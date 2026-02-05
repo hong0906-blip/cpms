@@ -1,0 +1,13 @@
+# public/.htaccess
+# - Apache 환경에서만 사용
+# - index.php로 모든 요청을 전달 (선택사항)
+
+RewriteEngine On
+
+# 실제 파일/폴더가 있으면 그대로
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# 나머지는 index.php로
+RewriteRule ^ index.php [L]
