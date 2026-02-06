@@ -41,16 +41,29 @@ try {
     $stP->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
     $stP->execute();
     $rows = $stP->fetchAll();
-    $seen = array();
+    $grouped = array();
+    $baseOrder = array();
     if (is_array($rows)) {
         foreach ($rows as $row) {
             $base = isset($row['base_name']) ? trim((string)$row['base_name']) : '';
             $spec = isset($row['spec']) ? trim((string)$row['spec']) : '';
             if ($base === '' || $spec === '') continue;
-            $name = $base . ' (' . $spec . ')';
-            if (isset($seen[$name])) continue;
-            $seen[$name] = true;
-            $processes[] = $name;
+            if (!isset($grouped[$base])) {
+                $grouped[$base] = array();
+                $baseOrder[] = $base;
+            }
+            if (isset($grouped[$base][$spec])) continue;
+            $grouped[$base][$spec] = true;
+        }
+    }
+    foreach ($baseOrder as $base) {
+        $specs = array_keys($grouped[$base]);
+        if (count($specs) > 1) {
+            foreach ($specs as $spec) {
+                $processes[] = $base . ' (' . $spec . ')';
+            }
+        } else {
+            $processes[] = $base;
         }
     }
 } catch (Exception $e) {
