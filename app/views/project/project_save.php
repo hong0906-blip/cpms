@@ -63,7 +63,7 @@ $contract_amount = isset($_POST['contract_amount']) ? trim((string)$_POST['contr
 
 $mainManagerId = isset($_POST['main_manager_id']) ? (int)$_POST['main_manager_id'] : 0;
 $subManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
-
+$unitPriceToken = isset($_POST['unit_price_token']) ? trim((string)$_POST['unit_price_token']) : '';
 if ($name === '' || $mainManagerId <= 0) {
     flash_set('error', '프로젝트명/공사 담당자는 필수입니다.');
     header('Location: ?r=공무');
@@ -122,6 +122,62 @@ try {
         $stMem->bindValue(':eid', $eid, PDO::PARAM_INT);
         $stMem->bindValue(':role', 'sub');
         $stMem->execute();
+    }
+    // 단가내역서(엑셀) 저장: 미리보기 토큰 기준 세션 데이터 반영
+    if ($unitPriceToken !== '' && isset($_SESSION['project_create_unit_price'][$unitPriceToken])) {
+        $pack = $_SESSION['project_create_unit_price'][$unitPriceToken];
+        $rows = (isset($pack['rows']) && is_array($pack['rows'])) ? $pack['rows'] : array();
+
+        try {
+            $tableOk = false;
+            $chk = $pdo->query("SHOW TABLES LIKE 'cpms_project_unit_prices'");
+            if ($chk && $chk->fetchColumn()) $tableOk = true;
+
+            if ($tableOk && count($rows) > 0) {
+                $stUp = $pdo->prepare("
+                    INSERT INTO cpms_project_unit_prices(project_id, item_name, spec, unit, qty, unit_price, remark)
+                    VALUES(:pid, :item, :spec, :unit, :qty, :up, :remark)
+                ");
+
+                foreach ($rows as $r) {
+                    $item = isset($r['item_name']) ? trim((string)$r['item_name']) : '';
+                    if ($item === '') continue;
+
+                    $spec = isset($r['spec']) ? trim((string)$r['spec']) : '';
+                    $unit = isset($r['unit']) ? trim((string)$r['unit']) : '';
+                    $qtyRaw = isset($r['qty']) ? trim((string)$r['qty']) : '';
+                    $priceRaw = isset($r['unit_price']) ? trim((string)$r['unit_price']) : '';
+                    if ($priceRaw === '' && isset($r['total_unit_price'])) {
+                        $priceRaw = trim((string)$r['total_unit_price']);
+                    }
+
+                    $qty = null;
+                    if ($qtyRaw !== '') {
+                        $clean = preg_replace('/[^0-9.\-]/', '', $qtyRaw);
+                        if ($clean !== '') $qty = (float)$clean;
+                    }
+
+                    $unitPrice = null;
+                    if ($priceRaw !== '') {
+                        $clean = preg_replace('/[^0-9.\-]/', '', $priceRaw);
+                        if ($clean !== '') $unitPrice = (float)$clean;
+                    }
+
+                    $stUp->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                    $stUp->bindValue(':item', $item);
+                    $stUp->bindValue(':spec', $spec);
+                    $stUp->bindValue(':unit', $unit);
+                    $stUp->bindValue(':qty', $qty);
+                    $stUp->bindValue(':up', $unitPrice);
+                    $stUp->bindValue(':remark', '');
+                    $stUp->execute();
+                }
+            }
+        } catch (Exception $e) {
+            // 단가 테이블이 없거나 실패해도 프로젝트 생성은 계속 진행
+        }
+
+        unset($_SESSION['project_create_unit_price'][$unitPriceToken]);
     }
 
     /**
