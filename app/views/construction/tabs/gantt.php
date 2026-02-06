@@ -189,7 +189,7 @@ function clamp($v, $min, $max) {
 
                     <div class="gantt-header"
                          style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
-                        <div class="w-56 shrink-0"></div>
+                        <div class="gantt-header-spacer w-56 shrink-0"></div>
                         <div class="gantt-header-rows">
                             <div class="gantt-header-row">
                                 <?php
@@ -419,8 +419,9 @@ function clamp($v, $min, $max) {
 </div>
 
 <style>
-  .gantt-header { width: calc(var(--day-width) * var(--grid-days)); }
-  .gantt-header-rows { border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; }
+  .gantt-header { display: flex; align-items: stretch; width: auto; }
+  .gantt-header-spacer { flex: 0 0 14rem; }
+  .gantt-header-rows { width: calc(var(--day-width) * var(--grid-days)); border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; }
   .gantt-header-row { display: flex; }
   .gantt-cell {
     width: var(--day-width);
