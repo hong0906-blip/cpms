@@ -100,6 +100,10 @@ if ($tab === '') $tab = 'gantt';
 $tabs = array(
     'roles'    => '담당지정',
     'gantt'    => '공정표(간트)',
+    'labor'    => '노무비',
+    'equipment'=> '장비',
+    'materials'=> '자재구입비',
+    'safety_cost' => '안전관리비',
     'issues'   => '이슈',
     'safety'   => '안전사고',
 );

@@ -180,6 +180,10 @@ if ($route === 'construction/safety_incident_create') {
     require_once __DIR__ . '/../app/views/construction/safety_incident_create.php';
     exit;
 }
+if ($route === 'construction/labor_sheet_download') {
+    require_once __DIR__ . '/../app/views/construction/labor_sheet_download.php';
+    exit;
+}
 
 // 공사 페이지 전용 이슈 등록/댓글(리다이렉트가 공사로 돌아오게)
 if ($route === 'construction/issue_create') {
