@@ -147,6 +147,7 @@ try {
 
                     $spec = isset($r['spec']) ? trim((string)$r['spec']) : '';
                     $unit = isset($r['unit']) ? trim((string)$r['unit']) : '';
+                    if ($spec === '' || $unit === '') continue;                    
                     $qtyRaw = isset($r['qty']) ? trim((string)$r['qty']) : '';
                     $priceRaw = isset($r['unit_price']) ? trim((string)$r['unit_price']) : '';
                     if ($priceRaw === '' && isset($r['total_unit_price'])) {

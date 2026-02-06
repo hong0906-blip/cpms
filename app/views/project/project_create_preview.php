@@ -290,7 +290,8 @@ for ($i = $startRow; $i < count($rows); $i++) {
     $emptyStreak = 0;
 
     if ($item === '') continue;
-
+    if ($spec === '' || $unit === '') continue;
+    
     $nitem = norm_k($item);
     if ($nitem === '소계' || $nitem === '합계') continue;
 

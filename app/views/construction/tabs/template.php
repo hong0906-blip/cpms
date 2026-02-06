@@ -75,7 +75,7 @@ try {
             아직 템플릿이 없습니다. <b>템플릿 생성</b> 버튼을 눌러주세요.
         </div>
         <div class="mt-3 text-xs text-gray-500">
-            * 현재 버전은 단가표의 <code>item_name</code>을 "공정"으로 사용합니다.
+            * 현재 버전은 단가표의 <code>item_name</code> + <code>spec</code>을 "공정"으로 사용합니다.
         </div>
     <?php else: ?>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">

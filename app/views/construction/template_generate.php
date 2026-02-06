@@ -52,13 +52,17 @@ if (!$pdo) {
 }
 
 try {
-    // 단가표에서 공정 추출(현재: item_name)
-    $st = $pdo->prepare("SELECT DISTINCT TRIM(item_name) AS proc
+    // 단가표에서 공정 추출(현재: item_name + 규격)
+    $st = $pdo->prepare("SELECT DISTINCT
+                            TRIM(COALESCE(NULLIF(process_name, ''), item_name)) AS base_name,
+                            TRIM(spec) AS spec
                          FROM cpms_project_unit_prices
                          WHERE project_id = :pid
-                         AND item_name IS NOT NULL
-                         AND TRIM(item_name) <> ''
-                         ORDER BY proc ASC");
+                         AND COALESCE(NULLIF(process_name, ''), item_name) IS NOT NULL
+                         AND TRIM(COALESCE(NULLIF(process_name, ''), item_name)) <> ''
+                         AND spec IS NOT NULL
+                         AND TRIM(spec) <> ''
+                         ORDER BY base_name ASC, spec ASC");
     $st->bindValue(':pid', $projectId, \PDO::PARAM_INT);
     $st->execute();
     $rows = $st->fetchAll();
@@ -86,8 +90,10 @@ try {
     $added = 0;
     $ord = 0;
     foreach ($rows as $r) {
-        $name = isset($r['proc']) ? trim((string)$r['proc']) : '';
-        if ($name === '') continue;
+        $base = isset($r['base_name']) ? trim((string)$r['base_name']) : '';
+        $spec = isset($r['spec']) ? trim((string)$r['spec']) : '';
+        if ($base === '' || $spec === '') continue;
+        $name = $base . ' (' . $spec . ')';
         if (isset($existsMap[$name])) continue;
 
         $ins->bindValue(':pid', $projectId, \PDO::PARAM_INT);

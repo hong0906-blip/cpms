@@ -209,6 +209,7 @@ for ($r = 1; $r < count($rows); $r++) {
 
     // 필수값(item_name, unit_price 등) 최소 체크
     if ($item === '') { $skipped++; continue; }
+    if ($spec === '' || $unit === '') { $skipped++; continue; }    
     // unit_price는 매핑 테이블에서 required로 설정할 수 있음 → 여기서는 null 허용(필요시 DB설정에서 required=1로 강제)
     // 다만 기본 시드는 unit_price를 required=1로 넣어둠 → 그래서 여기까지 오면 대부분 존재함
 

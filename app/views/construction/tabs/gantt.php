@@ -26,18 +26,33 @@ try {
 $processes = array();
 try {
     $stP = $pdo->prepare("
-        SELECT DISTINCT COALESCE(NULLIF(process_name, ''), item_name) AS name
+        SELECT
+            TRIM(COALESCE(NULLIF(process_name, ''), item_name)) AS base_name,
+            TRIM(spec) AS spec
         FROM cpms_project_unit_prices
         WHERE project_id = :pid
           AND COALESCE(NULLIF(process_name, ''), item_name) IS NOT NULL
-          AND COALESCE(NULLIF(process_name, ''), item_name) <> ''
-        ORDER BY name ASC
+          AND TRIM(COALESCE(NULLIF(process_name, ''), item_name)) <> ''
+          AND spec IS NOT NULL
+          AND TRIM(spec) <> ''
+        ORDER BY base_name ASC, spec ASC
         LIMIT 300
     ");
     $stP->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
     $stP->execute();
-    $processes = $stP->fetchAll(\PDO::FETCH_COLUMN);
-    if (!is_array($processes)) $processes = array();
+    $rows = $stP->fetchAll();
+    $seen = array();
+    if (is_array($rows)) {
+        foreach ($rows as $row) {
+            $base = isset($row['base_name']) ? trim((string)$row['base_name']) : '';
+            $spec = isset($row['spec']) ? trim((string)$row['spec']) : '';
+            if ($base === '' || $spec === '') continue;
+            $name = $base . ' (' . $spec . ')';
+            if (isset($seen[$name])) continue;
+            $seen[$name] = true;
+            $processes[] = $name;
+        }
+    }
 } catch (Exception $e) {
     $processes = array();
 }

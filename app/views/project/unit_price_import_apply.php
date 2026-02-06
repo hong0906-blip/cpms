@@ -82,11 +82,14 @@ try {
     foreach ($rows as $r) {
         $item = isset($r['item_name']) ? (string)$r['item_name'] : '';
         if (trim($item) === '') continue;
+        $spec = isset($r['spec']) ? trim((string)$r['spec']) : '';
+        $unit = isset($r['unit']) ? trim((string)$r['unit']) : '';
+        if ($spec === '' || $unit === '') continue;
 
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $st->bindValue(':item', $item);
-        $st->bindValue(':spec', isset($r['spec']) ? (string)$r['spec'] : '');
-        $st->bindValue(':unit', isset($r['unit']) ? (string)$r['unit'] : '');
+        $st->bindValue(':spec', $spec);
+        $st->bindValue(':unit', $unit);
         $st->bindValue(':qty', isset($r['qty']) ? $r['qty'] : null);
         $st->bindValue(':up', isset($r['unit_price']) ? $r['unit_price'] : null);
         $st->bindValue(':rm', isset($r['remark']) ? (string)$r['remark'] : '');
