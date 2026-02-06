@@ -424,6 +424,7 @@ function clamp($v, $min, $max) {
   .gantt-header-row { display: flex; }
   .gantt-cell {
     width: var(--day-width);
+    box-sizing: border-box;
     text-align: center;
     border-right: 1px solid #e5e7eb;
     border-bottom: 1px solid #e5e7eb;
@@ -540,7 +541,10 @@ function clamp($v, $min, $max) {
     el.addEventListener('dragstart', function(e){
       dragName = el.getAttribute('data-task-name') || el.textContent.trim();
       dragEl = el;
-      e.dataTransfer.setData('text/plain', dragName);
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('text/plain', dragName);
+      }
     });
   });
 
@@ -548,13 +552,18 @@ function clamp($v, $min, $max) {
     zone.addEventListener('dragover', function(e){ e.preventDefault(); });
     zone.addEventListener('drop', function(e){
       e.preventDefault();
-      if (!dragName) return;
+      var droppedName = '';
+      if (e.dataTransfer) {
+        droppedName = e.dataTransfer.getData('text/plain') || '';
+      }
+      if (!droppedName) droppedName = dragName || '';
+      if (!droppedName) return;
       var zoneRect = zone.getBoundingClientRect();
       var offsetX = e.clientX - zoneRect.left;
       var leftDays = dayFromOffset(offsetX, zoneRect.width);
       var startTs = rangeStartTs + (leftDays * 86400);
       var endTs = startTs + (3 * 86400);
-      saveTask(0, dragName, tsToYmd(startTs), tsToYmd(endTs), 0);
+      saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0);
       if (dragEl && dragEl.parentNode) {
         dragEl.parentNode.removeChild(dragEl);
       }
