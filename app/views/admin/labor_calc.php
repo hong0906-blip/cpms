@@ -100,7 +100,7 @@ $projectsOk = false;
 if ($dbOk) {
     $entriesOk = cpms_table_exists($pdo, $entriesTable);
     $directOk = cpms_table_exists($pdo, $directRatesTable);
-    $projectsOk = cpms_table_exists($pdo, 'projects');
+    $projectsOk = cpms_table_exists($pdo, 'cpms_projects');
 }
 
 // ---------- 테이블 생성 SQL (웹에서 실행 버튼용/참고용) ----------
@@ -108,7 +108,7 @@ $sqlAll = "/* =========================\n"
     . "   CPMS - 노무비 계산용 테이블 생성 (MySQL 5.6)\n"
     . "   - labor_entries\n"
     . "   - direct_team_rates\n"
-    . "   - projects (최소 컬럼)\n"
+    . "   cpms_projects (프로젝트 테이블, 공무에서 생성)\n"
     . "   ========================= */\n\n"
     . "CREATE TABLE IF NOT EXISTS `labor_entries` (\n"
     . "  `id` INT NOT NULL AUTO_INCREMENT,\n"
@@ -133,12 +133,7 @@ $sqlAll = "/* =========================\n"
     . "  PRIMARY KEY (`id`),\n"
     . "  UNIQUE KEY `uk_direct_team_rates_employee` (`employee_id`)\n"
     . ") ENGINE=InnoDB DEFAULT CHARSET=utf8;\n\n"
-    . "CREATE TABLE IF NOT EXISTS `projects` (\n"
-    . "  `id` INT NOT NULL AUTO_INCREMENT,\n"
-    . "  `name` VARCHAR(200) NOT NULL,\n"
-    . "  `created_at` DATETIME NOT NULL,\n"
-    . "  PRIMARY KEY (`id`)\n"
-    . ") ENGINE=InnoDB DEFAULT CHARSET=utf8;\n";
+    . "/* NOTE: 프로젝트 테이블(cpms_projects)은 공무 섹션 DB 설정에서 생성됩니다. */\n";
 
 /* ---------------------------
    프로젝트 목록
@@ -146,7 +141,7 @@ $sqlAll = "/* =========================\n"
 $projects = array();
 if ($dbOk && $projectsOk) {
     try {
-        $st = $pdo->query("SELECT id, name FROM projects ORDER BY id DESC LIMIT 200");
+        $st = $pdo->query("SELECT id, name FROM cpms_projects ORDER BY id DESC LIMIT 200");
         $projects = $st->fetchAll(PDO::FETCH_ASSOC);
     } catch (Exception $e) {
         $projects = array();
@@ -286,10 +281,10 @@ if (is_array($flash)) {
     <?php if ($dbOk && (!$entriesOk || !$directOk || !$projectsOk)): ?>
       <div class="mt-4 bg-orange-50 border border-orange-200 text-orange-800 rounded-2xl p-4">
         <div class="font-extrabold">노무비 계산용 테이블이 없습니다.</div>
-        <div class="text-sm mt-2">phpMyAdmin 없이도 아래 버튼으로 <span class="font-bold">필요 테이블 3개</span>를 자동 생성할 수 있습니다.</div>
+        <div class="text-sm mt-2">phpMyAdmin 없이도 아래 버튼으로 <span class="font-bold">필요 테이블 2개</span>를 자동 생성할 수 있습니다.</div>
 
         <div class="mt-3 flex flex-wrap items-center gap-2">
-          <form method="post" action="?r=admin/labor_entries_save" onsubmit="return confirm('노무비 계산용 테이블(labor_entries, direct_team_rates, projects)을 생성할까요?');">
+          <form method="post" action="?r=admin/labor_entries_save" onsubmit="return confirm('노무비 계산용 테이블(labor_entries, direct_team_rates)을 생성할까요?\\n(프로젝트 테이블 cpms_projects는 공무 DB 설정에서 생성됩니다)');">
             <input type="hidden" name="_csrf" value="<?= h(csrf_token()) ?>"/>
             <input type="hidden" name="action" value="ensure_tables"/>
             <button type="submit" class="bg-orange-600 text-white rounded-xl px-4 py-2 font-extrabold">

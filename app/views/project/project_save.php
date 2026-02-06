@@ -64,6 +64,7 @@ $contract_amount = isset($_POST['contract_amount']) ? trim((string)$_POST['contr
 $mainManagerId = isset($_POST['main_manager_id']) ? (int)$_POST['main_manager_id'] : 0;
 $subManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
 $unitPriceToken = isset($_POST['unit_price_token']) ? trim((string)$_POST['unit_price_token']) : '';
+
 if ($name === '' || $mainManagerId <= 0) {
     flash_set('error', '프로젝트명/공사 담당자는 필수입니다.');
     header('Location: ?r=공무');

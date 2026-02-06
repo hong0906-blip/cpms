@@ -37,7 +37,7 @@ if ($action === 'ensure_tables') {
    CPMS - 노무비 계산용 테이블 생성 (MySQL 5.6)
    - labor_entries
    - direct_team_rates
-   - projects (최소 컬럼)
+   - cpms_projects는 공무 DB 설정에서 생성
    ========================= */\n\n"
 
         // ✅ A안: DATETIME DEFAULT CURRENT_TIMESTAMP 제거 (MySQL 5.6 호환)
@@ -66,12 +66,7 @@ if ($action === 'ensure_tables') {
   UNIQUE KEY `uk_direct_team_rates_employee` (`employee_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;\n\n"
 
-        . "CREATE TABLE IF NOT EXISTS `projects` (
-  `id` INT NOT NULL AUTO_INCREMENT,
-  `name` VARCHAR(200) NOT NULL,
-  `created_at` DATETIME NOT NULL,
-  PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;\n";
+. "/* NOTE: 프로젝트 테이블(cpms_projects)은 공무 섹션 DB 설정에서 생성됩니다. */\n";
 
         // 멀티쿼리 실행 (MySQL/PDO 드라이버에 따라 분리 실행이 더 안전)
         // 여기서는 안정적으로 세 문장으로 쪼개 실행
@@ -86,7 +81,7 @@ if ($action === 'ensure_tables') {
             $pdo->exec($q);
         }
 
-        flash_set('success', '노무비 계산용 테이블 3개(labor_entries, direct_team_rates, projects)를 생성했습니다.');
+        flash_set('success', '노무비 계산용 테이블 2개(labor_entries, direct_team_rates)를 생성했습니다.');
     } catch (Exception $e) {
         flash_set('error', '테이블 생성 실패: ' . $e->getMessage());
     }
