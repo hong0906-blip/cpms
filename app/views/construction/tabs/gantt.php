@@ -147,10 +147,11 @@ function clamp($v, $min, $max) {
 
             <div class="flex-1 overflow-x-auto">
                 <div class="min-w-max">
-                    <div class="flex items-center gap-0 text-xs text-gray-500">
+                    <div class="flex items-center gap-0 text-xs text-gray-500 gantt-header"
+                         style="--day-width:32px; --grid-days:<?php echo (int)($rangeDays + 1); ?>;">
                         <div class="w-56 shrink-0"></div>
                         <?php foreach ($rangeDates as $d): ?>
-                            <div class="gantt-day w-7 text-center"><?php echo h($d); ?></div>
+                            <div class="gantt-day text-center"><?php echo h($d); ?></div>
                         <?php endforeach; ?>
                     </div>
 
@@ -158,7 +159,8 @@ function clamp($v, $min, $max) {
                          data-range-start="<?php echo h(date('Y-m-d', $rangeStartTs)); ?>"
                          data-range-days="<?php echo (int)$rangeDays; ?>"
                          data-project-id="<?php echo (int)$pid; ?>"
-                         data-csrf="<?php echo h(csrf_token()); ?>">
+                         data-csrf="<?php echo h(csrf_token()); ?>"
+                         style="--day-width:32px; --grid-days:<?php echo (int)($rangeDays + 1); ?>;">
                         <?php foreach ($tasks as $t): ?>
                             <?php
                             $sd = isset($t['start_date']) ? (string)$t['start_date'] : '';
@@ -181,8 +183,15 @@ function clamp($v, $min, $max) {
                                  data-task-id="<?php echo (int)$t['id']; ?>"
                                  data-task-name="<?php echo h($t['name']); ?>"
                                  data-task-progress="<?php echo (int)$t['progress']; ?>">
-                                <div class="w-56 shrink-0 text-sm font-semibold text-gray-800 truncate pr-2">
-                                    <?php echo h($t['name']); ?>
+                                <div class="w-56 shrink-0 text-sm font-semibold text-gray-800 truncate pr-2 flex items-center gap-2">
+                                    <span class="truncate"><?php echo h($t['name']); ?></span>
+                                    <?php if ($canEdit): ?>
+                                        <button type="button"
+                                                class="gantt-delete text-xs px-2 py-1 rounded-lg border border-rose-200 text-rose-700 bg-rose-50"
+                                                data-task-id="<?php echo (int)$t['id']; ?>">
+                                            삭제
+                                        </button>
+                                    <?php endif; ?>
                                 </div>
                                 <div class="gantt-dropzone relative h-9 flex-1 border border-gray-100 rounded-xl bg-gray-50"
                                      data-start="<?php echo h($sd); ?>"
@@ -330,8 +339,24 @@ function clamp($v, $min, $max) {
 </div>
 
 <style>
-  .gantt-day { width: 28px; }
-  .gantt-dropzone { min-width: 280px; }
+  .gantt-header { width: calc(var(--day-width) * var(--grid-days)); }
+  .gantt-day {
+    width: var(--day-width);
+    border: 1px solid #e5e7eb;
+    padding: 2px 0;
+    background: #f8fafc;
+  }
+  .gantt-dropzone {
+    min-width: calc(var(--day-width) * var(--grid-days));
+    background-size: var(--day-width) 100%;
+    background-image: repeating-linear-gradient(
+      to right,
+      rgba(148,163,184,0.35) 0,
+      rgba(148,163,184,0.35) 1px,
+      transparent 1px,
+      transparent calc(var(--day-width))
+    );
+  }
   .gantt-bar { cursor: grab; }
   .gantt-bar.dragging { opacity: 0.7; cursor: grabbing; }
   .gantt-handle {
@@ -387,6 +412,19 @@ function clamp($v, $min, $max) {
     fd.append('progress', progress || '0');
 
     fetch('?r=construction/schedule_save', {
+      method: 'POST',
+      body: fd,
+      credentials: 'same-origin'
+    }).then(function(){ window.location.reload(); })
+      .catch(function(){ window.location.reload(); });
+  }
+
+  function deleteTask(taskId){
+    var fd = new FormData();
+    fd.append('_csrf', csrfToken || '');
+    fd.append('project_id', projectId || '0');
+    fd.append('task_id', taskId || '0');
+    fetch('?r=construction/schedule_delete', {
       method: 'POST',
       body: fd,
       credentials: 'same-origin'
@@ -503,6 +541,15 @@ function clamp($v, $min, $max) {
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
       });
+    });
+  });
+
+  document.querySelectorAll('.gantt-delete').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var taskId = btn.getAttribute('data-task-id') || '0';
+      if (!taskId || taskId === '0') return;
+      if (!confirm('이 공정을 삭제할까요?')) return;
+      deleteTask(taskId);
     });
   });
 })();
