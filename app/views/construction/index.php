@@ -99,7 +99,6 @@ if ($tab === '') $tab = 'gantt';
 
 $tabs = array(
     'roles'    => '담당지정',
-    'template' => '템플릿',
     'gantt'    => '공정표(간트)',
     'issues'   => '이슈',
     'safety'   => '안전사고',

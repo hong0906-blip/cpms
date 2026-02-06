@@ -79,8 +79,20 @@ if ($rangeStartTs === 0 || $rangeEndTs === 0) {
     $rangeEndTs = strtotime(date('Y-m-d', $rangeStartTs + 86400 * 30) . ' 00:00:00');
 }
 
+// 월 단위 보기(기본: 프로젝트 시작월)
+$viewMonth = isset($_GET['month']) ? trim((string)$_GET['month']) : '';
+$viewMonth = preg_match('/^\d{4}-\d{2}$/', $viewMonth) ? $viewMonth : '';
+$baseStartTs = $rangeStartTs;
+$baseEndTs = $rangeEndTs;
+if ($viewMonth === '') {
+    $viewMonth = date('Y-m', $baseStartTs);
+}
+$rangeStartTs = strtotime($viewMonth . '-01 00:00:00');
+$rangeEndTs = strtotime(date('Y-m-t', $rangeStartTs) . ' 00:00:00');
+
 $rangeDays = (int)floor(($rangeEndTs - $rangeStartTs) / 86400);
 if ($rangeDays < 1) $rangeDays = 1;
+$gridDays = $rangeDays + 1;
 
 // 간트 날짜 라벨
 $rangeDates = array();
@@ -94,8 +106,8 @@ for ($i = 0; $i <= $rangeDays; $i++) {
     $rangeMonths[] = date('m', $ts);
 }
 // 월 옵션
-$tmpTs = $rangeStartTs;
-while ($tmpTs <= $rangeEndTs) {
+$tmpTs = $baseStartTs;
+while ($tmpTs <= $baseEndTs) {
     $monthKey = date('Y-m', $tmpTs);
     if (!isset($monthOptions[$monthKey])) {
         $monthOptions[$monthKey] = array(
@@ -125,14 +137,6 @@ function clamp($v, $min, $max) {
             <button type="button" class="px-4 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-extrabold hover:bg-rose-100" data-modal-open="issueAdd">
                 이슈등록
             </button>
-
-            <?php if ($canEdit): ?>
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/schedule_seed_from_template" class="inline">
-                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                    <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-                    <button type="submit" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">초안 생성(템플릿)</button>
-                </form>
-            <?php endif; ?>
         </div>
     </div>
 
@@ -142,7 +146,7 @@ function clamp($v, $min, $max) {
         </div>
     <?php endif; ?>
 
-          <div class="flex items-center gap-2 mt-6">
+    <div class="flex items-center gap-2 mt-6">
         <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" data-tab="board">간트 편집</button>
         <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-extrabold" data-tab="progress">현재 진행률</button>
     </div>
@@ -171,19 +175,20 @@ function clamp($v, $min, $max) {
             <div class="flex-1 overflow-x-auto">
                 <div class="min-w-max">
                     <div class="flex items-center justify-between mb-2">
-                        <div class="text-xs text-gray-500">기간 보기</div>
-                        <?php if (count($monthOptions) > 6): ?>
-                            <select class="gantt-month-select border border-gray-200 rounded-xl px-3 py-2 text-sm"
-                                    data-range-start="<?php echo h(date('Y-m-d', $rangeStartTs)); ?>">
-                                <?php foreach ($monthOptions as $key => $opt): ?>
-                                    <option value="<?php echo h($opt['start']); ?>"><?php echo h($opt['label']); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        <?php endif; ?>
+                        <div class="text-xs text-gray-500">월 선택</div>
+                        <select class="gantt-month-select border border-gray-200 rounded-xl px-3 py-2 text-sm"
+                                data-project-id="<?php echo (int)$pid; ?>"
+                                data-tab="gantt">
+                            <?php foreach ($monthOptions as $key => $opt): ?>
+                                <option value="<?php echo h($key); ?>" <?php echo ($key === $viewMonth) ? 'selected' : ''; ?>>
+                                    <?php echo h($opt['label']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
                     </div>
 
                     <div class="gantt-header"
-                         style="--day-width:48px; --grid-days:<?php echo (int)($rangeDays + 1); ?>;">
+                         style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
                         <div class="w-56 shrink-0"></div>
                         <div class="gantt-header-rows">
                             <div class="gantt-header-row">
@@ -228,10 +233,10 @@ function clamp($v, $min, $max) {
 
                     <div class="mt-2 space-y-2 gantt-board"
                          data-range-start="<?php echo h(date('Y-m-d', $rangeStartTs)); ?>"
-                         data-range-days="<?php echo (int)$rangeDays; ?>"
+                         data-range-days="<?php echo (int)$gridDays; ?>"
                          data-project-id="<?php echo (int)$pid; ?>"
                          data-csrf="<?php echo h(csrf_token()); ?>"
-                         style="--day-width:48px; --grid-days:<?php echo (int)($rangeDays + 1); ?>;">
+                         style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
                         <?php foreach ($tasks as $t): ?>
                             <?php
                             $sd = isset($t['start_date']) ? (string)$t['start_date'] : '';
@@ -244,12 +249,12 @@ function clamp($v, $min, $max) {
                             if ($sdTs > 0 && $edTs > 0) {
                                 $leftDays = (int)floor(($sdTs - $rangeStartTs) / 86400);
                                 $durDays  = (int)floor(($edTs - $sdTs) / 86400) + 1;
-                                $leftDays = clamp($leftDays, 0, $rangeDays);
-                                $maxDur   = $rangeDays - $leftDays + 1;
+                                $leftDays = clamp($leftDays, 0, $gridDays - 1);
+                                $maxDur   = $gridDays - $leftDays;
                                 if ($maxDur < 1) $maxDur = 1;
                                 $durDays  = clamp($durDays, 1, $maxDur);
-                                $leftPct  = ($leftDays / $rangeDays) * 100.0;
-                                $widthPct = ($durDays / $rangeDays) * 100.0;
+                                $leftPct  = ($leftDays / $gridDays) * 100.0;
+                                $widthPct = ($durDays / $gridDays) * 100.0;
                             }
                             ?>
                             <div class="flex items-center gap-0 gantt-row"
@@ -324,12 +329,12 @@ function clamp($v, $min, $max) {
                 if ($sdTs > 0 && $edTs > 0) {
                     $leftDays = (int)floor(($sdTs - $rangeStartTs) / 86400);
                     $durDays  = (int)floor(($edTs - $sdTs) / 86400) + 1;
-                    $leftDays = clamp($leftDays, 0, $rangeDays);
-                     $maxDur   = $rangeDays - $leftDays + 1;
+                    $leftDays = clamp($leftDays, 0, $gridDays - 1);
+                    $maxDur   = $gridDays - $leftDays;
                     if ($maxDur < 1) $maxDur = 1;
                     $durDays  = clamp($durDays, 1, $maxDur);
-                    $leftPct  = ($leftDays / $rangeDays) * 100.0;
-                    $widthPct = ($durDays / $rangeDays) * 100.0;
+                    $leftPct  = ($leftDays / $gridDays) * 100.0;
+                    $widthPct = ($durDays / $gridDays) * 100.0;
                 }
                 $pr = isset($t['progress']) ? (int)$t['progress'] : 0;
                 if ($pr < 0) $pr = 0; if ($pr > 100) $pr = 100;
@@ -460,7 +465,7 @@ function clamp($v, $min, $max) {
   var board = document.querySelector('.gantt-board');
   if (!board) return;
   var rangeStart = board.getAttribute('data-range-start');
-  var rangeDays = parseInt(board.getAttribute('data-range-days'), 10) || 1;
+  var gridDays = parseInt(board.getAttribute('data-range-days'), 10) || 1;
   var projectId = board.getAttribute('data-project-id');
   var csrfToken = board.getAttribute('data-csrf');
 
@@ -481,7 +486,6 @@ function clamp($v, $min, $max) {
     return y + '-' + m + '-' + day;
   }
   var rangeStartTs = ymdToTs(rangeStart);
-  var dayWidth = parseInt(getComputedStyle(board).getPropertyValue('--day-width'), 10) || 48;
 
   function clamp(v, min, max){
     return Math.max(min, Math.min(max, v));
@@ -520,20 +524,22 @@ function clamp($v, $min, $max) {
 
   function dayFromOffset(offsetX, zoneWidth){
     var pct = clamp(offsetX / zoneWidth, 0, 1);
-    return Math.floor(pct * rangeDays);
+    return Math.floor(pct * gridDays);
   }
 
   function setBarPosition(bar, leftDays, duration){
-    var leftPct = (leftDays / rangeDays) * 100;
-    var widthPct = (duration / rangeDays) * 100;
+    var leftPct = (leftDays / gridDays) * 100;
+    var widthPct = (duration / gridDays) * 100;
     bar.style.left = leftPct + '%';
     bar.style.width = widthPct + '%';
   }
 
   var dragName = '';
+  var dragEl = null;
   document.querySelectorAll('.gantt-draggable').forEach(function(el){
     el.addEventListener('dragstart', function(e){
       dragName = el.getAttribute('data-task-name') || el.textContent.trim();
+      dragEl = el;
       e.dataTransfer.setData('text/plain', dragName);
     });
   });
@@ -549,7 +555,11 @@ function clamp($v, $min, $max) {
       var startTs = rangeStartTs + (leftDays * 86400);
       var endTs = startTs + (3 * 86400);
       saveTask(0, dragName, tsToYmd(startTs), tsToYmd(endTs), 0);
+      if (dragEl && dragEl.parentNode) {
+        dragEl.parentNode.removeChild(dragEl);
+      }
       dragName = '';
+      dragEl = null;
     });
   });
 
@@ -578,12 +588,12 @@ function clamp($v, $min, $max) {
         var newLeft = clamp(origLeft + pctDelta, 0, 1 - origWidth);
         bar.style.left = (newLeft * 100) + '%';
       } else if (resizing === 'left') {
-        var newLeftL = clamp(origLeft + pctDelta, 0, origLeft + origWidth - (1 / rangeDays));
+        var newLeftL = clamp(origLeft + pctDelta, 0, origLeft + origWidth - (1 / gridDays));
         var newWidthL = (origLeft + origWidth) - newLeftL;
         bar.style.left = (newLeftL * 100) + '%';
         bar.style.width = (newWidthL * 100) + '%';
       } else if (resizing === 'right') {
-        var newWidth = clamp(origWidth + pctDelta, (1 / rangeDays), 1 - origLeft);
+        var newWidth = clamp(origWidth + pctDelta, (1 / gridDays), 1 - origLeft);
         bar.style.width = (newWidth * 100) + '%';
       }
     }
@@ -593,8 +603,8 @@ function clamp($v, $min, $max) {
       var zoneRect = zone.getBoundingClientRect();
       var leftPct = parseFloat(bar.style.left || '0') / 100;
       var widthPct = parseFloat(bar.style.width || '0') / 100;
-      var leftDays = Math.round(leftPct * rangeDays);
-      var durDays = Math.max(1, Math.round(widthPct * rangeDays));
+      var leftDays = Math.round(leftPct * gridDays);
+      var durDays = Math.max(1, Math.round(widthPct * gridDays));
       var startTs = rangeStartTs + (leftDays * 86400);
       var endTs = startTs + ((durDays - 1) * 86400);
       saveTask(taskId, taskName, tsToYmd(startTs), tsToYmd(endTs), progress);
@@ -661,19 +671,16 @@ function clamp($v, $min, $max) {
   var monthSelect = document.querySelector('.gantt-month-select');
   if (monthSelect) {
     monthSelect.addEventListener('change', function(){
-      var start = monthSelect.getAttribute('data-range-start');
       var chosen = monthSelect.value;
-      if (!start || !chosen) return;
-      var startTs = ymdToTs(start);
-      var chosenTs = ymdToTs(chosen);
-      if (!startTs || !chosenTs) return;
-      var diffDays = Math.floor((chosenTs - startTs) / 86400);
-      diffDays = clamp(diffDays, 0, rangeDays);
-      var scrollX = diffDays * dayWidth;
-      var scrollWrap = board.closest('.overflow-x-auto');
-      if (scrollWrap) {
-        scrollWrap.scrollLeft = scrollX;
-      }
+      if (!chosen) return;
+      var pid = monthSelect.getAttribute('data-project-id') || '';
+      var tab = monthSelect.getAttribute('data-tab') || 'gantt';
+      var params = new URLSearchParams(window.location.search);
+      params.set('r', '공사');
+      if (pid) params.set('pid', pid);
+      params.set('tab', tab);
+      params.set('month', chosen);
+      window.location.search = params.toString();
     });
   }
 })();
