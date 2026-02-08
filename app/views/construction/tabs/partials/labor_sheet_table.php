@@ -12,6 +12,17 @@
  */
 ?>
 
+<?php
+$daysInMonth = 31;
+try {
+    $daysInMonth = (int)(new DateTime($periodStart))->format('t');
+} catch (Exception $e) {
+    $daysInMonth = 31;
+}
+$timesheetRows = isset($timesheetRows) ? (int)$timesheetRows : 1;
+if ($timesheetRows < 1) $timesheetRows = 1;
+?>
+
 <div class="overflow-x-auto">
     <table class="min-w-[1200px] w-full border border-gray-200 text-xs">
         <tbody>
@@ -39,57 +50,38 @@
     <table class="min-w-[1200px] w-full border border-gray-200 text-[11px] mt-3">
         <thead>
         <tr class="bg-gray-200 text-gray-800">
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">연번</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">출력월</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">성명</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">주민등록번호</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">외국인</th>
-            <th class="border border-gray-200 px-2 py-2 text-center" colspan="31">출력일수</th>
+            <th class="border border-gray-200 px-2 py-2 text-center" colspan="<?php echo (int)$daysInMonth; ?>">출력일수</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">출력일수 합계</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">임금단가</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">지급총액</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">갑근세</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">주민세</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">건강보험</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">국민연금</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">고용보험</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">공제합계</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">차감지급액</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">영수인/예금주</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">은행명</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">계좌번호</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">인력사업체명</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">하도급 구분</th>
         </tr>
         <tr class="bg-gray-200 text-gray-800">
-            <?php for ($d = 1; $d <= 31; $d++): ?>
+            <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
                 <th class="border border-gray-200 px-1 py-1"><?php echo (int)$d; ?></th>
             <?php endfor; ?>
         </tr>
         </thead>
         <tbody>
-        <?php for ($i = 1; $i <= 10; $i++): ?>
+        <?php for ($i = 1; $i <= $timesheetRows; $i++): ?>
             <tr class="<?php echo ($i % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>">
-                <td class="border border-gray-200 px-2 py-2 text-center"><?php echo (int)$i; ?></td>
                 <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
                 <td class="border border-gray-200 px-2 py-2"></td>
                 <td class="border border-gray-200 px-2 py-2"></td>
                 <td class="border border-gray-200 px-2 py-2 text-center"></td>
-                <?php for ($d = 1; $d <= 31; $d++): ?>
+                <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
                     <td class="border border-gray-200 px-1 py-1 text-center"></td>
                 <?php endfor; ?>
                 <td class="border border-gray-200 px-2 py-2 text-center">0</td>
                 <td class="border border-gray-200 px-2 py-2 text-right">0</td>
                 <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2"></td>
                 <td class="border border-gray-200 px-2 py-2"></td>
                 <td class="border border-gray-200 px-2 py-2"></td>
                 <td class="border border-gray-200 px-2 py-2"></td>

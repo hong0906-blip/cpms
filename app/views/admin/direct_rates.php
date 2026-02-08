@@ -32,9 +32,7 @@ $tableOk = ($dbOk && cpms_table_exists_local($pdo, 'direct_team_members'));
 $members = array();
 
 if ($tableOk) {
-    $sql = "SELECT id, name, note, daily_wage, is_active
-            FROM direct_team_members
-            ORDER BY is_active DESC, name ASC, id DESC";
+$sql = "SELECT * FROM direct_team_members ORDER BY id DESC";
     $st = $pdo->prepare($sql);
     $st->execute();
     $members = $st->fetchAll();
@@ -47,7 +45,7 @@ if ($tableOk) {
       <div class="text-sm text-gray-500">관리</div>
       <h2 class="text-2xl font-extrabold text-gray-900">직영팀 일급 설정</h2>
       <div class="text-sm text-gray-500 mt-1">
-        직영팀 명부에서 등록한 인력의 <span class="font-bold">일급</span>을 설정합니다.
+        직영팀 인력 정보를 작성합니다.
       </div>
     </div>
     <div class="flex gap-2">
@@ -103,132 +101,137 @@ if ($tableOk) {
   </div>
 <?php endif; ?>
 
-<?php if ($tableOk && is_array($members) && count($members) > 0): ?>
+<?php if ($tableOk): ?>
+  <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-6">
+    <div class="font-extrabold text-gray-900 mb-3">인력 추가</div>
+    <form method="post" action="?r=admin/direct_team_save" class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
+      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+      <input type="hidden" name="action" value="save">
+      <input type="hidden" name="id" value="">
+
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">이름</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="name" required placeholder="홍길동">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">주민등록번호</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="resident_no" placeholder="000000-0000000">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">핸드폰번호</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="phone" placeholder="010-0000-0000">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">주소</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="address" placeholder="주소">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">인금단가</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="deposit_rate" placeholder="예: 180000">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">계좌번호</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="bank_account" placeholder="000-0000-0000">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">은행명</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="bank_name" placeholder="은행명">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">예금주</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="account_holder" placeholder="예금주">
+      </div>
+      <button class="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-extrabold">
+        추가
+      </button>
+    </form>
+  </div>
+
   <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
     <div class="overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead class="bg-gray-50 border-b border-gray-100">
           <tr class="text-left text-gray-600">
             <th class="px-4 py-3 font-extrabold">이름</th>
-            <th class="px-4 py-3 font-extrabold">비고</th>
-            <th class="px-4 py-3 font-extrabold">일급</th>
-            <th class="px-4 py-3 font-extrabold">상태</th>
+            <th class="px-4 py-3 font-extrabold">주민등록번호</th>
+            <th class="px-4 py-3 font-extrabold">핸드폰번호</th>
+            <th class="px-4 py-3 font-extrabold">주소</th>
+            <th class="px-4 py-3 font-extrabold">인금단가</th>
+            <th class="px-4 py-3 font-extrabold">계좌번호</th>
+            <th class="px-4 py-3 font-extrabold">은행명</th>
+            <th class="px-4 py-3 font-extrabold">예금주</th>
             <th class="px-4 py-3 font-extrabold">관리</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
-          <?php foreach ($members as $m): ?>
-            <?php
-              $id = (int)$m['id'];
-              $name = (string)$m['name'];
-              $note = isset($m['note']) ? (string)$m['note'] : '';
-              $wage = isset($m['daily_wage']) ? (int)$m['daily_wage'] : 0;
-              $active = ((int)$m['is_active'] === 1);
-              $statusLabel = $active ? '활성' : '비활성';
-              $wageText = ($wage > 0) ? number_format((float)$wage) . '원' : '-';
-            ?>
-            <tr class="hover:bg-gray-50/60">
-              <td class="px-4 py-3 font-extrabold text-gray-900"><?php echo h($name); ?></td>
-              <td class="px-4 py-3 text-gray-700"><?php echo h($note); ?></td>
-              <td class="px-4 py-3 text-gray-900 font-bold"><?php echo h($wageText); ?></td>
-              <td class="px-4 py-3">
-                <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo $active ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-gray-50 text-gray-700 border-gray-100'; ?>">
-                  <?php echo h($statusLabel); ?>
-                </span>
-              </td>
-              <td class="px-4 py-3">
-                <button type="button"
-                        class="px-3 py-2 rounded-2xl bg-white border border-gray-200 hover:bg-gray-50 text-xs font-bold"
-                        data-wage-edit="<?php echo $id; ?>"
-                        data-wage-name="<?php echo h($name); ?>"
-                        data-wage-val="<?php echo (int)$wage; ?>">
-                  <i data-lucide="edit-2" class="w-4 h-4 inline"></i> 일급 수정
-                </button>
-              </td>
+          <?php if (is_array($members) && count($members) > 0): ?>
+            <?php foreach ($members as $m): ?>
+              <?php
+                $id = (int)$m['id'];
+                $name = (string)$m['name'];
+                $residentNo = isset($m['resident_no']) ? (string)$m['resident_no'] : '';
+                $phone = isset($m['phone']) ? (string)$m['phone'] : '';
+                $address = isset($m['address']) ? (string)$m['address'] : '';
+                $depositRate = isset($m['deposit_rate']) ? (string)$m['deposit_rate'] : '';
+                $bankAccount = isset($m['bank_account']) ? (string)$m['bank_account'] : '';
+                $bankName = isset($m['bank_name']) ? (string)$m['bank_name'] : '';
+                $accountHolder = isset($m['account_holder']) ? (string)$m['account_holder'] : '';
+              ?>
+              <tr class="hover:bg-gray-50/60">
+                <td class="px-4 py-3 font-extrabold text-gray-900">
+                  <form method="post" action="?r=admin/direct_team_save" class="m-0">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="action" value="save">
+                    <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="name" value="<?php echo h($name); ?>" required>
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="resident_no" value="<?php echo h($residentNo); ?>">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="phone" value="<?php echo h($phone); ?>">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="address" value="<?php echo h($address); ?>">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="deposit_rate" value="<?php echo h($depositRate); ?>">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="bank_account" value="<?php echo h($bankAccount); ?>">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="bank_name" value="<?php echo h($bankName); ?>">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="account_holder" value="<?php echo h($accountHolder); ?>">
+                </td>
+                <td class="px-4 py-3">
+                    <div class="flex gap-2">
+                      <button class="px-3 py-2 rounded-2xl bg-white border border-gray-200 hover:bg-gray-50 text-xs font-bold">
+                        저장
+                      </button>
+                      </form>
+
+                      <form method="post" action="?r=admin/direct_team_save" class="m-0" onsubmit="return confirm('삭제할까요?');">
+                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                        <input type="hidden" name="action" value="delete">
+                        <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
+                        <button class="px-3 py-2 rounded-2xl bg-white border border-red-200 text-red-700 hover:bg-red-50 text-xs font-bold">
+                          삭제
+                        </button>
+                      </form>
+                    </div>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+          <?php else: ?>
+            <tr>
+              <td colspan="9" class="px-4 py-6 text-gray-600">직영팀 인력이 없습니다. 위에서 추가하세요.</td>
             </tr>
-          <?php endforeach; ?>
+          <?php endif; ?>
         </tbody>
       </table>
     </div>
   </div>
-
-<?php elseif ($tableOk): ?>
-  <div class="bg-white/70 border border-gray-200 rounded-2xl p-6 text-gray-600">
-    직영팀 명부가 없습니다. 먼저 <span class="font-bold">직영팀 명부</span> 탭에서 인력을 등록해주세요.
-  </div>
 <?php endif; ?>
-
-<!-- ==========================
-     일급 수정 모달
-========================== -->
-<div id="modal-wageEdit" class="fixed inset-0 z-50 hidden">
-  <div class="absolute inset-0 bg-black/40" data-modal-close="wageEdit"></div>
-  <div class="absolute inset-0 flex items-center justify-center p-4">
-    <div class="w-full max-w-lg bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
-      <div class="p-6 border-b border-gray-100 flex items-center justify-between">
-        <h3 class="text-xl font-extrabold text-gray-900">직영팀 일급 수정</h3>
-        <button type="button" class="p-3 rounded-2xl hover:bg-gray-50" data-modal-close="wageEdit">
-          <i data-lucide="x" class="w-5 h-5"></i>
-        </button>
-      </div>
-
-      <form method="post" action="?r=admin/direct_rates_save" class="p-6 space-y-4">
-        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-        <input type="hidden" name="action" value="save_rate">
-        <input type="hidden" name="member_id" id="wageMemberId" value="">
-
-        <div class="bg-gray-50 border border-gray-200 rounded-2xl p-4">
-          <div class="text-sm text-gray-500">대상</div>
-          <div class="text-lg font-extrabold text-gray-900" id="wageMemberName"></div>
-        </div>
-
-        <div>
-          <label class="block text-sm font-bold text-gray-700 mb-2">일급(원)</label>
-          <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="daily_wage" id="wageDaily" placeholder="예: 180000" required>
-          <div class="text-xs text-gray-500 mt-2">숫자만 입력 (콤마는 자동 제거)</div>
-        </div>
-
-        <button class="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-extrabold">
-          저장
-        </button>
-      </form>
-    </div>
-  </div>
-</div>
-
-<script>
-(function(){
-  function openModal(name){
-    var el = document.getElementById('modal-' + name);
-    if (!el) return;
-    el.classList.remove('hidden');
-    try { if (window.lucide) lucide.createIcons(); } catch(e){}
-  }
-  function closeModal(name){
-    var el = document.getElementById('modal-' + name);
-    if (!el) return;
-    el.classList.add('hidden');
-  }
-
-  document.addEventListener('click', function(e){
-    var t = e.target;
-
-    var closeBtn = t.closest ? t.closest('[data-modal-close]') : null;
-    if (closeBtn) {
-      closeModal(closeBtn.getAttribute('data-modal-close'));
-      e.preventDefault();
-      return;
-    }
-
-    var btn = t.closest ? t.closest('[data-wage-edit]') : null;
-    if (btn) {
-      document.getElementById('wageMemberId').value = btn.getAttribute('data-wage-edit');
-      document.getElementById('wageMemberName').innerHTML = btn.getAttribute('data-wage-name') || '';
-      document.getElementById('wageDaily').value = btn.getAttribute('data-wage-val') || '';
-      openModal('wageEdit');
-      e.preventDefault();
-      return;
-    }
-  });
-})();
-</script>

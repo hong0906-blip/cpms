@@ -62,6 +62,36 @@ try {
 }
 
 $downloadUrl = base_url() . '/?r=construction/labor_sheet_download&pid=' . (int)$pid . '&month=' . urlencode($selectedMonth);
+
+$directTeamMembers = array();
+try {
+    if (!function_exists('cpms_table_exists_labor')) {
+        function cpms_table_exists_labor($pdo, $table) {
+            try {
+                $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+                if ($dbName === '') return false;
+                $sql = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl";
+                $st = $pdo->prepare($sql);
+                $st->bindValue(':db', $dbName);
+                $st->bindValue(':tbl', $table);
+                $st->execute();
+                return ((int)$st->fetchColumn() > 0);
+            } catch (Exception $e) {
+                return false;
+            }
+        }
+    }
+    if (isset($pdo) && $pdo && cpms_table_exists_labor($pdo, 'direct_team_members')) {
+        $st = $pdo->prepare("SELECT * FROM direct_team_members ORDER BY id ASC");
+        $st->execute();
+        $directTeamMembers = $st->fetchAll();
+    }
+} catch (Exception $e) {
+    $directTeamMembers = array();
+}
+
+$timesheetRows = count($directTeamMembers);
+if ($timesheetRows < 1) $timesheetRows = 1;
 ?>
 
 <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
@@ -114,13 +144,14 @@ $downloadUrl = base_url() . '/?r=construction/labor_sheet_download&pid=' . (int)
     $projectRow = $projectRow;
     $selectedMonth = $selectedMonth;
     $periodStart = $periodStart;
+    $timesheetRows = $timesheetRows;
     $periodEnd = $periodEnd;
     require __DIR__ . '/partials/labor_sheet_table.php';
     ?>
 <?php else: ?>
     <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
         <h4 class="text-lg font-extrabold text-gray-900">인원 작성</h4>
-        <div class="text-sm text-gray-600 mt-1">입금 단가 및 계좌 정보를 등록합니다.</div>
+        <div class="text-sm text-gray-600 mt-1">인금 단가 및 계좌 정보를 등록합니다.</div>
         <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 가져옵니다.</div>
 
         <div class="overflow-x-auto mt-4">
@@ -131,21 +162,57 @@ $downloadUrl = base_url() . '/?r=construction/labor_sheet_download&pid=' . (int)
                     <th class="border border-gray-200 px-2 py-2">주민등록번호</th>
                     <th class="border border-gray-200 px-2 py-2">핸드폰 번호</th>
                     <th class="border border-gray-200 px-2 py-2">주소</th>
-                    <th class="border border-gray-200 px-2 py-2">입금단가</th>
+                    <th class="border border-gray-200 px-2 py-2">인금단가</th>
                     <th class="border border-gray-200 px-2 py-2">계좌번호</th>
                     <th class="border border-gray-200 px-2 py-2">은행명</th>
                     <th class="border border-gray-200 px-2 py-2">예금주</th>
                     <th class="border border-gray-200 px-2 py-2">인력사업체명</th>
                 </tr>
                 </thead>
-                <tbody>
-                <?php for ($i = 0; $i < 5; $i++): ?>
-                    <tr class="<?php echo ($i % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
+                <tbody id="laborWorkerRows">
+                <?php $rowIndex = 0; ?>
+                <?php if (!empty($directTeamMembers)): ?>
+                    <?php foreach ($directTeamMembers as $member): ?>
+                        <tr class="<?php echo ($rowIndex % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
+                            <td class="border border-gray-200 px-2 py-2">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['name']) ? $member['name'] : ''); ?>" placeholder="성명">
+                            </td>
+                            <td class="border border-gray-200 px-2 py-2">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['resident_no']) ? $member['resident_no'] : ''); ?>" placeholder="주민등록번호">
+                            </td>
+                            <td class="border border-gray-200 px-2 py-2">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['phone']) ? $member['phone'] : ''); ?>" placeholder="핸드폰 번호">
+                            </td>
+                            <td class="border border-gray-200 px-2 py-2">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['address']) ? $member['address'] : ''); ?>" placeholder="주소">
+                            </td>
+                            <td class="border border-gray-200 px-2 py-2">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['deposit_rate']) ? $member['deposit_rate'] : ''); ?>" placeholder="인금단가">
+                            </td>
+                            <td class="border border-gray-200 px-2 py-2">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['bank_account']) ? $member['bank_account'] : ''); ?>" placeholder="계좌번호">
+                            </td>
+                            <td class="border border-gray-200 px-2 py-2">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['bank_name']) ? $member['bank_name'] : ''); ?>" placeholder="은행명">
+                            </td>
+                            <td class="border border-gray-200 px-2 py-2">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['account_holder']) ? $member['account_holder'] : ''); ?>" placeholder="예금주">
+                            </td>
+                            <td class="border border-gray-200 px-2 py-2">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg bg-gray-100" type="text" value="창명건설" placeholder="인력사업체명" readonly>
+                            </td>
+                        </tr>
+                        <?php $rowIndex++; ?>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+
+                <?php for ($i = 0; $i < 3; $i++): ?>
+                    <tr class="<?php echo (($rowIndex + $i) % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="성명"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="주민등록번호"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="핸드폰 번호"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="주소"></td>
-                        <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="입금단가"></td>
+                        <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="인금단가"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="계좌번호"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="은행명"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="예금주"></td>
@@ -155,5 +222,39 @@ $downloadUrl = base_url() . '/?r=construction/labor_sheet_download&pid=' . (int)
                 </tbody>
             </table>
         </div>
+
+        <div class="mt-4 flex justify-end">
+            <button type="button" id="addLaborWorkerRow" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">
+                인원 추가
+            </button>
+        </div>        
     </div>
+    <template id="laborWorkerRowTemplate">
+        <tr class="bg-white">
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="성명"></td>
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="주민등록번호"></td>
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="핸드폰 번호"></td>
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="주소"></td>
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="인금단가"></td>
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="계좌번호"></td>
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="은행명"></td>
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="예금주"></td>
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="인력사업체명"></td>
+        </tr>
+    </template>
+    <script>
+    (function(){
+        var addButton = document.getElementById('addLaborWorkerRow');
+        var body = document.getElementById('laborWorkerRows');
+        var template = document.getElementById('laborWorkerRowTemplate');
+        if (!addButton || !body || !template) return;
+        addButton.addEventListener('click', function(){
+            var row = template.content ? template.content.firstElementChild.cloneNode(true) : template.firstElementChild.cloneNode(true);
+            if (!row) return;
+            var index = body.children.length;
+            if (index % 2 === 1) row.classList.add('bg-gray-50');
+            body.appendChild(row);
+        });
+    })();
+    </script>
 <?php endif; ?>

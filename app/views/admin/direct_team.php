@@ -33,18 +33,17 @@ $rows = array();
 if ($dbOk) {
     $tableOk = cpms_table_exists_local($pdo, 'direct_team_members');
     if ($tableOk) {
-        $st = $pdo->prepare("SELECT id, name, note, is_active, daily_wage FROM direct_team_members ORDER BY is_active DESC, name ASC, id DESC LIMIT 500");
+        $st = $pdo->prepare("SELECT * FROM direct_team_members ORDER BY id DESC LIMIT 500");
         $st->execute();
         $rows = $st->fetchAll();
     }
 }
 ?>
-?>
 
 <div class="flex items-center justify-between mb-6">
   <div>
     <h3 class="text-xl font-extrabold text-gray-900">직영팀 명부</h3>
-    <div class="text-sm text-gray-500 mt-1">직영팀 인력(이름/메모/상태)을 등록합니다. 일급은 “직영팀 일급 설정” 탭에서 설정하세요.</div>
+    <div class="text-sm text-gray-500 mt-1">직영팀 인력 정보를 등록합니다.</div>
   </div>
 </div>
 
@@ -82,15 +81,32 @@ if ($dbOk) {
         <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="name" required placeholder="홍길동">
       </div>
       <div>
-        <label class="block text-sm font-bold text-gray-700 mb-2">메모</label>
-        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="note" placeholder="(선택) 팀/직종/기타">
+        <label class="block text-sm font-bold text-gray-700 mb-2">주민등록번호</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="resident_no" placeholder="000000-0000000">
       </div>
       <div>
-        <label class="block text-sm font-bold text-gray-700 mb-2">상태</label>
-        <select class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="is_active">
-          <option value="1">활성</option>
-          <option value="0">비활성</option>
-        </select>
+        <label class="block text-sm font-bold text-gray-700 mb-2">핸드폰번호</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="phone" placeholder="010-0000-0000">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">주소</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="address" placeholder="주소">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">인금단가</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="deposit_rate" placeholder="예: 180000">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">계좌번호</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="bank_account" placeholder="000-0000-0000">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">은행명</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="bank_name" placeholder="은행명">
+      </div>
+      <div>
+        <label class="block text-sm font-bold text-gray-700 mb-2">예금주</label>
+        <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="account_holder" placeholder="예금주">
       </div>
       <button class="w-full py-3 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-500 text-white font-extrabold">
         추가
@@ -104,9 +120,13 @@ if ($dbOk) {
         <thead class="bg-gray-50 border-b border-gray-100">
           <tr class="text-left text-gray-600">
             <th class="px-4 py-3 font-extrabold">이름</th>
-            <th class="px-4 py-3 font-extrabold">메모</th>
-            <th class="px-4 py-3 font-extrabold">일급</th>
-            <th class="px-4 py-3 font-extrabold">상태</th>
+            <th class="px-4 py-3 font-extrabold">주민등록번호</th>
+            <th class="px-4 py-3 font-extrabold">핸드폰번호</th>
+            <th class="px-4 py-3 font-extrabold">주소</th>
+            <th class="px-4 py-3 font-extrabold">인금단가</th>
+            <th class="px-4 py-3 font-extrabold">계좌번호</th>
+            <th class="px-4 py-3 font-extrabold">은행명</th>
+            <th class="px-4 py-3 font-extrabold">예금주</th>
             <th class="px-4 py-3 font-extrabold">관리</th>
           </tr>
         </thead>
@@ -116,9 +136,13 @@ if ($dbOk) {
               <?php
                 $id = (int)$r['id'];
                 $name = (string)$r['name'];
-                $note = isset($r['note']) ? (string)$r['note'] : '';
-                $active = ((int)$r['is_active'] === 1);
-                $wage = isset($r['daily_wage']) ? (int)$r['daily_wage'] : 0;
+                $residentNo = isset($r['resident_no']) ? (string)$r['resident_no'] : '';
+                $phone = isset($r['phone']) ? (string)$r['phone'] : '';
+                $address = isset($r['address']) ? (string)$r['address'] : '';
+                $depositRate = isset($r['deposit_rate']) ? (string)$r['deposit_rate'] : '';
+                $bankAccount = isset($r['bank_account']) ? (string)$r['bank_account'] : '';
+                $bankName = isset($r['bank_name']) ? (string)$r['bank_name'] : '';
+                $accountHolder = isset($r['account_holder']) ? (string)$r['account_holder'] : '';
               ?>
               <tr class="hover:bg-gray-50/60">
                 <td class="px-4 py-3 font-extrabold text-gray-900">
@@ -129,16 +153,25 @@ if ($dbOk) {
                     <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="name" value="<?php echo h($name); ?>" required>
                 </td>
                 <td class="px-4 py-3">
-                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="note" value="<?php echo h($note); ?>" placeholder="(선택)">
-                </td>
-                <td class="px-4 py-3 text-gray-700">
-                  <?php echo number_format($wage); ?>원
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="resident_no" value="<?php echo h($residentNo); ?>" placeholder="주민등록번호">
                 </td>
                 <td class="px-4 py-3">
-                    <select class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="is_active">
-                      <option value="1" <?php echo $active ? 'selected' : ''; ?>>활성</option>
-                      <option value="0" <?php echo !$active ? 'selected' : ''; ?>>비활성</option>
-                    </select>
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="phone" value="<?php echo h($phone); ?>" placeholder="핸드폰번호">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="address" value="<?php echo h($address); ?>" placeholder="주소">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="deposit_rate" value="<?php echo h($depositRate); ?>" placeholder="인금단가">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="bank_account" value="<?php echo h($bankAccount); ?>" placeholder="계좌번호">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="bank_name" value="<?php echo h($bankName); ?>" placeholder="은행명">
+                </td>
+                <td class="px-4 py-3">
+                    <input class="w-full px-3 py-2 rounded-2xl border border-gray-200" name="account_holder" value="<?php echo h($accountHolder); ?>" placeholder="예금주">
                 </td>
                 <td class="px-4 py-3">
                     <div class="flex gap-2">
@@ -161,7 +194,7 @@ if ($dbOk) {
             <?php endforeach; ?>
           <?php else: ?>
             <tr>
-              <td colspan="5" class="px-4 py-6 text-gray-600">직영팀 인력이 없습니다. 위에서 추가하세요.</td>
+              <td colspan="9" class="px-4 py-6 text-gray-600">직영팀 인력이 없습니다. 위에서 추가하세요.</td>
             </tr>
           <?php endif; ?>
         </tbody>

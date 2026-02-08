@@ -146,9 +146,9 @@ try {
     $roleRow = null;
 }
 
-$siteId = $roleRow ? (int)$roleRow['site_manager_id'] : 0;
-$safetyId = $roleRow ? (int)$roleRow['safety_manager_id'] : 0;
-$qualityId = $roleRow ? (int)$roleRow['quality_manager_id'] : 0;
+$siteId = $roleRow && isset($roleRow['site_employee_id']) ? (int)$roleRow['site_employee_id'] : 0;
+$safetyId = $roleRow && isset($roleRow['safety_employee_id']) ? (int)$roleRow['safety_employee_id'] : 0;
+$qualityId = $roleRow && isset($roleRow['quality_employee_id']) ? (int)$roleRow['quality_employee_id'] : 0;
 
 $siteName = '';
 $safetyName = '';
