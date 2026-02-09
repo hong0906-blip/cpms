@@ -39,7 +39,12 @@ try {
 }
 
 if ($selectedMonth === '' || !in_array($selectedMonth, $months, true)) {
-    $selectedMonth = $months[count($months) - 1];
+    $currentMonth = date('Y-m');
+    if (in_array($currentMonth, $months, true)) {
+        $selectedMonth = $currentMonth;
+    } else {
+        $selectedMonth = $months[count($months) - 1];
+    }
 }
 
 $periodStart = $selectedMonth . '-01';
