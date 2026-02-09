@@ -114,6 +114,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $run === '1') {
             $pdo->exec($sql);
         }
 
+        // 3-1) 공정 진행(수량/사진)
+        if (!table_exists($pdo, 'cpms_schedule_progress')) {
+            $sql = "CREATE TABLE cpms_schedule_progress (
+                        id INT NOT NULL AUTO_INCREMENT,
+                        project_id INT NOT NULL,
+                        task_id INT NOT NULL,
+                        work_date DATE NOT NULL,
+                        total_qty DECIMAL(12,2) NULL,
+                        done_qty DECIMAL(12,2) NULL,
+                        updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (id),
+                        UNIQUE KEY uniq_task_date (task_id, work_date),
+                        KEY idx_project_id (project_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+            $pdo->exec($sql);
+        }
+
+        if (!table_exists($pdo, 'cpms_schedule_progress_photos')) {
+            $sql = "CREATE TABLE cpms_schedule_progress_photos (
+                        id INT NOT NULL AUTO_INCREMENT,
+                        progress_id INT NOT NULL,
+                        file_path VARCHAR(255) NOT NULL,
+                        file_name VARCHAR(255) NULL,
+                        file_size INT NULL,
+                        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (id),
+                        KEY idx_progress_id (progress_id)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+            $pdo->exec($sql);
+        }
+
         // 4) 안전사고
         if (!table_exists($pdo, 'cpms_safety_incidents')) {
             $sql = "CREATE TABLE cpms_safety_incidents (

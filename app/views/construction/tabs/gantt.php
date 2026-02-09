@@ -213,6 +213,32 @@ function clamp($v, $min, $max) {
     if ($v > $max) return $max;
     return $v;
 }
+
+function task_overlaps_range($sdTs, $edTs, $rangeStartTs, $rangeEndTs) {
+    if ($sdTs <= 0 || $edTs <= 0) return true;
+    if ($edTs < $rangeStartTs || $sdTs > $rangeEndTs) return false;
+    return true;
+}
+
+function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) {
+    $leftPct = 0;
+    $widthPct = 0;
+    if ($sdTs > 0 && $edTs > 0) {
+        $barStart = ($sdTs < $rangeStartTs) ? $rangeStartTs : $sdTs;
+        $barEnd = ($edTs > $rangeEndTs) ? $rangeEndTs : $edTs;
+        if ($barEnd >= $barStart) {
+            $leftDays = (int)floor(($barStart - $rangeStartTs) / 86400);
+            $durDays  = (int)floor(($barEnd - $barStart) / 86400) + 1;
+            $leftDays = clamp($leftDays, 0, $gridDays - 1);
+            $maxDur   = $gridDays - $leftDays;
+            if ($maxDur < 1) $maxDur = 1;
+            $durDays  = clamp($durDays, 1, $maxDur);
+            $leftPct  = ($leftDays / $gridDays) * 100.0;
+            $widthPct = ($durDays / $gridDays) * 100.0;
+        }
+    }
+    return array($leftPct, $widthPct);
+}
 ?>
 
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
@@ -312,21 +338,12 @@ function clamp($v, $min, $max) {
                 $sdTs = ymd_to_ts($sd);
                 $edTs = ymd_to_ts($ed);
                 if ($sdTs > 0 && $edTs > 0 && $edTs < $sdTs) { $tmp = $sdTs; $sdTs = $edTs; $edTs = $tmp; }
-                $leftPct = 0;
-                $widthPct = 0;
-                if ($sdTs > 0 && $edTs > 0) {
-                    $leftDays = (int)floor(($sdTs - $rangeStartTs) / 86400);
-                    $durDays  = (int)floor(($edTs - $sdTs) / 86400) + 1;
-                    $leftDays = clamp($leftDays, 0, $gridDays - 1);
-                    $maxDur   = $gridDays - $leftDays;
-                    if ($maxDur < 1) $maxDur = 1;
-                    $durDays  = clamp($durDays, 1, $maxDur);
-                    $leftPct  = ($leftDays / $gridDays) * 100.0;
-                    $widthPct = ($durDays / $gridDays) * 100.0;
-                }
+                if (!task_overlaps_range($sdTs, $edTs, $rangeStartTs, $rangeEndTs)) continue;
+                list($leftPct, $widthPct) = gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays);
                 $taskQty = isset($taskQtyMap[$t['name']]) ? $taskQtyMap[$t['name']] : 0;               
                 ?>
                 <div class="flex items-center gap-0 gantt-row"
+                     data-task-id="<?php echo (int)$t['id']; ?>"                
                      data-task-name="<?php echo h($t['name']); ?>"
                      data-task-total-qty="<?php echo h($taskQty); ?>">
                     <div class="w-56 shrink-0 text-sm font-semibold text-gray-800 truncate pr-2">
@@ -442,18 +459,8 @@ function clamp($v, $min, $max) {
                             $sdTs = ymd_to_ts($sd);
                             $edTs = ymd_to_ts($ed);
                             if ($sdTs > 0 && $edTs > 0 && $edTs < $sdTs) { $tmp = $sdTs; $sdTs = $edTs; $edTs = $tmp; }
-                            $leftPct = 0;
-                            $widthPct = 0;
-                            if ($sdTs > 0 && $edTs > 0) {
-                                $leftDays = (int)floor(($sdTs - $rangeStartTs) / 86400);
-                                $durDays  = (int)floor(($edTs - $sdTs) / 86400) + 1;
-                                $leftDays = clamp($leftDays, 0, $gridDays - 1);
-                                $maxDur   = $gridDays - $leftDays;
-                                if ($maxDur < 1) $maxDur = 1;
-                                $durDays  = clamp($durDays, 1, $maxDur);
-                                $leftPct  = ($leftDays / $gridDays) * 100.0;
-                                $widthPct = ($durDays / $gridDays) * 100.0;
-                            }
+                            if (!task_overlaps_range($sdTs, $edTs, $rangeStartTs, $rangeEndTs)) continue;
+                            list($leftPct, $widthPct) = gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays);
                             $taskQty = isset($taskQtyMap[$t['name']]) ? $taskQtyMap[$t['name']] : 0;                            
                             ?>
                             <div class="flex items-center gap-0 gantt-row"
@@ -522,20 +529,9 @@ function clamp($v, $min, $max) {
                 $sdTs = ymd_to_ts($sd);
                 $edTs = ymd_to_ts($ed);
                 if ($sdTs > 0 && $edTs > 0 && $edTs < $sdTs) { $tmp = $sdTs; $sdTs = $edTs; $edTs = $tmp; }
-
+                if (!task_overlaps_range($sdTs, $edTs, $rangeStartTs, $rangeEndTs)) continue;
                 // bar 계산(기간 없으면 0)
-                $leftPct = 0;
-                $widthPct = 0;
-                if ($sdTs > 0 && $edTs > 0) {
-                    $leftDays = (int)floor(($sdTs - $rangeStartTs) / 86400);
-                    $durDays  = (int)floor(($edTs - $sdTs) / 86400) + 1;
-                    $leftDays = clamp($leftDays, 0, $gridDays - 1);
-                    $maxDur   = $gridDays - $leftDays;
-                    if ($maxDur < 1) $maxDur = 1;
-                    $durDays  = clamp($durDays, 1, $maxDur);
-                    $leftPct  = ($leftDays / $gridDays) * 100.0;
-                    $widthPct = ($durDays / $gridDays) * 100.0;
-                }
+                list($leftPct, $widthPct) = gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays);
                 $pr = isset($t['progress']) ? (int)$t['progress'] : 0;
                 if ($pr < 0) $pr = 0; if ($pr > 100) $pr = 100;
                 ?>
@@ -619,6 +615,8 @@ function clamp($v, $min, $max) {
                 </button>
             </div>
             <div class="p-6 space-y-5">
+                <input type="hidden" id="ganttProgressTaskId" value="">
+                <input type="hidden" id="ganttProgressTaskDateInput" value="">                
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                         <label class="text-xs font-bold text-gray-500">전체 수량</label>
@@ -643,7 +641,9 @@ function clamp($v, $min, $max) {
 
                 <div class="flex items-center justify-end gap-2">
                     <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 text-gray-700 font-extrabold" data-modal-close="ganttProgress">닫기</button>
-                    <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" data-modal-close="ganttProgress">저장</button>
+                    <?php if ($canEdit): ?>
+                        <button type="button" id="ganttProgressSave" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">저장</button>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -898,16 +898,22 @@ function clamp($v, $min, $max) {
       var offsetX = e.clientX - zoneRect.left;
       var leftDays = dayFromOffset(offsetX, zoneRect.width);
       var dateTs = rangeStartTs + (leftDays * 86400);
-      openProgress(taskName, tsToYmd(dateTs), getRowTotalQty(row));
+      var taskId = row ? row.getAttribute('data-task-id') : '';
+      openProgress(taskId, taskName, tsToYmd(dateTs), getRowTotalQty(row));
     });    
     });
   }
 
-  function openProgress(taskName, taskDate, totalQty){
+  function openProgress(taskId, taskName, taskDate, totalQty){
+    var taskIdEl = document.getElementById('ganttProgressTaskId');
+    if (taskIdEl) taskIdEl.value = taskId || '';
     var nameEl = document.getElementById('ganttProgressTaskName');
     var dateEl = document.getElementById('ganttProgressTaskDate');
     if (nameEl) nameEl.textContent = taskName;
     if (dateEl) dateEl.textContent = taskDate;
+
+    var dateInputEl = document.getElementById('ganttProgressTaskDateInput');
+    if (dateInputEl) dateInputEl.value = taskDate || '';
 
     var totalEl = document.getElementById('ganttTotalQty');
     var doneEl = document.getElementById('ganttDoneQty');
@@ -941,7 +947,8 @@ function clamp($v, $min, $max) {
         var offsetX = e.clientX - zoneRect.left;
         var leftDays = dayFromOffset(offsetX, zoneRect.width);
         var dateTs = rangeStartTs + (leftDays * 86400);
-        openProgress(taskName, tsToYmd(dateTs), getRowTotalQty(row));
+        var taskId = row.getAttribute('data-task-id') || '';
+        openProgress(taskId, taskName, tsToYmd(dateTs), getRowTotalQty(row));
       });
     });
   }
@@ -1014,7 +1021,8 @@ function clamp($v, $min, $max) {
     btn.addEventListener('click', function(){
       var taskName = btn.getAttribute('data-task-name') || '';
       var taskDate = btn.getAttribute('data-task-date') || '';
-      openProgress(taskName, taskDate);
+      var taskId = btn.getAttribute('data-task-id') || '';
+      openProgress(taskId, taskName, taskDate);
     });
   });
 
@@ -1041,6 +1049,42 @@ function clamp($v, $min, $max) {
           '</div>';
         listEl.appendChild(row);
       });
+    });
+  }
+  
+  var progressSaveBtn = document.getElementById('ganttProgressSave');
+  if (progressSaveBtn) {
+    progressSaveBtn.addEventListener('click', function(){
+      if (!board) return;
+      var taskIdEl = document.getElementById('ganttProgressTaskId');
+      var dateInputEl = document.getElementById('ganttProgressTaskDateInput');
+      var totalEl = document.getElementById('ganttTotalQty');
+      var doneEl = document.getElementById('ganttDoneQty');
+      var taskId = taskIdEl ? taskIdEl.value : '';
+      var taskDate = dateInputEl ? dateInputEl.value : '';
+      if (!taskId || !taskDate) {
+        alert('작업 정보가 없습니다.');
+        return;
+      }
+      var fd = new FormData();
+      fd.append('_csrf', csrfToken || '');
+      fd.append('project_id', projectId || '0');
+      fd.append('task_id', taskId);
+      fd.append('work_date', taskDate);
+      fd.append('total_qty', totalEl ? totalEl.value : '');
+      fd.append('done_qty', doneEl ? doneEl.value : '');
+      if (photoInput && photoInput.files && photoInput.files.length > 0) {
+        Array.prototype.forEach.call(photoInput.files, function(file){
+          fd.append('photos[]', file);
+        });
+      }
+
+      fetch('?r=construction/schedule_progress_save', {
+        method: 'POST',
+        body: fd,
+        credentials: 'same-origin'
+      }).then(function(){ window.location.reload(); })
+        .catch(function(){ window.location.reload(); });
     });
   }
 

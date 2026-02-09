@@ -176,6 +176,10 @@ if ($route === 'construction/schedule_delete') {
     require_once __DIR__ . '/../app/views/construction/schedule_delete.php';
     exit;
 }
+if ($route === 'construction/schedule_progress_save') {
+    require_once __DIR__ . '/../app/views/construction/schedule_progress_save.php';
+    exit;
+}
 if ($route === 'construction/safety_incident_create') {
     require_once __DIR__ . '/../app/views/construction/safety_incident_create.php';
     exit;
