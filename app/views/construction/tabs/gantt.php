@@ -722,7 +722,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                         <label class="text-xs font-bold text-gray-500">전체 수량</label>
-                        <input id="ganttTotalQty" type="number" min="0" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" placeholder="예: 120">
+                        <input id="ganttTotalQty" type="number" min="0" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full bg-gray-50 text-gray-700" placeholder="예: 120" readonly>
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-500">완료 수량</label>
@@ -814,16 +814,16 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     if (!ymd) return 0;
     var parts = ymd.split('-');
     if (parts.length !== 3) return 0;
-    return Date.UTC(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10)) / 1000;
+    return new Date(parseInt(parts[0],10), parseInt(parts[1],10)-1, parseInt(parts[2],10)).getTime() / 1000;
   }
   function pad2(n){
     return (n < 10 ? '0' : '') + n;
   }
   function tsToYmd(ts){
     var d = new Date(ts * 1000);
-    var y = d.getUTCFullYear();
-    var m = pad2(d.getUTCMonth()+1);
-    var day = pad2(d.getUTCDate());
+    var y = d.getFullYear();
+    var m = pad2(d.getMonth()+1);
+    var day = pad2(d.getDate());
     return y + '-' + m + '-' + day;
   }
   var rangeStartTs = ymdToTs(rangeStart);
@@ -1034,29 +1034,50 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return num;
   }
 
-  function getPreviousRemain(taskId, taskDate){
-    if (!progressMap || !taskId || !taskDate) return null;
-    var prevDate = '';
-    var prevRemain = null;
+  function getTaskBaseTotal(taskId, fallbackTotal){
+    if (!taskId) return toNumber(fallbackTotal);
+    var baseTotal = toNumber(fallbackTotal);
+    if (baseTotal !== null && baseTotal > 0) return baseTotal;
+    var foundDate = '';
+    Object.keys(progressMap || {}).forEach(function(key){
+      if (!Object.prototype.hasOwnProperty.call(progressMap, key)) return;
+      var parts = key.split('|');
+      if (!parts.length || parts[0] !== taskId) return;
+      var date = parts.slice(1).join('|');
+      var entry = progressMap[key] || {};
+      var total = toNumber(entry.total_qty);
+      if (total === null) return;
+      if (foundDate === '' || date < foundDate) {
+        foundDate = date;
+        baseTotal = total;
+      }
+    });
+    return baseTotal;
+  }
+
+  function getDoneBefore(taskId, taskDate){
+    if (!progressMap || !taskId || !taskDate) return 0;
+    var sum = 0;
     Object.keys(progressMap).forEach(function(key){
       if (!Object.prototype.hasOwnProperty.call(progressMap, key)) return;
       var parts = key.split('|');
       if (!parts.length || parts[0] !== taskId) return;
       var date = parts.slice(1).join('|');
       if (!date || date >= taskDate) return;
-      if (prevDate !== '' && date <= prevDate) return;
       var entry = progressMap[key] || {};
-      var total = toNumber(entry.total_qty);
       var done = toNumber(entry.done_qty);
-      if (total === null) return;
-      if (done === null) done = 0;
-      var remain = total - done;
-      if (remain < 0) remain = 0;
-      prevDate = date;
-      prevRemain = remain;
+      if (done === null) return;
+      sum += done;
     });
-    return prevRemain;
-  }  
+    return sum;
+  }
+
+  var currentProgressContext = {
+    taskId: '',
+    taskDate: '',
+    baseTotal: null,
+    doneBefore: 0
+  };
 
   function openProgress(taskId, taskName, taskDate, totalQty){
     var taskIdEl = document.getElementById('ganttProgressTaskId');
@@ -1073,27 +1094,19 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var doneEl = document.getElementById('ganttDoneQty');
     var mapKey = taskId + '|' + taskDate;
     var saved = (progressMap && progressMap[mapKey]) ? progressMap[mapKey] : null;
-    var prevRemain = getPreviousRemain(taskId, taskDate);
-    var fallbackTotal = (prevRemain !== null && typeof prevRemain !== 'undefined') ? prevRemain : totalQty;    
-    var totalVal = '';
-    var doneVal = '';
-    if (saved) {
-      if (saved.total_qty !== null && typeof saved.total_qty !== 'undefined' && saved.total_qty !== '') {
-        totalVal = saved.total_qty;
-      } else {
-        totalVal = (typeof fallbackTotal !== 'undefined' && fallbackTotal !== null) ? fallbackTotal : '';
-      }
-      if (saved.done_qty !== null && typeof saved.done_qty !== 'undefined' && saved.done_qty !== '') {
-        doneVal = saved.done_qty;
-      } else {
-        doneVal = '0';
-      }
-    } else {
-      totalVal = (typeof fallbackTotal !== 'undefined' && fallbackTotal !== null) ? fallbackTotal : '';
-      doneVal = '0';
+    var baseTotal = getTaskBaseTotal(taskId, totalQty);
+    var totalVal = (baseTotal !== null && typeof baseTotal !== 'undefined') ? baseTotal : '';
+    var doneVal = '0';
+    if (saved && saved.done_qty !== null && typeof saved.done_qty !== 'undefined' && saved.done_qty !== '') {
+      doneVal = saved.done_qty;
     }
     if (totalEl) totalEl.value = totalVal;
     if (doneEl) doneEl.value = doneVal;
+
+    currentProgressContext.taskId = taskId;
+    currentProgressContext.taskDate = taskDate;
+    currentProgressContext.baseTotal = baseTotal;
+    currentProgressContext.doneBefore = getDoneBefore(taskId, taskDate);
     updateRemainQty();
 
     var listEl = document.getElementById('ganttPhotoList');
@@ -1186,12 +1199,19 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var doneEl = document.getElementById('ganttDoneQty');
     var remainEl = document.getElementById('ganttRemainQty');
     if (!totalEl || !doneEl || !remainEl) return;
-    var total = parseFloat(totalEl.value || '0');
-    var done = parseFloat(doneEl.value || '0');
-    if (isNaN(total)) total = 0;
-    if (isNaN(done)) done = 0;
-    var remain = total - done;
-    if (remain < 0) remain = 0;
+    var baseTotal = (currentProgressContext && currentProgressContext.baseTotal !== null) ? currentProgressContext.baseTotal : toNumber(totalEl.value);
+    var doneNow = toNumber(doneEl.value);
+    if (doneNow === null) doneNow = 0;
+    var doneBefore = (currentProgressContext && typeof currentProgressContext.doneBefore === 'number') ? currentProgressContext.doneBefore : 0;
+    if (baseTotal === null || typeof baseTotal === 'undefined' || baseTotal === '') {
+      remainEl.textContent = '-';
+      return;
+    }
+    var remain = baseTotal - (doneBefore + doneNow);
+    if (remain < 0) {
+      remainEl.textContent = '-';
+      return;
+    }
     remainEl.textContent = remain.toString();
   }
 
@@ -1200,7 +1220,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var taskName = btn.getAttribute('data-task-name') || '';
       var taskDate = btn.getAttribute('data-task-date') || '';
       var taskId = btn.getAttribute('data-task-id') || '';
-      openProgress(taskId, taskName, taskDate);
+      var totalQty = btn.getAttribute('data-task-total-qty') || '';
+      openProgress(taskId, taskName, taskDate, totalQty);
     });
   });
 
