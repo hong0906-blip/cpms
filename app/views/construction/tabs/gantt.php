@@ -250,6 +250,37 @@ try {
             }
         }
     }
+    // 이전 기간(현재 월 이전)의 마지막 진행 정보도 추가해서 남은 수량 계산에 사용
+    $stPrev = $pdo->prepare("
+        SELECT p.id, p.task_id, p.work_date, p.total_qty, p.done_qty
+        FROM cpms_schedule_progress p
+        INNER JOIN (
+            SELECT task_id, MAX(work_date) AS max_date
+            FROM cpms_schedule_progress
+            WHERE project_id = :pid
+              AND work_date < :s
+            GROUP BY task_id
+        ) t ON p.task_id = t.task_id AND p.work_date = t.max_date
+        WHERE p.project_id = :pid
+    ");
+    $stPrev->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
+    $stPrev->bindValue(':s', $rangeStartYmd);
+    $stPrev->execute();
+    $prevRows = $stPrev->fetchAll();
+    if (is_array($prevRows)) {
+        foreach ($prevRows as $row) {
+            $taskId = isset($row['task_id']) ? (int)$row['task_id'] : 0;
+            $workDate = isset($row['work_date']) ? (string)$row['work_date'] : '';
+            if ($taskId <= 0 || $workDate === '') continue;
+            $key = $taskId . '|' . $workDate;
+            if (!isset($progressMap[$key])) {
+                $progressMap[$key] = array(
+                    'total_qty' => isset($row['total_qty']) ? $row['total_qty'] : null,
+                    'done_qty' => isset($row['done_qty']) ? $row['done_qty'] : null
+                );
+            }
+        }
+    }    
 } catch (Exception $e) {
     $progressMap = array();
     $progressPhotoMap = array();
@@ -995,7 +1026,38 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       listEl.appendChild(row);
     });
   }
-  
+
+  function toNumber(val){
+    if (val === null || typeof val === 'undefined' || val === '') return null;
+    var num = parseFloat(val);
+    if (isNaN(num)) return null;
+    return num;
+  }
+
+  function getPreviousRemain(taskId, taskDate){
+    if (!progressMap || !taskId || !taskDate) return null;
+    var prevDate = '';
+    var prevRemain = null;
+    Object.keys(progressMap).forEach(function(key){
+      if (!Object.prototype.hasOwnProperty.call(progressMap, key)) return;
+      var parts = key.split('|');
+      if (!parts.length || parts[0] !== taskId) return;
+      var date = parts.slice(1).join('|');
+      if (!date || date >= taskDate) return;
+      if (prevDate !== '' && date <= prevDate) return;
+      var entry = progressMap[key] || {};
+      var total = toNumber(entry.total_qty);
+      var done = toNumber(entry.done_qty);
+      if (total === null) return;
+      if (done === null) done = 0;
+      var remain = total - done;
+      if (remain < 0) remain = 0;
+      prevDate = date;
+      prevRemain = remain;
+    });
+    return prevRemain;
+  }  
+
   function openProgress(taskId, taskName, taskDate, totalQty){
     var taskIdEl = document.getElementById('ganttProgressTaskId');
     if (taskIdEl) taskIdEl.value = taskId || '';
@@ -1011,13 +1073,23 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var doneEl = document.getElementById('ganttDoneQty');
     var mapKey = taskId + '|' + taskDate;
     var saved = (progressMap && progressMap[mapKey]) ? progressMap[mapKey] : null;
+    var prevRemain = getPreviousRemain(taskId, taskDate);
+    var fallbackTotal = (prevRemain !== null && typeof prevRemain !== 'undefined') ? prevRemain : totalQty;    
     var totalVal = '';
     var doneVal = '';
     if (saved) {
-      if (saved.total_qty !== null && typeof saved.total_qty !== 'undefined') totalVal = saved.total_qty;
-      if (saved.done_qty !== null && typeof saved.done_qty !== 'undefined') doneVal = saved.done_qty;
+      if (saved.total_qty !== null && typeof saved.total_qty !== 'undefined' && saved.total_qty !== '') {
+        totalVal = saved.total_qty;
+      } else {
+        totalVal = (typeof fallbackTotal !== 'undefined' && fallbackTotal !== null) ? fallbackTotal : '';
+      }
+      if (saved.done_qty !== null && typeof saved.done_qty !== 'undefined' && saved.done_qty !== '') {
+        doneVal = saved.done_qty;
+      } else {
+        doneVal = '0';
+      }
     } else {
-      totalVal = (typeof totalQty !== 'undefined' && totalQty !== null) ? totalQty : '';
+      totalVal = (typeof fallbackTotal !== 'undefined' && fallbackTotal !== null) ? fallbackTotal : '';
       doneVal = '0';
     }
     if (totalEl) totalEl.value = totalVal;
