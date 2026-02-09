@@ -86,6 +86,47 @@ $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
 
 $timesheetRows = count($timesheetWorkers);
 if ($timesheetRows < 1) $timesheetRows = 1;
+
+if (!function_exists('cpms_timesheet_worker_key')) {
+    function cpms_timesheet_worker_key($name) {
+        $name = trim((string)$name);
+        if ($name === '') return '';
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($name, 'UTF-8');
+        }
+        return strtolower($name);
+    }
+}
+
+if (!function_exists('cpms_format_gongsu_value')) {
+    function cpms_format_gongsu_value($value) {
+        if ($value === null || $value === '') return '';
+        if (!is_numeric($value)) return (string)$value;
+        $floatVal = (float)$value;
+        if (abs($floatVal - round($floatVal)) < 0.0001) {
+            return (string)(int)round($floatVal);
+        }
+        $formatted = number_format($floatVal, 2, '.', '');
+        $formatted = rtrim(rtrim($formatted, '0'), '.');
+        return $formatted;
+    }
+}
+
+$todayKey = date('Y-m-d');
+$todayWorkers = array();
+foreach ($timesheetWorkers as $worker) {
+    $name = isset($worker['name']) ? (string)$worker['name'] : '';
+    $key = cpms_timesheet_worker_key($name);
+    if ($key === '') continue;
+    $dailyMap = isset($attendanceGongsuMap[$key]) ? $attendanceGongsuMap[$key] : array();
+    if (!isset($dailyMap[$todayKey])) continue;
+    $gongsuValue = $dailyMap[$todayKey];
+    if ($gongsuValue === null || $gongsuValue === '') continue;
+    $todayWorkers[] = array(
+        'name' => $name,
+        'gongsu' => cpms_format_gongsu_value($gongsuValue),
+    );
+}
 ?>
 
 <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
@@ -121,6 +162,38 @@ if ($timesheetRows < 1) $timesheetRows = 1;
                 </button>
             <?php endif; ?>
         </div>
+    </div>
+</div>
+
+<div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm mt-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+            <h4 class="text-lg font-extrabold text-gray-900">금일 작업 인원/공수</h4>
+            <div class="text-sm text-gray-600 mt-1"><?php echo h($todayKey); ?> 기준</div>
+        </div>
+        <div class="text-xs text-gray-500">공수 수정은 박원덕 상무에게 요청됩니다.</div>
+    </div>
+    <div class="mt-4 space-y-2">
+        <?php if (count($todayWorkers) === 0): ?>
+            <div class="text-sm text-gray-500">오늘 기록된 공수 데이터가 없습니다.</div>
+        <?php else: ?>
+            <?php foreach ($todayWorkers as $worker): ?>
+                <div class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
+                    <div class="flex items-center gap-3">
+                        <div class="font-extrabold text-gray-900"><?php echo h($worker['name']); ?></div>
+                        <div class="text-sm text-gray-600">공수: <b><?php echo h($worker['gongsu']); ?></b></div>
+                    </div>
+                    <button type="button"
+                            class="px-3 py-2 rounded-2xl bg-gray-900 text-white text-xs font-extrabold"
+                            data-gongsu-edit="1"
+                            data-worker-name="<?php echo h($worker['name']); ?>"
+                            data-worker-date="<?php echo h($todayKey); ?>"
+                            data-worker-gongsu="<?php echo h($worker['gongsu']); ?>">
+                        공수 수정 요청
+                    </button>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -295,3 +368,88 @@ if ($timesheetRows < 1) $timesheetRows = 1;
     })();
     </script>
 <?php endif; ?>
+
+<div id="modal-gongsuRequest" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40" data-modal-close="gongsuRequest"></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-xl bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+            <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                    <h3 class="text-xl font-extrabold text-gray-900">공수 수정 요청</h3>
+                    <div class="text-xs text-gray-500 mt-1">수정 요청은 박원덕 상무에게 전달됩니다.</div>
+                </div>
+                <button type="button" class="p-3 rounded-2xl hover:bg-gray-50" data-modal-close="gongsuRequest">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div class="text-sm text-gray-700">
+                    <b id="gongsuWorkerName"></b> · <span id="gongsuWorkerDate"></span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-xs font-bold text-gray-500">현재 공수</label>
+                        <div class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 bg-gray-50 text-gray-700" id="gongsuCurrentValue"></div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500">요청 공수</label>
+                        <input id="gongsuRequestedValue" type="number" min="0" step="0.1" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" placeholder="예: 1.0">
+                    </div>
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-gray-500">요청 사유</label>
+                    <textarea id="gongsuRequestReason" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" rows="3" placeholder="간단한 사유를 입력하세요."></textarea>
+                </div>
+                <div class="flex items-center justify-end gap-2">
+                    <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 text-gray-700 font-extrabold" data-modal-close="gongsuRequest">닫기</button>
+                    <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" id="gongsuRequestSubmit">요청 보내기</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function(){
+    function openModal(key){
+        var modal = document.getElementById('modal-' + key);
+        if (modal) modal.classList.remove('hidden');
+    }
+    function closeModal(key){
+        var modal = document.getElementById('modal-' + key);
+        if (modal) modal.classList.add('hidden');
+    }
+
+    document.querySelectorAll('[data-modal-close]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            closeModal(btn.getAttribute('data-modal-close'));
+        });
+    });
+
+    document.querySelectorAll('[data-gongsu-edit="1"]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            var name = btn.getAttribute('data-worker-name') || '';
+            var date = btn.getAttribute('data-worker-date') || '';
+            var gongsu = btn.getAttribute('data-worker-gongsu') || '';
+            var nameEl = document.getElementById('gongsuWorkerName');
+            var dateEl = document.getElementById('gongsuWorkerDate');
+            var currentEl = document.getElementById('gongsuCurrentValue');
+            var requestedEl = document.getElementById('gongsuRequestedValue');
+            var reasonEl = document.getElementById('gongsuRequestReason');
+            if (nameEl) nameEl.textContent = name;
+            if (dateEl) dateEl.textContent = date;
+            if (currentEl) currentEl.textContent = gongsu;
+            if (requestedEl) requestedEl.value = '';
+            if (reasonEl) reasonEl.value = '';
+            openModal('gongsuRequest');
+        });
+    });
+
+    var submitBtn = document.getElementById('gongsuRequestSubmit');
+    if (submitBtn) {
+        submitBtn.addEventListener('click', function(){
+            closeModal('gongsuRequest');
+        });
+    }
+})();
+</script>

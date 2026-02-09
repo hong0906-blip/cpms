@@ -99,7 +99,7 @@ if ($tab === '') $tab = 'gantt';
 
 $tabs = array(
     'roles'    => '담당지정',
-    'gantt'    => '공정표(간트)',
+    'gantt'    => '공정표',
     'labor'    => '노무비',
     'equipment'=> '장비',
     'materials'=> '자재구입비',

@@ -1,7 +1,7 @@
 <?php
 /**
  * C:\www\cpms\app\views\construction\tabs\gantt.php
- * - 공사: 공정표(간트) 탭
+ * - 공사: 공정표 탭
  *
  * 요구사항:
  * - 공정표는 공사팀과 임원만 수정/삭제 가능
@@ -156,9 +156,9 @@ function clamp($v, $min, $max) {
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
     <div class="flex items-center justify-between mb-4">
         <div>
-            <h3 class="text-xl font-extrabold text-gray-900">공정표(간트)</h3>
+            <h3 class="text-xl font-extrabold text-gray-900">공정표</h3>
             <div class="text-sm text-gray-600 mt-1">프로젝트 기간에 맞춰 공정을 배치하고, 일정 변경 시 이슈등록으로 공유합니다.</div>
-            <div class="text-xs text-gray-500 mt-1">간트 기준 기간: <b><?php echo h(date('Y-m-d', $rangeStartTs)); ?></b> ~ <b><?php echo h(date('Y-m-d', $rangeEndTs)); ?></b></div>
+            <div class="text-xs text-gray-500 mt-1">공정표 기준 기간: <b><?php echo h(date('Y-m-d', $rangeStartTs)); ?></b> ~ <b><?php echo h(date('Y-m-d', $rangeEndTs)); ?></b></div>
         </div>
 
         <div class="flex items-center gap-2">
@@ -175,12 +175,85 @@ function clamp($v, $min, $max) {
     <?php endif; ?>
 
     <div class="flex items-center gap-2 mt-6">
-        <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" data-tab="board">간트 편집</button>
+        <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" data-tab="overview">공정표</button>
+        <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-extrabold" data-tab="board">공정표 수정</button>
         <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-extrabold" data-tab="progress">현재 진행률</button>
     </div>
 
+        <!-- 공정표 보기 -->
+    <div class="mt-6 overflow-x-auto gantt-tab-panel" data-tab-panel="overview">
+        <table class="min-w-full text-sm">
+            <thead>
+            <tr class="text-left text-gray-500">
+                <th class="py-2 pr-2">공정</th>
+                <th class="py-2 pr-2">시작</th>
+                <th class="py-2 pr-2">종료</th>
+                <th class="py-2 pr-2">진행률</th>
+                <th class="py-2 pr-2">일정</th>
+            </tr>
+            </thead>
+            <tbody>
+            <?php foreach ($tasks as $t): ?>
+                <?php
+                $sd = isset($t['start_date']) ? (string)$t['start_date'] : '';
+                $ed = isset($t['end_date']) ? (string)$t['end_date'] : '';
+                $sdTs = ymd_to_ts($sd);
+                $edTs = ymd_to_ts($ed);
+                if ($sdTs > 0 && $edTs > 0 && $edTs < $sdTs) { $tmp = $sdTs; $sdTs = $edTs; $edTs = $tmp; }
+
+                $leftPct = 0;
+                $widthPct = 0;
+                if ($sdTs > 0 && $edTs > 0) {
+                    $leftDays = (int)floor(($sdTs - $rangeStartTs) / 86400);
+                    $durDays  = (int)floor(($edTs - $sdTs) / 86400) + 1;
+                    $leftDays = clamp($leftDays, 0, $gridDays - 1);
+                    $maxDur   = $gridDays - $leftDays;
+                    if ($maxDur < 1) $maxDur = 1;
+                    $durDays  = clamp($durDays, 1, $maxDur);
+                    $leftPct  = ($leftDays / $gridDays) * 100.0;
+                    $widthPct = ($durDays / $gridDays) * 100.0;
+                }
+                $pr = isset($t['progress']) ? (int)$t['progress'] : 0;
+                if ($pr < 0) $pr = 0; if ($pr > 100) $pr = 100;
+                ?>
+                <tr class="border-t border-gray-100">
+                    <td class="py-2 pr-2 font-extrabold text-gray-900"><?php echo h($t['name']); ?></td>
+                    <td class="py-2 pr-2 text-gray-700">
+                        <button type="button"
+                                class="gantt-progress-date text-blue-700 underline underline-offset-4"
+                                data-task-id="<?php echo (int)$t['id']; ?>"
+                                data-task-name="<?php echo h($t['name']); ?>"
+                                data-task-date="<?php echo h($sd); ?>">
+                            <?php echo h($sd); ?>
+                        </button>
+                    </td>
+                    <td class="py-2 pr-2 text-gray-700">
+                        <button type="button"
+                                class="gantt-progress-date text-blue-700 underline underline-offset-4"
+                                data-task-id="<?php echo (int)$t['id']; ?>"
+                                data-task-name="<?php echo h($t['name']); ?>"
+                                data-task-date="<?php echo h($ed); ?>">
+                            <?php echo h($ed); ?>
+                        </button>
+                    </td>
+                    <td class="py-2 pr-2 text-gray-700"><?php echo (int)$pr; ?>%</td>
+                    <td class="py-2 pr-2">
+                        <div class="h-4 rounded-full bg-gray-100 overflow-hidden relative" style="min-width:260px">
+                            <?php if ($widthPct > 0): ?>
+                                <div class="absolute top-0 bottom-0 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500" style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%;"></div>
+                                <div class="absolute top-0 bottom-0 rounded-full bg-black/20" style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct * ($pr/100.0); ?>%;"></div>
+                            <?php endif; ?>
+                        </div>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+        <div class="text-xs text-gray-500 mt-3">공정 날짜를 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
+    </div>
+
     <!-- 드래그형 간트 보드 -->
-    <div class="mt-6 rounded-3xl border border-gray-200 bg-white p-4 gantt-tab-panel" data-tab-panel="board">
+    <div class="mt-6 rounded-3xl border border-gray-200 bg-white p-4 gantt-tab-panel hidden" data-tab-panel="board">
         <div class="flex flex-col lg:flex-row gap-4">
             <div class="lg:w-56 shrink-0">
                 <div class="text-sm font-extrabold text-gray-900">내역서 공정</div>
@@ -338,7 +411,7 @@ function clamp($v, $min, $max) {
                 <th class="py-2 pr-2">시작</th>
                 <th class="py-2 pr-2">종료</th>
                 <th class="py-2 pr-2">진행률</th>
-                <th class="py-2 pr-2">간트</th>
+                <th class="py-2 pr-2">일정</th>
                 <?php if ($canEdit): ?><th class="py-2">작업</th><?php endif; ?>
             </tr>
             </thead>
@@ -444,6 +517,56 @@ function clamp($v, $min, $max) {
         <div class="mt-4 text-sm text-gray-500">※ 수정/삭제 권한이 없습니다. (공사/임원만)</div>
     <?php endif; ?>
 
+</div>
+
+<!-- 공정 진행 입력 모달 -->
+<div id="modal-ganttProgress" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40" data-modal-close="ganttProgress"></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+            <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                    <h3 class="text-xl font-extrabold text-gray-900">공정 진행 입력</h3>
+                    <div class="text-xs text-gray-500 mt-1">
+                        <span id="ganttProgressTaskName"></span>
+                        <span class="mx-2">·</span>
+                        <span id="ganttProgressTaskDate"></span>
+                    </div>
+                </div>
+                <button type="button" class="p-3 rounded-2xl hover:bg-gray-50" data-modal-close="ganttProgress">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-5">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                        <label class="text-xs font-bold text-gray-500">전체 수량</label>
+                        <input id="ganttTotalQty" type="number" min="0" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" placeholder="예: 120">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500">완료 수량</label>
+                        <input id="ganttDoneQty" type="number" min="0" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" placeholder="예: 80">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500">남은 수량</label>
+                        <div class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full bg-gray-50 text-gray-700 font-extrabold" id="ganttRemainQty">0</div>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold text-gray-500">작업 사진 업로드</label>
+                    <input id="ganttPhotoInput" type="file" multiple class="mt-2 block w-full text-sm text-gray-700">
+                    <div id="ganttPhotoList" class="mt-3 space-y-2 text-sm text-gray-700"></div>
+                    <div class="text-xs text-gray-500 mt-2">업로드한 사진은 아래에서 바로 확인 및 다운로드할 수 있습니다.</div>
+                </div>
+
+                <div class="flex items-center justify-end gap-2">
+                    <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 text-gray-700 font-extrabold" data-modal-close="ganttProgress">닫기</button>
+                    <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" data-modal-close="ganttProgress">저장</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <style>
@@ -705,6 +828,90 @@ function clamp($v, $min, $max) {
       });
     });
   });
+
+  function openModal(key){
+    var modal = document.getElementById('modal-' + key);
+    if (modal) modal.classList.remove('hidden');
+  }
+  function closeModal(key){
+    var modal = document.getElementById('modal-' + key);
+    if (modal) modal.classList.add('hidden');
+  }
+
+  document.querySelectorAll('[data-modal-open]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      openModal(btn.getAttribute('data-modal-open'));
+    });
+  });
+  document.querySelectorAll('[data-modal-close]').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      closeModal(btn.getAttribute('data-modal-close'));
+    });
+  });
+
+  function updateRemainQty(){
+    var totalEl = document.getElementById('ganttTotalQty');
+    var doneEl = document.getElementById('ganttDoneQty');
+    var remainEl = document.getElementById('ganttRemainQty');
+    if (!totalEl || !doneEl || !remainEl) return;
+    var total = parseFloat(totalEl.value || '0');
+    var done = parseFloat(doneEl.value || '0');
+    if (isNaN(total)) total = 0;
+    if (isNaN(done)) done = 0;
+    var remain = total - done;
+    if (remain < 0) remain = 0;
+    remainEl.textContent = remain.toString();
+  }
+
+  document.querySelectorAll('.gantt-progress-date').forEach(function(btn){
+    btn.addEventListener('click', function(){
+      var taskName = btn.getAttribute('data-task-name') || '';
+      var taskDate = btn.getAttribute('data-task-date') || '';
+      var nameEl = document.getElementById('ganttProgressTaskName');
+      var dateEl = document.getElementById('ganttProgressTaskDate');
+      if (nameEl) nameEl.textContent = taskName;
+      if (dateEl) dateEl.textContent = taskDate;
+
+      var totalEl = document.getElementById('ganttTotalQty');
+      var doneEl = document.getElementById('ganttDoneQty');
+      if (totalEl) totalEl.value = '';
+      if (doneEl) doneEl.value = '';
+      updateRemainQty();
+
+      var listEl = document.getElementById('ganttPhotoList');
+      if (listEl) listEl.innerHTML = '';
+      var inputEl = document.getElementById('ganttPhotoInput');
+      if (inputEl) inputEl.value = '';
+
+      openModal('ganttProgress');
+    });
+  });
+
+  var totalQtyInput = document.getElementById('ganttTotalQty');
+  if (totalQtyInput) totalQtyInput.addEventListener('input', updateRemainQty);
+  var doneQtyInput = document.getElementById('ganttDoneQty');
+  if (doneQtyInput) doneQtyInput.addEventListener('input', updateRemainQty);
+
+  var photoInput = document.getElementById('ganttPhotoInput');
+  if (photoInput) {
+    photoInput.addEventListener('change', function(){
+      var listEl = document.getElementById('ganttPhotoList');
+      if (!listEl) return;
+      listEl.innerHTML = '';
+      if (!photoInput.files || photoInput.files.length === 0) return;
+      Array.prototype.forEach.call(photoInput.files, function(file){
+        var url = URL.createObjectURL(file);
+        var row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2';
+        row.innerHTML = '<span class="truncate">' + file.name + '</span>' +
+          '<div class="flex items-center gap-2">' +
+          '<a class="text-blue-700 underline text-xs" href="' + url + '" target="_blank" rel="noopener">보기</a>' +
+          '<a class="text-blue-700 underline text-xs" href="' + url + '" download="' + file.name + '">다운로드</a>' +
+          '</div>';
+        listEl.appendChild(row);
+      });
+    });
+  }
 
   var monthSelect = document.querySelector('.gantt-month-select');
   if (monthSelect) {
