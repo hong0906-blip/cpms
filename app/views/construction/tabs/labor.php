@@ -68,12 +68,15 @@ require_once __DIR__ . '/partials/labor_data_loader.php';
 $directTeamMembers = cpms_load_direct_team_members(isset($pdo) ? $pdo : null);
 $gongsuData = cpms_load_gongsu_data(isset($pdo) ? $pdo : null, isset($projectRow['name']) ? $projectRow['name'] : '', $selectedMonth);
 
-$attendanceWorkers = isset($gongsuData['workers']) ? $gongsuData['workers'] : array();
+$attendanceWorkers = isset($gongsuData['all_workers']) ? $gongsuData['all_workers'] : (isset($gongsuData['workers']) ? $gongsuData['workers'] : array());
 $attendanceGongsuMap = isset($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
 $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
 $attendanceOutputDays = isset($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
 
-$workerRows = cpms_build_worker_rows($directTeamMembers, $attendanceWorkers);
+$projectId = isset($pid) ? (int)$pid : 0;
+cpms_sync_project_labor_workers_from_attendance(isset($pdo) ? $pdo : null, $projectId, $attendanceWorkers);
+$projectLaborWorkers = cpms_load_project_labor_workers(isset($pdo) ? $pdo : null, $projectId);
+$workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
 $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
 
 $timesheetRows = count($timesheetWorkers);
@@ -142,7 +145,28 @@ if ($timesheetRows < 1) $timesheetRows = 1;
     <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
         <h4 class="text-lg font-extrabold text-gray-900">인원 작성</h4>
         <div class="text-sm text-gray-600 mt-1">임금 단가 및 계좌 정보를 등록합니다.</div>
-        <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 가져옵니다.</div>
+        <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 선택해 프로젝트에 추가합니다.</div>
+
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" class="mt-4 flex flex-wrap items-end gap-2">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+            <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+            <input type="hidden" name="labor_tab" value="workers">
+            <div>
+                <label class="text-xs font-bold text-gray-500">직영팀 선택</label>
+                <select name="direct_member_id" class="mt-1 px-3 py-2 rounded-xl border border-gray-200 text-sm min-w-[220px]">
+                    <option value="">직영팀 선택</option>
+                    <?php foreach ($directTeamMembers as $member): ?>
+                        <option value="<?php echo (int)$member['id']; ?>">
+                            <?php echo h(isset($member['name']) ? $member['name'] : ''); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <button type="submit" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">
+                직영팀 추가
+            </button>
+        </form>
 
         <div class="overflow-x-auto mt-4">
             <table class="min-w-[1100px] w-full border border-gray-200 text-sm">
@@ -157,6 +181,7 @@ if ($timesheetRows < 1) $timesheetRows = 1;
                     <th class="border border-gray-200 px-2 py-2">은행명</th>
                     <th class="border border-gray-200 px-2 py-2">예금주</th>
                     <th class="border border-gray-200 px-2 py-2">인력사업체명</th>
+                    <th class="border border-gray-200 px-2 py-2">삭제</th>                   
                 </tr>
                 </thead>
                 <tbody id="laborWorkerRows">
@@ -192,7 +217,21 @@ if ($timesheetRows < 1) $timesheetRows = 1;
                             <td class="border border-gray-200 px-2 py-2">
                                 <input class="w-full px-2 py-1 border border-gray-200 rounded-lg bg-gray-100" type="text" value="창명건설" placeholder="인력사업체명" readonly>
                             </td>
-                        </tr>
+                            <td class="border border-gray-200 px-2 py-2 text-center">
+                                <?php if (!empty($row['id'])): ?>
+                                    <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_delete" onsubmit="return confirm('해당 인원을 삭제할까요?');">
+                                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                        <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                                        <input type="hidden" name="worker_id" value="<?php echo (int)$row['id']; ?>">
+                                        <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+                                        <input type="hidden" name="labor_tab" value="workers">
+                                        <button type="submit" class="px-2 py-1 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs font-bold">
+                                            삭제
+                                        </button>
+                                    </form>
+                                <?php endif; ?>
+                            </td>                            
+                        </tr>           
                         <?php $rowIndex++; ?>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -208,6 +247,7 @@ if ($timesheetRows < 1) $timesheetRows = 1;
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="은행명"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="예금주"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="인력사업체명"></td>
+                        <td class="border border-gray-200 px-2 py-2 text-center text-xs text-gray-400">-</td>
                     </tr>
                 <?php endfor; ?>
                 </tbody>
@@ -231,6 +271,7 @@ if ($timesheetRows < 1) $timesheetRows = 1;
             <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="은행명"></td>
             <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="예금주"></td>
             <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="인력사업체명"></td>
+            <td class="border border-gray-200 px-2 py-2 text-center text-xs text-gray-400">-</td>
         </tr>
     </template>
     <script>

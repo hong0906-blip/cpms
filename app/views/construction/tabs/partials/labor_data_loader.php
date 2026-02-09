@@ -352,6 +352,7 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
     function cpms_load_gongsu_data_from_attendance_records($attendancePdo, $projectName, $selectedMonth) {
         $result = array(
             'workers' => array(),
+            'all_workers' => array(),
             'gongsu_map' => array(),
             'gongsu_unit' => array(),
             'output_days' => array(),
@@ -387,7 +388,26 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
             $monthEnd = $selectedMonth . '-31 23:59:59';
         }
 
-        // 3) 출근기록 조회 (이름 목록 + 공수 자동 계산)
+        // 3) 전체 이름 목록 (월과 무관)
+        $allWorkers = array();
+        try {
+            $sqlAll = "SELECT DISTINCT name FROM attendance WHERE site_id = :sid ORDER BY name ASC";
+            $stAll = $attendancePdo->prepare($sqlAll);
+            $stAll->bindValue(':sid', $siteId, PDO::PARAM_INT);
+            $stAll->execute();
+            $rowsAll = $stAll->fetchAll();
+            foreach ($rowsAll as $rowAll) {
+                $nameAll = isset($rowAll['name']) ? trim((string)$rowAll['name']) : '';
+                if ($nameAll === '') continue;
+                $keyAll = cpms_normalize_worker_key($nameAll);
+                if ($keyAll === '') continue;
+                $allWorkers[$keyAll] = $nameAll;
+            }
+        } catch (Exception $e) {
+            $allWorkers = array();
+        }
+
+        // 4) 출근기록 조회 (이름 목록 + 공수 자동 계산)
         $rows = array();
         try {
             $sql = "SELECT name, start_time_phone, stop_time_phone, total_minutes, status
@@ -467,7 +487,7 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
             $sumGongsu[$key] = round(((float)$sumGongsu[$key]) + (float)$gongsu, 2);
         }
 
-        // 4) 출력일수(=done인 날짜 수) 및 공수단위(평균공수) 구성
+        // 5) 출력일수(=done인 날짜 수) 및 공수단위(평균공수) 구성
         $outputDays = array();
         $gongsuUnit = array();
         foreach ($workers as $key => $nm) {
@@ -485,6 +505,11 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
         }
 
         $result['workers'] = array_values($workers);
+        if (count($allWorkers) > 0) {
+            $result['all_workers'] = array_values($allWorkers);
+        } else {
+            $result['all_workers'] = array_values($workers);
+        }
         $result['gongsu_map'] = $gongsuMap;
         $result['gongsu_unit'] = $gongsuUnit;
         $result['output_days'] = $outputDays;
@@ -497,6 +522,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
     function cpms_load_gongsu_data($pdo, $projectName, $selectedMonth) {
         $result = array(
             'workers' => array(),
+            'all_workers' => array(),
             'gongsu_map' => array(),
             'gongsu_unit' => array(),
             'output_days' => array(),
@@ -549,6 +575,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
         }
 
         $workers = array();
+        $allWorkers = array();
         $gongsuMap = array();
         $gongsuUnit = array();
         $outputDays = array();
@@ -590,7 +617,37 @@ if (!function_exists('cpms_load_gongsu_data')) {
             }
         }
 
+        // 전체 이름 목록은 월과 무관하게 한 번 더 조회
+        if (isset($cols['printed'])) {
+            $sqlAll = "SELECT `" . $cols['name'] . "` AS worker_name, `" . $cols['printed'] . "` AS printed_value
+                       FROM `" . $table . "`
+                       WHERE `" . $cols['site'] . "` = :site";
+        } else {
+            $sqlAll = "SELECT `" . $cols['name'] . "` AS worker_name
+                       FROM `" . $table . "`
+                       WHERE `" . $cols['site'] . "` = :site";
+        }
+        try {
+            $stAll = $pdo->prepare($sqlAll);
+            $stAll->bindValue(':site', $projectName);
+            $stAll->execute();
+            $rowsAll = $stAll->fetchAll();
+            foreach ($rowsAll as $rowAll) {
+                if (isset($rowAll['printed_value']) && !cpms_is_printed_value($rowAll['printed_value'])) {
+                    continue;
+                }
+                $workerName = isset($rowAll['worker_name']) ? trim((string)$rowAll['worker_name']) : '';
+                if ($workerName === '') continue;
+                $key = cpms_normalize_worker_key($workerName);
+                if ($key === '') continue;
+                if (!isset($allWorkers[$key])) $allWorkers[$key] = $workerName;
+            }
+        } catch (Exception $e) {
+            $allWorkers = array();
+        }
+
         $result['workers'] = array_values($workers);
+        $result['all_workers'] = count($allWorkers) > 0 ? array_values($allWorkers) : array_values($workers);
         $result['gongsu_map'] = $gongsuMap;
         $result['gongsu_unit'] = $gongsuUnit;
         $result['output_days'] = $outputDays;
@@ -613,6 +670,121 @@ if (!function_exists('cpms_load_direct_team_members')) {
             $members = array();
         }
         return $members;
+    }
+}
+
+if (!function_exists('cpms_ensure_project_labor_workers_table')) {
+    function cpms_ensure_project_labor_workers_table($pdo) {
+        if (!$pdo) return false;
+        if (cpms_table_exists_labor($pdo, 'cpms_project_labor_workers')) return true;
+        try {
+            $pdo->exec("CREATE TABLE cpms_project_labor_workers (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                project_id INT UNSIGNED NOT NULL,
+                name VARCHAR(100) NOT NULL,
+                source VARCHAR(20) NOT NULL DEFAULT 'manual',
+                direct_member_id INT UNSIGNED NULL,
+                is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE KEY uk_project_labor_workers (project_id, name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('cpms_load_project_labor_workers')) {
+    function cpms_load_project_labor_workers($pdo, $projectId) {
+        $rows = array();
+        if (!$pdo || $projectId <= 0) return $rows;
+        if (!cpms_ensure_project_labor_workers_table($pdo)) return $rows;
+        try {
+            $st = $pdo->prepare("SELECT * FROM cpms_project_labor_workers WHERE project_id = :pid AND is_deleted = 0 ORDER BY id ASC");
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->execute();
+            $rows = $st->fetchAll();
+        } catch (Exception $e) {
+            $rows = array();
+        }
+        return $rows;
+    }
+}
+
+if (!function_exists('cpms_sync_project_labor_workers_from_attendance')) {
+    function cpms_sync_project_labor_workers_from_attendance($pdo, $projectId, $attendanceWorkers) {
+        if (!$pdo || $projectId <= 0) return;
+        if (!cpms_ensure_project_labor_workers_table($pdo)) return;
+        if (!is_array($attendanceWorkers) || count($attendanceWorkers) === 0) return;
+
+        $existing = array();
+        try {
+            $st = $pdo->prepare("SELECT id, name, is_deleted FROM cpms_project_labor_workers WHERE project_id = :pid");
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->execute();
+            $rows = $st->fetchAll();
+            foreach ($rows as $row) {
+                $name = isset($row['name']) ? (string)$row['name'] : '';
+                $key = cpms_normalize_worker_key($name);
+                if ($key === '') continue;
+                $existing[$key] = array(
+                    'id' => (int)$row['id'],
+                    'is_deleted' => (int)$row['is_deleted'],
+                );
+            }
+        } catch (Exception $e) {
+            $existing = array();
+        }
+
+        foreach ($attendanceWorkers as $name) {
+            $name = trim((string)$name);
+            if ($name === '') continue;
+            $key = cpms_normalize_worker_key($name);
+            if ($key === '') continue;
+            if (isset($existing[$key])) continue;
+            try {
+                $now = date('Y-m-d H:i:s');
+                $stIns = $pdo->prepare("INSERT INTO cpms_project_labor_workers
+                                        (project_id, name, source, direct_member_id, is_deleted, created_at, updated_at)
+                                        VALUES (:pid, :name, 'attendance', NULL, 0, :now, :now)");
+                $stIns->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                $stIns->bindValue(':name', $name);
+                $stIns->bindValue(':now', $now);
+                $stIns->execute();
+            } catch (Exception $e) {
+                // ignore insert errors
+            }
+        }
+    }
+}
+
+if (!function_exists('cpms_build_project_worker_rows')) {
+    function cpms_build_project_worker_rows($projectWorkers, $directTeamMembers) {
+        $rows = array();
+        $directMap = array();
+        foreach ($directTeamMembers as $member) {
+            $id = isset($member['id']) ? (int)$member['id'] : 0;
+            if ($id > 0) {
+                $directMap[$id] = $member;
+            }
+        }
+
+        foreach ($projectWorkers as $worker) {
+            $data = array('name' => isset($worker['name']) ? (string)$worker['name'] : '');
+            $directId = isset($worker['direct_member_id']) ? (int)$worker['direct_member_id'] : 0;
+            if ($directId > 0 && isset($directMap[$directId])) {
+                $data = $directMap[$directId];
+            }
+            $rows[] = array(
+                'id' => isset($worker['id']) ? (int)$worker['id'] : 0,
+                'source' => isset($worker['source']) ? (string)$worker['source'] : '',
+                'data' => $data,
+            );
+        }
+
+        return $rows;
     }
 }
 
