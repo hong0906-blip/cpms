@@ -124,7 +124,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $run === '1') {
                         total_qty DECIMAL(12,2) NULL,
                         done_qty DECIMAL(12,2) NULL,
                         updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                        created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                        created_at DATETIME NULL DEFAULT NULL,
                         PRIMARY KEY (id),
                         UNIQUE KEY uniq_task_date (task_id, work_date),
                         KEY idx_project_id (project_id)

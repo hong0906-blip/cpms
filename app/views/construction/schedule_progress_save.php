@@ -84,8 +84,8 @@ try {
     }
 
     $pdo->beginTransaction();
-    $sql = "INSERT INTO cpms_schedule_progress (project_id, task_id, work_date, total_qty, done_qty)
-            VALUES (:pid, :tid, :wd, :tq, :dq)
+    $sql = "INSERT INTO cpms_schedule_progress (project_id, task_id, work_date, total_qty, done_qty, created_at)
+            VALUES (:pid, :tid, :wd, :tq, :dq, CURRENT_TIMESTAMP)
             ON DUPLICATE KEY UPDATE total_qty = VALUES(total_qty), done_qty = VALUES(done_qty), updated_at = CURRENT_TIMESTAMP";
     $ins = $pdo->prepare($sql);
     $ins->bindValue(':pid', $projectId, \PDO::PARAM_INT);
