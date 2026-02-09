@@ -52,6 +52,68 @@ if (!function_exists('cpms_table_columns')) {
     }
 }
 
+if (!function_exists('cpms_create_pdo_from_config')) {
+    function cpms_create_pdo_from_config($cfgFile) {
+        if ($cfgFile === '' || !file_exists($cfgFile)) return null;
+        $cfg = require $cfgFile;
+        if (!is_array($cfg)) return null;
+
+        $host = isset($cfg['host']) ? $cfg['host'] : '127.0.0.1';
+        $port = isset($cfg['port']) ? (int)$cfg['port'] : 3306;
+        $db   = isset($cfg['dbname']) ? $cfg['dbname'] : '';
+        $user = isset($cfg['user']) ? $cfg['user'] : '';
+        $pass = isset($cfg['pass']) ? $cfg['pass'] : '';
+        $ch   = isset($cfg['charset']) ? $cfg['charset'] : 'utf8mb4';
+
+        if ($db === '' || $user === '') return null;
+
+        $dsn = 'mysql:host=' . $host . ';port=' . $port . ';dbname=' . $db . ';charset=' . $ch;
+        try {
+            return new PDO($dsn, $user, $pass, array(
+                PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ));
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+}
+
+if (!function_exists('cpms_load_attendance_pdo')) {
+    function cpms_load_attendance_pdo() {
+        static $attendancePdo = false;
+        static $resolved = false;
+        if ($resolved) return ($attendancePdo instanceof PDO) ? $attendancePdo : null;
+        $resolved = true;
+
+        $roots = array();
+        $cpmsRoot = realpath(__DIR__ . '/../../../../..');
+        if ($cpmsRoot) {
+            $baseRoot = dirname($cpmsRoot);
+            $roots[] = $baseRoot . '/attendance';
+        }
+        $roots[] = '/www/attendance';
+
+        $configFiles = array(
+            'app/config/database.php',
+            'app/config/db.php',
+            'config/database.php',
+            'db.php',
+        );
+
+        foreach ($roots as $root) {
+            foreach ($configFiles as $rel) {
+                $cfgFile = rtrim($root, '/') . '/' . $rel;
+                if (!file_exists($cfgFile)) continue;
+                $attendancePdo = cpms_create_pdo_from_config($cfgFile);
+                if ($attendancePdo instanceof PDO) return $attendancePdo;
+            }
+        }
+
+        return null;
+    }
+}
+
 if (!function_exists('cpms_map_gongsu_columns')) {
     function cpms_map_gongsu_columns($columns) {
         $colMap = array();
@@ -157,10 +219,22 @@ if (!function_exists('cpms_load_gongsu_data')) {
 
         $projectName = trim((string)$projectName);
         if ($projectName === '' || $selectedMonth === '') return $result;
-        if (!$pdo) return $result;
+        if (!$pdo) $pdo = null;
 
-        $info = cpms_find_gongsu_table($pdo);
-        if (count($info) === 0) return $result;
+        $info = array();
+        if ($pdo) {
+            $info = cpms_find_gongsu_table($pdo);
+        }
+        if (count($info) === 0) {
+            $attendancePdo = cpms_load_attendance_pdo();
+            if ($attendancePdo) {
+                $info = cpms_find_gongsu_table($attendancePdo);
+                if (count($info) > 0) {
+                    $pdo = $attendancePdo;
+                }
+            }
+        }
+        if (count($info) === 0 || !$pdo) return $result;
 
         $table = $info['table'];
         $cols = $info['columns'];
