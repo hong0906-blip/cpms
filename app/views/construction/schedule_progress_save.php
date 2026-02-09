@@ -54,6 +54,12 @@ if ($workDate === '' || !preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $workDate)) {
     exit;
 }
 
+$redirectMonth = substr($workDate, 0, 7);
+$redirectSuffix = '';
+if (preg_match('/^\\d{4}-\\d{2}$/', $redirectMonth)) {
+    $redirectSuffix = '&month=' . $redirectMonth;
+}
+
 $toNumber = function($raw) {
     $clean = preg_replace('/[^0-9.\\-]/', '', (string)$raw);
     if ($clean === '' || !is_numeric($clean)) return null;
@@ -67,7 +73,7 @@ if ($doneQty !== null && $doneQty < 0) $doneQty = 0;
 $pdo = Db::pdo();
 if (!$pdo) {
     flash_set('error', 'DB 연결 실패');
-    header('Location: ?r=공사&pid=' . $projectId . '&tab=gantt');
+    header('Location: ?r=공사&pid=' . $projectId . '&tab=gantt' . $redirectSuffix);
     exit;
 }
 
@@ -79,7 +85,7 @@ try {
     $row = $st->fetch();
     if (!is_array($row)) {
         flash_set('error', '공정 정보를 찾을 수 없습니다.');
-        header('Location: ?r=공사&pid=' . $projectId . '&tab=gantt');
+        header('Location: ?r=공사&pid=' . $projectId . '&tab=gantt' . $redirectSuffix);
         exit;
     }
 
@@ -162,5 +168,5 @@ try {
     flash_set('error', '저장 실패: ' . $e->getMessage());
 }
 
-header('Location: ?r=공사&pid=' . $projectId . '&tab=gantt');
+header('Location: ?r=공사&pid=' . $projectId . '&tab=gantt' . $redirectSuffix);
 exit;
