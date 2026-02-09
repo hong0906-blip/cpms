@@ -184,6 +184,77 @@ $rangeDays = (int)floor(($rangeEndTs - $rangeStartTs) / 86400);
 if ($rangeDays < 1) $rangeDays = 1;
 $gridDays = $rangeDays + 1;
 
+// 공정 진행(수량/사진) 맵
+$progressMap = array();
+$progressPhotoMap = array();
+try {
+    $rangeStartYmd = date('Y-m-d', $rangeStartTs);
+    $rangeEndYmd = date('Y-m-d', $rangeEndTs);
+    $stProg = $pdo->prepare("
+        SELECT id, task_id, work_date, total_qty, done_qty
+        FROM cpms_schedule_progress
+        WHERE project_id = :pid
+          AND work_date BETWEEN :s AND :e
+        ORDER BY work_date ASC, id ASC
+    ");
+    $stProg->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
+    $stProg->bindValue(':s', $rangeStartYmd);
+    $stProg->bindValue(':e', $rangeEndYmd);
+    $stProg->execute();
+    $progRows = $stProg->fetchAll();
+    $progressIds = array();
+    if (is_array($progRows)) {
+        foreach ($progRows as $row) {
+            $taskId = isset($row['task_id']) ? (int)$row['task_id'] : 0;
+            $workDate = isset($row['work_date']) ? (string)$row['work_date'] : '';
+            if ($taskId <= 0 || $workDate === '') continue;
+            $key = $taskId . '|' . $workDate;
+            $progressMap[$key] = array(
+                'total_qty' => isset($row['total_qty']) ? $row['total_qty'] : null,
+                'done_qty' => isset($row['done_qty']) ? $row['done_qty'] : null
+            );
+            if (isset($row['id'])) $progressIds[] = (int)$row['id'];
+        }
+    }
+    if (count($progressIds) > 0) {
+        $placeholders = implode(',', array_fill(0, count($progressIds), '?'));
+        $stPhoto = $pdo->prepare("
+            SELECT progress_id, file_path, file_name
+            FROM cpms_schedule_progress_photos
+            WHERE progress_id IN ($placeholders)
+            ORDER BY id ASC
+        ");
+        foreach ($progressIds as $idx => $pidVal) {
+            $stPhoto->bindValue($idx + 1, $pidVal, \PDO::PARAM_INT);
+        }
+        $stPhoto->execute();
+        $photoRows = $stPhoto->fetchAll();
+        if (is_array($photoRows)) {
+            $progressIdToKey = array();
+            foreach ($progRows as $row) {
+                $taskId = isset($row['task_id']) ? (int)$row['task_id'] : 0;
+                $workDate = isset($row['work_date']) ? (string)$row['work_date'] : '';
+                $rid = isset($row['id']) ? (int)$row['id'] : 0;
+                if ($taskId <= 0 || $workDate === '' || $rid <= 0) continue;
+                $progressIdToKey[$rid] = $taskId . '|' . $workDate;
+            }
+            foreach ($photoRows as $prow) {
+                $rid = isset($prow['progress_id']) ? (int)$prow['progress_id'] : 0;
+                if ($rid <= 0 || !isset($progressIdToKey[$rid])) continue;
+                $key = $progressIdToKey[$rid];
+                if (!isset($progressPhotoMap[$key])) $progressPhotoMap[$key] = array();
+                $progressPhotoMap[$key][] = array(
+                    'file_path' => isset($prow['file_path']) ? (string)$prow['file_path'] : '',
+                    'file_name' => isset($prow['file_name']) ? (string)$prow['file_name'] : ''
+                );
+            }
+        }
+    }
+} catch (Exception $e) {
+    $progressMap = array();
+    $progressPhotoMap = array();
+}
+
 // 간트 날짜 라벨
 $rangeDates = array();
 $rangeYears = array();
@@ -705,6 +776,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var gridDays = parseInt(rangeSource.getAttribute('data-range-days'), 10) || 1;
   var projectId = board ? board.getAttribute('data-project-id') : null;
   var csrfToken = board ? board.getAttribute('data-csrf') : null;
+  var progressMap = <?php echo json_encode($progressMap, JSON_UNESCAPED_UNICODE); ?>;
+  var progressPhotoMap = <?php echo json_encode($progressPhotoMap, JSON_UNESCAPED_UNICODE); ?>;
 
   function ymdToTs(ymd){
     if (!ymd) return 0;
@@ -904,6 +977,25 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     });
   }
 
+  function renderPhotoList(listEl, photos){
+    if (!listEl) return;
+    listEl.innerHTML = '';
+    if (!photos || !photos.length) return;
+    photos.forEach(function(photo){
+      var url = photo.file_path || '';
+      var name = photo.file_name || '사진';
+      if (!url) return;
+      var row = document.createElement('div');
+      row.className = 'flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2';
+      row.innerHTML = '<span class="truncate">' + name + '</span>' +
+        '<div class="flex items-center gap-2">' +
+        '<a class="text-blue-700 underline text-xs" href="' + url + '" target="_blank" rel="noopener">보기</a>' +
+        '<a class="text-blue-700 underline text-xs" href="' + url + '" download>다운로드</a>' +
+        '</div>';
+      listEl.appendChild(row);
+    });
+  }
+  
   function openProgress(taskId, taskName, taskDate, totalQty){
     var taskIdEl = document.getElementById('ganttProgressTaskId');
     if (taskIdEl) taskIdEl.value = taskId || '';
@@ -917,12 +1009,26 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
     var totalEl = document.getElementById('ganttTotalQty');
     var doneEl = document.getElementById('ganttDoneQty');
-    if (totalEl) totalEl.value = (typeof totalQty !== 'undefined' && totalQty !== null) ? totalQty : '';
-    if (doneEl) doneEl.value = '0';
+    var mapKey = taskId + '|' + taskDate;
+    var saved = (progressMap && progressMap[mapKey]) ? progressMap[mapKey] : null;
+    var totalVal = '';
+    var doneVal = '';
+    if (saved) {
+      if (saved.total_qty !== null && typeof saved.total_qty !== 'undefined') totalVal = saved.total_qty;
+      if (saved.done_qty !== null && typeof saved.done_qty !== 'undefined') doneVal = saved.done_qty;
+    } else {
+      totalVal = (typeof totalQty !== 'undefined' && totalQty !== null) ? totalQty : '';
+      doneVal = '0';
+    }
+    if (totalEl) totalEl.value = totalVal;
+    if (doneEl) doneEl.value = doneVal;
     updateRemainQty();
 
     var listEl = document.getElementById('ganttPhotoList');
-    if (listEl) listEl.innerHTML = '';
+    if (listEl) {
+      var photos = (progressPhotoMap && progressPhotoMap[mapKey]) ? progressPhotoMap[mapKey] : [];
+      renderPhotoList(listEl, photos);
+    }
     var inputEl = document.getElementById('ganttPhotoInput');
     if (inputEl) inputEl.value = '';
 
@@ -1051,7 +1157,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       });
     });
   }
-  
+
   var progressSaveBtn = document.getElementById('ganttProgressSave');
   if (progressSaveBtn) {
     progressSaveBtn.addEventListener('click', function(){
