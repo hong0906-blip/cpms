@@ -93,6 +93,17 @@ header('Pragma: no-cache');
 </head>
 <body>
 <?php
+require_once __DIR__ . '/tabs/partials/labor_data_loader.php';
+$directTeamMembers = cpms_load_direct_team_members($pdo);
+$gongsuData = cpms_load_gongsu_data($pdo, isset($projectRow['name']) ? $projectRow['name'] : '', $selectedMonth);
+$attendanceWorkers = isset($gongsuData['workers']) ? $gongsuData['workers'] : array();
+$attendanceGongsuMap = isset($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
+$attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
+$attendanceOutputDays = isset($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
+$workerRows = cpms_build_worker_rows($directTeamMembers, $attendanceWorkers);
+$timesheetWorkers = cpms_build_timesheet_workers($workerRows);
+$timesheetRows = count($timesheetWorkers);
+if ($timesheetRows < 1) $timesheetRows = 1;
 require __DIR__ . '/tabs/partials/labor_sheet_table.php';
 ?>
 </body>

@@ -126,7 +126,7 @@ $sql = "SELECT * FROM direct_team_members ORDER BY id DESC";
         <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="address" placeholder="주소">
       </div>
       <div>
-        <label class="block text-sm font-bold text-gray-700 mb-2">인금단가</label>
+        <label class="block text-sm font-bold text-gray-700 mb-2">임금단가</label>
         <input class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="deposit_rate" placeholder="예: 180000">
       </div>
       <div>
@@ -156,7 +156,7 @@ $sql = "SELECT * FROM direct_team_members ORDER BY id DESC";
             <th class="px-4 py-3 font-extrabold">주민등록번호</th>
             <th class="px-4 py-3 font-extrabold">핸드폰번호</th>
             <th class="px-4 py-3 font-extrabold">주소</th>
-            <th class="px-4 py-3 font-extrabold">인금단가</th>
+            <th class="px-4 py-3 font-extrabold">임금단가</th>
             <th class="px-4 py-3 font-extrabold">계좌번호</th>
             <th class="px-4 py-3 font-extrabold">은행명</th>
             <th class="px-4 py-3 font-extrabold">예금주</th>

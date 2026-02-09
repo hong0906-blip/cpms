@@ -21,6 +21,57 @@ try {
 }
 $timesheetRows = isset($timesheetRows) ? (int)$timesheetRows : 1;
 if ($timesheetRows < 1) $timesheetRows = 1;
+if (!function_exists('cpms_timesheet_worker_key')) {
+    function cpms_timesheet_worker_key($name) {
+        $name = trim((string)$name);
+        if ($name === '') return '';
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($name, 'UTF-8');
+        }
+        return strtolower($name);
+    }
+}
+
+if (!function_exists('cpms_format_gongsu_value')) {
+    function cpms_format_gongsu_value($value) {
+        if ($value === null || $value === '') return '';
+        if (!is_numeric($value)) return (string)$value;
+        $floatVal = (float)$value;
+        if (abs($floatVal - round($floatVal)) < 0.0001) {
+            return (string)(int)round($floatVal);
+        }
+        $formatted = number_format($floatVal, 2, '.', '');
+        $formatted = rtrim(rtrim($formatted, '0'), '.');
+        return $formatted;
+    }
+}
+
+if (!function_exists('cpms_parse_money_value')) {
+    function cpms_parse_money_value($value) {
+        $value = trim((string)$value);
+        if ($value === '') return 0.0;
+        $value = str_replace(',', '', $value);
+        if (!is_numeric($value)) return 0.0;
+        return (float)$value;
+    }
+}
+
+if (!function_exists('cpms_format_money_value')) {
+    function cpms_format_money_value($value) {
+        if (!is_numeric($value)) return (string)$value;
+        $floatVal = (float)$value;
+        if (abs($floatVal - round($floatVal)) < 0.0001) {
+            return number_format($floatVal, 0, '.', ',');
+        }
+        $formatted = number_format($floatVal, 2, '.', ',');
+        return rtrim(rtrim($formatted, '0'), '.');
+    }
+}
+
+$timesheetWorkers = isset($timesheetWorkers) && is_array($timesheetWorkers) ? $timesheetWorkers : array();
+$attendanceGongsuMap = isset($attendanceGongsuMap) && is_array($attendanceGongsuMap) ? $attendanceGongsuMap : array();
+$attendanceGongsuUnit = isset($attendanceGongsuUnit) && is_array($attendanceGongsuUnit) ? $attendanceGongsuUnit : array();
+$attendanceOutputDays = isset($attendanceOutputDays) && is_array($attendanceOutputDays) ? $attendanceOutputDays : array();
 ?>
 
 <div class="overflow-x-auto">
@@ -70,24 +121,60 @@ if ($timesheetRows < 1) $timesheetRows = 1;
         </tr>
         </thead>
         <tbody>
-        <?php for ($i = 1; $i <= $timesheetRows; $i++): ?>
-            <tr class="<?php echo ($i % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>">
-                <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
-                <td class="border border-gray-200 px-2 py-2"></td>
-                <td class="border border-gray-200 px-2 py-2"></td>
-                <td class="border border-gray-200 px-2 py-2 text-center"></td>
-                <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
-                    <td class="border border-gray-200 px-1 py-1 text-center"></td>
-                <?php endfor; ?>
-                <td class="border border-gray-200 px-2 py-2 text-center">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2 text-right">0</td>
-                <td class="border border-gray-200 px-2 py-2"></td>
-                <td class="border border-gray-200 px-2 py-2"></td>
-                <td class="border border-gray-200 px-2 py-2"></td>
-                <td class="border border-gray-200 px-2 py-2"></td>
-            </tr>
-        <?php endfor; ?>
+        <?php if (count($timesheetWorkers) > 0): ?>
+            <?php foreach ($timesheetWorkers as $idx => $worker): ?>
+                <?php
+                $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
+                $workerKey = cpms_timesheet_worker_key($workerName);
+                $dailyMap = isset($attendanceGongsuMap[$workerKey]) ? $attendanceGongsuMap[$workerKey] : array();
+                $outputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
+                $gongsuUnit = isset($attendanceGongsuUnit[$workerKey]) ? (float)$attendanceGongsuUnit[$workerKey] : 0.0;
+                $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
+                $wageRate = cpms_parse_money_value($wageRateRaw);
+                $totalPay = $gongsuUnit * $wageRate * $outputDays;
+                ?>
+                <tr class="<?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>">
+                    <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
+                    <td class="border border-gray-200 px-2 py-2"><?php echo h($workerName); ?></td>
+                    <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['resident_no']) ? $worker['resident_no'] : ''); ?></td>
+                    <td class="border border-gray-200 px-2 py-2 text-center"></td>
+                    <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
+                        <?php
+                        $dateKey = $selectedMonth . '-' . str_pad((string)$d, 2, '0', STR_PAD_LEFT);
+                        $gongsuValue = isset($dailyMap[$dateKey]) ? $dailyMap[$dateKey] : null;
+                        $gongsuDisplay = cpms_format_gongsu_value($gongsuValue);
+                        ?>
+                        <td class="border border-gray-200 px-1 py-1 text-center"><?php echo h($gongsuDisplay); ?></td>
+                    <?php endfor; ?>
+                    <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h($outputDays > 0 ? (string)$outputDays : '0'); ?></td>
+                    <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h($wageRateRaw !== '' ? $wageRateRaw : '0'); ?></td>
+                    <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h($totalPay > 0 ? cpms_format_money_value($totalPay) : '0'); ?></td>
+                    <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['account_holder']) ? $worker['account_holder'] : ''); ?></td>
+                    <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['bank_name']) ? $worker['bank_name'] : ''); ?></td>
+                    <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['bank_account']) ? $worker['bank_account'] : ''); ?></td>
+                    <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['company_name']) ? $worker['company_name'] : ''); ?></td>
+                </tr>
+            <?php endforeach; ?>
+        <?php else: ?>
+            <?php for ($i = 1; $i <= $timesheetRows; $i++): ?>
+                <tr class="<?php echo ($i % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>">
+                    <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
+                    <td class="border border-gray-200 px-2 py-2"></td>
+                    <td class="border border-gray-200 px-2 py-2"></td>
+                    <td class="border border-gray-200 px-2 py-2 text-center"></td>
+                    <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
+                        <td class="border border-gray-200 px-1 py-1 text-center"></td>
+                    <?php endfor; ?>
+                    <td class="border border-gray-200 px-2 py-2 text-center">0</td>
+                    <td class="border border-gray-200 px-2 py-2 text-right">0</td>
+                    <td class="border border-gray-200 px-2 py-2 text-right">0</td>
+                    <td class="border border-gray-200 px-2 py-2"></td>
+                    <td class="border border-gray-200 px-2 py-2"></td>
+                    <td class="border border-gray-200 px-2 py-2"></td>
+                    <td class="border border-gray-200 px-2 py-2"></td>
+                </tr>
+            <?php endfor; ?>
+        <?php endif; ?>
         </tbody>
     </table>
 </div>

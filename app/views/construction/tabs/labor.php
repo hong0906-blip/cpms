@@ -63,34 +63,20 @@ try {
 
 $downloadUrl = base_url() . '/?r=construction/labor_sheet_download&pid=' . (int)$pid . '&month=' . urlencode($selectedMonth);
 
-$directTeamMembers = array();
-try {
-    if (!function_exists('cpms_table_exists_labor')) {
-        function cpms_table_exists_labor($pdo, $table) {
-            try {
-                $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
-                if ($dbName === '') return false;
-                $sql = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl";
-                $st = $pdo->prepare($sql);
-                $st->bindValue(':db', $dbName);
-                $st->bindValue(':tbl', $table);
-                $st->execute();
-                return ((int)$st->fetchColumn() > 0);
-            } catch (Exception $e) {
-                return false;
-            }
-        }
-    }
-    if (isset($pdo) && $pdo && cpms_table_exists_labor($pdo, 'direct_team_members')) {
-        $st = $pdo->prepare("SELECT * FROM direct_team_members ORDER BY id ASC");
-        $st->execute();
-        $directTeamMembers = $st->fetchAll();
-    }
-} catch (Exception $e) {
-    $directTeamMembers = array();
-}
+require_once __DIR__ . '/partials/labor_data_loader.php';
 
-$timesheetRows = count($directTeamMembers);
+$directTeamMembers = cpms_load_direct_team_members(isset($pdo) ? $pdo : null);
+$gongsuData = cpms_load_gongsu_data(isset($pdo) ? $pdo : null, isset($projectRow['name']) ? $projectRow['name'] : '', $selectedMonth);
+
+$attendanceWorkers = isset($gongsuData['workers']) ? $gongsuData['workers'] : array();
+$attendanceGongsuMap = isset($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
+$attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
+$attendanceOutputDays = isset($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
+
+$workerRows = cpms_build_worker_rows($directTeamMembers, $attendanceWorkers);
+$timesheetWorkers = cpms_build_timesheet_workers($workerRows);
+
+$timesheetRows = count($timesheetWorkers);
 if ($timesheetRows < 1) $timesheetRows = 1;
 ?>
 
@@ -146,12 +132,16 @@ if ($timesheetRows < 1) $timesheetRows = 1;
     $periodStart = $periodStart;
     $timesheetRows = $timesheetRows;
     $periodEnd = $periodEnd;
+    $timesheetWorkers = $timesheetWorkers;
+    $attendanceGongsuMap = $attendanceGongsuMap;
+    $attendanceGongsuUnit = $attendanceGongsuUnit;
+    $attendanceOutputDays = $attendanceOutputDays;
     require __DIR__ . '/partials/labor_sheet_table.php';
     ?>
 <?php else: ?>
     <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
         <h4 class="text-lg font-extrabold text-gray-900">인원 작성</h4>
-        <div class="text-sm text-gray-600 mt-1">인금 단가 및 계좌 정보를 등록합니다.</div>
+        <div class="text-sm text-gray-600 mt-1">임금 단가 및 계좌 정보를 등록합니다.</div>
         <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 가져옵니다.</div>
 
         <div class="overflow-x-auto mt-4">
@@ -162,7 +152,7 @@ if ($timesheetRows < 1) $timesheetRows = 1;
                     <th class="border border-gray-200 px-2 py-2">주민등록번호</th>
                     <th class="border border-gray-200 px-2 py-2">핸드폰 번호</th>
                     <th class="border border-gray-200 px-2 py-2">주소</th>
-                    <th class="border border-gray-200 px-2 py-2">인금단가</th>
+                    <th class="border border-gray-200 px-2 py-2">임금단가</th>
                     <th class="border border-gray-200 px-2 py-2">계좌번호</th>
                     <th class="border border-gray-200 px-2 py-2">은행명</th>
                     <th class="border border-gray-200 px-2 py-2">예금주</th>
@@ -171,8 +161,9 @@ if ($timesheetRows < 1) $timesheetRows = 1;
                 </thead>
                 <tbody id="laborWorkerRows">
                 <?php $rowIndex = 0; ?>
-                <?php if (!empty($directTeamMembers)): ?>
-                    <?php foreach ($directTeamMembers as $member): ?>
+                <?php if (!empty($workerRows)): ?>
+                    <?php foreach ($workerRows as $row): ?>
+                        <?php $member = isset($row['data']) && is_array($row['data']) ? $row['data'] : array(); ?>
                         <tr class="<?php echo ($rowIndex % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
                             <td class="border border-gray-200 px-2 py-2">
                                 <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['name']) ? $member['name'] : ''); ?>" placeholder="성명">
@@ -187,7 +178,7 @@ if ($timesheetRows < 1) $timesheetRows = 1;
                                 <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['address']) ? $member['address'] : ''); ?>" placeholder="주소">
                             </td>
                             <td class="border border-gray-200 px-2 py-2">
-                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['deposit_rate']) ? $member['deposit_rate'] : ''); ?>" placeholder="인금단가">
+                                <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['deposit_rate']) ? $member['deposit_rate'] : ''); ?>" placeholder="임금단가">
                             </td>
                             <td class="border border-gray-200 px-2 py-2">
                                 <input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['bank_account']) ? $member['bank_account'] : ''); ?>" placeholder="계좌번호">
@@ -212,7 +203,7 @@ if ($timesheetRows < 1) $timesheetRows = 1;
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="주민등록번호"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="핸드폰 번호"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="주소"></td>
-                        <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="인금단가"></td>
+                        <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="임금단가"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="계좌번호"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="은행명"></td>
                         <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="예금주"></td>
@@ -235,7 +226,7 @@ if ($timesheetRows < 1) $timesheetRows = 1;
             <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="주민등록번호"></td>
             <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="핸드폰 번호"></td>
             <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="주소"></td>
-            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="인금단가"></td>
+            <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="임금단가"></td>
             <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="계좌번호"></td>
             <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="은행명"></td>
             <td class="border border-gray-200 px-2 py-2"><input class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" placeholder="예금주"></td>
