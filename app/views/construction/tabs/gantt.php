@@ -24,6 +24,8 @@ try {
 
 // 내역서 공정(템플릿 후보)
 $processes = array();
+// 공정별 수량(모달 자동 입력용)
+$taskQtyMap = array();
 try {
     $stP = $pdo->prepare("
         SELECT
@@ -68,6 +70,66 @@ try {
     }
 } catch (Exception $e) {
     $processes = array();
+}
+
+try {
+    $stQ = $pdo->prepare("
+        SELECT
+            TRIM(COALESCE(NULLIF(process_name, ''), item_name)) AS base_name,
+            TRIM(spec) AS spec,
+            qty
+        FROM cpms_project_unit_prices
+        WHERE project_id = :pid
+          AND COALESCE(NULLIF(process_name, ''), item_name) IS NOT NULL
+          AND TRIM(COALESCE(NULLIF(process_name, ''), item_name)) <> ''
+        ORDER BY base_name ASC, spec ASC
+        LIMIT 1000
+    ");
+    $stQ->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
+    $stQ->execute();
+    $rowsQ = $stQ->fetchAll();
+    $baseTotals = array();
+    $specTotals = array();
+    $specFlags = array();
+    if (is_array($rowsQ)) {
+        foreach ($rowsQ as $row) {
+            $base = isset($row['base_name']) ? trim((string)$row['base_name']) : '';
+            if ($base === '') continue;
+            $spec = isset($row['spec']) ? trim((string)$row['spec']) : '';
+            $qtyRaw = isset($row['qty']) ? (string)$row['qty'] : '';
+            $qty = 0;
+            if ($qtyRaw !== '') {
+                $clean = preg_replace('/[^0-9.\-]/', '', $qtyRaw);
+                if ($clean !== '' && is_numeric($clean)) $qty = (float)$clean;
+            }
+            if (!isset($baseTotals[$base])) $baseTotals[$base] = 0;
+            $baseTotals[$base] += $qty;
+            if ($spec !== '') {
+                if (!isset($specTotals[$base])) $specTotals[$base] = array();
+                if (!isset($specTotals[$base][$spec])) $specTotals[$base][$spec] = 0;
+                $specTotals[$base][$spec] += $qty;
+                if (!isset($specFlags[$base])) $specFlags[$base] = array();
+                $specFlags[$base][$spec] = true;
+            }
+        }
+    }
+    foreach ($baseTotals as $base => $total) {
+        $specCount = isset($specFlags[$base]) ? count($specFlags[$base]) : 0;
+        if ($specCount > 1 && isset($specTotals[$base])) {
+            foreach ($specTotals[$base] as $spec => $qty) {
+                $taskQtyMap[$base . ' (' . $spec . ')'] = $qty;
+            }
+            $taskQtyMap[$base] = $total;
+        } else {
+            $taskQtyMap[$base] = $total;
+            if (isset($specTotals[$base]) && count($specTotals[$base]) === 1) {
+                $onlySpec = array_keys($specTotals[$base]);
+                $taskQtyMap[$base . ' (' . $onlySpec[0] . ')'] = $total;
+            }
+        }
+    }
+} catch (Exception $e) {
+    $taskQtyMap = array();
 }
 
 // 간트 범위: 프로젝트 기간(있으면) 우선
@@ -262,9 +324,11 @@ function clamp($v, $min, $max) {
                     $leftPct  = ($leftDays / $gridDays) * 100.0;
                     $widthPct = ($durDays / $gridDays) * 100.0;
                 }
+                $taskQty = isset($taskQtyMap[$t['name']]) ? $taskQtyMap[$t['name']] : 0;               
                 ?>
                 <div class="flex items-center gap-0 gantt-row"
-                     data-task-name="<?php echo h($t['name']); ?>">
+                     data-task-name="<?php echo h($t['name']); ?>"
+                     data-task-total-qty="<?php echo h($taskQty); ?>">
                     <div class="w-56 shrink-0 text-sm font-semibold text-gray-800 truncate pr-2">
                         <span class="truncate"><?php echo h($t['name']); ?></span>
                     </div>
@@ -282,7 +346,7 @@ function clamp($v, $min, $max) {
             <?php endforeach; ?>
         </div>
 
-        <div class="text-xs text-gray-500 mt-3">공정표의 날짜 칸(네모칸)을 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
+        <div class="text-xs text-gray-500 mt-3">공정표 수정 탭에서 파란색 공정 바를 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
     </div>
 
     <!-- 드래그형 간트 보드 -->
@@ -390,11 +454,13 @@ function clamp($v, $min, $max) {
                                 $leftPct  = ($leftDays / $gridDays) * 100.0;
                                 $widthPct = ($durDays / $gridDays) * 100.0;
                             }
+                            $taskQty = isset($taskQtyMap[$t['name']]) ? $taskQtyMap[$t['name']] : 0;                            
                             ?>
                             <div class="flex items-center gap-0 gantt-row"
                                  data-task-id="<?php echo (int)$t['id']; ?>"
                                  data-task-name="<?php echo h($t['name']); ?>"
-                                 data-task-progress="<?php echo (int)$t['progress']; ?>">
+                                 data-task-progress="<?php echo (int)$t['progress']; ?>"
+                                 data-task-total-qty="<?php echo h($taskQty); ?>">
                                 <div class="w-56 shrink-0 text-sm font-semibold text-gray-800 truncate pr-2 flex items-center gap-2">
                                     <span class="truncate"><?php echo h($t['name']); ?></span>
                                     <?php if ($canEdit): ?>
@@ -528,25 +594,7 @@ function clamp($v, $min, $max) {
         </table>
     </div>
 
-    <!-- 새 태스크 추가 -->
-    <?php if ($canEdit): ?>
-        <div class="mt-6 p-4 rounded-2xl border border-gray-200 bg-gray-50">
-            <div class="font-extrabold text-gray-900 mb-3">공정 추가</div>
-            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/schedule_save" class="grid grid-cols-1 md:grid-cols-5 gap-3">
-                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-                <input type="hidden" name="task_id" value="0">
-
-                <input name="name" class="md:col-span-2 px-4 py-3 rounded-2xl border border-gray-200" placeholder="공정명(예: 골조공사)">
-                <input type="date" name="start_date" class="px-4 py-3 rounded-2xl border border-gray-200">
-                <input type="date" name="end_date" class="px-4 py-3 rounded-2xl border border-gray-200">
-                <div class="flex items-center gap-2">
-                    <input type="number" name="progress" min="0" max="100" value="0" class="w-24 px-4 py-3 rounded-2xl border border-gray-200">%
-                    <button type="submit" class="px-5 py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-extrabold">추가</button>
-                </div>
-            </form>
-        </div>
-    <?php else: ?>
+    <?php if (!$canEdit): ?>
         <div class="mt-4 text-sm text-gray-500">※ 수정/삭제 권한이 없습니다. (공사/임원만)</div>
     <?php endif; ?>
 
@@ -780,11 +828,13 @@ function clamp($v, $min, $max) {
     var startX = 0;
     var origLeft = 0;
     var origWidth = 0;
+    var moved = false;
 
     function onMouseMove(e){
       if (!dragging && !resizing) return;
       var zoneRect = zone.getBoundingClientRect();
       var delta = e.clientX - startX;
+      if (Math.abs(delta) > 2) moved = true;
       var pctDelta = delta / zoneRect.width;
       if (dragging) {
         var newLeft = clamp(origLeft + pctDelta, 0, 1 - origWidth);
@@ -821,6 +871,7 @@ function clamp($v, $min, $max) {
       if (e.target.classList.contains('gantt-handle')) return;
       dragging = true;
       startX = e.clientX;
+      moved = false;      
       bar.classList.add('dragging');
       origLeft = parseFloat(bar.style.left || '0') / 100;
       origWidth = parseFloat(bar.style.width || '0') / 100;
@@ -833,6 +884,7 @@ function clamp($v, $min, $max) {
         e.stopPropagation();
         resizing = handle.classList.contains('gantt-handle-left') ? 'left' : 'right';
         startX = e.clientX;
+        moved = false;
         bar.classList.add('dragging');
         origLeft = parseFloat(bar.style.left || '0') / 100;
         origWidth = parseFloat(bar.style.width || '0') / 100;
@@ -840,10 +892,18 @@ function clamp($v, $min, $max) {
         document.addEventListener('mouseup', onMouseUp);
       });
     });
+    bar.addEventListener('click', function(e){
+      if (dragging || resizing || moved) return;
+      var zoneRect = zone.getBoundingClientRect();
+      var offsetX = e.clientX - zoneRect.left;
+      var leftDays = dayFromOffset(offsetX, zoneRect.width);
+      var dateTs = rangeStartTs + (leftDays * 86400);
+      openProgress(taskName, tsToYmd(dateTs), getRowTotalQty(row));
+    });    
     });
   }
 
-  function openProgress(taskName, taskDate){
+  function openProgress(taskName, taskDate, totalQty){
     var nameEl = document.getElementById('ganttProgressTaskName');
     var dateEl = document.getElementById('ganttProgressTaskDate');
     if (nameEl) nameEl.textContent = taskName;
@@ -851,8 +911,8 @@ function clamp($v, $min, $max) {
 
     var totalEl = document.getElementById('ganttTotalQty');
     var doneEl = document.getElementById('ganttDoneQty');
-    if (totalEl) totalEl.value = '';
-    if (doneEl) doneEl.value = '';
+    if (totalEl) totalEl.value = (typeof totalQty !== 'undefined' && totalQty !== null) ? totalQty : '';
+    if (doneEl) doneEl.value = '0';
     updateRemainQty();
 
     var listEl = document.getElementById('ganttPhotoList');
@@ -863,17 +923,25 @@ function clamp($v, $min, $max) {
     openModal('ganttProgress');
   }
 
+  function getRowTotalQty(row){
+    if (!row) return '';
+    var qty = row.getAttribute('data-task-total-qty');
+    if (qty === null || typeof qty === 'undefined') return '';
+    return qty;
+  }
+
   if (readOnlyBoard) {
-    readOnlyBoard.querySelectorAll('.gantt-dropzone').forEach(function(zone){
-      zone.addEventListener('click', function(e){
-        if (e.target.closest('.gantt-bar')) return;
-        var row = zone.closest('.gantt-row');
-        var taskName = row ? (row.getAttribute('data-task-name') || '') : '';
+    readOnlyBoard.querySelectorAll('.gantt-bar').forEach(function(bar){
+      bar.addEventListener('click', function(e){
+        var zone = bar.closest('.gantt-dropzone');
+        var row = bar.closest('.gantt-row');
+        if (!zone || !row) return;
+        var taskName = row.getAttribute('data-task-name') || '';
         var zoneRect = zone.getBoundingClientRect();
         var offsetX = e.clientX - zoneRect.left;
         var leftDays = dayFromOffset(offsetX, zoneRect.width);
         var dateTs = rangeStartTs + (leftDays * 86400);
-        openProgress(taskName, tsToYmd(dateTs));
+        openProgress(taskName, tsToYmd(dateTs), getRowTotalQty(row));
       });
     });
   }
