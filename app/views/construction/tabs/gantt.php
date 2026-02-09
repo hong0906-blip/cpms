@@ -182,17 +182,67 @@ function clamp($v, $min, $max) {
 
         <!-- 공정표 보기 -->
     <div class="mt-6 overflow-x-auto gantt-tab-panel" data-tab-panel="overview">
-        <table class="min-w-full text-sm">
-            <thead>
-            <tr class="text-left text-gray-500">
-                <th class="py-2 pr-2">공정</th>
-                <th class="py-2 pr-2">시작</th>
-                <th class="py-2 pr-2">종료</th>
-                <th class="py-2 pr-2">진행률</th>
-                <th class="py-2 pr-2">일정</th>
-            </tr>
-            </thead>
-            <tbody>
+        <div class="flex items-center justify-between mb-2">
+            <div class="text-xs text-gray-500">월 선택</div>
+            <select class="gantt-month-select border border-gray-200 rounded-xl px-3 py-2 text-sm"
+                    data-project-id="<?php echo (int)$pid; ?>"
+                    data-tab="gantt">
+                <?php foreach ($monthOptions as $key => $opt): ?>
+                    <option value="<?php echo h($key); ?>" <?php echo ($key === $viewMonth) ? 'selected' : ''; ?>>
+                        <?php echo h($opt['label']); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+
+        <div class="gantt-header"
+             style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
+            <div class="gantt-header-spacer w-56 shrink-0"></div>
+            <div class="gantt-header-rows">
+                <div class="gantt-header-row">
+                    <?php
+                    $cur = $rangeYears[0];
+                    $span = 0;
+                    for ($i = 0; $i < count($rangeYears); $i++) {
+                        if ($rangeYears[$i] !== $cur) {
+                            echo '<div class="gantt-cell gantt-cell-year" style="width: calc(var(--day-width) * ' . $span . ');">' . h($cur) . '</div>';
+                            $cur = $rangeYears[$i];
+                            $span = 1;
+                        } else {
+                            $span++;
+                        }
+                    }
+                    echo '<div class="gantt-cell gantt-cell-year" style="width: calc(var(--day-width) * ' . $span . ');">' . h($cur) . '</div>';
+                    ?>
+                </div>
+                <div class="gantt-header-row">
+                    <?php
+                    $cur = $rangeMonths[0];
+                    $span = 0;
+                    for ($i = 0; $i < count($rangeMonths); $i++) {
+                        if ($rangeMonths[$i] !== $cur) {
+                            echo '<div class="gantt-cell gantt-cell-month" style="width: calc(var(--day-width) * ' . $span . ');">' . h($cur) . '</div>';
+                            $cur = $rangeMonths[$i];
+                            $span = 1;
+                        } else {
+                            $span++;
+                        }
+                    }
+                    echo '<div class="gantt-cell gantt-cell-month" style="width: calc(var(--day-width) * ' . $span . ');">' . h($cur) . '</div>';
+                    ?>
+                </div>
+                <div class="gantt-header-row">
+                    <?php foreach ($rangeDates as $d): ?>
+                        <div class="gantt-cell gantt-cell-day"><?php echo h($d); ?></div>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-2 space-y-2 gantt-board-readonly"
+             data-range-start="<?php echo h(date('Y-m-d', $rangeStartTs)); ?>"
+             data-range-days="<?php echo (int)$gridDays; ?>"
+             style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
             <?php foreach ($tasks as $t): ?>
                 <?php
                 $sd = isset($t['start_date']) ? (string)$t['start_date'] : '';
@@ -200,7 +250,6 @@ function clamp($v, $min, $max) {
                 $sdTs = ymd_to_ts($sd);
                 $edTs = ymd_to_ts($ed);
                 if ($sdTs > 0 && $edTs > 0 && $edTs < $sdTs) { $tmp = $sdTs; $sdTs = $edTs; $edTs = $tmp; }
-
                 $leftPct = 0;
                 $widthPct = 0;
                 if ($sdTs > 0 && $edTs > 0) {
@@ -213,43 +262,27 @@ function clamp($v, $min, $max) {
                     $leftPct  = ($leftDays / $gridDays) * 100.0;
                     $widthPct = ($durDays / $gridDays) * 100.0;
                 }
-                $pr = isset($t['progress']) ? (int)$t['progress'] : 0;
-                if ($pr < 0) $pr = 0; if ($pr > 100) $pr = 100;
                 ?>
-                <tr class="border-t border-gray-100">
-                    <td class="py-2 pr-2 font-extrabold text-gray-900"><?php echo h($t['name']); ?></td>
-                    <td class="py-2 pr-2 text-gray-700">
-                        <button type="button"
-                                class="gantt-progress-date text-blue-700 underline underline-offset-4"
-                                data-task-id="<?php echo (int)$t['id']; ?>"
-                                data-task-name="<?php echo h($t['name']); ?>"
-                                data-task-date="<?php echo h($sd); ?>">
-                            <?php echo h($sd); ?>
-                        </button>
-                    </td>
-                    <td class="py-2 pr-2 text-gray-700">
-                        <button type="button"
-                                class="gantt-progress-date text-blue-700 underline underline-offset-4"
-                                data-task-id="<?php echo (int)$t['id']; ?>"
-                                data-task-name="<?php echo h($t['name']); ?>"
-                                data-task-date="<?php echo h($ed); ?>">
-                            <?php echo h($ed); ?>
-                        </button>
-                    </td>
-                    <td class="py-2 pr-2 text-gray-700"><?php echo (int)$pr; ?>%</td>
-                    <td class="py-2 pr-2">
-                        <div class="h-4 rounded-full bg-gray-100 overflow-hidden relative" style="min-width:260px">
-                            <?php if ($widthPct > 0): ?>
-                                <div class="absolute top-0 bottom-0 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500" style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%;"></div>
-                                <div class="absolute top-0 bottom-0 rounded-full bg-black/20" style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct * ($pr/100.0); ?>%;"></div>
-                            <?php endif; ?>
-                        </div>
-                    </td>
-                </tr>
+                <div class="flex items-center gap-0 gantt-row"
+                     data-task-name="<?php echo h($t['name']); ?>">
+                    <div class="w-56 shrink-0 text-sm font-semibold text-gray-800 truncate pr-2">
+                        <span class="truncate"><?php echo h($t['name']); ?></span>
+                    </div>
+                    <div class="gantt-dropzone relative h-11 flex-1 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
+                         data-start="<?php echo h($sd); ?>"
+                         data-end="<?php echo h($ed); ?>">
+                        <?php if ($widthPct > 0): ?>
+                            <div class="gantt-bar absolute inset-y-0 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-xs flex items-center px-2"
+                                 style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%; min-width: 28px;">
+                                <span class="truncate"><?php echo h($t['name']); ?></span>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
             <?php endforeach; ?>
-            </tbody>
-        </table>
-        <div class="text-xs text-gray-500 mt-3">공정 날짜를 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
+        </div>
+
+        <div class="text-xs text-gray-500 mt-3">공정표의 날짜 칸(네모칸)을 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
     </div>
 
     <!-- 드래그형 간트 보드 -->
@@ -602,6 +635,7 @@ function clamp($v, $min, $max) {
   }
   .gantt-bar { cursor: grab; }
   .gantt-bar.dragging { opacity: 0.7; cursor: grabbing; }
+  .gantt-board-readonly .gantt-bar { cursor: default; }
   .gantt-handle {
     position: absolute;
     top: 0;
@@ -616,11 +650,13 @@ function clamp($v, $min, $max) {
 <script>
 (function(){
   var board = document.querySelector('.gantt-board');
-  if (!board) return;
-  var rangeStart = board.getAttribute('data-range-start');
-  var gridDays = parseInt(board.getAttribute('data-range-days'), 10) || 1;
-  var projectId = board.getAttribute('data-project-id');
-  var csrfToken = board.getAttribute('data-csrf');
+  var readOnlyBoard = document.querySelector('.gantt-board-readonly');
+  if (!board && !readOnlyBoard) return;
+  var rangeSource = board || readOnlyBoard;
+  var rangeStart = rangeSource.getAttribute('data-range-start');
+  var gridDays = parseInt(rangeSource.getAttribute('data-range-days'), 10) || 1;
+  var projectId = board ? board.getAttribute('data-project-id') : null;
+  var csrfToken = board ? board.getAttribute('data-csrf') : null;
 
   function ymdToTs(ymd){
     if (!ymd) return 0;
@@ -646,6 +682,7 @@ function clamp($v, $min, $max) {
 
   function saveTask(taskId, name, startDate, endDate, progress){
     var fd = new FormData();
+    if (!board) return;
     fd.append('_csrf', csrfToken || '');
     fd.append('project_id', projectId || '0');
     fd.append('task_id', taskId || '0');
@@ -663,6 +700,7 @@ function clamp($v, $min, $max) {
   }
 
   function deleteTask(taskId){
+    if (!board) return;
     var fd = new FormData();
     fd.append('_csrf', csrfToken || '');
     fd.append('project_id', projectId || '0');
@@ -687,44 +725,47 @@ function clamp($v, $min, $max) {
     bar.style.width = widthPct + '%';
   }
 
-  var dragName = '';
-  var dragEl = null;
-  document.querySelectorAll('.gantt-draggable').forEach(function(el){
-    el.addEventListener('dragstart', function(e){
-      dragName = el.getAttribute('data-task-name') || el.textContent.trim();
-      dragEl = el;
-      if (e.dataTransfer) {
-        e.dataTransfer.effectAllowed = 'copy';
-        e.dataTransfer.setData('text/plain', dragName);
-      }
+  if (board) {
+    var dragName = '';
+    var dragEl = null;
+    board.querySelectorAll('.gantt-draggable').forEach(function(el){
+      el.addEventListener('dragstart', function(e){
+        dragName = el.getAttribute('data-task-name') || el.textContent.trim();
+        dragEl = el;
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'copy';
+          e.dataTransfer.setData('text/plain', dragName);
+        }
+      });
     });
-  });
 
-  document.querySelectorAll('.gantt-dropzone').forEach(function(zone){
-    zone.addEventListener('dragover', function(e){ e.preventDefault(); });
-    zone.addEventListener('drop', function(e){
-      e.preventDefault();
-      var droppedName = '';
-      if (e.dataTransfer) {
-        droppedName = e.dataTransfer.getData('text/plain') || '';
-      }
-      if (!droppedName) droppedName = dragName || '';
-      if (!droppedName) return;
-      var zoneRect = zone.getBoundingClientRect();
-      var offsetX = e.clientX - zoneRect.left;
-      var leftDays = dayFromOffset(offsetX, zoneRect.width);
-      var startTs = rangeStartTs + (leftDays * 86400);
-      var endTs = startTs + (3 * 86400);
-      saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0);
-      if (dragEl && dragEl.parentNode) {
-        dragEl.parentNode.removeChild(dragEl);
-      }
-      dragName = '';
-      dragEl = null;
+    board.querySelectorAll('.gantt-dropzone').forEach(function(zone){
+      zone.addEventListener('dragover', function(e){ e.preventDefault(); });
+      zone.addEventListener('drop', function(e){
+        e.preventDefault();
+        var droppedName = '';
+        if (e.dataTransfer) {
+          droppedName = e.dataTransfer.getData('text/plain') || '';
+        }
+        if (!droppedName) droppedName = dragName || '';
+        if (!droppedName) return;
+        var zoneRect = zone.getBoundingClientRect();
+        var offsetX = e.clientX - zoneRect.left;
+        var leftDays = dayFromOffset(offsetX, zoneRect.width);
+        var startTs = rangeStartTs + (leftDays * 86400);
+        var endTs = startTs + (3 * 86400);
+        saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0);
+        if (dragEl && dragEl.parentNode) {
+          dragEl.parentNode.removeChild(dragEl);
+        }
+        dragName = '';
+        dragEl = null;
+      });
     });
-  });
+  }
 
-  document.querySelectorAll('.gantt-bar').forEach(function(bar){
+  if (board) {
+    board.querySelectorAll('.gantt-bar').forEach(function(bar){
     var row = bar.closest('.gantt-row');
     var zone = bar.closest('.gantt-dropzone');
     var taskId = row ? row.getAttribute('data-task-id') : '0';
@@ -799,16 +840,54 @@ function clamp($v, $min, $max) {
         document.addEventListener('mouseup', onMouseUp);
       });
     });
-  });
-
-  document.querySelectorAll('.gantt-delete').forEach(function(btn){
-    btn.addEventListener('click', function(){
-      var taskId = btn.getAttribute('data-task-id') || '0';
-      if (!taskId || taskId === '0') return;
-      if (!confirm('이 공정을 삭제할까요?')) return;
-      deleteTask(taskId);
     });
-  });
+  }
+
+  function openProgress(taskName, taskDate){
+    var nameEl = document.getElementById('ganttProgressTaskName');
+    var dateEl = document.getElementById('ganttProgressTaskDate');
+    if (nameEl) nameEl.textContent = taskName;
+    if (dateEl) dateEl.textContent = taskDate;
+
+    var totalEl = document.getElementById('ganttTotalQty');
+    var doneEl = document.getElementById('ganttDoneQty');
+    if (totalEl) totalEl.value = '';
+    if (doneEl) doneEl.value = '';
+    updateRemainQty();
+
+    var listEl = document.getElementById('ganttPhotoList');
+    if (listEl) listEl.innerHTML = '';
+    var inputEl = document.getElementById('ganttPhotoInput');
+    if (inputEl) inputEl.value = '';
+
+    openModal('ganttProgress');
+  }
+
+  if (readOnlyBoard) {
+    readOnlyBoard.querySelectorAll('.gantt-dropzone').forEach(function(zone){
+      zone.addEventListener('click', function(e){
+        if (e.target.closest('.gantt-bar')) return;
+        var row = zone.closest('.gantt-row');
+        var taskName = row ? (row.getAttribute('data-task-name') || '') : '';
+        var zoneRect = zone.getBoundingClientRect();
+        var offsetX = e.clientX - zoneRect.left;
+        var leftDays = dayFromOffset(offsetX, zoneRect.width);
+        var dateTs = rangeStartTs + (leftDays * 86400);
+        openProgress(taskName, tsToYmd(dateTs));
+      });
+    });
+  }
+
+  if (board) {
+    board.querySelectorAll('.gantt-delete').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var taskId = btn.getAttribute('data-task-id') || '0';
+        if (!taskId || taskId === '0') return;
+        if (!confirm('이 공정을 삭제할까요?')) return;
+        deleteTask(taskId);
+      });
+    });
+  }
 
   document.querySelectorAll('.gantt-tab').forEach(function(btn){
     btn.addEventListener('click', function(){
@@ -867,23 +946,7 @@ function clamp($v, $min, $max) {
     btn.addEventListener('click', function(){
       var taskName = btn.getAttribute('data-task-name') || '';
       var taskDate = btn.getAttribute('data-task-date') || '';
-      var nameEl = document.getElementById('ganttProgressTaskName');
-      var dateEl = document.getElementById('ganttProgressTaskDate');
-      if (nameEl) nameEl.textContent = taskName;
-      if (dateEl) dateEl.textContent = taskDate;
-
-      var totalEl = document.getElementById('ganttTotalQty');
-      var doneEl = document.getElementById('ganttDoneQty');
-      if (totalEl) totalEl.value = '';
-      if (doneEl) doneEl.value = '';
-      updateRemainQty();
-
-      var listEl = document.getElementById('ganttPhotoList');
-      if (listEl) listEl.innerHTML = '';
-      var inputEl = document.getElementById('ganttPhotoInput');
-      if (inputEl) inputEl.value = '';
-
-      openModal('ganttProgress');
+      openProgress(taskName, taskDate);
     });
   });
 
@@ -913,8 +976,7 @@ function clamp($v, $min, $max) {
     });
   }
 
-  var monthSelect = document.querySelector('.gantt-month-select');
-  if (monthSelect) {
+  document.querySelectorAll('.gantt-month-select').forEach(function(monthSelect){
     monthSelect.addEventListener('change', function(){
       var chosen = monthSelect.value;
       if (!chosen) return;
@@ -927,6 +989,6 @@ function clamp($v, $min, $max) {
       params.set('month', chosen);
       window.location.search = params.toString();
     });
-  }
+  });
 })();
 </script>
