@@ -1,7 +1,7 @@
 <?php
 /**
  * C:\www\cpms\app\views\admin\index.php
- * - 관리부 탭 화면(직원명부/직영팀 일급 설정/노무비 계산)
+ * - 관리부 탭 화면(직원명부/직영팀 설정/노무비 계산)
  * - PHP 5.6 호환
  */
 
@@ -18,8 +18,8 @@ if ($tab === '') $tab = 'employees';
 
 $tabs = array(
     'employees'     => array('label' => '직원명부', 'icon' => 'users'),
-	    'direct_team'   => array('label' => '직영팀 명부', 'icon' => 'clipboard-list'),
-    'direct_rates'  => array('label' => '직영팀 일급 설정', 'icon' => 'wallet'),
+    'direct_team'   => array('label' => '직영팀 명부', 'icon' => 'clipboard-list'),
+    'direct_rates'  => array('label' => '직영팀 설정', 'icon' => 'wallet'),
     'labor_calc'    => array('label' => '노무비 계산', 'icon' => 'calculator'),
 );
 if (!isset($tabs[$tab])) $tab = 'employees';
@@ -33,7 +33,7 @@ function admin_tab_url($tab) {
 <div class="mb-6">
   <div class="text-sm text-gray-500">관리</div>
   <h2 class="text-2xl font-extrabold text-gray-900">관리부</h2>
-  <div class="text-sm text-gray-500 mt-1">직원명부 / 직영팀 일급 / 노무비 계산을 한 화면에서 관리합니다.</div>
+  <div class="text-sm text-gray-500 mt-1">직원명부 / 직영팀 설정 / 노무비 계산을 한 화면에서 관리합니다.</div>
 </div>
 
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden mb-6">

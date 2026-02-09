@@ -1,8 +1,8 @@
 <?php
 /**
  * C:\www\cpms\app\views\admin\direct_rates.php
- * - 직영팀(내부 인력) 일급 설정
- * - 직영팀 명부는 별도 탭(직영팀 명부)에서 관리
+ * - 직영팀(내부 인력) 설정
+ * - 직영팀 명부는 별도 탭(직영팀 명부)에서 확인
  * - PHP 5.6 호환
  */
 
@@ -43,9 +43,9 @@ $sql = "SELECT * FROM direct_team_members ORDER BY id DESC";
   <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
     <div>
       <div class="text-sm text-gray-500">관리</div>
-      <h2 class="text-2xl font-extrabold text-gray-900">직영팀 일급 설정</h2>
+      <h2 class="text-2xl font-extrabold text-gray-900">직영팀 설정</h2>
       <div class="text-sm text-gray-500 mt-1">
-        직영팀 인력 정보를 작성합니다.
+        직영팀 인력 정보를 등록하고 일급을 설정합니다.
       </div>
     </div>
     <div class="flex gap-2">
@@ -96,7 +96,7 @@ $sql = "SELECT * FROM direct_team_members ORDER BY id DESC";
     </div>
 
     <div class="text-xs text-gray-500 mt-2">
-      ※ 1번만 누르면 됩니다. 생성 후 “직영팀 명부” 탭에서 인력 등록 → 여기서 일급 설정하세요.
+      ※ 1번만 누르면 됩니다. 생성 후 아래에서 인력을 등록하고 일급을 설정하세요.
     </div>
   </div>
 <?php endif; ?>
