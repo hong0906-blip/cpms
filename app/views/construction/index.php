@@ -210,6 +210,13 @@ try {
             DB 설정
         </a>
 
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/sample_c5_seed" onsubmit="return confirm('요청 샘플 프로젝트(공정률 70%, 원가율 87%)를 생성/재적용할까요?');">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <button type="submit" class="px-4 py-2 rounded-2xl bg-indigo-600 text-white font-bold shadow hover:shadow-lg transition">
+                샘플 C5 적용
+            </button>
+        </form>
+                
         <button type="button"
                 class="px-5 py-3 rounded-2xl bg-gradient-to-r from-red-500 to-rose-500 text-white font-extrabold shadow-lg hover:shadow-xl transition"
                 data-modal-open="safetyIncidentAdd">

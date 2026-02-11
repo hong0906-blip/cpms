@@ -226,7 +226,10 @@ if ($route === 'construction/recognized_save') {
     require_once __DIR__ . '/../app/views/construction/recognized_save.php';
     exit;
 }
-
+if ($route === 'construction/sample_c5_seed') {
+    require_once __DIR__ . '/../app/views/construction/sample_c5_seed.php';
+    exit;
+}
 // ==========================
 //  안전(안전사고) 액션(POST 처리)
 // ==========================
