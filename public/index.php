@@ -135,6 +135,12 @@ if ($route === 'project/header_mapping_save') {
     exit;
 }
 
+
+if ($route === 'project/unit_price_toggle_safety') {
+    require_once __DIR__ . '/../app/views/project/unit_price_toggle_safety.php';
+    exit;
+}
+
 /**
  * ==========================
  * ✅ 이슈(등록/상태/댓글) 액션(POST 처리)
@@ -204,6 +210,20 @@ if ($route === 'construction/issue_create') {
 }
 if ($route === 'construction/issue_comment_create') {
     require_once __DIR__ . '/../app/views/construction/issue_comment_create.php';
+    exit;
+}
+
+
+if ($route === 'construction/daily_work_save') {
+    require_once __DIR__ . '/../app/views/construction/daily_work_save.php';
+    exit;
+}
+if ($route === 'construction/daily_cost_save') {
+    require_once __DIR__ . '/../app/views/construction/daily_cost_save.php';
+    exit;
+}
+if ($route === 'construction/recognized_save') {
+    require_once __DIR__ . '/../app/views/construction/recognized_save.php';
     exit;
 }
 

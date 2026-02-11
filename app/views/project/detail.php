@@ -288,7 +288,11 @@ if (is_file($contractMetaFile)) {
                         <th class="px-3 py-2 font-extrabold">규격</th>
                         <th class="px-3 py-2 font-extrabold">단위</th>
                         <th class="px-3 py-2 font-extrabold">수량</th>
+                        <th class="px-3 py-2 font-extrabold">자재단가</th>
+                        <th class="px-3 py-2 font-extrabold">노무단가</th>
+                        <th class="px-3 py-2 font-extrabold">안전단가</th>                        
                         <th class="px-3 py-2 font-extrabold">합계단가</th>
+                        <th class="px-3 py-2 font-extrabold">안전항목</th>                        
                         <th class="px-3 py-2 font-extrabold">비고</th>
                         <th class="px-3 py-2 font-extrabold">관리</th>
                     </tr>
@@ -300,7 +304,20 @@ if (is_file($contractMetaFile)) {
                             <td class="px-3 py-2"><?php echo h($r['spec']); ?></td>
                             <td class="px-3 py-2"><?php echo h($r['unit']); ?></td>
                             <td class="px-3 py-2"><?php echo h($r['qty']); ?></td>
+                            <td class="px-3 py-2"><?php echo h(isset($r['material_unit_price']) ? $r['material_unit_price'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo h(isset($r['labor_unit_price']) ? $r['labor_unit_price'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo h(isset($r['safety_unit_price']) ? $r['safety_unit_price'] : ''); ?></td>
                             <td class="px-3 py-2"><?php echo h($r['unit_price']); ?></td>
+                            <td class="px-3 py-2">
+                                <form method="post" action="<?php echo h(base_url()); ?>/?r=project/unit_price_toggle_safety" style="margin:0;">
+                                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                    <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
+                                    <input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>">
+                                    <button type="submit" class="px-3 py-1 rounded-xl border <?php echo ((int)$r['is_safety']===1)?'bg-rose-50 border-rose-200 text-rose-700':'bg-gray-50 border-gray-200 text-gray-700'; ?> font-bold"> 
+                                        <?php echo ((int)$r['is_safety']===1)?'안전항목':'일반항목'; ?>
+                                    </button>
+                                </form>
+                            </td>
                             <td class="px-3 py-2"><?php echo h($r['remark']); ?></td>
                             <td class="px-3 py-2">
                                 <form method="post" action="<?php echo h(base_url()); ?>/?r=project/unit_price_delete" style="margin:0;">

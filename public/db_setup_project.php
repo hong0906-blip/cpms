@@ -123,6 +123,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $type = 'ok';
                 $msg = (count($added) === 0) ? '컬럼 업데이트: 이미 적용되어 있습니다.' : ('컬럼 업데이트 완료: ' . implode(', ', $added));
 
+
+            } else if ($action === 'update_unit_price_columns') {
+
+                $added = array();
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN labor_unit_price DECIMAL(18,2) NULL AFTER unit_price");
+                    $added[] = 'labor_unit_price';
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'material_unit_price')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN material_unit_price DECIMAL(18,2) NULL AFTER labor_unit_price");
+                    $added[] = 'material_unit_price';
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'safety_unit_price')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN safety_unit_price DECIMAL(18,2) NULL AFTER material_unit_price");
+                    $added[] = 'safety_unit_price';
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'is_safety')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_safety TINYINT(1) NOT NULL DEFAULT 0 AFTER safety_unit_price");
+                    $added[] = 'is_safety';
+                }
+
+                $type = 'ok';
+                $msg = (count($added) === 0) ? '단가표 컬럼 업데이트: 이미 적용되어 있습니다.' : ('단가표 컬럼 업데이트 완료: ' . implode(', ', $added));
+                
             } else if ($action === 'create_issues') {
 
                 /**
@@ -154,7 +178,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     array('spec',       '규격|형식|사양', 0),
                     array('unit',       '단위|UOM', 0),
                     array('qty',        '수량|물량', 0),
-                    array('unit_price', '단가|금액|단가(원)|단가(₩)', 1),
+                    array('unit_price', '합계_단가|합계단가|단가|금액', 1),
+                    array('labor_unit_price', '노무_단가|노무단가|노무비_단가|노무 단가', 0),
+                    array('material_unit_price', '자재_단가|자재단가|자재비_단가|자재 단가', 0),
+                    array('safety_unit_price', '안전_단가|안전관리비_단가|안전비_단가|안전 단가', 0),
                     array('remark',     '비고|메모|설명', 0),
                 );
 
@@ -227,6 +254,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="hidden" name="_csrf" value="<?php echo h2(csrf_token()); ?>">
             <input type="hidden" name="action" value="update_columns">
             <button class="btn btn-warn" type="submit">1-1) 컬럼 업데이트(시공사/계약금액)</button>
+        </form>
+
+
+        <form method="post" style="margin:0">
+            <input type="hidden" name="_csrf" value="<?php echo h2(csrf_token()); ?>">
+            <input type="hidden" name="action" value="update_unit_price_columns">
+            <button class="btn btn-warn" type="submit">1-2) 단가표 컬럼 업데이트(노무/자재/안전)</button>
         </form>
 
         <form method="post" style="margin:0">

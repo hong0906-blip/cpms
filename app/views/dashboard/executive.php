@@ -5,6 +5,7 @@
  */
 
 require_once __DIR__ . '/../partials/TaskList.php';
+require_once __DIR__ . '/../partials/cost_metrics.php';
 
 use App\Core\Db;
 
@@ -43,6 +44,34 @@ if ($pdo) {
     }
 }
 
+
+// ✅ 원가/공정 KPI(week/month)
+$WARN_RATE = 85;
+$period = isset($_GET['period']) ? trim((string)$_GET['period']) : 'week';
+if ($period !== 'month') $period = 'week';
+
+$kpiRows = array();
+if ($pdo) {
+    try {
+        $stP = $pdo->query("SELECT id, name FROM cpms_projects ORDER BY id DESC");
+        $ps = $stP->fetchAll();
+        foreach ($ps as $pr) {
+            $m = cpms_project_cost_metrics($pdo, (int)$pr['id'], $period);
+            $m['project_id'] = (int)$pr['id'];
+            $m['project_name'] = (string)$pr['name'];
+            $kpiRows[] = $m;
+        }
+        usort($kpiRows, function($a, $b){
+            $av = ($a['cost_rate'] === null) ? -1 : (float)$a['cost_rate'];
+            $bv = ($b['cost_rate'] === null) ? -1 : (float)$b['cost_rate'];
+            if ($av === $bv) return 0;
+            return ($av > $bv) ? -1 : 1;
+        });
+    } catch (Exception $e) {
+        $kpiRows = array();
+    }
+}
+
 $flash = flash_get();
 ?>
 
@@ -63,6 +92,55 @@ $flash = flash_get();
         <?php echo h($flash['message']); ?>
     </div>
 <?php endif; ?>
+
+
+<!-- ✅ 프로젝트별 원가/공정 KPI -->
+<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
+    <div class="flex items-center justify-between mb-4">
+        <div>
+            <h3 class="text-xl font-extrabold text-gray-900">프로젝트별 원가/공정 KPI</h3>
+            <div class="text-sm text-gray-600 mt-1">전체 프로젝트 · 원가율 높은 순 · 85% 초과 경고</div>
+        </div>
+        <form method="get" class="flex items-center gap-2">
+            <input type="hidden" name="r" value="대시보드">
+            <input type="hidden" name="dv" value="executive">
+            <select name="period" onchange="this.form.submit()" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
+                <option value="week" <?php echo ($period==='week')?'selected':''; ?>>week</option>
+                <option value="month" <?php echo ($period==='month')?'selected':''; ?>>month</option>
+            </select>
+        </form>
+    </div>
+
+    <?php if (count($kpiRows) === 0): ?>
+        <div class="text-sm text-gray-600">표시할 프로젝트가 없습니다.</div>
+    <?php else: ?>
+        <div class="overflow-x-auto rounded-2xl border border-gray-200">
+            <table class="min-w-full text-sm">
+                <thead class="bg-gray-50 text-gray-600">
+                <tr>
+                    <th class="p-3 text-left font-extrabold">프로젝트</th>
+                    <th class="p-3 text-center font-extrabold">원가율</th>
+                    <th class="p-3 text-center font-extrabold">공정률</th>
+                    <th class="p-3 text-center font-extrabold">경고</th>
+                    <th class="p-3 text-center font-extrabold">노무/자재/안전 차이</th>
+                </tr>
+                </thead>
+                <tbody>
+                <?php foreach ($kpiRows as $r): ?>
+                    <?php $warn = ($r['cost_rate'] !== null && (float)$r['cost_rate'] > $WARN_RATE); ?>
+                    <tr class="border-t border-gray-100">
+                        <td class="p-3"><a class="font-bold text-indigo-600 hover:underline" href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$r['project_id']; ?>&tab=cost_progress&sub=summary&period=<?php echo h($period); ?>"><?php echo h($r['project_name']); ?></a></td>
+                        <td class="p-3 text-center"><?php echo h($r['cost_rate_label']); ?><?php if ($r['cost_rate_note'] !== ''): ?> (<?php echo h($r['cost_rate_note']); ?>)<?php endif; ?></td>
+                        <td class="p-3 text-center"><?php echo number_format((float)$r['progress_rate'], 2); ?>%</td>
+                        <td class="p-3 text-center"><?php echo $warn ? '<span class="text-red-600 font-extrabold">빨간불</span>' : '-'; ?></td>
+                        <td class="p-3 text-center"><?php echo number_format((float)$r['variance_labor']); ?> / <?php echo number_format((float)$r['variance_material']); ?> / <?php echo number_format((float)$r['variance_safety']); ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    <?php endif; ?>
+</div>
 
 <!-- KPI 카드(샘플) -->
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">

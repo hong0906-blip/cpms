@@ -40,7 +40,10 @@ $labels = array(
     'spec' => '규격',
     'unit' => '단위',
     'qty' => '수량',
-    'unit_price' => '단가',
+    'unit_price' => '합계단가',
+    'labor_unit_price' => '노무단가',
+    'material_unit_price' => '자재단가',
+    'safety_unit_price' => '안전단가',
     'remark' => '비고',
 );
 
