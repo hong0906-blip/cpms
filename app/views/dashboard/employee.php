@@ -74,6 +74,7 @@ if ($pdo && $userEmail !== '') {
 // ✅ 원가/공정 KPI(week/month)
 $period = isset($_GET['period']) ? trim((string)$_GET['period']) : 'week';
 if ($period !== 'month') $period = 'week';
+$periodLabel = ($period === 'month') ? '월간' : '주간';
 
 $kpiRows = array();
 if ($pdo && $userEmail !== '') {
@@ -85,12 +86,12 @@ if ($pdo && $userEmail !== '') {
         $eid2 = (int)$stE2->fetchColumn();
 
         if ($eid2 > 0) {
-            $sql = "SELECT p.id, p.name
+            $sql = "SELECT DISTINCT p.id, p.name
                     FROM cpms_projects p
-                    JOIN cpms_construction_roles r ON r.project_id = p.id
-                    WHERE r.site_employee_id = :eid
-                       OR r.safety_employee_id = :eid
-                       OR r.quality_employee_id = :eid";
+                    JOIN cpms_project_members pm ON pm.project_id = p.id
+                    WHERE pm.employee_id = :eid
+                      AND LOWER(TRIM(pm.role)) IN ('main','sub')
+                    ORDER BY p.id DESC";
             $stP = $pdo->prepare($sql);
             $stP->bindValue(':eid', $eid2, PDO::PARAM_INT);
             $stP->execute();
@@ -144,14 +145,14 @@ $flash = flash_get();
     <div class="flex items-center justify-between mb-4">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">프로젝트별 원가/공정 KPI</h3>
-            <div class="text-sm text-gray-600 mt-1">담당(현장/안전/품질) 프로젝트만 표시 · 원가율 높은 순</div>
+            <div class="text-sm text-gray-600 mt-1">공사 섹션 기준 내 담당(main/sub) 프로젝트만 표시 · <?php echo h($periodLabel); ?> · 원가율 높은 순</div>
         </div>
         <form method="get" class="flex items-center gap-2">
             <input type="hidden" name="r" value="대시보드">
             <input type="hidden" name="dv" value="employee">
             <select name="period" onchange="this.form.submit()" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
-                <option value="week" <?php echo ($period==='week')?'selected':''; ?>>week</option>
-                <option value="month" <?php echo ($period==='month')?'selected':''; ?>>month</option>
+                <option value="week" <?php echo ($period==='week')?'selected':''; ?>>주간</option>
+                <option value="month" <?php echo ($period==='month')?'selected':''; ?>>월간</option>
             </select>
         </form>
     </div>

@@ -49,6 +49,7 @@ if ($pdo) {
 $WARN_RATE = 85;
 $period = isset($_GET['period']) ? trim((string)$_GET['period']) : 'week';
 if ($period !== 'month') $period = 'week';
+$periodLabel = ($period === 'month') ? '월간' : '주간';
 
 $kpiRows = array();
 if ($pdo) {
@@ -99,14 +100,14 @@ $flash = flash_get();
     <div class="flex items-center justify-between mb-4">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">프로젝트별 원가/공정 KPI</h3>
-            <div class="text-sm text-gray-600 mt-1">전체 프로젝트 · 원가율 높은 순 · 85% 초과 경고</div>
+            <div class="text-sm text-gray-600 mt-1">공사 섹션 기준 전체 프로젝트 · <?php echo h($periodLabel); ?> · 원가율 높은 순 · 85% 초과 경고</div>
         </div>
         <form method="get" class="flex items-center gap-2">
             <input type="hidden" name="r" value="대시보드">
             <input type="hidden" name="dv" value="executive">
             <select name="period" onchange="this.form.submit()" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
-                <option value="week" <?php echo ($period==='week')?'selected':''; ?>>week</option>
-                <option value="month" <?php echo ($period==='month')?'selected':''; ?>>month</option>
+                <option value="week" <?php echo ($period==='week')?'selected':''; ?>>주간</option>
+                <option value="month" <?php echo ($period==='month')?'selected':''; ?>>월간</option>
             </select>
         </form>
     </div>
