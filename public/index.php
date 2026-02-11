@@ -154,8 +154,8 @@ if ($route === 'project/issue_comment_create') {
     require_once __DIR__ . '/../app/views/project/issue_comment_create.php';
     exit;
 }
-if ($route === 'dashboard/issue_update') {
-    require_once __DIR__ . '/../app/views/dashboard/issue_update.php';
+if ($route === 'project/issue_update') {
+    require_once __DIR__ . '/../app/views/project/issue_update.php';
     exit;
 }
 
