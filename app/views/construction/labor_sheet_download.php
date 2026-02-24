@@ -98,6 +98,18 @@ $directTeamMembers = cpms_load_direct_team_members($pdo);
 $gongsuData = cpms_load_gongsu_data($pdo, isset($projectRow['name']) ? $projectRow['name'] : '', $selectedMonth);
 $attendanceWorkers = isset($gongsuData['all_workers']) ? $gongsuData['all_workers'] : (isset($gongsuData['workers']) ? $gongsuData['workers'] : array());
 $attendanceGongsuMap = isset($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
+$overrideRows = cpms_load_labor_overrides($projectId, $selectedMonth);
+if (is_array($overrideRows)) {
+    foreach ($overrideRows as $workerKey => $dateRows) {
+        if (!isset($attendanceGongsuMap[$workerKey]) || !is_array($attendanceGongsuMap[$workerKey])) $attendanceGongsuMap[$workerKey] = array();
+        if (!is_array($dateRows)) continue;
+        foreach ($dateRows as $dateKey => $entry) {
+            if (is_array($entry) && isset($entry['value']) && is_numeric($entry['value'])) {
+                $attendanceGongsuMap[$workerKey][$dateKey] = (float)$entry['value'];
+            }
+        }
+    }
+}
 $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
 $attendanceOutputDays = isset($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
 $projectId = isset($projectId) ? (int)$projectId : 0;

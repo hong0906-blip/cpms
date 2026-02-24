@@ -144,7 +144,15 @@ $attendanceOutputDays = isset($attendanceOutputDays) && is_array($attendanceOutp
                         $gongsuValue = isset($dailyMap[$dateKey]) ? $dailyMap[$dateKey] : null;
                         $gongsuDisplay = cpms_format_gongsu_value($gongsuValue);
                         ?>
-                        <td class="border border-gray-200 px-1 py-1 text-center"><?php echo h($gongsuDisplay); ?></td>
+                        <td class="border border-gray-200 px-1 py-1 text-center">
+                            <button type="button"
+                                    class="cpms-gongsu-cell inline-flex min-w-[22px] justify-center rounded px-1 hover:bg-yellow-50"
+                                    data-project-id="<?php echo (int)(isset($pid) ? $pid : (isset($projectId) ? $projectId : 0)); ?>"
+                                    data-month="<?php echo h($selectedMonth); ?>"
+                                    data-worker-name="<?php echo h($workerName); ?>"
+                                    data-date="<?php echo h($dateKey); ?>"
+                                    data-old-value="<?php echo h($gongsuDisplay); ?>"><?php echo h($gongsuDisplay); ?></button>
+                        </td>
                     <?php endfor; ?>
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h($outputDays > 0 ? (string)$outputDays : '0'); ?></td>
                     <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h($wageRateRaw !== '' ? $wageRateRaw : '0'); ?></td>

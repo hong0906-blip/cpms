@@ -117,6 +117,30 @@ if ($pdo && $userEmail !== '') {
 }
 
 $flash = flash_get();
+
+// 요청사항(받은요청/나의요청)
+$myReceivedRequests = array();
+$mySentRequests = array();
+$requestTargetNameMap = array();
+$myUserId = cpms_find_employee_id_by_email($pdo, $userEmail);
+$reqStore = cpms_request_store_load();
+$allReq = isset($reqStore['requests']) && is_array($reqStore['requests']) ? $reqStore['requests'] : array();
+if ($pdo) {
+    try {
+        $stNm = $pdo->query("SELECT id, name FROM employees");
+        $nmRows = $stNm->fetchAll();
+        foreach ($nmRows as $nr) $requestTargetNameMap[(int)$nr['id']] = (string)$nr['name'];
+    } catch (Exception $e) {
+        $requestTargetNameMap = array();
+    }
+}
+for ($i = count($allReq) - 1; $i >= 0; $i--) {
+    $rq = $allReq[$i];
+    if (!is_array($rq)) continue;
+    if ((int)$myUserId > 0 && (int)$rq['target_user_id'] === (int)$myUserId) $myReceivedRequests[] = $rq;
+    if ((int)$myUserId > 0 && (int)$rq['requester_user_id'] === (int)$myUserId) $mySentRequests[] = $rq;
+}
+
 ?>
 
 <div class="bg-gradient-to-r from-blue-600 to-cyan-500 rounded-3xl p-8 text-white shadow-xl shadow-blue-500/20 mb-8">
@@ -139,6 +163,93 @@ $flash = flash_get();
     </div>
 <?php endif; ?>
 
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
+    <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
+        <h3 class="text-xl font-extrabold text-gray-900">요청사항(받은 요청)</h3>
+        <div class="text-sm text-gray-600 mt-1">내가 처리해야 하는 요청입니다.</div>
+        <div class="mt-4 space-y-3">
+            <?php if (count($myReceivedRequests) === 0): ?>
+                <div class="text-sm text-gray-500">받은 요청이 없습니다.</div>
+            <?php else: ?>
+                <?php foreach ($myReceivedRequests as $rq): ?>
+                    <?php $pl = isset($rq['payload']) && is_array($rq['payload']) ? $rq['payload'] : array(); ?>
+                    <div class="p-4 rounded-2xl border border-gray-100">
+                        <div class="text-xs text-gray-500"><?php echo h($rq['request_type']); ?> · <?php echo h($rq['created_at']); ?></div>
+                        <div class="font-bold text-gray-900 mt-1"><?php echo h(isset($pl['worker_name']) ? $pl['worker_name'] : '-'); ?> / <?php echo h(isset($pl['date']) ? $pl['date'] : '-'); ?> / <?php echo h(isset($pl['old_value']) ? $pl['old_value'] : '-'); ?> → <?php echo h(isset($pl['requested_value']) ? $pl['requested_value'] : '-'); ?></div>
+                        <div class="text-sm text-gray-600 mt-1">요청자: <?php echo h(isset($rq['requester_name']) ? $rq['requester_name'] : ''); ?> · 사유: <?php echo h($rq['reason']); ?></div>
+                        <div class="text-xs mt-1 font-bold">상태: <?php echo h($rq['status']); ?></div>
+                        <?php if ($rq['status'] === 'PENDING'): ?>
+                        <div class="flex gap-2 mt-3">
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=request/decide">
+                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                <input type="hidden" name="request_id" value="<?php echo h($rq['request_id']); ?>">
+                                <input type="hidden" name="decision" value="APPROVED">
+                                <button class="px-3 py-1 rounded-xl bg-emerald-600 text-white text-xs font-bold" type="submit">승인</button>
+                            </form>
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=request/decide" onsubmit="var r=prompt('반려 사유를 입력하세요'); if(!r){return false;} this.reject_reason.value=r;">
+                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                <input type="hidden" name="request_id" value="<?php echo h($rq['request_id']); ?>">
+                                <input type="hidden" name="decision" value="REJECTED">
+                                <input type="hidden" name="reject_reason" value="">
+                                <button class="px-3 py-1 rounded-xl bg-rose-600 text-white text-xs font-bold" type="submit">반려</button>
+                            </form>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+    <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
+        <h3 class="text-xl font-extrabold text-gray-900">나의 요청사항(보낸 요청)</h3>
+        <div class="text-sm text-gray-600 mt-1">내가 요청한 건의 상태를 확인합니다.</div>
+        <div class="mt-4 space-y-3">
+            <?php if (count($mySentRequests) === 0): ?>
+                <div class="text-sm text-gray-500">보낸 요청이 없습니다.</div>
+            <?php else: ?>
+                <?php foreach ($mySentRequests as $rq): ?>
+                    <?php $pl = isset($rq['payload']) && is_array($rq['payload']) ? $rq['payload'] : array(); ?>
+                    <div class="p-4 rounded-2xl border border-gray-100">
+                        <div class="text-xs text-gray-500"><?php echo h($rq['request_type']); ?> · <?php echo h($rq['created_at']); ?></div>
+                        <div class="font-bold text-gray-900 mt-1"><?php echo h(isset($pl['worker_name']) ? $pl['worker_name'] : '-'); ?> / <?php echo h(isset($pl['date']) ? $pl['date'] : '-'); ?> / <?php echo h(isset($pl['old_value']) ? $pl['old_value'] : '-'); ?> → <?php echo h(isset($pl['requested_value']) ? $pl['requested_value'] : '-'); ?></div>
+                        <div class="text-sm text-gray-600 mt-1">대상자: <?php echo h(isset($requestTargetNameMap[(int)$rq['target_user_id']]) ? $requestTargetNameMap[(int)$rq['target_user_id']] : $rq['target_user_id']); ?> · 상태: <b><?php echo h($rq['status']); ?></b></div>
+                        <?php if (!empty($rq['decided_at'])): ?><div class="text-xs text-gray-500">처리일: <?php echo h($rq['decided_at']); ?></div><?php endif; ?>
+                        <?php if ($rq['status'] === 'REJECTED' && !empty($rq['reject_reason'])): ?><div class="text-xs text-rose-600">반려사유: <?php echo h($rq['reject_reason']); ?></div><?php endif; ?>
+                        <?php if ($rq['status'] === 'REJECTED'): ?>
+                            <button type="button" class="mt-2 px-3 py-1 rounded-xl bg-gray-900 text-white text-xs font-bold btn-rereq" data-target="<?php echo (int)$rq['target_user_id']; ?>" data-reason="<?php echo h($rq['reason']); ?>" data-request-id="<?php echo h($rq['request_id']); ?>" data-payload="<?php echo h(json_encode($pl)); ?>">재요청</button>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+<script>
+(function(){
+    var csrf = <?php echo json_encode(csrf_token()); ?>;
+    document.querySelectorAll('.btn-rereq').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            var reason = prompt('요청 사유를 입력하세요', btn.getAttribute('data-reason') || '');
+            if (!reason) return;
+            var target = prompt('대상 임원 ID를 입력하세요', btn.getAttribute('data-target') || '');
+            if (!target) return;
+            var payload = btn.getAttribute('data-payload') || '{}';
+            var fd = new FormData();
+            fd.append('_csrf', csrf);
+            fd.append('request_type', 'LABOR_MANPOWER_CHANGE');
+            fd.append('target_user_id', target);
+            fd.append('reason', reason);
+            fd.append('re_request_of', btn.getAttribute('data-request-id') || '');
+            fd.append('payload', payload);
+            fetch('<?php echo h(base_url()); ?>/?r=request/create', { method:'POST', body:fd })
+                .then(function(r){ return r.json(); })
+                .then(function(res){ if(!res || !res.ok) throw new Error(res && res.message ? res.message : '재요청 실패'); alert('재요청이 생성되었습니다.'); location.reload(); })
+                .catch(function(e){ alert(e.message || '재요청 실패'); });
+        });
+    });
+})();
+</script>
 
 <!-- ✅ 프로젝트별 원가/공정 KPI -->
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">

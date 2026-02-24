@@ -79,6 +79,35 @@ $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_
 $attendanceOutputDays = isset($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
 
 $projectId = isset($pid) ? (int)$pid : 0;
+
+if (!function_exists('cpms_apply_labor_overrides_to_map')) {
+    function cpms_apply_labor_overrides_to_map($map, $projectId, $month) {
+        $rows = cpms_load_labor_overrides((int)$projectId, (string)$month);
+        if (!is_array($rows)) return $map;
+        foreach ($rows as $workerKey => $dateRows) {
+            if (!isset($map[$workerKey]) || !is_array($map[$workerKey])) $map[$workerKey] = array();
+            if (!is_array($dateRows)) continue;
+            foreach ($dateRows as $dateKey => $entry) {
+                if (is_array($entry) && isset($entry['value']) && is_numeric($entry['value'])) {
+                    $map[$workerKey][$dateKey] = (float)$entry['value'];
+                }
+            }
+        }
+        return $map;
+    }
+}
+$attendanceGongsuMap = cpms_apply_labor_overrides_to_map($attendanceGongsuMap, $projectId, $selectedMonth);
+
+$executiveUsers = array();
+if (isset($pdo) && $pdo) {
+    try {
+        $stExec = $pdo->query("SELECT id, name, email, position FROM employees WHERE role = 'executive' ORDER BY name ASC");
+        $executiveUsers = $stExec->fetchAll();
+    } catch (Exception $e) {
+        $executiveUsers = array();
+    }
+}
+
 cpms_sync_project_labor_workers_from_attendance(isset($pdo) ? $pdo : null, $projectId, $attendanceWorkers);
 $projectLaborWorkers = cpms_load_project_labor_workers(isset($pdo) ? $pdo : null, $projectId);
 $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
@@ -162,38 +191,6 @@ foreach ($timesheetWorkers as $worker) {
                 </button>
             <?php endif; ?>
         </div>
-    </div>
-</div>
-
-<div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm mt-4">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-            <h4 class="text-lg font-extrabold text-gray-900">금일 작업 인원/공수</h4>
-            <div class="text-sm text-gray-600 mt-1"><?php echo h($todayKey); ?> 기준</div>
-        </div>
-        <div class="text-xs text-gray-500">공수 수정은 박원덕 상무에게 요청됩니다.</div>
-    </div>
-    <div class="mt-4 space-y-2">
-        <?php if (count($todayWorkers) === 0): ?>
-            <div class="text-sm text-gray-500">오늘 기록된 공수 데이터가 없습니다.</div>
-        <?php else: ?>
-            <?php foreach ($todayWorkers as $worker): ?>
-                <div class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3">
-                    <div class="flex items-center gap-3">
-                        <div class="font-extrabold text-gray-900"><?php echo h($worker['name']); ?></div>
-                        <div class="text-sm text-gray-600">공수: <b><?php echo h($worker['gongsu']); ?></b></div>
-                    </div>
-                    <button type="button"
-                            class="px-3 py-2 rounded-2xl bg-gray-900 text-white text-xs font-extrabold"
-                            data-gongsu-edit="1"
-                            data-worker-name="<?php echo h($worker['name']); ?>"
-                            data-worker-date="<?php echo h($todayKey); ?>"
-                            data-worker-gongsu="<?php echo h($worker['gongsu']); ?>">
-                        공수 수정 요청
-                    </button>
-                </div>
-            <?php endforeach; ?>
-        <?php endif; ?>
     </div>
 </div>
 
@@ -369,23 +366,19 @@ foreach ($timesheetWorkers as $worker) {
     </script>
 <?php endif; ?>
 
+
 <div id="modal-gongsuRequest" class="fixed inset-0 z-50 hidden">
     <div class="absolute inset-0 bg-black/40" data-modal-close="gongsuRequest"></div>
     <div class="absolute inset-0 flex items-center justify-center p-4">
         <div class="w-full max-w-xl bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
             <div class="p-6 border-b border-gray-100 flex items-center justify-between">
                 <div>
-                    <h3 class="text-xl font-extrabold text-gray-900">공수 수정 요청</h3>
-                    <div class="text-xs text-gray-500 mt-1">수정 요청은 박원덕 상무에게 전달됩니다.</div>
+                    <h3 class="text-xl font-extrabold text-gray-900">공수 수정요청</h3>
                 </div>
-                <button type="button" class="p-3 rounded-2xl hover:bg-gray-50" data-modal-close="gongsuRequest">
-                    <i data-lucide="x" class="w-5 h-5"></i>
-                </button>
+                <button type="button" class="p-3 rounded-2xl hover:bg-gray-50" data-modal-close="gongsuRequest">닫기</button>
             </div>
             <div class="p-6 space-y-4">
-                <div class="text-sm text-gray-700">
-                    <b id="gongsuWorkerName"></b> · <span id="gongsuWorkerDate"></span>
-                </div>
+                <div class="text-sm text-gray-700"><b id="gongsuWorkerName"></b> · <span id="gongsuWorkerDate"></span></div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div>
                         <label class="text-xs font-bold text-gray-500">현재 공수</label>
@@ -393,16 +386,25 @@ foreach ($timesheetWorkers as $worker) {
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-500">요청 공수</label>
-                        <input id="gongsuRequestedValue" type="number" min="0" step="0.1" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" placeholder="예: 1.0">
+                        <input id="gongsuRequestedValue" type="number" min="0" step="0.1" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" placeholder="예: 1.5">
                     </div>
                 </div>
                 <div>
+                    <label class="text-xs font-bold text-gray-500">요청 대상 임원</label>
+                    <select id="gongsuTargetExecutive" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full">
+                        <option value="">임원 선택</option>
+                        <?php foreach ($executiveUsers as $ex): ?>
+                            <option value="<?php echo (int)$ex['id']; ?>"><?php echo h($ex['name']); ?><?php echo !empty($ex['position']) ? ' (' . h($ex['position']) . ')' : ''; ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>                
+                <div>                    
                     <label class="text-xs font-bold text-gray-500">요청 사유</label>
                     <textarea id="gongsuRequestReason" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" rows="3" placeholder="간단한 사유를 입력하세요."></textarea>
                 </div>
                 <div class="flex items-center justify-end gap-2">
                     <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 text-gray-700 font-extrabold" data-modal-close="gongsuRequest">닫기</button>
-                    <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" id="gongsuRequestSubmit">요청 보내기</button>
+                    <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" id="gongsuRequestSubmit">요청 생성</button>
                 </div>
             </div>
         </div>
@@ -411,44 +413,113 @@ foreach ($timesheetWorkers as $worker) {
 
 <script>
 (function(){
-    function openModal(key){
-        var modal = document.getElementById('modal-' + key);
-        if (modal) modal.classList.remove('hidden');
-    }
-    function closeModal(key){
-        var modal = document.getElementById('modal-' + key);
-        if (modal) modal.classList.add('hidden');
+    var csrf = <?php echo json_encode(csrf_token()); ?>;
+    var requestCtx = null;
+    function openModal(){ var m=document.getElementById('modal-gongsuRequest'); if(m)m.classList.remove('hidden'); }
+    function closeModal(){ var m=document.getElementById('modal-gongsuRequest'); if(m)m.classList.add('hidden'); }
+    document.querySelectorAll('[data-modal-close="gongsuRequest"]').forEach(function(btn){ btn.addEventListener('click', closeModal); });
+
+    function formatValue(v){
+        var n = parseFloat(v);
+        if (isNaN(n)) return '';
+        if (Math.abs(n - Math.round(n)) < 0.0001) return String(Math.round(n));
+        return String(n.toFixed(2)).replace(/0+$/,'').replace(/\.$/,'');
     }
 
-    document.querySelectorAll('[data-modal-close]').forEach(function(btn){
-        btn.addEventListener('click', function(){
-            closeModal(btn.getAttribute('data-modal-close'));
-        });
-    });
+    function submitDirect(cell, ctx, input){
+        var fd = new FormData();
+        fd.append('_csrf', csrf);
+        fd.append('project_id', ctx.projectId);
+        fd.append('month', ctx.month);
+        fd.append('worker_name', ctx.workerName);
+        fd.append('date', ctx.date);
+        fd.append('old_value', ctx.oldValue);
+        fd.append('new_value', ctx.newValue);
+        fetch('<?php echo h(base_url()); ?>/?r=construction/labor_cell_save', { method:'POST', body:fd })
+            .then(function(r){ return r.json(); })
+            .then(function(res){
+                if (!res || !res.ok) throw new Error(res && res.message ? res.message : '저장 실패');
+                cell.textContent = formatValue(res.value);
+                cell.setAttribute('data-old-value', cell.textContent);
+            })
+            .catch(function(e){ alert(e.message || '저장 실패'); cell.textContent = ctx.oldValue; })
+            .finally(function(){ input.remove(); cell.style.display='inline-flex'; });
+    }
 
-    document.querySelectorAll('[data-gongsu-edit="1"]').forEach(function(btn){
-        btn.addEventListener('click', function(){
-            var name = btn.getAttribute('data-worker-name') || '';
-            var date = btn.getAttribute('data-worker-date') || '';
-            var gongsu = btn.getAttribute('data-worker-gongsu') || '';
-            var nameEl = document.getElementById('gongsuWorkerName');
-            var dateEl = document.getElementById('gongsuWorkerDate');
-            var currentEl = document.getElementById('gongsuCurrentValue');
-            var requestedEl = document.getElementById('gongsuRequestedValue');
-            var reasonEl = document.getElementById('gongsuRequestReason');
-            if (nameEl) nameEl.textContent = name;
-            if (dateEl) dateEl.textContent = date;
-            if (currentEl) currentEl.textContent = gongsu;
-            if (requestedEl) requestedEl.value = '';
-            if (reasonEl) reasonEl.value = '';
-            openModal('gongsuRequest');
+    function openRequestModal(cell, ctx, input){
+        requestCtx = { cell:cell, ctx:ctx, input:input };
+        document.getElementById('gongsuWorkerName').textContent = ctx.workerName;
+        document.getElementById('gongsuWorkerDate').textContent = ctx.date;
+        document.getElementById('gongsuCurrentValue').textContent = ctx.oldValue;
+        document.getElementById('gongsuRequestedValue').value = ctx.newValue;
+        document.getElementById('gongsuRequestReason').value = '';
+        openModal();
+    }
+
+    document.querySelectorAll('.cpms-gongsu-cell').forEach(function(cell){
+        cell.addEventListener('click', function(){
+            if (cell.getAttribute('data-editing') === '1') return;
+            cell.setAttribute('data-editing', '1');
+            var oldValue = cell.getAttribute('data-old-value') || '';
+            var input = document.createElement('input');
+            input.type = 'text';
+            input.value = oldValue;
+            input.className = 'w-14 text-center border border-yellow-300 rounded';
+            cell.style.display = 'none';
+            cell.parentNode.appendChild(input);
+            input.focus();
+
+            function finish(){
+                var val = input.value.replace(/\s+/g,'');
+                if (val === oldValue || val === '') { input.remove(); cell.style.display='inline-flex'; cell.setAttribute('data-editing','0'); return; }
+                if (!/^\d+(\.\d+)?$/.test(val)) { alert('숫자 형식만 입력하세요.'); input.focus(); return; }
+                var n = parseFloat(val);
+                var ctx = { projectId:cell.getAttribute('data-project-id'), month:cell.getAttribute('data-month'), workerName:cell.getAttribute('data-worker-name'), date:cell.getAttribute('data-date'), oldValue:oldValue, newValue:n };
+                if (n <= 1.4) submitDirect(cell, ctx, input);
+                else openRequestModal(cell, ctx, input);
+                cell.setAttribute('data-editing','0');
+            }
+            input.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); finish(); } if(e.key==='Escape'){ input.remove(); cell.style.display='inline-flex'; cell.setAttribute('data-editing','0'); } });
+            input.addEventListener('blur', finish);
         });
     });
 
     var submitBtn = document.getElementById('gongsuRequestSubmit');
     if (submitBtn) {
         submitBtn.addEventListener('click', function(){
-            closeModal('gongsuRequest');
+           if (!requestCtx) return;
+            var targetUserId = document.getElementById('gongsuTargetExecutive').value;
+            var reason = document.getElementById('gongsuRequestReason').value.trim();
+            var requestedVal = document.getElementById('gongsuRequestedValue').value;
+            if (!targetUserId) { alert('임원을 선택하세요.'); return; }
+            if (!reason) { alert('요청 사유를 입력하세요.'); return; }
+            var payload = {
+                project_id: parseInt(requestCtx.ctx.projectId,10),
+                month: requestCtx.ctx.month,
+                worker_name: requestCtx.ctx.workerName,
+                worker_key: requestCtx.ctx.workerName.toLowerCase(),
+                date: requestCtx.ctx.date,
+                old_value: parseFloat(requestCtx.ctx.oldValue || '0'),
+                requested_value: parseFloat(requestedVal),
+                screen: 'construction/labor/timesheet'
+            };
+            var fd = new FormData();
+            fd.append('_csrf', csrf);
+            fd.append('request_type', 'LABOR_MANPOWER_CHANGE');
+            fd.append('target_user_id', targetUserId);
+            fd.append('reason', reason);
+            fd.append('payload', JSON.stringify(payload));
+            fetch('<?php echo h(base_url()); ?>/?r=request/create', { method:'POST', body:fd })
+                .then(function(r){ return r.json(); })
+                .then(function(res){
+                    if (!res || !res.ok) throw new Error(res && res.message ? res.message : '요청 생성 실패');
+                    requestCtx.cell.textContent = requestCtx.ctx.oldValue;
+                    requestCtx.input.remove();
+                    requestCtx.cell.style.display = 'inline-flex';
+                    alert('수정요청이 생성되었습니다.');
+                    closeModal();
+                })
+                .catch(function(e){ alert(e.message || '요청 생성 실패'); });
         });
     }
 })();

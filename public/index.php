@@ -203,6 +203,20 @@ if ($route === 'construction/labor_sheet_download') {
     exit;
 }
 
+
+if ($route === 'construction/labor_cell_save') {
+    require_once __DIR__ . '/../app/views/construction/labor_cell_save.php';
+    exit;
+}
+if ($route === 'request/create') {
+    require_once __DIR__ . '/../app/views/request/create.php';
+    exit;
+}
+if ($route === 'request/decide') {
+    require_once __DIR__ . '/../app/views/request/decide.php';
+    exit;
+}
+
 // 공사 페이지 전용 이슈 등록/댓글(리다이렉트가 공사로 돌아오게)
 if ($route === 'construction/issue_create') {
     require_once __DIR__ . '/../app/views/construction/issue_create.php';
