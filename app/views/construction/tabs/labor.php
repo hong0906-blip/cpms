@@ -214,8 +214,8 @@ foreach ($timesheetWorkers as $worker) {
     $attendanceGongsuMap = $attendanceGongsuMap;
     $attendanceGongsuUnit = $attendanceGongsuUnit;
     $attendanceOutputDays = $attendanceOutputDays;
-    require __DIR__ . '/partials/labor_sheet_table.php';
     $showBankColumns = false;    
+    require __DIR__ . '/partials/labor_sheet_table.php';
     ?>
 <?php else: ?>
     <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
@@ -416,6 +416,7 @@ foreach ($timesheetWorkers as $worker) {
 (function(){
     var csrf = <?php echo json_encode(csrf_token()); ?>;
     var requestCtx = null;
+    var savingCell = false;
     function openModal(){ var m=document.getElementById('modal-gongsuRequest'); if(m)m.classList.remove('hidden'); }
     function closeModal(){ var m=document.getElementById('modal-gongsuRequest'); if(m)m.classList.add('hidden'); }
     document.querySelectorAll('[data-modal-close="gongsuRequest"]').forEach(function(btn){ btn.addEventListener('click', closeModal); });
@@ -427,15 +428,55 @@ foreach ($timesheetWorkers as $worker) {
         return String(n.toFixed(2)).replace(/0+$/,'').replace(/\.$/,'');
     }
 
-    function openRequestModal(cell, ctx){
+    function openRequestModal(cell, ctx, requestedValue){
         requestCtx = { cell:cell, ctx:ctx };
         document.getElementById('gongsuWorkerName').textContent = ctx.workerName;
         document.getElementById('gongsuWorkerDate').textContent = ctx.date;
         document.getElementById('gongsuCurrentValue').textContent = formatValue(ctx.oldValue);
-        document.getElementById('gongsuRequestedValue').value = formatValue(ctx.oldValue);
+        document.getElementById('gongsuRequestedValue').value = formatValue(requestedValue);
         document.getElementById('gongsuRequestReason').value = '';
         document.getElementById('gongsuTargetExecutive').value = '';
         openModal();
+    }
+
+    function saveDirectCell(cell, ctx, newValue){
+        if (savingCell) return;
+        savingCell = true;
+        var fd = new FormData();
+        fd.append('_csrf', csrf);
+        fd.append('project_id', ctx.projectId);
+        fd.append('month', ctx.month);
+        fd.append('worker_name', ctx.workerName);
+        fd.append('date', ctx.date);
+        fd.append('old_value', String(ctx.oldValue));
+        fd.append('new_value', String(newValue));
+        fetch('<?php echo h(base_url()); ?>/?r=construction/labor_cell_save', { method:'POST', body:fd })
+            .then(function(r){
+                return r.text().then(function(text){
+                    var data = null;
+                    try { data = JSON.parse(text); } catch (e) {}
+                    if (!r.ok) {
+                        var message = data && data.message ? data.message : ('저장 실패 (HTTP ' + r.status + ')');
+                        throw new Error(message);
+                    }
+                    if (!data || !data.ok) {
+                        throw new Error(data && data.message ? data.message : '저장 실패');
+                    }
+                    return data;
+                });
+            })
+            .then(function(data){
+                var value = (data && typeof data.value !== 'undefined') ? data.value : newValue;
+                var display = formatValue(value);
+                cell.textContent = display;
+                cell.setAttribute('data-old-value', display);
+            })
+            .catch(function(e){
+                alert(e && e.message ? e.message : '저장 실패');
+            })
+            .then(function(){
+                savingCell = false;
+            });
     }
 
     document.querySelectorAll('.cpms-gongsu-cell').forEach(function(cell){
@@ -450,7 +491,23 @@ foreach ($timesheetWorkers as $worker) {
                 date:cell.getAttribute('data-date'),
                 oldValue:oldValue
             };
-            openRequestModal(cell, ctx);
+            var input = window.prompt('공수를 입력하세요. (1.5 이상은 수정요청으로 처리됩니다.)', formatValue(oldValue));
+            if (input === null) return;
+            input = String(input).replace(/\s+/g, '');
+            if (!/^\d+(\.\d+)?$/.test(input)) {
+                alert('공수는 숫자 형식으로 입력하세요.');
+                return;
+            }
+            var nextValue = parseFloat(input);
+            if (isNaN(nextValue) || nextValue < 0) {
+                alert('공수는 0 이상만 가능합니다.');
+                return;
+            }
+            if (nextValue >= 1.5) {
+                openRequestModal(cell, ctx, nextValue);
+                return;
+            }
+            saveDirectCell(cell, ctx, nextValue);
         });
     });
 
