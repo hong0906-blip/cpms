@@ -464,7 +464,11 @@ foreach ($timesheetWorkers as $worker) {
             if (!targetUserId) { alert('임원을 선택하세요.'); return; }
             if (!reason) { alert('요청 사유를 입력하세요.'); return; }
             if (!/^\d+(\.\d+)?$/.test(requestedVal)) { alert('요청 공수는 숫자 형식으로 입력하세요.'); return; }
-            if (parseFloat(requestedVal) < 1.5) { alert('요청 공수는 1.5 이상만 가능합니다.'); return; }
+            if (parseFloat(requestedVal) < 0) { alert('요청 공수는 0 이상만 가능합니다.'); return; }
+            if (!requestCtx.ctx.projectId || isNaN(parseInt(requestCtx.ctx.projectId, 10)) || parseInt(requestCtx.ctx.projectId, 10) <= 0) {
+                alert('프로젝트 정보가 올바르지 않아 요청을 생성할 수 없습니다. 페이지를 새로고침 후 다시 시도해 주세요.');
+                return;
+            }
             var payload = {
                 project_id: parseInt(requestCtx.ctx.projectId,10),
                 month: requestCtx.ctx.month,
@@ -482,7 +486,18 @@ foreach ($timesheetWorkers as $worker) {
             fd.append('reason', reason);
             fd.append('payload', JSON.stringify(payload));
             fetch('<?php echo h(base_url()); ?>/?r=request/create', { method:'POST', body:fd })
-                .then(function(r){ return r.json(); })
+                .then(function(r){
+                    return r.text().then(function(text){
+                        var data = null;
+                        try { data = JSON.parse(text); } catch (e) {}
+                        if (!r.ok) {
+                            var message = data && data.message ? data.message : ('요청 생성 실패 (HTTP ' + r.status + ')');
+                            throw new Error(message);
+                        }
+                        if (!data) throw new Error('요청 응답 형식이 올바르지 않습니다.');
+                        return data;
+                    });
+                })
                 .then(function(res){
                     if (!res || !res.ok) throw new Error(res && res.message ? res.message : '요청 생성 실패');
                     alert('수정요청이 생성되었습니다.');

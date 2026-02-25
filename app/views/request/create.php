@@ -48,15 +48,20 @@ if (!($role === 'executive' || $dept === '공사')) {
 if ($requestType === 'LABOR_MANPOWER_CHANGE') {
     $projectId = isset($payload['project_id']) ? (int)$payload['project_id'] : 0;
     $requestValue = isset($payload['requested_value']) ? (float)$payload['requested_value'] : 0.0;
+    if ($projectId <= 0) {
+        http_response_code(400);
+        echo json_encode(array('ok' => false, 'message' => '프로젝트 정보가 올바르지 않습니다.'));
+        exit;
+    }
+    if ($requestValue < 0) {
+        http_response_code(400);
+        echo json_encode(array('ok' => false, 'message' => '요청 공수는 0 이상만 가능합니다.'));
+        exit;
+    }
     $pdo = Db::pdo();
     if (!cpms_is_project_member_or_executive($pdo, $projectId, $role, (string)Auth::userEmail())) {
         http_response_code(403);
         echo json_encode(array('ok' => false, 'message' => '담당 프로젝트만 요청할 수 있습니다.'));
-        exit;
-    }
-    if ($requestValue < 1.5) {
-        http_response_code(400);
-        echo json_encode(array('ok' => false, 'message' => '1.5 이상만 요청 가능합니다.'));
         exit;
     }
 }
