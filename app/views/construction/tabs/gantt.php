@@ -183,6 +183,12 @@ $rangeEndTs = strtotime(date('Y-m-t', $rangeStartTs) . ' 00:00:00');
 $rangeDays = (int)floor(($rangeEndTs - $rangeStartTs) / 86400);
 if ($rangeDays < 1) $rangeDays = 1;
 $gridDays = $rangeDays + 1;
+$todayYmd = date('Y-m-d');
+$todayTs = ymd_to_ts($todayYmd);
+$todayOffset = -1;
+if ($todayTs >= $rangeStartTs && $todayTs <= $rangeEndTs) {
+    $todayOffset = (int)floor(($todayTs - $rangeStartTs) / 86400);
+}
 
 // 공정 진행(수량/사진) 맵
 $progressMap = array();
@@ -352,7 +358,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         </div>
 
         <div class="flex items-center gap-2">
-            <button type="button" class="px-4 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-extrabold hover:bg-rose-100" data-modal-open="issueAdd">
+            <button type="button" id="ganttJumpToday" class="px-4 py-2 rounded-2xl border border-blue-200 text-blue-700 bg-blue-50 font-extrabold hover:bg-blue-100">
+                오늘로 이동
+            </button>
+        <button type="button" class="px-4 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-extrabold hover:bg-rose-100" data-modal-open="issueAdd">
                 이슈등록
             </button>
         </div>
@@ -422,9 +431,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                     ?>
                 </div>
                 <div class="gantt-header-row">
-                    <?php foreach ($rangeDates as $d): ?>
-                        <div class="gantt-cell gantt-cell-day"><?php echo h($d); ?></div>
-                    <?php endforeach; ?>
+                    <?php for ($i = 0; $i < count($rangeDates); $i++): ?>
+                        <?php $isTodayCol = ($todayOffset === $i); ?>
+                        <div class="gantt-cell gantt-cell-day <?php echo $isTodayCol ? 'gantt-cell-today' : ''; ?>" data-day-index="<?php echo (int)$i; ?>"><?php echo h($rangeDates[$i]); ?></div>
+                    <?php endfor; ?>
                 </div>
             </div>
         </div>
@@ -432,6 +442,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         <div class="mt-2 space-y-2 gantt-board-readonly"
              data-range-start="<?php echo h(date('Y-m-d', $rangeStartTs)); ?>"
              data-range-days="<?php echo (int)$gridDays; ?>"
+             data-today-offset="<?php echo (int)$todayOffset; ?>"
+             data-today-ymd="<?php echo h($todayYmd); ?>"
              style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
             <?php foreach ($tasks as $t): ?>
                 <?php
@@ -454,7 +466,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                     <div class="gantt-dropzone relative h-11 flex-1 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
                          data-start="<?php echo h($sd); ?>"
                          data-end="<?php echo h($ed); ?>">
-                        <?php if ($widthPct > 0): ?>
+                        <?php if ($todayOffset >= 0): ?>
+                            <div class="gantt-today-marker" style="left: calc(var(--day-width) * <?php echo (int)$todayOffset; ?>);"></div>
+                        <?php endif; ?>
+                         <?php if ($widthPct > 0): ?>
                             <div class="gantt-bar absolute inset-y-0 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-xs flex items-center px-2"
                                  style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%; min-width: 28px;">
                                 <span class="truncate"><?php echo h($t['name']); ?></span>
@@ -541,9 +556,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                                 ?>
                             </div>
                             <div class="gantt-header-row">
-                                <?php foreach ($rangeDates as $d): ?>
-                                    <div class="gantt-cell gantt-cell-day"><?php echo h($d); ?></div>
-                                <?php endforeach; ?>
+                                <?php for ($i = 0; $i < count($rangeDates); $i++): ?>
+                                    <?php $isTodayCol = ($todayOffset === $i); ?>
+                                    <div class="gantt-cell gantt-cell-day <?php echo $isTodayCol ? 'gantt-cell-today' : ''; ?>" data-day-index="<?php echo (int)$i; ?>"><?php echo h($rangeDates[$i]); ?></div>
+                                <?php endfor; ?>
                             </div>
                         </div>
                     </div>
@@ -553,6 +569,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                          data-range-days="<?php echo (int)$gridDays; ?>"
                          data-project-id="<?php echo (int)$pid; ?>"
                          data-csrf="<?php echo h(csrf_token()); ?>"
+                         data-today-offset="<?php echo (int)$todayOffset; ?>"
+                         data-today-ymd="<?php echo h($todayYmd); ?>"
                          style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
                         <?php foreach ($tasks as $t): ?>
                             <?php
@@ -583,7 +601,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                                 <div class="gantt-dropzone relative h-11 flex-1 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
                                      data-start="<?php echo h($sd); ?>"
                                      data-end="<?php echo h($ed); ?>">
-                                    <div class="gantt-bar absolute inset-y-0 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-xs flex items-center px-2"
+                                    <?php if ($todayOffset >= 0): ?>
+                                        <div class="gantt-today-marker" style="left: calc(var(--day-width) * <?php echo (int)$todayOffset; ?>);"></div>
+                                    <?php endif; ?>
+                                     <div class="gantt-bar absolute inset-y-0 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-xs flex items-center px-2"
                                          style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%; min-width: 28px;"
                                          draggable="true">
                                         <span class="truncate"><?php echo h($t['name']); ?></span>
@@ -597,7 +618,13 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                         <?php if ($canEdit): ?>
                             <div class="flex items-center gap-0 gantt-row gantt-new-row" data-task-id="0">
                                 <div class="w-56 shrink-0 text-sm text-gray-500 pr-2">+ 드래그해 공정 추가</div>
-                                <div class="gantt-dropzone relative h-11 flex-1 border border-dashed border-gray-200 rounded-xl bg-white overflow-hidden"></div>
+                                <?php if ($todayOffset >= 0): ?>
+                                    <div class="gantt-dropzone relative h-11 flex-1 border border-dashed border-gray-200 rounded-xl bg-white overflow-hidden">
+                                        <div class="gantt-today-marker" style="left: calc(var(--day-width) * <?php echo (int)$todayOffset; ?>);"></div>
+                                    </div>
+                                <?php else: ?>
+                                    <div class="gantt-dropzone relative h-11 flex-1 border border-dashed border-gray-200 rounded-xl bg-white overflow-hidden"></div>
+                                <?php endif; ?>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -719,6 +746,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
             <div class="p-6 space-y-5">
                 <input type="hidden" id="ganttProgressTaskId" value="">
                 <input type="hidden" id="ganttProgressTaskDateInput" value="">                
+                <input type="hidden" id="ganttProgressInputMode" value="manual">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <div>
                         <label class="text-xs font-bold text-gray-500">전체 수량</label>
@@ -727,11 +755,32 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                     <div>
                         <label class="text-xs font-bold text-gray-500">완료 수량</label>
                         <input id="ganttDoneQty" type="number" min="0" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" placeholder="예: 80">
+                        <div id="ganttDoneQtyHint" class="mt-1 text-xs text-gray-500"></div>
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-500">남은 수량</label>
                         <div class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full bg-gray-50 text-gray-700 font-extrabold" id="ganttRemainQty">0</div>
                     </div>
+                </div>
+
+                <div class="rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 space-y-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <label class="inline-flex items-center gap-2 text-sm text-gray-700 font-bold">
+                            <input type="checkbox" id="ganttAutoDistributionToggle" class="rounded border-gray-300" checked>
+                            자동 분배 제안 사용
+                        </label>
+                        <div class="text-xs text-gray-500">자동 계산은 오늘~미래 날짜만 반영되고, 과거/수동 입력값은 유지됩니다.</div>
+                    </div>
+                    <div id="ganttShiftInfo" class="text-xs text-gray-600">이동 범위: 오늘 ~ 종료일 (과거 데이터 이동 금지)</div>
+                    <?php if ($canEdit): ?>
+                        <div class="flex flex-wrap items-center gap-2">
+                            <button type="button" id="ganttShiftPlus1" class="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-sm font-extrabold">일정 +1일 밀기</button>
+                            <button type="button" id="ganttShiftMinus1" class="px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-sm font-extrabold">일정 -1일 당기기</button>
+                            <input type="number" id="ganttShiftDaysInput" class="px-3 py-2 rounded-xl border border-gray-200 w-24 text-sm" value="1" min="1" step="1">
+                            <button type="button" id="ganttShiftApplyPlus" class="px-3 py-2 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-sm font-extrabold">N일 밀기</button>
+                            <button type="button" id="ganttShiftApplyMinus" class="px-3 py-2 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-sm font-extrabold">N일 당기기</button>
+                        </div>
+                    <?php endif; ?>
                 </div>
 
                 <div>
@@ -770,9 +819,20 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   .gantt-cell-year { background: #eef2ff; font-size: 16px; }
   .gantt-cell-month { background: #f1f5f9; font-size: 15px; }
   .gantt-cell-day { background: #f8fafc; font-size: 14px; }
+  .gantt-cell-today { background: #dbeafe; border: 2px solid #2563eb; color: #1e3a8a; }
   .gantt-header-row:last-child .gantt-cell { border-bottom: none; }
   .gantt-header-row .gantt-cell:last-child { border-right: none; }
   .gantt-dropzone {
+  .gantt-today-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #2563eb;
+    opacity: 0.7;
+    pointer-events: none;
+    z-index: 1;
+  }  
     min-width: calc(var(--day-width) * var(--grid-days));
     background-size: var(--day-width) 100%;
     background-image: repeating-linear-gradient(
@@ -809,6 +869,9 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var csrfToken = board ? board.getAttribute('data-csrf') : null;
   var progressMap = <?php echo json_encode($progressMap, JSON_UNESCAPED_UNICODE); ?>;
   var progressPhotoMap = <?php echo json_encode($progressPhotoMap, JSON_UNESCAPED_UNICODE); ?>;
+  var todayYmd = rangeSource.getAttribute('data-today-ymd') || '';
+  var todayOffset = parseInt(rangeSource.getAttribute('data-today-offset'), 10);
+  if (isNaN(todayOffset)) todayOffset = -1;
 
   function ymdToTs(ymd){
     if (!ymd) return 0;
@@ -825,6 +888,32 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var m = pad2(d.getMonth()+1);
     var day = pad2(d.getDate());
     return y + '-' + m + '-' + day;
+  }
+  function ymdAddDays(ymd, days){
+    var ts = ymdToTs(ymd);
+    if (!ts) return '';
+    return tsToYmd(ts + (days * 86400));
+  }
+
+  function normalizeInt(val){
+    var num = parseFloat(val);
+    if (isNaN(num) || num < 0) return 0;
+    return Math.round(num);
+  }
+
+  function getTaskRowById(taskId){
+    if (!taskId) return null;
+    return document.querySelector('.gantt-row[data-task-id="' + taskId + '"]');
+  }
+
+  function getTaskDateRange(taskId){
+    var row = getTaskRowById(taskId);
+    var zone = row ? row.querySelector('.gantt-dropzone') : null;
+    if (!zone) return { start: '', end: '' };
+    return {
+      start: zone.getAttribute('data-start') || '',
+      end: zone.getAttribute('data-end') || ''
+    };
   }
   var rangeStartTs = ymdToTs(rangeStart);
 
@@ -1072,6 +1161,64 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return sum;
   }
 
+  function getTaskDailyEntries(taskId){
+    var out = [];
+    Object.keys(progressMap || {}).forEach(function(key){
+      if (!Object.prototype.hasOwnProperty.call(progressMap, key)) return;
+      var parts = key.split('|');
+      if (!parts.length || parts[0] !== taskId) return;
+      var date = parts.slice(1).join('|');
+      var entry = progressMap[key] || {};
+      var done = toNumber(entry.done_qty);
+      out.push({ date: date, done: done });
+    });
+    return out.sort(function(a,b){ return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
+  }
+
+  function suggestAutoQty(taskId, taskDate, baseTotal){
+    var range = getTaskDateRange(taskId);
+    if (!range.start || !range.end || !taskDate || !baseTotal || taskDate < todayYmd) return null;
+    var remainingTotal = normalizeInt(baseTotal);
+    var manualMap = {};
+    getTaskDailyEntries(taskId).forEach(function(item){
+      if (item.done === null) return;
+      if (item.date < todayYmd) {
+        remainingTotal -= normalizeInt(item.done);
+      } else {
+        manualMap[item.date] = normalizeInt(item.done);
+      }
+    });
+    if (remainingTotal < 0) remainingTotal = 0;
+
+    var dates = [];
+    var cur = (range.start > todayYmd) ? range.start : todayYmd;
+    while (cur && cur <= range.end) {
+      dates.push(cur);
+      cur = ymdAddDays(cur, 1);
+    }
+    if (!dates.length || dates.indexOf(taskDate) === -1) return null;
+
+    var freeDays = [];
+    var lockedTotal = 0;
+    dates.forEach(function(d){
+      if (Object.prototype.hasOwnProperty.call(manualMap, d)) lockedTotal += manualMap[d];
+      else freeDays.push(d);
+    });
+    var allocatable = remainingTotal - lockedTotal;
+    if (allocatable < 0) allocatable = 0;
+    if (Object.prototype.hasOwnProperty.call(manualMap, taskDate)) return manualMap[taskDate];
+    if (!freeDays.length) return 0;
+    var base = Math.floor(allocatable / freeDays.length);
+    var remain = allocatable - (base * freeDays.length);
+    for (var i = 0; i < freeDays.length; i++) {
+      var d = freeDays[i];
+      var val = base;
+      if (i === freeDays.length - 1) val += remain;
+      if (d === taskDate) return val;
+    }
+    return null;
+  }
+  
   var currentProgressContext = {
     taskId: '',
     taskDate: '',
@@ -1092,14 +1239,35 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
     var totalEl = document.getElementById('ganttTotalQty');
     var doneEl = document.getElementById('ganttDoneQty');
+    var modeEl = document.getElementById('ganttProgressInputMode');
+    var hintEl = document.getElementById('ganttDoneQtyHint');
+    var autoToggleEl = document.getElementById('ganttAutoDistributionToggle');
     var mapKey = taskId + '|' + taskDate;
     var saved = (progressMap && progressMap[mapKey]) ? progressMap[mapKey] : null;
     var baseTotal = getTaskBaseTotal(taskId, totalQty);
     var totalVal = (baseTotal !== null && typeof baseTotal !== 'undefined') ? baseTotal : '';
     var doneVal = '0';
+    var inputMode = 'manual';
+    if (autoToggleEl) {
+      var savedAuto = window.localStorage ? window.localStorage.getItem('cpms:auto:' + taskId) : null;
+      autoToggleEl.checked = (savedAuto !== 'off');
+    }
     if (saved && saved.done_qty !== null && typeof saved.done_qty !== 'undefined' && saved.done_qty !== '') {
       doneVal = saved.done_qty;
+      inputMode = 'manual';
+      if (hintEl) hintEl.textContent = '수동 입력값(자동 덮어쓰기 금지)';
+    } else {
+      var useAuto = autoToggleEl ? !!autoToggleEl.checked : true;
+      var suggested = useAuto ? suggestAutoQty(taskId, taskDate, baseTotal) : null;
+      if (suggested !== null) {
+        doneVal = suggested;
+        inputMode = 'auto';
+        if (hintEl) hintEl.textContent = '자동 제안값(저장 전 수정 가능)';
+      } else if (hintEl) {
+        hintEl.textContent = '';
+      }
     }
+    if (modeEl) modeEl.value = inputMode;    
     if (totalEl) totalEl.value = totalVal;
     if (doneEl) doneEl.value = doneVal;
 
@@ -1107,6 +1275,13 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     currentProgressContext.taskDate = taskDate;
     currentProgressContext.baseTotal = baseTotal;
     currentProgressContext.doneBefore = getDoneBefore(taskId, taskDate);
+    var shiftInfoEl = document.getElementById('ganttShiftInfo');
+    var taskRange = getTaskDateRange(taskId);
+    if (shiftInfoEl) {
+      var shiftStart = (taskRange.start && taskRange.start > todayYmd) ? taskRange.start : todayYmd;
+      var shiftEnd = taskRange.end || '-';
+      shiftInfoEl.textContent = '이동 범위: ' + shiftStart + ' ~ ' + shiftEnd + ' (과거 데이터 이동 금지, 충돌 시 합치기)';
+    }
     updateRemainQty();
 
     var listEl = document.getElementById('ganttPhotoList');
@@ -1228,7 +1403,55 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var totalQtyInput = document.getElementById('ganttTotalQty');
   if (totalQtyInput) totalQtyInput.addEventListener('input', updateRemainQty);
   var doneQtyInput = document.getElementById('ganttDoneQty');
-  if (doneQtyInput) doneQtyInput.addEventListener('input', updateRemainQty);
+  if (doneQtyInput) doneQtyInput.addEventListener('input', function(){
+    var modeEl = document.getElementById('ganttProgressInputMode');
+    var hintEl = document.getElementById('ganttDoneQtyHint');
+    if (modeEl) modeEl.value = 'manual';
+    if (hintEl && doneQtyInput.value !== '') hintEl.textContent = '수동 입력값(자동 덮어쓰기 금지)';
+    updateRemainQty();
+  });
+
+  var autoDistributionToggle = document.getElementById('ganttAutoDistributionToggle');
+  if (autoDistributionToggle) {
+    autoDistributionToggle.addEventListener('change', function(){
+      var taskIdEl = document.getElementById('ganttProgressTaskId');
+      var taskId = taskIdEl ? taskIdEl.value : '';
+      if (taskId && window.localStorage) {
+        window.localStorage.setItem('cpms:auto:' + taskId, autoDistributionToggle.checked ? 'on' : 'off');
+      }
+      openProgress(
+        taskId,
+        document.getElementById('ganttProgressTaskName') ? document.getElementById('ganttProgressTaskName').textContent : '',
+        document.getElementById('ganttProgressTaskDateInput') ? document.getElementById('ganttProgressTaskDateInput').value : '',
+        document.getElementById('ganttTotalQty') ? document.getElementById('ganttTotalQty').value : ''
+      );
+    });
+  }
+
+  function applyScheduleShift(dayDelta){
+    if (!board) return;
+    var taskIdEl = document.getElementById('ganttProgressTaskId');
+    var taskDateEl = document.getElementById('ganttProgressTaskDateInput');
+    var taskId = taskIdEl ? taskIdEl.value : '';
+    var taskDate = taskDateEl ? taskDateEl.value : '';
+    if (!taskId || !taskDate || !dayDelta) return;
+    if (!confirm('선택 공정의 오늘~미래 입력값을 ' + dayDelta + '일 이동합니다. 충돌 날짜는 합산됩니다. 계속할까요?')) return;
+
+    var fd = new FormData();
+    fd.append('_csrf', csrfToken || '');
+    fd.append('project_id', projectId || '0');
+    fd.append('task_id', taskId);
+    fd.append('work_date', taskDate);
+    fd.append('action', 'shift');
+    fd.append('shift_days', String(dayDelta));
+    fd.append('shift_from', todayYmd || taskDate);
+    fetch('?r=construction/schedule_progress_save', {
+      method: 'POST',
+      body: fd,
+      credentials: 'same-origin'
+    }).then(function(){ window.location.reload(); })
+      .catch(function(){ window.location.reload(); });
+  }
 
   var photoInput = document.getElementById('ganttPhotoInput');
   if (photoInput) {
@@ -1251,6 +1474,25 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     });
   }
 
+  var shiftPlusBtn = document.getElementById('ganttShiftPlus1');
+  if (shiftPlusBtn) shiftPlusBtn.addEventListener('click', function(){ applyScheduleShift(1); });
+  var shiftMinusBtn = document.getElementById('ganttShiftMinus1');
+  if (shiftMinusBtn) shiftMinusBtn.addEventListener('click', function(){ applyScheduleShift(-1); });
+  var shiftApplyPlusBtn = document.getElementById('ganttShiftApplyPlus');
+  if (shiftApplyPlusBtn) shiftApplyPlusBtn.addEventListener('click', function(){
+    var daysEl = document.getElementById('ganttShiftDaysInput');
+    var days = daysEl ? parseInt(daysEl.value, 10) : 0;
+    if (!days || days < 1) return;
+    applyScheduleShift(days);
+  });
+  var shiftApplyMinusBtn = document.getElementById('ganttShiftApplyMinus');
+  if (shiftApplyMinusBtn) shiftApplyMinusBtn.addEventListener('click', function(){
+    var daysEl = document.getElementById('ganttShiftDaysInput');
+    var days = daysEl ? parseInt(daysEl.value, 10) : 0;
+    if (!days || days < 1) return;
+    applyScheduleShift(-days);
+  });
+
   var progressSaveBtn = document.getElementById('ganttProgressSave');
   if (progressSaveBtn) {
     progressSaveBtn.addEventListener('click', function(){
@@ -1272,6 +1514,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       fd.append('work_date', taskDate);
       fd.append('total_qty', totalEl ? totalEl.value : '');
       fd.append('done_qty', doneEl ? doneEl.value : '');
+      var modeEl = document.getElementById('ganttProgressInputMode');
+      var autoEl = document.getElementById('ganttAutoDistributionToggle');
+      fd.append('input_mode', modeEl ? modeEl.value : 'manual');
+      fd.append('auto_distribution', autoEl && autoEl.checked ? '1' : '0');
       if (photoInput && photoInput.files && photoInput.files.length > 0) {
         Array.prototype.forEach.call(photoInput.files, function(file){
           fd.append('photos[]', file);
@@ -1284,6 +1530,20 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         credentials: 'same-origin'
       }).then(function(){ window.location.reload(); })
         .catch(function(){ window.location.reload(); });
+    });
+  }
+
+  var jumpTodayBtn = document.getElementById('ganttJumpToday');
+  if (jumpTodayBtn) {
+    jumpTodayBtn.addEventListener('click', function(){
+      if (!todayYmd) return;
+      var month = todayYmd.slice(0, 7);
+      var params = new URLSearchParams(window.location.search);
+      params.set('r', '공사');
+      if (projectId) params.set('pid', projectId);
+      params.set('tab', 'gantt');
+      params.set('month', month);
+      window.location.search = params.toString();
     });
   }
 
