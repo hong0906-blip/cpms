@@ -72,6 +72,7 @@ $timesheetWorkers = isset($timesheetWorkers) && is_array($timesheetWorkers) ? $t
 $attendanceGongsuMap = isset($attendanceGongsuMap) && is_array($attendanceGongsuMap) ? $attendanceGongsuMap : array();
 $attendanceGongsuUnit = isset($attendanceGongsuUnit) && is_array($attendanceGongsuUnit) ? $attendanceGongsuUnit : array();
 $attendanceOutputDays = isset($attendanceOutputDays) && is_array($attendanceOutputDays) ? $attendanceOutputDays : array();
+$showBankColumns = isset($showBankColumns) ? (bool)$showBankColumns : true;
 ?>
 
 <div class="overflow-x-auto">
@@ -109,9 +110,11 @@ $attendanceOutputDays = isset($attendanceOutputDays) && is_array($attendanceOutp
             <th class="border border-gray-200 px-2 py-2" rowspan="2">출력일수 합계</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">임금단가</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">지급총액</th>
+            <?php if ($showBankColumns): ?>            
             <th class="border border-gray-200 px-2 py-2" rowspan="2">영수인/예금주</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">은행명</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">계좌번호</th>
+            <?php endif; ?>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">인력사업체명</th>
         </tr>
         <tr class="bg-gray-200 text-gray-800">
@@ -157,9 +160,11 @@ $attendanceOutputDays = isset($attendanceOutputDays) && is_array($attendanceOutp
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h($outputDays > 0 ? (string)$outputDays : '0'); ?></td>
                     <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h($wageRateRaw !== '' ? $wageRateRaw : '0'); ?></td>
                     <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h($totalPay > 0 ? cpms_format_money_value($totalPay) : '0'); ?></td>
+                    <?php if ($showBankColumns): ?>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['account_holder']) ? $worker['account_holder'] : ''); ?></td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['bank_name']) ? $worker['bank_name'] : ''); ?></td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['bank_account']) ? $worker['bank_account'] : ''); ?></td>
+                    <?php endif; ?>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['company_name']) ? $worker['company_name'] : ''); ?></td>
                 </tr>
             <?php endforeach; ?>
@@ -176,9 +181,11 @@ $attendanceOutputDays = isset($attendanceOutputDays) && is_array($attendanceOutp
                     <td class="border border-gray-200 px-2 py-2 text-center">0</td>
                     <td class="border border-gray-200 px-2 py-2 text-right">0</td>
                     <td class="border border-gray-200 px-2 py-2 text-right">0</td>
+                    <?php if ($showBankColumns): ?>
                     <td class="border border-gray-200 px-2 py-2"></td>
                     <td class="border border-gray-200 px-2 py-2"></td>
                     <td class="border border-gray-200 px-2 py-2"></td>
+                    <?php endif; ?>
                     <td class="border border-gray-200 px-2 py-2"></td>
                 </tr>
             <?php endfor; ?>

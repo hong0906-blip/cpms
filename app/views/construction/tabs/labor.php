@@ -215,6 +215,7 @@ foreach ($timesheetWorkers as $worker) {
     $attendanceGongsuUnit = $attendanceGongsuUnit;
     $attendanceOutputDays = $attendanceOutputDays;
     require __DIR__ . '/partials/labor_sheet_table.php';
+    $showBankColumns = false;    
     ?>
 <?php else: ?>
     <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
@@ -426,61 +427,30 @@ foreach ($timesheetWorkers as $worker) {
         return String(n.toFixed(2)).replace(/0+$/,'').replace(/\.$/,'');
     }
 
-    function submitDirect(cell, ctx, input){
-        var fd = new FormData();
-        fd.append('_csrf', csrf);
-        fd.append('project_id', ctx.projectId);
-        fd.append('month', ctx.month);
-        fd.append('worker_name', ctx.workerName);
-        fd.append('date', ctx.date);
-        fd.append('old_value', ctx.oldValue);
-        fd.append('new_value', ctx.newValue);
-        fetch('<?php echo h(base_url()); ?>/?r=construction/labor_cell_save', { method:'POST', body:fd })
-            .then(function(r){ return r.json(); })
-            .then(function(res){
-                if (!res || !res.ok) throw new Error(res && res.message ? res.message : '저장 실패');
-                cell.textContent = formatValue(res.value);
-                cell.setAttribute('data-old-value', cell.textContent);
-            })
-            .catch(function(e){ alert(e.message || '저장 실패'); cell.textContent = ctx.oldValue; })
-            .finally(function(){ input.remove(); cell.style.display='inline-flex'; });
-    }
-
-    function openRequestModal(cell, ctx, input){
-        requestCtx = { cell:cell, ctx:ctx, input:input };
+    function openRequestModal(cell, ctx){
+        requestCtx = { cell:cell, ctx:ctx };
         document.getElementById('gongsuWorkerName').textContent = ctx.workerName;
         document.getElementById('gongsuWorkerDate').textContent = ctx.date;
-        document.getElementById('gongsuCurrentValue').textContent = ctx.oldValue;
-        document.getElementById('gongsuRequestedValue').value = ctx.newValue;
+        document.getElementById('gongsuCurrentValue').textContent = formatValue(ctx.oldValue);
+        document.getElementById('gongsuRequestedValue').value = formatValue(ctx.oldValue);
         document.getElementById('gongsuRequestReason').value = '';
+        document.getElementById('gongsuTargetExecutive').value = '';
         openModal();
     }
 
     document.querySelectorAll('.cpms-gongsu-cell').forEach(function(cell){
         cell.addEventListener('click', function(){
-            if (cell.getAttribute('data-editing') === '1') return;
-            cell.setAttribute('data-editing', '1');
-            var oldValue = cell.getAttribute('data-old-value') || '';
-            var input = document.createElement('input');
-            input.type = 'text';
-            input.value = oldValue;
-            input.className = 'w-14 text-center border border-yellow-300 rounded';
-            cell.style.display = 'none';
-            cell.parentNode.appendChild(input);
-            input.focus();
-
-            function finish(){
-                var val = input.value.replace(/\s+/g,'');
-                if (val === oldValue || val === '') { input.remove(); cell.style.display='inline-flex'; cell.setAttribute('data-editing','0'); return; }
-                if (!/^\d+(\.\d+)?$/.test(val)) { alert('숫자 형식만 입력하세요.'); input.focus(); return; }
-                var n = parseFloat(val);
-                var ctx = { projectId:cell.getAttribute('data-project-id'), month:cell.getAttribute('data-month'), workerName:cell.getAttribute('data-worker-name'), date:cell.getAttribute('data-date'), oldValue:oldValue, newValue:n };
-                if (n <= 1.4) submitDirect(cell, ctx, input);
-                else openRequestModal(cell, ctx, input);
-                cell.setAttribute('data-editing','0');
-            }
-            input.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); finish(); } if(e.key==='Escape'){ input.remove(); cell.style.display='inline-flex'; cell.setAttribute('data-editing','0'); } });
-            input.addEventListener('blur', finish);
+            var oldValueRaw = (cell.getAttribute('data-old-value') || '').replace(/\s+/g,'');
+            var oldValue = oldValueRaw === '' ? 0 : parseFloat(oldValueRaw);
+            if (isNaN(oldValue)) oldValue = 0;
+            var ctx = {
+                projectId:cell.getAttribute('data-project-id'),
+                month:cell.getAttribute('data-month'),
+                workerName:cell.getAttribute('data-worker-name'),
+                date:cell.getAttribute('data-date'),
+                oldValue:oldValue
+            };
+            openRequestModal(cell, ctx);
         });
     });
 
@@ -490,9 +460,11 @@ foreach ($timesheetWorkers as $worker) {
            if (!requestCtx) return;
             var targetUserId = document.getElementById('gongsuTargetExecutive').value;
             var reason = document.getElementById('gongsuRequestReason').value.trim();
-            var requestedVal = document.getElementById('gongsuRequestedValue').value;
+            var requestedVal = document.getElementById('gongsuRequestedValue').value.replace(/\s+/g, '');
             if (!targetUserId) { alert('임원을 선택하세요.'); return; }
             if (!reason) { alert('요청 사유를 입력하세요.'); return; }
+            if (!/^\d+(\.\d+)?$/.test(requestedVal)) { alert('요청 공수는 숫자 형식으로 입력하세요.'); return; }
+            if (parseFloat(requestedVal) < 1.5) { alert('요청 공수는 1.5 이상만 가능합니다.'); return; }
             var payload = {
                 project_id: parseInt(requestCtx.ctx.projectId,10),
                 month: requestCtx.ctx.month,
@@ -513,9 +485,6 @@ foreach ($timesheetWorkers as $worker) {
                 .then(function(r){ return r.json(); })
                 .then(function(res){
                     if (!res || !res.ok) throw new Error(res && res.message ? res.message : '요청 생성 실패');
-                    requestCtx.cell.textContent = requestCtx.ctx.oldValue;
-                    requestCtx.input.remove();
-                    requestCtx.cell.style.display = 'inline-flex';
                     alert('수정요청이 생성되었습니다.');
                     closeModal();
                 })
