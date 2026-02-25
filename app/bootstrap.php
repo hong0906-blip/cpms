@@ -41,6 +41,10 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
+
+// ===== 공통 헬퍼 =====
+require_once __DIR__ . '/helpers.php';
+
 // ===== 간단 유틸 =====
 if (!function_exists('h')) {
     function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
