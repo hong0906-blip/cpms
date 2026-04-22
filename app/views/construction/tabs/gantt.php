@@ -967,55 +967,51 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   }
 
   if (board) {
+    // 드래그 드롭 공정 추가 수정: 수정 탭(보드) 패널 범위에서만 이벤트를 바인딩한다.
+    var boardPanel = board.closest('.gantt-tab-panel[data-tab-panel="board"]');
     var dragName = '';
     var dragEl = null;
-
-    // [공정표 수정 > 드래그&드롭] "오늘로 이동" 후에도 동작하도록 위임 방식으로 바인딩 유지
-    board.addEventListener('dragstart', function(e){
-      var draggable = e.target && e.target.closest ? e.target.closest('.gantt-draggable') : null;
-      if (!draggable || !board.contains(draggable)) return;
-      dragName = draggable.getAttribute('data-task-name') || draggable.textContent.trim();
-      dragEl = draggable;
-      if (e.dataTransfer) {
-        e.dataTransfer.effectAllowed = 'copy';
-        e.dataTransfer.setData('text/plain', dragName);
-      }
+    var draggableEls = boardPanel ? boardPanel.querySelectorAll('.gantt-draggable') : [];
+    draggableEls.forEach(function(el){
+      el.addEventListener('dragstart', function(e){
+        dragName = el.getAttribute('data-task-name') || el.textContent.trim();
+        dragEl = el;
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'copy';
+          e.dataTransfer.setData('text/plain', dragName);
+        }
+      });
     });
 
-    board.addEventListener('dragend', function(e){
-      var draggable = e.target && e.target.closest ? e.target.closest('.gantt-draggable') : null;
-      if (!draggable || !board.contains(draggable)) return;
-      dragName = '';
-      dragEl = null;
-    });
-
-    board.addEventListener('dragover', function(e){
-      var zone = e.target && e.target.closest ? e.target.closest('.gantt-dropzone') : null;
-      if (!zone || !board.contains(zone)) return;
-      e.preventDefault();
-    });
-
-    board.addEventListener('drop', function(e){
-      var zone = e.target && e.target.closest ? e.target.closest('.gantt-dropzone') : null;
-      if (!zone || !board.contains(zone)) return;
-      e.preventDefault();
-      var droppedName = '';
-      if (e.dataTransfer) {
-        droppedName = e.dataTransfer.getData('text/plain') || '';
-      }
-      if (!droppedName) droppedName = dragName || '';
-      if (!droppedName) return;
-      var zoneRect = zone.getBoundingClientRect();
-      var offsetX = e.clientX - zoneRect.left;
-      var leftDays = dayFromOffset(offsetX, zoneRect.width);
-      var startTs = rangeStartTs + (leftDays * 86400);
-      var endTs = startTs + (3 * 86400);
-      saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0);
-      if (dragEl && dragEl.parentNode) {
-        dragEl.parentNode.removeChild(dragEl);
-      }
-      dragName = '';
-      dragEl = null;
+    var dropZones = boardPanel ? boardPanel.querySelectorAll('.gantt-dropzone') : [];
+    dropZones.forEach(function(zone){
+      // 드래그 드롭 공정 추가 수정: 일부 브라우저에서 drop 가능 상태를 보장.
+      zone.addEventListener('dragenter', function(e){ e.preventDefault(); });
+      zone.addEventListener('dragover', function(e){ e.preventDefault(); });
+      zone.addEventListener('drop', function(e){
+        e.preventDefault();
+        // 드래그 드롭 공정 추가 수정: dataTransfer 미지원/제한 환경까지 fallback 처리.
+        var droppedName = '';
+        if (e.dataTransfer) {
+          droppedName = e.dataTransfer.getData('text/plain') || '';
+        }
+        if (!droppedName) droppedName = dragName || '';
+        if (!droppedName && dragEl) {
+          droppedName = dragEl.getAttribute('data-task-name') || dragEl.textContent.trim() || '';
+        }
+        if (!droppedName) return;
+        var zoneRect = zone.getBoundingClientRect();
+        var offsetX = e.clientX - zoneRect.left;
+        var leftDays = dayFromOffset(offsetX, zoneRect.width);
+        var startTs = rangeStartTs + (leftDays * 86400);
+        var endTs = startTs + (3 * 86400);
+        saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0);
+        if (dragEl && dragEl.parentNode) {
+          dragEl.parentNode.removeChild(dragEl);
+        }
+        dragName = '';
+        dragEl = null;
+      });
     });
   }
 
