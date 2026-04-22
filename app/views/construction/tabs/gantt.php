@@ -400,7 +400,6 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
             <div class="gantt-header"
                  style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
-                <div class="gantt-header-spacer gantt-left-col shrink-0"></div>
                 <div class="gantt-header-rows">
                 <div class="gantt-header-row">
                     <?php
@@ -464,9 +463,6 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                      data-task-id="<?php echo (int)$t['id']; ?>"                
                      data-task-name="<?php echo h($t['name']); ?>"
                      data-task-total-qty="<?php echo h($taskQty); ?>">
-                    <div class="gantt-left-col shrink-0 text-sm font-semibold text-gray-800 truncate">
-                        <span class="truncate"><?php echo h($t['name']); ?></span>
-                    </div>
                     <div class="gantt-dropzone gantt-dropzone-readonly relative h-11 shrink-0 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
                          data-start="<?php echo h($sd); ?>"
                          data-end="<?php echo h($ed); ?>">
@@ -858,6 +854,17 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   .gantt-bar { cursor: grab; }
   .gantt-bar.dragging { opacity: 0.7; cursor: grabbing; }
   .gantt-board-readonly .gantt-bar { cursor: default; }
+  /* 공정표(보기) 좌측 영역 제거 */
+  [data-tab-panel="overview"] .gantt-header { display: block; width: 100%; }
+  [data-tab-panel="overview"] .gantt-header-rows {
+    width: 100%;
+    min-width: calc(var(--day-width) * var(--grid-days));
+  }
+  [data-tab-panel="overview"] .gantt-row { display: block; }
+  [data-tab-panel="overview"] .gantt-dropzone-readonly {
+    width: 100%;
+    min-width: calc(var(--day-width) * var(--grid-days));
+  }
   /* 공정표(보기) 날짜/그리드 정렬 수정 */
   .gantt-dropzone-readonly {
     flex: 0 0 auto;
