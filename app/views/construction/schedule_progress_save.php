@@ -102,7 +102,40 @@ try {
     }
 
     $pdo->beginTransaction();
-    
+
+    /* 완료수량→진행률 반영: 완료수량 저장/이동 이후 task 진행률을 자동 계산해 cpms_schedule_tasks.progress 갱신 */
+    $recalculateTaskProgress = function($pdoConn, $projectIdVal, $taskIdVal) {
+        $stCalc = $pdoConn->prepare("
+            SELECT
+                MAX(CASE WHEN total_qty IS NOT NULL THEN total_qty END) AS total_qty_ref,
+                COALESCE(SUM(COALESCE(done_qty, 0)), 0) AS done_qty_sum
+            FROM cpms_schedule_progress
+            WHERE project_id = :pid AND task_id = :tid
+        ");
+        $stCalc->bindValue(':pid', (int)$projectIdVal, \PDO::PARAM_INT);
+        $stCalc->bindValue(':tid', (int)$taskIdVal, \PDO::PARAM_INT);
+        $stCalc->execute();
+        $calcRow = $stCalc->fetch();
+        if (!is_array($calcRow)) return;
+
+        $totalQtyRef = isset($calcRow['total_qty_ref']) ? (float)$calcRow['total_qty_ref'] : 0;
+        $doneQtySum = isset($calcRow['done_qty_sum']) ? (float)$calcRow['done_qty_sum'] : 0;
+        if ($totalQtyRef <= 0) return; // 전체수량 정보가 없으면 기존 progress 유지
+
+        $pct = 0;
+        if ($doneQtySum > 0) {
+            $pct = (int)round(min(100, ($doneQtySum / $totalQtyRef) * 100));
+        }
+        if ($pct < 0) $pct = 0;
+        if ($pct > 100) $pct = 100;
+
+        $stUpd = $pdoConn->prepare("UPDATE cpms_schedule_tasks SET progress = :pct WHERE id = :tid AND project_id = :pid");
+        $stUpd->bindValue(':pct', $pct, \PDO::PARAM_INT);
+        $stUpd->bindValue(':tid', (int)$taskIdVal, \PDO::PARAM_INT);
+        $stUpd->bindValue(':pid', (int)$projectIdVal, \PDO::PARAM_INT);
+        $stUpd->execute();
+    };
+
     if ($action === 'shift') {
         if ($shiftDays === 0) {
             throw new Exception('이동 일수는 0일이 될 수 없습니다.');
@@ -228,6 +261,7 @@ try {
         $upTask->bindValue(':pid', $projectId, \PDO::PARAM_INT);
         $upTask->execute();
 
+        $recalculateTaskProgress($pdo, $projectId, $taskId);        
         $pdo->commit();
         flash_set('success', '일정 이동이 적용되었습니다. (오늘~미래 수동 입력값 이동, 충돌 시 합치기)');
         header('Location: ?r=공사&pid=' . $projectId . '&tab=gantt' . $redirectSuffix);
@@ -305,6 +339,7 @@ try {
         }
     }
 
+    $recalculateTaskProgress($pdo, $projectId, $taskId);    
     $pdo->commit();
     flash_set('success', '공정 진행 정보가 저장되었습니다.');
 } catch (Exception $e) {

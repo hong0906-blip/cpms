@@ -480,7 +480,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
             <?php endforeach; ?>
         </div>
 
-            <div class="text-xs text-gray-500 mt-3">공정표 수정 탭에서 파란색 공정 바를 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
+              <div class="text-xs text-gray-500 mt-3">공정표(보기) 탭에서 파란색 공정 바를 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
         </div>
     </div>
 
@@ -647,8 +647,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                 <th class="py-2 pr-2">공정</th>
                 <th class="py-2 pr-2">시작</th>
                 <th class="py-2 pr-2">종료</th>
-                <th class="py-2 pr-2">진행률</th>
-                <th class="py-2 pr-2">일정</th>
+                <th class="py-2 pr-2">진행률</th> <!-- 현재진행률 일정컬럼 삭제 -->
                 <?php if ($canEdit): ?><th class="py-2">작업</th><?php endif; ?>
             </tr>
             </thead>
@@ -661,8 +660,6 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                 $edTs = ymd_to_ts($ed);
                 if ($sdTs > 0 && $edTs > 0 && $edTs < $sdTs) { $tmp = $sdTs; $sdTs = $edTs; $edTs = $tmp; }
                 if (!task_overlaps_range($sdTs, $edTs, $rangeStartTs, $rangeEndTs)) continue;
-                // bar 계산(기간 없으면 0)
-                list($leftPct, $widthPct) = gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays);
                 $pr = isset($t['progress']) ? (int)$t['progress'] : 0;
                 if ($pr < 0) $pr = 0; if ($pr > 100) $pr = 100;
                 ?>
@@ -682,14 +679,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                             <td class="py-2 pr-2">
                                 <input type="number" name="progress" min="0" max="100" value="<?php echo (int)$pr; ?>" class="w-24 px-3 py-2 rounded-2xl border border-gray-200">%
                             </td>
-                            <td class="py-2 pr-2">
-                                <div class="h-4 rounded-full bg-gray-100 overflow-hidden relative" style="min-width:260px">
-                                    <?php if ($widthPct > 0): ?>
-                                        <div class="absolute top-0 bottom-0 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500" style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%;"></div>
-                                        <div class="absolute top-0 bottom-0 rounded-full bg-black/20" style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct * ($pr/100.0); ?>%;"></div>
-                                    <?php endif; ?>
-                                </div>
-                            </td>
+                            <!-- 현재진행률 일정컬럼 삭제 -->
                             <td class="py-2">
                                 <div class="flex items-center gap-2">
                                     <button type="submit" class="px-3 py-2 rounded-2xl bg-gray-900 text-white text-xs font-extrabold">저장</button>
@@ -707,15 +697,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                         <td class="py-2 pr-2 font-extrabold text-gray-900"><?php echo h($t['name']); ?></td>
                         <td class="py-2 pr-2 text-gray-700"><?php echo h($sd); ?></td>
                         <td class="py-2 pr-2 text-gray-700"><?php echo h($ed); ?></td>
-                        <td class="py-2 pr-2 text-gray-700"><?php echo (int)$pr; ?>%</td>
-                        <td class="py-2 pr-2">
-                            <div class="h-4 rounded-full bg-gray-100 overflow-hidden relative" style="min-width:260px">
-                                <?php if ($widthPct > 0): ?>
-                                    <div class="absolute top-0 bottom-0 rounded-full bg-gradient-to-r from-blue-600 to-cyan-500" style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%;"></div>
-                                    <div class="absolute top-0 bottom-0 rounded-full bg-black/20" style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct * ($pr/100.0); ?>%;"></div>
-                                <?php endif; ?>
-                            </div>
-                        </td>
+                        <td class="py-2 pr-2 text-gray-700"><?php echo (int)$pr; ?>%</td> <!-- 현재진행률 일정컬럼 삭제 -->
                     <?php endif; ?>
                 </tr>
             <?php endforeach; ?>
@@ -903,7 +885,13 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return params.get('month') || '<?php echo h($viewMonth); ?>' || '';
   }
 
-  /* 공정 추가 후 수정탭 유지: 수정 모드/월 파라미터를 유지해서 동일 상태로 새로고침 */
+  function getActiveTab(){
+    var activePanel = document.querySelector('.gantt-tab-panel:not(.hidden)');
+    if (!activePanel) return (initialMode === 'edit') ? 'board' : 'overview';
+    return activePanel.getAttribute('data-tab-panel') || 'overview';
+  }
+
+  /* 저장 후 탭 유지: 현재 활성 탭/월 파라미터를 유지해서 동일 상태로 새로고침 */
   function reloadWithState(mode){
     var params = new URLSearchParams(window.location.search);
     params.set('r', '공사');
@@ -911,7 +899,9 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     params.set('tab', 'gantt');
     var month = getCurrentMonthParam();
     if (month) params.set('month', month);
-    if (mode === 'edit') params.set('mode', 'edit');
+    var activeTab = getActiveTab();
+    var keepEditMode = (mode === 'edit') || (mode !== 'overview' && activeTab === 'board');
+    if (keepEditMode) params.set('mode', 'edit');
     else params.delete('mode');
     window.location.search = params.toString();
   }
@@ -1107,7 +1097,9 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var durDays = Math.max(1, Math.round(widthPct * gridDays));
       var startTs = rangeStartTs + (leftDays * 86400);
       var endTs = startTs + ((durDays - 1) * 86400);
-      saveTask(taskId, taskName, tsToYmd(startTs), tsToYmd(endTs), progress);
+      if (moved) {
+        saveTask(taskId, taskName, tsToYmd(startTs), tsToYmd(endTs), progress);
+      } // 수정탭 모달 비활성 + 단순 클릭시 저장 호출 방지
       dragging = false;
       resizing = null;
       bar.classList.remove('dragging');
@@ -1140,15 +1132,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         document.addEventListener('mouseup', onMouseUp);
       });
     });
-    bar.addEventListener('click', function(e){
-      if (dragging || resizing || moved) return;
-      var zoneRect = zone.getBoundingClientRect();
-      var offsetX = e.clientX - zoneRect.left;
-      var leftDays = dayFromOffset(offsetX, zoneRect.width);
-      var dateTs = rangeStartTs + (leftDays * 86400);
-      var taskId = row ? row.getAttribute('data-task-id') : '';
-      openProgress(taskId, taskName, tsToYmd(dateTs), getRowTotalQty(row));
-    });    
+    // 수정탭 모달 비활성: 공정표 수정 탭(.gantt-board)에서는 진행 입력 모달을 열지 않음
     });
   }
 
@@ -1513,8 +1497,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       method: 'POST',
       body: fd,
       credentials: 'same-origin'
-    }).then(function(){ reloadWithState('edit'); })
-      .catch(function(){ reloadWithState('edit'); });
+    }).then(function(){ reloadWithState(); }) // 저장 후 탭 유지
+      .catch(function(){ reloadWithState(); });
   }
 
   var photoInput = document.getElementById('ganttPhotoInput');
@@ -1592,8 +1576,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         method: 'POST',
         body: fd,
         credentials: 'same-origin'
-      }).then(function(){ reloadWithState('edit'); })
-        .catch(function(){ reloadWithState('edit'); });
+      }).then(function(){ reloadWithState(); }) // 저장 후 탭 유지
+        .catch(function(){ reloadWithState(); });
     });
   }
 
