@@ -521,9 +521,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                         </select>
                     </div>
 
+                    <!-- 간트 날짜/그리드 정렬 수정 -->                    
                     <div class="gantt-header"
+                         style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">                    
                         <div class="gantt-header-spacer gantt-left-col shrink-0"></div>
-                        <div class="gantt-header-spacer w-56 shrink-0"></div>
                         <div class="gantt-header-rows">
                             <div class="gantt-header-row">
                                 <?php
@@ -806,7 +807,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 </div>
 
 <style>
-  /* 공정표 정렬 수정: 헤더/바디 좌측 라벨 폭을 동일 기준으로 통일 */
+  /* 간트 날짜/그리드 정렬 수정: 헤더/바디 좌측 라벨 폭을 동일 기준으로 통일 */
   .gantt-left-col { width: calc(14rem + 0.5rem); padding-right: 0.5rem; box-sizing: border-box; }  
   .gantt-header { display: flex; align-items: stretch; width: auto; }
   .gantt-header-spacer { flex: 0 0 auto; }
@@ -831,6 +832,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   .gantt-dropzone {
     min-width: calc(var(--day-width) * var(--grid-days));
     background-size: var(--day-width) 100%;
+    background-origin: border-box; /* 간트 날짜/그리드 정렬 수정 */    
     background-image: repeating-linear-gradient(
       to right,
       rgba(148,163,184,0.35) 0,
