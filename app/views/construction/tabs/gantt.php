@@ -383,23 +383,25 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
         <!-- 공정표 보기 -->
     <div class="mt-6 overflow-x-auto gantt-tab-panel" data-tab-panel="overview">
-        <div class="flex items-center justify-between mb-2">
-            <div class="text-xs text-gray-500">월 선택</div>
-            <select class="gantt-month-select border border-gray-200 rounded-xl px-3 py-2 text-sm"
-                    data-project-id="<?php echo (int)$pid; ?>"
-                    data-tab="gantt">
-                <?php foreach ($monthOptions as $key => $opt): ?>
-                    <option value="<?php echo h($key); ?>" <?php echo ($key === $viewMonth) ? 'selected' : ''; ?>>
-                        <?php echo h($opt['label']); ?>
-                    </option>
-                <?php endforeach; ?>
-            </select>
-        </div>
+        <!-- 공정표(보기) 날짜/그리드 정렬 수정 -->
+        <div class="min-w-max">
+            <div class="flex items-center justify-between mb-2">
+                <div class="text-xs text-gray-500">월 선택</div>
+                <select class="gantt-month-select border border-gray-200 rounded-xl px-3 py-2 text-sm"
+                        data-project-id="<?php echo (int)$pid; ?>"
+                        data-tab="gantt">
+                    <?php foreach ($monthOptions as $key => $opt): ?>
+                        <option value="<?php echo h($key); ?>" <?php echo ($key === $viewMonth) ? 'selected' : ''; ?>>
+                            <?php echo h($opt['label']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
 
-        <div class="gantt-header"
-             style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
-            <div class="gantt-header-spacer gantt-left-col shrink-0"></div>
-            <div class="gantt-header-rows">
+            <div class="gantt-header"
+                 style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
+                <div class="gantt-header-spacer gantt-left-col shrink-0"></div>
+                <div class="gantt-header-rows">
                 <div class="gantt-header-row">
                     <?php
                     $cur = $rangeYears[0];
@@ -465,7 +467,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                     <div class="gantt-left-col shrink-0 text-sm font-semibold text-gray-800 truncate">
                         <span class="truncate"><?php echo h($t['name']); ?></span>
                     </div>
-                    <div class="gantt-dropzone relative h-11 flex-1 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
+                    <div class="gantt-dropzone gantt-dropzone-readonly relative h-11 shrink-0 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
                          data-start="<?php echo h($sd); ?>"
                          data-end="<?php echo h($ed); ?>">
                         <?php if ($todayOffset >= 0): ?>
@@ -482,7 +484,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
             <?php endforeach; ?>
         </div>
 
-        <div class="text-xs text-gray-500 mt-3">공정표 수정 탭에서 파란색 공정 바를 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
+            <div class="text-xs text-gray-500 mt-3">공정표 수정 탭에서 파란색 공정 바를 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
+        </div>
     </div>
 
     <!-- 드래그형 간트 보드 -->
@@ -855,6 +858,11 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   .gantt-bar { cursor: grab; }
   .gantt-bar.dragging { opacity: 0.7; cursor: grabbing; }
   .gantt-board-readonly .gantt-bar { cursor: default; }
+  /* 공정표(보기) 날짜/그리드 정렬 수정 */
+  .gantt-dropzone-readonly {
+    flex: 0 0 auto;
+    width: calc(var(--day-width) * var(--grid-days));
+  }  
   .gantt-handle {
     position: absolute;
     top: 0;
