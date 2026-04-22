@@ -40,9 +40,19 @@ $name      = isset($_POST['name']) ? trim((string)$_POST['name']) : '';
 $startDate = isset($_POST['start_date']) ? trim((string)$_POST['start_date']) : '';
 $endDate   = isset($_POST['end_date']) ? trim((string)$_POST['end_date']) : '';
 $progress  = isset($_POST['progress']) ? (int)$_POST['progress'] : 0;
+$month     = isset($_POST['month']) ? trim((string)$_POST['month']) : '';
+$mode      = isset($_POST['mode']) ? trim((string)$_POST['mode']) : '';
+$redirectSuffix = '';
+if ($month !== '' && preg_match('/^\d{4}-\d{2}$/', $month)) {
+    $redirectSuffix .= '&month=' . urlencode($month);
+}
+/* 공정 추가 후 수정탭 유지: 저장 후에도 수정 모드(mode=edit)를 유지 */
+if ($mode === 'edit') {
+    $redirectSuffix .= '&mode=edit';
+}
 
 if ($projectId <= 0) { flash_set('error','프로젝트 정보가 올바르지 않습니다.'); header('Location: ?r=공사'); exit; }
-if ($name === '') { flash_set('error','공정명을 입력해주세요.'); header('Location: ?r=공사&pid='.$projectId.'&tab=gantt'); exit; }
+if ($name === '') { flash_set('error','공정명을 입력해주세요.'); header('Location: ?r=공사&pid='.$projectId.'&tab=gantt'.$redirectSuffix); exit; }
 if (mb_strlen($name,'UTF-8') > 255) { $name = mb_substr($name,0,255,'UTF-8'); }
 
 if ($progress < 0) $progress = 0;
@@ -55,14 +65,14 @@ function valid_date($ymd) {
 }
 if (!valid_date($startDate) || !valid_date($endDate)) {
     flash_set('error','날짜 형식이 올바르지 않습니다.');
-    header('Location: ?r=공사&pid='.$projectId.'&tab=gantt');
+    header('Location: ?r=공사&pid='.$projectId.'&tab=gantt'.$redirectSuffix);
     exit;
 }
 
 $pdo = Db::pdo();
 if (!$pdo) {
     flash_set('error','DB 연결 실패');
-    header('Location: ?r=공사&pid='.$projectId.'&tab=gantt');
+    header('Location: ?r=공사&pid='.$projectId.'&tab=gantt'.$redirectSuffix);
     exit;
 }
 
@@ -101,11 +111,11 @@ try {
         flash_set('success','공정이 추가되었습니다.');
     }
 
-    header('Location: ?r=공사&pid='.$projectId.'&tab=gantt');
+    header('Location: ?r=공사&pid='.$projectId.'&tab=gantt'.$redirectSuffix);
     exit;
 
 } catch (Exception $e) {
     flash_set('error','저장 실패: '.$e->getMessage());
-    header('Location: ?r=공사&pid='.$projectId.'&tab=gantt');
+    header('Location: ?r=공사&pid='.$projectId.'&tab=gantt'.$redirectSuffix);
     exit;
 }

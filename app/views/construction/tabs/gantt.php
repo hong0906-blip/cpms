@@ -172,6 +172,8 @@ if ($rangeStartTs === 0 || $rangeEndTs === 0) {
 // 월 단위 보기(기본: 프로젝트 시작월)
 $viewMonth = isset($_GET['month']) ? trim((string)$_GET['month']) : '';
 $viewMonth = preg_match('/^\d{4}-\d{2}$/', $viewMonth) ? $viewMonth : '';
+$viewMode = isset($_GET['mode']) ? trim((string)$_GET['mode']) : '';
+$viewMode = ($viewMode === 'edit') ? 'edit' : 'overview';
 $baseStartTs = $rangeStartTs;
 $baseEndTs = $rangeEndTs;
 if ($viewMonth === '') {
@@ -396,7 +398,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
         <div class="gantt-header"
              style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
-            <div class="gantt-header-spacer w-56 shrink-0"></div>
+            <div class="gantt-header-spacer gantt-left-col shrink-0"></div>
             <div class="gantt-header-rows">
                 <div class="gantt-header-row">
                     <?php
@@ -460,7 +462,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                      data-task-id="<?php echo (int)$t['id']; ?>"                
                      data-task-name="<?php echo h($t['name']); ?>"
                      data-task-total-qty="<?php echo h($taskQty); ?>">
-                    <div class="w-56 shrink-0 text-sm font-semibold text-gray-800 truncate pr-2">
+                    <div class="gantt-left-col shrink-0 text-sm font-semibold text-gray-800 truncate">
                         <span class="truncate"><?php echo h($t['name']); ?></span>
                     </div>
                     <div class="gantt-dropzone relative h-11 flex-1 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
@@ -520,7 +522,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                     </div>
 
                     <div class="gantt-header"
-                         style="--day-width:48px; --grid-days:<?php echo (int)$gridDays; ?>;">
+                        <div class="gantt-header-spacer gantt-left-col shrink-0"></div>
                         <div class="gantt-header-spacer w-56 shrink-0"></div>
                         <div class="gantt-header-rows">
                             <div class="gantt-header-row">
@@ -588,7 +590,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                                  data-task-name="<?php echo h($t['name']); ?>"
                                  data-task-progress="<?php echo (int)$t['progress']; ?>"
                                  data-task-total-qty="<?php echo h($taskQty); ?>">
-                                <div class="w-56 shrink-0 text-sm font-semibold text-gray-800 truncate pr-2 flex items-center gap-2">
+                                <div class="gantt-left-col shrink-0 text-sm font-semibold text-gray-800 truncate flex items-center gap-2">
                                     <span class="truncate"><?php echo h($t['name']); ?></span>
                                     <?php if ($canEdit): ?>
                                         <button type="button"
@@ -617,7 +619,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
                         <?php if ($canEdit): ?>
                             <div class="flex items-center gap-0 gantt-row gantt-new-row" data-task-id="0">
-                                <div class="w-56 shrink-0 text-sm text-gray-500 pr-2">+ 드래그해 공정 추가</div>
+                                <div class="gantt-left-col shrink-0 text-sm text-gray-500">+ 드래그해 공정 추가</div>
                                 <?php if ($todayOffset >= 0): ?>
                                     <div class="gantt-dropzone relative h-11 flex-1 border border-dashed border-gray-200 rounded-xl bg-white overflow-hidden">
                                         <div class="gantt-today-marker" style="left: calc(var(--day-width) * <?php echo (int)$todayOffset; ?>);"></div>
@@ -670,6 +672,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                             <input type="hidden" name="task_id" value="<?php echo (int)$t['id']; ?>">
+                            <input type="hidden" name="month" value="<?php echo h($viewMonth); ?>">
+                            <input type="hidden" name="mode" value="edit">                           
                             <td class="py-2 pr-2">
                                 <input name="name" value="<?php echo h($t['name']); ?>" class="w-64 px-3 py-2 rounded-2xl border border-gray-200">
                             </td>
@@ -802,8 +806,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 </div>
 
 <style>
+  /* 공정표 정렬 수정: 헤더/바디 좌측 라벨 폭을 동일 기준으로 통일 */
+  .gantt-left-col { width: calc(14rem + 0.5rem); padding-right: 0.5rem; box-sizing: border-box; }  
   .gantt-header { display: flex; align-items: stretch; width: auto; }
-  .gantt-header-spacer { flex: 0 0 14rem; }
+  .gantt-header-spacer { flex: 0 0 auto; }
   .gantt-header-rows { width: calc(var(--day-width) * var(--grid-days)); border: 1px solid #e5e7eb; border-radius: 16px; overflow: hidden; }
   .gantt-header-row { display: flex; }
   .gantt-cell {
@@ -823,16 +829,6 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   .gantt-header-row:last-child .gantt-cell { border-bottom: none; }
   .gantt-header-row .gantt-cell:last-child { border-right: none; }
   .gantt-dropzone {
-  .gantt-today-marker {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 2px;
-    background: #2563eb;
-    opacity: 0.7;
-    pointer-events: none;
-    z-index: 1;
-  }  
     min-width: calc(var(--day-width) * var(--grid-days));
     background-size: var(--day-width) 100%;
     background-image: repeating-linear-gradient(
@@ -842,6 +838,17 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       transparent 1px,
       transparent calc(var(--day-width))
     );
+    box-sizing: border-box;
+  }
+  .gantt-today-marker {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #2563eb;
+    opacity: 0.7;
+    pointer-events: none;
+    z-index: 1;    
   }
   .gantt-bar { cursor: grab; }
   .gantt-bar.dragging { opacity: 0.7; cursor: grabbing; }
@@ -871,7 +878,26 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var progressPhotoMap = <?php echo json_encode($progressPhotoMap, JSON_UNESCAPED_UNICODE); ?>;
   var todayYmd = rangeSource.getAttribute('data-today-ymd') || '';
   var todayOffset = parseInt(rangeSource.getAttribute('data-today-offset'), 10);
+  var initialMode = '<?php echo h($viewMode); ?>';
   if (isNaN(todayOffset)) todayOffset = -1;
+
+  function getCurrentMonthParam(){
+    var params = new URLSearchParams(window.location.search);
+    return params.get('month') || '<?php echo h($viewMonth); ?>' || '';
+  }
+
+  /* 공정 추가 후 수정탭 유지: 수정 모드/월 파라미터를 유지해서 동일 상태로 새로고침 */
+  function reloadWithState(mode){
+    var params = new URLSearchParams(window.location.search);
+    params.set('r', '공사');
+    if (projectId) params.set('pid', projectId);
+    params.set('tab', 'gantt');
+    var month = getCurrentMonthParam();
+    if (month) params.set('month', month);
+    if (mode === 'edit') params.set('mode', 'edit');
+    else params.delete('mode');
+    window.location.search = params.toString();
+  }
 
   function ymdToTs(ymd){
     if (!ymd) return 0;
@@ -931,13 +957,15 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     fd.append('start_date', startDate || '');
     fd.append('end_date', endDate || '');
     fd.append('progress', progress || '0');
+    fd.append('month', getCurrentMonthParam());
+    fd.append('mode', 'edit');
 
     fetch('?r=construction/schedule_save', {
       method: 'POST',
       body: fd,
       credentials: 'same-origin'
-    }).then(function(){ window.location.reload(); })
-      .catch(function(){ window.location.reload(); });
+    }).then(function(){ reloadWithState('edit'); })
+      .catch(function(){ reloadWithState('edit'); });
   }
 
   function deleteTask(taskId){
@@ -950,8 +978,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       method: 'POST',
       body: fd,
       credentials: 'same-origin'
-    }).then(function(){ window.location.reload(); })
-      .catch(function(){ window.location.reload(); });
+    }).then(function(){ reloadWithState('edit'); })
+      .catch(function(){ reloadWithState('edit'); });
   }
 
   function dayFromOffset(offsetX, zoneWidth){
@@ -1356,8 +1384,17 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
           panel.classList.add('hidden');
         }
       });
+      var params = new URLSearchParams(window.location.search);
+      if (target === 'board') params.set('mode', 'edit');
+      else params.delete('mode');
+      history.replaceState(null, '', window.location.pathname + '?' + params.toString());      
     });
   });
+
+  if (initialMode === 'edit') {
+    var boardTabBtn = document.querySelector('.gantt-tab[data-tab="board"]');
+    if (boardTabBtn) boardTabBtn.click();
+  }
 
   function openModal(key){
     var modal = document.getElementById('modal-' + key);
@@ -1459,8 +1496,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       method: 'POST',
       body: fd,
       credentials: 'same-origin'
-    }).then(function(){ window.location.reload(); })
-      .catch(function(){ window.location.reload(); });
+    }).then(function(){ reloadWithState('edit'); })
+      .catch(function(){ reloadWithState('edit'); });
   }
 
   var photoInput = document.getElementById('ganttPhotoInput');
@@ -1538,8 +1575,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         method: 'POST',
         body: fd,
         credentials: 'same-origin'
-      }).then(function(){ window.location.reload(); })
-        .catch(function(){ window.location.reload(); });
+      }).then(function(){ reloadWithState('edit'); })
+        .catch(function(){ reloadWithState('edit'); });
     });
   }
 
@@ -1553,6 +1590,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       if (projectId) params.set('pid', projectId);
       params.set('tab', 'gantt');
       params.set('month', month);
+      params.delete('mode');
       window.location.search = params.toString();
     });
   }
@@ -1569,6 +1607,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       params.set('tab', tab);
       params.set('month', chosen);
       window.location.search = params.toString();
+      if (initialMode === 'edit') params.set('mode', 'edit');
+      else params.delete('mode');      
     });
   });
 })();
