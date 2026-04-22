@@ -969,39 +969,53 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   if (board) {
     var dragName = '';
     var dragEl = null;
-    board.querySelectorAll('.gantt-draggable').forEach(function(el){
-      el.addEventListener('dragstart', function(e){
-        dragName = el.getAttribute('data-task-name') || el.textContent.trim();
-        dragEl = el;
-        if (e.dataTransfer) {
-          e.dataTransfer.effectAllowed = 'copy';
-          e.dataTransfer.setData('text/plain', dragName);
-        }
-      });
+
+    // [공정표 수정 > 드래그&드롭] "오늘로 이동" 후에도 동작하도록 위임 방식으로 바인딩 유지
+    board.addEventListener('dragstart', function(e){
+      var draggable = e.target && e.target.closest ? e.target.closest('.gantt-draggable') : null;
+      if (!draggable || !board.contains(draggable)) return;
+      dragName = draggable.getAttribute('data-task-name') || draggable.textContent.trim();
+      dragEl = draggable;
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData('text/plain', dragName);
+      }
     });
 
-    board.querySelectorAll('.gantt-dropzone').forEach(function(zone){
-      zone.addEventListener('dragover', function(e){ e.preventDefault(); });
-      zone.addEventListener('drop', function(e){
-        e.preventDefault();
-        var droppedName = '';
-        if (e.dataTransfer) {
-          droppedName = e.dataTransfer.getData('text/plain') || '';
-        }
-        if (!droppedName) droppedName = dragName || '';
-        if (!droppedName) return;
-        var zoneRect = zone.getBoundingClientRect();
-        var offsetX = e.clientX - zoneRect.left;
-        var leftDays = dayFromOffset(offsetX, zoneRect.width);
-        var startTs = rangeStartTs + (leftDays * 86400);
-        var endTs = startTs + (3 * 86400);
-        saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0);
-        if (dragEl && dragEl.parentNode) {
-          dragEl.parentNode.removeChild(dragEl);
-        }
-        dragName = '';
-        dragEl = null;
-      });
+    board.addEventListener('dragend', function(e){
+      var draggable = e.target && e.target.closest ? e.target.closest('.gantt-draggable') : null;
+      if (!draggable || !board.contains(draggable)) return;
+      dragName = '';
+      dragEl = null;
+    });
+
+    board.addEventListener('dragover', function(e){
+      var zone = e.target && e.target.closest ? e.target.closest('.gantt-dropzone') : null;
+      if (!zone || !board.contains(zone)) return;
+      e.preventDefault();
+    });
+
+    board.addEventListener('drop', function(e){
+      var zone = e.target && e.target.closest ? e.target.closest('.gantt-dropzone') : null;
+      if (!zone || !board.contains(zone)) return;
+      e.preventDefault();
+      var droppedName = '';
+      if (e.dataTransfer) {
+        droppedName = e.dataTransfer.getData('text/plain') || '';
+      }
+      if (!droppedName) droppedName = dragName || '';
+      if (!droppedName) return;
+      var zoneRect = zone.getBoundingClientRect();
+      var offsetX = e.clientX - zoneRect.left;
+      var leftDays = dayFromOffset(offsetX, zoneRect.width);
+      var startTs = rangeStartTs + (leftDays * 86400);
+      var endTs = startTs + (3 * 86400);
+      saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0);
+      if (dragEl && dragEl.parentNode) {
+        dragEl.parentNode.removeChild(dragEl);
+      }
+      dragName = '';
+      dragEl = null;
     });
   }
 
