@@ -39,8 +39,9 @@ function equipment_parse_use_dates2($text, $ym)
     $result = array();
     $text = str_replace(array("\r\n", "\n", ';', '|'), ',', $text);
     $tokens = explode(',', $text);
-    $monthStart = strtotime($ym . '-01');
-    $monthEnd = strtotime(date('Y-m-t', $monthStart));
+    $range = equipment_month_range2($ym);
+    $rangeStart = strtotime($range['start']);
+    $rangeEnd = strtotime($range['end']);
 
     foreach ($tokens as $tk) {
         $token = trim($tk);
@@ -55,7 +56,7 @@ function equipment_parse_use_dates2($text, $ym)
             if ($s === false || $e === false) continue;
             if ($s > $e) { $tmp = $s; $s = $e; $e = $tmp; }
             for ($t = $s; $t <= $e; $t += 86400) {
-                if ($t < $monthStart || $t > $monthEnd) continue;
+                if ($rangeStart === false || $rangeEnd === false || $t < $rangeStart || $t > $rangeEnd) continue;
                 $result[date('Y-m-d', $t)] = true;
             }
             continue;
@@ -64,26 +65,42 @@ function equipment_parse_use_dates2($text, $ym)
         if (preg_match('/^\d{1,2}$/', $token)) $token = $ym . '-' . sprintf('%02d', (int)$token);
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $token)) {
             $ts = strtotime($token);
-            if ($ts !== false && $ts >= $monthStart && $ts <= $monthEnd) $result[date('Y-m-d', $ts)] = true;
+            if ($ts !== false && $rangeStart !== false && $rangeEnd !== false && $ts >= $rangeStart && $ts <= $rangeEnd) $result[date('Y-m-d', $ts)] = true;
         }
     }
 
     return array_keys($result);
 }
 
+function equipment_month_range2($ym)
+{
+    $prevYm = date('Y-m', strtotime($ym . '-01 -1 month'));
+    return array(
+        'start' => $prevYm . '-25',
+        'end' => $ym . '-24',
+    );
+}
+
+function equipment_is_in_month_range2($date, $ym)
+{
+    $range = equipment_month_range2($ym);
+    $ts = strtotime($date);
+    $startTs = strtotime($range['start']);
+    $endTs = strtotime($range['end']);
+    if ($ts === false || $startTs === false || $endTs === false) return false;
+    return ($ts >= $startTs && $ts <= $endTs);
+}
 
 function equipment_collect_usage_dates2($usageDates, $text, $ym)
 {
     $result = array();
-    $monthStart = strtotime($ym . '-01');
-    $monthEnd = strtotime(date('Y-m-t', $monthStart));
 
     if (is_array($usageDates)) {
         foreach ($usageDates as $d) {
             $date = trim((string)$d);
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) continue;
             $ts = strtotime($date);
-            if ($ts !== false && $ts >= $monthStart && $ts <= $monthEnd) {
+            if ($ts !== false && equipment_is_in_month_range2($date, $ym)) {
                 $result[date('Y-m-d', $ts)] = true;
             }
         }
@@ -118,7 +135,15 @@ try {
         header('Location: ' . $redirect);
         exit;
     }
-
+    foreach ($dates as $d) {
+        if (!equipment_is_in_month_range2($d, $ym)) {
+            $range = equipment_month_range2($ym);
+            flash_set('error', '사용일자는 ' . $range['start'] . ' ~ ' . $range['end'] . ' 범위만 저장할 수 있습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+    }
+    
     $st = $pdo->prepare("INSERT INTO cpms_equipment_usage
         (project_id, equipment_id, use_date, amount, memo, created_at)
         VALUES

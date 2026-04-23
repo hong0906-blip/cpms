@@ -227,13 +227,18 @@ function equipment_money($v)
                         <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고">
                     </div>
 
-                    <!-- 장비 사용일자 달력 선택 -->
-                    <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="equipmentCreateDateInputs" data-chip-target="equipmentCreateDateChips" data-grid-target="equipmentCreateDateGrid">
+                    <!-- 장비 달력(전월/현월 2달력) -->
+                    <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="equipmentCreateDateInputs" data-chip-target="equipmentCreateDateChips" data-prev-grid-target="equipmentCreateCalPrev" data-curr-grid-target="equipmentCreateCalCurr">
                         <div class="flex items-center justify-between gap-2 mb-2">
-                            <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($ym); ?>, 복수 선택)</label>
+                            <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($prevYm); ?> 25일~<?php echo h($ym); ?> 24일, 복수 선택)</label>
                             <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-toggle-calendar>날짜 선택</button>
                         </div>
-                        <div id="equipmentCreateDateGrid" class="hidden border border-gray-200 rounded-lg p-2 bg-gray-50"></div>
+                        <div class="hidden border border-gray-200 rounded-lg p-2 bg-gray-50" data-calendar-box>
+                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                                <div id="equipmentCreateCalPrev"></div>
+                                <div id="equipmentCreateCalCurr"></div>
+                            </div>
+                        </div>
                         <div id="equipmentCreateDateChips" class="mt-2 flex flex-wrap gap-2"></div>
                         <div id="equipmentCreateDateInputs"></div>
                     </div>
@@ -273,13 +278,18 @@ function equipment_money($v)
                                             <input type="hidden" name="equip_tab" value="input">
                                             <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
 
-                                            <!-- 장비 사용일자 달력 선택 -->
-                                            <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-grid-target="usageDateGrid_<?php echo (int)$it['id']; ?>">
+                                            <!-- 장비 달력(전월/현월 2달력) -->
+                                            <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-prev-grid-target="usageDatePrev_<?php echo (int)$it['id']; ?>" data-curr-grid-target="usageDateCurr_<?php echo (int)$it['id']; ?>">
                                                 <div class="flex items-center justify-between">
-                                                    <div class="text-xs text-gray-700 font-bold">날짜(<?php echo h($ym); ?>)</div>
+                                                    <div class="text-xs text-gray-700 font-bold">날짜(<?php echo h($prevYm); ?> 25일~<?php echo h($ym); ?> 24일)</div>
                                                     <button type="button" class="px-2 py-1 rounded border text-xs" data-toggle-calendar>날짜 선택</button>
                                                 </div>
-                                                <div id="usageDateGrid_<?php echo (int)$it['id']; ?>" class="hidden mt-2 border border-gray-200 rounded p-2 bg-gray-50"></div>
+                                                <div class="hidden mt-2 border border-gray-200 rounded p-2 bg-gray-50" data-calendar-box>
+                                                    <div class="grid grid-cols-1 xl:grid-cols-2 gap-2">
+                                                        <div id="usageDatePrev_<?php echo (int)$it['id']; ?>"></div>
+                                                        <div id="usageDateCurr_<?php echo (int)$it['id']; ?>"></div>
+                                                    </div>
+                                                </div>
                                                 <div id="usageDateChips_<?php echo (int)$it['id']; ?>" class="mt-2 flex flex-wrap gap-1"></div>
                                                 <div id="usageDateInputs_<?php echo (int)$it['id']; ?>"></div>
                                             </div>
@@ -298,9 +308,27 @@ function equipment_money($v)
         <script>
         (function(){
             var selectedYm = <?php echo json_encode($ym); ?>;
+            // 장비 달력(전월/현월 2달력)
+            window.cpmsEquipRange = {
+                ym: <?php echo json_encode($ym); ?>,
+                prevYm: <?php echo json_encode($prevYm); ?>,
+                prevLastDay: <?php echo (int)$prevLastDay; ?>,
+                start: <?php echo json_encode($monthlyStart); ?>,
+                end: <?php echo json_encode($monthlyEnd); ?>
+            };
+            var rangeInfo = window.cpmsEquipRange || {};
             var vendorPresets = <?php echo json_encode($vendorPresets); ?>;
 
             function pad2(v){ return (v < 10 ? '0' : '') + v; }
+            function ymdToTs(dateText){
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText || '')) return null;
+                return new Date(dateText + 'T00:00:00').getTime();
+            }
+            function classToggle(baseClass, enabled, selected){
+                if (!enabled) return baseClass + ' bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed';
+                if (selected) return baseClass + ' bg-blue-600 text-white border-blue-600';
+                return baseClass + ' bg-white text-gray-700 border-gray-300 hover:bg-blue-50';
+            }
 
             // 업체명 프리셋 자동채움
             var presetSelect = document.getElementById('vendorPresetSelect');
@@ -327,21 +355,33 @@ function equipment_money($v)
             // 장비 사용일자 달력 선택
             function initCalendar(wrapper){
                 var ym = wrapper.getAttribute('data-ym') || selectedYm;
-                var gridId = wrapper.getAttribute('data-grid-target');
+                var prevGridId = wrapper.getAttribute('data-prev-grid-target');
+                var currGridId = wrapper.getAttribute('data-curr-grid-target');
                 var chipId = wrapper.getAttribute('data-chip-target');
                 var inputId = wrapper.getAttribute('data-target');
                 var toggleBtn = wrapper.querySelector('[data-toggle-calendar]');
-                var grid = document.getElementById(gridId);
+                var box = wrapper.querySelector('[data-calendar-box]');
+                var prevGrid = document.getElementById(prevGridId);
+                var currGrid = document.getElementById(currGridId);
                 var chips = document.getElementById(chipId);
                 var inputs = document.getElementById(inputId);
                 var selected = {};
 
-                if (!grid || !chips || !inputs) return;
+                if (!box || !prevGrid || !currGrid || !chips || !inputs) return;
 
                 var parts = ym.split('-');
                 var year = parseInt(parts[0], 10);
                 var month = parseInt(parts[1], 10);
-                var lastDay = new Date(year, month, 0).getDate();
+                var prevDate = new Date(year, month - 1, 1);
+                var prevYear = prevDate.getFullYear();
+                var prevMonth = prevDate.getMonth() + 1;
+                var prevYm = prevYear + '-' + pad2(prevMonth);
+                var prevLastDay = new Date(prevYear, prevMonth, 0).getDate();
+                var currLastDay = new Date(year, month, 0).getDate();
+                var startDate = (rangeInfo.start && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.start : (prevYm + '-25');
+                var endDate = (rangeInfo.end && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.end : (ym + '-24');
+                var startTs = ymdToTs(startDate);
+                var endTs = ymdToTs(endDate);
 
                 function renderInputs(){
                     inputs.innerHTML = '';
@@ -383,8 +423,9 @@ function equipment_money($v)
                 }
 
                 function toggleDate(dateStr){
-                    if (dateStr.substring(0, 7) !== ym) {
-                        alert('선택 월(' + ym + ') 날짜만 선택할 수 있습니다.');
+                    var ts = ymdToTs(dateStr);
+                    if (ts === null || (startTs !== null && ts < startTs) || (endTs !== null && ts > endTs)) {
+                        alert('선택 가능 범위(' + startDate + ' ~ ' + endDate + ') 날짜만 선택할 수 있습니다.');
                         return;
                     }
                     if (selected[dateStr]) delete selected[dateStr];
@@ -392,39 +433,73 @@ function equipment_money($v)
                     render();
                 }
 
-                function renderGrid(){
-                    grid.innerHTML = '';
+                function renderMonthCalendar(root, targetYm, dayStart, dayEnd, modeLabel){
+                    root.innerHTML = '';
                     var head = document.createElement('div');
                     head.className = 'text-xs font-bold mb-2 text-gray-700';
-                    head.textContent = ym + ' 날짜 선택';
-                    grid.appendChild(head);
+                    head.textContent = modeLabel + ' (' + targetYm + ')';
+                    root.appendChild(head);
 
-                    var list = document.createElement('div');
-                    list.className = 'grid grid-cols-7 gap-1';
+                    var weekHead = document.createElement('div');
+                    weekHead.className = 'grid grid-cols-7 gap-1 mb-1';
+                    var weekdays = ['일','월','화','수','목','금','토'];
+                    for (var w = 0; w < weekdays.length; w++) {
+                        var wCell = document.createElement('div');
+                        wCell.className = 'text-[11px] text-center text-gray-500 font-bold';
+                        wCell.textContent = weekdays[w];
+                        weekHead.appendChild(wCell);
+                    }
+                    root.appendChild(weekHead);
+
+                    var firstWeekday = new Date(targetYm + '-01T00:00:00').getDay();
+                    var targetParts = targetYm.split('-');
+                    var y = parseInt(targetParts[0], 10);
+                    var m = parseInt(targetParts[1], 10);
+                    var lastDay = new Date(y, m, 0).getDate();
+                    var grid = document.createElement('div');
+                    grid.className = 'grid grid-cols-7 gap-1';
+
+                    for (var e = 0; e < firstWeekday; e++) {
+                        var emptyCell = document.createElement('div');
+                        emptyCell.className = 'h-7';
+                        grid.appendChild(emptyCell);
+                    }
+
                     for (var day=1; day<=lastDay; day++) {
                         (function(d){
-                            var dateStr = ym + '-' + pad2(d);
+                            var dateStr = targetYm + '-' + pad2(d);
+                            var isEnabled = (d >= dayStart && d <= dayEnd);
                             var btn = document.createElement('button');
                             btn.type = 'button';
-                            btn.className = 'px-2 py-1 rounded border text-xs ' + (selected[dateStr] ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300');
+                            btn.className = classToggle('h-7 rounded border text-xs', isEnabled, !!selected[dateStr]);
                             btn.textContent = d;
-                            btn.addEventListener('click', function(){ toggleDate(dateStr); });
-                            list.appendChild(btn);
+                            if (!isEnabled) btn.disabled = true;
+                            btn.setAttribute('data-date', dateStr);
+                            btn.addEventListener('click', function(){
+                                if (!isEnabled) return;
+                                toggleDate(dateStr);
+                            });
+                            grid.appendChild(btn);
                         })(day);
                     }
-                    grid.appendChild(list);
+                    root.appendChild(grid);
+                }
+
+                function renderGrids(){
+                    renderMonthCalendar(prevGrid, prevYm, 25, prevLastDay, '전월');
+                    renderMonthCalendar(currGrid, ym, 1, 24, '현월');
                 }
 
                 function render(){
-                    renderGrid();
+                    renderGrids();
                     renderChips();
                     renderInputs();
                 }
 
                 if (toggleBtn) {
                     toggleBtn.addEventListener('click', function(){
-                        if (grid.className.indexOf('hidden') !== -1) grid.className = grid.className.replace('hidden', '').trim();
-                        else grid.className += ' hidden';
+                        if (box.className.indexOf('hidden') !== -1) box.className = box.className.replace('hidden', '').trim();
+                        else box.className += ' hidden';
                     });
                 }
 
