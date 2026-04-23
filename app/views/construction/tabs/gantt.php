@@ -606,7 +606,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                                         </button>
                                     <?php endif; ?>
                                 </div>
-                                <div class="gantt-dropzone relative h-11 flex-1 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
+                                <div class="gantt-dropzone relative h-11 shrink-0 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
                                      data-start="<?php echo h($sd); ?>"
                                      data-end="<?php echo h($ed); ?>">
                                     <?php if ($todayOffset >= 0): ?>
@@ -627,11 +627,11 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                             <div class="flex items-center gap-0 gantt-row gantt-new-row" data-task-id="0">
                                 <div class="gantt-left-col shrink-0 text-sm text-gray-500">+ 드래그해 공정 추가</div>
                                 <?php if ($todayOffset >= 0): ?>
-                                    <div class="gantt-dropzone relative h-11 flex-1 border border-dashed border-gray-200 rounded-xl bg-white overflow-hidden">
+                                    <div class="gantt-dropzone relative h-11 shrink-0 border border-dashed border-gray-200 rounded-xl bg-white overflow-hidden">
                                         <div class="gantt-today-marker" style="left: calc(var(--day-width) * <?php echo (int)$todayOffset; ?>);"></div>
                                     </div>
                                 <?php else: ?>
-                                    <div class="gantt-dropzone relative h-11 flex-1 border border-dashed border-gray-200 rounded-xl bg-white overflow-hidden"></div>
+                                    <div class="gantt-dropzone relative h-11 shrink-0 border border-dashed border-gray-200 rounded-xl bg-white overflow-hidden"></div>
                                 <?php endif; ?>
                             </div>
                         <?php endif; ?>
@@ -819,6 +819,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   .gantt-dropzone {
     min-width: calc(var(--day-width) * var(--grid-days));
     background-size: var(--day-width) 100%;
+    width: calc(var(--day-width) * var(--grid-days));    
     background-origin: border-box; /* 간트 날짜/그리드 정렬 수정 */    
     background-image: repeating-linear-gradient(
       to right,
@@ -1000,16 +1001,67 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       .catch(function(){ reloadWithState('edit'); });
   }
 
-  function dayFromOffset(offsetX, zoneWidth){
-    var pct = clamp(offsetX / zoneWidth, 0, 1);
-    return Math.floor(pct * gridDays);
+  var ganttDayWidth = 48;
+
+  function getMeasuredDayWidth(){
+    var dayCell = document.querySelector('.gantt-header .gantt-cell-day');
+    if (dayCell) {
+      var measured = dayCell.getBoundingClientRect().width;
+      if (measured && measured > 0) return measured;
+    }
+    var root = rangeSource;
+    var fromStyle = root ? parseFloat(window.getComputedStyle(root).getPropertyValue('--day-width')) : 0;
+    if (!isNaN(fromStyle) && fromStyle > 0) return fromStyle;
+    return 48;
+  }
+
+  function getTaskSpanByDate(startDate, endDate){
+    var startTs = ymdToTs(startDate || '');
+    var endTs = ymdToTs(endDate || '');
+    if (!startTs || !endTs) return null;
+    var barStart = Math.max(startTs, rangeStartTs);
+    var barEnd = Math.min(endTs, rangeStartTs + ((gridDays - 1) * 86400));
+    if (barEnd < barStart) return null;
+    var leftDays = Math.floor((barStart - rangeStartTs) / 86400);
+    var duration = Math.floor((barEnd - barStart) / 86400) + 1;
+    leftDays = clamp(leftDays, 0, gridDays - 1);
+    duration = clamp(duration, 1, gridDays - leftDays);
+    return { leftDays: leftDays, duration: duration };
   }
 
   function setBarPosition(bar, leftDays, duration){
-    var leftPct = (leftDays / gridDays) * 100;
-    var widthPct = (duration / gridDays) * 100;
-    bar.style.left = leftPct + '%';
-    bar.style.width = widthPct + '%';
+    if (!bar) return;
+    bar.style.left = (leftDays * ganttDayWidth) + 'px';
+    bar.style.width = (duration * ganttDayWidth) + 'px';
+  }
+
+  function dayFromOffset(offsetX){
+    var day = Math.floor(offsetX / ganttDayWidth);
+    return clamp(day, 0, gridDays - 1);
+  }
+
+  // 리사이즈 시 간트 바 재정렬(날짜 고정)
+  function recalcGanttLayout(){
+    ganttDayWidth = getMeasuredDayWidth();
+    var gridWidth = ganttDayWidth * gridDays;
+
+    document.querySelectorAll('.gantt-header, .gantt-board, .gantt-board-readonly').forEach(function(el){
+      el.style.setProperty('--day-width', ganttDayWidth + 'px');
+    });
+
+    document.querySelectorAll('.gantt-dropzone').forEach(function(zone){
+      zone.style.width = gridWidth + 'px';
+      zone.style.minWidth = gridWidth + 'px';
+      var bar = zone.querySelector('.gantt-bar');
+      if (!bar) return;
+      var span = getTaskSpanByDate(zone.getAttribute('data-start'), zone.getAttribute('data-end'));
+      if (!span) {
+        bar.style.display = 'none';
+        return;
+      }
+      bar.style.display = '';
+      setBarPosition(bar, span.leftDays, span.duration);
+    });
   }
 
   if (board) {
@@ -1048,7 +1100,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         if (!droppedName) return;
         var zoneRect = zone.getBoundingClientRect();
         var offsetX = e.clientX - zoneRect.left;
-        var leftDays = dayFromOffset(offsetX, zoneRect.width);
+        var leftDays = dayFromOffset(offsetX);
         var startTs = rangeStartTs + (leftDays * 86400);
         var endTs = startTs + (3 * 86400);
         saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0);
@@ -1081,31 +1133,33 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
     function onMouseMove(e){
       if (!dragging && !resizing) return;
-      var zoneRect = zone.getBoundingClientRect();
       var delta = e.clientX - startX;
       if (Math.abs(delta) > 2) moved = true;
-      var pctDelta = delta / zoneRect.width;
+      var minWidthPx = ganttDayWidth;
+      var maxLeftPx = (gridDays * ganttDayWidth) - origWidth;
       if (dragging) {
-        var newLeft = clamp(origLeft + pctDelta, 0, 1 - origWidth);
-        bar.style.left = (newLeft * 100) + '%';
+        var newLeft = clamp(origLeft + delta, 0, maxLeftPx);
+        bar.style.left = newLeft + 'px';
       } else if (resizing === 'left') {
-        var newLeftL = clamp(origLeft + pctDelta, 0, origLeft + origWidth - (1 / gridDays));
-        var newWidthL = (origLeft + origWidth) - newLeftL;
-        bar.style.left = (newLeftL * 100) + '%';
-        bar.style.width = (newWidthL * 100) + '%';
+        var rightEdge = origLeft + origWidth;
+        var newLeftL = clamp(origLeft + delta, 0, rightEdge - minWidthPx);
+        var newWidthL = rightEdge - newLeftL;
+        bar.style.left = newLeftL + 'px';
+        bar.style.width = newWidthL + 'px';
       } else if (resizing === 'right') {
-        var newWidth = clamp(origWidth + pctDelta, (1 / gridDays), 1 - origLeft);
-        bar.style.width = (newWidth * 100) + '%';
+        var maxWidth = (gridDays * ganttDayWidth) - origLeft;
+        var newWidth = clamp(origWidth + delta, minWidthPx, maxWidth);
+        bar.style.width = newWidth + 'px';
       }
     }
 
     function onMouseUp(){
       if (!dragging && !resizing) return;
-      var zoneRect = zone.getBoundingClientRect();
-      var leftPct = parseFloat(bar.style.left || '0') / 100;
-      var widthPct = parseFloat(bar.style.width || '0') / 100;
-      var leftDays = Math.round(leftPct * gridDays);
-      var durDays = Math.max(1, Math.round(widthPct * gridDays));
+      var leftPx = parseFloat(bar.style.left || '0');
+      var widthPx = parseFloat(bar.style.width || (ganttDayWidth + ''));
+      var leftDays = clamp(Math.round(leftPx / ganttDayWidth), 0, gridDays - 1);
+      var durDays = Math.max(1, Math.round(widthPx / ganttDayWidth));
+      durDays = clamp(durDays, 1, gridDays - leftDays);
       var startTs = rangeStartTs + (leftDays * 86400);
       var endTs = startTs + ((durDays - 1) * 86400);
       if (moved) {
@@ -1124,8 +1178,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       startX = e.clientX;
       moved = false;      
       bar.classList.add('dragging');
-      origLeft = parseFloat(bar.style.left || '0') / 100;
-      origWidth = parseFloat(bar.style.width || '0') / 100;
+      origLeft = parseFloat(bar.style.left || '0');
+      origWidth = parseFloat(bar.style.width || (ganttDayWidth + ''));
+      if (isNaN(origLeft)) origLeft = 0;
+      if (isNaN(origWidth) || origWidth <= 0) origWidth = ganttDayWidth;
       document.addEventListener('mousemove', onMouseMove);
       document.addEventListener('mouseup', onMouseUp);
     });
@@ -1137,8 +1193,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         startX = e.clientX;
         moved = false;
         bar.classList.add('dragging');
-        origLeft = parseFloat(bar.style.left || '0') / 100;
-        origWidth = parseFloat(bar.style.width || '0') / 100;
+        origLeft = parseFloat(bar.style.left || '0');
+        origWidth = parseFloat(bar.style.width || (ganttDayWidth + ''));
+        if (isNaN(origLeft)) origLeft = 0;
+        if (isNaN(origWidth) || origWidth <= 0) origWidth = ganttDayWidth;
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
       });
@@ -1361,7 +1419,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         var taskName = row.getAttribute('data-task-name') || '';
         var zoneRect = zone.getBoundingClientRect();
         var offsetX = e.clientX - zoneRect.left;
-        var leftDays = dayFromOffset(offsetX, zoneRect.width);
+        var leftDays = dayFromOffset(offsetX);
         var dateTs = rangeStartTs + (leftDays * 86400);
         var taskId = row.getAttribute('data-task-id') || '';
         openProgress(taskId, taskName, tsToYmd(dateTs), getRowTotalQty(row));
@@ -1379,6 +1437,27 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       });
     });
   }
+
+  var recalcQueued = false;
+  function requestRecalcGanttLayout(){
+    if (recalcQueued) return;
+    recalcQueued = true;
+    window.requestAnimationFrame(function(){
+      recalcQueued = false;
+      recalcGanttLayout();
+    });
+  }
+
+  if (typeof ResizeObserver !== 'undefined') {
+    var resizeObserver = new ResizeObserver(function(){
+      requestRecalcGanttLayout();
+    });
+    document.querySelectorAll('.gantt-header, .gantt-board, .gantt-board-readonly').forEach(function(el){
+      resizeObserver.observe(el);
+    });
+  }
+  window.addEventListener('resize', requestRecalcGanttLayout);
+  requestRecalcGanttLayout();
 
   document.querySelectorAll('.gantt-tab').forEach(function(btn){
     btn.addEventListener('click', function(){
@@ -1399,7 +1478,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var params = new URLSearchParams(window.location.search);
       if (target === 'board') params.set('mode', 'edit');
       else params.delete('mode');
-      history.replaceState(null, '', window.location.pathname + '?' + params.toString());      
+      history.replaceState(null, '', window.location.pathname + '?' + params.toString());
+      requestRecalcGanttLayout();  
     });
   });
 
