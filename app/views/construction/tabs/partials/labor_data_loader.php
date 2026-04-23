@@ -203,7 +203,8 @@ if (!function_exists('cpms_map_gongsu_columns')) {
             'date' => array('work_date', 'attendance_date', 'date', 'workday', 'gongsu_date', 'workday_date'),
             'gongsu' => array('total_gongsu', 'gongsu', 'man_days', 'total_man_days', 'man_day', 'work_days', 'work_day'),
             'printed' => array('printed', 'print_yn', 'printed_yn', 'output_yn', 'is_printed', 'print_flag'),
-        );
+            'role' => array('role', 'job', 'position', 'duty', 'work_type', 'type', 'category', 'worker_role'),        
+            );
 
         foreach ($aliases as $key => $list) {
             foreach ($list as $alias) {
@@ -219,6 +220,42 @@ if (!function_exists('cpms_map_gongsu_columns')) {
             return array();
         }
         return $colMap;
+    }
+}
+
+if (!function_exists('cpms_find_role_column')) {
+    function cpms_find_role_column($columns) {
+        $lower = array();
+        foreach ($columns as $col) {
+            $lower[strtolower((string)$col)] = (string)$col;
+        }
+        $aliases = array('role', 'job', 'position', 'duty', 'work_type', 'type', 'category', 'worker_role');
+        foreach ($aliases as $alias) {
+            $k = strtolower($alias);
+            if (isset($lower[$k])) return $lower[$k];
+        }
+        return '';
+    }
+}
+
+if (!function_exists('cpms_normalize_role_value')) {
+    function cpms_normalize_role_value($value) {
+        $value = trim((string)$value);
+        if ($value === '') return '';
+        $value = preg_replace('/\s+/u', '', $value);
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($value, 'UTF-8');
+        }
+        return strtolower($value);
+    }
+}
+
+if (!function_exists('cpms_is_excluded_equipment_driver_role')) {
+    function cpms_is_excluded_equipment_driver_role($roleValue) {
+        $normalized = cpms_normalize_role_value($roleValue);
+        if ($normalized === '') return false;
+        // 장비기사 제외
+        return ($normalized === '장비기사');
     }
 }
 
@@ -356,7 +393,8 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
             'gongsu_map' => array(),
             'gongsu_unit' => array(),
             'output_days' => array(),
-        );
+            'excluded_workers' => array(),
+            );
 
         if (!$attendancePdo || $projectName === '' || $selectedMonth === '') return $result;
 
@@ -388,11 +426,19 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
             $monthEnd = $selectedMonth . '-31 23:59:59';
         }
 
+        $attendanceColumns = cpms_table_columns($attendancePdo, 'attendance');
+        $roleColumn = cpms_find_role_column($attendanceColumns);
+
         // 3) 전체 이름 목록 (월과 무관)
         $allWorkers = array();
+        $excludedWorkers = array();        
         try {
             // 인원작성 누적(출력자만): done 이력이 1회 이상 있는 사람만 누적 목록에 포함
-            $sqlAll = "SELECT DISTINCT name FROM attendance WHERE site_id = :sid AND status = 'done' ORDER BY name ASC";
+            $sqlAll = "SELECT DISTINCT name";
+            if ($roleColumn !== '') {
+                $sqlAll .= ", `" . $roleColumn . "` AS role_value";
+            }
+            $sqlAll .= " FROM attendance WHERE site_id = :sid AND status = 'done' ORDER BY name ASC";
             $stAll = $attendancePdo->prepare($sqlAll);
             $stAll->bindValue(':sid', $siteId, PDO::PARAM_INT);
             $stAll->execute();
@@ -402,6 +448,10 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
                 if ($nameAll === '') continue;
                 $keyAll = cpms_normalize_worker_key($nameAll);
                 if ($keyAll === '') continue;
+                if ($roleColumn !== '' && cpms_is_excluded_equipment_driver_role(isset($rowAll['role_value']) ? $rowAll['role_value'] : '')) {
+                    if (!isset($excludedWorkers[$keyAll])) $excludedWorkers[$keyAll] = $nameAll; // 장비기사 제외
+                    continue;
+                }
                 $allWorkers[$keyAll] = $nameAll;
             }
         } catch (Exception $e) {
@@ -411,7 +461,11 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
         // 4) 출근기록 조회 (이름 목록 + 공수 자동 계산)
         $rows = array();
         try {
-            $sql = "SELECT name, start_time_phone, stop_time_phone, total_minutes, status
+            $sql = "SELECT name, start_time_phone, stop_time_phone, total_minutes, status";
+            if ($roleColumn !== '') {
+                $sql .= ", `" . $roleColumn . "` AS role_value";
+            }
+            $sql .= "
                     FROM attendance
                     WHERE site_id = :sid
                       AND start_time_phone >= :start
@@ -438,6 +492,10 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
 
             $key = cpms_normalize_worker_key($name);
             if ($key === '') continue;
+            if ($roleColumn !== '' && cpms_is_excluded_equipment_driver_role(isset($row['role_value']) ? $row['role_value'] : '')) {
+                if (!isset($excludedWorkers[$key])) $excludedWorkers[$key] = $name; // 장비기사 제외
+                continue;
+            }
 
             // 3-1) 인원작성 탭용 이름 목록은 "기록이 존재하면" 일단 포함
             if (!isset($workers[$key])) $workers[$key] = $name;
@@ -514,7 +572,8 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
         $result['gongsu_map'] = $gongsuMap;
         $result['gongsu_unit'] = $gongsuUnit;
         $result['output_days'] = $outputDays;
-
+        $result['excluded_workers'] = array_values($excludedWorkers);
+        
         return $result;
     }
 }
@@ -527,6 +586,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
             'gongsu_map' => array(),
             'gongsu_unit' => array(),
             'output_days' => array(),
+            'excluded_workers' => array(),            
         );
 
         $projectName = trim((string)$projectName);
@@ -563,6 +623,9 @@ if (!function_exists('cpms_load_gongsu_data')) {
         if (isset($cols['printed'])) {
             $sql .= ", `" . $cols['printed'] . "` AS printed_value";
         }
+        if (isset($cols['role'])) {
+            $sql .= ", `" . $cols['role'] . "` AS role_value";
+        }
         $sql .= " FROM `" . $table . "` WHERE `" . $cols['site'] . "` = :site AND `" . $cols['date'] . "` LIKE :month";
 
         try {
@@ -577,6 +640,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
 
         $workers = array();
         $allWorkers = array();
+        $excludedWorkers = array();
         $gongsuMap = array();
         $gongsuUnit = array();
         $outputDays = array();
@@ -584,6 +648,11 @@ if (!function_exists('cpms_load_gongsu_data')) {
         foreach ($rows as $row) {
             $workerName = isset($row['worker_name']) ? trim((string)$row['worker_name']) : '';
             if ($workerName === '') continue;
+            if (isset($cols['role']) && cpms_is_excluded_equipment_driver_role(isset($row['role_value']) ? $row['role_value'] : '')) {
+                $excludeKey = cpms_normalize_worker_key($workerName);
+                if ($excludeKey !== '' && !isset($excludedWorkers[$excludeKey])) $excludedWorkers[$excludeKey] = $workerName; // 장비기사 제외
+                continue;
+            }
             if (isset($row['printed_value']) && !cpms_is_printed_value($row['printed_value'])) {
                 continue;
             }
@@ -628,6 +697,9 @@ if (!function_exists('cpms_load_gongsu_data')) {
                        FROM `" . $table . "`
                        WHERE `" . $cols['site'] . "` = :site";
         }
+        if (isset($cols['role'])) {
+            $sqlAll = str_replace(" FROM `" . $table . "`", ", `" . $cols['role'] . "` AS role_value FROM `" . $table . "`", $sqlAll);
+        }
         try {
             $stAll = $pdo->prepare($sqlAll);
             $stAll->bindValue(':site', $projectName);
@@ -641,6 +713,10 @@ if (!function_exists('cpms_load_gongsu_data')) {
                 if ($workerName === '') continue;
                 $key = cpms_normalize_worker_key($workerName);
                 if ($key === '') continue;
+                if (isset($cols['role']) && cpms_is_excluded_equipment_driver_role(isset($rowAll['role_value']) ? $rowAll['role_value'] : '')) {
+                    if (!isset($excludedWorkers[$key])) $excludedWorkers[$key] = $workerName; // 장비기사 제외
+                    continue;
+                }
                 if (!isset($allWorkers[$key])) $allWorkers[$key] = $workerName;
             }
         } catch (Exception $e) {
@@ -652,6 +728,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
         $result['gongsu_map'] = $gongsuMap;
         $result['gongsu_unit'] = $gongsuUnit;
         $result['output_days'] = $outputDays;
+        $result['excluded_workers'] = array_values($excludedWorkers);
 
         return $result;
     }
@@ -757,6 +834,47 @@ if (!function_exists('cpms_sync_project_labor_workers_from_attendance')) {
             } catch (Exception $e) {
                 // ignore insert errors
             }
+        }
+    }
+}
+
+if (!function_exists('cpms_cleanup_project_labor_workers')) {
+    function cpms_cleanup_project_labor_workers($pdo, $projectId, $excludedWorkers) {
+        if (!$pdo || $projectId <= 0) return;
+        if (!cpms_ensure_project_labor_workers_table($pdo)) return;
+        if (!is_array($excludedWorkers) || count($excludedWorkers) === 0) return;
+
+        $nameMap = array();
+        foreach ($excludedWorkers as $name) {
+            $name = trim((string)$name);
+            if ($name === '') continue;
+            $key = cpms_normalize_worker_key($name);
+            if ($key === '') continue;
+            if (!isset($nameMap[$key])) $nameMap[$key] = $name;
+        }
+        if (count($nameMap) === 0) return;
+
+        $names = array_values($nameMap);
+        $placeholders = array();
+        foreach ($names as $idx => $nm) {
+            $placeholders[] = ':name' . $idx;
+        }
+        $sql = "UPDATE cpms_project_labor_workers
+                   SET is_deleted = 1, updated_at = :now
+                 WHERE project_id = :pid
+                   AND source = 'attendance'
+                   AND is_deleted = 0
+                   AND name IN (" . implode(',', $placeholders) . ")";
+        try {
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':now', date('Y-m-d H:i:s'));
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            foreach ($names as $idx => $nm) {
+                $st->bindValue(':name' . $idx, $nm);
+            }
+            $st->execute(); // 장비기사 기존 기록 삭제(soft delete)
+        } catch (Exception $e) {
+            // ignore cleanup errors
         }
     }
 }
