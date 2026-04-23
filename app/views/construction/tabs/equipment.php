@@ -3,7 +3,7 @@
  * 공사 > 장비 탭
  * - 서브탭: 장비월별(monthly), 장비입력(input)
  * - 월 선택(ym=YYYY-MM) 공통 적용
- * - 월별 양식(이전달 26~31 + 선택월 1~31) 출력
+ * - 월별 양식(전월 25~31 + 선택월 1~24, 2줄 출력) 출력
  * - PHP 5.6 호환
  */
 
@@ -33,11 +33,11 @@ if ($year < 2000 || $year > 2100 || $month < 1 || $month > 12) {
 }
 
 $baseUrl = base_url() . '/?r=공사&pid=' . (int)$pid . '&tab=equipment';
-$lastDay = (int)date('t', strtotime($ym . '-01'));
 $prevYm = date('Y-m', strtotime($ym . '-01 -1 month'));
 $prevLastDay = (int)date('t', strtotime($prevYm . '-01'));
-$monthlyStart = $prevYm . '-26';
-$monthlyEnd = $ym . '-' . sprintf('%02d', $lastDay);
+// 전월25~현월24 기준
+$monthlyStart = $prevYm . '-25';
+$monthlyEnd = $ym . '-24';
 
 $monthOptions = array();
 for ($i = -12; $i <= 12; $i++) {
@@ -125,7 +125,7 @@ try {
 }
 
 $dateSlots = array();
-for ($d = 26; $d <= 31; $d++) {
+for ($d = 25; $d <= 31; $d++) {
     $valid = ($d <= $prevLastDay);
     $dateSlots[] = array(
         'label' => '전월 ' . $d,
@@ -133,14 +133,25 @@ for ($d = 26; $d <= 31; $d++) {
         'valid' => $valid,
     );
 }
-for ($d = 1; $d <= 31; $d++) {
-    $valid = ($d <= $lastDay);
+for ($d = 1; $d <= 24; $d++) {
+    $valid = true;
     $dateSlots[] = array(
         'label' => $d,
         'date' => $ym . '-' . sprintf('%02d', $d),
         'valid' => $valid,
     );
 }
+
+// 장비월별 날짜 2줄
+$splitIndex = 0;
+$preferredFirstRowCount = (7 + 15); // 전월25~말일 + 현월 1~15
+if ($preferredFirstRowCount >= count($dateSlots)) {
+    $splitIndex = (int)ceil(count($dateSlots) / 2);
+} else {
+    $splitIndex = $preferredFirstRowCount;
+}
+$dateSlotsRow1 = array_slice($dateSlots, 0, $splitIndex);
+$dateSlotsRow2 = array_slice($dateSlots, $splitIndex);
 
 function equipment_money($v)
 {
@@ -440,21 +451,27 @@ function equipment_money($v)
         <div class="mt-6 overflow-auto">
             <table class="min-w-[1800px] w-full border-collapse text-xs">
                 <thead>
-                <tr class="bg-gray-50">
-                    <th class="border p-2">구분</th>
-                    <th class="border p-2">업체명</th>
-                    <th class="border p-2">규격</th>
-                    <th class="border p-2">대표자명</th>
-                    <th class="border p-2">전화번호</th>
-                    <th class="border p-2">사업자등록번호</th>
-                    <th class="border p-2">기본단가</th>
-                    <?php foreach ($dateSlots as $slot): ?>
-                        <th class="border p-1 <?php echo $slot['valid'] ? '' : 'bg-gray-200 text-gray-500'; ?>"><?php echo h($slot['label']); ?></th>
-                    <?php endforeach; ?>
-                    <th class="border p-2">일수</th>
-                    <th class="border p-2">금액</th>
-                    <th class="border p-2">비고</th>
-                </tr>
+                    <!-- 장비월별 날짜 2줄 -->
+                    <tr class="bg-gray-50">
+                        <th class="border p-2" rowspan="2">구분</th>
+                        <th class="border p-2" rowspan="2">업체명</th>
+                        <th class="border p-2" rowspan="2">규격</th>
+                        <th class="border p-2" rowspan="2">대표자명</th>
+                        <th class="border p-2" rowspan="2">전화번호</th>
+                        <th class="border p-2" rowspan="2">사업자등록번호</th>
+                        <th class="border p-2" rowspan="2">기본단가</th>
+                        <?php foreach ($dateSlotsRow1 as $slot): ?>
+                            <th class="border p-1 text-center <?php echo $slot['valid'] ? '' : 'bg-gray-200 text-gray-500'; ?>" style="min-width:52px;"><?php echo h($slot['label']); ?></th>
+                        <?php endforeach; ?>
+                        <th class="border p-2" rowspan="2">일수</th>
+                        <th class="border p-2" rowspan="2">금액</th>
+                        <th class="border p-2" rowspan="2">비고</th>
+                    </tr>
+                    <tr class="bg-gray-50">
+                        <?php foreach ($dateSlotsRow2 as $slot): ?>
+                            <th class="border p-1 text-center <?php echo $slot['valid'] ? '' : 'bg-gray-200 text-gray-500'; ?>" style="min-width:52px;"><?php echo h($slot['label']); ?></th>
+                        <?php endforeach; ?>
+                    </tr>
                 </thead>
                 <tbody>
                 <?php
@@ -474,30 +491,40 @@ function equipment_money($v)
                         $eid = (int)$it['id'];
                         $days = 0;
                         $rowAmount = 0.0;
+                        $rowSlotAmount = array();
+                        foreach ($dateSlots as $slotAll) {
+                            if (!$slotAll['valid']) {
+                                continue;
+                            }
+                            $amtAll = 0.0;
+                            if (isset($usageByEquipment[$eid]) && isset($usageByEquipment[$eid][$slotAll['date']])) {
+                                $amtAll = (float)$usageByEquipment[$eid][$slotAll['date']];
+                            }
+                            $rowSlotAmount[$slotAll['date']] = $amtAll;
+                            if ($amtAll > 0) {
+                                $days++;
+                                $rowAmount += $amtAll;
+                                $sumByDate[$slotAll['date']] += $amtAll;
+                            }
+                        }                        
                         ?>
                         <tr>
-                            <td class="border p-1 text-center"><?php echo ($lastCategory === (string)$it['category']) ? '' : h($it['category']); ?></td>
-                            <td class="border p-1"><?php echo h($it['vendor_name']); ?></td>
-                            <td class="border p-1"><?php echo h($it['spec']); ?></td>
-                            <td class="border p-1"><?php echo h($it['representative']); ?></td>
-                            <td class="border p-1"><?php echo h($it['phone']); ?></td>
-                            <td class="border p-1"><?php echo h($it['biz_no']); ?></td>
-                            <td class="border p-1 text-right"><?php echo equipment_money($it['base_rate']); ?></td>
+                            <td class="border p-1 text-center" rowspan="2"><?php echo ($lastCategory === (string)$it['category']) ? '' : h($it['category']); ?></td>
+                            <td class="border p-1" rowspan="2"><?php echo h($it['vendor_name']); ?></td>
+                            <td class="border p-1" rowspan="2"><?php echo h($it['spec']); ?></td>
+                            <td class="border p-1" rowspan="2"><?php echo h($it['representative']); ?></td>
+                            <td class="border p-1" rowspan="2"><?php echo h($it['phone']); ?></td>
+                            <td class="border p-1" rowspan="2"><?php echo h($it['biz_no']); ?></td>
+                            <td class="border p-1 text-right" rowspan="2"><?php echo equipment_money($it['base_rate']); ?></td>
 
-                            <?php foreach ($dateSlots as $slot): ?>
+                            <?php foreach ($dateSlotsRow1 as $slot): ?>
                                 <?php
                                 if (!$slot['valid']) {
                                     echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
                                     continue;
                                 }
-                                $amt = 0.0;
-                                if (isset($usageByEquipment[$eid]) && isset($usageByEquipment[$eid][$slot['date']])) {
-                                    $amt = (float)$usageByEquipment[$eid][$slot['date']];
-                                }
+                                $amt = isset($rowSlotAmount[$slot['date']]) ? (float)$rowSlotAmount[$slot['date']] : 0.0;
                                 if ($amt > 0) {
-                                    $days++;
-                                    $rowAmount += $amt;
-                                    $sumByDate[$slot['date']] += $amt;
                                     echo '<td class="border p-1 text-right">' . equipment_money($amt) . '</td>';
                                 } else {
                                     echo '<td class="border p-1 text-center text-gray-300">-</td>';
@@ -505,9 +532,25 @@ function equipment_money($v)
                                 ?>
                             <?php endforeach; ?>
 
-                            <td class="border p-1 text-center"><?php echo (int)$days; ?></td>
-                            <td class="border p-1 text-right"><?php echo equipment_money($rowAmount); ?></td>
-                            <td class="border p-1"><?php echo h($it['remark']); ?></td>
+                            <td class="border p-1 text-center" rowspan="2"><?php echo (int)$days; ?></td>
+                            <td class="border p-1 text-right" rowspan="2"><?php echo equipment_money($rowAmount); ?></td>
+                            <td class="border p-1" rowspan="2"><?php echo h($it['remark']); ?></td>
+                        </tr>
+                        <tr>
+                            <?php foreach ($dateSlotsRow2 as $slot): ?>
+                                <?php
+                                if (!$slot['valid']) {
+                                    echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
+                                    continue;
+                                }
+                                $amt = isset($rowSlotAmount[$slot['date']]) ? (float)$rowSlotAmount[$slot['date']] : 0.0;
+                                if ($amt > 0) {
+                                    echo '<td class="border p-1 text-right">' . equipment_money($amt) . '</td>';
+                                } else {
+                                    echo '<td class="border p-1 text-center text-gray-300">-</td>';
+                                }
+                                ?>
+                            <?php endforeach; ?>
                         </tr>
                         <?php
                         $lastCategory = (string)$it['category'];
@@ -517,17 +560,26 @@ function equipment_money($v)
                     <?php endforeach; ?>
 
                     <tr class="bg-yellow-50 font-bold">
-                        <td class="border p-1 text-center" colspan="7">합계</td>
-                        <?php foreach ($dateSlots as $slot): ?>
+                        <td class="border p-1 text-center" colspan="7" rowspan="2">합계</td>
+                        <?php foreach ($dateSlotsRow1 as $slot): ?>
                             <?php if (!$slot['valid']): ?>
                                 <td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>
                             <?php else: ?>
                                 <td class="border p-1 text-right"><?php echo equipment_money(isset($sumByDate[$slot['date']]) ? $sumByDate[$slot['date']] : 0); ?></td>
                             <?php endif; ?>
                         <?php endforeach; ?>
-                        <td class="border p-1 text-center"><?php echo (int)$sumDays; ?></td>
-                        <td class="border p-1 text-right"><?php echo equipment_money($sumAmount); ?></td>
-                        <td class="border p-1"></td>
+                        <td class="border p-1 text-center" rowspan="2"><?php echo (int)$sumDays; ?></td>
+                        <td class="border p-1 text-right" rowspan="2"><?php echo equipment_money($sumAmount); ?></td>
+                        <td class="border p-1" rowspan="2"></td>
+                    </tr>
+                    <tr class="bg-yellow-50 font-bold">
+                        <?php foreach ($dateSlotsRow2 as $slot): ?>
+                            <?php if (!$slot['valid']): ?>
+                                <td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>
+                            <?php else: ?>
+                                <td class="border p-1 text-right"><?php echo equipment_money(isset($sumByDate[$slot['date']]) ? $sumByDate[$slot['date']] : 0); ?></td>
+                            <?php endif; ?>
+                        <?php endforeach; ?>
                     </tr>
                 <?php endif; ?>
                 </tbody>
