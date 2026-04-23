@@ -69,7 +69,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UNIQUE KEY uniq_project_ym (project_id, ym)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 $msg = '원가/공정 입력 테이블 생성/확인 완료';
-            }
+            } else if ($action === 'equipment') {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_equipment_items (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    category VARCHAR(50) NOT NULL,
+                    vendor_name VARCHAR(100) NOT NULL,
+                    spec VARCHAR(100) DEFAULT '',
+                    representative VARCHAR(50) DEFAULT '',
+                    phone VARCHAR(30) DEFAULT '',
+                    biz_no VARCHAR(30) DEFAULT '',
+                    base_rate DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    remark VARCHAR(255) DEFAULT '',
+                    is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    KEY idx_project_id (project_id),
+                    KEY idx_category (category)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_equipment_usage (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    equipment_id INT NOT NULL,
+                    use_date DATE NOT NULL,
+                    amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    memo VARCHAR(255) DEFAULT '',
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_equipment_day (equipment_id, use_date),
+                    KEY idx_project_date (project_id, use_date)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                $msg = '장비 입력 테이블 생성/확인 완료';
+                }
         } catch (Exception $e) { $err = $e->getMessage(); }
     }
 }
@@ -81,5 +112,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <div class="row">
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="base"><button class="btn" type="submit">1) 공사 기본 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="cost_progress"><button class="btn" type="submit">2) 원가/공정 입력 테이블 생성/확인</button></form>
+<form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="equipment"><button class="btn" type="submit">3) 장비 입력 테이블 생성/확인</button></form>
 </div>
 </div></body></html>
