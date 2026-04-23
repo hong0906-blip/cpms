@@ -754,19 +754,49 @@ if (!function_exists('cpms_load_direct_team_members')) {
 if (!function_exists('cpms_ensure_project_labor_workers_table')) {
     function cpms_ensure_project_labor_workers_table($pdo) {
         if (!$pdo) return false;
-        if (cpms_table_exists_labor($pdo, 'cpms_project_labor_workers')) return true;
+        $table = 'cpms_project_labor_workers';
         try {
-            $pdo->exec("CREATE TABLE cpms_project_labor_workers (
-                id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-                project_id INT UNSIGNED NOT NULL,
-                name VARCHAR(100) NOT NULL,
-                source VARCHAR(20) NOT NULL DEFAULT 'manual',
-                direct_member_id INT UNSIGNED NULL,
-                is_deleted TINYINT(1) NOT NULL DEFAULT 0,
-                created_at DATETIME NOT NULL,
-                updated_at DATETIME NOT NULL,
-                UNIQUE KEY uk_project_labor_workers (project_id, name)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+            if (!cpms_table_exists_labor($pdo, $table)) {
+                // 인원작성 저장 기능: 프로젝트별 임금/계좌 정보 저장 컬럼 포함
+                $pdo->exec("CREATE TABLE cpms_project_labor_workers (
+                    id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT UNSIGNED NOT NULL,
+                    name VARCHAR(100) NOT NULL,
+                    source VARCHAR(20) NOT NULL DEFAULT 'manual',
+                    direct_member_id INT UNSIGNED NULL,
+                    resident_no VARCHAR(30) NULL,
+                    phone VARCHAR(30) NULL,
+                    address VARCHAR(255) NULL,
+                    deposit_rate INT NOT NULL DEFAULT 0,
+                    bank_account VARCHAR(50) NULL,
+                    bank_name VARCHAR(50) NULL,
+                    account_holder VARCHAR(50) NULL,
+                    company_name VARCHAR(80) NULL,
+                    is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    UNIQUE KEY uk_project_labor_workers (project_id, name)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+            }
+
+            // 인원작성 저장 기능: 기존 테이블 누락 컬럼 자동 보강
+            $cols = cpms_table_columns($pdo, $table);
+            $colMap = array();
+            foreach ($cols as $c) $colMap[(string)$c] = true;
+            $addCols = array(
+                'resident_no' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN resident_no VARCHAR(30) NULL AFTER direct_member_id",
+                'phone' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN phone VARCHAR(30) NULL AFTER resident_no",
+                'address' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN address VARCHAR(255) NULL AFTER phone",
+                'deposit_rate' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN deposit_rate INT NOT NULL DEFAULT 0 AFTER address",
+                'bank_account' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN bank_account VARCHAR(50) NULL AFTER deposit_rate",
+                'bank_name' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN bank_name VARCHAR(50) NULL AFTER bank_account",
+                'account_holder' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN account_holder VARCHAR(50) NULL AFTER bank_name",
+                'company_name' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN company_name VARCHAR(80) NULL AFTER account_holder",
+            );
+            foreach ($addCols as $col => $sql) {
+                if (isset($colMap[$col])) continue;
+                $pdo->exec($sql);
+            }
             return true;
         } catch (Exception $e) {
             return false;
@@ -891,10 +921,37 @@ if (!function_exists('cpms_build_project_worker_rows')) {
         }
 
         foreach ($projectWorkers as $worker) {
-            $data = array('name' => isset($worker['name']) ? (string)$worker['name'] : '');
+            // 인원작성 저장 기능: 프로젝트 저장값을 우선 보존할 수 있도록 base data 구성
+            $data = array(
+                'name' => isset($worker['name']) ? (string)$worker['name'] : '',
+                'resident_no' => isset($worker['resident_no']) ? (string)$worker['resident_no'] : '',
+                'phone' => isset($worker['phone']) ? (string)$worker['phone'] : '',
+                'address' => isset($worker['address']) ? (string)$worker['address'] : '',
+                'deposit_rate' => isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '0',
+                'bank_account' => isset($worker['bank_account']) ? (string)$worker['bank_account'] : '',
+                'bank_name' => isset($worker['bank_name']) ? (string)$worker['bank_name'] : '',
+                'account_holder' => isset($worker['account_holder']) ? (string)$worker['account_holder'] : '',
+                'company_name' => isset($worker['company_name']) ? (string)$worker['company_name'] : '',
+            );
             $directId = isset($worker['direct_member_id']) ? (int)$worker['direct_member_id'] : 0;
             if ($directId > 0 && isset($directMap[$directId])) {
-                $data = $directMap[$directId];
+                $memberData = $directMap[$directId];
+                if (!is_array($memberData)) $memberData = array();
+                // 직영팀 기본값 사용
+                $merged = $memberData;
+                if (!isset($merged['name']) || trim((string)$merged['name']) === '') {
+                    $merged['name'] = isset($data['name']) ? $data['name'] : '';
+                }
+                // 인원작성 저장 기능: 프로젝트 저장값으로 최종 덮어쓰기
+                foreach ($data as $field => $fieldValue) {
+                    if ($field === 'name') continue;
+                    if ($field === 'deposit_rate') {
+                        if ((string)$fieldValue !== '' && (int)$fieldValue >= 0) $merged[$field] = $fieldValue;
+                        continue;
+                    }
+                    if (trim((string)$fieldValue) !== '') $merged[$field] = $fieldValue;
+                }
+                $data = $merged;
             }
             $rows[] = array(
                 'id' => isset($worker['id']) ? (int)$worker['id'] : 0,
@@ -942,7 +999,7 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'bank_account' => isset($data['bank_account']) ? (string)$data['bank_account'] : '',
                 'bank_name' => isset($data['bank_name']) ? (string)$data['bank_name'] : '',
                 'account_holder' => isset($data['account_holder']) ? (string)$data['account_holder'] : '',
-                'company_name' => '창명건설',
+                'company_name' => (isset($data['company_name']) && trim((string)$data['company_name']) !== '') ? (string)$data['company_name'] : '창명건설',
             );
         }
         return $workers;

@@ -198,6 +198,11 @@ if ($route === 'construction/labor_worker_delete') {
     require_once __DIR__ . '/../app/views/construction/labor_worker_delete.php';
     exit;
 }
+// 인원작성 저장 기능
+if ($route === 'construction/labor_workers_save') {
+    require_once __DIR__ . '/../app/views/construction/labor_workers_save.php';
+    exit;
+}
 if ($route === 'construction/labor_sheet_download') {
     require_once __DIR__ . '/../app/views/construction/labor_sheet_download.php';
     exit;
