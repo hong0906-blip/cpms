@@ -391,7 +391,8 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
         // 3) 전체 이름 목록 (월과 무관)
         $allWorkers = array();
         try {
-            $sqlAll = "SELECT DISTINCT name FROM attendance WHERE site_id = :sid ORDER BY name ASC";
+            // 인원작성 누적(출력자만): done 이력이 1회 이상 있는 사람만 누적 목록에 포함
+            $sqlAll = "SELECT DISTINCT name FROM attendance WHERE site_id = :sid AND status = 'done' ORDER BY name ASC";
             $stAll = $attendancePdo->prepare($sqlAll);
             $stAll->bindValue(':sid', $siteId, PDO::PARAM_INT);
             $stAll->execute();

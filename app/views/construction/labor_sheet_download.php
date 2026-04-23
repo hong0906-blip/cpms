@@ -117,6 +117,19 @@ cpms_sync_project_labor_workers_from_attendance($pdo, $projectId, $attendanceWor
 $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
 $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
 $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
+// 공수 월별 출력일수 필터(월별 only): 선택 월 output_days > 0 인 사람만 다운로드 표에 포함
+if (is_array($timesheetWorkers)) {
+    $filteredTimesheetWorkers = array();
+    foreach ($timesheetWorkers as $worker) {
+        $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
+        $workerKey = cpms_normalize_worker_key($workerName);
+        if ($workerKey === '') continue;
+        $workerOutputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
+        if ($workerOutputDays <= 0) continue;
+        $filteredTimesheetWorkers[] = $worker;
+    }
+    $timesheetWorkers = $filteredTimesheetWorkers;
+}
 $timesheetRows = count($timesheetWorkers);
 if ($timesheetRows < 1) $timesheetRows = 1;
 require __DIR__ . '/tabs/partials/labor_sheet_table.php';
