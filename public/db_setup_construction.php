@@ -83,7 +83,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     remark VARCHAR(255) DEFAULT '',
                     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    -- 구버전 MySQL 호환: CURRENT_TIMESTAMP는 테이블당 1개만 사용
+                    updated_at TIMESTAMP NULL DEFAULT NULL,
                     KEY idx_project_id (project_id),
                     KEY idx_category (category)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
