@@ -50,6 +50,7 @@ $itemMap = array();
 $usageRows = array();
 $usageByEquipment = array();
 $usageByDate = array();
+$vendorPresets = array();
 
 try {
     $stItem = $pdo->prepare("SELECT * FROM cpms_equipment_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY category ASC, vendor_name ASC, spec ASC, id ASC");
@@ -63,6 +64,32 @@ try {
         $usageByEquipment[$eid] = array();
     }
 
+    // 업체명 프리셋 자동채움
+    $stPreset = $pdo->prepare("SELECT vendor_name, category, representative, phone, biz_no, base_rate, remark
+        FROM cpms_equipment_items
+        WHERE project_id = :pid
+          AND is_deleted = 0
+          AND TRIM(COALESCE(vendor_name, '')) <> ''
+        ORDER BY vendor_name ASC, id DESC");
+    $stPreset->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
+    $stPreset->execute();
+    $presetRows = $stPreset->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($presetRows as $pr) {
+        $vendorKey = trim((string)$pr['vendor_name']);
+        if ($vendorKey === '' || isset($vendorPresets[$vendorKey])) {
+            continue;
+        }
+        $vendorPresets[$vendorKey] = array(
+            'category' => isset($pr['category']) ? (string)$pr['category'] : '',
+            'vendor_name' => $vendorKey,
+            'representative' => isset($pr['representative']) ? (string)$pr['representative'] : '',
+            'phone' => isset($pr['phone']) ? (string)$pr['phone'] : '',
+            'biz_no' => isset($pr['biz_no']) ? (string)$pr['biz_no'] : '',
+            'base_rate' => isset($pr['base_rate']) ? (string)$pr['base_rate'] : '',
+            'remark' => isset($pr['remark']) ? (string)$pr['remark'] : '',
+        );
+    }
+    
     if (count($items) > 0) {
         $stUsage = $pdo->prepare("SELECT u.*, i.category, i.vendor_name, i.spec
             FROM cpms_equipment_usage u
@@ -94,6 +121,7 @@ try {
     $usageRows = array();
     $usageByEquipment = array();
     $usageByDate = array();
+    $vendorPresets = array();    
 }
 
 $dateSlots = array();
@@ -157,26 +185,48 @@ function equipment_money($v)
         <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="border border-gray-200 rounded-2xl p-4">
                 <div class="text-lg font-extrabold mb-3">새작성</div>
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_item_save" class="space-y-2">
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_item_save" class="space-y-3" id="equipmentCreateForm">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="equip_tab" value="input">
                     <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
 
+                    <!-- 업체명 프리셋 자동채움 -->
+                    <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end bg-gray-50 border border-gray-200 rounded-xl p-3">
+                        <div>
+                            <label class="text-sm font-bold text-gray-700">업체명 자동채움</label>
+                            <select id="vendorPresetSelect" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white">
+                                <option value="">업체명 선택</option>
+                                <?php foreach ($vendorPresets as $vendor => $preset): ?>
+                                    <option value="<?php echo h($vendor); ?>"><?php echo h($vendor); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <button type="button" id="fillPresetBtn" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold">자동채움</button>
+                    </div>
+
                     <div class="grid grid-cols-2 gap-2">
                         <input type="text" name="category" class="px-3 py-2 border rounded-xl" placeholder="구분" required>
                         <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required>
-                        <input type="text" name="spec" class="px-3 py-2 border rounded-xl" placeholder="규격">
+                        <input type="text" name="spec" class="px-3 py-2 border rounded-xl" placeholder="규격(직접입력)">
                         <input type="text" name="representative" class="px-3 py-2 border rounded-xl" placeholder="대표자명">
                         <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호">
                         <input type="text" name="biz_no" class="px-3 py-2 border rounded-xl" placeholder="사업자등록번호">
                         <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-2 border rounded-xl" placeholder="기본단가">
                         <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고">
                     </div>
-                    <div>
-                        <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($ym); ?>)</label>
-                        <textarea name="use_dates" class="w-full mt-1 px-3 py-2 border rounded-xl" rows="3" placeholder="예: 2026-04-04,2026-04-07 또는 2026-04-10~2026-04-12"></textarea>
+
+                    <!-- 장비 사용일자 달력 선택 -->
+                    <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="equipmentCreateDateInputs" data-chip-target="equipmentCreateDateChips" data-grid-target="equipmentCreateDateGrid">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($ym); ?>, 복수 선택)</label>
+                            <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-toggle-calendar>날짜 선택</button>
+                        </div>
+                        <div id="equipmentCreateDateGrid" class="hidden border border-gray-200 rounded-lg p-2 bg-gray-50"></div>
+                        <div id="equipmentCreateDateChips" class="mt-2 flex flex-wrap gap-2"></div>
+                        <div id="equipmentCreateDateInputs"></div>
                     </div>
+
                     <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">저장</button>
                 </form>
             </div>
@@ -205,13 +255,23 @@ function equipment_money($v)
                                     <td class="p-2 border"><?php echo h($it['spec']); ?></td>
                                     <td class="p-2 border text-right"><?php echo equipment_money($it['base_rate']); ?></td>
                                     <td class="p-2 border">
-                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_usage_save" class="flex gap-2">
+                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_usage_save" class="space-y-2" data-usage-form>
                                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                                             <input type="hidden" name="equipment_id" value="<?php echo (int)$it['id']; ?>">
                                             <input type="hidden" name="equip_tab" value="input">
                                             <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
-                                            <input type="text" name="use_dates" class="flex-1 px-2 py-1 border rounded-lg" placeholder="날짜/범위 입력" required>
+
+                                            <!-- 장비 사용일자 달력 선택 -->
+                                            <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-grid-target="usageDateGrid_<?php echo (int)$it['id']; ?>">
+                                                <div class="flex items-center justify-between">
+                                                    <div class="text-xs text-gray-700 font-bold">날짜(<?php echo h($ym); ?>)</div>
+                                                    <button type="button" class="px-2 py-1 rounded border text-xs" data-toggle-calendar>날짜 선택</button>
+                                                </div>
+                                                <div id="usageDateGrid_<?php echo (int)$it['id']; ?>" class="hidden mt-2 border border-gray-200 rounded p-2 bg-gray-50"></div>
+                                                <div id="usageDateChips_<?php echo (int)$it['id']; ?>" class="mt-2 flex flex-wrap gap-1"></div>
+                                                <div id="usageDateInputs_<?php echo (int)$it['id']; ?>"></div>
+                                            </div>
                                             <button type="submit" class="px-3 py-1 rounded-lg bg-gray-800 text-white">추가</button>
                                         </form>
                                     </td>
@@ -223,6 +283,159 @@ function equipment_money($v)
                 </div>
             </div>
         </div>
+
+        <script>
+        (function(){
+            var selectedYm = <?php echo json_encode($ym); ?>;
+            var vendorPresets = <?php echo json_encode($vendorPresets); ?>;
+
+            function pad2(v){ return (v < 10 ? '0' : '') + v; }
+
+            // 업체명 프리셋 자동채움
+            var presetSelect = document.getElementById('vendorPresetSelect');
+            var fillBtn = document.getElementById('fillPresetBtn');
+            var createForm = document.getElementById('equipmentCreateForm');
+            if (presetSelect && fillBtn && createForm) {
+                fillBtn.addEventListener('click', function(){
+                    var key = presetSelect.value || '';
+                    if (!key || !vendorPresets[key]) {
+                        alert('업체명을 먼저 선택하세요.');
+                        return;
+                    }
+                    var p = vendorPresets[key];
+                    if (createForm.elements['category']) createForm.elements['category'].value = p.category || '';
+                    if (createForm.elements['vendor_name']) createForm.elements['vendor_name'].value = p.vendor_name || key;
+                    if (createForm.elements['representative']) createForm.elements['representative'].value = p.representative || '';
+                    if (createForm.elements['phone']) createForm.elements['phone'].value = p.phone || '';
+                    if (createForm.elements['biz_no']) createForm.elements['biz_no'].value = p.biz_no || '';
+                    if (createForm.elements['base_rate']) createForm.elements['base_rate'].value = p.base_rate || '';
+                    if (createForm.elements['remark']) createForm.elements['remark'].value = p.remark || '';
+                });
+            }
+
+            // 장비 사용일자 달력 선택
+            function initCalendar(wrapper){
+                var ym = wrapper.getAttribute('data-ym') || selectedYm;
+                var gridId = wrapper.getAttribute('data-grid-target');
+                var chipId = wrapper.getAttribute('data-chip-target');
+                var inputId = wrapper.getAttribute('data-target');
+                var toggleBtn = wrapper.querySelector('[data-toggle-calendar]');
+                var grid = document.getElementById(gridId);
+                var chips = document.getElementById(chipId);
+                var inputs = document.getElementById(inputId);
+                var selected = {};
+
+                if (!grid || !chips || !inputs) return;
+
+                var parts = ym.split('-');
+                var year = parseInt(parts[0], 10);
+                var month = parseInt(parts[1], 10);
+                var lastDay = new Date(year, month, 0).getDate();
+
+                function renderInputs(){
+                    inputs.innerHTML = '';
+                    var keys = Object.keys(selected).sort();
+                    for (var i=0; i<keys.length; i++) {
+                        var hidden = document.createElement('input');
+                        hidden.type = 'hidden';
+                        hidden.name = 'usage_dates[]';
+                        hidden.value = keys[i];
+                        inputs.appendChild(hidden);
+                    }
+                }
+
+                function removeDate(d){
+                    if (selected[d]) {
+                        delete selected[d];
+                        render();
+                    }
+                }
+
+                function renderChips(){
+                    chips.innerHTML = '';
+                    var keys = Object.keys(selected).sort();
+                    for (var i=0; i<keys.length; i++) {
+                        (function(dateVal){
+                            var chip = document.createElement('span');
+                            chip.className = 'inline-flex items-center gap-1 px-2 py-1 rounded-full bg-blue-50 text-blue-700 text-xs border border-blue-200';
+                            chip.textContent = dateVal;
+
+                            var xBtn = document.createElement('button');
+                            xBtn.type = 'button';
+                            xBtn.className = 'text-blue-700 font-bold';
+                            xBtn.textContent = '×';
+                            xBtn.addEventListener('click', function(){ removeDate(dateVal); });
+                            chip.appendChild(xBtn);
+                            chips.appendChild(chip);
+                        })(keys[i]);
+                    }
+                }
+
+                function toggleDate(dateStr){
+                    if (dateStr.substring(0, 7) !== ym) {
+                        alert('선택 월(' + ym + ') 날짜만 선택할 수 있습니다.');
+                        return;
+                    }
+                    if (selected[dateStr]) delete selected[dateStr];
+                    else selected[dateStr] = true;
+                    render();
+                }
+
+                function renderGrid(){
+                    grid.innerHTML = '';
+                    var head = document.createElement('div');
+                    head.className = 'text-xs font-bold mb-2 text-gray-700';
+                    head.textContent = ym + ' 날짜 선택';
+                    grid.appendChild(head);
+
+                    var list = document.createElement('div');
+                    list.className = 'grid grid-cols-7 gap-1';
+                    for (var day=1; day<=lastDay; day++) {
+                        (function(d){
+                            var dateStr = ym + '-' + pad2(d);
+                            var btn = document.createElement('button');
+                            btn.type = 'button';
+                            btn.className = 'px-2 py-1 rounded border text-xs ' + (selected[dateStr] ? 'bg-blue-600 text-white border-blue-600' : 'bg-white border-gray-300');
+                            btn.textContent = d;
+                            btn.addEventListener('click', function(){ toggleDate(dateStr); });
+                            list.appendChild(btn);
+                        })(day);
+                    }
+                    grid.appendChild(list);
+                }
+
+                function render(){
+                    renderGrid();
+                    renderChips();
+                    renderInputs();
+                }
+
+                if (toggleBtn) {
+                    toggleBtn.addEventListener('click', function(){
+                        if (grid.className.indexOf('hidden') !== -1) grid.className = grid.className.replace('hidden', '').trim();
+                        else grid.className += ' hidden';
+                    });
+                }
+
+                var form = wrapper.closest('form');
+                if (form) {
+                    form.addEventListener('submit', function(e){
+                        if (Object.keys(selected).length <= 0) {
+                            e.preventDefault();
+                            alert('사용일자를 달력에서 1개 이상 선택하세요.');
+                        }
+                    });
+                }
+
+                render();
+            }
+
+            var wrappers = document.querySelectorAll('[data-calendar-wrapper]');
+            for (var i=0; i<wrappers.length; i++) {
+                initCalendar(wrappers[i]);
+            }
+        })();
+        </script>        
     <?php else: ?>
         <div class="mt-6 overflow-auto">
             <table class="min-w-[1800px] w-full border-collapse text-xs">

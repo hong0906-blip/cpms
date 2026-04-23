@@ -22,12 +22,13 @@ $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $equipmentId = isset($_POST['equipment_id']) ? (int)$_POST['equipment_id'] : 0;
 $equipTab = isset($_POST['equip_tab']) ? trim((string)$_POST['equip_tab']) : 'input';
 $ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : date('Y-m');
+$usageDates = isset($_POST['usage_dates']) ? $_POST['usage_dates'] : array();
 $useDatesText = trim((string)(isset($_POST['use_dates']) ? $_POST['use_dates'] : ''));
 $memo = trim((string)(isset($_POST['memo']) ? $_POST['memo'] : ''));
 if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = date('Y-m');
 $redirect = '?r=공사&pid=' . $projectId . '&tab=equipment&equip_tab=' . urlencode($equipTab) . '&ym=' . urlencode($ym);
 
-if ($projectId <= 0 || $equipmentId <= 0 || $useDatesText === '') {
+if ($projectId <= 0 || $equipmentId <= 0) {
     flash_set('error', '입력값이 올바르지 않습니다.');
     header('Location: ' . $redirect);
     exit;
@@ -70,6 +71,31 @@ function equipment_parse_use_dates2($text, $ym)
     return array_keys($result);
 }
 
+
+function equipment_collect_usage_dates2($usageDates, $text, $ym)
+{
+    $result = array();
+    $monthStart = strtotime($ym . '-01');
+    $monthEnd = strtotime(date('Y-m-t', $monthStart));
+
+    if (is_array($usageDates)) {
+        foreach ($usageDates as $d) {
+            $date = trim((string)$d);
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) continue;
+            $ts = strtotime($date);
+            if ($ts !== false && $ts >= $monthStart && $ts <= $monthEnd) {
+                $result[date('Y-m-d', $ts)] = true;
+            }
+        }
+    }
+
+    $legacy = equipment_parse_use_dates2($text, $ym);
+    foreach ($legacy as $d) {
+        $result[$d] = true;
+    }
+
+    return array_keys($result);
+}
 $pdo = Db::pdo();
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
 
@@ -86,7 +112,7 @@ try {
     }
 
     $amount = isset($_POST['amount']) && $_POST['amount'] !== '' ? (float)$_POST['amount'] : (float)$item['base_rate'];
-    $dates = equipment_parse_use_dates2($useDatesText, $ym);
+    $dates = equipment_collect_usage_dates2($usageDates, $useDatesText, $ym);
     if (count($dates) <= 0) {
         flash_set('error', '유효한 사용일자가 없습니다.');
         header('Location: ' . $redirect);

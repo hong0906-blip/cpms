@@ -48,6 +48,7 @@ $phone = trim((string)(isset($_POST['phone']) ? $_POST['phone'] : ''));
 $bizNo = trim((string)(isset($_POST['biz_no']) ? $_POST['biz_no'] : ''));
 $baseRate = isset($_POST['base_rate']) ? (float)$_POST['base_rate'] : 0;
 $remark = trim((string)(isset($_POST['remark']) ? $_POST['remark'] : ''));
+$usageDates = isset($_POST['usage_dates']) ? $_POST['usage_dates'] : array();
 $useDatesText = trim((string)(isset($_POST['use_dates']) ? $_POST['use_dates'] : ''));
 
 if ($category === '' || $vendorName === '') {
@@ -103,6 +104,31 @@ function equipment_parse_use_dates($text, $ym)
     return array_keys($result);
 }
 
+
+function equipment_collect_usage_dates($usageDates, $text, $ym)
+{
+    $result = array();
+    $monthStart = strtotime($ym . '-01');
+    $monthEnd = strtotime(date('Y-m-t', $monthStart));
+
+    if (is_array($usageDates)) {
+        foreach ($usageDates as $d) {
+            $date = trim((string)$d);
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) continue;
+            $ts = strtotime($date);
+            if ($ts !== false && $ts >= $monthStart && $ts <= $monthEnd) {
+                $result[date('Y-m-d', $ts)] = true;
+            }
+        }
+    }
+
+    $legacy = equipment_parse_use_dates($text, $ym);
+    foreach ($legacy as $d) {
+        $result[$d] = true;
+    }
+
+    return array_keys($result);
+}
 $pdo = Db::pdo();
 if (!$pdo) {
     flash_set('error', 'DB 연결 실패');
@@ -130,7 +156,7 @@ try {
 
     $equipmentId = (int)$pdo->lastInsertId();
 
-    $dates = equipment_parse_use_dates($useDatesText, $ym);
+    $dates = equipment_collect_usage_dates($usageDates, $useDatesText, $ym);
     if ($equipmentId > 0 && count($dates) > 0) {
         $stU = $pdo->prepare("INSERT INTO cpms_equipment_usage
             (project_id, equipment_id, use_date, amount, memo, created_at)
