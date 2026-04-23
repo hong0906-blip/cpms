@@ -747,6 +747,23 @@ if (!function_exists('cpms_load_direct_team_members')) {
         } catch (Exception $e) {
             $members = array();
         }
+        if (is_array($members) && count($members) > 0) {
+            foreach ($members as $idx => $member) {
+                if (!is_array($member)) continue;
+                $depositRate = isset($member['deposit_rate']) ? trim((string)$member['deposit_rate']) : '';
+                $dailyWage = isset($member['daily_wage']) ? trim((string)$member['daily_wage']) : '';
+
+                $depositRateNum = (is_numeric(str_replace(',', '', $depositRate))) ? (float)str_replace(',', '', $depositRate) : 0;
+                $dailyWageNum = (is_numeric(str_replace(',', '', $dailyWage))) ? (float)str_replace(',', '', $dailyWage) : 0;
+
+                // 레거시 데이터 보정:
+                // deposit_rate 값이 비었거나 0인데 daily_wage 값이 있으면 임금단가로 사용
+                if (($depositRate === '' || $depositRateNum <= 0) && $dailyWage !== '' && $dailyWageNum > 0) {
+                    $member['deposit_rate'] = $dailyWage;
+                }
+                $members[$idx] = $member;
+            }
+        }        
         return $members;
     }
 }
@@ -946,7 +963,16 @@ if (!function_exists('cpms_build_project_worker_rows')) {
                 foreach ($data as $field => $fieldValue) {
                     if ($field === 'name') continue;
                     if ($field === 'deposit_rate') {
-                        if ((string)$fieldValue !== '' && (int)$fieldValue >= 0) $merged[$field] = $fieldValue;
+                        $projectRateRaw = trim((string)$fieldValue);
+                        $projectRateNum = (is_numeric(str_replace(',', '', $projectRateRaw))) ? (float)str_replace(',', '', $projectRateRaw) : 0;
+                        $directRateRaw = isset($merged[$field]) ? trim((string)$merged[$field]) : '';
+                        // 직영팀 기본 임금단가를 우선 유지하고,
+                        // 프로젝트 저장값이 0보다 큰 경우에만 덮어씁니다.
+                        if ($projectRateRaw !== '' && $projectRateNum > 0) {
+                            $merged[$field] = $projectRateRaw;
+                        } else if ($directRateRaw === '' && $projectRateRaw !== '') {
+                            $merged[$field] = $projectRateRaw;
+                        }
                         continue;
                     }
                     if (trim((string)$fieldValue) !== '') $merged[$field] = $fieldValue;
