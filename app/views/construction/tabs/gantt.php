@@ -177,7 +177,13 @@ $viewMode = ($viewMode === 'edit') ? 'edit' : 'overview';
 $baseStartTs = $rangeStartTs;
 $baseEndTs = $rangeEndTs;
 if ($viewMonth === '') {
-    $viewMonth = date('Y-m', $baseStartTs);
+    // 기본 월을 오늘로 변경(보기/수정 공통)
+    $nowTs = strtotime(date('Y-m-d') . ' 00:00:00');
+    if ($nowTs >= $baseStartTs && $nowTs <= $baseEndTs) {
+        $viewMonth = date('Y-m', $nowTs);
+    } else {
+        $viewMonth = date('Y-m', $baseStartTs);
+    }
 }
 $rangeStartTs = strtotime($viewMonth . '-01 00:00:00');
 $rangeEndTs = strtotime(date('Y-m-t', $rangeStartTs) . ' 00:00:00');
@@ -879,6 +885,11 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var todayOffset = parseInt(rangeSource.getAttribute('data-today-offset'), 10);
   var initialMode = '<?php echo h($viewMode); ?>';
   if (isNaN(todayOffset)) todayOffset = -1;
+
+    function shouldKeepEditMode(){
+    if (initialMode === 'edit') return true;
+    return getActiveTab() === 'board';
+  }
 
   function getCurrentMonthParam(){
     var params = new URLSearchParams(window.location.search);
@@ -1591,7 +1602,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       if (projectId) params.set('pid', projectId);
       params.set('tab', 'gantt');
       params.set('month', month);
-      params.delete('mode');
+      if (shouldKeepEditMode()) params.set('mode', 'edit');
+      else params.delete('mode');
       window.location.search = params.toString();
     });
   }
@@ -1607,9 +1619,9 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       if (pid) params.set('pid', pid);
       params.set('tab', tab);
       params.set('month', chosen);
-      window.location.search = params.toString();
-      if (initialMode === 'edit') params.set('mode', 'edit');
-      else params.delete('mode');      
+      if (shouldKeepEditMode()) params.set('mode', 'edit');
+      else params.delete('mode');
+      window.location.search = params.toString(); 
     });
   });
 })();
