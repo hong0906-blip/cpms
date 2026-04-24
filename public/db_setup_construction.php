@@ -101,6 +101,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     KEY idx_project_date (project_id, use_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 $msg = '장비 입력 테이블 생성/확인 완료';
+                } else if ($action === 'materials') {
+                // 자재구입비(장비 방식 복제)
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_material_items (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    category VARCHAR(50) NOT NULL,
+                    vendor_name VARCHAR(100) NOT NULL,
+                    spec VARCHAR(100) DEFAULT '',
+                    representative VARCHAR(50) DEFAULT '',
+                    phone VARCHAR(30) DEFAULT '',
+                    biz_no VARCHAR(30) DEFAULT '',
+                    base_rate DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    remark VARCHAR(255) DEFAULT '',
+                    is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NULL DEFAULT NULL,
+                    KEY idx_project_id (project_id),
+                    KEY idx_category (category)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_material_usage (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    material_id INT NOT NULL,
+                    use_date DATE NOT NULL,
+                    amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    memo VARCHAR(255) DEFAULT '',
+                    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_material_day (material_id, use_date),
+                    KEY idx_project_date (project_id, use_date)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                $msg = '자재구입비 테이블 생성/확인 완료';                
                 }
         } catch (Exception $e) { $err = $e->getMessage(); }
     }
