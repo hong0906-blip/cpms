@@ -144,7 +144,10 @@ try {
                 $unitIdVal = isset($tr['unit_price_id']) ? (int)$tr['unit_price_id'] : 0;
                 if ($taskIdVal <= 0 || $unitIdVal <= 0) continue;
                 if (!isset($taskItemDoneMap[$taskIdVal])) $taskItemDoneMap[$taskIdVal] = array();
-                $taskItemDoneMap[$taskIdVal][$unitIdVal] = isset($tr['done_qty']) ? (float)$tr['done_qty'] : 0;
+                // 과거 공정 모달 자동완료 표시: NULL 저장값은 미입력으로 취급하기 위해 NULL 유지
+                $taskItemDoneMap[$taskIdVal][$unitIdVal] = (isset($tr['done_qty']) && $tr['done_qty'] !== null && $tr['done_qty'] !== '')
+                    ? (float)$tr['done_qty']
+                    : null;
             }
         }
     } catch (Exception $eTip) {
@@ -1442,6 +1445,9 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var rows = (taskItemMap && taskItemMap[taskId]) ? taskItemMap[taskId] : [];
     var doneMap = (taskItemDoneMap && taskItemDoneMap[taskId]) ? taskItemDoneMap[taskId] : {};
     bodyEl.innerHTML = '';
+    var taskRange = getTaskDateRange(taskId);
+    // 과거 공정 모달 자동완료 표시: 종료일이 오늘 00:00:00 이전이면 모달 기본 완료수량을 총수량으로 표시
+    var isPastTask = !!(taskRange && taskRange.end && todayYmd && taskRange.end < todayYmd);    
     var totalQtySum = 0;
     var doneQtySum = 0;
 
@@ -1461,8 +1467,16 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var uid = parseInt(item.unit_price_id, 10) || 0;
       var contractQty = toNumber(item.contract_qty);
       if (contractQty === null) contractQty = 0;
-      var doneQty = doneMap && Object.prototype.hasOwnProperty.call(doneMap, uid) ? toNumber(doneMap[uid]) : 0;
-      if (doneQty === null) doneQty = 0;
+      var hasSavedDoneQty = false;
+      var doneQty = 0;
+      if (doneMap && Object.prototype.hasOwnProperty.call(doneMap, uid)) {
+        var savedDoneQty = toNumber(doneMap[uid]);
+        if (savedDoneQty !== null) {
+          hasSavedDoneQty = true;
+          doneQty = savedDoneQty;
+        }
+      }
+      if (!hasSavedDoneQty && isPastTask) doneQty = contractQty;
       if (doneQty < 0) doneQty = 0;
       var remain = contractQty - doneQty;
       if (remain < 0) remain = 0;
