@@ -1,7 +1,7 @@
 <?php
 /**
- * 공사 > 상황 탭(연도별 월/분기 비용 그래프)
- * - 연도 선택 + 월별/분기별 4항목(노무/장비/자재/안전) 막대그래프
+ * 공사 > 상황 탭(연도별 월/분기 비용+매출 그래프)
+ * - 연도 선택 + 월별/분기별 5항목(노무/장비/안전/자재/매출) 막대그래프
  * - 회사 월 기준: 전월 25일 ~ 현월 24일
  * - PHP 5.6 호환
  */
@@ -62,6 +62,35 @@ if (!function_exists('cpms_status_sum_between')) {
             $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
             $st->bindValue(':start', (string)$startDate);
             $st->bindValue(':end', (string)$endDate);
+
+            if (is_array($extraParams)) {
+                foreach ($extraParams as $k => $v) {
+                    $st->bindValue($k, $v);
+                }
+            }
+
+            $st->execute();
+            return (float)$st->fetchColumn();
+        } catch (Exception $e) {
+            return 0;
+        }
+    }
+}
+
+if (!function_exists('cpms_status_sum_all')) {
+    function cpms_status_sum_all($pdo, $table, $projectId, $extraWhere, $extraParams) {
+        if (!$pdo) return 0;
+        if (!cpms_status_table_exists($pdo, $table)) return 0;
+        if (!cpms_status_column_exists($pdo, $table, 'project_id')) return 0;
+        if (!cpms_status_column_exists($pdo, $table, 'amount')) return 0;
+
+        try {
+            $sql = "SELECT COALESCE(SUM(amount), 0) FROM `" . $table . "` WHERE project_id = :pid";
+            if ($extraWhere !== '') {
+                $sql .= ' ' . $extraWhere;
+            }
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
 
             if (is_array($extraParams)) {
                 foreach ($extraParams as $k => $v) {
@@ -194,6 +223,87 @@ if (!function_exists('cpms_status_labor_total_between')) {
     }
 }
 
+if (!function_exists('cpms_status_sales_total_between')) {
+    function cpms_status_sales_total_between($pdo, $projectId, $startDate, $endDate) {
+        if (!$pdo || $projectId <= 0) return 0.0;
+        if (!cpms_status_table_exists($pdo, 'cpms_schedule_tasks')) return 0.0;
+        if (!cpms_status_table_exists($pdo, 'cpms_work_item_lines')) return 0.0;
+        if (!cpms_status_table_exists($pdo, 'cpms_project_unit_prices')) return 0.0;
+
+        $requiredTaskCols = array('project_id', 'work_id', 'end_date', 'progress');
+        foreach ($requiredTaskCols as $col) {
+            if (!cpms_status_column_exists($pdo, 'cpms_schedule_tasks', $col)) return 0.0;
+        }
+        $requiredLineCols = array('work_id', 'unit_price_id');
+        foreach ($requiredLineCols as $col) {
+            if (!cpms_status_column_exists($pdo, 'cpms_work_item_lines', $col)) return 0.0;
+        }
+        if (!cpms_status_column_exists($pdo, 'cpms_project_unit_prices', 'id')) return 0.0;
+        if (!cpms_status_column_exists($pdo, 'cpms_project_unit_prices', 'unit_price')) return 0.0;
+
+        $hasLinePlannedQty = cpms_status_column_exists($pdo, 'cpms_work_item_lines', 'planned_qty');
+        $hasUnitQty = cpms_status_column_exists($pdo, 'cpms_project_unit_prices', 'qty');
+
+        $qtyExpr = '0';
+        if ($hasLinePlannedQty && $hasUnitQty) {
+            $qtyExpr = 'COALESCE(NULLIF(wil.planned_qty, 0), pup.qty, 0)';
+        } else if ($hasLinePlannedQty) {
+            $qtyExpr = 'COALESCE(wil.planned_qty, 0)';
+        } else if ($hasUnitQty) {
+            $qtyExpr = 'COALESCE(pup.qty, 0)';
+        }
+
+        try {
+            $today = date('Y-m-d');
+            $sql = "
+                SELECT COALESCE(SUM(work_amount), 0) AS total_sales
+                FROM (
+                    SELECT
+                        st.id AS task_id,
+                        COALESCE(SUM((" . $qtyExpr . ") * COALESCE(pup.unit_price, 0)), 0) AS work_amount
+                    FROM cpms_schedule_tasks st
+                    LEFT JOIN cpms_work_item_lines wil ON wil.work_id = st.work_id
+                    LEFT JOIN cpms_project_unit_prices pup ON pup.id = wil.unit_price_id
+                    WHERE st.project_id = :pid
+                      AND st.end_date IS NOT NULL
+                      AND st.end_date <> ''
+                      AND st.end_date BETWEEN :start AND :end
+                      AND (
+                        COALESCE(st.progress, 0) >= 100
+                        OR (
+                            st.end_date < :today
+                            AND (st.progress IS NULL OR st.progress = 0)
+                        )
+                      )
+                    GROUP BY st.id
+                ) sales_by_task
+            ";
+
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+            $st->bindValue(':start', (string)$startDate);
+            $st->bindValue(':end', (string)$endDate);
+            $st->bindValue(':today', (string)$today);
+            $st->execute();
+            return (float)$st->fetchColumn();
+        } catch (Exception $e) {
+            return 0.0;
+        }
+    }
+}
+
+if (!function_exists('cpms_status_sales_total_all')) {
+    function cpms_status_sales_total_all($pdo, $projectId) {
+        if (!$pdo || $projectId <= 0) return 0.0;
+
+        try {
+            return cpms_status_sales_total_between($pdo, $projectId, '1900-01-01', '2999-12-31');
+        } catch (Exception $e) {
+            return 0.0;
+        }
+    }
+}
+
 $projectStartDate = isset($projectRow['start_date']) ? (string)$projectRow['start_date'] : date('Y-m-d');
 $projectEndDate = isset($projectRow['end_date']) ? (string)$projectRow['end_date'] : date('Y-m-d');
 $projectName = isset($projectRow['name']) ? (string)$projectRow['name'] : '';
@@ -229,17 +339,19 @@ if (!in_array($selectedYear, $years, true)) {
     }
 }
 
+// 상황탭 매출 추가/색상변경/상단금액구조 변경
 $categories = array(
     'labor' => array('label' => '노무비', 'color' => '#FACC15'),
-    'equipment' => array('label' => '장비', 'color' => '#EF4444'),
-    'materials' => array('label' => '자재구입비', 'color' => '#3B82F6'),
+    'equipment' => array('label' => '장비비', 'color' => '#EF4444'),
     'safety' => array('label' => '안전관리비', 'color' => '#22C55E'),
+    'materials' => array('label' => '자재구입비', 'color' => '#A855F7'),
+    'sales' => array('label' => '매출', 'color' => '#3B82F6'),    
 );
 
 $laborWageMap = cpms_status_labor_wage_map($pdo, (int)$pid);
 
 $monthlyData = array();
-$yearTotals = array('labor' => 0, 'equipment' => 0, 'materials' => 0, 'safety' => 0);
+$yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0);
 $maxMonthlyValue = 0;
 
 for ($m = 1; $m <= 12; $m++) {
@@ -256,10 +368,8 @@ for ($m = 1; $m <= 12; $m++) {
     $rangeStart = $rangeStartObj->format('Y-m-d');
     $rangeEnd = $rangeEndObj->format('Y-m-d');
 
-    // 4항목(노무/장비/자재/안전) 막대그래프: 월별 집계
     $equipment = cpms_status_sum_between($pdo, 'cpms_equipment_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
     $materials = cpms_status_sum_between($pdo, 'cpms_material_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
-
     $safety = cpms_status_sum_between(
         $pdo,
         'cpms_daily_cost_entries',
@@ -274,15 +384,19 @@ for ($m = 1; $m <= 12; $m++) {
     // 상황탭 노무비=지급총액 합
     $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $rangeStart, $rangeEnd, $laborWageMap);
 
+    // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
+    $sales = cpms_status_sales_total_between($pdo, (int)$pid, $rangeStart, $rangeEnd);
+
     $row = array(
         'month' => $m,
         'label' => $m . '월',
         'start' => $rangeStart,
         'end' => $rangeEnd,
         'labor' => $labor,
-        'equipment' => $equipment,
         'materials' => $materials,
         'safety' => $safety,
+        'materials' => $materials,
+        'sales' => $sales,        
     );
 
     foreach ($yearTotals as $key => $sumValue) {
@@ -306,8 +420,9 @@ for ($q = 1; $q <= 4; $q++) {
         'label' => $q . 'Q',
         'labor' => 0,
         'equipment' => 0,
-        'materials' => 0,
         'safety' => 0,
+        'materials' => 0,
+        'sales' => 0,        
     );
 
     foreach ($monthlyData as $mRow) {
@@ -328,8 +443,8 @@ for ($q = 1; $q <= 4; $q++) {
     $quarterlyData[] = $qRow;
 }
 
-// 총사용금액 누적 고정: 연도 선택과 무관하게 전체 누적
-$overallTotals = array('labor' => 0, 'equipment' => 0, 'materials' => 0, 'safety' => 0);
+// 상황탭 매출 추가/색상변경/상단금액구조 변경: 상단 전체 누적 금액(연도 변경과 무관)
+$overallTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0);
 foreach ($years as $yy) {
     for ($m = 1; $m <= 12; $m++) {
         $monthObj = DateTime::createFromFormat('Y-m-d', sprintf('%04d-%02d-01', (int)$yy, $m));
@@ -360,16 +475,17 @@ foreach ($years as $yy) {
         $overallTotals['labor'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $rangeStart, $rangeEnd, $laborWageMap);
     }
 }
+$overallTotals['sales'] = cpms_status_sales_total_all($pdo, (int)$pid);
+$overallUsageTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['safety'] + $overallTotals['materials'];
+$overallNetTotal = $overallTotals['sales'] - $overallUsageTotal;
 
-$overallGrandTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['materials'] + $overallTotals['safety'];
 if ($maxMonthlyValue <= 0) $maxMonthlyValue = 1;
 if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 ?>
 
 <style>
-/* 4항목(노무/장비/자재/안전) 막대그래프 */
 .cpms-status-wrap .card { border:1px solid #e5e7eb; border-radius:16px; background:#fff; }
-.cpms-status-wrap .summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.cpms-status-wrap .summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .cpms-status-wrap .chart-wrap { border:1px solid #e5e7eb; border-radius:16px; padding:16px; background:#fff; }
 .cpms-status-wrap .chart-scroll { overflow-x:auto; }
 .cpms-status-wrap .chart-row { min-width:900px; height:280px; display:flex; align-items:flex-end; gap:12px; padding:8px 4px 0 4px; border-bottom:1px solid #e5e7eb; }
@@ -382,7 +498,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 .cpms-status-wrap .legend-item { display:flex; align-items:center; gap:6px; font-size:12px; color:#374151; }
 .cpms-status-wrap .dot { width:12px; height:12px; border-radius:3px; display:inline-block; }
 @media (max-width: 980px) {
-    .cpms-status-wrap .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .cpms-status-wrap .summary-grid { grid-template-columns:repeat(1,minmax(0,1fr)); }
 }
 </style>
 
@@ -391,46 +507,48 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <h3 class="text-xl font-extrabold text-gray-900">상황</h3>
-                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용 현황(회사 월 기준: 전월 25일~현월 24일)</div>
+                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황(회사 월 기준: 전월 25일~현월 24일)</div>
             </div>
         </div>
 
+        <!-- 상황탭 매출 추가/색상변경/상단금액구조 변경 -->        
         <div class="mt-4 p-4 rounded-2xl bg-gray-900 text-white">
-            <div class="text-sm text-gray-200">총 사용금액(전체 누적)</div>
-            <div class="text-3xl font-extrabold mt-1"><?php echo h(cpms_status_money($overallGrandTotal)); ?></div>
+            <div class="text-sm text-gray-200">총 매출금액 (전체 누적, 순이익)</div>
+            <div class="text-3xl font-extrabold mt-1"><?php echo h(cpms_status_money($overallNetTotal)); ?></div>
         </div>
 
         <div class="summary-grid mt-3">
-            <?php foreach ($categories as $key => $meta): ?>
-                <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                    <div class="text-xs text-gray-500"><?php echo h($meta['label']); ?> (<?php echo (int)$selectedYear; ?>년)</div>
-                    <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($yearTotals[$key])); ?></div>
-                </div>
-            <?php endforeach; ?>
+            <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
+                <div class="text-xs text-gray-500">순수 총매출금액 (전체 누적)</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['sales'])); ?></div>
+            </div>
+            <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
+                <div class="text-xs text-gray-500">총사용금액 (전체 누적)</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallUsageTotal)); ?></div>
+            </div>
         </div>
+    </div>
+
+    <div class="flex justify-end">
+        <form method="get" action="" class="flex flex-wrap items-end gap-2">
+            <input type="hidden" name="r" value="공사">
+            <input type="hidden" name="pid" value="<?php echo (int)$pid; ?>">
+            <input type="hidden" name="tab" value="status">
+            <label class="text-sm font-bold text-gray-700">연도</label>
+            <select name="year" class="px-3 py-2 rounded-xl border border-gray-300" onchange="this.form.submit()">
+                <?php foreach ($years as $yy): ?>
+                    <option value="<?php echo (int)$yy; ?>" <?php echo ($selectedYear === (int)$yy) ? 'selected' : ''; ?>>
+                        <?php echo (int)$yy; ?>년
+                    </option>
+                <?php endforeach; ?>
+            </select>
+        </form>
     </div>
 
     <div class="chart-wrap">
         <div class="flex items-center justify-between">
-            <h4 class="text-lg font-extrabold text-gray-900">월별 비용 그래프</h4>
+            <h4 class="text-lg font-extrabold text-gray-900">월별 비용/매출 그래프</h4>
             <div class="text-xs text-gray-500">기준: 전월 25일 ~ 현월 24일</div>
-        </div>
-
-        <div class="mt-3 mb-3 flex justify-end">
-            <!-- 연도 드롭다운 위치 변경 -->
-            <form method="get" action="" class="flex flex-wrap items-end gap-2">
-                <input type="hidden" name="r" value="공사">
-                <input type="hidden" name="pid" value="<?php echo (int)$pid; ?>">
-                <input type="hidden" name="tab" value="status">
-                <label class="text-sm font-bold text-gray-700">연도</label>
-                <select name="year" class="px-3 py-2 rounded-xl border border-gray-300" onchange="this.form.submit()">
-                    <?php foreach ($years as $yy): ?>
-                        <option value="<?php echo (int)$yy; ?>" <?php echo ($selectedYear === (int)$yy) ? 'selected' : ''; ?>>
-                            <?php echo (int)$yy; ?>년
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </form>
         </div>
 
         <div class="chart-scroll">
@@ -463,7 +581,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     </div>
 
     <div class="chart-wrap">
-        <h4 class="text-lg font-extrabold text-gray-900">분기별 비용 그래프</h4>
+        <h4 class="text-lg font-extrabold text-gray-900">분기별 비용/매출 그래프</h4>
         <div class="chart-scroll">
             <div class="chart-row" style="min-width:520px;">
                 <?php foreach ($quarterlyData as $row): ?>
