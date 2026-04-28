@@ -1,0 +1,352 @@
+<?php
+/**
+ * 공사 > 상황 탭(연도별 월/분기 비용 그래프)
+ * - 연도 선택 + 월별/분기별 4항목(노무/장비/자재/안전) 막대그래프
+ * - 회사 월 기준: 전월 25일 ~ 현월 24일
+ * - PHP 5.6 호환
+ */
+
+if (!function_exists('cpms_status_table_exists')) {
+    function cpms_status_table_exists($pdo, $table) {
+        if (!$pdo) return false;
+        try {
+            $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            if ($dbName === '') return false;
+            $sql = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':db', $dbName);
+            $st->bindValue(':tbl', (string)$table);
+            $st->execute();
+            return ((int)$st->fetchColumn() > 0);
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('cpms_status_column_exists')) {
+    function cpms_status_column_exists($pdo, $table, $column) {
+        if (!$pdo) return false;
+        try {
+            $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            if ($dbName === '') return false;
+            $sql = "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl AND COLUMN_NAME = :col";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':db', $dbName);
+            $st->bindValue(':tbl', (string)$table);
+            $st->bindValue(':col', (string)$column);
+            $st->execute();
+            return ((int)$st->fetchColumn() > 0);
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('cpms_status_sum_between')) {
+    function cpms_status_sum_between($pdo, $table, $dateColumn, $projectId, $startDate, $endDate, $extraWhere, $extraParams) {
+        if (!$pdo) return 0;
+        if (!cpms_status_table_exists($pdo, $table)) return 0;
+        if (!cpms_status_column_exists($pdo, $table, 'project_id')) return 0;
+        if (!cpms_status_column_exists($pdo, $table, 'amount')) return 0;
+        if (!cpms_status_column_exists($pdo, $table, $dateColumn)) return 0;
+
+        try {
+            $sql = "SELECT COALESCE(SUM(amount), 0) FROM `" . $table . "` WHERE project_id = :pid AND `" . $dateColumn . "` BETWEEN :start AND :end";
+            if ($extraWhere !== '') {
+                $sql .= ' ' . $extraWhere;
+            }
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+            $st->bindValue(':start', (string)$startDate);
+            $st->bindValue(':end', (string)$endDate);
+
+            if (is_array($extraParams)) {
+                foreach ($extraParams as $k => $v) {
+                    $st->bindValue($k, $v);
+                }
+            }
+
+            $st->execute();
+            return (float)$st->fetchColumn();
+        } catch (Exception $e) {
+            return 0;
+        }
+    }
+}
+
+if (!function_exists('cpms_status_money')) {
+    function cpms_status_money($amount) {
+        return number_format((float)$amount) . '원';
+    }
+}
+
+$projectStartDate = isset($projectRow['start_date']) ? (string)$projectRow['start_date'] : date('Y-m-d');
+$projectEndDate = isset($projectRow['end_date']) ? (string)$projectRow['end_date'] : date('Y-m-d');
+
+$startYear = (int)date('Y');
+$endYear = (int)date('Y');
+try {
+    $startYear = (int)(new DateTime($projectStartDate))->format('Y');
+    $endYear = (int)(new DateTime($projectEndDate))->format('Y');
+} catch (Exception $e) {
+    $startYear = (int)date('Y');
+    $endYear = (int)date('Y');
+}
+if ($startYear > $endYear) {
+    $tmp = $startYear;
+    $startYear = $endYear;
+    $endYear = $tmp;
+}
+
+$years = array();
+for ($y = $startYear; $y <= $endYear; $y++) {
+    $years[] = $y;
+}
+if (count($years) === 0) {
+    $years[] = (int)date('Y');
+}
+
+$selectedYear = isset($_GET['year']) ? (int)$_GET['year'] : (int)date('Y');
+if (!in_array($selectedYear, $years, true)) {
+    $selectedYear = (int)date('Y');
+    if (!in_array($selectedYear, $years, true)) {
+        $selectedYear = $years[count($years) - 1];
+    }
+}
+
+$categories = array(
+    'labor' => array('label' => '노무비', 'color' => '#FACC15'),
+    'equipment' => array('label' => '장비', 'color' => '#EF4444'),
+    'materials' => array('label' => '자재구입비', 'color' => '#3B82F6'),
+    'safety' => array('label' => '안전관리비', 'color' => '#22C55E'),
+);
+
+$monthlyData = array();
+$yearTotals = array('labor' => 0, 'equipment' => 0, 'materials' => 0, 'safety' => 0);
+$maxMonthlyValue = 0;
+
+for ($m = 1; $m <= 12; $m++) {
+    $monthObj = DateTime::createFromFormat('Y-m-d', sprintf('%04d-%02d-01', $selectedYear, $m));
+    if (!$monthObj) continue;
+
+    $rangeStartObj = clone $monthObj;
+    $rangeStartObj->modify('-1 month');
+    $rangeStartObj->setDate((int)$rangeStartObj->format('Y'), (int)$rangeStartObj->format('m'), 25);
+
+    $rangeEndObj = clone $monthObj;
+    $rangeEndObj->setDate((int)$rangeEndObj->format('Y'), (int)$rangeEndObj->format('m'), 24);
+
+    $rangeStart = $rangeStartObj->format('Y-m-d');
+    $rangeEnd = $rangeEndObj->format('Y-m-d');
+
+    // 4항목(노무/장비/자재/안전) 막대그래프: 월별 집계
+    $equipment = cpms_status_sum_between($pdo, 'cpms_equipment_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
+    $materials = cpms_status_sum_between($pdo, 'cpms_material_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
+
+    $safety = cpms_status_sum_between(
+        $pdo,
+        'cpms_daily_cost_entries',
+        'cost_date',
+        $pid,
+        $rangeStart,
+        $rangeEnd,
+        "AND cost_type IN ('안전','안전관리비')",
+        array()
+    );
+
+    // 노무비: 대체안 사용 (cpms_daily_cost_entries cost_type='노무'/'노무비')
+    $labor = cpms_status_sum_between(
+        $pdo,
+        'cpms_daily_cost_entries',
+        'cost_date',
+        $pid,
+        $rangeStart,
+        $rangeEnd,
+        "AND cost_type IN ('노무','노무비')",
+        array()
+    );
+
+    $row = array(
+        'month' => $m,
+        'label' => $m . '월',
+        'start' => $rangeStart,
+        'end' => $rangeEnd,
+        'labor' => $labor,
+        'equipment' => $equipment,
+        'materials' => $materials,
+        'safety' => $safety,
+    );
+
+    foreach ($yearTotals as $key => $sumValue) {
+        $yearTotals[$key] += isset($row[$key]) ? (float)$row[$key] : 0;
+        if (isset($row[$key]) && (float)$row[$key] > $maxMonthlyValue) {
+            $maxMonthlyValue = (float)$row[$key];
+        }
+    }
+
+    $monthlyData[] = $row;
+}
+
+$quarterlyData = array();
+$maxQuarterValue = 0;
+for ($q = 1; $q <= 4; $q++) {
+    $startMonth = (($q - 1) * 3) + 1;
+    $endMonth = $startMonth + 2;
+
+    $qRow = array(
+        'quarter' => $q,
+        'label' => $q . 'Q',
+        'labor' => 0,
+        'equipment' => 0,
+        'materials' => 0,
+        'safety' => 0,
+    );
+
+    foreach ($monthlyData as $mRow) {
+        $mm = isset($mRow['month']) ? (int)$mRow['month'] : 0;
+        if ($mm < $startMonth || $mm > $endMonth) continue;
+
+        foreach ($yearTotals as $key => $ignored) {
+            $qRow[$key] += isset($mRow[$key]) ? (float)$mRow[$key] : 0;
+        }
+    }
+
+    foreach ($yearTotals as $key => $ignored) {
+        if ((float)$qRow[$key] > $maxQuarterValue) {
+            $maxQuarterValue = (float)$qRow[$key];
+        }
+    }
+
+    $quarterlyData[] = $qRow;
+}
+
+$yearGrandTotal = $yearTotals['labor'] + $yearTotals['equipment'] + $yearTotals['materials'] + $yearTotals['safety'];
+if ($maxMonthlyValue <= 0) $maxMonthlyValue = 1;
+if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
+?>
+
+<style>
+/* 4항목(노무/장비/자재/안전) 막대그래프 */
+.cpms-status-wrap .card { border:1px solid #e5e7eb; border-radius:16px; background:#fff; }
+.cpms-status-wrap .summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.cpms-status-wrap .chart-wrap { border:1px solid #e5e7eb; border-radius:16px; padding:16px; background:#fff; }
+.cpms-status-wrap .chart-scroll { overflow-x:auto; }
+.cpms-status-wrap .chart-row { min-width:900px; height:280px; display:flex; align-items:flex-end; gap:12px; padding:8px 4px 0 4px; border-bottom:1px solid #e5e7eb; }
+.cpms-status-wrap .group { flex:1; min-width:55px; display:flex; flex-direction:column; align-items:center; }
+.cpms-status-wrap .bars { width:100%; height:230px; display:flex; align-items:flex-end; justify-content:center; gap:4px; }
+.cpms-status-wrap .bar { width:18%; min-width:9px; border-radius:6px 6px 0 0; position:relative; }
+.cpms-status-wrap .bar .value { position:absolute; top:-20px; left:50%; transform:translateX(-50%); font-size:10px; color:#374151; white-space:nowrap; }
+.cpms-status-wrap .xlabel { margin-top:8px; font-size:12px; color:#4b5563; font-weight:700; }
+.cpms-status-wrap .legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
+.cpms-status-wrap .legend-item { display:flex; align-items:center; gap:6px; font-size:12px; color:#374151; }
+.cpms-status-wrap .dot { width:12px; height:12px; border-radius:3px; display:inline-block; }
+@media (max-width: 980px) {
+    .cpms-status-wrap .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+</style>
+
+<div class="cpms-status-wrap space-y-4">
+    <div class="card p-5">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+            <div>
+                <h3 class="text-xl font-extrabold text-gray-900">상황</h3>
+                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용 현황(회사 월 기준: 전월 25일~현월 24일)</div>
+            </div>
+
+            <form method="get" action="" class="flex flex-wrap items-end gap-2">
+                <input type="hidden" name="r" value="공사">
+                <input type="hidden" name="pid" value="<?php echo (int)$pid; ?>">
+                <input type="hidden" name="tab" value="status">
+                <label class="text-sm font-bold text-gray-700">연도</label>
+                <select name="year" class="px-3 py-2 rounded-xl border border-gray-300" onchange="this.form.submit()">
+                    <?php foreach ($years as $yy): ?>
+                        <option value="<?php echo (int)$yy; ?>" <?php echo ($selectedYear === (int)$yy) ? 'selected' : ''; ?>>
+                            <?php echo (int)$yy; ?>년
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+        </div>
+
+        <div class="mt-4 p-4 rounded-2xl bg-gray-900 text-white">
+            <div class="text-sm text-gray-200">총 사용금액(<?php echo (int)$selectedYear; ?>년)</div>
+            <div class="text-3xl font-extrabold mt-1"><?php echo h(cpms_status_money($yearGrandTotal)); ?></div>
+        </div>
+
+        <div class="summary-grid mt-3">
+            <?php foreach ($categories as $key => $meta): ?>
+                <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
+                    <div class="text-xs text-gray-500"><?php echo h($meta['label']); ?></div>
+                    <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($yearTotals[$key])); ?></div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="chart-wrap">
+        <div class="flex items-center justify-between">
+            <h4 class="text-lg font-extrabold text-gray-900">월별 비용 그래프</h4>
+            <div class="text-xs text-gray-500">기준: 전월 25일 ~ 현월 24일</div>
+        </div>
+
+        <div class="chart-scroll">
+            <div class="chart-row">
+                <?php foreach ($monthlyData as $row): ?>
+                    <div class="group">
+                        <div class="bars">
+                            <?php foreach ($categories as $key => $meta): ?>
+                                <?php
+                                $amount = isset($row[$key]) ? (float)$row[$key] : 0;
+                                $height = ($amount <= 0) ? 2 : max(2, ($amount / $maxMonthlyValue) * 100);
+                                $title = $row['label'] . ' ' . $meta['label'] . ': ' . cpms_status_money($amount) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
+                                ?>
+                                <div class="bar" title="<?php echo h($title); ?>" style="height:<?php echo round($height, 2); ?>%; background:<?php echo h($meta['color']); ?>;">
+                                    <span class="value"><?php echo h(number_format($amount)); ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="xlabel"><?php echo h($row['label']); ?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <div class="legend">
+            <?php foreach ($categories as $meta): ?>
+                <span class="legend-item"><span class="dot" style="background:<?php echo h($meta['color']); ?>;"></span><?php echo h($meta['label']); ?></span>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="chart-wrap">
+        <h4 class="text-lg font-extrabold text-gray-900">분기별 비용 그래프</h4>
+        <div class="chart-scroll">
+            <div class="chart-row" style="min-width:520px;">
+                <?php foreach ($quarterlyData as $row): ?>
+                    <div class="group">
+                        <div class="bars">
+                            <?php foreach ($categories as $key => $meta): ?>
+                                <?php
+                                $amount = isset($row[$key]) ? (float)$row[$key] : 0;
+                                $height = ($amount <= 0) ? 2 : max(2, ($amount / $maxQuarterValue) * 100);
+                                $title = $row['label'] . ' ' . $meta['label'] . ': ' . cpms_status_money($amount);
+                                ?>
+                                <div class="bar" title="<?php echo h($title); ?>" style="height:<?php echo round($height, 2); ?>%; background:<?php echo h($meta['color']); ?>;">
+                                    <span class="value"><?php echo h(number_format($amount)); ?></span>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <div class="xlabel"><?php echo h($row['label']); ?></div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <div class="legend">
+            <?php foreach ($categories as $meta): ?>
+                <span class="legend-item"><span class="dot" style="background:<?php echo h($meta['color']); ?>;"></span><?php echo h($meta['label']); ?></span>
+            <?php endforeach; ?>
+        </div>
+    </div>
+</div>

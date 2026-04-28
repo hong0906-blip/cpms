@@ -98,6 +98,8 @@ $tab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'gantt';
 if ($tab === '') $tab = 'gantt';
 
 $tabs = array(
+    // 상황 탭 추가
+    'status'   => '상황',    
     'roles'    => '담당지정',
     'gantt'    => '공정표',
     'labor'    => '노무비',
