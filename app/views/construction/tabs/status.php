@@ -6,6 +6,8 @@
  * - PHP 5.6 호환
  */
 
+require_once __DIR__ . '/partials/labor_data_loader.php';
+
 if (!function_exists('cpms_status_table_exists')) {
     function cpms_status_table_exists($pdo, $table) {
         if (!$pdo) return false;
@@ -81,8 +83,120 @@ if (!function_exists('cpms_status_money')) {
     }
 }
 
+if (!function_exists('cpms_status_parse_money')) {
+    function cpms_status_parse_money($value) {
+        $value = trim((string)$value);
+        if ($value === '') return 0.0;
+        $value = str_replace(',', '', $value);
+        if (!is_numeric($value)) return 0.0;
+        return (float)$value;
+    }
+}
+
+if (!function_exists('cpms_status_apply_overrides')) {
+    function cpms_status_apply_overrides($map, $projectId, $month) {
+        $rows = cpms_load_labor_overrides((int)$projectId, (string)$month);
+        if (!is_array($rows)) return $map;
+
+        foreach ($rows as $workerKey => $dateRows) {
+            if (!isset($map[$workerKey]) || !is_array($map[$workerKey])) $map[$workerKey] = array();
+            if (!is_array($dateRows)) continue;
+            foreach ($dateRows as $dateKey => $entry) {
+                if (is_array($entry) && isset($entry['value']) && is_numeric($entry['value'])) {
+                    $map[$workerKey][$dateKey] = (float)$entry['value'];
+                }
+            }
+        }
+
+        return $map;
+    }
+}
+
+if (!function_exists('cpms_status_labor_wage_map')) {
+    function cpms_status_labor_wage_map($pdo, $projectId) {
+        $wageMap = array();
+        if (!$pdo || $projectId <= 0) return $wageMap;
+
+        $directTeamMembers = cpms_load_direct_team_members($pdo);
+        $projectWorkers = cpms_load_project_labor_workers($pdo, (int)$projectId);
+        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers);
+        $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
+
+        foreach ($timesheetWorkers as $worker) {
+            $name = isset($worker['name']) ? (string)$worker['name'] : '';
+            $key = cpms_normalize_worker_key($name);
+            if ($key === '') continue;
+            $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
+            $wageMap[$key] = cpms_status_parse_money($wageRateRaw);
+        }
+
+        return $wageMap;
+    }
+}
+
+if (!function_exists('cpms_status_labor_total_between')) {
+    function cpms_status_labor_total_between($pdo, $projectId, $projectName, $startDate, $endDate, $laborWageMap) {
+        if (!$pdo || $projectId <= 0) return 0.0;
+        $projectName = trim((string)$projectName);
+        if ($projectName === '') return 0.0;
+
+        try {
+            $startObj = new DateTime((string)$startDate);
+            $endObj = new DateTime((string)$endDate);
+        } catch (Exception $e) {
+            return 0.0;
+        }
+
+        if ($startObj > $endObj) return 0.0;
+
+        $months = array();
+        $cursor = clone $startObj;
+        while ($cursor <= $endObj) {
+            $months[$cursor->format('Y-m')] = true;
+            $cursor->modify('+1 day');
+        }
+
+        $sumGongsu = array();
+        $outputDaysSet = array();
+
+        foreach ($months as $ym => $unused) {
+            $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
+            $gongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
+            $gongsuMap = cpms_status_apply_overrides($gongsuMap, (int)$projectId, $ym);
+
+            foreach ($gongsuMap as $workerKey => $dailyMap) {
+                if (!is_array($dailyMap)) continue;
+                if (!isset($sumGongsu[$workerKey])) $sumGongsu[$workerKey] = 0.0;
+                if (!isset($outputDaysSet[$workerKey])) $outputDaysSet[$workerKey] = array();
+
+                foreach ($dailyMap as $dateKey => $gongsuValue) {
+                    if (!is_numeric($gongsuValue)) continue;
+                    if ((string)$dateKey < (string)$startDate || (string)$dateKey > (string)$endDate) continue;
+                    $sumGongsu[$workerKey] += (float)$gongsuValue;
+                    $outputDaysSet[$workerKey][$dateKey] = true;
+                }
+            }
+        }
+
+        $totalLabor = 0.0;
+        foreach ($sumGongsu as $workerKey => $workerSumGongsu) {
+            $outputDays = isset($outputDaysSet[$workerKey]) && is_array($outputDaysSet[$workerKey]) ? count($outputDaysSet[$workerKey]) : 0;
+            if ($outputDays <= 0) continue;
+
+            $gongsuUnit = ((float)$workerSumGongsu) / $outputDays;
+            $wageRate = isset($laborWageMap[$workerKey]) ? (float)$laborWageMap[$workerKey] : 0.0;
+
+            // 상황탭 노무비=지급총액 합 (지급총액 = 공수단위 * 임금단가 * 출력일수)
+            $totalLabor += ((float)$gongsuUnit) * $wageRate * $outputDays;
+        }
+
+        return (float)$totalLabor;
+    }
+}
+
 $projectStartDate = isset($projectRow['start_date']) ? (string)$projectRow['start_date'] : date('Y-m-d');
 $projectEndDate = isset($projectRow['end_date']) ? (string)$projectRow['end_date'] : date('Y-m-d');
+$projectName = isset($projectRow['name']) ? (string)$projectRow['name'] : '';
 
 $startYear = (int)date('Y');
 $endYear = (int)date('Y');
@@ -122,6 +236,8 @@ $categories = array(
     'safety' => array('label' => '안전관리비', 'color' => '#22C55E'),
 );
 
+$laborWageMap = cpms_status_labor_wage_map($pdo, (int)$pid);
+
 $monthlyData = array();
 $yearTotals = array('labor' => 0, 'equipment' => 0, 'materials' => 0, 'safety' => 0);
 $maxMonthlyValue = 0;
@@ -155,17 +271,8 @@ for ($m = 1; $m <= 12; $m++) {
         array()
     );
 
-    // 노무비: 대체안 사용 (cpms_daily_cost_entries cost_type='노무'/'노무비')
-    $labor = cpms_status_sum_between(
-        $pdo,
-        'cpms_daily_cost_entries',
-        'cost_date',
-        $pid,
-        $rangeStart,
-        $rangeEnd,
-        "AND cost_type IN ('노무','노무비')",
-        array()
-    );
+    // 상황탭 노무비=지급총액 합
+    $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $rangeStart, $rangeEnd, $laborWageMap);
 
     $row = array(
         'month' => $m,
@@ -221,7 +328,40 @@ for ($q = 1; $q <= 4; $q++) {
     $quarterlyData[] = $qRow;
 }
 
-$yearGrandTotal = $yearTotals['labor'] + $yearTotals['equipment'] + $yearTotals['materials'] + $yearTotals['safety'];
+// 총사용금액 누적 고정: 연도 선택과 무관하게 전체 누적
+$overallTotals = array('labor' => 0, 'equipment' => 0, 'materials' => 0, 'safety' => 0);
+foreach ($years as $yy) {
+    for ($m = 1; $m <= 12; $m++) {
+        $monthObj = DateTime::createFromFormat('Y-m-d', sprintf('%04d-%02d-01', (int)$yy, $m));
+        if (!$monthObj) continue;
+
+        $rangeStartObj = clone $monthObj;
+        $rangeStartObj->modify('-1 month');
+        $rangeStartObj->setDate((int)$rangeStartObj->format('Y'), (int)$rangeStartObj->format('m'), 25);
+
+        $rangeEndObj = clone $monthObj;
+        $rangeEndObj->setDate((int)$rangeEndObj->format('Y'), (int)$rangeEndObj->format('m'), 24);
+
+        $rangeStart = $rangeStartObj->format('Y-m-d');
+        $rangeEnd = $rangeEndObj->format('Y-m-d');
+
+        $overallTotals['equipment'] += cpms_status_sum_between($pdo, 'cpms_equipment_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
+        $overallTotals['materials'] += cpms_status_sum_between($pdo, 'cpms_material_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
+        $overallTotals['safety'] += cpms_status_sum_between(
+            $pdo,
+            'cpms_daily_cost_entries',
+            'cost_date',
+            $pid,
+            $rangeStart,
+            $rangeEnd,
+            "AND cost_type IN ('안전','안전관리비')",
+            array()
+        );
+        $overallTotals['labor'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $rangeStart, $rangeEnd, $laborWageMap);
+    }
+}
+
+$overallGrandTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['materials'] + $overallTotals['safety'];
 if ($maxMonthlyValue <= 0) $maxMonthlyValue = 1;
 if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 ?>
@@ -253,7 +393,31 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <h3 class="text-xl font-extrabold text-gray-900">상황</h3>
                 <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용 현황(회사 월 기준: 전월 25일~현월 24일)</div>
             </div>
+        </div>
 
+        <div class="mt-4 p-4 rounded-2xl bg-gray-900 text-white">
+            <div class="text-sm text-gray-200">총 사용금액(전체 누적)</div>
+            <div class="text-3xl font-extrabold mt-1"><?php echo h(cpms_status_money($overallGrandTotal)); ?></div>
+        </div>
+
+        <div class="summary-grid mt-3">
+            <?php foreach ($categories as $key => $meta): ?>
+                <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
+                    <div class="text-xs text-gray-500"><?php echo h($meta['label']); ?> (<?php echo (int)$selectedYear; ?>년)</div>
+                    <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($yearTotals[$key])); ?></div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="chart-wrap">
+        <div class="flex items-center justify-between">
+            <h4 class="text-lg font-extrabold text-gray-900">월별 비용 그래프</h4>
+            <div class="text-xs text-gray-500">기준: 전월 25일 ~ 현월 24일</div>
+        </div>
+
+        <div class="mt-3 mb-3 flex justify-end">
+            <!-- 연도 드롭다운 위치 변경 -->
             <form method="get" action="" class="flex flex-wrap items-end gap-2">
                 <input type="hidden" name="r" value="공사">
                 <input type="hidden" name="pid" value="<?php echo (int)$pid; ?>">
@@ -267,27 +431,6 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                     <?php endforeach; ?>
                 </select>
             </form>
-        </div>
-
-        <div class="mt-4 p-4 rounded-2xl bg-gray-900 text-white">
-            <div class="text-sm text-gray-200">총 사용금액(<?php echo (int)$selectedYear; ?>년)</div>
-            <div class="text-3xl font-extrabold mt-1"><?php echo h(cpms_status_money($yearGrandTotal)); ?></div>
-        </div>
-
-        <div class="summary-grid mt-3">
-            <?php foreach ($categories as $key => $meta): ?>
-                <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                    <div class="text-xs text-gray-500"><?php echo h($meta['label']); ?></div>
-                    <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($yearTotals[$key])); ?></div>
-                </div>
-            <?php endforeach; ?>
-        </div>
-    </div>
-
-    <div class="chart-wrap">
-        <div class="flex items-center justify-between">
-            <h4 class="text-lg font-extrabold text-gray-900">월별 비용 그래프</h4>
-            <div class="text-xs text-gray-500">기준: 전월 25일 ~ 현월 24일</div>
         </div>
 
         <div class="chart-scroll">
