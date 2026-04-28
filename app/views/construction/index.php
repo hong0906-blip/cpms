@@ -102,6 +102,7 @@ $tabs = array(
     'status'   => '상황',    
     'roles'    => '담당지정',
     'gantt'    => '공정표',
+    'work'     => '작업',    
     'labor'    => '노무비',
     'equipment'=> '장비',
     'materials'=> '자재구입비',

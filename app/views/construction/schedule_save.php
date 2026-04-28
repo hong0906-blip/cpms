@@ -40,6 +40,7 @@ $name      = isset($_POST['name']) ? trim((string)$_POST['name']) : '';
 $startDate = isset($_POST['start_date']) ? trim((string)$_POST['start_date']) : '';
 $endDate   = isset($_POST['end_date']) ? trim((string)$_POST['end_date']) : '';
 $progress  = isset($_POST['progress']) ? (int)$_POST['progress'] : 0;
+$workId    = isset($_POST['work_id']) ? (int)$_POST['work_id'] : 0; // 공정표-작업 연결
 $month     = isset($_POST['month']) ? trim((string)$_POST['month']) : '';
 $mode      = isset($_POST['mode']) ? trim((string)$_POST['mode']) : '';
 $redirectSuffix = '';
@@ -79,13 +80,14 @@ if (!$pdo) {
 try {
     if ($taskId > 0) {
         $st = $pdo->prepare("UPDATE cpms_schedule_tasks
-                             SET name = :nm, start_date = :sd, end_date = :ed, progress = :pr
+                             SET name = :nm, start_date = :sd, end_date = :ed, progress = :pr, work_id = :wid
                              WHERE id = :id AND project_id = :pid");
         $st->bindValue(':nm', $name);
         $st->bindValue(':sd', $startDate !== '' ? $startDate : null, $startDate !== '' ? \PDO::PARAM_STR : \PDO::PARAM_NULL);
         $st->bindValue(':ed', $endDate !== '' ? $endDate : null, $endDate !== '' ? \PDO::PARAM_STR : \PDO::PARAM_NULL);
         $st->bindValue(':pr', $progress, \PDO::PARAM_INT);
         $st->bindValue(':id', $taskId, \PDO::PARAM_INT);
+        $st->bindValue(':wid', $workId > 0 ? $workId : null, $workId > 0 ? \PDO::PARAM_INT : \PDO::PARAM_NULL);        
         $st->bindValue(':pid', $projectId, \PDO::PARAM_INT);
         $st->execute();
         flash_set('success','공정표가 저장되었습니다.');
@@ -99,14 +101,15 @@ try {
             $ord = (int)$stO->fetchColumn();
         } catch (Exception $e) { $ord = 0; }
 
-        $ins = $pdo->prepare("INSERT INTO cpms_schedule_tasks(project_id, name, start_date, end_date, progress, sort_order)
-                              VALUES(:pid, :nm, :sd, :ed, :pr, :ord)");
+        $ins = $pdo->prepare("INSERT INTO cpms_schedule_tasks(project_id, name, start_date, end_date, progress, sort_order, work_id)
+                              VALUES(:pid, :nm, :sd, :ed, :pr, :ord, :wid)");
         $ins->bindValue(':pid', $projectId, \PDO::PARAM_INT);
         $ins->bindValue(':nm', $name);
         $ins->bindValue(':sd', $startDate !== '' ? $startDate : null, $startDate !== '' ? \PDO::PARAM_STR : \PDO::PARAM_NULL);
         $ins->bindValue(':ed', $endDate !== '' ? $endDate : null, $endDate !== '' ? \PDO::PARAM_STR : \PDO::PARAM_NULL);
         $ins->bindValue(':pr', $progress, \PDO::PARAM_INT);
         $ins->bindValue(':ord', $ord, \PDO::PARAM_INT);
+        $ins->bindValue(':wid', $workId > 0 ? $workId : null, $workId > 0 ? \PDO::PARAM_INT : \PDO::PARAM_NULL);
         $ins->execute();
         flash_set('success','공정이 추가되었습니다.');
     }

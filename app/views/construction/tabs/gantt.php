@@ -22,113 +22,67 @@ try {
     $tasks = $st->fetchAll();
 } catch (Exception $e) { $tasks = array(); }
 
-// 내역서 공정(템플릿 후보)
-$processes = array();
-// 공정별 수량(모달 자동 입력용)
+// 작업내용 목록/상세 (작업내용 레이어 추가)
+$workItems = array();
+$workMap = array();
+$workDetailMap = array();
 $taskQtyMap = array();
 try {
-    $stP = $pdo->prepare("
-        SELECT
-            TRIM(COALESCE(NULLIF(process_name, ''), item_name)) AS base_name,
-            TRIM(spec) AS spec
-        FROM cpms_project_unit_prices
-        WHERE project_id = :pid
-          AND COALESCE(NULLIF(process_name, ''), item_name) IS NOT NULL
-          AND TRIM(COALESCE(NULLIF(process_name, ''), item_name)) <> ''
-          AND spec IS NOT NULL
-          AND TRIM(spec) <> ''
-        ORDER BY base_name ASC, spec ASC
-        LIMIT 300
-    ");
-    $stP->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
-    $stP->execute();
-    $rows = $stP->fetchAll();
-    $grouped = array();
-    $baseOrder = array();
-    if (is_array($rows)) {
-        foreach ($rows as $row) {
-            $base = isset($row['base_name']) ? trim((string)$row['base_name']) : '';
-            $spec = isset($row['spec']) ? trim((string)$row['spec']) : '';
-            if ($base === '' || $spec === '') continue;
-            if (!isset($grouped[$base])) {
-                $grouped[$base] = array();
-                $baseOrder[] = $base;
-            }
-            if (isset($grouped[$base][$spec])) continue;
-            $grouped[$base][$spec] = true;
+    $stW = $pdo->prepare("SELECT * FROM cpms_work_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY sort_order ASC, id ASC");
+    $stW->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
+    $stW->execute();
+    $workItems = $stW->fetchAll();
+    if (is_array($workItems)) {
+        foreach ($workItems as $w) {
+            $wid = isset($w['id']) ? (int)$w['id'] : 0;
+            if ($wid <= 0) continue;
+            $workMap[$wid] = $w;
+            $workDetailMap[$wid] = array(
+                'id' => $wid,
+                'title' => isset($w['title']) ? (string)$w['title'] : '',
+                'description' => isset($w['description']) ? (string)$w['description'] : '',
+                'lines' => array(),
+                'total_amount' => 0
+            );
         }
     }
-    foreach ($baseOrder as $base) {
-        $specs = array_keys($grouped[$base]);
-        if (count($specs) > 1) {
-            foreach ($specs as $spec) {
-                $processes[] = $base . ' (' . $spec . ')';
-            }
-        } else {
-            $processes[] = $base;
-        }
-    }
-} catch (Exception $e) {
-    $processes = array();
-}
 
-try {
-    $stQ = $pdo->prepare("
-        SELECT
-            TRIM(COALESCE(NULLIF(process_name, ''), item_name)) AS base_name,
-            TRIM(spec) AS spec,
-            qty
-        FROM cpms_project_unit_prices
-        WHERE project_id = :pid
-          AND COALESCE(NULLIF(process_name, ''), item_name) IS NOT NULL
-          AND TRIM(COALESCE(NULLIF(process_name, ''), item_name)) <> ''
-        ORDER BY base_name ASC, spec ASC
-        LIMIT 1000
-    ");
-    $stQ->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
-    $stQ->execute();
-    $rowsQ = $stQ->fetchAll();
-    $baseTotals = array();
-    $specTotals = array();
-    $specFlags = array();
-    if (is_array($rowsQ)) {
-        foreach ($rowsQ as $row) {
-            $base = isset($row['base_name']) ? trim((string)$row['base_name']) : '';
-            if ($base === '') continue;
-            $spec = isset($row['spec']) ? trim((string)$row['spec']) : '';
-            $qtyRaw = isset($row['qty']) ? (string)$row['qty'] : '';
-            $qty = 0;
-            if ($qtyRaw !== '') {
-                $clean = preg_replace('/[^0-9.\-]/', '', $qtyRaw);
-                if ($clean !== '' && is_numeric($clean)) $qty = (float)$clean;
-            }
-            if (!isset($baseTotals[$base])) $baseTotals[$base] = 0;
-            $baseTotals[$base] += $qty;
-            if ($spec !== '') {
-                if (!isset($specTotals[$base])) $specTotals[$base] = array();
-                if (!isset($specTotals[$base][$spec])) $specTotals[$base][$spec] = 0;
-                $specTotals[$base][$spec] += $qty;
-                if (!isset($specFlags[$base])) $specFlags[$base] = array();
-                $specFlags[$base][$spec] = true;
-            }
-        }
-    }
-    foreach ($baseTotals as $base => $total) {
-        $specCount = isset($specFlags[$base]) ? count($specFlags[$base]) : 0;
-        if ($specCount > 1 && isset($specTotals[$base])) {
-            foreach ($specTotals[$base] as $spec => $qty) {
-                $taskQtyMap[$base . ' (' . $spec . ')'] = $qty;
-            }
-            $taskQtyMap[$base] = $total;
-        } else {
-            $taskQtyMap[$base] = $total;
-            if (isset($specTotals[$base]) && count($specTotals[$base]) === 1) {
-                $onlySpec = array_keys($specTotals[$base]);
-                $taskQtyMap[$base . ' (' . $onlySpec[0] . ')'] = $total;
+    if (count($workMap) > 0) {
+        $stWL = $pdo->prepare("
+            SELECT l.work_id, l.unit_price_id, l.planned_qty, u.item_name, u.unit, u.qty, u.unit_price
+            FROM cpms_work_item_lines l
+            INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id
+            WHERE u.project_id = :pid
+            ORDER BY l.work_id ASC, u.item_name ASC
+        ");
+        $stWL->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
+        $stWL->execute();
+        $lineRows = $stWL->fetchAll();
+        if (is_array($lineRows)) {
+            foreach ($lineRows as $lr) {
+                $wid = isset($lr['work_id']) ? (int)$lr['work_id'] : 0;
+                if ($wid <= 0 || !isset($workDetailMap[$wid])) continue;
+                $qtyRaw = (isset($lr['planned_qty']) && $lr['planned_qty'] !== null && $lr['planned_qty'] !== '') ? $lr['planned_qty'] : $lr['qty'];
+                $qtyUsed = is_numeric((string)$qtyRaw) ? (float)$qtyRaw : 0;
+                $unitPrice = (isset($lr['unit_price']) && is_numeric((string)$lr['unit_price'])) ? (float)$lr['unit_price'] : 0;
+                $lineAmount = $qtyUsed * $unitPrice;
+                $workDetailMap[$wid]['lines'][] = array(
+                    'item_name' => isset($lr['item_name']) ? (string)$lr['item_name'] : '',
+                    'unit' => isset($lr['unit']) ? (string)$lr['unit'] : '',
+                    'qty_used' => $qtyUsed,
+                    'unit_price' => $unitPrice,
+                    'amount' => $lineAmount
+                );
+                $workDetailMap[$wid]['total_amount'] += $lineAmount;
+                if (!isset($taskQtyMap[$wid])) $taskQtyMap[$wid] = 0;
+                $taskQtyMap[$wid] += $qtyUsed;
             }
         }
     }
 } catch (Exception $e) {
+    $workItems = array();
+    $workMap = array();
+    $workDetailMap = array();  
     $taskQtyMap = array();
 }
 
@@ -463,12 +417,14 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                 if ($sdTs > 0 && $edTs > 0 && $edTs < $sdTs) { $tmp = $sdTs; $sdTs = $edTs; $edTs = $tmp; }
                 if (!task_overlaps_range($sdTs, $edTs, $rangeStartTs, $rangeEndTs)) continue;
                 list($leftPct, $widthPct) = gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays);
-                $taskQty = isset($taskQtyMap[$t['name']]) ? $taskQtyMap[$t['name']] : 0;               
+                $workId = isset($t['work_id']) ? (int)$t['work_id'] : 0;
+                $taskQty = ($workId > 0 && isset($taskQtyMap[$workId])) ? $taskQtyMap[$workId] : 0;            
                 ?>
                 <div class="flex items-center gap-0 gantt-row"
                      data-task-id="<?php echo (int)$t['id']; ?>"                
                      data-task-name="<?php echo h($t['name']); ?>"
-                     data-task-total-qty="<?php echo h($taskQty); ?>">
+                     data-task-total-qty="<?php echo h($taskQty); ?>"
+                     data-work-id="<?php echo (int)$workId; ?>">
                     <div class="gantt-dropzone gantt-dropzone-readonly relative h-11 shrink-0 border border-gray-100 rounded-xl bg-gray-50 overflow-hidden"
                          data-start="<?php echo h($sd); ?>"
                          data-end="<?php echo h($ed); ?>">
@@ -486,7 +442,19 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
             <?php endforeach; ?>
         </div>
 
-              <div class="text-xs text-gray-500 mt-3">공정표(보기) 탭에서 파란색 공정 바를 클릭하면 작업 수량과 사진을 등록할 수 있습니다.</div>
+              <div class="text-xs text-gray-500 mt-3">공정표(보기) 탭에서 파란색 공정 바를 클릭하면 작업 상세(내역서 묶음)를 확인할 수 있습니다.</div>
+
+        <div id="ganttWorkDetail" class="mt-4 p-4 rounded-2xl border border-gray-200 bg-gray-50 hidden">
+            <div class="text-sm font-extrabold text-gray-900" id="ganttWorkDetailTitle"></div>
+            <div class="text-xs text-gray-600 mt-1" id="ganttWorkDetailDesc"></div>
+            <div class="mt-3 overflow-auto">
+                <table class="w-full text-xs border-collapse">
+                    <thead><tr class="bg-white"><th class="p-2 border text-left">항목명</th><th class="p-2 border text-left">단위</th><th class="p-2 border text-right">수량</th><th class="p-2 border text-right">단가</th><th class="p-2 border text-right">금액</th></tr></thead>
+                    <tbody id="ganttWorkDetailBody"></tbody>
+                </table>
+            </div>
+            <div class="mt-2 text-right text-sm font-extrabold">합계: <span id="ganttWorkDetailSum">0</span></div>
+        </div>
         </div>
     </div>
 
@@ -494,17 +462,19 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     <div class="mt-6 rounded-3xl border border-gray-200 bg-white p-4 gantt-tab-panel hidden" data-tab-panel="board">
         <div class="flex flex-col lg:flex-row gap-4">
             <div class="lg:w-56 shrink-0">
-                <div class="text-sm font-extrabold text-gray-900">내역서 공정</div>
-                <div class="text-xs text-gray-500 mt-1">내역서에서 읽은 공정을 드래그해 일정에 배치하세요.</div>
+                <div class="text-sm font-extrabold text-gray-900">작업 목록</div>
+                <div class="text-xs text-gray-500 mt-1">작업 탭에서 만든 작업내용을 드래그해 일정에 배치하세요.</div>
                 <div class="mt-3 space-y-2 max-h-80 overflow-auto">
-                    <?php if (count($processes) === 0): ?>
-                        <div class="text-xs text-gray-500">내역서 공정이 없습니다.</div>
+                    <?php if (count($workItems) === 0): ?>
+                        <div class="text-xs text-gray-500">작업 목록이 없습니다.</div>
                     <?php else: ?>
-                        <?php foreach ($processes as $pname): ?>
+                        <?php foreach ($workItems as $w): ?>
                             <div class="gantt-draggable px-3 py-2 rounded-xl border border-gray-200 bg-gray-50 text-sm font-semibold cursor-move"
                                  draggable="true"
-                                 data-task-name="<?php echo h($pname); ?>">
-                                <?php echo h($pname); ?>
+                                 data-work-id="<?php echo (int)$w['id']; ?>"
+                                 data-work-title="<?php echo h($w['title']); ?>"
+                                 data-task-name="<?php echo h($w['title']); ?>">
+                                <?php echo h($w['title']); ?>
                             </div>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -589,13 +559,15 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                             if ($sdTs > 0 && $edTs > 0 && $edTs < $sdTs) { $tmp = $sdTs; $sdTs = $edTs; $edTs = $tmp; }
                             if (!task_overlaps_range($sdTs, $edTs, $rangeStartTs, $rangeEndTs)) continue;
                             list($leftPct, $widthPct) = gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays);
-                            $taskQty = isset($taskQtyMap[$t['name']]) ? $taskQtyMap[$t['name']] : 0;                            
+                            $workId = isset($t['work_id']) ? (int)$t['work_id'] : 0;
+                $taskQty = ($workId > 0 && isset($taskQtyMap[$workId])) ? $taskQtyMap[$workId] : 0;                           
                             ?>
                             <div class="flex items-center gap-0 gantt-row"
                                  data-task-id="<?php echo (int)$t['id']; ?>"
                                  data-task-name="<?php echo h($t['name']); ?>"
                                  data-task-progress="<?php echo (int)$t['progress']; ?>"
-                                 data-task-total-qty="<?php echo h($taskQty); ?>">
+                                 data-task-total-qty="<?php echo h($taskQty); ?>"
+                                 data-work-id="<?php echo (int)$workId; ?>">
                                 <div class="gantt-left-col shrink-0 text-sm font-semibold text-gray-800 truncate flex items-center gap-2">
                                     <span class="truncate"><?php echo h($t['name']); ?></span>
                                     <?php if ($canEdit): ?>
@@ -676,7 +648,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                             <input type="hidden" name="task_id" value="<?php echo (int)$t['id']; ?>">
                             <input type="hidden" name="month" value="<?php echo h($viewMonth); ?>">
-                            <input type="hidden" name="mode" value="edit">                           
+                            <input type="hidden" name="mode" value="edit">
+                            <input type="hidden" name="work_id" value="<?php echo (int)(isset($t['work_id']) ? $t['work_id'] : 0); ?>">                             
                             <td class="py-2 pr-2">
                                 <input name="name" value="<?php echo h($t['name']); ?>" class="w-64 px-3 py-2 rounded-2xl border border-gray-200">
                             </td>
@@ -882,6 +855,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var csrfToken = board ? board.getAttribute('data-csrf') : null;
   var progressMap = <?php echo json_encode($progressMap, JSON_UNESCAPED_UNICODE); ?>;
   var progressPhotoMap = <?php echo json_encode($progressPhotoMap, JSON_UNESCAPED_UNICODE); ?>;
+  var workDetailMap = <?php echo json_encode($workDetailMap, JSON_UNESCAPED_UNICODE); ?>; // 공정 클릭 시 내역서 표시
   var todayYmd = rangeSource.getAttribute('data-today-ymd') || '';
   var todayOffset = parseInt(rangeSource.getAttribute('data-today-offset'), 10);
   var initialMode = '<?php echo h($viewMode); ?>';
@@ -966,7 +940,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return Math.max(min, Math.min(max, v));
   }
 
-  function saveTask(taskId, name, startDate, endDate, progress){
+  function saveTask(taskId, name, startDate, endDate, progress, workId){
     var fd = new FormData();
     if (!board) return;
     fd.append('_csrf', csrfToken || '');
@@ -977,6 +951,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     fd.append('end_date', endDate || '');
     fd.append('progress', progress || '0');
     fd.append('month', getCurrentMonthParam());
+    fd.append('work_id', workId || '0');
     fd.append('mode', 'edit');
 
     fetch('?r=construction/schedule_save', {
@@ -1068,11 +1043,13 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     // 드래그 드롭 공정 추가 수정: 수정 탭(보드) 패널 범위에서만 이벤트를 바인딩한다.
     var boardPanel = board.closest('.gantt-tab-panel[data-tab-panel="board"]');
     var dragName = '';
+    var dragWorkId = '0';
     var dragEl = null;
     var draggableEls = boardPanel ? boardPanel.querySelectorAll('.gantt-draggable') : [];
     draggableEls.forEach(function(el){
       el.addEventListener('dragstart', function(e){
-        dragName = el.getAttribute('data-task-name') || el.textContent.trim();
+        dragName = el.getAttribute('data-work-title') || el.getAttribute('data-task-name') || el.textContent.trim();
+        dragWorkId = el.getAttribute('data-work-id') || '0';
         dragEl = el;
         if (e.dataTransfer) {
           e.dataTransfer.effectAllowed = 'copy';
@@ -1095,7 +1072,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         }
         if (!droppedName) droppedName = dragName || '';
         if (!droppedName && dragEl) {
-          droppedName = dragEl.getAttribute('data-task-name') || dragEl.textContent.trim() || '';
+          droppedName = dragEl.getAttribute('data-work-title') || dragEl.getAttribute('data-task-name') || dragEl.textContent.trim() || '';
         }
         if (!droppedName) return;
         var zoneRect = zone.getBoundingClientRect();
@@ -1103,11 +1080,12 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         var leftDays = dayFromOffset(offsetX);
         var startTs = rangeStartTs + (leftDays * 86400);
         var endTs = startTs + (3 * 86400);
-        saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0);
+        saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0, dragWorkId || 0);
         if (dragEl && dragEl.parentNode) {
           dragEl.parentNode.removeChild(dragEl);
         }
         dragName = '';
+        dragWorkId = '0';
         dragEl = null;
       });
     });
@@ -1163,7 +1141,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var startTs = rangeStartTs + (leftDays * 86400);
       var endTs = startTs + ((durDays - 1) * 86400);
       if (moved) {
-        saveTask(taskId, taskName, tsToYmd(startTs), tsToYmd(endTs), progress);
+        saveTask(taskId, taskName, tsToYmd(startTs), tsToYmd(endTs), progress, row ? (row.getAttribute('data-work-id') || '0') : '0');
       } // 수정탭 모달 비활성 + 단순 클릭시 저장 호출 방지
       dragging = false;
       resizing = null;
@@ -1202,6 +1180,45 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       });
     });
     // 수정탭 모달 비활성: 공정표 수정 탭(.gantt-board)에서는 진행 입력 모달을 열지 않음
+    });
+  }
+
+
+  // 공정 클릭 시 내역서 표시
+  if (readOnlyBoard) {
+    readOnlyBoard.querySelectorAll('.gantt-row .gantt-bar').forEach(function(bar){
+      bar.addEventListener('click', function(){
+        var row = bar.closest('.gantt-row');
+        if (!row) return;
+        var wid = row.getAttribute('data-work-id') || '0';
+        var panel = document.getElementById('ganttWorkDetail');
+        var titleEl = document.getElementById('ganttWorkDetailTitle');
+        var descEl = document.getElementById('ganttWorkDetailDesc');
+        var bodyEl = document.getElementById('ganttWorkDetailBody');
+        var sumEl = document.getElementById('ganttWorkDetailSum');
+        if (!panel || !titleEl || !descEl || !bodyEl || !sumEl) return;
+        var data = workDetailMap && workDetailMap[wid] ? workDetailMap[wid] : null;
+        panel.classList.remove('hidden');
+        bodyEl.innerHTML = '';
+        if (!data) {
+          titleEl.textContent = '연결된 작업 없음';
+          descEl.textContent = '이 공정은 작업내용과 연결되지 않았습니다.';
+          sumEl.textContent = '0';
+          return;
+        }
+        titleEl.textContent = data.title || '';
+        descEl.textContent = data.description || '';
+        (data.lines || []).forEach(function(line){
+          var tr = document.createElement('tr');
+          tr.innerHTML = '<td class="p-2 border">' + (line.item_name || '') + '</td>' +
+            '<td class="p-2 border">' + (line.unit || '') + '</td>' +
+            '<td class="p-2 border text-right">' + (line.qty_used || 0) + '</td>' +
+            '<td class="p-2 border text-right">' + Math.round(line.unit_price || 0).toLocaleString() + '</td>' +
+            '<td class="p-2 border text-right">' + Math.round(line.amount || 0).toLocaleString() + '</td>';
+          bodyEl.appendChild(tr);
+        });
+        sumEl.textContent = Math.round(data.total_amount || 0).toLocaleString();
+      });
     });
   }
 

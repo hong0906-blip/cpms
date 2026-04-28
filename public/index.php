@@ -282,6 +282,22 @@ if ($route === 'construction/material_usage_delete') {
     require_once __DIR__ . '/../app/views/construction/material_usage_delete.php';
     exit;
 }
+
+if ($route === 'construction/work_item_save') {
+    require_once __DIR__ . '/../app/views/construction/work_item_save.php';
+    exit;
+}
+if ($route === 'construction/work_item_delete') {
+    require_once __DIR__ . '/../app/views/construction/work_item_delete.php';
+    exit;
+}
+if ($route === 'construction/work_item_line_save') {
+    require_once __DIR__ . '/../app/views/construction/work_item_line_save.php';
+    exit;
+}
+if ($route === 'construction/work_item_line_delete') {
+    require_once __DIR__ . '/../app/views/construction/work_item_line_delete.php';
+    exit;
 // ==========================
 //  안전(안전사고) 액션(POST 처리)
 // ==========================

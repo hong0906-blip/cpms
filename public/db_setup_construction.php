@@ -69,6 +69,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UNIQUE KEY uniq_project_ym (project_id, ym)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 $msg = '원가/공정 입력 테이블 생성/확인 완료';
+
+            } else if ($action === 'work_items') {
+                // 작업내용 레이어 추가
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_work_items (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    title VARCHAR(200) NOT NULL,
+                    description TEXT NULL,
+                    sort_order INT NOT NULL DEFAULT 0,
+                    is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    KEY idx_project_id (project_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_work_item_lines (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    work_id INT NOT NULL,
+                    unit_price_id INT NOT NULL,
+                    planned_qty DECIMAL(18,4) NULL,
+                    note VARCHAR(255) NULL,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uniq_work_unit (work_id, unit_price_id),
+                    KEY idx_work_id (work_id),
+                    KEY idx_unit_price_id (unit_price_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $hasWorkId = false;
+                try {
+                    $stCol = $pdo->query("SHOW COLUMNS FROM cpms_schedule_tasks LIKE 'work_id'");
+                    $hasWorkId = ($stCol && $stCol->fetch()) ? true : false;
+                } catch (Exception $eCol) { $hasWorkId = false; }
+                if (!$hasWorkId) {
+                    $pdo->exec("ALTER TABLE cpms_schedule_tasks ADD COLUMN work_id INT NULL AFTER parent_id");
+                }
+                try {
+                    $stIdx = $pdo->query("SHOW INDEX FROM cpms_schedule_tasks WHERE Key_name = 'idx_work_id'");
+                    $hasIdx = ($stIdx && $stIdx->fetch()) ? true : false;
+                    if (!$hasIdx) {
+                        $pdo->exec("ALTER TABLE cpms_schedule_tasks ADD INDEX idx_work_id (work_id)");
+                    }
+                } catch (Exception $eIdx) {}
+
+                $msg = '작업 테이블 생성/확인 완료';
+
             } else if ($action === 'equipment') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_equipment_items (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -147,5 +192,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="cost_progress"><button class="btn" type="submit">2) 원가/공정 입력 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="equipment"><button class="btn" type="submit">3) 장비 입력 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="materials_purchase"><button class="btn" type="submit">4) 자재구입비 테이블 생성/확인</button></form>
+<form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="work_items"><button class="btn" type="submit">5) 작업 테이블 생성/확인</button></form>
 </div>
 </div></body></html>
