@@ -43,7 +43,8 @@ if ($projectId <= 0) {
 
 $category = trim((string)(isset($_POST['category']) ? $_POST['category'] : ''));
 $vendorName = trim((string)(isset($_POST['vendor_name']) ? $_POST['vendor_name'] : ''));
-$spec = trim((string)(isset($_POST['spec']) ? $_POST['spec'] : ''));
+// 자재: 규격 제거
+$spec = '';
 $representative = trim((string)(isset($_POST['representative']) ? $_POST['representative'] : ''));
 $phone = trim((string)(isset($_POST['phone']) ? $_POST['phone'] : ''));
 $bizNo = trim((string)(isset($_POST['biz_no']) ? $_POST['biz_no'] : ''));

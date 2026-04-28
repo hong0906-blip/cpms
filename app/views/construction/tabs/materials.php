@@ -54,7 +54,7 @@ $usageByDate = array();
 $vendorPresets = array();
 
 try {
-    $stItem = $pdo->prepare("SELECT * FROM cpms_material_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY category ASC, vendor_name ASC, spec ASC, id ASC");
+    $stItem = $pdo->prepare("SELECT * FROM cpms_material_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY category ASC, vendor_name ASC, id ASC");
     $stItem->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
     $stItem->execute();
     $items = $stItem->fetchAll(PDO::FETCH_ASSOC);
@@ -92,13 +92,13 @@ try {
     }
     
     if (count($items) > 0) {
-        $stUsage = $pdo->prepare("SELECT u.*, i.category, i.vendor_name, i.spec
+        $stUsage = $pdo->prepare("SELECT u.*, i.category, i.vendor_name
             FROM cpms_material_usage u
             JOIN cpms_material_items i ON i.id = u.material_id
             WHERE u.project_id = :pid
               AND i.is_deleted = 0
               AND u.use_date BETWEEN :s AND :e
-            ORDER BY i.category ASC, i.vendor_name ASC, i.spec ASC, u.use_date ASC");
+            ORDER BY i.category ASC, i.vendor_name ASC, u.use_date ASC");
         $stUsage->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
         $stUsage->bindValue(':s', $monthlyStart);
         $stUsage->bindValue(':e', $monthlyEnd);
@@ -213,20 +213,21 @@ function material_money($v)
                         <tr class="bg-gray-50">
                             <th class="p-2 border text-left">구분</th>
                             <th class="p-2 border text-left">업체명</th>
-                            <th class="p-2 border text-left">규격</th>
-                            <th class="p-2 border text-right">기본단가</th>
+                            <!-- 자재: 규격 제거 -->
+                            <th class="p-2 border text-right">공급가액</th>
                             <th class="p-2 border text-left">사용일자 추가</th>
                         </tr>
                         </thead>
                         <tbody>
                         <?php if (count($items) === 0): ?>
-                            <tr><td colspan="5" class="p-3 border text-center text-gray-500">등록된 자재구입비가 없습니다.</td></tr>
+                            <tr><td colspan="4" class="p-3 border text-center text-gray-500">등록된 자재구입비가 없습니다.</td></tr>
                         <?php else: ?>
                             <?php foreach ($items as $it): ?>
                                 <tr>
                                     <td class="p-2 border"><?php echo h($it['category']); ?></td>
                                     <td class="p-2 border"><?php echo h($it['vendor_name']); ?></td>
-                                    <td class="p-2 border"><?php echo h($it['spec']); ?></td>
+                                    <!-- 자재: 규격 제거 -->
+                                    <!-- 자재: 공급가액 표기 -->
                                     <td class="p-2 border text-right"><?php echo material_money($it['base_rate']); ?></td>
                                     <td class="p-2 border">
                                         <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_save" class="space-y-2" data-usage-form>
@@ -294,11 +295,12 @@ function material_money($v)
                     <div class="grid grid-cols-2 gap-2">
                         <input type="text" name="category" class="px-3 py-2 border rounded-xl" placeholder="구분" required>
                         <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required>
-                        <input type="text" name="spec" class="px-3 py-2 border rounded-xl" placeholder="규격(직접입력)">
+                        <!-- 자재: 규격 제거 -->
                         <input type="text" name="representative" class="px-3 py-2 border rounded-xl" placeholder="대표자명">
                         <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호">
                         <input type="text" name="biz_no" class="px-3 py-2 border rounded-xl" placeholder="사업자등록번호">
-                        <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-2 border rounded-xl" placeholder="기본단가">
+                        <!-- 자재: 공급가액 표기 -->
+                        <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-2 border rounded-xl" placeholder="공급가액">
                         <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고">
                     </div>
 
@@ -558,11 +560,12 @@ function material_money($v)
                     <tr class="bg-gray-50">
                         <th class="border p-2" rowspan="2">구분</th>
                         <th class="border p-2" rowspan="2">업체명</th>
-                        <th class="border p-2" rowspan="2">규격</th>
+                        <!-- 자재: 규격 제거 -->
                         <th class="border p-2" rowspan="2">대표자명</th>
                         <th class="border p-2" rowspan="2">전화번호</th>
                         <th class="border p-2" rowspan="2">사업자등록번호</th>
-                        <th class="border p-2" rowspan="2">기본단가</th>
+                        <!-- 자재: 공급가액 표기 -->
+                        <th class="border p-2" rowspan="2">공급가액</th>
                         <?php foreach ($dateSlotsRow1 as $slot): ?>
                             <th class="border p-1 text-center <?php echo $slot['valid'] ? '' : 'bg-gray-200 text-gray-500'; ?>" style="min-width:52px;"><?php echo h($slot['label']); ?></th>
                         <?php endforeach; ?>
@@ -587,7 +590,7 @@ function material_money($v)
                 $lastCategory = '__none__';
                 ?>
                 <?php if (count($items) === 0): ?>
-                    <tr><td class="border p-3 text-center text-gray-500" colspan="48">등록된 자재구입비가 없습니다.</td></tr>
+                    <tr><td class="border p-3 text-center text-gray-500" colspan="47">등록된 자재구입비가 없습니다.</td></tr>
                 <?php else: ?>
                     <?php foreach ($items as $it): ?>
                         <?php
@@ -614,7 +617,7 @@ function material_money($v)
                         <tr>
                             <td class="border p-1 text-center" rowspan="2"><?php echo ($lastCategory === (string)$it['category']) ? '' : h($it['category']); ?></td>
                             <td class="border p-1" rowspan="2"><?php echo h($it['vendor_name']); ?></td>
-                            <td class="border p-1" rowspan="2"><?php echo h($it['spec']); ?></td>
+                            <!-- 자재: 규격 제거 -->
                             <td class="border p-1" rowspan="2"><?php echo h($it['representative']); ?></td>
                             <td class="border p-1" rowspan="2"><?php echo h($it['phone']); ?></td>
                             <td class="border p-1" rowspan="2"><?php echo h($it['biz_no']); ?></td>
@@ -663,7 +666,7 @@ function material_money($v)
                     <?php endforeach; ?>
 
                     <tr class="bg-yellow-50 font-bold">
-                        <td class="border p-1 text-center" colspan="7" rowspan="2">합계</td>
+                        <td class="border p-1 text-center" colspan="6" rowspan="2">합계</td>
                         <?php foreach ($dateSlotsRow1 as $slot): ?>
                             <?php if (!$slot['valid']): ?>
                                 <td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>
