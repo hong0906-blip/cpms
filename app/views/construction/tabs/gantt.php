@@ -86,33 +86,36 @@ try {
     $taskQtyMap = array();
 }
 
-// 항목별 수량표/저장: 공정별 내역서 항목 매핑 + 완료수량 맵
+// 항목별 수량표/저장: 공정(work_id)별 내역서 항목 매핑 + 완료수량 맵
 $taskItemMap = array();
 $taskItemDoneMap = array();
 try {
-    $stUnit = $pdo->prepare("
-        SELECT id, item_name, process_name, qty
-        FROM cpms_project_unit_prices
-        WHERE project_id = :pid
-        ORDER BY id ASC
-    " );
-    $stUnit->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
-    $stUnit->execute();
-    $unitRows = $stUnit->fetchAll();
-
-    $unitByBase = array();
-    if (is_array($unitRows)) {
-        foreach ($unitRows as $ur) {
-            $uid = isset($ur['id']) ? (int)$ur['id'] : 0;
-            if ($uid <= 0) continue;
-            $baseRaw = isset($ur['process_name']) && trim((string)$ur['process_name']) !== '' ? $ur['process_name'] : (isset($ur['item_name']) ? $ur['item_name'] : '');
-            $baseKey = base_process_name($baseRaw);
-            if ($baseKey === '') continue;
-            if (!isset($unitByBase[$baseKey])) $unitByBase[$baseKey] = array();
-            $unitByBase[$baseKey][] = array(
-                'unit_price_id' => $uid,
-                'item_name' => isset($ur['item_name']) ? (string)$ur['item_name'] : '',
-                'contract_qty' => isset($ur['qty']) && is_numeric((string)$ur['qty']) ? (float)$ur['qty'] : 0
+    $workLineMap = array();
+    $stLine = $pdo->prepare("
+        SELECT wil.work_id, wil.unit_price_id, wil.planned_qty,
+               upl.item_name, upl.unit, upl.qty AS contract_qty, upl.unit_price
+        FROM cpms_work_item_lines wil
+        INNER JOIN cpms_project_unit_prices upl ON upl.id = wil.unit_price_id
+        WHERE upl.project_id = :pid
+        ORDER BY wil.work_id ASC, upl.item_name ASC
+    ");
+    $stLine->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
+    $stLine->execute();
+    $lineRows = $stLine->fetchAll();
+    if (is_array($lineRows)) {
+        foreach ($lineRows as $lr) {
+            $wid = isset($lr['work_id']) ? (int)$lr['work_id'] : 0;
+            if ($wid <= 0) continue;
+            if (!isset($workLineMap[$wid])) $workLineMap[$wid] = array();
+            $qtyToShowRaw = (isset($lr['planned_qty']) && $lr['planned_qty'] !== null && $lr['planned_qty'] !== '')
+                ? $lr['planned_qty']
+                : (isset($lr['contract_qty']) ? $lr['contract_qty'] : 0);
+            $qtyToShow = is_numeric((string)$qtyToShowRaw) ? (float)$qtyToShowRaw : 0;
+            $workLineMap[$wid][] = array(
+                'unit_price_id' => isset($lr['unit_price_id']) ? (int)$lr['unit_price_id'] : 0,
+                'item_name' => isset($lr['item_name']) ? (string)$lr['item_name'] : '',
+                'unit' => isset($lr['unit']) ? (string)$lr['unit'] : '',
+                'contract_qty' => $qtyToShow
             );
         }
     }
@@ -120,9 +123,9 @@ try {
     if (is_array($tasks)) {
         foreach ($tasks as $tt) {
             $taskIdVal = isset($tt['id']) ? (int)$tt['id'] : 0;
+            $workIdVal = isset($tt['work_id']) ? (int)$tt['work_id'] : 0;
             if ($taskIdVal <= 0) continue;
-            $taskBase = base_process_name(isset($tt['name']) ? $tt['name'] : '');
-            $taskItemMap[$taskIdVal] = isset($unitByBase[$taskBase]) ? $unitByBase[$taskBase] : array();
+            $taskItemMap[$taskIdVal] = ($workIdVal > 0 && isset($workLineMap[$workIdVal])) ? $workLineMap[$workIdVal] : array();
         }
     }
 
@@ -507,7 +510,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                          <?php if ($widthPct > 0): ?>
                             <div class="gantt-bar absolute inset-y-0 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-xs flex items-center px-2"
                                  style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%; min-width: 28px;">
-                                <?php /* 공정명 텍스트 숨김 */ ?>
+                                <?php /* 공정표 바 텍스트 복구 */ ?>
+                                <span class="gantt-bar-text"><?php echo h($t['name']); ?></span>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -910,6 +914,16 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     z-index: 1;    
   }
   .gantt-bar { cursor: grab; }
+    /* 공정표 바 텍스트 복구 */
+  .gantt-bar-text {
+    display: block;
+    width: 100%;
+    color: #ffffff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+  }
   .gantt-bar.dragging { opacity: 0.7; cursor: grabbing; }
   .gantt-board-readonly .gantt-bar { cursor: default; }
   /* 공정표(보기) 좌측 영역 제거 */
@@ -951,7 +965,6 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var csrfToken = board ? board.getAttribute('data-csrf') : null;
   var progressMap = <?php echo json_encode($progressMap, JSON_UNESCAPED_UNICODE); ?>;
   var progressPhotoMap = <?php echo json_encode($progressPhotoMap, JSON_UNESCAPED_UNICODE); ?>;
-  var workDetailMap = <?php echo json_encode($workDetailMap, JSON_UNESCAPED_UNICODE); ?>; // 공정 클릭 시 내역서 표시
   var taskItemMap = <?php echo json_encode($taskItemMap, JSON_UNESCAPED_UNICODE); ?>; // 항목별 수량표/저장
   var taskItemDoneMap = <?php echo json_encode($taskItemDoneMap, JSON_UNESCAPED_UNICODE); ?>; // 항목별 수량표/저장
   var todayYmd = rangeSource.getAttribute('data-today-ymd') || '';
@@ -1021,6 +1034,12 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   function getTaskRowById(taskId){
     if (!taskId) return null;
     return document.querySelector('.gantt-row[data-task-id="' + taskId + '"]');
+  }
+
+  function getTaskWorkId(taskId){
+    var row = getTaskRowById(taskId);
+    if (!row) return 0;
+    return parseInt(row.getAttribute('data-work-id') || '0', 10) || 0;
   }
 
   function getTaskDateRange(taskId){
@@ -1281,45 +1300,6 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     });
   }
 
-
-  // 공정 클릭 시 내역서 표시
-  if (readOnlyBoard) {
-    readOnlyBoard.querySelectorAll('.gantt-row .gantt-bar').forEach(function(bar){
-      bar.addEventListener('click', function(){
-        var row = bar.closest('.gantt-row');
-        if (!row) return;
-        var wid = row.getAttribute('data-work-id') || '0';
-        var panel = document.getElementById('ganttWorkDetail');
-        var titleEl = document.getElementById('ganttWorkDetailTitle');
-        var descEl = document.getElementById('ganttWorkDetailDesc');
-        var bodyEl = document.getElementById('ganttWorkDetailBody');
-        var sumEl = document.getElementById('ganttWorkDetailSum');
-        if (!panel || !titleEl || !descEl || !bodyEl || !sumEl) return;
-        var data = workDetailMap && workDetailMap[wid] ? workDetailMap[wid] : null;
-        panel.classList.remove('hidden');
-        bodyEl.innerHTML = '';
-        if (!data) {
-          titleEl.textContent = '연결된 작업 없음';
-          descEl.textContent = '이 공정은 작업내용과 연결되지 않았습니다.';
-          sumEl.textContent = '0';
-          return;
-        }
-        titleEl.textContent = data.title || '';
-        descEl.textContent = data.description || '';
-        (data.lines || []).forEach(function(line){
-          var tr = document.createElement('tr');
-          tr.innerHTML = '<td class="p-2 border">' + (line.item_name || '') + '</td>' +
-            '<td class="p-2 border">' + (line.unit || '') + '</td>' +
-            '<td class="p-2 border text-right">' + (line.qty_used || 0) + '</td>' +
-            '<td class="p-2 border text-right">' + Math.round(line.unit_price || 0).toLocaleString() + '</td>' +
-            '<td class="p-2 border text-right">' + Math.round(line.amount || 0).toLocaleString() + '</td>';
-          bodyEl.appendChild(tr);
-        });
-        sumEl.textContent = Math.round(data.total_amount || 0).toLocaleString();
-      });
-    });
-  }
-
   function renderPhotoList(listEl, photos){
     if (!listEl) return;
     listEl.innerHTML = '';
@@ -1458,6 +1438,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var doneEl = document.getElementById('ganttDoneQty');
     var totalEl = document.getElementById('ganttTotalQty');
     if (!bodyEl) return;
+    var workId = getTaskWorkId(taskId);    
     var rows = (taskItemMap && taskItemMap[taskId]) ? taskItemMap[taskId] : [];
     var doneMap = (taskItemDoneMap && taskItemDoneMap[taskId]) ? taskItemDoneMap[taskId] : {};
     bodyEl.innerHTML = '';
@@ -1465,7 +1446,12 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var doneQtySum = 0;
 
     if (!rows || !rows.length) {
-      bodyEl.innerHTML = '<tr><td class="p-3 border text-center text-gray-500" colspan="4">연결된 내역서 항목이 없습니다.</td></tr>';
+      if (workId > 0) {
+        bodyEl.innerHTML = '<tr><td class="p-3 border text-center text-gray-500" colspan="4">작업 탭에 연결된 내역서 항목이 없습니다.</td></tr>';
+      } else {
+        // 모달에 작업-내역서 항목 표시
+        bodyEl.innerHTML = '<tr><td class="p-3 border text-center text-amber-700 bg-amber-50" colspan="4">연결된 작업내용이 없습니다(작업 탭에서 작업을 만들어 연결해주세요).</td></tr>';
+      }
       if (totalEl) totalEl.value = '0';
       if (doneEl) doneEl.value = '0';
       return;
