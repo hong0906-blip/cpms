@@ -14,6 +14,28 @@ if (!$pdo) {
     return;
 }
 
+if (!function_exists('cpms_work_normalize_unit')) {
+    function cpms_work_normalize_unit($unit) {
+        $unit = trim((string)$unit);
+        if ($unit === '') return '';
+        $unit = preg_replace('/\s+/u', '', $unit);
+        $unit = str_replace('.', '', $unit);
+        $unit = strtoupper($unit);
+        return trim((string)$unit);
+    }
+}
+
+if (!function_exists('cpms_work_is_no_multiply_unit')) {
+    function cpms_work_is_no_multiply_unit($unit) {
+        static $noMultiplyUnits = null;
+        if ($noMultiplyUnits === null) {
+            $noMultiplyUnits = array('EA' => true, 'SET' => true, '조' => true, '본' => true);
+        }
+        $normalized = cpms_work_normalize_unit($unit);
+        return isset($noMultiplyUnits[$normalized]);
+    }
+}
+
 $workItems = array();
 $workTotals = array();
 $unitPrices = array();
@@ -49,11 +71,14 @@ try {
             if (!isset($lineCountByWork[$wid])) $lineCountByWork[$wid] = 0;
             $lineCountByWork[$wid]++;
 
+            // 매출 단위별 곱하기 규칙(EA/SET/조/본 제외): 작업탭 합계도 동일 계산식 적용            
             $qtyRaw = isset($lr['planned_qty']) && $lr['planned_qty'] !== null && $lr['planned_qty'] !== '' ? $lr['planned_qty'] : $lr['qty'];
             $qty = is_numeric((string)$qtyRaw) ? (float)$qtyRaw : 0.0;
             $unitPrice = isset($lr['unit_price']) && is_numeric((string)$lr['unit_price']) ? (float)$lr['unit_price'] : 0.0;
+            $unitRaw = isset($lr['unit']) ? (string)$lr['unit'] : '';
+            $lineAmount = cpms_work_is_no_multiply_unit($unitRaw) ? $unitPrice : ($qty * $unitPrice);
             if (!isset($workTotals[$wid])) $workTotals[$wid] = 0.0;
-            $workTotals[$wid] += ($qty * $unitPrice);
+            $workTotals[$wid] += $lineAmount;
         }
     }
 } catch (Exception $e) {

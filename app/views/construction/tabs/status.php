@@ -122,6 +122,28 @@ if (!function_exists('cpms_status_parse_money')) {
     }
 }
 
+if (!function_exists('cpms_status_normalize_unit')) {
+    function cpms_status_normalize_unit($unit) {
+        $unit = trim((string)$unit);
+        if ($unit === '') return '';
+        $unit = preg_replace('/\s+/u', '', $unit);
+        $unit = str_replace('.', '', $unit);
+        $unit = strtoupper($unit);
+        return trim((string)$unit);
+    }
+}
+
+if (!function_exists('cpms_status_is_no_multiply_unit')) {
+    function cpms_status_is_no_multiply_unit($unit) {
+        static $noMultiplyUnits = null;
+        if ($noMultiplyUnits === null) {
+            $noMultiplyUnits = array('EA' => true, 'SET' => true, '조' => true, '본' => true);
+        }
+        $normalized = cpms_status_normalize_unit($unit);
+        return isset($noMultiplyUnits[$normalized]);
+    }
+}
+
 if (!function_exists('cpms_status_apply_overrides')) {
     function cpms_status_apply_overrides($map, $projectId, $month) {
         $rows = cpms_load_labor_overrides((int)$projectId, (string)$month);
@@ -243,40 +265,52 @@ if (!function_exists('cpms_status_sales_total_between')) {
 
         $hasLinePlannedQty = cpms_status_column_exists($pdo, 'cpms_work_item_lines', 'planned_qty');
         $hasUnitQty = cpms_status_column_exists($pdo, 'cpms_project_unit_prices', 'qty');
-
-        $qtyExpr = '0';
-        if ($hasLinePlannedQty && $hasUnitQty) {
-            $qtyExpr = 'COALESCE(NULLIF(wil.planned_qty, 0), pup.qty, 0)';
-        } else if ($hasLinePlannedQty) {
-            $qtyExpr = 'COALESCE(wil.planned_qty, 0)';
-        } else if ($hasUnitQty) {
-            $qtyExpr = 'COALESCE(pup.qty, 0)';
-        }
+        $hasUnitCol = cpms_status_column_exists($pdo, 'cpms_project_unit_prices', 'unit');
+        $hasItemNameCol = cpms_status_column_exists($pdo, 'cpms_project_unit_prices', 'item_name');
 
         try {
             $today = date('Y-m-d');
+            $lineSelect = "
+                st.id AS task_id,
+                pup.unit_price AS unit_price
+            ";
+            if ($hasLinePlannedQty) {
+                $lineSelect .= ", wil.planned_qty AS planned_qty";
+            } else {
+                $lineSelect .= ", NULL AS planned_qty";
+            }
+            if ($hasUnitQty) {
+                $lineSelect .= ", pup.qty AS contract_qty";
+            } else {
+                $lineSelect .= ", NULL AS contract_qty";
+            }
+            if ($hasUnitCol) {
+                $lineSelect .= ", pup.unit AS unit";
+            } else {
+                $lineSelect .= ", '' AS unit";
+            }
+            if ($hasItemNameCol) {
+                $lineSelect .= ", pup.item_name AS item_name";
+            } else {
+                $lineSelect .= ", '' AS item_name";
+            }      
+                  
             $sql = "
-                SELECT COALESCE(SUM(work_amount), 0) AS total_sales
-                FROM (
-                    SELECT
-                        st.id AS task_id,
-                        COALESCE(SUM((" . $qtyExpr . ") * COALESCE(pup.unit_price, 0)), 0) AS work_amount
-                    FROM cpms_schedule_tasks st
-                    LEFT JOIN cpms_work_item_lines wil ON wil.work_id = st.work_id
-                    LEFT JOIN cpms_project_unit_prices pup ON pup.id = wil.unit_price_id
-                    WHERE st.project_id = :pid
-                      AND st.end_date IS NOT NULL
-                      AND st.end_date <> ''
-                      AND st.end_date BETWEEN :start AND :end
-                      AND (
-                        COALESCE(st.progress, 0) >= 100
-                        OR (
-                            st.end_date < :today
-                            AND (st.progress IS NULL OR st.progress = 0)
-                        )
-                      )
-                    GROUP BY st.id
-                ) sales_by_task
+                SELECT " . $lineSelect . "
+                FROM cpms_schedule_tasks st
+                LEFT JOIN cpms_work_item_lines wil ON wil.work_id = st.work_id
+                LEFT JOIN cpms_project_unit_prices pup ON pup.id = wil.unit_price_id
+                WHERE st.project_id = :pid
+                  AND st.end_date IS NOT NULL
+                  AND st.end_date <> ''
+                  AND st.end_date BETWEEN :start AND :end
+                  AND (
+                    COALESCE(st.progress, 0) >= 100
+                    OR (
+                        st.end_date < :today
+                        AND (st.progress IS NULL OR st.progress = 0)
+                    )
+                  )
             ";
 
             $st = $pdo->prepare($sql);
@@ -285,7 +319,54 @@ if (!function_exists('cpms_status_sales_total_between')) {
             $st->bindValue(':end', (string)$endDate);
             $st->bindValue(':today', (string)$today);
             $st->execute();
-            return (float)$st->fetchColumn();
+
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($rows) || count($rows) === 0) return 0.0;
+
+            $totalSales = 0.0;
+            $workAmountByTask = array();
+            foreach ($rows as $row) {
+                $taskId = isset($row['task_id']) ? (int)$row['task_id'] : 0;
+                if ($taskId <= 0) continue;
+
+                $unitPrice = isset($row['unit_price']) && is_numeric((string)$row['unit_price']) ? (float)$row['unit_price'] : 0.0;
+                if (!isset($workAmountByTask[$taskId])) $workAmountByTask[$taskId] = 0.0;
+                if (!array_key_exists('unit_price', $row) || $row['unit_price'] === null) continue;
+
+                $plannedQtyRaw = isset($row['planned_qty']) ? $row['planned_qty'] : null;
+                $contractQtyRaw = isset($row['contract_qty']) ? $row['contract_qty'] : null;
+
+                // 매출 단위별 곱하기 규칙(EA/SET/조/본 제외): planned_qty 우선, 없으면 계약수량 사용
+                if ($plannedQtyRaw !== null && trim((string)$plannedQtyRaw) !== '') {
+                    $qtyUsed = is_numeric((string)$plannedQtyRaw) ? (float)$plannedQtyRaw : 0.0;
+                } else {
+                    $qtyUsed = is_numeric((string)$contractQtyRaw) ? (float)$contractQtyRaw : 0.0;
+                }
+
+                $unitRaw = isset($row['unit']) ? (string)$row['unit'] : '';
+                $lineAmount = cpms_status_is_no_multiply_unit($unitRaw)
+                    ? $unitPrice
+                    : ($qtyUsed * $unitPrice);
+
+                $workAmountByTask[$taskId] += $lineAmount;
+
+                // 매출 단위별 곱하기 규칙(EA/SET/조/본 제외) 디버그(임시):
+                // 관리자 전용 출력이 필요하면 아래 로그 배열을 화면/로그로 노출해 확인하세요.
+                // $debugSalesLines[] = array(
+                //     'task_id' => $taskId,
+                //     'item_name' => isset($row['item_name']) ? (string)$row['item_name'] : '',
+                //     'unit' => $unitRaw,
+                //     'qty_used' => $qtyUsed,
+                //     'unit_price' => $unitPrice,
+                //     'line_amount' => $lineAmount,
+                // );
+            }
+
+            foreach ($workAmountByTask as $taskWorkAmount) {
+                $totalSales += (float)$taskWorkAmount;
+            }
+
+            return (float)$totalSales;
         } catch (Exception $e) {
             return 0.0;
         }
