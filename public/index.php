@@ -298,6 +298,7 @@ if ($route === 'construction/work_item_line_save') {
 if ($route === 'construction/work_item_line_delete') {
     require_once __DIR__ . '/../app/views/construction/work_item_line_delete.php';
     exit;
+}
 // ==========================
 //  안전(안전사고) 액션(POST 처리)
 // ==========================
