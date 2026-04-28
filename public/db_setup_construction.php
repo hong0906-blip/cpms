@@ -143,7 +143,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $hasWorkId = ($stCol && $stCol->fetch()) ? true : false;
                 } catch (Exception $eCol) { $hasWorkId = false; }
                 if (!$hasWorkId) {
-                    $pdo->exec("ALTER TABLE cpms_schedule_tasks ADD COLUMN work_id INT NULL AFTER parent_id");
+                    $hasParentId = false;
+                    try {
+                        $stParent = $pdo->query("SHOW COLUMNS FROM cpms_schedule_tasks LIKE 'parent_id'");
+                        $hasParentId = ($stParent && $stParent->fetch()) ? true : false;
+                    } catch (Exception $eParent) { $hasParentId = false; }
+                    if ($hasParentId) {
+                        $pdo->exec("ALTER TABLE cpms_schedule_tasks ADD COLUMN work_id INT NULL AFTER parent_id");
+                    } else {
+                        $pdo->exec("ALTER TABLE cpms_schedule_tasks ADD COLUMN work_id INT NULL");
+                    }
                 }
                 try {
                     $stIdx = $pdo->query("SHOW INDEX FROM cpms_schedule_tasks WHERE Key_name = 'idx_work_id'");
