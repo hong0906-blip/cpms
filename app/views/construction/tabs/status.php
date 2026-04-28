@@ -294,7 +294,7 @@ if (!function_exists('cpms_status_sales_total_between')) {
             } else {
                 $lineSelect .= ", '' AS item_name";
             }      
-                  
+
             $sql = "
                 SELECT " . $lineSelect . "
                 FROM cpms_schedule_tasks st
@@ -474,10 +474,11 @@ for ($m = 1; $m <= 12; $m++) {
         'start' => $rangeStart,
         'end' => $rangeEnd,
         'labor' => $labor,
+        'equipment' => $equipment,
         'materials' => $materials,
         'safety' => $safety,
-        'materials' => $materials,
-        'sales' => $sales,        
+        'sales' => $sales,
+        'matSafetyTotal' => $materials + $safety,       
     );
 
     foreach ($yearTotals as $key => $sumValue) {
@@ -485,6 +486,9 @@ for ($m = 1; $m <= 12; $m++) {
         if (isset($row[$key]) && (float)$row[$key] > $maxMonthlyValue) {
             $maxMonthlyValue = (float)$row[$key];
         }
+    }
+    if ((float)$row['matSafetyTotal'] > $maxMonthlyValue) {
+        $maxMonthlyValue = (float)$row['matSafetyTotal'];
     }
 
     $monthlyData[] = $row;
@@ -503,7 +507,8 @@ for ($q = 1; $q <= 4; $q++) {
         'equipment' => 0,
         'safety' => 0,
         'materials' => 0,
-        'sales' => 0,        
+        'sales' => 0,
+        'matSafetyTotal' => 0,      
     );
 
     foreach ($monthlyData as $mRow) {
@@ -519,6 +524,10 @@ for ($q = 1; $q <= 4; $q++) {
         if ((float)$qRow[$key] > $maxQuarterValue) {
             $maxQuarterValue = (float)$qRow[$key];
         }
+    }
+    $qRow['matSafetyTotal'] = (float)$qRow['materials'] + (float)$qRow['safety'];
+    if ((float)$qRow['matSafetyTotal'] > $maxQuarterValue) {
+        $maxQuarterValue = (float)$qRow['matSafetyTotal'];
     }
 
     $quarterlyData[] = $qRow;
@@ -574,6 +583,8 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 .cpms-status-wrap .bars { width:100%; height:230px; display:flex; align-items:flex-end; justify-content:center; gap:4px; }
 .cpms-status-wrap .bar { width:18%; min-width:9px; border-radius:6px 6px 0 0; position:relative; }
 .cpms-status-wrap .bar .value { position:absolute; top:-20px; left:50%; transform:translateX(-50%); font-size:10px; color:#374151; white-space:nowrap; }
+.cpms-status-wrap .bar.stacked { display:flex; flex-direction:column-reverse; overflow:hidden; }
+.cpms-status-wrap .bar.stacked .segment { width:100%; }
 .cpms-status-wrap .xlabel { margin-top:8px; font-size:12px; color:#4b5563; font-weight:700; }
 .cpms-status-wrap .legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
 .cpms-status-wrap .legend-item { display:flex; align-items:center; gap:6px; font-size:12px; color:#374151; }
@@ -637,16 +648,43 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <?php foreach ($monthlyData as $row): ?>
                     <div class="group">
                         <div class="bars">
-                            <?php foreach ($categories as $key => $meta): ?>
-                                <?php
-                                $amount = isset($row[$key]) ? (float)$row[$key] : 0;
-                                $height = ($amount <= 0) ? 2 : max(2, ($amount / $maxMonthlyValue) * 100);
-                                $title = $row['label'] . ' ' . $meta['label'] . ': ' . cpms_status_money($amount) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
-                                ?>
-                                <div class="bar" title="<?php echo h($title); ?>" style="height:<?php echo round($height, 2); ?>%; background:<?php echo h($meta['color']); ?>;">
-                                    <span class="value"><?php echo h(number_format($amount)); ?></span>
-                                </div>
-                            <?php endforeach; ?>
+                            <?php
+                            // 매출 맨 왼쪽
+                            $salesAmount = isset($row['sales']) ? (float)$row['sales'] : 0;
+                            $salesHeight = ($salesAmount <= 0) ? 2 : max(2, ($salesAmount / $maxMonthlyValue) * 100);
+                            $salesTitle = $row['label'] . ' ' . $categories['sales']['label'] . ': ' . cpms_status_money($salesAmount) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
+
+                            $laborAmount = isset($row['labor']) ? (float)$row['labor'] : 0;
+                            $laborHeight = ($laborAmount <= 0) ? 2 : max(2, ($laborAmount / $maxMonthlyValue) * 100);
+                            $laborTitle = $row['label'] . ' ' . $categories['labor']['label'] . ': ' . cpms_status_money($laborAmount) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
+
+                            $equipmentAmount = isset($row['equipment']) ? (float)$row['equipment'] : 0;
+                            $equipmentHeight = ($equipmentAmount <= 0) ? 2 : max(2, ($equipmentAmount / $maxMonthlyValue) * 100);
+                            $equipmentTitle = $row['label'] . ' ' . $categories['equipment']['label'] . ': ' . cpms_status_money($equipmentAmount) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
+
+                            // 안전 스택
+                            $materialsAmount = isset($row['materials']) ? (float)$row['materials'] : 0;
+                            $safetyAmount = isset($row['safety']) ? (float)$row['safety'] : 0;
+                            $matSafetyTotal = isset($row['matSafetyTotal']) ? (float)$row['matSafetyTotal'] : ($materialsAmount + $safetyAmount);
+                            $matSafetyHeight = ($matSafetyTotal <= 0) ? 2 : max(2, ($matSafetyTotal / $maxMonthlyValue) * 100);
+                            $matPercent = ($matSafetyTotal > 0) ? (($materialsAmount / $matSafetyTotal) * 100) : 50;
+                            $safetyPercent = ($matSafetyTotal > 0) ? (($safetyAmount / $matSafetyTotal) * 100) : 50;
+                            $stackTitle = $row['label'] . ' 자재: ' . cpms_status_money($materialsAmount) . ' / 안전: ' . cpms_status_money($safetyAmount) . ' / 합계: ' . cpms_status_money($matSafetyTotal) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
+                            ?>
+                            <div class="bar" title="<?php echo h($salesTitle); ?>" style="height:<?php echo round($salesHeight, 2); ?>%; background:<?php echo h($categories['sales']['color']); ?>;">
+                                <span class="value"><?php echo h(number_format($salesAmount)); ?></span>
+                            </div>
+                            <div class="bar" title="<?php echo h($laborTitle); ?>" style="height:<?php echo round($laborHeight, 2); ?>%; background:<?php echo h($categories['labor']['color']); ?>;">
+                                <span class="value"><?php echo h(number_format($laborAmount)); ?></span>
+                            </div>
+                            <div class="bar" title="<?php echo h($equipmentTitle); ?>" style="height:<?php echo round($equipmentHeight, 2); ?>%; background:<?php echo h($categories['equipment']['color']); ?>;">
+                                <span class="value"><?php echo h(number_format($equipmentAmount)); ?></span>
+                            </div>
+                            <div class="bar stacked" title="<?php echo h($stackTitle); ?>" style="height:<?php echo round($matSafetyHeight, 2); ?>%;">
+                                <span class="segment" style="height:<?php echo round($matPercent, 2); ?>%; background:<?php echo h($categories['materials']['color']); ?>;"></span>
+                                <span class="segment" style="height:<?php echo round($safetyPercent, 2); ?>%; background:<?php echo h($categories['safety']['color']); ?>;"></span>
+                                <span class="value"><?php echo h(number_format($matSafetyTotal)); ?></span>
+                            </div>
                         </div>
                         <div class="xlabel"><?php echo h($row['label']); ?></div>
                     </div>
@@ -668,16 +706,43 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <?php foreach ($quarterlyData as $row): ?>
                     <div class="group">
                         <div class="bars">
-                            <?php foreach ($categories as $key => $meta): ?>
-                                <?php
-                                $amount = isset($row[$key]) ? (float)$row[$key] : 0;
-                                $height = ($amount <= 0) ? 2 : max(2, ($amount / $maxQuarterValue) * 100);
-                                $title = $row['label'] . ' ' . $meta['label'] . ': ' . cpms_status_money($amount);
-                                ?>
-                                <div class="bar" title="<?php echo h($title); ?>" style="height:<?php echo round($height, 2); ?>%; background:<?php echo h($meta['color']); ?>;">
-                                    <span class="value"><?php echo h(number_format($amount)); ?></span>
-                                </div>
-                            <?php endforeach; ?>
+                            <?php
+                            // 매출 맨 왼쪽
+                            $salesAmount = isset($row['sales']) ? (float)$row['sales'] : 0;
+                            $salesHeight = ($salesAmount <= 0) ? 2 : max(2, ($salesAmount / $maxQuarterValue) * 100);
+                            $salesTitle = $row['label'] . ' ' . $categories['sales']['label'] . ': ' . cpms_status_money($salesAmount);
+
+                            $laborAmount = isset($row['labor']) ? (float)$row['labor'] : 0;
+                            $laborHeight = ($laborAmount <= 0) ? 2 : max(2, ($laborAmount / $maxQuarterValue) * 100);
+                            $laborTitle = $row['label'] . ' ' . $categories['labor']['label'] . ': ' . cpms_status_money($laborAmount);
+
+                            $equipmentAmount = isset($row['equipment']) ? (float)$row['equipment'] : 0;
+                            $equipmentHeight = ($equipmentAmount <= 0) ? 2 : max(2, ($equipmentAmount / $maxQuarterValue) * 100);
+                            $equipmentTitle = $row['label'] . ' ' . $categories['equipment']['label'] . ': ' . cpms_status_money($equipmentAmount);
+
+                            // 안전 스택
+                            $materialsAmount = isset($row['materials']) ? (float)$row['materials'] : 0;
+                            $safetyAmount = isset($row['safety']) ? (float)$row['safety'] : 0;
+                            $matSafetyTotal = isset($row['matSafetyTotal']) ? (float)$row['matSafetyTotal'] : ($materialsAmount + $safetyAmount);
+                            $matSafetyHeight = ($matSafetyTotal <= 0) ? 2 : max(2, ($matSafetyTotal / $maxQuarterValue) * 100);
+                            $matPercent = ($matSafetyTotal > 0) ? (($materialsAmount / $matSafetyTotal) * 100) : 50;
+                            $safetyPercent = ($matSafetyTotal > 0) ? (($safetyAmount / $matSafetyTotal) * 100) : 50;
+                            $stackTitle = $row['label'] . ' 자재: ' . cpms_status_money($materialsAmount) . ' / 안전: ' . cpms_status_money($safetyAmount) . ' / 합계: ' . cpms_status_money($matSafetyTotal);
+                            ?>
+                            <div class="bar" title="<?php echo h($salesTitle); ?>" style="height:<?php echo round($salesHeight, 2); ?>%; background:<?php echo h($categories['sales']['color']); ?>;">
+                                <span class="value"><?php echo h(number_format($salesAmount)); ?></span>
+                            </div>
+                            <div class="bar" title="<?php echo h($laborTitle); ?>" style="height:<?php echo round($laborHeight, 2); ?>%; background:<?php echo h($categories['labor']['color']); ?>;">
+                                <span class="value"><?php echo h(number_format($laborAmount)); ?></span>
+                            </div>
+                            <div class="bar" title="<?php echo h($equipmentTitle); ?>" style="height:<?php echo round($equipmentHeight, 2); ?>%; background:<?php echo h($categories['equipment']['color']); ?>;">
+                                <span class="value"><?php echo h(number_format($equipmentAmount)); ?></span>
+                            </div>
+                            <div class="bar stacked" title="<?php echo h($stackTitle); ?>" style="height:<?php echo round($matSafetyHeight, 2); ?>%;">
+                                <span class="segment" style="height:<?php echo round($matPercent, 2); ?>%; background:<?php echo h($categories['materials']['color']); ?>;"></span>
+                                <span class="segment" style="height:<?php echo round($safetyPercent, 2); ?>%; background:<?php echo h($categories['safety']['color']); ?>;"></span>
+                                <span class="value"><?php echo h(number_format($matSafetyTotal)); ?></span>
+                            </div>
                         </div>
                         <div class="xlabel"><?php echo h($row['label']); ?></div>
                     </div>
