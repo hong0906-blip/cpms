@@ -86,6 +86,72 @@ try {
     $taskQtyMap = array();
 }
 
+// 항목별 수량표/저장: 공정별 내역서 항목 매핑 + 완료수량 맵
+$taskItemMap = array();
+$taskItemDoneMap = array();
+try {
+    $stUnit = $pdo->prepare("
+        SELECT id, item_name, process_name, qty
+        FROM cpms_project_unit_prices
+        WHERE project_id = :pid
+        ORDER BY id ASC
+    " );
+    $stUnit->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
+    $stUnit->execute();
+    $unitRows = $stUnit->fetchAll();
+
+    $unitByBase = array();
+    if (is_array($unitRows)) {
+        foreach ($unitRows as $ur) {
+            $uid = isset($ur['id']) ? (int)$ur['id'] : 0;
+            if ($uid <= 0) continue;
+            $baseRaw = isset($ur['process_name']) && trim((string)$ur['process_name']) !== '' ? $ur['process_name'] : (isset($ur['item_name']) ? $ur['item_name'] : '');
+            $baseKey = base_process_name($baseRaw);
+            if ($baseKey === '') continue;
+            if (!isset($unitByBase[$baseKey])) $unitByBase[$baseKey] = array();
+            $unitByBase[$baseKey][] = array(
+                'unit_price_id' => $uid,
+                'item_name' => isset($ur['item_name']) ? (string)$ur['item_name'] : '',
+                'contract_qty' => isset($ur['qty']) && is_numeric((string)$ur['qty']) ? (float)$ur['qty'] : 0
+            );
+        }
+    }
+
+    if (is_array($tasks)) {
+        foreach ($tasks as $tt) {
+            $taskIdVal = isset($tt['id']) ? (int)$tt['id'] : 0;
+            if ($taskIdVal <= 0) continue;
+            $taskBase = base_process_name(isset($tt['name']) ? $tt['name'] : '');
+            $taskItemMap[$taskIdVal] = isset($unitByBase[$taskBase]) ? $unitByBase[$taskBase] : array();
+        }
+    }
+
+    try {
+        $stTip = $pdo->prepare("
+            SELECT task_id, unit_price_id, done_qty
+            FROM cpms_schedule_task_item_progress
+            WHERE project_id = :pid
+        " );
+        $stTip->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
+        $stTip->execute();
+        $tipRows = $stTip->fetchAll();
+        if (is_array($tipRows)) {
+            foreach ($tipRows as $tr) {
+                $taskIdVal = isset($tr['task_id']) ? (int)$tr['task_id'] : 0;
+                $unitIdVal = isset($tr['unit_price_id']) ? (int)$tr['unit_price_id'] : 0;
+                if ($taskIdVal <= 0 || $unitIdVal <= 0) continue;
+                if (!isset($taskItemDoneMap[$taskIdVal])) $taskItemDoneMap[$taskIdVal] = array();
+                $taskItemDoneMap[$taskIdVal][$unitIdVal] = isset($tr['done_qty']) ? (float)$tr['done_qty'] : 0;
+            }
+        }
+    } catch (Exception $eTip) {
+        $taskItemDoneMap = array();
+    }
+} catch (Exception $e) {
+    $taskItemMap = array();
+    $taskItemDoneMap = array();
+}
+
 // 간트 범위: 프로젝트 기간(있으면) 우선
 $pStart = isset($projectRow['start_date']) ? trim((string)$projectRow['start_date']) : '';
 $pEnd   = isset($projectRow['end_date']) ? trim((string)$projectRow['end_date']) : '';
@@ -93,6 +159,13 @@ $pEnd   = isset($projectRow['end_date']) ? trim((string)$projectRow['end_date'])
 function ymd_to_ts($ymd) {
     if ($ymd === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $ymd)) return 0;
     return strtotime($ymd . ' 00:00:00');
+}
+
+function base_process_name($name) {
+    $name = trim((string)$name);
+    if ($name === '') return '';
+    $name = preg_replace('/\s*\([^)]*\)\s*$/', '', $name);
+    return trim((string)$name);
 }
 
 // 프로젝트 기간이 없으면 태스크 기간으로 대체
@@ -434,7 +507,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                          <?php if ($widthPct > 0): ?>
                             <div class="gantt-bar absolute inset-y-0 rounded-lg bg-gradient-to-r from-blue-600 to-cyan-500 text-white text-xs flex items-center px-2"
                                  style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%; min-width: 28px;">
-                                <span class="truncate"><?php echo h($t['name']); ?></span>
+                                <?php /* 공정명 텍스트 숨김 */ ?>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -639,7 +712,12 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                 if ($sdTs > 0 && $edTs > 0 && $edTs < $sdTs) { $tmp = $sdTs; $sdTs = $edTs; $edTs = $tmp; }
                 if (!task_overlaps_range($sdTs, $edTs, $rangeStartTs, $rangeEndTs)) continue;
                 $pr = isset($t['progress']) ? (int)$t['progress'] : 0;
-                if ($pr < 0) $pr = 0; if ($pr > 100) $pr = 100;
+                // 과거 공정 자동 100%
+                $displayPr = $pr;
+                if (($pr === 0 || !isset($t['progress']) || $t['progress'] === null || $t['progress'] === '') && $edTs > 0 && $edTs < $todayTs) {
+                    $displayPr = 100;
+                }
+                if ($displayPr < 0) $displayPr = 0; if ($displayPr > 100) $displayPr = 100;
                 ?>
                 <tr class="border-t border-gray-100">
                     <?php if ($canEdit): ?>
@@ -656,7 +734,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                             <td class="py-2 pr-2"><input type="date" name="start_date" value="<?php echo h($sd); ?>" class="px-3 py-2 rounded-2xl border border-gray-200"></td>
                             <td class="py-2 pr-2"><input type="date" name="end_date" value="<?php echo h($ed); ?>" class="px-3 py-2 rounded-2xl border border-gray-200"></td>
                             <td class="py-2 pr-2">
-                                <input type="number" name="progress" min="0" max="100" value="<?php echo (int)$pr; ?>" class="w-24 px-3 py-2 rounded-2xl border border-gray-200">%
+                                <input type="number" name="progress" min="0" max="100" value="<?php echo (int)$displayPr; ?>" class="w-24 px-3 py-2 rounded-2xl border border-gray-200">%
                             </td>
                             <!-- 현재진행률 일정컬럼 삭제 -->
                             <td class="py-2">
@@ -676,7 +754,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                         <td class="py-2 pr-2 font-extrabold text-gray-900"><?php echo h($t['name']); ?></td>
                         <td class="py-2 pr-2 text-gray-700"><?php echo h($sd); ?></td>
                         <td class="py-2 pr-2 text-gray-700"><?php echo h($ed); ?></td>
-                        <td class="py-2 pr-2 text-gray-700"><?php echo (int)$pr; ?>%</td> <!-- 현재진행률 일정컬럼 삭제 -->
+                        <td class="py-2 pr-2 text-gray-700"><?php echo (int)$displayPr; ?>%</td> <!-- 현재진행률 일정컬럼 삭제 -->
                     <?php endif; ?>
                 </tr>
             <?php endforeach; ?>
@@ -719,12 +797,30 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-500">완료 수량</label>
-                        <input id="ganttDoneQty" type="number" min="0" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" placeholder="예: 80">
+                        <input id="ganttDoneQty" type="number" min="0" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full bg-gray-50 text-gray-700" placeholder="항목 합계" readonly>
                         <div id="ganttDoneQtyHint" class="mt-1 text-xs text-gray-500"></div>
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-500">남은 수량</label>
                         <div class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full bg-gray-50 text-gray-700 font-extrabold" id="ganttRemainQty">0</div>
+                    </div>
+                </div>
+
+                <!-- 항목별 수량표/저장 -->
+                <div>
+                    <div class="text-xs font-bold text-gray-500 mb-2">내역서 항목별 수량</div>
+                    <div class="overflow-auto border border-gray-200 rounded-2xl">
+                        <table class="w-full text-xs border-collapse">
+                            <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="p-2 border text-left">항목명</th>
+                                    <th class="p-2 border text-right">수량(계약수량)</th>
+                                    <th class="p-2 border text-right">완료수량</th>
+                                    <th class="p-2 border text-right">남은수량</th>
+                                </tr>
+                            </thead>
+                            <tbody id="ganttItemQtyBody"></tbody>
+                        </table>
                     </div>
                 </div>
 
@@ -856,6 +952,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var progressMap = <?php echo json_encode($progressMap, JSON_UNESCAPED_UNICODE); ?>;
   var progressPhotoMap = <?php echo json_encode($progressPhotoMap, JSON_UNESCAPED_UNICODE); ?>;
   var workDetailMap = <?php echo json_encode($workDetailMap, JSON_UNESCAPED_UNICODE); ?>; // 공정 클릭 시 내역서 표시
+  var taskItemMap = <?php echo json_encode($taskItemMap, JSON_UNESCAPED_UNICODE); ?>; // 항목별 수량표/저장
+  var taskItemDoneMap = <?php echo json_encode($taskItemDoneMap, JSON_UNESCAPED_UNICODE); ?>; // 항목별 수량표/저장
   var todayYmd = rangeSource.getAttribute('data-today-ymd') || '';
   var todayOffset = parseInt(rangeSource.getAttribute('data-today-offset'), 10);
   var initialMode = '<?php echo h($viewMode); ?>';
@@ -1351,6 +1449,73 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     doneBefore: 0
   };
 
+  function escapeHtml(str){
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function renderTaskItemTable(taskId){
+    var bodyEl = document.getElementById('ganttItemQtyBody');
+    var doneEl = document.getElementById('ganttDoneQty');
+    var totalEl = document.getElementById('ganttTotalQty');
+    if (!bodyEl) return;
+    var rows = (taskItemMap && taskItemMap[taskId]) ? taskItemMap[taskId] : [];
+    var doneMap = (taskItemDoneMap && taskItemDoneMap[taskId]) ? taskItemDoneMap[taskId] : {};
+    bodyEl.innerHTML = '';
+    var totalQtySum = 0;
+    var doneQtySum = 0;
+
+    if (!rows || !rows.length) {
+      bodyEl.innerHTML = '<tr><td class="p-3 border text-center text-gray-500" colspan="4">연결된 내역서 항목이 없습니다.</td></tr>';
+      if (totalEl) totalEl.value = '0';
+      if (doneEl) doneEl.value = '0';
+      return;
+    }
+
+    rows.forEach(function(item){
+      var uid = parseInt(item.unit_price_id, 10) || 0;
+      var contractQty = toNumber(item.contract_qty);
+      if (contractQty === null) contractQty = 0;
+      var doneQty = doneMap && Object.prototype.hasOwnProperty.call(doneMap, uid) ? toNumber(doneMap[uid]) : 0;
+      if (doneQty === null) doneQty = 0;
+      if (doneQty < 0) doneQty = 0;
+      var remain = contractQty - doneQty;
+      if (remain < 0) remain = 0;
+      totalQtySum += contractQty;
+      doneQtySum += doneQty;
+
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td class="p-2 border">' + escapeHtml(item.item_name || '') + '</td>' +
+        '<td class="p-2 border text-right">' + contractQty + '</td>' +
+        '<td class="p-2 border text-right"><input type="number" min="0" step="0.0001" class="gantt-item-done w-24 px-2 py-1 border border-gray-200 rounded text-right" data-unit-price-id="' + uid + '" data-contract-qty="' + contractQty + '" value="' + doneQty + '"></td>' +
+        '<td class="p-2 border text-right"><span class="gantt-item-remain">' + remain + '</span></td>';
+      bodyEl.appendChild(tr);
+    });
+
+    if (totalEl) totalEl.value = totalQtySum;
+    if (doneEl) doneEl.value = doneQtySum;
+
+    bodyEl.querySelectorAll('.gantt-item-done').forEach(function(input){
+      input.addEventListener('input', function(){
+        var contractQty = toNumber(input.getAttribute('data-contract-qty'));
+        if (contractQty === null) contractQty = 0;
+        var val = toNumber(input.value);
+        if (val === null || val < 0) val = 0;
+        if (contractQty > 0 && val > contractQty) val = contractQty;
+        input.value = val;
+        var remainEl = input.closest('tr').querySelector('.gantt-item-remain');
+        if (remainEl) remainEl.textContent = (contractQty - val);
+
+        var doneTotal = 0;
+        bodyEl.querySelectorAll('.gantt-item-done').forEach(function(inp){
+          var iv = toNumber(inp.value);
+          doneTotal += (iv === null ? 0 : iv);
+        });
+        if (doneEl) doneEl.value = doneTotal;
+        updateRemainQty();
+      });
+    });
+  }
+
   function openProgress(taskId, taskName, taskDate, totalQty){
     var taskIdEl = document.getElementById('ganttProgressTaskId');
     if (taskIdEl) taskIdEl.value = taskId || '';
@@ -1399,7 +1564,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     currentProgressContext.taskId = taskId;
     currentProgressContext.taskDate = taskDate;
     currentProgressContext.baseTotal = baseTotal;
-    currentProgressContext.doneBefore = getDoneBefore(taskId, taskDate);
+    currentProgressContext.doneBefore = 0;
+    renderTaskItemTable(taskId);
     var shiftInfoEl = document.getElementById('ganttShiftInfo');
     var taskRange = getTaskDateRange(taskId);
     if (shiftInfoEl) {
@@ -1674,13 +1840,23 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var autoEl = document.getElementById('ganttAutoDistributionToggle');
       fd.append('input_mode', modeEl ? modeEl.value : 'manual');
       fd.append('auto_distribution', autoEl && autoEl.checked ? '1' : '0');
+      var itemDoneMap = {};
+      var itemRows = document.querySelectorAll('#ganttItemQtyBody .gantt-item-done');
+      itemRows.forEach(function(inp){
+        var uid = inp.getAttribute('data-unit-price-id') || '';
+        if (!uid) return;
+        itemDoneMap[uid] = inp.value || '0';
+      });
+      Object.keys(itemDoneMap).forEach(function(uid){
+        fd.append('item_done_qty[' + uid + ']', itemDoneMap[uid]);
+      });
       if (photoInput && photoInput.files && photoInput.files.length > 0) {
         Array.prototype.forEach.call(photoInput.files, function(file){
           fd.append('photos[]', file);
         });
       }
 
-      fetch('?r=construction/schedule_progress_save', {
+      fetch('?r=construction/schedule_task_item_progress_save', {
         method: 'POST',
         body: fd,
         credentials: 'same-origin'

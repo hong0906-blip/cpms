@@ -164,6 +164,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $msg = '작업 테이블 생성/확인 완료';
 
+            } else if ($action === 'task_item_progress') {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_schedule_task_item_progress (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    task_id INT NOT NULL,
+                    unit_price_id INT NOT NULL,
+                    done_qty DECIMAL(18,4) NOT NULL DEFAULT 0,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    UNIQUE KEY uniq_project_task_unit (project_id, task_id, unit_price_id),
+                    KEY idx_project_task (project_id, task_id),
+                    KEY idx_unit_price_id (unit_price_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                $msg = '공정표 항목완료수량 테이블 생성/확인 완료';
+
             } else if ($action === 'equipment') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_equipment_items (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -243,5 +258,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="equipment"><button class="btn" type="submit">3) 장비 입력 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="materials_purchase"><button class="btn" type="submit">4) 자재구입비 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="work_items"><button class="btn" type="submit">5) 작업 테이블 생성/확인</button></form>
+<form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="task_item_progress"><button class="btn" type="submit">6) 공정표 항목완료수량 테이블 생성/확인</button></form>
 </div>
 </div></body></html>

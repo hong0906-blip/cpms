@@ -186,6 +186,10 @@ if ($route === 'construction/schedule_progress_save') {
     require_once __DIR__ . '/../app/views/construction/schedule_progress_save.php';
     exit;
 }
+if ($route === 'construction/schedule_task_item_progress_save') {
+    require_once __DIR__ . '/../app/views/construction/schedule_task_item_progress_save.php';
+    exit;
+}
 if ($route === 'construction/safety_incident_create') {
     require_once __DIR__ . '/../app/views/construction/safety_incident_create.php';
     exit;
