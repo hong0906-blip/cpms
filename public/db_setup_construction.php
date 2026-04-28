@@ -80,9 +80,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     sort_order INT NOT NULL DEFAULT 0,
                     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
                     created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    -- 구버전 MySQL 호환: CURRENT_TIMESTAMP는 테이블당 1개만 사용
+                    updated_at TIMESTAMP NULL DEFAULT NULL,
                     KEY idx_project_id (project_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                // 기존 테이블 보정 (MySQL 5.6/구버전 호환)
+                if (table_exists2($pdo, 'cpms_work_items')) {
+                    $createdCol = null; $updatedCol = null;
+                    try {
+                        $stCreated = $pdo->query("SHOW COLUMNS FROM cpms_work_items LIKE 'created_at'");
+                        $createdCol = ($stCreated) ? $stCreated->fetch(PDO::FETCH_ASSOC) : null;
+                    } catch (Exception $eCreated) { $createdCol = null; }
+                    try {
+                        $stUpdated = $pdo->query("SHOW COLUMNS FROM cpms_work_items LIKE 'updated_at'");
+                        $updatedCol = ($stUpdated) ? $stUpdated->fetch(PDO::FETCH_ASSOC) : null;
+                    } catch (Exception $eUpdated) { $updatedCol = null; }
+
+                    // created_at/updated_at 상태 확인
+                    $createdDefault = '';
+                    if ($createdCol && isset($createdCol['Default'])) {
+                        $createdDefault = strtoupper((string)$createdCol['Default']);
+                    }
+                    // created_at은 CURRENT_TIMESTAMP 유지가 목표이며, 여기서는 상태만 확인한다.
+                    // (기존 데이터/환경 안전성 때문에 created_at ALTER는 수행하지 않음)
+                    if ($createdDefault === 'CURRENT_TIMESTAMP') { /* noop */ }
+                    $needFixUpdatedAt = false;
+                    if (!$updatedCol) {
+                        $needFixUpdatedAt = true;
+                    } else {
+                        $updatedDefault = isset($updatedCol['Default']) ? strtoupper((string)$updatedCol['Default']) : '';
+                        $updatedExtra = isset($updatedCol['Extra']) ? strtoupper((string)$updatedCol['Extra']) : '';
+                        if ($updatedDefault === 'CURRENT_TIMESTAMP' || strpos($updatedExtra, 'ON UPDATE CURRENT_TIMESTAMP') !== false) {
+                            $needFixUpdatedAt = true;
+                        }
+                    }
+
+                    if ($needFixUpdatedAt) {
+                        if (!$updatedCol) {
+                            $pdo->exec("ALTER TABLE cpms_work_items ADD COLUMN updated_at TIMESTAMP NULL DEFAULT NULL");
+                        } else {
+                            $pdo->exec("ALTER TABLE cpms_work_items MODIFY COLUMN updated_at TIMESTAMP NULL DEFAULT NULL");
+                        }
+                    }
+                }
 
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_work_item_lines (
                     id INT AUTO_INCREMENT PRIMARY KEY,
