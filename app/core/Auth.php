@@ -25,14 +25,32 @@ class Auth
         );
     }
 
+    // 마스터 권한 대소문자 무시
+    private static function normalizeEmail($email)
+    {
+        return strtolower(trim((string)$email));
+    }
+
     public static function isMaster()
     {
-        $email = trim((string)self::userEmail());
-        if ($email === '' && isset($_SESSION['user_email'])) {
-            $email = trim((string)$_SESSION['user_email']);
+        $emails = array(
+            self::userEmail(),
+            isset($_SESSION['user_email']) ? $_SESSION['user_email'] : '',
+            (isset($_SESSION[self::CPMS_USER_KEY]) && is_array($_SESSION[self::CPMS_USER_KEY]) && isset($_SESSION[self::CPMS_USER_KEY]['email'])) ? $_SESSION[self::CPMS_USER_KEY]['email'] : '',
+        );
+
+        $masters = array();
+        foreach (self::masterEmails() as $masterEmail) {
+            $nm = self::normalizeEmail($masterEmail);
+            if ($nm !== '') $masters[] = $nm;
         }
-        if ($email === '') return false;
-        return in_array($email, self::masterEmails(), true);
+
+        foreach ($emails as $email) {
+            $ne = self::normalizeEmail($email);
+            if ($ne !== '' && in_array($ne, $masters, true)) return true;
+        }
+
+        return false;
     }
 
     // (기존 임원 이메일 fallback - DB role이 없을 때만)
@@ -115,6 +133,7 @@ class Auth
     // ★ 월급 설정 가능: 임원 OR 관리(관리부)
     public static function canManageSalary()
     {
+        if (self::isMaster()) return true;        
         return self::canManageEmployees();
     }
 
@@ -195,7 +214,7 @@ class Auth
 
     private static function loadFromEmployeesByEmail($email, $force)
     {
-        $email = trim((string)$email);
+        $email = self::normalizeEmail($email);
         if ($email === '') return false;
 
         $pdo = Db::pdo();
@@ -235,10 +254,15 @@ class Auth
         }
 
         // 마스터 계정 권한: executive로 강제
-        if (in_array($email, self::masterEmails(), true)) {
+        $normalizedMasterEmails = array();
+        foreach (self::masterEmails() as $masterEmail) {
+            $normalizedMasterEmails[] = self::normalizeEmail($masterEmail);
+        }
+
+        if (in_array($email, $normalizedMasterEmails, true)) {
             $role = 'executive';
         }
-        
+
         // role fallback
         if ($role !== 'executive') {
             if (in_array($email, self::executiveEmails(), true)) $role = 'executive';

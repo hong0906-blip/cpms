@@ -1,4 +1,4 @@
-<?php /** 출퇴근 시스템 DB 설정 버튼 실행 페이지 */ require_once __DIR__.'/../app/bootstrap.php'; if(!\App\Core\Auth::canManageEmployees()){die('권한없음');} // 마스터 계정 권한 + 관리부/임원 허용 $pdo=\App\Core\Db::pdo(); if(!$pdo){die('DB 연결 실패');}
+<?php /** 출퇴근 시스템 DB 설정 버튼 실행 페이지 */ require_once __DIR__.'/../app/bootstrap.php'; if(!(\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees())){die('권한없음');} // 직접 권한 체크 마스터 통과 $pdo=\App\Core\Db::pdo(); if(!$pdo){die('DB 연결 실패');}
 $action=isset($_POST['action'])?$_POST['action']:''; $msg='';
 function run_att_sql($pdo,$keys){$defs=array(
 'records'=>"CREATE TABLE IF NOT EXISTS cpms_attendance_records (id INT AUTO_INCREMENT PRIMARY KEY, employee_id INT NOT NULL, work_date DATE NOT NULL, check_in DATETIME NULL, check_out DATETIME NULL, status VARCHAR(30) NOT NULL DEFAULT '출근전', raw_minutes INT NOT NULL DEFAULT 0, work_minutes INT NOT NULL DEFAULT 0, memo VARCHAR(255) DEFAULT '', created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, UNIQUE KEY uq_emp_date(employee_id,work_date), INDEX idx_work_date(work_date), INDEX idx_employee_id(employee_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",

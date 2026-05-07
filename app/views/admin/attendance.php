@@ -1,10 +1,56 @@
-<?php /** 출퇴근 시스템 관리 화면 */ use App\Core\Db; require_once __DIR__.'/../attendance/common.php'; if(!attendance_is_manager()){echo '권한없음';return;} $pdo=Db::pdo(); $date=isset($_GET['date'])?$_GET['date']:date('Y-m-d'); $tab=isset($_GET['atab'])?$_GET['atab']:'daily'; $settings=attendance_settings($pdo); list($ws,$we)=attendance_week_range($date);
-$daily=array();$reqs=array();$weekly=array();$emps=array(); if($pdo){$emps=$pdo->query("SELECT id,name,department,position,hire_date FROM employees ORDER BY name")->fetchAll();
-$st=$pdo->prepare("SELECT e.name,e.department,e.position,a.* FROM cpms_attendance_records a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=:d ORDER BY e.name");$st->execute(array(':d'=>$date));$daily=$st->fetchAll();
-$reqs=$pdo->query("SELECT r.*,e.name FROM cpms_attendance_requests r JOIN employees e ON e.id=r.employee_id ORDER BY r.id DESC LIMIT 100")->fetchAll();
-$st2=$pdo->prepare("SELECT e.id,e.name,e.department,SUM(a.work_minutes) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name,e.department ORDER BY m DESC");$st2->execute(array(':s'=>$ws,':e'=>$we));$weekly=$st2->fetchAll(); }
+<?php
+/** 출퇴근 시스템 관리 화면 */
+use App\Core\Auth;
+use App\Core\Db;
+
+require_once __DIR__.'/../attendance/common.php';
+
+if (!(Auth::isMaster() || attendance_is_manager())) { // 직접 권한 체크 마스터 통과
+    echo '권한없음';
+    return;
+}
+
+$pdo = Db::pdo();
+$date = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
+$tab = isset($_GET['atab']) ? $_GET['atab'] : 'daily';
+$settings = attendance_settings($pdo);
+list($ws, $we) = attendance_week_range($date);
+
+$daily = array();
+$reqs = array();
+$weekly = array();
+$emps = array();
+
+if ($pdo) {
+    $emps = $pdo->query("SELECT id,name,department,position,hire_date FROM employees ORDER BY name")->fetchAll();
+    $st = $pdo->prepare("SELECT e.name,e.department,e.position,a.* FROM cpms_attendance_records a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=:d ORDER BY e.name");
+    $st->execute(array(':d' => $date));
+    $daily = $st->fetchAll();
+    $reqs = $pdo->query("SELECT r.*,e.name FROM cpms_attendance_requests r JOIN employees e ON e.id=r.employee_id ORDER BY r.id DESC LIMIT 100")->fetchAll();
+    $st2 = $pdo->prepare("SELECT e.id,e.name,e.department,SUM(a.work_minutes) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name,e.department ORDER BY m DESC");
+    $st2->execute(array(':s' => $ws, ':e' => $we));
+    $weekly = $st2->fetchAll();
+}
 ?>
-<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'><h3 style='margin:0;'>출퇴근/근태관리</h3><?php if(attendance_is_manager()): ?><!-- 출퇴근 DB 설정 버튼 --><a href='?r=db_setup_attendance' style='display:inline-block;padding:8px 12px;background:#1d4ed8;color:#fff;border-radius:8px;font-weight:700;'>출퇴근 DB 설정</a><?php endif; ?></div>
+<div style='margin-bottom:10px;padding:10px;border:1px solid #c7d2fe;background:#eef2ff;border-radius:10px;'>
+  <div style='font-weight:700;margin-bottom:6px;'>마스터 권한 디버그 - 확인 후 제거 가능</div>
+  <div>Auth::userEmail(): <b><?php echo h((string)Auth::userEmail()); ?></b></div>
+  <div>$_SESSION['user_email']: <b><?php echo h(isset($_SESSION['user_email']) ? (string)$_SESSION['user_email'] : ''); ?></b></div>
+  <div>$_SESSION['cpms_user']['email']: <b><?php echo h(isset($_SESSION['cpms_user']['email']) ? (string)$_SESSION['cpms_user']['email'] : ''); ?></b></div>
+  <div>세션에 저장된 role: <b><?php echo h(isset($_SESSION['cpms_user']['role']) ? (string)$_SESSION['cpms_user']['role'] : ''); ?></b></div>
+  <div>Auth::userRole(): <b><?php echo h((string)Auth::userRole()); ?></b></div>
+  <div>Auth::userDepartment(): <b><?php echo h((string)Auth::userDepartment()); ?></b></div>
+  <div>Auth::isMaster(): <b><?php echo Auth::isMaster() ? 'true' : 'false'; ?></b></div>
+  <div>Auth::canManageEmployees(): <b><?php echo Auth::canManageEmployees() ? 'true' : 'false'; ?></b></div>
+  <div style='margin-top:4px;font-size:12px;color:#4338ca;'>권한 변경 후에도 반영이 안 되면 로그아웃 후 재로그인하세요.</div>
+</div>
+
+<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
+  <h3 style='margin:0;'>출퇴근/근태관리</h3>
+  <?php if (Auth::isMaster() || Auth::canManageEmployees()): ?><!-- 출퇴근 DB 설정 버튼 마스터 표시 -->
+    <a href='?r=db_setup_attendance' style='display:inline-block;padding:8px 12px;background:#1d4ed8;color:#fff;border-radius:8px;font-weight:700;'>출퇴근 DB 설정</a>
+  <?php endif; ?>
+</div>
 <a href='?r=관리&tab=attendance&atab=daily'>일일 출퇴근 현황</a> | <a href='?r=관리&tab=attendance&atab=requests'>출퇴근 요청 관리</a> | <a href='?r=관리&tab=attendance&atab=weekly'>주간 근무시간/52시간 초과자</a> | <a href='?r=관리&tab=attendance&atab=leave'>연차/월차/반차 관리</a> | <a href='?r=관리&tab=attendance&atab=settings'>근태 설정</a>
 <?php if($tab==='daily'): ?><table><tr><th>직원명</th><th>부서</th><th>직책</th><th>상태</th><th>출근</th><th>퇴근</th><th>실제 체류시간</th><th>인정 근무시간</th></tr><?php foreach($daily as $r): ?><tr><td><?php echo h($r['name']);?></td><td><?php echo h($r['department']);?></td><td><?php echo h($r['position']);?></td><td><?php echo h($r['status']);?></td><td><?php echo h($r['check_in']);?></td><td><?php echo h($r['check_out']);?></td><td><?php echo number_format(((int)$r['raw_minutes'])/60,2);?>h</td><td><?php echo number_format(((int)$r['work_minutes'])/60,2);?>h</td></tr><?php endforeach; ?></table><?php endif; ?>
 <?php if($tab==='requests'): foreach($reqs as $r): ?><div><?php echo h($r['name'].' '.$r['request_date'].' '.$r['request_type'].' '.$r['status']);?> <form method='post' action='?r=management/attendance_request_approve'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><input type='hidden' name='id' value='<?php echo (int)$r['id'];?>'><button>승인</button></form></div><?php endforeach; endif; ?>

@@ -101,6 +101,7 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 ?>
 
 
+<!-- 대시보드 명판 최상단 -->
 <div class="bg-gradient-to-r from-indigo-600 to-purple-500 rounded-3xl p-8 text-white shadow-xl shadow-indigo-500/20 mb-8">
     <div class="flex items-start gap-4">
         <div class="p-4 bg-white/20 rounded-3xl border border-white/20">

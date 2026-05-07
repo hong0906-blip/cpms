@@ -7,7 +7,7 @@
 
 use App\Core\Auth;
 
-$canManage = Auth::canManageEmployees();
+$canManage = (Auth::isMaster() || Auth::canManageEmployees()); // 직접 권한 체크 마스터 통과
 if (!$canManage) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (임원/관리 전용)</div>';
     return;
@@ -30,6 +30,20 @@ function admin_tab_url($tab) {
     return '?r=관리&tab=' . urlencode($tab);
 }
 ?>
+
+
+<div class="mb-4 p-4 rounded-2xl border border-indigo-200 bg-indigo-50 text-indigo-900 text-sm">
+  <div class="font-extrabold mb-2">마스터 권한 디버그 - 확인 후 제거 가능</div>
+  <div>Auth::userEmail(): <b><?php echo h((string)Auth::userEmail()); ?></b></div>
+  <div>$_SESSION['user_email']: <b><?php echo h(isset($_SESSION['user_email']) ? (string)$_SESSION['user_email'] : ''); ?></b></div>
+  <div>$_SESSION['cpms_user']['email']: <b><?php echo h(isset($_SESSION['cpms_user']['email']) ? (string)$_SESSION['cpms_user']['email'] : ''); ?></b></div>
+  <div>세션에 저장된 role: <b><?php echo h(isset($_SESSION['cpms_user']['role']) ? (string)$_SESSION['cpms_user']['role'] : ''); ?></b></div>
+  <div>Auth::userRole(): <b><?php echo h((string)Auth::userRole()); ?></b></div>
+  <div>Auth::userDepartment(): <b><?php echo h((string)Auth::userDepartment()); ?></b></div>
+  <div>Auth::isMaster(): <b><?php echo Auth::isMaster() ? 'true' : 'false'; ?></b></div>
+  <div>Auth::canManageEmployees(): <b><?php echo Auth::canManageEmployees() ? 'true' : 'false'; ?></b></div>
+  <div class="mt-2 text-xs text-indigo-700">권한 변경 후에도 반영이 안 되면 로그아웃 후 재로그인하세요.</div>
+</div>
 
 <div class="mb-6">
   <div class="text-sm text-gray-500">관리</div>
