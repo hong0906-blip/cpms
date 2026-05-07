@@ -5,10 +5,13 @@ use App\Core\Db;
 
 require_once __DIR__.'/../attendance/common.php';
 
-if (!(Auth::isMaster() || attendance_is_manager())) { // 직접 권한 체크 마스터 통과
+$canManageAttendance = (Auth::isMaster() || attendance_is_manager());
+if (!$canManageAttendance) {
     echo '권한없음';
     return;
 }
+
+$canShowDbButton = (Auth::isMaster() || Auth::canManageEmployees());
 
 $pdo = Db::pdo();
 $date = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
@@ -32,9 +35,24 @@ if ($pdo) {
     $weekly = $st2->fetchAll();
 }
 ?>
+<!-- 출퇴근 실제 렌더링 확인 -->
+<div style="background:#fef3c7;border:2px solid #dc2626;color:#7f1d1d;padding:12px 14px;border-radius:10px;margin:0 0 12px 0;font-size:13px;line-height:1.6;">
+  <div style="font-weight:800;margin-bottom:6px;">ADMIN_ATTENDANCE_LOADED = 2026-근태탭-강제진단-01</div>
+  <div style="font-weight:700;">ADMIN_ATTENDANCE_VERSION = 2026-근태탭-강제진단-01</div>
+  <!-- OPcache/서버 캐시 확인 문구 -->
+  <div style="margin:6px 0 10px 0;font-weight:700;">이 문구가 화면에 안 보이면 PHP가 최신 파일을 실행하지 않는 것입니다. OPcache/서버 캐시/다른 경로 실행을 확인하세요.</div>
+  <div>__FILE__: <?php echo h(__FILE__); ?></div>
+  <div>$_GET['r']: <?php echo h(isset($_GET['r']) ? $_GET['r'] : ''); ?></div>
+  <div>$_GET['tab']: <?php echo h(isset($_GET['tab']) ? $_GET['tab'] : ''); ?></div>
+  <div>$_GET['atab']: <?php echo h(isset($_GET['atab']) ? $_GET['atab'] : ''); ?></div>
+  <div>Auth::isMaster(): <?php echo Auth::isMaster() ? 'true' : 'false'; ?></div>
+  <div>Auth::canManageEmployees(): <?php echo Auth::canManageEmployees() ? 'true' : 'false'; ?></div>
+  <div>DB 버튼 표시 조건(Auth::isMaster() || Auth::canManageEmployees()): <?php echo $canShowDbButton ? 'true' : 'false'; ?></div>
+</div>
+
 <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
   <h3 style='margin:0;'>출퇴근/근태관리</h3>
-  <?php if (Auth::isMaster() || Auth::canManageEmployees()): ?><!-- 출퇴근 DB 설정 버튼 실제 렌더링 -->
+  <?php if ($canShowDbButton): ?>
     <a href='?r=db_setup_attendance' style='display:inline-block;padding:8px 12px;background:#1d4ed8;color:#fff;border-radius:8px;font-weight:700;'>출퇴근 DB 설정</a>
   <?php endif; ?>
 </div>

@@ -376,6 +376,24 @@ if (isset($_GET['dv'])) {
 }
 $dashboardType = isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee';
 
+
+// ==========================
+//  관리 라우트 강제 진단(debug_route=1)
+// ==========================
+if ($route === '관리' && isset($_GET['debug_route']) && (string)$_GET['debug_route'] === '1') {
+    if (\App\Core\Auth::check() && (\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees())) {
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "[ROUTE DEBUG]\n";
+        echo 'route=' . $route . "\n";
+        echo 'view=admin/index' . "\n";
+        echo 'selectedMenu=관리' . "\n";
+        echo 'Auth::isMaster()=' . (\App\Core\Auth::isMaster() ? 'true' : 'false') . "\n";
+        echo 'Auth::canManageEmployees()=' . (\App\Core\Auth::canManageEmployees() ? 'true' : 'false') . "\n";
+        echo '__FILE__=' . __FILE__ . "\n";
+        exit;
+    }
+}
+
 // ==========================
 //  화면 매핑
 // ==========================
