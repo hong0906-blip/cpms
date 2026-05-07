@@ -100,6 +100,11 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 
 ?>
 
+
+<?php require_once __DIR__.'/../attendance/common.php'; list($ews,$ewe)=attendance_week_range(attendance_today()); $risk52=array();$risk40=array();$absent=array();$pending=0; if($pdo){ try{$sql="SELECT e.name,COALESCE(SUM(a.work_minutes),0) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name";$st=$pdo->prepare($sql);$st->execute(array(':s'=>$ews,':e'=>$ewe));foreach($st->fetchAll() as $r){if((int)$r['m']>3120)$risk52[]=$r; if((int)$r['m']>2400)$risk40[]=$r;} $today=attendance_today(); $a2=$pdo->query("SELECT name FROM employees WHERE id NOT IN (SELECT employee_id FROM cpms_attendance_records WHERE work_date='".$today."' AND check_in IS NOT NULL)");$absent=$a2?$a2->fetchAll():array(); $pending=(int)$pdo->query("SELECT COUNT(*) FROM cpms_attendance_requests WHERE status='pending'")->fetchColumn(); }catch(Exception $e){} }
+?>
+<div class='bg-white/80 rounded-3xl p-6 border mb-6'><!-- 임원 대시보드 근태 리스크 --><h3 class='text-xl font-bold'>근태 리스크 현황</h3><div style='color:#b91c1c'>52시간 초과자: <?php echo count($risk52);?>명</div><div>40시간 초과자: <?php echo count($risk40);?>명</div><div>오늘 미출근자: <?php echo count($absent);?>명</div><div style='color:#a16207'>출퇴근 요청 승인대기: <?php echo (int)$pending;?>건</div></div>
+
 <div class="bg-gradient-to-r from-indigo-600 to-purple-500 rounded-3xl p-8 text-white shadow-xl shadow-indigo-500/20 mb-8">
     <div class="flex items-start gap-4">
         <div class="p-4 bg-white/20 rounded-3xl border border-white/20">

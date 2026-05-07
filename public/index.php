@@ -331,6 +331,7 @@ if ($route === 'management/attendance_record_save') { require_once __DIR__ . '/.
 if ($route === 'management/leave_save') { require_once __DIR__ . '/../app/views/management/leave_save.php'; exit; }
 if ($route === 'management/leave_delete') { require_once __DIR__ . '/../app/views/management/leave_delete.php'; exit; }
 if ($route === 'management/attendance_settings_save') { require_once __DIR__ . '/../app/views/management/attendance_settings_save.php'; exit; }
+if ($route === 'db_setup_attendance') { require_once __DIR__ . '/db_setup_attendance.php'; exit; }
 // ==========================
 //  로그인/로그아웃
 // ==========================
