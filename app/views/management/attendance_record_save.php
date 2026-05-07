@@ -1,0 +1,1 @@
+<?php /** 출퇴근 시스템 수동수정 */ header('Location: ?r=관리&tab=attendance&atab=daily');

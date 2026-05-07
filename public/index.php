@@ -320,6 +320,17 @@ if ($route === 'safety/incident_update') {
     exit;
 }
 
+
+if ($route === 'attendance/check_in') { require_once __DIR__ . '/../app/views/attendance/check_in.php'; exit; }
+if ($route === 'attendance/check_out') { require_once __DIR__ . '/../app/views/attendance/check_out.php'; exit; }
+if ($route === 'attendance/request_save') { require_once __DIR__ . '/../app/views/attendance/request_save.php'; exit; }
+if ($route === 'management/attendance') { require_once __DIR__ . '/../app/views/management/attendance.php'; exit; }
+if ($route === 'management/attendance_request_approve') { require_once __DIR__ . '/../app/views/management/attendance_request_approve.php'; exit; }
+if ($route === 'management/attendance_request_reject') { require_once __DIR__ . '/../app/views/management/attendance_request_reject.php'; exit; }
+if ($route === 'management/attendance_record_save') { require_once __DIR__ . '/../app/views/management/attendance_record_save.php'; exit; }
+if ($route === 'management/leave_save') { require_once __DIR__ . '/../app/views/management/leave_save.php'; exit; }
+if ($route === 'management/leave_delete') { require_once __DIR__ . '/../app/views/management/leave_delete.php'; exit; }
+if ($route === 'management/attendance_settings_save') { require_once __DIR__ . '/../app/views/management/attendance_settings_save.php'; exit; }
 // ==========================
 //  로그인/로그아웃
 // ==========================

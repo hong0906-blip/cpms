@@ -1,0 +1,1 @@
+<?php /** 연차/월차/반차 관리 삭제 */ use App\Core\Db; require_once __DIR__.'/../attendance/common.php'; if(!attendance_is_manager())exit; if(!csrf_check(isset($_POST['_csrf'])?$_POST['_csrf']:''))exit; $pdo=Db::pdo(); $pdo->prepare("DELETE FROM cpms_leave_records WHERE id=:id")->execute(array(':id'=>(int)$_POST['id'])); header('Location: ?r=관리&tab=attendance');
