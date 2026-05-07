@@ -62,7 +62,7 @@ if ($tab === 'employees') {
 } elseif ($tab === 'direct_rates') {
     require __DIR__ . '/direct_rates.php';
 } elseif ($tab === 'attendance') {
-    require __DIR__ . '/../management/attendance.php';    
+    require __DIR__ . '/attendance.php';     
 } else { // labor_calc
     require __DIR__ . '/labor_calc.php';
 }

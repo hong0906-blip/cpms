@@ -109,6 +109,12 @@ $dept  = isset($_POST['department']) ? trim((string)$_POST['department']) : '';
 $pos   = isset($_POST['position']) ? trim((string)$_POST['position']) : '';
 $role  = isset($_POST['role']) ? (string)$_POST['role'] : 'employee';
 $isActive = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;
+// 직원명부 입사날짜
+$hireDate = isset($_POST['hire_date']) ? trim((string)$_POST['hire_date']) : '';
+// 휴가 잔여 수동 입력
+$leaveMonthly = isset($_POST['leave_monthly_balance']) ? trim((string)$_POST['leave_monthly_balance']) : '';
+$leaveAnnual = isset($_POST['leave_annual_balance']) ? trim((string)$_POST['leave_annual_balance']) : '';
+$leaveHalf = isset($_POST['leave_half_balance']) ? trim((string)$_POST['leave_half_balance']) : '';
 
 if ($email === '' || $name === '') {
     flash_set('error', '이메일/이름은 필수입니다.');
@@ -130,7 +136,11 @@ try {
                     department = :dept,
                     position = :pos,
                     role = :role,
-                    is_active = :active
+                    is_active = :active,
+                    hire_date = :hire_date,
+                    leave_monthly_balance = :leave_monthly_balance,
+                    leave_annual_balance = :leave_annual_balance,
+                    leave_half_balance = :leave_half_balance
                 WHERE id = :id";
         $st = $pdo->prepare($sql);
         $st->bindValue(':email', $email);
@@ -142,13 +152,17 @@ try {
 
         $st->bindValue(':role', $role);
         $st->bindValue(':active', $isActive, \PDO::PARAM_INT);
+        $st->bindValue(':hire_date', ($hireDate === '' ? null : $hireDate));
+        $st->bindValue(':leave_monthly_balance', ($leaveMonthly === '' ? null : (float)$leaveMonthly));
+        $st->bindValue(':leave_annual_balance', ($leaveAnnual === '' ? null : (float)$leaveAnnual));
+        $st->bindValue(':leave_half_balance', ($leaveHalf === '' ? null : (float)$leaveHalf));
         $st->bindValue(':id', $id, \PDO::PARAM_INT);
         $st->execute();
 
         flash_set('success', '직원 정보가 수정되었습니다.');
     } else {
-        $sql = "INSERT INTO employees (email, name, department, position, role, is_active)
-                VALUES (:email, :name, :dept, :pos, :role, :active)";
+        $sql = "INSERT INTO employees (email, name, department, position, role, is_active, hire_date, leave_monthly_balance, leave_annual_balance, leave_half_balance)
+                VALUES (:email, :name, :dept, :pos, :role, :active, :hire_date, :leave_monthly_balance, :leave_annual_balance, :leave_half_balance)";
         $st = $pdo->prepare($sql);
         $st->bindValue(':email', $email);
         $st->bindValue(':name', $name);
@@ -159,6 +173,10 @@ try {
 
         $st->bindValue(':role', $role);
         $st->bindValue(':active', $isActive, \PDO::PARAM_INT);
+        $st->bindValue(':hire_date', ($hireDate === '' ? null : $hireDate));
+        $st->bindValue(':leave_monthly_balance', ($leaveMonthly === '' ? null : (float)$leaveMonthly));
+        $st->bindValue(':leave_annual_balance', ($leaveAnnual === '' ? null : (float)$leaveAnnual));
+        $st->bindValue(':leave_half_balance', ($leaveHalf === '' ? null : (float)$leaveHalf));
         $st->execute();
 
         flash_set('success', '직원이 추가되었습니다.');

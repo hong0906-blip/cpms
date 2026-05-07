@@ -103,11 +103,11 @@ if ($dbOk && $_SERVER['REQUEST_METHOD'] === 'POST') {
 if ($dbOk) {
     // 컬럼 없으면 SELECT에 position 넣으면 에러나서 분기
     if ($positionEnabled) {
-        $sql = "SELECT id, email, name, department, position, monthly_salary, role, photo_path, is_active
+        $sql = "SELECT id, email, name, department, position, hire_date, leave_monthly_balance, leave_annual_balance, leave_half_balance, monthly_salary, role, photo_path, is_active
                 FROM employees
                 WHERE 1=1 ";
     } else {
-        $sql = "SELECT id, email, name, department, monthly_salary, role, photo_path, is_active
+        $sql = "SELECT id, email, name, department, hire_date, leave_monthly_balance, leave_annual_balance, leave_half_balance, monthly_salary, role, photo_path, is_active
                 FROM employees
                 WHERE 1=1 ";
     }
@@ -221,6 +221,7 @@ if ($dbOk) {
             <th class="px-4 py-3 font-extrabold">이름</th>
             <th class="px-4 py-3 font-extrabold">이메일</th>
             <th class="px-4 py-3 font-extrabold">부서</th>
+            <th class="px-4 py-3 font-extrabold">입사일</th>
             <?php if ($positionEnabled): ?>
               <th class="px-4 py-3 font-extrabold">직급</th>
             <?php endif; ?>
@@ -237,7 +238,11 @@ if ($dbOk) {
               $name = (string)$r['name'];
               $dept = isset($r['department']) ? (string)$r['department'] : '';
               $pos = $positionEnabled && isset($r['position']) ? (string)$r['position'] : '';
-              $salary = isset($r['monthly_salary']) ? $r['monthly_salary'] : null; // (UI 제거됨 - 내부 유지)
+              $hireDate = isset($r['hire_date']) && $r['hire_date'] ? (string)$r['hire_date'] : '-';
+              $lbm = isset($r['leave_monthly_balance']) && $r['leave_monthly_balance'] !== null ? (string)$r['leave_monthly_balance'] : '';
+              $lba = isset($r['leave_annual_balance']) && $r['leave_annual_balance'] !== null ? (string)$r['leave_annual_balance'] : '';
+              $lbh = isset($r['leave_half_balance']) && $r['leave_half_balance'] !== null ? (string)$r['leave_half_balance'] : ''; // 휴가 잔여 수동 입력              
+              $salary = isset($r['monthly_salary']) ? $r['monthly_salary'] : null; // (UI 제거됨 - 내부 유지)              
               $erole = (string)$r['role'];
               $active = ((int)$r['is_active'] === 1);
               $photo = isset($r['photo_path']) ? $r['photo_path'] : null;
@@ -262,6 +267,7 @@ if ($dbOk) {
               <td class="px-4 py-3 font-extrabold text-gray-900"><?php echo h($name); ?></td>
               <td class="px-4 py-3 text-gray-700"><?php echo h($email); ?></td>
               <td class="px-4 py-3 text-gray-700"><?php echo h($dept); ?></td>
+              <td class="px-4 py-3 text-gray-700"><?php echo h($hireDate); ?></td>
 
               <?php if ($positionEnabled): ?>
                 <td class="px-4 py-3 text-gray-700"><?php echo h($pos); ?></td>
@@ -289,7 +295,7 @@ if ($dbOk) {
                           data-emp-dept="<?php echo h($dept); ?>"
                           <?php if ($positionEnabled): ?>data-emp-pos="<?php echo h($pos); ?>"<?php endif; ?>
                           data-emp-role="<?php echo h($erole); ?>"
-                          data-emp-active="<?php echo $active ? '1' : '0'; ?>">
+                          data-emp-active="<?php echo $active ? '1' : '0'; ?>" data-emp-hire-date="<?php echo h($hireDate === '-' ? '' : $hireDate); ?>" data-emp-lbm="<?php echo h($lbm); ?>" data-emp-lba="<?php echo h($lba); ?>" data-emp-lbh="<?php echo h($lbh); ?>">
                     <i data-lucide="edit-2" class="w-4 h-4 inline"></i> 수정
                   </button>
 
@@ -390,6 +396,23 @@ if ($dbOk) {
               <option value="0">비활성</option>
             </select>
           </div>
+        </div>
+
+        
+        <div>
+          <label class="block text-sm font-bold text-gray-700 mb-2">입사날짜</label><!-- 직원명부 입사날짜 -->
+          <input type="date" class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="hire_date">
+        </div>
+
+        
+        <div>
+          <label class="block text-sm font-bold text-gray-700 mb-2">입사날짜</label><!-- 직원명부 입사날짜 -->
+          <input type="date" class="w-full px-4 py-3 rounded-2xl border border-gray-200" name="hire_date" id="empEditHireDate">
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4"><!-- 휴가 잔여 수동 입력 -->
+          <div><label class="block text-sm font-bold text-gray-700 mb-2">남은 월차</label><input type="number" step="0.01" name="leave_monthly_balance" id="empEditLbm" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></div>
+          <div><label class="block text-sm font-bold text-gray-700 mb-2">남은 연차</label><input type="number" step="0.01" name="leave_annual_balance" id="empEditLba" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></div>
+          <div><label class="block text-sm font-bold text-gray-700 mb-2">남은 반차</label><input type="number" step="0.01" name="leave_half_balance" id="empEditLbh" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></div>
         </div>
 
         <button class="w-full py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-extrabold">
@@ -586,6 +609,10 @@ if ($dbOk) {
       if (posEl) posEl.value = btnEdit.getAttribute('data-emp-pos') || '';
       document.getElementById('empEditRole').value = btnEdit.getAttribute('data-emp-role') || 'employee';
       document.getElementById('empEditActive').value = btnEdit.getAttribute('data-emp-active') || '1';
+      var hd=document.getElementById('empEditHireDate'); if(hd) hd.value=btnEdit.getAttribute('data-emp-hire-date')||'';
+      var lbm=document.getElementById('empEditLbm'); if(lbm) lbm.value=btnEdit.getAttribute('data-emp-lbm')||'';
+      var lba=document.getElementById('empEditLba'); if(lba) lba.value=btnEdit.getAttribute('data-emp-lba')||'';
+      var lbh=document.getElementById('empEditLbh'); if(lbh) lbh.value=btnEdit.getAttribute('data-emp-lbh')||'';      
       openModal('empEdit');
       e.preventDefault();
       return;
