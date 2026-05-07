@@ -16,6 +16,25 @@ class Auth
 {
     const CPMS_USER_KEY = 'cpms_user';
 
+    // 마스터 계정 권한
+    // 마스터 계정 이메일이 다르면 여기에 추가
+    private static function masterEmails()
+    {
+        return array(
+            'hong0906@cmbuild.kr',
+        );
+    }
+
+    public static function isMaster()
+    {
+        $email = trim((string)self::userEmail());
+        if ($email === '' && isset($_SESSION['user_email'])) {
+            $email = trim((string)$_SESSION['user_email']);
+        }
+        if ($email === '') return false;
+        return in_array($email, self::masterEmails(), true);
+    }
+
     // (기존 임원 이메일 fallback - DB role이 없을 때만)
     private static function executiveEmails()
     {
@@ -61,6 +80,7 @@ class Auth
     public static function userRole()
     {
         $u = self::user();
+        if (self::isMaster()) return 'executive'; // 마스터 계정 권한
         return $u && isset($u['role']) ? $u['role'] : 'employee';
     }
 
@@ -82,6 +102,7 @@ class Auth
     public static function canManageEmployees()
     {
         if (!self::check()) return false;
+        if (self::isMaster()) return true; // 마스터 계정 권한
 
         $role = self::userRole();
         if ($role === 'executive') return true;
@@ -213,6 +234,11 @@ class Auth
             }
         }
 
+        // 마스터 계정 권한: executive로 강제
+        if (in_array($email, self::masterEmails(), true)) {
+            $role = 'executive';
+        }
+        
         // role fallback
         if ($role !== 'executive') {
             if (in_array($email, self::executiveEmails(), true)) $role = 'executive';

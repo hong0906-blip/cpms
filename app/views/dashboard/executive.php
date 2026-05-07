@@ -101,10 +101,6 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 ?>
 
 
-<?php require_once __DIR__.'/../attendance/common.php'; list($ews,$ewe)=attendance_week_range(attendance_today()); $risk52=array();$risk40=array();$absent=array();$pending=0; if($pdo){ try{$sql="SELECT e.name,COALESCE(SUM(a.work_minutes),0) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name";$st=$pdo->prepare($sql);$st->execute(array(':s'=>$ews,':e'=>$ewe));foreach($st->fetchAll() as $r){if((int)$r['m']>3120)$risk52[]=$r; if((int)$r['m']>2400)$risk40[]=$r;} $today=attendance_today(); $a2=$pdo->query("SELECT name FROM employees WHERE id NOT IN (SELECT employee_id FROM cpms_attendance_records WHERE work_date='".$today."' AND check_in IS NOT NULL)");$absent=$a2?$a2->fetchAll():array(); $pending=(int)$pdo->query("SELECT COUNT(*) FROM cpms_attendance_requests WHERE status='pending'")->fetchColumn(); }catch(Exception $e){} }
-?>
-<div class='grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6'><div class='bg-white/80 rounded-3xl p-6 border'><!-- 임원 대시보드 52시간 초과자 카드 --><h3 class='text-xl font-bold'>근태 리스크 현황</h3><div>오늘 미출근자 수: <?php echo count($absent);?>명</div><div>승인대기 출퇴근 요청 수: <?php echo (int)$pending;?>건</div><div>40시간 초과자 수: <?php echo count($risk40);?>명</div><div style='color:#b91c1c'>52시간 초과자 수: <?php echo count($risk52);?>명</div><div>연차/반차 사용 현황 요약: 대시보드 집계</div></div><div class='bg-red-50 rounded-3xl p-6 border border-red-200'><h3 class='text-xl font-bold text-red-700'>52시간 초과자 목록</h3><?php foreach($risk52 as $r): ?><div class='text-red-700 font-bold'><?php echo h($r['name']);?> / <?php echo h(isset($r['department'])?$r['department']:'-');?> / <?php echo h(isset($r['position'])?$r['position']:'-');?> / <?php echo attendance_hm((int)$r['m']);?></div><?php endforeach; ?><?php if(count($risk52)===0): ?><div>없음</div><?php endif; ?></div></div>
-
 <div class="bg-gradient-to-r from-indigo-600 to-purple-500 rounded-3xl p-8 text-white shadow-xl shadow-indigo-500/20 mb-8">
     <div class="flex items-start gap-4">
         <div class="p-4 bg-white/20 rounded-3xl border border-white/20">
@@ -116,6 +112,10 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
         </div>
     </div>
 </div>
+
+<?php require_once __DIR__.'/../attendance/common.php'; list($ews,$ewe)=attendance_week_range(attendance_today()); $risk52=array();$risk40=array();$absent=array();$pending=0; if($pdo){ try{$sql="SELECT e.name,COALESCE(SUM(a.work_minutes),0) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name";$st=$pdo->prepare($sql);$st->execute(array(':s'=>$ews,':e'=>$ewe));foreach($st->fetchAll() as $r){if((int)$r['m']>3120)$risk52[]=$r; if((int)$r['m']>2400)$risk40[]=$r;} $today=attendance_today(); $a2=$pdo->query("SELECT name FROM employees WHERE id NOT IN (SELECT employee_id FROM cpms_attendance_records WHERE work_date='".$today."' AND check_in IS NOT NULL)");$absent=$a2?$a2->fetchAll():array(); $pending=(int)$pdo->query("SELECT COUNT(*) FROM cpms_attendance_requests WHERE status='pending'")->fetchColumn(); }catch(Exception $e){} }
+?>
+<div class='grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6'><div class='bg-white/80 rounded-3xl p-6 border'><!-- 임원 대시보드 52시간 초과자 카드 --><h3 class='text-xl font-bold'>근태 리스크 현황</h3><div>오늘 미출근자 수: <?php echo count($absent);?>명</div><div>승인대기 출퇴근 요청 수: <?php echo (int)$pending;?>건</div><div>40시간 초과자 수: <?php echo count($risk40);?>명</div><div style='color:#b91c1c'>52시간 초과자 수: <?php echo count($risk52);?>명</div><div>연차/반차 사용 현황 요약: 대시보드 집계</div></div><div class='bg-red-50 rounded-3xl p-6 border border-red-200'><h3 class='text-xl font-bold text-red-700'>52시간 초과자 목록</h3><?php foreach($risk52 as $r): ?><div class='text-red-700 font-bold'><?php echo h($r['name']);?> / <?php echo h(isset($r['department'])?$r['department']:'-');?> / <?php echo h(isset($r['position'])?$r['position']:'-');?> / <?php echo attendance_hm((int)$r['m']);?></div><?php endforeach; ?><?php if(count($risk52)===0): ?><div>없음</div><?php endif; ?></div></div>
 
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type']==='success')?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-red-50 border-red-200 text-red-700'; ?>">

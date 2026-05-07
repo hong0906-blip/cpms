@@ -144,6 +144,19 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 ?>
 
 
+<div class="bg-gradient-to-r from-blue-600 to-cyan-500 rounded-3xl p-8 text-white shadow-xl shadow-blue-500/20 mb-8">
+    <div class="flex items-start gap-4">
+        <div class="p-4 bg-white/20 rounded-3xl border border-white/20">
+            <i data-lucide="sparkles" class="w-8 h-8 text-yellow-200"></i>
+        </div>
+        <div class="flex-1">
+            <h2 class="text-3xl font-extrabold">대시보드</h2>
+            <p class="text-blue-100 text-lg mt-2"><?php echo ($userName !== '') ? (h($userName) . '님, ') : ''; ?>오늘도 안전하게 진행하세요.</p>
+        </div>
+        <div class="flex gap-2"><!-- 직원 대시보드 출근/퇴근 버튼 --><form method='post' action='?r=attendance/check_in'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><button class='px-4 py-2 rounded-xl bg-white text-blue-700 font-bold'>출근</button></form><form method='post' action='?r=attendance/check_out'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><button class='px-4 py-2 rounded-xl bg-emerald-100 text-emerald-700 font-bold'>퇴근</button></form></div>        
+    </div>
+</div>
+
 <?php require_once __DIR__.'/../attendance/common.php'; $eid_att=attendance_employee_id($pdo); $today_att=attendance_today(); list($ws_att,$we_att)=attendance_week_range($today_att); $todayRow=array(); $myReqs=array(); $pendingCnt=0; $weekWork=0; $deductMin=attendance_break_minutes($pdo); if($pdo&&$eid_att>0){ try{$st=$pdo->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d LIMIT 1");$st->execute(array(':e'=>$eid_att,':d'=>$today_att));$todayRow=$st->fetch(); $st2=$pdo->prepare("SELECT * FROM cpms_attendance_requests WHERE employee_id=:e ORDER BY id DESC LIMIT 20");$st2->execute(array(':e'=>$eid_att));$myReqs=$st2->fetchAll(); $st3=$pdo->prepare("SELECT COALESCE(SUM(work_minutes),0) FROM cpms_attendance_records WHERE employee_id=:e AND work_date BETWEEN :s AND :w");$st3->execute(array(':e'=>$eid_att,':s'=>$ws_att,':w'=>$we_att));$weekWork=(int)$st3->fetchColumn(); $st4=$pdo->prepare("SELECT COUNT(*) FROM cpms_attendance_requests WHERE employee_id=:e AND status='pending'");$st4->execute(array(':e'=>$eid_att));$pendingCnt=(int)$st4->fetchColumn(); }catch(Exception $e){} }
 ?>
 <div class='bg-white/80 rounded-3xl p-6 border mb-6'><!-- 직원 대시보드 내 근태 현황 --><h3 class='text-xl font-bold'>내 근태 현황</h3><div>오늘 상태: <?php echo h(isset($todayRow['status'])?$todayRow['status']:'출근 전');?> / 오늘 실제 체류시간: <?php echo attendance_hm(isset($todayRow['raw_minutes'])?(int)$todayRow['raw_minutes']:0);?> / 오늘 인정 근무시간: <?php echo attendance_hm(isset($todayRow['work_minutes'])?(int)$todayRow['work_minutes']:0);?> / 오늘 공제시간: <?php echo attendance_hm($deductMin);?></div><div>이번 주 누적 인정 근무시간: <?php echo attendance_hm($weekWork);?> / 40시간 대비: <?php echo number_format(($weekWork/60)-40,2);?>h / 52시간 초과 여부: <?php echo ($weekWork>3120)?'초과':'정상';?> / 출퇴근 요청 승인대기: <?php echo (int)$pendingCnt;?>건</div></div>
@@ -167,22 +180,9 @@ if($pdo&&$eid_att>0){
 <div class='bg-white/80 rounded-3xl p-6 border'><!-- 직원 대시보드 휴가 현황 --><h3 class='text-xl font-bold'>휴가 현황</h3><div>월차 사용/잔여: <?php echo (int)$vac['monthly_used'];?> / <?php echo (int)$vac['monthly_left'];?></div><div>연차 사용/잔여: <?php echo (int)$vac['annual_used'];?> / <?php echo (int)$vac['annual_left'];?></div><div>반차 사용/잔여: <?php echo (int)$vac['half_used'];?> / <?php echo (int)$vac['half_left'];?></div></div>
 <div class='bg-white/80 rounded-3xl p-6 border'><h3 class='text-xl font-bold'>출퇴근 요청</h3><div class='text-sm text-gray-500'>아래 요청 카드에서 수정 요청을 등록하세요.</div></div>
 </div>
-<div class='bg-white/80 rounded-3xl p-6 border mb-8'><!-- 직원 대시보드 현재 상태 카드 --><h3 class='text-xl font-bold'>현재 상태</h3><div class='text-lg font-bold'><?php echo h($currentStatus);?></div><div class='text-sm text-gray-600'>상태 기준: 출근 전 / 출근중 / 퇴근완료 / 연차 / 오전반차 / 오후반차 / 휴무</div></div>
+
 
 <div class='bg-white/80 rounded-3xl p-6 border mb-6'><!-- 직원 대시보드 출퇴근 요청 --><h3 class='text-xl font-bold'>내 출퇴근 요청</h3><form method='post' action='?r=attendance/request_save' class='space-y-2'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><input type='date' name='request_date' value='<?php echo h($today_att);?>'><select name='request_type'><option value='check_in'>출근시간 수정</option><option value='check_out'>퇴근시간 수정</option><option value='both'>출근+퇴근 수정</option></select><input type='datetime-local' name='requested_check_in'><input type='datetime-local' name='requested_check_out'><input type='text' name='reason' placeholder='요청 사유'><button>요청</button></form><table><tr><th>요청날짜</th><th>종류</th><th>요청시간</th><th>상태</th><th>반려사유</th><th>요청일</th></tr><?php foreach($myReqs as $rq): ?><tr><td><?php echo h($rq['request_date']);?></td><td><?php echo h($rq['request_type']);?></td><td><?php echo h($rq['requested_check_in'].' / '.$rq['requested_check_out']);?></td><td><?php echo h($rq['status']);?></td><td><?php echo h($rq['reject_reason']);?></td><td><?php echo h($rq['created_at']);?></td></tr><?php endforeach; ?></table></div>
-
-<div class="bg-gradient-to-r from-blue-600 to-cyan-500 rounded-3xl p-8 text-white shadow-xl shadow-blue-500/20 mb-8">
-    <div class="flex items-start gap-4">
-        <div class="p-4 bg-white/20 rounded-3xl border border-white/20">
-            <i data-lucide="sparkles" class="w-8 h-8 text-yellow-200"></i>
-        </div>
-        <div class="flex-1">
-            <h2 class="text-3xl font-extrabold">대시보드</h2>
-            <p class="text-blue-100 text-lg mt-2"><?php echo ($userName !== '') ? (h($userName) . '님, ') : ''; ?>오늘도 안전하게 진행하세요.</p>
-        </div>
-        <div class="flex gap-2"><!-- 직원 대시보드 출근/퇴근 버튼 --><form method='post' action='?r=attendance/check_in'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><button class='px-4 py-2 rounded-xl bg-white text-blue-700 font-bold'>출근</button></form><form method='post' action='?r=attendance/check_out'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><button class='px-4 py-2 rounded-xl bg-emerald-100 text-emerald-700 font-bold'>퇴근</button></form></div>        
-    </div>
-</div>
 
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type']==='success')?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-red-50 border-red-200 text-red-700'; ?>">
@@ -463,3 +463,5 @@ if($pdo&&$eid_att>0){
 </div>
 <?php /** 출퇴근 시스템: 내 근태 현황 */ require_once __DIR__.'/../attendance/common.php'; $pdo2=\App\Core\Db::pdo(); $eid=attendance_employee_id($pdo2); $today=attendance_today(); $st='출근 전';$cin='-';$cout='-';$wm=0;$weekm=0;$pending=0;$approved=0;$rejected=0; if($pdo2&&$eid>0){try{$r=$pdo2->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d");$r->execute(array(':e'=>$eid,':d'=>$today));$row=$r->fetch(); if($row){$st=$row['status'];$cin=$row['check_in'];$cout=$row['check_out'];$wm=(int)$row['work_minutes'];} list($ws,$we)=attendance_week_range($today);$w=$pdo2->prepare("SELECT SUM(work_minutes) FROM cpms_attendance_records WHERE employee_id=:e AND work_date BETWEEN :s AND :t");$w->execute(array(':e'=>$eid,':s'=>$ws,':t'=>$we));$weekm=(int)$w->fetchColumn();$q=$pdo2->prepare("SELECT status,COUNT(*) c FROM cpms_attendance_requests WHERE employee_id=:e GROUP BY status");$q->execute(array(':e'=>$eid));foreach($q->fetchAll() as $x){if($x['status']==='pending')$pending=$x['c'];if($x['status']==='approved')$approved=$x['c'];if($x['status']==='rejected')$rejected=$x['c'];}}catch(Exception $e){}} ?>
 <div><h3>내 근태 현황</h3><p>오늘 상태: <?php echo h($st);?> / 출근: <?php echo h($cin);?> / 퇴근: <?php echo h($cout);?> / 오늘 근무: <?php echo number_format($wm/60,2);?>h / 이번 주: <?php echo number_format($weekm/60,2);?>h</p><p>출퇴근 수정 요청 상태: 승인대기 <?php echo (int)$pending;?> / 승인 <?php echo (int)$approved;?> / 반려 <?php echo (int)$rejected;?></p></div>
+
+<div class='bg-white/80 rounded-3xl p-6 border mb-8'><!-- 직원 대시보드 현재 상태 카드 --><h3 class='text-xl font-bold'>현재 상태</h3><div class='text-lg font-bold'><?php echo h($currentStatus);?></div><div class='text-sm text-gray-600'>상태 기준: 출근 전 / 출근중 / 퇴근완료 / 연차 / 오전반차 / 오후반차 / 휴무</div></div>
