@@ -35,27 +35,26 @@ if ($pdo) {
     $weekly = $st2->fetchAll();
 }
 ?>
-<!-- 출퇴근 실제 렌더링 확인 -->
-<div style="background:#fef3c7;border:2px solid #dc2626;color:#7f1d1d;padding:12px 14px;border-radius:10px;margin:0 0 12px 0;font-size:13px;line-height:1.6;">
-  <div style="font-weight:800;margin-bottom:6px;">ADMIN_ATTENDANCE_LOADED = 2026-근태탭-강제진단-01</div>
-  <div style="font-weight:700;">ADMIN_ATTENDANCE_VERSION = 2026-근태탭-강제진단-01</div>
-  <!-- OPcache/서버 캐시 확인 문구 -->
-  <div style="margin:6px 0 10px 0;font-weight:700;">이 문구가 화면에 안 보이면 PHP가 최신 파일을 실행하지 않는 것입니다. OPcache/서버 캐시/다른 경로 실행을 확인하세요.</div>
-  <div>__FILE__: <?php echo h(__FILE__); ?></div>
-  <div>$_GET['r']: <?php echo h(isset($_GET['r']) ? $_GET['r'] : ''); ?></div>
-  <div>$_GET['tab']: <?php echo h(isset($_GET['tab']) ? $_GET['tab'] : ''); ?></div>
-  <div>$_GET['atab']: <?php echo h(isset($_GET['atab']) ? $_GET['atab'] : ''); ?></div>
-  <div>Auth::isMaster(): <?php echo Auth::isMaster() ? 'true' : 'false'; ?></div>
-  <div>Auth::canManageEmployees(): <?php echo Auth::canManageEmployees() ? 'true' : 'false'; ?></div>
-  <div>DB 버튼 표시 조건(Auth::isMaster() || Auth::canManageEmployees()): <?php echo $canShowDbButton ? 'true' : 'false'; ?></div>
-</div>
+<details style="margin:0 0 10px 0;">
+  <summary style="cursor:pointer;color:#555;font-size:12px;">근태 디버그 정보 보기</summary>
+  <div style="background:#fef3c7;border:1px solid #d97706;color:#7c2d12;padding:10px;border-radius:8px;margin-top:8px;font-size:12px;line-height:1.6;">
+    <div>ADMIN_ATTENDANCE_LOADED = 2026-근태탭-강제진단-01</div>
+    <div>__FILE__: <?php echo h(__FILE__); ?></div>
+    <div>$_GET['r']: <?php echo h(isset($_GET['r']) ? $_GET['r'] : ''); ?></div>
+    <div>$_GET['tab']: <?php echo h(isset($_GET['tab']) ? $_GET['tab'] : ''); ?></div>
+    <div>$_GET['atab']: <?php echo h(isset($_GET['atab']) ? $_GET['atab'] : ''); ?></div>
+  </div>
+</details>
 
-<div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
-  <h3 style='margin:0;'>출퇴근/근태관리</h3>
+<?php // 출퇴근 DB 버튼 확실히 표시 ?>
+<div style='display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px 0;'>
+  <a href='?r=관리&tab=employees' style='display:inline-block;padding:8px 12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:8px;font-weight:700;text-decoration:none;'>직원명부</a>
   <?php if ($canShowDbButton): ?>
-    <a href='?r=db_setup_attendance' style='display:inline-block;padding:8px 12px;background:#1d4ed8;color:#fff;border-radius:8px;font-weight:700;'>출퇴근 DB 설정</a>
+    <a href='?r=db_setup_attendance' style='display:inline-block;padding:8px 12px;background:#1d4ed8;color:#fff;border:1px solid #1d4ed8;border-radius:8px;font-weight:700;text-decoration:none;'>출퇴근 DB 설정</a>
   <?php endif; ?>
+  <a href='?r=관리' style='display:inline-block;padding:8px 12px;background:#166534;color:#fff;border:1px solid #166534;border-radius:8px;font-weight:700;text-decoration:none;'>관리부 메인</a>  
 </div>
+<h3 style='margin:0 0 8px 0;'>출퇴근/근태관리</h3>
 <a href='?r=관리&tab=attendance&atab=daily'>일일 출퇴근 현황</a> | <a href='?r=관리&tab=attendance&atab=requests'>출퇴근 요청 관리</a> | <a href='?r=관리&tab=attendance&atab=weekly'>주간 근무시간/52시간 초과자</a> | <a href='?r=관리&tab=attendance&atab=leave'>연차/월차/반차 관리</a> | <a href='?r=관리&tab=attendance&atab=settings'>근태 설정</a>
 <?php if($tab==='daily'): ?><table><tr><th>직원명</th><th>부서</th><th>직책</th><th>상태</th><th>출근</th><th>퇴근</th><th>실제 체류시간</th><th>인정 근무시간</th></tr><?php foreach($daily as $r): ?><tr><td><?php echo h($r['name']);?></td><td><?php echo h($r['department']);?></td><td><?php echo h($r['position']);?></td><td><?php echo h($r['status']);?></td><td><?php echo h($r['check_in']);?></td><td><?php echo h($r['check_out']);?></td><td><?php echo number_format(((int)$r['raw_minutes'])/60,2);?>h</td><td><?php echo number_format(((int)$r['work_minutes'])/60,2);?>h</td></tr><?php endforeach; ?></table><?php endif; ?>
 <?php if($tab==='requests'): foreach($reqs as $r): ?><div><?php echo h($r['name'].' '.$r['request_date'].' '.$r['request_type'].' '.$r['status']);?> <form method='post' action='?r=management/attendance_request_approve'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><input type='hidden' name='id' value='<?php echo (int)$r['id'];?>'><button>승인</button></form></div><?php endforeach; endif; ?>

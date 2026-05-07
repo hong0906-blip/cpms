@@ -35,26 +35,19 @@ function admin_tab_url($tab)
 }
 ?>
 
-<?php if ($canManage): ?>
-<!-- 관리부 실제 렌더링 확인 - 확인 후 제거 가능 -->
-<div style="background:#fef3c7;border:2px solid #dc2626;color:#7f1d1d;padding:12px 14px;border-radius:10px;margin:0 0 16px 0;font-size:13px;line-height:1.6;">
-  <div style="font-weight:800;margin-bottom:6px;">ADMIN_INDEX_LOADED = 2026-관리탭-강제진단-01</div>
-  <div style="font-weight:700;">ADMIN_INDEX_VERSION = 2026-관리탭-강제진단-01</div>
-  <!-- OPcache/서버 캐시 확인 문구 -->
-  <div style="margin:6px 0 10px 0;font-weight:700;">이 문구가 화면에 안 보이면 PHP가 최신 파일을 실행하지 않는 것입니다. OPcache/서버 캐시/다른 경로 실행을 확인하세요.</div>
-  <div>__FILE__: <?php echo h(__FILE__); ?></div>
-  <div>$_SERVER['SCRIPT_FILENAME']: <?php echo h(isset($_SERVER['SCRIPT_FILENAME']) ? $_SERVER['SCRIPT_FILENAME'] : ''); ?></div>
-  <div>$_GET['r']: <?php echo h(isset($_GET['r']) ? $_GET['r'] : ''); ?></div>
-  <div>$_GET['tab']: <?php echo h(isset($_GET['tab']) ? $_GET['tab'] : ''); ?></div>
-  <div>최종 $tab: <?php echo h($tab); ?></div>
-  <div>$tabs keys: <?php echo h(implode(', ', array_keys($tabs))); ?></div>
-  <div>Auth::userEmail(): <?php echo h((string)Auth::userEmail()); ?></div>
-  <div>Auth::userRole(): <?php echo h((string)Auth::userRole()); ?></div>
-  <div>Auth::userDepartment(): <?php echo h((string)Auth::userDepartment()); ?></div>
-  <div>Auth::isMaster(): <?php echo Auth::isMaster() ? 'true' : 'false'; ?></div>
-  <div>Auth::canManageEmployees(): <?php echo Auth::canManageEmployees() ? 'true' : 'false'; ?></div>
-</div>
-<?php endif; ?>
+<details style="margin:0 0 12px 0;">
+  <summary style="cursor:pointer;color:#555;font-size:12px;">관리부 디버그 정보 보기</summary>
+  <div style="background:#fef3c7;border:1px solid #d97706;color:#7c2d12;padding:10px 12px;border-radius:8px;margin-top:8px;font-size:12px;line-height:1.6;">
+    <div>ADMIN_INDEX_LOADED = 2026-관리탭-강제진단-01</div>
+    <div>__FILE__: <?php echo h(__FILE__); ?></div>
+    <div>$_GET['r']: <?php echo h(isset($_GET['r']) ? $_GET['r'] : ''); ?></div>
+    <div>$_GET['tab']: <?php echo h(isset($_GET['tab']) ? $_GET['tab'] : ''); ?></div>
+    <div>최종 $tab: <?php echo h($tab); ?></div>
+    <div>$tabs keys: <?php echo h(implode(', ', array_keys($tabs))); ?></div>
+    <div>Auth::isMaster(): <?php echo Auth::isMaster() ? 'true' : 'false'; ?></div>
+    <div>Auth::canManageEmployees(): <?php echo Auth::canManageEmployees() ? 'true' : 'false'; ?></div>
+  </div>
+</details>
 
 <div class="mb-6">
   <div class="text-sm text-gray-500">관리</div>
@@ -62,18 +55,14 @@ function admin_tab_url($tab)
   <div class="text-sm text-gray-500 mt-1">직원명부 / 직영팀 설정 / 노무비 계산 / 출퇴근·근태를 한 화면에서 관리합니다.</div>
 </div>
 
-<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden mb-6">
-  <div class="flex flex-wrap gap-2 p-3">
-    <?php foreach ($tabs as $k => $t): ?>
-      <?php $active = ($k === $tab); ?>
-      <a href="<?php echo admin_tab_url($k); ?>"
-         class="px-4 py-2 rounded-2xl border font-extrabold text-sm inline-flex items-center gap-2
-                <?php echo $active ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'; ?>">
-        <i data-lucide="<?php echo h($t['icon']); ?>" class="w-4 h-4"></i>
-        <?php echo h($t['label']); ?>
-      </a>
-    <?php endforeach; ?>
-  </div>
+<?php // 관리부 탭 UI 단순 버튼화 ?>
+<div style="margin:0 0 16px 0; padding:12px; border:1px solid #e5e7eb; border-radius:12px; background:#fff;">
+  <?php foreach ($tabs as $k => $t): ?>
+    <?php $active = ($k === $tab); ?>
+    <a href="<?php echo admin_tab_url($k); ?>" style="display:inline-block;margin:4px 6px 4px 0;padding:10px 14px;border-radius:10px;text-decoration:none;font-weight:700;<?php echo $active ? 'background:#166534;color:#fff;border:1px solid #166534;' : 'background:#fff;color:#4b5563;border:1px solid #d1d5db;'; ?>">
+      <?php echo h($t['label']); ?>
+    </a>
+  <?php endforeach; ?>
 </div>
 
 <?php if ($canManage): ?>
