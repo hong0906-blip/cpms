@@ -51,7 +51,6 @@ $itemMap = array();
 $usageRows = array();
 $usageByEquipment = array();
 $usageByDate = array();
-$vendorPresets = array();
 
 try {
     $stItem = $pdo->prepare("SELECT * FROM cpms_material_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY category ASC, vendor_name ASC, id ASC");
@@ -65,32 +64,6 @@ try {
         $usageByEquipment[$eid] = array();
     }
 
-    // 업체명 프리셋 자동채움
-    $stPreset = $pdo->prepare("SELECT vendor_name, category, representative, phone, biz_no, base_rate, remark
-        FROM cpms_material_items
-        WHERE project_id = :pid
-          AND is_deleted = 0
-          AND TRIM(COALESCE(vendor_name, '')) <> ''
-        ORDER BY vendor_name ASC, id DESC");
-    $stPreset->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
-    $stPreset->execute();
-    $presetRows = $stPreset->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($presetRows as $pr) {
-        $vendorKey = trim((string)$pr['vendor_name']);
-        if ($vendorKey === '' || isset($vendorPresets[$vendorKey])) {
-            continue;
-        }
-        $vendorPresets[$vendorKey] = array(
-            'category' => isset($pr['category']) ? (string)$pr['category'] : '',
-            'vendor_name' => $vendorKey,
-            'representative' => isset($pr['representative']) ? (string)$pr['representative'] : '',
-            'phone' => isset($pr['phone']) ? (string)$pr['phone'] : '',
-            'biz_no' => isset($pr['biz_no']) ? (string)$pr['biz_no'] : '',
-            'base_rate' => isset($pr['base_rate']) ? (string)$pr['base_rate'] : '',
-            'remark' => isset($pr['remark']) ? (string)$pr['remark'] : '',
-        );
-    }
-    
     if (count($items) > 0) {
         $stUsage = $pdo->prepare("SELECT u.*, i.category, i.vendor_name
             FROM cpms_material_usage u
@@ -278,18 +251,11 @@ function material_money($v)
                     <input type="hidden" name="materials_tab" value="input">
                     <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
 
-                    <!-- 업체명 프리셋 자동채움 -->
-                    <div class="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2 items-end bg-gray-50 border border-gray-200 rounded-xl p-3">
-                        <div>
-                            <label class="text-sm font-bold text-gray-700">업체명 자동채움</label>
-                            <select id="materialVendorPresetSelect" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white">
-                                <option value="">업체명 선택</option>
-                                <?php foreach ($vendorPresets as $vendor => $preset): ?>
-                                    <option value="<?php echo h($vendor); ?>"><?php echo h($vendor); ?></option>
-                                <?php endforeach; ?>
-                            </select>
-                        </div>
-                        <button type="button" id="materialFillPresetBtn" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold">입력(자동채움)</button>
+                    <!-- 업체 검색 자동완성/공용프리셋 -->
+                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                        <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
+                        <input type="text" id="materialVendorSearch" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white" placeholder="업체명 2글자 이상 입력">
+                        <div id="materialVendorSuggestList" class="mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-2">
@@ -337,7 +303,6 @@ function material_money($v)
                 end: <?php echo json_encode($monthlyEnd); ?>
             };
             var rangeInfo = window.cpmsMaterialRange || {};
-            var vendorPresets = <?php echo json_encode($vendorPresets); ?>;
 
             function pad2(v){ return (v < 10 ? '0' : '') + v; }
             function ymdToTs(dateText){
@@ -350,38 +315,20 @@ function material_money($v)
                 return baseClass + ' bg-white text-gray-700 border-gray-300 hover:bg-blue-50';
             }
 
-            // 업체명 프리셋 자동채움
-            var presetSelect = document.getElementById('materialVendorPresetSelect');
-            var fillBtn = document.getElementById('materialFillPresetBtn');
+            // 업체 검색 자동완성/공용프리셋
             var createForm = document.getElementById('materialCreateForm');
+            var searchInput = document.getElementById('materialVendorSearch');
+            var suggestList = document.getElementById('materialVendorSuggestList');            
             var openModalBtn = document.getElementById('openMaterialCreateModal');
             var closeModalBtn = document.getElementById('closeMaterialCreateModal');
             var modal = document.getElementById('materialCreateModal');
             if (openModalBtn && closeModalBtn && modal) {
                 openModalBtn.addEventListener('click', function(){ modal.className = modal.className.replace('hidden', '').trim(); });
                 closeModalBtn.addEventListener('click', function(){ if (modal.className.indexOf('hidden') === -1) modal.className += ' hidden'; });
-                modal.addEventListener('click', function(e){
-                    if (e.target === modal && modal.className.indexOf('hidden') === -1) modal.className += ' hidden';
-                });
+                modal.addEventListener('click', function(e){ if (e.target === modal && modal.className.indexOf('hidden') === -1) modal.className += ' hidden'; });
             }
-            if (presetSelect && fillBtn && createForm) {
-                fillBtn.addEventListener('click', function(){
-                    var key = presetSelect.value || '';
-                    if (!key || !vendorPresets[key]) {
-                        alert('업체명을 먼저 선택하세요.');
-                        return;
-                    }
-                    var p = vendorPresets[key];
-                    if (createForm.elements['category']) createForm.elements['category'].value = p.category || '';
-                    if (createForm.elements['vendor_name']) createForm.elements['vendor_name'].value = p.vendor_name || key;
-                    if (createForm.elements['representative']) createForm.elements['representative'].value = p.representative || '';
-                    if (createForm.elements['phone']) createForm.elements['phone'].value = p.phone || '';
-                    if (createForm.elements['biz_no']) createForm.elements['biz_no'].value = p.biz_no || '';
-                    if (createForm.elements['base_rate']) createForm.elements['base_rate'].value = p.base_rate || '';
-                    if (createForm.elements['remark']) createForm.elements['remark'].value = p.remark || '';
-                });
-            }
-
+            function fillMaterialPreset(p){ if(!createForm||!p)return; if(createForm.elements['category']) createForm.elements['category'].value=p.category||''; if(createForm.elements['vendor_name']) createForm.elements['vendor_name'].value=p.vendor_name||''; if(createForm.elements['representative']) createForm.elements['representative'].value=p.representative||''; if(createForm.elements['phone']) createForm.elements['phone'].value=p.phone||''; if(createForm.elements['biz_no']) createForm.elements['biz_no'].value=p.biz_no||''; if(createForm.elements['base_rate']) createForm.elements['base_rate'].value=p.base_rate||''; if(createForm.elements['remark']) createForm.elements['remark'].value=p.remark||''; }
+            if (searchInput && suggestList) { searchInput.addEventListener('input', function(){ var q=(searchInput.value||'').trim(); if(q.length<2){suggestList.innerHTML=''; suggestList.className += ' hidden'; return;} var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4||xhr.status!==200)return; var rows=[]; try{rows=JSON.parse(xhr.responseText);}catch(e){} suggestList.innerHTML=''; if(!rows.length){suggestList.className += ' hidden'; return;} suggestList.className=suggestList.className.replace('hidden','').trim(); for(var i=0;i<rows.length;i++){(function(row){var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.addEventListener('click', function(){fillMaterialPreset(row); searchInput.value=row.vendor_name||''; suggestList.className += ' hidden';}); suggestList.appendChild(btn);})(rows[i]); }}; xhr.send(); }); }
             // 자재구입비 사용일자 달력 선택
             function initCalendar(wrapper){
                 var ym = wrapper.getAttribute('data-ym') || selectedYm;

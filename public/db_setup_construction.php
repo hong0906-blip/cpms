@@ -211,6 +211,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     KEY idx_project_date (project_id, use_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 $msg = '장비 입력 테이블 생성/확인 완료';
+                } else if ($action === 'equipment_vendor_presets') {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_equipment_vendor_presets (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    vendor_name VARCHAR(100) NOT NULL UNIQUE,
+                    category VARCHAR(50) DEFAULT '',
+                    representative VARCHAR(50) DEFAULT '',
+                    phone VARCHAR(30) DEFAULT '',
+                    biz_no VARCHAR(30) DEFAULT '',
+                    base_rate DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    remark VARCHAR(255) DEFAULT '',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                $msg = '장비 업체 프리셋 테이블 생성/확인 완료';                
                 } else if ($action === 'materials_purchase' || $action === 'materials') {
                 // 자재구입비(장비 방식 복제)
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_material_items (
@@ -242,7 +256,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UNIQUE KEY uniq_material_day (material_id, use_date),
                     KEY idx_project_date (project_id, use_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-                $msg = '자재구입비 테이블 생성/확인 완료';                
+                $msg = '자재구입비 테이블 생성/확인 완료';
+                } else if ($action === 'material_vendor_presets') {
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_material_vendor_presets (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    vendor_name VARCHAR(100) NOT NULL UNIQUE,
+                    category VARCHAR(50) DEFAULT '',
+                    representative VARCHAR(50) DEFAULT '',
+                    phone VARCHAR(30) DEFAULT '',
+                    biz_no VARCHAR(30) DEFAULT '',
+                    base_rate DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    remark VARCHAR(255) DEFAULT '',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                $msg = '자재 업체 프리셋 테이블 생성/확인 완료';                                
                 }
         } catch (Exception $e) { $err = $e->getMessage(); }
     }
@@ -259,5 +287,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="materials_purchase"><button class="btn" type="submit">4) 자재구입비 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="work_items"><button class="btn" type="submit">5) 작업 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="task_item_progress"><button class="btn" type="submit">6) 공정표 항목완료수량 테이블 생성/확인</button></form>
+<form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="equipment_vendor_presets"><button class="btn" type="submit">7) 장비 업체 프리셋 테이블 생성/확인</button></form>
+<form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="material_vendor_presets"><button class="btn" type="submit">8) 자재 업체 프리셋 테이블 생성/확인</button></form>
 </div>
 </div></body></html>

@@ -173,6 +173,18 @@ try {
     $st->bindValue(':now', $now);
     $st->execute();
 
+    // 업체 검색 자동완성/공용프리셋
+    $stPreset = $pdo->prepare("INSERT INTO cpms_material_vendor_presets (vendor_name, category, representative, phone, biz_no, base_rate, remark, created_at, updated_at) VALUES (:vendor, :category, :rep, :phone, :biz_no, :base_rate, :remark, :now, :now) ON DUPLICATE KEY UPDATE category=VALUES(category), representative=VALUES(representative), phone=VALUES(phone), biz_no=VALUES(biz_no), base_rate=VALUES(base_rate), remark=VALUES(remark), updated_at=VALUES(updated_at)");
+    $stPreset->bindValue(':vendor', $vendorName);
+    $stPreset->bindValue(':category', $category);
+    $stPreset->bindValue(':rep', $representative);
+    $stPreset->bindValue(':phone', $phone);
+    $stPreset->bindValue(':biz_no', $bizNo);
+    $stPreset->bindValue(':base_rate', $baseRate);
+    $stPreset->bindValue(':remark', $remark);
+    $stPreset->bindValue(':now', $now);
+    $stPreset->execute();
+
     $materialId = (int)$pdo->lastInsertId();
 
     $dates = material_collect_usage_dates($usageDates, $useDatesText, $ym);
