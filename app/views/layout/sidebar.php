@@ -177,7 +177,7 @@ if ($selectedMenu === '대시보드') {
         <div class="font-semibold text-gray-900"><?php echo h($userName); ?></div>
         <div class="text-xs text-gray-500"><?php echo h($userDept); ?></div>
       </div>
-      <?php require_once __DIR__ . '/../partials/sidebar_attendance_widget.php'; ?>      
+      <?php /* 사이드바 출퇴근 버튼 제거 */ ?>
       <div class="w-2 h-2 bg-green-500 rounded-full shadow-sm shadow-green-500/50"></div>
     </div>
   </div>
