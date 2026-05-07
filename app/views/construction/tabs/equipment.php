@@ -227,11 +227,12 @@ function equipment_money($v)
                             <th class="p-2 border text-left">규격</th>
                             <th class="p-2 border text-right">기본단가</th>
                             <th class="p-2 border text-left">사용일자 추가</th>
+                            <th class="p-2 border text-center">관리</th>                            
                         </tr>
                         </thead>
                         <tbody>
                         <?php if (count($items) === 0): ?>
-                            <tr><td colspan="5" class="p-3 border text-center text-gray-500">등록된 장비가 없습니다.</td></tr>
+                            <tr><td colspan="6" class="p-3 border text-center text-gray-500">등록된 장비가 없습니다.</td></tr>
                         <?php else: ?>
                             <?php foreach ($items as $it): ?>
                                 <tr>
@@ -263,6 +264,17 @@ function equipment_money($v)
                                                 <div id="usageDateInputs_<?php echo (int)$it['id']; ?>"></div>
                                             </div>
                                             <button type="submit" class="px-3 py-1 rounded-lg bg-gray-800 text-white">추가</button>
+                                        </form>
+                                    </td>
+                                    <td class="p-2 border text-center">
+                                        <!-- 등록장비 삭제 -->
+                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_item_delete" onsubmit="return confirm('삭제할까요?');">
+                                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                                            <input type="hidden" name="equipment_id" value="<?php echo (int)$it['id']; ?>">
+                                            <input type="hidden" name="equip_tab" value="input">
+                                            <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+                                            <button type="submit" class="px-2 py-1 rounded border border-red-300 text-red-600 text-xs">삭제</button>
                                         </form>
                                     </td>
                                 </tr>
@@ -324,7 +336,7 @@ function equipment_money($v)
                         xhr.onreadystatechange = function(){
                             if (xhr.readyState !== 4 || xhr.status !== 200) return;
                             var rows = [];
-                            try { rows = JSON.parse(xhr.responseText); } catch (e) { rows = []; }
+                            try { var json = JSON.parse(xhr.responseText); rows = (json && json.items) ? json.items : []; } catch (e) { rows = []; }
                             suggestList.innerHTML = '';
                             if (!rows || !rows.length) { suggestList.className = suggestList.className + ' hidden'; return; }
                             suggestList.className = suggestList.className.replace('hidden','').trim();

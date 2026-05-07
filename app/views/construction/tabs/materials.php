@@ -231,11 +231,12 @@ function material_money($v)
                             <!-- 자재: 규격 제거 -->
                             <th class="p-2 border text-right">공급가액</th>
                             <th class="p-2 border text-left">사용일자 추가</th>
+                            <th class="p-2 border text-center">관리</th>                        
                         </tr>
                         </thead>
                         <tbody>
                         <?php if (count($items) === 0): ?>
-                            <tr><td colspan="4" class="p-3 border text-center text-gray-500">등록된 자재구입비가 없습니다.</td></tr>
+                            <tr><td colspan="5" class="p-3 border text-center text-gray-500">등록된 자재구입비가 없습니다.</td></tr>
                         <?php else: ?>
                             <?php foreach ($items as $it): ?>
                                 <tr>
@@ -270,6 +271,17 @@ function material_money($v)
                                             <button type="submit" class="px-3 py-1 rounded-lg bg-gray-800 text-white">추가</button>
                                         </form>
                                     </td>
+                                    <td class="p-2 border text-center">
+                                        <!-- 등록 자재구입비 삭제 -->
+                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_delete" onsubmit="return confirm('삭제할까요?');">
+                                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                                            <input type="hidden" name="material_id" value="<?php echo (int)$it['id']; ?>">
+                                            <input type="hidden" name="materials_tab" value="input">
+                                            <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+                                            <button type="submit" class="px-2 py-1 rounded border border-red-300 text-red-600 text-xs">삭제</button>
+                                        </form>
+                                    </td>                                    
                                 </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -321,7 +333,7 @@ function material_money($v)
                 });
             }
             function fillMaterialPreset(p){ if(!createForm||!p)return; if(createForm.elements['category']) createForm.elements['category'].value=p.category||''; if(createForm.elements['vendor_name']) createForm.elements['vendor_name'].value=p.vendor_name||''; if(createForm.elements['representative']) createForm.elements['representative'].value=p.representative||''; if(createForm.elements['phone']) createForm.elements['phone'].value=p.phone||''; if(createForm.elements['biz_no']) createForm.elements['biz_no'].value=p.biz_no||''; if(createForm.elements['base_rate']) createForm.elements['base_rate'].value=p.base_rate||''; if(createForm.elements['remark']) createForm.elements['remark'].value=p.remark||''; }
-            if (searchInput && suggestList) { searchInput.addEventListener('input', function(){ var q=(searchInput.value||'').trim(); if(q.length<2){suggestList.innerHTML=''; suggestList.className += ' hidden'; return;} var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4||xhr.status!==200)return; var rows=[]; try{rows=JSON.parse(xhr.responseText);}catch(e){} suggestList.innerHTML=''; if(!rows.length){suggestList.className += ' hidden'; return;} suggestList.className=suggestList.className.replace('hidden','').trim(); for(var i=0;i<rows.length;i++){(function(row){var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.addEventListener('click', function(){fillMaterialPreset(row); searchInput.value=row.vendor_name||''; suggestList.className += ' hidden';}); suggestList.appendChild(btn);})(rows[i]); }}; xhr.send(); }); }
+            if (searchInput && suggestList) { searchInput.addEventListener('input', function(){ var q=(searchInput.value||'').trim(); if(q.length<2){suggestList.innerHTML=''; suggestList.className += ' hidden'; return;} var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4||xhr.status!==200)return; var rows=[]; try{var json=JSON.parse(xhr.responseText); rows=(json&&json.items)?json.items:[];}catch(e){rows=[];} suggestList.innerHTML=''; if(!rows.length){suggestList.className += ' hidden'; return;} suggestList.className=suggestList.className.replace('hidden','').trim(); for(var i=0;i<rows.length;i++){(function(row){var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.addEventListener('click', function(){fillMaterialPreset(row); searchInput.value=row.vendor_name||''; suggestList.className += ' hidden';}); suggestList.appendChild(btn);})(rows[i]); }}; xhr.send(); }); }
             // 자재구입비 사용일자 달력 선택
             function initCalendar(wrapper){
                 var ym = wrapper.getAttribute('data-ym') || selectedYm;
