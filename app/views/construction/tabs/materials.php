@@ -175,9 +175,10 @@ function material_money($v)
                 <!-- 자재 입력 모달→토글형 인라인 통일 -->
                 <div class="flex items-center justify-between mb-3">
                     <div class="text-lg font-extrabold">새작성</div>
-                    <button type="button" class="px-3 py-1 rounded border text-xs" data-toggle-material-create>입력 열기</button>
                 </div>
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save" class="space-y-3 hidden" id="materialCreateForm">
+                <!-- 자재구입비입력 토글 제거 -->
+                <!-- 자재구입비 입력폼 항상 표시 -->
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save" class="space-y-3" id="materialCreateForm">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="materials_tab" value="input">
@@ -319,18 +320,6 @@ function material_money($v)
             // 업체 자동완성 이벤트 위임
             var createForm = document.getElementById('materialCreateForm');
             var materialVendorTimers = {};        
-            var createToggleBtn = document.querySelector('[data-toggle-material-create]');
-            if (createToggleBtn && createForm) {
-                createToggleBtn.addEventListener('click', function(){
-                    if (createForm.className.indexOf('hidden') !== -1) {
-                        createForm.className = createForm.className.replace('hidden', '').trim();
-                        createToggleBtn.textContent = '접기';
-                    } else {
-                        createForm.className += ' hidden';
-                        createToggleBtn.textContent = '입력 열기';
-                    }
-                });
-            }
             function hideSuggestList(listEl){ if(!listEl)return; listEl.innerHTML=''; if(listEl.className.indexOf('hidden')===-1) listEl.className += ' hidden'; listEl.style.display='none'; }
             function showSuggestList(listEl){ if(!listEl)return; listEl.className=listEl.className.replace(/\bhidden\b/g,'').replace(/\s+/g,' ').trim(); listEl.style.display='block'; }
             function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; if(formEl.elements['category']) formEl.elements['category'].value=p.category||''; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark']) formEl.elements['remark'].value=p.remark||''; }
