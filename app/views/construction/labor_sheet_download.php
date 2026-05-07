@@ -25,7 +25,7 @@ $role = Auth::userRole();
 $dept = Auth::userDepartment();
 
 // 공사/임원만 허용
-if (!($role === 'executive' || $dept === '공사')) {
+if (!Auth::canManageConstruction()) {
     http_response_code(403);
     echo '403 Forbidden';
     exit;

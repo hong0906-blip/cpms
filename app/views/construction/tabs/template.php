@@ -15,7 +15,7 @@ use App\Core\Auth;
 
 $role = Auth::userRole();
 $dept = Auth::userDepartment();
-$canGenerate = ($role === 'executive' || $dept === '공사');
+$canGenerate = Auth::canManageConstruction();
 
 // 템플릿 목록
 $tpl = array();

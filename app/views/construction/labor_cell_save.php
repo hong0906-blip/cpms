@@ -54,7 +54,7 @@ if ($newValue >= 1.5) {
 $role = Auth::userRole();
 $dept = Auth::userDepartment();
 $email = (string)Auth::userEmail();
-if (!($role === 'executive' || $dept === '공사')) {
+if (!Auth::canManageConstruction()) {
     http_response_code(403);
     echo json_encode(array('ok' => false, 'message' => '권한이 없습니다.'));
     exit;

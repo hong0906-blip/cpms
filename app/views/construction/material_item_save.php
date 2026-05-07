@@ -16,7 +16,7 @@ if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
 $role = Auth::userRole();
 $dept = Auth::userDepartment();
-if (!($role === 'executive' || $dept === '공사')) {
+if (!Auth::canManageConstruction()) {
     http_response_code(403);
     echo '403 Forbidden';
     exit;

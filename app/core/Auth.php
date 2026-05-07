@@ -137,6 +137,24 @@ class Auth
         return self::canManageEmployees();
     }
 
+    
+    // 마스터 전체 권한: 공사 섹션 접근
+    public static function canAccessConstruction()
+    {
+        if (!self::check()) return false;
+        if (self::isMaster()) return true; // 마스터 전체 권한
+
+        $role = self::userRole();
+        $dept = self::userDepartment();
+        return ($role === 'executive' || $dept === '공사');
+    }
+
+    // 마스터 전체 권한: 공사 저장/수정/삭제
+    public static function canManageConstruction()
+    {
+        return self::canAccessConstruction();
+    }
+
     public static function logout()
     {
         unset($_SESSION[self::CPMS_USER_KEY]);

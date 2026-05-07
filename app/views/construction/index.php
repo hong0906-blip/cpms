@@ -21,7 +21,7 @@ $role = Auth::userRole();
 $dept = Auth::userDepartment();
 
 // 공사 메뉴 접근: 공사 또는 임원
-$allowed = ($role === 'executive' || $dept === '공사');
+$allowed = Auth::canAccessConstruction();
 if (!$allowed) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (공사/임원 전용)</div>';
     return;
@@ -113,7 +113,7 @@ $tabs = array(
 );
 if (!isset($tabs[$tab])) $tab = 'gantt';
 
-$canEditSchedule = ($role === 'executive' || $dept === '공사'); // 요구사항: 공사팀+임원만
+$canEditSchedule = Auth::canManageConstruction(); // 요구사항: 공사팀+임원만
 
 $flash = flash_get();
 

@@ -32,22 +32,9 @@ if ($pdo) {
     $weekly = $st2->fetchAll();
 }
 ?>
-<div style='margin-bottom:10px;padding:10px;border:1px solid #c7d2fe;background:#eef2ff;border-radius:10px;'>
-  <div style='font-weight:700;margin-bottom:6px;'>마스터 권한 디버그 - 확인 후 제거 가능</div>
-  <div>Auth::userEmail(): <b><?php echo h((string)Auth::userEmail()); ?></b></div>
-  <div>$_SESSION['user_email']: <b><?php echo h(isset($_SESSION['user_email']) ? (string)$_SESSION['user_email'] : ''); ?></b></div>
-  <div>$_SESSION['cpms_user']['email']: <b><?php echo h(isset($_SESSION['cpms_user']['email']) ? (string)$_SESSION['cpms_user']['email'] : ''); ?></b></div>
-  <div>세션에 저장된 role: <b><?php echo h(isset($_SESSION['cpms_user']['role']) ? (string)$_SESSION['cpms_user']['role'] : ''); ?></b></div>
-  <div>Auth::userRole(): <b><?php echo h((string)Auth::userRole()); ?></b></div>
-  <div>Auth::userDepartment(): <b><?php echo h((string)Auth::userDepartment()); ?></b></div>
-  <div>Auth::isMaster(): <b><?php echo Auth::isMaster() ? 'true' : 'false'; ?></b></div>
-  <div>Auth::canManageEmployees(): <b><?php echo Auth::canManageEmployees() ? 'true' : 'false'; ?></b></div>
-  <div style='margin-top:4px;font-size:12px;color:#4338ca;'>권한 변경 후에도 반영이 안 되면 로그아웃 후 재로그인하세요.</div>
-</div>
-
 <div style='display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;'>
   <h3 style='margin:0;'>출퇴근/근태관리</h3>
-  <?php if (Auth::isMaster() || Auth::canManageEmployees()): ?><!-- 출퇴근 DB 설정 버튼 마스터 표시 -->
+  <?php if (Auth::isMaster() || Auth::canManageEmployees()): ?><!-- 출퇴근 DB 설정 버튼 실제 렌더링 -->
     <a href='?r=db_setup_attendance' style='display:inline-block;padding:8px 12px;background:#1d4ed8;color:#fff;border-radius:8px;font-weight:700;'>출퇴근 DB 설정</a>
   <?php endif; ?>
 </div>

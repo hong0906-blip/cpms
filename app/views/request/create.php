@@ -39,7 +39,7 @@ if ($requestType === '' || $targetUserId <= 0 || $reason === '') {
 
 $role = Auth::userRole();
 $dept = Auth::userDepartment();
-if (!($role === 'executive' || $dept === '공사')) {
+if (!Auth::canManageConstruction()) {
     http_response_code(403);
     echo json_encode(array('ok' => false, 'message' => '요청 생성 권한이 없습니다.'));
     exit;

@@ -3,7 +3,7 @@
 require_once __DIR__ . '/../../bootstrap.php';
 use App\Core\Auth; use App\Core\Db;
 if (!Auth::check()) { header('Location:?r=login'); exit; }
-if (!(Auth::userRole()==='executive' || Auth::userDepartment()==='공사')) { http_response_code(403); exit; }
+if (!Auth::canManageConstruction()) { http_response_code(403); exit; }
 if ($_SERVER['REQUEST_METHOD']!=='POST' || !csrf_check(isset($_POST['_csrf'])?(string)$_POST['_csrf']:'')) { header('Location:?r=공사'); exit; }
 $pid=(int)$_POST['project_id']; $d=trim((string)$_POST['cost_date']); $t=trim((string)$_POST['cost_type']); $amt=(float)preg_replace('/[^0-9\.\-]/','',(string)$_POST['amount']); $memo=trim((string)$_POST['memo']);
 $pdo=Db::pdo();

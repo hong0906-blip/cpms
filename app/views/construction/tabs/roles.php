@@ -13,7 +13,7 @@ use App\Core\Auth;
 
 $role = Auth::userRole();
 $dept = Auth::userDepartment();
-$canSave = ($role === 'executive' || $dept === '공사');
+$canSave = Auth::canManageConstruction();
 
 // 직원 목록(부서별)
 function load_employees_by_dept($pdo, $deptName) {
