@@ -179,10 +179,10 @@ function equipment_money($v)
                     <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
 
                     <!-- 업체 검색 자동완성/공용프리셋 -->
-                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-3 vendor-search-wrap">
                         <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
-                        <input type="text" id="vendorSearch" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white" placeholder="업체명 2글자 이상 입력">
-                        <div id="vendorSuggestList" class="mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
+                        <input type="text" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-equipment-vendor-search" placeholder="업체명 2글자 이상 입력">
+                        <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
                     </div>
 
                     <div class="grid grid-cols-2 gap-2">
@@ -310,44 +310,97 @@ function equipment_money($v)
                 return baseClass + ' bg-white text-gray-700 border-gray-300 hover:bg-blue-50';
             }
 
-            // 업체 검색 자동완성/공용프리셋
+            // 업체 자동완성 이벤트 위임
             var createForm = document.getElementById('equipmentCreateForm');
-            var searchInput = document.getElementById('vendorSearch');
-            var suggestList = document.getElementById('vendorSuggestList');
-            function fillEquipmentPreset(p){
-                if (!createForm || !p) return;
-                if (createForm.elements['category']) createForm.elements['category'].value = p.category || '';
-                if (createForm.elements['vendor_name']) createForm.elements['vendor_name'].value = p.vendor_name || '';
-                if (createForm.elements['representative']) createForm.elements['representative'].value = p.representative || '';
-                if (createForm.elements['phone']) createForm.elements['phone'].value = p.phone || '';
-                if (createForm.elements['biz_no']) createForm.elements['biz_no'].value = p.biz_no || '';
-                if (createForm.elements['base_rate']) createForm.elements['base_rate'].value = p.base_rate || '';
-                if (createForm.elements['remark']) createForm.elements['remark'].value = p.remark || '';
+            var equipmentVendorTimers = {};
+            function hideSuggestList(listEl){
+                if (!listEl) return;
+                listEl.innerHTML = '';
+                if (listEl.className.indexOf('hidden') === -1) listEl.className += ' hidden';
+                listEl.style.display = 'none';
             }
-            if (searchInput && suggestList) {
-                var timer = null;
-                searchInput.addEventListener('input', function(){
-                    var q = (searchInput.value || '').trim();
-                    if (timer) clearTimeout(timer);
-                    if (q.length < 2) { suggestList.innerHTML=''; suggestList.className = suggestList.className + ' hidden'; return; }
-                    timer = setTimeout(function(){
-                        var xhr = new XMLHttpRequest();
-                        xhr.open('GET', '<?php echo h(base_url()); ?>/?r=construction/equipment_vendor_search&q=' + encodeURIComponent(q), true);
-                        xhr.onreadystatechange = function(){
-                            if (xhr.readyState !== 4 || xhr.status !== 200) return;
-                            var rows = [];
-                            try { var json = JSON.parse(xhr.responseText); rows = (json && json.items) ? json.items : []; } catch (e) { rows = []; }
-                            suggestList.innerHTML = '';
-                            if (!rows || !rows.length) { suggestList.className = suggestList.className + ' hidden'; return; }
-                            suggestList.className = suggestList.className.replace('hidden','').trim();
-                            for (var i=0;i<rows.length;i++) {
-                                (function(row){ var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.addEventListener('click', function(){ fillEquipmentPreset(row); searchInput.value = row.vendor_name || ''; suggestList.className += ' hidden'; }); suggestList.appendChild(btn);} )(rows[i]);
-                            }
-                        };
-                        xhr.send();
-                    }, 250);
-                });
+            function showSuggestList(listEl){
+                if (!listEl) return;
+                listEl.className = listEl.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').trim();
+                listEl.style.display = 'block';
             }
+            function fillEquipmentPreset(formEl, p){
+                if (!formEl || !p) return;
+                if (formEl.elements['category']) formEl.elements['category'].value = p.category || '';
+                if (formEl.elements['vendor_name']) formEl.elements['vendor_name'].value = p.vendor_name || '';
+                if (formEl.elements['representative']) formEl.elements['representative'].value = p.representative || '';
+                if (formEl.elements['phone']) formEl.elements['phone'].value = p.phone || '';
+                if (formEl.elements['biz_no']) formEl.elements['biz_no'].value = p.biz_no || '';
+                if (formEl.elements['base_rate']) formEl.elements['base_rate'].value = p.base_rate || '';
+                if (formEl.elements['remark']) formEl.elements['remark'].value = p.remark || '';
+            }
+            function renderEquipmentSuggestions(inputEl, rows){
+                var wrap = inputEl ? inputEl.closest('.vendor-search-wrap') : null;
+                var listEl = wrap ? wrap.querySelector('.vendor-suggest-list') : null;
+                if (!listEl) return;
+                listEl.innerHTML = '';
+                if (!rows || !rows.length) {
+                    var empty = document.createElement('div');
+                    empty.className = 'px-3 py-2 text-sm text-gray-500';
+                    empty.textContent = '검색 결과 없음';
+                    listEl.appendChild(empty);
+                    showSuggestList(listEl);
+                    return;
+                }
+                for (var i=0; i<rows.length; i++) {
+                    (function(row){
+                        var btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50';
+                        btn.textContent = (row.vendor_name || '') + (row.phone ? ' (' + row.phone + ')' : '');
+                        btn.setAttribute('data-vendor-item', '1');
+                        btn.vendorData = row;
+                        listEl.appendChild(btn);
+                    })(rows[i]);
+                }
+                showSuggestList(listEl);
+            }
+            document.addEventListener('input', function(e){
+                var inputEl = e.target;
+                if (!inputEl || inputEl.className.indexOf('js-equipment-vendor-search') === -1) return;
+                var wrap = inputEl.closest('.vendor-search-wrap');
+                var listEl = wrap ? wrap.querySelector('.vendor-suggest-list') : null;
+                if (!listEl) return;
+                var q = (inputEl.value || '').trim();
+                if (equipmentVendorTimers[inputEl]) clearTimeout(equipmentVendorTimers[inputEl]);
+                if (q.length < 2) { hideSuggestList(listEl); return; }
+                equipmentVendorTimers[inputEl] = setTimeout(function(){
+                    // 프리셋 최신 검색
+                    var xhr = new XMLHttpRequest();
+                    xhr.open('GET', '<?php echo h(base_url()); ?>/?r=construction/equipment_vendor_search&q=' + encodeURIComponent(q), true);
+                    xhr.onreadystatechange = function(){
+                        if (xhr.readyState !== 4) return;
+                        var rows = [];
+                        if (xhr.status === 200) {
+                            try { var json = JSON.parse(xhr.responseText); rows = (json && json.items) ? json.items : []; } catch (err) { rows = []; }
+                        }
+                        renderEquipmentSuggestions(inputEl, rows);
+                    };
+                    xhr.send();
+                }, 250);
+            });
+            document.addEventListener('click', function(e){
+                var target = e.target;
+                if (target && target.getAttribute && target.getAttribute('data-vendor-item') === '1') {
+                    var wrap = target.closest('.vendor-search-wrap');
+                    var inputEl = wrap ? wrap.querySelector('.js-equipment-vendor-search') : null;
+                    var formEl = target.closest('form');
+                    // 자동채움 재초기화
+                    fillEquipmentPreset(formEl, target.vendorData || {});
+                    if (inputEl) inputEl.value = (target.vendorData && target.vendorData.vendor_name) ? target.vendorData.vendor_name : '';
+                    hideSuggestList(wrap ? wrap.querySelector('.vendor-suggest-list') : null);
+                    return;
+                }
+                var lists = document.querySelectorAll('.vendor-search-wrap .vendor-suggest-list');
+                for (var i=0; i<lists.length; i++) {
+                    if (!lists[i].contains(target)) hideSuggestList(lists[i]);
+                }
+            });            
 
             // 장비 사용일자 달력 선택
             function initCalendar(wrapper){
