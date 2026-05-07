@@ -33,9 +33,12 @@ if ($year < 2000 || $year > 2100 || $month < 1 || $month > 12) {
 }
 
 $baseUrl = base_url() . '/?r=공사&pid=' . (int)$pid . '&tab=equipment';
-$prevYm = date('Y-m', strtotime($ym . '-01 -1 month'));
-$prevLastDay = (int)date('t', strtotime($prevYm . '-01'));
-// 전월25~현월24 기준
+// 달력 전월/현월 계산 수정
+$currFirst = new DateTime($ym . '-01');
+$prevFirst = clone $currFirst;
+$prevFirst->modify('-1 month');
+$prevYm = $prevFirst->format('Y-m');
+$prevLastDay = (int)$prevFirst->format('t');
 $monthlyStart = $prevYm . '-25';
 $monthlyEnd = $ym . '-24';
 
@@ -194,7 +197,7 @@ function equipment_money($v)
                     </div>
 
                     <!-- 장비 달력(전월/현월 2달력) -->
-                    <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="equipmentCreateDateInputs" data-chip-target="equipmentCreateDateChips" data-prev-grid-target="equipmentCreateCalPrev" data-curr-grid-target="equipmentCreateCalCurr">
+                    <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="equipmentCreateDateInputs" data-chip-target="equipmentCreateDateChips" data-prev-grid-target="equipmentCreateCalPrev" data-curr-grid-target="equipmentCreateCalCurr">
                         <div class="flex items-center justify-between gap-2 mb-2">
                             <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($prevYm); ?> 25일~<?php echo h($ym); ?> 24일, 복수 선택)</label>
                             <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-toggle-calendar>날짜 선택</button>
@@ -245,7 +248,7 @@ function equipment_money($v)
                                             <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
 
                                             <!-- 장비 달력(전월/현월 2달력) -->
-                                            <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-prev-grid-target="usageDatePrev_<?php echo (int)$it['id']; ?>" data-curr-grid-target="usageDateCurr_<?php echo (int)$it['id']; ?>">
+                                            <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-prev-grid-target="usageDatePrev_<?php echo (int)$it['id']; ?>" data-curr-grid-target="usageDateCurr_<?php echo (int)$it['id']; ?>">
                                                 <div class="flex items-center justify-between">
                                                     <div class="text-xs text-gray-700 font-bold">날짜(<?php echo h($prevYm); ?> 25일~<?php echo h($ym); ?> 24일)</div>
                                                     <button type="button" class="px-2 py-1 rounded border text-xs" data-toggle-calendar>날짜 선택</button>
@@ -338,6 +341,7 @@ function equipment_money($v)
             function initCalendar(wrapper){
                 var ym = wrapper.getAttribute('data-ym') || selectedYm;
                 var prevGridId = wrapper.getAttribute('data-prev-grid-target');
+                var wrapperPrevYm = wrapper.getAttribute('data-prev-ym') || (rangeInfo.prevYm || '');
                 var currGridId = wrapper.getAttribute('data-curr-grid-target');
                 var chipId = wrapper.getAttribute('data-chip-target');
                 var inputId = wrapper.getAttribute('data-target');
@@ -354,10 +358,10 @@ function equipment_money($v)
                 var parts = ym.split('-');
                 var year = parseInt(parts[0], 10);
                 var month = parseInt(parts[1], 10);
-                var prevDate = new Date(year, month - 1, 1);
-                var prevYear = prevDate.getFullYear();
-                var prevMonth = prevDate.getMonth() + 1;
-                var prevYm = prevYear + '-' + pad2(prevMonth);
+                var prevYm = wrapperPrevYm;
+                var prevParts = prevYm.split('-');
+                var prevYear = parseInt(prevParts[0], 10);
+                var prevMonth = parseInt(prevParts[1], 10);
                 var prevLastDay = new Date(prevYear, prevMonth, 0).getDate();
                 var currLastDay = new Date(year, month, 0).getDate();
                 var startDate = (rangeInfo.start && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.start : (prevYm + '-25');

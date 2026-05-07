@@ -34,9 +34,12 @@ if ($year < 2000 || $year > 2100 || $month < 1 || $month > 12) {
 }
 
 $baseUrl = base_url() . '/?r=공사&pid=' . (int)$pid . '&tab=materials';
-$prevYm = date('Y-m', strtotime($ym . '-01 -1 month'));
-$prevLastDay = (int)date('t', strtotime($prevYm . '-01'));
-// 전월25~현월24 기준
+// 달력 전월/현월 계산 수정
+$currFirst = new DateTime($ym . '-01');
+$prevFirst = clone $currFirst;
+$prevFirst->modify('-1 month');
+$prevYm = $prevFirst->format('Y-m');
+$prevLastDay = (int)$prevFirst->format('t');
 $monthlyStart = $prevYm . '-25';
 $monthlyEnd = $ym . '-24';
 
@@ -169,13 +172,52 @@ function material_money($v)
     <?php if ($materialsTab === 'input'): ?>
         <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="border border-gray-200 rounded-2xl p-4">
-                <div class="flex items-center justify-between">
-                    <div>
-                        <div class="text-lg font-extrabold">새작성</div>
-                        <div class="text-sm text-gray-500 mt-1">버튼으로 자재구입비 입력 모달을 엽니다.</div>
-                    </div>
-                    <button type="button" id="openMaterialCreateModal" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">새작성</button>
+                <!-- 자재 입력 모달→토글형 인라인 통일 -->
+                <div class="flex items-center justify-between mb-3">
+                    <div class="text-lg font-extrabold">새작성</div>
+                    <button type="button" class="px-3 py-1 rounded border text-xs" data-toggle-material-create>입력 열기</button>
                 </div>
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save" class="space-y-3 hidden" id="materialCreateForm">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                    <input type="hidden" name="materials_tab" value="input">
+                    <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+
+                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-3">
+                        <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
+                        <input type="text" id="materialVendorSearch" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white" placeholder="업체명 2글자 이상 입력">
+                        <div id="materialVendorSuggestList" class="mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <input type="text" name="category" class="px-3 py-2 border rounded-xl" placeholder="구분" required>
+                        <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required>
+                        <!-- 자재: 규격 제거 -->
+                        <input type="text" name="representative" class="px-3 py-2 border rounded-xl" placeholder="대표자명">
+                        <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호">
+                        <input type="text" name="biz_no" class="px-3 py-2 border rounded-xl" placeholder="사업자등록번호">
+                        <!-- 자재: 공급가액 표기 -->
+                        <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-2 border rounded-xl" placeholder="공급가액">
+                        <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고">
+                    </div>
+
+                    <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="materialCreateDateInputs" data-chip-target="materialCreateDateChips" data-prev-grid-target="materialCreateCalPrev" data-curr-grid-target="materialCreateCalCurr">
+                        <div class="flex items-center justify-between gap-2 mb-2">
+                            <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($prevYm); ?> 25일~<?php echo h($ym); ?> 24일, 복수 선택)</label>
+                            <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-toggle-calendar>날짜 선택</button>
+                        </div>
+                        <div class="hidden border border-gray-200 rounded-lg p-2 bg-gray-50" data-calendar-box>
+                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                                <div id="materialCreateCalPrev"></div>
+                                <div id="materialCreateCalCurr"></div>
+                            </div>
+                        </div>
+                        <div id="materialCreateDateChips" class="mt-2 flex flex-wrap gap-2"></div>
+                        <div id="materialCreateDateInputs"></div>
+                    </div>
+
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">저장</button>
+                </form>                
             </div>
 
             <div class="border border-gray-200 rounded-2xl p-4">
@@ -211,7 +253,7 @@ function material_money($v)
                                             <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
 
                                             <!-- 자재구입비 달력(전월/현월 2달력) -->
-                                            <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-prev-grid-target="usageDatePrev_<?php echo (int)$it['id']; ?>" data-curr-grid-target="usageDateCurr_<?php echo (int)$it['id']; ?>">
+                                            <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-prev-grid-target="usageDatePrev_<?php echo (int)$it['id']; ?>" data-curr-grid-target="usageDateCurr_<?php echo (int)$it['id']; ?>">
                                                 <div class="flex items-center justify-between">
                                                     <div class="text-xs text-gray-700 font-bold">날짜(<?php echo h($prevYm); ?> 25일~<?php echo h($ym); ?> 24일)</div>
                                                     <button type="button" class="px-2 py-1 rounded border text-xs" data-toggle-calendar>날짜 선택</button>
@@ -237,59 +279,6 @@ function material_money($v)
             </div>
         </div>
 
-        <!-- 자재구입비(장비 방식 복제): 새작성 모달 -->
-        <div id="materialCreateModal" class="hidden fixed inset-0 z-50 bg-black/40 p-4 overflow-auto">
-            <div class="max-w-4xl mx-auto mt-8 bg-white rounded-2xl border border-gray-200 p-4 md:p-6">
-                <div class="flex items-center justify-between mb-3">
-                    <div class="text-lg font-extrabold">자재구입비 새작성</div>
-                    <button type="button" id="closeMaterialCreateModal" class="px-3 py-1 border rounded-lg text-sm">닫기</button>
-                </div>
-
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save" class="space-y-3" id="materialCreateForm">
-                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                    <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-                    <input type="hidden" name="materials_tab" value="input">
-                    <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
-
-                    <!-- 업체 검색 자동완성/공용프리셋 -->
-                    <div class="bg-gray-50 border border-gray-200 rounded-xl p-3">
-                        <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
-                        <input type="text" id="materialVendorSearch" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white" placeholder="업체명 2글자 이상 입력">
-                        <div id="materialVendorSuggestList" class="mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
-                    </div>
-
-                    <div class="grid grid-cols-2 gap-2">
-                        <input type="text" name="category" class="px-3 py-2 border rounded-xl" placeholder="구분" required>
-                        <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required>
-                        <!-- 자재: 규격 제거 -->
-                        <input type="text" name="representative" class="px-3 py-2 border rounded-xl" placeholder="대표자명">
-                        <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호">
-                        <input type="text" name="biz_no" class="px-3 py-2 border rounded-xl" placeholder="사업자등록번호">
-                        <!-- 자재: 공급가액 표기 -->
-                        <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-2 border rounded-xl" placeholder="공급가액">
-                        <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고">
-                    </div>
-
-                    <!-- 자재구입비 달력(전월/현월 2달력) -->
-                    <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-target="materialCreateDateInputs" data-chip-target="materialCreateDateChips" data-prev-grid-target="materialCreateCalPrev" data-curr-grid-target="materialCreateCalCurr">
-                        <div class="flex items-center justify-between gap-2 mb-2">
-                            <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($prevYm); ?> 25일~<?php echo h($ym); ?> 24일, 복수 선택)</label>
-                            <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-toggle-calendar>날짜 선택</button>
-                        </div>
-                        <div class="hidden border border-gray-200 rounded-lg p-2 bg-gray-50" data-calendar-box>
-                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                                <div id="materialCreateCalPrev"></div>
-                                <div id="materialCreateCalCurr"></div>
-                            </div>
-                        </div>
-                        <div id="materialCreateDateChips" class="mt-2 flex flex-wrap gap-2"></div>
-                        <div id="materialCreateDateInputs"></div>
-                    </div>
-
-                    <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">저장</button>
-                </form>
-            </div>
-        </div>
 
         <script>
         (function(){
@@ -319,13 +308,17 @@ function material_money($v)
             var createForm = document.getElementById('materialCreateForm');
             var searchInput = document.getElementById('materialVendorSearch');
             var suggestList = document.getElementById('materialVendorSuggestList');            
-            var openModalBtn = document.getElementById('openMaterialCreateModal');
-            var closeModalBtn = document.getElementById('closeMaterialCreateModal');
-            var modal = document.getElementById('materialCreateModal');
-            if (openModalBtn && closeModalBtn && modal) {
-                openModalBtn.addEventListener('click', function(){ modal.className = modal.className.replace('hidden', '').trim(); });
-                closeModalBtn.addEventListener('click', function(){ if (modal.className.indexOf('hidden') === -1) modal.className += ' hidden'; });
-                modal.addEventListener('click', function(e){ if (e.target === modal && modal.className.indexOf('hidden') === -1) modal.className += ' hidden'; });
+            var createToggleBtn = document.querySelector('[data-toggle-material-create]');
+            if (createToggleBtn && createForm) {
+                createToggleBtn.addEventListener('click', function(){
+                    if (createForm.className.indexOf('hidden') !== -1) {
+                        createForm.className = createForm.className.replace('hidden', '').trim();
+                        createToggleBtn.textContent = '접기';
+                    } else {
+                        createForm.className += ' hidden';
+                        createToggleBtn.textContent = '입력 열기';
+                    }
+                });
             }
             function fillMaterialPreset(p){ if(!createForm||!p)return; if(createForm.elements['category']) createForm.elements['category'].value=p.category||''; if(createForm.elements['vendor_name']) createForm.elements['vendor_name'].value=p.vendor_name||''; if(createForm.elements['representative']) createForm.elements['representative'].value=p.representative||''; if(createForm.elements['phone']) createForm.elements['phone'].value=p.phone||''; if(createForm.elements['biz_no']) createForm.elements['biz_no'].value=p.biz_no||''; if(createForm.elements['base_rate']) createForm.elements['base_rate'].value=p.base_rate||''; if(createForm.elements['remark']) createForm.elements['remark'].value=p.remark||''; }
             if (searchInput && suggestList) { searchInput.addEventListener('input', function(){ var q=(searchInput.value||'').trim(); if(q.length<2){suggestList.innerHTML=''; suggestList.className += ' hidden'; return;} var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4||xhr.status!==200)return; var rows=[]; try{rows=JSON.parse(xhr.responseText);}catch(e){} suggestList.innerHTML=''; if(!rows.length){suggestList.className += ' hidden'; return;} suggestList.className=suggestList.className.replace('hidden','').trim(); for(var i=0;i<rows.length;i++){(function(row){var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.addEventListener('click', function(){fillMaterialPreset(row); searchInput.value=row.vendor_name||''; suggestList.className += ' hidden';}); suggestList.appendChild(btn);})(rows[i]); }}; xhr.send(); }); }
@@ -333,6 +326,7 @@ function material_money($v)
             function initCalendar(wrapper){
                 var ym = wrapper.getAttribute('data-ym') || selectedYm;
                 var prevGridId = wrapper.getAttribute('data-prev-grid-target');
+                var wrapperPrevYm = wrapper.getAttribute('data-prev-ym') || (rangeInfo.prevYm || '');                
                 var currGridId = wrapper.getAttribute('data-curr-grid-target');
                 var chipId = wrapper.getAttribute('data-chip-target');
                 var inputId = wrapper.getAttribute('data-target');
@@ -349,10 +343,10 @@ function material_money($v)
                 var parts = ym.split('-');
                 var year = parseInt(parts[0], 10);
                 var month = parseInt(parts[1], 10);
-                var prevDate = new Date(year, month - 1, 1);
-                var prevYear = prevDate.getFullYear();
-                var prevMonth = prevDate.getMonth() + 1;
-                var prevYm = prevYear + '-' + pad2(prevMonth);
+                var prevYm = wrapperPrevYm;
+                var prevParts = prevYm.split('-');
+                var prevYear = parseInt(prevParts[0], 10);
+                var prevMonth = parseInt(prevParts[1], 10);
                 var prevLastDay = new Date(prevYear, prevMonth, 0).getDate();
                 var currLastDay = new Date(year, month, 0).getDate();
                 var startDate = (rangeInfo.start && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.start : (prevYm + '-25');
