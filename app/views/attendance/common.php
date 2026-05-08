@@ -10,3 +10,41 @@ function attendance_week_range($date){$ts=strtotime($date);$w=(int)date('N',$ts)
 function attendance_minutes($in,$out){if(!$in||!$out)return 0;$m=(int)((strtotime($out)-strtotime($in))/60);return $m>0?$m:0;}
 function attendance_work_minutes($raw,$break){$w=(int)$raw-(int)$break;return $w>0?$w:0;}
 function attendance_hm($minutes){$minutes=(int)$minutes;$h=floor($minutes/60);$m=$minutes%60;return $h.'시간 '.$m.'분';}
+
+/* 휴가 계산 공통: 입사일 기준 월차/연차 발생 계산 (PHP 5.6) */
+function attendance_months_of_service($hireDate, $today){
+    if(!$hireDate) return 0;
+    $h=strtotime($hireDate); $t=strtotime($today);
+    if(!$h||!$t||$h>$t) return 0;
+    $hy=(int)date('Y',$h); $hm=(int)date('n',$h); $hd=(int)date('j',$h);
+    $ty=(int)date('Y',$t); $tm=(int)date('n',$t); $td=(int)date('j',$t);
+    $m=($ty-$hy)*12+($tm-$hm);
+    if($td<$hd) $m--;
+    return $m>0?$m:0;
+}
+function attendance_is_under_one_year($hireDate, $today){
+    if(!$hireDate) return false;
+    $h=strtotime($hireDate); $t=strtotime($today);
+    if(!$h||!$t||$h>$t) return false;
+    return attendance_months_of_service($hireDate,$today)<12;
+}
+function attendance_auto_leave_granted($hireDate, $today){
+    $ret=array('monthly'=>0.0,'annual'=>0.0,'under_one_year'=>false,'hire_missing'=>false);
+    if(!$hireDate){$ret['hire_missing']=true; return $ret;}
+    $months=attendance_months_of_service($hireDate,$today);
+    if($months<12){
+        $ret['under_one_year']=true;
+        $ret['monthly']=(float)$months;
+        $ret['annual']=0.0;
+    }else{
+        $ret['under_one_year']=false;
+        $ret['monthly']=0.0;
+        $ret['annual']=15.0;
+    }
+    return $ret;
+}
+function attendance_float_fmt($v){
+    if($v==='-'||$v===null) return '-';
+    if((float)$v==(int)$v) return (string)(int)$v;
+    return number_format((float)$v,1);
+}

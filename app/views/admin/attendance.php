@@ -40,3 +40,21 @@ if ($pdo) {
 <?php if($tab==='requests'): foreach($reqs as $r): ?><div><?php echo h($r['name']);?></div><?php endforeach; endif; ?>
 <?php if($tab==='weekly'): foreach($weekly as $r): ?><div><?php echo h($r['name']);?> <?php echo number_format(((float)$r['m'])/60,2);?>h</div><?php endforeach; endif; ?>
 <?php if($tab==='settings'): ?><form method='post' action='?r=management/attendance_settings_save'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><input name='standard_weekly_hours' value='<?php echo h($settings['standard_weekly_hours']);?>'><button>저장</button></form><?php endif; ?></div>
+
+<div class='bg-white/80 rounded-3xl shadow p-5 border border-gray-100 mb-4'>
+<h3 class='text-xl font-extrabold'>휴가 등록(관리부)</h3>
+<form method='post' action='?r=management/leave_save' class='space-y-2'>
+<input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'>
+<select name='employee_id' required><option value=''>직원 선택</option><?php foreach($emps as $e): ?><option value='<?php echo (int)$e['id'];?>'><?php echo h($e['name']);?></option><?php endforeach; ?></select>
+<input type='date' name='leave_date' value='<?php echo h($date);?>' required>
+<select name='leave_type' required>
+<option value='월차'>월차</option><option value='연차'>연차</option>
+<option value='월차반차'>월차반차</option><option value='연차반차'>연차반차</option>
+<option value='대체휴무'>대체휴무</option><option value='기타휴무'>기타휴무</option>
+</select>
+<input type='number' step='0.5' min='0' name='leave_amount' placeholder='휴가일수(비우면 자동)'>
+<input type='text' name='reason' placeholder='사유'>
+<button class='px-3 py-2 rounded-xl bg-blue-600 text-white'>저장</button>
+</form>
+<div class='text-xs text-gray-500 mt-2'>관리부 반차 차감 기준: 반차는 월차반차/연차반차를 선택하여 0.5일 차감으로 저장됩니다.</div>
+</div>

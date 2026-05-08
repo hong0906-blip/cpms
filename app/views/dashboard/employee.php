@@ -163,22 +163,56 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 <div class='bg-white/80 rounded-3xl p-6 border mb-6'><!-- 직원 대시보드 내 근태 현황 --><h3 class='text-xl font-bold'>내 근태 현황</h3><div>오늘 상태: <?php echo h(isset($todayRow['status'])?$todayRow['status']:'출근 전');?> / 오늘 실제 체류시간: <?php echo attendance_hm(isset($todayRow['raw_minutes'])?(int)$todayRow['raw_minutes']:0);?> / 오늘 인정 근무시간: <?php echo attendance_hm(isset($todayRow['work_minutes'])?(int)$todayRow['work_minutes']:0);?> / 오늘 공제시간: <?php echo attendance_hm($deductMin);?></div><div>이번 주 누적 인정 근무시간: <?php echo attendance_hm($weekWork);?> / 40시간 대비: <?php echo number_format(($weekWork/60)-40,2);?>h / 52시간 초과 여부: <?php echo ($weekWork>3120)?'초과':'정상';?> / 출퇴근 요청 승인대기: <?php echo (int)$pendingCnt;?>건</div></div>
 
 <?php
-// 근무시간 2시간 공제
-$vac=array('monthly_used'=>0,'monthly_left'=>0,'annual_used'=>0,'annual_left'=>0,'half_used'=>0,'half_left'=>0);
+// 휴가 현황 하드코딩 제거 + 입사일 기준 월차 계산 + 1년 미만 연차 0 처리 + 반차 월차/연차 0.5 차감 + 수동 휴가잔여값 우선
+$vac=array('monthly_granted'=>'-','monthly_used'=>0.0,'monthly_left'=>'-','annual_granted'=>'-','annual_used'=>0.0,'annual_left'=>'-','half_count'=>0,'half_deduct_days'=>0.0,'hire_notice'=>'');
 $currentStatus=isset($todayRow['status'])?$todayRow['status']:'출근 전';
 if($pdo&&$eid_att>0){
  try{
-  $m=date('Y-m');
-  $stV=$pdo->prepare("SELECT leave_type,COUNT(*) c FROM cpms_leave_records WHERE employee_id=:e AND leave_date LIKE :m GROUP BY leave_type");
-  $stV->execute(array(':e'=>$eid_att,':m'=>$m.'%'));
-  foreach($stV->fetchAll() as $vr){$t=(string)$vr['leave_type'];$c=(int)$vr['c']; if($t==='월차')$vac['monthly_used']=$c; if($t==='연차')$vac['annual_used']=$c; if($t==='오전반차'||$t==='오후반차'||$t==='반차')$vac['half_used']+=$c; }
-  $vac['monthly_left']=max(0,1-$vac['monthly_used']); $vac['annual_left']=max(0,15-$vac['annual_used']); $vac['half_left']=max(0,30-$vac['half_used']);
+  $emp=$pdo->prepare("SELECT hire_date,leave_monthly_balance,leave_annual_balance,leave_half_balance FROM employees WHERE id=:e LIMIT 1");
+  $emp->execute(array(':e'=>$eid_att));
+  $er=$emp->fetch();
+  $hireDate=$er&&!empty($er['hire_date'])?(string)$er['hire_date']:'';
+  $manualMonthly=($er&&$er['leave_monthly_balance']!==null)?(float)$er['leave_monthly_balance']:null;
+  $manualAnnual=($er&&$er['leave_annual_balance']!==null)?(float)$er['leave_annual_balance']:null;
+  $base=attendance_auto_leave_granted($hireDate,$today_att);
+
+  $stV=$pdo->prepare("SELECT leave_type,leave_amount FROM cpms_leave_records WHERE employee_id=:e");
+  $stV->execute(array(':e'=>$eid_att));
+  $legacyHalf=0;
+  foreach($stV->fetchAll() as $vr){
+    $t=(string)$vr['leave_type']; $amt=(float)$vr['leave_amount']; if($amt<=0)$amt=1.0;
+    if($t==='월차'){ $vac['monthly_used']+=$amt; continue; }
+    if($t==='연차'){ $vac['annual_used']+=$amt; continue; }
+    if($t==='월차반차'||$t==='오전월차반차'||$t==='오후월차반차'){ $vac['half_count']++; $vac['half_deduct_days']+=0.5; $vac['monthly_used']+=0.5; continue; }
+    if($t==='연차반차'||$t==='오전연차반차'||$t==='오후연차반차'){ $vac['half_count']++; $vac['half_deduct_days']+=0.5; $vac['annual_used']+=0.5; continue; }
+    if($t==='오전반차'||$t==='오후반차'||$t==='반차'){ $vac['half_count']++; $vac['half_deduct_days']+=0.5; $legacyHalf++; continue; }
+  }
+
+  if($base['hire_missing']){
+    $vac['hire_notice']='입사일이 없어 휴가 자동 계산이 제한됩니다. 직원명부에서 입사일을 입력하세요.';
+  }else{
+    $vac['monthly_granted']=$base['monthly'];
+    $vac['annual_granted']=$base['annual'];
+    if($legacyHalf>0){
+      for($i=0;$i<$legacyHalf;$i++){
+        if(($vac['monthly_granted']-$vac['monthly_used'])>=0.5){ $vac['monthly_used']+=0.5; } else { $vac['annual_used']+=0.5; }
+      }
+    }
+    $vac['monthly_left']=($manualMonthly!==null)?$manualMonthly:max(0,$vac['monthly_granted']-$vac['monthly_used']);
+    $vac['annual_left']=($manualAnnual!==null)?$manualAnnual:max(0,$vac['annual_granted']-$vac['annual_used']);
+  }
+
   $lv=$pdo->prepare("SELECT leave_type FROM cpms_leave_records WHERE employee_id=:e AND leave_date=:d LIMIT 1");$lv->execute(array(':e'=>$eid_att,':d'=>$today_att));$l=$lv->fetchColumn(); if($l)$currentStatus=$l;
  }catch(Exception $e){}
 }
 ?>
 <div class='grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6'>
-<div class='bg-white/80 rounded-3xl p-6 border'><!-- 직원 대시보드 휴가 현황 --><h3 class='text-xl font-bold'>휴가 현황</h3><div>월차 사용/잔여: <?php echo (int)$vac['monthly_used'];?> / <?php echo (int)$vac['monthly_left'];?></div><div>연차 사용/잔여: <?php echo (int)$vac['annual_used'];?> / <?php echo (int)$vac['annual_left'];?></div><div>반차 사용/잔여: <?php echo (int)$vac['half_used'];?> / <?php echo (int)$vac['half_left'];?></div></div>
+<div class='bg-white/80 rounded-3xl p-6 border'><!-- 직원 대시보드 휴가 현황 --><h3 class='text-xl font-bold'>휴가 현황</h3>
+<?php if($vac['hire_notice']!==''): ?><div class='text-sm text-amber-700'><?php echo h($vac['hire_notice']);?></div><?php endif; ?>
+<div>월차 발생/사용/남은: <?php echo h(attendance_float_fmt($vac['monthly_granted']));?> / <?php echo h(attendance_float_fmt($vac['monthly_used']));?> / <?php echo h(attendance_float_fmt($vac['monthly_left']));?></div>
+<div>연차 발생/사용/남은: <?php echo h(attendance_float_fmt($vac['annual_granted']));?> / <?php echo h(attendance_float_fmt($vac['annual_used']));?> / <?php echo h(attendance_float_fmt($vac['annual_left']));?></div>
+<div>반차 사용 횟수/차감 일수: <?php echo (int)$vac['half_count'];?>회 / <?php echo h(attendance_float_fmt($vac['half_deduct_days']));?>일</div>
+<div class='text-xs text-gray-500'>반차는 별도 잔여가 아니라 월차/연차에서 0.5일 차감됩니다.</div></div>
 <div class='bg-white/80 rounded-3xl p-6 border'><h3 class='text-xl font-bold'>출퇴근 요청</h3><div class='text-sm text-gray-500'>아래 요청 카드에서 수정 요청을 등록하세요.</div></div>
 </div>
 
