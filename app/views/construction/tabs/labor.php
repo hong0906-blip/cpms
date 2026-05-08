@@ -447,17 +447,23 @@ foreach ($timesheetWorkers as $worker) {
         fd.append('worker_key', ctx.workerKey);
         fd.append('old_value', String(ctx.oldValue));
         fd.append('new_value', String(newValue));
-        fetch('<?php echo h(base_url()); ?>/?r=construction/labor_cell_save', { method:'POST', body:fd })
+        fetch('<?php echo h(base_url()); ?>/?r=construction/labor_gongsu_override_save', { method:'POST', body:fd })
             .then(function(r){
                 return r.text().then(function(text){
                     var data = null;
                     try { data = JSON.parse(text); } catch (e) {}
+                    if (!data) {
+                        if (window.console && console.error) {
+                            console.error('공수 저장 응답(JSON 아님):', (text || '').substring(0, 300));
+                        }
+                        throw new Error('서버 응답이 JSON이 아닙니다.');
+                    }                    
                     if (!r.ok) {
                         var message = data && data.message ? data.message : ('저장 실패 (HTTP ' + r.status + ')');
                         throw new Error(message);
                     }
-                    if (!data || !data.ok) {
-                        throw new Error(data && data.message ? data.message : '저장 실패');
+                    if (!data.ok) {
+                        throw new Error(data.message ? data.message : '저장 실패');
                     }
                     return data;
                 });
@@ -511,10 +517,6 @@ foreach ($timesheetWorkers as $worker) {
             var nextValue = parseFloat(input);
             if (isNaN(nextValue) || nextValue < 0) {
                 alert('공수는 0 이상만 가능합니다.');
-                return;
-            }
-            if (nextValue >= 1.5) {
-                openRequestModal(cell, ctx, nextValue);
                 return;
             }
             saveDirectCell(cell, ctx, nextValue);

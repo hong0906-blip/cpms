@@ -185,9 +185,50 @@ function cpms_ensure_labor_override_table($pdo) {
             created_at DATETIME NOT NULL,
             updated_at DATETIME NOT NULL,
             UNIQUE KEY uk_labor_override(project_id, worker_key, work_date),
-            KEY idx_labor_override_status(status),
-            KEY idx_labor_override_month(project_id, month)
+            KEY idx_labor_override_project_month(project_id, month),
+            KEY idx_labor_override_status(status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+
+        $cols = array();
+        try {
+            $stCols = $pdo->query("SHOW COLUMNS FROM cpms_labor_gongsu_overrides");
+            while ($row = $stCols->fetch(PDO::FETCH_ASSOC)) {
+                if (isset($row['Field'])) $cols[(string)$row['Field']] = true;
+            }
+        } catch (Exception $e) {
+            $cols = array();
+        }
+        $adds = array(
+            'month' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN month CHAR(7) NOT NULL AFTER project_id",
+            'worker_key' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN worker_key VARCHAR(120) NOT NULL AFTER month",
+            'worker_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN worker_name VARCHAR(120) NOT NULL AFTER worker_key",
+            'work_date' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN work_date DATE NOT NULL AFTER worker_name",
+            'old_value' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN old_value DECIMAL(5,2) NULL AFTER work_date",
+            'new_value' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN new_value DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER old_value",
+            'reason' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN reason VARCHAR(255) NULL AFTER new_value",
+            'status' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'applied' AFTER reason",
+            'requested_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by INT NULL AFTER status",
+            'approved_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_by INT NULL AFTER requested_by",
+            'approved_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_at DATETIME NULL AFTER approved_by",
+            'created_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN created_at DATETIME NOT NULL AFTER approved_at",
+            'updated_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN updated_at DATETIME NOT NULL AFTER created_at"
+        );
+        foreach ($adds as $col => $sql) {
+            if (!isset($cols[$col])) $pdo->exec($sql);
+        }
+
+        $idx = array();
+        try {
+            $stIdx = $pdo->query("SHOW INDEX FROM cpms_labor_gongsu_overrides");
+            while ($row = $stIdx->fetch(PDO::FETCH_ASSOC)) {
+                if (isset($row['Key_name'])) $idx[(string)$row['Key_name']] = true;
+            }
+        } catch (Exception $e) {
+            $idx = array();
+        }
+        if (!isset($idx['uk_labor_override'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD UNIQUE KEY uk_labor_override(project_id, worker_key, work_date)");
+        if (!isset($idx['idx_labor_override_project_month'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_project_month(project_id, month)");
+        if (!isset($idx['idx_labor_override_status'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_status(status)");        
         return true;
     } catch (Exception $e) {
         return false;
