@@ -126,6 +126,9 @@ try {
         if ($leaveHalf === '') $st->bindValue(':leave_half_balance', null, \PDO::PARAM_NULL);
         else $st->bindValue(':leave_half_balance', (float)$leaveHalf);
     }
+        if ($id > 0) { // 직원 수정 id 바인딩 / HY093 오류 수정
+        $st->bindValue(':id', $id, \PDO::PARAM_INT);
+    }
     $st->execute();
     // 입사일 저장 확인 / 휴가잔여 저장 확인
     $savedId = ($id > 0) ? $id : (int)$pdo->lastInsertId();
