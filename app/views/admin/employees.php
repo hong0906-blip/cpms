@@ -44,18 +44,37 @@ if ($dbOk && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = isset($_POST['action']) ? (string)$_POST['action'] : '';
     try {
         if ($action === 'add_position_column') {
-            if ($positionEnabled) flash_set('success', '이미 존재합니다: position');
+            if (cpms_column_exists($pdo, 'employees', 'position')) flash_set('success', '이미 존재합니다: position');
             else { $pdo->exec("ALTER TABLE employees ADD COLUMN position VARCHAR(20) NULL AFTER department"); flash_set('success', 'position 컬럼을 추가했습니다.'); }
-        } elseif ($action === 'add_hire_date_column') { // 입사일 컬럼 추가
-            if ($hireDateEnabled) flash_set('success', '이미 존재합니다: hire_date');
-            else { $pdo->exec("ALTER TABLE employees ADD COLUMN hire_date DATE NULL AFTER position"); flash_set('success', 'hire_date 컬럼을 추가했습니다.'); }
-        } elseif ($action === 'add_leave_balance_columns' || $action === 'add_employee_attendance_columns') { // 휴가잔여 컬럼 추가
+        } elseif ($action === 'add_hire_date_column') { // 입사일 컬럼 추가 SQL 안전화
+            if (cpms_column_exists($pdo, 'employees', 'hire_date')) flash_set('success', '이미 존재합니다: hire_date');
+            else {
+                $hasPosition = cpms_column_exists($pdo, 'employees', 'position');
+                if ($hasPosition) $pdo->exec("ALTER TABLE employees ADD COLUMN hire_date DATE NULL AFTER position");
+                else $pdo->exec("ALTER TABLE employees ADD COLUMN hire_date DATE NULL AFTER department");
+                flash_set('success', 'hire_date 컬럼을 추가했습니다.');
+            }
+        } elseif ($action === 'add_leave_balance_columns') { // 휴가잔여 컬럼 추가
             $added = array(); $exists = array();
             foreach (array('leave_monthly_balance','leave_annual_balance','leave_half_balance') as $c) {
                 if (cpms_column_exists($pdo, 'employees', $c)) $exists[] = $c;
                 else { $pdo->exec("ALTER TABLE employees ADD COLUMN {$c} DECIMAL(6,2) NULL"); $added[] = $c; }
             }
-            flash_set('success', '완료: 추가('.implode(', ', $added).') / 이미존재('.implode(', ', $exists).')');
+            flash_set('success', '휴가잔여 처리: 추가('.(count($added)?implode(', ', $added):'없음').') / 이미존재('.(count($exists)?implode(', ', $exists):'없음').')');
+        } elseif ($action === 'add_employee_attendance_columns') {
+            $added = array(); $exists = array();
+            $targets = array('position','hire_date','leave_monthly_balance','leave_annual_balance','leave_half_balance');
+            foreach ($targets as $c) {
+                if (cpms_column_exists($pdo, 'employees', $c)) { $exists[] = $c; continue; }
+                if ($c === 'position') $pdo->exec("ALTER TABLE employees ADD COLUMN position VARCHAR(20) NULL AFTER department");
+                elseif ($c === 'hire_date') {
+                    $hasPosition = cpms_column_exists($pdo, 'employees', 'position');
+                    if ($hasPosition) $pdo->exec("ALTER TABLE employees ADD COLUMN hire_date DATE NULL AFTER position");
+                    else $pdo->exec("ALTER TABLE employees ADD COLUMN hire_date DATE NULL AFTER department");
+                } else $pdo->exec("ALTER TABLE employees ADD COLUMN {$c} DECIMAL(6,2) NULL");
+                $added[] = $c;
+            }
+            flash_set('success', '직원명부 추가 컬럼 처리: 추가('.(count($added)?implode(', ', $added):'없음').') / 이미존재('.(count($exists)?implode(', ', $exists):'없음').')');
         }
     } catch (\Exception $e) {
         flash_set('error', '컬럼 처리 실패: '.$e->getMessage());
@@ -100,6 +119,12 @@ if ($dbOk) {
   <button type="button" class="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-extrabold" data-modal-open="empAdd">직원 추가</button>
 </div>
 <details class="mb-4 bg-gray-50 border border-gray-200 rounded-2xl p-4"><summary class="font-bold cursor-pointer">직원명부 컬럼 진단 보기</summary><div class="text-xs mt-2">EMPLOYEES_PAGE_LOADED=yes / position=<?php echo $positionEnabled?'yes':'no'; ?> / hire_date=<?php echo $hireDateEnabled?'yes':'no'; ?> / leave_monthly_balance=<?php echo $leaveMonthlyEnabled?'yes':'no'; ?> / leave_annual_balance=<?php echo $leaveAnnualEnabled?'yes':'no'; ?> / leave_half_balance=<?php echo $leaveHalfEnabled?'yes':'no'; ?></div></details>
+<?php $flash = flash_get(); // 직원명부 flash 메시지 ?>
+<?php if (is_array($flash) && !empty($flash['msg'])): ?>
+  <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type']==='success')?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-red-50 border-red-200 text-red-700'; ?>">
+    <?php echo h($flash['msg']); ?>
+  </div>
+<?php endif; ?>
 <?php if (!empty($employeeLoadError)): ?><div class="mb-4 border border-red-300 bg-red-50 text-red-700 p-3 rounded"><?php echo h($employeeLoadError); ?></div><?php endif; ?>
 
 <div class="bg-white/80 rounded-3xl shadow p-4 mb-4 border border-gray-100"><div class="flex gap-2 flex-wrap">

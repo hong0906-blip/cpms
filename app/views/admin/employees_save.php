@@ -66,6 +66,7 @@ if ($action === 'salary') {
 
 if (!$canManage) { http_response_code(403); echo '403 Forbidden'; exit; }
 
+$email = isset($_POST['email']) ? trim((string)$_POST['email']) : ''; // employees_save email 누락 수정
 $name = isset($_POST['name']) ? trim((string)$_POST['name']) : '';
 $dept = isset($_POST['department']) ? trim((string)$_POST['department']) : '';
 $pos = isset($_POST['position']) ? trim((string)$_POST['position']) : '';
@@ -109,10 +110,22 @@ try {
 
     $st->bindValue(':email', $email); $st->bindValue(':name', $name); $st->bindValue(':dept', $dept); $st->bindValue(':role', $role); $st->bindValue(':active', $isActive, \PDO::PARAM_INT);
     if ($positionEnabled) { if ($pos==='') $st->bindValue(':pos', null, \PDO::PARAM_NULL); else $st->bindValue(':pos', $pos); }
-    if ($hireDateEnabled) $st->bindValue(':hire_date', ($hireDate===''?null:$hireDate));
-    if ($leaveMonthlyEnabled) $st->bindValue(':leave_monthly_balance', ($leaveMonthly===''?null:(float)$leaveMonthly));
-    if ($leaveAnnualEnabled) $st->bindValue(':leave_annual_balance', ($leaveAnnual===''?null:(float)$leaveAnnual));
-    if ($leaveHalfEnabled) $st->bindValue(':leave_half_balance', ($leaveHalf===''?null:(float)$leaveHalf));
+    if ($hireDateEnabled) { // 입사일 저장
+        if ($hireDate === '') $st->bindValue(':hire_date', null, \PDO::PARAM_NULL);
+        else $st->bindValue(':hire_date', $hireDate);
+    }
+    if ($leaveMonthlyEnabled) { // 휴가잔여 저장
+        if ($leaveMonthly === '') $st->bindValue(':leave_monthly_balance', null, \PDO::PARAM_NULL);
+        else $st->bindValue(':leave_monthly_balance', (float)$leaveMonthly);
+    }
+    if ($leaveAnnualEnabled) {
+        if ($leaveAnnual === '') $st->bindValue(':leave_annual_balance', null, \PDO::PARAM_NULL);
+        else $st->bindValue(':leave_annual_balance', (float)$leaveAnnual);
+    }
+    if ($leaveHalfEnabled) {
+        if ($leaveHalf === '') $st->bindValue(':leave_half_balance', null, \PDO::PARAM_NULL);
+        else $st->bindValue(':leave_half_balance', (float)$leaveHalf);
+    }
     $st->execute();
     flash_set('success', $id > 0 ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.');
 } catch (\Exception $e) { flash_set('error', '저장 실패: '.$e->getMessage()); }
