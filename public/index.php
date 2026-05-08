@@ -182,6 +182,10 @@ if ($route === 'construction/schedule_save') {
     require_once __DIR__ . '/../app/views/construction/schedule_save.php';
     exit;
 }
+if ($route === 'construction/schedule_move') {
+    require_once __DIR__ . '/../app/views/construction/schedule_move.php';
+    exit;
+}
 if ($route === 'construction/schedule_delete') {
     require_once __DIR__ . '/../app/views/construction/schedule_delete.php';
     exit;

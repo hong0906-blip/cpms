@@ -695,6 +695,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         <div class="mt-4 text-xs text-gray-500">
             팁: 공정을 드래그해 일정에 추가하고, 바를 드래그해 이동하거나 양쪽 핸들로 기간을 조절할 수 있습니다.
         </div>
+        <div id="ganttSaveNotice" class="mt-2 text-xs hidden"></div>        
     </div>
 
     <!-- 공정표 테이블 -->
@@ -1060,6 +1061,27 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return Math.max(min, Math.min(max, v));
   }
 
+  function showSaveNotice(msg, ok){
+    var el = document.getElementById('ganttSaveNotice');
+    if (!el) return;
+    el.className = 'mt-2 text-xs ' + (ok ? 'text-emerald-700' : 'text-rose-700');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    setTimeout(function(){ if (el) el.classList.add('hidden'); }, 1800);
+  }
+
+  // schedule_move: 기존 공정 드래그 이동 저장
+  function saveTaskMove(taskId, startDate, endDate){
+    var fd = new FormData();
+    fd.append('_csrf', csrfToken || '');
+    fd.append('project_id', projectId || '0');
+    fd.append('task_id', taskId || '0');
+    fd.append('start_date', startDate || '');
+    fd.append('end_date', endDate || '');
+    return fetch('?r=construction/schedule_move', { method:'POST', body:fd, credentials:'same-origin' })
+      .then(function(res){ return res.json(); });
+  }
+
   function saveTask(taskId, name, startDate, endDate, progress, workId){
     var fd = new FormData();
     if (!board) return;
@@ -1236,18 +1258,24 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var minWidthPx = ganttDayWidth;
       var maxLeftPx = (gridDays * ganttDayWidth) - origWidth;
       if (dragging) {
-        var newLeft = clamp(origLeft + delta, 0, maxLeftPx);
-        bar.style.left = newLeft + 'px';
+        var rawLeft = origLeft + delta;
+        var rawIndex = rawLeft / ganttDayWidth;
+        var snapIndex = clamp(Math.round(rawIndex), 0, Math.round(maxLeftPx / ganttDayWidth));
+        bar.style.left = (snapIndex * ganttDayWidth) + 'px';
       } else if (resizing === 'left') {
         var rightEdge = origLeft + origWidth;
         var newLeftL = clamp(origLeft + delta, 0, rightEdge - minWidthPx);
-        var newWidthL = rightEdge - newLeftL;
-        bar.style.left = newLeftL + 'px';
-        bar.style.width = newWidthL + 'px';
+        var snapLeft = clamp(Math.round(newLeftL / ganttDayWidth), 0, gridDays - 1);
+        var snappedLeftPx = snapLeft * ganttDayWidth;
+        var newWidthL = rightEdge - snappedLeftPx;
+        var snapDurL = Math.max(1, Math.round(newWidthL / ganttDayWidth));
+        bar.style.left = snappedLeftPx + 'px';
+        bar.style.width = (snapDurL * ganttDayWidth) + 'px';
       } else if (resizing === 'right') {
         var maxWidth = (gridDays * ganttDayWidth) - origLeft;
         var newWidth = clamp(origWidth + delta, minWidthPx, maxWidth);
-        bar.style.width = newWidth + 'px';
+        var snapDur = Math.max(1, Math.round(newWidth / ganttDayWidth));
+        bar.style.width = (snapDur * ganttDayWidth) + 'px';
       }
     }
 
@@ -1260,16 +1288,34 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       durDays = clamp(durDays, 1, gridDays - leftDays);
       var startTs = rangeStartTs + (leftDays * 86400);
       var endTs = startTs + ((durDays - 1) * 86400);
+      // 날짜 칸 자석 스냅: 드롭 후 위치를 날짜 기준 픽셀로 확정
+      bar.style.left = (leftDays * ganttDayWidth) + 'px';
+      bar.style.width = (durDays * ganttDayWidth) + 'px';      
       if (moved) {
-        saveTask(taskId, taskName, tsToYmd(startTs), tsToYmd(endTs), progress, row ? (row.getAttribute('data-work-id') || '0') : '0');
-      } // 수정탭 모달 비활성 + 단순 클릭시 저장 호출 방지
+        var oldStart = zone ? (zone.getAttribute('data-start') || '') : '';
+        var oldEnd = zone ? (zone.getAttribute('data-end') || '') : '';
+        saveTaskMove(taskId, tsToYmd(startTs), tsToYmd(endTs)).then(function(resp){
+          if (resp && resp.success) {
+            if (zone) { zone.setAttribute('data-start', resp.start_date || tsToYmd(startTs)); zone.setAttribute('data-end', resp.end_date || tsToYmd(endTs)); }
+            showSaveNotice('저장됨', true);
+          } else {
+            // 드래그 저장 실패 시 원위치
+            var span = getTaskSpanByDate(oldStart, oldEnd);
+            if (span) setBarPosition(bar, span.leftDays, span.duration);
+            showSaveNotice((resp && resp.message) ? resp.message : '저장 실패', false);
+          }
+        }).catch(function(){
+          var span = getTaskSpanByDate(oldStart, oldEnd);
+          if (span) setBarPosition(bar, span.leftDays, span.duration);
+          showSaveNotice('저장 실패(네트워크)', false);
+        });
+      }
       dragging = false;
       resizing = null;
       bar.classList.remove('dragging');
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     }
-
     bar.addEventListener('mousedown', function(e){
       if (e.target.classList.contains('gantt-handle')) return;
       dragging = true;
