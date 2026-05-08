@@ -120,31 +120,68 @@ try {
         cpms_gongsu_json_exit(false, 'POST 요청만 허용됩니다.', array(), 405);
     }
 
-    // [변경] 공수 저장 세션 로드 + 포탈 자동 로그인 재시도 + 세션 진단 메시지
-    $hasSessionArray = isset($_SESSION) && is_array($_SESSION);
-    $hasUserEmailSession = $hasSessionArray && !empty($_SESSION['user_email']);
+    // [변경] 공수 저장 세션 실제값 진단
+    $rawUserEmail = $hasSessionArray && isset($_SESSION['user_email']) ? trim((string)$_SESSION['user_email']) : '';
+    $rawCpmsUserEmail = $hasSessionArray && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['email']) ? trim((string)$_SESSION['cpms_user']['email']) : '';
+    $rawCpmsUserRole = $hasSessionArray && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['role']) ? trim((string)$_SESSION['cpms_user']['role']) : '';
+    $rawCpmsUserDepartment = $hasSessionArray && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['department']) ? trim((string)$_SESSION['cpms_user']['department']) : '';
+    $hasUserEmailSession = ($rawUserEmail !== '');
+    $hasCpmsUserSession = ($rawCpmsUserEmail !== '');
+
+    // [변경] Auth 이메일 복구 후 권한 체크
     $hasCpmsUserSession = $hasSessionArray && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && !empty($_SESSION['cpms_user']['email']);
     $authChecked = Auth::check();
     if (!$authChecked && $hasUserEmailSession && method_exists('Auth', 'autoLoginFromPortal')) {
         Auth::autoLoginFromPortal();
         $authChecked = Auth::check();
     }
+
+    $authEmail = method_exists('Auth', 'userEmail') ? trim((string)Auth::userEmail()) : '';
+    $portalEmail = $rawUserEmail;
+    $cpmsUserEmail = $rawCpmsUserEmail;
+    $needForceRestore = ($authEmail === '' && $portalEmail !== '') || ($portalEmail !== '' && $cpmsUserEmail === '');
+    if ($needForceRestore) {
+        // [변경] cpms_user 세션 강제 복구
+        $_SESSION[Auth::CPMS_USER_KEY] = array(
+            'email' => $portalEmail,
+            'name' => $portalEmail,
+            'role' => 'employee',
+            'photo_path' => null,
+            'department' => '',
+            'position' => ''
+        );
+        Auth::refreshCurrentUser(true);
+    } else {
+        Auth::refreshCurrentUser(true);
+    }
+
+    $authChecked = Auth::check();
+    $diagEmail = method_exists('Auth', 'userEmail') ? (string)Auth::userEmail() : '';
+    $diagRole = method_exists('Auth', 'userRole') ? (string)Auth::userRole() : '';
+    $diagDept = method_exists('Auth', 'userDepartment') ? (string)Auth::userDepartment() : '';
+    $diagMaster = method_exists('Auth', 'isMaster') ? (bool)Auth::isMaster() : false;
+    $diagCanManage = method_exists('Auth', 'canManageConstruction') ? (bool)Auth::canManageConstruction() : false;
+
+    $rawUserEmail = isset($_SESSION['user_email']) ? trim((string)$_SESSION['user_email']) : '';
+    $rawCpmsUserEmail = (isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['email'])) ? trim((string)$_SESSION['cpms_user']['email']) : '';
+    $rawCpmsUserRole = (isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['role'])) ? trim((string)$_SESSION['cpms_user']['role']) : '';
+    $rawCpmsUserDepartment = (isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['department'])) ? trim((string)$_SESSION['cpms_user']['department']) : '';
+    
     if (!$authChecked) {
-        $diagEmail = method_exists('Auth', 'userEmail') ? (string)Auth::userEmail() : '';
-        $diagRole = method_exists('Auth', 'userRole') ? (string)Auth::userRole() : '';
-        $diagDept = method_exists('Auth', 'userDepartment') ? (string)Auth::userDepartment() : '';
-        $diagMaster = method_exists('Auth', 'isMaster') ? (bool)Auth::isMaster() : false;
-        $diagCanManage = method_exists('Auth', 'canManageConstruction') ? (bool)Auth::canManageConstruction() : false;
-        cpms_gongsu_json_exit(false, '로그인 세션을 읽지 못했습니다. email=' . $diagEmail . ', role=' . $diagRole . ', dept=' . $diagDept . ', master=' . ($diagMaster ? 'Y' : 'N') . ', canManageConstruction=' . ($diagCanManage ? 'Y' : 'N') . ', session_id=' . session_id() . ', has_user_email=' . ($hasUserEmailSession ? 'Y' : 'N') . ', has_cpms_user=' . ($hasCpmsUserSession ? 'Y' : 'N'), array(
+        cpms_gongsu_json_exit(false, '로그인 세션을 읽지 못했습니다. email=' . $diagEmail . ', role=' . $diagRole . ', dept=' . $diagDept . ', master=' . ($diagMaster ? 'Y' : 'N') . ', canManageConstruction=' . ($diagCanManage ? 'Y' : 'N') . ', session_id=' . session_id() . ', raw_user_email=' . $rawUserEmail . ', raw_cpms_user_email=' . $rawCpmsUserEmail . ', raw_cpms_user_role=' . $rawCpmsUserRole . ', raw_cpms_user_department=' . $rawCpmsUserDepartment, array(
             'session_id' => session_id(),
             'has_session' => $hasSessionArray ? 'Y' : 'N',
-            'has_user_email' => $hasUserEmailSession ? 'Y' : 'N',
-            'has_cpms_user' => $hasCpmsUserSession ? 'Y' : 'N',
+            'has_user_email' => ($rawUserEmail !== '') ? 'Y' : 'N',
+            'has_cpms_user' => ($rawCpmsUserEmail !== '') ? 'Y' : 'N',
             'email' => $diagEmail,
             'role' => $diagRole,
             'dept' => $diagDept,
             'master' => $diagMaster ? 'Y' : 'N',
-            'canManageConstruction' => $diagCanManage ? 'Y' : 'N'
+            'canManageConstruction' => $diagCanManage ? 'Y' : 'N',
+            'raw_user_email' => $rawUserEmail,
+            'raw_cpms_user_email' => $rawCpmsUserEmail,
+            'raw_cpms_user_role' => $rawCpmsUserRole,
+            'raw_cpms_user_department' => $rawCpmsUserDepartment
         ), 401);
     }
 
@@ -163,17 +200,21 @@ try {
         $diagDept = method_exists('Auth', 'userDepartment') ? (string)Auth::userDepartment() : '';
         cpms_gongsu_json_exit(
             false,
-            '권한이 없습니다. email=' . $diagEmail . ', role=' . $diagRole . ', dept=' . $diagDept . ', master=' . ($isMaster ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N') . ', session_id=' . session_id() . ', has_user_email=' . (!empty($_SESSION['user_email']) ? 'Y' : 'N') . ', has_cpms_user=' . ((isset($_SESSION['cpms_user']['email']) && $_SESSION['cpms_user']['email'] !== '') ? 'Y' : 'N'),
-            array(
+            '권한이 없습니다. email=' . $diagEmail . ', role=' . $diagRole . ', dept=' . $diagDept . ', master=' . ($isMaster ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N') . ', session_id=' . session_id() . ', raw_user_email=' . $rawUserEmail . ', raw_cpms_user_email=' . $rawCpmsUserEmail . ', raw_cpms_user_role=' . $rawCpmsUserRole . ', raw_cpms_user_department=' . $rawCpmsUserDepartment,
+            array(            
                 'session_id' => session_id(),
                 'has_session' => (isset($_SESSION) && is_array($_SESSION)) ? 'Y' : 'N',
-                'has_user_email' => !empty($_SESSION['user_email']) ? 'Y' : 'N',
-                'has_cpms_user' => (isset($_SESSION['cpms_user']['email']) && $_SESSION['cpms_user']['email'] !== '') ? 'Y' : 'N',
+                'has_user_email' => ($rawUserEmail !== '') ? 'Y' : 'N',
+                'has_cpms_user' => ($rawCpmsUserEmail !== '') ? 'Y' : 'N',
                 'email' => $diagEmail,
                 'role' => $diagRole,
                 'dept' => $diagDept,
                 'master' => $isMaster ? 'Y' : 'N',
-                'canManageConstruction' => $canManageConstruction ? 'Y' : 'N'
+                'canManageConstruction' => $canManageConstruction ? 'Y' : 'N',
+                'raw_user_email' => $rawUserEmail,
+                'raw_cpms_user_email' => $rawCpmsUserEmail,
+                'raw_cpms_user_role' => $rawCpmsUserRole,
+                'raw_cpms_user_department' => $rawCpmsUserDepartment
             ),
             403
         );
