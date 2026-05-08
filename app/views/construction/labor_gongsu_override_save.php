@@ -127,8 +127,20 @@ try {
         cpms_gongsu_json_exit(false, 'CSRF 검증에 실패했습니다.', array(), 400);
     }
 
-    if (!method_exists('Auth', 'canManageConstruction') || !Auth::canManageConstruction()) {
-        cpms_gongsu_json_exit(false, '권한이 없습니다.', array(), 403);
+    // [변경] 마스터 공수 수정 권한 + Auth::canManageConstruction 권한 통일
+    $isMaster = method_exists('Auth', 'isMaster') ? (bool)Auth::isMaster() : false;
+    $canManageConstruction = method_exists('Auth', 'canManageConstruction') ? (bool)Auth::canManageConstruction() : false;
+    if (!($isMaster || $canManageConstruction)) {
+        // [변경] 권한 실패 진단 메시지
+        $diagEmail = method_exists('Auth', 'userEmail') ? (string)Auth::userEmail() : '';
+        $diagRole = method_exists('Auth', 'userRole') ? (string)Auth::userRole() : '';
+        $diagDept = method_exists('Auth', 'userDepartment') ? (string)Auth::userDepartment() : '';
+        cpms_gongsu_json_exit(
+            false,
+            '권한이 없습니다. email=' . $diagEmail . ', role=' . $diagRole . ', dept=' . $diagDept . ', master=' . ($isMaster ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N'),
+            array(),
+            403
+        );
     }
 
     $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
@@ -161,8 +173,8 @@ try {
 
     $role = method_exists('Auth', 'userRole') ? (string)Auth::userRole() : '';
     $email = method_exists('Auth', 'userEmail') ? (string)Auth::userEmail() : '';
-    if (!cpms_is_project_member_or_executive($pdo, $projectId, $role, $email)) {
-        cpms_gongsu_json_exit(false, '담당 프로젝트만 수정할 수 있습니다.', array(), 403);
+    if (!$isMaster && !cpms_is_project_member_or_executive($pdo, $projectId, $role, $email)) {
+        cpms_gongsu_json_exit(false, '담당 프로젝트만 수정할 수 있습니다. email=' . $email . ', role=' . $role . ', dept=' . (method_exists('Auth', 'userDepartment') ? (string)Auth::userDepartment() : '') . ', master=' . ($isMaster ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N'), array(), 403);
     }
 
     cpms_gongsu_ensure_override_table($pdo);
