@@ -975,6 +975,9 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var todayOffset = parseInt(rangeSource.getAttribute('data-today-offset'), 10);
   var initialMode = '<?php echo h($viewMode); ?>';
   if (isNaN(todayOffset)) todayOffset = -1;
+  // 공정표 자동저장 후 dirty 상태: 수정 데이터 변경 여부(보기 탭 최신화 트리거)
+  if (typeof window.cpmsGanttDirty === 'undefined') window.cpmsGanttDirty = false;
+  if (typeof window.cpmsGanttRefreshTs === 'undefined') window.cpmsGanttRefreshTs = 0;
 
     function shouldKeepEditMode(){
     if (initialMode === 'edit') return true;
@@ -992,19 +995,26 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return activePanel.getAttribute('data-tab-panel') || 'overview';
   }
 
-  /* 저장 후 탭 유지: 현재 활성 탭/월 파라미터를 유지해서 동일 상태로 새로고침 */
-  function reloadWithState(mode){
+  function buildGanttUrl(mode, refreshTs){
     var params = new URLSearchParams(window.location.search);
     params.set('r', '공사');
     if (projectId) params.set('pid', projectId);
     params.set('tab', 'gantt');
-    var month = getCurrentMonthParam();
+    var month = getCurrentMonthParam(); // month 유지
     if (month) params.set('month', month);
+    if (mode === 'edit') params.set('mode', 'edit');
+    else params.delete('mode');
+    // 캐시 방지 refresh 파라미터
+    if (refreshTs) params.set('refresh', String(refreshTs));
+    else params.delete('refresh');
+    return window.location.pathname + '?' + params.toString();
+  }
+
+  /* 저장 후 탭 유지: 현재 활성 탭/월 파라미터를 유지해서 동일 상태로 새로고침 */
+  function reloadWithState(mode){    
     var activeTab = getActiveTab();
     var keepEditMode = (mode === 'edit') || (mode !== 'overview' && activeTab === 'board');
-    if (keepEditMode) params.set('mode', 'edit');
-    else params.delete('mode');
-    window.location.search = params.toString();
+    window.location.href = buildGanttUrl(keepEditMode ? 'edit' : 'overview', window.cpmsGanttRefreshTs || 0);
   }
 
   function ymdToTs(ymd){
@@ -1409,6 +1419,9 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
           zone.setAttribute('data-end', appliedEnd);
           bar.setAttribute('data-start-date', appliedStart);
           bar.setAttribute('data-end-date', appliedEnd);
+          // 공정표 자동저장 후 dirty 상태 + 캐시방지 timestamp 갱신
+          window.cpmsGanttDirty = true;
+          window.cpmsGanttRefreshTs = Date.now();          
           showSaveNotice('저장됨', true);
         } else {
           restoreOriginalPosition();
@@ -1803,11 +1816,17 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
           panel.classList.add('hidden');
         }
       });
-      var params = new URLSearchParams(window.location.search);
-      if (target === 'board') params.set('mode', 'edit');
-      else params.delete('mode');
-      history.replaceState(null, '', window.location.pathname + '?' + params.toString());
-      requestRecalcGanttLayout();  
+      // 공정표 보기 탭 최신화: 자동저장 이후 overview 클릭 시 서버 재렌더링
+      if (target === 'overview' && window.cpmsGanttDirty === true) {
+        window.location.href = buildGanttUrl('overview', window.cpmsGanttRefreshTs || Date.now());
+        return;
+      }
+      if (target === 'board') {
+        history.replaceState(null, '', buildGanttUrl('edit', window.cpmsGanttRefreshTs || 0));
+      } else {
+        history.replaceState(null, '', buildGanttUrl('overview', window.cpmsGanttRefreshTs || 0));
+      }
+      requestRecalcGanttLayout();
     });
   });
 
