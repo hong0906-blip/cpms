@@ -98,6 +98,7 @@ if (!function_exists('cpms_apply_labor_overrides_to_map')) {
     }
 }
 $attendanceGongsuMap = cpms_apply_labor_overrides_to_map($attendanceGongsuMap, $projectId, $selectedMonth);
+$pendingOverrideRows = cpms_load_labor_override_pending($projectId, $selectedMonth);
 
 $executiveUsers = array();
 if (isset($pdo) && $pdo) {
@@ -208,6 +209,14 @@ foreach ($timesheetWorkers as $worker) {
         </div>
     </div>
 </div>
+<?php if (!empty($pendingOverrideRows)): ?>
+<div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+    <div class="font-bold mb-1">공수 수정 승인대기</div>
+    <?php foreach ($pendingOverrideRows as $pr): ?>
+        <div>- <?php echo h($pr['worker_name']); ?> / <?php echo h($pr['work_date']); ?> / <?php echo h($pr['old_value']); ?> → <?php echo h($pr['new_value']); ?> (승인대기)</div>
+    <?php endforeach; ?>
+</div>
+<?php endif; ?>
 
 <div class="flex flex-wrap gap-2 mt-4 mb-6">
     <?php foreach ($laborTabs as $k => $label): ?>
@@ -434,7 +443,8 @@ foreach ($timesheetWorkers as $worker) {
         fd.append('project_id', ctx.projectId);
         fd.append('month', ctx.month);
         fd.append('worker_name', ctx.workerName);
-        fd.append('date', ctx.date);
+        fd.append('work_date', ctx.date);
+        fd.append('worker_key', ctx.workerKey);
         fd.append('old_value', String(ctx.oldValue));
         fd.append('new_value', String(newValue));
         fetch('<?php echo h(base_url()); ?>/?r=construction/labor_cell_save', { method:'POST', body:fd })
@@ -453,12 +463,24 @@ foreach ($timesheetWorkers as $worker) {
                 });
             })
             .then(function(data){
+                if (data.mode === 'pending') {
+                    var pending = cell.querySelector('.cpms-pending-badge');
+                    if (!pending) {
+                        pending = document.createElement('small');
+                        pending.className = 'cpms-pending-badge ml-1 text-[10px] text-amber-600';
+                        pending.textContent = '승인대기';
+                        cell.appendChild(pending);
+                    }
+                    alert(data.message || '승인 요청으로 등록되었습니다.');
+                    return;
+                }                
                 var value = (data && typeof data.value !== 'undefined') ? data.value : newValue;
                 var display = formatValue(value);
                 cell.textContent = display;
                 cell.setAttribute('data-old-value', display);
             })
             .catch(function(e){
+                if (window.console && console.error) console.error('gongsu save failed:', e);                
                 alert(e && e.message ? e.message : '저장 실패');
             })
             .then(function(){
@@ -475,6 +497,7 @@ foreach ($timesheetWorkers as $worker) {
                 projectId:cell.getAttribute('data-project-id'),
                 month:cell.getAttribute('data-month'),
                 workerName:cell.getAttribute('data-worker-name'),
+                workerKey:(cell.getAttribute('data-worker-key') || '').trim(),                
                 date:cell.getAttribute('data-date'),
                 oldValue:oldValue
             };

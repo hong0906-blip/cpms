@@ -119,6 +119,29 @@ function cpms_labor_override_path($projectId, $month) {
 }
 
 function cpms_load_labor_overrides($projectId, $month) {
+    $projectId = (int)$projectId;
+    $month = trim((string)$month);
+    $rows = array();
+    try {
+        $pdo = \App\Core\Db::pdo();
+        if ($pdo && cpms_ensure_labor_override_table($pdo)) {
+            $sql = "SELECT worker_key, work_date, worker_name, old_value, new_value, status, reason, requested_by, approved_by, approved_at, created_at, updated_at
+                    FROM cpms_labor_gongsu_overrides
+                    WHERE project_id = :pid AND month = :month AND status IN ('applied','approved')";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->bindValue(':month', $month, PDO::PARAM_STR);
+            $st->execute();
+            while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+                $workerKey = isset($r['worker_key']) ? trim((string)$r['worker_key']) : '';
+                $workDate = isset($r['work_date']) ? trim((string)$r['work_date']) : '';
+                if ($workerKey === '' || $workDate === '') continue;
+                if (!isset($rows[$workerKey]) || !is_array($rows[$workerKey])) $rows[$workerKey] = array();
+                $rows[$workerKey][$workDate] = array('worker_name' => (string)$r['worker_name'], 'value' => (float)$r['new_value'], 'meta' => $r);
+            }
+            return $rows;
+        }
+    } catch (Exception $e) {}    
     return cpms_read_json_file(cpms_labor_override_path($projectId, $month), array());
 }
 
@@ -140,4 +163,48 @@ function cpms_set_labor_override($projectId, $month, $workerName, $date, $value,
         'meta' => is_array($meta) ? $meta : array(),
     );
     return cpms_save_labor_overrides((int)$projectId, (string)$month, $rows);
+}
+
+function cpms_ensure_labor_override_table($pdo) {
+    if (!$pdo) return false;
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_labor_gongsu_overrides (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            project_id INT NOT NULL,
+            month CHAR(7) NOT NULL,
+            worker_key VARCHAR(120) NOT NULL,
+            worker_name VARCHAR(120) NOT NULL,
+            work_date DATE NOT NULL,
+            old_value DECIMAL(5,2) NULL,
+            new_value DECIMAL(5,2) NOT NULL,
+            reason VARCHAR(255) NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'applied',
+            requested_by INT NULL,
+            approved_by INT NULL,
+            approved_at DATETIME NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            UNIQUE KEY uk_labor_override(project_id, worker_key, work_date),
+            KEY idx_labor_override_status(status),
+            KEY idx_labor_override_month(project_id, month)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+function cpms_load_labor_override_pending($projectId, $month) {
+    $list = array();
+    try {
+        $pdo = \App\Core\Db::pdo();
+        if (!$pdo || !cpms_ensure_labor_override_table($pdo)) return $list;
+        $st = $pdo->prepare("SELECT worker_name, work_date, old_value, new_value, reason, updated_at FROM cpms_labor_gongsu_overrides WHERE project_id=:pid AND month=:month AND status='pending' ORDER BY updated_at DESC");
+        $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+        $st->bindValue(':month', (string)$month, PDO::PARAM_STR);
+        $st->execute();
+        return $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return $list;
+    }
 }

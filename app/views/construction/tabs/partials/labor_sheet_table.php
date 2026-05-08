@@ -154,6 +154,7 @@ $showBankColumns = isset($showBankColumns) ? (bool)$showBankColumns : true;
                                     data-month="<?php echo h($selectedMonth); ?>"
                                     data-worker-name="<?php echo h($workerName); ?>"
                                     data-date="<?php echo h($dateKey); ?>"
+                                    data-worker-key="<?php echo h($workerKey); ?>"                                    
                                     data-old-value="<?php echo h($gongsuDisplay); ?>"><?php echo h($gongsuDisplay); ?></button>
                         </td>
                     <?php endfor; ?>
