@@ -114,17 +114,42 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
     </div>
 </div>
 
-<?php require_once __DIR__.'/../attendance/common.php'; list($ews,$ewe)=attendance_week_range(attendance_today()); $risk52=array();$risk40=array();$absent=array();$pending=0;$leaveToday=0; if($pdo){ try{$sql="SELECT e.id,e.name,e.department,e.position,COALESCE(SUM(a.work_minutes),0) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name,e.department,e.position";$st=$pdo->prepare($sql);$st->execute(array(':s'=>$ews,':e'=>$ewe));foreach($st->fetchAll() as $r){if((int)$r['m']>3120)$risk52[]=$r; if((int)$r['m']>2400)$risk40[]=$r;} $today=attendance_today(); $a2=$pdo->query("SELECT name FROM employees WHERE id NOT IN (SELECT employee_id FROM cpms_attendance_records WHERE work_date='".$today."' AND check_in IS NOT NULL)");$absent=$a2?$a2->fetchAll():array(); $pending=(int)$pdo->query("SELECT COUNT(*) FROM cpms_attendance_requests WHERE status='pending'")->fetchColumn(); $stL=$pdo->prepare("SELECT COUNT(DISTINCT employee_id) FROM cpms_leave_records WHERE leave_date=:d");$stL->execute(array(':d'=>$today));$leaveToday=(int)$stL->fetchColumn(); }catch(Exception $e){} }
+<?php require_once __DIR__.'/../attendance/common.php'; list($ews,$ewe)=attendance_week_range(attendance_today()); $risk52=array();$absent=array();$leaveToday=0;$today=attendance_today();$leaveExTypes=array('월차','연차','반차','오전반차','오후반차','월차반차','연차반차','오전월차반차','오후월차반차','오전연차반차','오후연차반차','대체휴무','기타휴무','휴무');$leaveMainTypes=array('월차','연차','반차','오전반차','오후반차','월차반차','연차반차','오전월차반차','오후월차반차','오전연차반차','오후연차반차'); if($pdo){ try{$sql="SELECT e.id,e.name,e.department,e.position,COALESCE(SUM(a.work_minutes),0) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e WHERE e.is_active=1 GROUP BY e.id,e.name,e.department,e.position";$st=$pdo->prepare($sql);$st->execute(array(':s'=>$ews,':e'=>$ewe));foreach($st->fetchAll() as $r){if((int)$r['m']>3120)$risk52[]=$r;} // 미출근자에서 휴가자 제외
+$leaveQMarks=array(); foreach($leaveExTypes as $v){$leaveQMarks[]='?';}
+$leaveSql="SELECT DISTINCT employee_id FROM cpms_leave_records WHERE leave_date=? AND leave_type IN (".implode(',', $leaveQMarks).")";
+$leaveParams=array_merge(array($today),$leaveExTypes);
+$stLeaveEx=$pdo->prepare($leaveSql);$stLeaveEx->execute($leaveParams);$leaveExIds=$stLeaveEx->fetchAll(PDO::FETCH_COLUMN,0);
+$leaveExMap=array(); if($leaveExIds){foreach($leaveExIds as $eid){$leaveExMap[(int)$eid]=1;}}
+$stActive=$pdo->query("SELECT id,name,department,position FROM employees WHERE is_active=1");$activeRows=$stActive?$stActive->fetchAll():array();
+$stAtt=$pdo->prepare("SELECT DISTINCT employee_id FROM cpms_attendance_records WHERE work_date=? AND (check_in IS NOT NULL OR status IN ('출근중','퇴근완료'))");$stAtt->execute(array($today));$attIds=$stAtt->fetchAll(PDO::FETCH_COLUMN,0);$attMap=array(); if($attIds){foreach($attIds as $eid){$attMap[(int)$eid]=1;}}
+$absent=array(); foreach($activeRows as $ar){$eid=(int)$ar['id']; if(isset($attMap[$eid])) continue; if(isset($leaveExMap[$eid])) continue; $absent[]=array('name'=>$ar['name'],'department'=>$ar['department'],'position'=>$ar['position']);}
+// 월차/연차/반차자 포함
+$leaveMainQMarks=array(); foreach($leaveMainTypes as $v){$leaveMainQMarks[]='?';}
+$leaveMainSql="SELECT COUNT(DISTINCT employee_id) FROM cpms_leave_records WHERE leave_date=? AND leave_type IN (".implode(',', $leaveMainQMarks).")";
+$leaveMainParams=array_merge(array($today),$leaveMainTypes);
+$stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(int)$stL->fetchColumn(); }catch(Exception $e){} }
 ?>
 <div class='grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6'><!-- 임원 대시보드 UI 정리 + 52시간 초과자 카드 정리 -->
-<div class='bg-white/80 rounded-3xl p-6 border'>
+<div class='bg-white/80 rounded-3xl p-6 border overflow-visible'>
 <h3 class='text-2xl font-extrabold mb-4'>근태 리스크 현황</h3>
 <div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
-<div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>오늘 미출근자 수</div><div class='text-2xl font-extrabold'><?php echo count($absent);?>명</div></div>
-<div class='p-4 rounded-2xl bg-amber-50'><div class='text-gray-500'>승인대기 출퇴근 요청 수</div><div class='text-2xl font-extrabold text-amber-700'><?php echo (int)$pending;?>건</div></div>
-<div class='p-4 rounded-2xl bg-orange-50'><div class='text-gray-500'>40시간 초과자 수</div><div class='text-2xl font-extrabold text-orange-700'><?php echo count($risk40);?>명</div></div>
-<div class='p-4 rounded-2xl bg-red-50'><div class='text-gray-500'>52시간 초과자 수</div><div class='text-2xl font-extrabold text-red-700'><?php echo count($risk52);?>명</div></div>
-<div class='p-4 rounded-2xl bg-indigo-50 md:col-span-2'><div class='text-gray-500'>오늘 연차/반차자 수</div><div class='text-2xl font-extrabold text-indigo-700'><?php echo (int)$leaveToday;?>명</div></div>
+<div class='p-4 rounded-2xl bg-gray-50 relative group cursor-pointer overflow-visible'>
+<div class='text-gray-600 text-lg font-bold'>오늘 미출근자 수</div>
+<div class='text-4xl font-extrabold mt-2'><?php echo count($absent);?>명</div>
+<!-- 미출근자 명단 hover -->
+<div class='hidden md:block absolute left-0 top-full mt-2 w-96 max-w-[92vw] p-4 rounded-2xl bg-white border border-gray-200 shadow-2xl z-[9999] opacity-0 group-hover:opacity-100 group-hover:visible invisible transition'>
+<div class='font-extrabold text-lg mb-2'>오늘 미출근자 명단</div>
+<?php if(count($absent)===0): ?><div class='text-base leading-8 text-gray-700'>오늘 미출근자는 없습니다.</div><?php else: ?><ul class='space-y-2'><?php foreach($absent as $ab): ?><li class='text-base leading-8 text-gray-800'><?php echo h($ab['name']);?> / <?php echo h($ab['department']?$ab['department']:'-');?> / <?php echo h($ab['position']?$ab['position']:'-');?></li><?php endforeach; ?></ul><?php endif; ?>
+</div>
+<details class='md:hidden mt-3'>
+<summary class='inline-block px-3 py-2 rounded-xl bg-gray-200 text-base font-bold'>명단 보기</summary>
+<div class='mt-3 p-3 rounded-xl bg-white border border-gray-200'><?php if(count($absent)===0): ?><div class='text-base leading-8 text-gray-700'>오늘 미출근자는 없습니다.</div><?php else: ?><ul class='space-y-2'><?php foreach($absent as $ab): ?><li class='text-base leading-8 text-gray-800'><?php echo h($ab['name']);?> / <?php echo h($ab['department']?$ab['department']:'-');?> / <?php echo h($ab['position']?$ab['position']:'-');?></li><?php endforeach; ?></ul><?php endif; ?></div>
+</details>
+</div>
+<div class='p-4 rounded-2xl bg-indigo-50'><div class='text-gray-600 text-lg font-bold'>오늘 월차/연차/반차자 수</div><div class='text-4xl font-extrabold text-indigo-700 mt-2'><?php echo (int)$leaveToday;?>명</div></div>
+<div class='p-4 rounded-2xl bg-red-50 md:col-span-2'><div class='text-gray-600 text-lg font-bold'>52시간 초과자 수</div><div class='text-4xl font-extrabold text-red-700 mt-2'><?php echo count($risk52);?>명</div></div>
+<!-- 40시간 초과자 카드 제거 -->
+<!-- 승인대기 요청 카드 제거 -->
 </div></div>
 <div class='bg-white rounded-3xl p-6 border'>
 <h3 class='text-2xl font-extrabold mb-4 text-red-700'>52시간 초과자 목록</h3>
