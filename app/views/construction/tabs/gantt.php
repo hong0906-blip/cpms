@@ -1070,7 +1070,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     setTimeout(function(){ if (el) el.classList.add('hidden'); }, 1800);
   }
 
-  // schedule_move: 기존 공정 드래그 이동 저장
+  // 기존 공정 드래그 자동 저장
   function saveTaskMove(taskId, startDate, endDate){
     var fd = new FormData();
     fd.append('_csrf', csrfToken || '');
@@ -1078,8 +1078,26 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     fd.append('task_id', taskId || '0');
     fd.append('start_date', startDate || '');
     fd.append('end_date', endDate || '');
+    fd.append('month', getCurrentMonthParam());
+    fd.append('mode', 'edit');
+
     return fetch('?r=construction/schedule_move', { method:'POST', body:fd, credentials:'same-origin' })
-      .then(function(res){ return res.json(); });
+      .then(function(res){
+        var status = res.status;
+        return res.text().then(function(text){
+          var data = null;
+          try { data = JSON.parse(text); } catch (e) {}
+          if (!res.ok) {
+            var msg = (data && data.message) ? data.message : ('HTTP ' + status);
+            return { ok:false, message:msg, http_status:status, parse_error:!data, raw_text:text };
+          }
+          if (!data) {
+            console.log('schedule_move non-json response:', text ? text.substring(0, 200) : '');
+            return { ok:false, message:'서버 응답이 JSON이 아닙니다.', parse_error:true, raw_text:text };
+          }
+          return data;
+        });
+      });
   }
 
   function saveTask(taskId, name, startDate, endDate, progress, workId){
@@ -1292,23 +1310,41 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       bar.style.left = (leftDays * ganttDayWidth) + 'px';
       bar.style.width = (durDays * ganttDayWidth) + 'px';      
       if (moved) {
-        var oldStart = zone ? (zone.getAttribute('data-start') || '') : '';
-        var oldEnd = zone ? (zone.getAttribute('data-end') || '') : '';
-        saveTaskMove(taskId, tsToYmd(startTs), tsToYmd(endTs)).then(function(resp){
-          if (resp && resp.success) {
-            if (zone) { zone.setAttribute('data-start', resp.start_date || tsToYmd(startTs)); zone.setAttribute('data-end', resp.end_date || tsToYmd(endTs)); }
-            showSaveNotice('저장됨', true);
-          } else {
-            // 드래그 저장 실패 시 원위치
-            var span = getTaskSpanByDate(oldStart, oldEnd);
-            if (span) setBarPosition(bar, span.leftDays, span.duration);
-            showSaveNotice((resp && resp.message) ? resp.message : '저장 실패', false);
-          }
-        }).catch(function(){
-          var span = getTaskSpanByDate(oldStart, oldEnd);
-          if (span) setBarPosition(bar, span.leftDays, span.duration);
-          showSaveNotice('저장 실패(네트워크)', false);
-        });
+        var originalStartDate = zone ? (zone.getAttribute('data-start') || '') : '';
+        var originalEndDate = zone ? (zone.getAttribute('data-end') || '') : '';
+        var newStartDate = tsToYmd(startTs);
+        var newEndDate = tsToYmd(endTs);
+        var safeTaskId = parseInt(taskId || '0', 10) || 0;
+
+        if (safeTaskId <= 0) {
+          var missingSpan = getTaskSpanByDate(originalStartDate, originalEndDate);
+          if (missingSpan) setBarPosition(bar, missingSpan.leftDays, missingSpan.duration);
+          showSaveNotice('저장 실패: task_id가 없습니다.', false);
+        } else {
+          showSaveNotice('저장 중...', true);
+          saveTaskMove(safeTaskId, newStartDate, newEndDate).then(function(resp){
+            if (resp && resp.ok) {
+              if (zone) {
+                zone.setAttribute('data-start', resp.start_date || newStartDate);
+                zone.setAttribute('data-end', resp.end_date || newEndDate);
+              }
+              // data-start-date 갱신
+              bar.setAttribute('data-start-date', resp.start_date || newStartDate);
+              bar.setAttribute('data-end-date', resp.end_date || newEndDate);
+              showSaveNotice('저장됨', true);
+            } else {
+              // 저장 실패 시 원위치
+              var failSpan = getTaskSpanByDate(originalStartDate, originalEndDate);
+              if (failSpan) setBarPosition(bar, failSpan.leftDays, failSpan.duration);
+              showSaveNotice('저장 실패: ' + ((resp && resp.message) ? resp.message : '알 수 없는 오류'), false);
+            }
+          }).catch(function(err){
+            var networkSpan = getTaskSpanByDate(originalStartDate, originalEndDate);
+            if (networkSpan) setBarPosition(bar, networkSpan.leftDays, networkSpan.duration);
+            showSaveNotice('저장 실패: 네트워크 오류', false);
+            if (window.console && console.log) console.log(err);
+          });
+        }
       }
       dragging = false;
       resizing = null;
