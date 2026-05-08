@@ -176,12 +176,12 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 </div>
 
 <?php
-// 휴가 현황 하드코딩 제거 + 입사일 기준 월차 계산 + 1년 미만 연차 0 처리 + 반차 월차/연차 0.5 차감 + 수동 휴가잔여값 우선
-$vac=array('monthly_granted'=>'-','monthly_used'=>0.0,'monthly_left'=>'-','annual_granted'=>'-','annual_used'=>0.0,'annual_left'=>'-','half_count'=>0,'half_deduct_days'=>0.0,'hire_notice'=>'');
+// 휴가 현황 잔여만 표시
+$vac=array('monthly_granted'=>0.0,'monthly_used'=>0.0,'monthly_left'=>0.0,'annual_granted'=>0.0,'annual_used'=>0.0,'annual_left'=>0.0,'hire_notice'=>'','has_hire_date'=>false,'is_under_one_year'=>false,'display_balance'=>0.0,'display_type'=>'','half_available'=>false);
 $currentStatus=isset($todayRow['status'])?$todayRow['status']:'출근 전';
 if($pdo&&$eid_att>0){
  try{
-  $emp=$pdo->prepare("SELECT hire_date,leave_monthly_balance,leave_annual_balance,leave_half_balance FROM employees WHERE id=:e LIMIT 1");
+  $emp=$pdo->prepare("SELECT hire_date,leave_monthly_balance,leave_annual_balance FROM employees WHERE id=:e LIMIT 1");
   $emp->execute(array(':e'=>$eid_att));
   $er=$emp->fetch();
   $hireDate=$er&&!empty($er['hire_date'])?(string)$er['hire_date']:'';
@@ -196,23 +196,36 @@ if($pdo&&$eid_att>0){
     $t=(string)$vr['leave_type']; $amt=(float)$vr['leave_amount']; if($amt<=0)$amt=1.0;
     if($t==='월차'){ $vac['monthly_used']+=$amt; continue; }
     if($t==='연차'){ $vac['annual_used']+=$amt; continue; }
-    if($t==='월차반차'||$t==='오전월차반차'||$t==='오후월차반차'){ $vac['half_count']++; $vac['half_deduct_days']+=0.5; $vac['monthly_used']+=0.5; continue; }
-    if($t==='연차반차'||$t==='오전연차반차'||$t==='오후연차반차'){ $vac['half_count']++; $vac['half_deduct_days']+=0.5; $vac['annual_used']+=0.5; continue; }
-    if($t==='오전반차'||$t==='오후반차'||$t==='반차'){ $vac['half_count']++; $vac['half_deduct_days']+=0.5; $legacyHalf++; continue; }
+    if($t==='월차반차'||$t==='오전월차반차'||$t==='오후월차반차'){ $vac['monthly_used']+=0.5; continue; }
+    if($t==='연차반차'||$t==='오전연차반차'||$t==='오후연차반차'){ $vac['annual_used']+=0.5; continue; }
+    if($t==='오전반차'||$t==='오후반차'||$t==='반차'){ $legacyHalf++; continue; }
   }
 
   if($base['hire_missing']){
-    $vac['hire_notice']='입사일이 없어 휴가 자동 계산이 제한됩니다. 직원명부에서 입사일을 입력하세요.';
+    $vac['hire_notice']='휴가 계산 불가';
   }else{
-    $vac['monthly_granted']=$base['monthly'];
-    $vac['annual_granted']=$base['annual'];
+    $vac['has_hire_date']=true;
+    $vac['monthly_granted']=(float)$base['monthly'];
+    $vac['annual_granted']=(float)$base['annual'];
+    $vac['is_under_one_year']=((float)$base['annual']<=0.0);
     if($legacyHalf>0){
       for($i=0;$i<$legacyHalf;$i++){
-        if(($vac['monthly_granted']-$vac['monthly_used'])>=0.5){ $vac['monthly_used']+=0.5; } else { $vac['annual_used']+=0.5; }
+        if($vac['is_under_one_year']){ $vac['monthly_used']+=0.5; }
+        else{ $vac['annual_used']+=0.5; }
       }
     }
     $vac['monthly_left']=($manualMonthly!==null)?$manualMonthly:max(0,$vac['monthly_granted']-$vac['monthly_used']);
     $vac['annual_left']=($manualAnnual!==null)?$manualAnnual:max(0,$vac['annual_granted']-$vac['annual_used']);
+
+    // 1년 미만 월차 기준
+    if($vac['is_under_one_year']){
+      $vac['display_type']='monthly';
+      $vac['display_balance']=(float)$vac['monthly_left'];
+    }else{ // 1년 이상 연차 기준
+      $vac['display_type']='annual';
+      $vac['display_balance']=(float)$vac['annual_left'];
+    }
+    $vac['half_available']=($vac['display_balance']>=0.5); // 반차 0.5일 차감 표시    
   }
 
   $lv=$pdo->prepare("SELECT leave_type FROM cpms_leave_records WHERE employee_id=:e AND leave_date=:d LIMIT 1");$lv->execute(array(':e'=>$eid_att,':d'=>$today_att));$l=$lv->fetchColumn(); if($l)$currentStatus=$l;
@@ -220,14 +233,42 @@ if($pdo&&$eid_att>0){
 }
 ?>
 <div class='mb-6'>
-<div class='bg-white/80 rounded-3xl p-6 border'><!-- 직원 대시보드 UI 정리 -->
+<div class='bg-white/80 rounded-3xl p-6 border'><!-- 휴가 현황 잔여만 표시 -->
 <h3 class='text-2xl font-extrabold mb-4'>휴가 현황</h3>
-<?php if($vac['hire_notice']!==''): ?><div class='text-sm text-amber-700 mb-3'><?php echo h($vac['hire_notice']);?></div><?php endif; ?>
-<div class='grid grid-cols-1 md:grid-cols-3 gap-4'>
-<div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>월차 발생 / 사용 / 잔여</div><div class='font-extrabold text-lg'><?php echo h(attendance_float_fmt($vac['monthly_granted']));?> / <?php echo h(attendance_float_fmt($vac['monthly_used']));?> / <?php echo h(attendance_float_fmt($vac['monthly_left']));?></div></div>
-<div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>연차 발생 / 사용 / 잔여</div><div class='font-extrabold text-lg'><?php echo h(attendance_float_fmt($vac['annual_granted']));?> / <?php echo h(attendance_float_fmt($vac['annual_used']));?> / <?php echo h(attendance_float_fmt($vac['annual_left']));?></div></div>
-<div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>반차 사용 횟수 / 차감 일수</div><div class='font-extrabold text-lg'><?php echo (int)$vac['half_count'];?>회 / <?php echo h(attendance_float_fmt($vac['half_deduct_days']));?>일</div></div>
-</div><div class='text-sm text-gray-500 mt-3'>반차는 월차 또는 연차에서 0.5일 차감됩니다.</div></div></div>
+<?php if(!$vac['has_hire_date']): ?>
+<div class='p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800'>
+  <div class='font-extrabold text-lg'>휴가 계산 불가</div>
+  <div class='text-sm mt-1'>직원명부에서 입사일을 입력해주세요.</div>
+</div>
+<?php else: ?>
+<div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
+  <div class='p-5 rounded-2xl bg-blue-50 border border-blue-100'>
+    <div class='text-gray-600 text-sm'><?php echo ($vac['display_type']==='monthly')?'월차 잔여':'연차 잔여';?></div>
+    <div class='font-extrabold text-4xl text-blue-700 mt-2'><?php echo h(attendance_float_fmt($vac['display_balance']));?><span class='text-xl ml-1'>일</span></div>
+  </div>
+  <div class='p-5 rounded-2xl bg-gray-50 border border-gray-100'>
+    <div class='text-gray-600 text-sm'>반차 가능</div>
+    <div class='mt-3'>
+      <span class='inline-flex items-center px-4 py-1 rounded-full text-base font-extrabold <?php echo $vac['half_available']?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700';?>'><?php echo $vac['half_available']?'가능':'불가';?></span>
+    </div>
+  </div>
+</div>
+<div class='text-sm text-gray-600 mt-3'>
+  <?php if($vac['display_type']==='monthly'): ?>
+    입사 1년 미만은 월차 기준으로 표시됩니다.
+  <?php else: ?>
+    입사 1년 이상은 연차 기준으로 표시됩니다.
+  <?php endif; ?>
+</div>
+<div class='text-sm text-gray-500 mt-1'>
+  <?php if($vac['display_type']==='monthly'): ?>
+    반차는 월차에서 0.5일 차감됩니다.
+  <?php else: ?>
+    반차는 연차에서 0.5일 차감됩니다.
+  <?php endif; ?>
+</div>
+<?php endif; ?>
+</div></div>
 <div id='attendanceRequestModal' class='fixed inset-0 z-50 hidden'><!-- 출퇴근 요청 모달 -->
 <div class='absolute inset-0 bg-black/50' data-attendance-request-close></div><div class='relative max-w-5xl mx-auto mt-10 mb-10 bg-white rounded-3xl border shadow-2xl p-6 max-h-[85vh] overflow-y-auto'>
 <div class='flex items-center justify-between mb-4'><h3 class='text-2xl font-extrabold'>출퇴근 수정 요청</h3><button type='button' data-attendance-request-close class='px-4 py-2 rounded-xl bg-gray-100 font-bold'>닫기</button></div>
