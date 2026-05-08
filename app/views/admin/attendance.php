@@ -31,12 +31,12 @@ if ($pdo) {
     catch (\Exception $e) { $attendanceErrors[]='주간 조회 오류: '.$e->getMessage(); }
 }
 ?>
-<div><a href='?r=관리&tab=employees'>직원명부</a> | <a href='?r=db_setup_attendance'>출퇴근 DB 설정</a></div>
+<div class='mb-4 flex gap-2'><a class='px-3 py-2 rounded-2xl border bg-white' href='?r=관리'>관리부 메인</a><a class='px-3 py-2 rounded-2xl border bg-white' href='?r=관리&tab=employees'>직원명부</a><a class='px-3 py-2 rounded-2xl border bg-white' href='?r=db_setup_attendance'>출퇴근 DB 설정</a></div>
 <?php if(!$hireDateEnabled): ?><div style="background:#fef3c7;border:1px solid #f59e0b;padding:8px;margin:8px 0;">입사일 컬럼이 없어 연차/월차 계산은 제한됩니다. 직원명부에서 컬럼을 추가하세요.</div><?php endif; ?>
 <?php foreach($attendanceErrors as $e): ?><div style="background:#fee2e2;border:1px solid #ef4444;padding:8px;margin:8px 0;"><?php echo h($e); ?></div><?php endforeach; ?>
-<h3>출퇴근/근태관리</h3>
+<div class='bg-white/80 rounded-3xl shadow p-5 border border-gray-100 mb-4'><h3 class='text-xl font-extrabold'>출퇴근/근태관리</h3>
 <a href='?r=관리&tab=attendance&atab=daily'>일일</a> | <a href='?r=관리&tab=attendance&atab=requests'>요청</a> | <a href='?r=관리&tab=attendance&atab=weekly'>주간</a> | <a href='?r=관리&tab=attendance&atab=settings'>설정</a>
 <?php if($tab==='daily'): ?><table><tr><th>직원명</th><th>부서</th><th>직책</th></tr><?php foreach($daily as $r): ?><tr><td><?php echo h($r['name']);?></td><td><?php echo h($r['department']);?></td><td><?php echo h($r['position']);?></td></tr><?php endforeach; ?></table><?php endif; ?>
 <?php if($tab==='requests'): foreach($reqs as $r): ?><div><?php echo h($r['name']);?></div><?php endforeach; endif; ?>
 <?php if($tab==='weekly'): foreach($weekly as $r): ?><div><?php echo h($r['name']);?> <?php echo number_format(((float)$r['m'])/60,2);?>h</div><?php endforeach; endif; ?>
-<?php if($tab==='settings'): ?><form method='post' action='?r=management/attendance_settings_save'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><input name='standard_weekly_hours' value='<?php echo h($settings['standard_weekly_hours']);?>'><button>저장</button></form><?php endif; ?>
+<?php if($tab==='settings'): ?><form method='post' action='?r=management/attendance_settings_save'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><input name='standard_weekly_hours' value='<?php echo h($settings['standard_weekly_hours']);?>'><button>저장</button></form><?php endif; ?></div>
