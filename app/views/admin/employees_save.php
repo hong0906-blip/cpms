@@ -31,6 +31,22 @@ $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
 $allowedDepts = array('관리', '공무', '품질', '안전', '공사');
 $allowedPositions = array('주임','대리','과장','차장','부장','전무','상무','이사','부사장','고문','대표');
 
+function cpms_column_exists($pdo, $table, $column) {
+    try {
+        $db = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+        if ($db === '') return false;
+        $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:tbl AND COLUMN_NAME=:col");
+        $st->execute(array(':db'=>$db, ':tbl'=>$table, ':col'=>$column));
+        return ((int)$st->fetchColumn() > 0);
+    } catch (\Exception $e) { return false; }
+}
+$positionEnabled = cpms_column_exists($pdo,'employees','position');
+$hireDateEnabled = cpms_column_exists($pdo,'employees','hire_date');
+$leaveMonthlyEnabled = cpms_column_exists($pdo,'employees','leave_monthly_balance');
+$leaveAnnualEnabled = cpms_column_exists($pdo,'employees','leave_annual_balance');
+$leaveHalfEnabled = cpms_column_exists($pdo,'employees','leave_half_balance');
+
+
 /* ==========================
    delete
 ========================== */
@@ -129,60 +145,38 @@ if ($dept !== '' && !in_array($dept, $allowedDepts, true)) $dept = '';
 if ($pos !== '' && !in_array($pos, $allowedPositions, true)) $pos = '';
 
 try {
+    $fields = array('email = :email','name = :name','department = :dept','role = :role','is_active = :active');
+    if ($positionEnabled) $fields[] = 'position = :pos';
+    if ($hireDateEnabled) $fields[] = 'hire_date = :hire_date';
+    if ($leaveMonthlyEnabled) $fields[] = 'leave_monthly_balance = :leave_monthly_balance';
+    if ($leaveAnnualEnabled) $fields[] = 'leave_annual_balance = :leave_annual_balance';
+    if ($leaveHalfEnable    
+
     if ($id > 0) {
-        $sql = "UPDATE employees
-                SET email = :email,
-                    name = :name,
-                    department = :dept,
-                    position = :pos,
-                    role = :role,
-                    is_active = :active,
-                    hire_date = :hire_date,
-                    leave_monthly_balance = :leave_monthly_balance,
-                    leave_annual_balance = :leave_annual_balance,
-                    leave_half_balance = :leave_half_balance
-                WHERE id = :id";
+        $sql = "UPDATE employees SET ".implode(', ', $fields)." WHERE id = :id";
         $st = $pdo->prepare($sql);
-        $st->bindValue(':email', $email);
-        $st->bindValue(':name', $name);
-        $st->bindValue(':dept', $dept);
-
-        if ($pos === '') $st->bindValue(':pos', null, \PDO::PARAM_NULL);
-        else $st->bindValue(':pos', $pos);
-
-        $st->bindValue(':role', $role);
-        $st->bindValue(':active', $isActive, \PDO::PARAM_INT);
-        $st->bindValue(':hire_date', ($hireDate === '' ? null : $hireDate));
-        $st->bindValue(':leave_monthly_balance', ($leaveMonthly === '' ? null : (float)$leaveMonthly));
-        $st->bindValue(':leave_annual_balance', ($leaveAnnual === '' ? null : (float)$leaveAnnual));
-        $st->bindValue(':leave_half_balance', ($leaveHalf === '' ? null : (float)$leaveHalf));
-        $st->bindValue(':id', $id, \PDO::PARAM_INT);
-        $st->execute();
-
-        flash_set('success', '직원 정보가 수정되었습니다.');
     } else {
-        $sql = "INSERT INTO employees (email, name, department, position, role, is_active, hire_date, leave_monthly_balance, leave_annual_balance, leave_half_balance)
-                VALUES (:email, :name, :dept, :pos, :role, :active, :hire_date, :leave_monthly_balance, :leave_annual_balance, :leave_half_balance)";
+        $cols = array('email','name','department','role','is_active');
+        $vals = array(':email',':name',':dept',':role',':active');
+        if ($positionEnabled) { $cols[]='position'; $vals[]=':pos'; }
+        if ($hireDateEnabled) { $cols[]='hire_date'; $vals[]=':hire_date'; }
+        if ($leaveMonthlyEnabled) { $cols[]='leave_monthly_balance'; $vals[]=':leave_monthly_balance'; }
+        if ($leaveAnnualEnabled) { $cols[]='leave_annual_balance'; $vals[]=':leave_annual_balance'; }
+        if ($leaveHalfEnabled) { $cols[]='leave_half_balance'; $vals[]=':leave_half_balance'; }
+        $sql = "INSERT INTO employees (".implode(',',$cols).") VALUES (".implode(',',$vals).")";
         $st = $pdo->prepare($sql);
-        $st->bindValue(':email', $email);
-        $st->bindValue(':name', $name);
-        $st->bindValue(':dept', $dept);
-
-        if ($pos === '') $st->bindValue(':pos', null, \PDO::PARAM_NULL);
-        else $st->bindValue(':pos', $pos);
-
-        $st->bindValue(':role', $role);
-        $st->bindValue(':active', $isActive, \PDO::PARAM_INT);
-        $st->bindValue(':hire_date', ($hireDate === '' ? null : $hireDate));
-        $st->bindValue(':leave_monthly_balance', ($leaveMonthly === '' ? null : (float)$leaveMonthly));
-        $st->bindValue(':leave_annual_balance', ($leaveAnnual === '' ? null : (float)$leaveAnnual));
-        $st->bindValue(':leave_half_balance', ($leaveHalf === '' ? null : (float)$leaveHalf));
-        $st->execute();
-
-        flash_set('success', '직원이 추가되었습니다.');
     }
 
-    // 본인 수정 시 즉시 반영(이름/부서/직급/권한)
+    $st->bindValue(':email', $email); $st->bindValue(':name', $name); $st->bindValue(':dept', $dept); $st->bindValue(':role', $role); $st->bindValue(':active', $isActive, \PDO::PARAM_INT);
+    if ($positionEnabled) { if ($pos === '') $st->bindValue(':pos', null, \PDO::PARAM_NULL); else $st->bindValue(':pos', $pos); }
+    if ($hireDateEnabled) $st->bindValue(':hire_date', ($hireDate === '' ? null : $hireDate));
+    if ($leaveMonthlyEnabled) $st->bindValue(':leave_monthly_balance', ($leaveMonthly === '' ? null : (float)$leaveMonthly));
+    if ($leaveAnnualEnabled) $st->bindValue(':leave_annual_balance', ($leaveAnnual === '' ? null : (float)$leaveAnnual));
+    if ($leaveHalfEnabled) $st->bindValue(':leave_half_balance', ($leaveHalf === '' ? null : (float)$leaveHalf));
+    if ($id > 0) $st->bindValue(':id', $id, \PDO::PARAM_INT);
+    $st->execute();
+    flash_set('success', $id > 0 ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.');
+// 본인 수정 시 즉시 반영(이름/부서/직급/권한)
     if (Auth::userEmail() === $email && method_exists('App\\Core\\Auth', 'refreshCurrentUser')) {
         Auth::refreshCurrentUser(true);
     }

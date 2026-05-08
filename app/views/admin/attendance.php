@@ -1,63 +1,42 @@
 <?php
-/** 출퇴근 시스템 관리 화면 */
-use App\Core\Auth;
-use App\Core\Db;
-
+use App\Core\Auth; use App\Core\Db;
 require_once __DIR__.'/../attendance/common.php';
+$canManageAttendance=(Auth::isMaster()||attendance_is_manager()); if(!$canManageAttendance){echo '권한없음'; return;}
+$pdo=Db::pdo(); $date=isset($_GET['date'])?$_GET['date']:date('Y-m-d'); $tab=isset($_GET['atab'])?$_GET['atab']:'daily'; $settings=attendance_settings($pdo); list($ws,$we)=attendance_week_range($date);
+$daily=array();$reqs=array();$weekly=array();$emps=array();$attendanceErrors=array();
 
-$canManageAttendance = (Auth::isMaster() || attendance_is_manager());
-if (!$canManageAttendance) {
-    echo '권한없음';
-    return;
-}
-
-$canShowDbButton = (Auth::isMaster() || Auth::canManageEmployees());
-
-$pdo = Db::pdo();
-$date = isset($_GET['date']) ? $_GET['date'] : date('Y-m-d');
-$tab = isset($_GET['atab']) ? $_GET['atab'] : 'daily';
-$settings = attendance_settings($pdo);
-list($ws, $we) = attendance_week_range($date);
-
-$daily = array();
-$reqs = array();
-$weekly = array();
-$emps = array();
+if (!function_exists('cpms_column_exists')) {
+function cpms_column_exists($pdo, $table, $column) {
+    try { $db=(string)$pdo->query("SELECT DATABASE()")->fetchColumn(); if($db==='') return false;
+        $st=$pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:tbl AND COLUMN_NAME=:col");
+        $st->execute(array(':db'=>$db,':tbl'=>$table,':col'=>$column)); return ((int)$st->fetchColumn()>0);
+    } catch (\Exception $e) { return false; }
+}}
+$positionEnabled = $pdo ? cpms_column_exists($pdo,'employees','position') : false;
+$hireDateEnabled = $pdo ? cpms_column_exists($pdo,'employees','hire_date') : false;
 
 if ($pdo) {
-    $emps = $pdo->query("SELECT id,name,department,position,hire_date FROM employees ORDER BY name")->fetchAll();
-    $st = $pdo->prepare("SELECT e.name,e.department,e.position,a.* FROM cpms_attendance_records a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=:d ORDER BY e.name");
-    $st->execute(array(':d' => $date));
-    $daily = $st->fetchAll();
-    $reqs = $pdo->query("SELECT r.*,e.name FROM cpms_attendance_requests r JOIN employees e ON e.id=r.employee_id ORDER BY r.id DESC LIMIT 100")->fetchAll();
-    $st2 = $pdo->prepare("SELECT e.id,e.name,e.department,SUM(a.work_minutes) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name,e.department ORDER BY m DESC");
-    $st2->execute(array(':s' => $ws, ':e' => $we));
-    $weekly = $st2->fetchAll();
+    $posSel=$positionEnabled?'position':"'' AS position";
+    $hireSel=$hireDateEnabled?'hire_date':'NULL AS hire_date';
+    // 출퇴근 employees 컬럼 안전 SELECT
+    try { $emps=$pdo->query("SELECT id,name,department,{$posSel},{$hireSel} FROM employees ORDER BY name")->fetchAll(); }
+    catch (\Exception $e) { $attendanceErrors[]='직원 조회 오류: '.$e->getMessage(); }
+
+    // daily/requests/weekly 안전 조회
+    try { $st=$pdo->prepare("SELECT e.name,e.department,".($positionEnabled?'e.position':"'' AS position").",a.* FROM cpms_attendance_records a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=:d ORDER BY e.name"); $st->execute(array(':d'=>$date)); $daily=$st->fetchAll(); }
+    catch (\Exception $e) { $attendanceErrors[]='일일 조회 오류: '.$e->getMessage(); }
+    try { $reqs=$pdo->query("SELECT r.*,e.name FROM cpms_attendance_requests r JOIN employees e ON e.id=r.employee_id ORDER BY r.id DESC LIMIT 100")->fetchAll(); }
+    catch (\Exception $e) { $attendanceErrors[]='요청 조회 오류: '.$e->getMessage(); }
+    try { $st2=$pdo->prepare("SELECT e.id,e.name,e.department,SUM(a.work_minutes) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name,e.department ORDER BY m DESC"); $st2->execute(array(':s'=>$ws,':e'=>$we)); $weekly=$st2->fetchAll(); }
+    catch (\Exception $e) { $attendanceErrors[]='주간 조회 오류: '.$e->getMessage(); }
 }
 ?>
-<details style="margin:0 0 10px 0;">
-  <summary style="cursor:pointer;color:#555;font-size:12px;">근태 디버그 정보 보기</summary>
-  <div style="background:#fef3c7;border:1px solid #d97706;color:#7c2d12;padding:10px;border-radius:8px;margin-top:8px;font-size:12px;line-height:1.6;">
-    <div>ADMIN_ATTENDANCE_LOADED = 2026-근태탭-강제진단-01</div>
-    <div>__FILE__: <?php echo h(__FILE__); ?></div>
-    <div>$_GET['r']: <?php echo h(isset($_GET['r']) ? $_GET['r'] : ''); ?></div>
-    <div>$_GET['tab']: <?php echo h(isset($_GET['tab']) ? $_GET['tab'] : ''); ?></div>
-    <div>$_GET['atab']: <?php echo h(isset($_GET['atab']) ? $_GET['atab'] : ''); ?></div>
-  </div>
-</details>
-
-<?php // 출퇴근 DB 버튼 확실히 표시 ?>
-<div style='display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px 0;'>
-  <a href='?r=관리&tab=employees' style='display:inline-block;padding:8px 12px;background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:8px;font-weight:700;text-decoration:none;'>직원명부</a>
-  <?php if ($canShowDbButton): ?>
-    <a href='?r=db_setup_attendance' style='display:inline-block;padding:8px 12px;background:#1d4ed8;color:#fff;border:1px solid #1d4ed8;border-radius:8px;font-weight:700;text-decoration:none;'>출퇴근 DB 설정</a>
-  <?php endif; ?>
-  <a href='?r=관리' style='display:inline-block;padding:8px 12px;background:#166534;color:#fff;border:1px solid #166534;border-radius:8px;font-weight:700;text-decoration:none;'>관리부 메인</a>  
-</div>
-<h3 style='margin:0 0 8px 0;'>출퇴근/근태관리</h3>
-<a href='?r=관리&tab=attendance&atab=daily'>일일 출퇴근 현황</a> | <a href='?r=관리&tab=attendance&atab=requests'>출퇴근 요청 관리</a> | <a href='?r=관리&tab=attendance&atab=weekly'>주간 근무시간/52시간 초과자</a> | <a href='?r=관리&tab=attendance&atab=leave'>연차/월차/반차 관리</a> | <a href='?r=관리&tab=attendance&atab=settings'>근태 설정</a>
-<?php if($tab==='daily'): ?><table><tr><th>직원명</th><th>부서</th><th>직책</th><th>상태</th><th>출근</th><th>퇴근</th><th>실제 체류시간</th><th>인정 근무시간</th></tr><?php foreach($daily as $r): ?><tr><td><?php echo h($r['name']);?></td><td><?php echo h($r['department']);?></td><td><?php echo h($r['position']);?></td><td><?php echo h($r['status']);?></td><td><?php echo h($r['check_in']);?></td><td><?php echo h($r['check_out']);?></td><td><?php echo number_format(((int)$r['raw_minutes'])/60,2);?>h</td><td><?php echo number_format(((int)$r['work_minutes'])/60,2);?>h</td></tr><?php endforeach; ?></table><?php endif; ?>
-<?php if($tab==='requests'): foreach($reqs as $r): ?><div><?php echo h($r['name'].' '.$r['request_date'].' '.$r['request_type'].' '.$r['status']);?> <form method='post' action='?r=management/attendance_request_approve'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><input type='hidden' name='id' value='<?php echo (int)$r['id'];?>'><button>승인</button></form></div><?php endforeach; endif; ?>
-<?php if($tab==='weekly'): foreach($weekly as $r): $h=$r['m']/60; ?><div><?php echo h($r['name']);?> <?php echo number_format($h,2);?>h <?php if($h>(float)$settings['max_weekly_hours']) echo '<span style="color:red">52시간 초과자</span>';?></div><?php endforeach; endif; ?>
-<?php if($tab==='settings'): ?><form method='post' action='?r=management/attendance_settings_save'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'>기준<input name='standard_weekly_hours' value='<?php echo h($settings['standard_weekly_hours']);?>'>최대<input name='max_weekly_hours' value='<?php echo h($settings['max_weekly_hours']);?>'> 일일공제(분)<input name='daily_break_deduct_minutes' value='<?php echo h($settings['daily_break_deduct_minutes']);?>'><button>저장</button></form><?php endif; ?>
-<?php if($tab==='leave'): ?><div>연차/월차/반차 관리는 관리 저장 API(leave_save/leave_delete)로 처리하세요.</div><?php endif; ?>
+<div><a href='?r=관리&tab=employees'>직원명부</a> | <a href='?r=db_setup_attendance'>출퇴근 DB 설정</a></div>
+<?php if(!$hireDateEnabled): ?><div style="background:#fef3c7;border:1px solid #f59e0b;padding:8px;margin:8px 0;">입사일 컬럼이 없어 연차/월차 계산은 제한됩니다. 직원명부에서 컬럼을 추가하세요.</div><?php endif; ?>
+<?php foreach($attendanceErrors as $e): ?><div style="background:#fee2e2;border:1px solid #ef4444;padding:8px;margin:8px 0;"><?php echo h($e); ?></div><?php endforeach; ?>
+<h3>출퇴근/근태관리</h3>
+<a href='?r=관리&tab=attendance&atab=daily'>일일</a> | <a href='?r=관리&tab=attendance&atab=requests'>요청</a> | <a href='?r=관리&tab=attendance&atab=weekly'>주간</a> | <a href='?r=관리&tab=attendance&atab=settings'>설정</a>
+<?php if($tab==='daily'): ?><table><tr><th>직원명</th><th>부서</th><th>직책</th></tr><?php foreach($daily as $r): ?><tr><td><?php echo h($r['name']);?></td><td><?php echo h($r['department']);?></td><td><?php echo h($r['position']);?></td></tr><?php endforeach; ?></table><?php endif; ?>
+<?php if($tab==='requests'): foreach($reqs as $r): ?><div><?php echo h($r['name']);?></div><?php endforeach; endif; ?>
+<?php if($tab==='weekly'): foreach($weekly as $r): ?><div><?php echo h($r['name']);?> <?php echo number_format(((float)$r['m'])/60,2);?>h</div><?php endforeach; endif; ?>
+<?php if($tab==='settings'): ?><form method='post' action='?r=management/attendance_settings_save'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><input name='standard_weekly_hours' value='<?php echo h($settings['standard_weekly_hours']);?>'><button>저장</button></form><?php endif; ?>
