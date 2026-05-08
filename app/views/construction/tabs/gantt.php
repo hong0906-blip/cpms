@@ -1252,137 +1252,200 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   }
 
   if (board) {
-    board.querySelectorAll('.gantt-bar').forEach(function(bar){
-    var row = bar.closest('.gantt-row');
-    var zone = bar.closest('.gantt-dropzone');
-    var taskId = row ? row.getAttribute('data-task-id') : '0';
-    var taskName = row ? row.getAttribute('data-task-name') : '';
-    var progress = row ? row.getAttribute('data-task-progress') : '0';
+    var savingTaskIds = {};
+    var dragState = {
+      isDragging: false,
+      currentDragTask: null,
+      dragMode: '',
+      dragStartX: 0,
+      origLeft: 0,
+      origWidth: 0,
+      moved: false,
+      originalStartDate: '',
+      originalEndDate: ''
+    };
 
-    var startDate = zone ? zone.getAttribute('data-start') : '';
-    var endDate = zone ? zone.getAttribute('data-end') : '';
+    // 드래그 상태 초기화 + 반복 드래그 먹통 방지
+    function cleanupDragState(){
+      if (dragState.currentDragTask && dragState.currentDragTask.bar) {
+        var cleanupBar = dragState.currentDragTask.bar;
+        cleanupBar.classList.remove('dragging');
+        cleanupBar.classList.remove('saving');
+        cleanupBar.style.pointerEvents = '';
+      }
+      dragState.isDragging = false;
+      dragState.currentDragTask = null;
+      dragState.dragMode = '';
+      dragState.dragStartX = 0;
+      dragState.origLeft = 0;
+      dragState.origWidth = 0;
+      dragState.moved = false;
+      dragState.originalStartDate = '';
+      dragState.originalEndDate = '';
+      document.removeEventListener('mousemove', onBoardMouseMove);
+      document.removeEventListener('mouseup', onBoardMouseUp);
+    }
 
-    var dragging = false;
-    var resizing = null;
-    var startX = 0;
-    var origLeft = 0;
-    var origWidth = 0;
-    var moved = false;
+    function startDragForTask(taskObj, mode, startX){
+      if (!taskObj || !taskObj.bar || !taskObj.zone || !taskObj.taskId) return false;
+      if (savingTaskIds[taskObj.taskId]) {
+        showSaveNotice('저장 중인 공정입니다. 잠시 후 다시 시도해주세요.', false);
+        return false;
+      }
+      dragState.isDragging = true;
+      dragState.currentDragTask = taskObj;
+      dragState.dragMode = mode;
+      dragState.dragStartX = startX;
+      dragState.origLeft = parseFloat(taskObj.bar.style.left || '0');
+      dragState.origWidth = parseFloat(taskObj.bar.style.width || (ganttDayWidth + ''));
+      dragState.moved = false;
+      dragState.originalStartDate = taskObj.zone.getAttribute('data-start') || '';
+      dragState.originalEndDate = taskObj.zone.getAttribute('data-end') || '';
+      if (isNaN(dragState.origLeft)) dragState.origLeft = 0;
+      if (isNaN(dragState.origWidth) || dragState.origWidth <= 0) dragState.origWidth = ganttDayWidth;
+      taskObj.bar.classList.add('dragging');
+      document.addEventListener('mousemove', onBoardMouseMove);
+      document.addEventListener('mouseup', onBoardMouseUp);
+      return true;
+    }
 
-    function onMouseMove(e){
-      if (!dragging && !resizing) return;
-      var delta = e.clientX - startX;
-      if (Math.abs(delta) > 2) moved = true;
+    function getTaskObjFromElement(el){
+      if (!el) return null;
+      var bar = el.closest('.gantt-bar');
+      if (!bar || !board.contains(bar)) return null;
+      var row = bar.closest('.gantt-row');
+      var zone = bar.closest('.gantt-dropzone');
+      var taskId = row ? (parseInt(row.getAttribute('data-task-id') || '0', 10) || 0) : 0;
+      if (!zone || taskId <= 0) return null;
+      return { bar: bar, row: row, zone: zone, taskId: taskId };
+    }
+
+    function onBoardMouseMove(e){
+      if (!dragState.isDragging || !dragState.currentDragTask) return;
+      var taskObj = dragState.currentDragTask;
+      var bar = taskObj.bar;
+      var delta = e.clientX - dragState.dragStartX;
+      if (Math.abs(delta) > 2) dragState.moved = true;
+
       var minWidthPx = ganttDayWidth;
-      var maxLeftPx = (gridDays * ganttDayWidth) - origWidth;
-      if (dragging) {
-        var rawLeft = origLeft + delta;
+      var maxLeftPx = (gridDays * ganttDayWidth) - dragState.origWidth;
+      if (dragState.dragMode === 'drag') {
+        var rawLeft = dragState.origLeft + delta;
         var rawIndex = rawLeft / ganttDayWidth;
         var snapIndex = clamp(Math.round(rawIndex), 0, Math.round(maxLeftPx / ganttDayWidth));
         bar.style.left = (snapIndex * ganttDayWidth) + 'px';
-      } else if (resizing === 'left') {
-        var rightEdge = origLeft + origWidth;
-        var newLeftL = clamp(origLeft + delta, 0, rightEdge - minWidthPx);
+      } else if (dragState.dragMode === 'left') {
+        var rightEdge = dragState.origLeft + dragState.origWidth;
+        var newLeftL = clamp(dragState.origLeft + delta, 0, rightEdge - minWidthPx);
         var snapLeft = clamp(Math.round(newLeftL / ganttDayWidth), 0, gridDays - 1);
         var snappedLeftPx = snapLeft * ganttDayWidth;
         var newWidthL = rightEdge - snappedLeftPx;
         var snapDurL = Math.max(1, Math.round(newWidthL / ganttDayWidth));
         bar.style.left = snappedLeftPx + 'px';
         bar.style.width = (snapDurL * ganttDayWidth) + 'px';
-      } else if (resizing === 'right') {
-        var maxWidth = (gridDays * ganttDayWidth) - origLeft;
-        var newWidth = clamp(origWidth + delta, minWidthPx, maxWidth);
+      } else if (dragState.dragMode === 'right') {
+        var maxWidth = (gridDays * ganttDayWidth) - dragState.origLeft;
+        var newWidth = clamp(dragState.origWidth + delta, minWidthPx, maxWidth);
         var snapDur = Math.max(1, Math.round(newWidth / ganttDayWidth));
         bar.style.width = (snapDur * ganttDayWidth) + 'px';
       }
     }
 
-    function onMouseUp(){
-      if (!dragging && !resizing) return;
+    function onBoardMouseUp(){
+      if (!dragState.isDragging || !dragState.currentDragTask) return;
+      var taskObj = dragState.currentDragTask;
+      var bar = taskObj.bar;
+      var zone = taskObj.zone;
+      var safeTaskId = taskObj.taskId;
+
       var leftPx = parseFloat(bar.style.left || '0');
       var widthPx = parseFloat(bar.style.width || (ganttDayWidth + ''));
       var leftDays = clamp(Math.round(leftPx / ganttDayWidth), 0, gridDays - 1);
       var durDays = Math.max(1, Math.round(widthPx / ganttDayWidth));
       durDays = clamp(durDays, 1, gridDays - leftDays);
-      var startTs = rangeStartTs + (leftDays * 86400);
-      var endTs = startTs + ((durDays - 1) * 86400);
-      // 날짜 칸 자석 스냅: 드롭 후 위치를 날짜 기준 픽셀로 확정
-      bar.style.left = (leftDays * ganttDayWidth) + 'px';
-      bar.style.width = (durDays * ganttDayWidth) + 'px';      
-      if (moved) {
-        var originalStartDate = zone ? (zone.getAttribute('data-start') || '') : '';
-        var originalEndDate = zone ? (zone.getAttribute('data-end') || '') : '';
-        var newStartDate = tsToYmd(startTs);
-        var newEndDate = tsToYmd(endTs);
-        var safeTaskId = parseInt(taskId || '0', 10) || 0;
+      setBarPosition(bar, leftDays, durDays);
 
-        if (safeTaskId <= 0) {
-          var missingSpan = getTaskSpanByDate(originalStartDate, originalEndDate);
-          if (missingSpan) setBarPosition(bar, missingSpan.leftDays, missingSpan.duration);
-          showSaveNotice('저장 실패: task_id가 없습니다.', false);
-        } else {
-          showSaveNotice('저장 중...', true);
-          saveTaskMove(safeTaskId, newStartDate, newEndDate).then(function(resp){
-            if (resp && resp.ok) {
-              if (zone) {
-                zone.setAttribute('data-start', resp.start_date || newStartDate);
-                zone.setAttribute('data-end', resp.end_date || newEndDate);
-              }
-              // data-start-date 갱신
-              bar.setAttribute('data-start-date', resp.start_date || newStartDate);
-              bar.setAttribute('data-end-date', resp.end_date || newEndDate);
-              showSaveNotice('저장됨', true);
-            } else {
-              // 저장 실패 시 원위치
-              var failSpan = getTaskSpanByDate(originalStartDate, originalEndDate);
-              if (failSpan) setBarPosition(bar, failSpan.leftDays, failSpan.duration);
-              showSaveNotice('저장 실패: ' + ((resp && resp.message) ? resp.message : '알 수 없는 오류'), false);
-            }
-          }).catch(function(err){
-            var networkSpan = getTaskSpanByDate(originalStartDate, originalEndDate);
-            if (networkSpan) setBarPosition(bar, networkSpan.leftDays, networkSpan.duration);
-            showSaveNotice('저장 실패: 네트워크 오류', false);
-            if (window.console && console.log) console.log(err);
-          });
-        }
+      if (!dragState.moved) {
+        cleanupDragState();
+        return;
       }
-      dragging = false;
-      resizing = null;
-      bar.classList.remove('dragging');
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
+
+      var newStartDate = tsToYmd(rangeStartTs + (leftDays * 86400));
+      var newEndDate = tsToYmd(rangeStartTs + ((leftDays + durDays - 1) * 86400));
+      var originalStartDate = dragState.originalStartDate;
+      var originalEndDate = dragState.originalEndDate;
+
+      // task별 자동저장 상태
+      savingTaskIds[safeTaskId] = true;
+      bar.classList.add('saving');
+      bar.style.pointerEvents = 'none';
+      showSaveNotice('저장 중...', true);
+      if (window.console && console.log) {
+        console.log('schedule_move request', { task_id: safeTaskId, start_date: newStartDate, end_date: newEndDate, url: '?r=construction/schedule_move' });
+      }
+
+      function restoreOriginalPosition(){
+        var restoreSpan = getTaskSpanByDate(originalStartDate, originalEndDate);
+        if (restoreSpan) setBarPosition(bar, restoreSpan.leftDays, restoreSpan.duration);
+        if (zone) {
+          zone.setAttribute('data-start', originalStartDate);
+          zone.setAttribute('data-end', originalEndDate);
+        }
+        bar.setAttribute('data-start-date', originalStartDate);
+        bar.setAttribute('data-end-date', originalEndDate);        
+      }
+
+      function finalizeAfterSave(){
+        delete savingTaskIds[safeTaskId];
+        cleanupDragState();
+      }
+
+      saveTaskMove(safeTaskId, newStartDate, newEndDate).then(function(resp){
+        if (resp && resp.ok) {
+          var appliedStart = resp.start_date || newStartDate;
+          var appliedEnd = resp.end_date || newEndDate;
+          // 저장 성공 후 data 날짜 갱신
+          zone.setAttribute('data-start', appliedStart);
+          zone.setAttribute('data-end', appliedEnd);
+          bar.setAttribute('data-start-date', appliedStart);
+          bar.setAttribute('data-end-date', appliedEnd);
+          showSaveNotice('저장됨', true);
+        } else {
+          restoreOriginalPosition();
+          showSaveNotice('저장 실패: ' + ((resp && resp.message) ? resp.message : '알 수 없는 오류'), false);
+          if (window.console && console.log && resp && resp.raw_text) console.log('schedule_move fail response:', String(resp.raw_text).substring(0, 300));
+        }
+        finalizeAfterSave();
+      }).catch(function(err){
+        // 저장 실패 원위치 복구
+        restoreOriginalPosition();
+        showSaveNotice('저장 실패: 네트워크 오류', false);
+        if (window.console && console.log) console.log('schedule_move network error:', err);
+        finalizeAfterSave();
+      });
     }
-    bar.addEventListener('mousedown', function(e){
-      if (e.target.classList.contains('gantt-handle')) return;
-      dragging = true;
-      startX = e.clientX;
-      moved = false;      
-      bar.classList.add('dragging');
-      origLeft = parseFloat(bar.style.left || '0');
-      origWidth = parseFloat(bar.style.width || (ganttDayWidth + ''));
-      if (isNaN(origLeft)) origLeft = 0;
-      if (isNaN(origWidth) || origWidth <= 0) origWidth = ganttDayWidth;
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
+
+    // 이벤트 위임 방식
+    board.addEventListener('mousedown', function(e){
+      var taskObj = getTaskObjFromElement(e.target);
+      if (!taskObj) return;
+      if (dragState.isDragging) return;
+      if (e.target.classList.contains('gantt-handle-left')) {
+        e.preventDefault();
+        startDragForTask(taskObj, 'left', e.clientX);
+        return;
+      }
+      if (e.target.classList.contains('gantt-handle-right')) {
+        e.preventDefault();
+        startDragForTask(taskObj, 'right', e.clientX);
+        return;
+      }
+      if (e.target.closest('.gantt-handle')) return;
+      e.preventDefault();
+      startDragForTask(taskObj, 'drag', e.clientX);      
     });
 
-    bar.querySelectorAll('.gantt-handle').forEach(function(handle){
-      handle.addEventListener('mousedown', function(e){
-        e.stopPropagation();
-        resizing = handle.classList.contains('gantt-handle-left') ? 'left' : 'right';
-        startX = e.clientX;
-        moved = false;
-        bar.classList.add('dragging');
-        origLeft = parseFloat(bar.style.left || '0');
-        origWidth = parseFloat(bar.style.width || (ganttDayWidth + ''));
-        if (isNaN(origLeft)) origLeft = 0;
-        if (isNaN(origWidth) || origWidth <= 0) origWidth = ganttDayWidth;
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-      });
-    });
     // 수정탭 모달 비활성: 공정표 수정 탭(.gantt-board)에서는 진행 입력 모달을 열지 않음
-    });
   }
 
   function renderPhotoList(listEl, photos){
