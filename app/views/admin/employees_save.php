@@ -127,7 +127,11 @@ try {
         else $st->bindValue(':leave_half_balance', (float)$leaveHalf);
     }
     $st->execute();
-    flash_set('success', $id > 0 ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.');
+    // 입사일 저장 확인 / 휴가잔여 저장 확인
+    $savedId = ($id > 0) ? $id : (int)$pdo->lastInsertId();
+    $msg = ($id > 0 ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.')
+        . ' (id=' . $savedId . ', hire_date=' . ($hireDate === '' ? 'NULL' : $hireDate) . ', hire_date_column=' . ($hireDateEnabled ? 'yes' : 'no') . ')';
+    flash_set('success', $msg);
 } catch (\Exception $e) { flash_set('error', '저장 실패: '.$e->getMessage()); }
 
 header('Location: ?r=관리&tab=employees');

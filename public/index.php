@@ -43,6 +43,10 @@ if ($route === 'admin/employees_upload') {
     require_once __DIR__ . '/../app/views/admin/employees_upload.php';
     exit;
 }
+if ($route === 'admin/employees_columns_save') {
+    require_once __DIR__ . '/../app/views/admin/employees_columns_save.php';
+    exit;
+}
 
 // ==========================
 //  관리(노무비) 관련 액션(POST 처리)
