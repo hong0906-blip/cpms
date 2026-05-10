@@ -65,7 +65,7 @@ $rejectReason = isset($_POST['reject_reason']) ? trim((string)$_POST['reject_rea
 
 if ($overrideId <= 0) cpms_labor_decide_redirect('error', '요청 ID가 올바르지 않습니다.');
 if ($decision !== 'approve' && $decision !== 'reject') cpms_labor_decide_redirect('error', '처리 유형이 올바르지 않습니다.');
-if ($decision === 'reject' && $rejectReason === '') cpms_labor_decide_redirect('error', '반려 사유를 입력하세요.');
+if ($decision === 'reject' && $rejectReason === '') cpms_labor_decide_redirect('error', '반려사유를 입력하세요.');
 
 $pdo = Db::pdo();
 if (!$pdo) cpms_labor_decide_redirect('error', 'DB 연결에 실패했습니다.');

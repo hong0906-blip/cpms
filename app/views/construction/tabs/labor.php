@@ -99,6 +99,24 @@ if (!function_exists('cpms_apply_labor_overrides_to_map')) {
 }
 $attendanceGongsuMap = cpms_apply_labor_overrides_to_map($attendanceGongsuMap, $projectId, $selectedMonth);
 $pendingOverrideRows = cpms_load_labor_override_pending($projectId, $selectedMonth);
+$overrideRequestRows = array();
+if (isset($pdo) && $pdo) {
+    try {
+        cpms_ensure_labor_override_table($pdo);
+        $sql = "SELECT worker_name, work_date, old_value, new_value, reason, reject_reason, status, created_at, rejected_at
+                FROM cpms_labor_gongsu_overrides
+                WHERE project_id = :pid AND month = :month AND status IN ('pending','rejected')
+                ORDER BY created_at DESC
+                LIMIT 20";
+        $st = $pdo->prepare($sql);
+        $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $st->bindValue(':month', $selectedMonth, PDO::PARAM_STR);
+        $st->execute();
+        $overrideRequestRows = $st->fetchAll();
+    } catch (Exception $e) {
+        $overrideRequestRows = array();
+    }
+}
 
 $executiveUsers = array();
 if (isset($pdo) && $pdo) {
@@ -217,6 +235,36 @@ foreach ($timesheetWorkers as $worker) {
     <?php endforeach; ?>
 </div>
 <?php endif; ?>
+<div class="mt-3 bg-white rounded-3xl border border-gray-200 p-4 shadow-sm">
+    <div class="font-extrabold text-gray-900 text-base">공수 수정 요청 내역</div>
+    <div class="text-xs text-gray-500 mt-1">승인대기/반려 내역을 확인합니다.</div>
+    <div class="mt-3 space-y-2">
+        <?php if (empty($overrideRequestRows)): ?>
+            <div class="text-sm text-gray-500">요청 내역이 없습니다.</div>
+        <?php else: ?>
+            <?php foreach ($overrideRequestRows as $rr): ?>
+                <?php $isRejected = ((string)$rr['status'] === 'rejected'); ?>
+                <div class="rounded-2xl border border-gray-100 p-3 text-sm">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <?php if ($isRejected): ?>
+                            <span class="px-2 py-1 rounded-full bg-red-100 text-red-700 text-xs font-bold">반려</span>
+                        <?php else: ?>
+                            <span class="px-2 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-bold">승인대기</span>
+                        <?php endif; ?>
+                        <span class="text-gray-800 font-bold"><?php echo h($rr['worker_name']); ?></span>
+                        <span class="text-gray-500"><?php echo h($rr['work_date']); ?></span>
+                    </div>
+                    <div class="mt-1 text-gray-700">기존 공수: <?php echo h($rr['old_value']); ?> → 요청 공수: <span class="font-extrabold"><?php echo h($rr['new_value']); ?></span></div>
+                    <div class="text-gray-700">요청사유: <?php echo h(trim((string)$rr['reason']) !== '' ? $rr['reason'] : '-'); ?></div>
+                    <?php if ($isRejected): ?>
+                        <div class="text-red-700">반려사유: <?php echo h(trim((string)$rr['reject_reason']) !== '' ? $rr['reject_reason'] : '-'); ?></div>
+                    <?php endif; ?>
+                    <div class="text-xs text-gray-500 mt-1">요청일: <?php echo h($rr['created_at']); ?><?php if ($isRejected): ?> · 처리일: <?php echo h($rr['rejected_at']); ?><?php endif; ?></div>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+</div>
 
 <div class="flex flex-wrap gap-2 mt-4 mb-6">
     <?php foreach ($laborTabs as $k => $label): ?>
@@ -435,7 +483,16 @@ foreach ($timesheetWorkers as $worker) {
         openModal();
     }
 
-    function saveDirectCell(cell, ctx, newValue){
+    function askOverrideReason(newValue){
+        if (parseFloat(newValue) < 1.5) return '';
+        var reason = prompt('1.5 이상 공수 수정 요청 사유를 입력하세요.');
+        if (reason === null) return null;
+        reason = String(reason).trim();
+        if (!reason) return null;
+        return reason;
+    }
+
+    function saveDirectCell(cell, ctx, newValue, reason){
         if (savingCell) return;
         savingCell = true;
         // [변경] 공수 저장 URL 통일 + x-www-form-urlencoded 전송
@@ -447,7 +504,8 @@ foreach ($timesheetWorkers as $worker) {
             'work_date=' + encodeURIComponent(ctx.date),
             'worker_key=' + encodeURIComponent(ctx.workerKey),
             'old_value=' + encodeURIComponent(String(ctx.oldValue)),
-            'new_value=' + encodeURIComponent(String(newValue))
+            'new_value=' + encodeURIComponent(String(newValue)),
+            'reason=' + encodeURIComponent(reason || '')
         ].join('&');
         fetch('?r=construction/labor_gongsu_override_save', {
             method:'POST',
@@ -526,7 +584,12 @@ foreach ($timesheetWorkers as $worker) {
                 alert('공수는 0 이상만 가능합니다.');
                 return;
             }
-            saveDirectCell(cell, ctx, nextValue);
+            var reason = askOverrideReason(nextValue); // [변경] 1.5 이상 요청사유 입력
+            if (nextValue >= 1.5 && reason === null) {
+                alert('요청사유를 입력하지 않아 요청이 취소되었습니다.');
+                return;
+            }
+            saveDirectCell(cell, ctx, nextValue, reason || '');
         });
     });
 

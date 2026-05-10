@@ -91,6 +91,8 @@ if (!function_exists('cpms_gongsu_ensure_override_table')) {
             'reason' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN reason VARCHAR(255) NULL AFTER new_value",
             'status' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'applied' AFTER reason",
             'requested_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by INT NULL AFTER status",
+            'requested_by_email' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by_email VARCHAR(120) NULL AFTER requested_by",
+            'requested_by_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by_name VARCHAR(80) NULL AFTER requested_by_email",            
             'approved_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_by INT NULL AFTER requested_by",
             'approved_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_at DATETIME NULL AFTER approved_by",
             'created_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN created_at DATETIME NOT NULL AFTER approved_at",
@@ -249,6 +251,7 @@ try {
     if ($newValue > 999.99) cpms_gongsu_json_exit(false, 'new_value는 DECIMAL(5,2) 범위를 초과했습니다.', array(), 200);
 
     $newValue = (float)number_format($newValue, 2, '.', '');
+    if ($newValue >= 1.5 && $reason === '') cpms_gongsu_json_exit(false, '1.5 이상 공수 수정은 요청사유가 필요합니다.', array(), 200);    
     $oldValue = null;
     if ($oldValueRaw !== '' && is_numeric($oldValueRaw)) $oldValue = (float)number_format((float)$oldValueRaw, 2, '.', '');
 
@@ -290,12 +293,22 @@ try {
         $userId = (int)$_SESSION['cpms_user']['id'];
     }
     $requestedBy = ($userId > 0) ? $userId : null;
+    // [변경] 요청자 저장(requested_by_email, requested_by_name)
+    $requestedByEmail = trim((string)($authEmail !== '' ? $authEmail : ($rawCpmsUserEmail !== '' ? $rawCpmsUserEmail : $rawUserEmail)));
+    $requestedByName = '';
+    if (method_exists('App\\Core\\Auth', 'user')) {
+        $u = Auth::user();
+        if (is_array($u) && isset($u['name'])) $requestedByName = trim((string)$u['name']);
+    }
+    if ($requestedByName === '' && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['name'])) {
+        $requestedByName = trim((string)$_SESSION['cpms_user']['name']);
+    }    
     $now = date('Y-m-d H:i:s');
 
     $sql = "INSERT INTO cpms_labor_gongsu_overrides
-      (project_id, month, worker_key, worker_name, work_date, old_value, new_value, reason, status, requested_by, created_at, updated_at)
+      (project_id, month, worker_key, worker_name, work_date, old_value, new_value, reason, status, requested_by, requested_by_email, requested_by_name, created_at, updated_at)
       VALUES
-      (:project_id, :month, :worker_key, :worker_name, :work_date, :old_value, :new_value, :reason, :status, :requested_by, :created_at, :updated_at)
+      (:project_id, :month, :worker_key, :worker_name, :work_date, :old_value, :new_value, :reason, :status, :requested_by, :requested_by_email, :requested_by_name, :created_at, :updated_at)
       ON DUPLICATE KEY UPDATE
         month = VALUES(month),
         worker_name = VALUES(worker_name),
@@ -304,6 +317,8 @@ try {
         reason = VALUES(reason),
         status = VALUES(status),
         requested_by = VALUES(requested_by),
+        requested_by_email = VALUES(requested_by_email),
+        requested_by_name = VALUES(requested_by_name),        
         updated_at = VALUES(updated_at)";
 
     $st = $pdo->prepare($sql);
@@ -325,6 +340,8 @@ try {
     } else {
         $st->bindValue(':requested_by', $requestedBy, PDO::PARAM_INT);
     }
+    $st->bindValue(':requested_by_email', $requestedByEmail !== '' ? $requestedByEmail : null, $requestedByEmail !== '' ? PDO::PARAM_STR : PDO::PARAM_NULL);
+    $st->bindValue(':requested_by_name', $requestedByName !== '' ? $requestedByName : null, $requestedByName !== '' ? PDO::PARAM_STR : PDO::PARAM_NULL);    
     $st->bindValue(':created_at', $now, PDO::PARAM_STR);
     $st->bindValue(':updated_at', $now, PDO::PARAM_STR);
     $st->execute();
