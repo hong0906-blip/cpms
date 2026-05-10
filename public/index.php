@@ -222,7 +222,8 @@ if ($route === 'construction/labor_sheet_download') {
 
 
 if ($route === 'construction/labor_cell_save') {
-    require_once __DIR__ . '/../app/views/construction/labor_cell_save.php';
+    // [변경] 구버전 labor_cell_save 차단/통합: 새 액션으로 일원화
+    require_once __DIR__ . '/../app/views/construction/labor_gongsu_override_save.php';
     exit;
 }
 // [변경] JSON action layout 차단: action 파일만 실행 후 즉시 종료

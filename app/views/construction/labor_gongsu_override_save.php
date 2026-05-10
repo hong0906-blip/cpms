@@ -255,17 +255,41 @@ try {
     $pdo = Db::pdo();
     if (!$pdo) cpms_gongsu_json_exit(false, 'DB 연결을 확인할 수 없습니다.', array(), 200);
 
-    $role = method_exists('Auth', 'userRole') ? (string)Auth::userRole() : '';
-    $email = method_exists('Auth', 'userEmail') ? (string)Auth::userEmail() : '';
-    if (!$isMaster && !cpms_is_project_member_or_executive($pdo, $projectId, $role, $email)) {
-        cpms_gongsu_json_exit(false, '담당 프로젝트만 수정할 수 있습니다. email=' . $email . ', role=' . $role . ', dept=' . (method_exists('Auth', 'userDepartment') ? (string)Auth::userDepartment() : '') . ', master=' . ($isMaster ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N'), array(), 403);
+    // [변경] 마스터 담당 프로젝트 제한 예외 + 진단값 강화
+    if (!($isMaster || $isMasterByRaw || $effectiveRole === 'executive')) {
+        if (!cpms_is_project_member_or_executive($pdo, $projectId, $effectiveRole, $effectiveEmail)) {
+            cpms_gongsu_json_exit(false,
+                '담당 프로젝트만 수정할 수 있습니다. auth_email=' . $authEmail . ', raw_user_email=' . $rawUserEmail . ', raw_cpms_user_email=' . $rawCpmsUserEmail . ', effective_email=' . $effectiveEmail . ', effective_role=' . $effectiveRole . ', effective_department=' . $effectiveDepartment . ', master_by_auth=' . ($isMaster ? 'Y' : 'N') . ', master_by_raw=' . ($isMasterByRaw ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N') . ', project_id=' . $projectId . ', route_file=labor_gongsu_override_save',
+                array(
+                    'auth_email' => $authEmail,
+                    'raw_user_email' => $rawUserEmail,
+                    'raw_cpms_user_email' => $rawCpmsUserEmail,
+                    'effective_email' => $effectiveEmail,
+                    'effective_role' => $effectiveRole,
+                    'effective_department' => $effectiveDepartment,
+                    'master_by_auth' => $isMaster ? 'Y' : 'N',
+                    'master_by_raw' => $isMasterByRaw ? 'Y' : 'N',
+                    'canManageConstruction' => $canManageConstruction ? 'Y' : 'N',
+                    'project_id' => $projectId,
+                    'route_file' => 'labor_gongsu_override_save'
+                ),
+                403
+            );
+        }
     }
 
     cpms_gongsu_ensure_override_table($pdo);
 
     $status = ($newValue >= 1.5) ? 'pending' : 'applied'; // 1.5 미만 즉시 반영 / 1.5 이상 승인대기
-    $requestedBy = method_exists('Auth', 'id') ? (int)Auth::id() : 0;
-    $requestedBy = ($requestedBy > 0) ? $requestedBy : null;
+    // [변경] Auth::id 안전 처리
+    $userId = 0;
+    if (method_exists('App\\Core\\Auth', 'id')) {
+        $userId = (int)Auth::id();
+    }
+    if ($userId <= 0 && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['id'])) {
+        $userId = (int)$_SESSION['cpms_user']['id'];
+    }
+    $requestedBy = ($userId > 0) ? $userId : null;
     $now = date('Y-m-d H:i:s');
 
     $sql = "INSERT INTO cpms_labor_gongsu_overrides

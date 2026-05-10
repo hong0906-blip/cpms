@@ -438,17 +438,23 @@ foreach ($timesheetWorkers as $worker) {
     function saveDirectCell(cell, ctx, newValue){
         if (savingCell) return;
         savingCell = true;
-        var fd = new FormData();
-        fd.append('_csrf', csrf);
-        fd.append('project_id', ctx.projectId);
-        fd.append('month', ctx.month);
-        fd.append('worker_name', ctx.workerName);
-        fd.append('work_date', ctx.date);
-        fd.append('worker_key', ctx.workerKey);
-        fd.append('old_value', String(ctx.oldValue));
-        fd.append('new_value', String(newValue));
-        // [변경] fetch credentials same-origin + 상대 URL로 세션 쿠키 보장
-        fetch('?r=construction/labor_gongsu_override_save', { method:'POST', body:fd, credentials:'same-origin' })
+        // [변경] 공수 저장 URL 통일 + x-www-form-urlencoded 전송
+        var body = [
+            '_csrf=' + encodeURIComponent(csrf),
+            'project_id=' + encodeURIComponent(ctx.projectId),
+            'month=' + encodeURIComponent(ctx.month),
+            'worker_name=' + encodeURIComponent(ctx.workerName),
+            'work_date=' + encodeURIComponent(ctx.date),
+            'worker_key=' + encodeURIComponent(ctx.workerKey),
+            'old_value=' + encodeURIComponent(String(ctx.oldValue)),
+            'new_value=' + encodeURIComponent(String(newValue))
+        ].join('&');
+        fetch('?r=construction/labor_gongsu_override_save', {
+            method:'POST',
+            credentials:'same-origin',
+            headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
+            body:body
+        })
             .then(function(r){
                 return r.text().then(function(text){
                     var data = null;
