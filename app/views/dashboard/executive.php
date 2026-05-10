@@ -76,6 +76,24 @@ if ($pdo) {
 
 $flash = flash_get();
 
+
+// 임원 공수 승인대기 카드
+$pendingGongsuOverrides = array();
+if ($pdo) {
+    try {
+        cpms_ensure_labor_override_table($pdo);
+        $sql = "SELECT o.id, o.project_id, o.month, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason, o.requested_by, o.created_at, p.name AS project_name
+                FROM cpms_labor_gongsu_overrides o
+                LEFT JOIN cpms_projects p ON p.id = o.project_id
+                WHERE o.status = 'pending'
+                ORDER BY o.created_at DESC";
+        $st = $pdo->query($sql);
+        $pendingGongsuOverrides = $st->fetchAll();
+    } catch (Exception $e) {
+        $pendingGongsuOverrides = array();
+    }
+}
+
 $myReceivedRequests = array();
 $mySentRequests = array();
 $requestTargetNameMap = array();
@@ -156,7 +174,45 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 <?php if(count($risk52)===0): ?><div class='p-4 rounded-2xl bg-emerald-50 text-emerald-700 font-bold'>이번 주 52시간 초과자는 없습니다.</div><?php else: ?><div class='space-y-3'><?php foreach($risk52 as $r): ?><div class='p-4 rounded-2xl bg-red-50 border border-red-200'><div class='font-extrabold text-lg text-red-700'><?php echo h($r['name']);?></div><div class='text-sm text-gray-700'><?php echo h(isset($r['department'])?$r['department']:'-');?> / <?php echo h(isset($r['position'])?$r['position']:'-');?></div><div class='font-extrabold text-red-700'>이번 주 인정 근무시간: <?php echo attendance_hm((int)$r['m']);?></div></div><?php endforeach; ?></div><?php endif; ?>
 </div></div>
 
+<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
+    <h3 class="text-xl font-extrabold text-gray-900">공수 수정 승인대기</h3>
+    <div class="text-sm text-gray-600 mt-1">1.5 이상 공수 변경 요청을 승인/반려합니다.</div>
+    <div class="mt-4 space-y-3">
+        <?php if (count($pendingGongsuOverrides) === 0): ?>
+            <div class="text-sm text-gray-500">승인대기 중인 공수 수정 요청이 없습니다.</div>
+        <?php else: ?>
+            <?php foreach ($pendingGongsuOverrides as $ov): ?>
+                <div class="p-4 rounded-2xl border border-gray-100">
+                    <div class="text-xs text-gray-500">요청일: <?php echo h($ov['created_at']); ?></div>
+                    <div class="font-bold text-gray-900 mt-1">현장명: <?php echo h($ov['project_name'] ? $ov['project_name'] : '-'); ?></div>
+                    <div class="text-sm text-gray-700 mt-1">작업자명: <?php echo h($ov['worker_name']); ?> / 작업일자: <?php echo h($ov['work_date']); ?></div>
+                    <div class="text-sm text-gray-700">기존 공수: <?php echo h($ov['old_value']); ?> → 요청 공수: <?php echo h($ov['new_value']); ?></div>
+                    <div class="text-sm text-gray-700">요청 사유: <?php echo h($ov['reason']); ?></div>
+                    <div class="flex gap-2 mt-3">
+                        <form method="post" action="?r=construction/labor_gongsu_override_decide">
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="override_id" value="<?php echo (int)$ov['id']; ?>">
+                            <input type="hidden" name="decision" value="approve">
+                            <button class="px-3 py-1 rounded-xl bg-emerald-600 text-white text-xs font-bold" type="submit">승인</button>
+                        </form>
+                        <form method="post" action="?r=construction/labor_gongsu_override_decide" onsubmit="var r=prompt('반려 사유를 입력하세요'); if(!r){return false;} this.reject_reason.value=r;">
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="override_id" value="<?php echo (int)$ov['id']; ?>">
+                            <input type="hidden" name="decision" value="reject">
+                            <input type="hidden" name="reject_reason" value="">
+                            <button class="px-3 py-1 rounded-xl bg-rose-600 text-white text-xs font-bold" type="submit">반려</button>
+                        </form>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+
+
 <?php if ($flash): ?>
+
+</div>
+
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type']==='success')?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-red-50 border-red-200 text-red-700'; ?>">
         <?php echo h($flash['message']); ?>
     </div>

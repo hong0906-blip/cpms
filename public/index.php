@@ -231,6 +231,10 @@ if ($route === 'construction/labor_gongsu_override_save') {
     require_once __DIR__ . '/../app/views/construction/labor_gongsu_override_save.php';
     exit;
 }
+if ($route === 'construction/labor_gongsu_override_decide') {
+    require_once __DIR__ . '/../app/views/construction/labor_gongsu_override_decide.php';
+    exit;
+}
 if ($route === 'request/create') {
     require_once __DIR__ . '/../app/views/request/create.php';
     exit;

@@ -1031,3 +1031,6 @@ if (!function_exists('cpms_build_timesheet_workers')) {
         return $workers;
     }
 }
+
+
+// approved만 공수표 반영 / pending/rejected 미반영은 app/helpers.php cpms_load_labor_overrides()에서 status IN ('applied','approved')로 처리됩니다.

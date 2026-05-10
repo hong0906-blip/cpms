@@ -183,6 +183,9 @@ function cpms_ensure_labor_override_table($pdo) {
             approved_by INT NULL,
             approved_at DATETIME NULL,
             created_at DATETIME NOT NULL,
+            rejected_by INT NULL,
+            rejected_at DATETIME NULL,
+            reject_reason VARCHAR(255) NULL,            
             updated_at DATETIME NOT NULL,
             UNIQUE KEY uk_labor_override(project_id, worker_key, work_date),
             KEY idx_labor_override_project_month(project_id, month),
@@ -211,7 +214,10 @@ function cpms_ensure_labor_override_table($pdo) {
             'approved_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_by INT NULL AFTER requested_by",
             'approved_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_at DATETIME NULL AFTER approved_by",
             'created_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN created_at DATETIME NOT NULL AFTER approved_at",
-            'updated_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN updated_at DATETIME NOT NULL AFTER created_at"
+            'rejected_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_by INT NULL AFTER approved_at",
+            'rejected_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_at DATETIME NULL AFTER rejected_by",
+            'reject_reason' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN reject_reason VARCHAR(255) NULL AFTER rejected_at",
+            'updated_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN updated_at DATETIME NOT NULL AFTER reject_reason"
         );
         foreach ($adds as $col => $sql) {
             if (!isset($cols[$col])) $pdo->exec($sql);
