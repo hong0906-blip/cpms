@@ -245,6 +245,10 @@ if ($route === 'request/decide') {
 }
 
 // 공사 페이지 전용 이슈 등록/댓글(리다이렉트가 공사로 돌아오게)
+if ($route === 'construction/issue_save') {
+    require_once __DIR__ . '/../app/views/construction/issue_save.php';
+    exit;
+}
 if ($route === 'construction/issue_create') {
     require_once __DIR__ . '/../app/views/construction/issue_create.php';
     exit;
@@ -333,6 +337,10 @@ if ($route === 'construction/work_item_line_delete') {
 // ==========================
 //  안전(안전사고) 액션(POST 처리)
 // ==========================
+if ($route === 'safety/safety_incident_save') {
+    require_once __DIR__ . '/../app/views/safety/safety_incident_save.php';
+    exit;
+}
 if ($route === 'safety/incident_update') {
     require_once __DIR__ . '/../app/views/safety/incident_update.php';
     exit;

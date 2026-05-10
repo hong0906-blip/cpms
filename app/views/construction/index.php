@@ -296,3 +296,47 @@ if (!file_exists($tabFile)) {
     require $tabFile;
 }
 ?>
+
+
+<!-- 변경: 이슈등록/안전사고등록 모달/저장 -->
+<div id="modal-issueAdd" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/40" data-modal-close="issueAdd"></div>
+  <div class="relative max-w-2xl mx-auto mt-16 bg-white rounded-3xl border p-6 shadow-xl">
+    <div class="flex items-center justify-between mb-4"><h3 class="text-xl font-extrabold">이슈등록</h3><button type="button" data-modal-close="issueAdd">닫기</button></div>
+    <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/issue_save" class="space-y-3">
+      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$selectedPid; ?>">
+      <input name="title" required maxlength="200" class="w-full px-4 py-3 rounded-2xl border" placeholder="제목">
+      <textarea name="description" class="w-full px-4 py-3 rounded-2xl border" rows="4" placeholder="내용"></textarea>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <select name="priority" class="px-4 py-3 rounded-2xl border"><option>낮음</option><option selected>보통</option><option>높음</option><option>긴급</option></select>
+        <select name="status" class="px-4 py-3 rounded-2xl border"><option selected>접수</option><option>처리중</option><option>처리완료</option></select>
+      </div>
+      <button class="px-4 py-3 rounded-2xl bg-rose-600 text-white font-extrabold">저장</button>
+    </form>
+  </div>
+</div>
+<div id="modal-safetyIncidentAdd" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/40" data-modal-close="safetyIncidentAdd"></div>
+  <div class="relative max-w-2xl mx-auto mt-16 bg-white rounded-3xl border p-6 shadow-xl">
+    <div class="flex items-center justify-between mb-4"><h3 class="text-xl font-extrabold">안전사고 등록</h3><button type="button" data-modal-close="safetyIncidentAdd">닫기</button></div>
+    <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/safety_incident_save" class="space-y-3">
+      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$selectedPid; ?>">
+      <input name="title" required maxlength="200" class="w-full px-4 py-3 rounded-2xl border" placeholder="제목">
+      <textarea name="description" class="w-full px-4 py-3 rounded-2xl border" rows="4" placeholder="사고내용"></textarea>
+      <input type="datetime-local" name="occurred_at" class="w-full px-4 py-3 rounded-2xl border">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <select name="severity" class="px-4 py-3 rounded-2xl border"><option>경미</option><option selected>보통</option><option>중대</option><option>긴급</option></select>
+        <select name="status" class="px-4 py-3 rounded-2xl border"><option selected>접수</option><option>처리중</option><option>처리완료</option></select>
+      </div>
+      <button class="px-4 py-3 rounded-2xl bg-rose-600 text-white font-extrabold">저장</button>
+    </form>
+  </div>
+</div>
+<script>
+(function(){
+ function o(k){var m=document.getElementById('modal-'+k); if(m)m.classList.remove('hidden');}
+ function c(k){var m=document.getElementById('modal-'+k); if(m)m.classList.add('hidden');}
+ var a=document.querySelectorAll('[data-modal-open]'); for(var i=0;i<a.length;i++){a[i].addEventListener('click',function(){o(this.getAttribute('data-modal-open'));});}
+ var b=document.querySelectorAll('[data-modal-close]'); for(var j=0;j<b.length;j++){b[j].addEventListener('click',function(){c(this.getAttribute('data-modal-close'));});}
+})();
+</script>

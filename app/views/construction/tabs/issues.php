@@ -65,14 +65,14 @@ if (count($issues) > 0) {
         <div class="space-y-3">
             <?php foreach ($issues as $it): ?>
                 <?php
-                $stt = isset($it['status']) ? (string)$it['status'] : '처리중';
+                $stt = isset($it['status']) ? (string)$it['status'] : '접수';
                 $badge = ($stt === '처리완료') ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                       : 'bg-blue-50 text-blue-700 border-blue-100';
+                       : (($stt === '처리중') ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-rose-50 text-rose-700 border-rose-100');
                 ?>
                 <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                            <div class="font-extrabold text-gray-900"><?php echo h($it['reason']); ?></div>
+                            <div class="font-extrabold text-gray-900"><?php echo h(isset($it['title']) && trim((string)$it['title'])!=='' ? $it['title'] : (isset($it['reason'])?$it['reason']:'-')); ?></div>
                             <div class="text-xs text-gray-500 mt-1">
                                 등록: <?php echo h($it['created_by_name']); ?> · <?php echo h($it['created_at']); ?>
                             </div>

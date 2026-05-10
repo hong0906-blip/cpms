@@ -175,13 +175,13 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 
 <div class="bg-white rounded-3xl border p-6 shadow mb-8">
     <h3 class="text-xl font-extrabold text-gray-900">공수 수정 승인대기</h3>
-    <div class="text-sm text-gray-600 mt-1">1.5 이상 공수 변경 요청을 승인/반려합니다.</div>
+    <div class="text-sm text-gray-600 mt-1">1.5 이상 공수 수정 요청을 승인 또는 반려합니다.</div>
     <div class="mt-4 space-y-3">
         <?php if (count($pendingGongsuOverrides) === 0): ?>
             <div class="text-sm text-gray-500">승인대기 중인 공수 수정 요청이 없습니다.</div>
         <?php else: ?>
             <?php foreach ($pendingGongsuOverrides as $ov): ?>
-                <div class="p-4 rounded-2xl border border-gray-100">
+                <div class="p-4 rounded-2xl border bg-gray-50 border-gray-100">
                     <?php $requesterName = trim((string)$ov['requested_by_name']) !== '' ? $ov['requested_by_name'] : (trim((string)$ov['requested_emp_name']) !== '' ? $ov['requested_emp_name'] : (trim((string)$ov['requested_by_email']) !== '' ? $ov['requested_by_email'] : '-')); ?>                    
                     <div class="text-xs text-gray-500">요청일: <?php echo h($ov['created_at']); ?></div>
                     <div class="font-bold text-gray-900 mt-1 text-lg">현장명: <?php echo h($ov['project_name'] ? $ov['project_name'] : '-'); ?></div>
@@ -230,7 +230,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
             <?php else: ?>
                 <?php foreach ($myReceivedRequests as $rq): ?>
                     <?php $pl = isset($rq['payload']) && is_array($rq['payload']) ? $rq['payload'] : array(); ?>
-                    <div class="p-4 rounded-2xl border border-gray-100">
+                    <div class="p-4 rounded-2xl border bg-gray-50 border-gray-100">
                         <div class="text-xs text-gray-500"><?php echo h($rq['request_type']); ?> · <?php echo h($rq['created_at']); ?></div>
                         <div class="font-bold text-gray-900 mt-1"><?php echo h(isset($pl['worker_name']) ? $pl['worker_name'] : '-'); ?> / <?php echo h(isset($pl['date']) ? $pl['date'] : '-'); ?> / <?php echo h(isset($pl['old_value']) ? $pl['old_value'] : '-'); ?> → <?php echo h(isset($pl['requested_value']) ? $pl['requested_value'] : '-'); ?></div>
                         <div class="text-sm text-gray-600 mt-1">요청자: <?php echo h(isset($rq['requester_name']) ? $rq['requester_name'] : ''); ?> · 사유: <?php echo h($rq['reason']); ?></div>
@@ -380,6 +380,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                                 · 접수시간: <?php echo h($it['created_at']); ?>
                                 <?php if (!empty($it['occurred_at'])): ?> · 발생: <?php echo h($it['occurred_at']); ?><?php endif; ?>
                             </div>
+                            <div class="text-xs mt-1">등급: <b class="<?php echo ((isset($it['severity']) && in_array($it['severity'], array('중대','긴급'), true)) ? 'text-red-600' : 'text-gray-700'); ?>"><?php echo h(isset($it['severity']) ? $it['severity'] : '보통'); ?></b></div>                            
                             <?php if (!empty($it['description'])): ?>
                                 <div class="text-sm text-gray-700 mt-2 whitespace-pre-line"><?php echo h($it['description']); ?></div>
                             <?php endif; ?>
@@ -416,7 +417,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                 <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
-                            <div class="font-extrabold text-gray-900"><?php echo h($it['reason']); ?></div>
+                            <div class="font-extrabold text-gray-900"><?php echo h(isset($it['title']) && trim((string)$it['title'])!=='' ? $it['title'] : (isset($it['reason'])?$it['reason']:'-')); ?></div>
                             <div class="text-xs text-gray-500 mt-1">
                                 프로젝트: <b><?php echo h($it['project_name']); ?></b>
                                 · 등록: <?php echo h($it['created_by_name']); ?>
