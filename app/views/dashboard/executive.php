@@ -436,7 +436,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
     <div class="mb-4">
         <h3 class="text-xl font-extrabold text-gray-900">이슈(최근 20)</h3>
         <div class="text-sm text-gray-600 mt-1">공사/공무에서 등록한 이슈를 확인하고 상태를 처리합니다.</div>
-        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_MODE = AJAX-VISIBLE · ISSUE_STATUS_ACTION = construction/issue_status_save · ISSUE_STATUS_UI_VERSION = 2026-issue-visible-save-01</div>
+        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_MODE = AJAX-VISIBLE · ISSUE_STATUS_ACTION = construction/issue_status_save · ISSUE_STATUS_UI_VERSION = 2026-issue-visible-save-02</div>
     </div>
 
     <?php if (count($issues) === 0): ?>
@@ -572,7 +572,11 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
           var savedStatus = data.status ? data.status : status;
           if(sel){ sel.value = savedStatus; sel.setAttribute('data-original-status', savedStatus); }
           if(badge){ badge.textContent = savedStatus; badge.className = 'js-issue-current-badge px-3 py-1 rounded-full text-xs font-bold border ' + badgeClass(savedStatus); }
-          if(msg){ msg.textContent='저장됨'; msg.className='js-issue-status-msg ml-2 text-sm font-bold text-emerald-600'; }
+          if(msg){
+            var okReason = (data && data.message) ? (' ('+data.message+')') : '';
+            msg.textContent='저장됨: '+prev+' → '+savedStatus+okReason;
+            msg.className='js-issue-status-msg ml-2 text-sm font-bold text-emerald-600';
+          }
         }else{
           if(sel){ sel.value = prev; }
           if(msg){ msg.textContent='저장 실패: '+(data&&data.message?data.message:'응답 오류'); msg.className='js-issue-status-msg ml-2 text-sm font-bold text-rose-600'; }

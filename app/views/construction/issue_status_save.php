@@ -53,7 +53,7 @@ $issueId = isset($_POST['issue_id']) ? (int)$_POST['issue_id'] : 0;
 $statusRaw = isset($_POST['status']) ? trim((string)$_POST['status']) : '';
 
 if (!csrf_check($token)) {
-    cpms_issue_status_save_json(false, '보안 토큰이 유효하지 않습니다.', '');
+    cpms_issue_status_save_json(false, '보안토큰 오류', '');
 }
 
 $statusMap = array(
@@ -66,7 +66,7 @@ $statusMap = array(
 );
 $resolvedStatus = isset($statusMap[$statusRaw]) ? $statusMap[$statusRaw] : '';
 if ($issueId <= 0 || $resolvedStatus === '') {
-    cpms_issue_status_save_json(false, '필수값이 누락되었거나 상태값이 올바르지 않습니다.', '');
+    cpms_issue_status_save_json(false, '요청값 오류', '');
 }
 
 $pdo = Db::pdo();
@@ -81,7 +81,7 @@ try {
     $issue = $stIssue->fetch();
 
     if (!is_array($issue)) {
-        cpms_issue_status_save_json(false, '이슈를 찾을 수 없습니다.', '');
+        cpms_issue_status_save_json(false, '이슈없음', '');
     }
 
     $userEmail = (string)Auth::userEmail();
@@ -95,7 +95,7 @@ try {
     if (!$can && $ownerEmail !== '' && $userEmail !== '' && $ownerEmail === $userEmail) $can = true;
 
     if (!$can) {
-        cpms_issue_status_save_json(false, '권한이 없습니다.', '');
+        cpms_issue_status_save_json(false, '권한없음', '');
     }
 
     $hasUpdatedAt = cpms_issue_status_save_column_exists($pdo, 'cpms_project_issues', 'updated_at');
@@ -108,7 +108,7 @@ try {
     $up->bindValue(':id', $issueId, PDO::PARAM_INT);
     $up->execute();
 
-    cpms_issue_status_save_json(true, '이슈 상태가 변경되었습니다.', $resolvedStatus);
+    cpms_issue_status_save_json(true, '저장완료', $resolvedStatus);
 } catch (Exception $e) {
-    cpms_issue_status_save_json(false, '이슈 상태 변경 실패: ' . $e->getMessage(), '');
+    cpms_issue_status_save_json(false, '기타사유: ' . $e->getMessage(), '');
 }
