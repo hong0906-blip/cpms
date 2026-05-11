@@ -23,6 +23,24 @@ function cpms_issue_status_save_json($payload)
     exit;
 }
 
+function cpms_issue_status_save_response($data)
+{
+    $base = array(
+        'ok' => false,
+        'message' => '',
+        'issue_id' => 0,
+        'requested_status' => '',
+        'before_status' => '',
+        'after_status' => '',
+        'row_count' => 0,
+        'received_post' => array(),
+    );
+    foreach ($data as $k => $v) {
+        $base[$k] = $v;
+    }
+    cpms_issue_status_save_json($base);
+}
+
 function cpms_issue_status_save_column_exists($pdo, $table, $column)
 {
     try {
@@ -44,16 +62,16 @@ $receivedPost = array(
 );
 
 if (!Auth::check()) {
-    cpms_issue_status_save_json(array('ok' => false, 'message' => '로그인이 필요합니다.', 'received_post' => $receivedPost));
+    cpms_issue_status_save_response(array('ok' => false, 'message' => '로그인이 필요합니다.', 'received_post' => $receivedPost));
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    cpms_issue_status_save_json(array('ok' => false, 'message' => 'POST 요청만 허용됩니다.', 'received_post' => $receivedPost));
+    cpms_issue_status_save_response(array('ok' => false, 'message' => 'POST 요청만 허용됩니다.', 'received_post' => $receivedPost));
 }
 
 $token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
 if (!csrf_check($token)) {
-    cpms_issue_status_save_json(array('ok' => false, 'message' => '보안토큰 오류', 'received_post' => $receivedPost));
+    cpms_issue_status_save_response(array('ok' => false, 'message' => '보안토큰 오류', 'received_post' => $receivedPost));
 }
 
 $issueId = (int)$issueIdRaw;
@@ -67,17 +85,17 @@ $statusMap = array(
 );
 $resolvedStatus = isset($statusMap[$statusRaw]) ? $statusMap[$statusRaw] : '';
 if ($issueId <= 0 || $resolvedStatus === '') {
-    cpms_issue_status_save_json(array('ok' => false, 'message' => '요청값 오류', 'received_post' => $receivedPost));
+    cpms_issue_status_save_response(array('ok' => false, 'message' => '요청값 오류', 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'received_post' => $receivedPost));
 }
 
 $pdo = Db::pdo();
 if (!$pdo) {
-    cpms_issue_status_save_json(array('ok' => false, 'message' => 'DB 연결에 실패했습니다.', 'received_post' => $receivedPost));
+    cpms_issue_status_save_response(array('ok' => false, 'message' => 'DB 연결에 실패했습니다.', 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'received_post' => $receivedPost));
 }
 
 try {
     if (!cpms_issue_status_save_column_exists($pdo, 'cpms_project_issues', 'status')) {
-        cpms_issue_status_save_json(array('ok' => false, 'message' => 'status 컬럼을 찾을 수 없습니다.', 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'received_post' => $receivedPost));
+        cpms_issue_status_save_response(array('ok' => false, 'message' => 'status 컬럼을 찾을 수 없습니다.', 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'received_post' => $receivedPost));
     }
 
     $stIssue = $pdo->prepare("SELECT id, created_by_email, status FROM cpms_project_issues WHERE id=:id LIMIT 1");
@@ -86,7 +104,7 @@ try {
     $issue = $stIssue->fetch();
 
     if (!is_array($issue)) {
-        cpms_issue_status_save_json(array('ok' => false, 'message' => '이슈없음', 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'received_post' => $receivedPost));
+        cpms_issue_status_save_response(array('ok' => false, 'message' => '이슈없음', 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'received_post' => $receivedPost));
     }
 
     $beforeStatus = isset($issue['status']) ? (string)$issue['status'] : '';
@@ -102,9 +120,9 @@ try {
     if (!$can && $ownerEmail !== '' && $userEmail !== '' && $ownerEmail === $userEmail) $can = true;
 
     if (!$can) {
-        cpms_issue_status_save_json(array('ok' => false, 'message' => '권한없음', 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'before_status' => $beforeStatus, 'after_status' => $beforeStatus, 'row_count' => 0, 'received_post' => $receivedPost));
+        cpms_issue_status_save_response(array('ok' => false, 'message' => '권한없음', 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'before_status' => $beforeStatus, 'after_status' => $beforeStatus, 'row_count' => 0, 'received_post' => $receivedPost));
     }
-
+    
     $hasUpdatedAt = cpms_issue_status_save_column_exists($pdo, 'cpms_project_issues', 'updated_at');
     if ($hasUpdatedAt) {
         $up = $pdo->prepare("UPDATE cpms_project_issues SET status=:status, updated_at=NOW() WHERE id=:id");
@@ -123,7 +141,7 @@ try {
     $afterStatus = is_array($afterRow) && isset($afterRow['status']) ? (string)$afterRow['status'] : '';
 
     if ($afterStatus !== $resolvedStatus) {
-        cpms_issue_status_save_json(array(
+        cpms_issue_status_save_response(array(
             'ok' => false,
             'message' => 'UPDATE 후에도 상태가 변경되지 않았습니다.',
             'issue_id' => $issueId,
@@ -135,7 +153,7 @@ try {
         ));
     }
 
-    cpms_issue_status_save_json(array(
+    cpms_issue_status_save_response(array(
         'ok' => true,
         'message' => '이슈 상태가 변경되었습니다.',
         'issue_id' => $issueId,
@@ -146,5 +164,5 @@ try {
         'received_post' => $receivedPost,
     ));
 } catch (Exception $e) {
-    cpms_issue_status_save_json(array('ok' => false, 'message' => '기타사유: ' . $e->getMessage(), 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'received_post' => $receivedPost));
+    cpms_issue_status_save_response(array('ok' => false, 'message' => '기타사유: ' . $e->getMessage(), 'issue_id' => $issueId, 'requested_status' => $resolvedStatus, 'received_post' => $receivedPost));
 }

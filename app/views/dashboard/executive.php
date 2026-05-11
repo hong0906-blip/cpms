@@ -436,7 +436,8 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
     <div class="mb-4">
         <h3 class="text-xl font-extrabold text-gray-900">이슈(최근 20)</h3>
         <div class="text-sm text-gray-600 mt-1">공사/공무에서 등록한 이슈를 확인하고 상태를 처리합니다.</div>
-        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_MODE = AJAX-VISIBLE · ISSUE_STATUS_ACTION = construction/issue_status_save · ISSUE_STATUS_UI_VERSION = 2026-issue-visible-save-02</div>
+        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_MODE = AJAX-VISIBLE · ISSUE_STATUS_ACTION = construction/issue_status_save · ISSUE_STATUS_UI_VERSION = 2026-issue-visible-save-03</div>
+        <div class="text-[11px] text-gray-500 mt-1">ISSUE_STATUS_JS_LOADED = window.cpmsSaveIssueStatus</div>
     </div>
 
     <?php if (count($issues) === 0): ?>
@@ -500,7 +501,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                                         <option value="처리중" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
                                         <option value="처리완료" <?php echo ($stt==='처리완료')?'selected':''; ?>>처리완료</option>
                                     </select>
-                                    <button type="button" class="js-issue-status-save px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
+                                    <button type="button" onclick="return cpmsSaveIssueStatus(this);" class="js-issue-status-save px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
                                 </div>
                                 <div class="js-issue-status-msg mt-2 text-sm font-bold text-gray-700"></div>
                             </div>
@@ -520,79 +521,85 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 <div><h3>근태 리스크 현황</h3><p style='color:red'>이번 주 52시간 초과자: <?php echo h(implode(', ',$over52));?></p><p>이번 주 40시간 초과자: <?php echo h(implode(', ',$over40));?></p><p>출퇴근 요청 승인대기 건수: <?php echo (int)$pendingReq;?></p></div>
 
 <script>
-// 이슈 상태 변경 visible AJAX + 저장 중/저장됨/실패 표시 + 상태 배지 즉시 갱신 + Bad Request 방지
-(function(){
-  function badgeClass(status){
-    if(status==='처리완료') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
-    if(status==='처리중') return 'bg-blue-50 text-blue-700 border-blue-100';
-    return 'bg-rose-50 text-rose-700 border-rose-100';
-  }
-  function encodeForm(data){ var parts=[]; for(var k in data){ if(data.hasOwnProperty(k)){ parts.push(encodeURIComponent(k)+'='+encodeURIComponent(data[k])); } } return parts.join('&'); }
-  function cleanup(btn){ if(btn){ btn.disabled=false; } }
-  function findParent(el, cls){ while(el){ if(el.classList && el.classList.contains(cls)) return el; el=el.parentNode; } return null; }
-
-  document.addEventListener('click', function(e){
-    var btn = e.target;
-    if(!btn || !btn.classList || !btn.classList.contains('js-issue-status-save')) return;
-
-    var control = findParent(btn, 'issue-status-control');
-    if(!control){ if(window.console&&console.log) console.log('[issue_status_save] issue-status-control not found'); return; }
-
-    var issueId = control.getAttribute('data-issue-id') || '';
-    var sel = control.querySelector('.js-issue-status');
-    var msg = control.querySelector('.js-issue-status-msg');
-    var csrfEl = control.querySelector('.js-issue-csrf');
-    var badge = control.parentNode ? control.parentNode.querySelector('.js-issue-current-badge') : null;
-    var prev = sel ? (sel.getAttribute('data-original-status') || sel.value) : '';
-    var status = sel ? sel.value : '';
-    var csrf = csrfEl ? csrfEl.value : '';
-
-    if(!issueId || !status || !csrf){ if(msg){ msg.textContent='저장 실패: 필수값 누락(issue_id/status/csrf) / issue_id='+issueId; msg.className='js-issue-status-msg mt-2 text-sm font-bold text-rose-600'; } return; }
-
-    btn.disabled=true;
-    if(msg){ msg.textContent='저장 중... issue_id='+issueId+', status='+status; msg.className='js-issue-status-msg mt-2 text-sm font-bold text-gray-700'; }
-
-    fetch('?r=construction/issue_status_save', {
-      method:'POST',
-      credentials:'same-origin',
-      headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
-      body: encodeForm({_csrf:csrf, issue_id:issueId, status:status})
-    }).then(function(response){
-      if(response.status!==200){
-        return response.text().then(function(txt){
-          if(window.console&&console.log) console.log('[issue_status_save] HTTP '+response.status+': '+String(txt).substring(0,300));
-          throw new Error('HTTP '+response.status);
-        });
-      }
-      return response.text().then(function(text){
+// 이슈 상태 변경 inline onclick
+// XHR 상태 저장
+// 저장 중/저장됨/실패 표시
+// before_status/after_status 표시
+// Bad Request 방지
+window.cpmsSaveIssueStatus = function(btn) {
+    var box = btn;
+    while (box && (!box.className || String(box.className).indexOf('issue-status-control') === -1)) {
+        box = box.parentNode;
+    }
+    if (!box) {
+        alert('이슈 상태 영역을 찾지 못했습니다.');
+        return false;
+    }
+    var issueId = box.getAttribute('data-issue-id') || '';
+    var csrfInput = box.querySelector('.js-issue-csrf');
+    var select = box.querySelector('.js-issue-status');
+    var msg = box.querySelector('.js-issue-status-msg');
+    var badge = box.querySelector('.js-issue-current-badge');
+    var csrf = csrfInput ? csrfInput.value : '';
+    var status = select ? select.value : '';
+    var beforeStatus = box.getAttribute('data-current-status') || '';
+    if (msg) {
+        msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-blue-700';
+        msg.innerHTML = '저장 중... issue_id=' + issueId + ', status=' + status;
+    }
+    if (!issueId || !status || !csrf) {
+        if (msg) {
+            msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-red-700';
+            msg.innerHTML = '저장 실패: issue_id/status/csrf 값이 비어 있습니다.';
+        }
+        return false;
+    }
+    btn.disabled = true;
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '?r=construction/issue_status_save', true);
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState !== 4) return;
+        btn.disabled = false;
+        var text = xhr.responseText || '';
         var data = null;
-        try { data = JSON.parse(text); } catch(parseErr) {
-          if(msg){ msg.textContent='저장 실패: 서버 응답이 JSON이 아닙니다. / '+String(text).substring(0,300); msg.className='js-issue-status-msg mt-2 text-sm font-bold text-rose-600'; }
-          if(window.console&&console.log) console.log('[issue_status_save] non-json response: '+String(text).substring(0,300));
-          throw parseErr;
+        try {
+            data = JSON.parse(text);
+        } catch (e) {
+            if (msg) {
+                msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-red-700';
+                msg.innerHTML = '저장 실패: 서버 응답이 JSON이 아닙니다. ' + text.substring(0, 200);
+            }
+            console.log('ISSUE STATUS RAW RESPONSE', text);
+            return;
         }
-        if(window.console&&console.log){ console.log('[issue_status_save] response json', data); }        
-        if(data && data.ok){
-          var savedStatus = data.after_status ? data.after_status : (data.status ? data.status : status);
-          if(sel){ sel.value = savedStatus; sel.setAttribute('data-original-status', savedStatus); }
-          if(badge){ badge.textContent = savedStatus; badge.className = 'js-issue-current-badge px-3 py-1 rounded-full text-xs font-bold border ' + badgeClass(savedStatus); }
-          if(msg){
-            var okReason = (data && data.message) ? (' ('+data.message+')') : '';
-            msg.textContent='저장됨: '+(data.before_status||prev)+' → '+(data.after_status||savedStatus)+' / rowCount='+(typeof data.row_count!=='undefined'?data.row_count:'-')+' / issue_id='+(data.issue_id||issueId)+okReason;
-            msg.className='js-issue-status-msg mt-2 text-sm font-bold text-emerald-600';
-          }
-        }else{
-          if(sel){ sel.value = prev; }
-          if(msg){ msg.textContent='저장 실패: '+(data&&data.message?data.message:'응답 오류')+' / issue_id='+(data&&data.issue_id?data.issue_id:issueId); msg.className='js-issue-status-msg mt-2 text-sm font-bold text-rose-600'; }
+        console.log('ISSUE STATUS RESPONSE', data);
+        if (data.ok) {
+            var afterStatus = data.after_status || data.status || status;
+            box.setAttribute('data-current-status', afterStatus);
+            if (badge) {
+                badge.innerHTML = afterStatus;
+            }
+            if (select) {
+                select.value = afterStatus;
+            }
+            if (msg) {
+                msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-emerald-700';
+                msg.innerHTML = '저장됨: ' + (data.before_status || beforeStatus || '-') + ' → ' + afterStatus + ' / rowCount=' + (typeof data.row_count !== 'undefined' ? data.row_count : '-');
+            }
+        } else {
+            if (select && data.after_status) {
+                select.value = data.after_status;
+            }
+            if (msg) {
+                msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-red-700';
+                msg.innerHTML = '저장 실패: ' + (data.message || '알 수 없는 오류') + ' / before=' + (data.before_status || '-') + ' / after=' + (data.after_status || '-') + ' / rowCount=' + (typeof data.row_count !== 'undefined' ? data.row_count : '-');
+            }
         }
-        cleanup(btn);
-      });
-    }).catch(function(err){
-      if(sel){ sel.value = prev; }
-      if(msg && msg.textContent.indexOf('저장 중...')===0){ msg.textContent='저장 실패: 네트워크/연결 오류 / issue_id='+issueId; msg.className='js-issue-status-msg mt-2 text-sm font-bold text-rose-600'; }
-      if(window.console&&console.log) console.log('[issue_status_save] fetch failed', err);
-      cleanup(btn);      
-    });
-  });
-})();
+    };
+    var body = '_csrf=' + encodeURIComponent(csrf) + '&issue_id=' + encodeURIComponent(issueId) + '&status=' + encodeURIComponent(status);
+    xhr.send(body);
+    return false;
+};
 </script>
+<div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_CLICK_MODE = inline onclick</div>
