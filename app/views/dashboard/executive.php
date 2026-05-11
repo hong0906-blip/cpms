@@ -436,8 +436,6 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
     <div class="mb-4">
         <h3 class="text-xl font-extrabold text-gray-900">이슈(최근 20)</h3>
         <div class="text-sm text-gray-600 mt-1">공사/공무에서 등록한 이슈를 확인하고 상태를 처리합니다.</div>
-        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_MODE = AJAX-VISIBLE · ISSUE_STATUS_ACTION = construction/issue_status_save · ISSUE_STATUS_UI_VERSION = 2026-issue-visible-save-03</div>
-        <div class="text-[11px] text-gray-500 mt-1">ISSUE_STATUS_JS_LOADED = window.cpmsSaveIssueStatus</div>
     </div>
 
     <?php if (count($issues) === 0): ?>
@@ -490,21 +488,19 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                         </div>
 
                         <div class="flex flex-col items-end gap-2">
-                            <div class="issue-status-control" data-issue-id="<?php echo (int)$it['id']; ?>" data-current-status="<?php echo h($stt); ?>">
-                                <!-- 공사 이슈 route 통일 / issue status AJAX 요청값 표시 -->
-                                <input type="hidden" class="js-issue-csrf" value="<?php echo h(csrf_token()); ?>">
-                                <div class="text-xs text-gray-500">ISSUE_ROUTE_CHECK = construction/issue_status_save / issue_id=<?php echo (int)$it['id']; ?> / db_status=<?php echo h($stt); ?></div>
-                                <div class="flex items-center gap-2 mt-2">
-                                    <span class="js-issue-current-badge text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
-                                    <select class="js-issue-status px-3 py-2 rounded-2xl border border-gray-200 text-sm" data-original-status="<?php echo h($stt); ?>">
-                                        <option value="접수" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>
-                                        <option value="처리중" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
-                                        <option value="처리완료" <?php echo ($stt==='처리완료')?'selected':''; ?>>처리완료</option>
-                                    </select>
-                                    <button type="button" onclick="return cpmsSaveIssueStatus(this);" class="js-issue-status-save px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
-                                </div>
-                                <div class="js-issue-status-msg mt-2 text-sm font-bold text-gray-700"></div>
-                            </div>
+                            <!-- 이슈 상태 AJAX 제거 / 댓글 기능 유지 -->
+                            <form method="post" action="?r=construction/issue_update" class="flex items-center gap-2">
+                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                <input type="hidden" name="issue_id" value="<?php echo (int)$issueId; ?>">
+                                <input type="hidden" name="redirect" value="dashboard_executive">
+                                <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
+                                <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
+                                    <option value="접수" <?php echo ($stt === '접수') ? 'selected' : ''; ?>>접수</option>
+                                    <option value="처리중" <?php echo ($stt === '처리중') ? 'selected' : ''; ?>>처리중</option>
+                                    <option value="처리완료" <?php echo ($stt === '처리완료') ? 'selected' : ''; ?>>처리완료</option>
+                                </select>
+                                <button type="submit" class="px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
+                            </form>
                         </div>
                     </div>
                 </div>
@@ -519,87 +515,3 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 </div>
 <?php /** 52시간 초과자: 임원 근태 리스크 현황 */ require_once __DIR__.'/../attendance/common.php'; $pdo2=\App\Core\Db::pdo(); $today=attendance_today(); list($ws,$we)=attendance_week_range($today); $over52=array();$over40=array();$pendingReq=0; if($pdo2){$set=attendance_settings($pdo2);$st=$pdo2->prepare("SELECT e.name,SUM(a.work_minutes) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name");$st->execute(array(':s'=>$ws,':e'=>$we));foreach($st->fetchAll() as $r){$h=$r['m']/60;if($h>(float)$set['max_weekly_hours'])$over52[]=$r['name'].'('.number_format($h,2).'h)';elseif($h>(float)$set['standard_weekly_hours'])$over40[]=$r['name'].'('.number_format($h,2).'h)';} $pendingReq=(int)$pdo2->query("SELECT COUNT(*) FROM cpms_attendance_requests WHERE status='pending'")->fetchColumn(); } ?>
 <div><h3>근태 리스크 현황</h3><p style='color:red'>이번 주 52시간 초과자: <?php echo h(implode(', ',$over52));?></p><p>이번 주 40시간 초과자: <?php echo h(implode(', ',$over40));?></p><p>출퇴근 요청 승인대기 건수: <?php echo (int)$pendingReq;?></p></div>
-
-<script>
-// 이슈 상태 변경 inline onclick
-// XHR 상태 저장
-// 저장 중/저장됨/실패 표시
-// before_status/after_status 표시
-// Bad Request 방지
-window.cpmsSaveIssueStatus = function(btn) {
-    var box = btn;
-    while (box && (!box.className || String(box.className).indexOf('issue-status-control') === -1)) {
-        box = box.parentNode;
-    }
-    if (!box) {
-        alert('이슈 상태 영역을 찾지 못했습니다.');
-        return false;
-    }
-    var issueId = box.getAttribute('data-issue-id') || '';
-    var csrfInput = box.querySelector('.js-issue-csrf');
-    var select = box.querySelector('.js-issue-status');
-    var msg = box.querySelector('.js-issue-status-msg');
-    var badge = box.querySelector('.js-issue-current-badge');
-    var csrf = csrfInput ? csrfInput.value : '';
-    var status = select ? select.value : '';
-    var beforeStatus = box.getAttribute('data-current-status') || '';
-    if (msg) {
-        msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-blue-700';
-        msg.innerHTML = '저장 중... issue_id=' + issueId + ', status=' + status;
-    }
-    if (!issueId || !status || !csrf) {
-        if (msg) {
-            msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-red-700';
-            msg.innerHTML = '저장 실패: issue_id/status/csrf 값이 비어 있습니다.';
-        }
-        return false;
-    }
-    btn.disabled = true;
-    var xhr = new XMLHttpRequest();
-    xhr.open('POST', '?r=construction/issue_status_save', true);
-    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
-    xhr.onreadystatechange = function() {
-        if (xhr.readyState !== 4) return;
-        btn.disabled = false;
-        var text = xhr.responseText || '';
-        var data = null;
-        try {
-            data = JSON.parse(text);
-        } catch (e) {
-            if (msg) {
-                msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-red-700';
-                msg.innerHTML = '저장 실패: 서버 응답이 JSON이 아닙니다. ' + text.substring(0, 200);
-            }
-            console.log('ISSUE STATUS RAW RESPONSE', text);
-            return;
-        }
-        console.log('ISSUE STATUS RESPONSE', data);
-        if (data.ok) {
-            var afterStatus = data.after_status || data.status || status;
-            box.setAttribute('data-current-status', afterStatus);
-            if (badge) {
-                badge.innerHTML = afterStatus;
-            }
-            if (select) {
-                select.value = afterStatus;
-            }
-            if (msg) {
-                msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-emerald-700';
-                msg.innerHTML = '저장됨: ' + (data.before_status || beforeStatus || '-') + ' → ' + afterStatus + ' / rowCount=' + (typeof data.row_count !== 'undefined' ? data.row_count : '-');
-            }
-        } else {
-            if (select && data.after_status) {
-                select.value = data.after_status;
-            }
-            if (msg) {
-                msg.className = 'js-issue-status-msg mt-2 text-sm font-bold text-red-700';
-                msg.innerHTML = '저장 실패: ' + (data.message || '알 수 없는 오류') + ' / before=' + (data.before_status || '-') + ' / after=' + (data.after_status || '-') + ' / rowCount=' + (typeof data.row_count !== 'undefined' ? data.row_count : '-');
-            }
-        }
-    };
-    var body = '_csrf=' + encodeURIComponent(csrf) + '&issue_id=' + encodeURIComponent(issueId) + '&status=' + encodeURIComponent(status);
-    xhr.send(body);
-    return false;
-};
-</script>
-<div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_CLICK_MODE = inline onclick</div>
