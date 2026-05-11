@@ -384,6 +384,14 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                             <?php if (!empty($it['description'])): ?>
                                 <div class="text-sm text-gray-700 mt-2 whitespace-pre-line"><?php echo h($it['description']); ?></div>
                             <?php endif; ?>
+                            <div class="mt-2 text-xs text-gray-600">
+                                <?php if (!empty($it['action_note'])): ?>
+                                    <div><b>후속조치:</b> <?php echo nl2br(h($it['action_note'])); ?></div>
+                                    <div class="mt-1">조치자: <?php echo h(isset($it['action_by_name']) && trim((string)$it['action_by_name']) !== '' ? $it['action_by_name'] : '-'); ?> · 조치일: <?php echo h(isset($it['action_at']) && $it['action_at'] ? $it['action_at'] : '-'); ?></div>
+                                <?php else: ?>
+                                    <div class="text-gray-400">후속조치 미입력</div>
+                                <?php endif; ?>
+                            </div>                            
                         </div>
                         <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
                     </div>
@@ -410,7 +418,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
         <div class="space-y-3">
             <?php foreach ($issues as $it): ?>
                 <?php
-                $stt = isset($it['status']) ? (string)$it['status'] : '처리중';
+                $stt = isset($it['status']) ? (string)$it['status'] : '접수';
                 $badge = ($stt === '처리완료') ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
                        : 'bg-blue-50 text-blue-700 border-blue-100';
                 ?>
@@ -419,20 +427,24 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                         <div class="min-w-0">
                             <div class="font-extrabold text-gray-900"><?php echo h(isset($it['title']) && trim((string)$it['title'])!=='' ? $it['title'] : (isset($it['reason'])?$it['reason']:'-')); ?></div>
                             <div class="text-xs text-gray-500 mt-1">
-                                프로젝트: <b><?php echo h($it['project_name']); ?></b>
-                                · 등록: <?php echo h($it['created_by_name']); ?>
+                                현장명: <b><?php echo h($it['project_name']); ?></b>
+                                · 등록자: <?php echo h($it['created_by_name']); ?>
                                 · 등록일: <?php echo h($it['created_at']); ?>
                             </div>
+                            <div class="text-xs text-gray-600 mt-1">중요도: <b><?php echo h(isset($it['priority']) ? $it['priority'] : '-'); ?></b></div>
+                            <div class="text-sm text-gray-700 mt-2 whitespace-pre-line"><?php echo h(isset($it['description']) && trim((string)$it['description']) !== '' ? $it['description'] : (isset($it['content']) ? $it['content'] : '-')); ?></div>                            
                         </div>
 
                         <div class="flex flex-col items-end gap-2">
                             <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
 
                             <!-- 상태처리(임원 가능) -->
-                            <form method="post" action="<?php echo h(base_url()); ?>/?r=dashboard/issue_update" class="flex items-center gap-2">
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/issue_update" class="flex items-center gap-2">
                                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                 <input type="hidden" name="issue_id" value="<?php echo (int)$it['id']; ?>">
+                                <input type="hidden" name="redirect" value="?r=대시보드&dv=executive">                                
                                 <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
+                                    <option value="접수" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>                                    
                                     <option value="처리중" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
                                     <option value="처리완료" <?php echo ($stt==='처리완료')?'selected':''; ?>>처리완료</option>
                                 </select>

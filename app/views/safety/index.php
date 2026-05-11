@@ -12,7 +12,8 @@ $role = Auth::userRole();
 $dept = Auth::userDepartment();
 
 // 안전 메뉴 접근은 원래 열려있지만, 안전사고 "상태변경"은 안전/임원만 가능
-$canUpdateIncident = ($role === 'executive' || $dept === '안전');
+$canUpdateIncident = ($role === 'executive' || $role === 'master' || $dept === '안전');
+if (!$canUpdateIncident && method_exists('App\\Core\\Auth', 'canManageConstruction')) $canUpdateIncident = Auth::canManageConstruction();
 
 // 안전사고 목록(최근 50)
 $pdo = Db::pdo();
@@ -87,21 +88,33 @@ $flash = flash_get();
                             <?php if (!empty($it['description'])): ?>
                                 <div class="text-sm text-gray-700 mt-2 whitespace-pre-line"><?php echo h($it['description']); ?></div>
                             <?php endif; ?>
+                            <div class="mt-2 text-xs text-gray-600">
+                                <?php if (!empty($it['action_note'])): ?>
+                                    <div><b>후속조치:</b> <?php echo nl2br(h($it['action_note'])); ?></div>
+                                    <div class="mt-1">조치자: <?php echo h(isset($it['action_by_name']) && trim((string)$it['action_by_name']) !== '' ? $it['action_by_name'] : '-'); ?> · 조치일: <?php echo h(isset($it['action_at']) && $it['action_at'] ? $it['action_at'] : '-'); ?></div>
+                                <?php else: ?>
+                                    <div class="text-gray-400">후속조치 미입력</div>
+                                <?php endif; ?>
+                            </div>                            
                         </div>
 
                         <div class="flex flex-col items-end gap-2">
                             <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
 
                             <?php if ($canUpdateIncident): ?>
-                                <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/incident_update" class="flex items-center gap-2">
+                                <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/incident_update" class="w-full">
                                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                     <input type="hidden" name="incident_id" value="<?php echo (int)$it['id']; ?>">
-                                    <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
-                                        <option value="접수" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>
-                                        <option value="처리중" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
-                                        <option value="처리완료" <?php echo ($stt==='처리완료')?'selected':''; ?>>처리완료</option>
-                                    </select>
-                                    <button type="submit" class="px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
+                                    <input type="hidden" name="redirect" value="?r=안전/보건">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
+                                            <option value="접수" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>
+                                            <option value="처리중" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
+                                            <option value="처리완료" <?php echo ($stt==='처리완료')?'selected':''; ?>>처리완료</option>
+                                        </select>
+                                    </div>
+                                    <textarea name="action_note" rows="3" class="w-full px-3 py-2 rounded-2xl border border-gray-200 text-sm" placeholder="후속조치 내용을 입력하세요."><?php echo h(isset($it['action_note']) ? $it['action_note'] : ''); ?></textarea>
+                                    <button type="submit" class="mt-2 px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">후속조치 저장</button>
                                 </form>
                             <?php endif; ?>
                         </div>
@@ -111,7 +124,7 @@ $flash = flash_get();
         </div>
 
         <?php if (!$canUpdateIncident): ?>
-            <div class="text-xs text-gray-500 mt-3">* 상태 변경은 안전팀/임원만 가능합니다.</div>
+            <div class="text-xs text-gray-500 mt-3">* 상태/후속조치 저장은 안전팀/임원/마스터(또는 공사관리 권한)만 가능합니다.</div>
         <?php endif; ?>
     <?php endif; ?>
 </div>

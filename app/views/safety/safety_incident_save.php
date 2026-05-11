@@ -25,7 +25,7 @@ $description = isset($_POST['description']) ? trim((string)$_POST['description']
 $occurredAt = isset($_POST['occurred_at']) ? trim((string)$_POST['occurred_at']) : '';
 $severity = isset($_POST['severity']) ? trim((string)$_POST['severity']) : '보통';
 $status = isset($_POST['status']) ? trim((string)$_POST['status']) : '접수';
-if ($projectId <= 0 || $title === '') { flash_set('error','필수값을 입력해주세요.'); header('Location: ?r=공사&pid='.$projectId.'&tab=safety'); exit; }
+if ($projectId <= 0 || $title === '') { flash_set('error','필수값을 입력해주세요.'); header('Location: ?r=안전/보건'); exit; }
 if (mb_strlen($title,'UTF-8') > 200) $title = mb_substr($title,0,200,'UTF-8');
 if (!in_array($severity, array('경미','보통','중대','긴급'), true)) $severity = '보통';
 if (!in_array($status, array('접수','처리중','처리완료'), true)) $status = '접수';
@@ -37,7 +37,7 @@ if ($occurredAt !== '') {
 }
 
 $pdo = Db::pdo();
-if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ?r=공사&pid='.$projectId.'&tab=safety'); exit; }
+if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ?r=안전/보건'); exit; }
 
 $createdBy = null;
 if (method_exists('App\\Core\\Auth', 'id')) { $tmpId = Auth::id(); if ($tmpId !== null && $tmpId !== false && $tmpId !== '') $createdBy = (int)$tmpId; }
@@ -67,7 +67,11 @@ try {
     $columns = array(
       'severity' => "ALTER TABLE cpms_safety_incidents ADD COLUMN severity VARCHAR(20) NOT NULL DEFAULT '보통'",
       'created_by' => "ALTER TABLE cpms_safety_incidents ADD COLUMN created_by INT NULL",
-      'updated_at' => "ALTER TABLE cpms_safety_incidents ADD COLUMN updated_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'"
+      'updated_at' => "ALTER TABLE cpms_safety_incidents ADD COLUMN updated_at DATETIME NOT NULL DEFAULT '1970-01-01 00:00:00'",
+      'action_note' => "ALTER TABLE cpms_safety_incidents ADD COLUMN action_note TEXT NULL",
+      'action_by' => "ALTER TABLE cpms_safety_incidents ADD COLUMN action_by INT NULL",
+      'action_by_name' => "ALTER TABLE cpms_safety_incidents ADD COLUMN action_by_name VARCHAR(80) NULL",
+      'action_at' => "ALTER TABLE cpms_safety_incidents ADD COLUMN action_at DATETIME NULL"
     );
     foreach ($columns as $col => $sql) {
       $q = $pdo->query("SHOW COLUMNS FROM cpms_safety_incidents LIKE '".$col."'");
@@ -89,10 +93,10 @@ try {
     $st->bindValue(':ua', $now);
     $st->execute();
 
-    flash_set('success','안전사고가 등록되었습니다.');
+    flash_set('success','안전사고가 등록되었습니다. 안전/보건 탭에서 후속조치를 입력할 수 있습니다.');
 } catch (Exception $e) {
     flash_set('error','안전사고 등록 실패: '.$e->getMessage());
 }
 
-header('Location: ?r=공사&pid='.$projectId.'&tab=safety');
+header('Location: ?r=안전/보건');
 exit;
