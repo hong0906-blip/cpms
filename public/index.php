@@ -288,6 +288,11 @@ if ($route === 'construction/issue_comment_create') {
     require_once __DIR__ . '/../app/views/construction/issue_comment_create.php';
     exit;
 }
+// [변경] issue_update 경로 폐기: issue_state_save 새 상태변경 action으로 Apache 400 우회
+if ($route === 'construction/issue_state_save') {
+    require_once __DIR__ . '/../app/views/construction/issue_state_save.php';
+    exit;
+}
 if ($route === 'construction/issue_update') {
     require_once __DIR__ . '/../app/views/construction/issue_update.php';
     exit;

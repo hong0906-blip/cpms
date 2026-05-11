@@ -489,7 +489,9 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 
                         <div class="flex flex-col items-end gap-2">
                             <!-- 이슈 상태 AJAX 제거 / 댓글 기능 유지 -->
-                            <form method="post" action="?r=construction/issue_update" class="flex items-center gap-2">
+                            <div class="text-[11px] text-gray-500">ISSUE_STATUS_ROUTE = construction/issue_state_save</div>
+                            <div class="text-[11px] text-gray-500">ISSUE_STATUS_METHOD = POST</div>
+                            <form method="post" action="?r=construction/issue_state_save" class="flex items-center gap-2">
                                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                 <input type="hidden" name="issue_id" value="<?php echo (int)$issueId; ?>">
                                 <input type="hidden" name="redirect" value="dashboard_executive">
