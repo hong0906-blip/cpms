@@ -29,6 +29,34 @@ if ($pdo) {
     }
 }
 
+
+// 공사/임원 이슈 댓글 통합 조회(cpms_project_issue_comments)
+$issueCommentsByIssueId = array();
+if ($pdo && count($issues) > 0) {
+    try {
+        $issueIds = array();
+        foreach ($issues as $issueRow) { $issueIds[] = (int)$issueRow['id']; }
+        $issueIds = array_values(array_unique($issueIds));
+        if (count($issueIds) > 0) {
+            $placeholders = implode(',', array_fill(0, count($issueIds), '?'));
+            $sqlComments = "SELECT issue_id, COALESCE(comment, comment_text, content, body) AS comment_body, created_by_name, created_at FROM cpms_project_issue_comments WHERE issue_id IN (".$placeholders.") ORDER BY id ASC";
+            $stc = $pdo->prepare($sqlComments);
+            foreach ($issueIds as $idx => $iid) {
+                $stc->bindValue($idx + 1, (int)$iid, PDO::PARAM_INT);
+            }
+            $stc->execute();
+            $commentRows = $stc->fetchAll();
+            foreach ($commentRows as $cr) {
+                $key = (int)$cr['issue_id'];
+                if (!isset($issueCommentsByIssueId[$key])) $issueCommentsByIssueId[$key] = array();
+                $issueCommentsByIssueId[$key][] = $cr;
+            }
+        }
+    } catch (Exception $e) {
+        $issueCommentsByIssueId = array();
+    }
+}
+
 // ✅ 안전사고 목록(최근 10)
 $safetyIncidents = [];
 if ($pdo) {
@@ -412,7 +440,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
     <div class="mb-4">
         <h3 class="text-xl font-extrabold text-gray-900">이슈(최근 20)</h3>
         <div class="text-sm text-gray-600 mt-1">공사/공무에서 등록한 이슈를 확인하고 상태를 처리합니다.</div>
-        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_FORM_VERSION = 2026-issue-form-fixed-02 · action = project/issue_update · redirect = dashboard_executive</div>
+        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_FORM_VERSION = 2026-issue-status-code-01 · action = ?r=project/issue_update · status field = status_code · redirect = dashboard_executive</div>
     </div>
 
     <?php if (count($issues) === 0): ?>
@@ -423,12 +451,13 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                 <?php
                 $stt = isset($it['status']) ? (string)$it['status'] : '접수';
                 $badge = ($stt === '처리완료') ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                       : 'bg-blue-50 text-blue-700 border-blue-100';
+                       : (($stt === '처리중') ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-rose-50 text-rose-700 border-rose-100');
+                $issueId = (int)$it['id'];
+                $issueComments = isset($issueCommentsByIssueId[$issueId]) ? $issueCommentsByIssueId[$issueId] : array();
                 ?>
                 <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">
-                    <!-- ISSUE_STATUS_FORM_VERSION -->         
                     <div class="flex items-start justify-between gap-3">
-                        <div class="min-w-0">
+                        <div class="min-w-0 flex-1">
                             <div class="font-extrabold text-gray-900"><?php echo h(isset($it['title']) && trim((string)$it['title'])!=='' ? $it['title'] : (isset($it['reason'])?$it['reason']:'-')); ?></div>
                             <div class="text-xs text-gray-500 mt-1">
                                 현장명: <b><?php echo h($it['project_name']); ?></b>
@@ -436,21 +465,43 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                                 · 등록일: <?php echo h($it['created_at']); ?>
                             </div>
                             <div class="text-xs text-gray-600 mt-1">중요도: <b><?php echo h(isset($it['priority']) ? $it['priority'] : '-'); ?></b></div>
-                            <div class="text-sm text-gray-700 mt-2 whitespace-pre-line"><?php echo h(isset($it['description']) && trim((string)$it['description']) !== '' ? $it['description'] : (isset($it['content']) ? $it['content'] : '-')); ?></div>                            
+                            <div class="text-sm text-gray-700 mt-2 whitespace-pre-line"><?php echo h(isset($it['description']) && trim((string)$it['description']) !== '' ? $it['description'] : (isset($it['content']) ? $it['content'] : '-')); ?></div>
+
+                            <div class="mt-4 p-3 rounded-xl bg-gray-50 border border-gray-200">
+                                <div class="text-sm font-bold text-gray-800 mb-2">이슈 댓글</div>
+                                <?php if (count($issueComments) === 0): ?>
+                                    <div class="text-sm text-gray-500">댓글이 없습니다.</div>
+                                <?php else: ?>
+                                    <div class="space-y-2">
+                                        <?php foreach ($issueComments as $c): ?>
+                                            <div class="text-sm rounded-lg bg-white border border-gray-200 p-2">
+                                                <div class="text-xs text-gray-500"><?php echo h(trim((string)$c['created_by_name']) !== '' ? $c['created_by_name'] : '작성자'); ?> · <?php echo h($c['created_at']); ?></div>
+                                                <div class="text-gray-800 whitespace-pre-line"><?php echo h($c['comment_body']); ?></div>
+                                            </div>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+
+                                <form method="post" action="?r=project/issue_comment_create" class="mt-3">
+                                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                    <input type="hidden" name="issue_id" value="<?php echo (int)$it['id']; ?>">
+                                    <input type="hidden" name="redirect" value="dashboard_executive">
+                                    <textarea name="comment" rows="2" class="w-full px-3 py-2 rounded-2xl border border-gray-200 text-sm" placeholder="댓글을 입력하세요"></textarea>
+                                    <button type="submit" class="mt-2 px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">댓글 등록</button>
+                                </form>
+                            </div>                          
                         </div>
 
                         <div class="flex flex-col items-end gap-2">
                             <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
-
-                            <!-- 이슈 상태 form 강제 교체 -->
-                            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/issue_update" class="flex items-center gap-2">
+                            <form method="post" action="?r=project/issue_update" class="flex items-center gap-2">
                                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                 <input type="hidden" name="issue_id" value="<?php echo (int)$it['id']; ?>">
-                                <input type="hidden" name="redirect" value="<?php echo h(base_url()); ?>/?r=dashboard_executive">                     
-                                <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
-                                    <option value="접수" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>                                    
-                                    <option value="처리중" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
-                                    <option value="처리완료" <?php echo ($stt==='처리완료')?'selected':''; ?>>처리완료</option>
+                                <input type="hidden" name="redirect" value="dashboard_executive">
+                                <select name="status_code" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
+                                    <option value="pending" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>
+                                    <option value="in_progress" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
+                                    <option value="done" <?php echo ($stt==='처리완료')?'selected':''; ?>>처리완료</option>
                                 </select>
                                 <button type="submit" class="px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
                             </form>
@@ -459,7 +510,6 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                 </div>
             <?php endforeach; ?>
         </div>
-        <div class="text-xs text-gray-500 mt-3">* 이슈 상태 변경은 임원 또는 등록자만 가능합니다(기존 정책).</div>
     <?php endif; ?>
 </div>
 

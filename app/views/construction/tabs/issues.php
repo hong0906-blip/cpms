@@ -97,10 +97,10 @@ if (count($issues) > 0) {
                     <?php endif; ?>
 
                     <!-- 댓글 작성(공사 전용 라우트: 리다이렉트가 공사로) -->
-                    <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/issue_comment_create" class="mt-3 flex flex-col md:flex-row md:items-center gap-2">
+                    <form method="post" action="<?php echo h(base_url()); ?>/?r=project/issue_comment_create" class="mt-3 flex flex-col md:flex-row md:items-center gap-2">
                         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                         <input type="hidden" name="issue_id" value="<?php echo (int)$iid; ?>">
-                        <input name="comment_text" maxlength="255" required
+                        <input name="comment" maxlength="255" required
                                class="flex-1 px-4 py-3 rounded-2xl border border-gray-200"
                                placeholder="댓글(공사/임원/공무)">
                         <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">댓글 등록</button>

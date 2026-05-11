@@ -1,10 +1,8 @@
 <?php
 /**
  * C:\www\cpms\app\views\project\issue_comment_create.php
- * - 이슈 댓글 등록(POST)
- * - 권한: (등록자) 또는 (임원)
- *
- * PHP 5.6 호환
+ * - 임원/공사 이슈 댓글 통합 저장 액션(POST)
+ * - PHP 5.6 호환
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
@@ -12,61 +10,83 @@ require_once __DIR__ . '/../../bootstrap.php';
 use App\Core\Auth;
 use App\Core\Db;
 
+// Bad Request 방지 + dashboard_executive redirect
+$defaultRedirect = '?r=dashboard_executive';
+function cpms_issue_comment_redirect($key, $default)
+{
+    if ($key === 'dashboard_executive') return '?r=dashboard_executive';
+    if ($key === 'construction_issue') return '?r=공사&tab=issues';
+    if ($key === 'dashboard_employee') return '?r=dashboard_employee';
+    return $default;
+}
+
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
-
-$token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
-if (!csrf_check($token)) { flash_set('error','보안 토큰이 유효하지 않습니다.'); header('Location: ?r=대시보드'); exit; }
-
-$issueId = isset($_POST['issue_id']) ? (int)$_POST['issue_id'] : 0;
-$comment = isset($_POST['comment_text']) ? trim((string)$_POST['comment_text']) : '';
-
-if ($issueId <= 0) { flash_set('error','이슈 정보가 올바르지 않습니다.'); header('Location: ?r=대시보드'); exit; }
-if ($comment === '') { flash_set('error','댓글을 입력해주세요.'); header('Location: ?r=대시보드'); exit; }
-if (mb_strlen($comment,'UTF-8') > 255) { $comment = mb_substr($comment,0,255,'UTF-8'); }
-
-$pdo = Db::pdo();
-if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ?r=대시보드'); exit; }
-
-$userEmail = (string)Auth::userEmail();
-$userRole  = (string)Auth::userRole();
-$userName  = (string)Auth::userName();
-if ($userName === '') $userName = '사용자';
-
-try {
-    $st = $pdo->prepare("SELECT id, created_by_email FROM cpms_project_issues WHERE id = :id LIMIT 1");
-    $st->bindValue(':id', $issueId, PDO::PARAM_INT);
-    $st->execute();
-    $issue = $st->fetch();
-
-    if (!is_array($issue)) {
-        flash_set('error','이슈를 찾을 수 없습니다.');
-        header('Location: ?r=대시보드');
-        exit;
-    }
-
-    $ownerEmail = isset($issue['created_by_email']) ? (string)$issue['created_by_email'] : '';
-
-    $can = false;
-    if ($userRole === 'executive') $can = true;
-    if ($ownerEmail !== '' && $userEmail !== '' && $ownerEmail === $userEmail) $can = true;
-
-    if (!$can) { http_response_code(403); echo '403 Forbidden'; exit; }
-
-    $ins = $pdo->prepare("INSERT INTO cpms_project_issue_comments(issue_id, comment_text, created_by_name, created_by_email)
-                          VALUES(:iid, :ct, :nm, :em)");
-    $ins->bindValue(':iid', $issueId, PDO::PARAM_INT);
-    $ins->bindValue(':ct', $comment);
-    $ins->bindValue(':nm', $userName);
-    $ins->bindValue(':em', $userEmail);
-    $ins->execute();
-
-    flash_set('success','댓글이 등록되었습니다.');
-    header('Location: ?r=대시보드');
-    exit;
-
-} catch (Exception $e) {
-    flash_set('error','댓글 등록 실패: '.$e->getMessage());
-    header('Location: ?r=대시보드');
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    flash_set('error', 'ISSUE_COMMENT_LOADED=Y 댓글 등록 실패: 잘못된 요청 방식입니다.');
+    header('Location: ' . $defaultRedirect);
     exit;
 }
+
+$token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
+if (!csrf_check($token)) {
+    flash_set('error', 'ISSUE_COMMENT_LOADED=Y 댓글 등록 실패: 보안 토큰 오류입니다.');
+    header('Location: ' . $defaultRedirect);
+    exit;
+}
+
+$issueId = isset($_POST['issue_id']) ? (int)$_POST['issue_id'] : 0;
+$comment = isset($_POST['comment']) ? trim((string)$_POST['comment']) : '';
+if ($comment === '' && isset($_POST['content'])) $comment = trim((string)$_POST['content']);
+if ($comment === '' && isset($_POST['body'])) $comment = trim((string)$_POST['body']);
+if ($comment === '' && isset($_POST['comment_text'])) $comment = trim((string)$_POST['comment_text']);
+$redirect = cpms_issue_comment_redirect(isset($_POST['redirect']) ? trim((string)$_POST['redirect']) : '', $defaultRedirect);
+
+if ($issueId <= 0 || $comment === '') {
+    flash_set('error', 'ISSUE_COMMENT_LOADED=Y 댓글 등록 실패: 필수값이 누락되었습니다.');
+    header('Location: ' . $redirect);
+    exit;
+}
+
+$pdo = Db::pdo();
+if (!$pdo) {
+    flash_set('error', 'ISSUE_COMMENT_LOADED=Y 댓글 등록 실패: DB 연결 실패');
+    header('Location: ' . $redirect);
+    exit;
+}
+
+try {
+    $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_project_issue_comments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        issue_id INT NOT NULL,
+        comment TEXT NOT NULL,
+        created_by INT NULL,
+        created_by_name VARCHAR(80) NULL,
+        created_by_email VARCHAR(120) NULL,
+        created_at DATETIME NOT NULL,
+        KEY idx_issue_comments_issue(issue_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+    $user = Auth::user();
+    $createdBy = null;
+    if (is_array($user) && isset($user['id'])) $createdBy = (int)$user['id'];
+    else if (method_exists('App\\Core\\Auth', 'id')) $createdBy = (int)Auth::id();
+    $createdByName = (string)Auth::userName();
+    $createdByEmail = (string)Auth::userEmail();
+
+    $ins = $pdo->prepare("INSERT INTO cpms_project_issue_comments(issue_id, comment, created_by, created_by_name, created_by_email, created_at)
+                          VALUES(:issue_id, :comment, :created_by, :created_by_name, :created_by_email, NOW())");
+    $ins->bindValue(':issue_id', $issueId, PDO::PARAM_INT);
+    $ins->bindValue(':comment', $comment, PDO::PARAM_STR);
+    if ($createdBy === null || $createdBy <= 0) $ins->bindValue(':created_by', null, PDO::PARAM_NULL);
+    else $ins->bindValue(':created_by', $createdBy, PDO::PARAM_INT);
+    $ins->bindValue(':created_by_name', $createdByName, PDO::PARAM_STR);
+    $ins->bindValue(':created_by_email', $createdByEmail, PDO::PARAM_STR);
+    $ins->execute();
+
+    flash_set('success', 'ISSUE_COMMENT_LOADED=Y 댓글을 등록했습니다.');
+} catch (Exception $e) {
+    flash_set('error', 'ISSUE_COMMENT_LOADED=Y 댓글 등록 실패: ' . $e->getMessage());
+}
+
+header('Location: ' . $redirect);
+exit;
