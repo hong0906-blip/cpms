@@ -278,6 +278,10 @@ if ($route === 'construction/issue_comment_create') {
     require_once __DIR__ . '/../app/views/construction/issue_comment_create.php';
     exit;
 }
+if ($route === 'construction/issue_update') {
+    require_once __DIR__ . '/../app/views/construction/issue_update.php';
+    exit;
+}
 
 
 if ($route === 'construction/daily_work_save') {

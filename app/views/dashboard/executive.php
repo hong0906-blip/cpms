@@ -39,7 +39,7 @@ if ($pdo && count($issues) > 0) {
         $issueIds = array_values(array_unique($issueIds));
         if (count($issueIds) > 0) {
             $placeholders = implode(',', array_fill(0, count($issueIds), '?'));
-            $sqlComments = "SELECT issue_id, COALESCE(comment, comment_text, content, body) AS comment_body, created_by_name, created_at FROM cpms_project_issue_comments WHERE issue_id IN (".$placeholders.") ORDER BY id ASC";
+            $sqlComments = "SELECT issue_id, comment_text AS comment_body, created_by_email, created_by_name, created_at FROM cpms_project_issue_comments WHERE issue_id IN (".$placeholders.") ORDER BY id ASC";
             $stc = $pdo->prepare($sqlComments);
             foreach ($issueIds as $idx => $iid) {
                 $stc->bindValue($idx + 1, (int)$iid, PDO::PARAM_INT);
@@ -440,7 +440,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
     <div class="mb-4">
         <h3 class="text-xl font-extrabold text-gray-900">이슈(최근 20)</h3>
         <div class="text-sm text-gray-600 mt-1">공사/공무에서 등록한 이슈를 확인하고 상태를 처리합니다.</div>
-        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_FORM_VERSION = 2026-issue-status-code-01 · action = ?r=project/issue_update · status field = status_code · redirect = dashboard_executive</div>
+        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_FORM_VERSION = 2026-issue-status-code-01 · ISSUE_FORM_ROUTE = construction/issue_update · redirect = dashboard_executive</div>
     </div>
 
     <?php if (count($issues) === 0): ?>
@@ -482,11 +482,11 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                                     </div>
                                 <?php endif; ?>
 
-                                <form method="post" action="?r=project/issue_comment_create" class="mt-3">
+                                <form method="post" action="?r=construction/issue_comment_create" class="mt-3">
                                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                     <input type="hidden" name="issue_id" value="<?php echo (int)$it['id']; ?>">
                                     <input type="hidden" name="redirect" value="dashboard_executive">
-                                    <textarea name="comment" rows="2" class="w-full px-3 py-2 rounded-2xl border border-gray-200 text-sm" placeholder="댓글을 입력하세요"></textarea>
+                                    <textarea name="comment_text" rows="2" class="w-full px-3 py-2 rounded-2xl border border-gray-200 text-sm" placeholder="댓글을 입력하세요"></textarea>
                                     <button type="submit" class="mt-2 px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">댓글 등록</button>
                                 </form>
                             </div>                          
@@ -494,11 +494,11 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 
                         <div class="flex flex-col items-end gap-2">
                             <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
-                            <form method="post" action="?r=project/issue_update" class="flex items-center gap-2">
+                            <form method="post" action="?r=construction/issue_update" class="flex items-center gap-2">
                                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                 <input type="hidden" name="issue_id" value="<?php echo (int)$it['id']; ?>">
                                 <input type="hidden" name="redirect" value="dashboard_executive">
-                                <select name="status_code" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
+                                <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
                                     <option value="pending" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>
                                     <option value="in_progress" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
                                     <option value="done" <?php echo ($stt==='처리완료')?'selected':''; ?>>처리완료</option>
