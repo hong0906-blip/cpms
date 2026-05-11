@@ -173,9 +173,14 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 <?php if(count($risk52)===0): ?><div class='p-4 rounded-2xl bg-emerald-50 text-emerald-700 font-bold'>이번 주 52시간 초과자는 없습니다.</div><?php else: ?><div class='space-y-3'><?php foreach($risk52 as $r): ?><div class='p-4 rounded-2xl bg-red-50 border border-red-200'><div class='font-extrabold text-lg text-red-700'><?php echo h($r['name']);?></div><div class='text-sm text-gray-700'><?php echo h(isset($r['department'])?$r['department']:'-');?> / <?php echo h(isset($r['position'])?$r['position']:'-');?></div><div class='font-extrabold text-red-700'>이번 주 인정 근무시간: <?php echo attendance_hm((int)$r['m']);?></div></div><?php endforeach; ?></div><?php endif; ?>
 </div></div>
 
-<div class="bg-white rounded-3xl border p-6 shadow mb-8">
+<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
     <h3 class="text-xl font-extrabold text-gray-900">공수 수정 승인대기</h3>
-    <div class="text-sm text-gray-600 mt-1">1.5 이상 공수 수정 요청을 승인 또는 반려합니다.</div>
+    <div class="flex items-start justify-between gap-4 mb-4">
+        <div>
+            <div class="text-sm text-gray-600 mt-1">1.5 이상 공수 수정 요청을 승인 또는 반려합니다.</div>
+        </div>
+        <span class="px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 text-sm font-bold">대기 <?php echo count($pendingGongsuOverrides); ?>건</span>
+    </div>
     <div class="mt-4 space-y-3">
         <?php if (count($pendingGongsuOverrides) === 0): ?>
             <div class="text-sm text-gray-500">승인대기 중인 공수 수정 요청이 없습니다.</div>
@@ -370,8 +375,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                        : (($stt === '처리중') ? 'bg-blue-50 text-blue-700 border-blue-100'
                        : 'bg-rose-50 text-rose-700 border-rose-100');
                 ?>
-                <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">
-                    <div class="text-[11px] text-gray-500 mb-2">ISSUE_STATUS_FORM_VERSION = 2026-issue-ascii-redirect-01 · issue form action = ?r=project/issue_update · redirect = ?r=dashboard_executive</div>                     
+                <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">                  
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
                             <div class="font-extrabold text-gray-900 truncate"><?php echo h($it['title']); ?></div>
@@ -405,12 +409,10 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 
 <!-- ✅ 이슈 목록 + 상태 처리 -->
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
-    <div class="flex items-center justify-between mb-4">
-        <div>
-            <h3 class="text-xl font-extrabold text-gray-900">이슈(최근 20)</h3>
-            <div class="text-sm text-gray-600 mt-1">공사/공무에서 등록한 이슈를 확인하고 상태를 처리합니다.</div>
-        </div>
-        <a href="<?php echo h(base_url()); ?>/?r=공무/프로젝트" class="px-4 py-2 rounded-2xl bg-gray-100 text-gray-900 font-bold hover:bg-gray-200">공무로</a>
+    <div class="mb-4">
+        <h3 class="text-xl font-extrabold text-gray-900">이슈(최근 20)</h3>
+        <div class="text-sm text-gray-600 mt-1">공사/공무에서 등록한 이슈를 확인하고 상태를 처리합니다.</div>
+        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_FORM_VERSION = 2026-issue-form-fixed-02 · action = project/issue_update · redirect = dashboard_executive</div>
     </div>
 
     <?php if (count($issues) === 0): ?>
@@ -424,8 +426,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                        : 'bg-blue-50 text-blue-700 border-blue-100';
                 ?>
                 <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">
-                    <!-- ISSUE_STATUS_FORM_VERSION -->
-                    <div class="text-[11px] text-gray-500 mb-2">ISSUE_STATUS_FORM_VERSION = 2026-issue-ascii-redirect-01 · issue form action = ?r=project/issue_update · redirect = ?r=dashboard_executive</div>              
+                    <!-- ISSUE_STATUS_FORM_VERSION -->         
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
                             <div class="font-extrabold text-gray-900"><?php echo h(isset($it['title']) && trim((string)$it['title'])!=='' ? $it['title'] : (isset($it['reason'])?$it['reason']:'-')); ?></div>
@@ -442,7 +443,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                             <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
 
                             <!-- 이슈 상태 form 강제 교체 -->
-                            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/issue_update" style="display:flex;gap:8px;align-items:center;">
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/issue_update" class="flex items-center gap-2">
                                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                 <input type="hidden" name="issue_id" value="<?php echo (int)$it['id']; ?>">
                                 <input type="hidden" name="redirect" value="<?php echo h(base_url()); ?>/?r=dashboard_executive">                     
@@ -454,13 +455,6 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                                 <button type="submit" class="px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
                             </form>
                         </div>
-                    </div>
-
-                    <div class="mt-3">
-                        <a class="text-sm font-bold text-indigo-600 hover:underline"
-                           href="<?php echo h(base_url()); ?>/?r=공무/프로젝트상세&id=<?php echo (int)$it['project_id']; ?>">
-                            프로젝트 상세로 이동
-                        </a>
                     </div>
                 </div>
             <?php endforeach; ?>
