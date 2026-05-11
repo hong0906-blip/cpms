@@ -53,6 +53,11 @@ if ($route === 'safety_home') {
     $route = '안전/보건';
 }
 
+if ($route === 'construction_home') {
+    // [변경] construction_home route: 한글 redirect 제거용 ASCII 우회
+    $route = '공사';
+}
+
 // ==========================
 //  액션(POST 처리) 라우트 먼저
 // ==========================
@@ -221,6 +226,11 @@ if ($route === 'construction/schedule_task_item_progress_save') {
 }
 if ($route === 'construction/safety_incident_create') {
     require_once __DIR__ . '/../app/views/construction/safety_incident_create.php';
+    exit;
+}
+
+if ($route === 'construction/issue_status_save') {
+    require_once __DIR__ . '/../app/views/construction/issue_status_save.php';
     exit;
 }
 if ($route === 'construction/labor_worker_add') {

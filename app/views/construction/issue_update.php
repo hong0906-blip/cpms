@@ -32,8 +32,8 @@ function cpms_issue_update_column_exists($pdo, $table, $column)
 function cpms_issue_update_redirect_url($redirectKey, $projectId)
 {
     if ($redirectKey === 'construction') {
-        if ((int)$projectId > 0) return '?r=공사&pid=' . (int)$projectId . '&tab=issues';
-        return '?r=공사&tab=issues';
+        if ((int)$projectId > 0) return '?r=construction_home&pid=' . (int)$projectId . '&tab=issues';
+        return '?r=construction_home&tab=issues';
     }
     return '?r=dashboard_executive';
 }
