@@ -76,11 +76,12 @@ $flash = flash_get();
                        : 'bg-rose-50 text-rose-700 border-rose-100');
                 ?>
                 <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">
+                    <div class="text-[11px] text-gray-500 mb-2">SAFETY_FOLLOWUP_UI_VERSION = 2026-safety-followup-01 · action = ?r=safety/incident_update · canUpdateIncident = <?php echo $canUpdateIncident ? 'Y' : 'N'; ?></div>                    
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
                             <div class="font-extrabold text-gray-900 truncate"><?php echo h($it['title']); ?></div>
                             <div class="text-xs text-gray-500 mt-1">
-                                프로젝트: <b><?php echo h($it['project_name']); ?></b>
+                                현장명: <b><?php echo h($it['project_name']); ?></b>
                                 · 등록: <?php echo h($it['created_by_name']); ?>
                                 · 접수시간: <?php echo h($it['created_at']); ?>
                                 <?php if (!empty($it['occurred_at'])): ?> · 발생: <?php echo h($it['occurred_at']); ?><?php endif; ?>
@@ -103,9 +104,10 @@ $flash = flash_get();
 
                             <?php if ($canUpdateIncident): ?>
                                 <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/incident_update" class="w-full">
+                                <!-- 안전 후속조치 UI 강제 표시 -->                                    
                                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                     <input type="hidden" name="incident_id" value="<?php echo (int)$it['id']; ?>">
-                                    <input type="hidden" name="redirect" value="?r=안전/보건">
+                                    <input type="hidden" name="redirect" value="<?php echo h(base_url()); ?>/?r=안전/보건">
                                     <div class="flex items-center gap-2 mb-2">
                                         <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
                                             <option value="접수" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>
@@ -116,6 +118,8 @@ $flash = flash_get();
                                     <textarea name="action_note" rows="3" class="w-full px-3 py-2 rounded-2xl border border-gray-200 text-sm" placeholder="후속조치 내용을 입력하세요."><?php echo h(isset($it['action_note']) ? $it['action_note'] : ''); ?></textarea>
                                     <button type="submit" class="mt-2 px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">후속조치 저장</button>
                                 </form>
+                            <?php else: ?>
+                                <div class="text-xs text-gray-500">후속조치 입력 권한이 없습니다.</div>                                
                             <?php endif; ?>
                         </div>
                     </div>

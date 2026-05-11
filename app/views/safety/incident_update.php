@@ -14,14 +14,14 @@ $redirect = isset($_POST['redirect']) && trim((string)$_POST['redirect']) !== ''
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    flash_set('error', '안전사고 후속조치 저장 실패: 잘못된 요청 방식입니다.');
+    flash_set('error', 'INCIDENT_UPDATE_LOADED=Y 안전사고 후속조치 저장 실패: 잘못된 요청 방식입니다.');
     header('Location: ' . $redirect);
     exit;
 }
 
 $token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
 if (!csrf_check($token)) {
-    flash_set('error', '안전사고 후속조치 저장 실패: 보안 토큰 오류입니다.');
+    flash_set('error', 'INCIDENT_UPDATE_LOADED=Y 안전사고 후속조치 저장 실패: 보안 토큰 오류입니다.');
     header('Location: ' . $redirect);
     exit;
 }
@@ -31,7 +31,7 @@ $dept = Auth::userDepartment();
 $can = ($dept === '안전' || $role === 'executive' || $role === 'master');
 if (!$can && method_exists('App\Core\Auth', 'canManageConstruction')) $can = Auth::canManageConstruction();
 if (!$can) {
-    flash_set('error', '안전사고 후속조치 저장 실패: 권한이 없습니다.');
+    flash_set('error', 'INCIDENT_UPDATE_LOADED=Y 안전사고 후속조치 저장 실패: 권한이 없습니다.');
     header('Location: ' . $redirect);
     exit;
 }
@@ -40,20 +40,20 @@ $id = isset($_POST['incident_id']) ? (int)$_POST['incident_id'] : 0;
 $status = isset($_POST['status']) ? trim((string)$_POST['status']) : '';
 $actionNote = isset($_POST['action_note']) ? trim((string)$_POST['action_note']) : '';
 if ($id <= 0 || $status === '') {
-    flash_set('error', '안전사고 후속조치 저장 실패: 필수값이 누락되었습니다.');
+    flash_set('error', 'INCIDENT_UPDATE_LOADED=Y 안전사고 후속조치 저장 실패: 필수값이 누락되었습니다.');
     header('Location: ' . $redirect);
     exit;
 }
 $allowed = array('접수', '처리중', '처리완료');
 if (!in_array($status, $allowed, true)) {
-    flash_set('error', '안전사고 후속조치 저장 실패: 허용되지 않은 상태값입니다.');
+    flash_set('error', 'INCIDENT_UPDATE_LOADED=Y 안전사고 후속조치 저장 실패: 허용되지 않은 상태값입니다.');
     header('Location: ' . $redirect);
     exit;
 }
 
 $pdo = Db::pdo();
 if (!$pdo) {
-    flash_set('error', '안전사고 후속조치 저장 실패: DB 연결 실패');
+    flash_set('error', 'INCIDENT_UPDATE_LOADED=Y 안전사고 후속조치 저장 실패: DB 연결 실패');
     header('Location: ' . $redirect);
     exit;
 }
@@ -64,7 +64,8 @@ try {
       'action_note' => "ALTER TABLE cpms_safety_incidents ADD COLUMN action_note TEXT NULL",
       'action_by' => "ALTER TABLE cpms_safety_incidents ADD COLUMN action_by INT NULL",
       'action_by_name' => "ALTER TABLE cpms_safety_incidents ADD COLUMN action_by_name VARCHAR(80) NULL",
-      'action_at' => "ALTER TABLE cpms_safety_incidents ADD COLUMN action_at DATETIME NULL"
+      'action_at' => "ALTER TABLE cpms_safety_incidents ADD COLUMN action_at DATETIME NULL",
+      'updated_at' => "ALTER TABLE cpms_safety_incidents ADD COLUMN updated_at DATETIME NULL"
     );
     foreach ($cols as $c => $sql) {
       $q = $pdo->query("SHOW COLUMNS FROM cpms_safety_incidents LIKE '".$c."'");
@@ -91,9 +92,9 @@ try {
         $st->bindValue(':id', $id, PDO::PARAM_INT);
     }
     $st->execute();
-    flash_set('success', '안전사고 후속조치를 저장했습니다.');    
+    flash_set('success', 'INCIDENT_UPDATE_LOADED=Y 안전사고 후속조치를 저장했습니다.');     
 } catch (Exception $e) {
-    flash_set('error', '안전사고 후속조치 저장 실패: ' . $e->getMessage());
+    flash_set('error', 'INCIDENT_UPDATE_LOADED=Y 안전사고 후속조치 저장 실패: ' . $e->getMessage());
 }
 
 header('Location: ' . $redirect);

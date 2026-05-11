@@ -371,6 +371,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                        : 'bg-rose-50 text-rose-700 border-rose-100');
                 ?>
                 <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">
+                    <div class="text-[11px] text-gray-500 mb-2">ISSUE_STATUS_FORM_VERSION = 2026-issue-form-post-01 · action = ?r=project/issue_update · method = POST</div>                    
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
                             <div class="font-extrabold text-gray-900 truncate"><?php echo h($it['title']); ?></div>
@@ -423,6 +424,8 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                        : 'bg-blue-50 text-blue-700 border-blue-100';
                 ?>
                 <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">
+                    <!-- ISSUE_STATUS_FORM_VERSION -->
+                    <div class="text-[11px] text-gray-500 mb-2">ISSUE_STATUS_FORM_VERSION = 2026-issue-form-post-01 · action = ?r=project/issue_update · method = POST</div>                    
                     <div class="flex items-start justify-between gap-3">
                         <div class="min-w-0">
                             <div class="font-extrabold text-gray-900"><?php echo h(isset($it['title']) && trim((string)$it['title'])!=='' ? $it['title'] : (isset($it['reason'])?$it['reason']:'-')); ?></div>
@@ -438,11 +441,11 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                         <div class="flex flex-col items-end gap-2">
                             <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
 
-                            <!-- 상태처리(임원 가능) -->
-                            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/issue_update" class="flex items-center gap-2">
+                            <!-- 이슈 상태 form 강제 교체 -->
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/issue_update" style="display:flex;gap:8px;align-items:center;">
                                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                 <input type="hidden" name="issue_id" value="<?php echo (int)$it['id']; ?>">
-                                <input type="hidden" name="redirect" value="?r=대시보드&dv=executive">                                
+                                <input type="hidden" name="redirect" value="<?php echo h(base_url()); ?>/?r=대시보드&dv=executive">                           
                                 <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
                                     <option value="접수" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>                                    
                                     <option value="처리중" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
