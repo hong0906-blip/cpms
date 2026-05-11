@@ -202,20 +202,20 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 </div></div>
 
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
-    <h3 class="text-xl font-extrabold text-gray-900">공수 수정 승인대기</h3>
     <div class="flex items-start justify-between gap-4 mb-4">
         <div>
+            <h3 class="text-2xl font-extrabold text-gray-900">공수 수정 승인대기</h3>            
             <div class="text-sm text-gray-600 mt-1">1.5 이상 공수 수정 요청을 승인 또는 반려합니다.</div>
         </div>
         <span class="px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 text-sm font-bold">대기 <?php echo count($pendingGongsuOverrides); ?>건</span>
     </div>
-    <div class="mt-4 space-y-3">
+    <div class="space-y-3">
         <?php if (count($pendingGongsuOverrides) === 0): ?>
             <div class="text-sm text-gray-500">승인대기 중인 공수 수정 요청이 없습니다.</div>
         <?php else: ?>
             <?php foreach ($pendingGongsuOverrides as $ov): ?>
                 <div class="p-4 rounded-2xl border bg-gray-50 border-gray-100">
-                    <?php $requesterName = trim((string)$ov['requested_by_name']) !== '' ? $ov['requested_by_name'] : (trim((string)$ov['requested_emp_name']) !== '' ? $ov['requested_emp_name'] : (trim((string)$ov['requested_by_email']) !== '' ? $ov['requested_by_email'] : '-')); ?>                    
+                    <?php $requesterName = trim((string)$ov['requested_by_name']) !== '' ? $ov['requested_by_name'] : (trim((string)$ov['requested_emp_name']) !== '' ? $ov['requested_emp_name'] : (trim((string)$ov['requested_by_email']) !== '' ? $ov['requested_by_email'] : '-')); ?>              
                     <div class="text-xs text-gray-500">요청일: <?php echo h($ov['created_at']); ?></div>
                     <div class="font-bold text-gray-900 mt-1 text-lg">현장명: <?php echo h($ov['project_name'] ? $ov['project_name'] : '-'); ?></div>
                     <div class="text-sm text-gray-700 mt-1">요청자: <?php echo h($requesterName); ?></div>
@@ -241,17 +241,13 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
             <?php endforeach; ?>
         <?php endif; ?>
     </div>
-
-
-<?php if ($flash): ?>
-
 </div>
 
+<?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type']==='success')?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-red-50 border-red-200 text-red-700'; ?>">
         <?php echo h($flash['message']); ?>
     </div>
 <?php endif; ?>
-
 
 <div class="grid grid-cols-1 xl:grid-cols-1 gap-6 mb-8">
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
@@ -440,7 +436,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
     <div class="mb-4">
         <h3 class="text-xl font-extrabold text-gray-900">이슈(최근 20)</h3>
         <div class="text-sm text-gray-600 mt-1">공사/공무에서 등록한 이슈를 확인하고 상태를 처리합니다.</div>
-        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_MODE = AJAX · ISSUE_STATUS_ACTION = construction/issue_status_save · NO_FORM_SUBMIT = YES</div>
+        <div class="text-[11px] text-gray-500 mt-2">ISSUE_STATUS_MODE = AJAX-VISIBLE · ISSUE_STATUS_ACTION = construction/issue_status_save · ISSUE_STATUS_UI_VERSION = 2026-issue-visible-save-01</div>
     </div>
 
     <?php if (count($issues) === 0): ?>
@@ -493,17 +489,17 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                         </div>
 
                         <div class="flex flex-col items-end gap-2">
-                            <span class="js-issue-status-badge text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
+                            <span class="js-issue-current-badge text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
                             <!-- 이슈 상태 변경 form 제거 -->
-                            <div class="issue-status-control flex items-center gap-2" data-issue-id="<?php echo (int)$it['id']; ?>" data-prev-status="<?php echo h($stt); ?>">
+                            <div class="issue-status-control flex items-center gap-2" data-issue-id="<?php echo (int)$it['id']; ?>" >
                                 <input type="hidden" class="js-issue-csrf" value="<?php echo h(csrf_token()); ?>">
-                                <select class="js-issue-status px-3 py-2 rounded-2xl border border-gray-200 text-sm">
+                                <select class="js-issue-status px-3 py-2 rounded-2xl border border-gray-200 text-sm" data-original-status="<?php echo h($stt); ?>">
                                     <option value="접수" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>
                                     <option value="처리중" <?php echo ($stt==='처리중')?'selected':''; ?>>처리중</option>
                                     <option value="처리완료" <?php echo ($stt==='처리완료')?'selected':''; ?>>처리완료</option>
                                 </select>
                                 <button type="button" class="js-issue-status-save px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
-                                <span class="js-issue-status-msg text-xs text-gray-600"></span>
+                                <span class="js-issue-status-msg ml-2 text-sm font-bold"></span>
                             </div>
                         </div>
                     </div>
@@ -521,58 +517,74 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 <div><h3>근태 리스크 현황</h3><p style='color:red'>이번 주 52시간 초과자: <?php echo h(implode(', ',$over52));?></p><p>이번 주 40시간 초과자: <?php echo h(implode(', ',$over40));?></p><p>출퇴근 요청 승인대기 건수: <?php echo (int)$pendingReq;?></p></div>
 
 <script>
-// AJAX 이슈 상태 저장
+// 이슈 상태 변경 visible AJAX + 저장 중/저장됨/실패 표시 + 상태 배지 즉시 갱신 + Bad Request 방지
 (function(){
   function badgeClass(status){
     if(status==='처리완료') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
     if(status==='처리중') return 'bg-blue-50 text-blue-700 border-blue-100';
     return 'bg-rose-50 text-rose-700 border-rose-100';
   }
-  function encodeForm(data){
-    var parts=[]; for(var k in data){ if(data.hasOwnProperty(k)){ parts.push(encodeURIComponent(k)+'='+encodeURIComponent(data[k])); } }
-    return parts.join('&');
-  }
-  var buttons=document.querySelectorAll('.js-issue-status-save');
-  for(var i=0;i<buttons.length;i++){
-    buttons[i].addEventListener('click', function(){
-      var control=this.parentNode;
-      var issueId=control.getAttribute('data-issue-id')||'';
-      var sel=control.querySelector('.js-issue-status');
-      var msg=control.querySelector('.js-issue-status-msg');
-      var csrf=control.querySelector('.js-issue-csrf').value;
-      var badge=control.parentNode.querySelector('.js-issue-status-badge');
-      var prev=control.getAttribute('data-prev-status') || (sel ? sel.value : '');
-      var status=sel ? sel.value : '';
-      if(!issueId || !status){ if(msg) msg.textContent='저장 실패: 필수값 누락'; return; }
-      if(msg) msg.textContent='저장 중...';
-      fetch('?r=construction/issue_status_save', {
-        method:'POST', credentials:'same-origin',
-        headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
-        body: encodeForm({_csrf:csrf, issue_id:issueId, status:status})
-      }).then(function(res){
-        return res.text().then(function(text){
-          var data=null;
-          try { data=JSON.parse(text); } catch(e){ console.log('[issue_status_save] non-json response:', text.substring(0,200)); }
-          return {data:data, text:text};
+  function encodeForm(data){ var parts=[]; for(var k in data){ if(data.hasOwnProperty(k)){ parts.push(encodeURIComponent(k)+'='+encodeURIComponent(data[k])); } } return parts.join('&'); }
+  function cleanup(btn){ if(btn){ btn.disabled=false; } }
+  function findParent(el, cls){ while(el){ if(el.classList && el.classList.contains(cls)) return el; el=el.parentNode; } return null; }
+
+  document.addEventListener('click', function(e){
+    var btn = e.target;
+    if(!btn || !btn.classList || !btn.classList.contains('js-issue-status-save')) return;
+
+    var control = findParent(btn, 'issue-status-control');
+    if(!control){ if(window.console&&console.log) console.log('[issue_status_save] issue-status-control not found'); return; }
+
+    var issueId = control.getAttribute('data-issue-id') || '';
+    var sel = control.querySelector('.js-issue-status');
+    var msg = control.querySelector('.js-issue-status-msg');
+    var csrfEl = control.querySelector('.js-issue-csrf');
+    var badge = control.parentNode ? control.parentNode.querySelector('.js-issue-current-badge') : null;
+    var prev = sel ? (sel.getAttribute('data-original-status') || sel.value) : '';
+    var status = sel ? sel.value : '';
+    var csrf = csrfEl ? csrfEl.value : '';
+
+    if(!issueId || !status || !csrf){ if(msg){ msg.textContent='저장 실패: 필수값 누락(issue_id/status/csrf)'; msg.className='js-issue-status-msg ml-2 text-sm font-bold text-rose-600'; } return; }
+
+    btn.disabled=true;
+    if(msg){ msg.textContent='저장 중...'; msg.className='js-issue-status-msg ml-2 text-sm font-bold text-gray-700'; }
+
+    fetch('?r=construction/issue_status_save', {
+      method:'POST',
+      credentials:'same-origin',
+      headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
+      body: encodeForm({_csrf:csrf, issue_id:issueId, status:status})
+    }).then(function(response){
+      if(response.status!==200){
+        return response.text().then(function(txt){
+          if(window.console&&console.log) console.log('[issue_status_save] HTTP '+response.status+': '+String(txt).substring(0,300));
+          throw new Error('HTTP '+response.status);
         });
-      }).then(function(payload){
-        var data=payload.data;
-        if(data && data.ok){
-          var savedStatus=data.status||status;
-          control.setAttribute('data-prev-status', savedStatus);
-          if(sel) sel.value=savedStatus;
-          if(badge){ badge.textContent=savedStatus; badge.className='js-issue-status-badge text-xs font-bold px-3 py-1 rounded-full border '+badgeClass(savedStatus); }
-          if(msg) msg.textContent='저장됨';
-        }else{
-          if(sel) sel.value=prev;
-          if(msg) msg.textContent='저장 실패: '+((data&&data.message)?data.message:'응답 오류');
+      }
+      return response.text().then(function(text){
+        var data = null;
+        try { data = JSON.parse(text); } catch(parseErr) {
+          if(msg){ msg.textContent='저장 실패: 서버 응답이 JSON이 아닙니다.'; msg.className='js-issue-status-msg ml-2 text-sm font-bold text-rose-600'; }
+          if(window.console&&console.log) console.log('[issue_status_save] non-json response: '+String(text).substring(0,300));
+          throw parseErr;
         }
-      }).catch(function(err){
-        if(sel) sel.value=prev;
-        if(msg) msg.textContent='저장 실패: 네트워크 오류';
-        if(window.console && console.log) console.log(err);
+        if(data && data.ok){
+          var savedStatus = data.status ? data.status : status;
+          if(sel){ sel.value = savedStatus; sel.setAttribute('data-original-status', savedStatus); }
+          if(badge){ badge.textContent = savedStatus; badge.className = 'js-issue-current-badge px-3 py-1 rounded-full text-xs font-bold border ' + badgeClass(savedStatus); }
+          if(msg){ msg.textContent='저장됨'; msg.className='js-issue-status-msg ml-2 text-sm font-bold text-emerald-600'; }
+        }else{
+          if(sel){ sel.value = prev; }
+          if(msg){ msg.textContent='저장 실패: '+(data&&data.message?data.message:'응답 오류'); msg.className='js-issue-status-msg ml-2 text-sm font-bold text-rose-600'; }
+        }
+        cleanup(btn);
       });
+    }).catch(function(err){
+      if(sel){ sel.value = prev; }
+      if(msg && msg.textContent==='저장 중...'){ msg.textContent='저장 실패: 네트워크/연결 오류'; msg.className='js-issue-status-msg ml-2 text-sm font-bold text-rose-600'; }
+      if(window.console&&console.log) console.log('[issue_status_save] fetch failed', err);
+      cleanup(btn);      
     });
-  }
+  });
 })();
 </script>
