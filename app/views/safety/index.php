@@ -18,6 +18,7 @@ if (!$canUpdateIncident && method_exists('App\\Core\\Auth', 'canManageConstructi
 // 안전사고 목록(최근 50)
 $pdo = Db::pdo();
 $safetyIncidents = array();
+$safetyLoadError = '';
 if ($pdo) {
     try {
         $sql = "SELECT i.*, p.name AS project_name
@@ -29,7 +30,10 @@ if ($pdo) {
         $safetyIncidents = $st->fetchAll();
     } catch (Exception $e) {
         $safetyIncidents = array();
+        $safetyLoadError = $e->getMessage();        
     }
+} else {
+    $safetyLoadError = 'DB 연결이 없습니다.';    
 }
 
 $checklist = get_safety_checklist_data();
@@ -48,6 +52,8 @@ $flash = flash_get();
     </div>
 </div>
 
+<div class="mb-4 p-3 rounded-xl bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm font-bold">SAFETY_INDEX_LOADED = 2026-safety-followup-visible-01</div>
+
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type']==='success')?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-red-50 border-red-200 text-red-700'; ?>">
         <?php echo h($flash['message']); ?>
@@ -63,6 +69,10 @@ $flash = flash_get();
         </div>
         <a href="<?php echo h(base_url()); ?>/?r=공사" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">공사로</a>
     </div>
+
+    <?php if ($safetyLoadError !== ''): ?>
+        <div class="mb-3 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-sm">안전사고 목록 조회 중 오류가 발생했습니다: <?php echo h($safetyLoadError); ?></div>
+    <?php endif; ?>
 
     <?php if (count($safetyIncidents) === 0): ?>
         <div class="text-sm text-gray-600">등록된 안전사고가 없습니다.</div>
@@ -107,7 +117,7 @@ $flash = flash_get();
                                 <!-- 안전 후속조치 UI 강제 표시 -->                                    
                                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                     <input type="hidden" name="incident_id" value="<?php echo (int)$it['id']; ?>">
-                                    <input type="hidden" name="redirect" value="<?php echo h(base_url()); ?>/?r=안전/보건">
+                                    <input type="hidden" name="redirect" value="<?php echo h(base_url()); ?>/?r=safety_home">
                                     <div class="flex items-center gap-2 mb-2">
                                         <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
                                             <option value="접수" <?php echo ($stt==='접수')?'selected':''; ?>>접수</option>

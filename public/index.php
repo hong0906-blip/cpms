@@ -32,6 +32,27 @@ if ($route === '관리자') {
     $route = '관리';
 }
 
+
+// ==========================
+//  ASCII 우회 라우트 (Bad Request 한글 URL 방지)
+//  - dashboard_executive ASCII 라우트
+//  - safety_home ASCII 라우트
+// ==========================
+if ($route === 'dashboard') {
+    $route = '대시보드';
+}
+if ($route === 'dashboard_executive') {
+    $_SESSION['dashboardType'] = 'executive';
+    $route = '대시보드';
+}
+if ($route === 'dashboard_employee') {
+    $_SESSION['dashboardType'] = 'employee';
+    $route = '대시보드';
+}
+if ($route === 'safety_home') {
+    $route = '안전/보건';
+}
+
 // ==========================
 //  액션(POST 처리) 라우트 먼저
 // ==========================
