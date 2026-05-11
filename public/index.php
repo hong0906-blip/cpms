@@ -385,6 +385,10 @@ if ($route === 'safety/incident_update') {
     require_once __DIR__ . '/../app/views/safety/incident_update.php';
     exit;
 }
+if ($route === 'construction/safety_incident_action_save') {
+    require_once __DIR__ . '/../app/views/construction/safety_incident_action_save.php';
+    exit;
+}
 
 
 if ($route === 'attendance/check_in') { require_once __DIR__ . '/../app/views/attendance/check_in.php'; exit; }

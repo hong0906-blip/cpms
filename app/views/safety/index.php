@@ -71,7 +71,7 @@ if (function_exists('get_safety_checklist_data')) {
     </div>
 </div>
 
-<div class="mb-4 p-3 rounded-xl bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm font-bold">SAFETY_Iible-01</div>NDEX_LOADED = 2026-safety-followup-vis
+<div class="mb-4 p-3 rounded-xl bg-yellow-50 border border-yellow-200 text-yellow-800 text-sm font-bold">SAFETY_INDEX_LOADED = 2026-safety-followup-vis<br>SAFETY_INCIDENT_ACTION_ROUTE = construction/safety_incident_action_save<br>SAFETY_INCIDENT_METHOD = POST</div>
 
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type'] === 'success') ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'; ?>">    
@@ -107,10 +107,10 @@ if (function_exists('get_safety_checklist_data')) {
                     <?php endif; ?>
 
                     <?php if ($canUpdateIncident): ?>
-                        <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/incident_update" class="mt-3">
+                        <form method="post" action="?r=construction/safety_incident_action_save" class="mt-3">
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                             <input type="hidden" name="incident_id" value="<?php echo (int)$it['id']; ?>">
-                            <input type="hidden" name="redirect" value="<?php echo h(base_url()); ?>/?r=safety_home">
+                            <input type="hidden" name="redirect" value="safety_home">
                             <div class="flex items-center gap-2 mb-2">
                                 <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
                                     <option value="접수" <?php echo ($stt === '접수') ? 'selected' : ''; ?>>접수</option>
@@ -119,7 +119,7 @@ if (function_exists('get_safety_checklist_data')) {
                                 </select>
                             </div>
                             <textarea name="action_note" rows="3" class="w-full px-3 py-2 rounded-2xl border border-gray-200 text-sm" placeholder="후속조치 내용을 입력하세요."><?php echo h(isset($it['action_note']) ? $it['action_note'] : ''); ?></textarea>
-                            <button type="submit" class="mt-2 px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">저장</button>
+                            <button type="submit" class="mt-2 px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">후속조치 저장</button>
                         </form>
                     <?php else: ?>
                         <div class="text-xs text-gray-500 mt-3">후속조치 입력 권한이 없습니다.</div>
