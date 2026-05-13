@@ -523,6 +523,7 @@ if ($route === 'project/header_mapping') {
 if ($route === 'approval_create') { \App\Core\View::render('approval/create', array('title'=>'전자결재 작성','selectedMenu'=>'전자결재','dashboardType'=>$dashboardType)); exit; }
 if ($route === 'approval_detail') { \App\Core\View::render('approval/detail', array('title'=>'전자결재 상세','selectedMenu'=>'전자결재','dashboardType'=>$dashboardType)); exit; }
 if ($route === 'approval_print') { require_once __DIR__ . '/../app/views/approval/print.php'; exit; }
+if ($route === 'approval_download_excel') { require_once __DIR__ . '/../app/views/approval/download_excel.php'; exit; }
 
 // ==========================
 //  일반 메뉴

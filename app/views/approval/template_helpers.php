@@ -1,0 +1,18 @@
+<?php
+if (!function_exists('approval_default_leave_agreement')) {
+    function approval_default_leave_agreement()
+    {
+        return '상기 본인은 위와 같이 연차휴가를 신청하며, 퇴사 시 연차휴가를 정산하여 본인이 사용할 수 있는 연차휴가를 초과하여 사용한 일수에 대해서는 금전으로 환산하여 마지막 급여 또는 퇴직금과 상계하여 지급받는 것을 동의합니다.';
+    }
+}
+if (!function_exists('approval_sign_path_by_email')) {
+    function approval_sign_path_by_email($email)
+    {
+        $prefix = explode('@', (string)$email);
+        $name = isset($prefix[0]) ? trim($prefix[0]) : '';
+        if ($name === '') { return ''; }
+        $rel = 'storage/signatures/'.$name.'.png';
+        $abs = dirname(__DIR__, 3).'/'.$rel;
+        return is_file($abs) ? $rel : '';
+    }
+}
