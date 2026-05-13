@@ -16,3 +16,13 @@ if (!function_exists('approval_sign_path_by_email')) {
         return is_file($abs) ? $rel : '';
     }
 }
+if (!function_exists('approval_norm_dept')) {
+    function approval_norm_dept($d)
+    {
+        $d=trim((string)$d);
+        if($d==='공사부')$d='공사';
+        if($d==='공무부')$d='공무';
+        if($d==='관리부')$d='관리';
+        return $d;
+    }
+}

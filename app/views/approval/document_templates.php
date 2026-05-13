@@ -8,10 +8,12 @@ if (!function_exists('approval_doc_get')) {
     }
 }
 if (!function_exists('approval_doc_field')) {
-    function approval_doc_field($mode, $name, $value, $class)
+    function approval_doc_field($mode, $name, $value, $class, $type='', $placeholder='')
     {
-        if ($mode === 'edit') { echo '<input type="text" name="'.h($name).'" value="'.h($value).'" class="'.$class.'">'; }
-        else { echo '<span>'.nl2br(h($value)).'</span>'; }
+        $type = $type ? $type : 'text';
+        $placeholder = $placeholder ? $placeholder : '';
+        if ($mode === 'edit') { echo '<input type="'.h($type).'" name="'.h($name).'" value="'.h($value).'" class="'.$class.'" placeholder="'.h($placeholder).'">'; }
+        else { echo '<span>'.nl2br(h($value !== '' ? $value : '-')).'</span>'; }
     }
 }
 if (!function_exists('approval_render_sign_cell')) {
@@ -30,5 +32,13 @@ if (!function_exists('approval_render_sign_cell')) {
         } else {
             echo '<div class="doc-time">대기중</div>';
         }
+    }
+}
+if (!function_exists('approval_doc_format_amount')) {
+    function approval_doc_format_amount($v)
+    {
+        $n = preg_replace('/[^0-9]/', '', (string)$v);
+        if ($n === '') return '';
+        return number_format((float)$n);
     }
 }

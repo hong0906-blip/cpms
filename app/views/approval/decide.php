@@ -14,11 +14,18 @@ $pdo->beginTransaction();
 if ($action === 'approve') {
     $email = (string)$u['email']; $parts = explode('@',$email); $sign = 'storage/signatures/'.$parts[0].'.png';
     $pdo->prepare("UPDATE cpms_approval_lines SET line_status='APPROVED',acted_at=NOW(),sign_path=:s WHERE id=:id AND line_status='PENDING'")->execute(array(':s'=>$sign,':id'=>$l['id']));
-    $next = (int)$l['line_order'] + 1;
-    $nx = $pdo->prepare("UPDATE cpms_approval_lines SET line_status='PENDING' WHERE document_id=:d AND line_order=:o AND line_status='WAITING'");
-    $nx->execute(array(':d'=>$id,':o'=>$next));
-    $docStatus = ($nx->rowCount() > 0) ? 'PENDING' : 'APPROVED';
-    $step = ($docStatus === 'APPROVED') ? (int)$l['line_order'] : $next;
+    $nextSt = $pdo->prepare("SELECT id,line_order FROM cpms_approval_lines WHERE document_id=:d AND line_status='WAITING' ORDER BY line_order ASC LIMIT 1");
+    $nextSt->execute(array(':d'=>$id));
+    $nextLine = $nextSt->fetch();
+    if($nextLine){
+        $nx = $pdo->prepare("UPDATE cpms_approval_lines SET line_status='PENDING' WHERE id=:id");
+        $nx->execute(array(':id'=>$nextLine['id']));
+        $docStatus = 'PENDING';
+        $step = (int)$nextLine['line_order'];
+    } else {
+        $docStatus = 'APPROVED';
+        $step = (int)$l['line_order'];
+    }
     $pdo->prepare("UPDATE cpms_approval_documents SET doc_status=:s,current_step_order=:o,updated_at=NOW() WHERE id=:id")->execute(array(':s'=>$docStatus,':o'=>$step,':id'=>$id));
     $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,created_at) VALUES (:d,:l,:a,:n,:e,'APPROVE',NOW())")->execute(array(':d'=>$id,':l'=>$l['id'],':a'=>$u['id'],':n'=>$u['name'],':e'=>$u['email']));
 } elseif ($action === 'reject') {
