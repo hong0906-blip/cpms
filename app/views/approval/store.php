@@ -19,6 +19,7 @@ if ($docType === 'leave') {
     if(strtotime($start)>strtotime($end)){ flash_set('danger','휴가 시작일은 종료일보다 늦을 수 없습니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
     $days=isset($_POST['leave_days'])?trim((string)$_POST['leave_days']):''; if($days===''){ $days=(string)(floor((strtotime($end)-strtotime($start))/86400)+1); }
     $contentData = array('request_type'=>trim((string)$_POST['request_type']),'request_type_etc'=>trim((string)$_POST['request_type_etc']),'department'=>trim((string)$_POST['department']),'position'=>trim((string)$_POST['position']),'applicant_name'=>trim((string)$_POST['applicant_name']),'birth_date'=>trim((string)$_POST['birth_date']),'leave_start_date'=>$start,'leave_end_date'=>$end,'leave_days'=>$days,'leave_period_text'=>trim((string)$_POST['leave_period_text']),'leave_reason'=>trim((string)$_POST['leave_reason']),'request_date'=>trim((string)$_POST['request_date']),'applicant_sign_name'=>trim((string)$_POST['applicant_sign_name']),'emergency_contact'=>trim((string)$_POST['emergency_contact']));
+    $contentData['applicant_email']=isset($user['email'])?(string)$user['email']:''; $contentData['writer_email']=$contentData['applicant_email'];
     $title='휴가계 - '.$contentData['applicant_name'];
     $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'부사장','emp'=>$vp));
 } else {
@@ -28,8 +29,8 @@ if ($docType === 'leave') {
     $st->execute(array(':id'=>$gongmuId)); $gongmu=$st->fetch(); $st->execute(array(':id'=>$manageId)); $manage=$st->fetch();
     if(!$sojang || !in_array($sojang['position'],array('과장','차장','부장')) || !in_array(approval_norm_dept($sojang['department']),array('공사','공사팀'))){ flash_set('danger','소장 결재자를 선택해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
     if(!$gongmu || !in_array(approval_norm_dept($gongmu['department']),array('공무','공무팀')) || !$manage || !in_array(approval_norm_dept($manage['department']),array('관리','관리팀'))){ flash_set('danger','공무/관리 결재자를 선택해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
-    $contentData = array('draft_date'=>trim((string)$_POST['draft_date']),'effective_date'=>trim((string)$_POST['effective_date']),'draft_department'=>trim((string)$_POST['draft_department']),'drafter_name'=>trim((string)$_POST['drafter_name']),'draft_type'=>trim((string)$_POST['draft_type']),'title'=>trim((string)$_POST['title']),'headline'=>trim((string)$_POST['headline']),'intro_text'=>trim((string)$_POST['intro_text']),'reason'=>trim((string)$_POST['reason']),'company_name'=>trim((string)$_POST['company_name']),'contract_amount'=>trim((string)$_POST['contract_amount']),'advance_amount'=>trim((string)$_POST['advance_amount']),'special_note_1'=>trim((string)$_POST['special_note_1']),'special_note_2'=>trim((string)$_POST['special_note_2']),'payment_request_date'=>trim((string)$_POST['payment_request_date']),'budget_status'=>trim((string)$_POST['budget_status']),'attached_doc_1'=>trim((string)$_POST['attached_doc_1']),'attached_doc_2'=>trim((string)$_POST['attached_doc_2']),'attached_doc_note'=>trim((string)$_POST['attached_doc_note']),'writer_name'=>trim((string)$_POST['drafter_name']));
-    $title=$contentData['title']!==''?$contentData['title']:'기안서 / 품의서';
+    $contentData = array('draft_date'=>trim((string)$_POST['draft_date']),'effective_date'=>trim((string)$_POST['effective_date']),'draft_department'=>trim((string)$_POST['draft_department']),'drafter_name'=>trim((string)$_POST['drafter_name']),'draft_type'=>trim((string)$_POST['draft_type']),'title'=>trim((string)$_POST['title']),'headline'=>trim((string)$_POST['headline']),'intro_text'=>trim((string)$_POST['intro_text']),'reason'=>trim((string)$_POST['reason']),'company_name'=>trim((string)$_POST['company_name']),'contract_amount'=>trim((string)$_POST['contract_amount']),'advance_amount'=>trim((string)$_POST['advance_amount']),'special_note_1'=>trim((string)$_POST['special_note_1']),'special_note_2'=>trim((string)$_POST['special_note_2']),'payment_request_date'=>trim((string)$_POST['payment_request_date']),'budget_status'=>trim((string)$_POST['budget_status']),'attached_doc_1'=>trim((string)$_POST['attached_doc_1']),'attached_doc_2'=>trim((string)$_POST['attached_doc_2']),'attached_doc_note'=>trim((string)$_POST['attached_doc_note']),'writer_name'=>trim((string)$_POST['drafter_name']),'writer_email'=>isset($user['email'])?(string)$user['email']:'');
+    $title=$contentData['title']!==''?$contentData['title']:'기안서';
     $lines=array(array('role'=>'소장','emp'=>$sojang),array('role'=>'공무','emp'=>$gongmu),array('role'=>'관리','emp'=>$manage),array('role'=>'부사장','emp'=>$vp),array('role'=>'대표이사','emp'=>$ceo));
 }
 $pdo->beginTransaction();
@@ -41,5 +42,28 @@ for($i=0;$i<count($lines);$i++){
     $pdo->prepare("INSERT INTO cpms_approval_lines (document_id,line_order,role_type,approver_id,approver_name,approver_email,line_status) VALUES (?,?,?,?,?,?,?)")
     ->execute(array($did,$i+1,$lines[$i]['role'],$emp['id'],$emp['name'],$emp['email'],$i===0?'PENDING':'WAITING'));
 }
+
+$uploadWarn=array();
+if($docType==='proposal'){
+    $allow=array('jpg','jpeg','png','gif','webp','pdf');
+    $labels=array('order_doc'=>array('발주서','order_doc_file'),'business_license'=>array('사업자 등록증','business_license_file'),'etc'=>array('기타','etc_file'));
+    $base=dirname(dirname(dirname(__DIR__))).'/storage/approvals/'.$did.'/files';
+    if(!is_dir($base)){ @mkdir($base,0777,true); }
+    foreach($labels as $ft=>$meta){
+        $fname=$meta[1];
+        if(!isset($_FILES[$fname])||!isset($_FILES[$fname]['tmp_name'])||$_FILES[$fname]['tmp_name']===''){ continue; }
+        if((int)$_FILES[$fname]['error']!==UPLOAD_ERR_OK){ $uploadWarn[]=$meta[0].' 업로드 실패'; continue; }
+        $orig=(string)$_FILES[$fname]['name'];
+        $ext=strtolower(pathinfo($orig,PATHINFO_EXTENSION));
+        if(!in_array($ext,$allow)){ $uploadWarn[]=$meta[0].' 확장자 제한'; continue; }
+        $saved=$ft.'_'.date('YmdHis').'_'.mt_rand(1000,9999).'.'.$ext;
+        $dest=$base.'/'.$saved;
+        if(!@move_uploaded_file($_FILES[$fname]['tmp_name'],$dest)){ $uploadWarn[]=$meta[0].' 저장 실패'; continue; }
+        $rel='storage/approvals/'.$did.'/files/'.$saved;
+        $pdo->prepare("INSERT INTO cpms_approval_files (document_id,original_name,saved_name,file_path,file_label,file_type,created_at) VALUES (?,?,?,?,?,?,NOW())")
+            ->execute(array($did,$orig,$saved,$rel,$meta[0],$ft));
+    }
+}
 $pdo->commit();
+if(count($uploadWarn)>0){ flash_set('danger', implode(', ',$uploadWarn)); }
 header('Location: ?r=approval_detail&id='.$did);

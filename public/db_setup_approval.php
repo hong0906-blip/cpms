@@ -13,7 +13,9 @@ $colSqls=array(
 array('cpms_approval_lines','sign_path',"ALTER TABLE cpms_approval_lines ADD COLUMN sign_path VARCHAR(255) NULL"),
 array('cpms_approval_lines','reject_reason',"ALTER TABLE cpms_approval_lines ADD COLUMN reject_reason TEXT NULL"),
 array('cpms_approval_documents','reject_reason',"ALTER TABLE cpms_approval_documents ADD COLUMN reject_reason TEXT NULL"),
-array('cpms_approval_documents','rejected_step',"ALTER TABLE cpms_approval_documents ADD COLUMN rejected_step VARCHAR(20) NULL")
+array('cpms_approval_documents','rejected_step',"ALTER TABLE cpms_approval_documents ADD COLUMN rejected_step VARCHAR(20) NULL"),
+array('cpms_approval_files','file_label',"ALTER TABLE cpms_approval_files ADD COLUMN file_label VARCHAR(100) NULL"),
+array('cpms_approval_files','file_type',"ALTER TABLE cpms_approval_files ADD COLUMN file_type VARCHAR(50) NULL")
 );
 foreach($colSqls as $c){ list($t,$col,$sql)=$c; try{$q=$pdo->query("SHOW COLUMNS FROM {$t} LIKE '".$col."'"); if(!$q->fetch()){ $pdo->exec($sql); $results[]=array('name'=>$t.'.'.$col,'type'=>'COLUMN','ok'=>1,'msg'=>'추가 완료'); } else { $results[]=array('name'=>$t.'.'.$col,'type'=>'COLUMN','ok'=>1,'msg'=>'이미 존재'); }}catch(Exception $e){$results[]=array('name'=>$t.'.'.$col,'type'=>'COLUMN','ok'=>0,'msg'=>$e->getMessage());}}
 ?><!doctype html><html><head><meta charset="utf-8"><title>전자결재 DB 설치/확인</title></head><body><h2>전자결재 DB 설치/확인</h2><table border="1" cellpadding="6" cellspacing="0"><tr><th>구분</th><th>대상</th><th>결과</th><th>메시지</th></tr><?php foreach($results as $r){?><tr><td><?php echo h($r['type']);?></td><td><?php echo h($r['name']);?></td><td><?php echo $r['ok']?'성공':'실패';?></td><td><?php echo h($r['msg']);?></td></tr><?php }?></table><p><a href="?r=approval_home">전자결재로 이동</a></p></body></html>

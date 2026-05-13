@@ -30,6 +30,6 @@ if (!function_exists('approval_doc_label')) {
     {
         $t = strtolower((string)$type);
         if ($t === 'leave') return '휴가계';
-        return '품의서';
+        return '기안서';
     }
 }
