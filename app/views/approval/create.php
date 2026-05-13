@@ -3,13 +3,24 @@ use App\Core\Db; require_once __DIR__.'/_common.php'; require_once __DIR__.'/doc
 $pdo=Db::pdo(); $type=isset($_GET['type'])?trim((string)$_GET['type']):'proposal'; $isLeave=($type==='leave'); $u=\App\Core\Auth::user();
 $dept=isset($u['department'])&&trim($u['department'])!==''?trim($u['department']):'창명건설'; $position=isset($u['position'])?trim($u['position']):''; $name=isset($u['name'])?trim($u['name']):'';
 $drafter=$name.($position!==''?' '.$position:'');
-$emps=$pdo?$pdo->query("SELECT id,name,department,position,email,birth_date FROM employees WHERE is_active=1 ORDER BY name")->fetchAll():array();
+$emps=array(); $empLoadError='';
+if($pdo){
+    try{
+        $birthDateSelect = approval_column_exists($pdo, 'employees', 'birth_date') ? 'birth_date' : "'' AS birth_date";
+        $sql = "SELECT id,name,department,position,email,".$birthDateSelect." FROM employees WHERE is_active=1 ORDER BY name";
+        $emps=$pdo->query($sql)->fetchAll();
+    }catch(Exception $e){
+        $empLoadError='직원명부 정보를 불러오는 중 오류가 발생했습니다. 관리자에게 직원명부 컬럼을 확인해달라고 요청해주세요.';
+        $emps=array();
+    }
+}
 $sojang=array(); $g=array(); $m=array(); $leaders=array(); $vp=null; $ceo=null;
 foreach($emps as $e){ $d=approval_norm_dept($e['department']); if(in_array($e['position'],array('과장','차장','부장'))){$leaders[]=$e; if(in_array($d,array('공사','공사팀')))$sojang[]=$e;} if(in_array($d,array('공무','공무팀')))$g[]=$e; if(in_array($d,array('관리','관리팀')))$m[]=$e; if($e['position']==='부사장'&&!$vp)$vp=$e; if(in_array($e['position'],array('대표','대표이사'))&&!$ceo)$ceo=$e; }
 $missing=(!$vp||!$ceo); $birth=''; if(isset($u['birth_date']))$birth=(string)$u['birth_date'];
 $init=array('draft_date'=>date('Y-m-d'),'effective_date'=>date('Y-m-d'),'draft_department'=>$dept,'drafter_name'=>$drafter,'draft_type'=>'품의','request_type'=>'연차','department'=>$dept,'position'=>$position,'applicant_name'=>$name,'birth_date'=>$birth,'leave_start_date'=>date('Y-m-d'),'leave_end_date'=>date('Y-m-d'),'leave_days'=>'1','request_date'=>date('Y-m-d'),'applicant_sign_name'=>$name);
 ?><div class="space-y-5"><div class="bg-white rounded-2xl border p-4 no-print"><div class="flex gap-2"><a href="javascript:history.back()" class="px-3 py-2 bg-gray-100 rounded">뒤로가기</a><a href="?r=approval_home" class="px-3 py-2 bg-gray-100 rounded">목록으로</a></div></div>
 <form method="post" action="?r=approval_store"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token());?>"><input type="hidden" name="doc_type" value="<?php echo $isLeave?'leave':'proposal';?>">
+<?php if($empLoadError!==''){?><div class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-4"><?php echo h($empLoadError);?></div><?php }?>
 <div class="bg-white rounded-2xl border p-4 no-print mb-4"><table class="w-full text-sm"><tr><th>순서</th><th>구분</th><th>결재자</th></tr><?php if($isLeave){ ?><tr><td>1</td><td>팀장</td><td><select name="team_lead_id" class="border px-2 py-1"><?php foreach($leaders as $e){?><option value="<?php echo (int)$e['id'];?>"><?php echo h($e['name'].' '.$e['position']);?></option><?php }?></select></td></tr><tr><td>2</td><td>부사장</td><td><?php echo h($vp?$vp['name']:'미등록');?></td></tr><?php } else { ?><tr><td>1</td><td>소장</td><td><select name="sojang_id" class="border px-2 py-1"><?php foreach($sojang as $e){?><option value="<?php echo (int)$e['id'];?>"><?php echo h($e['name'].' '.$e['position']);?></option><?php }?></select><?php if(count($sojang)===0){?><div class="text-red-600 text-xs mt-1">공사팀 과장~부장 직원이 없습니다. 직원명부에서 소장 결재자를 먼저 등록해주세요.</div><?php }?></td></tr><tr><td>2</td><td>공무</td><td><select name="gongmu_id" class="border px-2 py-1"><?php foreach($g as $e){?><option value="<?php echo (int)$e['id'];?>"><?php echo h($e['name']);?></option><?php }?></select></td></tr><tr><td>3</td><td>관리</td><td><select name="manage_id" class="border px-2 py-1"><?php foreach($m as $e){?><option value="<?php echo (int)$e['id'];?>"><?php echo h($e['name']);?></option><?php }?></select></td></tr><tr><td>4</td><td>부사장</td><td><?php echo h($vp?$vp['name']:'미등록');?></td></tr><tr><td>5</td><td>대표이사</td><td><?php echo h($ceo?$ceo['name']:'미등록');?></td></tr><?php }?></table><?php if($missing){?><p class="text-red-600 mt-2">직원명부에서 부사장 또는 대표이사가 등록되어 있지 않습니다. 관리 메뉴에서 먼저 등록해주세요.</p><?php }?><button class="mt-3 px-4 py-2 bg-indigo-600 text-white rounded" <?php echo ($missing||(!$isLeave&&count($sojang)===0))?'disabled="disabled"':'';?>>저장/결재요청</button></div>
 <?php if($isLeave){ render_approval_leave_document($init,array(), 'edit'); } else { render_approval_proposal_document($init,array(),'edit'); } ?>
 </form></div>

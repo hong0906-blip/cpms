@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../app/bootstrap.php';
-if (!(\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees())) { http_response_code(403); exit('403'); }
+if (!(\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees() || \App\Core\Auth::userRole()==='executive')) { http_response_code(403); exit('403'); }
 $pdo = \App\Core\Db::pdo(); $results=array();
 $tables=array(
 'cpms_approval_documents'=>"CREATE TABLE IF NOT EXISTS cpms_approval_documents (id INT AUTO_INCREMENT PRIMARY KEY, doc_type VARCHAR(20), title VARCHAR(255), content MEDIUMTEXT, doc_status VARCHAR(20), current_step_order INT DEFAULT 1, created_by_id INT, created_by_name VARCHAR(100), reject_reason TEXT NULL, rejected_step VARCHAR(20) NULL, created_at DATETIME, updated_at DATETIME)",

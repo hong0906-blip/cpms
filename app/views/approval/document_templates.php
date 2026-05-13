@@ -22,7 +22,7 @@ if (!function_exists('approval_render_sign_cell')) {
         $status = isset($line['line_status']) ? $line['line_status'] : 'WAITING';
         if ($status === 'APPROVED') {
             $sig = isset($line['sign_path']) ? trim((string)$line['sign_path']) : '';
-            $abs = dirname(__DIR__, 3).'/'.$sig;
+            $abs = dirname(dirname(dirname(__DIR__))).'/'.$sig;
             if ($sig !== '' && is_file($abs)) { echo '<img src="../'.h($sig).'" class="doc-sign">'; }
             else { echo '<div>승인완료</div>'; }
             if (!empty($line['acted_at'])) { echo '<div class="doc-time">'.h($line['acted_at']).'</div>'; }
