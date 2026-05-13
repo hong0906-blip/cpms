@@ -1,0 +1,1 @@
+<?php use App\Core\Db; if($_SERVER['REQUEST_METHOD']!=='POST') exit; csrf_validate(); $pdo=Db::pdo(); $u=\App\Core\Auth::user(); $pdo->prepare("UPDATE cpms_approval_documents SET doc_status='CANCELLED',updated_at=NOW() WHERE id=:id AND created_by_id=:u")->execute(array(':id'=>(int)$_POST['id'],':u'=>$u['id'])); header('Location: ?r=approval_home');

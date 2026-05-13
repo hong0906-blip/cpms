@@ -54,9 +54,9 @@ if ($route === 'safety_home') {
 }
 
 if ($route === 'construction_home') {
-    // [변경] construction_home route: 한글 redirect 제거용 ASCII 우회
     $route = '공사';
 }
+if ($route === 'approval_home') { $route = '전자결재'; }
 
 // ==========================
 //  액션(POST 처리) 라우트 먼저
@@ -391,6 +391,11 @@ if ($route === 'construction/safety_incident_action_save') {
 }
 
 
+
+if ($route === 'approval_store') { require_once __DIR__ . '/../app/views/approval/store.php'; exit; }
+if ($route === 'approval_decide') { require_once __DIR__ . '/../app/views/approval/decide.php'; exit; }
+if ($route === 'approval_cancel') { require_once __DIR__ . '/../app/views/approval/cancel.php'; exit; }
+if ($route === 'db_setup_approval') { require_once __DIR__ . '/db_setup_approval.php'; exit; }
 if ($route === 'attendance/check_in') { require_once __DIR__ . '/../app/views/attendance/check_in.php'; exit; }
 if ($route === 'attendance/check_out') { require_once __DIR__ . '/../app/views/attendance/check_out.php'; exit; }
 if ($route === 'attendance/request_save') { require_once __DIR__ . '/../app/views/attendance/request_save.php'; exit; }
@@ -472,7 +477,7 @@ $views = array(
     '공사'      => 'construction/index',
     '안전/보건' => 'safety/index',
     '품질'      => 'quality/index',
-    '전자결재'  => 'placeholder/index',
+    '전자결재'  => 'approval/index',
     '관리'      => 'admin/index',
 );
 
@@ -514,6 +519,10 @@ if ($route === 'project/header_mapping') {
     ));
     exit;
 }
+
+if ($route === 'approval_create') { \App\Core\View::render('approval/create', array('title'=>'전자결재 작성','selectedMenu'=>'전자결재','dashboardType'=>$dashboardType)); exit; }
+if ($route === 'approval_detail') { \App\Core\View::render('approval/detail', array('title'=>'전자결재 상세','selectedMenu'=>'전자결재','dashboardType'=>$dashboardType)); exit; }
+if ($route === 'approval_print') { require_once __DIR__ . '/../app/views/approval/print.php'; exit; }
 
 // ==========================
 //  일반 메뉴
