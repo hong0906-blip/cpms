@@ -8,4 +8,4 @@
 .doc-subline{font-size:13px;line-height:1.9}.doc-attach{font-size:12px;margin-top:42px}
 @media print {.no-print{display:none!important}body{margin:0;background:#fff}.approval-paper{box-shadow:none;margin:0 auto;border-color:#111}}
 </style>
-<style>.approval-line-table td{vertical-align:top}.sign-wrap{min-width:90px;text-align:center}.sign-slot{height:48px;display:flex;align-items:center;justify-content:center}.sign-name{font-weight:bold;border-top:1px solid #111;padding-top:2px}.sign-state{font-size:11px;color:#444}.attach-row{margin-top:6px}</style>
+<style>.approval-line-table td{text-align:center;vertical-align:middle}.approval-sign-row td{height:56px}.approval-name-row td{font-weight:700}.approval-time-row td{font-size:11px;color:#444}.approval-sign-cell .doc-time{display:block}.attach-row{margin-top:6px}</style>

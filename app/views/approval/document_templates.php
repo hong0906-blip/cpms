@@ -24,32 +24,47 @@ if (!function_exists('approval_render_sign_cell')) {
         $name = isset($opts['name']) ? (string)$opts['name'] : (isset($line['approver_name']) ? (string)$line['approver_name'] : '-');        
         $status = isset($line['line_status']) ? $line['line_status'] : 'WAITING';
         $time = !empty($line['acted_at']) ? $line['acted_at'] : '';
-        echo '<div class="sign-wrap">';
-        echo '<div class="sign-slot">';        
+        echo '<td class="approval-sign-cell">';    
         if ($status === 'APPROVED') {
             $sig = isset($line['sign_path']) ? trim((string)$line['sign_path']) : '';
             $abs = dirname(dirname(dirname(__DIR__))).'/'.$sig;
-            if ($sig !== '' && is_file($abs)) { echo '<img src="../'.h($sig).'" class="doc-sign">'; }
+            if ($sig !== '' && is_file($abs)) { echo '<img src="'.h('../'.$sig).'" class="doc-sign">'; }
             else { echo '<div class="doc-time">사인 미등록</div>'; }
         } elseif (!empty($opts['is_delegated'])) {
             echo '<div class="doc-time">전결</div>';
         } else {
             echo '<div class="doc-time">-</div>';
         }
-        echo '</div>';
-        echo '<div class="sign-name">'.h($name !== '' ? $name : '-').'</div>';
-        echo '<div class="sign-state">';
-        if ($status === 'APPROVED') {
+        echo '</td>';
+    }
+}
+if (!function_exists('approval_render_name_cell')) {
+    function approval_render_name_cell($name)
+    {
+        $display = approval_display_name_only($name);
+        if ($display === '') { $display = '-'; }
+        echo '<td class="approval-name-cell">'.h($display).'</td>';
+    }
+}
+if (!function_exists('approval_render_time_cell')) {
+    function approval_render_time_cell($line, $opts)
+    {
+        $line = is_array($line) ? $line : array();
+        $opts = is_array($opts) ? $opts : array();
+        $status = isset($line['line_status']) ? $line['line_status'] : 'WAITING';
+        $time = !empty($line['acted_at']) ? $line['acted_at'] : '';
+        echo '<td class="approval-time-cell">';
+        if (!empty($opts['is_drafter']) || !empty($opts['is_delegated'])) {
+            echo '-';
+        } elseif ($status === 'APPROVED') {
             echo h($time !== '' ? $time : '승인완료');
         } elseif ($status === 'REJECTED') {
             echo '반려';
             if ($time !== '') { echo ' '.h($time); }
-        } elseif (!empty($opts['is_delegated'])) {
-            echo '-';
         } else {
             echo '대기중';
         }
-        echo '</div></div>';        
+        echo '</td>';   
     }
 }
 if (!function_exists('approval_doc_format_amount')) {

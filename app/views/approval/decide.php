@@ -1,5 +1,6 @@
 <?php
 use App\Core\Db;
+require_once __DIR__.'/template_helpers.php';
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') exit;
 csrf_validate();
 $pdo = Db::pdo(); $u = \App\Core\Auth::user(); if (!$pdo || !$u) exit;
@@ -12,7 +13,7 @@ $l = $st->fetch(); if (!$l) { flash_set('danger','처리 권한이 없습니다.
 if ($action === 'reject' && $reason === '') { flash_set('danger','반려사유 필수'); header('Location: ?r=approval_detail&id='.$id); exit; }
 $pdo->beginTransaction();
 if ($action === 'approve') {
-    $email = (string)$u['email']; $parts = explode('@',$email); $sign = 'storage/signatures/'.$parts[0].'.png';
+    $email = (string)$u['email']; $parts = explode('@',$email); $sign = approval_sign_path_by_email($email); if($sign===''){ $sign = 'storage/signatures/'.$parts[0].'.png'; }
     $pdo->prepare("UPDATE cpms_approval_lines SET line_status='APPROVED',acted_at=NOW(),sign_path=:s WHERE id=:id AND line_status='PENDING'")->execute(array(':s'=>$sign,':id'=>$l['id']));
     $nextSt = $pdo->prepare("SELECT id,line_order FROM cpms_approval_lines WHERE document_id=:d AND line_status='WAITING' ORDER BY line_order ASC LIMIT 1");
     $nextSt->execute(array(':d'=>$id));

@@ -2,7 +2,7 @@
 use App\Core\Db; require_once __DIR__.'/_common.php'; require_once __DIR__.'/document_templates.php'; require_once __DIR__.'/template_style.php'; require_once __DIR__.'/template_proposal.php'; require_once __DIR__.'/template_leave.php';
 $pdo=Db::pdo(); $type=isset($_GET['type'])?trim((string)$_GET['type']):'proposal'; $isLeave=($type==='leave'); $u=\App\Core\Auth::user();
 $dept=isset($u['department'])&&trim($u['department'])!==''?trim($u['department']):'창명건설'; $position=isset($u['position'])?trim($u['position']):''; $name=isset($u['name'])?trim($u['name']):'';
-$drafter=$name.($position!==''?' '.$position:'');
+$drafter=$name;
 $emps=array(); $empLoadError='';
 if($pdo){
     try{
@@ -17,7 +17,8 @@ if($pdo){
 $sojang=array(); $g=array(); $m=array(); $leaders=array(); $vp=null; $ceo=null;
 foreach($emps as $e){ $d=approval_norm_dept($e['department']); if(in_array($e['position'],array('과장','차장','부장'))){$leaders[]=$e; if(in_array($d,array('공사','공사팀')))$sojang[]=$e;} if(in_array($d,array('공무','공무팀')))$g[]=$e; if(in_array($d,array('관리','관리팀')))$m[]=$e; if($e['position']==='부사장'&&!$vp)$vp=$e; if(in_array($e['position'],array('대표','대표이사'))&&!$ceo)$ceo=$e; }
 $missing=(!$vp||!$ceo); $birth=''; if(isset($u['birth_date']))$birth=(string)$u['birth_date'];
-$init=array('draft_date'=>date('Y-m-d'),'effective_date'=>date('Y-m-d'),'draft_department'=>$dept,'drafter_name'=>$drafter,'draft_type'=>'품의','request_type'=>'연차','department'=>$dept,'position'=>$position,'applicant_name'=>$name,'birth_date'=>$birth,'leave_start_date'=>date('Y-m-d'),'leave_end_date'=>date('Y-m-d'),'leave_days'=>'1','request_date'=>date('Y-m-d'),'applicant_sign_name'=>$name);
+$email=isset($u['email'])?trim((string)$u['email']):'';
+$init=array('draft_date'=>date('Y-m-d'),'effective_date'=>date('Y-m-d'),'draft_department'=>$dept,'drafter_name'=>$drafter,'draft_type'=>'품의','request_type'=>'연차','department'=>$dept,'position'=>$position,'applicant_name'=>$name,'birth_date'=>$birth,'leave_start_date'=>date('Y-m-d'),'leave_end_date'=>date('Y-m-d'),'leave_days'=>'1','request_date'=>date('Y-m-d'),'applicant_sign_name'=>$name,'writer_email'=>$email,'applicant_email'=>$email);
 ?><div class="space-y-5"><div class="bg-white rounded-2xl border p-4 no-print"><div class="flex gap-2"><a href="javascript:history.back()" class="px-3 py-2 bg-gray-100 rounded">뒤로가기</a><a href="?r=approval_home" class="px-3 py-2 bg-gray-100 rounded">목록으로</a></div></div>
 <form method="post" action="?r=approval_store" enctype="multipart/form-data"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token());?>"><input type="hidden" name="doc_type" value="<?php echo $isLeave?'leave':'proposal';?>">
 <?php if($empLoadError!==''){?><div class="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-4"><?php echo h($empLoadError);?></div><?php }?>

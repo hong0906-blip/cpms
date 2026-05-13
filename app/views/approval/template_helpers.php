@@ -11,9 +11,30 @@ if (!function_exists('approval_sign_path_by_email')) {
         $prefix = explode('@', (string)$email);
         $name = isset($prefix[0]) ? trim($prefix[0]) : '';
         if ($name === '') { return ''; }
-        $rel = 'storage/signatures/'.$name.'.png';
-        $abs = dirname(dirname(dirname(__DIR__))).'/'.$rel;
-        return is_file($abs) ? $rel : '';
+        $exts = array('png','PNG','jpg','JPG','jpeg','JPEG','webp','WEBP');
+        $baseDirs = array('storage/signatures','public/storage/signatures');
+        $root = dirname(dirname(dirname(__DIR__)));
+        foreach ($baseDirs as $baseDir) {
+            foreach ($exts as $ext) {
+                $rel = $baseDir.'/'.$name.'.'.$ext;
+                $abs = $root.'/'.$rel;
+                if (is_file($abs)) { return $rel; }
+            }
+        }
+        return '';
+    }
+}
+if (!function_exists('approval_display_name_only')) {
+    function approval_display_name_only($name)
+    {
+        $name = trim((string)$name);
+        if ($name === '') { return ''; }
+        $positions = array('대표이사','사원','주임','대리','과장','차장','부장','이사','상무','전무','부사장','대표','고문');
+        foreach ($positions as $position) {
+            $name = str_replace($position, '', $name);
+        }
+        $name = preg_replace('/\s+/', ' ', trim((string)$name));
+        return $name;
     }
 }
 if (!function_exists('approval_column_exists')) {

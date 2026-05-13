@@ -17,7 +17,8 @@ if ($docType === 'leave') {
     $start=trim((string)$_POST['leave_start_date']); $end=trim((string)$_POST['leave_end_date']);
     if($start===''||$end===''){ flash_set('danger','휴가 시작일/종료일은 필수입니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
     if(strtotime($start)>strtotime($end)){ flash_set('danger','휴가 시작일은 종료일보다 늦을 수 없습니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
-    $days=isset($_POST['leave_days'])?trim((string)$_POST['leave_days']):''; if($days===''){ $days=(string)(floor((strtotime($end)-strtotime($start))/86400)+1); }
+    $days=(string)(floor((strtotime($end)-strtotime($start))/86400)+1);
+    if((int)$days<1){ flash_set('danger','휴가 사용일수 계산값이 올바르지 않습니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
     $contentData = array('request_type'=>trim((string)$_POST['request_type']),'request_type_etc'=>trim((string)$_POST['request_type_etc']),'department'=>trim((string)$_POST['department']),'position'=>trim((string)$_POST['position']),'applicant_name'=>trim((string)$_POST['applicant_name']),'birth_date'=>trim((string)$_POST['birth_date']),'leave_start_date'=>$start,'leave_end_date'=>$end,'leave_days'=>$days,'leave_period_text'=>trim((string)$_POST['leave_period_text']),'leave_reason'=>trim((string)$_POST['leave_reason']),'request_date'=>trim((string)$_POST['request_date']),'applicant_sign_name'=>trim((string)$_POST['applicant_sign_name']),'emergency_contact'=>trim((string)$_POST['emergency_contact']));
     $contentData['applicant_email']=isset($user['email'])?(string)$user['email']:''; $contentData['writer_email']=$contentData['applicant_email'];
     $title='휴가계 - '.$contentData['applicant_name'];
