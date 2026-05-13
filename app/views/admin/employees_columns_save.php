@@ -42,7 +42,7 @@ try {
         flash_set('success', '휴가잔여 컬럼 처리: 추가('.(count($added)?implode(', ', $added):'없음').') / 이미존재('.(count($exists)?implode(', ', $exists):'없음').')');
     } elseif ($action === 'add_employee_attendance_columns') {
         $added = array(); $exists = array();
-        $targets = array('position'=>'VARCHAR(20) NULL','hire_date'=>'DATE NULL','leave_monthly_balance'=>'DECIMAL(6,2) NULL','leave_annual_balance'=>'DECIMAL(6,2) NULL','leave_half_balance'=>'DECIMAL(6,2) NULL');
+        $targets = array('position'=>'VARCHAR(20) NULL','hire_date'=>'DATE NULL','leave_monthly_balance'=>'DECIMAL(6,2) NULL','leave_annual_balance'=>'DECIMAL(6,2) NULL','leave_half_balance'=>'DECIMAL(6,2) NULL','birth_date'=>'DATE NULL','approval_can_be_site_manager'=>'TINYINT(1) NOT NULL DEFAULT 0','approval_can_be_team_leader'=>'TINYINT(1) NOT NULL DEFAULT 0','approval_can_be_gongmu_approver'=>'TINYINT(1) NOT NULL DEFAULT 0','approval_can_be_manage_approver'=>'TINYINT(1) NOT NULL DEFAULT 0','google_chat_enabled'=>'TINYINT(1) NOT NULL DEFAULT 0','google_chat_user_name'=>'VARCHAR(190) NULL','google_chat_dm_space_name'=>'VARCHAR(255) NULL');
         foreach ($targets as $c => $typeSql) {
             if (column_exists($pdo, 'employees', $c)) { $exists[] = $c; continue; }
             $pdo->exec("ALTER TABLE employees ADD COLUMN {$c} {$typeSql}");

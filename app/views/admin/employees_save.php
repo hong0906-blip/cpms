@@ -28,6 +28,15 @@ $hireDateEnabled = cpms_column_exists($pdo,'employees','hire_date');
 $leaveMonthlyEnabled = cpms_column_exists($pdo,'employees','leave_monthly_balance');
 $leaveAnnualEnabled = cpms_column_exists($pdo,'employees','leave_annual_balance');
 $leaveHalfEnabled = cpms_column_exists($pdo,'employees','leave_half_balance');
+$birthDateEnabled = cpms_column_exists($pdo,'employees','birth_date');
+$siteManagerEnabled = cpms_column_exists($pdo,'employees','approval_can_be_site_manager');
+$teamLeaderEnabled = cpms_column_exists($pdo,'employees','approval_can_be_team_leader');
+$gongmuEnabled = cpms_column_exists($pdo,'employees','approval_can_be_gongmu_approver');
+$manageEnabled = cpms_column_exists($pdo,'employees','approval_can_be_manage_approver');
+$chatEnabledCol = cpms_column_exists($pdo,'employees','google_chat_enabled');
+$chatUserEnabled = cpms_column_exists($pdo,'employees','google_chat_user_name');
+$chatSpaceEnabled = cpms_column_exists($pdo,'employees','google_chat_dm_space_name');
+
 
 $action = isset($_POST['action']) ? (string)$_POST['action'] : 'save';
 $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
@@ -76,6 +85,15 @@ $hireDate = isset($_POST['hire_date']) ? trim((string)$_POST['hire_date']) : '';
 $leaveMonthly = isset($_POST['leave_monthly_balance']) ? trim((string)$_POST['leave_monthly_balance']) : '';
 $leaveAnnual = isset($_POST['leave_annual_balance']) ? trim((string)$_POST['leave_annual_balance']) : '';
 $leaveHalf = isset($_POST['leave_half_balance']) ? trim((string)$_POST['leave_half_balance']) : '';
+$birthDate = isset($_POST['birth_date']) ? trim((string)$_POST['birth_date']) : '';
+$canSite = isset($_POST['approval_can_be_site_manager']) ? 1 : 0;
+$canLead = isset($_POST['approval_can_be_team_leader']) ? 1 : 0;
+$canGongmu = isset($_POST['approval_can_be_gongmu_approver']) ? 1 : 0;
+$canManageApprover = isset($_POST['approval_can_be_manage_approver']) ? 1 : 0;
+$googleChatEnabled = isset($_POST['google_chat_enabled']) ? 1 : 0;
+$googleChatUserName = isset($_POST['google_chat_user_name']) ? trim((string)$_POST['google_chat_user_name']) : '';
+$googleChatSpaceName = isset($_POST['google_chat_dm_space_name']) ? trim((string)$_POST['google_chat_dm_space_name']) : '';
+
 if ($email === '' || $name === '') { flash_set('error', '이메일/이름은 필수입니다.'); header('Location: ?r=관리&tab=employees'); exit; }
 
 $allowedDepts = array('관리', '공무', '품질', '안전', '공사');
@@ -92,6 +110,14 @@ try {
     if ($leaveMonthlyEnabled) $fields[] = 'leave_monthly_balance=:leave_monthly_balance';
     if ($leaveAnnualEnabled) $fields[] = 'leave_annual_balance=:leave_annual_balance';
     if ($leaveHalfEnabled) $fields[] = 'leave_half_balance=:leave_half_balance';
+    if ($birthDateEnabled) $fields[] = 'birth_date=:birth_date';
+    if ($siteManagerEnabled) $fields[] = 'approval_can_be_site_manager=:approval_can_be_site_manager';
+    if ($teamLeaderEnabled) $fields[] = 'approval_can_be_team_leader=:approval_can_be_team_leader';
+    if ($gongmuEnabled) $fields[] = 'approval_can_be_gongmu_approver=:approval_can_be_gongmu_approver';
+    if ($manageEnabled) $fields[] = 'approval_can_be_manage_approver=:approval_can_be_manage_approver';
+    if ($chatEnabledCol) $fields[] = 'google_chat_enabled=:google_chat_enabled';
+    if ($chatUserEnabled) $fields[] = 'google_chat_user_name=:google_chat_user_name';
+    if ($chatSpaceEnabled) $fields[] = 'google_chat_dm_space_name=:google_chat_dm_space_name';
 
     if ($id > 0) {
         $sql = "UPDATE employees SET ".implode(',',$fields)." WHERE id=:id";
@@ -104,6 +130,14 @@ try {
         if ($leaveMonthlyEnabled) { $cols[]='leave_monthly_balance'; $vals[]=':leave_monthly_balance'; }
         if ($leaveAnnualEnabled) { $cols[]='leave_annual_balance'; $vals[]=':leave_annual_balance'; }
         if ($leaveHalfEnabled) { $cols[]='leave_half_balance'; $vals[]=':leave_half_balance'; }
+        if ($birthDateEnabled) { $cols[]='birth_date'; $vals[]=':birth_date'; }
+        if ($siteManagerEnabled) { $cols[]='approval_can_be_site_manager'; $vals[]=':approval_can_be_site_manager'; }
+        if ($teamLeaderEnabled) { $cols[]='approval_can_be_team_leader'; $vals[]=':approval_can_be_team_leader'; }
+        if ($gongmuEnabled) { $cols[]='approval_can_be_gongmu_approver'; $vals[]=':approval_can_be_gongmu_approver'; }
+        if ($manageEnabled) { $cols[]='approval_can_be_manage_approver'; $vals[]=':approval_can_be_manage_approver'; }
+        if ($chatEnabledCol) { $cols[]='google_chat_enabled'; $vals[]=':google_chat_enabled'; }
+        if ($chatUserEnabled) { $cols[]='google_chat_user_name'; $vals[]=':google_chat_user_name'; }
+        if ($chatSpaceEnabled) { $cols[]='google_chat_dm_space_name'; $vals[]=':google_chat_dm_space_name'; }        
         $sql = "INSERT INTO employees (".implode(',', $cols).") VALUES (".implode(',', $vals).")";
         $st = $pdo->prepare($sql);
     }
@@ -126,6 +160,15 @@ try {
         if ($leaveHalf === '') $st->bindValue(':leave_half_balance', null, \PDO::PARAM_NULL);
         else $st->bindValue(':leave_half_balance', (float)$leaveHalf);
     }
+
+    if ($birthDateEnabled) { if ($birthDate==='') $st->bindValue(':birth_date', null, \PDO::PARAM_NULL); else $st->bindValue(':birth_date', $birthDate); }
+    if ($siteManagerEnabled) $st->bindValue(':approval_can_be_site_manager',$canSite,\PDO::PARAM_INT);
+    if ($teamLeaderEnabled) $st->bindValue(':approval_can_be_team_leader',$canLead,\PDO::PARAM_INT);
+    if ($gongmuEnabled) $st->bindValue(':approval_can_be_gongmu_approver',$canGongmu,\PDO::PARAM_INT);
+    if ($manageEnabled) $st->bindValue(':approval_can_be_manage_approver',$canManageApprover,\PDO::PARAM_INT);
+    if ($chatEnabledCol) $st->bindValue(':google_chat_enabled',$googleChatEnabled,\PDO::PARAM_INT);
+    if ($chatUserEnabled) { if($googleChatUserName==='') $st->bindValue(':google_chat_user_name',null,\PDO::PARAM_NULL); else $st->bindValue(':google_chat_user_name',$googleChatUserName); }
+    if ($chatSpaceEnabled) { if($googleChatSpaceName==='') $st->bindValue(':google_chat_dm_space_name',null,\PDO::PARAM_NULL); else $st->bindValue(':google_chat_dm_space_name',$googleChatSpaceName); }    
         if ($id > 0) { // 직원 수정 id 바인딩 / HY093 오류 수정
         $st->bindValue(':id', $id, \PDO::PARAM_INT);
     }
