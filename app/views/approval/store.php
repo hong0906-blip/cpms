@@ -5,6 +5,16 @@ require_once __DIR__.'/notification_helpers.php';
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { exit; }
 csrf_validate();
 $pdo = Db::pdo(); $user = \App\Core\Auth::user(); if (!$pdo || !$user) { exit; }
+if (!function_exists('approval_store_column_exists')) {
+function approval_store_column_exists($pdo, $table, $column) {
+    try {
+        $db = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+        if ($db === '') return false;
+        $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:tbl AND COLUMN_NAME=:col");
+        $st->execute(array(':db'=>$db, ':tbl'=>$table, ':col'=>$column));
+        return ((int)$st->fetchColumn() > 0);
+    } catch (\Exception $e) { return false; }
+}}
 $docType = isset($_POST['doc_type']) ? trim((string)$_POST['doc_type']) : 'proposal';
 $vp = $pdo->query("SELECT id,name,email FROM employees WHERE is_active=1 AND position='부사장' LIMIT 1")->fetch();
 $ceo = $pdo->query("SELECT id,name,email FROM employees WHERE is_active=1 AND position IN ('대표','대표이사') LIMIT 1")->fetch();
@@ -14,7 +24,7 @@ if ($docType === 'leave') {
     $leadId=(int)$_POST['team_lead_id'];
     $st=$pdo->prepare("SELECT id,name,email,position FROM employees WHERE id=:id AND is_active=1 AND position IN ('과장','차장','부장') LIMIT 1");
     $st->execute(array(':id'=>$leadId)); $lead=$st->fetch();
-    if(!$lead){ flash_set('danger','팀장 결재자를 선택해주세요.'); header('Location: ?r=approval_create&type=leave'); exit; }
+    if(!$lead){ flash_set('danger','팀장 결재자를 선택해주세요. 관리 > 직원명부에서 전자결재 역할을 설정해주세요.'); header('Location: ?r=approval_create&type=leave'); exit; }
     $start=trim((string)$_POST['leave_start_date']); $end=trim((string)$_POST['leave_end_date']);
     if($start===''||$end===''){ flash_set('danger','휴가 시작일/종료일은 필수입니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
     if(strtotime($start)>strtotime($end)){ flash_set('danger','휴가 시작일은 종료일보다 늦을 수 없습니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
@@ -27,12 +37,19 @@ if ($docType === 'leave') {
     if($isVpWriter){ $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'대표이사','emp'=>$ceo)); }
     else { $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'부사장','emp'=>$vp)); }
 } else {
+    $siteRoleCol = approval_store_column_exists($pdo, 'employees', 'approval_can_be_site_manager');
+    $gongmuRoleCol = approval_store_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver');
+    $manageRoleCol = approval_store_column_exists($pdo, 'employees', 'approval_can_be_manage_approver');    
     $sojangId=(int)$_POST['sojang_id']; $gongmuId=(int)$_POST['gongmu_id']; $manageId=(int)$_POST['manage_id'];
     $st=$pdo->prepare("SELECT id,name,email,position,department FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
     $st->execute(array(':id'=>$sojangId)); $sojang=$st->fetch();
     $st->execute(array(':id'=>$gongmuId)); $gongmu=$st->fetch(); $st->execute(array(':id'=>$manageId)); $manage=$st->fetch();
-    if(!$sojang || !in_array($sojang['position'],array('과장','차장','부장')) || !in_array(approval_norm_dept($sojang['department']),array('공사','공사팀'))){ flash_set('danger','소장 결재자를 선택해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
-    if(!$gongmu || !in_array(approval_norm_dept($gongmu['department']),array('공무','공무팀')) || !$manage || !in_array(approval_norm_dept($manage['department']),array('관리','관리팀'))){ flash_set('danger','공무/관리 결재자를 선택해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
+    $sojangRoleOk = false; $gongmuRoleOk = false; $manageRoleOk = false;
+    if ($siteRoleCol && $sojang) { $q=$pdo->prepare("SELECT approval_can_be_site_manager FROM employees WHERE id=:id LIMIT 1"); $q->execute(array(':id'=>(int)$sojang['id'])); $sojangRoleOk = ((int)$q->fetchColumn()===1); }
+    if ($gongmuRoleCol && $gongmu) { $q=$pdo->prepare("SELECT approval_can_be_gongmu_approver FROM employees WHERE id=:id LIMIT 1"); $q->execute(array(':id'=>(int)$gongmu['id'])); $gongmuRoleOk = ((int)$q->fetchColumn()===1); }
+    if ($manageRoleCol && $manage) { $q=$pdo->prepare("SELECT approval_can_be_manage_approver FROM employees WHERE id=:id LIMIT 1"); $q->execute(array(':id'=>(int)$manage['id'])); $manageRoleOk = ((int)$q->fetchColumn()===1); }
+    if(!$sojang || (($siteRoleCol && !$sojangRoleOk) || (!$siteRoleCol && (!in_array($sojang['position'],array('과장','차장','부장')) || !in_array(approval_norm_dept($sojang['department']),array('공사','공사팀')))))){ flash_set('danger','소장 결재자를 선택해주세요. 관리 > 직원명부에서 전자결재 역할을 설정해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
+    if(!$gongmu || (($gongmuRoleCol && !$gongmuRoleOk) || (!$gongmuRoleCol && !in_array(approval_norm_dept($gongmu['department']),array('공무','공무팀')))) || !$manage || (($manageRoleCol && !$manageRoleOk) || (!$manageRoleCol && !in_array(approval_norm_dept($manage['department']),array('관리','관리팀'))))){ flash_set('danger','공무/관리 결재자를 선택해주세요. 관리 > 직원명부에서 전자결재 역할을 설정해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
     $contentData = array('draft_date'=>trim((string)$_POST['draft_date']),'effective_date'=>trim((string)$_POST['effective_date']),'draft_department'=>trim((string)$_POST['draft_department']),'drafter_name'=>trim((string)$_POST['drafter_name']),'draft_type'=>trim((string)$_POST['draft_type']),'title'=>trim((string)$_POST['title']),'headline'=>trim((string)$_POST['headline']),'intro_text'=>trim((string)$_POST['intro_text']),'reason'=>trim((string)$_POST['reason']),'company_name'=>trim((string)$_POST['company_name']),'contract_amount'=>trim((string)$_POST['contract_amount']),'advance_amount'=>trim((string)$_POST['advance_amount']),'special_note_1'=>trim((string)$_POST['special_note_1']),'special_note_2'=>trim((string)$_POST['special_note_2']),'payment_request_date'=>trim((string)$_POST['payment_request_date']),'budget_status'=>trim((string)$_POST['budget_status']),'attached_doc_1'=>trim((string)$_POST['attached_doc_1']),'attached_doc_2'=>trim((string)$_POST['attached_doc_2']),'attached_doc_note'=>trim((string)$_POST['attached_doc_note']),'writer_name'=>trim((string)$_POST['drafter_name']),'writer_email'=>isset($user['email'])?(string)$user['email']:'');
     $title=$contentData['title']!==''?$contentData['title']:'기안서';
     $lines=array(array('role'=>'소장','emp'=>$sojang),array('role'=>'공무','emp'=>$gongmu),array('role'=>'관리','emp'=>$manage),array('role'=>'부사장','emp'=>$vp),array('role'=>'대표이사','emp'=>$ceo));
