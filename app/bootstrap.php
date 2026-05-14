@@ -85,6 +85,21 @@ if (!function_exists('csrf_check')) {
         return !empty($_SESSION['_csrf']) && hash_equals($_SESSION['_csrf'], (string)$token);
     }
 }
+if (!function_exists('csrf_validate')) {
+    function csrf_validate() {
+        $token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
+        if (!function_exists('csrf_check') || !csrf_check($token)) {
+            if (function_exists('flash_set')) {
+                flash_set('danger', '요청 시간이 만료되었거나 보안 토큰이 올바르지 않습니다. 다시 시도해주세요.');
+            }
+            $back = isset($_SERVER['HTTP_REFERER']) && $_SERVER['HTTP_REFERER'] !== ''
+                ? $_SERVER['HTTP_REFERER']
+                : '?r=대시보드';
+            header('Location: ' . $back);
+            exit;
+        }
+    }
+}
 
 // ===== Flash =====
 if (!function_exists('flash_set')) {

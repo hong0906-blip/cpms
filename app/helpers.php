@@ -18,21 +18,44 @@ function asset_url($path) {
     return base_url() . '/' . $path;
 }
 
+if (!function_exists('csrf_token')) {
 function csrf_token() {
     if (empty($_SESSION['_csrf'])) {
         $_SESSION['_csrf'] = bin2hex(openssl_random_pseudo_bytes(16));
     }
     return $_SESSION['_csrf'];
 }
+}
 
+if (!function_exists('csrf_check')) {
 function csrf_check($token) {
     return isset($_SESSION['_csrf']) && is_string($token) && hash_equals($_SESSION['_csrf'], $token);
 }
+}
 
+if (!function_exists('csrf_validate')) {
+function csrf_validate() {
+    $token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
+    if (!function_exists('csrf_check') || !csrf_check($token)) {
+        if (function_exists('flash_set')) {
+            flash_set('danger', '요청 시간이 만료되었거나 보안 토큰이 올바르지 않습니다. 다시 시도해주세요.');
+        }
+        $back = isset($_SERVER['HTTP_REFERER']) && $_SERVER['HTTP_REFERER'] !== ''
+            ? $_SERVER['HTTP_REFERER']
+            : '?r=대시보드';
+        header('Location: '.$back);
+        exit;
+    }
+}
+}
+
+if (!function_exists('flash_set')) {
 function flash_set($type, $message) {
     $_SESSION['_flash'] = array('type' => $type, 'message' => $message);
 }
+}
 
+if (!function_exists('flash_get')) {
 function flash_get() {
     if (!empty($_SESSION['_flash'])) {
         $f = $_SESSION['_flash'];
@@ -40,6 +63,7 @@ function flash_get() {
         return $f;
     }
     return null;
+}
 }
 
 function cpms_storage_root() {
