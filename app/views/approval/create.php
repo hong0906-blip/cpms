@@ -81,7 +81,19 @@ if(count($lead)===0){ foreach($emps as $e){ if(in_array($e['position'],array('�
 if(count($deptLead)===0)$deptLead=$lead;
 if(count($gong)===0){ foreach($emps as $e){ if(in_array(approval_norm_dept($e['department']),array('공무','공무팀')))$gong[]=$e; } if(count($gong)>0)$warn[]='gongmu_fallback'; }
 if(count($man)===0){ foreach($emps as $e){ if(in_array(approval_norm_dept($e['department']),array('관리','관리팀')))$man[]=$e; } if(count($man)>0)$warn[]='manage_fallback'; }
-$init=array('birth_date'=>$myBirth,'draft_date'=>date('Y-m-d'),'effective_date'=>date('Y-m-d'),'draft_department'=>$dept,'drafter_name'=>$name,'title'=>'','department'=>$dept,'position'=>$position,'applicant_name'=>$name,'leave_start_date'=>date('Y-m-d'),'leave_end_date'=>date('Y-m-d'),'request_date'=>date('Y-m-d'),'applicant_sign_name'=>$name,'writer_email'=>$email,'applicant_email'=>$email);
+$normDeptForApproval = approval_norm_dept($dept);
+$isConstructionDept = in_array($normDeptForApproval, array('공사','공사팀'), true);
+$sangmu = null;
+if($isConstructionDept && $pdo){
+    try{
+        $st = $pdo->prepare("SELECT id,name,email,position,department FROM employees WHERE is_active=1 AND name=:name LIMIT 1");
+        $st->execute(array(':name'=>'박원덕'));
+        $sangmu = $st->fetch();
+    } catch (Exception $e) {
+        $sangmu = null;
+    }
+}
+$init=array('birth_date'=>$myBirth,'draft_date'=>date('Y-m-d'),'effective_date'=>date('Y-m-d'),'draft_department'=>$dept,'drafter_name'=>$name,'title'=>'','department'=>$dept,'position'=>$position,'applicant_name'=>$name,'leave_start_date'=>date('Y-m-d'),'leave_end_date'=>date('Y-m-d'),'request_date'=>date('Y-m-d'),'applicant_sign_name'=>$name,'writer_email'=>$email,'applicant_email'=>$email,'include_sangmu'=>($isConstructionDept && $sangmu)?'1':'0','sangmu_name'=>($isConstructionDept && $sangmu && isset($sangmu['name']))?$sangmu['name']:'');
 ?>
 <div class="mb-4 flex items-center justify-between">
   <div class="flex gap-2">
@@ -94,8 +106,9 @@ $init=array('birth_date'=>$myBirth,'draft_date'=>date('Y-m-d'),'effective_date'=
 <input type="hidden" name="doc_type" value="<?php echo $isLeave?'leave':'proposal';?>">
 <?php if(in_array('sojang_fallback',$warn)){?><div>소장 결재자 역할이 설정되지 않아 공사팀 과장~부장을 임시 후보로 표시합니다. 관리 > 직원명부에서 소장 결재자를 설정해주세요.</div><?php }?>
 <?php if(in_array('leader_fallback',$warn)||in_array('gongmu_fallback',$warn)||in_array('manage_fallback',$warn)){?><div>관리 > 직원명부에서 전자결재 역할을 설정해주세요.</div><?php }?>
+<?php if($isLeave && $isConstructionDept && !$sangmu){?><div>공사부 휴가계는 상무 결재자 박원덕이 필요합니다. 관리 > 직원명부에서 박원덕 직원을 확인해주세요.</div><?php }?>
 <?php
-$approvalOptions=array('site'=>$site,'gongmu'=>$gong,'manage'=>$man,'team_lead'=>$deptLead,'vp'=>$vp,'ceo'=>$ceo,'writer_email'=>$email);
+$approvalOptions=array('site'=>$site,'gongmu'=>$gong,'manage'=>$man,'team_lead'=>$deptLead,'vp'=>$vp,'ceo'=>$ceo,'sangmu'=>$sangmu,'writer_email'=>$email);
 if($isLeave){ render_approval_leave_document($init,array(), 'edit',$approvalOptions); } else { render_approval_proposal_document($init,array(),'edit',array(),$approvalOptions); }
 ?>
 

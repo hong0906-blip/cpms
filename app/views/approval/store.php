@@ -30,6 +30,22 @@ function approval_upload_error_message($code) {
         default: return '알 수 없는 업로드 오류가 발생했습니다.';
     }
 }}
+if (!function_exists('approval_project_root')) {
+function approval_project_root() {
+    $candidates = array(
+        realpath(__DIR__ . '/../../..'),
+        realpath(__DIR__ . '/../../../..'),
+        realpath(dirname(__FILE__) . '/../../..'),
+        realpath(dirname(__FILE__) . '/../../../..')
+    );
+    for ($i = 0; $i < count($candidates); $i++) {
+        $root = $candidates[$i];
+        if ($root && is_dir($root . '/app') && is_dir($root . '/public')) {
+            return $root;
+        }
+    }
+    return dirname(dirname(dirname(__DIR__)));
+}}
 
 $creatorEmployeeId = approval_current_employee_id($pdo, $user);
 $creatorName = approval_current_user_name($user);
@@ -81,6 +97,18 @@ if ($docType === 'leave') {
     $leavePeriodText = isset($_POST['leave_period_text']) ? trim((string)$_POST['leave_period_text']) : '';
     $emergencyContact = isset($_POST['emergency_contact']) ? trim((string)$_POST['emergency_contact']) : '';
     $contentData = array('request_type'=>$requestType,'request_type_etc'=>isset($_POST['request_type_etc']) ? trim((string)$_POST['request_type_etc']) : '','department'=>isset($_POST['department']) ? trim((string)$_POST['department']) : '','position'=>isset($_POST['position']) ? trim((string)$_POST['position']) : '','applicant_name'=>isset($_POST['applicant_name']) ? trim((string)$_POST['applicant_name']) : '','birth_date'=>isset($_POST['birth_date']) ? trim((string)$_POST['birth_date']) : '','leave_start_date'=>$start,'leave_end_date'=>$end,'leave_days'=>$days,'leave_period_text'=>$leavePeriodText,'leave_reason'=>isset($_POST['leave_reason']) ? trim((string)$_POST['leave_reason']) : '','request_date'=>date('Y-m-d'),'applicant_sign_name'=>isset($_POST['applicant_sign_name']) ? trim((string)$_POST['applicant_sign_name']) : '','emergency_contact'=>$emergencyContact);
+        try {
+        if ($creatorEmployeeId > 0) {
+            $meSt = $pdo->prepare("SELECT department,position,name,email FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
+            $meSt->execute(array(':id'=>$creatorEmployeeId));
+            $me = $meSt->fetch();
+            if ($me) {
+                if (isset($me['department'])) { $contentData['department'] = trim((string)$me['department']); }
+                if (isset($me['position'])) { $contentData['position'] = trim((string)$me['position']); }
+                if (isset($me['name']) && trim((string)$me['name'])!=='') { $contentData['applicant_name'] = trim((string)$me['name']); }
+            }
+        }
+    } catch (Exception $e) {}
     $contentData['applicant_email']=$creatorEmail; $contentData['writer_email']=$contentData['applicant_email'];
     $title='휴가계 - '.$contentData['applicant_name'];
     $deptForLine = isset($contentData['department']) ? $contentData['department'] : '';
@@ -155,37 +183,54 @@ $uploadWarn=array();
 if($docType==='proposal'){
     $allow=array('jpg','jpeg','png','gif','webp','pdf');
     $labels=array('order_doc'=>array('발주서','order_doc_file'),'business_license'=>array('사업자 등록증','business_license_file'),'etc'=>array('기타','etc_file'));
-    $rootCandidates=array(
-        realpath(__DIR__.'/../../..'),
-        realpath(__DIR__.'/../../../..')
-    );
-    $root='';
-    for($ri=0;$ri<count($rootCandidates);$ri++){
-        if($rootCandidates[$ri] && is_dir($rootCandidates[$ri].'/app') && is_dir($rootCandidates[$ri].'/public')){
-            $root=$rootCandidates[$ri];
-            break;
-        }
-    }
-    if($root===''){ $root=dirname(dirname(dirname(__DIR__))); }
+    $root=approval_project_root();
     $storageRoot=rtrim($root,'/\\').'/storage';
-    $approvalRoot=rtrim($storageRoot,'/\\').'/approvals';
-    $base=rtrim($approvalRoot,'/\\').'/'.$did.'/files';
+    $approvalRoot=$storageRoot.'/approvals';
+    $base=$approvalRoot.'/'.$did.'/files';
     error_log('[approval_upload] root='.$root);
     error_log('[approval_upload] storageRoot='.$storageRoot);
+    error_log('[approval_upload] approvalRoot='.$approvalRoot);    
     error_log('[approval_upload] base='.$base);
-    if(!is_dir($storageRoot)){ @mkdir($storageRoot,0777,true); }
-    if(!is_dir($approvalRoot)){ @mkdir($approvalRoot,0777,true); }
-    if(!is_dir($base)){ @mkdir($base,0777,true); }
-    $baseReady=is_dir($base);
-    if(!$baseReady){
-        $uploadWarn[]='첨부파일 저장 폴더 생성 실패: 서버 storage 폴더 권한을 확인해주세요.';
-        error_log('[approval_upload] mkdir failed base='.$base);
+    // 기본 프로젝트 경로가 C:\www\cpms 인 경우:
+    // C:\www\cpms\storage
+    // C:\www\cpms\storage\approvals
+    // Linux 서버:
+    // 프로젝트루트/storage
+    // 프로젝트루트/storage/approvals
+    $uploadFolderOk=true;
+    if(!is_dir($storageRoot)){
+        if(!@mkdir($storageRoot,0777,true)){
+            $uploadFolderOk=false;
+            error_log('[approval_upload] mkdir failed storageRoot='.$storageRoot);
+        }
     }
+    if($uploadFolderOk && !is_dir($approvalRoot)){
+        if(!@mkdir($approvalRoot,0777,true)){
+            $uploadFolderOk=false;
+            error_log('[approval_upload] mkdir failed approvalRoot='.$approvalRoot);
+        }
+    }
+    if($uploadFolderOk && !is_dir($base)){
+        if(!@mkdir($base,0777,true)){
+            $uploadFolderOk=false;
+            error_log('[approval_upload] mkdir failed base='.$base);
+        }
+    }
+    if(!$uploadFolderOk){
+        $uploadWarn[]='첨부파일 저장 폴더 생성 실패: 서버 storage 폴더 권한을 확인해주세요.';
+    }
+    $uploadPathWarned = false;    
     foreach($labels as $ft=>$meta){
         $fname=$meta[1];
         if(!isset($_FILES[$fname])||!isset($_FILES[$fname]['tmp_name'])||$_FILES[$fname]['tmp_name']===''){ continue; }
-        if(!$baseReady){ continue; }
-        if(!is_writable($base)){ $uploadWarn[]=$meta[0].' 저장 폴더 쓰기 권한 없음'; continue; }
+        if(!$uploadFolderOk){ continue; }
+        if(!is_writable($base)){
+            if(!$uploadPathWarned){
+                $uploadWarn[]='첨부파일 저장 폴더 생성 실패: 서버 storage 폴더 권한을 확인해주세요.';
+                $uploadPathWarned = true;
+            }
+            continue;
+        }
         if((int)$_FILES[$fname]['error']!==UPLOAD_ERR_OK){ $uploadWarn[]=$meta[0].' 업로드 실패: '.approval_upload_error_message($_FILES[$fname]['error']); continue; }
         $orig=(string)$_FILES[$fname]['name'];
         $ext=strtolower(pathinfo($orig,PATHINFO_EXTENSION));

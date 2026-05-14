@@ -46,7 +46,14 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
         if($role==='팀장' && $mode==='edit'){ approval_render_select_cell('team_lead_id',isset($approvalOptions['team_lead'])?$approvalOptions['team_lead']:array(),'', '팀장 선택'); }
         else if($role==='대표이사'){ approval_render_name_cell($ceoName); }
         else if($role==='부사장'){ approval_render_name_cell(isset($approvalOptions['vp']['name'])?$approvalOptions['vp']['name']:(isset($lineByRole['부사장']['approver_name'])?$lineByRole['부사장']['approver_name']:'-')); }
-        else if($role==='상무'){ approval_render_name_cell(isset($lineByRole['상무']['approver_name'])?$lineByRole['상무']['approver_name']:approval_doc_get($data,'sangmu_name','박원덕')); }
+        else if($role==='상무'){
+            $sangmuName = '';
+            if(isset($lineByRole['상무']['approver_name'])){ $sangmuName = trim((string)$lineByRole['상무']['approver_name']); }
+            if($sangmuName==='' && isset($approvalOptions['sangmu']) && is_array($approvalOptions['sangmu']) && isset($approvalOptions['sangmu']['name'])){ $sangmuName = trim((string)$approvalOptions['sangmu']['name']); }
+            if($sangmuName===''){ $sangmuName = trim((string)approval_doc_get($data,'sangmu_name','')); }
+            if($sangmuName===''){ $sangmuName = '박원덕'; }
+            approval_render_name_cell($sangmuName);
+        }
         else { approval_render_name_cell(isset($lineByRole[$role]['approver_name'])?$lineByRole[$role]['approver_name']:'-'); }
     }
     echo '</tr><tr class="approval-time-row">';
