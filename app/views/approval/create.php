@@ -23,8 +23,58 @@ if($pdo){
     $sql="SELECT id,name,email,department,position,".$birthSel.",".(in_array('approval_can_be_site_manager',$warn)?"0":"approval_can_be_site_manager")." approval_can_be_site_manager,".(in_array('approval_can_be_team_leader',$warn)?"0":"approval_can_be_team_leader")." approval_can_be_team_leader,".(in_array('approval_can_be_gongmu_approver',$warn)?"0":"approval_can_be_gongmu_approver")." approval_can_be_gongmu_approver,".(in_array('approval_can_be_manage_approver',$warn)?"0":"approval_can_be_manage_approver")." approval_can_be_manage_approver FROM employees WHERE is_active=1 ORDER BY name";
     $emps=$pdo->query($sql)->fetchAll();
 }
-$site=array();$lead=array();$gong=array();$man=array();$vp=null;$ceo=null;$myBirth='';$deptLead=array();
-foreach($emps as $e){ if((int)$e['id']==(int)$u['id'])$myBirth=(string)$e['birth_date']; if((int)$e['approval_can_be_site_manager']===1)$site[]=$e; if((int)$e['approval_can_be_team_leader']===1)$lead[]=$e; if((int)$e['approval_can_be_gongmu_approver']===1)$gong[]=$e; if((int)$e['approval_can_be_manage_approver']===1)$man[]=$e; if($e['position']==='부사장'&&!$vp)$vp=$e; if(in_array($e['position'],array('대표','대표이사'))&&!$ceo)$ceo=$e; if(approval_norm_dept($e['department'])===approval_norm_dept($dept) && (int)$e['approval_can_be_team_leader']===1)$deptLead[]=$e; }
+$site=array();$lead=array();$gong=array();$man=array();$vp=null;$ceo=null;$myBirth='';$deptLead=array();$myEmp=array();
+foreach($emps as $e){
+    if((int)$e['approval_can_be_site_manager']===1)$site[]=$e; if((int)$e['approval_can_be_team_leader']===1)$lead[]=$e; if((int)$e['approval_can_be_gongmu_approver']===1)$gong[]=$e; if((int)$e['approval_can_be_manage_approver']===1)$man[]=$e; if($e['position']==='부사장'&&!$vp)$vp=$e; if(in_array($e['position'],array('대표','대표이사'))&&!$ceo)$ceo=$e; if(approval_norm_dept($e['department'])===approval_norm_dept($dept) && (int)$e['approval_can_be_team_leader']===1)$deptLead[]=$e;
+    if($myBirth==='' && (int)$e['id']===(int)$u['id']){ $myBirth=(string)$e['birth_date']; $myEmp=$e; }
+    if(empty($myEmp) && $email!=='' && isset($e['email']) && strtolower((string)$e['email'])===strtolower($email)){ $myEmp=$e; if($myBirth==='')$myBirth=(string)$e['birth_date']; }
+    if(empty($myEmp) && $name!=='' && isset($e['name']) && (string)$e['name']===$name){ $myEmp=$e; if($myBirth==='')$myBirth=(string)$e['birth_date']; }
+}
+if(!empty($myEmp)){
+    if($dept==='' && isset($myEmp['department']))$dept=trim((string)$myEmp['department']);
+    if($position==='' && isset($myEmp['position']))$position=trim((string)$myEmp['position']);
+    if($name==='' && isset($myEmp['name']))$name=trim((string)$myEmp['name']);
+    if($email==='' && isset($myEmp['email']))$email=trim((string)$myEmp['email']);
+}
+if($pdo && approval_column_exists($pdo,'employees','birth_date')){
+    try{
+        if($myBirth==='' && isset($u['id']) && (int)$u['id']>0){
+            $st=$pdo->prepare("SELECT id,name,email,department,position,birth_date FROM employees WHERE id=:id LIMIT 1");
+            $st->execute(array(':id'=>(int)$u['id']));
+            $row=$st->fetch();
+            if($row){
+                if($myBirth==='')$myBirth=(string)$row['birth_date'];
+                if($dept==='' && isset($row['department']))$dept=trim((string)$row['department']);
+                if($position==='' && isset($row['position']))$position=trim((string)$row['position']);
+                if($name==='' && isset($row['name']))$name=trim((string)$row['name']);
+                if($email==='' && isset($row['email']))$email=trim((string)$row['email']);
+            }
+        }
+        if($myBirth==='' && $email!==''){
+            $st=$pdo->prepare("SELECT id,name,email,department,position,birth_date FROM employees WHERE email=:email LIMIT 1");
+            $st->execute(array(':email'=>$email));
+            $row=$st->fetch();
+            if($row){
+                $myBirth=(string)$row['birth_date'];
+                if(isset($row['department']))$dept=trim((string)$row['department']);
+                if(isset($row['position']))$position=trim((string)$row['position']);
+                if(isset($row['name']) && $name==='')$name=trim((string)$row['name']);
+                if(isset($row['email']) && $email==='')$email=trim((string)$row['email']);
+            }
+        }
+        if($myBirth==='' && $name!==''){
+            $st=$pdo->prepare("SELECT id,name,email,department,position,birth_date FROM employees WHERE name=:name LIMIT 1");
+            $st->execute(array(':name'=>$name));
+            $row=$st->fetch();
+            if($row){
+                $myBirth=(string)$row['birth_date'];
+                if(isset($row['department']) && $dept==='')$dept=trim((string)$row['department']);
+                if(isset($row['position']) && $position==='')$position=trim((string)$row['position']);
+                if(isset($row['email']) && $email==='')$email=trim((string)$row['email']);
+            }
+        }
+    } catch (Exception $e) { $myBirth=''; }
+}
 if(count($site)===0){ foreach($emps as $e){ if(in_array(approval_norm_dept($e['department']),array('공사','공사팀'))&&in_array($e['position'],array('과장','차장','부장')))$site[]=$e; } if(count($site)>0)$warn[]='sojang_fallback'; }
 if(count($lead)===0){ foreach($emps as $e){ if(in_array($e['position'],array('과장','차장','부장')))$lead[]=$e; } if(count($lead)>0)$warn[]='leader_fallback'; }
 if(count($deptLead)===0)$deptLead=$lead;
