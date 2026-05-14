@@ -8,7 +8,9 @@ $tables=array(
 'cpms_approval_files'=>"CREATE TABLE IF NOT EXISTS cpms_approval_files (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT, original_name VARCHAR(255), saved_name VARCHAR(255), file_path VARCHAR(255), created_at DATETIME)",
 'cpms_approval_logs'=>"CREATE TABLE IF NOT EXISTS cpms_approval_logs (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT, line_id INT NULL, actor_id INT NULL, actor_name VARCHAR(100), actor_email VARCHAR(190), action_type VARCHAR(30), action_note TEXT NULL, created_at DATETIME)",
 'cpms_approval_notifications'=>"CREATE TABLE IF NOT EXISTS cpms_approval_notifications (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT, event_type VARCHAR(40), receiver_employee_id INT, receiver_name VARCHAR(100), receiver_email VARCHAR(190), message_text TEXT, dm_space_name VARCHAR(255) NULL, send_status VARCHAR(20), sent_at DATETIME NULL, error_message TEXT NULL, created_at DATETIME)",
-'cpms_approval_settings'=>"CREATE TABLE IF NOT EXISTS cpms_approval_settings (id INT AUTO_INCREMENT PRIMARY KEY, setting_key VARCHAR(100) UNIQUE, setting_value TEXT NULL, updated_at DATETIME)"
+'cpms_approval_settings'=>"CREATE TABLE IF NOT EXISTS cpms_approval_settings (id INT AUTO_INCREMENT PRIMARY KEY, setting_key VARCHAR(100) UNIQUE, setting_value TEXT NULL, updated_at DATETIME)",
+'cpms_holiday_cache'=>"CREATE TABLE IF NOT EXISTS cpms_holiday_cache (id INT AUTO_INCREMENT PRIMARY KEY, holiday_date DATE NOT NULL, holiday_name VARCHAR(190) NULL, source VARCHAR(40) NOT NULL DEFAULT 'GOOGLE_CALENDAR', source_calendar_id VARCHAR(190) NULL, source_event_id VARCHAR(190) NULL, year_no INT NULL, is_active TINYINT(1) NOT NULL DEFAULT 1, synced_at DATETIME NULL, created_at DATETIME, updated_at DATETIME, UNIQUE KEY uniq_holiday_date_source (holiday_date, source))",
+'cpms_approval_leave_deductions'=>"CREATE TABLE IF NOT EXISTS cpms_approval_leave_deductions (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT NOT NULL, employee_id INT NOT NULL, leave_type VARCHAR(50) NULL, leave_bucket VARCHAR(20) NULL, target_column VARCHAR(50) NULL, deduct_amount DECIMAL(6,2) NOT NULL DEFAULT 0, balance_before DECIMAL(6,2) NULL, balance_after DECIMAL(6,2) NULL, deducted_at DATETIME NULL, created_at DATETIME, note TEXT NULL, UNIQUE KEY uniq_document_id (document_id))"
 );
 foreach($tables as $name=>$sql){ try{$pdo->exec($sql);$results[]=array('name'=>$name,'type'=>'TABLE','ok'=>1,'msg'=>'확인/생성 완료');}catch(Exception $e){$results[]=array('name'=>$name,'type'=>'TABLE','ok'=>0,'msg'=>$e->getMessage());} }
 $colSqls=array(
@@ -23,7 +25,7 @@ foreach($colSqls as $c){ list($t,$col,$sql)=$c; try{$q=$pdo->query("SHOW COLUMNS
 ?><!doctype html><html><head><meta charset="utf-8"><title>전자결재 DB 설치/확인</title></head><body><h2>전자결재 DB 설치/확인</h2><p>직원별 생년월일, 전자결재 역할, Google Chat DM Space ID는 관리 &gt; 직원명부에서 컬럼 생성 및 설정합니다.</p><p><a href="?r=관리&tab=employees">관리 &gt; 직원명부로 이동</a></p><table border="1" cellpadding="6" cellspacing="0"><tr><th>구분</th><th>대상</th><th>결과</th><th>메시지</th></tr><?php foreach($results as $r){?><tr><td><?php echo h($r['type']);?></td><td><?php echo h($r['name']);?></td><td><?php echo $r['ok']?'성공':'실패';?></td><td><?php echo h($r['msg']);?></td></tr><?php }?></table><p><a href="?r=approval_home">전자결재로 이동</a></p></body></html>
 <?php
 try{
-$defaults=array('google_chat_dm_enabled'=>'0','google_chat_app_credentials_path'=>'','cpms_base_url'=>'');
+$defaults=array('google_chat_dm_enabled'=>'0','google_chat_app_credentials_path'=>'','cpms_base_url'=>'','google_holiday_calendar_enabled'=>'0','google_holiday_calendar_id'=>'ko.south_korea#holiday@group.v.calendar.google.com','google_holiday_calendar_api_key'=>'','google_holiday_sync_years'=>'2');
 foreach($defaults as $k=>$v){$pdo->prepare("INSERT IGNORE INTO cpms_approval_settings (setting_key,setting_value,updated_at) VALUES (:k,:v,NOW())")->execute(array(':k'=>$k,':v'=>$v));}
 }catch(Exception $e){}
 ?>

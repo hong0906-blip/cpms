@@ -524,7 +524,7 @@ if ($route === 'approval_create') { \App\Core\View::render('approval/create', ar
 if ($route === 'approval_detail') { \App\Core\View::render('approval/detail', array('title'=>'전자결재 상세','selectedMenu'=>'전자결재','dashboardType'=>$dashboardType)); exit; }
 if ($route === 'approval_print') { require_once __DIR__ . '/../app/views/approval/print.php'; exit; }
 if ($route === 'approval_download_excel') { require_once __DIR__ . '/../app/views/approval/download_excel.php'; exit; }
-
+if ($route === 'approval_google_holiday_sync') { \App\Core\View::render('approval/google_holiday_sync', array('title'=>'공휴일 동기화','selectedMenu'=>'전자결재','dashboardType'=>$dashboardType)); exit; }
 // ==========================
 //  일반 메뉴
 // ==========================

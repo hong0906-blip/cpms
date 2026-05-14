@@ -244,7 +244,7 @@ if($pdo&&$eid_att>0){
 <div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
   <div class='p-5 rounded-2xl bg-blue-50 border border-blue-100'>
     <div class='text-gray-600 text-sm'><?php echo ($vac['display_type']==='monthly')?'월차 잔여':'연차 잔여';?></div>
-    <div class='font-extrabold text-4xl text-blue-700 mt-2'><?php echo h(attendance_float_fmt($vac['display_balance']));?><span class='text-xl ml-1'>일</span></div>
+    <div class='font-extrabold text-4xl <?php echo ((float)$vac['display_balance']<0)?'text-rose-700':'text-blue-700';?> mt-2'><?php echo h(attendance_float_fmt($vac['display_balance']));?><span class='text-xl ml-1'>일</span></div><?php if((float)$vac['display_balance']<0){ ?><div class='mt-2 text-sm text-rose-700 font-bold'>마이너스 잔여 (청산필요)</div><?php } ?>
   </div>
   <div class='p-5 rounded-2xl bg-gray-50 border border-gray-100'>
     <div class='text-gray-600 text-sm'>반차 가능</div>

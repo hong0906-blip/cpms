@@ -3,6 +3,7 @@ use App\Core\Db;
 require_once __DIR__.'/template_helpers.php';
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') exit;
 require_once __DIR__.'/notification_helpers.php';
+require_once __DIR__.'/leave_balance_helpers.php';
 csrf_validate();
 $pdo = Db::pdo(); $u = \App\Core\Auth::user(); if (!$pdo || !$u) exit;
 $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
@@ -32,6 +33,7 @@ if ($action === 'approve') {
     }
     $pdo->prepare("UPDATE cpms_approval_documents SET doc_status=:s,current_step_order=:o,updated_at=NOW() WHERE id=:id")->execute(array(':s'=>$docStatus,':o'=>$step,':id'=>$id));
     $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,created_at) VALUES (:d,:l,:a,:n,:e,'APPROVE',NOW())")->execute(array(':d'=>$id,':l'=>$l['id'],':a'=>$u['id'],':n'=>$u['name'],':e'=>$u['email']));
+    if($docStatus==='APPROVED'){ approval_deduct_leave_balance_on_final_approval($pdo, $id); }    
 } elseif ($action === 'reject') {
     $pdo->prepare("UPDATE cpms_approval_lines SET line_status='REJECTED',acted_at=NOW(),reject_reason=:r WHERE id=:id AND line_status='PENDING'")->execute(array(':r'=>$reason,':id'=>$l['id']));
     $pdo->prepare("UPDATE cpms_approval_documents SET doc_status='REJECTED',reject_reason=:r,rejected_step=:s,updated_at=NOW() WHERE id=:id")->execute(array(':r'=>$reason,':s'=>$l['role_type'],':id'=>$id));
