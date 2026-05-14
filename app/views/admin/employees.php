@@ -17,6 +17,37 @@ $employeeLoadError = '';
 $deptOptions = array('관리', '공무', '품질', '안전', '공사');
 $positionOptions = array('주임','대리','과장','차장','부장','이사','전무','상무','부사장','고문','대표');
 
+if (!function_exists('cpms_balance_badge')) {
+function cpms_balance_badge($label, $value) {
+    $labelEsc = h((string)$label);
+    $numValue = null;
+    $displayValue = '-';
+    $isMinus = false;
+
+    if ($value !== null && $value !== '') {
+        if (is_numeric($value)) {
+            $numValue = (float)$value;
+            $isMinus = ($numValue < 0);
+            if (floor($numValue) == $numValue) {
+                $displayValue = (string)(int)$numValue;
+            } else {
+                $displayValue = number_format($numValue, 1, '.', '');
+            }
+        } else {
+            $displayValue = (string)$value;
+        }
+    }
+
+    $valueEsc = h($displayValue);
+    if ($isMinus) {
+        return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">'
+            .$labelEsc.' '.$valueEsc.' <span>청산필요</span></span>';
+    }
+
+    return '<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gray-100 text-gray-700 border border-gray-200">'
+        .$labelEsc.' '.$valueEsc.'</span>';
+}}
+
 if (!function_exists('cpms_column_exists')) {
 function cpms_column_exists($pdo, $table, $column) {
     try {
