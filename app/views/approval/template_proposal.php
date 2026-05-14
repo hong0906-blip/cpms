@@ -5,13 +5,13 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     $selectedType=approval_doc_get($data,'draft_type','품의');
     echo '<div class="approval-paper proposal-paper">';
     echo '<div class="doc-title">기안서</div>';
-    echo '<table><tr><td style="width:56%;padding:0">';
+    echo '<table><tr><td style="width:44%;padding:0">';
     echo '<table><tr><th>기안일자</th><td>'; approval_doc_field($mode,'draft_date',approval_doc_get($data,'draft_date',date('Y-m-d')),'doc-input','date'); echo '</td></tr>';
     echo '<tr><th>시행일자</th><td>'; approval_doc_field($mode,'effective_date',approval_doc_get($data,'effective_date',date('Y-m-d')),'doc-input','date'); echo '</td></tr>';
     echo '<tr><th>기안부서</th><td>'; approval_doc_field($mode,'draft_department',approval_doc_get($data,'draft_department',''),'doc-input'); echo '</td></tr>';
     echo '<tr><th>기 안 자</th><td>'; approval_doc_field($mode,'drafter_name',approval_doc_get($data,'drafter_name',''),'doc-input'); echo '</td></tr></table>';
-    echo '</td><td style="width:44%;padding:0">';
-    echo '<table class="approval-line-table"><tr><th rowspan="4">결재</th><th>담당</th><th>소장</th><th>공무</th><th>관리</th><th>부사장</th><th>대표이사</th></tr>';
+    echo '</td><td style="width:56%;padding:0">';
+    echo '<table class="approval-line-table proposal-approval-line"><colgroup><col class="approval-side-col"><col style="width:16.66%"><col style="width:16.66%"><col style="width:16.66%"><col style="width:16.66%"><col style="width:16.66%"><col style="width:16.66%"></colgroup><tr><th rowspan="4">결재</th><th>담당</th><th>소장</th><th>공무</th><th>관리</th><th>부사장</th><th>대표이사</th></tr>';
     echo '<tr class="approval-sign-row">';
     $writerEmail = approval_doc_get($data,'writer_email',isset($approvalOptions['writer_email'])?$approvalOptions['writer_email']:'');
     approval_render_sign_cell(array(), array('name'=>approval_doc_get($data,'drafter_name','-'),'is_drafter'=>1,'writer_email'=>$writerEmail));

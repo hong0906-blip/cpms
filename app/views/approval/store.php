@@ -16,6 +16,21 @@ function approval_store_column_exists($pdo, $table, $column) {
         return ((int)$st->fetchColumn() > 0);
     } catch (\Exception $e) { return false; }
 }}
+
+if (!function_exists('approval_upload_error_message')) {
+function approval_upload_error_message($code) {
+    switch ((int)$code) {
+        case UPLOAD_ERR_INI_SIZE: return '서버 업로드 용량 제한을 초과했습니다.';
+        case UPLOAD_ERR_FORM_SIZE: return '폼 업로드 용량 제한을 초과했습니다.';
+        case UPLOAD_ERR_PARTIAL: return '파일이 일부만 업로드되었습니다.';
+        case UPLOAD_ERR_NO_FILE: return '파일이 선택되지 않았습니다.';
+        case UPLOAD_ERR_NO_TMP_DIR: return '서버 임시폴더가 없습니다.';
+        case UPLOAD_ERR_CANT_WRITE: return '서버가 파일을 저장하지 못했습니다.';
+        case UPLOAD_ERR_EXTENSION: return '서버 확장 기능이 업로드를 중단했습니다.';
+        default: return '알 수 없는 업로드 오류가 발생했습니다.';
+    }
+}}
+
 $creatorEmployeeId = approval_current_employee_id($pdo, $user);
 $creatorName = approval_current_user_name($user);
 $creatorEmail = approval_current_user_email($user);
@@ -68,8 +83,21 @@ if ($docType === 'leave') {
     $contentData = array('request_type'=>$requestType,'request_type_etc'=>isset($_POST['request_type_etc']) ? trim((string)$_POST['request_type_etc']) : '','department'=>isset($_POST['department']) ? trim((string)$_POST['department']) : '','position'=>isset($_POST['position']) ? trim((string)$_POST['position']) : '','applicant_name'=>isset($_POST['applicant_name']) ? trim((string)$_POST['applicant_name']) : '','birth_date'=>isset($_POST['birth_date']) ? trim((string)$_POST['birth_date']) : '','leave_start_date'=>$start,'leave_end_date'=>$end,'leave_days'=>$days,'leave_period_text'=>$leavePeriodText,'leave_reason'=>isset($_POST['leave_reason']) ? trim((string)$_POST['leave_reason']) : '','request_date'=>date('Y-m-d'),'applicant_sign_name'=>isset($_POST['applicant_sign_name']) ? trim((string)$_POST['applicant_sign_name']) : '','emergency_contact'=>$emergencyContact);
     $contentData['applicant_email']=$creatorEmail; $contentData['writer_email']=$contentData['applicant_email'];
     $title='휴가계 - '.$contentData['applicant_name'];
-    $isVpWriter=($creatorEmployeeId>0 && (int)$creatorEmployeeId===(int)$vp['id']);
-    if($isVpWriter){ $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'대표이사','emp'=>$ceo)); }
+    $deptForLine = isset($contentData['department']) ? $contentData['department'] : '';
+    $normDept = approval_norm_dept($deptForLine);
+    $isConstructionDept = ($normDept==='공사' || $normDept==='공사팀');
+    $sangmu = null;
+    if($isConstructionDept){
+        $st=$pdo->prepare("SELECT id,name,email,position,department FROM employees WHERE is_active=1 AND name='박원덕' LIMIT 1");
+        $st->execute(array());
+        $sangmu=$st->fetch();
+        if(!$sangmu){ flash_set('danger','공사부 휴가계는 상무 결재자 박원덕이 필요합니다. 관리 > 직원명부에서 박원덕 직원을 확인해주세요.'); header('Location: ?r=approval_create&type=leave'); exit; }
+    }
+    $contentData['include_sangmu'] = $isConstructionDept ? '1' : '0';
+    $contentData['sangmu_name'] = ($isConstructionDept && isset($sangmu['name'])) ? $sangmu['name'] : '';
+    $contentData['ceo_name'] = isset($ceo['name']) ? $ceo['name'] : '';
+    $contentData['ceo_email'] = isset($ceo['email']) ? $ceo['email'] : '';
+    if($isConstructionDept){ $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'상무','emp'=>$sangmu),array('role'=>'부사장','emp'=>$vp)); }
     else { $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'부사장','emp'=>$vp)); }
 } else {
     $siteRoleCol = approval_store_column_exists($pdo, 'employees', 'approval_can_be_site_manager');
@@ -128,17 +156,20 @@ if($docType==='proposal'){
     $allow=array('jpg','jpeg','png','gif','webp','pdf');
     $labels=array('order_doc'=>array('발주서','order_doc_file'),'business_license'=>array('사업자 등록증','business_license_file'),'etc'=>array('기타','etc_file'));
     $base=dirname(dirname(dirname(__DIR__))).'/storage/approvals/'.$did.'/files';
-    if(!is_dir($base)){ @mkdir($base,0777,true); }
+    if(!is_dir($base)){ if(!@mkdir($base,0777,true)){ $uploadWarn[]='첨부파일 저장 폴더 생성 실패'; error_log('[approval_upload] mkdir failed base='.$base); } }
+    if(is_dir($base)){ error_log('[approval_upload] base='.$base); }
     foreach($labels as $ft=>$meta){
         $fname=$meta[1];
         if(!isset($_FILES[$fname])||!isset($_FILES[$fname]['tmp_name'])||$_FILES[$fname]['tmp_name']===''){ continue; }
-        if((int)$_FILES[$fname]['error']!==UPLOAD_ERR_OK){ $uploadWarn[]=$meta[0].' 업로드 실패'; continue; }
+        if(!is_dir($base)){ $uploadWarn[]=$meta[0].' 저장 폴더 생성 실패'; continue; }
+        if(!is_writable($base)){ $uploadWarn[]=$meta[0].' 저장 폴더 쓰기 권한 없음'; continue; }
+        if((int)$_FILES[$fname]['error']!==UPLOAD_ERR_OK){ $uploadWarn[]=$meta[0].' 업로드 실패: '.approval_upload_error_message($_FILES[$fname]['error']); continue; }
         $orig=(string)$_FILES[$fname]['name'];
         $ext=strtolower(pathinfo($orig,PATHINFO_EXTENSION));
         if(!in_array($ext,$allow)){ $uploadWarn[]=$meta[0].' 확장자 제한'; continue; }
         $saved=$ft.'_'.date('YmdHis').'_'.mt_rand(1000,9999).'.'.$ext;
         $dest=$base.'/'.$saved;
-        if(!@move_uploaded_file($_FILES[$fname]['tmp_name'],$dest)){ $uploadWarn[]=$meta[0].' 저장 실패'; continue; }
+        if(!@move_uploaded_file($_FILES[$fname]['tmp_name'],$dest)){ error_log('[approval_upload] move failed tmp='.$_FILES[$fname]['tmp_name'].' dest='.$dest); $uploadWarn[]=$meta[0].' 저장 실패: 서버 저장 권한 또는 경로를 확인해주세요.'; continue; }
         $rel='storage/approvals/'.$did.'/files/'.$saved;
         $pdo->prepare("INSERT INTO cpms_approval_files (document_id,original_name,saved_name,file_path,file_label,file_type,created_at) VALUES (?,?,?,?,?,?,NOW())")
             ->execute(array($did,$orig,$saved,$rel,$meta[0],$ft));

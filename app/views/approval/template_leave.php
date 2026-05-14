@@ -7,25 +7,54 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
     $applicantEmail = approval_doc_get($data,'applicant_email',approval_doc_get($data,'writer_email',''));
     $sig=approval_sign_path_by_email($applicantEmail);
     $requestDate = approval_doc_get($data,'request_date',date('Y-m-d'));
-    $ceoName = '대표이사';
-    if (isset($approvalOptions['ceo']) && is_array($approvalOptions['ceo']) && isset($approvalOptions['ceo']['name']) && trim((string)$approvalOptions['ceo']['name']) !== '') {
-        $ceoName = (string)$approvalOptions['ceo']['name'];
-    } elseif (isset($lines[2]) && is_array($lines[2]) && isset($lines[2]['approver_name']) && trim((string)$lines[2]['approver_name']) !== '') {
-        $ceoName = (string)$lines[2]['approver_name'];
-    }        
+
+    $lineByRole = array();
+    for($i=0;$i<count($lines);$i++){
+        if(isset($lines[$i]['role_type'])){ $lineByRole[$lines[$i]['role_type']] = $lines[$i]; }
+    }
+
+    $includeSangmu = (approval_doc_get($data,'include_sangmu','0') === '1');
+    if(!$includeSangmu && isset($lineByRole['상무'])){ $includeSangmu = true; }
+
+    $ceoName = trim((string)approval_doc_get($data,'ceo_name',''));
+    if($ceoName==='' && isset($approvalOptions['ceo']) && is_array($approvalOptions['ceo']) && isset($approvalOptions['ceo']['name'])){ $ceoName = trim((string)$approvalOptions['ceo']['name']); }
+    if($ceoName==='' && isset($lineByRole['대표이사']) && isset($lineByRole['대표이사']['approver_name'])){ $ceoName = trim((string)$lineByRole['대표이사']['approver_name']); }
+    if($ceoName===''){ $ceoName='대표이사'; }
+
+    $displayRoles = array('팀장');
+    if($includeSangmu){ $displayRoles[] = '상무'; }
+    $displayRoles[] = '부사장';
+    $displayRoles[] = '대표이사';
+    $dynamicWidth = ($includeSangmu ? '620px' : '520px');
+    $ratio = 100 / count($displayRoles);
+
     echo '<div class="approval-paper leave-paper"><div class="doc-title" style="letter-spacing:0;font-size:44px">휴가계</div>';
-    echo '<div style="display:flex;justify-content:flex-end;margin-bottom:12px"><table class="approval-line-table leave-approval-line" style="width:440px"><colgroup><col style="width:42px"><col style="width:33.33%"><col style="width:33.33%"><col style="width:33.33%"></colgroup><tr><th rowspan="4">결재</th><th>팀장</th><th>부사장</th><th>대표이사</th></tr><tr class="approval-sign-row">';
-    approval_render_sign_cell(isset($lines[0])?$lines[0]:array(), array('name'=>isset($lines[0]['approver_name'])?$lines[0]['approver_name']:'-'));
-    approval_render_sign_cell(isset($lines[1])?$lines[1]:array(), array('name'=>isset($lines[1]['approver_name'])?$lines[1]['approver_name']:'-'));
-    echo '<td><div class="leave-delegated-diagonal"></div></td>';
+    echo '<div class="leave-approval-wrap"><table class="approval-line-table leave-approval-line" style="width:'.$dynamicWidth.'"><colgroup><col class="approval-side-col">';
+    for($i=0;$i<count($displayRoles);$i++){ echo '<col style="width:'.number_format($ratio,2,'.','').'%">'; }
+    echo '</colgroup><tr><th rowspan="4">결재</th>';
+    for($i=0;$i<count($displayRoles);$i++){ echo '<th>'.h($displayRoles[$i]).'</th>'; }
+    echo '</tr><tr class="approval-sign-row">';
+    for($i=0;$i<count($displayRoles);$i++){
+        $role = $displayRoles[$i];
+        if($role==='대표이사'){ echo '<td><div class="leave-delegated-diagonal"></div></td>'; continue; }
+        $line = isset($lineByRole[$role]) ? $lineByRole[$role] : array();
+        approval_render_sign_cell($line, array('name'=>isset($line['approver_name'])?$line['approver_name']:'-'));
+    }
     echo '</tr><tr class="approval-name-row">';
-    if($mode==='edit'){ approval_render_select_cell('team_lead_id',isset($approvalOptions['team_lead'])?$approvalOptions['team_lead']:array(),'', '팀장 선택'); } else { approval_render_name_cell(isset($lines[0]['approver_name'])?$lines[0]['approver_name']:'-'); }
-    approval_render_name_cell(isset($approvalOptions['vp']['name'])?$approvalOptions['vp']['name']:(isset($lines[1]['approver_name'])?$lines[1]['approver_name']:'-'));
-    approval_render_name_cell($ceoName);
+    for($i=0;$i<count($displayRoles);$i++){
+        $role = $displayRoles[$i];
+        if($role==='팀장' && $mode==='edit'){ approval_render_select_cell('team_lead_id',isset($approvalOptions['team_lead'])?$approvalOptions['team_lead']:array(),'', '팀장 선택'); }
+        else if($role==='대표이사'){ approval_render_name_cell($ceoName); }
+        else if($role==='부사장'){ approval_render_name_cell(isset($approvalOptions['vp']['name'])?$approvalOptions['vp']['name']:(isset($lineByRole['부사장']['approver_name'])?$lineByRole['부사장']['approver_name']:'-')); }
+        else if($role==='상무'){ approval_render_name_cell(isset($lineByRole['상무']['approver_name'])?$lineByRole['상무']['approver_name']:approval_doc_get($data,'sangmu_name','박원덕')); }
+        else { approval_render_name_cell(isset($lineByRole[$role]['approver_name'])?$lineByRole[$role]['approver_name']:'-'); }
+    }
     echo '</tr><tr class="approval-time-row">';
-    approval_render_time_cell(isset($lines[0])?$lines[0]:array(), array());
-    approval_render_time_cell(isset($lines[1])?$lines[1]:array(), array());
-    echo '<td class="leave-delegated-status">전결</td>';
+    for($i=0;$i<count($displayRoles);$i++){
+        $role = $displayRoles[$i];
+        if($role==='대표이사'){ echo '<td class="leave-delegated-status">전결</td>'; }
+        else { approval_render_time_cell(isset($lineByRole[$role])?$lineByRole[$role]:array(), array()); }
+    }
     echo '</tr></table></div>';
     echo '<table><tr><th style="width:78px">신청구분</th><td>';
     if($mode==='edit'){ foreach(array('연차','월차','결근','반차 오전','반차 오후','경조휴가','공가','기타') as $v){ echo '<label style="margin-right:8px"><input type="radio" name="request_type" value="'.h($v).'" '.($rt===$v?'checked="checked"':'').'>'.h($v).'</label>'; } echo '<input type="text" name="request_type_etc" value="'.h(approval_doc_get($data,'request_type_etc','')).'" placeholder="기타" class="doc-input doc-inline-input" style="max-width:120px">'; }

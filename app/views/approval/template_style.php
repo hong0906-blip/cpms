@@ -9,9 +9,11 @@
 .doc-subline{font-size:13px;line-height:1.9}.doc-attach{font-size:12px;margin-top:42px}
 @media print {.no-print{display:none!important}body{margin:0;background:#fff}.approval-paper{box-shadow:none;margin:0 auto;border-color:#111}}
 </style>
-<style>.approval-line-table td{text-align:center;vertical-align:middle}.approval-sign-row td{height:56px}.approval-name-row td{font-weight:700}.approval-time-row td{font-size:11px;color:#444}.approval-sign-cell .doc-time{display:block}.attach-row{margin-top:6px}</style>
+<style>.approval-line-table{table-layout:fixed}.approval-line-table th,.approval-line-table td{text-align:center;vertical-align:middle}.approval-sign-row td{height:56px}.approval-name-row td{font-weight:700}.approval-time-row td{font-size:11px;color:#444}.approval-sign-cell .doc-time{display:block}.attach-row{margin-top:6px}.proposal-approval-line{width:100%;table-layout:fixed}.proposal-approval-line .approval-side-col,.leave-approval-line .approval-side-col{width:30px}</style>
 <style>
-.leave-approval-line th:not(:first-child),.leave-approval-line td:not(:first-child){width:33.33%}
+.leave-approval-wrap{display:flex;justify-content:flex-end;margin-bottom:12px}
+.leave-approval-line{table-layout:fixed}
+.leave-approval-line th:not(:first-child),.leave-approval-line td:not(:first-child){width:auto}
 .leave-delegated-diagonal{height:46px;background:linear-gradient(135deg,transparent 49%,#999 50%,transparent 51%)}
 .leave-delegated-status{font-weight:900;color:#111}
 .leave-request-date-big{text-align:center;font-size:42px;font-weight:800;line-height:1.2;margin:34px 0 22px 0}
