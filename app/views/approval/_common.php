@@ -33,3 +33,48 @@ if (!function_exists('approval_doc_label')) {
         return '기안서';
     }
 }
+
+if (!function_exists('approval_current_user_email')) {
+    function approval_current_user_email($user)
+    {
+        if (!is_array($user) || !isset($user['email'])) { return ''; }
+        return trim((string)$user['email']);
+    }
+}
+if (!function_exists('approval_current_user_name')) {
+    function approval_current_user_name($user)
+    {
+        if (!is_array($user) || !isset($user['name'])) { return ''; }
+        return trim((string)$user['name']);
+    }
+}
+if (!function_exists('approval_current_employee_id')) {
+    function approval_current_employee_id($pdo, $user)
+    {
+        if (is_array($user) && isset($user['id']) && (int)$user['id'] > 0) {
+            return (int)$user['id'];
+        }
+
+        $email = approval_current_user_email($user);
+        if ($pdo && $email !== '') {
+            try {
+                $st = $pdo->prepare("SELECT id FROM employees WHERE email=:email LIMIT 1");
+                $st->execute(array(':email'=>$email));
+                $id = (int)$st->fetchColumn();
+                if ($id > 0) { return $id; }
+            } catch (Exception $e) {}
+        }
+
+        $name = approval_current_user_name($user);
+        if ($pdo && $name !== '') {
+            try {
+                $st = $pdo->prepare("SELECT id FROM employees WHERE name=:name LIMIT 1");
+                $st->execute(array(':name'=>$name));
+                $id = (int)$st->fetchColumn();
+                if ($id > 0) { return $id; }
+            } catch (Exception $e) {}
+        }
+
+        return 0;
+    }
+}

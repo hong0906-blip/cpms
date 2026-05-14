@@ -187,6 +187,7 @@ class Auth
             'photo_path' => null,
             'department' => '',
             'position'   => '',
+            'id'         => 0,            
         );
 
         // DB에서 실제 값 로드
@@ -242,16 +243,17 @@ class Auth
         $photo = null;
         $dept = '';
         $pos = '';
+        $employeeId = 0;        
 
         if ($pdo) {
             try {
                 $hasPos = self::positionColumnExists($pdo);
 
                 if ($hasPos) {
-                    $st = $pdo->prepare("SELECT name, role, photo_path, is_active, department, position
+                    $st = $pdo->prepare("SELECT id, name, role, photo_path, is_active, department, position
                                          FROM employees WHERE email = :email LIMIT 1");
                 } else {
-                    $st = $pdo->prepare("SELECT name, role, photo_path, is_active, department
+                    $st = $pdo->prepare("SELECT id, name, role, photo_path, is_active, department
                                          FROM employees WHERE email = :email LIMIT 1");
                 }
 
@@ -260,6 +262,7 @@ class Auth
                 $row = $st->fetch();
 
                 if (is_array($row)) {
+                    $employeeId = isset($row['id']) ? (int)$row['id'] : 0;                    
                     $name = isset($row['name']) ? (string)$row['name'] : '';
                     $role = isset($row['role']) ? (string)$row['role'] : 'employee';
                     $photo = isset($row['photo_path']) ? $row['photo_path'] : null;
@@ -299,7 +302,8 @@ class Auth
         $_SESSION[self::CPMS_USER_KEY]['photo_path'] = $photo;
         $_SESSION[self::CPMS_USER_KEY]['department'] = $dept;
         $_SESSION[self::CPMS_USER_KEY]['position'] = $pos;
-
+        $_SESSION[self::CPMS_USER_KEY]['id'] = $employeeId;
+        
         return true;
     }
 }

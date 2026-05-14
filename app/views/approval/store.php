@@ -1,6 +1,7 @@
 <?php
 use App\Core\Db;
 require_once __DIR__.'/template_helpers.php';
+require_once __DIR__.'/_common.php';
 require_once __DIR__.'/notification_helpers.php';
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { exit; }
 csrf_validate();
@@ -15,6 +16,9 @@ function approval_store_column_exists($pdo, $table, $column) {
         return ((int)$st->fetchColumn() > 0);
     } catch (\Exception $e) { return false; }
 }}
+$creatorEmployeeId = approval_current_employee_id($pdo, $user);
+$creatorName = approval_current_user_name($user);
+$creatorEmail = approval_current_user_email($user);
 $docType = isset($_POST['doc_type']) ? trim((string)$_POST['doc_type']) : 'proposal';
 error_log('[approval_store] start docType='.$docType);
 
@@ -62,9 +66,9 @@ if ($docType === 'leave') {
     $leavePeriodText = isset($_POST['leave_period_text']) ? trim((string)$_POST['leave_period_text']) : '';
     $emergencyContact = isset($_POST['emergency_contact']) ? trim((string)$_POST['emergency_contact']) : '';
     $contentData = array('request_type'=>$requestType,'request_type_etc'=>isset($_POST['request_type_etc']) ? trim((string)$_POST['request_type_etc']) : '','department'=>isset($_POST['department']) ? trim((string)$_POST['department']) : '','position'=>isset($_POST['position']) ? trim((string)$_POST['position']) : '','applicant_name'=>isset($_POST['applicant_name']) ? trim((string)$_POST['applicant_name']) : '','birth_date'=>isset($_POST['birth_date']) ? trim((string)$_POST['birth_date']) : '','leave_start_date'=>$start,'leave_end_date'=>$end,'leave_days'=>$days,'leave_period_text'=>$leavePeriodText,'leave_reason'=>isset($_POST['leave_reason']) ? trim((string)$_POST['leave_reason']) : '','request_date'=>date('Y-m-d'),'applicant_sign_name'=>isset($_POST['applicant_sign_name']) ? trim((string)$_POST['applicant_sign_name']) : '','emergency_contact'=>$emergencyContact);
-    $contentData['applicant_email']=isset($user['email'])?(string)$user['email']:''; $contentData['writer_email']=$contentData['applicant_email'];
+    $contentData['applicant_email']=$creatorEmail; $contentData['writer_email']=$contentData['applicant_email'];
     $title='휴가계 - '.$contentData['applicant_name'];
-    $isVpWriter=((int)$user['id']===(int)$vp['id']);
+    $isVpWriter=($creatorEmployeeId>0 && (int)$creatorEmployeeId===(int)$vp['id']);
     if($isVpWriter){ $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'대표이사','emp'=>$ceo)); }
     else { $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'부사장','emp'=>$vp)); }
 } else {
@@ -85,7 +89,7 @@ if ($docType === 'leave') {
     if ($manageRoleCol && $manage) { $q=$pdo->prepare("SELECT approval_can_be_manage_approver FROM employees WHERE id=:id LIMIT 1"); $q->execute(array(':id'=>(int)$manage['id'])); $manageRoleOk = ((int)$q->fetchColumn()===1); }
     if(!$sojang || (($siteRoleCol && !$sojangRoleOk) || (!$siteRoleCol && (!in_array($sojang['position'],array('과장','차장','부장')) || !in_array(approval_norm_dept($sojang['department']),array('공사','공사팀')))))){ flash_set('danger','소장 결재자를 선택해주세요. 관리 > 직원명부에서 전자결재 역할을 설정해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
     if(!$gongmu || (($gongmuRoleCol && !$gongmuRoleOk) || (!$gongmuRoleCol && !in_array(approval_norm_dept($gongmu['department']),array('공무','공무팀')))) || !$manage || (($manageRoleCol && !$manageRoleOk) || (!$manageRoleCol && !in_array(approval_norm_dept($manage['department']),array('관리','관리팀'))))){ flash_set('danger','공무/관리 결재자를 선택해주세요. 관리 > 직원명부에서 전자결재 역할을 설정해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
-    $contentData = array('draft_date'=>isset($_POST['draft_date']) ? trim((string)$_POST['draft_date']) : '','effective_date'=>isset($_POST['effective_date']) ? trim((string)$_POST['effective_date']) : '','draft_department'=>isset($_POST['draft_department']) ? trim((string)$_POST['draft_department']) : '','drafter_name'=>isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : '','draft_type'=>isset($_POST['draft_type']) ? trim((string)$_POST['draft_type']) : '','title'=>isset($_POST['title']) ? trim((string)$_POST['title']) : '','headline'=>isset($_POST['headline']) ? trim((string)$_POST['headline']) : '','intro_text'=>isset($_POST['intro_text']) ? trim((string)$_POST['intro_text']) : '','reason'=>isset($_POST['reason']) ? trim((string)$_POST['reason']) : '','company_name'=>isset($_POST['company_name']) ? trim((string)$_POST['company_name']) : '','contract_amount'=>isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '','advance_amount'=>isset($_POST['advance_amount']) ? trim((string)$_POST['advance_amount']) : '','special_note_1'=>isset($_POST['special_note_1']) ? trim((string)$_POST['special_note_1']) : '','special_note_2'=>isset($_POST['special_note_2']) ? trim((string)$_POST['special_note_2']) : '','payment_request_date'=>isset($_POST['payment_request_date']) ? trim((string)$_POST['payment_request_date']) : '','budget_status'=>isset($_POST['budget_status']) ? trim((string)$_POST['budget_status']) : '','attached_doc_1'=>isset($_POST['attached_doc_1']) ? trim((string)$_POST['attached_doc_1']) : '','attached_doc_2'=>isset($_POST['attached_doc_2']) ? trim((string)$_POST['attached_doc_2']) : '','attached_doc_note'=>isset($_POST['attached_doc_note']) ? trim((string)$_POST['attached_doc_note']) : '','writer_name'=>isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : '','writer_email'=>isset($user['email'])?(string)$user['email']:'');
+    $contentData = array('draft_date'=>isset($_POST['draft_date']) ? trim((string)$_POST['draft_date']) : '','effective_date'=>isset($_POST['effective_date']) ? trim((string)$_POST['effective_date']) : '','draft_department'=>isset($_POST['draft_department']) ? trim((string)$_POST['draft_department']) : '','drafter_name'=>isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : '','draft_type'=>isset($_POST['draft_type']) ? trim((string)$_POST['draft_type']) : '','title'=>isset($_POST['title']) ? trim((string)$_POST['title']) : '','headline'=>isset($_POST['headline']) ? trim((string)$_POST['headline']) : '','intro_text'=>isset($_POST['intro_text']) ? trim((string)$_POST['intro_text']) : '','reason'=>isset($_POST['reason']) ? trim((string)$_POST['reason']) : '','company_name'=>isset($_POST['company_name']) ? trim((string)$_POST['company_name']) : '','contract_amount'=>isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '','advance_amount'=>isset($_POST['advance_amount']) ? trim((string)$_POST['advance_amount']) : '','special_note_1'=>isset($_POST['special_note_1']) ? trim((string)$_POST['special_note_1']) : '','special_note_2'=>isset($_POST['special_note_2']) ? trim((string)$_POST['special_note_2']) : '','payment_request_date'=>isset($_POST['payment_request_date']) ? trim((string)$_POST['payment_request_date']) : '','budget_status'=>isset($_POST['budget_status']) ? trim((string)$_POST['budget_status']) : '','attached_doc_1'=>isset($_POST['attached_doc_1']) ? trim((string)$_POST['attached_doc_1']) : '','attached_doc_2'=>isset($_POST['attached_doc_2']) ? trim((string)$_POST['attached_doc_2']) : '','attached_doc_note'=>isset($_POST['attached_doc_note']) ? trim((string)$_POST['attached_doc_note']) : '','writer_name'=>isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : '','writer_email'=>$creatorEmail);
     $title=$contentData['title']!==''?$contentData['title']:'기안서';
     $lines=array(array('role'=>'소장','emp'=>$sojang),array('role'=>'공무','emp'=>$gongmu),array('role'=>'관리','emp'=>$manage),array('role'=>'부사장','emp'=>$vp),array('role'=>'대표이사','emp'=>$ceo));
 }
@@ -94,13 +98,16 @@ error_log('[approval_store] docType='.$docType);
 $pdo->beginTransaction();
 error_log('[approval_store] before insert document');
 $pdo->prepare("INSERT INTO cpms_approval_documents (doc_type,title,content,doc_status,current_step_order,created_by_id,created_by_name,created_at,updated_at) VALUES (:t,:ti,:c,'PENDING',1,:uid,:un,NOW(),NOW())")
-    ->execute(array(':t'=>$docType,':ti'=>$title,':c'=>json_encode($contentData),':uid'=>(int)$user['id'],':un'=>$user['name']));
+    ->execute(array(':t'=>$docType,':ti'=>$title,':c'=>json_encode($contentData),':uid'=>$creatorEmployeeId,':un'=>$creatorName));
 $did=(int)$pdo->lastInsertId();
 $prepared=array();
 error_log('[approval_store] after insert document did='.$did);
 for($i=0;$i<count($lines);$i++){
     $emp=$lines[$i]['emp'];
-    $st=((int)$emp['id']===(int)$user['id'])?'SKIPPED':'WAITING';
+    $isSelfApprover=false;
+    if($creatorEmployeeId>0 && (int)$emp['id']===(int)$creatorEmployeeId){ $isSelfApprover=true; }
+    else if($creatorEmail!=='' && isset($emp['email']) && trim((string)$emp['email'])===$creatorEmail){ $isSelfApprover=true; }
+    $st=$isSelfApprover?'SKIPPED':'WAITING';
     $prepared[]=array('order'=>$i+1,'role'=>$lines[$i]['role'],'emp'=>$emp,'status'=>$st);
 }
 $first=0; for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']!=='SKIPPED'){ $first=$i; break; } }
@@ -111,7 +118,7 @@ for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']!=='SKIPPED'){$pre
     $pdo->prepare("INSERT INTO cpms_approval_lines (document_id,line_order,role_type,approver_id,approver_name,approver_email,line_status) VALUES (?,?,?,?,?,?,?)")
     ->execute(array($did,$prepared[$i]['order'],$prepared[$i]['role'],$emp['id'],$emp['name'],$emp['email'],$prepared[$i]['status']));
     if($prepared[$i]['status']==='SKIPPED'){
-      $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,NULL,:a,:n,:e,'SKIPPED',:m,NOW())")->execute(array(':d'=>$did,':a'=>$user['id'],':n'=>$user['name'],':e'=>$user['email'],':m'=>'작성자 본인 결재단계로 자동 건너뜀'));
+      $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,NULL,:a,:n,:e,'SKIPPED',:m,NOW())")->execute(array(':d'=>$did,':a'=>$creatorEmployeeId,':n'=>$creatorName,':e'=>$creatorEmail,':m'=>'작성자 본인 결재단계로 자동 건너뜀'));
     }
 }
 for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']==='PENDING'){ try { approval_queue_notification($pdo,$did,'REQUEST',$prepared[$i]['emp']['id'],'[전자결재 요청]\n확인: ?r=approval_detail&id='.$did); } catch (Exception $e) {} break; } }
