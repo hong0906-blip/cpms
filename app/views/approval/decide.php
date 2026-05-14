@@ -43,6 +43,6 @@ if ($action === 'approve') {
     $pdo->prepare("UPDATE cpms_approval_lines SET line_status='REJECTED',acted_at=NOW(),reject_reason=:r WHERE id=:id AND line_status='PENDING'")->execute(array(':r'=>$reason,':id'=>$l['id']));
     $pdo->prepare("UPDATE cpms_approval_documents SET doc_status='REJECTED',reject_reason=:r,rejected_step=:s,updated_at=NOW() WHERE id=:id")->execute(array(':r'=>$reason,':s'=>$l['role_type'],':id'=>$id));
     $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,:l,:a,:n,:e,'REJECT',:r,NOW())")->execute(array(':d'=>$id,':l'=>$l['id'],':a'=>$uid,':n'=>$actorName,':e'=>$actorEmail,':r'=>$reason));
-    $dst=$pdo->prepare("SELECT created_by_id FROM cpms_approval_documents WHERE id=:id"); $dst->execute(array(':id'=>$id)); $creatorId=(int)$dst->fetchColumn(); if($creatorId>0){ try { approval_queue_notification($pdo,$id,'REJECTED',$creatorId,'[전자결재 반려]\n확인: ?r=approval_detail&id='.$id); } catch (Exception $e) {} }
+    $dst=$pdo->prepare("SELECT created_by_id FROM cpms_approval_documents WHERE id=:id"); $dst->execute(array(':id'=>$id)); $creatorId=(int)$dst->fetchColumn(); if($creatorId>0){ try { approval_queue_notification($pdo,$id,'REJECTED',$creatorId,'[CPMS 전자결재 반려]\n반려사유: '.$reason.'\n확인하기: '.approval_setting_value($pdo,'google_chat_public_base_url','https://cmbuild.kr/cpms/public/').'?r=approval_detail&id='.$id); } catch (Exception $e) {} }
 }
 $pdo->commit(); header('Location: ?r=approval_detail&id='.$id);

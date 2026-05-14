@@ -94,6 +94,11 @@ $googleChatEnabled = isset($_POST['google_chat_enabled']) ? 1 : 0;
 $googleChatUserName = isset($_POST['google_chat_user_name']) ? trim((string)$_POST['google_chat_user_name']) : '';
 $googleChatSpaceName = isset($_POST['google_chat_dm_space_name']) ? trim((string)$_POST['google_chat_dm_space_name']) : '';
 
+
+if ($googleChatEnabled===1 && $googleChatUserName==='' && $email!=='') {
+    $googleChatUserName = 'users/'.$email;
+}
+
 if ($email === '' || $name === '') { flash_set('error', '이메일/이름은 필수입니다.'); header('Location: ?r=관리&tab=employees'); exit; }
 
 $allowedDepts = array('관리', '공무', '품질', '안전', '공사');

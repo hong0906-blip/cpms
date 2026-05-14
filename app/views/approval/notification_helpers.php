@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__.'/google_chat_helpers.php';
 function approval_notification_table_exists($pdo, $table) {
     try {
         $db = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
@@ -52,8 +53,13 @@ function approval_queue_notification($pdo, $documentId, $eventType, $receiverEmp
         $dmSpace = isset($emp['google_chat_dm_space_name']) ? trim((string)$emp['google_chat_dm_space_name']) : '';
         if (!$dmEnabled || (int)$emp['google_chat_enabled'] !== 1) { $status = 'DISABLED'; }
         else if ($dmSpace === '') { $status = 'FAILED'; $err = 'DM Space ID가 등록되지 않았습니다.'; }
-        else { $status = 'SENT'; }
-        $sentAt = ($status==='SENT') ? date('Y-m-d H:i:s') : null;
+        else { $status = 'READY'; }
+        $sentAt = null;
+        if ($status === 'READY') {
+            $ok = approval_google_chat_send_message($pdo, $dmSpace, $messageText);
+            if ($ok) { $status = 'SENT'; $sentAt = date('Y-m-d H:i:s'); }
+            else { $status = 'FAILED'; $err = 'Google Chat 전송 실패'; }
+        }
         $pdo->prepare("INSERT INTO cpms_approval_notifications (document_id,event_type,receiver_employee_id,receiver_name,receiver_email,message_text,dm_space_name,send_status,sent_at,error_message,created_at) VALUES (:d,:e,:rid,:rn,:re,:m,:s,:st,:sa,:er,NOW())")
             ->execute(array(':d'=>$documentId,':e'=>$eventType,':rid'=>$emp['id'],':rn'=>$emp['name'],':re'=>$emp['email'],':m'=>$messageText,':s'=>$dmSpace,':st'=>$status,':sa'=>$sentAt,':er'=>$err));
     } catch (Exception $e) {
