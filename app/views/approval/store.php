@@ -16,6 +16,30 @@ function approval_store_column_exists($pdo, $table, $column) {
     } catch (\Exception $e) { return false; }
 }}
 $docType = isset($_POST['doc_type']) ? trim((string)$_POST['doc_type']) : 'proposal';
+error_log('[approval_store] start docType='.$docType);
+
+$requiredStoreColumns = array(
+    array('cpms_approval_documents', 'current_step_order'),
+    array('cpms_approval_documents', 'created_by_id'),
+    array('cpms_approval_documents', 'created_by_name'),
+    array('cpms_approval_documents', 'updated_at'),
+    array('cpms_approval_lines', 'approver_email'),
+    array('cpms_approval_logs', 'action_type')
+);
+$missingStoreColumns = array();
+for ($i=0; $i<count($requiredStoreColumns); $i++) {
+    $tbl = $requiredStoreColumns[$i][0];
+    $col = $requiredStoreColumns[$i][1];
+    if (!approval_store_column_exists($pdo, $tbl, $col)) {
+        $missingStoreColumns[] = $tbl.'.'.$col;
+    }
+}
+if (count($missingStoreColumns) > 0) {
+    flash_set('danger', '전자결재 DB 컬럼이 아직 준비되지 않았습니다. 관리자에게 전자결재 DB 설치/확인을 요청해주세요.');
+    header('Location: ?r=approval_create&type='.$docType);
+    exit;
+}
+
 $vp = $pdo->query("SELECT id,name,email FROM employees WHERE is_active=1 AND position='부사장' LIMIT 1")->fetch();
 $ceo = $pdo->query("SELECT id,name,email FROM employees WHERE is_active=1 AND position IN ('대표','대표이사') LIMIT 1")->fetch();
 if (!$vp || ($docType!=='leave' && !$ceo)) { flash_set('danger','직원명부에서 부사장 또는 대표이사가 등록되어 있지 않습니다. 관리 메뉴에서 먼저 등록해주세요.'); header('Location: ?r=approval_create&type='.$docType); exit; }
@@ -65,11 +89,15 @@ if ($docType === 'leave') {
     $title=$contentData['title']!==''?$contentData['title']:'기안서';
     $lines=array(array('role'=>'소장','emp'=>$sojang),array('role'=>'공무','emp'=>$gongmu),array('role'=>'관리','emp'=>$manage),array('role'=>'부사장','emp'=>$vp),array('role'=>'대표이사','emp'=>$ceo));
 }
+try {
+error_log('[approval_store] docType='.$docType);
 $pdo->beginTransaction();
+error_log('[approval_store] before insert document');
 $pdo->prepare("INSERT INTO cpms_approval_documents (doc_type,title,content,doc_status,current_step_order,created_by_id,created_by_name,created_at,updated_at) VALUES (:t,:ti,:c,'PENDING',1,:uid,:un,NOW(),NOW())")
     ->execute(array(':t'=>$docType,':ti'=>$title,':c'=>json_encode($contentData),':uid'=>(int)$user['id'],':un'=>$user['name']));
 $did=(int)$pdo->lastInsertId();
 $prepared=array();
+error_log('[approval_store] after insert document did='.$did);
 for($i=0;$i<count($lines);$i++){
     $emp=$lines[$i]['emp'];
     $st=((int)$emp['id']===(int)$user['id'])?'SKIPPED':'WAITING';
@@ -79,6 +107,7 @@ $first=0; for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']!=='SKIP
 $allSkipped=true; for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']!=='SKIPPED'){ $allSkipped=false; break; } }
 if($allSkipped){ $pdo->rollBack(); flash_set('danger','모든 결재자가 작성자 본인으로 설정되어 결재 요청을 만들 수 없습니다. 결재라인을 다시 선택해주세요.'); header('Location: ?r=approval_create&type='.$docType); exit; }
 for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']!=='SKIPPED'){$prepared[$i]['status']=($i===$first)?'PENDING':'WAITING';} $emp=$prepared[$i]['emp'];    
+    if($i===0){ error_log('[approval_store] before insert lines'); }
     $pdo->prepare("INSERT INTO cpms_approval_lines (document_id,line_order,role_type,approver_id,approver_name,approver_email,line_status) VALUES (?,?,?,?,?,?,?)")
     ->execute(array($did,$prepared[$i]['order'],$prepared[$i]['role'],$emp['id'],$emp['name'],$emp['email'],$prepared[$i]['status']));
     if($prepared[$i]['status']==='SKIPPED'){
@@ -108,6 +137,17 @@ if($docType==='proposal'){
             ->execute(array($did,$orig,$saved,$rel,$meta[0],$ft));
     }
 }
+error_log('[approval_store] before commit');
 $pdo->commit();
 if(count($uploadWarn)>0){ flash_set('danger', implode(', ',$uploadWarn)); }
 header('Location: ?r=approval_detail&id='.$did);
+} catch (Exception $e) {
+    error_log('[approval_store] catch '.$e->getMessage());
+    if ($pdo && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    error_log('[approval_store] '.$e->getMessage());
+    flash_set('danger', '전자결재 저장 중 오류가 발생했습니다. 전자결재 DB 설치/확인을 먼저 실행해주세요.');
+    header('Location: ?r=approval_create&type='.$docType);
+    exit;
+}
