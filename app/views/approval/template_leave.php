@@ -1,5 +1,5 @@
 <?php
-function render_approval_leave_document($data, $lines, $mode)
+function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
 {
     $rt = approval_doc_get($data,'request_type','연차');
     $start=approval_doc_get($data,'leave_start_date',date('Y-m-d')); $end=approval_doc_get($data,'leave_end_date',date('Y-m-d')); $days=approval_doc_get($data,'leave_days','1');
@@ -12,8 +12,8 @@ function render_approval_leave_document($data, $lines, $mode)
     approval_render_sign_cell(isset($lines[1])?$lines[1]:array(), array('name'=>isset($lines[1]['approver_name'])?$lines[1]['approver_name']:'-'));
     approval_render_sign_cell(array(), array('name'=>'대표이사','is_delegated'=>1));
     echo '</tr><tr class="approval-name-row">';
-    approval_render_name_cell(isset($lines[0]['approver_name'])?$lines[0]['approver_name']:'-');
-    approval_render_name_cell(isset($lines[1]['approver_name'])?$lines[1]['approver_name']:'-');
+    if($mode==='edit'){ approval_render_select_cell('team_lead_id',isset($approvalOptions['team_lead'])?$approvalOptions['team_lead']:array(),'', '팀장 선택'); } else { approval_render_name_cell(isset($lines[0]['approver_name'])?$lines[0]['approver_name']:'-'); }
+    approval_render_name_cell(isset($approvalOptions['vp']['name'])?$approvalOptions['vp']['name']:(isset($lines[1]['approver_name'])?$lines[1]['approver_name']:'-'));
     approval_render_name_cell('대표이사');
     echo '</tr><tr class="approval-time-row">';
     approval_render_time_cell(isset($lines[0])?$lines[0]:array(), array());

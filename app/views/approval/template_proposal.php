@@ -1,5 +1,5 @@
 <?php
-function render_approval_proposal_document($data, $lines, $mode, $files)
+function render_approval_proposal_document($data, $lines, $mode, $files, $approvalOptions)
 {
     $types = array('품의','제안','보고','기타');
     $selectedType=approval_doc_get($data,'draft_type','품의');
@@ -13,7 +13,8 @@ function render_approval_proposal_document($data, $lines, $mode, $files)
     echo '</td><td style="width:44%;padding:0">';
     echo '<table class="approval-line-table"><tr><th rowspan="4">결재</th><th>담당</th><th>소장</th><th>공무</th><th>관리</th><th>부사장</th><th>대표이사</th></tr>';
     echo '<tr class="approval-sign-row">';
-    approval_render_sign_cell(array(), array('name'=>approval_doc_get($data,'drafter_name','-')));
+    $writerEmail = approval_doc_get($data,'writer_email',isset($approvalOptions['writer_email'])?$approvalOptions['writer_email']:'');
+    approval_render_sign_cell(array(), array('name'=>approval_doc_get($data,'drafter_name','-'),'is_drafter'=>1,'writer_email'=>$writerEmail));
     approval_render_sign_cell(isset($lines[0])?$lines[0]:array(), array('name'=>isset($lines[0]['approver_name'])?$lines[0]['approver_name']:'-'));
     approval_render_sign_cell(isset($lines[1])?$lines[1]:array(), array('name'=>isset($lines[1]['approver_name'])?$lines[1]['approver_name']:'-'));
     approval_render_sign_cell(isset($lines[2])?$lines[2]:array(), array('name'=>isset($lines[2]['approver_name'])?$lines[2]['approver_name']:'-'));
@@ -21,11 +22,11 @@ function render_approval_proposal_document($data, $lines, $mode, $files)
     approval_render_sign_cell(isset($lines[4])?$lines[4]:array(), array('name'=>isset($lines[4]['approver_name'])?$lines[4]['approver_name']:'-'));
     echo '</tr><tr class="approval-name-row">';
     approval_render_name_cell(approval_doc_get($data,'drafter_name','-'));
-    approval_render_name_cell(isset($lines[0]['approver_name'])?$lines[0]['approver_name']:'-');
-    approval_render_name_cell(isset($lines[1]['approver_name'])?$lines[1]['approver_name']:'-');
-    approval_render_name_cell(isset($lines[2]['approver_name'])?$lines[2]['approver_name']:'-');
-    approval_render_name_cell(isset($lines[3]['approver_name'])?$lines[3]['approver_name']:'-');
-    approval_render_name_cell(isset($lines[4]['approver_name'])?$lines[4]['approver_name']:'-');
+    if($mode==='edit'){ approval_render_select_cell('sojang_id',isset($approvalOptions['site'])?$approvalOptions['site']:array(),'', '소장 선택'); } else { approval_render_name_cell(isset($lines[0]['approver_name'])?$lines[0]['approver_name']:'-'); }
+    if($mode==='edit'){ approval_render_select_cell('gongmu_id',isset($approvalOptions['gongmu'])?$approvalOptions['gongmu']:array(),'', '공무 선택'); } else { approval_render_name_cell(isset($lines[1]['approver_name'])?$lines[1]['approver_name']:'-'); }
+    if($mode==='edit'){ approval_render_select_cell('manage_id',isset($approvalOptions['manage'])?$approvalOptions['manage']:array(),'', '관리 선택'); } else { approval_render_name_cell(isset($lines[2]['approver_name'])?$lines[2]['approver_name']:'-'); }
+    approval_render_name_cell(isset($approvalOptions['vp']['name'])?$approvalOptions['vp']['name']:(isset($lines[3]['approver_name'])?$lines[3]['approver_name']:'-'));
+    approval_render_name_cell(isset($approvalOptions['ceo']['name'])?$approvalOptions['ceo']['name']:(isset($lines[4]['approver_name'])?$lines[4]['approver_name']:'-'));
     echo '</tr><tr class="approval-time-row">';
     approval_render_time_cell(array(), array('is_drafter'=>1));
     approval_render_time_cell(isset($lines[0])?$lines[0]:array(), array());

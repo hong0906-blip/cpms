@@ -43,9 +43,10 @@ $init=array('birth_date'=>$myBirth,'draft_date'=>date('Y-m-d'),'effective_date'=
 <input type="hidden" name="doc_type" value="<?php echo $isLeave?'leave':'proposal';?>">
 <?php if(in_array('sojang_fallback',$warn)){?><div>소장 결재자 역할이 설정되지 않아 공사팀 과장~부장을 임시 후보로 표시합니다. 관리 > 직원명부에서 소장 결재자를 설정해주세요.</div><?php }?>
 <?php if(in_array('leader_fallback',$warn)||in_array('gongmu_fallback',$warn)||in_array('manage_fallback',$warn)){?><div>관리 > 직원명부에서 전자결재 역할을 설정해주세요.</div><?php }?>
-<?php if($isLeave){?><select name="team_lead_id"><?php foreach($deptLead as $e){?><option value="<?php echo (int)$e['id'];?>"><?php echo h($e['name']);?></option><?php }?></select><?php } else { ?><select name="sojang_id"><?php foreach($site as $e){?><option value="<?php echo (int)$e['id'];?>"><?php echo h($e['name']);?></option><?php }?></select><select name="gongmu_id"><?php foreach($gong as $e){?><option value="<?php echo (int)$e['id'];?>"><?php echo h($e['name']);?></option><?php }?></select><select name="manage_id"><?php foreach($man as $e){?><option value="<?php echo (int)$e['id'];?>"><?php echo h($e['name']);?></option><?php }?></select><?php }?>
-<button type="submit" class="px-5 py-2 rounded-xl border border-indigo-400 text-indigo-700 font-bold bg-white">전자결재 보내기</button>
-<?php if($isLeave){ render_approval_leave_document($init,array(), 'edit'); } else { render_approval_proposal_document($init,array(),'edit',array()); } ?>
+<?php
+$approvalOptions=array('site'=>$site,'gongmu'=>$gong,'manage'=>$man,'team_lead'=>$deptLead,'vp'=>$vp,'ceo'=>$ceo,'writer_email'=>$email);
+if($isLeave){ render_approval_leave_document($init,array(), 'edit',$approvalOptions); } else { render_approval_proposal_document($init,array(),'edit',array(),$approvalOptions); }
+?>
 
 <div class="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
   작성 내용을 확인한 뒤 전자결재 보내기를 누르면 결재라인 순서대로 요청이 전달됩니다.

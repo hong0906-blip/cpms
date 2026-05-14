@@ -25,7 +25,11 @@ if (!function_exists('approval_render_sign_cell')) {
         $status = isset($line['line_status']) ? $line['line_status'] : 'WAITING';
         $time = !empty($line['acted_at']) ? $line['acted_at'] : '';
         echo '<td class="approval-sign-cell">';    
-        if ($status === 'APPROVED') {
+        if (!empty($opts['is_drafter'])) {
+            $sig = approval_sign_path_by_email(isset($opts['writer_email']) ? $opts['writer_email'] : '');
+            if ($sig !== '') { echo '<img src="'.h('../'.$sig).'" class="doc-sign">'; }
+            else { echo '<div class="doc-time">사인 미등록</div>'; }
+        } elseif ($status === 'APPROVED') {
             $sig = isset($line['sign_path']) ? trim((string)$line['sign_path']) : '';
             $abs = dirname(dirname(dirname(__DIR__))).'/'.$sig;
             if ($sig !== '' && is_file($abs)) { echo '<img src="'.h('../'.$sig).'" class="doc-sign">'; }
@@ -36,6 +40,22 @@ if (!function_exists('approval_render_sign_cell')) {
             echo '<div class="doc-time">-</div>';
         }
         echo '</td>';
+    }
+}
+if (!function_exists('approval_render_select_cell')) {
+    function approval_render_select_cell($name, $list, $selected, $placeholder)
+    {
+        $list = is_array($list) ? $list : array();
+        echo '<td class="approval-name-cell"><select name="'.h($name).'" class="doc-select">';
+        echo '<option value="">'.h($placeholder).'</option>';
+        foreach ($list as $e) {
+            $id = isset($e['id']) ? (int)$e['id'] : 0;
+            if ($id <= 0) { continue; }
+            $nm = isset($e['name']) ? $e['name'] : '';
+            $sel = ((string)$selected !== '' && (int)$selected === $id) ? ' selected="selected"' : '';
+            echo '<option value="'.$id.'"'.$sel.'>'.h($nm).'</option>';
+        }
+        echo '</select></td>';
     }
 }
 if (!function_exists('approval_render_name_cell')) {
