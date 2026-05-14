@@ -178,6 +178,14 @@ try {
     $msg = ($id > 0 ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.')
         . ' (id=' . $savedId . ', hire_date=' . ($hireDate === '' ? 'NULL' : $hireDate) . ', hire_date_column=' . ($hireDateEnabled ? 'yes' : 'no') . ')';
     flash_set('success', $msg);
+    $currentUser = Auth::user();
+    if (is_array($currentUser)) {
+        $currentEmail = isset($currentUser['email']) ? strtolower(trim((string)$currentUser['email'])) : '';
+        $targetEmail = strtolower(trim((string)$email));
+        if ($currentEmail !== '' && $targetEmail !== '' && $currentEmail === $targetEmail && method_exists('App\\Core\\Auth','refreshCurrentUser')) {
+            Auth::refreshCurrentUser(true);
+        }
+    }    
 } catch (\Exception $e) { flash_set('error', '저장 실패: '.$e->getMessage()); }
 
 header('Location: ?r=관리&tab=employees');

@@ -19,27 +19,23 @@ if (!function_exists('approval_doc_field')) {
 if (!function_exists('approval_render_sign_cell')) {
     function approval_render_sign_cell($line, $opts)
     {
-        $line = is_array($line) ? $line : array();
-        $opts = is_array($opts) ? $opts : array();
-        $name = isset($opts['name']) ? (string)$opts['name'] : (isset($line['approver_name']) ? (string)$line['approver_name'] : '-');        
-        $status = isset($line['line_status']) ? $line['line_status'] : 'WAITING';
-        $time = !empty($line['acted_at']) ? $line['acted_at'] : '';
-        echo '<td class="approval-sign-cell">';    
-        if (!empty($opts['is_drafter'])) {
-            $sig = approval_sign_path_by_email(isset($opts['writer_email']) ? $opts['writer_email'] : '');
-            if ($sig !== '') { echo '<img src="'.h('../'.$sig).'" class="doc-sign">'; }
-            else { echo '<div class="doc-time">사인 미등록</div>'; }
-        } elseif ($status === 'APPROVED') {
-            $sig = isset($line['sign_path']) ? trim((string)$line['sign_path']) : '';
-            $abs = dirname(dirname(dirname(__DIR__))).'/'.$sig;
-            if ($sig !== '' && is_file($abs)) { echo '<img src="'.h('../'.$sig).'" class="doc-sign">'; }
-            else { echo '<div class="doc-time">사인 미등록</div>'; }
-        } elseif (!empty($opts['is_delegated'])) {
-            echo '<div class="doc-time">전결</div>';
+        $status = isset($line['line_status']) ? (string)$line['line_status'] : '';
+        $isApproved = ($status === 'APPROVED' || $status === 'SKIPPED');
+        $isDelegated = ($status === 'DELEGATED');
+        $isDrafter = isset($opts['is_drafter']) && (int)$opts['is_drafter'] === 1;
+        $email = '';
+        if ($isDrafter) { $email = isset($opts['writer_email']) ? (string)$opts['writer_email'] : ''; }
+        else { $email = isset($line['approver_email']) ? (string)$line['approver_email'] : ''; }
+        $sig = approval_sign_path_by_email($email);
+        echo '<td><div class="approval-sign-cell">';
+        if (($isApproved || $isDelegated || $isDrafter) && $sig !== '') {
+            echo '<img src="'.h('../'.$sig).'" class="doc-sign">';
+        } else if ($isDelegated) {
+            echo '<span class="doc-time">전결</span>';
         } else {
-            echo '<div class="doc-time">-</div>';
+            echo '<span class="doc-time">사인 미등록</span>';
         }
-        echo '</td>';
+        echo '</div></td>';
     }
 }
 if (!function_exists('approval_render_select_cell')) {

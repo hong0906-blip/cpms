@@ -31,10 +31,10 @@ foreach($emps as $e){
     if(empty($myEmp) && $name!=='' && isset($e['name']) && (string)$e['name']===$name){ $myEmp=$e; if($myBirth==='')$myBirth=(string)$e['birth_date']; }
 }
 if(!empty($myEmp)){
-    if($dept==='' && isset($myEmp['department']))$dept=trim((string)$myEmp['department']);
-    if($position==='' && isset($myEmp['position']))$position=trim((string)$myEmp['position']);
-    if($name==='' && isset($myEmp['name']))$name=trim((string)$myEmp['name']);
-    if($email==='' && isset($myEmp['email']))$email=trim((string)$myEmp['email']);
+    if(isset($myEmp['department']))$dept=trim((string)$myEmp['department']);
+    if(isset($myEmp['position']))$position=trim((string)$myEmp['position']);
+    if(isset($myEmp['name']) && trim((string)$myEmp['name'])!=='')$name=trim((string)$myEmp['name']);
+    if(isset($myEmp['email']) && trim((string)$myEmp['email'])!=='')$email=trim((string)$myEmp['email']);
 }
 if($pdo && approval_column_exists($pdo,'employees','birth_date')){
     try{
@@ -44,10 +44,10 @@ if($pdo && approval_column_exists($pdo,'employees','birth_date')){
             $row=$st->fetch();
             if($row){
                 if($myBirth==='')$myBirth=(string)$row['birth_date'];
-                if($dept==='' && isset($row['department']))$dept=trim((string)$row['department']);
-                if($position==='' && isset($row['position']))$position=trim((string)$row['position']);
-                if($name==='' && isset($row['name']))$name=trim((string)$row['name']);
-                if($email==='' && isset($row['email']))$email=trim((string)$row['email']);
+                if(isset($row['department']))$dept=trim((string)$row['department']);
+                if(isset($row['position']))$position=trim((string)$row['position']);
+                if(isset($row['name']) && trim((string)$row['name'])!=='')$name=trim((string)$row['name']);
+                if(isset($row['email']) && trim((string)$row['email'])!=='')$email=trim((string)$row['email']);
             }
         }
         if($myBirth==='' && $email!==''){
@@ -58,8 +58,8 @@ if($pdo && approval_column_exists($pdo,'employees','birth_date')){
                 $myBirth=(string)$row['birth_date'];
                 if(isset($row['department']))$dept=trim((string)$row['department']);
                 if(isset($row['position']))$position=trim((string)$row['position']);
-                if(isset($row['name']) && $name==='')$name=trim((string)$row['name']);
-                if(isset($row['email']) && $email==='')$email=trim((string)$row['email']);
+                if(isset($row['name']) && trim((string)$row['name'])!=='')$name=trim((string)$row['name']);
+                if(isset($row['email']) && trim((string)$row['email'])!=='')$email=trim((string)$row['email']);
             }
         }
         if($myBirth==='' && $name!==''){
@@ -68,9 +68,10 @@ if($pdo && approval_column_exists($pdo,'employees','birth_date')){
             $row=$st->fetch();
             if($row){
                 $myBirth=(string)$row['birth_date'];
-                if(isset($row['department']) && $dept==='')$dept=trim((string)$row['department']);
-                if(isset($row['position']) && $position==='')$position=trim((string)$row['position']);
-                if(isset($row['email']) && $email==='')$email=trim((string)$row['email']);
+                if(isset($row['department']))$dept=trim((string)$row['department']);
+                if(isset($row['position']))$position=trim((string)$row['position']);
+                if(isset($row['name']) && trim((string)$row['name'])!=='')$name=trim((string)$row['name']);
+                if(isset($row['email']) && trim((string)$row['email'])!=='')$email=trim((string)$row['email']);
             }
         }
     } catch (Exception $e) { $myBirth=''; }

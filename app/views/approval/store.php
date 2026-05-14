@@ -155,13 +155,36 @@ $uploadWarn=array();
 if($docType==='proposal'){
     $allow=array('jpg','jpeg','png','gif','webp','pdf');
     $labels=array('order_doc'=>array('발주서','order_doc_file'),'business_license'=>array('사업자 등록증','business_license_file'),'etc'=>array('기타','etc_file'));
-    $base=dirname(dirname(dirname(__DIR__))).'/storage/approvals/'.$did.'/files';
-    if(!is_dir($base)){ if(!@mkdir($base,0777,true)){ $uploadWarn[]='첨부파일 저장 폴더 생성 실패'; error_log('[approval_upload] mkdir failed base='.$base); } }
-    if(is_dir($base)){ error_log('[approval_upload] base='.$base); }
+    $rootCandidates=array(
+        realpath(__DIR__.'/../../..'),
+        realpath(__DIR__.'/../../../..')
+    );
+    $root='';
+    for($ri=0;$ri<count($rootCandidates);$ri++){
+        if($rootCandidates[$ri] && is_dir($rootCandidates[$ri].'/app') && is_dir($rootCandidates[$ri].'/public')){
+            $root=$rootCandidates[$ri];
+            break;
+        }
+    }
+    if($root===''){ $root=dirname(dirname(dirname(__DIR__))); }
+    $storageRoot=rtrim($root,'/\\').'/storage';
+    $approvalRoot=rtrim($storageRoot,'/\\').'/approvals';
+    $base=rtrim($approvalRoot,'/\\').'/'.$did.'/files';
+    error_log('[approval_upload] root='.$root);
+    error_log('[approval_upload] storageRoot='.$storageRoot);
+    error_log('[approval_upload] base='.$base);
+    if(!is_dir($storageRoot)){ @mkdir($storageRoot,0777,true); }
+    if(!is_dir($approvalRoot)){ @mkdir($approvalRoot,0777,true); }
+    if(!is_dir($base)){ @mkdir($base,0777,true); }
+    $baseReady=is_dir($base);
+    if(!$baseReady){
+        $uploadWarn[]='첨부파일 저장 폴더 생성 실패: 서버 storage 폴더 권한을 확인해주세요.';
+        error_log('[approval_upload] mkdir failed base='.$base);
+    }
     foreach($labels as $ft=>$meta){
         $fname=$meta[1];
         if(!isset($_FILES[$fname])||!isset($_FILES[$fname]['tmp_name'])||$_FILES[$fname]['tmp_name']===''){ continue; }
-        if(!is_dir($base)){ $uploadWarn[]=$meta[0].' 저장 폴더 생성 실패'; continue; }
+        if(!$baseReady){ continue; }
         if(!is_writable($base)){ $uploadWarn[]=$meta[0].' 저장 폴더 쓰기 권한 없음'; continue; }
         if((int)$_FILES[$fname]['error']!==UPLOAD_ERR_OK){ $uploadWarn[]=$meta[0].' 업로드 실패: '.approval_upload_error_message($_FILES[$fname]['error']); continue; }
         $orig=(string)$_FILES[$fname]['name'];
