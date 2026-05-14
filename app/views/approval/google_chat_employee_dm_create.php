@@ -1,14 +1,82 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
-use App\Core\Auth; use App\Core\Db;
-require_once __DIR__.'/google_chat_helpers.php';
-if (!Auth::check()) { header('Location: ?r=login'); exit; }
-if (!Auth::canManageEmployees()) { http_response_code(403); exit('403'); }
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ?r=관리&tab=employees'); exit; }
-if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) { flash_set('error','보안 토큰이 유효하지 않습니다.'); header('Location: ?r=관리&tab=employees'); exit; }
-$pdo = Db::pdo(); $id = isset($_POST['employee_id']) ? (int)$_POST['employee_id'] : 0;
-$st = $pdo->prepare("SELECT google_chat_dm_space_name FROM employees WHERE id=:id LIMIT 1"); $st->execute(array(':id'=>$id)); $space = trim((string)$st->fetchColumn());
-if ($space==='') { flash_set('error','먼저 DM Space 자동생성을 실행해주세요.'); header('Location: ?r=관리&tab=employees'); exit; }
-$msg = "CPMS 전자결재 Google Chat 알림 테스트입니다.\n이 메시지가 보이면 개인 DM 알림 설정이 완료된 것입니다.";
-if (approval_google_chat_send_message($pdo, $space, $msg)) flash_set('success','테스트 메시지를 전송했습니다.'); else flash_set('error','테스트 메시지 전송에 실패했습니다.');
-header('Location: ?r=관리&tab=employees'); exit;
+
+use App\Core\Auth;
+use App\Core\Db;
+
+require_once __DIR__ . '/google_chat_helpers.php';
+
+if (!Auth::check()) {
+    header('Location: ?r=login');
+    exit;
+}
+if (!Auth::canManageEmployees()) {
+    http_response_code(403);
+    exit('403');
+}
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
+if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
+    flash_set('danger', '보안 토큰이 유효하지 않습니다.');
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
+
+$employeeId = isset($_POST['employee_id']) ? (int)$_POST['employee_id'] : 0;
+if ($employeeId <= 0) {
+    flash_set('danger', '직원 정보가 올바르지 않습니다.');
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
+
+$pdo = Db::pdo();
+$employee = approval_google_chat_get_employee_for_dm($pdo, $employeeId);
+if (!is_array($employee)) {
+    flash_set('danger', '직원 정보를 찾을 수 없습니다.');
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
+
+$email = isset($employee['email']) ? trim((string)$employee['email']) : '';
+if ($email === '') {
+    flash_set('danger', '직원 이메일이 없어 Google Chat DM Space를 생성할 수 없습니다.');
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
+
+$userName = isset($employee['google_chat_user_name']) ? trim((string)$employee['google_chat_user_name']) : '';
+if ($userName === '') {
+    $userName = 'users/' . $email;
+}
+
+$saveOk = approval_google_chat_save_employee_chat_fields($pdo, $employeeId, array(
+    'google_chat_enabled' => 1,
+    'google_chat_user_name' => $userName,
+));
+if (!$saveOk) {
+    flash_set('danger', 'Google Chat 사용자 정보 저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
+
+$spaceName = approval_google_chat_setup_dm_space($pdo, $userName);
+if ($spaceName === false || trim((string)$spaceName) === '') {
+    flash_set('danger', 'Google Chat DM Space 자동생성에 실패했습니다. 설정 경로/권한/OAuth 범위를 확인해주세요.');
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
+
+$saveSpaceOk = approval_google_chat_save_employee_chat_fields($pdo, $employeeId, array(
+    'google_chat_dm_space_name' => (string)$spaceName,
+));
+if (!$saveSpaceOk) {
+    flash_set('danger', 'DM Space 생성은 되었지만 직원 정보 저장에 실패했습니다. 관리자에게 문의해주세요.');
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
+
+flash_set('success', 'Google Chat DM Space 자동생성이 완료되었습니다.');
+header('Location: ?r=관리&tab=employees');
+exit;
