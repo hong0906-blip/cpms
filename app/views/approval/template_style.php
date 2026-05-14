@@ -10,3 +10,16 @@
 @media print {.no-print{display:none!important}body{margin:0;background:#fff}.approval-paper{box-shadow:none;margin:0 auto;border-color:#111}}
 </style>
 <style>.approval-line-table td{text-align:center;vertical-align:middle}.approval-sign-row td{height:56px}.approval-name-row td{font-weight:700}.approval-time-row td{font-size:11px;color:#444}.approval-sign-cell .doc-time{display:block}.attach-row{margin-top:6px}</style>
+<style>
+.leave-approval-line th:not(:first-child),.leave-approval-line td:not(:first-child){width:33.33%}
+.leave-delegated-diagonal{height:46px;background:linear-gradient(135deg,transparent 49%,#999 50%,transparent 51%)}
+.leave-delegated-status{font-weight:900;color:#111}
+.leave-request-date-big{text-align:center;font-size:42px;font-weight:800;line-height:1.2;margin:34px 0 22px 0}
+.leave-applicant-line{text-align:right;margin-top:28px;font-size:22px;font-weight:700}
+.leave-applicant-name{display:inline-block;min-width:120px;text-align:center;font-size:28px;font-weight:900}
+.leave-applicant-name-input{font-size:28px !important;font-weight:900;min-width:140px !important;width:140px !important;text-align:center}
+.leave-sign-wrap{display:inline-block;position:relative;width:150px;height:52px;vertical-align:middle;text-align:center}
+.leave-sign-text{position:absolute;left:0;right:0;bottom:4px;font-size:18px;color:#111;z-index:1}
+.leave-sign-overlay{position:absolute;left:50%;top:50%;max-width:115px;max-height:46px;transform:translate(-50%,-50%);opacity:.92;z-index:2}
+.leave-sign-empty{position:absolute;left:0;right:0;top:2px;font-size:11px;z-index:3}
+</style>
