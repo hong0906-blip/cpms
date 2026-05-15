@@ -7,6 +7,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../common/chat_notification_helpers.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -88,7 +89,28 @@ try {
     $st->bindValue(':ua', $now);
     $st->bindValue(':rs', $title);
     $st->execute();
+    $issueId = (int)$pdo->lastInsertId();
 
+    $projectName = cpms_google_chat_project_name($pdo, $projectId);
+    $shortDescription = $description !== '' ? $description : $title;
+    if (mb_strlen($shortDescription, 'UTF-8') > 300) {
+        $shortDescription = mb_substr($shortDescription, 0, 300, 'UTF-8');
+    }
+    $messageText = implode("\n", array(
+        cpms_chat_priority_prefix('issue', $priority),
+        '',
+        '현장명 : '.$projectName,
+        '제목 : '.$title,
+        '구분 : '.$priority,
+        '등록자 : '.$createdByName,
+        '',
+        '내용 :',
+        $shortDescription,
+        '',
+        '협업툴 이슈사항에서 확인해주세요.'
+    ));
+    cpms_google_chat_send_to_executives($pdo, $messageText, 'CREATED', $issueId, 'ISSUE');
+    
     flash_set('success','이슈가 등록되었습니다.');
   } catch (Exception $e) {
     flash_set('error','이슈 등록 실패: '.$e->getMessage());

@@ -6,6 +6,7 @@
  * - 등록자 정보 저장
  */
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../common/chat_notification_helpers.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -92,7 +93,28 @@ try {
     $st->bindValue(':ca', $now);
     $st->bindValue(':ua', $now);
     $st->execute();
+    $incidentId = (int)$pdo->lastInsertId();
 
+    $projectName = cpms_google_chat_project_name($pdo, $projectId);
+    $shortDescription = $description !== '' ? $description : $title;
+    if (mb_strlen($shortDescription, 'UTF-8') > 300) $shortDescription = mb_substr($shortDescription, 0, 300, 'UTF-8');
+    $occurText = $occurredSql !== null ? substr($occurredSql, 0, 16) : '미입력';
+    $messageText = implode("\n", array(
+        cpms_chat_priority_prefix('safety', $severity),
+        '',
+        '현장명 : '.$projectName,
+        '제목 : '.$title,
+        '구분 : '.$severity,
+        '발생일자 : '.$occurText,
+        '등록자 : '.$createdByName,
+        '',
+        '사고내용 :',
+        $shortDescription,
+        '',
+        '협업툴 안전사고에서 확인해주세요.'
+    ));
+    cpms_google_chat_send_to_executives($pdo, $messageText, 'CREATED', $incidentId, 'SAFETY_INCIDENT');
+    
     flash_set('success','안전사고가 등록되었습니다. 안전/보건 탭에서 후속조치를 입력할 수 있습니다.');
 } catch (Exception $e) {
     flash_set('error','안전사고 등록 실패: '.$e->getMessage());

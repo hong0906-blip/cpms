@@ -14,6 +14,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../common/chat_notification_helpers.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -32,6 +33,9 @@ $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $title = isset($_POST['title']) ? trim((string)$_POST['title']) : '';
 $occurredAt = isset($_POST['occurred_at']) ? trim((string)$_POST['occurred_at']) : '';
 $desc = isset($_POST['description']) ? trim((string)$_POST['description']) : '';
+$severity = isset($_POST['severity']) ? trim((string)$_POST['severity']) : '';
+if ($severity === '') $severity = isset($_POST['priority']) ? trim((string)$_POST['priority']) : '보통';
+if (!in_array($severity, array('보통','긴급','경미','중대','낮음','높음'), true)) $severity = '보통';
 
 if ($projectId <= 0) { flash_set('error','프로젝트 정보가 올바르지 않습니다.'); header('Location: ?r=공사'); exit; }
 if ($title === '') { flash_set('error','제목을 입력해주세요.'); header('Location: ?r=공사&pid='.$projectId.'&tab=safety'); exit; }
@@ -64,7 +68,28 @@ try {
     $st->bindValue(':nm', $createdByName);
     $st->bindValue(':em', $createdByEmail);
     $st->execute();
+    $incidentId = (int)$pdo->lastInsertId();
 
+    $projectName = cpms_google_chat_project_name($pdo, $projectId);
+    $shortDescription = $desc !== '' ? $desc : $title;
+    if (mb_strlen($shortDescription, 'UTF-8') > 300) $shortDescription = mb_substr($shortDescription, 0, 300, 'UTF-8');
+    $occurText = $occurredSql !== null ? substr($occurredSql, 0, 16) : '미입력';
+    $messageText = implode("\n", array(
+        cpms_chat_priority_prefix('safety', $severity),
+        '',
+        '현장명 : '.$projectName,
+        '제목 : '.$title,
+        '구분 : '.$severity,
+        '발생일자 : '.$occurText,
+        '등록자 : '.$createdByName,
+        '',
+        '사고내용 :',
+        $shortDescription,
+        '',
+        '협업툴 안전사고에서 확인해주세요.'
+    ));
+    cpms_google_chat_send_to_executives($pdo, $messageText, 'CREATED', $incidentId, 'SAFETY_INCIDENT');
+    
     flash_set('success','안전사고가 등록되었습니다.');
     header('Location: ?r=공사&pid='.$projectId.'&tab=safety');
     exit;

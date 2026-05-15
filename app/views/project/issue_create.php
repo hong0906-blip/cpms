@@ -8,6 +8,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../common/chat_notification_helpers.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -44,7 +45,24 @@ try {
     $st->bindValue(':nm', $createdByName);
     $st->bindValue(':em', $createdByEmail);
     $st->execute();
+    $issueId = (int)$pdo->lastInsertId();
 
+    $projectName = cpms_google_chat_project_name($pdo, $projectId);
+    $messageText = implode("\n", array(
+        cpms_chat_priority_prefix('issue', '보통'),
+        '',
+        '현장명 : '.$projectName,
+        '제목 : '.$reason,
+        '구분 : 보통',
+        '등록자 : '.$createdByName,
+        '',
+        '내용 :',
+        $reason,
+        '',
+        '협업툴 이슈사항에서 확인해주세요.'
+    ));
+    cpms_google_chat_send_to_executives($pdo, $messageText, 'CREATED', $issueId, 'ISSUE');
+    
     flash_set('success','이슈가 등록되었습니다.');
     header('Location: ?r=공무');
     exit;
