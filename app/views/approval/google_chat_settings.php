@@ -92,6 +92,10 @@ if ($jsonParsable) {
 
 $jsonStatusText = $jsonExists ? '있음' : '없음';
 $jsonReadStatusText = ($jsonExists && $jsonReadable) ? '가능' : '불가';
+$scopeValue = trim((string)$vals['google_chat_oauth_scope']);
+$impersonationValue = trim((string)$vals['google_chat_impersonation_user']);
+$scopeHasComma = (strpos($scopeValue, ',') !== false);
+$impersonationHasUsersPrefix = ($impersonationValue !== '' && strpos($impersonationValue, 'users/') === 0);
 ?>
 <h2>Google Chat 설정</h2>
 <form method="post" action="?r=approval_google_chat_settings_save">
@@ -120,6 +124,12 @@ https://www.googleapis.com/auth/chat.memberships
 <div style="margin-top:8px;"><strong>CPMS 설정 google_chat_oauth_scope(공백 구분):</strong><br>
 https://www.googleapis.com/auth/chat.bot https://www.googleapis.com/auth/chat.spaces https://www.googleapis.com/auth/chat.spaces.create https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.messages.create https://www.googleapis.com/auth/chat.memberships
 </div>
+<?php if ($impersonationHasUsersPrefix) { ?>
+<div style="margin-top:8px;color:#c00;">google_chat_impersonation_user에는 users/를 붙이지 말고 회사 Google Workspace 이메일만 입력해주세요.</div>
+<?php } ?>
+<?php if ($scopeHasComma) { ?>
+<div style="margin-top:8px;color:#c00;">CPMS의 google_chat_oauth_scope는 쉼표가 아니라 공백으로 구분해야 합니다.<br>예: https://www.googleapis.com/auth/chat.bot https://www.googleapis.com/auth/chat.spaces</div>
+<?php } ?>
 
 <hr>
 <h3>서비스 계정 JSON 확인</h3>
@@ -130,6 +140,8 @@ https://www.googleapis.com/auth/chat.bot https://www.googleapis.com/auth/chat.sp
 <?php } ?>
 <div>JSON 파일 확인: <?php echo h($jsonStatusText); ?></div>
 <div>JSON 읽기 확인: <?php echo h($jsonReadStatusText); ?></div>
+<div>google_chat_oauth_scope 값: <?php echo h($scopeValue); ?></div>
+<div>google_chat_impersonation_user 값: <?php echo h($impersonationValue); ?></div>
 
 <ul>
   <li>경로 설정됨: <?php echo $jsonConfigured ? '예' : '아니오'; ?></li>

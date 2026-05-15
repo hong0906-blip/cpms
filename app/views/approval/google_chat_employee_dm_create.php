@@ -67,9 +67,6 @@ if ($spaceName === false || trim((string)$spaceName) === '') {
     if ($safeReason === '') {
         $safeReason = 'Google Chat DM Space 자동생성에 실패했습니다.';
     }
-    if (strpos($safeReason, 'Google Chat API 403') !== false) {
-        $safeReason .= "\n\n403 권한 오류가 계속되면 Google Chat 설정에서 google_chat_impersonation_user를 입력해야 합니다.\n예: admin@cmbuild.kr\n\n또한 Google Workspace 관리자 콘솔의 도메인 전체 위임에 서비스 계정 Client ID와 OAuth 범위가 승인되어 있어야 합니다.";
-    }    
     flash_set('danger', $safeReason);
     header('Location: ?r=관리&tab=employees');
     exit;

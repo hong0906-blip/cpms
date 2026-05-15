@@ -77,7 +77,13 @@ function approval_google_chat_get_access_token($pdo) {
     }
     $scope = approval_google_chat_setting($pdo, 'google_chat_oauth_scope', 'https://www.googleapis.com/auth/chat.bot');
     $impersonationUser = approval_google_chat_setting($pdo, 'google_chat_impersonation_user', '');
-    $impersonationUser = trim((string)$impersonationUser);    
+    $scope = trim((string)$scope);    
+    $impersonationUser = trim((string)$impersonationUser);
+    if ($impersonationUser !== '' && strpos($impersonationUser, 'users/') === 0) {
+        approval_google_chat_set_last_error('google_chat_impersonation_user에는 users/를 붙이지 말고 회사 Google Workspace 이메일만 입력해주세요.');
+        error_log('[google_chat] impersonation user invalid value=' . $impersonationUser);
+        return false;
+    }        
     $now = time();
     $header = approval_google_chat_base64url(json_encode(array('alg' => 'RS256', 'typ' => 'JWT')));
     $payloadArray = array(
@@ -101,7 +107,45 @@ function approval_google_chat_get_access_token($pdo) {
     $resp = approval_google_chat_http_request('POST', $tokenUri, array('Content-Type: application/x-www-form-urlencoded'), http_build_query(array('grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion' => $jwt)));
     $arr = json_decode((string)$resp['body'], true);
     if (!is_array($arr) || empty($arr['access_token'])) {
-        approval_google_chat_set_last_error('Access Token 발급 실패');        
+        $safeError = 'Access Token 발급 실패';
+        $status = isset($resp['status']) ? (int)$resp['status'] : 0;
+        if ($status > 0) {
+            $safeError .= "\n상태: HTTP " . $status;
+        }
+        $errorCode = '';
+        $errorDescription = '';
+        $errorUri = '';
+        if (is_array($arr)) {
+            if (isset($arr['error'])) {
+                $errorCode = trim((string)$arr['error']);
+            }
+            if (isset($arr['error_description'])) {
+                $errorDescription = trim((string)$arr['error_description']);
+            }
+            if (isset($arr['error_uri'])) {
+                $errorUri = trim((string)$arr['error_uri']);
+            }
+        }
+        if ($errorCode !== '') {
+            $safeError .= "\n오류: " . $errorCode;
+        }
+        if ($errorDescription !== '') {
+            $safeError .= "\n설명: " . $errorDescription;
+        }
+        if ($errorUri !== '') {
+            $safeError .= "\n안내: " . $errorUri;
+        }
+        if ($errorCode === 'invalid_scope') {
+            $safeError .= "\n\n해결 안내:\n- CPMS google_chat_oauth_scope 값에 쉼표가 들어갔는지 확인\n- 관리자 콘솔 OAuth 범위와 CPMS 범위가 맞는지 확인";
+        } elseif ($errorCode === 'unauthorized_client') {
+            $safeError .= "\n\n해결 안내:\n- Google Cloud 서비스 계정의 도메인 전체 위임이 켜져 있는지 확인\n- Google Workspace 관리자 콘솔의 도메인 전체 위임에 Client ID가 등록되어 있는지 확인";
+        } elseif ($errorCode === 'invalid_grant') {
+            $safeError .= "\n\n해결 안내:\n- google_chat_impersonation_user가 실제 회사 Google Workspace 계정인지 확인\n- users/ 접두사가 붙어 있지 않은지 확인\n- 서버 시간이 크게 틀어져 있지 않은지 확인\n- 서비스 계정 JSON 키가 폐기된 키가 아닌지 확인";
+        }
+        if (strlen($safeError) > 1000) {
+            $safeError = substr($safeError, 0, 1000);
+        }
+        approval_google_chat_set_last_error($safeError);    
         error_log('[google_chat] token fail status=' . $resp['status'] . ' body=' . (string)$resp['body']);
         return false;
     }
