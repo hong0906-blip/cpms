@@ -1,4 +1,15 @@
 <?php
+function approval_google_chat_set_last_error($message) {
+    $GLOBALS['approval_google_chat_last_error'] = (string)$message;
+}
+
+function approval_google_chat_get_last_error() {
+    if (isset($GLOBALS['approval_google_chat_last_error'])) {
+        return (string)$GLOBALS['approval_google_chat_last_error'];
+    }
+    return '';
+}
+
 function approval_google_chat_setting($pdo, $key, $defaultValue) {
     try {
         $st = $pdo->prepare("SELECT setting_value FROM cpms_approval_settings WHERE setting_key=:k LIMIT 1");
@@ -35,13 +46,20 @@ function approval_google_chat_http_request($method, $url, $headers, $body) {
 }
 
 function approval_google_chat_get_access_token($pdo) {
-    $jsonPath = approval_google_chat_setting($pdo, 'google_chat_service_account_json_path', '');
+    $jsonPath = approval_google_chat_setting($pdo, 'google_chat_service_account_json_path', '/www/cpms/storage/secrets/google-chat-service-account.json');
     if ($jsonPath === '' || !is_file($jsonPath)) {
+        approval_google_chat_set_last_error('서비스 계정 JSON 파일을 찾을 수 없습니다.');        
         error_log('[google_chat] json path invalid');
         return false;
     }
+    if (!is_readable($jsonPath)) {
+        approval_google_chat_set_last_error('서비스 계정 JSON 파일은 있으나 읽을 수 없습니다.');
+        error_log('[google_chat] json not readable');
+        return false;
+    }    
     $raw = @file_get_contents($jsonPath);
     if ($raw === false) {
+        approval_google_chat_set_last_error('서비스 계정 JSON 파일은 있으나 읽을 수 없습니다.');        
         error_log('[google_chat] json read fail');
         return false;
     }
@@ -71,6 +89,7 @@ function approval_google_chat_get_access_token($pdo) {
     $resp = approval_google_chat_http_request('POST', $tokenUri, array('Content-Type: application/x-www-form-urlencoded'), http_build_query(array('grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion' => $jwt)));
     $arr = json_decode((string)$resp['body'], true);
     if (!is_array($arr) || empty($arr['access_token'])) {
+        approval_google_chat_set_last_error('Access Token 발급 실패');        
         error_log('[google_chat] token fail status=' . $resp['status'] . ' body=' . (string)$resp['body']);
         return false;
     }
@@ -78,6 +97,7 @@ function approval_google_chat_get_access_token($pdo) {
 }
 
 function approval_google_chat_api_post($pdo, $url, $bodyArray) {
+    approval_google_chat_set_last_error('');    
     $token = approval_google_chat_get_access_token($pdo);
     if ($token === false) {
         return array('ok' => false, 'status' => 0, 'body' => '');
@@ -85,6 +105,13 @@ function approval_google_chat_api_post($pdo, $url, $bodyArray) {
     $resp = approval_google_chat_http_request('POST', $url, array('Authorization: Bearer ' . $token, 'Content-Type: application/json; charset=utf-8'), json_encode($bodyArray));
     $ok = ($resp['status'] >= 200 && $resp['status'] < 300);
     if (!$ok) {
+        if ((int)$resp['status'] === 403) {
+            approval_google_chat_set_last_error('Google Chat API 403 권한 오류');
+        } elseif ((int)$resp['status'] === 400) {
+            approval_google_chat_set_last_error('Google Chat API 400 요청 오류');
+        } else {
+            approval_google_chat_set_last_error('Google Chat API 호출 실패 (HTTP ' . (int)$resp['status'] . ')');
+        }        
         error_log('[google_chat] post fail status=' . $resp['status'] . ' body=' . (string)$resp['body']);
     }
     return array('ok' => $ok, 'status' => $resp['status'], 'body' => $resp['body']);

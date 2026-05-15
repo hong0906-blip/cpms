@@ -63,7 +63,11 @@ if (!$saveOk) {
 
 $spaceName = approval_google_chat_setup_dm_space($pdo, $userName);
 if ($spaceName === false || trim((string)$spaceName) === '') {
-    flash_set('danger', 'Google Chat DM Space 자동생성에 실패했습니다. 설정 경로/권한/OAuth 범위를 확인해주세요.');
+    $safeReason = trim((string)approval_google_chat_get_last_error());
+    if ($safeReason === '') {
+        $safeReason = 'Google Chat DM Space 자동생성에 실패했습니다.';
+    }
+    flash_set('danger', $safeReason);
     header('Location: ?r=관리&tab=employees');
     exit;
 }

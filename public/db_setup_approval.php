@@ -157,7 +157,15 @@ if (!approval_setup_index_exists($pdo, 'cpms_approval_leave_deductions', 'uniq_d
 ?><!doctype html><html><head><meta charset="utf-8"><title>전자결재 DB 설치/확인</title></head><body><h2>전자결재 DB 설치/확인</h2><p><strong>전자결재 저장 중 500 오류가 발생하면 이 화면에서 DB 설치/확인을 먼저 실행해주세요.</strong></p><p>직원별 Google Chat 컬럼은 관리 &gt; 직원명부에서 생성합니다. 단, Google Chat 컬럼이 없어도 전자결재 저장은 실패하지 않아야 합니다.</p><p>직원별 생년월일, 전자결재 역할, Google Chat DM Space ID는 관리 &gt; 직원명부에서 컬럼 생성 및 설정합니다.</p><p><a href="?r=관리&tab=employees">관리 &gt; 직원명부로 이동</a></p><table border="1" cellpadding="6" cellspacing="0"><tr><th>구분</th><th>대상</th><th>결과</th><th>메시지</th></tr><?php foreach($results as $r){?><tr><td><?php echo h($r['type']);?></td><td><?php echo h($r['name']);?></td><td><?php echo $r['ok']?'성공':'실패';?></td><td><?php echo h($r['msg']);?></td></tr><?php }?></table><p><a href="?r=approval_home">전자결재로 이동</a></p></body></html>
 <?php
 try{
-$defaults=array('google_chat_dm_enabled'=>'0','google_chat_app_credentials_path'=>'','cpms_base_url'=>'','google_holiday_calendar_enabled'=>'0','google_holiday_calendar_id'=>'ko.south_korea#holiday@group.v.calendar.google.com','google_holiday_calendar_api_key'=>'','google_holiday_sync_years'=>'2','google_chat_enabled'=>'0','google_chat_service_account_json_path'=>'C:/www/cpms/storage/secrets/google-chat-service-account.json','google_chat_project_id'=>'cpms-approval-chat-bot','google_chat_bot_email'=>'cpms-chat-bot@cpms-approval-chat-bot.iam.gserviceaccount.com','google_chat_oauth_scope'=>'https://www.googleapis.com/auth/chat.bot','google_chat_public_base_url'=>'https://cmbuild.kr/cpms/public/','google_chat_dm_auto_create_enabled'=>'1');
+$defaults=array('google_chat_dm_enabled'=>'0','google_chat_app_credentials_path'=>'','cpms_base_url'=>'','google_holiday_calendar_enabled'=>'0','google_holiday_calendar_id'=>'ko.south_korea#holiday@group.v.calendar.google.com','google_holiday_calendar_api_key'=>'','google_holiday_sync_years'=>'2','google_chat_enabled'=>'0','google_chat_service_account_json_path'=>'/www/cpms/storage/secrets/google-chat-service-account.json','google_chat_project_id'=>'cpms-approval-chat-bot','google_chat_bot_email'=>'cpms-chat-bot@cpms-approval-chat-bot.iam.gserviceaccount.com','google_chat_oauth_scope'=>'https://www.googleapis.com/auth/chat.bot','google_chat_public_base_url'=>'https://cmbuild.kr/cpms/public/','google_chat_dm_auto_create_enabled'=>'1');
 foreach($defaults as $k=>$v){$pdo->prepare("INSERT IGNORE INTO cpms_approval_settings (setting_key,setting_value,updated_at) VALUES (:k,:v,NOW())")->execute(array(':k'=>$k,':v'=>$v));}
+$stPath = $pdo->prepare("SELECT setting_value FROM cpms_approval_settings WHERE setting_key='google_chat_service_account_json_path' LIMIT 1");
+$stPath->execute();
+$curPath = $stPath->fetchColumn();
+$curPath = ($curPath === false || $curPath === null) ? '' : trim((string)$curPath);
+if ($curPath === '' || strpos($curPath, 'C:/www/') === 0 || strpos($curPath, 'c:/www/') === 0) {
+    $pdo->prepare("UPDATE cpms_approval_settings SET setting_value=:v, updated_at=NOW() WHERE setting_key='google_chat_service_account_json_path'")
+        ->execute(array(':v'=>'/www/cpms/storage/secrets/google-chat-service-account.json'));
+}
 }catch(Exception $e){}
 ?>
