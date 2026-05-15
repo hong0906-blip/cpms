@@ -110,6 +110,11 @@ $impersonationHasUsersPrefix = ($impersonationValue !== '' && strpos($impersonat
 </form>
 
 <hr>
+<h3>입력 형식 안내</h3>
+<p>Google Chat User Name은 직원별 값이며 <strong>users/직원이메일</strong> 형식입니다. 예: users/hong0906@cmbuild.kr</p>
+<p>google_chat_impersonation_user는 관리자 또는 실행 계정 이메일만 입력합니다. <strong>users/를 붙이면 안 됩니다.</strong> 예: admin@cmbuild.kr</p>
+
+<hr>
 <h3>권한 설정 안내</h3>
 <p>403 권한 오류가 발생하면 <strong>google_chat_impersonation_user</strong>를 반드시 설정해야 합니다. 회사 Google Workspace 계정 이메일을 입력하세요. 예: admin@cmbuild.kr</p>
 <p>Google Chat API를 회사 사용자 권한으로 실행할 계정입니다. Google Workspace 도메인 전체 위임 승인을 받은 서비스 계정이 이 사용자를 대신해 Chat API를 호출합니다.</p>

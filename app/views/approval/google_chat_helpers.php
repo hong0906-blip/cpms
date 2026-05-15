@@ -152,8 +152,44 @@ function approval_google_chat_get_access_token($pdo) {
     return (string)$arr['access_token'];
 }
 
-function approval_google_chat_api_post($pdo, $url, $bodyArray) {
-    approval_google_chat_set_last_error('');    
+
+function approval_google_chat_build_api_error_message($baseTitle, $statusCode, $respBody, $attemptLabel) {
+    $statusText = '';
+    $messageText = '';
+    $respBodyArray = json_decode((string)$respBody, true);
+    if (is_array($respBodyArray) && isset($respBodyArray['error']) && is_array($respBodyArray['error'])) {
+        if (isset($respBodyArray['error']['status'])) {
+            $statusText = trim((string)$respBodyArray['error']['status']);
+        }
+        if (isset($respBodyArray['error']['message'])) {
+            $messageText = trim((string)$respBodyArray['error']['message']);
+        }
+    }
+
+    $safeError = $baseTitle;
+    if ($attemptLabel !== '') {
+        $safeError .= "
+시도: " . $attemptLabel;
+    }
+    if ($statusText !== '') {
+        $safeError .= "
+상태: " . $statusText;
+    } elseif ((int)$statusCode > 0) {
+        $safeError .= "
+상태: HTTP " . (int)$statusCode;
+    }
+    if ($messageText !== '') {
+        $safeError .= "
+메시지: " . $messageText;
+    }
+    if (strlen($safeError) > 1000) {
+        $safeError = substr($safeError, 0, 1000);
+    }
+    return $safeError;
+}
+
+function approval_google_chat_api_post($pdo, $url, $bodyArray, $contextLabel) {
+    approval_google_chat_set_last_error('');
     $token = approval_google_chat_get_access_token($pdo);
     if ($token === false) {
         return array('ok' => false, 'status' => 0, 'body' => '');
@@ -161,34 +197,14 @@ function approval_google_chat_api_post($pdo, $url, $bodyArray) {
     $resp = approval_google_chat_http_request('POST', $url, array('Authorization: Bearer ' . $token, 'Content-Type: application/json; charset=utf-8'), json_encode($bodyArray));
     $ok = ($resp['status'] >= 200 && $resp['status'] < 300);
     if (!$ok) {
-        if ((int)$resp['status'] === 403) {
-            $statusText = '';
-            $messageText = '';
-            $respBodyArray = json_decode((string)$resp['body'], true);
-            if (is_array($respBodyArray) && isset($respBodyArray['error']) && is_array($respBodyArray['error'])) {
-                if (isset($respBodyArray['error']['status'])) {
-                    $statusText = trim((string)$respBodyArray['error']['status']);
-                }
-                if (isset($respBodyArray['error']['message'])) {
-                    $messageText = trim((string)$respBodyArray['error']['message']);
-                }
-            }
-            $safeError = 'Google Chat API 403 권한 오류';
-            if ($statusText !== '') {
-                $safeError .= "\n상태: " . $statusText;
-            }
-            if ($messageText !== '') {
-                $safeError .= "\n메시지: " . $messageText;
-            }
-            if (strlen($safeError) > 1000) {
-                $safeError = substr($safeError, 0, 1000);
-            }
-            approval_google_chat_set_last_error($safeError);
-        } elseif ((int)$resp['status'] === 400) {
-            approval_google_chat_set_last_error('Google Chat API 400 요청 오류');
+        $statusCode = (int)$resp['status'];
+        if ($statusCode === 403) {
+            approval_google_chat_set_last_error(approval_google_chat_build_api_error_message('Google Chat API 403 권한 오류', $statusCode, $resp['body'], $contextLabel));
+        } elseif ($statusCode === 400) {
+            approval_google_chat_set_last_error(approval_google_chat_build_api_error_message('Google Chat API 400 요청 오류', $statusCode, $resp['body'], $contextLabel));
         } else {
-            approval_google_chat_set_last_error('Google Chat API 호출 실패 (HTTP ' . (int)$resp['status'] . ')');
-        }        
+            approval_google_chat_set_last_error('Google Chat API 호출 실패 (HTTP ' . $statusCode . ')');
+        }
         error_log('[google_chat] post fail status=' . $resp['status'] . ' body=' . (string)$resp['body']);
     }
     return array('ok' => $ok, 'status' => $resp['status'], 'body' => $resp['body']);
@@ -196,27 +212,74 @@ function approval_google_chat_api_post($pdo, $url, $bodyArray) {
 
 function approval_google_chat_setup_dm_space($pdo, $userName) {
     $url = 'https://chat.googleapis.com/v1/spaces:setup';
-    $body = array(
-        'space' => array('spaceType' => 'DIRECT_MESSAGE', 'singleUserBotDm' => true),
-        'memberships' => array(
-            array('member' => array('name' => $userName, 'type' => 'HUMAN'))
+    $userName = trim((string)$userName);
+    if ($userName !== '' && strpos($userName, 'users/') !== 0) {
+        $userName = 'users/' . $userName;
+    }
+
+    $bodies = array(
+        array(
+            'space' => array(
+                'spaceType' => 'DIRECT_MESSAGE'
+            ),
+            'memberships' => array(
+                array(
+                    'member' => array(
+                        'name' => $userName
+                    )
+                )
+            )
+        ),
+        array(
+            'space' => array(
+                'spaceType' => 'DIRECT_MESSAGE'
+            ),
+            'memberships' => array(
+                array(
+                    'member' => array(
+                        'name' => $userName,
+                        'type' => 'HUMAN'
+                    )
+                )
+            )
+        ),
+        array(
+            'space' => array(
+                'spaceType' => 'DIRECT_MESSAGE',
+                'singleUserBotDm' => true
+            ),
+            'memberships' => array(
+                array(
+                    'member' => array(
+                        'name' => $userName
+                    )
+                )
+            )
         )
     );
-    $res = approval_google_chat_api_post($pdo, $url, $body);
-    if (!$res['ok']) {
-        return false;
+
+    $attempt = 1;
+    foreach ($bodies as $body) {
+        $contextLabel = 'spaces:setup body #' . $attempt;
+        $res = approval_google_chat_api_post($pdo, $url, $body, $contextLabel);
+        if ($res['ok']) {
+            $arr = json_decode((string)$res['body'], true);
+            if (is_array($arr) && !empty($arr['name'])) {
+                return (string)$arr['name'];
+            }
+            error_log('[google_chat] setup dm invalid response status=' . $res['status']);
+            return false;
+        }
+        error_log('[google_chat] spaces:setup attempt ' . $attempt . ' failed status=' . (int)$res['status'] . ' body=' . (string)$res['body']);
+        $attempt++;
     }
-    $arr = json_decode((string)$res['body'], true);
-    if (!is_array($arr) || empty($arr['name'])) {
-        error_log('[google_chat] setup dm invalid response status=' . $res['status']);
-        return false;
-    }
-    return (string)$arr['name'];
+
+    return false;
 }
 
 function approval_google_chat_send_message($pdo, $spaceName, $messageText) {
     $url = 'https://chat.googleapis.com/v1/' . trim((string)$spaceName) . '/messages';
-    $res = approval_google_chat_api_post($pdo, $url, array('text' => $messageText));
+    $res = approval_google_chat_api_post($pdo, $url, array('text' => $messageText), 'messages.create');
     if (!$res['ok']) {
         return false;
     }

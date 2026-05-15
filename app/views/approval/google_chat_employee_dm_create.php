@@ -50,6 +50,9 @@ $userName = isset($employee['google_chat_user_name']) ? trim((string)$employee['
 if ($userName === '') {
     $userName = 'users/' . $email;
 }
+if ($userName !== '' && strpos($userName, 'users/') !== 0) {
+    $userName = 'users/' . $userName;
+}
 
 $saveOk = approval_google_chat_save_employee_chat_fields($pdo, $employeeId, array(
     'google_chat_enabled' => 1,
