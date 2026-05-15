@@ -73,3 +73,27 @@ function approval_queue_notification($pdo, $documentId, $eventType, $receiverEmp
         return;
     }
 }
+
+function approval_doc_type_label($docType) {
+    $t = trim((string)$docType);
+    if ($t === 'leave') { return '휴가계'; }
+    if ($t === 'proposal') { return '기안서'; }
+    return '기안서';
+}
+
+function approval_build_request_message($docType, $title, $creatorName) {
+    $docTypeLabel = approval_doc_type_label($docType);
+    $safeTitle = trim((string)$title);
+    $safeCreatorName = trim((string)$creatorName);
+    if ($safeTitle === '') { $safeTitle = '전자결재 문서'; }
+    if ($safeCreatorName === '') { $safeCreatorName = '작성자'; }
+    return implode("\n", array(
+        '[CPMS 전자결재 요청]',
+        '',
+        '문서종류 : '.$docTypeLabel,
+        '제목 : '.$safeTitle,
+        '작성자 : '.$safeCreatorName,
+        '',
+        '전자결재에서 확인해주세요.'
+    ));
+}

@@ -14,6 +14,9 @@ $uid = approval_current_employee_id($pdo, $u);
 $userEmail = approval_current_user_email($u);
 $actorName = isset($u['name']) ? (string)$u['name'] : '';
 $actorEmail = isset($u['email']) ? (string)$u['email'] : '';
+$docSt = $pdo->prepare("SELECT doc_type,title,created_by_name FROM cpms_approval_documents WHERE id=:id LIMIT 1");
+$docSt->execute(array(':id'=>$id));
+$doc = $docSt->fetch();
 $st = $pdo->prepare("SELECT * FROM cpms_approval_lines WHERE document_id=:d AND line_status='PENDING' AND (approver_id=:u OR LOWER(TRIM(approver_email))=LOWER(TRIM(:email))) LIMIT 1");
 $st->execute(array(':d'=>$id,':u'=>$uid,':email'=>$userEmail));
 $l = $st->fetch(); if (!$l) { flash_set('danger','처리 권한이 없습니다.'); header('Location: ?r=approval_detail&id='.$id); exit; }
@@ -30,11 +33,18 @@ if ($action === 'approve') {
         $nx->execute(array(':id'=>$nextLine['id']));
         $docStatus = 'PENDING';
         $step = (int)$nextLine['line_order'];
-        try { $baseUrl = approval_setting_value($pdo,'google_chat_public_base_url','https://cmbuild.kr/cpms/public/'); $detailUrl = $baseUrl.'?r=approval_detail&id='.$id; approval_queue_notification($pdo,$id,'REQUEST',$nextLine['approver_id'],'[CPMS 전자결재 요청]\n확인하기: '.$detailUrl); } catch (Exception $e) {}
+        try {
+            $msg = approval_build_request_message(
+                isset($doc['doc_type']) ? $doc['doc_type'] : '',
+                isset($doc['title']) ? $doc['title'] : '',
+                isset($doc['created_by_name']) ? $doc['created_by_name'] : ''
+            );
+            approval_queue_notification($pdo,$id,'REQUEST',$nextLine['approver_id'],$msg);
+        } catch (Exception $e) {}
     } else {
         $docStatus = 'APPROVED';
         $step = (int)$l['line_order'];
-        $dst=$pdo->prepare("SELECT created_by_id FROM cpms_approval_documents WHERE id=:id"); $dst->execute(array(':id'=>$id)); $creatorId=(int)$dst->fetchColumn(); if($creatorId>0){ try { $baseUrl = approval_setting_value($pdo,'google_chat_public_base_url','https://cmbuild.kr/cpms/public/'); $detailUrl = $baseUrl.'?r=approval_detail&id='.$id; approval_queue_notification($pdo,$id,'FINAL_APPROVED',$creatorId,'[CPMS 전자결재 최종승인]\n확인하기: '.$detailUrl); } catch (Exception $e) {} }
+        $dst=$pdo->prepare("SELECT created_by_id FROM cpms_approval_documents WHERE id=:id"); $dst->execute(array(':id'=>$id)); $creatorId=(int)$dst->fetchColumn(); if($creatorId>0){ try { approval_queue_notification($pdo,$id,'FINAL_APPROVED',$creatorId,implode("\n", array('[CPMS 전자결재 최종승인]', '', '전자결재에서 확인해주세요.'))); } catch (Exception $e) {} }
     }
     $pdo->prepare("UPDATE cpms_approval_documents SET doc_status=:s,current_step_order=:o,updated_at=NOW() WHERE id=:id")->execute(array(':s'=>$docStatus,':o'=>$step,':id'=>$id));
     $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,created_at) VALUES (:d,:l,:a,:n,:e,'APPROVE',NOW())")->execute(array(':d'=>$id,':l'=>$l['id'],':a'=>$uid,':n'=>$actorName,':e'=>$actorEmail));
@@ -43,6 +53,6 @@ if ($action === 'approve') {
     $pdo->prepare("UPDATE cpms_approval_lines SET line_status='REJECTED',acted_at=NOW(),reject_reason=:r WHERE id=:id AND line_status='PENDING'")->execute(array(':r'=>$reason,':id'=>$l['id']));
     $pdo->prepare("UPDATE cpms_approval_documents SET doc_status='REJECTED',reject_reason=:r,rejected_step=:s,updated_at=NOW() WHERE id=:id")->execute(array(':r'=>$reason,':s'=>$l['role_type'],':id'=>$id));
     $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,:l,:a,:n,:e,'REJECT',:r,NOW())")->execute(array(':d'=>$id,':l'=>$l['id'],':a'=>$uid,':n'=>$actorName,':e'=>$actorEmail,':r'=>$reason));
-    $dst=$pdo->prepare("SELECT created_by_id FROM cpms_approval_documents WHERE id=:id"); $dst->execute(array(':id'=>$id)); $creatorId=(int)$dst->fetchColumn(); if($creatorId>0){ try { approval_queue_notification($pdo,$id,'REJECTED',$creatorId,'[CPMS 전자결재 반려]\n반려사유: '.$reason.'\n확인하기: '.approval_setting_value($pdo,'google_chat_public_base_url','https://cmbuild.kr/cpms/public/').'?r=approval_detail&id='.$id); } catch (Exception $e) {} }
+    $dst=$pdo->prepare("SELECT created_by_id FROM cpms_approval_documents WHERE id=:id"); $dst->execute(array(':id'=>$id)); $creatorId=(int)$dst->fetchColumn(); if($creatorId>0){ try { approval_queue_notification($pdo,$id,'REJECTED',$creatorId,implode("\n", array('[CPMS 전자결재 반려]', '반려사유: '.$reason, '', '전자결재에서 확인해주세요.'))); } catch (Exception $e) {} }
 }
 $pdo->commit(); header('Location: ?r=approval_detail&id='.$id);
