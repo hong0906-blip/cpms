@@ -17,6 +17,7 @@ $keys = array(
     'google_chat_project_id',
     'google_chat_bot_email',
     'google_chat_oauth_scope',
+    'google_chat_impersonation_user',    
     'google_chat_public_base_url',
     'google_chat_dm_auto_create_enabled'
 );
@@ -103,6 +104,22 @@ $jsonReadStatusText = ($jsonExists && $jsonReadable) ? '가능' : '불가';
   <?php } ?>
   <button>저장</button>
 </form>
+
+<hr>
+<h3>권한 설정 안내</h3>
+<p>403 권한 오류가 발생하면 <strong>google_chat_impersonation_user</strong>를 반드시 설정해야 합니다. 회사 Google Workspace 계정 이메일을 입력하세요. 예: admin@cmbuild.kr</p>
+<p>Google Chat API를 회사 사용자 권한으로 실행할 계정입니다. Google Workspace 도메인 전체 위임 승인을 받은 서비스 계정이 이 사용자를 대신해 Chat API를 호출합니다.</p>
+<div><strong>관리자 콘솔 OAuth 범위(쉼표 구분):</strong><br>
+https://www.googleapis.com/auth/chat.bot,<br>
+https://www.googleapis.com/auth/chat.spaces,<br>
+https://www.googleapis.com/auth/chat.spaces.create,<br>
+https://www.googleapis.com/auth/chat.messages,<br>
+https://www.googleapis.com/auth/chat.messages.create,<br>
+https://www.googleapis.com/auth/chat.memberships
+</div>
+<div style="margin-top:8px;"><strong>CPMS 설정 google_chat_oauth_scope(공백 구분):</strong><br>
+https://www.googleapis.com/auth/chat.bot https://www.googleapis.com/auth/chat.spaces https://www.googleapis.com/auth/chat.spaces.create https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.messages.create https://www.googleapis.com/auth/chat.memberships
+</div>
 
 <hr>
 <h3>서비스 계정 JSON 확인</h3>

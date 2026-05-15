@@ -76,9 +76,21 @@ function approval_google_chat_get_access_token($pdo) {
         return false;
     }
     $scope = approval_google_chat_setting($pdo, 'google_chat_oauth_scope', 'https://www.googleapis.com/auth/chat.bot');
+    $impersonationUser = approval_google_chat_setting($pdo, 'google_chat_impersonation_user', '');
+    $impersonationUser = trim((string)$impersonationUser);    
     $now = time();
     $header = approval_google_chat_base64url(json_encode(array('alg' => 'RS256', 'typ' => 'JWT')));
-    $payload = approval_google_chat_base64url(json_encode(array('iss' => $clientEmail, 'scope' => $scope, 'aud' => $tokenUri, 'iat' => $now, 'exp' => $now + 3600)));
+    $payloadArray = array(
+        'iss' => $clientEmail,
+        'scope' => $scope,
+        'aud' => $tokenUri,
+        'iat' => $now,
+        'exp' => $now + 3600
+    );
+    if ($impersonationUser !== '') {
+        $payloadArray['sub'] = $impersonationUser;
+    }
+    $payload = approval_google_chat_base64url(json_encode($payloadArray));
     $unsigned = $header . '.' . $payload;
     $signature = '';
     if (!openssl_sign($unsigned, $signature, $privateKey, OPENSSL_ALGO_SHA256)) {
@@ -106,7 +118,28 @@ function approval_google_chat_api_post($pdo, $url, $bodyArray) {
     $ok = ($resp['status'] >= 200 && $resp['status'] < 300);
     if (!$ok) {
         if ((int)$resp['status'] === 403) {
-            approval_google_chat_set_last_error('Google Chat API 403 권한 오류');
+            $statusText = '';
+            $messageText = '';
+            $respBodyArray = json_decode((string)$resp['body'], true);
+            if (is_array($respBodyArray) && isset($respBodyArray['error']) && is_array($respBodyArray['error'])) {
+                if (isset($respBodyArray['error']['status'])) {
+                    $statusText = trim((string)$respBodyArray['error']['status']);
+                }
+                if (isset($respBodyArray['error']['message'])) {
+                    $messageText = trim((string)$respBodyArray['error']['message']);
+                }
+            }
+            $safeError = 'Google Chat API 403 권한 오류';
+            if ($statusText !== '') {
+                $safeError .= "\n상태: " . $statusText;
+            }
+            if ($messageText !== '') {
+                $safeError .= "\n메시지: " . $messageText;
+            }
+            if (strlen($safeError) > 1000) {
+                $safeError = substr($safeError, 0, 1000);
+            }
+            approval_google_chat_set_last_error($safeError);
         } elseif ((int)$resp['status'] === 400) {
             approval_google_chat_set_last_error('Google Chat API 400 요청 오류');
         } else {
