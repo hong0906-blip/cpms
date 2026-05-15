@@ -177,7 +177,7 @@ for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']!=='SKIPPED'){$pre
       $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,NULL,:a,:n,:e,'SKIPPED',:m,NOW())")->execute(array(':d'=>$did,':a'=>$creatorEmployeeId,':n'=>$creatorName,':e'=>$creatorEmail,':m'=>'작성자 본인 결재단계로 자동 건너뜀'));
     }
 }
-for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']==='PENDING'){ try { approval_queue_notification($pdo,$did,'REQUEST',$prepared[$i]['emp']['id'],'[CPMS 전자결재 요청]\n확인하기: '.approval_setting_value($pdo,'google_chat_public_base_url','https://cmbuild.kr/cpms/public/').'?r=approval_detail&id='.$did); } catch (Exception $e) {} break; } }
+for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']==='PENDING'){ try { $docTypeLabel = ($docType === 'leave') ? '휴가계' : '기안서'; $docTitle = trim((string)$title); $writerLabel = trim((string)$creatorName); $currentStepLabel = trim((string)$prepared[$i]['role']).' 결재'; $detailUrl = approval_setting_value($pdo,'google_chat_public_base_url','https://cmbuild.kr/cpms/public/').'?r=approval_detail&id='.$did; $msg='[CPMS 전자결재 요청]\n\n문서종류: '.$docTypeLabel.'\n제목: '.$docTitle.'\n작성자: '.$writerLabel.'\n현재단계: '.$currentStepLabel.'\n\n확인하기:\n'.$detailUrl; approval_queue_notification($pdo,$did,'REQUEST',$prepared[$i]['emp']['id'],$msg); } catch (Exception $e) {} break; } }
 
 $uploadWarn=array();
 if($docType==='proposal'){

@@ -19,7 +19,8 @@ $keys = array(
     'google_chat_oauth_scope',
     'google_chat_impersonation_user',    
     'google_chat_public_base_url',
-    'google_chat_dm_auto_create_enabled'
+    'google_chat_dm_auto_create_enabled',
+    'google_chat_dm_enabled'
 );
 
 $vals = array();
@@ -109,6 +110,14 @@ $impersonationHasUsersPrefix = ($impersonationValue !== '' && strpos($impersonat
   <button>저장</button>
 </form>
 
+
+<hr>
+<h3>전자결재 알림 필수 조건 안내</h3>
+<p><strong>google_chat_enabled = 1</strong> 이 되어야 실제 전자결재 알림이 전송됩니다.</p>
+<p>직원명부에서 해당 직원의 <strong>Google Chat 개인 DM 사용(google_chat_enabled)</strong>이 체크되어 있어야 합니다.</p>
+<p>직원별 <strong>Google Chat DM Space ID(google_chat_dm_space_name)</strong>가 있어야 합니다.</p>
+<p>호환키 안내: <strong>legacy google_chat_dm_enabled</strong> 값이 0 또는 비어 있어도 <strong>google_chat_enabled=1</strong>이면 전송됩니다.</p>
+
 <hr>
 <h3>입력 형식 안내</h3>
 <p>Google Chat User Name은 직원별 값이며 <strong>users/직원이메일</strong> 형식입니다. 예: users/hong0906@cmbuild.kr</p>
@@ -162,3 +171,37 @@ https://www.googleapis.com/auth/chat.bot https://www.googleapis.com/auth/chat.sp
 <?php } ?>
 
 <p style="color:#666;">보안상 JSON 내용, private_key, access_token은 화면에 표시하지 않습니다.</p>
+
+<?php
+$notiRows = array();
+try {
+    $st = $pdo->query("SELECT created_at, document_id, event_type, receiver_name, receiver_email, dm_space_name, send_status, error_message FROM cpms_approval_notifications ORDER BY id DESC LIMIT 20");
+    if ($st) {
+        $notiRows = $st->fetchAll(PDO::FETCH_ASSOC);
+    }
+} catch (Exception $e) {
+    $notiRows = array();
+}
+?>
+
+<hr>
+<h3>최근 전자결재 알림 이력 (최근 20건)</h3>
+<table border="1" cellpadding="6" cellspacing="0">
+  <tr>
+    <th>created_at</th><th>document_id</th><th>event_type</th><th>receiver_name</th><th>receiver_email</th><th>dm_space_name</th><th>send_status</th><th>error_message</th>
+  </tr>
+  <?php if (count($notiRows) === 0) { ?>
+  <tr><td colspan="8">표시할 알림 이력이 없습니다.</td></tr>
+  <?php } else { foreach ($notiRows as $row) { ?>
+  <tr>
+    <td><?php echo h(isset($row['created_at']) ? $row['created_at'] : ''); ?></td>
+    <td><?php echo h(isset($row['document_id']) ? $row['document_id'] : ''); ?></td>
+    <td><?php echo h(isset($row['event_type']) ? $row['event_type'] : ''); ?></td>
+    <td><?php echo h(isset($row['receiver_name']) ? $row['receiver_name'] : ''); ?></td>
+    <td><?php echo h(isset($row['receiver_email']) ? $row['receiver_email'] : ''); ?></td>
+    <td><?php echo h(isset($row['dm_space_name']) ? $row['dm_space_name'] : ''); ?></td>
+    <td><?php echo h(isset($row['send_status']) ? $row['send_status'] : ''); ?></td>
+    <td><?php echo h(isset($row['error_message']) ? $row['error_message'] : ''); ?></td>
+  </tr>
+  <?php }} ?>
+</table>
