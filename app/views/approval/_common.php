@@ -15,6 +15,37 @@ if (!function_exists('approval_status_badge')) {
         return isset($map[$status]) ? $map[$status] : 'bg-gray-100 text-gray-700 border-gray-200';
     }
 }
+
+if (!function_exists('approval_status_label')) {
+    function approval_status_label($status)
+    {
+        $status = strtoupper((string)$status);
+        $map = array(
+            'PENDING' => '진행중',
+            'APPROVED' => '승인완료',
+            'REJECTED' => '반려',
+            'CANCELLED' => '요청취소',
+            'DRAFT' => '임시저장',
+            'WAITING' => '대기'
+        );
+        return isset($map[$status]) ? $map[$status] : $status;
+    }
+}
+if (!function_exists('approval_line_status_label')) {
+    function approval_line_status_label($status)
+    {
+        $status = strtoupper((string)$status);
+        $map = array(
+            'WAITING' => '대기',
+            'PENDING' => '진행중',
+            'APPROVED' => '승인',
+            'REJECTED' => '반려',
+            'SKIPPED' => '건너뜀',
+            'CANCELLED' => '요청취소'
+        );
+        return isset($map[$status]) ? $map[$status] : $status;
+    }
+}
 if (!function_exists('approval_parse_content')) {
     function approval_parse_content($content)
     {

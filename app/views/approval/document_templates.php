@@ -78,7 +78,7 @@ if (!function_exists('approval_render_time_cell')) {
             echo '반려';
             if ($time !== '') { echo ' '.h($time); }
         } else {
-            echo '대기중';
+            echo h(approval_line_status_label($status));
         }
         echo '</td>';   
     }

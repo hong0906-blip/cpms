@@ -401,6 +401,7 @@ if ($route === 'construction/safety_incident_action_save') {
 if ($route === 'approval_store') { require_once __DIR__ . '/../app/views/approval/store.php'; exit; }
 if ($route === 'approval_decide') { require_once __DIR__ . '/../app/views/approval/decide.php'; exit; }
 if ($route === 'approval_cancel') { require_once __DIR__ . '/../app/views/approval/cancel.php'; exit; }
+if ($route === 'approval_delete') { require_once __DIR__ . '/../app/views/approval/delete.php'; exit; }
 if ($route === 'db_setup_approval') { require_once __DIR__ . '/db_setup_approval.php'; exit; }
 if ($route === 'attendance/check_in') { require_once __DIR__ . '/../app/views/attendance/check_in.php'; exit; }
 if ($route === 'attendance/check_out') { require_once __DIR__ . '/../app/views/attendance/check_out.php'; exit; }
