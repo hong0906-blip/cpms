@@ -2,7 +2,7 @@
 /**
  * 공사 > 상황 탭(연도별 월/분기 비용+매출 그래프)
  * - 연도 선택 + 월별/분기별 5항목(노무/장비/안전/자재/매출) 막대그래프
- * - 회사 월 기준: 전월 26일 ~ 현월 25일
+ * - 노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일 ~ 현월 25일
  * - PHP 5.6 호환
  */
 
@@ -456,43 +456,48 @@ $yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' =
 $maxMonthlyValue = 0;
 
 for ($m = 1; $m <= 12; $m++) {
-    $monthObj = DateTime::createFromFormat('Y-m-d', sprintf('%04d-%02d-01', $selectedYear, $m));
-    if (!$monthObj) continue;
+    $ym = sprintf('%04d-%02d', $selectedYear, $m);
+    $laborRange = cpms_cost_period_range($ym, 'labor');
+    $costRange = cpms_cost_period_range($ym, 'material');
+    $salesRange = cpms_cost_period_range($ym, 'sales');
 
-    $rangeStartObj = clone $monthObj;
-    $rangeStartObj->modify('-1 month');
-    $rangeStartObj->setDate((int)$rangeStartObj->format('Y'), (int)$rangeStartObj->format('m'), 26);
+    $laborStart = isset($laborRange['start']) ? (string)$laborRange['start'] : '';
+    $laborEnd = isset($laborRange['end']) ? (string)$laborRange['end'] : '';
+    $costStart = isset($costRange['start']) ? (string)$costRange['start'] : '';
+    $costEnd = isset($costRange['end']) ? (string)$costRange['end'] : '';
+    $salesStart = isset($salesRange['start']) ? (string)$salesRange['start'] : '';
+    $salesEnd = isset($salesRange['end']) ? (string)$salesRange['end'] : '';
 
-    $rangeEndObj = clone $monthObj;
-    $rangeEndObj->setDate((int)$rangeEndObj->format('Y'), (int)$rangeEndObj->format('m'), 25);
-
-    $rangeStart = $rangeStartObj->format('Y-m-d');
-    $rangeEnd = $rangeEndObj->format('Y-m-d');
-
-    $equipment = cpms_status_sum_between($pdo, 'cpms_equipment_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
-    $materials = cpms_status_sum_between($pdo, 'cpms_material_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
+    $equipment = cpms_status_sum_between($pdo, 'cpms_equipment_usage', 'use_date', $pid, $costStart, $costEnd, '', array());
+    $materials = cpms_status_sum_between($pdo, 'cpms_material_usage', 'use_date', $pid, $costStart, $costEnd, '', array());
     $safety = cpms_status_sum_between(
         $pdo,
         'cpms_daily_cost_entries',
         'cost_date',
         $pid,
-        $rangeStart,
-        $rangeEnd,
+        $costStart,
+        $costEnd,
         "AND cost_type IN ('안전','안전관리비')",
         array()
     );
 
     // 상황탭 노무비=지급총액 합
-    $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $rangeStart, $rangeEnd, $laborWageMap);
+    $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
 
     // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
-    $sales = cpms_status_sales_total_between($pdo, (int)$pid, $rangeStart, $rangeEnd);
+    $sales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
 
     $row = array(
         'month' => $m,
         'label' => $m . '월',
-        'start' => $rangeStart,
-        'end' => $rangeEnd,
+        'start' => $costStart,
+        'end' => $costEnd,
+        'cost_start' => $costStart,
+        'cost_end' => $costEnd,
+        'labor_start' => $laborStart,
+        'labor_end' => $laborEnd,
+        'sales_start' => $salesStart,
+        'sales_end' => $salesEnd,
         'labor' => $labor,
         'equipment' => $equipment,
         'materials' => $materials,
@@ -557,32 +562,28 @@ for ($q = 1; $q <= 4; $q++) {
 $overallTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0);
 foreach ($years as $yy) {
     for ($m = 1; $m <= 12; $m++) {
-        $monthObj = DateTime::createFromFormat('Y-m-d', sprintf('%04d-%02d-01', (int)$yy, $m));
-        if (!$monthObj) continue;
+        $ym = sprintf('%04d-%02d', (int)$yy, $m);
+        $laborRange = cpms_cost_period_range($ym, 'labor');
+        $costRange = cpms_cost_period_range($ym, 'material');
 
-        $rangeStartObj = clone $monthObj;
-        $rangeStartObj->modify('-1 month');
-        $rangeStartObj->setDate((int)$rangeStartObj->format('Y'), (int)$rangeStartObj->format('m'), 26);
+        $laborStart = isset($laborRange['start']) ? (string)$laborRange['start'] : '';
+        $laborEnd = isset($laborRange['end']) ? (string)$laborRange['end'] : '';
+        $costStart = isset($costRange['start']) ? (string)$costRange['start'] : '';
+        $costEnd = isset($costRange['end']) ? (string)$costRange['end'] : '';
 
-        $rangeEndObj = clone $monthObj;
-        $rangeEndObj->setDate((int)$rangeEndObj->format('Y'), (int)$rangeEndObj->format('m'), 25);
-
-        $rangeStart = $rangeStartObj->format('Y-m-d');
-        $rangeEnd = $rangeEndObj->format('Y-m-d');
-
-        $overallTotals['equipment'] += cpms_status_sum_between($pdo, 'cpms_equipment_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
-        $overallTotals['materials'] += cpms_status_sum_between($pdo, 'cpms_material_usage', 'use_date', $pid, $rangeStart, $rangeEnd, '', array());
+        $overallTotals['equipment'] += cpms_status_sum_between($pdo, 'cpms_equipment_usage', 'use_date', $pid, $costStart, $costEnd, '', array());
+        $overallTotals['materials'] += cpms_status_sum_between($pdo, 'cpms_material_usage', 'use_date', $pid, $costStart, $costEnd, '', array());
         $overallTotals['safety'] += cpms_status_sum_between(
             $pdo,
             'cpms_daily_cost_entries',
             'cost_date',
             $pid,
-            $rangeStart,
-            $rangeEnd,
+            $costStart,
+            $costEnd,
             "AND cost_type IN ('안전','안전관리비')",
             array()
         );
-        $overallTotals['labor'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $rangeStart, $rangeEnd, $laborWageMap);
+        $overallTotals['labor'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
     }
 }
 $overallTotals['sales'] = cpms_status_sales_total_all($pdo, (int)$pid);
@@ -619,7 +620,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <h3 class="text-xl font-extrabold text-gray-900">상황</h3>
-                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황(회사 월 기준: 전월 26일~현월 25일)</div>
+                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황<br>노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일~현월 25일</div>
             </div>
         </div>
 
@@ -660,7 +661,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     <div class="chart-wrap">
         <div class="flex items-center justify-between">
             <h4 class="text-lg font-extrabold text-gray-900">월별 비용/매출 그래프</h4>
-            <div class="text-xs text-gray-500">기준: 전월 26일 ~ 현월 25일</div>
+            <div class="text-xs text-gray-500">노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일~현월 25일</div>
         </div>
 
         <div class="chart-scroll">
@@ -672,15 +673,15 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             // 매출 맨 왼쪽
                             $salesAmount = isset($row['sales']) ? (float)$row['sales'] : 0;
                             $salesHeight = ($salesAmount <= 0) ? 2 : max(2, ($salesAmount / $maxMonthlyValue) * 100);
-                            $salesTitle = $row['label'] . ' ' . $categories['sales']['label'] . ': ' . cpms_status_money($salesAmount) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
+                            $salesTitle = $row['label'] . ' ' . $categories['sales']['label'] . ': ' . cpms_status_money($salesAmount) . ' (' . $row['sales_start'] . ' ~ ' . $row['sales_end'] . ')';
 
                             $laborAmount = isset($row['labor']) ? (float)$row['labor'] : 0;
                             $laborHeight = ($laborAmount <= 0) ? 2 : max(2, ($laborAmount / $maxMonthlyValue) * 100);
-                            $laborTitle = $row['label'] . ' ' . $categories['labor']['label'] . ': ' . cpms_status_money($laborAmount) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
+                            $laborTitle = $row['label'] . ' ' . $categories['labor']['label'] . ': ' . cpms_status_money($laborAmount) . ' (' . $row['labor_start'] . ' ~ ' . $row['labor_end'] . ')';
 
                             $equipmentAmount = isset($row['equipment']) ? (float)$row['equipment'] : 0;
                             $equipmentHeight = ($equipmentAmount <= 0) ? 2 : max(2, ($equipmentAmount / $maxMonthlyValue) * 100);
-                            $equipmentTitle = $row['label'] . ' ' . $categories['equipment']['label'] . ': ' . cpms_status_money($equipmentAmount) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
+                            $equipmentTitle = $row['label'] . ' ' . $categories['equipment']['label'] . ': ' . cpms_status_money($equipmentAmount) . ' (' . $row['cost_start'] . ' ~ ' . $row['cost_end'] . ')';
 
                             // 안전 스택
                             $materialsAmount = isset($row['materials']) ? (float)$row['materials'] : 0;
@@ -689,7 +690,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             $matSafetyHeight = ($matSafetyTotal <= 0) ? 2 : max(2, ($matSafetyTotal / $maxMonthlyValue) * 100);
                             $matPercent = ($matSafetyTotal > 0) ? (($materialsAmount / $matSafetyTotal) * 100) : 50;
                             $safetyPercent = ($matSafetyTotal > 0) ? (($safetyAmount / $matSafetyTotal) * 100) : 50;
-                            $stackTitle = $row['label'] . ' 자재: ' . cpms_status_money($materialsAmount) . ' / 안전: ' . cpms_status_money($safetyAmount) . ' / 합계: ' . cpms_status_money($matSafetyTotal) . ' (' . $row['start'] . ' ~ ' . $row['end'] . ')';
+                            $stackTitle = $row['label'] . ' 자재: ' . cpms_status_money($materialsAmount) . ' / 안전: ' . cpms_status_money($safetyAmount) . ' / 합계: ' . cpms_status_money($matSafetyTotal) . ' (' . $row['cost_start'] . ' ~ ' . $row['cost_end'] . ')';
                             ?>
                             <div class="bar" title="<?php echo h($salesTitle); ?>" style="height:<?php echo round($salesHeight, 2); ?>%; background:<?php echo h($categories['sales']['color']); ?>;">
                                 <span class="value"><?php echo h(number_format($salesAmount)); ?></span>
