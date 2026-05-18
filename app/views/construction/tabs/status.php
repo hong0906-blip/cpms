@@ -257,12 +257,8 @@ if (!function_exists('cpms_status_labor_total_between')) {
         foreach ($sumGongsu as $workerKey => $workerSumGongsu) {
             $outputDays = isset($outputDaysSet[$workerKey]) && is_array($outputDaysSet[$workerKey]) ? count($outputDaysSet[$workerKey]) : 0;
             if ($outputDays <= 0) continue;
-
-            $gongsuUnit = ((float)$workerSumGongsu) / $outputDays;
             $wageRate = isset($laborWageMap[$workerKey]) ? (float)$laborWageMap[$workerKey] : 0.0;
-
-            // 상황탭 노무비=지급총액 합 (지급총액 = 공수단위 * 임금단가 * 출력일수)
-            $totalLabor += ((float)$gongsuUnit) * $wageRate * $outputDays;
+            $totalLabor += ((float)$workerSumGongsu) * $wageRate;
         }
 
         return (float)$totalLabor;

@@ -108,7 +108,8 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
             <th class="border border-gray-200 px-2 py-2" rowspan="2">주민등록번호</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">외국인</th>
             <th class="border border-gray-200 px-2 py-2 text-center" colspan="<?php echo (int)$daysInMonth; ?>">출력일수</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">출력일수 합계</th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2">출력일수</th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2">총공수</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">임금단가</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">지급총액</th>
             <?php if ($showBankColumns): ?>            
@@ -132,10 +133,15 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                 $workerKey = cpms_timesheet_worker_key($workerName);
                 $dailyMap = isset($attendanceGongsuMap[$workerKey]) ? $attendanceGongsuMap[$workerKey] : array();
                 $outputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
-                $gongsuUnit = isset($attendanceGongsuUnit[$workerKey]) ? (float)$attendanceGongsuUnit[$workerKey] : 0.0;
                 $wageRate = function_exists('cpms_resolve_labor_wage_rate') ? cpms_resolve_labor_wage_rate($worker) : cpms_parse_money_value(isset($worker['deposit_rate']) ? $worker['deposit_rate'] : '');
                 $wageRateRaw = $wageRate > 0 ? number_format($wageRate) : '0';
-                $totalPay = $gongsuUnit * $wageRate * $outputDays;
+                $totalGongsu = 0.0;
+                foreach ($dailyMap as $dateKey => $gongsuValue) {
+                    if (!is_numeric($gongsuValue)) continue;
+                    if (strpos((string)$dateKey, $selectedMonth) !== 0) continue;
+                    $totalGongsu += (float)$gongsuValue;
+                }
+                $totalPay = $totalGongsu * $wageRate;
                 ?>
                 <tr class="<?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>">
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
@@ -160,6 +166,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                         </td>
                     <?php endfor; ?>
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h($outputDays > 0 ? (string)$outputDays : '0'); ?></td>
+                    <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h(cpms_format_gongsu_value($totalGongsu)); ?></td>                    
                     <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h($wageRateRaw !== '' ? $wageRateRaw : '0'); ?></td>
                     <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h($totalPay > 0 ? cpms_format_money_value($totalPay) : '0'); ?></td>
                     <?php if ($showBankColumns): ?>
@@ -172,7 +179,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                 <?php if ($debugMode): ?>
                 <tr class="bg-yellow-50">
                     <td class="border border-gray-200 px-2 py-1 text-[10px] text-gray-700" colspan="<?php echo $showBankColumns ? (15 + (int)$daysInMonth) : (12 + (int)$daysInMonth); ?>">
-                        <?php echo h($workerName); ?> / 공수단위 <?php echo h(cpms_format_gongsu_value($gongsuUnit)); ?> / 출력일수 <?php echo h((string)$outputDays); ?> / deposit_rate=<?php echo h(isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : ''); ?> / daily_wage=<?php echo h(isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : ''); ?> / 적용단가=<?php echo h((string)(int)round($wageRate)); ?> / 지급총액=<?php echo h((string)(int)round($totalPay)); ?>
+                        <?php echo h($workerName); ?> / 총공수 <?php echo h(cpms_format_gongsu_value($totalGongsu)); ?> / 출력일수 <?php echo h((string)$outputDays); ?> / 임금단가원본 deposit_rate=<?php echo h(isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : ''); ?> / daily_wage=<?php echo h(isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : ''); ?> / 적용단가=<?php echo h((string)(int)round($wageRate)); ?> / 지급총액=<?php echo h((string)(int)round($totalPay)); ?>
                     </td>
                 </tr>
                 <?php endif; ?>                
@@ -190,6 +197,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                     <td class="border border-gray-200 px-2 py-2 text-center">0</td>
                     <td class="border border-gray-200 px-2 py-2 text-right">0</td>
                     <td class="border border-gray-200 px-2 py-2 text-right">0</td>
+                    <td class="border border-gray-200 px-2 py-2 text-right">0</td>                    
                     <?php if ($showBankColumns): ?>
                     <td class="border border-gray-200 px-2 py-2"></td>
                     <td class="border border-gray-200 px-2 py-2"></td>

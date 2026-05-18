@@ -93,7 +93,6 @@ function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
     $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
     $attendanceGongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
     $attendanceOutputDays = isset($gongsuData['output_days']) && is_array($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
-    $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) && is_array($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
     if (function_exists('cpms_apply_labor_overrides_to_map')) {
         $attendanceGongsuMap = cpms_apply_labor_overrides_to_map($attendanceGongsuMap, $projectId, $ym);
     }
@@ -104,14 +103,20 @@ function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
         if ($workerKey === '') { continue; }
         $outputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
         if ($outputDays <= 0) { continue; }
-        $gongsuUnit = isset($attendanceGongsuUnit[$workerKey]) ? (float)$attendanceGongsuUnit[$workerKey] : 0.0;
+        $dailyMap = isset($attendanceGongsuMap[$workerKey]) && is_array($attendanceGongsuMap[$workerKey]) ? $attendanceGongsuMap[$workerKey] : array();
+        $totalGongsu = 0.0;
+        foreach ($dailyMap as $dateKey => $gongsuValue) {
+            if (!is_numeric($gongsuValue)) { continue; }
+            if (strpos((string)$dateKey, $ym) !== 0) { continue; }
+            $totalGongsu += (float)$gongsuValue;
+        }
         if (function_exists('cpms_resolve_labor_wage_rate')) {
             $wageRate = (float)cpms_resolve_labor_wage_rate($worker);
         } else {
             $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
             $wageRate = project_monthly_parse_money($wageRateRaw);
         }
-        $sum += ($gongsuUnit * $wageRate * $outputDays);
+        $sum += ($totalGongsu * $wageRate);
         $result['workers_considered']++;
     }
     $result['amount'] = $sum;
@@ -376,6 +381,19 @@ if ($debugMode && isset($revenueResult['stats']) && is_array($revenueResult['sta
     $salesDiagnostics[] = '공정 진행 rows: ' . number_format((int)$revenueResult['stats']['progress_rows']);
     $salesDiagnostics[] = '단가 연결 rows: ' . number_format((int)$revenueResult['stats']['unit_link_rows']);
 }
+if ($debugMode) {
+    $salesDiagnostics[] = '프로젝트 계약기간 월 목록: ' . implode(', ', $allMonths);
+    $salesDiagnostics[] = '선택월: ' . $selectedViewMonth;
+    $salesDiagnostics[] = 'displayMonths: ' . implode(', ', $displayMonths);
+    $salesDiagnostics[] = 'allMonths 개수: ' . number_format(count($allMonths));
+    $salesDiagnostics[] = '매출 총합계: ' . number_format((float)array_sum($monthlyRevenue));
+    $salesDiagnostics[] = '최종 합계 총합계: ' . number_format((float)array_sum($finalTotal));
+    $salesDiagnostics[] = '손익 총합계: ' . number_format((float)array_sum($profit));
+    $laborDiagnostics[] = '노무비 월별 금액:';
+    foreach ($allMonths as $diagYm) {
+        $laborDiagnostics[] = $diagYm . ': ' . number_format(isset($sumBySection['노무비'][$diagYm]) ? (float)$sumBySection['노무비'][$diagYm] : 0);
+    }
+}
 if (array_sum($monthlyRevenue) <= 0) {
     $salesDiagnostics[] = '매출 집계 결과가 없습니다.';
     $salesDiagnostics[] = '항목별 완료수량 데이터: ' . number_format((int)$revenueResult['stats']['item_rows']) . '건';
@@ -436,7 +454,7 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 
 <div class="overflow-x-auto">
 <table class="min-w-[1100px] w-full text-sm border">
-<thead><tr class="bg-[#d7aa8a]"><th class="border p-2">구분</th><th class="border p-2">업체명</th><th class="border p-2">내역</th><?php foreach($displayMonths as $ym): ?><th class="border p-2 text-right"><?php echo h(str_replace('-', '.', $ym)); ?></th><?php endforeach; ?><th class="border p-2 text-right">총 합계</th></tr></thead>
+<thead><tr class="bg-[#d7aa8a]"><th class="border p-2">구분</th><th class="border p-2">업체명</th><th class="border p-2">내역</th><?php foreach($displayMonths as $ym): ?><th class="border p-2 text-right"><?php echo h(str_replace('-', '.', $ym)); ?></th><?php endforeach; ?><th class="border p-2 text-right">총합계<br><span class="text-[10px] font-normal">프로젝트 계약기간 전체 합계</span></th></tr></thead>
 <tbody>
 <tr class="bg-amber-100 font-bold"><td class="border p-2">매출금액(공정표 기준)</td><td class="border p-2"></td><td class="border p-2"></td><?php $revSum=0; foreach($allMonths as $ymAll){ $revSum+=(float)$monthlyRevenue[$ymAll]; } foreach($displayMonths as $ym){ $v=(float)$monthlyRevenue[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($revSum); ?></td></tr>
 <?php foreach($labels as $sec=>$title): ?>
