@@ -19,6 +19,7 @@ $workDateFallbackUsed = false;
 $salesDiagnostics = array();
 $laborDiagnostics = array();
 $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
+require_once __DIR__ . '/../construction/tabs/partials/sales_data_loader.php';
 
 function monthly_zero_map($months) { $m = array(); foreach ($months as $ym) { $m[$ym] = 0; } return $m; }
 function amount_fmt($n){ if ((float)$n == 0) { return '-'; } return number_format((float)$n); }
@@ -124,7 +125,22 @@ function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
     return $result;
 }
 function project_monthly_load_revenue($pdo, $projectId, $allMonths) {
-    $result = array('months'=>monthly_zero_map($allMonths), 'basis'=>'항목별 완료수량', 'row_count'=>0, 'warnings'=>array(), 'stats'=>array('item_rows'=>0,'unit_link_rows'=>0,'item_amount'=>0.0,'progress_rows'=>0,'progress_link_rows'=>0));
+    $result = array('months'=>monthly_zero_map($allMonths), 'basis'=>'항목별 완료수량', 'row_count'=>0, 'warnings'=>array(), 'stats'=>array('item_rows'=>0,'unit_link_rows'=>0,'item_amount'=>0.0,'progress_rows'=>0,'progress_link_rows'=>0,'schedule_task_rows'=>0,'work_item_line_rows'=>0,'unit_price_rows'=>0,'completed_task_rows'=>0,'sales_sum'=>0.0));
+    if (function_exists('cpms_sales_monthly_map')) {
+        $primary = cpms_sales_monthly_map($pdo, $projectId, $allMonths);
+        if (isset($primary['months']) && is_array($primary['months'])) {
+            $result['months'] = $primary['months'];
+        }
+        $result['basis'] = isset($primary['basis']) ? (string)$primary['basis'] : '공사 상황 탭 매출 기준';
+        if (isset($primary['stats']) && is_array($primary['stats'])) {
+            $result['stats'] = array_merge($result['stats'], $primary['stats']);
+        }
+        $result['row_count'] = isset($result['stats']['completed_task_rows']) ? (int)$result['stats']['completed_task_rows'] : 0;
+        if (array_sum($result['months']) > 0) {
+            return $result;
+        }
+        $result['warnings'][] = '상황 탭 기준 매출 데이터가 없어 fallback 집계를 사용합니다.';
+    }
     $hasWorkDate = project_monthly_column_exists($pdo, 'cpms_schedule_task_item_progress', 'work_date');
     try {
         $sql = 'SELECT p.done_qty,p.unit_price_id,' . ($hasWorkDate ? 'p.work_date,' : '') . ' t.start_date AS task_start_date, u.unit_price FROM cpms_schedule_task_item_progress p LEFT JOIN cpms_project_unit_prices u ON u.id=p.unit_price_id AND u.project_id=p.project_id LEFT JOIN cpms_schedule_tasks t ON t.id=p.task_id AND t.project_id=p.project_id WHERE p.project_id=:pid';
@@ -377,15 +393,15 @@ foreach ($allMonths as $ym) {
     $profit[$ym] = (isset($monthlyRevenue[$ym]) ? (float)$monthlyRevenue[$ym] : 0) - $finalTotal[$ym];
 }
 if ($debugMode && isset($revenueResult['stats']) && is_array($revenueResult['stats'])) {
-    $salesDiagnostics[] = '항목별 완료수량 rows: ' . number_format((int)$revenueResult['stats']['item_rows']);
-    $salesDiagnostics[] = '공정 진행 rows: ' . number_format((int)$revenueResult['stats']['progress_rows']);
-    $salesDiagnostics[] = '단가 연결 rows: ' . number_format((int)$revenueResult['stats']['unit_link_rows']);
+    $salesDiagnostics[] = 'cpms_schedule_tasks rows: ' . number_format((int)$revenueResult['stats']['schedule_task_rows']);
+    $salesDiagnostics[] = 'cpms_work_item_lines 연결 rows: ' . number_format((int)$revenueResult['stats']['work_item_line_rows']);
+    $salesDiagnostics[] = 'cpms_project_unit_prices 연결 rows: ' . number_format((int)$revenueResult['stats']['unit_price_rows']);
+    $salesDiagnostics[] = '완료공정 rows: ' . number_format((int)$revenueResult['stats']['completed_task_rows']);
+    $salesDiagnostics[] = '계산된 매출 합계: ' . number_format((float)$revenueResult['stats']['sales_sum']);
 }
 if ($debugMode) {
     $salesDiagnostics[] = '프로젝트 계약기간 월 목록: ' . implode(', ', $allMonths);
     $salesDiagnostics[] = '선택월: ' . $selectedViewMonth;
-    $salesDiagnostics[] = 'displayMonths: ' . implode(', ', $displayMonths);
-    $salesDiagnostics[] = 'allMonths 개수: ' . number_format(count($allMonths));
     $salesDiagnostics[] = '매출 총합계: ' . number_format((float)array_sum($monthlyRevenue));
     $salesDiagnostics[] = '최종 합계 총합계: ' . number_format((float)array_sum($finalTotal));
     $salesDiagnostics[] = '손익 총합계: ' . number_format((float)array_sum($profit));
@@ -396,10 +412,11 @@ if ($debugMode) {
 }
 if (array_sum($monthlyRevenue) <= 0) {
     $salesDiagnostics[] = '매출 집계 결과가 없습니다.';
-    $salesDiagnostics[] = '항목별 완료수량 데이터: ' . number_format((int)$revenueResult['stats']['item_rows']) . '건';
-    $salesDiagnostics[] = '공정 진행 데이터: ' . number_format((int)$revenueResult['stats']['progress_rows']) . '건';
-    $salesDiagnostics[] = '단가 연결: ' . number_format((int)$revenueResult['stats']['unit_link_rows']) . '건';
-    $salesDiagnostics[] = '확인 필요: 공정표의 완료수량과 단가내역 연결 여부를 확인해주세요.';
+    $salesDiagnostics[] = 'cpms_schedule_tasks rows: ' . number_format((int)$revenueResult['stats']['schedule_task_rows']) . '건';
+    $salesDiagnostics[] = 'cpms_work_item_lines 연결 rows: ' . number_format((int)$revenueResult['stats']['work_item_line_rows']) . '건';
+    $salesDiagnostics[] = 'cpms_project_unit_prices 연결 rows: ' . number_format((int)$revenueResult['stats']['unit_price_rows']) . '건';
+    $salesDiagnostics[] = '완료공정 rows: ' . number_format((int)$revenueResult['stats']['completed_task_rows']) . '건';
+    $salesDiagnostics[] = '계산된 매출 합계: ' . number_format((float)$revenueResult['stats']['sales_sum']);
 } else {
     $salesDiagnostics[] = '매출 데이터 건수: ' . number_format((int)$revenueResult['row_count']) . '건';
 }
@@ -456,7 +473,7 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 <table class="min-w-[1100px] w-full text-sm border">
 <thead><tr class="bg-[#d7aa8a]"><th class="border p-2">구분</th><th class="border p-2">업체명</th><th class="border p-2">내역</th><?php foreach($displayMonths as $ym): ?><th class="border p-2 text-right"><?php echo h(str_replace('-', '.', $ym)); ?></th><?php endforeach; ?><th class="border p-2 text-right">총합계<br><span class="text-[10px] font-normal">프로젝트 계약기간 전체 합계</span></th></tr></thead>
 <tbody>
-<tr class="bg-amber-100 font-bold"><td class="border p-2">매출금액(공정표 기준)</td><td class="border p-2"></td><td class="border p-2"></td><?php $revSum=0; foreach($allMonths as $ymAll){ $revSum+=(float)$monthlyRevenue[$ymAll]; } foreach($displayMonths as $ym){ $v=(float)$monthlyRevenue[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($revSum); ?></td></tr>
+<tr class="bg-amber-100 font-bold"><td class="border p-2">매출금액(공정표 완료 기준)<br><span class="text-[10px] font-normal">공사 상황 탭 매출 기준과 동일</span></td><td class="border p-2"></td><td class="border p-2"></td><?php $revSum=0; foreach($allMonths as $ymAll){ $revSum+=(float)$monthlyRevenue[$ymAll]; } foreach($displayMonths as $ym){ $v=(float)$monthlyRevenue[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($revSum); ?></td></tr>
 <?php foreach($labels as $sec=>$title): ?>
 <tr class="bg-[#f2dfcf] font-semibold"><td class="border p-2"><?php echo h($title); ?></td><td class="border p-2"></td><td class="border p-2"></td><?php foreach($displayMonths as $ym): ?><td class="border p-2"></td><?php endforeach; ?><td class="border p-2"></td></tr>
 <?php if (count($rowsBySection[$sec]) === 0): ?>
