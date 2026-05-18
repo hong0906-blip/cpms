@@ -73,6 +73,7 @@ $attendanceGongsuMap = isset($attendanceGongsuMap) && is_array($attendanceGongsu
 $attendanceGongsuUnit = isset($attendanceGongsuUnit) && is_array($attendanceGongsuUnit) ? $attendanceGongsuUnit : array();
 $attendanceOutputDays = isset($attendanceOutputDays) && is_array($attendanceOutputDays) ? $attendanceOutputDays : array();
 $showBankColumns = isset($showBankColumns) ? (bool)$showBankColumns : true;
+$debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
 ?>
 
 <div class="overflow-x-auto">
@@ -132,8 +133,8 @@ $showBankColumns = isset($showBankColumns) ? (bool)$showBankColumns : true;
                 $dailyMap = isset($attendanceGongsuMap[$workerKey]) ? $attendanceGongsuMap[$workerKey] : array();
                 $outputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
                 $gongsuUnit = isset($attendanceGongsuUnit[$workerKey]) ? (float)$attendanceGongsuUnit[$workerKey] : 0.0;
-                $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
-                $wageRate = cpms_parse_money_value($wageRateRaw);
+                $wageRate = function_exists('cpms_resolve_labor_wage_rate') ? cpms_resolve_labor_wage_rate($worker) : cpms_parse_money_value(isset($worker['deposit_rate']) ? $worker['deposit_rate'] : '');
+                $wageRateRaw = $wageRate > 0 ? number_format($wageRate) : '0';
                 $totalPay = $gongsuUnit * $wageRate * $outputDays;
                 ?>
                 <tr class="<?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>">
@@ -168,6 +169,13 @@ $showBankColumns = isset($showBankColumns) ? (bool)$showBankColumns : true;
                     <?php endif; ?>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['company_name']) ? $worker['company_name'] : ''); ?></td>
                 </tr>
+                <?php if ($debugMode): ?>
+                <tr class="bg-yellow-50">
+                    <td class="border border-gray-200 px-2 py-1 text-[10px] text-gray-700" colspan="<?php echo $showBankColumns ? (15 + (int)$daysInMonth) : (12 + (int)$daysInMonth); ?>">
+                        <?php echo h($workerName); ?> / 공수단위 <?php echo h(cpms_format_gongsu_value($gongsuUnit)); ?> / 출력일수 <?php echo h((string)$outputDays); ?> / deposit_rate=<?php echo h(isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : ''); ?> / daily_wage=<?php echo h(isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : ''); ?> / 적용단가=<?php echo h((string)(int)round($wageRate)); ?> / 지급총액=<?php echo h((string)(int)round($totalPay)); ?>
+                    </td>
+                </tr>
+                <?php endif; ?>                
             <?php endforeach; ?>
         <?php else: ?>
             <?php for ($i = 1; $i <= $timesheetRows; $i++): ?>

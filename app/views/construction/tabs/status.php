@@ -197,8 +197,12 @@ if (!function_exists('cpms_status_labor_wage_map')) {
             $name = isset($worker['name']) ? (string)$worker['name'] : '';
             $key = cpms_normalize_worker_key($name);
             if ($key === '') continue;
-            $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
-            $wageMap[$key] = cpms_status_parse_money($wageRateRaw);
+            if (function_exists('cpms_resolve_labor_wage_rate')) {
+                $wageMap[$key] = (float)cpms_resolve_labor_wage_rate($worker);
+            } else {
+                $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
+                $wageMap[$key] = cpms_status_parse_money($wageRateRaw);
+            }
         }
 
         return $wageMap;

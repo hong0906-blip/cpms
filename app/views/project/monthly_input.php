@@ -105,8 +105,12 @@ function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
         $outputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
         if ($outputDays <= 0) { continue; }
         $gongsuUnit = isset($attendanceGongsuUnit[$workerKey]) ? (float)$attendanceGongsuUnit[$workerKey] : 0.0;
-        $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
-        $wageRate = project_monthly_parse_money($wageRateRaw);
+        if (function_exists('cpms_resolve_labor_wage_rate')) {
+            $wageRate = (float)cpms_resolve_labor_wage_rate($worker);
+        } else {
+            $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
+            $wageRate = project_monthly_parse_money($wageRateRaw);
+        }
         $sum += ($gongsuUnit * $wageRate * $outputDays);
         $result['workers_considered']++;
     }
@@ -303,14 +307,6 @@ if ($pdo && is_array($selectedProject)) {
         $directTeamMembers = cpms_load_direct_team_members($pdo);
         $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $selectedProjectId);
         $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
-        $workerRateMap = array();
-        foreach ($workerRows as $wr) {
-            $wd = isset($wr['data']) ? $wr['data'] : array();
-            $wk = cpms_normalize_worker_key(isset($wd['name']) ? $wd['name'] : '');
-            if ($wk === '') { continue; }
-            $rate = isset($wd['deposit_rate']) ? (float)str_replace(',', '', (string)$wd['deposit_rate']) : 0;
-            $workerRateMap[$wk] = $rate;
-        }
         if (!function_exists('cpms_apply_labor_overrides_to_map')) {
             function cpms_apply_labor_overrides_to_map($map, $projectId, $month) {
                 $rows = cpms_load_labor_overrides((int)$projectId, (string)$month);

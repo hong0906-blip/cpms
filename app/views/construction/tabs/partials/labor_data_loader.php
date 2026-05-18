@@ -747,24 +747,36 @@ if (!function_exists('cpms_load_direct_team_members')) {
         } catch (Exception $e) {
             $members = array();
         }
-        if (is_array($members) && count($members) > 0) {
-            foreach ($members as $idx => $member) {
-                if (!is_array($member)) continue;
-                $depositRate = isset($member['deposit_rate']) ? trim((string)$member['deposit_rate']) : '';
-                $dailyWage = isset($member['daily_wage']) ? trim((string)$member['daily_wage']) : '';
-
-                $depositRateNum = (is_numeric(str_replace(',', '', $depositRate))) ? (float)str_replace(',', '', $depositRate) : 0;
-                $dailyWageNum = (is_numeric(str_replace(',', '', $dailyWage))) ? (float)str_replace(',', '', $dailyWage) : 0;
-
-                // 레거시 데이터 보정:
-                // deposit_rate 값이 비었거나 0인데 daily_wage 값이 있으면 임금단가로 사용
-                if (($depositRate === '' || $depositRateNum <= 0) && $dailyWage !== '' && $dailyWageNum > 0) {
-                    $member['deposit_rate'] = $dailyWage;
-                }
-                $members[$idx] = $member;
-            }
-        }        
         return $members;
+    }
+}
+
+if (!function_exists('cpms_parse_labor_wage_value')) {
+    function cpms_parse_labor_wage_value($value) {
+        $raw = trim((string)$value);
+        if ($raw === '') return 0.0;
+        $raw = str_replace(',', '', $raw);
+        if (!is_numeric($raw)) return 0.0;
+        return (float)$raw;
+    }
+}
+
+if (!function_exists('cpms_resolve_labor_wage_rate')) {
+    function cpms_resolve_labor_wage_rate($worker) {
+        if (!is_array($worker)) return 0.0;
+        $depositRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
+        $dailyWageRaw = isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : '';
+        $depositRate = cpms_parse_labor_wage_value($depositRateRaw);
+        $dailyWage = cpms_parse_labor_wage_value($dailyWageRaw);
+
+        if ($depositRate > 0) {
+            if ($depositRate < 1000 && $dailyWage >= 1000) {
+                return $dailyWage;
+            }
+            return $depositRate;
+        }
+        if ($dailyWage > 0) return $dailyWage;
+        return 0.0;
     }
 }
 
@@ -945,6 +957,7 @@ if (!function_exists('cpms_build_project_worker_rows')) {
                 'phone' => isset($worker['phone']) ? (string)$worker['phone'] : '',
                 'address' => isset($worker['address']) ? (string)$worker['address'] : '',
                 'deposit_rate' => isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '0',
+                'daily_wage' => isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : '',                
                 'bank_account' => isset($worker['bank_account']) ? (string)$worker['bank_account'] : '',
                 'bank_name' => isset($worker['bank_name']) ? (string)$worker['bank_name'] : '',
                 'account_holder' => isset($worker['account_holder']) ? (string)$worker['account_holder'] : '',
@@ -962,23 +975,13 @@ if (!function_exists('cpms_build_project_worker_rows')) {
                 // 인원작성 저장 기능: 프로젝트 저장값으로 최종 덮어쓰기
                 foreach ($data as $field => $fieldValue) {
                     if ($field === 'name') continue;
-                    if ($field === 'deposit_rate') {
-                        $projectRateRaw = trim((string)$fieldValue);
-                        $projectRateNum = (is_numeric(str_replace(',', '', $projectRateRaw))) ? (float)str_replace(',', '', $projectRateRaw) : 0;
-                        $directRateRaw = isset($merged[$field]) ? trim((string)$merged[$field]) : '';
-                        // 직영팀 기본 임금단가를 우선 유지하고,
-                        // 프로젝트 저장값이 0보다 큰 경우에만 덮어씁니다.
-                        if ($projectRateRaw !== '' && $projectRateNum > 0) {
-                            $merged[$field] = $projectRateRaw;
-                        } else if ($directRateRaw === '' && $projectRateRaw !== '') {
-                            $merged[$field] = $projectRateRaw;
-                        }
-                        continue;
-                    }
                     if (trim((string)$fieldValue) !== '') $merged[$field] = $fieldValue;
                 }
                 $data = $merged;
             }
+            if (!isset($data['daily_wage'])) {
+                $data['daily_wage'] = '';
+            }            
             $rows[] = array(
                 'id' => isset($worker['id']) ? (int)$worker['id'] : 0,
                 'source' => isset($worker['source']) ? (string)$worker['source'] : '',
@@ -1022,6 +1025,7 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'name' => isset($data['name']) ? (string)$data['name'] : '',
                 'resident_no' => isset($data['resident_no']) ? (string)$data['resident_no'] : '',
                 'deposit_rate' => isset($data['deposit_rate']) ? (string)$data['deposit_rate'] : '',
+                'daily_wage' => isset($data['daily_wage']) ? (string)$data['daily_wage'] : '',                
                 'bank_account' => isset($data['bank_account']) ? (string)$data['bank_account'] : '',
                 'bank_name' => isset($data['bank_name']) ? (string)$data['bank_name'] : '',
                 'account_holder' => isset($data['account_holder']) ? (string)$data['account_holder'] : '',
