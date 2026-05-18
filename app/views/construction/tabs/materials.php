@@ -4,7 +4,7 @@
  * 자재구입비(장비 방식 복제)
  * - 서브탭: 월별자재구입비(monthly), 자재구입비입력(input)
  * - 월 선택(ym=YYYY-MM) 공통 적용
- * - 월별 양식(전월 25~31 + 선택월 1~24, 2줄 출력) 출력
+ * - 월별 양식(전월 26~말일 + 선택월 1~25, 2줄 출력) 출력
  * - PHP 5.6 호환
  */
 
@@ -40,8 +40,8 @@ $prevFirst = clone $currFirst;
 $prevFirst->modify('-1 month');
 $prevYm = $prevFirst->format('Y-m');
 $prevLastDay = (int)$prevFirst->format('t');
-$monthlyStart = $prevYm . '-25';
-$monthlyEnd = $ym . '-24';
+$monthlyStart = $prevYm . '-26';
+$monthlyEnd = $ym . '-25';
 
 $monthOptions = array();
 for ($i = -12; $i <= 12; $i++) {
@@ -102,7 +102,7 @@ try {
 }
 
 $dateSlots = array();
-for ($d = 25; $d <= 31; $d++) {
+for ($d = 26; $d <= 31; $d++) {
     $valid = ($d <= $prevLastDay);
     $dateSlots[] = array(
         'label' => '전월 ' . $d,
@@ -110,7 +110,7 @@ for ($d = 25; $d <= 31; $d++) {
         'valid' => $valid,
     );
 }
-for ($d = 1; $d <= 24; $d++) {
+for ($d = 1; $d <= 25; $d++) {
     $valid = true;
     $dateSlots[] = array(
         'label' => $d,
@@ -121,7 +121,7 @@ for ($d = 1; $d <= 24; $d++) {
 
 // 월별자재구입비 날짜 2줄
 $splitIndex = 0;
-$preferredFirstRowCount = (7 + 15); // 전월25~말일 + 현월 1~15
+$preferredFirstRowCount = (7 + 15); // 전월26~말일 + 현월 1~15
 if ($preferredFirstRowCount >= count($dateSlots)) {
     $splitIndex = (int)ceil(count($dateSlots) / 2);
 } else {
@@ -204,7 +204,7 @@ function material_money($v)
 
                     <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="materialCreateDateInputs" data-chip-target="materialCreateDateChips" data-prev-grid-target="materialCreateCalPrev" data-curr-grid-target="materialCreateCalCurr">
                         <div class="flex items-center justify-between gap-2 mb-2">
-                            <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($prevYm); ?> 25일~<?php echo h($ym); ?> 24일, 복수 선택)</label>
+                            <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($prevYm); ?> 26일~<?php echo h($ym); ?> 25일, 복수 선택)</label>
                             <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-toggle-calendar>날짜 선택</button>
                         </div>
                         <div class="hidden border border-gray-200 rounded-lg p-2 bg-gray-50" data-calendar-box>
@@ -257,7 +257,7 @@ function material_money($v)
                                             <!-- 자재구입비 달력(전월/현월 2달력) -->
                                             <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-prev-grid-target="usageDatePrev_<?php echo (int)$it['id']; ?>" data-curr-grid-target="usageDateCurr_<?php echo (int)$it['id']; ?>">
                                                 <div class="flex items-center justify-between">
-                                                    <div class="text-xs text-gray-700 font-bold">날짜(<?php echo h($prevYm); ?> 25일~<?php echo h($ym); ?> 24일)</div>
+                                                    <div class="text-xs text-gray-700 font-bold">날짜(<?php echo h($prevYm); ?> 26일~<?php echo h($ym); ?> 25일)</div>
                                                     <button type="button" class="px-2 py-1 rounded border text-xs" data-toggle-calendar>날짜 선택</button>
                                                 </div>
                                                 <div class="hidden mt-2 border border-gray-200 rounded p-2 bg-gray-50" data-calendar-box>
@@ -356,7 +356,7 @@ function material_money($v)
                 var prevLastDay = new Date(prevYear, prevMonth, 0).getDate();
                 var currLastDay = new Date(year, month, 0).getDate();
                 var startDate = (rangeInfo.start && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.start : (prevYm + '-25');
-                var endDate = (rangeInfo.end && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.end : (ym + '-24');
+                var endDate = (rangeInfo.end && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.end : (ym + '-25');
                 var startTs = ymdToTs(startDate);
                 var endTs = ymdToTs(endDate);
 
@@ -464,7 +464,7 @@ function material_money($v)
 
                 function renderGrids(){
                     renderMonthCalendar(prevGrid, prevYm, 25, prevLastDay, '전월');
-                    renderMonthCalendar(currGrid, ym, 1, 24, '현월');
+                    renderMonthCalendar(currGrid, ym, 1, 25, '현월');
                 }
 
                 function render(){

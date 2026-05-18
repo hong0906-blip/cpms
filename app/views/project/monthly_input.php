@@ -24,6 +24,34 @@ function monthly_zero_map($months) { $m = array(); foreach ($months as $ym) { $m
 function amount_fmt($n){ if ((float)$n == 0) { return '-'; } return number_format((float)$n); }
 function row_total($row, $months){ $sum = 0; foreach($months as $ym){ $sum += isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; } return $sum; }
 function ym_valid($ym){ return preg_match('/^\\d{4}-\\d{2}$/', (string)$ym); }
+
+function cpms_cost_period_range($ym, $type) {
+    $ym = trim((string)$ym);
+    $type = trim((string)$type);
+    if (!preg_match('/^\d{4}-\d{2}$/', $ym)) { $ym = date('Y-m'); }
+    if ($type === 'labor') {
+        $start = $ym . '-01';
+        $ts = strtotime($start);
+        $end = date('Y-m-t', $ts);
+        return array('start' => $start, 'end' => $end);
+    }
+    $currentStartTs = strtotime($ym . '-01');
+    $prevMonthTs = strtotime('-1 month', $currentStartTs);
+    $start = date('Y-m', $prevMonthTs) . '-26';
+    $end = $ym . '-25';
+    return array('start' => $start, 'end' => $end);
+}
+function cpms_material_equipment_cost_ym($useDate) {
+    $useDate = trim((string)$useDate);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $useDate)) { return ''; }
+    $day = (int)substr($useDate, 8, 2);
+    $baseYm = substr($useDate, 0, 7);
+    if ($day >= 26) {
+        $ts = strtotime($baseYm . '-01 +1 month');
+        return date('Y-m', $ts);
+    }
+    return $baseYm;
+}
 function project_monthly_table_exists($pdo, $table) {
     try { $st = $pdo->prepare('SHOW TABLES LIKE :t'); $st->bindValue(':t', $table); $st->execute(); return is_array($st->fetch()); }
     catch (Exception $e) { return false; }
@@ -246,7 +274,7 @@ if ($pdo && is_array($selectedProject)) {
             if (!isset($tmp[$sec . '_' . $id])) {
                 $tmp[$sec . '_' . $id] = array('section'=>$sec,'업체명'=>$r['vendor_name'],'내역'=>($r['remark'] !== '' ? $r['remark'] : $cat),'months'=>monthly_zero_map($allMonths));
             }
-            $ym = substr((string)$r['use_date'], 0, 7);
+            $ym = cpms_material_equipment_cost_ym($r['use_date']);
             if (isset($tmp[$sec . '_' . $id]['months'][$ym])) { $tmp[$sec . '_' . $id]['months'][$ym] += (float)$r['amount']; }
         }
         foreach ($tmp as $one) { $rowsBySection[$one['section']][] = $one; }
@@ -262,7 +290,7 @@ if ($pdo && is_array($selectedProject)) {
         foreach ($eq as $r) {
             $id = 'e' . (int)$r['id'];
             if (!isset($tmpEq[$id])) { $tmpEq[$id] = array('section'=>'장비비','업체명'=>$r['vendor_name'],'내역'=>($r['spec'] !== '' ? $r['spec'] : $r['category']),'months'=>monthly_zero_map($allMonths)); }
-            $ym = substr((string)$r['use_date'], 0, 7);
+            $ym = cpms_material_equipment_cost_ym($r['use_date']);
             if (isset($tmpEq[$id]['months'][$ym])) { $tmpEq[$id]['months'][$ym] += (float)$r['amount']; }
         }
         foreach ($tmpEq as $one) { $rowsBySection['장비비'][] = $one; }
@@ -372,6 +400,13 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 ?>
 <div class="bg-white rounded-3xl border border-gray-100 p-5">
 <h3 class="text-xl font-extrabold mb-3">월별 투입비 상세내역</h3>
+<?php $guideYm = ($selectedViewMonth === 'all' && count($displayMonths) > 0) ? $displayMonths[count($displayMonths)-1] : $selectedViewMonth; if (!ym_valid($guideYm) && count($allMonths) > 0) { $guideYm = $allMonths[count($allMonths)-1]; } $laborRange = cpms_cost_period_range($guideYm, 'labor'); $meRange = cpms_cost_period_range($guideYm, 'material'); ?>
+<div class="mb-3 rounded-xl border border-blue-100 bg-blue-50 text-blue-900 p-3 text-xs">
+<div class="font-bold mb-1">계산 기준</div>
+<div>- 노무비: 매월 1일 ~ 말일</div>
+<div>- 자재비/장비비: 전월 26일 ~ 현월 25일</div>
+<?php if (ym_valid($guideYm)): ?><div class="mt-1"><?php echo h(str_replace('-', '.', $guideYm)); ?> 기준 / 노무비: <?php echo h($laborRange['start']); ?> ~ <?php echo h($laborRange['end']); ?> / 자재비·장비비: <?php echo h($meRange['start']); ?> ~ <?php echo h($meRange['end']); ?></div><?php endif; ?>
+</div>
 <?php if (count($errors)>0): ?><div class="mb-3 rounded-xl border border-red-200 bg-red-50 text-red-800 p-3 text-sm"><?php foreach($errors as $em): ?><div><?php echo h($em); ?></div><?php endforeach; ?></div><?php endif; ?>
 <?php if ($deductionTableMissing): ?><div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 p-3 text-sm">공제분 테이블이 없습니다. 공무 DB 설치/확인을 실행해주세요.</div><?php endif; ?>
 <?php foreach($notices as $nt): ?><div class="mb-2 text-xs text-amber-700"><?php echo h($nt); ?></div><?php endforeach; ?>

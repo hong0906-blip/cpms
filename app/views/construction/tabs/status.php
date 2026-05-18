@@ -2,11 +2,31 @@
 /**
  * 공사 > 상황 탭(연도별 월/분기 비용+매출 그래프)
  * - 연도 선택 + 월별/분기별 5항목(노무/장비/안전/자재/매출) 막대그래프
- * - 회사 월 기준: 전월 25일 ~ 현월 24일
+ * - 회사 월 기준: 전월 26일 ~ 현월 25일
  * - PHP 5.6 호환
  */
 
 require_once __DIR__ . '/partials/labor_data_loader.php';
+
+
+if (!function_exists('cpms_cost_period_range')) {
+    function cpms_cost_period_range($ym, $type) {
+        $ym = trim((string)$ym);
+        $type = trim((string)$type);
+        if (!preg_match('/^\d{4}-\d{2}$/', $ym)) { $ym = date('Y-m'); }
+        if ($type === 'labor') {
+            $start = $ym . '-01';
+            $ts = strtotime($start);
+            $end = date('Y-m-t', $ts);
+            return array('start' => $start, 'end' => $end);
+        }
+        $currentStartTs = strtotime($ym . '-01');
+        $prevMonthTs = strtotime('-1 month', $currentStartTs);
+        $start = date('Y-m', $prevMonthTs) . '-26';
+        $end = $ym . '-25';
+        return array('start' => $start, 'end' => $end);
+    }
+}
 
 if (!function_exists('cpms_status_table_exists')) {
     function cpms_status_table_exists($pdo, $table) {
@@ -441,10 +461,10 @@ for ($m = 1; $m <= 12; $m++) {
 
     $rangeStartObj = clone $monthObj;
     $rangeStartObj->modify('-1 month');
-    $rangeStartObj->setDate((int)$rangeStartObj->format('Y'), (int)$rangeStartObj->format('m'), 25);
+    $rangeStartObj->setDate((int)$rangeStartObj->format('Y'), (int)$rangeStartObj->format('m'), 26);
 
     $rangeEndObj = clone $monthObj;
-    $rangeEndObj->setDate((int)$rangeEndObj->format('Y'), (int)$rangeEndObj->format('m'), 24);
+    $rangeEndObj->setDate((int)$rangeEndObj->format('Y'), (int)$rangeEndObj->format('m'), 25);
 
     $rangeStart = $rangeStartObj->format('Y-m-d');
     $rangeEnd = $rangeEndObj->format('Y-m-d');
@@ -542,10 +562,10 @@ foreach ($years as $yy) {
 
         $rangeStartObj = clone $monthObj;
         $rangeStartObj->modify('-1 month');
-        $rangeStartObj->setDate((int)$rangeStartObj->format('Y'), (int)$rangeStartObj->format('m'), 25);
+        $rangeStartObj->setDate((int)$rangeStartObj->format('Y'), (int)$rangeStartObj->format('m'), 26);
 
         $rangeEndObj = clone $monthObj;
-        $rangeEndObj->setDate((int)$rangeEndObj->format('Y'), (int)$rangeEndObj->format('m'), 24);
+        $rangeEndObj->setDate((int)$rangeEndObj->format('Y'), (int)$rangeEndObj->format('m'), 25);
 
         $rangeStart = $rangeStartObj->format('Y-m-d');
         $rangeEnd = $rangeEndObj->format('Y-m-d');
@@ -599,7 +619,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <h3 class="text-xl font-extrabold text-gray-900">상황</h3>
-                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황(회사 월 기준: 전월 25일~현월 24일)</div>
+                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황(회사 월 기준: 전월 26일~현월 25일)</div>
             </div>
         </div>
 
@@ -640,7 +660,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     <div class="chart-wrap">
         <div class="flex items-center justify-between">
             <h4 class="text-lg font-extrabold text-gray-900">월별 비용/매출 그래프</h4>
-            <div class="text-xs text-gray-500">기준: 전월 25일 ~ 현월 24일</div>
+            <div class="text-xs text-gray-500">기준: 전월 26일 ~ 현월 25일</div>
         </div>
 
         <div class="chart-scroll">

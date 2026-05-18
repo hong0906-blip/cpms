@@ -77,8 +77,8 @@ function material_month_range2($ym)
 {
     $prevYm = date('Y-m', strtotime($ym . '-01 -1 month'));
     return array(
-        'start' => $prevYm . '-25',
-        'end' => $ym . '-24',
+        'start' => $prevYm . '-26',
+        'end' => $ym . '-25',
     );
 }
 
