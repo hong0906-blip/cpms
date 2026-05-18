@@ -96,6 +96,16 @@ if ($route === 'admin/labor_entries_save') {
     exit;
 }
 
+
+if ($route === 'db_setup_project_monthly') {
+    $dept = (string)\App\Core\Auth::userDepartment();
+    $role = (string)\App\Core\Auth::userRole();
+    $ok = \App\Core\Auth::isMaster() || $role === 'executive' || $dept === '공무' || $dept === '관리' || $dept === '관리부';
+    if (!$ok) { http_response_code(403); echo '403 Forbidden'; exit; }
+    require_once __DIR__ . '/db_setup_project_monthly.php';
+    exit;
+}
+
 // ==========================
 //  공무(프로젝트) 액션(POST 처리)
 // ==========================
