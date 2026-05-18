@@ -9,10 +9,11 @@ if (!function_exists('approval_status_badge')) {
             'PENDING' => 'bg-indigo-50 text-indigo-700 border-indigo-200',
             'APPROVED' => 'bg-emerald-50 text-emerald-700 border-emerald-200',
             'REJECTED' => 'bg-rose-50 text-rose-700 border-rose-200',
-            'CANCELLED' => 'bg-gray-100 text-gray-700 border-gray-200',
-            'DRAFT' => 'bg-amber-50 text-amber-700 border-amber-200'
+            'CANCELLED' => 'bg-gray-100 text-gray-700 border-gray-300',
+            'DRAFT' => 'bg-slate-100 text-slate-700 border-slate-300',
+            'WAITING' => 'bg-amber-50 text-amber-700 border-amber-200'
         );
-        return isset($map[$status]) ? $map[$status] : 'bg-gray-100 text-gray-700 border-gray-200';
+        return isset($map[$status]) ? $map[$status] : 'bg-gray-100 text-gray-700 border-gray-300';
     }
 }
 
