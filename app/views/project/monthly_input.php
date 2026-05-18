@@ -18,6 +18,7 @@ $periodMissing = false;
 $workDateFallbackUsed = false;
 $salesDiagnostics = array();
 $laborDiagnostics = array();
+$debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
 
 function monthly_zero_map($months) { $m = array(); foreach ($months as $ym) { $m[$ym] = 0; } return $m; }
 function amount_fmt($n){ if ((float)$n == 0) { return '-'; } return number_format((float)$n); }
@@ -30,6 +31,147 @@ function project_monthly_table_exists($pdo, $table) {
 function project_monthly_column_exists($pdo, $table, $column) {
     try { $st = $pdo->prepare('SHOW COLUMNS FROM ' . $table . ' LIKE :c'); $st->bindValue(':c', $column); $st->execute(); return is_array($st->fetch()); }
     catch (Exception $e) { return false; }
+}
+function project_monthly_parse_money($value) {
+    if (function_exists('cpms_parse_money_value')) {
+        return (float)cpms_parse_money_value($value);
+    }
+    $raw = preg_replace('/[^0-9.\-]/', '', (string)$value);
+    if ($raw === '' || !is_numeric($raw)) { return 0.0; }
+    return (float)$raw;
+}
+function project_monthly_table_columns($pdo, $table) {
+    try {
+        $st = $pdo->query("SHOW COLUMNS FROM `" . $table . "`");
+        $rows = $st->fetchAll();
+        $cols = array();
+        if (is_array($rows)) {
+            foreach ($rows as $r) {
+                if (isset($r['Field'])) { $cols[] = (string)$r['Field']; }
+            }
+        }
+        return $cols;
+    } catch (Exception $e) {
+        return array();
+    }
+}
+function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
+    $result = array('amount'=>0.0, 'worker_rows'=>0, 'workers_considered'=>0);
+    if (!function_exists('cpms_load_gongsu_data') || !function_exists('cpms_build_timesheet_workers')) { return $result; }
+    $directTeamMembers = cpms_load_direct_team_members($pdo);
+    $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
+    $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
+    $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
+    $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
+    $attendanceGongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
+    $attendanceOutputDays = isset($gongsuData['output_days']) && is_array($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
+    $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) && is_array($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
+    if (function_exists('cpms_apply_labor_overrides_to_map')) {
+        $attendanceGongsuMap = cpms_apply_labor_overrides_to_map($attendanceGongsuMap, $projectId, $ym);
+    }
+    $sum = 0.0;
+    foreach ($timesheetWorkers as $worker) {
+        $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
+        $workerKey = function_exists('cpms_normalize_worker_key') ? cpms_normalize_worker_key($workerName) : trim((string)$workerName);
+        if ($workerKey === '') { continue; }
+        $outputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
+        if ($outputDays <= 0) { continue; }
+        $gongsuUnit = isset($attendanceGongsuUnit[$workerKey]) ? (float)$attendanceGongsuUnit[$workerKey] : 0.0;
+        $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
+        $wageRate = project_monthly_parse_money($wageRateRaw);
+        $sum += ($gongsuUnit * $wageRate * $outputDays);
+        $result['workers_considered']++;
+    }
+    $result['amount'] = $sum;
+    $result['worker_rows'] = is_array($timesheetWorkers) ? count($timesheetWorkers) : 0;
+    return $result;
+}
+function project_monthly_load_revenue($pdo, $projectId, $allMonths) {
+    $result = array('months'=>monthly_zero_map($allMonths), 'basis'=>'항목별 완료수량', 'row_count'=>0, 'warnings'=>array(), 'stats'=>array('item_rows'=>0,'unit_link_rows'=>0,'item_amount'=>0.0,'progress_rows'=>0,'progress_link_rows'=>0));
+    $hasWorkDate = project_monthly_column_exists($pdo, 'cpms_schedule_task_item_progress', 'work_date');
+    try {
+        $sql = 'SELECT p.done_qty,p.unit_price_id,' . ($hasWorkDate ? 'p.work_date,' : '') . ' t.start_date AS task_start_date, u.unit_price FROM cpms_schedule_task_item_progress p LEFT JOIN cpms_project_unit_prices u ON u.id=p.unit_price_id AND u.project_id=p.project_id LEFT JOIN cpms_schedule_tasks t ON t.id=p.task_id AND t.project_id=p.project_id WHERE p.project_id=:pid';
+        $st = $pdo->prepare($sql);
+        $st->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+        $st->execute();
+        $rows = $st->fetchAll();
+        if (!is_array($rows)) { $rows = array(); }
+        $result['stats']['item_rows'] = count($rows);
+        foreach ($rows as $r) {
+            $dateBase = '';
+            if ($hasWorkDate && isset($r['work_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$r['work_date'])) { $dateBase = (string)$r['work_date']; }
+            if ($dateBase === '' && isset($r['task_start_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$r['task_start_date'])) { $dateBase = (string)$r['task_start_date']; }
+            if ($dateBase === '') { continue; }
+            $ym = substr($dateBase, 0, 7);
+            if (!isset($result['months'][$ym])) { continue; }
+            $done = isset($r['done_qty']) ? (float)$r['done_qty'] : 0;
+            $unit = isset($r['unit_price']) ? (float)$r['unit_price'] : 0;
+            if ($unit > 0) { $result['stats']['unit_link_rows']++; }
+            $amt = $done * $unit;
+            $result['months'][$ym] += $amt;
+            $result['stats']['item_amount'] += $amt;
+        }
+        $result['row_count'] = $result['stats']['item_rows'];
+    } catch (Exception $e) {
+        $result['warnings'][] = '항목별 완료수량 집계 오류: ' . $e->getMessage();
+    }
+    if (array_sum($result['months']) > 0) { return $result; }
+    $taskCols = project_monthly_table_columns($pdo, 'cpms_schedule_tasks');
+    $priceCol = '';
+    foreach (array('amount','contract_amount','total_amount','price') as $col) { if (in_array($col, $taskCols, true)) { $priceCol = $col; break; } }
+    if ($priceCol !== '' && project_monthly_table_exists($pdo, 'cpms_schedule_progress')) {
+        try {
+            $sql2 = 'SELECT sp.done_qty,sp.total_qty,sp.work_date,t.' . $priceCol . ' AS task_amount FROM cpms_schedule_progress sp LEFT JOIN cpms_schedule_tasks t ON t.id=sp.task_id AND t.project_id=sp.project_id WHERE sp.project_id=:pid';
+            $st2 = $pdo->prepare($sql2);
+            $st2->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+            $st2->execute();
+            $rows2 = $st2->fetchAll();
+            if (!is_array($rows2)) { $rows2 = array(); }
+            $result['stats']['progress_rows'] = count($rows2);
+            foreach ($rows2 as $r2) {
+                $d = isset($r2['work_date']) ? (string)$r2['work_date'] : '';
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) { continue; }
+                $ym = substr($d, 0, 7);
+                if (!isset($result['months'][$ym])) { continue; }
+                $totalQty = isset($r2['total_qty']) ? (float)$r2['total_qty'] : 0;
+                $doneQty = isset($r2['done_qty']) ? (float)$r2['done_qty'] : 0;
+                $taskAmount = isset($r2['task_amount']) ? (float)$r2['task_amount'] : 0;
+                if ($totalQty <= 0 || $taskAmount <= 0) { continue; }
+                $result['months'][$ym] += ($doneQty / $totalQty) * $taskAmount;
+                $result['stats']['progress_link_rows']++;
+            }
+            if (array_sum($result['months']) > 0) { $result['basis'] = '공정 진행 완료수량 비율'; $result['row_count'] = $result['stats']['progress_rows']; return $result; }
+        } catch (Exception $e) {
+            $result['warnings'][] = '공정 진행 집계 오류: ' . $e->getMessage();
+        }
+    }
+    if ($priceCol !== '' && in_array('progress', $taskCols, true)) {
+        try {
+            $st3 = $pdo->prepare('SELECT start_date,end_date,progress,' . $priceCol . ' AS task_amount FROM cpms_schedule_tasks WHERE project_id=:pid');
+            $st3->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+            $st3->execute();
+            $rows3 = $st3->fetchAll();
+            if (!is_array($rows3)) { $rows3 = array(); }
+            foreach ($rows3 as $r3) {
+                $baseDate = isset($r3['end_date']) ? (string)$r3['end_date'] : '';
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $baseDate)) { $baseDate = isset($r3['start_date']) ? (string)$r3['start_date'] : ''; }
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $baseDate)) { continue; }
+                $ym = substr($baseDate, 0, 7);
+                if (!isset($result['months'][$ym])) { continue; }
+                $progress = isset($r3['progress']) ? (float)$r3['progress'] : 0;
+                $taskAmount = isset($r3['task_amount']) ? (float)$r3['task_amount'] : 0;
+                if ($taskAmount <= 0 || $progress <= 0) { continue; }
+                $result['months'][$ym] += $taskAmount * ($progress / 100);
+            }
+            if (array_sum($result['months']) > 0) {
+                $result['basis'] = '공정률 기준 임시 집계';
+                $result['warnings'][] = '완료수량 기준 매출 데이터가 없어 공정률 기준으로 임시 집계했습니다.';
+            }
+        } catch (Exception $e) {
+            $result['warnings'][] = '공정률 임시 집계 오류: ' . $e->getMessage();
+        }
+    }
+    return $result;
 }
 
 if ($pdo) {
@@ -83,48 +225,10 @@ if ($selectedViewMonth === '' && count($allMonths) > 0) { $selectedViewMonth = $
 $displayMonths = ($selectedViewMonth === 'all') ? $allMonths : array($selectedViewMonth);
 
 if ($pdo && is_array($selectedProject)) {
-    $hasWorkDate = project_monthly_column_exists($pdo, 'cpms_schedule_task_item_progress', 'work_date');
-    $hasTotalUnitPrice = project_monthly_column_exists($pdo, 'cpms_project_unit_prices', 'total_unit_price');
-    $hasAmount = project_monthly_column_exists($pdo, 'cpms_project_unit_prices', 'amount');
-
-    try {
-        $extraSelect = '';
-        if ($hasTotalUnitPrice) { $extraSelect .= ',u.total_unit_price'; }
-        if ($hasAmount) { $extraSelect .= ',u.amount'; }
-        $selectWorkDate = $hasWorkDate ? 'p.work_date,' : '';
-
-        $sqlProgress = 'SELECT p.done_qty,' . $selectWorkDate . 'u.unit_price,u.qty' . $extraSelect . ',t.start_date AS task_start_date '
-            . 'FROM cpms_schedule_task_item_progress p '
-            . 'LEFT JOIN cpms_project_unit_prices u ON u.id=p.unit_price_id AND u.project_id=p.project_id '
-            . 'LEFT JOIN cpms_schedule_tasks t ON t.id=p.task_id AND t.project_id=p.project_id '
-            . 'WHERE p.project_id=:pid';
-        $stProgress = $pdo->prepare($sqlProgress);
-        $stProgress->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
-        $stProgress->execute();
-        $progressRows = $stProgress->fetchAll();
-        if (!is_array($progressRows)) { $progressRows = array(); }
-
-        foreach ($progressRows as $rr) {
-            $dateBase = '';
-            if ($hasWorkDate && isset($rr['work_date']) && preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', (string)$rr['work_date'])) { $dateBase = (string)$rr['work_date']; }
-            if ($dateBase === '' && isset($rr['task_start_date']) && preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', (string)$rr['task_start_date'])) {
-                $dateBase = (string)$rr['task_start_date'];
-                $workDateFallbackUsed = true;
-            }
-            if ($dateBase === '') { continue; }
-            $ym = substr($dateBase, 0, 7);
-            if (!isset($monthlyRevenue[$ym])) { continue; }
-            $done = isset($rr['done_qty']) ? (float)$rr['done_qty'] : 0;
-            $amount = 0;
-            if (isset($rr['unit_price']) && $rr['unit_price'] !== null && $rr['unit_price'] !== '') { $amount = $done * (float)$rr['unit_price']; }
-            else if ($hasTotalUnitPrice && isset($rr['total_unit_price']) && $rr['total_unit_price'] !== null && $rr['total_unit_price'] !== '') { $amount = $done * (float)$rr['total_unit_price']; }
-            else if ($hasAmount && isset($rr['amount']) && isset($rr['qty']) && (float)$rr['qty'] > 0) { $amount = ($done / (float)$rr['qty']) * (float)$rr['amount']; }
-            $monthlyRevenue[$ym] += $amount;
-        }
-        $salesDiagnostics[] = '매출 집계 기준: 항목별 완료수량(done_qty × 단가)';        
-    } catch (Exception $e) {
-        $errors[] = '공정표 매출 데이터를 불러오지 못했습니다. 오류: ' . $e->getMessage();
-    }
+    $revenueResult = project_monthly_load_revenue($pdo, $selectedProjectId, $allMonths);
+    $monthlyRevenue = isset($revenueResult['months']) ? $revenueResult['months'] : $monthlyRevenue;
+    $salesDiagnostics[] = '매출 집계 기준: ' . (isset($revenueResult['basis']) ? $revenueResult['basis'] : '항목별 완료수량');
+    foreach (isset($revenueResult['warnings']) && is_array($revenueResult['warnings']) ? $revenueResult['warnings'] : array() as $w) { $notices[] = $w; }
 
     try {
         $stMat = $pdo->prepare('SELECT m.id,m.category,m.vendor_name,m.representative,m.phone,m.biz_no,m.remark,u.use_date,u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id=m.id AND u.project_id=m.project_id WHERE m.project_id=:pid');
@@ -179,22 +283,29 @@ if ($pdo && is_array($selectedProject)) {
             $rate = isset($wd['deposit_rate']) ? (float)str_replace(',', '', (string)$wd['deposit_rate']) : 0;
             $workerRateMap[$wk] = $rate;
         }
-        $laborMonths = monthly_zero_map($allMonths);
-        foreach ($allMonths as $ym) {
-            $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
-            $sum = 0;
-            $gMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
-            foreach ($gMap as $wk => $dayMap) {
-                if (!is_array($dayMap)) { continue; }
-                $rate = isset($workerRateMap[$wk]) ? (float)$workerRateMap[$wk] : 0;
-                foreach ($dayMap as $d => $gv) {
-                    $sum += ((float)$gv) * $rate;
+        if (!function_exists('cpms_apply_labor_overrides_to_map')) {
+            function cpms_apply_labor_overrides_to_map($map, $projectId, $month) {
+                $rows = cpms_load_labor_overrides((int)$projectId, (string)$month);
+                if (!is_array($rows)) return $map;
+                foreach ($rows as $workerKey => $dateRows) {
+                    if (!isset($map[$workerKey]) || !is_array($map[$workerKey])) $map[$workerKey] = array();
+                    foreach (is_array($dateRows) ? $dateRows : array() as $dateKey => $entry) {
+                        if (is_array($entry) && isset($entry['value']) && is_numeric($entry['value'])) { $map[$workerKey][$dateKey] = (float)$entry['value']; }
+                    }
                 }
+                return $map;                
             }
-            $laborMonths[$ym] = $sum;
+        }
+        $laborMonths = monthly_zero_map($allMonths);
+        $laborWorkerRows = 0;
+        foreach ($allMonths as $ym) {
+            $laborResult = project_monthly_labor_amount($pdo, $selectedProjectId, $projectName, $ym);
+            $laborMonths[$ym] = isset($laborResult['amount']) ? (float)$laborResult['amount'] : 0;
+            $laborWorkerRows = isset($laborResult['worker_rows']) ? (int)$laborResult['worker_rows'] : $laborWorkerRows;
         }
         $rowsBySection['노무비'][] = array('section'=>'노무비','업체명'=>'-','내역'=>'노무비 합계','months'=>$laborMonths);
-        $laborDiagnostics[] = '노무비 집계 기준: 공수 일자별 합계 × 인원작성 임금단가';
+        $laborDiagnostics[] = '노무비 집계 기준: 공사 > 노무비 지급총액 기준';
+        if ($debugMode) { $laborDiagnostics[] = '노무비 근로자 rows: ' . number_format($laborWorkerRows); }
     }
 
     try {
@@ -236,13 +347,27 @@ foreach ($allMonths as $ym) {
     $finalTotal[$ym] = $subtotal1[$ym] + $sumBySection['안전관리비'][$ym] + $sumBySection['공제분'][$ym];
     $profit[$ym] = (isset($monthlyRevenue[$ym]) ? (float)$monthlyRevenue[$ym] : 0) - $finalTotal[$ym];
 }
-if (array_sum($monthlyRevenue) <= 0) {
-    $salesDiagnostics[] = '매출 집계 결과가 없습니다. 확인 필요: 공사 > 공정표에서 완료수량과 계약단가가 저장되어 있는지 확인해주세요.';
-} else {
-    $salesDiagnostics[] = '매출 데이터 건수: ' . number_format((int)count($monthlyRevenue)) . '개월';
+if ($debugMode && isset($revenueResult['stats']) && is_array($revenueResult['stats'])) {
+    $salesDiagnostics[] = '항목별 완료수량 rows: ' . number_format((int)$revenueResult['stats']['item_rows']);
+    $salesDiagnostics[] = '공정 진행 rows: ' . number_format((int)$revenueResult['stats']['progress_rows']);
+    $salesDiagnostics[] = '단가 연결 rows: ' . number_format((int)$revenueResult['stats']['unit_link_rows']);
 }
-if (row_total($rowsBySection['노무비'][0], $allMonths) <= 0) {
-    $laborDiagnostics[] = '노무비 집계 결과가 없습니다. 확인 필요: 공사 > 노무비에서 해당 프로젝트명과 출퇴근 현장명이 일치하는지 확인해주세요.';
+if (array_sum($monthlyRevenue) <= 0) {
+    $salesDiagnostics[] = '매출 집계 결과가 없습니다.';
+    $salesDiagnostics[] = '항목별 완료수량 데이터: ' . number_format((int)$revenueResult['stats']['item_rows']) . '건';
+    $salesDiagnostics[] = '공정 진행 데이터: ' . number_format((int)$revenueResult['stats']['progress_rows']) . '건';
+    $salesDiagnostics[] = '단가 연결: ' . number_format((int)$revenueResult['stats']['unit_link_rows']) . '건';
+    $salesDiagnostics[] = '확인 필요: 공정표의 완료수량과 단가내역 연결 여부를 확인해주세요.';
+} else {
+    $salesDiagnostics[] = '매출 데이터 건수: ' . number_format((int)$revenueResult['row_count']) . '건';
+}
+if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비'][0], $allMonths) <= 0) {
+    $laborDiagnostics[] = '노무비 집계 결과가 없습니다.';
+    $laborDiagnostics[] = '확인 필요:';
+    $laborDiagnostics[] = '1. 공사 > 노무비에서 해당 월 노무비가 표시되는지 확인';
+    $laborDiagnostics[] = '2. 프로젝트명과 출퇴근 현장명이 일치하는지 확인';
+    $laborDiagnostics[] = '3. 근로자 임금단가가 입력되어 있는지 확인';
+    $laborDiagnostics[] = '4. 출력일수가 0인지 확인';
 }
 ?>
 <div class="bg-white rounded-3xl border border-gray-100 p-5">

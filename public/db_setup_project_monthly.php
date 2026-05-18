@@ -46,6 +46,34 @@ if (!$pdo) {
             } else {
                 $msgs[]='cpms_schedule_task_item_progress.work_date 이미 존재';
             }
+            try {
+                $idxRows = $pdo->query("SHOW INDEX FROM cpms_schedule_task_item_progress")->fetchAll();
+                $uniqueMap = array();
+                if (is_array($idxRows)) {
+                    foreach ($idxRows as $ix) {
+                        if (!isset($ix['Key_name'])) continue;
+                        $keyName = (string)$ix['Key_name'];
+                        $nonUnique = isset($ix['Non_unique']) ? (int)$ix['Non_unique'] : 1;
+                        if ($nonUnique !== 0) continue;
+                        if (!isset($uniqueMap[$keyName])) $uniqueMap[$keyName] = array();
+                        $uniqueMap[$keyName][] = isset($ix['Column_name']) ? (string)$ix['Column_name'] : '';
+                    }
+                }
+                $hasDateUnique = false;
+                foreach ($uniqueMap as $keyCols) {
+                    if (in_array('project_id', $keyCols, true) && in_array('task_id', $keyCols, true) && in_array('unit_price_id', $keyCols, true) && in_array('work_date', $keyCols, true)) {
+                        $hasDateUnique = true;
+                        break;
+                    }
+                }
+                if ($hasDateUnique) {
+                    $msgs[] = 'cpms_schedule_task_item_progress UNIQUE KEY: work_date 포함 구조 확인됨';
+                } else {
+                    $msgs[] = '주의: cpms_schedule_task_item_progress UNIQUE KEY에 work_date 미포함 가능성(월별 누적 저장 제약 가능)';
+                }
+            } catch (Exception $e) {
+                $msgs[] = '인덱스 점검 오류: ' . $e->getMessage();
+            }            
         }
     } catch (Exception $e) {
         $msgs[]='work_date 확인/추가 오류: ' . $e->getMessage();
