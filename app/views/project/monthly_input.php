@@ -3,8 +3,11 @@ use App\Core\Db;
 
 $pdo = Db::pdo();
 $selectedProjectId = isset($_GET['pid']) ? (int)$_GET['pid'] : 0;
+$viewMonthParam = isset($_GET['view_month']) ? trim((string)$_GET['view_month']) : '';
 $monthlyProjects = array();
-$selectedProject = null;
+$allMonths = array();
+$displayMonths = array();
+$selectedViewMonth = '';
 $months = array();
 $monthlyRevenue = array();
 $rowsBySection = array('구매품'=>array(),'자재비'=>array(),'장비비'=>array(),'노무비'=>array(),'기타경비'=>array(),'안전관리비'=>array(),'공제분'=>array());
@@ -13,6 +16,8 @@ $notices = array();
 $deductionTableMissing = false;
 $periodMissing = false;
 $workDateFallbackUsed = false;
+$salesDiagnostics = array();
+$laborDiagnostics = array();
 
 function monthly_zero_map($months) { $m = array(); foreach ($months as $ym) { $m[$ym] = 0; } return $m; }
 function amount_fmt($n){ if ((float)$n == 0) { return '-'; } return number_format((float)$n); }
@@ -52,7 +57,7 @@ if ($pdo) {
             $cur = strtotime($s);
             $end = strtotime($e);
             while ($cur <= $end) {
-                $months[] = date('Y-m', $cur);
+                $allMonths[] = date('Y-m', $cur);
                 $cur = strtotime('+1 month', $cur);
             }
         } else {
@@ -61,8 +66,21 @@ if ($pdo) {
     }
 }
 
-if (count($months) === 0) { $months[] = date('Y-m'); }
-$monthlyRevenue = monthly_zero_map($months);
+if (count($allMonths) === 0) { $allMonths[] = date('Y-m'); }
+$monthlyRevenue = monthly_zero_map($allMonths);
+
+$currentMonth = date('Y-m');
+if ($viewMonthParam === 'all') {
+    $selectedViewMonth = 'all';
+} else if (ym_valid($viewMonthParam) && in_array($viewMonthParam, $allMonths, true)) {
+    $selectedViewMonth = $viewMonthParam;
+} else if (in_array($currentMonth, $allMonths, true)) {
+    $selectedViewMonth = $currentMonth;
+} else if (count($allMonths) > 0) {
+    $selectedViewMonth = $allMonths[count($allMonths)-1];
+}
+if ($selectedViewMonth === '' && count($allMonths) > 0) { $selectedViewMonth = $allMonths[0]; }
+$displayMonths = ($selectedViewMonth === 'all') ? $allMonths : array($selectedViewMonth);
 
 if ($pdo && is_array($selectedProject)) {
     $hasWorkDate = project_monthly_column_exists($pdo, 'cpms_schedule_task_item_progress', 'work_date');
@@ -103,6 +121,7 @@ if ($pdo && is_array($selectedProject)) {
             else if ($hasAmount && isset($rr['amount']) && isset($rr['qty']) && (float)$rr['qty'] > 0) { $amount = ($done / (float)$rr['qty']) * (float)$rr['amount']; }
             $monthlyRevenue[$ym] += $amount;
         }
+        $salesDiagnostics[] = '매출 집계 기준: 항목별 완료수량(done_qty × 단가)';        
     } catch (Exception $e) {
         $errors[] = '공정표 매출 데이터를 불러오지 못했습니다. 오류: ' . $e->getMessage();
     }
@@ -121,7 +140,7 @@ if ($pdo && is_array($selectedProject)) {
             $sec = $map[$cat];
             $id = 'm' . (int)$r['id'];
             if (!isset($tmp[$sec . '_' . $id])) {
-                $tmp[$sec . '_' . $id] = array('section'=>$sec,'업체명'=>$r['vendor_name'],'내역'=>($r['remark'] !== '' ? $r['remark'] : $cat),'months'=>monthly_zero_map($months));
+                $tmp[$sec . '_' . $id] = array('section'=>$sec,'업체명'=>$r['vendor_name'],'내역'=>($r['remark'] !== '' ? $r['remark'] : $cat),'months'=>monthly_zero_map($allMonths));
             }
             $ym = substr((string)$r['use_date'], 0, 7);
             if (isset($tmp[$sec . '_' . $id]['months'][$ym])) { $tmp[$sec . '_' . $id]['months'][$ym] += (float)$r['amount']; }
@@ -138,15 +157,44 @@ if ($pdo && is_array($selectedProject)) {
         $tmpEq = array();
         foreach ($eq as $r) {
             $id = 'e' . (int)$r['id'];
-            if (!isset($tmpEq[$id])) { $tmpEq[$id] = array('section'=>'장비비','업체명'=>$r['vendor_name'],'내역'=>($r['spec'] !== '' ? $r['spec'] : $r['category']),'months'=>monthly_zero_map($months)); }
+            if (!isset($tmpEq[$id])) { $tmpEq[$id] = array('section'=>'장비비','업체명'=>$r['vendor_name'],'내역'=>($r['spec'] !== '' ? $r['spec'] : $r['category']),'months'=>monthly_zero_map($allMonths)); }
             $ym = substr((string)$r['use_date'], 0, 7);
             if (isset($tmpEq[$id]['months'][$ym])) { $tmpEq[$id]['months'][$ym] += (float)$r['amount']; }
         }
         foreach ($tmpEq as $one) { $rowsBySection['장비비'][] = $one; }
     } catch (Exception $e) { $errors[] = '장비비 데이터를 불러오지 못했습니다. 오류: ' . $e->getMessage(); }
 
-    if (count($rowsBySection['노무비']) === 0) {
-        $rowsBySection['노무비'][] = array('section'=>'노무비','업체명'=>'','내역'=>'노무비 데이터 없음','months'=>monthly_zero_map($months));
+    // 노무비: 공사 > 노무비 계산 로더 재사용
+    require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
+    if (function_exists('cpms_load_gongsu_data') && is_array($selectedProject) && isset($selectedProject['name'])) {
+        $projectName = (string)$selectedProject['name'];
+        $directTeamMembers = cpms_load_direct_team_members($pdo);
+        $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $selectedProjectId);
+        $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
+        $workerRateMap = array();
+        foreach ($workerRows as $wr) {
+            $wd = isset($wr['data']) ? $wr['data'] : array();
+            $wk = cpms_normalize_worker_key(isset($wd['name']) ? $wd['name'] : '');
+            if ($wk === '') { continue; }
+            $rate = isset($wd['deposit_rate']) ? (float)str_replace(',', '', (string)$wd['deposit_rate']) : 0;
+            $workerRateMap[$wk] = $rate;
+        }
+        $laborMonths = monthly_zero_map($allMonths);
+        foreach ($allMonths as $ym) {
+            $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
+            $sum = 0;
+            $gMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
+            foreach ($gMap as $wk => $dayMap) {
+                if (!is_array($dayMap)) { continue; }
+                $rate = isset($workerRateMap[$wk]) ? (float)$workerRateMap[$wk] : 0;
+                foreach ($dayMap as $d => $gv) {
+                    $sum += ((float)$gv) * $rate;
+                }
+            }
+            $laborMonths[$ym] = $sum;
+        }
+        $rowsBySection['노무비'][] = array('section'=>'노무비','업체명'=>'-','내역'=>'노무비 합계','months'=>$laborMonths);
+        $laborDiagnostics[] = '노무비 집계 기준: 공수 일자별 합계 × 인원작성 임금단가';
     }
 
     try {
@@ -157,7 +205,7 @@ if ($pdo && is_array($selectedProject)) {
             $dd = $stDed->fetchAll();
             if (!is_array($dd)) { $dd = array(); }
             foreach ($dd as $r) {
-                $row = array('section'=>'공제분','업체명'=>'','내역'=>$r['deduction_name'],'memo'=>$r['memo'],'months'=>monthly_zero_map($months),'id'=>(int)$r['id']);
+                $row = array('section'=>'공제분','업체명'=>'','내역'=>$r['deduction_name'],'memo'=>$r['memo'],'months'=>monthly_zero_map($allMonths),'id'=>(int)$r['id']);
                 if (isset($row['months'][$r['ym']])) { $row['months'][$r['ym']] = (float)$r['amount']; }
                 $rowsBySection['공제분'][] = $row;
             }
@@ -174,19 +222,27 @@ if ($workDateFallbackUsed) { $notices[] = 'work_date가 없거나 비어 있으�
 
 $labels = array('구매품'=>'1. 구매품','자재비'=>'2. 자재비','장비비'=>'3. 장비비','노무비'=>'4. 노무비','기타경비'=>'5. 기타경비','안전관리비'=>'6. 안전관리비','공제분'=>'7. 공제분');
 $sumBySection = array();
-foreach ($labels as $k=>$v) { $sumBySection[$k] = monthly_zero_map($months); }
+foreach ($labels as $k=>$v) { $sumBySection[$k] = monthly_zero_map($allMonths); }
 foreach ($rowsBySection as $sec=>$rows) {
     foreach ($rows as $row) {
-        foreach ($months as $ym) { $sumBySection[$sec][$ym] += isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; }
+        foreach ($allMonths as $ym) { $sumBySection[$sec][$ym] += isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; }
     }
 }
-$subtotal1 = monthly_zero_map($months);
-$finalTotal = monthly_zero_map($months);
-$profit = monthly_zero_map($months);
-foreach ($months as $ym) {
+$subtotal1 = monthly_zero_map($allMonths);
+$finalTotal = monthly_zero_map($allMonths);
+$profit = monthly_zero_map($allMonths);
+foreach ($allMonths as $ym) {
     $subtotal1[$ym] = $sumBySection['구매품'][$ym] + $sumBySection['자재비'][$ym] + $sumBySection['장비비'][$ym] + $sumBySection['노무비'][$ym] + $sumBySection['기타경비'][$ym];
     $finalTotal[$ym] = $subtotal1[$ym] + $sumBySection['안전관리비'][$ym] + $sumBySection['공제분'][$ym];
     $profit[$ym] = (isset($monthlyRevenue[$ym]) ? (float)$monthlyRevenue[$ym] : 0) - $finalTotal[$ym];
+}
+if (array_sum($monthlyRevenue) <= 0) {
+    $salesDiagnostics[] = '매출 집계 결과가 없습니다. 확인 필요: 공사 > 공정표에서 완료수량과 계약단가가 저장되어 있는지 확인해주세요.';
+} else {
+    $salesDiagnostics[] = '매출 데이터 건수: ' . number_format((int)count($monthlyRevenue)) . '개월';
+}
+if (row_total($rowsBySection['노무비'][0], $allMonths) <= 0) {
+    $laborDiagnostics[] = '노무비 집계 결과가 없습니다. 확인 필요: 공사 > 노무비에서 해당 프로젝트명과 출퇴근 현장명이 일치하는지 확인해주세요.';
 }
 ?>
 <div class="bg-white rounded-3xl border border-gray-100 p-5">
@@ -203,7 +259,14 @@ foreach ($months as $ym) {
 <div class="font-bold text-base">프로젝트 선택 :</div>
 <select name="pid" class="px-3 py-2 border rounded-xl min-w-[260px]"><?php foreach($monthlyProjects as $pp): ?><option value="<?php echo (int)$pp['id']; ?>" <?php echo ((int)$pp['id']===$selectedProjectId)?'selected':''; ?>><?php echo h($pp['name']); ?></option><?php endforeach; ?></select>
 <button type="submit" class="px-4 py-2 rounded-xl bg-amber-700 text-white">조회</button>
+<div class="font-bold text-base ml-3">월 선택 :</div>
+<select name="view_month" class="px-3 py-2 border rounded-xl min-w-[160px]">
+<option value="all" <?php echo ($selectedViewMonth==='all')?'selected':''; ?>>전체보기</option>
+<?php foreach($allMonths as $ymOpt): ?><option value="<?php echo h($ymOpt); ?>" <?php echo ($selectedViewMonth===$ymOpt)?'selected':''; ?>><?php echo h(str_replace('-', '.', $ymOpt)); ?></option><?php endforeach; ?>
+</select>
 </form>
+<?php foreach($salesDiagnostics as $diag): ?><div class="mb-1 text-xs text-gray-700"><?php echo h($diag); ?></div><?php endforeach; ?>
+<?php foreach($laborDiagnostics as $diag): ?><div class="mb-1 text-xs text-gray-700"><?php echo h($diag); ?></div><?php endforeach; ?>
 
 <?php if($selectedProject): ?>
 <div class="text-sm mb-3 space-y-1">
@@ -216,22 +279,22 @@ foreach ($months as $ym) {
 <?php if ($periodMissing): ?><div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 p-3 text-sm">프로젝트 계약기간이 없어 월별 투입비를 계산할 수 없습니다. 프로젝트 관리 탭에서 공사 시작일/종료일을 입력해주세요.</div><?php endif; ?>
 
 <div class="overflow-x-auto">
-<table class="min-w-[1600px] w-full text-sm border">
-<thead><tr class="bg-[#d7aa8a]"><th class="border p-2">구분</th><th class="border p-2">업체명</th><th class="border p-2">내역</th><?php foreach($months as $ym): ?><th class="border p-2 text-right"><?php echo h(str_replace('-', '.', $ym)); ?></th><?php endforeach; ?><th class="border p-2 text-right">합계</th></tr></thead>
+<table class="min-w-[1100px] w-full text-sm border">
+<thead><tr class="bg-[#d7aa8a]"><th class="border p-2">구분</th><th class="border p-2">업체명</th><th class="border p-2">내역</th><?php foreach($displayMonths as $ym): ?><th class="border p-2 text-right"><?php echo h(str_replace('-', '.', $ym)); ?></th><?php endforeach; ?><th class="border p-2 text-right">총 합계</th></tr></thead>
 <tbody>
-<tr class="bg-amber-100 font-bold"><td class="border p-2">매출금액(공정표 기준)</td><td class="border p-2"></td><td class="border p-2"></td><?php $revSum=0; foreach($months as $ym){ $v=(float)$monthlyRevenue[$ym]; $revSum+=$v; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($revSum); ?></td></tr>
+<tr class="bg-amber-100 font-bold"><td class="border p-2">매출금액(공정표 기준)</td><td class="border p-2"></td><td class="border p-2"></td><?php $revSum=0; foreach($allMonths as $ymAll){ $revSum+=(float)$monthlyRevenue[$ymAll]; } foreach($displayMonths as $ym){ $v=(float)$monthlyRevenue[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($revSum); ?></td></tr>
 <?php foreach($labels as $sec=>$title): ?>
-<tr class="bg-[#f2dfcf] font-semibold"><td class="border p-2"><?php echo h($title); ?></td><td class="border p-2"></td><td class="border p-2"></td><?php foreach($months as $ym): ?><td class="border p-2"></td><?php endforeach; ?><td class="border p-2"></td></tr>
+<tr class="bg-[#f2dfcf] font-semibold"><td class="border p-2"><?php echo h($title); ?></td><td class="border p-2"></td><td class="border p-2"></td><?php foreach($displayMonths as $ym): ?><td class="border p-2"></td><?php endforeach; ?><td class="border p-2"></td></tr>
 <?php if (count($rowsBySection[$sec]) === 0): ?>
-<tr><td class="border p-2"></td><td class="border p-2 text-gray-500" colspan="2">데이터 없음</td><?php foreach($months as $ym): ?><td class="border p-2 text-right">-</td><?php endforeach; ?><td class="border p-2 text-right">-</td></tr>
+<tr><td class="border p-2"></td><td class="border p-2 text-gray-500" colspan="2">데이터 없음</td><?php foreach($displayMonths as $ym): ?><td class="border p-2 text-right">-</td><?php endforeach; ?><td class="border p-2 text-right">-</td></tr>
 <?php else: foreach($rowsBySection[$sec] as $row): ?>
-<tr><td class="border p-2"></td><td class="border p-2"><?php echo h(isset($row['업체명'])?$row['업체명']:''); ?></td><td class="border p-2"><?php echo h(isset($row['내역'])?$row['내역']:''); ?></td><?php foreach($months as $ym): $v = isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php endforeach; ?><td class="border p-2 text-right"><?php echo amount_fmt(row_total($row,$months)); ?></td></tr>
+<tr><td class="border p-2"></td><td class="border p-2"><?php echo h(isset($row['업체명'])?$row['업체명']:''); ?></td><td class="border p-2"><?php echo h(isset($row['내역'])?$row['내역']:''); ?></td><?php foreach($displayMonths as $ym): $v = isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php endforeach; ?><td class="border p-2 text-right"><?php echo amount_fmt(row_total($row,$allMonths)); ?></td></tr>
 <?php endforeach; endif; ?>
-<tr class="bg-amber-50 font-semibold"><td class="border p-2"><?php echo h($title); ?> 소계</td><td class="border p-2"></td><td class="border p-2"></td><?php $secSum=0; foreach($months as $ym){ $secSum += $sumBySection[$sec][$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($sumBySection[$sec][$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($secSum); ?></td></tr>
+<tr class="bg-amber-50 font-semibold"><td class="border p-2"><?php echo h($title); ?> 소계</td><td class="border p-2"></td><td class="border p-2"></td><?php $secSum=0; foreach($allMonths as $ymAll){ $secSum += $sumBySection[$sec][$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($sumBySection[$sec][$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($secSum); ?></td></tr>
 <?php endforeach; ?>
-<tr class="bg-yellow-100 font-bold"><td class="border p-2">1차 합계</td><td class="border p-2"></td><td class="border p-2"></td><?php $s1=0; foreach($months as $ym){ $s1 += $subtotal1[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($subtotal1[$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($s1); ?></td></tr>
-<tr class="bg-orange-100 font-bold"><td class="border p-2">최종 합계</td><td class="border p-2"></td><td class="border p-2"></td><?php $sf=0; foreach($months as $ym){ $sf += $finalTotal[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($finalTotal[$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($sf); ?></td></tr>
-<tr class="font-bold"><td class="border p-2">손익</td><td class="border p-2"></td><td class="border p-2"></td><?php $sp=0; foreach($months as $ym){ $sp += $profit[$ym]; $cls=$profit[$ym]<0?'text-red-600':'text-blue-700'; ?><td class="border p-2 text-right <?php echo $cls; ?>"><?php echo amount_fmt($profit[$ym]); ?></td><?php } $clsAll=$sp<0?'text-red-600':'text-blue-700'; ?><td class="border p-2 text-right <?php echo $clsAll; ?>"><?php echo amount_fmt($sp); ?></td></tr>
+<tr class="bg-yellow-100 font-bold"><td class="border p-2">1차 합계</td><td class="border p-2"></td><td class="border p-2"></td><?php $s1=0; foreach($allMonths as $ymAll){ $s1 += $subtotal1[$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($subtotal1[$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($s1); ?></td></tr>
+<tr class="bg-orange-100 font-bold"><td class="border p-2">최종 합계</td><td class="border p-2"></td><td class="border p-2"></td><?php $sf=0; foreach($allMonths as $ymAll){ $sf += $finalTotal[$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($finalTotal[$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($sf); ?></td></tr>
+<tr class="font-bold"><td class="border p-2">손익</td><td class="border p-2"></td><td class="border p-2"></td><?php $sp=0; foreach($allMonths as $ymAll){ $sp += $profit[$ymAll]; } foreach($displayMonths as $ym){ $cls=$profit[$ym]<0?'text-red-600':'text-blue-700'; ?><td class="border p-2 text-right <?php echo $cls; ?>"><?php echo amount_fmt($profit[$ym]); ?></td><?php } $clsAll=$sp<0?'text-red-600':'text-blue-700'; ?><td class="border p-2 text-right <?php echo $clsAll; ?>"><?php echo amount_fmt($sp); ?></td></tr>
 </tbody></table>
 </div>
 
@@ -246,7 +309,7 @@ foreach ($months as $ym) {
 <button type="submit" class="px-3 py-1 rounded bg-amber-700 text-white">공제분 저장</button>
 </form>
 <?php if (count($rowsBySection['공제분'])>0): ?><div class="mt-2 text-sm space-y-1"><?php foreach($rowsBySection['공제분'] as $d): ?>
-<div><?php echo h($d['내역']); ?> / <?php echo amount_fmt(row_total($d,$months)); ?>
+<div><?php echo h($d['내역']); ?> / <?php echo amount_fmt(row_total($d,$allMonths)); ?>
 <?php if (isset($d['id'])): ?><a class="text-red-600 ml-2" href="?r=project/monthly_deduction_delete&id=<?php echo (int)$d['id']; ?>&project_id=<?php echo (int)$selectedProjectId; ?>">삭제</a><?php endif; ?></div>
 <?php endforeach; ?></div><?php endif; ?>
 </div>
