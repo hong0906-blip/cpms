@@ -80,6 +80,9 @@ if ($dbOk) {
 }
 
 $flash = flash_get();
+$activeTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'monthly_input';
+if ($activeTab === '') $activeTab = 'monthly_input';
+if ($activeTab !== 'monthly_input' && $activeTab !== 'project_manage') $activeTab = 'monthly_input';
 
 function status_badge_class($st) {
     $st = trim((string)$st);
@@ -90,6 +93,19 @@ function status_badge_class($st) {
 }
 ?>
 
+<div class="mb-5">
+  <div class="text-sm text-gray-500">공무</div>
+  <h2 class="text-2xl font-extrabold text-gray-900">공무 관리</h2>
+  <div class="mt-3 flex gap-2">
+    <a href="?r=공무&tab=monthly_input" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_input' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 상세내역</a>
+    <a href="?r=공무&tab=project_manage" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
+    <a href="db_setup_project_monthly.php" class="px-4 py-2 rounded-2xl border border-amber-300 bg-amber-50 text-amber-800 font-bold">공무 DB 설치/확인</a>
+  </div>
+</div>
+
+<?php if ($activeTab === 'monthly_input'): ?>
+  <?php require __DIR__ . '/monthly_input.php'; ?>
+<?php else: ?>
 <div class="flex items-center justify-between mb-6">
   <div>
     <div class="text-sm text-gray-500">공무</div>

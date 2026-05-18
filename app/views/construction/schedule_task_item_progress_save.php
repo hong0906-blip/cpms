@@ -94,9 +94,9 @@ try {
     $pdo->beginTransaction();
 
     $upsert = $pdo->prepare("INSERT INTO cpms_schedule_task_item_progress
-        (project_id, task_id, unit_price_id, done_qty, created_at, updated_at)
-        VALUES (:pid, :tid, :uid, :dq, :cat, :uat)
-        ON DUPLICATE KEY UPDATE done_qty = VALUES(done_qty), updated_at = VALUES(updated_at)");
+        (project_id, task_id, unit_price_id, done_qty, work_date, created_at, updated_at)
+        VALUES (:pid, :tid, :uid, :dq, :wd, :cat, :uat)
+        ON DUPLICATE KEY UPDATE done_qty = VALUES(done_qty), work_date = VALUES(work_date), updated_at = VALUES(updated_at)");
 
     foreach ($itemDone as $k => $v) {
         $uid = (int)$k;
@@ -113,6 +113,7 @@ try {
         $upsert->bindValue(':tid', $taskId, \PDO::PARAM_INT);
         $upsert->bindValue(':uid', $uid, \PDO::PARAM_INT);
         $upsert->bindValue(':dq', $doneQty);
+        $upsert->bindValue(':wd', ($taskDate !== '' ? $taskDate : null));        
         $upsert->bindValue(':cat', $now);
         $upsert->bindValue(':uat', $now);
         $upsert->execute();

@@ -121,6 +121,14 @@ if ($route === 'project/project_delete') {
     require_once __DIR__ . '/../app/views/project/project_delete.php';
     exit;
 }
+if ($route === 'project/monthly_deduction_save') {
+    require_once __DIR__ . '/../app/views/project/monthly_deduction_save.php';
+    exit;
+}
+if ($route === 'project/monthly_deduction_delete') {
+    require_once __DIR__ . '/../app/views/project/monthly_deduction_delete.php';
+    exit;
+}
 
 
 /**
