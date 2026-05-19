@@ -13,6 +13,7 @@ $tmp = isset($_FILES['xlsx']['tmp_name']) ? (string)$_FILES['xlsx']['tmp_name'] 
 $name = isset($_FILES['xlsx']['name']) ? (string)$_FILES['xlsx']['name'] : '';
 if ($tmp === '' || !is_uploaded_file($tmp)) { echo json_encode(array('ok'=>false,'message'=>'업로드 실패')); exit; }
 if (strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'xlsx') { echo json_encode(array('ok'=>false,'message'=>'.xlsx만 가능')); exit; }
+$cpmsRoot = dirname(dirname(dirname(__DIR__)));
 $pdo = Db::pdo();
 $parsed = cpms_project_parse_unit_price_xlsx($pdo, $tmp);
 if (!$parsed['ok']) { echo json_encode(array('ok'=>false,'message'=>$parsed['message'])); exit; }
@@ -39,5 +40,9 @@ foreach ($oldRows as $or) {
 }
 $token = bin2hex(openssl_random_pseudo_bytes(16));
 if (!isset($_SESSION['unit_price_update']) || !is_array($_SESSION['unit_price_update'])) $_SESSION['unit_price_update'] = array();
-$_SESSION['unit_price_update'][$token] = array('project_id'=>$projectId,'file_name'=>$name,'created_at'=>time(),'rows'=>$newRows);
+$changeDir = $cpmsRoot . '/storage/contracts/' . $projectId . '/changes';
+if (!is_dir($changeDir)) @mkdir($changeDir, 0777, true);
+$tmpStored = $changeDir . '/tmp_' . $token . '.xlsx';
+@move_uploaded_file($tmp, $tmpStored);
+$_SESSION['unit_price_update'][$token] = array('project_id'=>$projectId,'file_name'=>$name,'created_at'=>time(),'rows'=>$newRows,'stored_path'=>$tmpStored);
 echo json_encode(array('ok'=>true,'token'=>$token,'changes'=>$changes,'excluded'=>$excluded));

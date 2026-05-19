@@ -13,6 +13,9 @@
 
 use App\Core\Auth;
 use App\Core\Db;
+function cpms_format_qty0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format(round((float)$v), 0); }
+function cpms_format_price1($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format((float)$v, 1); }
+function cpms_format_amount0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format(round((float)$v), 0); }
 
 $pdo = Db::pdo();
 if (!$pdo) {
@@ -150,11 +153,11 @@ if (is_file($contractMetaFile)) {
     </div>
 <?php endif; ?>
 
-<!-- 계약서 업로드/다운로드 -->
+<!-- 계약서 파일 보관/다운로드 -->
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden mb-6">
     <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-        <div class="font-extrabold text-gray-900">계약서</div>
-        <div class="text-xs text-gray-500">프로젝트 계약서 파일 업로드/확인</div>
+        <div class="font-extrabold text-gray-900">계약서 파일 보관</div>
+        <div class="text-xs text-gray-500">※ 이 업로드는 파일 보관용이며 단가내역은 변경되지 않습니다.</div>
     </div>
     <div class="p-6">
         <?php if ($hasContract): ?>
@@ -178,7 +181,8 @@ if (is_file($contractMetaFile)) {
         <?php endif; ?>
 
         <div class="mt-5 pt-5 border-t border-gray-100">
-            <div class="text-sm font-extrabold text-gray-900 mb-2">계약서 업로드</div>
+            <div class="text-sm font-extrabold text-gray-900 mb-2">계약서 파일 보관 업로드</div>
+            <div class="text-xs text-gray-500 mb-2">이곳은 계약서 파일을 보관/다운로드하는 영역입니다. 단가내역 변경은 공무 &gt; 프로젝트 관리 &gt; 수정 &gt; 변경 단가내역서 업로드에서 처리합니다.</div>
             <div class="text-xs text-gray-500 mb-3">* 새로 업로드하면 기존 계약서는 교체됩니다. (PDF/문서/이미지 가능)</div>
             <form method="post" action="<?php echo h(base_url()); ?>/?r=project/contract_upload" enctype="multipart/form-data" class="flex flex-col md:flex-row md:items-center gap-3">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -303,11 +307,11 @@ if (is_file($contractMetaFile)) {
                             <td class="px-3 py-2"><?php echo h($r['item_name']); ?></td>
                             <td class="px-3 py-2"><?php echo h($r['spec']); ?></td>
                             <td class="px-3 py-2"><?php echo h($r['unit']); ?></td>
-                            <td class="px-3 py-2"><?php echo h($r['qty']); ?></td>
-                            <td class="px-3 py-2"><?php echo h(isset($r['material_unit_price']) ? $r['material_unit_price'] : ''); ?></td>
-                            <td class="px-3 py-2"><?php echo h(isset($r['labor_unit_price']) ? $r['labor_unit_price'] : ''); ?></td>
-                            <td class="px-3 py-2"><?php echo h(isset($r['safety_unit_price']) ? $r['safety_unit_price'] : ''); ?></td>
-                            <td class="px-3 py-2"><?php echo h($r['unit_price']); ?></td>
+                            <td class="px-3 py-2"><?php echo cpms_format_qty0($r['qty']); ?></td>
+                            <td class="px-3 py-2"><?php echo cpms_format_price1(isset($r['material_unit_price']) ? $r['material_unit_price'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo cpms_format_price1(isset($r['labor_unit_price']) ? $r['labor_unit_price'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo cpms_format_price1(isset($r['safety_unit_price']) ? $r['safety_unit_price'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo cpms_format_price1($r['unit_price']); ?></td>
                             <td class="px-3 py-2">
                                 <form method="post" action="<?php echo h(base_url()); ?>/?r=project/unit_price_toggle_safety" style="margin:0;">
                                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">

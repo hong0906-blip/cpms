@@ -415,7 +415,7 @@ function status_badge_class($st) {
         </button>
       </div>
 
-      <form method="post" action="?r=project/project_update" id="projectEditForm">
+      <form method="post" action="?r=project/project_update" id="projectEditForm" enctype="multipart/form-data">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
         <input type="hidden" name="project_id" id="edit_project_id" value="0">
         <input type="hidden" name="unit_price_update_token" id="edit_unit_price_update_token" value="">        
@@ -488,11 +488,29 @@ function status_badge_class($st) {
             </div>
 
             <div class="md:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-              <div class="font-extrabold text-amber-900">변경 계약서 / 변경 단가내역서</div>
-              <div class="text-xs text-amber-800 mt-1">변경 계약서 또는 변경 단가내역서를 업로드하면 기존 단가내역이 변경됩니다. 항목명, 기본수량, 단가가 변경될 수 있으며 기존 공정표에도 반영됩니다. 업로드 후 반드시 미리보기에서 변경 내용을 확인하세요.</div>
+              <div class="font-extrabold text-amber-900">변경 단가내역서 업로드</div>
+              <div class="text-xs text-amber-800 mt-1">※ 이 파일은 기존 단가내역을 변경합니다. 반드시 미리보기 후 저장하세요.</div>
               <input type="file" id="edit_unit_price_file" accept=".xlsx" class="mt-3 block w-full text-sm">
               <button type="button" id="btnEditPreview" class="mt-2 px-3 py-2 rounded-xl border border-gray-300 bg-white text-sm font-bold">변경 내역 미리보기</button>
               <div id="editPreviewStatus" class="text-xs text-gray-700 mt-2"></div>
+              <div id="editPreviewWrap" class="mt-4 hidden">
+                <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
+                  <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50 border-b border-gray-100">
+                      <tr>
+                        <th class="px-3 py-2">상태</th>
+                        <th class="px-3 py-2">품명</th>
+                        <th class="px-3 py-2">규격</th>
+                        <th class="px-3 py-2">단위</th>
+                        <th class="px-3 py-2">기본수량</th>
+                        <th class="px-3 py-2">합계단가</th>
+                        <th class="px-3 py-2">비고</th>
+                      </tr>
+                    </thead>
+                    <tbody id="editPreviewTbody"></tbody>
+                  </table>
+                </div>
+              </div>              
             </div>            
           </div>
         </div>
@@ -575,6 +593,16 @@ function status_badge_class($st) {
       var subSel = document.getElementById('edit_subs');
       clearMulti(subSel);
       setMulti(subSel, subs);
+      var editFile = document.getElementById('edit_unit_price_file');
+      var editToken = document.getElementById('edit_unit_price_update_token');
+      var editStatus = document.getElementById('editPreviewStatus');
+      var editPreviewWrap = document.getElementById('editPreviewWrap');
+      var editPreviewTbody = document.getElementById('editPreviewTbody');
+      if (editFile) editFile.value = '';
+      if (editToken) editToken.value = '';
+      if (editStatus) editStatus.textContent = '';
+      if (editPreviewWrap) editPreviewWrap.classList.add('hidden');
+      if (editPreviewTbody) editPreviewTbody.innerHTML = '';      
 
       openModal('projectEdit');
     });
@@ -674,20 +702,62 @@ function status_badge_class($st) {
       var pid = document.getElementById('edit_project_id').value || '0';
       var f = document.getElementById('edit_unit_price_file');
       var status = document.getElementById('editPreviewStatus');
+      var previewWrap = document.getElementById('editPreviewWrap');
+      var previewTbody = document.getElementById('editPreviewTbody');      
       if (!f.files || !f.files[0]) { status.textContent = '파일을 선택하세요.'; return; }
       var fd = new FormData();
       fd.append('_csrf', '<?php echo h(csrf_token()); ?>');
       fd.append('project_id', pid);
       fd.append('xlsx', f.files[0]);
       status.textContent = '변경 미리보기 생성 중...';
+      if (previewWrap) previewWrap.classList.add('hidden');
+      if (previewTbody) previewTbody.innerHTML = '';      
       fetch('?r=project/unit_price_update_preview', { method:'POST', body:fd, credentials:'same-origin' })
-        .then(function(r){ return r.json(); })
+        .then(function(r){
+          return r.text().then(function(text){
+            var json = null;
+            try { json = JSON.parse(text); } catch(e) {}
+            if (!r.ok) throw new Error('HTTP ' + r.status + ' / ' + text.substring(0, 200));
+            if (!json) throw new Error('JSON 파싱 실패 / ' + text.substring(0, 200));
+            return json;
+          });
+        })
         .then(function(j){
           if (!j || !j.ok) { status.textContent = (j && j.message) ? j.message : '실패'; return; }
           document.getElementById('edit_unit_price_update_token').value = j.token || '';
           status.textContent = '변경:' + (j.changes ? j.changes.length : 0) + '건 / 제외:' + (j.excluded ? j.excluded.length : 0) + '건 확인됨';
+          if (previewWrap) previewWrap.classList.remove('hidden');
+          function addCell(tr, txt) {
+            var td = document.createElement('td');
+            td.className = 'px-3 py-2';
+            td.textContent = txt;
+            tr.appendChild(td);
+          }
+          function drawRow(state, row, note) {
+            if (!previewTbody) return;
+            var tr = document.createElement('tr');
+            tr.className = 'border-b border-gray-100';
+            addCell(tr, state);
+            addCell(tr, row && row.item_name ? row.item_name : '');
+            addCell(tr, row && row.spec ? row.spec : '');
+            addCell(tr, row && row.unit ? row.unit : '');
+            addCell(tr, formatQty0(row && row.qty ? row.qty : ''));
+            addCell(tr, formatPrice1(row && row.unit_price ? row.unit_price : ''));
+            addCell(tr, note || (row && row.remark ? row.remark : ''));
+            previewTbody.appendChild(tr);
+          }
+          if (j.changes && j.changes.length) {
+            j.changes.forEach(function(c){
+              drawRow(c.status || '유지', c.row || {}, '');
+            });
+          }
+          if (j.excluded && j.excluded.length) {
+            j.excluded.forEach(function(r){
+              drawRow('제외', r || {}, '제외됨');
+            });
+          }          
         })
-        .catch(function(){ status.textContent = '통신 오류'; });
+        .catch(function(err){ status.textContent = '미리보기 실패: ' + err.message; });
     });
   }
 
@@ -702,6 +772,18 @@ function status_badge_class($st) {
     }
     return true;
   });
+  var editForm = document.getElementById('projectEditForm');
+  if (editForm) {
+    editForm.addEventListener('submit', function(e){
+      var f = document.getElementById('edit_unit_price_file');
+      var token = document.getElementById('edit_unit_price_update_token');
+      if (f && f.files && f.files.length > 0 && token && !token.value) {
+        e.preventDefault();
+        alert('변경 단가내역서를 선택한 경우, 먼저 “변경 내역 미리보기”를 실행해야 합니다.');
+        return false;
+      }
+    });
+  }  
 })();
 </script>
 

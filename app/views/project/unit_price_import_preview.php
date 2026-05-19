@@ -145,6 +145,8 @@ if (!isset($_SESSION['unit_price_import']) || !is_array($_SESSION['unit_price_im
 $_SESSION['unit_price_import'][$importToken] = array('project_id' => $projectId, 'file_name' => $name, 'created_at' => time(), 'rows' => $parsed);
 
 function hh($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
+function cpms_format_qty0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return hh((string)$v); return number_format(round((float)$v), 0); }
+function cpms_format_price1($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return hh((string)$v); return number_format((float)$v, 1); }
 ?>
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>단가표 미리보기</title>
 <style>body{font-family:Arial;background:#f6f7fb;margin:0;padding:24px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:16px;max-width:1300px}.btn{padding:12px 14px;border-radius:12px;border:0;cursor:pointer;font-weight:800}.btn-primary{background:#111827;color:#fff}.btn-ghost{background:#f3f4f6;color:#111827}table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border-top:1px solid #e5e7eb;padding:10px;font-size:13px;text-align:left}th{background:#f9fafb}.num{text-align:right}</style></head><body>
@@ -156,6 +158,6 @@ function hh($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 <form method="post" action="<?php echo hh(base_url()); ?>/?r=project/unit_price_import_apply"><input type="hidden" name="_csrf" value="<?php echo hh(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>"><input type="hidden" name="token" value="<?php echo hh($importToken); ?>"><button class="btn btn-primary" type="submit">적용(저장)</button></form>
 </div>
 <table><thead><tr><th>품명</th><th>규격</th><th>단위</th><th class="num">수량</th><th class="num">자재단가</th><th class="num">노무단가</th><th class="num">안전단가</th><th class="num">합계단가</th><th>안전항목</th><th>비고</th></tr></thead><tbody>
-<?php foreach ($parsed as $r): ?><tr><td><?php echo hh($r['item_name']); ?></td><td><?php echo hh($r['spec']); ?></td><td><?php echo hh($r['unit']); ?></td><td class="num"><?php echo hh($r['qty']); ?></td><td class="num"><?php echo hh($r['material_unit_price']); ?></td><td class="num"><?php echo hh($r['labor_unit_price']); ?></td><td class="num"><?php echo hh($r['safety_unit_price']); ?></td><td class="num"><?php echo hh($r['unit_price']); ?></td><td><?php echo ((int)$r['is_safety']===1)?'Y':''; ?></td><td><?php echo hh($r['remark']); ?></td></tr><?php endforeach; ?>
+<?php foreach ($parsed as $r): ?><tr><td><?php echo hh($r['item_name']); ?></td><td><?php echo hh($r['spec']); ?></td><td><?php echo hh($r['unit']); ?></td><td class="num"><?php echo cpms_format_qty0($r['qty']); ?></td><td class="num"><?php echo cpms_format_price1($r['material_unit_price']); ?></td><td class="num"><?php echo cpms_format_price1($r['labor_unit_price']); ?></td><td class="num"><?php echo cpms_format_price1($r['safety_unit_price']); ?></td><td class="num"><?php echo cpms_format_price1($r['unit_price']); ?></td><td><?php echo ((int)$r['is_safety']===1)?'Y':''; ?></td><td><?php echo hh($r['remark']); ?></td></tr><?php endforeach; ?>
 </tbody></table>
 </div></body></html>
