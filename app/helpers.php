@@ -204,12 +204,30 @@ function cpms_ensure_labor_override_table($pdo) {
             reason VARCHAR(255) NULL,
             status VARCHAR(20) NOT NULL DEFAULT 'applied',
             requested_by INT NULL,
+            requested_by_email VARCHAR(120) NULL,
+            requested_by_name VARCHAR(80) NULL,            
             approved_by INT NULL,
             approved_at DATETIME NULL,
+            approval_stage VARCHAR(30) NULL,
+            approval_required_level VARCHAR(30) NULL,
+            current_approver_employee_id INT NULL,
+            current_approver_name VARCHAR(100) NULL,
+            current_approver_email VARCHAR(190) NULL,
+            first_approver_employee_id INT NULL,
+            first_approver_name VARCHAR(100) NULL,
+            first_approver_email VARCHAR(190) NULL,
+            first_approved_at DATETIME NULL,
+            second_approver_employee_id INT NULL,
+            second_approver_name VARCHAR(100) NULL,
+            second_approver_email VARCHAR(190) NULL,
+            second_approved_at DATETIME NULL,
+            final_approved_at DATETIME NULL,            
             created_at DATETIME NOT NULL,
             rejected_by INT NULL,
+            rejected_by_name VARCHAR(100) NULL,
+            rejected_by_email VARCHAR(190) NULL,            
             rejected_at DATETIME NULL,
-            reject_reason VARCHAR(255) NULL,            
+            reject_reason VARCHAR(255) NULL,
             updated_at DATETIME NOT NULL,
             UNIQUE KEY uk_labor_override(project_id, worker_key, work_date),
             KEY idx_labor_override_project_month(project_id, month),
@@ -235,11 +253,29 @@ function cpms_ensure_labor_override_table($pdo) {
             'reason' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN reason VARCHAR(255) NULL AFTER new_value",
             'status' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'applied' AFTER reason",
             'requested_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by INT NULL AFTER status",
-            'approved_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_by INT NULL AFTER requested_by",
+            'requested_by_email' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by_email VARCHAR(120) NULL AFTER requested_by",
+            'requested_by_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by_name VARCHAR(80) NULL AFTER requested_by_email",
+            'approved_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_by INT NULL AFTER requested_by_name",
             'approved_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_at DATETIME NULL AFTER approved_by",
-            'created_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN created_at DATETIME NOT NULL AFTER approved_at",
-            'rejected_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_by INT NULL AFTER approved_at",
-            'rejected_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_at DATETIME NULL AFTER rejected_by",
+            'approval_stage' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approval_stage VARCHAR(30) NULL AFTER approved_at",
+            'approval_required_level' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approval_required_level VARCHAR(30) NULL AFTER approval_stage",
+            'current_approver_employee_id' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN current_approver_employee_id INT NULL AFTER approval_required_level",
+            'current_approver_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN current_approver_name VARCHAR(100) NULL AFTER current_approver_employee_id",
+            'current_approver_email' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN current_approver_email VARCHAR(190) NULL AFTER current_approver_name",
+            'first_approver_employee_id' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN first_approver_employee_id INT NULL AFTER current_approver_email",
+            'first_approver_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN first_approver_name VARCHAR(100) NULL AFTER first_approver_employee_id",
+            'first_approver_email' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN first_approver_email VARCHAR(190) NULL AFTER first_approver_name",
+            'first_approved_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN first_approved_at DATETIME NULL AFTER first_approver_email",
+            'second_approver_employee_id' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN second_approver_employee_id INT NULL AFTER first_approved_at",
+            'second_approver_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN second_approver_name VARCHAR(100) NULL AFTER second_approver_employee_id",
+            'second_approver_email' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN second_approver_email VARCHAR(190) NULL AFTER second_approver_name",
+            'second_approved_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN second_approved_at DATETIME NULL AFTER second_approver_email",
+            'final_approved_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN final_approved_at DATETIME NULL AFTER second_approved_at",
+            'created_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN created_at DATETIME NOT NULL AFTER final_approved_at",
+            'rejected_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_by INT NULL AFTER created_at",
+            'rejected_by_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_by_name VARCHAR(100) NULL AFTER rejected_by",
+            'rejected_by_email' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_by_email VARCHAR(190) NULL AFTER rejected_by_name",
+            'rejected_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_at DATETIME NULL AFTER rejected_by_email",
             'reject_reason' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN reject_reason VARCHAR(255) NULL AFTER rejected_at",
             'updated_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN updated_at DATETIME NOT NULL AFTER reject_reason"
         );
@@ -258,7 +294,9 @@ function cpms_ensure_labor_override_table($pdo) {
         }
         if (!isset($idx['uk_labor_override'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD UNIQUE KEY uk_labor_override(project_id, worker_key, work_date)");
         if (!isset($idx['idx_labor_override_project_month'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_project_month(project_id, month)");
-        if (!isset($idx['idx_labor_override_status'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_status(status)");        
+        if (!isset($idx['idx_labor_override_status'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_status(status)");
+        if (!isset($idx['idx_labor_override_current_approver'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_current_approver(current_approver_employee_id, status)");
+        cpms_labor_backfill_legacy_pending_approver($pdo);
         return true;
     } catch (Exception $e) {
         return false;
@@ -278,4 +316,143 @@ function cpms_load_labor_override_pending($projectId, $month) {
     } catch (Exception $e) {
         return $list;
     }
+}
+
+function cpms_labor_employee_select_columns($pdo) {
+    $cols = array('id', 'name', 'email', 'position', 'role');
+    $optional = array('google_chat_enabled', 'google_chat_dm_space_name');
+    foreach ($optional as $col) {
+        $exists = false;
+        try {
+            $st = $pdo->prepare("SHOW COLUMNS FROM employees LIKE :col");
+            $st->execute(array(':col' => $col));
+            $exists = (bool)$st->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $e) { $exists = false; }
+        if ($exists) $cols[] = $col;
+        else if ($col === 'google_chat_enabled') $cols[] = '0 AS google_chat_enabled';
+        else $cols[] = "'' AS google_chat_dm_space_name";
+    }
+    return implode(', ', $cols);
+}
+
+function cpms_labor_find_director_approver($pdo) {
+    if (!$pdo) return null;
+    try {
+        $sql = "SELECT " . cpms_labor_employee_select_columns($pdo) . " FROM employees WHERE is_active = 1 AND name = '박원덕' AND position LIKE '%상무%' ORDER BY id ASC LIMIT 1";
+        $st = $pdo->query($sql);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if ($row) return $row;
+    } catch (Exception $e) {}
+    return null;
+}
+
+function cpms_labor_find_vp_approver($pdo) {
+    if (!$pdo) return null;
+    try {
+        $sql = "SELECT " . cpms_labor_employee_select_columns($pdo) . " FROM employees WHERE is_active = 1 AND position LIKE '%부사장%' ORDER BY id ASC";
+        $st = $pdo->query($sql);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows && count($rows) > 0) {
+            if (count($rows) > 1) error_log('부사장 승인자가 여러 명입니다. 첫 번째 직원을 사용했습니다.');
+            return $rows[0];
+        }
+    } catch (Exception $e) {}
+    return null;
+}
+
+function cpms_labor_find_employee_by_email($pdo, $email) {
+    $email = trim((string)$email);
+    if (!$pdo || $email === '') return null;
+    try {
+        $sql = "SELECT " . cpms_labor_employee_select_columns($pdo) . " FROM employees WHERE LOWER(email) = LOWER(:email) LIMIT 1";
+        $st = $pdo->prepare($sql);
+        $st->bindValue(':email', $email, PDO::PARAM_STR);
+        $st->execute();
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return $row ? $row : null;
+    } catch (Exception $e) { return null; }
+}
+
+function cpms_labor_project_name($pdo, $projectId) {
+    $projectId = (int)$projectId;
+    if (!$pdo || $projectId <= 0) return '현장 #' . $projectId;
+    try {
+        $st = $pdo->prepare("SELECT name FROM cpms_projects WHERE id=:id LIMIT 1");
+        $st->execute(array(':id' => $projectId));
+        $name = $st->fetchColumn();
+        if ($name !== false && trim((string)$name) !== '') return trim((string)$name);
+    } catch (Exception $e) {}
+    return '현장 #' . $projectId;
+}
+
+function cpms_labor_format_chat_gongsu($value) {
+    $s = number_format((float)$value, 2, '.', '');
+    $s = rtrim(rtrim($s, '0'), '.');
+    return $s === '' ? '0' : $s;
+}
+
+function cpms_labor_build_override_message($pdo, $row, $secondStage) {
+    $projectName = cpms_labor_project_name($pdo, isset($row['project_id']) ? (int)$row['project_id'] : 0);
+    $requester = isset($row['requested_by_name']) && trim((string)$row['requested_by_name']) !== '' ? trim((string)$row['requested_by_name']) : (isset($row['requested_by_email']) ? trim((string)$row['requested_by_email']) : '');
+    if ($requester === '') $requester = '-';
+    $reason = isset($row['reason']) ? trim((string)$row['reason']) : '';
+    $lines = array();
+    $lines[] = $secondStage ? '[CPMS 공수 수정 2차 승인 요청]' : '[CPMS 공수 수정 요청]';
+    $lines[] = '';
+    $lines[] = '현장명 : ' . $projectName;
+    $lines[] = '요청자 : ' . $requester;
+    $lines[] = '요청 내용 : 공수 ' . cpms_labor_format_chat_gongsu(isset($row['old_value']) ? $row['old_value'] : 0) . ' -> ' . cpms_labor_format_chat_gongsu(isset($row['new_value']) ? $row['new_value'] : 0) . ' 변경';
+    $lines[] = '요청 사유 : ' . ($reason !== '' ? $reason : '-');
+    if ($secondStage) $lines[] = '1차 승인자 : ' . (isset($row['first_approver_name']) && trim((string)$row['first_approver_name']) !== '' ? trim((string)$row['first_approver_name']) : '박원덕');
+    $lines[] = '';
+    $lines[] = '요청내용 확인 바랍니다.';
+    return implode("\n", $lines);
+}
+
+function cpms_send_google_chat_to_employee($pdo, $employeeId, $messageText, $sourceId, $eventType, $sourceType) {
+    try {
+        require_once __DIR__ . '/views/common/chat_notification_helpers.php';
+        if (!function_exists('approval_google_chat_send_message')) require_once __DIR__ . '/views/approval/google_chat_helpers.php';
+        if (!$pdo || (int)$employeeId <= 0) return false;
+        $sql = "SELECT " . cpms_labor_employee_select_columns($pdo) . " FROM employees WHERE id=:id LIMIT 1";
+        $st = $pdo->prepare($sql);
+        $st->bindValue(':id', (int)$employeeId, PDO::PARAM_INT);
+        $st->execute();
+        $emp = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$emp) return false;
+        $spaceName = isset($emp['google_chat_dm_space_name']) ? trim((string)$emp['google_chat_dm_space_name']) : '';
+        $enabled = isset($emp['google_chat_enabled']) ? (int)$emp['google_chat_enabled'] : 0;
+        if ($enabled !== 1 || $spaceName === '') {
+            if (function_exists('cpms_google_chat_log_notification')) cpms_google_chat_log_notification($pdo, array('source_type'=>$sourceType,'source_id'=>$sourceId,'event_type'=>$eventType,'receiver_employee_id'=>(int)$employeeId,'receiver_name'=>isset($emp['name'])?$emp['name']:'','receiver_email'=>isset($emp['email'])?$emp['email']:'','dm_space_name'=>$spaceName,'message_text'=>$messageText,'send_status'=>'SKIPPED','error_message'=>'Google Chat DM disabled or dm space empty','sent_at'=>null));
+            return false;
+        }
+        $ok = approval_google_chat_send_message($pdo, $spaceName, $messageText);
+        $lastError = function_exists('approval_google_chat_get_last_error') ? approval_google_chat_get_last_error() : '';
+        if (function_exists('cpms_google_chat_log_notification')) cpms_google_chat_log_notification($pdo, array('source_type'=>$sourceType,'source_id'=>$sourceId,'event_type'=>$eventType,'receiver_employee_id'=>(int)$employeeId,'receiver_name'=>isset($emp['name'])?$emp['name']:'','receiver_email'=>isset($emp['email'])?$emp['email']:'','dm_space_name'=>$spaceName,'message_text'=>$messageText,'send_status'=>$ok?'SUCCESS':'FAILED','error_message'=>$ok?null:$lastError,'sent_at'=>$ok?date('Y-m-d H:i:s'):null));
+        return (bool)$ok;
+    } catch (Exception $e) { error_log('[labor_gongsu_chat] ' . $e->getMessage()); return false; }
+}
+
+function cpms_labor_send_override_notification($pdo, $overrideId, $eventType) {
+    try {
+        if (!$pdo || (int)$overrideId <= 0) return false;
+        $st = $pdo->prepare("SELECT * FROM cpms_labor_gongsu_overrides WHERE id=:id LIMIT 1");
+        $st->bindValue(':id', (int)$overrideId, PDO::PARAM_INT);
+        $st->execute();
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$row) return false;
+        $employeeId = isset($row['current_approver_employee_id']) ? (int)$row['current_approver_employee_id'] : 0;
+        return cpms_send_google_chat_to_employee($pdo, $employeeId, cpms_labor_build_override_message($pdo, $row, $eventType === 'VP_REQUEST'), (int)$overrideId, $eventType, 'LABOR_GONGSU_OVERRIDE');
+    } catch (Exception $e) { error_log('[labor_gongsu_chat] ' . $e->getMessage()); return false; }
+}
+
+function cpms_labor_backfill_legacy_pending_approver($pdo) {
+    if (!$pdo) return false;
+    try {
+        $director = cpms_labor_find_director_approver($pdo);
+        if (!$director) return false;
+        $st = $pdo->prepare("UPDATE cpms_labor_gongsu_overrides SET approval_required_level=CASE WHEN approval_required_level IS NULL OR approval_required_level='' THEN 'DIRECTOR_ONLY' ELSE approval_required_level END, approval_stage=CASE WHEN approval_stage IS NULL OR approval_stage='' THEN 'DIRECTOR_PENDING' ELSE approval_stage END, current_approver_employee_id=:eid, current_approver_name=:name, current_approver_email=:email, first_approver_employee_id=:eid2, first_approver_name=:name2, first_approver_email=:email2 WHERE status='pending' AND (approval_stage IS NULL OR approval_stage='' OR current_approver_employee_id IS NULL)");
+        $st->execute(array(':eid'=>(int)$director['id'], ':name'=>isset($director['name'])?(string)$director['name']:'', ':email'=>isset($director['email'])?(string)$director['email']:'', ':eid2'=>(int)$director['id'], ':name2'=>isset($director['name'])?(string)$director['name']:'', ':email2'=>isset($director['email'])?(string)$director['email']:''));
+        return true;
+    } catch (Exception $e) { return false; }
 }

@@ -58,7 +58,9 @@ function cpms_google_chat_project_name($pdo, $projectId) {
 if (!function_exists('cpms_google_chat_log_notification')) {
 function cpms_google_chat_log_notification($pdo, $data) {
     try {
-        if (!cpms_google_chat_table_exists($pdo, 'cpms_google_chat_notifications')) return;
+        if (!cpms_google_chat_table_exists($pdo, 'cpms_google_chat_notifications')) {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_google_chat_notifications (id INT AUTO_INCREMENT PRIMARY KEY, source_type VARCHAR(50) NOT NULL, source_id INT NULL, event_type VARCHAR(50) NULL, receiver_employee_id INT NULL, receiver_name VARCHAR(100) NULL, receiver_email VARCHAR(190) NULL, dm_space_name VARCHAR(255) NULL, message_text TEXT NULL, send_status VARCHAR(20) NULL, error_message TEXT NULL, sent_at DATETIME NULL, created_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+        }
         $st = $pdo->prepare("INSERT INTO cpms_google_chat_notifications
             (source_type, source_id, event_type, receiver_employee_id, receiver_name, receiver_email, dm_space_name, message_text, send_status, error_message, sent_at, created_at)
             VALUES

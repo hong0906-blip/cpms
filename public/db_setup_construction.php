@@ -37,7 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!table_exists2($pdo, 'cpms_safety_incidents')) {
                     $pdo->exec("CREATE TABLE cpms_safety_incidents (id INT AUTO_INCREMENT PRIMARY KEY, project_id INT NOT NULL, title VARCHAR(255) NOT NULL, description TEXT NULL, occurred_at DATETIME NULL, created_by_name VARCHAR(100) NOT NULL, created_by_email VARCHAR(255) NULL, status VARCHAR(20) NOT NULL DEFAULT '접수', created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP, KEY idx_project_id (project_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
                 }
-                $msg = '공사 기본 테이블 생성/확인 완료';
+                cpms_ensure_labor_override_table($pdo);
+                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_google_chat_notifications (id INT AUTO_INCREMENT PRIMARY KEY, source_type VARCHAR(50) NOT NULL, source_id INT NULL, event_type VARCHAR(50) NULL, receiver_employee_id INT NULL, receiver_name VARCHAR(100) NULL, receiver_email VARCHAR(190) NULL, dm_space_name VARCHAR(255) NULL, message_text TEXT NULL, send_status VARCHAR(20) NULL, error_message TEXT NULL, sent_at DATETIME NULL, created_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+                $msg = '공사 기본 테이블 및 공수 승인/Google Chat 알림 테이블 생성/확인 완료';
             } else if ($action === 'cost_progress') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_daily_work_qty (
                     id INT AUTO_INCREMENT PRIMARY KEY,

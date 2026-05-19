@@ -107,16 +107,24 @@ $flash = flash_get();
 
 // 임원 공수 승인대기 카드
 $pendingGongsuOverrides = array();
+$myUserId = cpms_find_employee_id_by_email($pdo, $userEmail);
 if ($pdo) {
     try {
         cpms_ensure_labor_override_table($pdo);
-        $sql = "SELECT o.id, o.project_id, o.month, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason, o.requested_by, o.requested_by_email, o.requested_by_name, o.created_at, p.name AS project_name, e.name AS requested_emp_name
+        $sql = "SELECT o.id, o.project_id, o.month, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason, o.requested_by, o.requested_by_email, o.requested_by_name, o.approval_stage, o.approval_required_level, o.current_approver_employee_id, o.current_approver_name, o.current_approver_email, o.created_at, p.name AS project_name, e.name AS requested_emp_name
                 FROM cpms_labor_gongsu_overrides o
                 LEFT JOIN cpms_projects p ON p.id = o.project_id
-                LEFT JOIN employees e ON e.id = o.requested_by                
+                LEFT JOIN employees e ON e.id = o.requested_by
                 WHERE o.status = 'pending'
+                  AND (
+                        o.current_approver_employee_id = :my_employee_id
+                        OR LOWER(o.current_approver_email) = LOWER(:my_email)
+                      )                
                 ORDER BY o.created_at DESC";
-        $st = $pdo->query($sql);
+        $st = $pdo->prepare($sql);
+        $st->bindValue(':my_employee_id', (int)$myUserId, PDO::PARAM_INT);
+        $st->bindValue(':my_email', (string)$userEmail, PDO::PARAM_STR);
+        $st->execute();
         $pendingGongsuOverrides = $st->fetchAll();
     } catch (Exception $e) {
         $pendingGongsuOverrides = array();
@@ -125,7 +133,6 @@ if ($pdo) {
 
 $myReceivedRequests = array();
 $requestTargetNameMap = array();
-$myUserId = cpms_find_employee_id_by_email($pdo, $userEmail);
 $reqStore = cpms_request_store_load();
 $allReq = isset($reqStore['requests']) && is_array($reqStore['requests']) ? $reqStore['requests'] : array();
 if ($pdo) {
@@ -211,7 +218,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
     <div class="flex items-start justify-between gap-4 mb-4">
         <div>
             <h3 class="text-2xl font-extrabold text-gray-900">공수 수정 승인대기</h3>            
-            <div class="text-sm text-gray-600 mt-1">1.5 이상 공수 수정 요청을 승인 또는 반려합니다.</div>
+            <div class="text-sm text-gray-600 mt-1">내게 요청된 공수 수정 요청을 승인 또는 반려합니다.</div>
         </div>
         <span class="px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 text-sm font-bold">대기 <?php echo count($pendingGongsuOverrides); ?>건</span>
     </div>
@@ -226,20 +233,22 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                     <div class="font-bold text-gray-900 mt-1 text-lg">현장명: <?php echo h($ov['project_name'] ? $ov['project_name'] : '-'); ?></div>
                     <div class="text-sm text-gray-700 mt-1">요청자: <?php echo h($requesterName); ?></div>
                     <div class="text-sm text-gray-700 mt-1">작업자명: <?php echo h($ov['worker_name']); ?> / 작업일자: <?php echo h($ov['work_date']); ?></div>
-                    <div class="text-sm text-gray-700">기존 공수: <?php echo h($ov['old_value']); ?> → 요청 공수: <span class="font-extrabold text-emerald-700"><?php echo h($ov['new_value']); ?></span></div>
+                    <?php $stageLabel = (isset($ov['approval_stage']) && (string)$ov['approval_stage'] === 'VP_PENDING') ? '부사장 승인' : '상무 승인'; ?>
+                    <div class="text-sm text-gray-700">요청 내용: 공수 <?php echo h($ov['old_value']); ?> -> <span class="font-extrabold text-emerald-700"><?php echo h($ov['new_value']); ?></span> 변경</div>
                     <div class="text-sm text-gray-700">요청사유: <?php echo h(trim((string)$ov['reason']) !== '' ? $ov['reason'] : '-'); ?></div>
-                    <div class="flex gap-2 mt-3">
+                    <div class="text-sm text-gray-700">현재 승인 단계: <span class="font-extrabold text-amber-700"><?php echo h($stageLabel); ?></span></div>
+                    <div class="flex flex-wrap gap-2 mt-3">
                         <form method="post" action="?r=construction/labor_gongsu_override_decide">
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                             <input type="hidden" name="override_id" value="<?php echo (int)$ov['id']; ?>">
                             <input type="hidden" name="decision" value="approve">
                             <button class="px-3 py-1 rounded-xl bg-emerald-600 text-white text-xs font-bold" type="submit">승인</button>
                         </form>
-                        <form method="post" action="?r=construction/labor_gongsu_override_decide" onsubmit="var r=prompt('반려사유를 입력하세요.'); if(!r||!String(r).trim()){return false;} this.reject_reason.value=String(r).trim();">
+                        <form method="post" action="?r=construction/labor_gongsu_override_decide" class="flex flex-wrap items-center gap-2">
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                             <input type="hidden" name="override_id" value="<?php echo (int)$ov['id']; ?>">
                             <input type="hidden" name="decision" value="reject">
-                            <input type="hidden" name="reject_reason" value="">
+                            <input type="text" name="reject_reason" class="px-3 py-1 rounded-xl border border-gray-200 text-xs" placeholder="반려사유 입력" required>
                             <button class="px-3 py-1 rounded-xl bg-rose-600 text-white text-xs font-bold" type="submit">반려</button>
                         </form>
                     </div>
@@ -272,11 +281,11 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                                 <input type="hidden" name="decision" value="APPROVED">
                                 <button class="px-3 py-1 rounded-xl bg-emerald-600 text-white text-xs font-bold" type="submit">승인</button>
                             </form>
-                            <form method="post" action="<?php echo h(base_url()); ?>/?r=request/decide" onsubmit="var r=prompt('반려 사유를 입력하세요'); if(!r){return false;} this.reject_reason.value=r;">
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=request/decide" class="flex flex-wrap items-center gap-2">
                                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                 <input type="hidden" name="request_id" value="<?php echo h($rq['request_id']); ?>">
                                 <input type="hidden" name="decision" value="REJECTED">
-                                <input type="hidden" name="reject_reason" value="">
+                                <input type="text" name="reject_reason" class="px-3 py-1 rounded-xl border border-gray-200 text-xs" placeholder="반려 사유" required>
                                 <button class="px-3 py-1 rounded-xl bg-rose-600 text-white text-xs font-bold" type="submit">반려</button>
                             </form>
                         </div>

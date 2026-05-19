@@ -60,6 +60,7 @@ if (!function_exists('cpms_gongsu_index_exists')) {
 
 if (!function_exists('cpms_gongsu_ensure_override_table')) {
     function cpms_gongsu_ensure_override_table($pdo) {
+        if (function_exists('cpms_ensure_labor_override_table')) return cpms_ensure_labor_override_table($pdo);        
         $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_labor_gongsu_overrides (
             id INT AUTO_INCREMENT PRIMARY KEY,
             project_id INT NOT NULL,
@@ -251,7 +252,7 @@ try {
     if ($newValue > 999.99) cpms_gongsu_json_exit(false, 'new_value는 DECIMAL(5,2) 범위를 초과했습니다.', array(), 200);
 
     $newValue = (float)number_format($newValue, 2, '.', '');
-    if ($newValue >= 1.5 && $reason === '') cpms_gongsu_json_exit(false, '1.5 이상 공수 수정은 요청사유가 필요합니다.', array(), 200);    
+    if ($newValue >= 1.2 && $reason === '') cpms_gongsu_json_exit(false, '1.2 이상 공수 수정은 승인 요청사유가 필요합니다.', array(), 200);
     $oldValue = null;
     if ($oldValueRaw !== '' && is_numeric($oldValueRaw)) $oldValue = (float)number_format((float)$oldValueRaw, 2, '.', '');
 
@@ -283,7 +284,20 @@ try {
 
     cpms_gongsu_ensure_override_table($pdo);
 
-    $status = ($newValue >= 1.5) ? 'pending' : 'applied'; // 1.5 미만 즉시 반영 / 1.5 이상 승인대기
+    $approvalRequiredLevel = 'NONE';
+    $approvalStage = 'COMPLETED';
+    $currentApprover = null;
+    $directorApprover = null;
+    if ($newValue >= 1.2) {
+        $status = 'pending';
+        $approvalStage = 'DIRECTOR_PENDING';
+        $directorApprover = cpms_labor_find_director_approver($pdo);
+        if (!$directorApprover) cpms_gongsu_json_exit(false, '박원덕 상무 승인자를 직원명부에서 찾을 수 없습니다.', array(), 200);
+        $currentApprover = $directorApprover;
+        $approvalRequiredLevel = ($newValue >= 1.4) ? 'DIRECTOR_THEN_VP' : 'DIRECTOR_ONLY';
+    } else {
+        $status = 'applied';
+    }
     // [변경] Auth::id 안전 처리
     $userId = 0;
     if (method_exists('App\\Core\\Auth', 'id')) {
@@ -305,10 +319,17 @@ try {
     }    
     $now = date('Y-m-d H:i:s');
 
+    $currentApproverId = ($currentApprover && isset($currentApprover['id'])) ? (int)$currentApprover['id'] : null;
+    $currentApproverName = ($currentApprover && isset($currentApprover['name'])) ? (string)$currentApprover['name'] : null;
+    $currentApproverEmail = ($currentApprover && isset($currentApprover['email'])) ? (string)$currentApprover['email'] : null;
+    $directorId = ($directorApprover && isset($directorApprover['id'])) ? (int)$directorApprover['id'] : null;
+    $directorName = ($directorApprover && isset($directorApprover['name'])) ? (string)$directorApprover['name'] : null;
+    $directorEmail = ($directorApprover && isset($directorApprover['email'])) ? (string)$directorApprover['email'] : null;
+    
     $sql = "INSERT INTO cpms_labor_gongsu_overrides
-      (project_id, month, worker_key, worker_name, work_date, old_value, new_value, reason, status, requested_by, requested_by_email, requested_by_name, created_at, updated_at)
+      (project_id, month, worker_key, worker_name, work_date, old_value, new_value, reason, status, requested_by, requested_by_email, requested_by_name, approval_stage, approval_required_level, current_approver_employee_id, current_approver_name, current_approver_email, first_approver_employee_id, first_approver_name, first_approver_email, approved_by, approved_at, first_approved_at, second_approved_at, final_approved_at, rejected_by, rejected_by_name, rejected_by_email, rejected_at, reject_reason, created_at, updated_at)
       VALUES
-      (:project_id, :month, :worker_key, :worker_name, :work_date, :old_value, :new_value, :reason, :status, :requested_by, :requested_by_email, :requested_by_name, :created_at, :updated_at)
+      (:project_id, :month, :worker_key, :worker_name, :work_date, :old_value, :new_value, :reason, :status, :requested_by, :requested_by_email, :requested_by_name, :approval_stage, :approval_required_level, :current_approver_employee_id, :current_approver_name, :current_approver_email, :first_approver_employee_id, :first_approver_name, :first_approver_email, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :created_at, :updated_at)
       ON DUPLICATE KEY UPDATE
         month = VALUES(month),
         worker_name = VALUES(worker_name),
@@ -318,7 +339,25 @@ try {
         status = VALUES(status),
         requested_by = VALUES(requested_by),
         requested_by_email = VALUES(requested_by_email),
-        requested_by_name = VALUES(requested_by_name),        
+        requested_by_name = VALUES(requested_by_name),
+        approval_stage = VALUES(approval_stage),
+        approval_required_level = VALUES(approval_required_level),
+        current_approver_employee_id = VALUES(current_approver_employee_id),
+        current_approver_name = VALUES(current_approver_name),
+        current_approver_email = VALUES(current_approver_email),
+        first_approver_employee_id = VALUES(first_approver_employee_id),
+        first_approver_name = VALUES(first_approver_name),
+        first_approver_email = VALUES(first_approver_email),
+        approved_by = NULL,
+        approved_at = NULL,
+        first_approved_at = NULL,
+        second_approved_at = NULL,
+        final_approved_at = NULL,
+        rejected_by = NULL,
+        rejected_by_name = NULL,
+        rejected_by_email = NULL,
+        rejected_at = NULL,
+        reject_reason = NULL,
         updated_at = VALUES(updated_at)";
 
     $st = $pdo->prepare($sql);
@@ -341,7 +380,15 @@ try {
         $st->bindValue(':requested_by', $requestedBy, PDO::PARAM_INT);
     }
     $st->bindValue(':requested_by_email', $requestedByEmail !== '' ? $requestedByEmail : null, $requestedByEmail !== '' ? PDO::PARAM_STR : PDO::PARAM_NULL);
-    $st->bindValue(':requested_by_name', $requestedByName !== '' ? $requestedByName : null, $requestedByName !== '' ? PDO::PARAM_STR : PDO::PARAM_NULL);    
+    $st->bindValue(':requested_by_name', $requestedByName !== '' ? $requestedByName : null, $requestedByName !== '' ? PDO::PARAM_STR : PDO::PARAM_NULL);
+    $st->bindValue(':approval_stage', $approvalStage, PDO::PARAM_STR);
+    $st->bindValue(':approval_required_level', $approvalRequiredLevel, PDO::PARAM_STR);
+    $st->bindValue(':current_approver_employee_id', $currentApproverId, $currentApproverId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+    $st->bindValue(':current_approver_name', $currentApproverName, $currentApproverName === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    $st->bindValue(':current_approver_email', $currentApproverEmail, $currentApproverEmail === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    $st->bindValue(':first_approver_employee_id', $directorId, $directorId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
+    $st->bindValue(':first_approver_name', $directorName, $directorName === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+    $st->bindValue(':first_approver_email', $directorEmail, $directorEmail === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
     $st->bindValue(':created_at', $now, PDO::PARAM_STR);
     $st->bindValue(':updated_at', $now, PDO::PARAM_STR);
     $st->execute();
@@ -353,9 +400,29 @@ try {
         ), 200);
     }
 
+    $overrideId = (int)$pdo->lastInsertId();
+    if ($overrideId <= 0) {
+        $stFind = $pdo->prepare("SELECT id FROM cpms_labor_gongsu_overrides WHERE project_id=:project_id AND worker_key=:worker_key AND work_date=:work_date LIMIT 1");
+        $stFind->execute(array(':project_id'=>$projectId, ':worker_key'=>$workerKey, ':work_date'=>$workDate));
+        $overrideId = (int)$stFind->fetchColumn();
+    }
+    cpms_labor_send_override_notification($pdo, $overrideId, 'DIRECTOR_REQUEST');
+
     $returnValue = ($oldValue === null) ? number_format($newValue, 2, '.', '') : number_format($oldValue, 2, '.', '');
-    cpms_gongsu_json_exit(true, '1.5 이상 공수는 승인 요청으로 등록되었습니다.', array(
+    if ($approvalRequiredLevel === 'DIRECTOR_THEN_VP') {
+        cpms_gongsu_json_exit(true, '박원덕 상무에게 1차 공수 수정 승인 요청을 보냈습니다. 승인 후 부사장에게 2차 승인 요청이 전달됩니다.', array(
+            'mode' => 'pending',
+            'approval_stage' => 'DIRECTOR_PENDING',
+            'approval_required_level' => 'DIRECTOR_THEN_VP',
+            'approver_name' => '박원덕',
+            'value' => $returnValue,
+            'pending_value' => number_format($newValue, 2, '.', '')
+        ), 200);
+    }
+    cpms_gongsu_json_exit(true, '박원덕 상무에게 공수 수정 승인 요청을 보냈습니다.', array(
         'mode' => 'pending',
+        'approval_stage' => 'DIRECTOR_PENDING',
+        'approver_name' => '박원덕',        
         'value' => $returnValue,
         'pending_value' => number_format($newValue, 2, '.', '')
     ), 200);
