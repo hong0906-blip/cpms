@@ -17,6 +17,26 @@ $ci = trim((string)$_POST['requested_check_in']);
 $co = trim((string)$_POST['requested_check_out']);
 $reason = trim((string)$_POST['reason']);
 $now = attendance_now();
+$ci = str_replace('T', ' ', $ci);
+$co = str_replace('T', ' ', $co);
+
+$ciDate = attendance_datetime_date_part($ci);
+$coDate = attendance_datetime_date_part($co);
+if (($t === 'check_in' || $t === 'both') && $ciDate !== '' && $ciDate !== $d) {
+    flash_set('danger', '요청 날짜와 출근시간의 날짜가 서로 다릅니다.');
+    header('Location: ?r=대시보드');
+    exit;
+}
+if (($t === 'check_out' || $t === 'both') && $coDate !== '' && $coDate !== $d) {
+    flash_set('danger', '요청 날짜와 퇴근시간의 날짜가 서로 다릅니다.');
+    header('Location: ?r=대시보드');
+    exit;
+}
+if ($t === 'both' && $ciDate !== '' && $coDate !== '' && $ciDate !== $coDate) {
+    flash_set('danger', '요청 날짜와 출퇴근 시간의 날짜가 서로 다릅니다. 요청 날짜를 ' . $ciDate . '로 선택해주세요.');
+    header('Location: ?r=대시보드');
+    exit;
+}
 
 try {
     $st = $pdo->prepare("INSERT INTO cpms_attendance_requests(employee_id,request_date,request_type,requested_check_in,requested_check_out,reason,status,created_at,updated_at) VALUES(:e,:d,:t,:ci,:co,:r,'pending',:c,:u)");

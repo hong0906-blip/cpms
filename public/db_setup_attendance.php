@@ -21,6 +21,7 @@ $logs = array();
 $errors = array();
 $success = false;
 $warnings = array();
+$repairReports = array();
 
 function table_indexes($pdo, $table)
 {
@@ -224,6 +225,36 @@ try {
             $success = true;
             $logs[] = '처리 완료: drop_bad_unique_emp';
         }
+        if ($action === 'repair_mismatch_records') {
+            $stMis = $pdo->query("SELECT * FROM cpms_attendance_records WHERE (check_in IS NOT NULL AND check_in <> '' AND DATE(check_in) <> work_date) OR (check_out IS NOT NULL AND check_out <> '' AND DATE(check_out) <> work_date) ORDER BY id ASC");
+            $misRows = $stMis ? $stMis->fetchAll(PDO::FETCH_ASSOC) : array();
+            $moved = 0;
+            foreach ($misRows as $mr) {
+                $ciDate = isset($mr['check_in']) ? substr((string)$mr['check_in'], 0, 10) : '';
+                $coDate = isset($mr['check_out']) ? substr((string)$mr['check_out'], 0, 10) : '';
+                $targetDate = '';
+                if ($ciDate !== '' && $coDate !== '' && $ciDate === $coDate) {
+                    $targetDate = $ciDate;
+                }
+                if ($targetDate === '' || $targetDate === (string)$mr['work_date']) {
+                    $repairReports[] = '복구 불가(id='.(int)$mr['id'].'): 출근/퇴근 날짜가 일치하지 않거나 이동 대상 날짜를 확정할 수 없습니다.';
+                    continue;
+                }
+                $stDup = $pdo->prepare("SELECT id FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d AND id<>:id LIMIT 1");
+                $stDup->execute(array(':e'=>(int)$mr['employee_id'], ':d'=>$targetDate, ':id'=>(int)$mr['id']));
+                $dupId = (int)$stDup->fetchColumn();
+                if ($dupId > 0) {
+                    $repairReports[] = '복구 불가(id='.(int)$mr['id'].'): 해당 직원의 '.$targetDate.' 기록이 이미 존재합니다.';
+                    continue;
+                }
+                $stUp = $pdo->prepare("UPDATE cpms_attendance_records SET work_date=:d, updated_at=:u WHERE id=:id");
+                $stUp->execute(array(':d'=>$targetDate, ':u'=>date('Y-m-d H:i:s'), ':id'=>(int)$mr['id']));
+                $moved++;
+                $repairReports[] = '복구 완료(id='.(int)$mr['id'].'): work_date를 '.$targetDate.'로 이동했습니다.';
+            }
+            $success = true;
+            $logs[] = '날짜 불일치 기록 점검/복구 완료: 이동 '.$moved.'건';
+        }
 
         if (in_array($action, array('records', 'requests', 'leave', 'settings', 'all'), true)) {
             $success = true;
@@ -304,11 +335,22 @@ if ($pdo && table_exists($pdo, 'cpms_attendance_records')) {
     <form method="post" style="margin:0;"><button type="submit" name="action" value="leave" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;">leave 생성/확인</button></form>
     <form method="post" style="margin:0;"><button type="submit" name="action" value="settings" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;">settings 생성/확인</button></form>
     <form method="post" style="margin:0;"><button type="submit" name="action" value="all" style="padding:8px 12px;border:1px solid #15803d;border-radius:8px;background:#16a34a;color:#fff;cursor:pointer;">all 생성/확인</button></form>
+    <form method="post" style="margin:0;"><button type="submit" name="action" value="repair_mismatch_records" style="padding:8px 12px;border:1px solid #1d4ed8;border-radius:8px;background:#2563eb;color:#fff;cursor:pointer;">날짜 불일치 기록 점검/복구</button></form>    
   </div>
 
   <div style="margin-bottom:12px;"><a href="?r=관리&amp;tab=attendance" style="color:#1d4ed8;">관리 화면으로 돌아가기</a></div>
 
   <h3 style="font-size:16px; margin:16px 0 8px 0;">처리 로그</h3>
+  <?php if (!empty($repairReports)): ?>
+    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;background:#fff;margin-bottom:12px;">
+      <div style="font-weight:bold;margin-bottom:6px;">날짜 불일치 복구 결과</div>
+      <ul style="margin:0 0 0 18px;padding:0;">
+        <?php foreach ($repairReports as $line): ?>
+          <li style="margin:4px 0;"><?php echo h($line); ?></li>
+        <?php endforeach; ?>
+      </ul>
+    </div>
+  <?php endif; ?>  
   <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px;background:#fafafa;">
     <?php if (empty($logs)): ?>
       <div style="color:#666;">아직 실행 로그가 없습니다.</div>

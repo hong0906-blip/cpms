@@ -18,6 +18,22 @@ function attendance_today(){
     $dt = new DateTime('now', new DateTimeZone('Asia/Seoul'));
     return $dt->format('Y-m-d');
 }
+function attendance_datetime_date_part($value){
+    $value = trim((string)$value);
+    if($value === '') return '';
+    return substr($value, 0, 10);
+}
+function attendance_record_datetime_matches_work_date($row){
+    if(!$row || !isset($row['work_date'])) return true;
+    $wd = (string)$row['work_date'];
+    if(isset($row['check_in']) && trim((string)$row['check_in']) !== ''){
+        if(attendance_datetime_date_part($row['check_in']) !== $wd) return false;
+    }
+    if(isset($row['check_out']) && trim((string)$row['check_out']) !== ''){
+        if(attendance_datetime_date_part($row['check_out']) !== $wd) return false;
+    }
+    return true;
+}
 function attendance_today_record($pdo, $employeeId){
     $employeeId = (int)$employeeId;
     if(!$pdo || $employeeId <= 0) return null;
@@ -26,7 +42,12 @@ function attendance_today_record($pdo, $employeeId){
         $st = $pdo->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id = :employee_id AND work_date = :today LIMIT 1");
         $st->execute(array(':employee_id'=>$employeeId, ':today'=>$today));
         $row = $st->fetch(PDO::FETCH_ASSOC);
-        return $row ? $row : null;
+        if(!$row) return null;
+        if(!attendance_record_datetime_matches_work_date($row)){
+            error_log('[attendance_today_record] date mismatch record_id='.(isset($row['id'])?$row['id']:'0').' work_date='.(isset($row['work_date'])?$row['work_date']:'').' check_in='.(isset($row['check_in'])?$row['check_in']:'').' check_out='.(isset($row['check_out'])?$row['check_out']:''));
+            return null;
+        }
+        return $row;
     }catch(Exception $e){
         error_log('[attendance_today_record] '.$e->getMessage());        
         return null;

@@ -119,6 +119,7 @@ foreach ($reqs as $rq) {
 }
 ?>
 <div class='mb-4 flex gap-2'><a class='px-3 py-2 rounded-2xl border bg-white' href='?r=관리'>관리부 메인</a><a class='px-3 py-2 rounded-2xl border bg-white' href='?r=관리&tab=employees'>직원명부</a><a class='px-3 py-2 rounded-2xl border bg-white' href='?r=db_setup_attendance'>출퇴근 DB 설정</a></div>
+<div class='mb-4'><a class='px-3 py-2 rounded-2xl border bg-blue-600 text-white inline-block' href='?r=db_setup_attendance'>날짜 불일치 기록 점검/복구</a></div>
 <?php if(!$hireDateEnabled): ?><div style="background:#fef3c7;border:1px solid #f59e0b;padding:8px;margin:8px 0;">입사일 컬럼이 없어 연차/월차 계산은 제한됩니다. 직원명부에서 컬럼을 추가하세요.</div><?php endif; ?>
 <?php foreach($attendanceErrors as $e): ?><div style="background:#fee2e2;border:1px solid #ef4444;padding:8px;margin:8px 0;"><?php echo h($e); ?></div><?php endforeach; ?>
 <?php if(isset($_GET['msg']) && $_GET['msg']==='reject_reason_required'): ?><div style="background:#fef3c7;border:1px solid #f59e0b;padding:8px;margin:8px 0;">반려사유를 입력해주세요.</div><?php endif; ?>
