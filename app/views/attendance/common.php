@@ -1,11 +1,21 @@
 <?php
 /** 출퇴근 시스템 공통 함수 */
+function attendance_timezone(){
+    $tz = 'Asia/Seoul';
+    if (function_exists('date_default_timezone_get')) {
+        $cur = (string)date_default_timezone_get();
+        if ($cur !== $tz && function_exists('date_default_timezone_set')) {
+            @date_default_timezone_set($tz);
+        }
+    }
+    return new DateTimeZone($tz);
+}
 function attendance_now(){
-    $dt = new DateTime('now', new DateTimeZone('Asia/Seoul'));
+    $dt = new DateTime('now', attendance_timezone());
     return $dt->format('Y-m-d H:i:s');
 }
 function attendance_today(){
-    $dt = new DateTime('now', new DateTimeZone('Asia/Seoul'));
+    $dt = new DateTime('now', attendance_timezone());
     return $dt->format('Y-m-d');
 }
 function attendance_today_record($pdo, $employeeId){
