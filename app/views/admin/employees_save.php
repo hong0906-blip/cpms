@@ -36,6 +36,41 @@ $manageEnabled = cpms_column_exists($pdo,'employees','approval_can_be_manage_app
 $chatEnabledCol = cpms_column_exists($pdo,'employees','google_chat_enabled');
 $chatUserEnabled = cpms_column_exists($pdo,'employees','google_chat_user_name');
 $chatSpaceEnabled = cpms_column_exists($pdo,'employees','google_chat_dm_space_name');
+$photoPathEnabled = cpms_column_exists($pdo,'employees','photo_path');
+
+if (!function_exists('cpms_employee_photo_delete_file')) {
+function cpms_employee_photo_delete_file($photoPath) {
+    if (!is_string($photoPath) || strpos($photoPath, '/cpms/public/uploads/employees/') !== 0) return;
+    $projectRoot = realpath(__DIR__ . '/../../../..');
+    if ($projectRoot === false) return;
+    $filePath = $projectRoot . '/public/uploads/employees/' . basename($photoPath);
+    if (is_file($filePath)) @unlink($filePath);
+}}
+
+if (!function_exists('cpms_employee_photo_upload')) {
+function cpms_employee_photo_upload($employeeId, $fileInfo) {
+    if (!is_array($fileInfo) || !isset($fileInfo['tmp_name']) || !is_uploaded_file($fileInfo['tmp_name'])) return array('ok'=>false,'message'=>'업로드 파일이 없습니다.');
+    if (!isset($fileInfo['error']) || (int)$fileInfo['error'] !== UPLOAD_ERR_OK) return array('ok'=>false,'message'=>'파일 업로드 중 오류가 발생했습니다.');
+    if (!isset($fileInfo['size']) || (int)$fileInfo['size'] > 5242880) return array('ok'=>false,'message'=>'파일 크기는 5MB 이하만 가능합니다.');
+    $imgInfo = @getimagesize($fileInfo['tmp_name']);
+    if (!is_array($imgInfo) || !isset($imgInfo['mime'])) return array('ok'=>false,'message'=>'이미지 파일만 업로드할 수 있습니다.');
+    $allowedMimeToExt = array('image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp');
+    $mime = strtolower((string)$imgInfo['mime']);
+    if (!isset($allowedMimeToExt[$mime])) return array('ok'=>false,'message'=>'JPG, PNG, WEBP 파일만 가능합니다.');
+    $origName = isset($fileInfo['name']) ? strtolower((string)$fileInfo['name']) : '';
+    $ext = pathinfo($origName, PATHINFO_EXTENSION);
+    if (!in_array($ext, array('jpg','jpeg','png','webp'), true)) return array('ok'=>false,'message'=>'JPG, PNG, WEBP 파일만 가능합니다.');
+    $projectRoot = realpath(__DIR__ . '/../../../..');
+    if ($projectRoot === false) return array('ok'=>false,'message'=>'프로젝트 경로를 확인할 수 없습니다.');
+    $uploadDir = $projectRoot . '/public/uploads/employees';
+    if (!is_dir($uploadDir) && !@mkdir($uploadDir, 0775, true)) return array('ok'=>false,'message'=>'업로드 폴더를 생성할 수 없습니다. public/uploads/employees 폴더 권한을 확인해주세요.');
+    if (!is_dir($uploadDir) || !is_writable($uploadDir)) return array('ok'=>false,'message'=>'업로드 폴더에 쓰기 권한이 없습니다. public/uploads/employees 폴더 권한을 확인해주세요.');
+    $safeExt = $allowedMimeToExt[$mime];
+    $fileName = 'employee_' . (int)$employeeId . '_' . date('YmdHis') . '_' . mt_rand(1000, 9999) . '.' . $safeExt;
+    $destPath = $uploadDir . '/' . $fileName;
+    if (!@move_uploaded_file($fileInfo['tmp_name'], $destPath)) return array('ok'=>false,'message'=>'업로드 파일 저장에 실패했습니다.');
+    return array('ok'=>true,'db_path'=>'/cpms/public/uploads/employees/' . $fileName);
+}}
 
 
 $action = isset($_POST['action']) ? (string)$_POST['action'] : 'save';
@@ -51,10 +86,7 @@ if ($action === 'delete') {
         if (is_array($row0)) $photoPath = isset($row0['photo_path']) ? $row0['photo_path'] : null;
         $st = $pdo->prepare("DELETE FROM employees WHERE id=:id");
         $st->bindValue(':id', $id, \PDO::PARAM_INT); $st->execute();
-        if (is_string($photoPath) && strpos($photoPath, '/cpms/public/uploads/employees/') === 0) {
-            $projectRoot = realpath(__DIR__ . '/../../../..');
-            if ($projectRoot !== false) { $fs = $projectRoot . '/public/uploads/employees/' . basename($photoPath); if (is_file($fs)) @unlink($fs); }
-        }
+        cpms_employee_photo_delete_file($photoPath);
         flash_set('success', '직원이 삭제되었습니다.');
     } catch (\Exception $e) { flash_set('error', '삭제 실패: '.$e->getMessage()); }
     header('Location: ?r=관리&tab=employees'); exit;
@@ -109,6 +141,17 @@ if ($dept !== '' && !in_array($dept, $allowedDepts, true)) $dept='';
 if ($pos !== '' && !in_array($pos, $allowedPositions, true)) $pos='';
 
 try {
+    $uploadedPhoto = (isset($_FILES['employee_photo']) && is_array($_FILES['employee_photo'])) ? $_FILES['employee_photo'] : null;
+    $hasNewPhoto = ($uploadedPhoto && isset($uploadedPhoto['error']) && (int)$uploadedPhoto['error'] === UPLOAD_ERR_OK);
+    $removePhoto = (isset($_POST['remove_photo']) && (string)$_POST['remove_photo'] === '1') ? 1 : 0;
+    $oldPhotoPath = null;
+    if ($id > 0 && $photoPathEnabled) {
+        $stOld = $pdo->prepare("SELECT photo_path FROM employees WHERE id=:id LIMIT 1");
+        $stOld->bindValue(':id', $id, \PDO::PARAM_INT);
+        $stOld->execute();
+        $oldRow = $stOld->fetch();
+        if (is_array($oldRow) && isset($oldRow['photo_path'])) $oldPhotoPath = $oldRow['photo_path'];
+    }    
     $fields = array('email=:email','name=:name','department=:dept','role=:role','is_active=:active');
     if ($positionEnabled) $fields[] = 'position=:pos';
     if ($hireDateEnabled) $fields[] = 'hire_date=:hire_date';
@@ -180,9 +223,31 @@ try {
     $st->execute();
     // 입사일 저장 확인 / 휴가잔여 저장 확인
     $savedId = ($id > 0) ? $id : (int)$pdo->lastInsertId();
+    $photoError = '';
+    if ($photoPathEnabled) {
+        if ($hasNewPhoto) {
+            $up = cpms_employee_photo_upload($savedId, $uploadedPhoto);
+            if (isset($up['ok']) && $up['ok'] && isset($up['db_path'])) {
+                $newPath = (string)$up['db_path'];
+                $stPhoto = $pdo->prepare("UPDATE employees SET photo_path=:photo_path WHERE id=:id");
+                $stPhoto->bindValue(':photo_path', $newPath);
+                $stPhoto->bindValue(':id', $savedId, \PDO::PARAM_INT);
+                $stPhoto->execute();
+                if ($oldPhotoPath !== null && $oldPhotoPath !== $newPath) cpms_employee_photo_delete_file($oldPhotoPath);
+            } else {
+                $photoError = isset($up['message']) ? (string)$up['message'] : '알 수 없는 오류';
+            }
+        } elseif ($id > 0 && $removePhoto === 1) {
+            $stPhoto = $pdo->prepare("UPDATE employees SET photo_path=NULL WHERE id=:id");
+            $stPhoto->bindValue(':id', $savedId, \PDO::PARAM_INT);
+            $stPhoto->execute();
+            cpms_employee_photo_delete_file($oldPhotoPath);
+        }
+    }    
     $msg = ($id > 0 ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.')
         . ' (id=' . $savedId . ', hire_date=' . ($hireDate === '' ? 'NULL' : $hireDate) . ', hire_date_column=' . ($hireDateEnabled ? 'yes' : 'no') . ')';
-    flash_set('success', $msg);
+    if ($photoError !== '') flash_set('error', '직원 정보는 저장되었지만 사진 업로드에 실패했습니다: ' . $photoError);
+    else flash_set('success', $msg);
     $currentUser = Auth::user();
     if (is_array($currentUser)) {
         $currentEmail = isset($currentUser['email']) ? strtolower(trim((string)$currentUser['email'])) : '';

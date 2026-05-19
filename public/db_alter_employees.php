@@ -74,15 +74,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $type = 'error';
                 $msg = '실패: ' . $e->getMessage();
             }
+        } elseif ($action === 'add_photo_path') {
+            try {
+                if ($dbName === '') throw new Exception('DB 이름을 가져오지 못했습니다.');
+                if (columnExists($pdo, $dbName, 'employees', 'photo_path')) {
+                    $type = 'success';
+                    $msg = '이미 photo_path(직원 사진 경로) 컬럼이 존재합니다.';
+                } else {
+                    $pdo->exec("ALTER TABLE employees ADD COLUMN photo_path VARCHAR(255) NULL");
+                    $type = 'success';
+                    $msg = 'photo_path(직원 사진 경로) 컬럼을 추가했습니다.';
+                }
+            } catch (Exception $e) {
+                $type = 'error';
+                $msg = '실패: ' . $e->getMessage();
+            }            
         }
     }
 }
 
 // 상태 체크
 $positionExists = false;
+$photoPathExists = false;
 try {
     if ($dbName !== '') {
         $positionExists = columnExists($pdo, $dbName, 'employees', 'position');
+        $photoPathExists = columnExists($pdo, $dbName, 'employees', 'photo_path');        
     }
 } catch (Exception $e) {}
 ?>
@@ -130,7 +147,23 @@ try {
         <button class="btn" <?php echo $positionExists ? 'disabled' : ''; ?>>직급 컬럼 추가</button>
       </form>
     </div>
-
+    <div style="height:12px;"></div>
+    <div class="row">
+      <div>
+        <div style="font-weight:800;">employees.photo_path</div>
+        <?php if ($photoPathExists): ?>
+          <span class="tag ok">존재함</span>
+        <?php else: ?>
+          <span class="tag no">없음</span>
+        <?php endif; ?>
+      </div>
+      <form method="post" style="margin:0;">
+        <input type="hidden" name="_csrf" value="<?php echo h2(csrf_token()); ?>">
+        <input type="hidden" name="action" value="add_photo_path">
+        <button class="btn" <?php echo $photoPathExists ? 'disabled' : ''; ?>>직원 사진 컬럼 생성/확인</button>
+      </form>
+    </div>
+    
     <?php if ($msg !== ''): ?>
       <div class="msg <?php echo ($type === 'success') ? 'ok' : 'err'; ?>">
         <?php echo h2($msg); ?>
