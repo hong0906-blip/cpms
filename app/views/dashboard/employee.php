@@ -194,13 +194,15 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
             <button type='button' data-attendance-request-open class='px-5 py-3 rounded-2xl bg-blue-900/80 text-white font-extrabold text-base border border-white/40'>출퇴근 요청</button>
             <?php if ($debugAttendance): ?>
                 <div class='basis-full mt-1 p-3 rounded-xl bg-black/60 text-white text-xs leading-6'>
-                    employee_id=<?php echo h((string)$eid_btn); ?><br>
-                    today=<?php echo h($today_btn); ?><br>
-                    today_record_id=<?php echo h((string)$todayRecordId); ?><br>
-                    today_check_in=<?php echo h($todayCheckIn !== '' ? $todayCheckIn : '-'); ?><br>
-                    today_check_out=<?php echo h($todayCheckOut !== '' ? $todayCheckOut : '-'); ?><br>
-                    canCheckIn=<?php echo $canCheckIn ? '1' : '0'; ?><br>
-                    canCheckOut=<?php echo $canCheckOut ? '1' : '0'; ?>
+                    employee_id: <?php echo h((string)$eid_btn); ?><br>
+                    attendance_today(): <?php echo h($today_btn); ?><br>
+                    attendance_now(): <?php echo h(attendance_now()); ?><br>
+                    today_record_id: <?php echo h($todayRecordId > 0 ? (string)$todayRecordId : '없음'); ?><br>
+                    today_record_work_date: <?php echo h(($row_btn && isset($row_btn['work_date']) && $row_btn['work_date']) ? (string)$row_btn['work_date'] : '없음'); ?><br>
+                    today_check_in: <?php echo h($todayCheckIn !== '' ? $todayCheckIn : '없음'); ?><br>
+                    today_check_out: <?php echo h($todayCheckOut !== '' ? $todayCheckOut : '없음'); ?><br>
+                    canCheckIn: <?php echo $canCheckIn ? 'true' : 'false'; ?><br>
+                    canCheckOut: <?php echo $canCheckOut ? 'true' : 'false'; ?>
                 </div>
             <?php endif; ?>
         </div>  

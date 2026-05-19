@@ -11,11 +11,11 @@ function attendance_timezone(){
     return new DateTimeZone($tz);
 }
 function attendance_now(){
-    $dt = new DateTime('now', attendance_timezone());
+    $dt = new DateTime('now', new DateTimeZone('Asia/Seoul'));
     return $dt->format('Y-m-d H:i:s');
 }
 function attendance_today(){
-    $dt = new DateTime('now', attendance_timezone());
+    $dt = new DateTime('now', new DateTimeZone('Asia/Seoul'));
     return $dt->format('Y-m-d');
 }
 function attendance_today_record($pdo, $employeeId){
@@ -23,11 +23,12 @@ function attendance_today_record($pdo, $employeeId){
     if(!$pdo || $employeeId <= 0) return null;
     try{
         $today = attendance_today();
-        $st = $pdo->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d LIMIT 1");
-        $st->execute(array(':e'=>$employeeId, ':d'=>$today));
+        $st = $pdo->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id = :employee_id AND work_date = :today LIMIT 1");
+        $st->execute(array(':employee_id'=>$employeeId, ':today'=>$today));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         return $row ? $row : null;
     }catch(Exception $e){
+        error_log('[attendance_today_record] '.$e->getMessage());        
         return null;
     }
 }

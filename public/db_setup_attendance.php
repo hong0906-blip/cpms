@@ -20,6 +20,42 @@ $action = isset($_POST['action']) ? trim((string)$_POST['action']) : '';
 $logs = array();
 $errors = array();
 $success = false;
+$warnings = array();
+
+function table_indexes($pdo, $table)
+{
+    $st = $pdo->query("SHOW INDEX FROM `" . str_replace('`', '``', $table) . "`");
+    return $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+}
+
+function attendance_record_index_status($pdo)
+{
+    $ret = array(
+        'has_uq_emp_date' => false,
+        'bad_unique_indexes' => array()
+    );
+    $rows = table_indexes($pdo, 'cpms_attendance_records');
+    $map = array();
+    foreach ($rows as $r) {
+        $key = isset($r['Key_name']) ? (string)$r['Key_name'] : '';
+        if ($key === '') continue;
+        if (!isset($map[$key])) {
+            $map[$key] = array('unique' => ((int)$r['Non_unique'] === 0), 'cols' => array());
+        }
+        $map[$key]['cols'][(int)$r['Seq_in_index']] = (string)$r['Column_name'];
+    }
+    foreach ($map as $name => $info) {
+        ksort($info['cols']);
+        $cols = array_values($info['cols']);
+        if ($info['unique'] && count($cols) === 2 && $cols[0] === 'employee_id' && $cols[1] === 'work_date') {
+            $ret['has_uq_emp_date'] = true;
+        }
+        if ($info['unique'] && count($cols) === 1 && $cols[0] === 'employee_id') {
+            $ret['bad_unique_indexes'][] = $name;
+        }
+    }
+    return $ret;
+}
 
 function table_exists($pdo, $table)
 {
@@ -106,6 +142,14 @@ try {
             } else {
                 $logs[] = 'raw_minutes 컬럼 이미 존재';
             }
+
+            $idxStatus = attendance_record_index_status($pdo);
+            if (!$idxStatus['has_uq_emp_date']) {
+                safe_exec($pdo, "ALTER TABLE cpms_attendance_records ADD UNIQUE KEY uq_emp_date(employee_id, work_date)", $logs);
+            }
+            if (!empty($idxStatus['bad_unique_indexes'])) {
+                $warnings[] = '잘못된 인덱스가 있습니다. employee_id 단독 UNIQUE가 있으면 날짜별 출퇴근 기록이 막힙니다.';
+            }            
         }
 
         if ($action === 'requests' || $action === 'all') {
@@ -160,6 +204,26 @@ try {
             ensure_settings_table($pdo, $logs);
             seed_settings($pdo, $logs);
         }
+        if ($action === 'drop_bad_unique_emp') {
+            if (!table_exists($pdo, 'cpms_attendance_records')) {
+                throw new Exception('cpms_attendance_records 테이블이 없습니다.');
+            }
+            $idxStatus = attendance_record_index_status($pdo);
+            if (empty($idxStatus['bad_unique_indexes'])) {
+                $logs[] = 'employee_id 단독 UNIQUE 인덱스가 없습니다.';
+            } else {
+                foreach ($idxStatus['bad_unique_indexes'] as $idxName) {
+                    safe_exec($pdo, "ALTER TABLE cpms_attendance_records DROP INDEX `" . str_replace('`', '``', $idxName) . "`", $logs);
+                }
+                $logs[] = 'employee_id 단독 UNIQUE 인덱스를 제거했습니다.';
+            }
+            $idxStatus2 = attendance_record_index_status($pdo);
+            if (!$idxStatus2['has_uq_emp_date']) {
+                safe_exec($pdo, "ALTER TABLE cpms_attendance_records ADD UNIQUE KEY uq_emp_date(employee_id, work_date)", $logs);
+            }
+            $success = true;
+            $logs[] = '처리 완료: drop_bad_unique_emp';
+        }
 
         if (in_array($action, array('records', 'requests', 'leave', 'settings', 'all'), true)) {
             $success = true;
@@ -170,6 +234,18 @@ try {
     $errors[] = 'PDO 오류: ' . $e->getMessage();
 } catch (Exception $e) {
     $errors[] = '오류: ' . $e->getMessage();
+}
+
+$indexStatusView = array('has_uq_emp_date' => false, 'bad_unique_indexes' => array());
+if ($pdo && table_exists($pdo, 'cpms_attendance_records')) {
+    try {
+        $indexStatusView = attendance_record_index_status($pdo);
+        if (!empty($indexStatusView['bad_unique_indexes'])) {
+            $warnings[] = '잘못된 인덱스가 있습니다. employee_id 단독 UNIQUE가 있으면 날짜별 출퇴근 기록이 막힙니다.';
+        }
+    } catch (Exception $e) {
+        $warnings[] = '인덱스 점검 중 오류: ' . $e->getMessage();
+    }
 }
 ?>
 <!doctype html>
@@ -197,6 +273,30 @@ try {
       처리 성공
     </div>
   <?php endif; ?>
+
+    <?php if (!empty($warnings)): ?>
+    <div style="background:#fff7ed;border:1px solid #ea580c;color:#9a3412;padding:10px 12px;border-radius:8px;margin-bottom:12px;">
+      <strong>경고</strong>
+      <ul style="margin:8px 0 0 18px; padding:0;">
+        <?php foreach ($warnings as $w): ?>
+          <li><?php echo h($w); ?></li>
+        <?php endforeach; ?>
+      </ul>
+    </div>
+  <?php endif; ?>
+
+  <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+    <div style="font-weight:bold;margin-bottom:6px;">cpms_attendance_records 인덱스 상태</div>
+    <div style="font-size:13px;line-height:1.6;">
+      employee_id + work_date UNIQUE(uq_emp_date): <?php echo $indexStatusView['has_uq_emp_date'] ? '있음' : '없음'; ?><br>
+      employee_id 단독 UNIQUE: <?php echo empty($indexStatusView['bad_unique_indexes']) ? '없음' : h(implode(', ', $indexStatusView['bad_unique_indexes'])); ?>
+    </div>
+    <?php if (!empty($indexStatusView['bad_unique_indexes'])): ?>
+      <form method="post" style="margin-top:10px;">
+        <button type="submit" name="action" value="drop_bad_unique_emp" style="padding:8px 12px;border:1px solid #b91c1c;border-radius:8px;background:#dc2626;color:#fff;cursor:pointer;">employee_id 단독 UNIQUE 제거</button>
+      </form>
+    <?php endif; ?>
+  </div>
 
   <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
     <form method="post" style="margin:0;"><button type="submit" name="action" value="records" style="padding:8px 12px;border:1px solid #d1d5db;border-radius:8px;background:#fff;cursor:pointer;">records 생성/확인</button></form>
