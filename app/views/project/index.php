@@ -330,6 +330,14 @@ function status_badge_class($st) {
               </select>
               <div class="text-xs text-gray-500 mt-2">PC: Ctrl(또는 Cmd) 누르고 여러 명 선택</div>
             </div>
+
+            <div class="md:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <div class="font-extrabold text-amber-900">변경 계약서 / 변경 단가내역서</div>
+              <div class="text-xs text-amber-800 mt-1">변경 계약서 또는 변경 단가내역서를 업로드하면 기존 단가내역이 변경됩니다. 항목명, 기본수량, 단가가 변경될 수 있으며 기존 공정표에도 반영됩니다. 업로드 후 반드시 미리보기에서 변경 내용을 확인하세요.</div>
+              <input type="file" id="edit_unit_price_file" accept=".xlsx" class="mt-3 block w-full text-sm">
+              <button type="button" id="btnEditPreview" class="mt-2 px-3 py-2 rounded-xl border border-gray-300 bg-white text-sm font-bold">변경 내역 미리보기</button>
+              <div id="editPreviewStatus" class="text-xs text-gray-700 mt-2"></div>
+            </div>            
           </div>
 
           <!-- 엑셀 업로드 + 미리보기 -->
@@ -410,6 +418,7 @@ function status_badge_class($st) {
       <form method="post" action="?r=project/project_update" id="projectEditForm">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
         <input type="hidden" name="project_id" id="edit_project_id" value="0">
+        <input type="hidden" name="unit_price_update_token" id="edit_unit_price_update_token" value="">        
 
         <div class="p-6 space-y-5 overflow-y-auto" style="max-height: calc(90vh - 170px);">
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -477,6 +486,14 @@ function status_badge_class($st) {
               </select>
               <div class="text-xs text-gray-500 mt-2">PC: Ctrl(또는 Cmd) 누르고 여러 명 선택</div>
             </div>
+
+            <div class="md:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+              <div class="font-extrabold text-amber-900">변경 계약서 / 변경 단가내역서</div>
+              <div class="text-xs text-amber-800 mt-1">변경 계약서 또는 변경 단가내역서를 업로드하면 기존 단가내역이 변경됩니다. 항목명, 기본수량, 단가가 변경될 수 있으며 기존 공정표에도 반영됩니다. 업로드 후 반드시 미리보기에서 변경 내용을 확인하세요.</div>
+              <input type="file" id="edit_unit_price_file" accept=".xlsx" class="mt-3 block w-full text-sm">
+              <button type="button" id="btnEditPreview" class="mt-2 px-3 py-2 rounded-xl border border-gray-300 bg-white text-sm font-bold">변경 내역 미리보기</button>
+              <div id="editPreviewStatus" class="text-xs text-gray-700 mt-2"></div>
+            </div>            
           </div>
         </div>
 
@@ -564,6 +581,10 @@ function status_badge_class($st) {
   });
 
   // ===== 엑셀 미리보기 =====
+  function formatQty0(n){ var x=parseFloat(n); if(isNaN(x)) return ""; return Math.round(x).toLocaleString(); }
+  function formatPrice1(n){ var x=parseFloat(n); if(isNaN(x)) return ""; return x.toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1}); }
+  function formatAmount0(n){ var x=parseFloat(n); if(isNaN(x)) return ""; return Math.round(x).toLocaleString(); }
+
   function round2(n){
     var x = parseFloat(n);
     if (isNaN(x)) return '';
@@ -624,9 +645,9 @@ function status_badge_class($st) {
           tr.appendChild(td(r.item_name || ''));
           tr.appendChild(td(r.spec || ''));                 // ✅ 규격
           tr.appendChild(td(r.unit || ''));
-          tr.appendChild(td(round2(r.qty || '')));
-          tr.appendChild(td(round2(r.total_unit_price || '')));
-          tr.appendChild(td(round2(r.amount || '')));
+          tr.appendChild(td(formatQty0(r.qty || '')));
+          tr.appendChild(td(formatPrice1(r.total_unit_price || '')));
+          tr.appendChild(td(formatAmount0(r.amount || '')));
           tbody.appendChild(tr);
         }
 
@@ -645,6 +666,30 @@ function status_badge_class($st) {
         wrapEl.classList.add('hidden');
       });
   });
+
+    
+  var btnEditPreview = document.getElementById('btnEditPreview');
+  if (btnEditPreview) {
+    btnEditPreview.addEventListener('click', function(){
+      var pid = document.getElementById('edit_project_id').value || '0';
+      var f = document.getElementById('edit_unit_price_file');
+      var status = document.getElementById('editPreviewStatus');
+      if (!f.files || !f.files[0]) { status.textContent = '파일을 선택하세요.'; return; }
+      var fd = new FormData();
+      fd.append('_csrf', '<?php echo h(csrf_token()); ?>');
+      fd.append('project_id', pid);
+      fd.append('xlsx', f.files[0]);
+      status.textContent = '변경 미리보기 생성 중...';
+      fetch('?r=project/unit_price_update_preview', { method:'POST', body:fd, credentials:'same-origin' })
+        .then(function(r){ return r.json(); })
+        .then(function(j){
+          if (!j || !j.ok) { status.textContent = (j && j.message) ? j.message : '실패'; return; }
+          document.getElementById('edit_unit_price_update_token').value = j.token || '';
+          status.textContent = '변경:' + (j.changes ? j.changes.length : 0) + '건 / 제외:' + (j.excluded ? j.excluded.length : 0) + '건 확인됨';
+        })
+        .catch(function(){ status.textContent = '통신 오류'; });
+    });
+  }
 
   // 저장 전 메인 담당자 체크
   var form = document.getElementById('projectCreateForm');
