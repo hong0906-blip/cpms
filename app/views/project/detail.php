@@ -229,7 +229,7 @@ if (is_file($contractMetaFile)) {
 
             <div class="flex items-center justify-between gap-2">
                 <div class="text-gray-500">계약금액</div>
-                <div class="font-bold"><?php echo h($project['contract_amount']); ?></div>
+                <div class="font-bold"><?php echo cpms_format_amount0($project['contract_amount']); ?></div>
             </div>
         </div>
     </div>

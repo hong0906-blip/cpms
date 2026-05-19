@@ -116,6 +116,7 @@ if ($route === 'project/project_save') {
 
 /**
  * ✅ [추가] 프로젝트 수정 저장(POST)
+ * - debug_project_update=1 쿼리는 project_update.php에서 실패 원인 JSON을 반환
  * - app/views/project/project_update.php
  */
 if ($route === 'project/project_update') {

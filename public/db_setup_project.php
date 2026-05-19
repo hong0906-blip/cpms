@@ -158,6 +158,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     project_id INT NOT NULL,
                     unit_price_id INT NULL,
                     change_type VARCHAR(30) NOT NULL,
+                    before_json TEXT NULL,
+                    after_json TEXT NULL,
                     old_item_name VARCHAR(255) NULL,
                     new_item_name VARCHAR(255) NULL,
                     old_qty DECIMAL(18,4) NULL,
@@ -174,18 +176,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     created_at DATETIME NULL,
                     KEY idx_project (project_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                if (!column_exists($pdo, 'cpms_project_unit_price_change_logs', 'before_json')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_price_change_logs ADD COLUMN before_json TEXT NULL AFTER change_type");
+                    array_push($added, 'unit_price_change_logs.before_json');
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_price_change_logs', 'after_json')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_price_change_logs ADD COLUMN after_json TEXT NULL AFTER before_json");
+                    array_push($added, 'unit_price_change_logs.after_json');
+                }
                 execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_project_contract_change_files (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     project_id INT NOT NULL,
                     original_name VARCHAR(255) NOT NULL,
                     stored_name VARCHAR(255) NOT NULL,
                     stored_path VARCHAR(500) NOT NULL,
+                    file_type VARCHAR(50) NULL,
                     uploaded_by INT NULL,
                     uploaded_at DATETIME NULL,
                     applied_token VARCHAR(100) NULL,
                     change_summary TEXT NULL,
                     KEY idx_project (project_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                if (!column_exists($pdo, 'cpms_project_contract_change_files', 'file_type')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_contract_change_files ADD COLUMN file_type VARCHAR(50) NULL AFTER stored_path");
+                    array_push($added, 'contract_change_files.file_type');
+                }
 $type = 'ok';
                 $msg = (count($added) === 0) ? '단가표 컬럼 업데이트: 이미 적용되어 있습니다.' : ('단가표 컬럼 업데이트 완료: ' . implode(', ', $added));
                 

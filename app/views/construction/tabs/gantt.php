@@ -1482,9 +1482,15 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
   function toNumber(val){
     if (val === null || typeof val === 'undefined' || val === '') return null;
-    var num = parseFloat(val);
+    var num = parseFloat(String(val).replace(/,/g, ''));
     if (isNaN(num)) return null;
     return num;
+  }
+
+  function formatQty0(val){
+    var num = toNumber(val);
+    if (num === null) return '';
+    return String(Math.round(num));
   }
 
   function getTaskBaseTotal(taskId, fallbackTotal){
@@ -1643,14 +1649,14 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
       var tr = document.createElement('tr');
       tr.innerHTML = '<td class="p-2 border">' + escapeHtml(item.item_name || '') + '</td>' +
-        '<td class="p-2 border text-right">' + contractQty + '</td>' +
-        '<td class="p-2 border text-right"><input type="number" min="0" step="0.0001" class="gantt-item-done w-24 px-2 py-1 border border-gray-200 rounded text-right" data-unit-price-id="' + uid + '" data-contract-qty="' + contractQty + '" value="' + doneQty + '"></td>' +
-        '<td class="p-2 border text-right"><span class="gantt-item-remain">' + remain + '</span></td>';
+        '<td class="p-2 border text-right">' + formatQty0(contractQty) + '</td>' +
+        '<td class="p-2 border text-right"><input type="number" min="0" step="1" class="gantt-item-done w-24 px-2 py-1 border border-gray-200 rounded text-right" data-unit-price-id="' + uid + '" data-contract-qty="' + contractQty + '" value="' + formatQty0(doneQty) + '"></td>' +
+        '<td class="p-2 border text-right"><span class="gantt-item-remain">' + formatQty0(remain) + '</span></td>';
       bodyEl.appendChild(tr);
     });
 
-    if (totalEl) totalEl.value = totalQtySum;
-    if (doneEl) doneEl.value = doneQtySum;
+    if (totalEl) totalEl.value = formatQty0(totalQtySum);
+    if (doneEl) doneEl.value = formatQty0(doneQtySum);
 
     bodyEl.querySelectorAll('.gantt-item-done').forEach(function(input){
       input.addEventListener('input', function(){
@@ -1659,16 +1665,16 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         var val = toNumber(input.value);
         if (val === null || val < 0) val = 0;
         if (contractQty > 0 && val > contractQty) val = contractQty;
-        input.value = val;
+        input.value = formatQty0(val);
         var remainEl = input.closest('tr').querySelector('.gantt-item-remain');
-        if (remainEl) remainEl.textContent = (contractQty - val);
+        if (remainEl) remainEl.textContent = formatQty0(contractQty - val);
 
         var doneTotal = 0;
         bodyEl.querySelectorAll('.gantt-item-done').forEach(function(inp){
           var iv = toNumber(inp.value);
           doneTotal += (iv === null ? 0 : iv);
         });
-        if (doneEl) doneEl.value = doneTotal;
+        if (doneEl) doneEl.value = formatQty0(doneTotal);
         updateRemainQty();
       });
     });
@@ -1693,7 +1699,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var mapKey = taskId + '|' + taskDate;
     var saved = (progressMap && progressMap[mapKey]) ? progressMap[mapKey] : null;
     var baseTotal = getTaskBaseTotal(taskId, totalQty);
-    var totalVal = (baseTotal !== null && typeof baseTotal !== 'undefined') ? baseTotal : '';
+    var totalVal = (baseTotal !== null && typeof baseTotal !== 'undefined') ? formatQty0(baseTotal) : '';
     var doneVal = '0';
     var inputMode = 'manual';
     if (autoToggleEl) {
@@ -1701,14 +1707,14 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       autoToggleEl.checked = (savedAuto !== 'off');
     }
     if (saved && saved.done_qty !== null && typeof saved.done_qty !== 'undefined' && saved.done_qty !== '') {
-      doneVal = saved.done_qty;
+      doneVal = formatQty0(saved.done_qty);
       inputMode = 'manual';
       if (hintEl) hintEl.textContent = '수동 입력값(자동 덮어쓰기 금지)';
     } else {
       var useAuto = autoToggleEl ? !!autoToggleEl.checked : true;
       var suggested = useAuto ? suggestAutoQty(taskId, taskDate, baseTotal) : null;
       if (suggested !== null) {
-        doneVal = suggested;
+        doneVal = formatQty0(suggested);
         inputMode = 'auto';
         if (hintEl) hintEl.textContent = '자동 제안값(저장 전 수정 가능)';
       } else if (hintEl) {
@@ -1873,7 +1879,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       remainEl.textContent = '-';
       return;
     }
-    remainEl.textContent = remain.toString();
+    remainEl.textContent = formatQty0(remain);
   }
 
   document.querySelectorAll('.gantt-progress-date').forEach(function(btn){

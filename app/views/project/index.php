@@ -331,13 +331,6 @@ function status_badge_class($st) {
               <div class="text-xs text-gray-500 mt-2">PC: Ctrl(또는 Cmd) 누르고 여러 명 선택</div>
             </div>
 
-            <div class="md:col-span-2 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-              <div class="font-extrabold text-amber-900">변경 계약서 / 변경 단가내역서</div>
-              <div class="text-xs text-amber-800 mt-1">변경 계약서 또는 변경 단가내역서를 업로드하면 기존 단가내역이 변경됩니다. 항목명, 기본수량, 단가가 변경될 수 있으며 기존 공정표에도 반영됩니다. 업로드 후 반드시 미리보기에서 변경 내용을 확인하세요.</div>
-              <input type="file" id="edit_unit_price_file" accept=".xlsx" class="mt-3 block w-full text-sm">
-              <button type="button" id="btnEditPreview" class="mt-2 px-3 py-2 rounded-xl border border-gray-300 bg-white text-sm font-bold">변경 내역 미리보기</button>
-              <div id="editPreviewStatus" class="text-xs text-gray-700 mt-2"></div>
-            </div>            
           </div>
 
           <!-- 엑셀 업로드 + 미리보기 -->
@@ -609,6 +602,10 @@ function status_badge_class($st) {
   });
 
   // ===== 엑셀 미리보기 =====
+  function fieldValue(row, key){
+    if (!row || typeof row[key] === 'undefined' || row[key] === null) return '';
+    return row[key];
+  }
   function formatQty0(n){ var x=parseFloat(n); if(isNaN(x)) return ""; return Math.round(x).toLocaleString(); }
   function formatPrice1(n){ var x=parseFloat(n); if(isNaN(x)) return ""; return x.toLocaleString(undefined,{minimumFractionDigits:1,maximumFractionDigits:1}); }
   function formatAmount0(n){ var x=parseFloat(n); if(isNaN(x)) return ""; return Math.round(x).toLocaleString(); }
@@ -673,9 +670,9 @@ function status_badge_class($st) {
           tr.appendChild(td(r.item_name || ''));
           tr.appendChild(td(r.spec || ''));                 // ✅ 규격
           tr.appendChild(td(r.unit || ''));
-          tr.appendChild(td(formatQty0(r.qty || '')));
-          tr.appendChild(td(formatPrice1(r.total_unit_price || '')));
-          tr.appendChild(td(formatAmount0(r.amount || '')));
+          tr.appendChild(td(formatQty0(fieldValue(r, 'qty'))));
+          tr.appendChild(td(formatPrice1(fieldValue(r, 'total_unit_price'))));
+          tr.appendChild(td(formatAmount0(fieldValue(r, 'amount'))));
           tbody.appendChild(tr);
         }
 
@@ -696,14 +693,18 @@ function status_badge_class($st) {
   });
 
     
-  var btnEditPreview = document.getElementById('btnEditPreview');
+  var editModal = document.getElementById('modal-projectEdit');
+  function editEl(id){
+    return editModal ? editModal.querySelector('#' + id) : document.getElementById(id);
+  }
+  var btnEditPreview = editEl('btnEditPreview');
   if (btnEditPreview) {
     btnEditPreview.addEventListener('click', function(){
-      var pid = document.getElementById('edit_project_id').value || '0';
-      var f = document.getElementById('edit_unit_price_file');
-      var status = document.getElementById('editPreviewStatus');
-      var previewWrap = document.getElementById('editPreviewWrap');
-      var previewTbody = document.getElementById('editPreviewTbody');      
+      var pid = editEl('edit_project_id').value || '0';
+      var f = editEl('edit_unit_price_file');
+      var status = editEl('editPreviewStatus');
+      var previewWrap = editEl('editPreviewWrap');
+      var previewTbody = editEl('editPreviewTbody');
       if (!f.files || !f.files[0]) { status.textContent = '파일을 선택하세요.'; return; }
       var fd = new FormData();
       fd.append('_csrf', '<?php echo h(csrf_token()); ?>');
@@ -717,15 +718,20 @@ function status_badge_class($st) {
           return r.text().then(function(text){
             var json = null;
             try { json = JSON.parse(text); } catch(e) {}
-            if (!r.ok) throw new Error('HTTP ' + r.status + ' / ' + text.substring(0, 200));
-            if (!json) throw new Error('JSON 파싱 실패 / ' + text.substring(0, 200));
+            if (!r.ok) throw new Error('HTTP ' + r.status + ' / ' + text.substring(0, 300));
+            if (!json) throw new Error('JSON 파싱 실패 / ' + text.substring(0, 300));
             return json;
           });
         })
         .then(function(j){
-          if (!j || !j.ok) { status.textContent = (j && j.message) ? j.message : '실패'; return; }
-          document.getElementById('edit_unit_price_update_token').value = j.token || '';
-          status.textContent = '변경:' + (j.changes ? j.changes.length : 0) + '건 / 제외:' + (j.excluded ? j.excluded.length : 0) + '건 확인됨';
+          if (!j || !j.ok) { status.textContent = '미리보기 실패: ' + ((j && j.message) ? j.message : '실패'); return; }
+          editEl('edit_unit_price_update_token').value = j.token || '';
+          var summary = j.summary || {};
+          var kept = typeof summary.kept !== 'undefined' ? summary.kept : 0;
+          var changed = typeof summary.changed !== 'undefined' ? summary.changed : 0;
+          var inserted = typeof summary.inserted !== 'undefined' ? summary.inserted : 0;
+          var excluded = typeof summary.excluded !== 'undefined' ? summary.excluded : (j.excluded ? j.excluded.length : 0);
+          status.textContent = '유지 ' + kept + '건 / 변경 ' + changed + '건 / 신규 ' + inserted + '건 / 제외 ' + excluded + '건 확인됨';
           if (previewWrap) previewWrap.classList.remove('hidden');
           function addCell(tr, txt) {
             var td = document.createElement('td');
@@ -741,8 +747,8 @@ function status_badge_class($st) {
             addCell(tr, row && row.item_name ? row.item_name : '');
             addCell(tr, row && row.spec ? row.spec : '');
             addCell(tr, row && row.unit ? row.unit : '');
-            addCell(tr, formatQty0(row && row.qty ? row.qty : ''));
-            addCell(tr, formatPrice1(row && row.unit_price ? row.unit_price : ''));
+            addCell(tr, formatQty0(fieldValue(row, 'qty')));
+            addCell(tr, formatPrice1(fieldValue(row, 'unit_price')));
             addCell(tr, note || (row && row.remark ? row.remark : ''));
             previewTbody.appendChild(tr);
           }
@@ -775,11 +781,11 @@ function status_badge_class($st) {
   var editForm = document.getElementById('projectEditForm');
   if (editForm) {
     editForm.addEventListener('submit', function(e){
-      var f = document.getElementById('edit_unit_price_file');
-      var token = document.getElementById('edit_unit_price_update_token');
+      var f = editEl('edit_unit_price_file');
+      var token = editEl('edit_unit_price_update_token');
       if (f && f.files && f.files.length > 0 && token && !token.value) {
         e.preventDefault();
-        alert('변경 단가내역서를 선택한 경우, 먼저 “변경 내역 미리보기”를 실행해야 합니다.');
+        alert('변경 단가내역서를 선택한 경우, 먼저 변경 내역 미리보기를 실행해야 합니다.');
         return false;
       }
     });

@@ -73,6 +73,8 @@ if (!$pdo) {
             project_id INT NOT NULL,
             unit_price_id INT NULL,
             change_type VARCHAR(30) NOT NULL,
+            before_json TEXT NULL,
+            after_json TEXT NULL,
             old_item_name VARCHAR(255) NULL,
             new_item_name VARCHAR(255) NULL,
             old_spec VARCHAR(255) NULL,
@@ -99,6 +101,22 @@ if (!$pdo) {
             INDEX idx_change_type (change_type)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         add_result($results, 'TABLE', 'cpms_project_unit_price_change_logs', '성공', '확인/생성 완료');
+
+        $col = $pdo->query("SHOW COLUMNS FROM cpms_project_unit_price_change_logs LIKE 'before_json'")->fetch();
+        if (!$col) {
+            $pdo->exec('ALTER TABLE cpms_project_unit_price_change_logs ADD COLUMN before_json TEXT NULL AFTER change_type');
+            add_result($results, 'COLUMN', 'cpms_project_unit_price_change_logs.before_json', '성공', '추가 완료');
+        } else {
+            add_result($results, 'COLUMN', 'cpms_project_unit_price_change_logs.before_json', '성공', '이미 존재');
+        }
+
+        $col = $pdo->query("SHOW COLUMNS FROM cpms_project_unit_price_change_logs LIKE 'after_json'")->fetch();
+        if (!$col) {
+            $pdo->exec('ALTER TABLE cpms_project_unit_price_change_logs ADD COLUMN after_json TEXT NULL AFTER before_json');
+            add_result($results, 'COLUMN', 'cpms_project_unit_price_change_logs.after_json', '성공', '추가 완료');
+        } else {
+            add_result($results, 'COLUMN', 'cpms_project_unit_price_change_logs.after_json', '성공', '이미 존재');
+        }
     } catch (Exception $e) {
         add_result($results, 'TABLE', 'cpms_project_unit_price_change_logs', '오류', '처리 오류: ' . $e->getMessage());
     }
@@ -119,6 +137,14 @@ if (!$pdo) {
             INDEX idx_uploaded_at (uploaded_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
         add_result($results, 'TABLE', 'cpms_project_contract_change_files', '성공', '확인/생성 완료');
+
+        $col = $pdo->query("SHOW COLUMNS FROM cpms_project_contract_change_files LIKE 'file_type'")->fetch();
+        if (!$col) {
+            $pdo->exec('ALTER TABLE cpms_project_contract_change_files ADD COLUMN file_type VARCHAR(50) NULL AFTER stored_path');
+            add_result($results, 'COLUMN', 'cpms_project_contract_change_files.file_type', '성공', '추가 완료');
+        } else {
+            add_result($results, 'COLUMN', 'cpms_project_contract_change_files.file_type', '성공', '이미 존재');
+        }
     } catch (Exception $e) {
         add_result($results, 'TABLE', 'cpms_project_contract_change_files', '오류', '처리 오류: ' . $e->getMessage());
     }
