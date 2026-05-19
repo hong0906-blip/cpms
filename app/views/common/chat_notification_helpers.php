@@ -109,3 +109,35 @@ function cpms_google_chat_send_to_executives($pdo, $messageText, $eventType, $so
     } catch (Exception $e) { error_log('[google_chat_exec_notify] '.$e->getMessage()); }
 }
 }
+
+if (!function_exists('cpms_google_chat_send_to_management_department')) {
+function cpms_google_chat_send_to_management_department($pdo, $messageText, $eventType, $sourceId, $sourceType) {
+    try {
+        if (!function_exists('approval_google_chat_send_message')) require_once __DIR__ . '/../approval/google_chat_helpers.php';
+        $st = $pdo->prepare("SELECT id, name, email, department, google_chat_dm_space_name FROM employees WHERE is_active = 1 AND google_chat_enabled = 1 AND google_chat_dm_space_name IS NOT NULL AND google_chat_dm_space_name <> '' AND TRIM(department) IN ('관리', '관리부') ORDER BY id ASC");
+        $st->execute();
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!$rows || count($rows) === 0) {
+            error_log('[attendance_chat_notify] no management department receivers');
+            return;
+        }
+        foreach ($rows as $row) {
+            $receiverId = isset($row['id']) ? (int)$row['id'] : null;
+            $receiverName = isset($row['name']) ? (string)$row['name'] : '';
+            $receiverEmail = isset($row['email']) ? (string)$row['email'] : '';
+            $spaceName = isset($row['google_chat_dm_space_name']) ? trim((string)$row['google_chat_dm_space_name']) : '';
+            if ($spaceName === '') continue;
+
+            $ok = approval_google_chat_send_message($pdo, $spaceName, $messageText);
+            $lastError = function_exists('approval_google_chat_get_last_error') ? approval_google_chat_get_last_error() : '';
+            if ($ok) {
+                cpms_google_chat_log_notification($pdo, array('source_type'=>$sourceType,'source_id'=>$sourceId,'event_type'=>$eventType,'receiver_employee_id'=>$receiverId,'receiver_name'=>$receiverName,'receiver_email'=>$receiverEmail,'dm_space_name'=>$spaceName,'message_text'=>$messageText,'send_status'=>'SUCCESS','error_message'=>null,'sent_at'=>date('Y-m-d H:i:s')));
+            } else {
+                cpms_google_chat_log_notification($pdo, array('source_type'=>$sourceType,'source_id'=>$sourceId,'event_type'=>$eventType,'receiver_employee_id'=>$receiverId,'receiver_name'=>$receiverName,'receiver_email'=>$receiverEmail,'dm_space_name'=>$spaceName,'message_text'=>$messageText,'send_status'=>'FAILED','error_message'=>$lastError,'sent_at'=>null));
+            }
+        }
+    } catch (Exception $e) {
+        error_log('[attendance_chat_notify] ' . $e->getMessage());
+    }
+}
+}
