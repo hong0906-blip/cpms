@@ -14,6 +14,32 @@
  */
 
 // 태스크 목록
+if (!function_exists('cpms_gantt_unit_price_value')) {
+function cpms_gantt_unit_price_value($row) {
+    $unitPrice = (isset($row['unit_price']) && is_numeric((string)$row['unit_price'])) ? (float)$row['unit_price'] : 0.0;
+    if (abs($unitPrice) > 0.0001) return $unitPrice;
+    $material = (isset($row['material_unit_price']) && is_numeric((string)$row['material_unit_price'])) ? (float)$row['material_unit_price'] : 0.0;
+    $labor = (isset($row['labor_unit_price']) && is_numeric((string)$row['labor_unit_price'])) ? (float)$row['labor_unit_price'] : 0.0;
+    $expense = (isset($row['expense_unit_price']) && is_numeric((string)$row['expense_unit_price'])) ? (float)$row['expense_unit_price'] : 0.0;
+    return $material + $labor + $expense;
+}}
+
+if (!function_exists('cpms_gantt_column_exists')) {
+function cpms_gantt_column_exists($pdo, $table, $column) {
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM `" . $table . "` LIKE :col");
+        $st->bindValue(':col', $column);
+        $st->execute();
+        return $st->fetch() ? true : false;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+$hasGanttMaterialUnitPrice = cpms_gantt_column_exists($pdo, 'cpms_project_unit_prices', 'material_unit_price');
+$hasGanttLaborUnitPrice = cpms_gantt_column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price');
+$hasGanttExpenseUnitPrice = cpms_gantt_column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price');
+
 $tasks = array();
 try {
     $st = $pdo->prepare("SELECT * FROM cpms_schedule_tasks WHERE project_id = :pid ORDER BY sort_order ASC, id ASC");
@@ -48,13 +74,12 @@ try {
     }
 
     if (count($workMap) > 0) {
-        $stWL = $pdo->prepare("
-            SELECT l.work_id, l.unit_price_id, l.planned_qty, u.item_name, u.unit, u.qty, u.unit_price
-            FROM cpms_work_item_lines l
-            INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id
-            WHERE u.project_id = :pid
-            ORDER BY l.work_id ASC, u.id ASC
-        ");
+        $sqlWL = "SELECT l.work_id, l.unit_price_id, l.planned_qty, u.item_name, u.unit, u.qty, u.unit_price";
+        $sqlWL .= $hasGanttMaterialUnitPrice ? ", u.material_unit_price" : ", NULL AS material_unit_price";
+        $sqlWL .= $hasGanttLaborUnitPrice ? ", u.labor_unit_price" : ", NULL AS labor_unit_price";
+        $sqlWL .= $hasGanttExpenseUnitPrice ? ", u.expense_unit_price" : ", NULL AS expense_unit_price";
+        $sqlWL .= " FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id WHERE u.project_id = :pid ORDER BY l.work_id ASC, u.id ASC";
+        $stWL = $pdo->prepare($sqlWL);
         $stWL->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
         $stWL->execute();
         $lineRows = $stWL->fetchAll();
@@ -64,7 +89,7 @@ try {
                 if ($wid <= 0 || !isset($workDetailMap[$wid])) continue;
                 $qtyRaw = (isset($lr['planned_qty']) && $lr['planned_qty'] !== null && $lr['planned_qty'] !== '') ? $lr['planned_qty'] : $lr['qty'];
                 $qtyUsed = is_numeric((string)$qtyRaw) ? (float)$qtyRaw : 0;
-                $unitPrice = (isset($lr['unit_price']) && is_numeric((string)$lr['unit_price'])) ? (float)$lr['unit_price'] : 0;
+                $unitPrice = cpms_gantt_unit_price_value($lr);
                 $lineAmount = $qtyUsed * $unitPrice;
                 $workDetailMap[$wid]['lines'][] = array(
                     'item_name' => isset($lr['item_name']) ? (string)$lr['item_name'] : '',
@@ -91,14 +116,12 @@ $taskItemMap = array();
 $taskItemDoneMap = array();
 try {
     $workLineMap = array();
-    $stLine = $pdo->prepare("
-        SELECT wil.work_id, wil.unit_price_id, wil.planned_qty,
-               upl.item_name, upl.unit, upl.qty AS contract_qty, upl.unit_price
-        FROM cpms_work_item_lines wil
-        INNER JOIN cpms_project_unit_prices upl ON upl.id = wil.unit_price_id
-        WHERE upl.project_id = :pid
-        ORDER BY wil.work_id ASC, upl.id ASC
-    ");
+    $sqlLine = "SELECT wil.work_id, wil.unit_price_id, wil.planned_qty, upl.item_name, upl.unit, upl.qty AS contract_qty, upl.unit_price";
+    $sqlLine .= $hasGanttMaterialUnitPrice ? ", upl.material_unit_price" : ", NULL AS material_unit_price";
+    $sqlLine .= $hasGanttLaborUnitPrice ? ", upl.labor_unit_price" : ", NULL AS labor_unit_price";
+    $sqlLine .= $hasGanttExpenseUnitPrice ? ", upl.expense_unit_price" : ", NULL AS expense_unit_price";
+    $sqlLine .= " FROM cpms_work_item_lines wil INNER JOIN cpms_project_unit_prices upl ON upl.id = wil.unit_price_id WHERE upl.project_id = :pid ORDER BY wil.work_id ASC, upl.id ASC";
+    $stLine = $pdo->prepare($sqlLine);
     $stLine->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
     $stLine->execute();
     $lineRows = $stLine->fetchAll();

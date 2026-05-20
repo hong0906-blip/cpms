@@ -11,7 +11,8 @@ function cpms_project_unit_price_lang($key) {
             'unit_price' => json_decode('"\uB2E8\uAC00"'),
             'amount' => json_decode('"\uAE08\uC561"'),
             'material' => json_decode('"\uC7AC\uB8CC\uBE44"'),
-            'material_alt' => json_decode('"\uC790\uC7AC"'),
+            'material_alt' => json_decode('"\uC790\uC7AC\uBE44"'),
+            'material_price' => json_decode('"\uC790\uC7AC\uB2E8\uAC00"'),
             'labor' => json_decode('"\uB178\uBB34\uBE44"'),
             'labor_alt' => json_decode('"\uB178\uBB34"'),
             'expense' => json_decode('"\uACBD\uBE44"'),
@@ -392,7 +393,7 @@ function cpms_project_unit_price_segment_end($matrix, $row, $startCol, $maxCol, 
 
 if (!function_exists('cpms_project_unit_price_material_keys')) {
 function cpms_project_unit_price_material_keys() {
-    return array(cpms_project_unit_price_lang('material'), cpms_project_unit_price_lang('material_alt'));
+    return array(cpms_project_unit_price_lang('material'), cpms_project_unit_price_lang('material_alt'), cpms_project_unit_price_lang('material_price'));
 }}
 
 if (!function_exists('cpms_project_unit_price_labor_keys')) {
@@ -430,7 +431,7 @@ function cpms_project_unit_price_find_flat_group($matrix, $maxRow, $maxCol, $hea
         $materialCol = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_material_keys(), false);
         $laborCol = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_labor_keys(), false);
         $expenseCol = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_expense_keys(), false);
-        if ($materialCol > 0 && $laborCol > 0 && $expenseCol > 0) {
+        if ($materialCol > 0 && $laborCol > 0 && $expenseCol > 0 && $materialCol !== $laborCol && $materialCol !== $expenseCol && $laborCol !== $expenseCol) {
             $minCol = min($materialCol, $laborCol, $expenseCol);
             $maxDetailCol = max($materialCol, $laborCol, $expenseCol);
             $excelTotalCol = cpms_project_unit_price_find_detail_col($matrix, $r, $minCol, $maxCol, cpms_project_unit_price_total_keys(), false);
@@ -484,7 +485,7 @@ function cpms_project_unit_price_find_unit_group($matrix, $maxRow, $maxCol, $hea
                 $materialCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $startCol, $searchEndCol, cpms_project_unit_price_material_keys(), false);
                 $laborCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $startCol, $searchEndCol, cpms_project_unit_price_labor_keys(), false);
                 $expenseCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $startCol, $searchEndCol, cpms_project_unit_price_expense_keys(), false);
-                if ($materialCol > 0 && $laborCol > 0 && $expenseCol > 0) {
+                if ($materialCol > 0 && $laborCol > 0 && $expenseCol > 0 && $materialCol !== $laborCol && $materialCol !== $expenseCol && $laborCol !== $expenseCol) {
                     $excelTotalCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $startCol, $searchEndCol, cpms_project_unit_price_total_keys(), false);
                     $amountTotalCol = 0;
                     if ($amountStart > 0) {
@@ -697,14 +698,15 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
         $materialUnitPrice = ($materialParsed === null) ? 0.0 : $materialParsed;
         $laborUnitPrice = ($laborParsed === null) ? 0.0 : $laborParsed;
         $expenseUnitPrice = ($expenseParsed === null) ? 0.0 : $expenseParsed;
-        $unitPrice = $materialUnitPrice + $laborUnitPrice + $expenseUnitPrice;
+        $calculatedUnitPrice = $materialUnitPrice + $laborUnitPrice + $expenseUnitPrice;
         $excelUnitPriceTotal = cpms_project_unit_price_number_parse($excelTotalRaw);
+        $unitPrice = ($excelUnitPriceTotal !== null) ? $excelUnitPriceTotal : $calculatedUnitPrice;
         $amount = cpms_project_unit_price_number_parse($amountRaw);
 
         if ($excelUnitPriceTotal === null) {
             $validationCode = 'missing';
             $validationText = cpms_project_unit_price_lang('validation_missing');
-        } else if (abs($excelUnitPriceTotal - $unitPrice) < 0.0001) {
+        } else if (abs($excelUnitPriceTotal - $calculatedUnitPrice) < 0.0001) {
             $validationCode = 'ok';
             $validationText = cpms_project_unit_price_lang('validation_ok');
         } else {
@@ -726,6 +728,7 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
             'expense_unit_price' => $expenseUnitPrice,
             'unit_price' => $unitPrice,
             'total_unit_price' => $unitPrice,
+            'calculated_unit_price' => $calculatedUnitPrice,
             'excel_unit_price_total' => $excelUnitPriceTotal,
             'amount' => $amount,
             'is_safety' => $isSafety,

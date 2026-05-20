@@ -103,6 +103,15 @@ function cpms_contract_upload_build_data($row, $columns) {
         'is_safety' => isset($row['is_safety']) ? (int)$row['is_safety'] : 0,
         'remark' => isset($row['remark']) ? trim((string)$row['remark']) : ''
     );
+    $partsTotal = 0.0;
+    foreach (array('material_unit_price', 'labor_unit_price', 'expense_unit_price') as $partColumn) {
+        if (isset($source[$partColumn]) && is_numeric((string)$source[$partColumn])) {
+            $partsTotal += (float)$source[$partColumn];
+        }
+    }
+    if ((!isset($source['unit_price']) || $source['unit_price'] === null || $source['unit_price'] === '' || (is_numeric((string)$source['unit_price']) && abs((float)$source['unit_price']) < 0.0001)) && abs($partsTotal) > 0.0001) {
+        $source['unit_price'] = $partsTotal;
+    }
     $data = array();
     foreach ($source as $column => $value) {
         if (isset($columns[$column])) $data[$column] = $value;

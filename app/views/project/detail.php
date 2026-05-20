@@ -6,11 +6,20 @@ if (!function_exists('cpms_format_qty0')) {
 function cpms_format_qty0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format(round((float)$v), 0); }
 }
 if (!function_exists('cpms_format_price1')) {
-function cpms_format_price1($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format((float)$v, 1); }
+function cpms_format_price1($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format(round((float)$v), 0); }
 }
 if (!function_exists('cpms_format_amount0')) {
 function cpms_format_amount0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format(round((float)$v), 0); }
 }
+if (!function_exists('cpms_project_detail_unit_price_value')) {
+function cpms_project_detail_unit_price_value($row) {
+    $unitPrice = (isset($row['unit_price']) && is_numeric((string)$row['unit_price'])) ? (float)$row['unit_price'] : 0.0;
+    if (abs($unitPrice) > 0.0001) return $unitPrice;
+    $material = (isset($row['material_unit_price']) && is_numeric((string)$row['material_unit_price'])) ? (float)$row['material_unit_price'] : 0.0;
+    $labor = (isset($row['labor_unit_price']) && is_numeric((string)$row['labor_unit_price'])) ? (float)$row['labor_unit_price'] : 0.0;
+    $expense = (isset($row['expense_unit_price']) && is_numeric((string)$row['expense_unit_price'])) ? (float)$row['expense_unit_price'] : 0.0;
+    return $material + $labor + $expense;
+}}
 
 $pdo = Db::pdo();
 if (!$pdo) {
@@ -370,9 +379,10 @@ if (is_file($contractMetaFile)) {
                         <th class="px-3 py-2 font-extrabold">규격</th>
                         <th class="px-3 py-2 font-extrabold">단위</th>
                         <th class="px-3 py-2 font-extrabold">기본수량</th>
-                        <th class="px-3 py-2 font-extrabold">재료비</th>
-                        <th class="px-3 py-2 font-extrabold">노무비</th>
-                        <th class="px-3 py-2 font-extrabold">경비</th>
+                        <th class="px-3 py-2 font-extrabold">자재단가</th>
+                        <th class="px-3 py-2 font-extrabold">노무단가</th>
+                        <th class="px-3 py-2 font-extrabold">경비단가</th>
+                        <th class="px-3 py-2 font-extrabold">안전단가</th>
                         <th class="px-3 py-2 font-extrabold">합계단가</th>
                         <th class="px-3 py-2 font-extrabold">안전항목</th>
                         <th class="px-3 py-2 font-extrabold">비고</th>
@@ -389,7 +399,8 @@ if (is_file($contractMetaFile)) {
                             <td class="px-3 py-2"><?php echo cpms_format_price1(isset($row['material_unit_price']) ? $row['material_unit_price'] : ''); ?></td>
                             <td class="px-3 py-2"><?php echo cpms_format_price1(isset($row['labor_unit_price']) ? $row['labor_unit_price'] : ''); ?></td>
                             <td class="px-3 py-2"><?php echo cpms_format_price1(isset($row['expense_unit_price']) ? $row['expense_unit_price'] : ''); ?></td>
-                            <td class="px-3 py-2"><?php echo cpms_format_price1($row['unit_price']); ?></td>
+                            <td class="px-3 py-2"><?php echo cpms_format_price1(isset($row['safety_unit_price']) ? $row['safety_unit_price'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo cpms_format_price1(cpms_project_detail_unit_price_value($row)); ?></td>
                             <td class="px-3 py-2">
                                 <form method="post" action="<?php echo h(base_url()); ?>/?r=project/unit_price_toggle_safety" style="margin:0;">
                                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">

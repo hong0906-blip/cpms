@@ -400,7 +400,7 @@ function status_badge_class($status) {
             appendCell(formatPrice1(fieldValue(row, 'material_unit_price')));
             appendCell(formatPrice1(fieldValue(row, 'labor_unit_price')));
             appendCell(formatPrice1(fieldValue(row, 'expense_unit_price')));
-            appendCell(formatPrice1(fieldValue(row, 'total_unit_price')));
+            appendCell(formatPrice1(fieldValue(row, 'calculated_unit_price') || fieldValue(row, 'total_unit_price')));
             appendCell(formatPrice1(fieldValue(row, 'excel_unit_price_total')));
             appendCell(row.unit_price_validation_text || '');
             tbody.appendChild(tr);

@@ -183,6 +183,11 @@ try {
                     if ($unit === '') continue;
                     $qty = cpms_project_save_number_or_null(isset($r['qty']) ? $r['qty'] : null);
                     $unitPrice = cpms_project_save_number_or_null(isset($r['unit_price']) ? $r['unit_price'] : (isset($r['total_unit_price']) ? $r['total_unit_price'] : null));
+                    $materialUnitPrice = cpms_project_save_number_or_null(isset($r['material_unit_price']) ? $r['material_unit_price'] : null);
+                    $laborUnitPrice = cpms_project_save_number_or_null(isset($r['labor_unit_price']) ? $r['labor_unit_price'] : null);
+                    $expenseUnitPrice = cpms_project_save_number_or_null(isset($r['expense_unit_price']) ? $r['expense_unit_price'] : null);
+                    $partsUnitPrice = (float)$materialUnitPrice + (float)$laborUnitPrice + (float)$expenseUnitPrice;
+                    if (($unitPrice === null || abs((float)$unitPrice) < 0.0001) && abs($partsUnitPrice) > 0.0001) $unitPrice = $partsUnitPrice;
                     if ($qty === null || $unitPrice === null) continue;
 
                     $values = array(
@@ -190,9 +195,9 @@ try {
                         'spec' => $spec,
                         'unit' => $unit,
                         'qty' => $qty,
-                        'material_unit_price' => cpms_project_save_number_or_null(isset($r['material_unit_price']) ? $r['material_unit_price'] : null),
-                        'labor_unit_price' => cpms_project_save_number_or_null(isset($r['labor_unit_price']) ? $r['labor_unit_price'] : null),
-                        'expense_unit_price' => cpms_project_save_number_or_null(isset($r['expense_unit_price']) ? $r['expense_unit_price'] : null),
+                        'material_unit_price' => $materialUnitPrice,
+                        'labor_unit_price' => $laborUnitPrice,
+                        'expense_unit_price' => $expenseUnitPrice,
                         'unit_price' => $unitPrice,
                         'amount' => cpms_project_save_number_or_null(isset($r['amount']) ? $r['amount'] : null),
                         'source_row' => isset($r['source_row']) ? (int)$r['source_row'] : null,

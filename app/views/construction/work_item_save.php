@@ -30,11 +30,26 @@ try {
         $wid = (int)$pdo->lastInsertId();
     }
     if ($wid > 0) {
+        $oldPlannedMap = array();
+        try {
+            $stOldLines = $pdo->prepare("SELECT unit_price_id, planned_qty FROM cpms_work_item_lines WHERE work_id = :wid");
+            $stOldLines->bindValue(':wid', $wid, PDO::PARAM_INT);
+            $stOldLines->execute();
+            $oldLines = $stOldLines->fetchAll(PDO::FETCH_ASSOC);
+            if (is_array($oldLines)) {
+                foreach ($oldLines as $oldLine) {
+                    $oldUid = isset($oldLine['unit_price_id']) ? (int)$oldLine['unit_price_id'] : 0;
+                    if ($oldUid > 0) $oldPlannedMap[$oldUid] = isset($oldLine['planned_qty']) ? $oldLine['planned_qty'] : null;
+                }
+            }
+        } catch (Exception $eOld) {
+            $oldPlannedMap = array();
+        }
         $pdo->prepare("DELETE FROM cpms_work_item_lines WHERE work_id = :wid")->execute(array(':wid' => $wid));
         $ins = $pdo->prepare("INSERT INTO cpms_work_item_lines(work_id, unit_price_id, planned_qty, note, created_at) VALUES(:wid,:uid,:pq,:note,NOW())");
         foreach ($selected as $uidRaw) {
             $uid = (int)$uidRaw; if ($uid <= 0) continue;
-            $pqRaw = isset($plannedMap[$uid]) ? trim((string)$plannedMap[$uid]) : '';
+            $pqRaw = isset($plannedMap[$uid]) ? trim((string)$plannedMap[$uid]) : (isset($oldPlannedMap[$uid]) ? trim((string)$oldPlannedMap[$uid]) : '');
             $pq = ($pqRaw !== '' && is_numeric($pqRaw)) ? (float)$pqRaw : null;
             $ins->bindValue(':wid', $wid, PDO::PARAM_INT);
             $ins->bindValue(':uid', $uid, PDO::PARAM_INT);

@@ -14,28 +14,6 @@ if (!$pdo) {
     return;
 }
 
-if (!function_exists('cpms_work_normalize_unit')) {
-    function cpms_work_normalize_unit($unit) {
-        $unit = trim((string)$unit);
-        if ($unit === '') return '';
-        $unit = preg_replace('/\s+/u', '', $unit);
-        $unit = str_replace('.', '', $unit);
-        $unit = strtoupper($unit);
-        return trim((string)$unit);
-    }
-}
-
-if (!function_exists('cpms_work_is_no_multiply_unit')) {
-    function cpms_work_is_no_multiply_unit($unit) {
-        static $noMultiplyUnits = null;
-        if ($noMultiplyUnits === null) {
-            $noMultiplyUnits = array('EA' => true, 'SET' => true, '조' => true, '본' => true);
-        }
-        $normalized = cpms_work_normalize_unit($unit);
-        return isset($noMultiplyUnits[$normalized]);
-    }
-}
-
 if (!function_exists('cpms_work_column_exists')) {
     function cpms_work_column_exists($pdo, $table, $column) {
         try {
@@ -61,7 +39,18 @@ if (!function_exists('cpms_work_format_price1')) {
     function cpms_work_format_price1($value) {
         if ($value === null || $value === '') return '';
         if (!is_numeric((string)$value)) return h((string)$value);
-        return number_format((float)$value, 1);
+        return number_format(round((float)$value), 0);
+    }
+}
+
+if (!function_exists('cpms_work_unit_price_value')) {
+    function cpms_work_unit_price_value($row) {
+        $unitPrice = (isset($row['unit_price']) && is_numeric((string)$row['unit_price'])) ? (float)$row['unit_price'] : 0.0;
+        if (abs($unitPrice) > 0.0001) return $unitPrice;
+        $material = (isset($row['material_unit_price']) && is_numeric((string)$row['material_unit_price'])) ? (float)$row['material_unit_price'] : 0.0;
+        $labor = (isset($row['labor_unit_price']) && is_numeric((string)$row['labor_unit_price'])) ? (float)$row['labor_unit_price'] : 0.0;
+        $expense = (isset($row['expense_unit_price']) && is_numeric((string)$row['expense_unit_price'])) ? (float)$row['expense_unit_price'] : 0.0;
+        return $material + $labor + $expense;
     }
 }
 
@@ -69,6 +58,9 @@ $workItems = array();
 $workTotals = array();
 $unitPrices = array();
 $lineCountByWork = array();
+$hasMaterialUnitPrice = false;
+$hasLaborUnitPrice = false;
+$hasExpenseUnitPrice = false;
 
 try {
     $st = $pdo->prepare("SELECT * FROM cpms_work_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY sort_order ASC, id ASC");
@@ -84,7 +76,7 @@ try {
     $hasMaterialUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'material_unit_price');
     $hasLaborUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price');
     $hasExpenseUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price');
-    $sqlUnit = "SELECT id, item_name, unit, qty, unit_price";
+    $sqlUnit = "SELECT id, item_name, spec, unit, qty, unit_price";
     $sqlUnit .= $hasMaterialUnitPrice ? ", material_unit_price" : ", NULL AS material_unit_price";
     $sqlUnit .= $hasLaborUnitPrice ? ", labor_unit_price" : ", NULL AS labor_unit_price";
     $sqlUnit .= $hasExpenseUnitPrice ? ", expense_unit_price" : ", NULL AS expense_unit_price";
@@ -100,7 +92,12 @@ try {
 }
 
 try {
-    $stL = $pdo->prepare("SELECT l.work_id, l.unit_price_id, l.planned_qty, u.item_name, u.unit, u.qty, u.unit_price FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id WHERE u.project_id = :pid ORDER BY l.work_id ASC, u.id ASC");
+    $lineSelect = "SELECT l.work_id, l.unit_price_id, l.planned_qty, u.item_name, u.unit, u.qty, u.unit_price";
+    $lineSelect .= $hasMaterialUnitPrice ? ", u.material_unit_price" : ", NULL AS material_unit_price";
+    $lineSelect .= $hasLaborUnitPrice ? ", u.labor_unit_price" : ", NULL AS labor_unit_price";
+    $lineSelect .= $hasExpenseUnitPrice ? ", u.expense_unit_price" : ", NULL AS expense_unit_price";
+    $lineSelect .= " FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id WHERE u.project_id = :pid ORDER BY l.work_id ASC, u.id ASC";
+    $stL = $pdo->prepare($lineSelect);
     $stL->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
     $stL->execute();
     $lineRows = $stL->fetchAll(PDO::FETCH_ASSOC);
@@ -111,12 +108,10 @@ try {
             if (!isset($lineCountByWork[$wid])) $lineCountByWork[$wid] = 0;
             $lineCountByWork[$wid]++;
 
-            // 매출 단위별 곱하기 규칙(EA/SET/조/본 제외): 작업탭 합계도 동일 계산식 적용            
             $qtyRaw = isset($lr['planned_qty']) && $lr['planned_qty'] !== null && $lr['planned_qty'] !== '' ? $lr['planned_qty'] : $lr['qty'];
             $qty = is_numeric((string)$qtyRaw) ? (float)$qtyRaw : 0.0;
-            $unitPrice = isset($lr['unit_price']) && is_numeric((string)$lr['unit_price']) ? (float)$lr['unit_price'] : 0.0;
-            $unitRaw = isset($lr['unit']) ? (string)$lr['unit'] : '';
-            $lineAmount = cpms_work_is_no_multiply_unit($unitRaw) ? $unitPrice : ($qty * $unitPrice);
+            $unitPrice = cpms_work_unit_price_value($lr);
+            $lineAmount = $qty * $unitPrice;
             if (!isset($workTotals[$wid])) $workTotals[$wid] = 0.0;
             $workTotals[$wid] += $lineAmount;
         }
@@ -159,8 +154,8 @@ if ($editingId > 0) {
         </div>
     </div>
 
-    <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="border border-gray-200 rounded-2xl p-4">
+    <div class="mt-6 grid grid-cols-1 xl:grid-cols-12 gap-6">
+        <div class="xl:col-span-4 border border-gray-200 rounded-2xl p-4">
             <div class="text-lg font-extrabold mb-3">작업 목록</div>
             <div class="overflow-auto max-h-[560px]">
                 <table class="w-full text-sm border-collapse">
@@ -203,7 +198,7 @@ if ($editingId > 0) {
             </div>
         </div>
 
-        <div class="border border-gray-200 rounded-2xl p-4">
+        <div class="xl:col-span-8 border border-gray-200 rounded-2xl p-4">
             <div class="text-lg font-extrabold mb-1"><?php echo $editingRow ? '작업 수정' : '작업 추가'; ?></div>
             <div class="text-xs text-gray-500 mb-3">변경 지점 주석: 작업내용 레이어 추가</div>
             <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/work_item_save" class="space-y-3">
@@ -222,39 +217,33 @@ if ($editingId > 0) {
 
                 <div>
                     <div class="text-xs font-bold text-gray-600 mb-2">내역서 항목 묶기 (선택)</div>
-                    <div class="max-h-[280px] overflow-auto border border-gray-200 rounded-xl">
+                    <div class="max-h-[420px] overflow-auto border border-gray-200 rounded-xl">
                         <table class="w-full text-xs border-collapse">
                             <thead class="bg-gray-50 sticky top-0">
                             <tr>
                                 <th class="p-2 border text-center">선택</th>
                                 <th class="p-2 border text-left">항목명</th>
+                                <th class="p-2 border text-left">규격</th>
                                 <th class="p-2 border text-right">기본수량</th>
-                                <th class="p-2 border text-right">재료비</th>
-                                <th class="p-2 border text-right">노무비</th>
-                                <th class="p-2 border text-right">경비</th>
                                 <th class="p-2 border text-right">단가계</th>
-                                <th class="p-2 border text-right">최종 계획수량</th>
                             </tr>
                             </thead>
                             <tbody>
                             <?php if (count($unitPrices) === 0): ?>
-                                <tr><td colspan="8" class="p-2 border text-center text-gray-500">내역서 항목이 없습니다.</td></tr>
+                                <tr><td colspan="5" class="p-2 border text-center text-gray-500">내역서 항목이 없습니다.</td></tr>
                             <?php else: ?>
                                 <?php foreach ($unitPrices as $u): ?>
                                     <?php
                                     $uid = (int)$u['id'];
                                     $sel = isset($editingLineMap[$uid]);
-                                    $planned = $sel ? (string)$editingLineMap[$uid]['planned_qty'] : '';
+                                    $unitPriceDisplay = cpms_work_unit_price_value($u);
                                     ?>
                                     <tr>
                                         <td class="p-2 border text-center"><input type="checkbox" name="selected_unit_price_ids[]" value="<?php echo $uid; ?>" <?php echo $sel ? 'checked' : ''; ?>></td>
                                         <td class="p-2 border"><?php echo h($u['item_name']); ?></td>
+                                        <td class="p-2 border"><?php echo h(isset($u['spec']) ? $u['spec'] : ''); ?></td>
                                         <td class="p-2 border text-right"><?php echo cpms_work_format_qty0($u['qty']); ?> <?php echo h($u['unit']); ?></td>
-                                        <td class="p-2 border text-right"><?php echo cpms_work_format_price1(isset($u['material_unit_price']) ? $u['material_unit_price'] : ''); ?></td>
-                                        <td class="p-2 border text-right"><?php echo cpms_work_format_price1(isset($u['labor_unit_price']) ? $u['labor_unit_price'] : ''); ?></td>
-                                        <td class="p-2 border text-right"><?php echo cpms_work_format_price1(isset($u['expense_unit_price']) ? $u['expense_unit_price'] : ''); ?></td>
-                                        <td class="p-2 border text-right"><?php echo cpms_work_format_price1($u['unit_price']); ?></td>
-                                        <td class="p-2 border text-right"><input type="number" step="0.0001" min="0" name="planned_qty_map[<?php echo $uid; ?>]" value="<?php echo h($planned); ?>" class="w-24 px-2 py-1 border border-gray-200 rounded"></td>
+                                        <td class="p-2 border text-right"><?php echo cpms_work_format_price1($unitPriceDisplay); ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php endif; ?>
