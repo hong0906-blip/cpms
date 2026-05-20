@@ -186,10 +186,6 @@ if ($route === 'project/unit_price_import_apply') {
     exit;
 }
 
-if ($route === 'project/unit_price_update_preview') {
-    require_once __DIR__ . '/../app/views/project/unit_price_update_preview.php';
-    exit;
-}
 if ($route === 'project/header_mapping_save') {
     require_once __DIR__ . '/../app/views/project/header_mapping_save.php';
     exit;

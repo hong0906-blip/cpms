@@ -36,6 +36,35 @@ if (!function_exists('cpms_work_is_no_multiply_unit')) {
     }
 }
 
+if (!function_exists('cpms_work_column_exists')) {
+    function cpms_work_column_exists($pdo, $table, $column) {
+        try {
+            $st = $pdo->prepare("SHOW COLUMNS FROM `" . $table . "` LIKE :col");
+            $st->bindValue(':col', $column);
+            $st->execute();
+            return $st->fetch() ? true : false;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('cpms_work_format_qty0')) {
+    function cpms_work_format_qty0($value) {
+        if ($value === null || $value === '') return '';
+        if (!is_numeric((string)$value)) return h((string)$value);
+        return number_format(round((float)$value), 0);
+    }
+}
+
+if (!function_exists('cpms_work_format_price1')) {
+    function cpms_work_format_price1($value) {
+        if ($value === null || $value === '') return '';
+        if (!is_numeric((string)$value)) return h((string)$value);
+        return number_format((float)$value, 1);
+    }
+}
+
 $workItems = array();
 $workTotals = array();
 $unitPrices = array();
@@ -51,7 +80,11 @@ try {
 }
 
 try {
-    $stU = $pdo->prepare("SELECT id, item_name, unit, qty, unit_price FROM cpms_project_unit_prices WHERE project_id = :pid ORDER BY item_name ASC, id ASC LIMIT 2000");
+    $hasIsActive = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'is_active');
+    $sqlUnit = "SELECT id, item_name, unit, qty, unit_price FROM cpms_project_unit_prices WHERE project_id = :pid";
+    if ($hasIsActive) $sqlUnit .= " AND (is_active = 1 OR is_active IS NULL)";
+    $sqlUnit .= " ORDER BY id ASC LIMIT 2000";
+    $stU = $pdo->prepare($sqlUnit);
     $stU->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
     $stU->execute();
     $unitPrices = $stU->fetchAll(PDO::FETCH_ASSOC);
@@ -60,7 +93,7 @@ try {
 }
 
 try {
-    $stL = $pdo->prepare("SELECT l.work_id, l.unit_price_id, l.planned_qty, u.item_name, u.unit, u.qty, u.unit_price FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id WHERE u.project_id = :pid");
+    $stL = $pdo->prepare("SELECT l.work_id, l.unit_price_id, l.planned_qty, u.item_name, u.unit, u.qty, u.unit_price FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id WHERE u.project_id = :pid ORDER BY l.work_id ASC, u.id ASC");
     $stL->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
     $stL->execute();
     $lineRows = $stL->fetchAll(PDO::FETCH_ASSOC);
@@ -206,8 +239,8 @@ if ($editingId > 0) {
                                     <tr>
                                         <td class="p-2 border text-center"><input type="checkbox" name="selected_unit_price_ids[]" value="<?php echo $uid; ?>" <?php echo $sel ? 'checked' : ''; ?>></td>
                                         <td class="p-2 border"><?php echo h($u['item_name']); ?></td>
-                                        <td class="p-2 border text-right"><?php echo h($u['qty']); ?> <?php echo h($u['unit']); ?></td>
-                                        <td class="p-2 border text-right"><?php echo number_format((float)$u['unit_price'], 0); ?></td>
+                                        <td class="p-2 border text-right"><?php echo cpms_work_format_qty0($u['qty']); ?> <?php echo h($u['unit']); ?></td>
+                                        <td class="p-2 border text-right"><?php echo cpms_work_format_price1($u['unit_price']); ?></td>
                                         <td class="p-2 border text-right"><input type="number" step="0.0001" min="0" name="planned_qty_map[<?php echo $uid; ?>]" value="<?php echo h($planned); ?>" class="w-24 px-2 py-1 border border-gray-200 rounded"></td>
                                     </tr>
                                 <?php endforeach; ?>

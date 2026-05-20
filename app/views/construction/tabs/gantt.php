@@ -53,7 +53,7 @@ try {
             FROM cpms_work_item_lines l
             INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id
             WHERE u.project_id = :pid
-            ORDER BY l.work_id ASC, u.item_name ASC
+            ORDER BY l.work_id ASC, u.id ASC
         ");
         $stWL->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
         $stWL->execute();
@@ -97,7 +97,7 @@ try {
         FROM cpms_work_item_lines wil
         INNER JOIN cpms_project_unit_prices upl ON upl.id = wil.unit_price_id
         WHERE upl.project_id = :pid
-        ORDER BY wil.work_id ASC, upl.item_name ASC
+        ORDER BY wil.work_id ASC, upl.id ASC
     ");
     $stLine->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
     $stLine->execute();
