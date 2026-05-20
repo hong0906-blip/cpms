@@ -88,7 +88,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     unit VARCHAR(50) DEFAULT '',
                     qty DECIMAL(18,4) NULL,
                     unit_price DECIMAL(18,2) NULL,
+                    labor_unit_price DECIMAL(18,4) NULL,
+                    material_unit_price DECIMAL(18,4) NULL,
+                    expense_unit_price DECIMAL(18,4) NULL,
+                    safety_unit_price DECIMAL(18,4) NULL,
+                    amount DECIMAL(18,4) NULL,
+                    source_row INT NULL,
+                    import_order INT NULL,
+                    is_safety TINYINT(1) NOT NULL DEFAULT 0,
                     remark VARCHAR(255) DEFAULT '',
+                    is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    updated_at DATETIME NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     KEY idx_project (project_id)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -138,6 +148,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'safety_unit_price')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN safety_unit_price DECIMAL(18,2) NULL AFTER material_unit_price");
                     $added[] = 'safety_unit_price';
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN expense_unit_price DECIMAL(18,4) NULL");
+                    $added[] = 'expense_unit_price';
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'amount')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN amount DECIMAL(18,4) NULL");
+                    $added[] = 'amount';
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'source_row')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN source_row INT NULL");
+                    $added[] = 'source_row';
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'import_order')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN import_order INT NULL");
+                    $added[] = 'import_order';
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'is_safety')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_safety TINYINT(1) NOT NULL DEFAULT 0 AFTER safety_unit_price");

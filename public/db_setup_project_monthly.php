@@ -62,6 +62,24 @@ if (!$pdo) {
             } else {
                 add_result($results, 'COLUMN', 'cpms_project_unit_prices.updated_at', '성공', '이미 존재');
             }
+
+            $unitPriceExtraColumns = array(
+                array('expense_unit_price', 'DECIMAL(18,4) NULL'),
+                array('amount', 'DECIMAL(18,4) NULL'),
+                array('source_row', 'INT NULL'),
+                array('import_order', 'INT NULL')
+            );
+            foreach ($unitPriceExtraColumns as $colDef) {
+                $colName = $colDef[0];
+                $colSql = $colDef[1];
+                $col = $pdo->query("SHOW COLUMNS FROM cpms_project_unit_prices LIKE '" . $colName . "'")->fetch();
+                if (!$col) {
+                    $pdo->exec('ALTER TABLE cpms_project_unit_prices ADD COLUMN ' . $colName . ' ' . $colSql);
+                    add_result($results, 'COLUMN', 'cpms_project_unit_prices.' . $colName, '성공', '추가 완료');
+                } else {
+                    add_result($results, 'COLUMN', 'cpms_project_unit_prices.' . $colName, '성공', '이미 존재');
+                }
+            }
         }
     } catch (Exception $e) {
         add_result($results, 'TABLE', 'cpms_project_unit_prices', '오류', '컬럼 확인/추가 오류: ' . $e->getMessage());

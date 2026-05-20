@@ -264,6 +264,7 @@ function status_badge_class($status) {
 
             <div class="mt-4 text-sm">
               <div id="previewStatus" class="text-gray-600">엑셀 파일을 선택한 뒤 미리보기를 실행해주세요.</div>
+              <pre id="previewDebug" class="mt-3 hidden whitespace-pre-wrap rounded-2xl bg-gray-900 text-gray-50 p-3 text-xs overflow-auto"></pre>
             </div>
 
             <div id="previewWrap" class="mt-4 hidden">
@@ -271,12 +272,17 @@ function status_badge_class($status) {
                 <table class="min-w-full text-sm">
                   <thead class="bg-gray-50 border-b border-gray-100">
                     <tr class="text-left text-gray-600">
+                      <th class="px-3 py-2 font-extrabold">원본행</th>
                       <th class="px-3 py-2 font-extrabold">품명</th>
                       <th class="px-3 py-2 font-extrabold">규격</th>
                       <th class="px-3 py-2 font-extrabold">단위</th>
                       <th class="px-3 py-2 font-extrabold">수량</th>
-                      <th class="px-3 py-2 font-extrabold">합계단가</th>
-                      <th class="px-3 py-2 font-extrabold">금액</th>
+                      <th class="px-3 py-2 font-extrabold">단가 재료비</th>
+                      <th class="px-3 py-2 font-extrabold">단가 노무비</th>
+                      <th class="px-3 py-2 font-extrabold">단가 경비</th>
+                      <th class="px-3 py-2 font-extrabold">계산 단가 계</th>
+                      <th class="px-3 py-2 font-extrabold">엑셀 단가 계</th>
+                      <th class="px-3 py-2 font-extrabold">검증</th>
                     </tr>
                   </thead>
                   <tbody id="previewTbody"></tbody>
@@ -330,6 +336,7 @@ function status_badge_class($status) {
   var fileInput = document.getElementById('unit_price_file');
   var btnPreview = document.getElementById('btnPreview');
   var statusEl = document.getElementById('previewStatus');
+  var debugEl = document.getElementById('previewDebug');
   var wrapEl = document.getElementById('previewWrap');
   var tbody = document.getElementById('previewTbody');
   var tokenEl = document.getElementById('unit_price_token');
@@ -344,6 +351,10 @@ function status_badge_class($status) {
       }
 
       statusEl.textContent = '미리보기를 생성 중입니다...';
+      if (debugEl) {
+        debugEl.classList.add('hidden');
+        debugEl.textContent = '';
+      }
       if (wrapEl) wrapEl.classList.add('hidden');
       if (tbody) tbody.innerHTML = '';
 
@@ -364,6 +375,10 @@ function status_badge_class($status) {
 
           var rows = json.rows || [];
           statusEl.textContent = '미리보기 ' + rows.length + '건이 준비되었습니다.';
+          if (debugEl && window.location.search.indexOf('debug_unit_price=1') !== -1) {
+            debugEl.textContent = JSON.stringify(json.debug || {}, null, 2);
+            debugEl.classList.remove('hidden');
+          }
           if (wrapEl) wrapEl.classList.remove('hidden');
 
           var max = Math.min(rows.length, 80);
@@ -377,12 +392,17 @@ function status_badge_class($status) {
               td.textContent = text;
               tr.appendChild(td);
             }
+            appendCell(fieldValue(row, 'source_row'));
             appendCell(row.item_name || '');
             appendCell(row.spec || '');
             appendCell(row.unit || '');
             appendCell(formatQty0(fieldValue(row, 'qty')));
+            appendCell(formatPrice1(fieldValue(row, 'material_unit_price')));
+            appendCell(formatPrice1(fieldValue(row, 'labor_unit_price')));
+            appendCell(formatPrice1(fieldValue(row, 'expense_unit_price')));
             appendCell(formatPrice1(fieldValue(row, 'total_unit_price')));
-            appendCell(formatAmount0(fieldValue(row, 'amount')));
+            appendCell(formatPrice1(fieldValue(row, 'excel_unit_price_total')));
+            appendCell(row.unit_price_validation_text || '');
             tbody.appendChild(tr);
           }
         })

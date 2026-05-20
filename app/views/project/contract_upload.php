@@ -88,7 +88,7 @@ function cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $orig
 
 if (!function_exists('cpms_contract_upload_build_data')) {
 function cpms_contract_upload_build_data($row, $columns) {
-    $data = array(
+    $source = array(
         'item_name' => isset($row['item_name']) ? trim((string)$row['item_name']) : '',
         'spec' => isset($row['spec']) ? trim((string)$row['spec']) : '',
         'unit' => isset($row['unit']) ? trim((string)$row['unit']) : '',
@@ -96,10 +96,17 @@ function cpms_contract_upload_build_data($row, $columns) {
         'unit_price' => isset($row['unit_price']) ? $row['unit_price'] : null,
         'labor_unit_price' => isset($row['labor_unit_price']) ? $row['labor_unit_price'] : null,
         'material_unit_price' => isset($row['material_unit_price']) ? $row['material_unit_price'] : null,
-        'safety_unit_price' => isset($row['safety_unit_price']) ? $row['safety_unit_price'] : null,
+        'expense_unit_price' => isset($row['expense_unit_price']) ? $row['expense_unit_price'] : null,
+        'amount' => isset($row['amount']) ? $row['amount'] : null,
+        'source_row' => isset($row['source_row']) ? (int)$row['source_row'] : null,
+        'import_order' => isset($row['import_order']) ? (int)$row['import_order'] : null,
         'is_safety' => isset($row['is_safety']) ? (int)$row['is_safety'] : 0,
         'remark' => isset($row['remark']) ? trim((string)$row['remark']) : ''
     );
+    $data = array();
+    foreach ($source as $column => $value) {
+        if (isset($columns[$column])) $data[$column] = $value;
+    }
     if (isset($columns['is_active'])) $data['is_active'] = 1;
     if (isset($columns['updated_at'])) $data['updated_at'] = date('Y-m-d H:i:s');
     return $data;
@@ -136,13 +143,32 @@ function cpms_contract_upload_insert_row($pdo, $projectId, $data) {
 }
 }
 
+if (!function_exists('cpms_contract_upload_update_planned_qty')) {
+function cpms_contract_upload_update_planned_qty($pdo, $unitPriceId, $oldQty, $newQty) {
+    if (!is_numeric((string)$newQty)) return;
+    $params = array(':uid' => (int)$unitPriceId, ':new_qty' => (float)$newQty);
+    $where = "unit_price_id = :uid AND planned_qty IS NULL";
+    if (is_numeric((string)$oldQty)) {
+        $where = "unit_price_id = :uid AND (planned_qty IS NULL OR ABS(planned_qty - :old_qty) < 0.0001)";
+        $params[':old_qty'] = (float)$oldQty;
+    }
+    $sql = "UPDATE cpms_work_item_lines SET planned_qty = :new_qty WHERE " . $where;
+    try {
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+    } catch (Exception $e) {
+        error_log('[contract_upload] planned_qty update failed: ' . $e->getMessage());
+    }
+}
+}
+
 if (!function_exists('cpms_contract_upload_apply_unit_price_update')) {
 function cpms_contract_upload_apply_unit_price_update($pdo, $projectId, $rows) {
     $summary = array('updated' => 0, 'inserted' => 0, 'deactivated' => 0);
 
     $requiredColumns = array('item_name', 'spec', 'unit', 'qty', 'unit_price');
     $availableColumns = array();
-    foreach (array('item_name', 'spec', 'unit', 'qty', 'unit_price', 'labor_unit_price', 'material_unit_price', 'safety_unit_price', 'is_safety', 'remark', 'is_active', 'updated_at') as $column) {
+    foreach (array('item_name', 'spec', 'unit', 'qty', 'unit_price', 'labor_unit_price', 'material_unit_price', 'expense_unit_price', 'amount', 'source_row', 'import_order', 'is_safety', 'remark', 'is_active', 'updated_at') as $column) {
         if (cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', $column)) {
             $availableColumns[$column] = true;
         }
@@ -206,6 +232,7 @@ function cpms_contract_upload_apply_unit_price_update($pdo, $projectId, $rows) {
 
         if ($matchIndex >= 0 && isset($activeRows[$matchIndex])) {
             $usedIndexes[$matchIndex] = 1;
+            cpms_contract_upload_update_planned_qty($pdo, (int)$activeRows[$matchIndex]['id'], isset($activeRows[$matchIndex]['qty']) ? $activeRows[$matchIndex]['qty'] : null, isset($data['qty']) ? $data['qty'] : null);
             cpms_contract_upload_update_row($pdo, $projectId, (int)$activeRows[$matchIndex]['id'], $data);
             $summary['updated']++;
         } else {

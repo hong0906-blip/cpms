@@ -109,12 +109,24 @@ foreach ($newRows as $nr) {
         $changed = $changed || !cpms_unit_price_update_preview_num_same(isset($or['unit_price']) ? $or['unit_price'] : null, isset($nr['unit_price']) ? $nr['unit_price'] : null);
         $changed = $changed || !cpms_unit_price_update_preview_num_same(isset($or['labor_unit_price']) ? $or['labor_unit_price'] : null, isset($nr['labor_unit_price']) ? $nr['labor_unit_price'] : null);
         $changed = $changed || !cpms_unit_price_update_preview_num_same(isset($or['material_unit_price']) ? $or['material_unit_price'] : null, isset($nr['material_unit_price']) ? $nr['material_unit_price'] : null);
-        $changed = $changed || !cpms_unit_price_update_preview_num_same(isset($or['safety_unit_price']) ? $or['safety_unit_price'] : null, isset($nr['safety_unit_price']) ? $nr['safety_unit_price'] : null);
+        $changed = $changed || !cpms_unit_price_update_preview_num_same(isset($or['expense_unit_price']) ? $or['expense_unit_price'] : null, isset($nr['expense_unit_price']) ? $nr['expense_unit_price'] : null);
         $changed = $changed || !cpms_unit_price_update_preview_text_same(isset($or['remark']) ? $or['remark'] : '', isset($nr['remark']) ? $nr['remark'] : '');
         $changed = $changed || ((int)(isset($or['is_safety']) ? $or['is_safety'] : 0) !== (int)(isset($nr['is_safety']) ? $nr['is_safety'] : 0));
         if ($changed) $summary['changed']++;
         else $summary['kept']++;
-        array_push($changes, array('status' => ($changed ? '변경' : '유지'), 'old_id' => (int)$or['id'], 'row' => $nr));
+        array_push($changes, array(
+            'status' => ($changed ? '변경' : '유지'),
+            'old_id' => (int)$or['id'],
+            'old_row' => $or,
+            'row' => $nr,
+            'diff' => array(
+                'qty' => array('old' => isset($or['qty']) ? $or['qty'] : null, 'new' => isset($nr['qty']) ? $nr['qty'] : null),
+                'unit_price' => array('old' => isset($or['unit_price']) ? $or['unit_price'] : null, 'new' => isset($nr['unit_price']) ? $nr['unit_price'] : null),
+                'material_unit_price' => array('old' => isset($or['material_unit_price']) ? $or['material_unit_price'] : null, 'new' => isset($nr['material_unit_price']) ? $nr['material_unit_price'] : null),
+                'labor_unit_price' => array('old' => isset($or['labor_unit_price']) ? $or['labor_unit_price'] : null, 'new' => isset($nr['labor_unit_price']) ? $nr['labor_unit_price'] : null),
+                'expense_unit_price' => array('old' => isset($or['expense_unit_price']) ? $or['expense_unit_price'] : null, 'new' => isset($nr['expense_unit_price']) ? $nr['expense_unit_price'] : null)
+            )
+        ));
     } else {
         $summary['inserted']++;
         array_push($changes, array('status' => '신규', 'old_id' => 0, 'row' => $nr));
@@ -147,7 +159,8 @@ $_SESSION['unit_price_update'][$token] = array(
     'created_at' => time(),
     'rows' => $newRows,
     'stored_path' => $tmpStored,
-    'summary' => $summary
+    'summary' => $summary,
+    'debug' => isset($parsed['debug']) ? $parsed['debug'] : array()
 );
 
 cpms_unit_price_update_preview_out(array(
@@ -159,5 +172,6 @@ cpms_unit_price_update_preview_out(array(
     'detected_columns' => isset($parsed['detected_columns']) ? $parsed['detected_columns'] : array(),
     'sheet_name' => isset($parsed['sheet_name']) ? $parsed['sheet_name'] : '',
     'header_end_row' => isset($parsed['header_end_row']) ? (int)$parsed['header_end_row'] : 0,
-    'data_start_row' => isset($parsed['data_start_row']) ? (int)$parsed['data_start_row'] : 0
+    'data_start_row' => isset($parsed['data_start_row']) ? (int)$parsed['data_start_row'] : 0,
+    'debug' => isset($parsed['debug']) ? $parsed['debug'] : array()
 ));

@@ -17,6 +17,27 @@ require_once __DIR__ . '/../../bootstrap.php';
 use App\Core\Auth;
 use App\Core\Db;
 
+if (!function_exists('cpms_project_save_column_exists')) {
+function cpms_project_save_column_exists($pdo, $table, $column) {
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM `" . $table . "` LIKE :col");
+        $st->bindValue(':col', $column);
+        $st->execute();
+        return $st->fetch() ? true : false;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_project_save_number_or_null')) {
+function cpms_project_save_number_or_null($value) {
+    if ($value === null || $value === '') return null;
+    $clean = preg_replace('/[^0-9.\-]/', '', (string)$value);
+    if ($clean === '' || $clean === '-' || $clean === '.' || $clean === '-.') return null;
+    if (!is_numeric($clean)) return null;
+    return (float)$clean;
+}}
+
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
 // 권한: 임원 또는 공무/관리
@@ -136,10 +157,22 @@ try {
             if ($chk && $chk->fetchColumn()) $tableOk = true;
 
             if ($tableOk && count($rows) > 0) {
-                $stUp = $pdo->prepare("
-                    INSERT INTO cpms_project_unit_prices(project_id, item_name, spec, unit, qty, unit_price, remark)
-                    VALUES(:pid, :item, :spec, :unit, :qty, :up, :remark)
-                ");
+                $availableColumns = array();
+                foreach (array('item_name', 'spec', 'unit', 'qty', 'unit_price', 'material_unit_price', 'labor_unit_price', 'expense_unit_price', 'amount', 'source_row', 'import_order', 'remark', 'is_safety') as $column) {
+                    if (cpms_project_save_column_exists($pdo, 'cpms_project_unit_prices', $column)) {
+                        $availableColumns[$column] = true;
+                    }
+                }
+
+                $insertColumns = array('project_id');
+                $insertHolders = array(':project_id');
+                foreach (array('item_name', 'spec', 'unit', 'qty', 'material_unit_price', 'labor_unit_price', 'expense_unit_price', 'unit_price', 'amount', 'source_row', 'import_order', 'remark', 'is_safety') as $column) {
+                    if (isset($availableColumns[$column])) {
+                        array_push($insertColumns, '`' . $column . '`');
+                        array_push($insertHolders, ':' . $column);
+                    }
+                }
+                $stUp = $pdo->prepare("INSERT INTO cpms_project_unit_prices (" . implode(',', $insertColumns) . ") VALUES (" . implode(',', $insertHolders) . ")");
 
                 foreach ($rows as $r) {
                     $item = isset($r['item_name']) ? trim((string)$r['item_name']) : '';
@@ -148,31 +181,31 @@ try {
                     $spec = isset($r['spec']) ? trim((string)$r['spec']) : '';
                     $unit = isset($r['unit']) ? trim((string)$r['unit']) : '';
                     if ($unit === '') continue;
-                    $qtyRaw = isset($r['qty']) ? trim((string)$r['qty']) : '';
-                    $priceRaw = isset($r['unit_price']) ? trim((string)$r['unit_price']) : '';
-                    if ($priceRaw === '' && isset($r['total_unit_price'])) {
-                        $priceRaw = trim((string)$r['total_unit_price']);
-                    }
+                    $qty = cpms_project_save_number_or_null(isset($r['qty']) ? $r['qty'] : null);
+                    $unitPrice = cpms_project_save_number_or_null(isset($r['unit_price']) ? $r['unit_price'] : (isset($r['total_unit_price']) ? $r['total_unit_price'] : null));
+                    if ($qty === null || $unitPrice === null) continue;
 
-                    $qty = null;
-                    if ($qtyRaw !== '') {
-                        $clean = preg_replace('/[^0-9.\-]/', '', $qtyRaw);
-                        if ($clean !== '') $qty = (float)$clean;
-                    }
+                    $values = array(
+                        'item_name' => $item,
+                        'spec' => $spec,
+                        'unit' => $unit,
+                        'qty' => $qty,
+                        'material_unit_price' => cpms_project_save_number_or_null(isset($r['material_unit_price']) ? $r['material_unit_price'] : null),
+                        'labor_unit_price' => cpms_project_save_number_or_null(isset($r['labor_unit_price']) ? $r['labor_unit_price'] : null),
+                        'expense_unit_price' => cpms_project_save_number_or_null(isset($r['expense_unit_price']) ? $r['expense_unit_price'] : null),
+                        'unit_price' => $unitPrice,
+                        'amount' => cpms_project_save_number_or_null(isset($r['amount']) ? $r['amount'] : null),
+                        'source_row' => isset($r['source_row']) ? (int)$r['source_row'] : null,
+                        'import_order' => isset($r['import_order']) ? (int)$r['import_order'] : null,
+                        'remark' => isset($r['remark']) ? trim((string)$r['remark']) : '',
+                        'is_safety' => isset($r['is_safety']) ? (int)$r['is_safety'] : 0
+                    );
 
-                    $unitPrice = null;
-                    if ($priceRaw !== '') {
-                        $clean = preg_replace('/[^0-9.\-]/', '', $priceRaw);
-                        if ($clean !== '') $unitPrice = (float)$clean;
+                    $stUp->bindValue(':project_id', $projectId, PDO::PARAM_INT);
+                    foreach ($values as $column => $value) {
+                        if (!isset($availableColumns[$column])) continue;
+                        $stUp->bindValue(':' . $column, $value);
                     }
-
-                    $stUp->bindValue(':pid', $projectId, PDO::PARAM_INT);
-                    $stUp->bindValue(':item', $item);
-                    $stUp->bindValue(':spec', $spec);
-                    $stUp->bindValue(':unit', $unit);
-                    $stUp->bindValue(':qty', $qty);
-                    $stUp->bindValue(':up', $unitPrice);
-                    $stUp->bindValue(':remark', '');
                     $stUp->execute();
                 }
             }

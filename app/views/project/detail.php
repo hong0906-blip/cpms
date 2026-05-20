@@ -370,9 +370,9 @@ if (is_file($contractMetaFile)) {
                         <th class="px-3 py-2 font-extrabold">규격</th>
                         <th class="px-3 py-2 font-extrabold">단위</th>
                         <th class="px-3 py-2 font-extrabold">기본수량</th>
-                        <th class="px-3 py-2 font-extrabold">자재단가</th>
-                        <th class="px-3 py-2 font-extrabold">노무단가</th>
-                        <th class="px-3 py-2 font-extrabold">안전단가</th>
+                        <th class="px-3 py-2 font-extrabold">재료비</th>
+                        <th class="px-3 py-2 font-extrabold">노무비</th>
+                        <th class="px-3 py-2 font-extrabold">경비</th>
                         <th class="px-3 py-2 font-extrabold">합계단가</th>
                         <th class="px-3 py-2 font-extrabold">안전항목</th>
                         <th class="px-3 py-2 font-extrabold">비고</th>
@@ -388,7 +388,7 @@ if (is_file($contractMetaFile)) {
                             <td class="px-3 py-2"><?php echo cpms_format_qty0($row['qty']); ?></td>
                             <td class="px-3 py-2"><?php echo cpms_format_price1(isset($row['material_unit_price']) ? $row['material_unit_price'] : ''); ?></td>
                             <td class="px-3 py-2"><?php echo cpms_format_price1(isset($row['labor_unit_price']) ? $row['labor_unit_price'] : ''); ?></td>
-                            <td class="px-3 py-2"><?php echo cpms_format_price1(isset($row['safety_unit_price']) ? $row['safety_unit_price'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo cpms_format_price1(isset($row['expense_unit_price']) ? $row['expense_unit_price'] : ''); ?></td>
                             <td class="px-3 py-2"><?php echo cpms_format_price1($row['unit_price']); ?></td>
                             <td class="px-3 py-2">
                                 <form method="post" action="<?php echo h(base_url()); ?>/?r=project/unit_price_toggle_safety" style="margin:0;">
