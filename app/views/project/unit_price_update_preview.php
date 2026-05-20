@@ -155,5 +155,9 @@ cpms_unit_price_update_preview_out(array(
     'token' => $token,
     'changes' => $changes,
     'excluded' => $excluded,
-    'summary' => $summary
+    'summary' => $summary,
+    'detected_columns' => isset($parsed['detected_columns']) ? $parsed['detected_columns'] : array(),
+    'sheet_name' => isset($parsed['sheet_name']) ? $parsed['sheet_name'] : '',
+    'header_end_row' => isset($parsed['header_end_row']) ? (int)$parsed['header_end_row'] : 0,
+    'data_start_row' => isset($parsed['data_start_row']) ? (int)$parsed['data_start_row'] : 0
 ));
