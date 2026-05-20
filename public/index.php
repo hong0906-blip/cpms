@@ -358,6 +358,14 @@ if ($route === 'construction/equipment_usage_save') {
     require_once __DIR__ . '/../app/views/construction/equipment_usage_save.php';
     exit;
 }
+if ($route === 'construction/equipment_gongsu_override_save') {
+    require_once __DIR__ . '/../app/views/construction/equipment_gongsu_override_save.php';
+    exit;
+}
+if ($route === 'construction/equipment_gongsu_override_decide') {
+    require_once __DIR__ . '/../app/views/construction/equipment_gongsu_override_decide.php';
+    exit;
+}
 if ($route === 'construction/equipment_usage_delete') {
     require_once __DIR__ . '/../app/views/construction/equipment_usage_delete.php';
     exit;

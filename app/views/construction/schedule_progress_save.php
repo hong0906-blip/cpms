@@ -8,6 +8,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/schedule_auto_progress_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -88,6 +89,7 @@ if (!$pdo) {
     header('Location: ?r=공사&pid=' . $projectId . '&tab=gantt' . $redirectSuffix);
     exit;
 }
+cpms_schedule_auto_ensure_schema($pdo);
 
 try {
     $st = $pdo->prepare("SELECT id, start_date, end_date FROM cpms_schedule_tasks WHERE id = :tid AND project_id = :pid LIMIT 1");
@@ -268,9 +270,9 @@ try {
         exit;
     }
 
-    $sql = "INSERT INTO cpms_schedule_progress (project_id, task_id, work_date, total_qty, done_qty, created_at)
-            VALUES (:pid, :tid, :wd, :tq, :dq, CURRENT_TIMESTAMP)
-            ON DUPLICATE KEY UPDATE total_qty = VALUES(total_qty), done_qty = VALUES(done_qty), updated_at = CURRENT_TIMESTAMP";
+    $sql = "INSERT INTO cpms_schedule_progress (project_id, task_id, work_date, total_qty, done_qty, is_auto, is_manual, created_at, updated_at)
+            VALUES (:pid, :tid, :wd, :tq, :dq, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON DUPLICATE KEY UPDATE total_qty = VALUES(total_qty), done_qty = VALUES(done_qty), is_auto = 0, is_manual = 1, updated_at = CURRENT_TIMESTAMP";
     $ins = $pdo->prepare($sql);
     $ins->bindValue(':pid', $projectId, \PDO::PARAM_INT);
     $ins->bindValue(':tid', $taskId, \PDO::PARAM_INT);
@@ -282,7 +284,8 @@ try {
     $ins->execute();
 
     $progressId = 0;
-    $stp = $pdo->prepare("SELECT id FROM cpms_schedule_progress WHERE task_id = :tid AND work_date = :wd LIMIT 1");
+    $stp = $pdo->prepare("SELECT id FROM cpms_schedule_progress WHERE project_id = :pid AND task_id = :tid AND work_date = :wd LIMIT 1");
+    $stp->bindValue(':pid', $projectId, \PDO::PARAM_INT);
     $stp->bindValue(':tid', $taskId, \PDO::PARAM_INT);
     $stp->bindValue(':wd', $workDate);
     $stp->execute();

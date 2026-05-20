@@ -7,6 +7,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -114,6 +115,7 @@ function equipment_collect_usage_dates2($usageDates, $text, $ym)
     return array_keys($result);
 }
 $pdo = Db::pdo();
+if ($pdo) cpms_equipment_gongsu_ensure_schema($pdo);
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
 
 try {
@@ -128,7 +130,9 @@ try {
         exit;
     }
 
-    $amount = isset($_POST['amount']) && $_POST['amount'] !== '' ? (float)$_POST['amount'] : (float)$item['base_rate'];
+    $baseRate = (float)$item['base_rate'];
+    $workUnit = 1.00;
+    $amount = $workUnit * $baseRate;
     $dates = equipment_collect_usage_dates2($usageDates, $useDatesText, $ym);
     if (count($dates) <= 0) {
         flash_set('error', '유효한 사용일자가 없습니다.');
@@ -145,15 +149,21 @@ try {
     }
     
     $st = $pdo->prepare("INSERT INTO cpms_equipment_usage
-        (project_id, equipment_id, use_date, amount, memo, created_at)
+        (project_id, equipment_id, use_date, work_unit, base_rate_snapshot, amount, is_manual_unit, memo, created_at)
         VALUES
-        (:pid, :eid, :d, :amt, :memo, :created_at)
-        ON DUPLICATE KEY UPDATE amount = VALUES(amount), memo = VALUES(memo)");
+        (:pid, :eid, :d, :work_unit, :base_rate, :amt, 0, :memo, :created_at)
+        ON DUPLICATE KEY UPDATE
+            work_unit = IF(is_manual_unit = 1, work_unit, VALUES(work_unit)),
+            base_rate_snapshot = IF(is_manual_unit = 1, base_rate_snapshot, VALUES(base_rate_snapshot)),
+            amount = IF(is_manual_unit = 1, amount, VALUES(amount)),
+            memo = VALUES(memo)");
     $now = date('Y-m-d H:i:s');
     foreach ($dates as $d) {
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $st->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
         $st->bindValue(':d', $d);
+        $st->bindValue(':work_unit', $workUnit);
+        $st->bindValue(':base_rate', $baseRate);
         $st->bindValue(':amt', $amount);
         $st->bindValue(':memo', $memo);
         $st->bindValue(':created_at', $now);

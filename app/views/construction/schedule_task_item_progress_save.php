@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/schedule_auto_progress_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -52,11 +53,12 @@ if (!$pdo) {
     header('Location: ?r=공사&pid=' . $projectId . '&tab=gantt');
     exit;
 }
+cpms_schedule_auto_ensure_schema($pdo);
 
 $now = date('Y-m-d H:i:s');
 
 try {
-    $stTask = $pdo->prepare('SELECT id, name FROM cpms_schedule_tasks WHERE id=:tid AND project_id=:pid LIMIT 1');
+    $stTask = $pdo->prepare('SELECT id, name, work_id FROM cpms_schedule_tasks WHERE id=:tid AND project_id=:pid LIMIT 1');
     $stTask->bindValue(':tid', $taskId, \PDO::PARAM_INT);
     $stTask->bindValue(':pid', $projectId, \PDO::PARAM_INT);
     $stTask->execute();
@@ -75,10 +77,20 @@ try {
     $validUnitMap = array();
     if (count($unitIds) > 0) {
         $ph = implode(',', array_fill(0, count($unitIds), '?'));
-        $stUnit = $pdo->prepare("SELECT id, qty FROM cpms_project_unit_prices WHERE project_id = ? AND id IN ($ph)");
-        $stUnit->bindValue(1, $projectId, \PDO::PARAM_INT);
-        foreach ($unitIds as $idx => $uid) {
-            $stUnit->bindValue($idx + 2, $uid, \PDO::PARAM_INT);
+        $taskWorkId = isset($taskRow['work_id']) ? (int)$taskRow['work_id'] : 0;
+        if ($taskWorkId > 0) {
+            $stUnit = $pdo->prepare("SELECT u.id, COALESCE(l.planned_qty, u.qty, 0) AS qty FROM cpms_project_unit_prices u LEFT JOIN cpms_work_item_lines l ON l.unit_price_id = u.id AND l.work_id = ? WHERE u.project_id = ? AND u.id IN ($ph)");
+            $stUnit->bindValue(1, $taskWorkId, \PDO::PARAM_INT);
+            $stUnit->bindValue(2, $projectId, \PDO::PARAM_INT);
+            foreach ($unitIds as $idx => $uid) {
+                $stUnit->bindValue($idx + 3, $uid, \PDO::PARAM_INT);
+            }
+        } else {
+            $stUnit = $pdo->prepare("SELECT id, qty FROM cpms_project_unit_prices WHERE project_id = ? AND id IN ($ph)");
+            $stUnit->bindValue(1, $projectId, \PDO::PARAM_INT);
+            foreach ($unitIds as $idx => $uid) {
+                $stUnit->bindValue($idx + 2, $uid, \PDO::PARAM_INT);
+            }
         }
         $stUnit->execute();
         $rows = $stUnit->fetchAll();
@@ -94,10 +106,12 @@ try {
     $pdo->beginTransaction();
 
     $upsert = $pdo->prepare("INSERT INTO cpms_schedule_task_item_progress
-        (project_id, task_id, unit_price_id, done_qty, work_date, created_at, updated_at)
-        VALUES (:pid, :tid, :uid, :dq, :wd, :cat, :uat)
-        ON DUPLICATE KEY UPDATE done_qty = VALUES(done_qty), work_date = VALUES(work_date), updated_at = VALUES(updated_at)");
+        (project_id, task_id, unit_price_id, work_date, total_qty, done_qty, is_auto, is_manual, created_at, updated_at)
+        VALUES (:pid, :tid, :uid, :wd, :tq, :dq, 0, 1, :cat, :uat)
+        ON DUPLICATE KEY UPDATE total_qty = VALUES(total_qty), done_qty = VALUES(done_qty), is_auto = 0, is_manual = 1, updated_at = VALUES(updated_at)");
 
+    $totalQtySum = 0.0;
+    $doneQtySum = 0.0;
     foreach ($itemDone as $k => $v) {
         $uid = (int)$k;
         if ($uid <= 0 || !isset($validUnitMap[$uid])) continue;
@@ -108,45 +122,35 @@ try {
 
         $contractQty = (float)$validUnitMap[$uid];
         if ($contractQty > 0 && $doneQty > $contractQty) $doneQty = $contractQty;
+        $totalQtySum += $contractQty;
+        $doneQtySum += $doneQty;
 
         $upsert->bindValue(':pid', $projectId, \PDO::PARAM_INT);
         $upsert->bindValue(':tid', $taskId, \PDO::PARAM_INT);
         $upsert->bindValue(':uid', $uid, \PDO::PARAM_INT);
-        $upsert->bindValue(':dq', $doneQty);
         $upsert->bindValue(':wd', ($taskDate !== '' ? $taskDate : null));        
+        $upsert->bindValue(':tq', $contractQty);
+        $upsert->bindValue(':dq', $doneQty);
         $upsert->bindValue(':cat', $now);
         $upsert->bindValue(':uat', $now);
         $upsert->execute();
     }
 
-    // 항목별 완료수량 기준으로 공정 progress 반영
-    $stAgg = $pdo->prepare("SELECT
-            COALESCE(SUM(COALESCE(p.done_qty, 0)), 0) AS done_sum,
-            COALESCE(SUM(COALESCE(u.qty, 0)), 0) AS total_sum
-        FROM cpms_schedule_task_item_progress p
-        INNER JOIN cpms_project_unit_prices u ON u.id = p.unit_price_id AND u.project_id = p.project_id
-        WHERE p.project_id = :pid AND p.task_id = :tid");
-    $stAgg->bindValue(':pid', $projectId, \PDO::PARAM_INT);
-    $stAgg->bindValue(':tid', $taskId, \PDO::PARAM_INT);
-    $stAgg->execute();
-    $agg = $stAgg->fetch();
-
-    $pct = 0;
-    if (is_array($agg)) {
-        $doneSum = isset($agg['done_sum']) ? (float)$agg['done_sum'] : 0;
-        $totalSum = isset($agg['total_sum']) ? (float)$agg['total_sum'] : 0;
-        if ($totalSum > 0) {
-            $pct = (int)round(($doneSum / $totalSum) * 100);
-            if ($pct < 0) $pct = 0;
-            if ($pct > 100) $pct = 100;
-        }
+    if ($taskDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $taskDate)) {
+        $upTaskProgress = $pdo->prepare("INSERT INTO cpms_schedule_progress
+            (project_id, task_id, work_date, total_qty, done_qty, is_auto, is_manual, created_at, updated_at)
+            VALUES (:pid, :tid, :wd, :tq, :dq, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON DUPLICATE KEY UPDATE total_qty=VALUES(total_qty), done_qty=VALUES(done_qty), is_auto=0, is_manual=1, updated_at=CURRENT_TIMESTAMP");
+        $upTaskProgress->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+        $upTaskProgress->bindValue(':tid', $taskId, \PDO::PARAM_INT);
+        $upTaskProgress->bindValue(':wd', $taskDate);
+        $upTaskProgress->bindValue(':tq', $totalQtySum);
+        $upTaskProgress->bindValue(':dq', $doneQtySum);
+        $upTaskProgress->execute();
     }
 
-    $stUpd = $pdo->prepare('UPDATE cpms_schedule_tasks SET progress=:pct WHERE id=:tid AND project_id=:pid');
-    $stUpd->bindValue(':pct', $pct, \PDO::PARAM_INT);
-    $stUpd->bindValue(':tid', $taskId, \PDO::PARAM_INT);
-    $stUpd->bindValue(':pid', $projectId, \PDO::PARAM_INT);
-    $stUpd->execute();
+    // 항목별 완료수량 기준으로 공정 progress 반영
+    cpms_schedule_recalculate_task_progress($pdo, $projectId, $taskId, $totalQtySum);
 
     $pdo->commit();
 

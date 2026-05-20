@@ -127,6 +127,74 @@ if (!function_exists('cpms_status_sum_all')) {
     }
 }
 
+if (!function_exists('cpms_status_equipment_total_between')) {
+    function cpms_status_equipment_total_between($pdo, $projectId, $startDate, $endDate) {
+        if (!$pdo) return 0.0;
+        if (!cpms_status_table_exists($pdo, 'cpms_equipment_usage')) return 0.0;
+        if (!cpms_status_column_exists($pdo, 'cpms_equipment_usage', 'project_id')) return 0.0;
+        if (!cpms_status_column_exists($pdo, 'cpms_equipment_usage', 'use_date')) return 0.0;
+
+        $hasWorkUnit = cpms_status_column_exists($pdo, 'cpms_equipment_usage', 'work_unit');
+        $hasBaseRate = cpms_status_column_exists($pdo, 'cpms_equipment_usage', 'base_rate_snapshot');
+        $hasAmount = cpms_status_column_exists($pdo, 'cpms_equipment_usage', 'amount');
+        if (!$hasAmount && (!$hasWorkUnit || !$hasBaseRate)) return 0.0;
+
+        try {
+            if ($hasWorkUnit && $hasBaseRate) {
+                $amountExpr = "COALESCE(NULLIF(work_unit, 0), 1) * COALESCE(NULLIF(base_rate_snapshot, 0)" . ($hasAmount ? ", amount" : "") . ", 0)";
+                $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM cpms_equipment_usage WHERE project_id = :pid AND use_date BETWEEN :start AND :end";
+            } else {
+                $sql = "SELECT COALESCE(SUM(amount), 0) FROM cpms_equipment_usage WHERE project_id = :pid AND use_date BETWEEN :start AND :end";
+            }
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+            $st->bindValue(':start', (string)$startDate);
+            $st->bindValue(':end', (string)$endDate);
+            $st->execute();
+            return (float)$st->fetchColumn();
+        } catch (Exception $e) {
+            return 0.0;
+        }
+    }
+}
+
+if (!function_exists('cpms_status_material_category_sum_between')) {
+    function cpms_status_material_category_sum_between($pdo, $projectId, $startDate, $endDate) {
+        $result = array('자재비'=>0.0, '구매품'=>0.0, '기타경비'=>0.0, '안전관리비'=>0.0);
+        if (!$pdo) return $result;
+        if (!cpms_status_table_exists($pdo, 'cpms_material_usage')) return $result;
+        if (!cpms_status_table_exists($pdo, 'cpms_material_items')) return $result;
+        if (!cpms_status_column_exists($pdo, 'cpms_material_usage', 'project_id')) return $result;
+        if (!cpms_status_column_exists($pdo, 'cpms_material_usage', 'use_date')) return $result;
+        if (!cpms_status_column_exists($pdo, 'cpms_material_usage', 'amount')) return $result;
+
+        try {
+            $deletedWhere = cpms_status_column_exists($pdo, 'cpms_material_items', 'is_deleted') ? " AND (i.is_deleted = 0 OR i.is_deleted IS NULL)" : "";
+            $sql = "SELECT COALESCE(i.category, '') AS category, COALESCE(SUM(u.amount), 0) AS amount
+                FROM cpms_material_usage u
+                LEFT JOIN cpms_material_items i ON i.id = u.material_id
+                WHERE u.project_id = :pid
+                  AND u.use_date BETWEEN :start AND :end" . $deletedWhere . "
+                GROUP BY COALESCE(i.category, '')";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+            $st->bindValue(':start', (string)$startDate);
+            $st->bindValue(':end', (string)$endDate);
+            $st->execute();
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($rows)) $rows = array();
+            foreach ($rows as $r) {
+                $cat = trim((string)(isset($r['category']) ? $r['category'] : ''));
+                if (!isset($result[$cat])) $cat = '자재비';
+                $result[$cat] += isset($r['amount']) ? (float)$r['amount'] : 0.0;
+            }
+        } catch (Exception $e) {
+            return $result;
+        }
+        return $result;
+    }
+}
+
 if (!function_exists('cpms_status_money')) {
     function cpms_status_money($amount) {
         return number_format((float)$amount) . '원';
@@ -342,9 +410,10 @@ for ($m = 1; $m <= 12; $m++) {
     $salesStart = isset($salesRange['start']) ? (string)$salesRange['start'] : '';
     $salesEnd = isset($salesRange['end']) ? (string)$salesRange['end'] : '';
 
-    $equipment = cpms_status_sum_between($pdo, 'cpms_equipment_usage', 'use_date', $pid, $costStart, $costEnd, '', array());
-    $materials = cpms_status_sum_between($pdo, 'cpms_material_usage', 'use_date', $pid, $costStart, $costEnd, '', array());
-    $safety = cpms_status_sum_between(
+    $equipment = cpms_status_equipment_total_between($pdo, $pid, $costStart, $costEnd);
+    $materialByCategory = cpms_status_material_category_sum_between($pdo, $pid, $costStart, $costEnd);
+    $materials = (float)$materialByCategory['자재비'] + (float)$materialByCategory['구매품'] + (float)$materialByCategory['기타경비'];
+    $safety = (float)$materialByCategory['안전관리비'] + cpms_status_sum_between(
         $pdo,
         'cpms_daily_cost_entries',
         'cost_date',
@@ -445,9 +514,10 @@ foreach ($years as $yy) {
         $costStart = isset($costRange['start']) ? (string)$costRange['start'] : '';
         $costEnd = isset($costRange['end']) ? (string)$costRange['end'] : '';
 
-        $overallTotals['equipment'] += cpms_status_sum_between($pdo, 'cpms_equipment_usage', 'use_date', $pid, $costStart, $costEnd, '', array());
-        $overallTotals['materials'] += cpms_status_sum_between($pdo, 'cpms_material_usage', 'use_date', $pid, $costStart, $costEnd, '', array());
-        $overallTotals['safety'] += cpms_status_sum_between(
+        $overallTotals['equipment'] += cpms_status_equipment_total_between($pdo, $pid, $costStart, $costEnd);
+        $overallMaterialByCategory = cpms_status_material_category_sum_between($pdo, $pid, $costStart, $costEnd);
+        $overallTotals['materials'] += (float)$overallMaterialByCategory['자재비'] + (float)$overallMaterialByCategory['구매품'] + (float)$overallMaterialByCategory['기타경비'];
+        $overallTotals['safety'] += (float)$overallMaterialByCategory['안전관리비'] + cpms_status_sum_between(
             $pdo,
             'cpms_daily_cost_entries',
             'cost_date',

@@ -1,5 +1,7 @@
 <?php
 require_once __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/views/construction/partials/schedule_auto_progress_helper.php';
+require_once __DIR__ . '/../app/views/construction/partials/equipment_gongsu_approval_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -13,12 +15,12 @@ if (!$ok) { http_response_code(403); echo '403 Forbidden'; exit; }
 $pdo = Db::pdo();
 $results = array();
 function add_result(&$results, $kind, $target, $status, $message) {
-    $results[] = array(
+    array_push($results, array(
         'kind' => $kind,
         'target' => $target,
         'status' => $status,
         'message' => $message
-    );
+    ));
 }
 if (!$pdo) {
     add_result($results, 'SYSTEM', 'DB', '오류', 'DB 연결 실패');
@@ -191,7 +193,7 @@ if (!$pdo) {
                         $nonUnique = isset($ix['Non_unique']) ? (int)$ix['Non_unique'] : 1;
                         if ($nonUnique !== 0) continue;
                         if (!isset($uniqueMap[$keyName])) $uniqueMap[$keyName] = array();
-                        $uniqueMap[$keyName][] = isset($ix['Column_name']) ? (string)$ix['Column_name'] : '';
+                        array_push($uniqueMap[$keyName], isset($ix['Column_name']) ? (string)$ix['Column_name'] : '');
                     }
                 }
                 $hasDateUnique = false;
@@ -212,6 +214,67 @@ if (!$pdo) {
         }
     } catch (Exception $e) {
         add_result($results, 'COLUMN', 'cpms_schedule_task_item_progress.work_date', '오류', '확인/추가 오류: ' . $e->getMessage());
+    }
+
+    try {
+        cpms_schedule_auto_ensure_schema($pdo);
+        add_result($results, 'TABLE', 'cpms_schedule_progress', '성공', '확인/생성 완료');
+        add_result($results, 'TABLE', 'cpms_schedule_task_item_progress', '성공', '날짜별 항목완료수량 구조 확인/보정 완료');
+        $scheduleChecks = array(
+            array('cpms_schedule_progress', 'is_auto'),
+            array('cpms_schedule_progress', 'is_manual'),
+            array('cpms_schedule_task_item_progress', 'work_date'),
+            array('cpms_schedule_task_item_progress', 'is_auto'),
+            array('cpms_schedule_task_item_progress', 'is_manual')
+        );
+        foreach ($scheduleChecks as $check) {
+            $tbl = $check[0];
+            $colName = $check[1];
+            $col = $pdo->query("SHOW COLUMNS FROM " . $tbl . " LIKE '" . $colName . "'")->fetch();
+            if ($col) {
+                add_result($results, 'COLUMN', $tbl . '.' . $colName, '성공', '추가 완료 또는 이미 존재');
+            } else {
+                add_result($results, 'COLUMN', $tbl . '.' . $colName, '오류', '컬럼 확인 실패');
+            }
+        }
+    } catch (Exception $e) {
+        add_result($results, 'TABLE', '공정표 자동 완료수량', '오류', '처리 오류: ' . $e->getMessage());
+    }
+
+    try {
+        cpms_equipment_gongsu_ensure_schema($pdo);
+        $eqTable = $pdo->prepare("SHOW TABLES LIKE 'cpms_equipment_gongsu_overrides'");
+        $eqTable->execute();
+        $eqTableExists = $eqTable->fetch() ? true : false;
+        add_result($results, 'TABLE', 'cpms_equipment_gongsu_overrides', $eqTableExists ? '성공' : '오류', $eqTableExists ? '확인/생성 완료' : '테이블 확인 실패');
+    } catch (Exception $e) {
+        add_result($results, 'TABLE', 'cpms_equipment_gongsu_overrides', '오류', '처리 오류: ' . $e->getMessage());
+    }
+    try {
+        $equipmentChecks = array('work_unit', 'base_rate_snapshot', 'amount', 'is_manual_unit');
+        foreach ($equipmentChecks as $colName) {
+            $col = $pdo->query("SHOW COLUMNS FROM cpms_equipment_usage LIKE '" . $colName . "'")->fetch();
+            if ($col) {
+                add_result($results, 'COLUMN', 'cpms_equipment_usage.' . $colName, '성공', '추가 완료 또는 이미 존재');
+            } else {
+                add_result($results, 'COLUMN', 'cpms_equipment_usage.' . $colName, '오류', '컬럼 확인 실패');
+            }
+        }
+    } catch (Exception $e) {
+        add_result($results, 'COLUMN', 'cpms_equipment_usage', '오류', '컬럼 확인 오류: ' . $e->getMessage());
+    }
+
+    try {
+        $st = $pdo->prepare("SHOW TABLES LIKE 'cpms_material_items'");
+        $st->execute();
+        if ($st->fetch()) {
+            $col = $pdo->query("SHOW COLUMNS FROM cpms_material_items LIKE 'category'")->fetch();
+            add_result($results, 'COLUMN', 'cpms_material_items.category', $col ? '성공' : '오류', $col ? '자재비/구매품/기타경비/안전관리비 구분 컬럼 확인' : 'category 컬럼 없음');
+        } else {
+            add_result($results, 'TABLE', 'cpms_material_items', '주의', '공사 DB 설정에서 자재구입비 테이블을 먼저 생성하세요');
+        }
+    } catch (Exception $e) {
+        add_result($results, 'COLUMN', 'cpms_material_items.category', '오류', '확인 오류: ' . $e->getMessage());
     }
 }
 ?><!doctype html><html><head><meta charset="utf-8"><title>공무 DB 설치/확인</title><style>table{border-collapse:collapse;width:100%;max-width:1100px}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#f5f5f5}</style></head><body><h2>공무 DB 설치/확인</h2><table><thead><tr><th>구분</th><th>대상</th><th>결과</th><th>메시지</th></tr></thead><tbody><?php foreach($results as $row){ ?><tr><td><?php echo h($row['kind']); ?></td><td><?php echo h($row['target']); ?></td><td><?php echo h($row['status']); ?></td><td><?php echo h($row['message']); ?></td></tr><?php } ?></tbody></table><p><a href="?r=공무&tab=monthly_input">공무 화면으로 돌아가기</a></p></body></html>

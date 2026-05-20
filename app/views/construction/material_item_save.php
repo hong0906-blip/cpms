@@ -42,6 +42,7 @@ if ($projectId <= 0) {
 }
 
 $category = trim((string)(isset($_POST['category']) ? $_POST['category'] : ''));
+$allowedMaterialCategories = array('자재비'=>true, '구매품'=>true, '기타경비'=>true, '안전관리비'=>true);
 $vendorName = trim((string)(isset($_POST['vendor_name']) ? $_POST['vendor_name'] : ''));
 // 자재: 규격 제거
 $spec = '';
@@ -55,6 +56,11 @@ $useDatesText = trim((string)(isset($_POST['use_dates']) ? $_POST['use_dates'] :
 
 if ($category === '' || $vendorName === '') {
     flash_set('error', '구분, 업체명은 필수입니다.');
+    header('Location: ' . $redirect);
+    exit;
+}
+if (!isset($allowedMaterialCategories[$category])) {
+    flash_set('error', '허용되지 않은 구분입니다.');
     header('Location: ' . $redirect);
     exit;
 }
@@ -111,8 +117,8 @@ function material_month_range($ym)
 {
     $prevYm = date('Y-m', strtotime($ym . '-01 -1 month'));
     return array(
-        'start' => $prevYm . '-25',
-        'end' => $ym . '-24',
+        'start' => $prevYm . '-26',
+        'end' => $ym . '-25',
     );
 }
 

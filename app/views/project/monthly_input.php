@@ -293,7 +293,7 @@ if ($pdo && is_array($selectedProject)) {
         $tmp = array();
         foreach ($mat as $r) {
             $cat = trim((string)$r['category']);
-            if (!isset($map[$cat])) { continue; }
+            if (!isset($map[$cat])) { $cat = '자재비'; }
             $sec = $map[$cat];
             $id = 'm' . (int)$r['id'];
             if (!isset($tmp[$sec . '_' . $id])) {
@@ -306,7 +306,12 @@ if ($pdo && is_array($selectedProject)) {
     } catch (Exception $e) { $errors[] = '자재구입비 데이터를 불러오지 못했습니다. 오류: ' . $e->getMessage(); }
 
     try {
-        $stEq = $pdo->prepare('SELECT e.id,e.vendor_name,e.spec,e.category,u.use_date,u.amount FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid');
+        $hasEqWorkUnit = project_monthly_column_exists($pdo, 'cpms_equipment_usage', 'work_unit');
+        $hasEqBaseRate = project_monthly_column_exists($pdo, 'cpms_equipment_usage', 'base_rate_snapshot');
+        $eqSelectExtra = '';
+        if ($hasEqWorkUnit) $eqSelectExtra .= ',u.work_unit';
+        if ($hasEqBaseRate) $eqSelectExtra .= ',u.base_rate_snapshot';
+        $stEq = $pdo->prepare('SELECT e.id,e.vendor_name,e.spec,e.category,u.use_date,u.amount' . $eqSelectExtra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid');
         $stEq->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
         $stEq->execute();
         $eq = $stEq->fetchAll();
@@ -316,7 +321,15 @@ if ($pdo && is_array($selectedProject)) {
             $id = 'e' . (int)$r['id'];
             if (!isset($tmpEq[$id])) { $tmpEq[$id] = array('section'=>'장비비','업체명'=>$r['vendor_name'],'내역'=>($r['spec'] !== '' ? $r['spec'] : $r['category']),'months'=>monthly_zero_map($allMonths)); }
             $ym = cpms_material_equipment_cost_ym($r['use_date']);
-            if (isset($tmpEq[$id]['months'][$ym])) { $tmpEq[$id]['months'][$ym] += (float)$r['amount']; }
+            $eqAmount = (float)$r['amount'];
+            if ($hasEqWorkUnit && $hasEqBaseRate) {
+                $workUnit = isset($r['work_unit']) ? (float)$r['work_unit'] : 1.0;
+                if ($workUnit <= 0) $workUnit = 1.0;
+                $rateSnapshot = isset($r['base_rate_snapshot']) ? (float)$r['base_rate_snapshot'] : 0.0;
+                if ($rateSnapshot <= 0) $rateSnapshot = (float)$r['amount'];
+                $eqAmount = $workUnit * $rateSnapshot;
+            }
+            if (isset($tmpEq[$id]['months'][$ym])) { $tmpEq[$id]['months'][$ym] += $eqAmount; }
         }
         foreach ($tmpEq as $one) { $rowsBySection['장비비'][] = $one; }
     } catch (Exception $e) { $errors[] = '장비비 데이터를 불러오지 못했습니다. 오류: ' . $e->getMessage(); }

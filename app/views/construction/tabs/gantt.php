@@ -40,6 +40,9 @@ $hasGanttMaterialUnitPrice = cpms_gantt_column_exists($pdo, 'cpms_project_unit_p
 $hasGanttLaborUnitPrice = cpms_gantt_column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price');
 $hasGanttExpenseUnitPrice = cpms_gantt_column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price');
 
+require_once __DIR__ . '/../partials/schedule_auto_progress_helper.php';
+cpms_schedule_apply_auto_progress($pdo, (int)$pid);
+
 $tasks = array();
 try {
     $st = $pdo->prepare("SELECT * FROM cpms_schedule_tasks WHERE project_id = :pid ORDER BY sort_order ASC, id ASC");
@@ -154,7 +157,7 @@ try {
 
     try {
         $stTip = $pdo->prepare("
-            SELECT task_id, unit_price_id, done_qty
+            SELECT task_id, unit_price_id, work_date, done_qty, is_auto, is_manual
             FROM cpms_schedule_task_item_progress
             WHERE project_id = :pid
         " );
@@ -165,12 +168,16 @@ try {
             foreach ($tipRows as $tr) {
                 $taskIdVal = isset($tr['task_id']) ? (int)$tr['task_id'] : 0;
                 $unitIdVal = isset($tr['unit_price_id']) ? (int)$tr['unit_price_id'] : 0;
-                if ($taskIdVal <= 0 || $unitIdVal <= 0) continue;
+                $workDateVal = isset($tr['work_date']) ? (string)$tr['work_date'] : '';
+                if ($taskIdVal <= 0 || $unitIdVal <= 0 || $workDateVal === '') continue;
                 if (!isset($taskItemDoneMap[$taskIdVal])) $taskItemDoneMap[$taskIdVal] = array();
+                if (!isset($taskItemDoneMap[$taskIdVal][$workDateVal])) $taskItemDoneMap[$taskIdVal][$workDateVal] = array();
                 // 과거 공정 모달 자동완료 표시: NULL 저장값은 미입력으로 취급하기 위해 NULL 유지
-                $taskItemDoneMap[$taskIdVal][$unitIdVal] = (isset($tr['done_qty']) && $tr['done_qty'] !== null && $tr['done_qty'] !== '')
-                    ? (float)$tr['done_qty']
-                    : null;
+                $taskItemDoneMap[$taskIdVal][$workDateVal][$unitIdVal] = array(
+                    'done_qty' => (isset($tr['done_qty']) && $tr['done_qty'] !== null && $tr['done_qty'] !== '') ? (float)$tr['done_qty'] : null,
+                    'is_auto' => isset($tr['is_auto']) ? (int)$tr['is_auto'] : 0,
+                    'is_manual' => isset($tr['is_manual']) ? (int)$tr['is_manual'] : 0
+                );
             }
         }
     } catch (Exception $eTip) {
@@ -261,7 +268,7 @@ try {
     $rangeStartYmd = date('Y-m-d', $rangeStartTs);
     $rangeEndYmd = date('Y-m-d', $rangeEndTs);
     $stProg = $pdo->prepare("
-        SELECT id, task_id, work_date, total_qty, done_qty
+        SELECT id, task_id, work_date, total_qty, done_qty, is_auto, is_manual
         FROM cpms_schedule_progress
         WHERE project_id = :pid
           AND work_date BETWEEN :s AND :e
@@ -281,7 +288,9 @@ try {
             $key = $taskId . '|' . $workDate;
             $progressMap[$key] = array(
                 'total_qty' => isset($row['total_qty']) ? $row['total_qty'] : null,
-                'done_qty' => isset($row['done_qty']) ? $row['done_qty'] : null
+                'done_qty' => isset($row['done_qty']) ? $row['done_qty'] : null,
+                'is_auto' => isset($row['is_auto']) ? (int)$row['is_auto'] : 0,
+                'is_manual' => isset($row['is_manual']) ? (int)$row['is_manual'] : 0
             );
             if (isset($row['id'])) $progressIds[] = (int)$row['id'];
         }
@@ -322,7 +331,7 @@ try {
     }
     // 이전 기간(현재 월 이전)의 마지막 진행 정보도 추가해서 남은 수량 계산에 사용
     $stPrev = $pdo->prepare("
-        SELECT p.id, p.task_id, p.work_date, p.total_qty, p.done_qty
+        SELECT p.id, p.task_id, p.work_date, p.total_qty, p.done_qty, p.is_auto, p.is_manual
         FROM cpms_schedule_progress p
         INNER JOIN (
             SELECT task_id, MAX(work_date) AS max_date
@@ -346,7 +355,9 @@ try {
             if (!isset($progressMap[$key])) {
                 $progressMap[$key] = array(
                     'total_qty' => isset($row['total_qty']) ? $row['total_qty'] : null,
-                    'done_qty' => isset($row['done_qty']) ? $row['done_qty'] : null
+                    'done_qty' => isset($row['done_qty']) ? $row['done_qty'] : null,
+                    'is_auto' => isset($row['is_auto']) ? (int)$row['is_auto'] : 0,
+                    'is_manual' => isset($row['is_manual']) ? (int)$row['is_manual'] : 0
                 );
             }
         }
@@ -830,6 +841,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                         <label class="text-xs font-bold text-gray-500">완료 수량</label>
                         <input id="ganttDoneQty" type="number" min="0" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full bg-gray-50 text-gray-700" placeholder="항목 합계" readonly>
                         <div id="ganttDoneQtyHint" class="mt-1 text-xs text-gray-500"></div>
+                        <div id="ganttProgressSourceStatus" class="mt-1 text-xs font-bold text-gray-600"></div>
                     </div>
                     <div>
                         <label class="text-xs font-bold text-gray-500">남은 수량</label>
@@ -1630,7 +1642,9 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     if (!bodyEl) return;
     var workId = getTaskWorkId(taskId);    
     var rows = (taskItemMap && taskItemMap[taskId]) ? taskItemMap[taskId] : [];
-    var doneMap = (taskItemDoneMap && taskItemDoneMap[taskId]) ? taskItemDoneMap[taskId] : {};
+    var taskDate = currentProgressContext && currentProgressContext.taskDate ? currentProgressContext.taskDate : '';
+    var doneMapByDate = (taskItemDoneMap && taskItemDoneMap[taskId]) ? taskItemDoneMap[taskId] : {};
+    var doneMap = (taskDate && doneMapByDate && doneMapByDate[taskDate]) ? doneMapByDate[taskDate] : {};
     bodyEl.innerHTML = '';
     var taskRange = getTaskDateRange(taskId);
     // 과거 공정 모달 자동완료 표시: 종료일이 오늘 00:00:00 이전이면 모달 기본 완료수량을 총수량으로 표시
@@ -1657,7 +1671,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var hasSavedDoneQty = false;
       var doneQty = 0;
       if (doneMap && Object.prototype.hasOwnProperty.call(doneMap, uid)) {
-        var savedDoneQty = toNumber(doneMap[uid]);
+        var itemSaved = doneMap[uid];
+        var savedDoneQty = toNumber((itemSaved && typeof itemSaved === 'object') ? itemSaved.done_qty : itemSaved);
         if (savedDoneQty !== null) {
           hasSavedDoneQty = true;
           doneQty = savedDoneQty;
@@ -1718,6 +1733,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var doneEl = document.getElementById('ganttDoneQty');
     var modeEl = document.getElementById('ganttProgressInputMode');
     var hintEl = document.getElementById('ganttDoneQtyHint');
+    var sourceEl = document.getElementById('ganttProgressSourceStatus');
     var autoToggleEl = document.getElementById('ganttAutoDistributionToggle');
     var mapKey = taskId + '|' + taskDate;
     var saved = (progressMap && progressMap[mapKey]) ? progressMap[mapKey] : null;
@@ -1732,8 +1748,14 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     if (saved && saved.done_qty !== null && typeof saved.done_qty !== 'undefined' && saved.done_qty !== '') {
       doneVal = formatQty0(saved.done_qty);
       inputMode = 'manual';
-      if (hintEl) hintEl.textContent = '수동 입력값(자동 덮어쓰기 금지)';
+      if (hintEl) hintEl.textContent = '저장된 완료수량입니다.';
+      if (sourceEl) {
+        if (parseInt(saved.is_manual || 0, 10) === 1) sourceEl.textContent = '수동 수정';
+        else if (parseInt(saved.is_auto || 0, 10) === 1) sourceEl.textContent = '자동 반영';
+        else sourceEl.textContent = '저장값';
+      }
     } else {
+      if (sourceEl) sourceEl.textContent = '';
       var useAuto = autoToggleEl ? !!autoToggleEl.checked : true;
       var suggested = useAuto ? suggestAutoQty(taskId, taskDate, baseTotal) : null;
       if (suggested !== null) {

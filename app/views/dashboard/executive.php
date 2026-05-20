@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/../partials/TaskList.php';
 require_once __DIR__ . '/../partials/cost_metrics.php';
+require_once __DIR__ . '/../construction/partials/equipment_gongsu_approval_helper.php';
 
 use App\Core\Db;
 
@@ -131,6 +132,31 @@ if ($pdo) {
     }
 }
 
+$pendingEquipmentGongsuOverrides = array();
+if ($pdo) {
+    try {
+        cpms_equipment_gongsu_ensure_schema($pdo);
+        $sqlEq = "SELECT o.*, p.name AS project_name, e.vendor_name, e.spec
+                FROM cpms_equipment_gongsu_overrides o
+                LEFT JOIN cpms_projects p ON p.id = o.project_id
+                LEFT JOIN cpms_equipment_items e ON e.id = o.equipment_id
+                WHERE o.status = 'pending'
+                  AND (
+                        o.current_approver_employee_id = :my_employee_id
+                        OR LOWER(o.current_approver_email) = LOWER(:my_email)
+                      )
+                ORDER BY o.created_at DESC";
+        $stEq = $pdo->prepare($sqlEq);
+        $stEq->bindValue(':my_employee_id', (int)$myUserId, PDO::PARAM_INT);
+        $stEq->bindValue(':my_email', (string)$userEmail, PDO::PARAM_STR);
+        $stEq->execute();
+        $pendingEquipmentGongsuOverrides = $stEq->fetchAll();
+        if (!is_array($pendingEquipmentGongsuOverrides)) $pendingEquipmentGongsuOverrides = array();
+    } catch (Exception $e) {
+        $pendingEquipmentGongsuOverrides = array();
+    }
+}
+
 $myReceivedRequests = array();
 $requestTargetNameMap = array();
 $reqStore = cpms_request_store_load();
@@ -245,6 +271,54 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
                             <button class="px-3 py-1 rounded-xl bg-emerald-600 text-white text-xs font-bold" type="submit">승인</button>
                         </form>
                         <form method="post" action="?r=construction/labor_gongsu_override_decide" class="flex flex-wrap items-center gap-2">
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="override_id" value="<?php echo (int)$ov['id']; ?>">
+                            <input type="hidden" name="decision" value="reject">
+                            <input type="text" name="reject_reason" class="px-3 py-1 rounded-xl border border-gray-200 text-xs" placeholder="반려사유 입력" required>
+                            <button class="px-3 py-1 rounded-xl bg-rose-600 text-white text-xs font-bold" type="submit">반려</button>
+                        </form>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+</div>
+
+<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
+    <div class="flex items-start justify-between gap-4 mb-4">
+        <div>
+            <h3 class="text-2xl font-extrabold text-gray-900">장비공수 수정 승인대기</h3>
+            <div class="text-sm text-gray-600 mt-1">내게 요청된 장비공수 수정 요청을 승인 또는 반려합니다.</div>
+        </div>
+        <span class="px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 text-sm font-bold">대기 <?php echo count($pendingEquipmentGongsuOverrides); ?>건</span>
+    </div>
+    <div class="space-y-3">
+        <?php if (count($pendingEquipmentGongsuOverrides) === 0): ?>
+            <div class="text-sm text-gray-500">승인대기 중인 장비공수 수정 요청이 없습니다.</div>
+        <?php else: ?>
+            <?php foreach ($pendingEquipmentGongsuOverrides as $ov): ?>
+                <div class="p-4 rounded-2xl border bg-gray-50 border-gray-100">
+                    <?php
+                    $requesterName = trim((string)$ov['requested_by_name']) !== '' ? $ov['requested_by_name'] : (trim((string)$ov['requested_by_email']) !== '' ? $ov['requested_by_email'] : '-');
+                    $equipmentName = trim((string)(isset($ov['spec']) ? $ov['spec'] : ''));
+                    if ($equipmentName === '') $equipmentName = trim((string)(isset($ov['vendor_name']) ? $ov['vendor_name'] : ''));
+                    $stageLabel = (isset($ov['approval_stage']) && (string)$ov['approval_stage'] === 'VP_PENDING') ? '부사장 승인' : '상무 승인';
+                    ?>
+                    <div class="text-xs text-gray-500">요청일: <?php echo h($ov['created_at']); ?></div>
+                    <div class="font-bold text-gray-900 mt-1 text-lg">현장명: <?php echo h($ov['project_name'] ? $ov['project_name'] : '-'); ?></div>
+                    <div class="text-sm text-gray-700 mt-1">요청자: <?php echo h($requesterName); ?></div>
+                    <div class="text-sm text-gray-700 mt-1">장비명: <?php echo h($equipmentName); ?> / 사용일자: <?php echo h($ov['use_date']); ?></div>
+                    <div class="text-sm text-gray-700">요청 내용: 장비공수 <?php echo h($ov['old_value']); ?> -> <span class="font-extrabold text-emerald-700"><?php echo h($ov['new_value']); ?></span> 변경</div>
+                    <div class="text-sm text-gray-700">요청사유: <?php echo h(trim((string)$ov['reason']) !== '' ? $ov['reason'] : '-'); ?></div>
+                    <div class="text-sm text-gray-700">현재 승인 단계: <span class="font-extrabold text-amber-700"><?php echo h($stageLabel); ?></span></div>
+                    <div class="flex flex-wrap gap-2 mt-3">
+                        <form method="post" action="?r=construction/equipment_gongsu_override_decide">
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="override_id" value="<?php echo (int)$ov['id']; ?>">
+                            <input type="hidden" name="decision" value="approve">
+                            <button class="px-3 py-1 rounded-xl bg-emerald-600 text-white text-xs font-bold" type="submit">승인</button>
+                        </form>
+                        <form method="post" action="?r=construction/equipment_gongsu_override_decide" class="flex flex-wrap items-center gap-2">
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                             <input type="hidden" name="override_id" value="<?php echo (int)$ov['id']; ?>">
                             <input type="hidden" name="decision" value="reject">

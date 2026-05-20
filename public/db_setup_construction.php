@@ -5,6 +5,8 @@
  * - PHP 5.6 호환
  */
 require_once __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/views/construction/partials/schedule_auto_progress_helper.php';
+require_once __DIR__ . '/../app/views/construction/partials/equipment_gongsu_approval_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -17,6 +19,19 @@ $pdo = Db::pdo(); if (!$pdo) { echo 'DB 연결 실패'; exit; }
 function table_exists2($pdo, $table) {
     $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=:t");
     $st->bindValue(':t', $table); $st->execute(); return ((int)$st->fetchColumn() > 0);
+}
+function column_exists2($pdo, $table, $column) {
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM `" . $table . "` LIKE :c");
+        $st->bindValue(':c', $column);
+        $st->execute();
+        return $st->fetch() ? true : false;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+function add_db_check(&$checks, $kind, $target, $status, $message) {
+    array_push($checks, array('kind'=>$kind, 'target'=>$target, 'status'=>$status, 'message'=>$message));
 }
 $msg=''; $err='';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -38,8 +53,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->exec("CREATE TABLE cpms_safety_incidents (id INT AUTO_INCREMENT PRIMARY KEY, project_id INT NOT NULL, title VARCHAR(255) NOT NULL, description TEXT NULL, occurred_at DATETIME NULL, created_by_name VARCHAR(100) NOT NULL, created_by_email VARCHAR(255) NULL, status VARCHAR(20) NOT NULL DEFAULT '접수', created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP, KEY idx_project_id (project_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8");
                 }
                 cpms_ensure_labor_override_table($pdo);
+                cpms_schedule_auto_ensure_schema($pdo);
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_google_chat_notifications (id INT AUTO_INCREMENT PRIMARY KEY, source_type VARCHAR(50) NOT NULL, source_id INT NULL, event_type VARCHAR(50) NULL, receiver_employee_id INT NULL, receiver_name VARCHAR(100) NULL, receiver_email VARCHAR(190) NULL, dm_space_name VARCHAR(255) NULL, message_text TEXT NULL, send_status VARCHAR(20) NULL, error_message TEXT NULL, sent_at DATETIME NULL, created_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8");
-                $msg = '공사 기본 테이블 및 공수 승인/Google Chat 알림 테이블 생성/확인 완료';
+                $msg = '공사 기본 테이블 및 공정표 자동 완료수량/공수 승인/Google Chat 알림 테이블 생성/확인 완료';
             } else if ($action === 'cost_progress') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_daily_work_qty (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -167,19 +183,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg = '작업 테이블 생성/확인 완료';
 
             } else if ($action === 'task_item_progress') {
-                $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_schedule_task_item_progress (
-                    id INT AUTO_INCREMENT PRIMARY KEY,
-                    project_id INT NOT NULL,
-                    task_id INT NOT NULL,
-                    unit_price_id INT NOT NULL,
-                    done_qty DECIMAL(18,4) NOT NULL DEFAULT 0,
-                    created_at DATETIME NOT NULL,
-                    updated_at DATETIME NOT NULL,
-                    UNIQUE KEY uniq_project_task_unit (project_id, task_id, unit_price_id),
-                    KEY idx_project_task (project_id, task_id),
-                    KEY idx_unit_price_id (unit_price_id)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-                $msg = '공정표 항목완료수량 테이블 생성/확인 완료';
+                cpms_schedule_auto_ensure_schema($pdo);
+                $msg = '공정표 날짜별/항목별 자동 완료수량 테이블 및 is_auto/is_manual 컬럼 생성/확인 완료';
 
             } else if ($action === 'equipment') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_equipment_items (
@@ -212,7 +217,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UNIQUE KEY uniq_equipment_day (equipment_id, use_date),
                     KEY idx_project_date (project_id, use_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-                $msg = '장비 입력 테이블 생성/확인 완료';
+                cpms_equipment_gongsu_ensure_schema($pdo);
+                $msg = '장비 입력 테이블 및 장비공수(work_unit/base_rate_snapshot/is_manual_unit) 승인 테이블 생성/확인 완료';
                 } else if ($action === 'equipment_vendor_presets') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_equipment_vendor_presets (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -258,7 +264,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UNIQUE KEY uniq_material_day (material_id, use_date),
                     KEY idx_project_date (project_id, use_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-                $msg = '자재구입비 테이블 생성/확인 완료';
+                $msg = '자재구입비 테이블 생성/확인 완료. 구분은 자재비/구매품/기타경비/안전관리비만 사용합니다.';
                 } else if ($action === 'material_vendor_presets') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_material_vendor_presets (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -277,6 +283,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } catch (Exception $e) { $err = $e->getMessage(); }
     }
 }
+$checks = array();
+if ($pdo) {
+    $tableChecks = array('cpms_schedule_progress', 'cpms_schedule_task_item_progress', 'cpms_equipment_gongsu_overrides');
+    foreach ($tableChecks as $tbl) {
+        add_db_check($checks, 'TABLE', $tbl, table_exists2($pdo, $tbl) ? '성공' : '주의', table_exists2($pdo, $tbl) ? '존재' : '아직 생성되지 않음');
+    }
+    $columnChecks = array(
+        array('cpms_schedule_progress', 'is_auto'),
+        array('cpms_schedule_progress', 'is_manual'),
+        array('cpms_schedule_task_item_progress', 'work_date'),
+        array('cpms_schedule_task_item_progress', 'is_auto'),
+        array('cpms_schedule_task_item_progress', 'is_manual'),
+        array('cpms_equipment_usage', 'work_unit'),
+        array('cpms_equipment_usage', 'base_rate_snapshot'),
+        array('cpms_equipment_usage', 'amount'),
+        array('cpms_equipment_usage', 'is_manual_unit'),
+        array('cpms_material_items', 'category')
+    );
+    foreach ($columnChecks as $cc) {
+        $target = $cc[0] . '.' . $cc[1];
+        add_db_check($checks, 'COLUMN', $target, column_exists2($pdo, $cc[0], $cc[1]) ? '성공' : '주의', column_exists2($pdo, $cc[0], $cc[1]) ? '존재' : '버튼 실행 필요');
+    }
+}
 ?>
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><title>공사 DB 설정</title><style>body{font-family:Arial;background:#f6f7fb;padding:24px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:18px;max-width:900px}.btn{padding:10px 14px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;font-weight:700}.ok{background:#ecfdf5;padding:10px}.bad{background:#fef2f2;padding:10px}.row{display:flex;gap:10px;flex-wrap:wrap}</style></head><body>
 <div class="card"><h2>공사 DB 설정</h2>
@@ -292,4 +321,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="equipment_vendor_presets"><button class="btn" type="submit">7) 장비 업체 프리셋 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="material_vendor_presets"><button class="btn" type="submit">8) 자재 업체 프리셋 테이블 생성/확인</button></form>
 </div>
+<h3>주요 확인 항목</h3>
+<table style="border-collapse:collapse;width:100%;max-width:900px;margin-top:10px">
+<thead><tr><th style="border:1px solid #ddd;padding:6px;text-align:left">구분</th><th style="border:1px solid #ddd;padding:6px;text-align:left">대상</th><th style="border:1px solid #ddd;padding:6px;text-align:left">결과</th><th style="border:1px solid #ddd;padding:6px;text-align:left">메시지</th></tr></thead>
+<tbody>
+<?php foreach ($checks as $c): ?>
+<tr><td style="border:1px solid #ddd;padding:6px"><?php echo h($c['kind']); ?></td><td style="border:1px solid #ddd;padding:6px"><?php echo h($c['target']); ?></td><td style="border:1px solid #ddd;padding:6px"><?php echo h($c['status']); ?></td><td style="border:1px solid #ddd;padding:6px"><?php echo h($c['message']); ?></td></tr>
+<?php endforeach; ?>
+</tbody>
+</table>
 </div></body></html>

@@ -54,6 +54,7 @@ $itemMap = array();
 $usageRows = array();
 $usageByEquipment = array();
 $usageByDate = array();
+$allowedMaterialCategories = array('자재비'=>true, '구매품'=>true, '기타경비'=>true, '안전관리비'=>true);
 
 try {
     $stItem = $pdo->prepare("SELECT * FROM cpms_material_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY category ASC, vendor_name ASC, id ASC");
@@ -134,6 +135,12 @@ function material_money($v)
 {
     return number_format((float)$v, 0);
 }
+function material_category_label($category)
+{
+    $category = trim((string)$category);
+    $allowed = array('자재비'=>true, '구매품'=>true, '기타경비'=>true, '안전관리비'=>true);
+    return isset($allowed[$category]) ? $category : '자재비';
+}
 ?>
 
 <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
@@ -191,7 +198,12 @@ function material_money($v)
                     </div>
 
                     <div class="grid grid-cols-2 gap-2">
-                        <input type="text" name="category" class="px-3 py-2 border rounded-xl" placeholder="구분" required>
+                        <select name="category" class="px-3 py-2 border rounded-xl" required>
+                            <option value="자재비">자재비</option>
+                            <option value="구매품">구매품</option>
+                            <option value="기타경비">기타경비</option>
+                            <option value="안전관리비">안전관리비</option>
+                        </select>
                         <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required>
                         <!-- 자재: 규격 제거 -->
                         <input type="text" name="representative" class="px-3 py-2 border rounded-xl" placeholder="대표자명">
@@ -241,7 +253,7 @@ function material_money($v)
                         <?php else: ?>
                             <?php foreach ($items as $it): ?>
                                 <tr>
-                                    <td class="p-2 border"><?php echo h($it['category']); ?></td>
+                                    <td class="p-2 border"><?php echo h(material_category_label($it['category'])); ?></td>
                                     <td class="p-2 border"><?php echo h($it['vendor_name']); ?></td>
                                     <!-- 자재: 규격 제거 -->
                                     <!-- 자재: 공급가액 표기 -->
@@ -322,7 +334,7 @@ function material_money($v)
             var materialVendorTimers = {};        
             function hideSuggestList(listEl){ if(!listEl)return; listEl.innerHTML=''; if(listEl.className.indexOf('hidden')===-1) listEl.className += ' hidden'; listEl.style.display='none'; }
             function showSuggestList(listEl){ if(!listEl)return; listEl.className=listEl.className.replace(/\bhidden\b/g,'').replace(/\s+/g,' ').trim(); listEl.style.display='block'; }
-            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; if(formEl.elements['category']) formEl.elements['category'].value=p.category||''; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark']) formEl.elements['remark'].value=p.remark||''; }
+            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1,'안전관리비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark']) formEl.elements['remark'].value=p.remark||''; }
             function renderMaterialSuggestions(inputEl, rows){ var wrap=inputEl?inputEl.closest('.vendor-search-wrap'):null; var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; listEl.innerHTML=''; if(!rows||!rows.length){ var empty=document.createElement('div'); empty.className='px-3 py-2 text-sm text-gray-500'; empty.textContent='검색 결과 없음'; listEl.appendChild(empty); showSuggestList(listEl); return; } for(var i=0;i<rows.length;i++){ (function(row){ var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.setAttribute('data-material-vendor-item','1'); btn.vendorData=row; listEl.appendChild(btn);} )(rows[i]); } showSuggestList(listEl); }
             document.addEventListener('input', function(e){ var inputEl=e.target; if(!inputEl||inputEl.className.indexOf('js-material-vendor-search')===-1) return; var wrap=inputEl.closest('.vendor-search-wrap'); var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; var q=(inputEl.value||'').trim(); if(materialVendorTimers[inputEl]) clearTimeout(materialVendorTimers[inputEl]); if(q.length<2){ hideSuggestList(listEl); return; } materialVendorTimers[inputEl]=setTimeout(function(){ // 프리셋 최신 검색
                 var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4)return; var rows=[]; if(xhr.status===200){ try{var json=JSON.parse(xhr.responseText); rows=(json&&json.items)?json.items:[];}catch(err){rows=[];} } renderMaterialSuggestions(inputEl, rows); }; xhr.send(); },250); });
@@ -355,7 +367,7 @@ function material_money($v)
                 var prevMonth = parseInt(prevParts[1], 10);
                 var prevLastDay = new Date(prevYear, prevMonth, 0).getDate();
                 var currLastDay = new Date(year, month, 0).getDate();
-                var startDate = (rangeInfo.start && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.start : (prevYm + '-25');
+                var startDate = (rangeInfo.start && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.start : (prevYm + '-26');
                 var endDate = (rangeInfo.end && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.end : (ym + '-25');
                 var startTs = ymdToTs(startDate);
                 var endTs = ymdToTs(endDate);
@@ -463,7 +475,7 @@ function material_money($v)
                 }
 
                 function renderGrids(){
-                    renderMonthCalendar(prevGrid, prevYm, 25, prevLastDay, '전월');
+                    renderMonthCalendar(prevGrid, prevYm, 26, prevLastDay, '전월');
                     renderMonthCalendar(currGrid, ym, 1, 25, '현월');
                 }
 
@@ -562,7 +574,7 @@ function material_money($v)
                         }                        
                         ?>
                         <tr>
-                            <td class="border p-1 text-center" rowspan="2"><?php echo ($lastCategory === (string)$it['category']) ? '' : h($it['category']); ?></td>
+                            <td class="border p-1 text-center" rowspan="2"><?php echo ($lastCategory === material_category_label($it['category'])) ? '' : h(material_category_label($it['category'])); ?></td>
                             <td class="border p-1" rowspan="2"><?php echo h($it['vendor_name']); ?></td>
                             <!-- 자재: 규격 제거 -->
                             <td class="border p-1" rowspan="2"><?php echo h($it['representative']); ?></td>
@@ -606,7 +618,7 @@ function material_money($v)
                             <?php endforeach; ?>
                         </tr>
                         <?php
-                        $lastCategory = (string)$it['category'];
+                        $lastCategory = material_category_label($it['category']);
                         $sumDays += $days;
                         $sumAmount += $rowAmount;
                         ?>

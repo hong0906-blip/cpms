@@ -8,12 +8,14 @@
  */
 
 use App\Core\Db;
+require_once __DIR__ . '/../partials/equipment_gongsu_approval_helper.php';
 
 $pdo = Db::pdo();
 if (!$pdo) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">DB 연결 실패</div>';
     return;
 }
+cpms_equipment_gongsu_ensure_schema($pdo);
 
 $equipTab = isset($_GET['equip_tab']) ? trim((string)$_GET['equip_tab']) : 'monthly';
 if ($equipTab !== 'monthly' && $equipTab !== 'input') {
@@ -53,6 +55,7 @@ $itemMap = array();
 $usageRows = array();
 $usageByEquipment = array();
 $usageByDate = array();
+$pendingByUsage = array();
 
 try {
     $stItem = $pdo->prepare("SELECT * FROM cpms_equipment_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY category ASC, vendor_name ASC, spec ASC, id ASC");
@@ -83,11 +86,34 @@ try {
         foreach ($usageRows as $ur) {
             $eid = (int)$ur['equipment_id'];
             $d = (string)$ur['use_date'];
-            $amt = (float)$ur['amount'];
+            $workUnit = isset($ur['work_unit']) ? (float)$ur['work_unit'] : 1.0;
+            if ($workUnit <= 0) $workUnit = 1.0;
+            $rateSnapshot = isset($ur['base_rate_snapshot']) ? (float)$ur['base_rate_snapshot'] : 0.0;
+            if ($rateSnapshot <= 0 && isset($ur['amount'])) $rateSnapshot = (float)$ur['amount'];
+            $ur['_work_unit'] = $workUnit;
+            $ur['_base_rate_snapshot'] = $rateSnapshot;
+            $ur['_calc_amount'] = $workUnit * $rateSnapshot;
             if (!isset($usageByEquipment[$eid])) $usageByEquipment[$eid] = array();
-            $usageByEquipment[$eid][$d] = $amt;
+            $usageByEquipment[$eid][$d] = $ur;
             if (!isset($usageByDate[$d])) $usageByDate[$d] = 0.0;
-            $usageByDate[$d] += $amt;
+            $usageByDate[$d] += $workUnit;
+        }
+
+        $stPending = $pdo->prepare("SELECT *
+            FROM cpms_equipment_gongsu_overrides
+            WHERE project_id = :pid
+              AND status = 'pending'
+              AND use_date BETWEEN :s AND :e
+            ORDER BY id DESC");
+        $stPending->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
+        $stPending->bindValue(':s', $monthlyStart);
+        $stPending->bindValue(':e', $monthlyEnd);
+        $stPending->execute();
+        $pendingRows = $stPending->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($pendingRows)) {
+            foreach ($pendingRows as $pr) {
+                $pendingByUsage[(int)$pr['equipment_usage_id']] = $pr;
+            }
         }
     }
 } catch (Exception $e) {
@@ -97,6 +123,7 @@ try {
     $usageRows = array();
     $usageByEquipment = array();
     $usageByDate = array();
+    $pendingByUsage = array();
     $vendorPresets = array();    
 }
 
@@ -132,6 +159,46 @@ $dateSlotsRow2 = array_slice($dateSlots, $splitIndex);
 function equipment_money($v)
 {
     return number_format((float)$v, 0);
+}
+function equipment_gongsu($v)
+{
+    $n = (float)$v;
+    if (abs($n - round($n)) < 0.001) return number_format($n, 0);
+    return rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
+}
+function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
+{
+    if (!is_array($usageRow)) {
+        return '<td class="border p-1 text-center text-gray-300">-</td>';
+    }
+    $unit = isset($usageRow['_work_unit']) ? (float)$usageRow['_work_unit'] : 1.0;
+    if ($unit <= 0) {
+        return '<td class="border p-1 text-center text-gray-300">-</td>';
+    }
+    $usageId = isset($usageRow['id']) ? (int)$usageRow['id'] : 0;
+    $projectId = isset($usageRow['project_id']) ? (int)$usageRow['project_id'] : 0;
+    $date = isset($usageRow['use_date']) ? (string)$usageRow['use_date'] : '';
+    $equipmentName = trim((string)(isset($item['spec']) ? $item['spec'] : ''));
+    if ($equipmentName === '') $equipmentName = trim((string)(isset($item['vendor_name']) ? $item['vendor_name'] : ''));
+    $vendorName = trim((string)(isset($item['vendor_name']) ? $item['vendor_name'] : ''));
+    $pending = ($usageId > 0 && isset($pendingByUsage[$usageId]) && is_array($pendingByUsage[$usageId])) ? $pendingByUsage[$usageId] : null;
+
+    $html = '<td class="border p-1 text-center">';
+    $html .= '<button type="button" class="px-2 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-bold hover:bg-blue-100"';
+    $html .= ' data-equipment-gongsu-cell="1"';
+    $html .= ' data-project-id="' . $projectId . '"';
+    $html .= ' data-usage-id="' . $usageId . '"';
+    $html .= ' data-equipment-name="' . h($equipmentName) . '"';
+    $html .= ' data-vendor-name="' . h($vendorName) . '"';
+    $html .= ' data-use-date="' . h($date) . '"';
+    $html .= ' data-old-value="' . h(number_format($unit, 2, '.', '')) . '"';
+    $html .= '>' . h(equipment_gongsu($unit)) . '</button>';
+    if ($pending) {
+        $newValue = isset($pending['new_value']) ? (float)$pending['new_value'] : 0.0;
+        $html .= '<div class="mt-1 text-[11px] text-amber-700 font-bold">' . h(equipment_gongsu($newValue)) . ' 승인대기</div>';
+    }
+    $html .= '</td>';
+    return $html;
 }
 ?>
 
@@ -429,7 +496,7 @@ function equipment_money($v)
                 var prevMonth = parseInt(prevParts[1], 10);
                 var prevLastDay = new Date(prevYear, prevMonth, 0).getDate();
                 var currLastDay = new Date(year, month, 0).getDate();
-                var startDate = (rangeInfo.start && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.start : (prevYm + '-25');
+                var startDate = (rangeInfo.start && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.start : (prevYm + '-26');
                 var endDate = (rangeInfo.end && rangeInfo.prevYm === prevYm && rangeInfo.ym === ym) ? rangeInfo.end : (ym + '-25');
                 var startTs = ymdToTs(startDate);
                 var endTs = ymdToTs(endDate);
@@ -537,7 +604,7 @@ function equipment_money($v)
                 }
 
                 function renderGrids(){
-                    renderMonthCalendar(prevGrid, prevYm, 25, prevLastDay, '전월');
+                    renderMonthCalendar(prevGrid, prevYm, 26, prevLastDay, '전월');
                     renderMonthCalendar(currGrid, ym, 1, 25, '현월');
                 }
 
@@ -589,8 +656,8 @@ function equipment_money($v)
                         <?php foreach ($dateSlotsRow1 as $slot): ?>
                             <th class="border p-1 text-center <?php echo $slot['valid'] ? '' : 'bg-gray-200 text-gray-500'; ?>" style="min-width:52px;"><?php echo h($slot['label']); ?></th>
                         <?php endforeach; ?>
-                        <th class="border p-2" rowspan="2">일수</th>
-                        <th class="border p-2" rowspan="2">금액</th>
+                        <th class="border p-2" rowspan="2">총 장비공수</th>
+                        <th class="border p-2" rowspan="2">총 장비비</th>
                         <th class="border p-2" rowspan="2">비고</th>
                     </tr>
                     <tr class="bg-gray-50">
@@ -601,7 +668,7 @@ function equipment_money($v)
                 </thead>
                 <tbody>
                 <?php
-                $sumDays = 0;
+                $sumWorkUnit = 0.0;
                 $sumAmount = 0.0;
                 $sumByDate = array();
                 foreach ($dateSlots as $slot) {
@@ -615,22 +682,28 @@ function equipment_money($v)
                     <?php foreach ($items as $it): ?>
                         <?php
                         $eid = (int)$it['id'];
-                        $days = 0;
+                        $rowWorkUnit = 0.0;
                         $rowAmount = 0.0;
-                        $rowSlotAmount = array();
+                        $rowSlotUsage = array();
                         foreach ($dateSlots as $slotAll) {
                             if (!$slotAll['valid']) {
                                 continue;
                             }
-                            $amtAll = 0.0;
+                            $usageRow = null;
+                            $slotUnit = 0.0;
+                            $slotAmount = 0.0;
                             if (isset($usageByEquipment[$eid]) && isset($usageByEquipment[$eid][$slotAll['date']])) {
-                                $amtAll = (float)$usageByEquipment[$eid][$slotAll['date']];
+                                $usageRow = $usageByEquipment[$eid][$slotAll['date']];
+                                if (is_array($usageRow)) {
+                                    $slotUnit = isset($usageRow['_work_unit']) ? (float)$usageRow['_work_unit'] : 1.0;
+                                    $slotAmount = isset($usageRow['_calc_amount']) ? (float)$usageRow['_calc_amount'] : 0.0;
+                                }
                             }
-                            $rowSlotAmount[$slotAll['date']] = $amtAll;
-                            if ($amtAll > 0) {
-                                $days++;
-                                $rowAmount += $amtAll;
-                                $sumByDate[$slotAll['date']] += $amtAll;
+                            $rowSlotUsage[$slotAll['date']] = $usageRow;
+                            if ($slotUnit > 0) {
+                                $rowWorkUnit += $slotUnit;
+                                $rowAmount += $slotAmount;
+                                $sumByDate[$slotAll['date']] += $slotUnit;
                             }
                         }                        
                         ?>
@@ -649,16 +722,12 @@ function equipment_money($v)
                                     echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
                                     continue;
                                 }
-                                $amt = isset($rowSlotAmount[$slot['date']]) ? (float)$rowSlotAmount[$slot['date']] : 0.0;
-                                if ($amt > 0) {
-                                    echo '<td class="border p-1 text-right">' . equipment_money($amt) . '</td>';
-                                } else {
-                                    echo '<td class="border p-1 text-center text-gray-300">-</td>';
-                                }
+                                $usageRow = isset($rowSlotUsage[$slot['date']]) ? $rowSlotUsage[$slot['date']] : null;
+                                echo equipment_render_gongsu_cell($usageRow, $pendingByUsage, $it);
                                 ?>
                             <?php endforeach; ?>
 
-                            <td class="border p-1 text-center" rowspan="2"><?php echo (int)$days; ?></td>
+                            <td class="border p-1 text-center" rowspan="2"><?php echo equipment_gongsu($rowWorkUnit); ?></td>
                             <td class="border p-1 text-right" rowspan="2"><?php echo equipment_money($rowAmount); ?></td>
                             <td class="border p-1" rowspan="2"><?php echo h($it['remark']); ?></td>
                         </tr>
@@ -669,18 +738,14 @@ function equipment_money($v)
                                     echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
                                     continue;
                                 }
-                                $amt = isset($rowSlotAmount[$slot['date']]) ? (float)$rowSlotAmount[$slot['date']] : 0.0;
-                                if ($amt > 0) {
-                                    echo '<td class="border p-1 text-right">' . equipment_money($amt) . '</td>';
-                                } else {
-                                    echo '<td class="border p-1 text-center text-gray-300">-</td>';
-                                }
+                                $usageRow = isset($rowSlotUsage[$slot['date']]) ? $rowSlotUsage[$slot['date']] : null;
+                                echo equipment_render_gongsu_cell($usageRow, $pendingByUsage, $it);
                                 ?>
                             <?php endforeach; ?>
                         </tr>
                         <?php
                         $lastCategory = (string)$it['category'];
-                        $sumDays += $days;
+                        $sumWorkUnit += $rowWorkUnit;
                         $sumAmount += $rowAmount;
                         ?>
                     <?php endforeach; ?>
@@ -691,10 +756,10 @@ function equipment_money($v)
                             <?php if (!$slot['valid']): ?>
                                 <td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>
                             <?php else: ?>
-                                <td class="border p-1 text-right"><?php echo equipment_money(isset($sumByDate[$slot['date']]) ? $sumByDate[$slot['date']] : 0); ?></td>
+                                <td class="border p-1 text-right"><?php echo equipment_gongsu(isset($sumByDate[$slot['date']]) ? $sumByDate[$slot['date']] : 0); ?></td>
                             <?php endif; ?>
                         <?php endforeach; ?>
-                        <td class="border p-1 text-center" rowspan="2"><?php echo (int)$sumDays; ?></td>
+                        <td class="border p-1 text-center" rowspan="2"><?php echo equipment_gongsu($sumWorkUnit); ?></td>
                         <td class="border p-1 text-right" rowspan="2"><?php echo equipment_money($sumAmount); ?></td>
                         <td class="border p-1" rowspan="2"></td>
                     </tr>
@@ -703,7 +768,7 @@ function equipment_money($v)
                             <?php if (!$slot['valid']): ?>
                                 <td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>
                             <?php else: ?>
-                                <td class="border p-1 text-right"><?php echo equipment_money(isset($sumByDate[$slot['date']]) ? $sumByDate[$slot['date']] : 0); ?></td>
+                                <td class="border p-1 text-right"><?php echo equipment_gongsu(isset($sumByDate[$slot['date']]) ? $sumByDate[$slot['date']] : 0); ?></td>
                             <?php endif; ?>
                         <?php endforeach; ?>
                     </tr>
@@ -711,5 +776,118 @@ function equipment_money($v)
                 </tbody>
             </table>
         </div>
+        <div id="equipmentGongsuModal" class="hidden fixed inset-0 z-50 bg-black/40 items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-lg p-5">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <div class="text-lg font-extrabold text-gray-900">장비공수 수정</div>
+                        <div class="text-sm text-gray-500" id="equipmentGongsuMeta"></div>
+                    </div>
+                    <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-equipment-gongsu-close>닫기</button>
+                </div>
+                <div class="mt-4 space-y-3">
+                    <input type="hidden" id="equipmentGongsuUsageId" value="">
+                    <input type="hidden" id="equipmentGongsuProjectId" value="<?php echo (int)$pid; ?>">
+                    <div class="grid grid-cols-2 gap-3 text-sm">
+                        <div class="bg-gray-50 rounded-xl p-3">
+                            <div class="text-xs text-gray-500 font-bold">기존 장비공수</div>
+                            <div class="mt-1 text-xl font-extrabold" id="equipmentGongsuOldText">1</div>
+                        </div>
+                        <label class="block">
+                            <span class="text-xs text-gray-500 font-bold">변경 장비공수</span>
+                            <input type="number" step="0.01" min="0" id="equipmentGongsuNewValue" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" value="1">
+                        </label>
+                    </div>
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">요청 사유</span>
+                        <textarea id="equipmentGongsuReason" rows="3" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" placeholder="1.2 이상은 승인 요청 사유가 필요합니다."></textarea>
+                    </label>
+                    <div class="text-xs text-gray-500">1.2 미만은 즉시 반영되고, 1.2 이상은 승인 요청으로 처리됩니다.</div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-2 rounded-xl border border-gray-300 font-bold" data-equipment-gongsu-close>취소</button>
+                        <button type="button" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold" id="equipmentGongsuSubmit">저장/요청</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function(){
+            var modal = document.getElementById('equipmentGongsuModal');
+            if (!modal) return;
+            var meta = document.getElementById('equipmentGongsuMeta');
+            var usageId = document.getElementById('equipmentGongsuUsageId');
+            var projectId = document.getElementById('equipmentGongsuProjectId');
+            var oldText = document.getElementById('equipmentGongsuOldText');
+            var newValue = document.getElementById('equipmentGongsuNewValue');
+            var reason = document.getElementById('equipmentGongsuReason');
+            var submitBtn = document.getElementById('equipmentGongsuSubmit');
+
+            function showModal(){
+                modal.className = modal.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').trim();
+                if (modal.className.indexOf('flex') === -1) modal.className += ' flex';
+            }
+            function hideModal(){
+                modal.className = modal.className.replace(/\bflex\b/g, '').replace(/\s+/g, ' ').trim();
+                if (modal.className.indexOf('hidden') === -1) modal.className += ' hidden';
+            }
+            document.addEventListener('click', function(e){
+                var cell = e.target && e.target.closest ? e.target.closest('[data-equipment-gongsu-cell]') : null;
+                if (cell) {
+                    usageId.value = cell.getAttribute('data-usage-id') || '';
+                    projectId.value = cell.getAttribute('data-project-id') || '<?php echo (int)$pid; ?>';
+                    var oldVal = cell.getAttribute('data-old-value') || '1.00';
+                    oldText.textContent = oldVal;
+                    newValue.value = oldVal;
+                    reason.value = '';
+                    var name = cell.getAttribute('data-equipment-name') || '';
+                    var vendor = cell.getAttribute('data-vendor-name') || '';
+                    var useDate = cell.getAttribute('data-use-date') || '';
+                    meta.textContent = vendor + (name ? ' / ' + name : '') + (useDate ? ' / ' + useDate : '');
+                    showModal();
+                    return;
+                }
+                if (e.target && e.target.getAttribute && e.target.getAttribute('data-equipment-gongsu-close') !== null) {
+                    hideModal();
+                }
+            });
+            if (submitBtn) {
+                submitBtn.addEventListener('click', function(){
+                    var v = parseFloat(newValue.value || '0');
+                    if (isNaN(v) || v < 0) { alert('변경 장비공수를 확인해주세요.'); return; }
+                    if (v >= 1.2 && (reason.value || '').replace(/\s+/g, '') === '') {
+                        alert('1.2 이상 장비공수는 요청 사유가 필요합니다.');
+                        return;
+                    }
+                    var params = new URLSearchParams();
+                    params.append('_csrf', <?php echo json_encode(csrf_token()); ?>);
+                    params.append('project_id', projectId.value || '<?php echo (int)$pid; ?>');
+                    params.append('equipment_usage_id', usageId.value || '');
+                    params.append('new_value', newValue.value || '');
+                    params.append('reason', reason.value || '');
+                    submitBtn.disabled = true;
+                    fetch('<?php echo h(base_url()); ?>/?r=construction/equipment_gongsu_override_save', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
+                        body: params.toString()
+                    }).then(function(res){
+                        return res.text().then(function(text){ return {ok: res.ok, text: text}; });
+                    }).then(function(resp){
+                        var json = null;
+                        try { json = JSON.parse(resp.text); } catch (err) {}
+                        if (!resp.ok || !json || !json.ok) {
+                            alert((json && json.message) ? json.message : ('장비공수 저장 실패: ' + resp.text.substring(0, 200)));
+                            return;
+                        }
+                        alert(json.message || '장비공수가 처리되었습니다.');
+                        window.location.reload();
+                    }).catch(function(){
+                        alert('장비공수 저장 중 통신 오류가 발생했습니다.');
+                    }).finally(function(){
+                        submitBtn.disabled = false;
+                    });
+                });
+            }
+        })();
+        </script>
     <?php endif; ?>
 </div>

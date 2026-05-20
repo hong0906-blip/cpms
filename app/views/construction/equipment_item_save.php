@@ -7,6 +7,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -109,8 +110,8 @@ function equipment_month_range($ym)
 {
     $prevYm = date('Y-m', strtotime($ym . '-01 -1 month'));
     return array(
-        'start' => $prevYm . '-25',
-        'end' => $ym . '-24',
+        'start' => $prevYm . '-26',
+        'end' => $ym . '-25',
     );
 }
 
@@ -147,6 +148,7 @@ function equipment_collect_usage_dates($usageDates, $text, $ym)
     return array_keys($result);
 }
 $pdo = Db::pdo();
+if ($pdo) cpms_equipment_gongsu_ensure_schema($pdo);
 if (!$pdo) {
     flash_set('error', 'DB 연결 실패');
     header('Location: ' . $redirect);
@@ -196,14 +198,20 @@ try {
     }    
     if ($equipmentId > 0 && count($dates) > 0) {
         $stU = $pdo->prepare("INSERT INTO cpms_equipment_usage
-            (project_id, equipment_id, use_date, amount, memo, created_at)
+            (project_id, equipment_id, use_date, work_unit, base_rate_snapshot, amount, is_manual_unit, memo, created_at)
             VALUES
-            (:pid, :eid, :d, :amt, :memo, :created_at)
-            ON DUPLICATE KEY UPDATE amount = VALUES(amount), memo = VALUES(memo)");
+            (:pid, :eid, :d, :work_unit, :base_rate, :amt, 0, :memo, :created_at)
+            ON DUPLICATE KEY UPDATE
+                work_unit = IF(is_manual_unit = 1, work_unit, VALUES(work_unit)),
+                base_rate_snapshot = IF(is_manual_unit = 1, base_rate_snapshot, VALUES(base_rate_snapshot)),
+                amount = IF(is_manual_unit = 1, amount, VALUES(amount)),
+                memo = VALUES(memo)");
         foreach ($dates as $d) {
             $stU->bindValue(':pid', $projectId, PDO::PARAM_INT);
             $stU->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
             $stU->bindValue(':d', $d);
+            $stU->bindValue(':work_unit', 1.00);
+            $stU->bindValue(':base_rate', $baseRate);
             $stU->bindValue(':amt', $baseRate);
             $stU->bindValue(':memo', '');
             $stU->bindValue(':created_at', $now);

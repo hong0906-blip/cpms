@@ -10,6 +10,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/schedule_auto_progress_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -90,6 +91,7 @@ try {
         $st->bindValue(':wid', $workId > 0 ? $workId : null, $workId > 0 ? \PDO::PARAM_INT : \PDO::PARAM_NULL);        
         $st->bindValue(':pid', $projectId, \PDO::PARAM_INT);
         $st->execute();
+        cpms_schedule_apply_auto_progress($pdo, $projectId);
         flash_set('success','공정표가 저장되었습니다.');
     } else {
         // sort_order는 맨 뒤로
@@ -111,6 +113,7 @@ try {
         $ins->bindValue(':ord', $ord, \PDO::PARAM_INT);
         $ins->bindValue(':wid', $workId > 0 ? $workId : null, $workId > 0 ? \PDO::PARAM_INT : \PDO::PARAM_NULL);
         $ins->execute();
+        cpms_schedule_apply_auto_progress($pdo, $projectId);
         flash_set('success','공정이 추가되었습니다.');
     }
 
