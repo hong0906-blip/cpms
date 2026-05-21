@@ -23,7 +23,7 @@ try {
     $userName = '';
 }
 
-$myIssues = [];
+$myIssues = array();
 if ($pdo && $userEmail !== '') {
     try {
         $sql = "SELECT i.*, p.name AS project_name
@@ -37,12 +37,12 @@ if ($pdo && $userEmail !== '') {
         $st->execute();
         $myIssues = $st->fetchAll();
     } catch (Exception $e) {
-        $myIssues = [];
+        $myIssues = array();
     }
 }
 
 // ✅ 내 프로젝트 안전사고(최근 10) - 공사팀이 "내 프로젝트만" 보는 흐름 보조용
-$mySafety = [];
+$mySafety = array();
 if ($pdo && $userEmail !== '') {
     try {
         // employees 테이블에서 내 employee_id 찾고, 멤버(main/sub) 프로젝트만 조회
@@ -67,7 +67,7 @@ if ($pdo && $userEmail !== '') {
             $mySafety = $st->fetchAll();
         }
     } catch (Exception $e) {
-        $mySafety = [];
+        $mySafety = array();
     }
 }
 
@@ -102,7 +102,7 @@ if ($pdo && $userEmail !== '') {
                 $m = cpms_project_cost_metrics($pdo, (int)$pr['id'], $period);
                 $m['project_id'] = (int)$pr['id'];
                 $m['project_name'] = (string)$pr['name'];
-                $kpiRows[] = $m;
+                $kpiRows[count($kpiRows)] = $m;
             }
 
             usort($kpiRows, function($a, $b){
@@ -138,8 +138,8 @@ if ($pdo) {
 for ($i = count($allReq) - 1; $i >= 0; $i--) {
     $rq = $allReq[$i];
     if (!is_array($rq)) continue;
-    if ((int)$myUserId > 0 && (int)$rq['target_user_id'] === (int)$myUserId) $myReceivedRequests[] = $rq;
-    if ((int)$myUserId > 0 && (int)$rq['requester_user_id'] === (int)$myUserId) $mySentRequests[] = $rq;
+    if ((int)$myUserId > 0 && (int)$rq['target_user_id'] === (int)$myUserId) $myReceivedRequests[count($myReceivedRequests)] = $rq;
+    if ((int)$myUserId > 0 && (int)$rq['requester_user_id'] === (int)$myUserId) $mySentRequests[count($mySentRequests)] = $rq;
 }
 
 ?>
@@ -334,6 +334,7 @@ if($pdo&&$eid_att>0){
 <?php endif; ?>
 
 
+<?php if (false): ?>
 <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-8">
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
         <h3 class="text-xl font-extrabold text-gray-900">요청사항(받은 요청)</h3>
@@ -604,8 +605,11 @@ if($pdo&&$eid_att>0){
 <div class="mt-8">
     <?php render_task_list_sample(); ?>
 </div>
+<?php endif; ?>
 <?php /** 출퇴근 시스템: 내 근태 현황 */ require_once __DIR__.'/../attendance/common.php'; $pdo2=\App\Core\Db::pdo(); $eid=attendance_employee_id($pdo2); $today=attendance_today(); $st='출근 전';$cin='-';$cout='-';$wm=0;$weekm=0;$pending=0;$approved=0;$rejected=0; if($pdo2&&$eid>0){try{$r=$pdo2->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d");$r->execute(array(':e'=>$eid,':d'=>$today));$row=$r->fetch(); if($row){$st=$row['status'];$cin=$row['check_in'];$cout=$row['check_out'];$wm=(int)$row['work_minutes'];} list($ws,$we)=attendance_week_range($today);$w=$pdo2->prepare("SELECT SUM(work_minutes) FROM cpms_attendance_records WHERE employee_id=:e AND work_date BETWEEN :s AND :t");$w->execute(array(':e'=>$eid,':s'=>$ws,':t'=>$we));$weekm=(int)$w->fetchColumn();$q=$pdo2->prepare("SELECT status,COUNT(*) c FROM cpms_attendance_requests WHERE employee_id=:e GROUP BY status");$q->execute(array(':e'=>$eid));foreach($q->fetchAll() as $x){if($x['status']==='pending')$pending=$x['c'];if($x['status']==='approved')$approved=$x['c'];if($x['status']==='rejected')$rejected=$x['c'];}}catch(Exception $e){}} ?>
 <div><h3>내 근태 현황</h3><p>오늘 상태: <?php echo h($st);?> / 출근: <?php echo h($cin);?> / 퇴근: <?php echo h($cout);?> / 오늘 근무: <?php echo number_format($wm/60,2);?>h / 이번 주: <?php echo number_format($weekm/60,2);?>h</p><p>출퇴근 수정 요청 상태: 승인대기 <?php echo (int)$pending;?> / 승인 <?php echo (int)$approved;?> / 반려 <?php echo (int)$rejected;?></p></div>
 
 <div class='bg-white/80 rounded-3xl p-6 border mb-8'><!-- 직원 대시보드 현재 상태 카드 --><h3 class='text-xl font-bold'>현재 상태</h3><div class='text-lg font-bold'><?php echo h($currentStatus);?></div><div class='text-sm text-gray-600'>상태 기준: 출근 전 / 출근중 / 퇴근완료 / 연차 / 오전반차 / 오후반차 / 휴무</div></div>
+<?php if (false): ?>
 <div class="bg-white rounded-2xl p-4 border mb-4"><h3 class="font-bold">받은 전자결재</h3><p><a href="?r=approval_home">전자결재에서 확인</a></p><h3 class="font-bold mt-3">나의 전자결재 요청</h3><p><a href="?r=approval_home">전자결재에서 확인</a></p></div>
+<?php endif; ?>

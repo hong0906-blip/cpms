@@ -138,10 +138,14 @@ function cpms_render_employee_task_dashboard($pdo)
         }
     }
     ?>
-    <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
+    <div id="cpmsEmployeeTasksPanel" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
         <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
-            <div>
-                <h2 class="text-2xl font-extrabold text-gray-900">나의 할일</h2>
+            <div class="flex-1 min-w-0">
+                <div class="flex flex-wrap items-center gap-3">
+                    <h2 class="text-2xl font-extrabold text-gray-900">나의 할일</h2>
+                    <button type="button" id="cpmsEmployeeTasksToggle" class="px-3 py-2 rounded-2xl bg-white border border-gray-200 text-sm font-bold text-gray-700">숨기기 ▲</button>
+                </div>
+                <div data-cpms-employee-task-body>
                 <div class="text-sm text-gray-600 mt-1">업무 요청, 승인 요청, 마감 임박 업무를 한 곳에서 확인하고 바로 처리할 수 있습니다.</div>
                 <div class="mt-3 flex flex-wrap gap-2 text-sm">
                     <span class="px-3 py-2 rounded-full bg-slate-100 text-slate-700 font-bold">전체 <?php echo (int)$summary['all']; ?>건</span>
@@ -151,6 +155,7 @@ function cpms_render_employee_task_dashboard($pdo)
                     <span class="px-3 py-2 rounded-full bg-red-50 text-red-700 font-bold">지연 <?php echo (int)$summary['delayed']; ?>건</span>
                     <span class="px-3 py-2 rounded-full bg-indigo-50 text-indigo-700 font-bold">승인대기 <?php echo (int)$summary['approval']; ?>건</span>
                 </div>
+                </div>
             </div>
             <div class="flex flex-wrap items-center gap-2">
                 <a href="?r=tasks/my_list" class="px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-700 font-bold">전체 보기</a>
@@ -158,7 +163,7 @@ function cpms_render_employee_task_dashboard($pdo)
             </div>
         </div>
 
-        <div class="mt-6 space-y-5">
+        <div data-cpms-employee-task-body class="mt-6 space-y-5">
             <?php cpms_render_feed_lane('긴급', '긴급 요청으로 표시된 업무입니다.', 'bg-rose-50 text-rose-700', $urgentItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
             <?php cpms_render_feed_lane('오늘 마감', '오늘 안에 챙기면 좋은 업무입니다.', 'bg-amber-50 text-amber-700', $todayItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
             <?php cpms_render_feed_lane('진행중', '이미 착수했거나 보완 중인 업무입니다.', 'bg-blue-50 text-blue-700', $progressItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
@@ -167,6 +172,36 @@ function cpms_render_employee_task_dashboard($pdo)
             <?php cpms_render_feed_lane('내가 요청한 업무', '요청 후 진행 상황을 계속 확인할 수 있습니다.', 'bg-slate-100 text-slate-700', $requested, (int)$currentEmployee['id'], $returnUrl, true); ?>
         </div>
     </div>
+
+    <script>
+    (function(){
+        var key = 'cpms_employee_tasks_collapsed';
+        var toggle = document.getElementById('cpmsEmployeeTasksToggle');
+        var bodies = document.querySelectorAll('[data-cpms-employee-task-body]');
+        if (!toggle || !bodies || bodies.length === 0) return;
+        function readState() {
+            try { return window.localStorage && localStorage.getItem(key) === '1'; } catch (e) { return false; }
+        }
+        function saveState(collapsed) {
+            try { if (window.localStorage) localStorage.setItem(key, collapsed ? '1' : '0'); } catch (e) {}
+        }
+        function applyState(collapsed) {
+            for (var i = 0; i < bodies.length; i++) {
+                if (collapsed) bodies[i].classList.add('hidden');
+                else bodies[i].classList.remove('hidden');
+            }
+            toggle.textContent = collapsed ? '보기 ▼' : '숨기기 ▲';
+            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        }
+        var collapsed = readState();
+        applyState(collapsed);
+        toggle.addEventListener('click', function(){
+            collapsed = !collapsed;
+            applyState(collapsed);
+            saveState(collapsed);
+        });
+    })();
+    </script>
 
     <div id="modal-taskCreate" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-black/40" data-modal-close="taskCreate"></div>
@@ -450,17 +485,19 @@ function cpms_render_executive_task_dashboard($pdo)
     $summaryData = cpms_task_feed_for_executive($pdo, array('department' => $selectedDepartment));
     $departmentOptions = array_merge(array('전체'), cpms_tasks_department_options());
     ?>
-    <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
+    <div id="cpmsExecutiveTasksPanel" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div>
                 <h2 class="text-2xl font-extrabold text-gray-900">부서별 업무 현황</h2>
                 <div class="text-sm text-gray-600 mt-1">업무가 몰린 곳과 마감 임박 업무를 함께 보며 지원이 필요한 지점을 빠르게 확인할 수 있습니다.</div>
             </div>
             <div class="flex flex-wrap gap-2">
+                <button type="button" id="cpmsExecutiveTasksToggle" class="px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-700 font-bold">숨기기 ▲</button>
                 <a href="?r=tasks/executive_summary" class="px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-700 font-bold">요약 보기</a>
             </div>
         </div>
 
+        <div data-cpms-executive-task-body>
         <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mt-6">
             <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500 font-bold">오늘 할일</div><div class="mt-2 text-3xl font-extrabold text-slate-900"><?php echo (int)$summaryData['summary']['today']; ?></div></div>
             <div class="p-4 rounded-2xl bg-rose-50 border border-rose-200"><div class="text-xs text-rose-500 font-bold">긴급 요청</div><div class="mt-2 text-3xl font-extrabold text-rose-700"><?php echo (int)$summaryData['summary']['urgent']; ?></div></div>
@@ -593,6 +630,34 @@ function cpms_render_executive_task_dashboard($pdo)
                 <?php endforeach; ?>
             </div>
         </div>
+        </div>
     </div>
+    <script>
+    (function(){
+        var key = 'cpms_executive_tasks_collapsed';
+        var toggle = document.getElementById('cpmsExecutiveTasksToggle');
+        var body = document.querySelector('[data-cpms-executive-task-body]');
+        if (!toggle || !body) return;
+        function readState() {
+            try { return window.localStorage && localStorage.getItem(key) === '1'; } catch (e) { return false; }
+        }
+        function saveState(collapsed) {
+            try { if (window.localStorage) localStorage.setItem(key, collapsed ? '1' : '0'); } catch (e) {}
+        }
+        function applyState(collapsed) {
+            if (collapsed) body.classList.add('hidden');
+            else body.classList.remove('hidden');
+            toggle.textContent = collapsed ? '보기 ▼' : '숨기기 ▲';
+            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        }
+        var collapsed = readState();
+        applyState(collapsed);
+        toggle.addEventListener('click', function(){
+            collapsed = !collapsed;
+            applyState(collapsed);
+            saveState(collapsed);
+        });
+    })();
+    </script>
     <?php
 }}

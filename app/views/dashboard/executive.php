@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/../partials/TaskList.php';
 require_once __DIR__ . '/../partials/cost_metrics.php';
+require_once __DIR__ . '/partials/project_cost_summary_helper.php';
 require_once __DIR__ . '/../construction/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../tasks/dashboard_sections.php';
 
@@ -14,9 +15,12 @@ use App\Core\Db;
 $user = \App\Core\Auth::user();
 $pdo = Db::pdo();
 $userEmail = (string)\App\Core\Auth::userEmail();
+$projectCostSummary = cpms_dashboard_project_cost_summary($pdo);
+if (!isset($projectCostSummary['project_count'])) $projectCostSummary['project_count'] = 0;
+if (!isset($projectCostSummary['projects']) || !is_array($projectCostSummary['projects'])) $projectCostSummary['projects'] = array();
 
 // 임원 대시보드 이슈 목록(최근 20)
-$issues = [];
+$issues = array();
 if ($pdo) {
     try {
         $sql = "SELECT i.*, p.name AS project_name
@@ -27,7 +31,7 @@ if ($pdo) {
         $st = $pdo->query($sql);
         $issues = $st->fetchAll();
     } catch (Exception $e) {
-        $issues = [];
+        $issues = array();
     }
 }
 
@@ -37,7 +41,7 @@ $issueCommentsByIssueId = array();
 if ($pdo && count($issues) > 0) {
     try {
         $issueIds = array();
-        foreach ($issues as $issueRow) { $issueIds[] = (int)$issueRow['id']; }
+        foreach ($issues as $issueRow) { $issueIds[count($issueIds)] = (int)$issueRow['id']; }
         $issueIds = array_values(array_unique($issueIds));
         if (count($issueIds) > 0) {
             $placeholders = implode(',', array_fill(0, count($issueIds), '?'));
@@ -51,7 +55,7 @@ if ($pdo && count($issues) > 0) {
             foreach ($commentRows as $cr) {
                 $key = (int)$cr['issue_id'];
                 if (!isset($issueCommentsByIssueId[$key])) $issueCommentsByIssueId[$key] = array();
-                $issueCommentsByIssueId[$key][] = $cr;
+                $issueCommentsByIssueId[$key][count($issueCommentsByIssueId[$key])] = $cr;
             }
         }
     } catch (Exception $e) {
@@ -60,7 +64,7 @@ if ($pdo && count($issues) > 0) {
 }
 
 // ✅ 안전사고 목록(최근 10)
-$safetyIncidents = [];
+$safetyIncidents = array();
 if ($pdo) {
     try {
         $sql = "SELECT i.*, p.name AS project_name
@@ -71,7 +75,7 @@ if ($pdo) {
         $st = $pdo->query($sql);
         $safetyIncidents = $st->fetchAll();
     } catch (Exception $e) {
-        $safetyIncidents = [];
+        $safetyIncidents = array();
     }
 }
 
@@ -91,7 +95,7 @@ if ($pdo) {
             $m = cpms_project_cost_metrics($pdo, (int)$pr['id'], $period);
             $m['project_id'] = (int)$pr['id'];
             $m['project_name'] = (string)$pr['name'];
-            $kpiRows[] = $m;
+            $kpiRows[count($kpiRows)] = $m;
         }
         usort($kpiRows, function($a, $b){
             $av = ($a['cost_rate'] === null) ? -1 : (float)$a['cost_rate'];
@@ -174,7 +178,7 @@ if ($pdo) {
 for ($i = count($allReq) - 1; $i >= 0; $i--) {
     $rq = $allReq[$i];
     if (!is_array($rq)) continue;
-    if ((int)$myUserId > 0 && (int)$rq['target_user_id'] === (int)$myUserId) $myReceivedRequests[] = $rq;
+    if ((int)$myUserId > 0 && (int)$rq['target_user_id'] === (int)$myUserId) $myReceivedRequests[count($myReceivedRequests)] = $rq;
 }
 
 ?>
@@ -193,17 +197,17 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
     </div>
 </div>
 
-<?php require_once __DIR__.'/../attendance/common.php'; list($ews,$ewe)=attendance_week_range(attendance_today()); $risk52=array();$absent=array();$leaveToday=0;$today=attendance_today();$leaveExTypes=array('월차','연차','반차','오전반차','오후반차','월차반차','연차반차','오전월차반차','오후월차반차','오전연차반차','오후연차반차','대체휴무','기타휴무','휴무');$leaveMainTypes=array('월차','연차','반차','오전반차','오후반차','월차반차','연차반차','오전월차반차','오후월차반차','오전연차반차','오후연차반차'); if($pdo){ try{$sql="SELECT e.id,e.name,e.department,e.position,COALESCE(SUM(a.work_minutes),0) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e WHERE e.is_active=1 GROUP BY e.id,e.name,e.department,e.position";$st=$pdo->prepare($sql);$st->execute(array(':s'=>$ews,':e'=>$ewe));foreach($st->fetchAll() as $r){if((int)$r['m']>3120)$risk52[]=$r;} // 미출근자에서 휴가자 제외
-$leaveQMarks=array(); foreach($leaveExTypes as $v){$leaveQMarks[]='?';}
+<?php require_once __DIR__.'/../attendance/common.php'; list($ews,$ewe)=attendance_week_range(attendance_today()); $risk52=array();$absent=array();$leaveToday=0;$today=attendance_today();$leaveExTypes=array('월차','연차','반차','오전반차','오후반차','월차반차','연차반차','오전월차반차','오후월차반차','오전연차반차','오후연차반차','대체휴무','기타휴무','휴무');$leaveMainTypes=array('월차','연차','반차','오전반차','오후반차','월차반차','연차반차','오전월차반차','오후월차반차','오전연차반차','오후연차반차'); if($pdo){ try{$sql="SELECT e.id,e.name,e.department,e.position,COALESCE(SUM(a.work_minutes),0) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e WHERE e.is_active=1 GROUP BY e.id,e.name,e.department,e.position";$st=$pdo->prepare($sql);$st->execute(array(':s'=>$ews,':e'=>$ewe));foreach($st->fetchAll() as $r){if((int)$r['m']>3120)$risk52[count($risk52)]=$r;} // 미출근자에서 휴가자 제외
+$leaveQMarks=array(); foreach($leaveExTypes as $v){$leaveQMarks[count($leaveQMarks)]='?';}
 $leaveSql="SELECT DISTINCT employee_id FROM cpms_leave_records WHERE leave_date=? AND leave_type IN (".implode(',', $leaveQMarks).")";
 $leaveParams=array_merge(array($today),$leaveExTypes);
 $stLeaveEx=$pdo->prepare($leaveSql);$stLeaveEx->execute($leaveParams);$leaveExIds=$stLeaveEx->fetchAll(PDO::FETCH_COLUMN,0);
 $leaveExMap=array(); if($leaveExIds){foreach($leaveExIds as $eid){$leaveExMap[(int)$eid]=1;}}
 $stActive=$pdo->query("SELECT id,name,department,position FROM employees WHERE is_active=1");$activeRows=$stActive?$stActive->fetchAll():array();
 $stAtt=$pdo->prepare("SELECT DISTINCT employee_id FROM cpms_attendance_records WHERE work_date=? AND (check_in IS NOT NULL OR status IN ('출근중','퇴근완료'))");$stAtt->execute(array($today));$attIds=$stAtt->fetchAll(PDO::FETCH_COLUMN,0);$attMap=array(); if($attIds){foreach($attIds as $eid){$attMap[(int)$eid]=1;}}
-$absent=array(); foreach($activeRows as $ar){$eid=(int)$ar['id']; if(isset($attMap[$eid])) continue; if(isset($leaveExMap[$eid])) continue; $absent[]=array('name'=>$ar['name'],'department'=>$ar['department'],'position'=>$ar['position']);}
+$absent=array(); foreach($activeRows as $ar){$eid=(int)$ar['id']; if(isset($attMap[$eid])) continue; if(isset($leaveExMap[$eid])) continue; $absent[count($absent)]=array('name'=>$ar['name'],'department'=>$ar['department'],'position'=>$ar['position']);}
 // 월차/연차/반차자 포함
-$leaveMainQMarks=array(); foreach($leaveMainTypes as $v){$leaveMainQMarks[]='?';}
+$leaveMainQMarks=array(); foreach($leaveMainTypes as $v){$leaveMainQMarks[count($leaveMainQMarks)]='?';}
 $leaveMainSql="SELECT COUNT(DISTINCT employee_id) FROM cpms_leave_records WHERE leave_date=? AND leave_type IN (".implode(',', $leaveMainQMarks).")";
 $leaveMainParams=array_merge(array($today),$leaveMainTypes);
 $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(int)$stL->fetchColumn(); }catch(Exception $e){} }
@@ -335,6 +339,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
     </div>
 </div>
 
+<?php if (false): ?>
 <div class="grid grid-cols-1 xl:grid-cols-1 gap-6 mb-8">
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
         <h3 class="text-xl font-extrabold text-gray-900">요청사항(받은 요청)</h3>
@@ -373,7 +378,9 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
         </div>
     </div>
     
+<?php endif; ?>
 
+<?php if (false): ?>
 <!-- ✅ 프로젝트별 원가/공정 KPI -->
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
     <div class="flex items-center justify-between mb-4">
@@ -421,20 +428,79 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
         </div>
     <?php endif; ?>
 </div>
+<?php endif; ?>
 
-<!-- KPI 카드(샘플) -->
+<?php
+$projectCostRows = isset($projectCostSummary['projects']) && is_array($projectCostSummary['projects']) ? $projectCostSummary['projects'] : array();
+$projectCostCount = isset($projectCostSummary['project_count']) ? (int)$projectCostSummary['project_count'] : 0;
+?>
+<!-- KPI 카드 -->
 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-    <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
+    <div class="relative group bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 hover:shadow-xl transition-all duration-300 cursor-pointer focus:outline-none focus:ring-4 focus:ring-blue-100" tabindex="0" data-project-cost-open="1">
         <div class="flex items-center justify-between">
             <div>
                 <p class="text-sm font-semibold text-gray-600">전체 프로젝트</p>
-                <p class="text-3xl font-extrabold text-gray-900 mt-2">—</p>
+                <p class="text-3xl font-extrabold text-gray-900 mt-2"><?php echo (int)$projectCostCount; ?>건</p>
             </div>
             <div class="p-4 bg-gradient-to-br from-blue-500 to-indigo-500 rounded-2xl shadow-lg shadow-blue-500/30">
                 <i data-lucide="folder" class="w-6 h-6 text-white"></i>
             </div>
         </div>
-        <p class="text-sm text-gray-500 mt-4">프로젝트 수는 공무에서 확인합니다.</p>
+        <p class="text-sm text-gray-600 mt-4 font-semibold">현재 등록된 프로젝트 <?php echo (int)$projectCostCount; ?>건</p>
+        <p class="text-xs text-gray-500 mt-1">마우스를 올리면 프로젝트별 매출 대비 사용금액을 확인할 수 있습니다.</p>
+        <p class="text-xs text-blue-600 mt-1 lg:hidden">터치하면 상세보기</p>
+
+        <div class="hidden lg:block absolute left-0 top-full z-30 mt-3 w-[440px] max-w-[calc(100vw-2rem)] rounded-3xl border border-gray-100 bg-white shadow-2xl shadow-gray-300/50 p-5 opacity-0 invisible translate-y-2 group-hover:opacity-100 group-hover:visible group-hover:translate-y-0 transition-all duration-200">
+            <div class="flex items-center justify-between gap-3 mb-4">
+                <div>
+                    <div class="text-sm font-extrabold text-gray-900">전체 프로젝트 <?php echo (int)$projectCostCount; ?>건</div>
+                    <div class="text-xs text-gray-500">프로젝트별 매출 대비 사용금액 요약</div>
+                </div>
+                <span class="px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-bold">공무 데이터</span>
+            </div>
+            <?php if (count($projectCostRows) === 0): ?>
+                <div class="rounded-2xl bg-gray-50 p-4 text-sm text-gray-500">표시할 프로젝트가 없습니다.</div>
+            <?php else: ?>
+                <div class="max-h-96 overflow-y-auto pr-1 space-y-3">
+                    <?php foreach ($projectCostRows as $projectCost): ?>
+                        <?php
+                        $projectName = isset($projectCost['project_name']) && trim((string)$projectCost['project_name']) !== '' ? (string)$projectCost['project_name'] : '-';
+                        $statusColor = isset($projectCost['status_color']) ? (string)$projectCost['status_color'] : 'blue';
+                        $isOverSales = isset($projectCost['is_over_sales']) && (int)$projectCost['is_over_sales'] === 1;
+                        $noSales = isset($projectCost['no_sales']) && (int)$projectCost['no_sales'] === 1;
+                        $dotClass = ($statusColor === 'red') ? 'bg-red-500' : 'bg-blue-500';
+                        if ($isOverSales || $noSales) $dotClass = 'bg-red-600 ring-4 ring-red-100';
+                        $rateClass = ($statusColor === 'red') ? 'text-red-700' : 'text-blue-700';
+                        ?>
+                        <div class="rounded-2xl border border-gray-100 bg-gray-50 p-4">
+                            <div class="flex items-start gap-3">
+                                <span class="mt-1 h-3 w-3 rounded-full flex-none <?php echo h($dotClass); ?>"></span>
+                                <div class="min-w-0 flex-1">
+                                    <a href="<?php echo h(base_url()); ?>/?r=project/detail&id=<?php echo (int)$projectCost['project_id']; ?>" class="font-extrabold text-gray-900 hover:text-blue-700 hover:underline block truncate"><?php echo h($projectName); ?></a>
+                                    <div class="grid grid-cols-2 gap-x-3 gap-y-1 mt-2 text-xs text-gray-600">
+                                        <div>매출 <span class="font-bold text-gray-900"><?php echo h(cpms_dashboard_money($projectCost['sales'])); ?></span></div>
+                                        <div>사용 <span class="font-bold text-gray-900"><?php echo h(cpms_dashboard_money($projectCost['used_total'])); ?></span></div>
+                                        <div>장비 <?php echo h(cpms_dashboard_money($projectCost['equipment'])); ?></div>
+                                        <div>노무 <?php echo h(cpms_dashboard_money($projectCost['labor'])); ?></div>
+                                        <div>자재 <?php echo h(cpms_dashboard_money($projectCost['materials'])); ?></div>
+                                        <div class="font-extrabold <?php echo h($rateClass); ?>">원가율 <?php echo h($projectCost['cost_rate_label']); ?></div>
+                                    </div>
+                                    <?php if ($noSales): ?>
+                                        <div class="mt-2 text-xs font-bold text-red-700">매출 없음 / 사용금액 발생</div>
+                                    <?php elseif ($isOverSales): ?>
+                                        <div class="mt-2 text-xs font-bold text-red-700">매출 대비 사용금액 초과</div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+            <div class="mt-4 rounded-2xl bg-gray-50 px-4 py-3 text-xs text-gray-500">
+                원가율 = (장비비 + 노무비 + 자재구입비) ÷ 매출 × 100<br>
+                80% 초과 시 빨간색으로 표시됩니다.
+            </div>
+        </div>
     </div>
 
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 hover:shadow-xl transition-all duration-300">
@@ -463,6 +529,114 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
         <p class="text-sm text-gray-500 mt-4">최근 10건 기준 표시</p>
     </div>
 </div>
+
+<div id="cpmsProjectCostModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-gray-950/50 p-4" aria-hidden="true">
+    <div class="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-3xl bg-white shadow-2xl">
+        <div class="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-5">
+            <div>
+                <div class="text-2xl font-extrabold text-gray-900">전체 프로젝트 <?php echo (int)$projectCostCount; ?>건</div>
+                <div class="text-sm text-gray-500 mt-1">프로젝트별 매출 대비 사용금액과 원가율을 확인합니다.</div>
+            </div>
+            <button type="button" class="rounded-2xl border border-gray-200 px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-50" data-project-cost-close>닫기</button>
+        </div>
+        <div class="max-h-[65vh] overflow-y-auto px-6 py-5">
+            <?php if (count($projectCostRows) === 0): ?>
+                <div class="rounded-2xl bg-gray-50 p-5 text-sm text-gray-500">표시할 프로젝트가 없습니다.</div>
+            <?php else: ?>
+                <div class="space-y-3">
+                    <?php foreach ($projectCostRows as $projectCost): ?>
+                        <?php
+                        $projectName = isset($projectCost['project_name']) && trim((string)$projectCost['project_name']) !== '' ? (string)$projectCost['project_name'] : '-';
+                        $statusColor = isset($projectCost['status_color']) ? (string)$projectCost['status_color'] : 'blue';
+                        $isOverSales = isset($projectCost['is_over_sales']) && (int)$projectCost['is_over_sales'] === 1;
+                        $noSales = isset($projectCost['no_sales']) && (int)$projectCost['no_sales'] === 1;
+                        $dotClass = ($statusColor === 'red') ? 'bg-red-500' : 'bg-blue-500';
+                        if ($isOverSales || $noSales) $dotClass = 'bg-red-600 ring-4 ring-red-100';
+                        $rateClass = ($statusColor === 'red') ? 'text-red-700' : 'text-blue-700';
+                        ?>
+                        <div class="rounded-3xl border border-gray-100 bg-gray-50 p-5">
+                            <div class="flex items-start gap-3">
+                                <span class="mt-1 h-3 w-3 rounded-full flex-none <?php echo h($dotClass); ?>"></span>
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex flex-wrap items-center gap-2">
+                                        <a href="<?php echo h(base_url()); ?>/?r=project/detail&id=<?php echo (int)$projectCost['project_id']; ?>" class="font-extrabold text-lg text-gray-900 hover:text-blue-700 hover:underline"><?php echo h($projectName); ?></a>
+                                        <?php if ($isOverSales): ?><span class="px-3 py-1 rounded-full bg-red-50 text-red-700 text-xs font-bold">매출 초과</span><?php endif; ?>
+                                        <?php if ($noSales): ?><span class="px-3 py-1 rounded-full bg-red-50 text-red-700 text-xs font-bold">매출 없음</span><?php endif; ?>
+                                    </div>
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-3 text-sm text-gray-600">
+                                        <div class="rounded-2xl bg-white px-3 py-2">매출 <b class="text-gray-900"><?php echo h(cpms_dashboard_money($projectCost['sales'])); ?></b></div>
+                                        <div class="rounded-2xl bg-white px-3 py-2">사용금액 <b class="text-gray-900"><?php echo h(cpms_dashboard_money($projectCost['used_total'])); ?></b></div>
+                                        <div class="rounded-2xl bg-white px-3 py-2">원가율 <b class="<?php echo h($rateClass); ?>"><?php echo h($projectCost['cost_rate_label']); ?></b></div>
+                                        <div class="rounded-2xl bg-white px-3 py-2">장비비 <?php echo h(cpms_dashboard_money($projectCost['equipment'])); ?></div>
+                                        <div class="rounded-2xl bg-white px-3 py-2">노무비 <?php echo h(cpms_dashboard_money($projectCost['labor'])); ?></div>
+                                        <div class="rounded-2xl bg-white px-3 py-2">자재구입비 <?php echo h(cpms_dashboard_money($projectCost['materials'])); ?></div>
+                                    </div>
+                                    <?php if ($noSales): ?>
+                                        <div class="mt-3 text-sm font-bold text-red-700">매출 없음 / 사용금액 발생</div>
+                                    <?php elseif ($isOverSales): ?>
+                                        <div class="mt-3 text-sm font-bold text-red-700">매출보다 장비비 + 노무비 + 자재구입비 합계가 큽니다.</div>
+                                    <?php endif; ?>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+        <div class="border-t border-gray-100 bg-gray-50 px-6 py-4 text-xs text-gray-500">
+            원가율 = (장비비 + 노무비 + 자재구입비) ÷ 매출 × 100 · 80% 초과 시 빨간색으로 표시됩니다.
+        </div>
+    </div>
+</div>
+
+<script>
+(function(){
+    var modal = document.getElementById('cpmsProjectCostModal');
+    if (!modal) return;
+    function insideLink(el) {
+        while (el && el !== document) {
+            if (el.tagName && el.tagName.toLowerCase() === 'a') return true;
+            el = el.parentNode;
+        }
+        return false;
+    }
+    function openModal() {
+        modal.classList.remove('hidden');
+        modal.setAttribute('aria-hidden', 'false');
+        if (document.body) document.body.classList.add('overflow-hidden');
+    }
+    function closeModal() {
+        modal.classList.add('hidden');
+        modal.setAttribute('aria-hidden', 'true');
+        if (document.body) document.body.classList.remove('overflow-hidden');
+    }
+    var openers = document.querySelectorAll('[data-project-cost-open]');
+    for (var i = 0; i < openers.length; i++) {
+        openers[i].addEventListener('click', function(event){
+            if (insideLink(event.target)) return;
+            openModal();
+        });
+        openers[i].addEventListener('keydown', function(event){
+            var key = event.key || event.keyCode;
+            if (key === 'Enter' || key === ' ' || key === 13 || key === 32) {
+                event.preventDefault();
+                openModal();
+            }
+        });
+    }
+    var closers = modal.querySelectorAll('[data-project-cost-close]');
+    for (var j = 0; j < closers.length; j++) {
+        closers[j].addEventListener('click', closeModal);
+    }
+    modal.addEventListener('click', function(event){
+        if (event.target === modal) closeModal();
+    });
+    document.addEventListener('keydown', function(event){
+        var key = event.key || event.keyCode;
+        if (key === 'Escape' || key === 'Esc' || key === 27) closeModal();
+    });
+})();
+</script>
 
 <!-- ✅ 안전사고(임원) -->
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-6">
@@ -601,7 +775,7 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
 <div class="mt-8">
     <?php render_task_list_sample(); ?>
 </div>
-<?php /** 52시간 초과자: 임원 근태 리스크 현황 */ require_once __DIR__.'/../attendance/common.php'; $pdo2=\App\Core\Db::pdo(); $today=attendance_today(); list($ws,$we)=attendance_week_range($today); $over52=array();$over40=array();$pendingReq=0; if($pdo2){$set=attendance_settings($pdo2);$st=$pdo2->prepare("SELECT e.name,SUM(a.work_minutes) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name");$st->execute(array(':s'=>$ws,':e'=>$we));foreach($st->fetchAll() as $r){$h=$r['m']/60;if($h>(float)$set['max_weekly_hours'])$over52[]=$r['name'].'('.number_format($h,2).'h)';elseif($h>(float)$set['standard_weekly_hours'])$over40[]=$r['name'].'('.number_format($h,2).'h)';} $pendingReq=(int)$pdo2->query("SELECT COUNT(*) FROM cpms_attendance_requests WHERE status='pending'")->fetchColumn(); } ?>
+<?php /** 52시간 초과자: 임원 근태 리스크 현황 */ require_once __DIR__.'/../attendance/common.php'; $pdo2=\App\Core\Db::pdo(); $today=attendance_today(); list($ws,$we)=attendance_week_range($today); $over52=array();$over40=array();$pendingReq=0; if($pdo2){$set=attendance_settings($pdo2);$st=$pdo2->prepare("SELECT e.name,SUM(a.work_minutes) m FROM employees e LEFT JOIN cpms_attendance_records a ON a.employee_id=e.id AND a.work_date BETWEEN :s AND :e GROUP BY e.id,e.name");$st->execute(array(':s'=>$ws,':e'=>$we));foreach($st->fetchAll() as $r){$h=$r['m']/60;if($h>(float)$set['max_weekly_hours'])$over52[count($over52)]=$r['name'].'('.number_format($h,2).'h)';elseif($h>(float)$set['standard_weekly_hours'])$over40[count($over40)]=$r['name'].'('.number_format($h,2).'h)';} $pendingReq=(int)$pdo2->query("SELECT COUNT(*) FROM cpms_attendance_requests WHERE status='pending'")->fetchColumn(); } ?>
 <div><h3>근태 리스크 현황</h3><p style='color:red'>이번 주 52시간 초과자: <?php echo h(implode(', ',$over52));?></p><p>이번 주 40시간 초과자: <?php echo h(implode(', ',$over40));?></p><p>출퇴근 요청 승인대기 건수: <?php echo (int)$pendingReq;?></p></div>
 
 <div class="bg-white rounded-2xl p-4 border mb-4"><h3 class="font-bold">전자결재 승인대기</h3><p><a href="?r=approval_home">전자결재에서 확인</a></p></div>
