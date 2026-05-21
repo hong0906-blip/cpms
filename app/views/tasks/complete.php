@@ -1,0 +1,55 @@
+<?php
+use App\Core\Auth;
+use App\Core\Db;
+
+require_once __DIR__ . '/helpers.php';
+
+if (!Auth::check()) {
+    header('Location: ?r=login');
+    exit;
+}
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    flash_set('danger', '잘못된 요청입니다.');
+    cpms_tasks_redirect_back();
+}
+if (!csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) {
+    flash_set('danger', '보안 토큰이 올바르지 않습니다.');
+    cpms_tasks_redirect_back();
+}
+
+$pdo = Db::pdo();
+$currentEmployee = cpms_tasks_current_employee($pdo);
+$taskId = isset($_POST['task_id']) ? (int)$_POST['task_id'] : 0;
+$completedMemo = trim((string)(isset($_POST['completed_memo']) ? $_POST['completed_memo'] : ''));
+$task = cpms_tasks_find_task($pdo, $taskId);
+
+if (!$task || !cpms_tasks_can_change_status($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0)) {
+    flash_set('danger', '완료 처리 권한이 없습니다.');
+    cpms_tasks_redirect_back();
+}
+
+$now = cpms_tasks_now();
+
+try {
+    $st = $pdo->prepare("UPDATE cpms_tasks SET status = 'done', completed_at = :completed_at, completed_by = :completed_by, completed_memo = :completed_memo, updated_at = :updated_at WHERE id = :id");
+    $st->execute(array(
+        ':completed_at' => $now,
+        ':completed_by' => (int)$currentEmployee['id'] > 0 ? (int)$currentEmployee['id'] : null,
+        ':completed_memo' => $completedMemo !== '' ? $completedMemo : null,
+        ':updated_at' => $now,
+        ':id' => $taskId,
+    ));
+    if (isset($_FILES['attachments'])) {
+        cpms_tasks_save_uploaded_files($pdo, $taskId, $_FILES['attachments'], (int)$currentEmployee['id']);
+    }
+    cpms_tasks_insert_log($pdo, $taskId, $currentEmployee, 'completed', $completedMemo, isset($task['status']) ? $task['status'] : null, 'done');
+    $updatedTask = cpms_tasks_find_task($pdo, $taskId);
+    if ($updatedTask) {
+        cpms_tasks_send_completed_notification($pdo, $updatedTask);
+    }
+    flash_set('success', '업무를 완료 처리했습니다.');
+} catch (Exception $e) {
+    flash_set('danger', '완료 처리에 실패했습니다.');
+}
+
+cpms_tasks_redirect_back();

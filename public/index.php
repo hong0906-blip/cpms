@@ -17,6 +17,39 @@ if ($route === '') $route = '대시보드';
 //  세션 유지용 Ping
 //  - footer.php에서 주기적으로 호출해서 세션 만료(자동로그아웃)를 방지
 // ==========================
+$dashboardType = isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee';
+
+if ($route === 'tasks/my_list') {
+    if (!\App\Core\Auth::check()) {
+        header('Location: ?r=login');
+        exit;
+    }
+    \App\Core\View::render('tasks/my_list', array(
+        'title' => urldecode('%EB%82%98%EC%9D%98%20%ED%95%A0%EC%9D%BC'),
+        'selectedMenu' => urldecode('%EB%8C%80%EC%8B%9C%EB%B3%B4%EB%93%9C'),
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+if ($route === 'tasks/executive_summary') {
+    if (!\App\Core\Auth::check()) {
+        header('Location: ?r=login');
+        exit;
+    }
+    if (!(\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive' || \App\Core\Auth::canManageEmployees())) {
+        http_response_code(403);
+        echo '403 Forbidden';
+        exit;
+    }
+    \App\Core\View::render('tasks/executive_summary', array(
+        'title' => urldecode('%EB%B6%80%EC%84%9C%EB%B3%84%20%EC%97%85%EB%AC%B4%20%ED%98%84%ED%99%A9'),
+        'selectedMenu' => urldecode('%EB%8C%80%EC%8B%9C%EB%B3%B4%EB%93%9C'),
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
 if ($route === 'ping') {
     header('Content-Type: text/plain; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
@@ -302,6 +335,34 @@ if ($route === 'request/create') {
 }
 if ($route === 'request/decide') {
     require_once __DIR__ . '/../app/views/request/decide.php';
+    exit;
+}
+if ($route === 'tasks/create') {
+    require_once __DIR__ . '/../app/views/tasks/create.php';
+    exit;
+}
+if ($route === 'tasks/update_status') {
+    require_once __DIR__ . '/../app/views/tasks/update_status.php';
+    exit;
+}
+if ($route === 'tasks/complete') {
+    require_once __DIR__ . '/../app/views/tasks/complete.php';
+    exit;
+}
+if ($route === 'tasks/revision') {
+    require_once __DIR__ . '/../app/views/tasks/revision.php';
+    exit;
+}
+if ($route === 'tasks/cancel') {
+    require_once __DIR__ . '/../app/views/tasks/cancel.php';
+    exit;
+}
+if ($route === 'tasks/detail') {
+    require_once __DIR__ . '/../app/views/tasks/detail.php';
+    exit;
+}
+if ($route === 'db_setup_tasks') {
+    require_once __DIR__ . '/db_setup_tasks.php';
     exit;
 }
 

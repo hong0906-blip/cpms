@@ -7,6 +7,7 @@
 require_once __DIR__ . '/../partials/TaskList.php';
 require_once __DIR__ . '/../partials/cost_metrics.php';
 require_once __DIR__ . '/../construction/partials/equipment_gongsu_approval_helper.php';
+require_once __DIR__ . '/../tasks/dashboard_sections.php';
 
 use App\Core\Db;
 
@@ -239,6 +240,8 @@ $stL=$pdo->prepare($leaveMainSql);$stL->execute($leaveMainParams);$leaveToday=(i
         <?php echo h($flash['message']); ?>
     </div>
 <?php endif; ?>
+
+<?php cpms_render_executive_task_dashboard($pdo); ?>
 
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
     <div class="flex items-start justify-between gap-4 mb-4">

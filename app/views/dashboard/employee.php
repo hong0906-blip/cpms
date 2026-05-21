@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/../partials/TaskList.php';
 require_once __DIR__ . '/../partials/cost_metrics.php';
+require_once __DIR__ . '/../tasks/dashboard_sections.php';
 
 use App\Core\Db;
 
@@ -211,6 +212,8 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 
 <?php require_once __DIR__.'/../attendance/common.php'; $eid_att=attendance_employee_id($pdo); $today_att=attendance_today(); list($ws_att,$we_att)=attendance_week_range($today_att); $todayRow=array(); $todayInState='미처리'; $todayOutState='미처리'; $myReqs=array(); $pendingCnt=0; $weekWork=0; $todayMismatch=false; if($pdo&&$eid_att>0){ try{$stTodayRaw=$pdo->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d LIMIT 1");$stTodayRaw->execute(array(':e'=>$eid_att,':d'=>$today_att));$todayRaw=$stTodayRaw->fetch(PDO::FETCH_ASSOC);$todayMismatch=($todayRaw&&!attendance_record_datetime_matches_work_date($todayRaw));$todayRow=attendance_today_record($pdo,$eid_att); $st2=$pdo->prepare("SELECT * FROM cpms_attendance_requests WHERE employee_id=:e ORDER BY id DESC LIMIT 20");$st2->execute(array(':e'=>$eid_att));$myReqs=$st2->fetchAll(); $st3=$pdo->prepare("SELECT COALESCE(SUM(work_minutes),0) FROM cpms_attendance_records WHERE employee_id=:e AND work_date BETWEEN :s AND :w");$st3->execute(array(':e'=>$eid_att,':s'=>$ws_att,':w'=>$we_att));$weekWork=(int)$st3->fetchColumn(); $st4=$pdo->prepare("SELECT COUNT(*) FROM cpms_attendance_requests WHERE employee_id=:e AND status='pending'");$st4->execute(array(':e'=>$eid_att));$pendingCnt=(int)$st4->fetchColumn(); if($todayRow){$todayInState=(isset($todayRow['check_in'])&&$todayRow['check_in'])?'처리':'미처리';$todayOutState=(isset($todayRow['check_out'])&&$todayRow['check_out'])?'처리':'미처리';} }catch(Exception $e){} }
 ?>
+<?php cpms_render_employee_task_dashboard($pdo); ?>
+
 <div class='bg-white/80 rounded-3xl p-6 border mb-6'><!-- 직원 대시보드 UI 정리 + 공제시간 표시 제거 -->
 <h3 class='text-2xl font-extrabold mb-4'>내 근태 현황</h3>
 <div class='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 text-base'>
