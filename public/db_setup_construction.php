@@ -55,7 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 cpms_ensure_labor_override_table($pdo);
                 cpms_schedule_auto_ensure_schema($pdo);
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_google_chat_notifications (id INT AUTO_INCREMENT PRIMARY KEY, source_type VARCHAR(50) NOT NULL, source_id INT NULL, event_type VARCHAR(50) NULL, receiver_employee_id INT NULL, receiver_name VARCHAR(100) NULL, receiver_email VARCHAR(190) NULL, dm_space_name VARCHAR(255) NULL, message_text TEXT NULL, send_status VARCHAR(20) NULL, error_message TEXT NULL, sent_at DATETIME NULL, created_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8");
-                $msg = '공사 기본 테이블 및 공정표 자동 완료수량/공수 승인/Google Chat 알림 테이블 생성/확인 완료';
+                $msg = '공사 기본 테이블 및 공정표 자동 완료수량(오늘 포함)/공수 승인/Google Chat 알림 테이블 생성/확인 완료';
             } else if ($action === 'cost_progress') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_daily_work_qty (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -184,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             } else if ($action === 'task_item_progress') {
                 cpms_schedule_auto_ensure_schema($pdo);
-                $msg = '공정표 날짜별/항목별 자동 완료수량 테이블 및 is_auto/is_manual 컬럼 생성/확인 완료';
+                $msg = '공정표 날짜별/항목별 자동 완료수량(오늘 포함) 테이블 및 is_auto/is_manual 컬럼 생성/확인 완료';
 
             } else if ($action === 'equipment') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_equipment_items (

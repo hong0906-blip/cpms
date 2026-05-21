@@ -172,6 +172,109 @@ function cpms_schedule_recalculate_task_progress($pdo, $projectId, $taskId, $tot
     } catch (Exception $e) {}
 }}
 
+if (!function_exists('cpms_schedule_auto_elapsed_days')) {
+function cpms_schedule_auto_elapsed_days($startDate, $endDate, $today) {
+    $startTs = strtotime($startDate . ' 00:00:00');
+    $endTs = strtotime($endDate . ' 00:00:00');
+    $todayTs = strtotime($today . ' 00:00:00');
+    if ($startTs === false || $endTs === false || $todayTs === false || $startTs <= 0 || $endTs <= 0 || $todayTs <= 0) {
+        return array('duration_days'=>0, 'elapsed_days'=>0, 'base_date'=>'');
+    }
+    if ($endTs < $startTs) { $tmp = $startTs; $startTs = $endTs; $endTs = $tmp; }
+
+    $durationDays = (int)floor(($endTs - $startTs) / 86400) + 1;
+    if ($durationDays < 1) $durationDays = 1;
+
+    $baseTs = $todayTs;
+    if ($baseTs > $endTs) $baseTs = $endTs;
+
+    $elapsedDays = 0;
+    if ($baseTs >= $startTs) {
+        $elapsedDays = (int)floor(($baseTs - $startTs) / 86400) + 1;
+    }
+    if ($elapsedDays < 0) $elapsedDays = 0;
+    if ($elapsedDays > $durationDays) $elapsedDays = $durationDays;
+
+    return array(
+        'duration_days'=>$durationDays,
+        'elapsed_days'=>$elapsedDays,
+        'base_date'=>date('Y-m-d', $baseTs)
+    );
+}}
+
+if (!function_exists('cpms_schedule_auto_work_lines')) {
+function cpms_schedule_auto_work_lines($pdo, $projectId, $workId) {
+    $lines = array();
+    if (!$pdo || (int)$projectId <= 0 || (int)$workId <= 0) return $lines;
+    try {
+        $stLines = $pdo->prepare("SELECT l.unit_price_id, COALESCE(l.planned_qty, u.qty, 0) AS qty FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id=l.unit_price_id WHERE l.work_id=:wid AND u.project_id=:pid ORDER BY u.id ASC");
+        $stLines->execute(array(':wid'=>(int)$workId, ':pid'=>(int)$projectId));
+        $rows = $stLines->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    } catch (Exception $e) {
+        return array();
+    }
+}}
+
+if (!function_exists('cpms_schedule_auto_progress_diagnostics')) {
+function cpms_schedule_auto_progress_diagnostics($pdo, $projectId) {
+    $result = array();
+    if (!$pdo || (int)$projectId <= 0) return $result;
+    cpms_schedule_auto_ensure_schema($pdo);
+    $today = date('Y-m-d');
+    try {
+        $st = $pdo->prepare("SELECT id, work_id, name, start_date, end_date FROM cpms_schedule_tasks WHERE project_id=:pid AND work_id IS NOT NULL AND work_id > 0 ORDER BY sort_order ASC, id ASC");
+        $st->execute(array(':pid'=>(int)$projectId));
+        $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($tasks)) return $result;
+        $countSt = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN is_manual=1 THEN 1 ELSE 0 END),0) AS manual_rows_count, COALESCE(SUM(CASE WHEN is_auto=1 AND is_manual=0 THEN 1 ELSE 0 END),0) AS auto_rows_count FROM cpms_schedule_progress WHERE project_id=:pid AND task_id=:tid");
+
+        foreach ($tasks as $task) {
+            $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+            $workId = isset($task['work_id']) ? (int)$task['work_id'] : 0;
+            $startDate = isset($task['start_date']) ? trim((string)$task['start_date']) : '';
+            $endDate = isset($task['end_date']) ? trim((string)$task['end_date']) : '';
+            if ($taskId <= 0 || $workId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) continue;
+            if ($endDate < $startDate) { $tmpDate = $startDate; $startDate = $endDate; $endDate = $tmpDate; }
+
+            $lines = cpms_schedule_auto_work_lines($pdo, $projectId, $workId);
+            $totalQty = 0.0;
+            foreach ($lines as $line) {
+                $totalQty += isset($line['qty']) && is_numeric((string)$line['qty']) ? (float)$line['qty'] : 0.0;
+            }
+            $calc = cpms_schedule_auto_elapsed_days($startDate, $endDate, $today);
+            $durationDays = isset($calc['duration_days']) ? (int)$calc['duration_days'] : 0;
+            $elapsedDays = isset($calc['elapsed_days']) ? (int)$calc['elapsed_days'] : 0;
+            $dailyQty = ($durationDays > 0 && $totalQty > 0) ? ($totalQty / $durationDays) : 0.0;
+            $autoDoneQty = $dailyQty * $elapsedDays;
+
+            $countSt->execute(array(':pid'=>(int)$projectId, ':tid'=>$taskId));
+            $countRow = $countSt->fetch(PDO::FETCH_ASSOC);
+            $manualRows = ($countRow && isset($countRow['manual_rows_count'])) ? (int)$countRow['manual_rows_count'] : 0;
+            $autoRows = ($countRow && isset($countRow['auto_rows_count'])) ? (int)$countRow['auto_rows_count'] : 0;
+
+            array_push($result, array(
+                'task_id'=>$taskId,
+                'task_name'=>isset($task['name']) ? (string)$task['name'] : '',
+                'start_date'=>$startDate,
+                'end_date'=>$endDate,
+                'today'=>$today,
+                'total_qty'=>$totalQty,
+                'duration_days'=>$durationDays,
+                'elapsed_days'=>$elapsedDays,
+                'daily_qty'=>$dailyQty,
+                'auto_done_qty'=>$autoDoneQty,
+                'manual_rows_count'=>$manualRows,
+                'auto_rows_count'=>$autoRows
+            ));
+        }
+    } catch (Exception $e) {
+        error_log('[schedule_auto_progress_debug] ' . $e->getMessage());
+        return $result;
+    }
+    return $result;
+}}
+
 if (!function_exists('cpms_schedule_apply_auto_progress')) {
 function cpms_schedule_apply_auto_progress($pdo, $projectId) {
     if (!$pdo || (int)$projectId <= 0) return false;
@@ -179,7 +282,6 @@ function cpms_schedule_apply_auto_progress($pdo, $projectId) {
     if (!cpms_schedule_auto_table_exists($pdo, 'cpms_schedule_progress') || !cpms_schedule_auto_table_exists($pdo, 'cpms_schedule_task_item_progress')) return false;
 
     $today = date('Y-m-d');
-    $yesterday = date('Y-m-d', strtotime($today . ' -1 day'));
 
     try {
         $st = $pdo->prepare("SELECT id, work_id, start_date, end_date FROM cpms_schedule_tasks WHERE project_id=:pid AND work_id IS NOT NULL AND work_id > 0");
@@ -195,17 +297,17 @@ function cpms_schedule_apply_auto_progress($pdo, $projectId) {
             if ($taskId <= 0 || $workId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) continue;
             if ($endDate < $startDate) { $tmpDate = $startDate; $startDate = $endDate; $endDate = $tmpDate; }
 
-            $durationDays = cpms_schedule_auto_date_days($startDate, $endDate);
+            $durationCalc = cpms_schedule_auto_elapsed_days($startDate, $endDate, $today);
+            $durationDays = isset($durationCalc['duration_days']) ? (int)$durationCalc['duration_days'] : 0;
+            $elapsedDays = isset($durationCalc['elapsed_days']) ? (int)$durationCalc['elapsed_days'] : 0;
             if ($durationDays <= 0) continue;
-            $autoEnd = ($endDate < $today) ? $endDate : $yesterday;
-            if ($autoEnd < $startDate) {
+            $autoEnd = isset($durationCalc['base_date']) ? (string)$durationCalc['base_date'] : '';
+            if ($elapsedDays <= 0 || $autoEnd === '' || $autoEnd < $startDate) {
                 cpms_schedule_recalculate_task_progress($pdo, $projectId, $taskId, 0);
                 continue;
             }
 
-            $stLines = $pdo->prepare("SELECT l.unit_price_id, COALESCE(l.planned_qty, u.qty, 0) AS qty FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id=l.unit_price_id WHERE l.work_id=:wid AND u.project_id=:pid ORDER BY u.id ASC");
-            $stLines->execute(array(':wid'=>$workId, ':pid'=>(int)$projectId));
-            $lines = $stLines->fetchAll(PDO::FETCH_ASSOC);
+            $lines = cpms_schedule_auto_work_lines($pdo, $projectId, $workId);
             if (!is_array($lines) || count($lines) === 0) continue;
 
             $totalQty = 0.0;

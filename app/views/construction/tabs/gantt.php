@@ -42,6 +42,8 @@ $hasGanttExpenseUnitPrice = cpms_gantt_column_exists($pdo, 'cpms_project_unit_pr
 
 require_once __DIR__ . '/../partials/schedule_auto_progress_helper.php';
 cpms_schedule_apply_auto_progress($pdo, (int)$pid);
+$debugAutoProgress = isset($_GET['debug_auto_progress']) && (string)$_GET['debug_auto_progress'] === '1';
+$autoProgressDiagnostics = $debugAutoProgress ? cpms_schedule_auto_progress_diagnostics($pdo, (int)$pid) : array();
 
 $tasks = array();
 try {
@@ -430,6 +432,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
             <h3 class="text-xl font-extrabold text-gray-900">공정표</h3>
             <div class="text-sm text-gray-600 mt-1">프로젝트 기간에 맞춰 공정을 배치하고, 일정 변경 시 이슈등록으로 공유합니다.</div>
             <div class="text-xs text-gray-500 mt-1">공정표 기준 기간: <b><?php echo h(date('Y-m-d', $rangeStartTs)); ?></b> ~ <b><?php echo h(date('Y-m-d', $rangeEndTs)); ?></b></div>
+            <div class="text-xs text-blue-700 mt-1 font-bold">자동 완료수량은 공정 시작일부터 오늘 날짜까지 포함하여 계산됩니다. 수동 수정한 날짜는 자동 계산으로 덮어쓰지 않습니다.</div>
         </div>
 
         <div class="flex items-center gap-2">
@@ -453,6 +456,53 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-extrabold" data-tab="board">공정표 수정</button>
         <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-extrabold" data-tab="progress">현재 진행률</button>
     </div>
+    <?php if ($debugAutoProgress): ?>
+        <div class="mt-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+            <div class="font-extrabold text-blue-900 mb-2">자동 완료수량 진단</div>
+            <div class="overflow-auto">
+                <table class="min-w-[1100px] w-full text-xs border-collapse bg-white">
+                    <thead>
+                    <tr class="bg-blue-100 text-blue-900">
+                        <th class="p-2 border text-right">task_id</th>
+                        <th class="p-2 border text-left">작업명</th>
+                        <th class="p-2 border">start_date</th>
+                        <th class="p-2 border">end_date</th>
+                        <th class="p-2 border">today</th>
+                        <th class="p-2 border text-right">total_qty</th>
+                        <th class="p-2 border text-right">duration_days</th>
+                        <th class="p-2 border text-right">elapsed_days</th>
+                        <th class="p-2 border text-right">daily_qty</th>
+                        <th class="p-2 border text-right">auto_done_qty</th>
+                        <th class="p-2 border text-right">manual_rows_count</th>
+                        <th class="p-2 border text-right">auto_rows_count</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <?php if (count($autoProgressDiagnostics) === 0): ?>
+                        <tr><td class="p-3 border text-center text-gray-500" colspan="12">진단 가능한 작업이 없습니다.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($autoProgressDiagnostics as $diag): ?>
+                            <tr>
+                                <td class="p-2 border text-right"><?php echo (int)$diag['task_id']; ?></td>
+                                <td class="p-2 border"><?php echo h($diag['task_name']); ?></td>
+                                <td class="p-2 border text-center"><?php echo h($diag['start_date']); ?></td>
+                                <td class="p-2 border text-center"><?php echo h($diag['end_date']); ?></td>
+                                <td class="p-2 border text-center"><?php echo h($diag['today']); ?></td>
+                                <td class="p-2 border text-right"><?php echo number_format((float)$diag['total_qty'], 4); ?></td>
+                                <td class="p-2 border text-right"><?php echo (int)$diag['duration_days']; ?></td>
+                                <td class="p-2 border text-right"><?php echo (int)$diag['elapsed_days']; ?></td>
+                                <td class="p-2 border text-right"><?php echo number_format((float)$diag['daily_qty'], 4); ?></td>
+                                <td class="p-2 border text-right"><?php echo number_format((float)$diag['auto_done_qty'], 4); ?></td>
+                                <td class="p-2 border text-right"><?php echo (int)$diag['manual_rows_count']; ?></td>
+                                <td class="p-2 border text-right"><?php echo (int)$diag['auto_rows_count']; ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <?php endif; ?>
 
         <!-- 공정표 보기 -->
     <div class="mt-6 overflow-x-auto gantt-tab-panel" data-tab-panel="overview">
@@ -873,7 +923,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                             <input type="checkbox" id="ganttAutoDistributionToggle" class="rounded border-gray-300" checked>
                             자동 분배 제안 사용
                         </label>
-                        <div class="text-xs text-gray-500">자동 계산은 오늘~미래 날짜만 반영되고, 과거/수동 입력값은 유지됩니다.</div>
+                        <div class="text-xs text-gray-500">자동 완료수량은 공정 시작일부터 오늘 날짜까지 포함하여 계산됩니다. 수동 수정한 날짜는 자동 계산으로 덮어쓰지 않습니다.</div>
                     </div>
                     <div id="ganttShiftInfo" class="text-xs text-gray-600">이동 범위: 오늘 ~ 종료일 (과거 데이터 이동 금지)</div>
                     <?php if ($canEdit): ?>
