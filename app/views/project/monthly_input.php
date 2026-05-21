@@ -30,7 +30,7 @@ function cpms_cost_period_range($ym, $type) {
     $ym = trim((string)$ym);
     $type = trim((string)$type);
     if (!preg_match('/^\d{4}-\d{2}$/', $ym)) { $ym = date('Y-m'); }
-    if ($type === 'labor') {
+    if ($type === 'labor' || $type === 'sales') {
         $start = $ym . '-01';
         $ts = strtotime($start);
         $end = date('Y-m-t', $ts);
@@ -415,6 +415,14 @@ if ($debugMode && isset($revenueResult['stats']) && is_array($revenueResult['sta
 if ($debugMode) {
     $salesDiagnostics[] = '프로젝트 계약기간 월 목록: ' . implode(', ', $allMonths);
     $salesDiagnostics[] = '선택월: ' . $selectedViewMonth;
+    foreach ($allMonths as $diagYm) {
+        $diagSalesRange = cpms_cost_period_range($diagYm, 'sales');
+        $diagLaborRange = cpms_cost_period_range($diagYm, 'labor');
+        $diagCostRange = cpms_cost_period_range($diagYm, 'material');
+        $salesDiagnostics[] = $diagYm . ' 매출 기간: ' . $diagSalesRange['start'] . ' ~ ' . $diagSalesRange['end'];
+        $salesDiagnostics[] = $diagYm . ' 노무비 기간: ' . $diagLaborRange['start'] . ' ~ ' . $diagLaborRange['end'];
+        $salesDiagnostics[] = $diagYm . ' 자재/장비 기간: ' . $diagCostRange['start'] . ' ~ ' . $diagCostRange['end'];
+    }
     $salesDiagnostics[] = '매출 총합계: ' . number_format((float)array_sum($monthlyRevenue));
     $salesDiagnostics[] = '최종 합계 총합계: ' . number_format((float)array_sum($finalTotal));
     $salesDiagnostics[] = '손익 총합계: ' . number_format((float)array_sum($profit));
@@ -444,12 +452,12 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 ?>
 <div class="bg-white rounded-3xl border border-gray-100 p-5">
 <h3 class="text-xl font-extrabold mb-3">월별 투입비 상세내역</h3>
-<?php $guideYm = ($selectedViewMonth === 'all' && count($displayMonths) > 0) ? $displayMonths[count($displayMonths)-1] : $selectedViewMonth; if (!ym_valid($guideYm) && count($allMonths) > 0) { $guideYm = $allMonths[count($allMonths)-1]; } $laborRange = cpms_cost_period_range($guideYm, 'labor'); $meRange = cpms_cost_period_range($guideYm, 'material'); ?>
+<?php $guideYm = ($selectedViewMonth === 'all' && count($displayMonths) > 0) ? $displayMonths[count($displayMonths)-1] : $selectedViewMonth; if (!ym_valid($guideYm) && count($allMonths) > 0) { $guideYm = $allMonths[count($allMonths)-1]; } $laborRange = cpms_cost_period_range($guideYm, 'labor'); $salesRange = cpms_cost_period_range($guideYm, 'sales'); $meRange = cpms_cost_period_range($guideYm, 'material'); ?>
 <div class="mb-3 rounded-xl border border-blue-100 bg-blue-50 text-blue-900 p-3 text-xs">
 <div class="font-bold mb-1">계산 기준</div>
-<div>- 노무비: 매월 1일 ~ 말일</div>
-<div>- 자재비/장비비: 전월 26일 ~ 현월 25일</div>
-<?php if (ym_valid($guideYm)): ?><div class="mt-1"><?php echo h(str_replace('-', '.', $guideYm)); ?> 기준 / 노무비: <?php echo h($laborRange['start']); ?> ~ <?php echo h($laborRange['end']); ?> / 자재비·장비비: <?php echo h($meRange['start']); ?> ~ <?php echo h($meRange['end']); ?></div><?php endif; ?>
+<div>- 매출·노무비: 매월 1일 ~ 말일</div>
+<div>- 자재비/장비비/안전관리비: 전월 26일 ~ 현월 25일</div>
+<?php if (ym_valid($guideYm)): ?><div class="mt-1"><?php echo h(str_replace('-', '.', $guideYm)); ?> 기준 / 매출: <?php echo h($salesRange['start']); ?> ~ <?php echo h($salesRange['end']); ?> / 노무비: <?php echo h($laborRange['start']); ?> ~ <?php echo h($laborRange['end']); ?> / 자재·장비: <?php echo h($meRange['start']); ?> ~ <?php echo h($meRange['end']); ?></div><?php endif; ?>
 </div>
 <?php if (count($errors)>0): ?><div class="mb-3 rounded-xl border border-red-200 bg-red-50 text-red-800 p-3 text-sm"><?php foreach($errors as $em): ?><div><?php echo h($em); ?></div><?php endforeach; ?></div><?php endif; ?>
 <?php if ($deductionTableMissing): ?><div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 p-3 text-sm">공제분 테이블이 없습니다. 공무 DB 설치/확인을 실행해주세요.</div><?php endif; ?>

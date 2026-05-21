@@ -2,7 +2,7 @@
 /**
  * 공사 > 상황 탭(연도별 월/분기 비용+매출 그래프)
  * - 연도 선택 + 월별/분기별 5항목(노무/장비/안전/자재/매출) 막대그래프
- * - 노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일 ~ 현월 25일
+ * - 매출·노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일 ~ 현월 25일
  * - PHP 5.6 호환
  */
 
@@ -15,7 +15,7 @@ if (!function_exists('cpms_cost_period_range')) {
         $ym = trim((string)$ym);
         $type = trim((string)$type);
         if (!preg_match('/^\d{4}-\d{2}$/', $ym)) { $ym = date('Y-m'); }
-        if ($type === 'labor') {
+        if ($type === 'labor' || $type === 'sales') {
             $start = $ym . '-01';
             $ts = strtotime($start);
             $end = date('Y-m-t', $ts);
@@ -392,6 +392,8 @@ $categories = array(
 );
 
 $laborWageMap = cpms_status_labor_wage_map($pdo, (int)$pid);
+$debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
+$periodDiagnostics = array();
 
 $monthlyData = array();
 $yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0);
@@ -409,6 +411,11 @@ for ($m = 1; $m <= 12; $m++) {
     $costEnd = isset($costRange['end']) ? (string)$costRange['end'] : '';
     $salesStart = isset($salesRange['start']) ? (string)$salesRange['start'] : '';
     $salesEnd = isset($salesRange['end']) ? (string)$salesRange['end'] : '';
+    if ($debugMode) {
+        $periodDiagnostics[] = $ym . ' 매출 기간: ' . $salesStart . ' ~ ' . $salesEnd;
+        $periodDiagnostics[] = $ym . ' 노무비 기간: ' . $laborStart . ' ~ ' . $laborEnd;
+        $periodDiagnostics[] = $ym . ' 자재/장비 기간: ' . $costStart . ' ~ ' . $costEnd;
+    }
 
     $equipment = cpms_status_equipment_total_between($pdo, $pid, $costStart, $costEnd);
     $materialByCategory = cpms_status_material_category_sum_between($pdo, $pid, $costStart, $costEnd);
@@ -564,7 +571,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <h3 class="text-xl font-extrabold text-gray-900">상황</h3>
-                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황<br>노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일~현월 25일</div>
+                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황<br>매출·노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일~현월 25일</div>
             </div>
         </div>
 
@@ -605,8 +612,15 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     <div class="chart-wrap">
         <div class="flex items-center justify-between">
             <h4 class="text-lg font-extrabold text-gray-900">월별 비용/매출 그래프</h4>
-            <div class="text-xs text-gray-500">노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일~현월 25일</div>
+            <div class="text-xs text-gray-500">매출·노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일~현월 25일</div>
         </div>
+        <?php if ($debugMode && count($periodDiagnostics) > 0): ?>
+            <div class="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
+                <?php foreach ($periodDiagnostics as $diag): ?>
+                    <div><?php echo h($diag); ?></div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
 
         <div class="chart-scroll">
             <div class="chart-row">

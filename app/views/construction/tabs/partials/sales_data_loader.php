@@ -59,6 +59,23 @@ if (!function_exists('cpms_sales_is_no_multiply_unit')) {
     }
 }
 
+if (!function_exists('cpms_sales_period_range')) {
+    function cpms_sales_period_range($ym) {
+        $ym = trim((string)$ym);
+        if (!preg_match('/^\d{4}-\d{2}$/', $ym)) { $ym = date('Y-m'); }
+        if (function_exists('cpms_cost_period_range')) {
+            $range = cpms_cost_period_range($ym, 'sales');
+            $start = isset($range['start']) ? (string)$range['start'] : '';
+            $end = isset($range['end']) ? (string)$range['end'] : '';
+            if ($start !== '' && $end !== '') return $range;
+        }
+        $start = $ym . '-01';
+        $ts = strtotime($start);
+        $end = date('Y-m-t', $ts);
+        return array('start' => $start, 'end' => $end);
+    }
+}
+
 if (!function_exists('cpms_sales_total_between')) {
     function cpms_sales_total_between($pdo, $projectId, $startDate, $endDate) {
         $result = array('amount' => 0.0, 'stats' => array('schedule_task_rows' => 0, 'work_item_line_rows' => 0, 'unit_price_rows' => 0, 'completed_task_rows' => 0, 'sales_sum' => 0.0));
@@ -147,10 +164,9 @@ if (!function_exists('cpms_sales_monthly_map')) {
     function cpms_sales_monthly_map($pdo, $projectId, $allMonths) {
         $months = array();
         foreach ($allMonths as $ym) { $months[$ym] = 0.0; }
-        $diag = array('basis' => '공사 상황 탭 매출 기준', 'stats' => array('schedule_task_rows' => 0, 'work_item_line_rows' => 0, 'unit_price_rows' => 0, 'completed_task_rows' => 0, 'sales_sum' => 0.0));
+        $diag = array('basis' => '공사 상황 탭 매출 기준(현월 1일~말일)', 'stats' => array('schedule_task_rows' => 0, 'work_item_line_rows' => 0, 'unit_price_rows' => 0, 'completed_task_rows' => 0, 'sales_sum' => 0.0));
         foreach ($allMonths as $ym) {
-            if (!function_exists('cpms_cost_period_range')) continue;
-            $range = cpms_cost_period_range($ym, 'sales');
+            $range = cpms_sales_period_range($ym);
             $start = isset($range['start']) ? (string)$range['start'] : '';
             $end = isset($range['end']) ? (string)$range['end'] : '';
             if ($start === '' || $end === '') continue;
