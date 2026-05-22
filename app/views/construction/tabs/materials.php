@@ -9,6 +9,7 @@
  */
 
 use App\Core\Db;
+require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 
 $pdo = Db::pdo();
 if (!$pdo) {
@@ -140,6 +141,45 @@ function material_category_label($category)
     $category = trim((string)$category);
     $allowed = array('자재비'=>true, '구매품'=>true, '기타경비'=>true, '안전관리비'=>true);
     return isset($allowed[$category]) ? $category : '자재비';
+}
+
+$displayItems = array();
+foreach ($items as $it) {
+    $groupKey = cpms_material_master_group_key($it);
+    if (!isset($displayItems[$groupKey])) {
+        $displayItems[$groupKey] = array(
+            'group_key' => $groupKey,
+            'category' => isset($it['category']) ? (string)$it['category'] : '',
+            'vendor_name' => isset($it['vendor_name']) ? (string)$it['vendor_name'] : '',
+            'representative' => isset($it['representative']) ? (string)$it['representative'] : '',
+            'phone' => isset($it['phone']) ? (string)$it['phone'] : '',
+            'biz_no' => isset($it['biz_no']) ? (string)$it['biz_no'] : '',
+            'base_rate' => isset($it['base_rate']) ? (float)$it['base_rate'] : 0.0,
+            'remark' => isset($it['remark']) ? (string)$it['remark'] : '',
+            'item_ids' => array(),
+            'slot_amounts' => array()
+        );
+    }
+    $displayItems[$groupKey]['representative'] = cpms_merge_first_non_empty($displayItems[$groupKey]['representative'], isset($it['representative']) ? $it['representative'] : '');
+    $displayItems[$groupKey]['phone'] = cpms_merge_first_non_empty($displayItems[$groupKey]['phone'], isset($it['phone']) ? $it['phone'] : '');
+    $displayItems[$groupKey]['biz_no'] = cpms_merge_first_non_empty($displayItems[$groupKey]['biz_no'], isset($it['biz_no']) ? $it['biz_no'] : '');
+    $displayItems[$groupKey]['remark'] = cpms_merge_first_non_empty($displayItems[$groupKey]['remark'], isset($it['remark']) ? $it['remark'] : '');
+    $displayItems[$groupKey]['item_ids'][count($displayItems[$groupKey]['item_ids'])] = isset($it['id']) ? (int)$it['id'] : 0;
+}
+foreach ($displayItems as $groupKey => $displayItem) {
+    foreach ($dateSlots as $slot) {
+        $displayItems[$groupKey]['slot_amounts'][$slot['date']] = 0.0;
+    }
+}
+foreach ($usageRows as $ur) {
+    $materialId = isset($ur['material_id']) ? (int)$ur['material_id'] : 0;
+    if (!isset($itemMap[$materialId])) continue;
+    $groupKey = cpms_material_master_group_key($itemMap[$materialId]);
+    if (!isset($displayItems[$groupKey])) continue;
+    $useDate = isset($ur['use_date']) ? (string)$ur['use_date'] : '';
+    if ($useDate === '') continue;
+    if (!isset($displayItems[$groupKey]['slot_amounts'][$useDate])) $displayItems[$groupKey]['slot_amounts'][$useDate] = 0.0;
+    $displayItems[$groupKey]['slot_amounts'][$useDate] += isset($ur['amount']) ? (float)$ur['amount'] : 0.0;
 }
 ?>
 
@@ -548,24 +588,18 @@ function material_category_label($category)
                 }
                 $lastCategory = '__none__';
                 ?>
-                <?php if (count($items) === 0): ?>
+                <?php if (count($displayItems) === 0): ?>
                     <tr><td class="border p-3 text-center text-gray-500" colspan="47">등록된 자재구입비가 없습니다.</td></tr>
                 <?php else: ?>
-                    <?php foreach ($items as $it): ?>
+                    <?php foreach ($displayItems as $it): ?>
                         <?php
-                        $eid = (int)$it['id'];
                         $days = 0;
                         $rowAmount = 0.0;
-                        $rowSlotAmount = array();
                         foreach ($dateSlots as $slotAll) {
                             if (!$slotAll['valid']) {
                                 continue;
                             }
-                            $amtAll = 0.0;
-                            if (isset($usageByEquipment[$eid]) && isset($usageByEquipment[$eid][$slotAll['date']])) {
-                                $amtAll = (float)$usageByEquipment[$eid][$slotAll['date']];
-                            }
-                            $rowSlotAmount[$slotAll['date']] = $amtAll;
+                            $amtAll = isset($it['slot_amounts'][$slotAll['date']]) ? (float)$it['slot_amounts'][$slotAll['date']] : 0.0;
                             if ($amtAll > 0) {
                                 $days++;
                                 $rowAmount += $amtAll;
@@ -588,7 +622,7 @@ function material_category_label($category)
                                     echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
                                     continue;
                                 }
-                                $amt = isset($rowSlotAmount[$slot['date']]) ? (float)$rowSlotAmount[$slot['date']] : 0.0;
+                                $amt = isset($it['slot_amounts'][$slot['date']]) ? (float)$it['slot_amounts'][$slot['date']] : 0.0;
                                 if ($amt > 0) {
                                     echo '<td class="border p-1 text-right">' . material_money($amt) . '</td>';
                                 } else {
@@ -608,7 +642,7 @@ function material_category_label($category)
                                     echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
                                     continue;
                                 }
-                                $amt = isset($rowSlotAmount[$slot['date']]) ? (float)$rowSlotAmount[$slot['date']] : 0.0;
+                                $amt = isset($it['slot_amounts'][$slot['date']]) ? (float)$it['slot_amounts'][$slot['date']] : 0.0;
                                 if ($amt > 0) {
                                     echo '<td class="border p-1 text-right">' . material_money($amt) . '</td>';
                                 } else {

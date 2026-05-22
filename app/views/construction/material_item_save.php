@@ -8,6 +8,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/master_dedupe_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -163,21 +164,36 @@ if (!$pdo) {
 
 try {
     $now = date('Y-m-d H:i:s');
-    $st = $pdo->prepare("INSERT INTO cpms_material_items
-        (project_id, category, vendor_name, spec, representative, phone, biz_no, base_rate, remark, is_deleted, created_at, updated_at)
-        VALUES
-        (:pid, :category, :vendor, :spec, :rep, :phone, :biz_no, :base_rate, :remark, 0, :now, :now)");
-    $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
-    $st->bindValue(':category', $category);
-    $st->bindValue(':vendor', $vendorName);
-    $st->bindValue(':spec', $spec);
-    $st->bindValue(':rep', $representative);
-    $st->bindValue(':phone', $phone);
-    $st->bindValue(':biz_no', $bizNo);
-    $st->bindValue(':base_rate', $baseRate);
-    $st->bindValue(':remark', $remark);
-    $st->bindValue(':now', $now);
-    $st->execute();
+    $sourceRow = array(
+        'representative' => $representative,
+        'phone' => $phone,
+        'biz_no' => $bizNo,
+        'remark' => $remark
+    );
+    $existingItem = cpms_find_existing_material_item($pdo, $projectId, $category, $vendorName, $bizNo, $baseRate);
+    $isReused = false;
+    if ($existingItem) {
+        $materialId = isset($existingItem['id']) ? (int)$existingItem['id'] : 0;
+        cpms_update_material_item_fill_blanks($pdo, $materialId, $sourceRow, $now);
+        $isReused = ($materialId > 0);
+    } else {
+        $st = $pdo->prepare("INSERT INTO cpms_material_items
+            (project_id, category, vendor_name, spec, representative, phone, biz_no, base_rate, remark, is_deleted, created_at, updated_at)
+            VALUES
+            (:pid, :category, :vendor, :spec, :rep, :phone, :biz_no, :base_rate, :remark, 0, :now, :now)");
+        $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $st->bindValue(':category', $category);
+        $st->bindValue(':vendor', $vendorName);
+        $st->bindValue(':spec', $spec);
+        $st->bindValue(':rep', $representative);
+        $st->bindValue(':phone', $phone);
+        $st->bindValue(':biz_no', $bizNo);
+        $st->bindValue(':base_rate', $baseRate);
+        $st->bindValue(':remark', $remark);
+        $st->bindValue(':now', $now);
+        $st->execute();
+        $materialId = (int)$pdo->lastInsertId();
+    }
 
     // 공용 업체 프리셋 저장
     $stPreset = $pdo->prepare("INSERT INTO cpms_material_vendor_presets (vendor_name, category, representative, phone, biz_no, base_rate, remark, created_at, updated_at) VALUES (:vendor, :category, :rep, :phone, :biz_no, :base_rate, :remark, :now, :now) ON DUPLICATE KEY UPDATE category=VALUES(category), representative=VALUES(representative), phone=VALUES(phone), biz_no=VALUES(biz_no), base_rate=VALUES(base_rate), remark=VALUES(remark), updated_at=VALUES(updated_at)");
@@ -191,8 +207,6 @@ try {
     $stPreset->bindValue(':now', $now);
     $stPreset->execute();
 
-    $materialId = (int)$pdo->lastInsertId();
-
     $dates = material_collect_usage_dates($usageDates, $useDatesText, $ym);
     foreach ($dates as $d) {
         if (!material_is_in_month_range($d, $ym)) {
@@ -201,7 +215,7 @@ try {
             header('Location: ' . $redirect);
             exit;
         }
-    }    
+    }
     if ($materialId > 0 && count($dates) > 0) {
         $stU = $pdo->prepare("INSERT INTO cpms_material_usage
             (project_id, material_id, use_date, amount, memo, created_at)
@@ -219,7 +233,11 @@ try {
         }
     }
 
-    flash_set('success', '자재구입비를 저장했습니다.');
+    if ($isReused) {
+        flash_set('success', '기존 자재구입비에 사용일자를 추가했습니다.');
+    } else {
+        flash_set('success', '새 자재구입비를 등록했습니다.');
+    }
     header('Location: ' . $redirect);
     exit;
 } catch (Exception $e) {

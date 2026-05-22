@@ -101,6 +101,23 @@ if ($editMode) {
     } catch (Exception $e) {
         $employees = array();
     }
+    if ($mainManager && $mainManagerId > 0) {
+        $hasMainEmployee = false;
+        foreach ($employees as $employee) {
+            if ((int)$employee['id'] === $mainManagerId) {
+                $hasMainEmployee = true;
+                break;
+            }
+        }
+        if (!$hasMainEmployee) {
+            $employees[count($employees)] = array(
+                'id' => $mainManagerId,
+                'name' => isset($mainManager['name']) ? $mainManager['name'] : '',
+                'department' => isset($mainManager['department']) ? $mainManager['department'] : '',
+                'position' => isset($mainManager['position']) ? $mainManager['position'] : ''
+            );
+        }
+    }
 }
 
 $unitPrices = array();

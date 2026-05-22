@@ -42,7 +42,7 @@ function approval_setup_index_exists($pdo, $table, $indexName) {
     }
 }}
 $tables=array(
-'cpms_approval_documents'=>"CREATE TABLE IF NOT EXISTS cpms_approval_documents (id INT AUTO_INCREMENT PRIMARY KEY, doc_type VARCHAR(20), title VARCHAR(255), content MEDIUMTEXT, doc_status VARCHAR(20), current_step_order INT DEFAULT 1, created_by_id INT, created_by_name VARCHAR(100), reject_reason TEXT NULL, rejected_step VARCHAR(20) NULL, created_at DATETIME, updated_at DATETIME)",
+'cpms_approval_documents'=>"CREATE TABLE IF NOT EXISTS cpms_approval_documents (id INT AUTO_INCREMENT PRIMARY KEY, doc_type VARCHAR(20), title VARCHAR(255), content MEDIUMTEXT, doc_status VARCHAR(20), current_step_order INT DEFAULT 1, created_by_id INT, created_by_name VARCHAR(100), created_by_email VARCHAR(190) NULL, reject_reason TEXT NULL, rejected_step VARCHAR(20) NULL, created_at DATETIME, updated_at DATETIME)",
 'cpms_approval_lines'=>"CREATE TABLE IF NOT EXISTS cpms_approval_lines (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT, line_order INT, role_type VARCHAR(20), approver_id INT, approver_name VARCHAR(100), approver_email VARCHAR(190), line_status VARCHAR(20), acted_at DATETIME NULL, sign_path VARCHAR(255) NULL, reject_reason TEXT NULL)",
 'cpms_approval_files'=>"CREATE TABLE IF NOT EXISTS cpms_approval_files (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT, original_name VARCHAR(255), saved_name VARCHAR(255), file_path VARCHAR(255), created_at DATETIME)",
 'cpms_approval_logs'=>"CREATE TABLE IF NOT EXISTS cpms_approval_logs (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT, line_id INT NULL, actor_id INT NULL, actor_name VARCHAR(100), actor_email VARCHAR(190), action_type VARCHAR(30), action_note TEXT NULL, created_at DATETIME)",
@@ -62,6 +62,7 @@ $requiredColumns = array(
         'current_step_order' => "ALTER TABLE cpms_approval_documents ADD COLUMN current_step_order INT DEFAULT 1",
         'created_by_id' => "ALTER TABLE cpms_approval_documents ADD COLUMN created_by_id INT NULL",
         'created_by_name' => "ALTER TABLE cpms_approval_documents ADD COLUMN created_by_name VARCHAR(100) NULL",
+        'created_by_email' => "ALTER TABLE cpms_approval_documents ADD COLUMN created_by_email VARCHAR(190) NULL",
         'reject_reason' => "ALTER TABLE cpms_approval_documents ADD COLUMN reject_reason TEXT NULL",
         'rejected_step' => "ALTER TABLE cpms_approval_documents ADD COLUMN rejected_step VARCHAR(20) NULL",
         'created_at' => "ALTER TABLE cpms_approval_documents ADD COLUMN created_at DATETIME NULL",

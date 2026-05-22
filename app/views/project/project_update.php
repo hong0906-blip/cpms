@@ -17,6 +17,20 @@ function cpms_project_update_fail_redirect($projectId, $message) {
 }
 }
 
+if (!function_exists('cpms_project_update_find_existing_main_manager_id')) {
+function cpms_project_update_find_existing_main_manager_id($pdo, $projectId) {
+    if (!$pdo || (int)$projectId <= 0) return 0;
+    try {
+        $st = $pdo->prepare("SELECT employee_id FROM cpms_project_members WHERE project_id = :pid AND role = 'main' ORDER BY employee_id ASC LIMIT 1");
+        $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+        $st->execute();
+        return (int)$st->fetchColumn();
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+}
+
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
 $role = Auth::userRole();
@@ -41,6 +55,7 @@ $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 if ($projectId <= 0) {
     cpms_project_update_fail_redirect(0, '프로젝트 ID가 없습니다.');
 }
+error_log('[project_update] project_id=' . $projectId);
 
 $name = isset($_POST['name']) ? trim((string)$_POST['name']) : '';
 $client = isset($_POST['client']) ? trim((string)$_POST['client']) : '';
@@ -56,13 +71,18 @@ $subManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manage
 if ($name === '') {
     cpms_project_update_fail_redirect($projectId, '프로젝트명이 없습니다.');
 }
-if ($mainManagerId <= 0) {
-    cpms_project_update_fail_redirect($projectId, '공사 담당자가 없습니다.');
-}
 
 $pdo = Db::pdo();
 if (!$pdo) {
     cpms_project_update_fail_redirect($projectId, 'DB 연결에 실패했습니다.');
+}
+
+if ($mainManagerId <= 0) {
+    $existingMainManagerId = cpms_project_update_find_existing_main_manager_id($pdo, $projectId);
+    if ($existingMainManagerId > 0) {
+        $mainManagerId = $existingMainManagerId;
+        error_log('[project_update] main_manager_id missing, fallback to existing main manager: ' . $mainManagerId);
+    }
 }
 
 $contractAmountVal = null;
@@ -79,6 +99,9 @@ try {
     $stExists->execute();
     if (!$stExists->fetch()) {
         cpms_project_update_fail_redirect($projectId, '프로젝트를 찾을 수 없습니다.');
+    }
+    if ($mainManagerId <= 0) {
+        cpms_project_update_fail_redirect($projectId, '공사 담당자가 선택되지 않았고 기존 담당자도 없습니다.');
     }
 
     $pdo->beginTransaction();
@@ -154,6 +177,7 @@ try {
     header('Location: ?r=project/detail&id=' . $projectId);
     exit;
 } catch (Exception $e) {
+    error_log('[project_update] error project_id=' . $projectId . ' main_manager_id=' . $mainManagerId . ' message=' . $e->getMessage());
     if ($pdo->inTransaction()) $pdo->rollBack();
     cpms_project_update_fail_redirect($projectId, $e->getMessage());
 }

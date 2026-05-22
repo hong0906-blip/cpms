@@ -9,6 +9,7 @@
 
 use App\Core\Db;
 require_once __DIR__ . '/../partials/equipment_gongsu_approval_helper.php';
+require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 
 $pdo = Db::pdo();
 if (!$pdo) {
@@ -199,6 +200,71 @@ function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
     }
     $html .= '</td>';
     return $html;
+}
+function equipment_render_grouped_gongsu_cell($slotBundle, $pendingByUsage, $item)
+{
+    if (!is_array($slotBundle)) {
+        return '<td class="border p-1 text-center text-gray-300">-</td>';
+    }
+    $rows = isset($slotBundle['rows']) && is_array($slotBundle['rows']) ? $slotBundle['rows'] : array();
+    $totalUnit = isset($slotBundle['total_unit']) ? (float)$slotBundle['total_unit'] : 0.0;
+    if (count($rows) === 1) {
+        return equipment_render_gongsu_cell($rows[0], $pendingByUsage, $item);
+    }
+    if ($totalUnit <= 0) {
+        return '<td class="border p-1 text-center text-gray-300">-</td>';
+    }
+    $html = '<td class="border p-1 text-center">';
+    $html .= '<div class="font-bold text-gray-800">' . h(equipment_gongsu($totalUnit)) . '</div>';
+    $html .= '<div class="text-[10px] text-amber-700">중복 묶음</div>';
+    $html .= '</td>';
+    return $html;
+}
+
+$displayItems = array();
+foreach ($items as $it) {
+    $groupKey = cpms_equipment_master_group_key($it);
+    if (!isset($displayItems[$groupKey])) {
+        $displayItems[$groupKey] = array(
+            'group_key' => $groupKey,
+            'category' => isset($it['category']) ? (string)$it['category'] : '',
+            'vendor_name' => isset($it['vendor_name']) ? (string)$it['vendor_name'] : '',
+            'spec' => isset($it['spec']) ? (string)$it['spec'] : '',
+            'representative' => isset($it['representative']) ? (string)$it['representative'] : '',
+            'phone' => isset($it['phone']) ? (string)$it['phone'] : '',
+            'biz_no' => isset($it['biz_no']) ? (string)$it['biz_no'] : '',
+            'base_rate' => isset($it['base_rate']) ? (float)$it['base_rate'] : 0.0,
+            'remark' => isset($it['remark']) ? (string)$it['remark'] : '',
+            'item_ids' => array(),
+            'slot_usage' => array()
+        );
+    }
+    $displayItems[$groupKey]['representative'] = cpms_merge_first_non_empty($displayItems[$groupKey]['representative'], isset($it['representative']) ? $it['representative'] : '');
+    $displayItems[$groupKey]['phone'] = cpms_merge_first_non_empty($displayItems[$groupKey]['phone'], isset($it['phone']) ? $it['phone'] : '');
+    $displayItems[$groupKey]['biz_no'] = cpms_merge_first_non_empty($displayItems[$groupKey]['biz_no'], isset($it['biz_no']) ? $it['biz_no'] : '');
+    $displayItems[$groupKey]['remark'] = cpms_merge_first_non_empty($displayItems[$groupKey]['remark'], isset($it['remark']) ? $it['remark'] : '');
+    $displayItems[$groupKey]['item_ids'][count($displayItems[$groupKey]['item_ids'])] = isset($it['id']) ? (int)$it['id'] : 0;
+}
+foreach ($displayItems as $groupKey => $displayItem) {
+    foreach ($dateSlots as $slot) {
+        $displayItems[$groupKey]['slot_usage'][$slot['date']] = array('rows' => array(), 'total_unit' => 0.0, 'total_amount' => 0.0);
+    }
+}
+foreach ($usageRows as $ur) {
+    $equipmentId = isset($ur['equipment_id']) ? (int)$ur['equipment_id'] : 0;
+    if (!isset($itemMap[$equipmentId])) continue;
+    $groupKey = cpms_equipment_master_group_key($itemMap[$equipmentId]);
+    if (!isset($displayItems[$groupKey])) continue;
+    $useDate = isset($ur['use_date']) ? (string)$ur['use_date'] : '';
+    if ($useDate === '') continue;
+    if (!isset($displayItems[$groupKey]['slot_usage'][$useDate])) {
+        $displayItems[$groupKey]['slot_usage'][$useDate] = array('rows' => array(), 'total_unit' => 0.0, 'total_amount' => 0.0);
+    }
+    $slotUnit = isset($ur['_work_unit']) ? (float)$ur['_work_unit'] : 1.0;
+    $slotAmount = isset($ur['_calc_amount']) ? (float)$ur['_calc_amount'] : 0.0;
+    $displayItems[$groupKey]['slot_usage'][$useDate]['rows'][count($displayItems[$groupKey]['slot_usage'][$useDate]['rows'])] = $ur;
+    $displayItems[$groupKey]['slot_usage'][$useDate]['total_unit'] += $slotUnit;
+    $displayItems[$groupKey]['slot_usage'][$useDate]['total_amount'] += $slotAmount;
 }
 ?>
 
@@ -676,30 +742,19 @@ function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
                 }
                 $lastCategory = '__none__';
                 ?>
-                <?php if (count($items) === 0): ?>
+                <?php if (count($displayItems) === 0): ?>
                     <tr><td class="border p-3 text-center text-gray-500" colspan="48">등록된 장비가 없습니다.</td></tr>
                 <?php else: ?>
-                    <?php foreach ($items as $it): ?>
+                    <?php foreach ($displayItems as $it): ?>
                         <?php
-                        $eid = (int)$it['id'];
                         $rowWorkUnit = 0.0;
                         $rowAmount = 0.0;
-                        $rowSlotUsage = array();
                         foreach ($dateSlots as $slotAll) {
                             if (!$slotAll['valid']) {
                                 continue;
                             }
-                            $usageRow = null;
-                            $slotUnit = 0.0;
-                            $slotAmount = 0.0;
-                            if (isset($usageByEquipment[$eid]) && isset($usageByEquipment[$eid][$slotAll['date']])) {
-                                $usageRow = $usageByEquipment[$eid][$slotAll['date']];
-                                if (is_array($usageRow)) {
-                                    $slotUnit = isset($usageRow['_work_unit']) ? (float)$usageRow['_work_unit'] : 1.0;
-                                    $slotAmount = isset($usageRow['_calc_amount']) ? (float)$usageRow['_calc_amount'] : 0.0;
-                                }
-                            }
-                            $rowSlotUsage[$slotAll['date']] = $usageRow;
+                            $slotUnit = isset($it['slot_usage'][$slotAll['date']]['total_unit']) ? (float)$it['slot_usage'][$slotAll['date']]['total_unit'] : 0.0;
+                            $slotAmount = isset($it['slot_usage'][$slotAll['date']]['total_amount']) ? (float)$it['slot_usage'][$slotAll['date']]['total_amount'] : 0.0;
                             if ($slotUnit > 0) {
                                 $rowWorkUnit += $slotUnit;
                                 $rowAmount += $slotAmount;
@@ -722,8 +777,8 @@ function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
                                     echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
                                     continue;
                                 }
-                                $usageRow = isset($rowSlotUsage[$slot['date']]) ? $rowSlotUsage[$slot['date']] : null;
-                                echo equipment_render_gongsu_cell($usageRow, $pendingByUsage, $it);
+                                $slotBundle = isset($it['slot_usage'][$slot['date']]) ? $it['slot_usage'][$slot['date']] : null;
+                                echo equipment_render_grouped_gongsu_cell($slotBundle, $pendingByUsage, $it);
                                 ?>
                             <?php endforeach; ?>
 
@@ -738,8 +793,8 @@ function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
                                     echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
                                     continue;
                                 }
-                                $usageRow = isset($rowSlotUsage[$slot['date']]) ? $rowSlotUsage[$slot['date']] : null;
-                                echo equipment_render_gongsu_cell($usageRow, $pendingByUsage, $it);
+                                $slotBundle = isset($it['slot_usage'][$slot['date']]) ? $it['slot_usage'][$slot['date']] : null;
+                                echo equipment_render_grouped_gongsu_cell($slotBundle, $pendingByUsage, $it);
                                 ?>
                             <?php endforeach; ?>
                         </tr>

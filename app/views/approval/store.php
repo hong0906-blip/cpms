@@ -153,8 +153,14 @@ try {
 error_log('[approval_store] docType='.$docType);
 $pdo->beginTransaction();
 error_log('[approval_store] before insert document');
-$pdo->prepare("INSERT INTO cpms_approval_documents (doc_type,title,content,doc_status,current_step_order,created_by_id,created_by_name,created_at,updated_at) VALUES (:t,:ti,:c,'PENDING',1,:uid,:un,NOW(),NOW())")
-    ->execute(array(':t'=>$docType,':ti'=>$title,':c'=>json_encode($contentData),':uid'=>$creatorEmployeeId,':un'=>$creatorName));
+$docHasCreatorEmail = approval_store_column_exists($pdo, 'cpms_approval_documents', 'created_by_email');
+if ($docHasCreatorEmail) {
+    $pdo->prepare("INSERT INTO cpms_approval_documents (doc_type,title,content,doc_status,current_step_order,created_by_id,created_by_name,created_by_email,created_at,updated_at) VALUES (:t,:ti,:c,'PENDING',1,:uid,:un,:ue,NOW(),NOW())")
+        ->execute(array(':t'=>$docType,':ti'=>$title,':c'=>json_encode($contentData),':uid'=>$creatorEmployeeId,':un'=>$creatorName,':ue'=>$creatorEmail));
+} else {
+    $pdo->prepare("INSERT INTO cpms_approval_documents (doc_type,title,content,doc_status,current_step_order,created_by_id,created_by_name,created_at,updated_at) VALUES (:t,:ti,:c,'PENDING',1,:uid,:un,NOW(),NOW())")
+        ->execute(array(':t'=>$docType,':ti'=>$title,':c'=>json_encode($contentData),':uid'=>$creatorEmployeeId,':un'=>$creatorName));
+}
 $did=(int)$pdo->lastInsertId();
 $prepared=array();
 error_log('[approval_store] after insert document did='.$did);

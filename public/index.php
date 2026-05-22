@@ -90,6 +90,18 @@ if ($route === 'construction_home') {
     $route = '공사';
 }
 if ($route === 'approval_home') { $route = '전자결재'; }
+if ($route === 'approval_active') {
+    $_GET['view'] = 'active';
+    $route = '전자결재';
+}
+if ($route === 'approval_cancelled') {
+    $_GET['view'] = 'cancelled';
+    $route = '전자결재';
+}
+if ($route === 'approval_completed') {
+    $_GET['view'] = 'completed';
+    $route = '전자결재';
+}
 
 // ==========================
 //  액션(POST 처리) 라우트 먼저

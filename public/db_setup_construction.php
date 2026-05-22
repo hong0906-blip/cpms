@@ -7,6 +7,7 @@
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/views/construction/partials/schedule_auto_progress_helper.php';
 require_once __DIR__ . '/../app/views/construction/partials/equipment_gongsu_approval_helper.php';
+require_once __DIR__ . '/../app/views/construction/partials/master_dedupe_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -32,6 +33,70 @@ function column_exists2($pdo, $table, $column) {
 }
 function add_db_check(&$checks, $kind, $target, $status, $message) {
     array_push($checks, array('kind'=>$kind, 'target'=>$target, 'status'=>$status, 'message'=>$message));
+}
+function index_columns2($pdo, $table, $indexName) {
+    $cols = array();
+    try {
+        $st = $pdo->prepare("SHOW INDEX FROM `" . $table . "` WHERE Key_name = :idx");
+        $st->bindValue(':idx', $indexName);
+        $st->execute();
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) return $cols;
+        usort($rows, function($a, $b){
+            $aa = isset($a['Seq_in_index']) ? (int)$a['Seq_in_index'] : 0;
+            $bb = isset($b['Seq_in_index']) ? (int)$b['Seq_in_index'] : 0;
+            if ($aa === $bb) return 0;
+            return ($aa < $bb) ? -1 : 1;
+        });
+        foreach ($rows as $row) {
+            $cols[count($cols)] = isset($row['Column_name']) ? (string)$row['Column_name'] : '';
+        }
+    } catch (Exception $e) {
+        $cols = array();
+    }
+    return $cols;
+}
+function has_exact_index2($pdo, $table, $columns) {
+    if (!$pdo || !is_array($columns) || count($columns) === 0) return false;
+    try {
+        $st = $pdo->query("SHOW INDEX FROM `" . $table . "`");
+        $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+        if (!is_array($rows)) return false;
+        $byIndex = array();
+        foreach ($rows as $row) {
+            $idx = isset($row['Key_name']) ? (string)$row['Key_name'] : '';
+            if ($idx === '') continue;
+            if (!isset($byIndex[$idx])) $byIndex[$idx] = array();
+            $seq = isset($row['Seq_in_index']) ? (int)$row['Seq_in_index'] : 0;
+            $byIndex[$idx][$seq] = isset($row['Column_name']) ? (string)$row['Column_name'] : '';
+        }
+        foreach ($byIndex as $colMap) {
+            ksort($colMap);
+            $idxCols = array_values($colMap);
+            if ($idxCols === $columns) return true;
+        }
+    } catch (Exception $e) {
+        return false;
+    }
+    return false;
+}
+function ensure_usage_unique_index2($pdo, $table, $legacyIndexName, $newIndexName, $secondColumn) {
+    if (!$pdo || !table_exists2($pdo, $table)) return '테이블 없음';
+    if (has_exact_index2($pdo, $table, array('project_id', $secondColumn, 'use_date'))) {
+        return '복합 UNIQUE 확인 완료';
+    }
+    try {
+        if (cpms_equipment_gongsu_index_exists($pdo, $table, $legacyIndexName)) {
+            $pdo->exec("ALTER TABLE `" . $table . "` DROP INDEX `" . $legacyIndexName . "`");
+        }
+    } catch (Exception $e) {
+    }
+    try {
+        $pdo->exec("ALTER TABLE `" . $table . "` ADD UNIQUE KEY `" . $newIndexName . "` (project_id, `" . $secondColumn . "`, use_date)");
+        return '복합 UNIQUE 추가 완료';
+    } catch (Exception $e) {
+        return '복합 UNIQUE 추가 실패: ' . $e->getMessage();
+    }
 }
 $msg=''; $err='';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -218,7 +283,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     KEY idx_project_date (project_id, use_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 cpms_equipment_gongsu_ensure_schema($pdo);
-                $msg = '장비 입력 테이블 및 장비공수(work_unit/base_rate_snapshot/is_manual_unit) 승인 테이블 생성/확인 완료';
+                $uniqueMsg = ensure_usage_unique_index2($pdo, 'cpms_equipment_usage', 'uniq_equipment_day', 'uniq_project_equipment_day', 'equipment_id');
+                $msg = '장비 입력 테이블 및 장비공수(work_unit/base_rate_snapshot/is_manual_unit) 승인 테이블 생성/확인 완료 / ' . $uniqueMsg;
                 } else if ($action === 'equipment_vendor_presets') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_equipment_vendor_presets (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -264,7 +330,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UNIQUE KEY uniq_material_day (material_id, use_date),
                     KEY idx_project_date (project_id, use_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-                $msg = '자재구입비 테이블 생성/확인 완료. 구분은 자재비/구매품/기타경비/안전관리비만 사용합니다.';
+                $uniqueMsg = ensure_usage_unique_index2($pdo, 'cpms_material_usage', 'uniq_material_day', 'uniq_project_material_day', 'material_id');
+                $msg = '자재구입비 테이블 생성/확인 완료. 구분은 자재비/구매품/기타경비/안전관리비만 사용합니다. / ' . $uniqueMsg;
                 } else if ($action === 'material_vendor_presets') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_material_vendor_presets (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -279,10 +346,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     updated_at DATETIME NOT NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 $msg = '자재 업체 프리셋 테이블 생성/확인 완료';                                
+                } else if ($action === 'material_dedupe_apply') {
+                $applyResult = cpms_material_dedupe_apply($pdo);
+                $msg = '자재 중복 병합 실행 완료. ' . (isset($applyResult['message']) ? $applyResult['message'] : '');
+                } else if ($action === 'equipment_dedupe_apply') {
+                $applyResult = cpms_equipment_dedupe_apply($pdo);
+                $msg = '장비 중복 병합 실행 완료. ' . (isset($applyResult['message']) ? $applyResult['message'] : '');
                 }
         } catch (Exception $e) { $err = $e->getMessage(); }
     }
 }
+$materialDuplicateScan = cpms_material_duplicate_groups($pdo);
+$equipmentDuplicateScan = cpms_equipment_duplicate_groups($pdo);
 $checks = array();
 if ($pdo) {
     $tableChecks = array('cpms_schedule_progress', 'cpms_schedule_task_item_progress', 'cpms_equipment_gongsu_overrides');
@@ -305,6 +380,10 @@ if ($pdo) {
         $target = $cc[0] . '.' . $cc[1];
         add_db_check($checks, 'COLUMN', $target, column_exists2($pdo, $cc[0], $cc[1]) ? '성공' : '주의', column_exists2($pdo, $cc[0], $cc[1]) ? '존재' : '버튼 실행 필요');
     }
+    add_db_check($checks, 'UNIQUE', 'cpms_material_usage(project_id, material_id, use_date)', has_exact_index2($pdo, 'cpms_material_usage', array('project_id', 'material_id', 'use_date')) ? '성공' : '주의', has_exact_index2($pdo, 'cpms_material_usage', array('project_id', 'material_id', 'use_date')) ? '복합 UNIQUE 확인 완료' : '자재구입비 테이블 생성/확인 버튼 재실행 또는 중복 정리 필요');
+    add_db_check($checks, 'UNIQUE', 'cpms_equipment_usage(project_id, equipment_id, use_date)', has_exact_index2($pdo, 'cpms_equipment_usage', array('project_id', 'equipment_id', 'use_date')) ? '성공' : '주의', has_exact_index2($pdo, 'cpms_equipment_usage', array('project_id', 'equipment_id', 'use_date')) ? '복합 UNIQUE 확인 완료' : '장비 입력 테이블 생성/확인 버튼 재실행 또는 중복 정리 필요');
+    add_db_check($checks, 'DEDUPE', '자재구입비 중복 업체 점검', '확인', '중복 그룹 ' . (int)$materialDuplicateScan['summary']['group_count'] . '개 / 자동 병합 가능 ' . (int)$materialDuplicateScan['summary']['mergeable_count'] . '개 / 충돌 ' . (int)$materialDuplicateScan['summary']['conflict_count'] . '개');
+    add_db_check($checks, 'DEDUPE', '장비 중복 그룹 점검', '확인', '중복 그룹 ' . (int)$equipmentDuplicateScan['summary']['group_count'] . '개 / 자동 병합 가능 ' . (int)$equipmentDuplicateScan['summary']['mergeable_count'] . '개 / 충돌 ' . (int)$equipmentDuplicateScan['summary']['conflict_count'] . '개');
 }
 ?>
 <!doctype html><html lang="ko"><head><meta charset="utf-8"><title>공사 DB 설정</title><style>body{font-family:Arial;background:#f6f7fb;padding:24px}.card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:18px;max-width:900px}.btn{padding:10px 14px;border-radius:10px;border:1px solid #111;background:#111;color:#fff;font-weight:700}.ok{background:#ecfdf5;padding:10px}.bad{background:#fef2f2;padding:10px}.row{display:flex;gap:10px;flex-wrap:wrap}</style></head><body>
@@ -320,6 +399,8 @@ if ($pdo) {
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="task_item_progress"><button class="btn" type="submit">6) 공정표 항목완료수량 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="equipment_vendor_presets"><button class="btn" type="submit">7) 장비 업체 프리셋 테이블 생성/확인</button></form>
 <form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="material_vendor_presets"><button class="btn" type="submit">8) 자재 업체 프리셋 테이블 생성/확인</button></form>
+<form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="material_dedupe_apply"><button class="btn" type="submit">9) 자재 중복 병합 실행</button></form>
+<form method="post"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="equipment_dedupe_apply"><button class="btn" type="submit">10) 장비 중복 병합 실행</button></form>
 </div>
 <h3>주요 확인 항목</h3>
 <table style="border-collapse:collapse;width:100%;max-width:900px;margin-top:10px">
@@ -328,6 +409,51 @@ if ($pdo) {
 <?php foreach ($checks as $c): ?>
 <tr><td style="border:1px solid #ddd;padding:6px"><?php echo h($c['kind']); ?></td><td style="border:1px solid #ddd;padding:6px"><?php echo h($c['target']); ?></td><td style="border:1px solid #ddd;padding:6px"><?php echo h($c['status']); ?></td><td style="border:1px solid #ddd;padding:6px"><?php echo h($c['message']); ?></td></tr>
 <?php endforeach; ?>
+</tbody>
+</table>
+<h3 style="margin-top:22px">자재구입비 중복 업체 점검</h3>
+<div style="margin-bottom:10px">중복 그룹 <?php echo (int)$materialDuplicateScan['summary']['group_count']; ?>개 / 자동 병합 가능 <?php echo (int)$materialDuplicateScan['summary']['mergeable_count']; ?>개 / 충돌 <?php echo (int)$materialDuplicateScan['summary']['conflict_count']; ?>개</div>
+<table style="border-collapse:collapse;width:100%;max-width:900px">
+<thead><tr><th style="border:1px solid #ddd;padding:6px;text-align:left">프로젝트</th><th style="border:1px solid #ddd;padding:6px;text-align:left">구분</th><th style="border:1px solid #ddd;padding:6px;text-align:left">업체명</th><th style="border:1px solid #ddd;padding:6px;text-align:left">공급가액</th><th style="border:1px solid #ddd;padding:6px;text-align:left">대표ID</th><th style="border:1px solid #ddd;padding:6px;text-align:left">중복ID</th><th style="border:1px solid #ddd;padding:6px;text-align:left">결과</th></tr></thead>
+<tbody>
+<?php if (count($materialDuplicateScan['groups']) === 0): ?>
+<tr><td colspan="7" style="border:1px solid #ddd;padding:6px">중복 그룹이 없습니다.</td></tr>
+<?php else: ?>
+<?php foreach ($materialDuplicateScan['groups'] as $group): ?>
+<tr>
+<td style="border:1px solid #ddd;padding:6px"><?php echo (int)$group['project_id']; ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo h($group['category']); ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo h($group['vendor_name']); ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo h(number_format((float)$group['base_rate'], 0)); ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo (int)$group['main_id']; ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo h(implode(', ', $group['duplicate_ids'])); ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo isset($group['mergeable']) && $group['mergeable'] ? '자동 병합 가능' : '충돌'; ?><?php if (!empty($group['conflicts'])): ?> / <?php echo h(isset($group['conflicts'][0]['reason']) ? $group['conflicts'][0]['reason'] : 'conflict'); ?><?php endif; ?></td>
+</tr>
+<?php endforeach; ?>
+<?php endif; ?>
+</tbody>
+</table>
+<h3 style="margin-top:22px">장비 중복 그룹 점검</h3>
+<div style="margin-bottom:10px">중복 그룹 <?php echo (int)$equipmentDuplicateScan['summary']['group_count']; ?>개 / 자동 병합 가능 <?php echo (int)$equipmentDuplicateScan['summary']['mergeable_count']; ?>개 / 충돌 <?php echo (int)$equipmentDuplicateScan['summary']['conflict_count']; ?>개</div>
+<table style="border-collapse:collapse;width:100%;max-width:900px">
+<thead><tr><th style="border:1px solid #ddd;padding:6px;text-align:left">프로젝트</th><th style="border:1px solid #ddd;padding:6px;text-align:left">구분</th><th style="border:1px solid #ddd;padding:6px;text-align:left">업체명</th><th style="border:1px solid #ddd;padding:6px;text-align:left">규격</th><th style="border:1px solid #ddd;padding:6px;text-align:left">기본단가</th><th style="border:1px solid #ddd;padding:6px;text-align:left">대표ID</th><th style="border:1px solid #ddd;padding:6px;text-align:left">중복ID</th><th style="border:1px solid #ddd;padding:6px;text-align:left">결과</th></tr></thead>
+<tbody>
+<?php if (count($equipmentDuplicateScan['groups']) === 0): ?>
+<tr><td colspan="8" style="border:1px solid #ddd;padding:6px">중복 그룹이 없습니다.</td></tr>
+<?php else: ?>
+<?php foreach ($equipmentDuplicateScan['groups'] as $group): ?>
+<tr>
+<td style="border:1px solid #ddd;padding:6px"><?php echo (int)$group['project_id']; ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo h($group['category']); ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo h($group['vendor_name']); ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo h($group['spec']); ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo h(number_format((float)$group['base_rate'], 0)); ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo (int)$group['main_id']; ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo h(implode(', ', $group['duplicate_ids'])); ?></td>
+<td style="border:1px solid #ddd;padding:6px"><?php echo isset($group['mergeable']) && $group['mergeable'] ? '자동 병합 가능' : '충돌'; ?><?php if (!empty($group['conflicts'])): ?> / <?php echo h(isset($group['conflicts'][0]['reason']) ? $group['conflicts'][0]['reason'] : 'conflict'); ?><?php endif; ?></td>
+</tr>
+<?php endforeach; ?>
+<?php endif; ?>
 </tbody>
 </table>
 </div></body></html>
