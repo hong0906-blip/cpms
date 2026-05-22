@@ -1,265 +1,411 @@
 <?php
 use App\Core\Db;
-require_once __DIR__.'/template_helpers.php';
-require_once __DIR__.'/_common.php';
-require_once __DIR__.'/notification_helpers.php';
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') { exit; }
-csrf_validate();
-$pdo = Db::pdo(); $user = \App\Core\Auth::user(); if (!$pdo || !$user) { exit; }
-if (!function_exists('approval_store_column_exists')) {
-function approval_store_column_exists($pdo, $table, $column) {
-    try {
-        $db = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
-        if ($db === '') return false;
-        $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:tbl AND COLUMN_NAME=:col");
-        $st->execute(array(':db'=>$db, ':tbl'=>$table, ':col'=>$column));
-        return ((int)$st->fetchColumn() > 0);
-    } catch (\Exception $e) { return false; }
-}}
 
-if (!function_exists('approval_upload_error_message')) {
-function approval_upload_error_message($code) {
-    switch ((int)$code) {
-        case UPLOAD_ERR_INI_SIZE: return '서버 업로드 용량 제한을 초과했습니다.';
-        case UPLOAD_ERR_FORM_SIZE: return '폼 업로드 용량 제한을 초과했습니다.';
-        case UPLOAD_ERR_PARTIAL: return '파일이 일부만 업로드되었습니다.';
-        case UPLOAD_ERR_NO_FILE: return '파일이 선택되지 않았습니다.';
-        case UPLOAD_ERR_NO_TMP_DIR: return '서버 임시폴더가 없습니다.';
-        case UPLOAD_ERR_CANT_WRITE: return '서버가 파일을 저장하지 못했습니다.';
-        case UPLOAD_ERR_EXTENSION: return '서버 확장 기능이 업로드를 중단했습니다.';
-        default: return '알 수 없는 업로드 오류가 발생했습니다.';
+require_once __DIR__ . '/_common.php';
+require_once __DIR__ . '/template_helpers.php';
+require_once __DIR__ . '/notification_helpers.php';
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    exit;
+}
+csrf_validate();
+
+$pdo = Db::pdo();
+$user = \App\Core\Auth::user();
+if (!$pdo || !$user) {
+    exit;
+}
+
+if (!function_exists('approval_store_column_exists')) {
+    function approval_store_column_exists($pdo, $table, $column)
+    {
+        return approval_table_column_exists($pdo, $table, $column);
     }
-}}
-if (!function_exists('approval_project_root')) {
-function approval_project_root() {
-    $candidates = array(
-        realpath(__DIR__ . '/../../..'),
-        realpath(__DIR__ . '/../../../..'),
-        realpath(dirname(__FILE__) . '/../../..'),
-        realpath(dirname(__FILE__) . '/../../../..')
-    );
-    for ($i = 0; $i < count($candidates); $i++) {
-        $root = $candidates[$i];
+}
+
+if (!function_exists('approval_store_employee')) {
+    function approval_store_employee($pdo, $id)
+    {
+        if ((int)$id <= 0) {
+            return null;
+        }
+        $st = $pdo->prepare("SELECT id,name,email,department,position FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
+        $st->execute(array(':id' => (int)$id));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return $row ? $row : null;
+    }
+}
+
+if (!function_exists('approval_store_employee_by_name')) {
+    function approval_store_employee_by_name($pdo, $name)
+    {
+        $st = $pdo->prepare("SELECT id,name,email,department,position FROM employees WHERE name=:name AND is_active=1 LIMIT 1");
+        $st->execute(array(':name' => $name));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return $row ? $row : null;
+    }
+}
+
+if (!function_exists('approval_store_project_root')) {
+    function approval_store_project_root()
+    {
+        $root = realpath(__DIR__ . '/../../..');
         if ($root && is_dir($root . '/app') && is_dir($root . '/public')) {
             return $root;
         }
+        return dirname(dirname(dirname(__DIR__)));
     }
-    return dirname(dirname(dirname(__DIR__)));
-}}
+}
+
+if (!function_exists('approval_store_upload_error_message')) {
+    function approval_store_upload_error_message($code)
+    {
+        switch ((int)$code) {
+            case UPLOAD_ERR_INI_SIZE:
+            case UPLOAD_ERR_FORM_SIZE:
+                return approval_ko('%EC%97%85%EB%A1%9C%EB%93%9C%20%ED%97%88%EC%9A%A9%20%EC%9A%A9%EB%9F%89%EC%9D%84%20%EC%B4%88%EA%B3%BC%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+            case UPLOAD_ERR_PARTIAL:
+                return approval_ko('%ED%8C%8C%EC%9D%BC%EC%9D%B4%20%EC%9D%BC%EB%B6%80%EB%A7%8C%20%EC%97%85%EB%A1%9C%EB%93%9C%EB%90%98%EC%97%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+            case UPLOAD_ERR_NO_FILE:
+                return approval_ko('%ED%8C%8C%EC%9D%BC%EC%9D%B4%20%EC%84%A0%ED%83%9D%EB%90%98%EC%A7%80%20%EC%95%8A%EC%95%98%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+            default:
+                return approval_ko('%ED%8C%8C%EC%9D%BC%20%EC%97%85%EB%A1%9C%EB%93%9C%20%EC%98%A4%EB%A5%98%EA%B0%80%20%EB%B0%9C%EC%83%9D%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+        }
+    }
+}
 
 $creatorEmployeeId = approval_current_employee_id($pdo, $user);
 $creatorName = approval_current_user_name($user);
 $creatorEmail = approval_current_user_email($user);
 $docType = isset($_POST['doc_type']) ? trim((string)$_POST['doc_type']) : 'proposal';
-error_log('[approval_store] start docType='.$docType);
-
-$requiredStoreColumns = array(
-    array('cpms_approval_documents', 'current_step_order'),
-    array('cpms_approval_documents', 'created_by_id'),
-    array('cpms_approval_documents', 'created_by_name'),
-    array('cpms_approval_documents', 'updated_at'),
-    array('cpms_approval_lines', 'approver_email'),
-    array('cpms_approval_logs', 'action_type')
-);
-$missingStoreColumns = array();
-for ($i=0; $i<count($requiredStoreColumns); $i++) {
-    $tbl = $requiredStoreColumns[$i][0];
-    $col = $requiredStoreColumns[$i][1];
-    if (!approval_store_column_exists($pdo, $tbl, $col)) {
-        $missingStoreColumns[] = $tbl.'.'.$col;
-    }
+if ($docType !== 'leave') {
+    $docType = 'proposal';
 }
-if (count($missingStoreColumns) > 0) {
-    flash_set('danger', '전자결재 DB 컬럼이 아직 준비되지 않았습니다. 관리자에게 전자결재 DB 설치/확인을 요청해주세요.');
-    header('Location: ?r=approval_create&type='.$docType);
+
+$vpRole = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5');
+$ceoRole = approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC');
+$siteRole = approval_ko('%EC%86%8C%EC%9E%A5');
+$teamRole = approval_ko('%ED%8C%80%EC%9E%A5');
+$gongmuRole = approval_ko('%EA%B3%B5%EB%AC%B4');
+$manageRole = approval_ko('%EA%B4%80%EB%A6%AC');
+$pmRole = 'PM';
+$parkName = approval_ko('%EB%B0%95%EC%9B%90%EB%8D%95');
+$goName = approval_ko('%EA%B3%A0%EC%98%81%EC%84%B1');
+
+$vp = approval_store_employee_by_name($pdo, $vpRole);
+if (!$vp) {
+    $st = $pdo->prepare("SELECT id,name,email,department,position FROM employees WHERE is_active=1 AND position=:pos LIMIT 1");
+    $st->execute(array(':pos' => $vpRole));
+    $vp = $st->fetch(PDO::FETCH_ASSOC);
+}
+$ceo = null;
+$st = $pdo->prepare("SELECT id,name,email,department,position FROM employees WHERE is_active=1 AND (position=:p1 OR position=:p2) LIMIT 1");
+$st->execute(array(':p1' => $ceoRole, ':p2' => approval_ko('%EB%8C%80%ED%91%9C')));
+$ceo = $st->fetch(PDO::FETCH_ASSOC);
+if (!$vp || !$ceo) {
+    flash_set('danger', approval_ko('%EC%A7%81%EC%9B%90%EB%AA%85%EB%B6%80%EC%97%90%EC%84%9C%20%EB%B6%80%EC%82%AC%EC%9E%A5%20%EB%98%90%EB%8A%94%20%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC%EA%B0%80%20%ED%99%95%EC%9D%B8%EB%90%98%EC%A7%80%20%EC%95%8A%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+    header('Location: ?r=approval_create&type=' . $docType);
     exit;
 }
 
-$vp = $pdo->query("SELECT id,name,email FROM employees WHERE is_active=1 AND position='부사장' LIMIT 1")->fetch();
-$ceo = $pdo->query("SELECT id,name,email FROM employees WHERE is_active=1 AND position IN ('대표','대표이사') LIMIT 1")->fetch();
-if (!$vp || ($docType!=='leave' && !$ceo)) { flash_set('danger','직원명부에서 부사장 또는 대표이사가 등록되어 있지 않습니다. 관리 메뉴에서 먼저 등록해주세요.'); header('Location: ?r=approval_create&type='.$docType); exit; }
-$contentData = array(); $title=''; $lines=array();
+$contentData = array();
+$title = '';
+$lines = array();
+$delegateLevel = 'none';
+
 if ($docType === 'leave') {
     $leadId = isset($_POST['team_lead_id']) ? (int)$_POST['team_lead_id'] : 0;
-    if ($leadId <= 0) { flash_set('danger','팀장 결재자를 선택해주세요.'); header('Location: ?r=approval_create&type=leave'); exit; }
-    $st=$pdo->prepare("SELECT id,name,email,position FROM employees WHERE id=:id AND is_active=1 AND position IN ('과장','차장','부장') LIMIT 1");
-    $st->execute(array(':id'=>$leadId)); $lead=$st->fetch();
-    if(!$lead){ flash_set('danger','팀장 결재자를 선택해주세요. 관리 > 직원명부에서 전자결재 역할을 설정해주세요.'); header('Location: ?r=approval_create&type=leave'); exit; }
-    $start=isset($_POST['leave_start_date']) ? trim((string)$_POST['leave_start_date']) : '';
-    $end=isset($_POST['leave_end_date']) ? trim((string)$_POST['leave_end_date']) : '';
-    if($start===''||$end===''){ flash_set('danger','휴가 시작일/종료일은 필수입니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
-    if(strtotime($start)>strtotime($end)){ flash_set('danger','휴가 시작일은 종료일보다 늦을 수 없습니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
-    $days=(string)(floor((strtotime($end)-strtotime($start))/86400)+1);
-    if((int)$days<1){ flash_set('danger','휴가 사용일수 계산값이 올바르지 않습니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
-    $requestType=isset($_POST['request_type']) ? trim((string)$_POST['request_type']) : '';
-    $allowedRequestTypes=array('연차','월차','결근','반차 오전','반차 오후','경조휴가','공가','기타');
-    if(!in_array($requestType,$allowedRequestTypes,true)){ flash_set('danger','신청구분이 올바르지 않습니다.'); header('Location: ?r=approval_create&type=leave'); exit; }
-    $leavePeriodText = isset($_POST['leave_period_text']) ? trim((string)$_POST['leave_period_text']) : '';
-    $emergencyContact = isset($_POST['emergency_contact']) ? trim((string)$_POST['emergency_contact']) : '';
-    $contentData = array('request_type'=>$requestType,'request_type_etc'=>isset($_POST['request_type_etc']) ? trim((string)$_POST['request_type_etc']) : '','department'=>isset($_POST['department']) ? trim((string)$_POST['department']) : '','position'=>isset($_POST['position']) ? trim((string)$_POST['position']) : '','applicant_name'=>isset($_POST['applicant_name']) ? trim((string)$_POST['applicant_name']) : '','birth_date'=>isset($_POST['birth_date']) ? trim((string)$_POST['birth_date']) : '','leave_start_date'=>$start,'leave_end_date'=>$end,'leave_days'=>$days,'leave_period_text'=>$leavePeriodText,'leave_reason'=>isset($_POST['leave_reason']) ? trim((string)$_POST['leave_reason']) : '','request_date'=>date('Y-m-d'),'applicant_sign_name'=>isset($_POST['applicant_sign_name']) ? trim((string)$_POST['applicant_sign_name']) : '','emergency_contact'=>$emergencyContact);
+    $lead = approval_store_employee($pdo, $leadId);
+    if (!$lead) {
+        flash_set('danger', approval_ko('%ED%8C%80%EC%9E%A5%20%EA%B2%B0%EC%9E%AC%EC%9E%90%EB%A5%BC%20%EC%84%A0%ED%83%9D%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        header('Location: ?r=approval_create&type=leave');
+        exit;
+    }
+    $start = isset($_POST['leave_start_date']) ? trim((string)$_POST['leave_start_date']) : '';
+    $end = isset($_POST['leave_end_date']) ? trim((string)$_POST['leave_end_date']) : '';
+    if ($start === '' || $end === '' || strtotime($start) === false || strtotime($end) === false || strtotime($start) > strtotime($end)) {
+        flash_set('danger', approval_ko('%ED%9C%B4%EA%B0%80%20%EA%B8%B0%EA%B0%84%EC%9D%84%20%EB%8B%A4%EC%8B%9C%20%ED%99%95%EC%9D%B8%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        header('Location: ?r=approval_create&type=leave');
+        exit;
+    }
+    $days = isset($_POST['leave_days']) ? trim((string)$_POST['leave_days']) : '';
+    if ($days === '' || (float)$days <= 0) {
+        $days = (string)(floor((strtotime($end) - strtotime($start)) / 86400) + 1);
+    }
+    $department = isset($_POST['department']) ? trim((string)$_POST['department']) : '';
+    if ($creatorEmployeeId > 0) {
         try {
-        if ($creatorEmployeeId > 0) {
-            $meSt = $pdo->prepare("SELECT department,position,name,email FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
-            $meSt->execute(array(':id'=>$creatorEmployeeId));
-            $me = $meSt->fetch();
+            $me = approval_store_employee($pdo, $creatorEmployeeId);
             if ($me) {
-                if (isset($me['department'])) { $contentData['department'] = trim((string)$me['department']); }
-                if (isset($me['position'])) { $contentData['position'] = trim((string)$me['position']); }
-                if (isset($me['name']) && trim((string)$me['name'])!=='') { $contentData['applicant_name'] = trim((string)$me['name']); }
+                if (isset($me['department'])) {
+                    $department = trim((string)$me['department']);
+                }
+                if (isset($me['position'])) {
+                    $_POST['position'] = trim((string)$me['position']);
+                }
+                if (isset($me['name']) && trim((string)$me['name']) !== '') {
+                    $_POST['applicant_name'] = trim((string)$me['name']);
+                }
             }
+        } catch (Exception $e) {
         }
-    } catch (Exception $e) {}
-    $contentData['applicant_email']=$creatorEmail; $contentData['writer_email']=$contentData['applicant_email'];
-    $title='휴가계 - '.$contentData['applicant_name'];
-    $deptForLine = isset($contentData['department']) ? $contentData['department'] : '';
-    $normDept = approval_norm_dept($deptForLine);
-    $isConstructionDept = ($normDept==='공사' || $normDept==='공사팀');
-    $sangmu = null;
-    if($isConstructionDept){
-        $st=$pdo->prepare("SELECT id,name,email,position,department FROM employees WHERE is_active=1 AND name='박원덕' LIMIT 1");
-        $st->execute(array());
-        $sangmu=$st->fetch();
-        if(!$sangmu){ flash_set('danger','공사부 휴가계는 상무 결재자 박원덕이 필요합니다. 관리 > 직원명부에서 박원덕 직원을 확인해주세요.'); header('Location: ?r=approval_create&type=leave'); exit; }
     }
-    $contentData['include_sangmu'] = $isConstructionDept ? '1' : '0';
-    $contentData['sangmu_name'] = ($isConstructionDept && isset($sangmu['name'])) ? $sangmu['name'] : '';
-    $contentData['ceo_name'] = isset($ceo['name']) ? $ceo['name'] : '';
-    $contentData['ceo_email'] = isset($ceo['email']) ? $ceo['email'] : '';
-    if($isConstructionDept){ $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'상무','emp'=>$sangmu),array('role'=>'부사장','emp'=>$vp)); }
-    else { $lines=array(array('role'=>'팀장','emp'=>$lead),array('role'=>'부사장','emp'=>$vp)); }
-} else {
-    $siteRoleCol = approval_store_column_exists($pdo, 'employees', 'approval_can_be_site_manager');
-    $gongmuRoleCol = approval_store_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver');
-    $manageRoleCol = approval_store_column_exists($pdo, 'employees', 'approval_can_be_manage_approver');    
-    $sojangId=isset($_POST['sojang_id']) ? (int)$_POST['sojang_id'] : 0;
-    $gongmuId=isset($_POST['gongmu_id']) ? (int)$_POST['gongmu_id'] : 0;
-    $manageId=isset($_POST['manage_id']) ? (int)$_POST['manage_id'] : 0;
-    if ($sojangId <= 0) { flash_set('danger','소장 결재자를 선택해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
-    if ($gongmuId <= 0 || $manageId <= 0) { flash_set('danger','공무/관리 결재자를 선택해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
-    $st=$pdo->prepare("SELECT id,name,email,position,department FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
-    $st->execute(array(':id'=>$sojangId)); $sojang=$st->fetch();
-    $st->execute(array(':id'=>$gongmuId)); $gongmu=$st->fetch(); $st->execute(array(':id'=>$manageId)); $manage=$st->fetch();
-    $sojangRoleOk = false; $gongmuRoleOk = false; $manageRoleOk = false;
-    if ($siteRoleCol && $sojang) { $q=$pdo->prepare("SELECT approval_can_be_site_manager FROM employees WHERE id=:id LIMIT 1"); $q->execute(array(':id'=>(int)$sojang['id'])); $sojangRoleOk = ((int)$q->fetchColumn()===1); }
-    if ($gongmuRoleCol && $gongmu) { $q=$pdo->prepare("SELECT approval_can_be_gongmu_approver FROM employees WHERE id=:id LIMIT 1"); $q->execute(array(':id'=>(int)$gongmu['id'])); $gongmuRoleOk = ((int)$q->fetchColumn()===1); }
-    if ($manageRoleCol && $manage) { $q=$pdo->prepare("SELECT approval_can_be_manage_approver FROM employees WHERE id=:id LIMIT 1"); $q->execute(array(':id'=>(int)$manage['id'])); $manageRoleOk = ((int)$q->fetchColumn()===1); }
-    if(!$sojang || (($siteRoleCol && !$sojangRoleOk) || (!$siteRoleCol && (!in_array($sojang['position'],array('과장','차장','부장')) || !in_array(approval_norm_dept($sojang['department']),array('공사','공사팀')))))){ flash_set('danger','소장 결재자를 선택해주세요. 관리 > 직원명부에서 전자결재 역할을 설정해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
-    if(!$gongmu || (($gongmuRoleCol && !$gongmuRoleOk) || (!$gongmuRoleCol && !in_array(approval_norm_dept($gongmu['department']),array('공무','공무팀')))) || !$manage || (($manageRoleCol && !$manageRoleOk) || (!$manageRoleCol && !in_array(approval_norm_dept($manage['department']),array('관리','관리팀'))))){ flash_set('danger','공무/관리 결재자를 선택해주세요. 관리 > 직원명부에서 전자결재 역할을 설정해주세요.'); header('Location: ?r=approval_create&type=proposal'); exit; }
-    $contentData = array('draft_date'=>isset($_POST['draft_date']) ? trim((string)$_POST['draft_date']) : '','effective_date'=>isset($_POST['effective_date']) ? trim((string)$_POST['effective_date']) : '','draft_department'=>isset($_POST['draft_department']) ? trim((string)$_POST['draft_department']) : '','drafter_name'=>isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : '','draft_type'=>isset($_POST['draft_type']) ? trim((string)$_POST['draft_type']) : '','title'=>isset($_POST['title']) ? trim((string)$_POST['title']) : '','headline'=>isset($_POST['headline']) ? trim((string)$_POST['headline']) : '','intro_text'=>isset($_POST['intro_text']) ? trim((string)$_POST['intro_text']) : '','reason'=>isset($_POST['reason']) ? trim((string)$_POST['reason']) : '','company_name'=>isset($_POST['company_name']) ? trim((string)$_POST['company_name']) : '','contract_amount'=>isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '','advance_amount'=>isset($_POST['advance_amount']) ? trim((string)$_POST['advance_amount']) : '','special_note_1'=>isset($_POST['special_note_1']) ? trim((string)$_POST['special_note_1']) : '','special_note_2'=>isset($_POST['special_note_2']) ? trim((string)$_POST['special_note_2']) : '','payment_request_date'=>isset($_POST['payment_request_date']) ? trim((string)$_POST['payment_request_date']) : '','budget_status'=>isset($_POST['budget_status']) ? trim((string)$_POST['budget_status']) : '','attached_doc_1'=>isset($_POST['attached_doc_1']) ? trim((string)$_POST['attached_doc_1']) : '','attached_doc_2'=>isset($_POST['attached_doc_2']) ? trim((string)$_POST['attached_doc_2']) : '','attached_doc_note'=>isset($_POST['attached_doc_note']) ? trim((string)$_POST['attached_doc_note']) : '','writer_name'=>isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : '','writer_email'=>$creatorEmail);
-    $title=$contentData['title']!==''?$contentData['title']:'기안서';
-    $lines=array(array('role'=>'소장','emp'=>$sojang),array('role'=>'공무','emp'=>$gongmu),array('role'=>'관리','emp'=>$manage),array('role'=>'부사장','emp'=>$vp),array('role'=>'대표이사','emp'=>$ceo));
-}
-try {
-error_log('[approval_store] docType='.$docType);
-$pdo->beginTransaction();
-error_log('[approval_store] before insert document');
-$docHasCreatorEmail = approval_store_column_exists($pdo, 'cpms_approval_documents', 'created_by_email');
-if ($docHasCreatorEmail) {
-    $pdo->prepare("INSERT INTO cpms_approval_documents (doc_type,title,content,doc_status,current_step_order,created_by_id,created_by_name,created_by_email,created_at,updated_at) VALUES (:t,:ti,:c,'PENDING',1,:uid,:un,:ue,NOW(),NOW())")
-        ->execute(array(':t'=>$docType,':ti'=>$title,':c'=>json_encode($contentData),':uid'=>$creatorEmployeeId,':un'=>$creatorName,':ue'=>$creatorEmail));
-} else {
-    $pdo->prepare("INSERT INTO cpms_approval_documents (doc_type,title,content,doc_status,current_step_order,created_by_id,created_by_name,created_at,updated_at) VALUES (:t,:ti,:c,'PENDING',1,:uid,:un,NOW(),NOW())")
-        ->execute(array(':t'=>$docType,':ti'=>$title,':c'=>json_encode($contentData),':uid'=>$creatorEmployeeId,':un'=>$creatorName));
-}
-$did=(int)$pdo->lastInsertId();
-$prepared=array();
-error_log('[approval_store] after insert document did='.$did);
-for($i=0;$i<count($lines);$i++){
-    $emp=$lines[$i]['emp'];
-    $isSelfApprover=false;
-    if($creatorEmployeeId>0 && (int)$emp['id']===(int)$creatorEmployeeId){ $isSelfApprover=true; }
-    else if($creatorEmail!=='' && isset($emp['email']) && trim((string)$emp['email'])===$creatorEmail){ $isSelfApprover=true; }
-    $st=$isSelfApprover?'SKIPPED':'WAITING';
-    $prepared[]=array('order'=>$i+1,'role'=>$lines[$i]['role'],'emp'=>$emp,'status'=>$st);
-}
-$first=0; for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']!=='SKIPPED'){ $first=$i; break; } }
-$allSkipped=true; for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']!=='SKIPPED'){ $allSkipped=false; break; } }
-if($allSkipped){ $pdo->rollBack(); flash_set('danger','모든 결재자가 작성자 본인으로 설정되어 결재 요청을 만들 수 없습니다. 결재라인을 다시 선택해주세요.'); header('Location: ?r=approval_create&type='.$docType); exit; }
-for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']!=='SKIPPED'){$prepared[$i]['status']=($i===$first)?'PENDING':'WAITING';} $emp=$prepared[$i]['emp'];    
-    if($i===0){ error_log('[approval_store] before insert lines'); }
-    $pdo->prepare("INSERT INTO cpms_approval_lines (document_id,line_order,role_type,approver_id,approver_name,approver_email,line_status) VALUES (?,?,?,?,?,?,?)")
-    ->execute(array($did,$prepared[$i]['order'],$prepared[$i]['role'],$emp['id'],$emp['name'],$emp['email'],$prepared[$i]['status']));
-    if($prepared[$i]['status']==='SKIPPED'){
-      $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,NULL,:a,:n,:e,'SKIPPED',:m,NOW())")->execute(array(':d'=>$did,':a'=>$creatorEmployeeId,':n'=>$creatorName,':e'=>$creatorEmail,':m'=>'작성자 본인 결재단계로 자동 건너뜀'));
+    $normDept = approval_norm_dept($department);
+    $leavePm = null;
+    if ($normDept === approval_ko('%EA%B3%B5%EC%82%AC') || $normDept === approval_ko('%EC%95%88%EC%A0%84')) {
+        $leavePm = approval_store_employee_by_name($pdo, $parkName);
+    } else if ($normDept === approval_ko('%EA%B3%B5%EB%AC%B4')) {
+        $leavePm = approval_store_employee_by_name($pdo, $goName);
     }
+    $contentData = array(
+        'request_type' => isset($_POST['request_type']) ? trim((string)$_POST['request_type']) : '',
+        'request_type_etc' => isset($_POST['request_type_etc']) ? trim((string)$_POST['request_type_etc']) : '',
+        'department' => $department,
+        'position' => isset($_POST['position']) ? trim((string)$_POST['position']) : '',
+        'applicant_name' => isset($_POST['applicant_name']) ? trim((string)$_POST['applicant_name']) : $creatorName,
+        'birth_date' => isset($_POST['birth_date']) ? trim((string)$_POST['birth_date']) : '',
+        'leave_start_date' => $start,
+        'leave_end_date' => $end,
+        'leave_days' => $days,
+        'leave_reason' => isset($_POST['leave_reason']) ? trim((string)$_POST['leave_reason']) : '',
+        'request_date' => isset($_POST['request_date']) ? trim((string)$_POST['request_date']) : date('Y-m-d'),
+        'applicant_sign_name' => isset($_POST['applicant_sign_name']) ? trim((string)$_POST['applicant_sign_name']) : $creatorName,
+        'applicant_email' => $creatorEmail,
+        'writer_email' => $creatorEmail,
+        'ceo_name' => isset($ceo['name']) ? $ceo['name'] : '',
+        'delegate_level' => 'ceo'
+    );
+    $title = approval_doc_label('leave') . ' - ' . $contentData['applicant_name'];
+    $lines[] = array('role' => $teamRole, 'emp' => $lead, 'delegated' => 0);
+    if ($leavePm) {
+        $lines[] = array('role' => $pmRole, 'emp' => $leavePm, 'delegated' => 0);
+    }
+    $lines[] = array('role' => $vpRole, 'emp' => $vp, 'delegated' => 0);
+    $lines[] = array('role' => $ceoRole, 'emp' => $ceo, 'delegated' => 1, 'delegated_by_role' => $vpRole);
+    $delegateLevel = 'ceo';
+} else {
+    $sojang = approval_store_employee($pdo, isset($_POST['sojang_id']) ? (int)$_POST['sojang_id'] : 0);
+    $pm = approval_store_employee($pdo, isset($_POST['pm_id']) ? (int)$_POST['pm_id'] : 0);
+    $gongmu = approval_store_employee($pdo, isset($_POST['gongmu_id']) ? (int)$_POST['gongmu_id'] : 0);
+    $manage = approval_store_employee($pdo, isset($_POST['manage_id']) ? (int)$_POST['manage_id'] : 0);
+    if (!$sojang || !$gongmu || !$manage) {
+        flash_set('danger', approval_ko('%EC%86%8C%EC%9E%A5%2F%EA%B3%B5%EB%AC%B4%2F%EA%B4%80%EB%A6%AC%20%EA%B2%B0%EC%9E%AC%EC%9E%90%EB%A5%BC%20%EC%84%A0%ED%83%9D%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        header('Location: ?r=approval_create&type=proposal');
+        exit;
+    }
+    $delegateLevel = isset($_POST['delegate_level']) ? trim((string)$_POST['delegate_level']) : 'none';
+    if (!in_array($delegateLevel, array('none', 'vp', 'ceo'), true)) {
+        $delegateLevel = 'none';
+    }
+    $contentData = array(
+        'draft_date' => isset($_POST['draft_date']) ? trim((string)$_POST['draft_date']) : '',
+        'effective_date' => isset($_POST['effective_date']) ? trim((string)$_POST['effective_date']) : '',
+        'draft_department' => isset($_POST['draft_department']) ? trim((string)$_POST['draft_department']) : '',
+        'drafter_name' => isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : $creatorName,
+        'draft_type' => isset($_POST['draft_type']) ? trim((string)$_POST['draft_type']) : '',
+        'title' => isset($_POST['title']) ? trim((string)$_POST['title']) : '',
+        'headline' => isset($_POST['headline']) ? trim((string)$_POST['headline']) : '',
+        'intro_text' => isset($_POST['intro_text']) ? trim((string)$_POST['intro_text']) : '',
+        'reason' => isset($_POST['reason']) ? trim((string)$_POST['reason']) : '',
+        'company_name' => isset($_POST['company_name']) ? trim((string)$_POST['company_name']) : '',
+        'contract_amount' => isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '',
+        'advance_amount' => isset($_POST['advance_amount']) ? trim((string)$_POST['advance_amount']) : '',
+        'special_note_1' => isset($_POST['special_note_1']) ? trim((string)$_POST['special_note_1']) : '',
+        'special_note_2' => isset($_POST['special_note_2']) ? trim((string)$_POST['special_note_2']) : '',
+        'payment_request_date' => isset($_POST['payment_request_date']) ? trim((string)$_POST['payment_request_date']) : '',
+        'budget_status' => isset($_POST['budget_status']) ? trim((string)$_POST['budget_status']) : '',
+        'writer_name' => isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : $creatorName,
+        'writer_email' => $creatorEmail,
+        'delegate_level' => $delegateLevel
+    );
+    $title = $contentData['title'] !== '' ? $contentData['title'] : approval_doc_label('proposal');
+    $lines[] = array('role' => $siteRole, 'emp' => $sojang, 'delegated' => 0);
+    if ($pm) {
+        $lines[] = array('role' => $pmRole, 'emp' => $pm, 'delegated' => 0);
+    }
+    $lines[] = array('role' => $gongmuRole, 'emp' => $gongmu, 'delegated' => 0);
+    $lines[] = array('role' => $manageRole, 'emp' => $manage, 'delegated' => 0);
+    $lines[] = array('role' => $vpRole, 'emp' => $vp, 'delegated' => ($delegateLevel === 'vp') ? 1 : 0, 'delegated_by_role' => $manageRole);
+    $lines[] = array('role' => $ceoRole, 'emp' => $ceo, 'delegated' => ($delegateLevel === 'vp' || $delegateLevel === 'ceo') ? 1 : 0, 'delegated_by_role' => ($delegateLevel === 'vp' ? $manageRole : $vpRole));
 }
-for($i=0;$i<count($prepared);$i++){ if($prepared[$i]['status']==='PENDING'){ try { $msg = approval_build_request_message($docType, $title, $creatorName); approval_queue_notification($pdo,$did,'REQUEST',$prepared[$i]['emp']['id'],$msg); } catch (Exception $e) {} break; } }
 
-$uploadWarn=array();
-if($docType==='proposal'){
-    $allow=array('jpg','jpeg','png','gif','webp','pdf');
-    $labels=array('order_doc'=>array('발주서','order_doc_file'),'business_license'=>array('사업자 등록증','business_license_file'),'etc'=>array('기타','etc_file'));
-    $root=approval_project_root();
-    $storageRoot=rtrim($root,'/\\').'/storage';
-    $approvalRoot=$storageRoot.'/approvals';
-    $base=$approvalRoot.'/'.$did.'/files';
-    error_log('[approval_upload] root='.$root);
-    error_log('[approval_upload] storageRoot='.$storageRoot);
-    error_log('[approval_upload] approvalRoot='.$approvalRoot);    
-    error_log('[approval_upload] base='.$base);
-    // 기본 프로젝트 경로가 C:\www\cpms 인 경우:
-    // C:\www\cpms\storage
-    // C:\www\cpms\storage\approvals
-    // Linux 서버:
-    // 프로젝트루트/storage
-    // 프로젝트루트/storage/approvals
-    $uploadFolderOk=true;
-    if(!is_dir($storageRoot)){
-        if(!@mkdir($storageRoot,0777,true)){
-            $uploadFolderOk=false;
-            error_log('[approval_upload] mkdir failed storageRoot='.$storageRoot);
-        }
+$hasCreatorEmail = approval_store_column_exists($pdo, 'cpms_approval_documents', 'created_by_email');
+$hasDelegateLevel = approval_store_column_exists($pdo, 'cpms_approval_documents', 'delegate_level');
+$hasLineDelegated = approval_store_column_exists($pdo, 'cpms_approval_lines', 'is_delegated');
+$hasLineDelegatedBy = approval_store_column_exists($pdo, 'cpms_approval_lines', 'delegated_by_role');
+
+try {
+    $pdo->beginTransaction();
+
+    $docColumns = array('doc_type', 'title', 'content', 'doc_status', 'current_step_order', 'created_by_id', 'created_by_name', 'created_at', 'updated_at');
+    $docValues = array(':t', ':ti', ':c', "'PENDING'", '1', ':uid', ':un', 'NOW()', 'NOW()');
+    $docParams = array(':t' => $docType, ':ti' => $title, ':c' => json_encode($contentData), ':uid' => $creatorEmployeeId, ':un' => $creatorName);
+    if ($hasCreatorEmail) {
+        $docColumns[] = 'created_by_email';
+        $docValues[] = ':ue';
+        $docParams[':ue'] = $creatorEmail;
     }
-    if($uploadFolderOk && !is_dir($approvalRoot)){
-        if(!@mkdir($approvalRoot,0777,true)){
-            $uploadFolderOk=false;
-            error_log('[approval_upload] mkdir failed approvalRoot='.$approvalRoot);
-        }
+    if ($hasDelegateLevel) {
+        $docColumns[] = 'delegate_level';
+        $docValues[] = ':delegate_level';
+        $docParams[':delegate_level'] = $delegateLevel;
     }
-    if($uploadFolderOk && !is_dir($base)){
-        if(!@mkdir($base,0777,true)){
-            $uploadFolderOk=false;
-            error_log('[approval_upload] mkdir failed base='.$base);
-        }
-    }
-    if(!$uploadFolderOk){
-        $uploadWarn[]='첨부파일 저장 폴더 생성 실패: 서버 storage 폴더 권한을 확인해주세요.';
-    }
-    $uploadPathWarned = false;    
-    foreach($labels as $ft=>$meta){
-        $fname=$meta[1];
-        if(!isset($_FILES[$fname])||!isset($_FILES[$fname]['tmp_name'])||$_FILES[$fname]['tmp_name']===''){ continue; }
-        if(!$uploadFolderOk){ continue; }
-        if(!is_writable($base)){
-            if(!$uploadPathWarned){
-                $uploadWarn[]='첨부파일 저장 폴더 생성 실패: 서버 storage 폴더 권한을 확인해주세요.';
-                $uploadPathWarned = true;
+    $sql = "INSERT INTO cpms_approval_documents (" . implode(',', $docColumns) . ") VALUES (" . implode(',', $docValues) . ")";
+    $pdo->prepare($sql)->execute($docParams);
+    $did = (int)$pdo->lastInsertId();
+
+    $prepared = array();
+    for ($i = 0; $i < count($lines); $i++) {
+        $line = $lines[$i];
+        $emp = $line['emp'];
+        $isDelegated = isset($line['delegated']) && (int)$line['delegated'] === 1;
+        $isSelfApprover = false;
+        if (!$isDelegated) {
+            if ($creatorEmployeeId > 0 && (int)$emp['id'] === (int)$creatorEmployeeId) {
+                $isSelfApprover = true;
+            } else if ($creatorEmail !== '' && isset($emp['email']) && strtolower(trim((string)$emp['email'])) === strtolower($creatorEmail)) {
+                $isSelfApprover = true;
             }
-            continue;
         }
-        if((int)$_FILES[$fname]['error']!==UPLOAD_ERR_OK){ $uploadWarn[]=$meta[0].' 업로드 실패: '.approval_upload_error_message($_FILES[$fname]['error']); continue; }
-        $orig=(string)$_FILES[$fname]['name'];
-        $ext=strtolower(pathinfo($orig,PATHINFO_EXTENSION));
-        if(!in_array($ext,$allow)){ $uploadWarn[]=$meta[0].' 확장자 제한'; continue; }
-        $saved=$ft.'_'.date('YmdHis').'_'.mt_rand(1000,9999).'.'.$ext;
-        $dest=$base.'/'.$saved;
-        if(!@move_uploaded_file($_FILES[$fname]['tmp_name'],$dest)){ error_log('[approval_upload] move failed tmp='.$_FILES[$fname]['tmp_name'].' dest='.$dest); $uploadWarn[]=$meta[0].' 저장 실패: 서버 저장 권한 또는 경로를 확인해주세요.'; continue; }
-        $rel='storage/approvals/'.$did.'/files/'.$saved;
-        $pdo->prepare("INSERT INTO cpms_approval_files (document_id,original_name,saved_name,file_path,file_label,file_type,created_at) VALUES (?,?,?,?,?,?,NOW())")
-            ->execute(array($did,$orig,$saved,$rel,$meta[0],$ft));
+        $status = $isDelegated ? 'DELEGATED' : ($isSelfApprover ? 'SKIPPED' : 'WAITING');
+        $prepared[] = array(
+            'order' => $i + 1,
+            'role' => $line['role'],
+            'emp' => $emp,
+            'status' => $status,
+            'delegated' => $isDelegated ? 1 : 0,
+            'delegated_by_role' => isset($line['delegated_by_role']) ? $line['delegated_by_role'] : null
+        );
     }
-}
-error_log('[approval_store] before commit');
-$pdo->commit();
-if(count($uploadWarn)>0){ flash_set('danger', implode(', ',$uploadWarn)); }
-header('Location: ?r=approval_detail&id='.$did);
+
+    $first = -1;
+    for ($i = 0; $i < count($prepared); $i++) {
+        if ($prepared[$i]['status'] === 'WAITING') {
+            $first = $i;
+            break;
+        }
+    }
+    if ($first >= 0) {
+        $prepared[$first]['status'] = 'PENDING';
+    }
+
+    for ($i = 0; $i < count($prepared); $i++) {
+        $emp = $prepared[$i]['emp'];
+        $cols = array('document_id', 'line_order', 'role_type', 'approver_id', 'approver_name', 'approver_email', 'line_status');
+        $marks = array(':d', ':o', ':r', ':aid', ':an', ':ae', ':st');
+        $params = array(':d' => $did, ':o' => $prepared[$i]['order'], ':r' => $prepared[$i]['role'], ':aid' => $emp['id'], ':an' => $emp['name'], ':ae' => $emp['email'], ':st' => $prepared[$i]['status']);
+        if ($hasLineDelegated) {
+            $cols[] = 'is_delegated';
+            $marks[] = ':is_delegated';
+            $params[':is_delegated'] = $prepared[$i]['delegated'];
+        }
+        if ($hasLineDelegatedBy) {
+            $cols[] = 'delegated_by_role';
+            $marks[] = ':delegated_by_role';
+            $params[':delegated_by_role'] = $prepared[$i]['delegated_by_role'];
+        }
+        $pdo->prepare("INSERT INTO cpms_approval_lines (" . implode(',', $cols) . ") VALUES (" . implode(',', $marks) . ")")->execute($params);
+        if ($prepared[$i]['status'] === 'SKIPPED' || $prepared[$i]['status'] === 'DELEGATED') {
+            $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,NULL,:a,:n,:e,:type,:m,NOW())")
+                ->execute(array(':d' => $did, ':a' => $creatorEmployeeId, ':n' => $creatorName, ':e' => $creatorEmail, ':type' => $prepared[$i]['status'], ':m' => approval_line_status_label($prepared[$i]['status'])));
+        }
+    }
+
+    if ($first < 0) {
+        $pdo->prepare("UPDATE cpms_approval_documents SET doc_status='APPROVED', updated_at=NOW() WHERE id=:id")->execute(array(':id' => $did));
+    } else {
+        for ($i = 0; $i < count($prepared); $i++) {
+            if ($prepared[$i]['status'] === 'PENDING') {
+                try {
+                    $msg = approval_build_request_message($docType, $title, $creatorName);
+                    approval_queue_notification($pdo, $did, 'REQUEST', $prepared[$i]['emp']['id'], $msg);
+                } catch (Exception $e) {
+                }
+                break;
+            }
+        }
+    }
+
+    if (approval_table_exists($pdo, 'cpms_approval_references')) {
+        $selectedRefs = isset($_POST['reference_employee_ids']) && is_array($_POST['reference_employee_ids']) ? $_POST['reference_employee_ids'] : array();
+        $lineEmployeeIds = array();
+        for ($i = 0; $i < count($prepared); $i++) {
+            $lineEmployeeIds[] = (int)$prepared[$i]['emp']['id'];
+        }
+        $seen = array();
+        for ($i = 0; $i < count($selectedRefs); $i++) {
+            $rid = (int)$selectedRefs[$i];
+            if ($rid <= 0 || isset($seen[$rid])) {
+                continue;
+            }
+            $seen[$rid] = 1;
+            if ($creatorEmployeeId > 0 && $rid === (int)$creatorEmployeeId) {
+                continue;
+            }
+            if (in_array($rid, $lineEmployeeIds, true)) {
+                continue;
+            }
+            $refEmp = approval_store_employee($pdo, $rid);
+            if (!$refEmp) {
+                continue;
+            }
+            $pdo->prepare("INSERT INTO cpms_approval_references (document_id,employee_id,employee_name,employee_email,employee_department,created_at) VALUES (:d,:eid,:en,:ee,:ed,NOW())")
+                ->execute(array(':d' => $did, ':eid' => $rid, ':en' => $refEmp['name'], ':ee' => $refEmp['email'], ':ed' => isset($refEmp['department']) ? $refEmp['department'] : null));
+        }
+    }
+
+    $uploadWarn = array();
+    if ($docType === 'proposal') {
+        $allow = array('jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf');
+        $labels = array(
+            'order_doc' => array(approval_ko('%EB%B0%9C%EC%A3%BC%EC%84%9C'), 'order_doc_file'),
+            'business_license' => array(approval_ko('%EC%82%AC%EC%97%85%EC%9E%90%EB%93%B1%EB%A1%9D%EC%A6%9D'), 'business_license_file'),
+            'etc' => array(approval_ko('%EA%B8%B0%ED%83%80'), 'etc_file')
+        );
+        $root = approval_store_project_root();
+        $base = rtrim($root, '/\\') . '/storage/approvals/' . $did . '/files';
+        if (!is_dir($base)) {
+            @mkdir($base, 0777, true);
+        }
+        foreach ($labels as $ft => $meta) {
+            $fname = $meta[1];
+            if (!isset($_FILES[$fname]) || !isset($_FILES[$fname]['tmp_name']) || $_FILES[$fname]['tmp_name'] === '') {
+                continue;
+            }
+            if ((int)$_FILES[$fname]['error'] !== UPLOAD_ERR_OK) {
+                $uploadWarn[] = $meta[0] . ' ' . approval_store_upload_error_message($_FILES[$fname]['error']);
+                continue;
+            }
+            $orig = (string)$_FILES[$fname]['name'];
+            $ext = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
+            if (!in_array($ext, $allow, true)) {
+                $uploadWarn[] = $meta[0] . ' ' . approval_ko('%ED%97%88%EC%9A%A9%EB%90%98%EC%A7%80%20%EC%95%8A%EB%8A%94%20%ED%99%95%EC%9E%A5%EC%9E%90%EC%9E%85%EB%8B%88%EB%8B%A4.');
+                continue;
+            }
+            $saved = $ft . '_' . date('YmdHis') . '_' . mt_rand(1000, 9999) . '.' . $ext;
+            $dest = $base . '/' . $saved;
+            if (!@move_uploaded_file($_FILES[$fname]['tmp_name'], $dest)) {
+                $uploadWarn[] = $meta[0] . ' ' . approval_ko('%EC%A0%80%EC%9E%A5%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+                continue;
+            }
+            $rel = 'storage/approvals/' . $did . '/files/' . $saved;
+            $pdo->prepare("INSERT INTO cpms_approval_files (document_id,original_name,saved_name,file_path,file_label,file_type,created_at) VALUES (?,?,?,?,?,?,NOW())")
+                ->execute(array($did, $orig, $saved, $rel, $meta[0], $ft));
+        }
+    }
+
+    $pdo->commit();
+    if (count($uploadWarn) > 0) {
+        flash_set('danger', implode(', ', $uploadWarn));
+    }
+    header('Location: ?r=approval_detail&id=' . $did);
+    exit;
 } catch (Exception $e) {
-    error_log('[approval_store] catch '.$e->getMessage());
     if ($pdo && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    error_log('[approval_store] '.$e->getMessage());
-    flash_set('danger', '전자결재 저장 중 오류가 발생했습니다. 전자결재 DB 설치/확인을 먼저 실행해주세요.');
-    header('Location: ?r=approval_create&type='.$docType);
+    error_log('[approval_store] ' . $e->getMessage());
+    flash_set('danger', approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%A0%80%EC%9E%A5%20%EC%A4%91%20%EC%98%A4%EB%A5%98%EA%B0%80%20%EB%B0%9C%EC%83%9D%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20DB%20%EC%84%A4%EC%B9%98%2F%ED%99%95%EC%9D%B8%EC%9D%84%20%EB%A8%BC%EC%A0%80%20%EC%8B%A4%ED%96%89%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+    header('Location: ?r=approval_create&type=' . $docType);
     exit;
 }

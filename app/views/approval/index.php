@@ -3,12 +3,109 @@ use App\Core\Db;
 
 require_once __DIR__ . '/_common.php';
 
+if (!function_exists('approval_index_tab_class')) {
+    function approval_index_tab_class($currentView, $targetView)
+    {
+        if ($currentView === $targetView) {
+            return 'bg-white text-indigo-700 font-extrabold shadow';
+        }
+        return 'bg-white/15 text-indigo-50 hover:bg-white/25';
+    }
+}
+
+if (!function_exists('approval_index_mask_email')) {
+    function approval_index_mask_email($email)
+    {
+        $email = trim((string)$email);
+        if ($email === '') {
+            return urldecode('%EC%97%86%EC%9D%8C');
+        }
+        $parts = explode('@', $email, 2);
+        $local = isset($parts[0]) ? $parts[0] : '';
+        $domain = isset($parts[1]) ? $parts[1] : '';
+        if ($local === '') {
+            return urldecode('%EC%97%86%EC%9D%8C');
+        }
+        if (strlen($local) <= 2) {
+            return substr($local, 0, 1) . '*@' . $domain;
+        }
+        return substr($local, 0, 2) . '***@' . $domain;
+    }
+}
+
+if (!function_exists('approval_index_card_class')) {
+    function approval_index_card_class($index)
+    {
+        $classes = array(
+            'from-indigo-500 to-cyan-500',
+            'from-rose-500 to-orange-500',
+            'from-emerald-500 to-teal-500',
+            'from-slate-600 to-slate-500'
+        );
+        return isset($classes[$index]) ? $classes[$index] : 'from-indigo-500 to-cyan-500';
+    }
+}
+
 $pdo = Db::pdo();
 $u = \App\Core\Auth::user();
 $uid = approval_current_employee_id($pdo, $u);
 $userEmail = approval_current_user_email($u);
 $userName = approval_current_user_name($u);
 $isAdmin = approval_is_admin_user($u);
+$isMaster = approval_is_master_user();
+$debugApproval = isset($_GET['debug_approval']) && (string)$_GET['debug_approval'] === '1';
+
+$txt = array(
+    'page_active' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%A7%84%ED%96%89%EB%AC%B8%EC%84%9C'),
+    'page_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C'),
+    'page_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C'),
+    'desc_active' => urldecode('%EA%B8%B0%EC%95%88%EC%84%9C%EC%99%80%20%ED%9C%B4%EA%B0%80%EA%B3%84%20%EB%93%B1%20%EC%A7%84%ED%96%89%20%EC%A4%91%EC%9D%B8%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AC%B8%EC%84%9C%EB%A5%BC%20%ED%99%95%EC%9D%B8%ED%95%A9%EB%8B%88%EB%8B%A4.'),
+    'desc_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%90%9C%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AC%B8%EC%84%9C%EB%A7%8C%20%EB%AA%A8%EC%95%84%20%ED%99%95%EC%9D%B8%ED%95%98%EA%B3%A0%20%ED%95%84%EC%9A%94%20%EC%8B%9C%20%EC%82%AD%EC%A0%9C%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
+    'desc_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%EB%A5%BC%20%EC%A2%85%EB%A5%98%2F%EC%A0%9C%EB%AA%A9%2F%EC%9E%91%EC%84%B1%EC%9E%90%2F%EC%9E%91%EC%84%B1%EC%9D%BC%EC%9E%90%20%EA%B8%B0%EC%A4%80%EC%9C%BC%EB%A1%9C%20%EA%B2%80%EC%83%89%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
+    'db_setup' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20DB%20%EC%84%A4%EC%B9%98%2F%ED%99%95%EC%9D%B8'),
+    'db_desc' => urldecode('%EB%AC%B8%EC%84%9C%2C%20%EA%B2%B0%EC%9E%AC%EC%84%A0%2C%20%EC%B2%A8%EB%B6%80%2C%20%EC%95%8C%EB%A6%BC%20%ED%85%8C%EC%9D%B4%EB%B8%94%EC%9D%84%20%EC%A0%90%EA%B2%80%ED%95%A9%EB%8B%88%EB%8B%A4.'),
+    'create_proposal' => urldecode('%EA%B8%B0%EC%95%88%EC%84%9C%20%EC%9E%91%EC%84%B1'),
+    'create_leave' => urldecode('%ED%9C%B4%EA%B0%80%EA%B3%84%20%EC%9E%91%EC%84%B1'),
+    'view_active' => urldecode('%EC%A7%84%ED%96%89%EB%AC%B8%EC%84%9C%20%EB%B3%B4%EA%B8%B0'),
+    'view_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C%20%EB%B3%B4%EA%B8%B0'),
+    'view_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%20%EB%B3%B4%EA%B8%B0'),
+    'filter_doc_type' => urldecode('%EB%AC%B8%EC%84%9C%20%EC%A2%85%EB%A5%98'),
+    'filter_all' => urldecode('%EC%A0%84%EC%B2%B4'),
+    'filter_title' => urldecode('%EC%A0%9C%EB%AA%A9%20%EA%B2%80%EC%83%89'),
+    'filter_author' => urldecode('%EC%9E%91%EC%84%B1%EC%9E%90%20%EA%B2%80%EC%83%89'),
+    'filter_date_from' => urldecode('%EC%9E%91%EC%84%B1%EC%9D%BC%EC%9E%90%20%EC%8B%9C%EC%9E%91'),
+    'filter_date_to' => urldecode('%EC%9E%91%EC%84%B1%EC%9D%BC%EC%9E%90%20%EC%A2%85%EB%A3%8C'),
+    'filter_q' => urldecode('%ED%86%B5%ED%95%A9%20%EA%B2%80%EC%83%89%EC%96%B4'),
+    'search' => urldecode('%EA%B2%80%EC%83%89'),
+    'reset' => urldecode('%EC%B4%88%EA%B8%B0%ED%99%94'),
+    'card_received' => urldecode('%EB%B0%9B%EC%9D%80%20%EA%B2%B0%EC%9E%AC'),
+    'card_requested' => urldecode('%EB%82%98%EC%9D%98%20%EC%9A%94%EC%B2%AD'),
+    'card_progress' => urldecode('%EC%A7%84%ED%96%89%EC%A4%91'),
+    'card_rejected' => urldecode('%EB%B0%98%EB%A0%A4'),
+    'card_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C'),
+    'card_my_cancelled' => urldecode('%EB%82%B4%EA%B0%80%20%EC%B7%A8%EC%86%8C%ED%95%9C%20%EB%AC%B8%EC%84%9C'),
+    'card_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%AC%B8%EC%84%9C'),
+    'card_my_completed' => urldecode('%EB%82%B4%EA%B0%80%20%EC%9E%91%EC%84%B1%ED%95%9C%20%EC%99%84%EB%A3%8C%EB%AC%B8%EC%84%9C'),
+    'card_my_approved' => urldecode('%EB%82%B4%EA%B0%80%20%EA%B2%B0%EC%9E%AC%ED%95%9C%20%EC%99%84%EB%A3%8C%EB%AC%B8%EC%84%9C'),
+    'error_load' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AA%A9%EB%A1%9D%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EB%8A%94%20%EC%A4%91%20%EC%98%A4%EB%A5%98%EA%B0%80%20%EB%B0%9C%EC%83%9D%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.%20%EA%B4%80%EB%A6%AC%EC%9E%90%EC%97%90%EA%B2%8C%20%EB%AC%B8%EC%9D%98%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'),
+    'table_type' => urldecode('%EC%A2%85%EB%A5%98'),
+    'table_title' => urldecode('%EC%A0%9C%EB%AA%A9'),
+    'table_author' => urldecode('%EC%9E%91%EC%84%B1%EC%9E%90'),
+    'table_created_at' => urldecode('%EC%9E%91%EC%84%B1%EC%9D%BC%EC%8B%9C'),
+    'table_completed_at' => urldecode('%EC%99%84%EB%A3%8C%EC%9D%BC%EC%8B%9C'),
+    'table_current_step' => urldecode('%ED%98%84%EC%9E%AC%20%EA%B2%B0%EC%9E%AC'),
+    'table_my_step' => urldecode('%EB%82%B4%20%EA%B2%B0%EC%9E%AC%EC%84%A0'),
+    'table_status' => urldecode('%EC%83%81%ED%83%9C'),
+    'table_actions' => urldecode('%EC%95%A1%EC%85%98'),
+    'detail' => urldecode('%EC%83%81%EC%84%B8%EB%B3%B4%EA%B8%B0'),
+    'cancel' => urldecode('%EC%9A%94%EC%B2%AD%EC%B7%A8%EC%86%8C'),
+    'delete' => urldecode('%EC%82%AD%EC%A0%9C'),
+    'confirm_cancel' => urldecode('%EC%9D%B4%20%EB%AC%B8%EC%84%9C%20%EC%9A%94%EC%B2%AD%EC%9D%84%20%EC%B7%A8%EC%86%8C%ED%95%A0%EA%B9%8C%EC%9A%94%3F'),
+    'confirm_delete' => urldecode('%EC%9D%B4%20%EC%B7%A8%EC%86%8C%20%EB%AC%B8%EC%84%9C%EB%A5%BC%20%EC%82%AD%EC%A0%9C%ED%95%A0%EA%B9%8C%EC%9A%94%3F'),
+    'empty_active' => urldecode('%EC%A7%84%ED%96%89%EC%A4%91%EC%9D%B8%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
+    'empty_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
+    'empty_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')
+);
 
 $view = isset($_GET['view']) ? trim((string)$_GET['view']) : 'active';
 if (isset($_GET['show_cancelled']) && (string)$_GET['show_cancelled'] === '1') {
@@ -25,9 +122,40 @@ $dateFromFilter = isset($_GET['date_from']) ? trim((string)$_GET['date_from']) :
 $dateToFilter = isset($_GET['date_to']) ? trim((string)$_GET['date_to']) : '';
 $queryFilter = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
 
+$pageTitle = $txt['page_active'];
+$pageDesc = $txt['desc_active'];
+$emptyMessage = $txt['empty_active'];
+if ($view === 'cancelled') {
+    $pageTitle = $txt['page_cancelled'];
+    $pageDesc = $txt['desc_cancelled'];
+    $emptyMessage = $txt['empty_cancelled'];
+} else if ($view === 'completed') {
+    $pageTitle = $txt['page_completed'];
+    $pageDesc = $txt['desc_completed'];
+    $emptyMessage = $txt['empty_completed'];
+}
+
 $rows = array();
 $countCards = array();
-$docHasCreatedByEmail = ($pdo && approval_table_column_exists($pdo, 'cpms_approval_documents', 'created_by_email'));
+$fatalMessage = '';
+$debugInfo = array(
+    'view' => $view,
+    'uid' => $uid,
+    'user_email' => approval_index_mask_email($userEmail),
+    'user_name' => $userName,
+    'is_admin' => $isAdmin ? 'Y' : 'N',
+    'is_master' => $isMaster ? 'Y' : 'N',
+    'params_keys' => array(),
+    'sql_status' => 'not_run',
+    'sql_error' => ''
+);
+
+$docHasCreatedByEmail = false;
+$referenceTableExists = false;
+if ($pdo) {
+    $docHasCreatedByEmail = approval_table_column_exists($pdo, 'cpms_approval_documents', 'created_by_email');
+    $referenceTableExists = approval_table_exists($pdo, 'cpms_approval_references');
+}
 
 if ($pdo) {
     $params = array();
@@ -41,22 +169,26 @@ if ($pdo) {
         $where[] = "UPPER(COALESCE(d.doc_status, '')) NOT IN ('CANCELLED', 'APPROVED', 'COMPLETED')";
     }
 
-    if (!$isAdmin) {
+    if (!$isMaster) {
         $ownerParts = array();
         $lineParts = array();
+        $refParts = array();
 
         if ($uid > 0) {
             $ownerParts[] = "d.created_by_id = :uid";
             $lineParts[] = "x.approver_id = :uid";
+            $refParts[] = "r.employee_id = :uid";
             $params[':uid'] = $uid;
         }
         if ($userName !== '') {
             $ownerParts[] = "d.created_by_name = :uname";
             $lineParts[] = "x.approver_name = :uname";
+            $refParts[] = "r.employee_name = :uname";
             $params[':uname'] = $userName;
         }
         if ($userEmail !== '') {
             $lineParts[] = "LOWER(TRIM(x.approver_email)) = LOWER(TRIM(:email))";
+            $refParts[] = "LOWER(TRIM(r.employee_email)) = LOWER(TRIM(:email))";
             $params[':email'] = $userEmail;
             if ($docHasCreatedByEmail) {
                 $ownerParts[] = "LOWER(TRIM(d.created_by_email)) = LOWER(TRIM(:owner_email))";
@@ -71,7 +203,9 @@ if ($pdo) {
         if (count($lineParts) > 0) {
             $relatedParts[] = "EXISTS (SELECT 1 FROM cpms_approval_lines x WHERE x.document_id = d.id AND (" . implode(' OR ', $lineParts) . "))";
         }
-
+        if ($view === 'completed' && $referenceTableExists && count($refParts) > 0) {
+            $relatedParts[] = "EXISTS (SELECT 1 FROM cpms_approval_references r WHERE r.document_id = d.id AND (" . implode(' OR ', $refParts) . "))";
+        }
         if (count($relatedParts) > 0) {
             $where[] = '(' . implode(' OR ', $relatedParts) . ')';
         } else {
@@ -109,34 +243,59 @@ if ($pdo) {
     $myLineSelect = "NULL";
     $myLineWhere = array();
     if ($uid > 0) {
-        $myLineWhere[] = "my.approver_id = :uid";
+        $myLineWhere[] = "my.approver_id = :my_uid";
+        $params[':my_uid'] = $uid;
     }
     if ($userEmail !== '') {
-        $myLineWhere[] = "LOWER(TRIM(my.approver_email)) = LOWER(TRIM(:email))";
+        $myLineWhere[] = "LOWER(TRIM(my.approver_email)) = LOWER(TRIM(:my_email))";
+        $params[':my_email'] = $userEmail;
     }
     if ($userName !== '') {
-        $myLineWhere[] = "my.approver_name = :uname";
+        $myLineWhere[] = "my.approver_name = :my_uname";
+        $params[':my_uname'] = $userName;
     }
     if (count($myLineWhere) > 0) {
-        $myLineSelect = "(SELECT my.line_status FROM cpms_approval_lines my WHERE my.document_id = d.id AND (" . implode(' OR ', $myLineWhere) . ") ORDER BY my.line_order ASC LIMIT 1)";
+        $myLineSelect = "(SELECT my.line_status
+                            FROM cpms_approval_lines my
+                           WHERE my.document_id = d.id
+                             AND (" . implode(' OR ', $myLineWhere) . ")
+                           ORDER BY my.line_order ASC
+                           LIMIT 1)";
     }
 
     $sql = "SELECT d.*,
                    " . $myLineSelect . " AS my_line_status,
-                   (SELECT cur.role_type FROM cpms_approval_lines cur WHERE cur.document_id = d.id AND cur.line_status = 'PENDING' ORDER BY cur.line_order ASC LIMIT 1) AS current_role
+                   (SELECT cur.role_type
+                      FROM cpms_approval_lines cur
+                     WHERE cur.document_id = d.id
+                       AND cur.line_status = 'PENDING'
+                     ORDER BY cur.line_order ASC
+                     LIMIT 1) AS current_role
               FROM cpms_approval_documents d";
     if (count($where) > 0) {
         $sql .= " WHERE " . implode(' AND ', $where);
     }
     $sql .= " ORDER BY d.updated_at DESC, d.id DESC LIMIT 300";
 
-    $st = $pdo->prepare($sql);
-    $st->execute($params);
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-    if (!is_array($rows)) { $rows = array(); }
+    $debugInfo['params_keys'] = array_keys($params);
+
+    try {
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) {
+            $rows = array();
+        }
+        $debugInfo['sql_status'] = 'success';
+    } catch (Exception $e) {
+        error_log('[approval_index] SQL error: ' . $e->getMessage());
+        $fatalMessage = $txt['error_load'];
+        $rows = array();
+        $debugInfo['sql_status'] = 'failed';
+        $debugInfo['sql_error'] = substr($e->getMessage(), 0, 300);
+    }
 }
 
-$countCards = array();
 if ($view === 'cancelled') {
     $mineCancelled = 0;
     for ($i = 0; $i < count($rows); $i++) {
@@ -145,25 +304,24 @@ if ($view === 'cancelled') {
         }
     }
     $countCards = array(
-        array('label' => '취소문서', 'count' => count($rows)),
-        array('label' => '내가 취소한 문서', 'count' => $mineCancelled)
+        array('label' => $txt['card_cancelled'], 'count' => count($rows)),
+        array('label' => $txt['card_my_cancelled'], 'count' => $mineCancelled)
     );
 } else if ($view === 'completed') {
     $mineCompleted = 0;
     $approvedByMe = 0;
     for ($i = 0; $i < count($rows); $i++) {
-        $row = $rows[$i];
-        if (approval_is_document_owner($pdo, $row, $u)) {
+        if (approval_is_document_owner($pdo, $rows[$i], $u)) {
             $mineCompleted++;
         }
-        if (isset($row['my_line_status']) && in_array(strtoupper(trim((string)$row['my_line_status'])), array('APPROVED', 'REJECTED', 'PENDING', 'WAITING', 'SKIPPED'), true)) {
+        if (isset($rows[$i]['my_line_status']) && trim((string)$rows[$i]['my_line_status']) !== '') {
             $approvedByMe++;
         }
     }
     $countCards = array(
-        array('label' => '완료문서', 'count' => count($rows)),
-        array('label' => '내가 작성한 완료문서', 'count' => $mineCompleted),
-        array('label' => '내가 결재한 완료문서', 'count' => $approvedByMe)
+        array('label' => $txt['card_completed'], 'count' => count($rows)),
+        array('label' => $txt['card_my_completed'], 'count' => $mineCompleted),
+        array('label' => $txt['card_my_approved'], 'count' => $approvedByMe)
     );
 } else {
     $recv = 0;
@@ -171,64 +329,74 @@ if ($view === 'cancelled') {
     $prog = 0;
     $rej = 0;
     for ($i = 0; $i < count($rows); $i++) {
-        $row = $rows[$i];
-        if (approval_is_document_owner($pdo, $row, $u)) { $mine++; }
-        if (isset($row['my_line_status']) && $row['my_line_status'] !== null && trim((string)$row['my_line_status']) !== '') { $recv++; }
-        $status = strtoupper(trim((string)(isset($row['doc_status']) ? $row['doc_status'] : '')));
-        if ($status === 'PENDING' || $status === 'DRAFT') { $prog++; }
-        if ($status === 'REJECTED') { $rej++; }
+        if (approval_is_document_owner($pdo, $rows[$i], $u)) {
+            $mine++;
+        }
+        if (isset($rows[$i]['my_line_status']) && trim((string)$rows[$i]['my_line_status']) !== '') {
+            $recv++;
+        }
+        $status = strtoupper(trim((string)(isset($rows[$i]['doc_status']) ? $rows[$i]['doc_status'] : '')));
+        if ($status === 'PENDING' || $status === 'DRAFT') {
+            $prog++;
+        }
+        if ($status === 'REJECTED') {
+            $rej++;
+        }
     }
     $countCards = array(
-        array('label' => '받은 결재', 'count' => $recv),
-        array('label' => '나의 요청', 'count' => $mine),
-        array('label' => '진행중', 'count' => $prog),
-        array('label' => '반려', 'count' => $rej)
+        array('label' => $txt['card_received'], 'count' => $recv),
+        array('label' => $txt['card_requested'], 'count' => $mine),
+        array('label' => $txt['card_progress'], 'count' => $prog),
+        array('label' => $txt['card_rejected'], 'count' => $rej)
     );
 }
 
 $canDb = \App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees() || \App\Core\Auth::userRole() === 'executive';
-$pageTitle = approval_document_title_by_view($view);
-$emptyMessage = approval_document_empty_message($view);
-
-function approval_tab_class($currentView, $targetView)
-{
-    if ($currentView === $targetView) {
-        return 'bg-white text-indigo-700 font-extrabold';
-    }
-    return 'bg-white/15 text-indigo-50';
-}
 ?>
 <div class="space-y-5">
+    <?php if ($fatalMessage !== '') { ?>
+        <div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4"><?php echo h($fatalMessage); ?></div>
+    <?php } ?>
+
+    <?php if ($debugApproval) { ?>
+        <div class="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-2xl p-4 text-sm">
+            <div><strong>debug_approval</strong></div>
+            <div>view: <?php echo h($debugInfo['view']); ?></div>
+            <div>uid: <?php echo (int)$debugInfo['uid']; ?></div>
+            <div>userEmail: <?php echo h($debugInfo['user_email']); ?></div>
+            <div>userName: <?php echo h($debugInfo['user_name']); ?></div>
+            <div>isAdmin: <?php echo h($debugInfo['is_admin']); ?></div>
+            <div>isMaster: <?php echo h($debugInfo['is_master']); ?></div>
+            <div>params: <?php echo h(implode(', ', $debugInfo['params_keys'])); ?></div>
+            <div>sql: <?php echo h($debugInfo['sql_status']); ?></div>
+            <?php if ($debugInfo['sql_error'] !== '') { ?>
+                <div>error: <?php echo h($debugInfo['sql_error']); ?></div>
+            <?php } ?>
+        </div>
+    <?php } ?>
+
     <div class="bg-gradient-to-r from-indigo-600 to-cyan-500 rounded-3xl p-7 text-white shadow-xl">
         <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
             <div class="min-w-0">
                 <h2 class="text-3xl font-extrabold"><?php echo h($pageTitle); ?></h2>
-                <p class="mt-2 text-indigo-100">
-                    <?php if ($view === 'cancelled') { ?>
-                        취소된 전자결재 문서를 확인하고 필요한 경우 삭제할 수 있습니다.
-                    <?php } else if ($view === 'completed') { ?>
-                        완료된 전자결재 문서를 종류별, 제목별, 작성자별, 작성일자별로 검색할 수 있습니다.
-                    <?php } else { ?>
-                        기안서와 휴가계를 작성하고 결재 진행상태를 확인합니다.
-                    <?php } ?>
-                </p>
+                <p class="mt-2 text-indigo-100"><?php echo h($pageDesc); ?></p>
                 <?php if ($canDb) { ?>
-                    <p class="mt-2 text-indigo-100 text-sm">전자결재 DB 설치/확인은 문서, 결재라인, 첨부, 알림 테이블을 생성합니다.</p>
+                    <p class="mt-2 text-indigo-100 text-sm"><?php echo h($txt['db_desc']); ?></p>
                 <?php } ?>
             </div>
             <div class="flex flex-wrap items-center justify-start xl:justify-end gap-3 shrink-0 max-w-none">
                 <?php if ($canDb) { ?>
-                    <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-amber-200 text-amber-950" href="?r=db_setup_approval">전자결재 DB 설치/확인</a>
+                    <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-amber-200 text-amber-950" href="?r=db_setup_approval"><?php echo h($txt['db_setup']); ?></a>
                 <?php } ?>
-                <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-indigo-700" href="?r=approval_create&type=proposal">기안서 작성</a>
-                <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-cyan-700" href="?r=approval_create&type=leave">휴가계 작성</a>
+                <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-indigo-700" href="?r=approval_create&type=proposal"><?php echo h($txt['create_proposal']); ?></a>
+                <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-cyan-700" href="?r=approval_create&type=leave"><?php echo h($txt['create_leave']); ?></a>
             </div>
         </div>
 
         <div class="flex flex-wrap gap-2 mt-5">
-            <a href="?r=approval_home&view=active" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl <?php echo approval_tab_class($view, 'active'); ?>">진행문서 보기</a>
-            <a href="?r=approval_home&view=cancelled" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl <?php echo approval_tab_class($view, 'cancelled'); ?>">취소문서 보기</a>
-            <a href="?r=approval_home&view=completed" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl <?php echo approval_tab_class($view, 'completed'); ?>">완료된 문서 보기</a>
+            <a href="?r=approval_home&view=active" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl transition <?php echo approval_index_tab_class($view, 'active'); ?>"><?php echo h($txt['view_active']); ?></a>
+            <a href="?r=approval_home&view=cancelled" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl transition <?php echo approval_index_tab_class($view, 'cancelled'); ?>"><?php echo h($txt['view_cancelled']); ?></a>
+            <a href="?r=approval_home&view=completed" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl transition <?php echo approval_index_tab_class($view, 'completed'); ?>"><?php echo h($txt['view_completed']); ?></a>
         </div>
     </div>
 
@@ -238,129 +406,129 @@ function approval_tab_class($currentView, $targetView)
             <input type="hidden" name="view" value="completed">
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
                 <div>
-                    <div class="text-sm font-bold text-gray-700 mb-1">문서 종류</div>
+                    <div class="text-sm font-bold text-gray-700 mb-1"><?php echo h($txt['filter_doc_type']); ?></div>
                     <select name="doc_type" class="w-full border rounded-xl px-3 py-2">
-                        <option value="">전체</option>
-                        <option value="proposal" <?php echo ($docTypeFilter === 'proposal') ? 'selected' : ''; ?>>기안서</option>
-                        <option value="leave" <?php echo ($docTypeFilter === 'leave') ? 'selected' : ''; ?>>휴가계</option>
+                        <option value=""><?php echo h($txt['filter_all']); ?></option>
+                        <option value="proposal" <?php echo ($docTypeFilter === 'proposal') ? 'selected' : ''; ?>><?php echo h($txt['create_proposal']); ?></option>
+                        <option value="leave" <?php echo ($docTypeFilter === 'leave') ? 'selected' : ''; ?>><?php echo h($txt['create_leave']); ?></option>
                     </select>
                 </div>
                 <div>
-                    <div class="text-sm font-bold text-gray-700 mb-1">제목 검색</div>
+                    <div class="text-sm font-bold text-gray-700 mb-1"><?php echo h($txt['filter_title']); ?></div>
                     <input type="text" name="title" value="<?php echo h($titleFilter); ?>" class="w-full border rounded-xl px-3 py-2">
                 </div>
                 <div>
-                    <div class="text-sm font-bold text-gray-700 mb-1">작성자 검색</div>
+                    <div class="text-sm font-bold text-gray-700 mb-1"><?php echo h($txt['filter_author']); ?></div>
                     <input type="text" name="author" value="<?php echo h($authorFilter); ?>" class="w-full border rounded-xl px-3 py-2">
                 </div>
                 <div>
-                    <div class="text-sm font-bold text-gray-700 mb-1">작성일자 시작</div>
+                    <div class="text-sm font-bold text-gray-700 mb-1"><?php echo h($txt['filter_date_from']); ?></div>
                     <input type="date" name="date_from" value="<?php echo h($dateFromFilter); ?>" class="w-full border rounded-xl px-3 py-2">
                 </div>
                 <div>
-                    <div class="text-sm font-bold text-gray-700 mb-1">작성일자 종료</div>
+                    <div class="text-sm font-bold text-gray-700 mb-1"><?php echo h($txt['filter_date_to']); ?></div>
                     <input type="date" name="date_to" value="<?php echo h($dateToFilter); ?>" class="w-full border rounded-xl px-3 py-2">
                 </div>
                 <div>
-                    <div class="text-sm font-bold text-gray-700 mb-1">통합 검색어</div>
+                    <div class="text-sm font-bold text-gray-700 mb-1"><?php echo h($txt['filter_q']); ?></div>
                     <input type="text" name="q" value="<?php echo h($queryFilter); ?>" class="w-full border rounded-xl px-3 py-2">
                 </div>
             </div>
             <div class="flex flex-wrap gap-2 mt-4">
-                <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold">검색</button>
-                <a href="?r=approval_home&view=completed" class="px-4 py-2 rounded-xl bg-gray-100 text-gray-900 font-bold">초기화</a>
+                <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold"><?php echo h($txt['search']); ?></button>
+                <a href="?r=approval_home&view=completed" class="px-4 py-2 rounded-xl bg-gray-100 text-gray-900 font-bold"><?php echo h($txt['reset']); ?></a>
             </div>
         </form>
     <?php } ?>
 
-    <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-<?php echo count($countCards) >= 4 ? '4' : '3'; ?> gap-4 mt-6 mb-6">
-        <?php for ($i = 0; $i < count($countCards); $i++) { ?>
-            <div class="bg-white rounded-2xl border p-5 text-gray-900">
-                <div class="text-gray-800 font-bold"><?php echo h($countCards[$i]['label']); ?></div>
-                <div class="text-2xl font-extrabold text-gray-950"><?php echo (int)$countCards[$i]['count']; ?></div>
-            </div>
-        <?php } ?>
-    </div>
+    <?php if (count($countCards) > 0) { ?>
+        <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+            <?php for ($i = 0; $i < count($countCards); $i++) { ?>
+                <div class="rounded-3xl p-[1px] bg-gradient-to-br <?php echo approval_index_card_class($i); ?>">
+                    <div class="rounded-[calc(1.5rem-1px)] bg-white p-5 h-full">
+                        <div class="text-sm font-semibold text-gray-500"><?php echo h($countCards[$i]['label']); ?></div>
+                        <div class="mt-2 text-3xl font-extrabold text-gray-900"><?php echo number_format((int)$countCards[$i]['count']); ?></div>
+                    </div>
+                </div>
+            <?php } ?>
+        </div>
+    <?php } ?>
 
-    <div class="bg-white rounded-3xl border p-5 overflow-x-auto mt-6 text-gray-900">
-        <table class="min-w-[1100px] w-full text-base text-gray-900">
-            <thead>
-                <?php if ($view === 'completed') { ?>
-                    <tr class="text-left border-b text-gray-950">
-                        <th class="py-3 px-3">종류</th>
-                        <th class="py-3 px-3">제목</th>
-                        <th class="py-3 px-3">작성자</th>
-                        <th class="py-3 px-3">작성일시</th>
-                        <th class="py-3 px-3">완료일시</th>
-                        <th class="py-3 px-3">상태</th>
-                        <th class="py-3 px-3">상세보기</th>
-                    </tr>
-                <?php } else { ?>
-                    <tr class="text-left border-b text-gray-950">
-                        <th class="py-3 px-3">종류</th>
-                        <th class="py-3 px-3">제목</th>
-                        <th class="py-3 px-3">작성자</th>
-                        <th class="py-3 px-3">상태</th>
-                        <th class="py-3 px-3">현재 단계</th>
-                        <th class="py-3 px-3">작성일시</th>
-                        <th class="py-3 px-3">액션</th>
-                    </tr>
-                <?php } ?>
-            </thead>
-            <tbody>
-                <?php if (count($rows) === 0) { ?>
-                    <tr>
-                        <td colspan="<?php echo ($view === 'completed') ? '7' : '7'; ?>" class="py-6 px-3 text-center text-gray-500"><?php echo h($emptyMessage); ?></td>
-                    </tr>
-                <?php } else { ?>
-                    <?php for ($i = 0; $i < count($rows); $i++) {
-                        $r = $rows[$i];
-                        $rowMine = approval_is_document_owner($pdo, $r, $u);
-                        $rowCanCancel = $rowMine && approval_can_cancel_document($r);
-                        $rowCanDelete = approval_can_delete_document($pdo, $r, $u);
+    <div class="bg-white rounded-3xl border overflow-hidden">
+        <div class="px-5 py-4 border-b bg-gray-50">
+            <div class="text-lg font-extrabold text-gray-900"><?php echo h($pageTitle); ?></div>
+        </div>
+
+        <?php if (count($rows) === 0) { ?>
+            <div class="p-8 text-center text-gray-500"><?php echo h($emptyMessage); ?></div>
+        <?php } else { ?>
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50 text-gray-700">
+                        <tr>
+                            <th class="px-4 py-3 text-left"><?php echo h($txt['table_type']); ?></th>
+                            <th class="px-4 py-3 text-left"><?php echo h($txt['table_title']); ?></th>
+                            <th class="px-4 py-3 text-left"><?php echo h($txt['table_author']); ?></th>
+                            <th class="px-4 py-3 text-left"><?php echo h($txt['table_created_at']); ?></th>
+                            <?php if ($view === 'completed') { ?>
+                                <th class="px-4 py-3 text-left"><?php echo h($txt['table_completed_at']); ?></th>
+                            <?php } else { ?>
+                                <th class="px-4 py-3 text-left"><?php echo h($txt['table_current_step']); ?></th>
+                            <?php } ?>
+                            <th class="px-4 py-3 text-left"><?php echo h($txt['table_my_step']); ?></th>
+                            <th class="px-4 py-3 text-left"><?php echo h($txt['table_status']); ?></th>
+                            <th class="px-4 py-3 text-left"><?php echo h($txt['table_actions']); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                        <?php for ($i = 0; $i < count($rows); $i++) {
+                            $row = $rows[$i];
+                            $currentRole = isset($row['current_role']) ? trim((string)$row['current_role']) : '';
+                            $myLineStatus = isset($row['my_line_status']) ? trim((string)$row['my_line_status']) : '';
+                            $completedAt = isset($row['updated_at']) ? (string)$row['updated_at'] : '';
                         ?>
-                        <?php if ($view === 'completed') { ?>
-                            <tr class="border-b">
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(approval_doc_label(isset($r['doc_type']) ? $r['doc_type'] : '')); ?></td>
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(isset($r['title']) ? $r['title'] : ''); ?></td>
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(isset($r['created_by_name']) ? $r['created_by_name'] : ''); ?></td>
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(isset($r['created_at']) ? $r['created_at'] : ''); ?></td>
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(isset($r['updated_at']) ? $r['updated_at'] : ''); ?></td>
-                                <td class="py-4 px-3 text-gray-900"><span class="px-4 py-2 rounded-full border <?php echo approval_status_badge(isset($r['doc_status']) ? $r['doc_status'] : ''); ?>"><?php echo h(approval_status_label(isset($r['doc_status']) ? $r['doc_status'] : '')); ?></span></td>
-                                <td class="py-4 px-3 text-gray-900"><a href="?r=approval_detail&id=<?php echo (int)$r['id']; ?>" class="text-indigo-700 font-bold">상세보기</a></td>
-                            </tr>
-                        <?php } else { ?>
-                            <tr class="border-b">
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(approval_doc_label(isset($r['doc_type']) ? $r['doc_type'] : '')); ?></td>
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(isset($r['title']) ? $r['title'] : ''); ?></td>
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(isset($r['created_by_name']) ? $r['created_by_name'] : ''); ?></td>
-                                <td class="py-4 px-3 text-gray-900"><span class="px-4 py-2 rounded-full border <?php echo approval_status_badge(isset($r['doc_status']) ? $r['doc_status'] : ''); ?>"><?php echo h(approval_status_label(isset($r['doc_status']) ? $r['doc_status'] : '')); ?></span></td>
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(isset($r['current_role']) && trim((string)$r['current_role']) !== '' ? $r['current_role'] : '-'); ?></td>
-                                <td class="py-4 px-3 text-gray-900"><?php echo h(isset($r['created_at']) ? $r['created_at'] : ''); ?></td>
-                                <td class="py-4 px-3 text-gray-900">
-                                    <div class="flex flex-wrap items-center gap-3">
-                                        <a href="?r=approval_detail&id=<?php echo (int)$r['id']; ?>" class="text-indigo-700 font-bold">상세보기</a>
-                                        <?php if ($rowCanCancel) { ?>
-                                            <form method="post" action="?r=approval_cancel" style="display:inline;">
-                                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                                                <input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>">
-                                                <button class="text-rose-700 font-bold">요청취소</button>
+                            <tr class="hover:bg-gray-50">
+                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h(approval_doc_label(isset($row['doc_type']) ? $row['doc_type'] : '')); ?></td>
+                                <td class="px-4 py-3 min-w-[280px]">
+                                    <div class="font-semibold text-gray-900"><?php echo h(isset($row['title']) ? $row['title'] : ''); ?></div>
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h(isset($row['created_by_name']) ? $row['created_by_name'] : ''); ?></td>
+                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h(isset($row['created_at']) ? $row['created_at'] : ''); ?></td>
+                                <?php if ($view === 'completed') { ?>
+                                    <td class="px-4 py-3 whitespace-nowrap"><?php echo h($completedAt); ?></td>
+                                <?php } else { ?>
+                                    <td class="px-4 py-3 whitespace-nowrap"><?php echo h($currentRole === '' ? '-' : approval_role_label($currentRole)); ?></td>
+                                <?php } ?>
+                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h($myLineStatus === '' ? '-' : approval_line_status_label($myLineStatus)); ?></td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <span class="inline-flex items-center px-3 py-1 rounded-full border text-xs font-bold <?php echo h(approval_status_badge(isset($row['doc_status']) ? $row['doc_status'] : '')); ?>">
+                                        <?php echo h(approval_status_label(isset($row['doc_status']) ? $row['doc_status'] : '')); ?>
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <div class="flex flex-wrap gap-2">
+                                        <a href="?r=approval_detail&id=<?php echo (int)$row['id']; ?>" class="inline-flex items-center px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 font-bold"><?php echo h($txt['detail']); ?></a>
+                                        <?php if (approval_is_document_owner($pdo, $row, $u) && approval_can_cancel_document($row)) { ?>
+                                            <form method="post" action="?r=approval_cancel" onsubmit="return confirm('<?php echo h($txt['confirm_cancel']); ?>');">
+                                                <?php echo csrf_field(); ?>
+                                                <input type="hidden" name="id" value="<?php echo (int)$row['id']; ?>">
+                                                <button type="submit" class="inline-flex items-center px-3 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold"><?php echo h($txt['cancel']); ?></button>
                                             </form>
                                         <?php } ?>
-                                        <?php if ($rowCanDelete) { ?>
-                                            <form method="post" action="?r=approval_delete" style="display:inline;" onsubmit="return confirm('취소문서를 삭제하시겠습니까?');">
-                                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                                                <input type="hidden" name="id" value="<?php echo (int)$r['id']; ?>">
-                                                <button class="text-gray-800 font-bold">삭제</button>
+                                        <?php if (approval_can_delete_document($pdo, $row, $u)) { ?>
+                                            <form method="post" action="?r=approval_delete" onsubmit="return confirm('<?php echo h($txt['confirm_delete']); ?>');">
+                                                <?php echo csrf_field(); ?>
+                                                <input type="hidden" name="id" value="<?php echo (int)$row['id']; ?>">
+                                                <button type="submit" class="inline-flex items-center px-3 py-2 rounded-xl bg-gray-100 text-gray-800 font-bold"><?php echo h($txt['delete']); ?></button>
                                             </form>
                                         <?php } ?>
                                     </div>
                                 </td>
                             </tr>
                         <?php } ?>
-                    <?php } ?>
-                <?php } ?>
-            </tbody>
-        </table>
+                    </tbody>
+                </table>
+            </div>
+        <?php } ?>
     </div>
 </div>
