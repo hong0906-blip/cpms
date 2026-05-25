@@ -327,9 +327,6 @@ if (!function_exists('approval_can_view_document')) {
         if (!is_array($docRow) || !isset($docRow['id'])) {
             return false;
         }
-        if (approval_is_master_user()) {
-            return true;
-        }
         if (approval_is_document_owner($pdo, $docRow, $user)) {
             return true;
         }
@@ -337,8 +334,7 @@ if (!function_exists('approval_can_view_document')) {
         if (approval_is_line_approver($pdo, $documentId, $user)) {
             return true;
         }
-        $status = strtoupper(trim((string)(isset($docRow['doc_status']) ? $docRow['doc_status'] : '')));
-        if (($status === 'APPROVED' || $status === 'COMPLETED') && approval_is_document_reference($pdo, $documentId, $user)) {
+        if (approval_is_document_reference($pdo, $documentId, $user)) {
             return true;
         }
         return false;

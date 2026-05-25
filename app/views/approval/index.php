@@ -52,7 +52,6 @@ $uid = approval_current_employee_id($pdo, $u);
 $userEmail = approval_current_user_email($u);
 $userName = approval_current_user_name($u);
 $isAdmin = approval_is_admin_user($u);
-$isMaster = approval_is_master_user();
 $debugApproval = isset($_GET['debug_approval']) && (string)$_GET['debug_approval'] === '1';
 
 $txt = array(
@@ -144,7 +143,6 @@ $debugInfo = array(
     'user_email' => approval_index_mask_email($userEmail),
     'user_name' => $userName,
     'is_admin' => $isAdmin ? 'Y' : 'N',
-    'is_master' => $isMaster ? 'Y' : 'N',
     'params_keys' => array(),
     'sql_status' => 'not_run',
     'sql_error' => ''
@@ -169,48 +167,46 @@ if ($pdo) {
         $where[] = "UPPER(COALESCE(d.doc_status, '')) NOT IN ('CANCELLED', 'APPROVED', 'COMPLETED')";
     }
 
-    if (!$isMaster) {
-        $ownerParts = array();
-        $lineParts = array();
-        $refParts = array();
+    $ownerParts = array();
+    $lineParts = array();
+    $refParts = array();
 
-        if ($uid > 0) {
-            $ownerParts[] = "d.created_by_id = :uid";
-            $lineParts[] = "x.approver_id = :uid";
-            $refParts[] = "r.employee_id = :uid";
-            $params[':uid'] = $uid;
+    if ($uid > 0) {
+        $ownerParts[] = "d.created_by_id = :uid";
+        $lineParts[] = "x.approver_id = :uid";
+        $refParts[] = "r.employee_id = :uid";
+        $params[':uid'] = $uid;
+    }
+    if ($userName !== '') {
+        $ownerParts[] = "d.created_by_name = :uname";
+        $lineParts[] = "x.approver_name = :uname";
+        $refParts[] = "r.employee_name = :uname";
+        $params[':uname'] = $userName;
+    }
+    if ($userEmail !== '') {
+        $lineParts[] = "LOWER(TRIM(x.approver_email)) = LOWER(TRIM(:email))";
+        $refParts[] = "LOWER(TRIM(r.employee_email)) = LOWER(TRIM(:email))";
+        $params[':email'] = $userEmail;
+        if ($docHasCreatedByEmail) {
+            $ownerParts[] = "LOWER(TRIM(d.created_by_email)) = LOWER(TRIM(:owner_email))";
+            $params[':owner_email'] = $userEmail;
         }
-        if ($userName !== '') {
-            $ownerParts[] = "d.created_by_name = :uname";
-            $lineParts[] = "x.approver_name = :uname";
-            $refParts[] = "r.employee_name = :uname";
-            $params[':uname'] = $userName;
-        }
-        if ($userEmail !== '') {
-            $lineParts[] = "LOWER(TRIM(x.approver_email)) = LOWER(TRIM(:email))";
-            $refParts[] = "LOWER(TRIM(r.employee_email)) = LOWER(TRIM(:email))";
-            $params[':email'] = $userEmail;
-            if ($docHasCreatedByEmail) {
-                $ownerParts[] = "LOWER(TRIM(d.created_by_email)) = LOWER(TRIM(:owner_email))";
-                $params[':owner_email'] = $userEmail;
-            }
-        }
+    }
 
-        $relatedParts = array();
-        if (count($ownerParts) > 0) {
-            $relatedParts[] = '(' . implode(' OR ', $ownerParts) . ')';
-        }
-        if (count($lineParts) > 0) {
-            $relatedParts[] = "EXISTS (SELECT 1 FROM cpms_approval_lines x WHERE x.document_id = d.id AND (" . implode(' OR ', $lineParts) . "))";
-        }
-        if ($view === 'completed' && $referenceTableExists && count($refParts) > 0) {
-            $relatedParts[] = "EXISTS (SELECT 1 FROM cpms_approval_references r WHERE r.document_id = d.id AND (" . implode(' OR ', $refParts) . "))";
-        }
-        if (count($relatedParts) > 0) {
-            $where[] = '(' . implode(' OR ', $relatedParts) . ')';
-        } else {
-            $where[] = '1 = 0';
-        }
+    $relatedParts = array();
+    if (count($ownerParts) > 0) {
+        $relatedParts[] = '(' . implode(' OR ', $ownerParts) . ')';
+    }
+    if (count($lineParts) > 0) {
+        $relatedParts[] = "EXISTS (SELECT 1 FROM cpms_approval_lines x WHERE x.document_id = d.id AND (" . implode(' OR ', $lineParts) . "))";
+    }
+    if ($referenceTableExists && count($refParts) > 0) {
+        $relatedParts[] = "EXISTS (SELECT 1 FROM cpms_approval_references r WHERE r.document_id = d.id AND (" . implode(' OR ', $refParts) . "))";
+    }
+    if (count($relatedParts) > 0) {
+        $where[] = '(' . implode(' OR ', $relatedParts) . ')';
+    } else {
+        $where[] = '1 = 0';
     }
 
     if ($view === 'completed') {
@@ -366,7 +362,6 @@ $canDb = \App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees() || \
             <div>userEmail: <?php echo h($debugInfo['user_email']); ?></div>
             <div>userName: <?php echo h($debugInfo['user_name']); ?></div>
             <div>isAdmin: <?php echo h($debugInfo['is_admin']); ?></div>
-            <div>isMaster: <?php echo h($debugInfo['is_master']); ?></div>
             <div>params: <?php echo h(implode(', ', $debugInfo['params_keys'])); ?></div>
             <div>sql: <?php echo h($debugInfo['sql_status']); ?></div>
             <?php if ($debugInfo['sql_error'] !== '') { ?>
