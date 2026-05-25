@@ -71,6 +71,8 @@ if ($action === 'reject' && $reason === '') {
 }
 
 $hasLineDelegated = approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated');
+$ceoRole = approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC');
+$vpRole = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5');
 
 try {
     $pdo->beginTransaction();
@@ -80,13 +82,31 @@ try {
         $pdo->prepare("UPDATE cpms_approval_lines SET line_status='APPROVED', acted_at=NOW(), sign_path=:s WHERE id=:id AND line_status='PENDING'")
             ->execute(array(':s' => $sign, ':id' => $line['id']));
 
+        // Leave form rule: CEO is always delegated.
+        if (isset($doc['doc_type']) && (string)$doc['doc_type'] === 'leave') {
+            if ($hasLineDelegated) {
+                $pdo->prepare("UPDATE cpms_approval_lines SET line_status='DELEGATED', is_delegated=1, delegated_by_role=:byRole WHERE document_id=:d AND role_type=:ceoRole AND line_status IN ('WAITING','PENDING')")
+                    ->execute(array(':byRole' => $vpRole, ':d' => $id, ':ceoRole' => $ceoRole));
+            } else {
+                $pdo->prepare("UPDATE cpms_approval_lines SET line_status='DELEGATED' WHERE document_id=:d AND role_type=:ceoRole AND line_status IN ('WAITING','PENDING')")
+                    ->execute(array(':d' => $id, ':ceoRole' => $ceoRole));
+            }
+        }
+
         $nextSql = "SELECT id,line_order,approver_id FROM cpms_approval_lines WHERE document_id=:d AND line_status='WAITING'";
         if ($hasLineDelegated) {
             $nextSql .= " AND is_delegated=0";
         }
+        if (isset($doc['doc_type']) && (string)$doc['doc_type'] === 'leave') {
+            $nextSql .= " AND role_type<>:ceoRole";
+        }
         $nextSql .= " ORDER BY line_order ASC LIMIT 1";
         $nextSt = $pdo->prepare($nextSql);
-        $nextSt->execute(array(':d' => $id));
+        $nextParams = array(':d' => $id);
+        if (isset($doc['doc_type']) && (string)$doc['doc_type'] === 'leave') {
+            $nextParams[':ceoRole'] = $ceoRole;
+        }
+        $nextSt->execute($nextParams);
         $nextLine = $nextSt->fetch(PDO::FETCH_ASSOC);
 
         if ($nextLine) {

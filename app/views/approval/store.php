@@ -259,6 +259,9 @@ try {
         $line = $lines[$i];
         $emp = $line['emp'];
         $isDelegated = isset($line['delegated']) && (int)$line['delegated'] === 1;
+        if ($docType === 'leave' && isset($line['role']) && (string)$line['role'] === $ceoRole) {
+            $isDelegated = true;
+        }
         $isSelfApprover = false;
         if (!$isDelegated) {
             if ($creatorEmployeeId > 0 && (int)$emp['id'] === (int)$creatorEmployeeId) {

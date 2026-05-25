@@ -60,6 +60,10 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
     echo '</tr><tr class="approval-sign-row">';
     for ($i = 0; $i < count($displayRoles); $i++) {
         $role = $displayRoles[$i];
+        if ($role === $ceoRole) {
+            approval_render_delegated_sign_cell();
+            continue;
+        }
         approval_render_sign_cell(isset($lineByRole[$role]) ? $lineByRole[$role] : array(), array());
     }
     echo '</tr><tr class="approval-name-row">';
@@ -79,7 +83,8 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
         } else if ($role === $vpRole) {
             approval_render_name_cell(isset($approvalOptions['vp']['name']) ? $approvalOptions['vp']['name'] : (isset($lineByRole[$vpRole]['approver_name']) ? $lineByRole[$vpRole]['approver_name'] : '-'));
         } else if ($role === $ceoRole) {
-            approval_render_name_cell(isset($approvalOptions['ceo']['name']) ? $approvalOptions['ceo']['name'] : (isset($lineByRole[$ceoRole]['approver_name']) ? $lineByRole[$ceoRole]['approver_name'] : '-'));
+            $ceoName = isset($approvalOptions['ceo']['name']) ? $approvalOptions['ceo']['name'] : (isset($lineByRole[$ceoRole]['approver_name']) ? $lineByRole[$ceoRole]['approver_name'] : '-');
+            approval_render_name_cell($ceoName . ' (' . approval_status_label('DELEGATED') . ')');
         } else {
             approval_render_name_cell(isset($lineByRole[$role]['approver_name']) ? $lineByRole[$role]['approver_name'] : '-');
         }
@@ -87,6 +92,10 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
     echo '</tr><tr class="approval-time-row">';
     for ($i = 0; $i < count($displayRoles); $i++) {
         $role = $displayRoles[$i];
+        if ($role === $ceoRole) {
+            approval_render_time_cell(isset($lineByRole[$role]) ? $lineByRole[$role] : array(), array('is_delegated' => 1));
+            continue;
+        }
         approval_render_time_cell(isset($lineByRole[$role]) ? $lineByRole[$role] : array(), array());
     }
     echo '</tr></table></div>';
