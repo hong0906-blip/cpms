@@ -90,6 +90,26 @@ function ensure_settings_table($pdo, &$logs)
     safe_exec($pdo, $sql, $logs);
 }
 
+function ensure_geofence_table($pdo, &$logs)
+{
+    $sql = "CREATE TABLE IF NOT EXISTS cpms_attendance_geofences (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        location_type VARCHAR(30) NOT NULL DEFAULT 'office',
+        project_id INT NULL,
+        project_name VARCHAR(255) NULL,
+        lat DECIMAL(10,7) NOT NULL,
+        lng DECIMAL(10,7) NOT NULL,
+        radius_m INT NOT NULL DEFAULT 50,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at DATETIME NULL,
+        updated_at DATETIME NULL,
+        INDEX idx_is_active(is_active),
+        INDEX idx_project_id(project_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8";
+    safe_exec($pdo, $sql, $logs);
+}
+
 function seed_settings($pdo, &$logs)
 {
     $defaults = array(
@@ -208,6 +228,7 @@ try {
 
         if ($action === 'settings' || $action === 'all') {
             ensure_settings_table($pdo, $logs);
+            ensure_geofence_table($pdo, $logs);
             seed_settings($pdo, $logs);
         }
         if ($action === 'drop_bad_unique_emp') {

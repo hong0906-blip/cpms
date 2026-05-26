@@ -131,22 +131,97 @@ function attendance_parse_coordinate($value){
     if(!is_numeric($value)) return null;
     return (float)$value;
 }
+function attendance_table_exists($pdo, $table){
+    if(!$pdo) return false;
+    try{
+        $st = $pdo->prepare('SHOW TABLES LIKE :table');
+        $st->execute(array(':table' => $table));
+        return (bool)$st->fetchColumn();
+    }catch(Exception $e){
+        return false;
+    }
+}
+function attendance_geofence_locations($pdo, $includeInactive){
+    $rows = array();
+    if(!$pdo) return $rows;
+    if(!attendance_table_exists($pdo, 'cpms_attendance_geofences')) return $rows;
+    try{
+        $sql = "SELECT id,name,location_type,project_id,project_name,lat,lng,radius_m,is_active,created_at,updated_at
+                FROM cpms_attendance_geofences";
+        if(!$includeInactive){
+            $sql .= " WHERE is_active = 1";
+        }
+        $sql .= " ORDER BY is_active DESC, location_type ASC, name ASC, id ASC";
+        $st = $pdo->query($sql);
+        $fetched = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+        if(!is_array($fetched)) return $rows;
+        foreach($fetched as $row){
+            $lat = attendance_parse_coordinate(isset($row['lat']) ? $row['lat'] : '');
+            $lng = attendance_parse_coordinate(isset($row['lng']) ? $row['lng'] : '');
+            $radius = isset($row['radius_m']) ? (float)$row['radius_m'] : 50.0;
+            if($radius <= 0) $radius = 50.0;
+            if($lat === null || $lng === null) continue;
+            $rows[] = array(
+                'id' => isset($row['id']) ? (int)$row['id'] : 0,
+                'name' => isset($row['name']) ? trim((string)$row['name']) : '',
+                'location_type' => isset($row['location_type']) ? trim((string)$row['location_type']) : 'office',
+                'project_id' => isset($row['project_id']) ? (int)$row['project_id'] : 0,
+                'project_name' => isset($row['project_name']) ? trim((string)$row['project_name']) : '',
+                'lat' => $lat,
+                'lng' => $lng,
+                'radius_m' => $radius,
+                'is_active' => isset($row['is_active']) ? (int)$row['is_active'] : 0,
+                'created_at' => isset($row['created_at']) ? $row['created_at'] : '',
+                'updated_at' => isset($row['updated_at']) ? $row['updated_at'] : ''
+            );
+        }
+    }catch(Exception $e){
+        error_log('[attendance_geofence_locations] ' . $e->getMessage());
+    }
+    return $rows;
+}
+function attendance_geofence_type_label($type){
+    $type = trim((string)$type);
+    if($type === 'field') return attendance_text('%ED%98%84%EC%9E%A5');
+    if($type === 'other') return attendance_text('%EA%B8%B0%ED%83%80');
+    return attendance_text('%EC%82%AC%EB%AC%B4%EC%8B%A4');
+}
 function attendance_geofence_settings($pdo){
     $s = attendance_settings($pdo);
     $radius = isset($s['attendance_geofence_radius_m']) ? (float)$s['attendance_geofence_radius_m'] : 50.0;
     if($radius <= 0) $radius = 50.0;
+    $locations = attendance_geofence_locations($pdo, false);
+    $fallbackLat = attendance_parse_coordinate(isset($s['attendance_geofence_lat']) ? $s['attendance_geofence_lat'] : '');
+    $fallbackLng = attendance_parse_coordinate(isset($s['attendance_geofence_lng']) ? $s['attendance_geofence_lng'] : '');
+    if(count($locations) === 0 && $fallbackLat !== null && $fallbackLng !== null){
+        $locations[] = array(
+            'id' => 0,
+            'name' => isset($s['attendance_geofence_name']) ? trim((string)$s['attendance_geofence_name']) : '',
+            'location_type' => 'office',
+            'project_id' => 0,
+            'project_name' => '',
+            'lat' => $fallbackLat,
+            'lng' => $fallbackLng,
+            'radius_m' => $radius,
+            'is_active' => 1,
+            'created_at' => '',
+            'updated_at' => ''
+        );
+    }
     return array(
         'enabled' => (isset($s['attendance_geofence_enabled']) && (string)$s['attendance_geofence_enabled'] === '1'),
         'name' => isset($s['attendance_geofence_name']) ? trim((string)$s['attendance_geofence_name']) : '',
-        'lat' => attendance_parse_coordinate(isset($s['attendance_geofence_lat']) ? $s['attendance_geofence_lat'] : ''),
-        'lng' => attendance_parse_coordinate(isset($s['attendance_geofence_lng']) ? $s['attendance_geofence_lng'] : ''),
-        'radius_m' => $radius
+        'lat' => $fallbackLat,
+        'lng' => $fallbackLng,
+        'radius_m' => $radius,
+        'locations' => $locations,
+        'location_count' => count($locations)
     );
 }
 function attendance_has_geofence($cfg){
-    return is_array($cfg)
-        && !empty($cfg['enabled'])
-        && isset($cfg['lat']) && $cfg['lat'] !== null
+    if(!is_array($cfg) || empty($cfg['enabled'])) return false;
+    if(isset($cfg['locations']) && is_array($cfg['locations']) && count($cfg['locations']) > 0) return true;
+    return isset($cfg['lat']) && $cfg['lat'] !== null
         && isset($cfg['lng']) && $cfg['lng'] !== null
         && isset($cfg['radius_m']) && (float)$cfg['radius_m'] > 0;
 }
@@ -167,6 +242,8 @@ function attendance_geofence_validation_result($pdo, $post){
         'ok' => true,
         'message' => '',
         'distance_m' => null,
+        'matched_location' => null,
+        'nearest_location' => null,
         'config' => $cfg,
         'lat' => attendance_parse_coordinate(isset($post['geo_lat']) ? $post['geo_lat'] : ''),
         'lng' => attendance_parse_coordinate(isset($post['geo_lng']) ? $post['geo_lng'] : ''),
@@ -177,7 +254,7 @@ function attendance_geofence_validation_result($pdo, $post){
     }
     if (!attendance_has_geofence($cfg)) {
         $result['ok'] = false;
-        $result['message'] = attendance_text('%EA%B4%80%EB%A6%AC%ED%8C%80%EC%97%90%EC%84%9C%20%EC%B6%9C%ED%87%B4%EA%B7%BC%20%EC%9C%84%EC%B9%98%EA%B0%80%20%EC%95%84%EC%A7%81%20%EC%84%A4%EC%A0%95%EB%90%98%EC%A7%80%20%EC%95%8A%EC%95%98%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+        $result['message'] = attendance_text('%EA%B4%80%EB%A6%AC%ED%8C%80%EC%97%90%EC%84%9C%20%EC%B6%9C%ED%87%B4%EA%B7%BC%20%ED%97%88%EC%9A%A9%20%EC%9C%84%EC%B9%98%EA%B0%80%20%EC%95%84%EC%A7%81%20%EC%84%A4%EC%A0%95%EB%90%98%EC%A7%80%20%EC%95%8A%EC%95%98%EC%8A%B5%EB%8B%88%EB%8B%A4.');
         return $result;
     }
     if ($result['lat'] === null || $result['lng'] === null) {
@@ -185,13 +262,49 @@ function attendance_geofence_validation_result($pdo, $post){
         $result['message'] = attendance_text('%ED%98%84%EC%9E%AC%20%EC%9C%84%EC%B9%98%20%ED%99%95%EC%9D%B8%20%ED%9B%84%20%EB%8B%A4%EC%8B%9C%20%EC%8B%9C%EB%8F%84%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.');
         return $result;
     }
-    $distance = attendance_haversine_meters($cfg['lat'], $cfg['lng'], $result['lat'], $result['lng']);
-    $result['distance_m'] = $distance;
-    if ($distance > (float)$cfg['radius_m']) {
-        $label = trim((string)$cfg['name']);
-        if ($label === '') $label = attendance_text('%EA%B4%80%EB%A6%AC%ED%8C%80%20%EC%A7%80%EC%A0%95%20%EC%9C%84%EC%B9%98');
+    $locations = isset($cfg['locations']) && is_array($cfg['locations']) ? $cfg['locations'] : array();
+    if(count($locations) === 0 && isset($cfg['lat']) && $cfg['lat'] !== null && isset($cfg['lng']) && $cfg['lng'] !== null){
+        $locations[] = array(
+            'id' => 0,
+            'name' => isset($cfg['name']) ? trim((string)$cfg['name']) : '',
+            'location_type' => 'office',
+            'project_id' => 0,
+            'project_name' => '',
+            'lat' => $cfg['lat'],
+            'lng' => $cfg['lng'],
+            'radius_m' => isset($cfg['radius_m']) ? (float)$cfg['radius_m'] : 50.0,
+            'is_active' => 1
+        );
+    }
+    $matched = null;
+    $nearest = null;
+    foreach($locations as $location){
+        if(!isset($location['lat']) || !isset($location['lng'])) continue;
+        $distance = attendance_haversine_meters($location['lat'], $location['lng'], $result['lat'], $result['lng']);
+        if($nearest === null || $distance < $nearest['distance_m']){
+            $nearest = $location;
+            $nearest['distance_m'] = $distance;
+        }
+        if($distance <= (float)$location['radius_m']){
+            $matched = $location;
+            $matched['distance_m'] = $distance;
+            break;
+        }
+    }
+    if($matched !== null){
+        $result['matched_location'] = $matched;
+        $result['nearest_location'] = $matched;
+        $result['distance_m'] = isset($matched['distance_m']) ? $matched['distance_m'] : null;
+        return $result;
+    }
+    if($nearest !== null){
+        $result['nearest_location'] = $nearest;
+        $result['distance_m'] = isset($nearest['distance_m']) ? $nearest['distance_m'] : null;
+        $label = trim((string)$nearest['name']);
+        if($label === '') $label = attendance_text('%EA%B4%80%EB%A6%AC%ED%8C%80%20%EC%A7%80%EC%A0%95%20%EC%9C%84%EC%B9%98');
         $result['ok'] = false;
-        $result['message'] = $label . ' ' . attendance_text('%EB%B0%98%EA%B2%BD%20') . number_format((float)$cfg['radius_m']) . 'm ' . attendance_text('%EC%95%88%EC%97%90%EC%84%9C%EB%A7%8C%20%EC%B6%9C%ED%87%B4%EA%B7%BC%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.%20%ED%98%84%EC%9E%AC%20%EA%B1%B0%EB%A6%AC%3A%20%EC%95%BD%20') . number_format($distance) . 'm';
+        $result['message'] = attendance_text('%EB%93%B1%EB%A1%9D%EB%90%9C%20%EC%B6%9C%ED%87%B4%EA%B7%BC%20%ED%97%88%EC%9A%A9%20%EC%9C%84%EC%B9%98%20%EB%B0%98%EA%B2%BD%20%EC%95%88%EC%97%90%EC%84%9C%EB%A7%8C%20%EC%B6%9C%ED%87%B4%EA%B7%BC%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.%20%EA%B0%80%EC%9E%A5%20%EA%B0%80%EA%B9%8C%EC%9A%B4%20%EC%9C%84%EC%B9%98%3A%20') . $label . ' / ' . attendance_text('%ED%97%88%EC%9A%A9%20%EB%B0%98%EA%B2%BD%20') . number_format((float)$nearest['radius_m']) . 'm / ' . attendance_text('%ED%98%84%EC%9E%AC%20%EA%B1%B0%EB%A6%AC%3A%20%EC%95%BD%20') . number_format((float)$nearest['distance_m']) . 'm';
+        return $result;
     }
     return $result;
 }

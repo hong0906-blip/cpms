@@ -518,6 +518,8 @@ if ($route === 'management/attendance_record_save') { require_once __DIR__ . '/.
 if ($route === 'management/leave_save') { require_once __DIR__ . '/../app/views/management/leave_save.php'; exit; }
 if ($route === 'management/leave_delete') { require_once __DIR__ . '/../app/views/management/leave_delete.php'; exit; }
 if ($route === 'management/attendance_settings_save') { require_once __DIR__ . '/../app/views/management/attendance_settings_save.php'; exit; }
+if ($route === 'management/attendance_geofence_save') { require_once __DIR__ . '/../app/views/management/attendance_geofence_save.php'; exit; }
+if ($route === 'management/attendance_geofence_delete') { require_once __DIR__ . '/../app/views/management/attendance_geofence_delete.php'; exit; }
 // db_setup_attendance 라우트
 if ($route === 'db_setup_attendance') {
     if (!(\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees())) {
