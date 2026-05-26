@@ -1,11 +1,11 @@
 <?php
 /**
  * C:\www\cpms\app\views\layout\sidebar.php
- * - 좌하단 유저 표시: (임원) 임원 · 직급 / (직원) 부서 · 직급
- * - ✅ photo_path 있으면 좌하단 아바타에 사진 표시
+ * - ???щ뮡?????? ??筌?六? (??ш끽維?? ??ш끽維??勇?癲ル슣????/ (癲ル슣???? ??딅텑???勇?癲ル슣????
+ * - ??photo_path ???源끹걬癲????щ뮡?????ш끽維곻쭚??????鶯???筌?六?
  */
 
-$route = isset($_GET['r']) ? (string)$_GET['r'] : '대시보드';
+$route = isset($_GET['r']) ? (string)$_GET['r'] : '????筌먲퐡???;
 $selectedMenu = isset($selectedMenu) ? (string)$selectedMenu : $route;
 
 $user = \App\Core\Auth::user();
@@ -14,8 +14,8 @@ $role = \App\Core\Auth::userRole();
 $dashboardType = isset($dashboardType) ? (string)$dashboardType : (isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee');
 if ($dashboardType !== 'employee' && $dashboardType !== 'executive') $dashboardType = 'employee';
 
-// 이름 첫 글자(서버 mbstring 없을 때 대비)
-$initial = '홍';
+// ?????癲???れ꽔?????筌먦끉裕?mbstring ???⑤챶援???????
+$initial = '??;
 if ($user && isset($user['name']) && $user['name'] !== '') {
     if (function_exists('mb_substr')) {
         $initial = mb_substr($user['name'], 0, 1, 'UTF-8');
@@ -23,18 +23,18 @@ if ($user && isset($user['name']) && $user['name'] !== '') {
         $initial = substr($user['name'], 0, 1);
     }
 }
-$userName = $user && isset($user['name']) ? $user['name'] : '홍길동';
+$userName = $user && isset($user['name']) ? $user['name'] : '????뱀떳??;
 
-// ✅ 사용자 사진 경로
+// ?????????鶯??濡ろ뜑?灌鍮?
 $userPhoto = null;
 if ($user && isset($user['photo_path']) && trim((string)$user['photo_path']) !== '') {
     $userPhoto = trim((string)$user['photo_path']);
 }
 
 // ==========================
-// 부서/직급 표시 만들기
-// - 임원: "임원 · 직급"
-// - 직원: "부서 · 직급"
+// ??딅텑???癲ル슣??????筌?六?癲ル슢?????琉왈?
+// - ??ш끽維?? "??ш끽維??勇?癲ル슣????
+// - 癲ル슣???? "??딅텑???勇?癲ル슣????
 // ==========================
 $dept = \App\Core\Auth::userDepartment();
 $pos  = '';
@@ -42,40 +42,40 @@ if ($user && isset($user['position'])) $pos = (string)$user['position'];
 
 $dept = trim((string)$dept);
 $deptMap = array(
-  '관리부' => '관리',
-  '공무부' => '공무',
-  '품질부' => '품질',
-  '안전부' => '안전',
-  '공사부' => '공사',
-  '안전/보건' => '안전',
-  '안전보건' => '안전',
+  '???굿?域?' => '???굿??,
+  '???살쓱???딅텑?' => '???살쓱??,
+  '???源녿뼥??딅텑?' => '???源녿뼥',
+  '???源놁벁??딅텑?' => '???源놁벁',
+  '???살쓴雅?굞??룰??' => '???살쓴雅?,
+  '???源놁벁/?怨뚮옖??琉? => '???源놁벁',
+  '???源놁벁?怨뚮옖??琉? => '???源놁벁',
 );
 if (isset($deptMap[$dept])) $dept = $deptMap[$dept];
-if (substr($dept, -1) === '부') $dept = substr($dept, 0, -1);
+if (substr($dept, -1) === '??딅텑?') $dept = substr($dept, 0, -1);
 $dept = trim($dept);
 
 $pos = trim((string)$pos);
 
 $parts = array();
-if ($role === 'executive') $parts[] = '임원';
-else $parts[] = ($dept !== '' ? $dept : '직원');
+if ($role === 'executive') $parts[] = '??ш끽維??;
+else $parts[] = ($dept !== '' ? $dept : '癲ル슣????);
 if ($pos !== '') $parts[] = $pos;
-$userDept = implode(' · ', $parts);
+$userDept = implode(' 勇?', $parts);
 
 $menuItems = array(
-  array('id'=>'대시보드','label'=>'대시보드','icon'=>'layout-dashboard','gradient'=>'from-blue-500 to-cyan-500','iconBg'=>'bg-gradient-to-br from-blue-100 to-cyan-100','iconColor'=>'text-blue-600','hoverShadow'=>'hover:shadow-blue-200'),
-  array('id'=>'전자결재','label'=>'전자결재','icon'=>'file-check','gradient'=>'from-indigo-500 to-purple-500','iconBg'=>'bg-gradient-to-br from-indigo-100 to-purple-100','iconColor'=>'text-indigo-600','hoverShadow'=>'hover:shadow-indigo-200'),
-  array('id'=>'공무','label'=>'공무','icon'=>'scroll-text','gradient'=>'from-orange-500 to-amber-500','iconBg'=>'bg-gradient-to-br from-orange-100 to-amber-100','iconColor'=>'text-orange-600','hoverShadow'=>'hover:shadow-orange-200'),
-  array('id'=>'관리','label'=>'관리','icon'=>'bar-chart-3','gradient'=>'from-emerald-500 to-teal-500','iconBg'=>'bg-gradient-to-br from-emerald-100 to-teal-100','iconColor'=>'text-emerald-600','hoverShadow'=>'hover:shadow-emerald-200'),
-  array('id'=>'공사','label'=>'공사','icon'=>'hard-hat','gradient'=>'from-yellow-500 to-orange-500','iconBg'=>'bg-gradient-to-br from-yellow-100 to-orange-100','iconColor'=>'text-yellow-600','hoverShadow'=>'hover:shadow-yellow-200'),
-  array('id'=>'안전/보건','label'=>'안전/보건','icon'=>'shield-alert','gradient'=>'from-red-500 to-rose-500','iconBg'=>'bg-gradient-to-br from-red-100 to-rose-100','iconColor'=>'text-red-600','hoverShadow'=>'hover:shadow-red-200'),
-  array('id'=>'품질','label'=>'품질','icon'=>'award','gradient'=>'from-cyan-500 to-blue-500','iconBg'=>'bg-gradient-to-br from-cyan-100 to-blue-100','iconColor'=>'text-cyan-600','hoverShadow'=>'hover:shadow-cyan-200'),
+  array('id'=>'????筌먲퐡???,'label'=>'????筌먲퐡???,'icon'=>'layout-dashboard','gradient'=>'from-blue-500 to-cyan-500','iconBg'=>'bg-gradient-to-br from-blue-100 to-cyan-100','iconColor'=>'text-blue-600','hoverShadow'=>'hover:shadow-blue-200'),
+  array('id'=>'??ш끽維??쎈눇?용맪???,'label'=>'??ш끽維??쎈눇?용맪???,'icon'=>'file-check','gradient'=>'from-indigo-500 to-purple-500','iconBg'=>'bg-gradient-to-br from-indigo-100 to-purple-100','iconColor'=>'text-indigo-600','hoverShadow'=>'hover:shadow-indigo-200'),
+  array('id'=>'???살쓱??,'label'=>'???살쓱??,'icon'=>'scroll-text','gradient'=>'from-orange-500 to-amber-500','iconBg'=>'bg-gradient-to-br from-orange-100 to-amber-100','iconColor'=>'text-orange-600','hoverShadow'=>'hover:shadow-orange-200'),
+  array('id'=>'???굿??,'label'=>'???굿??,'icon'=>'bar-chart-3','gradient'=>'from-emerald-500 to-teal-500','iconBg'=>'bg-gradient-to-br from-emerald-100 to-teal-100','iconColor'=>'text-emerald-600','hoverShadow'=>'hover:shadow-emerald-200'),
+  array('id'=>'???살쓴雅?,'label'=>'???살쓴雅?,'icon'=>'hard-hat','gradient'=>'from-yellow-500 to-orange-500','iconBg'=>'bg-gradient-to-br from-yellow-100 to-orange-100','iconColor'=>'text-yellow-600','hoverShadow'=>'hover:shadow-yellow-200'),
+  array('id'=>'???源놁벁/?怨뚮옖??琉?,'label'=>'???源놁벁/?怨뚮옖??琉?,'icon'=>'shield-alert','gradient'=>'from-red-500 to-rose-500','iconBg'=>'bg-gradient-to-br from-red-100 to-rose-100','iconColor'=>'text-red-600','hoverShadow'=>'hover:shadow-red-200'),
+  array('id'=>'???源녿뼥','label'=>'???源녿뼥','icon'=>'award','gradient'=>'from-cyan-500 to-blue-500','iconBg'=>'bg-gradient-to-br from-cyan-100 to-blue-100','iconColor'=>'text-cyan-600','hoverShadow'=>'hover:shadow-cyan-200'),
 );
 
-// App.tsx 헤더 타이틀 로직
+// App.tsx ????밸쭬 ????? ?棺??짆?먰맪?
 $pageTitle = $selectedMenu;
-if ($selectedMenu === '대시보드') {
-    $pageTitle = ($dashboardType === 'employee') ? '내 대시보드' : '업무 대시보드 (관리부)';
+if ($selectedMenu === '????筌먲퐡???) {
+    $pageTitle = ($dashboardType === 'employee') ? '??????筌먲퐡??? : '????????筌먲퐡???(???굿?域?)';
 }
 ?>
 
@@ -96,19 +96,15 @@ if ($selectedMenu === '대시보드') {
   <!-- Logo -->
   <div class="p-6 px-6 when-expanded">
     <div class="flex items-center gap-3">
-      <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-600 flex items-center justify-center text-white font-black">
-        CM
-      </div>
-      <span class="font-bold text-xl bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">창명건설</span>
+      <img src="<?php echo h(base_url()); ?>/assets/img/logo.png" alt="logo" class="w-12 h-12 rounded-2xl object-contain bg-white border border-gray-100 p-1">
+      <span class="font-bold text-xl bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">CPMS</span>
     </div>
   </div>
 
   <!-- Collapsed Logo -->
   <div class="p-6 px-4 when-collapsed">
     <div class="flex items-center justify-center">
-      <div class="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-600 flex items-center justify-center text-white font-black text-sm">
-        CM
-      </div>
+      <img src="<?php echo h(base_url()); ?>/assets/img/logo.png" alt="logo" class="w-10 h-10 rounded-2xl object-contain bg-white border border-gray-100 p-1">
     </div>
   </div>
 
@@ -177,7 +173,7 @@ if ($selectedMenu === '대시보드') {
         <div class="font-semibold text-gray-900"><?php echo h($userName); ?></div>
         <div class="text-xs text-gray-500"><?php echo h($userDept); ?></div>
       </div>
-      <?php /* 사이드바 출퇴근 버튼 제거 */ ?>
+      <?php /* ?????筌먦끇????⑥レ툗??琉용룯??類??????癰귙끋源?*/ ?>
       <div class="w-2 h-2 bg-green-500 rounded-full shadow-sm shadow-green-500/50"></div>
     </div>
   </div>
@@ -211,15 +207,15 @@ if ($selectedMenu === '대시보드') {
     </div>
 
     <div class="flex items-center gap-4">
-      <?php if ($selectedMenu === '대시보드' && $role === 'executive'): ?>
+      <?php if ($selectedMenu === '????筌먲퐡??? && $role === 'executive'): ?>
         <div class="flex gap-1 bg-gray-100/80 backdrop-blur-sm rounded-2xl p-1 shadow-sm">
-          <a href="<?php echo h('?r=대시보드&dv=employee'); ?>"
+          <a href="<?php echo h('?r=????筌먲퐡???dv=employee'); ?>"
              class="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-300 <?php echo ($dashboardType === 'employee') ? 'bg-white text-blue-600 shadow-md shadow-blue-500/10' : 'text-gray-600 hover:text-gray-900'; ?>">
-            직원용
+            癲ル슣?????
           </a>
-          <a href="<?php echo h('?r=대시보드&dv=executive'); ?>"
+          <a href="<?php echo h('?r=????筌먲퐡???dv=executive'); ?>"
              class="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-300 <?php echo ($dashboardType === 'executive') ? 'bg-white text-blue-600 shadow-md shadow-blue-500/10' : 'text-gray-600 hover:text-gray-900'; ?>">
-            임원용
+            ??ш끽維???
           </a>
         </div>
       <?php endif; ?>
@@ -227,22 +223,22 @@ if ($selectedMenu === '대시보드') {
       <div class="cpms-user-chip flex items-center gap-3 text-sm bg-white/60 backdrop-blur-sm px-4 py-2 rounded-2xl border border-gray-200/50">
         <span class="font-semibold text-gray-900"><?php echo h($userName); ?></span>
         <span class="text-gray-300">|</span>
-        <span class="text-blue-600 font-medium"><?php echo ($role === 'executive') ? '임원' : '직원'; ?></span>
+        <span class="text-blue-600 font-medium"><?php echo ($role === 'executive') ? '??ш끽維?? : '癲ル슣????; ?></span>
         <span class="text-gray-300">|</span>
-        <a href="?r=logout" class="text-gray-600 hover:text-red-600 font-medium transition-colors">로그아웃</a>
+        <a href="?r=logout" class="text-gray-600 hover:text-red-600 font-medium transition-colors">?棺??짆???ш끽維??/a>
       </div>
     </div>
   </header>
 
   <?php
     $mobileNavItems = array(
-      array('menu' => '대시보드', 'label' => '대시보드', 'icon' => 'layout-dashboard', 'href' => '?r=dashboard_employee'),
-      array('menu' => '전자결재', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
-      array('menu' => '공무', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_input'),
-      array('menu' => '공사', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status'),
+      array('menu' => 'dashboard', 'label' => '대시보드', 'icon' => 'layout-dashboard', 'href' => ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee')),
+      array('menu' => 'approval', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
+      array('menu' => 'work', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_input'),
+      array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status'),
     );
   ?>
-  <nav class="cpms-mobile-bottom-nav" aria-label="모바일 주요 메뉴">
+  <nav class="cpms-mobile-bottom-nav" aria-label="mobile main menu">
     <?php foreach ($mobileNavItems as $mobileItem): ?>
       <?php $mobileActive = ($selectedMenu === $mobileItem['menu']); ?>
       <a href="<?php echo h($mobileItem['href']); ?>" class="<?php echo $mobileActive ? 'is-active' : ''; ?>">
