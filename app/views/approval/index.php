@@ -347,8 +347,16 @@ if ($view === 'cancelled') {
     );
 }
 
+$mobileLeaveRows = array();
+for ($i = 0; $i < count($rows); $i++) {
+    $docTypeForMobile = isset($rows[$i]['doc_type']) ? trim((string)$rows[$i]['doc_type']) : '';
+    if ($docTypeForMobile === 'leave') {
+        $mobileLeaveRows[] = $rows[$i];
+    }
+}
+
 ?>
-<div class="space-y-5">
+<div class="cpms-approval-page space-y-5">
     <?php if ($fatalMessage !== '') { ?>
         <div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4"><?php echo h($fatalMessage); ?></div>
     <?php } ?>
@@ -376,7 +384,7 @@ if ($view === 'cancelled') {
                 <p class="mt-2 text-indigo-100"><?php echo h($pageDesc); ?></p>
             </div>
             <div class="flex flex-wrap items-center justify-start xl:justify-end gap-3 shrink-0 max-w-none">
-                <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-indigo-700" href="?r=approval_create&type=proposal"><?php echo h($txt['create_proposal']); ?></a>
+                <a class="cpms-mobile-hide inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-indigo-700" href="?r=approval_create&type=proposal"><?php echo h($txt['create_proposal']); ?></a>
                 <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-cyan-700" href="?r=approval_create&type=leave"><?php echo h($txt['create_leave']); ?></a>
             </div>
         </div>
@@ -450,7 +458,69 @@ if ($view === 'cancelled') {
         <?php if (count($rows) === 0) { ?>
             <div class="p-8 text-center text-gray-500"><?php echo h($emptyMessage); ?></div>
         <?php } else { ?>
-            <div class="overflow-x-auto">
+            <div class="cpms-approval-mobile-list">
+                <?php if (count($mobileLeaveRows) === 0) { ?>
+                    <div class="p-5 text-center text-gray-500">모바일에서 처리할 휴가계 문서가 없습니다.</div>
+                <?php } else { ?>
+                    <div class="p-3 space-y-3">
+                        <?php for ($mi = 0; $mi < count($mobileLeaveRows); $mi++) {
+                            $row = $mobileLeaveRows[$mi];
+                            $myLineStatus = isset($row['my_line_status']) ? trim((string)$row['my_line_status']) : '';
+                            $docStatus = isset($row['doc_status']) ? trim((string)$row['doc_status']) : '';
+                            $currentRole = isset($row['current_role']) ? trim((string)$row['current_role']) : '';
+                            $canMobileDecide = (strtoupper($docStatus) === 'PENDING' && strtoupper($myLineStatus) === 'PENDING');
+                        ?>
+                            <div class="rounded-2xl border border-gray-200 bg-white p-4">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div class="min-w-0">
+                                        <div class="text-xs font-extrabold text-cyan-700"><?php echo h(approval_doc_label(isset($row['doc_type']) ? $row['doc_type'] : '')); ?></div>
+                                        <div class="mt-1 text-base font-extrabold text-gray-900 leading-6"><?php echo h(isset($row['title']) ? $row['title'] : ''); ?></div>
+                                        <div class="mt-2 text-xs text-gray-500">
+                                            <?php echo h(isset($row['created_by_name']) ? $row['created_by_name'] : ''); ?>
+                                            · <?php echo h(isset($row['created_at']) ? $row['created_at'] : ''); ?>
+                                        </div>
+                                    </div>
+                                    <span class="shrink-0 inline-flex items-center px-3 py-1 rounded-full border text-xs font-bold <?php echo h(approval_status_badge($docStatus)); ?>">
+                                        <?php echo h(approval_status_label($docStatus)); ?>
+                                    </span>
+                                </div>
+                                <div class="mt-3 grid grid-cols-2 gap-2 text-xs text-gray-600">
+                                    <div class="rounded-xl bg-gray-50 p-2">
+                                        <span class="block text-gray-400">현재 결재</span>
+                                        <b><?php echo h($currentRole === '' ? '-' : approval_role_label($currentRole)); ?></b>
+                                    </div>
+                                    <div class="rounded-xl bg-gray-50 p-2">
+                                        <span class="block text-gray-400">내 결재선</span>
+                                        <b><?php echo h($myLineStatus === '' ? '-' : approval_line_status_label($myLineStatus)); ?></b>
+                                    </div>
+                                </div>
+                                <div class="mt-3 flex flex-wrap gap-2">
+                                    <a href="?r=approval_detail&id=<?php echo (int)$row['id']; ?>" class="flex-1 inline-flex items-center justify-center px-3 py-3 rounded-xl bg-indigo-50 text-indigo-700 font-extrabold"><?php echo h($txt['detail']); ?></a>
+                                    <?php if ($canMobileDecide) { ?>
+                                        <form method="post" action="?r=approval_decide" class="flex-1">
+                                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                            <input type="hidden" name="id" value="<?php echo (int)$row['id']; ?>">
+                                            <input type="hidden" name="action" value="approve">
+                                            <button type="submit" class="w-full px-3 py-3 rounded-xl bg-emerald-600 text-white font-extrabold">승인</button>
+                                        </form>
+                                    <?php } ?>
+                                </div>
+                                <?php if ($canMobileDecide) { ?>
+                                    <form method="post" action="?r=approval_decide" class="mt-2 flex gap-2">
+                                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                        <input type="hidden" name="id" value="<?php echo (int)$row['id']; ?>">
+                                        <input type="hidden" name="action" value="reject">
+                                        <input type="text" name="reject_reason" required class="min-w-0 flex-1 rounded-xl border border-gray-200 px-3 py-3" placeholder="반려 사유">
+                                        <button type="submit" class="px-4 py-3 rounded-xl bg-rose-600 text-white font-extrabold">반려</button>
+                                    </form>
+                                <?php } ?>
+                            </div>
+                        <?php } ?>
+                    </div>
+                <?php } ?>
+            </div>
+
+            <div class="cpms-approval-table overflow-x-auto">
                 <table class="min-w-full text-sm">
                     <thead class="bg-gray-50 text-gray-700">
                         <tr>

@@ -52,12 +52,12 @@ function status_badge_class($status) {
 }
 ?>
 
-<div class="mb-5">
+<div class="cpms-project-page mb-5">
   <div class="text-sm text-gray-500">공무</div>
   <h2 class="text-2xl font-extrabold text-gray-900">공무 관리</h2>
   <div class="mt-3 flex gap-2">
     <a href="?r=공무&tab=monthly_input" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_input' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 상세내역</a>
-    <a href="?r=공무&tab=project_manage" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
+    <a href="?r=공무&tab=project_manage" class="cpms-project-manage-tab px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
   </div>
 </div>
 

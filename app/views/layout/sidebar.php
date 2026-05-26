@@ -202,8 +202,8 @@ if ($selectedMenu === '대시보드') {
 </aside>
 
 <!-- Right Content -->
-<div class="flex-1 flex flex-col overflow-hidden">
-  <header class="bg-white/70 backdrop-blur-xl border-b border-gray-200/50 px-8 py-4 flex items-center justify-between">
+<div id="cpmsContentShell" class="flex-1 flex flex-col overflow-hidden">
+  <header id="cpmsContentHeader" class="bg-white/70 backdrop-blur-xl border-b border-gray-200/50 px-8 py-4 flex items-center justify-between">
     <div class="flex items-center gap-4">
       <h1 class="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 bg-clip-text text-transparent">
         <?php echo h($pageTitle); ?>
@@ -224,7 +224,7 @@ if ($selectedMenu === '대시보드') {
         </div>
       <?php endif; ?>
 
-      <div class="flex items-center gap-3 text-sm bg-white/60 backdrop-blur-sm px-4 py-2 rounded-2xl border border-gray-200/50">
+      <div class="cpms-user-chip flex items-center gap-3 text-sm bg-white/60 backdrop-blur-sm px-4 py-2 rounded-2xl border border-gray-200/50">
         <span class="font-semibold text-gray-900"><?php echo h($userName); ?></span>
         <span class="text-gray-300">|</span>
         <span class="text-blue-600 font-medium"><?php echo ($role === 'executive') ? '임원' : '직원'; ?></span>
@@ -234,7 +234,25 @@ if ($selectedMenu === '대시보드') {
     </div>
   </header>
 
-  <main class="flex-1 overflow-y-auto overflow-x-hidden p-8">
+  <?php
+    $mobileNavItems = array(
+      array('menu' => '대시보드', 'label' => '대시보드', 'icon' => 'layout-dashboard', 'href' => '?r=dashboard_employee'),
+      array('menu' => '전자결재', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
+      array('menu' => '공무', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_input'),
+      array('menu' => '공사', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status'),
+    );
+  ?>
+  <nav class="cpms-mobile-bottom-nav" aria-label="모바일 주요 메뉴">
+    <?php foreach ($mobileNavItems as $mobileItem): ?>
+      <?php $mobileActive = ($selectedMenu === $mobileItem['menu']); ?>
+      <a href="<?php echo h($mobileItem['href']); ?>" class="<?php echo $mobileActive ? 'is-active' : ''; ?>">
+        <i data-lucide="<?php echo h($mobileItem['icon']); ?>"></i>
+        <span><?php echo h($mobileItem['label']); ?></span>
+      </a>
+    <?php endforeach; ?>
+  </nav>
+
+  <main id="cpmsContentMain" class="flex-1 overflow-y-auto overflow-x-hidden p-8">
     <?php if (!empty($flash) && is_array($flash)): ?>
       <?php $cls = ($flash['type'] === 'danger') ? 'bg-red-50 border-red-200 text-red-700' : 'bg-slate-50 border-slate-200 text-slate-700'; ?>
       <div class="mb-4 rounded-2xl border px-4 py-3 <?php echo h($cls); ?>">

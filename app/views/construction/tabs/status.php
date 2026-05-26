@@ -564,6 +564,16 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 @media (max-width: 980px) {
     .cpms-status-wrap .summary-grid { grid-template-columns:repeat(1,minmax(0,1fr)); }
 }
+@media (max-width: 767px) {
+    .cpms-status-wrap .card { border-radius:16px; }
+    .cpms-status-wrap .chart-wrap { padding:12px; border-radius:16px; }
+    .cpms-status-wrap .chart-row { min-width:760px; height:230px; gap:8px; }
+    .cpms-status-wrap .chart-row[style] { min-width:520px !important; }
+    .cpms-status-wrap .bars { height:184px; gap:3px; }
+    .cpms-status-wrap .bar .value { display:none; }
+    .cpms-status-wrap .legend { gap:8px; }
+    .cpms-status-wrap .legend-item { font-size:11px; }
+}
 </style>
 
 <div class="cpms-status-wrap space-y-4">

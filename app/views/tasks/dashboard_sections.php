@@ -158,7 +158,7 @@ function cpms_render_employee_task_dashboard($pdo)
                     <h2 class="text-2xl font-extrabold text-gray-900">나의 할일</h2>
                     <button type="button" id="cpmsEmployeeTasksToggle" class="px-3 py-2 rounded-2xl bg-white border border-gray-200 text-sm font-bold text-gray-700">숨기기 ▲</button>
                 </div>
-                <div data-cpms-employee-task-body>
+                <div data-cpms-employee-task-body class="cpms-task-summary">
                 <div class="text-sm text-gray-600 mt-1">업무 요청, 승인 요청, 마감 임박 업무를 한 곳에서 확인하고 바로 처리할 수 있습니다.</div>
                 <div class="mt-3 flex flex-wrap gap-2 text-sm">
                     <span class="px-3 py-2 rounded-full bg-slate-100 text-slate-700 font-bold">전체 <?php echo (int)$summary['all']; ?>건</span>

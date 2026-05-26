@@ -494,7 +494,7 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 <?php if (count($monthlyProjects) === 0): ?>
 <div class="text-sm text-gray-700">등록된 프로젝트가 없습니다. [프로젝트 관리] 탭에서 신규 프로젝트를 먼저 생성해주세요.</div>
 <?php else: ?>
-<form method="get" class="mb-4 flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 rounded-2xl p-3">
+<form method="get" class="cpms-monthly-filter mb-4 flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 rounded-2xl p-3">
 <input type="hidden" name="r" value="공무"><input type="hidden" name="tab" value="monthly_input">
 <div class="font-bold text-base">프로젝트 선택 :</div>
 <select name="pid" class="px-3 py-2 border rounded-xl min-w-[260px]"><?php foreach($monthlyProjects as $pp): ?><option value="<?php echo (int)$pp['id']; ?>" <?php echo ((int)$pp['id']===$selectedProjectId)?'selected':''; ?>><?php echo h($pp['name']); ?></option><?php endforeach; ?></select>
@@ -520,7 +520,39 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 
 <?php if ($periodMissing): ?><div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 p-3 text-sm">프로젝트 계약기간이 없어 월별 투입비를 계산할 수 없습니다. 프로젝트 관리 탭에서 공사 시작일/종료일을 입력해주세요.</div><?php endif; ?>
 
-<div class="overflow-x-auto">
+<?php
+$mobileSalesTotal = 0.0;
+$mobileFinalTotal = 0.0;
+$mobileProfitTotal = 0.0;
+foreach ($displayMonths as $mobileYm) {
+    $mobileSalesTotal += isset($monthlyRevenue[$mobileYm]) ? (float)$monthlyRevenue[$mobileYm] : 0.0;
+    $mobileFinalTotal += isset($finalTotal[$mobileYm]) ? (float)$finalTotal[$mobileYm] : 0.0;
+    $mobileProfitTotal += isset($profit[$mobileYm]) ? (float)$profit[$mobileYm] : 0.0;
+}
+?>
+<div class="cpms-monthly-mobile-summary">
+  <div class="rounded-2xl bg-slate-900 text-white p-4">
+    <div class="text-xs text-slate-300">매출</div>
+    <div class="mt-1 text-xl font-extrabold"><?php echo h(amount_fmt($mobileSalesTotal)); ?></div>
+  </div>
+  <div class="rounded-2xl bg-white border border-gray-200 p-4">
+    <div class="text-xs text-gray-500">최종 합계</div>
+    <div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo h(amount_fmt($mobileFinalTotal)); ?></div>
+  </div>
+  <div class="rounded-2xl bg-white border border-gray-200 p-4">
+    <div class="text-xs text-gray-500">손익</div>
+    <div class="mt-1 text-xl font-extrabold <?php echo $mobileProfitTotal < 0 ? 'text-red-600' : 'text-blue-700'; ?>"><?php echo h(amount_fmt($mobileProfitTotal)); ?></div>
+  </div>
+  <?php foreach($labels as $sec=>$title): ?>
+    <?php $mobileSecTotal = 0.0; foreach ($displayMonths as $mobileYm) { $mobileSecTotal += isset($sumBySection[$sec][$mobileYm]) ? (float)$sumBySection[$sec][$mobileYm] : 0.0; } ?>
+    <div class="rounded-2xl bg-gray-50 border border-gray-200 p-4">
+      <div class="text-xs text-gray-500"><?php echo h($title); ?></div>
+      <div class="mt-1 text-lg font-extrabold text-gray-900"><?php echo h(amount_fmt($mobileSecTotal)); ?></div>
+    </div>
+  <?php endforeach; ?>
+</div>
+
+<div class="cpms-monthly-table-scroll overflow-x-auto">
 <table class="min-w-[1100px] w-full text-sm border">
 <thead><tr class="bg-[#d7aa8a]"><th class="border p-2">구분</th><th class="border p-2">업체명</th><th class="border p-2">내역</th><?php foreach($displayMonths as $ym): ?><th class="border p-2 text-right"><?php echo h(str_replace('-', '.', $ym)); ?></th><?php endforeach; ?><th class="border p-2 text-right">총합계<br><span class="text-[10px] font-normal">프로젝트 계약기간 전체 합계</span></th></tr></thead>
 <tbody>
@@ -540,7 +572,7 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 </tbody></table>
 </div>
 
-<div class="mt-4 p-3 border rounded-xl bg-gray-50">
+<div class="cpms-monthly-deduction mt-4 p-3 border rounded-xl bg-gray-50">
 <div class="font-semibold mb-2">공제분 입력</div>
 <form method="post" action="?r=project/monthly_deduction_save" class="flex flex-wrap gap-2 items-center">
 <input type="hidden" name="project_id" value="<?php echo (int)$selectedProjectId; ?>">

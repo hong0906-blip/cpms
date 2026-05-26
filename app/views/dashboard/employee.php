@@ -146,7 +146,7 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 
 
 <!-- 대시보드 명판 최상단 -->
-<div class="bg-gradient-to-r from-blue-600 to-cyan-500 rounded-3xl p-8 text-white shadow-xl shadow-blue-500/20 mb-8">
+<div class="cpms-dashboard-hero bg-gradient-to-r from-blue-600 to-cyan-500 rounded-3xl p-8 text-white shadow-xl shadow-blue-500/20 mb-8">
     <div class="flex items-start gap-4">
         <div class="p-4 bg-white/20 rounded-3xl border border-white/20">
             <i data-lucide="sparkles" class="w-8 h-8 text-yellow-200"></i>
@@ -155,7 +155,7 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
             <h2 class="text-3xl font-extrabold">대시보드</h2>
             <p class="text-blue-100 text-lg mt-2"><?php echo ($userName !== '') ? (h($userName) . '님, ') : ''; ?>오늘도 안전하게 진행하세요.</p>
         </div>
-        <div class="flex flex-wrap items-center gap-3"><!-- 직원 대시보드 UI 정리 -->
+        <div class="cpms-attendance-actions flex flex-wrap items-center gap-3"><!-- 직원 대시보드 UI 정리 -->
             <?php
             require_once __DIR__.'/../attendance/common.php';
             $eid_btn = attendance_employee_id($pdo);
@@ -193,7 +193,7 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
                     <div class='px-5 py-3 rounded-2xl bg-slate-100 text-slate-700 font-extrabold text-base'>오늘 근무 완료</div>
                 <?php endif; ?>
             <?php endif; ?>
-            <button type='button' data-attendance-request-open class='px-5 py-3 rounded-2xl bg-blue-900/80 text-white font-extrabold text-base border border-white/40'>출퇴근 요청</button>
+            <button type='button' data-attendance-request-open class='cpms-mobile-hide px-5 py-3 rounded-2xl bg-blue-900/80 text-white font-extrabold text-base border border-white/40'>출퇴근 요청</button>
             <?php if (!empty($attendanceGeofence['enabled'])): ?>
                 <div class='basis-full text-sm text-blue-100'>
                     출퇴근은 <?php echo h(trim((string)$attendanceGeofence['name']) !== '' ? $attendanceGeofence['name'] : '관리팀 지정 위치'); ?> 반경 <?php echo number_format((float)$attendanceGeofence['radius_m']); ?>m 안에서만 가능합니다.
@@ -282,6 +282,7 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 
 <?php cpms_render_employee_task_dashboard($pdo); ?>
 
+<div class="cpms-dashboard-desktop-extra cpms-mobile-hide">
 <div class='bg-white/80 rounded-3xl p-6 border mb-6'><!-- 직원 대시보드 UI 정리 + 공제시간 표시 제거 -->
 <h3 class='text-2xl font-extrabold mb-4'>내 근태 현황</h3>
 <div class='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 text-base'>
@@ -675,3 +676,4 @@ if($pdo&&$eid_att>0){
 <?php if (false): ?>
 <div class="bg-white rounded-2xl p-4 border mb-4"><h3 class="font-bold">받은 전자결재</h3><p><a href="?r=approval_home">전자결재에서 확인</a></p><h3 class="font-bold mt-3">나의 전자결재 요청</h3><p><a href="?r=approval_home">전자결재에서 확인</a></p></div>
 <?php endif; ?>
+</div>

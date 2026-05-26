@@ -179,12 +179,12 @@ try {
 
 ?>
 
-<div class="flex items-start justify-between gap-3 mb-6">
+<div class="cpms-construction-page flex items-start justify-between gap-3 mb-6">
     <div class="min-w-0">
         <h2 class="text-2xl font-extrabold text-gray-900">공사 관리</h2>
     </div>
 
-    <div class="flex items-center gap-2">
+    <div class="cpms-mobile-hide flex items-center gap-2">
         <button type="button"
                 class="px-5 py-3 rounded-2xl bg-gradient-to-r from-red-500 to-rose-500 text-white font-extrabold shadow-lg hover:shadow-xl transition"
                 data-modal-open="safetyIncidentAdd">
@@ -216,7 +216,7 @@ try {
             </select>
         </div>
 
-        <div>
+        <div class="cpms-construction-tab-select">
             <label class="text-sm font-bold text-gray-700">탭</label>
             <select name="tab" class="w-full mt-1 px-4 py-3 rounded-2xl border border-gray-200">
                 <?php foreach ($tabs as $k => $label): ?>
@@ -239,7 +239,7 @@ try {
 </div>
 
 <!-- 탭 메뉴(빠른 전환) -->
-<div class="flex flex-wrap gap-2 mb-6">
+<div class="cpms-construction-tabs flex flex-wrap gap-2 mb-6">
     <?php foreach ($tabs as $k => $label): ?>
         <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$selectedPid; ?>&tab=<?php echo h($k); ?>"
            class="px-4 py-2 rounded-2xl border font-extrabold <?php echo ($k===$tab)?'bg-gray-900 text-white border-gray-900':'bg-white text-gray-900 border-gray-200 hover:bg-gray-50'; ?>">

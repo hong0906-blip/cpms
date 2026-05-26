@@ -108,7 +108,7 @@ $canDecide = (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && $myPe
     </div>
 
     <?php if (isset($d['doc_status']) && $d['doc_status'] === 'PENDING') { ?>
-        <div class="no-print bg-white rounded-2xl border p-4 flex flex-wrap gap-3 items-center">
+        <div class="no-print cpms-approval-decision-panel <?php echo (isset($d['doc_type']) && (string)$d['doc_type'] === 'leave') ? '' : 'cpms-mobile-hide'; ?> bg-white rounded-2xl border p-4 flex flex-wrap gap-3 items-center">
             <?php if ($canDecide) { ?>
                 <form method="post" action="?r=approval_decide" style="display:inline;">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">

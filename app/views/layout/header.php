@@ -3,6 +3,9 @@
  * layout/header.php
  * - Tailwind CDN + lucide + (추가) 접힘/펼침 표시용 CSS
  */
+$bodyRoute = isset($_GET['r']) ? trim((string)$_GET['r']) : '';
+$bodyRouteClass = 'cpms-route-' . preg_replace('/[^a-z0-9_-]+/i', '-', $bodyRoute !== '' ? $bodyRoute : 'dashboard');
+$bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', isset($selectedMenu) ? (string)$selectedMenu : '');
 ?>
 <!doctype html>
 <html lang="ko">
@@ -25,8 +28,278 @@
   <style>
     #cpmsSidebar[data-collapsed="1"] .when-expanded { display:none !important; }
     #cpmsSidebar[data-collapsed="0"] .when-collapsed { display:none !important; }
+    #cpmsContentShell { min-width: 0; }
+    .cpms-mobile-bottom-nav { display: none; }
+    .cpms-approval-mobile-list { display: none; }
+    .cpms-monthly-mobile-summary { display: none; }
+
+    @media (max-width: 767px) {
+      html,
+      body {
+        height: auto;
+        min-height: 100%;
+      }
+
+      body {
+        overflow: auto;
+        background: #f8fafc;
+      }
+
+      body > .flex.h-screen {
+        display: block;
+        height: auto;
+        min-height: 100vh;
+      }
+
+      #cpmsSidebar {
+        display: none !important;
+      }
+
+      #cpmsContentShell {
+        display: block;
+        min-height: 100vh;
+        overflow: visible;
+      }
+
+      #cpmsContentHeader {
+        position: sticky;
+        top: 0;
+        z-index: 30;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px 14px;
+        background: rgba(255,255,255,.92);
+      }
+
+      #cpmsContentHeader h1 {
+        font-size: 20px;
+        line-height: 1.25;
+      }
+
+      #cpmsContentHeader > div {
+        max-width: 100%;
+        flex-wrap: wrap;
+      }
+
+      #cpmsContentHeader .cpms-user-chip {
+        width: 100%;
+        justify-content: space-between;
+        padding: 8px 10px;
+        border-radius: 14px;
+      }
+
+      #cpmsContentMain {
+        padding: 14px 14px 96px !important;
+        overflow: visible;
+      }
+
+      .cpms-mobile-hide {
+        display: none !important;
+      }
+
+      .cpms-mobile-bottom-nav {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 40;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 4px;
+        padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+        border-top: 1px solid #e5e7eb;
+        background: rgba(255,255,255,.96);
+        box-shadow: 0 -10px 30px rgba(15,23,42,.08);
+        backdrop-filter: blur(14px);
+      }
+
+      .cpms-mobile-bottom-nav a {
+        min-width: 0;
+        height: 58px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        border-radius: 14px;
+        color: #64748b;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .cpms-mobile-bottom-nav a.is-active {
+        color: #0f172a;
+        background: #eef6ff;
+      }
+
+      .cpms-mobile-bottom-nav i {
+        width: 20px;
+        height: 20px;
+      }
+
+      input,
+      select,
+      textarea,
+      button {
+        font-size: 16px;
+      }
+
+      .rounded-3xl {
+        border-radius: 20px;
+      }
+
+      .cpms-dashboard-hero {
+        padding: 18px !important;
+        margin-bottom: 14px !important;
+        box-shadow: none !important;
+      }
+
+      .cpms-dashboard-hero > .flex {
+        flex-direction: column;
+      }
+
+      .cpms-dashboard-hero h2 {
+        font-size: 24px;
+        line-height: 1.25;
+      }
+
+      .cpms-dashboard-hero p {
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .cpms-attendance-actions,
+      .cpms-attendance-actions form,
+      .cpms-attendance-actions button {
+        width: 100%;
+      }
+
+      .cpms-attendance-actions button,
+      .cpms-attendance-actions form button,
+      .cpms-attendance-actions > div {
+        min-height: 52px;
+        border-radius: 16px;
+      }
+
+      #cpmsEmployeeTasksPanel {
+        margin-bottom: 14px !important;
+        padding: 16px !important;
+        border-radius: 20px !important;
+        box-shadow: none !important;
+      }
+
+      #cpmsEmployeeTasksPanel h2 {
+        font-size: 22px;
+      }
+
+      #cpmsEmployeeTasksToggle,
+      #cpmsEmployeeTasksPanel > div:first-child > div:last-child,
+      #cpmsEmployeeTasksPanel > [data-cpms-employee-task-body] {
+        display: none !important;
+      }
+
+      #cpmsEmployeeTasksPanel .cpms-task-summary {
+        display: block !important;
+      }
+
+      #cpmsEmployeeTasksPanel .cpms-task-summary .mt-3 {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      #cpmsEmployeeTasksPanel .cpms-task-summary span {
+        justify-content: center;
+        text-align: center;
+        border-radius: 14px;
+      }
+
+      .cpms-approval-page > .bg-gradient-to-r {
+        padding: 20px !important;
+      }
+
+      .cpms-approval-page h2 {
+        font-size: 22px;
+        line-height: 1.25;
+      }
+
+      .cpms-approval-page .cpms-approval-mobile-list {
+        display: block;
+      }
+
+      .cpms-approval-page .cpms-approval-table {
+        display: none !important;
+      }
+
+      .cpms-approval-page .grid {
+        gap: 10px;
+      }
+
+      .cpms-approval-decision-panel {
+        align-items: stretch;
+      }
+
+      .cpms-approval-decision-panel form,
+      .cpms-approval-decision-panel button,
+      .cpms-approval-decision-panel input {
+        width: 100%;
+      }
+
+      .cpms-project-manage-tab,
+      .cpms-construction-tabs,
+      .cpms-construction-tab-select {
+        display: none !important;
+      }
+
+      .cpms-monthly-filter {
+        display: grid !important;
+        grid-template-columns: 1fr;
+        align-items: stretch !important;
+      }
+
+      .cpms-monthly-filter select,
+      .cpms-monthly-filter button {
+        width: 100%;
+        min-width: 0 !important;
+      }
+
+      .cpms-monthly-mobile-summary {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .cpms-monthly-mobile-summary > div:first-child,
+      .cpms-monthly-mobile-summary > div:nth-child(3) {
+        grid-column: span 2;
+      }
+
+      .cpms-monthly-table-scroll {
+        border: 1px solid #e5e7eb;
+        border-radius: 16px;
+        background: #fff;
+      }
+
+      .cpms-monthly-table-scroll table {
+        font-size: 12px;
+      }
+
+      .cpms-monthly-deduction {
+        display: none !important;
+      }
+
+      .cpms-construction-page {
+        margin-bottom: 12px !important;
+      }
+
+      .cpms-construction-page h2,
+      .cpms-project-page h2 {
+        font-size: 22px;
+      }
+    }
   </style>
 </head>
 
-<body class="h-screen">
+<body class="h-screen <?php echo h($bodyRouteClass . ' ' . $bodySelectedClass); ?>">
   <div class="flex h-screen bg-gradient-to-br from-gray-50 via-blue-50/50 to-cyan-50/30">
