@@ -58,7 +58,6 @@ function status_badge_class($status) {
   <div class="mt-3 flex gap-2">
     <a href="?r=공무&tab=monthly_input" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_input' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 상세내역</a>
     <a href="?r=공무&tab=project_manage" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
-    <a href="?r=db_setup_project_monthly" class="px-4 py-2 rounded-2xl border border-amber-300 bg-amber-50 text-amber-800 font-bold">공무 DB 설치/확인</a>
   </div>
 </div>
 

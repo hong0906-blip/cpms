@@ -347,7 +347,6 @@ if ($view === 'cancelled') {
     );
 }
 
-$canDb = \App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees() || \App\Core\Auth::userRole() === 'executive';
 ?>
 <div class="space-y-5">
     <?php if ($fatalMessage !== '') { ?>
@@ -375,14 +374,8 @@ $canDb = \App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees() || \
             <div class="min-w-0">
                 <h2 class="text-3xl font-extrabold"><?php echo h($pageTitle); ?></h2>
                 <p class="mt-2 text-indigo-100"><?php echo h($pageDesc); ?></p>
-                <?php if ($canDb) { ?>
-                    <p class="mt-2 text-indigo-100 text-sm"><?php echo h($txt['db_desc']); ?></p>
-                <?php } ?>
             </div>
             <div class="flex flex-wrap items-center justify-start xl:justify-end gap-3 shrink-0 max-w-none">
-                <?php if ($canDb) { ?>
-                    <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-amber-200 text-amber-950" href="?r=db_setup_approval"><?php echo h($txt['db_setup']); ?></a>
-                <?php } ?>
                 <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-indigo-700" href="?r=approval_create&type=proposal"><?php echo h($txt['create_proposal']); ?></a>
                 <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-cyan-700" href="?r=approval_create&type=leave"><?php echo h($txt['create_leave']); ?></a>
             </div>

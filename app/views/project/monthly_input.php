@@ -482,7 +482,7 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 <div class="bg-white rounded-3xl border border-gray-100 p-5">
 <h3 class="text-xl font-extrabold mb-3">월별 투입비 상세내역</h3>
 <?php $guideYm = ($selectedViewMonth === 'all' && count($displayMonths) > 0) ? $displayMonths[count($displayMonths)-1] : $selectedViewMonth; if (!ym_valid($guideYm) && count($allMonths) > 0) { $guideYm = $allMonths[count($allMonths)-1]; } $laborRange = cpms_cost_period_range($guideYm, 'labor'); $salesRange = cpms_cost_period_range($guideYm, 'sales'); $meRange = cpms_cost_period_range($guideYm, 'material'); ?>
-<div class="mb-3 rounded-xl border border-blue-100 bg-blue-50 text-blue-900 p-3 text-xs">
+<div class="mb-3 rounded-xl border border-blue-100 bg-blue-50 text-blue-900 p-3 text-xs" style="display:none;">
 <div class="font-bold mb-1">계산 기준</div>
 <div>- 매출·노무비: 매월 1일 ~ 말일</div>
 <div>- 자재비/장비비/안전관리비: 전월 26일 ~ 현월 25일</div>
@@ -490,7 +490,6 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 </div>
 <?php if (count($errors)>0): ?><div class="mb-3 rounded-xl border border-red-200 bg-red-50 text-red-800 p-3 text-sm"><?php foreach($errors as $em): ?><div><?php echo h($em); ?></div><?php endforeach; ?></div><?php endif; ?>
 <?php if ($deductionTableMissing): ?><div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 p-3 text-sm">공제분 테이블이 없습니다. 공무 DB 설치/확인을 실행해주세요.</div><?php endif; ?>
-<?php foreach($notices as $nt): ?><div class="mb-2 text-xs text-amber-700"><?php echo h($nt); ?></div><?php endforeach; ?>
 
 <?php if (count($monthlyProjects) === 0): ?>
 <div class="text-sm text-gray-700">등록된 프로젝트가 없습니다. [프로젝트 관리] 탭에서 신규 프로젝트를 먼저 생성해주세요.</div>
@@ -506,10 +505,12 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 <?php foreach($allMonths as $ymOpt): ?><option value="<?php echo h($ymOpt); ?>" <?php echo ($selectedViewMonth===$ymOpt)?'selected':''; ?>><?php echo h(str_replace('-', '.', $ymOpt)); ?></option><?php endforeach; ?>
 </select>
 </form>
+<?php if (false): ?>
 <?php foreach($salesDiagnostics as $diag): ?><div class="mb-1 text-xs text-gray-700"><?php echo h($diag); ?></div><?php endforeach; ?>
 <?php foreach($laborDiagnostics as $diag): ?><div class="mb-1 text-xs text-gray-700"><?php echo h($diag); ?></div><?php endforeach; ?>
+<?php endif; ?>
 
-<?php if($selectedProject): ?>
+<?php if(false && $selectedProject): ?>
 <div class="text-sm mb-3 space-y-1">
 <div><span class="font-semibold">공사명 :</span> <?php echo h($selectedProject['name']); ?></div>
 <div><span class="font-semibold">계약기간 :</span> <?php echo h($selectedProject['start_date']); ?> ~ <?php echo h($selectedProject['end_date']); ?></div>

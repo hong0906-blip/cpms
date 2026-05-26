@@ -281,22 +281,7 @@ if (is_array($flash)) {
     <?php if ($dbOk && (!$entriesOk || !$directOk || !$projectsOk)): ?>
       <div class="mt-4 bg-orange-50 border border-orange-200 text-orange-800 rounded-2xl p-4">
         <div class="font-extrabold">노무비 계산용 테이블이 없습니다.</div>
-        <div class="text-sm mt-2">phpMyAdmin 없이도 아래 버튼으로 <span class="font-bold">필요 테이블 2개</span>를 자동 생성할 수 있습니다.</div>
-
-        <div class="mt-3 flex flex-wrap items-center gap-2">
-          <form method="post" action="?r=admin/labor_entries_save" onsubmit="return confirm('노무비 계산용 테이블(labor_entries, direct_team_rates)을 생성할까요?\\n(프로젝트 테이블 cpms_projects는 공무 DB 설정에서 생성됩니다)');">
-            <input type="hidden" name="_csrf" value="<?= h(csrf_token()) ?>"/>
-            <input type="hidden" name="action" value="ensure_tables"/>
-            <button type="submit" class="bg-orange-600 text-white rounded-xl px-4 py-2 font-extrabold">
-              웹에서 자동 생성
-            </button>
-          </form>
-          <div class="text-xs text-orange-700">
-            ※ 기존 테이블이 있으면 덮어쓰지 않습니다(<span class="font-bold">CREATE TABLE IF NOT EXISTS</span>)
-          </div>
-        </div>
-
-        <pre class="mt-3 text-xs bg-white border border-orange-200 rounded-2xl p-3 overflow-x-auto"><code><?= h($sqlAll) ?></code></pre>
+        <div class="text-sm mt-2">필요한 계산용 테이블 구성이 아직 준비되지 않았습니다.</div>
       </div>
     <?php endif; ?>
   </div>

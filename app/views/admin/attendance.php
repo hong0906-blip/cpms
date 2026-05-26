@@ -11,7 +11,6 @@ if (!$canManageAttendance) {
 }
 
 $routeManage = '?r=' . attendance_text('%EA%B4%80%EB%A6%AC');
-$routeDbSetup = '?r=db_setup_attendance';
 
 $pdo = Db::pdo();
 $date = isset($_GET['date']) ? (string)$_GET['date'] : date('Y-m-d');
@@ -173,7 +172,6 @@ foreach ($reqs as $rq) {
 <div class='mb-4 flex gap-2 flex-wrap'>
     <a class='px-3 py-2 rounded-2xl border bg-white' href='<?php echo h($routeManage); ?>'><?php echo h(attendance_text('%EA%B4%80%EB%A6%AC%EB%B6%80%20%EB%A9%94%EC%9D%B8')); ?></a>
     <a class='px-3 py-2 rounded-2xl border bg-white' href='<?php echo h($routeManage . '&tab=employees'); ?>'><?php echo h(attendance_text('%EC%A7%81%EC%9B%90%EB%AA%85%EB%B6%80')); ?></a>
-    <a class='px-3 py-2 rounded-2xl border bg-white' href='<?php echo h($routeDbSetup); ?>'><?php echo h(attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%20DB%20%EC%84%A4%EC%B9%98%2F%ED%99%95%EC%9D%B8')); ?></a>
 </div>
 
 <?php if(!$hireDateEnabled): ?>

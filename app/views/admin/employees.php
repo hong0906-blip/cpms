@@ -119,7 +119,6 @@ if ($dbOk) {
   </div>
   <button type="button" class="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-extrabold" data-modal-open="empAdd">직원 추가</button>
 </div>
-<details class="mb-4 bg-gray-50 border border-gray-200 rounded-2xl p-4"><summary class="font-bold cursor-pointer">직원명부 컬럼 진단 보기</summary><div class="text-xs mt-2">EMPLOYEES_PAGE_LOADED=yes / position=<?php echo $positionEnabled?'yes':'no'; ?> / hire_date=<?php echo $hireDateEnabled?'yes':'no'; ?> / leave_monthly_balance=<?php echo $leaveMonthlyEnabled?'yes':'no'; ?> / leave_annual_balance=<?php echo $leaveAnnualEnabled?'yes':'no'; ?> / leave_half_balance=<?php echo $leaveHalfEnabled?'yes':'no'; ?> / birth_date=<?php echo $birthDateEnabled?'yes':'no'; ?> / approval_can_be_site_manager=<?php echo $siteManagerEnabled?'yes':'no'; ?> / approval_can_be_team_leader=<?php echo $teamLeaderEnabled?'yes':'no'; ?> / approval_can_be_gongmu_approver=<?php echo $gongmuEnabled?'yes':'no'; ?> / approval_can_be_manage_approver=<?php echo $manageApproverEnabled?'yes':'no'; ?> / google_chat_enabled=<?php echo $googleChatEnabled?'yes':'no'; ?> / google_chat_user_name=<?php echo $googleChatUserEnabled?'yes':'no'; ?> / google_chat_dm_space_name=<?php echo $googleChatSpaceEnabled?'yes':'no'; ?> / photo_path=<?php echo $photoPathEnabled?'yes':'no'; ?></div></details>
 <?php $flash = flash_get(); // 직원명부 flash 메시지 ?>
 <?php if (is_array($flash) && !empty($flash['message'])): ?>
   <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type']==='success')?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-red-50 border-red-200 text-red-700'; ?>">
@@ -127,15 +126,6 @@ if ($dbOk) {
   </div>
 <?php endif; ?>
 <?php if (!empty($employeeLoadError)): ?><div class="mb-4 border border-red-300 bg-red-50 text-red-700 p-3 rounded"><?php echo h($employeeLoadError); ?></div><?php endif; ?>
-
-<div class="bg-white/80 rounded-3xl shadow p-4 mb-4 border border-gray-100"><div class="flex gap-2 flex-wrap">
-<form method="post" action="?r=admin/employees_columns_save"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="add_position_column"><button class="px-3 py-2 border rounded-2xl bg-white">직급 컬럼 추가</button></form>
-<form method="post" action="?r=admin/employees_columns_save"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="add_hire_date_column"><button class="px-3 py-2 border rounded-2xl bg-white">입사날짜 컬럼 추가</button></form>
-<form method="post" action="?r=admin/employees_columns_save"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="add_leave_balance_columns"><button class="px-3 py-2 border rounded-2xl bg-white">휴가잔여 컬럼 추가</button></form>
-<form method="post" action="?r=admin/employees_columns_save"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="add_employee_attendance_columns"><button class="px-3 py-2 border rounded-2xl bg-white">직원명부 추가 컬럼 전체 생성/확인</button></form>
-<form method="post" action="?r=admin/employees_columns_save"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="add_employee_approval_chat_columns"><button class="px-3 py-2 border rounded-2xl bg-white">전자결재/생년월일/Google Chat 컬럼 생성</button></form>
-<form method="post" action="?r=admin/employees_save"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="repair_photo_paths"><button class="px-3 py-2 border rounded-2xl bg-amber-50 border-amber-200 text-amber-800 font-bold">직원 사진 파일 위치 점검/복구</button></form>
-</div></div>
 
 <div class="bg-white/80 rounded-3xl shadow p-6 mb-6 border border-gray-100"><form method="get" class="flex gap-3 items-center"><input type="hidden" name="r" value="관리"><input type="hidden" name="tab" value="employees"><input class="w-full px-4 py-3 rounded-2xl border" name="q" value="<?php echo h($q); ?>" placeholder="이메일/이름/부서/직급 검색"><button class="px-5 py-3 rounded-2xl border bg-white">검색</button></form></div>
 

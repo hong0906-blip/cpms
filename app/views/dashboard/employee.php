@@ -297,7 +297,6 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 <?php
 // 휴가 현황 잔여만 표시
 $vac=array('monthly_granted'=>0.0,'monthly_used'=>0.0,'monthly_left'=>0.0,'annual_granted'=>0.0,'annual_used'=>0.0,'annual_left'=>0.0,'hire_notice'=>'','has_hire_date'=>false,'is_under_one_year'=>false,'display_balance'=>0.0,'display_type'=>'','half_available'=>false);
-$currentStatus=isset($todayRow['status'])?$todayRow['status']:'출근 전';
 if($pdo&&$eid_att>0){
  try{
   $emp=$pdo->prepare("SELECT hire_date,leave_monthly_balance,leave_annual_balance FROM employees WHERE id=:e LIMIT 1");
@@ -347,7 +346,6 @@ if($pdo&&$eid_att>0){
     $vac['half_available']=($vac['display_balance']>=0.5); // 반차 0.5일 차감 표시    
   }
 
-  $lv=$pdo->prepare("SELECT leave_type FROM cpms_leave_records WHERE employee_id=:e AND leave_date=:d LIMIT 1");$lv->execute(array(':e'=>$eid_att,':d'=>$today_att));$l=$lv->fetchColumn(); if($l)$currentStatus=$l;
  }catch(Exception $e){}
 }
 ?>
@@ -674,10 +672,6 @@ if($pdo&&$eid_att>0){
     <?php render_task_list_sample(); ?>
 </div>
 <?php endif; ?>
-<?php /** 출퇴근 시스템: 내 근태 현황 */ require_once __DIR__.'/../attendance/common.php'; $pdo2=\App\Core\Db::pdo(); $eid=attendance_employee_id($pdo2); $today=attendance_today(); $st='출근 전';$cin='-';$cout='-';$wm=0;$weekm=0;$pending=0;$approved=0;$rejected=0; if($pdo2&&$eid>0){try{$r=$pdo2->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d");$r->execute(array(':e'=>$eid,':d'=>$today));$row=$r->fetch(); if($row){$st=$row['status'];$cin=$row['check_in'];$cout=$row['check_out'];$wm=(int)$row['work_minutes'];} list($ws,$we)=attendance_week_range($today);$w=$pdo2->prepare("SELECT SUM(work_minutes) FROM cpms_attendance_records WHERE employee_id=:e AND work_date BETWEEN :s AND :t");$w->execute(array(':e'=>$eid,':s'=>$ws,':t'=>$we));$weekm=(int)$w->fetchColumn();$q=$pdo2->prepare("SELECT status,COUNT(*) c FROM cpms_attendance_requests WHERE employee_id=:e GROUP BY status");$q->execute(array(':e'=>$eid));foreach($q->fetchAll() as $x){if($x['status']==='pending')$pending=$x['c'];if($x['status']==='approved')$approved=$x['c'];if($x['status']==='rejected')$rejected=$x['c'];}}catch(Exception $e){}} ?>
-<div><h3>내 근태 현황</h3><p>오늘 상태: <?php echo h($st);?> / 출근: <?php echo h($cin);?> / 퇴근: <?php echo h($cout);?> / 오늘 근무: <?php echo number_format($wm/60,2);?>h / 이번 주: <?php echo number_format($weekm/60,2);?>h</p><p>출퇴근 수정 요청 상태: 승인대기 <?php echo (int)$pending;?> / 승인 <?php echo (int)$approved;?> / 반려 <?php echo (int)$rejected;?></p></div>
-
-<div class='bg-white/80 rounded-3xl p-6 border mb-8'><!-- 직원 대시보드 현재 상태 카드 --><h3 class='text-xl font-bold'>현재 상태</h3><div class='text-lg font-bold'><?php echo h($currentStatus);?></div><div class='text-sm text-gray-600'>상태 기준: 출근 전 / 출근중 / 퇴근완료 / 연차 / 오전반차 / 오후반차 / 휴무</div></div>
 <?php if (false): ?>
 <div class="bg-white rounded-2xl p-4 border mb-4"><h3 class="font-bold">받은 전자결재</h3><p><a href="?r=approval_home">전자결재에서 확인</a></p><h3 class="font-bold mt-3">나의 전자결재 요청</h3><p><a href="?r=approval_home">전자결재에서 확인</a></p></div>
 <?php endif; ?>
