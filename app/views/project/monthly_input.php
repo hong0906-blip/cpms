@@ -84,8 +84,8 @@ function project_monthly_table_columns($pdo, $table) {
         return array();
     }
 }
-function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
-    $result = array('amount'=>0.0, 'worker_rows'=>0, 'workers_considered'=>0);
+function project_monthly_labor_breakdown($pdo, $projectId, $projectName, $ym) {
+    $result = array('amount'=>0.0, 'worker_rows'=>0, 'workers_considered'=>0, 'company_amounts'=>array());
     if (!function_exists('cpms_load_gongsu_data') || !function_exists('cpms_build_timesheet_workers')) { return $result; }
     $directTeamMembers = cpms_load_direct_team_members($pdo);
     $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
@@ -93,8 +93,13 @@ function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
     $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
     $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
     $attendanceGongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
+    $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) && is_array($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
     $attendanceOutputDays = isset($gongsuData['output_days']) && is_array($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
-    if (function_exists('cpms_apply_labor_overrides_to_map')) {
+    if (function_exists('cpms_apply_labor_overrides_to_dataset')) {
+        $overrideDataset = cpms_apply_labor_overrides_to_dataset($attendanceGongsuMap, $attendanceOutputDays, $attendanceGongsuUnit, $projectId, $ym);
+        $attendanceGongsuMap = isset($overrideDataset['gongsu_map']) && is_array($overrideDataset['gongsu_map']) ? $overrideDataset['gongsu_map'] : array();
+        $attendanceOutputDays = isset($overrideDataset['output_days']) && is_array($overrideDataset['output_days']) ? $overrideDataset['output_days'] : array();
+    } else if (function_exists('cpms_apply_labor_overrides_to_map')) {
         $attendanceGongsuMap = cpms_apply_labor_overrides_to_map($attendanceGongsuMap, $projectId, $ym);
     }
     $sum = 0.0;
@@ -111,18 +116,34 @@ function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
             if (strpos((string)$dateKey, $ym) !== 0) { continue; }
             $totalGongsu += (float)$gongsuValue;
         }
+        if ($totalGongsu <= 0) { continue; }
         if (function_exists('cpms_resolve_labor_wage_rate')) {
             $wageRate = (float)cpms_resolve_labor_wage_rate($worker);
         } else {
             $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
             $wageRate = project_monthly_parse_money($wageRateRaw);
         }
-        $sum += ($totalGongsu * $wageRate);
+        $amount = $totalGongsu * $wageRate;
+        if ($amount <= 0) { continue; }
+        $companyName = isset($worker['company_name']) ? trim((string)$worker['company_name']) : '';
+        if ($companyName === '') $companyName = '창명건설';
+        if (!isset($result['company_amounts'][$companyName])) $result['company_amounts'][$companyName] = 0.0;
+        $result['company_amounts'][$companyName] += $amount;
+        $sum += $amount;
         $result['workers_considered']++;
     }
     $result['amount'] = $sum;
     $result['worker_rows'] = is_array($timesheetWorkers) ? count($timesheetWorkers) : 0;
     return $result;
+}
+function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
+    $breakdown = project_monthly_labor_breakdown($pdo, $projectId, $projectName, $ym);
+    return array(
+        'amount' => isset($breakdown['amount']) ? (float)$breakdown['amount'] : 0.0,
+        'worker_rows' => isset($breakdown['worker_rows']) ? (int)$breakdown['worker_rows'] : 0,
+        'workers_considered' => isset($breakdown['workers_considered']) ? (int)$breakdown['workers_considered'] : 0,
+        'company_amounts' => isset($breakdown['company_amounts']) && is_array($breakdown['company_amounts']) ? $breakdown['company_amounts'] : array(),
+    );
 }
 function project_monthly_load_revenue($pdo, $projectId, $allMonths) {
     $result = array('months'=>monthly_zero_map($allMonths), 'basis'=>'항목별 완료수량', 'row_count'=>0, 'warnings'=>array(), 'stats'=>array('item_rows'=>0,'unit_link_rows'=>0,'item_amount'=>0.0,'progress_rows'=>0,'progress_link_rows'=>0,'schedule_task_rows'=>0,'work_item_line_rows'=>0,'unit_price_rows'=>0,'completed_task_rows'=>0,'sales_sum'=>0.0));
@@ -338,30 +359,38 @@ if ($pdo && is_array($selectedProject)) {
     require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
     if (function_exists('cpms_load_gongsu_data') && is_array($selectedProject) && isset($selectedProject['name'])) {
         $projectName = (string)$selectedProject['name'];
-        $directTeamMembers = cpms_load_direct_team_members($pdo);
-        $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $selectedProjectId);
-        $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
-        if (!function_exists('cpms_apply_labor_overrides_to_map')) {
-            function cpms_apply_labor_overrides_to_map($map, $projectId, $month) {
-                $rows = cpms_load_labor_overrides((int)$projectId, (string)$month);
-                if (!is_array($rows)) return $map;
-                foreach ($rows as $workerKey => $dateRows) {
-                    if (!isset($map[$workerKey]) || !is_array($map[$workerKey])) $map[$workerKey] = array();
-                    foreach (is_array($dateRows) ? $dateRows : array() as $dateKey => $entry) {
-                        if (is_array($entry) && isset($entry['value']) && is_numeric($entry['value'])) { $map[$workerKey][$dateKey] = (float)$entry['value']; }
-                    }
-                }
-                return $map;                
-            }
-        }
         $laborMonths = monthly_zero_map($allMonths);
         $laborWorkerRows = 0;
+        $otherCompanyRows = array();
         foreach ($allMonths as $ym) {
             $laborResult = project_monthly_labor_amount($pdo, $selectedProjectId, $projectName, $ym);
-            $laborMonths[$ym] = isset($laborResult['amount']) ? (float)$laborResult['amount'] : 0;
+            $companyAmounts = isset($laborResult['company_amounts']) && is_array($laborResult['company_amounts']) ? $laborResult['company_amounts'] : array();
+            $laborMonths[$ym] = isset($companyAmounts['창명건설']) ? (float)$companyAmounts['창명건설'] : 0;
+            foreach ($companyAmounts as $companyName => $amount) {
+                $companyName = trim((string)$companyName);
+                if ($companyName === '' || $companyName === '창명건설') continue;
+                if (!isset($otherCompanyRows[$companyName])) {
+                    $otherCompanyRows[$companyName] = array(
+                        'section' => '노무비',
+                        '업체명' => $companyName,
+                        '내역' => '노무비 합계',
+                        'months' => monthly_zero_map($allMonths)
+                    );
+                }
+                if (isset($otherCompanyRows[$companyName]['months'][$ym])) {
+                    $otherCompanyRows[$companyName]['months'][$ym] += (float)$amount;
+                }
+            }
             $laborWorkerRows = isset($laborResult['worker_rows']) ? (int)$laborResult['worker_rows'] : $laborWorkerRows;
         }
         $rowsBySection['노무비'][] = array('section'=>'노무비','업체명'=>'-','내역'=>'노무비 합계','months'=>$laborMonths);
+        if (count($otherCompanyRows) > 0) {
+            ksort($otherCompanyRows);
+            foreach ($otherCompanyRows as $companyRow) {
+                if (row_total($companyRow, $allMonths) <= 0) continue;
+                $rowsBySection['노무비'][] = $companyRow;
+            }
+        }
         $laborDiagnostics[] = '노무비 집계 기준: 공사 > 노무비 지급총액 기준';
         if ($debugMode) { $laborDiagnostics[] = '노무비 근로자 rows: ' . number_format($laborWorkerRows); }
     }

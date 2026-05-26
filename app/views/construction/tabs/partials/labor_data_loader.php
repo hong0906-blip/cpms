@@ -1022,6 +1022,8 @@ if (!function_exists('cpms_build_timesheet_workers')) {
         foreach ($workerRows as $row) {
             $data = isset($row['data']) && is_array($row['data']) ? $row['data'] : array();
             $workers[] = array(
+                'worker_id' => isset($row['id']) ? (int)$row['id'] : 0,
+                'source' => isset($row['source']) ? (string)$row['source'] : '',
                 'name' => isset($data['name']) ? (string)$data['name'] : '',
                 'resident_no' => isset($data['resident_no']) ? (string)$data['resident_no'] : '',
                 'deposit_rate' => isset($data['deposit_rate']) ? (string)$data['deposit_rate'] : '',

@@ -15,6 +15,8 @@ if (!function_exists('cpms_render_feed_card')) {
 function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requestedMode)
 {
     $statusKey = cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
+    $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
+    $hasProjectName = isset($item['project_name']) && trim((string)$item['project_name']) !== '';
     $dueText = '-';
     if (isset($item['due_date']) && trim((string)$item['due_date']) !== '') {
         $dueText = (string)$item['due_date'];
@@ -31,6 +33,10 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
             <?php endif; ?>
         </div>
         <div class="mt-3 text-lg font-extrabold text-slate-900 leading-7"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>
+        <?php if ($hasProjectName): ?>
+            <div class="mt-2 text-sm text-slate-600">현장명: <?php echo h($item['project_name']); ?></div>
+        <?php endif; ?>
+        <?php if (!$isConstructionSchedule): ?>
         <div class="mt-2 text-sm text-slate-600">
             <?php if ($requestedMode): ?>
                 담당자: <?php echo h(isset($item['assignee_name']) ? $item['assignee_name'] : '-'); ?>
@@ -39,6 +45,10 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
             <?php endif; ?>
         </div>
         <div class="mt-1 text-sm text-slate-500">마감: <?php echo h($dueText); ?></div>
+        <?php endif; ?>
+        <?php if ($isConstructionSchedule): ?>
+            <div class="mt-1 text-sm text-slate-500">공정일: <?php echo h($dueText); ?></div>
+        <?php endif; ?>
         <div class="mt-1">
             <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', $statusKey)); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : cpms_tasks_status_label(isset($item['status']) ? $item['status'] : 'pending')); ?></span>
         </div>
@@ -116,13 +126,16 @@ function cpms_render_employee_task_dashboard($pdo)
     $delayedItems = array();
 
     foreach ($feed as $item) {
+        $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
         if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1) {
             $summary['urgent']++;
             $urgentItems[count($urgentItems)] = $item;
         }
         if (cpms_tasks_is_due_today($item)) {
-            $summary['today']++;
-            $todayItems[count($todayItems)] = $item;
+            if (!$isConstructionSchedule) {
+                $summary['today']++;
+                $todayItems[count($todayItems)] = $item;
+            }
         }
         if (isset($item['status']) && in_array((string)$item['status'], array('progress', 'revision'), true)) {
             $summary['progress']++;

@@ -80,24 +80,16 @@ $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_
 $attendanceOutputDays = isset($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
 
 $projectId = isset($pid) ? (int)$pid : 0;
-
-if (!function_exists('cpms_apply_labor_overrides_to_map')) {
-    function cpms_apply_labor_overrides_to_map($map, $projectId, $month) {
-        $rows = cpms_load_labor_overrides((int)$projectId, (string)$month);
-        if (!is_array($rows)) return $map;
-        foreach ($rows as $workerKey => $dateRows) {
-            if (!isset($map[$workerKey]) || !is_array($map[$workerKey])) $map[$workerKey] = array();
-            if (!is_array($dateRows)) continue;
-            foreach ($dateRows as $dateKey => $entry) {
-                if (is_array($entry) && isset($entry['value']) && is_numeric($entry['value'])) {
-                    $map[$workerKey][$dateKey] = (float)$entry['value'];
-                }
-            }
-        }
-        return $map;
-    }
-}
-$attendanceGongsuMap = cpms_apply_labor_overrides_to_map($attendanceGongsuMap, $projectId, $selectedMonth);
+$overrideDataset = function_exists('cpms_apply_labor_overrides_to_dataset')
+    ? cpms_apply_labor_overrides_to_dataset($attendanceGongsuMap, $attendanceOutputDays, $attendanceGongsuUnit, $projectId, $selectedMonth)
+    : array(
+        'gongsu_map' => $attendanceGongsuMap,
+        'output_days' => $attendanceOutputDays,
+        'gongsu_unit' => $attendanceGongsuUnit,
+    );
+$attendanceGongsuMap = isset($overrideDataset['gongsu_map']) && is_array($overrideDataset['gongsu_map']) ? $overrideDataset['gongsu_map'] : array();
+$attendanceOutputDays = isset($overrideDataset['output_days']) && is_array($overrideDataset['output_days']) ? $overrideDataset['output_days'] : array();
+$attendanceGongsuUnit = isset($overrideDataset['gongsu_unit']) && is_array($overrideDataset['gongsu_unit']) ? $overrideDataset['gongsu_unit'] : array();
 $pendingOverrideRows = cpms_load_labor_override_pending($projectId, $selectedMonth);
 $overrideRequestRows = array();
 if (isset($pdo) && $pdo) {
@@ -133,7 +125,7 @@ cpms_sync_project_labor_workers_from_attendance(isset($pdo) ? $pdo : null, $proj
 $projectLaborWorkers = cpms_load_project_labor_workers(isset($pdo) ? $pdo : null, $projectId);
 $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
 $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
-// 공수 월별 출력일수 필터(월별 only): 선택 월 output_days > 0 인 사람만 공수 표에 표시
+// 공수 월별 출력일수 필터: attendance 자동행은 출력일수가 있을 때만 보이고, 수동/직영 추가 인원은 항상 표시
 if (is_array($timesheetWorkers)) {
     $filteredTimesheetWorkers = array();
     foreach ($timesheetWorkers as $worker) {
@@ -141,7 +133,8 @@ if (is_array($timesheetWorkers)) {
         $workerKey = cpms_normalize_worker_key($workerName);
         if ($workerKey === '') continue;
         $workerOutputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
-        if ($workerOutputDays <= 0) continue;
+        $workerSource = isset($worker['source']) ? trim((string)$worker['source']) : '';
+        if ($workerOutputDays <= 0 && $workerSource === 'attendance') continue;
         $filteredTimesheetWorkers[] = $worker;
     }
     $timesheetWorkers = $filteredTimesheetWorkers;
@@ -295,26 +288,56 @@ foreach ($timesheetWorkers as $worker) {
         <div class="text-sm text-gray-600 mt-1">임금 단가 및 계좌 정보를 등록합니다.</div>
         <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 선택해 프로젝트에 추가합니다.</div>
 
-        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" class="mt-4 flex flex-wrap items-end gap-2">
-            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-            <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
-            <input type="hidden" name="labor_tab" value="workers">
-            <div>
-                <label class="text-xs font-bold text-gray-500">직영팀 선택</label>
-                <select name="direct_member_id" class="mt-1 px-3 py-2 rounded-xl border border-gray-200 text-sm min-w-[220px]">
-                    <option value="">직영팀 선택</option>
-                    <?php foreach ($directTeamMembers as $member): ?>
-                        <option value="<?php echo (int)$member['id']; ?>">
-                            <?php echo h(isset($member['name']) ? $member['name'] : ''); ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
-            <button type="submit" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">
-                직영팀 추가
-            </button>
-        </form>
+        <div class="mt-4 grid gap-3 lg:grid-cols-2">
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" class="rounded-2xl border border-gray-200 p-4">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+                <input type="hidden" name="labor_tab" value="workers">
+                <div class="text-sm font-extrabold text-gray-900">직영팀에서 추가</div>
+                <div class="text-xs text-gray-500 mt-1">관리부 직영팀 명부에 등록된 인원을 프로젝트에 연결합니다.</div>
+                <div class="mt-3">
+                    <label class="text-xs font-bold text-gray-500">직영팀 선택</label>
+                    <select name="direct_member_id" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-sm">
+                        <option value="">직영팀 선택</option>
+                        <?php foreach ($directTeamMembers as $member): ?>
+                            <option value="<?php echo (int)$member['id']; ?>">
+                                <?php echo h(isset($member['name']) ? $member['name'] : ''); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="mt-3 flex justify-end">
+                    <button type="submit" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">
+                        직영팀 추가
+                    </button>
+                </div>
+            </form>
+
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" class="rounded-2xl border border-gray-200 p-4">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+                <input type="hidden" name="labor_tab" value="workers">
+                <div class="text-sm font-extrabold text-gray-900">직접 인원 추가</div>
+                <div class="text-xs text-gray-500 mt-1">근로자 시프티에서 못 가져온 인원을 직접 추가합니다.</div>
+                <div class="mt-3 grid gap-3 md:grid-cols-2">
+                    <div>
+                        <label class="text-xs font-bold text-gray-500">이름</label>
+                        <input name="manual_name" type="text" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-sm" placeholder="이름 입력">
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500">업체명</label>
+                        <input name="manual_company_name" type="text" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-sm" placeholder="창명건설">
+                    </div>
+                </div>
+                <div class="mt-3 flex justify-end">
+                    <button type="submit" class="px-4 py-2 rounded-2xl bg-blue-600 text-white font-extrabold">
+                        인원 추가
+                    </button>
+                </div>
+            </form>
+        </div>
 
         <!-- 인원작성 저장 기능 -->
         <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_workers_save" class="mt-4">
@@ -412,6 +435,22 @@ foreach ($timesheetWorkers as $worker) {
 <?php endif; ?>
 
 
+<div id="modal-gongsuAddConfirm" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40" data-modal-close="gongsuAddConfirm"></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-sm bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+            <div class="p-6">
+                <div class="text-lg font-extrabold text-gray-900">공수를 추가할까요?</div>
+                <div class="mt-2 text-sm text-gray-600">빈칸에 공수 1을 자동으로 입력합니다.</div>
+                <div class="mt-5 flex items-center justify-end gap-2">
+                    <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 text-gray-700 font-extrabold" data-modal-close="gongsuAddConfirm">아니요</button>
+                    <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" id="gongsuAddConfirmYes">예</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div id="modal-gongsuRequest" class="fixed inset-0 z-50 hidden">
     <div class="absolute inset-0 bg-black/40" data-modal-close="gongsuRequest"></div>
     <div class="absolute inset-0 flex items-center justify-center p-4">
@@ -456,9 +495,12 @@ foreach ($timesheetWorkers as $worker) {
                     <textarea id="gongsuRequestReason" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" rows="3" placeholder="예: 점심시간 없이 근무"></textarea>
                     <div class="mt-2 text-xs text-gray-500">1.2 이상 공수 수정은 요청 사유가 필요합니다. 예: 점심시간 없이 근무</div>
                 </div>
-                <div class="flex items-center justify-end gap-2">
-                    <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 text-gray-700 font-extrabold" data-modal-close="gongsuRequest">취소</button>
-                    <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" id="gongsuRequestSubmit">요청/저장</button>
+                <div class="flex items-center justify-between gap-2">
+                    <button type="button" class="px-4 py-2 rounded-2xl border border-red-200 text-red-600 font-extrabold hidden" id="gongsuRequestDelete">공수 삭제</button>
+                    <div class="flex items-center justify-end gap-2 ml-auto">
+                        <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 text-gray-700 font-extrabold" data-modal-close="gongsuRequest">취소</button>
+                        <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" id="gongsuRequestSubmit">요청/저장</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -584,6 +626,253 @@ foreach ($timesheetWorkers as $worker) {
             }
             saveGongsuCell(requestCtx.cell, requestCtx.ctx, nextValue, reason);
         });
+    }
+})();
+</script>
+<script>
+(function(){
+    var csrf = <?php echo json_encode(csrf_token()); ?>;
+    var projectName = <?php echo json_encode(isset($projectRow['name']) ? (string)$projectRow['name'] : ''); ?>;
+    var requestCtx = null;
+    var addCtx = null;
+    var savingCell = false;
+
+    function openModal(id){
+        var modal = document.getElementById(id);
+        if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeModal(id){
+        var modal = document.getElementById(id);
+        if (modal) modal.classList.add('hidden');
+    }
+
+    function closeAllModals(){
+        closeModal('modal-gongsuRequest');
+        closeModal('modal-gongsuAddConfirm');
+    }
+
+    function formatValue(v){
+        var n = parseFloat(v);
+        if (isNaN(n)) return '';
+        if (Math.abs(n - Math.round(n)) < 0.0001) return String(Math.round(n));
+        return String(n.toFixed(2)).replace(/0+$/,'').replace(/\.$/,'');
+    }
+
+    function formatMoney(v){
+        var n = parseFloat(v);
+        if (isNaN(n) || Math.abs(n) < 0.0001) return '0';
+        return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    }
+
+    function parseCellValue(cell){
+        if (!cell) return 0;
+        var raw = (cell.getAttribute('data-old-value') || '').replace(/\s+/g, '');
+        if (raw === '') return 0;
+        var n = parseFloat(raw);
+        return isNaN(n) ? 0 : n;
+    }
+
+    function setCellDisplay(cell, displayValue, isPending){
+        if (!cell) return;
+        while (cell.firstChild) cell.removeChild(cell.firstChild);
+        cell.setAttribute('data-old-value', displayValue || '');
+        if (displayValue) {
+            cell.appendChild(document.createTextNode(displayValue));
+        }
+        if (isPending) {
+            var pending = document.createElement('small');
+            pending.className = 'cpms-pending-badge ml-1 text-[10px] text-amber-600';
+            pending.textContent = '승인대기';
+            cell.appendChild(pending);
+        }
+    }
+
+    function updateRowSummary(cell){
+        if (!cell || !cell.closest) return;
+        var row = cell.closest('tr');
+        if (!row) return;
+        var buttons = row.querySelectorAll('.cpms-gongsu-cell');
+        var outputDays = 0;
+        var totalGongsu = 0;
+        for (var i = 0; i < buttons.length; i++) {
+            var value = parseCellValue(buttons[i]);
+            if (value <= 0) continue;
+            outputDays++;
+            totalGongsu += value;
+        }
+        var outputDaysCell = row.querySelector('.cpms-output-days');
+        var totalGongsuCell = row.querySelector('.cpms-total-gongsu');
+        var totalPayCell = row.querySelector('.cpms-total-pay');
+        var wageRate = parseFloat(row.getAttribute('data-wage-rate') || '0');
+        if (outputDaysCell) outputDaysCell.textContent = String(outputDays);
+        if (totalGongsuCell) totalGongsuCell.textContent = formatValue(totalGongsu);
+        if (totalPayCell) totalPayCell.textContent = formatMoney(totalGongsu * (isNaN(wageRate) ? 0 : wageRate));
+    }
+
+    function openRequestModal(cell, ctx){
+        requestCtx = { cell:cell, ctx:ctx };
+        document.getElementById('gongsuProjectName').textContent = projectName || '-';
+        document.getElementById('gongsuWorkerName').textContent = ctx.workerName;
+        document.getElementById('gongsuWorkerDate').textContent = ctx.date;
+        document.getElementById('gongsuCurrentValue').textContent = formatValue(ctx.oldValue);
+        document.getElementById('gongsuRequestedValue').value = formatValue(ctx.oldValue);
+        document.getElementById('gongsuRequestReason').value = '';
+        var deleteBtn = document.getElementById('gongsuRequestDelete');
+        if (deleteBtn) {
+            if (ctx.oldValue > 0) deleteBtn.classList.remove('hidden');
+            else deleteBtn.classList.add('hidden');
+        }
+        openModal('modal-gongsuRequest');
+        setTimeout(function(){
+            var input = document.getElementById('gongsuRequestedValue');
+            if (input) {
+                input.focus();
+                input.select();
+            }
+        }, 0);
+    }
+
+    function openAddConfirmModal(cell, ctx){
+        addCtx = { cell:cell, ctx:ctx };
+        openModal('modal-gongsuAddConfirm');
+    }
+
+    function saveGongsuCell(cell, ctx, newValue, reason, options){
+        if (savingCell) return;
+        options = options || {};
+        savingCell = true;
+        var body = [
+            '_csrf=' + encodeURIComponent(csrf),
+            'project_id=' + encodeURIComponent(ctx.projectId),
+            'month=' + encodeURIComponent(ctx.month),
+            'worker_name=' + encodeURIComponent(ctx.workerName),
+            'work_date=' + encodeURIComponent(ctx.date),
+            'worker_key=' + encodeURIComponent(ctx.workerKey),
+            'old_value=' + encodeURIComponent(String(ctx.oldValue)),
+            'new_value=' + encodeURIComponent(String(newValue)),
+            'reason=' + encodeURIComponent(reason || ''),
+            'delete_mode=' + encodeURIComponent(options.deleteMode ? '1' : '0')
+        ].join('&');
+
+        fetch('?r=construction/labor_gongsu_override_save', {
+            method:'POST',
+            credentials:'same-origin',
+            headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
+            body:body
+        })
+            .then(function(r){
+                return r.text().then(function(text){
+                    var data = null;
+                    try { data = JSON.parse(text); } catch (e) {}
+                    if (!data) throw new Error('서버 응답이 JSON이 아닙니다.');
+                    if (!r.ok || !data.ok) throw new Error(data.message ? data.message : '저장 실패');
+                    return data;
+                });
+            })
+            .then(function(data){
+                if (data.mode === 'pending') {
+                    setCellDisplay(cell, formatValue(ctx.oldValue), true);
+                    alert(data.message || '승인 요청으로 등록되었습니다.');
+                    closeAllModals();
+                    return;
+                }
+                var value = (data && typeof data.value !== 'undefined') ? data.value : newValue;
+                var displayValue = (data && data.deleted === 'Y') ? '' : formatValue(value);
+                setCellDisplay(cell, displayValue, false);
+                updateRowSummary(cell);
+                closeAllModals();
+            })
+            .catch(function(e){
+                if (window.console && console.error) console.error('gongsu save failed:', e);
+                alert(e && e.message ? e.message : '저장에 실패했습니다.');
+            })
+            .then(function(){ savingCell = false; });
+    }
+
+    var modalCloseButtons = document.querySelectorAll('[data-modal-close="gongsuRequest"], [data-modal-close="gongsuAddConfirm"]');
+    for (var i = 0; i < modalCloseButtons.length; i++) {
+        modalCloseButtons[i].addEventListener('click', function(){
+            closeModal('modal-' + this.getAttribute('data-modal-close'));
+        }, true);
+    }
+
+    var cells = document.querySelectorAll('.cpms-gongsu-cell');
+    for (var c = 0; c < cells.length; c++) {
+        cells[c].addEventListener('click', function(event){
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            var cell = this;
+            var oldValueRaw = (cell.getAttribute('data-old-value') || '').replace(/\s+/g, '');
+            var oldValue = parseCellValue(cell);
+            var ctx = {
+                projectId:cell.getAttribute('data-project-id'),
+                month:cell.getAttribute('data-month'),
+                workerName:cell.getAttribute('data-worker-name'),
+                workerKey:(cell.getAttribute('data-worker-key') || '').trim(),
+                date:cell.getAttribute('data-date'),
+                oldValue:oldValue
+            };
+            if (oldValueRaw === '') {
+                openAddConfirmModal(cell, ctx);
+                return;
+            }
+            openRequestModal(cell, ctx);
+        }, true);
+    }
+
+    var addConfirmYesBtn = document.getElementById('gongsuAddConfirmYes');
+    if (addConfirmYesBtn) {
+        addConfirmYesBtn.addEventListener('click', function(event){
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (!addCtx) return;
+            if (!addCtx.ctx.projectId || isNaN(parseInt(addCtx.ctx.projectId, 10)) || parseInt(addCtx.ctx.projectId, 10) <= 0) {
+                alert('프로젝트 정보를 확인할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해주세요.');
+                return;
+            }
+            saveGongsuCell(addCtx.cell, addCtx.ctx, 1, '', { deleteMode:false });
+        }, true);
+    }
+
+    var submitBtn = document.getElementById('gongsuRequestSubmit');
+    if (submitBtn) {
+        submitBtn.addEventListener('click', function(event){
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (!requestCtx) return;
+            var reason = document.getElementById('gongsuRequestReason').value.replace(/^\s+|\s+$/g, '');
+            var requestedVal = document.getElementById('gongsuRequestedValue').value.replace(/\s+/g, '');
+            if (!/^\d+(\.\d+)?$/.test(requestedVal)) {
+                alert('변경 공수는 숫자 형식으로 입력하세요.');
+                return;
+            }
+            var nextValue = parseFloat(requestedVal);
+            if (isNaN(nextValue) || nextValue < 0) {
+                alert('변경 공수는 0 이상만 가능합니다.');
+                return;
+            }
+            if (nextValue >= 1.2 && !reason) {
+                alert('1.2 이상 공수 수정은 승인 요청사유가 필요합니다.');
+                return;
+            }
+            if (!requestCtx.ctx.projectId || isNaN(parseInt(requestCtx.ctx.projectId, 10)) || parseInt(requestCtx.ctx.projectId, 10) <= 0) {
+                alert('프로젝트 정보가 올바르지 않아 저장할 수 없습니다. 페이지를 새로고침한 뒤 다시 시도해주세요.');
+                return;
+            }
+            saveGongsuCell(requestCtx.cell, requestCtx.ctx, nextValue, reason, { deleteMode:false });
+        }, true);
+    }
+
+    var deleteBtn = document.getElementById('gongsuRequestDelete');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', function(event){
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            if (!requestCtx) return;
+            if (!window.confirm('공수를 삭제할까요?')) return;
+            saveGongsuCell(requestCtx.cell, requestCtx.ctx, 0, '', { deleteMode:true });
+        }, true);
     }
 })();
 </script>

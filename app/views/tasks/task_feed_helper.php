@@ -460,11 +460,128 @@ function cpms_task_feed_safety_items_for_employee($pdo, $employeeId, $employeeEm
     return $rows;
 }}
 
+if (!function_exists('cpms_task_feed_employee_project_ids')) {
+function cpms_task_feed_employee_project_ids($pdo, $employeeId)
+{
+    $projectIdMap = array();
+    if (!$pdo || (int)$employeeId <= 0) return array();
+
+    if (cpms_tasks_table_exists($pdo, 'cpms_project_members')) {
+        try {
+            $st = $pdo->prepare("SELECT DISTINCT project_id FROM cpms_project_members WHERE employee_id = :employee_id AND LOWER(TRIM(role)) IN ('main', 'sub')");
+            $st->execute(array(':employee_id' => (int)$employeeId));
+            $items = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (is_array($items)) {
+                foreach ($items as $item) {
+                    $projectId = isset($item['project_id']) ? (int)$item['project_id'] : 0;
+                    if ($projectId > 0) $projectIdMap[$projectId] = $projectId;
+                }
+            }
+        } catch (Exception $e) {
+        }
+    }
+
+    if (cpms_tasks_table_exists($pdo, 'cpms_construction_roles')) {
+        try {
+            $st = $pdo->prepare("SELECT DISTINCT project_id
+                                 FROM cpms_construction_roles
+                                 WHERE :employee_id IN (
+                                     COALESCE(site_employee_id, 0),
+                                     COALESCE(safety_employee_id, 0),
+                                     COALESCE(quality_employee_id, 0)
+                                 )");
+            $st->execute(array(':employee_id' => (int)$employeeId));
+            $items = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (is_array($items)) {
+                foreach ($items as $item) {
+                    $projectId = isset($item['project_id']) ? (int)$item['project_id'] : 0;
+                    if ($projectId > 0) $projectIdMap[$projectId] = $projectId;
+                }
+            }
+        } catch (Exception $e) {
+        }
+    }
+
+    return array_values($projectIdMap);
+}}
+
+if (!function_exists('cpms_task_feed_construction_schedule_items_for_employee')) {
+function cpms_task_feed_construction_schedule_items_for_employee($pdo, $employeeId)
+{
+    $rows = array();
+    if (
+        !$pdo
+        || (int)$employeeId <= 0
+        || !cpms_tasks_table_exists($pdo, 'cpms_schedule_tasks')
+        || !cpms_tasks_table_exists($pdo, 'cpms_projects')
+    ) {
+        return $rows;
+    }
+
+    $projectIds = cpms_task_feed_employee_project_ids($pdo, $employeeId);
+    if (count($projectIds) === 0) return $rows;
+
+    $placeholders = implode(',', array_fill(0, count($projectIds), '?'));
+    $today = cpms_tasks_today();
+
+    try {
+        $sql = "SELECT st.id, st.project_id, st.name, st.start_date, st.end_date, st.progress, p.name AS project_name
+                FROM cpms_schedule_tasks st
+                INNER JOIN cpms_projects p ON p.id = st.project_id
+                WHERE st.project_id IN (" . $placeholders . ")
+                  AND COALESCE(st.progress, 0) < 100
+                  AND COALESCE(st.start_date, st.end_date) IS NOT NULL
+                  AND COALESCE(st.end_date, st.start_date) IS NOT NULL
+                  AND COALESCE(st.start_date, st.end_date) <= ?
+                  AND COALESCE(st.end_date, st.start_date) >= ?
+                ORDER BY p.name ASC, st.sort_order ASC, st.id ASC";
+        $params = $projectIds;
+        $params[] = $today;
+        $params[] = $today;
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        $items = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($items)) $items = array();
+        foreach ($items as $item) {
+            $taskName = trim(isset($item['name']) ? (string)$item['name'] : '');
+            if ($taskName === '') continue;
+            $projectName = isset($item['project_name']) ? trim((string)$item['project_name']) : '';
+            $rows[count($rows)] = array(
+                'source_type' => 'construction_schedule',
+                'source_id' => isset($item['id']) ? (int)$item['id'] : 0,
+                'title' => $taskName,
+                'content' => $taskName,
+                'requester_name' => $projectName,
+                'requester_employee_id' => 0,
+                'assignee_name' => '',
+                'assignee_employee_id' => (int)$employeeId,
+                'department' => '공사',
+                'project_id' => isset($item['project_id']) ? (int)$item['project_id'] : 0,
+                'project_name' => $projectName,
+                'due_date' => $today,
+                'due_time' => '',
+                'priority' => 'normal',
+                'is_urgent' => 0,
+                'status' => 'progress',
+                'task_type' => 'construction_schedule',
+                'display_status' => '오늘 공정',
+                'action_url' => '?r=공사&pid=' . (isset($item['project_id']) ? (int)$item['project_id'] : 0) . '&tab=gantt',
+                'is_direct_task' => 0,
+            );
+        }
+    } catch (Exception $e) {
+        $rows = array();
+    }
+
+    return $rows;
+}}
+
 if (!function_exists('cpms_task_feed_for_employee')) {
 function cpms_task_feed_for_employee($pdo, $employeeId, $employeeEmail, $employeeMeta)
 {
     return cpms_task_feed_merge(array(
         cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId),
+        cpms_task_feed_construction_schedule_items_for_employee($pdo, $employeeId),
         cpms_task_feed_approval_items_for_employee($pdo, $employeeId, $employeeEmail),
         cpms_task_feed_labor_gongsu_items_for_employee($pdo, $employeeId, $employeeEmail),
         cpms_task_feed_equipment_gongsu_items_for_employee($pdo, $employeeId, $employeeEmail),

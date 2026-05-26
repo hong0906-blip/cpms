@@ -164,6 +164,7 @@ function cpms_tasks_status_label($status)
 if (!function_exists('cpms_tasks_type_label')) {
 function cpms_tasks_type_label($taskType)
 {
+    if ((string)$taskType === 'construction_schedule') return '오늘 공정';
     $options = cpms_tasks_type_options();
     return isset($options[$taskType]) ? $options[$taskType] : (trim((string)$taskType) !== '' ? (string)$taskType : '업무');
 }}

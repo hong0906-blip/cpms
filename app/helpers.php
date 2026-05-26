@@ -149,7 +149,7 @@ function cpms_load_labor_overrides($projectId, $month) {
     try {
         $pdo = \App\Core\Db::pdo();
         if ($pdo && cpms_ensure_labor_override_table($pdo)) {
-            $sql = "SELECT worker_key, work_date, worker_name, old_value, new_value, status, reason, requested_by, approved_by, approved_at, created_at, updated_at
+            $sql = "SELECT worker_key, work_date, worker_name, old_value, new_value, is_deleted_entry, status, reason, requested_by, approved_by, approved_at, created_at, updated_at
                     FROM cpms_labor_gongsu_overrides
                     WHERE project_id = :pid AND month = :month AND status IN ('applied','approved')";
             $st = $pdo->prepare($sql);
@@ -161,7 +161,12 @@ function cpms_load_labor_overrides($projectId, $month) {
                 $workDate = isset($r['work_date']) ? trim((string)$r['work_date']) : '';
                 if ($workerKey === '' || $workDate === '') continue;
                 if (!isset($rows[$workerKey]) || !is_array($rows[$workerKey])) $rows[$workerKey] = array();
-                $rows[$workerKey][$workDate] = array('worker_name' => (string)$r['worker_name'], 'value' => (float)$r['new_value'], 'meta' => $r);
+                $rows[$workerKey][$workDate] = array(
+                    'worker_name' => (string)$r['worker_name'],
+                    'value' => (float)$r['new_value'],
+                    'is_deleted' => (isset($r['is_deleted_entry']) && (int)$r['is_deleted_entry'] === 1),
+                    'meta' => $r
+                );
             }
             return $rows;
         }
@@ -189,6 +194,93 @@ function cpms_set_labor_override($projectId, $month, $workerName, $date, $value,
     return cpms_save_labor_overrides((int)$projectId, (string)$month, $rows);
 }
 
+function cpms_is_labor_override_deleted_entry($entry) {
+    if (!is_array($entry)) return false;
+    if (isset($entry['is_deleted'])) {
+        return ((int)$entry['is_deleted'] === 1);
+    }
+    if (isset($entry['is_deleted_entry'])) {
+        return ((int)$entry['is_deleted_entry'] === 1);
+    }
+    if (isset($entry['meta']) && is_array($entry['meta'])) {
+        if (isset($entry['meta']['is_deleted_entry'])) {
+            return ((int)$entry['meta']['is_deleted_entry'] === 1);
+        }
+        if (isset($entry['meta']['is_deleted'])) {
+            return ((int)$entry['meta']['is_deleted'] === 1);
+        }
+    }
+    return false;
+}
+
+function cpms_apply_labor_overrides_to_dataset($gongsuMap, $outputDays, $gongsuUnit, $projectId, $month) {
+    $rows = cpms_load_labor_overrides((int)$projectId, (string)$month);
+    if (!is_array($rows)) {
+        return array(
+            'gongsu_map' => is_array($gongsuMap) ? $gongsuMap : array(),
+            'output_days' => is_array($outputDays) ? $outputDays : array(),
+            'gongsu_unit' => is_array($gongsuUnit) ? $gongsuUnit : array(),
+        );
+    }
+
+    if (!is_array($gongsuMap)) $gongsuMap = array();
+    if (!is_array($outputDays)) $outputDays = array();
+    if (!is_array($gongsuUnit)) $gongsuUnit = array();
+
+    foreach ($rows as $workerKey => $dateRows) {
+        if (!isset($gongsuMap[$workerKey]) || !is_array($gongsuMap[$workerKey])) {
+            $gongsuMap[$workerKey] = array();
+        }
+        if (!is_array($dateRows)) continue;
+        foreach ($dateRows as $dateKey => $entry) {
+            if (!is_array($entry) || trim((string)$dateKey) === '') continue;
+            $isDeleted = cpms_is_labor_override_deleted_entry($entry);
+            $hasNumericValue = (isset($entry['value']) && is_numeric($entry['value']));
+            $value = $hasNumericValue ? (float)$entry['value'] : 0.0;
+
+            if ($isDeleted || $value <= 0) {
+                if (isset($gongsuMap[$workerKey][$dateKey])) unset($gongsuMap[$workerKey][$dateKey]);
+                continue;
+            }
+
+            $gongsuMap[$workerKey][$dateKey] = round($value, 2);
+        }
+    }
+
+    $workerKeys = array();
+    foreach ($gongsuMap as $workerKey => $unusedMap) $workerKeys[$workerKey] = true;
+    foreach ($outputDays as $workerKey => $unusedDays) $workerKeys[$workerKey] = true;
+    foreach ($gongsuUnit as $workerKey => $unusedUnit) $workerKeys[$workerKey] = true;
+    foreach ($rows as $workerKey => $unusedOverrideRows) $workerKeys[$workerKey] = true;
+
+    foreach (array_keys($workerKeys) as $workerKey) {
+        $days = 0;
+        $sum = 0.0;
+        $dailyMap = (isset($gongsuMap[$workerKey]) && is_array($gongsuMap[$workerKey])) ? $gongsuMap[$workerKey] : array();
+        foreach ($dailyMap as $dateKey => $gongsuValue) {
+            if (!is_numeric($gongsuValue)) continue;
+            if ($month !== '' && strpos((string)$dateKey, $month) !== 0) continue;
+            $floatValue = (float)$gongsuValue;
+            if ($floatValue <= 0) continue;
+            $days++;
+            $sum += $floatValue;
+        }
+        $outputDays[$workerKey] = $days;
+        $gongsuUnit[$workerKey] = ($days > 0) ? round($sum / $days, 2) : 0.0;
+    }
+
+    return array(
+        'gongsu_map' => $gongsuMap,
+        'output_days' => $outputDays,
+        'gongsu_unit' => $gongsuUnit,
+    );
+}
+
+function cpms_apply_labor_overrides_to_map($map, $projectId, $month) {
+    $dataset = cpms_apply_labor_overrides_to_dataset($map, array(), array(), $projectId, $month);
+    return isset($dataset['gongsu_map']) && is_array($dataset['gongsu_map']) ? $dataset['gongsu_map'] : array();
+}
+
 function cpms_ensure_labor_override_table($pdo) {
     if (!$pdo) return false;
     try {
@@ -201,6 +293,7 @@ function cpms_ensure_labor_override_table($pdo) {
             work_date DATE NOT NULL,
             old_value DECIMAL(5,2) NULL,
             new_value DECIMAL(5,2) NOT NULL,
+            is_deleted_entry TINYINT(1) NOT NULL DEFAULT 0,
             reason VARCHAR(255) NULL,
             status VARCHAR(20) NOT NULL DEFAULT 'applied',
             requested_by INT NULL,
@@ -250,7 +343,8 @@ function cpms_ensure_labor_override_table($pdo) {
             'work_date' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN work_date DATE NOT NULL AFTER worker_name",
             'old_value' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN old_value DECIMAL(5,2) NULL AFTER work_date",
             'new_value' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN new_value DECIMAL(5,2) NOT NULL DEFAULT 0.00 AFTER old_value",
-            'reason' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN reason VARCHAR(255) NULL AFTER new_value",
+            'is_deleted_entry' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN is_deleted_entry TINYINT(1) NOT NULL DEFAULT 0 AFTER new_value",
+            'reason' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN reason VARCHAR(255) NULL AFTER is_deleted_entry",
             'status' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'applied' AFTER reason",
             'requested_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by INT NULL AFTER status",
             'requested_by_email' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by_email VARCHAR(120) NULL AFTER requested_by",

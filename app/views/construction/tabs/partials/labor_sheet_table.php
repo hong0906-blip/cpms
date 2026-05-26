@@ -143,7 +143,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                 }
                 $totalPay = $totalGongsu * $wageRate;
                 ?>
-                <tr class="<?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>">
+                <tr class="cpms-timesheet-row <?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>" data-wage-rate="<?php echo h(number_format($wageRate, 2, '.', '')); ?>">
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h($workerName); ?></td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['resident_no']) ? $worker['resident_no'] : ''); ?></td>
@@ -161,14 +161,14 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                                     data-month="<?php echo h($selectedMonth); ?>"
                                     data-worker-name="<?php echo h($workerName); ?>"
                                     data-date="<?php echo h($dateKey); ?>"
-                                    data-worker-key="<?php echo h($workerKey); ?>"                                    
+                                    data-worker-key="<?php echo h($workerKey); ?>"
                                     data-old-value="<?php echo h($gongsuDisplay); ?>"><?php echo h($gongsuDisplay); ?></button>
                         </td>
                     <?php endfor; ?>
-                    <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h($outputDays > 0 ? (string)$outputDays : '0'); ?></td>
-                    <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h(cpms_format_gongsu_value($totalGongsu)); ?></td>                    
+                    <td class="cpms-output-days border border-gray-200 px-2 py-2 text-center"><?php echo h($outputDays > 0 ? (string)$outputDays : '0'); ?></td>
+                    <td class="cpms-total-gongsu border border-gray-200 px-2 py-2 text-right"><?php echo h(cpms_format_gongsu_value($totalGongsu)); ?></td>
                     <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h($wageRateRaw !== '' ? $wageRateRaw : '0'); ?></td>
-                    <td class="border border-gray-200 px-2 py-2 text-right"><?php echo h($totalPay > 0 ? cpms_format_money_value($totalPay) : '0'); ?></td>
+                    <td class="cpms-total-pay border border-gray-200 px-2 py-2 text-right"><?php echo h($totalPay > 0 ? cpms_format_money_value($totalPay) : '0'); ?></td>
                     <?php if ($showBankColumns): ?>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['account_holder']) ? $worker['account_holder'] : ''); ?></td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['bank_name']) ? $worker['bank_name'] : ''); ?></td>

@@ -238,6 +238,7 @@ try {
     $oldValueRaw = isset($_POST['old_value']) ? trim((string)$_POST['old_value']) : '';
     $newValueRaw = isset($_POST['new_value']) ? trim((string)$_POST['new_value']) : '';
     $reason = isset($_POST['reason']) ? trim((string)$_POST['reason']) : '';
+    $deleteMode = (isset($_POST['delete_mode']) && (int)$_POST['delete_mode'] === 1);
 
     if ($projectId <= 0) cpms_gongsu_json_exit(false, 'project_id 값이 누락되었거나 올바르지 않습니다.', array(), 200);
     if (!preg_match('/^\d{4}\-\d{2}$/', $month)) cpms_gongsu_json_exit(false, 'month 형식이 올바르지 않습니다. (YYYY-MM)', array(), 200);
@@ -252,9 +253,13 @@ try {
     if ($newValue > 999.99) cpms_gongsu_json_exit(false, 'new_value는 DECIMAL(5,2) 범위를 초과했습니다.', array(), 200);
 
     $newValue = (float)number_format($newValue, 2, '.', '');
-    if ($newValue >= 1.2 && $reason === '') cpms_gongsu_json_exit(false, '1.2 이상 공수 수정은 승인 요청사유가 필요합니다.', array(), 200);
     $oldValue = null;
     if ($oldValueRaw !== '' && is_numeric($oldValueRaw)) $oldValue = (float)number_format((float)$oldValueRaw, 2, '.', '');
+    if ($deleteMode) {
+        $newValue = 0.0;
+        $reason = '';
+    }
+    if (!$deleteMode && $newValue >= 1.2 && $reason === '') cpms_gongsu_json_exit(false, '1.2 이상 공수 수정은 승인 요청사유가 필요합니다.', array(), 200);
 
     $pdo = Db::pdo();
     if (!$pdo) cpms_gongsu_json_exit(false, 'DB 연결을 확인할 수 없습니다.', array(), 200);
@@ -288,7 +293,8 @@ try {
     $approvalStage = 'COMPLETED';
     $currentApprover = null;
     $directorApprover = null;
-    if ($newValue >= 1.2) {
+    $isDeletedEntry = $deleteMode ? 1 : 0;
+    if (!$deleteMode && $newValue >= 1.2) {
         $status = 'pending';
         $approvalStage = 'DIRECTOR_PENDING';
         $directorApprover = cpms_labor_find_director_approver($pdo);
@@ -327,14 +333,15 @@ try {
     $directorEmail = ($directorApprover && isset($directorApprover['email'])) ? (string)$directorApprover['email'] : null;
     
     $sql = "INSERT INTO cpms_labor_gongsu_overrides
-      (project_id, month, worker_key, worker_name, work_date, old_value, new_value, reason, status, requested_by, requested_by_email, requested_by_name, approval_stage, approval_required_level, current_approver_employee_id, current_approver_name, current_approver_email, first_approver_employee_id, first_approver_name, first_approver_email, approved_by, approved_at, first_approved_at, second_approved_at, final_approved_at, rejected_by, rejected_by_name, rejected_by_email, rejected_at, reject_reason, created_at, updated_at)
+      (project_id, month, worker_key, worker_name, work_date, old_value, new_value, is_deleted_entry, reason, status, requested_by, requested_by_email, requested_by_name, approval_stage, approval_required_level, current_approver_employee_id, current_approver_name, current_approver_email, first_approver_employee_id, first_approver_name, first_approver_email, approved_by, approved_at, first_approved_at, second_approved_at, final_approved_at, rejected_by, rejected_by_name, rejected_by_email, rejected_at, reject_reason, created_at, updated_at)
       VALUES
-      (:project_id, :month, :worker_key, :worker_name, :work_date, :old_value, :new_value, :reason, :status, :requested_by, :requested_by_email, :requested_by_name, :approval_stage, :approval_required_level, :current_approver_employee_id, :current_approver_name, :current_approver_email, :first_approver_employee_id, :first_approver_name, :first_approver_email, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :created_at, :updated_at)
+      (:project_id, :month, :worker_key, :worker_name, :work_date, :old_value, :new_value, :is_deleted_entry, :reason, :status, :requested_by, :requested_by_email, :requested_by_name, :approval_stage, :approval_required_level, :current_approver_employee_id, :current_approver_name, :current_approver_email, :first_approver_employee_id, :first_approver_name, :first_approver_email, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :created_at, :updated_at)
       ON DUPLICATE KEY UPDATE
         month = VALUES(month),
         worker_name = VALUES(worker_name),
         old_value = VALUES(old_value),
         new_value = VALUES(new_value),
+        is_deleted_entry = VALUES(is_deleted_entry),
         reason = VALUES(reason),
         status = VALUES(status),
         requested_by = VALUES(requested_by),
@@ -372,6 +379,7 @@ try {
         $st->bindValue(':old_value', $oldValue);
     }
     $st->bindValue(':new_value', $newValue);
+    $st->bindValue(':is_deleted_entry', $isDeletedEntry, PDO::PARAM_INT);
     $st->bindValue(':reason', $reason, PDO::PARAM_STR);
     $st->bindValue(':status', $status, PDO::PARAM_STR);
     if ($requestedBy === null) {
@@ -394,9 +402,10 @@ try {
     $st->execute();
 
     if ($status === 'applied') {
-        cpms_gongsu_json_exit(true, '공수가 수정되었습니다.', array(
+        cpms_gongsu_json_exit(true, $deleteMode ? '공수가 삭제되었습니다.' : '공수가 수정되었습니다.', array(
             'mode' => 'applied',
-            'value' => number_format($newValue, 2, '.', '')
+            'value' => $deleteMode ? '' : number_format($newValue, 2, '.', ''),
+            'deleted' => $deleteMode ? 'Y' : 'N'
         ), 200);
     }
 
