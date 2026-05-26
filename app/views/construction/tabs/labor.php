@@ -797,6 +797,31 @@ foreach ($timesheetWorkers as $worker) {
         }, true);
     }
 
+    var slots = document.querySelectorAll('.cpms-gongsu-cell-slot');
+    for (var s = 0; s < slots.length; s++) {
+        slots[s].addEventListener('click', function(event){
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            var cell = this.querySelector('.cpms-gongsu-cell');
+            if (!cell) return;
+            var oldValueRaw = (cell.getAttribute('data-old-value') || '').replace(/\s+/g, '');
+            var oldValue = parseCellValue(cell);
+            var ctx = {
+                projectId:cell.getAttribute('data-project-id'),
+                month:cell.getAttribute('data-month'),
+                workerName:cell.getAttribute('data-worker-name'),
+                workerKey:(cell.getAttribute('data-worker-key') || '').trim(),
+                date:cell.getAttribute('data-date'),
+                oldValue:oldValue
+            };
+            if (oldValueRaw === '') {
+                openAddConfirmModal(cell, ctx);
+                return;
+            }
+            openRequestModal(cell, ctx);
+        }, true);
+    }
+
     var cells = document.querySelectorAll('.cpms-gongsu-cell');
     for (var c = 0; c < cells.length; c++) {
         cells[c].addEventListener('click', function(event){

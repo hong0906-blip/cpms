@@ -154,9 +154,9 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                         $gongsuValue = isset($dailyMap[$dateKey]) ? $dailyMap[$dateKey] : null;
                         $gongsuDisplay = cpms_format_gongsu_value($gongsuValue);
                         ?>
-                        <td class="border border-gray-200 px-1 py-1 text-center">
+                        <td class="cpms-gongsu-cell-slot border border-gray-200 px-0 py-0 text-center">
                             <button type="button"
-                                    class="cpms-gongsu-cell inline-flex min-w-[22px] justify-center rounded px-1 hover:bg-yellow-50"
+                                    class="cpms-gongsu-cell flex w-full min-h-[28px] items-center justify-center rounded px-1 hover:bg-yellow-50"
                                     data-project-id="<?php echo (int)(isset($pid) ? $pid : (isset($projectId) ? $projectId : 0)); ?>"
                                     data-month="<?php echo h($selectedMonth); ?>"
                                     data-worker-name="<?php echo h($workerName); ?>"
