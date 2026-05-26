@@ -164,6 +164,7 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
             $todayRecordId = ($row_btn && isset($row_btn['id'])) ? (int)$row_btn['id'] : 0;
             $todayCheckIn = ($row_btn && isset($row_btn['check_in']) && $row_btn['check_in']) ? (string)$row_btn['check_in'] : '';
             $todayCheckOut = ($row_btn && isset($row_btn['check_out']) && $row_btn['check_out']) ? (string)$row_btn['check_out'] : '';
+            $attendanceGeofence = attendance_geofence_settings($pdo);
             $canCheckIn = false;
             $canCheckOut = false;
             $showDone = false;
@@ -193,6 +194,11 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
                 <?php endif; ?>
             <?php endif; ?>
             <button type='button' data-attendance-request-open class='px-5 py-3 rounded-2xl bg-blue-900/80 text-white font-extrabold text-base border border-white/40'>출퇴근 요청</button>
+            <?php if (!empty($attendanceGeofence['enabled'])): ?>
+                <div class='basis-full text-sm text-blue-100'>
+                    출퇴근은 <?php echo h(trim((string)$attendanceGeofence['name']) !== '' ? $attendanceGeofence['name'] : '관리팀 지정 위치'); ?> 반경 <?php echo number_format((float)$attendanceGeofence['radius_m']); ?>m 안에서만 가능합니다.
+                </div>
+            <?php endif; ?>
             <?php if ($debugAttendance): ?>
                 <div class='basis-full mt-1 p-3 rounded-xl bg-black/60 text-white text-xs leading-6'>
                     employee_id: <?php echo h((string)$eid_btn); ?><br>
@@ -212,6 +218,68 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 
 <?php require_once __DIR__.'/../attendance/common.php'; $eid_att=attendance_employee_id($pdo); $today_att=attendance_today(); list($ws_att,$we_att)=attendance_week_range($today_att); $todayRow=array(); $todayInState='미처리'; $todayOutState='미처리'; $myReqs=array(); $pendingCnt=0; $weekWork=0; $todayMismatch=false; if($pdo&&$eid_att>0){ try{$stTodayRaw=$pdo->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d LIMIT 1");$stTodayRaw->execute(array(':e'=>$eid_att,':d'=>$today_att));$todayRaw=$stTodayRaw->fetch(PDO::FETCH_ASSOC);$todayMismatch=($todayRaw&&!attendance_record_datetime_matches_work_date($todayRaw));$todayRow=attendance_today_record($pdo,$eid_att); $st2=$pdo->prepare("SELECT * FROM cpms_attendance_requests WHERE employee_id=:e ORDER BY id DESC LIMIT 20");$st2->execute(array(':e'=>$eid_att));$myReqs=$st2->fetchAll(); $st3=$pdo->prepare("SELECT COALESCE(SUM(work_minutes),0) FROM cpms_attendance_records WHERE employee_id=:e AND work_date BETWEEN :s AND :w");$st3->execute(array(':e'=>$eid_att,':s'=>$ws_att,':w'=>$we_att));$weekWork=(int)$st3->fetchColumn(); $st4=$pdo->prepare("SELECT COUNT(*) FROM cpms_attendance_requests WHERE employee_id=:e AND status='pending'");$st4->execute(array(':e'=>$eid_att));$pendingCnt=(int)$st4->fetchColumn(); if($todayRow){$todayInState=(isset($todayRow['check_in'])&&$todayRow['check_in'])?'처리':'미처리';$todayOutState=(isset($todayRow['check_out'])&&$todayRow['check_out'])?'처리':'미처리';} }catch(Exception $e){} }
 ?>
+<script>
+(function(){
+    try{
+        var forms = document.querySelectorAll("form[action='?r=attendance/check_in'], form[action='?r=attendance/check_out']");
+        if(!forms || !forms.length) return;
+        var geofenceEnabled = <?php echo !empty($attendanceGeofence['enabled']) ? 'true' : 'false'; ?>;
+        function ensureHidden(form, name){
+            var input = form.querySelector("input[name='" + name + "']");
+            if(!input){
+                input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = name;
+                form.appendChild(input);
+            }
+            return input;
+        }
+        function restoreButton(button, text){
+            if(!button) return;
+            button.disabled = false;
+            button.textContent = text;
+        }
+        function handleSubmit(e){
+            var form = e.currentTarget;
+            if(!form || !geofenceEnabled) return;
+            if(form.getAttribute('data-geo-ready') === '1') return;
+            e.preventDefault();
+            if(!navigator.geolocation){
+                alert('이 브라우저에서는 위치 확인을 지원하지 않습니다.');
+                return;
+            }
+            var button = form.querySelector('button[type=\"submit\"], button:not([type])');
+            var originalText = button ? button.textContent : '';
+            if(button){
+                button.disabled = true;
+                button.textContent = '위치 확인 중...';
+            }
+            navigator.geolocation.getCurrentPosition(function(pos){
+                ensureHidden(form, 'geo_lat').value = pos.coords.latitude;
+                ensureHidden(form, 'geo_lng').value = pos.coords.longitude;
+                ensureHidden(form, 'geo_accuracy').value = pos.coords.accuracy;
+                form.setAttribute('data-geo-ready', '1');
+                form.submit();
+            }, function(err){
+                restoreButton(button, originalText);
+                if(err && err.code === 1){
+                    alert('위치 권한을 허용해야 출퇴근을 등록할 수 있습니다.');
+                    return;
+                }
+                alert('현재 위치를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.');
+            }, {
+                enableHighAccuracy: true,
+                timeout: 12000,
+                maximumAge: 0
+            });
+        }
+        for(var i=0;i<forms.length;i++){
+            forms[i].addEventListener('submit', handleSubmit);
+        }
+    }catch(e){}
+})();
+</script>
+
 <?php cpms_render_employee_task_dashboard($pdo); ?>
 
 <div class='bg-white/80 rounded-3xl p-6 border mb-6'><!-- 직원 대시보드 UI 정리 + 공제시간 표시 제거 -->

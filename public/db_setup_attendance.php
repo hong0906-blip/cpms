@@ -100,6 +100,11 @@ function seed_settings($pdo, &$logs)
         'half_day_amount' => '0.5',
         'leave_rule_after_one_year' => 'half_year',
         'week_start' => 'monday',
+        'attendance_geofence_enabled' => '0',
+        'attendance_geofence_name' => '',
+        'attendance_geofence_lat' => '',
+        'attendance_geofence_lng' => '',
+        'attendance_geofence_radius_m' => '50',
     );
     $now = date('Y-m-d H:i:s');
     $st = $pdo->prepare('REPLACE INTO cpms_attendance_settings(setting_key, setting_value, updated_at) VALUES(:k, :v, :u)');
