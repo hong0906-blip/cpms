@@ -214,6 +214,36 @@ function cpms_render_employee_task_dashboard($pdo)
             saveState(collapsed);
         });
     })();
+    (function(){
+        var toggles = document.querySelectorAll('[data-cpms-employee-toggle]');
+        var closeButtons = document.querySelectorAll('[data-cpms-employee-close]');
+        function closeAll(exceptId) {
+            var panels = document.querySelectorAll('[data-cpms-employee-panel]');
+            for (var i = 0; i < panels.length; i++) {
+                if (exceptId && panels[i].id === 'panel-' + exceptId) continue;
+                panels[i].classList.add('hidden');
+            }
+        }
+        for (var i = 0; i < toggles.length; i++) {
+            toggles[i].addEventListener('click', function(){
+                var key = this.getAttribute('data-cpms-employee-toggle');
+                var panel = document.getElementById('panel-' + key);
+                if (!panel) return;
+                var willOpen = panel.classList.contains('hidden');
+                closeAll(willOpen ? key : null);
+                if (willOpen) panel.classList.remove('hidden');
+                else panel.classList.add('hidden');
+            });
+        }
+        for (var j = 0; j < closeButtons.length; j++) {
+            closeButtons[j].addEventListener('click', function(e){
+                e.preventDefault();
+                var key = this.getAttribute('data-cpms-employee-close');
+                var panel = document.getElementById('panel-' + key);
+                if (panel) panel.classList.add('hidden');
+            });
+        }
+    })();
     </script>
 
     <div id="modal-taskCreate" class="fixed inset-0 z-50 hidden">
@@ -502,7 +532,6 @@ function cpms_render_executive_task_dashboard($pdo)
         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div>
                 <h2 class="text-2xl font-extrabold text-gray-900">부서별 업무 현황</h2>
-                <div class="text-sm text-gray-600 mt-1">업무가 몰린 곳과 마감 임박 업무를 함께 보며 지원이 필요한 지점을 빠르게 확인할 수 있습니다.</div>
             </div>
             <div class="flex flex-wrap gap-2">
                 <button type="button" id="cpmsExecutiveTasksToggle" class="px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-700 font-bold">숨기기 ▲</button>
@@ -526,11 +555,12 @@ function cpms_render_executive_task_dashboard($pdo)
                 <?php foreach ($departmentOptions as $departmentName): ?>
                     <?php
                     $isSelected = ($selectedDepartment === $departmentName);
+                    $departmentLabel = (($departmentName === '기타') ? '임원' : $departmentName);
                     $url = '?r=대시보드&dv=executive';
                     if ($departmentName !== '전체') $url .= '&task_department=' . urlencode($departmentName);
                     ?>
                     <a href="<?php echo h($url); ?>" class="px-4 py-2 rounded-2xl font-bold <?php echo $isSelected ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-700'; ?>">
-                        <?php echo h($departmentName); ?>
+                        <?php echo h($departmentLabel); ?>
                     </a>
                 <?php endforeach; ?>
             </div>
@@ -538,18 +568,21 @@ function cpms_render_executive_task_dashboard($pdo)
 
         <div class="mt-6">
             <h3 class="text-xl font-extrabold text-gray-900 mb-4">부서별 현황</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div class="space-y-3">
                 <?php foreach ($summaryData['departments'] as $departmentName => $departmentMetrics): ?>
                     <?php if ($selectedDepartment !== '전체' && $departmentName !== $selectedDepartment) continue; ?>
-                    <div class="p-5 rounded-3xl border border-gray-200 bg-white shadow-sm">
-                        <div class="text-xl font-extrabold text-gray-900"><?php echo h($departmentName); ?></div>
-                        <div class="grid grid-cols-2 gap-3 mt-4 text-sm">
-                            <div class="p-3 rounded-2xl bg-slate-50">오늘 할일 <b class="block mt-1 text-lg"><?php echo (int)$departmentMetrics['today']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-emerald-50">완료 <b class="block mt-1 text-lg text-emerald-700"><?php echo (int)$departmentMetrics['done']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-blue-50">진행중 <b class="block mt-1 text-lg text-blue-700"><?php echo (int)$departmentMetrics['progress']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-red-50">지연 <b class="block mt-1 text-lg text-red-700"><?php echo (int)$departmentMetrics['delayed']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-rose-50">긴급 <b class="block mt-1 text-lg text-rose-700"><?php echo (int)$departmentMetrics['urgent']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-amber-50">마감임박 <b class="block mt-1 text-lg text-amber-700"><?php echo (int)$departmentMetrics['due_soon']; ?>건</b></div>
+                    <?php $departmentLabel = ($departmentName === '기타') ? '임원' : $departmentName; ?>
+                    <div class="px-4 py-3 rounded-2xl border border-gray-200 bg-white shadow-sm">
+                        <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+                            <div class="text-lg font-extrabold text-gray-900"><?php echo h($departmentLabel); ?></div>
+                            <div class="flex flex-wrap gap-2 text-sm">
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 font-bold">오늘 할일 <b class="text-base"><?php echo (int)$departmentMetrics['today']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 font-bold">완료 <b class="text-base"><?php echo (int)$departmentMetrics['done']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 font-bold">진행중 <b class="text-base"><?php echo (int)$departmentMetrics['progress']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 text-red-700 font-bold">지연 <b class="text-base"><?php echo (int)$departmentMetrics['delayed']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold">긴급 <b class="text-base"><?php echo (int)$departmentMetrics['urgent']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 font-bold">마감 임박 <b class="text-base"><?php echo (int)$departmentMetrics['due_soon']; ?>건</b></span>
+                            </div>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -558,86 +591,73 @@ function cpms_render_executive_task_dashboard($pdo)
 
         <div class="mt-8">
             <h3 class="text-xl font-extrabold text-gray-900 mb-4">직원별 현황</h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div class="space-y-3" data-cpms-executive-employee-list>
                 <?php foreach ($summaryData['employees'] as $employeeRow): ?>
                     <?php
                     $employee = isset($employeeRow['employee']) ? $employeeRow['employee'] : array();
                     $metrics = isset($employeeRow['metrics']) ? $employeeRow['metrics'] : array();
                     $feed = isset($employeeRow['feed']) ? $employeeRow['feed'] : array();
                     $modalId = 'executiveTaskEmployee' . (int)$employee['id'];
+                    $employeeDepartmentLabel = (isset($employee['department']) && trim((string)$employee['department']) !== '') ? (($employee['department'] === '기타') ? '임원' : $employee['department']) : '-';
                     ?>
-                    <button type="button" data-modal-open="<?php echo h($modalId); ?>" class="text-left p-5 rounded-3xl border border-gray-200 bg-white shadow-sm hover:shadow-lg transition relative group">
-                        <div class="text-xl font-extrabold text-gray-900"><?php echo h(isset($employee['name']) ? $employee['name'] : '-'); ?></div>
-                        <div class="text-sm text-gray-500 mt-1"><?php echo h((isset($employee['department']) ? $employee['department'] : '-') . ' / ' . (isset($employee['position']) && trim((string)$employee['position']) !== '' ? $employee['position'] : '-')); ?></div>
-                        <div class="grid grid-cols-2 gap-3 mt-4 text-sm">
-                            <div class="p-3 rounded-2xl bg-slate-50">오늘 할일 <b class="block mt-1 text-lg"><?php echo (int)$metrics['today']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-emerald-50">완료 <b class="block mt-1 text-lg text-emerald-700"><?php echo (int)$metrics['done']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-blue-50">진행중 <b class="block mt-1 text-lg text-blue-700"><?php echo (int)$metrics['progress']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-red-50">지연 <b class="block mt-1 text-lg text-red-700"><?php echo (int)$metrics['delayed']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-rose-50">긴급 <b class="block mt-1 text-lg text-rose-700"><?php echo (int)$metrics['urgent']; ?>건</b></div>
-                            <div class="p-3 rounded-2xl bg-amber-50">마감임박 <b class="block mt-1 text-lg text-amber-700"><?php echo (int)$metrics['due_soon']; ?>건</b></div>
+                    <button type="button" data-cpms-employee-toggle="<?php echo h($modalId); ?>" class="w-full text-left px-4 py-3 rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-md hover:border-gray-300 transition">
+                        <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
+                            <div class="min-w-0">
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <div class="text-lg font-extrabold text-gray-900"><?php echo h(isset($employee['name']) ? $employee['name'] : '-'); ?></div>
+                                    <span class="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold"><?php echo h($employeeDepartmentLabel); ?></span>
+                                </div>
+                                <div class="text-sm text-gray-500 mt-1"><?php echo h((isset($employee['position']) && trim((string)$employee['position']) !== '') ? $employee['position'] : '-'); ?></div>
+                            </div>
+                            <div class="flex flex-wrap gap-2 text-sm">
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 font-bold">오늘 할일 <b class="text-base"><?php echo (int)$metrics['today']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 font-bold">완료 <b class="text-base"><?php echo (int)$metrics['done']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 font-bold">진행중 <b class="text-base"><?php echo (int)$metrics['progress']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 text-red-700 font-bold">지연 <b class="text-base"><?php echo (int)$metrics['delayed']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold">긴급 <b class="text-base"><?php echo (int)$metrics['urgent']; ?>건</b></span>
+                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 font-bold">마감 임박 <b class="text-base"><?php echo (int)$metrics['due_soon']; ?>건</b></span>
+                            </div>
                         </div>
+                    </button>
 
-                        <div class="hidden xl:block absolute left-0 right-0 top-full mt-2 p-4 rounded-2xl bg-white border border-gray-200 shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition z-30">
-                            <div class="font-extrabold text-gray-900 mb-2">업무 미리보기</div>
+                    <div id="panel-<?php echo h($modalId); ?>" class="hidden mt-2 mb-4 rounded-2xl border border-gray-200 bg-white shadow-sm" data-cpms-employee-panel>
+                        <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                            <div>
+                                <div class="text-xl font-extrabold text-gray-900"><?php echo h(isset($employee['name']) ? $employee['name'] : '-'); ?> 업무 현황</div>
+                                <div class="text-sm text-gray-500 mt-1"><?php echo h($employeeDepartmentLabel . ' / ' . ((isset($employee['position']) && trim((string)$employee['position']) !== '') ? $employee['position'] : '-')); ?></div>
+                            </div>
+                            <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50" data-cpms-employee-close="<?php echo h($modalId); ?>">닫기</button>
+                        </div>
+                        <div class="p-5">
                             <?php if (count($feed) === 0): ?>
-                                <div class="text-sm text-gray-500">표시할 업무가 없습니다.</div>
+                                <div class="p-6 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500">표시할 업무가 없습니다.</div>
                             <?php else: ?>
-                                <div class="space-y-2">
-                                    <?php $previewCount = 0; foreach ($feed as $item): $previewCount++; if ($previewCount > 5) break; ?>
-                                        <div class="text-sm text-gray-700">
-                                            <b><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></b>
-                                            <span class="text-xs text-gray-500"> / <?php echo h(isset($item['due_time']) && $item['due_time'] !== '' ? substr((string)$item['due_time'], 0, 5) : '-'); ?> / <?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?><?php echo (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1) ? ' / 긴급' : ''; ?></span>
+                                <div class="space-y-3">
+                                    <?php foreach ($feed as $item): ?>
+                                        <div class="p-4 rounded-2xl border border-gray-200 bg-slate-50">
+                                            <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                                                <div class="min-w-0">
+                                                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                                                        <span class="px-3 py-1 rounded-full border text-xs font-bold bg-slate-100 text-slate-700 border-slate-200"><?php echo h(cpms_tasks_type_label(isset($item['task_type']) ? $item['task_type'] : 'general')); ?></span>
+                                                        <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending'))); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?></span>
+                                                        <?php if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1): ?><span class="px-3 py-1 rounded-full border text-xs font-bold bg-rose-50 text-rose-700 border-rose-200">긴급</span><?php endif; ?>
+                                                    </div>
+                                                    <div class="font-extrabold text-gray-900"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>
+                                                    <div class="text-sm text-gray-600 mt-1">요청자: <?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?></div>
+                                                    <div class="text-sm text-gray-500 mt-1">마감: <?php echo h(isset($item['due_date']) && $item['due_date'] !== '' ? $item['due_date'] . (isset($item['due_time']) && $item['due_time'] !== '' ? ' ' . substr((string)$item['due_time'], 0, 5) : '') : '-'); ?></div>
+                                                </div>
+                                                <div>
+                                                    <?php if (isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
+                                                        <a href="?r=tasks/detail&id=<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold text-slate-700">상세 이동</a>
+                                                    <?php else: ?>
+                                                        <a href="<?php echo h(isset($item['action_url']) ? $item['action_url'] : '#'); ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold text-slate-700">상세 이동</a>
+                                                    <?php endif; ?>
+                                                </div>
+                                            </div>
                                         </div>
                                     <?php endforeach; ?>
                                 </div>
                             <?php endif; ?>
-                        </div>
-                    </button>
-
-                    <div id="modal-<?php echo h($modalId); ?>" class="fixed inset-0 z-50 hidden">
-                        <div class="absolute inset-0 bg-black/40" data-modal-close="<?php echo h($modalId); ?>"></div>
-                        <div class="absolute inset-0 flex items-center justify-center p-4">
-                            <div class="w-full max-w-4xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
-                                <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
-                                    <div>
-                                        <div class="text-2xl font-extrabold text-gray-900"><?php echo h(isset($employee['name']) ? $employee['name'] : '-'); ?> 업무 현황</div>
-                                        <div class="text-sm text-gray-500 mt-1"><?php echo h((isset($employee['department']) ? $employee['department'] : '-') . ' / ' . (isset($employee['position']) ? $employee['position'] : '-')); ?></div>
-                                    </div>
-                                    <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="<?php echo h($modalId); ?>">닫기</button>
-                                </div>
-                                <div class="p-6 overflow-y-auto max-h-[74vh]">
-                                    <?php if (count($feed) === 0): ?>
-                                        <div class="p-6 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500">표시할 업무가 없습니다.</div>
-                                    <?php else: ?>
-                                        <div class="space-y-3">
-                                            <?php foreach ($feed as $item): ?>
-                                                <div class="p-4 rounded-2xl border border-gray-200 bg-slate-50">
-                                                    <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                                                        <div class="min-w-0">
-                                                            <div class="flex flex-wrap items-center gap-2 mb-2">
-                                                                <span class="px-3 py-1 rounded-full border text-xs font-bold bg-slate-100 text-slate-700 border-slate-200"><?php echo h(cpms_tasks_type_label(isset($item['task_type']) ? $item['task_type'] : 'general')); ?></span>
-                                                                <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending'))); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?></span>
-                                                                <?php if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1): ?><span class="px-3 py-1 rounded-full border text-xs font-bold bg-rose-50 text-rose-700 border-rose-200">🔥 긴급</span><?php endif; ?>
-                                                            </div>
-                                                            <div class="font-extrabold text-gray-900"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>
-                                                            <div class="text-sm text-gray-600 mt-1">요청자: <?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?></div>
-                                                            <div class="text-sm text-gray-500 mt-1">마감: <?php echo h(isset($item['due_date']) && $item['due_date'] !== '' ? $item['due_date'] . (isset($item['due_time']) && $item['due_time'] !== '' ? ' ' . substr((string)$item['due_time'], 0, 5) : '') : '-'); ?></div>
-                                                        </div>
-                                                        <div>
-                                                            <?php if (isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
-                                                                <a href="?r=tasks/detail&id=<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold text-slate-700">상세 이동</a>
-                                                            <?php else: ?>
-                                                                <a href="<?php echo h(isset($item['action_url']) ? $item['action_url'] : '#'); ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold text-slate-700">상세 이동</a>
-                                                            <?php endif; ?>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            <?php endforeach; ?>
-                                        </div>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
                         </div>
                     </div>
                 <?php endforeach; ?>
@@ -670,6 +690,36 @@ function cpms_render_executive_task_dashboard($pdo)
             applyState(collapsed);
             saveState(collapsed);
         });
+    })();
+    (function(){
+        var toggles = document.querySelectorAll('[data-cpms-employee-toggle]');
+        var closeButtons = document.querySelectorAll('[data-cpms-employee-close]');
+        function closeAll(exceptId) {
+            var panels = document.querySelectorAll('[data-cpms-employee-panel]');
+            for (var i = 0; i < panels.length; i++) {
+                if (exceptId && panels[i].id === 'panel-' + exceptId) continue;
+                panels[i].classList.add('hidden');
+            }
+        }
+        for (var i = 0; i < toggles.length; i++) {
+            toggles[i].addEventListener('click', function(){
+                var key = this.getAttribute('data-cpms-employee-toggle');
+                var panel = document.getElementById('panel-' + key);
+                if (!panel) return;
+                var willOpen = panel.classList.contains('hidden');
+                closeAll(willOpen ? key : null);
+                if (willOpen) panel.classList.remove('hidden');
+                else panel.classList.add('hidden');
+            });
+        }
+        for (var j = 0; j < closeButtons.length; j++) {
+            closeButtons[j].addEventListener('click', function(e){
+                e.preventDefault();
+                var key = this.getAttribute('data-cpms-employee-close');
+                var panel = document.getElementById('panel-' + key);
+                if (panel) panel.classList.add('hidden');
+            });
+        }
     })();
     </script>
     <?php

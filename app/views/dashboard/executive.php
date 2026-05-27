@@ -224,7 +224,6 @@ if ($pdo) {
         </div>
         <div class="flex-1">
             <h2 class="text-3xl font-extrabold">임원 대시보드</h2>
-            <p class="text-indigo-100 text-lg mt-2">근태, 승인, 이슈, 안전 현황을 한 화면에서 확인합니다.</p>
         </div>
     </div>
 </div>
@@ -333,15 +332,10 @@ if ($pdo) {
     </div>
 
     <div class="bg-white/80 rounded-3xl p-6 border">
-        <h3 class="text-2xl font-extrabold mb-4">요약 현황</h3>
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div class="p-4 rounded-2xl bg-blue-50">
                 <div class="text-gray-600 font-bold">전체 프로젝트</div>
                 <div class="text-4xl font-extrabold text-blue-700 mt-2"><?php echo $projectCostCount; ?>건</div>
-            </div>
-            <div class="p-4 rounded-2xl bg-red-50">
-                <div class="text-gray-600 font-bold">52시간 초과자</div>
-                <div class="text-4xl font-extrabold text-red-700 mt-2"><?php echo count($risk52); ?>명</div>
             </div>
             <div class="p-4 rounded-2xl bg-amber-50">
                 <div class="text-gray-600 font-bold">미처리 이슈</div>
@@ -352,6 +346,35 @@ if ($pdo) {
                 <div class="text-4xl font-extrabold text-rose-700 mt-2"><?php echo count($safetyIncidents); ?>건</div>
             </div>
         </div>
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div>
+                <h3 class="text-2xl font-extrabold">52시간 초과자 명단</h3>
+                <div class="text-sm text-gray-500 mt-1">이번 주 누적 근무시간 기준</div>
+            </div>
+            <div class="px-4 py-2 rounded-2xl bg-red-50 text-red-700 font-extrabold border border-red-100">
+                <?php echo count($risk52); ?>명
+            </div>
+        </div>
+        <?php if (count($risk52) === 0): ?>
+            <div class="p-6 rounded-2xl border border-dashed border-emerald-200 bg-emerald-50 text-emerald-700 font-bold">
+                현재 52시간 초과자는 없습니다.
+            </div>
+        <?php else: ?>
+            <div class="space-y-3">
+                <?php foreach ($risk52 as $person): ?>
+                    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 p-4 rounded-2xl border border-red-100 bg-red-50/70">
+                        <div class="min-w-0">
+                            <div class="text-lg font-extrabold text-gray-900"><?php echo h($person['name']); ?></div>
+                            <div class="text-sm text-gray-600 mt-1"><?php echo h(($person['department'] ?: '-') . ' / ' . ($person['position'] ?: '-')); ?></div>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <span class="px-3 py-1 rounded-full bg-white border border-red-100 text-sm font-bold text-gray-700">주간 누적</span>
+                            <span class="text-2xl font-extrabold text-red-700"><?php echo h(attendance_hm((int)$person['m'])); ?></span>
+                        </div>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 
