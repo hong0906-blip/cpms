@@ -123,6 +123,16 @@ $columns = array(
         'file_label' => "ALTER TABLE cpms_approval_files ADD COLUMN file_label VARCHAR(100) NULL",
         'file_type' => "ALTER TABLE cpms_approval_files ADD COLUMN file_type VARCHAR(50) NULL"
     ),
+    'cpms_approval_leave_deductions' => array(
+        'leave_bucket' => "ALTER TABLE cpms_approval_leave_deductions ADD COLUMN leave_bucket VARCHAR(20) NULL",
+        'target_column' => "ALTER TABLE cpms_approval_leave_deductions ADD COLUMN target_column VARCHAR(50) NULL",
+        'deduct_amount' => "ALTER TABLE cpms_approval_leave_deductions ADD COLUMN deduct_amount DECIMAL(6,2) NOT NULL DEFAULT 0",
+        'balance_before' => "ALTER TABLE cpms_approval_leave_deductions ADD COLUMN balance_before DECIMAL(6,2) NULL",
+        'balance_after' => "ALTER TABLE cpms_approval_leave_deductions ADD COLUMN balance_after DECIMAL(6,2) NULL",
+        'deducted_at' => "ALTER TABLE cpms_approval_leave_deductions ADD COLUMN deducted_at DATETIME NULL",
+        'created_at' => "ALTER TABLE cpms_approval_leave_deductions ADD COLUMN created_at DATETIME NULL",
+        'note' => "ALTER TABLE cpms_approval_leave_deductions ADD COLUMN note TEXT NULL"
+    ),
     'employees' => array(
         'hire_date' => "ALTER TABLE employees ADD COLUMN hire_date DATE NULL",
         'resign_date' => "ALTER TABLE employees ADD COLUMN resign_date DATE NULL",
@@ -151,6 +161,8 @@ approval_setup_add_index($pdo, 'cpms_approval_references', 'idx_document_id', "A
 approval_setup_add_index($pdo, 'cpms_approval_references', 'idx_employee_id', "ALTER TABLE cpms_approval_references ADD INDEX idx_employee_id (employee_id)", $results);
 approval_setup_add_index($pdo, 'cpms_approval_references', 'idx_employee_email', "ALTER TABLE cpms_approval_references ADD INDEX idx_employee_email (employee_email)", $results);
 approval_setup_add_index($pdo, 'cpms_approval_leave_deductions', 'uniq_document_id', "ALTER TABLE cpms_approval_leave_deductions ADD UNIQUE KEY uniq_document_id (document_id)", $results);
+approval_setup_add_index($pdo, 'cpms_approval_leave_deductions', 'idx_employee_id', "ALTER TABLE cpms_approval_leave_deductions ADD INDEX idx_employee_id (employee_id)", $results);
+approval_setup_add_index($pdo, 'cpms_approval_leave_deductions', 'idx_leave_bucket', "ALTER TABLE cpms_approval_leave_deductions ADD INDEX idx_leave_bucket (leave_bucket)", $results);
 approval_setup_add_index($pdo, 'cpms_leave_accrual_logs', 'uniq_employee_type_date', "ALTER TABLE cpms_leave_accrual_logs ADD UNIQUE KEY uniq_employee_type_date (employee_id, leave_type, accrual_date)", $results);
 approval_setup_add_index($pdo, 'cpms_leave_accrual_logs', 'idx_employee_year', "ALTER TABLE cpms_leave_accrual_logs ADD INDEX idx_employee_year (employee_id, accrual_year)", $results);
 approval_setup_add_index($pdo, 'cpms_leave_adjustments', 'idx_employee_year', "ALTER TABLE cpms_leave_adjustments ADD INDEX idx_employee_year (employee_id, target_year)", $results);

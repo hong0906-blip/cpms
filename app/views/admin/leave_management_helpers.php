@@ -134,6 +134,95 @@ function cpms_leave_add_years_clamped($date, $years)
     return date('Y-m-d', mktime(0, 0, 0, $month, $day, $year));
 }}
 
+if (!function_exists('cpms_leave_normalize_half_step')) {
+function cpms_leave_normalize_half_step($value)
+{
+    if ($value === null || $value === '' || !is_numeric($value)) {
+        return 0.0;
+    }
+    $num = (float)$value;
+    return round($num * 2, 0) / 2;
+}}
+
+if (!function_exists('cpms_leave_is_half_step_value')) {
+function cpms_leave_is_half_step_value($value)
+{
+    if ($value === null || $value === '' || !is_numeric($value)) {
+        return true;
+    }
+    $num = (float)$value;
+    $normalized = cpms_leave_normalize_half_step($num);
+    return (abs($num - $normalized) < 0.00001);
+}}
+
+if (!function_exists('cpms_leave_normalize_employee_balances')) {
+function cpms_leave_normalize_employee_balances($pdo, $employeeId)
+{
+    $result = array(
+        'leave_monthly_balance' => null,
+        'leave_annual_balance' => null,
+        'leave_half_balance' => null
+    );
+    if (!$pdo || (int)$employeeId <= 0) {
+        return $result;
+    }
+    try {
+        $hasMonthly = cpms_leave_column_exists($pdo, 'employees', 'leave_monthly_balance');
+        $hasAnnual = cpms_leave_column_exists($pdo, 'employees', 'leave_annual_balance');
+        $hasHalf = cpms_leave_column_exists($pdo, 'employees', 'leave_half_balance');
+        if (!$hasMonthly && !$hasAnnual && !$hasHalf) {
+            return $result;
+        }
+
+        $selects = array('id');
+        if ($hasMonthly) {
+            $selects[count($selects)] = 'leave_monthly_balance';
+        }
+        if ($hasAnnual) {
+            $selects[count($selects)] = 'leave_annual_balance';
+        }
+        if ($hasHalf) {
+            $selects[count($selects)] = 'leave_half_balance';
+        }
+
+        $st = $pdo->prepare("SELECT " . implode(',', $selects) . " FROM employees WHERE id=:id LIMIT 1");
+        $st->execute(array(':id' => (int)$employeeId));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return $result;
+        }
+
+        $updates = array();
+        $params = array(':id' => (int)$employeeId);
+        $columns = array('leave_monthly_balance', 'leave_annual_balance', 'leave_half_balance');
+        for ($i = 0; $i < count($columns); $i++) {
+            $column = $columns[$i];
+            if (!array_key_exists($column, $row)) {
+                continue;
+            }
+            if ($row[$column] === null || $row[$column] === '') {
+                $result[$column] = null;
+                continue;
+            }
+            $normalized = cpms_leave_normalize_half_step($row[$column]);
+            $result[$column] = $normalized;
+            if (!cpms_leave_is_half_step_value($row[$column])) {
+                $updates[count($updates)] = $column . '=:' . $column;
+                $params[':' . $column] = $normalized;
+            }
+        }
+
+        if (count($updates) > 0) {
+            $sql = "UPDATE employees SET " . implode(',', $updates) . " WHERE id=:id";
+            $up = $pdo->prepare($sql);
+            $up->execute($params);
+        }
+    } catch (Exception $e) {
+        error_log('[cpms_leave_normalize_employee_balances] ' . $e->getMessage());
+    }
+    return $result;
+}}
+
 if (!function_exists('cpms_leave_months_of_service')) {
 function cpms_leave_months_of_service($hireDate, $baseDate)
 {
@@ -194,6 +283,59 @@ function cpms_leave_monthly_accrual_dates($hireDate, $baseDate)
         }
     }
     return $dates;
+}}
+
+if (!function_exists('cpms_leave_is_under_one_year')) {
+function cpms_leave_is_under_one_year($hireDate, $baseDate)
+{
+    $hireDate = cpms_leave_parse_date($hireDate);
+    $baseDate = cpms_leave_parse_date($baseDate);
+    if ($hireDate === '' || $baseDate === '') {
+        return false;
+    }
+    if (strcmp($hireDate, $baseDate) > 0) {
+        return true;
+    }
+    $oneYearDate = cpms_leave_add_years_clamped($hireDate, 1);
+    if ($oneYearDate === '') {
+        return false;
+    }
+    return (strcmp($baseDate, $oneYearDate) < 0);
+}}
+
+if (!function_exists('cpms_leave_is_annual_employee')) {
+function cpms_leave_is_annual_employee($hireDate, $baseDate)
+{
+    $hireDate = cpms_leave_parse_date($hireDate);
+    $baseDate = cpms_leave_parse_date($baseDate);
+    if ($hireDate === '' || $baseDate === '') {
+        return false;
+    }
+    if (strcmp($hireDate, $baseDate) > 0) {
+        return false;
+    }
+    return !cpms_leave_is_under_one_year($hireDate, $baseDate);
+}}
+
+if (!function_exists('cpms_leave_determine_bucket_by_dates')) {
+function cpms_leave_determine_bucket_by_dates($hireDate, $baseDate)
+{
+    return cpms_leave_is_under_one_year($hireDate, $baseDate) ? 'MONTHLY' : 'ANNUAL';
+}}
+
+if (!function_exists('cpms_leave_monthly_accrual_count_for_year')) {
+function cpms_leave_monthly_accrual_count_for_year($hireDate, $targetYear, $baseDate)
+{
+    $count = 0.0;
+    $targetYear = (int)$targetYear;
+    $dates = cpms_leave_monthly_accrual_dates($hireDate, $baseDate);
+    for ($i = 0; $i < count($dates); $i++) {
+        $accrualDate = $dates[$i];
+        if ((int)date('Y', strtotime($accrualDate)) === $targetYear) {
+            $count += 1.0;
+        }
+    }
+    return $count;
 }}
 
 if (!function_exists('cpms_leave_annual_accruals_until')) {
@@ -320,10 +462,19 @@ function cpms_leave_apply_employee_row_accruals_until($pdo, $employee, $baseDate
         return $stats;
     }
 
+    $normalizedBalances = cpms_leave_normalize_employee_balances($pdo, $employeeId);
+    if ($normalizedBalances['leave_monthly_balance'] !== null) {
+        $employee['leave_monthly_balance'] = $normalizedBalances['leave_monthly_balance'];
+    }
+    if ($normalizedBalances['leave_annual_balance'] !== null) {
+        $employee['leave_annual_balance'] = $normalizedBalances['leave_annual_balance'];
+    }
+
     $monthlyHadLogs = (cpms_leave_count_accrual_logs($pdo, $employeeId, 'MONTHLY') > 0);
     $annualHadLogs = (cpms_leave_count_accrual_logs($pdo, $employeeId, 'ANNUAL') > 0);
     $monthlyManualPresent = (isset($employee['leave_monthly_balance']) && $employee['leave_monthly_balance'] !== null && $employee['leave_monthly_balance'] !== '');
     $annualManualPresent = (isset($employee['leave_annual_balance']) && $employee['leave_annual_balance'] !== null && $employee['leave_annual_balance'] !== '');
+    $currentMonthlyBalance = $monthlyManualPresent ? cpms_leave_normalize_half_step($employee['leave_monthly_balance']) : 0.0;
 
     $monthlyDates = cpms_leave_monthly_accrual_dates($hireDate, $baseDate);
     for ($i = 0; $i < count($monthlyDates); $i++) {
@@ -339,8 +490,9 @@ function cpms_leave_apply_employee_row_accruals_until($pdo, $employee, $baseDate
         $inserted = cpms_leave_insert_accrual_log($pdo, $employeeId, 'MONTHLY', $accrualDate, $amount, $reason);
         if ($inserted && $applyBalance) {
             try {
-                $st = $pdo->prepare("UPDATE employees SET leave_monthly_balance=COALESCE(leave_monthly_balance,0)+1 WHERE id=:id");
-                $st->execute(array(':id' => $employeeId));
+                $currentMonthlyBalance = cpms_leave_normalize_half_step($currentMonthlyBalance + 1.0);
+                $st = $pdo->prepare("UPDATE employees SET leave_monthly_balance=:balance WHERE id=:id");
+                $st->execute(array(':balance' => $currentMonthlyBalance, ':id' => $employeeId));
                 $stats['monthly']++;
             } catch (Exception $e) {
                 error_log('[cpms_leave_apply_monthly] ' . $e->getMessage());
@@ -363,6 +515,7 @@ function cpms_leave_apply_employee_row_accruals_until($pdo, $employee, $baseDate
         $inserted = cpms_leave_insert_accrual_log($pdo, $employeeId, 'ANNUAL', $accrualDate, $amount, $reason);
         if ($inserted && $applyBalance) {
             try {
+                $amount = cpms_leave_normalize_half_step($amount);
                 $st = $pdo->prepare("UPDATE employees SET leave_annual_balance=:amount WHERE id=:id");
                 $st->execute(array(':amount' => $amount, ':id' => $employeeId));
                 $stats['annual']++;
@@ -438,11 +591,11 @@ function cpms_leave_format_decimal($value)
     if ($value === null || $value === '') {
         return '';
     }
-    $num = (float)$value;
+    $num = cpms_leave_normalize_half_step($value);
     if (abs($num - (int)$num) < 0.00001) {
         return (string)(int)$num;
     }
-    return number_format($num, 2, '.', '');
+    return number_format($num, 1, '.', '');
 }}
 
 if (!function_exists('cpms_leave_normalize_department')) {

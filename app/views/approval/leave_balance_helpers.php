@@ -17,7 +17,7 @@ if (!function_exists('approval_determine_leave_bucket_by_hire_date')) {
     function approval_determine_leave_bucket_by_hire_date($hireDate, $baseDate)
     {
         if (!$hireDate || !$baseDate) return '';
-        return attendance_is_under_one_year($hireDate, $baseDate) ? 'MONTHLY' : 'ANNUAL';
+        return cpms_leave_determine_bucket_by_dates($hireDate, $baseDate);
     }
 }
 if (!function_exists('approval_get_google_holiday_cache_between')) {
@@ -78,6 +78,7 @@ if (!function_exists('approval_deduct_leave_balance_on_final_approval')) {
         if ($baseDate === '') $baseDate = approval_parse_date($doc['created_at']);
         if ($baseDate === '') $baseDate = date('Y-m-d');
         cpms_leave_apply_employee_accruals_until($pdo, (int)$doc['created_by_id'], date('Y-m-d'));
+        cpms_leave_normalize_employee_balances($pdo, (int)$doc['created_by_id']);
         $empSt = $pdo->prepare("SELECT id,hire_date,leave_monthly_balance,leave_annual_balance FROM employees WHERE id=:id LIMIT 1");
         $empSt->execute(array(':id'=>(int)$doc['created_by_id']));
         $emp = $empSt->fetch();
@@ -94,9 +95,10 @@ if (!function_exists('approval_deduct_leave_balance_on_final_approval')) {
             $ret['message'] = 'not_target';
             return $ret;
         }
+        $deduct = cpms_leave_normalize_half_step($deduct);
         $targetColumn = ($bucket === 'MONTHLY') ? 'leave_monthly_balance' : 'leave_annual_balance';
-        $before = isset($emp[$targetColumn]) && $emp[$targetColumn] !== null ? (float)$emp[$targetColumn] : 0.0;
-        $after = $before - $deduct;
+        $before = isset($emp[$targetColumn]) && $emp[$targetColumn] !== null ? cpms_leave_normalize_half_step($emp[$targetColumn]) : 0.0;
+        $after = cpms_leave_normalize_half_step($before - $deduct);
         $up = $pdo->prepare("UPDATE employees SET {$targetColumn}=:v WHERE id=:id");
         $up->execute(array(':v'=>$after, ':id'=>(int)$emp['id']));
         $note = ($bucket === 'MONTHLY' ? '1년 미만 직원이므로 월차에서 차감되었습니다.' : '1년 이상 직원이므로 연차에서 차감되었습니다.');

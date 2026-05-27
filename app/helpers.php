@@ -194,6 +194,57 @@ function cpms_set_labor_override($projectId, $month, $workerName, $date, $value,
     return cpms_save_labor_overrides((int)$projectId, (string)$month, $rows);
 }
 
+function cpms_normalize_management_department($dept) {
+    $dept = trim((string)$dept);
+    if ($dept === '관리부' || $dept === '관리팀') {
+        return '관리';
+    }
+    return $dept;
+}
+
+function cpms_is_management_department_value($dept) {
+    return cpms_normalize_management_department($dept) === '관리';
+}
+
+function cpms_is_management_department_user($pdo, $user) {
+    if (is_array($user) && isset($user['department']) && cpms_is_management_department_value($user['department'])) {
+        return true;
+    }
+
+    if (!$pdo) return false;
+
+    $employeeId = 0;
+    if (is_array($user) && isset($user['id'])) {
+        $employeeId = (int)$user['id'];
+    }
+
+    try {
+        if ($employeeId > 0) {
+            $st = $pdo->prepare("SELECT department FROM employees WHERE id = :id LIMIT 1");
+            $st->bindValue(':id', $employeeId, PDO::PARAM_INT);
+            $st->execute();
+            $dept = $st->fetchColumn();
+            if (cpms_is_management_department_value($dept)) return true;
+        }
+
+        $email = '';
+        if (is_array($user) && isset($user['email'])) {
+            $email = trim((string)$user['email']);
+        }
+        if ($email !== '') {
+            $st = $pdo->prepare("SELECT department FROM employees WHERE LOWER(email) = LOWER(:email) LIMIT 1");
+            $st->bindValue(':email', $email);
+            $st->execute();
+            $dept = $st->fetchColumn();
+            if (cpms_is_management_department_value($dept)) return true;
+        }
+    } catch (Exception $e) {
+        return false;
+    }
+
+    return false;
+}
+
 function cpms_is_labor_override_deleted_entry($entry) {
     if (!is_array($entry)) return false;
     if (isset($entry['is_deleted'])) {

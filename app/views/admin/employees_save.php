@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/leave_management_helpers.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -200,6 +201,16 @@ $googleChatSpaceName = isset($_POST['google_chat_dm_space_name']) ? trim((string
 
 if ($googleChatEnabled === 1 && $googleChatUserName === '' && $email !== '') {
     $googleChatUserName = 'users/' . $email;
+}
+
+if ($leaveMonthly !== '' && is_numeric($leaveMonthly)) {
+    $leaveMonthly = (string)cpms_leave_normalize_half_step($leaveMonthly);
+}
+if ($leaveAnnual !== '' && is_numeric($leaveAnnual)) {
+    $leaveAnnual = (string)cpms_leave_normalize_half_step($leaveAnnual);
+}
+if ($leaveHalf !== '' && is_numeric($leaveHalf)) {
+    $leaveHalf = (string)cpms_leave_normalize_half_step($leaveHalf);
 }
 
 if ($email === '' || $name === '') { flash_set('error', '이메일/이름은 필수입니다.'); header('Location: ?r=관리&tab=employees'); exit; }

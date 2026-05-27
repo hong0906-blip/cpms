@@ -1,437 +1,243 @@
 <?php
-/* ==========================================
-   CPMS - 노무비 계산 (labor_calc.php)
-   ========================================== */
+/**
+ * C:\www\cpms\app\views\admin\labor_calc.php
+ * - 관리 > 노무비 계산
+ * - PHP 5.6 호환
+ */
 
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+require_once __DIR__ . '/labor_consultant_helpers.php';
+
+$pdo = \App\Core\Db::pdo();
+$user = \App\Core\Auth::user();
+$canAccess = cpms_labor_consultant_can_access($pdo, $user);
+$section = isset($_GET['section']) ? trim((string)$_GET['section']) : 'consultant';
+if ($section !== 'consultant' && $section !== 'tax') {
+    $section = 'consultant';
+}
+$projectId = isset($_GET['project_id']) ? $_GET['project_id'] : 'all';
+$ym = isset($_GET['ym']) ? $_GET['ym'] : cpms_labor_consultant_current_ym();
+$projectId = cpms_labor_consultant_normalize_project_filter($projectId);
+$ym = cpms_labor_consultant_normalize_ym($ym);
+$flash = function_exists('flash_get') ? flash_get() : null;
+
+if (!$canAccess) {
+    echo '<div class="rounded-2xl border border-red-200 bg-red-50 p-4 font-bold text-red-700">접근 권한이 없습니다. 관리부서 전용 화면입니다.</div>';
+    return;
 }
 
-/* ---------------------------
-   공통 유틸 (중복선언 방지)
---------------------------- */
-if (!function_exists('h')) {
-    function h($s) { return htmlspecialchars($s, ENT_QUOTES, 'UTF-8'); }
-}
-
-if (!function_exists('csrf_token')) {
-    function csrf_token() {
-        if (empty($_SESSION['csrf_token'])) {
-            if (function_exists('openssl_random_pseudo_bytes')) {
-                $_SESSION['csrf_token'] = bin2hex(openssl_random_pseudo_bytes(16));
-            } else {
-                $_SESSION['csrf_token'] = md5(uniqid('', true));
-            }
-        }
-        return $_SESSION['csrf_token'];
+$setupRows = cpms_labor_consultant_setup_status($pdo, false);
+$activeTemplate = cpms_labor_consultant_get_active_template($pdo);
+if ($activeTemplate) {
+    $activeTemplatePath = cpms_labor_consultant_resolve_stored_path(isset($activeTemplate['stored_path']) ? $activeTemplate['stored_path'] : '');
+    if ($activeTemplatePath === '' || !is_file($activeTemplatePath)) {
+        $activeTemplate = null;
     }
 }
-
-if (!function_exists('csrf_check')) {
-    function csrf_check($token) {
-        if (!isset($_SESSION['csrf_token'])) return false;
-        if (function_exists('hash_equals')) {
-            return hash_equals($_SESSION['csrf_token'], $token);
-        }
-        return $_SESSION['csrf_token'] === $token;
-    }
-}
-
-if (!function_exists('flash_set')) {
-    function flash_set($type, $msg) {
-        $_SESSION['flash'] = array('type' => $type, 'msg' => $msg);
-    }
-}
-
-if (!function_exists('flash_get')) {
-    function flash_get() {
-        if (!empty($_SESSION['flash'])) {
-            $f = $_SESSION['flash'];
-            unset($_SESSION['flash']);
-            return $f;
-        }
-        return null;
-    }
-}
-
-/* ---------------------------
-   DB 연결
-   ✅ 수정한 부분(최소 수정)
-   - 기존: class_exists('Db') / Db::pdo()
-   - 변경: \App\Core\Db::pdo() 사용 (네 프로젝트 구조에 맞춤)
---------------------------- */
-$dbOk = false;
-$pdo  = null;
-
-try {
-    if (class_exists('\\App\\Core\\Db') && method_exists('\\App\\Core\\Db', 'pdo')) {
-        $pdo = \App\Core\Db::pdo();
-        if ($pdo) $dbOk = true;
-    }
-} catch (Exception $e) {
-    $dbOk = false;
-}
-
-/* ---------------------------
-   테이블 존재 확인
---------------------------- */
-if (!function_exists('cpms_table_exists')) {
-    function cpms_table_exists($pdo, $tableName) {
-        if (!$pdo) return false;
-
-        $sql = "SELECT 1
-                  FROM information_schema.tables
-                 WHERE table_schema = DATABASE()
-                   AND table_name = :t
-                 LIMIT 1";
-        $st = $pdo->prepare($sql);
-        $st->execute(array(':t' => $tableName));
-        return (bool)$st->fetchColumn();
-    }
-}
-
-$entriesTable = 'labor_entries';
-$directRatesTable = 'direct_team_rates';
-
-$entriesOk = false;
-$directOk  = false;
-$projectsOk = false;
-
-if ($dbOk) {
-    $entriesOk = cpms_table_exists($pdo, $entriesTable);
-    $directOk = cpms_table_exists($pdo, $directRatesTable);
-    $projectsOk = cpms_table_exists($pdo, 'cpms_projects');
-}
-
-// ---------- 테이블 생성 SQL (웹에서 실행 버튼용/참고용) ----------
-$sqlAll = "/* =========================\n"
-    . "   CPMS - 노무비 계산용 테이블 생성 (MySQL 5.6)\n"
-    . "   - labor_entries\n"
-    . "   - direct_team_rates\n"
-    . "   cpms_projects (프로젝트 테이블, 공무에서 생성)\n"
-    . "   ========================= */\n\n"
-    . "CREATE TABLE IF NOT EXISTS `labor_entries` (\n"
-    . "  `id` INT NOT NULL AUTO_INCREMENT,\n"
-    . "  `project_id` INT NOT NULL,\n"
-    . "  `work_date` DATE NOT NULL,\n"
-    . "  `worker_type` VARCHAR(20) NOT NULL DEFAULT 'direct',  -- direct / subcontract / equipment 등\n"
-    . "  `employee_id` INT NULL,                               -- 직영이면 내부ID(없으면 NULL)\n"
-    . "  `worker_name` VARCHAR(80) NOT NULL,\n"
-    . "  `company_name` VARCHAR(120) NULL,\n"
-    . "  `daily_wage` INT NULL,                                -- 공사팀 입력(외주/장비), 직영은 관리부 설정값으로 덮어씀\n"
-    . "  `man_days` DECIMAL(10,2) NOT NULL DEFAULT 1.00,        -- 공수(일수)\n"
-    . "  `memo` VARCHAR(255) NULL,\n"
-    . "  `created_at` DATETIME NOT NULL,\n"
-    . "  PRIMARY KEY (`id`),\n"
-    . "  KEY `idx_labor_entries_pid_date` (`project_id`, `work_date`)\n"
-    . ") ENGINE=InnoDB DEFAULT CHARSET=utf8;\n\n"
-    . "CREATE TABLE IF NOT EXISTS `direct_team_rates` (\n"
-    . "  `id` INT NOT NULL AUTO_INCREMENT,\n"
-    . "  `employee_id` INT NOT NULL,\n"
-    . "  `daily_wage` INT NOT NULL DEFAULT 0,\n"
-    . "  `updated_at` DATETIME NOT NULL,\n"
-    . "  PRIMARY KEY (`id`),\n"
-    . "  UNIQUE KEY `uk_direct_team_rates_employee` (`employee_id`)\n"
-    . ") ENGINE=InnoDB DEFAULT CHARSET=utf8;\n\n"
-    . "/* NOTE: 프로젝트 테이블(cpms_projects)은 공무 섹션 DB 설정에서 생성됩니다. */\n";
-
-/* ---------------------------
-   프로젝트 목록
---------------------------- */
-$projects = array();
-if ($dbOk && $projectsOk) {
-    try {
-        $st = $pdo->query("SELECT id, name FROM cpms_projects ORDER BY id DESC LIMIT 200");
-        $projects = $st->fetchAll(PDO::FETCH_ASSOC);
-    } catch (Exception $e) {
-        $projects = array();
-    }
-}
-
-/* ---------------------------
-   화면 입력값 처리
---------------------------- */
-$projectId = isset($_GET['project_id']) ? (int)$_GET['project_id'] : 0;
-$month     = isset($_GET['month']) ? preg_replace('/[^0-9-]/', '', $_GET['month']) : date('Y-m');
-
-$monthStart = $month . '-01';
-$monthEnd   = date('Y-m-t', strtotime($monthStart));
-
-/* ---------------------------
-   데이터 조회 (공수 원장)
---------------------------- */
-$entries = array();
-if ($dbOk && $entriesOk && $projectId > 0) {
-    $sql = "SELECT id, project_id, work_date, worker_type, employee_id, worker_name, company_name, daily_wage, man_days, memo
-              FROM labor_entries
-             WHERE project_id = :pid
-               AND work_date BETWEEN :s AND :e
-             ORDER BY work_date ASC, id ASC";
-    $st = $pdo->prepare($sql);
-    $st->execute(array(':pid' => $projectId, ':s' => $monthStart, ':e' => $monthEnd));
-    $entries = $st->fetchAll(PDO::FETCH_ASSOC);
-}
-
-/* ---------------------------
-   직영팀 단가(관리부 설정)
---------------------------- */
-$directRates = array(); // employee_id => daily_wage
-if ($dbOk && $directOk) {
-    $st = $pdo->query("SELECT employee_id, daily_wage FROM direct_team_rates");
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as $r) {
-        $directRates[(int)$r['employee_id']] = (int)$r['daily_wage'];
-    }
-}
-
-/* ---------------------------
-   합계 계산
---------------------------- */
-$totalDirect = 0;
-$totalOther  = 0;
-
-foreach ($entries as $row) {
-    $type = $row['worker_type'];
-    $manDays = (float)$row['man_days'];
-    $wage = (int)$row['daily_wage'];
-
-    if ($type === 'direct') {
-        $eid = (int)$row['employee_id'];
-        if ($eid > 0 && isset($directRates[$eid])) {
-            $wage = (int)$directRates[$eid]; // 직영은 관리부 설정 단가로 덮어씀
-        }
-        $totalDirect += ($wage * $manDays);
-    } else {
-        $totalOther += ($wage * $manDays);
-    }
-}
-
-$totalAll = $totalDirect + $totalOther;
-
-$flash = flash_get();
-// bootstrap.php의 flash는 ['type','message'] 형태.
-// (이 파일의 과거 버전은 msg 키를 사용했으니 둘 다 호환)
-$flashMsg = null;
-if (is_array($flash)) {
-    if (isset($flash['msg'])) {
-        $flashMsg = $flash['msg'];
-    } elseif (isset($flash['message'])) {
-        $flashMsg = $flash['message'];
-    }
+$viewData = cpms_labor_consultant_load_view_data($pdo, $projectId, $ym);
+$projects = isset($viewData['projects']) ? $viewData['projects'] : array();
+$rows = isset($viewData['rows']) ? $viewData['rows'] : array();
+$daysInMonth = isset($viewData['days_in_month']) ? (int)$viewData['days_in_month'] : cpms_labor_consultant_days_in_month($ym);
+$emptyMessage = isset($viewData['message']) ? $viewData['message'] : '';
+$totalAmount = 0;
+foreach ($rows as $row) {
+    $totalAmount += isset($row['amount']) ? (float)$row['amount'] : 0;
 }
 ?>
 
-<div class="p-6 max-w-6xl mx-auto">
-  <div class="flex items-start justify-between gap-4">
+<div class="mx-auto max-w-full space-y-6">
+  <div class="flex flex-wrap items-start justify-between gap-4">
     <div>
-      <div class="text-2xl font-black tracking-tight">노무비 계산</div>
-      <div class="text-sm text-gray-500 mt-1">프로젝트별 월 공수/노무비 합계 (직영 단가는 관리부 설정으로 자동 반영)</div>
+      <div class="text-2xl font-black tracking-tight text-gray-900">노무비 계산</div>
+      <div class="mt-1 text-sm text-gray-500">관리부서 전용 노무사 확인용 조회와 양식 기반 엑셀 다운로드를 제공합니다.</div>
     </div>
-
-    <div class="text-right">
-      <div class="text-xs text-gray-500">합계</div>
-      <div class="text-2xl font-black"><?= number_format($totalAll) ?> 원</div>
-      <div class="text-xs text-gray-500 mt-1">직영 <?= number_format($totalDirect) ?> / 외주·장비 <?= number_format($totalOther) ?></div>
+    <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-right shadow-sm">
+      <div class="text-xs text-gray-500">조회 합계</div>
+      <div class="text-2xl font-black text-gray-900"><?php echo h(number_format($totalAmount)); ?></div>
+      <div class="text-xs text-gray-500"><?php echo h($ym); ?></div>
     </div>
   </div>
 
-  <?php if ($flash && $flashMsg !== null): ?>
-    <div class="mt-4 rounded-2xl p-4 border
-      <?= $flash['type'] === 'success' ? 'bg-green-50 border-green-200 text-green-800' : '' ?>
-      <?= $flash['type'] === 'error' ? 'bg-red-50 border-red-200 text-red-800' : '' ?>
-      <?= $flash['type'] === 'info' ? 'bg-blue-50 border-blue-200 text-blue-800' : '' ?>
-    ">
-      <div class="font-bold"><?= h($flashMsg) ?></div>
+  <?php if (is_array($flash) && isset($flash['type']) && isset($flash['message'])): ?>
+    <?php
+    $flashClass = 'border-blue-200 bg-blue-50 text-blue-800';
+    if ($flash['type'] === 'success') $flashClass = 'border-green-200 bg-green-50 text-green-800';
+    if ($flash['type'] === 'error' || $flash['type'] === 'danger') $flashClass = 'border-red-200 bg-red-50 text-red-800';
+    ?>
+    <div class="rounded-2xl border p-4 font-bold <?php echo h($flashClass); ?>">
+      <?php echo h($flash['message']); ?>
     </div>
   <?php endif; ?>
 
-  <div class="mt-6 bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-    <form method="get" class="flex flex-wrap items-end gap-3">
-      <!-- C:\www\cpms\public\index.php 라우팅 기준: 관리 화면(tab=labor_calc)로 조회 유지 -->
-      <input type="hidden" name="r" value="관리"/>
-      <input type="hidden" name="tab" value="labor_calc"/>
-
-      <div>
-        <div class="text-xs text-gray-500 mb-1">프로젝트</div>
-        <select name="project_id" class="border border-gray-300 rounded-xl px-3 py-2 min-w-[240px]">
-          <option value="0">프로젝트 선택</option>
-          <?php foreach ($projects as $p): ?>
-            <option value="<?= (int)$p['id'] ?>" <?= $projectId === (int)$p['id'] ? 'selected' : '' ?>>
-              <?= h($p['name']) ?> (<?= (int)$p['id'] ?>)
-            </option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-
-      <div>
-        <div class="text-xs text-gray-500 mb-1">월</div>
-        <input type="month" name="month" value="<?= h($month) ?>" class="border border-gray-300 rounded-xl px-3 py-2"/>
-      </div>
-
-      <button type="submit" class="bg-black text-white rounded-xl px-4 py-2 font-bold">조회</button>
-    </form>
-
-    <?php if (!$dbOk): ?>
-      <div class="mt-4 bg-red-50 border border-red-200 text-red-800 rounded-2xl p-4">
-        <div class="font-extrabold">DB 연결 실패</div>
-        <div class="text-sm mt-2">Db 연결 객체(\App\Core\Db::pdo())를 가져오지 못했습니다. (bootstrap 로딩/DB 설정을 확인하세요)</div>
-      </div>
-    <?php endif; ?>
-
-    <?php if ($dbOk && (!$entriesOk || !$directOk || !$projectsOk)): ?>
-      <div class="mt-4 bg-orange-50 border border-orange-200 text-orange-800 rounded-2xl p-4">
-        <div class="font-extrabold">노무비 계산용 테이블이 없습니다.</div>
-        <div class="text-sm mt-2">필요한 계산용 테이블 구성이 아직 준비되지 않았습니다.</div>
-      </div>
-    <?php endif; ?>
+  <div class="grid gap-3 md:grid-cols-2">
+    <a href="<?php echo h(cpms_labor_consultant_view_url($projectId, $ym, 'consultant')); ?>" class="rounded-2xl border px-5 py-4 font-extrabold <?php echo $section === 'consultant' ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-gray-200 bg-white text-gray-900'; ?>">
+      노무사 확인용
+    </a>
+    <a href="<?php echo h(cpms_labor_consultant_view_url($projectId, $ym, 'tax')); ?>" class="rounded-2xl border px-5 py-4 font-extrabold <?php echo $section === 'tax' ? 'border-emerald-600 bg-emerald-600 text-white' : 'border-gray-200 bg-white text-gray-900'; ?>">
+      세무서 전달용
+    </a>
   </div>
 
-  <div class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
-    <div class="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-      <div class="flex items-center justify-between">
-        <div class="font-black text-lg">공수 원장</div>
-        <div class="text-xs text-gray-500">공사팀 입력(외주/장비) + 직영 입력(직영은 단가 자동 덮어씀)</div>
-      </div>
+  <?php if ($section === 'tax'): ?>
+    <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+      <div class="text-lg font-extrabold text-gray-900">세무서 전달용</div>
+      <div class="mt-3 text-sm text-gray-600">추후 작업 예정입니다.</div>
+    </div>
+    <?php return; ?>
+  <?php endif; ?>
 
-      <?php if (!$projectId): ?>
-        <div class="mt-4 text-gray-500">프로젝트를 선택하면 공수 원장이 표시됩니다.</div>
-      <?php elseif (!$entriesOk): ?>
-        <div class="mt-4 text-gray-500">테이블이 없어서 공수 원장을 표시할 수 없습니다.</div>
-      <?php else: ?>
-        <div class="mt-4 overflow-x-auto">
-          <table class="min-w-full text-sm">
-            <thead>
-              <tr class="text-left text-gray-500 border-b">
-                <th class="py-2 pr-3">일자</th>
-                <th class="py-2 pr-3">구분</th>
-                <th class="py-2 pr-3">성명</th>
-                <th class="py-2 pr-3">업체</th>
-                <th class="py-2 pr-3 text-right">일급(원)</th>
-                <th class="py-2 pr-3 text-right">공수</th>
-                <th class="py-2 pr-3 text-right">금액</th>
-                <th class="py-2 pr-3">비고</th>
-                <th class="py-2 pr-3"></th>
+  <div class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
+    <div class="flex flex-wrap items-start justify-between gap-4">
+      <div>
+        <div class="text-lg font-extrabold text-gray-900">노무사 확인용</div>
+        <div class="mt-1 text-sm text-gray-500">공사섹션 노무비 계산 결과와 같은 기준으로 월별 노무비를 조회합니다.</div>
+      </div>
+      <form method="post" action="?r=admin/labor_consultant_setup" class="m-0">
+        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+        <input type="hidden" name="project_id" value="<?php echo h($projectId); ?>">
+        <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+        <button type="submit" class="rounded-xl border border-gray-200 bg-white px-4 py-2 font-bold text-gray-700 hover:bg-gray-50">관리 DB 설치/확인</button>
+      </form>
+    </div>
+
+    <div class="mt-5 overflow-x-auto">
+      <table class="min-w-full border border-gray-200 text-sm">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="border border-gray-200 px-3 py-2 text-left">구분</th>
+            <th class="border border-gray-200 px-3 py-2 text-left">대상</th>
+            <th class="border border-gray-200 px-3 py-2 text-left">결과</th>
+            <th class="border border-gray-200 px-3 py-2 text-left">메시지</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($setupRows as $setupRow): ?>
+            <tr>
+              <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($setupRow['kind']) ? $setupRow['kind'] : ''); ?></td>
+              <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($setupRow['target']) ? $setupRow['target'] : ''); ?></td>
+              <td class="border border-gray-200 px-3 py-2 <?php echo (isset($setupRow['status']) && $setupRow['status'] === '성공') ? 'text-emerald-700' : 'text-red-700'; ?>"><?php echo h(isset($setupRow['status']) ? $setupRow['status'] : ''); ?></td>
+              <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($setupRow['message']) ? $setupRow['message'] : ''); ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <div class="space-y-4">
+        <form method="get" class="grid gap-3 rounded-2xl border border-gray-200 bg-gray-50 p-4 lg:grid-cols-[minmax(0,1fr)_180px_auto_auto] lg:items-end">
+          <input type="hidden" name="r" value="관리">
+          <input type="hidden" name="tab" value="labor_calc">
+          <input type="hidden" name="section" value="consultant">
+
+          <div>
+            <div class="mb-1 text-xs font-bold text-gray-600">현장 선택</div>
+            <select name="project_id" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2">
+              <option value="all" <?php echo $projectId === 'all' ? 'selected' : ''; ?>>전체 현장</option>
+              <?php foreach ($projects as $project): ?>
+                <?php $optionId = (string)(int)(isset($project['id']) ? $project['id'] : 0); ?>
+                <option value="<?php echo h($optionId); ?>" <?php echo $projectId === $optionId ? 'selected' : ''; ?>>
+                  <?php echo h(isset($project['name']) ? $project['name'] : ''); ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+
+          <div>
+            <div class="mb-1 text-xs font-bold text-gray-600">년월 선택</div>
+            <input type="month" name="ym" value="<?php echo h($ym); ?>" class="w-full rounded-xl border border-gray-300 bg-white px-3 py-2">
+          </div>
+
+          <button type="submit" class="rounded-xl bg-gray-900 px-4 py-2 font-bold text-white">조회</button>
+
+          <a href="<?php echo h('?r=admin/labor_consultant_export&project_id=' . urlencode($projectId) . '&ym=' . urlencode($ym)); ?>" class="rounded-xl px-4 py-2 text-center font-bold <?php echo ($activeTemplate && count($rows) > 0) ? 'bg-emerald-600 text-white' : 'pointer-events-none bg-gray-200 text-gray-500'; ?>">엑셀 다운로드</a>
+        </form>
+
+        <?php if ($emptyMessage !== ''): ?>
+          <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800"><?php echo h($emptyMessage); ?></div>
+        <?php endif; ?>
+
+        <div class="overflow-x-auto rounded-2xl border border-gray-200">
+          <table class="min-w-[1600px] w-full text-xs">
+            <thead class="bg-gray-100">
+              <tr>
+                <th class="border border-gray-200 px-3 py-2">현장명</th>
+                <th class="border border-gray-200 px-3 py-2">성명</th>
+                <th class="border border-gray-200 px-3 py-2">직종</th>
+                <th class="border border-gray-200 px-3 py-2">단가</th>
+                <th class="border border-gray-200 px-3 py-2">총 공수</th>
+                <th class="border border-gray-200 px-3 py-2">지급금액</th>
+                <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
+                  <th class="border border-gray-200 px-2 py-2"><?php echo h((string)$d); ?></th>
+                <?php endfor; ?>
+                <th class="border border-gray-200 px-3 py-2">합계</th>
               </tr>
             </thead>
             <tbody>
-              <?php foreach ($entries as $row): ?>
-                <?php
-                  $type = $row['worker_type'];
-                  $man = (float)$row['man_days'];
-                  $wage = (int)$row['daily_wage'];
-
-                  if ($type === 'direct') {
-                      $eid = (int)$row['employee_id'];
-                      if ($eid > 0 && isset($directRates[$eid])) {
-                          $wage = (int)$directRates[$eid];
+              <?php if (count($rows) > 0): ?>
+                <?php foreach ($rows as $idx => $row): ?>
+                  <tr class="<?php echo ($idx % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
+                    <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['project_name']) ? $row['project_name'] : ''); ?></td>
+                    <td class="border border-gray-200 px-3 py-2 font-bold text-gray-900"><?php echo h(isset($row['worker_name']) ? $row['worker_name'] : ''); ?></td>
+                    <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['role']) && $row['role'] !== '' ? $row['role'] : '-'); ?></td>
+                    <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(number_format(isset($row['wage_rate']) ? (float)$row['wage_rate'] : 0)); ?></td>
+                    <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(rtrim(rtrim(number_format(isset($row['total_gongsu']) ? (float)$row['total_gongsu'] : 0, 2, '.', ''), '0'), '.')); ?></td>
+                    <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(number_format(isset($row['amount']) ? (float)$row['amount'] : 0)); ?></td>
+                    <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
+                      <?php
+                      $dayValue = '';
+                      if (isset($row['days']) && is_array($row['days']) && isset($row['days'][$d])) {
+                          $dayValue = $row['days'][$d];
+                          if ($dayValue !== '') {
+                              $dayValue = rtrim(rtrim(number_format((float)$dayValue, 2, '.', ''), '0'), '.');
+                          }
                       }
-                  }
-                  $amt = $wage * $man;
-                ?>
-                <tr class="border-b">
-                  <td class="py-2 pr-3 whitespace-nowrap"><?= h($row['work_date']) ?></td>
-                  <td class="py-2 pr-3 whitespace-nowrap">
-                    <?php if ($type === 'direct'): ?>
-                      <span class="px-2 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs font-bold">직영</span>
-                    <?php elseif ($type === 'subcontract'): ?>
-                      <span class="px-2 py-1 rounded-lg bg-green-50 text-green-700 text-xs font-bold">외주</span>
-                    <?php else: ?>
-                      <span class="px-2 py-1 rounded-lg bg-gray-50 text-gray-700 text-xs font-bold"><?= h($type) ?></span>
-                    <?php endif; ?>
-                  </td>
-                  <td class="py-2 pr-3"><?= h($row['worker_name']) ?></td>
-                  <td class="py-2 pr-3"><?= h($row['company_name']) ?></td>
-                  <td class="py-2 pr-3 text-right"><?= number_format($wage) ?></td>
-                  <td class="py-2 pr-3 text-right"><?= number_format($man, 2) ?></td>
-                  <td class="py-2 pr-3 text-right font-bold"><?= number_format($amt) ?></td>
-                  <td class="py-2 pr-3"><?= h($row['memo']) ?></td>
-                  <td class="py-2 pr-3 text-right">
-                    <form method="post" action="?r=admin/labor_entries_save" onsubmit="return confirm('삭제할까요?');">
-                      <input type="hidden" name="_csrf" value="<?= h(csrf_token()) ?>"/>
-                      <input type="hidden" name="action" value="delete"/>
-                      <input type="hidden" name="id" value="<?= (int)$row['id'] ?>"/>
-                      <input type="hidden" name="project_id" value="<?= (int)$projectId ?>"/>
-                      <input type="hidden" name="month" value="<?= h($month) ?>"/>
-                      <button type="submit" class="text-red-600 font-bold">삭제</button>
-                    </form>
-                  </td>
-                </tr>
-              <?php endforeach; ?>
-
-              <?php if (empty($entries)): ?>
+                      ?>
+                      <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h($dayValue); ?></td>
+                    <?php endfor; ?>
+                    <td class="border border-gray-200 px-3 py-2 text-right font-bold"><?php echo h(rtrim(rtrim(number_format(isset($row['total_gongsu']) ? (float)$row['total_gongsu'] : 0, 2, '.', ''), '0'), '.')); ?></td>
+                  </tr>
+                <?php endforeach; ?>
+              <?php else: ?>
                 <tr>
-                  <td colspan="9" class="py-6 text-center text-gray-500">데이터가 없습니다.</td>
+                  <td colspan="<?php echo h((string)(7 + $daysInMonth)); ?>" class="px-4 py-8 text-center text-sm text-gray-500">조회된 데이터가 없습니다.</td>
                 </tr>
               <?php endif; ?>
             </tbody>
           </table>
         </div>
-      <?php endif; ?>
-    </div>
+      </div>
 
-    <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
-      <div class="font-black text-lg">공수 수동입력(테스트)</div>
-      <div class="text-xs text-gray-500 mt-1">현재는 테스트용. 추후 공사팀 입력 화면으로 분리 예정</div>
-
-      <form method="post" action="?r=admin/labor_entries_save" class="mt-4 space-y-3">
-        <input type="hidden" name="_csrf" value="<?= h(csrf_token()) ?>"/>
-        <input type="hidden" name="action" value="add"/>
-        <input type="hidden" name="project_id" value="<?= (int)$projectId ?>"/>
-        <input type="hidden" name="month" value="<?= h($month) ?>"/>
-
-        <div>
-          <div class="text-xs text-gray-500 mb-1">일자</div>
-          <input type="date" name="work_date" value="<?= h(date('Y-m-d')) ?>" class="w-full border border-gray-300 rounded-xl px-3 py-2"/>
+      <div class="space-y-4">
+        <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+          <div class="text-sm font-extrabold text-gray-900">현재 사용 중인 양식</div>
+          <?php if ($activeTemplate): ?>
+            <div class="mt-3 text-sm text-gray-700">
+              <div><span class="font-bold">파일명:</span> <?php echo h(isset($activeTemplate['original_name']) ? $activeTemplate['original_name'] : ''); ?></div>
+              <div class="mt-1"><span class="font-bold">업로드일:</span> <?php echo h(isset($activeTemplate['uploaded_at']) ? $activeTemplate['uploaded_at'] : '-'); ?></div>
+            </div>
+          <?php else: ?>
+            <div class="mt-3 text-sm font-bold text-amber-800">등록된 노무사 확인용 양식이 없습니다. 먼저 엑셀 양식을 업로드해주세요.</div>
+          <?php endif; ?>
         </div>
 
-        <div>
-          <div class="text-xs text-gray-500 mb-1">구분</div>
-          <select name="worker_type" class="w-full border border-gray-300 rounded-xl px-3 py-2">
-            <option value="direct">직영</option>
-            <option value="subcontract">외주</option>
-            <option value="equipment">장비</option>
-          </select>
+        <form method="post" action="?r=admin/labor_consultant_template_upload" enctype="multipart/form-data" class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+          <input type="hidden" name="project_id" value="<?php echo h($projectId); ?>">
+          <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+          <div class="text-sm font-extrabold text-gray-900">노무사 확인용 엑셀 양식 업로드</div>
+          <div class="mt-1 text-xs text-gray-500">업로드한 .xlsx 양식을 이후 다운로드에 계속 재사용합니다.</div>
+          <input type="file" name="template_file" accept=".xlsx" class="mt-4 w-full rounded-xl border border-gray-300 bg-white px-3 py-2" required>
+          <button type="submit" class="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white">양식파일 업로드/교체</button>
+        </form>
+
+        <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div class="text-sm font-extrabold text-gray-900">다운로드 안내</div>
+          <ul class="mt-3 list-disc space-y-1 pl-5 text-xs text-gray-600">
+            <li>노무비 기간은 해당 월 1일 ~ 말일 기준입니다.</li>
+            <li>공수 수정 승인 완료 값만 반영됩니다.</li>
+            <li>엑셀은 업로드한 양식 파일을 그대로 기반으로 생성됩니다.</li>
+          </ul>
         </div>
-
-        <div>
-          <div class="text-xs text-gray-500 mb-1">직영 Employee ID (직영일 때만)</div>
-          <input type="number" name="employee_id" value="" class="w-full border border-gray-300 rounded-xl px-3 py-2" placeholder="예: 101"/>
-        </div>
-
-        <div>
-          <div class="text-xs text-gray-500 mb-1">성명</div>
-          <input type="text" name="worker_name" value="" class="w-full border border-gray-300 rounded-xl px-3 py-2" placeholder="홍길동"/>
-        </div>
-
-        <div>
-          <div class="text-xs text-gray-500 mb-1">업체명(외주/장비)</div>
-          <input type="text" name="company_name" value="" class="w-full border border-gray-300 rounded-xl px-3 py-2" placeholder="OO건설"/>
-        </div>
-
-        <div class="grid grid-cols-2 gap-2">
-          <div>
-            <div class="text-xs text-gray-500 mb-1">일급(원)</div>
-            <input type="number" name="daily_wage" value="" class="w-full border border-gray-300 rounded-xl px-3 py-2" placeholder="200000"/>
-          </div>
-          <div>
-            <div class="text-xs text-gray-500 mb-1">공수</div>
-            <input type="number" step="0.01" name="man_days" value="1.00" class="w-full border border-gray-300 rounded-xl px-3 py-2"/>
-          </div>
-        </div>
-
-        <div>
-          <div class="text-xs text-gray-500 mb-1">비고</div>
-          <input type="text" name="note" value="" class="w-full border border-gray-300 rounded-xl px-3 py-2" placeholder="메모"/>
-        </div>
-
-        <button type="submit" class="w-full bg-black text-white rounded-xl px-4 py-2 font-black">
-          저장
-        </button>
-      </form>
-
-      <div class="mt-4 text-xs text-gray-500 leading-relaxed">
-        ※ 직영은 employee_id가 있으면 <span class="font-bold">direct_team_rates의 일급</span>으로 계산됩니다.<br/>
-        ※ 외주/장비는 여기 입력한 일급이 그대로 계산됩니다.
       </div>
     </div>
   </div>

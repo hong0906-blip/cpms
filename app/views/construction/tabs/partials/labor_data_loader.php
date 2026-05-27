@@ -394,6 +394,7 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
             'gongsu_unit' => array(),
             'output_days' => array(),
             'excluded_workers' => array(),
+            'role_map' => array(),
             );
 
         if (!$attendancePdo || $projectName === '' || $selectedMonth === '') return $result;
@@ -431,7 +432,8 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
 
         // 3) 전체 이름 목록 (월과 무관)
         $allWorkers = array();
-        $excludedWorkers = array();        
+        $excludedWorkers = array();
+        $roleMap = array();
         try {
             // 인원작성 누적(출력자만): done 이력이 1회 이상 있는 사람만 누적 목록에 포함
             $sqlAll = "SELECT DISTINCT name";
@@ -453,6 +455,10 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
                     continue;
                 }
                 $allWorkers[$keyAll] = $nameAll;
+                if ($roleColumn !== '') {
+                    $roleValueAll = isset($rowAll['role_value']) ? trim((string)$rowAll['role_value']) : '';
+                    if ($roleValueAll !== '' && !isset($roleMap[$keyAll])) $roleMap[$keyAll] = $roleValueAll;
+                }
             }
         } catch (Exception $e) {
             $allWorkers = array();
@@ -499,6 +505,10 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
 
             // 3-1) 인원작성 탭용 이름 목록은 "기록이 존재하면" 일단 포함
             if (!isset($workers[$key])) $workers[$key] = $name;
+            if ($roleColumn !== '') {
+                $roleValue = isset($row['role_value']) ? trim((string)$row['role_value']) : '';
+                if ($roleValue !== '' && !isset($roleMap[$key])) $roleMap[$key] = $roleValue;
+            }
 
             $startPhone = isset($row['start_time_phone']) ? (string)$row['start_time_phone'] : '';
             $stopPhone  = isset($row['stop_time_phone']) ? (string)$row['stop_time_phone'] : '';
@@ -573,6 +583,7 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
         $result['gongsu_unit'] = $gongsuUnit;
         $result['output_days'] = $outputDays;
         $result['excluded_workers'] = array_values($excludedWorkers);
+        $result['role_map'] = $roleMap;
         
         return $result;
     }
@@ -586,7 +597,8 @@ if (!function_exists('cpms_load_gongsu_data')) {
             'gongsu_map' => array(),
             'gongsu_unit' => array(),
             'output_days' => array(),
-            'excluded_workers' => array(),            
+            'excluded_workers' => array(),
+            'role_map' => array(),
         );
 
         $projectName = trim((string)$projectName);
@@ -641,6 +653,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
         $workers = array();
         $allWorkers = array();
         $excludedWorkers = array();
+        $roleMap = array();
         $gongsuMap = array();
         $gongsuUnit = array();
         $outputDays = array();
@@ -675,6 +688,10 @@ if (!function_exists('cpms_load_gongsu_data')) {
             if ($key === '') continue;
 
             if (!isset($workers[$key])) $workers[$key] = $workerName;
+            if (isset($cols['role'])) {
+                $roleValue = isset($row['role_value']) ? trim((string)$row['role_value']) : '';
+                if ($roleValue !== '' && !isset($roleMap[$key])) $roleMap[$key] = $roleValue;
+            }
             if (!isset($gongsuMap[$key])) $gongsuMap[$key] = array();
 
             $gongsuMap[$key][$workDate] = $gongsuValue;
@@ -718,6 +735,10 @@ if (!function_exists('cpms_load_gongsu_data')) {
                     continue;
                 }
                 if (!isset($allWorkers[$key])) $allWorkers[$key] = $workerName;
+                if (isset($cols['role'])) {
+                    $roleValueAll = isset($rowAll['role_value']) ? trim((string)$rowAll['role_value']) : '';
+                    if ($roleValueAll !== '' && !isset($roleMap[$key])) $roleMap[$key] = $roleValueAll;
+                }
             }
         } catch (Exception $e) {
             $allWorkers = array();
@@ -729,6 +750,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
         $result['gongsu_unit'] = $gongsuUnit;
         $result['output_days'] = $outputDays;
         $result['excluded_workers'] = array_values($excludedWorkers);
+        $result['role_map'] = $roleMap;
 
         return $result;
     }

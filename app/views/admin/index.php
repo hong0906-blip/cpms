@@ -1,38 +1,52 @@
 <?php
 /**
  * C:\www\cpms\app\views\admin\index.php
- * - 관리부 탭 화면(직원명부/직영팀 설정/노무비 계산/출퇴근)
+ * - 관리 섹션 메인
  * - PHP 5.6 호환
  */
 
 use App\Core\Auth;
+use App\Core\Db;
 
+$pdo = Db::pdo();
+$user = Auth::user();
 $canManage = (Auth::isMaster() || Auth::canManageEmployees());
-if (!$canManage) {
-    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (임원/관리부 전용)</div>';
+$canLaborManagement = cpms_is_management_department_user($pdo, $user);
+
+if (!$canManage && !$canLaborManagement) {
+    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. 관리부서 전용 화면입니다.</div>';
     return;
 }
 
 $tab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : '';
 if ($tab === '') {
-    $tab = 'employees';
+    $tab = $canManage ? 'employees' : 'labor_calc';
 }
 
 $tabs = array(
-    'employees'    => array('label' => '직원명부', 'icon' => 'users'),
-    'direct_team'  => array('label' => '직영팀 명부', 'icon' => 'clipboard-list'),
+    'employees' => array('label' => '직원명부', 'icon' => 'users'),
+    'direct_team' => array('label' => '직영팀 명부', 'icon' => 'clipboard-list'),
     'direct_rates' => array('label' => '직영팀 설정', 'icon' => 'wallet'),
-    'labor_calc'   => array('label' => '노무비 계산', 'icon' => 'calculator'),
-    'attendance'   => array('label' => '출퇴근·근태관리', 'icon' => 'clock-3'),
+    'labor_calc' => array('label' => '노무비 계산', 'icon' => 'calculator'),
+    'attendance' => array('label' => '출퇴근·근태관리', 'icon' => 'clock-3'),
     'leave_management' => array('label' => '연차 관리', 'icon' => 'calendar-days'),
 );
-if (!isset($tabs[$tab])) {
-    $tab = 'employees';
+
+if (!$canManage && $canLaborManagement) {
+    $tabs = array(
+        'labor_calc' => array('label' => '노무비 계산', 'icon' => 'calculator'),
+    );
 }
 
-function admin_tab_url($tab)
-{
-    return '?r=관리&tab=' . urlencode($tab);
+if (!isset($tabs[$tab])) {
+    $tab = $canManage ? 'employees' : 'labor_calc';
+}
+
+if (!function_exists('admin_tab_url')) {
+    function admin_tab_url($tab)
+    {
+        return '?r=관리&tab=' . urlencode($tab);
+    }
 }
 ?>
 
@@ -67,7 +81,7 @@ if ($tab === 'employees') {
 } elseif ($tab === 'leave_management') {
     require __DIR__ . '/leave_management.php';
 } else {
-    require __DIR__ . '/employees.php';
+    require __DIR__ . '/labor_calc.php';
 }
 
 unset($GLOBALS['__admin_embedded']);

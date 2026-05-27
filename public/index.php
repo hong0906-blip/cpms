@@ -140,6 +140,18 @@ if ($route === 'admin/labor_entries_save') {
     require_once __DIR__ . '/../app/views/admin/labor_entries_save.php';
     exit;
 }
+if ($route === 'admin/labor_consultant_setup') {
+    require_once __DIR__ . '/../app/views/admin/labor_consultant_setup.php';
+    exit;
+}
+if ($route === 'admin/labor_consultant_template_upload') {
+    require_once __DIR__ . '/../app/views/admin/labor_consultant_template_upload.php';
+    exit;
+}
+if ($route === 'admin/labor_consultant_export') {
+    require_once __DIR__ . '/../app/views/admin/labor_consultant_export.php';
+    exit;
+}
 
 
 if ($route === 'db_setup_project_monthly') {
