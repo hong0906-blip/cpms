@@ -340,6 +340,15 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
                 'project_name' => $projectName,
                 'worker_name' => $workerName,
                 'role' => isset($roleMap[$workerKey]) ? (string)$roleMap[$workerKey] : '',
+                'phone' => isset($worker['phone']) ? (string)$worker['phone'] : '',
+                'address' => isset($worker['address']) ? (string)$worker['address'] : '',
+                'resident_no' => isset($worker['resident_no']) ? (string)$worker['resident_no'] : '',
+                'account_holder' => isset($worker['account_holder']) ? (string)$worker['account_holder'] : '',
+                'bank_name' => isset($worker['bank_name']) ? (string)$worker['bank_name'] : '',
+                'bank_account' => isset($worker['bank_account']) ? (string)$worker['bank_account'] : '',
+                'company_name' => isset($worker['company_name']) ? (string)$worker['company_name'] : '',
+                'subcontract_type' => '',
+                'foreigner' => '',
                 'wage_rate' => $wageRate,
                 'output_days' => $outputDays,
                 'total_gongsu' => round($totalGongsu, 2),
@@ -969,6 +978,654 @@ if (!function_exists('cpms_labor_consultant_fill_sheet_rows')) {
     }
 }
 
+if (!function_exists('cpms_labor_consultant_xlsx_sheet_list')) {
+    function cpms_labor_consultant_xlsx_sheet_list($zip) {
+        $sheets = array();
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
+        if ($workbookXml === false || $relsXml === false) return $sheets;
+
+        $wb = @simplexml_load_string($workbookXml);
+        $rels = @simplexml_load_string($relsXml);
+        if (!$wb || !$rels || !isset($wb->sheets)) return $sheets;
+
+        $targets = array();
+        foreach ($rels->Relationship as $rel) {
+            $rid = (string)$rel['Id'];
+            $target = (string)$rel['Target'];
+            if ($rid === '' || $target === '') continue;
+            $target = str_replace('\\', '/', $target);
+            $target = ltrim($target, '/');
+            if (strpos($target, 'xl/') !== 0) {
+                $target = 'xl/' . $target;
+            }
+            $targets[$rid] = $target;
+        }
+
+        $idx = 0;
+        foreach ($wb->sheets->sheet as $sheet) {
+            $attrs = $sheet->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
+            $rid = isset($attrs['id']) ? (string)$attrs['id'] : '';
+            $name = (string)$sheet['name'];
+            if ($rid === '' || !isset($targets[$rid])) {
+                $idx++;
+                continue;
+            }
+            $sheets[count($sheets)] = array(
+                'name' => $name,
+                'path' => $targets[$rid],
+                'rid' => $rid,
+                'index' => $idx
+            );
+            $idx++;
+        }
+
+        return $sheets;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_find_sheet')) {
+    function cpms_labor_consultant_xlsx_find_sheet($zip, $preferredName) {
+        $sheets = cpms_labor_consultant_xlsx_sheet_list($zip);
+        $fallback = null;
+        foreach ($sheets as $sheet) {
+            if (!$fallback) $fallback = $sheet;
+            if ((string)$sheet['name'] === (string)$preferredName) return $sheet;
+        }
+        if ($fallback) return $fallback;
+        return array('name' => '', 'path' => 'xl/worksheets/sheet1.xml', 'rid' => '', 'index' => 0);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_set_active_sheet')) {
+    function cpms_labor_consultant_xlsx_set_active_sheet($zip, $sheetIndex) {
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        if ($workbookXml === false || $workbookXml === '') return;
+
+        $doc = new DOMDocument('1.0', 'UTF-8');
+        $doc->preserveWhiteSpace = true;
+        $doc->formatOutput = false;
+        if (!@$doc->loadXML($workbookXml)) return;
+
+        $sheetIndex = (int)$sheetIndex;
+        $xpath = new DOMXPath($doc);
+        $views = $xpath->query('//*[local-name()="workbookView"]');
+        if ($views && $views->length > 0) {
+            $views->item(0)->setAttribute('activeTab', (string)$sheetIndex);
+            $views->item(0)->setAttribute('firstSheet', (string)$sheetIndex);
+        }
+
+        $idx = 0;
+        $sheetNodes = $xpath->query('//*[local-name()="sheets"]/*[local-name()="sheet"]');
+        foreach ($sheetNodes as $sheetNode) {
+            if ($idx === $sheetIndex && $sheetNode->hasAttribute('state')) {
+                $sheetNode->removeAttribute('state');
+            }
+            $idx++;
+        }
+
+        $zip->addFromString('xl/workbook.xml', $doc->saveXML());
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_cell_text_at')) {
+    function cpms_labor_consultant_xlsx_cell_text_at($sheetDoc, $sharedStrings, $ref) {
+        $ref = strtoupper(trim((string)$ref));
+        if ($ref === '') return '';
+        $xpath = new DOMXPath($sheetDoc);
+        $nodes = $xpath->query('//*[local-name()="c"][@r="' . $ref . '"]');
+        if (!$nodes || $nodes->length < 1) return '';
+        return cpms_labor_consultant_xlsx_cell_text($nodes->item(0), $sharedStrings);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_text_contains_any')) {
+    function cpms_labor_consultant_text_contains_any($text, $needles) {
+        $key = cpms_labor_consultant_header_key($text);
+        foreach ($needles as $needle) {
+            $needleKey = cpms_labor_consultant_header_key($needle);
+            if ($needleKey === '') continue;
+            if (function_exists('mb_strpos')) {
+                if (mb_strpos($key, $needleKey, 0, 'UTF-8') !== false) return true;
+            } else {
+                if (strpos($key, $needleKey) !== false) return true;
+            }
+        }
+        return false;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_header_day_number')) {
+    function cpms_labor_consultant_header_day_number($text) {
+        $key = cpms_labor_consultant_header_key($text);
+        if ($key === '') return 0;
+        if (preg_match('/^([0-9]{1,2})일$/u', $key, $m)) {
+            return (int)$m[1];
+        }
+        if (preg_match('/^[0-9]{1,2}$/', $key)) {
+            return (int)$key;
+        }
+        if (preg_match('/^([0-9]{1,2})\.0+$/', $key, $m)) {
+            return (int)$m[1];
+        }
+        return 0;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_row_cell_texts')) {
+    function cpms_labor_consultant_row_cell_texts($sheetDoc, $sharedStrings, $rowNum) {
+        $cells = array();
+        $xpath = new DOMXPath($sheetDoc);
+        $nodes = $xpath->query('//*[local-name()="worksheet"]/*[local-name()="sheetData"]/*[local-name()="row"][@r="' . (int)$rowNum . '"]/*[local-name()="c"]');
+        foreach ($nodes as $cellNode) {
+            $ref = $cellNode->getAttribute('r');
+            list(, $colIndex) = cpms_labor_consultant_xlsx_ref_to_pos($ref);
+            if ($colIndex <= 0) continue;
+            $cells[$colIndex] = cpms_labor_consultant_xlsx_cell_text($cellNode, $sharedStrings);
+        }
+        return $cells;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_find_header_col')) {
+    function cpms_labor_consultant_find_header_col($cells, $needles) {
+        foreach ($cells as $colIndex => $text) {
+            if (cpms_labor_consultant_text_contains_any($text, $needles)) {
+                return (int)$colIndex;
+            }
+        }
+        return 0;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_detect_day_columns')) {
+    function cpms_labor_consultant_detect_day_columns($cells, $startDay, $endDay) {
+        $days = array();
+        foreach ($cells as $colIndex => $text) {
+            $day = cpms_labor_consultant_header_day_number($text);
+            if ($day >= $startDay && $day <= $endDay) {
+                $days[$day] = (int)$colIndex;
+            }
+        }
+        return $days;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_detect_two_row_block')) {
+    function cpms_labor_consultant_detect_two_row_block($sheetDoc, $sharedStrings, $sheetName) {
+        $layout = array(
+            'ok' => false,
+            'mode' => '',
+            'sheet_name' => (string)$sheetName,
+            'headerTopRow' => 5,
+            'headerBottomRow' => 6,
+            'dataStartRow' => 7,
+            'blockRows' => 2,
+            'columns' => array(
+                'serialCol' => 1,
+                'outputMonthCol' => 2,
+                'workTypeCol' => 2,
+                'nameCol' => 4,
+                'phoneCol' => 4,
+                'residentNoCol' => 5,
+                'addressCol' => 5,
+                'foreignerCol' => 6,
+                'totalWorkCol' => 23,
+                'dailyRateCol' => 24,
+                'grossAmountCol' => 25,
+                'earnedTaxCol' => 27,
+                'residentTaxCol' => 27,
+                'healthInsuranceCol' => 28,
+                'pensionCol' => 28,
+                'employmentInsuranceCol' => 29,
+                'deductionTotalCol' => 29,
+                'netAmountCol' => 30,
+                'accountHolderCol' => 31,
+                'bankNameCol' => 32,
+                'bankAccountCol' => 33,
+                'companyCol' => 34,
+                'subcontractTypeCol' => 35
+            ),
+            'topDays' => array(),
+            'bottomDays' => array()
+        );
+
+        $d = 1;
+        while ($d <= 15) {
+            $layout['topDays'][$d] = 6 + $d;
+            $d++;
+        }
+        $d = 16;
+        while ($d <= 31) {
+            $layout['bottomDays'][$d] = $d - 9;
+            $d++;
+        }
+
+        $topCells = cpms_labor_consultant_row_cell_texts($sheetDoc, $sharedStrings, 5);
+        $bottomCells = cpms_labor_consultant_row_cell_texts($sheetDoc, $sharedStrings, 6);
+
+        $nameCol = cpms_labor_consultant_find_header_col($topCells, array('성명', '이름'));
+        $residentNoCol = cpms_labor_consultant_find_header_col($topCells, array('주민등록번호', '주민 등록번호', '주민'));
+        $phoneCol = cpms_labor_consultant_find_header_col($bottomCells, array('핸드폰번호', '핸드폰', '휴대폰', '전화'));
+        $addressCol = cpms_labor_consultant_find_header_col($bottomCells, array('주소'));
+
+        if ($nameCol > 0) $layout['columns']['nameCol'] = $nameCol;
+        if ($residentNoCol > 0) $layout['columns']['residentNoCol'] = $residentNoCol;
+        if ($phoneCol > 0) $layout['columns']['phoneCol'] = $phoneCol;
+        if ($addressCol > 0) $layout['columns']['addressCol'] = $addressCol;
+
+        $col = cpms_labor_consultant_find_header_col($topCells, array('출력월'));
+        if ($col > 0) $layout['columns']['outputMonthCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($bottomCells, array('공종'));
+        if ($col > 0) $layout['columns']['workTypeCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('외국인'));
+        if ($col > 0) $layout['columns']['foreignerCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('출력일수', '총출력일수'));
+        if ($col > 0) $layout['columns']['totalWorkCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('임금단가', '임 금 단 가'));
+        if ($col > 0) $layout['columns']['dailyRateCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('지급총액', '지 급 총 액'));
+        if ($col > 0) $layout['columns']['grossAmountCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('차감지급액', '차감 지급액'));
+        if ($col > 0) $layout['columns']['netAmountCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('영수인', '예금주'));
+        if ($col > 0) $layout['columns']['accountHolderCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('은행명'));
+        if ($col > 0) $layout['columns']['bankNameCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('계좌번호'));
+        if ($col > 0) $layout['columns']['bankAccountCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('인력사업체명', '팀명'));
+        if ($col > 0) $layout['columns']['companyCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('하도급'));
+        if ($col > 0) $layout['columns']['subcontractTypeCol'] = $col;
+
+        $col = cpms_labor_consultant_find_header_col($topCells, array('갑근세'));
+        if ($col > 0) $layout['columns']['earnedTaxCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($bottomCells, array('주민세'));
+        if ($col > 0) $layout['columns']['residentTaxCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('건강보험'));
+        if ($col > 0) $layout['columns']['healthInsuranceCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($bottomCells, array('국민연금'));
+        if ($col > 0) $layout['columns']['pensionCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($topCells, array('고용보험'));
+        if ($col > 0) $layout['columns']['employmentInsuranceCol'] = $col;
+        $col = cpms_labor_consultant_find_header_col($bottomCells, array('공제소계', '공제 소계'));
+        if ($col > 0) $layout['columns']['deductionTotalCol'] = $col;
+
+        $topDayCols = cpms_labor_consultant_detect_day_columns($topCells, 1, 15);
+        $bottomDayCols = cpms_labor_consultant_detect_day_columns($bottomCells, 16, 31);
+        if (count($topDayCols) > 0) $layout['topDays'] = $topDayCols;
+        if (count($bottomDayCols) > 0) $layout['bottomDays'] = $bottomDayCols;
+
+        $ok = true;
+        if ($nameCol <= 0) $ok = false;
+        if ($residentNoCol <= 0) $ok = false;
+        if ($phoneCol <= 0) $ok = false;
+        if ($addressCol <= 0) $ok = false;
+        if (!isset($layout['topDays'][1]) || !isset($layout['topDays'][15])) $ok = false;
+        if (!isset($layout['bottomDays'][16]) || !isset($layout['bottomDays'][31])) $ok = false;
+
+        if ($ok) {
+            $layout['ok'] = true;
+            $layout['mode'] = 'two_row_worker_block';
+        }
+
+        return $layout;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_clear_cell_all')) {
+    function cpms_labor_consultant_clear_cell_all($cellNode) {
+        $remove = array();
+        foreach ($cellNode->childNodes as $child) {
+            if ($child instanceof DOMElement) {
+                $remove[count($remove)] = $child;
+            }
+        }
+        foreach ($remove as $node) {
+            $cellNode->removeChild($node);
+        }
+        $cellNode->removeAttribute('t');
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_clear_row_values_in_range')) {
+    function cpms_labor_consultant_clear_row_values_in_range($rowNode, $startCol, $endCol) {
+        foreach ($rowNode->childNodes as $child) {
+            if (!($child instanceof DOMElement)) continue;
+            if ($child->localName !== 'c') continue;
+            list(, $colIndex) = cpms_labor_consultant_xlsx_ref_to_pos($child->getAttribute('r'));
+            if ($colIndex >= $startCol && $colIndex <= $endCol) {
+                cpms_labor_consultant_clear_cell_all($child);
+            }
+        }
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_prepare_two_row_blocks')) {
+    function cpms_labor_consultant_prepare_two_row_blocks($sheetDoc, $dataStartRow, $blockCount) {
+        $blockCount = (int)$blockCount;
+        $dataStartRow = (int)$dataStartRow;
+        if ($blockCount <= 0 || $dataStartRow <= 0) return array();
+
+        $topRow = cpms_labor_consultant_find_row_node($sheetDoc, $dataStartRow);
+        $bottomRow = cpms_labor_consultant_find_row_node($sheetDoc, $dataStartRow + 1);
+        if (!$topRow || !$bottomRow) return array();
+
+        $existingBlocks = array();
+        $i = 0;
+        while ($i < $blockCount) {
+            $rowTopNum = $dataStartRow + ($i * 2);
+            $rowBottomNum = $rowTopNum + 1;
+            $existingTop = cpms_labor_consultant_find_row_node($sheetDoc, $rowTopNum);
+            $existingBottom = cpms_labor_consultant_find_row_node($sheetDoc, $rowBottomNum);
+            if (!$existingTop || !$existingBottom) break;
+            $existingBlocks[count($existingBlocks)] = array('top' => $existingTop, 'bottom' => $existingBottom);
+            $i++;
+        }
+        if (count($existingBlocks) === $blockCount) {
+            return $existingBlocks;
+        }
+
+        $templateTop = $topRow->cloneNode(true);
+        $templateBottom = $bottomRow->cloneNode(true);
+
+        $xpath = new DOMXPath($sheetDoc);
+        $sheetDataList = $xpath->query('//*[local-name()="worksheet"]/*[local-name()="sheetData"]');
+        if (!$sheetDataList || $sheetDataList->length < 1) return array();
+        $sheetData = $sheetDataList->item(0);
+
+        $extraRows = ($blockCount - 1) * 2;
+        if ($extraRows > 0) {
+            cpms_labor_consultant_shift_sheet_rows($sheetDoc, $dataStartRow + 1, $extraRows);
+            cpms_labor_consultant_shift_merged_cells($sheetDoc, $dataStartRow + 1, $extraRows);
+        }
+
+        $blocks = array();
+        $blocks[count($blocks)] = array('top' => $topRow, 'bottom' => $bottomRow);
+        $insertAfter = $bottomRow;
+
+        $i = 1;
+        while ($i < $blockCount) {
+            $rowTopNum = $dataStartRow + ($i * 2);
+            $rowBottomNum = $rowTopNum + 1;
+            $cloneTop = $templateTop->cloneNode(true);
+            $cloneBottom = $templateBottom->cloneNode(true);
+            cpms_labor_consultant_reindex_row_node($cloneTop, $rowTopNum);
+            cpms_labor_consultant_reindex_row_node($cloneBottom, $rowBottomNum);
+
+            if ($insertAfter->nextSibling) {
+                $sheetData->insertBefore($cloneTop, $insertAfter->nextSibling);
+            } else {
+                $sheetData->appendChild($cloneTop);
+            }
+            $insertAfter = $cloneTop;
+
+            if ($insertAfter->nextSibling) {
+                $sheetData->insertBefore($cloneBottom, $insertAfter->nextSibling);
+            } else {
+                $sheetData->appendChild($cloneBottom);
+            }
+            $insertAfter = $cloneBottom;
+
+            $blocks[count($blocks)] = array('top' => $cloneTop, 'bottom' => $cloneBottom);
+            $i++;
+        }
+
+        cpms_labor_consultant_update_dimension($sheetDoc);
+        return $blocks;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_number_value')) {
+    function cpms_labor_consultant_number_value($rowData, $key) {
+        if (!isset($rowData[$key]) || $rowData[$key] === '') return 0;
+        return is_numeric($rowData[$key]) ? (float)$rowData[$key] : 0;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_text_value')) {
+    function cpms_labor_consultant_text_value($rowData, $key) {
+        return isset($rowData[$key]) ? (string)$rowData[$key] : '';
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fill_two_row_blocks')) {
+    function cpms_labor_consultant_fill_two_row_blocks($sheetDoc, $layout, $dataRows, $ym) {
+        if (!isset($layout['ok']) || !$layout['ok']) return false;
+        $blocks = cpms_labor_consultant_prepare_two_row_blocks($sheetDoc, $layout['dataStartRow'], count($dataRows));
+        if (count($blocks) !== count($dataRows)) return false;
+
+        $cols = isset($layout['columns']) ? $layout['columns'] : array();
+        $topDays = isset($layout['topDays']) ? $layout['topDays'] : array();
+        $bottomDays = isset($layout['bottomDays']) ? $layout['bottomDays'] : array();
+        $daysInMonth = cpms_labor_consultant_days_in_month($ym);
+
+        foreach ($blocks as $idx => $block) {
+            $rowData = isset($dataRows[$idx]) ? $dataRows[$idx] : array();
+            $topRow = isset($block['top']) ? $block['top'] : null;
+            $bottomRow = isset($block['bottom']) ? $block['bottom'] : null;
+            if (!$topRow || !$bottomRow) return false;
+
+            cpms_labor_consultant_clear_row_values_in_range($topRow, 1, 35);
+            cpms_labor_consultant_clear_row_values_in_range($bottomRow, 1, 35);
+
+            $serial = $idx + 1;
+            $workerName = cpms_labor_consultant_text_value($rowData, 'worker_name');
+            $role = cpms_labor_consultant_text_value($rowData, 'role');
+            $amount = cpms_labor_consultant_number_value($rowData, 'amount');
+            $wageRate = cpms_labor_consultant_number_value($rowData, 'wage_rate');
+            $outputDays = cpms_labor_consultant_number_value($rowData, 'output_days');
+            $netAmount = $amount;
+            $deductionTotal = 0;
+
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['serialCol'], $serial, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['outputMonthCol'], $ym, false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['nameCol'], $workerName, false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['residentNoCol'], cpms_labor_consultant_text_value($rowData, 'resident_no'), false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['foreignerCol'], cpms_labor_consultant_text_value($rowData, 'foreigner'), false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['totalWorkCol'], $outputDays, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['dailyRateCol'], $wageRate, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['grossAmountCol'], $amount, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['earnedTaxCol'], 0, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['healthInsuranceCol'], 0, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['employmentInsuranceCol'], 0, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['netAmountCol'], $netAmount, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['accountHolderCol'], cpms_labor_consultant_text_value($rowData, 'account_holder') !== '' ? cpms_labor_consultant_text_value($rowData, 'account_holder') : $workerName, false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['bankNameCol'], cpms_labor_consultant_text_value($rowData, 'bank_name'), false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['bankAccountCol'], cpms_labor_consultant_text_value($rowData, 'bank_account'), false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['companyCol'], cpms_labor_consultant_text_value($rowData, 'company_name'), false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['subcontractTypeCol'], cpms_labor_consultant_text_value($rowData, 'subcontract_type'), false);
+
+            cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $cols['workTypeCol'], $role, false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $cols['phoneCol'], cpms_labor_consultant_text_value($rowData, 'phone'), false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $cols['addressCol'], cpms_labor_consultant_text_value($rowData, 'address'), false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $cols['residentTaxCol'], 0, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $cols['pensionCol'], 0, true);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $cols['deductionTotalCol'], $deductionTotal, true);
+
+            $days = isset($rowData['days']) && is_array($rowData['days']) ? $rowData['days'] : array();
+            $day = 1;
+            while ($day <= 31) {
+                if ($day <= $daysInMonth) {
+                    $value = isset($days[$day]) ? $days[$day] : '';
+                } else {
+                    $value = '';
+                }
+
+                if ($day <= 15 && isset($topDays[$day])) {
+                    cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $topDays[$day], $value, ($value !== ''));
+                } else if ($day >= 16 && isset($bottomDays[$day])) {
+                    cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $bottomDays[$day], $value, ($value !== ''));
+                }
+                $day++;
+            }
+        }
+
+        cpms_labor_consultant_update_dimension($sheetDoc);
+        return true;
+    }
+}
+
+if (!function_exists('cpms_labor_export_remove_calc_chain')) {
+    function cpms_labor_export_remove_calc_chain($xlsxPath) {
+        if (!class_exists('ZipArchive') || !is_file($xlsxPath)) return false;
+        $zip = new ZipArchive();
+        if ($zip->open($xlsxPath) !== true) return false;
+
+        if ($zip->locateName('xl/calcChain.xml') !== false) {
+            $zip->deleteName('xl/calcChain.xml');
+        }
+
+        $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
+        if ($relsXml !== false && $relsXml !== '') {
+            $doc = new DOMDocument('1.0', 'UTF-8');
+            $doc->preserveWhiteSpace = true;
+            $doc->formatOutput = false;
+            if (@$doc->loadXML($relsXml)) {
+                $xpath = new DOMXPath($doc);
+                $nodes = $xpath->query('/*[local-name()="Relationships"]/*[local-name()="Relationship"]');
+                $remove = array();
+                foreach ($nodes as $node) {
+                    $type = $node->getAttribute('Type');
+                    $target = $node->getAttribute('Target');
+                    if (strpos($type, '/calcChain') !== false || strpos($target, 'calcChain.xml') !== false) {
+                        $remove[count($remove)] = $node;
+                    }
+                }
+                foreach ($remove as $node) {
+                    $node->parentNode->removeChild($node);
+                }
+                $zip->addFromString('xl/_rels/workbook.xml.rels', $doc->saveXML());
+            }
+        }
+
+        $typesXml = $zip->getFromName('[Content_Types].xml');
+        if ($typesXml !== false && $typesXml !== '') {
+            $doc = new DOMDocument('1.0', 'UTF-8');
+            $doc->preserveWhiteSpace = true;
+            $doc->formatOutput = false;
+            if (@$doc->loadXML($typesXml)) {
+                $xpath = new DOMXPath($doc);
+                $nodes = $xpath->query('/*[local-name()="Types"]/*[local-name()="Override"]');
+                $remove = array();
+                foreach ($nodes as $node) {
+                    if ($node->getAttribute('PartName') === '/xl/calcChain.xml') {
+                        $remove[count($remove)] = $node;
+                    }
+                }
+                foreach ($remove as $node) {
+                    $node->parentNode->removeChild($node);
+                }
+                $zip->addFromString('[Content_Types].xml', $doc->saveXML());
+            }
+        }
+
+        $zip->close();
+        return true;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_debug_export_detection')) {
+    function cpms_labor_consultant_debug_export_detection($templatePath, $dataRows) {
+        $result = array(
+            'ok' => false,
+            'message' => '',
+            'sheet' => '',
+            'layout' => array(),
+            'labor_count' => is_array($dataRows) ? count($dataRows) : 0,
+            'first_labor_row' => is_array($dataRows) && count($dataRows) > 0 ? $dataRows[0] : array()
+        );
+
+        if (!class_exists('ZipArchive') || !function_exists('simplexml_load_string') || !class_exists('DOMDocument')) {
+            $result['message'] = '엑셀 생성 라이브러리를 찾을 수 없습니다.';
+            return $result;
+        }
+        if (!is_file($templatePath)) {
+            $result['message'] = '등록된 노무사 확인용 양식이 없습니다.';
+            return $result;
+        }
+
+        $zip = new ZipArchive();
+        if ($zip->open($templatePath) !== true) {
+            $result['message'] = '엑셀 양식을 읽을 수 없습니다.';
+            return $result;
+        }
+
+        $sheet = cpms_labor_consultant_xlsx_find_sheet($zip, '통합');
+        $result['sheet'] = isset($sheet['name']) ? $sheet['name'] : '';
+        $sheetPath = isset($sheet['path']) ? $sheet['path'] : '';
+        $sheetXml = $zip->getFromName($sheetPath);
+        if ($sheetXml === false || $sheetXml === '') {
+            $zip->close();
+            $result['message'] = '엑셀 양식을 읽을 수 없습니다.';
+            return $result;
+        }
+
+        $sheetDoc = new DOMDocument('1.0', 'UTF-8');
+        $sheetDoc->preserveWhiteSpace = true;
+        $sheetDoc->formatOutput = false;
+        if (!@$sheetDoc->loadXML($sheetXml)) {
+            $zip->close();
+            $result['message'] = '엑셀 양식을 읽을 수 없습니다.';
+            return $result;
+        }
+
+        $sharedStrings = cpms_labor_consultant_xlsx_shared_strings($zip);
+        $layout = cpms_labor_consultant_detect_two_row_block($sheetDoc, $sharedStrings, isset($sheet['name']) ? $sheet['name'] : '');
+        $zip->close();
+
+        $result['layout'] = $layout;
+        if (isset($layout['ok']) && $layout['ok']) {
+            $result['ok'] = true;
+        } else {
+            $result['message'] = '노무사 확인용 엑셀 양식 구조를 인식하지 못했습니다. 통합 시트의 5행/6행 헤더를 확인해주세요.';
+        }
+        return $result;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_render_debug_page')) {
+    function cpms_labor_consultant_render_debug_page($debug) {
+        $layout = isset($debug['layout']) && is_array($debug['layout']) ? $debug['layout'] : array();
+        $cols = isset($layout['columns']) && is_array($layout['columns']) ? $layout['columns'] : array();
+        $topDays = isset($layout['topDays']) && is_array($layout['topDays']) ? $layout['topDays'] : array();
+        $bottomDays = isset($layout['bottomDays']) && is_array($layout['bottomDays']) ? $layout['bottomDays'] : array();
+
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!doctype html><html><head><meta charset="utf-8"><title>labor export debug</title>';
+        echo '<style>body{font-family:Consolas,monospace;padding:24px;line-height:1.55}pre{background:#f5f5f5;padding:12px;white-space:pre-wrap}</style>';
+        echo '</head><body>';
+        echo '<h1>labor consultant export debug</h1>';
+        if (isset($debug['message']) && $debug['message'] !== '') {
+            echo '<p>' . htmlspecialchars((string)$debug['message'], ENT_QUOTES, 'UTF-8') . '</p>';
+        }
+        echo '<pre>';
+        echo 'template sheet: ' . htmlspecialchars(isset($debug['sheet']) ? (string)$debug['sheet'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'mode: ' . htmlspecialchars(isset($layout['mode']) ? (string)$layout['mode'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'headerTopRow: ' . htmlspecialchars(isset($layout['headerTopRow']) ? (string)$layout['headerTopRow'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'headerBottomRow: ' . htmlspecialchars(isset($layout['headerBottomRow']) ? (string)$layout['headerBottomRow'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'dataStartRow: ' . htmlspecialchars(isset($layout['dataStartRow']) ? (string)$layout['dataStartRow'] : '', ENT_QUOTES, 'UTF-8') . "\n\n";
+        echo 'day 1 col: ' . (isset($topDays[1]) ? cpms_labor_consultant_xlsx_col_to_letter($topDays[1]) : '') . "\n";
+        echo 'day 15 col: ' . (isset($topDays[15]) ? cpms_labor_consultant_xlsx_col_to_letter($topDays[15]) : '') . "\n";
+        echo 'day 16 col: ' . (isset($bottomDays[16]) ? cpms_labor_consultant_xlsx_col_to_letter($bottomDays[16]) : '') . "\n";
+        echo 'day 31 col: ' . (isset($bottomDays[31]) ? cpms_labor_consultant_xlsx_col_to_letter($bottomDays[31]) : '') . "\n\n";
+        echo 'nameCol: ' . (isset($cols['nameCol']) ? cpms_labor_consultant_xlsx_col_to_letter($cols['nameCol']) : '') . "\n";
+        echo 'phoneCol: ' . (isset($cols['phoneCol']) ? cpms_labor_consultant_xlsx_col_to_letter($cols['phoneCol']) : '') . "\n";
+        echo 'residentNoCol: ' . (isset($cols['residentNoCol']) ? cpms_labor_consultant_xlsx_col_to_letter($cols['residentNoCol']) : '') . "\n";
+        echo 'addressCol: ' . (isset($cols['addressCol']) ? cpms_labor_consultant_xlsx_col_to_letter($cols['addressCol']) : '') . "\n";
+        echo 'totalWorkCol: ' . (isset($cols['totalWorkCol']) ? cpms_labor_consultant_xlsx_col_to_letter($cols['totalWorkCol']) : '') . "\n";
+        echo 'dailyRateCol: ' . (isset($cols['dailyRateCol']) ? cpms_labor_consultant_xlsx_col_to_letter($cols['dailyRateCol']) : '') . "\n";
+        echo 'grossAmountCol: ' . (isset($cols['grossAmountCol']) ? cpms_labor_consultant_xlsx_col_to_letter($cols['grossAmountCol']) : '') . "\n";
+        echo 'netAmountCol: ' . (isset($cols['netAmountCol']) ? cpms_labor_consultant_xlsx_col_to_letter($cols['netAmountCol']) : '') . "\n\n";
+        echo 'laborRows count: ' . htmlspecialchars(isset($debug['labor_count']) ? (string)$debug['labor_count'] : '0', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'first labor row sample:' . "\n";
+        echo htmlspecialchars(print_r(isset($debug['first_labor_row']) ? $debug['first_labor_row'] : array(), true), ENT_QUOTES, 'UTF-8');
+        echo '</pre></body></html>';
+        exit;
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_create_export_file')) {
     function cpms_labor_consultant_create_export_file($templatePath, $dataRows) {
         if (!class_exists('ZipArchive') || !function_exists('simplexml_load_string') || !class_exists('DOMDocument')) {
@@ -1048,6 +1705,106 @@ if (!function_exists('cpms_labor_consultant_create_export_file')) {
         }
 
         $zip->close();
+        return array('ok' => true, 'path' => $tmpPath);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_create_export_file_v2')) {
+    function cpms_labor_consultant_create_export_file_v2($templatePath, $dataRows, $options) {
+        if (!is_array($options)) $options = array();
+        $ym = isset($options['ym']) ? cpms_labor_consultant_normalize_ym($options['ym']) : cpms_labor_consultant_current_ym();
+
+        if (!class_exists('ZipArchive') || !function_exists('simplexml_load_string') || !class_exists('DOMDocument')) {
+            error_log('[labor_consultant_export] library missing');
+            return array('ok' => false, 'message' => '엑셀 생성 라이브러리를 찾을 수 없습니다.');
+        }
+        if (!is_file($templatePath)) {
+            error_log('[labor_consultant_export] template missing');
+            return array('ok' => false, 'message' => '등록된 노무사 확인용 양식이 없습니다.');
+        }
+        if (!is_array($dataRows) || count($dataRows) < 1) {
+            error_log('[labor_consultant_export] no data');
+            return array('ok' => false, 'message' => '선택한 현장/기간에 노무비 데이터가 없습니다.');
+        }
+
+        $tmpBase = tempnam(sys_get_temp_dir(), 'cpms_labor_');
+        if ($tmpBase === false) {
+            error_log('[labor_consultant_export] temp file create failed');
+            return array('ok' => false, 'message' => '엑셀 양식을 읽을 수 없습니다.');
+        }
+        $tmpPath = $tmpBase . '.xlsx';
+        @unlink($tmpPath);
+        if (!@copy($templatePath, $tmpPath)) {
+            @unlink($tmpBase);
+            error_log('[labor_consultant_export] template copy failed');
+            return array('ok' => false, 'message' => '엑셀 양식을 읽을 수 없습니다.');
+        }
+        @unlink($tmpBase);
+
+        $zip = new ZipArchive();
+        if ($zip->open($tmpPath) !== true) {
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] template open failed');
+            return array('ok' => false, 'message' => '엑셀 양식을 읽을 수 없습니다.');
+        }
+
+        $sheet = cpms_labor_consultant_xlsx_find_sheet($zip, '통합');
+        $sheetPath = isset($sheet['path']) ? (string)$sheet['path'] : '';
+        $sheetXml = $zip->getFromName($sheetPath);
+        if ($sheetXml === false || $sheetXml === '') {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] sheet xml missing');
+            return array('ok' => false, 'message' => '엑셀 양식을 읽을 수 없습니다.');
+        }
+
+        $sheetDoc = new DOMDocument('1.0', 'UTF-8');
+        $sheetDoc->preserveWhiteSpace = true;
+        $sheetDoc->formatOutput = false;
+        if (!@$sheetDoc->loadXML($sheetXml)) {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] sheet load failed');
+            return array('ok' => false, 'message' => '엑셀 양식을 읽을 수 없습니다.');
+        }
+
+        $sharedStrings = cpms_labor_consultant_xlsx_shared_strings($zip);
+        $layout = cpms_labor_consultant_detect_two_row_block($sheetDoc, $sharedStrings, isset($sheet['name']) ? $sheet['name'] : '');
+        if (!isset($layout['ok']) || !$layout['ok']) {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] header detection failed');
+            return array('ok' => false, 'message' => '노무사 확인용 엑셀 양식 구조를 인식하지 못했습니다. 통합 시트의 5행/6행 헤더를 확인해주세요.');
+        }
+
+        if (!cpms_labor_consultant_fill_two_row_blocks($sheetDoc, $layout, $dataRows, $ym)) {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] fill failed');
+            return array('ok' => false, 'message' => '노무사 확인용 엑셀 양식 구조를 인식하지 못했습니다. 통합 시트의 5행/6행 헤더를 확인해주세요.');
+        }
+
+        $firstNameCol = isset($layout['columns']['nameCol']) ? (int)$layout['columns']['nameCol'] : 4;
+        $firstNameRef = cpms_labor_consultant_xlsx_col_to_letter($firstNameCol) . '7';
+        $firstName = cpms_labor_consultant_xlsx_cell_text_at($sheetDoc, array(), $firstNameRef);
+        if (trim((string)$firstName) === '') {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] first data row empty');
+            return array('ok' => false, 'message' => '선택한 현장/기간에 노무비 데이터가 없습니다.');
+        }
+
+        if (!$zip->addFromString($sheetPath, $sheetDoc->saveXML())) {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] sheet write failed');
+            return array('ok' => false, 'message' => '엑셀 양식을 읽을 수 없습니다.');
+        }
+
+        cpms_labor_consultant_xlsx_set_active_sheet($zip, isset($sheet['index']) ? (int)$sheet['index'] : 0);
+        $zip->close();
+        cpms_labor_export_remove_calc_chain($tmpPath);
+
         return array('ok' => true, 'path' => $tmpPath);
     }
 }

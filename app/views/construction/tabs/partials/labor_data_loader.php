@@ -1043,11 +1043,13 @@ if (!function_exists('cpms_build_timesheet_workers')) {
         $workers = array();
         foreach ($workerRows as $row) {
             $data = isset($row['data']) && is_array($row['data']) ? $row['data'] : array();
-            $workers[] = array(
+            $workers[count($workers)] = array(
                 'worker_id' => isset($row['id']) ? (int)$row['id'] : 0,
                 'source' => isset($row['source']) ? (string)$row['source'] : '',
                 'name' => isset($data['name']) ? (string)$data['name'] : '',
                 'resident_no' => isset($data['resident_no']) ? (string)$data['resident_no'] : '',
+                'phone' => isset($data['phone']) ? (string)$data['phone'] : '',
+                'address' => isset($data['address']) ? (string)$data['address'] : '',
                 'deposit_rate' => isset($data['deposit_rate']) ? (string)$data['deposit_rate'] : '',
                 'daily_wage' => isset($data['daily_wage']) ? (string)$data['daily_wage'] : '',                
                 'bank_account' => isset($data['bank_account']) ? (string)$data['bank_account'] : '',
