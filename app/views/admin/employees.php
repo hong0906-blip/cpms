@@ -2,6 +2,8 @@
 use App\Core\Db;
 use App\Core\Auth;
 
+require_once __DIR__ . '/leave_management_helpers.php';
+
 $canManage = Auth::canManageEmployees();
 if (!$canManage) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (임원/관리 전용)</div>';
@@ -13,6 +15,10 @@ $q = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
 $rows = array();
 $dbOk = ($pdo !== null);
 $employeeLoadError = '';
+
+if ($dbOk) {
+    cpms_leave_apply_accruals_until($pdo, date('Y-m-d'));
+}
 
 $deptOptions = array('관리', '공무', '품질', '안전', '공사');
 $positionOptions = array('주임','대리','과장','차장','부장','이사','전무','상무','부사장','고문','대표');
@@ -62,6 +68,8 @@ function cpms_column_exists($pdo, $table, $column) {
 // 직원명부 컬럼 존재 여부 체크
 $positionEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'position') : false;
 $hireDateEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'hire_date') : false;
+$resignDateEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'resign_date') : false;
+$monthlyRegularWageEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'monthly_regular_wage') : false;
 $leaveMonthlyEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'leave_monthly_balance') : false;
 $leaveAnnualEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'leave_annual_balance') : false;
 $leaveHalfEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'leave_half_balance') : false;
@@ -79,6 +87,8 @@ $photoPathEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'photo_path') 
 if ($dbOk) {
     $positionSelect = $positionEnabled ? 'position' : "'' AS position";
     $hireDateSelect = $hireDateEnabled ? 'hire_date' : 'NULL AS hire_date';
+    $resignDateSelect = $resignDateEnabled ? 'resign_date' : 'NULL AS resign_date';
+    $wageSelect = $monthlyRegularWageEnabled ? 'monthly_regular_wage' : 'NULL AS monthly_regular_wage';
     $lmSelect = $leaveMonthlyEnabled ? 'leave_monthly_balance' : 'NULL AS leave_monthly_balance';
     $laSelect = $leaveAnnualEnabled ? 'leave_annual_balance' : 'NULL AS leave_annual_balance';
     $lhSelect = $leaveHalfEnabled ? 'leave_half_balance' : 'NULL AS leave_half_balance';
@@ -91,7 +101,7 @@ if ($dbOk) {
     $chatUserSelect = $googleChatUserEnabled ? 'google_chat_user_name' : "'' AS google_chat_user_name";
     $chatSpaceSelect = $googleChatSpaceEnabled ? 'google_chat_dm_space_name' : "'' AS google_chat_dm_space_name";
 
-    $sql = "SELECT id,email,name,department,{$positionSelect},{$hireDateSelect},{$lmSelect},{$laSelect},{$lhSelect},{$birthDateSelect},{$siteManagerSelect},{$teamLeaderSelect},{$gongmuSelect},{$manageSelect},{$chatEnabledSelect},{$chatUserSelect},{$chatSpaceSelect},role,photo_path,is_active FROM employees WHERE 1=1";
+    $sql = "SELECT id,email,name,department,{$positionSelect},{$hireDateSelect},{$resignDateSelect},{$wageSelect},{$lmSelect},{$laSelect},{$lhSelect},{$birthDateSelect},{$siteManagerSelect},{$teamLeaderSelect},{$gongmuSelect},{$manageSelect},{$chatEnabledSelect},{$chatUserSelect},{$chatSpaceSelect},role,photo_path,is_active FROM employees WHERE 1=1";
     $params = array();
     if ($q !== '') {
         $sql .= " AND (email LIKE :q OR name LIKE :q OR department LIKE :q" . ($positionEnabled ? " OR position LIKE :q" : "") . ")";
@@ -134,7 +144,7 @@ if ($dbOk) {
 <tr>
 <td class="px-4 py-3"><div class="w-10 h-10 rounded-2xl bg-emerald-100 flex items-center justify-center font-bold text-emerald-700 relative overflow-hidden"><?php if($photoPath !== ''): ?><img src="<?php echo h($photoPath); ?>" class="w-10 h-10 rounded-2xl object-cover absolute inset-0" onerror="this.style.display='none';"><?php endif; ?><span><?php echo h($first); ?></span></div></td>
 <td class="px-4 py-3 font-bold"><?php echo h($r['name']); ?></td><td class="px-4 py-3"><?php echo h($r['email']); ?></td><td class="px-4 py-3"><?php echo h($r['department']); ?></td><td class="px-4 py-3"><?php echo h($r['hire_date'] ? $r['hire_date'] : '-'); ?></td><td class="px-4 py-3"><?php echo h($r['position']); ?></td><td class="px-4 py-3"><?php echo h($r['role']==='executive'?'임원':'직원'); ?></td><td class="px-4 py-3"><?php echo ((int)$r['is_active']===1)?'활성':'비활성'; ?></td>
-<td class="px-4 py-3"><div class="flex gap-2"><button type="button" class="px-3 py-2 border rounded-2xl" data-emp-edit="<?php echo (int)$r['id']; ?>" data-emp-email="<?php echo h($r['email']); ?>" data-emp-name="<?php echo h($r['name']); ?>" data-emp-dept="<?php echo h($r['department']); ?>" data-emp-pos="<?php echo h($r['position']); ?>" data-emp-role="<?php echo h($r['role']); ?>" data-emp-active="<?php echo (int)$r['is_active']; ?>" data-emp-hire-date="<?php echo h($r['hire_date']); ?>" data-emp-lbm="<?php echo h($r['leave_monthly_balance']); ?>" data-emp-lba="<?php echo h($r['leave_annual_balance']); ?>" data-emp-lbh="<?php echo h($r['leave_half_balance']); ?>" data-emp-birth-date="<?php echo h(isset($r['birth_date']) ? $r['birth_date'] : ''); ?>" data-emp-can-site="<?php echo h(isset($r['approval_can_be_site_manager']) ? $r['approval_can_be_site_manager'] : '0'); ?>" data-emp-can-lead="<?php echo h(isset($r['approval_can_be_team_leader']) ? $r['approval_can_be_team_leader'] : '0'); ?>" data-emp-can-gongmu="<?php echo h(isset($r['approval_can_be_gongmu_approver']) ? $r['approval_can_be_gongmu_approver'] : '0'); ?>" data-emp-can-manage="<?php echo h(isset($r['approval_can_be_manage_approver']) ? $r['approval_can_be_manage_approver'] : '0'); ?>" data-emp-chat-enabled="<?php echo h(isset($r['google_chat_enabled']) ? $r['google_chat_enabled'] : '0'); ?>" data-emp-chat-user="<?php echo h(isset($r['google_chat_user_name']) ? $r['google_chat_user_name'] : ''); ?>" data-emp-chat-space="<?php echo h(isset($r['google_chat_dm_space_name']) ? $r['google_chat_dm_space_name'] : ''); ?>" data-emp-photo="<?php echo h(isset($r['photo_path']) ? $r['photo_path'] : ''); ?>">수정</button><button type="button" class="px-3 py-2 border border-red-200 text-red-700 rounded-2xl" data-emp-delete="<?php echo (int)$r['id']; ?>" data-emp-name-for="<?php echo h($r['name']); ?>">삭제</button></div></td>
+<td class="px-4 py-3"><div class="flex gap-2"><button type="button" class="px-3 py-2 border rounded-2xl" data-emp-edit="<?php echo (int)$r['id']; ?>" data-emp-email="<?php echo h($r['email']); ?>" data-emp-name="<?php echo h($r['name']); ?>" data-emp-dept="<?php echo h($r['department']); ?>" data-emp-pos="<?php echo h($r['position']); ?>" data-emp-role="<?php echo h($r['role']); ?>" data-emp-active="<?php echo (int)$r['is_active']; ?>" data-emp-hire-date="<?php echo h($r['hire_date']); ?>" data-emp-resign-date="<?php echo h(isset($r['resign_date']) ? $r['resign_date'] : ''); ?>" data-emp-wage="<?php echo h(isset($r['monthly_regular_wage']) ? $r['monthly_regular_wage'] : ''); ?>" data-emp-lbm="<?php echo h($r['leave_monthly_balance']); ?>" data-emp-lba="<?php echo h($r['leave_annual_balance']); ?>" data-emp-lbh="<?php echo h($r['leave_half_balance']); ?>" data-emp-birth-date="<?php echo h(isset($r['birth_date']) ? $r['birth_date'] : ''); ?>" data-emp-can-site="<?php echo h(isset($r['approval_can_be_site_manager']) ? $r['approval_can_be_site_manager'] : '0'); ?>" data-emp-can-lead="<?php echo h(isset($r['approval_can_be_team_leader']) ? $r['approval_can_be_team_leader'] : '0'); ?>" data-emp-can-gongmu="<?php echo h(isset($r['approval_can_be_gongmu_approver']) ? $r['approval_can_be_gongmu_approver'] : '0'); ?>" data-emp-can-manage="<?php echo h(isset($r['approval_can_be_manage_approver']) ? $r['approval_can_be_manage_approver'] : '0'); ?>" data-emp-chat-enabled="<?php echo h(isset($r['google_chat_enabled']) ? $r['google_chat_enabled'] : '0'); ?>" data-emp-chat-user="<?php echo h(isset($r['google_chat_user_name']) ? $r['google_chat_user_name'] : ''); ?>" data-emp-chat-space="<?php echo h(isset($r['google_chat_dm_space_name']) ? $r['google_chat_dm_space_name'] : ''); ?>" data-emp-photo="<?php echo h(isset($r['photo_path']) ? $r['photo_path'] : ''); ?>">수정</button><button type="button" class="px-3 py-2 border border-red-200 text-red-700 rounded-2xl" data-emp-delete="<?php echo (int)$r['id']; ?>" data-emp-name-for="<?php echo h($r['name']); ?>">삭제</button></div></td>
 </tr>
 <?php endforeach; ?>
 </tbody></table></div><div class="px-4 py-3 text-xs text-gray-600 bg-amber-50 border-t">휴가 차감 기준은 입사일 기준 1년 미만은 월차, 1년 이상은 연차입니다. 반차는 해당 기준에 따라 월차 또는 연차에서 0.5개 차감됩니다.</div></div>
@@ -164,6 +174,14 @@ function setChecked(id, checked) {
     var el = document.getElementById(id);
     if (el) el.checked = !!checked;
 }
+function insertAfterId(anchorId, html) {
+    var el = document.getElementById(anchorId);
+    if (el && el.insertAdjacentHTML) el.insertAdjacentHTML('afterend', html);
+}
+insertAfterId('empAddHireDate', '<input type="date" class="w-full px-4 py-2 border rounded-2xl mt-1" name="resign_date" id="empAddResignDate" placeholder="퇴사일">');
+insertAfterId('empAddResignDate', '<input type="number" step="0.01" class="px-3 py-2 border rounded-2xl" name="monthly_regular_wage" id="empAddWage" placeholder="통상임금(월)">');
+insertAfterId('empEditHireDate', '<input type="date" class="w-full px-4 py-2 border rounded-2xl mt-2" name="resign_date" id="empEditResignDate" placeholder="퇴사일">');
+insertAfterId('empEditResignDate', '<input type="number" step="0.01" class="w-full px-4 py-2 border rounded-2xl mt-2" name="monthly_regular_wage" id="empEditWage" placeholder="통상임금(월)">');
 document.addEventListener('click', function(e) {
     var t = e.target;
     var op = t.closest ? t.closest('[data-modal-open]') : null;
@@ -184,6 +202,8 @@ document.addEventListener('click', function(e) {
             setValue('empEditRole', be.getAttribute('data-emp-role') || 'employee');
             setValue('empEditActive', be.getAttribute('data-emp-active') || '1');
             setValue('empEditHireDate', be.getAttribute('data-emp-hire-date') || '');
+            setValue('empEditResignDate', be.getAttribute('data-emp-resign-date') || '');
+            setValue('empEditWage', be.getAttribute('data-emp-wage') || '');
             setValue('empEditLbm', be.getAttribute('data-emp-lbm') || '');
             setValue('empEditLba', be.getAttribute('data-emp-lba') || '');
             setValue('empEditLbh', be.getAttribute('data-emp-lbh') || '');

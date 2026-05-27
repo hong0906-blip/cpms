@@ -24,6 +24,7 @@ $tabs = array(
     'direct_rates' => array('label' => '직영팀 설정', 'icon' => 'wallet'),
     'labor_calc'   => array('label' => '노무비 계산', 'icon' => 'calculator'),
     'attendance'   => array('label' => '출퇴근·근태관리', 'icon' => 'clock-3'),
+    'leave_management' => array('label' => '연차 관리', 'icon' => 'calendar-days'),
 );
 if (!isset($tabs[$tab])) {
     $tab = 'employees';
@@ -63,6 +64,8 @@ if ($tab === 'employees') {
     require __DIR__ . '/labor_calc.php';
 } elseif ($tab === 'attendance') {
     require __DIR__ . '/attendance.php';
+} elseif ($tab === 'leave_management') {
+    require __DIR__ . '/leave_management.php';
 } else {
     require __DIR__ . '/employees.php';
 }

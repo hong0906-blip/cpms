@@ -89,7 +89,9 @@ $tables = array(
     'cpms_google_chat_notifications' => "CREATE TABLE IF NOT EXISTS cpms_google_chat_notifications (id INT AUTO_INCREMENT PRIMARY KEY, source_type VARCHAR(50) NOT NULL, source_id INT NULL, event_type VARCHAR(50) NULL, receiver_employee_id INT NULL, receiver_name VARCHAR(100) NULL, receiver_email VARCHAR(190) NULL, dm_space_name VARCHAR(255) NULL, message_text TEXT NULL, send_status VARCHAR(20) NULL, error_message TEXT NULL, sent_at DATETIME NULL, created_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
     'cpms_approval_settings' => "CREATE TABLE IF NOT EXISTS cpms_approval_settings (id INT AUTO_INCREMENT PRIMARY KEY, setting_key VARCHAR(100) NULL, setting_value TEXT NULL, updated_at DATETIME NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
     'cpms_holiday_cache' => "CREATE TABLE IF NOT EXISTS cpms_holiday_cache (id INT AUTO_INCREMENT PRIMARY KEY, holiday_date DATE NOT NULL, holiday_name VARCHAR(190) NULL, source VARCHAR(40) NOT NULL DEFAULT 'GOOGLE_CALENDAR', source_calendar_id VARCHAR(190) NULL, source_event_id VARCHAR(190) NULL, year_no INT NULL, is_active TINYINT(1) NOT NULL DEFAULT 1, synced_at DATETIME NULL, created_at DATETIME NULL, updated_at DATETIME NULL, UNIQUE KEY uniq_holiday_date_source (holiday_date, source)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    'cpms_approval_leave_deductions' => "CREATE TABLE IF NOT EXISTS cpms_approval_leave_deductions (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT NOT NULL, employee_id INT NOT NULL, leave_type VARCHAR(50) NULL, leave_bucket VARCHAR(20) NULL, target_column VARCHAR(50) NULL, deduct_amount DECIMAL(6,2) NOT NULL DEFAULT 0, balance_before DECIMAL(6,2) NULL, balance_after DECIMAL(6,2) NULL, deducted_at DATETIME NULL, created_at DATETIME NULL, note TEXT NULL, UNIQUE KEY uniq_document_id (document_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    'cpms_approval_leave_deductions' => "CREATE TABLE IF NOT EXISTS cpms_approval_leave_deductions (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT NOT NULL, employee_id INT NOT NULL, leave_type VARCHAR(50) NULL, leave_bucket VARCHAR(20) NULL, target_column VARCHAR(50) NULL, deduct_amount DECIMAL(6,2) NOT NULL DEFAULT 0, balance_before DECIMAL(6,2) NULL, balance_after DECIMAL(6,2) NULL, deducted_at DATETIME NULL, created_at DATETIME NULL, note TEXT NULL, UNIQUE KEY uniq_document_id (document_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    'cpms_leave_accrual_logs' => "CREATE TABLE IF NOT EXISTS cpms_leave_accrual_logs (id INT AUTO_INCREMENT PRIMARY KEY, employee_id INT NOT NULL, leave_type VARCHAR(20) NOT NULL, accrual_date DATE NOT NULL, accrual_year INT NOT NULL, accrual_month INT NULL, amount DECIMAL(6,2) NOT NULL DEFAULT 0, reason VARCHAR(255) NULL, created_at DATETIME NULL, UNIQUE KEY uniq_employee_type_date (employee_id, leave_type, accrual_date), INDEX idx_employee_year (employee_id, accrual_year)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    'cpms_leave_adjustments' => "CREATE TABLE IF NOT EXISTS cpms_leave_adjustments (id INT AUTO_INCREMENT PRIMARY KEY, employee_id INT NOT NULL, target_year INT NOT NULL, adjust_type VARCHAR(20) NOT NULL, amount DECIMAL(6,2) NOT NULL DEFAULT 0, reason VARCHAR(255) NULL, created_by INT NULL, created_at DATETIME NULL, INDEX idx_employee_year (employee_id, target_year)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
 );
 
 foreach ($tables as $name => $sql) {
@@ -120,6 +122,22 @@ $columns = array(
     'cpms_approval_files' => array(
         'file_label' => "ALTER TABLE cpms_approval_files ADD COLUMN file_label VARCHAR(100) NULL",
         'file_type' => "ALTER TABLE cpms_approval_files ADD COLUMN file_type VARCHAR(50) NULL"
+    ),
+    'employees' => array(
+        'hire_date' => "ALTER TABLE employees ADD COLUMN hire_date DATE NULL",
+        'resign_date' => "ALTER TABLE employees ADD COLUMN resign_date DATE NULL",
+        'leave_monthly_balance' => "ALTER TABLE employees ADD COLUMN leave_monthly_balance DECIMAL(6,2) NULL",
+        'leave_annual_balance' => "ALTER TABLE employees ADD COLUMN leave_annual_balance DECIMAL(6,2) NULL",
+        'leave_half_balance' => "ALTER TABLE employees ADD COLUMN leave_half_balance DECIMAL(6,2) NULL",
+        'monthly_regular_wage' => "ALTER TABLE employees ADD COLUMN monthly_regular_wage DECIMAL(15,2) NULL"
+    ),
+    'cpms_leave_adjustments' => array(
+        'target_year' => "ALTER TABLE cpms_leave_adjustments ADD COLUMN target_year INT NULL",
+        'adjust_type' => "ALTER TABLE cpms_leave_adjustments ADD COLUMN adjust_type VARCHAR(20) NULL",
+        'amount' => "ALTER TABLE cpms_leave_adjustments ADD COLUMN amount DECIMAL(6,2) NOT NULL DEFAULT 0",
+        'reason' => "ALTER TABLE cpms_leave_adjustments ADD COLUMN reason VARCHAR(255) NULL",
+        'created_by' => "ALTER TABLE cpms_leave_adjustments ADD COLUMN created_by INT NULL",
+        'created_at' => "ALTER TABLE cpms_leave_adjustments ADD COLUMN created_at DATETIME NULL"
     )
 );
 foreach ($columns as $table => $defs) {
@@ -133,6 +151,9 @@ approval_setup_add_index($pdo, 'cpms_approval_references', 'idx_document_id', "A
 approval_setup_add_index($pdo, 'cpms_approval_references', 'idx_employee_id', "ALTER TABLE cpms_approval_references ADD INDEX idx_employee_id (employee_id)", $results);
 approval_setup_add_index($pdo, 'cpms_approval_references', 'idx_employee_email', "ALTER TABLE cpms_approval_references ADD INDEX idx_employee_email (employee_email)", $results);
 approval_setup_add_index($pdo, 'cpms_approval_leave_deductions', 'uniq_document_id', "ALTER TABLE cpms_approval_leave_deductions ADD UNIQUE KEY uniq_document_id (document_id)", $results);
+approval_setup_add_index($pdo, 'cpms_leave_accrual_logs', 'uniq_employee_type_date', "ALTER TABLE cpms_leave_accrual_logs ADD UNIQUE KEY uniq_employee_type_date (employee_id, leave_type, accrual_date)", $results);
+approval_setup_add_index($pdo, 'cpms_leave_accrual_logs', 'idx_employee_year', "ALTER TABLE cpms_leave_accrual_logs ADD INDEX idx_employee_year (employee_id, accrual_year)", $results);
+approval_setup_add_index($pdo, 'cpms_leave_adjustments', 'idx_employee_year', "ALTER TABLE cpms_leave_adjustments ADD INDEX idx_employee_year (employee_id, target_year)", $results);
 
 try {
     $defaults = array(

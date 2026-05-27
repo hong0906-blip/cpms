@@ -332,20 +332,6 @@ if ($pdo) {
     </div>
 
     <div class="bg-white/80 rounded-3xl p-6 border">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-            <div class="p-4 rounded-2xl bg-blue-50">
-                <div class="text-gray-600 font-bold">전체 프로젝트</div>
-                <div class="text-4xl font-extrabold text-blue-700 mt-2"><?php echo $projectCostCount; ?>건</div>
-            </div>
-            <div class="p-4 rounded-2xl bg-amber-50">
-                <div class="text-gray-600 font-bold">미처리 이슈</div>
-                <div class="text-4xl font-extrabold text-amber-700 mt-2"><?php echo count($issues); ?>건</div>
-            </div>
-            <div class="p-4 rounded-2xl bg-rose-50">
-                <div class="text-gray-600 font-bold">안전사고</div>
-                <div class="text-4xl font-extrabold text-rose-700 mt-2"><?php echo count($safetyIncidents); ?>건</div>
-            </div>
-        </div>
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div>
                 <h3 class="text-2xl font-extrabold">52시간 초과자 명단</h3>
@@ -378,7 +364,93 @@ if ($pdo) {
     </div>
 </div>
 
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+    <button type="button" class="p-4 rounded-3xl bg-blue-50 border text-left" data-project-cost-modal-open="projectCostSummary">
+            <div class="text-gray-600 font-bold">전체 프로젝트</div>
+            <div class="text-4xl font-extrabold text-blue-700 mt-2"><?php echo $projectCostCount; ?>건</div>
+            <div class="text-sm text-blue-700 font-bold mt-2">클릭해서 프로젝트별 원가율 보기</div>
+    </button>
+    <div class="p-4 rounded-3xl bg-amber-50 border">
+        <div class="text-gray-600 font-bold">미처리 이슈</div>
+        <div class="text-4xl font-extrabold text-amber-700 mt-2"><?php echo count($issues); ?>건</div>
+    </div>
+    <div class="p-4 rounded-3xl bg-rose-50 border">
+        <div class="text-gray-600 font-bold">안전사고</div>
+        <div class="text-4xl font-extrabold text-rose-700 mt-2"><?php echo count($safetyIncidents); ?>건</div>
+    </div>
+</div>
+
+<div id="modal-projectCostSummary" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40" data-project-cost-modal-close="projectCostSummary"></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-5xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
+            <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                <div>
+                    <div class="text-2xl font-extrabold text-gray-900">프로젝트별 원가율 현황</div>
+                    <div class="text-sm text-gray-500 mt-1">80% 초과는 빨간색, 이하는 파란색으로 표시됩니다.</div>
+                </div>
+                <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-project-cost-modal-close="projectCostSummary">닫기</button>
+            </div>
+            <div class="p-4 md:p-6 overflow-y-auto max-h-[74vh]">
+            <?php if (empty($projectCostSummary['projects'])): ?>
+                <div class="text-sm text-gray-600">표시할 프로젝트가 없습니다.</div>
+            <?php else: ?>
+                <div class="space-y-3 max-h-[28rem] overflow-y-auto">
+                    <?php foreach ($projectCostSummary['projects'] as $projectRow): ?>
+                        <?php
+                        $rateClass = (isset($projectRow['status_color']) && $projectRow['status_color'] === 'red')
+                            ? 'bg-red-50 text-red-700 border-red-100'
+                            : 'bg-blue-50 text-blue-700 border-blue-100';
+                        ?>
+                        <div class="p-4 rounded-2xl border border-gray-200 bg-slate-50">
+                            <div class="flex flex-col gap-2">
+                                <div class="font-extrabold text-gray-900"><?php echo h($projectRow['project_name']); ?></div>
+                                <div class="flex flex-wrap gap-2 text-sm">
+                                    <span class="px-3 py-1 rounded-full border font-bold <?php echo $rateClass; ?>">원가율 <?php echo h($projectRow['cost_rate_label']); ?></span>
+                                    <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">매출 <?php echo number_format((float)$projectRow['sales']); ?></span>
+                                    <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">투입원가 <?php echo number_format((float)$projectRow['used_total']); ?></span>
+                                </div>
+                                <div class="flex flex-wrap gap-2 text-xs text-gray-600">
+                                    <span>노무 <?php echo number_format((float)$projectRow['labor']); ?></span>
+                                    <span>장비 <?php echo number_format((float)$projectRow['equipment']); ?></span>
+                                    <span>자재 <?php echo number_format((float)$projectRow['materials']); ?></span>
+                                </div>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php cpms_render_executive_task_dashboard($pdo); ?>
+
+<script>
+(function(){
+    var openButtons = document.querySelectorAll('[data-project-cost-modal-open]');
+    var closeButtons = document.querySelectorAll('[data-project-cost-modal-close]');
+    function openModal(key) {
+        var modal = document.getElementById('modal-' + key);
+        if (modal) modal.classList.remove('hidden');
+    }
+    function closeModal(key) {
+        var modal = document.getElementById('modal-' + key);
+        if (modal) modal.classList.add('hidden');
+    }
+    for (var i = 0; i < openButtons.length; i++) {
+        openButtons[i].addEventListener('click', function(){
+            openModal(this.getAttribute('data-project-cost-modal-open'));
+        });
+    }
+    for (var j = 0; j < closeButtons.length; j++) {
+        closeButtons[j].addEventListener('click', function(){
+            closeModal(this.getAttribute('data-project-cost-modal-close'));
+        });
+    }
+})();
+</script>
 
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
     <div class="flex items-start justify-between gap-4 mb-4">

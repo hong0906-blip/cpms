@@ -25,6 +25,8 @@ function cpms_column_exists($pdo, $table, $column) {
 
 $positionEnabled = cpms_column_exists($pdo, 'employees', 'position');
 $hireDateEnabled = cpms_column_exists($pdo, 'employees', 'hire_date');
+$resignDateEnabled = cpms_column_exists($pdo, 'employees', 'resign_date');
+$monthlyRegularWageEnabled = cpms_column_exists($pdo, 'employees', 'monthly_regular_wage');
 $leaveMonthlyEnabled = cpms_column_exists($pdo, 'employees', 'leave_monthly_balance');
 $leaveAnnualEnabled = cpms_column_exists($pdo, 'employees', 'leave_annual_balance');
 $leaveHalfEnabled = cpms_column_exists($pdo, 'employees', 'leave_half_balance');
@@ -182,6 +184,8 @@ $pos = isset($_POST['position']) ? trim((string)$_POST['position']) : '';
 $role = isset($_POST['role']) ? (string)$_POST['role'] : 'employee';
 $isActive = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;
 $hireDate = isset($_POST['hire_date']) ? trim((string)$_POST['hire_date']) : '';
+$resignDate = isset($_POST['resign_date']) ? trim((string)$_POST['resign_date']) : '';
+$monthlyRegularWage = isset($_POST['monthly_regular_wage']) ? trim((string)$_POST['monthly_regular_wage']) : '';
 $leaveMonthly = isset($_POST['leave_monthly_balance']) ? trim((string)$_POST['leave_monthly_balance']) : '';
 $leaveAnnual = isset($_POST['leave_annual_balance']) ? trim((string)$_POST['leave_annual_balance']) : '';
 $leaveHalf = isset($_POST['leave_half_balance']) ? trim((string)$_POST['leave_half_balance']) : '';
@@ -223,6 +227,8 @@ try {
     $fields = array('email=:email','name=:name','department=:dept','role=:role','is_active=:active');
     if ($positionEnabled) $fields[] = 'position=:pos';
     if ($hireDateEnabled) $fields[] = 'hire_date=:hire_date';
+    if ($resignDateEnabled) $fields[] = 'resign_date=:resign_date';
+    if ($monthlyRegularWageEnabled) $fields[] = 'monthly_regular_wage=:monthly_regular_wage';
     if ($leaveMonthlyEnabled) $fields[] = 'leave_monthly_balance=:leave_monthly_balance';
     if ($leaveAnnualEnabled) $fields[] = 'leave_annual_balance=:leave_annual_balance';
     if ($leaveHalfEnabled) $fields[] = 'leave_half_balance=:leave_half_balance';
@@ -243,6 +249,8 @@ try {
         $vals = array(':email',':name',':dept',':role',':active');
         if ($positionEnabled) { $cols[] = 'position'; $vals[] = ':pos'; }
         if ($hireDateEnabled) { $cols[] = 'hire_date'; $vals[] = ':hire_date'; }
+        if ($resignDateEnabled) { $cols[] = 'resign_date'; $vals[] = ':resign_date'; }
+        if ($monthlyRegularWageEnabled) { $cols[] = 'monthly_regular_wage'; $vals[] = ':monthly_regular_wage'; }
         if ($leaveMonthlyEnabled) { $cols[] = 'leave_monthly_balance'; $vals[] = ':leave_monthly_balance'; }
         if ($leaveAnnualEnabled) { $cols[] = 'leave_annual_balance'; $vals[] = ':leave_annual_balance'; }
         if ($leaveHalfEnabled) { $cols[] = 'leave_half_balance'; $vals[] = ':leave_half_balance'; }
@@ -265,6 +273,8 @@ try {
     $st->bindValue(':active', $isActive, \PDO::PARAM_INT);
     if ($positionEnabled) { if ($pos === '') $st->bindValue(':pos', null, \PDO::PARAM_NULL); else $st->bindValue(':pos', $pos); }
     if ($hireDateEnabled) { if ($hireDate === '') $st->bindValue(':hire_date', null, \PDO::PARAM_NULL); else $st->bindValue(':hire_date', $hireDate); }
+    if ($resignDateEnabled) { if ($resignDate === '') $st->bindValue(':resign_date', null, \PDO::PARAM_NULL); else $st->bindValue(':resign_date', $resignDate); }
+    if ($monthlyRegularWageEnabled) { if ($monthlyRegularWage === '') $st->bindValue(':monthly_regular_wage', null, \PDO::PARAM_NULL); else $st->bindValue(':monthly_regular_wage', (float)$monthlyRegularWage); }
     if ($leaveMonthlyEnabled) { if ($leaveMonthly === '') $st->bindValue(':leave_monthly_balance', null, \PDO::PARAM_NULL); else $st->bindValue(':leave_monthly_balance', (float)$leaveMonthly); }
     if ($leaveAnnualEnabled) { if ($leaveAnnual === '') $st->bindValue(':leave_annual_balance', null, \PDO::PARAM_NULL); else $st->bindValue(':leave_annual_balance', (float)$leaveAnnual); }
     if ($leaveHalfEnabled) { if ($leaveHalf === '') $st->bindValue(':leave_half_balance', null, \PDO::PARAM_NULL); else $st->bindValue(':leave_half_balance', (float)$leaveHalf); }

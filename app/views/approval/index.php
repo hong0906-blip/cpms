@@ -113,6 +113,7 @@ if (isset($_GET['show_cancelled']) && (string)$_GET['show_cancelled'] === '1') {
 if (!in_array($view, array('active', 'cancelled', 'completed'), true)) {
     $view = 'active';
 }
+$isManagementCompletedViewer = ($view === 'completed' && approval_is_management_department_user($pdo, $u));
 
 $docTypeFilter = isset($_GET['doc_type']) ? trim((string)$_GET['doc_type']) : '';
 $titleFilter = isset($_GET['title']) ? trim((string)$_GET['title']) : '';
@@ -194,6 +195,9 @@ if ($pdo) {
     }
 
     $relatedParts = array();
+    if ($isManagementCompletedViewer) {
+        $relatedParts[] = '1 = 1';
+    }
     if (count($ownerParts) > 0) {
         $relatedParts[] = '(' . implode(' OR ', $ownerParts) . ')';
     }

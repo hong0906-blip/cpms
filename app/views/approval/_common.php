@@ -321,11 +321,70 @@ if (!function_exists('approval_is_admin_user')) {
     }
 }
 
+if (!function_exists('approval_is_management_department_value')) {
+    function approval_is_management_department_value($dept)
+    {
+        $dept = trim((string)$dept);
+        if ($dept === '관리' || $dept === '관리부' || $dept === '관리팀') {
+            return true;
+        }
+        return false;
+    }
+}
+
+if (!function_exists('approval_is_management_department_user')) {
+    function approval_is_management_department_user($pdo, $user)
+    {
+        if (\App\Core\Auth::isMaster()) {
+            return true;
+        }
+        if (is_array($user) && isset($user['department']) && approval_is_management_department_value($user['department'])) {
+            return true;
+        }
+        if (!$pdo || !is_array($user)) {
+            return false;
+        }
+        try {
+            $parts = array();
+            $params = array();
+            if (isset($user['id']) && (int)$user['id'] > 0) {
+                $parts[count($parts)] = 'id=:id';
+                $params[':id'] = (int)$user['id'];
+            }
+            if (isset($user['email']) && trim((string)$user['email']) !== '') {
+                $parts[count($parts)] = 'LOWER(TRIM(email))=LOWER(TRIM(:email))';
+                $params[':email'] = trim((string)$user['email']);
+            }
+            if (isset($user['name']) && trim((string)$user['name']) !== '') {
+                $parts[count($parts)] = 'name=:name';
+                $params[':name'] = trim((string)$user['name']);
+            }
+            if (count($parts) === 0) {
+                return false;
+            }
+            $sql = "SELECT department FROM employees WHERE " . implode(' OR ', $parts) . " LIMIT 1";
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+            $dept = $st->fetchColumn();
+            return approval_is_management_department_value($dept);
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
 if (!function_exists('approval_can_view_document')) {
     function approval_can_view_document($pdo, $docRow, $user)
     {
         if (!is_array($docRow) || !isset($docRow['id'])) {
             return false;
+        }
+        if (approval_is_master_user()) {
+            return true;
+        }
+        $status = strtoupper(trim((string)(isset($docRow['doc_status']) ? $docRow['doc_status'] : '')));
+        if (in_array($status, array('APPROVED', 'COMPLETED'), true) && approval_is_management_department_user($pdo, $user)) {
+            return true;
         }
         if (approval_is_document_owner($pdo, $docRow, $user)) {
             return true;

@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/template_helpers.php';
 require_once __DIR__ . '/../attendance/common.php';
+require_once __DIR__ . '/../admin/leave_management_helpers.php';
 
 if (!function_exists('approval_parse_date')) {
     function approval_parse_date($v)
@@ -76,6 +77,11 @@ if (!function_exists('approval_deduct_leave_balance_on_final_approval')) {
         $baseDate = approval_parse_date(isset($content['leave_start_date'])?$content['leave_start_date']:'');
         if ($baseDate === '') $baseDate = approval_parse_date($doc['created_at']);
         if ($baseDate === '') $baseDate = date('Y-m-d');
+        cpms_leave_apply_employee_accruals_until($pdo, (int)$doc['created_by_id'], date('Y-m-d'));
+        $empSt = $pdo->prepare("SELECT id,hire_date,leave_monthly_balance,leave_annual_balance FROM employees WHERE id=:id LIMIT 1");
+        $empSt->execute(array(':id'=>(int)$doc['created_by_id']));
+        $emp = $empSt->fetch();
+        if (!$emp) return $ret;
         $bucket = approval_determine_leave_bucket_by_hire_date($emp['hire_date'], $baseDate);
         if ($bucket === '') return $ret;
 
