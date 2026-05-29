@@ -1008,12 +1008,73 @@ if (!function_exists('cpms_labor_consultant_prepare_target_rows')) {
     }
 }
 
+if (!function_exists('cpms_labor_consultant_cell_node_has_formula')) {
+    function cpms_labor_consultant_cell_node_has_formula($cellNode) {
+        if (!($cellNode instanceof DOMElement)) return false;
+        foreach ($cellNode->childNodes as $child) {
+            if ($child instanceof DOMElement && $child->localName === 'f') {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_cell_has_formula')) {
+    function cpms_labor_consultant_cell_has_formula($sheetDoc, $rowNode, $colIndex) {
+        if (!($rowNode instanceof DOMElement)) return false;
+        $colIndex = (int)$colIndex;
+        foreach ($rowNode->childNodes as $child) {
+            if (!($child instanceof DOMElement)) continue;
+            if ($child->localName !== 'c') continue;
+            list(, $existingCol) = cpms_labor_consultant_xlsx_ref_to_pos($child->getAttribute('r'));
+            if ($existingCol === $colIndex) {
+                return cpms_labor_consultant_cell_node_has_formula($child);
+            }
+        }
+        return false;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_formula_stats_reset')) {
+    function cpms_labor_consultant_formula_stats_reset() {
+        $GLOBALS['cpms_labor_consultant_formula_stats'] = array(
+            'written' => array(),
+            'skipped' => array()
+        );
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_formula_stats_get')) {
+    function cpms_labor_consultant_formula_stats_get() {
+        if (!isset($GLOBALS['cpms_labor_consultant_formula_stats']) || !is_array($GLOBALS['cpms_labor_consultant_formula_stats'])) {
+            cpms_labor_consultant_formula_stats_reset();
+        }
+        return $GLOBALS['cpms_labor_consultant_formula_stats'];
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_formula_stats_add')) {
+    function cpms_labor_consultant_formula_stats_add($kind, $ref) {
+        $stats = cpms_labor_consultant_formula_stats_get();
+        $kind = (string)$kind;
+        if (!isset($stats[$kind]) || !is_array($stats[$kind])) {
+            $stats[$kind] = array();
+        }
+        if (count($stats[$kind]) < 80) {
+            $stats[$kind][count($stats[$kind])] = (string)$ref;
+        }
+        $GLOBALS['cpms_labor_consultant_formula_stats'] = $stats;
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_clear_cell_value')) {
     function cpms_labor_consultant_clear_cell_value($cellNode) {
+        if (cpms_labor_consultant_cell_node_has_formula($cellNode)) return;
+
         $remove = array();
         foreach ($cellNode->childNodes as $child) {
             if (!($child instanceof DOMElement)) continue;
-            if ($child->localName === 'f') continue;
             $remove[count($remove)] = $child;
         }
         foreach ($remove as $node) {
@@ -1063,15 +1124,8 @@ if (!function_exists('cpms_labor_consultant_set_cell_value')) {
         $cellNode = cpms_labor_consultant_find_or_create_cell($sheetDoc, $rowNode, $colIndex);
         if (!$cellNode) return;
 
-        $hasFormula = false;
-        foreach ($cellNode->childNodes as $child) {
-            if ($child instanceof DOMElement && $child->localName === 'f') {
-                $hasFormula = true;
-                break;
-            }
-        }
-        if ($hasFormula) {
-            cpms_labor_consultant_clear_cell_value($cellNode);
+        if (cpms_labor_consultant_cell_node_has_formula($cellNode)) {
+            cpms_labor_consultant_formula_stats_add('skipped', $cellNode->getAttribute('r'));
             return;
         }
 
@@ -1089,6 +1143,8 @@ if (!function_exists('cpms_labor_consultant_set_cell_value')) {
         if ($value === '' || $value === null) {
             return;
         }
+
+        cpms_labor_consultant_formula_stats_add('written', $cellNode->getAttribute('r'));
 
         if ($isNumeric) {
             $vNode = $sheetDoc->createElement('v');
@@ -1295,6 +1351,54 @@ if (!function_exists('cpms_labor_consultant_xlsx_force_recalc')) {
         $calcPr->setAttribute('forceFullCalc', '1');
         $calcPr->setAttribute('calcCompleted', '0');
         $zip->addFromString('xl/workbook.xml', $doc->saveXML());
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_forced_calc_pr_info')) {
+    function cpms_labor_consultant_forced_calc_pr_info() {
+        return array(
+            'calcMode' => 'auto',
+            'calcOnSave' => '1',
+            'fullCalcOnLoad' => '1',
+            'forceFullCalc' => '1',
+            'calcCompleted' => '0',
+            'calcId' => '0'
+        );
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_calc_pr_info')) {
+    function cpms_labor_consultant_xlsx_calc_pr_info($zip) {
+        $info = cpms_labor_consultant_forced_calc_pr_info();
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        if ($workbookXml === false || $workbookXml === '') return $info;
+
+        $doc = new DOMDocument('1.0', 'UTF-8');
+        $doc->preserveWhiteSpace = true;
+        $doc->formatOutput = false;
+        if (!@$doc->loadXML($workbookXml)) return $info;
+
+        $xpath = new DOMXPath($doc);
+        $nodes = $xpath->query('/*[local-name()="workbook"]/*[local-name()="calcPr"]');
+        if (!$nodes || $nodes->length < 1) return $info;
+
+        $calcPr = $nodes->item(0);
+        foreach ($info as $key => $value) {
+            if ($calcPr->hasAttribute($key)) {
+                $info[$key] = (string)$calcPr->getAttribute($key);
+            }
+        }
+        return $info;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_count_formula_cells')) {
+    function cpms_labor_consultant_count_formula_cells($sheetDoc) {
+        if (!($sheetDoc instanceof DOMDocument)) return 0;
+        $xpath = new DOMXPath($sheetDoc);
+        $nodes = $xpath->query('//*[local-name()="c"][*[local-name()="f"]]');
+        if (!$nodes) return 0;
+        return (int)$nodes->length;
     }
 }
 
@@ -2271,6 +2375,7 @@ if (!function_exists('cpms_labor_consultant_debug_export_detection')) {
             return $result;
         }
 
+        $result['formula_cells'] = cpms_labor_consultant_count_formula_cells($sheetDoc);
         $sharedStrings = cpms_labor_consultant_xlsx_shared_strings($zip);
         $layout = cpms_labor_consultant_detect_two_row_block($sheetDoc, $sharedStrings, isset($sheet['name']) ? $sheet['name'] : '');
         $zip->close();
@@ -2533,7 +2638,13 @@ if (!function_exists('cpms_labor_consultant_debug_export_detection_v2')) {
             'first_labor_row' => is_array($dataRows) && count($dataRows) > 0 ? $dataRows[0] : array(),
             'fill_result' => 'not_run',
             'firstNameRef' => '',
-            'firstNameAfterFill' => ''
+            'firstNameAfterFill' => '',
+            'formula_cache_clear' => 'disabled',
+            'calc_chain_removed' => 'yes',
+            'calc_pr' => cpms_labor_consultant_forced_calc_pr_info(),
+            'formula_cells' => 0,
+            'overwritten_cells' => array(),
+            'skipped_formula_cells' => array()
         );
 
         if (!class_exists('ZipArchive') || !function_exists('simplexml_load_string') || !class_exists('DOMDocument')) {
@@ -2577,6 +2688,7 @@ if (!function_exists('cpms_labor_consultant_debug_export_detection_v2')) {
             return $result;
         }
 
+        $result['formula_cells'] = cpms_labor_consultant_count_formula_cells($sheetDoc);
         $sharedStrings = cpms_labor_consultant_xlsx_shared_strings($zip);
         $layout = cpms_labor_consultant_detect_two_row_block($sheetDoc, $sharedStrings, $result['selected_sheet_name']);
         $result['layout'] = $layout;
@@ -2589,8 +2701,13 @@ if (!function_exists('cpms_labor_consultant_debug_export_detection_v2')) {
 
         if (isset($layout['ok']) && $layout['ok'] && is_array($dataRows) && count($dataRows) > 0) {
             try {
+                cpms_labor_consultant_formula_stats_reset();
                 $fillOk = cpms_labor_consultant_fill_two_row_blocks($sheetDoc, $layout, $dataRows, $ym);
+                $formulaStats = cpms_labor_consultant_formula_stats_get();
                 $result['fill_result'] = $fillOk ? 'success' : 'failed';
+                $result['formula_cells'] = cpms_labor_consultant_count_formula_cells($sheetDoc);
+                $result['overwritten_cells'] = isset($formulaStats['written']) && is_array($formulaStats['written']) ? $formulaStats['written'] : array();
+                $result['skipped_formula_cells'] = isset($formulaStats['skipped']) && is_array($formulaStats['skipped']) ? $formulaStats['skipped'] : array();
                 $result['firstNameAfterFill'] = cpms_labor_consultant_xlsx_cell_text_at($sheetDoc, array(), $result['firstNameRef']);
             } catch (Exception $e) {
                 $result['fill_result'] = 'exception: ' . $e->getMessage();
@@ -2618,6 +2735,9 @@ if (!function_exists('cpms_labor_consultant_render_debug_page_v2')) {
         $bottomDays = isset($layout['bottomDays']) && is_array($layout['bottomDays']) ? $layout['bottomDays'] : cpms_labor_consultant_default_bottom_day_columns();
         if (!isset($topDays[1]) || !isset($topDays[15])) $topDays = cpms_labor_consultant_default_top_day_columns();
         if (!isset($bottomDays[16]) || !isset($bottomDays[31])) $bottomDays = cpms_labor_consultant_default_bottom_day_columns();
+        $calcPr = isset($debug['calc_pr']) && is_array($debug['calc_pr']) ? $debug['calc_pr'] : cpms_labor_consultant_forced_calc_pr_info();
+        $writtenCells = isset($debug['overwritten_cells']) && is_array($debug['overwritten_cells']) ? $debug['overwritten_cells'] : array();
+        $skippedFormulaCells = isset($debug['skipped_formula_cells']) && is_array($debug['skipped_formula_cells']) ? $debug['skipped_formula_cells'] : array();
 
         header('Content-Type: text/html; charset=utf-8');
         echo '<!doctype html><html><head><meta charset="utf-8"><title>labor export debug</title>';
@@ -2645,6 +2765,17 @@ if (!function_exists('cpms_labor_consultant_render_debug_page_v2')) {
         echo 'fill_result: ' . htmlspecialchars(isset($debug['fill_result']) ? (string)$debug['fill_result'] : '', ENT_QUOTES, 'UTF-8') . "\n";
         echo 'firstNameRef: ' . htmlspecialchars(isset($debug['firstNameRef']) ? (string)$debug['firstNameRef'] : '', ENT_QUOTES, 'UTF-8') . "\n";
         echo 'firstNameAfterFill: ' . htmlspecialchars(isset($debug['firstNameAfterFill']) ? (string)$debug['firstNameAfterFill'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'formula cache clear: ' . htmlspecialchars(isset($debug['formula_cache_clear']) ? (string)$debug['formula_cache_clear'] : 'disabled', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'calcChain removed: ' . htmlspecialchars(isset($debug['calc_chain_removed']) ? (string)$debug['calc_chain_removed'] : 'yes', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'calcMode: ' . htmlspecialchars(isset($calcPr['calcMode']) ? (string)$calcPr['calcMode'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'calcOnSave: ' . htmlspecialchars(isset($calcPr['calcOnSave']) ? (string)$calcPr['calcOnSave'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'fullCalcOnLoad: ' . htmlspecialchars(isset($calcPr['fullCalcOnLoad']) ? (string)$calcPr['fullCalcOnLoad'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'forceFullCalc: ' . htmlspecialchars(isset($calcPr['forceFullCalc']) ? (string)$calcPr['forceFullCalc'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'calcCompleted: ' . htmlspecialchars(isset($calcPr['calcCompleted']) ? (string)$calcPr['calcCompleted'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'calcId: ' . htmlspecialchars(isset($calcPr['calcId']) ? (string)$calcPr['calcId'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'formula cells: ' . htmlspecialchars(isset($debug['formula_cells']) ? (string)$debug['formula_cells'] : '0', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'overwritten cells sample: ' . htmlspecialchars(implode(', ', array_slice($writtenCells, 0, 40)), ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'skipped formula cells: ' . htmlspecialchars(implode(', ', array_slice($skippedFormulaCells, 0, 40)), ENT_QUOTES, 'UTF-8') . "\n";
         if (isset($debug['message']) && $debug['message'] !== '') {
             echo 'message: ' . htmlspecialchars((string)$debug['message'], ENT_QUOTES, 'UTF-8') . "\n";
         }
@@ -2882,7 +3013,6 @@ if (!function_exists('cpms_labor_consultant_create_export_file_v3')) {
         cpms_labor_consultant_xlsx_apply_worksheet_content_types($zip, $sheetPaths);
         cpms_labor_consultant_xlsx_apply_output_sheets($zip, $outputSheets, $activeOutputPath);
         cpms_labor_consultant_xlsx_force_recalc($zip);
-        cpms_labor_consultant_xlsx_clear_formula_cached_values($zip);
         if ($zip->close() === false) {
             @unlink($tmpPath);
             error_log('[labor_consultant_export] zip close failed');
