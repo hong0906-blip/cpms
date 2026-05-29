@@ -1738,8 +1738,7 @@ if (!function_exists('cpms_labor_consultant_xlsx_apply_output_sheets')) {
         $sheetNodes = $wbXpath->query('/*[local-name()="workbook"]/*[local-name()="sheets"]/*[local-name()="sheet"]');
         $used = array();
         foreach ($sheetNodes as $sheetNode) {
-            $attrs = $sheetNode->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
-            $rid = isset($attrs['id']) ? (string)$attrs['id'] : '';
+            $rid = $sheetNode->getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
             $path = isset($pathByRid[$rid]) ? $pathByRid[$rid] : '';
             if ($path !== '' && isset($outputByPath[$path])) continue;
             $used[cpms_labor_consultant_sheet_name_key((string)$sheetNode->getAttribute('name'))] = true;
@@ -1748,8 +1747,7 @@ if (!function_exists('cpms_labor_consultant_xlsx_apply_output_sheets')) {
         $activeIndex = 0;
         $idx = 0;
         foreach ($sheetNodes as $sheetNode) {
-            $attrs = $sheetNode->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
-            $rid = isset($attrs['id']) ? (string)$attrs['id'] : '';
+            $rid = $sheetNode->getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
             $path = isset($pathByRid[$rid]) ? $pathByRid[$rid] : '';
             if ($path !== '' && isset($outputByPath[$path])) {
                 $sheetNode->setAttribute('name', cpms_labor_consultant_unique_sheet_name($outputByPath[$path], $used));
