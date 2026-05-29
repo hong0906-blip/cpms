@@ -149,20 +149,31 @@ foreach ($rows as $row) {
 
           <button type="submit" class="rounded-xl bg-gray-900 px-4 py-2 font-bold text-white">조회</button>
 
-          <a href="<?php echo h('?r=admin/labor_consultant_export&project_id=' . urlencode($projectId) . '&ym=' . urlencode($ym)); ?>" class="rounded-xl px-4 py-2 text-center font-bold <?php echo ($activeTemplate && count($rows) > 0) ? 'bg-emerald-600 text-white' : 'pointer-events-none bg-gray-200 text-gray-500'; ?>">엑셀 다운로드</a>
+          <?php
+          $laborExportUrl = '?r=admin/labor_consultant_export&project_id=' . urlencode($projectId) . '&ym=' . urlencode($ym);
+          $laborDownloadEnabled = ($activeTemplate);
+          ?>
+          <button type="button" id="laborConsultantDownloadBtn" data-url="<?php echo h($laborExportUrl); ?>" class="rounded-xl px-4 py-2 text-center font-bold <?php echo $laborDownloadEnabled ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-500'; ?>" <?php echo $laborDownloadEnabled ? '' : 'disabled'; ?>>엑셀 다운로드</button>
         </form>
+        <div id="laborConsultantDownloadStatus" class="mt-3 hidden rounded-2xl border px-4 py-3 text-sm font-bold"></div>
 
         <?php if ($emptyMessage !== ''): ?>
           <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800"><?php echo h($emptyMessage); ?></div>
         <?php endif; ?>
 
         <div class="overflow-x-auto rounded-2xl border border-gray-200">
-          <table class="min-w-[1600px] w-full text-xs">
+          <table class="min-w-[2200px] w-full text-xs">
             <thead class="bg-gray-100">
               <tr>
                 <th class="border border-gray-200 px-3 py-2">현장명</th>
                 <th class="border border-gray-200 px-3 py-2">성명</th>
                 <th class="border border-gray-200 px-3 py-2">직종</th>
+                <th class="border border-gray-200 px-3 py-2">연락처</th>
+                <th class="border border-gray-200 px-3 py-2">주민등록번호</th>
+                <th class="border border-gray-200 px-3 py-2">주소</th>
+                <th class="border border-gray-200 px-3 py-2">예금주</th>
+                <th class="border border-gray-200 px-3 py-2">은행명</th>
+                <th class="border border-gray-200 px-3 py-2">계좌번호</th>
                 <th class="border border-gray-200 px-3 py-2">단가</th>
                 <th class="border border-gray-200 px-3 py-2">총 공수</th>
                 <th class="border border-gray-200 px-3 py-2">지급금액</th>
@@ -179,6 +190,12 @@ foreach ($rows as $row) {
                     <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['project_name']) ? $row['project_name'] : ''); ?></td>
                     <td class="border border-gray-200 px-3 py-2 font-bold text-gray-900"><?php echo h(isset($row['worker_name']) ? $row['worker_name'] : ''); ?></td>
                     <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['role']) && $row['role'] !== '' ? $row['role'] : '-'); ?></td>
+                    <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['phone']) ? $row['phone'] : ''); ?></td>
+                    <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['resident_no']) ? $row['resident_no'] : ''); ?></td>
+                    <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['address']) ? $row['address'] : ''); ?></td>
+                    <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['account_holder']) ? $row['account_holder'] : ''); ?></td>
+                    <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['bank_name']) ? $row['bank_name'] : ''); ?></td>
+                    <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['bank_account']) ? $row['bank_account'] : ''); ?></td>
                     <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(number_format(isset($row['wage_rate']) ? (float)$row['wage_rate'] : 0)); ?></td>
                     <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(rtrim(rtrim(number_format(isset($row['total_gongsu']) ? (float)$row['total_gongsu'] : 0, 2, '.', ''), '0'), '.')); ?></td>
                     <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(number_format(isset($row['amount']) ? (float)$row['amount'] : 0)); ?></td>
@@ -199,7 +216,7 @@ foreach ($rows as $row) {
                 <?php endforeach; ?>
               <?php else: ?>
                 <tr>
-                  <td colspan="<?php echo h((string)(7 + $daysInMonth)); ?>" class="px-4 py-8 text-center text-sm text-gray-500">조회된 데이터가 없습니다.</td>
+                  <td colspan="<?php echo h((string)(13 + $daysInMonth)); ?>" class="px-4 py-8 text-center text-sm text-gray-500">조회된 데이터가 없습니다.</td>
                 </tr>
               <?php endif; ?>
             </tbody>
@@ -242,3 +259,74 @@ foreach ($rows as $row) {
     </div>
   </div>
 </div>
+<script>
+(function() {
+  var button = document.getElementById('laborConsultantDownloadBtn');
+  var status = document.getElementById('laborConsultantDownloadStatus');
+  if (!button || !status) return;
+
+  function showStatus(message, isError) {
+    status.className = 'mt-3 rounded-2xl border px-4 py-3 text-sm font-bold ' + (isError ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700');
+    status.textContent = message;
+  }
+
+  function cleanErrorText(text) {
+    text = String(text || '');
+    text = text.replace(/<script[\s\S]*?<\/script>/gi, ' ');
+    text = text.replace(/<style[\s\S]*?<\/style>/gi, ' ');
+    text = text.replace(/<[^>]*>/g, ' ');
+    text = text.replace(/\s+/g, ' ').trim();
+    if (text === '') text = '서버가 엑셀 파일 대신 오류 응답을 반환했습니다.';
+    return text.substring(0, 500);
+  }
+
+  function filenameFromDisposition(disposition) {
+    disposition = String(disposition || '');
+    var star = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (star && star[1]) {
+      try { return decodeURIComponent(star[1].replace(/"/g, '')); } catch (e) {}
+    }
+    var plain = disposition.match(/filename="?([^";]+)"?/i);
+    if (plain && plain[1]) return plain[1];
+    return 'labor_consultant.xlsx';
+  }
+
+  function addQuery(url, key, value) {
+    var glue = url.indexOf('?') === -1 ? '?' : '&';
+    return url + glue + encodeURIComponent(key) + '=' + encodeURIComponent(value);
+  }
+
+  button.addEventListener('click', function() {
+    var url = button.getAttribute('data-url');
+    if (!url || button.disabled) return;
+    if (!window.fetch) {
+      window.location.href = url;
+      return;
+    }
+
+    button.disabled = true;
+    showStatus('엑셀 다운로드를 준비 중입니다.', false);
+
+    fetch(addQuery(url, 'check_labor_export', '1'), { credentials: 'same-origin' }).then(function(res) {
+      return res.text();
+    }).then(function(text) {
+      var message = cleanErrorText(text);
+      if (message !== 'OK') {
+        throw new Error(message);
+      }
+      window.location.href = url;
+      showStatus('엑셀 다운로드가 시작되었습니다.', false);
+      button.disabled = false;
+    }).catch(function(err) {
+      var message = err && err.message ? err.message : '알 수 없는 오류';
+      if (message === 'Failed to fetch') {
+        showStatus('다운로드 검증 요청이 실패했습니다. 직접 다운로드로 전환합니다.', true);
+        window.location.href = url;
+      } else {
+        showStatus('다운로드 실패: ' + message, true);
+      }
+      button.disabled = false;
+    });
+  });
+})();
+</script>

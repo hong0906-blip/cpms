@@ -228,7 +228,7 @@ if (!function_exists('cpms_labor_consultant_list_projects')) {
         $rows = array();
         if (!$pdo) return $rows;
         try {
-            $st = $pdo->query("SELECT id, name FROM cpms_projects ORDER BY name ASC, id ASC");
+            $st = $pdo->query("SELECT * FROM cpms_projects ORDER BY name ASC, id ASC");
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
             if (!is_array($rows)) $rows = array();
         } catch (Exception $e) {
@@ -242,7 +242,7 @@ if (!function_exists('cpms_labor_consultant_find_project')) {
     function cpms_labor_consultant_find_project($pdo, $projectId) {
         if (!$pdo || $projectId <= 0) return null;
         try {
-            $st = $pdo->prepare("SELECT id, name FROM cpms_projects WHERE id = :id LIMIT 1");
+            $st = $pdo->prepare("SELECT * FROM cpms_projects WHERE id = :id LIMIT 1");
             $st->bindValue(':id', (int)$projectId, PDO::PARAM_INT);
             $st->execute();
             $row = $st->fetch(PDO::FETCH_ASSOC);
@@ -269,6 +269,84 @@ if (!function_exists('cpms_labor_consultant_project_label')) {
     }
 }
 
+if (!function_exists('cpms_labor_consultant_project_manager_name')) {
+    function cpms_labor_consultant_project_manager_name($pdo, $projectId) {
+        $projectId = (int)$projectId;
+        if (!$pdo || $projectId <= 0) return '';
+
+        $employeeId = 0;
+        try {
+            if (cpms_labor_consultant_table_exists($pdo, 'cpms_construction_roles')) {
+                $st = $pdo->prepare("SELECT * FROM cpms_construction_roles WHERE project_id = :pid LIMIT 1");
+                $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                $st->execute();
+                $roleRow = $st->fetch(PDO::FETCH_ASSOC);
+                if ($roleRow && isset($roleRow['site_employee_id'])) {
+                    $employeeId = (int)$roleRow['site_employee_id'];
+                } else if ($roleRow && isset($roleRow['site_manager_id'])) {
+                    $employeeId = (int)$roleRow['site_manager_id'];
+                }
+            }
+        } catch (Exception $e) {
+            $employeeId = 0;
+        }
+
+        if ($employeeId <= 0) {
+            try {
+                if (cpms_labor_consultant_table_exists($pdo, 'cpms_project_members')) {
+                    $st = $pdo->prepare("SELECT employee_id FROM cpms_project_members WHERE project_id = :pid AND role = 'main' ORDER BY employee_id ASC LIMIT 1");
+                    $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                    $st->execute();
+                    $employeeId = (int)$st->fetchColumn();
+                }
+            } catch (Exception $e2) {
+                $employeeId = 0;
+            }
+        }
+
+        if ($employeeId <= 0) return '';
+
+        try {
+            $st = $pdo->prepare("SELECT name FROM employees WHERE id = :id LIMIT 1");
+            $st->bindValue(':id', $employeeId, PDO::PARAM_INT);
+            $st->execute();
+            return trim((string)$st->fetchColumn());
+        } catch (Exception $e3) {
+            return '';
+        }
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_direct_member_map')) {
+    function cpms_labor_consultant_direct_member_map($directTeamMembers) {
+        $map = array();
+        if (!is_array($directTeamMembers)) return $map;
+        foreach ($directTeamMembers as $member) {
+            if (!is_array($member)) continue;
+            $name = isset($member['name']) ? trim((string)$member['name']) : '';
+            if ($name === '') continue;
+            $key = function_exists('cpms_normalize_worker_key') ? cpms_normalize_worker_key($name) : strtolower($name);
+            if ($key === '') continue;
+            $map[$key] = $member;
+        }
+        return $map;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_worker_detail_value')) {
+    function cpms_labor_consultant_worker_detail_value($worker, $directMap, $workerKey, $field, $default) {
+        $value = '';
+        if (is_array($worker) && isset($worker[$field])) {
+            $value = trim((string)$worker[$field]);
+        }
+        if ($value === '' && is_array($directMap) && isset($directMap[$workerKey]) && is_array($directMap[$workerKey]) && isset($directMap[$workerKey][$field])) {
+            $value = trim((string)$directMap[$workerKey][$field]);
+        }
+        if ($value === '') return $default;
+        return $value;
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
     function cpms_labor_consultant_load_project_month_rows($pdo, $projectRow, $ym) {
         require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
@@ -279,6 +357,7 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
         $projectId = isset($projectRow['id']) ? (int)$projectRow['id'] : 0;
         $projectName = isset($projectRow['name']) ? trim((string)$projectRow['name']) : '';
         if ($projectId <= 0 || $projectName === '') return $rows;
+        $projectManagerName = cpms_labor_consultant_project_manager_name($pdo, $projectId);
 
         $daysInMonth = cpms_labor_consultant_days_in_month($ym);
         $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
@@ -303,6 +382,7 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
 
         $projectWorkers = cpms_load_project_labor_workers($pdo, $projectId);
         $directTeamMembers = cpms_load_direct_team_members($pdo);
+        $directMemberMap = cpms_labor_consultant_direct_member_map($directTeamMembers);
         $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers);
         $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
         $roleMap = isset($gongsuData['role_map']) && is_array($gongsuData['role_map']) ? $gongsuData['role_map'] : array();
@@ -338,19 +418,23 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
             $rows[count($rows)] = array(
                 'project_id' => $projectId,
                 'project_name' => $projectName,
+                'project_start_date' => isset($projectRow['start_date']) ? (string)$projectRow['start_date'] : '',
+                'project_end_date' => isset($projectRow['end_date']) ? (string)$projectRow['end_date'] : '',
+                'project_manager_name' => $projectManagerName,
                 'worker_name' => $workerName,
                 'role' => isset($roleMap[$workerKey]) ? (string)$roleMap[$workerKey] : '',
-                'phone' => isset($worker['phone']) ? (string)$worker['phone'] : '',
-                'address' => isset($worker['address']) ? (string)$worker['address'] : '',
-                'resident_no' => isset($worker['resident_no']) ? (string)$worker['resident_no'] : '',
-                'account_holder' => isset($worker['account_holder']) ? (string)$worker['account_holder'] : '',
-                'bank_name' => isset($worker['bank_name']) ? (string)$worker['bank_name'] : '',
-                'bank_account' => isset($worker['bank_account']) ? (string)$worker['bank_account'] : '',
-                'company_name' => isset($worker['company_name']) ? (string)$worker['company_name'] : '',
+                'phone' => cpms_labor_consultant_worker_detail_value($worker, $directMemberMap, $workerKey, 'phone', ''),
+                'address' => cpms_labor_consultant_worker_detail_value($worker, $directMemberMap, $workerKey, 'address', ''),
+                'resident_no' => cpms_labor_consultant_worker_detail_value($worker, $directMemberMap, $workerKey, 'resident_no', ''),
+                'account_holder' => cpms_labor_consultant_worker_detail_value($worker, $directMemberMap, $workerKey, 'account_holder', ''),
+                'bank_name' => cpms_labor_consultant_worker_detail_value($worker, $directMemberMap, $workerKey, 'bank_name', ''),
+                'bank_account' => cpms_labor_consultant_worker_detail_value($worker, $directMemberMap, $workerKey, 'bank_account', ''),
+                'company_name' => cpms_labor_consultant_worker_detail_value($worker, $directMemberMap, $workerKey, 'company_name', '창명건설'),
                 'subcontract_type' => '',
                 'foreigner' => '',
                 'wage_rate' => $wageRate,
-                'output_days' => $outputDays,
+                'work_days_count' => $outputDays,
+                'output_days' => round($totalGongsu, 2),
                 'total_gongsu' => round($totalGongsu, 2),
                 'amount' => round($totalGongsu * $wageRate, 2),
                 'days' => $days,
@@ -650,9 +734,62 @@ if (!function_exists('cpms_labor_consultant_detect_headers')) {
     }
 }
 
+if (!function_exists('cpms_labor_consultant_offset_formula_text_rows')) {
+    function cpms_labor_consultant_offset_formula_text_rows($formula, $offset) {
+        $offset = (int)$offset;
+        if ($offset === 0 || $formula === '') return $formula;
+
+        return preg_replace_callback('/(^|[^A-Za-z0-9_])(\$?[A-Z]{1,3})(\$?)([0-9]{1,7})(?![A-Za-z0-9_])/i', function($m) use ($offset) {
+            $prefix = isset($m[1]) ? $m[1] : '';
+            $col = isset($m[2]) ? $m[2] : '';
+            $rowDollar = isset($m[3]) ? $m[3] : '';
+            $row = isset($m[4]) ? (int)$m[4] : 0;
+            if ($rowDollar !== '$' && $row > 0) $row += $offset;
+            return $prefix . $col . $rowDollar . $row;
+        }, (string)$formula);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_formula_sheet_prefix')) {
+    function cpms_labor_consultant_formula_sheet_prefix($sheetName) {
+        $sheetName = str_replace("'", "''", (string)$sheetName);
+        return "'" . $sheetName . "'!";
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_replace_formula_sheet_name')) {
+    function cpms_labor_consultant_replace_formula_sheet_name($formula, $oldName, $newName) {
+        $oldName = (string)$oldName;
+        $newName = (string)$newName;
+        if ($formula === '' || $oldName === '' || $newName === '' || $oldName === $newName) return $formula;
+
+        $oldQuoted = cpms_labor_consultant_formula_sheet_prefix($oldName);
+        $newQuoted = cpms_labor_consultant_formula_sheet_prefix($newName);
+        $formula = str_replace($oldQuoted, $newQuoted, (string)$formula);
+        $formula = str_replace($oldName . '!', $newQuoted, (string)$formula);
+        return $formula;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_update_sheet_formula_sheet_name')) {
+    function cpms_labor_consultant_update_sheet_formula_sheet_name($sheetDoc, $oldName, $newName) {
+        $oldName = (string)$oldName;
+        $newName = (string)$newName;
+        if ($oldName === '' || $newName === '' || $oldName === $newName) return;
+        $xpath = new DOMXPath($sheetDoc);
+        $formulaNodes = $xpath->query('//*[local-name()="f"]');
+        foreach ($formulaNodes as $formulaNode) {
+            if ($formulaNode->textContent === '') continue;
+            $formulaNode->nodeValue = cpms_labor_consultant_replace_formula_sheet_name($formulaNode->textContent, $oldName, $newName);
+        }
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_reindex_row_node')) {
     function cpms_labor_consultant_reindex_row_node($rowNode, $newRowNum) {
         $newRowNum = (int)$newRowNum;
+        $oldRowNum = (int)$rowNode->getAttribute('r');
+        $offset = $newRowNum - $oldRowNum;
         $rowNode->setAttribute('r', (string)$newRowNum);
         foreach ($rowNode->childNodes as $child) {
             if (!($child instanceof DOMElement)) continue;
@@ -661,6 +798,18 @@ if (!function_exists('cpms_labor_consultant_reindex_row_node')) {
             list(, $colIndex) = cpms_labor_consultant_xlsx_ref_to_pos($ref);
             if ($colIndex <= 0) continue;
             $child->setAttribute('r', cpms_labor_consultant_xlsx_col_to_letter($colIndex) . $newRowNum);
+            foreach ($child->childNodes as $formulaNode) {
+                if (!($formulaNode instanceof DOMElement)) continue;
+                if ($formulaNode->localName !== 'f') continue;
+                if ($formulaNode->textContent !== '') {
+                    $formulaNode->nodeValue = cpms_labor_consultant_offset_formula_text_rows($formulaNode->textContent, $offset);
+                    if ($formulaNode->hasAttribute('t') && $formulaNode->getAttribute('t') === 'shared') {
+                        $formulaNode->removeAttribute('t');
+                        $formulaNode->removeAttribute('si');
+                        $formulaNode->removeAttribute('ref');
+                    }
+                }
+            }
         }
     }
 }
@@ -722,6 +871,42 @@ if (!function_exists('cpms_labor_consultant_shift_merged_cells')) {
             $ref = $mergeNode->getAttribute('ref');
             if ($ref === '') continue;
             $mergeNode->setAttribute('ref', cpms_labor_consultant_shift_range_ref($ref, $afterRow, $offset));
+        }
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_shift_formula_text_rows')) {
+    function cpms_labor_consultant_shift_formula_text_rows($formula, $afterRow, $offset) {
+        $afterRow = (int)$afterRow;
+        $offset = (int)$offset;
+        if ($offset <= 0 || $formula === '') return $formula;
+
+        return preg_replace_callback('/(^|[^A-Za-z0-9_])(\$?[A-Z]{1,3})(\$?)([0-9]{1,7})(?![A-Za-z0-9_])/i', function($m) use ($afterRow, $offset) {
+            $prefix = isset($m[1]) ? $m[1] : '';
+            $col = isset($m[2]) ? $m[2] : '';
+            $rowDollar = isset($m[3]) ? $m[3] : '';
+            $row = isset($m[4]) ? (int)$m[4] : 0;
+            if ($row > $afterRow) $row += $offset;
+            return $prefix . $col . $rowDollar . $row;
+        }, (string)$formula);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_shift_sheet_formula_refs')) {
+    function cpms_labor_consultant_shift_sheet_formula_refs($sheetDoc, $afterRow, $offset) {
+        $afterRow = (int)$afterRow;
+        $offset = (int)$offset;
+        if ($offset <= 0) return;
+
+        $xpath = new DOMXPath($sheetDoc);
+        $formulaNodes = $xpath->query('//*[local-name()="f"]');
+        foreach ($formulaNodes as $formulaNode) {
+            if ($formulaNode->hasAttribute('ref')) {
+                $formulaNode->setAttribute('ref', cpms_labor_consultant_shift_range_ref($formulaNode->getAttribute('ref'), $afterRow, $offset));
+            }
+            if ($formulaNode->textContent !== '') {
+                $formulaNode->nodeValue = cpms_labor_consultant_shift_formula_text_rows($formulaNode->textContent, $afterRow, $offset);
+            }
         }
     }
 }
@@ -877,6 +1062,18 @@ if (!function_exists('cpms_labor_consultant_set_cell_value')) {
     function cpms_labor_consultant_set_cell_value($sheetDoc, $rowNode, $colIndex, $value, $isNumeric) {
         $cellNode = cpms_labor_consultant_find_or_create_cell($sheetDoc, $rowNode, $colIndex);
         if (!$cellNode) return;
+
+        $hasFormula = false;
+        foreach ($cellNode->childNodes as $child) {
+            if ($child instanceof DOMElement && $child->localName === 'f') {
+                $hasFormula = true;
+                break;
+            }
+        }
+        if ($hasFormula) {
+            cpms_labor_consultant_clear_cell_value($cellNode);
+            return;
+        }
 
         $remove = array();
         foreach ($cellNode->childNodes as $child) {
@@ -1068,6 +1265,77 @@ if (!function_exists('cpms_labor_consultant_xlsx_set_active_sheet')) {
     }
 }
 
+if (!function_exists('cpms_labor_consultant_xlsx_force_recalc')) {
+    function cpms_labor_consultant_xlsx_force_recalc($zip) {
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        if ($workbookXml === false || $workbookXml === '') return;
+
+        $doc = new DOMDocument('1.0', 'UTF-8');
+        $doc->preserveWhiteSpace = true;
+        $doc->formatOutput = false;
+        if (!@$doc->loadXML($workbookXml)) return;
+
+        $xpath = new DOMXPath($doc);
+        $nodes = $xpath->query('/*[local-name()="workbook"]/*[local-name()="calcPr"]');
+        if ($nodes && $nodes->length > 0) {
+            $calcPr = $nodes->item(0);
+        } else {
+            $workbookNodes = $xpath->query('/*[local-name()="workbook"]');
+            if (!$workbookNodes || $workbookNodes->length < 1) return;
+            $root = $workbookNodes->item(0);
+            $ns = $root->namespaceURI ? $root->namespaceURI : 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+            $calcPr = $doc->createElementNS($ns, 'calcPr');
+            $root->appendChild($calcPr);
+        }
+
+        $calcPr->setAttribute('calcMode', 'auto');
+        $calcPr->setAttribute('calcOnSave', '1');
+        $calcPr->setAttribute('calcId', '0');
+        $calcPr->setAttribute('fullCalcOnLoad', '1');
+        $calcPr->setAttribute('forceFullCalc', '1');
+        $calcPr->setAttribute('calcCompleted', '0');
+        $zip->addFromString('xl/workbook.xml', $doc->saveXML());
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_clear_formula_cached_values')) {
+    function cpms_labor_consultant_xlsx_clear_formula_cached_values($zip) {
+        $fileCount = $zip->numFiles;
+        $i = 0;
+        while ($i < $fileCount) {
+            $stat = $zip->statIndex($i);
+            $name = $stat && isset($stat['name']) ? (string)$stat['name'] : '';
+            if (preg_match('#^xl/worksheets/sheet[0-9]+\.xml$#', $name)) {
+                $xml = $zip->getFromName($name);
+                if ($xml !== false && $xml !== '') {
+                    $doc = new DOMDocument('1.0', 'UTF-8');
+                    $doc->preserveWhiteSpace = true;
+                    $doc->formatOutput = false;
+                    if (@$doc->loadXML($xml)) {
+                        $xpath = new DOMXPath($doc);
+                        $formulaCells = $xpath->query('//*[local-name()="c"][*[local-name()="f"]]');
+                        if ($formulaCells) {
+                            foreach ($formulaCells as $cell) {
+                                $remove = array();
+                                foreach ($cell->childNodes as $child) {
+                                    if ($child instanceof DOMElement && $child->localName === 'v') {
+                                        $remove[count($remove)] = $child;
+                                    }
+                                }
+                                foreach ($remove as $node) {
+                                    $cell->removeChild($node);
+                                }
+                            }
+                            $zip->addFromString($name, $doc->saveXML());
+                        }
+                    }
+                }
+            }
+            $i++;
+        }
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_xlsx_cell_text_at')) {
     function cpms_labor_consultant_xlsx_cell_text_at($sheetDoc, $sharedStrings, $ref) {
         $ref = strtoupper(trim((string)$ref));
@@ -1151,6 +1419,352 @@ if (!function_exists('cpms_labor_consultant_detect_day_columns')) {
     }
 }
 
+if (!function_exists('cpms_labor_consultant_default_two_row_columns')) {
+    function cpms_labor_consultant_default_two_row_columns() {
+        return array(
+            'serialCol' => 1,
+            'outputMonthCol' => 2,
+            'workTypeCol' => 2,
+            'nameCol' => 4,
+            'phoneCol' => 4,
+            'residentNoCol' => 5,
+            'addressCol' => 5,
+            'foreignerCol' => 6,
+            'totalWorkCol' => 23,
+            'dailyRateCol' => 24,
+            'grossAmountCol' => 25,
+            'earnedTaxCol' => 27,
+            'residentTaxCol' => 27,
+            'healthInsuranceCol' => 28,
+            'pensionCol' => 28,
+            'employmentInsuranceCol' => 29,
+            'deductionTotalCol' => 29,
+            'netAmountCol' => 30,
+            'accountHolderCol' => 31,
+            'bankNameCol' => 32,
+            'bankAccountCol' => 33,
+            'companyCol' => 34,
+            'subcontractTypeCol' => 35
+        );
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_default_top_day_columns')) {
+    function cpms_labor_consultant_default_top_day_columns() {
+        $days = array();
+        $d = 1;
+        while ($d <= 15) {
+            $days[$d] = 6 + $d;
+            $d++;
+        }
+        return $days;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_default_bottom_day_columns')) {
+    function cpms_labor_consultant_default_bottom_day_columns() {
+        $days = array();
+        $d = 16;
+        while ($d <= 31) {
+            $days[$d] = $d - 9;
+            $d++;
+        }
+        return $days;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_find_named_sheet')) {
+    function cpms_labor_consultant_xlsx_find_named_sheet($zip, $sheetName) {
+        $sheets = cpms_labor_consultant_xlsx_sheet_list($zip);
+        foreach ($sheets as $sheet) {
+            if ((string)(isset($sheet['name']) ? $sheet['name'] : '') === (string)$sheetName) {
+                return $sheet;
+            }
+        }
+        return null;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_find_export_base_sheet')) {
+    function cpms_labor_consultant_xlsx_find_export_base_sheet($zip) {
+        $sheet = cpms_labor_consultant_xlsx_find_named_sheet($zip, '현장명');
+        if ($sheet) return $sheet;
+        $sheet = cpms_labor_consultant_xlsx_find_named_sheet($zip, '통합');
+        if ($sheet) return $sheet;
+        $sheets = cpms_labor_consultant_xlsx_sheet_list($zip);
+        return count($sheets) > 0 ? $sheets[0] : null;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_sheet_name')) {
+    function cpms_labor_consultant_sheet_name($name) {
+        $name = trim((string)$name);
+        if ($name === '') $name = '현장';
+        $name = preg_replace('/[\[\]\:\*\?\/\\\\]/u', '_', $name);
+        $name = str_replace("'", '', $name);
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            if (mb_strlen($name, 'UTF-8') > 31) $name = mb_substr($name, 0, 31, 'UTF-8');
+        } else {
+            if (strlen($name) > 31) $name = substr($name, 0, 31);
+        }
+        if (trim($name) === '') $name = '현장';
+        return $name;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_sheet_name_key')) {
+    function cpms_labor_consultant_sheet_name_key($name) {
+        $name = (string)$name;
+        if (function_exists('mb_strtolower')) return mb_strtolower($name, 'UTF-8');
+        return strtolower($name);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_unique_sheet_name')) {
+    function cpms_labor_consultant_unique_sheet_name($name, &$used) {
+        $base = cpms_labor_consultant_sheet_name($name);
+        $candidate = $base;
+        $idx = 2;
+        while (isset($used[cpms_labor_consultant_sheet_name_key($candidate)])) {
+            $suffix = '(' . $idx . ')';
+            if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+                $limit = 31 - mb_strlen($suffix, 'UTF-8');
+                $candidate = mb_substr($base, 0, $limit, 'UTF-8') . $suffix;
+            } else {
+                $candidate = substr($base, 0, 31 - strlen($suffix)) . $suffix;
+            }
+            $idx++;
+        }
+        $used[cpms_labor_consultant_sheet_name_key($candidate)] = true;
+        return $candidate;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_sheet_rels_path')) {
+    function cpms_labor_consultant_sheet_rels_path($sheetPath) {
+        $sheetPath = str_replace('\\', '/', (string)$sheetPath);
+        return dirname($sheetPath) . '/_rels/' . basename($sheetPath) . '.rels';
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_next_sheet_path')) {
+    function cpms_labor_consultant_xlsx_next_sheet_path($zip) {
+        $idx = 1;
+        while ($zip->locateName('xl/worksheets/sheet' . $idx . '.xml') !== false) {
+            $idx++;
+        }
+        return 'xl/worksheets/sheet' . $idx . '.xml';
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_add_content_type_override')) {
+    function cpms_labor_consultant_xlsx_add_content_type_override($zip, $partName, $contentType) {
+        $xml = $zip->getFromName('[Content_Types].xml');
+        if ($xml === false || $xml === '') return;
+
+        $doc = new DOMDocument('1.0', 'UTF-8');
+        $doc->preserveWhiteSpace = true;
+        $doc->formatOutput = false;
+        if (!@$doc->loadXML($xml)) return;
+
+        $partName = '/' . ltrim((string)$partName, '/');
+        $xpath = new DOMXPath($doc);
+        $nodes = $xpath->query('/*[local-name()="Types"]/*[local-name()="Override"][@PartName="' . $partName . '"]');
+        if ($nodes && $nodes->length > 0) return;
+
+        $rootNodes = $xpath->query('/*[local-name()="Types"]');
+        if (!$rootNodes || $rootNodes->length < 1) return;
+        $root = $rootNodes->item(0);
+        $ns = $root->namespaceURI ? $root->namespaceURI : 'http://schemas.openxmlformats.org/package/2006/content-types';
+        $node = $doc->createElementNS($ns, 'Override');
+        $node->setAttribute('PartName', $partName);
+        $node->setAttribute('ContentType', $contentType);
+        $root->appendChild($node);
+        $zip->addFromString('[Content_Types].xml', $doc->saveXML());
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_clone_sheet')) {
+    function cpms_labor_consultant_xlsx_clone_sheet($zip, $baseSheet, $newName) {
+        $basePath = isset($baseSheet['path']) ? (string)$baseSheet['path'] : '';
+        $baseXml = $zip->getFromName($basePath);
+        if ($basePath === '' || $baseXml === false || $baseXml === '') return null;
+
+        $newPath = cpms_labor_consultant_xlsx_next_sheet_path($zip);
+        if (!$zip->addFromString($newPath, $baseXml)) return null;
+
+        $baseRels = cpms_labor_consultant_sheet_rels_path($basePath);
+        $newRels = cpms_labor_consultant_sheet_rels_path($newPath);
+        $relsXml = $zip->getFromName($baseRels);
+        if ($relsXml !== false && $relsXml !== '') {
+            $zip->addFromString($newRels, $relsXml);
+        }
+        cpms_labor_consultant_xlsx_add_content_type_override($zip, $newPath, 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml');
+
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        $workbookRelsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
+        if ($workbookXml === false || $workbookRelsXml === false) return null;
+
+        $wbDoc = new DOMDocument('1.0', 'UTF-8');
+        $wbDoc->preserveWhiteSpace = true;
+        $wbDoc->formatOutput = false;
+        $relsDoc = new DOMDocument('1.0', 'UTF-8');
+        $relsDoc->preserveWhiteSpace = true;
+        $relsDoc->formatOutput = false;
+        if (!@$wbDoc->loadXML($workbookXml) || !@$relsDoc->loadXML($workbookRelsXml)) return null;
+
+        $wbXpath = new DOMXPath($wbDoc);
+        $relsXpath = new DOMXPath($relsDoc);
+        $sheetNodes = $wbXpath->query('/*[local-name()="workbook"]/*[local-name()="sheets"]/*[local-name()="sheet"]');
+        $sheetsNodes = $wbXpath->query('/*[local-name()="workbook"]/*[local-name()="sheets"]');
+        if (!$sheetsNodes || $sheetsNodes->length < 1) return null;
+
+        $maxSheetId = 0;
+        $sheetIndex = 0;
+        foreach ($sheetNodes as $sheetNode) {
+            $sid = (int)$sheetNode->getAttribute('sheetId');
+            if ($sid > $maxSheetId) $maxSheetId = $sid;
+            $sheetIndex++;
+        }
+
+        $maxRid = 0;
+        $relNodes = $relsXpath->query('/*[local-name()="Relationships"]/*[local-name()="Relationship"]');
+        foreach ($relNodes as $relNode) {
+            $rid = $relNode->getAttribute('Id');
+            if (preg_match('/^rId([0-9]+)$/', $rid, $m) && (int)$m[1] > $maxRid) {
+                $maxRid = (int)$m[1];
+            }
+        }
+        $newRid = 'rId' . ($maxRid + 1);
+
+        $relsRootNodes = $relsXpath->query('/*[local-name()="Relationships"]');
+        if (!$relsRootNodes || $relsRootNodes->length < 1) return null;
+        $relsRoot = $relsRootNodes->item(0);
+        $relsNs = $relsRoot->namespaceURI ? $relsRoot->namespaceURI : 'http://schemas.openxmlformats.org/package/2006/relationships';
+        $relNode = $relsDoc->createElementNS($relsNs, 'Relationship');
+        $relNode->setAttribute('Id', $newRid);
+        $relNode->setAttribute('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet');
+        $relNode->setAttribute('Target', preg_replace('#^xl/#', '', $newPath));
+        $relsRoot->appendChild($relNode);
+
+        $sheetsNode = $sheetsNodes->item(0);
+        $wbRootNodes = $wbXpath->query('/*[local-name()="workbook"]');
+        $wbNs = ($wbRootNodes && $wbRootNodes->length > 0 && $wbRootNodes->item(0)->namespaceURI) ? $wbRootNodes->item(0)->namespaceURI : 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+        $sheetNode = $wbDoc->createElementNS($wbNs, 'sheet');
+        $sheetNode->setAttribute('name', cpms_labor_consultant_sheet_name($newName));
+        $sheetNode->setAttribute('sheetId', (string)($maxSheetId + 1));
+        $sheetNode->setAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'r:id', $newRid);
+        $sheetsNode->appendChild($sheetNode);
+
+        $zip->addFromString('xl/workbook.xml', $wbDoc->saveXML());
+        $zip->addFromString('xl/_rels/workbook.xml.rels', $relsDoc->saveXML());
+
+        return array('name' => cpms_labor_consultant_sheet_name($newName), 'path' => $newPath, 'rid' => $newRid, 'index' => $sheetIndex);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_xlsx_apply_output_sheets')) {
+    function cpms_labor_consultant_xlsx_apply_output_sheets($zip, $outputSheets, $activePath) {
+        if (!is_array($outputSheets) || count($outputSheets) < 1) return;
+
+        $workbookXml = $zip->getFromName('xl/workbook.xml');
+        $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
+        if ($workbookXml === false || $relsXml === false) return;
+
+        $wbDoc = new DOMDocument('1.0', 'UTF-8');
+        $wbDoc->preserveWhiteSpace = true;
+        $wbDoc->formatOutput = false;
+        $relsDoc = new DOMDocument('1.0', 'UTF-8');
+        $relsDoc->preserveWhiteSpace = true;
+        $relsDoc->formatOutput = false;
+        if (!@$wbDoc->loadXML($workbookXml) || !@$relsDoc->loadXML($relsXml)) return;
+
+        $relsXpath = new DOMXPath($relsDoc);
+        $pathByRid = array();
+        $relNodes = $relsXpath->query('/*[local-name()="Relationships"]/*[local-name()="Relationship"]');
+        foreach ($relNodes as $relNode) {
+            $rid = $relNode->getAttribute('Id');
+            $target = str_replace('\\', '/', $relNode->getAttribute('Target'));
+            if ($rid === '' || $target === '') continue;
+            $target = ltrim($target, '/');
+            if (strpos($target, 'xl/') !== 0) $target = 'xl/' . $target;
+            $pathByRid[$rid] = $target;
+        }
+
+        $outputByPath = array();
+        foreach ($outputSheets as $item) {
+            if (!is_array($item)) continue;
+            $path = isset($item['path']) ? (string)$item['path'] : '';
+            if ($path === '') continue;
+            $outputByPath[$path] = isset($item['name']) ? (string)$item['name'] : '현장';
+        }
+
+        $wbXpath = new DOMXPath($wbDoc);
+        $sheetNodes = $wbXpath->query('/*[local-name()="workbook"]/*[local-name()="sheets"]/*[local-name()="sheet"]');
+        $used = array();
+        foreach ($sheetNodes as $sheetNode) {
+            $attrs = $sheetNode->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
+            $rid = isset($attrs['id']) ? (string)$attrs['id'] : '';
+            $path = isset($pathByRid[$rid]) ? $pathByRid[$rid] : '';
+            if ($path !== '' && isset($outputByPath[$path])) continue;
+            $used[cpms_labor_consultant_sheet_name_key((string)$sheetNode->getAttribute('name'))] = true;
+        }
+
+        $activeIndex = 0;
+        $idx = 0;
+        foreach ($sheetNodes as $sheetNode) {
+            $attrs = $sheetNode->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
+            $rid = isset($attrs['id']) ? (string)$attrs['id'] : '';
+            $path = isset($pathByRid[$rid]) ? $pathByRid[$rid] : '';
+            if ($path !== '' && isset($outputByPath[$path])) {
+                $sheetNode->setAttribute('name', cpms_labor_consultant_unique_sheet_name($outputByPath[$path], $used));
+                if ($sheetNode->hasAttribute('state')) $sheetNode->removeAttribute('state');
+                if ($path === $activePath) $activeIndex = $idx;
+            } else {
+                $sheetNode->setAttribute('state', 'hidden');
+            }
+            $idx++;
+        }
+
+        $views = $wbXpath->query('//*[local-name()="workbookView"]');
+        if ($views && $views->length > 0) {
+            $views->item(0)->setAttribute('activeTab', (string)$activeIndex);
+            $views->item(0)->setAttribute('firstSheet', (string)$activeIndex);
+        }
+
+        $zip->addFromString('xl/workbook.xml', $wbDoc->saveXML());
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_group_rows_by_project')) {
+    function cpms_labor_consultant_group_rows_by_project($dataRows, $fallbackLabel) {
+        $groups = array();
+        $order = array();
+        if (!is_array($dataRows)) return $groups;
+        foreach ($dataRows as $row) {
+            if (!is_array($row)) continue;
+            $pid = isset($row['project_id']) ? (string)((int)$row['project_id']) : '';
+            $pname = isset($row['project_name']) ? trim((string)$row['project_name']) : '';
+            $key = $pid !== '' && $pid !== '0' ? 'id:' . $pid : 'name:' . $pname;
+            if (!isset($groups[$key])) {
+                $groups[$key] = array(
+                    'project_id' => $pid,
+                    'project_name' => $pname !== '' ? $pname : (string)$fallbackLabel,
+                    'rows' => array()
+                );
+                $order[count($order)] = $key;
+            }
+            $groups[$key]['rows'][count($groups[$key]['rows'])] = $row;
+        }
+
+        $out = array();
+        foreach ($order as $key) {
+            $out[count($out)] = $groups[$key];
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_detect_two_row_block')) {
     function cpms_labor_consultant_detect_two_row_block($sheetDoc, $sharedStrings, $sheetName) {
         $layout = array(
@@ -1161,45 +1775,11 @@ if (!function_exists('cpms_labor_consultant_detect_two_row_block')) {
             'headerBottomRow' => 6,
             'dataStartRow' => 7,
             'blockRows' => 2,
-            'columns' => array(
-                'serialCol' => 1,
-                'outputMonthCol' => 2,
-                'workTypeCol' => 2,
-                'nameCol' => 4,
-                'phoneCol' => 4,
-                'residentNoCol' => 5,
-                'addressCol' => 5,
-                'foreignerCol' => 6,
-                'totalWorkCol' => 23,
-                'dailyRateCol' => 24,
-                'grossAmountCol' => 25,
-                'earnedTaxCol' => 27,
-                'residentTaxCol' => 27,
-                'healthInsuranceCol' => 28,
-                'pensionCol' => 28,
-                'employmentInsuranceCol' => 29,
-                'deductionTotalCol' => 29,
-                'netAmountCol' => 30,
-                'accountHolderCol' => 31,
-                'bankNameCol' => 32,
-                'bankAccountCol' => 33,
-                'companyCol' => 34,
-                'subcontractTypeCol' => 35
-            ),
-            'topDays' => array(),
-            'bottomDays' => array()
+            'message' => '',
+            'columns' => cpms_labor_consultant_default_two_row_columns(),
+            'topDays' => cpms_labor_consultant_default_top_day_columns(),
+            'bottomDays' => cpms_labor_consultant_default_bottom_day_columns()
         );
-
-        $d = 1;
-        while ($d <= 15) {
-            $layout['topDays'][$d] = 6 + $d;
-            $d++;
-        }
-        $d = 16;
-        while ($d <= 31) {
-            $layout['bottomDays'][$d] = $d - 9;
-            $d++;
-        }
 
         $topCells = cpms_labor_consultant_row_cell_texts($sheetDoc, $sharedStrings, 5);
         $bottomCells = cpms_labor_consultant_row_cell_texts($sheetDoc, $sharedStrings, 6);
@@ -1268,6 +1848,14 @@ if (!function_exists('cpms_labor_consultant_detect_two_row_block')) {
         if ($ok) {
             $layout['ok'] = true;
             $layout['mode'] = 'two_row_worker_block';
+            $layout['message'] = '자동 헤더 감지 성공';
+        } else {
+            $layout['ok'] = true;
+            $layout['mode'] = 'two_row_worker_block_fixed_fallback';
+            $layout['message'] = '자동 헤더 감지 일부 실패, 고정 양식 위치로 처리';
+            $layout['columns'] = cpms_labor_consultant_default_two_row_columns();
+            $layout['topDays'] = cpms_labor_consultant_default_top_day_columns();
+            $layout['bottomDays'] = cpms_labor_consultant_default_bottom_day_columns();
         }
 
         return $layout;
@@ -1296,7 +1884,7 @@ if (!function_exists('cpms_labor_consultant_clear_row_values_in_range')) {
             if ($child->localName !== 'c') continue;
             list(, $colIndex) = cpms_labor_consultant_xlsx_ref_to_pos($child->getAttribute('r'));
             if ($colIndex >= $startCol && $colIndex <= $endCol) {
-                cpms_labor_consultant_clear_cell_all($child);
+                cpms_labor_consultant_clear_cell_value($child);
             }
         }
     }
@@ -1397,9 +1985,21 @@ if (!function_exists('cpms_labor_consultant_fill_two_row_blocks')) {
         if (count($blocks) !== count($dataRows)) return false;
 
         $cols = isset($layout['columns']) ? $layout['columns'] : array();
+        if (!is_array($cols)) $cols = array();
+        $cols = array_merge(cpms_labor_consultant_default_two_row_columns(), $cols);
         $topDays = isset($layout['topDays']) ? $layout['topDays'] : array();
         $bottomDays = isset($layout['bottomDays']) ? $layout['bottomDays'] : array();
+        if (!is_array($topDays)) $topDays = array();
+        if (!is_array($bottomDays)) $bottomDays = array();
+        if (!isset($topDays[1]) || !isset($topDays[15])) {
+            $topDays = cpms_labor_consultant_default_top_day_columns();
+        }
+        if (!isset($bottomDays[16]) || !isset($bottomDays[31])) {
+            $bottomDays = cpms_labor_consultant_default_bottom_day_columns();
+        }
         $daysInMonth = cpms_labor_consultant_days_in_month($ym);
+
+        $outputMonthValue = (int)substr(cpms_labor_consultant_normalize_ym($ym), 5, 2);
 
         foreach ($blocks as $idx => $block) {
             $rowData = isset($dataRows[$idx]) ? $dataRows[$idx] : array();
@@ -1420,7 +2020,7 @@ if (!function_exists('cpms_labor_consultant_fill_two_row_blocks')) {
             $deductionTotal = 0;
 
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['serialCol'], $serial, true);
-            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['outputMonthCol'], $ym, false);
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['outputMonthCol'], $outputMonthValue, true);
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['nameCol'], $workerName, false);
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['residentNoCol'], cpms_labor_consultant_text_value($rowData, 'resident_no'), false);
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['foreignerCol'], cpms_labor_consultant_text_value($rowData, 'foreigner'), false);
@@ -1464,6 +2064,72 @@ if (!function_exists('cpms_labor_consultant_fill_two_row_blocks')) {
 
         cpms_labor_consultant_update_dimension($sheetDoc);
         return true;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_set_cell_ref_value')) {
+    function cpms_labor_consultant_set_cell_ref_value($sheetDoc, $ref, $value, $isNumeric) {
+        list($rowNum, $colIndex) = cpms_labor_consultant_xlsx_ref_to_pos($ref);
+        if ($rowNum <= 0 || $colIndex <= 0) return false;
+        $rowNode = cpms_labor_consultant_find_row_node($sheetDoc, $rowNum);
+        if (!$rowNode) return false;
+        cpms_labor_consultant_set_cell_value($sheetDoc, $rowNode, $colIndex, $value, $isNumeric);
+        return true;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_month_period_label')) {
+    function cpms_labor_consultant_month_period_label($ym) {
+        $range = cpms_labor_consultant_month_range($ym);
+        return $range['start'] . ' ~ ' . $range['end'];
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_project_period_label')) {
+    function cpms_labor_consultant_project_period_label($rowData, $fallback) {
+        $start = isset($rowData['project_start_date']) ? trim((string)$rowData['project_start_date']) : '';
+        $end = isset($rowData['project_end_date']) ? trim((string)$rowData['project_end_date']) : '';
+        if ($start !== '' && $end !== '') return $start . ' ~ ' . $end;
+        if ($start !== '') return $start . ' ~';
+        if ($end !== '') return '~ ' . $end;
+        return $fallback;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fill_summary_cells')) {
+    function cpms_labor_consultant_fill_summary_cells($sheetDoc, $sharedStrings, $dataRows, $ym, $options) {
+        if (!is_array($options)) $options = array();
+        $firstRow = is_array($dataRows) && count($dataRows) > 0 && is_array($dataRows[0]) ? $dataRows[0] : array();
+        $projectLabel = isset($options['project_label']) ? trim((string)$options['project_label']) : '';
+        if ($projectLabel === '' && isset($firstRow['project_name'])) $projectLabel = trim((string)$firstRow['project_name']);
+
+        $managerName = isset($options['project_manager_name']) ? trim((string)$options['project_manager_name']) : '';
+        if ($managerName === '' && isset($firstRow['project_manager_name'])) $managerName = trim((string)$firstRow['project_manager_name']);
+
+        $monthRange = cpms_labor_consultant_month_range($ym);
+        $monthPeriod = cpms_labor_consultant_month_period_label($ym);
+        $projectPeriod = cpms_labor_consultant_project_period_label($firstRow, $monthPeriod);
+
+        if ($projectLabel !== '') {
+            cpms_labor_consultant_set_cell_ref_value($sheetDoc, 'C1', $projectLabel, false);
+        }
+
+        cpms_labor_consultant_set_cell_ref_value($sheetDoc, 'M1', $projectPeriod, false);
+        cpms_labor_consultant_set_cell_ref_value($sheetDoc, 'AE3', $monthRange['start'], false);
+        cpms_labor_consultant_set_cell_ref_value($sheetDoc, 'AE4', $monthRange['end'], false);
+
+        if ($managerName !== '') {
+            $ac1 = cpms_labor_consultant_xlsx_cell_text_at($sheetDoc, $sharedStrings, 'AC1');
+            $ac2 = cpms_labor_consultant_xlsx_cell_text_at($sheetDoc, $sharedStrings, 'AC2');
+            cpms_labor_consultant_set_cell_ref_value($sheetDoc, 'AC1', $managerName, false);
+            cpms_labor_consultant_set_cell_ref_value($sheetDoc, 'AC2', $managerName, false);
+            if (cpms_labor_consultant_text_contains_any($ac1, array('책임자'))) {
+                cpms_labor_consultant_set_cell_ref_value($sheetDoc, 'AE1', $managerName, false);
+            }
+            if (cpms_labor_consultant_text_contains_any($ac2, array('작성자'))) {
+                cpms_labor_consultant_set_cell_ref_value($sheetDoc, 'AE2', $managerName, false);
+            }
+        }
     }
 }
 
@@ -1711,6 +2377,9 @@ if (!function_exists('cpms_labor_consultant_create_export_file')) {
 
 if (!function_exists('cpms_labor_consultant_create_export_file_v2')) {
     function cpms_labor_consultant_create_export_file_v2($templatePath, $dataRows, $options) {
+        if (function_exists('cpms_labor_consultant_create_export_file_v3')) {
+            return cpms_labor_consultant_create_export_file_v3($templatePath, $dataRows, $options);
+        }
         if (!is_array($options)) $options = array();
         $ym = isset($options['ym']) ? cpms_labor_consultant_normalize_ym($options['ym']) : cpms_labor_consultant_current_ym();
 
@@ -1804,6 +2473,319 @@ if (!function_exists('cpms_labor_consultant_create_export_file_v2')) {
         cpms_labor_consultant_xlsx_set_active_sheet($zip, isset($sheet['index']) ? (int)$sheet['index'] : 0);
         $zip->close();
         cpms_labor_export_remove_calc_chain($tmpPath);
+
+        return array('ok' => true, 'path' => $tmpPath);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_debug_export_detection_v2')) {
+    function cpms_labor_consultant_debug_export_detection_v2($templatePath, $dataRows, $options) {
+        if (!is_array($options)) $options = array();
+        $projectId = isset($options['project_id']) ? (string)$options['project_id'] : '';
+        $ym = isset($options['ym']) ? cpms_labor_consultant_normalize_ym($options['ym']) : cpms_labor_consultant_current_ym();
+        $result = array(
+            'ok' => false,
+            'message' => '',
+            'project_id' => $projectId,
+            'ym' => $ym,
+            'template_path' => (string)$templatePath,
+            'template_exists' => is_file($templatePath) ? 'true' : 'false',
+            'selected_sheet_name' => '',
+            'sheet_path' => '',
+            'layout_ok' => 'false',
+            'layout_message' => '',
+            'layout' => array(),
+            'labor_count' => is_array($dataRows) ? count($dataRows) : 0,
+            'first_labor_row' => is_array($dataRows) && count($dataRows) > 0 ? $dataRows[0] : array(),
+            'fill_result' => 'not_run',
+            'firstNameRef' => '',
+            'firstNameAfterFill' => ''
+        );
+
+        if (!class_exists('ZipArchive') || !function_exists('simplexml_load_string') || !class_exists('DOMDocument')) {
+            $result['message'] = '엑셀 생성 라이브러리를 찾을 수 없습니다.';
+            return $result;
+        }
+        if (!is_file($templatePath)) {
+            $result['message'] = '등록된 양식 파일이 없습니다.';
+            return $result;
+        }
+
+        $zip = new ZipArchive();
+        if ($zip->open($templatePath) !== true) {
+            $result['message'] = '양식 파일을 ZipArchive로 열 수 없습니다.';
+            return $result;
+        }
+
+        $sheet = cpms_labor_consultant_xlsx_find_export_base_sheet($zip);
+        if (!$sheet) {
+            $zip->close();
+            $result['message'] = '현장명 또는 통합 시트를 찾지 못했습니다.';
+            return $result;
+        }
+
+        $result['selected_sheet_name'] = isset($sheet['name']) ? (string)$sheet['name'] : '';
+        $result['sheet_path'] = isset($sheet['path']) ? (string)$sheet['path'] : '';
+
+        $sheetXml = $zip->getFromName($result['sheet_path']);
+        if ($sheetXml === false || $sheetXml === '') {
+            $zip->close();
+            $result['message'] = '기준 시트 XML을 읽을 수 없습니다.';
+            return $result;
+        }
+
+        $sheetDoc = new DOMDocument('1.0', 'UTF-8');
+        $sheetDoc->preserveWhiteSpace = true;
+        $sheetDoc->formatOutput = false;
+        if (!@$sheetDoc->loadXML($sheetXml)) {
+            $zip->close();
+            $result['message'] = '기준 시트 XML을 읽을 수 없습니다.';
+            return $result;
+        }
+
+        $sharedStrings = cpms_labor_consultant_xlsx_shared_strings($zip);
+        $layout = cpms_labor_consultant_detect_two_row_block($sheetDoc, $sharedStrings, $result['selected_sheet_name']);
+        $result['layout'] = $layout;
+        $result['layout_ok'] = (isset($layout['ok']) && $layout['ok']) ? 'true' : 'false';
+        $result['layout_message'] = isset($layout['message']) ? (string)$layout['message'] : '';
+
+        $cols = isset($layout['columns']) && is_array($layout['columns']) ? array_merge(cpms_labor_consultant_default_two_row_columns(), $layout['columns']) : cpms_labor_consultant_default_two_row_columns();
+        $firstNameCol = isset($cols['nameCol']) ? (int)$cols['nameCol'] : 4;
+        $result['firstNameRef'] = cpms_labor_consultant_xlsx_col_to_letter($firstNameCol) . '7';
+
+        if (isset($layout['ok']) && $layout['ok'] && is_array($dataRows) && count($dataRows) > 0) {
+            try {
+                $fillOk = cpms_labor_consultant_fill_two_row_blocks($sheetDoc, $layout, $dataRows, $ym);
+                $result['fill_result'] = $fillOk ? 'success' : 'failed';
+                $result['firstNameAfterFill'] = cpms_labor_consultant_xlsx_cell_text_at($sheetDoc, array(), $result['firstNameRef']);
+            } catch (Exception $e) {
+                $result['fill_result'] = 'exception: ' . $e->getMessage();
+            }
+        } else if (!is_array($dataRows) || count($dataRows) < 1) {
+            $result['fill_result'] = 'not_run: no labor rows';
+        } else {
+            $result['fill_result'] = 'not_run: layout failed';
+        }
+
+        $zip->close();
+        if ($result['message'] === '') {
+            $result['message'] = $result['layout_message'];
+        }
+        $result['ok'] = true;
+        return $result;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_render_debug_page_v2')) {
+    function cpms_labor_consultant_render_debug_page_v2($debug) {
+        $layout = isset($debug['layout']) && is_array($debug['layout']) ? $debug['layout'] : array();
+        $cols = isset($layout['columns']) && is_array($layout['columns']) ? array_merge(cpms_labor_consultant_default_two_row_columns(), $layout['columns']) : cpms_labor_consultant_default_two_row_columns();
+        $topDays = isset($layout['topDays']) && is_array($layout['topDays']) ? $layout['topDays'] : cpms_labor_consultant_default_top_day_columns();
+        $bottomDays = isset($layout['bottomDays']) && is_array($layout['bottomDays']) ? $layout['bottomDays'] : cpms_labor_consultant_default_bottom_day_columns();
+        if (!isset($topDays[1]) || !isset($topDays[15])) $topDays = cpms_labor_consultant_default_top_day_columns();
+        if (!isset($bottomDays[16]) || !isset($bottomDays[31])) $bottomDays = cpms_labor_consultant_default_bottom_day_columns();
+
+        header('Content-Type: text/html; charset=utf-8');
+        echo '<!doctype html><html><head><meta charset="utf-8"><title>labor export debug</title>';
+        echo '<style>body{font-family:Consolas,monospace;padding:24px;line-height:1.55}pre{background:#f5f5f5;padding:12px;white-space:pre-wrap}</style>';
+        echo '</head><body>';
+        echo '<h1>labor consultant export debug</h1><pre>';
+        echo 'project_id: ' . htmlspecialchars(isset($debug['project_id']) ? (string)$debug['project_id'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'ym: ' . htmlspecialchars(isset($debug['ym']) ? (string)$debug['ym'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'template_path: ' . htmlspecialchars(isset($debug['template_path']) ? (string)$debug['template_path'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'template_exists: ' . htmlspecialchars(isset($debug['template_exists']) ? (string)$debug['template_exists'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'selected_sheet_name: ' . htmlspecialchars(isset($debug['selected_sheet_name']) ? (string)$debug['selected_sheet_name'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'sheet_path: ' . htmlspecialchars(isset($debug['sheet_path']) ? (string)$debug['sheet_path'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'layout_ok: ' . htmlspecialchars(isset($debug['layout_ok']) ? (string)$debug['layout_ok'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'layout_message: ' . htmlspecialchars(isset($debug['layout_message']) ? (string)$debug['layout_message'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'laborRows count: ' . htmlspecialchars(isset($debug['labor_count']) ? (string)$debug['labor_count'] : '0', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'first labor row sample:' . "\n";
+        echo htmlspecialchars(print_r(isset($debug['first_labor_row']) ? $debug['first_labor_row'] : array(), true), ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'dataStartRow: ' . htmlspecialchars(isset($layout['dataStartRow']) ? (string)$layout['dataStartRow'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'blockRows: ' . htmlspecialchars(isset($layout['blockRows']) ? (string)$layout['blockRows'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'nameCol: ' . (isset($cols['nameCol']) ? cpms_labor_consultant_xlsx_col_to_letter($cols['nameCol']) : '') . "\n";
+        echo 'day 1 col: ' . (isset($topDays[1]) ? cpms_labor_consultant_xlsx_col_to_letter($topDays[1]) : '') . "\n";
+        echo 'day 15 col: ' . (isset($topDays[15]) ? cpms_labor_consultant_xlsx_col_to_letter($topDays[15]) : '') . "\n";
+        echo 'day 16 col: ' . (isset($bottomDays[16]) ? cpms_labor_consultant_xlsx_col_to_letter($bottomDays[16]) : '') . "\n";
+        echo 'day 31 col: ' . (isset($bottomDays[31]) ? cpms_labor_consultant_xlsx_col_to_letter($bottomDays[31]) : '') . "\n";
+        echo 'fill_result: ' . htmlspecialchars(isset($debug['fill_result']) ? (string)$debug['fill_result'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'firstNameRef: ' . htmlspecialchars(isset($debug['firstNameRef']) ? (string)$debug['firstNameRef'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        echo 'firstNameAfterFill: ' . htmlspecialchars(isset($debug['firstNameAfterFill']) ? (string)$debug['firstNameAfterFill'] : '', ENT_QUOTES, 'UTF-8') . "\n";
+        if (isset($debug['message']) && $debug['message'] !== '') {
+            echo 'message: ' . htmlspecialchars((string)$debug['message'], ENT_QUOTES, 'UTF-8') . "\n";
+        }
+        echo '</pre></body></html>';
+        exit;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_create_export_file_v3')) {
+    function cpms_labor_consultant_create_export_file_v3($templatePath, $dataRows, $options) {
+        if (!is_array($options)) $options = array();
+        $ym = isset($options['ym']) ? cpms_labor_consultant_normalize_ym($options['ym']) : cpms_labor_consultant_current_ym();
+
+        if (!class_exists('ZipArchive') || !function_exists('simplexml_load_string') || !class_exists('DOMDocument')) {
+            error_log('[labor_consultant_export] library missing');
+            return array('ok' => false, 'message' => '엑셀 생성 라이브러리를 찾을 수 없습니다.');
+        }
+        if (!is_file($templatePath)) {
+            error_log('[labor_consultant_export] template missing');
+            return array('ok' => false, 'message' => '등록된 양식 파일이 없습니다.');
+        }
+        if (!is_array($dataRows) || count($dataRows) < 1) {
+            error_log('[labor_consultant_export] no data');
+            return array('ok' => false, 'message' => '선택한 현장/기간에 노무비 데이터가 없습니다.');
+        }
+
+        $firstWorkerName = isset($dataRows[0]['worker_name']) ? trim((string)$dataRows[0]['worker_name']) : '';
+        if ($firstWorkerName === '') {
+            error_log('[labor_consultant_export] first worker name empty');
+            return array('ok' => false, 'message' => '첫 번째 데이터 행 성명칸이 비어 있습니다.');
+        }
+
+        $tmpBase = tempnam(sys_get_temp_dir(), 'cpms_labor_');
+        if ($tmpBase === false) {
+            error_log('[labor_consultant_export] temp file create failed');
+            return array('ok' => false, 'message' => '양식 파일을 복사할 수 없습니다.');
+        }
+        $tmpPath = $tmpBase . '.xlsx';
+        @unlink($tmpPath);
+        if (!@copy($templatePath, $tmpPath)) {
+            @unlink($tmpBase);
+            error_log('[labor_consultant_export] template copy failed');
+            return array('ok' => false, 'message' => '양식 파일을 복사할 수 없습니다.');
+        }
+        @unlink($tmpBase);
+
+        $zip = new ZipArchive();
+        if ($zip->open($tmpPath) !== true) {
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] template open failed');
+            return array('ok' => false, 'message' => '양식 파일을 ZipArchive로 열 수 없습니다.');
+        }
+
+        $baseSheet = cpms_labor_consultant_xlsx_find_export_base_sheet($zip);
+        if (!$baseSheet) {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] base sheet missing');
+            return array('ok' => false, 'message' => '현장명 또는 통합 시트를 찾지 못했습니다.');
+        }
+
+        $baseSheetPath = isset($baseSheet['path']) ? (string)$baseSheet['path'] : '';
+        $baseSheetXml = $zip->getFromName($baseSheetPath);
+        if ($baseSheetXml === false || $baseSheetXml === '') {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] base sheet xml missing');
+            return array('ok' => false, 'message' => '현장명 시트 XML을 읽을 수 없습니다.');
+        }
+
+        $sharedStrings = cpms_labor_consultant_xlsx_shared_strings($zip);
+        $fallbackLabel = isset($options['project_label']) ? trim((string)$options['project_label']) : '';
+        $groups = cpms_labor_consultant_group_rows_by_project($dataRows, $fallbackLabel);
+        if (count($groups) < 1) {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] grouped rows empty');
+            return array('ok' => false, 'message' => '선택한 현장/기간에 노무비 데이터가 없습니다.');
+        }
+
+        $outputSheets = array();
+        $activeOutputPath = '';
+        $idx = 0;
+        foreach ($groups as $group) {
+            $groupRows = isset($group['rows']) && is_array($group['rows']) ? $group['rows'] : array();
+            if (count($groupRows) < 1) continue;
+
+            $groupName = isset($group['project_name']) ? trim((string)$group['project_name']) : '';
+            if ($groupName === '') $groupName = $fallbackLabel !== '' ? $fallbackLabel : '현장';
+
+            if ($idx === 0) {
+                $sheet = $baseSheet;
+            } else {
+                $sheet = cpms_labor_consultant_xlsx_clone_sheet($zip, $baseSheet, $groupName);
+                if (!$sheet) {
+                    $zip->close();
+                    @unlink($tmpPath);
+                    error_log('[labor_consultant_export] sheet clone failed');
+                    return array('ok' => false, 'message' => '현장별 엑셀 시트를 만들 수 없습니다.');
+                }
+            }
+
+            $sheetPath = isset($sheet['path']) ? (string)$sheet['path'] : '';
+            $sheetDoc = new DOMDocument('1.0', 'UTF-8');
+            $sheetDoc->preserveWhiteSpace = true;
+            $sheetDoc->formatOutput = false;
+            if (!@$sheetDoc->loadXML($baseSheetXml)) {
+                $zip->close();
+                @unlink($tmpPath);
+                error_log('[labor_consultant_export] sheet load failed');
+                return array('ok' => false, 'message' => '현장명 시트 XML을 읽을 수 없습니다.');
+            }
+
+            $layout = cpms_labor_consultant_detect_two_row_block($sheetDoc, $sharedStrings, isset($baseSheet['name']) ? $baseSheet['name'] : '');
+            if (!isset($layout['ok']) || !$layout['ok']) {
+                $zip->close();
+                @unlink($tmpPath);
+                error_log('[labor_consultant_export] layout detection failed');
+                return array('ok' => false, 'message' => '노무사 확인용 양식 구조를 인식하지 못했습니다.');
+            }
+
+            try {
+                $filled = cpms_labor_consultant_fill_two_row_blocks($sheetDoc, $layout, $groupRows, $ym);
+            } catch (Exception $e) {
+                $zip->close();
+                @unlink($tmpPath);
+                error_log('[labor_consultant_export] fill exception: ' . $e->getMessage());
+                return array('ok' => false, 'message' => '근로자 데이터 입력 중 오류가 발생했습니다: ' . $e->getMessage());
+            }
+            if (!$filled) {
+                $zip->close();
+                @unlink($tmpPath);
+                error_log('[labor_consultant_export] fill failed');
+                return array('ok' => false, 'message' => '근로자 데이터 입력 행을 만들 수 없습니다.');
+            }
+
+            $groupOptions = $options;
+            $groupOptions['project_label'] = $groupName;
+            cpms_labor_consultant_fill_summary_cells($sheetDoc, $sharedStrings, $groupRows, $ym, $groupOptions);
+            cpms_labor_consultant_update_sheet_formula_sheet_name($sheetDoc, isset($baseSheet['name']) ? (string)$baseSheet['name'] : '', $groupName);
+
+            if (!$zip->addFromString($sheetPath, $sheetDoc->saveXML())) {
+                $zip->close();
+                @unlink($tmpPath);
+                error_log('[labor_consultant_export] sheet write failed');
+                return array('ok' => false, 'message' => '생성된 엑셀 파일을 저장하지 못했습니다.');
+            }
+
+            $outputSheets[count($outputSheets)] = array('path' => $sheetPath, 'name' => $groupName);
+            if ($activeOutputPath === '') $activeOutputPath = $sheetPath;
+            $idx++;
+        }
+
+        if (count($outputSheets) < 1) {
+            $zip->close();
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] no output sheets');
+            return array('ok' => false, 'message' => '선택한 현장/기간에 노무비 데이터가 없습니다.');
+        }
+
+        cpms_labor_consultant_xlsx_apply_output_sheets($zip, $outputSheets, $activeOutputPath);
+        cpms_labor_consultant_xlsx_force_recalc($zip);
+        cpms_labor_consultant_xlsx_clear_formula_cached_values($zip);
+        if ($zip->close() === false) {
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] zip close failed');
+            return array('ok' => false, 'message' => '생성된 엑셀 파일을 저장하지 못했습니다.');
+        }
+        cpms_labor_export_remove_calc_chain($tmpPath);
+
+        if (!is_file($tmpPath) || filesize($tmpPath) < 1000) {
+            @unlink($tmpPath);
+            error_log('[labor_consultant_export] generated file empty');
+            return array('ok' => false, 'message' => '생성된 엑셀 파일이 비어 있습니다.');
+        }
 
         return array('ok' => true, 'path' => $tmpPath);
     }
