@@ -1549,11 +1549,16 @@ if (!function_exists('cpms_labor_consultant_sheet_rels_path')) {
 
 if (!function_exists('cpms_labor_consultant_xlsx_next_sheet_path')) {
     function cpms_labor_consultant_xlsx_next_sheet_path($zip) {
+        static $reserved = array();
+        $hash = is_object($zip) ? spl_object_hash($zip) : 'default';
+        if (!isset($reserved[$hash])) $reserved[$hash] = array();
         $idx = 1;
-        while ($zip->locateName('xl/worksheets/sheet' . $idx . '.xml') !== false) {
+        while ($zip->locateName('xl/worksheets/sheet' . $idx . '.xml') !== false || isset($reserved[$hash]['xl/worksheets/sheet' . $idx . '.xml'])) {
             $idx++;
         }
-        return 'xl/worksheets/sheet' . $idx . '.xml';
+        $path = 'xl/worksheets/sheet' . $idx . '.xml';
+        $reserved[$hash][$path] = true;
+        return $path;
     }
 }
 
@@ -1588,10 +1593,16 @@ if (!function_exists('cpms_labor_consultant_xlsx_clone_sheet')) {
     function cpms_labor_consultant_xlsx_clone_sheet($zip, $baseSheet, $newName) {
         $basePath = isset($baseSheet['path']) ? (string)$baseSheet['path'] : '';
         $baseXml = $zip->getFromName($basePath);
-        if ($basePath === '' || $baseXml === false || $baseXml === '') return null;
+        if ($basePath === '' || $baseXml === false || $baseXml === '') {
+            error_log('[labor_consultant_export] clone base xml missing: ' . $basePath);
+            return null;
+        }
 
         $newPath = cpms_labor_consultant_xlsx_next_sheet_path($zip);
-        if (!$zip->addFromString($newPath, $baseXml)) return null;
+        if (!$zip->addFromString($newPath, $baseXml)) {
+            error_log('[labor_consultant_export] clone add sheet failed: ' . $newPath);
+            return null;
+        }
 
         $baseRels = cpms_labor_consultant_sheet_rels_path($basePath);
         $newRels = cpms_labor_consultant_sheet_rels_path($newPath);
@@ -1601,65 +1612,7 @@ if (!function_exists('cpms_labor_consultant_xlsx_clone_sheet')) {
         }
         cpms_labor_consultant_xlsx_add_content_type_override($zip, $newPath, 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml');
 
-        $workbookXml = $zip->getFromName('xl/workbook.xml');
-        $workbookRelsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
-        if ($workbookXml === false || $workbookRelsXml === false) return null;
-
-        $wbDoc = new DOMDocument('1.0', 'UTF-8');
-        $wbDoc->preserveWhiteSpace = true;
-        $wbDoc->formatOutput = false;
-        $relsDoc = new DOMDocument('1.0', 'UTF-8');
-        $relsDoc->preserveWhiteSpace = true;
-        $relsDoc->formatOutput = false;
-        if (!@$wbDoc->loadXML($workbookXml) || !@$relsDoc->loadXML($workbookRelsXml)) return null;
-
-        $wbXpath = new DOMXPath($wbDoc);
-        $relsXpath = new DOMXPath($relsDoc);
-        $sheetNodes = $wbXpath->query('/*[local-name()="workbook"]/*[local-name()="sheets"]/*[local-name()="sheet"]');
-        $sheetsNodes = $wbXpath->query('/*[local-name()="workbook"]/*[local-name()="sheets"]');
-        if (!$sheetsNodes || $sheetsNodes->length < 1) return null;
-
-        $maxSheetId = 0;
-        $sheetIndex = 0;
-        foreach ($sheetNodes as $sheetNode) {
-            $sid = (int)$sheetNode->getAttribute('sheetId');
-            if ($sid > $maxSheetId) $maxSheetId = $sid;
-            $sheetIndex++;
-        }
-
-        $maxRid = 0;
-        $relNodes = $relsXpath->query('/*[local-name()="Relationships"]/*[local-name()="Relationship"]');
-        foreach ($relNodes as $relNode) {
-            $rid = $relNode->getAttribute('Id');
-            if (preg_match('/^rId([0-9]+)$/', $rid, $m) && (int)$m[1] > $maxRid) {
-                $maxRid = (int)$m[1];
-            }
-        }
-        $newRid = 'rId' . ($maxRid + 1);
-
-        $relsRootNodes = $relsXpath->query('/*[local-name()="Relationships"]');
-        if (!$relsRootNodes || $relsRootNodes->length < 1) return null;
-        $relsRoot = $relsRootNodes->item(0);
-        $relsNs = $relsRoot->namespaceURI ? $relsRoot->namespaceURI : 'http://schemas.openxmlformats.org/package/2006/relationships';
-        $relNode = $relsDoc->createElementNS($relsNs, 'Relationship');
-        $relNode->setAttribute('Id', $newRid);
-        $relNode->setAttribute('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet');
-        $relNode->setAttribute('Target', preg_replace('#^xl/#', '', $newPath));
-        $relsRoot->appendChild($relNode);
-
-        $sheetsNode = $sheetsNodes->item(0);
-        $wbRootNodes = $wbXpath->query('/*[local-name()="workbook"]');
-        $wbNs = ($wbRootNodes && $wbRootNodes->length > 0 && $wbRootNodes->item(0)->namespaceURI) ? $wbRootNodes->item(0)->namespaceURI : 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
-        $sheetNode = $wbDoc->createElementNS($wbNs, 'sheet');
-        $sheetNode->setAttribute('name', cpms_labor_consultant_sheet_name($newName));
-        $sheetNode->setAttribute('sheetId', (string)($maxSheetId + 1));
-        $sheetNode->setAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'r:id', $newRid);
-        $sheetsNode->appendChild($sheetNode);
-
-        $zip->addFromString('xl/workbook.xml', $wbDoc->saveXML());
-        $zip->addFromString('xl/_rels/workbook.xml.rels', $relsDoc->saveXML());
-
-        return array('name' => cpms_labor_consultant_sheet_name($newName), 'path' => $newPath, 'rid' => $newRid, 'index' => $sheetIndex);
+        return array('name' => cpms_labor_consultant_sheet_name($newName), 'path' => $newPath, 'rid' => '', 'index' => 0);
     }
 }
 
@@ -1681,6 +1634,8 @@ if (!function_exists('cpms_labor_consultant_xlsx_apply_output_sheets')) {
 
         $relsXpath = new DOMXPath($relsDoc);
         $pathByRid = array();
+        $ridByPath = array();
+        $maxRid = 0;
         $relNodes = $relsXpath->query('/*[local-name()="Relationships"]/*[local-name()="Relationship"]');
         foreach ($relNodes as $relNode) {
             $rid = $relNode->getAttribute('Id');
@@ -1689,6 +1644,10 @@ if (!function_exists('cpms_labor_consultant_xlsx_apply_output_sheets')) {
             $target = ltrim($target, '/');
             if (strpos($target, 'xl/') !== 0) $target = 'xl/' . $target;
             $pathByRid[$rid] = $target;
+            $ridByPath[$target] = $rid;
+            if (preg_match('/^rId([0-9]+)$/', $rid, $m) && (int)$m[1] > $maxRid) {
+                $maxRid = (int)$m[1];
+            }
         }
 
         $outputByPath = array();
@@ -1700,6 +1659,45 @@ if (!function_exists('cpms_labor_consultant_xlsx_apply_output_sheets')) {
         }
 
         $wbXpath = new DOMXPath($wbDoc);
+        $sheetsNodes = $wbXpath->query('/*[local-name()="workbook"]/*[local-name()="sheets"]');
+        if (!$sheetsNodes || $sheetsNodes->length < 1) return;
+        $sheetsNode = $sheetsNodes->item(0);
+        $sheetNodes = $wbXpath->query('/*[local-name()="workbook"]/*[local-name()="sheets"]/*[local-name()="sheet"]');
+        $maxSheetId = 0;
+        foreach ($sheetNodes as $sheetNode) {
+            $sid = (int)$sheetNode->getAttribute('sheetId');
+            if ($sid > $maxSheetId) $maxSheetId = $sid;
+        }
+
+        $relsRootNodes = $relsXpath->query('/*[local-name()="Relationships"]');
+        if (!$relsRootNodes || $relsRootNodes->length < 1) return;
+        $relsRoot = $relsRootNodes->item(0);
+        $relsNs = $relsRoot->namespaceURI ? $relsRoot->namespaceURI : 'http://schemas.openxmlformats.org/package/2006/relationships';
+        $wbRootNodes = $wbXpath->query('/*[local-name()="workbook"]');
+        $wbNs = ($wbRootNodes && $wbRootNodes->length > 0 && $wbRootNodes->item(0)->namespaceURI) ? $wbRootNodes->item(0)->namespaceURI : 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+
+        foreach ($outputByPath as $path => $displayName) {
+            if (isset($ridByPath[$path])) continue;
+            $maxRid++;
+            $maxSheetId++;
+            $newRid = 'rId' . $maxRid;
+
+            $relNode = $relsDoc->createElementNS($relsNs, 'Relationship');
+            $relNode->setAttribute('Id', $newRid);
+            $relNode->setAttribute('Type', 'http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet');
+            $relNode->setAttribute('Target', preg_replace('#^xl/#', '', $path));
+            $relsRoot->appendChild($relNode);
+
+            $sheetNode = $wbDoc->createElementNS($wbNs, 'sheet');
+            $sheetNode->setAttribute('name', cpms_labor_consultant_sheet_name($displayName));
+            $sheetNode->setAttribute('sheetId', (string)$maxSheetId);
+            $sheetNode->setAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'r:id', $newRid);
+            $sheetsNode->appendChild($sheetNode);
+
+            $pathByRid[$newRid] = $path;
+            $ridByPath[$path] = $newRid;
+        }
+
         $sheetNodes = $wbXpath->query('/*[local-name()="workbook"]/*[local-name()="sheets"]/*[local-name()="sheet"]');
         $used = array();
         foreach ($sheetNodes as $sheetNode) {
@@ -1733,6 +1731,7 @@ if (!function_exists('cpms_labor_consultant_xlsx_apply_output_sheets')) {
         }
 
         $zip->addFromString('xl/workbook.xml', $wbDoc->saveXML());
+        $zip->addFromString('xl/_rels/workbook.xml.rels', $relsDoc->saveXML());
     }
 }
 
