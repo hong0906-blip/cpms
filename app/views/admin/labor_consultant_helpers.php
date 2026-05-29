@@ -1589,6 +1589,43 @@ if (!function_exists('cpms_labor_consultant_xlsx_add_content_type_override')) {
     }
 }
 
+if (!function_exists('cpms_labor_consultant_xlsx_apply_worksheet_content_types')) {
+    function cpms_labor_consultant_xlsx_apply_worksheet_content_types($zip, $sheetPaths) {
+        if (!is_array($sheetPaths) || count($sheetPaths) < 1) return;
+        $xml = $zip->getFromName('[Content_Types].xml');
+        if ($xml === false || $xml === '') return;
+
+        $doc = new DOMDocument('1.0', 'UTF-8');
+        $doc->preserveWhiteSpace = true;
+        $doc->formatOutput = false;
+        if (!@$doc->loadXML($xml)) return;
+
+        $xpath = new DOMXPath($doc);
+        $rootNodes = $xpath->query('/*[local-name()="Types"]');
+        if (!$rootNodes || $rootNodes->length < 1) return;
+        $root = $rootNodes->item(0);
+        $ns = $root->namespaceURI ? $root->namespaceURI : 'http://schemas.openxmlformats.org/package/2006/content-types';
+
+        $existing = array();
+        $nodes = $xpath->query('/*[local-name()="Types"]/*[local-name()="Override"]');
+        foreach ($nodes as $node) {
+            $existing[(string)$node->getAttribute('PartName')] = true;
+        }
+
+        foreach ($sheetPaths as $path) {
+            $path = '/' . ltrim((string)$path, '/');
+            if ($path === '/' || isset($existing[$path])) continue;
+            $node = $doc->createElementNS($ns, 'Override');
+            $node->setAttribute('PartName', $path);
+            $node->setAttribute('ContentType', 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml');
+            $root->appendChild($node);
+            $existing[$path] = true;
+        }
+
+        $zip->addFromString('[Content_Types].xml', $doc->saveXML());
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_xlsx_clone_sheet')) {
     function cpms_labor_consultant_xlsx_clone_sheet($zip, $baseSheet, $newName) {
         $basePath = isset($baseSheet['path']) ? (string)$baseSheet['path'] : '';
@@ -2618,6 +2655,72 @@ if (!function_exists('cpms_labor_consultant_render_debug_page_v2')) {
     }
 }
 
+if (!function_exists('cpms_labor_consultant_validate_export_template_v3')) {
+    function cpms_labor_consultant_validate_export_template_v3($templatePath, $dataRows, $options) {
+        if (!is_array($options)) $options = array();
+
+        if (!class_exists('ZipArchive') || !function_exists('simplexml_load_string') || !class_exists('DOMDocument')) {
+            error_log('[labor_consultant_export] library missing');
+            return array('ok' => false, 'message' => '엑셀 생성 라이브러리를 찾을 수 없습니다.');
+        }
+        if (!is_file($templatePath)) {
+            error_log('[labor_consultant_export] template missing');
+            return array('ok' => false, 'message' => '등록된 양식 파일이 없습니다.');
+        }
+        if (!is_array($dataRows) || count($dataRows) < 1) {
+            error_log('[labor_consultant_export] no data');
+            return array('ok' => false, 'message' => '선택한 현장/기간에 노무비 데이터가 없습니다.');
+        }
+
+        $firstWorkerName = isset($dataRows[0]['worker_name']) ? trim((string)$dataRows[0]['worker_name']) : '';
+        if ($firstWorkerName === '') {
+            error_log('[labor_consultant_export] first worker name empty');
+            return array('ok' => false, 'message' => '첫 번째 데이터 행 성명칸이 비어 있습니다.');
+        }
+
+        $zip = new ZipArchive();
+        if ($zip->open($templatePath) !== true) {
+            error_log('[labor_consultant_export] template open failed');
+            return array('ok' => false, 'message' => '양식 파일을 ZipArchive로 열 수 없습니다.');
+        }
+
+        $baseSheet = cpms_labor_consultant_xlsx_find_export_base_sheet($zip);
+        if (!$baseSheet) {
+            $zip->close();
+            error_log('[labor_consultant_export] base sheet missing');
+            return array('ok' => false, 'message' => '현장명 또는 통합 시트를 찾지 못했습니다.');
+        }
+
+        $baseSheetPath = isset($baseSheet['path']) ? (string)$baseSheet['path'] : '';
+        $baseSheetXml = $zip->getFromName($baseSheetPath);
+        if ($baseSheetXml === false || $baseSheetXml === '') {
+            $zip->close();
+            error_log('[labor_consultant_export] base sheet xml missing');
+            return array('ok' => false, 'message' => '현장명 시트 XML을 읽을 수 없습니다.');
+        }
+
+        $sheetDoc = new DOMDocument('1.0', 'UTF-8');
+        $sheetDoc->preserveWhiteSpace = true;
+        $sheetDoc->formatOutput = false;
+        if (!@$sheetDoc->loadXML($baseSheetXml)) {
+            $zip->close();
+            error_log('[labor_consultant_export] sheet load failed');
+            return array('ok' => false, 'message' => '현장명 시트 XML을 읽을 수 없습니다.');
+        }
+
+        $sharedStrings = cpms_labor_consultant_xlsx_shared_strings($zip);
+        $layout = cpms_labor_consultant_detect_two_row_block($sheetDoc, $sharedStrings, isset($baseSheet['name']) ? $baseSheet['name'] : '');
+        $zip->close();
+
+        if (!isset($layout['ok']) || !$layout['ok']) {
+            error_log('[labor_consultant_export] layout detection failed');
+            return array('ok' => false, 'message' => '노무사 확인용 양식 구조를 인식하지 못했습니다.');
+        }
+
+        return array('ok' => true, 'message' => 'OK');
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_create_export_file_v3')) {
     function cpms_labor_consultant_create_export_file_v3($templatePath, $dataRows, $options) {
         if (!is_array($options)) $options = array();
@@ -2703,13 +2806,15 @@ if (!function_exists('cpms_labor_consultant_create_export_file_v3')) {
             if ($idx === 0) {
                 $sheet = $baseSheet;
             } else {
-                $sheet = cpms_labor_consultant_xlsx_clone_sheet($zip, $baseSheet, $groupName);
-                if (!$sheet) {
-                    $zip->close();
-                    @unlink($tmpPath);
-                    error_log('[labor_consultant_export] sheet clone failed');
-                    return array('ok' => false, 'message' => '현장별 엑셀 시트를 만들 수 없습니다.');
+                $newSheetPath = cpms_labor_consultant_xlsx_next_sheet_path($zip);
+                $baseRels = cpms_labor_consultant_sheet_rels_path($baseSheetPath);
+                $newRels = cpms_labor_consultant_sheet_rels_path($newSheetPath);
+                $relsXml = $zip->getFromName($baseRels);
+                if ($relsXml !== false && $relsXml !== '') {
+                    $zip->addFromString($newRels, $relsXml);
                 }
+                cpms_labor_consultant_xlsx_add_content_type_override($zip, $newSheetPath, 'application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml');
+                $sheet = array('name' => cpms_labor_consultant_sheet_name($groupName), 'path' => $newSheetPath, 'rid' => '', 'index' => 0);
             }
 
             $sheetPath = isset($sheet['path']) ? (string)$sheet['path'] : '';
@@ -2770,6 +2875,13 @@ if (!function_exists('cpms_labor_consultant_create_export_file_v3')) {
             return array('ok' => false, 'message' => '선택한 현장/기간에 노무비 데이터가 없습니다.');
         }
 
+        $sheetPaths = array();
+        foreach ($outputSheets as $outputSheet) {
+            if (is_array($outputSheet) && isset($outputSheet['path'])) {
+                $sheetPaths[count($sheetPaths)] = (string)$outputSheet['path'];
+            }
+        }
+        cpms_labor_consultant_xlsx_apply_worksheet_content_types($zip, $sheetPaths);
         cpms_labor_consultant_xlsx_apply_output_sheets($zip, $outputSheets, $activeOutputPath);
         cpms_labor_consultant_xlsx_force_recalc($zip);
         cpms_labor_consultant_xlsx_clear_formula_cached_values($zip);

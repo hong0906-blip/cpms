@@ -23,6 +23,27 @@ $ym = cpms_labor_consultant_normalize_ym($ym);
 $debugLaborExport = isset($_GET['debug_labor_export']) && (string)$_GET['debug_labor_export'] === '1';
 $checkLaborExport = isset($_GET['check_labor_export']) && (string)$_GET['check_labor_export'] === '1';
 
+register_shutdown_function(function() use ($checkLaborExport) {
+    $err = error_get_last();
+    if (!$err || !isset($err['type'])) return;
+    $fatalTypes = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR);
+    if (defined('E_RECOVERABLE_ERROR')) $fatalTypes[count($fatalTypes)] = E_RECOVERABLE_ERROR;
+    if (!in_array((int)$err['type'], $fatalTypes, true)) return;
+
+    $message = isset($err['message']) ? (string)$err['message'] : 'unknown fatal error';
+    $file = isset($err['file']) ? (string)$err['file'] : '';
+    $line = isset($err['line']) ? (string)$err['line'] : '';
+    error_log('[labor_consultant_export] fatal: ' . $message . ' in ' . $file . ':' . $line);
+
+    if (!headers_sent()) {
+        while (ob_get_level() > 0) {
+            if (!@ob_end_clean()) break;
+        }
+        header('Content-Type: text/plain; charset=utf-8', true, 500);
+        echo '엑셀 다운로드 처리 중 서버 오류가 발생했습니다: ' . $message;
+    }
+});
+
 $templateRow = cpms_labor_consultant_get_active_template($pdo);
 $templatePath = $templateRow ? cpms_labor_consultant_resolve_stored_path(isset($templateRow['stored_path']) ? $templateRow['stored_path'] : '') : '';
 
@@ -51,7 +72,7 @@ if ($checkLaborExport) {
     $projects = isset($viewData['projects']) ? $viewData['projects'] : array();
     $projectLabel = cpms_labor_consultant_project_label($projectId, $projects);
     try {
-        $checkResult = cpms_labor_consultant_create_export_file_v3($templatePath, $rows, array(
+        $checkResult = cpms_labor_consultant_validate_export_template_v3($templatePath, $rows, array(
             'ym' => $ym,
             'project_label' => $projectLabel
         ));
