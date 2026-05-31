@@ -100,6 +100,14 @@ try {
         ));
         flash_set('success', attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%20%ED%97%88%EC%9A%A9%20%EC%9C%84%EC%B9%98%EA%B0%80%20%EC%B6%94%EA%B0%80%EB%90%98%EC%97%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
     }
+    if ($isActive === 1) {
+        $stSetting = $pdo->prepare("REPLACE INTO cpms_attendance_settings(setting_key, setting_value, updated_at) VALUES(:k, :v, :u)");
+        $stSetting->execute(array(
+            ':k' => 'attendance_geofence_enabled',
+            ':v' => '1',
+            ':u' => $now
+        ));
+    }
 } catch (Exception $e) {
     flash_set('danger', $e->getMessage());
 }

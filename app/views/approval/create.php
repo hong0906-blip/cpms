@@ -6,6 +6,7 @@ require_once __DIR__ . '/document_templates.php';
 require_once __DIR__ . '/template_style.php';
 require_once __DIR__ . '/template_proposal.php';
 require_once __DIR__ . '/template_leave.php';
+require_once __DIR__ . '/template_unused_leave.php';
 
 if (!function_exists('approval_create_fetch_employee_by_name')) {
     function approval_create_fetch_employee_by_name($pdo, $name)
@@ -57,13 +58,25 @@ if (!function_exists('approval_create_employee_list_by_dept')) {
 
 $pdo = Db::pdo();
 $type = isset($_GET['type']) ? trim((string)$_GET['type']) : 'proposal';
+$allowedTypes = array('proposal', 'leave', 'unused_leave_notice', 'unused_leave_plan');
+if (!in_array($type, $allowedTypes, true)) {
+    $type = 'proposal';
+}
 $isLeave = ($type === 'leave');
+$isUnusedLeaveNotice = ($type === 'unused_leave_notice');
+$isUnusedLeavePlan = ($type === 'unused_leave_plan');
+$isManagementOnlyDoc = ($isUnusedLeaveNotice || $isUnusedLeavePlan);
 $u = \App\Core\Auth::user();
 $dept = isset($u['department']) ? trim((string)$u['department']) : '';
 $name = isset($u['name']) ? trim((string)$u['name']) : '';
 $email = isset($u['email']) ? trim((string)$u['email']) : '';
 $position = isset($u['position']) ? trim((string)$u['position']) : '';
 $creatorEmployeeId = approval_current_employee_id($pdo, $u);
+
+if ($isManagementOnlyDoc && !approval_is_management_department_user($pdo, $u)) {
+    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4">' . h(approval_ko('%EA%B4%80%EB%A6%AC%EB%B6%80%EB%A7%8C%20%EC%9E%91%EC%84%B1%ED%95%A0%20%EC%88%98%20%EC%9E%88%EB%8A%94%20%EB%AC%B8%EC%84%9C%EC%9E%85%EB%8B%88%EB%8B%A4.')) . '</div>';
+    return;
+}
 
 $employees = array();
 $site = array();
@@ -217,6 +230,25 @@ $init = array(
     'delegate_level' => 'none'
 );
 
+if ($isManagementOnlyDoc) {
+    $init = array(
+        'writer_email' => $email,
+        'sender_name' => $name,
+        'sent_at' => date('Y-m-d H:i:s'),
+        'target_employee_id' => '',
+        'target_name' => '',
+        'target_department' => '',
+        'target_position' => '',
+        'unused_leave_days' => '',
+        'annual_grant_date' => date('Y-m-d'),
+        'annual_expiry_date' => date('Y-m-d'),
+        'notice_message' => approval_ko('%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%EA%B0%80%20%EC%9E%88%EC%9C%BC%EB%8B%88%20%EB%A7%8C%EB%A3%8C%EC%9D%BC%20%EC%A0%84%EC%97%90%20%EC%82%AC%EC%9A%A9%ED%95%B4%20%EC%A3%BC%EC%8B%9C%EA%B8%B0%20%EB%B0%94%EB%9E%8D%EB%8B%88%EB%8B%A4.'),
+        'plan_start_date' => date('Y-m-d'),
+        'plan_leave_days' => '',
+        'plan_message' => approval_ko('%EB%8C%80%EC%83%81%EC%9E%90%EC%9D%98%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%20%EA%B3%84%ED%9A%8D%EC%9D%84%20%EA%B8%B0%EC%9E%AC%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.')
+    );
+}
+
 $approvalOptions = array(
     'site' => $site,
     'gongmu' => $gongmu,
@@ -241,10 +273,14 @@ $approvalOptions = array(
 </div>
 <form method="post" action="?r=approval_store" enctype="multipart/form-data">
     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-    <input type="hidden" name="doc_type" value="<?php echo $isLeave ? 'leave' : 'proposal'; ?>">
+    <input type="hidden" name="doc_type" value="<?php echo h($type); ?>">
     <?php
     if ($isLeave) {
         render_approval_leave_document($init, array(), 'edit', $approvalOptions);
+    } else if ($isUnusedLeaveNotice) {
+        render_approval_unused_leave_notice_document($init, array(), 'edit', $approvalOptions);
+    } else if ($isUnusedLeavePlan) {
+        render_approval_unused_leave_plan_document($init, array(), 'edit', $approvalOptions);
     } else {
         render_approval_proposal_document($init, array(), 'edit', array(), $approvalOptions);
     }

@@ -104,7 +104,21 @@ if (!function_exists('approval_doc_label')) {
         if ($type === 'proposal') {
             return approval_ko('%EA%B8%B0%EC%95%88%EC%84%9C');
         }
+        if ($type === 'unused_leave_notice') {
+            return approval_ko('%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EC%B4%89%EA%B5%AC%EC%84%9C');
+        }
+        if ($type === 'unused_leave_plan') {
+            return approval_ko('%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EA%B3%84%ED%9A%8D%EC%84%9C');
+        }
         return $type === '' ? approval_ko('%EB%AC%B8%EC%84%9C') : (string)$type;
+    }
+}
+
+if (!function_exists('approval_is_management_only_doc_type')) {
+    function approval_is_management_only_doc_type($type)
+    {
+        $type = strtolower(trim((string)$type));
+        return in_array($type, array('unused_leave_notice', 'unused_leave_plan'), true);
     }
 }
 
@@ -378,6 +392,9 @@ if (!function_exists('approval_can_view_document')) {
     {
         if (!is_array($docRow) || !isset($docRow['id'])) {
             return false;
+        }
+        if (approval_is_management_only_doc_type(isset($docRow['doc_type']) ? $docRow['doc_type'] : '')) {
+            return approval_is_management_department_user($pdo, $user);
         }
         if (approval_is_master_user()) {
             return true;

@@ -1,6 +1,8 @@
 <?php
 use App\Core\Auth;
 
+require_once dirname(__DIR__) . '/admin/leave_management_helpers.php';
+
 if (!function_exists('cpms_tasks_now')) {
 function cpms_tasks_now()
 {
@@ -400,6 +402,291 @@ function cpms_tasks_find_employee_by_id($pdo, $employeeId)
     return null;
 }}
 
+if (!function_exists('cpms_tasks_is_management_department')) {
+function cpms_tasks_is_management_department($department)
+{
+    return cpms_tasks_normalize_department($department) === urldecode('%EA%B4%80%EB%A6%AC');
+}}
+
+if (!function_exists('cpms_tasks_fetch_management_employees')) {
+function cpms_tasks_fetch_management_employees($pdo)
+{
+    $all = cpms_tasks_fetch_active_employees($pdo);
+    $rows = array();
+    for ($i = 0; $i < count($all); $i++) {
+        if (cpms_tasks_is_management_department(isset($all[$i]['department']) ? $all[$i]['department'] : '')) {
+            $rows[count($rows)] = $all[$i];
+        }
+    }
+    return $rows;
+}}
+
+if (!function_exists('cpms_tasks_shared_group_key')) {
+function cpms_tasks_shared_group_key($type, $baseDate)
+{
+    return 'unused_leave:' . trim((string)$type) . ':' . trim((string)$baseDate);
+}}
+
+if (!function_exists('cpms_tasks_unused_leave_title')) {
+function cpms_tasks_unused_leave_title($type)
+{
+    if ($type === '2m10d') {
+        return urldecode('%5B%EA%B8%B4%EA%B8%89%5D%202%EA%B0%9C%EC%9B%94%2010%EC%9D%BC%20%EC%A0%84%20%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EC%B4%89%EA%B5%AC%EC%84%9C%20%EB%B0%9C%EC%86%A1');
+    }
+    return urldecode('%5B%EA%B8%B4%EA%B8%89%5D%206%EA%B0%9C%EC%9B%94%2010%EC%9D%BC%20%EC%A0%84%20%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%95%88%EB%82%B4%20%EB%AC%B8%EC%84%9C%20%EB%B0%9C%EC%86%A1');
+}}
+
+if (!function_exists('cpms_tasks_unused_leave_instruction')) {
+function cpms_tasks_unused_leave_instruction($type)
+{
+    if ($type === '2m10d') {
+        return urldecode('%EB%8C%80%EC%83%81%EC%9E%90%EC%97%90%EA%B2%8C%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%60%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EC%B4%89%EA%B5%AC%EC%84%9C%60%EB%A5%BC%20%EB%B0%9C%EC%86%A1%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.');
+    }
+    return urldecode('%EB%8C%80%EC%83%81%EC%9E%90%EC%97%90%EA%B2%8C%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%60%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EC%B4%89%EA%B5%AC%EC%84%9C%60%EC%99%80%20%60%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EA%B3%84%ED%9A%8D%EC%84%9C%60%EB%A5%BC%20%EB%B0%9C%EC%86%A1%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.');
+}}
+
+if (!function_exists('cpms_tasks_unused_leave_candidate_info')) {
+function cpms_tasks_unused_leave_candidate_info($pdo, $employee)
+{
+    $result = null;
+    if (!$pdo || !is_array($employee)) {
+        return $result;
+    }
+
+    $employeeId = isset($employee['id']) ? (int)$employee['id'] : 0;
+    $balance = isset($employee['leave_annual_balance']) ? (float)$employee['leave_annual_balance'] : 0.0;
+    if ($employeeId <= 0 || $balance <= 0) {
+        return $result;
+    }
+
+    try {
+        $st = $pdo->prepare("SELECT accrual_date FROM cpms_leave_accrual_logs WHERE employee_id=:employee_id AND leave_type='ANNUAL' AND accrual_date<=:today ORDER BY accrual_date DESC, id DESC LIMIT 1");
+        $st->execute(array(
+            ':employee_id' => $employeeId,
+            ':today' => cpms_tasks_today()
+        ));
+        $accrualDate = cpms_leave_parse_date($st->fetchColumn());
+        if ($accrualDate === '') {
+            return $result;
+        }
+        $expiryDate = cpms_leave_add_days(cpms_leave_add_years_clamped($accrualDate, 1), -1);
+        if ($expiryDate === '' || strcmp($expiryDate, cpms_tasks_today()) < 0) {
+            return $result;
+        }
+        $trigger6 = cpms_leave_add_days(cpms_leave_add_months_clamped($expiryDate, -6), -10);
+        $trigger2 = cpms_leave_add_days(cpms_leave_add_months_clamped($expiryDate, -2), -10);
+        $today = cpms_tasks_today();
+        $triggerType = '';
+        if ($trigger6 !== '' && $today === $trigger6) {
+            $triggerType = '6m10d';
+        } else if ($trigger2 !== '' && $today === $trigger2) {
+            $triggerType = '2m10d';
+        }
+        if ($triggerType === '') {
+            return $result;
+        }
+
+        $result = array(
+            'trigger_type' => $triggerType,
+            'employee_id' => $employeeId,
+            'name' => isset($employee['name']) ? (string)$employee['name'] : '',
+            'department' => isset($employee['department']) ? (string)$employee['department'] : '',
+            'position' => isset($employee['position']) ? (string)$employee['position'] : '',
+            'annual_balance' => cpms_leave_normalize_half_step($balance),
+            'annual_grant_date' => $accrualDate,
+            'annual_expiry_date' => $expiryDate
+        );
+    } catch (Exception $e) {
+        $result = null;
+    }
+
+    return $result;
+}}
+
+if (!function_exists('cpms_tasks_unused_leave_candidates')) {
+function cpms_tasks_unused_leave_candidates($pdo)
+{
+    $result = array(
+        '6m10d' => array(),
+        '2m10d' => array()
+    );
+    if (
+        !$pdo
+        || !cpms_leave_table_exists($pdo, 'cpms_leave_accrual_logs')
+        || !cpms_leave_column_exists($pdo, 'employees', 'hire_date')
+        || !cpms_leave_column_exists($pdo, 'employees', 'leave_annual_balance')
+    ) {
+        return $result;
+    }
+
+    $positionColumn = cpms_tasks_column_exists($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+    $resignColumn = cpms_leave_column_exists($pdo, 'employees', 'resign_date') ? 'resign_date' : "NULL AS resign_date";
+    try {
+        $sql = "SELECT id,name,email,department," . $positionColumn . ",hire_date,leave_annual_balance,is_active," . $resignColumn . " FROM employees WHERE is_active=1 AND hire_date IS NOT NULL AND hire_date<>'' AND leave_annual_balance IS NOT NULL AND leave_annual_balance>0 ORDER BY name ASC";
+        $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) {
+            $rows = array();
+        }
+        for ($i = 0; $i < count($rows); $i++) {
+            $resignDate = isset($rows[$i]['resign_date']) ? cpms_leave_parse_date($rows[$i]['resign_date']) : '';
+            if ($resignDate !== '' && strcmp($resignDate, cpms_tasks_today()) < 0) {
+                continue;
+            }
+            $one = cpms_tasks_unused_leave_candidate_info($pdo, $rows[$i]);
+            if (!$one || !isset($one['trigger_type'])) {
+                continue;
+            }
+            $result[$one['trigger_type']][count($result[$one['trigger_type']])] = $one;
+        }
+    } catch (Exception $e) {
+        return $result;
+    }
+
+    return $result;
+}}
+
+if (!function_exists('cpms_tasks_unused_leave_content')) {
+function cpms_tasks_unused_leave_content($type, $targets)
+{
+    $lines = array();
+    $lines[] = cpms_tasks_unused_leave_instruction($type);
+    $lines[] = '';
+    $lines[] = urldecode('%EB%8C%80%EC%83%81%20%EC%9D%B8%EC%9B%90');
+    for ($i = 0; $i < count($targets); $i++) {
+        $one = $targets[$i];
+        $parts = array();
+        $parts[] = isset($one['name']) ? (string)$one['name'] : '';
+        if (isset($one['department']) && trim((string)$one['department']) !== '') {
+            $parts[] = trim((string)$one['department']);
+        }
+        if (isset($one['position']) && trim((string)$one['position']) !== '') {
+            $parts[] = trim((string)$one['position']);
+        }
+        $label = implode(' / ', $parts);
+        $lines[] = '- ' . $label
+            . ' | ' . urldecode('%EC%9E%94%EC%97%AC') . ' ' . cpms_leave_format_decimal(isset($one['annual_balance']) ? $one['annual_balance'] : 0)
+            . urldecode('%EC%9D%BC')
+            . ' | ' . urldecode('%EB%B0%9C%ED%96%89%EC%9D%BC') . ' ' . (isset($one['annual_grant_date']) ? $one['annual_grant_date'] : '-')
+            . ' | ' . urldecode('%EB%A7%8C%EB%A3%8C%EC%9D%BC') . ' ' . (isset($one['annual_expiry_date']) ? $one['annual_expiry_date'] : '-');
+    }
+    return implode("\n", $lines);
+}}
+
+if (!function_exists('cpms_tasks_sync_shared_group_task')) {
+function cpms_tasks_sync_shared_group_task($pdo, $assignee, $groupKey, $title, $content)
+{
+    if (!$pdo || !is_array($assignee) || trim((string)$groupKey) === '') {
+        return false;
+    }
+    $assigneeId = isset($assignee['id']) ? (int)$assignee['id'] : 0;
+    if ($assigneeId <= 0) {
+        return false;
+    }
+
+    $now = cpms_tasks_now();
+    $existing = null;
+    try {
+        $st = $pdo->prepare("SELECT * FROM cpms_tasks WHERE assignee_employee_id=:assignee_employee_id AND group_key=:group_key ORDER BY id DESC LIMIT 1");
+        $st->execute(array(
+            ':assignee_employee_id' => $assigneeId,
+            ':group_key' => $groupKey
+        ));
+        $existing = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        $existing = null;
+    }
+
+    if ($existing) {
+        if (isset($existing['status']) && in_array((string)$existing['status'], array('done', 'cancelled'), true)) {
+            return true;
+        }
+        try {
+            $st = $pdo->prepare("UPDATE cpms_tasks SET title=:title, content=:content, due_date=:due_date, due_time=:due_time, priority='urgent', is_urgent=1, task_type='admin', updated_at=:updated_at WHERE id=:id");
+            $st->execute(array(
+                ':title' => $title,
+                ':content' => $content,
+                ':due_date' => cpms_tasks_today(),
+                ':due_time' => '18:00:00',
+                ':updated_at' => $now,
+                ':id' => (int)$existing['id']
+            ));
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+
+    try {
+        $st = $pdo->prepare("INSERT INTO cpms_tasks (title, content, requester_employee_id, requester_name, requester_email, assignee_employee_id, assignee_name, assignee_email, department, task_type, priority, is_urgent, due_date, due_time, status, created_by, created_at, updated_at, group_key) VALUES (:title, :content, NULL, :requester_name, NULL, :assignee_employee_id, :assignee_name, :assignee_email, :department, 'admin', 'urgent', 1, :due_date, :due_time, 'pending', NULL, :created_at, :updated_at, :group_key)");
+        $st->execute(array(
+            ':title' => $title,
+            ':content' => $content,
+            ':requester_name' => urldecode('CPMS%20%EC%9E%90%EB%8F%99%EC%95%88%EB%82%B4'),
+            ':assignee_employee_id' => $assigneeId,
+            ':assignee_name' => isset($assignee['name']) ? (string)$assignee['name'] : '',
+            ':assignee_email' => isset($assignee['email']) ? (string)$assignee['email'] : '',
+            ':department' => urldecode('%EA%B4%80%EB%A6%AC'),
+            ':due_date' => cpms_tasks_today(),
+            ':due_time' => '18:00:00',
+            ':created_at' => $now,
+            ':updated_at' => $now,
+            ':group_key' => $groupKey
+        ));
+        $taskId = (int)$pdo->lastInsertId();
+        if ($taskId > 0) {
+            cpms_tasks_insert_log($pdo, $taskId, array(
+                'id' => 0,
+                'name' => urldecode('CPMS%20%EC%9E%90%EB%8F%99%EC%95%88%EB%82%B4')
+            ), 'created', $content, null, 'pending');
+        }
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_tasks_bootstrap_automations')) {
+function cpms_tasks_bootstrap_automations($pdo)
+{
+    static $bootstrapped = false;
+    if ($bootstrapped) {
+        return;
+    }
+    $bootstrapped = true;
+
+    if (!$pdo || !cpms_tasks_table_exists($pdo, 'cpms_tasks')) {
+        return;
+    }
+
+    if (!cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) {
+        $results = array();
+        cpms_tasks_ensure_schema($pdo, $results);
+    }
+    if (!cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) {
+        return;
+    }
+
+    $targetsByType = cpms_tasks_unused_leave_candidates($pdo);
+    $managers = cpms_tasks_fetch_management_employees($pdo);
+    if (count($managers) === 0) {
+        return;
+    }
+
+    $types = array('6m10d', '2m10d');
+    for ($i = 0; $i < count($types); $i++) {
+        $type = $types[$i];
+        if (!isset($targetsByType[$type]) || count($targetsByType[$type]) === 0) {
+            continue;
+        }
+        $groupKey = cpms_tasks_shared_group_key($type, cpms_tasks_today());
+        $title = cpms_tasks_unused_leave_title($type);
+        $content = cpms_tasks_unused_leave_content($type, $targetsByType[$type]);
+        for ($j = 0; $j < count($managers); $j++) {
+            cpms_tasks_sync_shared_group_task($pdo, $managers[$j], $groupKey, $title, $content);
+        }
+    }
+}}
+
 if (!function_exists('cpms_tasks_can_view')) {
 function cpms_tasks_can_view($task, $currentEmployeeId)
 {
@@ -742,6 +1029,7 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'created_by' => "ALTER TABLE cpms_tasks ADD COLUMN created_by INT NULL AFTER cancel_reason",
             'created_at' => "ALTER TABLE cpms_tasks ADD COLUMN created_at DATETIME NULL AFTER created_by",
             'updated_at' => "ALTER TABLE cpms_tasks ADD COLUMN updated_at DATETIME NULL AFTER created_at",
+            'group_key' => "ALTER TABLE cpms_tasks ADD COLUMN group_key VARCHAR(190) NULL AFTER updated_at",
         ),
         'cpms_task_logs' => array(
             'task_id' => "ALTER TABLE cpms_task_logs ADD COLUMN task_id INT NOT NULL DEFAULT 0 AFTER id",
@@ -788,6 +1076,7 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'idx_department' => "ALTER TABLE cpms_tasks ADD INDEX idx_department (department)",
             'idx_project_id' => "ALTER TABLE cpms_tasks ADD INDEX idx_project_id (project_id)",
             'idx_is_urgent' => "ALTER TABLE cpms_tasks ADD INDEX idx_is_urgent (is_urgent)",
+            'idx_group_key' => "ALTER TABLE cpms_tasks ADD INDEX idx_group_key (group_key)",
         ),
         'cpms_task_logs' => array(
             'idx_task_id' => "ALTER TABLE cpms_task_logs ADD INDEX idx_task_id (task_id)",

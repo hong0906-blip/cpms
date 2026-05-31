@@ -39,6 +39,36 @@ try {
         ':updated_at' => $now,
         ':id' => $taskId,
     ));
+    $groupKey = (isset($task['group_key']) && trim((string)$task['group_key']) !== '') ? trim((string)$task['group_key']) : '';
+    if ($groupKey !== '' && cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) {
+        $syncMemo = $completedMemo;
+        if ($syncMemo === '') {
+            $syncMemo = urldecode('%EA%B3%B5%EC%9A%A9%20%ED%95%A0%EC%9D%BC%20%EB%AC%B6%EC%9D%8C%20%EC%9E%90%EB%8F%99%20%EC%99%84%EB%A3%8C');
+        }
+        $st = $pdo->prepare("SELECT id,status FROM cpms_tasks WHERE group_key=:group_key AND id<>:id");
+        $st->execute(array(
+            ':group_key' => $groupKey,
+            ':id' => $taskId
+        ));
+        $siblings = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($siblings)) {
+            $siblings = array();
+        }
+        $up = $pdo->prepare("UPDATE cpms_tasks SET status='done', completed_at=:completed_at, completed_by=:completed_by, completed_memo=:completed_memo, updated_at=:updated_at WHERE id=:id");
+        for ($i = 0; $i < count($siblings); $i++) {
+            if (isset($siblings[$i]['status']) && in_array((string)$siblings[$i]['status'], array('done', 'cancelled'), true)) {
+                continue;
+            }
+            $up->execute(array(
+                ':completed_at' => $now,
+                ':completed_by' => (int)$currentEmployee['id'] > 0 ? (int)$currentEmployee['id'] : null,
+                ':completed_memo' => $syncMemo,
+                ':updated_at' => $now,
+                ':id' => (int)$siblings[$i]['id']
+            ));
+            cpms_tasks_insert_log($pdo, (int)$siblings[$i]['id'], $currentEmployee, 'completed', $syncMemo, isset($siblings[$i]['status']) ? $siblings[$i]['status'] : null, 'done');
+        }
+    }
     if (isset($_FILES['attachments'])) {
         cpms_tasks_save_uploaded_files($pdo, $taskId, $_FILES['attachments'], (int)$currentEmployee['id']);
     }

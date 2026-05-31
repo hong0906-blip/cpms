@@ -29,7 +29,8 @@ if (!function_exists('approval_store_employee')) {
         if ((int)$id <= 0) {
             return null;
         }
-        $st = $pdo->prepare("SELECT id,name,email,department,position FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
+        $hireColumn = approval_store_column_exists($pdo, 'employees', 'hire_date') ? 'hire_date' : "NULL AS hire_date";
+        $st = $pdo->prepare("SELECT id,name,email,department,position," . $hireColumn . " FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
         $st->execute(array(':id' => (int)$id));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         return $row ? $row : null;
@@ -74,12 +75,99 @@ if (!function_exists('approval_store_upload_error_message')) {
     }
 }
 
+if (!function_exists('approval_store_latest_annual_leave_snapshot')) {
+    function approval_store_latest_annual_leave_snapshot($pdo, $employeeId)
+    {
+        $result = array(
+            'grant_date' => '',
+            'grant_days' => 0.0,
+            'used_days' => 0.0,
+            'unused_days' => 0.0,
+            'usable_period' => '',
+            'occurrence_label' => ''
+        );
+        if (!$pdo || (int)$employeeId <= 0) {
+            return $result;
+        }
+
+        try {
+            $st = $pdo->prepare("SELECT accrual_date, amount FROM cpms_leave_accrual_logs WHERE employee_id=:employee_id AND leave_type='ANNUAL' AND accrual_date<=CURDATE() ORDER BY accrual_date DESC, id DESC LIMIT 1");
+            $st->execute(array(':employee_id' => (int)$employeeId));
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                return $result;
+            }
+            $grantDate = cpms_leave_parse_date(isset($row['accrual_date']) ? $row['accrual_date'] : '');
+            $grantDays = isset($row['amount']) ? cpms_leave_normalize_half_step($row['amount']) : 0.0;
+            $result['grant_date'] = $grantDate;
+            $result['grant_days'] = $grantDays;
+            if ($grantDate !== '') {
+                $usableEnd = cpms_leave_add_days(cpms_leave_add_years_clamped($grantDate, 1), -1);
+                $result['usable_period'] = $grantDate . ' ~ ' . $usableEnd;
+            }
+
+            $hireSt = $pdo->prepare("SELECT hire_date, leave_annual_balance FROM employees WHERE id=:id LIMIT 1");
+            $hireSt->execute(array(':id' => (int)$employeeId));
+            $employee = $hireSt->fetch(PDO::FETCH_ASSOC);
+            if ($employee) {
+                $unusedDays = isset($employee['leave_annual_balance']) ? cpms_leave_normalize_half_step($employee['leave_annual_balance']) : 0.0;
+                $usedDays = cpms_leave_normalize_half_step(max(0, $grantDays - $unusedDays));
+                $result['unused_days'] = $unusedDays;
+                $result['used_days'] = $usedDays;
+                $hireDate = cpms_leave_parse_date(isset($employee['hire_date']) ? $employee['hire_date'] : '');
+                if ($hireDate !== '' && $grantDate !== '') {
+                    $year = 0;
+                    for ($i = 1; $i <= 50; $i++) {
+                        $anniversary = cpms_leave_add_years_clamped($hireDate, $i);
+                        $accrual = cpms_leave_add_days($anniversary, 1);
+                        if ($accrual === $grantDate) {
+                            $year = $i;
+                            break;
+                        }
+                    }
+                    if ($year > 0) {
+                        $result['occurrence_label'] = urldecode('%EC%9E%85%EC%82%AC%EC%9D%BC%20%ED%9B%84%20') . $year . urldecode('%EB%85%84%201%EC%9D%BC%20%EB%92%A4');
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            return $result;
+        }
+
+        return $result;
+    }
+}
+
+if (!function_exists('approval_store_build_notice_message')) {
+    function approval_store_build_notice_message($snapshot)
+    {
+        $grantDays = isset($snapshot['grant_days']) ? cpms_leave_format_decimal($snapshot['grant_days']) : '0';
+        $usedDays = isset($snapshot['used_days']) ? cpms_leave_format_decimal($snapshot['used_days']) : '0';
+        $unusedDays = isset($snapshot['unused_days']) ? cpms_leave_format_decimal($snapshot['unused_days']) : '0';
+        return '상기인은 현재 ' . $grantDays . '일의 연차 중 [ ' . $usedDays . ' ]일의 연차휴가를 사용하여, 사용기간까지 [ ' . $unusedDays . ' ]일의 연차휴가를 추가로 사용할 수 있습니다.'
+            . "\n\n"
+            . '상기인은 10일 이내에 향후 6개월 간 연차 사용 시기를 정하여 회사로 통보해주시기 바랍니다.'
+            . "\n\n"
+            . '만약, 연차휴가 사용 시기를 통보하지 않는다면, 회사는 근로기준법에 근거하여 연차휴가 사용기간 마지막 2개월 사이의 일자를 임의로 연차휴가 사용일로 지정하여 연차 사용기간 종료일 2개월 전까지 통보하도록 하겠습니다.'
+            . "\n\n"
+            . '연차휴가일을 지정하지 않고, 회사가 지정한 연차휴가일에 연차휴가를 사용하지 않는 경우, 근로기준법에 따라 해당 연차휴가는 소멸하며, 수당도 지급되지 않음에 유의하시기 바랍니다.'
+            . "\n\n"
+            . '위와 같이 연차사용촉진제도에 의거하여 연차휴가 사용을 촉구합니다.';
+    }
+}
+
 $creatorEmployeeId = approval_current_employee_id($pdo, $user);
 $creatorName = approval_current_user_name($user);
 $creatorEmail = approval_current_user_email($user);
 $docType = isset($_POST['doc_type']) ? trim((string)$_POST['doc_type']) : 'proposal';
-if ($docType !== 'leave') {
+if (!in_array($docType, array('proposal', 'leave', 'unused_leave_notice', 'unused_leave_plan'), true)) {
     $docType = 'proposal';
+}
+$isManagementOnlyDoc = approval_is_management_only_doc_type($docType);
+if ($isManagementOnlyDoc && !approval_is_management_department_user($pdo, $user)) {
+    flash_set('danger', approval_ko('%EA%B4%80%EB%A6%AC%EB%B6%80%EB%A7%8C%20%EC%9E%91%EC%84%B1%ED%95%A0%20%EC%88%98%20%EC%9E%88%EB%8A%94%20%EB%AC%B8%EC%84%9C%EC%9E%85%EB%8B%88%EB%8B%A4.'));
+    header('Location: ?r=approval_home&view=active');
+    exit;
 }
 
 $vpRole = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5');
@@ -102,7 +190,7 @@ $ceo = null;
 $st = $pdo->prepare("SELECT id,name,email,department,position FROM employees WHERE is_active=1 AND (position=:p1 OR position=:p2) LIMIT 1");
 $st->execute(array(':p1' => $ceoRole, ':p2' => approval_ko('%EB%8C%80%ED%91%9C')));
 $ceo = $st->fetch(PDO::FETCH_ASSOC);
-if (!$vp || !$ceo) {
+if (!$isManagementOnlyDoc && (!$vp || !$ceo)) {
     flash_set('danger', approval_ko('%EC%A7%81%EC%9B%90%EB%AA%85%EB%B6%80%EC%97%90%EC%84%9C%20%EB%B6%80%EC%82%AC%EC%9E%A5%20%EB%98%90%EB%8A%94%20%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC%EA%B0%80%20%ED%99%95%EC%9D%B8%EB%90%98%EC%A7%80%20%EC%95%8A%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
     header('Location: ?r=approval_create&type=' . $docType);
     exit;
@@ -113,7 +201,79 @@ $title = '';
 $lines = array();
 $delegateLevel = 'none';
 
-if ($docType === 'leave') {
+if ($isManagementOnlyDoc) {
+    $targetEmployee = approval_store_employee($pdo, isset($_POST['target_employee_id']) ? (int)$_POST['target_employee_id'] : 0);
+    if (!$targetEmployee) {
+        flash_set('danger', approval_ko('%EB%8C%80%EC%83%81%EC%9E%90%EB%A5%BC%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        header('Location: ?r=approval_create&type=' . $docType);
+        exit;
+    }
+
+    $targetDepartment = isset($_POST['target_department']) ? trim((string)$_POST['target_department']) : '';
+    $targetPosition = isset($_POST['target_position']) ? trim((string)$_POST['target_position']) : '';
+    if ($targetDepartment === '' && isset($targetEmployee['department'])) {
+        $targetDepartment = trim((string)$targetEmployee['department']);
+    }
+    if ($targetPosition === '' && isset($targetEmployee['position'])) {
+        $targetPosition = trim((string)$targetEmployee['position']);
+    }
+
+    $sentAt = date('Y-m-d H:i:s');
+    $snapshot = approval_store_latest_annual_leave_snapshot($pdo, (int)$targetEmployee['id']);
+    $contentData = array(
+        'writer_email' => $creatorEmail,
+        'sender_name' => $creatorName,
+        'sent_at' => $sentAt,
+        'target_employee_id' => (int)$targetEmployee['id'],
+        'target_name' => isset($targetEmployee['name']) ? trim((string)$targetEmployee['name']) : '',
+        'target_department' => $targetDepartment,
+        'target_position' => $targetPosition,
+        'target_hire_date' => isset($targetEmployee['hire_date']) ? trim((string)$targetEmployee['hire_date']) : '',
+        'unused_leave_days' => cpms_leave_format_decimal(isset($snapshot['unused_days']) ? $snapshot['unused_days'] : 0),
+        'used_leave_days' => cpms_leave_format_decimal(isset($snapshot['used_days']) ? $snapshot['used_days'] : 0),
+        'annual_grant_date' => isset($snapshot['grant_date']) ? $snapshot['grant_date'] : '',
+        'annual_expiry_date' => isset($snapshot['grant_date']) && $snapshot['grant_date'] !== '' ? cpms_leave_add_days(cpms_leave_add_years_clamped($snapshot['grant_date'], 1), -1) : '',
+        'annual_occurrence_label' => isset($snapshot['occurrence_label']) ? $snapshot['occurrence_label'] : '',
+        'annual_granted_days' => cpms_leave_format_decimal(isset($snapshot['grant_days']) ? $snapshot['grant_days'] : 0),
+        'annual_usable_period' => isset($snapshot['usable_period']) ? $snapshot['usable_period'] : ''
+    );
+    if ($docType === 'unused_leave_notice') {
+        $contentData['notice_message'] = approval_store_build_notice_message($snapshot);
+    } else {
+        $contentData['plan_notice_date'] = isset($_POST['plan_notice_date']) ? trim((string)$_POST['plan_notice_date']) : '';
+        $contentData['plan_period_1'] = '';
+        $contentData['plan_period_2'] = '';
+        $contentData['plan_period_3'] = '';
+        $contentData['plan_days_1'] = '';
+        $contentData['plan_days_2'] = '';
+        $contentData['plan_days_3'] = '';
+        $contentData['plan_total_days'] = '';
+        $contentData['receiver_signed_name'] = '';
+    }
+
+    $title = approval_doc_label($docType) . ' - ' . $contentData['target_name'];
+    $lines[] = array(
+        'role' => $manageRole,
+        'emp' => array(
+            'id' => $creatorEmployeeId,
+            'name' => $creatorName,
+            'email' => $creatorEmail
+        ),
+        'status' => 'APPROVED',
+        'acted_at' => $sentAt,
+        'sign_path' => approval_sign_path_by_email($creatorEmail),
+        'delegated' => 0
+    );
+    $lines[] = array(
+        'role' => approval_ko('%EB%B3%B8%EC%9D%B8'),
+        'emp' => array(
+            'id' => isset($targetEmployee['id']) ? (int)$targetEmployee['id'] : 0,
+            'name' => isset($targetEmployee['name']) ? (string)$targetEmployee['name'] : '',
+            'email' => isset($targetEmployee['email']) ? (string)$targetEmployee['email'] : ''
+        ),
+        'delegated' => 0
+    );
+} else if ($docType === 'leave') {
     $leadId = isset($_POST['team_lead_id']) ? (int)$_POST['team_lead_id'] : 0;
     $lead = approval_store_employee($pdo, $leadId);
     if (!$lead) {
@@ -237,9 +397,11 @@ $hasLineDelegatedBy = approval_store_column_exists($pdo, 'cpms_approval_lines', 
 try {
     $pdo->beginTransaction();
 
+    $initialDocStatus = 'PENDING';
     $docColumns = array('doc_type', 'title', 'content', 'doc_status', 'current_step_order', 'created_by_id', 'created_by_name', 'created_at', 'updated_at');
-    $docValues = array(':t', ':ti', ':c', "'PENDING'", '1', ':uid', ':un', 'NOW()', 'NOW()');
+    $docValues = array(':t', ':ti', ':c', ':doc_status', '1', ':uid', ':un', 'NOW()', 'NOW()');
     $docParams = array(':t' => $docType, ':ti' => $title, ':c' => json_encode($contentData), ':uid' => $creatorEmployeeId, ':un' => $creatorName);
+    $docParams[':doc_status'] = $initialDocStatus;
     if ($hasCreatorEmail) {
         $docColumns[] = 'created_by_email';
         $docValues[] = ':ue';
@@ -270,14 +432,16 @@ try {
                 $isSelfApprover = true;
             }
         }
-        $status = $isDelegated ? 'DELEGATED' : ($isSelfApprover ? 'SKIPPED' : 'WAITING');
+        $status = isset($line['status']) ? (string)$line['status'] : ($isDelegated ? 'DELEGATED' : ($isSelfApprover ? 'SKIPPED' : 'WAITING'));
         $prepared[] = array(
             'order' => $i + 1,
             'role' => $line['role'],
             'emp' => $emp,
             'status' => $status,
             'delegated' => $isDelegated ? 1 : 0,
-            'delegated_by_role' => isset($line['delegated_by_role']) ? $line['delegated_by_role'] : null
+            'delegated_by_role' => isset($line['delegated_by_role']) ? $line['delegated_by_role'] : null,
+            'acted_at' => isset($line['acted_at']) ? $line['acted_at'] : null,
+            'sign_path' => isset($line['sign_path']) ? $line['sign_path'] : null
         );
     }
 
@@ -297,6 +461,16 @@ try {
         $cols = array('document_id', 'line_order', 'role_type', 'approver_id', 'approver_name', 'approver_email', 'line_status');
         $marks = array(':d', ':o', ':r', ':aid', ':an', ':ae', ':st');
         $params = array(':d' => $did, ':o' => $prepared[$i]['order'], ':r' => $prepared[$i]['role'], ':aid' => $emp['id'], ':an' => $emp['name'], ':ae' => $emp['email'], ':st' => $prepared[$i]['status']);
+        if (approval_store_column_exists($pdo, 'cpms_approval_lines', 'acted_at') && !empty($prepared[$i]['acted_at'])) {
+            $cols[] = 'acted_at';
+            $marks[] = ':acted_at';
+            $params[':acted_at'] = $prepared[$i]['acted_at'];
+        }
+        if (approval_store_column_exists($pdo, 'cpms_approval_lines', 'sign_path') && !empty($prepared[$i]['sign_path'])) {
+            $cols[] = 'sign_path';
+            $marks[] = ':sign_path';
+            $params[':sign_path'] = $prepared[$i]['sign_path'];
+        }
         if ($hasLineDelegated) {
             $cols[] = 'is_delegated';
             $marks[] = ':is_delegated';
@@ -308,7 +482,7 @@ try {
             $params[':delegated_by_role'] = $prepared[$i]['delegated_by_role'];
         }
         $pdo->prepare("INSERT INTO cpms_approval_lines (" . implode(',', $cols) . ") VALUES (" . implode(',', $marks) . ")")->execute($params);
-        if ($prepared[$i]['status'] === 'SKIPPED' || $prepared[$i]['status'] === 'DELEGATED') {
+        if (in_array($prepared[$i]['status'], array('SKIPPED', 'DELEGATED', 'APPROVED'), true)) {
             $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,NULL,:a,:n,:e,:type,:m,NOW())")
                 ->execute(array(':d' => $did, ':a' => $creatorEmployeeId, ':n' => $creatorName, ':e' => $creatorEmail, ':type' => $prepared[$i]['status'], ':m' => approval_line_status_label($prepared[$i]['status'])));
         }

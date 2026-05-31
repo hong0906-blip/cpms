@@ -579,6 +579,7 @@ function cpms_task_feed_construction_schedule_items_for_employee($pdo, $employee
 if (!function_exists('cpms_task_feed_for_employee')) {
 function cpms_task_feed_for_employee($pdo, $employeeId, $employeeEmail, $employeeMeta)
 {
+    cpms_tasks_bootstrap_automations($pdo);
     return cpms_task_feed_merge(array(
         cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId),
         cpms_task_feed_construction_schedule_items_for_employee($pdo, $employeeId),

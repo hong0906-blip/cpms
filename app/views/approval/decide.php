@@ -78,6 +78,36 @@ try {
     $pdo->beginTransaction();
 
     if ($action === 'approve') {
+        if (isset($doc['doc_type']) && (string)$doc['doc_type'] === 'unused_leave_plan') {
+            $content = approval_parse_content(isset($doc['content']) ? $doc['content'] : '');
+            $planTotal = 0.0;
+            $planFields = array('plan_notice_date', 'plan_total_days');
+            for ($pf = 0; $pf < count($planFields); $pf++) {
+                $field = $planFields[$pf];
+                if (isset($_POST[$field])) {
+                    $content[$field] = trim((string)$_POST[$field]);
+                }
+            }
+            for ($i = 1; $i <= 3; $i++) {
+                $periodKey = 'plan_period_' . $i;
+                $daysKey = 'plan_days_' . $i;
+                $content[$periodKey] = isset($_POST[$periodKey]) ? trim((string)$_POST[$periodKey]) : '';
+                $content[$daysKey] = isset($_POST[$daysKey]) ? trim((string)$_POST[$daysKey]) : '';
+                if ($content[$daysKey] !== '' && is_numeric($content[$daysKey])) {
+                    $planTotal += (float)$content[$daysKey];
+                }
+            }
+            if ((!isset($content['plan_total_days']) || trim((string)$content['plan_total_days']) === '') && $planTotal > 0) {
+                $content['plan_total_days'] = ((abs($planTotal - (int)$planTotal) < 0.00001) ? (string)(int)$planTotal : number_format($planTotal, 1, '.', ''));
+            }
+            $content['receiver_signed_name'] = $actorName;
+            $pdo->prepare("UPDATE cpms_approval_documents SET content=:content, updated_at=NOW() WHERE id=:id")
+                ->execute(array(
+                    ':content' => json_encode($content),
+                    ':id' => $id
+                ));
+            $doc['content'] = json_encode($content);
+        }
         $sign = approval_sign_path_by_email($actorEmail);
         $pdo->prepare("UPDATE cpms_approval_lines SET line_status='APPROVED', acted_at=NOW(), sign_path=:s WHERE id=:id AND line_status='PENDING'")
             ->execute(array(':s' => $sign, ':id' => $line['id']));

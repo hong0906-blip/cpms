@@ -208,8 +208,12 @@ function attendance_geofence_settings($pdo){
             'updated_at' => ''
         );
     }
+    $enabledBySetting = (isset($s['attendance_geofence_enabled']) && (string)$s['attendance_geofence_enabled'] === '1');
+    $enabledByLocations = (count($locations) > 0);
     return array(
-        'enabled' => (isset($s['attendance_geofence_enabled']) && (string)$s['attendance_geofence_enabled'] === '1'),
+        // 활성 허용위치가 있으면 실제 출퇴근 검증도 함께 적용한다.
+        'enabled' => ($enabledBySetting || $enabledByLocations),
+        'enabled_setting' => $enabledBySetting,
         'name' => isset($s['attendance_geofence_name']) ? trim((string)$s['attendance_geofence_name']) : '',
         'lat' => $fallbackLat,
         'lng' => $fallbackLng,

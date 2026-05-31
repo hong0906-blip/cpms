@@ -5,6 +5,7 @@ require_once __DIR__ . '/_common.php';
 require_once __DIR__ . '/document_templates.php';
 require_once __DIR__ . '/template_proposal.php';
 require_once __DIR__ . '/template_leave.php';
+require_once __DIR__ . '/template_unused_leave.php';
 
 $pdo = Db::pdo();
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -51,6 +52,10 @@ if (isset($d['doc_type']) && $d['doc_type'] === 'proposal' && approval_table_exi
 <?php
 if (isset($d['doc_type']) && $d['doc_type'] === 'leave') {
     render_approval_leave_document($content, $lines, 'print', array());
+} else if (isset($d['doc_type']) && $d['doc_type'] === 'unused_leave_notice') {
+    render_approval_unused_leave_notice_document($content, $lines, 'print', array());
+} else if (isset($d['doc_type']) && $d['doc_type'] === 'unused_leave_plan') {
+    render_approval_unused_leave_plan_document($content, $lines, 'print', array());
 } else {
     render_approval_proposal_document($content, $lines, 'print', $filesByType, array());
 }

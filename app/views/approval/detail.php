@@ -6,6 +6,7 @@ require_once __DIR__ . '/document_templates.php';
 require_once __DIR__ . '/template_style.php';
 require_once __DIR__ . '/template_proposal.php';
 require_once __DIR__ . '/template_leave.php';
+require_once __DIR__ . '/template_unused_leave.php';
 
 $pdo = Db::pdo();
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -75,6 +76,7 @@ for ($i = 0; $i < count($lines); $i++) {
     }
 }
 $canDecide = (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && $myPendingLine);
+$isRecipientEditablePlan = ($canDecide && isset($d['doc_type']) && $d['doc_type'] === 'unused_leave_plan');
 ?>
 <div class="space-y-4">
     <div class="no-print flex flex-wrap gap-2">
@@ -107,7 +109,7 @@ $canDecide = (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && $myPe
         </div>
     </div>
 
-    <?php if (isset($d['doc_status']) && $d['doc_status'] === 'PENDING') { ?>
+    <?php if (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && !$isRecipientEditablePlan) { ?>
         <div class="no-print cpms-approval-decision-panel <?php echo (isset($d['doc_type']) && (string)$d['doc_type'] === 'leave') ? '' : 'cpms-mobile-hide'; ?> bg-white rounded-2xl border p-4 flex flex-wrap gap-3 items-center">
             <?php if ($canDecide) { ?>
                 <form method="post" action="?r=approval_decide" style="display:inline;">
@@ -137,13 +139,36 @@ $canDecide = (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && $myPe
         </div>
     <?php } ?>
 
-    <?php
-    if (isset($d['doc_type']) && $d['doc_type'] === 'leave') {
-        render_approval_leave_document($content, $lines, 'view', array());
-    } else {
-        render_approval_proposal_document($content, $lines, 'view', $filesByType, array());
-    }
-    ?>
+    <?php if ($isRecipientEditablePlan) { ?>
+        <form method="post" action="?r=approval_decide">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
+            <input type="hidden" name="action" value="approve">
+            <?php render_approval_unused_leave_plan_document($content, $lines, 'approve_edit', array()); ?>
+            <div class="no-print bg-white rounded-2xl border p-4 flex flex-wrap gap-3 items-center">
+                <button type="submit" class="px-6 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"><?php echo h(approval_ko('%EC%9E%91%EC%84%B1%20%ED%9B%84%20%EC%88%98%EB%9D%BD%ED%95%98%EA%B8%B0')); ?></button>
+            </div>
+        </form>
+        <form method="post" action="?r=approval_decide" class="no-print bg-white rounded-2xl border p-4 flex flex-wrap gap-2 items-center">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
+            <input type="hidden" name="action" value="reject">
+            <input type="text" name="reject_reason" class="border rounded-xl px-3 py-2 min-w-[280px]" placeholder="<?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%EC%82%AC%EC%9C%A0%20%EC%9E%85%EB%A0%A5')); ?>" required>
+            <button type="submit" class="px-6 py-3 rounded-xl bg-rose-600 text-white font-extrabold"><?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%ED%95%98%EA%B8%B0')); ?></button>
+        </form>
+    <?php } else { ?>
+        <?php
+        if (isset($d['doc_type']) && $d['doc_type'] === 'leave') {
+            render_approval_leave_document($content, $lines, 'view', array());
+        } else if (isset($d['doc_type']) && $d['doc_type'] === 'unused_leave_notice') {
+            render_approval_unused_leave_notice_document($content, $lines, 'view', array());
+        } else if (isset($d['doc_type']) && $d['doc_type'] === 'unused_leave_plan') {
+            render_approval_unused_leave_plan_document($content, $lines, 'view', array());
+        } else {
+            render_approval_proposal_document($content, $lines, 'view', $filesByType, array());
+        }
+        ?>
+    <?php } ?>
 
     <?php if (count($references) > 0) { ?>
         <div class="bg-white rounded-2xl border p-4 no-print">

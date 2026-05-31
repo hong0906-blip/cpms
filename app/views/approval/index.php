@@ -65,6 +65,8 @@ $txt = array(
     'db_desc' => urldecode('%EB%AC%B8%EC%84%9C%2C%20%EA%B2%B0%EC%9E%AC%EC%84%A0%2C%20%EC%B2%A8%EB%B6%80%2C%20%EC%95%8C%EB%A6%BC%20%ED%85%8C%EC%9D%B4%EB%B8%94%EC%9D%84%20%EC%A0%90%EA%B2%80%ED%95%A9%EB%8B%88%EB%8B%A4.'),
     'create_proposal' => urldecode('%EA%B8%B0%EC%95%88%EC%84%9C%20%EC%9E%91%EC%84%B1'),
     'create_leave' => urldecode('%ED%9C%B4%EA%B0%80%EA%B3%84%20%EC%9E%91%EC%84%B1'),
+    'create_unused_leave_notice' => urldecode('%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EC%B4%89%EA%B5%AC%EC%84%9C'),
+    'create_unused_leave_plan' => urldecode('%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EA%B3%84%ED%9A%8D%EC%84%9C'),
     'view_active' => urldecode('%EC%A7%84%ED%96%89%EB%AC%B8%EC%84%9C%20%EB%B3%B4%EA%B8%B0'),
     'view_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C%20%EB%B3%B4%EA%B8%B0'),
     'view_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%20%EB%B3%B4%EA%B8%B0'),
@@ -390,6 +392,10 @@ for ($i = 0; $i < count($rows); $i++) {
             <div class="flex flex-wrap items-center justify-start xl:justify-end gap-3 shrink-0 max-w-none">
                 <a class="cpms-mobile-hide inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-indigo-700" href="?r=approval_create&type=proposal"><?php echo h($txt['create_proposal']); ?></a>
                 <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-cyan-700" href="?r=approval_create&type=leave"><?php echo h($txt['create_leave']); ?></a>
+                <?php if (approval_is_management_department_user($pdo, $u)) { ?>
+                    <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-emerald-700" href="?r=approval_create&type=unused_leave_notice"><?php echo h($txt['create_unused_leave_notice']); ?></a>
+                    <a class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-amber-700" href="?r=approval_create&type=unused_leave_plan"><?php echo h($txt['create_unused_leave_plan']); ?></a>
+                <?php } ?>
             </div>
         </div>
 
@@ -411,6 +417,8 @@ for ($i = 0; $i < count($rows); $i++) {
                         <option value=""><?php echo h($txt['filter_all']); ?></option>
                         <option value="proposal" <?php echo ($docTypeFilter === 'proposal') ? 'selected' : ''; ?>><?php echo h($txt['create_proposal']); ?></option>
                         <option value="leave" <?php echo ($docTypeFilter === 'leave') ? 'selected' : ''; ?>><?php echo h($txt['create_leave']); ?></option>
+                        <option value="unused_leave_notice" <?php echo ($docTypeFilter === 'unused_leave_notice') ? 'selected' : ''; ?>><?php echo h($txt['create_unused_leave_notice']); ?></option>
+                        <option value="unused_leave_plan" <?php echo ($docTypeFilter === 'unused_leave_plan') ? 'selected' : ''; ?>><?php echo h($txt['create_unused_leave_plan']); ?></option>
                     </select>
                 </div>
                 <div>
