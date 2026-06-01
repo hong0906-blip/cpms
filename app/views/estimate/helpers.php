@@ -61,20 +61,6 @@ function cpms_estimate_table_exists($pdo, $table)
     }
 }}
 
-if (!function_exists('cpms_estimate_tables_ready')) {
-function cpms_estimate_tables_ready($pdo)
-{
-    if (!$pdo) return false;
-    foreach (cpms_estimate_required_tables() as $table) {
-        if (!cpms_estimate_table_exists($pdo, $table)) return false;
-    }
-    $priceColumns = array('project_name', 'sub_project_name', 'contract_amount', 'material_unit_price', 'labor_unit_price', 'expense_unit_price');
-    foreach ($priceColumns as $column) {
-        if (!cpms_estimate_column_exists($pdo, 'cpms_estimate_price_history', $column)) return false;
-    }
-    return true;
-}}
-
 if (!function_exists('cpms_estimate_column_exists')) {
 function cpms_estimate_column_exists($pdo, $table, $column)
 {
@@ -90,12 +76,26 @@ function cpms_estimate_column_exists($pdo, $table, $column)
     }
 }}
 
+if (!function_exists('cpms_estimate_tables_ready')) {
+function cpms_estimate_tables_ready($pdo)
+{
+    if (!$pdo) return false;
+    foreach (cpms_estimate_required_tables() as $table) {
+        if (!cpms_estimate_table_exists($pdo, $table)) return false;
+    }
+    $priceColumns = array('project_name', 'sub_project_name', 'contract_amount', 'material_unit_price', 'labor_unit_price', 'expense_unit_price');
+    foreach ($priceColumns as $column) {
+        if (!cpms_estimate_column_exists($pdo, 'cpms_estimate_price_history', $column)) return false;
+    }
+    return true;
+}}
+
 if (!function_exists('cpms_estimate_parse_number')) {
 function cpms_estimate_parse_number($value)
 {
     $value = trim((string)$value);
     if ($value === '') return null;
-    $value = str_replace(array(',', ' ', '원'), '', $value);
+    $value = str_replace(array(',', ' ', "\t", "\r", "\n"), '', $value);
     $value = preg_replace('/[^0-9\.\-]/', '', $value);
     if ($value === '' || $value === '-' || $value === '.' || $value === '-.') return null;
     if (!is_numeric($value)) return null;
@@ -169,6 +169,41 @@ function cpms_estimate_confidence($count)
     return '직접 입력 필요';
 }}
 
+if (!function_exists('cpms_estimate_stats')) {
+function cpms_estimate_stats($values)
+{
+    $clean = array();
+    $sum = 0.0;
+    foreach ((array)$values as $value) {
+        $num = (float)$value;
+        if ($num < 0) $num = 0.0;
+        $clean[] = $num;
+        $sum += $num;
+    }
+    $count = count($clean);
+    if ($count === 0) {
+        return array(
+            'min' => null,
+            'median' => null,
+            'avg' => null,
+            'max' => null,
+        );
+    }
+    sort($clean, SORT_NUMERIC);
+    $middle = (int)floor($count / 2);
+    if ($count % 2 === 1) {
+        $median = $clean[$middle];
+    } else {
+        $median = ($clean[$middle - 1] + $clean[$middle]) / 2;
+    }
+    return array(
+        'min' => $clean[0],
+        'median' => $median,
+        'avg' => ($sum / $count),
+        'max' => $clean[$count - 1],
+    );
+}}
+
 if (!function_exists('cpms_estimate_match_condition')) {
 function cpms_estimate_match_condition($params, $level)
 {
@@ -236,6 +271,24 @@ function cpms_estimate_recommend($pdo, $params)
         'confidence' => '직접 입력 필요',
         'match_level' => 0,
         'match_label' => '일치 데이터 없음',
+        'material_min_price' => null,
+        'material_median_price' => null,
+        'material_avg_price' => null,
+        'material_max_price' => null,
+        'recommended_material_price' => null,
+        'recent_contract_material_price' => null,
+        'labor_min_price' => null,
+        'labor_median_price' => null,
+        'labor_avg_price' => null,
+        'labor_max_price' => null,
+        'recommended_labor_price' => null,
+        'recent_contract_labor_price' => null,
+        'expense_min_price' => null,
+        'expense_median_price' => null,
+        'expense_avg_price' => null,
+        'expense_max_price' => null,
+        'recommended_expense_price' => null,
+        'recent_contract_expense_price' => null,
         'rows' => array(),
     );
 
@@ -254,44 +307,77 @@ function cpms_estimate_recommend($pdo, $params)
         }
     }
 
-    $count = count($matchedRows);
-    if ($count === 0) return $empty;
+    if (count($matchedRows) === 0) return $empty;
 
     $prices = array();
-    $sum = 0.0;
+    $materialPrices = array();
+    $laborPrices = array();
+    $expensePrices = array();
     $recentContractPrice = null;
+    $recentContractMaterialPrice = null;
+    $recentContractLaborPrice = null;
+    $recentContractExpensePrice = null;
+
     foreach ($matchedRows as $row) {
         $price = isset($row['unit_price']) ? (float)$row['unit_price'] : 0.0;
         if ($price <= 0) continue;
+        $material = isset($row['material_unit_price']) ? (float)$row['material_unit_price'] : 0.0;
+        $labor = isset($row['labor_unit_price']) ? (float)$row['labor_unit_price'] : 0.0;
+        $expense = isset($row['expense_unit_price']) ? (float)$row['expense_unit_price'] : 0.0;
+        if ($material < 0) $material = 0.0;
+        if ($labor < 0) $labor = 0.0;
+        if ($expense < 0) $expense = 0.0;
+
         $prices[] = $price;
-        $sum += $price;
+        $materialPrices[] = $material;
+        $laborPrices[] = $labor;
+        $expensePrices[] = $expense;
+
         if ($recentContractPrice === null && isset($row['price_type']) && (string)$row['price_type'] === 'contract') {
             $recentContractPrice = $price;
+            $recentContractMaterialPrice = $material;
+            $recentContractLaborPrice = $labor;
+            $recentContractExpensePrice = $expense;
         }
     }
 
-    sort($prices, SORT_NUMERIC);
     $validCount = count($prices);
     if ($validCount === 0) return $empty;
 
-    $middle = (int)floor($validCount / 2);
-    if ($validCount % 2 === 1) {
-        $median = $prices[$middle];
-    } else {
-        $median = ($prices[$middle - 1] + $prices[$middle]) / 2;
-    }
+    $totalStats = cpms_estimate_stats($prices);
+    $materialStats = cpms_estimate_stats($materialPrices);
+    $laborStats = cpms_estimate_stats($laborPrices);
+    $expenseStats = cpms_estimate_stats($expensePrices);
 
     return array(
         'count' => $validCount,
-        'min_price' => $prices[0],
-        'median_price' => $median,
-        'avg_price' => ($sum / $validCount),
-        'max_price' => $prices[$validCount - 1],
+        'min_price' => $totalStats['min'],
+        'median_price' => $totalStats['median'],
+        'avg_price' => $totalStats['avg'],
+        'max_price' => $totalStats['max'],
         'recent_contract_price' => $recentContractPrice,
-        'recommended_price' => $median,
+        'recommended_price' => $totalStats['median'],
         'confidence' => cpms_estimate_confidence($validCount),
         'match_level' => $matchedLevel,
         'match_label' => $matchedLabel,
+        'material_min_price' => $materialStats['min'],
+        'material_median_price' => $materialStats['median'],
+        'material_avg_price' => $materialStats['avg'],
+        'material_max_price' => $materialStats['max'],
+        'recommended_material_price' => $materialStats['median'],
+        'recent_contract_material_price' => $recentContractMaterialPrice,
+        'labor_min_price' => $laborStats['min'],
+        'labor_median_price' => $laborStats['median'],
+        'labor_avg_price' => $laborStats['avg'],
+        'labor_max_price' => $laborStats['max'],
+        'recommended_labor_price' => $laborStats['median'],
+        'recent_contract_labor_price' => $recentContractLaborPrice,
+        'expense_min_price' => $expenseStats['min'],
+        'expense_median_price' => $expenseStats['median'],
+        'expense_avg_price' => $expenseStats['avg'],
+        'expense_max_price' => $expenseStats['max'],
+        'recommended_expense_price' => $expenseStats['median'],
+        'recent_contract_expense_price' => $recentContractExpensePrice,
         'rows' => array_slice($matchedRows, 0, 30),
     );
 }}
@@ -423,5 +509,8 @@ function cpms_estimate_recommendation_brief($json)
     if (isset($data['median_price'])) $parts[] = '중앙 ' . cpms_estimate_format_money($data['median_price']);
     if (isset($data['avg_price'])) $parts[] = '평균 ' . cpms_estimate_format_money($data['avg_price']);
     if (isset($data['max_price'])) $parts[] = '최고 ' . cpms_estimate_format_money($data['max_price']);
+    if (isset($data['recommended_material_price']) || isset($data['recommended_labor_price']) || isset($data['recommended_expense_price'])) {
+        $parts[] = '재/노/경 ' . cpms_estimate_format_money(isset($data['recommended_material_price']) ? $data['recommended_material_price'] : null) . ' / ' . cpms_estimate_format_money(isset($data['recommended_labor_price']) ? $data['recommended_labor_price'] : null) . ' / ' . cpms_estimate_format_money(isset($data['recommended_expense_price']) ? $data['recommended_expense_price'] : null);
+    }
     return implode(' / ', $parts);
 }}

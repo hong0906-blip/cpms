@@ -153,12 +153,24 @@ function cpms_estimate_result_badge($result)
       <div class="text-xs text-gray-500 mt-1">과거 계약/실패 견적 단가에서 품목을 검색하고 체크하면 아래 견적 품목에 자동으로 들어갑니다.</div>
     </div>
     <div class="p-6">
-      <div class="grid grid-cols-1 md:grid-cols-5 gap-3">
+      <div class="grid grid-cols-1 md:grid-cols-4 xl:grid-cols-7 gap-3">
         <input id="estimateItemSearchKeyword" placeholder="품명/규격 검색" class="px-4 py-3 rounded-2xl border border-gray-200">
         <select id="estimateItemSearchWorkType" class="px-4 py-3 rounded-2xl border border-gray-200 bg-white">
           <option value="">공종 전체</option>
           <?php foreach ($workTypeOptions as $opt): ?>
             <option value="<?php echo h($opt['item_name']); ?>"><?php echo h(($opt['parent_name'] !== '' ? $opt['parent_name'] . ' / ' : '') . $opt['item_name']); ?></option>
+          <?php endforeach; ?>
+        </select>
+        <select id="estimateItemSearchWorkCharacter" class="px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+          <option value="">공사성격 전체</option>
+          <?php foreach ($workCharacterOptions as $opt): ?>
+            <option value="<?php echo h($opt['item_name']); ?>"><?php echo h($opt['item_name']); ?></option>
+          <?php endforeach; ?>
+        </select>
+        <select id="estimateItemSearchDifficulty" class="px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+          <option value="">공사난이도 전체</option>
+          <?php foreach ($workDifficultyOptions as $opt): ?>
+            <option value="<?php echo h($opt['item_name']); ?>"><?php echo h($opt['item_name']); ?></option>
           <?php endforeach; ?>
         </select>
         <input id="estimateItemSearchUnit" placeholder="단위" class="px-4 py-3 rounded-2xl border border-gray-200">
@@ -169,7 +181,7 @@ function cpms_estimate_result_badge($result)
       <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white mt-4 hidden" id="estimateItemSearchWrap">
         <table class="min-w-full text-sm">
           <thead class="bg-gray-50 text-gray-600">
-            <tr><th class="px-3 py-2">선택</th><th class="px-3 py-2">공종</th><th class="px-3 py-2">품명</th><th class="px-3 py-2">규격</th><th class="px-3 py-2">단위</th><th class="px-3 py-2 text-right">추천단가</th><th class="px-3 py-2">신뢰도</th><th class="px-3 py-2">근거</th></tr>
+            <tr><th class="px-3 py-2">선택</th><th class="px-3 py-2">공종</th><th class="px-3 py-2">품명</th><th class="px-3 py-2">규격</th><th class="px-3 py-2">단위</th><th class="px-3 py-2 text-right">재료비</th><th class="px-3 py-2 text-right">노무비</th><th class="px-3 py-2 text-right">경비</th><th class="px-3 py-2 text-right">추천합계</th><th class="px-3 py-2">신뢰도</th><th class="px-3 py-2">근거</th></tr>
           </thead>
           <tbody id="estimateItemSearchTbody"></tbody>
         </table>
@@ -195,6 +207,9 @@ function cpms_estimate_result_badge($result)
               <th class="px-3 py-2 font-extrabold">규격</th>
               <th class="px-3 py-2 font-extrabold">단위</th>
               <th class="px-3 py-2 font-extrabold">수량</th>
+              <th class="px-3 py-2 font-extrabold">추천 재료비</th>
+              <th class="px-3 py-2 font-extrabold">추천 노무비</th>
+              <th class="px-3 py-2 font-extrabold">추천 경비</th>
               <th class="px-3 py-2 font-extrabold">추천단가</th>
               <th class="px-3 py-2 font-extrabold">제출단가</th>
               <th class="px-3 py-2 font-extrabold">금액</th>
@@ -210,6 +225,9 @@ function cpms_estimate_result_badge($result)
               <td class="px-2 py-2"><input name="items[<?php echo $i; ?>][spec]" data-item-field="spec" class="w-40 px-3 py-2 border rounded-xl"></td>
               <td class="px-2 py-2"><input name="items[<?php echo $i; ?>][unit]" data-item-field="unit" class="w-24 px-3 py-2 border rounded-xl"></td>
               <td class="px-2 py-2"><input name="items[<?php echo $i; ?>][qty]" data-item-field="qty" class="w-24 px-3 py-2 border rounded-xl text-right" data-estimate-calc></td>
+              <td class="px-2 py-2"><input data-item-field="recommended_material_price" class="w-28 px-3 py-2 border rounded-xl text-right bg-gray-50" readonly></td>
+              <td class="px-2 py-2"><input data-item-field="recommended_labor_price" class="w-28 px-3 py-2 border rounded-xl text-right bg-gray-50" readonly></td>
+              <td class="px-2 py-2"><input data-item-field="recommended_expense_price" class="w-28 px-3 py-2 border rounded-xl text-right bg-gray-50" readonly></td>
               <td class="px-2 py-2"><input name="items[<?php echo $i; ?>][recommended_unit_price]" data-item-field="recommended_unit_price" class="w-32 px-3 py-2 border rounded-xl text-right" data-estimate-calc></td>
               <td class="px-2 py-2"><input name="items[<?php echo $i; ?>][submitted_unit_price]" data-item-field="submitted_unit_price" class="w-32 px-3 py-2 border rounded-xl text-right" data-estimate-calc></td>
               <td class="px-2 py-2"><input name="items[<?php echo $i; ?>][amount]" data-item-field="amount" class="w-36 px-3 py-2 border rounded-xl text-right bg-gray-50" readonly></td>
@@ -676,6 +694,8 @@ function cpms_estimate_result_badge($result)
       }
       add('q', 'estimateItemSearchKeyword');
       add('work_type', 'estimateItemSearchWorkType');
+      add('work_character', 'estimateItemSearchWorkCharacter');
+      add('difficulty', 'estimateItemSearchDifficulty');
       add('unit', 'estimateItemSearchUnit');
       var clientEl = document.querySelector('[data-estimate-basic="client"]');
       var sectionEl = document.querySelector('[data-estimate-basic="section_name"]');
@@ -762,5 +782,180 @@ function cpms_estimate_result_badge($result)
         if (summary) summary.textContent = '추천 조회 중 오류가 발생했습니다.';
       });
   });
+})();
+</script>
+<script>
+(function(){
+  function parseNumber(value) {
+    value = (value || '').toString().replace(/,/g, '').replace(/\s/g, '');
+    value = value.replace(/[^0-9.\-]/g, '');
+    var n = parseFloat(value);
+    return isNaN(n) ? 0 : n;
+  }
+  function formatNumber(value) {
+    var n = parseFloat(value);
+    if (isNaN(n)) return '';
+    return Math.round(n).toLocaleString();
+  }
+  function field(row, key) {
+    return row ? row.querySelector('[data-item-field="' + key + '"]') : null;
+  }
+  function setValue(row, key, value) {
+    var el = field(row, key);
+    if (el) el.value = value || '';
+  }
+  function setBreakdown(row, recommendation) {
+    recommendation = recommendation || {};
+    setValue(row, 'recommended_material_price', recommendation.recommended_material_price ? formatNumber(recommendation.recommended_material_price) : '');
+    setValue(row, 'recommended_labor_price', recommendation.recommended_labor_price ? formatNumber(recommendation.recommended_labor_price) : '');
+    setValue(row, 'recommended_expense_price', recommendation.recommended_expense_price ? formatNumber(recommendation.recommended_expense_price) : '');
+  }
+  function evidenceText(row) {
+    var type = row.price_type === 'contract' ? '계약' : (row.price_type === 'estimate' ? '견적실패' : (row.price_type || ''));
+    var site = [row.project_name || row.source_name || '', row.client || '', row.section_name || '', row.contractor || ''].filter(function(v){ return !!v; }).join(' / ');
+    return '[' + type + '] 재료비 ' + formatNumber(row.material_unit_price) + ' / 노무비 ' + formatNumber(row.labor_unit_price) + ' / 경비 ' + formatNumber(row.expense_unit_price) + ' / 합계 ' + formatNumber(row.unit_price) + (row.contract_date ? ' / ' + row.contract_date : '') + (site ? ' / ' + site : '');
+  }
+  function populateEvidence(row, recommendation) {
+    var details = row.querySelector('[data-recommend-evidence]');
+    var body = row.querySelector('[data-recommend-evidence-body]');
+    if (!details || !body) return;
+    body.innerHTML = '';
+    var rows = recommendation && recommendation.rows ? recommendation.rows : [];
+    if (!rows.length) {
+      details.classList.add('hidden');
+      return;
+    }
+    details.classList.remove('hidden');
+    for (var i = 0; i < Math.min(rows.length, 8); i++) {
+      var div = document.createElement('div');
+      div.className = 'rounded-xl bg-gray-50 border border-gray-100 px-2 py-1';
+      div.textContent = evidenceText(rows[i]);
+      body.appendChild(div);
+    }
+  }
+  function summaryText(r) {
+    if (!r || !r.count) return '';
+    return (r.match_label || '') + ' / ' + r.count + '건 / 신뢰도 ' + (r.confidence || '') + ' / 재료비 ' + formatNumber(r.recommended_material_price) + ' / 노무비 ' + formatNumber(r.recommended_labor_price) + ' / 경비 ' + formatNumber(r.recommended_expense_price) + ' / 합계 ' + formatNumber(r.recommended_price);
+  }
+  function applyRecommendationToRow(row, recommendation) {
+    if (!row || !recommendation) return;
+    setBreakdown(row, recommendation);
+    if (field(row, 'recommended_unit_price') && recommendation.recommended_price) {
+      field(row, 'recommended_unit_price').value = formatNumber(recommendation.recommended_price);
+    }
+    if (field(row, 'submitted_unit_price') && !field(row, 'submitted_unit_price').value && recommendation.recommended_price) {
+      field(row, 'submitted_unit_price').value = formatNumber(recommendation.recommended_price);
+    }
+    var summary = row.querySelector('[data-recommend-summary]');
+    if (summary) summary.textContent = summaryText(recommendation);
+    populateEvidence(row, recommendation);
+  }
+  function rows() {
+    return document.querySelectorAll('[data-estimate-row]');
+  }
+  function matchCachedItem(row, items) {
+    var workType = field(row, 'work_type') ? field(row, 'work_type').value : '';
+    var itemName = field(row, 'item_name') ? field(row, 'item_name').value : '';
+    var spec = field(row, 'spec') ? field(row, 'spec').value : '';
+    var unit = field(row, 'unit') ? field(row, 'unit').value : '';
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i] || {};
+      if ((item.work_type || '') === workType && (item.item_name || '') === itemName && (item.spec || '') === spec && (item.unit || '') === unit) {
+        return item;
+      }
+    }
+    return null;
+  }
+  function renderSearchResults(items) {
+    var wrap = document.getElementById('estimateItemSearchWrap');
+    var tbody = document.getElementById('estimateItemSearchTbody');
+    var status = document.getElementById('estimateItemSearchStatus');
+    if (!wrap || !tbody || !status) return;
+    tbody.innerHTML = '';
+    if (!items || !items.length) {
+      wrap.classList.add('hidden');
+      status.textContent = '검색 결과가 없습니다.';
+      return;
+    }
+    wrap.classList.remove('hidden');
+    status.textContent = '검색 결과 ' + items.length + '건입니다. 필요한 품목을 체크해서 추가하세요.';
+    for (var i = 0; i < items.length; i++) {
+      var item = items[i] || {};
+      var rec = item.recommendation || {};
+      var tr = document.createElement('tr');
+      tr.className = 'border-b border-gray-100';
+      function td(text, cls) {
+        var cell = document.createElement('td');
+        cell.className = cls || 'px-3 py-2';
+        cell.textContent = text || '';
+        tr.appendChild(cell);
+      }
+      var checkTd = document.createElement('td');
+      checkTd.className = 'px-3 py-2';
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = i;
+      cb.setAttribute('data-item-search-check', '1');
+      checkTd.appendChild(cb);
+      tr.appendChild(checkTd);
+      td(item.work_type || '');
+      td(item.item_name || '', 'px-3 py-2 font-bold');
+      td(item.spec || '');
+      td(item.unit || '');
+      td(formatNumber(rec.recommended_material_price), 'px-3 py-2 text-right');
+      td(formatNumber(rec.recommended_labor_price), 'px-3 py-2 text-right');
+      td(formatNumber(rec.recommended_expense_price), 'px-3 py-2 text-right');
+      td(formatNumber(rec.recommended_price), 'px-3 py-2 text-right font-extrabold text-blue-700');
+      td(rec.confidence || '');
+      td((rec.match_label || '') + ' / ' + (rec.count || 0) + '건 / 최저 ' + formatNumber(rec.min_price) + ' / 중앙 ' + formatNumber(rec.median_price) + ' / 평균 ' + formatNumber(rec.avg_price) + ' / 최고 ' + formatNumber(rec.max_price), 'px-3 py-2 text-xs text-gray-600');
+      tbody.appendChild(tr);
+    }
+  }
+
+  var originalFetch = window.fetch;
+  window.fetch = function(input, init) {
+    var url = typeof input === 'string' ? input : (input && input.url ? input.url : '');
+    return originalFetch.apply(window, arguments).then(function(response){
+      if (url.indexOf('?r=estimate/item_search') !== -1) {
+        response.clone().json().then(function(json){
+          if (json && json.ok && json.items) {
+            window.__estimateSearchItems = json.items;
+            setTimeout(function(){ renderSearchResults(json.items); }, 0);
+          }
+        })["catch"](function(){});
+      }
+      if (url.indexOf('?r=estimate/price_recommend') !== -1) {
+        response.clone().json().then(function(json){
+          if (json && json.ok && json.recommendation && window.__estimateActiveRow) {
+            applyRecommendationToRow(window.__estimateActiveRow, json.recommendation);
+          }
+        })["catch"](function(){});
+      }
+      return response;
+    });
+  };
+
+  document.addEventListener('click', function(e){
+    var btn = e.target && e.target.getAttribute('data-estimate-recommend') !== null ? e.target : null;
+    if (btn && btn.closest) {
+      window.__estimateActiveRow = btn.closest('[data-estimate-row]');
+    }
+  }, true);
+
+  var addSelectedBtn = document.getElementById('estimateItemAddSelectedBtn');
+  if (addSelectedBtn) {
+    addSelectedBtn.addEventListener('click', function(){
+      setTimeout(function(){
+        var items = window.__estimateSearchItems || [];
+        var list = rows();
+        for (var i = 0; i < list.length; i++) {
+          if (field(list[i], 'recommended_material_price') && !field(list[i], 'recommended_material_price').value) {
+            var item = matchCachedItem(list[i], items);
+            if (item && item.recommendation) applyRecommendationToRow(list[i], item.recommendation);
+          }
+        }
+      }, 0);
+    });
+  }
 })();
 </script>

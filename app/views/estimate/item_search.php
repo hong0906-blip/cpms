@@ -18,6 +18,8 @@ if (!$pdo || !cpms_estimate_tables_ready($pdo)) {
 
 $q = cpms_estimate_request_string('q', '');
 $workType = cpms_estimate_request_string('work_type', '');
+$workCharacter = cpms_estimate_request_string('work_character', '');
+$difficulty = cpms_estimate_request_string('difficulty', '');
 $unit = cpms_estimate_request_string('unit', '');
 $client = cpms_estimate_request_string('client', '');
 $sectionName = cpms_estimate_request_string('section_name', '');
@@ -33,6 +35,14 @@ if ($q !== '') {
 if ($workType !== '') {
     $where[] = "work_type LIKE :work_type";
     $bind[':work_type'] = '%' . $workType . '%';
+}
+if ($workCharacter !== '') {
+    $where[] = "remark LIKE :work_character";
+    $bind[':work_character'] = '%공사성격: ' . $workCharacter . '%';
+}
+if ($difficulty !== '') {
+    $where[] = "remark LIKE :difficulty";
+    $bind[':difficulty'] = '%난이도: ' . $difficulty . '%';
 }
 if ($unit !== '') {
     $where[] = "unit LIKE :unit";
