@@ -104,7 +104,7 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
         bottom: 0;
         z-index: 40;
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
         gap: 4px;
         padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
         border-top: 1px solid #e5e7eb;

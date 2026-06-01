@@ -155,6 +155,38 @@ class Auth
         return self::canAccessConstruction();
     }
 
+    // 견적관리 접근 권한: 공무팀, 부사장/대표, 마스터 관리자
+    public static function canAccessEstimate()
+    {
+        if (!self::check()) return false;
+        if (self::isMaster()) return true;
+
+        $dept = self::normalizeDept(self::userDepartment());
+        if ($dept === '공무') return true;
+
+        $role = self::normalizeText(self::userRole());
+        $pos = self::normalizeText(self::userPosition());
+
+        $allowedWords = array('부사장', '대표', '대표님', 'ceo', 'president', 'vicepresident', 'vp');
+        foreach ($allowedWords as $word) {
+            $wordNorm = self::normalizeText($word);
+            if ($wordNorm !== '' && $role !== '' && strpos($role, $wordNorm) !== false) return true;
+            if ($wordNorm !== '' && $pos !== '' && strpos($pos, $wordNorm) !== false) return true;
+        }
+
+        return false;
+    }
+
+    private static function normalizeText($value)
+    {
+        $value = trim((string)$value);
+        $value = str_replace(array(' ', "\t", "\r", "\n", '-', '_'), '', $value);
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($value, 'UTF-8');
+        }
+        return strtolower($value);
+    }
+
     public static function logout()
     {
         unset($_SESSION[self::CPMS_USER_KEY]);

@@ -102,6 +102,25 @@ if ($route === 'approval_completed') {
     $_GET['view'] = 'completed';
     $route = '전자결재';
 }
+if ($route === 'estimate_home' || $route === '견적단가 추천') {
+    $route = '견적관리';
+}
+if ($route === 'estimate/write') {
+    $_GET['tab'] = 'write';
+    $route = '견적관리';
+}
+if ($route === 'estimate/search') {
+    $_GET['tab'] = 'search';
+    $route = '견적관리';
+}
+if ($route === 'estimate/history') {
+    $_GET['tab'] = 'history';
+    $route = '견적관리';
+}
+if ($route === 'estimate/bid_result') {
+    $_GET['tab'] = 'bid_result';
+    $route = '견적관리';
+}
 
 // ==========================
 //  액션(POST 처리) 라우트 먼저
@@ -150,6 +169,40 @@ if ($route === 'admin/labor_consultant_template_upload') {
 }
 if ($route === 'admin/labor_consultant_export') {
     require_once __DIR__ . '/../app/views/admin/labor_consultant_export.php';
+    exit;
+}
+
+if ($route === 'db_setup_estimate') {
+    require_once __DIR__ . '/db_setup_estimate.php';
+    exit;
+}
+
+if ($route === 'estimate/estimate_save') {
+    require_once __DIR__ . '/../app/views/estimate/estimate_save.php';
+    exit;
+}
+if ($route === 'estimate/price_import_preview') {
+    require_once __DIR__ . '/../app/views/estimate/price_import_preview.php';
+    exit;
+}
+if ($route === 'estimate/price_import_apply') {
+    require_once __DIR__ . '/../app/views/estimate/price_import_apply.php';
+    exit;
+}
+if ($route === 'estimate/price_recommend') {
+    require_once __DIR__ . '/../app/views/estimate/price_recommend.php';
+    exit;
+}
+if ($route === 'estimate/item_search') {
+    require_once __DIR__ . '/../app/views/estimate/item_search.php';
+    exit;
+}
+if ($route === 'estimate/bid_result_save') {
+    require_once __DIR__ . '/../app/views/estimate/bid_result_save.php';
+    exit;
+}
+if ($route === 'estimate/export_xlsx') {
+    require_once __DIR__ . '/../app/views/estimate/export_xlsx.php';
     exit;
 }
 
@@ -577,6 +630,15 @@ if (isset($_GET['dv'])) {
 }
 $dashboardType = isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee';
 
+// ==========================
+//  견적관리 직접 URL 접근 차단
+// ==========================
+if ($route === '견적관리' && !\App\Core\Auth::canAccessEstimate()) {
+    http_response_code(403);
+    echo '접근 권한이 없습니다.';
+    exit;
+}
+
 
 // ==========================
 //  관리 라우트 강제 진단(debug_route=1)
@@ -605,6 +667,7 @@ $views = array(
     '품질'      => 'quality/index',
     '전자결재'  => 'approval/index',
     '관리'      => 'admin/index',
+    '견적관리'  => 'estimate/index',
 );
 
 // ==========================

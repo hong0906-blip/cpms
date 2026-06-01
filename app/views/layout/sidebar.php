@@ -10,12 +10,14 @@ $manageMenu = '관리';
 $constructionMenu = '공사';
 $safetyMenu = '안전/보건';
 $qualityMenu = '품질';
+$estimateMenu = '견적관리';
 
 $route = isset($_GET['r']) ? (string)$_GET['r'] : $dashboardMenu;
 $selectedMenu = isset($selectedMenu) ? (string)$selectedMenu : $route;
 
 $user = \App\Core\Auth::user();
 $role = \App\Core\Auth::userRole();
+$canAccessEstimate = \App\Core\Auth::canAccessEstimate();
 
 $dashboardType = isset($dashboardType) ? (string)$dashboardType : (isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee');
 if ($dashboardType !== 'employee' && $dashboardType !== 'executive') $dashboardType = 'employee';
@@ -64,6 +66,9 @@ $menuItems = array(
   array('id'=>$safetyMenu,'label'=>$safetyMenu,'icon'=>'shield-alert','gradient'=>'from-red-500 to-rose-500','iconBg'=>'bg-gradient-to-br from-red-100 to-rose-100','iconColor'=>'text-red-600','hoverShadow'=>'hover:shadow-red-200'),
   array('id'=>$qualityMenu,'label'=>$qualityMenu,'icon'=>'award','gradient'=>'from-cyan-500 to-blue-500','iconBg'=>'bg-gradient-to-br from-cyan-100 to-blue-100','iconColor'=>'text-cyan-600','hoverShadow'=>'hover:shadow-cyan-200'),
 );
+if ($canAccessEstimate) {
+  $menuItems[] = array('id'=>$estimateMenu,'label'=>$estimateMenu,'icon'=>'receipt-text','gradient'=>'from-slate-700 to-blue-700','iconBg'=>'bg-gradient-to-br from-slate-100 to-blue-100','iconColor'=>'text-slate-700','hoverShadow'=>'hover:shadow-slate-200');
+}
 
 $pageTitle = $selectedMenu;
 if ($selectedMenu === $dashboardMenu) {
@@ -219,6 +224,9 @@ if ($selectedMenu === $dashboardMenu) {
       array('menu' => 'work', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_input'),
       array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status'),
     );
+    if ($canAccessEstimate) {
+      $mobileNavItems[] = array('menu' => 'estimate', 'label' => '견적', 'icon' => 'receipt-text', 'href' => '?r=estimate_home');
+    }
   ?>
   <nav class="cpms-mobile-bottom-nav" aria-label="mobile main menu">
     <?php foreach ($mobileNavItems as $mobileItem): ?>
