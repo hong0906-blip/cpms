@@ -94,11 +94,12 @@ $gongmuPm = null;
 
 if ($pdo) {
     $birthSel = approval_column_exists($pdo, 'employees', 'birth_date') ? 'birth_date' : "'' AS birth_date";
+    $hireSel = approval_column_exists($pdo, 'employees', 'hire_date') ? 'hire_date' : "'' AS hire_date";
     $flagSite = approval_column_exists($pdo, 'employees', 'approval_can_be_site_manager');
     $flagLead = approval_column_exists($pdo, 'employees', 'approval_can_be_team_leader');
     $flagGongmu = approval_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver');
     $flagManage = approval_column_exists($pdo, 'employees', 'approval_can_be_manage_approver');
-    $sql = "SELECT id,name,email,department,position," . $birthSel . "," .
+    $sql = "SELECT id,name,email,department,position," . $birthSel . "," . $hireSel . "," .
         ($flagSite ? "approval_can_be_site_manager" : "0") . " AS approval_can_be_site_manager," .
         ($flagLead ? "approval_can_be_team_leader" : "0") . " AS approval_can_be_team_leader," .
         ($flagGongmu ? "approval_can_be_gongmu_approver" : "0") . " AS approval_can_be_gongmu_approver," .

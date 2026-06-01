@@ -44,7 +44,8 @@ if (!function_exists('approval_unused_leave_employee_options')) {
                 'id' => (int)$one['id'],
                 'name' => isset($one['name']) ? (string)$one['name'] : '',
                 'department' => isset($one['department']) ? (string)$one['department'] : '',
-                'position' => isset($one['position']) ? (string)$one['position'] : ''
+                'position' => isset($one['position']) ? (string)$one['position'] : '',
+                'hire_date' => isset($one['hire_date']) ? (string)$one['hire_date'] : ''
             );
         }
         return $list;
@@ -140,7 +141,7 @@ if (!function_exists('approval_unused_leave_render_target_select')) {
                 $label .= ' / ' . $one['department'] . ' / ' . $one['position'];
             }
             $selected = ($selectedId > 0 && $selectedId === (int)$one['id']) ? ' selected="selected"' : '';
-            echo '<option value="' . (int)$one['id'] . '"' . $selected . '>' . h($label) . '</option>';
+            echo '<option value="' . (int)$one['id'] . '" data-name="' . h($one['name']) . '" data-department="' . h($one['department']) . '" data-position="' . h($one['position']) . '" data-hire-date="' . h($one['hire_date']) . '"' . $selected . '>' . h($label) . '</option>';
         }
         echo '</select>';
     }
@@ -156,18 +157,40 @@ if (!function_exists('approval_unused_leave_render_identity_table')) {
         echo '<td>';
         if ($mode === 'edit') {
             approval_unused_leave_render_target_select($data, $approvalOptions);
+            echo '<input type="hidden" name="target_name" value="' . h(approval_doc_get($data, 'target_name', '')) . '" id="unusedLeaveTargetName">';
         } else {
             echo h(approval_doc_get($data, 'target_name', '-'));
         }
         echo '</td>';
         echo '<th style="background:#f1f1f1">' . h(approval_ko('%EB%B6%80%EC%84%9C%EB%AA%85')) . '</th>';
-        echo '<td>' . h(approval_doc_get($data, 'target_department', '-')) . '</td>';
+        echo '<td>';
+        if ($mode === 'edit') {
+            echo '<span id="unusedLeaveTargetDepartmentText">' . h(approval_doc_get($data, 'target_department', '')) . '</span>';
+            echo '<input type="hidden" name="target_department" value="' . h(approval_doc_get($data, 'target_department', '')) . '" id="unusedLeaveTargetDepartment">';
+        } else {
+            echo h(approval_doc_get($data, 'target_department', '-'));
+        }
+        echo '</td>';
         echo '</tr>';
         echo '<tr>';
         echo '<th style="background:#f1f1f1">' . h(approval_ko('%EC%A7%81%EC%9C%84')) . '</th>';
-        echo '<td>' . h(approval_doc_get($data, 'target_position', '-')) . '</td>';
+        echo '<td>';
+        if ($mode === 'edit') {
+            echo '<span id="unusedLeaveTargetPositionText">' . h(approval_doc_get($data, 'target_position', '')) . '</span>';
+            echo '<input type="hidden" name="target_position" value="' . h(approval_doc_get($data, 'target_position', '')) . '" id="unusedLeaveTargetPosition">';
+        } else {
+            echo h(approval_doc_get($data, 'target_position', '-'));
+        }
+        echo '</td>';
         echo '<th style="background:#f1f1f1">' . h(approval_ko('%EC%9E%85%EC%82%AC%EC%9D%BC')) . '</th>';
-        echo '<td>' . h(approval_doc_get($data, 'target_hire_date', '-')) . '</td>';
+        echo '<td>';
+        if ($mode === 'edit') {
+            echo '<span id="unusedLeaveTargetHireDateText">' . h(approval_doc_get($data, 'target_hire_date', '')) . '</span>';
+            echo '<input type="hidden" name="target_hire_date" value="' . h(approval_doc_get($data, 'target_hire_date', '')) . '" id="unusedLeaveTargetHireDate">';
+        } else {
+            echo h(approval_doc_get($data, 'target_hire_date', '-'));
+        }
+        echo '</td>';
         echo '</tr>';
         echo '</table>';
     }
@@ -212,6 +235,13 @@ if (!function_exists('approval_unused_leave_render_plan_rows')) {
             echo '<td></td>';
             echo '</tr>';
         }
+    }
+}
+
+if (!function_exists('approval_unused_leave_render_autofill_script')) {
+    function approval_unused_leave_render_autofill_script()
+    {
+        echo '<script>(function(){var select=document.getElementById("unusedLeaveTargetSelect");if(!select){return;}var nameInput=document.getElementById("unusedLeaveTargetName");var deptInput=document.getElementById("unusedLeaveTargetDepartment");var posInput=document.getElementById("unusedLeaveTargetPosition");var hireInput=document.getElementById("unusedLeaveTargetHireDate");var deptText=document.getElementById("unusedLeaveTargetDepartmentText");var posText=document.getElementById("unusedLeaveTargetPositionText");var hireText=document.getElementById("unusedLeaveTargetHireDateText");function sync(){var opt=select.options[select.selectedIndex];var name="";var dept="";var pos="";var hire="";if(opt&&opt.value!==""){name=opt.getAttribute("data-name")||"";dept=opt.getAttribute("data-department")||"";pos=opt.getAttribute("data-position")||"";hire=opt.getAttribute("data-hire-date")||"";}if(nameInput){nameInput.value=name;}if(deptInput){deptInput.value=dept;}if(posInput){posInput.value=pos;}if(hireInput){hireInput.value=hire;}if(deptText){deptText.innerHTML=dept;}if(posText){posText.innerHTML=pos;}if(hireText){hireText.innerHTML=hire;}}if(select.addEventListener){select.addEventListener("change",sync,false);}else if(select.attachEvent){select.attachEvent("onchange",sync);}sync();})();</script>';
     }
 }
 
@@ -267,6 +297,9 @@ if (!function_exists('render_approval_unused_leave_notice_document')) {
         echo '</div>';
 
         approval_unused_leave_render_notice_footer($mode, $data);
+        if ($mode === 'edit') {
+            approval_unused_leave_render_autofill_script();
+        }
         echo '</div>';
     }
 }
@@ -362,6 +395,7 @@ if (!function_exists('render_approval_unused_leave_plan_document')) {
         if ($mode === 'edit') {
             echo '<input type="hidden" name="sent_at" value="' . h(approval_doc_get($data, 'sent_at', date('Y-m-d H:i:s'))) . '">';
             echo '<input type="hidden" name="sender_name" value="' . h(approval_doc_get($data, 'sender_name', '')) . '">';
+            approval_unused_leave_render_autofill_script();
         }
 
         echo '</div>';

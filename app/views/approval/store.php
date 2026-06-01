@@ -4,6 +4,7 @@ use App\Core\Db;
 require_once __DIR__ . '/_common.php';
 require_once __DIR__ . '/template_helpers.php';
 require_once __DIR__ . '/notification_helpers.php';
+require_once __DIR__ . '/../admin/leave_management_helpers.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
@@ -156,6 +157,23 @@ if (!function_exists('approval_store_build_notice_message')) {
     }
 }
 
+if (!function_exists('approval_store_build_notice_message_safe')) {
+    function approval_store_build_notice_message_safe($snapshot)
+    {
+        $grantDays = isset($snapshot['grant_days']) ? cpms_leave_format_decimal($snapshot['grant_days']) : '0';
+        $usedDays = isset($snapshot['used_days']) ? cpms_leave_format_decimal($snapshot['used_days']) : '0';
+        $unusedDays = isset($snapshot['unused_days']) ? cpms_leave_format_decimal($snapshot['unused_days']) : '0';
+
+        return implode("\n\n", array(
+            approval_ko('%EC%83%81%EA%B8%B0%EC%9D%B8%EC%9D%80%20%ED%98%84%EC%9E%AC%20') . $grantDays . approval_ko('%EC%9D%BC%EC%9D%98%20%EC%97%B0%EC%B0%A8%20%EC%A4%91%20%5B%20') . $usedDays . approval_ko('%20%5D%EC%9D%BC%EC%9D%98%20%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%EB%A5%BC%20%EC%82%AC%EC%9A%A9%ED%95%98%EC%97%AC%2C%20%EC%82%AC%EC%9A%A9%EA%B8%B0%EA%B0%84%EA%B9%8C%EC%A7%80%20%5B%20') . $unusedDays . approval_ko('%20%5D%EC%9D%BC%EC%9D%98%20%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%EB%A5%BC%20%EC%B6%94%EA%B0%80%20%EC%82%AC%EC%9A%A9%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
+            approval_ko('%EC%83%81%EA%B8%B0%EC%9D%B8%EC%9D%80%2010%EC%9D%BC%20%EC%9D%B4%EB%82%B4%EC%97%90%20%ED%96%A5%ED%9B%84%206%EA%B0%9C%EC%9B%94%20%EA%B0%84%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%20%EC%8B%9C%EA%B8%B0%EB%A5%BC%20%EC%A0%95%ED%95%98%EC%97%AC%20%ED%9A%8C%EC%82%AC%EB%A1%9C%20%ED%86%B5%EB%B3%B4%ED%95%B4%EC%A3%BC%EC%8B%9C%EA%B8%B0%20%EB%B0%94%EB%9E%8D%EB%8B%88%EB%8B%A4.'),
+            approval_ko('%EB%A7%8C%EC%95%BD%2C%20%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%20%EC%82%AC%EC%9A%A9%20%EC%8B%9C%EA%B8%B0%EB%A5%BC%20%ED%86%B5%EB%B3%B4%ED%95%98%EC%A7%80%20%EC%95%8A%EB%8A%94%EB%8B%A4%EB%A9%B4%2C%20%ED%9A%8C%EC%82%AC%EB%8A%94%20%EA%B7%BC%EB%A1%9C%EA%B8%B0%EC%A4%80%EB%B2%95%EC%97%90%20%EA%B7%BC%EA%B1%B0%ED%95%98%EC%97%AC%20%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%20%EC%82%AC%EC%9A%A9%EA%B8%B0%EA%B0%84%20%EB%A7%88%EC%A7%80%EB%A7%89%202%EA%B0%9C%EC%9B%94%20%EC%82%AC%EC%9D%B4%EC%9D%98%20%EC%9D%BC%EC%9E%90%EB%A5%BC%20%EC%9E%84%EC%9D%98%EB%A1%9C%20%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%20%EC%82%AC%EC%9A%A9%EC%9D%BC%EB%A1%9C%20%EC%A7%80%EC%A0%95%ED%95%98%EC%97%AC%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EA%B8%B0%EA%B0%84%20%EC%A2%85%EB%A3%8C%EC%9D%BC%202%EA%B0%9C%EC%9B%94%20%EC%A0%84%EA%B9%8C%EC%A7%80%20%ED%86%B5%EB%B3%B4%ED%95%98%EB%8F%84%EB%A1%9D%20%ED%95%98%EA%B2%A0%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
+            approval_ko('%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%EC%9D%BC%EC%9D%84%20%EC%A7%80%EC%A0%95%ED%95%98%EC%A7%80%20%EC%95%8A%EA%B3%A0%2C%20%ED%9A%8C%EC%82%AC%EA%B0%80%20%EC%A7%80%EC%A0%95%ED%95%9C%20%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%EC%9D%BC%EC%97%90%20%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%EB%A5%BC%20%EC%82%AC%EC%9A%A9%ED%95%98%EC%A7%80%20%EC%95%8A%EB%8A%94%20%EA%B2%BD%EC%9A%B0%2C%20%EA%B7%BC%EB%A1%9C%EA%B8%B0%EC%A4%80%EB%B2%95%EC%97%90%20%EB%94%B0%EB%9D%BC%20%ED%95%B4%EB%8B%B9%20%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%EB%8A%94%20%EC%86%8C%EB%A9%B8%ED%95%98%EB%A9%B0%2C%20%EC%88%98%EB%8B%B9%EB%8F%84%20%EC%A7%80%EA%B8%89%EB%90%98%EC%A7%80%20%EC%95%8A%EC%9D%8C%EC%97%90%20%EC%9C%A0%EC%9D%98%ED%95%98%EC%8B%9C%EA%B8%B0%20%EB%B0%94%EB%9E%8D%EB%8B%88%EB%8B%A4.'),
+            approval_ko('%EC%9C%84%EC%99%80%20%EA%B0%99%EC%9D%B4%20%EC%97%B0%EC%B0%A8%EC%82%AC%EC%9A%A9%EC%B4%89%EC%A7%84%EC%A0%9C%EB%8F%84%EC%97%90%20%EC%9D%98%EA%B1%B0%ED%95%98%EC%97%AC%20%EC%97%B0%EC%B0%A8%ED%9C%B4%EA%B0%80%20%EC%82%AC%EC%9A%A9%EC%9D%84%20%EC%B4%89%EA%B5%AC%ED%95%A9%EB%8B%88%EB%8B%A4.')
+        ));
+    }
+}
+
 $creatorEmployeeId = approval_current_employee_id($pdo, $user);
 $creatorName = approval_current_user_name($user);
 $creatorEmail = approval_current_user_email($user);
@@ -238,7 +256,7 @@ if ($isManagementOnlyDoc) {
         'annual_usable_period' => isset($snapshot['usable_period']) ? $snapshot['usable_period'] : ''
     );
     if ($docType === 'unused_leave_notice') {
-        $contentData['notice_message'] = approval_store_build_notice_message($snapshot);
+        $contentData['notice_message'] = approval_store_build_notice_message_safe($snapshot);
     } else {
         $contentData['plan_notice_date'] = isset($_POST['plan_notice_date']) ? trim((string)$_POST['plan_notice_date']) : '';
         $contentData['plan_period_1'] = '';
