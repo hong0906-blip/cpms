@@ -192,7 +192,7 @@ if (is_file($contractMetaFile)) {
         <div class="font-extrabold text-gray-900">프로젝트 기본정보 수정</div>
         <div class="text-sm text-gray-500 mt-1">상세보기 화면에서 프로젝트 정보와 담당자를 바로 수정합니다.</div>
     </div>
-    <form method="post" action="<?php echo h(base_url()); ?>/?r=project/project_update" class="p-6 space-y-5">
+    <form method="post" action="<?php echo h(base_url()); ?>/?r=project_edit_save" class="p-6 space-y-5">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
         <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
 

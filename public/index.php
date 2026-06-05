@@ -235,7 +235,7 @@ if ($route === 'project/project_save') {
  * - debug_project_update=1 쿼리는 project_update.php에서 실패 원인 JSON을 반환
  * - app/views/project/project_update.php
  */
-if ($route === 'project/project_update') {
+if ($route === 'project/project_update' || $route === 'project/project_edit_save' || $route === 'project_edit_save') {
     require_once __DIR__ . '/../app/views/project/project_update.php';
     exit;
 }
