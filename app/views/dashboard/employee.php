@@ -657,7 +657,7 @@ if($pdo&&$eid_att>0){
 
                     <div class="mt-3">
                         <a class="text-sm font-bold text-indigo-600 hover:underline"
-                           href="<?php echo h(base_url()); ?>/?r=공무/프로젝트상세&id=<?php echo (int)$it['project_id']; ?>">
+                           href="<?php echo h(base_url()); ?>/?r=project/detail&id=<?php echo (int)$it['project_id']; ?>">
                             프로젝트 상세로 이동
                         </a>
                     </div>

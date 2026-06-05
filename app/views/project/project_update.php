@@ -43,6 +43,13 @@ if (!$allowed) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    $redirectProjectId = 0;
+    if (isset($_REQUEST['project_id'])) $redirectProjectId = (int)$_REQUEST['project_id'];
+    if ($redirectProjectId <= 0 && isset($_GET['id'])) $redirectProjectId = (int)$_GET['id'];
+    if ($redirectProjectId > 0) {
+        header('Location: ?r=project/detail&id=' . $redirectProjectId . '&edit=1');
+        exit;
+    }
     cpms_project_update_fail_redirect(0, '잘못된 요청입니다.');
 }
 

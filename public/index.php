@@ -89,6 +89,12 @@ if ($route === 'safety_home') {
 if ($route === 'construction_home') {
     $route = '공사';
 }
+if ($route === '공무/프로젝트상세' || $route === 'project_view') {
+    $route = 'project/detail';
+}
+if ($route === '공무/프로젝트수정' || $route === 'project/update' || $route === 'project_update') {
+    $route = 'project/project_update';
+}
 if ($route === 'approval_home') { $route = '전자결재'; }
 if ($route === 'approval_active') {
     $_GET['view'] = 'active';

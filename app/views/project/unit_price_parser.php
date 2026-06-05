@@ -302,6 +302,31 @@ function cpms_project_unit_price_header_exact($normalizedValue, $keyword) {
     return ($normalizedValue === cpms_project_unit_price_label_normalize($keyword));
 }}
 
+if (!function_exists('cpms_project_unit_price_item_name_keys')) {
+function cpms_project_unit_price_item_name_keys() {
+    return array(cpms_project_unit_price_lang('item_name'), '공종명', '공 종 명', '공종', '품목명', '품목', '명칭');
+}}
+
+if (!function_exists('cpms_project_unit_price_spec_keys')) {
+function cpms_project_unit_price_spec_keys() {
+    return array(cpms_project_unit_price_lang('spec'), '규 격', '규격명', '사양');
+}}
+
+if (!function_exists('cpms_project_unit_price_unit_keys')) {
+function cpms_project_unit_price_unit_keys() {
+    return array(cpms_project_unit_price_lang('unit'), '단 위');
+}}
+
+if (!function_exists('cpms_project_unit_price_qty_keys')) {
+function cpms_project_unit_price_qty_keys() {
+    return array(cpms_project_unit_price_lang('qty'), '수 량', '물량');
+}}
+
+if (!function_exists('cpms_project_unit_price_remark_keys')) {
+function cpms_project_unit_price_remark_keys() {
+    return array(cpms_project_unit_price_lang('remark'), '비 고', '적요');
+}}
+
 if (!function_exists('cpms_project_unit_price_find_positions')) {
 function cpms_project_unit_price_find_positions($matrix, $maxRow, $maxCol, $headerLimit) {
     $positions = array(
@@ -319,11 +344,11 @@ function cpms_project_unit_price_find_positions($matrix, $maxRow, $maxCol, $head
             $value = isset($matrix[$r][$c]) ? $matrix[$r][$c] : '';
             $norm = cpms_project_unit_price_label_normalize($value);
             if ($norm !== '') {
-                if (cpms_project_unit_price_header_match($norm, cpms_project_unit_price_lang('item_name'))) array_push($positions['item_name'], array('row'=>$r,'col'=>$c));
-                if (cpms_project_unit_price_header_match($norm, cpms_project_unit_price_lang('spec'))) array_push($positions['spec'], array('row'=>$r,'col'=>$c));
-                if (cpms_project_unit_price_header_match($norm, cpms_project_unit_price_lang('unit'))) array_push($positions['unit'], array('row'=>$r,'col'=>$c));
-                if (cpms_project_unit_price_header_match($norm, cpms_project_unit_price_lang('qty'))) array_push($positions['qty'], array('row'=>$r,'col'=>$c));
-                if (cpms_project_unit_price_header_match($norm, cpms_project_unit_price_lang('remark'))) array_push($positions['remark'], array('row'=>$r,'col'=>$c));
+                if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_item_name_keys(), false)) array_push($positions['item_name'], array('row'=>$r,'col'=>$c));
+                if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_spec_keys(), false)) array_push($positions['spec'], array('row'=>$r,'col'=>$c));
+                if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_unit_keys(), false)) array_push($positions['unit'], array('row'=>$r,'col'=>$c));
+                if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_qty_keys(), false)) array_push($positions['qty'], array('row'=>$r,'col'=>$c));
+                if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_remark_keys(), false)) array_push($positions['remark'], array('row'=>$r,'col'=>$c));
             }
             $c++;
         }
@@ -393,12 +418,12 @@ function cpms_project_unit_price_segment_end($matrix, $row, $startCol, $maxCol, 
 
 if (!function_exists('cpms_project_unit_price_material_keys')) {
 function cpms_project_unit_price_material_keys() {
-    return array(cpms_project_unit_price_lang('material'), cpms_project_unit_price_lang('material_alt'), cpms_project_unit_price_lang('material_price'));
+    return array(cpms_project_unit_price_lang('material'), cpms_project_unit_price_lang('material_alt'), cpms_project_unit_price_lang('material_price'), '재료', '자재');
 }}
 
 if (!function_exists('cpms_project_unit_price_labor_keys')) {
 function cpms_project_unit_price_labor_keys() {
-    return array(cpms_project_unit_price_lang('labor'), cpms_project_unit_price_lang('labor_alt'));
+    return array(cpms_project_unit_price_lang('labor'), cpms_project_unit_price_lang('labor_alt'), '인건비');
 }}
 
 if (!function_exists('cpms_project_unit_price_expense_keys')) {
@@ -419,8 +444,46 @@ function cpms_project_unit_price_total_keys() {
     return array(
         cpms_project_unit_price_lang('sum'),
         cpms_project_unit_price_lang('total_unit_price'),
-        cpms_project_unit_price_lang('unit_price') . cpms_project_unit_price_lang('sum')
+        cpms_project_unit_price_lang('unit_price') . cpms_project_unit_price_lang('sum'),
+        '견적금액',
+        '합계금액',
+        '총금액'
     );
+}}
+
+if (!function_exists('cpms_project_unit_price_total_group_keys')) {
+function cpms_project_unit_price_total_group_keys() {
+    return array('견적금액', '합계금액', '합계', '총액', '총금액');
+}}
+
+if (!function_exists('cpms_project_unit_price_segment_end_any')) {
+function cpms_project_unit_price_segment_end_any($matrix, $row, $startCol, $maxCol, $keywords) {
+    $end = (int)$startCol;
+    $c = (int)$startCol + 1;
+    while ($c <= (int)$maxCol) {
+        $value = isset($matrix[$row][$c]) ? $matrix[$row][$c] : '';
+        $norm = cpms_project_unit_price_label_normalize($value);
+        if ($norm !== '' && cpms_project_unit_price_header_match_any($norm, $keywords, false)) {
+            $end = $c;
+            $c++;
+            continue;
+        }
+        break;
+    }
+    return $end;
+}}
+
+if (!function_exists('cpms_project_unit_price_count_header_in_row')) {
+function cpms_project_unit_price_count_header_in_row($matrix, $row, $maxCol, $keywords, $exactOnly) {
+    $count = 0;
+    $c = 1;
+    while ($c <= (int)$maxCol) {
+        $value = isset($matrix[$row][$c]) ? $matrix[$row][$c] : '';
+        $norm = cpms_project_unit_price_label_normalize($value);
+        if ($norm !== '' && cpms_project_unit_price_header_match_any($norm, $keywords, $exactOnly)) $count++;
+        $c++;
+    }
+    return $count;
 }}
 
 if (!function_exists('cpms_project_unit_price_find_flat_group')) {
@@ -450,6 +513,149 @@ function cpms_project_unit_price_find_flat_group($matrix, $maxRow, $maxCol, $hea
             );
         }
         $r++;
+    }
+    return null;
+}}
+
+if (!function_exists('cpms_project_unit_price_find_cost_group')) {
+function cpms_project_unit_price_find_cost_group($matrix, $maxRow, $maxCol, $headerLimit) {
+    $lastRow = ($maxRow < $headerLimit) ? $maxRow : $headerLimit;
+    $r = 1;
+    while ($r <= $lastRow) {
+        $materialStart = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_material_keys(), false);
+        $laborStart = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_labor_keys(), false);
+        $expenseStart = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_expense_keys(), false);
+
+        $groupCount = 0;
+        if ($materialStart > 0) $groupCount++;
+        if ($laborStart > 0) $groupCount++;
+        if ($expenseStart > 0) $groupCount++;
+        if ($groupCount < 2) {
+            $r++;
+            continue;
+        }
+
+        $materialEnd = ($materialStart > 0) ? cpms_project_unit_price_segment_end_any($matrix, $r, $materialStart, $maxCol, cpms_project_unit_price_material_keys()) : 0;
+        $laborEnd = ($laborStart > 0) ? cpms_project_unit_price_segment_end_any($matrix, $r, $laborStart, $maxCol, cpms_project_unit_price_labor_keys()) : 0;
+        $expenseEnd = ($expenseStart > 0) ? cpms_project_unit_price_segment_end_any($matrix, $r, $expenseStart, $maxCol, cpms_project_unit_price_expense_keys()) : 0;
+
+        $costStartCols = array();
+        $costEndCols = array();
+        if ($materialStart > 0) { $costStartCols[] = $materialStart; $costEndCols[] = $materialEnd; }
+        if ($laborStart > 0) { $costStartCols[] = $laborStart; $costEndCols[] = $laborEnd; }
+        if ($expenseStart > 0) { $costStartCols[] = $expenseStart; $costEndCols[] = $expenseEnd; }
+        $minCostCol = min($costStartCols);
+        $maxCostCol = max($costEndCols);
+
+        $detailMax = $r + 8;
+        if ($detailMax > $lastRow) $detailMax = $lastRow;
+        $dr = $r + 1;
+        while ($dr <= $detailMax) {
+            $unitLabelCount = cpms_project_unit_price_count_header_in_row($matrix, $dr, $maxCol, cpms_project_unit_price_lang('unit_price'), true);
+            if ($unitLabelCount <= 0) {
+                $dr++;
+                continue;
+            }
+
+            $materialCol = 0;
+            $laborCol = 0;
+            $expenseCol = 0;
+            if ($materialStart > 0) {
+                $materialCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $materialStart, $materialEnd, cpms_project_unit_price_lang('unit_price'), true);
+                if ($materialCol <= 0) $materialCol = $materialStart;
+            }
+            if ($laborStart > 0) {
+                $laborCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $laborStart, $laborEnd, cpms_project_unit_price_lang('unit_price'), true);
+                if ($laborCol <= 0) $laborCol = $laborStart;
+            }
+            if ($expenseStart > 0) {
+                $expenseCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $expenseStart, $expenseEnd, cpms_project_unit_price_lang('unit_price'), true);
+                if ($expenseCol <= 0) $expenseCol = $expenseStart;
+            }
+
+            $priceColCount = 0;
+            if ($materialCol > 0) $priceColCount++;
+            if ($laborCol > 0) $priceColCount++;
+            if ($expenseCol > 0) $priceColCount++;
+            if ($priceColCount < 2) {
+                $dr++;
+                continue;
+            }
+
+            $totalStart = cpms_project_unit_price_find_detail_col($matrix, $r, $maxCostCol + 1, $maxCol, cpms_project_unit_price_total_group_keys(), false);
+            $totalEnd = 0;
+            $excelTotalCol = 0;
+            $amountCol = 0;
+            if ($totalStart > 0) {
+                $totalEnd = cpms_project_unit_price_segment_end_any($matrix, $r, $totalStart, $maxCol, cpms_project_unit_price_total_group_keys());
+                $excelTotalCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $totalStart, $totalEnd, cpms_project_unit_price_lang('unit_price'), true);
+                $amountCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $totalStart, $totalEnd, cpms_project_unit_price_lang('amount'), true);
+                if ($excelTotalCol <= 0) $excelTotalCol = $totalStart;
+                if ($amountCol <= 0 && $totalEnd > $totalStart) $amountCol = $totalStart + 1;
+            }
+
+            if ($excelTotalCol <= 0) {
+                $excelTotalCol = cpms_project_unit_price_find_detail_col($matrix, $dr, $maxCostCol + 1, $maxCol, cpms_project_unit_price_total_keys(), false);
+            }
+
+            return array(
+                'group_header_row' => $r,
+                'detail_header_row' => $dr,
+                'unit_price_group_start_col' => $minCostCol,
+                'unit_price_group_end_col' => $maxCostCol,
+                'amount_group_start_col' => $totalStart,
+                'material_unit_price_col' => $materialCol,
+                'labor_unit_price_col' => $laborCol,
+                'expense_unit_price_col' => $expenseCol,
+                'excel_unit_price_total_col' => $excelTotalCol,
+                'amount_col' => $amountCol
+            );
+        }
+
+        $r++;
+    }
+    return null;
+}}
+
+if (!function_exists('cpms_project_unit_price_find_simple_price_group')) {
+function cpms_project_unit_price_find_simple_price_group($matrix, $maxRow, $maxCol, $headerLimit) {
+    $lastRow = ($maxRow < $headerLimit) ? $maxRow : $headerLimit;
+    $r = 1;
+    while ($r <= $lastRow) {
+        $itemCol = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_item_name_keys(), false);
+        $specCol = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_spec_keys(), false);
+        $unitCol = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_unit_keys(), false);
+        $qtyCol = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_qty_keys(), false);
+        if ($itemCol <= 0 || $specCol <= 0 || $unitCol <= 0 || $qtyCol <= 0) {
+            $r++;
+            continue;
+        }
+
+        $unitLabelCount = cpms_project_unit_price_count_header_in_row($matrix, $r, $maxCol, cpms_project_unit_price_lang('unit_price'), true);
+        if ($unitLabelCount !== 1) {
+            $r++;
+            continue;
+        }
+
+        $unitPriceCol = cpms_project_unit_price_find_detail_col($matrix, $r, 1, $maxCol, cpms_project_unit_price_lang('unit_price'), true);
+        $amountCol = cpms_project_unit_price_find_detail_col($matrix, $r, $unitPriceCol + 1, $maxCol, cpms_project_unit_price_lang('amount'), true);
+        if ($unitPriceCol <= 0) {
+            $r++;
+            continue;
+        }
+
+        return array(
+            'group_header_row' => $r,
+            'detail_header_row' => $r,
+            'unit_price_group_start_col' => $unitPriceCol,
+            'unit_price_group_end_col' => ($amountCol > 0 ? $amountCol : $unitPriceCol),
+            'amount_group_start_col' => ($amountCol > 0 ? $amountCol : 0),
+            'material_unit_price_col' => 0,
+            'labor_unit_price_col' => 0,
+            'expense_unit_price_col' => 0,
+            'excel_unit_price_total_col' => $unitPriceCol,
+            'amount_col' => $amountCol
+        );
     }
     return null;
 }}
@@ -522,6 +728,8 @@ function cpms_project_unit_price_find_unit_group($matrix, $maxRow, $maxCol, $hea
         }
         $r++;
     }
+    if ($best === null) $best = cpms_project_unit_price_find_cost_group($matrix, $maxRow, $maxCol, $headerLimit);
+    if ($best === null) $best = cpms_project_unit_price_find_simple_price_group($matrix, $maxRow, $maxCol, $headerLimit);
     if ($best === null) $best = cpms_project_unit_price_find_flat_group($matrix, $maxRow, $maxCol, $headerLimit);
     return $best;
 }}
@@ -689,7 +897,8 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
         $materialParsed = cpms_project_unit_price_number_parse($materialRaw);
         $laborParsed = cpms_project_unit_price_number_parse($laborRaw);
         $expenseParsed = cpms_project_unit_price_number_parse($expenseRaw);
-        $hasAnyUnitPricePart = ($materialParsed !== null || $laborParsed !== null || $expenseParsed !== null);
+        $excelUnitPriceTotal = cpms_project_unit_price_number_parse($excelTotalRaw);
+        $hasAnyUnitPricePart = ($materialParsed !== null || $laborParsed !== null || $expenseParsed !== null || $excelUnitPriceTotal !== null);
         if ($qty === null || !$hasAnyUnitPricePart) {
             $rowNumber++;
             continue;
@@ -699,11 +908,13 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
         $laborUnitPrice = ($laborParsed === null) ? 0.0 : $laborParsed;
         $expenseUnitPrice = ($expenseParsed === null) ? 0.0 : $expenseParsed;
         $calculatedUnitPrice = $materialUnitPrice + $laborUnitPrice + $expenseUnitPrice;
-        $excelUnitPriceTotal = cpms_project_unit_price_number_parse($excelTotalRaw);
         $unitPrice = ($excelUnitPriceTotal !== null) ? $excelUnitPriceTotal : $calculatedUnitPrice;
         $amount = cpms_project_unit_price_number_parse($amountRaw);
 
-        if ($excelUnitPriceTotal === null) {
+        if ($excelUnitPriceTotal !== null && $materialParsed === null && $laborParsed === null && $expenseParsed === null) {
+            $validationCode = 'ok';
+            $validationText = cpms_project_unit_price_lang('validation_ok');
+        } else if ($excelUnitPriceTotal === null) {
             $validationCode = 'missing';
             $validationText = cpms_project_unit_price_lang('validation_missing');
         } else if (abs($excelUnitPriceTotal - $calculatedUnitPrice) < 0.0001) {

@@ -16,6 +16,88 @@ if (!function_exists('cpms_normalize_worker_key')) {
     }
 }
 
+if (!function_exists('cpms_normalize_site_key')) {
+    function cpms_normalize_site_key($name) {
+        $name = trim((string)$name);
+        if ($name === '') return '';
+
+        $name = str_ireplace(
+            array('retrofit', 'green', 'samsung'),
+            array('리트로핏', '그린', '삼성'),
+            $name
+        );
+
+        if (function_exists('mb_strtolower')) {
+            $name = mb_strtolower($name, 'UTF-8');
+        } else {
+            $name = strtolower($name);
+        }
+
+        $normalized = @preg_replace('/[^\p{L}\p{N}]+/u', '', $name);
+        if ($normalized === null) {
+            $normalized = str_replace(array(' ', "\r", "\n", "\t", '-', '_', '.', ',', '(', ')', '[', ']', '&', '/'), '', $name);
+        }
+        $normalized = str_replace(array('공사', '현장', '프로젝트'), '', $normalized);
+        return trim((string)$normalized);
+    }
+}
+
+if (!function_exists('cpms_site_match_score')) {
+    function cpms_site_match_score($projectName, $siteName) {
+        $projectKey = cpms_normalize_site_key($projectName);
+        $siteKey = cpms_normalize_site_key($siteName);
+        if ($projectKey === '' || $siteKey === '') return 0.0;
+        if ($projectKey === $siteKey) return 100.0;
+
+        $projectLen = function_exists('mb_strlen') ? mb_strlen($projectKey, 'UTF-8') : strlen($projectKey);
+        $siteLen = function_exists('mb_strlen') ? mb_strlen($siteKey, 'UTF-8') : strlen($siteKey);
+        if ($projectLen <= 0 || $siteLen <= 0) return 0.0;
+        $minLen = min($projectLen, $siteLen);
+        $maxLen = max($projectLen, $siteLen);
+
+        $contains = false;
+        if (function_exists('mb_strpos')) {
+            $contains = (mb_strpos($projectKey, $siteKey, 0, 'UTF-8') !== false || mb_strpos($siteKey, $projectKey, 0, 'UTF-8') !== false);
+        } else {
+            $contains = (strpos($projectKey, $siteKey) !== false || strpos($siteKey, $projectKey) !== false);
+        }
+        if ($contains && $minLen >= 4) {
+            $ratio = ($maxLen > 0) ? ($minLen / $maxLen) : 0;
+            if ($ratio >= 0.55) return 92.0 + ($ratio * 7.0);
+            return 82.0 + ($ratio * 8.0);
+        }
+
+        $percent = 0.0;
+        similar_text($projectKey, $siteKey, $percent);
+        return (float)$percent;
+    }
+}
+
+if (!function_exists('cpms_pick_best_site_match')) {
+    function cpms_pick_best_site_match($rows, $projectName, $nameField, $idField) {
+        $best = array('id' => 0, 'name' => '', 'score' => 0.0);
+        if (!is_array($rows) || count($rows) === 0) return $best;
+
+        foreach ($rows as $row) {
+            $siteName = isset($row[$nameField]) ? trim((string)$row[$nameField]) : '';
+            if ($siteName === '') continue;
+            $score = cpms_site_match_score($projectName, $siteName);
+            if ($score > (float)$best['score']) {
+                $best = array(
+                    'id' => ($idField !== '' && isset($row[$idField])) ? (int)$row[$idField] : 0,
+                    'name' => $siteName,
+                    'score' => $score,
+                );
+            }
+        }
+
+        if ((float)$best['score'] < 82.0) {
+            return array('id' => 0, 'name' => '', 'score' => (float)$best['score']);
+        }
+        return $best;
+    }
+}
+
 if (!function_exists('cpms_table_exists_labor')) {
     function cpms_table_exists_labor($pdo, $table) {
         try {
@@ -49,6 +131,66 @@ if (!function_exists('cpms_table_columns')) {
         } catch (Exception $e) {
             return array();
         }
+    }
+}
+
+if (!function_exists('cpms_find_attendance_site_match')) {
+    function cpms_find_attendance_site_match($pdo, $projectName) {
+        $empty = array('id' => 0, 'name' => '', 'score' => 0.0);
+        if (!$pdo || trim((string)$projectName) === '') return $empty;
+
+        try {
+            $st = $pdo->prepare("SELECT id, name FROM sites WHERE name = :name AND active = 1 ORDER BY id DESC LIMIT 1");
+            $st->bindValue(':name', $projectName);
+            $st->execute();
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (is_array($row) && isset($row['id'])) {
+                return array('id' => (int)$row['id'], 'name' => isset($row['name']) ? (string)$row['name'] : $projectName, 'score' => 100.0);
+            }
+        } catch (Exception $e) {
+        }
+
+        try {
+            $stAll = $pdo->prepare("SELECT id, name FROM sites WHERE active = 1 ORDER BY id DESC");
+            $stAll->execute();
+            $rows = $stAll->fetchAll(PDO::FETCH_ASSOC);
+            return cpms_pick_best_site_match($rows, $projectName, 'name', 'id');
+        } catch (Exception $e) {
+            return $empty;
+        }
+    }
+}
+
+if (!function_exists('cpms_resolve_gongsu_site_name')) {
+    function cpms_resolve_gongsu_site_name($pdo, $table, $siteColumn, $projectName) {
+        $projectName = trim((string)$projectName);
+        if (!$pdo || $table === '' || $siteColumn === '' || $projectName === '') return $projectName;
+
+        try {
+            $sql = "SELECT `" . $siteColumn . "` AS site_name FROM `" . $table . "` WHERE `" . $siteColumn . "` = :site LIMIT 1";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':site', $projectName);
+            $st->execute();
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (is_array($row) && isset($row['site_name']) && trim((string)$row['site_name']) !== '') {
+                return trim((string)$row['site_name']);
+            }
+        } catch (Exception $e) {
+        }
+
+        try {
+            $sqlAll = "SELECT DISTINCT `" . $siteColumn . "` AS site_name FROM `" . $table . "` WHERE `" . $siteColumn . "` IS NOT NULL AND `" . $siteColumn . "` <> '' LIMIT 500";
+            $stAll = $pdo->prepare($sqlAll);
+            $stAll->execute();
+            $rows = $stAll->fetchAll(PDO::FETCH_ASSOC);
+            $best = cpms_pick_best_site_match($rows, $projectName, 'site_name', '');
+            if (isset($best['name']) && trim((string)$best['name']) !== '') {
+                return trim((string)$best['name']);
+            }
+        } catch (Exception $e) {
+        }
+
+        return $projectName;
     }
 }
 
@@ -406,14 +548,8 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
 
         // 1) 프로젝트명과 같은 현장(site) 찾기
         $siteId = 0;
-        try {
-            $st = $attendancePdo->prepare("SELECT id FROM sites WHERE name = :name AND active = 1 ORDER BY id DESC LIMIT 1");
-            $st->bindValue(':name', $projectName);
-            $st->execute();
-            $siteId = (int)$st->fetchColumn();
-        } catch (Exception $e) {
-            $siteId = 0;
-        }
+        $siteMatch = cpms_find_attendance_site_match($attendancePdo, $projectName);
+        if (is_array($siteMatch) && isset($siteMatch['id'])) $siteId = (int)$siteMatch['id'];
         if ($siteId <= 0) return $result;
 
         // 2) 월 범위 계산
@@ -627,6 +763,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
 
         $table = $info['table'];
         $cols = $info['columns'];
+        $siteNameForQuery = cpms_resolve_gongsu_site_name($pdo, $table, $cols['site'], $projectName);
 
         $sql = "SELECT `" . $cols['site'] . "` AS site_name,
                        `" . $cols['name'] . "` AS worker_name,
@@ -642,7 +779,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
 
         try {
             $st = $pdo->prepare($sql);
-            $st->bindValue(':site', $projectName);
+            $st->bindValue(':site', $siteNameForQuery);
             $st->bindValue(':month', $selectedMonth . '%');
             $st->execute();
             $rows = $st->fetchAll();
@@ -719,7 +856,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
         }
         try {
             $stAll = $pdo->prepare($sqlAll);
-            $stAll->bindValue(':site', $projectName);
+            $stAll->bindValue(':site', $siteNameForQuery);
             $stAll->execute();
             $rowsAll = $stAll->fetchAll();
             foreach ($rowsAll as $rowAll) {
