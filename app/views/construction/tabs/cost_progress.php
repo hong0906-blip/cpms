@@ -5,8 +5,10 @@
  */
 require_once __DIR__ . '/../../partials/cost_metrics.php';
 
+$canEditCostProgress = isset($canEdit) ? (bool)$canEdit : false;
 $sub = isset($_GET['sub']) ? trim((string)$_GET['sub']) : 'summary';
 if (!in_array($sub, array('work','cost','recogn','summary'), true)) $sub = 'summary';
+if (!$canEditCostProgress && $sub !== 'summary') $sub = 'summary';
 $period = isset($_GET['period']) ? trim((string)$_GET['period']) : 'week';
 if ($period !== 'month') $period = 'week';
 
@@ -22,11 +24,12 @@ try { $summary = cpms_project_cost_metrics($pdo, $pid, $period); } catch (Except
 <div class="bg-white rounded-3xl border border-gray-100 p-5">
     <div class="flex gap-2 mb-4">
         <?php foreach (array('work'=>'실적수량 입력','cost'=>'원가 입력','recogn'=>'월별 인정기성','summary'=>'주간/월간 요약') as $k=>$lb): ?>
+            <?php if (!$canEditCostProgress && $k !== 'summary') continue; ?>
             <a class="px-3 py-2 rounded-2xl border <?php echo ($sub===$k)?'bg-gray-900 text-white':'bg-white'; ?>" href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=cost_progress&sub=<?php echo h($k); ?>&period=<?php echo h($period); ?>"><?php echo h($lb); ?></a>
         <?php endforeach; ?>
     </div>
 
-    <?php if ($sub === 'work'): ?>
+    <?php if ($sub === 'work' && $canEditCostProgress): ?>
         <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/daily_work_save" class="grid grid-cols-1 md:grid-cols-6 gap-2">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <select name="unit_price_id" class="px-3 py-2 border rounded-2xl md:col-span-2"><?php foreach($unitRows as $u): ?><option value="<?php echo (int)$u['id']; ?>"><?php echo h($u['item_name']); ?> (계약수량 <?php echo h($u['qty']); ?>)</option><?php endforeach; ?></select>
@@ -37,7 +40,7 @@ try { $summary = cpms_project_cost_metrics($pdo, $pid, $period); } catch (Except
         </form>
     <?php endif; ?>
 
-    <?php if ($sub === 'cost'): ?>
+    <?php if ($sub === 'cost' && $canEditCostProgress): ?>
         <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/daily_cost_save" class="grid grid-cols-1 md:grid-cols-6 gap-2">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <input type="date" name="cost_date" class="px-3 py-2 border rounded-2xl" value="<?php echo h(date('Y-m-d')); ?>">
@@ -48,7 +51,7 @@ try { $summary = cpms_project_cost_metrics($pdo, $pid, $period); } catch (Except
         </form>
     <?php endif; ?>
 
-    <?php if ($sub === 'recogn'): ?>
+    <?php if ($sub === 'recogn' && $canEditCostProgress): ?>
         <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/recognized_save" class="grid grid-cols-1 md:grid-cols-4 gap-2">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <input type="month" name="ym" class="px-3 py-2 border rounded-2xl" value="<?php echo h(date('Y-m')); ?>">

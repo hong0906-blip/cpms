@@ -6,7 +6,10 @@
  * 사용 변수:
  * - $pdo (PDO)
  * - $pid (int)
+ * - $canEdit (bool)
  */
+
+$canEditSafety = isset($canEdit) ? (bool)$canEdit : false;
 
 $incidents = array();
 try {
@@ -26,7 +29,9 @@ try {
             <div class="text-sm text-gray-600 mt-1">공사에서 등록한 안전사고를 프로젝트 기준으로 봅니다.</div>
         </div>
         <div class="flex items-center gap-2">
-            <button type="button" class="px-4 py-2 rounded-2xl bg-rose-600 text-white font-extrabold" data-modal-open="safetyIncidentAdd">안전사고 등록</button>
+            <?php if ($canEditSafety): ?>
+                <button type="button" class="px-4 py-2 rounded-2xl bg-rose-600 text-white font-extrabold" data-modal-open="safetyIncidentAdd">안전사고 등록</button>
+            <?php endif; ?>
             <a href="<?php echo h(base_url()); ?>/?r=안전/보건" class="px-4 py-2 rounded-2xl bg-gray-100 text-gray-900 font-bold hover:bg-gray-200">안전 탭으로</a>
         </div>
     </div>

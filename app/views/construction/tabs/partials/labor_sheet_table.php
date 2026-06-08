@@ -73,6 +73,7 @@ $attendanceGongsuMap = isset($attendanceGongsuMap) && is_array($attendanceGongsu
 $attendanceGongsuUnit = isset($attendanceGongsuUnit) && is_array($attendanceGongsuUnit) ? $attendanceGongsuUnit : array();
 $attendanceOutputDays = isset($attendanceOutputDays) && is_array($attendanceOutputDays) ? $attendanceOutputDays : array();
 $showBankColumns = isset($showBankColumns) ? (bool)$showBankColumns : true;
+$canEditTimesheet = isset($canEdit) ? (bool)$canEdit : false;
 $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
 ?>
 
@@ -155,6 +156,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                         $gongsuDisplay = cpms_format_gongsu_value($gongsuValue);
                         ?>
                         <td class="cpms-gongsu-cell-slot border border-gray-200 px-0 py-0 text-center">
+                            <?php if ($canEditTimesheet): ?>
                             <button type="button"
                                     class="cpms-gongsu-cell flex w-full min-h-[28px] items-center justify-center rounded px-1 hover:bg-yellow-50"
                                     data-project-id="<?php echo (int)(isset($pid) ? $pid : (isset($projectId) ? $projectId : 0)); ?>"
@@ -163,6 +165,9 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                                     data-date="<?php echo h($dateKey); ?>"
                                     data-worker-key="<?php echo h($workerKey); ?>"
                                     data-old-value="<?php echo h($gongsuDisplay); ?>"><?php echo h($gongsuDisplay); ?></button>
+                            <?php else: ?>
+                                <span class="flex w-full min-h-[28px] items-center justify-center px-1"><?php echo h($gongsuDisplay); ?></span>
+                            <?php endif; ?>
                         </td>
                     <?php endfor; ?>
                     <td class="cpms-output-days border border-gray-200 px-2 py-2 text-center"><?php echo h($outputDays > 0 ? (string)$outputDays : '0'); ?></td>

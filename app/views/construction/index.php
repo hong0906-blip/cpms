@@ -20,10 +20,10 @@ use App\Core\Db;
 $role = Auth::userRole();
 $dept = Auth::userDepartment();
 
-// 공사 메뉴 접근: 공사 또는 임원
+// 공사 메뉴 접근: 공사/공무 또는 임원
 $allowed = Auth::canAccessConstruction();
 if (!$allowed) {
-    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (공사/임원 전용)</div>';
+    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (공사/공무/임원 전용)</div>';
     return;
 }
 
@@ -34,10 +34,11 @@ if (!$pdo) {
 }
 
 $userEmail = Auth::userEmail();
+$canViewAllProjects = ($role === 'executive' || $dept === '공무');
 
 // 직원 ID 조회(공사 "내 프로젝트" 필터에 필요)
 $employeeId = 0;
-if ($role !== 'executive') {
+if (!$canViewAllProjects) {
     try {
         $stE = $pdo->prepare("SELECT id FROM employees WHERE email = :em LIMIT 1");
         $stE->bindValue(':em', (string)$userEmail);
@@ -55,7 +56,7 @@ if ($role !== 'executive') {
 // 프로젝트 목록
 $projects = array();
 try {
-    if ($role === 'executive') {
+    if ($canViewAllProjects) {
         $st = $pdo->query("SELECT * FROM cpms_projects ORDER BY id DESC");
         $projects = $st->fetchAll();
     } else {
@@ -75,7 +76,7 @@ try {
 }
 
 if (count($projects) === 0) {
-    echo '<div class="bg-white rounded-2xl border border-gray-200 p-6 text-gray-600">조회 가능한 프로젝트가 없습니다. (공사팀은 본인/팀이 배정(main/sub)된 프로젝트만 보입니다.)</div>';
+    echo '<div class="bg-white rounded-2xl border border-gray-200 p-6 text-gray-600">조회 가능한 프로젝트가 없습니다. (공사팀은 본인/팀이 배정(main/sub)된 프로젝트만 보이고, 공무/임원은 전체 프로젝트가 보입니다.)</div>';
     return;
 }
 
@@ -184,6 +185,7 @@ try {
         <h2 class="text-2xl font-extrabold text-gray-900">공사 관리</h2>
     </div>
 
+    <?php if ($canEditSchedule): ?>
     <div class="cpms-mobile-hide flex items-center gap-2">
         <button type="button"
                 class="px-5 py-3 rounded-2xl bg-gradient-to-r from-red-500 to-rose-500 text-white font-extrabold shadow-lg hover:shadow-xl transition"
@@ -193,6 +195,7 @@ try {
             </span>
         </button>
     </div>
+    <?php endif; ?>
 </div>
 
 <?php if ($flash): ?>
@@ -263,6 +266,7 @@ if (!file_exists($tabFile)) {
 ?>
 
 
+<?php if ($canEditSchedule): ?>
 <!-- 변경: 이슈등록/안전사고등록 모달/저장 -->
 <div id="modal-issueAdd" class="fixed inset-0 z-50 hidden">
   <div class="absolute inset-0 bg-black/40" data-modal-close="issueAdd"></div>
@@ -297,6 +301,7 @@ if (!file_exists($tabFile)) {
     </form>
   </div>
 </div>
+<?php endif; ?>
 <script>
 (function(){
  function o(k){var m=document.getElementById('modal-'+k); if(m)m.classList.remove('hidden');}

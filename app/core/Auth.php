@@ -69,6 +69,14 @@ class Auth
         );
     }
 
+    // Accounts granted construction-section view access without changing employee dept.
+    private static function constructionAccessEmails()
+    {
+        return array(
+            'kimyounggi@cmbuild.kr',
+        );
+    }
+
     public static function check()
     {
         // 세션 없으면 포탈 기반 자동로그인 시도 (요청한 자동로그인 유지)
@@ -144,15 +152,25 @@ class Auth
         if (!self::check()) return false;
         if (self::isMaster()) return true; // 마스터 전체 권한
 
+        $email = self::normalizeEmail(self::userEmail());
+        foreach (self::constructionAccessEmails() as $allowedEmail) {
+            if ($email !== '' && $email === self::normalizeEmail($allowedEmail)) return true;
+        }
+
         $role = self::userRole();
-        $dept = self::userDepartment();
-        return ($role === 'executive' || $dept === '공사');
+        $dept = self::normalizeDept(self::userDepartment());
+        return ($role === 'executive' || $dept === '공사' || $dept === '공무');
     }
 
     // 마스터 전체 권한: 공사 저장/수정/삭제
     public static function canManageConstruction()
     {
-        return self::canAccessConstruction();
+        if (!self::check()) return false;
+        if (self::isMaster()) return true;
+
+        $role = self::userRole();
+        $dept = self::normalizeDept(self::userDepartment());
+        return ($role === 'executive' || $dept === '공사');
     }
 
     // 견적관리 접근 권한: 공무팀, 부사장/대표, 마스터 관리자

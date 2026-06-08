@@ -439,9 +439,11 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
             <button type="button" id="ganttJumpToday" class="px-4 py-2 rounded-2xl border border-blue-200 text-blue-700 bg-blue-50 font-extrabold hover:bg-blue-100">
                 오늘로 이동
             </button>
-        <button type="button" class="px-4 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-extrabold hover:bg-rose-100" data-modal-open="issueAdd">
-                이슈등록
-            </button>
+            <?php if ($canEdit): ?>
+                <button type="button" class="px-4 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-extrabold hover:bg-rose-100" data-modal-open="issueAdd">
+                    이슈등록
+                </button>
+            <?php endif; ?>
         </div>
     </div>
 

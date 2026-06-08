@@ -13,8 +13,7 @@ use App\Core\Auth;
 use App\Core\Db;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
-$role = Auth::userRole(); $dept = Auth::userDepartment();
-if (!($role === 'executive' || $dept === '공사' || $dept === '관리' || $dept === '관리부')) { http_response_code(403); echo '403'; exit; }
+if (!(Auth::canManageConstruction() || Auth::canManageEmployees())) { http_response_code(403); echo '403'; exit; }
 $pdo = Db::pdo(); if (!$pdo) { echo 'DB 연결 실패'; exit; }
 
 function table_exists2($pdo, $table) {

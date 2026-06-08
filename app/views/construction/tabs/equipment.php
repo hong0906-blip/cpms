@@ -11,6 +11,8 @@ use App\Core\Db;
 require_once __DIR__ . '/../partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 
+$canEditEquipment = isset($canEdit) ? (bool)$canEdit : false;
+
 $pdo = Db::pdo();
 if (!$pdo) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">DB 연결 실패</div>';
@@ -20,6 +22,9 @@ cpms_equipment_gongsu_ensure_schema($pdo);
 
 $equipTab = isset($_GET['equip_tab']) ? trim((string)$_GET['equip_tab']) : 'monthly';
 if ($equipTab !== 'monthly' && $equipTab !== 'input') {
+    $equipTab = 'monthly';
+}
+if (!$canEditEquipment && $equipTab === 'input') {
     $equipTab = 'monthly';
 }
 
@@ -169,6 +174,7 @@ function equipment_gongsu($v)
 }
 function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
 {
+    global $canEditEquipment;
     if (!is_array($usageRow)) {
         return '<td class="border p-1 text-center text-gray-300">-</td>';
     }
@@ -185,6 +191,15 @@ function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
     $pending = ($usageId > 0 && isset($pendingByUsage[$usageId]) && is_array($pendingByUsage[$usageId])) ? $pendingByUsage[$usageId] : null;
 
     $html = '<td class="border p-1 text-center">';
+    if (!$canEditEquipment) {
+        $html .= '<span class="inline-flex min-h-[28px] items-center justify-center px-1 font-bold text-gray-800">' . h(equipment_gongsu($unit)) . '</span>';
+        if ($pending) {
+            $newValue = isset($pending['new_value']) ? (float)$pending['new_value'] : 0.0;
+            $html .= '<div class="mt-1 text-[11px] text-amber-700 font-bold">' . h(equipment_gongsu($newValue)) . ' 승인대기</div>';
+        }
+        $html .= '</td>';
+        return $html;
+    }
     $html .= '<button type="button" class="px-2 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-bold hover:bg-blue-100"';
     $html .= ' data-equipment-gongsu-cell="1"';
     $html .= ' data-project-id="' . $projectId . '"';
@@ -297,8 +312,10 @@ foreach ($usageRows as $ur) {
     <div class="mt-4 flex flex-wrap gap-2">
         <a href="<?php echo h($baseUrl . '&equip_tab=monthly&ym=' . urlencode($ym)); ?>"
            class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($equipTab === 'monthly') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">장비월별</a>
-        <a href="<?php echo h($baseUrl . '&equip_tab=input&ym=' . urlencode($ym)); ?>"
-           class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($equipTab === 'input') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">장비입력</a>
+        <?php if ($canEditEquipment): ?>
+            <a href="<?php echo h($baseUrl . '&equip_tab=input&ym=' . urlencode($ym)); ?>"
+               class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($equipTab === 'input') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">장비입력</a>
+        <?php endif; ?>
     </div>
 
     <?php if ($equipTab === 'input'): ?>

@@ -10,7 +10,10 @@
  * 사용 변수:
  * - $pdo (PDO)
  * - $pid (int)
+ * - $canEdit (bool)
  */
+
+$canEditIssue = isset($canEdit) ? (bool)$canEdit : false;
 
 // 프로젝트 이슈
 $issues = array();
@@ -54,9 +57,11 @@ if (count($issues) > 0) {
             <h3 class="text-xl font-extrabold text-gray-900">이슈</h3>
             <div class="text-sm text-gray-600 mt-1">공정표 변경/기간 연장/공사중지 등 이슈를 등록해 공유합니다.</div>
         </div>
-        <button type="button" class="px-4 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-extrabold hover:bg-rose-100" data-modal-open="issueAdd">
-            이슈등록
-        </button>
+        <?php if ($canEditIssue): ?>
+            <button type="button" class="px-4 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-extrabold hover:bg-rose-100" data-modal-open="issueAdd">
+                이슈등록
+            </button>
+        <?php endif; ?>
     </div>
 
     <?php if (count($issues) === 0): ?>
@@ -96,15 +101,18 @@ if (count($issues) > 0) {
                         </div>
                     <?php endif; ?>
 
-                    <!-- 댓글 작성(공사 전용 라우트: 리다이렉트가 공사로) -->
-                    <form method="post" action="<?php echo h(base_url()); ?>/?r=project/issue_comment_create" class="mt-3 flex flex-col md:flex-row md:items-center gap-2">
-                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                        <input type="hidden" name="issue_id" value="<?php echo (int)$iid; ?>">
-                        <input name="comment" maxlength="255" required
-                               class="flex-1 px-4 py-3 rounded-2xl border border-gray-200"
-                               placeholder="댓글(공사/임원/공무)">
-                        <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">댓글 등록</button>
-                    </form>
+                    <?php if ($canEditIssue): ?>
+                        <!-- 댓글 작성(공사 전용 라우트: 리다이렉트가 공사로) -->
+                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/issue_comment_create" class="mt-3 flex flex-col md:flex-row md:items-center gap-2">
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="issue_id" value="<?php echo (int)$iid; ?>">
+                            <input type="hidden" name="redirect" value="construction">
+                            <input name="comment_text" maxlength="255" required
+                                   class="flex-1 px-4 py-3 rounded-2xl border border-gray-200"
+                                   placeholder="댓글(공사/임원)">
+                            <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">댓글 등록</button>
+                        </form>
+                    <?php endif; ?>
                 </div>
             <?php endforeach; ?>
         </div>

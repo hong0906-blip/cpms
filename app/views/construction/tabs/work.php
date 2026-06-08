@@ -8,6 +8,8 @@
 
 use App\Core\Db;
 
+$canEditWork = isset($canEdit) ? (bool)$canEdit : false;
+
 $pdo = Db::pdo();
 if (!$pdo) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">DB 연결 실패</div>';
@@ -164,12 +166,12 @@ if ($editingId > 0) {
                         <th class="p-2 border text-left">작업명</th>
                         <th class="p-2 border text-right">항목수</th>
                         <th class="p-2 border text-right">합계금액</th>
-                        <th class="p-2 border text-center">작업</th>
+                        <?php if ($canEditWork): ?><th class="p-2 border text-center">작업</th><?php endif; ?>
                     </tr>
                     </thead>
                     <tbody>
                     <?php if (count($workItems) === 0): ?>
-                        <tr><td colspan="4" class="p-3 border text-center text-gray-500">등록된 작업이 없습니다.</td></tr>
+                        <tr><td colspan="<?php echo $canEditWork ? 4 : 3; ?>" class="p-3 border text-center text-gray-500">등록된 작업이 없습니다.</td></tr>
                     <?php else: ?>
                         <?php foreach ($workItems as $w): ?>
                             <?php
@@ -181,6 +183,7 @@ if ($editingId > 0) {
                                 <td class="p-2 border"><?php echo h($w['title']); ?></td>
                                 <td class="p-2 border text-right"><?php echo (int)$lineCnt; ?></td>
                                 <td class="p-2 border text-right"><?php echo number_format($sumAmt, 0); ?></td>
+                                <?php if ($canEditWork): ?>
                                 <td class="p-2 border text-center">
                                     <a class="px-2 py-1 rounded-lg border border-gray-300 text-xs" href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=work&work_id=<?php echo $wid; ?>">수정</a>
                                     <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/work_item_delete" class="inline-block" onsubmit="return confirm('작업을 삭제할까요?');">
@@ -190,6 +193,7 @@ if ($editingId > 0) {
                                         <button type="submit" class="px-2 py-1 rounded-lg border border-rose-200 text-rose-700 bg-rose-50 text-xs">삭제</button>
                                     </form>
                                 </td>
+                                <?php endif; ?>
                             </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -198,6 +202,7 @@ if ($editingId > 0) {
             </div>
         </div>
 
+        <?php if ($canEditWork): ?>
         <div class="xl:col-span-8 border border-gray-200 rounded-2xl p-4">
             <div class="text-lg font-extrabold mb-1"><?php echo $editingRow ? '작업 수정' : '작업 추가'; ?></div>
             <div class="text-xs text-gray-500 mb-3">변경 지점 주석: 작업내용 레이어 추가</div>
@@ -258,5 +263,6 @@ if ($editingId > 0) {
                 </div>
             </form>
         </div>
+        <?php endif; ?>
     </div>
 </div>

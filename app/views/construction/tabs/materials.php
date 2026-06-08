@@ -11,6 +11,8 @@
 use App\Core\Db;
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 
+$canEditMaterials = isset($canEdit) ? (bool)$canEdit : false;
+
 $pdo = Db::pdo();
 if (!$pdo) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">DB 연결 실패</div>';
@@ -19,6 +21,9 @@ if (!$pdo) {
 
 $materialsTab = isset($_GET['materials_tab']) ? trim((string)$_GET['materials_tab']) : 'monthly';
 if ($materialsTab !== 'monthly' && $materialsTab !== 'input') {
+    $materialsTab = 'monthly';
+}
+if (!$canEditMaterials && $materialsTab === 'input') {
     $materialsTab = 'monthly';
 }
 
@@ -212,8 +217,10 @@ foreach ($usageRows as $ur) {
     <div class="mt-4 flex flex-wrap gap-2">
         <a href="<?php echo h($baseUrl . '&materials_tab=monthly&ym=' . urlencode($ym)); ?>"
            class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($materialsTab === 'monthly') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">월별자재구입비</a>
-        <a href="<?php echo h($baseUrl . '&materials_tab=input&ym=' . urlencode($ym)); ?>"
-           class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($materialsTab === 'input') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">자재구입비입력</a>
+        <?php if ($canEditMaterials): ?>
+            <a href="<?php echo h($baseUrl . '&materials_tab=input&ym=' . urlencode($ym)); ?>"
+               class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($materialsTab === 'input') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">자재구입비입력</a>
+        <?php endif; ?>
     </div>
 
     <?php if ($materialsTab === 'input'): ?>

@@ -5,6 +5,7 @@
  * - PHP 5.6 호환
  */
 
+$canEditLabor = isset($canEdit) ? (bool)$canEdit : false;
 $laborTab = isset($_GET['labor_tab']) ? trim((string)$_GET['labor_tab']) : 'timesheet';
 if ($laborTab === '') $laborTab = 'timesheet';
 
@@ -12,6 +13,7 @@ $laborTabs = array(
     'timesheet' => '공수',
     'workers'   => '인원 작성',
 );
+if (!$canEditLabor && isset($laborTabs['workers'])) unset($laborTabs['workers']);
 if (!isset($laborTabs[$laborTab])) $laborTab = 'timesheet';
 
 // 월 목록(프로젝트 기간 기준)
@@ -205,7 +207,7 @@ foreach ($timesheetWorkers as $worker) {
                 </select>
             </div>
 
-            <?php if ($canDownload): ?>
+            <?php if ($canEditLabor && $canDownload): ?>
                 <a href="<?php echo h($downloadUrl); ?>"
                    class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold shadow hover:shadow-lg transition">
                     공수 다운로드
@@ -213,7 +215,7 @@ foreach ($timesheetWorkers as $worker) {
             <?php else: ?>
                 <button type="button"
                         class="px-4 py-2 rounded-2xl bg-gray-200 text-gray-500 font-extrabold cursor-not-allowed"
-                        title="해당 월이 종료된 후 다운로드할 수 있습니다.">
+                        title="<?php echo $canEditLabor ? '해당 월이 종료된 후 다운로드할 수 있습니다.' : '다운로드 권한이 없습니다.'; ?>">
                     공수 다운로드
                 </button>
             <?php endif; ?>
@@ -280,6 +282,7 @@ foreach ($timesheetWorkers as $worker) {
     $attendanceGongsuUnit = $attendanceGongsuUnit;
     $attendanceOutputDays = $attendanceOutputDays;
     $showBankColumns = false;    
+    $canEdit = $canEditLabor;
     require __DIR__ . '/partials/labor_sheet_table.php';
     ?>
 <?php else: ?>
