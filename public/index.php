@@ -270,6 +270,10 @@ if ($route === 'project/unit_price_update_preview') {
     require_once __DIR__ . '/../app/views/project/unit_price_update_preview.php';
     exit;
 }
+if ($route === 'project/contract_change_preview') {
+    require_once __DIR__ . '/../app/views/project/contract_change_preview.php';
+    exit;
+}
 
 /**
  * ✅ [추가] 계약서 업로드(프로젝트 상세에서 업로드)

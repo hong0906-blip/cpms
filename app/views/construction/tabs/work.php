@@ -8,6 +8,8 @@
 
 use App\Core\Db;
 
+require_once __DIR__ . '/../helpers/quantity_remaining_helper.php';
+
 $canEditWork = isset($canEdit) ? (bool)$canEdit : false;
 
 $pdo = Db::pdo();
@@ -78,17 +80,7 @@ try {
     $hasMaterialUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'material_unit_price');
     $hasLaborUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price');
     $hasExpenseUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price');
-    $sqlUnit = "SELECT id, item_name, spec, unit, qty, unit_price";
-    $sqlUnit .= $hasMaterialUnitPrice ? ", material_unit_price" : ", NULL AS material_unit_price";
-    $sqlUnit .= $hasLaborUnitPrice ? ", labor_unit_price" : ", NULL AS labor_unit_price";
-    $sqlUnit .= $hasExpenseUnitPrice ? ", expense_unit_price" : ", NULL AS expense_unit_price";
-    $sqlUnit .= " FROM cpms_project_unit_prices WHERE project_id = :pid";
-    if ($hasIsActive) $sqlUnit .= " AND (is_active = 1 OR is_active IS NULL)";
-    $sqlUnit .= " ORDER BY id ASC LIMIT 2000";
-    $stU = $pdo->prepare($sqlUnit);
-    $stU->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
-    $stU->execute();
-    $unitPrices = $stU->fetchAll(PDO::FETCH_ASSOC);
+    $unitPrices = cpms_contract_items_with_remaining_quantity($pdo, (int)$pid, array('include_depleted' => true, 'limit' => 2000));
 } catch (Exception $e) {
     $unitPrices = array();
 }
@@ -126,6 +118,7 @@ try {
 $editingId = isset($_GET['work_id']) ? (int)$_GET['work_id'] : 0;
 $editingRow = null;
 $editingLineMap = array();
+$editingScheduleCount = 0;
 if ($editingId > 0) {
     foreach ($workItems as $it) {
         if ((int)$it['id'] === $editingId) { $editingRow = $it; break; }
@@ -145,6 +138,7 @@ if ($editingId > 0) {
             $editingLineMap = array();
         }
     }
+    $editingScheduleCount = cpms_work_item_schedule_count($pdo, (int)$pid, $editingId, 0);
 }
 ?>
 
@@ -222,6 +216,16 @@ if ($editingId > 0) {
 
                 <div>
                     <div class="text-xs font-bold text-gray-600 mb-2">내역서 항목 묶기 (선택)</div>
+                    <div class="mb-3 grid grid-cols-1 md:grid-cols-3 gap-2">
+                        <div class="md:col-span-2">
+                            <label class="text-xs font-bold text-gray-600">내역서 검색</label>
+                            <input type="search" id="cpmsWorkUnitSearch" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 text-sm" placeholder="품명, 규격, 단위, 단가로 검색">
+                        </div>
+                        <label class="mt-6 inline-flex items-center gap-2 text-xs font-bold text-gray-700">
+                            <input type="checkbox" id="cpmsWorkShowDepleted" class="rounded border-gray-300">
+                            소진 항목 보기
+                        </label>
+                    </div>
                     <div class="max-h-[420px] overflow-auto border border-gray-200 rounded-xl">
                         <table class="w-full text-xs border-collapse">
                             <thead class="bg-gray-50 sticky top-0">
@@ -229,25 +233,59 @@ if ($editingId > 0) {
                                 <th class="p-2 border text-center">선택</th>
                                 <th class="p-2 border text-left">항목명</th>
                                 <th class="p-2 border text-left">규격</th>
-                                <th class="p-2 border text-right">기본수량</th>
-                                <th class="p-2 border text-right">단가계</th>
+                                <th class="p-2 border text-left">단위</th>
+                                <th class="p-2 border text-right">계약수량</th>
+                                <th class="p-2 border text-right">사용수량</th>
+                                <th class="p-2 border text-right">남은수량</th>
+                                <th class="p-2 border text-right">배정수량</th>
+                                <th class="p-2 border text-right">단가</th>
                             </tr>
                             </thead>
                             <tbody>
                             <?php if (count($unitPrices) === 0): ?>
-                                <tr><td colspan="5" class="p-2 border text-center text-gray-500">내역서 항목이 없습니다.</td></tr>
+                                <tr><td colspan="9" class="p-2 border text-center text-gray-500">내역서 항목이 없습니다.</td></tr>
                             <?php else: ?>
                                 <?php foreach ($unitPrices as $u): ?>
                                     <?php
                                     $uid = (int)$u['id'];
                                     $sel = isset($editingLineMap[$uid]);
-                                    $unitPriceDisplay = cpms_work_unit_price_value($u);
+                                    $unitPriceDisplay = isset($u['unit_price_total']) ? (float)$u['unit_price_total'] : cpms_work_unit_price_value($u);
+                                    $contractQty = isset($u['contract_quantity']) ? (float)$u['contract_quantity'] : (isset($u['qty']) ? (float)$u['qty'] : 0.0);
+                                    $usedQty = isset($u['used_quantity']) ? (float)$u['used_quantity'] : 0.0;
+                                    $remainingQty = isset($u['remaining_quantity']) ? (float)$u['remaining_quantity'] : ($contractQty - $usedQty);
+                                    $isDepleted = ($remainingQty <= 0.0001);
+                                    $availableForEdit = cpms_contract_item_remaining_quantity($pdo, (int)$pid, $uid, $editingId);
+                                    $maxPlannedQty = ($editingScheduleCount > 0) ? ($availableForEdit / $editingScheduleCount) : $availableForEdit;
+                                    if ($maxPlannedQty < 0) $maxPlannedQty = 0;
+                                    $plannedValue = '';
+                                    if ($sel) {
+                                        $linePlanned = isset($editingLineMap[$uid]['planned_qty']) ? $editingLineMap[$uid]['planned_qty'] : null;
+                                        $plannedValue = ($linePlanned !== null && $linePlanned !== '') ? (string)$linePlanned : (string)$contractQty;
+                                    } else if ($remainingQty > 0.0001) {
+                                        $plannedValue = (string)$remainingQty;
+                                    }
+                                    $rowText = (isset($u['item_name']) ? (string)$u['item_name'] : '') . ' ' . (isset($u['spec']) ? (string)$u['spec'] : '') . ' ' . (isset($u['unit']) ? (string)$u['unit'] : '') . ' ' . (string)$unitPriceDisplay;
+                                    $rowClass = 'cpms-work-unit-row';
+                                    if ($isDepleted) $rowClass .= ' cpms-work-depleted-row bg-gray-50 text-gray-400';
+                                    if ($isDepleted && !$sel) $rowClass .= ' hidden';
                                     ?>
-                                    <tr>
+                                    <tr class="<?php echo h($rowClass); ?>" data-search="<?php echo h($rowText); ?>" data-depleted="<?php echo $isDepleted ? '1' : '0'; ?>">
                                         <td class="p-2 border text-center"><input type="checkbox" name="selected_unit_price_ids[]" value="<?php echo $uid; ?>" <?php echo $sel ? 'checked' : ''; ?>></td>
                                         <td class="p-2 border"><?php echo h($u['item_name']); ?></td>
                                         <td class="p-2 border"><?php echo h(isset($u['spec']) ? $u['spec'] : ''); ?></td>
-                                        <td class="p-2 border text-right"><?php echo cpms_work_format_qty0($u['qty']); ?> <?php echo h($u['unit']); ?></td>
+                                        <td class="p-2 border"><?php echo h($u['unit']); ?></td>
+                                        <td class="p-2 border text-right"><?php echo cpms_work_format_qty0($contractQty); ?></td>
+                                        <td class="p-2 border text-right"><?php echo cpms_work_format_qty0($usedQty); ?></td>
+                                        <td class="p-2 border text-right">
+                                            <?php if ($isDepleted): ?>
+                                                <span class="inline-flex items-center rounded-lg bg-gray-200 px-2 py-1 font-extrabold text-gray-600">소진됨 / 남은수량 0</span>
+                                            <?php else: ?>
+                                                <span class="<?php echo ($remainingQty <= 5 && $remainingQty > 0) ? 'text-amber-700 font-extrabold' : 'font-bold text-gray-900'; ?>"><?php echo cpms_work_format_qty0($remainingQty); ?></span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="p-2 border text-right">
+                                            <input type="number" step="0.0001" min="0" max="<?php echo h((string)$maxPlannedQty); ?>" name="planned_qty_map[<?php echo $uid; ?>]" value="<?php echo h($plannedValue); ?>" class="w-24 px-2 py-1 rounded-lg border border-gray-300 text-right">
+                                        </td>
                                         <td class="p-2 border text-right"><?php echo cpms_work_format_price1($unitPriceDisplay); ?></td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -266,3 +304,39 @@ if ($editingId > 0) {
         <?php endif; ?>
     </div>
 </div>
+<script>
+(function () {
+    var searchInput = document.getElementById('cpmsWorkUnitSearch');
+    var showDepleted = document.getElementById('cpmsWorkShowDepleted');
+    var rows = Array.prototype.slice.call(document.querySelectorAll('.cpms-work-unit-row'));
+
+    function normalizeText(value) {
+        value = String(value || '').toLowerCase();
+        value = value.replace(/,/g, ' ');
+        value = value.replace(/\s+/g, ' ');
+        return value;
+    }
+
+    function refreshRows() {
+        var q = searchInput ? normalizeText(searchInput.value) : '';
+        var includeDepleted = showDepleted && showDepleted.checked;
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i];
+            var haystack = normalizeText(row.getAttribute('data-search') || '');
+            var depleted = row.getAttribute('data-depleted') === '1';
+            var checked = !!row.querySelector('input[type="checkbox"]:checked');
+            var match = (q === '' || haystack.indexOf(q) !== -1);
+            var visible = match && (!depleted || includeDepleted || checked);
+            if (visible) row.classList.remove('hidden');
+            else row.classList.add('hidden');
+        }
+    }
+
+    if (searchInput) searchInput.addEventListener('input', refreshRows);
+    if (showDepleted) showDepleted.addEventListener('change', refreshRows);
+    for (var j = 0; j < rows.length; j++) {
+        rows[j].addEventListener('change', refreshRows);
+    }
+    refreshRows();
+})();
+</script>

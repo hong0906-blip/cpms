@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/helpers/quantity_remaining_helper.php';
 use App\Core\Auth;
 use App\Core\Db;
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
@@ -17,6 +18,43 @@ $redir = '?r=공사&pid=' . $pid . '&tab=work';
 if ($pid <= 0 || $title === '') { flash_set('error','프로젝트/작업명 확인'); header('Location: ' . $redir); exit; }
 if (mb_strlen($title, 'UTF-8') > 200) $title = mb_substr($title, 0, 200, 'UTF-8');
 $pdo = Db::pdo(); if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ' . $redir); exit; }
+
+$oldPlannedMap = array();
+if ($wid > 0) {
+    try {
+        $stOldLines = $pdo->prepare("SELECT unit_price_id, planned_qty FROM cpms_work_item_lines WHERE work_id = :wid");
+        $stOldLines->bindValue(':wid', $wid, PDO::PARAM_INT);
+        $stOldLines->execute();
+        $oldLines = $stOldLines->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($oldLines)) {
+            foreach ($oldLines as $oldLine) {
+                $oldUid = isset($oldLine['unit_price_id']) ? (int)$oldLine['unit_price_id'] : 0;
+                if ($oldUid > 0) $oldPlannedMap[$oldUid] = isset($oldLine['planned_qty']) ? $oldLine['planned_qty'] : null;
+            }
+        }
+    } catch (Exception $eOld) {
+        $oldPlannedMap = array();
+    }
+}
+
+$candidatePlannedMap = array();
+$seenUnitMap = array();
+foreach ($selected as $uidRaw) {
+    $uid = (int)$uidRaw;
+    if ($uid <= 0) continue;
+    if (isset($seenUnitMap[$uid])) continue;
+    $seenUnitMap[$uid] = 1;
+    $pqRaw = isset($plannedMap[$uid]) ? trim((string)$plannedMap[$uid]) : (isset($oldPlannedMap[$uid]) ? trim((string)$oldPlannedMap[$uid]) : '');
+    $candidatePlannedMap[$uid] = ($pqRaw !== '' && is_numeric($pqRaw)) ? (float)$pqRaw : null;
+}
+
+$quantityValidation = cpms_validate_work_item_line_quantities($pdo, $pid, $wid, $candidatePlannedMap);
+if (empty($quantityValidation['ok'])) {
+    flash_set('error', isset($quantityValidation['message']) ? $quantityValidation['message'] : '남은 수량보다 큰 수량은 입력할 수 없습니다.');
+    header('Location: ' . $redir . ($wid > 0 ? '&work_id=' . $wid : ''));
+    exit;
+}
+
 try {
     if ($wid > 0) {
         $st = $pdo->prepare("UPDATE cpms_work_items SET title=:t, description=:d, updated_at=NOW() WHERE id=:id AND project_id=:pid");
@@ -30,27 +68,10 @@ try {
         $wid = (int)$pdo->lastInsertId();
     }
     if ($wid > 0) {
-        $oldPlannedMap = array();
-        try {
-            $stOldLines = $pdo->prepare("SELECT unit_price_id, planned_qty FROM cpms_work_item_lines WHERE work_id = :wid");
-            $stOldLines->bindValue(':wid', $wid, PDO::PARAM_INT);
-            $stOldLines->execute();
-            $oldLines = $stOldLines->fetchAll(PDO::FETCH_ASSOC);
-            if (is_array($oldLines)) {
-                foreach ($oldLines as $oldLine) {
-                    $oldUid = isset($oldLine['unit_price_id']) ? (int)$oldLine['unit_price_id'] : 0;
-                    if ($oldUid > 0) $oldPlannedMap[$oldUid] = isset($oldLine['planned_qty']) ? $oldLine['planned_qty'] : null;
-                }
-            }
-        } catch (Exception $eOld) {
-            $oldPlannedMap = array();
-        }
         $pdo->prepare("DELETE FROM cpms_work_item_lines WHERE work_id = :wid")->execute(array(':wid' => $wid));
         $ins = $pdo->prepare("INSERT INTO cpms_work_item_lines(work_id, unit_price_id, planned_qty, note, created_at) VALUES(:wid,:uid,:pq,:note,NOW())");
-        foreach ($selected as $uidRaw) {
-            $uid = (int)$uidRaw; if ($uid <= 0) continue;
-            $pqRaw = isset($plannedMap[$uid]) ? trim((string)$plannedMap[$uid]) : (isset($oldPlannedMap[$uid]) ? trim((string)$oldPlannedMap[$uid]) : '');
-            $pq = ($pqRaw !== '' && is_numeric($pqRaw)) ? (float)$pqRaw : null;
+        foreach ($candidatePlannedMap as $uid => $pq) {
+            $uid = (int)$uid; if ($uid <= 0) continue;
             $ins->bindValue(':wid', $wid, PDO::PARAM_INT);
             $ins->bindValue(':uid', $uid, PDO::PARAM_INT);
             $ins->bindValue(':pq', $pq, $pq !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);

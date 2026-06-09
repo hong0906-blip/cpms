@@ -120,12 +120,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 if (!column_exists($pdo, 'cpms_projects', 'contractor')) {
                     execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN contractor VARCHAR(255) DEFAULT '' AFTER client");
-                    $added[] = 'contractor(시공사)';
+                    array_push($added, 'contractor(시공사)');
                 }
 
                 if (!column_exists($pdo, 'cpms_projects', 'contract_amount')) {
                     execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN contract_amount BIGINT NULL AFTER end_date");
-                    $added[] = 'contract_amount(계약금액)';
+                    array_push($added, 'contract_amount(계약금액)');
                 }
 
                 // status 기본값이 옛날 값이면 그대로 둬도 되지만, 신규 생성 시 기본값은 계약중으로 이미 설정됨.
@@ -139,45 +139,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $added = array();
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN labor_unit_price DECIMAL(18,2) NULL AFTER unit_price");
-                    $added[] = 'labor_unit_price';
+                    array_push($added, 'labor_unit_price');
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'material_unit_price')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN material_unit_price DECIMAL(18,2) NULL AFTER labor_unit_price");
-                    $added[] = 'material_unit_price';
+                    array_push($added, 'material_unit_price');
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'safety_unit_price')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN safety_unit_price DECIMAL(18,2) NULL AFTER material_unit_price");
-                    $added[] = 'safety_unit_price';
+                    array_push($added, 'safety_unit_price');
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN expense_unit_price DECIMAL(18,4) NULL");
-                    $added[] = 'expense_unit_price';
+                    array_push($added, 'expense_unit_price');
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'amount')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN amount DECIMAL(18,4) NULL");
-                    $added[] = 'amount';
+                    array_push($added, 'amount');
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'source_row')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN source_row INT NULL");
-                    $added[] = 'source_row';
+                    array_push($added, 'source_row');
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'import_order')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN import_order INT NULL");
-                    $added[] = 'import_order';
+                    array_push($added, 'import_order');
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'is_safety')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_safety TINYINT(1) NOT NULL DEFAULT 0 AFTER safety_unit_price");
-                    $added[] = 'is_safety';
+                    array_push($added, 'is_safety');
                 }
 
                 
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'is_active')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER remark");
-                    $added[] = 'is_active';
+                    array_push($added, 'is_active');
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'updated_at')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN updated_at DATETIME NULL AFTER is_active");
-                    $added[] = 'updated_at';
+                    array_push($added, 'updated_at');
                 }
                 execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_project_unit_price_change_logs (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -227,7 +227,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     execSql($pdo, "ALTER TABLE cpms_project_contract_change_files ADD COLUMN file_type VARCHAR(50) NULL AFTER stored_path");
                     array_push($added, 'contract_change_files.file_type');
                 }
-$type = 'ok';
+                execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_contract_change_logs (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    contract_item_id INT NULL,
+                    change_type VARCHAR(50) NOT NULL,
+                    item_name VARCHAR(255) NULL,
+                    spec VARCHAR(255) NULL,
+                    unit VARCHAR(50) NULL,
+                    old_quantity DECIMAL(15,4) NULL,
+                    new_quantity DECIMAL(15,4) NULL,
+                    old_unit_price DECIMAL(15,2) NULL,
+                    new_unit_price DECIMAL(15,2) NULL,
+                    created_by INT NULL,
+                    created_at DATETIME NULL,
+                    INDEX idx_project_id (project_id),
+                    INDEX idx_change_type (change_type)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                $changeLogColumns = array(
+                    'contract_item_id' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN contract_item_id INT NULL AFTER project_id",
+                    'item_name' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN item_name VARCHAR(255) NULL AFTER change_type",
+                    'spec' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN spec VARCHAR(255) NULL AFTER item_name",
+                    'unit' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN unit VARCHAR(50) NULL AFTER spec",
+                    'old_quantity' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN old_quantity DECIMAL(15,4) NULL AFTER unit",
+                    'new_quantity' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN new_quantity DECIMAL(15,4) NULL AFTER old_quantity",
+                    'old_unit_price' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN old_unit_price DECIMAL(15,2) NULL AFTER new_quantity",
+                    'new_unit_price' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN new_unit_price DECIMAL(15,2) NULL AFTER old_unit_price",
+                    'created_by' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN created_by INT NULL AFTER new_unit_price",
+                    'created_at' => "ALTER TABLE cpms_contract_change_logs ADD COLUMN created_at DATETIME NULL AFTER created_by"
+                );
+                foreach ($changeLogColumns as $columnName => $columnSql) {
+                    if (!column_exists($pdo, 'cpms_contract_change_logs', $columnName)) {
+                        execSql($pdo, $columnSql);
+                        array_push($added, 'contract_change_logs.' . $columnName);
+                    }
+                }
+                $type = 'ok';
                 $msg = (count($added) === 0) ? '단가표 컬럼 업데이트: 이미 적용되어 있습니다.' : ('단가표 컬럼 업데이트 완료: ' . implode(', ', $added));
                 
             } else if ($action === 'create_issues') {
@@ -343,7 +378,7 @@ $type = 'ok';
         <form method="post" style="margin:0">
             <input type="hidden" name="_csrf" value="<?php echo h2(csrf_token()); ?>">
             <input type="hidden" name="action" value="update_unit_price_columns">
-            <button class="btn btn-warn" type="submit">1-2) 단가표 컬럼 업데이트(노무/자재/안전)</button>
+            <button class="btn btn-warn" type="submit">1-2) 단가표/변경계약 로그 업데이트</button>
         </form>
 
         <form method="post" style="margin:0">

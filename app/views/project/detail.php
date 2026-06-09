@@ -2,6 +2,8 @@
 use App\Core\Auth;
 use App\Core\Db;
 
+require_once __DIR__ . '/contract_change_helper.php';
+
 if (!function_exists('cpms_format_qty0')) {
 function cpms_format_qty0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format(round((float)$v), 0); }
 }
@@ -131,6 +133,19 @@ try {
     $unitPrices = array();
 }
 
+$contractChangeLogs = array();
+try {
+    if (cpms_contract_change_table_exists($pdo, 'cpms_contract_change_logs')) {
+        $stLogs = $pdo->prepare("SELECT * FROM cpms_contract_change_logs WHERE project_id = :pid ORDER BY id DESC LIMIT 30");
+        $stLogs->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stLogs->execute();
+        $tmpLogs = $stLogs->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($tmpLogs)) $contractChangeLogs = $tmpLogs;
+    }
+} catch (Exception $e) {
+    $contractChangeLogs = array();
+}
+
 $flash = flash_get();
 
 $cpmsRoot = dirname(dirname(dirname(__DIR__)));
@@ -150,6 +165,10 @@ if (is_file($contractMetaFile)) {
     }
 }
 ?>
+
+<style>
+.cpms-change-badge{display:inline-flex;align-items:center;margin:2px 4px 2px 0;padding:4px 8px;border-radius:999px;background:#fef3c7;color:#111827;border:1px solid #f59e0b;font-weight:700;white-space:nowrap}
+</style>
 
 <div class="flex items-start justify-between gap-3 mb-6">
     <div>
@@ -316,18 +335,51 @@ if (is_file($contractMetaFile)) {
             <div class="text-xs text-gray-500 mt-1">변경된 엑셀 단가내역서를 업로드하면 공무 단가표와 공사 작업 탭의 내역서 항목이 갱신됩니다. 기존 공정표 연결을 유지하기 위해 기존 단가 ID는 최대한 유지합니다.</div>
         </div>
         <div class="p-6">
-            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/contract_upload" enctype="multipart/form-data" class="space-y-3">
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/contract_change_preview" enctype="multipart/form-data" class="space-y-3">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                 <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
                 <input type="hidden" name="upload_mode" value="unit_price_update">
                 <input type="file" name="contract_file" accept=".xlsx" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" required>
                 <button type="submit" class="px-6 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-extrabold shadow">
-                    변경 단가내역 적용
+                    변경내용 미리보기
                 </button>
             </form>
         </div>
     </div>
 </div>
+
+<?php if (count($contractChangeLogs) > 0): ?>
+<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden mb-6">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div class="font-extrabold text-gray-900">최근 변경계약 변경내용</div>
+        <div class="text-xs text-gray-500">최근 <?php echo (int)count($contractChangeLogs); ?>건</div>
+    </div>
+    <div class="p-6 overflow-x-auto">
+        <table class="min-w-full text-sm">
+            <thead class="bg-gray-50 border-b border-gray-100">
+            <tr class="text-left text-gray-600">
+                <th class="px-3 py-2 font-extrabold">변경내용</th>
+                <th class="px-3 py-2 font-extrabold">품명</th>
+                <th class="px-3 py-2 font-extrabold">규격</th>
+                <th class="px-3 py-2 font-extrabold">단위</th>
+                <th class="px-3 py-2 font-extrabold">변경일</th>
+            </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+            <?php foreach ($contractChangeLogs as $logRow): ?>
+                <tr>
+                    <td class="px-3 py-2"><?php echo cpms_contract_change_render_badges(cpms_contract_change_badges_from_log($logRow)); ?></td>
+                    <td class="px-3 py-2"><?php echo h(isset($logRow['item_name']) ? $logRow['item_name'] : ''); ?></td>
+                    <td class="px-3 py-2"><?php echo h(isset($logRow['spec']) ? $logRow['spec'] : ''); ?></td>
+                    <td class="px-3 py-2"><?php echo h(isset($logRow['unit']) ? $logRow['unit'] : ''); ?></td>
+                    <td class="px-3 py-2"><?php echo h(isset($logRow['created_at']) ? $logRow['created_at'] : ''); ?></td>
+                </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php endif; ?>
 
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">

@@ -11,6 +11,7 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/schedule_auto_progress_helper.php';
+require_once __DIR__ . '/helpers/quantity_remaining_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -76,6 +77,15 @@ if (!$pdo) {
     flash_set('error','DB 연결 실패');
     header('Location: ?r=공사&pid='.$projectId.'&tab=gantt'.$redirectSuffix);
     exit;
+}
+
+if ($workId > 0) {
+    $quantityValidation = cpms_validate_work_item_can_be_scheduled($pdo, $projectId, $workId, $taskId);
+    if (empty($quantityValidation['ok'])) {
+        flash_set('error', isset($quantityValidation['message']) ? $quantityValidation['message'] : '남은 수량보다 큰 수량은 입력할 수 없습니다.');
+        header('Location: ?r=공사&pid='.$projectId.'&tab=gantt'.$redirectSuffix);
+        exit;
+    }
 }
 
 try {

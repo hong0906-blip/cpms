@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/helpers/quantity_remaining_helper.php';
 use App\Core\Auth; use App\Core\Db;
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $role = Auth::userRole(); $dept = Auth::userDepartment();
@@ -15,6 +16,14 @@ $pq = ($pqRaw !== '' && is_numeric($pqRaw)) ? (float)$pqRaw : null;
 $redir = '?r=공사&pid=' . $pid . '&tab=work&work_id=' . $wid;
 $pdo = Db::pdo(); if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ' . $redir); exit; }
 try {
+    $checkMap = array();
+    $checkMap[$uid] = $pq;
+    $quantityValidation = cpms_validate_work_item_line_quantities($pdo, $pid, $wid, $checkMap);
+    if (empty($quantityValidation['ok'])) {
+        flash_set('error', isset($quantityValidation['message']) ? $quantityValidation['message'] : '남은 수량보다 큰 수량은 입력할 수 없습니다.');
+        header('Location: ' . $redir);
+        exit;
+    }
     $st = $pdo->prepare("INSERT INTO cpms_work_item_lines(work_id,unit_price_id,planned_qty,note,created_at) VALUES(:wid,:uid,:pq,:note,NOW()) ON DUPLICATE KEY UPDATE planned_qty=VALUES(planned_qty), note=VALUES(note)");
     $st->bindValue(':wid', $wid, PDO::PARAM_INT); $st->bindValue(':uid', $uid, PDO::PARAM_INT); $st->bindValue(':pq', $pq, $pq !== null ? PDO::PARAM_STR : PDO::PARAM_NULL); $st->bindValue(':note', $note !== '' ? $note : null, $note !== '' ? PDO::PARAM_STR : PDO::PARAM_NULL); $st->execute();
     flash_set('success','작업 항목이 저장되었습니다.');
