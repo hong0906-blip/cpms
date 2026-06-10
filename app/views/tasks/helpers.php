@@ -879,20 +879,19 @@ if (!function_exists('cpms_tasks_build_create_message')) {
 function cpms_tasks_build_create_message($task)
 {
     $lines = array();
-    $isUrgent = isset($task['is_urgent']) && (int)$task['is_urgent'] === 1;
-    $lines[count($lines)] = $isUrgent ? '🔥 [CPMS 긴급 업무 요청]' : '[CPMS 업무 요청]';
-    $lines[count($lines)] = '';
-    $lines[count($lines)] = '업무명 : ' . (isset($task['title']) ? (string)$task['title'] : '-');
-    $lines[count($lines)] = '요청자 : ' . (isset($task['requester_name']) ? (string)$task['requester_name'] : '-');
+    $lines[count($lines)] = '[CPMS 업무요청]';
+    $lines[count($lines)] = '제목: ' . (isset($task['title']) ? (string)$task['title'] : '-');
+    $lines[count($lines)] = '요청자: ' . (isset($task['requester_name']) ? (string)$task['requester_name'] : '-');
+    $lines[count($lines)] = '담당자: ' . (isset($task['assignee_name']) ? (string)$task['assignee_name'] : '-');
     $dueLine = '-';
     if (!empty($task['due_date'])) {
         $dueLine = (string)$task['due_date'];
         if (!empty($task['due_time'])) $dueLine .= ' ' . substr((string)$task['due_time'], 0, 5);
     }
-    $lines[count($lines)] = '마감기한 : ' . $dueLine;
-    $lines[count($lines)] = '내용 : ' . cpms_tasks_text_excerpt(isset($task['content']) ? $task['content'] : '', 120);
-    $lines[count($lines)] = '';
-    $lines[count($lines)] = '나의 할일에서 확인해주세요.';
+    $lines[count($lines)] = '기한: ' . $dueLine;
+    $lines[count($lines)] = '중요도: ' . cpms_tasks_priority_label(isset($task['priority']) ? $task['priority'] : 'normal');
+    $lines[count($lines)] = '내용: ' . cpms_tasks_text_excerpt(isset($task['content']) ? $task['content'] : '', 100);
+    $lines[count($lines)] = '대시보드 나의 할일에서 확인해주세요.';
     return implode("\n", $lines);
 }}
 
@@ -913,13 +912,43 @@ function cpms_tasks_build_complete_message($task)
 if (!function_exists('cpms_tasks_send_created_notification')) {
 function cpms_tasks_send_created_notification($pdo, $task)
 {
-    if (!function_exists('cpms_send_google_chat_to_employee')) {
-        require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    try {
+        if (!$pdo || !is_array($task) || $taskId <= 0) return false;
+        if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'chat_notified_at')) {
+            $alreadyNotifiedAt = isset($task['chat_notified_at']) ? trim((string)$task['chat_notified_at']) : '';
+            if ($alreadyNotifiedAt !== '') return false;
+        }
+        if (!function_exists('cpms_send_google_chat_to_employee')) {
+            require_once dirname(dirname(__DIR__)) . '/helpers.php';
+        }
+        if (!function_exists('cpms_send_google_chat_to_employee')) {
+            error_log('[task_google_chat] send failed task_id=' . $taskId . ' helper missing');
+            return false;
+        }
+        $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+        if ($assigneeId <= 0) {
+            error_log('[task_google_chat] send failed task_id=' . $taskId . ' assignee missing');
+            return false;
+        }
+
+        $ok = cpms_send_google_chat_to_employee($pdo, $assigneeId, cpms_tasks_build_create_message($task), $taskId, 'TASK_CREATED', 'TASK');
+        if ($ok) {
+            if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'chat_notified_at')) {
+                $st = $pdo->prepare("UPDATE cpms_tasks SET chat_notified_at = :chat_notified_at WHERE id = :id AND chat_notified_at IS NULL");
+                $st->execute(array(
+                    ':chat_notified_at' => cpms_tasks_now(),
+                    ':id' => $taskId,
+                ));
+            }
+        } else {
+            error_log('[task_google_chat] send failed task_id=' . $taskId);
+        }
+        return (bool)$ok;
+    } catch (Exception $e) {
+        error_log('[task_google_chat] send failed task_id=' . $taskId . ' error=' . $e->getMessage());
+        return false;
     }
-    if (!function_exists('cpms_send_google_chat_to_employee')) return false;
-    $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
-    if ($assigneeId <= 0) return false;
-    return cpms_send_google_chat_to_employee($pdo, $assigneeId, cpms_tasks_build_create_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_CREATED', 'TASK');
 }}
 
 if (!function_exists('cpms_tasks_send_completed_notification')) {
@@ -967,7 +996,8 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             cancel_reason TEXT NULL,
             created_by INT NULL,
             created_at DATETIME NULL,
-            updated_at DATETIME NULL
+            updated_at DATETIME NULL,
+            chat_notified_at DATETIME NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         'cpms_task_logs' => "CREATE TABLE IF NOT EXISTS cpms_task_logs (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -1029,7 +1059,8 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'created_by' => "ALTER TABLE cpms_tasks ADD COLUMN created_by INT NULL AFTER cancel_reason",
             'created_at' => "ALTER TABLE cpms_tasks ADD COLUMN created_at DATETIME NULL AFTER created_by",
             'updated_at' => "ALTER TABLE cpms_tasks ADD COLUMN updated_at DATETIME NULL AFTER created_at",
-            'group_key' => "ALTER TABLE cpms_tasks ADD COLUMN group_key VARCHAR(190) NULL AFTER updated_at",
+            'chat_notified_at' => "ALTER TABLE cpms_tasks ADD COLUMN chat_notified_at DATETIME NULL AFTER updated_at",
+            'group_key' => "ALTER TABLE cpms_tasks ADD COLUMN group_key VARCHAR(190) NULL AFTER chat_notified_at",
         ),
         'cpms_task_logs' => array(
             'task_id' => "ALTER TABLE cpms_task_logs ADD COLUMN task_id INT NOT NULL DEFAULT 0 AFTER id",
