@@ -10,6 +10,7 @@
 use App\Core\Db;
 require_once __DIR__ . '/../partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
+require_once __DIR__ . '/../partials/project_month_options_helper.php';
 
 $canEditEquipment = isset($canEdit) ? (bool)$canEdit : false;
 
@@ -40,6 +41,13 @@ if ($year < 2000 || $year > 2100 || $month < 1 || $month > 12) {
     $month = (int)substr($ym, 5, 2);
 }
 
+$monthData = cpms_construction_project_month_options($pdo, (int)$pid, $ym);
+$monthOptions = (isset($monthData['months']) && is_array($monthData['months'])) ? $monthData['months'] : array();
+$ym = isset($monthData['selected_ym']) ? (string)$monthData['selected_ym'] : $ym;
+$monthSelectMessage = isset($monthData['message']) ? (string)$monthData['message'] : '';
+$year = (int)substr($ym, 0, 4);
+$month = (int)substr($ym, 5, 2);
+
 $baseUrl = base_url() . '/?r=공사&pid=' . (int)$pid . '&tab=equipment';
 // 달력 전월/현월 계산 수정
 $currFirst = new DateTime($ym . '-01');
@@ -49,12 +57,6 @@ $prevYm = $prevFirst->format('Y-m');
 $prevLastDay = (int)$prevFirst->format('t');
 $monthlyStart = $prevYm . '-26';
 $monthlyEnd = $ym . '-25';
-
-$monthOptions = array();
-for ($i = -12; $i <= 12; $i++) {
-    $optYm = date('Y-m', strtotime($ym . '-01 ' . ($i >= 0 ? '+' . $i : $i) . ' month'));
-    $monthOptions[] = $optYm;
-}
 
 $items = array();
 $itemMap = array();
@@ -304,6 +306,9 @@ foreach ($usageRows as $ur) {
                         </option>
                     <?php endforeach; ?>
                 </select>
+                <?php if ($monthSelectMessage !== ''): ?>
+                    <div class="text-xs text-gray-500 mt-1"><?php echo h($monthSelectMessage); ?></div>
+                <?php endif; ?>
             </div>
             <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold text-sm">적용</button>
         </form>
