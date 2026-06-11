@@ -8,6 +8,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/material_statement_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -150,7 +151,9 @@ try {
         VALUES
         (:pid, :eid, :d, :amt, :memo, :created_at)
         ON DUPLICATE KEY UPDATE amount = VALUES(amount), memo = VALUES(memo)");
+    $stFindUsage = $pdo->prepare("SELECT id, use_date FROM cpms_material_usage WHERE project_id = :pid AND material_id = :mid AND use_date = :d LIMIT 1");
     $now = date('Y-m-d H:i:s');
+    $savedUsageRows = array();
     foreach ($dates as $d) {
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $st->bindValue(':eid', $materialId, PDO::PARAM_INT);
@@ -159,9 +162,28 @@ try {
         $st->bindValue(':memo', $memo);
         $st->bindValue(':created_at', $now);
         $st->execute();
+
+        $stFindUsage->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stFindUsage->bindValue(':mid', $materialId, PDO::PARAM_INT);
+        $stFindUsage->bindValue(':d', $d);
+        $stFindUsage->execute();
+        $usageRow = $stFindUsage->fetch(PDO::FETCH_ASSOC);
+        if (is_array($usageRow) && isset($usageRow['id'])) {
+            $savedUsageRows[count($savedUsageRows)] = $usageRow;
+        }
     }
 
-    flash_set('success', '사용일자를 저장했습니다.');
+    $baseMessage = '사용일자를 저장했습니다.';
+    $uploadResult = cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, 'statement_file', $projectId, $materialId, $savedUsageRows, $ym);
+    if (isset($uploadResult['has_file']) && $uploadResult['has_file']) {
+        if (isset($uploadResult['ok']) && $uploadResult['ok']) {
+            flash_set('success', $baseMessage . ' 거래명세표를 첨부했습니다.');
+        } else {
+            flash_set('error', $baseMessage . ' 다만 거래명세표 첨부 실패: ' . (isset($uploadResult['message']) ? $uploadResult['message'] : '알 수 없는 오류'));
+        }
+    } else {
+        flash_set('success', $baseMessage);
+    }
 } catch (Exception $e) {
     flash_set('error', '저장 실패: ' . $e->getMessage());
 }

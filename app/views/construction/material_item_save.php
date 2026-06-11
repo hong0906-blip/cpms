@@ -9,6 +9,7 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/master_dedupe_helper.php';
+require_once __DIR__ . '/partials/material_statement_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -222,6 +223,8 @@ try {
             VALUES
             (:pid, :eid, :d, :amt, :memo, :created_at)
             ON DUPLICATE KEY UPDATE amount = VALUES(amount), memo = VALUES(memo)");
+        $stFindUsage = $pdo->prepare("SELECT id, use_date FROM cpms_material_usage WHERE project_id = :pid AND material_id = :mid AND use_date = :d LIMIT 1");
+        $savedUsageRows = array();
         foreach ($dates as $d) {
             $stU->bindValue(':pid', $projectId, PDO::PARAM_INT);
             $stU->bindValue(':eid', $materialId, PDO::PARAM_INT);
@@ -230,13 +233,35 @@ try {
             $stU->bindValue(':memo', '');
             $stU->bindValue(':created_at', $now);
             $stU->execute();
+
+            $stFindUsage->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stFindUsage->bindValue(':mid', $materialId, PDO::PARAM_INT);
+            $stFindUsage->bindValue(':d', $d);
+            $stFindUsage->execute();
+            $usageRow = $stFindUsage->fetch(PDO::FETCH_ASSOC);
+            if (is_array($usageRow) && isset($usageRow['id'])) {
+                $savedUsageRows[count($savedUsageRows)] = $usageRow;
+            }
         }
+    } else {
+        $savedUsageRows = array();
     }
 
     if ($isReused) {
-        flash_set('success', '기존 자재구입비에 사용일자를 추가했습니다.');
+        $baseMessage = '기존 자재구입비에 사용일자를 추가했습니다.';
     } else {
-        flash_set('success', '새 자재구입비를 등록했습니다.');
+        $baseMessage = '새 자재구입비를 등록했습니다.';
+    }
+
+    $uploadResult = cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, 'statement_file', $projectId, $materialId, $savedUsageRows, $ym);
+    if (isset($uploadResult['has_file']) && $uploadResult['has_file']) {
+        if (isset($uploadResult['ok']) && $uploadResult['ok']) {
+            flash_set('success', $baseMessage . ' 거래명세표를 첨부했습니다.');
+        } else {
+            flash_set('error', $baseMessage . ' 다만 거래명세표 첨부 실패: ' . (isset($uploadResult['message']) ? $uploadResult['message'] : '알 수 없는 오류'));
+        }
+    } else {
+        flash_set('success', $baseMessage);
     }
     header('Location: ' . $redirect);
     exit;

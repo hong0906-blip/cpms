@@ -159,7 +159,7 @@ class Auth
 
         $role = self::userRole();
         $dept = self::normalizeDept(self::userDepartment());
-        return ($role === 'executive' || $dept === '공사' || $dept === '공무');
+        return ($role === 'executive' || $dept === '공사' || $dept === '공무' || $dept === '관리');
     }
 
     // 마스터 전체 권한: 공사 저장/수정/삭제
@@ -249,10 +249,13 @@ class Auth
         $dept = trim((string)$dept);
         $map = array(
             '관리부' => '관리',
+            '관리팀' => '관리',
             '공무부' => '공무',
+            '공무팀' => '공무',
             '품질부' => '품질',
             '안전부' => '안전',
             '공사부' => '공사',
+            '공사팀' => '공사',
             '안전/보건' => '안전',
             '안전보건' => '안전',
         );

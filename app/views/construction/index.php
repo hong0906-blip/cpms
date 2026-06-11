@@ -19,11 +19,15 @@ use App\Core\Db;
 
 $role = Auth::userRole();
 $dept = Auth::userDepartment();
+$deptForConstructionView = trim((string)$dept);
+if ($deptForConstructionView === '관리부' || $deptForConstructionView === '관리팀') $deptForConstructionView = '관리';
+if ($deptForConstructionView === '공무부' || $deptForConstructionView === '공무팀') $deptForConstructionView = '공무';
+if ($deptForConstructionView === '공사부' || $deptForConstructionView === '공사팀') $deptForConstructionView = '공사';
 
-// 공사 메뉴 접근: 공사/공무 또는 임원
+// 공사 메뉴 접근: 공사/공무/관리 또는 임원
 $allowed = Auth::canAccessConstruction();
 if (!$allowed) {
-    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (공사/공무/임원 전용)</div>';
+    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (공사/공무/관리/임원 전용)</div>';
     return;
 }
 
@@ -34,7 +38,7 @@ if (!$pdo) {
 }
 
 $userEmail = Auth::userEmail();
-$canViewAllProjects = ($role === 'executive' || $dept === '공무');
+$canViewAllProjects = ($role === 'executive' || $deptForConstructionView === '공무' || $deptForConstructionView === '관리');
 
 // 직원 ID 조회(공사 "내 프로젝트" 필터에 필요)
 $employeeId = 0;

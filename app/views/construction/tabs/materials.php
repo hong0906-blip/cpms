@@ -11,6 +11,7 @@
 use App\Core\Db;
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../partials/project_month_options_helper.php';
+require_once __DIR__ . '/../partials/material_statement_helper.php';
 
 $canEditMaterials = isset($canEdit) ? (bool)$canEdit : false;
 
@@ -19,12 +20,14 @@ if (!$pdo) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">DB 연결 실패</div>';
     return;
 }
+$canDownloadMaterialStatements = cpms_material_statement_user_can_download($pdo, (int)$pid);
+$canViewMaterialInput = ($canEditMaterials || $canDownloadMaterialStatements);
 
 $materialsTab = isset($_GET['materials_tab']) ? trim((string)$_GET['materials_tab']) : 'monthly';
 if ($materialsTab !== 'monthly' && $materialsTab !== 'input') {
     $materialsTab = 'monthly';
 }
-if (!$canEditMaterials && $materialsTab === 'input') {
+if (!$canViewMaterialInput && $materialsTab === 'input') {
     $materialsTab = 'monthly';
 }
 
@@ -62,6 +65,8 @@ $itemMap = array();
 $usageRows = array();
 $usageByEquipment = array();
 $usageByDate = array();
+$statementFilesByUsage = array();
+$statementFilesByGroupDate = array();
 $allowedMaterialCategories = array('자재비'=>true, '구매품'=>true, '기타경비'=>true, '안전관리비'=>true);
 
 try {
@@ -110,6 +115,28 @@ try {
     $vendorPresets = array();    
 }
 
+$statementUsageIds = array();
+foreach ($usageRows as $ur) {
+    if (isset($ur['id']) && (int)$ur['id'] > 0) {
+        $statementUsageIds[count($statementUsageIds)] = (int)$ur['id'];
+    }
+}
+$statementFilesByUsage = cpms_material_statement_files_by_usage_ids($pdo, $statementUsageIds);
+foreach ($usageRows as $ur) {
+    $uid = isset($ur['id']) ? (int)$ur['id'] : 0;
+    if ($uid <= 0 || !isset($statementFilesByUsage[$uid])) continue;
+    $materialIdForStatement = isset($ur['material_id']) ? (int)$ur['material_id'] : 0;
+    if ($materialIdForStatement <= 0 || !isset($itemMap[$materialIdForStatement])) continue;
+    $groupKeyForStatement = cpms_material_master_group_key($itemMap[$materialIdForStatement]);
+    $useDateForStatement = isset($ur['use_date']) ? (string)$ur['use_date'] : '';
+    if ($groupKeyForStatement === '' || $useDateForStatement === '') continue;
+    if (!isset($statementFilesByGroupDate[$groupKeyForStatement])) $statementFilesByGroupDate[$groupKeyForStatement] = array();
+    if (!isset($statementFilesByGroupDate[$groupKeyForStatement][$useDateForStatement])) $statementFilesByGroupDate[$groupKeyForStatement][$useDateForStatement] = array();
+    foreach ($statementFilesByUsage[$uid] as $statementFileRow) {
+        $statementFilesByGroupDate[$groupKeyForStatement][$useDateForStatement][count($statementFilesByGroupDate[$groupKeyForStatement][$useDateForStatement])] = $statementFileRow;
+    }
+}
+
 $dateSlots = array();
 for ($d = 26; $d <= 31; $d++) {
     $valid = ($d <= $prevLastDay);
@@ -148,6 +175,35 @@ function material_category_label($category)
     $category = trim((string)$category);
     $allowed = array('자재비'=>true, '구매품'=>true, '기타경비'=>true, '안전관리비'=>true);
     return isset($allowed[$category]) ? $category : '자재비';
+}
+function material_statement_cell_files($map, $groupKey, $date)
+{
+    if (!is_array($map)) return array();
+    if (!isset($map[$groupKey]) || !is_array($map[$groupKey])) return array();
+    if (!isset($map[$groupKey][$date]) || !is_array($map[$groupKey][$date])) return array();
+    return $map[$groupKey][$date];
+}
+function material_statement_links_html($files, $label, $canDownload, $emptyLabel)
+{
+    if (!is_array($files) || count($files) <= 0) {
+        return '<span class="text-gray-400 text-xs">' . h($emptyLabel) . '</span>';
+    }
+    if (!$canDownload) {
+        return '<span class="text-gray-500 text-xs">첨부 있음</span>';
+    }
+    $html = '';
+    $idx = 0;
+    foreach ($files as $fileRow) {
+        $idx++;
+        $fileId = isset($fileRow['id']) ? (int)$fileRow['id'] : 0;
+        if ($fileId <= 0) continue;
+        $originalName = isset($fileRow['original_name']) ? (string)$fileRow['original_name'] : '';
+        $buttonLabel = (count($files) > 1) ? ($label . ' ' . $idx) : $label;
+        $url = base_url() . '/?r=construction/material_statement_download&id=' . $fileId;
+        $html .= '<a class="inline-flex items-center justify-center px-2 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100" href="' . h($url) . '" title="' . h($originalName) . '">' . h($buttonLabel) . '</a>';
+    }
+    if ($html === '') return '<span class="text-gray-400 text-xs">' . h($emptyLabel) . '</span>';
+    return $html;
 }
 
 $displayItems = array();
@@ -222,13 +278,14 @@ foreach ($usageRows as $ur) {
     <div class="mt-4 flex flex-wrap gap-2">
         <a href="<?php echo h($baseUrl . '&materials_tab=monthly&ym=' . urlencode($ym)); ?>"
            class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($materialsTab === 'monthly') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">월별자재구입비</a>
-        <?php if ($canEditMaterials): ?>
+        <?php if ($canViewMaterialInput): ?>
             <a href="<?php echo h($baseUrl . '&materials_tab=input&ym=' . urlencode($ym)); ?>"
                class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($materialsTab === 'input') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">자재구입비입력</a>
         <?php endif; ?>
     </div>
 
     <?php if ($materialsTab === 'input'): ?>
+        <?php if ($canEditMaterials): ?>
         <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="border border-gray-200 rounded-2xl p-4">
                 <!-- 자재 입력 모달→토글형 인라인 통일 -->
@@ -237,7 +294,7 @@ foreach ($usageRows as $ur) {
                 </div>
                 <!-- 자재구입비입력 토글 제거 -->
                 <!-- 자재구입비 입력폼 항상 표시 -->
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save" class="space-y-3" id="materialCreateForm">
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save" class="space-y-3" id="materialCreateForm" enctype="multipart/form-data">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="materials_tab" value="input">
@@ -281,6 +338,12 @@ foreach ($usageRows as $ur) {
                         <div id="materialCreateDateInputs"></div>
                     </div>
 
+                    <div class="border border-gray-200 rounded-xl p-3">
+                        <label class="text-sm font-bold text-gray-700">거래명세표 첨부</label>
+                        <input type="file" name="statement_file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" class="mt-2 block w-full text-sm">
+                        <div class="text-xs text-gray-500 mt-1">PDF, 이미지, 엑셀 파일 업로드 가능</div>
+                    </div>
+
                     <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">저장</button>
                 </form>                
             </div>
@@ -311,7 +374,7 @@ foreach ($usageRows as $ur) {
                                     <!-- 자재: 공급가액 표기 -->
                                     <td class="p-2 border text-right"><?php echo material_money($it['base_rate']); ?></td>
                                     <td class="p-2 border">
-                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_save" class="space-y-2" data-usage-form>
+                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_save" class="space-y-2" data-usage-form enctype="multipart/form-data">
                                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                                             <input type="hidden" name="material_id" value="<?php echo (int)$it['id']; ?>">
@@ -330,11 +393,16 @@ foreach ($usageRows as $ur) {
                                                         <div id="usageDateCurr_<?php echo (int)$it['id']; ?>"></div>
                                                     </div>
                                                 </div>
-                                                <div id="usageDateChips_<?php echo (int)$it['id']; ?>" class="mt-2 flex flex-wrap gap-1"></div>
-                                                <div id="usageDateInputs_<?php echo (int)$it['id']; ?>"></div>
-                                            </div>
-                                            <button type="submit" class="px-3 py-1 rounded-lg bg-gray-800 text-white">추가</button>
-                                        </form>
+                                                 <div id="usageDateChips_<?php echo (int)$it['id']; ?>" class="mt-2 flex flex-wrap gap-1"></div>
+                                                 <div id="usageDateInputs_<?php echo (int)$it['id']; ?>"></div>
+                                             </div>
+                                             <div class="border border-gray-200 rounded-lg p-2">
+                                                 <label class="text-xs font-bold text-gray-700">거래명세표 첨부</label>
+                                                 <input type="file" name="statement_file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" class="mt-1 block w-full text-xs">
+                                                 <div class="text-[11px] text-gray-500 mt-1">PDF, 이미지, 엑셀 파일 업로드 가능</div>
+                                             </div>
+                                             <button type="submit" class="px-3 py-1 rounded-lg bg-gray-800 text-white">추가</button>
+                                         </form>
                                     </td>
                                     <td class="p-2 border text-center">
                                         <!-- 등록 자재구입비 삭제 -->
@@ -353,6 +421,49 @@ foreach ($usageRows as $ur) {
                         </tbody>
                     </table>
                 </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <div class="mt-6 border border-gray-200 rounded-2xl p-4">
+            <div class="text-lg font-extrabold mb-3">입력내역 목록</div>
+            <div class="max-h-[420px] overflow-auto">
+                <table class="w-full text-sm border-collapse">
+                    <thead>
+                    <tr class="bg-gray-50">
+                        <th class="p-2 border text-left">사용일자</th>
+                        <th class="p-2 border text-left">구분</th>
+                        <th class="p-2 border text-left">업체명</th>
+                        <th class="p-2 border text-right">금액</th>
+                        <th class="p-2 border text-left">비고</th>
+                        <th class="p-2 border text-left">거래명세표</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <?php if (count($usageRows) === 0): ?>
+                        <tr><td colspan="6" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($usageRows as $ur): ?>
+                            <?php
+                            $usageIdForList = isset($ur['id']) ? (int)$ur['id'] : 0;
+                            $listFiles = ($usageIdForList > 0 && isset($statementFilesByUsage[$usageIdForList])) ? $statementFilesByUsage[$usageIdForList] : array();
+                            ?>
+                            <tr>
+                                <td class="p-2 border whitespace-nowrap"><?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?></td>
+                                <td class="p-2 border"><?php echo h(material_category_label(isset($ur['category']) ? $ur['category'] : '')); ?></td>
+                                <td class="p-2 border"><?php echo h(isset($ur['vendor_name']) ? $ur['vendor_name'] : ''); ?></td>
+                                <td class="p-2 border text-right"><?php echo material_money(isset($ur['amount']) ? $ur['amount'] : 0); ?></td>
+                                <td class="p-2 border"><?php echo h(isset($ur['memo']) ? $ur['memo'] : ''); ?></td>
+                                <td class="p-2 border">
+                                    <div class="flex flex-wrap gap-1">
+                                        <?php echo material_statement_links_html($listFiles, '거래명세표 다운로드', $canDownloadMaterialStatements, '첨부 없음'); ?>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
             </div>
         </div>
 
@@ -633,14 +744,19 @@ foreach ($usageRows as $ur) {
                                 if (!$slot['valid']) {
                                     echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
                                     continue;
-                                }
-                                $amt = isset($it['slot_amounts'][$slot['date']]) ? (float)$it['slot_amounts'][$slot['date']] : 0.0;
-                                if ($amt > 0) {
-                                    echo '<td class="border p-1 text-right">' . material_money($amt) . '</td>';
-                                } else {
-                                    echo '<td class="border p-1 text-center text-gray-300">-</td>';
-                                }
-                                ?>
+                                 }
+                                 $amt = isset($it['slot_amounts'][$slot['date']]) ? (float)$it['slot_amounts'][$slot['date']] : 0.0;
+                                 if ($amt > 0) {
+                                     $cellFiles = material_statement_cell_files($statementFilesByGroupDate, $it['group_key'], $slot['date']);
+                                     echo '<td class="border p-1 text-right"><div>' . material_money($amt) . '</div>';
+                                     if (count($cellFiles) > 0) {
+                                         echo '<div class="mt-1 flex flex-col items-end gap-1">' . material_statement_links_html($cellFiles, '📎 거래명세표', $canDownloadMaterialStatements, '') . '</div>';
+                                     }
+                                     echo '</td>';
+                                 } else {
+                                     echo '<td class="border p-1 text-center text-gray-300">-</td>';
+                                 }
+                                 ?>
                             <?php endforeach; ?>
 
                             <td class="border p-1 text-center" rowspan="2"><?php echo (int)$days; ?></td>
@@ -653,14 +769,19 @@ foreach ($usageRows as $ur) {
                                 if (!$slot['valid']) {
                                     echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
                                     continue;
-                                }
-                                $amt = isset($it['slot_amounts'][$slot['date']]) ? (float)$it['slot_amounts'][$slot['date']] : 0.0;
-                                if ($amt > 0) {
-                                    echo '<td class="border p-1 text-right">' . material_money($amt) . '</td>';
-                                } else {
-                                    echo '<td class="border p-1 text-center text-gray-300">-</td>';
-                                }
-                                ?>
+                                 }
+                                 $amt = isset($it['slot_amounts'][$slot['date']]) ? (float)$it['slot_amounts'][$slot['date']] : 0.0;
+                                 if ($amt > 0) {
+                                     $cellFiles = material_statement_cell_files($statementFilesByGroupDate, $it['group_key'], $slot['date']);
+                                     echo '<td class="border p-1 text-right"><div>' . material_money($amt) . '</div>';
+                                     if (count($cellFiles) > 0) {
+                                         echo '<div class="mt-1 flex flex-col items-end gap-1">' . material_statement_links_html($cellFiles, '📎 거래명세표', $canDownloadMaterialStatements, '') . '</div>';
+                                     }
+                                     echo '</td>';
+                                 } else {
+                                     echo '<td class="border p-1 text-center text-gray-300">-</td>';
+                                 }
+                                 ?>
                             <?php endforeach; ?>
                         </tr>
                         <?php

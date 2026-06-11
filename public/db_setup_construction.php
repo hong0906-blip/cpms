@@ -8,6 +8,7 @@ require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/views/construction/partials/schedule_auto_progress_helper.php';
 require_once __DIR__ . '/../app/views/construction/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../app/views/construction/partials/master_dedupe_helper.php';
+require_once __DIR__ . '/../app/views/construction/partials/material_statement_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -329,8 +330,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     UNIQUE KEY uniq_material_day (material_id, use_date),
                     KEY idx_project_date (project_id, use_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+                cpms_material_statement_ensure_schema($pdo);
                 $uniqueMsg = ensure_usage_unique_index2($pdo, 'cpms_material_usage', 'uniq_material_day', 'uniq_project_material_day', 'material_id');
-                $msg = '자재구입비 테이블 생성/확인 완료. 구분은 자재비/구매품/기타경비/안전관리비만 사용합니다. / ' . $uniqueMsg;
+                $msg = '자재구입비/거래명세표 파일 테이블 생성/확인 완료. 구분은 자재비/구매품/기타경비/안전관리비만 사용합니다. / ' . $uniqueMsg;
                 } else if ($action === 'material_vendor_presets') {
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_material_vendor_presets (
                     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -359,7 +361,7 @@ $materialDuplicateScan = cpms_material_duplicate_groups($pdo);
 $equipmentDuplicateScan = cpms_equipment_duplicate_groups($pdo);
 $checks = array();
 if ($pdo) {
-    $tableChecks = array('cpms_schedule_progress', 'cpms_schedule_task_item_progress', 'cpms_equipment_gongsu_overrides');
+    $tableChecks = array('cpms_schedule_progress', 'cpms_schedule_task_item_progress', 'cpms_equipment_gongsu_overrides', 'cpms_material_statement_files');
     foreach ($tableChecks as $tbl) {
         add_db_check($checks, 'TABLE', $tbl, table_exists2($pdo, $tbl) ? '성공' : '주의', table_exists2($pdo, $tbl) ? '존재' : '아직 생성되지 않음');
     }
@@ -373,7 +375,12 @@ if ($pdo) {
         array('cpms_equipment_usage', 'base_rate_snapshot'),
         array('cpms_equipment_usage', 'amount'),
         array('cpms_equipment_usage', 'is_manual_unit'),
-        array('cpms_material_items', 'category')
+        array('cpms_material_items', 'category'),
+        array('cpms_material_statement_files', 'project_id'),
+        array('cpms_material_statement_files', 'material_id'),
+        array('cpms_material_statement_files', 'material_usage_id'),
+        array('cpms_material_statement_files', 'stored_path'),
+        array('cpms_material_statement_files', 'is_deleted')
     );
     foreach ($columnChecks as $cc) {
         $target = $cc[0] . '.' . $cc[1];
@@ -381,6 +388,7 @@ if ($pdo) {
     }
     add_db_check($checks, 'UNIQUE', 'cpms_material_usage(project_id, material_id, use_date)', has_exact_index2($pdo, 'cpms_material_usage', array('project_id', 'material_id', 'use_date')) ? '성공' : '주의', has_exact_index2($pdo, 'cpms_material_usage', array('project_id', 'material_id', 'use_date')) ? '복합 UNIQUE 확인 완료' : '자재구입비 테이블 생성/확인 버튼 재실행 또는 중복 정리 필요');
     add_db_check($checks, 'UNIQUE', 'cpms_equipment_usage(project_id, equipment_id, use_date)', has_exact_index2($pdo, 'cpms_equipment_usage', array('project_id', 'equipment_id', 'use_date')) ? '성공' : '주의', has_exact_index2($pdo, 'cpms_equipment_usage', array('project_id', 'equipment_id', 'use_date')) ? '복합 UNIQUE 확인 완료' : '장비 입력 테이블 생성/확인 버튼 재실행 또는 중복 정리 필요');
+    add_db_check($checks, 'INDEX', 'cpms_material_statement_files(material_usage_id)', cpms_material_statement_index_exists($pdo, 'idx_material_usage_id') ? '성공' : '주의', cpms_material_statement_index_exists($pdo, 'idx_material_usage_id') ? '존재' : '자재구입비 테이블 생성/확인 버튼 실행 필요');
     add_db_check($checks, 'DEDUPE', '자재구입비 중복 업체 점검', '확인', '중복 그룹 ' . (int)$materialDuplicateScan['summary']['group_count'] . '개 / 자동 병합 가능 ' . (int)$materialDuplicateScan['summary']['mergeable_count'] . '개 / 충돌 ' . (int)$materialDuplicateScan['summary']['conflict_count'] . '개');
     add_db_check($checks, 'DEDUPE', '장비 중복 그룹 점검', '확인', '중복 그룹 ' . (int)$equipmentDuplicateScan['summary']['group_count'] . '개 / 자동 병합 가능 ' . (int)$equipmentDuplicateScan['summary']['mergeable_count'] . '개 / 충돌 ' . (int)$equipmentDuplicateScan['summary']['conflict_count'] . '개');
 }
