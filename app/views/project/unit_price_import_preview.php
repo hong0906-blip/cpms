@@ -119,6 +119,9 @@ for ($r = $dataStart; $r < count($rows); $r++) {
     if ($allEmpty) { $skipped++; continue; }
 
     $item = isset($fieldToCol['item_name']) ? trim((string)@$row[$fieldToCol['item_name']]) : '';
+    $tradeGroup = isset($fieldToCol['trade_group']) ? trim((string)@$row[$fieldToCol['trade_group']]) : '';
+    $subTrade = isset($fieldToCol['sub_trade']) ? trim((string)@$row[$fieldToCol['sub_trade']]) : '';
+    $locationName = isset($fieldToCol['location_name']) ? trim((string)@$row[$fieldToCol['location_name']]) : '';
     $spec = isset($fieldToCol['spec']) ? trim((string)@$row[$fieldToCol['spec']]) : '';
     $unit = isset($fieldToCol['unit']) ? trim((string)@$row[$fieldToCol['unit']]) : '';
     $remark = isset($fieldToCol['remark']) ? trim((string)@$row[$fieldToCol['remark']]) : '';
@@ -133,6 +136,7 @@ for ($r = $dataStart; $r < count($rows); $r++) {
 
     $isSafety = (mb_strpos($item, '안전', 0, 'UTF-8') !== false || mb_strpos($spec, '안전', 0, 'UTF-8') !== false) ? 1 : 0;
     $parsed[] = array(
+        'trade_group' => $tradeGroup, 'sub_trade' => $subTrade, 'location_name' => $locationName,
         'item_name' => $item, 'spec' => $spec, 'unit' => $unit, 'qty' => $qty,
         'unit_price' => $up, 'labor_unit_price' => $lup, 'material_unit_price' => $mup, 'safety_unit_price' => $sup,
         'is_safety' => $isSafety, 'remark' => $remark,
@@ -157,7 +161,7 @@ function cpms_format_price1($v) { if ($v === null || $v === '') return ''; if (!
 <a class="btn btn-ghost" href="<?php echo hh(base_url()); ?>/?r=project/detail&id=<?php echo (int)$projectId; ?>">← 돌아가기</a>
 <form method="post" action="<?php echo hh(base_url()); ?>/?r=project/unit_price_import_apply"><input type="hidden" name="_csrf" value="<?php echo hh(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>"><input type="hidden" name="token" value="<?php echo hh($importToken); ?>"><button class="btn btn-primary" type="submit">적용(저장)</button></form>
 </div>
-<table><thead><tr><th>품명</th><th>규격</th><th>단위</th><th class="num">수량</th><th class="num">자재단가</th><th class="num">노무단가</th><th class="num">안전단가</th><th class="num">합계단가</th><th>안전항목</th><th>비고</th></tr></thead><tbody>
-<?php foreach ($parsed as $r): ?><tr><td><?php echo hh($r['item_name']); ?></td><td><?php echo hh($r['spec']); ?></td><td><?php echo hh($r['unit']); ?></td><td class="num"><?php echo cpms_format_qty0($r['qty']); ?></td><td class="num"><?php echo cpms_format_price1($r['material_unit_price']); ?></td><td class="num"><?php echo cpms_format_price1($r['labor_unit_price']); ?></td><td class="num"><?php echo cpms_format_price1($r['safety_unit_price']); ?></td><td class="num"><?php echo cpms_format_price1($r['unit_price']); ?></td><td><?php echo ((int)$r['is_safety']===1)?'Y':''; ?></td><td><?php echo hh($r['remark']); ?></td></tr><?php endforeach; ?>
+<table><thead><tr><th>공종그룹</th><th>세부공종</th><th>위치</th><th>품명</th><th>규격</th><th>단위</th><th class="num">수량</th><th class="num">자재단가</th><th class="num">노무단가</th><th class="num">안전단가</th><th class="num">합계단가</th><th>안전항목</th><th>비고</th></tr></thead><tbody>
+<?php foreach ($parsed as $r): ?><tr><td><?php echo hh(isset($r['trade_group']) ? $r['trade_group'] : ''); ?></td><td><?php echo hh(isset($r['sub_trade']) ? $r['sub_trade'] : ''); ?></td><td><?php echo hh(isset($r['location_name']) ? $r['location_name'] : ''); ?></td><td><?php echo hh($r['item_name']); ?></td><td><?php echo hh($r['spec']); ?></td><td><?php echo hh($r['unit']); ?></td><td class="num"><?php echo cpms_format_qty0($r['qty']); ?></td><td class="num"><?php echo cpms_format_price1($r['material_unit_price']); ?></td><td class="num"><?php echo cpms_format_price1($r['labor_unit_price']); ?></td><td class="num"><?php echo cpms_format_price1($r['safety_unit_price']); ?></td><td class="num"><?php echo cpms_format_price1($r['unit_price']); ?></td><td><?php echo ((int)$r['is_safety']===1)?'Y':''; ?></td><td><?php echo hh($r['remark']); ?></td></tr><?php endforeach; ?>
 </tbody></table>
 </div></body></html>

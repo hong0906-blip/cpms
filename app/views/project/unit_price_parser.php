@@ -5,6 +5,9 @@ function cpms_project_unit_price_lang($key) {
     if ($map === null) {
         $map = array(
             'item_name' => json_decode('"\uD488\uBA85"'),
+            'trade_group' => json_decode('"\uACF5\uC885\uADF8\uB8F9"'),
+            'sub_trade' => json_decode('"\uC138\uBD80\uACF5\uC885"'),
+            'location_name' => json_decode('"\uC704\uCE58"'),
             'spec' => json_decode('"\uADDC\uACA9"'),
             'unit' => json_decode('"\uB2E8\uC704"'),
             'qty' => json_decode('"\uC218\uB7C9"'),
@@ -304,7 +307,22 @@ function cpms_project_unit_price_header_exact($normalizedValue, $keyword) {
 
 if (!function_exists('cpms_project_unit_price_item_name_keys')) {
 function cpms_project_unit_price_item_name_keys() {
-    return array(cpms_project_unit_price_lang('item_name'), '공종명', '공 종 명', '공종', '품목명', '품목', '명칭');
+    return array(cpms_project_unit_price_lang('item_name'), '품 명', '자재명', '자재', '품목명', '품목', '명칭', '공종명', '공 종 명');
+}}
+
+if (!function_exists('cpms_project_unit_price_trade_group_keys')) {
+function cpms_project_unit_price_trade_group_keys() {
+    return array(cpms_project_unit_price_lang('trade_group'), '공종 그룹', '대공종', '공종명', '공 종 명', '공종');
+}}
+
+if (!function_exists('cpms_project_unit_price_sub_trade_keys')) {
+function cpms_project_unit_price_sub_trade_keys() {
+    return array(cpms_project_unit_price_lang('sub_trade'), '세부 공종', '소공종', '세부');
+}}
+
+if (!function_exists('cpms_project_unit_price_location_keys')) {
+function cpms_project_unit_price_location_keys() {
+    return array(cpms_project_unit_price_lang('location_name'), '시공위치', '작업위치', '구역', '층', '실명');
 }}
 
 if (!function_exists('cpms_project_unit_price_spec_keys')) {
@@ -330,6 +348,9 @@ function cpms_project_unit_price_remark_keys() {
 if (!function_exists('cpms_project_unit_price_find_positions')) {
 function cpms_project_unit_price_find_positions($matrix, $maxRow, $maxCol, $headerLimit) {
     $positions = array(
+        'trade_group' => array(),
+        'sub_trade' => array(),
+        'location_name' => array(),
         'item_name' => array(),
         'spec' => array(),
         'unit' => array(),
@@ -344,6 +365,9 @@ function cpms_project_unit_price_find_positions($matrix, $maxRow, $maxCol, $head
             $value = isset($matrix[$r][$c]) ? $matrix[$r][$c] : '';
             $norm = cpms_project_unit_price_label_normalize($value);
             if ($norm !== '') {
+                if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_trade_group_keys(), false)) array_push($positions['trade_group'], array('row'=>$r,'col'=>$c));
+                if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_sub_trade_keys(), false)) array_push($positions['sub_trade'], array('row'=>$r,'col'=>$c));
+                if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_location_keys(), false)) array_push($positions['location_name'], array('row'=>$r,'col'=>$c));
                 if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_item_name_keys(), false)) array_push($positions['item_name'], array('row'=>$r,'col'=>$c));
                 if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_spec_keys(), false)) array_push($positions['spec'], array('row'=>$r,'col'=>$c));
                 if (cpms_project_unit_price_header_match_any($norm, cpms_project_unit_price_unit_keys(), false)) array_push($positions['unit'], array('row'=>$r,'col'=>$c));
@@ -774,7 +798,7 @@ function cpms_project_unit_price_detect_columns($matrix, $maxRow, $maxCol, $shee
         $fieldRows['amount'] = (int)$unitGroup['detail_header_row'];
     }
 
-    foreach (array('item_name', 'spec', 'unit', 'qty', 'remark') as $field) {
+    foreach (array('trade_group', 'sub_trade', 'location_name', 'item_name', 'spec', 'unit', 'qty', 'remark') as $field) {
         $picked = cpms_project_unit_price_pick_nearest_header($positions[$field], (int)$unitGroup['detail_header_row']);
         if ($picked !== null) {
             $columns[$field] = (int)$picked['col'];
@@ -865,6 +889,9 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
     $importOrder = 0;
     $rowNumber = $dataStartRow;
     while ($rowNumber <= $maxRow) {
+        $tradeGroup = isset($columns['trade_group']) && isset($matrix[$rowNumber][$columns['trade_group']]) ? cpms_project_unit_price_text_normalize($matrix[$rowNumber][$columns['trade_group']]) : '';
+        $subTrade = isset($columns['sub_trade']) && isset($matrix[$rowNumber][$columns['sub_trade']]) ? cpms_project_unit_price_text_normalize($matrix[$rowNumber][$columns['sub_trade']]) : '';
+        $locationName = isset($columns['location_name']) && isset($matrix[$rowNumber][$columns['location_name']]) ? cpms_project_unit_price_text_normalize($matrix[$rowNumber][$columns['location_name']]) : '';
         $itemName = isset($columns['item_name']) && isset($matrix[$rowNumber][$columns['item_name']]) ? cpms_project_unit_price_text_normalize($matrix[$rowNumber][$columns['item_name']]) : '';
         $spec = isset($columns['spec']) && isset($matrix[$rowNumber][$columns['spec']]) ? cpms_project_unit_price_text_normalize($matrix[$rowNumber][$columns['spec']]) : '';
         $unit = isset($columns['unit']) && isset($matrix[$rowNumber][$columns['unit']]) ? cpms_project_unit_price_text_normalize($matrix[$rowNumber][$columns['unit']]) : '';
@@ -930,6 +957,9 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
 
         $importOrder++;
         array_push($rows, array(
+            'trade_group' => $tradeGroup,
+            'sub_trade' => $subTrade,
+            'location_name' => $locationName,
             'item_name' => $itemName,
             'spec' => $spec,
             'unit' => $unit,

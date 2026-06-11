@@ -293,6 +293,19 @@ if ($route === 'project/contract_download') {
     exit;
 }
 
+if ($route === 'project/additional_work_save') {
+    require_once __DIR__ . '/../app/views/project/additional_work_save.php';
+    exit;
+}
+if ($route === 'project/progress_save') {
+    require_once __DIR__ . '/../app/views/project/progress_save.php';
+    exit;
+}
+if ($route === 'project/progress_download') {
+    require_once __DIR__ . '/../app/views/project/progress_download.php';
+    exit;
+}
+
 if ($route === 'project/unit_price_add') {
     require_once __DIR__ . '/../app/views/project/unit_price_add.php';
     exit;

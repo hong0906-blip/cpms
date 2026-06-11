@@ -124,13 +124,68 @@ if ($editMode) {
 
 $unitPrices = array();
 try {
-    $stUnits = $pdo->prepare("SELECT * FROM cpms_project_unit_prices WHERE project_id = :pid ORDER BY id ASC");
+    $unitSql = "SELECT * FROM cpms_project_unit_prices WHERE project_id = :pid";
+    if (cpms_contract_change_column_exists($pdo, 'cpms_project_unit_prices', 'is_active')) {
+        $unitSql .= " AND (is_active = 1 OR is_active IS NULL)";
+    }
+    if (cpms_contract_change_column_exists($pdo, 'cpms_project_unit_prices', 'is_current')) {
+        $unitSql .= " AND (is_current = 1 OR is_current IS NULL)";
+    }
+    $unitSql .= cpms_contract_change_column_exists($pdo, 'cpms_project_unit_prices', 'import_order') ? " ORDER BY COALESCE(import_order, id) ASC, id ASC" : " ORDER BY id ASC";
+    $stUnits = $pdo->prepare($unitSql);
     $stUnits->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $stUnits->execute();
     $unitPrices = $stUnits->fetchAll(PDO::FETCH_ASSOC);
     if (!is_array($unitPrices)) $unitPrices = array();
 } catch (Exception $e) {
     $unitPrices = array();
+}
+
+$contractVersions = array();
+try {
+    if (cpms_contract_change_table_exists($pdo, 'cpms_contract_versions')) {
+        $stVersions = $pdo->prepare("SELECT * FROM cpms_contract_versions WHERE project_id = :pid ORDER BY is_current DESC, id DESC");
+        $stVersions->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stVersions->execute();
+        $tmpVersions = $stVersions->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($tmpVersions)) $contractVersions = $tmpVersions;
+    }
+} catch (Exception $e) {
+    $contractVersions = array();
+}
+
+$additionalWorks = array();
+try {
+    if (cpms_contract_change_table_exists($pdo, 'cpms_contract_additional_works')) {
+        $stAdditional = $pdo->prepare("SELECT * FROM cpms_contract_additional_works WHERE project_id = :pid ORDER BY id DESC LIMIT 30");
+        $stAdditional->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stAdditional->execute();
+        $tmpAdditional = $stAdditional->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($tmpAdditional)) $additionalWorks = $tmpAdditional;
+    }
+} catch (Exception $e) {
+    $additionalWorks = array();
+}
+
+$progressBillings = array();
+$progressRecognizedTotal = 0.0;
+$progressRequestedTotal = 0.0;
+try {
+    if (cpms_contract_change_table_exists($pdo, 'cpms_progress_billings')) {
+        $stProgress = $pdo->prepare("SELECT * FROM cpms_progress_billings WHERE project_id = :pid ORDER BY progress_date ASC, id ASC");
+        $stProgress->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stProgress->execute();
+        $tmpProgress = $stProgress->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($tmpProgress)) {
+            $progressBillings = $tmpProgress;
+            foreach ($progressBillings as $progressRow) {
+                $progressRecognizedTotal += isset($progressRow['recognized_amount']) ? (float)$progressRow['recognized_amount'] : 0.0;
+                $progressRequestedTotal += isset($progressRow['requested_amount']) ? (float)$progressRow['requested_amount'] : 0.0;
+            }
+        }
+    }
+} catch (Exception $e) {
+    $progressBillings = array();
 }
 
 $contractChangeLogs = array();
@@ -290,7 +345,7 @@ if (is_file($contractMetaFile)) {
 </div>
 <?php endif; ?>
 
-<div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-6">
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
             <div>
@@ -331,6 +386,24 @@ if (is_file($contractMetaFile)) {
 
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-100">
+            <div class="font-extrabold text-gray-900">당초 내역서 업로드</div>
+            <div class="text-xs text-gray-500 mt-1">CPMS 표준 양식 xlsx만 등록합니다. 현재 적용 내역서가 있으면 덮어쓰지 않습니다.</div>
+        </div>
+        <div class="p-6">
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/contract_upload" enctype="multipart/form-data" class="space-y-3">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
+                <input type="hidden" name="upload_mode" value="unit_price_original">
+                <input type="file" name="contract_file" accept=".xlsx" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" required>
+                <button type="submit" class="px-6 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow">
+                    당초 내역서 저장
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100">
             <div class="font-extrabold text-gray-900">변경 단가내역서 업로드</div>
             <div class="text-xs text-gray-500 mt-1">변경된 엑셀 단가내역서를 업로드하면 공무 단가표와 공사 작업 탭의 내역서 항목이 갱신됩니다. 기존 공정표 연결을 유지하기 위해 기존 단가 ID는 최대한 유지합니다.</div>
         </div>
@@ -345,6 +418,150 @@ if (is_file($contractMetaFile)) {
                 </button>
             </form>
         </div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-6">
+    <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div>
+                <div class="font-extrabold text-gray-900">내역서 버전 이력</div>
+                <div class="text-xs text-gray-500 mt-1">당초/변경계약/추가공사 파일을 덮어쓰지 않고 보존합니다.</div>
+            </div>
+            <div class="text-xs text-gray-500">총 <?php echo count($contractVersions); ?>건</div>
+        </div>
+        <div class="p-6">
+            <?php if (count($contractVersions) === 0): ?>
+                <div class="text-sm text-gray-600">등록된 내역서 버전이 없습니다.</div>
+            <?php else: ?>
+                <div class="overflow-x-auto rounded-2xl border border-gray-200">
+                    <table class="min-w-full text-sm">
+                        <thead class="bg-gray-50 text-gray-600">
+                        <tr>
+                            <th class="px-3 py-2 text-left font-extrabold">구분</th>
+                            <th class="px-3 py-2 text-left font-extrabold">상태</th>
+                            <th class="px-3 py-2 text-left font-extrabold">파일</th>
+                            <th class="px-3 py-2 text-left font-extrabold">적용일</th>
+                        </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                        <?php foreach ($contractVersions as $versionRow): ?>
+                            <tr>
+                                <td class="px-3 py-2 font-bold text-gray-900"><?php echo h(isset($versionRow['title']) ? $versionRow['title'] : ''); ?></td>
+                                <td class="px-3 py-2">
+                                    <?php if (isset($versionRow['is_current']) && (int)$versionRow['is_current'] === 1): ?>
+                                        <span class="px-2 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-extrabold">현재 적용</span>
+                                    <?php else: ?>
+                                        <span class="px-2 py-1 rounded-xl bg-gray-50 text-gray-600 border border-gray-100 text-xs font-bold">보존</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="px-3 py-2 text-gray-700"><?php echo h(isset($versionRow['original_name']) ? $versionRow['original_name'] : ''); ?></td>
+                                <td class="px-3 py-2 text-gray-600"><?php echo h(isset($versionRow['applied_at']) ? $versionRow['applied_at'] : ''); ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
+        <div class="px-6 py-4 border-b border-gray-100">
+            <div class="font-extrabold text-gray-900">추가공사 등록</div>
+            <div class="text-xs text-gray-500 mt-1">승인 상태와 관련 품의/요청을 별도로 관리합니다.</div>
+        </div>
+        <div class="p-6">
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/additional_work_save" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
+                <input name="title" required maxlength="255" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="추가공사명">
+                <input type="date" name="occurred_on" class="px-4 py-3 rounded-2xl border border-gray-200">
+                <input name="request_ref" maxlength="255" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="관련 품의/요청">
+                <select name="status" class="px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                    <?php foreach (array('승인 전','승인 완료','계약 반영 완료','보류','반려') as $statusOption): ?>
+                        <option value="<?php echo h($statusOption); ?>"><?php echo h($statusOption); ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <input type="file" name="attachment_file" accept=".pdf,.hwp,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" class="md:col-span-2 px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                <textarea name="remark" rows="2" class="md:col-span-2 px-4 py-3 rounded-2xl border border-gray-200" placeholder="비고"></textarea>
+                <button type="submit" class="md:col-span-2 px-6 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">
+                    추가공사 등록
+                </button>
+            </form>
+
+            <?php if (count($additionalWorks) > 0): ?>
+                <div class="mt-5 space-y-2">
+                    <?php foreach ($additionalWorks as $additionalRow): ?>
+                        <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm">
+                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                <div class="font-extrabold text-gray-900"><?php echo h(isset($additionalRow['title']) ? $additionalRow['title'] : ''); ?></div>
+                                <span class="px-2 py-1 rounded-xl bg-amber-50 text-amber-800 border border-amber-100 text-xs font-extrabold"><?php echo h(isset($additionalRow['status']) ? $additionalRow['status'] : ''); ?></span>
+                            </div>
+                            <div class="mt-1 text-xs text-gray-500"><?php echo h(isset($additionalRow['occurred_on']) ? $additionalRow['occurred_on'] : ''); ?> <?php echo h(isset($additionalRow['request_ref']) ? $additionalRow['request_ref'] : ''); ?></div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
+<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden mb-6">
+    <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div>
+            <div class="font-extrabold text-gray-900">기성관리</div>
+            <div class="text-xs text-gray-500 mt-1">회차별 청구금액/인정금액을 보존하고 확정매출로 집계합니다.</div>
+        </div>
+        <div class="text-right text-sm">
+            <div class="font-extrabold text-gray-900">누적 인정금액 <?php echo cpms_format_amount0($progressRecognizedTotal); ?></div>
+            <div class="text-xs text-gray-500">누적 청구금액 <?php echo cpms_format_amount0($progressRequestedTotal); ?></div>
+        </div>
+    </div>
+    <div class="p-6">
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=project/progress_save" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-6 gap-3">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
+            <input name="round_label" required maxlength="100" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="1회 기성">
+            <input type="date" name="progress_date" class="px-4 py-3 rounded-2xl border border-gray-200">
+            <input name="requested_amount" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="청구금액">
+            <input name="recognized_amount" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="인정금액">
+            <input type="file" name="attachment_file" accept=".pdf,.hwp,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" class="md:col-span-2 px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+            <textarea name="remark" rows="2" class="md:col-span-5 px-4 py-3 rounded-2xl border border-gray-200" placeholder="비고"></textarea>
+            <button type="submit" class="px-6 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">등록</button>
+        </form>
+        <?php if (count($progressBillings) > 0): ?>
+            <div class="mt-5 overflow-x-auto rounded-2xl border border-gray-200">
+                <table class="min-w-full text-sm">
+                    <thead class="bg-gray-50 text-gray-600">
+                    <tr>
+                        <th class="px-3 py-2 text-left font-extrabold">회차</th>
+                        <th class="px-3 py-2 text-left font-extrabold">기성일자</th>
+                        <th class="px-3 py-2 text-right font-extrabold">청구금액</th>
+                        <th class="px-3 py-2 text-right font-extrabold">인정금액</th>
+                        <th class="px-3 py-2 text-left font-extrabold">첨부</th>
+                        <th class="px-3 py-2 text-left font-extrabold">비고</th>
+                    </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100">
+                    <?php foreach ($progressBillings as $progressRow): ?>
+                        <tr>
+                            <td class="px-3 py-2 font-bold"><?php echo h(isset($progressRow['round_label']) ? $progressRow['round_label'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo h(isset($progressRow['progress_date']) ? $progressRow['progress_date'] : ''); ?></td>
+                            <td class="px-3 py-2 text-right"><?php echo cpms_format_amount0(isset($progressRow['requested_amount']) ? $progressRow['requested_amount'] : 0); ?></td>
+                            <td class="px-3 py-2 text-right"><?php echo cpms_format_amount0(isset($progressRow['recognized_amount']) ? $progressRow['recognized_amount'] : 0); ?></td>
+                            <td class="px-3 py-2">
+                                <?php if (isset($progressRow['attachment_stored_path']) && trim((string)$progressRow['attachment_stored_path']) !== ''): ?>
+                                    <a class="text-blue-700 font-bold" href="<?php echo h(base_url()); ?>/?r=project/progress_download&id=<?php echo (int)$progressRow['id']; ?>">다운로드</a>
+                                <?php endif; ?>
+                            </td>
+                            <td class="px-3 py-2"><?php echo h(isset($progressRow['remark']) ? $progressRow['remark'] : ''); ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -444,6 +661,9 @@ if (is_file($contractMetaFile)) {
                 <table class="min-w-full text-sm">
                     <thead class="bg-gray-50 border-b border-gray-100">
                     <tr class="text-left text-gray-600">
+                        <th class="px-3 py-2 font-extrabold">공종그룹</th>
+                        <th class="px-3 py-2 font-extrabold">세부공종</th>
+                        <th class="px-3 py-2 font-extrabold">위치</th>
                         <th class="px-3 py-2 font-extrabold">품명</th>
                         <th class="px-3 py-2 font-extrabold">규격</th>
                         <th class="px-3 py-2 font-extrabold">단위</th>
@@ -461,6 +681,9 @@ if (is_file($contractMetaFile)) {
                     <tbody class="divide-y divide-gray-100">
                     <?php foreach ($unitPrices as $row): ?>
                         <tr>
+                            <td class="px-3 py-2"><?php echo h(isset($row['trade_group']) ? (string)$row['trade_group'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo h(isset($row['sub_trade']) ? (string)$row['sub_trade'] : ''); ?></td>
+                            <td class="px-3 py-2"><?php echo h(isset($row['location_name']) ? (string)$row['location_name'] : ''); ?></td>
                             <td class="px-3 py-2"><?php echo h((string)$row['item_name']); ?></td>
                             <td class="px-3 py-2"><?php echo h((string)$row['spec']); ?></td>
                             <td class="px-3 py-2"><?php echo h((string)$row['unit']); ?></td>

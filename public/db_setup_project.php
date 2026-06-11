@@ -83,6 +83,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_project_unit_prices (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     project_id INT NOT NULL,
+                    contract_version_id INT NULL,
+                    version_type VARCHAR(30) NOT NULL DEFAULT 'current',
+                    version_no INT NULL,
+                    additional_work_id INT NULL,
+                    trade_group VARCHAR(255) DEFAULT '',
+                    sub_trade VARCHAR(255) DEFAULT '',
+                    location_name VARCHAR(255) DEFAULT '',
                     item_name VARCHAR(255) NOT NULL,
                     spec VARCHAR(255) DEFAULT '',
                     unit VARCHAR(50) DEFAULT '',
@@ -98,9 +105,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     is_safety TINYINT(1) NOT NULL DEFAULT 0,
                     remark VARCHAR(255) DEFAULT '',
                     is_active TINYINT(1) NOT NULL DEFAULT 1,
+                    is_current TINYINT(1) NOT NULL DEFAULT 1,
                     updated_at DATETIME NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                    KEY idx_project (project_id)
+                    KEY idx_project (project_id),
+                    KEY idx_project_current (project_id, is_current),
+                    KEY idx_contract_version (contract_version_id),
+                    KEY idx_additional_work (additional_work_id)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_contract_versions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    version_type VARCHAR(30) NOT NULL,
+                    version_no INT NOT NULL DEFAULT 0,
+                    title VARCHAR(255) NOT NULL,
+                    status VARCHAR(30) NOT NULL DEFAULT 'draft',
+                    is_current TINYINT(1) NOT NULL DEFAULT 0,
+                    original_name VARCHAR(255) DEFAULT '',
+                    stored_name VARCHAR(255) DEFAULT '',
+                    stored_path VARCHAR(500) DEFAULT '',
+                    uploaded_by INT NULL,
+                    uploaded_at DATETIME NULL,
+                    applied_at DATETIME NULL,
+                    change_summary TEXT NULL,
+                    KEY idx_project (project_id),
+                    KEY idx_project_current (project_id, is_current),
+                    KEY idx_project_type_no (project_id, version_type, version_no)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_contract_additional_works (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    occurred_on DATE NULL,
+                    request_ref VARCHAR(255) DEFAULT '',
+                    remark TEXT NULL,
+                    status VARCHAR(30) NOT NULL DEFAULT '승인 전',
+                    attachment_original_name VARCHAR(255) DEFAULT '',
+                    attachment_stored_name VARCHAR(255) DEFAULT '',
+                    attachment_stored_path VARCHAR(500) DEFAULT '',
+                    created_by INT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NULL,
+                    reflected_version_id INT NULL,
+                    KEY idx_project (project_id),
+                    KEY idx_status (status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_progress_billings (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    round_label VARCHAR(100) NOT NULL,
+                    progress_date DATE NULL,
+                    requested_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    recognized_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    attachment_original_name VARCHAR(255) DEFAULT '',
+                    attachment_stored_name VARCHAR(255) DEFAULT '',
+                    attachment_stored_path VARCHAR(500) DEFAULT '',
+                    remark TEXT NULL,
+                    created_by INT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NULL,
+                    KEY idx_project (project_id),
+                    KEY idx_progress_date (project_id, progress_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
                 execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_unit_price_header_map (
@@ -137,6 +205,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else if ($action === 'update_unit_price_columns') {
 
                 $added = array();
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'contract_version_id')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN contract_version_id INT NULL AFTER project_id");
+                    array_push($added, 'contract_version_id');
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'version_type')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN version_type VARCHAR(30) NOT NULL DEFAULT 'current' AFTER contract_version_id");
+                    array_push($added, 'version_type');
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'version_no')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN version_no INT NULL AFTER version_type");
+                    array_push($added, 'version_no');
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'additional_work_id')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN additional_work_id INT NULL AFTER version_no");
+                    array_push($added, 'additional_work_id');
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'trade_group')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN trade_group VARCHAR(255) DEFAULT '' AFTER additional_work_id");
+                    array_push($added, 'trade_group');
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'sub_trade')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN sub_trade VARCHAR(255) DEFAULT '' AFTER trade_group");
+                    array_push($added, 'sub_trade');
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'location_name')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN location_name VARCHAR(255) DEFAULT '' AFTER sub_trade");
+                    array_push($added, 'location_name');
+                }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN labor_unit_price DECIMAL(18,2) NULL AFTER unit_price");
                     array_push($added, 'labor_unit_price');
@@ -174,6 +270,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'is_active')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1 AFTER remark");
                     array_push($added, 'is_active');
+                }
+                if (!column_exists($pdo, 'cpms_project_unit_prices', 'is_current')) {
+                    execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_current TINYINT(1) NOT NULL DEFAULT 1 AFTER is_active");
+                    array_push($added, 'is_current');
                 }
                 if (!column_exists($pdo, 'cpms_project_unit_prices', 'updated_at')) {
                     execSql($pdo, "ALTER TABLE cpms_project_unit_prices ADD COLUMN updated_at DATETIME NULL AFTER is_active");
@@ -264,6 +364,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $type = 'ok';
                 $msg = (count($added) === 0) ? '단가표 컬럼 업데이트: 이미 적용되어 있습니다.' : ('단가표 컬럼 업데이트 완료: ' . implode(', ', $added));
+            } else if ($action === 'contract_version_tables') {
+
+                execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_contract_versions (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    version_type VARCHAR(30) NOT NULL,
+                    version_no INT NOT NULL DEFAULT 0,
+                    title VARCHAR(255) NOT NULL,
+                    status VARCHAR(30) NOT NULL DEFAULT 'draft',
+                    is_current TINYINT(1) NOT NULL DEFAULT 0,
+                    original_name VARCHAR(255) DEFAULT '',
+                    stored_name VARCHAR(255) DEFAULT '',
+                    stored_path VARCHAR(500) DEFAULT '',
+                    uploaded_by INT NULL,
+                    uploaded_at DATETIME NULL,
+                    applied_at DATETIME NULL,
+                    change_summary TEXT NULL,
+                    KEY idx_project (project_id),
+                    KEY idx_project_current (project_id, is_current),
+                    KEY idx_project_type_no (project_id, version_type, version_no)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_contract_additional_works (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    title VARCHAR(255) NOT NULL,
+                    occurred_on DATE NULL,
+                    request_ref VARCHAR(255) DEFAULT '',
+                    remark TEXT NULL,
+                    status VARCHAR(30) NOT NULL DEFAULT '승인 전',
+                    attachment_original_name VARCHAR(255) DEFAULT '',
+                    attachment_stored_name VARCHAR(255) DEFAULT '',
+                    attachment_stored_path VARCHAR(500) DEFAULT '',
+                    created_by INT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NULL,
+                    reflected_version_id INT NULL,
+                    KEY idx_project (project_id),
+                    KEY idx_status (status)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                execSql($pdo, "CREATE TABLE IF NOT EXISTS cpms_progress_billings (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    project_id INT NOT NULL,
+                    round_label VARCHAR(100) NOT NULL,
+                    progress_date DATE NULL,
+                    requested_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    recognized_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    attachment_original_name VARCHAR(255) DEFAULT '',
+                    attachment_stored_name VARCHAR(255) DEFAULT '',
+                    attachment_stored_path VARCHAR(500) DEFAULT '',
+                    remark TEXT NULL,
+                    created_by INT NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NULL,
+                    KEY idx_project (project_id),
+                    KEY idx_progress_date (project_id, progress_date)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+                $type = 'ok';
+                $msg = '내역서 버전/추가공사/기성관리 테이블 생성/확인 완료';
                 
             } else if ($action === 'create_issues') {
 
@@ -293,6 +454,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $rows = array(
                     array('item_name',  '품명|자재명|자재', 1),
+                    array('trade_group', '공종그룹|공종 그룹|대공종|공종', 0),
+                    array('sub_trade',   '세부공종|세부 공종|소공종', 0),
+                    array('location_name', '위치|시공위치|작업위치|구역', 0),
                     array('spec',       '규격|형식|사양', 0),
                     array('unit',       '단위|UOM', 0),
                     array('qty',        '수량|물량', 0),
@@ -378,13 +542,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <form method="post" style="margin:0">
             <input type="hidden" name="_csrf" value="<?php echo h2(csrf_token()); ?>">
             <input type="hidden" name="action" value="update_unit_price_columns">
-            <button class="btn btn-warn" type="submit">1-2) 단가표/변경계약 로그 업데이트</button>
+            <button class="btn btn-warn" type="submit">1-2) 표준 내역서/변경계약 컬럼 업데이트</button>
+        </form>
+
+        <form method="post" style="margin:0">
+            <input type="hidden" name="_csrf" value="<?php echo h2(csrf_token()); ?>">
+            <input type="hidden" name="action" value="contract_version_tables">
+            <button class="btn btn-secondary" type="submit">1-3) 버전/추가공사/기성관리 테이블 생성</button>
         </form>
 
         <form method="post" style="margin:0">
             <input type="hidden" name="_csrf" value="<?php echo h2(csrf_token()); ?>">
             <input type="hidden" name="action" value="create_issues">
-            <button class="btn btn-emerald" type="submit">1-2) 이슈 테이블 생성/확인</button>
+            <button class="btn btn-emerald" type="submit">1-4) 이슈 테이블 생성/확인</button>
         </form>
 
         <form method="post" style="margin:0">
@@ -395,7 +565,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </div>
 
     <div class="muted">
-        * 이미 테이블 생성이 끝났다면, 이슈 기능을 위해 <b>1-2) 이슈 테이블 생성/확인</b>을 한 번 눌러주세요.
+        * 이미 테이블 생성이 끝났다면, 이번 기능을 위해 <b>1-2</b>, <b>1-3</b> 버튼을 한 번 눌러주세요.
     </div>
 
     <hr style="border:none;border-top:1px solid #e5e7eb; margin:16px 0;">

@@ -65,6 +65,11 @@ $lineCountByWork = array();
 $hasMaterialUnitPrice = false;
 $hasLaborUnitPrice = false;
 $hasExpenseUnitPrice = false;
+$hasIsActive = false;
+$hasTradeGroup = false;
+$hasSubTrade = false;
+$hasLocationName = false;
+$hasIsCurrentUnitPrice = false;
 
 try {
     $st = $pdo->prepare("SELECT * FROM cpms_work_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY sort_order ASC, id ASC");
@@ -80,6 +85,10 @@ try {
     $hasMaterialUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'material_unit_price');
     $hasLaborUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price');
     $hasExpenseUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price');
+    $hasTradeGroup = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'trade_group');
+    $hasSubTrade = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'sub_trade');
+    $hasLocationName = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'location_name');
+    $hasIsCurrentUnitPrice = cpms_work_column_exists($pdo, 'cpms_project_unit_prices', 'is_current');
     $unitPrices = cpms_contract_items_with_remaining_quantity($pdo, (int)$pid, array('include_depleted' => true, 'limit' => 2000));
 } catch (Exception $e) {
     $unitPrices = array();
@@ -90,7 +99,10 @@ try {
     $lineSelect .= $hasMaterialUnitPrice ? ", u.material_unit_price" : ", NULL AS material_unit_price";
     $lineSelect .= $hasLaborUnitPrice ? ", u.labor_unit_price" : ", NULL AS labor_unit_price";
     $lineSelect .= $hasExpenseUnitPrice ? ", u.expense_unit_price" : ", NULL AS expense_unit_price";
-    $lineSelect .= " FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id WHERE u.project_id = :pid ORDER BY l.work_id ASC, u.id ASC";
+    $lineSelect .= " FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id WHERE u.project_id = :pid";
+    if ($hasIsActive) $lineSelect .= " AND (u.is_active = 1 OR u.is_active IS NULL)";
+    if ($hasIsCurrentUnitPrice) $lineSelect .= " AND (u.is_current = 1 OR u.is_current IS NULL)";
+    $lineSelect .= " ORDER BY l.work_id ASC, u.id ASC";
     $stL = $pdo->prepare($lineSelect);
     $stL->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
     $stL->execute();
@@ -219,7 +231,7 @@ if ($editingId > 0) {
                     <div class="mb-3 grid grid-cols-1 md:grid-cols-3 gap-2">
                         <div class="md:col-span-2">
                             <label class="text-xs font-bold text-gray-600">내역서 검색</label>
-                            <input type="search" id="cpmsWorkUnitSearch" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 text-sm" placeholder="품명, 규격, 단위, 단가로 검색">
+                            <input type="search" id="cpmsWorkUnitSearch" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 text-sm" placeholder="위치, 공종, 품명, 규격, 단위로 검색">
                         </div>
                         <label class="mt-6 inline-flex items-center gap-2 text-xs font-bold text-gray-700">
                             <input type="checkbox" id="cpmsWorkShowDepleted" class="rounded border-gray-300">
@@ -231,6 +243,9 @@ if ($editingId > 0) {
                             <thead class="bg-gray-50 sticky top-0">
                             <tr>
                                 <th class="p-2 border text-center">선택</th>
+                                <th class="p-2 border text-left">공종그룹</th>
+                                <th class="p-2 border text-left">세부공종</th>
+                                <th class="p-2 border text-left">위치</th>
                                 <th class="p-2 border text-left">항목명</th>
                                 <th class="p-2 border text-left">규격</th>
                                 <th class="p-2 border text-left">단위</th>
@@ -243,11 +258,17 @@ if ($editingId > 0) {
                             </thead>
                             <tbody>
                             <?php if (count($unitPrices) === 0): ?>
-                                <tr><td colspan="9" class="p-2 border text-center text-gray-500">내역서 항목이 없습니다.</td></tr>
+                                <tr><td colspan="12" class="p-2 border text-center text-gray-500">내역서 항목이 없습니다.</td></tr>
                             <?php else: ?>
+                                <?php $lastWorkGroupKey = ''; ?>
                                 <?php foreach ($unitPrices as $u): ?>
                                     <?php
                                     $uid = (int)$u['id'];
+                                    $tradeGroup = isset($u['trade_group']) ? trim((string)$u['trade_group']) : '';
+                                    $subTrade = isset($u['sub_trade']) ? trim((string)$u['sub_trade']) : '';
+                                    $locationName = isset($u['location_name']) ? trim((string)$u['location_name']) : '';
+                                    $groupLabel = ($locationName !== '') ? ('위치별 보기: ' . $locationName) : ('공종그룹별 보기: ' . ($tradeGroup !== '' ? $tradeGroup : '미분류'));
+                                    $groupKey = ($locationName !== '') ? ('loc:' . $locationName) : ('trade:' . $tradeGroup);
                                     $sel = isset($editingLineMap[$uid]);
                                     $unitPriceDisplay = isset($u['unit_price_total']) ? (float)$u['unit_price_total'] : cpms_work_unit_price_value($u);
                                     $contractQty = isset($u['contract_quantity']) ? (float)$u['contract_quantity'] : (isset($u['qty']) ? (float)$u['qty'] : 0.0);
@@ -264,13 +285,22 @@ if ($editingId > 0) {
                                     } else if ($remainingQty > 0.0001) {
                                         $plannedValue = (string)$remainingQty;
                                     }
-                                    $rowText = (isset($u['item_name']) ? (string)$u['item_name'] : '') . ' ' . (isset($u['spec']) ? (string)$u['spec'] : '') . ' ' . (isset($u['unit']) ? (string)$u['unit'] : '') . ' ' . (string)$unitPriceDisplay;
+                                    $rowText = $tradeGroup . ' ' . $subTrade . ' ' . $locationName . ' ' . (isset($u['item_name']) ? (string)$u['item_name'] : '') . ' ' . (isset($u['spec']) ? (string)$u['spec'] : '') . ' ' . (isset($u['unit']) ? (string)$u['unit'] : '') . ' ' . (string)$unitPriceDisplay;
                                     $rowClass = 'cpms-work-unit-row';
                                     if ($isDepleted) $rowClass .= ' cpms-work-depleted-row bg-gray-50 text-gray-400';
                                     if ($isDepleted && !$sel) $rowClass .= ' hidden';
                                     ?>
+                                    <?php if ($groupKey !== $lastWorkGroupKey): ?>
+                                        <tr class="cpms-work-group-row bg-slate-100 text-slate-800" data-search="<?php echo h($groupLabel); ?>" data-group-key="<?php echo h($groupKey); ?>">
+                                            <td colspan="12" class="p-2 border font-extrabold"><?php echo h($groupLabel); ?></td>
+                                        </tr>
+                                        <?php $lastWorkGroupKey = $groupKey; ?>
+                                    <?php endif; ?>
                                     <tr class="<?php echo h($rowClass); ?>" data-search="<?php echo h($rowText); ?>" data-depleted="<?php echo $isDepleted ? '1' : '0'; ?>">
                                         <td class="p-2 border text-center"><input type="checkbox" name="selected_unit_price_ids[]" value="<?php echo $uid; ?>" <?php echo $sel ? 'checked' : ''; ?>></td>
+                                        <td class="p-2 border"><?php echo h($tradeGroup); ?></td>
+                                        <td class="p-2 border"><?php echo h($subTrade); ?></td>
+                                        <td class="p-2 border"><?php echo h($locationName); ?></td>
                                         <td class="p-2 border"><?php echo h($u['item_name']); ?></td>
                                         <td class="p-2 border"><?php echo h(isset($u['spec']) ? $u['spec'] : ''); ?></td>
                                         <td class="p-2 border"><?php echo h($u['unit']); ?></td>
@@ -309,6 +339,7 @@ if ($editingId > 0) {
     var searchInput = document.getElementById('cpmsWorkUnitSearch');
     var showDepleted = document.getElementById('cpmsWorkShowDepleted');
     var rows = Array.prototype.slice.call(document.querySelectorAll('.cpms-work-unit-row'));
+    var groupRows = Array.prototype.slice.call(document.querySelectorAll('.cpms-work-group-row'));
 
     function normalizeText(value) {
         value = String(value || '').toLowerCase();
@@ -329,6 +360,21 @@ if ($editingId > 0) {
             var visible = match && (!depleted || includeDepleted || checked);
             if (visible) row.classList.remove('hidden');
             else row.classList.add('hidden');
+        }
+        for (var g = 0; g < groupRows.length; g++) {
+            var group = groupRows[g];
+            var groupKey = group.getAttribute('data-group-key') || '';
+            var hasVisibleChild = false;
+            var next = group.nextElementSibling;
+            while (next && !next.classList.contains('cpms-work-group-row')) {
+                if (next.classList.contains('cpms-work-unit-row') && !next.classList.contains('hidden')) {
+                    hasVisibleChild = true;
+                    break;
+                }
+                next = next.nextElementSibling;
+            }
+            if (groupKey !== '' && hasVisibleChild) group.classList.remove('hidden');
+            else group.classList.add('hidden');
         }
     }
 

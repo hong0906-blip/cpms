@@ -482,11 +482,15 @@ function cpms_dashboard_project_monthly_cost_rows($pdo, $projectId, $projectName
         $laborRange = cpms_dashboard_cost_period_range($ym, 'labor');
         $costRange = cpms_dashboard_cost_period_range($ym, 'material');
 
-        $sales = 0.0;
+        $expectedSales = 0.0;
         if (function_exists('cpms_sales_total_between')) {
             $salesResult = cpms_sales_total_between($pdo, (int)$projectId, $salesRange['start'], $salesRange['end']);
-            $sales = isset($salesResult['amount']) ? (float)$salesResult['amount'] : 0.0;
+            $expectedSales = isset($salesResult['amount']) ? (float)$salesResult['amount'] : 0.0;
         }
+        $confirmedSales = function_exists('cpms_confirmed_sales_total_between') ? (float)cpms_confirmed_sales_total_between($pdo, (int)$projectId, $salesRange['start'], $salesRange['end']) : 0.0;
+        $hasConfirmedSales = function_exists('cpms_confirmed_sales_has_data') ? cpms_confirmed_sales_has_data($pdo, (int)$projectId) : false;
+        $sales = $hasConfirmedSales ? $confirmedSales : $expectedSales;
+        $salesBasis = $hasConfirmedSales ? '확정매출' : '기성매출 없음 / 예상매출 기준 임시 원가율';
         $labor = cpms_dashboard_labor_total_between($pdo, (int)$projectId, $projectName, $laborRange['start'], $laborRange['end'], $wageMap);
         $equipment = cpms_dashboard_equipment_total_between($pdo, (int)$projectId, $costRange['start'], $costRange['end']);
         $materials = cpms_dashboard_material_total_between($pdo, (int)$projectId, $costRange['start'], $costRange['end']);
@@ -498,6 +502,9 @@ function cpms_dashboard_project_monthly_cost_rows($pdo, $projectId, $projectName
             'ym' => $ym,
             'label' => $ym,
             'sales' => $sales,
+            'expected_sales' => $expectedSales,
+            'confirmed_sales' => $confirmedSales,
+            'sales_basis' => $salesBasis,
             'labor' => $labor,
             'equipment' => $equipment,
             'materials' => $materials,
@@ -539,7 +546,11 @@ function cpms_dashboard_project_cost_summary($pdo)
         $startDate = isset($project['start_date']) ? (string)$project['start_date'] : '';
         $endDate = isset($project['end_date']) ? (string)$project['end_date'] : '';
 
-        $sales = function_exists('cpms_sales_total_all') ? (float)cpms_sales_total_all($pdo, $projectId) : 0.0;
+        $expectedSales = function_exists('cpms_sales_total_all') ? (float)cpms_sales_total_all($pdo, $projectId) : 0.0;
+        $confirmedSales = function_exists('cpms_confirmed_sales_total_all') ? (float)cpms_confirmed_sales_total_all($pdo, $projectId) : 0.0;
+        $hasConfirmedSales = function_exists('cpms_confirmed_sales_has_data') ? cpms_confirmed_sales_has_data($pdo, $projectId) : false;
+        $sales = $hasConfirmedSales ? $confirmedSales : $expectedSales;
+        $salesBasis = $hasConfirmedSales ? '확정매출' : '기성매출 없음 / 예상매출 기준 임시 원가율';
         $equipment = cpms_dashboard_equipment_total($pdo, $projectId);
         $labor = cpms_dashboard_labor_total($pdo, $projectId, $projectName, $startDate, $endDate);
         $materials = cpms_dashboard_material_total($pdo, $projectId);
@@ -553,6 +564,9 @@ function cpms_dashboard_project_cost_summary($pdo)
             'project_id' => $projectId,
             'project_name' => $projectName,
             'sales' => $sales,
+            'expected_sales' => $expectedSales,
+            'confirmed_sales' => $confirmedSales,
+            'sales_basis' => $salesBasis,
             'labor' => $labor,
             'equipment' => $equipment,
             'materials' => $materials,

@@ -75,10 +75,19 @@ function cpms_contract_change_normalize_value($value) {
 
 if (!function_exists('cpms_contract_change_row_key')) {
 function cpms_contract_change_row_key($row) {
+    $tradeGroup = isset($row['trade_group']) ? cpms_contract_change_normalize_value($row['trade_group']) : '';
+    $subTrade = isset($row['sub_trade']) ? cpms_contract_change_normalize_value($row['sub_trade']) : '';
+    $locationName = isset($row['location_name']) ? cpms_contract_change_normalize_value($row['location_name']) : '';
     $item = isset($row['item_name']) ? cpms_contract_change_normalize_value($row['item_name']) : '';
     $spec = isset($row['spec']) ? cpms_contract_change_normalize_value($row['spec']) : '';
     $unit = isset($row['unit']) ? cpms_contract_change_normalize_value($row['unit']) : '';
-    return $item . '|' . $spec . '|' . $unit;
+    return $tradeGroup . '|' . $subTrade . '|' . $locationName . '|' . $item . '|' . $spec . '|' . $unit;
+}
+}
+
+if (!function_exists('cpms_contract_change_row_key_empty')) {
+function cpms_contract_change_row_key_empty($key) {
+    return trim(str_replace('|', '', (string)$key)) === '';
 }
 }
 
@@ -114,7 +123,7 @@ function cpms_contract_change_compare_rows($oldRows, $newRows) {
         $activeIndex = count($activeOldRows);
         $activeOldRows[$activeIndex] = $oldRow;
         $key = cpms_contract_change_row_key($oldRow);
-        if ($key === '||') continue;
+        if (cpms_contract_change_row_key_empty($key)) continue;
         if (!isset($oldMap[$key])) $oldMap[$key] = array();
         array_push($oldMap[$key], $activeIndex);
     }
@@ -134,7 +143,7 @@ function cpms_contract_change_compare_rows($oldRows, $newRows) {
     foreach ($newRows as $newRow) {
         if (!is_array($newRow)) continue;
         $key = cpms_contract_change_row_key($newRow);
-        if ($key === '||') continue;
+        if (cpms_contract_change_row_key_empty($key)) continue;
 
         $matchIndex = -1;
         if (isset($oldMap[$key])) {

@@ -185,14 +185,22 @@ function cpms_contract_items_with_remaining_quantity($pdo, $projectId, $filters)
     $hasLabor = cpms_qr_column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price');
     $hasExpense = cpms_qr_column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price');
     $hasImportOrder = cpms_qr_column_exists($pdo, 'cpms_project_unit_prices', 'import_order');
+    $hasIsCurrent = cpms_qr_column_exists($pdo, 'cpms_project_unit_prices', 'is_current');
+    $hasTradeGroup = cpms_qr_column_exists($pdo, 'cpms_project_unit_prices', 'trade_group');
+    $hasSubTrade = cpms_qr_column_exists($pdo, 'cpms_project_unit_prices', 'sub_trade');
+    $hasLocationName = cpms_qr_column_exists($pdo, 'cpms_project_unit_prices', 'location_name');
 
     try {
         $sql = "SELECT id, item_name, spec, unit, qty, unit_price";
+        $sql .= $hasTradeGroup ? ", trade_group" : ", '' AS trade_group";
+        $sql .= $hasSubTrade ? ", sub_trade" : ", '' AS sub_trade";
+        $sql .= $hasLocationName ? ", location_name" : ", '' AS location_name";
         $sql .= $hasMaterial ? ", material_unit_price" : ", NULL AS material_unit_price";
         $sql .= $hasLabor ? ", labor_unit_price" : ", NULL AS labor_unit_price";
         $sql .= $hasExpense ? ", expense_unit_price" : ", NULL AS expense_unit_price";
         $sql .= " FROM cpms_project_unit_prices WHERE project_id = :pid";
         if ($hasIsActive) $sql .= " AND (is_active = 1 OR is_active IS NULL)";
+        if ($hasIsCurrent) $sql .= " AND (is_current = 1 OR is_current IS NULL)";
         $sql .= $hasImportOrder ? " ORDER BY COALESCE(import_order, id) ASC, id ASC" : " ORDER BY id ASC";
         $sql .= " LIMIT " . (int)$limit;
         $st = $pdo->prepare($sql);
@@ -206,6 +214,9 @@ function cpms_contract_items_with_remaining_quantity($pdo, $projectId, $filters)
             if ($id <= 0) continue;
             $unitPrice = cpms_qr_unit_price_value($row);
             $searchText = cpms_qr_search_text(
+                (isset($row['trade_group']) ? $row['trade_group'] : '') . ' ' .
+                (isset($row['sub_trade']) ? $row['sub_trade'] : '') . ' ' .
+                (isset($row['location_name']) ? $row['location_name'] : '') . ' ' .
                 (isset($row['item_name']) ? $row['item_name'] : '') . ' ' .
                 (isset($row['spec']) ? $row['spec'] : '') . ' ' .
                 (isset($row['unit']) ? $row['unit'] : '') . ' ' .

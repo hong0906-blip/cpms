@@ -160,6 +160,85 @@ if (!function_exists('cpms_sales_total_all')) {
     }
 }
 
+if (!function_exists('cpms_confirmed_sales_total_between')) {
+    function cpms_confirmed_sales_total_between($pdo, $projectId, $startDate, $endDate) {
+        if (!$pdo || $projectId <= 0) return 0.0;
+        if (!cpms_sales_table_exists($pdo, 'cpms_progress_billings')) return 0.0;
+        if (!cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'project_id')) return 0.0;
+        if (!cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'recognized_amount')) return 0.0;
+
+        try {
+            $sql = "SELECT COALESCE(SUM(recognized_amount), 0) FROM cpms_progress_billings WHERE project_id = :pid";
+            if (cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'progress_date')) {
+                $sql .= " AND progress_date IS NOT NULL AND progress_date BETWEEN :start_date AND :end_date";
+            }
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+            if (strpos($sql, ':start_date') !== false) {
+                $st->bindValue(':start_date', (string)$startDate);
+                $st->bindValue(':end_date', (string)$endDate);
+            }
+            $st->execute();
+            return (float)$st->fetchColumn();
+        } catch (Exception $e) {
+            return 0.0;
+        }
+    }
+}
+
+if (!function_exists('cpms_confirmed_sales_total_all')) {
+    function cpms_confirmed_sales_total_all($pdo, $projectId) {
+        if (!$pdo || $projectId <= 0) return 0.0;
+        if (cpms_sales_table_exists($pdo, 'cpms_progress_billings') && cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'recognized_amount')) {
+            try {
+                $st = $pdo->prepare("SELECT COALESCE(SUM(recognized_amount), 0) FROM cpms_progress_billings WHERE project_id = :pid");
+                $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+                $st->execute();
+                $amount = (float)$st->fetchColumn();
+                if ($amount > 0) return $amount;
+            } catch (Exception $e) {
+            }
+        }
+        if (cpms_sales_table_exists($pdo, 'cpms_monthly_recognized') && cpms_sales_column_exists($pdo, 'cpms_monthly_recognized', 'recognized_cum_amount')) {
+            try {
+                $stLegacy = $pdo->prepare("SELECT COALESCE(MAX(recognized_cum_amount), 0) FROM cpms_monthly_recognized WHERE project_id = :pid");
+                $stLegacy->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+                $stLegacy->execute();
+                return (float)$stLegacy->fetchColumn();
+            } catch (Exception $e) {
+                return 0.0;
+            }
+        }
+        return 0.0;
+    }
+}
+
+if (!function_exists('cpms_confirmed_sales_has_data')) {
+    function cpms_confirmed_sales_has_data($pdo, $projectId) {
+        if (!$pdo || $projectId <= 0) return false;
+        if (cpms_sales_table_exists($pdo, 'cpms_progress_billings')) {
+            try {
+                $st = $pdo->prepare("SELECT COUNT(*) FROM cpms_progress_billings WHERE project_id = :pid AND recognized_amount > 0");
+                $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+                $st->execute();
+                if ((int)$st->fetchColumn() > 0) return true;
+            } catch (Exception $e) {
+            }
+        }
+        if (cpms_sales_table_exists($pdo, 'cpms_monthly_recognized')) {
+            try {
+                $stLegacy = $pdo->prepare("SELECT COUNT(*) FROM cpms_monthly_recognized WHERE project_id = :pid AND recognized_cum_amount > 0");
+                $stLegacy->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+                $stLegacy->execute();
+                return ((int)$stLegacy->fetchColumn() > 0);
+            } catch (Exception $e) {
+                return false;
+            }
+        }
+        return false;
+    }
+}
+
 if (!function_exists('cpms_sales_monthly_map')) {
     function cpms_sales_monthly_map($pdo, $projectId, $allMonths) {
         $months = array();

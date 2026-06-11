@@ -32,16 +32,47 @@ if (count($rows) === 0) { flash_set('error', '저장할 데이터가 없습니�
 $pdo = Db::pdo();
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ?r=project/detail&id=' . $projectId); exit; }
 
+function cpms_unit_price_import_column_exists($pdo, $column) {
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM cpms_project_unit_prices LIKE :col");
+        $st->bindValue(':col', (string)$column);
+        $st->execute();
+        return $st->fetch() ? true : false;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
 try {
     $pdo->beginTransaction();
-    $st = $pdo->prepare("INSERT INTO cpms_project_unit_prices(project_id, item_name, spec, unit, qty, unit_price, labor_unit_price, material_unit_price, safety_unit_price, is_safety, remark)
-                         VALUES(:pid, :item, :spec, :unit, :qty, :up, :lup, :mup, :sup, :is_safety, :rm)");
+    $insertColumns = array('project_id');
+    $insertHolders = array(':pid');
+    $optionalColumns = array('trade_group', 'sub_trade', 'location_name');
+    foreach ($optionalColumns as $optionalColumn) {
+        if (cpms_unit_price_import_column_exists($pdo, $optionalColumn)) {
+            $insertColumns[] = $optionalColumn;
+            $insertHolders[] = ':' . $optionalColumn;
+        }
+    }
+    foreach (array('item_name', 'spec', 'unit', 'qty', 'unit_price', 'labor_unit_price', 'material_unit_price', 'safety_unit_price', 'is_safety', 'remark') as $baseColumn) {
+        $insertColumns[] = $baseColumn;
+    }
+    foreach (array(':item', ':spec', ':unit', ':qty', ':up', ':lup', ':mup', ':sup', ':is_safety', ':rm') as $baseHolder) {
+        $insertHolders[] = $baseHolder;
+    }
+    $st = $pdo->prepare("INSERT INTO cpms_project_unit_prices(" . implode(',', $insertColumns) . ")
+                         VALUES(" . implode(',', $insertHolders) . ")");
 
     $count = 0;
     foreach ($rows as $r) {
         $item = isset($r['item_name']) ? trim((string)$r['item_name']) : '';
         if ($item === '') continue;
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        foreach ($optionalColumns as $optionalColumn) {
+            if (in_array($optionalColumn, $insertColumns, true)) {
+                $st->bindValue(':' . $optionalColumn, isset($r[$optionalColumn]) ? trim((string)$r[$optionalColumn]) : '');
+            }
+        }
         $st->bindValue(':item', $item);
         $st->bindValue(':spec', isset($r['spec']) ? trim((string)$r['spec']) : '');
         $st->bindValue(':unit', isset($r['unit']) ? trim((string)$r['unit']) : '');
