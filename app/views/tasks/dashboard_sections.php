@@ -110,6 +110,7 @@ function cpms_render_employee_task_dashboard($pdo)
     $employees = cpms_tasks_fetch_active_employees($pdo);
     $projects = cpms_tasks_fetch_projects($pdo);
     $returnUrl = cpms_tasks_default_return_url();
+    $currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, cpms_tasks_today()) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
 
     $summary = array(
         'all' => count($feed),
@@ -278,8 +279,16 @@ function cpms_render_employee_task_dashboard($pdo)
                             <select name="assignee_employee_id" id="taskAssigneeSelect" required class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
                                 <option value="">담당자 선택</option>
                                 <?php foreach ($employees as $employee): ?>
-                                    <option value="<?php echo (int)$employee['id']; ?>" data-department="<?php echo h(isset($employee['department']) ? $employee['department'] : ''); ?>">
-                                        <?php echo h((isset($employee['name']) ? $employee['name'] : '-') . ' / ' . (isset($employee['department']) ? $employee['department'] : '-') . ' / ' . (isset($employee['position']) && trim((string)$employee['position']) !== '' ? $employee['position'] : '-')); ?>
+                                    <?php
+                                    $employeeLeaveInfo = function_exists('approval_current_leave_info_from_index') ? approval_current_leave_info_from_index($currentLeaveIndex, $employee) : null;
+                                    $employeeLeaveLabel = is_array($employeeLeaveInfo) && isset($employeeLeaveInfo['status_label']) ? (string)$employeeLeaveInfo['status_label'] : '';
+                                    $employeeOptionName = isset($employee['name']) ? $employee['name'] : '-';
+                                    if ($employeeLeaveLabel !== '') {
+                                        $employeeOptionName .= ' (' . $employeeLeaveLabel . ')';
+                                    }
+                                    ?>
+                                    <option value="<?php echo (int)$employee['id']; ?>" data-department="<?php echo h(isset($employee['department']) ? $employee['department'] : ''); ?>" data-on-leave="<?php echo is_array($employeeLeaveInfo) ? '1' : '0'; ?>" <?php echo is_array($employeeLeaveInfo) ? 'disabled="disabled"' : ''; ?>>
+                                        <?php echo h($employeeOptionName . ' / ' . (isset($employee['department']) ? $employee['department'] : '-') . ' / ' . (isset($employee['position']) && trim((string)$employee['position']) !== '' ? $employee['position'] : '-')); ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -417,6 +426,8 @@ function cpms_render_employee_task_dashboard($pdo)
         var assigneeSearch = document.getElementById('taskAssigneeSearch');
         var assigneeSelect = document.getElementById('taskAssigneeSelect');
         var departmentSelect = document.getElementById('taskDepartmentSelect');
+        var taskCreateForm = assigneeSelect ? assigneeSelect.form : null;
+        var onLeaveMessage = <?php echo json_encode(approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?>;
         var taskDetailBody = document.getElementById('taskDetailBody');
         var completeTaskId = document.getElementById('taskCompleteTaskId');
         var revisionTaskId = document.getElementById('taskRevisionTaskId');
@@ -454,11 +465,26 @@ function cpms_render_employee_task_dashboard($pdo)
             assigneeSelect.addEventListener('change', function(){
                 var selected = assigneeSelect.options[assigneeSelect.selectedIndex];
                 if (!selected) return;
+                if (selected.getAttribute('data-on-leave') === '1') {
+                    alert(onLeaveMessage);
+                    assigneeSelect.value = '';
+                    return;
+                }
                 if (departmentSelect && departmentSelect.value === '') {
                     var dept = selected.getAttribute('data-department') || '';
                     departmentSelect.value = dept;
                 }
             });
+            if (taskCreateForm) {
+                taskCreateForm.addEventListener('submit', function(e){
+                    var selected = assigneeSelect.options[assigneeSelect.selectedIndex];
+                    if (selected && selected.getAttribute('data-on-leave') === '1') {
+                        e.preventDefault();
+                        alert(onLeaveMessage);
+                        assigneeSelect.value = '';
+                    }
+                });
+            }
         }
 
         function openCompleteModal(taskId) {
@@ -526,6 +552,7 @@ function cpms_render_executive_task_dashboard($pdo)
     $selectedDepartment = isset($_GET['task_department']) ? trim((string)$_GET['task_department']) : '전체';
     if ($selectedDepartment === '') $selectedDepartment = '전체';
     $summaryData = cpms_task_feed_for_executive($pdo, array('department' => $selectedDepartment));
+    $currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, cpms_tasks_today()) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
     $departmentOptions = array_merge(array('전체'), cpms_tasks_department_options());
     ?>
     <div id="cpmsExecutiveTasksPanel" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
@@ -598,13 +625,18 @@ function cpms_render_executive_task_dashboard($pdo)
                     $metrics = isset($employeeRow['metrics']) ? $employeeRow['metrics'] : array();
                     $feed = isset($employeeRow['feed']) ? $employeeRow['feed'] : array();
                     $modalId = 'executiveTaskEmployee' . (int)$employee['id'];
+                    $employeeLeaveInfo = function_exists('approval_current_leave_info_from_index') ? approval_current_leave_info_from_index($currentLeaveIndex, $employee) : null;
+                    $employeeLeaveLabel = is_array($employeeLeaveInfo) && isset($employeeLeaveInfo['status_label']) ? (string)$employeeLeaveInfo['status_label'] : '';
                     $employeeDepartmentLabel = (isset($employee['department']) && trim((string)$employee['department']) !== '') ? (($employee['department'] === '기타') ? '임원' : $employee['department']) : '-';
                     ?>
                     <button type="button" data-cpms-employee-toggle="<?php echo h($modalId); ?>" class="w-full text-left px-4 py-3 rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-md hover:border-gray-300 transition">
                         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
                             <div class="min-w-0">
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <div class="text-lg font-extrabold text-gray-900"><?php echo h(isset($employee['name']) ? $employee['name'] : '-'); ?></div>
+                                    <div class="text-lg font-extrabold text-gray-900 break-words"><?php echo h(isset($employee['name']) ? $employee['name'] : '-'); ?></div>
+                                    <?php if ($employeeLeaveLabel !== ''): ?>
+                                        <span class="cpms-chip inline-flex items-center px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 text-xs font-extrabold whitespace-nowrap"><?php echo h($employeeLeaveLabel); ?></span>
+                                    <?php endif; ?>
                                     <span class="cpms-chip px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold"><?php echo h($employeeDepartmentLabel); ?></span>
                                 </div>
                                 <div class="text-sm text-gray-500 mt-1"><?php echo h((isset($employee['position']) && trim((string)$employee['position']) !== '') ? $employee['position'] : '-'); ?></div>
@@ -624,6 +656,9 @@ function cpms_render_executive_task_dashboard($pdo)
                         <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                             <div>
                                 <div class="text-xl font-extrabold text-gray-900"><?php echo h(isset($employee['name']) ? $employee['name'] : '-'); ?> 업무 현황</div>
+                                <?php if ($employeeLeaveLabel !== ''): ?>
+                                    <div class="mt-1"><span class="cpms-chip inline-flex items-center px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-100 text-xs font-extrabold whitespace-nowrap"><?php echo h($employeeLeaveLabel); ?></span></div>
+                                <?php endif; ?>
                                 <div class="text-sm text-gray-500 mt-1"><?php echo h($employeeDepartmentLabel . ' / ' . ((isset($employee['position']) && trim((string)$employee['position']) !== '') ? $employee['position'] : '-')); ?></div>
                             </div>
                             <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50" data-cpms-employee-close="<?php echo h($modalId); ?>">닫기</button>

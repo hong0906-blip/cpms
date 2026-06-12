@@ -272,27 +272,242 @@ if (!function_exists('approval_employee_is_executive')) {
     }
 }
 
+if (!function_exists('approval_leave_normalize_date')) {
+    function approval_leave_normalize_date($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return '';
+        }
+        $ts = strtotime($value);
+        if ($ts === false) {
+            return '';
+        }
+        return date('Y-m-d', $ts);
+    }
+}
+
+if (!function_exists('approval_leave_status_label_from_type')) {
+    function approval_leave_status_label_from_type($requestType)
+    {
+        $requestType = trim((string)$requestType);
+        $norm = approval_normalize_compare_text($requestType);
+        $halfNorm = approval_normalize_compare_text(approval_ko('%EB%B0%98%EC%B0%A8'));
+        $morningNorm = approval_normalize_compare_text(approval_ko('%EC%98%A4%EC%A0%84'));
+        $afternoonNorm = approval_normalize_compare_text(approval_ko('%EC%98%A4%ED%9B%84'));
+        if ($norm !== '' && $halfNorm !== '' && strpos($norm, $halfNorm) !== false) {
+            if ($morningNorm !== '' && strpos($norm, $morningNorm) !== false) {
+                return approval_ko('%EC%98%A4%EC%A0%84%EB%B0%98%EC%B0%A8');
+            }
+            if ($afternoonNorm !== '' && strpos($norm, $afternoonNorm) !== false) {
+                return approval_ko('%EC%98%A4%ED%9B%84%EB%B0%98%EC%B0%A8');
+            }
+            return approval_ko('%EB%B0%98%EC%B0%A8');
+        }
+        return approval_ko('%ED%9C%B4%EA%B0%80%EC%A4%91');
+    }
+}
+
+if (!function_exists('approval_leave_type_label_from_content')) {
+    function approval_leave_type_label_from_content($content)
+    {
+        if (!is_array($content)) {
+            return '';
+        }
+        $requestType = isset($content['request_type']) ? trim((string)$content['request_type']) : '';
+        $requestTypeEtc = isset($content['request_type_etc']) ? trim((string)$content['request_type_etc']) : '';
+        if ($requestType === approval_ko('%EA%B8%B0%ED%83%80') && $requestTypeEtc !== '') {
+            return $requestTypeEtc;
+        }
+        return $requestType;
+    }
+}
+
+if (!function_exists('approval_current_leave_info_from_index')) {
+    function approval_current_leave_info_from_index($index, $employee)
+    {
+        if (!is_array($index) || !is_array($employee)) {
+            return null;
+        }
+        $employeeId = isset($employee['id']) ? (int)$employee['id'] : 0;
+        if ($employeeId > 0 && isset($index['by_id']) && isset($index['by_id'][$employeeId])) {
+            return $index['by_id'][$employeeId];
+        }
+        $email = isset($employee['email']) ? strtolower(trim((string)$employee['email'])) : '';
+        if ($email !== '' && isset($index['by_email']) && isset($index['by_email'][$email])) {
+            return $index['by_email'][$email];
+        }
+        $name = isset($employee['name']) ? trim((string)$employee['name']) : '';
+        if ($name !== '' && isset($index['by_name']) && isset($index['by_name'][$name])) {
+            return $index['by_name'][$name];
+        }
+        return null;
+    }
+}
+
+if (!function_exists('approval_current_leave_index')) {
+    function approval_current_leave_index($pdo, $baseDate)
+    {
+        static $cache = array();
+        $empty = array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
+        if (!$pdo) {
+            return $empty;
+        }
+        $baseDate = approval_leave_normalize_date($baseDate);
+        if ($baseDate === '') {
+            $baseDate = date('Y-m-d');
+        }
+        $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':' . $baseDate;
+        if (isset($cache[$cacheKey])) {
+            return $cache[$cacheKey];
+        }
+        $cache[$cacheKey] = $empty;
+        if (!approval_table_exists($pdo, 'cpms_approval_documents')) {
+            return $cache[$cacheKey];
+        }
+
+        $employeeExists = approval_table_exists($pdo, 'employees');
+        $hasCreatedByEmail = approval_table_column_exists($pdo, 'cpms_approval_documents', 'created_by_email');
+        $createdByEmailSelect = $hasCreatedByEmail ? 'd.created_by_email' : "'' AS created_by_email";
+        $employeeSelect = "'' AS employee_name, '' AS employee_email, '' AS employee_department, '' AS employee_position, '' AS employee_role";
+        $joinSql = '';
+        if ($employeeExists) {
+            $employeeNameSelect = approval_table_column_exists($pdo, 'employees', 'name') ? 'e.name' : "''";
+            $employeeEmailSelect = approval_table_column_exists($pdo, 'employees', 'email') ? 'e.email' : "''";
+            $employeeDepartmentSelect = approval_table_column_exists($pdo, 'employees', 'department') ? 'e.department' : "''";
+            $employeePositionSelect = approval_table_column_exists($pdo, 'employees', 'position') ? 'e.position' : "''";
+            $employeeRoleSelect = approval_table_column_exists($pdo, 'employees', 'role') ? 'e.role' : "''";
+            $employeeSelect = $employeeNameSelect . " AS employee_name, " . $employeeEmailSelect . " AS employee_email, " . $employeeDepartmentSelect . " AS employee_department, " . $employeePositionSelect . " AS employee_position, " . $employeeRoleSelect . " AS employee_role";
+            $joinSql = ' LEFT JOIN employees e ON e.id = d.created_by_id';
+        }
+
+        try {
+            $sql = "SELECT d.id, d.created_by_id, d.created_by_name, " . $createdByEmailSelect . ", d.content, d.created_at, d.updated_at, " . $employeeSelect . "
+                    FROM cpms_approval_documents d" . $joinSql . "
+                    WHERE d.doc_type='leave'
+                      AND UPPER(COALESCE(d.doc_status,'')) IN ('APPROVED','COMPLETED')
+                    ORDER BY d.updated_at DESC, d.id DESC";
+            $st = $pdo->query($sql);
+            $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+        } catch (Exception $e) {
+            $rows = array();
+        }
+        if (!is_array($rows)) {
+            $rows = array();
+        }
+
+        $baseTs = strtotime($baseDate . ' 00:00:00');
+        if ($baseTs === false) {
+            return $cache[$cacheKey];
+        }
+
+        $seen = array();
+        for ($i = 0; $i < count($rows); $i++) {
+            $row = $rows[$i];
+            $content = approval_parse_content(isset($row['content']) ? $row['content'] : '');
+            $start = approval_leave_normalize_date(isset($content['leave_start_date']) ? $content['leave_start_date'] : '');
+            $end = approval_leave_normalize_date(isset($content['leave_end_date']) ? $content['leave_end_date'] : '');
+            if ($start === '' || $end === '') {
+                continue;
+            }
+            $startTs = strtotime($start . ' 00:00:00');
+            $endTs = strtotime($end . ' 00:00:00');
+            if ($startTs === false || $endTs === false || $endTs < $startTs) {
+                continue;
+            }
+            if ($baseTs < $startTs || $baseTs > $endTs) {
+                continue;
+            }
+
+            $employeeId = isset($row['created_by_id']) ? (int)$row['created_by_id'] : 0;
+            $name = isset($row['employee_name']) && trim((string)$row['employee_name']) !== '' ? trim((string)$row['employee_name']) : '';
+            if ($name === '' && isset($row['created_by_name'])) {
+                $name = trim((string)$row['created_by_name']);
+            }
+            if ($name === '' && isset($content['applicant_name'])) {
+                $name = trim((string)$content['applicant_name']);
+            }
+            $email = isset($row['employee_email']) && trim((string)$row['employee_email']) !== '' ? trim((string)$row['employee_email']) : '';
+            if ($email === '' && isset($row['created_by_email'])) {
+                $email = trim((string)$row['created_by_email']);
+            }
+            if ($email === '' && isset($content['applicant_email'])) {
+                $email = trim((string)$content['applicant_email']);
+            }
+            if ($email === '' && isset($content['writer_email'])) {
+                $email = trim((string)$content['writer_email']);
+            }
+            $department = isset($row['employee_department']) && trim((string)$row['employee_department']) !== '' ? trim((string)$row['employee_department']) : '';
+            if ($department === '' && isset($content['department'])) {
+                $department = trim((string)$content['department']);
+            }
+            $position = isset($row['employee_position']) && trim((string)$row['employee_position']) !== '' ? trim((string)$row['employee_position']) : '';
+            if ($position === '' && isset($content['position'])) {
+                $position = trim((string)$content['position']);
+            }
+            $role = isset($row['employee_role']) ? trim((string)$row['employee_role']) : '';
+            $typeLabel = approval_leave_type_label_from_content($content);
+            $statusLabel = approval_leave_status_label_from_type($typeLabel);
+            $dedupeKey = $employeeId > 0 ? 'id:' . $employeeId : ($email !== '' ? 'email:' . strtolower($email) : 'name:' . $name);
+            if ($dedupeKey === 'name:' || isset($seen[$dedupeKey])) {
+                continue;
+            }
+            $seen[$dedupeKey] = 1;
+
+            $info = array(
+                'employee_id' => $employeeId,
+                'name' => $name !== '' ? $name : '-',
+                'email' => $email,
+                'department' => $department,
+                'position' => $position,
+                'role' => $role,
+                'start_date' => $start,
+                'end_date' => $end,
+                'period' => $start . ' ~ ' . $end,
+                'type_label' => $typeLabel,
+                'status_label' => $statusLabel,
+                'document_id' => isset($row['id']) ? (int)$row['id'] : 0
+            );
+
+            $cache[$cacheKey]['people'][count($cache[$cacheKey]['people'])] = $info;
+            if ($employeeId > 0) {
+                $cache[$cacheKey]['by_id'][$employeeId] = $info;
+            }
+            if ($email !== '') {
+                $cache[$cacheKey]['by_email'][strtolower($email)] = $info;
+            }
+            if ($name !== '') {
+                $cache[$cacheKey]['by_name'][$name] = $info;
+            }
+        }
+
+        return $cache[$cacheKey];
+    }
+}
+
+if (!function_exists('approval_current_leave_people')) {
+    function approval_current_leave_people($pdo, $baseDate)
+    {
+        $index = approval_current_leave_index($pdo, $baseDate);
+        return isset($index['people']) && is_array($index['people']) ? $index['people'] : array();
+    }
+}
+
+if (!function_exists('approval_current_leave_info_for_employee')) {
+    function approval_current_leave_info_for_employee($pdo, $employee, $baseDate)
+    {
+        if (!is_array($employee)) {
+            $employee = array('id' => (int)$employee);
+        }
+        $index = approval_current_leave_index($pdo, $baseDate);
+        return approval_current_leave_info_from_index($index, $employee);
+    }
+}
+
 if (!function_exists('approval_is_employee_on_leave')) {
     function approval_is_employee_on_leave($pdo, $employeeId, $baseDate)
     {
-        $employeeId = (int)$employeeId;
-        if (!$pdo || $employeeId <= 0 || !approval_table_exists($pdo, 'cpms_leave_records')) {
-            return false;
-        }
-        $baseDate = trim((string)$baseDate);
-        $ts = strtotime($baseDate);
-        if (!$ts) {
-            $baseDate = date('Y-m-d');
-        } else {
-            $baseDate = date('Y-m-d', $ts);
-        }
-        try {
-            $st = $pdo->prepare("SELECT COUNT(*) FROM cpms_leave_records WHERE employee_id=:employee_id AND leave_date=:leave_date AND COALESCE(leave_amount,0) > 0");
-            $st->execute(array(':employee_id' => $employeeId, ':leave_date' => $baseDate));
-            return ((int)$st->fetchColumn() > 0);
-        } catch (Exception $e) {
-            return false;
-        }
+        return is_array(approval_current_leave_info_for_employee($pdo, array('id' => (int)$employeeId), $baseDate));
     }
 }
 

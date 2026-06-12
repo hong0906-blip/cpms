@@ -47,6 +47,12 @@ if (!$assignee) {
     cpms_tasks_redirect_back();
 }
 
+$assigneeLeaveInfo = function_exists('approval_current_leave_info_for_employee') ? approval_current_leave_info_for_employee($pdo, $assignee, cpms_tasks_today()) : null;
+if (is_array($assigneeLeaveInfo)) {
+    flash_set('danger', approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+    cpms_tasks_redirect_back();
+}
+
 if ($department === '') $department = isset($assignee['department']) ? (string)$assignee['department'] : '';
 $department = cpms_tasks_normalize_department($department);
 if ($dueTime === '') $dueTime = '18:00';

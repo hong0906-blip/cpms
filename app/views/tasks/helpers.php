@@ -2,6 +2,7 @@
 use App\Core\Auth;
 
 require_once dirname(__DIR__) . '/admin/leave_management_helpers.php';
+require_once dirname(__DIR__) . '/approval/_common.php';
 
 if (!function_exists('cpms_tasks_now')) {
 function cpms_tasks_now()

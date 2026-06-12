@@ -9,6 +9,7 @@ require_once __DIR__ . '/partials/project_cost_summary_helper.php';
 require_once __DIR__ . '/../construction/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../tasks/dashboard_sections.php';
 require_once __DIR__ . '/../attendance/common.php';
+require_once __DIR__ . '/../approval/_common.php';
 
 use App\Core\Db;
 
@@ -189,11 +190,12 @@ $myUserId = cpms_find_employee_id_by_email($pdo, $userEmail);
 
 $today = attendance_today();
 list($weekStart, $weekEnd) = attendance_week_range($today);
+$currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, $today) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
 $risk52 = array();
 $absent = array();
 $presentPeople = array();
-$leavePeople = array();
-$leaveToday = 0;
+$leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? $currentLeaveIndex['people'] : array();
+$leaveToday = count($leavePeople);
 $todayPresent = 0;
 
 $leaveExTypes = array('월차', '연차', '반차', '오전반차', '오후반차', '월차반차', '연차반차', '오전월차반차', '오후월차반차', '오전연차반차', '오후연차반차', '대체휴무', '기타휴무', '휴무');
@@ -271,18 +273,7 @@ if ($pdo) {
             if ((int)$r['m'] > 3120) $risk52[] = $r;
         }
 
-        $leaveQMarks = implode(',', array_fill(0, count($leaveExTypes), '?'));
-        $leaveSql = "SELECT DISTINCT employee_id
-                     FROM cpms_leave_records
-                     WHERE leave_date = ?
-                       AND leave_type IN (" . $leaveQMarks . ")";
-        $leaveParams = array_merge(array($today), $leaveExTypes);
-        $stLeaveEx = $pdo->prepare($leaveSql);
-        $stLeaveEx->execute($leaveParams);
-        $leaveExMap = array();
-        foreach ($stLeaveEx->fetchAll(PDO::FETCH_COLUMN, 0) as $eid) {
-            $leaveExMap[(int)$eid] = 1;
-        }
+        $leaveExMap = isset($currentLeaveIndex['by_id']) && is_array($currentLeaveIndex['by_id']) ? $currentLeaveIndex['by_id'] : array();
 
         $activeRows = $pdo->query("SELECT id, name, department, position FROM employees WHERE is_active = 1")->fetchAll();
         $stAtt = $pdo->prepare("SELECT DISTINCT employee_id
@@ -314,25 +305,8 @@ if ($pdo) {
             );
         }
 
-        $leaveMainQMarks = implode(',', array_fill(0, count($leaveMainTypes), '?'));
-        $leaveMainSql = "SELECT COUNT(DISTINCT employee_id)
-                         FROM cpms_leave_records
-                         WHERE leave_date = ?
-                           AND leave_type IN (" . $leaveMainQMarks . ")";
-        $leaveMainParams = array_merge(array($today), $leaveMainTypes);
-        $stL = $pdo->prepare($leaveMainSql);
-        $stL->execute($leaveMainParams);
-        $leaveToday = (int)$stL->fetchColumn();
-
-        $leavePeopleSql = "SELECT DISTINCT e.name, e.department, e.position
-                           FROM cpms_leave_records l
-                           INNER JOIN employees e ON e.id = l.employee_id
-                           WHERE l.leave_date = ?
-                             AND l.leave_type IN (" . $leaveMainQMarks . ")
-                           ORDER BY e.name ASC";
-        $stLeavePeople = $pdo->prepare($leavePeopleSql);
-        $stLeavePeople->execute($leaveMainParams);
-        $leavePeople = $stLeavePeople->fetchAll();
+        $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? $currentLeaveIndex['people'] : array();
+        $leaveToday = count($leavePeople);
     } catch (Exception $e) {
     }
 
@@ -522,6 +496,34 @@ if ($pdo) {
             </div>
         <?php endif; ?>
     </div>
+</div>
+
+<div class="bg-white/80 rounded-3xl p-6 border mb-6">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        <div>
+            <h3 class="text-2xl font-extrabold text-gray-900"><?php echo h(approval_ko('%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%20%EC%9D%B8%EC%9B%90')); ?></h3>
+        </div>
+        <span class="px-4 py-2 rounded-2xl bg-indigo-50 text-indigo-700 font-extrabold border border-indigo-100"><?php echo count($leavePeople); ?><?php echo h(approval_ko('%EB%AA%85')); ?></span>
+    </div>
+    <?php if (count($leavePeople) === 0): ?>
+        <div class="p-6 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500"><?php echo h(approval_ko('%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B8%20%EC%9D%B8%EC%9B%90%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?></div>
+    <?php else: ?>
+        <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            <?php foreach ($leavePeople as $person): ?>
+                <div class="p-4 rounded-2xl border border-indigo-100 bg-indigo-50/60">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="text-lg font-extrabold text-gray-900 break-words"><?php echo h(isset($person['name']) ? $person['name'] : '-'); ?></div>
+                        <span class="px-2 py-1 rounded-full bg-white text-indigo-700 border border-indigo-100 text-xs font-extrabold whitespace-nowrap"><?php echo h(isset($person['status_label']) ? $person['status_label'] : approval_ko('%ED%9C%B4%EA%B0%80%EC%A4%91')); ?></span>
+                    </div>
+                    <div class="text-sm text-gray-600 mt-1"><?php echo h((isset($person['department']) && trim((string)$person['department']) !== '' ? $person['department'] : '-') . ' / ' . (isset($person['position']) && trim((string)$person['position']) !== '' ? $person['position'] : (isset($person['role']) && trim((string)$person['role']) !== '' ? $person['role'] : '-'))); ?></div>
+                    <div class="text-sm font-bold text-gray-800 mt-2"><?php echo h(isset($person['period']) ? $person['period'] : '-'); ?></div>
+                    <?php if (isset($person['type_label']) && trim((string)$person['type_label']) !== ''): ?>
+                        <div class="text-xs text-gray-500 mt-1"><?php echo h($person['type_label']); ?></div>
+                    <?php endif; ?>
+                </div>
+            <?php endforeach; ?>
+        </div>
+    <?php endif; ?>
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">

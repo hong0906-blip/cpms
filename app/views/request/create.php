@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../approval/_common.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -45,6 +46,26 @@ if (!Auth::canManageConstruction()) {
     exit;
 }
 
+$pdo = Db::pdo();
+$targetEmployee = array('id' => $targetUserId);
+if ($pdo && approval_table_exists($pdo, 'employees')) {
+    try {
+        $stTarget = $pdo->prepare("SELECT id, name, email, department, position FROM employees WHERE id=:id LIMIT 1");
+        $stTarget->execute(array(':id' => $targetUserId));
+        $rowTarget = $stTarget->fetch(PDO::FETCH_ASSOC);
+        if ($rowTarget) {
+            $targetEmployee = $rowTarget;
+        }
+    } catch (Exception $e) {
+    }
+}
+$targetLeaveInfo = function_exists('approval_current_leave_info_for_employee') ? approval_current_leave_info_for_employee($pdo, $targetEmployee, date('Y-m-d')) : null;
+if (is_array($targetLeaveInfo)) {
+    http_response_code(400);
+    echo json_encode(array('ok' => false, 'message' => approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')));
+    exit;
+}
+
 if ($requestType === 'LABOR_MANPOWER_CHANGE') {
     $projectId = isset($payload['project_id']) ? (int)$payload['project_id'] : 0;
     $requestValue = isset($payload['requested_value']) ? (float)$payload['requested_value'] : 0.0;
@@ -58,7 +79,6 @@ if ($requestType === 'LABOR_MANPOWER_CHANGE') {
         echo json_encode(array('ok' => false, 'message' => '요청 공수는 0 이상만 가능합니다.'));
         exit;
     }
-    $pdo = Db::pdo();
     if (!cpms_is_project_member_or_executive($pdo, $projectId, $role, (string)Auth::userEmail())) {
         http_response_code(403);
         echo json_encode(array('ok' => false, 'message' => '담당 프로젝트만 요청할 수 있습니다.'));
@@ -66,7 +86,6 @@ if ($requestType === 'LABOR_MANPOWER_CHANGE') {
     }
 }
 
-$pdo = Db::pdo();
 $requesterUserId = cpms_find_employee_id_by_email($pdo, (string)Auth::userEmail());
 $requestId = cpms_request_new_id();
 $now = date('Y-m-d H:i:s');
