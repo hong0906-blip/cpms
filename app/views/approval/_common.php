@@ -122,6 +122,449 @@ if (!function_exists('approval_is_management_only_doc_type')) {
     }
 }
 
+if (!function_exists('approval_auto_delegate_target_doc_type')) {
+    function approval_auto_delegate_target_doc_type($type)
+    {
+        $type = strtolower(trim((string)$type));
+        return in_array($type, array('leave', 'proposal'), true);
+    }
+}
+
+if (!function_exists('approval_normalize_compare_text')) {
+    function approval_normalize_compare_text($value)
+    {
+        $value = trim((string)$value);
+        $value = str_replace(array(' ', "\t", "\r", "\n", '-', '_', '/', '.', ','), '', $value);
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($value, 'UTF-8');
+        }
+        return strtolower($value);
+    }
+}
+
+if (!function_exists('approval_employee_identity_matches')) {
+    function approval_employee_identity_matches($employee, $id, $email, $name)
+    {
+        if (!is_array($employee)) {
+            return false;
+        }
+        if ((int)$id > 0 && isset($employee['id']) && (int)$employee['id'] === (int)$id) {
+            return true;
+        }
+        if (trim((string)$email) !== '' && isset($employee['email']) && strtolower(trim((string)$employee['email'])) === strtolower(trim((string)$email))) {
+            return true;
+        }
+        if (trim((string)$name) !== '' && isset($employee['name']) && trim((string)$employee['name']) === trim((string)$name)) {
+            return true;
+        }
+        return false;
+    }
+}
+
+if (!function_exists('approval_line_matches_employee')) {
+    function approval_line_matches_employee($line, $employee)
+    {
+        if (!is_array($line) || !is_array($employee)) {
+            return false;
+        }
+        $id = isset($line['approver_id']) ? (int)$line['approver_id'] : (isset($line['emp']['id']) ? (int)$line['emp']['id'] : 0);
+        $email = isset($line['approver_email']) ? (string)$line['approver_email'] : (isset($line['emp']['email']) ? (string)$line['emp']['email'] : '');
+        $name = isset($line['approver_name']) ? (string)$line['approver_name'] : (isset($line['emp']['name']) ? (string)$line['emp']['name'] : '');
+        return approval_employee_identity_matches($employee, $id, $email, $name);
+    }
+}
+
+if (!function_exists('approval_role_is_vp')) {
+    function approval_role_is_vp($role)
+    {
+        $roleNorm = approval_normalize_compare_text(approval_role_label($role));
+        $vpNorm = approval_normalize_compare_text(approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5'));
+        return ($roleNorm === 'vp' || $roleNorm === $vpNorm);
+    }
+}
+
+if (!function_exists('approval_role_is_ceo')) {
+    function approval_role_is_ceo($role)
+    {
+        $roleNorm = approval_normalize_compare_text(approval_role_label($role));
+        $ceoNorm = approval_normalize_compare_text(approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC'));
+        $ceoShortNorm = approval_normalize_compare_text(approval_ko('%EB%8C%80%ED%91%9C'));
+        return ($roleNorm === 'ceo' || $roleNorm === $ceoNorm || $roleNorm === $ceoShortNorm);
+    }
+}
+
+if (!function_exists('approval_role_is_team_or_pm')) {
+    function approval_role_is_team_or_pm($role)
+    {
+        $roleNorm = approval_normalize_compare_text(approval_role_label($role));
+        $teamNorm = approval_normalize_compare_text(approval_ko('%ED%8C%80%EC%9E%A5'));
+        return ($roleNorm === 'pm' || $roleNorm === $teamNorm);
+    }
+}
+
+if (!function_exists('approval_employee_text_blob')) {
+    function approval_employee_text_blob($employee)
+    {
+        if (!is_array($employee)) {
+            return '';
+        }
+        $parts = array();
+        $keys = array('name', 'position', 'role', 'department');
+        for ($i = 0; $i < count($keys); $i++) {
+            if (isset($employee[$keys[$i]]) && trim((string)$employee[$keys[$i]]) !== '') {
+                $parts[] = (string)$employee[$keys[$i]];
+            }
+        }
+        return approval_normalize_compare_text(implode(' ', $parts));
+    }
+}
+
+if (!function_exists('approval_employee_is_vp')) {
+    function approval_employee_is_vp($employee)
+    {
+        $blob = approval_employee_text_blob($employee);
+        if ($blob === '') {
+            return false;
+        }
+        $words = array(
+            approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5'),
+            'vicepresident',
+            'vicepres',
+            'vp'
+        );
+        for ($i = 0; $i < count($words); $i++) {
+            $w = approval_normalize_compare_text($words[$i]);
+            if ($w !== '' && strpos($blob, $w) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+if (!function_exists('approval_employee_is_executive')) {
+    function approval_employee_is_executive($employee)
+    {
+        $blob = approval_employee_text_blob($employee);
+        if ($blob === '') {
+            return false;
+        }
+        $words = array(
+            'executive',
+            'ceo',
+            'president',
+            'vp',
+            'vicepresident',
+            approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC'),
+            approval_ko('%EB%8C%80%ED%91%9C'),
+            approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5'),
+            approval_ko('%EC%83%81%EB%AC%B4'),
+            approval_ko('%EC%A0%84%EB%AC%B4'),
+            approval_ko('%EC%9D%B4%EC%82%AC')
+        );
+        for ($i = 0; $i < count($words); $i++) {
+            $w = approval_normalize_compare_text($words[$i]);
+            if ($w !== '' && strpos($blob, $w) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+if (!function_exists('approval_is_employee_on_leave')) {
+    function approval_is_employee_on_leave($pdo, $employeeId, $baseDate)
+    {
+        $employeeId = (int)$employeeId;
+        if (!$pdo || $employeeId <= 0 || !approval_table_exists($pdo, 'cpms_leave_records')) {
+            return false;
+        }
+        $baseDate = trim((string)$baseDate);
+        $ts = strtotime($baseDate);
+        if (!$ts) {
+            $baseDate = date('Y-m-d');
+        } else {
+            $baseDate = date('Y-m-d', $ts);
+        }
+        try {
+            $st = $pdo->prepare("SELECT COUNT(*) FROM cpms_leave_records WHERE employee_id=:employee_id AND leave_date=:leave_date AND COALESCE(leave_amount,0) > 0");
+            $st->execute(array(':employee_id' => $employeeId, ':leave_date' => $baseDate));
+            return ((int)$st->fetchColumn() > 0);
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('approval_auto_delegate_reason_label')) {
+    function approval_auto_delegate_reason_label($reasonCode)
+    {
+        $reasonCode = trim((string)$reasonCode);
+        $map = array(
+            'higher_position' => approval_ko('%EC%83%81%EC%9C%84%20%EC%A7%81%EA%B8%89%20%EA%B8%B0%EC%95%88%EC%9C%BC%EB%A1%9C%20%EC%9D%B8%ED%95%9C%20%EC%9E%90%EB%8F%99%20%EC%A0%84%EA%B2%B0'),
+            'on_leave' => approval_ko('%ED%9C%B4%EA%B0%80%EC%9E%90%20%EC%9E%90%EB%8F%99%20%EC%A0%84%EA%B2%B0'),
+            'self' => approval_ko('%EB%B3%B8%EC%9D%B8%20%EA%B2%B0%EC%9E%AC%EB%8B%A8%EA%B3%84%20%EC%9E%90%EB%8F%99%20%EC%A0%84%EA%B2%B0'),
+            'previous_step' => approval_ko('%EC%9D%B4%EC%A0%84%20%EB%8B%A8%EA%B3%84%20%EC%9E%90%EB%8F%99%20%EC%A0%84%EA%B2%B0'),
+            'vp_leave_ceo_proxy' => approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5%20%ED%9C%B4%EA%B0%80%EB%A1%9C%20%EB%8C%80%ED%91%9C%20%EB%8C%80%EB%A6%AC%20%EA%B2%B0%EC%9E%AC'),
+            'leave_ceo_default' => approval_ko('%ED%9C%B4%EA%B0%80%EA%B3%84%20%EB%8C%80%ED%91%9C%20%EB%8B%A8%EA%B3%84%20%EC%9E%90%EB%8F%99%20%EC%A0%84%EA%B2%B0'),
+            'auto' => approval_ko('%EC%9E%90%EB%8F%99%20%EC%A0%84%EA%B2%B0')
+        );
+        return isset($map[$reasonCode]) ? $map[$reasonCode] : approval_ko('%EC%9E%90%EB%8F%99%20%EC%A0%84%EA%B2%B0');
+    }
+}
+
+if (!function_exists('approval_auto_delegate_note')) {
+    function approval_auto_delegate_note($line, $reason)
+    {
+        $role = '';
+        $name = '';
+        if (is_array($line)) {
+            $role = isset($line['role_type']) ? (string)$line['role_type'] : (isset($line['role']) ? (string)$line['role'] : '');
+            $name = isset($line['approver_name']) ? (string)$line['approver_name'] : (isset($line['emp']['name']) ? (string)$line['emp']['name'] : '');
+        }
+        $label = approval_role_label($role);
+        $parts = array();
+        if ($label !== '-' && $label !== '') {
+            $parts[] = $label;
+        }
+        if (trim($name) !== '') {
+            $parts[] = trim($name);
+        }
+        $prefix = count($parts) > 0 ? implode(' / ', $parts) . ' - ' : '';
+        return $prefix . trim((string)$reason);
+    }
+}
+
+if (!function_exists('approval_line_auto_note')) {
+    function approval_line_auto_note($line)
+    {
+        if (!is_array($line) || !isset($line['reject_reason'])) {
+            return '';
+        }
+        return trim((string)$line['reject_reason']);
+    }
+}
+
+if (!function_exists('approval_line_is_delegated_status')) {
+    function approval_line_is_delegated_status($line)
+    {
+        if (!is_array($line)) {
+            return false;
+        }
+        $status = isset($line['line_status']) ? strtoupper(trim((string)$line['line_status'])) : '';
+        return ($status === 'DELEGATED' || (isset($line['is_delegated']) && (int)$line['is_delegated'] === 1));
+    }
+}
+
+if (!function_exists('approval_insert_auto_delegate_log')) {
+    function approval_insert_auto_delegate_log($pdo, $documentId, $lineId, $line, $reason, $actor)
+    {
+        if (!$pdo || (int)$documentId <= 0 || !approval_table_exists($pdo, 'cpms_approval_logs')) {
+            return;
+        }
+        $actorId = 0;
+        $actorName = approval_ko('%EC%8B%9C%EC%8A%A4%ED%85%9C');
+        $actorEmail = '';
+        if (is_array($actor)) {
+            if (isset($actor['id'])) {
+                $actorId = (int)$actor['id'];
+            }
+            if (isset($actor['name']) && trim((string)$actor['name']) !== '') {
+                $actorName = trim((string)$actor['name']);
+            }
+            if (isset($actor['email'])) {
+                $actorEmail = trim((string)$actor['email']);
+            }
+        }
+        $note = approval_auto_delegate_note($line, $reason);
+        try {
+            $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,:l,:a,:n,:e,'DELEGATED',:m,NOW())")
+                ->execute(array(':d' => (int)$documentId, ':l' => ((int)$lineId > 0 ? (int)$lineId : null), ':a' => $actorId, ':n' => $actorName, ':e' => $actorEmail, ':m' => $note));
+        } catch (Exception $e) {
+        }
+    }
+}
+
+if (!function_exists('approval_mark_line_delegated')) {
+    function approval_mark_line_delegated($pdo, $documentId, $line, $reason, $actor, $delegatedByRole)
+    {
+        if (!$pdo || !is_array($line) || !isset($line['id']) || (int)$line['id'] <= 0) {
+            return;
+        }
+        $lineId = (int)$line['id'];
+        $oldStatus = isset($line['line_status']) ? strtoupper(trim((string)$line['line_status'])) : '';
+        $sets = array("line_status='DELEGATED'");
+        $params = array(':id' => $lineId);
+        if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'acted_at')) {
+            $sets[] = 'acted_at=NOW()';
+        }
+        if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated')) {
+            $sets[] = 'is_delegated=1';
+        }
+        if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'reject_reason')) {
+            $sets[] = 'reject_reason=:reason_note';
+            $params[':reason_note'] = trim((string)$reason);
+        }
+        if ($delegatedByRole !== null && approval_table_column_exists($pdo, 'cpms_approval_lines', 'delegated_by_role')) {
+            $sets[] = 'delegated_by_role=:delegated_by_role';
+            $params[':delegated_by_role'] = $delegatedByRole;
+        }
+        try {
+            $pdo->prepare("UPDATE cpms_approval_lines SET " . implode(',', $sets) . " WHERE id=:id")->execute($params);
+            if ($oldStatus !== 'DELEGATED') {
+                approval_insert_auto_delegate_log($pdo, $documentId, $lineId, $line, $reason, $actor);
+            }
+        } catch (Exception $e) {
+        }
+    }
+}
+
+if (!function_exists('approval_document_requires_ceo_for_vp_leave')) {
+    function approval_document_requires_ceo_for_vp_leave($pdo, $docType, $lines, $baseDate)
+    {
+        if (!approval_auto_delegate_target_doc_type($docType) || !is_array($lines)) {
+            return false;
+        }
+        for ($i = 0; $i < count($lines); $i++) {
+            $line = $lines[$i];
+            $role = isset($line['role_type']) ? (string)$line['role_type'] : (isset($line['role']) ? (string)$line['role'] : '');
+            if (!approval_role_is_vp($role)) {
+                continue;
+            }
+            $status = isset($line['line_status']) ? strtoupper(trim((string)$line['line_status'])) : '';
+            if (in_array($status, array('APPROVED', 'REJECTED'), true)) {
+                continue;
+            }
+            $employeeId = isset($line['approver_id']) ? (int)$line['approver_id'] : (isset($line['emp']['id']) ? (int)$line['emp']['id'] : 0);
+            if (approval_is_employee_on_leave($pdo, $employeeId, $baseDate)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+if (!function_exists('approval_force_ceo_waiting_for_vp_leave')) {
+    function approval_force_ceo_waiting_for_vp_leave($pdo, $documentId, $lines)
+    {
+        if (!$pdo || (int)$documentId <= 0 || !is_array($lines)) {
+            return;
+        }
+        for ($i = 0; $i < count($lines); $i++) {
+            $line = $lines[$i];
+            if (!isset($line['id']) || !approval_role_is_ceo(isset($line['role_type']) ? $line['role_type'] : '')) {
+                continue;
+            }
+            $status = isset($line['line_status']) ? strtoupper(trim((string)$line['line_status'])) : '';
+            if (in_array($status, array('APPROVED', 'REJECTED'), true)) {
+                continue;
+            }
+            $sets = array("line_status='WAITING'");
+            $params = array(':id' => (int)$line['id']);
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated')) {
+                $sets[] = 'is_delegated=0';
+            }
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'delegated_by_role')) {
+                $sets[] = 'delegated_by_role=NULL';
+            }
+            try {
+                $pdo->prepare("UPDATE cpms_approval_lines SET " . implode(',', $sets) . " WHERE id=:id")->execute($params);
+            } catch (Exception $e) {
+            }
+        }
+    }
+}
+
+if (!function_exists('approval_move_to_next_pending_line')) {
+    function approval_move_to_next_pending_line($pdo, $docRow, $documentId, $actor)
+    {
+        $result = array('doc_status' => 'APPROVED', 'step' => 0, 'next_line' => null);
+        if (!$pdo || (int)$documentId <= 0) {
+            return $result;
+        }
+        $docType = isset($docRow['doc_type']) ? (string)$docRow['doc_type'] : '';
+        $baseDate = date('Y-m-d');
+        $ceoRole = approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC');
+        $vpRole = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5');
+        try {
+            $st = $pdo->prepare("SELECT * FROM cpms_approval_lines WHERE document_id=:d ORDER BY line_order ASC");
+            $st->execute(array(':d' => (int)$documentId));
+            $lines = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($lines)) {
+                $lines = array();
+            }
+        } catch (Exception $e) {
+            $lines = array();
+        }
+        $limit = count($lines);
+        $forceCeo = approval_document_requires_ceo_for_vp_leave($pdo, $docType, $lines, $baseDate);
+        if ($forceCeo) {
+            approval_force_ceo_waiting_for_vp_leave($pdo, $documentId, $lines);
+            try {
+                $st = $pdo->prepare("SELECT * FROM cpms_approval_lines WHERE document_id=:d ORDER BY line_order ASC");
+                $st->execute(array(':d' => (int)$documentId));
+                $lines = $st->fetchAll(PDO::FETCH_ASSOC);
+                if (!is_array($lines)) {
+                    $lines = array();
+                }
+            } catch (Exception $e) {
+                $lines = array();
+            }
+        }
+        for ($i = 0; $i < count($lines) && $i < $limit; $i++) {
+            $line = $lines[$i];
+            $status = isset($line['line_status']) ? strtoupper(trim((string)$line['line_status'])) : '';
+            if ($status !== 'WAITING') {
+                continue;
+            }
+            $role = isset($line['role_type']) ? (string)$line['role_type'] : '';
+            $employeeId = isset($line['approver_id']) ? (int)$line['approver_id'] : 0;
+            if (approval_auto_delegate_target_doc_type($docType) && approval_role_is_vp($role) && approval_is_employee_on_leave($pdo, $employeeId, $baseDate)) {
+                approval_mark_line_delegated($pdo, $documentId, $line, approval_auto_delegate_reason_label('vp_leave_ceo_proxy'), $actor, $ceoRole);
+                continue;
+            }
+            if ($docType === 'leave' && approval_role_is_ceo($role) && !$forceCeo) {
+                approval_mark_line_delegated($pdo, $documentId, $line, approval_auto_delegate_reason_label('leave_ceo_default'), $actor, $vpRole);
+                continue;
+            }
+            if (approval_line_is_delegated_status($line)) {
+                $note = approval_line_auto_note($line);
+                if ($note === '') {
+                    $note = approval_auto_delegate_reason_label('auto');
+                }
+                approval_mark_line_delegated($pdo, $documentId, $line, $note, $actor, isset($line['delegated_by_role']) ? $line['delegated_by_role'] : null);
+                continue;
+            }
+            if (approval_auto_delegate_target_doc_type($docType) && approval_is_employee_on_leave($pdo, $employeeId, $baseDate)) {
+                approval_mark_line_delegated($pdo, $documentId, $line, approval_auto_delegate_reason_label('on_leave'), $actor, null);
+                continue;
+            }
+            $sets = array("line_status='PENDING'");
+            $params = array(':id' => (int)$line['id']);
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated')) {
+                $sets[] = 'is_delegated=0';
+            }
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'delegated_by_role')) {
+                $sets[] = 'delegated_by_role=NULL';
+            }
+            $pdo->prepare("UPDATE cpms_approval_lines SET " . implode(',', $sets) . " WHERE id=:id")->execute($params);
+            $line['line_status'] = 'PENDING';
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated')) {
+                $line['is_delegated'] = 0;
+            }
+            $result['doc_status'] = 'PENDING';
+            $result['step'] = isset($line['line_order']) ? (int)$line['line_order'] : 0;
+            $result['next_line'] = $line;
+            return $result;
+        }
+        if (count($lines) > 0) {
+            $last = $lines[count($lines) - 1];
+            $result['step'] = isset($last['line_order']) ? (int)$last['line_order'] : 0;
+        }
+        return $result;
+    }
+}
+
 if (!function_exists('approval_current_user_email')) {
     function approval_current_user_email($user)
     {

@@ -112,37 +112,12 @@ try {
         $pdo->prepare("UPDATE cpms_approval_lines SET line_status='APPROVED', acted_at=NOW(), sign_path=:s WHERE id=:id AND line_status='PENDING'")
             ->execute(array(':s' => $sign, ':id' => $line['id']));
 
-        // Leave form rule: CEO is always delegated.
-        if (isset($doc['doc_type']) && (string)$doc['doc_type'] === 'leave') {
-            if ($hasLineDelegated) {
-                $pdo->prepare("UPDATE cpms_approval_lines SET line_status='DELEGATED', is_delegated=1, delegated_by_role=:byRole WHERE document_id=:d AND role_type=:ceoRole AND line_status IN ('WAITING','PENDING')")
-                    ->execute(array(':byRole' => $vpRole, ':d' => $id, ':ceoRole' => $ceoRole));
-            } else {
-                $pdo->prepare("UPDATE cpms_approval_lines SET line_status='DELEGATED' WHERE document_id=:d AND role_type=:ceoRole AND line_status IN ('WAITING','PENDING')")
-                    ->execute(array(':d' => $id, ':ceoRole' => $ceoRole));
-            }
-        }
-
-        $nextSql = "SELECT id,line_order,approver_id FROM cpms_approval_lines WHERE document_id=:d AND line_status='WAITING'";
-        if ($hasLineDelegated) {
-            $nextSql .= " AND is_delegated=0";
-        }
-        if (isset($doc['doc_type']) && (string)$doc['doc_type'] === 'leave') {
-            $nextSql .= " AND role_type<>:ceoRole";
-        }
-        $nextSql .= " ORDER BY line_order ASC LIMIT 1";
-        $nextSt = $pdo->prepare($nextSql);
-        $nextParams = array(':d' => $id);
-        if (isset($doc['doc_type']) && (string)$doc['doc_type'] === 'leave') {
-            $nextParams[':ceoRole'] = $ceoRole;
-        }
-        $nextSt->execute($nextParams);
-        $nextLine = $nextSt->fetch(PDO::FETCH_ASSOC);
+        $advance = approval_move_to_next_pending_line($pdo, $doc, $id, array('id' => $uid, 'name' => $actorName, 'email' => $actorEmail));
+        $nextLine = isset($advance['next_line']) ? $advance['next_line'] : null;
 
         if ($nextLine) {
-            $pdo->prepare("UPDATE cpms_approval_lines SET line_status='PENDING' WHERE id=:id")->execute(array(':id' => $nextLine['id']));
             $docStatus = 'PENDING';
-            $step = (int)$nextLine['line_order'];
+            $step = isset($advance['step']) ? (int)$advance['step'] : (int)$nextLine['line_order'];
             try {
                 $msg = approval_build_request_message(isset($doc['doc_type']) ? $doc['doc_type'] : '', isset($doc['title']) ? $doc['title'] : '', isset($doc['created_by_name']) ? $doc['created_by_name'] : '');
                 approval_queue_notification($pdo, $id, 'REQUEST', $nextLine['approver_id'], $msg);
@@ -150,7 +125,7 @@ try {
             }
         } else {
             $docStatus = 'APPROVED';
-            $step = (int)$line['line_order'];
+            $step = isset($advance['step']) && (int)$advance['step'] > 0 ? (int)$advance['step'] : (int)$line['line_order'];
             $creatorId = isset($doc['created_by_id']) ? (int)$doc['created_by_id'] : 0;
             if ($creatorId > 0) {
                 try {

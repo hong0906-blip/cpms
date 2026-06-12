@@ -22,7 +22,8 @@
 .approval-name-row td{font-weight:700}
 .approval-time-row td{font-size:11px;color:#444}
 .approval-delegated-cell{position:relative}
-.approval-delegated-cell:after{content:"";position:absolute;left:10%;top:50%;width:80%;border-top:2px solid #111;transform:rotate(-35deg)}
+.approval-delegated-cell:after{content:"";position:absolute;left:10%;top:50%;width:80%;border-top:2px solid #111;transform:rotate(-35deg);opacity:.45;z-index:1}
+.approval-delegated-cell .approval-sign-cell{position:relative;z-index:2}
 .approval-delegated-status{font-weight:800;color:#111}
 .approval-reference-box{margin:10px 0 14px 0;border:1px solid #d8dbe8;background:#f8fafc;padding:10px}
 .approval-reference-title{font-weight:800;margin-bottom:6px}

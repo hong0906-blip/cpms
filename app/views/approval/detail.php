@@ -56,6 +56,19 @@ if (isset($d['doc_type']) && $d['doc_type'] === 'proposal' && approval_table_exi
 }
 
 $references = approval_fetch_references($pdo, $id);
+$approvalLogs = array();
+if (approval_table_exists($pdo, 'cpms_approval_logs')) {
+    try {
+        $logSt = $pdo->prepare("SELECT l.*, al.role_type, al.approver_name AS line_approver_name FROM cpms_approval_logs l LEFT JOIN cpms_approval_lines al ON al.id=l.line_id WHERE l.document_id=:id ORDER BY l.created_at ASC, l.id ASC");
+        $logSt->execute(array(':id' => $id));
+        $approvalLogs = $logSt->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($approvalLogs)) {
+            $approvalLogs = array();
+        }
+    } catch (Exception $e) {
+        $approvalLogs = array();
+    }
+}
 $canCancel = approval_is_document_owner($pdo, $d, $u) && approval_can_cancel_document($d);
 $canDelete = approval_can_delete_document($pdo, $d, $u);
 
@@ -185,6 +198,48 @@ $isRecipientEditablePlan = ($canDecide && isset($d['doc_type']) && $d['doc_type'
             </div>
         </div>
     <?php } ?>
+
+    <div class="bg-white rounded-2xl border p-4 no-print">
+        <h3 class="font-extrabold mb-2"><?php echo h(approval_ko('%EA%B2%B0%EC%9E%AC%20%EC%9D%B4%EB%A0%A5')); ?></h3>
+        <?php if (count($approvalLogs) === 0) { ?>
+            <div class="text-sm text-gray-500"><?php echo h(approval_ko('%EA%B2%B0%EC%9E%AC%20%EC%9D%B4%EB%A0%A5%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?></div>
+        <?php } else { ?>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm border-collapse">
+                    <thead>
+                        <tr class="bg-gray-50">
+                            <th class="border px-2 py-1 text-left"><?php echo h(approval_ko('%EC%9D%BC%EC%8B%9C')); ?></th>
+                            <th class="border px-2 py-1 text-left"><?php echo h(approval_ko('%EB%8B%A8%EA%B3%84')); ?></th>
+                            <th class="border px-2 py-1 text-left"><?php echo h(approval_ko('%EC%B2%98%EB%A6%AC%EC%9E%90')); ?></th>
+                            <th class="border px-2 py-1 text-left"><?php echo h(approval_ko('%EC%B2%98%EB%A6%AC%EB%82%B4%EC%9A%A9')); ?></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php for ($li = 0; $li < count($approvalLogs); $li++) {
+                            $log = $approvalLogs[$li];
+                            $roleLabel = isset($log['role_type']) && trim((string)$log['role_type']) !== '' ? approval_role_label($log['role_type']) : '-';
+                            $actor = isset($log['actor_name']) && trim((string)$log['actor_name']) !== '' ? trim((string)$log['actor_name']) : '-';
+                            $actionType = isset($log['action_type']) ? strtoupper(trim((string)$log['action_type'])) : '';
+                            $actionText = approval_status_label($actionType);
+                            if ($actionType === 'APPROVE') {
+                                $actionText = approval_ko('%EC%8A%B9%EC%9D%B8');
+                            } else if ($actionType === 'REJECT') {
+                                $actionText = approval_ko('%EB%B0%98%EB%A0%A4');
+                            }
+                            $note = isset($log['action_note']) ? trim((string)$log['action_note']) : '';
+                        ?>
+                            <tr>
+                                <td class="border px-2 py-1"><?php echo h(isset($log['created_at']) ? $log['created_at'] : ''); ?></td>
+                                <td class="border px-2 py-1"><?php echo h($roleLabel); ?></td>
+                                <td class="border px-2 py-1"><?php echo h($actor); ?></td>
+                                <td class="border px-2 py-1"><?php echo h($actionText . ($note !== '' ? ' - ' . $note : '')); ?></td>
+                            </tr>
+                        <?php } ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php } ?>
+    </div>
 
     <?php if (isset($d['doc_type']) && $d['doc_type'] === 'leave' && approval_table_exists($pdo, 'cpms_approval_leave_deductions')) {
         $dd = $pdo->prepare("SELECT * FROM cpms_approval_leave_deductions WHERE document_id=:id LIMIT 1");

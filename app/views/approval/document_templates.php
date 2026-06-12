@@ -26,9 +26,13 @@ if (!function_exists('approval_doc_field')) {
 }
 
 if (!function_exists('approval_render_delegated_sign_cell')) {
-    function approval_render_delegated_sign_cell()
+    function approval_render_delegated_sign_cell($label = '')
     {
-        echo '<td class="approval-delegated-cell"><div class="approval-sign-cell"></div></td>';
+        $label = trim((string)$label);
+        if ($label === '') {
+            $label = approval_status_label('DELEGATED');
+        }
+        echo '<td class="approval-delegated-cell"><div class="approval-sign-cell"><span class="approval-delegated-status">' . h($label) . '</span></div></td>';
     }
 }
 
@@ -53,7 +57,7 @@ if (!function_exists('approval_render_sign_cell')) {
         }
         $sig = approval_sign_path_by_email($email);
         if ($isDelegated) {
-            approval_render_delegated_sign_cell();
+            approval_render_delegated_sign_cell(approval_status_label('DELEGATED'));
             return;
         }
         echo '<td><div class="approval-sign-cell">';
@@ -122,6 +126,13 @@ if (!function_exists('approval_render_time_cell')) {
             echo '-';
         } else if ($isDelegated) {
             echo '<span class="approval-delegated-status">' . h(approval_status_label('DELEGATED')) . '</span>';
+            $note = approval_line_auto_note($line);
+            if ($note !== '') {
+                echo '<br><span class="doc-time">' . h($note) . '</span>';
+            }
+            if ($time !== '') {
+                echo '<br><span class="doc-time">' . h($time) . '</span>';
+            }
         } else if ($status === 'APPROVED') {
             echo h($time !== '' ? $time : approval_status_label('APPROVED'));
         } else if ($status === 'REJECTED') {

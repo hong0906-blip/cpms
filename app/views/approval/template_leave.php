@@ -28,6 +28,8 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
     }
 
     $teamRole = approval_ko('%ED%8C%80%EC%9E%A5');
+    $manageRole = approval_ko('%EA%B4%80%EB%A6%AC');
+    $gongmuRole = approval_ko('%EA%B3%B5%EB%AC%B4');
     $pmRole = 'PM';
     $vpRole = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5');
     $ceoRole = approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC');
@@ -39,13 +41,20 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
         $hasPm = true;
     }
 
-    $displayRoles = array($teamRole);
+    $displayRoles = array();
+    if (isset($lineByRole[$manageRole])) {
+        $displayRoles[] = $manageRole;
+    }
+    if (isset($lineByRole[$gongmuRole])) {
+        $displayRoles[] = $gongmuRole;
+    }
+    $displayRoles[] = $teamRole;
     if ($hasPm) {
         $displayRoles[] = $pmRole;
     }
     $displayRoles[] = $vpRole;
     $displayRoles[] = $ceoRole;
-    $dynamicWidth = $hasPm ? '620px' : '520px';
+    $dynamicWidth = (count($displayRoles) * 120 + 40) . 'px';
     $ratio = 100 / count($displayRoles);
 
     echo '<div class="approval-paper leave-paper"><div class="doc-title" style="letter-spacing:0;font-size:44px">' . h(approval_ko('%ED%9C%B4%EA%B0%80%EA%B3%84')) . '</div>';
@@ -60,11 +69,12 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
     echo '</tr><tr class="approval-sign-row">';
     for ($i = 0; $i < count($displayRoles); $i++) {
         $role = $displayRoles[$i];
-        if ($role === $ceoRole) {
-            approval_render_delegated_sign_cell();
+        $roleLine = isset($lineByRole[$role]) ? $lineByRole[$role] : array();
+        if ($role === $ceoRole && $mode === 'edit') {
+            approval_render_delegated_sign_cell(approval_status_label('DELEGATED'));
             continue;
         }
-        approval_render_sign_cell(isset($lineByRole[$role]) ? $lineByRole[$role] : array(), array());
+        approval_render_sign_cell($roleLine, array());
     }
     echo '</tr><tr class="approval-name-row">';
     for ($i = 0; $i < count($displayRoles); $i++) {
@@ -84,7 +94,8 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
             approval_render_name_cell(isset($approvalOptions['vp']['name']) ? $approvalOptions['vp']['name'] : (isset($lineByRole[$vpRole]['approver_name']) ? $lineByRole[$vpRole]['approver_name'] : '-'));
         } else if ($role === $ceoRole) {
             $ceoName = isset($approvalOptions['ceo']['name']) ? $approvalOptions['ceo']['name'] : (isset($lineByRole[$ceoRole]['approver_name']) ? $lineByRole[$ceoRole]['approver_name'] : '-');
-            approval_render_name_cell($ceoName . ' (' . approval_status_label('DELEGATED') . ')');
+            $ceoDelegated = ($mode === 'edit' || approval_line_is_delegated_status(isset($lineByRole[$ceoRole]) ? $lineByRole[$ceoRole] : array()));
+            approval_render_name_cell($ceoName . ($ceoDelegated ? ' (' . approval_status_label('DELEGATED') . ')' : ''));
         } else {
             approval_render_name_cell(isset($lineByRole[$role]['approver_name']) ? $lineByRole[$role]['approver_name'] : '-');
         }
@@ -92,7 +103,7 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
     echo '</tr><tr class="approval-time-row">';
     for ($i = 0; $i < count($displayRoles); $i++) {
         $role = $displayRoles[$i];
-        if ($role === $ceoRole) {
+        if ($role === $ceoRole && $mode === 'edit') {
             approval_render_time_cell(isset($lineByRole[$role]) ? $lineByRole[$role] : array(), array('is_delegated' => 1));
             continue;
         }
