@@ -16,6 +16,16 @@ if (!function_exists('cpms_normalize_worker_key')) {
     }
 }
 
+if (!function_exists('cpms_labor_cache_key')) {
+    function cpms_labor_cache_key($pdo, $suffix) {
+        $prefix = 'nopdo';
+        if ($pdo && function_exists('spl_object_hash')) {
+            $prefix = spl_object_hash($pdo);
+        }
+        return $prefix . ':' . (string)$suffix;
+    }
+}
+
 if (!function_exists('cpms_normalize_site_key')) {
     function cpms_normalize_site_key($name) {
         $name = trim((string)$name);
@@ -100,16 +110,27 @@ if (!function_exists('cpms_pick_best_site_match')) {
 
 if (!function_exists('cpms_table_exists_labor')) {
     function cpms_table_exists_labor($pdo, $table) {
+        static $cache = array();
+        static $dbNameCache = array();
+        if (!$pdo || trim((string)$table) === '') return false;
+        $cacheKey = cpms_labor_cache_key($pdo, 'table:' . (string)$table);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         try {
-            $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            $pdoKey = cpms_labor_cache_key($pdo, 'db');
+            if (!isset($dbNameCache[$pdoKey])) {
+                $dbNameCache[$pdoKey] = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            }
+            $dbName = (string)$dbNameCache[$pdoKey];
             if ($dbName === '') return false;
             $sql = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl";
             $st = $pdo->prepare($sql);
             $st->bindValue(':db', $dbName);
             $st->bindValue(':tbl', $table);
             $st->execute();
-            return ((int)$st->fetchColumn() > 0);
+            $cache[$cacheKey] = ((int)$st->fetchColumn() > 0);
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = false;
             return false;
         }
     }
@@ -117,6 +138,10 @@ if (!function_exists('cpms_table_exists_labor')) {
 
 if (!function_exists('cpms_table_columns')) {
     function cpms_table_columns($pdo, $table) {
+        static $cache = array();
+        if (!$pdo || trim((string)$table) === '') return array();
+        $cacheKey = cpms_labor_cache_key($pdo, 'columns:' . (string)$table);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         try {
             $st = $pdo->prepare("SHOW COLUMNS FROM `$table`");
             $st->execute();
@@ -127,8 +152,10 @@ if (!function_exists('cpms_table_columns')) {
                     $cols[] = (string)$row['Field'];
                 }
             }
+            $cache[$cacheKey] = $cols;
             return $cols;
         } catch (Exception $e) {
+            $cache[$cacheKey] = array();
             return array();
         }
     }
@@ -138,6 +165,9 @@ if (!function_exists('cpms_find_attendance_site_match')) {
     function cpms_find_attendance_site_match($pdo, $projectName) {
         $empty = array('id' => 0, 'name' => '', 'score' => 0.0);
         if (!$pdo || trim((string)$projectName) === '') return $empty;
+        static $cache = array();
+        $cacheKey = cpms_labor_cache_key($pdo, 'attendance-site:' . trim((string)$projectName));
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
 
         try {
             $st = $pdo->prepare("SELECT id, name FROM sites WHERE name = :name AND active = 1 ORDER BY id DESC LIMIT 1");
@@ -145,7 +175,8 @@ if (!function_exists('cpms_find_attendance_site_match')) {
             $st->execute();
             $row = $st->fetch(PDO::FETCH_ASSOC);
             if (is_array($row) && isset($row['id'])) {
-                return array('id' => (int)$row['id'], 'name' => isset($row['name']) ? (string)$row['name'] : $projectName, 'score' => 100.0);
+                $cache[$cacheKey] = array('id' => (int)$row['id'], 'name' => isset($row['name']) ? (string)$row['name'] : $projectName, 'score' => 100.0);
+                return $cache[$cacheKey];
             }
         } catch (Exception $e) {
         }
@@ -154,8 +185,10 @@ if (!function_exists('cpms_find_attendance_site_match')) {
             $stAll = $pdo->prepare("SELECT id, name FROM sites WHERE active = 1 ORDER BY id DESC");
             $stAll->execute();
             $rows = $stAll->fetchAll(PDO::FETCH_ASSOC);
-            return cpms_pick_best_site_match($rows, $projectName, 'name', 'id');
+            $cache[$cacheKey] = cpms_pick_best_site_match($rows, $projectName, 'name', 'id');
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = $empty;
             return $empty;
         }
     }
@@ -165,6 +198,9 @@ if (!function_exists('cpms_resolve_gongsu_site_name')) {
     function cpms_resolve_gongsu_site_name($pdo, $table, $siteColumn, $projectName) {
         $projectName = trim((string)$projectName);
         if (!$pdo || $table === '' || $siteColumn === '' || $projectName === '') return $projectName;
+        static $cache = array();
+        $cacheKey = cpms_labor_cache_key($pdo, 'gongsu-site:' . $table . ':' . $siteColumn . ':' . $projectName);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
 
         try {
             $sql = "SELECT `" . $siteColumn . "` AS site_name FROM `" . $table . "` WHERE `" . $siteColumn . "` = :site LIMIT 1";
@@ -173,7 +209,8 @@ if (!function_exists('cpms_resolve_gongsu_site_name')) {
             $st->execute();
             $row = $st->fetch(PDO::FETCH_ASSOC);
             if (is_array($row) && isset($row['site_name']) && trim((string)$row['site_name']) !== '') {
-                return trim((string)$row['site_name']);
+                $cache[$cacheKey] = trim((string)$row['site_name']);
+                return $cache[$cacheKey];
             }
         } catch (Exception $e) {
         }
@@ -185,11 +222,13 @@ if (!function_exists('cpms_resolve_gongsu_site_name')) {
             $rows = $stAll->fetchAll(PDO::FETCH_ASSOC);
             $best = cpms_pick_best_site_match($rows, $projectName, 'site_name', '');
             if (isset($best['name']) && trim((string)$best['name']) !== '') {
-                return trim((string)$best['name']);
+                $cache[$cacheKey] = trim((string)$best['name']);
+                return $cache[$cacheKey];
             }
         } catch (Exception $e) {
         }
 
+        $cache[$cacheKey] = $projectName;
         return $projectName;
     }
 }
@@ -403,13 +442,20 @@ if (!function_exists('cpms_is_excluded_equipment_driver_role')) {
 
 if (!function_exists('cpms_find_gongsu_table')) {
     function cpms_find_gongsu_table($pdo) {
+        static $cache = array();
+        if (!$pdo) return array();
+        $cacheKey = cpms_labor_cache_key($pdo, 'gongsu-table');
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         $dbName = '';
         try {
             $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
         } catch (Exception $e) {
             $dbName = '';
         }
-        if ($dbName === '') return array();
+        if ($dbName === '') {
+            $cache[$cacheKey] = array();
+            return array();
+        }
 
         $candidates = array('admin_gongsu', 'attendance_gongsu', 'gongsu', 'gongsu_entries', 'attendance_entries');
         try {
@@ -434,8 +480,10 @@ if (!function_exists('cpms_find_gongsu_table')) {
             if (count($columns) === 0) continue;
             $map = cpms_map_gongsu_columns($columns);
             if (count($map) === 0) continue;
-            return array('table' => $table, 'columns' => $map);
+            $cache[$cacheKey] = array('table' => $table, 'columns' => $map);
+            return $cache[$cacheKey];
         }
+        $cache[$cacheKey] = array();
         return array();
     }
 }
@@ -540,9 +588,13 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
             );
 
         if (!$attendancePdo || $projectName === '' || $selectedMonth === '') return $result;
+        static $cache = array();
+        $cacheKey = cpms_labor_cache_key($attendancePdo, 'attendance-records:' . trim((string)$projectName) . ':' . trim((string)$selectedMonth));
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
 
         // 테이블 존재 확인 (attendance, sites)
         if (!cpms_table_exists_labor($attendancePdo, 'sites') || !cpms_table_exists_labor($attendancePdo, 'attendance')) {
+            $cache[$cacheKey] = $result;
             return $result;
         }
 
@@ -550,7 +602,10 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
         $siteId = 0;
         $siteMatch = cpms_find_attendance_site_match($attendancePdo, $projectName);
         if (is_array($siteMatch) && isset($siteMatch['id'])) $siteId = (int)$siteMatch['id'];
-        if ($siteId <= 0) return $result;
+        if ($siteId <= 0) {
+            $cache[$cacheKey] = $result;
+            return $result;
+        }
 
         // 2) 월 범위 계산
         $monthStart = $selectedMonth . '-01 00:00:00';
@@ -720,7 +775,8 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
         $result['output_days'] = $outputDays;
         $result['excluded_workers'] = array_values($excludedWorkers);
         $result['role_map'] = $roleMap;
-        
+        $cache[$cacheKey] = $result;
+
         return $result;
     }
 }
@@ -740,6 +796,8 @@ if (!function_exists('cpms_load_gongsu_data')) {
         $projectName = trim((string)$projectName);
         if ($projectName === '' || $selectedMonth === '') return $result;
         if (!$pdo) $pdo = null;
+        static $cache = array();
+        $cachePdo = $pdo;
 
         $info = array();
         if ($pdo) {
@@ -753,13 +811,19 @@ if (!function_exists('cpms_load_gongsu_data')) {
                 $info = cpms_find_gongsu_table($attendancePdo);
                 if (count($info) > 0) {
                     $pdo = $attendancePdo;
+                    $cachePdo = $attendancePdo;
                 } else {
                     // (현장명=프로젝트명) 기준으로 attendance 기록을 읽어서 공수/인원작성 자동매핑
-                    return cpms_load_gongsu_data_from_attendance_records($attendancePdo, $projectName, $selectedMonth);
+                    $cacheKey = cpms_labor_cache_key($attendancePdo, 'gongsu-data:' . $projectName . ':' . $selectedMonth);
+                    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+                    $cache[$cacheKey] = cpms_load_gongsu_data_from_attendance_records($attendancePdo, $projectName, $selectedMonth);
+                    return $cache[$cacheKey];
                 }
             }
         }
         if (count($info) === 0 || !$pdo) return $result;
+        $cacheKey = cpms_labor_cache_key($cachePdo, 'gongsu-data:' . $projectName . ':' . $selectedMonth);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
 
         $table = $info['table'];
         $cols = $info['columns'];
@@ -889,6 +953,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
         $result['excluded_workers'] = array_values($excludedWorkers);
         $result['role_map'] = $roleMap;
 
+        $cache[$cacheKey] = $result;
         return $result;
     }
 }
@@ -897,6 +962,9 @@ if (!function_exists('cpms_load_direct_team_members')) {
     function cpms_load_direct_team_members($pdo) {
         $members = array();
         if (!$pdo) return $members;
+        static $cache = array();
+        $cacheKey = cpms_labor_cache_key($pdo, 'direct-team-members');
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         try {
             if (cpms_table_exists_labor($pdo, 'direct_team_members')) {
                 $st = $pdo->prepare("SELECT * FROM direct_team_members ORDER BY id ASC");
@@ -906,6 +974,7 @@ if (!function_exists('cpms_load_direct_team_members')) {
         } catch (Exception $e) {
             $members = array();
         }
+        $cache[$cacheKey] = $members;
         return $members;
     }
 }
@@ -997,6 +1066,9 @@ if (!function_exists('cpms_load_project_labor_workers')) {
         $rows = array();
         if (!$pdo || $projectId <= 0) return $rows;
         if (!cpms_ensure_project_labor_workers_table($pdo)) return $rows;
+        static $cache = array();
+        $cacheKey = cpms_labor_cache_key($pdo, 'project-labor-workers:' . (int)$projectId);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         try {
             $st = $pdo->prepare("SELECT * FROM cpms_project_labor_workers WHERE project_id = :pid AND is_deleted = 0 ORDER BY id ASC");
             $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
@@ -1005,6 +1077,7 @@ if (!function_exists('cpms_load_project_labor_workers')) {
         } catch (Exception $e) {
             $rows = array();
         }
+        $cache[$cacheKey] = $rows;
         return $rows;
     }
 }

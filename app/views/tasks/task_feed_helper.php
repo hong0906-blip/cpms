@@ -463,8 +463,11 @@ function cpms_task_feed_safety_items_for_employee($pdo, $employeeId, $employeeEm
 if (!function_exists('cpms_task_feed_employee_project_ids')) {
 function cpms_task_feed_employee_project_ids($pdo, $employeeId)
 {
+    static $cache = array();
     $projectIdMap = array();
     if (!$pdo || (int)$employeeId <= 0) return array();
+    $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':employee-project-ids:' . (int)$employeeId;
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
 
     if (cpms_tasks_table_exists($pdo, 'cpms_project_members')) {
         try {
@@ -502,7 +505,8 @@ function cpms_task_feed_employee_project_ids($pdo, $employeeId)
         }
     }
 
-    return array_values($projectIdMap);
+    $cache[$cacheKey] = array_values($projectIdMap);
+    return $cache[$cacheKey];
 }}
 
 if (!function_exists('cpms_task_feed_construction_schedule_items_for_employee')) {
@@ -579,8 +583,11 @@ function cpms_task_feed_construction_schedule_items_for_employee($pdo, $employee
 if (!function_exists('cpms_task_feed_for_employee')) {
 function cpms_task_feed_for_employee($pdo, $employeeId, $employeeEmail, $employeeMeta)
 {
+    static $cache = array();
+    $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':feed-for-employee:' . (int)$employeeId . ':' . strtolower(trim((string)$employeeEmail));
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     cpms_tasks_bootstrap_automations($pdo);
-    return cpms_task_feed_merge(array(
+    $cache[$cacheKey] = cpms_task_feed_merge(array(
         cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId),
         cpms_task_feed_construction_schedule_items_for_employee($pdo, $employeeId),
         cpms_task_feed_approval_items_for_employee($pdo, $employeeId, $employeeEmail),
@@ -590,6 +597,7 @@ function cpms_task_feed_for_employee($pdo, $employeeId, $employeeEmail, $employe
         cpms_task_feed_issue_items_for_employee($pdo, $employeeId, $employeeEmail),
         cpms_task_feed_safety_items_for_employee($pdo, $employeeId, $employeeEmail),
     ));
+    return $cache[$cacheKey];
 }}
 
 if (!function_exists('cpms_task_feed_for_executive')) {

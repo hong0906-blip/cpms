@@ -575,13 +575,13 @@ function cpms_render_executive_task_dashboard($pdo)
                     <div class="px-4 py-3 rounded-2xl border border-gray-200 bg-white shadow-sm">
                         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
                             <div class="text-lg font-extrabold text-gray-900"><?php echo h($departmentLabel); ?></div>
-                            <div class="flex flex-wrap gap-2 text-sm">
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 font-bold">오늘 할일 <b class="text-base"><?php echo (int)$departmentMetrics['today']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 font-bold">완료 <b class="text-base"><?php echo (int)$departmentMetrics['done']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 font-bold">진행중 <b class="text-base"><?php echo (int)$departmentMetrics['progress']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 text-red-700 font-bold">지연 <b class="text-base"><?php echo (int)$departmentMetrics['delayed']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold">긴급 <b class="text-base"><?php echo (int)$departmentMetrics['urgent']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 font-bold">마감 임박 <b class="text-base"><?php echo (int)$departmentMetrics['due_soon']; ?>건</b></span>
+                            <div class="cpms-chip-row text-sm">
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 font-bold">오늘 할일 <b class="text-base"><?php echo (int)$departmentMetrics['today']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 font-bold">완료 <b class="text-base"><?php echo (int)$departmentMetrics['done']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 font-bold">진행중 <b class="text-base"><?php echo (int)$departmentMetrics['progress']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 text-red-700 font-bold">지연 <b class="text-base"><?php echo (int)$departmentMetrics['delayed']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold">긴급 <b class="text-base"><?php echo (int)$departmentMetrics['urgent']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 font-bold">마감 임박 <b class="text-base"><?php echo (int)$departmentMetrics['due_soon']; ?>건</b></span>
                             </div>
                         </div>
                     </div>
@@ -605,17 +605,17 @@ function cpms_render_executive_task_dashboard($pdo)
                             <div class="min-w-0">
                                 <div class="flex flex-wrap items-center gap-2">
                                     <div class="text-lg font-extrabold text-gray-900"><?php echo h(isset($employee['name']) ? $employee['name'] : '-'); ?></div>
-                                    <span class="px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold"><?php echo h($employeeDepartmentLabel); ?></span>
+                                    <span class="cpms-chip px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-bold"><?php echo h($employeeDepartmentLabel); ?></span>
                                 </div>
                                 <div class="text-sm text-gray-500 mt-1"><?php echo h((isset($employee['position']) && trim((string)$employee['position']) !== '') ? $employee['position'] : '-'); ?></div>
                             </div>
-                            <div class="flex flex-wrap gap-2 text-sm">
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 font-bold">오늘 할일 <b class="text-base"><?php echo (int)$metrics['today']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 font-bold">완료 <b class="text-base"><?php echo (int)$metrics['done']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 font-bold">진행중 <b class="text-base"><?php echo (int)$metrics['progress']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 text-red-700 font-bold">지연 <b class="text-base"><?php echo (int)$metrics['delayed']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold">긴급 <b class="text-base"><?php echo (int)$metrics['urgent']; ?>건</b></span>
-                                <span class="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 font-bold">마감 임박 <b class="text-base"><?php echo (int)$metrics['due_soon']; ?>건</b></span>
+                            <div class="cpms-chip-row text-sm">
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-50 font-bold">오늘 할일 <b class="text-base"><?php echo (int)$metrics['today']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700 font-bold">완료 <b class="text-base"><?php echo (int)$metrics['done']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 text-blue-700 font-bold">진행중 <b class="text-base"><?php echo (int)$metrics['progress']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 text-red-700 font-bold">지연 <b class="text-base"><?php echo (int)$metrics['delayed']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold">긴급 <b class="text-base"><?php echo (int)$metrics['urgent']; ?>건</b></span>
+                                <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 font-bold">마감 임박 <b class="text-base"><?php echo (int)$metrics['due_soon']; ?>건</b></span>
                             </div>
                         </div>
                     </button>
@@ -638,9 +638,9 @@ function cpms_render_executive_task_dashboard($pdo)
                                             <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                                                 <div class="min-w-0">
                                                     <div class="flex flex-wrap items-center gap-2 mb-2">
-                                                        <span class="px-3 py-1 rounded-full border text-xs font-bold bg-slate-100 text-slate-700 border-slate-200"><?php echo h(cpms_tasks_type_label(isset($item['task_type']) ? $item['task_type'] : 'general')); ?></span>
-                                                        <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending'))); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?></span>
-                                                        <?php if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1): ?><span class="px-3 py-1 rounded-full border text-xs font-bold bg-rose-50 text-rose-700 border-rose-200">긴급</span><?php endif; ?>
+                                                        <span class="cpms-chip px-3 py-1 rounded-full border text-xs font-bold bg-slate-100 text-slate-700 border-slate-200"><?php echo h(cpms_tasks_type_label(isset($item['task_type']) ? $item['task_type'] : 'general')); ?></span>
+                                                        <span class="cpms-chip px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending'))); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?></span>
+                                                        <?php if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1): ?><span class="cpms-chip px-3 py-1 rounded-full border text-xs font-bold bg-rose-50 text-rose-700 border-rose-200">긴급</span><?php endif; ?>
                                                     </div>
                                                     <div class="font-extrabold text-gray-900"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>
                                                     <div class="text-sm text-gray-600 mt-1">요청자: <?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?></div>

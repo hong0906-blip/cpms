@@ -7,19 +7,39 @@
 require_once dirname(dirname(__DIR__)) . '/construction/tabs/partials/sales_data_loader.php';
 require_once dirname(dirname(__DIR__)) . '/construction/tabs/partials/labor_data_loader.php';
 
+if (!function_exists('cpms_dashboard_cache_key')) {
+function cpms_dashboard_cache_key($pdo, $suffix)
+{
+    $prefix = 'nopdo';
+    if ($pdo && function_exists('spl_object_hash')) {
+        $prefix = spl_object_hash($pdo);
+    }
+    return $prefix . ':' . (string)$suffix;
+}}
+
 if (!function_exists('cpms_dashboard_table_exists')) {
 function cpms_dashboard_table_exists($pdo, $table)
 {
+    static $cache = array();
+    static $dbNameCache = array();
     if (!$pdo || trim((string)$table) === '') return false;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'table:' . (string)$table);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     try {
-        $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+        $pdoKey = cpms_dashboard_cache_key($pdo, 'db');
+        if (!isset($dbNameCache[$pdoKey])) {
+            $dbNameCache[$pdoKey] = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+        }
+        $dbName = (string)$dbNameCache[$pdoKey];
         if ($dbName === '') return false;
         $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl");
         $st->bindValue(':db', $dbName);
         $st->bindValue(':tbl', (string)$table);
         $st->execute();
-        return ((int)$st->fetchColumn() > 0);
+        $cache[$cacheKey] = ((int)$st->fetchColumn() > 0);
+        return $cache[$cacheKey];
     } catch (Exception $e) {
+        $cache[$cacheKey] = false;
         return false;
     }
 }}
@@ -27,17 +47,27 @@ function cpms_dashboard_table_exists($pdo, $table)
 if (!function_exists('cpms_dashboard_column_exists')) {
 function cpms_dashboard_column_exists($pdo, $table, $column)
 {
+    static $cache = array();
+    static $dbNameCache = array();
     if (!$pdo || trim((string)$table) === '' || trim((string)$column) === '') return false;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'column:' . (string)$table . ':' . (string)$column);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     try {
-        $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+        $pdoKey = cpms_dashboard_cache_key($pdo, 'db');
+        if (!isset($dbNameCache[$pdoKey])) {
+            $dbNameCache[$pdoKey] = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+        }
+        $dbName = (string)$dbNameCache[$pdoKey];
         if ($dbName === '') return false;
         $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl AND COLUMN_NAME = :col");
         $st->bindValue(':db', $dbName);
         $st->bindValue(':tbl', (string)$table);
         $st->bindValue(':col', (string)$column);
         $st->execute();
-        return ((int)$st->fetchColumn() > 0);
+        $cache[$cacheKey] = ((int)$st->fetchColumn() > 0);
+        return $cache[$cacheKey];
     } catch (Exception $e) {
+        $cache[$cacheKey] = false;
         return false;
     }
 }}
@@ -61,8 +91,11 @@ function cpms_dashboard_parse_money($value)
 if (!function_exists('cpms_dashboard_project_rows')) {
 function cpms_dashboard_project_rows($pdo)
 {
+    static $cache = array();
     $rows = array();
     if (!$pdo || !cpms_dashboard_table_exists($pdo, 'cpms_projects')) return $rows;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'project-rows');
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
 
     $select = array('id');
     $select[count($select)] = cpms_dashboard_column_exists($pdo, 'cpms_projects', 'name') ? 'name' : "'' AS name";
@@ -87,13 +120,17 @@ function cpms_dashboard_project_rows($pdo)
         $rows = array();
     }
 
+    $cache[$cacheKey] = $rows;
     return $rows;
 }}
 
 if (!function_exists('cpms_dashboard_equipment_total')) {
 function cpms_dashboard_equipment_total($pdo, $projectId)
 {
+    static $cache = array();
     if (!$pdo || $projectId <= 0) return 0.0;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'equipment-total:' . (int)$projectId);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     if (!cpms_dashboard_table_exists($pdo, 'cpms_equipment_usage')) return 0.0;
     if (!cpms_dashboard_column_exists($pdo, 'cpms_equipment_usage', 'project_id')) return 0.0;
 
@@ -112,8 +149,10 @@ function cpms_dashboard_equipment_total($pdo, $projectId)
         $st = $pdo->prepare($sql);
         $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
         $st->execute();
-        return (float)$st->fetchColumn();
+        $cache[$cacheKey] = (float)$st->fetchColumn();
+        return $cache[$cacheKey];
     } catch (Exception $e) {
+        $cache[$cacheKey] = 0.0;
         return 0.0;
     }
 }}
@@ -121,7 +160,10 @@ function cpms_dashboard_equipment_total($pdo, $projectId)
 if (!function_exists('cpms_dashboard_material_total')) {
 function cpms_dashboard_material_total($pdo, $projectId)
 {
+    static $cache = array();
     if (!$pdo || $projectId <= 0) return 0.0;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'material-total:' . (int)$projectId);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     if (!cpms_dashboard_table_exists($pdo, 'cpms_material_usage')) return 0.0;
     if (!cpms_dashboard_table_exists($pdo, 'cpms_material_items')) return 0.0;
     if (!cpms_dashboard_column_exists($pdo, 'cpms_material_usage', 'project_id')) return 0.0;
@@ -150,8 +192,10 @@ function cpms_dashboard_material_total($pdo, $projectId)
             if ($hasCategory && !isset($allowedCategories[$category])) continue;
             $total += isset($row['amount']) ? (float)$row['amount'] : 0.0;
         }
-        return $total;
+        $cache[$cacheKey] = $total;
+        return $cache[$cacheKey];
     } catch (Exception $e) {
+        $cache[$cacheKey] = 0.0;
         return 0.0;
     }
 }}
@@ -178,8 +222,11 @@ function cpms_dashboard_labor_apply_overrides($map, $projectId, $month)
 if (!function_exists('cpms_dashboard_labor_wage_map')) {
 function cpms_dashboard_labor_wage_map($pdo, $projectId)
 {
+    static $cache = array();
     $wageMap = array();
     if (!$pdo || $projectId <= 0) return $wageMap;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'labor-wage-map:' . (int)$projectId);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     if (!function_exists('cpms_load_direct_team_members') || !function_exists('cpms_load_project_labor_workers') || !function_exists('cpms_build_project_worker_rows') || !function_exists('cpms_build_timesheet_workers')) {
         return $wageMap;
     }
@@ -200,6 +247,7 @@ function cpms_dashboard_labor_wage_map($pdo, $projectId)
             $wageMap[$key] = cpms_dashboard_parse_money($raw);
         }
     }
+    $cache[$cacheKey] = $wageMap;
     return $wageMap;
 }}
 
@@ -214,7 +262,10 @@ function cpms_dashboard_valid_date($date)
 if (!function_exists('cpms_dashboard_labor_total')) {
 function cpms_dashboard_labor_total($pdo, $projectId, $projectName, $startDate, $endDate)
 {
+    static $cache = array();
     if (!$pdo || $projectId <= 0) return 0.0;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'labor-total:' . (int)$projectId . ':' . trim((string)$projectName) . ':' . (string)$startDate . ':' . (string)$endDate);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     $projectName = trim((string)$projectName);
     if ($projectName === '' || !function_exists('cpms_load_gongsu_data')) return 0.0;
 
@@ -229,12 +280,16 @@ function cpms_dashboard_labor_total($pdo, $projectId, $projectName, $startDate, 
     }
 
     $wageMap = cpms_dashboard_labor_wage_map($pdo, (int)$projectId);
-    if (count($wageMap) === 0) return 0.0;
+    if (count($wageMap) === 0) {
+        $cache[$cacheKey] = 0.0;
+        return 0.0;
+    }
 
     try {
         $cursor = new DateTime(substr($startDate, 0, 7) . '-01');
         $last = new DateTime(substr($endDate, 0, 7) . '-01');
     } catch (Exception $e) {
+        $cache[$cacheKey] = 0.0;
         return 0.0;
     }
 
@@ -263,7 +318,8 @@ function cpms_dashboard_labor_total($pdo, $projectId, $projectName, $startDate, 
         $wageRate = isset($wageMap[$workerKey]) ? (float)$wageMap[$workerKey] : 0.0;
         $total += ((float)$gongsuTotal) * $wageRate;
     }
-    return $total;
+    $cache[$cacheKey] = $total;
+    return $cache[$cacheKey];
 }}
 
 if (!function_exists('cpms_dashboard_cost_period_range')) {
@@ -318,7 +374,10 @@ function cpms_dashboard_month_cursor_bounds($startDate, $endDate)
 if (!function_exists('cpms_dashboard_equipment_total_between')) {
 function cpms_dashboard_equipment_total_between($pdo, $projectId, $startDate, $endDate)
 {
+    static $cache = array();
     if (!$pdo || $projectId <= 0) return 0.0;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'equipment-between:' . (int)$projectId . ':' . (string)$startDate . ':' . (string)$endDate);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     if (!cpms_dashboard_table_exists($pdo, 'cpms_equipment_usage')) return 0.0;
     if (!cpms_dashboard_column_exists($pdo, 'cpms_equipment_usage', 'project_id')) return 0.0;
     if (!cpms_dashboard_column_exists($pdo, 'cpms_equipment_usage', 'use_date')) return 0.0;
@@ -340,8 +399,10 @@ function cpms_dashboard_equipment_total_between($pdo, $projectId, $startDate, $e
         $st->bindValue(':start', (string)$startDate);
         $st->bindValue(':end', (string)$endDate);
         $st->execute();
-        return (float)$st->fetchColumn();
+        $cache[$cacheKey] = (float)$st->fetchColumn();
+        return $cache[$cacheKey];
     } catch (Exception $e) {
+        $cache[$cacheKey] = 0.0;
         return 0.0;
     }
 }}
@@ -349,7 +410,10 @@ function cpms_dashboard_equipment_total_between($pdo, $projectId, $startDate, $e
 if (!function_exists('cpms_dashboard_material_total_between')) {
 function cpms_dashboard_material_total_between($pdo, $projectId, $startDate, $endDate)
 {
+    static $cache = array();
     if (!$pdo || $projectId <= 0) return 0.0;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'material-between:' . (int)$projectId . ':' . (string)$startDate . ':' . (string)$endDate);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     if (!cpms_dashboard_table_exists($pdo, 'cpms_material_usage')) return 0.0;
     if (!cpms_dashboard_table_exists($pdo, 'cpms_material_items')) return 0.0;
     if (!cpms_dashboard_column_exists($pdo, 'cpms_material_usage', 'project_id')) return 0.0;
@@ -382,8 +446,10 @@ function cpms_dashboard_material_total_between($pdo, $projectId, $startDate, $en
             if ($hasCategory && !isset($allowedCategories[$category])) continue;
             $total += isset($row['amount']) ? (float)$row['amount'] : 0.0;
         }
-        return $total;
+        $cache[$cacheKey] = $total;
+        return $cache[$cacheKey];
     } catch (Exception $e) {
+        $cache[$cacheKey] = 0.0;
         return 0.0;
     }
 }}
@@ -391,19 +457,26 @@ function cpms_dashboard_material_total_between($pdo, $projectId, $startDate, $en
 if (!function_exists('cpms_dashboard_labor_total_between')) {
 function cpms_dashboard_labor_total_between($pdo, $projectId, $projectName, $startDate, $endDate, $wageMap)
 {
+    static $cache = array();
     if (!$pdo || $projectId <= 0) return 0.0;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'labor-between:' . (int)$projectId . ':' . trim((string)$projectName) . ':' . (string)$startDate . ':' . (string)$endDate);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     $projectName = trim((string)$projectName);
     if ($projectName === '' || !function_exists('cpms_load_gongsu_data')) return 0.0;
     if (!is_array($wageMap) || count($wageMap) === 0) return 0.0;
 
     $startDate = cpms_dashboard_valid_date($startDate);
     $endDate = cpms_dashboard_valid_date($endDate);
-    if ($startDate === '' || $endDate === '' || $startDate > $endDate) return 0.0;
+    if ($startDate === '' || $endDate === '' || $startDate > $endDate) {
+        $cache[$cacheKey] = 0.0;
+        return 0.0;
+    }
 
     try {
         $cursor = new DateTime(substr($startDate, 0, 7) . '-01');
         $last = new DateTime(substr($endDate, 0, 7) . '-01');
     } catch (Exception $e) {
+        $cache[$cacheKey] = 0.0;
         return 0.0;
     }
 
@@ -431,7 +504,8 @@ function cpms_dashboard_labor_total_between($pdo, $projectId, $projectName, $sta
         $wageRate = isset($wageMap[$workerKey]) ? (float)$wageMap[$workerKey] : 0.0;
         $total += ((float)$gongsuTotal) * $wageRate;
     }
-    return $total;
+    $cache[$cacheKey] = $total;
+    return $cache[$cacheKey];
 }}
 
 if (!function_exists('cpms_dashboard_cost_rate_info')) {
@@ -464,15 +538,19 @@ function cpms_dashboard_cost_rate_info($sales, $usedTotal)
 if (!function_exists('cpms_dashboard_project_monthly_cost_rows')) {
 function cpms_dashboard_project_monthly_cost_rows($pdo, $projectId, $projectName, $startDate, $endDate)
 {
+    static $cache = array();
     $rows = array();
     if (!$pdo || $projectId <= 0) return $rows;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'project-monthly-rows:' . (int)$projectId . ':' . trim((string)$projectName) . ':' . (string)$startDate . ':' . (string)$endDate);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
 
     $bounds = cpms_dashboard_month_cursor_bounds($startDate, $endDate);
     try {
         $cursor = new DateTime($bounds['start']);
         $last = new DateTime($bounds['end']);
     } catch (Exception $e) {
-        return $rows;
+        $cache[$cacheKey] = $rows;
+        return $cache[$cacheKey];
     }
 
     $wageMap = cpms_dashboard_labor_wage_map($pdo, (int)$projectId);
@@ -519,7 +597,8 @@ function cpms_dashboard_project_monthly_cost_rows($pdo, $projectId, $projectName
 
         $cursor->modify('+1 month');
     }
-    return $rows;
+    $cache[$cacheKey] = $rows;
+    return $cache[$cacheKey];
 }}
 
 if (!function_exists('cpms_dashboard_project_status_color')) {
@@ -533,10 +612,23 @@ function cpms_dashboard_project_status_color($sales, $usedTotal)
     return ($rate > 80) ? 'red' : 'blue';
 }}
 
+if (!function_exists('cpms_dashboard_project_count')) {
+function cpms_dashboard_project_count($pdo)
+{
+    return count(cpms_dashboard_project_rows($pdo));
+}}
+
 if (!function_exists('cpms_dashboard_project_cost_summary')) {
 function cpms_dashboard_project_cost_summary($pdo)
 {
+    static $cache = array();
     $projects = array();
+    if ($pdo) {
+        $cacheKey = cpms_dashboard_cache_key($pdo, 'project-cost-summary');
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+    } else {
+        $cacheKey = 'nopdo:project-cost-summary';
+    }
     $projectRows = cpms_dashboard_project_rows($pdo);
 
     foreach ($projectRows as $project) {
@@ -591,8 +683,9 @@ function cpms_dashboard_project_cost_summary($pdo)
         return ($av > $bv) ? -1 : 1;
     });
 
-    return array(
+    $cache[$cacheKey] = array(
         'project_count' => count($projectRows),
         'projects' => $projects,
     );
+    return $cache[$cacheKey];
 }}

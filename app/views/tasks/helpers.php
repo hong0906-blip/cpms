@@ -30,12 +30,17 @@ function cpms_tasks_public_root()
 if (!function_exists('cpms_tasks_table_exists')) {
 function cpms_tasks_table_exists($pdo, $tableName)
 {
+    static $cache = array();
     if (!$pdo || trim((string)$tableName) === '') return false;
+    $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':table:' . (string)$tableName;
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     try {
         $st = $pdo->prepare("SHOW TABLES LIKE :table_name");
         $st->execute(array(':table_name' => $tableName));
-        return $st->fetchColumn() ? true : false;
+        $cache[$cacheKey] = $st->fetchColumn() ? true : false;
+        return $cache[$cacheKey];
     } catch (Exception $e) {
+        $cache[$cacheKey] = false;
         return false;
     }
 }}
@@ -43,12 +48,17 @@ function cpms_tasks_table_exists($pdo, $tableName)
 if (!function_exists('cpms_tasks_column_exists')) {
 function cpms_tasks_column_exists($pdo, $tableName, $columnName)
 {
+    static $cache = array();
     if (!$pdo || trim((string)$tableName) === '' || trim((string)$columnName) === '') return false;
+    $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':column:' . (string)$tableName . ':' . (string)$columnName;
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     try {
         $st = $pdo->prepare("SHOW COLUMNS FROM `" . str_replace('`', '``', $tableName) . "` LIKE :column_name");
         $st->execute(array(':column_name' => $columnName));
-        return $st->fetchColumn() ? true : false;
+        $cache[$cacheKey] = $st->fetchColumn() ? true : false;
+        return $cache[$cacheKey];
     } catch (Exception $e) {
+        $cache[$cacheKey] = false;
         return false;
     }
 }}
@@ -323,8 +333,11 @@ function cpms_tasks_current_employee($pdo)
 if (!function_exists('cpms_tasks_fetch_active_employees')) {
 function cpms_tasks_fetch_active_employees($pdo)
 {
+    static $cache = array();
     $rows = array();
     if (!$pdo) return $rows;
+    $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':active-employees';
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     $departmentColumn = cpms_tasks_column_exists($pdo, 'employees', 'department') ? 'department' : "'' AS department";
     $positionColumn = cpms_tasks_column_exists($pdo, 'employees', 'position') ? 'position' : "'' AS position";
     $roleColumn = cpms_tasks_column_exists($pdo, 'employees', 'role') ? 'role' : "'employee' AS role";
@@ -343,21 +356,26 @@ function cpms_tasks_fetch_active_employees($pdo)
     foreach ($rows as $index => $row) {
         $rows[$index]['department'] = cpms_tasks_normalize_department(isset($row['department']) ? $row['department'] : '');
     }
+    $cache[$cacheKey] = $rows;
     return $rows;
 }}
 
 if (!function_exists('cpms_tasks_fetch_projects')) {
 function cpms_tasks_fetch_projects($pdo)
 {
+    static $cache = array();
     $rows = array();
     if (!$pdo || !cpms_tasks_table_exists($pdo, 'cpms_projects')) return $rows;
+    $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':projects';
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     try {
         $st = $pdo->query("SELECT id, name FROM cpms_projects ORDER BY id DESC");
         $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
     } catch (Exception $e) {
         $rows = array();
     }
-    return is_array($rows) ? $rows : array();
+    $cache[$cacheKey] = is_array($rows) ? $rows : array();
+    return $cache[$cacheKey];
 }}
 
 if (!function_exists('cpms_tasks_resolve_project')) {

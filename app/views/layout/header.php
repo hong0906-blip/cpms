@@ -32,6 +32,45 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
     .cpms-mobile-bottom-nav { display: none; }
     .cpms-approval-mobile-list { display: none; }
     .cpms-monthly-mobile-summary { display: none; }
+    .cpms-responsive-table-wrap {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+    .cpms-responsive-table {
+      width: 100%;
+      min-width: 720px;
+      border-collapse: collapse;
+    }
+    .cpms-responsive-table th,
+    .cpms-responsive-table td {
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+    .cpms-responsive-table th.text-left,
+    .cpms-responsive-table td.text-left,
+    .cpms-responsive-table [data-wrap="1"] {
+      white-space: normal;
+      word-break: keep-all;
+      overflow-wrap: anywhere;
+    }
+    .cpms-chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-width: 0;
+    }
+    .cpms-chip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      max-width: 100%;
+      min-width: 0;
+      line-height: 1.35;
+      white-space: normal;
+      word-break: keep-all;
+      overflow-wrap: anywhere;
+      text-align: center;
+    }
 
     @media (max-width: 767px) {
       html,
@@ -296,6 +335,23 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
       .cpms-construction-page h2,
       .cpms-project-page h2 {
         font-size: 22px;
+      }
+
+      .cpms-responsive-table {
+        min-width: 680px;
+      }
+
+      .cpms-responsive-table th,
+      .cpms-responsive-table td {
+        font-size: 12px;
+      }
+
+      .cpms-chip-row {
+        gap: 6px;
+      }
+
+      .cpms-chip {
+        font-size: 11px;
       }
     }
   </style>

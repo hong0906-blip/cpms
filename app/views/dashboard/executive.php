@@ -17,9 +17,168 @@ $pdo = Db::pdo();
 $userEmail = (string)\App\Core\Auth::userEmail();
 $flash = flash_get();
 
-$projectCostSummary = cpms_dashboard_project_cost_summary($pdo);
-$projectCostCount = isset($projectCostSummary['project_count']) ? (int)$projectCostSummary['project_count'] : 0;
+$projectCostFragmentOnly = isset($projectCostFragmentOnly) ? (bool)$projectCostFragmentOnly : false;
 $debugProjectCost = isset($_GET['debug_project_cost']) && (string)$_GET['debug_project_cost'] === '1';
+$loadProjectCostSummary = $projectCostFragmentOnly || (isset($_GET['load_project_cost']) && (string)$_GET['load_project_cost'] === '1');
+$projectCostCount = function_exists('cpms_dashboard_project_count') ? (int)cpms_dashboard_project_count($pdo) : 0;
+$projectCostSummary = $loadProjectCostSummary ? cpms_dashboard_project_cost_summary($pdo) : array('project_count' => $projectCostCount, 'projects' => array());
+
+if (!function_exists('cpms_render_executive_project_cost_summary_body')) {
+function cpms_render_executive_project_cost_summary_body($projectCostSummary, $debugProjectCost)
+{
+    ob_start();
+    if (empty($projectCostSummary['projects'])) {
+        ?>
+        <div class="text-sm text-gray-600">표시할 프로젝트가 없습니다.</div>
+        <?php
+    } else {
+        ?>
+        <div class="space-y-4 max-h-[34rem] overflow-y-auto">
+            <?php foreach ($projectCostSummary['projects'] as $projectRow): ?>
+                <?php
+                $costRateValue = isset($projectRow['cost_rate']) ? (float)$projectRow['cost_rate'] : 0.0;
+                $noSales = isset($projectRow['no_sales']) ? (int)$projectRow['no_sales'] : 0;
+                if ($noSales === 1 || $costRateValue > 100) {
+                    $rateClass = 'bg-red-50 text-red-700 border-red-100';
+                } else if ($costRateValue > 70) {
+                    $rateClass = 'bg-orange-50 text-orange-700 border-orange-100';
+                } else {
+                    $rateClass = 'bg-blue-50 text-blue-700 border-blue-100';
+                }
+                $targetOver = isset($projectRow['is_target_over']) ? (int)$projectRow['is_target_over'] : 0;
+                $monthlyRows = isset($projectRow['monthly_rows']) && is_array($projectRow['monthly_rows']) ? $projectRow['monthly_rows'] : array();
+                $firstMonthlyRow = count($monthlyRows) > 0 ? $monthlyRows[0] : null;
+                ?>
+                <div class="p-4 rounded-2xl border border-gray-200 bg-slate-50">
+                    <div class="flex flex-col gap-3">
+                        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                            <div class="font-extrabold text-gray-900"><?php echo h($projectRow['project_name']); ?></div>
+                            <?php if ($targetOver === 1): ?>
+                                <span class="cpms-chip self-start md:self-auto px-3 py-1 rounded-full bg-red-50 text-red-700 border border-red-100 text-xs font-extrabold">목표초과</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                            <div class="rounded-2xl border bg-white p-3">
+                                <div class="text-xs text-gray-500 font-bold">총 원가율</div>
+                                <div class="mt-1 text-lg font-extrabold <?php echo $rateClass; ?> inline-block px-2 py-1 rounded-xl border"><?php echo h($projectRow['cost_rate_label']); ?></div>
+                            </div>
+                            <div class="rounded-2xl border bg-white p-3">
+                                <div class="text-xs text-gray-500 font-bold">총 매출</div>
+                                <div class="mt-1 text-lg font-extrabold text-gray-900"><?php echo h(cpms_dashboard_money(isset($projectRow['sales']) ? $projectRow['sales'] : 0)); ?></div>
+                                <div class="mt-1 text-xs text-gray-500"><?php echo h(isset($projectRow['sales_basis']) ? $projectRow['sales_basis'] : ''); ?></div>
+                            </div>
+                            <div class="rounded-2xl border bg-white p-3">
+                                <div class="text-xs text-gray-500 font-bold">총 투입원가</div>
+                                <div class="mt-1 text-lg font-extrabold text-gray-900"><?php echo h(cpms_dashboard_money(isset($projectRow['used_total']) ? $projectRow['used_total'] : 0)); ?></div>
+                            </div>
+                            <div class="rounded-2xl border bg-white p-3">
+                                <div class="text-xs text-gray-500 font-bold">총 투입목표금액</div>
+                                <div class="mt-1 text-lg font-extrabold text-gray-900"><?php echo h(isset($projectRow['target_amount_label']) ? $projectRow['target_amount_label'] : cpms_dashboard_money(0)); ?></div>
+                            </div>
+                        </div>
+                        <div class="cpms-chip-row text-xs text-gray-600">
+                            <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 원가율 <?php echo h(isset($projectRow['cost_rate_label']) ? $projectRow['cost_rate_label'] : '0%'); ?></span>
+                            <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 매출 <?php echo h(cpms_dashboard_money(isset($projectRow['sales']) ? $projectRow['sales'] : 0)); ?></span>
+                            <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold"><?php echo h(isset($projectRow['sales_basis']) ? $projectRow['sales_basis'] : ''); ?></span>
+                            <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 투입원가 <?php echo h(cpms_dashboard_money(isset($projectRow['used_total']) ? $projectRow['used_total'] : 0)); ?></span>
+                            <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 투입목표금액 <?php echo h(cpms_dashboard_money(isset($projectRow['target_amount']) ? $projectRow['target_amount'] : 0)); ?></span>
+                            <?php if ($targetOver === 1): ?>
+                                <span class="cpms-chip px-3 py-1 rounded-full bg-red-50 text-red-700 border border-red-100 font-bold">목표초과</span>
+                            <?php endif; ?>
+                        </div>
+                        <div class="cpms-chip-row text-xs text-gray-600">
+                            <span class="cpms-chip">노무 <?php echo h(cpms_dashboard_money(isset($projectRow['labor']) ? $projectRow['labor'] : 0)); ?></span>
+                            <span class="cpms-chip">장비 <?php echo h(cpms_dashboard_money(isset($projectRow['equipment']) ? $projectRow['equipment'] : 0)); ?></span>
+                            <span class="cpms-chip">자재 <?php echo h(cpms_dashboard_money(isset($projectRow['materials']) ? $projectRow['materials'] : 0)); ?></span>
+                        </div>
+                        <?php if ($debugProjectCost): ?>
+                            <div class="rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
+                                <div><b>project_id</b>: <?php echo (int)(isset($projectRow['project_id']) ? $projectRow['project_id'] : 0); ?></div>
+                                <div><b>project_name</b>: <?php echo h(isset($projectRow['project_name']) ? $projectRow['project_name'] : ''); ?></div>
+                                <div><b>monthly_rows count</b>: <?php echo count($monthlyRows); ?></div>
+                                <div><b>sales</b>: <?php echo h((string)(isset($projectRow['sales']) ? $projectRow['sales'] : 0)); ?></div>
+                                <div><b>used_total</b>: <?php echo h((string)(isset($projectRow['used_total']) ? $projectRow['used_total'] : 0)); ?></div>
+                                <div><b>target_amount</b>: <?php echo h((string)(isset($projectRow['target_amount']) ? $projectRow['target_amount'] : 0)); ?></div>
+                                <?php if (is_array($firstMonthlyRow)): ?>
+                                    <div><b>first monthly row sample</b>: <?php echo h((isset($firstMonthlyRow['label']) ? $firstMonthlyRow['label'] : '-') . ' / sales=' . (isset($firstMonthlyRow['sales']) ? $firstMonthlyRow['sales'] : 0) . ' / used_total=' . (isset($firstMonthlyRow['used_total']) ? $firstMonthlyRow['used_total'] : 0) . ' / target_amount=' . (isset($firstMonthlyRow['target_amount']) ? $firstMonthlyRow['target_amount'] : 0) . ' / rate=' . (isset($firstMonthlyRow['cost_rate_label']) ? $firstMonthlyRow['cost_rate_label'] : '0%')); ?></div>
+                                <?php else: ?>
+                                    <div><b>first monthly row sample</b>: -</div>
+                                <?php endif; ?>
+                            </div>
+                        <?php endif; ?>
+                        <details class="rounded-2xl border border-gray-200 bg-white">
+                            <summary class="cursor-pointer px-4 py-3 text-sm font-extrabold text-gray-800">월별 보기</summary>
+                            <div class="cpms-responsive-table-wrap border-t border-gray-100">
+                                <?php if (count($monthlyRows) === 0): ?>
+                                    <div class="p-4 text-sm text-gray-500">월별 데이터가 없습니다.</div>
+                                <?php else: ?>
+                                    <table class="cpms-responsive-table text-sm">
+                                        <thead class="bg-gray-50 text-gray-500">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-bold">월</th>
+                                                <th class="px-3 py-2 text-right font-bold">원가율</th>
+                                                <th class="px-3 py-2 text-right font-bold">매출</th>
+                                                <th class="px-3 py-2 text-left font-bold">매출기준</th>
+                                                <th class="px-3 py-2 text-right font-bold">투입원가</th>
+                                                <th class="px-3 py-2 text-right font-bold">투입목표금액</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($monthlyRows as $monthRow): ?>
+                                                <?php
+                                                $monthRate = isset($monthRow['cost_rate']) ? (float)$monthRow['cost_rate'] : 0.0;
+                                                $monthNoSales = isset($monthRow['no_sales']) ? (int)$monthRow['no_sales'] : 0;
+                                                if ($monthNoSales === 1 || $monthRate > 100) {
+                                                    $monthRateClass = 'text-red-700 bg-red-50 border-red-100';
+                                                } else if ($monthRate > 70) {
+                                                    $monthRateClass = 'text-orange-700 bg-orange-50 border-orange-100';
+                                                } else {
+                                                    $monthRateClass = 'text-blue-700 bg-blue-50 border-blue-100';
+                                                }
+                                                $monthTargetAmount = isset($monthRow['target_amount']) ? (float)$monthRow['target_amount'] : 0.0;
+                                                $monthUsedTotal = isset($monthRow['used_total']) ? (float)$monthRow['used_total'] : 0.0;
+                                                $monthTargetOver = ($monthTargetAmount > 0 && $monthUsedTotal > $monthTargetAmount) ? 1 : 0;
+                                                ?>
+                                                <tr class="border-t border-gray-100">
+                                                    <td class="px-3 py-2 text-gray-700 font-bold"><?php echo h(isset($monthRow['label']) ? $monthRow['label'] : '-'); ?></td>
+                                                    <td class="px-3 py-2 text-right">
+                                                        <span class="cpms-chip inline-flex px-2 py-1 rounded-xl border text-xs font-extrabold <?php echo $monthRateClass; ?>"><?php echo h(isset($monthRow['cost_rate_label']) ? $monthRow['cost_rate_label'] : '0%'); ?></span>
+                                                    </td>
+                                                    <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_dashboard_money(isset($monthRow['sales']) ? $monthRow['sales'] : 0)); ?></td>
+                                                    <td class="px-3 py-2 text-gray-600"><?php echo h(isset($monthRow['sales_basis']) ? $monthRow['sales_basis'] : ''); ?></td>
+                                                    <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_dashboard_money(isset($monthRow['used_total']) ? $monthRow['used_total'] : 0)); ?></td>
+                                                    <td class="px-3 py-2 text-right text-gray-800">
+                                                        <?php echo h(cpms_dashboard_money(isset($monthRow['target_amount']) ? $monthRow['target_amount'] : 0)); ?>
+                                                        <?php if ($monthTargetOver === 1): ?>
+                                                            <span class="cpms-chip ml-2 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-100 font-bold">목표초과</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                <?php endif; ?>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+            <?php endforeach; ?>
+        </div>
+        <?php
+    }
+    return ob_get_clean();
+}}
+
+$projectCostSummaryBodyHtml = '';
+if ($loadProjectCostSummary) {
+    $projectCostSummaryBodyHtml = cpms_render_executive_project_cost_summary_body($projectCostSummary, $debugProjectCost);
+    $projectCostCount = isset($projectCostSummary['project_count']) ? (int)$projectCostSummary['project_count'] : $projectCostCount;
+}
+
+if ($projectCostFragmentOnly) {
+    echo $projectCostSummaryBodyHtml !== '' ? $projectCostSummaryBodyHtml : '<div class="text-sm text-gray-600">표시할 프로젝트가 없습니다.</div>';
+    return;
+}
 
 $issues = array();
 $safetyIncidents = array();
@@ -366,7 +525,10 @@ if ($pdo) {
 </div>
 
 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-    <button type="button" class="p-4 rounded-3xl bg-blue-50 border text-left" data-project-cost-modal-open="projectCostSummary">
+    <button type="button"
+            class="p-4 rounded-3xl bg-blue-50 border text-left"
+            data-project-cost-modal-open="projectCostSummary"
+            data-project-cost-modal-url="<?php echo h(base_url()); ?>/?r=dashboard_executive&amp;fragment=project_cost_summary&amp;load_project_cost=1<?php echo $debugProjectCost ? '&amp;debug_project_cost=1' : ''; ?>">
             <div class="text-gray-600 font-bold">전체 프로젝트</div>
             <div class="text-4xl font-extrabold text-blue-700 mt-2"><?php echo $projectCostCount; ?>건</div>
             <div class="text-sm text-blue-700 font-bold mt-2">클릭해서 프로젝트별 원가율 보기</div>
@@ -392,8 +554,10 @@ if ($pdo) {
                 </div>
                 <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-project-cost-modal-close="projectCostSummary">닫기</button>
             </div>
-            <div class="p-4 md:p-6 overflow-y-auto max-h-[74vh]">
-            <?php if (empty($projectCostSummary['projects'])): ?>
+            <div class="p-4 md:p-6 overflow-y-auto max-h-[74vh]" data-project-cost-modal-body="projectCostSummary" data-loaded="0">
+            <?php if (!$loadProjectCostSummary): ?>
+                <div class="text-sm text-gray-600">프로젝트별 원가율을 불러오는 중입니다.</div>
+            <?php else if (empty($projectCostSummary['projects'])): ?>
                 <div class="text-sm text-gray-600">표시할 프로젝트가 없습니다.</div>
             <?php else: ?>
                 <div class="space-y-4 max-h-[34rem] overflow-y-auto">
@@ -417,7 +581,7 @@ if ($pdo) {
                                 <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                                     <div class="font-extrabold text-gray-900"><?php echo h($projectRow['project_name']); ?></div>
                                     <?php if ($targetOver === 1): ?>
-                                        <span class="self-start md:self-auto px-3 py-1 rounded-full bg-red-50 text-red-700 border border-red-100 text-xs font-extrabold">목표초과</span>
+                                        <span class="cpms-chip self-start md:self-auto px-3 py-1 rounded-full bg-red-50 text-red-700 border border-red-100 text-xs font-extrabold">목표초과</span>
                                     <?php endif; ?>
                                 </div>
                                 <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
@@ -439,20 +603,20 @@ if ($pdo) {
                                         <div class="mt-1 text-lg font-extrabold text-gray-900"><?php echo h(isset($projectRow['target_amount_label']) ? $projectRow['target_amount_label'] : cpms_dashboard_money(0)); ?></div>
                                     </div>
                                 </div>
-                                <div class="flex flex-wrap gap-2 text-xs text-gray-600">
-                                    <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 원가율 <?php echo h(isset($projectRow['cost_rate_label']) ? $projectRow['cost_rate_label'] : '0%'); ?></span>
-                                    <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 매출 <?php echo h(cpms_dashboard_money(isset($projectRow['sales']) ? $projectRow['sales'] : 0)); ?></span>
-                                    <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold"><?php echo h(isset($projectRow['sales_basis']) ? $projectRow['sales_basis'] : ''); ?></span>
-                                    <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 투입원가 <?php echo h(cpms_dashboard_money(isset($projectRow['used_total']) ? $projectRow['used_total'] : 0)); ?></span>
-                                    <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 투입목표금액 <?php echo h(cpms_dashboard_money(isset($projectRow['target_amount']) ? $projectRow['target_amount'] : 0)); ?></span>
+                                <div class="cpms-chip-row text-xs text-gray-600">
+                                    <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 원가율 <?php echo h(isset($projectRow['cost_rate_label']) ? $projectRow['cost_rate_label'] : '0%'); ?></span>
+                                    <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 매출 <?php echo h(cpms_dashboard_money(isset($projectRow['sales']) ? $projectRow['sales'] : 0)); ?></span>
+                                    <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold"><?php echo h(isset($projectRow['sales_basis']) ? $projectRow['sales_basis'] : ''); ?></span>
+                                    <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 투입원가 <?php echo h(cpms_dashboard_money(isset($projectRow['used_total']) ? $projectRow['used_total'] : 0)); ?></span>
+                                    <span class="cpms-chip px-3 py-1 rounded-full bg-white border border-gray-200 text-gray-700 font-bold">총 투입목표금액 <?php echo h(cpms_dashboard_money(isset($projectRow['target_amount']) ? $projectRow['target_amount'] : 0)); ?></span>
                                     <?php if ($targetOver === 1): ?>
-                                        <span class="px-3 py-1 rounded-full bg-red-50 text-red-700 border border-red-100 font-bold">목표초과</span>
+                                        <span class="cpms-chip px-3 py-1 rounded-full bg-red-50 text-red-700 border border-red-100 font-bold">목표초과</span>
                                     <?php endif; ?>
                                 </div>
-                                <div class="flex flex-wrap gap-2 text-xs text-gray-600">
-                                    <span>노무 <?php echo h(cpms_dashboard_money(isset($projectRow['labor']) ? $projectRow['labor'] : 0)); ?></span>
-                                    <span>장비 <?php echo h(cpms_dashboard_money(isset($projectRow['equipment']) ? $projectRow['equipment'] : 0)); ?></span>
-                                    <span>자재 <?php echo h(cpms_dashboard_money(isset($projectRow['materials']) ? $projectRow['materials'] : 0)); ?></span>
+                                <div class="cpms-chip-row text-xs text-gray-600">
+                                    <span class="cpms-chip">노무 <?php echo h(cpms_dashboard_money(isset($projectRow['labor']) ? $projectRow['labor'] : 0)); ?></span>
+                                    <span class="cpms-chip">장비 <?php echo h(cpms_dashboard_money(isset($projectRow['equipment']) ? $projectRow['equipment'] : 0)); ?></span>
+                                    <span class="cpms-chip">자재 <?php echo h(cpms_dashboard_money(isset($projectRow['materials']) ? $projectRow['materials'] : 0)); ?></span>
                                 </div>
                                 <?php if ($debugProjectCost): ?>
                                     <div class="rounded-2xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
@@ -471,11 +635,11 @@ if ($pdo) {
                                 <?php endif; ?>
                                 <details class="rounded-2xl border border-gray-200 bg-white">
                                     <summary class="cursor-pointer px-4 py-3 text-sm font-extrabold text-gray-800">월별 보기</summary>
-                                    <div class="overflow-x-auto border-t border-gray-100">
+                                    <div class="cpms-responsive-table-wrap border-t border-gray-100">
                                         <?php if (count($monthlyRows) === 0): ?>
                                             <div class="p-4 text-sm text-gray-500">월별 데이터가 없습니다.</div>
                                         <?php else: ?>
-                                            <table class="min-w-full text-sm">
+                                            <table class="cpms-responsive-table text-sm">
                                                 <thead class="bg-gray-50 text-gray-500">
                                                     <tr>
                                                         <th class="px-3 py-2 text-left font-bold">월</th>
@@ -505,7 +669,7 @@ if ($pdo) {
                                                         <tr class="border-t border-gray-100">
                                                             <td class="px-3 py-2 text-gray-700 font-bold"><?php echo h(isset($monthRow['label']) ? $monthRow['label'] : '-'); ?></td>
                                                             <td class="px-3 py-2 text-right">
-                                                                <span class="inline-block px-2 py-1 rounded-xl border text-xs font-extrabold <?php echo $monthRateClass; ?>"><?php echo h(isset($monthRow['cost_rate_label']) ? $monthRow['cost_rate_label'] : '0%'); ?></span>
+                                                                <span class="cpms-chip inline-flex px-2 py-1 rounded-xl border text-xs font-extrabold <?php echo $monthRateClass; ?>"><?php echo h(isset($monthRow['cost_rate_label']) ? $monthRow['cost_rate_label'] : '0%'); ?></span>
                                                             </td>
                                                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_dashboard_money(isset($monthRow['sales']) ? $monthRow['sales'] : 0)); ?></td>
                                                             <td class="px-3 py-2 text-gray-600"><?php echo h(isset($monthRow['sales_basis']) ? $monthRow['sales_basis'] : ''); ?></td>
@@ -513,7 +677,7 @@ if ($pdo) {
                                                             <td class="px-3 py-2 text-right text-gray-800">
                                                                 <?php echo h(cpms_dashboard_money(isset($monthRow['target_amount']) ? $monthRow['target_amount'] : 0)); ?>
                                                                 <?php if ($monthTargetOver === 1): ?>
-                                                                    <span class="ml-2 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-100 font-bold">목표초과</span>
+                                                                    <span class="cpms-chip ml-2 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-100 font-bold">목표초과</span>
                                                                 <?php endif; ?>
                                                             </td>
                                                         </tr>
@@ -539,6 +703,27 @@ if ($pdo) {
 (function(){
     var openButtons = document.querySelectorAll('[data-project-cost-modal-open]');
     var closeButtons = document.querySelectorAll('[data-project-cost-modal-close]');
+    function loadProjectCostModal(url) {
+        var body = document.querySelector('[data-project-cost-modal-body="projectCostSummary"]');
+        if (!body || !url) return;
+        if (body.getAttribute('data-loaded') === '1' || body.getAttribute('data-loading') === '1') return;
+
+        body.setAttribute('data-loading', '1');
+        body.innerHTML = '<div class="text-sm text-gray-600">프로젝트별 원가율을 불러오는 중입니다.</div>';
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.onreadystatechange = function(){
+            if (xhr.readyState !== 4) return;
+            body.removeAttribute('data-loading');
+            if (xhr.status >= 200 && xhr.status < 300) {
+                body.innerHTML = xhr.responseText;
+                body.setAttribute('data-loaded', '1');
+                return;
+            }
+            body.innerHTML = '<div class="text-sm text-red-600">프로젝트별 원가율을 불러오지 못했습니다. 다시 시도해주세요.</div>';
+        };
+        xhr.send(null);
+    }
     function openModal(key) {
         var modal = document.getElementById('modal-' + key);
         if (modal) modal.classList.remove('hidden');
@@ -549,6 +734,7 @@ if ($pdo) {
     }
     for (var i = 0; i < openButtons.length; i++) {
         openButtons[i].addEventListener('click', function(){
+            loadProjectCostModal(this.getAttribute('data-project-cost-modal-url'));
             openModal(this.getAttribute('data-project-cost-modal-open'));
         });
     }

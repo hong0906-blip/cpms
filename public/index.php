@@ -708,11 +708,17 @@ if ($route === '대시보드') {
         $view = 'dashboard/employee';
     }
 
-    \App\Core\View::render($view, array(
+    $viewData = array(
         'title' => '대시보드',
         'selectedMenu' => '대시보드',
         'dashboardType' => $dashboardType,
-    ));
+    );
+    if ($view === 'dashboard/executive' && isset($_GET['fragment']) && (string)$_GET['fragment'] === 'project_cost_summary') {
+        $viewData['hideLayout'] = true;
+        $viewData['projectCostFragmentOnly'] = true;
+    }
+
+    \App\Core\View::render($view, $viewData);
     exit;
 }
 

@@ -1,18 +1,38 @@
 <?php
 
+if (!function_exists('cpms_sales_cache_key')) {
+    function cpms_sales_cache_key($pdo, $suffix) {
+        $prefix = 'nopdo';
+        if ($pdo && function_exists('spl_object_hash')) {
+            $prefix = spl_object_hash($pdo);
+        }
+        return $prefix . ':' . (string)$suffix;
+    }
+}
+
 if (!function_exists('cpms_sales_table_exists')) {
     function cpms_sales_table_exists($pdo, $table) {
+        static $cache = array();
+        static $dbNameCache = array();
         if (!$pdo) return false;
+        $cacheKey = cpms_sales_cache_key($pdo, 'table:' . (string)$table);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         try {
-            $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            $pdoKey = cpms_sales_cache_key($pdo, 'db');
+            if (!isset($dbNameCache[$pdoKey])) {
+                $dbNameCache[$pdoKey] = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            }
+            $dbName = (string)$dbNameCache[$pdoKey];
             if ($dbName === '') return false;
             $sql = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl";
             $st = $pdo->prepare($sql);
             $st->bindValue(':db', $dbName);
             $st->bindValue(':tbl', (string)$table);
             $st->execute();
-            return ((int)$st->fetchColumn() > 0);
+            $cache[$cacheKey] = ((int)$st->fetchColumn() > 0);
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = false;
             return false;
         }
     }
@@ -20,9 +40,17 @@ if (!function_exists('cpms_sales_table_exists')) {
 
 if (!function_exists('cpms_sales_column_exists')) {
     function cpms_sales_column_exists($pdo, $table, $column) {
+        static $cache = array();
+        static $dbNameCache = array();
         if (!$pdo) return false;
+        $cacheKey = cpms_sales_cache_key($pdo, 'column:' . (string)$table . ':' . (string)$column);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         try {
-            $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            $pdoKey = cpms_sales_cache_key($pdo, 'db');
+            if (!isset($dbNameCache[$pdoKey])) {
+                $dbNameCache[$pdoKey] = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            }
+            $dbName = (string)$dbNameCache[$pdoKey];
             if ($dbName === '') return false;
             $sql = "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl AND COLUMN_NAME = :col";
             $st = $pdo->prepare($sql);
@@ -30,8 +58,10 @@ if (!function_exists('cpms_sales_column_exists')) {
             $st->bindValue(':tbl', (string)$table);
             $st->bindValue(':col', (string)$column);
             $st->execute();
-            return ((int)$st->fetchColumn() > 0);
+            $cache[$cacheKey] = ((int)$st->fetchColumn() > 0);
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = false;
             return false;
         }
     }
@@ -80,6 +110,9 @@ if (!function_exists('cpms_sales_total_between')) {
     function cpms_sales_total_between($pdo, $projectId, $startDate, $endDate) {
         $result = array('amount' => 0.0, 'stats' => array('schedule_task_rows' => 0, 'work_item_line_rows' => 0, 'unit_price_rows' => 0, 'completed_task_rows' => 0, 'sales_sum' => 0.0));
         if (!$pdo || $projectId <= 0) return $result;
+        static $cache = array();
+        $cacheKey = cpms_sales_cache_key($pdo, 'sales-between:' . (int)$projectId . ':' . (string)$startDate . ':' . (string)$endDate);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (!cpms_sales_table_exists($pdo, 'cpms_schedule_tasks')) return $result;
         if (!cpms_sales_table_exists($pdo, 'cpms_work_item_lines')) return $result;
         if (!cpms_sales_table_exists($pdo, 'cpms_project_unit_prices')) return $result;
@@ -110,7 +143,10 @@ if (!function_exists('cpms_sales_total_between')) {
             $st->bindValue(':today', (string)$today);
             $st->execute();
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-            if (!is_array($rows) || count($rows) === 0) return $result;
+            if (!is_array($rows) || count($rows) === 0) {
+                $cache[$cacheKey] = $result;
+                return $result;
+            }
 
             $taskSet = array(); $lineSet = array(); $unitSet = array();
             $totalSales = 0.0;
@@ -146,8 +182,10 @@ if (!function_exists('cpms_sales_total_between')) {
             $result['stats']['unit_price_rows'] = count($unitSet);
             $result['stats']['completed_task_rows'] = count($taskSet);
             $result['stats']['sales_sum'] = (float)$totalSales;
-            return $result;
+            $cache[$cacheKey] = $result;
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = $result;
             return $result;
         }
     }
@@ -163,6 +201,9 @@ if (!function_exists('cpms_sales_total_all')) {
 if (!function_exists('cpms_confirmed_sales_total_between')) {
     function cpms_confirmed_sales_total_between($pdo, $projectId, $startDate, $endDate) {
         if (!$pdo || $projectId <= 0) return 0.0;
+        static $cache = array();
+        $cacheKey = cpms_sales_cache_key($pdo, 'confirmed-between:' . (int)$projectId . ':' . (string)$startDate . ':' . (string)$endDate);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (!cpms_sales_table_exists($pdo, 'cpms_progress_billings')) return 0.0;
         if (!cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'project_id')) return 0.0;
         if (!cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'recognized_amount')) return 0.0;
@@ -179,8 +220,10 @@ if (!function_exists('cpms_confirmed_sales_total_between')) {
                 $st->bindValue(':end_date', (string)$endDate);
             }
             $st->execute();
-            return (float)$st->fetchColumn();
+            $cache[$cacheKey] = (float)$st->fetchColumn();
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = 0.0;
             return 0.0;
         }
     }
@@ -189,13 +232,19 @@ if (!function_exists('cpms_confirmed_sales_total_between')) {
 if (!function_exists('cpms_confirmed_sales_total_all')) {
     function cpms_confirmed_sales_total_all($pdo, $projectId) {
         if (!$pdo || $projectId <= 0) return 0.0;
+        static $cache = array();
+        $cacheKey = cpms_sales_cache_key($pdo, 'confirmed-all:' . (int)$projectId);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (cpms_sales_table_exists($pdo, 'cpms_progress_billings') && cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'recognized_amount')) {
             try {
                 $st = $pdo->prepare("SELECT COALESCE(SUM(recognized_amount), 0) FROM cpms_progress_billings WHERE project_id = :pid");
                 $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
                 $st->execute();
                 $amount = (float)$st->fetchColumn();
-                if ($amount > 0) return $amount;
+                if ($amount > 0) {
+                    $cache[$cacheKey] = $amount;
+                    return $cache[$cacheKey];
+                }
             } catch (Exception $e) {
             }
         }
@@ -204,11 +253,14 @@ if (!function_exists('cpms_confirmed_sales_total_all')) {
                 $stLegacy = $pdo->prepare("SELECT COALESCE(MAX(recognized_cum_amount), 0) FROM cpms_monthly_recognized WHERE project_id = :pid");
                 $stLegacy->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
                 $stLegacy->execute();
-                return (float)$stLegacy->fetchColumn();
+                $cache[$cacheKey] = (float)$stLegacy->fetchColumn();
+                return $cache[$cacheKey];
             } catch (Exception $e) {
+                $cache[$cacheKey] = 0.0;
                 return 0.0;
             }
         }
+        $cache[$cacheKey] = 0.0;
         return 0.0;
     }
 }
@@ -216,12 +268,18 @@ if (!function_exists('cpms_confirmed_sales_total_all')) {
 if (!function_exists('cpms_confirmed_sales_has_data')) {
     function cpms_confirmed_sales_has_data($pdo, $projectId) {
         if (!$pdo || $projectId <= 0) return false;
+        static $cache = array();
+        $cacheKey = cpms_sales_cache_key($pdo, 'confirmed-has-data:' . (int)$projectId);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (cpms_sales_table_exists($pdo, 'cpms_progress_billings')) {
             try {
                 $st = $pdo->prepare("SELECT COUNT(*) FROM cpms_progress_billings WHERE project_id = :pid AND recognized_amount > 0");
                 $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
                 $st->execute();
-                if ((int)$st->fetchColumn() > 0) return true;
+                if ((int)$st->fetchColumn() > 0) {
+                    $cache[$cacheKey] = true;
+                    return true;
+                }
             } catch (Exception $e) {
             }
         }
@@ -230,11 +288,14 @@ if (!function_exists('cpms_confirmed_sales_has_data')) {
                 $stLegacy = $pdo->prepare("SELECT COUNT(*) FROM cpms_monthly_recognized WHERE project_id = :pid AND recognized_cum_amount > 0");
                 $stLegacy->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
                 $stLegacy->execute();
-                return ((int)$stLegacy->fetchColumn() > 0);
+                $cache[$cacheKey] = ((int)$stLegacy->fetchColumn() > 0);
+                return $cache[$cacheKey];
             } catch (Exception $e) {
+                $cache[$cacheKey] = false;
                 return false;
             }
         }
+        $cache[$cacheKey] = false;
         return false;
     }
 }

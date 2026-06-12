@@ -9,6 +9,15 @@
 require_once __DIR__ . '/partials/labor_data_loader.php';
 require_once __DIR__ . '/partials/sales_data_loader.php';
 
+if (!function_exists('cpms_status_cache_key')) {
+    function cpms_status_cache_key($pdo, $suffix) {
+        $prefix = 'nopdo';
+        if ($pdo && function_exists('spl_object_hash')) {
+            $prefix = spl_object_hash($pdo);
+        }
+        return $prefix . ':' . (string)$suffix;
+    }
+}
 
 if (!function_exists('cpms_cost_period_range')) {
     function cpms_cost_period_range($ym, $type) {
@@ -31,17 +40,27 @@ if (!function_exists('cpms_cost_period_range')) {
 
 if (!function_exists('cpms_status_table_exists')) {
     function cpms_status_table_exists($pdo, $table) {
+        static $cache = array();
+        static $dbNameCache = array();
         if (!$pdo) return false;
+        $cacheKey = cpms_status_cache_key($pdo, 'table:' . (string)$table);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         try {
-            $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            $pdoKey = cpms_status_cache_key($pdo, 'db');
+            if (!isset($dbNameCache[$pdoKey])) {
+                $dbNameCache[$pdoKey] = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            }
+            $dbName = (string)$dbNameCache[$pdoKey];
             if ($dbName === '') return false;
             $sql = "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl";
             $st = $pdo->prepare($sql);
             $st->bindValue(':db', $dbName);
             $st->bindValue(':tbl', (string)$table);
             $st->execute();
-            return ((int)$st->fetchColumn() > 0);
+            $cache[$cacheKey] = ((int)$st->fetchColumn() > 0);
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = false;
             return false;
         }
     }
@@ -49,9 +68,17 @@ if (!function_exists('cpms_status_table_exists')) {
 
 if (!function_exists('cpms_status_column_exists')) {
     function cpms_status_column_exists($pdo, $table, $column) {
+        static $cache = array();
+        static $dbNameCache = array();
         if (!$pdo) return false;
+        $cacheKey = cpms_status_cache_key($pdo, 'column:' . (string)$table . ':' . (string)$column);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         try {
-            $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            $pdoKey = cpms_status_cache_key($pdo, 'db');
+            if (!isset($dbNameCache[$pdoKey])) {
+                $dbNameCache[$pdoKey] = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+            }
+            $dbName = (string)$dbNameCache[$pdoKey];
             if ($dbName === '') return false;
             $sql = "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :tbl AND COLUMN_NAME = :col";
             $st = $pdo->prepare($sql);
@@ -59,8 +86,10 @@ if (!function_exists('cpms_status_column_exists')) {
             $st->bindValue(':tbl', (string)$table);
             $st->bindValue(':col', (string)$column);
             $st->execute();
-            return ((int)$st->fetchColumn() > 0);
+            $cache[$cacheKey] = ((int)$st->fetchColumn() > 0);
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = false;
             return false;
         }
     }
@@ -68,7 +97,11 @@ if (!function_exists('cpms_status_column_exists')) {
 
 if (!function_exists('cpms_status_sum_between')) {
     function cpms_status_sum_between($pdo, $table, $dateColumn, $projectId, $startDate, $endDate, $extraWhere, $extraParams) {
+        static $cache = array();
         if (!$pdo) return 0;
+        $paramKey = is_array($extraParams) ? md5(serialize($extraParams)) : 'noparams';
+        $cacheKey = cpms_status_cache_key($pdo, 'sum-between:' . $table . ':' . $dateColumn . ':' . (int)$projectId . ':' . (string)$startDate . ':' . (string)$endDate . ':' . (string)$extraWhere . ':' . $paramKey);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (!cpms_status_table_exists($pdo, $table)) return 0;
         if (!cpms_status_column_exists($pdo, $table, 'project_id')) return 0;
         if (!cpms_status_column_exists($pdo, $table, 'amount')) return 0;
@@ -91,8 +124,10 @@ if (!function_exists('cpms_status_sum_between')) {
             }
 
             $st->execute();
-            return (float)$st->fetchColumn();
+            $cache[$cacheKey] = (float)$st->fetchColumn();
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = 0;
             return 0;
         }
     }
@@ -100,7 +135,11 @@ if (!function_exists('cpms_status_sum_between')) {
 
 if (!function_exists('cpms_status_sum_all')) {
     function cpms_status_sum_all($pdo, $table, $projectId, $extraWhere, $extraParams) {
+        static $cache = array();
         if (!$pdo) return 0;
+        $paramKey = is_array($extraParams) ? md5(serialize($extraParams)) : 'noparams';
+        $cacheKey = cpms_status_cache_key($pdo, 'sum-all:' . $table . ':' . (int)$projectId . ':' . (string)$extraWhere . ':' . $paramKey);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (!cpms_status_table_exists($pdo, $table)) return 0;
         if (!cpms_status_column_exists($pdo, $table, 'project_id')) return 0;
         if (!cpms_status_column_exists($pdo, $table, 'amount')) return 0;
@@ -120,8 +159,10 @@ if (!function_exists('cpms_status_sum_all')) {
             }
 
             $st->execute();
-            return (float)$st->fetchColumn();
+            $cache[$cacheKey] = (float)$st->fetchColumn();
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = 0;
             return 0;
         }
     }
@@ -129,7 +170,10 @@ if (!function_exists('cpms_status_sum_all')) {
 
 if (!function_exists('cpms_status_equipment_total_between')) {
     function cpms_status_equipment_total_between($pdo, $projectId, $startDate, $endDate) {
+        static $cache = array();
         if (!$pdo) return 0.0;
+        $cacheKey = cpms_status_cache_key($pdo, 'equipment-between:' . (int)$projectId . ':' . (string)$startDate . ':' . (string)$endDate);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (!cpms_status_table_exists($pdo, 'cpms_equipment_usage')) return 0.0;
         if (!cpms_status_column_exists($pdo, 'cpms_equipment_usage', 'project_id')) return 0.0;
         if (!cpms_status_column_exists($pdo, 'cpms_equipment_usage', 'use_date')) return 0.0;
@@ -151,8 +195,10 @@ if (!function_exists('cpms_status_equipment_total_between')) {
             $st->bindValue(':start', (string)$startDate);
             $st->bindValue(':end', (string)$endDate);
             $st->execute();
-            return (float)$st->fetchColumn();
+            $cache[$cacheKey] = (float)$st->fetchColumn();
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = 0.0;
             return 0.0;
         }
     }
@@ -161,7 +207,10 @@ if (!function_exists('cpms_status_equipment_total_between')) {
 if (!function_exists('cpms_status_material_category_sum_between')) {
     function cpms_status_material_category_sum_between($pdo, $projectId, $startDate, $endDate) {
         $result = array('자재비'=>0.0, '구매품'=>0.0, '기타경비'=>0.0, '안전관리비'=>0.0);
+        static $cache = array();
         if (!$pdo) return $result;
+        $cacheKey = cpms_status_cache_key($pdo, 'material-between:' . (int)$projectId . ':' . (string)$startDate . ':' . (string)$endDate);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (!cpms_status_table_exists($pdo, 'cpms_material_usage')) return $result;
         if (!cpms_status_table_exists($pdo, 'cpms_material_items')) return $result;
         if (!cpms_status_column_exists($pdo, 'cpms_material_usage', 'project_id')) return $result;
@@ -189,8 +238,10 @@ if (!function_exists('cpms_status_material_category_sum_between')) {
                 $result[$cat] += isset($r['amount']) ? (float)$r['amount'] : 0.0;
             }
         } catch (Exception $e) {
+            $cache[$cacheKey] = $result;
             return $result;
         }
+        $cache[$cacheKey] = $result;
         return $result;
     }
 }
@@ -283,6 +334,9 @@ if (!function_exists('cpms_status_labor_wage_map')) {
     function cpms_status_labor_wage_map($pdo, $projectId) {
         $wageMap = array();
         if (!$pdo || $projectId <= 0) return $wageMap;
+        static $cache = array();
+        $cacheKey = cpms_status_cache_key($pdo, 'labor-wage-map:' . (int)$projectId);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
 
         $directTeamMembers = cpms_load_direct_team_members($pdo);
         $projectWorkers = cpms_load_project_labor_workers($pdo, (int)$projectId);
@@ -301,13 +355,17 @@ if (!function_exists('cpms_status_labor_wage_map')) {
             }
         }
 
+        $cache[$cacheKey] = $wageMap;
         return $wageMap;
     }
 }
 
 if (!function_exists('cpms_status_labor_total_between')) {
     function cpms_status_labor_total_between($pdo, $projectId, $projectName, $startDate, $endDate, $laborWageMap) {
+        static $cache = array();
         if (!$pdo || $projectId <= 0) return 0.0;
+        $cacheKey = cpms_status_cache_key($pdo, 'labor-between:' . (int)$projectId . ':' . trim((string)$projectName) . ':' . (string)$startDate . ':' . (string)$endDate);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         $projectName = trim((string)$projectName);
         if ($projectName === '') return 0.0;
 
@@ -318,7 +376,10 @@ if (!function_exists('cpms_status_labor_total_between')) {
             return 0.0;
         }
 
-        if ($startObj > $endObj) return 0.0;
+        if ($startObj > $endObj) {
+            $cache[$cacheKey] = 0.0;
+            return 0.0;
+        }
 
         $months = array();
         $cursor = clone $startObj;
@@ -357,7 +418,8 @@ if (!function_exists('cpms_status_labor_total_between')) {
             $totalLabor += ((float)$workerSumGongsu) * $wageRate;
         }
 
-        return (float)$totalLabor;
+        $cache[$cacheKey] = (float)$totalLabor;
+        return $cache[$cacheKey];
     }
 }
 
@@ -614,6 +676,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 <style>
 .cpms-status-wrap .card { border:1px solid #e5e7eb; border-radius:16px; background:#fff; }
 .cpms-status-wrap .summary-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.cpms-status-wrap .summary-grid > div { min-width:0; }
 .cpms-status-wrap .chart-wrap { border:1px solid #e5e7eb; border-radius:16px; padding:16px; background:#fff; }
 .cpms-status-wrap .chart-scroll { overflow-x:auto; }
 .cpms-status-wrap .chart-row { min-width:900px; height:280px; display:flex; align-items:flex-end; gap:12px; padding:8px 4px 0 4px; border-bottom:1px solid #e5e7eb; }
@@ -626,6 +689,9 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 .cpms-status-wrap .xlabel { margin-top:8px; font-size:12px; color:#4b5563; font-weight:700; }
 .cpms-status-wrap .legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; }
 .cpms-status-wrap .legend-item { display:flex; align-items:center; gap:6px; font-size:12px; color:#374151; }
+.cpms-status-wrap .summary-grid .text-lg,
+.cpms-status-wrap .summary-grid .text-3xl { word-break:keep-all; overflow-wrap:anywhere; }
+.cpms-status-wrap .cpms-status-rate-badge { min-width:52px; }
 .cpms-status-wrap .dot { width:12px; height:12px; border-radius:3px; display:inline-block; }
 @media (max-width: 980px) {
     .cpms-status-wrap .summary-grid { grid-template-columns:repeat(1,minmax(0,1fr)); }
@@ -639,6 +705,8 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     .cpms-status-wrap .bar .value { display:none; }
     .cpms-status-wrap .legend { gap:8px; }
     .cpms-status-wrap .legend-item { font-size:11px; }
+    .cpms-status-wrap .summary-grid .text-lg { font-size:16px; }
+    .cpms-status-wrap .cpms-status-filter { width:100%; justify-content:stretch; }
 }
 </style>
 
@@ -692,7 +760,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     </div>
 
     <div class="flex justify-end">
-        <form method="get" action="" class="flex flex-wrap items-end gap-2">
+        <form method="get" action="" class="cpms-status-filter flex flex-wrap items-end gap-2">
             <input type="hidden" name="r" value="공사">
             <input type="hidden" name="pid" value="<?php echo (int)$pid; ?>">
             <input type="hidden" name="tab" value="status">
@@ -781,8 +849,8 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <span class="legend-item"><span class="dot" style="background:<?php echo h($meta['color']); ?>;"></span><?php echo h($meta['label']); ?></span>
             <?php endforeach; ?>
         </div>
-        <div class="mt-4 overflow-x-auto rounded-2xl border border-gray-200">
-            <table class="min-w-full text-sm">
+        <div class="cpms-responsive-table-wrap mt-4 rounded-2xl border border-gray-200">
+            <table class="cpms-responsive-table text-sm">
                 <thead class="bg-gray-50 text-gray-500">
                     <tr>
                         <th class="px-3 py-2 text-left font-bold">월</th>
@@ -813,7 +881,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['used_total']) ? $row['used_total'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['target_amount']) ? $row['target_amount'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right">
-                                <span class="inline-block px-2 py-1 rounded-xl border text-xs font-extrabold <?php echo $rowRateClass; ?>"><?php echo h(isset($row['cost_rate_label']) ? $row['cost_rate_label'] : '0%'); ?></span>
+                                <span class="cpms-chip cpms-status-rate-badge inline-flex px-2 py-1 rounded-xl border text-xs font-extrabold <?php echo $rowRateClass; ?>"><?php echo h(isset($row['cost_rate_label']) ? $row['cost_rate_label'] : '0%'); ?></span>
                             </td>
                         </tr>
                     <?php endforeach; ?>
