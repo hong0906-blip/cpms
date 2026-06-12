@@ -557,7 +557,7 @@ if ($pdo) {
             <div class="p-4 md:p-6 overflow-y-auto max-h-[74vh]" data-project-cost-modal-body="projectCostSummary" data-loaded="0">
             <?php if (!$loadProjectCostSummary): ?>
                 <div class="text-sm text-gray-600">프로젝트별 원가율을 불러오는 중입니다.</div>
-            <?php else if (empty($projectCostSummary['projects'])): ?>
+            <?php elseif (empty($projectCostSummary['projects'])): ?>
                 <div class="text-sm text-gray-600">표시할 프로젝트가 없습니다.</div>
             <?php else: ?>
                 <div class="space-y-4 max-h-[34rem] overflow-y-auto">
