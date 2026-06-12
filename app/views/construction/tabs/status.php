@@ -2,12 +2,13 @@
 /**
  * 공사 > 상황 탭(연도별 월/분기 비용+매출 그래프)
  * - 연도 선택 + 월별/분기별 5항목(노무/장비/안전/자재/매출) 막대그래프
- * - 매출·노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일 ~ 현월 25일
+ * - 매출·노무비: 1일~말일 / 자재·장비: 전월 26일 ~ 현월 25일 / 안전관리비: 안전섹션 원본
  * - PHP 5.6 호환
  */
 
 require_once __DIR__ . '/partials/labor_data_loader.php';
 require_once __DIR__ . '/partials/sales_data_loader.php';
+require_once __DIR__ . '/../../safety/safety_cost_helper.php';
 
 if (!function_exists('cpms_status_cache_key')) {
     function cpms_status_cache_key($pdo, $suffix) {
@@ -524,16 +525,7 @@ for ($m = 1; $m <= 12; $m++) {
     $equipment = cpms_status_equipment_total_between($pdo, $pid, $costStart, $costEnd);
     $materialByCategory = cpms_status_material_category_sum_between($pdo, $pid, $costStart, $costEnd);
     $materials = (float)$materialByCategory['자재비'] + (float)$materialByCategory['구매품'] + (float)$materialByCategory['기타경비'];
-    $safety = (float)$materialByCategory['안전관리비'] + cpms_status_sum_between(
-        $pdo,
-        'cpms_daily_cost_entries',
-        'cost_date',
-        $pid,
-        $costStart,
-        $costEnd,
-        "AND cost_type IN ('안전','안전관리비')",
-        array()
-    );
+    $safety = cpms_safety_cost_total_between((int)$pid, $costStart, $costEnd);
 
     // 상황탭 노무비=지급총액 합
     $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
@@ -648,21 +640,18 @@ foreach ($years as $yy) {
         $overallTotals['equipment'] += cpms_status_equipment_total_between($pdo, $pid, $costStart, $costEnd);
         $overallMaterialByCategory = cpms_status_material_category_sum_between($pdo, $pid, $costStart, $costEnd);
         $overallTotals['materials'] += (float)$overallMaterialByCategory['자재비'] + (float)$overallMaterialByCategory['구매품'] + (float)$overallMaterialByCategory['기타경비'];
-        $overallTotals['safety'] += (float)$overallMaterialByCategory['안전관리비'] + cpms_status_sum_between(
-            $pdo,
-            'cpms_daily_cost_entries',
-            'cost_date',
-            $pid,
-            $costStart,
-            $costEnd,
-            "AND cost_type IN ('안전','안전관리비')",
-            array()
-        );
         $overallTotals['labor'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
     }
 }
 $overallTotals['sales'] = cpms_status_sales_total_all($pdo, (int)$pid);
 $overallTotals['confirmed_sales'] = cpms_status_confirmed_sales_total_all($pdo, (int)$pid);
+$safetyContractTotal = cpms_safety_cost_contract_total($pdo, (int)$pid);
+$safetyLimit110 = round($safetyContractTotal * 1.1);
+$safetyUsedTotal = cpms_safety_cost_total((int)$pid);
+$safetyRemaining = $safetyLimit110 - $safetyUsedTotal;
+$safetyUseRate = ($safetyContractTotal > 0) ? (($safetyUsedTotal / $safetyContractTotal) * 100) : 0.0;
+$safetyRemainRate = ($safetyLimit110 > 0) ? (($safetyRemaining / $safetyLimit110) * 100) : 0.0;
+$overallTotals['safety'] = $safetyUsedTotal;
 $overallUsageTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['safety'] + $overallTotals['materials'];
 $overallInputCostTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['materials'];
 $overallTargetAmount = round($overallTotals['sales'] * 0.7);
@@ -715,7 +704,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <h3 class="text-xl font-extrabold text-gray-900">상황</h3>
-                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황<br>매출·노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일~현월 25일</div>
+                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황<br>매출·노무비: 1일~말일 / 자재·장비: 전월 26일~현월 25일 / 안전관리비: 안전섹션 원본</div>
             </div>
         </div>
 
@@ -754,6 +743,33 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallUsageTotal)); ?></div>
             </div>
         </div>
+        <div class="summary-grid mt-3">
+            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
+                <div class="text-xs text-emerald-700">안전관리비 총액</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($safetyContractTotal)); ?></div>
+            </div>
+            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
+                <div class="text-xs text-emerald-700">110% 사용가능한도</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($safetyLimit110)); ?></div>
+            </div>
+            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
+                <div class="text-xs text-emerald-700">현재 사용금액</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($safetyUsedTotal)); ?></div>
+            </div>
+            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
+                <div class="text-xs text-emerald-700">남은금액</div>
+                <div class="text-lg font-extrabold <?php echo ($safetyRemaining < 0) ? 'text-red-700' : 'text-gray-900'; ?>"><?php echo h(cpms_status_money($safetyRemaining)); ?></div>
+            </div>
+            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
+                <div class="text-xs text-emerald-700">사용률(총액 기준)</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_safety_cost_rate_label($safetyUseRate)); ?></div>
+            </div>
+            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
+                <div class="text-xs text-emerald-700">남은 퍼센트(110% 한도)</div>
+                <div class="text-lg font-extrabold <?php echo ($safetyRemainRate < 0) ? 'text-red-700' : 'text-gray-900'; ?>"><?php echo h(cpms_safety_cost_rate_label($safetyRemainRate)); ?></div>
+            </div>
+        </div>
+        <div class="mt-2 text-xs text-gray-500">안전관리비 사용금액은 안전섹션의 안전관리비 사용내역 원본 기준입니다.</div>
         <div class="mt-3 text-xs text-gray-500">
             투입원가 = 노무비 + 장비비 + 자재구입비 / 안전관리비 제외 · 투입목표금액 = 매출 × 70%
         </div>
@@ -778,7 +794,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     <div class="chart-wrap">
         <div class="flex items-center justify-between">
             <h4 class="text-lg font-extrabold text-gray-900">월별 비용/매출 그래프</h4>
-            <div class="text-xs text-gray-500">매출·노무비: 1일~말일 / 자재·장비·안전관리비: 전월 26일~현월 25일</div>
+            <div class="text-xs text-gray-500">매출·노무비: 1일~말일 / 자재·장비: 전월 26일~현월 25일 / 안전관리비: 안전섹션 원본</div>
         </div>
         <?php if ($debugMode && count($periodDiagnostics) > 0): ?>
             <div class="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">

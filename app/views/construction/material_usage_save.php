@@ -119,13 +119,18 @@ $pdo = Db::pdo();
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
 
 try {
-    $stE = $pdo->prepare("SELECT base_rate FROM cpms_material_items WHERE id = :id AND project_id = :pid AND is_deleted = 0 LIMIT 1");
+    $stE = $pdo->prepare("SELECT base_rate, category FROM cpms_material_items WHERE id = :id AND project_id = :pid AND is_deleted = 0 LIMIT 1");
     $stE->bindValue(':id', $materialId, PDO::PARAM_INT);
     $stE->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $stE->execute();
     $item = $stE->fetch(PDO::FETCH_ASSOC);
     if (!$item) {
         flash_set('error', '자재구입비 정보를 찾을 수 없습니다.');
+        header('Location: ' . $redirect);
+        exit;
+    }
+    if (isset($item['category']) && trim((string)$item['category']) === '안전관리비') {
+        flash_set('error', '안전관리비 사용내역은 안전섹션에서 등록해주세요.');
         header('Location: ' . $redirect);
         exit;
     }

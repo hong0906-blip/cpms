@@ -584,6 +584,18 @@ if ($route === 'safety/safety_incident_save') {
     require_once __DIR__ . '/../app/views/safety/safety_incident_save.php';
     exit;
 }
+if ($route === 'safety/safety_cost_save') {
+    require_once __DIR__ . '/../app/views/safety/safety_cost_save.php';
+    exit;
+}
+if ($route === 'safety/safety_cost_delete') {
+    require_once __DIR__ . '/../app/views/safety/safety_cost_delete.php';
+    exit;
+}
+if ($route === 'safety/safety_cost_download') {
+    require_once __DIR__ . '/../app/views/safety/safety_cost_download.php';
+    exit;
+}
 if ($route === 'safety/incident_update') {
     require_once __DIR__ . '/../app/views/safety/incident_update.php';
     exit;

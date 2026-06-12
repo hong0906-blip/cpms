@@ -44,7 +44,7 @@ if ($projectId <= 0) {
 }
 
 $category = trim((string)(isset($_POST['category']) ? $_POST['category'] : ''));
-$allowedMaterialCategories = array('자재비'=>true, '구매품'=>true, '기타경비'=>true, '안전관리비'=>true);
+$allowedMaterialCategories = array('자재비'=>true, '구매품'=>true, '기타경비'=>true);
 $vendorName = trim((string)(isset($_POST['vendor_name']) ? $_POST['vendor_name'] : ''));
 // 자재: 규격 제거
 $spec = '';
@@ -62,7 +62,11 @@ if ($category === '' || $vendorName === '') {
     exit;
 }
 if (!isset($allowedMaterialCategories[$category])) {
-    flash_set('error', '허용되지 않은 구분입니다.');
+    if ($category === '안전관리비') {
+        flash_set('error', '안전관리비 사용내역은 안전섹션에서 등록해주세요.');
+    } else {
+        flash_set('error', '허용되지 않은 구분입니다.');
+    }
     header('Location: ' . $redirect);
     exit;
 }
