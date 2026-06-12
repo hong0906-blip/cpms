@@ -7,26 +7,27 @@
  */
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/../common/chat_notification_helpers.php';
+require_once __DIR__ . '/safety_cost_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
-if (!(Auth::canManageConstruction() || Auth::canManageEmployees() || Auth::isMaster() || Auth::userRole() === 'executive')) {
-    http_response_code(403); echo '403 Forbidden'; exit;
-}
-
-$token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
-if (!csrf_check($token)) { flash_set('error','보안 토큰이 유효하지 않습니다.'); header('Location: ?r=공사'); exit; }
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
+$redirectMode = isset($_POST['redirect']) ? trim((string)$_POST['redirect']) : '';
+$redirect = ($redirectMode === 'safety_home') ? ('?r=safety_home&pid=' . (int)$projectId . '&tab=incidents') : '?r=안전/보건';
+
+$token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
+if (!csrf_check($token)) { flash_set('error','보안 토큰이 유효하지 않습니다.'); header('Location: ' . $redirect); exit; }
+
 $title = isset($_POST['title']) ? trim((string)$_POST['title']) : '';
 $description = isset($_POST['description']) ? trim((string)$_POST['description']) : '';
 $occurredAt = isset($_POST['occurred_at']) ? trim((string)$_POST['occurred_at']) : '';
 $severity = isset($_POST['severity']) ? trim((string)$_POST['severity']) : '보통';
 $status = isset($_POST['status']) ? trim((string)$_POST['status']) : '접수';
-if ($projectId <= 0 || $title === '') { flash_set('error','필수값을 입력해주세요.'); header('Location: ?r=안전/보건'); exit; }
+if ($projectId <= 0 || $title === '') { flash_set('error','필수값을 입력해주세요.'); header('Location: ' . $redirect); exit; }
 if (mb_strlen($title,'UTF-8') > 200) $title = mb_substr($title,0,200,'UTF-8');
 if (!in_array($severity, array('경미','보통','중대','긴급'), true)) $severity = '보통';
 if (!in_array($status, array('접수','처리중','처리완료'), true)) $status = '접수';
@@ -38,7 +39,12 @@ if ($occurredAt !== '') {
 }
 
 $pdo = Db::pdo();
-if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ?r=안전/보건'); exit; }
+if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ' . $redirect); exit; }
+if (!cpms_safety_cost_user_can_view_project($pdo, $projectId) || !cpms_safety_incident_user_can_manage_project($pdo, $projectId)) {
+    flash_set('error', '해당 프로젝트의 안전사고를 등록할 권한이 없습니다.');
+    header('Location: ' . $redirect);
+    exit;
+}
 
 $createdBy = null;
 if (method_exists('App\\Core\\Auth', 'id')) { $tmpId = Auth::id(); if ($tmpId !== null && $tmpId !== false && $tmpId !== '') $createdBy = (int)$tmpId; }
@@ -120,5 +126,5 @@ try {
     flash_set('error','안전사고 등록 실패: '.$e->getMessage());
 }
 
-header('Location: ?r=안전/보건');
+header('Location: ' . $redirect);
 exit;

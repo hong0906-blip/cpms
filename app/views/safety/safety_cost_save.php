@@ -21,11 +21,17 @@ if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
 $pdo = Db::pdo();
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $recordId = isset($_POST['safety_cost_id']) ? trim((string)$_POST['safety_cost_id']) : '';
-$redirect = '?r=safety_home&safety_pid=' . (int)$projectId . '#safety-cost-section';
+$redirect = '?r=safety_home&pid=' . (int)$projectId . '&tab=safety_cost#safety-cost-section';
+
+if (!$pdo) {
+    flash_set('error', 'DB 연결 실패');
+    header('Location: ' . $redirect);
+    exit;
+}
 
 if ($projectId <= 0) {
     flash_set('error', '현장/프로젝트를 선택해주세요.');
-    header('Location: ?r=safety_home#safety-cost-section');
+    header('Location: ?r=safety_home');
     exit;
 }
 if (!cpms_safety_cost_user_can_manage_project($pdo, $projectId)) {
@@ -42,14 +48,37 @@ if ($useDate === '') {
 }
 
 $vendorName = trim((string)(isset($_POST['vendor_name']) ? $_POST['vendor_name'] : ''));
+$representative = trim((string)(isset($_POST['representative']) ? $_POST['representative'] : ''));
+$phone = trim((string)(isset($_POST['phone']) ? $_POST['phone'] : ''));
+$bizNo = trim((string)(isset($_POST['biz_no']) ? $_POST['biz_no'] : ''));
 $itemName = trim((string)(isset($_POST['item_name']) ? $_POST['item_name'] : ''));
 $useContent = trim((string)(isset($_POST['use_content']) ? $_POST['use_content'] : ''));
-$amount = cpms_safety_cost_parse_amount(isset($_POST['amount']) ? $_POST['amount'] : '');
+$remark = trim((string)(isset($_POST['remark']) ? $_POST['remark'] : ''));
+if ($itemName === '') $itemName = $useContent;
+if ($vendorName === '' || $useContent === '') {
+    flash_set('error', '업체명과 품목 또는 사용내용을 입력해주세요.');
+    header('Location: ' . $redirect);
+    exit;
+}
+$amountInput = isset($_POST['amount']) ? trim((string)$_POST['amount']) : '';
+$amountNumberText = str_replace(array(',', ' '), '', $amountInput);
+if ($amountInput === '' || !preg_match('/^\d+(\.\d+)?$/', $amountNumberText)) {
+    flash_set('error', '공급가액은 숫자와 콤마만 입력해주세요.');
+    header('Location: ' . $redirect);
+    exit;
+}
+$amount = cpms_safety_cost_parse_amount($amountInput);
+if ($amountInput === '' || $amount <= 0) {
+    flash_set('error', '공급가액은 0원보다 큰 숫자로 입력해주세요.');
+    header('Location: ' . $redirect);
+    exit;
+}
 $now = date('Y-m-d H:i:s');
 $userId = cpms_safety_cost_user_id();
 $userName = (string)Auth::userName();
 $userEmail = (string)Auth::userEmail();
 $projectName = cpms_safety_cost_project_name($pdo, $projectId);
+$uploadedStoredPath = '';
 
 try {
     $store = cpms_safety_cost_read_store();
@@ -78,12 +107,25 @@ try {
         $recordId = cpms_safety_cost_new_id();
     }
 
+    $safetyContractTotal = cpms_safety_cost_contract_total($pdo, $projectId);
+    $safetyLimit110 = round($safetyContractTotal * 1.1);
+    $usedExceptCurrent = cpms_safety_cost_total_except($projectId, $recordId);
+    $usedAfterSave = $usedExceptCurrent + $amount;
+    if ($usedAfterSave > $safetyLimit110 + 0.0001) {
+        flash_set('error', '안전관리비 110% 사용가능한도를 초과하여 저장할 수 없습니다. 사용가능한도: ' . cpms_safety_cost_money_label($safetyLimit110) . ' / 저장 후 사용금액: ' . cpms_safety_cost_money_label($usedAfterSave));
+        header('Location: ' . $redirect);
+        exit;
+    }
+
     $uploadMessage = '';
     $upload = cpms_safety_cost_store_uploaded_pdf('pdf_file', $projectId, $recordId, $useDate, $uploadMessage);
     if (isset($upload['has_file']) && (int)$upload['has_file'] === 1 && empty($upload['ok'])) {
         flash_set('error', $uploadMessage !== '' ? $uploadMessage : 'PDF 업로드에 실패했습니다.');
         header('Location: ' . $redirect);
         exit;
+    }
+    if (isset($upload['ok']) && (int)$upload['ok'] === 1 && isset($upload['stored_path'])) {
+        $uploadedStoredPath = (string)$upload['stored_path'];
     }
 
     $base = array();
@@ -105,9 +147,14 @@ try {
     $base['use_date'] = $useDate;
     $base['category'] = '안전관리비';
     $base['vendor_name'] = $vendorName;
+    $base['representative'] = $representative;
+    $base['phone'] = $phone;
+    $base['biz_no'] = $bizNo;
     $base['item_name'] = $itemName;
     $base['use_content'] = $useContent;
+    $base['remark'] = $remark;
     $base['amount'] = $amount;
+    $base['supply_amount'] = $amount;
     $base['status'] = 'active';
     $base['is_deleted'] = 0;
     $base['updated_at'] = $now;
@@ -139,6 +186,10 @@ try {
     }
 
     if (!cpms_safety_cost_write_store($store)) {
+        if ($uploadedStoredPath !== '') {
+            $uploadedFile = cpms_safety_cost_resolve_path($uploadedStoredPath);
+            if ($uploadedFile !== '') @unlink($uploadedFile);
+        }
         flash_set('error', '안전관리비 사용내역 저장에 실패했습니다.');
         header('Location: ' . $redirect);
         exit;
@@ -148,8 +199,11 @@ try {
     header('Location: ' . $redirect);
     exit;
 } catch (Exception $e) {
+    if ($uploadedStoredPath !== '') {
+        $uploadedFile = cpms_safety_cost_resolve_path($uploadedStoredPath);
+        if ($uploadedFile !== '') @unlink($uploadedFile);
+    }
     flash_set('error', '저장 실패: ' . $e->getMessage());
     header('Location: ' . $redirect);
     exit;
 }
-

@@ -349,7 +349,7 @@ if ($pdo && is_array($selectedProject)) {
             . '<div class="mt-1">' . cpms_safety_cost_pdf_links_html($safetyRow) . '</div>'
             . '</div>';
         $monthsForSafety = monthly_zero_map($allMonths);
-        $monthsForSafety[$safetyYm] += isset($safetyRow['amount']) && is_numeric((string)$safetyRow['amount']) ? (float)$safetyRow['amount'] : 0.0;
+        $monthsForSafety[$safetyYm] += cpms_safety_cost_row_amount($safetyRow);
         $rowsBySection['안전관리비'][] = array(
             'section' => '안전관리비',
             '업체명' => ($vendorName !== '' ? $vendorName : '-'),

@@ -86,6 +86,11 @@ function cpms_safety_cost_normalize_dept($dept)
         '공무팀' => '공무',
         '공사부' => '공사',
         '공사팀' => '공사',
+        '품질부' => '품질',
+        '품질팀' => '품질',
+        '품질관리' => '품질',
+        '품질관리부' => '품질',
+        '품질관리팀' => '품질',
         '관리부' => '관리',
         '관리팀' => '관리'
     );
@@ -132,29 +137,88 @@ function cpms_safety_cost_column_exists($pdo, $table, $column)
     }
 }}
 
+if (!function_exists('cpms_safety_cost_user_employee_id')) {
+function cpms_safety_cost_user_employee_id($pdo)
+{
+    $userId = cpms_safety_cost_user_id();
+    if ($userId > 0) return $userId;
+    if (!$pdo || !class_exists('App\\Core\\Auth')) return 0;
+    $email = trim((string)\App\Core\Auth::userEmail());
+    if ($email === '') return 0;
+    if (function_exists('cpms_find_employee_id_by_email')) {
+        return (int)cpms_find_employee_id_by_email($pdo, $email);
+    }
+    try {
+        $st = $pdo->prepare("SELECT id FROM employees WHERE email = :email LIMIT 1");
+        $st->bindValue(':email', $email);
+        $st->execute();
+        return (int)$st->fetchColumn();
+    } catch (Exception $e) {
+        return 0;
+    }
+}}
+
+if (!function_exists('cpms_safety_cost_user_can_view_all_projects')) {
+function cpms_safety_cost_user_can_view_all_projects()
+{
+    if (!class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return false;
+    if (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive') return true;
+    $dept = cpms_safety_cost_normalize_dept(\App\Core\Auth::userDepartment());
+    return ($dept === '공무' || $dept === '관리');
+}}
+
+if (!function_exists('cpms_safety_cost_project_role_row')) {
+function cpms_safety_cost_project_role_row($pdo, $projectId)
+{
+    static $cache = array();
+    $projectId = (int)$projectId;
+    if (!$pdo || $projectId <= 0 || !cpms_safety_cost_table_exists($pdo, 'cpms_construction_roles')) return null;
+    $key = spl_object_hash($pdo) . ':' . $projectId;
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    try {
+        $st = $pdo->prepare("SELECT * FROM cpms_construction_roles WHERE project_id = :pid LIMIT 1");
+        $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $st->execute();
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        $cache[$key] = is_array($row) ? $row : null;
+    } catch (Exception $e) {
+        $cache[$key] = null;
+    }
+    return $cache[$key];
+}}
+
+if (!function_exists('cpms_safety_cost_user_has_project_role')) {
+function cpms_safety_cost_user_has_project_role($pdo, $projectId, $column)
+{
+    $column = trim((string)$column);
+    if ($column === '') return false;
+    $userId = cpms_safety_cost_user_employee_id($pdo);
+    if ($userId <= 0) return false;
+    $row = cpms_safety_cost_project_role_row($pdo, (int)$projectId);
+    if (!is_array($row) || !isset($row[$column])) return false;
+    return ((int)$row[$column] === $userId);
+}}
+
 if (!function_exists('cpms_safety_cost_user_can_manage_project')) {
 function cpms_safety_cost_user_can_manage_project($pdo, $projectId)
 {
     $projectId = (int)$projectId;
     if ($projectId <= 0 || !class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return false;
-    if (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive') return true;
 
     $dept = cpms_safety_cost_normalize_dept(\App\Core\Auth::userDepartment());
     if ($dept !== '안전') return false;
 
-    $userId = cpms_safety_cost_user_id();
-    if (!$pdo || !cpms_safety_cost_table_exists($pdo, 'cpms_construction_roles')) {
+    $userId = cpms_safety_cost_user_employee_id($pdo);
+    if (!$pdo) return false;
+    if (!cpms_safety_cost_table_exists($pdo, 'cpms_construction_roles')) {
         return true;
     }
     if ($userId <= 0) return false;
 
     try {
-        $st = $pdo->prepare("SELECT safety_employee_id FROM cpms_construction_roles WHERE project_id = :pid LIMIT 1");
-        $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
-        $st->execute();
-        $row = $st->fetch(PDO::FETCH_ASSOC);
+        $row = cpms_safety_cost_project_role_row($pdo, $projectId);
         if (!is_array($row)) return false;
-        return ((int)$row['safety_employee_id'] === $userId);
+        return (isset($row['safety_employee_id']) && (int)$row['safety_employee_id'] === $userId);
     } catch (Exception $e) {
         return false;
     }
@@ -165,12 +229,26 @@ function cpms_safety_cost_user_can_view_project($pdo, $projectId)
 {
     $projectId = (int)$projectId;
     if ($projectId <= 0 || !class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return false;
-    if (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive') return true;
+    if (cpms_safety_cost_user_can_view_all_projects()) return true;
     if (cpms_safety_cost_user_can_manage_project($pdo, $projectId)) return true;
+    if (cpms_safety_cost_user_has_project_role($pdo, $projectId, 'quality_employee_id')) return true;
+    if (cpms_safety_cost_user_has_project_role($pdo, $projectId, 'site_employee_id')) return true;
     if (function_exists('cpms_is_project_member_or_executive')) {
         if (cpms_is_project_member_or_executive($pdo, $projectId, \App\Core\Auth::userRole(), \App\Core\Auth::userEmail())) return true;
     }
-    if (method_exists('App\\Core\\Auth', 'canAccessConstruction') && \App\Core\Auth::canAccessConstruction()) return true;
+    return false;
+}}
+
+if (!function_exists('cpms_safety_incident_user_can_manage_project')) {
+function cpms_safety_incident_user_can_manage_project($pdo, $projectId)
+{
+    $projectId = (int)$projectId;
+    if ($projectId <= 0 || !class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return false;
+    if (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive') return true;
+    if (cpms_safety_cost_user_can_manage_project($pdo, $projectId)) return true;
+    if (method_exists('App\\Core\\Auth', 'canManageConstruction') && \App\Core\Auth::canManageConstruction()) {
+        return cpms_safety_cost_user_can_view_project($pdo, $projectId);
+    }
     return false;
 }}
 
@@ -272,13 +350,27 @@ function cpms_safety_cost_project_items_between($projectId, $startDate, $endDate
     return $result;
 }}
 
+if (!function_exists('cpms_safety_cost_row_amount')) {
+function cpms_safety_cost_row_amount($row)
+{
+    if (!is_array($row)) return 0.0;
+    $fallback = null;
+    foreach (array('amount', 'supply_amount', 'used_amount', 'cost', 'price') as $key) {
+        if (!isset($row[$key]) || !is_numeric((string)$row[$key])) continue;
+        $value = (float)$row[$key];
+        if ($fallback === null) $fallback = $value;
+        if (abs($value) > 0.0001) return $value;
+    }
+    return ($fallback === null) ? 0.0 : (float)$fallback;
+}}
+
 if (!function_exists('cpms_safety_cost_total')) {
 function cpms_safety_cost_total($projectId)
 {
     $sum = 0.0;
     $items = cpms_safety_cost_project_items((int)$projectId);
     foreach ($items as $row) {
-        $sum += isset($row['amount']) && is_numeric((string)$row['amount']) ? (float)$row['amount'] : 0.0;
+        $sum += cpms_safety_cost_row_amount($row);
     }
     return $sum;
 }}
@@ -289,7 +381,21 @@ function cpms_safety_cost_total_between($projectId, $startDate, $endDate)
     $sum = 0.0;
     $items = cpms_safety_cost_project_items_between((int)$projectId, $startDate, $endDate);
     foreach ($items as $row) {
-        $sum += isset($row['amount']) && is_numeric((string)$row['amount']) ? (float)$row['amount'] : 0.0;
+        $sum += cpms_safety_cost_row_amount($row);
+    }
+    return $sum;
+}}
+
+if (!function_exists('cpms_safety_cost_total_except')) {
+function cpms_safety_cost_total_except($projectId, $excludeId)
+{
+    $sum = 0.0;
+    $excludeId = trim((string)$excludeId);
+    $items = cpms_safety_cost_project_items((int)$projectId);
+    foreach ($items as $row) {
+        $rowId = isset($row['id']) ? (string)$row['id'] : '';
+        if ($excludeId !== '' && $rowId === $excludeId) continue;
+        $sum += cpms_safety_cost_row_amount($row);
     }
     return $sum;
 }}
@@ -506,4 +612,32 @@ if (!function_exists('cpms_safety_cost_rate_label')) {
 function cpms_safety_cost_rate_label($value)
 {
     return number_format((float)$value, 1) . '%';
+}}
+
+if (!function_exists('cpms_safety_cost_money_label')) {
+function cpms_safety_cost_money_label($value)
+{
+    return number_format((float)round((float)$value)) . '원';
+}}
+
+if (!function_exists('cpms_safety_cost_summary')) {
+function cpms_safety_cost_summary($pdo, $projectId)
+{
+    $projectId = (int)$projectId;
+    $contractTotal = cpms_safety_cost_contract_total($pdo, $projectId);
+    $limit110 = round($contractTotal * 1.1);
+    $usedTotal = cpms_safety_cost_total($projectId);
+    $remaining = $limit110 - $usedTotal;
+    $useRate = ($contractTotal > 0) ? (($usedTotal / $contractTotal) * 100) : 0.0;
+    $remainingRate = ($limit110 > 0) ? (($remaining / $limit110) * 100) : 0.0;
+    $limitUseRate = ($limit110 > 0) ? (($usedTotal / $limit110) * 100) : 0.0;
+    return array(
+        'contract_total' => $contractTotal,
+        'limit_110' => $limit110,
+        'used_total' => $usedTotal,
+        'remaining' => $remaining,
+        'use_rate' => $useRate,
+        'remaining_rate' => $remainingRate,
+        'limit_use_rate' => $limitUseRate
+    );
 }}

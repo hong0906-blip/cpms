@@ -21,7 +21,13 @@ if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
 $pdo = Db::pdo();
 $id = isset($_POST['safety_cost_id']) ? trim((string)$_POST['safety_cost_id']) : '';
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
-$redirect = '?r=safety_home&safety_pid=' . (int)$projectId . '#safety-cost-section';
+$redirect = '?r=safety_home&pid=' . (int)$projectId . '&tab=safety_cost#safety-cost-section';
+
+if (!$pdo) {
+    flash_set('error', 'DB 연결 실패');
+    header('Location: ' . $redirect);
+    exit;
+}
 
 if ($id === '') {
     flash_set('error', '삭제할 안전관리비 사용내역이 올바르지 않습니다.');
@@ -36,7 +42,7 @@ foreach ($store['items'] as $idx => $row) {
     if (!is_array($row) || !isset($row['id']) || (string)$row['id'] !== $id) continue;
     $rowProjectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
     if ($rowProjectId > 0) $projectId = $rowProjectId;
-    $redirect = '?r=safety_home&safety_pid=' . (int)$projectId . '#safety-cost-section';
+    $redirect = '?r=safety_home&pid=' . (int)$projectId . '&tab=safety_cost#safety-cost-section';
     if (!cpms_safety_cost_user_can_manage_project($pdo, $projectId)) {
         http_response_code(403);
         echo '403 Forbidden';
@@ -66,4 +72,3 @@ if (!cpms_safety_cost_write_store($store)) {
 flash_set('success', '안전관리비 사용내역을 삭제 처리했습니다.');
 header('Location: ' . $redirect);
 exit;
-
