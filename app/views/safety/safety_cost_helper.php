@@ -204,6 +204,7 @@ function cpms_safety_cost_user_can_manage_project($pdo, $projectId)
 {
     $projectId = (int)$projectId;
     if ($projectId <= 0 || !class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return false;
+    if (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive') return true;
 
     $dept = cpms_safety_cost_normalize_dept(\App\Core\Auth::userDepartment());
     if ($dept !== '안전') return false;
