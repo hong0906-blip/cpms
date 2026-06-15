@@ -321,6 +321,27 @@ usort($monthlyRows, function($a, $b) {
     return strcmp($av, $bv);
 });
 $monthlyOverallTotal = $monthlyTotals['구매품'] + $monthlyTotals['자재비'] + $monthlyTotals['안전관리비'] + $monthlyTotals['기타경비'];
+
+$bulkToken = isset($_GET['bulk_token']) ? trim((string)$_GET['bulk_token']) : '';
+$bulkPreview = null;
+$bulkPreviewRows = array();
+$bulkPreviewMeta = array();
+$bulkPreviewSaveableCount = 0;
+if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) && is_array($_SESSION['material_bulk_preview'][$bulkToken])) {
+    $candidatePreview = $_SESSION['material_bulk_preview'][$bulkToken];
+    if (isset($candidatePreview['project_id']) && (int)$candidatePreview['project_id'] === (int)$pid) {
+        $bulkPreview = $candidatePreview;
+        $bulkPreviewRows = (isset($bulkPreview['rows']) && is_array($bulkPreview['rows'])) ? $bulkPreview['rows'] : array();
+        $bulkPreviewMeta = (isset($bulkPreview['meta']) && is_array($bulkPreview['meta'])) ? $bulkPreview['meta'] : array();
+        foreach ($bulkPreviewRows as $bulkPreviewRow) {
+            if (is_array($bulkPreviewRow) && isset($bulkPreviewRow['saveable']) && (int)$bulkPreviewRow['saveable'] === 1) {
+                $bulkPreviewSaveableCount++;
+            }
+        }
+    } else {
+        $bulkToken = '';
+    }
+}
 ?>
 
 <style>
@@ -432,88 +453,180 @@ $monthlyOverallTotal = $monthlyTotals['구매품'] + $monthlyTotals['자재비']
             </div>
 
             <div class="border border-gray-200 rounded-2xl p-4">
-                <div class="text-lg font-extrabold mb-3">등록 자재구입비 + 사용일자 추가</div>
-                <div class="max-h-[520px] overflow-auto">
-                    <table class="w-full text-sm border-collapse">
-                        <thead>
-                        <tr class="bg-gray-50">
-                            <th class="p-2 border text-left">구분</th>
-                            <th class="p-2 border text-left">업체명</th>
-                            <!-- 자재: 규격 제거 -->
-                            <th class="p-2 border text-right">공급가액</th>
-                            <th class="p-2 border text-left">사용일자 추가</th>
-                            <th class="p-2 border text-center">관리</th>                        
-                        </tr>
-                        </thead>
-                        <tbody>
-                        <?php if (count($items) === 0): ?>
-                            <tr><td colspan="5" class="p-3 border text-center text-gray-500">등록된 자재구입비가 없습니다.</td></tr>
-                        <?php else: ?>
-                            <?php foreach ($items as $it): ?>
-                                <tr>
-                                    <td class="p-2 border"><?php echo h(material_category_label($it['category'])); ?></td>
-                                    <td class="p-2 border"><?php echo h($it['vendor_name']); ?></td>
-                                    <!-- 자재: 규격 제거 -->
-                                    <!-- 자재: 공급가액 표기 -->
-                                    <td class="p-2 border text-right"><?php echo material_money($it['base_rate']); ?></td>
-                                    <td class="p-2 border">
-                                        <?php if (material_category_label($it['category']) === '안전관리비'): ?>
-                                            <div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 font-bold">
-                                                안전관리비 사용내역은 안전섹션에서 등록/수정합니다.
-                                            </div>
-                                        <?php else: ?>
-                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_save" class="space-y-2" data-usage-form enctype="multipart/form-data">
-                                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                                            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-                                            <input type="hidden" name="material_id" value="<?php echo (int)$it['id']; ?>">
-                                            <input type="hidden" name="materials_tab" value="input">
-                                            <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
-
-                                            <select name="advance_yn" class="w-full px-2 py-1 rounded border text-xs" required>
-                                                <option value="N">선급 N</option>
-                                                <option value="Y">선급 Y</option>
-                                            </select>
-                                            <!-- 자재구입비 달력(전월/현월 2달력) -->
-                                            <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-prev-grid-target="usageDatePrev_<?php echo (int)$it['id']; ?>" data-curr-grid-target="usageDateCurr_<?php echo (int)$it['id']; ?>">
-                                                <div class="flex items-center justify-between">
-                                                    <div class="text-xs text-gray-700 font-bold">날짜(<?php echo h($prevYm); ?> 26일~<?php echo h($ym); ?> 25일)</div>
-                                                    <button type="button" class="px-2 py-1 rounded border text-xs" data-toggle-calendar>날짜 선택</button>
-                                                </div>
-                                                <div class="hidden mt-2 border border-gray-200 rounded p-2 bg-gray-50" data-calendar-box>
-                                                    <div class="grid grid-cols-1 xl:grid-cols-2 gap-2">
-                                                        <div id="usageDatePrev_<?php echo (int)$it['id']; ?>"></div>
-                                                        <div id="usageDateCurr_<?php echo (int)$it['id']; ?>"></div>
-                                                    </div>
-                                                </div>
-                                                 <div id="usageDateChips_<?php echo (int)$it['id']; ?>" class="mt-2 flex flex-wrap gap-1"></div>
-                                                 <div id="usageDateInputs_<?php echo (int)$it['id']; ?>"></div>
-                                             </div>
-                                             <div class="border border-gray-200 rounded-lg p-2">
-                                                 <label class="text-xs font-bold text-gray-700">거래명세표 첨부</label>
-                                                 <input type="file" name="statement_file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" class="mt-1 block w-full text-xs">
-                                                 <div class="text-[11px] text-gray-500 mt-1">PDF, 이미지, 엑셀 파일 업로드 가능</div>
-                                             </div>
-                                             <button type="submit" class="px-3 py-1 rounded-lg bg-gray-800 text-white">추가</button>
-                                         </form>
-                                         <?php endif; ?>
-                                    </td>
-                                    <td class="p-2 border text-center">
-                                        <!-- 등록 자재구입비 삭제 -->
-                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_delete" onsubmit="return confirm('삭제할까요?');">
-                                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                                            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-                                            <input type="hidden" name="material_id" value="<?php echo (int)$it['id']; ?>">
-                                            <input type="hidden" name="materials_tab" value="input">
-                                            <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
-                                            <button type="submit" class="px-2 py-1 rounded border border-red-300 text-red-600 text-xs">삭제</button>
-                                        </form>
-                                    </td>                                    
-                                </tr>
-                            <?php endforeach; ?>
-                        <?php endif; ?>
-                        </tbody>
-                    </table>
+                <div class="flex flex-col gap-1 mb-4">
+                    <div class="text-lg font-extrabold">월별 자재구입비 엑셀 업로드</div>
+                    <div class="text-xs text-gray-600">선택한 월 기준으로 전월 26일 ~ 당월 25일 자료가 등록됩니다.</div>
                 </div>
+
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save" enctype="multipart/form-data" class="space-y-3">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                    <input type="hidden" name="materials_tab" value="input">
+                    <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+                    <input type="hidden" name="bulk_action" value="preview">
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                            <label class="text-sm font-bold text-gray-700">등록할 정산월</label>
+                            <select name="bulk_ym" class="mt-1 w-full px-3 py-2 border rounded-xl" required>
+                                <?php foreach ($monthOptions as $opt): ?>
+                                    <option value="<?php echo h($opt); ?>" <?php echo ($opt === $ym) ? 'selected' : ''; ?>>
+                                        <?php echo h(substr($opt, 0, 4) . '년 ' . substr($opt, 5, 2) . '월분'); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-sm font-bold text-gray-700">엑셀 파일</label>
+                            <input type="file" name="bulk_xlsx" accept=".xlsx" class="mt-1 block w-full text-sm border rounded-xl px-3 py-2" required>
+                        </div>
+                    </div>
+
+                    <div class="rounded-xl bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600 leading-5">
+                        시트명은 3.구매,자재,경비를 먼저 읽고, 없으면 첫 번째 시트를 확인합니다. 3행 헤더, 4행 데이터부터 A~J열을 읽습니다.
+                        A열 일이 26 이상이면 전월 날짜, 1~25이면 선택월 날짜로 변환합니다.
+                    </div>
+                    <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold">업로드/미리보기</button>
+                </form>
+
+                <?php if ($bulkPreview !== null): ?>
+                    <?php
+                    $bulkPreviewYm = isset($bulkPreview['ym']) ? (string)$bulkPreview['ym'] : $ym;
+                    $bulkPreviewOriginalName = isset($bulkPreview['original_name']) ? (string)$bulkPreview['original_name'] : '';
+                    $bulkSheetName = isset($bulkPreviewMeta['sheet_name']) ? (string)$bulkPreviewMeta['sheet_name'] : '';
+                    $bulkUsedFallback = isset($bulkPreviewMeta['used_fallback']) ? (int)$bulkPreviewMeta['used_fallback'] : 0;
+                    ?>
+                    <div class="mt-5 border-t border-gray-200 pt-4">
+                        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+                            <div>
+                                <div class="font-extrabold text-gray-900">미리보기</div>
+                                <div class="text-xs text-gray-500">
+                                    <?php echo h($bulkPreviewYm); ?>월분 · <?php echo h($bulkPreviewOriginalName); ?> · 시트: <?php echo h($bulkSheetName); ?>
+                                    <?php if ($bulkUsedFallback): ?> · 지정 시트가 없어 첫 번째 시트를 확인했습니다.<?php endif; ?>
+                                </div>
+                            </div>
+                            <div class="text-xs text-gray-600">
+                                정상 <?php echo (int)(isset($bulkPreviewMeta['normal_count']) ? $bulkPreviewMeta['normal_count'] : 0); ?>건 /
+                                제외 <?php echo (int)(isset($bulkPreviewMeta['excluded_count']) ? $bulkPreviewMeta['excluded_count'] : 0); ?>건 /
+                                오류 <?php echo (int)(isset($bulkPreviewMeta['error_count']) ? $bulkPreviewMeta['error_count'] : 0); ?>건 /
+                                중복 <?php echo (int)(isset($bulkPreviewMeta['duplicate_count']) ? $bulkPreviewMeta['duplicate_count'] : 0); ?>건
+                            </div>
+                        </div>
+
+                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save">
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                            <input type="hidden" name="materials_tab" value="input">
+                            <input type="hidden" name="ym" value="<?php echo h($bulkPreviewYm); ?>">
+                            <input type="hidden" name="bulk_action" value="apply">
+                            <input type="hidden" name="bulk_token" value="<?php echo h($bulkToken); ?>">
+
+                            <div class="overflow-auto max-h-[520px] border border-gray-200 rounded-xl">
+                                <table class="min-w-[1500px] w-full text-xs border-collapse">
+                                    <thead>
+                                    <tr class="bg-gray-50">
+                                        <th class="p-2 border text-center">등록</th>
+                                        <th class="p-2 border text-center">원본 일</th>
+                                        <th class="p-2 border text-left">사용일자</th>
+                                        <th class="p-2 border text-left">구분</th>
+                                        <th class="p-2 border text-center">선급여부</th>
+                                        <th class="p-2 border text-left">업체명</th>
+                                        <th class="p-2 border text-left">내역</th>
+                                        <th class="p-2 border text-left">대표자명</th>
+                                        <th class="p-2 border text-left">전화번호</th>
+                                        <th class="p-2 border text-left">사업자등록번호</th>
+                                        <th class="p-2 border text-right">공급가액</th>
+                                        <th class="p-2 border text-left">비고</th>
+                                        <th class="p-2 border text-left">상태</th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    <?php foreach ($bulkPreviewRows as $bulkIdx => $bulkRow): ?>
+                                        <?php
+                                        $bulkRowStatusType = isset($bulkRow['status_type']) ? (string)$bulkRow['status_type'] : 'normal';
+                                        $bulkRowSaveable = (isset($bulkRow['saveable']) && (int)$bulkRow['saveable'] === 1);
+                                        $bulkRowClass = '';
+                                        if ($bulkRowStatusType === 'error') $bulkRowClass = 'bg-red-50';
+                                        else if ($bulkRowStatusType === 'excluded') $bulkRowClass = 'bg-amber-50';
+                                        else if ($bulkRowStatusType === 'duplicate') $bulkRowClass = 'bg-gray-100';
+                                        ?>
+                                        <tr class="<?php echo h($bulkRowClass); ?>">
+                                            <td class="p-2 border text-center">
+                                                <?php if ($bulkRowSaveable): ?>
+                                                    <input type="checkbox" name="rows[<?php echo (int)$bulkIdx; ?>][include]" value="1" checked>
+                                                <?php else: ?>
+                                                    <span class="text-gray-400">-</span>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="p-2 border text-center"><?php echo h(isset($bulkRow['raw_day']) ? $bulkRow['raw_day'] : ''); ?></td>
+                                            <td class="p-2 border whitespace-nowrap"><?php echo h(isset($bulkRow['use_date']) ? $bulkRow['use_date'] : ''); ?></td>
+                                            <td class="p-2 border">
+                                                <?php if ($bulkRowSaveable): ?>
+                                                    <select name="rows[<?php echo (int)$bulkIdx; ?>][category]" class="w-full min-w-[90px] px-2 py-1 border rounded">
+                                                        <?php foreach (array('자재비', '구매품', '기타경비') as $bulkCategoryOption): ?>
+                                                            <option value="<?php echo h($bulkCategoryOption); ?>" <?php echo ((isset($bulkRow['category']) ? (string)$bulkRow['category'] : '') === $bulkCategoryOption) ? 'selected' : ''; ?>><?php echo h($bulkCategoryOption); ?></option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                <?php else: ?>
+                                                    <?php echo h(isset($bulkRow['category']) ? $bulkRow['category'] : ''); ?>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="p-2 border text-center">
+                                                <?php if ($bulkRowSaveable): ?>
+                                                    <select name="rows[<?php echo (int)$bulkIdx; ?>][advance_yn]" class="w-full min-w-[70px] px-2 py-1 border rounded">
+                                                        <option value="N" <?php echo ((isset($bulkRow['advance_yn']) ? (string)$bulkRow['advance_yn'] : 'N') === 'N') ? 'selected' : ''; ?>>N</option>
+                                                        <option value="Y" <?php echo ((isset($bulkRow['advance_yn']) ? (string)$bulkRow['advance_yn'] : 'N') === 'Y') ? 'selected' : ''; ?>>Y</option>
+                                                    </select>
+                                                <?php else: ?>
+                                                    <?php echo h(isset($bulkRow['advance_yn']) ? $bulkRow['advance_yn'] : 'N'); ?>
+                                                <?php endif; ?>
+                                            </td>
+                                            <?php
+                                            $bulkEditableFields = array(
+                                                'vendor_name'=>array('label'=>'업체명', 'class'=>'min-w-[140px]'),
+                                                'detail'=>array('label'=>'내역', 'class'=>'min-w-[140px]'),
+                                                'representative'=>array('label'=>'대표자명', 'class'=>'min-w-[110px]'),
+                                                'phone'=>array('label'=>'전화번호', 'class'=>'min-w-[120px]'),
+                                                'biz_no'=>array('label'=>'사업자등록번호', 'class'=>'min-w-[140px]')
+                                            );
+                                            foreach ($bulkEditableFields as $bulkFieldName => $bulkFieldInfo):
+                                            ?>
+                                                <td class="p-2 border">
+                                                    <?php if ($bulkRowSaveable): ?>
+                                                        <input type="text" name="rows[<?php echo (int)$bulkIdx; ?>][<?php echo h($bulkFieldName); ?>]" value="<?php echo h(isset($bulkRow[$bulkFieldName]) ? $bulkRow[$bulkFieldName] : ''); ?>" class="w-full <?php echo h($bulkFieldInfo['class']); ?> px-2 py-1 border rounded" lang="ko" inputmode="text" autocomplete="off">
+                                                    <?php else: ?>
+                                                        <?php echo h(isset($bulkRow[$bulkFieldName]) ? $bulkRow[$bulkFieldName] : ''); ?>
+                                                    <?php endif; ?>
+                                                </td>
+                                            <?php endforeach; ?>
+                                            <td class="p-2 border text-right">
+                                                <?php if ($bulkRowSaveable): ?>
+                                                    <input type="text" name="rows[<?php echo (int)$bulkIdx; ?>][amount]" value="<?php echo h(material_money(isset($bulkRow['amount']) ? $bulkRow['amount'] : 0)); ?>" class="w-full min-w-[110px] px-2 py-1 border rounded text-right">
+                                                <?php else: ?>
+                                                    <?php echo material_money(isset($bulkRow['amount']) ? $bulkRow['amount'] : 0); ?>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="p-2 border">
+                                                <?php if ($bulkRowSaveable): ?>
+                                                    <input type="text" name="rows[<?php echo (int)$bulkIdx; ?>][remark]" value="<?php echo h(isset($bulkRow['remark']) ? $bulkRow['remark'] : ''); ?>" class="w-full min-w-[140px] px-2 py-1 border rounded" lang="ko" inputmode="text" autocomplete="off">
+                                                <?php else: ?>
+                                                    <?php echo h(isset($bulkRow['remark']) ? $bulkRow['remark'] : ''); ?>
+                                                <?php endif; ?>
+                                            </td>
+                                            <td class="p-2 border min-w-[180px]"><?php echo h(isset($bulkRow['status']) ? $bulkRow['status'] : ''); ?></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div class="mt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                                <div class="text-xs text-gray-500">정상 행만 기본 등록 대상입니다. 오류, 제외, 중복 행은 저장되지 않습니다.</div>
+                                <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold" <?php echo ($bulkPreviewSaveableCount <= 0) ? 'disabled' : ''; ?>>일괄등록</button>
+                            </div>
+                        </form>
+                    </div>
+                <?php endif; ?>
             </div>
         </div>
         <?php endif; ?>
@@ -787,9 +900,7 @@ $monthlyOverallTotal = $monthlyTotals['구매품'] + $monthlyTotals['자재비']
         .cpms-material-sheet th, .cpms-material-sheet td { border: 1px solid #6b7280; height: 30px; padding: 0 8px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .cpms-material-sheet .sheet-group { background: #bfbfbf; text-align: center; font-weight: 700; }
         .cpms-material-sheet .sheet-total { background: #f7c7a8; text-align: right; font-weight: 700; }
-        .cpms-material-sheet .sheet-head { background: #bfbfbf; text-align: center; font-weight: 700; position: relative; padding-right: 22px; }
-        .cpms-material-sheet .sheet-head:before { content: ""; position: absolute; right: 0; top: 0; width: 18px; height: 100%; background: #f9fafb; border-left: 1px solid #d1d5db; }
-        .cpms-material-sheet .sheet-head:after { content: ""; position: absolute; right: 5px; top: 50%; margin-top: -2px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #6b7280; }
+        .cpms-material-sheet .sheet-head { background: #bfbfbf; text-align: center; font-weight: 700; }
         .cpms-material-sheet .sheet-empty-row td { color: transparent; }
         .cpms-material-sheet .text-right { text-align: right; }
         .cpms-material-sheet .text-center { text-align: center; }

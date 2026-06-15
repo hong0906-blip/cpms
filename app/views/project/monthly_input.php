@@ -26,6 +26,31 @@ function monthly_zero_map($months) { $m = array(); foreach ($months as $ym) { $m
 function amount_fmt($n){ if ((float)$n == 0) { return '-'; } return number_format((float)$n); }
 function row_total($row, $months){ $sum = 0; foreach($months as $ym){ $sum += isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; } return $sum; }
 function ym_valid($ym){ return preg_match('/^\\d{4}-\\d{2}$/', (string)$ym); }
+function project_monthly_text_key($value) {
+    $value = trim((string)$value);
+    if ($value === '') return '';
+    $value = preg_replace('/\s+/u', '', $value);
+    return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
+}
+function project_monthly_biz_key($value) {
+    return preg_replace('/[^0-9]/', '', trim((string)$value));
+}
+function project_monthly_add_detail(&$row, $ym, $detail) {
+    $detail = trim((string)$detail);
+    if ($detail === '') return;
+    if (!isset($row['_details_by_month']) || !is_array($row['_details_by_month'])) $row['_details_by_month'] = array();
+    if (!isset($row['_details_by_month'][$ym]) || !is_array($row['_details_by_month'][$ym])) $row['_details_by_month'][$ym] = array();
+    $key = project_monthly_text_key($detail);
+    if ($key !== '') $row['_details_by_month'][$ym][$key] = $detail;
+    if (!isset($row['_all_details']) || !is_array($row['_all_details'])) $row['_all_details'] = array();
+    if ($key !== '') $row['_all_details'][$key] = $detail;
+}
+function project_monthly_detail_label($details, $fallback) {
+    if (!is_array($details) || count($details) === 0) return $fallback;
+    $labels = array_values($details);
+    if (count($labels) === 1) return (string)$labels[0];
+    return (string)$labels[0] . ' 외 ' . (count($labels) - 1) . '건';
+}
 
 function cpms_cost_period_range($ym, $type) {
     $ym = trim((string)$ym);
@@ -318,14 +343,40 @@ if ($pdo && is_array($selectedProject)) {
             if ($cat === '안전관리비') { continue; }
             if (!isset($map[$cat])) { $cat = '자재비'; }
             $sec = $map[$cat];
-            $id = 'm' . (int)$r['id'];
-            if (!isset($tmp[$sec . '_' . $id])) {
-                $tmp[$sec . '_' . $id] = array('section'=>$sec,'업체명'=>$r['vendor_name'],'내역'=>($r['remark'] !== '' ? $r['remark'] : $cat),'months'=>monthly_zero_map($allMonths));
+            $vendorName = isset($r['vendor_name']) ? trim((string)$r['vendor_name']) : '';
+            $bizNo = isset($r['biz_no']) ? trim((string)$r['biz_no']) : '';
+            $groupKey = $sec . '|' . project_monthly_text_key($vendorName) . '|biz:' . project_monthly_biz_key($bizNo);
+            if (!isset($tmp[$groupKey])) {
+                $tmp[$groupKey] = array(
+                    'section'=>$sec,
+                    '업체명'=>($vendorName !== '' ? $vendorName : '-'),
+                    '내역'=>$sec . ' 합계',
+                    'months'=>monthly_zero_map($allMonths),
+                    '_details_by_month'=>array(),
+                    '_all_details'=>array()
+                );
             }
             $ym = cpms_material_equipment_cost_ym($r['use_date']);
-            if (isset($tmp[$sec . '_' . $id]['months'][$ym])) { $tmp[$sec . '_' . $id]['months'][$ym] += (float)$r['amount']; }
+            if (isset($tmp[$groupKey]['months'][$ym])) {
+                $tmp[$groupKey]['months'][$ym] += (float)$r['amount'];
+                $detail = isset($r['remark']) ? trim((string)$r['remark']) : '';
+                if ($detail === '') $detail = $cat;
+                project_monthly_add_detail($tmp[$groupKey], $ym, $detail);
+            }
         }
-        foreach ($tmp as $one) { $rowsBySection[$one['section']][] = $one; }
+        foreach ($tmp as $one) {
+            $detailsByMonth = array();
+            if (isset($one['_details_by_month']) && is_array($one['_details_by_month'])) {
+                foreach ($one['_details_by_month'] as $detailYm => $detailRows) {
+                    $detailsByMonth[$detailYm] = project_monthly_detail_label($detailRows, isset($one['section']) ? $one['section'] . ' 합계' : '합계');
+                }
+            }
+            $one['details_by_month'] = $detailsByMonth;
+            $one['내역'] = project_monthly_detail_label(isset($one['_all_details']) ? $one['_all_details'] : array(), isset($one['section']) ? $one['section'] . ' 합계' : '합계');
+            unset($one['_details_by_month']);
+            unset($one['_all_details']);
+            $rowsBySection[$one['section']][] = $one;
+        }
     } catch (Exception $e) { $errors[] = '자재구입비 데이터를 불러오지 못했습니다. 오류: ' . $e->getMessage(); }
 
     $safetyCostRows = cpms_safety_cost_project_items($selectedProjectId);
@@ -597,7 +648,16 @@ foreach ($displayMonths as $mobileYm) {
 <?php if (count($rowsBySection[$sec]) === 0): ?>
 <tr><td class="border p-2"></td><td class="border p-2 text-gray-500" colspan="2">데이터 없음</td><?php foreach($displayMonths as $ym): ?><td class="border p-2 text-right">-</td><?php endforeach; ?><td class="border p-2 text-right">-</td></tr>
 <?php else: foreach($rowsBySection[$sec] as $row): ?>
-<tr><td class="border p-2"></td><td class="border p-2"><?php echo h(isset($row['업체명'])?$row['업체명']:''); ?></td><td class="border p-2"><?php if (isset($row['내역_html'])) { echo $row['내역_html']; } else { echo h(isset($row['내역'])?$row['내역']:''); } ?></td><?php foreach($displayMonths as $ym): $v = isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php endforeach; ?><td class="border p-2 text-right"><?php echo amount_fmt(row_total($row,$allMonths)); ?></td></tr>
+<?php
+$detailText = isset($row['내역']) ? (string)$row['내역'] : '';
+if (!isset($row['내역_html']) && count($displayMonths) === 1 && isset($row['details_by_month']) && is_array($row['details_by_month'])) {
+    $detailMonth = $displayMonths[0];
+    if (isset($row['details_by_month'][$detailMonth]) && trim((string)$row['details_by_month'][$detailMonth]) !== '') {
+        $detailText = (string)$row['details_by_month'][$detailMonth];
+    }
+}
+?>
+<tr><td class="border p-2"></td><td class="border p-2"><?php echo h(isset($row['업체명'])?$row['업체명']:''); ?></td><td class="border p-2"><?php if (isset($row['내역_html'])) { echo $row['내역_html']; } else { echo h($detailText); } ?></td><?php foreach($displayMonths as $ym): $v = isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php endforeach; ?><td class="border p-2 text-right"><?php echo amount_fmt(row_total($row,$allMonths)); ?></td></tr>
 <?php endforeach; endif; ?>
 <tr class="bg-amber-50 font-semibold"><td class="border p-2"><?php echo h($title); ?> 소계</td><td class="border p-2"></td><td class="border p-2"></td><?php $secSum=0; foreach($allMonths as $ymAll){ $secSum += $sumBySection[$sec][$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($sumBySection[$sec][$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($secSum); ?></td></tr>
 <?php endforeach; ?>
