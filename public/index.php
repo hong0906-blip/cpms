@@ -606,6 +606,21 @@ if ($route === 'safety/samsung_portal_save') {
     cpms_samsung_portal_handle_save_request(\App\Core\Db::pdo());
     exit;
 }
+if ($route === 'safety/samsung_portal_delete') {
+    require_once __DIR__ . '/../app/views/safety/safety_cost_helper.php';
+    cpms_samsung_portal_handle_delete_request(\App\Core\Db::pdo());
+    exit;
+}
+if ($route === 'safety/samsung_portal_health_upload') {
+    require_once __DIR__ . '/../app/views/safety/safety_cost_helper.php';
+    cpms_samsung_portal_handle_health_upload_request(\App\Core\Db::pdo());
+    exit;
+}
+if ($route === 'safety/samsung_portal_health_download') {
+    require_once __DIR__ . '/../app/views/safety/safety_cost_helper.php';
+    cpms_samsung_portal_handle_health_download_request(\App\Core\Db::pdo());
+    exit;
+}
 if ($route === 'safety/incident_update') {
     require_once __DIR__ . '/../app/views/safety/incident_update.php';
     exit;

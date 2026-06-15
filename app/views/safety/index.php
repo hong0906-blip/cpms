@@ -255,7 +255,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                 </form>
 
                 <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
-                    <table class="min-w-[1180px] w-full text-sm">
+                    <table class="min-w-[1480px] w-full text-sm">
                         <thead class="bg-gray-50 text-gray-600">
                             <tr>
                                 <th class="px-3 py-2 text-left font-bold">임직원명</th>
@@ -265,20 +265,27 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                                 <th class="px-3 py-2 text-left font-bold">통신사</th>
                                 <th class="px-3 py-2 text-left font-bold">출입자 안전교육 만료일</th>
                                 <th class="px-3 py-2 text-left font-bold">유해화학물질교육 만료일</th>
+                                <th class="px-3 py-2 text-left font-bold">배치전건강검진</th>
+                                <th class="px-3 py-2 text-left font-bold">일반건강검진</th>
                                 <th class="px-3 py-2 text-left font-bold">상태</th>
-                                <th class="px-3 py-2 text-center font-bold">저장</th>
+                                <th class="px-3 py-2 text-center font-bold">관리</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100">
                             <?php if (count($samsungPortalRecords) === 0): ?>
-                                <tr><td colspan="9" class="px-3 py-5 text-center text-gray-500"><?php echo ($samsungPortalSearch !== '') ? '검색 결과가 없습니다.' : '업로드된 삼성 내방 인원 목록이 없습니다.'; ?></td></tr>
+                                <tr><td colspan="11" class="px-3 py-5 text-center text-gray-500"><?php echo ($samsungPortalSearch !== '') ? '검색 결과가 없습니다.' : '업로드된 삼성 내방 인원 목록이 없습니다.'; ?></td></tr>
                             <?php else: ?>
                                 <?php foreach ($samsungPortalRecords as $portalRow): ?>
                                     <?php
                                     $portalKey = isset($portalRow['record_key']) ? (string)$portalRow['record_key'] : '';
                                     $portalFormId = 'samsungPortalForm' . preg_replace('/[^A-Za-z0-9_\-]/', '', $portalKey);
+                                    $portalDeleteFormId = 'samsungPortalDeleteForm' . preg_replace('/[^A-Za-z0-9_\-]/', '', $portalKey);
                                     $safetyStatus = cpms_samsung_portal_date_status(isset($portalRow['safety_training_expire_date']) ? $portalRow['safety_training_expire_date'] : '');
                                     $chemicalStatus = cpms_samsung_portal_date_status(isset($portalRow['chemical_training_expire_date']) ? $portalRow['chemical_training_expire_date'] : '');
+                                    $preHealthDate = cpms_samsung_portal_health_uploaded_at($portalRow, 'pre_placement');
+                                    $generalHealthDate = cpms_samsung_portal_health_uploaded_at($portalRow, 'general');
+                                    $preHealthUrl = cpms_samsung_portal_health_file_exists($portalRow, 'pre_placement') ? cpms_samsung_portal_health_file_url($portalKey, 'pre_placement') : '';
+                                    $generalHealthUrl = cpms_samsung_portal_health_file_exists($portalRow, 'general') ? cpms_samsung_portal_health_file_url($portalKey, 'general') : '';
                                     ?>
                                     <tr>
                                             <td class="px-3 py-2 font-bold text-gray-900 whitespace-nowrap">
@@ -309,6 +316,14 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                                                 <div class="font-bold text-gray-900"><?php echo h(isset($portalRow['chemical_training_expire_date']) && $portalRow['chemical_training_expire_date'] !== '' ? $portalRow['chemical_training_expire_date'] : '날짜 없음'); ?></div>
                                                 <div class="text-xs text-gray-500 mt-1" style="overflow-wrap:anywhere;"><?php echo h(isset($portalRow['chemical_training_text']) ? $portalRow['chemical_training_text'] : ''); ?></div>
                                             </td>
+                                            <td class="px-3 py-2 whitespace-nowrap">
+                                                <div class="font-bold text-gray-900"><?php echo h($preHealthDate !== '' ? $preHealthDate : '미업로드'); ?></div>
+                                                <?php if ($preHealthUrl !== ''): ?><a href="<?php echo h($preHealthUrl); ?>" target="_blank" class="text-xs font-bold text-blue-600">확인</a><?php endif; ?>
+                                            </td>
+                                            <td class="px-3 py-2 whitespace-nowrap">
+                                                <div class="font-bold text-gray-900"><?php echo h($generalHealthDate !== '' ? $generalHealthDate : '미업로드'); ?></div>
+                                                <?php if ($generalHealthUrl !== ''): ?><a href="<?php echo h($generalHealthUrl); ?>" target="_blank" class="text-xs font-bold text-blue-600">확인</a><?php endif; ?>
+                                            </td>
                                             <td class="px-3 py-2">
                                                 <div class="flex flex-col gap-1 min-w-[150px]">
                                                     <span class="inline-flex px-2 py-1 rounded-full border text-xs font-bold <?php echo h(isset($safetyStatus['class']) ? $safetyStatus['class'] : ''); ?>">출입자: <?php echo h(isset($safetyStatus['label']) ? $safetyStatus['label'] : '-'); ?></span>
@@ -317,7 +332,23 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                                             </td>
                                             <td class="px-3 py-2 text-center">
                                                 <?php if ($canEditSamsungPortal): ?>
-                                                    <button type="submit" form="<?php echo h($portalFormId); ?>" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">저장</button>
+                                                    <form id="<?php echo h($portalDeleteFormId); ?>" method="post" action="<?php echo h(base_url()); ?>/?r=safety/samsung_portal_delete" onsubmit="return confirm('이 인원을 목록에서 삭제 처리할까요?');"></form>
+                                                    <input type="hidden" form="<?php echo h($portalDeleteFormId); ?>" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                                    <input type="hidden" form="<?php echo h($portalDeleteFormId); ?>" name="record_key" value="<?php echo h($portalKey); ?>">
+                                                    <input type="hidden" form="<?php echo h($portalDeleteFormId); ?>" name="q" value="<?php echo h($samsungPortalSearch); ?>">
+                                                    <div class="flex flex-wrap justify-center gap-1 min-w-[190px]">
+                                                        <button type="submit" form="<?php echo h($portalFormId); ?>" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">저장</button>
+                                                        <button type="button"
+                                                                class="js-samsung-health-open px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-bold"
+                                                                data-record-key="<?php echo h($portalKey); ?>"
+                                                                data-name="<?php echo h(isset($portalRow['name']) ? $portalRow['name'] : ''); ?>"
+                                                                data-login-id="<?php echo h(isset($portalRow['login_id']) ? $portalRow['login_id'] : ''); ?>"
+                                                                data-pre-date="<?php echo h($preHealthDate); ?>"
+                                                                data-general-date="<?php echo h($generalHealthDate); ?>"
+                                                                data-pre-url="<?php echo h($preHealthUrl); ?>"
+                                                                data-general-url="<?php echo h($generalHealthUrl); ?>">건강검진</button>
+                                                        <button type="submit" form="<?php echo h($portalDeleteFormId); ?>" class="px-3 py-2 rounded-xl border border-red-200 bg-red-50 text-red-700 text-xs font-bold">삭제</button>
+                                                    </div>
                                                 <?php else: ?>
                                                     <span class="text-xs text-gray-400">조회</span>
                                                 <?php endif; ?>
@@ -328,6 +359,166 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                         </tbody>
                     </table>
                 </div>
+
+                <?php if ($canEditSamsungPortal): ?>
+                    <div id="samsungHealthModal" class="fixed inset-0 z-50 hidden bg-black/40 px-4 py-6 overflow-y-auto">
+                        <div id="samsungHealthModalPanel" class="w-full max-w-xl rounded-2xl bg-white shadow-2xl border border-gray-200 p-5">
+                            <div class="flex items-start justify-between gap-3 mb-4">
+                                <div class="min-w-0">
+                                    <h4 class="text-lg font-extrabold text-gray-900">건강검진 업로드</h4>
+                                    <div class="text-sm text-gray-600 mt-1"><span id="samsungHealthModalName"></span></div>
+                                </div>
+                                <button type="button" class="js-samsung-health-close px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-bold">닫기</button>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+                                <div class="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                                    <div class="text-xs font-bold text-gray-500">배치전건강검진 업로드일</div>
+                                    <div id="samsungHealthPreDate" class="mt-1 font-extrabold text-gray-900">미업로드</div>
+                                    <a id="samsungHealthPreLink" href="#" target="_blank" class="hidden mt-2 text-sm font-bold text-blue-600">배치전건강검진 확인</a>
+                                </div>
+                                <div class="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                                    <div class="text-xs font-bold text-gray-500">일반건강검진 업로드일</div>
+                                    <div id="samsungHealthGeneralDate" class="mt-1 font-extrabold text-gray-900">미업로드</div>
+                                    <a id="samsungHealthGeneralLink" href="#" target="_blank" class="hidden mt-2 text-sm font-bold text-blue-600">일반건강검진 확인</a>
+                                </div>
+                            </div>
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/samsung_portal_health_upload" enctype="multipart/form-data" class="space-y-4">
+                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                <input type="hidden" name="record_key" id="samsungHealthRecordKey" value="">
+                                <input type="hidden" name="q" value="<?php echo h($samsungPortalSearch); ?>">
+                                <div>
+                                    <div class="text-sm font-bold text-gray-700 mb-2">업로드 구분</div>
+                                    <div class="flex flex-wrap gap-2">
+                                        <label class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-bold">
+                                            <input type="radio" name="health_type" value="pre_placement" checked>
+                                            배치전건강검진
+                                        </label>
+                                        <label class="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-bold">
+                                            <input type="radio" name="health_type" value="general">
+                                            일반건강검진
+                                        </label>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-sm font-bold text-gray-700">파일 선택</label>
+                                    <input type="file" name="health_file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 bg-white text-sm" required>
+                                    <div class="mt-1 text-xs text-gray-500">PDF/JPG/PNG 파일, 최대 20MB</div>
+                                </div>
+                                <div class="flex flex-wrap justify-end gap-2">
+                                    <button type="button" class="js-samsung-health-close px-4 py-2 rounded-xl border border-gray-200 bg-white font-bold">취소</button>
+                                    <button type="submit" class="px-4 py-2 rounded-xl bg-emerald-600 text-white font-bold">업로드</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                <?php endif; ?>
+
+                <script>
+                (function(){
+                    function positionModal(el, trigger){
+                        var panel = document.getElementById('samsungHealthModalPanel');
+                        if(!el || !panel || !trigger || !trigger.getBoundingClientRect) return;
+                        var triggerRect = trigger.getBoundingClientRect();
+                        var viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
+                        var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
+                        panel.style.position = 'absolute';
+                        panel.style.margin = '0';
+                        panel.style.visibility = 'hidden';
+                        panel.style.width = '';
+                        panel.style.left = '0px';
+                        panel.style.top = '0px';
+                        var panelRect = panel.getBoundingClientRect();
+                        var panelWidth = panelRect.width;
+                        var panelHeight = panelRect.height;
+                        var gap = 12;
+                        var minGap = 16;
+                        var top = triggerRect.top + gap;
+                        var maxTop = viewportHeight - panelHeight - minGap;
+                        if(maxTop < minGap) maxTop = minGap;
+                        if(top > maxTop) top = Math.max(minGap, triggerRect.top - panelHeight - gap);
+                        if(top < minGap) top = minGap;
+                        var left = triggerRect.left + (triggerRect.width / 2) - (panelWidth / 2);
+                        var maxLeft = viewportWidth - panelWidth - minGap;
+                        if(maxLeft < minGap) maxLeft = minGap;
+                        if(left < minGap) left = minGap;
+                        if(left > maxLeft) left = maxLeft;
+                        panel.style.top = top + 'px';
+                        panel.style.left = left + 'px';
+                        panel.style.visibility = 'visible';
+                    }
+                    function showModal(el, trigger){
+                        if(!el) return;
+                        el.className = el.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').trim();
+                        el.style.display = 'block';
+                        positionModal(el, trigger);
+                    }
+                    function hideModal(el){
+                        if(!el) return;
+                        var panel = document.getElementById('samsungHealthModalPanel');
+                        if(panel){
+                            panel.style.position = '';
+                            panel.style.margin = '';
+                            panel.style.top = '';
+                            panel.style.left = '';
+                            panel.style.visibility = '';
+                            panel.style.width = '';
+                        }
+                        if(el.className.indexOf('hidden') === -1) el.className += ' hidden';
+                        el.style.display = 'none';
+                    }
+                    function setLink(link, url){
+                        if(!link) return;
+                        if(url){
+                            link.href = url;
+                            link.className = link.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').trim();
+                        } else {
+                            link.href = '#';
+                            if(link.className.indexOf('hidden') === -1) link.className += ' hidden';
+                        }
+                    }
+                    document.addEventListener('click', function(e){
+                        var target = e.target;
+                        if(target && target.className && target.className.indexOf('js-samsung-password-toggle') !== -1){
+                            var wrap = target.parentNode;
+                            var input = wrap ? wrap.querySelector('.js-samsung-password') : null;
+                            if(input){
+                                input.type = input.type === 'password' ? 'text' : 'password';
+                                target.textContent = input.type === 'password' ? '보기' : '숨김';
+                            }
+                            return;
+                        }
+                        if(target && target.className && target.className.indexOf('js-samsung-health-open') !== -1){
+                            var modal = document.getElementById('samsungHealthModal');
+                            var recordInput = document.getElementById('samsungHealthRecordKey');
+                            var nameEl = document.getElementById('samsungHealthModalName');
+                            var preDateEl = document.getElementById('samsungHealthPreDate');
+                            var generalDateEl = document.getElementById('samsungHealthGeneralDate');
+                            var preLink = document.getElementById('samsungHealthPreLink');
+                            var generalLink = document.getElementById('samsungHealthGeneralLink');
+                            var name = target.getAttribute('data-name') || '';
+                            var loginId = target.getAttribute('data-login-id') || '';
+                            if(recordInput) recordInput.value = target.getAttribute('data-record-key') || '';
+                            if(nameEl) nameEl.textContent = name + (loginId ? ' / ' + loginId : '');
+                            if(preDateEl) preDateEl.textContent = target.getAttribute('data-pre-date') || '미업로드';
+                            if(generalDateEl) generalDateEl.textContent = target.getAttribute('data-general-date') || '미업로드';
+                            setLink(preLink, target.getAttribute('data-pre-url') || '');
+                            setLink(generalLink, target.getAttribute('data-general-url') || '');
+                            showModal(modal, target);
+                            return;
+                        }
+                        if(target && target.className && target.className.indexOf('js-samsung-health-close') !== -1){
+                            hideModal(document.getElementById('samsungHealthModal'));
+                            return;
+                        }
+                        if(target && target.id === 'samsungHealthModal'){
+                            hideModal(target);
+                        }
+                    });
+                    document.addEventListener('keydown', function(e){
+                        if(e.key === 'Escape') hideModal(document.getElementById('samsungHealthModal'));
+                    });
+                })();
+                </script>
             </div>
         <?php endif; ?>
     <?php elseif ($projectAccessDenied): ?>
