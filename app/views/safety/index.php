@@ -255,18 +255,18 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                 </form>
 
                 <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
-                    <table class="min-w-[1480px] w-full text-sm">
+                    <table class="min-w-[1380px] w-full text-sm">
                         <thead class="bg-gray-50 text-gray-600">
                             <tr>
-                                <th class="px-3 py-2 text-left font-bold">임직원명</th>
+                                <th class="px-3 py-2 text-left font-bold">임직원</th>
                                 <th class="px-3 py-2 text-left font-bold">아이디</th>
                                 <th class="px-3 py-2 text-left font-bold">비밀번호</th>
                                 <th class="px-3 py-2 text-left font-bold">휴대폰번호</th>
                                 <th class="px-3 py-2 text-left font-bold">통신사</th>
-                                <th class="px-3 py-2 text-left font-bold">출입자 안전교육 만료일</th>
-                                <th class="px-3 py-2 text-left font-bold">유해화학물질교육 만료일</th>
-                                <th class="px-3 py-2 text-left font-bold">배치전건강검진</th>
-                                <th class="px-3 py-2 text-left font-bold">일반건강검진</th>
+                                <th class="px-3 py-2 text-left font-bold">출입자 안전교육</th>
+                                <th class="px-3 py-2 text-left font-bold">유해화학물질교육</th>
+                                <th class="px-3 py-2 text-left font-bold">배치전검진</th>
+                                <th class="px-3 py-2 text-left font-bold">일반검진</th>
                                 <th class="px-3 py-2 text-left font-bold">상태</th>
                                 <th class="px-3 py-2 text-center font-bold">관리</th>
                             </tr>
@@ -297,13 +297,13 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                                             </td>
                                             <td class="px-3 py-2 whitespace-nowrap"><?php echo h(isset($portalRow['login_id']) ? $portalRow['login_id'] : ''); ?></td>
                                             <td class="px-3 py-2">
-                                                <div class="flex items-center gap-1 min-w-[180px]">
+                                                <div class="flex items-center gap-1 min-w-[135px]">
                                                     <input type="password" form="<?php echo h($portalFormId); ?>" name="password" value="<?php echo h(isset($portalRow['password']) ? $portalRow['password'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="js-samsung-password flex-1 min-w-0 px-2 py-2 rounded-xl border border-gray-300 bg-white">
                                                     <button type="button" class="js-samsung-password-toggle px-2 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold">보기</button>
                                                 </div>
                                             </td>
                                             <td class="px-3 py-2">
-                                                <input type="text" form="<?php echo h($portalFormId); ?>" name="phone" value="<?php echo h(isset($portalRow['phone']) ? $portalRow['phone'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="min-w-[150px] w-full px-2 py-2 rounded-xl border border-gray-300 bg-white" placeholder="010-0000-0000">
+                                                <input type="text" form="<?php echo h($portalFormId); ?>" name="phone" value="<?php echo h(isset($portalRow['phone']) ? $portalRow['phone'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="min-w-[125px] w-full px-2 py-2 rounded-xl border border-gray-300 bg-white" placeholder="010-0000-0000">
                                             </td>
                                             <td class="px-3 py-2">
                                                 <input type="text" form="<?php echo h($portalFormId); ?>" name="carrier" value="<?php echo h(isset($portalRow['carrier']) ? $portalRow['carrier'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="min-w-[100px] w-full px-2 py-2 rounded-xl border border-gray-300 bg-white" placeholder="통신사">
@@ -430,14 +430,20 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                         var panelRect = panel.getBoundingClientRect();
                         var panelWidth = panelRect.width;
                         var panelHeight = panelRect.height;
-                        var gap = 12;
                         var minGap = 16;
-                        var top = triggerRect.top + gap;
+                        panel.style.maxHeight = 'calc(100vh - 32px)';
+                        panel.style.overflowY = 'auto';
+                        panelRect = panel.getBoundingClientRect();
+                        panelWidth = panelRect.width;
+                        panelHeight = panelRect.height;
+                        var triggerCenterX = triggerRect.left + (triggerRect.width / 2);
+                        var triggerCenterY = triggerRect.top + (triggerRect.height / 2);
+                        var top = triggerCenterY - (panelHeight / 2);
                         var maxTop = viewportHeight - panelHeight - minGap;
                         if(maxTop < minGap) maxTop = minGap;
-                        if(top > maxTop) top = Math.max(minGap, triggerRect.top - panelHeight - gap);
                         if(top < minGap) top = minGap;
-                        var left = triggerRect.left + (triggerRect.width / 2) - (panelWidth / 2);
+                        if(top > maxTop) top = maxTop;
+                        var left = triggerCenterX - (panelWidth / 2);
                         var maxLeft = viewportWidth - panelWidth - minGap;
                         if(maxLeft < minGap) maxLeft = minGap;
                         if(left < minGap) left = minGap;
