@@ -211,7 +211,11 @@ if (!function_exists('cpms_confirmed_sales_total_between')) {
         try {
             $sql = "SELECT COALESCE(SUM(recognized_amount), 0) FROM cpms_progress_billings WHERE project_id = :pid";
             if (cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'progress_date')) {
-                $sql .= " AND progress_date IS NOT NULL AND progress_date BETWEEN :start_date AND :end_date";
+                if (cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'created_at')) {
+                    $sql .= " AND COALESCE(progress_date, DATE(created_at)) BETWEEN :start_date AND :end_date";
+                } else {
+                    $sql .= " AND progress_date IS NOT NULL AND progress_date BETWEEN :start_date AND :end_date";
+                }
             }
             $st = $pdo->prepare($sql);
             $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);

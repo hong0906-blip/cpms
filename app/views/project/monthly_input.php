@@ -171,8 +171,51 @@ function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
         'company_amounts' => isset($breakdown['company_amounts']) && is_array($breakdown['company_amounts']) ? $breakdown['company_amounts'] : array(),
     );
 }
+function project_monthly_confirmed_revenue_map($pdo, $projectId, $allMonths) {
+    $result = array('has_data'=>false, 'has_monthly_amount'=>false, 'months'=>monthly_zero_map($allMonths), 'row_count'=>0, 'total'=>0.0);
+    if (!$pdo || (int)$projectId <= 0) return $result;
+    if (!function_exists('cpms_confirmed_sales_has_data') || !cpms_confirmed_sales_has_data($pdo, (int)$projectId)) return $result;
+    $result['has_data'] = true;
+    if (project_monthly_table_exists($pdo, 'cpms_progress_billings')) {
+        try {
+            $stCount = $pdo->prepare('SELECT COUNT(*) FROM cpms_progress_billings WHERE project_id=:pid AND recognized_amount > 0');
+            $stCount->bindValue(':pid', (int)$projectId, \PDO::PARAM_INT);
+            $stCount->execute();
+            $result['row_count'] = (int)$stCount->fetchColumn();
+        } catch (Exception $e) {
+        }
+    }
+    foreach ($allMonths as $ym) {
+        if (function_exists('cpms_sales_period_range')) {
+            $range = cpms_sales_period_range($ym);
+            $start = isset($range['start']) ? (string)$range['start'] : ($ym . '-01');
+            $end = isset($range['end']) ? (string)$range['end'] : date('Y-m-t', strtotime($ym . '-01'));
+        } else {
+            $start = $ym . '-01';
+            $end = date('Y-m-t', strtotime($ym . '-01'));
+        }
+        $amount = function_exists('cpms_confirmed_sales_total_between') ? (float)cpms_confirmed_sales_total_between($pdo, (int)$projectId, $start, $end) : 0.0;
+        if (isset($result['months'][$ym])) {
+            $result['months'][$ym] = $amount;
+            $result['total'] += $amount;
+        }
+    }
+    if ($result['total'] > 0) $result['has_monthly_amount'] = true;
+    return $result;
+}
 function project_monthly_load_revenue($pdo, $projectId, $allMonths) {
     $result = array('months'=>monthly_zero_map($allMonths), 'basis'=>'항목별 완료수량', 'row_count'=>0, 'warnings'=>array(), 'stats'=>array('item_rows'=>0,'unit_link_rows'=>0,'item_amount'=>0.0,'progress_rows'=>0,'progress_link_rows'=>0,'schedule_task_rows'=>0,'work_item_line_rows'=>0,'unit_price_rows'=>0,'completed_task_rows'=>0,'sales_sum'=>0.0));
+    $confirmed = project_monthly_confirmed_revenue_map($pdo, $projectId, $allMonths);
+    if (isset($confirmed['has_monthly_amount']) && $confirmed['has_monthly_amount']) {
+        $result['months'] = isset($confirmed['months']) && is_array($confirmed['months']) ? $confirmed['months'] : $result['months'];
+        $result['basis'] = '기성관리 인정금액(확정매출)';
+        $result['row_count'] = isset($confirmed['row_count']) ? (int)$confirmed['row_count'] : 0;
+        $result['stats']['sales_sum'] = isset($confirmed['total']) ? (float)$confirmed['total'] : (float)array_sum($result['months']);
+        return $result;
+    }
+    if (isset($confirmed['has_data']) && $confirmed['has_data']) {
+        $result['warnings'][] = '기성관리 인정금액은 있으나 기성일자가 없어 월별 매출에 반영할 수 없습니다.';
+    }
     if (function_exists('cpms_sales_monthly_map')) {
         $primary = cpms_sales_monthly_map($pdo, $projectId, $allMonths);
         if (isset($primary['months']) && is_array($primary['months'])) {
@@ -665,7 +708,7 @@ foreach ($displayMonths as $mobileYm) {
 <table class="min-w-[1100px] w-full text-sm border">
 <thead><tr class="bg-[#d7aa8a]"><th class="border p-2">구분</th><th class="border p-2">업체명</th><th class="border p-2">내역</th><?php foreach($displayMonths as $ym): ?><th class="border p-2 text-right"><?php echo h(str_replace('-', '.', $ym)); ?></th><?php endforeach; ?><th class="border p-2 text-right">총합계<br><span class="text-[10px] font-normal">프로젝트 계약기간 전체 합계</span></th></tr></thead>
 <tbody>
-<tr class="bg-amber-100 font-bold"><td class="border p-2">매출금액(공정표 완료 기준)<br><span class="text-[10px] font-normal">공사 상황 탭 매출 기준과 동일</span></td><td class="border p-2"></td><td class="border p-2"></td><?php $revSum=0; foreach($allMonths as $ymAll){ $revSum+=(float)$monthlyRevenue[$ymAll]; } foreach($displayMonths as $ym){ $v=(float)$monthlyRevenue[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($revSum); ?></td></tr>
+<tr class="bg-amber-100 font-bold"><td class="border p-2">매출금액(기성관리 인정금액 우선)<br><span class="text-[10px] font-normal">기성관리 확정매출이 없으면 공사 상황 탭 매출 기준 사용</span></td><td class="border p-2"></td><td class="border p-2"></td><?php $revSum=0; foreach($allMonths as $ymAll){ $revSum+=(float)$monthlyRevenue[$ymAll]; } foreach($displayMonths as $ym){ $v=(float)$monthlyRevenue[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($revSum); ?></td></tr>
 <?php foreach($labels as $sec=>$title): ?>
 <tr class="bg-[#f2dfcf] font-semibold"><td class="border p-2"><?php echo h($title); ?></td><td class="border p-2"></td><td class="border p-2"></td><?php foreach($displayMonths as $ym): ?><td class="border p-2"></td><?php endforeach; ?><td class="border p-2"></td></tr>
 <?php if (count($rowsBySection[$sec]) === 0): ?>

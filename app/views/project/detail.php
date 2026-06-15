@@ -523,7 +523,7 @@ if (is_file($contractMetaFile)) {
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
             <input name="round_label" required maxlength="100" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="1회 기성">
-            <input type="date" name="progress_date" class="px-4 py-3 rounded-2xl border border-gray-200">
+            <input type="date" name="progress_date" required class="px-4 py-3 rounded-2xl border border-gray-200">
             <input name="requested_amount" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="청구금액">
             <input name="recognized_amount" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="인정금액">
             <input type="file" name="attachment_file" accept=".pdf,.hwp,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" class="md:col-span-2 px-4 py-3 rounded-2xl border border-gray-200 bg-white">

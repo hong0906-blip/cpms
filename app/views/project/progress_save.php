@@ -35,8 +35,17 @@ if ($projectId <= 0 || $roundLabel === '') {
     header('Location: ' . $redirect);
     exit;
 }
+if ($progressDate === '') {
+    $progressDate = date('Y-m-d');
+}
 if ($progressDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $progressDate)) {
-    $progressDate = '';
+    $progressDate = date('Y-m-d');
+}
+if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $progressDate)) {
+    $progressDateParts = explode('-', $progressDate);
+    if (count($progressDateParts) !== 3 || !checkdate((int)$progressDateParts[1], (int)$progressDateParts[2], (int)$progressDateParts[0])) {
+        $progressDate = date('Y-m-d');
+    }
 }
 
 $pdo = Db::pdo();
@@ -96,7 +105,42 @@ function cpms_progress_table_exists($pdo, $table) {
     }
 }
 
+function cpms_progress_ensure_schema($pdo) {
+    if (!$pdo) return false;
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_progress_billings (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            project_id INT NOT NULL,
+            round_label VARCHAR(100) NOT NULL,
+            progress_date DATE NULL,
+            requested_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+            recognized_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+            attachment_original_name VARCHAR(255) DEFAULT '',
+            attachment_stored_name VARCHAR(255) DEFAULT '',
+            attachment_stored_path VARCHAR(500) DEFAULT '',
+            remark TEXT NULL,
+            created_by INT NULL,
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NULL,
+            KEY idx_project (project_id),
+            KEY idx_progress_date (project_id, progress_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_monthly_recognized (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            project_id INT NOT NULL,
+            ym CHAR(7) NOT NULL,
+            recognized_cum_amount DECIMAL(18,2) NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uniq_project_ym (project_id, ym)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
 try {
+    cpms_progress_ensure_schema($pdo);
     $fileInfo = cpms_progress_store_file($projectId, $progressDate);
     $now = date('Y-m-d H:i:s');
     $pdo->beginTransaction();
@@ -123,7 +167,7 @@ try {
 
     if ($progressDate !== '' && cpms_progress_table_exists($pdo, 'cpms_monthly_recognized')) {
         $ym = substr($progressDate, 0, 7);
-        $stCum = $pdo->prepare("SELECT COALESCE(SUM(recognized_amount), 0) FROM cpms_progress_billings WHERE project_id = :pid AND progress_date IS NOT NULL AND progress_date <= :last_day");
+        $stCum = $pdo->prepare("SELECT COALESCE(SUM(recognized_amount), 0) FROM cpms_progress_billings WHERE project_id = :pid AND COALESCE(progress_date, DATE(created_at)) <= :last_day");
         $stCum->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $stCum->bindValue(':last_day', date('Y-m-t', strtotime($ym . '-01')));
         $stCum->execute();
@@ -144,4 +188,3 @@ try {
 
 header('Location: ' . $redirect);
 exit;
-
