@@ -256,7 +256,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
 
                 <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
                     <table class="min-w-[1380px] w-full text-sm">
-                        <thead class="bg-gray-50 text-gray-600">
+                        <thead class="bg-gray-50 text-gray-600 text-xs">
                             <tr>
                                 <th class="px-3 py-2 text-left font-bold">임직원</th>
                                 <th class="px-3 py-2 text-left font-bold">아이디</th>
@@ -297,7 +297,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                                             </td>
                                             <td class="px-3 py-2 whitespace-nowrap"><?php echo h(isset($portalRow['login_id']) ? $portalRow['login_id'] : ''); ?></td>
                                             <td class="px-3 py-2">
-                                                <div class="flex items-center gap-1 min-w-[135px]">
+                                                <div class="flex items-center gap-1 min-w-[110px]">
                                                     <input type="password" form="<?php echo h($portalFormId); ?>" name="password" value="<?php echo h(isset($portalRow['password']) ? $portalRow['password'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="js-samsung-password flex-1 min-w-0 px-2 py-2 rounded-xl border border-gray-300 bg-white">
                                                     <button type="button" class="js-samsung-password-toggle px-2 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold">보기</button>
                                                 </div>
@@ -415,48 +415,24 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
 
                 <script>
                 (function(){
-                    function positionModal(el, trigger){
+                    function positionModal(el){
                         var panel = document.getElementById('samsungHealthModalPanel');
-                        if(!el || !panel || !trigger || !trigger.getBoundingClientRect) return;
-                        var triggerRect = trigger.getBoundingClientRect();
-                        var viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0;
-                        var viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0;
-                        panel.style.position = 'absolute';
+                        if(!el || !panel) return;
+                        panel.style.position = 'fixed';
                         panel.style.margin = '0';
-                        panel.style.visibility = 'hidden';
                         panel.style.width = '';
-                        panel.style.left = '0px';
-                        panel.style.top = '0px';
-                        var panelRect = panel.getBoundingClientRect();
-                        var panelWidth = panelRect.width;
-                        var panelHeight = panelRect.height;
-                        var minGap = 16;
+                        panel.style.left = '50%';
+                        panel.style.top = '50%';
+                        panel.style.transform = 'translate(-50%, -50%)';
                         panel.style.maxHeight = 'calc(100vh - 32px)';
                         panel.style.overflowY = 'auto';
-                        panelRect = panel.getBoundingClientRect();
-                        panelWidth = panelRect.width;
-                        panelHeight = panelRect.height;
-                        var triggerCenterX = triggerRect.left + (triggerRect.width / 2);
-                        var triggerCenterY = triggerRect.top + (triggerRect.height / 2);
-                        var top = triggerCenterY - (panelHeight / 2);
-                        var maxTop = viewportHeight - panelHeight - minGap;
-                        if(maxTop < minGap) maxTop = minGap;
-                        if(top < minGap) top = minGap;
-                        if(top > maxTop) top = maxTop;
-                        var left = triggerCenterX - (panelWidth / 2);
-                        var maxLeft = viewportWidth - panelWidth - minGap;
-                        if(maxLeft < minGap) maxLeft = minGap;
-                        if(left < minGap) left = minGap;
-                        if(left > maxLeft) left = maxLeft;
-                        panel.style.top = top + 'px';
-                        panel.style.left = left + 'px';
                         panel.style.visibility = 'visible';
                     }
-                    function showModal(el, trigger){
+                    function showModal(el){
                         if(!el) return;
                         el.className = el.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').trim();
                         el.style.display = 'block';
-                        positionModal(el, trigger);
+                        positionModal(el);
                     }
                     function hideModal(el){
                         if(!el) return;
@@ -466,8 +442,11 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                             panel.style.margin = '';
                             panel.style.top = '';
                             panel.style.left = '';
+                            panel.style.transform = '';
                             panel.style.visibility = '';
                             panel.style.width = '';
+                            panel.style.maxHeight = '';
+                            panel.style.overflowY = '';
                         }
                         if(el.className.indexOf('hidden') === -1) el.className += ' hidden';
                         el.style.display = 'none';
@@ -509,7 +488,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                             if(generalDateEl) generalDateEl.textContent = target.getAttribute('data-general-date') || '미업로드';
                             setLink(preLink, target.getAttribute('data-pre-url') || '');
                             setLink(generalLink, target.getAttribute('data-general-url') || '');
-                            showModal(modal, target);
+                            showModal(modal);
                             return;
                         }
                         if(target && target.className && target.className.indexOf('js-samsung-health-close') !== -1){
