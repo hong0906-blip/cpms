@@ -255,7 +255,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                 </form>
 
                 <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
-                    <table class="min-w-[1380px] w-full text-sm">
+                    <table class="min-w-[1320px] w-full text-sm">
                         <thead class="bg-gray-50 text-gray-600 text-xs">
                             <tr>
                                 <th class="px-3 py-2 text-left font-bold">임직원</th>
@@ -263,9 +263,9 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                                 <th class="px-3 py-2 text-left font-bold">비밀번호</th>
                                 <th class="px-3 py-2 text-left font-bold">휴대폰번호</th>
                                 <th class="px-3 py-2 text-left font-bold">통신사</th>
-                                <th class="px-3 py-2 text-left font-bold">출입자 안전교육</th>
-                                <th class="px-3 py-2 text-left font-bold">유해화학물질교육</th>
-                                <th class="px-3 py-2 text-left font-bold">배치전검진</th>
+                                <th class="px-3 py-2 text-left font-bold w-[120px] max-w-[120px]">출입자 안전교육</th>
+                                <th class="px-3 py-2 text-left font-bold w-[122px] max-w-[122px]">유해화학물질교육</th>
+                                <th class="px-3 py-2 text-left font-bold min-w-[115px]">배치전검진</th>
                                 <th class="px-3 py-2 text-left font-bold">일반검진</th>
                                 <th class="px-3 py-2 text-left font-bold">상태</th>
                                 <th class="px-3 py-2 text-center font-bold">관리</th>
@@ -297,26 +297,26 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                                             </td>
                                             <td class="px-3 py-2 whitespace-nowrap"><?php echo h(isset($portalRow['login_id']) ? $portalRow['login_id'] : ''); ?></td>
                                             <td class="px-3 py-2">
-                                                <div class="flex items-center gap-1 min-w-[110px]">
+                                                <div class="flex items-center gap-1 min-w-[54px]">
                                                     <input type="password" form="<?php echo h($portalFormId); ?>" name="password" value="<?php echo h(isset($portalRow['password']) ? $portalRow['password'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="js-samsung-password flex-1 min-w-0 px-2 py-2 rounded-xl border border-gray-300 bg-white">
-                                                    <button type="button" class="js-samsung-password-toggle px-2 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold">보기</button>
+                                                    <button type="button" class="js-samsung-password-toggle px-1 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold">보기</button>
                                                 </div>
                                             </td>
                                             <td class="px-3 py-2">
                                                 <input type="text" form="<?php echo h($portalFormId); ?>" name="phone" value="<?php echo h(isset($portalRow['phone']) ? $portalRow['phone'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="min-w-[125px] w-full px-2 py-2 rounded-xl border border-gray-300 bg-white" placeholder="010-0000-0000">
                                             </td>
                                             <td class="px-3 py-2">
-                                                <input type="text" form="<?php echo h($portalFormId); ?>" name="carrier" value="<?php echo h(isset($portalRow['carrier']) ? $portalRow['carrier'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="min-w-[100px] w-full px-2 py-2 rounded-xl border border-gray-300 bg-white" placeholder="통신사">
+                                                <input type="text" form="<?php echo h($portalFormId); ?>" name="carrier" value="<?php echo h(isset($portalRow['carrier']) ? $portalRow['carrier'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="min-w-[72px] w-full px-2 py-2 rounded-xl border border-gray-300 bg-white" placeholder="통신사">
                                             </td>
-                                            <td class="px-3 py-2 whitespace-nowrap">
+                                            <td class="px-3 py-2 w-[120px] max-w-[120px]">
                                                 <div class="font-bold text-gray-900"><?php echo h(isset($portalRow['safety_training_expire_date']) && $portalRow['safety_training_expire_date'] !== '' ? $portalRow['safety_training_expire_date'] : '날짜 없음'); ?></div>
-                                                <div class="text-xs text-gray-500 mt-1" style="overflow-wrap:anywhere;"><?php echo h(isset($portalRow['safety_training_text']) ? $portalRow['safety_training_text'] : ''); ?></div>
+                                                <div class="text-xs text-gray-500 mt-1" style="max-width:120px; overflow-wrap:anywhere; white-space:normal;"><?php echo h(isset($portalRow['safety_training_text']) ? $portalRow['safety_training_text'] : ''); ?></div>
                                             </td>
-                                            <td class="px-3 py-2 whitespace-nowrap">
+                                            <td class="px-3 py-2 w-[122px] max-w-[122px]">
                                                 <div class="font-bold text-gray-900"><?php echo h(isset($portalRow['chemical_training_expire_date']) && $portalRow['chemical_training_expire_date'] !== '' ? $portalRow['chemical_training_expire_date'] : '날짜 없음'); ?></div>
-                                                <div class="text-xs text-gray-500 mt-1" style="overflow-wrap:anywhere;"><?php echo h(isset($portalRow['chemical_training_text']) ? $portalRow['chemical_training_text'] : ''); ?></div>
+                                                <div class="text-xs text-gray-500 mt-1" style="max-width:122px; overflow-wrap:anywhere; white-space:normal;"><?php echo h(isset($portalRow['chemical_training_text']) ? $portalRow['chemical_training_text'] : ''); ?></div>
                                             </td>
-                                            <td class="px-3 py-2 whitespace-nowrap">
+                                            <td class="px-3 py-2 whitespace-nowrap min-w-[115px]">
                                                 <div class="font-bold text-gray-900"><?php echo h($preHealthDate !== '' ? $preHealthDate : '미업로드'); ?></div>
                                                 <?php if ($preHealthUrl !== ''): ?><a href="<?php echo h($preHealthUrl); ?>" target="_blank" class="text-xs font-bold text-blue-600">확인</a><?php endif; ?>
                                             </td>
@@ -418,6 +418,15 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                     function positionModal(el){
                         var panel = document.getElementById('samsungHealthModalPanel');
                         if(!el || !panel) return;
+                        el.style.position = 'fixed';
+                        el.style.left = '0';
+                        el.style.right = '0';
+                        el.style.top = '0';
+                        el.style.bottom = '0';
+                        el.style.width = '100vw';
+                        el.style.height = '100vh';
+                        el.style.margin = '0';
+                        el.style.overflowY = 'auto';
                         panel.style.position = 'fixed';
                         panel.style.margin = '0';
                         panel.style.width = '';
@@ -430,6 +439,9 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                     }
                     function showModal(el){
                         if(!el) return;
+                        if(el.parentNode !== document.body){
+                            document.body.appendChild(el);
+                        }
                         el.className = el.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').trim();
                         el.style.display = 'block';
                         positionModal(el);
@@ -448,6 +460,15 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                             panel.style.maxHeight = '';
                             panel.style.overflowY = '';
                         }
+                        el.style.position = '';
+                        el.style.left = '';
+                        el.style.right = '';
+                        el.style.top = '';
+                        el.style.bottom = '';
+                        el.style.width = '';
+                        el.style.height = '';
+                        el.style.margin = '';
+                        el.style.overflowY = '';
                         if(el.className.indexOf('hidden') === -1) el.className += ' hidden';
                         el.style.display = 'none';
                     }
