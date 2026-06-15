@@ -509,10 +509,6 @@ $categories = array(
 $laborWageMap = cpms_status_labor_wage_map($pdo, (int)$pid);
 $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
 $periodDiagnostics = array();
-$hasConfirmedSalesData = function_exists('cpms_confirmed_sales_has_data') ? cpms_confirmed_sales_has_data($pdo, (int)$pid) : false;
-if ($hasConfirmedSalesData) {
-    $categories['sales']['label'] = '확정매출';
-}
 
 $monthlyData = array();
 $yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'confirmed_sales' => 0, 'target_amount' => 0, 'used_total' => 0);
@@ -547,7 +543,7 @@ for ($m = 1; $m <= 12; $m++) {
     // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
     $expectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
     $confirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
-    $sales = $hasConfirmedSalesData ? $confirmedSales : $expectedSales;
+    $sales = $expectedSales;
     $usedTotal = $labor + $equipment + $materials;
     $targetAmount = round($sales * 0.7);
     $costRateInfo = cpms_status_cost_rate_info($sales, $usedTotal);
@@ -660,7 +656,7 @@ foreach ($years as $yy) {
     }
 }
 $overallTotals['confirmed_sales'] = cpms_status_confirmed_sales_total_all($pdo, (int)$pid);
-$overallTotals['sales'] = $hasConfirmedSalesData ? $overallTotals['confirmed_sales'] : cpms_status_sales_total_all($pdo, (int)$pid);
+$overallTotals['sales'] = cpms_status_sales_total_all($pdo, (int)$pid);
 $safetyContractTotal = cpms_safety_cost_contract_total($pdo, (int)$pid);
 $safetyLimit110 = round($safetyContractTotal * 1.1);
 $safetyUsedTotal = cpms_safety_cost_total((int)$pid);
