@@ -96,11 +96,17 @@ try {
             $d = (string)$ur['use_date'];
             $workUnit = isset($ur['work_unit']) ? (float)$ur['work_unit'] : 1.0;
             if ($workUnit <= 0) $workUnit = 1.0;
+            $storedAmount = isset($ur['amount']) ? (float)$ur['amount'] : 0.0;
             $rateSnapshot = isset($ur['base_rate_snapshot']) ? (float)$ur['base_rate_snapshot'] : 0.0;
-            if ($rateSnapshot <= 0 && isset($ur['amount'])) $rateSnapshot = (float)$ur['amount'];
+            $masterBaseRate = (isset($itemMap[$eid]) && isset($itemMap[$eid]['base_rate'])) ? (float)$itemMap[$eid]['base_rate'] : 0.0;
+            if ($rateSnapshot <= 0 && $masterBaseRate > 0) $rateSnapshot = $masterBaseRate;
             $ur['_work_unit'] = $workUnit;
             $ur['_base_rate_snapshot'] = $rateSnapshot;
-            $ur['_calc_amount'] = $workUnit * $rateSnapshot;
+            if ($rateSnapshot > 0) {
+                $ur['_calc_amount'] = $workUnit * $rateSnapshot;
+            } else {
+                $ur['_calc_amount'] = $storedAmount;
+            }
             if (!isset($usageByEquipment[$eid])) $usageByEquipment[$eid] = array();
             $usageByEquipment[$eid][$d] = $ur;
             if (!isset($usageByDate[$d])) $usageByDate[$d] = 0.0;
@@ -237,10 +243,19 @@ function equipment_render_grouped_gongsu_cell($slotBundle, $pendingByUsage, $ite
     $html .= '</td>';
     return $html;
 }
+function equipment_display_group_key($row)
+{
+    $vendorKey = cpms_master_dedupe_text_key(isset($row['vendor_name']) ? $row['vendor_name'] : '');
+    $specKey = cpms_master_dedupe_text_key(isset($row['spec']) ? $row['spec'] : '');
+    if ($vendorKey === '' && $specKey === '') {
+        return 'id:' . (isset($row['id']) ? (int)$row['id'] : 0);
+    }
+    return (isset($row['project_id']) ? (int)$row['project_id'] : 0) . '|vendor:' . $vendorKey . '|spec:' . $specKey;
+}
 
 $displayItems = array();
 foreach ($items as $it) {
-    $groupKey = cpms_equipment_master_group_key($it);
+    $groupKey = equipment_display_group_key($it);
     if (!isset($displayItems[$groupKey])) {
         $displayItems[$groupKey] = array(
             'group_key' => $groupKey,
@@ -270,7 +285,7 @@ foreach ($displayItems as $groupKey => $displayItem) {
 foreach ($usageRows as $ur) {
     $equipmentId = isset($ur['equipment_id']) ? (int)$ur['equipment_id'] : 0;
     if (!isset($itemMap[$equipmentId])) continue;
-    $groupKey = cpms_equipment_master_group_key($itemMap[$equipmentId]);
+    $groupKey = equipment_display_group_key($itemMap[$equipmentId]);
     if (!isset($displayItems[$groupKey])) continue;
     $useDate = isset($ur['use_date']) ? (string)$ur['use_date'] : '';
     if ($useDate === '') continue;

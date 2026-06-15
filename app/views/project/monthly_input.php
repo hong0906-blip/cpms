@@ -382,6 +382,7 @@ if ($pdo && is_array($selectedProject)) {
     } catch (Exception $e) { $errors[] = '자재구입비 데이터를 불러오지 못했습니다. 오류: ' . $e->getMessage(); }
 
     $safetyCostRows = cpms_safety_cost_project_items($selectedProjectId);
+    $tmpSafety = array();
     foreach ($safetyCostRows as $safetyRow) {
         $useDate = isset($safetyRow['use_date']) ? cpms_safety_cost_valid_date($safetyRow['use_date']) : '';
         if ($useDate === '') { continue; }
@@ -393,15 +394,34 @@ if ($pdo && is_array($selectedProject)) {
         $useContent = isset($safetyRow['use_content']) ? trim((string)$safetyRow['use_content']) : '';
         $desc = trim($itemName . (($itemName !== '' && $useContent !== '') ? ' / ' : '') . $useContent);
         if ($desc === '') $desc = '안전관리비 사용';
-        $monthsForSafety = monthly_zero_map($allMonths);
-        $monthsForSafety[$safetyYm] += cpms_safety_cost_row_amount($safetyRow);
-        $rowsBySection['안전관리비'][] = array(
-            'section' => '안전관리비',
-            '업체명' => ($vendorName !== '' ? $vendorName : '-'),
-            '내역' => $desc,
-            'months' => $monthsForSafety,
-            'source' => 'safety_section'
-        );
+        $vendorKey = project_monthly_text_key($vendorName);
+        $groupKey = 'safety|vendor:' . ($vendorKey !== '' ? $vendorKey : 'empty');
+        if (!isset($tmpSafety[$groupKey])) {
+            $tmpSafety[$groupKey] = array(
+                'section' => '안전관리비',
+                '업체명' => ($vendorName !== '' ? $vendorName : '-'),
+                '내역' => '안전관리비 합계',
+                'months' => monthly_zero_map($allMonths),
+                '_details_by_month' => array(),
+                '_all_details' => array(),
+                'source' => 'safety_section'
+            );
+        }
+        $tmpSafety[$groupKey]['months'][$safetyYm] += cpms_safety_cost_row_amount($safetyRow);
+        project_monthly_add_detail($tmpSafety[$groupKey], $safetyYm, $desc);
+    }
+    foreach ($tmpSafety as $one) {
+        $detailsByMonth = array();
+        if (isset($one['_details_by_month']) && is_array($one['_details_by_month'])) {
+            foreach ($one['_details_by_month'] as $detailYm => $detailRows) {
+                $detailsByMonth[$detailYm] = project_monthly_detail_label($detailRows, '안전관리비 합계');
+            }
+        }
+        $one['details_by_month'] = $detailsByMonth;
+        $one['내역'] = project_monthly_detail_label(isset($one['_all_details']) ? $one['_all_details'] : array(), '안전관리비 합계');
+        unset($one['_details_by_month']);
+        unset($one['_all_details']);
+        $rowsBySection['안전관리비'][] = $one;
     }
 
     try {
@@ -412,22 +432,30 @@ if ($pdo && is_array($selectedProject)) {
         if ($hasEqWorkUnit) $eqSelectExtra .= ',u.work_unit';
         if ($hasEqBaseRate) $eqSelectExtra .= ',u.base_rate_snapshot';
         $eqDeletedWhere = $hasEqDeleted ? ' AND (e.is_deleted = 0 OR e.is_deleted IS NULL)' : '';
-        $stEq = $pdo->prepare('SELECT e.id,e.vendor_name,e.spec,e.category,u.use_date,u.amount' . $eqSelectExtra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid' . $eqDeletedWhere);
+        $stEq = $pdo->prepare('SELECT e.id,e.vendor_name,e.spec,e.category,e.base_rate,u.use_date,u.amount' . $eqSelectExtra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid' . $eqDeletedWhere);
         $stEq->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
         $stEq->execute();
         $eq = $stEq->fetchAll();
         if (!is_array($eq)) { $eq = array(); }
         $tmpEq = array();
         foreach ($eq as $r) {
-            $id = 'e' . (int)$r['id'];
-            if (!isset($tmpEq[$id])) { $tmpEq[$id] = array('section'=>'장비비','업체명'=>$r['vendor_name'],'내역'=>($r['spec'] !== '' ? $r['spec'] : $r['category']),'months'=>monthly_zero_map($allMonths)); }
+            $vendorName = isset($r['vendor_name']) ? trim((string)$r['vendor_name']) : '';
+            $spec = isset($r['spec']) ? trim((string)$r['spec']) : '';
+            $category = isset($r['category']) ? trim((string)$r['category']) : '';
+            if ($vendorName === '' && $spec === '') {
+                $id = 'e' . (int)$r['id'];
+            } else {
+                $id = 'equipment|' . project_monthly_text_key($vendorName) . '|spec:' . project_monthly_text_key($spec);
+            }
+            if (!isset($tmpEq[$id])) { $tmpEq[$id] = array('section'=>'장비비','업체명'=>($vendorName !== '' ? $vendorName : '-'),'내역'=>($spec !== '' ? $spec : $category),'months'=>monthly_zero_map($allMonths)); }
             $ym = cpms_material_equipment_cost_ym($r['use_date']);
             $eqAmount = (float)$r['amount'];
-            if ($hasEqWorkUnit && $hasEqBaseRate) {
-                $workUnit = isset($r['work_unit']) ? (float)$r['work_unit'] : 1.0;
-                if ($workUnit <= 0) $workUnit = 1.0;
-                $rateSnapshot = isset($r['base_rate_snapshot']) ? (float)$r['base_rate_snapshot'] : 0.0;
-                if ($rateSnapshot <= 0) $rateSnapshot = (float)$r['amount'];
+            $workUnit = ($hasEqWorkUnit && isset($r['work_unit'])) ? (float)$r['work_unit'] : 1.0;
+            if ($workUnit <= 0) $workUnit = 1.0;
+            $rateSnapshot = ($hasEqBaseRate && isset($r['base_rate_snapshot'])) ? (float)$r['base_rate_snapshot'] : 0.0;
+            $masterBaseRate = isset($r['base_rate']) ? (float)$r['base_rate'] : 0.0;
+            if ($rateSnapshot <= 0 && $masterBaseRate > 0) $rateSnapshot = $masterBaseRate;
+            if ($rateSnapshot > 0) {
                 $eqAmount = $workUnit * $rateSnapshot;
             }
             if (isset($tmpEq[$id]['months'][$ym])) { $tmpEq[$id]['months'][$ym] += $eqAmount; }
