@@ -9,6 +9,7 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/material_statement_helper.php';
+require_once __DIR__ . '/partials/material_usage_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -27,6 +28,7 @@ $ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : date('Y-m');
 $usageDates = isset($_POST['usage_dates']) ? $_POST['usage_dates'] : array();
 $useDatesText = trim((string)(isset($_POST['use_dates']) ? $_POST['use_dates'] : ''));
 $memo = trim((string)(isset($_POST['memo']) ? $_POST['memo'] : ''));
+$advanceYn = cpms_material_advance_yn(isset($_POST['advance_yn']) ? $_POST['advance_yn'] : 'N');
 if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = date('Y-m');
 $redirect = '?r=공사&pid=' . $projectId . '&tab=materials&materials_tab=' . urlencode($materialsTab) . '&ym=' . urlencode($ym);
 
@@ -116,7 +118,9 @@ function material_collect_usage_dates2($usageDates, $text, $ym)
     return array_keys($result);
 }
 $pdo = Db::pdo();
+if ($pdo) cpms_material_usage_ensure_schema($pdo);
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
+$hasMaterialAdvanceYn = cpms_material_usage_column_exists($pdo, 'advance_yn');
 
 try {
     $stE = $pdo->prepare("SELECT base_rate, category FROM cpms_material_items WHERE id = :id AND project_id = :pid AND is_deleted = 0 LIMIT 1");
@@ -151,11 +155,19 @@ try {
         }
     }
     
-    $st = $pdo->prepare("INSERT INTO cpms_material_usage
-        (project_id, material_id, use_date, amount, memo, created_at)
-        VALUES
-        (:pid, :eid, :d, :amt, :memo, :created_at)
-        ON DUPLICATE KEY UPDATE amount = VALUES(amount), memo = VALUES(memo)");
+    if ($hasMaterialAdvanceYn) {
+        $st = $pdo->prepare("INSERT INTO cpms_material_usage
+            (project_id, material_id, use_date, amount, advance_yn, memo, created_at)
+            VALUES
+            (:pid, :eid, :d, :amt, :advance_yn, :memo, :created_at)
+            ON DUPLICATE KEY UPDATE amount = VALUES(amount), advance_yn = VALUES(advance_yn), memo = VALUES(memo)");
+    } else {
+        $st = $pdo->prepare("INSERT INTO cpms_material_usage
+            (project_id, material_id, use_date, amount, memo, created_at)
+            VALUES
+            (:pid, :eid, :d, :amt, :memo, :created_at)
+            ON DUPLICATE KEY UPDATE amount = VALUES(amount), memo = VALUES(memo)");
+    }
     $stFindUsage = $pdo->prepare("SELECT id, use_date FROM cpms_material_usage WHERE project_id = :pid AND material_id = :mid AND use_date = :d LIMIT 1");
     $now = date('Y-m-d H:i:s');
     $savedUsageRows = array();
@@ -164,6 +176,7 @@ try {
         $st->bindValue(':eid', $materialId, PDO::PARAM_INT);
         $st->bindValue(':d', $d);
         $st->bindValue(':amt', $amount);
+        if ($hasMaterialAdvanceYn) $st->bindValue(':advance_yn', $advanceYn);
         $st->bindValue(':memo', $memo);
         $st->bindValue(':created_at', $now);
         $st->execute();

@@ -12,6 +12,8 @@ use App\Core\Db;
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../partials/project_month_options_helper.php';
 require_once __DIR__ . '/../partials/material_statement_helper.php';
+require_once __DIR__ . '/../partials/material_usage_helper.php';
+require_once __DIR__ . '/../../safety/safety_cost_helper.php';
 
 $canEditMaterials = isset($canEdit) ? (bool)$canEdit : false;
 
@@ -20,6 +22,8 @@ if (!$pdo) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">DB 연결 실패</div>';
     return;
 }
+cpms_material_usage_ensure_schema($pdo);
+$hasMaterialAdvanceYn = cpms_material_usage_column_exists($pdo, 'advance_yn');
 $canDownloadMaterialStatements = cpms_material_statement_user_can_download($pdo, (int)$pid);
 $canViewMaterialInput = ($canEditMaterials || $canDownloadMaterialStatements);
 
@@ -82,13 +86,15 @@ try {
     }
 
     if (count($items) > 0) {
-        $stUsage = $pdo->prepare("SELECT u.*, i.category, i.vendor_name
+        $usageSelect = $hasMaterialAdvanceYn ? "u.*" : "u.*, 'N' AS advance_yn";
+        $stUsage = $pdo->prepare("SELECT " . $usageSelect . ", i.category, i.vendor_name, i.representative, i.phone, i.biz_no, i.base_rate, i.remark
             FROM cpms_material_usage u
             JOIN cpms_material_items i ON i.id = u.material_id
             WHERE u.project_id = :pid
               AND i.is_deleted = 0
+              AND i.category <> '안전관리비'
               AND u.use_date BETWEEN :s AND :e
-            ORDER BY i.category ASC, i.vendor_name ASC, u.use_date ASC");
+            ORDER BY u.use_date ASC, i.category ASC, i.vendor_name ASC, u.id ASC");
         $stUsage->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
         $stUsage->bindValue(':s', $monthlyStart);
         $stUsage->bindValue(':e', $monthlyEnd);
@@ -170,6 +176,20 @@ function material_money($v)
 {
     return number_format((float)$v, 0);
 }
+function material_money_or_dash($v)
+{
+    $v = (float)$v;
+    return (abs($v) > 0.0001) ? number_format($v, 0) : '-';
+}
+function material_monthly_detail_text($row)
+{
+    if (!is_array($row)) return '';
+    $itemName = isset($row['item_name']) ? trim((string)$row['item_name']) : '';
+    $useContent = isset($row['use_content']) ? trim((string)$row['use_content']) : '';
+    if ($itemName !== '' && $useContent !== '' && $itemName !== $useContent) return $itemName . ' / ' . $useContent;
+    if ($useContent !== '') return $useContent;
+    return $itemName;
+}
 function material_category_label($category)
 {
     $category = trim((string)$category);
@@ -244,9 +264,69 @@ foreach ($usageRows as $ur) {
     if (!isset($displayItems[$groupKey]['slot_amounts'][$useDate])) $displayItems[$groupKey]['slot_amounts'][$useDate] = 0.0;
     $displayItems[$groupKey]['slot_amounts'][$useDate] += isset($ur['amount']) ? (float)$ur['amount'] : 0.0;
 }
+
+$monthlyRows = array();
+$monthlyTotals = array('구매품'=>0.0, '자재비'=>0.0, '안전관리비'=>0.0, '기타경비'=>0.0);
+foreach ($usageRows as $ur) {
+    $cat = material_category_label(isset($ur['category']) ? $ur['category'] : '');
+    if ($cat === '안전관리비') continue;
+    if (!isset($monthlyTotals[$cat])) $cat = '자재비';
+    $amount = isset($ur['amount']) ? (float)$ur['amount'] : 0.0;
+    $monthlyTotals[$cat] += $amount;
+    $monthlyRows[count($monthlyRows)] = array(
+        'date' => isset($ur['use_date']) ? (string)$ur['use_date'] : '',
+        'category' => $cat,
+        'advance_yn' => cpms_material_advance_yn(isset($ur['advance_yn']) ? $ur['advance_yn'] : 'N'),
+        'vendor_name' => isset($ur['vendor_name']) ? (string)$ur['vendor_name'] : '',
+        'detail' => isset($ur['memo']) ? trim((string)$ur['memo']) : '',
+        'representative' => isset($ur['representative']) ? (string)$ur['representative'] : '',
+        'phone' => isset($ur['phone']) ? (string)$ur['phone'] : '',
+        'biz_no' => isset($ur['biz_no']) ? (string)$ur['biz_no'] : '',
+        'amount' => $amount,
+        'remark' => isset($ur['remark']) ? (string)$ur['remark'] : ''
+    );
+}
+
+try {
+    $safetyRowsForMaterials = cpms_safety_cost_project_items_between((int)$pid, $monthlyStart, $monthlyEnd);
+    foreach ($safetyRowsForMaterials as $safetyRow) {
+        $useDate = isset($safetyRow['use_date']) ? cpms_safety_cost_valid_date($safetyRow['use_date']) : '';
+        if ($useDate === '') continue;
+        $amount = cpms_safety_cost_row_amount($safetyRow);
+        $monthlyTotals['안전관리비'] += $amount;
+        $monthlyRows[count($monthlyRows)] = array(
+            'date' => $useDate,
+            'category' => '안전관리비',
+            'advance_yn' => 'N',
+            'vendor_name' => isset($safetyRow['vendor_name']) ? (string)$safetyRow['vendor_name'] : '',
+            'detail' => material_monthly_detail_text($safetyRow),
+            'representative' => isset($safetyRow['representative']) ? (string)$safetyRow['representative'] : '',
+            'phone' => isset($safetyRow['phone']) ? (string)$safetyRow['phone'] : '',
+            'biz_no' => isset($safetyRow['biz_no']) ? (string)$safetyRow['biz_no'] : '',
+            'amount' => $amount,
+            'remark' => isset($safetyRow['remark']) ? (string)$safetyRow['remark'] : ''
+        );
+    }
+} catch (Exception $e) {}
+
+usort($monthlyRows, function($a, $b) {
+    $ad = isset($a['date']) ? (string)$a['date'] : '';
+    $bd = isset($b['date']) ? (string)$b['date'] : '';
+    if ($ad !== $bd) return strcmp($ad, $bd);
+    $ac = isset($a['category']) ? (string)$a['category'] : '';
+    $bc = isset($b['category']) ? (string)$b['category'] : '';
+    if ($ac !== $bc) return strcmp($ac, $bc);
+    $av = isset($a['vendor_name']) ? (string)$a['vendor_name'] : '';
+    $bv = isset($b['vendor_name']) ? (string)$b['vendor_name'] : '';
+    return strcmp($av, $bv);
+});
+$monthlyOverallTotal = $monthlyTotals['구매품'] + $monthlyTotals['자재비'] + $monthlyTotals['안전관리비'] + $monthlyTotals['기타경비'];
 ?>
 
-<div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
+<style>
+.cpms-material-ko-ime input[type="text"], .cpms-material-ko-ime textarea { ime-mode: active; }
+</style>
+<div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm cpms-material-ko-ime">
     <div class="flex flex-col lg:flex-row lg:items-end gap-3 justify-between">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">자재구입비</h3>
@@ -302,7 +382,7 @@ foreach ($usageRows as $ur) {
 
                     <div class="bg-gray-50 border border-gray-200 rounded-xl p-3 vendor-search-wrap">
                         <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
-                        <input type="text" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-material-vendor-search" placeholder="업체명 2글자 이상 입력">
+                        <input type="text" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-material-vendor-search" placeholder="업체명 2글자 이상 입력" lang="ko" inputmode="text" autocomplete="off">
                         <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
                     </div>
 
@@ -312,14 +392,18 @@ foreach ($usageRows as $ur) {
                             <option value="구매품">구매품</option>
                             <option value="기타경비">기타경비</option>
                         </select>
-                        <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required>
+                        <select name="advance_yn" class="px-3 py-2 border rounded-xl" required>
+                            <option value="N">선급 N</option>
+                            <option value="Y">선급 Y</option>
+                        </select>
+                        <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required lang="ko" inputmode="text" autocomplete="off">
                         <!-- 자재: 규격 제거 -->
-                        <input type="text" name="representative" class="px-3 py-2 border rounded-xl" placeholder="대표자명">
-                        <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호">
-                        <input type="text" name="biz_no" class="px-3 py-2 border rounded-xl" placeholder="사업자등록번호">
+                        <input type="text" name="representative" class="px-3 py-2 border rounded-xl" placeholder="대표자명" lang="ko" inputmode="text" autocomplete="off">
+                        <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호" lang="ko" inputmode="text" autocomplete="off">
+                        <input type="text" name="biz_no" class="px-3 py-2 border rounded-xl" placeholder="사업자등록번호" lang="ko" inputmode="text" autocomplete="off">
                         <!-- 자재: 공급가액 표기 -->
                         <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-2 border rounded-xl" placeholder="공급가액">
-                        <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고">
+                        <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고" lang="ko" inputmode="text" autocomplete="off">
                     </div>
 
                     <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="materialCreateDateInputs" data-chip-target="materialCreateDateChips" data-prev-grid-target="materialCreateCalPrev" data-curr-grid-target="materialCreateCalCurr">
@@ -385,6 +469,10 @@ foreach ($usageRows as $ur) {
                                             <input type="hidden" name="materials_tab" value="input">
                                             <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
 
+                                            <select name="advance_yn" class="w-full px-2 py-1 rounded border text-xs" required>
+                                                <option value="N">선급 N</option>
+                                                <option value="Y">선급 Y</option>
+                                            </select>
                                             <!-- 자재구입비 달력(전월/현월 2달력) -->
                                             <div class="border border-gray-200 rounded-lg p-2" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="usageDateInputs_<?php echo (int)$it['id']; ?>" data-chip-target="usageDateChips_<?php echo (int)$it['id']; ?>" data-prev-grid-target="usageDatePrev_<?php echo (int)$it['id']; ?>" data-curr-grid-target="usageDateCurr_<?php echo (int)$it['id']; ?>">
                                                 <div class="flex items-center justify-between">
@@ -438,6 +526,7 @@ foreach ($usageRows as $ur) {
                     <tr class="bg-gray-50">
                         <th class="p-2 border text-left">사용일자</th>
                         <th class="p-2 border text-left">구분</th>
+                        <th class="p-2 border text-center">선급여부</th>
                         <th class="p-2 border text-left">업체명</th>
                         <th class="p-2 border text-right">금액</th>
                         <th class="p-2 border text-left">비고</th>
@@ -446,7 +535,7 @@ foreach ($usageRows as $ur) {
                     </thead>
                     <tbody>
                     <?php if (count($usageRows) === 0): ?>
-                        <tr><td colspan="6" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
+                        <tr><td colspan="7" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
                     <?php else: ?>
                         <?php foreach ($usageRows as $ur): ?>
                             <?php
@@ -456,6 +545,7 @@ foreach ($usageRows as $ur) {
                             <tr>
                                 <td class="p-2 border whitespace-nowrap"><?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?></td>
                                 <td class="p-2 border"><?php echo h(material_category_label(isset($ur['category']) ? $ur['category'] : '')); ?></td>
+                                <td class="p-2 border text-center"><?php echo h(cpms_material_advance_yn(isset($ur['advance_yn']) ? $ur['advance_yn'] : 'N')); ?></td>
                                 <td class="p-2 border"><?php echo h(isset($ur['vendor_name']) ? $ur['vendor_name'] : ''); ?></td>
                                 <td class="p-2 border text-right"><?php echo material_money(isset($ur['amount']) ? $ur['amount'] : 0); ?></td>
                                 <td class="p-2 border"><?php echo h(isset($ur['memo']) ? $ur['memo'] : ''); ?></td>
@@ -499,15 +589,26 @@ foreach ($usageRows as $ur) {
 
             // 업체 자동완성 이벤트 위임
             var createForm = document.getElementById('materialCreateForm');
-            var materialVendorTimers = {};        
+            var materialVendorTimers = {};
+            function keepKoreanInputMode(root){
+                if (!root || !root.querySelectorAll) return;
+                var fields = root.querySelectorAll('input[type="text"], textarea');
+                for (var i=0; i<fields.length; i++) {
+                    fields[i].setAttribute('lang', 'ko');
+                    fields[i].setAttribute('inputmode', 'text');
+                    fields[i].setAttribute('autocomplete', 'off');
+                    fields[i].style.imeMode = 'active';
+                }
+            }
+            keepKoreanInputMode(document);
             function hideSuggestList(listEl){ if(!listEl)return; listEl.innerHTML=''; if(listEl.className.indexOf('hidden')===-1) listEl.className += ' hidden'; listEl.style.display='none'; }
             function showSuggestList(listEl){ if(!listEl)return; listEl.className=listEl.className.replace(/\bhidden\b/g,'').replace(/\s+/g,' ').trim(); listEl.style.display='block'; }
             function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark']) formEl.elements['remark'].value=p.remark||''; }
-            function renderMaterialSuggestions(inputEl, rows){ var wrap=inputEl?inputEl.closest('.vendor-search-wrap'):null; var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; listEl.innerHTML=''; if(!rows||!rows.length){ var empty=document.createElement('div'); empty.className='px-3 py-2 text-sm text-gray-500'; empty.textContent='검색 결과 없음'; listEl.appendChild(empty); showSuggestList(listEl); return; } for(var i=0;i<rows.length;i++){ (function(row){ var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.setAttribute('data-material-vendor-item','1'); btn.vendorData=row; listEl.appendChild(btn);} )(rows[i]); } showSuggestList(listEl); }
+            function renderMaterialSuggestions(inputEl, rows){ var wrap=inputEl?inputEl.closest('.vendor-search-wrap'):null; var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; listEl.innerHTML=''; if(!rows||!rows.length){ var empty=document.createElement('div'); empty.className='px-3 py-2 text-sm text-gray-500'; empty.textContent='검색 결과 없음'; listEl.appendChild(empty); showSuggestList(listEl); return; } for(var i=0;i<rows.length;i++){ (function(row){ var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.setAttribute('data-material-vendor-item','1'); btn.vendorData=row; btn.addEventListener('mousedown', function(ev){ ev.preventDefault(); }); listEl.appendChild(btn);} )(rows[i]); } showSuggestList(listEl); }
             document.addEventListener('input', function(e){ var inputEl=e.target; if(!inputEl||inputEl.className.indexOf('js-material-vendor-search')===-1) return; var wrap=inputEl.closest('.vendor-search-wrap'); var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; var q=(inputEl.value||'').trim(); if(materialVendorTimers[inputEl]) clearTimeout(materialVendorTimers[inputEl]); if(q.length<2){ hideSuggestList(listEl); return; } materialVendorTimers[inputEl]=setTimeout(function(){ // 프리셋 최신 검색
                 var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4)return; var rows=[]; if(xhr.status===200){ try{var json=JSON.parse(xhr.responseText); rows=(json&&json.items)?json.items:[];}catch(err){rows=[];} } renderMaterialSuggestions(inputEl, rows); }; xhr.send(); },250); });
             document.addEventListener('click', function(e){ var target=e.target; if(target&&target.getAttribute&&target.getAttribute('data-material-vendor-item')==='1'){ var wrap=target.closest('.vendor-search-wrap'); var inputEl=wrap?wrap.querySelector('.js-material-vendor-search'):null; var formEl=target.closest('form'); // 자동채움 재초기화
-                fillMaterialPreset(formEl, target.vendorData||{}); if(inputEl) inputEl.value=(target.vendorData&&target.vendorData.vendor_name)?target.vendorData.vendor_name:''; hideSuggestList(wrap?wrap.querySelector('.vendor-suggest-list'):null); return; } var lists=document.querySelectorAll('.vendor-search-wrap .vendor-suggest-list'); for(var i=0;i<lists.length;i++){ if(!lists[i].contains(target)) hideSuggestList(lists[i]); } });
+                fillMaterialPreset(formEl, target.vendorData||{}); if(inputEl) { inputEl.value=(target.vendorData&&target.vendorData.vendor_name)?target.vendorData.vendor_name:''; inputEl.focus(); } hideSuggestList(wrap?wrap.querySelector('.vendor-suggest-list'):null); return; } var lists=document.querySelectorAll('.vendor-search-wrap .vendor-suggest-list'); for(var i=0;i<lists.length;i++){ if(!lists[i].contains(target)) hideSuggestList(lists[i]); } });
             // 자재구입비 사용일자 달력 선택
             function initCalendar(wrapper){
                 var ym = wrapper.getAttribute('data-ym') || selectedYm;
@@ -680,145 +781,101 @@ foreach ($usageRows as $ur) {
         })();
         </script>        
     <?php else: ?>
-        <div class="mt-6 overflow-auto">
-            <table class="min-w-[1800px] w-full border-collapse text-xs">
+        <style>
+        .cpms-material-monthly-wrap { max-height: 72vh; background: #fff; }
+        .cpms-material-sheet { min-width: 1280px; border-collapse: collapse; table-layout: fixed; font-size: 12px; color: #111827; }
+        .cpms-material-sheet th, .cpms-material-sheet td { border: 1px solid #6b7280; height: 30px; padding: 0 8px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .cpms-material-sheet .sheet-group { background: #bfbfbf; text-align: center; font-weight: 700; }
+        .cpms-material-sheet .sheet-total { background: #f7c7a8; text-align: right; font-weight: 700; }
+        .cpms-material-sheet .sheet-head { background: #bfbfbf; text-align: center; font-weight: 700; position: relative; padding-right: 22px; }
+        .cpms-material-sheet .sheet-head:before { content: ""; position: absolute; right: 0; top: 0; width: 18px; height: 100%; background: #f9fafb; border-left: 1px solid #d1d5db; }
+        .cpms-material-sheet .sheet-head:after { content: ""; position: absolute; right: 5px; top: 50%; margin-top: -2px; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #6b7280; }
+        .cpms-material-sheet .sheet-empty-row td { color: transparent; }
+        .cpms-material-sheet .text-right { text-align: right; }
+        .cpms-material-sheet .text-center { text-align: center; }
+        .cpms-material-sheet .sheet-muted { color: #6b7280; }
+        @media (max-width: 900px) {
+            .cpms-material-sheet { min-width: 1080px; font-size: 11px; }
+            .cpms-material-sheet th, .cpms-material-sheet td { height: 28px; padding: 0 6px; }
+        }
+        </style>
+        <div class="mt-6 overflow-auto cpms-material-monthly-wrap border border-gray-300">
+            <table class="cpms-material-sheet w-full">
+                <colgroup>
+                    <col style="width:120px;">
+                    <col style="width:130px;">
+                    <col style="width:90px;">
+                    <col style="width:140px;">
+                    <col style="width:150px;">
+                    <col style="width:110px;">
+                    <col style="width:120px;">
+                    <col style="width:150px;">
+                    <col style="width:140px;">
+                    <col style="width:150px;">
+                </colgroup>
                 <thead>
-                    <!-- 월별자재구입비 날짜 2줄 -->
-                    <tr class="bg-gray-50">
-                        <th class="border p-2" rowspan="2">구분</th>
-                        <th class="border p-2" rowspan="2">업체명</th>
-                        <!-- 자재: 규격 제거 -->
-                        <th class="border p-2" rowspan="2">대표자명</th>
-                        <th class="border p-2" rowspan="2">전화번호</th>
-                        <th class="border p-2" rowspan="2">사업자등록번호</th>
-                        <!-- 자재: 공급가액 표기 -->
-                        <th class="border p-2" rowspan="2">공급가액</th>
-                        <?php foreach ($dateSlotsRow1 as $slot): ?>
-                            <th class="border p-1 text-center <?php echo $slot['valid'] ? '' : 'bg-gray-200 text-gray-500'; ?>" style="min-width:52px;"><?php echo h($slot['label']); ?></th>
-                        <?php endforeach; ?>
-                        <th class="border p-2" rowspan="2">일수</th>
-                        <th class="border p-2" rowspan="2">금액</th>
-                        <th class="border p-2" rowspan="2">비고</th>
+                    <tr>
+                        <th class="sheet-group" colspan="2">구매품</th>
+                        <th class="sheet-group" colspan="2">자재비</th>
+                        <th class="sheet-group" colspan="2">안전관리비</th>
+                        <th class="sheet-group" colspan="2">기타경비</th>
+                        <th class="sheet-group" colspan="2">합계</th>
                     </tr>
-                    <tr class="bg-gray-50">
-                        <?php foreach ($dateSlotsRow2 as $slot): ?>
-                            <th class="border p-1 text-center <?php echo $slot['valid'] ? '' : 'bg-gray-200 text-gray-500'; ?>" style="min-width:52px;"><?php echo h($slot['label']); ?></th>
-                        <?php endforeach; ?>
+                    <tr>
+                        <td class="sheet-total" colspan="2"><?php echo material_money_or_dash($monthlyTotals['구매품']); ?></td>
+                        <td class="sheet-total" colspan="2"><?php echo material_money_or_dash($monthlyTotals['자재비']); ?></td>
+                        <td class="sheet-total" colspan="2"><?php echo material_money_or_dash($monthlyTotals['안전관리비']); ?></td>
+                        <td class="sheet-total" colspan="2"><?php echo material_money_or_dash($monthlyTotals['기타경비']); ?></td>
+                        <td class="sheet-total" colspan="2"><?php echo material_money_or_dash($monthlyOverallTotal); ?></td>
+                    </tr>
+                    <tr>
+                        <th class="sheet-head">일</th>
+                        <th class="sheet-head">구분</th>
+                        <th class="sheet-head">선급여부</th>
+                        <th class="sheet-head">업체명</th>
+                        <th class="sheet-head">내역</th>
+                        <th class="sheet-head">대표자명</th>
+                        <th class="sheet-head">전화번호</th>
+                        <th class="sheet-head">사업자등록번호</th>
+                        <th class="sheet-head">공급가액</th>
+                        <th class="sheet-head">비고</th>
                     </tr>
                 </thead>
                 <tbody>
-                <?php
-                $sumDays = 0;
-                $sumAmount = 0.0;
-                $sumByDate = array();
-                foreach ($dateSlots as $slot) {
-                    $sumByDate[$slot['date']] = 0.0;
-                }
-                $lastCategory = '__none__';
-                ?>
-                <?php if (count($displayItems) === 0): ?>
-                    <tr><td class="border p-3 text-center text-gray-500" colspan="47">등록된 자재구입비가 없습니다.</td></tr>
-                <?php else: ?>
-                    <?php foreach ($displayItems as $it): ?>
-                        <?php
-                        $days = 0;
-                        $rowAmount = 0.0;
-                        foreach ($dateSlots as $slotAll) {
-                            if (!$slotAll['valid']) {
-                                continue;
-                            }
-                            $amtAll = isset($it['slot_amounts'][$slotAll['date']]) ? (float)$it['slot_amounts'][$slotAll['date']] : 0.0;
-                            if ($amtAll > 0) {
-                                $days++;
-                                $rowAmount += $amtAll;
-                                $sumByDate[$slotAll['date']] += $amtAll;
-                            }
-                        }                        
-                        ?>
+                <?php if (count($monthlyRows) > 0): ?>
+                    <?php foreach ($monthlyRows as $row): ?>
                         <tr>
-                            <td class="border p-1 text-center" rowspan="2"><?php echo ($lastCategory === material_category_label($it['category'])) ? '' : h(material_category_label($it['category'])); ?></td>
-                            <td class="border p-1" rowspan="2"><?php echo h($it['vendor_name']); ?></td>
-                            <!-- 자재: 규격 제거 -->
-                            <td class="border p-1" rowspan="2"><?php echo h($it['representative']); ?></td>
-                            <td class="border p-1" rowspan="2"><?php echo h($it['phone']); ?></td>
-                            <td class="border p-1" rowspan="2"><?php echo h($it['biz_no']); ?></td>
-                            <td class="border p-1 text-right" rowspan="2"><?php echo material_money($it['base_rate']); ?></td>
-
-                            <?php foreach ($dateSlotsRow1 as $slot): ?>
-                                <?php
-                                if (!$slot['valid']) {
-                                    echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
-                                    continue;
-                                 }
-                                 $amt = isset($it['slot_amounts'][$slot['date']]) ? (float)$it['slot_amounts'][$slot['date']] : 0.0;
-                                 if ($amt > 0) {
-                                     $cellFiles = material_statement_cell_files($statementFilesByGroupDate, $it['group_key'], $slot['date']);
-                                     echo '<td class="border p-1 text-right"><div>' . material_money($amt) . '</div>';
-                                     if (count($cellFiles) > 0) {
-                                         echo '<div class="mt-1 flex flex-col items-end gap-1">' . material_statement_links_html($cellFiles, '📎 거래명세표', $canDownloadMaterialStatements, '') . '</div>';
-                                     }
-                                     echo '</td>';
-                                 } else {
-                                     echo '<td class="border p-1 text-center text-gray-300">-</td>';
-                                 }
-                                 ?>
-                            <?php endforeach; ?>
-
-                            <td class="border p-1 text-center" rowspan="2"><?php echo (int)$days; ?></td>
-                            <td class="border p-1 text-right" rowspan="2"><?php echo material_money($rowAmount); ?></td>
-                            <td class="border p-1" rowspan="2"><?php echo h($it['remark']); ?></td>
+                            <td class="text-center"><?php echo h(isset($row['date']) ? $row['date'] : ''); ?></td>
+                            <td class="text-center"><?php echo h(isset($row['category']) ? $row['category'] : ''); ?></td>
+                            <td class="text-center"><?php echo h(isset($row['advance_yn']) ? $row['advance_yn'] : 'N'); ?></td>
+                            <td><?php echo h(isset($row['vendor_name']) ? $row['vendor_name'] : ''); ?></td>
+                            <td><?php echo h(isset($row['detail']) ? $row['detail'] : ''); ?></td>
+                            <td><?php echo h(isset($row['representative']) ? $row['representative'] : ''); ?></td>
+                            <td><?php echo h(isset($row['phone']) ? $row['phone'] : ''); ?></td>
+                            <td><?php echo h(isset($row['biz_no']) ? $row['biz_no'] : ''); ?></td>
+                            <td class="text-right"><?php echo material_money(isset($row['amount']) ? $row['amount'] : 0); ?></td>
+                            <td><?php echo h(isset($row['remark']) ? $row['remark'] : ''); ?></td>
                         </tr>
-                        <tr>
-                            <?php foreach ($dateSlotsRow2 as $slot): ?>
-                                <?php
-                                if (!$slot['valid']) {
-                                    echo '<td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>';
-                                    continue;
-                                 }
-                                 $amt = isset($it['slot_amounts'][$slot['date']]) ? (float)$it['slot_amounts'][$slot['date']] : 0.0;
-                                 if ($amt > 0) {
-                                     $cellFiles = material_statement_cell_files($statementFilesByGroupDate, $it['group_key'], $slot['date']);
-                                     echo '<td class="border p-1 text-right"><div>' . material_money($amt) . '</div>';
-                                     if (count($cellFiles) > 0) {
-                                         echo '<div class="mt-1 flex flex-col items-end gap-1">' . material_statement_links_html($cellFiles, '📎 거래명세표', $canDownloadMaterialStatements, '') . '</div>';
-                                     }
-                                     echo '</td>';
-                                 } else {
-                                     echo '<td class="border p-1 text-center text-gray-300">-</td>';
-                                 }
-                                 ?>
-                            <?php endforeach; ?>
-                        </tr>
-                        <?php
-                        $lastCategory = material_category_label($it['category']);
-                        $sumDays += $days;
-                        $sumAmount += $rowAmount;
-                        ?>
                     <?php endforeach; ?>
-
-                    <tr class="bg-yellow-50 font-bold">
-                        <td class="border p-1 text-center" colspan="6" rowspan="2">합계</td>
-                        <?php foreach ($dateSlotsRow1 as $slot): ?>
-                            <?php if (!$slot['valid']): ?>
-                                <td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>
-                            <?php else: ?>
-                                <td class="border p-1 text-right"><?php echo material_money(isset($sumByDate[$slot['date']]) ? $sumByDate[$slot['date']] : 0); ?></td>
-                            <?php endif; ?>
-                        <?php endforeach; ?>
-                        <td class="border p-1 text-center" rowspan="2"><?php echo (int)$sumDays; ?></td>
-                        <td class="border p-1 text-right" rowspan="2"><?php echo material_money($sumAmount); ?></td>
-                        <td class="border p-1" rowspan="2"></td>
-                    </tr>
-                    <tr class="bg-yellow-50 font-bold">
-                        <?php foreach ($dateSlotsRow2 as $slot): ?>
-                            <?php if (!$slot['valid']): ?>
-                                <td class="border p-1 text-center bg-gray-200 text-gray-500">X</td>
-                            <?php else: ?>
-                                <td class="border p-1 text-right"><?php echo material_money(isset($sumByDate[$slot['date']]) ? $sumByDate[$slot['date']] : 0); ?></td>
-                            <?php endif; ?>
-                        <?php endforeach; ?>
-                    </tr>
                 <?php endif; ?>
+                <?php
+                $blankRowCount = 32 - count($monthlyRows);
+                if ($blankRowCount < 4) $blankRowCount = 4;
+                for ($i = 0; $i < $blankRowCount; $i++):
+                ?>
+                    <tr class="sheet-empty-row">
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                        <td>&nbsp;</td>
+                    </tr>
+                <?php endfor; ?>
                 </tbody>
             </table>
         </div>

@@ -9,6 +9,7 @@ require_once __DIR__ . '/../app/views/construction/partials/schedule_auto_progre
 require_once __DIR__ . '/../app/views/construction/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../app/views/construction/partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../app/views/construction/partials/material_statement_helper.php';
+require_once __DIR__ . '/../app/views/construction/partials/material_usage_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -325,12 +326,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     material_id INT NOT NULL,
                     use_date DATE NOT NULL,
                     amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+                    advance_yn CHAR(1) NOT NULL DEFAULT 'N',
                     memo VARCHAR(255) DEFAULT '',
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE KEY uniq_material_day (material_id, use_date),
                     KEY idx_project_date (project_id, use_date)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
                 cpms_material_statement_ensure_schema($pdo);
+                cpms_material_usage_ensure_schema($pdo);
                 $uniqueMsg = ensure_usage_unique_index2($pdo, 'cpms_material_usage', 'uniq_material_day', 'uniq_project_material_day', 'material_id');
                 $msg = '자재구입비/거래명세표 파일 테이블 생성/확인 완료. 구분은 자재비/구매품/기타경비/안전관리비만 사용합니다. / ' . $uniqueMsg;
                 } else if ($action === 'material_vendor_presets') {
@@ -376,6 +379,7 @@ if ($pdo) {
         array('cpms_equipment_usage', 'amount'),
         array('cpms_equipment_usage', 'is_manual_unit'),
         array('cpms_material_items', 'category'),
+        array('cpms_material_usage', 'advance_yn'),
         array('cpms_material_statement_files', 'project_id'),
         array('cpms_material_statement_files', 'material_id'),
         array('cpms_material_statement_files', 'material_usage_id'),

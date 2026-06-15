@@ -10,6 +10,7 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/master_dedupe_helper.php';
 require_once __DIR__ . '/partials/material_statement_helper.php';
+require_once __DIR__ . '/partials/material_usage_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -53,6 +54,7 @@ $phone = trim((string)(isset($_POST['phone']) ? $_POST['phone'] : ''));
 $bizNo = trim((string)(isset($_POST['biz_no']) ? $_POST['biz_no'] : ''));
 $baseRate = isset($_POST['base_rate']) ? (float)$_POST['base_rate'] : 0;
 $remark = trim((string)(isset($_POST['remark']) ? $_POST['remark'] : ''));
+$advanceYn = cpms_material_advance_yn(isset($_POST['advance_yn']) ? $_POST['advance_yn'] : 'N');
 $usageDates = isset($_POST['usage_dates']) ? $_POST['usage_dates'] : array();
 $useDatesText = trim((string)(isset($_POST['use_dates']) ? $_POST['use_dates'] : ''));
 
@@ -166,6 +168,8 @@ if (!$pdo) {
     header('Location: ' . $redirect);
     exit;
 }
+cpms_material_usage_ensure_schema($pdo);
+$hasMaterialAdvanceYn = cpms_material_usage_column_exists($pdo, 'advance_yn');
 
 try {
     $now = date('Y-m-d H:i:s');
@@ -222,11 +226,19 @@ try {
         }
     }
     if ($materialId > 0 && count($dates) > 0) {
-        $stU = $pdo->prepare("INSERT INTO cpms_material_usage
-            (project_id, material_id, use_date, amount, memo, created_at)
-            VALUES
-            (:pid, :eid, :d, :amt, :memo, :created_at)
-            ON DUPLICATE KEY UPDATE amount = VALUES(amount), memo = VALUES(memo)");
+        if ($hasMaterialAdvanceYn) {
+            $stU = $pdo->prepare("INSERT INTO cpms_material_usage
+                (project_id, material_id, use_date, amount, advance_yn, memo, created_at)
+                VALUES
+                (:pid, :eid, :d, :amt, :advance_yn, :memo, :created_at)
+                ON DUPLICATE KEY UPDATE amount = VALUES(amount), advance_yn = VALUES(advance_yn), memo = VALUES(memo)");
+        } else {
+            $stU = $pdo->prepare("INSERT INTO cpms_material_usage
+                (project_id, material_id, use_date, amount, memo, created_at)
+                VALUES
+                (:pid, :eid, :d, :amt, :memo, :created_at)
+                ON DUPLICATE KEY UPDATE amount = VALUES(amount), memo = VALUES(memo)");
+        }
         $stFindUsage = $pdo->prepare("SELECT id, use_date FROM cpms_material_usage WHERE project_id = :pid AND material_id = :mid AND use_date = :d LIMIT 1");
         $savedUsageRows = array();
         foreach ($dates as $d) {
@@ -234,6 +246,7 @@ try {
             $stU->bindValue(':eid', $materialId, PDO::PARAM_INT);
             $stU->bindValue(':d', $d);
             $stU->bindValue(':amt', $baseRate);
+            if ($hasMaterialAdvanceYn) $stU->bindValue(':advance_yn', $advanceYn);
             $stU->bindValue(':memo', '');
             $stU->bindValue(':created_at', $now);
             $stU->execute();
