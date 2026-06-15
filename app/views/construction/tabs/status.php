@@ -509,6 +509,10 @@ $categories = array(
 $laborWageMap = cpms_status_labor_wage_map($pdo, (int)$pid);
 $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
 $periodDiagnostics = array();
+$hasConfirmedSalesData = function_exists('cpms_confirmed_sales_has_data') ? cpms_confirmed_sales_has_data($pdo, (int)$pid) : false;
+if ($hasConfirmedSalesData) {
+    $categories['sales']['label'] = '확정매출';
+}
 
 $monthlyData = array();
 $yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'confirmed_sales' => 0, 'target_amount' => 0, 'used_total' => 0);
@@ -541,8 +545,9 @@ for ($m = 1; $m <= 12; $m++) {
     $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
 
     // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
-    $sales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
+    $expectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
     $confirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
+    $sales = $hasConfirmedSalesData ? $confirmedSales : $expectedSales;
     $usedTotal = $labor + $equipment + $materials;
     $targetAmount = round($sales * 0.7);
     $costRateInfo = cpms_status_cost_rate_info($sales, $usedTotal);
@@ -563,6 +568,7 @@ for ($m = 1; $m <= 12; $m++) {
         'materials' => $materials,
         'safety' => $safety,
         'sales' => $sales,
+        'expected_sales' => $expectedSales,
         'confirmed_sales' => $confirmedSales,
         'target_amount' => $targetAmount,
         'used_total' => $usedTotal,
@@ -653,8 +659,8 @@ foreach ($years as $yy) {
         $overallTotals['labor'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
     }
 }
-$overallTotals['sales'] = cpms_status_sales_total_all($pdo, (int)$pid);
 $overallTotals['confirmed_sales'] = cpms_status_confirmed_sales_total_all($pdo, (int)$pid);
+$overallTotals['sales'] = $hasConfirmedSalesData ? $overallTotals['confirmed_sales'] : cpms_status_sales_total_all($pdo, (int)$pid);
 $safetyContractTotal = cpms_safety_cost_contract_total($pdo, (int)$pid);
 $safetyLimit110 = round($safetyContractTotal * 1.1);
 $safetyUsedTotal = cpms_safety_cost_total((int)$pid);
@@ -726,7 +732,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 
         <div class="summary-grid mt-3">
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                <div class="text-xs text-gray-500">총 예상매출 (전체 누적)</div>
+                <div class="text-xs text-gray-500">총 <?php echo h($categories['sales']['label']); ?> (전체 누적)</div>
                 <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['sales'])); ?></div>
             </div>
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
@@ -880,7 +886,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <thead class="bg-gray-50 text-gray-500">
                     <tr>
                         <th class="px-3 py-2 text-left font-bold">월</th>
-                        <th class="px-3 py-2 text-right font-bold">예상매출</th>
+                        <th class="px-3 py-2 text-right font-bold"><?php echo h($categories['sales']['label']); ?></th>
                         <th class="px-3 py-2 text-right font-bold">확정매출</th>
                         <th class="px-3 py-2 text-right font-bold">투입원가</th>
                         <th class="px-3 py-2 text-right font-bold">투입목표금액</th>

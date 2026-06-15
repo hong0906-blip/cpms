@@ -209,7 +209,8 @@ if (!function_exists('cpms_confirmed_sales_total_between')) {
         if (!cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'recognized_amount')) return 0.0;
 
         try {
-            $sql = "SELECT COALESCE(SUM(recognized_amount), 0) FROM cpms_progress_billings WHERE project_id = :pid";
+            $amountExpr = cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'requested_amount') ? "COALESCE(NULLIF(recognized_amount, 0), requested_amount, 0)" : "recognized_amount";
+            $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM cpms_progress_billings WHERE project_id = :pid";
             if (cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'progress_date')) {
                 if (cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'created_at')) {
                     $sql .= " AND COALESCE(progress_date, DATE(created_at)) BETWEEN :start_date AND :end_date";
@@ -241,7 +242,8 @@ if (!function_exists('cpms_confirmed_sales_total_all')) {
         if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (cpms_sales_table_exists($pdo, 'cpms_progress_billings') && cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'recognized_amount')) {
             try {
-                $st = $pdo->prepare("SELECT COALESCE(SUM(recognized_amount), 0) FROM cpms_progress_billings WHERE project_id = :pid");
+                $amountExpr = cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'requested_amount') ? "COALESCE(NULLIF(recognized_amount, 0), requested_amount, 0)" : "recognized_amount";
+                $st = $pdo->prepare("SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM cpms_progress_billings WHERE project_id = :pid");
                 $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
                 $st->execute();
                 $amount = (float)$st->fetchColumn();
@@ -277,7 +279,8 @@ if (!function_exists('cpms_confirmed_sales_has_data')) {
         if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (cpms_sales_table_exists($pdo, 'cpms_progress_billings')) {
             try {
-                $st = $pdo->prepare("SELECT COUNT(*) FROM cpms_progress_billings WHERE project_id = :pid AND recognized_amount > 0");
+                $amountExpr = cpms_sales_column_exists($pdo, 'cpms_progress_billings', 'requested_amount') ? "COALESCE(NULLIF(recognized_amount, 0), requested_amount, 0)" : "recognized_amount";
+                $st = $pdo->prepare("SELECT COUNT(*) FROM cpms_progress_billings WHERE project_id = :pid AND " . $amountExpr . " > 0");
                 $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
                 $st->execute();
                 if ((int)$st->fetchColumn() > 0) {

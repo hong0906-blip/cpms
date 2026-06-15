@@ -172,6 +172,24 @@ $progressRecognizedTotal = 0.0;
 $progressRequestedTotal = 0.0;
 try {
     if (cpms_contract_change_table_exists($pdo, 'cpms_progress_billings')) {
+        if (cpms_contract_change_column_exists($pdo, 'cpms_progress_billings', 'requested_amount') && cpms_contract_change_column_exists($pdo, 'cpms_progress_billings', 'recognized_amount')) {
+            $stRepair = $pdo->prepare("UPDATE cpms_progress_billings
+                                           SET recognized_amount = requested_amount
+                                         WHERE project_id = :pid
+                                           AND (recognized_amount IS NULL OR recognized_amount = 0)
+                                           AND requested_amount > 0");
+            $stRepair->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stRepair->execute();
+        }
+        if (cpms_contract_change_column_exists($pdo, 'cpms_progress_billings', 'progress_date') && cpms_contract_change_column_exists($pdo, 'cpms_progress_billings', 'created_at')) {
+            $stDateRepair = $pdo->prepare("UPDATE cpms_progress_billings
+                                              SET progress_date = DATE(created_at)
+                                            WHERE project_id = :pid
+                                              AND progress_date IS NULL
+                                              AND created_at IS NOT NULL");
+            $stDateRepair->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stDateRepair->execute();
+        }
         $stProgress = $pdo->prepare("SELECT * FROM cpms_progress_billings WHERE project_id = :pid ORDER BY progress_date ASC, id ASC");
         $stProgress->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $stProgress->execute();
@@ -179,8 +197,12 @@ try {
         if (is_array($tmpProgress)) {
             $progressBillings = $tmpProgress;
             foreach ($progressBillings as $progressRow) {
-                $progressRecognizedTotal += isset($progressRow['recognized_amount']) ? (float)$progressRow['recognized_amount'] : 0.0;
-                $progressRequestedTotal += isset($progressRow['requested_amount']) ? (float)$progressRow['requested_amount'] : 0.0;
+                $recognizedOne = isset($progressRow['recognized_amount']) ? (float)$progressRow['recognized_amount'] : 0.0;
+                $requestedOne = isset($progressRow['requested_amount']) ? (float)$progressRow['requested_amount'] : 0.0;
+                if ($recognizedOne <= 0 && $requestedOne > 0) $recognizedOne = $requestedOne;
+                if ($requestedOne <= 0 && $recognizedOne > 0) $requestedOne = $recognizedOne;
+                $progressRecognizedTotal += $recognizedOne;
+                $progressRequestedTotal += $requestedOne;
             }
         }
     }
@@ -511,21 +533,21 @@ if (is_file($contractMetaFile)) {
     <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
         <div>
             <div class="font-extrabold text-gray-900">기성관리</div>
-            <div class="text-xs text-gray-500 mt-1">회차별 청구금액/인정금액을 보존하고 확정매출로 집계합니다.</div>
+            <div class="text-xs text-gray-500 mt-1">기성금액을 확정매출로 저장하고 월별 집계에 반영합니다.</div>
         </div>
         <div class="text-right text-sm">
-            <div class="font-extrabold text-gray-900">누적 인정금액 <?php echo cpms_format_amount0($progressRecognizedTotal); ?></div>
-            <div class="text-xs text-gray-500">누적 청구금액 <?php echo cpms_format_amount0($progressRequestedTotal); ?></div>
+            <div class="font-extrabold text-gray-900">누적 확정매출 <?php echo cpms_format_amount0($progressRecognizedTotal); ?></div>
+            <div class="text-xs text-gray-500">누적 기성금액 <?php echo cpms_format_amount0($progressRequestedTotal); ?></div>
         </div>
     </div>
     <div class="p-6">
         <form method="post" action="<?php echo h(base_url()); ?>/?r=project/progress_save" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-6 gap-3">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
+            <input type="hidden" name="action" value="create">
             <input name="round_label" required maxlength="100" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="1회 기성">
             <input type="date" name="progress_date" required class="px-4 py-3 rounded-2xl border border-gray-200">
-            <input name="requested_amount" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="청구금액">
-            <input name="recognized_amount" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="인정금액">
+            <input name="recognized_amount" required class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="기성금액(확정매출)">
             <input type="file" name="attachment_file" accept=".pdf,.hwp,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" class="md:col-span-2 px-4 py-3 rounded-2xl border border-gray-200 bg-white">
             <textarea name="remark" rows="2" class="md:col-span-5 px-4 py-3 rounded-2xl border border-gray-200" placeholder="비고"></textarea>
             <button type="submit" class="px-6 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">등록</button>
@@ -537,25 +559,47 @@ if (is_file($contractMetaFile)) {
                     <tr>
                         <th class="px-3 py-2 text-left font-extrabold">회차</th>
                         <th class="px-3 py-2 text-left font-extrabold">기성일자</th>
-                        <th class="px-3 py-2 text-right font-extrabold">청구금액</th>
-                        <th class="px-3 py-2 text-right font-extrabold">인정금액</th>
+                        <th class="px-3 py-2 text-right font-extrabold">기성금액(확정매출)</th>
                         <th class="px-3 py-2 text-left font-extrabold">첨부</th>
                         <th class="px-3 py-2 text-left font-extrabold">비고</th>
+                        <th class="px-3 py-2 text-center font-extrabold">관리</th>
                     </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100">
                     <?php foreach ($progressBillings as $progressRow): ?>
+                        <?php $progressFormId = 'progressUpdateForm' . (int)$progressRow['id']; ?>
+                        <?php
+                        $progressDisplayAmount = isset($progressRow['recognized_amount']) ? (float)$progressRow['recognized_amount'] : 0.0;
+                        if ($progressDisplayAmount <= 0 && isset($progressRow['requested_amount'])) $progressDisplayAmount = (float)$progressRow['requested_amount'];
+                        ?>
                         <tr>
-                            <td class="px-3 py-2 font-bold"><?php echo h(isset($progressRow['round_label']) ? $progressRow['round_label'] : ''); ?></td>
-                            <td class="px-3 py-2"><?php echo h(isset($progressRow['progress_date']) ? $progressRow['progress_date'] : ''); ?></td>
-                            <td class="px-3 py-2 text-right"><?php echo cpms_format_amount0(isset($progressRow['requested_amount']) ? $progressRow['requested_amount'] : 0); ?></td>
-                            <td class="px-3 py-2 text-right"><?php echo cpms_format_amount0(isset($progressRow['recognized_amount']) ? $progressRow['recognized_amount'] : 0); ?></td>
+                            <td class="px-3 py-2">
+                                <input form="<?php echo h($progressFormId); ?>" name="round_label" required maxlength="100" class="w-28 px-2 py-1 rounded-lg border border-gray-200 font-bold" value="<?php echo h(isset($progressRow['round_label']) ? $progressRow['round_label'] : ''); ?>">
+                            </td>
+                            <td class="px-3 py-2">
+                                <input form="<?php echo h($progressFormId); ?>" type="date" name="progress_date" required class="w-36 px-2 py-1 rounded-lg border border-gray-200" value="<?php echo h(isset($progressRow['progress_date']) ? $progressRow['progress_date'] : ''); ?>">
+                            </td>
+                            <td class="px-3 py-2 text-right">
+                                <input form="<?php echo h($progressFormId); ?>" name="recognized_amount" required class="w-36 px-2 py-1 rounded-lg border border-gray-200 text-right" value="<?php echo h(cpms_format_amount0($progressDisplayAmount)); ?>">
+                            </td>
                             <td class="px-3 py-2">
                                 <?php if (isset($progressRow['attachment_stored_path']) && trim((string)$progressRow['attachment_stored_path']) !== ''): ?>
                                     <a class="text-blue-700 font-bold" href="<?php echo h(base_url()); ?>/?r=project/progress_download&id=<?php echo (int)$progressRow['id']; ?>">다운로드</a>
                                 <?php endif; ?>
+                                <input form="<?php echo h($progressFormId); ?>" type="file" name="attachment_file" accept=".pdf,.hwp,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" class="mt-1 block w-40 text-xs">
                             </td>
-                            <td class="px-3 py-2"><?php echo h(isset($progressRow['remark']) ? $progressRow['remark'] : ''); ?></td>
+                            <td class="px-3 py-2">
+                                <input form="<?php echo h($progressFormId); ?>" name="remark" class="w-44 px-2 py-1 rounded-lg border border-gray-200" value="<?php echo h(isset($progressRow['remark']) ? $progressRow['remark'] : ''); ?>">
+                            </td>
+                            <td class="px-3 py-2">
+                                <form id="<?php echo h($progressFormId); ?>" method="post" action="<?php echo h(base_url()); ?>/?r=project/progress_save" enctype="multipart/form-data" class="flex items-center justify-center gap-1">
+                                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                    <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
+                                    <input type="hidden" name="progress_id" value="<?php echo (int)$progressRow['id']; ?>">
+                                    <button type="submit" name="action" value="update" class="px-3 py-1 rounded-lg bg-blue-600 text-white text-xs font-bold">수정</button>
+                                    <button type="submit" name="action" value="delete" formnovalidate class="px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-bold" onclick="return confirm('삭제할까요?');">삭제</button>
+                                </form>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
