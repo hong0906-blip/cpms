@@ -511,6 +511,14 @@ if ($route === 'construction/equipment_item_save') {
     require_once __DIR__ . '/../app/views/construction/equipment_item_save.php';
     exit;
 }
+if ($route === 'construction/equipment_excel_preview') {
+    require_once __DIR__ . '/../app/views/construction/equipment_excel_preview.php';
+    exit;
+}
+if ($route === 'construction/equipment_excel_save') {
+    require_once __DIR__ . '/../app/views/construction/equipment_excel_save.php';
+    exit;
+}
 if ($route === 'construction/equipment_item_delete') {
     require_once __DIR__ . '/../app/views/construction/equipment_item_delete.php';
     exit;

@@ -331,7 +331,9 @@ if ($pdo && is_array($selectedProject)) {
     foreach (isset($revenueResult['warnings']) && is_array($revenueResult['warnings']) ? $revenueResult['warnings'] : array() as $w) { $notices[] = $w; }
 
     try {
-        $stMat = $pdo->prepare('SELECT m.id,m.category,m.vendor_name,m.representative,m.phone,m.biz_no,m.remark,u.use_date,u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id=m.id AND u.project_id=m.project_id WHERE m.project_id=:pid');
+        $hasMatDeleted = project_monthly_column_exists($pdo, 'cpms_material_items', 'is_deleted');
+        $matDeletedWhere = $hasMatDeleted ? ' AND (m.is_deleted = 0 OR m.is_deleted IS NULL)' : '';
+        $stMat = $pdo->prepare('SELECT m.id,m.category,m.vendor_name,m.representative,m.phone,m.biz_no,m.remark,u.use_date,u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id=m.id AND u.project_id=m.project_id WHERE m.project_id=:pid' . $matDeletedWhere);
         $stMat->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
         $stMat->execute();
         $mat = $stMat->fetchAll();
@@ -389,23 +391,14 @@ if ($pdo && is_array($selectedProject)) {
         $vendorName = isset($safetyRow['vendor_name']) ? trim((string)$safetyRow['vendor_name']) : '';
         $itemName = isset($safetyRow['item_name']) ? trim((string)$safetyRow['item_name']) : '';
         $useContent = isset($safetyRow['use_content']) ? trim((string)$safetyRow['use_content']) : '';
-        $projectNameForSafety = isset($safetyRow['project_name']) && trim((string)$safetyRow['project_name']) !== '' ? trim((string)$safetyRow['project_name']) : (isset($selectedProject['name']) ? (string)$selectedProject['name'] : '');
-        $registrant = isset($safetyRow['created_by_name']) && trim((string)$safetyRow['created_by_name']) !== '' ? (string)$safetyRow['created_by_name'] : (isset($safetyRow['created_by_email']) ? (string)$safetyRow['created_by_email'] : '-');
         $desc = trim($itemName . (($itemName !== '' && $useContent !== '') ? ' / ' : '') . $useContent);
         if ($desc === '') $desc = '안전관리비 사용';
-        $html = '<div class="space-y-1 min-w-[260px]">'
-            . '<div class="font-bold text-gray-900">' . h($desc) . '</div>'
-            . '<div class="text-xs text-gray-600">사용일자: ' . h($useDate) . ' / 현장: ' . h($projectNameForSafety) . ' / 등록자: ' . h($registrant) . '</div>'
-            . '<div class="text-xs text-gray-500">안전관리비 수정은 안전섹션에서 처리합니다.</div>'
-            . '<div class="mt-1">' . cpms_safety_cost_pdf_links_html($safetyRow) . '</div>'
-            . '</div>';
         $monthsForSafety = monthly_zero_map($allMonths);
         $monthsForSafety[$safetyYm] += cpms_safety_cost_row_amount($safetyRow);
         $rowsBySection['안전관리비'][] = array(
             'section' => '안전관리비',
             '업체명' => ($vendorName !== '' ? $vendorName : '-'),
             '내역' => $desc,
-            '내역_html' => $html,
             'months' => $monthsForSafety,
             'source' => 'safety_section'
         );
@@ -414,10 +407,12 @@ if ($pdo && is_array($selectedProject)) {
     try {
         $hasEqWorkUnit = project_monthly_column_exists($pdo, 'cpms_equipment_usage', 'work_unit');
         $hasEqBaseRate = project_monthly_column_exists($pdo, 'cpms_equipment_usage', 'base_rate_snapshot');
+        $hasEqDeleted = project_monthly_column_exists($pdo, 'cpms_equipment_items', 'is_deleted');
         $eqSelectExtra = '';
         if ($hasEqWorkUnit) $eqSelectExtra .= ',u.work_unit';
         if ($hasEqBaseRate) $eqSelectExtra .= ',u.base_rate_snapshot';
-        $stEq = $pdo->prepare('SELECT e.id,e.vendor_name,e.spec,e.category,u.use_date,u.amount' . $eqSelectExtra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid');
+        $eqDeletedWhere = $hasEqDeleted ? ' AND (e.is_deleted = 0 OR e.is_deleted IS NULL)' : '';
+        $stEq = $pdo->prepare('SELECT e.id,e.vendor_name,e.spec,e.category,u.use_date,u.amount' . $eqSelectExtra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid' . $eqDeletedWhere);
         $stEq->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
         $stEq->execute();
         $eq = $stEq->fetchAll();

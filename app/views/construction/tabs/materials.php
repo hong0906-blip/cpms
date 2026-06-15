@@ -632,11 +632,35 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
         <?php endif; ?>
 
         <div class="mt-6 border border-gray-200 rounded-2xl p-4">
-            <div class="text-lg font-extrabold mb-3">입력내역 목록</div>
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+                <div>
+                    <div class="text-lg font-extrabold">입력내역 목록</div>
+                    <?php if ($canEditMaterials && count($usageRows) > 0): ?>
+                        <div class="text-xs text-gray-500 mt-1">잘못 업로드한 자료는 행을 체크한 뒤 선택 삭제할 수 있습니다.</div>
+                    <?php endif; ?>
+                </div>
+                <?php if ($canEditMaterials && count($usageRows) > 0): ?>
+                    <button type="submit" form="materialUsageBulkDeleteForm" class="px-3 py-2 rounded-xl border border-red-300 text-red-600 font-bold text-sm" onclick="return confirm('선택한 자재구입비 사용내역을 삭제할까요? 월별 자재구입비와 상황탭 집계에서도 제외됩니다.');">선택 삭제</button>
+                <?php endif; ?>
+            </div>
+            <?php if ($canEditMaterials && count($usageRows) > 0): ?>
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_delete" id="materialUsageBulkDeleteForm">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                <input type="hidden" name="materials_tab" value="input">
+                <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+            <?php endif; ?>
             <div class="max-h-[420px] overflow-auto">
                 <table class="w-full text-sm border-collapse">
                     <thead>
                     <tr class="bg-gray-50">
+                        <?php if ($canEditMaterials): ?>
+                            <th class="p-2 border text-center w-12">
+                                <?php if (count($usageRows) > 0): ?>
+                                    <input type="checkbox" id="materialUsageSelectAll" title="전체 선택">
+                                <?php endif; ?>
+                            </th>
+                        <?php endif; ?>
                         <th class="p-2 border text-left">사용일자</th>
                         <th class="p-2 border text-left">구분</th>
                         <th class="p-2 border text-center">선급여부</th>
@@ -648,7 +672,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     </thead>
                     <tbody>
                     <?php if (count($usageRows) === 0): ?>
-                        <tr><td colspan="7" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
+                        <tr><td colspan="<?php echo $canEditMaterials ? 8 : 7; ?>" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
                     <?php else: ?>
                         <?php foreach ($usageRows as $ur): ?>
                             <?php
@@ -656,6 +680,13 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                             $listFiles = ($usageIdForList > 0 && isset($statementFilesByUsage[$usageIdForList])) ? $statementFilesByUsage[$usageIdForList] : array();
                             ?>
                             <tr>
+                                <?php if ($canEditMaterials): ?>
+                                    <td class="p-2 border text-center">
+                                        <?php if ($usageIdForList > 0): ?>
+                                            <input type="checkbox" name="usage_ids[]" value="<?php echo (int)$usageIdForList; ?>" class="material-usage-delete-check">
+                                        <?php endif; ?>
+                                    </td>
+                                <?php endif; ?>
                                 <td class="p-2 border whitespace-nowrap"><?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?></td>
                                 <td class="p-2 border"><?php echo h(material_category_label(isset($ur['category']) ? $ur['category'] : '')); ?></td>
                                 <td class="p-2 border text-center"><?php echo h(cpms_material_advance_yn(isset($ur['advance_yn']) ? $ur['advance_yn'] : 'N')); ?></td>
@@ -673,6 +704,9 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     </tbody>
                 </table>
             </div>
+            <?php if ($canEditMaterials && count($usageRows) > 0): ?>
+            </form>
+            <?php endif; ?>
         </div>
 
 
@@ -714,6 +748,29 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                 }
             }
             keepKoreanInputMode(document);
+            var usageSelectAll = document.getElementById('materialUsageSelectAll');
+            var usageDeleteForm = document.getElementById('materialUsageBulkDeleteForm');
+            if (usageSelectAll) {
+                usageSelectAll.addEventListener('change', function(){
+                    var checks = document.querySelectorAll('.material-usage-delete-check');
+                    for (var i=0; i<checks.length; i++) {
+                        checks[i].checked = usageSelectAll.checked;
+                    }
+                });
+            }
+            if (usageDeleteForm) {
+                usageDeleteForm.addEventListener('submit', function(ev){
+                    var checks = usageDeleteForm.querySelectorAll('.material-usage-delete-check');
+                    var hasChecked = false;
+                    for (var i=0; i<checks.length; i++) {
+                        if (checks[i].checked) { hasChecked = true; break; }
+                    }
+                    if (!hasChecked) {
+                        ev.preventDefault();
+                        alert('삭제할 사용내역을 선택해주세요.');
+                    }
+                });
+            }
             function hideSuggestList(listEl){ if(!listEl)return; listEl.innerHTML=''; if(listEl.className.indexOf('hidden')===-1) listEl.className += ' hidden'; listEl.style.display='none'; }
             function showSuggestList(listEl){ if(!listEl)return; listEl.className=listEl.className.replace(/\bhidden\b/g,'').replace(/\s+/g,' ').trim(); listEl.style.display='block'; }
             function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark']) formEl.elements['remark'].value=p.remark||''; }

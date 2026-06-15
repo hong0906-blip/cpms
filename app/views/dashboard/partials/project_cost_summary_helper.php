@@ -140,11 +140,21 @@ function cpms_dashboard_equipment_total($pdo, $projectId)
     if (!$hasAmount && (!$hasWorkUnit || !$hasBaseRate)) return 0.0;
 
     try {
+        $fromSql = "cpms_equipment_usage u";
+        $deletedWhere = "";
+        if (
+            cpms_dashboard_table_exists($pdo, 'cpms_equipment_items') &&
+            cpms_dashboard_column_exists($pdo, 'cpms_equipment_usage', 'equipment_id') &&
+            cpms_dashboard_column_exists($pdo, 'cpms_equipment_items', 'is_deleted')
+        ) {
+            $fromSql .= " INNER JOIN cpms_equipment_items e ON e.id = u.equipment_id AND e.project_id = u.project_id";
+            $deletedWhere = " AND (e.is_deleted = 0 OR e.is_deleted IS NULL)";
+        }
         if ($hasWorkUnit && $hasBaseRate) {
-            $amountExpr = "COALESCE(NULLIF(work_unit, 0), 1) * COALESCE(NULLIF(base_rate_snapshot, 0)" . ($hasAmount ? ", amount" : "") . ", 0)";
-            $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM cpms_equipment_usage WHERE project_id = :pid";
+            $amountExpr = "COALESCE(NULLIF(u.work_unit, 0), 1) * COALESCE(NULLIF(u.base_rate_snapshot, 0)" . ($hasAmount ? ", u.amount" : "") . ", 0)";
+            $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM " . $fromSql . " WHERE u.project_id = :pid" . $deletedWhere;
         } else {
-            $sql = "SELECT COALESCE(SUM(amount), 0) FROM cpms_equipment_usage WHERE project_id = :pid";
+            $sql = "SELECT COALESCE(SUM(u.amount), 0) FROM " . $fromSql . " WHERE u.project_id = :pid" . $deletedWhere;
         }
         $st = $pdo->prepare($sql);
         $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
@@ -388,11 +398,21 @@ function cpms_dashboard_equipment_total_between($pdo, $projectId, $startDate, $e
     if (!$hasAmount && (!$hasWorkUnit || !$hasBaseRate)) return 0.0;
 
     try {
+        $fromSql = "cpms_equipment_usage u";
+        $deletedWhere = "";
+        if (
+            cpms_dashboard_table_exists($pdo, 'cpms_equipment_items') &&
+            cpms_dashboard_column_exists($pdo, 'cpms_equipment_usage', 'equipment_id') &&
+            cpms_dashboard_column_exists($pdo, 'cpms_equipment_items', 'is_deleted')
+        ) {
+            $fromSql .= " INNER JOIN cpms_equipment_items e ON e.id = u.equipment_id AND e.project_id = u.project_id";
+            $deletedWhere = " AND (e.is_deleted = 0 OR e.is_deleted IS NULL)";
+        }
         if ($hasWorkUnit && $hasBaseRate) {
-            $amountExpr = "COALESCE(NULLIF(work_unit, 0), 1) * COALESCE(NULLIF(base_rate_snapshot, 0)" . ($hasAmount ? ", amount" : "") . ", 0)";
-            $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM cpms_equipment_usage WHERE project_id = :pid AND use_date BETWEEN :start AND :end";
+            $amountExpr = "COALESCE(NULLIF(u.work_unit, 0), 1) * COALESCE(NULLIF(u.base_rate_snapshot, 0)" . ($hasAmount ? ", u.amount" : "") . ", 0)";
+            $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND u.use_date BETWEEN :start AND :end" . $deletedWhere;
         } else {
-            $sql = "SELECT COALESCE(SUM(amount), 0) FROM cpms_equipment_usage WHERE project_id = :pid AND use_date BETWEEN :start AND :end";
+            $sql = "SELECT COALESCE(SUM(u.amount), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND u.use_date BETWEEN :start AND :end" . $deletedWhere;
         }
         $st = $pdo->prepare($sql);
         $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);

@@ -283,6 +283,29 @@ foreach ($usageRows as $ur) {
     $displayItems[$groupKey]['slot_usage'][$useDate]['total_unit'] += $slotUnit;
     $displayItems[$groupKey]['slot_usage'][$useDate]['total_amount'] += $slotAmount;
 }
+
+$equipmentExcelToken = isset($_GET['equipment_excel_token']) ? trim((string)$_GET['equipment_excel_token']) : '';
+$equipmentExcelPreview = null;
+$equipmentExcelRows = array();
+$equipmentExcelSummary = array();
+$equipmentExcelWarnings = array();
+$equipmentExcelSaveableCount = 0;
+if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$equipmentExcelToken]) && is_array($_SESSION['equipment_excel_preview'][$equipmentExcelToken])) {
+    $candidateEquipmentPreview = $_SESSION['equipment_excel_preview'][$equipmentExcelToken];
+    if (isset($candidateEquipmentPreview['project_id']) && (int)$candidateEquipmentPreview['project_id'] === (int)$pid) {
+        $equipmentExcelPreview = $candidateEquipmentPreview;
+        $equipmentExcelRows = (isset($equipmentExcelPreview['rows']) && is_array($equipmentExcelPreview['rows'])) ? $equipmentExcelPreview['rows'] : array();
+        $equipmentExcelSummary = (isset($equipmentExcelPreview['summary']) && is_array($equipmentExcelPreview['summary'])) ? $equipmentExcelPreview['summary'] : array();
+        $equipmentExcelWarnings = (isset($equipmentExcelPreview['warnings']) && is_array($equipmentExcelPreview['warnings'])) ? $equipmentExcelPreview['warnings'] : array();
+        foreach ($equipmentExcelRows as $equipmentExcelRow) {
+            if (is_array($equipmentExcelRow) && isset($equipmentExcelRow['saveable']) && (int)$equipmentExcelRow['saveable'] === 1) {
+                $equipmentExcelSaveableCount++;
+            }
+        }
+    } else {
+        $equipmentExcelToken = '';
+    }
+}
 ?>
 
 <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
@@ -320,6 +343,8 @@ foreach ($usageRows as $ur) {
         <?php if ($canEditEquipment): ?>
             <a href="<?php echo h($baseUrl . '&equip_tab=input&ym=' . urlencode($ym)); ?>"
                class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($equipTab === 'input') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">장비입력</a>
+            <a href="<?php echo h($baseUrl . '&equip_tab=input&ym=' . urlencode($ym)); ?>#equipmentExcelUpload"
+               class="px-4 py-2 rounded-xl border font-bold text-sm bg-white text-blue-700 border-blue-200 hover:bg-blue-50">엑셀 업로드</a>
         <?php endif; ?>
     </div>
 
@@ -439,6 +464,189 @@ foreach ($usageRows as $ur) {
                     </table>
                 </div>
             </div>
+        </div>
+
+        <div id="equipmentExcelUpload" class="mt-6 border border-gray-200 rounded-2xl p-4">
+            <div class="flex flex-col gap-1 mb-4">
+                <div class="text-lg font-extrabold">월별 장비비 엑셀 업로드</div>
+                <div class="text-xs text-gray-600">장비비 양식의 2.장비비 시트를 읽고, J~AE 날짜별 금액을 장비입력에 등록합니다.</div>
+            </div>
+
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_excel_preview" enctype="multipart/form-data" class="space-y-3">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-sm font-bold text-gray-700">기준년월</label>
+                        <select name="base_ym" class="mt-1 w-full px-3 py-2 border rounded-xl" required>
+                            <?php foreach ($monthOptions as $opt): ?>
+                                <option value="<?php echo h($opt); ?>" <?php echo ($opt === $ym) ? 'selected' : ''; ?>>
+                                    <?php echo h(substr($opt, 0, 4) . '년 ' . substr($opt, 5, 2) . '월'); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-sm font-bold text-gray-700">엑셀 파일</label>
+                        <input type="file" name="equipment_excel_file" accept=".xlsx,.xls" class="mt-1 block w-full text-sm border rounded-xl px-3 py-2" required>
+                    </div>
+                </div>
+
+                <div class="rounded-xl bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600 leading-5">
+                    등록 전 미리보기에서 신규, 기존 업데이트, 중복 제외, 오류를 확인할 수 있습니다. 존재하지 않는 날짜와 음수 금액은 저장하지 않습니다.
+                </div>
+                <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold">업로드/미리보기</button>
+            </form>
+
+            <?php if ($equipmentExcelPreview !== null): ?>
+                <?php
+                $equipmentExcelYm = isset($equipmentExcelPreview['ym']) ? (string)$equipmentExcelPreview['ym'] : $ym;
+                $equipmentExcelOriginalName = isset($equipmentExcelPreview['original_name']) ? (string)$equipmentExcelPreview['original_name'] : '';
+                $equipmentExcelSheetName = isset($equipmentExcelPreview['sheet_name']) ? (string)$equipmentExcelPreview['sheet_name'] : '';
+                ?>
+                <div class="mt-5 border-t border-gray-200 pt-4">
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+                        <div>
+                            <div class="font-extrabold text-gray-900">미리보기</div>
+                            <div class="text-xs text-gray-500">
+                                <?php echo h($equipmentExcelYm); ?> 기준 · <?php echo h($equipmentExcelOriginalName); ?> · 시트: <?php echo h($equipmentExcelSheetName); ?>
+                            </div>
+                        </div>
+                        <div class="text-xs text-gray-600">
+                            총 <?php echo (int)(isset($equipmentExcelSummary['total_count']) ? $equipmentExcelSummary['total_count'] : 0); ?>건 /
+                            등록 가능 <?php echo (int)(isset($equipmentExcelSummary['valid_count']) ? $equipmentExcelSummary['valid_count'] : 0); ?>건 /
+                            오류 <?php echo (int)(isset($equipmentExcelSummary['error_count']) ? $equipmentExcelSummary['error_count'] : 0); ?>건 /
+                            중복 <?php echo (int)(isset($equipmentExcelSummary['duplicate_count']) ? $equipmentExcelSummary['duplicate_count'] : 0); ?>건 /
+                            업데이트 <?php echo (int)(isset($equipmentExcelSummary['update_count']) ? $equipmentExcelSummary['update_count'] : 0); ?>건 /
+                            총액 <?php echo equipment_money(isset($equipmentExcelSummary['total_amount']) ? $equipmentExcelSummary['total_amount'] : 0); ?>원
+                        </div>
+                    </div>
+
+                    <?php if (count($equipmentExcelWarnings) > 0): ?>
+                        <div class="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 leading-5">
+                            <?php foreach ($equipmentExcelWarnings as $warningMessage): ?>
+                                <div><?php echo h($warningMessage); ?></div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+
+                    <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_excel_save">
+                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                        <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                        <input type="hidden" name="ym" value="<?php echo h($equipmentExcelYm); ?>">
+                        <input type="hidden" name="equipment_excel_token" value="<?php echo h($equipmentExcelToken); ?>">
+
+                        <div class="overflow-auto max-h-[560px] border border-gray-200 rounded-xl">
+                            <table class="min-w-[1500px] w-full text-xs border-collapse">
+                                <thead>
+                                <tr class="bg-gray-50">
+                                    <th class="p-2 border text-center">등록</th>
+                                    <th class="p-2 border text-left">상태</th>
+                                    <th class="p-2 border text-left">날짜</th>
+                                    <th class="p-2 border text-left">장비구분</th>
+                                    <th class="p-2 border text-left">업체명</th>
+                                    <th class="p-2 border text-left">사업자등록번호</th>
+                                    <th class="p-2 border text-left">규격</th>
+                                    <th class="p-2 border text-right">기본단가</th>
+                                    <th class="p-2 border text-right">금액</th>
+                                    <th class="p-2 border text-left">비고</th>
+                                    <th class="p-2 border text-left">오류/경고</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                <?php foreach ($equipmentExcelRows as $excelIdx => $excelRow): ?>
+                                    <?php
+                                    $excelStatusType = isset($excelRow['status_type']) ? (string)$excelRow['status_type'] : 'new';
+                                    $excelSaveable = (isset($excelRow['saveable']) && (int)$excelRow['saveable'] === 1);
+                                    $excelRowClass = '';
+                                    if ($excelStatusType === 'error') $excelRowClass = 'bg-red-50';
+                                    else if ($excelStatusType === 'duplicate') $excelRowClass = 'bg-gray-100';
+                                    else if ($excelStatusType === 'update') $excelRowClass = 'bg-blue-50';
+                                    $excelMessages = array();
+                                    if (isset($excelRow['errors']) && is_array($excelRow['errors'])) {
+                                        foreach ($excelRow['errors'] as $excelMessage) $excelMessages[count($excelMessages)] = $excelMessage;
+                                    }
+                                    if (isset($excelRow['warnings']) && is_array($excelRow['warnings'])) {
+                                        foreach ($excelRow['warnings'] as $excelMessage) $excelMessages[count($excelMessages)] = $excelMessage;
+                                    }
+                                    ?>
+                                    <tr class="<?php echo h($excelRowClass); ?>">
+                                        <td class="p-2 border text-center">
+                                            <?php if ($excelSaveable): ?>
+                                                <input type="checkbox" name="rows[<?php echo (int)$excelIdx; ?>][include]" value="1" checked>
+                                            <?php else: ?>
+                                                <span class="text-gray-400">-</span>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="p-2 border min-w-[120px]"><?php echo h(isset($excelRow['status']) ? $excelRow['status'] : ''); ?></td>
+                                        <td class="p-2 border whitespace-nowrap"><?php echo h(isset($excelRow['work_date']) ? $excelRow['work_date'] : ''); ?></td>
+                                        <td class="p-2 border">
+                                            <?php if ($excelSaveable): ?>
+                                                <input type="text" name="rows[<?php echo (int)$excelIdx; ?>][equipment_category]" value="<?php echo h(isset($excelRow['equipment_category']) ? $excelRow['equipment_category'] : ''); ?>" class="w-full min-w-[100px] px-2 py-1 border rounded" lang="ko" autocomplete="off">
+                                            <?php else: ?>
+                                                <?php echo h(isset($excelRow['equipment_category']) ? $excelRow['equipment_category'] : ''); ?>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="p-2 border">
+                                            <?php if ($excelSaveable): ?>
+                                                <input type="text" name="rows[<?php echo (int)$excelIdx; ?>][vendor_name]" value="<?php echo h(isset($excelRow['vendor_name']) ? $excelRow['vendor_name'] : ''); ?>" class="w-full min-w-[140px] px-2 py-1 border rounded" lang="ko" autocomplete="off">
+                                            <?php else: ?>
+                                                <?php echo h(isset($excelRow['vendor_name']) ? $excelRow['vendor_name'] : ''); ?>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="p-2 border">
+                                            <?php if ($excelSaveable): ?>
+                                                <input type="text" name="rows[<?php echo (int)$excelIdx; ?>][business_no]" value="<?php echo h(isset($excelRow['business_no']) ? $excelRow['business_no'] : ''); ?>" class="w-full min-w-[140px] px-2 py-1 border rounded" autocomplete="off">
+                                            <?php else: ?>
+                                                <?php echo h(isset($excelRow['business_no']) ? $excelRow['business_no'] : ''); ?>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="p-2 border">
+                                            <?php if ($excelSaveable): ?>
+                                                <input type="text" name="rows[<?php echo (int)$excelIdx; ?>][equipment_spec]" value="<?php echo h(isset($excelRow['equipment_spec']) ? $excelRow['equipment_spec'] : ''); ?>" class="w-full min-w-[120px] px-2 py-1 border rounded" lang="ko" autocomplete="off">
+                                                <input type="hidden" name="rows[<?php echo (int)$excelIdx; ?>][representative]" value="<?php echo h(isset($excelRow['representative']) ? $excelRow['representative'] : ''); ?>">
+                                                <input type="hidden" name="rows[<?php echo (int)$excelIdx; ?>][phone]" value="<?php echo h(isset($excelRow['phone']) ? $excelRow['phone'] : ''); ?>">
+                                            <?php else: ?>
+                                                <?php echo h(isset($excelRow['equipment_spec']) ? $excelRow['equipment_spec'] : ''); ?>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="p-2 border text-right">
+                                            <?php if ($excelSaveable): ?>
+                                                <input type="text" name="rows[<?php echo (int)$excelIdx; ?>][base_price]" value="<?php echo h(equipment_money(isset($excelRow['base_price']) ? $excelRow['base_price'] : 0)); ?>" class="w-full min-w-[100px] px-2 py-1 border rounded text-right">
+                                            <?php else: ?>
+                                                <?php echo equipment_money(isset($excelRow['base_price']) ? $excelRow['base_price'] : 0); ?>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="p-2 border text-right">
+                                            <?php if ($excelSaveable): ?>
+                                                <input type="text" name="rows[<?php echo (int)$excelIdx; ?>][amount]" value="<?php echo h(equipment_money(isset($excelRow['amount']) ? $excelRow['amount'] : 0)); ?>" class="w-full min-w-[110px] px-2 py-1 border rounded text-right">
+                                            <?php else: ?>
+                                                <?php echo equipment_money(isset($excelRow['amount']) ? $excelRow['amount'] : 0); ?>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="p-2 border">
+                                            <?php if ($excelSaveable): ?>
+                                                <input type="text" name="rows[<?php echo (int)$excelIdx; ?>][memo]" value="<?php echo h(isset($excelRow['memo']) ? $excelRow['memo'] : ''); ?>" class="w-full min-w-[140px] px-2 py-1 border rounded" lang="ko" autocomplete="off">
+                                            <?php else: ?>
+                                                <?php echo h(isset($excelRow['memo']) ? $excelRow['memo'] : ''); ?>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td class="p-2 border min-w-[220px]"><?php echo h(implode(' / ', $excelMessages)); ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <div class="mt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                            <div class="text-xs text-gray-500">체크된 등록 가능 행만 저장됩니다. 같은 장비/날짜가 있으면 새 행을 만들지 않고 기존 사용내역을 업데이트합니다.</div>
+                            <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold" <?php echo ($equipmentExcelSaveableCount <= 0) ? 'disabled' : ''; ?>>등록하기</button>
+                        </div>
+                    </form>
+                </div>
+            <?php endif; ?>
         </div>
 
         <script>
