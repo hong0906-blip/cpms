@@ -81,7 +81,15 @@ class EstimateXlsxReader
         if ($targetRid === null) {
             foreach ($wb->sheets->sheet as $sh) {
                 $nm = (string)$sh['name'];
-                if ($nm !== '' && mb_strpos($nm, (string)$sheetName) !== false) {
+                $containsName = false;
+                if ($nm !== '') {
+                    if (function_exists('mb_strpos')) {
+                        $containsName = (mb_strpos($nm, (string)$sheetName) !== false);
+                    } else {
+                        $containsName = (strpos($nm, (string)$sheetName) !== false);
+                    }
+                }
+                if ($containsName) {
                     $attrs = $sh->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
                     $targetRid = isset($attrs['id']) ? (string)$attrs['id'] : null;
                     break;

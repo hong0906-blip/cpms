@@ -142,6 +142,9 @@ function cpms_tasks_type_options()
         'attendance' => '출퇴근승인',
         'issue' => '이슈조치',
         'safety_accident' => '안전사고조치',
+        'samsung_portal_employment_check' => '삼성내방 재직확인',
+        'samsung_portal_safety_training' => '출입자 안전교육',
+        'samsung_portal_chemical_training' => '유해화학물질 교육',
         'field' => '현장요청',
         'construction' => '공사요청',
         'project' => '공무요청',
@@ -683,6 +686,14 @@ function cpms_tasks_bootstrap_automations($pdo)
     }
     if (!cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) {
         return;
+    }
+
+    $safetyHelperPath = dirname(__DIR__) . '/safety/safety_cost_helper.php';
+    if (is_file($safetyHelperPath)) {
+        require_once $safetyHelperPath;
+    }
+    if (function_exists('cpms_samsung_portal_bootstrap_automations')) {
+        cpms_samsung_portal_bootstrap_automations($pdo, false);
     }
 
     $targetsByType = cpms_tasks_unused_leave_candidates($pdo);

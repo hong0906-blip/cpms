@@ -22,7 +22,7 @@ if (isset($_GET['pid'])) {
 }
 
 $activeSafetyTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'safety_cost';
-if ($activeSafetyTab !== 'safety_cost' && $activeSafetyTab !== 'incidents') {
+if ($activeSafetyTab !== 'safety_cost' && $activeSafetyTab !== 'incidents' && $activeSafetyTab !== 'samsung_portal') {
     $activeSafetyTab = 'safety_cost';
 }
 
@@ -36,6 +36,11 @@ $editSafetyCostId = isset($_GET['safety_cost_edit']) ? trim((string)$_GET['safet
 $editSafetyCost = null;
 $safetyIncidents = array();
 $safetyLoadError = '';
+$canViewSamsungPortal = false;
+$canEditSamsungPortal = false;
+$samsungPortalSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
+$samsungPortalRecords = array();
+$samsungPortalSummary = array('total' => 0, 'soon' => 0, 'today' => 0, 'expired' => 0, 'missing' => 0);
 
 $checklistData = array();
 if (!function_exists('get_safety_checklist_data')) {
@@ -54,8 +59,16 @@ if (function_exists('get_safety_checklist_data')) {
 }
 
 if ($pdo) {
+    $canViewSamsungPortal = cpms_samsung_portal_can_view();
+    $canEditSamsungPortal = cpms_samsung_portal_can_edit();
+    if ($canViewSamsungPortal) {
+        cpms_samsung_portal_bootstrap_automations($pdo, false);
+        $samsungPortalRecords = cpms_samsung_portal_records($samsungPortalSearch);
+        $samsungPortalSummary = cpms_samsung_portal_summary(cpms_samsung_portal_records(''));
+    }
+
     $safetyProjects = cpms_safety_cost_project_rows_for_user($pdo);
-    if ($selectedProjectId <= 0 && count($safetyProjects) > 0) {
+    if ($activeSafetyTab !== 'samsung_portal' && $selectedProjectId <= 0 && count($safetyProjects) > 0) {
         $selectedProjectId = (int)$safetyProjects[0]['id'];
     }
     foreach ($safetyProjects as $projectRow) {
@@ -64,7 +77,7 @@ if ($pdo) {
             break;
         }
     }
-    if ($selectedProjectId > 0 && !is_array($selectedProject)) {
+    if ($activeSafetyTab !== 'samsung_portal' && $selectedProjectId > 0 && !is_array($selectedProject)) {
         $projectAccessDenied = true;
         $selectedProjectId = 0;
     }
@@ -152,31 +165,178 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                 <select name="tab" class="w-full mt-1 px-4 py-3 rounded-2xl border border-gray-200">
                     <option value="safety_cost" <?php echo ($activeSafetyTab === 'safety_cost') ? 'selected' : ''; ?>>안전관리비 사용내역</option>
                     <option value="incidents" <?php echo ($activeSafetyTab === 'incidents') ? 'selected' : ''; ?>>안전사고</option>
+                    <option value="samsung_portal" <?php echo ($activeSafetyTab === 'samsung_portal') ? 'selected' : ''; ?>>삼성 상생협력포탈</option>
                 </select>
             </div>
             <button type="submit" class="px-5 py-3 rounded-2xl bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-extrabold shadow-lg">보기</button>
         </form>
-        <?php if ($selectedProjectName !== ''): ?>
+        <?php if ($activeSafetyTab === 'samsung_portal'): ?>
+            <div class="mt-4 text-sm text-gray-600">삼성 상생협력포탈 탭은 프로젝트 선택과 무관하게 전체 내방 인원 기준으로 조회합니다.</div>
+        <?php elseif ($selectedProjectName !== ''): ?>
             <div class="mt-4 text-xs text-gray-600">선택 프로젝트: <b><?php echo h($selectedProjectName); ?></b></div>
         <?php else: ?>
             <div class="mt-4 text-sm text-gray-600">프로젝트를 선택하면 안전관리비 사용내역과 안전사고를 확인할 수 있습니다.</div>
         <?php endif; ?>
     </div>
 
-    <?php if ($projectAccessDenied): ?>
+    <?php
+    $safeTabPidPart = $selectedProjectId > 0 ? '&pid=' . (int)$selectedProjectId : '';
+    $safeTabBase = base_url() . '/?r=safety_home' . $safeTabPidPart;
+    ?>
+    <div class="flex flex-wrap gap-2 mb-6">
+        <a href="<?php echo h($safeTabBase . '&tab=safety_cost'); ?>"
+           class="px-4 py-2 rounded-2xl border font-extrabold <?php echo ($activeSafetyTab === 'safety_cost') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-900 border-gray-200 hover:bg-gray-50'; ?>">안전관리비 사용내역</a>
+        <a href="<?php echo h($safeTabBase . '&tab=incidents'); ?>"
+           class="px-4 py-2 rounded-2xl border font-extrabold <?php echo ($activeSafetyTab === 'incidents') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-900 border-gray-200 hover:bg-gray-50'; ?>">안전사고</a>
+        <a href="<?php echo h(base_url() . '/?r=safety_home&tab=samsung_portal'); ?>"
+           class="px-4 py-2 rounded-2xl border font-extrabold <?php echo ($activeSafetyTab === 'samsung_portal') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-900 border-gray-200 hover:bg-gray-50'; ?>">삼성 상생협력포탈</a>
+    </div>
+
+    <?php if ($activeSafetyTab === 'samsung_portal'): ?>
+        <?php if (!$canViewSamsungPortal): ?>
+            <div class="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700 font-bold">삼성 상생협력포탈 조회 권한이 없습니다.</div>
+        <?php else: ?>
+            <div id="samsung-portal-section" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-6">
+                <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3 mb-5">
+                    <div>
+                        <h3 class="text-xl font-extrabold text-gray-900">삼성 상생협력포탈</h3>
+                        <div class="text-sm text-gray-600 mt-1">매월 재직확인, 출입자 안전교육, 유해화학물질 종사자교육 만료일을 전체 인원 기준으로 관리합니다.</div>
+                    </div>
+                    <div class="text-xs text-gray-500">편집 권한: 안전팀/마스터</div>
+                </div>
+
+                <div class="grid grid-cols-2 lg:grid-cols-5 gap-3 mb-5">
+                    <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 min-w-0">
+                        <div class="text-xs text-gray-500 font-bold">전체 인원</div>
+                        <div class="mt-1 text-2xl font-extrabold text-gray-900"><?php echo number_format((int)$samsungPortalSummary['total']); ?></div>
+                    </div>
+                    <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4 min-w-0">
+                        <div class="text-xs text-amber-700 font-bold">10일 이내 만료</div>
+                        <div class="mt-1 text-2xl font-extrabold text-amber-700"><?php echo number_format((int)$samsungPortalSummary['soon']); ?></div>
+                    </div>
+                    <div class="rounded-2xl border border-rose-200 bg-rose-50 p-4 min-w-0">
+                        <div class="text-xs text-rose-700 font-bold">오늘 만료</div>
+                        <div class="mt-1 text-2xl font-extrabold text-rose-700"><?php echo number_format((int)$samsungPortalSummary['today']); ?></div>
+                    </div>
+                    <div class="rounded-2xl border border-red-200 bg-red-50 p-4 min-w-0">
+                        <div class="text-xs text-red-700 font-bold">만료됨</div>
+                        <div class="mt-1 text-2xl font-extrabold text-red-700"><?php echo number_format((int)$samsungPortalSummary['expired']); ?></div>
+                    </div>
+                    <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4 min-w-0">
+                        <div class="text-xs text-slate-600 font-bold">날짜 없음</div>
+                        <div class="mt-1 text-2xl font-extrabold text-slate-700"><?php echo number_format((int)$samsungPortalSummary['missing']); ?></div>
+                    </div>
+                </div>
+
+                <?php if ($canEditSamsungPortal): ?>
+                    <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/samsung_portal_upload" enctype="multipart/form-data" class="mb-5 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                        <div class="flex flex-col md:flex-row md:items-end gap-3">
+                            <div class="flex-1 min-w-0">
+                                <label class="text-sm font-bold text-gray-700">엑셀 업로드 (.xlsx)</label>
+                                <input type="file" name="samsung_excel" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 bg-white text-sm" required>
+                            </div>
+                            <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">업로드</button>
+                        </div>
+                        <div class="mt-2 text-xs text-gray-500">2행 헤더의 임직원명, 아이디, 출입자 안전교육, 유해화학물질 종사자교육만 읽습니다.</div>
+                    </form>
+                <?php else: ?>
+                    <div class="mb-5 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 font-bold">임원은 조회만 가능하며, 업로드/수정은 안전팀 또는 마스터가 처리합니다.</div>
+                <?php endif; ?>
+
+                <form method="get" action="" class="mb-4 flex flex-col md:flex-row gap-2">
+                    <input type="hidden" name="r" value="safety_home">
+                    <input type="hidden" name="tab" value="samsung_portal">
+                    <input type="search" name="q" value="<?php echo h($samsungPortalSearch); ?>" class="flex-1 min-w-0 px-4 py-3 rounded-2xl border border-gray-200" placeholder="이름 또는 아이디 검색">
+                    <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">검색</button>
+                    <?php if ($samsungPortalSearch !== ''): ?>
+                        <a href="<?php echo h(base_url() . '/?r=safety_home&tab=samsung_portal'); ?>" class="px-4 py-3 rounded-2xl border border-gray-200 bg-white text-gray-700 font-extrabold text-center">초기화</a>
+                    <?php endif; ?>
+                </form>
+
+                <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
+                    <table class="min-w-[1180px] w-full text-sm">
+                        <thead class="bg-gray-50 text-gray-600">
+                            <tr>
+                                <th class="px-3 py-2 text-left font-bold">임직원명</th>
+                                <th class="px-3 py-2 text-left font-bold">아이디</th>
+                                <th class="px-3 py-2 text-left font-bold">비밀번호</th>
+                                <th class="px-3 py-2 text-left font-bold">휴대폰번호</th>
+                                <th class="px-3 py-2 text-left font-bold">통신사</th>
+                                <th class="px-3 py-2 text-left font-bold">출입자 안전교육 만료일</th>
+                                <th class="px-3 py-2 text-left font-bold">유해화학물질교육 만료일</th>
+                                <th class="px-3 py-2 text-left font-bold">상태</th>
+                                <th class="px-3 py-2 text-center font-bold">저장</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <?php if (count($samsungPortalRecords) === 0): ?>
+                                <tr><td colspan="9" class="px-3 py-5 text-center text-gray-500"><?php echo ($samsungPortalSearch !== '') ? '검색 결과가 없습니다.' : '업로드된 삼성 내방 인원 목록이 없습니다.'; ?></td></tr>
+                            <?php else: ?>
+                                <?php foreach ($samsungPortalRecords as $portalRow): ?>
+                                    <?php
+                                    $portalKey = isset($portalRow['record_key']) ? (string)$portalRow['record_key'] : '';
+                                    $portalFormId = 'samsungPortalForm' . preg_replace('/[^A-Za-z0-9_\-]/', '', $portalKey);
+                                    $safetyStatus = cpms_samsung_portal_date_status(isset($portalRow['safety_training_expire_date']) ? $portalRow['safety_training_expire_date'] : '');
+                                    $chemicalStatus = cpms_samsung_portal_date_status(isset($portalRow['chemical_training_expire_date']) ? $portalRow['chemical_training_expire_date'] : '');
+                                    ?>
+                                    <tr>
+                                            <td class="px-3 py-2 font-bold text-gray-900 whitespace-nowrap">
+                                                <form id="<?php echo h($portalFormId); ?>" method="post" action="<?php echo h(base_url()); ?>/?r=safety/samsung_portal_save"></form>
+                                                <input type="hidden" form="<?php echo h($portalFormId); ?>" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                                <input type="hidden" form="<?php echo h($portalFormId); ?>" name="record_key" value="<?php echo h($portalKey); ?>">
+                                                <input type="hidden" form="<?php echo h($portalFormId); ?>" name="q" value="<?php echo h($samsungPortalSearch); ?>">
+                                                <?php echo h(isset($portalRow['name']) ? $portalRow['name'] : ''); ?>
+                                            </td>
+                                            <td class="px-3 py-2 whitespace-nowrap"><?php echo h(isset($portalRow['login_id']) ? $portalRow['login_id'] : ''); ?></td>
+                                            <td class="px-3 py-2">
+                                                <div class="flex items-center gap-1 min-w-[180px]">
+                                                    <input type="password" form="<?php echo h($portalFormId); ?>" name="password" value="<?php echo h(isset($portalRow['password']) ? $portalRow['password'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="js-samsung-password flex-1 min-w-0 px-2 py-2 rounded-xl border border-gray-300 bg-white">
+                                                    <button type="button" class="js-samsung-password-toggle px-2 py-2 rounded-xl border border-gray-200 bg-white text-xs font-bold">보기</button>
+                                                </div>
+                                            </td>
+                                            <td class="px-3 py-2">
+                                                <input type="text" form="<?php echo h($portalFormId); ?>" name="phone" value="<?php echo h(isset($portalRow['phone']) ? $portalRow['phone'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="min-w-[150px] w-full px-2 py-2 rounded-xl border border-gray-300 bg-white" placeholder="010-0000-0000">
+                                            </td>
+                                            <td class="px-3 py-2">
+                                                <input type="text" form="<?php echo h($portalFormId); ?>" name="carrier" value="<?php echo h(isset($portalRow['carrier']) ? $portalRow['carrier'] : ''); ?>" <?php echo $canEditSamsungPortal ? '' : 'readonly'; ?> class="min-w-[100px] w-full px-2 py-2 rounded-xl border border-gray-300 bg-white" placeholder="통신사">
+                                            </td>
+                                            <td class="px-3 py-2 whitespace-nowrap">
+                                                <div class="font-bold text-gray-900"><?php echo h(isset($portalRow['safety_training_expire_date']) && $portalRow['safety_training_expire_date'] !== '' ? $portalRow['safety_training_expire_date'] : '날짜 없음'); ?></div>
+                                                <div class="text-xs text-gray-500 mt-1" style="overflow-wrap:anywhere;"><?php echo h(isset($portalRow['safety_training_text']) ? $portalRow['safety_training_text'] : ''); ?></div>
+                                            </td>
+                                            <td class="px-3 py-2 whitespace-nowrap">
+                                                <div class="font-bold text-gray-900"><?php echo h(isset($portalRow['chemical_training_expire_date']) && $portalRow['chemical_training_expire_date'] !== '' ? $portalRow['chemical_training_expire_date'] : '날짜 없음'); ?></div>
+                                                <div class="text-xs text-gray-500 mt-1" style="overflow-wrap:anywhere;"><?php echo h(isset($portalRow['chemical_training_text']) ? $portalRow['chemical_training_text'] : ''); ?></div>
+                                            </td>
+                                            <td class="px-3 py-2">
+                                                <div class="flex flex-col gap-1 min-w-[150px]">
+                                                    <span class="inline-flex px-2 py-1 rounded-full border text-xs font-bold <?php echo h(isset($safetyStatus['class']) ? $safetyStatus['class'] : ''); ?>">출입자: <?php echo h(isset($safetyStatus['label']) ? $safetyStatus['label'] : '-'); ?></span>
+                                                    <span class="inline-flex px-2 py-1 rounded-full border text-xs font-bold <?php echo h(isset($chemicalStatus['class']) ? $chemicalStatus['class'] : ''); ?>">유해: <?php echo h(isset($chemicalStatus['label']) ? $chemicalStatus['label'] : '-'); ?></span>
+                                                </div>
+                                            </td>
+                                            <td class="px-3 py-2 text-center">
+                                                <?php if ($canEditSamsungPortal): ?>
+                                                    <button type="submit" form="<?php echo h($portalFormId); ?>" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-xs font-bold">저장</button>
+                                                <?php else: ?>
+                                                    <span class="text-xs text-gray-400">조회</span>
+                                                <?php endif; ?>
+                                            </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        <?php endif; ?>
+    <?php elseif ($projectAccessDenied): ?>
         <div class="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700 font-bold">해당 프로젝트의 안전 정보를 조회할 권한이 없습니다.</div>
     <?php elseif (count($safetyProjects) === 0): ?>
         <div class="rounded-2xl border border-gray-200 bg-white p-6 text-gray-600">조회 가능한 프로젝트가 없습니다.</div>
     <?php elseif ($selectedProjectId <= 0 || !is_array($selectedProject)): ?>
         <div class="rounded-2xl border border-gray-200 bg-white p-6 text-gray-600">프로젝트를 선택하면 안전관리비 사용내역과 안전사고를 확인할 수 있습니다.</div>
     <?php else: ?>
-        <div class="flex flex-wrap gap-2 mb-6">
-            <a href="<?php echo h($baseSafetyUrl . '&tab=safety_cost'); ?>"
-               class="px-4 py-2 rounded-2xl border font-extrabold <?php echo ($activeSafetyTab === 'safety_cost') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-900 border-gray-200 hover:bg-gray-50'; ?>">안전관리비 사용내역</a>
-            <a href="<?php echo h($baseSafetyUrl . '&tab=incidents'); ?>"
-               class="px-4 py-2 rounded-2xl border font-extrabold <?php echo ($activeSafetyTab === 'incidents') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-900 border-gray-200 hover:bg-gray-50'; ?>">안전사고</a>
-        </div>
-
         <?php if ($activeSafetyTab === 'safety_cost'): ?>
             <div id="safety-cost-section" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-6">
                 <div class="mb-4">
@@ -543,6 +703,15 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
             });
             document.addEventListener('click', function(e){
                 var target = e.target;
+                if(target && target.className && target.className.indexOf('js-samsung-password-toggle') !== -1){
+                    var wrap = target.parentNode;
+                    var input = wrap ? wrap.querySelector('.js-samsung-password') : null;
+                    if(input){
+                        input.type = input.type === 'password' ? 'text' : 'password';
+                        target.textContent = input.type === 'password' ? '보기' : '숨김';
+                    }
+                    return;
+                }
                 if(target && target.getAttribute && target.getAttribute('data-safety-vendor-item') === '1'){
                     var wrap = target.closest('.vendor-search-wrap');
                     var inputEl = wrap ? wrap.querySelector('.js-safety-vendor-search') : null;

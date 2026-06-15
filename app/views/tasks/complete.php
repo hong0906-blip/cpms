@@ -3,6 +3,10 @@ use App\Core\Auth;
 use App\Core\Db;
 
 require_once __DIR__ . '/helpers.php';
+$samsungSafetyHelper = dirname(__DIR__) . '/safety/safety_cost_helper.php';
+if (is_file($samsungSafetyHelper)) {
+    require_once $samsungSafetyHelper;
+}
 
 if (!Auth::check()) {
     header('Location: ?r=login');
@@ -73,6 +77,9 @@ try {
         cpms_tasks_save_uploaded_files($pdo, $taskId, $_FILES['attachments'], (int)$currentEmployee['id']);
     }
     cpms_tasks_insert_log($pdo, $taskId, $currentEmployee, 'completed', $completedMemo, isset($task['status']) ? $task['status'] : null, 'done');
+    if (function_exists('cpms_samsung_portal_handle_task_completed')) {
+        cpms_samsung_portal_handle_task_completed($pdo, $task, $currentEmployee, $now);
+    }
     $updatedTask = cpms_tasks_find_task($pdo, $taskId);
     if ($updatedTask) {
         cpms_tasks_send_completed_notification($pdo, $updatedTask);

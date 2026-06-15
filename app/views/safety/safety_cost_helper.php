@@ -642,3 +642,682 @@ function cpms_safety_cost_summary($pdo, $projectId)
         'limit_use_rate' => $limitUseRate
     );
 }}
+
+if (!function_exists('cpms_samsung_portal_label')) {
+function cpms_samsung_portal_label($encoded)
+{
+    return urldecode((string)$encoded);
+}}
+
+if (!function_exists('cpms_samsung_portal_store_template')) {
+function cpms_samsung_portal_store_template($data)
+{
+    if (!is_array($data)) $data = array();
+    if (!isset($data['items']) || !is_array($data['items'])) $data['items'] = array();
+    if (!isset($data['samsung_portal']) || !is_array($data['samsung_portal'])) $data['samsung_portal'] = array();
+    if (!isset($data['samsung_portal']['records']) || !is_array($data['samsung_portal']['records'])) $data['samsung_portal']['records'] = array();
+    if (!isset($data['samsung_portal']['automation_runs']) || !is_array($data['samsung_portal']['automation_runs'])) $data['samsung_portal']['automation_runs'] = array();
+    if (!isset($data['samsung_portal']['task_map']) || !is_array($data['samsung_portal']['task_map'])) $data['samsung_portal']['task_map'] = array();
+    if (!isset($data['samsung_portal']['completion_logs']) || !is_array($data['samsung_portal']['completion_logs'])) $data['samsung_portal']['completion_logs'] = array();
+    if (!isset($data['samsung_portal']['employment_checks']) || !is_array($data['samsung_portal']['employment_checks'])) $data['samsung_portal']['employment_checks'] = array();
+    return $data;
+}}
+
+if (!function_exists('cpms_samsung_portal_load_store')) {
+function cpms_samsung_portal_load_store()
+{
+    return cpms_samsung_portal_store_template(cpms_read_json_file(cpms_safety_cost_store_path(), array('items' => array())));
+}}
+
+if (!function_exists('cpms_samsung_portal_save_store')) {
+function cpms_samsung_portal_save_store($data)
+{
+    $data = cpms_samsung_portal_store_template($data);
+    $data['updated_at'] = date('Y-m-d H:i:s');
+    return cpms_write_json_file(cpms_safety_cost_store_path(), $data);
+}}
+
+if (!function_exists('cpms_samsung_portal_trim')) {
+function cpms_samsung_portal_trim($value)
+{
+    return trim((string)$value);
+}}
+
+if (!function_exists('cpms_samsung_portal_normalize_header')) {
+function cpms_samsung_portal_normalize_header($value)
+{
+    $value = trim((string)$value);
+    $value = str_replace(array(' ', "\t", "\r", "\n"), '', $value);
+    return $value;
+}}
+
+if (!function_exists('cpms_samsung_portal_employee_key')) {
+function cpms_samsung_portal_employee_key($name, $loginId)
+{
+    $base = strtolower(trim((string)$name)) . '|' . strtolower(trim((string)$loginId));
+    return 'sp_' . substr(md5($base), 0, 24);
+}}
+
+if (!function_exists('cpms_samsung_portal_valid_date')) {
+function cpms_samsung_portal_valid_date($date)
+{
+    return cpms_safety_cost_valid_date($date);
+}}
+
+if (!function_exists('cpms_samsung_portal_parse_expire_date')) {
+function cpms_samsung_portal_parse_expire_date($value)
+{
+    $value = trim((string)$value);
+    if ($value === '') return '';
+    if (preg_match('/\((\d{4}-\d{2}-\d{2})\)/', $value, $m)) {
+        return cpms_samsung_portal_valid_date($m[1]);
+    }
+    if (preg_match('/(\d{4})[\.\-\/](\d{1,2})[\.\-\/](\d{1,2})/', $value, $m)) {
+        $date = sprintf('%04d-%02d-%02d', (int)$m[1], (int)$m[2], (int)$m[3]);
+        return cpms_samsung_portal_valid_date($date);
+    }
+    return '';
+}}
+
+if (!function_exists('cpms_samsung_portal_date_status')) {
+function cpms_samsung_portal_date_status($date)
+{
+    $date = cpms_samsung_portal_valid_date($date);
+    if ($date === '') {
+        return array('label' => cpms_samsung_portal_label('%EB%82%A0%EC%A7%9C%20%EC%97%86%EC%9D%8C'), 'class' => 'bg-slate-100 text-slate-600 border-slate-200', 'days' => null);
+    }
+    $today = date('Y-m-d');
+    $diff = (int)floor((strtotime($date) - strtotime($today)) / 86400);
+    if ($diff < 0) {
+        return array('label' => cpms_samsung_portal_label('%EB%A7%8C%EB%A3%8C%EB%90%A8'), 'class' => 'bg-red-50 text-red-700 border-red-200', 'days' => $diff);
+    }
+    if ($diff === 0) {
+        return array('label' => cpms_samsung_portal_label('%EC%98%A4%EB%8A%98%20%EB%A7%8C%EB%A3%8C'), 'class' => 'bg-rose-50 text-rose-700 border-rose-200', 'days' => $diff);
+    }
+    if ($diff <= 10) {
+        return array('label' => cpms_samsung_portal_label('10%EC%9D%BC%20%EC%9D%B4%EB%82%B4%20%EB%A7%8C%EB%A3%8C'), 'class' => 'bg-amber-50 text-amber-700 border-amber-200', 'days' => $diff);
+    }
+    return array('label' => cpms_samsung_portal_label('%EC%A0%95%EC%83%81'), 'class' => 'bg-emerald-50 text-emerald-700 border-emerald-200', 'days' => $diff);
+}}
+
+if (!function_exists('cpms_samsung_portal_string_contains')) {
+function cpms_samsung_portal_string_contains($haystack, $needle)
+{
+    $haystack = (string)$haystack;
+    $needle = (string)$needle;
+    if ($needle === '') return true;
+    if (function_exists('mb_stripos')) {
+        return mb_stripos($haystack, $needle, 0, 'UTF-8') !== false;
+    }
+    return stripos($haystack, $needle) !== false;
+}}
+
+if (!function_exists('cpms_samsung_portal_records')) {
+function cpms_samsung_portal_records($query)
+{
+    $data = cpms_samsung_portal_load_store();
+    $records = isset($data['samsung_portal']['records']) ? $data['samsung_portal']['records'] : array();
+    $rows = array();
+    $query = trim((string)$query);
+    foreach ($records as $key => $row) {
+        if (!is_array($row)) continue;
+        $row['record_key'] = (string)$key;
+        $name = isset($row['name']) ? (string)$row['name'] : '';
+        $loginId = isset($row['login_id']) ? (string)$row['login_id'] : '';
+        if ($query !== '' && !cpms_samsung_portal_string_contains($name, $query) && !cpms_samsung_portal_string_contains($loginId, $query)) {
+            continue;
+        }
+        $rows[count($rows)] = $row;
+    }
+    usort($rows, function($a, $b) {
+        $an = isset($a['name']) ? (string)$a['name'] : '';
+        $bn = isset($b['name']) ? (string)$b['name'] : '';
+        $cmp = strcmp($an, $bn);
+        if ($cmp !== 0) return $cmp;
+        return strcmp(isset($a['login_id']) ? (string)$a['login_id'] : '', isset($b['login_id']) ? (string)$b['login_id'] : '');
+    });
+    return $rows;
+}}
+
+if (!function_exists('cpms_samsung_portal_summary')) {
+function cpms_samsung_portal_summary($records)
+{
+    $summary = array('total' => 0, 'soon' => 0, 'today' => 0, 'expired' => 0, 'missing' => 0);
+    if (!is_array($records)) return $summary;
+    $summary['total'] = count($records);
+    for ($i = 0; $i < count($records); $i++) {
+        $dates = array(
+            isset($records[$i]['safety_training_expire_date']) ? $records[$i]['safety_training_expire_date'] : '',
+            isset($records[$i]['chemical_training_expire_date']) ? $records[$i]['chemical_training_expire_date'] : ''
+        );
+        for ($j = 0; $j < count($dates); $j++) {
+            $st = cpms_samsung_portal_date_status($dates[$j]);
+            $label = isset($st['label']) ? (string)$st['label'] : '';
+            if ($label === cpms_samsung_portal_label('%EB%A7%8C%EB%A3%8C%EB%90%A8')) $summary['expired']++;
+            else if ($label === cpms_samsung_portal_label('%EC%98%A4%EB%8A%98%20%EB%A7%8C%EB%A3%8C')) $summary['today']++;
+            else if ($label === cpms_samsung_portal_label('10%EC%9D%BC%20%EC%9D%B4%EB%82%B4%20%EB%A7%8C%EB%A3%8C')) $summary['soon']++;
+            else if ($label === cpms_samsung_portal_label('%EB%82%A0%EC%A7%9C%20%EC%97%86%EC%9D%8C')) $summary['missing']++;
+        }
+    }
+    return $summary;
+}}
+
+if (!function_exists('cpms_samsung_portal_is_safety_department')) {
+function cpms_samsung_portal_is_safety_department($department)
+{
+    $department = trim((string)$department);
+    $safety = cpms_samsung_portal_label('%EC%95%88%EC%A0%84');
+    $normalized = function_exists('cpms_safety_cost_normalize_dept') ? cpms_safety_cost_normalize_dept($department) : $department;
+    if ($normalized === $safety || $department === $safety) return true;
+    if ($department !== '' && cpms_samsung_portal_string_contains($department, $safety)) return true;
+    if (cpms_samsung_portal_string_contains(strtolower($department), 'safety')) return true;
+    return false;
+}}
+
+if (!function_exists('cpms_samsung_portal_can_view')) {
+function cpms_samsung_portal_can_view()
+{
+    if (!class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return false;
+    if (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive') return true;
+    return cpms_samsung_portal_is_safety_department(\App\Core\Auth::userDepartment());
+}}
+
+if (!function_exists('cpms_samsung_portal_can_edit')) {
+function cpms_samsung_portal_can_edit()
+{
+    if (!class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return false;
+    if (\App\Core\Auth::isMaster()) return true;
+    return cpms_samsung_portal_is_safety_department(\App\Core\Auth::userDepartment());
+}}
+
+if (!function_exists('cpms_samsung_portal_user_label')) {
+function cpms_samsung_portal_user_label()
+{
+    if (!class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return '';
+    $name = trim((string)\App\Core\Auth::userName());
+    $email = trim((string)\App\Core\Auth::userEmail());
+    if ($name !== '') return $name;
+    return $email;
+}}
+
+if (!function_exists('cpms_samsung_portal_read_xlsx_rows')) {
+function cpms_samsung_portal_read_xlsx_rows($path, &$message)
+{
+    $message = '';
+    $rows = array();
+    $appRoot = dirname(dirname(__DIR__));
+    if (!class_exists('App\\Core\\EstimateXlsxReader')) {
+        $readerPath = $appRoot . '/core/EstimateXlsxReader.php';
+        if (is_file($readerPath)) require_once $readerPath;
+    }
+    if (class_exists('App\\Core\\EstimateXlsxReader')) {
+        $sheetName = cpms_samsung_portal_label('%EC%82%AC%EC%9A%A9%EC%9E%90%EB%AA%A9%EB%A1%9D');
+        $res = \App\Core\EstimateXlsxReader::readSheetByName($path, $sheetName, 5000);
+        if (is_array($res) && empty($res['error']) && isset($res['rows']) && is_array($res['rows'])) {
+            return $res['rows'];
+        }
+        $message = (is_array($res) && isset($res['error'])) ? (string)$res['error'] : '';
+    }
+    if (!class_exists('App\\Core\\SimpleXlsxReader')) {
+        $readerPath = $appRoot . '/core/SimpleXlsxReader.php';
+        if (is_file($readerPath)) require_once $readerPath;
+    }
+    if (class_exists('App\\Core\\SimpleXlsxReader')) {
+        $res = \App\Core\SimpleXlsxReader::readFirstSheet($path, 5000);
+        if (is_array($res) && empty($res['error']) && isset($res['rows']) && is_array($res['rows'])) {
+            return $res['rows'];
+        }
+        $message = (is_array($res) && isset($res['error'])) ? (string)$res['error'] : $message;
+    }
+    if ($message === '') $message = cpms_samsung_portal_label('%EC%97%91%EC%85%80%20%ED%8C%8C%EC%9D%BC%EC%9D%84%20%EC%9D%BD%EC%9D%84%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+    return $rows;
+}}
+
+if (!function_exists('cpms_samsung_portal_import_xlsx')) {
+function cpms_samsung_portal_import_xlsx($filePath, $actor)
+{
+    $result = array('ok' => false, 'message' => '', 'inserted' => 0, 'updated' => 0, 'skipped' => 0, 'missing_headers' => array());
+    $rows = cpms_samsung_portal_read_xlsx_rows($filePath, $readMessage);
+    if (count($rows) < 2) {
+        $result['message'] = $readMessage !== '' ? $readMessage : cpms_samsung_portal_label('%EC%97%91%EC%85%80%202%ED%96%89%20%ED%97%A4%EB%8D%94%EB%A5%BC%20%EC%B0%BE%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+        return $result;
+    }
+    $required = array(
+        'name' => cpms_samsung_portal_label('%EC%9E%84%EC%A7%81%EC%9B%90%EB%AA%85'),
+        'login_id' => cpms_samsung_portal_label('%EC%95%84%EC%9D%B4%EB%94%94'),
+        'safety_training' => cpms_samsung_portal_label('%EC%B6%9C%EC%9E%85%EC%9E%90%20%EC%95%88%EC%A0%84%EA%B5%90%EC%9C%A1'),
+        'chemical_training' => cpms_samsung_portal_label('%EC%9C%A0%ED%95%B4%ED%99%94%ED%95%99%EB%AC%BC%EC%A7%88%20%EC%A2%85%EC%82%AC%EC%9E%90%EA%B5%90%EC%9C%A1')
+    );
+    $header = isset($rows[1]) && is_array($rows[1]) ? $rows[1] : array();
+    $indexes = array();
+    foreach ($required as $key => $label) {
+        $target = cpms_samsung_portal_normalize_header($label);
+        for ($i = 0; $i < count($header); $i++) {
+            if (cpms_samsung_portal_normalize_header(isset($header[$i]) ? $header[$i] : '') === $target) {
+                $indexes[$key] = $i;
+                break;
+            }
+        }
+        if (!isset($indexes[$key])) $result['missing_headers'][count($result['missing_headers'])] = $label;
+    }
+    if (count($result['missing_headers']) > 0) {
+        $result['message'] = cpms_samsung_portal_label('%ED%95%84%EC%88%98%20%ED%97%A4%EB%8D%94%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4: ') . implode(', ', $result['missing_headers']);
+        return $result;
+    }
+
+    $data = cpms_samsung_portal_load_store();
+    $now = date('Y-m-d H:i:s');
+    $records = isset($data['samsung_portal']['records']) ? $data['samsung_portal']['records'] : array();
+    for ($r = 2; $r < count($rows); $r++) {
+        $row = is_array($rows[$r]) ? $rows[$r] : array();
+        $name = cpms_samsung_portal_trim(isset($row[$indexes['name']]) ? $row[$indexes['name']] : '');
+        $loginId = cpms_samsung_portal_trim(isset($row[$indexes['login_id']]) ? $row[$indexes['login_id']] : '');
+        if ($name === '' || $loginId === '') {
+            $result['skipped']++;
+            continue;
+        }
+        $safetyRaw = cpms_samsung_portal_trim(isset($row[$indexes['safety_training']]) ? $row[$indexes['safety_training']] : '');
+        $chemicalRaw = cpms_samsung_portal_trim(isset($row[$indexes['chemical_training']]) ? $row[$indexes['chemical_training']] : '');
+        $key = cpms_samsung_portal_employee_key($name, $loginId);
+        $old = isset($records[$key]) && is_array($records[$key]) ? $records[$key] : array();
+        $record = $old;
+        $record['name'] = $name;
+        $record['login_id'] = $loginId;
+        $record['password'] = isset($old['password']) ? (string)$old['password'] : '';
+        $record['phone'] = isset($old['phone']) ? (string)$old['phone'] : '';
+        $record['carrier'] = isset($old['carrier']) ? (string)$old['carrier'] : '';
+        $record['safety_training_text'] = $safetyRaw;
+        $record['safety_training_expire_date'] = cpms_samsung_portal_parse_expire_date($safetyRaw);
+        $record['chemical_training_text'] = $chemicalRaw;
+        $record['chemical_training_expire_date'] = cpms_samsung_portal_parse_expire_date($chemicalRaw);
+        if (!isset($record['created_at']) || trim((string)$record['created_at']) === '') $record['created_at'] = $now;
+        $record['last_excel_upload_at'] = $now;
+        $record['last_modified_by'] = (string)$actor;
+        $record['last_modified_at'] = $now;
+        $records[$key] = $record;
+        if (count($old) === 0) $result['inserted']++;
+        else $result['updated']++;
+    }
+    $data['samsung_portal']['records'] = $records;
+    $data['samsung_portal']['last_upload_at'] = $now;
+    $data['samsung_portal']['last_upload_by'] = (string)$actor;
+    if (!cpms_samsung_portal_save_store($data)) {
+        $result['message'] = cpms_samsung_portal_label('%EC%82%BC%EC%84%B1%20%ED%8F%AC%ED%83%88%20%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%A0%80%EC%9E%A5%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+        return $result;
+    }
+    $result['ok'] = true;
+    $result['message'] = cpms_samsung_portal_label('%EC%97%85%EB%A1%9C%EB%93%9C%20%EC%99%84%EB%A3%8C');
+    return $result;
+}}
+
+if (!function_exists('cpms_samsung_portal_redirect')) {
+function cpms_samsung_portal_redirect($extra)
+{
+    $url = '?r=safety_home&tab=samsung_portal';
+    $q = trim((string)$extra);
+    if ($q !== '') $url .= '&' . ltrim($q, '&');
+    header('Location: ' . $url);
+    exit;
+}}
+
+if (!function_exists('cpms_samsung_portal_handle_upload_request')) {
+function cpms_samsung_portal_handle_upload_request($pdo)
+{
+    if (!class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) {
+        header('Location: ?r=login');
+        exit;
+    }
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
+        flash_set('error', cpms_samsung_portal_label('%EB%B3%B4%EC%95%88%20%ED%86%A0%ED%81%B0%EC%9D%B4%20%EC%98%AC%EB%B0%94%EB%A5%B4%EC%A7%80%20%EC%95%8A%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+        cpms_samsung_portal_redirect('');
+    }
+    if (!cpms_samsung_portal_can_edit()) {
+        flash_set('error', cpms_samsung_portal_label('%EC%82%BC%EC%84%B1%20%EC%83%81%EC%83%9D%ED%98%91%EB%A0%A5%ED%8F%AC%ED%83%88%20%EC%88%98%EC%A0%95%20%EA%B6%8C%ED%95%9C%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+        cpms_samsung_portal_redirect('');
+    }
+    if (!isset($_FILES['samsung_excel']) || !is_array($_FILES['samsung_excel'])) {
+        flash_set('error', cpms_samsung_portal_label('%EC%97%85%EB%A1%9C%EB%93%9C%ED%95%A0%20%EC%97%91%EC%85%80%20%ED%8C%8C%EC%9D%BC%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        cpms_samsung_portal_redirect('');
+    }
+    $file = $_FILES['samsung_excel'];
+    $error = isset($file['error']) ? (int)$file['error'] : UPLOAD_ERR_NO_FILE;
+    if ($error !== UPLOAD_ERR_OK) {
+        flash_set('error', cpms_samsung_portal_label('%EC%97%91%EC%85%80%20%EC%97%85%EB%A1%9C%EB%93%9C%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+        cpms_samsung_portal_redirect('');
+    }
+    $name = isset($file['name']) ? (string)$file['name'] : '';
+    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+    if ($ext !== 'xlsx') {
+        flash_set('error', cpms_samsung_portal_label('xlsx%20%ED%8C%8C%EC%9D%BC%EB%A7%8C%20%EC%97%85%EB%A1%9C%EB%93%9C%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+        cpms_samsung_portal_redirect('');
+    }
+    $tmp = isset($file['tmp_name']) ? (string)$file['tmp_name'] : '';
+    if ($tmp === '' || !is_uploaded_file($tmp)) {
+        flash_set('error', cpms_samsung_portal_label('%EC%A0%95%EC%83%81%EC%A0%81%EC%9D%B8%20%EC%97%85%EB%A1%9C%EB%93%9C%20%ED%8C%8C%EC%9D%BC%EC%9D%B4%20%EC%95%84%EB%8B%99%EB%8B%88%EB%8B%A4.'));
+        cpms_samsung_portal_redirect('');
+    }
+    $result = cpms_samsung_portal_import_xlsx($tmp, cpms_samsung_portal_user_label());
+    if (empty($result['ok'])) {
+        flash_set('error', isset($result['message']) ? $result['message'] : cpms_samsung_portal_label('%EC%97%85%EB%A1%9C%EB%93%9C%20%EC%8B%A4%ED%8C%A8'));
+        cpms_samsung_portal_redirect('');
+    }
+    if ($pdo && function_exists('cpms_samsung_portal_bootstrap_automations')) {
+        cpms_samsung_portal_bootstrap_automations($pdo, true);
+    }
+    $message = cpms_samsung_portal_label('%EC%97%85%EB%A1%9C%EB%93%9C%20%EC%99%84%EB%A3%8C: ')
+        . cpms_samsung_portal_label('%EC%8B%A0%EA%B7%9C') . ' ' . (int)$result['inserted']
+        . ', ' . cpms_samsung_portal_label('%EA%B0%B1%EC%8B%A0') . ' ' . (int)$result['updated']
+        . ', ' . cpms_samsung_portal_label('%EC%A0%9C%EC%99%B8') . ' ' . (int)$result['skipped'];
+    flash_set('success', $message);
+    cpms_samsung_portal_redirect('');
+}}
+
+if (!function_exists('cpms_samsung_portal_handle_save_request')) {
+function cpms_samsung_portal_handle_save_request($pdo)
+{
+    if (!class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) {
+        header('Location: ?r=login');
+        exit;
+    }
+    $search = isset($_POST['q']) ? trim((string)$_POST['q']) : '';
+    $extra = $search !== '' ? 'q=' . rawurlencode($search) : '';
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
+        flash_set('error', cpms_samsung_portal_label('%EB%B3%B4%EC%95%88%20%ED%86%A0%ED%81%B0%EC%9D%B4%20%EC%98%AC%EB%B0%94%EB%A5%B4%EC%A7%80%20%EC%95%8A%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+        cpms_samsung_portal_redirect($extra);
+    }
+    if (!cpms_samsung_portal_can_edit()) {
+        flash_set('error', cpms_samsung_portal_label('%EC%82%BC%EC%84%B1%20%EC%83%81%EC%83%9D%ED%98%91%EB%A0%A5%ED%8F%AC%ED%83%88%20%EC%88%98%EC%A0%95%20%EA%B6%8C%ED%95%9C%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+        cpms_samsung_portal_redirect($extra);
+    }
+    $recordKey = isset($_POST['record_key']) ? trim((string)$_POST['record_key']) : '';
+    $data = cpms_samsung_portal_load_store();
+    if ($recordKey === '' || !isset($data['samsung_portal']['records'][$recordKey]) || !is_array($data['samsung_portal']['records'][$recordKey])) {
+        flash_set('error', cpms_samsung_portal_label('%EC%A0%80%EC%9E%A5%ED%95%A0%20%EB%8C%80%EC%83%81%EC%9D%84%20%EC%B0%BE%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+        cpms_samsung_portal_redirect($extra);
+    }
+    $row = $data['samsung_portal']['records'][$recordKey];
+    $row['password'] = isset($_POST['password']) ? trim((string)$_POST['password']) : '';
+    $row['phone'] = isset($_POST['phone']) ? trim((string)$_POST['phone']) : '';
+    $row['carrier'] = isset($_POST['carrier']) ? trim((string)$_POST['carrier']) : '';
+    $row['last_modified_by'] = cpms_samsung_portal_user_label();
+    $row['last_modified_at'] = date('Y-m-d H:i:s');
+    $data['samsung_portal']['records'][$recordKey] = $row;
+    if (!cpms_samsung_portal_save_store($data)) {
+        flash_set('error', cpms_samsung_portal_label('%EC%A0%80%EC%9E%A5%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+        cpms_samsung_portal_redirect($extra);
+    }
+    flash_set('success', cpms_samsung_portal_label('%EC%A0%80%EC%9E%A5%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+    cpms_samsung_portal_redirect($extra);
+}}
+
+if (!function_exists('cpms_samsung_portal_require_tasks')) {
+function cpms_samsung_portal_require_tasks()
+{
+    if (!function_exists('cpms_tasks_current_employee')) {
+        $path = dirname(__DIR__) . '/tasks/helpers.php';
+        if (is_file($path)) require_once $path;
+    }
+    return function_exists('cpms_tasks_current_employee') && function_exists('cpms_tasks_column_exists');
+}}
+
+if (!function_exists('cpms_samsung_portal_fetch_safety_employees')) {
+function cpms_samsung_portal_fetch_safety_employees($pdo)
+{
+    $rows = array();
+    if (!$pdo || !function_exists('cpms_tasks_fetch_active_employees')) return $rows;
+    $all = cpms_tasks_fetch_active_employees($pdo);
+    for ($i = 0; $i < count($all); $i++) {
+        if (cpms_samsung_portal_is_safety_department(isset($all[$i]['department']) ? $all[$i]['department'] : '')) {
+            $rows[count($rows)] = $all[$i];
+        }
+    }
+    return $rows;
+}}
+
+if (!function_exists('cpms_samsung_portal_task_key_part')) {
+function cpms_samsung_portal_task_key_part($value)
+{
+    $value = preg_replace('/[^A-Za-z0-9_\-]/', '_', (string)$value);
+    $value = trim($value, '_');
+    return $value !== '' ? $value : 'unknown';
+}}
+
+if (!function_exists('cpms_samsung_portal_group_completed')) {
+function cpms_samsung_portal_group_completed($pdo, $groupKey)
+{
+    if (!$pdo || trim((string)$groupKey) === '' || !function_exists('cpms_tasks_table_exists') || !cpms_tasks_table_exists($pdo, 'cpms_tasks')) return false;
+    if (!cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) return false;
+    try {
+        $st = $pdo->prepare("SELECT COUNT(*) FROM cpms_tasks WHERE group_key=:group_key AND status='done'");
+        $st->execute(array(':group_key' => (string)$groupKey));
+        return ((int)$st->fetchColumn() > 0);
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_samsung_portal_absolute_task_url')) {
+function cpms_samsung_portal_absolute_task_url($taskId)
+{
+    $path = base_url() . '/?r=tasks/detail&id=' . (int)$taskId;
+    $host = isset($_SERVER['HTTP_HOST']) ? trim((string)$_SERVER['HTTP_HOST']) : '';
+    if ($host === '') return $path;
+    $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
+    return ($https ? 'https://' : 'http://') . $host . $path;
+}}
+
+if (!function_exists('cpms_samsung_portal_sync_task_map')) {
+function cpms_samsung_portal_sync_task_map($groupKey, $map)
+{
+    $data = cpms_samsung_portal_load_store();
+    $data['samsung_portal']['task_map'][(string)$groupKey] = $map;
+    cpms_samsung_portal_save_store($data);
+}}
+
+if (!function_exists('cpms_samsung_portal_sync_safety_task')) {
+function cpms_samsung_portal_sync_safety_task($pdo, $assignee, $groupKey, $title, $content, $taskType, $dueDate, $map)
+{
+    if (!$pdo || !is_array($assignee) || trim((string)$groupKey) === '') return false;
+    if (!cpms_samsung_portal_require_tasks()) return false;
+    if (!cpms_tasks_table_exists($pdo, 'cpms_tasks')) return false;
+    $results = array();
+    cpms_tasks_ensure_schema($pdo, $results);
+    if (!cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) return false;
+    if (cpms_samsung_portal_group_completed($pdo, $groupKey)) return false;
+    $assigneeId = isset($assignee['id']) ? (int)$assignee['id'] : 0;
+    if ($assigneeId <= 0) return false;
+    $existing = null;
+    try {
+        $st = $pdo->prepare("SELECT * FROM cpms_tasks WHERE assignee_employee_id=:assignee_employee_id AND group_key=:group_key ORDER BY id DESC LIMIT 1");
+        $st->execute(array(':assignee_employee_id' => $assigneeId, ':group_key' => (string)$groupKey));
+        $existing = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        $existing = null;
+    }
+    $now = date('Y-m-d H:i:s');
+    if ($existing) {
+        cpms_samsung_portal_sync_task_map($groupKey, $map);
+        if (isset($existing['status']) && in_array((string)$existing['status'], array('done', 'cancelled'), true)) return false;
+        try {
+            $st = $pdo->prepare("UPDATE cpms_tasks SET title=:title, content=:content, due_date=:due_date, due_time='18:00:00', priority='high', is_urgent=1, task_type=:task_type, updated_at=:updated_at WHERE id=:id");
+            $st->execute(array(
+                ':title' => $title,
+                ':content' => $content,
+                ':due_date' => $dueDate,
+                ':task_type' => $taskType,
+                ':updated_at' => $now,
+                ':id' => (int)$existing['id']
+            ));
+        } catch (Exception $e) {
+            return false;
+        }
+        return false;
+    }
+    try {
+        $st = $pdo->prepare("INSERT INTO cpms_tasks (title, content, requester_employee_id, requester_name, requester_email, assignee_employee_id, assignee_name, assignee_email, department, project_id, project_name, task_type, priority, is_urgent, due_date, due_time, status, created_by, created_at, updated_at, group_key) VALUES (:title, :content, NULL, :requester_name, NULL, :assignee_employee_id, :assignee_name, :assignee_email, :department, NULL, NULL, :task_type, 'high', 1, :due_date, '18:00:00', 'pending', NULL, :created_at, :updated_at, :group_key)");
+        $st->execute(array(
+            ':title' => $title,
+            ':content' => $content,
+            ':requester_name' => cpms_samsung_portal_label('CPMS%20%EC%9E%90%EB%8F%99%EC%95%88%EB%82%B4'),
+            ':assignee_employee_id' => $assigneeId,
+            ':assignee_name' => isset($assignee['name']) ? (string)$assignee['name'] : '',
+            ':assignee_email' => isset($assignee['email']) ? (string)$assignee['email'] : '',
+            ':department' => cpms_samsung_portal_label('%EC%95%88%EC%A0%84'),
+            ':task_type' => $taskType,
+            ':due_date' => $dueDate,
+            ':created_at' => $now,
+            ':updated_at' => $now,
+            ':group_key' => (string)$groupKey
+        ));
+        $taskId = (int)$pdo->lastInsertId();
+        if ($taskId > 0) {
+            $linkedContent = cpms_samsung_portal_label('%EB%A7%81%ED%81%AC: ') . cpms_samsung_portal_absolute_task_url($taskId) . "\n" . $content;
+            $up = $pdo->prepare("UPDATE cpms_tasks SET content=:content WHERE id=:id");
+            $up->execute(array(':content' => $linkedContent, ':id' => $taskId));
+            cpms_tasks_insert_log($pdo, $taskId, array('id' => 0, 'name' => cpms_samsung_portal_label('CPMS%20%EC%9E%90%EB%8F%99%EC%95%88%EB%82%B4')), 'created', $linkedContent, null, 'pending');
+            $task = cpms_tasks_find_task($pdo, $taskId);
+            if ($task && function_exists('cpms_tasks_send_created_notification')) {
+                cpms_tasks_send_created_notification($pdo, $task);
+            }
+            cpms_samsung_portal_sync_task_map($groupKey, $map);
+            return true;
+        }
+    } catch (Exception $e) {
+        error_log('[samsung_portal_task] ' . $e->getMessage());
+        return false;
+    }
+    return false;
+}}
+
+if (!function_exists('cpms_samsung_portal_in_training_window')) {
+function cpms_samsung_portal_in_training_window($expireDate)
+{
+    $expireDate = cpms_samsung_portal_valid_date($expireDate);
+    if ($expireDate === '') return false;
+    $today = date('Y-m-d');
+    $diff = (int)floor((strtotime($expireDate) - strtotime($today)) / 86400);
+    return ($diff >= 0 && $diff <= 10);
+}}
+
+if (!function_exists('cpms_samsung_portal_bootstrap_automations')) {
+function cpms_samsung_portal_bootstrap_automations($pdo, $force)
+{
+    if (!$pdo || !cpms_samsung_portal_require_tasks()) return;
+    $data = cpms_samsung_portal_load_store();
+    $today = date('Y-m-d');
+    if (!$force && isset($data['samsung_portal']['automation_runs'][$today]) && !empty($data['samsung_portal']['automation_runs'][$today]['checked_at'])) {
+        return;
+    }
+    $created = 0;
+    $errors = array();
+    $safetyEmployees = cpms_samsung_portal_fetch_safety_employees($pdo);
+    if (count($safetyEmployees) === 0) {
+        $data['samsung_portal']['automation_runs'][$today] = array('checked_at' => date('Y-m-d H:i:s'), 'created' => 0, 'message' => 'no safety employees');
+        cpms_samsung_portal_save_store($data);
+        return;
+    }
+    $monthKey = date('Y_m');
+    if (date('d') === '01') {
+        $groupKey = 'samsung_employment_' . $monthKey;
+        $title = cpms_samsung_portal_label('%5B%ED%99%94%EC%84%B1%2F%EA%B8%B0%ED%9D%A5%20%EC%82%BC%EC%84%B1%EB%82%B4%EB%B0%A9%20%EC%9E%AC%EC%A7%81%ED%99%95%EC%9D%B8%20%EC%9A%94%EC%B2%AD%5D');
+        $content = cpms_samsung_portal_label('%5B%EC%82%BC%EC%84%B1%EC%83%81%EC%83%9D%ED%98%91%EB%A0%A5%ED%8F%AC%ED%83%88%EC%97%90%EC%84%9C%20%EC%9E%AC%EC%A7%81%ED%99%95%EC%9D%B8%20%EB%B6%80%ED%83%81%EB%93%9C%EB%A6%BD%EB%8B%88%EB%8B%A4%5D');
+        $dueDate = date('Y-m-10');
+        for ($i = 0; $i < count($safetyEmployees); $i++) {
+            if (cpms_samsung_portal_sync_safety_task($pdo, $safetyEmployees[$i], $groupKey, $title, $content, 'samsung_portal_employment_check', $dueDate, array('kind' => 'employment', 'month' => $monthKey))) $created++;
+        }
+    }
+    $records = isset($data['samsung_portal']['records']) && is_array($data['samsung_portal']['records']) ? $data['samsung_portal']['records'] : array();
+    foreach ($records as $recordKey => $row) {
+        if (!is_array($row)) continue;
+        $empName = isset($row['name']) ? (string)$row['name'] : '';
+        $loginId = isset($row['login_id']) ? (string)$row['login_id'] : '';
+        if ($empName === '' || $loginId === '') continue;
+        $safeLogin = cpms_samsung_portal_task_key_part($loginId);
+        $safetyExpire = isset($row['safety_training_expire_date']) ? (string)$row['safety_training_expire_date'] : '';
+        if (cpms_samsung_portal_in_training_window($safetyExpire)) {
+            $groupKey = 'samsung_safety_training_' . $safeLogin . '_' . str_replace('-', '_', $safetyExpire);
+            $title = cpms_samsung_portal_label('%5B%EC%B6%9C%EC%9E%85%EC%9E%90%20%EC%95%88%EC%A0%84%EA%B5%90%EC%9C%A1%20%EC%A7%84%ED%96%89%5D');
+            $content = cpms_samsung_portal_label('%EC%9E%84%EC%A7%81%EC%9B%90%EB%AA%85: ') . $empName . "\n"
+                . cpms_samsung_portal_label('%EC%95%84%EC%9D%B4%EB%94%94: ') . $loginId . "\n"
+                . cpms_samsung_portal_label('%EC%B6%9C%EC%9E%85%EC%9E%90%20%EC%95%88%EC%A0%84%EA%B5%90%EC%9C%A1%20%EB%A7%8C%EB%A3%8C%EC%9D%BC: ') . $safetyExpire . "\n"
+                . cpms_samsung_portal_label('%EC%82%BC%EC%84%B1%EC%83%81%EC%83%9D%ED%98%91%EB%A0%A5%ED%8F%AC%ED%83%88%EC%97%90%EC%84%9C%20%EC%B6%9C%EC%9E%85%EC%9E%90%20%EC%95%88%EC%A0%84%EA%B5%90%EC%9C%A1%20%EC%A7%84%ED%96%89%20%EB%B6%80%ED%83%81%EB%93%9C%EB%A6%BD%EB%8B%88%EB%8B%A4.');
+            for ($i = 0; $i < count($safetyEmployees); $i++) {
+                if (cpms_samsung_portal_sync_safety_task($pdo, $safetyEmployees[$i], $groupKey, $title, $content, 'samsung_portal_safety_training', $safetyExpire, array('kind' => 'safety_training', 'record_key' => (string)$recordKey, 'expire_date' => $safetyExpire))) $created++;
+            }
+        }
+        $chemicalExpire = isset($row['chemical_training_expire_date']) ? (string)$row['chemical_training_expire_date'] : '';
+        if (cpms_samsung_portal_in_training_window($chemicalExpire)) {
+            $groupKey = 'samsung_chemical_training_' . $safeLogin . '_' . str_replace('-', '_', $chemicalExpire);
+            $title = cpms_samsung_portal_label('%5B%EC%9C%A0%ED%95%B4%ED%99%94%ED%95%99%EB%AC%BC%EC%A7%88%20%EA%B5%90%EC%9C%A1%EC%A7%84%ED%96%89%5D');
+            $content = cpms_samsung_portal_label('%EC%9E%84%EC%A7%81%EC%9B%90%EB%AA%85: ') . $empName . "\n"
+                . cpms_samsung_portal_label('%EC%95%84%EC%9D%B4%EB%94%94: ') . $loginId . "\n"
+                . cpms_samsung_portal_label('%EC%9C%A0%ED%95%B4%ED%99%94%ED%95%99%EB%AC%BC%EC%A7%88%EA%B5%90%EC%9C%A1%20%EB%A7%8C%EB%A3%8C%EC%9D%BC: ') . $chemicalExpire . "\n"
+                . cpms_samsung_portal_label('%EC%82%BC%EC%84%B1%EC%83%81%EC%83%9D%ED%98%91%EB%A0%A5%ED%8F%AC%ED%83%88%EC%97%90%EC%84%9C%20%EC%9C%A0%ED%95%B4%ED%99%94%ED%95%99%EB%AC%BC%EC%A7%88%20%EA%B5%90%EC%9C%A1%20%EC%A7%84%ED%96%89%20%EB%B6%80%ED%83%81%EB%93%9C%EB%A6%BD%EB%8B%88%EB%8B%A4.');
+            for ($i = 0; $i < count($safetyEmployees); $i++) {
+                if (cpms_samsung_portal_sync_safety_task($pdo, $safetyEmployees[$i], $groupKey, $title, $content, 'samsung_portal_chemical_training', $chemicalExpire, array('kind' => 'chemical_training', 'record_key' => (string)$recordKey, 'expire_date' => $chemicalExpire))) $created++;
+            }
+        }
+    }
+    $data = cpms_samsung_portal_load_store();
+    $data['samsung_portal']['automation_runs'][$today] = array('checked_at' => date('Y-m-d H:i:s'), 'created' => $created, 'errors' => $errors);
+    cpms_samsung_portal_save_store($data);
+}}
+
+if (!function_exists('cpms_samsung_portal_add_year')) {
+function cpms_samsung_portal_add_year($date)
+{
+    $date = cpms_samsung_portal_valid_date($date);
+    if ($date === '') return '';
+    $ts = strtotime($date . ' +1 year');
+    if ($ts === false) return '';
+    return date('Y-m-d', $ts);
+}}
+
+if (!function_exists('cpms_samsung_portal_handle_task_completed')) {
+function cpms_samsung_portal_handle_task_completed($pdo, $task, $actor, $completedAt)
+{
+    if (!$pdo || !is_array($task)) return false;
+    $groupKey = isset($task['group_key']) ? trim((string)$task['group_key']) : '';
+    if ($groupKey === '' || strpos($groupKey, 'samsung_') !== 0) return false;
+    $data = cpms_samsung_portal_load_store();
+    $map = isset($data['samsung_portal']['task_map'][$groupKey]) && is_array($data['samsung_portal']['task_map'][$groupKey]) ? $data['samsung_portal']['task_map'][$groupKey] : array();
+    $kind = isset($map['kind']) ? (string)$map['kind'] : '';
+    $completedDate = substr((string)$completedAt, 0, 10);
+    $completedDate = cpms_samsung_portal_valid_date($completedDate) !== '' ? $completedDate : date('Y-m-d');
+    $actorName = is_array($actor) && isset($actor['name']) ? (string)$actor['name'] : '';
+    $actorId = is_array($actor) && isset($actor['id']) ? (int)$actor['id'] : 0;
+    if ($kind === 'employment') {
+        $month = isset($map['month']) ? (string)$map['month'] : date('Y_m');
+        $data['samsung_portal']['employment_checks'][$month] = array(
+            'completed_at' => (string)$completedAt,
+            'completed_by' => $actorName,
+            'completed_by_id' => $actorId,
+            'group_key' => $groupKey
+        );
+    } else if ($kind === 'safety_training' || $kind === 'chemical_training') {
+        $recordKey = isset($map['record_key']) ? (string)$map['record_key'] : '';
+        if ($recordKey !== '' && isset($data['samsung_portal']['records'][$recordKey]) && is_array($data['samsung_portal']['records'][$recordKey])) {
+            $newExpire = cpms_samsung_portal_add_year($completedDate);
+            if ($kind === 'safety_training') {
+                $data['samsung_portal']['records'][$recordKey]['last_safety_training_completed_date'] = $completedDate;
+                $data['samsung_portal']['records'][$recordKey]['safety_training_expire_date'] = $newExpire;
+                $data['samsung_portal']['records'][$recordKey]['safety_training_text'] = cpms_samsung_portal_label('%EC%99%84%EB%A3%8C') . '(' . $newExpire . ')';
+            } else {
+                $data['samsung_portal']['records'][$recordKey]['last_chemical_training_completed_date'] = $completedDate;
+                $data['samsung_portal']['records'][$recordKey]['chemical_training_expire_date'] = $newExpire;
+                $data['samsung_portal']['records'][$recordKey]['chemical_training_text'] = cpms_samsung_portal_label('%EC%99%84%EB%A3%8C') . '(' . $newExpire . ')';
+            }
+            $data['samsung_portal']['records'][$recordKey]['last_modified_by'] = $actorName;
+            $data['samsung_portal']['records'][$recordKey]['last_modified_at'] = (string)$completedAt;
+        }
+    }
+    $data['samsung_portal']['completion_logs'][count($data['samsung_portal']['completion_logs'])] = array(
+        'group_key' => $groupKey,
+        'task_id' => isset($task['id']) ? (int)$task['id'] : 0,
+        'kind' => $kind,
+        'completed_at' => (string)$completedAt,
+        'completed_by' => $actorName,
+        'completed_by_id' => $actorId
+    );
+    return cpms_samsung_portal_save_store($data);
+}}
