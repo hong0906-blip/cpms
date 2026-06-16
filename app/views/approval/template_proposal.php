@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/../../services/ApprovalDriveService.php';
+
 function render_approval_proposal_document($data, $lines, $mode, $files, $approvalOptions)
 {
     $types = array(
@@ -128,7 +130,7 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
         } else {
             $f = isset($files[$k]) ? $files[$k] : null;
             if ($f) {
-                echo ' : ' . h($f['original_name']) . ' <a href="../' . h($f['file_path']) . '" target="_blank">' . h(approval_ko('%EB%B3%B4%EA%B8%B0')) . '</a> <a href="../' . h($f['file_path']) . '" download>' . h(approval_ko('%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C')) . '</a>';
+                echo ' : ' . h($f['original_name']) . ' ' . cpms_approval_drive_file_links_html($f);
             } else {
                 echo ' : -';
             }

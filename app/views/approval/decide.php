@@ -5,6 +5,7 @@ require_once __DIR__ . '/_common.php';
 require_once __DIR__ . '/template_helpers.php';
 require_once __DIR__ . '/notification_helpers.php';
 require_once __DIR__ . '/leave_balance_helpers.php';
+require_once __DIR__ . '/../../services/ApprovalPdfService.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
@@ -158,6 +159,20 @@ try {
     }
 
     $pdo->commit();
+    if ($action === 'approve' && isset($docStatus) && $docStatus === 'APPROVED') {
+        try {
+            cpms_approval_pdf_upload_completed_pdf($pdo, $id, $u);
+        } catch (Exception $pdfException) {
+            cpms_approval_pdf_log_failure(array(
+                'user' => $u,
+                'section' => 'approval_completed_pdf_exception',
+                'approval_document_id' => $id,
+                'document_type' => isset($doc['doc_type']) ? approval_doc_label($doc['doc_type']) : '',
+                'project_id' => isset($doc['project_id']) ? (string)$doc['project_id'] : '',
+                'message' => 'Completed PDF post-approval job failed: ' . $pdfException->getMessage()
+            ));
+        }
+    }
 } catch (Exception $e) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();

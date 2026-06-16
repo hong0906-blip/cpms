@@ -7,6 +7,7 @@ require_once __DIR__ . '/template_style.php';
 require_once __DIR__ . '/template_proposal.php';
 require_once __DIR__ . '/template_leave.php';
 require_once __DIR__ . '/template_unused_leave.php';
+require_once __DIR__ . '/../../services/ApprovalPdfService.php';
 
 $pdo = Db::pdo();
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
@@ -121,6 +122,8 @@ $isRecipientEditablePlan = ($canDecide && isset($d['doc_type']) && $d['doc_type'
             <span class="text-sm text-gray-500"><?php echo h(approval_doc_label(isset($d['doc_type']) ? $d['doc_type'] : '')); ?></span>
         </div>
     </div>
+
+    <?php echo cpms_approval_pdf_links_html($d); ?>
 
     <?php if (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && !$isRecipientEditablePlan) { ?>
         <div class="no-print cpms-approval-decision-panel <?php echo (isset($d['doc_type']) && (string)$d['doc_type'] === 'leave') ? '' : 'cpms-mobile-hide'; ?> bg-white rounded-2xl border p-4 flex flex-wrap gap-3 items-center">

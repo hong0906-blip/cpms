@@ -80,10 +80,10 @@ if (!function_exists('approval_setup_add_index')) {
 }
 
 $tables = array(
-    'cpms_approval_documents' => "CREATE TABLE IF NOT EXISTS cpms_approval_documents (id INT AUTO_INCREMENT PRIMARY KEY, doc_type VARCHAR(20) NULL, title VARCHAR(255) NULL, content MEDIUMTEXT NULL, doc_status VARCHAR(20) NULL, current_step_order INT DEFAULT 1, created_by_id INT NULL, created_by_name VARCHAR(100) NULL, created_by_email VARCHAR(190) NULL, delegate_level VARCHAR(20) NULL, reject_reason TEXT NULL, rejected_step VARCHAR(50) NULL, created_at DATETIME NULL, updated_at DATETIME NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    'cpms_approval_documents' => "CREATE TABLE IF NOT EXISTS cpms_approval_documents (id INT AUTO_INCREMENT PRIMARY KEY, doc_type VARCHAR(20) NULL, title VARCHAR(255) NULL, content MEDIUMTEXT NULL, doc_status VARCHAR(20) NULL, current_step_order INT DEFAULT 1, created_by_id INT NULL, created_by_name VARCHAR(100) NULL, created_by_email VARCHAR(190) NULL, project_id INT NULL, completed_pdf_storage_type VARCHAR(30) NULL, completed_pdf_drive_file_id VARCHAR(128) NULL, completed_pdf_drive_folder_id VARCHAR(128) NULL, completed_pdf_drive_web_view_link TEXT NULL, completed_pdf_drive_web_content_link TEXT NULL, completed_pdf_name VARCHAR(255) NULL, completed_pdf_mime_type VARCHAR(190) NULL, completed_pdf_size BIGINT NULL, completed_pdf_uploaded_at DATETIME NULL, completed_pdf_upload_status VARCHAR(30) NULL, completed_pdf_upload_error TEXT NULL, delegate_level VARCHAR(20) NULL, reject_reason TEXT NULL, rejected_step VARCHAR(50) NULL, created_at DATETIME NULL, updated_at DATETIME NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
     'cpms_approval_lines' => "CREATE TABLE IF NOT EXISTS cpms_approval_lines (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT NULL, line_order INT NULL, role_type VARCHAR(50) NULL, approver_id INT NULL, approver_name VARCHAR(100) NULL, approver_email VARCHAR(190) NULL, line_status VARCHAR(20) NULL, acted_at DATETIME NULL, sign_path VARCHAR(255) NULL, reject_reason TEXT NULL, is_delegated TINYINT(1) NOT NULL DEFAULT 0, delegated_by_role VARCHAR(50) NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
     'cpms_approval_references' => "CREATE TABLE IF NOT EXISTS cpms_approval_references (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT NOT NULL, employee_id INT NOT NULL, employee_name VARCHAR(100) NULL, employee_email VARCHAR(190) NULL, employee_department VARCHAR(100) NULL, created_at DATETIME NULL, INDEX idx_document_id (document_id), INDEX idx_employee_id (employee_id), INDEX idx_employee_email (employee_email)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-    'cpms_approval_files' => "CREATE TABLE IF NOT EXISTS cpms_approval_files (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT NULL, original_name VARCHAR(255) NULL, saved_name VARCHAR(255) NULL, file_path VARCHAR(255) NULL, file_label VARCHAR(100) NULL, file_type VARCHAR(50) NULL, created_at DATETIME NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+    'cpms_approval_files' => "CREATE TABLE IF NOT EXISTS cpms_approval_files (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT NULL, original_name VARCHAR(255) NULL, saved_name VARCHAR(255) NULL, file_path VARCHAR(255) NULL, file_label VARCHAR(100) NULL, file_type VARCHAR(50) NULL, storage_type VARCHAR(30) NULL, drive_name VARCHAR(255) NULL, drive_file_id VARCHAR(128) NULL, drive_folder_id VARCHAR(128) NULL, drive_web_view_link TEXT NULL, drive_web_content_link TEXT NULL, mime_type VARCHAR(190) NULL, file_size BIGINT NULL, uploaded_by VARCHAR(190) NULL, uploaded_at DATETIME NULL, upload_status VARCHAR(30) NULL, drive_upload_error TEXT NULL, created_at DATETIME NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
     'cpms_approval_logs' => "CREATE TABLE IF NOT EXISTS cpms_approval_logs (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT NULL, line_id INT NULL, actor_id INT NULL, actor_name VARCHAR(100) NULL, actor_email VARCHAR(190) NULL, action_type VARCHAR(30) NULL, action_note TEXT NULL, created_at DATETIME NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
     'cpms_approval_notifications' => "CREATE TABLE IF NOT EXISTS cpms_approval_notifications (id INT AUTO_INCREMENT PRIMARY KEY, document_id INT NULL, event_type VARCHAR(40) NULL, receiver_employee_id INT NULL, receiver_name VARCHAR(100) NULL, receiver_email VARCHAR(190) NULL, message_text TEXT NULL, dm_space_name VARCHAR(255) NULL, send_status VARCHAR(20) NULL, sent_at DATETIME NULL, error_message TEXT NULL, created_at DATETIME NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
     'cpms_google_chat_notifications' => "CREATE TABLE IF NOT EXISTS cpms_google_chat_notifications (id INT AUTO_INCREMENT PRIMARY KEY, source_type VARCHAR(50) NOT NULL, source_id INT NULL, event_type VARCHAR(50) NULL, receiver_employee_id INT NULL, receiver_name VARCHAR(100) NULL, receiver_email VARCHAR(190) NULL, dm_space_name VARCHAR(255) NULL, message_text TEXT NULL, send_status VARCHAR(20) NULL, error_message TEXT NULL, sent_at DATETIME NULL, created_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
@@ -106,6 +106,18 @@ foreach ($tables as $name => $sql) {
 $columns = array(
     'cpms_approval_documents' => array(
         'created_by_email' => "ALTER TABLE cpms_approval_documents ADD COLUMN created_by_email VARCHAR(190) NULL",
+        'project_id' => "ALTER TABLE cpms_approval_documents ADD COLUMN project_id INT NULL",
+        'completed_pdf_storage_type' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_storage_type VARCHAR(30) NULL",
+        'completed_pdf_drive_file_id' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_drive_file_id VARCHAR(128) NULL",
+        'completed_pdf_drive_folder_id' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_drive_folder_id VARCHAR(128) NULL",
+        'completed_pdf_drive_web_view_link' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_drive_web_view_link TEXT NULL",
+        'completed_pdf_drive_web_content_link' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_drive_web_content_link TEXT NULL",
+        'completed_pdf_name' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_name VARCHAR(255) NULL",
+        'completed_pdf_mime_type' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_mime_type VARCHAR(190) NULL",
+        'completed_pdf_size' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_size BIGINT NULL",
+        'completed_pdf_uploaded_at' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_uploaded_at DATETIME NULL",
+        'completed_pdf_upload_status' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_upload_status VARCHAR(30) NULL",
+        'completed_pdf_upload_error' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_upload_error TEXT NULL",
         'delegate_level' => "ALTER TABLE cpms_approval_documents ADD COLUMN delegate_level VARCHAR(20) NULL",
         'reject_reason' => "ALTER TABLE cpms_approval_documents ADD COLUMN reject_reason TEXT NULL",
         'rejected_step' => "ALTER TABLE cpms_approval_documents ADD COLUMN rejected_step VARCHAR(50) NULL",
@@ -121,7 +133,19 @@ $columns = array(
     ),
     'cpms_approval_files' => array(
         'file_label' => "ALTER TABLE cpms_approval_files ADD COLUMN file_label VARCHAR(100) NULL",
-        'file_type' => "ALTER TABLE cpms_approval_files ADD COLUMN file_type VARCHAR(50) NULL"
+        'file_type' => "ALTER TABLE cpms_approval_files ADD COLUMN file_type VARCHAR(50) NULL",
+        'storage_type' => "ALTER TABLE cpms_approval_files ADD COLUMN storage_type VARCHAR(30) NULL",
+        'drive_name' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_name VARCHAR(255) NULL",
+        'drive_file_id' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_file_id VARCHAR(128) NULL",
+        'drive_folder_id' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_folder_id VARCHAR(128) NULL",
+        'drive_web_view_link' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_web_view_link TEXT NULL",
+        'drive_web_content_link' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_web_content_link TEXT NULL",
+        'mime_type' => "ALTER TABLE cpms_approval_files ADD COLUMN mime_type VARCHAR(190) NULL",
+        'file_size' => "ALTER TABLE cpms_approval_files ADD COLUMN file_size BIGINT NULL",
+        'uploaded_by' => "ALTER TABLE cpms_approval_files ADD COLUMN uploaded_by VARCHAR(190) NULL",
+        'uploaded_at' => "ALTER TABLE cpms_approval_files ADD COLUMN uploaded_at DATETIME NULL",
+        'upload_status' => "ALTER TABLE cpms_approval_files ADD COLUMN upload_status VARCHAR(30) NULL",
+        'drive_upload_error' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_upload_error TEXT NULL"
     ),
     'cpms_approval_leave_deductions' => array(
         'leave_bucket' => "ALTER TABLE cpms_approval_leave_deductions ADD COLUMN leave_bucket VARCHAR(20) NULL",
