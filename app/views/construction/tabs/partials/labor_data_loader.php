@@ -1135,9 +1135,13 @@ if (!function_exists('cpms_labor_worker_payload_from_workforce')) {
         return array(
             'worker_id' => isset($worker['id']) ? (int)$worker['id'] : 0,
             'name' => $name,
+            'resident_no' => isset($worker['resident_no_plain']) ? trim((string)$worker['resident_no_plain']) : '',
             'phone' => isset($worker['phone']) ? trim((string)$worker['phone']) : '',
             'address' => isset($worker['address']) ? trim((string)$worker['address']) : '',
             'deposit_rate' => $dailyWage,
+            'bank_account' => isset($worker['bank_account_plain']) ? trim((string)$worker['bank_account_plain']) : '',
+            'bank_name' => isset($worker['bank_name']) ? trim((string)$worker['bank_name']) : '',
+            'account_holder' => isset($worker['account_holder']) ? trim((string)$worker['account_holder']) : '',
             'company_name' => $agencyName,
             'worker_name_snapshot' => $name,
             'agency_name_snapshot' => $agencyName,

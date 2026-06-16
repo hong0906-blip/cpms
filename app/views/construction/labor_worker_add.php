@@ -82,7 +82,7 @@ try {
         }
 
         $workerRepo = new WorkerRepository($pdo);
-        $masterWorker = $workerRepo->getById($workforceWorkerId, false);
+        $masterWorker = $workerRepo->getById($workforceWorkerId, true);
         if (!$masterWorker || !is_array($masterWorker)) {
             flash_set('error', '인력관리 등록자를 찾을 수 없습니다.');
             header('Location: ' . $redirect);
@@ -152,9 +152,13 @@ try {
                                        daily_wage_snapshot = :daily_wage_snapshot,
                                        source_type = :source_type,
                                        matched_status = :matched_status,
+                                       resident_no = :resident_no,
                                        phone = :phone,
                                        address = :address,
                                        deposit_rate = :deposit_rate,
+                                       bank_account = :bank_account,
+                                       bank_name = :bank_name,
+                                       account_holder = :account_holder,
                                        company_name = :company_name,
                                        is_deleted = 0,
                                        updated_at = :now
@@ -166,9 +170,13 @@ try {
             $stUp->bindValue(':daily_wage_snapshot', (int)$workforcePayload['daily_wage_snapshot'], PDO::PARAM_INT);
             $stUp->bindValue(':source_type', $workforcePayload['source_type']);
             $stUp->bindValue(':matched_status', $workforcePayload['matched_status']);
+            $stUp->bindValue(':resident_no', $workforcePayload['resident_no']);
             $stUp->bindValue(':phone', $workforcePayload['phone']);
             $stUp->bindValue(':address', $workforcePayload['address']);
             $stUp->bindValue(':deposit_rate', (int)$workforcePayload['deposit_rate'], PDO::PARAM_INT);
+            $stUp->bindValue(':bank_account', $workforcePayload['bank_account']);
+            $stUp->bindValue(':bank_name', $workforcePayload['bank_name']);
+            $stUp->bindValue(':account_holder', $workforcePayload['account_holder']);
             $stUp->bindValue(':company_name', $workforcePayload['company_name']);
             $stUp->bindValue(':now', $now);
             $stUp->bindValue(':id', $existingId, PDO::PARAM_INT);
@@ -200,11 +208,13 @@ try {
             $stIns = $pdo->prepare("INSERT INTO cpms_project_labor_workers
                                     (project_id, name, source, direct_member_id, worker_id,
                                      worker_name_snapshot, agency_name_snapshot, job_type_snapshot, daily_wage_snapshot,
-                                     source_type, matched_status, phone, address, deposit_rate, company_name,
+                                     source_type, matched_status, resident_no, phone, address, deposit_rate,
+                                     bank_account, bank_name, account_holder, company_name,
                                      is_deleted, created_at, updated_at)
                                     VALUES (:pid, :name, 'workforce', NULL, :worker_id,
                                      :worker_name_snapshot, :agency_name_snapshot, :job_type_snapshot, :daily_wage_snapshot,
-                                     :source_type, :matched_status, :phone, :address, :deposit_rate, :company_name,
+                                     :source_type, :matched_status, :resident_no, :phone, :address, :deposit_rate,
+                                     :bank_account, :bank_name, :account_holder, :company_name,
                                      0, :now, :now)");
             $stIns->bindValue(':pid', $projectId, PDO::PARAM_INT);
             $stIns->bindValue(':name', $name);
@@ -215,9 +225,13 @@ try {
             $stIns->bindValue(':daily_wage_snapshot', (int)$workforcePayload['daily_wage_snapshot'], PDO::PARAM_INT);
             $stIns->bindValue(':source_type', $workforcePayload['source_type']);
             $stIns->bindValue(':matched_status', $workforcePayload['matched_status']);
+            $stIns->bindValue(':resident_no', $workforcePayload['resident_no']);
             $stIns->bindValue(':phone', $workforcePayload['phone']);
             $stIns->bindValue(':address', $workforcePayload['address']);
             $stIns->bindValue(':deposit_rate', (int)$workforcePayload['deposit_rate'], PDO::PARAM_INT);
+            $stIns->bindValue(':bank_account', $workforcePayload['bank_account']);
+            $stIns->bindValue(':bank_name', $workforcePayload['bank_name']);
+            $stIns->bindValue(':account_holder', $workforcePayload['account_holder']);
             $stIns->bindValue(':company_name', $workforcePayload['company_name']);
             $stIns->bindValue(':now', $now);
             $stIns->execute();

@@ -302,12 +302,19 @@ foreach ($timesheetWorkers as $worker) {
         <div class="mt-4 grid gap-3 lg:grid-cols-3">
             <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
                 <div class="text-sm font-extrabold text-gray-900">인력관리에서 가져오기</div>
-                <div class="text-xs text-gray-600 mt-1">등록된 인력을 검색해 단가와 업체명을 자동 입력합니다.</div>
-                <div class="mt-3 flex justify-end">
-                    <button type="button" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-extrabold" data-workforce-modal-open>
-                        인력관리에서 가져오기
+                <div class="text-xs text-gray-600 mt-1">현재 현장 인원작성 명단의 이름을 인력관리와 맞춰 전체 입력합니다.</div>
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_workers_save" class="mt-3 flex flex-wrap justify-end gap-2">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                    <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+                    <input type="hidden" name="labor_tab" value="workers">
+                    <button type="submit" name="action" value="apply_workforce_by_name" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-extrabold" onclick="return confirm('현재 현장 인원 명단을 인력관리 기준으로 전체 입력할까요?');">
+                        현재 명단 전체 가져오기
                     </button>
-                </div>
+                    <button type="button" class="px-4 py-2 rounded-2xl border border-emerald-200 bg-white text-emerald-700 font-extrabold" data-workforce-modal-open>
+                        개별 검색
+                    </button>
+                </form>
             </div>
 
             <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" class="rounded-2xl border border-gray-200 p-4">

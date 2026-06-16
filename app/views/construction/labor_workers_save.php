@@ -135,6 +135,113 @@ try {
         exit;
     }
 
+    if ($action === 'apply_workforce_by_name') {
+        if (!cpms_labor_load_workforce_services()) {
+            flash_set('error', '인력관리 서비스를 찾을 수 없습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $repo = new WorkerRepository($pdo);
+        $stRows = $pdo->prepare("SELECT id, name, worker_name_snapshot
+                                 FROM cpms_project_labor_workers
+                                 WHERE project_id = :pid
+                                   AND is_deleted = 0
+                                 ORDER BY id ASC");
+        $stRows->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stRows->execute();
+        $projectRows = $stRows->fetchAll(PDO::FETCH_ASSOC);
+
+        $stMatched = $pdo->prepare("UPDATE cpms_project_labor_workers
+                                    SET source = 'workforce',
+                                        direct_member_id = NULL,
+                                        worker_id = :worker_id,
+                                        worker_name_snapshot = :worker_name_snapshot,
+                                        agency_name_snapshot = :agency_name_snapshot,
+                                        job_type_snapshot = :job_type_snapshot,
+                                        daily_wage_snapshot = :daily_wage_snapshot,
+                                        source_type = :source_type,
+                                        matched_status = :matched_status,
+                                        resident_no = :resident_no,
+                                        phone = :phone,
+                                        address = :address,
+                                        deposit_rate = :deposit_rate,
+                                        bank_account = :bank_account,
+                                        bank_name = :bank_name,
+                                        account_holder = :account_holder,
+                                        company_name = :company_name,
+                                        updated_at = :now
+                                    WHERE id = :id
+                                      AND project_id = :pid
+                                      AND is_deleted = 0");
+        $stStatus = $pdo->prepare("UPDATE cpms_project_labor_workers
+                                   SET matched_status = :matched_status,
+                                       source_type = :source_type,
+                                       updated_at = :now
+                                   WHERE id = :id
+                                     AND project_id = :pid
+                                     AND is_deleted = 0");
+
+        $matchedCount = 0;
+        $duplicateCount = 0;
+        $notFoundCount = 0;
+        foreach ($projectRows as $projectRow) {
+            $rowId = isset($projectRow['id']) ? (int)$projectRow['id'] : 0;
+            $name = isset($projectRow['name']) ? trim((string)$projectRow['name']) : '';
+            if ($name === '' && isset($projectRow['worker_name_snapshot'])) {
+                $name = trim((string)$projectRow['worker_name_snapshot']);
+            }
+            if ($rowId <= 0 || $name === '') continue;
+
+            $match = cpms_labor_match_workforce_by_name($pdo, $name);
+            $status = isset($match['status']) ? trim((string)$match['status']) : 'not_found';
+            if ($status === 'matched' && isset($match['worker']) && is_array($match['worker'])) {
+                $masterId = isset($match['worker']['id']) ? (int)$match['worker']['id'] : 0;
+                $master = $masterId > 0 ? $repo->getById($masterId, true) : $match['worker'];
+                if (!$master || !is_array($master)) $master = $match['worker'];
+                $payload = cpms_labor_worker_payload_from_workforce($master, 'workforce', 'matched');
+                if (trim((string)$payload['name']) === '') $payload['name'] = $name;
+
+                $stMatched->bindValue(':worker_id', (int)$payload['worker_id'], PDO::PARAM_INT);
+                $stMatched->bindValue(':worker_name_snapshot', $payload['worker_name_snapshot']);
+                $stMatched->bindValue(':agency_name_snapshot', $payload['agency_name_snapshot']);
+                $stMatched->bindValue(':job_type_snapshot', $payload['job_type_snapshot']);
+                $stMatched->bindValue(':daily_wage_snapshot', (int)$payload['daily_wage_snapshot'], PDO::PARAM_INT);
+                $stMatched->bindValue(':source_type', $payload['source_type']);
+                $stMatched->bindValue(':matched_status', $payload['matched_status']);
+                $stMatched->bindValue(':resident_no', $payload['resident_no']);
+                $stMatched->bindValue(':phone', $payload['phone']);
+                $stMatched->bindValue(':address', $payload['address']);
+                $stMatched->bindValue(':deposit_rate', (int)$payload['deposit_rate'], PDO::PARAM_INT);
+                $stMatched->bindValue(':bank_account', $payload['bank_account']);
+                $stMatched->bindValue(':bank_name', $payload['bank_name']);
+                $stMatched->bindValue(':account_holder', $payload['account_holder']);
+                $stMatched->bindValue(':company_name', $payload['company_name']);
+                $stMatched->bindValue(':now', $now);
+                $stMatched->bindValue(':id', $rowId, PDO::PARAM_INT);
+                $stMatched->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                $stMatched->execute();
+                $matchedCount++;
+                continue;
+            }
+
+            $nextStatus = ($status === 'duplicate') ? 'duplicate' : 'not_found';
+            $nextSourceType = ($status === 'duplicate') ? 'workforce' : 'shiftee';
+            $stStatus->bindValue(':matched_status', $nextStatus);
+            $stStatus->bindValue(':source_type', $nextSourceType);
+            $stStatus->bindValue(':now', $now);
+            $stStatus->bindValue(':id', $rowId, PDO::PARAM_INT);
+            $stStatus->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stStatus->execute();
+            if ($nextStatus === 'duplicate') $duplicateCount++;
+            else $notFoundCount++;
+        }
+
+        flash_set('success', '인력관리 명단을 현재 현장 인원에 적용했습니다. 매칭 ' . (int)$matchedCount . '건 / 동명이인 ' . (int)$duplicateCount . '건 / 미등록 ' . (int)$notFoundCount . '건');
+        header('Location: ' . $redirect);
+        exit;
+    }
+
     // 인원작성 저장 기능: 인원별 임금/계좌 정보 저장
     if ($action === 'save') {
         if (count($workers) > 0) {
