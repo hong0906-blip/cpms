@@ -913,6 +913,83 @@ function cpms_drive_save_project_structure_result($pdo, $projectId, $driveResult
     }
 }}
 
+if (!function_exists('cpms_drive_sync_project_after_create')) {
+function cpms_drive_sync_project_after_create($pdo, $projectId, $projectName, $userContext, $section) {
+    if (!is_array($userContext)) $userContext = array();
+    $projectId = (int)$projectId;
+    $projectName = trim((string)$projectName);
+    $section = trim((string)$section);
+    if ($section === '') $section = 'project';
+
+    $result = array(
+        'ok' => false,
+        'saved' => false,
+        'drive_result' => array(
+            'ok' => false,
+            'status' => 'failed',
+            'message' => '',
+            'drive' => array(),
+            'errors' => array()
+        ),
+        'message' => ''
+    );
+
+    if (!$pdo || $projectId <= 0) {
+        $result['message'] = 'Project Drive sync skipped because project ID or DB connection is empty.';
+        $result['drive_result']['message'] = $result['message'];
+        return $result;
+    }
+
+    try {
+        $driveResult = cpms_drive_create_project_structure($projectId, $projectName, $userContext);
+        $saved = cpms_drive_save_project_structure_result($pdo, $projectId, $driveResult);
+        $result['drive_result'] = $driveResult;
+        $result['saved'] = $saved;
+        $result['ok'] = (!empty($driveResult['ok']) && $saved);
+        $result['message'] = isset($driveResult['message']) ? (string)$driveResult['message'] : '';
+
+        if (!$saved) {
+            cpms_drive_log_upload_failure(array(
+                'user' => $userContext,
+                'section' => $section,
+                'project_id' => $projectId,
+                'original_name' => $projectName,
+                'target_folder_id' => cpms_drive_folder_id('project_root'),
+                'message' => 'Project was saved, but Drive metadata could not be saved to cpms_projects.'
+            ));
+        }
+        return $result;
+    } catch (Exception $driveException) {
+        $folderName = cpms_drive_project_folder_name($projectName, $projectId);
+        $driveResult = array(
+            'ok' => false,
+            'status' => 'failed',
+            'message' => $driveException->getMessage(),
+            'drive' => array(
+                'status' => 'failed',
+                'synced_at' => date('Y-m-d H:i:s'),
+                'project_folder_id' => '',
+                'project_folder_name' => $folderName,
+                'folders' => array()
+            ),
+            'errors' => array($driveException->getMessage())
+        );
+        $saved = cpms_drive_save_project_structure_result($pdo, $projectId, $driveResult);
+        cpms_drive_log_upload_failure(array(
+            'user' => $userContext,
+            'section' => $section,
+            'project_id' => $projectId,
+            'original_name' => $projectName,
+            'target_folder_id' => cpms_drive_folder_id('project_root'),
+            'message' => 'Project Drive folder creation exception: ' . $driveException->getMessage()
+        ));
+        $result['drive_result'] = $driveResult;
+        $result['saved'] = $saved;
+        $result['message'] = $driveException->getMessage();
+        return $result;
+    }
+}}
+
 if (!function_exists('cpms_drive_ensure_approval_year_folders')) {
 function cpms_drive_ensure_approval_year_folders($year, $context) {
     if (!is_array($context)) $context = array();

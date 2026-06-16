@@ -5,6 +5,7 @@
  * - 원가율 87% (주간 기준)
  */
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/GoogleDriveHelper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -139,6 +140,10 @@ try {
     $st->execute();
 
     $pdo->commit();
+
+    if ($pid > 0) {
+        cpms_drive_sync_project_after_create($pdo, $pid, $projectName, Auth::user(), 'sample_project_create');
+    }
 
     $progressRate = ($progressAmount / $totalContract) * 100.0;
     $costRate = ($actualCost / $progressAmount) * 100.0;

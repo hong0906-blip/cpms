@@ -250,39 +250,9 @@ try {
 
     $pdo->commit();
 
-    $driveResult = null;
-    $driveSaved = false;
-    try {
-        $driveResult = cpms_drive_create_project_structure($projectId, $name, Auth::user());
-        $driveSaved = cpms_drive_save_project_structure_result($pdo, $projectId, $driveResult);
-        if (!$driveSaved) {
-            cpms_drive_log_upload_failure(array(
-                'user' => Auth::user(),
-                'section' => 'project',
-                'project_id' => $projectId,
-                'original_name' => $name,
-                'target_folder_id' => cpms_drive_folder_id('project_root'),
-                'message' => 'Project was created, but Drive metadata could not be saved to cpms_projects.'
-            ));
-        }
-    } catch (Exception $driveException) {
-        $driveResult = array(
-            'ok' => false,
-            'status' => 'failed',
-            'message' => $driveException->getMessage(),
-            'drive' => array(),
-            'errors' => array()
-        );
-        cpms_drive_save_project_structure_result($pdo, $projectId, $driveResult);
-        cpms_drive_log_upload_failure(array(
-            'user' => Auth::user(),
-            'section' => 'project',
-            'project_id' => $projectId,
-            'original_name' => $name,
-            'target_folder_id' => cpms_drive_folder_id('project_root'),
-            'message' => 'Project Drive folder creation exception: ' . $driveException->getMessage()
-        ));
-    }
+    $driveSync = cpms_drive_sync_project_after_create($pdo, $projectId, $name, Auth::user(), 'project_create');
+    $driveResult = isset($driveSync['drive_result']) ? $driveSync['drive_result'] : null;
+    $driveSaved = isset($driveSync['saved']) ? (bool)$driveSync['saved'] : false;
 
     if (is_array($driveResult) && !empty($driveResult['ok']) && $driveSaved) {
         flash_set('success', '프로젝트가 생성되었습니다. Google Drive 프로젝트 폴더도 준비되었습니다.');
