@@ -127,7 +127,7 @@ cpms_sync_project_labor_workers_from_attendance(isset($pdo) ? $pdo : null, $proj
 $projectLaborWorkers = cpms_load_project_labor_workers(isset($pdo) ? $pdo : null, $projectId);
 $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
 $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
-// 공수 월별 출력일수 필터: attendance 자동행은 출력일수가 있을 때만 보이고, 수동/직영 추가 인원은 항상 표시
+// 공수 월별 출력일수 필터: 선택월에 실제 공수가 있는 인원만 표시
 if (is_array($timesheetWorkers)) {
     $filteredTimesheetWorkers = array();
     foreach ($timesheetWorkers as $worker) {
@@ -135,8 +135,7 @@ if (is_array($timesheetWorkers)) {
         $workerKey = cpms_normalize_worker_key($workerName);
         if ($workerKey === '') continue;
         $workerOutputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
-        $workerSource = isset($worker['source']) ? trim((string)$worker['source']) : '';
-        if ($workerOutputDays <= 0 && $workerSource === 'attendance') continue;
+        if ($workerOutputDays <= 0) continue;
         $filteredTimesheetWorkers[] = $worker;
     }
     $timesheetWorkers = $filteredTimesheetWorkers;
@@ -350,11 +349,10 @@ foreach ($timesheetWorkers as $worker) {
             <input type="hidden" name="labor_tab" value="workers">
 
             <div class="overflow-x-auto">
-                <table class="min-w-[1100px] w-full border border-gray-200 text-sm">
+                <table class="min-w-[1000px] w-full border border-gray-200 text-sm">
                     <thead class="bg-gray-100 text-gray-700">
                     <tr>
                         <th class="border border-gray-200 px-2 py-2">성명</th>
-                        <th class="border border-gray-200 px-2 py-2">주민등록번호</th>
                         <th class="border border-gray-200 px-2 py-2">핸드폰 번호</th>
                         <th class="border border-gray-200 px-2 py-2">주소</th>
                         <th class="border border-gray-200 px-2 py-2">임금단가</th>
@@ -378,9 +376,6 @@ foreach ($timesheetWorkers as $worker) {
                             <tr class="<?php echo ($rowIndex % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
                                 <td class="border border-gray-200 px-2 py-2">
                                     <input class="w-full px-2 py-1 border border-gray-200 rounded-lg bg-gray-100" type="text" value="<?php echo h(isset($member['name']) ? $member['name'] : ''); ?>" placeholder="성명" readonly>
-                                </td>
-                                <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][resident_no]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['resident_no']) ? $member['resident_no'] : ''); ?>" placeholder="주민등록번호">
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
                                     <input name="workers[<?php echo $workerId; ?>][phone]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['phone']) ? $member['phone'] : ''); ?>" placeholder="핸드폰 번호">
@@ -420,7 +415,7 @@ foreach ($timesheetWorkers as $worker) {
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr class="bg-white">
-                            <td colspan="10" class="border border-gray-200 px-2 py-6 text-center text-gray-500">등록된 인원이 없습니다.</td>
+                            <td colspan="9" class="border border-gray-200 px-2 py-6 text-center text-gray-500">등록된 인원이 없습니다.</td>
                         </tr>
                     <?php endif; ?>
                     </tbody>

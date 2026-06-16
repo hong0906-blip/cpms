@@ -502,7 +502,7 @@ $categories = array(
     'equipment' => array('label' => '장비비', 'color' => '#EF4444'),
     'safety' => array('label' => '안전관리비', 'color' => '#22C55E'),
     'materials' => array('label' => '자재구입비', 'color' => '#A855F7'),
-    'sales' => array('label' => '예상매출', 'color' => '#3B82F6'),
+    'sales' => array('label' => '확정매출', 'color' => '#3B82F6'),
     'target_amount' => array('label' => '투입목표금액', 'color' => '#14B8A6'),
 );
 
@@ -543,7 +543,7 @@ for ($m = 1; $m <= 12; $m++) {
     // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
     $expectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
     $confirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
-    $sales = $expectedSales;
+    $sales = $confirmedSales;
     $usedTotal = $labor + $equipment + $materials;
     $targetAmount = round($sales * 0.7);
     $costRateInfo = cpms_status_cost_rate_info($sales, $usedTotal);
@@ -637,7 +637,7 @@ for ($q = 1; $q <= 4; $q++) {
 }
 
 // 상황탭 매출 추가/색상변경/상단금액구조 변경: 상단 전체 누적 금액(연도 변경과 무관)
-$overallTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'confirmed_sales' => 0);
+$overallTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'expected_sales' => 0, 'confirmed_sales' => 0);
 foreach ($years as $yy) {
     for ($m = 1; $m <= 12; $m++) {
         $ym = sprintf('%04d-%02d', (int)$yy, $m);
@@ -656,7 +656,8 @@ foreach ($years as $yy) {
     }
 }
 $overallTotals['confirmed_sales'] = cpms_status_confirmed_sales_total_all($pdo, (int)$pid);
-$overallTotals['sales'] = cpms_status_sales_total_all($pdo, (int)$pid);
+$overallTotals['expected_sales'] = cpms_status_sales_total_all($pdo, (int)$pid);
+$overallTotals['sales'] = $overallTotals['confirmed_sales'];
 $safetyContractTotal = cpms_safety_cost_contract_total($pdo, (int)$pid);
 $safetyLimit110 = round($safetyContractTotal * 1.1);
 $safetyUsedTotal = cpms_safety_cost_total((int)$pid);
@@ -722,7 +723,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 
         <!-- 상황탭 매출 추가/색상변경/상단금액구조 변경 -->        
         <div class="mt-4 p-4 rounded-2xl bg-gray-900 text-white">
-            <div class="text-sm text-gray-200">예상 순이익 (총 예상매출 - 총 사용금액)</div>
+            <div class="text-sm text-gray-200">확정 순이익 (총 확정매출 - 총 사용금액)</div>
             <div class="text-3xl font-extrabold mt-1"><?php echo h(cpms_status_money($overallNetTotal)); ?></div>
         </div>
 
@@ -732,11 +733,8 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['sales'])); ?></div>
             </div>
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                <div class="text-xs text-gray-500">총 확정매출 (기성 인정금액)</div>
-                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['confirmed_sales'])); ?></div>
-                <?php if ((float)$overallTotals['confirmed_sales'] <= 0): ?>
-                    <div class="text-xs text-gray-500 mt-1">기성매출 없음</div>
-                <?php endif; ?>
+                <div class="text-xs text-gray-500">총 예상매출 (아이템내역서)</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['expected_sales'])); ?></div>
             </div>
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
                 <div class="text-xs text-gray-500">총 투입원가</div>
@@ -883,7 +881,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                     <tr>
                         <th class="px-3 py-2 text-left font-bold">월</th>
                         <th class="px-3 py-2 text-right font-bold"><?php echo h($categories['sales']['label']); ?></th>
-                        <th class="px-3 py-2 text-right font-bold">확정매출</th>
+                        <th class="px-3 py-2 text-right font-bold">예상매출</th>
                         <th class="px-3 py-2 text-right font-bold">투입원가</th>
                         <th class="px-3 py-2 text-right font-bold">투입목표금액</th>
                         <th class="px-3 py-2 text-right font-bold">원가율</th>
@@ -905,7 +903,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                         <tr class="border-t border-gray-100">
                             <td class="px-3 py-2 text-gray-700 font-bold"><?php echo h(isset($row['label']) ? $row['label'] : '-'); ?></td>
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['sales']) ? $row['sales'] : 0)); ?></td>
-                            <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['confirmed_sales']) ? $row['confirmed_sales'] : 0)); ?></td>
+                            <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['expected_sales']) ? $row['expected_sales'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['used_total']) ? $row['used_total'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['target_amount']) ? $row['target_amount'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right">

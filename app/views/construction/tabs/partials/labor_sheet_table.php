@@ -106,7 +106,6 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
         <tr class="bg-gray-200 text-gray-800">
             <th class="border border-gray-200 px-2 py-2" rowspan="2">출력월</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">성명</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">주민등록번호</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">외국인</th>
             <th class="border border-gray-200 px-2 py-2 text-center" colspan="<?php echo (int)$daysInMonth; ?>">출력일수</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">출력일수</th>
@@ -147,7 +146,6 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                 <tr class="cpms-timesheet-row <?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>" data-wage-rate="<?php echo h(number_format($wageRate, 2, '.', '')); ?>">
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h($workerName); ?></td>
-                    <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['resident_no']) ? $worker['resident_no'] : ''); ?></td>
                     <td class="border border-gray-200 px-2 py-2 text-center"></td>
                     <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
                         <?php
@@ -183,7 +181,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                 </tr>
                 <?php if ($debugMode): ?>
                 <tr class="bg-yellow-50">
-                    <td class="border border-gray-200 px-2 py-1 text-[10px] text-gray-700" colspan="<?php echo $showBankColumns ? (15 + (int)$daysInMonth) : (12 + (int)$daysInMonth); ?>">
+                    <td class="border border-gray-200 px-2 py-1 text-[10px] text-gray-700" colspan="<?php echo $showBankColumns ? (11 + (int)$daysInMonth) : (8 + (int)$daysInMonth); ?>">
                         <?php echo h($workerName); ?> / 총공수 <?php echo h(cpms_format_gongsu_value($totalGongsu)); ?> / 출력일수 <?php echo h((string)$outputDays); ?> / 임금단가원본 deposit_rate=<?php echo h(isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : ''); ?> / daily_wage=<?php echo h(isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : ''); ?> / 적용단가=<?php echo h((string)(int)round($wageRate)); ?> / 지급총액=<?php echo h((string)(int)round($totalPay)); ?>
                     </td>
                 </tr>
@@ -193,7 +191,6 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
             <?php for ($i = 1; $i <= $timesheetRows; $i++): ?>
                 <tr class="<?php echo ($i % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>">
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
-                    <td class="border border-gray-200 px-2 py-2"></td>
                     <td class="border border-gray-200 px-2 py-2"></td>
                     <td class="border border-gray-200 px-2 py-2 text-center"></td>
                     <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>

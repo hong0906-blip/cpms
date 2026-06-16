@@ -99,21 +99,19 @@ $gongsuData = cpms_load_gongsu_data($pdo, isset($projectRow['name']) ? $projectR
 $attendanceWorkers = isset($gongsuData['all_workers']) ? $gongsuData['all_workers'] : (isset($gongsuData['workers']) ? $gongsuData['workers'] : array());
 $excludedWorkers = isset($gongsuData['excluded_workers']) ? $gongsuData['excluded_workers'] : array();
 $attendanceGongsuMap = isset($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
-$overrideRows = cpms_load_labor_overrides($projectId, $selectedMonth);
-if (is_array($overrideRows)) {
-    foreach ($overrideRows as $workerKey => $dateRows) {
-        if (!isset($attendanceGongsuMap[$workerKey]) || !is_array($attendanceGongsuMap[$workerKey])) $attendanceGongsuMap[$workerKey] = array();
-        if (!is_array($dateRows)) continue;
-        foreach ($dateRows as $dateKey => $entry) {
-            if (is_array($entry) && isset($entry['value']) && is_numeric($entry['value'])) {
-                $attendanceGongsuMap[$workerKey][$dateKey] = (float)$entry['value'];
-            }
-        }
-    }
-}
 $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
 $attendanceOutputDays = isset($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
 $projectId = isset($projectId) ? (int)$projectId : 0;
+$overrideDataset = function_exists('cpms_apply_labor_overrides_to_dataset')
+    ? cpms_apply_labor_overrides_to_dataset($attendanceGongsuMap, $attendanceOutputDays, $attendanceGongsuUnit, $projectId, $selectedMonth)
+    : array(
+        'gongsu_map' => $attendanceGongsuMap,
+        'output_days' => $attendanceOutputDays,
+        'gongsu_unit' => $attendanceGongsuUnit,
+    );
+$attendanceGongsuMap = isset($overrideDataset['gongsu_map']) && is_array($overrideDataset['gongsu_map']) ? $overrideDataset['gongsu_map'] : array();
+$attendanceOutputDays = isset($overrideDataset['output_days']) && is_array($overrideDataset['output_days']) ? $overrideDataset['output_days'] : array();
+$attendanceGongsuUnit = isset($overrideDataset['gongsu_unit']) && is_array($overrideDataset['gongsu_unit']) ? $overrideDataset['gongsu_unit'] : array();
 cpms_cleanup_project_labor_workers($pdo, $projectId, $excludedWorkers); // 장비기사 기존 기록 삭제(soft delete)
 cpms_sync_project_labor_workers_from_attendance($pdo, $projectId, $attendanceWorkers); // 장비기사 제외
 $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);

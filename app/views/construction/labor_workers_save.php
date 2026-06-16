@@ -83,8 +83,7 @@ try {
     if ($action === 'save') {
         if (count($workers) > 0) {
             $sql = "UPDATE cpms_project_labor_workers
-                    SET resident_no = :resident_no,
-                        phone = :phone,
+                    SET phone = :phone,
                         address = :address,
                         deposit_rate = :deposit_rate,
                         bank_account = :bank_account,
@@ -101,7 +100,6 @@ try {
                 $workerId = (int)$workerIdRaw;
                 if ($workerId <= 0 || !is_array($fields)) continue;
 
-                $residentNo = isset($fields['resident_no']) ? trim((string)$fields['resident_no']) : '';
                 $phone = isset($fields['phone']) ? trim((string)$fields['phone']) : '';
                 $address = isset($fields['address']) ? trim((string)$fields['address']) : '';
                 $bankAccount = isset($fields['bank_account']) ? trim((string)$fields['bank_account']) : '';
@@ -118,7 +116,6 @@ try {
                     if ($depositRate < 0) $depositRate = 0;
                 }
 
-                $stUp->bindValue(':resident_no', $residentNo === '' ? null : $residentNo, $residentNo === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
                 $stUp->bindValue(':phone', $phone === '' ? null : $phone, $phone === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
                 $stUp->bindValue(':address', $address === '' ? null : $address, $address === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
                 $stUp->bindValue(':deposit_rate', $depositRate, PDO::PARAM_INT);

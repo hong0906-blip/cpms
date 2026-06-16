@@ -91,7 +91,7 @@ try {
         $stUsage->execute();
         $usageRows = $stUsage->fetchAll(PDO::FETCH_ASSOC);
 
-        foreach ($usageRows as $ur) {
+        foreach ($usageRows as $usageIndex => $ur) {
             $eid = (int)$ur['equipment_id'];
             $d = (string)$ur['use_date'];
             $workUnit = isset($ur['work_unit']) ? (float)$ur['work_unit'] : 1.0;
@@ -102,13 +102,16 @@ try {
             if ($rateSnapshot <= 0 && $masterBaseRate > 0) $rateSnapshot = $masterBaseRate;
             $ur['_work_unit'] = $workUnit;
             $ur['_base_rate_snapshot'] = $rateSnapshot;
-            if ($rateSnapshot > 0) {
+            if ($storedAmount > 0) {
+                $ur['_calc_amount'] = $storedAmount;
+            } else if ($rateSnapshot > 0) {
                 $ur['_calc_amount'] = $workUnit * $rateSnapshot;
             } else {
-                $ur['_calc_amount'] = $storedAmount;
+                $ur['_calc_amount'] = 0.0;
             }
             if (!isset($usageByEquipment[$eid])) $usageByEquipment[$eid] = array();
             $usageByEquipment[$eid][$d] = $ur;
+            $usageRows[$usageIndex] = $ur;
             if (!isset($usageByDate[$d])) $usageByDate[$d] = 0.0;
             $usageByDate[$d] += $workUnit;
         }
@@ -270,6 +273,12 @@ foreach ($items as $it) {
             'item_ids' => array(),
             'slot_usage' => array()
         );
+    }
+    $displayItems[$groupKey]['category'] = cpms_merge_first_non_empty($displayItems[$groupKey]['category'], isset($it['category']) ? $it['category'] : '');
+    $displayItems[$groupKey]['vendor_name'] = cpms_merge_first_non_empty($displayItems[$groupKey]['vendor_name'], isset($it['vendor_name']) ? $it['vendor_name'] : '');
+    $displayItems[$groupKey]['spec'] = cpms_merge_first_non_empty($displayItems[$groupKey]['spec'], isset($it['spec']) ? $it['spec'] : '');
+    if ((float)$displayItems[$groupKey]['base_rate'] <= 0 && isset($it['base_rate']) && (float)$it['base_rate'] > 0) {
+        $displayItems[$groupKey]['base_rate'] = (float)$it['base_rate'];
     }
     $displayItems[$groupKey]['representative'] = cpms_merge_first_non_empty($displayItems[$groupKey]['representative'], isset($it['representative']) ? $it['representative'] : '');
     $displayItems[$groupKey]['phone'] = cpms_merge_first_non_empty($displayItems[$groupKey]['phone'], isset($it['phone']) ? $it['phone'] : '');
@@ -1008,7 +1017,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                         }                        
                         ?>
                         <tr>
-                            <td class="border p-1 text-center" rowspan="2"><?php echo ($lastCategory === (string)$it['category']) ? '' : h($it['category']); ?></td>
+                            <td class="border p-1 text-center" rowspan="2"><?php echo h($it['category']); ?></td>
                             <td class="border p-1" rowspan="2"><?php echo h($it['vendor_name']); ?></td>
                             <td class="border p-1" rowspan="2"><?php echo h($it['spec']); ?></td>
                             <td class="border p-1" rowspan="2"><?php echo h($it['representative']); ?></td>
