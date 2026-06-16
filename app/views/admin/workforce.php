@@ -185,17 +185,18 @@ function cpms_workforce_status_label($status)
 
   <div class="rounded-3xl border border-gray-200 bg-white overflow-hidden">
     <div class="overflow-x-auto">
-      <table class="min-w-[1150px] w-full text-sm">
+      <table class="min-w-[1320px] w-full text-sm">
         <thead class="bg-gray-50 text-gray-700">
           <tr>
             <th class="px-3 py-3 border-b"><input type="checkbox" data-workforce-check-all></th>
             <th class="px-3 py-3 border-b text-left">이름</th>
             <th class="px-3 py-3 border-b text-left">연락처</th>
+            <th class="px-3 py-3 border-b text-left">주민번호</th>
             <th class="px-3 py-3 border-b text-left">구분/직종</th>
             <th class="px-3 py-3 border-b text-left">인력사 업체명</th>
             <th class="px-3 py-3 border-b text-right">임금단가</th>
             <th class="px-3 py-3 border-b text-left">은행명</th>
-            <th class="px-3 py-3 border-b text-left">계좌번호 마스킹</th>
+            <th class="px-3 py-3 border-b text-left">계좌번호</th>
             <th class="px-3 py-3 border-b text-left">예금주</th>
             <th class="px-3 py-3 border-b text-left">상태</th>
             <th class="px-3 py-3 border-b">수정</th>
@@ -204,18 +205,39 @@ function cpms_workforce_status_label($status)
         </thead>
         <tbody class="divide-y divide-gray-100">
           <?php if (empty($workers)): ?>
-            <tr><td colspan="12" class="px-4 py-8 text-center text-gray-500">등록된 인력이 없습니다.</td></tr>
+            <tr><td colspan="13" class="px-4 py-8 text-center text-gray-500">등록된 인력이 없습니다.</td></tr>
           <?php else: ?>
             <?php foreach ($workers as $w): ?>
+              <?php
+                $residentMasked = isset($w['resident_no_masked']) ? trim((string)$w['resident_no_masked']) : '';
+                if ($residentMasked === '') $residentMasked = '-';
+                $bankMasked = isset($w['bank_account_masked']) ? trim((string)$w['bank_account_masked']) : '';
+                if ($bankMasked === '') $bankMasked = '-';
+              ?>
               <tr>
                 <td class="px-3 py-3 text-center"><input type="checkbox" class="workforce-row-check" value="<?php echo (int)$w['id']; ?>"></td>
                 <td class="px-3 py-3 font-extrabold text-gray-900"><?php echo h($w['name']); ?></td>
                 <td class="px-3 py-3"><?php echo h($w['phone']); ?></td>
+                <td class="px-3 py-3" data-sensitive-cell>
+                  <div class="cpms-sensitive-wrap">
+                    <span class="cpms-sensitive-value" data-sensitive-display data-masked="<?php echo h($residentMasked); ?>"><?php echo h($residentMasked); ?></span>
+                    <?php if ($residentMasked !== '-'): ?>
+                      <button type="button" class="cpms-sensitive-toggle" data-workforce-sensitive-toggle data-worker-id="<?php echo (int)$w['id']; ?>" data-sensitive-field="resident_no" data-sensitive-visible="0">마스킹 해제</button>
+                    <?php endif; ?>
+                  </div>
+                </td>
                 <td class="px-3 py-3"><?php echo h($w['job_type']); ?></td>
                 <td class="px-3 py-3"><?php echo h($w['agency_name']); ?></td>
                 <td class="px-3 py-3 text-right"><?php echo number_format((int)$w['daily_wage']); ?></td>
                 <td class="px-3 py-3"><?php echo h($w['bank_name']); ?></td>
-                <td class="px-3 py-3"><?php echo h($w['bank_account_masked']); ?></td>
+                <td class="px-3 py-3" data-sensitive-cell>
+                  <div class="cpms-sensitive-wrap">
+                    <span class="cpms-sensitive-value" data-sensitive-display data-masked="<?php echo h($bankMasked); ?>"><?php echo h($bankMasked); ?></span>
+                    <?php if ($bankMasked !== '-'): ?>
+                      <button type="button" class="cpms-sensitive-toggle" data-workforce-sensitive-toggle data-worker-id="<?php echo (int)$w['id']; ?>" data-sensitive-field="bank_account" data-sensitive-visible="0">마스킹 해제</button>
+                    <?php endif; ?>
+                  </div>
+                </td>
                 <td class="px-3 py-3"><?php echo h($w['account_holder']); ?></td>
                 <td class="px-3 py-3"><?php echo h(cpms_workforce_status_label($w['status'])); ?></td>
                 <td class="px-3 py-3 text-center"><a class="px-3 py-2 rounded-xl border border-gray-200 font-bold" href="?r=admin/workforce_form&id=<?php echo (int)$w['id']; ?>">수정</a></td>
