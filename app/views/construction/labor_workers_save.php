@@ -79,33 +79,77 @@ try {
         exit;
     }
 
+    if ($action === 'apply_latest_wage') {
+        if (!cpms_labor_load_workforce_services()) {
+            flash_set('error', '인력관리 서비스를 찾을 수 없습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $repo = new WorkerRepository($pdo);
+        $stRows = $pdo->prepare("SELECT id, worker_id FROM cpms_project_labor_workers
+                                 WHERE project_id = :pid
+                                   AND is_deleted = 0
+                                   AND worker_id IS NOT NULL
+                                   AND worker_id > 0");
+        $stRows->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stRows->execute();
+        $projectRows = $stRows->fetchAll(PDO::FETCH_ASSOC);
+        $updated = 0;
+
+        $stLatest = $pdo->prepare("UPDATE cpms_project_labor_workers
+                                   SET worker_name_snapshot = :worker_name_snapshot,
+                                       agency_name_snapshot = :agency_name_snapshot,
+                                       job_type_snapshot = :job_type_snapshot,
+                                       daily_wage_snapshot = :daily_wage_snapshot,
+                                       deposit_rate = :deposit_rate,
+                                       company_name = :company_name,
+                                       source_type = 'workforce',
+                                       matched_status = 'matched',
+                                       updated_at = :now
+                                   WHERE id = :id
+                                     AND project_id = :pid");
+
+        foreach ($projectRows as $projectRow) {
+            $masterId = isset($projectRow['worker_id']) ? (int)$projectRow['worker_id'] : 0;
+            $projectWorkerId = isset($projectRow['id']) ? (int)$projectRow['id'] : 0;
+            if ($masterId <= 0 || $projectWorkerId <= 0) continue;
+            $master = $repo->getById($masterId, false);
+            if (!$master || !is_array($master)) continue;
+            $payload = cpms_labor_worker_payload_from_workforce($master, 'workforce', 'matched');
+            $stLatest->bindValue(':worker_name_snapshot', $payload['worker_name_snapshot']);
+            $stLatest->bindValue(':agency_name_snapshot', $payload['agency_name_snapshot']);
+            $stLatest->bindValue(':job_type_snapshot', $payload['job_type_snapshot']);
+            $stLatest->bindValue(':daily_wage_snapshot', (int)$payload['daily_wage_snapshot'], PDO::PARAM_INT);
+            $stLatest->bindValue(':deposit_rate', (int)$payload['deposit_rate'], PDO::PARAM_INT);
+            $stLatest->bindValue(':company_name', $payload['company_name']);
+            $stLatest->bindValue(':now', $now);
+            $stLatest->bindValue(':id', $projectWorkerId, PDO::PARAM_INT);
+            $stLatest->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stLatest->execute();
+            $updated++;
+        }
+
+        flash_set('success', '최신 단가를 적용했습니다. 업데이트 ' . (int)$updated . '건');
+        header('Location: ' . $redirect);
+        exit;
+    }
+
     // 인원작성 저장 기능: 인원별 임금/계좌 정보 저장
     if ($action === 'save') {
         if (count($workers) > 0) {
-            $sql = "UPDATE cpms_project_labor_workers
-                    SET phone = :phone,
-                        address = :address,
-                        deposit_rate = :deposit_rate,
-                        bank_account = :bank_account,
-                        bank_name = :bank_name,
-                        account_holder = :account_holder,
-                        company_name = :company_name,
-                        updated_at = :now
-                    WHERE id = :id
-                      AND project_id = :pid
-                      AND is_deleted = 0";
-            $stUp = $pdo->prepare($sql);
-
             foreach ($workers as $workerIdRaw => $fields) {
                 $workerId = (int)$workerIdRaw;
                 if ($workerId <= 0 || !is_array($fields)) continue;
 
                 $phone = isset($fields['phone']) ? trim((string)$fields['phone']) : '';
                 $address = isset($fields['address']) ? trim((string)$fields['address']) : '';
-                $bankAccount = isset($fields['bank_account']) ? trim((string)$fields['bank_account']) : '';
-                $bankName = isset($fields['bank_name']) ? trim((string)$fields['bank_name']) : '';
-                $accountHolder = isset($fields['account_holder']) ? trim((string)$fields['account_holder']) : '';
                 $companyName = isset($fields['company_name']) ? trim((string)$fields['company_name']) : '';
+                $jobTypeSnapshot = isset($fields['job_type_snapshot']) ? trim((string)$fields['job_type_snapshot']) : '';
+                $workerNameSnapshot = isset($fields['worker_name_snapshot']) ? trim((string)$fields['worker_name_snapshot']) : '';
+                $sourceType = isset($fields['source_type']) ? trim((string)$fields['source_type']) : 'manual';
+                $matchedStatus = isset($fields['matched_status']) ? trim((string)$fields['matched_status']) : 'manual';
+                $masterWorkerId = isset($fields['worker_id']) ? (int)$fields['worker_id'] : 0;
 
                 $depositRateRaw = isset($fields['deposit_rate']) ? trim((string)$fields['deposit_rate']) : '';
                 $depositRateNormalized = preg_replace('/[^0-9\-]/', '', $depositRateRaw);
@@ -116,16 +160,67 @@ try {
                     if ($depositRate < 0) $depositRate = 0;
                 }
 
-                $stUp->bindValue(':phone', $phone === '' ? null : $phone, $phone === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                $stUp->bindValue(':address', $address === '' ? null : $address, $address === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                $stUp->bindValue(':deposit_rate', $depositRate, PDO::PARAM_INT);
-                $stUp->bindValue(':bank_account', $bankAccount === '' ? null : $bankAccount, $bankAccount === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                $stUp->bindValue(':bank_name', $bankName === '' ? null : $bankName, $bankName === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                $stUp->bindValue(':account_holder', $accountHolder === '' ? null : $accountHolder, $accountHolder === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                $stUp->bindValue(':company_name', $companyName === '' ? null : $companyName, $companyName === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
-                $stUp->bindValue(':now', $now);
-                $stUp->bindValue(':id', $workerId, PDO::PARAM_INT);
-                $stUp->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                if ($sourceType === '') $sourceType = 'manual';
+                if ($matchedStatus === '') $matchedStatus = ($masterWorkerId > 0 ? 'matched' : 'manual');
+
+                $set = array(
+                    'phone = :phone',
+                    'address = :address',
+                    'deposit_rate = :deposit_rate',
+                    'worker_id = :worker_id',
+                    'worker_name_snapshot = :worker_name_snapshot',
+                    'agency_name_snapshot = :agency_name_snapshot',
+                    'job_type_snapshot = :job_type_snapshot',
+                    'daily_wage_snapshot = :daily_wage_snapshot',
+                    'source_type = :source_type',
+                    'matched_status = :matched_status',
+                    'company_name = :company_name',
+                    'updated_at = :now'
+                );
+                $params = array(
+                    ':phone' => $phone === '' ? null : $phone,
+                    ':address' => $address === '' ? null : $address,
+                    ':deposit_rate' => $depositRate,
+                    ':worker_id' => $masterWorkerId > 0 ? $masterWorkerId : null,
+                    ':worker_name_snapshot' => $workerNameSnapshot === '' ? null : $workerNameSnapshot,
+                    ':agency_name_snapshot' => $companyName === '' ? null : $companyName,
+                    ':job_type_snapshot' => $jobTypeSnapshot === '' ? null : $jobTypeSnapshot,
+                    ':daily_wage_snapshot' => $depositRate,
+                    ':source_type' => $sourceType,
+                    ':matched_status' => $matchedStatus,
+                    ':company_name' => $companyName === '' ? null : $companyName,
+                    ':now' => $now,
+                    ':id' => $workerId,
+                    ':pid' => $projectId,
+                );
+
+                if (array_key_exists('bank_account', $fields)) {
+                    $set[] = 'bank_account = :bank_account';
+                    $bankAccount = trim((string)$fields['bank_account']);
+                    $params[':bank_account'] = $bankAccount === '' ? null : $bankAccount;
+                }
+                if (array_key_exists('bank_name', $fields)) {
+                    $set[] = 'bank_name = :bank_name';
+                    $bankName = trim((string)$fields['bank_name']);
+                    $params[':bank_name'] = $bankName === '' ? null : $bankName;
+                }
+                if (array_key_exists('account_holder', $fields)) {
+                    $set[] = 'account_holder = :account_holder';
+                    $accountHolder = trim((string)$fields['account_holder']);
+                    $params[':account_holder'] = $accountHolder === '' ? null : $accountHolder;
+                }
+
+                $sql = "UPDATE cpms_project_labor_workers
+                        SET " . implode(', ', $set) . "
+                        WHERE id = :id
+                          AND project_id = :pid
+                          AND is_deleted = 0";
+                $stUp = $pdo->prepare($sql);
+                foreach ($params as $paramName => $paramValue) {
+                    if ($paramValue === null) $stUp->bindValue($paramName, null, PDO::PARAM_NULL);
+                    else if (is_int($paramValue)) $stUp->bindValue($paramName, $paramValue, PDO::PARAM_INT);
+                    else $stUp->bindValue($paramName, $paramValue);
+                }
                 $stUp->execute();
             }
         }

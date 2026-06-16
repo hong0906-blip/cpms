@@ -285,12 +285,31 @@ foreach ($timesheetWorkers as $worker) {
     require __DIR__ . '/partials/labor_sheet_table.php';
     ?>
 <?php else: ?>
+    <?php $showSensitiveLaborFields = (\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees()); ?>
     <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
         <h4 class="text-lg font-extrabold text-gray-900">인원 작성</h4>
         <div class="text-sm text-gray-600 mt-1">임금 단가 및 계좌 정보를 등록합니다.</div>
         <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 선택해 프로젝트에 추가합니다.</div>
 
-        <div class="mt-4 grid gap-3 lg:grid-cols-2">
+        <form id="workforceAddForm" method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" style="display:none;">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+            <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+            <input type="hidden" name="labor_tab" value="workers">
+            <input type="hidden" name="workforce_worker_id" id="workforceAddWorkerId" value="">
+        </form>
+
+        <div class="mt-4 grid gap-3 lg:grid-cols-3">
+            <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                <div class="text-sm font-extrabold text-gray-900">인력관리에서 가져오기</div>
+                <div class="text-xs text-gray-600 mt-1">등록된 인력을 검색해 단가와 업체명을 자동 입력합니다.</div>
+                <div class="mt-3 flex justify-end">
+                    <button type="button" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-extrabold" data-workforce-modal-open>
+                        인력관리에서 가져오기
+                    </button>
+                </div>
+            </div>
+
             <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" class="rounded-2xl border border-gray-200 p-4">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                 <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
@@ -341,6 +360,16 @@ foreach ($timesheetWorkers as $worker) {
             </form>
         </div>
 
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_workers_save" class="mt-4 flex justify-end">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+            <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+            <input type="hidden" name="labor_tab" value="workers">
+            <button type="submit" name="action" value="apply_latest_wage" class="px-4 py-2 rounded-2xl border border-emerald-200 text-emerald-700 font-extrabold" onclick="return confirm('인력관리의 최신 단가를 현재 프로젝트 인원에 적용할까요?');">
+                최신 단가 적용
+            </button>
+        </form>
+
         <!-- 인원작성 저장 기능 -->
         <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_workers_save" class="mt-4">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -355,11 +384,15 @@ foreach ($timesheetWorkers as $worker) {
                         <th class="border border-gray-200 px-2 py-2">성명</th>
                         <th class="border border-gray-200 px-2 py-2">핸드폰 번호</th>
                         <th class="border border-gray-200 px-2 py-2">주소</th>
+                        <th class="border border-gray-200 px-2 py-2">구분/직종</th>
                         <th class="border border-gray-200 px-2 py-2">임금단가</th>
-                        <th class="border border-gray-200 px-2 py-2">계좌번호</th>
-                        <th class="border border-gray-200 px-2 py-2">은행명</th>
-                        <th class="border border-gray-200 px-2 py-2">예금주</th>
+                        <?php if ($showSensitiveLaborFields): ?>
+                            <th class="border border-gray-200 px-2 py-2">계좌번호</th>
+                            <th class="border border-gray-200 px-2 py-2">은행명</th>
+                            <th class="border border-gray-200 px-2 py-2">예금주</th>
+                        <?php endif; ?>
                         <th class="border border-gray-200 px-2 py-2">인력사업체명</th>
+                        <th class="border border-gray-200 px-2 py-2">상태</th>
                         <th class="border border-gray-200 px-2 py-2">삭제</th>
                     </tr>
                     </thead>
@@ -372,9 +405,21 @@ foreach ($timesheetWorkers as $worker) {
                             $workerId = isset($row['id']) ? (int)$row['id'] : 0;
                             $companyName = isset($member['company_name']) ? trim((string)$member['company_name']) : '';
                             if ($companyName === '') $companyName = '창명건설';
+                            $masterWorkerId = isset($member['worker_id']) ? (int)$member['worker_id'] : 0;
+                            $jobTypeSnapshot = isset($member['job_type_snapshot']) ? trim((string)$member['job_type_snapshot']) : '';
+                            $sourceType = isset($member['source_type']) ? trim((string)$member['source_type']) : 'manual';
+                            $matchedStatus = isset($member['matched_status']) ? trim((string)$member['matched_status']) : 'manual';
+                            $statusText = '수동입력';
+                            if ($matchedStatus === 'matched') $statusText = '인력관리 등록됨';
+                            else if ($matchedStatus === 'duplicate') $statusText = '동명이인 확인 필요';
+                            else if ($matchedStatus === 'not_found') $statusText = '인력관리 미등록';
                             ?>
                             <tr class="<?php echo ($rowIndex % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
                                 <td class="border border-gray-200 px-2 py-2">
+                                    <input type="hidden" name="workers[<?php echo $workerId; ?>][worker_id]" value="<?php echo (int)$masterWorkerId; ?>">
+                                    <input type="hidden" name="workers[<?php echo $workerId; ?>][worker_name_snapshot]" value="<?php echo h(isset($member['name']) ? $member['name'] : ''); ?>">
+                                    <input type="hidden" name="workers[<?php echo $workerId; ?>][source_type]" value="<?php echo h($sourceType); ?>">
+                                    <input type="hidden" name="workers[<?php echo $workerId; ?>][matched_status]" value="<?php echo h($matchedStatus); ?>">
                                     <input class="w-full px-2 py-1 border border-gray-200 rounded-lg bg-gray-100" type="text" value="<?php echo h(isset($member['name']) ? $member['name'] : ''); ?>" placeholder="성명" readonly>
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
@@ -384,19 +429,27 @@ foreach ($timesheetWorkers as $worker) {
                                     <input name="workers[<?php echo $workerId; ?>][address]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['address']) ? $member['address'] : ''); ?>" placeholder="주소">
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
+                                    <input name="workers[<?php echo $workerId; ?>][job_type_snapshot]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h($jobTypeSnapshot); ?>" placeholder="구분/직종">
+                                </td>
+                                <td class="border border-gray-200 px-2 py-2">
                                     <input name="workers[<?php echo $workerId; ?>][deposit_rate]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['deposit_rate']) ? $member['deposit_rate'] : '0'); ?>" placeholder="임금단가">
                                 </td>
-                                <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][bank_account]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['bank_account']) ? $member['bank_account'] : ''); ?>" placeholder="계좌번호">
-                                </td>
-                                <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][bank_name]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['bank_name']) ? $member['bank_name'] : ''); ?>" placeholder="은행명">
-                                </td>
-                                <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][account_holder]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['account_holder']) ? $member['account_holder'] : ''); ?>" placeholder="예금주">
-                                </td>
+                                <?php if ($showSensitiveLaborFields): ?>
+                                    <td class="border border-gray-200 px-2 py-2">
+                                        <input name="workers[<?php echo $workerId; ?>][bank_account]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['bank_account']) ? $member['bank_account'] : ''); ?>" placeholder="계좌번호">
+                                    </td>
+                                    <td class="border border-gray-200 px-2 py-2">
+                                        <input name="workers[<?php echo $workerId; ?>][bank_name]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['bank_name']) ? $member['bank_name'] : ''); ?>" placeholder="은행명">
+                                    </td>
+                                    <td class="border border-gray-200 px-2 py-2">
+                                        <input name="workers[<?php echo $workerId; ?>][account_holder]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['account_holder']) ? $member['account_holder'] : ''); ?>" placeholder="예금주">
+                                    </td>
+                                <?php endif; ?>
                                 <td class="border border-gray-200 px-2 py-2">
                                     <input name="workers[<?php echo $workerId; ?>][company_name]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h($companyName); ?>" placeholder="인력사업체명">
+                                </td>
+                                <td class="border border-gray-200 px-2 py-2 text-xs font-bold text-gray-700">
+                                    <?php echo h($statusText); ?>
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2 text-center">
                                     <?php if ($workerId > 0): ?>
@@ -415,7 +468,7 @@ foreach ($timesheetWorkers as $worker) {
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr class="bg-white">
-                            <td colspan="9" class="border border-gray-200 px-2 py-6 text-center text-gray-500">등록된 인원이 없습니다.</td>
+                            <td colspan="<?php echo $showSensitiveLaborFields ? 11 : 8; ?>" class="border border-gray-200 px-2 py-6 text-center text-gray-500">등록된 인원이 없습니다.</td>
                         </tr>
                     <?php endif; ?>
                     </tbody>
@@ -429,6 +482,30 @@ foreach ($timesheetWorkers as $worker) {
                 </button>
             </div>
         </form>    
+
+        <div id="workforceSearchModal" class="fixed inset-0 z-50 hidden">
+            <div class="absolute inset-0 bg-black/40" data-workforce-modal-close></div>
+            <div class="absolute inset-0 flex items-center justify-center p-4">
+                <div class="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+                    <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+                        <div>
+                            <div class="text-lg font-extrabold text-gray-900">인력관리에서 가져오기</div>
+                            <div class="text-xs text-gray-500 mt-1">이름을 검색하고 선택하세요.</div>
+                        </div>
+                        <button type="button" class="px-3 py-2 rounded-xl border border-gray-200" data-workforce-modal-close>닫기</button>
+                    </div>
+                    <div class="p-5">
+                        <div class="flex gap-2">
+                            <input id="workforceSearchInput" class="flex-1 px-4 py-3 rounded-2xl border border-gray-200" placeholder="이름을 입력하세요">
+                            <button type="button" id="workforceSearchButton" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">검색</button>
+                        </div>
+                        <div id="workforceSearchResults" class="mt-4 space-y-2 text-sm"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script defer src="<?php echo h(asset_url('assets/js/labor_personnel.js')); ?>"></script>
     </div>
 <?php endif; ?>
 

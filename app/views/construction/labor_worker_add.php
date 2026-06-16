@@ -30,6 +30,7 @@ if (!csrf_check($token)) {
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $directMemberId = isset($_POST['direct_member_id']) ? (int)$_POST['direct_member_id'] : 0;
+$workforceWorkerId = isset($_POST['workforce_worker_id']) ? (int)$_POST['workforce_worker_id'] : 0;
 $manualName = isset($_POST['manual_name']) ? trim((string)$_POST['manual_name']) : '';
 $manualCompanyName = isset($_POST['manual_company_name']) ? trim((string)$_POST['manual_company_name']) : '';
 $month = isset($_POST['month']) ? trim((string)$_POST['month']) : '';
@@ -47,7 +48,7 @@ if ($projectId <= 0) {
     exit;
 }
 
-if ($directMemberId <= 0 && $manualName === '') {
+if ($directMemberId <= 0 && $workforceWorkerId <= 0 && $manualName === '') {
     flash_set('error', '추가할 인원 정보를 입력하세요.');
     header('Location: ' . $redirect);
     exit;
@@ -71,6 +72,28 @@ try {
     $source = 'manual';
     $name = $manualName;
     $companyName = $manualCompanyName === '' ? '창명건설' : $manualCompanyName;
+    $workforcePayload = null;
+
+    if ($workforceWorkerId > 0) {
+        if (!cpms_labor_load_workforce_services()) {
+            flash_set('error', '인력관리 서비스를 찾을 수 없습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $workerRepo = new WorkerRepository($pdo);
+        $masterWorker = $workerRepo->getById($workforceWorkerId, false);
+        if (!$masterWorker || !is_array($masterWorker)) {
+            flash_set('error', '인력관리 등록자를 찾을 수 없습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $source = 'workforce';
+        $workforcePayload = cpms_labor_worker_payload_from_workforce($masterWorker, 'workforce', 'matched');
+        $name = isset($workforcePayload['name']) ? trim((string)$workforcePayload['name']) : '';
+        $companyName = isset($workforcePayload['company_name']) ? trim((string)$workforcePayload['company_name']) : '';
+    }
 
     if ($directMemberId > 0) {
         if (!cpms_table_exists_labor($pdo, 'direct_team_members')) {
@@ -118,6 +141,38 @@ try {
             $stUp->bindValue(':now', $now);
             $stUp->bindValue(':id', $existingId, PDO::PARAM_INT);
             $stUp->execute();
+        } else if ($source === 'workforce' && is_array($workforcePayload)) {
+            $stUp = $pdo->prepare("UPDATE cpms_project_labor_workers
+                                   SET source = 'workforce',
+                                       direct_member_id = NULL,
+                                       worker_id = :worker_id,
+                                       worker_name_snapshot = :worker_name_snapshot,
+                                       agency_name_snapshot = :agency_name_snapshot,
+                                       job_type_snapshot = :job_type_snapshot,
+                                       daily_wage_snapshot = :daily_wage_snapshot,
+                                       source_type = :source_type,
+                                       matched_status = :matched_status,
+                                       phone = :phone,
+                                       address = :address,
+                                       deposit_rate = :deposit_rate,
+                                       company_name = :company_name,
+                                       is_deleted = 0,
+                                       updated_at = :now
+                                   WHERE id = :id");
+            $stUp->bindValue(':worker_id', (int)$workforcePayload['worker_id'], PDO::PARAM_INT);
+            $stUp->bindValue(':worker_name_snapshot', $workforcePayload['worker_name_snapshot']);
+            $stUp->bindValue(':agency_name_snapshot', $workforcePayload['agency_name_snapshot']);
+            $stUp->bindValue(':job_type_snapshot', $workforcePayload['job_type_snapshot']);
+            $stUp->bindValue(':daily_wage_snapshot', (int)$workforcePayload['daily_wage_snapshot'], PDO::PARAM_INT);
+            $stUp->bindValue(':source_type', $workforcePayload['source_type']);
+            $stUp->bindValue(':matched_status', $workforcePayload['matched_status']);
+            $stUp->bindValue(':phone', $workforcePayload['phone']);
+            $stUp->bindValue(':address', $workforcePayload['address']);
+            $stUp->bindValue(':deposit_rate', (int)$workforcePayload['deposit_rate'], PDO::PARAM_INT);
+            $stUp->bindValue(':company_name', $workforcePayload['company_name']);
+            $stUp->bindValue(':now', $now);
+            $stUp->bindValue(':id', $existingId, PDO::PARAM_INT);
+            $stUp->execute();
         } else {
             $stUp = $pdo->prepare("UPDATE cpms_project_labor_workers
                                    SET source = 'manual',
@@ -141,6 +196,31 @@ try {
             $stIns->bindValue(':mid', $directMemberId, PDO::PARAM_INT);
             $stIns->bindValue(':now', $now);
             $stIns->execute();
+        } else if ($source === 'workforce' && is_array($workforcePayload)) {
+            $stIns = $pdo->prepare("INSERT INTO cpms_project_labor_workers
+                                    (project_id, name, source, direct_member_id, worker_id,
+                                     worker_name_snapshot, agency_name_snapshot, job_type_snapshot, daily_wage_snapshot,
+                                     source_type, matched_status, phone, address, deposit_rate, company_name,
+                                     is_deleted, created_at, updated_at)
+                                    VALUES (:pid, :name, 'workforce', NULL, :worker_id,
+                                     :worker_name_snapshot, :agency_name_snapshot, :job_type_snapshot, :daily_wage_snapshot,
+                                     :source_type, :matched_status, :phone, :address, :deposit_rate, :company_name,
+                                     0, :now, :now)");
+            $stIns->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stIns->bindValue(':name', $name);
+            $stIns->bindValue(':worker_id', (int)$workforcePayload['worker_id'], PDO::PARAM_INT);
+            $stIns->bindValue(':worker_name_snapshot', $workforcePayload['worker_name_snapshot']);
+            $stIns->bindValue(':agency_name_snapshot', $workforcePayload['agency_name_snapshot']);
+            $stIns->bindValue(':job_type_snapshot', $workforcePayload['job_type_snapshot']);
+            $stIns->bindValue(':daily_wage_snapshot', (int)$workforcePayload['daily_wage_snapshot'], PDO::PARAM_INT);
+            $stIns->bindValue(':source_type', $workforcePayload['source_type']);
+            $stIns->bindValue(':matched_status', $workforcePayload['matched_status']);
+            $stIns->bindValue(':phone', $workforcePayload['phone']);
+            $stIns->bindValue(':address', $workforcePayload['address']);
+            $stIns->bindValue(':deposit_rate', (int)$workforcePayload['deposit_rate'], PDO::PARAM_INT);
+            $stIns->bindValue(':company_name', $workforcePayload['company_name']);
+            $stIns->bindValue(':now', $now);
+            $stIns->execute();
         } else {
             $stIns = $pdo->prepare("INSERT INTO cpms_project_labor_workers
                                     (project_id, name, source, direct_member_id, company_name, is_deleted, created_at, updated_at)
@@ -153,7 +233,13 @@ try {
         }
     }
 
-    flash_set('success', $source === 'direct' ? '직영팀 인원이 추가되었습니다.' : '인원이 추가되었습니다.');
+    if ($source === 'direct') {
+        flash_set('success', '직영팀 인원이 추가되었습니다.');
+    } else if ($source === 'workforce') {
+        flash_set('success', '인력관리 등록자를 가져왔습니다.');
+    } else {
+        flash_set('success', '인원이 추가되었습니다.');
+    }
     header('Location: ' . $redirect);
     exit;
 

@@ -16,6 +16,16 @@ if (!function_exists('cpms_normalize_worker_key')) {
     }
 }
 
+if (!function_exists('cpms_labor_load_workforce_services')) {
+    function cpms_labor_load_workforce_services() {
+        $path = __DIR__ . '/../../../../services/WorkerRepository.php';
+        if (is_file($path)) {
+            require_once $path;
+        }
+        return class_exists('WorkerRepository');
+    }
+}
+
 if (!function_exists('cpms_labor_cache_key')) {
     function cpms_labor_cache_key($pdo, $suffix) {
         $prefix = 'nopdo';
@@ -1021,6 +1031,13 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
                     name VARCHAR(100) NOT NULL,
                     source VARCHAR(20) NOT NULL DEFAULT 'manual',
                     direct_member_id INT UNSIGNED NULL,
+                    worker_id INT NULL,
+                    worker_name_snapshot VARCHAR(100) NULL,
+                    agency_name_snapshot VARCHAR(100) NULL,
+                    job_type_snapshot VARCHAR(100) NULL,
+                    daily_wage_snapshot INT NOT NULL DEFAULT 0,
+                    source_type VARCHAR(30) NOT NULL DEFAULT 'manual',
+                    matched_status VARCHAR(30) NOT NULL DEFAULT 'manual',
                     resident_no VARCHAR(30) NULL,
                     phone VARCHAR(30) NULL,
                     address VARCHAR(255) NULL,
@@ -1032,7 +1049,9 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
                     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
-                    UNIQUE KEY uk_project_labor_workers (project_id, name)
+                    UNIQUE KEY uk_project_labor_workers (project_id, name),
+                    KEY idx_project_labor_worker_id(worker_id),
+                    KEY idx_project_labor_match(project_id, matched_status)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
             }
 
@@ -1041,6 +1060,13 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
             $colMap = array();
             foreach ($cols as $c) $colMap[(string)$c] = true;
             $addCols = array(
+                'worker_id' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN worker_id INT NULL AFTER direct_member_id",
+                'worker_name_snapshot' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN worker_name_snapshot VARCHAR(100) NULL AFTER worker_id",
+                'agency_name_snapshot' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN agency_name_snapshot VARCHAR(100) NULL AFTER worker_name_snapshot",
+                'job_type_snapshot' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN job_type_snapshot VARCHAR(100) NULL AFTER agency_name_snapshot",
+                'daily_wage_snapshot' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN daily_wage_snapshot INT NOT NULL DEFAULT 0 AFTER job_type_snapshot",
+                'source_type' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN source_type VARCHAR(30) NOT NULL DEFAULT 'manual' AFTER daily_wage_snapshot",
+                'matched_status' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN matched_status VARCHAR(30) NOT NULL DEFAULT 'manual' AFTER source_type",
                 'resident_no' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN resident_no VARCHAR(30) NULL AFTER direct_member_id",
                 'phone' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN phone VARCHAR(30) NULL AFTER resident_no",
                 'address' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN address VARCHAR(255) NULL AFTER phone",
@@ -1053,6 +1079,21 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
             foreach ($addCols as $col => $sql) {
                 if (isset($colMap[$col])) continue;
                 $pdo->exec($sql);
+            }
+            $idxMap = array();
+            try {
+                $stIdx = $pdo->query("SHOW INDEX FROM cpms_project_labor_workers");
+                while ($idxRow = $stIdx->fetch(PDO::FETCH_ASSOC)) {
+                    if (isset($idxRow['Key_name'])) $idxMap[(string)$idxRow['Key_name']] = true;
+                }
+            } catch (Exception $e) {
+                $idxMap = array();
+            }
+            if (!isset($idxMap['idx_project_labor_worker_id'])) {
+                $pdo->exec("ALTER TABLE cpms_project_labor_workers ADD KEY idx_project_labor_worker_id(worker_id)");
+            }
+            if (!isset($idxMap['idx_project_labor_match'])) {
+                $pdo->exec("ALTER TABLE cpms_project_labor_workers ADD KEY idx_project_labor_match(project_id, matched_status)");
             }
             return true;
         } catch (Exception $e) {
@@ -1079,6 +1120,49 @@ if (!function_exists('cpms_load_project_labor_workers')) {
         }
         $cache[$cacheKey] = $rows;
         return $rows;
+    }
+}
+
+if (!function_exists('cpms_labor_worker_payload_from_workforce')) {
+    function cpms_labor_worker_payload_from_workforce($worker, $sourceType, $matchedStatus) {
+        if (!is_array($worker)) $worker = array();
+        $name = isset($worker['name']) ? trim((string)$worker['name']) : '';
+        $agencyName = isset($worker['agency_name']) ? trim((string)$worker['agency_name']) : '';
+        $jobType = isset($worker['job_type']) ? trim((string)$worker['job_type']) : '';
+        $dailyWage = isset($worker['daily_wage']) ? (int)$worker['daily_wage'] : 0;
+        if ($dailyWage < 0) $dailyWage = 0;
+
+        return array(
+            'worker_id' => isset($worker['id']) ? (int)$worker['id'] : 0,
+            'name' => $name,
+            'phone' => isset($worker['phone']) ? trim((string)$worker['phone']) : '',
+            'address' => isset($worker['address']) ? trim((string)$worker['address']) : '',
+            'deposit_rate' => $dailyWage,
+            'company_name' => $agencyName,
+            'worker_name_snapshot' => $name,
+            'agency_name_snapshot' => $agencyName,
+            'job_type_snapshot' => $jobType,
+            'daily_wage_snapshot' => $dailyWage,
+            'source_type' => trim((string)$sourceType) !== '' ? trim((string)$sourceType) : 'manual',
+            'matched_status' => trim((string)$matchedStatus) !== '' ? trim((string)$matchedStatus) : 'manual',
+        );
+    }
+}
+
+if (!function_exists('cpms_labor_match_workforce_by_name')) {
+    function cpms_labor_match_workforce_by_name($pdo, $name) {
+        if (!$pdo || trim((string)$name) === '') {
+            return array('status' => 'not_found', 'worker' => null, 'workers' => array());
+        }
+        if (!cpms_labor_load_workforce_services()) {
+            return array('status' => 'not_found', 'worker' => null, 'workers' => array());
+        }
+        try {
+            $repo = new WorkerRepository($pdo);
+            return $repo->matchWorker($name, '', '');
+        } catch (Exception $e) {
+            return array('status' => 'not_found', 'worker' => null, 'workers' => array());
+        }
     }
 }
 
@@ -1115,11 +1199,49 @@ if (!function_exists('cpms_sync_project_labor_workers_from_attendance')) {
             if (isset($existing[$key])) continue;
             try {
                 $now = date('Y-m-d H:i:s');
+                $match = cpms_labor_match_workforce_by_name($pdo, $name);
+                $matchedStatus = isset($match['status']) ? (string)$match['status'] : 'not_found';
+                $payload = array(
+                    'worker_id' => 0,
+                    'name' => $name,
+                    'phone' => '',
+                    'address' => '',
+                    'deposit_rate' => 0,
+                    'company_name' => '',
+                    'worker_name_snapshot' => $name,
+                    'agency_name_snapshot' => '',
+                    'job_type_snapshot' => '',
+                    'daily_wage_snapshot' => 0,
+                    'source_type' => 'shiftee',
+                    'matched_status' => $matchedStatus === 'duplicate' ? 'duplicate' : 'not_found',
+                );
+                if ($matchedStatus === 'matched' && isset($match['worker']) && is_array($match['worker'])) {
+                    $payload = cpms_labor_worker_payload_from_workforce($match['worker'], 'shiftee', 'matched');
+                    if (trim((string)$payload['name']) === '') $payload['name'] = $name;
+                }
                 $stIns = $pdo->prepare("INSERT INTO cpms_project_labor_workers
-                                        (project_id, name, source, direct_member_id, is_deleted, created_at, updated_at)
-                                        VALUES (:pid, :name, 'attendance', NULL, 0, :now, :now)");
+                                        (project_id, name, source, direct_member_id, worker_id,
+                                         worker_name_snapshot, agency_name_snapshot, job_type_snapshot, daily_wage_snapshot,
+                                         source_type, matched_status, phone, address, deposit_rate, company_name,
+                                         is_deleted, created_at, updated_at)
+                                        VALUES (:pid, :name, 'attendance', NULL, :worker_id,
+                                         :worker_name_snapshot, :agency_name_snapshot, :job_type_snapshot, :daily_wage_snapshot,
+                                         :source_type, :matched_status, :phone, :address, :deposit_rate, :company_name,
+                                         0, :now, :now)");
                 $stIns->bindValue(':pid', $projectId, PDO::PARAM_INT);
-                $stIns->bindValue(':name', $name);
+                $stIns->bindValue(':name', $payload['name']);
+                if ((int)$payload['worker_id'] > 0) $stIns->bindValue(':worker_id', (int)$payload['worker_id'], PDO::PARAM_INT);
+                else $stIns->bindValue(':worker_id', null, PDO::PARAM_NULL);
+                $stIns->bindValue(':worker_name_snapshot', $payload['worker_name_snapshot']);
+                $stIns->bindValue(':agency_name_snapshot', $payload['agency_name_snapshot']);
+                $stIns->bindValue(':job_type_snapshot', $payload['job_type_snapshot']);
+                $stIns->bindValue(':daily_wage_snapshot', (int)$payload['daily_wage_snapshot'], PDO::PARAM_INT);
+                $stIns->bindValue(':source_type', $payload['source_type']);
+                $stIns->bindValue(':matched_status', $payload['matched_status']);
+                $stIns->bindValue(':phone', $payload['phone']);
+                $stIns->bindValue(':address', $payload['address']);
+                $stIns->bindValue(':deposit_rate', (int)$payload['deposit_rate'], PDO::PARAM_INT);
+                $stIns->bindValue(':company_name', $payload['company_name']);
                 $stIns->bindValue(':now', $now);
                 $stIns->execute();
             } catch (Exception $e) {
@@ -1184,16 +1306,23 @@ if (!function_exists('cpms_build_project_worker_rows')) {
         foreach ($projectWorkers as $worker) {
             // 인원작성 저장 기능: 프로젝트 저장값을 우선 보존할 수 있도록 base data 구성
             $data = array(
-                'name' => isset($worker['name']) ? (string)$worker['name'] : '',
+                'name' => (isset($worker['worker_name_snapshot']) && trim((string)$worker['worker_name_snapshot']) !== '') ? (string)$worker['worker_name_snapshot'] : (isset($worker['name']) ? (string)$worker['name'] : ''),
+                'worker_id' => isset($worker['worker_id']) ? (int)$worker['worker_id'] : 0,
                 'resident_no' => isset($worker['resident_no']) ? (string)$worker['resident_no'] : '',
                 'phone' => isset($worker['phone']) ? (string)$worker['phone'] : '',
                 'address' => isset($worker['address']) ? (string)$worker['address'] : '',
-                'deposit_rate' => isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '0',
-                'daily_wage' => isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : '',                
+                'deposit_rate' => (isset($worker['daily_wage_snapshot']) && (int)$worker['daily_wage_snapshot'] > 0) ? (string)(int)$worker['daily_wage_snapshot'] : (isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '0'),
+                'daily_wage' => (isset($worker['daily_wage_snapshot']) && (int)$worker['daily_wage_snapshot'] > 0) ? (string)(int)$worker['daily_wage_snapshot'] : (isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : ''),
                 'bank_account' => isset($worker['bank_account']) ? (string)$worker['bank_account'] : '',
                 'bank_name' => isset($worker['bank_name']) ? (string)$worker['bank_name'] : '',
                 'account_holder' => isset($worker['account_holder']) ? (string)$worker['account_holder'] : '',
-                'company_name' => isset($worker['company_name']) ? (string)$worker['company_name'] : '',
+                'company_name' => (isset($worker['agency_name_snapshot']) && trim((string)$worker['agency_name_snapshot']) !== '') ? (string)$worker['agency_name_snapshot'] : (isset($worker['company_name']) ? (string)$worker['company_name'] : ''),
+                'job_type_snapshot' => isset($worker['job_type_snapshot']) ? (string)$worker['job_type_snapshot'] : '',
+                'agency_name_snapshot' => isset($worker['agency_name_snapshot']) ? (string)$worker['agency_name_snapshot'] : '',
+                'worker_name_snapshot' => isset($worker['worker_name_snapshot']) ? (string)$worker['worker_name_snapshot'] : '',
+                'daily_wage_snapshot' => isset($worker['daily_wage_snapshot']) ? (int)$worker['daily_wage_snapshot'] : 0,
+                'source_type' => isset($worker['source_type']) ? (string)$worker['source_type'] : (isset($worker['source']) ? (string)$worker['source'] : 'manual'),
+                'matched_status' => isset($worker['matched_status']) ? (string)$worker['matched_status'] : 'manual',
             );
             $directId = isset($worker['direct_member_id']) ? (int)$worker['direct_member_id'] : 0;
             if ($directId > 0 && isset($directMap[$directId])) {
@@ -1255,6 +1384,7 @@ if (!function_exists('cpms_build_timesheet_workers')) {
             $data = isset($row['data']) && is_array($row['data']) ? $row['data'] : array();
             $workers[count($workers)] = array(
                 'worker_id' => isset($row['id']) ? (int)$row['id'] : 0,
+                'master_worker_id' => isset($data['worker_id']) ? (int)$data['worker_id'] : 0,
                 'source' => isset($row['source']) ? (string)$row['source'] : '',
                 'name' => isset($data['name']) ? (string)$data['name'] : '',
                 'resident_no' => isset($data['resident_no']) ? (string)$data['resident_no'] : '',
@@ -1266,6 +1396,12 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'bank_name' => isset($data['bank_name']) ? (string)$data['bank_name'] : '',
                 'account_holder' => isset($data['account_holder']) ? (string)$data['account_holder'] : '',
                 'company_name' => (isset($data['company_name']) && trim((string)$data['company_name']) !== '') ? (string)$data['company_name'] : '창명건설',
+                'job_type_snapshot' => isset($data['job_type_snapshot']) ? (string)$data['job_type_snapshot'] : '',
+                'agency_name_snapshot' => isset($data['agency_name_snapshot']) ? (string)$data['agency_name_snapshot'] : '',
+                'worker_name_snapshot' => isset($data['worker_name_snapshot']) ? (string)$data['worker_name_snapshot'] : '',
+                'daily_wage_snapshot' => isset($data['daily_wage_snapshot']) ? (int)$data['daily_wage_snapshot'] : 0,
+                'source_type' => isset($data['source_type']) ? (string)$data['source_type'] : 'manual',
+                'matched_status' => isset($data['matched_status']) ? (string)$data['matched_status'] : 'manual',
             );
         }
         return $workers;

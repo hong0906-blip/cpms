@@ -143,6 +143,34 @@ if ($route === 'admin/employees_columns_save') {
     require_once __DIR__ . '/../app/views/admin/employees_columns_save.php';
     exit;
 }
+if ($route === 'admin/workforce_save') {
+    require_once __DIR__ . '/../app/views/admin/workforce_save.php';
+    exit;
+}
+if ($route === 'admin/workforce_delete') {
+    require_once __DIR__ . '/../app/views/admin/workforce_delete.php';
+    exit;
+}
+if ($route === 'admin/workforce_import_preview') {
+    require_once __DIR__ . '/../app/views/admin/workforce_import_preview.php';
+    exit;
+}
+if ($route === 'admin/workforce_import_process') {
+    require_once __DIR__ . '/../app/views/admin/workforce_import_process.php';
+    exit;
+}
+if ($route === 'ajax/workforce_search') {
+    require_once __DIR__ . '/../app/views/ajax/workforce_search.php';
+    exit;
+}
+if ($route === 'ajax/workforce_get') {
+    require_once __DIR__ . '/../app/views/ajax/workforce_get.php';
+    exit;
+}
+if ($route === 'ajax/workforce_match_shiftee') {
+    require_once __DIR__ . '/../app/views/ajax/workforce_match_shiftee.php';
+    exit;
+}
 
 if ($route === 'approval_google_chat_settings') { require_once __DIR__ . '/../app/views/approval/google_chat_settings.php'; exit; }
 if ($route === 'approval_google_chat_settings_save') { require_once __DIR__ . '/../app/views/approval/google_chat_settings_save.php'; exit; }
@@ -782,6 +810,22 @@ if ($route === 'project/header_mapping') {
     \App\Core\View::render('project/header_mapping', array(
         'title' => '단가표 헤더 매핑',
         'selectedMenu' => '공무',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+if ($route === 'admin/workforce_form') {
+    \App\Core\View::render('admin/workforce_form', array(
+        'title' => '인력관리',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+if ($route === 'admin/workforce_upload') {
+    \App\Core\View::render('admin/workforce_upload', array(
+        'title' => '인력관리 엑셀 업로드',
+        'selectedMenu' => '관리',
         'dashboardType' => $dashboardType,
     ));
     exit;

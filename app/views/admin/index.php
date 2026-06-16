@@ -25,6 +25,7 @@ if ($tab === '') {
 
 $tabs = array(
     'employees' => array('label' => '직원명부', 'icon' => 'users'),
+    'workforce' => array('label' => '인력관리', 'icon' => 'hard-hat'),
     'direct_team' => array('label' => '직영팀 명부', 'icon' => 'clipboard-list'),
     'direct_rates' => array('label' => '직영팀 설정', 'icon' => 'wallet'),
     'labor_calc' => array('label' => '노무비 계산', 'icon' => 'calculator'),
@@ -70,6 +71,8 @@ $GLOBALS['__admin_embedded'] = true;
 
 if ($tab === 'employees') {
     require __DIR__ . '/employees.php';
+} elseif ($tab === 'workforce') {
+    require __DIR__ . '/workforce.php';
 } elseif ($tab === 'direct_team') {
     require __DIR__ . '/direct_team.php';
 } elseif ($tab === 'direct_rates') {
