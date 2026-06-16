@@ -429,6 +429,10 @@ if (!function_exists('cpms_status_labor_total_between')) {
             $totalLabor += ((float)$workerSumGongsu) * $wageRate;
         }
 
+        if (function_exists('cpms_labor_force_amount_between')) {
+            $totalLabor += cpms_labor_force_amount_between($pdo, (int)$projectId, $startDate, $endDate);
+        }
+
         $cache[$cacheKey] = (float)$totalLabor;
         return $cache[$cacheKey];
     }
@@ -543,7 +547,7 @@ for ($m = 1; $m <= 12; $m++) {
     // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
     $expectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
     $confirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
-    $sales = $confirmedSales;
+    $sales = ($confirmedSales > 0) ? $confirmedSales : $expectedSales;
     $usedTotal = $labor + $equipment + $materials;
     $targetAmount = round($sales * 0.7);
     $costRateInfo = cpms_status_cost_rate_info($sales, $usedTotal);
@@ -643,21 +647,27 @@ foreach ($years as $yy) {
         $ym = sprintf('%04d-%02d', (int)$yy, $m);
         $laborRange = cpms_cost_period_range($ym, 'labor');
         $costRange = cpms_cost_period_range($ym, 'material');
+        $salesRange = cpms_cost_period_range($ym, 'sales');
 
         $laborStart = isset($laborRange['start']) ? (string)$laborRange['start'] : '';
         $laborEnd = isset($laborRange['end']) ? (string)$laborRange['end'] : '';
         $costStart = isset($costRange['start']) ? (string)$costRange['start'] : '';
         $costEnd = isset($costRange['end']) ? (string)$costRange['end'] : '';
+        $salesStart = isset($salesRange['start']) ? (string)$salesRange['start'] : '';
+        $salesEnd = isset($salesRange['end']) ? (string)$salesRange['end'] : '';
 
         $overallTotals['equipment'] += cpms_status_equipment_total_between($pdo, $pid, $costStart, $costEnd);
         $overallMaterialByCategory = cpms_status_material_category_sum_between($pdo, $pid, $costStart, $costEnd);
         $overallTotals['materials'] += (float)$overallMaterialByCategory['자재비'] + (float)$overallMaterialByCategory['구매품'] + (float)$overallMaterialByCategory['기타경비'];
         $overallTotals['labor'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
+
+        $overallExpectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
+        $overallConfirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
+        $overallTotals['expected_sales'] += $overallExpectedSales;
+        $overallTotals['confirmed_sales'] += $overallConfirmedSales;
+        $overallTotals['sales'] += ($overallConfirmedSales > 0) ? $overallConfirmedSales : $overallExpectedSales;
     }
 }
-$overallTotals['confirmed_sales'] = cpms_status_confirmed_sales_total_all($pdo, (int)$pid);
-$overallTotals['expected_sales'] = cpms_status_sales_total_all($pdo, (int)$pid);
-$overallTotals['sales'] = $overallTotals['confirmed_sales'];
 $safetyContractTotal = cpms_safety_cost_contract_total($pdo, (int)$pid);
 $safetyLimit110 = round($safetyContractTotal * 1.1);
 $safetyUsedTotal = cpms_safety_cost_total((int)$pid);
@@ -665,11 +675,11 @@ $safetyRemaining = $safetyLimit110 - $safetyUsedTotal;
 $safetyUseRate = ($safetyContractTotal > 0) ? (($safetyUsedTotal / $safetyContractTotal) * 100) : 0.0;
 $safetyRemainRate = ($safetyLimit110 > 0) ? (($safetyRemaining / $safetyLimit110) * 100) : 0.0;
 $overallTotals['safety'] = $safetyUsedTotal;
-$overallUsageTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['safety'] + $overallTotals['materials'];
 $overallInputCostTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['materials'];
+$overallUsageTotal = $overallInputCostTotal;
 $overallTargetAmount = round($overallTotals['sales'] * 0.7);
 $overallCostRateInfo = cpms_status_cost_rate_info($overallTotals['sales'], $overallInputCostTotal);
-$overallNetTotal = $overallTotals['sales'] - $overallUsageTotal;
+$overallNetTotal = $overallTotals['sales'] - $overallInputCostTotal;
 
 if ($maxMonthlyValue <= 0) $maxMonthlyValue = 1;
 if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
@@ -723,7 +733,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 
         <!-- 상황탭 매출 추가/색상변경/상단금액구조 변경 -->        
         <div class="mt-4 p-4 rounded-2xl bg-gray-900 text-white">
-            <div class="text-sm text-gray-200">확정 순이익 (총 확정매출 - 총 사용금액)</div>
+            <div class="text-sm text-gray-200">확정 순이익 (총 확정매출 - 총 투입원가)</div>
             <div class="text-3xl font-extrabold mt-1"><?php echo h(cpms_status_money($overallNetTotal)); ?></div>
         </div>
 
@@ -749,7 +759,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <div class="text-lg font-extrabold text-gray-900"><?php echo h($overallCostRateInfo['cost_rate_label']); ?></div>
             </div>
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                <div class="text-xs text-gray-500">총 사용금액</div>
+                <div class="text-xs text-gray-500">총 사용금액 (안전관리비 제외)</div>
                 <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallUsageTotal)); ?></div>
             </div>
         </div>
@@ -782,6 +792,9 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         <div class="mt-2 text-xs text-gray-500">안전관리비 사용금액은 안전섹션의 안전관리비 사용내역 원본 기준입니다.</div>
         <div class="mt-3 text-xs text-gray-500">
             투입원가 = 노무비 + 장비비 + 자재구입비 / 안전관리비 제외 · 투입목표금액 = 매출 × 70%
+        </div>
+        <div class="mt-1 text-xs text-gray-500">
+            확정매출은 월별 기성 입력 금액을 우선 적용하고, 해당 월 기성 입력이 없으면 예상매출을 대체 적용합니다.
         </div>
     </div>
 

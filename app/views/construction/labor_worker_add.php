@@ -73,6 +73,7 @@ try {
     $name = $manualName;
     $companyName = $manualCompanyName === '' ? '창명건설' : $manualCompanyName;
     $workforcePayload = null;
+    $savedWorkerId = 0;
 
     if ($workforceWorkerId > 0) {
         if (!cpms_labor_load_workforce_services()) {
@@ -141,6 +142,7 @@ try {
             $stUp->bindValue(':now', $now);
             $stUp->bindValue(':id', $existingId, PDO::PARAM_INT);
             $stUp->execute();
+            $savedWorkerId = $existingId;
         } else if ($source === 'workforce' && is_array($workforcePayload)) {
             $stUp = $pdo->prepare("UPDATE cpms_project_labor_workers
                                    SET source = 'workforce',
@@ -181,6 +183,7 @@ try {
             $stUp->bindValue(':now', $now);
             $stUp->bindValue(':id', $existingId, PDO::PARAM_INT);
             $stUp->execute();
+            $savedWorkerId = $existingId;
         } else {
             $stUp = $pdo->prepare("UPDATE cpms_project_labor_workers
                                    SET source = 'manual',
@@ -193,6 +196,7 @@ try {
             $stUp->bindValue(':now', $now);
             $stUp->bindValue(':id', $existingId, PDO::PARAM_INT);
             $stUp->execute();
+            $savedWorkerId = $existingId;
         }
     } else {
         if ($source === 'direct') {
@@ -204,6 +208,7 @@ try {
             $stIns->bindValue(':mid', $directMemberId, PDO::PARAM_INT);
             $stIns->bindValue(':now', $now);
             $stIns->execute();
+            $savedWorkerId = (int)$pdo->lastInsertId();
         } else if ($source === 'workforce' && is_array($workforcePayload)) {
             $stIns = $pdo->prepare("INSERT INTO cpms_project_labor_workers
                                     (project_id, name, source, direct_member_id, worker_id,
@@ -235,6 +240,7 @@ try {
             $stIns->bindValue(':company_name', $workforcePayload['company_name']);
             $stIns->bindValue(':now', $now);
             $stIns->execute();
+            $savedWorkerId = (int)$pdo->lastInsertId();
         } else {
             $stIns = $pdo->prepare("INSERT INTO cpms_project_labor_workers
                                     (project_id, name, source, direct_member_id, company_name, is_deleted, created_at, updated_at)
@@ -244,7 +250,12 @@ try {
             $stIns->bindValue(':company_name', $companyName, PDO::PARAM_STR);
             $stIns->bindValue(':now', $now);
             $stIns->execute();
+            $savedWorkerId = (int)$pdo->lastInsertId();
         }
+    }
+
+    if ($savedWorkerId > 0 && preg_match('/^\d{4}-\d{2}$/', $month)) {
+        cpms_assign_project_labor_worker_month($pdo, $projectId, $savedWorkerId, $month);
     }
 
     if ($source === 'direct') {

@@ -116,6 +116,17 @@ cpms_cleanup_project_labor_workers($pdo, $projectId, $excludedWorkers); // 장�
 cpms_sync_project_labor_workers_from_attendance($pdo, $projectId, $attendanceWorkers); // 장비기사 제외
 $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
 $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
+$laborWorkerMonthMap = function_exists('cpms_load_project_labor_worker_month_map') ? cpms_load_project_labor_worker_month_map($pdo, $projectId, $selectedMonth) : array();
+if (is_array($workerRows) && is_array($laborWorkerMonthMap) && count($laborWorkerMonthMap) > 0) {
+    foreach ($workerRows as $workerRowIndex => $workerRow) {
+        $laborWorkerId = isset($workerRow['id']) ? (int)$workerRow['id'] : 0;
+        $isMonthAssigned = ($laborWorkerId > 0 && isset($laborWorkerMonthMap[$laborWorkerId])) ? 1 : 0;
+        $workerRows[$workerRowIndex]['month_assigned'] = $isMonthAssigned;
+        if (isset($workerRows[$workerRowIndex]['data']) && is_array($workerRows[$workerRowIndex]['data'])) {
+            $workerRows[$workerRowIndex]['data']['month_assigned'] = $isMonthAssigned;
+        }
+    }
+}
 $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
 // 공수 월별 출력일수 필터(월별 only): 선택 월 output_days > 0 인 사람만 다운로드 표에 포함
 if (is_array($timesheetWorkers)) {
@@ -125,7 +136,8 @@ if (is_array($timesheetWorkers)) {
         $workerKey = cpms_normalize_worker_key($workerName);
         if ($workerKey === '') continue;
         $workerOutputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
-        if ($workerOutputDays <= 0) continue;
+        $isMonthAssigned = (isset($worker['month_assigned']) && (int)$worker['month_assigned'] === 1);
+        if ($workerOutputDays <= 0 && !$isMonthAssigned) continue;
         $filteredTimesheetWorkers[] = $worker;
     }
     $timesheetWorkers = $filteredTimesheetWorkers;

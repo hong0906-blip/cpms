@@ -87,6 +87,24 @@ function project_monthly_column_exists($pdo, $table, $column) {
     try { $st = $pdo->prepare('SHOW COLUMNS FROM ' . $table . ' LIKE :c'); $st->bindValue(':c', $column); $st->execute(); return is_array($st->fetch()); }
     catch (Exception $e) { return false; }
 }
+function project_monthly_ensure_deduction_table($pdo) {
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_project_monthly_deductions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            project_id INT NOT NULL,
+            ym VARCHAR(7) NOT NULL,
+            deduction_name VARCHAR(190) NOT NULL,
+            amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+            memo TEXT NULL,
+            created_at DATETIME NULL,
+            updated_at DATETIME NULL,
+            INDEX idx_project_ym (project_id, ym)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
 function project_monthly_parse_money($value) {
     if (function_exists('cpms_parse_money_value')) {
         return (float)cpms_parse_money_value($value);
@@ -157,6 +175,13 @@ function project_monthly_labor_breakdown($pdo, $projectId, $projectName, $ym) {
         $result['company_amounts'][$companyName] += $amount;
         $sum += $amount;
         $result['workers_considered']++;
+    }
+    $forceAmount = function_exists('cpms_labor_force_amount') ? (float)cpms_labor_force_amount($pdo, $projectId, $ym) : 0.0;
+    if ($forceAmount > 0) {
+        $forceCompanyName = '노무비 강제입력';
+        if (!isset($result['company_amounts'][$forceCompanyName])) $result['company_amounts'][$forceCompanyName] = 0.0;
+        $result['company_amounts'][$forceCompanyName] += $forceAmount;
+        $sum += $forceAmount;
     }
     $result['amount'] = $sum;
     $result['worker_rows'] = is_array($timesheetWorkers) ? count($timesheetWorkers) : 0;
@@ -547,7 +572,7 @@ if ($pdo && is_array($selectedProject)) {
     }
 
     try {
-        if (project_monthly_table_exists($pdo, 'cpms_project_monthly_deductions')) {
+        if (project_monthly_ensure_deduction_table($pdo) && project_monthly_table_exists($pdo, 'cpms_project_monthly_deductions')) {
             $stDed = $pdo->prepare('SELECT id,ym,deduction_name,amount,memo FROM cpms_project_monthly_deductions WHERE project_id=:pid ORDER BY ym ASC,id ASC');
             $stDed->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
             $stDed->execute();
@@ -735,9 +760,14 @@ if (!isset($row['내역_html']) && count($displayMonths) === 1 && isset($row['de
 
 <div class="cpms-monthly-deduction mt-4 p-3 border rounded-xl bg-gray-50">
 <div class="font-semibold mb-2">공제분 입력</div>
+<?php $deductionDefaultYm = $guideYm; if (!ym_valid($deductionDefaultYm) || !in_array($deductionDefaultYm, $allMonths, true)) { $deductionDefaultYm = (count($allMonths) > 0) ? $allMonths[count($allMonths)-1] : date('Y-m'); } ?>
 <form method="post" action="?r=project/monthly_deduction_save" class="flex flex-wrap gap-2 items-center">
+<input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
 <input type="hidden" name="project_id" value="<?php echo (int)$selectedProjectId; ?>">
-<input type="text" name="ym" placeholder="월(YYYY-MM)" class="px-2 py-1 border rounded w-32">
+<input type="hidden" name="view_month" value="<?php echo h($selectedViewMonth); ?>">
+<select name="ym" class="px-2 py-1 border rounded w-36">
+<?php foreach($allMonths as $deductYm): ?><option value="<?php echo h($deductYm); ?>" <?php echo ($deductYm===$deductionDefaultYm)?'selected':''; ?>><?php echo h(str_replace('-', '.', $deductYm)); ?></option><?php endforeach; ?>
+</select>
 <input type="text" name="deduction_name" placeholder="공제항목" class="px-2 py-1 border rounded w-40">
 <input type="text" name="amount" placeholder="금액" class="px-2 py-1 border rounded w-32 text-right">
 <input type="text" name="memo" placeholder="메모" class="px-2 py-1 border rounded w-56">
@@ -745,7 +775,7 @@ if (!isset($row['내역_html']) && count($displayMonths) === 1 && isset($row['de
 </form>
 <?php if (count($rowsBySection['공제분'])>0): ?><div class="mt-2 text-sm space-y-1"><?php foreach($rowsBySection['공제분'] as $d): ?>
 <div><?php echo h($d['내역']); ?> / <?php echo amount_fmt(row_total($d,$allMonths)); ?>
-<?php if (isset($d['id'])): ?><a class="text-red-600 ml-2" href="?r=project/monthly_deduction_delete&id=<?php echo (int)$d['id']; ?>&project_id=<?php echo (int)$selectedProjectId; ?>">삭제</a><?php endif; ?></div>
+<?php if (isset($d['id'])): ?><form method="post" action="?r=project/monthly_deduction_delete" class="inline"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="id" value="<?php echo (int)$d['id']; ?>"><input type="hidden" name="pid" value="<?php echo (int)$selectedProjectId; ?>"><input type="hidden" name="view_month" value="<?php echo h($selectedViewMonth); ?>"><button type="submit" class="text-red-600 ml-2" onclick="return confirm('공제분을 삭제하시겠습니까?');">삭제</button></form><?php endif; ?></div>
 <?php endforeach; ?></div><?php endif; ?>
 </div>
 

@@ -126,6 +126,17 @@ cpms_cleanup_project_labor_workers(isset($pdo) ? $pdo : null, $projectId, $exclu
 cpms_sync_project_labor_workers_from_attendance(isset($pdo) ? $pdo : null, $projectId, $attendanceWorkers); // 장비기사 제외
 $projectLaborWorkers = cpms_load_project_labor_workers(isset($pdo) ? $pdo : null, $projectId);
 $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
+$laborWorkerMonthMap = function_exists('cpms_load_project_labor_worker_month_map') ? cpms_load_project_labor_worker_month_map(isset($pdo) ? $pdo : null, $projectId, $selectedMonth) : array();
+if (is_array($workerRows) && is_array($laborWorkerMonthMap) && count($laborWorkerMonthMap) > 0) {
+    foreach ($workerRows as $workerRowIndex => $workerRow) {
+        $laborWorkerId = isset($workerRow['id']) ? (int)$workerRow['id'] : 0;
+        $isMonthAssigned = ($laborWorkerId > 0 && isset($laborWorkerMonthMap[$laborWorkerId])) ? 1 : 0;
+        $workerRows[$workerRowIndex]['month_assigned'] = $isMonthAssigned;
+        if (isset($workerRows[$workerRowIndex]['data']) && is_array($workerRows[$workerRowIndex]['data'])) {
+            $workerRows[$workerRowIndex]['data']['month_assigned'] = $isMonthAssigned;
+        }
+    }
+}
 $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
 // 공수 월별 출력일수 필터: 선택월에 실제 공수가 있는 인원만 표시
 if (is_array($timesheetWorkers)) {
@@ -135,10 +146,25 @@ if (is_array($timesheetWorkers)) {
         $workerKey = cpms_normalize_worker_key($workerName);
         if ($workerKey === '') continue;
         $workerOutputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
-        if ($workerOutputDays <= 0) continue;
+        $isMonthAssigned = (isset($worker['month_assigned']) && (int)$worker['month_assigned'] === 1);
+        if ($workerOutputDays <= 0 && !$isMonthAssigned) continue;
         $filteredTimesheetWorkers[] = $worker;
     }
     $timesheetWorkers = $filteredTimesheetWorkers;
+}
+
+$workerRowsForSelectedMonth = array();
+if (is_array($workerRows)) {
+    foreach ($workerRows as $row) {
+        $member = isset($row['data']) && is_array($row['data']) ? $row['data'] : array();
+        $workerName = isset($member['name']) ? (string)$member['name'] : '';
+        $workerKey = cpms_normalize_worker_key($workerName);
+        if ($workerKey === '') continue;
+        $workerOutputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
+        $isMonthAssigned = (isset($row['month_assigned']) && (int)$row['month_assigned'] === 1) || (isset($member['month_assigned']) && (int)$member['month_assigned'] === 1);
+        if ($workerOutputDays <= 0 && !$isMonthAssigned) continue;
+        $workerRowsForSelectedMonth[] = $row;
+    }
 }
 
 $timesheetRows = count($timesheetWorkers);
@@ -168,6 +194,36 @@ if (!function_exists('cpms_format_gongsu_value')) {
         return $formatted;
     }
 }
+
+if (!function_exists('cpms_labor_tab_monthly_pay_total')) {
+    function cpms_labor_tab_monthly_pay_total($workers, $gongsuMap, $selectedMonth) {
+        $total = 0.0;
+        if (!is_array($workers)) return $total;
+        foreach ($workers as $worker) {
+            $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
+            $workerKey = cpms_normalize_worker_key($workerName);
+            if ($workerKey === '') continue;
+            $dailyMap = (isset($gongsuMap[$workerKey]) && is_array($gongsuMap[$workerKey])) ? $gongsuMap[$workerKey] : array();
+            $totalGongsu = 0.0;
+            foreach ($dailyMap as $dateKey => $gongsuValue) {
+                if (!is_numeric($gongsuValue)) continue;
+                if (strpos((string)$dateKey, (string)$selectedMonth) !== 0) continue;
+                $totalGongsu += (float)$gongsuValue;
+            }
+            if ($totalGongsu <= 0) continue;
+            $wageRate = function_exists('cpms_resolve_labor_wage_rate') ? (float)cpms_resolve_labor_wage_rate($worker) : 0.0;
+            if ($wageRate <= 0) continue;
+            $total += $totalGongsu * $wageRate;
+        }
+        return $total;
+    }
+}
+
+$canManageLaborForce = (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive');
+$laborForceRow = function_exists('cpms_labor_force_load') ? cpms_labor_force_load(isset($pdo) ? $pdo : null, $projectId, $selectedMonth) : array('amount' => 0.0, 'memo' => '');
+$laborForceAmount = isset($laborForceRow['amount']) ? (float)$laborForceRow['amount'] : 0.0;
+$laborBaseAmount = cpms_labor_tab_monthly_pay_total($timesheetWorkers, $attendanceGongsuMap, $selectedMonth);
+$laborTotalAmount = $laborBaseAmount + $laborForceAmount;
 
 $todayKey = date('Y-m-d');
 $todayWorkers = array();
@@ -220,6 +276,46 @@ foreach ($timesheetWorkers as $worker) {
             <?php endif; ?>
         </div>
     </div>
+
+    <div class="mt-5 grid grid-cols-1 <?php echo $canManageLaborForce ? 'md:grid-cols-3' : 'md:grid-cols-2'; ?> gap-3">
+        <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <div class="text-xs font-bold text-gray-500">공수 기준 노무비</div>
+            <div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo number_format($laborBaseAmount); ?>원</div>
+        </div>
+        <?php if ($canManageLaborForce): ?>
+        <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+            <div class="text-xs font-bold text-gray-500">강제입력 노무비</div>
+            <div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo number_format($laborForceAmount); ?>원</div>
+        </div>
+        <?php endif; ?>
+        <div class="rounded-2xl border border-gray-900 bg-gray-900 p-4 text-white">
+            <div class="text-xs font-bold text-gray-300">월 노무비 합계</div>
+            <div class="mt-1 text-xl font-extrabold"><?php echo number_format($laborTotalAmount); ?>원</div>
+        </div>
+    </div>
+
+    <?php if ($canManageLaborForce): ?>
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_force_save" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+            <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+            <input type="hidden" name="labor_tab" value="<?php echo h($laborTab); ?>">
+            <div class="grid grid-cols-1 md:grid-cols-[220px_1fr_auto] gap-3 items-end">
+                <div>
+                    <label class="text-xs font-bold text-amber-800">임원 전용 강제입력</label>
+                    <input type="text" name="amount" value="<?php echo h(number_format($laborForceAmount)); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-amber-200 bg-white text-right font-bold">
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-amber-800">메모</label>
+                    <input type="text" name="memo" value="<?php echo h(isset($laborForceRow['memo']) ? $laborForceRow['memo'] : ''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-amber-200 bg-white" placeholder="예: 시프티 미등록 인원 노무비 보정">
+                </div>
+                <button type="submit" class="px-4 py-2 rounded-xl bg-amber-600 text-white font-extrabold">저장</button>
+            </div>
+            <?php if (isset($laborForceRow['updated_at']) && trim((string)$laborForceRow['updated_at']) !== ''): ?>
+                <div class="mt-2 text-xs text-amber-800">최근 저장: <?php echo h($laborForceRow['updated_at']); ?> <?php echo h(isset($laborForceRow['updated_by_name']) ? $laborForceRow['updated_by_name'] : ''); ?></div>
+            <?php endif; ?>
+        </form>
+    <?php endif; ?>
 </div>
 <?php if (!empty($pendingOverrideRows)): ?>
 <div class="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -405,8 +501,8 @@ foreach ($timesheetWorkers as $worker) {
                     </thead>
                     <tbody>
                     <?php $rowIndex = 0; ?>
-                    <?php if (!empty($workerRows)): ?>
-                        <?php foreach ($workerRows as $row): ?>
+                    <?php if (!empty($workerRowsForSelectedMonth)): ?>
+                        <?php foreach ($workerRowsForSelectedMonth as $row): ?>
                             <?php
                             $member = isset($row['data']) && is_array($row['data']) ? $row['data'] : array();
                             $workerId = isset($row['id']) ? (int)$row['id'] : 0;
@@ -416,10 +512,12 @@ foreach ($timesheetWorkers as $worker) {
                             $jobTypeSnapshot = isset($member['job_type_snapshot']) ? trim((string)$member['job_type_snapshot']) : '';
                             $sourceType = isset($member['source_type']) ? trim((string)$member['source_type']) : 'manual';
                             $matchedStatus = isset($member['matched_status']) ? trim((string)$member['matched_status']) : 'manual';
+                            $isMonthAssigned = (isset($member['month_assigned']) && (int)$member['month_assigned'] === 1);
                             $statusText = '수동입력';
                             if ($matchedStatus === 'matched') $statusText = '인력관리 등록됨';
                             else if ($matchedStatus === 'duplicate') $statusText = '동명이인 확인 필요';
                             else if ($matchedStatus === 'not_found') $statusText = '인력관리 미등록';
+                            if ($isMonthAssigned) $statusText .= ' / ' . $selectedMonth . ' 추가';
                             ?>
                             <tr class="<?php echo ($rowIndex % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
                                 <td class="border border-gray-200 px-2 py-2">

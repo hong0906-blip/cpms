@@ -1123,6 +1123,197 @@ if (!function_exists('cpms_load_project_labor_workers')) {
     }
 }
 
+if (!function_exists('cpms_ensure_project_labor_worker_months_table')) {
+    function cpms_ensure_project_labor_worker_months_table($pdo) {
+        if (!$pdo) return false;
+        try {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_project_labor_worker_months (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                project_id INT UNSIGNED NOT NULL,
+                labor_worker_id INT UNSIGNED NOT NULL,
+                month CHAR(7) NOT NULL,
+                is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE KEY uk_project_labor_worker_month (project_id, labor_worker_id, month),
+                KEY idx_project_labor_worker_month_lookup(project_id, month, is_deleted)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('cpms_assign_project_labor_worker_month')) {
+    function cpms_assign_project_labor_worker_month($pdo, $projectId, $laborWorkerId, $month) {
+        $projectId = (int)$projectId;
+        $laborWorkerId = (int)$laborWorkerId;
+        $month = trim((string)$month);
+        if (!$pdo || $projectId <= 0 || $laborWorkerId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return false;
+        if (!cpms_ensure_project_labor_worker_months_table($pdo)) return false;
+        try {
+            $now = date('Y-m-d H:i:s');
+            $st = $pdo->prepare("INSERT INTO cpms_project_labor_worker_months
+                    (project_id, labor_worker_id, month, is_deleted, created_at, updated_at)
+                    VALUES (:pid, :wid, :month, 0, :now, :now)
+                    ON DUPLICATE KEY UPDATE is_deleted = 0, updated_at = VALUES(updated_at)");
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->bindValue(':wid', $laborWorkerId, PDO::PARAM_INT);
+            $st->bindValue(':month', $month);
+            $st->bindValue(':now', $now);
+            $st->execute();
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('cpms_load_project_labor_worker_month_map')) {
+    function cpms_load_project_labor_worker_month_map($pdo, $projectId, $month) {
+        $map = array();
+        $projectId = (int)$projectId;
+        $month = trim((string)$month);
+        if (!$pdo || $projectId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return $map;
+        if (!cpms_ensure_project_labor_worker_months_table($pdo)) return $map;
+        try {
+            $st = $pdo->prepare("SELECT labor_worker_id
+                                 FROM cpms_project_labor_worker_months
+                                 WHERE project_id = :pid
+                                   AND month = :month
+                                   AND is_deleted = 0");
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->bindValue(':month', $month);
+            $st->execute();
+            while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+                $id = isset($row['labor_worker_id']) ? (int)$row['labor_worker_id'] : 0;
+                if ($id > 0) $map[$id] = true;
+            }
+        } catch (Exception $e) {
+            $map = array();
+        }
+        return $map;
+    }
+}
+
+if (!function_exists('cpms_ensure_labor_force_adjustments_table')) {
+    function cpms_ensure_labor_force_adjustments_table($pdo) {
+        if (!$pdo) return false;
+        try {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_labor_force_adjustments (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                project_id INT UNSIGNED NOT NULL,
+                month CHAR(7) NOT NULL,
+                amount DECIMAL(15,2) NOT NULL DEFAULT 0.00,
+                memo VARCHAR(255) NULL,
+                updated_by INT NULL,
+                updated_by_name VARCHAR(100) NULL,
+                updated_by_email VARCHAR(190) NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE KEY uk_labor_force_project_month(project_id, month),
+                KEY idx_labor_force_month(project_id, month)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('cpms_labor_force_parse_amount')) {
+    function cpms_labor_force_parse_amount($value) {
+        $raw = trim((string)$value);
+        if ($raw === '') return 0.0;
+        $raw = str_replace(',', '', $raw);
+        $raw = preg_replace('/[^0-9.\-]/', '', $raw);
+        if ($raw === '' || !is_numeric($raw)) return 0.0;
+        $amount = (float)$raw;
+        if ($amount < 0) $amount = 0.0;
+        return $amount;
+    }
+}
+
+if (!function_exists('cpms_labor_force_load')) {
+    function cpms_labor_force_load($pdo, $projectId, $month) {
+        $empty = array('amount' => 0.0, 'memo' => '', 'updated_at' => '', 'updated_by_name' => '');
+        $projectId = (int)$projectId;
+        $month = trim((string)$month);
+        if (!$pdo || $projectId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return $empty;
+        if (!cpms_ensure_labor_force_adjustments_table($pdo)) return $empty;
+        try {
+            $st = $pdo->prepare("SELECT amount, memo, updated_at, updated_by_name
+                                 FROM cpms_labor_force_adjustments
+                                 WHERE project_id = :pid AND month = :month
+                                 LIMIT 1");
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->bindValue(':month', $month);
+            $st->execute();
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!$row) return $empty;
+            return array(
+                'amount' => isset($row['amount']) ? (float)$row['amount'] : 0.0,
+                'memo' => isset($row['memo']) ? (string)$row['memo'] : '',
+                'updated_at' => isset($row['updated_at']) ? (string)$row['updated_at'] : '',
+                'updated_by_name' => isset($row['updated_by_name']) ? (string)$row['updated_by_name'] : '',
+            );
+        } catch (Exception $e) {
+            return $empty;
+        }
+    }
+}
+
+if (!function_exists('cpms_labor_force_amount')) {
+    function cpms_labor_force_amount($pdo, $projectId, $month) {
+        $row = cpms_labor_force_load($pdo, $projectId, $month);
+        return isset($row['amount']) ? (float)$row['amount'] : 0.0;
+    }
+}
+
+if (!function_exists('cpms_labor_force_amount_between')) {
+    function cpms_labor_force_amount_between($pdo, $projectId, $startDate, $endDate) {
+        $projectId = (int)$projectId;
+        if (!$pdo || $projectId <= 0) return 0.0;
+        if (!cpms_ensure_labor_force_adjustments_table($pdo)) return 0.0;
+        try {
+            $startObj = new DateTime(substr((string)$startDate, 0, 7) . '-01');
+            $endObj = new DateTime(substr((string)$endDate, 0, 7) . '-01');
+        } catch (Exception $e) {
+            return 0.0;
+        }
+        if ($startObj > $endObj) return 0.0;
+
+        $months = array();
+        $cursor = clone $startObj;
+        while ($cursor <= $endObj) {
+            $months[] = $cursor->format('Y-m');
+            $cursor->modify('+1 month');
+        }
+        if (count($months) <= 0) return 0.0;
+
+        $placeholders = array();
+        foreach ($months as $idx => $ym) {
+            $placeholders[] = ':m' . $idx;
+        }
+        try {
+            $sql = "SELECT COALESCE(SUM(amount), 0)
+                    FROM cpms_labor_force_adjustments
+                    WHERE project_id = :pid
+                      AND month IN (" . implode(',', $placeholders) . ")";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            foreach ($months as $idx => $ym) {
+                $st->bindValue(':m' . $idx, $ym);
+            }
+            $st->execute();
+            return (float)$st->fetchColumn();
+        } catch (Exception $e) {
+            return 0.0;
+        }
+    }
+}
+
 if (!function_exists('cpms_labor_worker_payload_from_workforce')) {
     function cpms_labor_worker_payload_from_workforce($worker, $sourceType, $matchedStatus) {
         if (!is_array($worker)) $worker = array();
@@ -1406,6 +1597,7 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'daily_wage_snapshot' => isset($data['daily_wage_snapshot']) ? (int)$data['daily_wage_snapshot'] : 0,
                 'source_type' => isset($data['source_type']) ? (string)$data['source_type'] : 'manual',
                 'matched_status' => isset($data['matched_status']) ? (string)$data['matched_status'] : 'manual',
+                'month_assigned' => ((isset($row['month_assigned']) && (int)$row['month_assigned'] === 1) || (isset($data['month_assigned']) && (int)$data['month_assigned'] === 1)) ? 1 : 0,
             );
         }
         return $workers;

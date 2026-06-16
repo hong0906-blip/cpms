@@ -64,6 +64,8 @@ $usageRows = array();
 $usageByEquipment = array();
 $usageByDate = array();
 $pendingByUsage = array();
+$monthlyActiveEquipmentIds = array();
+$itemsForUsageAdd = array();
 
 try {
     $stItem = $pdo->prepare("SELECT * FROM cpms_equipment_items WHERE project_id = :pid AND is_deleted = 0 ORDER BY category ASC, vendor_name ASC, spec ASC, id ASC");
@@ -114,6 +116,7 @@ try {
             $usageRows[$usageIndex] = $ur;
             if (!isset($usageByDate[$d])) $usageByDate[$d] = 0.0;
             $usageByDate[$d] += $workUnit;
+            $monthlyActiveEquipmentIds[$eid] = true;
         }
 
         $stPending = $pdo->prepare("SELECT *
@@ -142,6 +145,13 @@ try {
     $usageByDate = array();
     $pendingByUsage = array();
     $vendorPresets = array();    
+}
+
+foreach ($items as $it) {
+    $eid = isset($it['id']) ? (int)$it['id'] : 0;
+    if ($eid > 0 && isset($monthlyActiveEquipmentIds[$eid])) {
+        $itemsForUsageAdd[count($itemsForUsageAdd)] = $it;
+    }
 }
 
 $dateSlots = array();
@@ -307,6 +317,22 @@ foreach ($usageRows as $ur) {
     $displayItems[$groupKey]['slot_usage'][$useDate]['total_unit'] += $slotUnit;
     $displayItems[$groupKey]['slot_usage'][$useDate]['total_amount'] += $slotAmount;
 }
+foreach ($displayItems as $groupKey => $displayItem) {
+    $hasMonthlyUsage = false;
+    $slotUsageRows = isset($displayItem['slot_usage']) && is_array($displayItem['slot_usage']) ? $displayItem['slot_usage'] : array();
+    foreach ($slotUsageRows as $slotUsage) {
+        $slotRows = isset($slotUsage['rows']) && is_array($slotUsage['rows']) ? $slotUsage['rows'] : array();
+        $slotUnit = isset($slotUsage['total_unit']) ? (float)$slotUsage['total_unit'] : 0.0;
+        $slotAmount = isset($slotUsage['total_amount']) ? (float)$slotUsage['total_amount'] : 0.0;
+        if (count($slotRows) > 0 || $slotUnit > 0 || $slotAmount > 0) {
+            $hasMonthlyUsage = true;
+            break;
+        }
+    }
+    if (!$hasMonthlyUsage) {
+        unset($displayItems[$groupKey]);
+    }
+}
 
 $equipmentExcelToken = isset($_GET['equipment_excel_token']) ? trim((string)$_GET['equipment_excel_token']) : '';
 $equipmentExcelPreview = null;
@@ -435,10 +461,10 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                         </tr>
                         </thead>
                         <tbody>
-                        <?php if (count($items) === 0): ?>
-                            <tr><td colspan="6" class="p-3 border text-center text-gray-500">등록된 장비가 없습니다.</td></tr>
+                        <?php if (count($itemsForUsageAdd) === 0): ?>
+                            <tr><td colspan="6" class="p-3 border text-center text-gray-500">선택한 월에 사용된 장비가 없습니다.</td></tr>
                         <?php else: ?>
-                            <?php foreach ($items as $it): ?>
+                            <?php foreach ($itemsForUsageAdd as $it): ?>
                                 <tr>
                                     <td class="p-2 border"><?php echo h($it['category']); ?></td>
                                     <td class="p-2 border"><?php echo h($it['vendor_name']); ?></td>
@@ -997,7 +1023,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                 $lastCategory = '__none__';
                 ?>
                 <?php if (count($displayItems) === 0): ?>
-                    <tr><td class="border p-3 text-center text-gray-500" colspan="48">등록된 장비가 없습니다.</td></tr>
+                    <tr><td class="border p-3 text-center text-gray-500" colspan="48">선택한 월에 사용된 장비가 없습니다.</td></tr>
                 <?php else: ?>
                     <?php foreach ($displayItems as $it): ?>
                         <?php

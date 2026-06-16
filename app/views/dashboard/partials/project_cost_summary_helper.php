@@ -290,10 +290,6 @@ function cpms_dashboard_labor_total($pdo, $projectId, $projectName, $startDate, 
     }
 
     $wageMap = cpms_dashboard_labor_wage_map($pdo, (int)$projectId);
-    if (count($wageMap) === 0) {
-        $cache[$cacheKey] = 0.0;
-        return 0.0;
-    }
 
     try {
         $cursor = new DateTime(substr($startDate, 0, 7) . '-01');
@@ -327,6 +323,9 @@ function cpms_dashboard_labor_total($pdo, $projectId, $projectName, $startDate, 
     foreach ($sumGongsu as $workerKey => $gongsuTotal) {
         $wageRate = isset($wageMap[$workerKey]) ? (float)$wageMap[$workerKey] : 0.0;
         $total += ((float)$gongsuTotal) * $wageRate;
+    }
+    if (function_exists('cpms_labor_force_amount_between')) {
+        $total += cpms_labor_force_amount_between($pdo, (int)$projectId, $startDate, $endDate);
     }
     $cache[$cacheKey] = $total;
     return $cache[$cacheKey];
@@ -483,7 +482,6 @@ function cpms_dashboard_labor_total_between($pdo, $projectId, $projectName, $sta
     if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     $projectName = trim((string)$projectName);
     if ($projectName === '' || !function_exists('cpms_load_gongsu_data')) return 0.0;
-    if (!is_array($wageMap) || count($wageMap) === 0) return 0.0;
 
     $startDate = cpms_dashboard_valid_date($startDate);
     $endDate = cpms_dashboard_valid_date($endDate);
@@ -491,6 +489,7 @@ function cpms_dashboard_labor_total_between($pdo, $projectId, $projectName, $sta
         $cache[$cacheKey] = 0.0;
         return 0.0;
     }
+    if (!is_array($wageMap)) $wageMap = array();
 
     try {
         $cursor = new DateTime(substr($startDate, 0, 7) . '-01');
@@ -523,6 +522,9 @@ function cpms_dashboard_labor_total_between($pdo, $projectId, $projectName, $sta
     foreach ($sumGongsu as $workerKey => $gongsuTotal) {
         $wageRate = isset($wageMap[$workerKey]) ? (float)$wageMap[$workerKey] : 0.0;
         $total += ((float)$gongsuTotal) * $wageRate;
+    }
+    if (function_exists('cpms_labor_force_amount_between')) {
+        $total += cpms_labor_force_amount_between($pdo, (int)$projectId, $startDate, $endDate);
     }
     $cache[$cacheKey] = $total;
     return $cache[$cacheKey];
