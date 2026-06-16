@@ -36,6 +36,9 @@ $tabs = array(
 if (Auth::isMaster()) {
     $tabs['drive_check'] = array('label' => 'Drive 점검', 'icon' => 'cloud');
 }
+if ($canManage) {
+    $tabs['project_drive_sync'] = array('label' => '프로젝트 Drive 동기화', 'icon' => 'folder-sync');
+}
 
 if (!$canManage && $canLaborManagement) {
     $tabs = array(
@@ -89,6 +92,8 @@ if ($tab === 'employees') {
     require __DIR__ . '/leave_management.php';
 } elseif ($tab === 'drive_check' && Auth::isMaster()) {
     require __DIR__ . '/drive_check.php';
+} elseif ($tab === 'project_drive_sync' && $canManage) {
+    require __DIR__ . '/project_drive_sync.php';
 } else {
     require __DIR__ . '/labor_calc.php';
 }

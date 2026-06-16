@@ -370,7 +370,7 @@ function cpms_drive_authorized_request($method, $path, $params, $body, $headers,
 
 if (!function_exists('cpms_drive_file_fields')) {
 function cpms_drive_file_fields() {
-    return 'id,name,mimeType,size,parents,webViewLink,webContentLink';
+    return 'id,name,mimeType,size,parents,trashed,webViewLink,webContentLink';
 }}
 
 if (!function_exists('cpms_drive_query_escape')) {
@@ -658,8 +658,18 @@ function cpms_drive_build_storage_name($originalName, $section, $documentType, $
 if (!function_exists('cpms_drive_project_folder_name')) {
 function cpms_drive_project_folder_name($projectName, $projectId) {
     $name = trim((string)$projectName);
-    if ($name === '') $name = 'project';
-    return cpms_drive_sanitize_folder_name($name . '_' . (int)$projectId);
+    $projectId = (int)$projectId;
+    if ($name === '') $name = 'PROJECT';
+    $name = cpms_drive_sanitize_folder_name($name);
+    if ($name === '' || $name === 'cpms_file') $name = 'PROJECT';
+    if (function_exists('mb_substr')) {
+        $name = mb_substr($name, 0, 90, 'UTF-8');
+    } else {
+        $name = substr($name, 0, 90);
+    }
+    $name = trim($name, " .\t\r\n");
+    if ($name === '') $name = 'PROJECT';
+    return cpms_drive_sanitize_folder_name($name . '_' . $projectId);
 }}
 
 if (!function_exists('cpms_drive_project_folder_schema')) {
@@ -670,17 +680,18 @@ function cpms_drive_project_folder_schema() {
             'children' => array(
                 'public_affairs_estimate' => '내역서',
                 'public_affairs_contract' => '계약서',
-                'public_affairs_site_briefing' => '현설자료',
-                'public_affairs_monthly_input' => '월별투입비'
+                'public_affairs_site_docs' => '현설자료',
+                'public_affairs_monthly_cost' => '월별투입비'
             )
         ),
         'management' => array(
             'name' => '02_관리',
             'children' => array(
-                'management_transaction_statement' => '거래명세표',
+                'management_statement' => '거래명세표',
                 'management_tax_invoice' => '세금계산서',
                 'management_settlement' => '정산자료',
-                'management_labor' => '노무자료'
+                'management_labor' => '노무자료',
+                'management_manpower' => '인력관리'
             )
         ),
         'construction' => array(
@@ -689,18 +700,19 @@ function cpms_drive_project_folder_schema() {
                 'construction_material' => '자재구입비',
                 'construction_daily_report' => '일일보고',
                 'construction_photo' => '공사사진',
-                'construction_status' => '상황자료'
+                'construction_status' => '상황자료',
+                'construction_equipment' => '장비투입'
             )
         ),
         'safety_health' => array(
             'name' => '04_안전보건',
             'children' => array(
                 'safety_health_safety_cost' => '안전관리비',
-                'safety_health_incident' => '안전사고',
+                'safety_health_accident' => '안전사고',
                 'safety_health_samsung_portal' => '삼성상생협력포탈',
-                'safety_health_protection' => '보호구',
+                'safety_health_ppe' => '보호구',
                 'safety_health_education' => '교육',
-                'safety_health_checkup' => '검진'
+                'safety_health_medical_checkup' => '검진'
             )
         ),
         'quality' => array(
@@ -726,6 +738,8 @@ function cpms_drive_create_project_structure($projectId, $projectName, $userCont
         'status' => 'failed',
         'message' => '',
         'drive' => array(
+            'status' => '',
+            'synced_at' => '',
             'project_folder_id' => '',
             'project_folder_name' => '',
             'folders' => array(),
@@ -757,6 +771,8 @@ function cpms_drive_create_project_structure($projectId, $projectName, $userCont
     }
 
     $projectFolderId = (string)$projectFolder['file']['id'];
+    $result['drive']['status'] = 'ready';
+    $result['drive']['synced_at'] = date('Y-m-d H:i:s');
     $result['drive']['project_folder_id'] = $projectFolderId;
     $result['drive']['project_folder_name'] = $folderName;
     $result['drive']['folders']['project'] = $projectFolderId;
@@ -852,7 +868,14 @@ function cpms_drive_save_project_structure_result($pdo, $projectId, $driveResult
     if (!cpms_drive_ensure_project_columns($pdo)) return false;
 
     $drive = isset($driveResult['drive']) && is_array($driveResult['drive']) ? $driveResult['drive'] : array();
-    $status = !empty($driveResult['ok']) ? 'ready' : 'failed';
+    $status = isset($driveResult['status']) ? trim((string)$driveResult['status']) : '';
+    if ($status === '') $status = !empty($driveResult['ok']) ? 'ready' : 'failed';
+    if (count($drive) > 0) {
+        $drive['status'] = $status;
+        if (!isset($drive['synced_at']) || trim((string)$drive['synced_at']) === '') {
+            $drive['synced_at'] = date('Y-m-d H:i:s');
+        }
+    }
     $folderId = isset($drive['project_folder_id']) ? (string)$drive['project_folder_id'] : '';
     $message = isset($driveResult['message']) ? (string)$driveResult['message'] : '';
     if (isset($driveResult['errors']) && is_array($driveResult['errors']) && count($driveResult['errors']) > 0) {
@@ -861,16 +884,25 @@ function cpms_drive_save_project_structure_result($pdo, $projectId, $driveResult
     if (strlen($message) > 2000) $message = substr($message, 0, 2000);
 
     try {
+        $hasDriveData = (isset($drive['project_folder_id']) && trim((string)$drive['project_folder_id']) !== '')
+            || (isset($drive['folders']) && is_array($drive['folders']) && count($drive['folders']) > 0);
+        $setParts = array(
+            'drive_status = :status',
+            'drive_error_message = :error_message',
+            'drive_updated_at = :updated_at'
+        );
+        if ($folderId !== '') {
+            array_push($setParts, 'drive_folder_id = :folder_id');
+        }
+        if ($hasDriveData) {
+            array_push($setParts, 'drive_folders_json = :folders_json');
+        }
         $st = $pdo->prepare("UPDATE cpms_projects
-            SET drive_status = :status,
-                drive_folder_id = :folder_id,
-                drive_folders_json = :folders_json,
-                drive_error_message = :error_message,
-                drive_updated_at = :updated_at
+            SET " . implode(",\n                ", $setParts) . "
             WHERE id = :project_id");
         $st->bindValue(':status', $status);
-        $st->bindValue(':folder_id', $folderId);
-        $st->bindValue(':folders_json', cpms_drive_json_encode($drive));
+        if ($folderId !== '') $st->bindValue(':folder_id', $folderId);
+        if ($hasDriveData) $st->bindValue(':folders_json', cpms_drive_json_encode($drive));
         $st->bindValue(':error_message', $status === 'ready' ? '' : $message);
         $st->bindValue(':updated_at', date('Y-m-d H:i:s'));
         $st->bindValue(':project_id', $projectId, PDO::PARAM_INT);

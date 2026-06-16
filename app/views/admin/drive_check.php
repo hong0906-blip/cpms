@@ -105,6 +105,12 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
     <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold">연결 점검 실행</button>
   </form>
 
+  <div class="bg-white border border-gray-200 rounded-2xl p-4">
+    <div class="font-extrabold text-gray-900">기존 프로젝트 Drive 보정</div>
+    <div class="text-sm text-gray-600 mt-1">운영 중 생성된 기존 프로젝트의 Drive 폴더 ID와 기본 하위 폴더를 동기화합니다.</div>
+    <a href="?r=<?php echo urlencode('관리'); ?>&tab=project_drive_sync" class="inline-flex mt-3 px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">기존 프로젝트 Drive 동기화 열기</a>
+  </div>
+
   <?php if (is_array($checkResult)): ?>
     <div class="bg-white border border-gray-200 rounded-2xl p-4">
       <div class="font-extrabold text-gray-900 mb-3">점검 결과</div>
