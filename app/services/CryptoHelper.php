@@ -8,6 +8,8 @@
 if (!class_exists('CryptoHelper')) {
 class CryptoHelper
 {
+    private static $keyMaterial = null;
+
     public static function normalizeDigits($value)
     {
         return preg_replace('/[^0-9]/', '', (string)$value);
@@ -37,6 +39,9 @@ class CryptoHelper
         $ivLength = openssl_cipher_iv_length('AES-256-CBC');
         if (!$ivLength || $ivLength <= 0) $ivLength = 16;
         $iv = openssl_random_pseudo_bytes($ivLength);
+        if ($iv === false || strlen($iv) !== $ivLength) {
+            $iv = substr(hash('sha256', uniqid('', true) . microtime(true), true), 0, $ivLength);
+        }
         $cipher = openssl_encrypt($plainText, 'AES-256-CBC', $key, OPENSSL_RAW_DATA, $iv);
         if ($cipher === false) return null;
 
@@ -106,13 +111,18 @@ class CryptoHelper
 
     private static function keyBytes()
     {
+        if (self::$keyMaterial !== null && trim((string)self::$keyMaterial) !== '') {
+            return hash('sha256', self::$keyMaterial, true);
+        }
+
         $material = getenv('CPMS_WORKER_CRYPTO_KEY');
         if (!is_string($material) || trim($material) === '') {
             $material = self::loadOrCreateKeyFile();
         }
         if (!is_string($material) || trim($material) === '') {
-            $material = __FILE__;
+            $material = self::fallbackKeyMaterial();
         }
+        self::$keyMaterial = trim((string)$material);
         return hash('sha256', $material, true);
     }
 
@@ -124,17 +134,47 @@ class CryptoHelper
 
         if (is_file($file)) {
             $txt = @file_get_contents($file);
-            return is_string($txt) ? trim($txt) : '';
+            $txt = is_string($txt) ? trim($txt) : '';
+            if ($txt !== '') return $txt;
         }
 
         if (!is_dir($dir)) {
             @mkdir($dir, 0775, true);
         }
 
+        if (!is_dir($dir) || !is_writable($dir)) {
+            return self::fallbackKeyMaterial();
+        }
+
         $bytes = openssl_random_pseudo_bytes(32);
+        if ($bytes === false || strlen($bytes) < 32) {
+            $bytes = hash('sha256', uniqid('', true) . microtime(true), true);
+        }
         $material = bin2hex($bytes);
-        @file_put_contents($file, $material, LOCK_EX);
-        return $material;
+        $written = @file_put_contents($file, $material, LOCK_EX);
+        if ($written !== false && is_file($file)) {
+            $saved = @file_get_contents($file);
+            $saved = is_string($saved) ? trim($saved) : '';
+            if ($saved !== '') return $saved;
+        }
+
+        return self::fallbackKeyMaterial();
+    }
+
+    private static function fallbackKeyMaterial()
+    {
+        $root = dirname(dirname(__DIR__));
+        $configPart = '';
+        $cfgFile = $root . '/app/config/database.php';
+        if (is_file($cfgFile)) {
+            $cfg = @include $cfgFile;
+            if (is_array($cfg)) {
+                $configPart = (isset($cfg['host']) ? $cfg['host'] : '') . '|'
+                    . (isset($cfg['dbname']) ? $cfg['dbname'] : '') . '|'
+                    . (isset($cfg['user']) ? $cfg['user'] : '');
+            }
+        }
+        return 'cpms-worker-crypto-v1|' . $root . '|' . $configPart;
     }
 }
 }
