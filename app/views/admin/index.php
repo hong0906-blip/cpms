@@ -33,6 +33,10 @@ $tabs = array(
     'leave_management' => array('label' => '연차 관리', 'icon' => 'calendar-days'),
 );
 
+if (Auth::isMaster()) {
+    $tabs['drive_check'] = array('label' => 'Drive 점검', 'icon' => 'cloud');
+}
+
 if (!$canManage && $canLaborManagement) {
     $tabs = array(
         'labor_calc' => array('label' => '노무비 계산', 'icon' => 'calculator'),
@@ -83,6 +87,8 @@ if ($tab === 'employees') {
     require __DIR__ . '/attendance.php';
 } elseif ($tab === 'leave_management') {
     require __DIR__ . '/leave_management.php';
+} elseif ($tab === 'drive_check' && Auth::isMaster()) {
+    require __DIR__ . '/drive_check.php';
 } else {
     require __DIR__ . '/labor_calc.php';
 }

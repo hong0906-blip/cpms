@@ -1,3 +1,9 @@
 
 storage/secrets/
+storage/logs/
+storage/tmp/
+cpms_private/
+**/cpms-drive-uploader.json
+tools/test_drive_upload.php
+tools/check_drive_ready.php
 

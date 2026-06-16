@@ -342,6 +342,10 @@ if ($route === 'project/unit_price_delete') {
     require_once __DIR__ . '/../app/views/project/unit_price_delete.php';
     exit;
 }
+if ($route === 'project/unit_price_bulk_delete') {
+    require_once __DIR__ . '/../app/views/project/unit_price_bulk_delete.php';
+    exit;
+}
 if ($route === 'project/unit_price_import_preview') {
     require_once __DIR__ . '/../app/views/project/unit_price_import_preview.php';
     exit;

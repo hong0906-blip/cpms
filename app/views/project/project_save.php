@@ -13,6 +13,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/GoogleDriveHelper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -249,7 +250,45 @@ try {
 
     $pdo->commit();
 
-    flash_set('success', '프로젝트가 생성되었습니다.');
+    $driveResult = null;
+    $driveSaved = false;
+    try {
+        $driveResult = cpms_drive_create_project_structure($projectId, $name, Auth::user());
+        $driveSaved = cpms_drive_save_project_structure_result($pdo, $projectId, $driveResult);
+        if (!$driveSaved) {
+            cpms_drive_log_upload_failure(array(
+                'user' => Auth::user(),
+                'section' => 'project',
+                'project_id' => $projectId,
+                'original_name' => $name,
+                'target_folder_id' => cpms_drive_folder_id('project_root'),
+                'message' => 'Project was created, but Drive metadata could not be saved to cpms_projects.'
+            ));
+        }
+    } catch (Exception $driveException) {
+        $driveResult = array(
+            'ok' => false,
+            'status' => 'failed',
+            'message' => $driveException->getMessage(),
+            'drive' => array(),
+            'errors' => array()
+        );
+        cpms_drive_save_project_structure_result($pdo, $projectId, $driveResult);
+        cpms_drive_log_upload_failure(array(
+            'user' => Auth::user(),
+            'section' => 'project',
+            'project_id' => $projectId,
+            'original_name' => $name,
+            'target_folder_id' => cpms_drive_folder_id('project_root'),
+            'message' => 'Project Drive folder creation exception: ' . $driveException->getMessage()
+        ));
+    }
+
+    if (is_array($driveResult) && !empty($driveResult['ok']) && $driveSaved) {
+        flash_set('success', '프로젝트가 생성되었습니다. Google Drive 프로젝트 폴더도 준비되었습니다.');
+    } else {
+        flash_set('success', '프로젝트가 생성되었습니다. Google Drive 폴더 생성은 실패 상태로 기록했으니 관리자가 점검 후 다시 처리할 수 있습니다.');
+    }
     header('Location: ?r=project/detail&id=' . $projectId);
     exit;
 

@@ -68,6 +68,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     end_date DATE NULL,
                     contract_amount BIGINT NULL,
                     status VARCHAR(50) DEFAULT '계약중',
+                    drive_status VARCHAR(30) DEFAULT '',
+                    drive_folder_id VARCHAR(128) DEFAULT '',
+                    drive_folders_json TEXT NULL,
+                    drive_error_message TEXT NULL,
+                    drive_updated_at DATETIME NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP NULL DEFAULT NULL
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
@@ -194,6 +199,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!column_exists($pdo, 'cpms_projects', 'contract_amount')) {
                     execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN contract_amount BIGINT NULL AFTER end_date");
                     array_push($added, 'contract_amount(계약금액)');
+                }
+
+                if (!column_exists($pdo, 'cpms_projects', 'drive_status')) {
+                    execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN drive_status VARCHAR(30) DEFAULT ''");
+                    array_push($added, 'drive_status');
+                }
+
+                if (!column_exists($pdo, 'cpms_projects', 'drive_folder_id')) {
+                    execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN drive_folder_id VARCHAR(128) DEFAULT ''");
+                    array_push($added, 'drive_folder_id');
+                }
+
+                if (!column_exists($pdo, 'cpms_projects', 'drive_folders_json')) {
+                    execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN drive_folders_json TEXT NULL");
+                    array_push($added, 'drive_folders_json');
+                }
+
+                if (!column_exists($pdo, 'cpms_projects', 'drive_error_message')) {
+                    execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN drive_error_message TEXT NULL");
+                    array_push($added, 'drive_error_message');
+                }
+
+                if (!column_exists($pdo, 'cpms_projects', 'drive_updated_at')) {
+                    execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN drive_updated_at DATETIME NULL");
+                    array_push($added, 'drive_updated_at');
                 }
 
                 // status 기본값이 옛날 값이면 그대로 둬도 되지만, 신규 생성 시 기본값은 계약중으로 이미 설정됨.

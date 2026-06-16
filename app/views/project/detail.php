@@ -701,10 +701,22 @@ if (is_file($contractMetaFile)) {
         <?php if (!is_array($unitPrices) || count($unitPrices) === 0): ?>
             <div class="text-sm text-gray-600">단가 내역이 없습니다.</div>
         <?php else: ?>
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <form id="unitPriceBulkDeleteForm" method="post" action="<?php echo h(base_url()); ?>/?r=project/unit_price_bulk_delete" class="flex flex-wrap items-center gap-2">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
+                    <button type="submit" name="mode" value="selected" class="px-3 py-2 rounded-2xl bg-red-50 border border-red-200 text-red-700 font-extrabold hover:bg-red-100" onclick="return cpmsUnitPriceConfirmBulkDelete('selected');">선택삭제</button>
+                    <button type="submit" name="mode" value="all" class="px-3 py-2 rounded-2xl bg-red-600 text-white font-extrabold hover:bg-red-700" onclick="return cpmsUnitPriceConfirmBulkDelete('all');">전체삭제</button>
+                </form>
+                <div id="unitPriceSelectedCount" class="text-xs text-gray-500">0건 선택</div>
+            </div>
             <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
                 <table class="min-w-full text-sm">
                     <thead class="bg-gray-50 border-b border-gray-100">
                     <tr class="text-left text-gray-600">
+                        <th class="px-3 py-2 font-extrabold text-center">
+                            <input type="checkbox" id="unitPriceSelectAll" class="w-4 h-4" title="전체 선택">
+                        </th>
                         <th class="px-3 py-2 font-extrabold">공종그룹</th>
                         <th class="px-3 py-2 font-extrabold">세부공종</th>
                         <th class="px-3 py-2 font-extrabold">위치</th>
@@ -725,6 +737,9 @@ if (is_file($contractMetaFile)) {
                     <tbody class="divide-y divide-gray-100">
                     <?php foreach ($unitPrices as $row): ?>
                         <tr>
+                            <td class="px-3 py-2 text-center">
+                                <input type="checkbox" class="unit-price-row-check w-4 h-4" form="unitPriceBulkDeleteForm" name="ids[]" value="<?php echo (int)$row['id']; ?>">
+                            </td>
                             <td class="px-3 py-2"><?php echo h(isset($row['trade_group']) ? (string)$row['trade_group'] : ''); ?></td>
                             <td class="px-3 py-2"><?php echo h(isset($row['sub_trade']) ? (string)$row['sub_trade'] : ''); ?></td>
                             <td class="px-3 py-2"><?php echo h(isset($row['location_name']) ? (string)$row['location_name'] : ''); ?></td>
@@ -763,6 +778,56 @@ if (is_file($contractMetaFile)) {
                     </tbody>
                 </table>
             </div>
+            <script>
+            (function() {
+                var all = document.getElementById('unitPriceSelectAll');
+                var countLabel = document.getElementById('unitPriceSelectedCount');
+                var checks = document.querySelectorAll ? document.querySelectorAll('.unit-price-row-check') : [];
+
+                function checkedCount() {
+                    var count = 0;
+                    for (var i = 0; i < checks.length; i++) {
+                        if (checks[i].checked) count++;
+                    }
+                    return count;
+                }
+
+                function updateCount() {
+                    var count = checkedCount();
+                    if (countLabel) countLabel.innerHTML = count + '건 선택';
+                    if (all) {
+                        all.checked = (checks.length > 0 && count === checks.length);
+                    }
+                }
+
+                if (all) {
+                    all.onclick = function() {
+                        for (var i = 0; i < checks.length; i++) {
+                            checks[i].checked = all.checked;
+                        }
+                        updateCount();
+                    };
+                }
+
+                for (var j = 0; j < checks.length; j++) {
+                    checks[j].onclick = updateCount;
+                }
+
+                window.cpmsUnitPriceConfirmBulkDelete = function(mode) {
+                    if (mode === 'all') {
+                        return confirm('단가 내역표 전체를 삭제하시겠습니까?');
+                    }
+                    var count = checkedCount();
+                    if (count <= 0) {
+                        alert('삭제할 단가 내역을 선택해주세요.');
+                        return false;
+                    }
+                    return confirm('선택한 단가 내역 ' + count + '건을 삭제하시겠습니까?');
+                };
+
+                updateCount();
+            })();
+            </script>
         <?php endif; ?>
     </div>
 </div>
