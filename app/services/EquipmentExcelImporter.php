@@ -563,31 +563,58 @@ class EquipmentExcelImporter
     private function readEquipmentSheet($filePath)
     {
         $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-        if ($ext === 'xls') {
+        $this->loadPHPExcel();
+        if (class_exists('PHPExcel_IOFactory')) {
             return $this->readWithPHPExcel($filePath);
+        }
+        if ($ext === 'xls') {
+            return array('error' => '.xls 파일을 읽으려면 PHPExcel 1.8.1 라이브러리가 필요합니다. 현재 서버에서는 .xlsx 파일로 저장해서 업로드해주세요.');
         }
         return $this->readWithZipArchive($filePath, '2.장비비');
     }
 
+    private function loadPHPExcel()
+    {
+        if (class_exists('PHPExcel_IOFactory')) return;
+
+        $root = dirname(dirname(__DIR__));
+        $candidates = array(
+            $root . '/app/libraries/PHPExcel/PHPExcel.php',
+            $root . '/app/libraries/PHPExcel/PHPExcel/IOFactory.php',
+            $root . '/vendor/phpoffice/phpexcel/Classes/PHPExcel.php',
+            $root . '/vendor/phpoffice/phpexcel/Classes/PHPExcel/IOFactory.php'
+        );
+        foreach ($candidates as $file) {
+            if (is_file($file)) {
+                require_once $file;
+            }
+        }
+    }
+
     private function readWithPHPExcel($filePath)
     {
-        $root = dirname(dirname(__DIR__));
-        $phpExcel = $root . '/app/libraries/PHPExcel/PHPExcel.php';
-        $phpExcelIo = $root . '/app/libraries/PHPExcel/PHPExcel/IOFactory.php';
-        if (is_file($phpExcel)) require_once $phpExcel;
-        if (is_file($phpExcelIo)) require_once $phpExcelIo;
-
         if (!class_exists('PHPExcel_IOFactory')) {
-            return array('error' => '.xls 파일을 읽으려면 PHPExcel 1.8.1 라이브러리가 필요합니다. 현재 서버에서는 .xlsx 파일을 업로드해주세요.');
+            return array('error' => '.xls 파일을 읽으려면 PHPExcel 1.8.1 라이브러리가 필요합니다. 현재 서버에서는 .xlsx 파일로 저장해서 업로드해주세요.');
         }
 
         try {
             $reader = PHPExcel_IOFactory::createReaderForFile($filePath);
             $excel = $reader->load($filePath);
-            $sheet = $excel->getSheetByName('2.장비비');
-            if (!$sheet) {
-                return array('error' => '2.장비비 시트를 찾을 수 없습니다.');
+            $sheetItems = array();
+            for ($i = 0; $i < $excel->getSheetCount(); $i++) {
+                $candidate = $excel->getSheet($i);
+                $sheetItems[count($sheetItems)] = array(
+                    'name' => $candidate->getTitle(),
+                    'object' => $candidate
+                );
             }
+
+            $target = $this->selectEquipmentSheet($sheetItems, '2.장비비');
+            if (!$target || !isset($target['object'])) {
+                return array('error' => '장비비 시트를 찾을 수 없습니다. 시트명을 2.장비비 또는 장비비로 맞춰주세요. 현재 시트: ' . $this->sheetNamesForMessage($sheetItems));
+            }
+            $sheet = $target['object'];
+            $sheetName = isset($target['name']) ? (string)$target['name'] : '2.장비비';
 
             $rows = array();
             for ($r = 1; $r <= 65; $r++) {
@@ -615,10 +642,92 @@ class EquipmentExcelImporter
                 }
             }
 
-            return array('error' => '', 'rows' => $rows, 'sheet_name' => '2.장비비');
+            return array('error' => '', 'rows' => $rows, 'sheet_name' => $sheetName);
         } catch (Exception $e) {
             return array('error' => '엑셀 파일을 읽는 중 오류가 발생했습니다: ' . $e->getMessage());
         }
+    }
+
+    private function selectEquipmentSheet($sheetList, $preferredSheetName)
+    {
+        if (!is_array($sheetList) || count($sheetList) <= 0) {
+            return null;
+        }
+
+        foreach ($sheetList as $sheet) {
+            $name = isset($sheet['name']) ? (string)$sheet['name'] : '';
+            if ($name === (string)$preferredSheetName) {
+                return $sheet;
+            }
+        }
+
+        foreach ($sheetList as $sheet) {
+            $name = isset($sheet['name']) ? (string)$sheet['name'] : '';
+            if ($this->isEquipmentSheetName($name, $preferredSheetName)) {
+                return $sheet;
+            }
+        }
+
+        if (count($sheetList) === 1) {
+            return $sheetList[0];
+        }
+
+        return null;
+    }
+
+    private function isEquipmentSheetName($sheetName, $preferredSheetName)
+    {
+        $normalized = $this->normalizeSheetName($sheetName);
+        if ($normalized === '') {
+            return false;
+        }
+
+        $preferred = $this->normalizeSheetName($preferredSheetName);
+        $equipment = $this->normalizeSheetName('장비비');
+        if ($normalized === $preferred || $normalized === $equipment) {
+            return true;
+        }
+        if ($equipment !== '' && strpos($normalized, $equipment) !== false) {
+            return true;
+        }
+        if (strpos($normalized, 'equipment') !== false) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function normalizeSheetName($name)
+    {
+        $value = trim((string)$name);
+        $compact = preg_replace('/\s+/u', '', $value);
+        if ($compact !== null) {
+            $value = $compact;
+        }
+        $value = str_replace(array('.', '_', '-', '/', '\\', '(', ')', '[', ']'), '', $value);
+        if (function_exists('mb_strtolower')) {
+            return mb_strtolower($value, 'UTF-8');
+        }
+        return strtolower($value);
+    }
+
+    private function sheetNamesForMessage($sheetList)
+    {
+        $names = array();
+        if (is_array($sheetList)) {
+            foreach ($sheetList as $sheet) {
+                $name = isset($sheet['name']) ? trim((string)$sheet['name']) : '';
+                if ($name !== '') {
+                    $names[count($names)] = $name;
+                }
+            }
+        }
+
+        if (count($names) <= 0) {
+            return '없음';
+        }
+
+        return implode(', ', $names);
     }
 
     private function readWithZipArchive($filePath, $preferredSheetName)
@@ -637,31 +746,26 @@ class EquipmentExcelImporter
         }
 
         $sheetList = $this->xlsxSheetList($zip);
-        $target = null;
-        foreach ($sheetList as $sheet) {
-            if ((string)$sheet['name'] === (string)$preferredSheetName) {
-                $target = $sheet;
-                break;
-            }
-        }
+        $target = $this->selectEquipmentSheet($sheetList, $preferredSheetName);
         if (!$target) {
             $zip->close();
-            $result['error'] = '2.장비비 시트를 찾을 수 없습니다.';
+            $result['error'] = '장비비 시트를 찾을 수 없습니다. 시트명을 2.장비비 또는 장비비로 맞춰주세요. 현재 시트: ' . $this->sheetNamesForMessage($sheetList);
             return $result;
         }
+        $targetSheetName = isset($target['name']) ? (string)$target['name'] : (string)$preferredSheetName;
 
         $sheetXml = $zip->getFromName($target['path']);
         if ($sheetXml === false) {
             $zip->close();
-            $result['error'] = '2.장비비 시트 데이터를 찾을 수 없습니다.';
+            $result['error'] = $targetSheetName . ' 시트 데이터를 찾을 수 없습니다.';
             return $result;
         }
 
         $sharedStrings = $this->xlsxSharedStrings($zip);
-        $sx = @simplexml_load_string($sheetXml);
+        $sx = $this->xlsxLoadXml($sheetXml);
         if (!$sx || !isset($sx->sheetData)) {
             $zip->close();
-            $result['error'] = '2.장비비 시트 파싱에 실패했습니다.';
+            $result['error'] = $targetSheetName . ' 시트 파싱에 실패했습니다.';
             return $result;
         }
 
@@ -700,20 +804,12 @@ class EquipmentExcelImporter
         if ($xml === false) {
             return $strings;
         }
-        $sx = @simplexml_load_string($xml);
+        $sx = $this->xlsxLoadXml($xml);
         if (!$sx) {
             return $strings;
         }
         foreach ($sx->si as $si) {
-            $text = '';
-            if (isset($si->t)) {
-                $text = (string)$si->t;
-            } else if (isset($si->r)) {
-                foreach ($si->r as $run) {
-                    if (isset($run->t)) $text .= (string)$run->t;
-                }
-            }
-            $strings[count($strings)] = $text;
+            $strings[count($strings)] = $this->xlsxStringItemText($si);
         }
         return $strings;
     }
@@ -727,8 +823,8 @@ class EquipmentExcelImporter
             return $sheets;
         }
 
-        $wb = @simplexml_load_string($workbookXml);
-        $rels = @simplexml_load_string($relsXml);
+        $wb = $this->xlsxLoadXml($workbookXml);
+        $rels = $this->xlsxLoadXml($relsXml);
         if (!$wb || !$rels || !isset($wb->sheets)) {
             return $sheets;
         }
@@ -750,8 +846,7 @@ class EquipmentExcelImporter
         }
 
         foreach ($wb->sheets->sheet as $sheet) {
-            $attrs = $sheet->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
-            $rid = isset($attrs['id']) ? (string)$attrs['id'] : '';
+            $rid = isset($sheet['id']) ? (string)$sheet['id'] : '';
             $name = (string)$sheet['name'];
             if ($rid !== '' && isset($targets[$rid])) {
                 $sheets[count($sheets)] = array('name' => $name, 'path' => $targets[$rid]);
@@ -773,8 +868,8 @@ class EquipmentExcelImporter
             $idx = isset($cell->v) ? (int)$cell->v : -1;
             $value = ($idx >= 0 && isset($sharedStrings[$idx])) ? $sharedStrings[$idx] : '';
         } else if ($type === 'inlineStr') {
-            if (isset($cell->is) && isset($cell->is->t)) {
-                $value = (string)$cell->is->t;
+            if (isset($cell->is)) {
+                $value = $this->xlsxStringItemText($cell->is);
             }
         } else {
             $value = isset($cell->v) ? (string)$cell->v : '';
@@ -794,6 +889,36 @@ class EquipmentExcelImporter
             'style' => $style,
             'is_date' => 0
         );
+    }
+
+    private function xlsxLoadXml($xml)
+    {
+        $xml = $this->xlsxStripNamespaces((string)$xml);
+        return @simplexml_load_string($xml);
+    }
+
+    private function xlsxStripNamespaces($xml)
+    {
+        $xml = preg_replace('/\sxmlns(:[A-Za-z0-9_\\-]+)?="[^"]*"/', '', (string)$xml);
+        $xml = preg_replace('/(<\/?)([A-Za-z0-9_\\-]+):/', '$1', $xml);
+        $xml = preg_replace('/\s([A-Za-z0-9_\\-]+):([A-Za-z0-9_\\-]+)=/', ' $2=', $xml);
+        return $xml;
+    }
+
+    private function xlsxStringItemText($item)
+    {
+        $text = '';
+        if (isset($item->t)) {
+            $text .= (string)$item->t;
+        }
+        if (isset($item->r)) {
+            foreach ($item->r as $run) {
+                if (isset($run->t)) {
+                    $text .= (string)$run->t;
+                }
+            }
+        }
+        return $text;
     }
 
     private function headerCellToDate($cell, $baseYearMonth, $lineType, &$warning)

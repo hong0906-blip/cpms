@@ -493,7 +493,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
         <div id="equipmentExcelUpload" class="mt-6 border border-gray-200 rounded-2xl p-4">
             <div class="flex flex-col gap-1 mb-4">
                 <div class="text-lg font-extrabold">월별 장비비 엑셀 업로드</div>
-                <div class="text-xs text-gray-600">장비비 양식의 2.장비비 시트를 읽고, J~AE 날짜별 금액을 장비입력에 등록합니다.</div>
+                <div class="text-xs text-gray-600">장비비 양식의 2.장비비 또는 장비비 시트를 읽고, J~AE 날짜별 금액을 장비입력에 등록합니다.</div>
             </div>
 
             <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_excel_preview" enctype="multipart/form-data" class="space-y-3">
@@ -514,12 +514,12 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                     </div>
                     <div>
                         <label class="text-sm font-bold text-gray-700">엑셀 파일</label>
-                        <input type="file" name="equipment_excel_file" accept=".xlsx,.xls" class="mt-1 block w-full text-sm border rounded-xl px-3 py-2" required>
+                        <input type="file" name="equipment_excel_file" accept=".xlsx" class="mt-1 block w-full text-sm border rounded-xl px-3 py-2" required>
                     </div>
                 </div>
 
                 <div class="rounded-xl bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600 leading-5">
-                    등록 전 미리보기에서 신규, 기존 업데이트, 중복 제외, 오류를 확인할 수 있습니다. 존재하지 않는 날짜와 음수 금액은 저장하지 않습니다.
+                    등록 전 미리보기에서 신규, 기존 업데이트, 중복 제외, 오류를 확인할 수 있습니다. 현재 서버에서는 .xlsx 형식을 사용해주세요.
                 </div>
                 <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold">업로드/미리보기</button>
             </form>

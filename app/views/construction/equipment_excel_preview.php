@@ -40,6 +40,26 @@ function equipment_excel_preview_redirect($projectId, $ym, $token)
     return $url;
 }
 
+function equipment_excel_preview_has_phpexcel()
+{
+    if (class_exists('PHPExcel_IOFactory')) return true;
+
+    $root = dirname(dirname(dirname(__DIR__)));
+    $candidates = array(
+        $root . '/app/libraries/PHPExcel/PHPExcel.php',
+        $root . '/app/libraries/PHPExcel/PHPExcel/IOFactory.php',
+        $root . '/vendor/phpoffice/phpexcel/Classes/PHPExcel.php',
+        $root . '/vendor/phpoffice/phpexcel/Classes/PHPExcel/IOFactory.php'
+    );
+    foreach ($candidates as $file) {
+        if (is_file($file)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 if ($projectId <= 0) {
     flash_set('error', '프로젝트 정보가 올바르지 않습니다.');
     header('Location: ' . equipment_excel_preview_redirect($projectId, $baseYm, ''));
@@ -66,6 +86,11 @@ if ($errorCode !== UPLOAD_ERR_OK || $tmpName === '' || !is_uploaded_file($tmpNam
 }
 if ($ext !== 'xlsx' && $ext !== 'xls') {
     flash_set('error', '장비비 엑셀은 .xlsx 또는 .xls 파일만 업로드할 수 있습니다.');
+    header('Location: ' . equipment_excel_preview_redirect($projectId, $baseYm, ''));
+    exit;
+}
+if ($ext === 'xls' && !equipment_excel_preview_has_phpexcel()) {
+    flash_set('error', '.xls 파일은 현재 서버에서 미리보기를 만들 수 없습니다. 엑셀에서 .xlsx로 저장한 뒤 업로드해주세요.');
     header('Location: ' . equipment_excel_preview_redirect($projectId, $baseYm, ''));
     exit;
 }
