@@ -156,7 +156,7 @@ class ExcelWorkerImporter
 
         return array(
             'import_no' => trim((string)(isset($data['import_no']) ? $data['import_no'] : '')),
-            'resident_no' => trim((string)(isset($data['resident_no']) ? $data['resident_no'] : '')),
+            'resident_no' => $this->normalizeSensitiveText(isset($data['resident_no']) ? $data['resident_no'] : '', true),
             'name' => trim((string)(isset($data['name']) ? $data['name'] : '')),
             'job_type' => trim((string)(isset($data['job_type']) ? $data['job_type'] : '')),
             'agency_name' => trim((string)(isset($data['agency_name']) ? $data['agency_name'] : '')),
@@ -167,7 +167,7 @@ class ExcelWorkerImporter
             'daily_wage' => $dailyWage,
             'account_holder' => trim((string)(isset($data['account_holder']) ? $data['account_holder'] : '')),
             'bank_name' => trim((string)(isset($data['bank_name']) ? $data['bank_name'] : '')),
-            'bank_account' => trim((string)(isset($data['bank_account']) ? $data['bank_account'] : '')),
+            'bank_account' => $this->normalizeSensitiveText(isset($data['bank_account']) ? $data['bank_account'] : '', false),
             'memo' => trim((string)(isset($data['memo']) ? $data['memo'] : '')),
             'source_type' => 'excel',
             'is_active' => 1,
@@ -182,6 +182,36 @@ class ExcelWorkerImporter
         if ($raw === '' || !is_numeric($raw)) return 0;
         $num = (int)$raw;
         return $num < 0 ? 0 : $num;
+    }
+
+    public function normalizeSensitiveText($value, $isResidentNo)
+    {
+        $raw = trim((string)$value);
+        if ($raw === '') return '';
+
+        $raw = str_replace(array("\xC2\xA0", '　'), ' ', $raw);
+        $raw = trim($raw);
+
+        if (preg_match('/^[+-]?\d+(?:\.\d+)?[eE][+-]?\d+$/', $raw)) {
+            $raw = sprintf('%.0f', (float)$raw);
+        }
+        if (preg_match('/^\d+\.0+$/', $raw)) {
+            $raw = (string)((float)$raw);
+            if (preg_match('/^[+-]?\d+(?:\.\d+)?[eE][+-]?\d+$/', $raw)) {
+                $raw = sprintf('%.0f', (float)$raw);
+            }
+            $raw = preg_replace('/\.0+$/', '', $raw);
+        }
+
+        $raw = trim($raw);
+        if ($isResidentNo) {
+            $digits = CryptoHelper::normalizeDigits($raw);
+            if (strlen($digits) === 13 && strpos($raw, '-') === false) {
+                return substr($digits, 0, 6) . '-' . substr($digits, 6);
+            }
+        }
+
+        return $raw;
     }
 
     public function normalizeDate($value)
@@ -269,19 +299,35 @@ class ExcelWorkerImporter
                 $result['rows'][$r] = array();
                 for ($c = 1; $c <= $highestColumnIndex; $c++) {
                     $cell = $sheet->getCellByColumnAndRow($c - 1, $r);
-                    $value = '';
-                    try {
-                        $value = $cell->getCalculatedValue();
-                    } catch (Exception $e) {
-                        $value = $cell->getValue();
-                    }
-                    $result['rows'][$r][$c] = trim((string)$value);
+                    $result['rows'][$r][$c] = $this->phpExcelCellValue($cell);
                 }
             }
         } catch (Exception $e) {
             $result['error'] = '엑셀 파일을 읽는 중 오류가 발생했습니다: ' . $e->getMessage();
         }
         return $result;
+    }
+
+    private function phpExcelCellValue($cell)
+    {
+        $value = '';
+        try {
+            if (method_exists($cell, 'getFormattedValue')) {
+                $value = $cell->getFormattedValue();
+            }
+        } catch (Exception $e) {
+            $value = '';
+        }
+
+        if (trim((string)$value) === '') {
+            try {
+                $value = $cell->getCalculatedValue();
+            } catch (Exception $e2) {
+                $value = $cell->getValue();
+            }
+        }
+
+        return trim((string)$value);
     }
 
     private function readWithZipArchive($filePath)
@@ -321,7 +367,7 @@ class ExcelWorkerImporter
             return $result;
         }
 
-        $sx = @simplexml_load_string($sheetXml);
+        $sx = $this->xlsxLoadXml($sheetXml);
         if (!$sx || !isset($sx->sheetData)) {
             $zip->close();
             $result['error'] = '엑셀 시트 파싱에 실패했습니다.';
@@ -351,18 +397,10 @@ class ExcelWorkerImporter
         $strings = array();
         $xml = $zip->getFromName('xl/sharedStrings.xml');
         if ($xml === false) return $strings;
-        $sx = @simplexml_load_string($xml);
+        $sx = $this->xlsxLoadXml($xml);
         if (!$sx) return $strings;
         foreach ($sx->si as $si) {
-            $text = '';
-            if (isset($si->t)) {
-                $text = (string)$si->t;
-            } else if (isset($si->r)) {
-                foreach ($si->r as $run) {
-                    if (isset($run->t)) $text .= (string)$run->t;
-                }
-            }
-            $strings[] = $text;
+            $strings[] = $this->xlsxStringItemText($si);
         }
         return $strings;
     }
@@ -374,8 +412,8 @@ class ExcelWorkerImporter
         $relsXml = $zip->getFromName('xl/_rels/workbook.xml.rels');
         if ($workbookXml === false || $relsXml === false) return $sheets;
 
-        $wb = @simplexml_load_string($workbookXml);
-        $rels = @simplexml_load_string($relsXml);
+        $wb = $this->xlsxLoadXml($workbookXml);
+        $rels = $this->xlsxLoadXml($relsXml);
         if (!$wb || !$rels || !isset($wb->sheets)) return $sheets;
 
         $targets = array();
@@ -391,8 +429,7 @@ class ExcelWorkerImporter
         }
 
         foreach ($wb->sheets->sheet as $sheet) {
-            $attrs = $sheet->attributes('http://schemas.openxmlformats.org/officeDocument/2006/relationships');
-            $rid = isset($attrs['id']) ? (string)$attrs['id'] : '';
+            $rid = isset($sheet['id']) ? (string)$sheet['id'] : '';
             $name = (string)$sheet['name'];
             if ($rid !== '' && isset($targets[$rid])) {
                 $sheets[] = array('name' => $name, 'path' => $targets[$rid]);
@@ -409,10 +446,39 @@ class ExcelWorkerImporter
             return ($idx >= 0 && isset($sharedStrings[$idx])) ? trim((string)$sharedStrings[$idx]) : '';
         }
         if ($type === 'inlineStr') {
-            if (isset($cell->is) && isset($cell->is->t)) return trim((string)$cell->is->t);
+            if (isset($cell->is)) return trim($this->xlsxStringItemText($cell->is));
             return '';
         }
+        if ($type === 'str' && isset($cell->v)) return trim((string)$cell->v);
         return isset($cell->v) ? trim((string)$cell->v) : '';
+    }
+
+    private function xlsxLoadXml($xml)
+    {
+        $xml = $this->xlsxStripNamespaces((string)$xml);
+        return @simplexml_load_string($xml);
+    }
+
+    private function xlsxStripNamespaces($xml)
+    {
+        $xml = preg_replace('/\sxmlns(:[A-Za-z0-9_\\-]+)?="[^"]*"/', '', (string)$xml);
+        $xml = preg_replace('/(<\\/?)([A-Za-z0-9_\\-]+):/', '$1', $xml);
+        $xml = preg_replace('/\\s([A-Za-z0-9_\\-]+):([A-Za-z0-9_\\-]+)=/', ' $2=', $xml);
+        return $xml;
+    }
+
+    private function xlsxStringItemText($item)
+    {
+        $text = '';
+        if (isset($item->t)) {
+            $text .= (string)$item->t;
+        }
+        if (isset($item->r)) {
+            foreach ($item->r as $run) {
+                if (isset($run->t)) $text .= (string)$run->t;
+            }
+        }
+        return $text;
     }
 
     private function cell($cells, $colNo)

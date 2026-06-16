@@ -119,12 +119,13 @@ function cpms_workforce_status_label($status)
         </div>
 
         <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
-          <table class="min-w-[1200px] w-full text-sm">
+          <table class="min-w-[1280px] w-full text-sm">
             <thead class="bg-gray-100 text-gray-700">
               <tr>
                 <th class="px-3 py-2 border">행</th>
                 <th class="px-3 py-2 border">상태</th>
                 <th class="px-3 py-2 border">성명</th>
+                <th class="px-3 py-2 border">주민번호</th>
                 <th class="px-3 py-2 border">연락처</th>
                 <th class="px-3 py-2 border">구분/직종</th>
                 <th class="px-3 py-2 border">인력사 업체명</th>
@@ -142,6 +143,7 @@ function cpms_workforce_status_label($status)
                   <td class="px-3 py-2 border text-center"><?php echo (int)(isset($pr['row_no']) ? $pr['row_no'] : 0); ?></td>
                   <td class="px-3 py-2 border"><?php echo h(isset($pr['status']) ? $pr['status'] : ''); ?></td>
                   <td class="px-3 py-2 border font-bold"><?php echo h(isset($d['name']) ? $d['name'] : ''); ?></td>
+                  <td class="px-3 py-2 border"><?php echo h(CryptoHelper::maskResidentNo(isset($d['resident_no']) ? $d['resident_no'] : '')); ?></td>
                   <td class="px-3 py-2 border"><?php echo h(isset($d['phone']) ? $d['phone'] : ''); ?></td>
                   <td class="px-3 py-2 border"><?php echo h(isset($d['job_type']) ? $d['job_type'] : ''); ?></td>
                   <td class="px-3 py-2 border"><?php echo h(isset($d['agency_name']) ? $d['agency_name'] : ''); ?></td>
