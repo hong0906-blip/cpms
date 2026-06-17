@@ -4,6 +4,8 @@
  * PHP 5.6 compatible.
  */
 
+require_once dirname(dirname(__DIR__)) . '/services/SafetyHealthDriveService.php';
+
 if (!function_exists('cpms_safety_cost_store_path')) {
 function cpms_safety_cost_store_path()
 {
@@ -493,6 +495,9 @@ if (!function_exists('cpms_safety_cost_file_exists')) {
 function cpms_safety_cost_file_exists($row)
 {
     if (!is_array($row) || !isset($row['pdf']) || !is_array($row['pdf'])) return false;
+    if (function_exists('cpms_safety_health_drive_is_drive_file') && cpms_safety_health_drive_is_drive_file($row['pdf'])) {
+        return cpms_safety_health_drive_link($row['pdf'], false) !== '';
+    }
     $path = isset($row['pdf']['stored_path']) ? (string)$row['pdf']['stored_path'] : '';
     return cpms_safety_cost_resolve_path($path) !== '';
 }}
@@ -500,6 +505,25 @@ function cpms_safety_cost_file_exists($row)
 if (!function_exists('cpms_safety_cost_pdf_links_html')) {
 function cpms_safety_cost_pdf_links_html($row)
 {
+    if (is_array($row) && isset($row['pdf']) && is_array($row['pdf']) && function_exists('cpms_safety_health_drive_is_drive_file') && cpms_safety_health_drive_is_drive_file($row['pdf'])) {
+        $id = isset($row['id']) ? (string)$row['id'] : '';
+        $title = isset($row['pdf']['original_name']) ? (string)$row['pdf']['original_name'] : 'safety_cost.pdf';
+        $viewUrl = base_url() . '/?r=safety/safety_cost_download&id=' . rawurlencode($id);
+        $hasView = cpms_safety_health_drive_link($row['pdf'], false) !== '';
+        $hasDownload = isset($row['pdf']['drive_web_content_link']) && trim((string)$row['pdf']['drive_web_content_link']) !== '';
+        if ($id === '' || (!$hasView && !$hasDownload)) {
+            return '<span class="text-red-500 text-xs">' . cpms_safety_health_drive_h(cpms_safety_health_drive_label('file_check_required')) . '</span>';
+        }
+        $html = '<span class="inline-flex flex-wrap gap-1">';
+        if ($hasView) {
+            $html .= '<a class="inline-flex items-center px-2 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold" target="_blank" rel="noopener" href="' . cpms_safety_health_drive_h($viewUrl) . '" title="' . cpms_safety_health_drive_h($title) . '">' . cpms_safety_health_drive_h(cpms_safety_health_drive_label('view')) . '</a>';
+        }
+        if ($hasDownload) {
+            $html .= '<a class="inline-flex items-center px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-700 text-xs font-bold" href="' . cpms_safety_health_drive_h($viewUrl . '&download=1') . '" title="' . cpms_safety_health_drive_h($title) . '">' . cpms_safety_health_drive_h(cpms_safety_health_drive_label('download')) . '</a>';
+        }
+        $html .= '</span>';
+        return $html;
+    }
     if (!is_array($row) || !isset($row['pdf']) || !is_array($row['pdf'])) {
         return '<span class="text-gray-400 text-xs">첨부 없음</span>';
     }
@@ -919,6 +943,9 @@ if (!function_exists('cpms_samsung_portal_health_file_exists')) {
 function cpms_samsung_portal_health_file_exists($row, $type)
 {
     $file = cpms_samsung_portal_health_record($row, $type);
+    if (function_exists('cpms_safety_health_drive_is_drive_file') && cpms_safety_health_drive_is_drive_file($file)) {
+        return cpms_safety_health_drive_link($file, false) !== '';
+    }
     $path = isset($file['stored_path']) ? (string)$file['stored_path'] : '';
     return cpms_samsung_portal_resolve_health_path($path) !== '';
 }}
@@ -1155,10 +1182,51 @@ function cpms_samsung_portal_handle_upload_request($pdo)
     if ($pdo && function_exists('cpms_samsung_portal_bootstrap_automations')) {
         cpms_samsung_portal_bootstrap_automations($pdo, true);
     }
+    $driveResult = null;
+    if (function_exists('cpms_safety_health_drive_upload_local_file')) {
+        $userContext = class_exists('App\\Core\\Auth') ? \App\Core\Auth::user() : array();
+        $driveResult = cpms_safety_health_drive_upload_local_file(
+            $pdo,
+            0,
+            $tmp,
+            $name,
+            'samsung_excel',
+            date('Y-m'),
+            date('Y-m-d H:i:s'),
+            array('date' => date('Y-m-d H:i:s'), 'project_name' => cpms_safety_health_drive_label('common')),
+            $userContext
+        );
+        if (is_array($driveResult) && !empty($driveResult['ok']) && isset($driveResult['record']) && is_array($driveResult['record'])) {
+            $meta = cpms_safety_health_drive_insert_generic_record(
+                $pdo,
+                0,
+                'samsung_portal',
+                $name,
+                isset($driveResult['record']['stored_name']) ? (string)$driveResult['record']['stored_name'] : $name,
+                '',
+                $driveResult['record'],
+                function_exists('cpms_safety_cost_user_id') ? cpms_safety_cost_user_id() : 0,
+                array(
+                    'source_table' => 'samsung_portal_import',
+                    'source_id' => date('YmdHis'),
+                    'uploaded_by_name' => cpms_samsung_portal_user_label(),
+                    'extra_json' => cpms_drive_json_encode(array(
+                        'inserted' => isset($result['inserted']) ? (int)$result['inserted'] : 0,
+                        'updated' => isset($result['updated']) ? (int)$result['updated'] : 0,
+                        'skipped' => isset($result['skipped']) ? (int)$result['skipped'] : 0
+                    ))
+                )
+            );
+            if (empty($meta['ok'])) $driveResult = $meta;
+        }
+    }
     $message = cpms_samsung_portal_label('%EC%97%85%EB%A1%9C%EB%93%9C%20%EC%99%84%EB%A3%8C: ')
         . cpms_samsung_portal_label('%EC%8B%A0%EA%B7%9C') . ' ' . (int)$result['inserted']
         . ', ' . cpms_samsung_portal_label('%EA%B0%B1%EC%8B%A0') . ' ' . (int)$result['updated']
         . ', ' . cpms_samsung_portal_label('%EC%A0%9C%EC%99%B8') . ' ' . (int)$result['skipped'];
+    if (is_array($driveResult) && empty($driveResult['ok'])) {
+        $message = cpms_safety_health_drive_flash_message($message, $driveResult);
+    }
     flash_set('success', $message);
     cpms_samsung_portal_redirect('');
 }}
@@ -1267,6 +1335,25 @@ function cpms_samsung_portal_handle_health_upload_request($pdo)
         flash_set('error', $message !== '' ? $message : cpms_samsung_portal_label('%EA%B1%B4%EA%B0%95%EA%B2%80%EC%A7%84%20%ED%8C%8C%EC%9D%BC%20%EC%A0%80%EC%9E%A5%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
         cpms_samsung_portal_redirect($extra);
     }
+    $driveResult = null;
+    if (function_exists('cpms_safety_health_drive_upload_local_file')) {
+        $localPath = isset($file['stored_path']) ? cpms_samsung_portal_resolve_health_path($file['stored_path']) : '';
+        $userContext = class_exists('App\\Core\\Auth') ? \App\Core\Auth::user() : array();
+        $driveResult = cpms_safety_health_drive_upload_local_file(
+            $pdo,
+            0,
+            $localPath,
+            isset($file['original_name']) ? (string)$file['original_name'] : '',
+            'samsung_health',
+            date('Y-m'),
+            isset($file['uploaded_at']) ? (string)$file['uploaded_at'] : date('Y-m-d H:i:s'),
+            array('date' => isset($file['uploaded_at']) ? (string)$file['uploaded_at'] : date('Y-m-d H:i:s'), 'project_name' => cpms_safety_health_drive_label('common')),
+            $userContext
+        );
+        if (is_array($driveResult) && isset($driveResult['record']) && is_array($driveResult['record'])) {
+            $file = array_merge($file, cpms_safety_health_drive_record_values($driveResult['record'], function_exists('cpms_safety_cost_user_id') ? cpms_safety_cost_user_id() : 0));
+        }
+    }
     if (!isset($data['samsung_portal']['records'][$recordKey]['health_checks']) || !is_array($data['samsung_portal']['records'][$recordKey]['health_checks'])) {
         $data['samsung_portal']['records'][$recordKey]['health_checks'] = array();
     }
@@ -1274,10 +1361,21 @@ function cpms_samsung_portal_handle_health_upload_request($pdo)
     $data['samsung_portal']['records'][$recordKey]['last_modified_by'] = cpms_samsung_portal_user_label();
     $data['samsung_portal']['records'][$recordKey]['last_modified_at'] = date('Y-m-d H:i:s');
     if (!cpms_samsung_portal_save_store($data)) {
+        if (is_array($driveResult) && !empty($driveResult['ok']) && isset($driveResult['record']) && is_array($driveResult['record'])) {
+            cpms_safety_health_drive_delete_uploaded_record($driveResult['record'], array(
+                'section' => 'safety_health',
+                'project_id' => '',
+                'is_common_file' => '1',
+                'original_name' => isset($file['original_name']) ? (string)$file['original_name'] : '',
+                'message' => 'Samsung portal health file metadata save failed after Drive upload.'
+            ));
+        }
         flash_set('error', cpms_samsung_portal_label('%EA%B1%B4%EA%B0%95%EA%B2%80%EC%A7%84%20%ED%8C%8C%EC%9D%BC%20%EC%A0%95%EB%B3%B4%20%EC%A0%80%EC%9E%A5%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
         cpms_samsung_portal_redirect($extra);
     }
-    flash_set('success', cpms_samsung_portal_health_type_label($type) . cpms_samsung_portal_label('%20%ED%8C%8C%EC%9D%BC%EC%9D%84%20%EC%97%85%EB%A1%9C%EB%93%9C%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
+    $successMessage = cpms_samsung_portal_health_type_label($type) . cpms_samsung_portal_label('%20%ED%8C%8C%EC%9D%BC%EC%9D%84%20%EC%97%85%EB%A1%9C%EB%93%9C%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+    if (is_array($driveResult) && empty($driveResult['ok'])) $successMessage = cpms_safety_health_drive_flash_message($successMessage, $driveResult);
+    flash_set('success', $successMessage);
     cpms_samsung_portal_redirect($extra);
 }}
 
@@ -1299,6 +1397,16 @@ function cpms_samsung_portal_handle_health_download_request($pdo)
     }
     $row = $data['samsung_portal']['records'][$recordKey];
     $file = cpms_samsung_portal_health_record($row, $type);
+    if (function_exists('cpms_safety_health_drive_is_drive_file') && cpms_safety_health_drive_is_drive_file($file)) {
+        $url = cpms_safety_health_drive_link($file, (isset($_GET['download']) && (string)$_GET['download'] === '1'));
+        if ($url === '') {
+            http_response_code(404);
+            echo cpms_safety_health_drive_label('file_check_required');
+            exit;
+        }
+        header('Location: ' . $url);
+        exit;
+    }
     $path = isset($file['stored_path']) ? cpms_samsung_portal_resolve_health_path($file['stored_path']) : '';
     if ($path === '') {
         http_response_code(404);

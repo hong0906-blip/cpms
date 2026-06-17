@@ -79,6 +79,8 @@ $userName = (string)Auth::userName();
 $userEmail = (string)Auth::userEmail();
 $projectName = cpms_safety_cost_project_name($pdo, $projectId);
 $uploadedStoredPath = '';
+$driveUploadResult = null;
+$driveUploadedRecord = null;
 
 try {
     $store = cpms_safety_cost_read_store();
@@ -173,6 +175,24 @@ try {
             'uploaded_by' => $userId,
             'uploaded_by_name' => $userName
         );
+        if (function_exists('cpms_safety_health_drive_upload_local_file')) {
+            $localPath = cpms_safety_cost_resolve_path(isset($upload['stored_path']) ? (string)$upload['stored_path'] : '');
+            $driveUploadResult = cpms_safety_health_drive_upload_local_file(
+                $pdo,
+                $projectId,
+                $localPath,
+                isset($upload['original_name']) ? (string)$upload['original_name'] : '',
+                'safety_cost_pdf',
+                $useDate,
+                $now,
+                array('date' => $useDate, 'project_name' => $projectName),
+                Auth::user()
+            );
+            if (is_array($driveUploadResult) && isset($driveUploadResult['record']) && is_array($driveUploadResult['record'])) {
+                $driveUploadedRecord = $driveUploadResult['record'];
+                $base['pdf'] = array_merge($base['pdf'], cpms_safety_health_drive_record_values($driveUploadedRecord, $userId));
+            }
+        }
     } else if (!isset($base['pdf']) || !is_array($base['pdf'])) {
         $base['pdf'] = array();
     }
@@ -190,11 +210,23 @@ try {
             $uploadedFile = cpms_safety_cost_resolve_path($uploadedStoredPath);
             if ($uploadedFile !== '') @unlink($uploadedFile);
         }
+        if (is_array($driveUploadedRecord) && function_exists('cpms_safety_health_drive_delete_uploaded_record')) {
+            cpms_safety_health_drive_delete_uploaded_record($driveUploadedRecord, array(
+                'section' => 'safety_health',
+                'project_id' => $projectId,
+                'is_common_file' => '0',
+                'original_name' => isset($driveUploadedRecord['original_name']) ? (string)$driveUploadedRecord['original_name'] : '',
+                'message' => 'Safety cost metadata save failed after Drive upload.'
+            ));
+        }
         flash_set('error', '안전관리비 사용내역 저장에 실패했습니다.');
         header('Location: ' . $redirect);
         exit;
     }
 
+    if (is_array($driveUploadResult) && empty($driveUploadResult['ok'])) {
+        $message = cpms_safety_health_drive_flash_message($message, $driveUploadResult);
+    }
     flash_set('success', $message);
     header('Location: ' . $redirect);
     exit;
@@ -202,6 +234,15 @@ try {
     if ($uploadedStoredPath !== '') {
         $uploadedFile = cpms_safety_cost_resolve_path($uploadedStoredPath);
         if ($uploadedFile !== '') @unlink($uploadedFile);
+    }
+    if (is_array($driveUploadedRecord) && function_exists('cpms_safety_health_drive_delete_uploaded_record')) {
+        cpms_safety_health_drive_delete_uploaded_record($driveUploadedRecord, array(
+            'section' => 'safety_health',
+            'project_id' => $projectId,
+            'is_common_file' => '0',
+            'original_name' => isset($driveUploadedRecord['original_name']) ? (string)$driveUploadedRecord['original_name'] : '',
+            'message' => 'Safety cost save exception after Drive upload: ' . $e->getMessage()
+        ));
     }
     flash_set('error', '저장 실패: ' . $e->getMessage());
     header('Location: ' . $redirect);

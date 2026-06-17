@@ -124,6 +124,9 @@ function cpms_drive_log_upload_failure($context) {
         'approval_document_id' => (string)cpms_drive_context_value($context, 'approval_document_id', cpms_drive_context_value($context, 'approval_id', '')),
         'document_type' => (string)cpms_drive_context_value($context, 'document_type', ''),
         'project_id' => (string)cpms_drive_context_value($context, 'project_id', ''),
+        'is_common_file' => (string)cpms_drive_context_value($context, 'is_common_file', ''),
+        'document_year' => (string)cpms_drive_context_value($context, 'document_year', ''),
+        'document_month' => (string)cpms_drive_context_value($context, 'document_month', ''),
         'original_name' => (string)cpms_drive_context_value($context, 'original_name', cpms_drive_context_value($context, 'file_name', '')),
         'target_folder_id' => (string)cpms_drive_context_value($context, 'target_folder_id', cpms_drive_context_value($context, 'drive_folder_id', '')),
         'message' => cpms_drive_redact_text((string)cpms_drive_context_value($context, 'message', '')),
@@ -728,7 +731,8 @@ function cpms_drive_project_folder_schema() {
                 'safety_health_samsung_portal' => urldecode('%EC%82%BC%EC%84%B1%EC%83%81%EC%83%9D%ED%98%91%EB%A0%A5%ED%8F%AC%ED%83%88'),
                 'safety_health_ppe' => urldecode('%EB%B3%B4%ED%98%B8%EA%B5%AC'),
                 'safety_health_education' => urldecode('%EA%B5%90%EC%9C%A1'),
-                'safety_health_medical_checkup' => urldecode('%EA%B2%80%EC%A7%84')
+                'safety_health_medical_checkup' => urldecode('%EA%B2%80%EC%A7%84'),
+                'safety_health_etc' => urldecode('%EA%B8%B0%ED%83%80')
             )
         ),
         'quality' => array(

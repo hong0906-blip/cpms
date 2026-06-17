@@ -212,7 +212,8 @@ function cpms_project_drive_sync_folder_aliases() {
         'management_etc' => array('management_other'),
         'safety_health_accident' => array('safety_health_incident'),
         'safety_health_ppe' => array('safety_health_protection'),
-        'safety_health_medical_checkup' => array('safety_health_checkup')
+        'safety_health_medical_checkup' => array('safety_health_checkup'),
+        'safety_health_etc' => array('safety_health_other')
     );
 }}
 

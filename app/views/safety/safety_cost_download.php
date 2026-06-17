@@ -30,6 +30,17 @@ if (!cpms_safety_cost_user_can_view_project($pdo, $projectId)) {
 }
 
 $pdf = isset($row['pdf']) && is_array($row['pdf']) ? $row['pdf'] : array();
+if (function_exists('cpms_safety_health_drive_is_drive_file') && cpms_safety_health_drive_is_drive_file($pdf)) {
+    $url = cpms_safety_health_drive_link($pdf, (isset($_GET['download']) && (string)$_GET['download'] === '1'));
+    if ($url === '') {
+        http_response_code(404);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo cpms_safety_health_drive_label('file_check_required');
+        exit;
+    }
+    header('Location: ' . $url);
+    exit;
+}
 $storedPath = isset($pdf['stored_path']) ? (string)$pdf['stored_path'] : '';
 $path = cpms_safety_cost_resolve_path($storedPath);
 if ($path === '') {
@@ -48,4 +59,3 @@ header('Content-Disposition: ' . $disposition . '; filename="' . str_replace('"'
 header('Cache-Control: private, max-age=0, must-revalidate');
 readfile($path);
 exit;
-
