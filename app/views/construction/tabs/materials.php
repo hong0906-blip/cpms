@@ -225,14 +225,14 @@ function material_statement_links_html($files, $label, $canDownload, $emptyLabel
             $viewLink = isset($fileRow['drive_web_view_link']) ? trim((string)$fileRow['drive_web_view_link']) : '';
             $downloadLink = isset($fileRow['drive_web_content_link']) ? trim((string)$fileRow['drive_web_content_link']) : '';
             if ($viewLink === '' && $downloadLink === '') {
-                $html .= '<span class="inline-flex items-center justify-center px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-xs font-bold" title="' . h($originalName) . '">' . h(cpms_management_drive_label('file_check_required')) . '</span>';
+                $html .= '<span class="inline-flex items-center justify-center px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-700 text-xs font-bold" title="' . h($originalName) . '">' . h(cpms_construction_drive_label('file_check_required')) . '</span>';
                 continue;
             }
             if ($viewLink !== '') {
-                $html .= '<a class="inline-flex items-center justify-center px-2 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100" href="' . h($url . '&view=1') . '" target="_blank" rel="noopener" title="' . h($originalName) . '">' . h(cpms_management_drive_label('view')) . '</a>';
+                $html .= '<a class="inline-flex items-center justify-center px-2 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100" href="' . h($url . '&view=1') . '" target="_blank" rel="noopener" title="' . h($originalName) . '">' . h(cpms_construction_drive_label('view')) . '</a>';
             }
             if ($downloadLink !== '') {
-                $html .= '<a class="inline-flex items-center justify-center px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-700 text-xs font-bold hover:bg-gray-50" href="' . h($url . '&download=1') . '" title="' . h($originalName) . '">' . h(cpms_management_drive_label('download')) . '</a>';
+                $html .= '<a class="inline-flex items-center justify-center px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-700 text-xs font-bold hover:bg-gray-50" href="' . h($url . '&download=1') . '" title="' . h($originalName) . '">' . h(cpms_construction_drive_label('download')) . '</a>';
             }
         } else {
             $html .= '<a class="inline-flex items-center justify-center px-2 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold hover:bg-blue-100" href="' . h($url) . '" title="' . h($originalName) . '">' . h($buttonLabel) . '</a>';

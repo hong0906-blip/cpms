@@ -9,6 +9,7 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/schedule_auto_progress_helper.php';
+require_once __DIR__ . '/../../services/ConstructionDriveService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -37,6 +38,31 @@ if (!csrf_check($token)) {
     header('Location: ?r=공사');
     exit;
 }
+
+if (!function_exists('cpms_schedule_progress_insert_photo_row')) {
+function cpms_schedule_progress_insert_photo_row($pdo, $values) {
+    if (!$pdo || !is_array($values)) throw new Exception('사진 저장 데이터가 올바르지 않습니다.');
+    $columns = array();
+    $holders = array();
+    $params = array();
+    foreach ($values as $column => $value) {
+        $column = trim((string)$column);
+        if ($column === '') continue;
+        if (!cpms_construction_drive_column_exists($pdo, 'cpms_schedule_progress_photos', $column)) continue;
+        $columns[] = '`' . $column . '`';
+        $holders[] = ':' . $column;
+        $params[':' . $column] = $value;
+    }
+    if (count($columns) === 0) throw new Exception('사진 저장 테이블을 확인할 수 없습니다.');
+    $sql = "INSERT INTO cpms_schedule_progress_photos (" . implode(',', $columns) . ") VALUES (" . implode(',', $holders) . ")";
+    $st = $pdo->prepare($sql);
+    foreach ($params as $key => $value) {
+        if ($value === null) $st->bindValue($key, null, \PDO::PARAM_NULL);
+        else $st->bindValue($key, $value);
+    }
+    $st->execute();
+    return (int)$pdo->lastInsertId();
+}}
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $taskId = isset($_POST['task_id']) ? (int)$_POST['task_id'] : 0;
@@ -90,6 +116,13 @@ if (!$pdo) {
     exit;
 }
 cpms_schedule_auto_ensure_schema($pdo);
+cpms_construction_drive_ensure_table_columns($pdo, 'cpms_schedule_progress_photos');
+
+$now = date('Y-m-d H:i:s');
+$currentUser = Auth::user();
+$currentUserId = (is_array($currentUser) && isset($currentUser['id'])) ? (int)$currentUser['id'] : 0;
+$uploadedDriveRecords = array();
+$photoDriveUploadFailed = false;
 
 try {
     $st = $pdo->prepare("SELECT id, start_date, end_date FROM cpms_schedule_tasks WHERE id = :tid AND project_id = :pid LIMIT 1");
@@ -331,22 +364,79 @@ try {
                 @chmod($target, 0644);
 
                 $publicPath = asset_url('uploads/construction/' . $filename);
-                $insPhoto = $pdo->prepare("INSERT INTO cpms_schedule_progress_photos (progress_id, file_path, file_name, file_size)
-                                           VALUES (:pid, :path, :name, :size)");
-                $insPhoto->bindValue(':pid', $progressId, \PDO::PARAM_INT);
-                $insPhoto->bindValue(':path', $publicPath);
-                $insPhoto->bindValue(':name', $name);
-                $insPhoto->bindValue(':size', $size, \PDO::PARAM_INT);
-                $insPhoto->execute();
+                $driveUploadResult = cpms_construction_drive_upload_local_file(
+                    $pdo,
+                    (int)$projectId,
+                    $target,
+                    $name,
+                    'photo',
+                    $workDate,
+                    $now,
+                    array('date' => $workDate),
+                    $currentUser
+                );
+                $driveRecord = (isset($driveUploadResult['record']) && is_array($driveUploadResult['record'])) ? $driveUploadResult['record'] : array();
+                if (!is_array($driveUploadResult) || empty($driveUploadResult['ok'])) {
+                    $photoDriveUploadFailed = true;
+                }
+                $photoValues = array(
+                    'progress_id' => (int)$progressId,
+                    'file_path' => $publicPath,
+                    'file_name' => $name,
+                    'file_size' => (int)$size
+                );
+                if (is_array($driveRecord) && count($driveRecord) > 0) {
+                    $driveValues = cpms_construction_drive_record_values($driveRecord, $currentUserId);
+                    foreach ($driveValues as $driveColumn => $driveValue) {
+                        $photoValues[$driveColumn] = $driveValue;
+                    }
+                }
+                try {
+                    cpms_schedule_progress_insert_photo_row($pdo, $photoValues);
+                    if (is_array($driveUploadResult) && !empty($driveUploadResult['ok']) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+                        $uploadedDriveRecords[] = $driveRecord;
+                    }
+                } catch (Exception $photoInsertException) {
+                    if (is_array($driveUploadResult) && !empty($driveUploadResult['ok']) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+                        cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+                            'section' => 'construction',
+                            'project_id' => (int)$projectId,
+                            'document_type' => 'photo',
+                            'document_year' => isset($driveRecord['document_year']) ? (string)$driveRecord['document_year'] : '',
+                            'document_month' => isset($driveRecord['document_month']) ? (string)$driveRecord['document_month'] : '',
+                            'original_name' => $name,
+                            'target_folder_id' => isset($driveRecord['drive_folder_id']) ? (string)$driveRecord['drive_folder_id'] : '',
+                            'message' => 'Construction photo metadata save failed: ' . $photoInsertException->getMessage()
+                        ));
+                    }
+                    throw $photoInsertException;
+                }
             }
         }
     }
 
     $recalculateTaskProgress($pdo, $projectId, $taskId);    
     $pdo->commit();
-    flash_set('success', '공정 진행 정보가 저장되었습니다.');
+    $successMessage = '공정 진행 정보가 저장되었습니다.';
+    if ($photoDriveUploadFailed) {
+        $successMessage = cpms_construction_drive_flash_message($successMessage, array('ok' => false));
+    }
+    flash_set('success', $successMessage);
 } catch (Exception $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
+    foreach ($uploadedDriveRecords as $uploadedDriveRecord) {
+        if (!is_array($uploadedDriveRecord) || !isset($uploadedDriveRecord['drive_file_id']) || trim((string)$uploadedDriveRecord['drive_file_id']) === '') continue;
+        cpms_drive_delete_file((string)$uploadedDriveRecord['drive_file_id'], array(
+            'section' => 'construction',
+            'project_id' => (int)$projectId,
+            'document_type' => isset($uploadedDriveRecord['document_type']) ? (string)$uploadedDriveRecord['document_type'] : 'photo',
+            'document_year' => isset($uploadedDriveRecord['document_year']) ? (string)$uploadedDriveRecord['document_year'] : '',
+            'document_month' => isset($uploadedDriveRecord['document_month']) ? (string)$uploadedDriveRecord['document_month'] : '',
+            'original_name' => isset($uploadedDriveRecord['original_name']) ? (string)$uploadedDriveRecord['original_name'] : '',
+            'target_folder_id' => isset($uploadedDriveRecord['drive_folder_id']) ? (string)$uploadedDriveRecord['drive_folder_id'] : '',
+            'message' => 'Construction photo CPMS transaction failed: ' . $e->getMessage()
+        ));
+    }
     flash_set('error', '저장 실패: ' . $e->getMessage());
 }
 

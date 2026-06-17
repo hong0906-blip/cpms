@@ -196,6 +196,19 @@ function material_bulk_valid_ym($ym)
     return ($year >= 2000 && $year <= 2100 && $month >= 1 && $month <= 12);
 }
 
+function material_bulk_storage_dir($projectId, $ym)
+{
+    $ym = material_bulk_valid_ym($ym) ? (string)$ym : date('Y-m');
+    return cpms_storage_root() . '/construction/material_excel/' . ((int)$projectId) . '/' . $ym;
+}
+
+function material_bulk_safe_stored_name($projectId, $ym, $originalName)
+{
+    $ext = strtolower(pathinfo((string)$originalName, PATHINFO_EXTENSION));
+    if ($ext !== 'xlsx') $ext = 'xlsx';
+    return 'material_excel_' . ((int)$projectId) . '_' . preg_replace('/[^0-9]/', '', (string)$ym) . '_' . date('Ymd_His') . '_' . substr(md5(uniqid('', true)), 0, 8) . '.' . $ext;
+}
+
 function material_bulk_prev_ym($ym)
 {
     return date('Y-m', strtotime($ym . '-01 -1 month'));
@@ -681,6 +694,21 @@ function material_bulk_preview_action($pdo, $projectId, $fallbackYm)
         exit;
     }
 
+    $storedDir = material_bulk_storage_dir($projectId, $bulkYm);
+    if (!cpms_ensure_dir($storedDir)) {
+        flash_set('error', '자재구입비 엑셀 원본 저장 폴더를 만들 수 없습니다.');
+        header('Location: ' . material_bulk_redirect_url($projectId, $bulkYm, ''));
+        exit;
+    }
+    $storedName = material_bulk_safe_stored_name($projectId, $bulkYm, $originalName);
+    $storedPath = rtrim($storedDir, '/\\') . '/' . $storedName;
+    if (!@move_uploaded_file($tmpName, $storedPath)) {
+        flash_set('error', '자재구입비 엑셀 원본 파일 저장에 실패했습니다.');
+        header('Location: ' . material_bulk_redirect_url($projectId, $bulkYm, ''));
+        exit;
+    }
+    @chmod($storedPath, 0644);
+
     $token = substr(md5(uniqid('', true)), 0, 20);
     if (!isset($_SESSION['material_bulk_preview']) || !is_array($_SESSION['material_bulk_preview'])) {
         $_SESSION['material_bulk_preview'] = array();
@@ -691,6 +719,8 @@ function material_bulk_preview_action($pdo, $projectId, $fallbackYm)
         'rows'=>$rows,
         'meta'=>$meta,
         'original_name'=>$originalName,
+        'stored_name'=>$storedName,
+        'stored_path'=>$storedPath,
         'created_at'=>time()
     );
     flash_set('success', '엑셀 미리보기를 만들었습니다. 정상 ' . (int)$meta['normal_count'] . '건 / 제외 ' . (int)$meta['excluded_count'] . '건 / 오류 ' . (int)$meta['error_count'] . '건 / 중복 ' . (int)$meta['duplicate_count'] . '건');
@@ -848,8 +878,59 @@ function material_bulk_apply_action($pdo, $projectId, $fallbackYm)
         }
     }
 
+    $driveUploadResult = null;
+    if ($saved > 0 && isset($preview['stored_path']) && trim((string)$preview['stored_path']) !== '' && is_file((string)$preview['stored_path'])) {
+        $excelStoredPath = (string)$preview['stored_path'];
+        $excelStoredName = isset($preview['stored_name']) ? (string)$preview['stored_name'] : basename($excelStoredPath);
+        $excelOriginalName = isset($preview['original_name']) ? (string)$preview['original_name'] : $excelStoredName;
+        $driveUploadResult = cpms_construction_drive_upload_local_file(
+            $pdo,
+            (int)$projectId,
+            $excelStoredPath,
+            $excelOriginalName,
+            'material_excel',
+            $bulkYm,
+            $now,
+            array('date' => $bulkYm . '-01'),
+            Auth::user()
+        );
+        $driveRecord = (isset($driveUploadResult['record']) && is_array($driveUploadResult['record'])) ? $driveUploadResult['record'] : array();
+        if (is_array($driveUploadResult) && !empty($driveUploadResult['ok'])) {
+            $extraJson = cpms_drive_json_encode(array(
+                'source' => 'material_bulk_import',
+                'saved_count' => (int)$saved,
+                'skipped_count' => (int)$skipped,
+                'error_count' => (int)$errors,
+                'meta' => isset($preview['meta']) ? $preview['meta'] : array()
+            ));
+            $genericSave = cpms_construction_drive_insert_generic_record(
+                $pdo,
+                (int)$projectId,
+                'material_excel',
+                $excelOriginalName,
+                $excelStoredName,
+                $excelStoredPath,
+                $driveRecord,
+                cpms_material_statement_current_user_id(),
+                array(
+                    'source_table' => 'cpms_material_usage',
+                    'uploaded_by_name' => (string)Auth::userName(),
+                    'extra_json' => $extraJson
+                )
+            );
+            if (empty($genericSave['ok'])) {
+                $driveUploadResult['ok'] = false;
+                $driveUploadResult['message'] = isset($genericSave['message']) ? (string)$genericSave['message'] : 'Construction Drive metadata save failed.';
+            }
+        }
+    }
+
     unset($_SESSION['material_bulk_preview'][$token]);
-    flash_set('success', '자재구입비 일괄등록 완료: 저장 ' . (int)$saved . '건 / 제외·중복 ' . (int)$skipped . '건 / 오류 ' . (int)$errors . '건');
+    $successMessage = '자재구입비 일괄등록 완료: 저장 ' . (int)$saved . '건 / 제외·중복 ' . (int)$skipped . '건 / 오류 ' . (int)$errors . '건';
+    if (is_array($driveUploadResult)) {
+        $successMessage = cpms_construction_drive_flash_message($successMessage, $driveUploadResult);
+    }
+    flash_set('success', $successMessage);
     header('Location: ' . material_bulk_redirect_url($projectId, $bulkYm, ''));
     exit;
 }

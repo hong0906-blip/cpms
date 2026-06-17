@@ -595,6 +595,10 @@ if ($route === 'construction/material_statement_download') {
     require_once __DIR__ . '/../app/views/construction/material_statement_download.php';
     exit;
 }
+if ($route === 'construction/photo_file') {
+    require_once __DIR__ . '/../app/views/construction/photo_file.php';
+    exit;
+}
 
 if ($route === 'construction/equipment_vendor_search') {
     require_once __DIR__ . '/../app/views/construction/equipment_vendor_search.php';

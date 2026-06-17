@@ -4,7 +4,7 @@
  * - PHP 5.6 호환
  */
 
-require_once __DIR__ . '/../../../services/ManagementDriveService.php';
+require_once __DIR__ . '/../../../services/ConstructionDriveService.php';
 
 if (!function_exists('cpms_material_statement_allowed_extensions')) {
 function cpms_material_statement_allowed_extensions() {
@@ -147,7 +147,7 @@ function cpms_material_statement_ensure_schema($pdo) {
         }
     }
 
-    cpms_management_drive_ensure_table_columns($pdo, 'cpms_material_statement_files');
+    cpms_construction_drive_ensure_table_columns($pdo, 'cpms_material_statement_files');
 
     return true;
 }
@@ -401,20 +401,20 @@ function cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, $field
     $uploadedByName = class_exists('App\\Core\\Auth') ? (string)\App\Core\Auth::userName() : '';
     $now = date('Y-m-d H:i:s');
     $userContext = class_exists('App\\Core\\Auth') ? \App\Core\Auth::user() : array();
-    $driveMonthValue = trim((string)$firstUseDate) !== '' ? $firstUseDate : (string)$ym;
-    $driveUploadResult = cpms_management_drive_upload_local_file(
+    $driveMonthValue = (string)$ym;
+    $driveUploadResult = cpms_construction_drive_upload_local_file(
         $pdo,
         (int)$projectId,
         $storedPath,
         $originalName,
-        'statement',
+        'material',
         $driveMonthValue,
         $now,
-        array('date' => trim((string)$firstUseDate) !== '' ? $firstUseDate : date('Y-m-d')),
+        array('date' => $driveMonthValue . '-01'),
         $userContext
     );
     $driveRecord = (isset($driveUploadResult['record']) && is_array($driveUploadResult['record'])) ? $driveUploadResult['record'] : array();
-    $driveValues = is_array($driveRecord) ? cpms_management_drive_record_values($driveRecord, $uploadedBy) : array();
+    $driveValues = is_array($driveRecord) ? cpms_construction_drive_record_values($driveRecord, $uploadedBy) : array();
 
     try {
         $pdo->beginTransaction();
@@ -448,7 +448,7 @@ function cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, $field
             $holders = array();
             $params = array();
             foreach ($insertMap as $column => $value) {
-                if (!cpms_management_drive_column_exists($pdo, 'cpms_material_statement_files', $column)) continue;
+                if (!cpms_construction_drive_column_exists($pdo, 'cpms_material_statement_files', $column)) continue;
                 $columns[] = '`' . $column . '`';
                 $holders[] = ':' . $column;
                 $params[':' . $column] = $value;
@@ -466,9 +466,9 @@ function cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, $field
             $pdo->rollBack();
             if (is_array($driveRecord) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
                 cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
-                    'section' => 'management',
+                    'section' => 'construction',
                     'project_id' => (int)$projectId,
-                    'document_type' => 'statement',
+                    'document_type' => 'material',
                     'original_name' => $originalName,
                     'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
                     'message' => 'Material statement DB save produced no rows after Drive upload.'
@@ -484,16 +484,16 @@ function cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, $field
         $result['inserted'] = $inserted;
         $result['message'] = '거래명세표를 첨부했습니다.';
         if (is_array($driveUploadResult) && empty($driveUploadResult['ok'])) {
-            $result['message'] = cpms_management_drive_flash_message($result['message'], $driveUploadResult);
+            $result['message'] = cpms_construction_drive_flash_message($result['message'], $driveUploadResult);
         }
         return $result;
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         if (is_array($driveRecord) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
             cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
-                'section' => 'management',
+                'section' => 'construction',
                 'project_id' => (int)$projectId,
-                'document_type' => 'statement',
+                'document_type' => 'material',
                 'original_name' => $originalName,
                 'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
                 'message' => 'Material statement DB save failed after Drive upload.'

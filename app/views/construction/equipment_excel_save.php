@@ -9,6 +9,7 @@ require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../../services/EquipmentExcelImporter.php';
+require_once __DIR__ . '/../../services/ConstructionDriveService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -57,6 +58,7 @@ function equipment_excel_save_ensure_log_table($pdo)
             base_ym CHAR(7) NOT NULL,
             original_name VARCHAR(255) DEFAULT '',
             stored_name VARCHAR(255) DEFAULT '',
+            stored_path VARCHAR(500) DEFAULT '',
             total_count INT NOT NULL DEFAULT 0,
             saved_count INT NOT NULL DEFAULT 0,
             updated_count INT NOT NULL DEFAULT 0,
@@ -69,6 +71,10 @@ function equipment_excel_save_ensure_log_table($pdo)
             KEY idx_project_ym (project_id, base_ym),
             KEY idx_created_at (created_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        if (!cpms_construction_drive_column_exists($pdo, 'cpms_equipment_excel_import_logs', 'stored_path')) {
+            try { $pdo->exec("ALTER TABLE cpms_equipment_excel_import_logs ADD COLUMN stored_path VARCHAR(500) DEFAULT '' AFTER stored_name"); } catch (Exception $e) {}
+        }
+        cpms_construction_drive_ensure_table_columns($pdo, 'cpms_equipment_excel_import_logs');
         return true;
     } catch (Exception $e) {
         return false;
@@ -229,6 +235,10 @@ $skippedCount = 0;
 $errorCount = 0;
 $totalAmount = 0.0;
 $now = date('Y-m-d H:i:s');
+$logId = 0;
+$driveUploadResult = null;
+$currentUser = Auth::user();
+$currentUserId = (is_array($currentUser) && isset($currentUser['id'])) ? (int)$currentUser['id'] : 0;
 
 try {
     $pdo->beginTransaction();
@@ -293,13 +303,14 @@ try {
     try {
         $summary = isset($preview['summary']) && is_array($preview['summary']) ? $preview['summary'] : array();
         $stLog = $pdo->prepare("INSERT INTO cpms_equipment_excel_import_logs
-            (project_id, base_ym, original_name, stored_name, total_count, saved_count, updated_count, skipped_count, error_count, total_amount, created_by_name, created_by_email, created_at)
+            (project_id, base_ym, original_name, stored_name, stored_path, total_count, saved_count, updated_count, skipped_count, error_count, total_amount, created_by_name, created_by_email, created_at)
             VALUES
-            (:pid, :base_ym, :original_name, :stored_name, :total_count, :saved_count, :updated_count, :skipped_count, :error_count, :total_amount, :created_by_name, :created_by_email, :created_at)");
+            (:pid, :base_ym, :original_name, :stored_name, :stored_path, :total_count, :saved_count, :updated_count, :skipped_count, :error_count, :total_amount, :created_by_name, :created_by_email, :created_at)");
         $stLog->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
         $stLog->bindValue(':base_ym', $ym);
         $stLog->bindValue(':original_name', isset($preview['original_name']) ? (string)$preview['original_name'] : '');
         $stLog->bindValue(':stored_name', isset($preview['stored_name']) ? (string)$preview['stored_name'] : '');
+        $stLog->bindValue(':stored_path', isset($preview['stored_path']) ? (string)$preview['stored_path'] : '');
         $stLog->bindValue(':total_count', (int)(isset($summary['total_count']) ? $summary['total_count'] : count($previewRows)), PDO::PARAM_INT);
         $stLog->bindValue(':saved_count', (int)$savedCount, PDO::PARAM_INT);
         $stLog->bindValue(':updated_count', (int)$updatedCount, PDO::PARAM_INT);
@@ -310,14 +321,57 @@ try {
         $stLog->bindValue(':created_by_email', (string)Auth::userEmail());
         $stLog->bindValue(':created_at', $now);
         $stLog->execute();
+        $logId = (int)$pdo->lastInsertId();
     } catch (Exception $logException) {
         // 로그 실패는 저장 성공을 막지 않는다.
     }
 
     $pdo->commit();
+
+    if ($logId > 0 && isset($preview['stored_path']) && trim((string)$preview['stored_path']) !== '' && is_file((string)$preview['stored_path'])) {
+        $excelStoredPath = (string)$preview['stored_path'];
+        $excelStoredName = isset($preview['stored_name']) ? (string)$preview['stored_name'] : basename($excelStoredPath);
+        $excelOriginalName = isset($preview['original_name']) ? (string)$preview['original_name'] : $excelStoredName;
+        $driveUploadResult = cpms_construction_drive_upload_local_file(
+            $pdo,
+            (int)$projectId,
+            $excelStoredPath,
+            $excelOriginalName,
+            'equipment_excel',
+            $ym,
+            $now,
+            array('date' => $ym . '-01'),
+            $currentUser
+        );
+        if (is_array($driveUploadResult) && !empty($driveUploadResult['ok']) && isset($driveUploadResult['record']) && is_array($driveUploadResult['record'])) {
+            $metaSave = cpms_construction_drive_apply_record_to_row(
+                $pdo,
+                'cpms_equipment_excel_import_logs',
+                $logId,
+                $driveUploadResult['record'],
+                $currentUserId,
+                array(
+                    'section' => 'construction',
+                    'project_id' => (int)$projectId,
+                    'document_type' => 'equipment_excel',
+                    'original_name' => $excelOriginalName,
+                    'target_folder_id' => isset($driveUploadResult['record']['drive_folder_id']) ? (string)$driveUploadResult['record']['drive_folder_id'] : ''
+                )
+            );
+            if (empty($metaSave['ok'])) {
+                $driveUploadResult['ok'] = false;
+                $driveUploadResult['message'] = isset($metaSave['message']) ? (string)$metaSave['message'] : 'Construction Drive metadata save failed.';
+            }
+        }
+    }
+
     unset($_SESSION['equipment_excel_preview'][$token]);
 
-    flash_set('success', '장비비 엑셀 등록 완료: 신규 ' . (int)$savedCount . '건 / 업데이트 ' . (int)$updatedCount . '건 / 제외 ' . (int)$skippedCount . '건 / 오류 ' . (int)$errorCount . '건');
+    $successMessage = '장비비 엑셀 등록 완료: 신규 ' . (int)$savedCount . '건 / 업데이트 ' . (int)$updatedCount . '건 / 제외 ' . (int)$skippedCount . '건 / 오류 ' . (int)$errorCount . '건';
+    if (is_array($driveUploadResult)) {
+        $successMessage = cpms_construction_drive_flash_message($successMessage, $driveUploadResult);
+    }
+    flash_set('success', $successMessage);
     header('Location: ' . equipment_excel_save_redirect($projectId, $ym));
     exit;
 } catch (Exception $e) {

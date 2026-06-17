@@ -41,6 +41,8 @@ $hasGanttLaborUnitPrice = cpms_gantt_column_exists($pdo, 'cpms_project_unit_pric
 $hasGanttExpenseUnitPrice = cpms_gantt_column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price');
 
 require_once __DIR__ . '/../partials/schedule_auto_progress_helper.php';
+require_once __DIR__ . '/../../../services/ConstructionDriveService.php';
+cpms_construction_drive_ensure_table_columns($pdo, 'cpms_schedule_progress_photos');
 cpms_schedule_apply_auto_progress($pdo, (int)$pid);
 $debugAutoProgress = isset($_GET['debug_auto_progress']) && (string)$_GET['debug_auto_progress'] === '1';
 $autoProgressDiagnostics = $debugAutoProgress ? cpms_schedule_auto_progress_diagnostics($pdo, (int)$pid) : array();
@@ -299,8 +301,14 @@ try {
     }
     if (count($progressIds) > 0) {
         $placeholders = implode(',', array_fill(0, count($progressIds), '?'));
+        $photoSelectColumns = array('id', 'progress_id', 'file_path', 'file_name');
+        foreach (array('storage_type', 'drive_web_view_link', 'drive_web_content_link') as $photoExtraColumn) {
+            if (cpms_construction_drive_column_exists($pdo, 'cpms_schedule_progress_photos', $photoExtraColumn)) {
+                $photoSelectColumns[] = $photoExtraColumn;
+            }
+        }
         $stPhoto = $pdo->prepare("
-            SELECT progress_id, file_path, file_name
+            SELECT " . implode(', ', $photoSelectColumns) . "
             FROM cpms_schedule_progress_photos
             WHERE progress_id IN ($placeholders)
             ORDER BY id ASC
@@ -324,9 +332,24 @@ try {
                 if ($rid <= 0 || !isset($progressIdToKey[$rid])) continue;
                 $key = $progressIdToKey[$rid];
                 if (!isset($progressPhotoMap[$key])) $progressPhotoMap[$key] = array();
+                $photoId = isset($prow['id']) ? (int)$prow['id'] : 0;
+                $filePath = isset($prow['file_path']) ? (string)$prow['file_path'] : '';
+                $storageType = isset($prow['storage_type']) ? trim((string)$prow['storage_type']) : '';
+                $driveViewLink = isset($prow['drive_web_view_link']) ? trim((string)$prow['drive_web_view_link']) : '';
+                $driveContentLink = isset($prow['drive_web_content_link']) ? trim((string)$prow['drive_web_content_link']) : '';
+                $viewUrl = $filePath;
+                $downloadUrl = $filePath;
+                if ($storageType === 'google_drive') {
+                    $viewUrl = ($driveViewLink !== '' && $photoId > 0) ? base_url() . '/?r=construction/photo_file&id=' . (int)$photoId . '&view=1' : '';
+                    $downloadUrl = ($driveContentLink !== '' && $photoId > 0) ? base_url() . '/?r=construction/photo_file&id=' . (int)$photoId . '&download=1' : '';
+                }
                 $progressPhotoMap[$key][] = array(
-                    'file_path' => isset($prow['file_path']) ? (string)$prow['file_path'] : '',
-                    'file_name' => isset($prow['file_name']) ? (string)$prow['file_name'] : ''
+                    'id' => $photoId,
+                    'file_path' => $filePath,
+                    'file_name' => isset($prow['file_name']) ? (string)$prow['file_name'] : '',
+                    'storage_type' => $storageType,
+                    'view_url' => $viewUrl,
+                    'download_url' => $downloadUrl
                 );
             }
         }
@@ -1553,16 +1576,21 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     listEl.innerHTML = '';
     if (!photos || !photos.length) return;
     photos.forEach(function(photo){
-      var url = photo.file_path || '';
+      var url = photo.view_url || photo.file_path || '';
+      var downloadUrl = photo.download_url || '';
       var name = photo.file_name || '사진';
-      if (!url) return;
+      if (!url && !downloadUrl) return;
       var row = document.createElement('div');
       row.className = 'flex items-center justify-between gap-3 rounded-xl border border-gray-200 px-3 py-2';
-      row.innerHTML = '<span class="truncate">' + name + '</span>' +
-        '<div class="flex items-center gap-2">' +
-        '<a class="text-blue-700 underline text-xs" href="' + url + '" target="_blank" rel="noopener">보기</a>' +
-        '<a class="text-blue-700 underline text-xs" href="' + url + '" download>다운로드</a>' +
-        '</div>';
+      var linksHtml = '<div class="flex items-center gap-2">';
+      if (url) {
+        linksHtml += '<a class="text-blue-700 underline text-xs" href="' + url + '" target="_blank" rel="noopener">보기</a>';
+      }
+      if (downloadUrl) {
+        linksHtml += '<a class="text-blue-700 underline text-xs" href="' + downloadUrl + '" download>다운로드</a>';
+      }
+      linksHtml += '</div>';
+      row.innerHTML = '<span class="truncate">' + name + '</span>' + linksHtml;
       listEl.appendChild(row);
     });
   }

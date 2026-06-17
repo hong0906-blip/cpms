@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../services/GoogleDriveHelper.php';
 require_once __DIR__ . '/../../services/ApprovalPdfService.php';
 require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
 require_once __DIR__ . '/../../services/ManagementDriveService.php';
+require_once __DIR__ . '/../../services/ConstructionDriveService.php';
 
 if (!(Auth::isMaster() || Auth::canManageEmployees())) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. 마스터 관리자만 사용할 수 있습니다.</div>';
@@ -46,11 +47,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $checkError = '보안 토큰이 올바르지 않습니다. 새로고침 후 다시 시도해주세요.';
     } else {
         $publicAffairsProjectId = isset($_POST['public_affairs_project_id']) ? (int)$_POST['public_affairs_project_id'] : 0;
+        $constructionProjectId = isset($_POST['construction_project_id']) ? (int)$_POST['construction_project_id'] : $publicAffairsProjectId;
         $managementProjectId = isset($_POST['management_project_id']) ? (int)$_POST['management_project_id'] : $publicAffairsProjectId;
         $checkResult = cpms_drive_run_connection_check(Auth::user());
         if (is_array($checkResult)) {
             $checkResult['completed_pdf'] = cpms_approval_pdf_run_admin_check(Auth::user());
             $checkResult['public_affairs'] = cpms_public_affairs_drive_run_admin_check(Db::pdo(), Auth::user(), $publicAffairsProjectId);
+            $checkResult['construction'] = cpms_construction_drive_run_admin_check(Db::pdo(), Auth::user(), $constructionProjectId);
             $checkResult['management'] = cpms_management_drive_run_admin_check(Db::pdo(), Auth::user(), $managementProjectId);
         }
     }
@@ -121,6 +124,10 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
       <label class="block text-sm font-bold text-gray-700" for="public_affairs_project_id">
         <span class="block mb-2">공무 테스트 프로젝트 ID</span>
         <input id="public_affairs_project_id" name="public_affairs_project_id" type="number" min="1" class="w-48 px-3 py-3 rounded-xl border border-gray-300 text-sm" placeholder="미입력 시 첫 프로젝트">
+      </label>
+      <label class="block text-sm font-bold text-gray-700" for="construction_project_id">
+        <span class="block mb-2"><?php echo h(urldecode('%EA%B3%B5%EC%82%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8%20%49%44')); ?></span>
+        <input id="construction_project_id" name="construction_project_id" type="number" min="1" class="w-48 px-3 py-3 rounded-xl border border-gray-300 text-sm" placeholder="미입력 시 첫 프로젝트">
       </label>
       <label class="block text-sm font-bold text-gray-700" for="management_project_id">
         <span class="block mb-2"><?php echo h(urldecode('%EA%B4%80%EB%A6%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8%20%49%44')); ?></span>
@@ -215,6 +222,33 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EB%AC%B4%20%EA%B8%B0%EC%84%B1%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%97%85%EB%A1%9C%EB%93%9C'), !empty($paUpload['ok']), isset($paUpload['message']) ? $paUpload['message'] : '', isset($paUpload['http_code']) ? $paUpload['http_code'] : 0);
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EB%AC%B4%20%EA%B8%B0%EC%84%B1%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%82%AD%EC%A0%9C'), !empty($paDelete['ok']), isset($paDelete['message']) ? $paDelete['message'] : '', isset($paDelete['http_code']) ? $paDelete['http_code'] : 0);
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EB%AC%B4%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%9E%84%EC%8B%9C%ED%8C%8C%EC%9D%BC%20%EC%82%AD%EC%A0%9C'), !empty($paCleanup['ok']), isset($paCleanup['message']) ? $paCleanup['message'] : '', 0);
+            $constructionCheck = (isset($checkResult['construction']) && is_array($checkResult['construction'])) ? $checkResult['construction'] : array();
+            $coProject = (isset($constructionCheck['project']) && is_array($constructionCheck['project'])) ? $constructionCheck['project'] : array();
+            $coRoot = (isset($constructionCheck['construction_folder']) && is_array($constructionCheck['construction_folder'])) ? $constructionCheck['construction_folder'] : array();
+            $coMaterial = (isset($constructionCheck['material_folder']) && is_array($constructionCheck['material_folder'])) ? $constructionCheck['material_folder'] : array();
+            $coEquipment = (isset($constructionCheck['equipment_folder']) && is_array($constructionCheck['equipment_folder'])) ? $constructionCheck['equipment_folder'] : array();
+            $coDaily = (isset($constructionCheck['daily_report_folder']) && is_array($constructionCheck['daily_report_folder'])) ? $constructionCheck['daily_report_folder'] : array();
+            $coPhoto = (isset($constructionCheck['photo_folder']) && is_array($constructionCheck['photo_folder'])) ? $constructionCheck['photo_folder'] : array();
+            $coStatus = (isset($constructionCheck['status_folder']) && is_array($constructionCheck['status_folder'])) ? $constructionCheck['status_folder'] : array();
+            $coLabor = (isset($constructionCheck['labor_folder']) && is_array($constructionCheck['labor_folder'])) ? $constructionCheck['labor_folder'] : array();
+            $coYear = (isset($constructionCheck['year_folder']) && is_array($constructionCheck['year_folder'])) ? $constructionCheck['year_folder'] : array();
+            $coMonth = (isset($constructionCheck['month_folder']) && is_array($constructionCheck['month_folder'])) ? $constructionCheck['month_folder'] : array();
+            $coUpload = (isset($constructionCheck['upload']) && is_array($constructionCheck['upload'])) ? $constructionCheck['upload'] : array();
+            $coDelete = (isset($constructionCheck['delete']) && is_array($constructionCheck['delete'])) ? $constructionCheck['delete'] : array();
+            $coCleanup = (isset($constructionCheck['cleanup']) && is_array($constructionCheck['cleanup'])) ? $constructionCheck['cleanup'] : array();
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20%EC%A0%90%EA%B2%80%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8'), !empty($coProject['ok']), isset($coProject['message']) ? $coProject['message'] : '', 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20%30%33%5F%EA%B3%B5%EC%82%AC%20%ED%8F%B4%EB%8D%94'), !empty($coRoot['ok']), isset($coRoot['message']) ? $coRoot['message'] : '', isset($coRoot['http_code']) ? $coRoot['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20') . cpms_construction_drive_label('material') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($coMaterial['ok']), isset($coMaterial['message']) ? $coMaterial['message'] : '', isset($coMaterial['http_code']) ? $coMaterial['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20') . cpms_construction_drive_label('equipment') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($coEquipment['ok']), isset($coEquipment['message']) ? $coEquipment['message'] : '', isset($coEquipment['http_code']) ? $coEquipment['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20') . cpms_construction_drive_label('daily_report') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($coDaily['ok']), isset($coDaily['message']) ? $coDaily['message'] : '', isset($coDaily['http_code']) ? $coDaily['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20') . cpms_construction_drive_label('photo') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($coPhoto['ok']), isset($coPhoto['message']) ? $coPhoto['message'] : '', isset($coPhoto['http_code']) ? $coPhoto['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20') . cpms_construction_drive_label('status') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($coStatus['ok']), isset($coStatus['message']) ? $coStatus['message'] : '', isset($coStatus['http_code']) ? $coStatus['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20') . cpms_construction_drive_label('labor') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($coLabor['ok']), isset($coLabor['message']) ? $coLabor['message'] : '', isset($coLabor['http_code']) ? $coLabor['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20%ED%98%84%EC%9E%AC%EC%97%B0%EB%8F%84%20%ED%8F%B4%EB%8D%94'), !empty($coYear['ok']), isset($coYear['message']) ? $coYear['message'] : '', isset($coYear['http_code']) ? $coYear['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20%ED%98%84%EC%9E%AC%EC%9B%94%20%ED%8F%B4%EB%8D%94'), !empty($coMonth['ok']), isset($coMonth['message']) ? $coMonth['message'] : '', isset($coMonth['http_code']) ? $coMonth['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%97%85%EB%A1%9C%EB%93%9C'), !empty($coUpload['ok']), isset($coUpload['message']) ? $coUpload['message'] : '', isset($coUpload['http_code']) ? $coUpload['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%82%AD%EC%A0%9C'), !empty($coDelete['ok']), isset($coDelete['message']) ? $coDelete['message'] : '', isset($coDelete['http_code']) ? $coDelete['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%EC%82%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%9E%84%EC%8B%9C%ED%8C%8C%EC%9D%BC%20%EC%82%AD%EC%A0%9C'), !empty($coCleanup['ok']), isset($coCleanup['message']) ? $coCleanup['message'] : '', 0);
             $managementCheck = (isset($checkResult['management']) && is_array($checkResult['management'])) ? $checkResult['management'] : array();
             $mgProject = (isset($managementCheck['project']) && is_array($managementCheck['project'])) ? $managementCheck['project'] : array();
             $mgRoot = (isset($managementCheck['management_folder']) && is_array($managementCheck['management_folder'])) ? $managementCheck['management_folder'] : array();
@@ -275,6 +309,12 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
         <div class="mt-2 text-xs text-gray-500">
           공무 기성 테스트 파일 ID: <code><?php echo h($checkResult['public_affairs']['test_file']['id']); ?></code>
           / 파일명: <code><?php echo h(isset($checkResult['public_affairs']['test_file']['name']) ? $checkResult['public_affairs']['test_file']['name'] : ''); ?></code>
+        </div>
+      <?php endif; ?>
+      <?php if (!empty($checkResult['construction']['test_file']['id'])): ?>
+        <div class="mt-2 text-xs text-gray-500">
+          <?php echo h(urldecode('%EA%B3%B5%EC%82%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%ED%8C%8C%EC%9D%BC%20%49%44')); ?>: <code><?php echo h($checkResult['construction']['test_file']['id']); ?></code>
+          / <?php echo h(urldecode('%ED%8C%8C%EC%9D%BC%EB%AA%85')); ?>: <code><?php echo h(isset($checkResult['construction']['test_file']['name']) ? $checkResult['construction']['test_file']['name'] : ''); ?></code>
         </div>
       <?php endif; ?>
       <?php if (!empty($checkResult['management']['test_file']['id'])): ?>

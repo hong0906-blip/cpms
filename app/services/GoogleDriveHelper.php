@@ -715,7 +715,9 @@ function cpms_drive_project_folder_schema() {
                 'construction_daily_report' => urldecode('%EC%9D%BC%EC%9D%BC%EB%B3%B4%EA%B3%A0'),
                 'construction_photo' => urldecode('%EA%B3%B5%EC%82%AC%EC%82%AC%EC%A7%84'),
                 'construction_status' => urldecode('%EC%83%81%ED%99%A9%EC%9E%90%EB%A3%8C'),
-                'construction_equipment' => urldecode('%EC%9E%A5%EB%B9%84%ED%88%AC%EC%9E%85')
+                'construction_equipment' => urldecode('%EC%9E%A5%EB%B9%84%ED%88%AC%EC%9E%85'),
+                'construction_labor' => urldecode('%EB%85%B8%EB%AC%B4%EB%B9%84'),
+                'construction_etc' => urldecode('%EA%B8%B0%ED%83%80')
             )
         ),
         'safety_health' => array(
