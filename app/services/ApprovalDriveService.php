@@ -46,6 +46,11 @@ function cpms_approval_drive_ensure_file_columns($pdo) {
         'drive_folder_id' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_folder_id VARCHAR(128) NULL",
         'drive_web_view_link' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_web_view_link TEXT NULL",
         'drive_web_content_link' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_web_content_link TEXT NULL",
+        'document_year' => "ALTER TABLE cpms_approval_files ADD COLUMN document_year VARCHAR(4) NULL",
+        'document_month' => "ALTER TABLE cpms_approval_files ADD COLUMN document_month VARCHAR(2) NULL",
+        'drive_year_folder_id' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_year_folder_id VARCHAR(128) NULL",
+        'drive_type_folder_id' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_type_folder_id VARCHAR(128) NULL",
+        'drive_month_folder_id' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_month_folder_id VARCHAR(128) NULL",
         'mime_type' => "ALTER TABLE cpms_approval_files ADD COLUMN mime_type VARCHAR(190) NULL",
         'file_size' => "ALTER TABLE cpms_approval_files ADD COLUMN file_size BIGINT NULL",
         'uploaded_by' => "ALTER TABLE cpms_approval_files ADD COLUMN uploaded_by VARCHAR(190) NULL",
@@ -139,11 +144,31 @@ function cpms_approval_drive_document_folder($docType, $content) {
     return array('key' => 'other', 'label' => cpms_drive_approval_folder_name('other'));
 }}
 
+if (!function_exists('cpms_approval_drive_parse_date_value')) {
+function cpms_approval_drive_parse_date_value($value) {
+    $raw = trim((string)$value);
+    if ($raw === '') return '';
+
+    if (preg_match('/(\d{4})\D{0,5}(\d{1,2})(?:\D{0,5}(\d{1,2}))?/u', $raw, $m)) {
+        $year = (int)$m[1];
+        $month = (int)$m[2];
+        $day = isset($m[3]) && trim((string)$m[3]) !== '' ? (int)$m[3] : 1;
+        if ($year > 0 && $month >= 1 && $month <= 12 && $day >= 1 && $day <= 31 && checkdate($month, $day, $year)) {
+            return sprintf('%04d-%02d-%02d', $year, $month, $day);
+        }
+        return '';
+    }
+
+    $ts = strtotime($raw);
+    if ($ts !== false) return date('Y-m-d', $ts);
+    return '';
+}}
+
 if (!function_exists('cpms_approval_drive_document_date')) {
-function cpms_approval_drive_document_date($docRow, $content) {
+function cpms_approval_drive_document_date($docRow, $content, $context = null) {
     $content = is_array($content) ? $content : array();
     $candidates = array();
-    foreach (array('draft_date', 'request_date', 'sent_at', 'created_at', 'updated_at') as $key) {
+    foreach (array('draft_date', 'request_date', 'document_date', 'registered_at', 'registration_date', 'sent_at', 'created_at') as $key) {
         if (isset($content[$key])) $candidates[] = $content[$key];
     }
     if (is_array($docRow)) {
@@ -151,9 +176,18 @@ function cpms_approval_drive_document_date($docRow, $content) {
             if (isset($docRow[$key])) $candidates[] = $docRow[$key];
         }
     }
+    $invalidRaw = '';
     for ($i = 0; $i < count($candidates); $i++) {
-        $ts = strtotime((string)$candidates[$i]);
-        if ($ts !== false) return date('Y-m-d', $ts);
+        $raw = trim((string)$candidates[$i]);
+        if ($raw === '') continue;
+        $parsed = cpms_approval_drive_parse_date_value($raw);
+        if ($parsed !== '') return $parsed;
+        if ($invalidRaw === '') $invalidRaw = $raw;
+    }
+    if ($invalidRaw !== '' && is_array($context)) {
+        cpms_drive_log_upload_failure(array_merge($context, array(
+            'message' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%9B%94%20%EA%B0%92%20%ED%99%95%EC%9D%B8%20%ED%95%84%EC%9A%94') . ': ' . $invalidRaw
+        )));
     }
     return date('Y-m-d');
 }}
@@ -191,7 +225,8 @@ function cpms_approval_drive_build_file_name($date, $documentTypeLabel, $drafter
 }}
 
 if (!function_exists('cpms_approval_drive_failed_record')) {
-function cpms_approval_drive_failed_record($originalName, $localPath, $mimeType, $size, $userContext, $message) {
+function cpms_approval_drive_failed_record($originalName, $localPath, $mimeType, $size, $userContext, $message, $extra = null) {
+    $extra = is_array($extra) ? $extra : array();
     return array(
         'original_name' => (string)$originalName,
         'stored_name' => '',
@@ -199,6 +234,11 @@ function cpms_approval_drive_failed_record($originalName, $localPath, $mimeType,
         'drive_folder_id' => '',
         'drive_web_view_link' => '',
         'drive_web_content_link' => '',
+        'document_year' => isset($extra['document_year']) ? (string)$extra['document_year'] : '',
+        'document_month' => isset($extra['document_month']) ? (string)$extra['document_month'] : '',
+        'drive_year_folder_id' => isset($extra['drive_year_folder_id']) ? (string)$extra['drive_year_folder_id'] : '',
+        'drive_type_folder_id' => isset($extra['drive_type_folder_id']) ? (string)$extra['drive_type_folder_id'] : '',
+        'drive_month_folder_id' => isset($extra['drive_month_folder_id']) ? (string)$extra['drive_month_folder_id'] : '',
         'mime_type' => (string)$mimeType,
         'size' => (string)$size,
         'uploaded_by' => cpms_drive_user_label($userContext),
@@ -219,10 +259,10 @@ function cpms_approval_drive_upload_local_file($localPath, $originalName, $docRo
     $content = is_array($content) ? $content : array();
     $mimeType = cpms_drive_detect_mime_type($localPath);
     $size = (is_file($localPath) ? (int)@filesize($localPath) : 0);
-    $date = cpms_approval_drive_document_date($docRow, $content);
     $folderInfo = cpms_approval_drive_document_folder(isset($docRow['doc_type']) ? $docRow['doc_type'] : '', $content);
     $projectId = cpms_approval_drive_project_id($docRow, $content);
     $documentId = isset($docRow['id']) ? (int)$docRow['id'] : 0;
+    $uploadedAt = date('Y-m-d H:i:s');
     $context = array(
         'user' => $userContext,
         'uploaded_by' => $userContext,
@@ -234,30 +274,51 @@ function cpms_approval_drive_upload_local_file($localPath, $originalName, $docRo
         'original_name' => $originalName,
         'mime_type' => $mimeType,
         'size' => $size,
+        'fallback_date' => $uploadedAt,
+        'uploaded_at' => $uploadedAt,
         'local_backup_path' => isset($fileMeta['local_path']) ? (string)$fileMeta['local_path'] : ''
+    );
+    $date = cpms_approval_drive_document_date($docRow, $content, $context);
+    $context['document_date'] = $date;
+    $fallbackMeta = array(
+        'document_year' => substr($date, 0, 4),
+        'document_month' => substr($date, 5, 2)
     );
 
     if ($localPath === '' || !is_file($localPath)) {
         $message = 'Local approval file is not available for Drive upload.';
         cpms_drive_log_upload_failure(array_merge($context, array('message' => $message)));
-        return array('ok' => false, 'record' => cpms_approval_drive_failed_record($originalName, isset($fileMeta['local_path']) ? $fileMeta['local_path'] : '', $mimeType, $size, $userContext, $message), 'message' => $message, 'http_code' => 0);
+        return array('ok' => false, 'record' => cpms_approval_drive_failed_record($originalName, isset($fileMeta['local_path']) ? $fileMeta['local_path'] : '', $mimeType, $size, $userContext, $message, $fallbackMeta), 'message' => $message, 'http_code' => 0);
     }
 
     $folder = cpms_drive_ensure_approval_folder((int)substr($date, 0, 4), $folderInfo['key'], $context);
     if (empty($folder['ok'])) {
         $message = isset($folder['message']) ? $folder['message'] : 'Approval Drive folder preparation failed.';
-        return array('ok' => false, 'record' => cpms_approval_drive_failed_record($originalName, isset($fileMeta['local_path']) ? $fileMeta['local_path'] : '', $mimeType, $size, $userContext, $message), 'message' => $message, 'http_code' => isset($folder['http_code']) ? (int)$folder['http_code'] : 0);
+        return array('ok' => false, 'record' => cpms_approval_drive_failed_record($originalName, isset($fileMeta['local_path']) ? $fileMeta['local_path'] : '', $mimeType, $size, $userContext, $message, $fallbackMeta), 'message' => $message, 'http_code' => isset($folder['http_code']) ? (int)$folder['http_code'] : 0);
     }
 
     $context['target_folder_id'] = (string)$folder['folder_id'];
+    $context['drive_folder_id'] = (string)$folder['folder_id'];
+    $context['document_year'] = isset($folder['year']) ? sprintf('%04d', (int)$folder['year']) : substr($date, 0, 4);
+    $context['document_month'] = isset($folder['month']) ? (string)$folder['month'] : substr($date, 5, 2);
+    $context['drive_year_folder_id'] = isset($folder['year_folder_id']) ? (string)$folder['year_folder_id'] : '';
+    $context['drive_type_folder_id'] = isset($folder['type_folder_id']) ? (string)$folder['type_folder_id'] : '';
+    $context['drive_month_folder_id'] = isset($folder['month_folder_id']) ? (string)$folder['month_folder_id'] : '';
+    $folderMeta = array(
+        'document_year' => $context['document_year'],
+        'document_month' => $context['document_month'],
+        'drive_year_folder_id' => $context['drive_year_folder_id'],
+        'drive_type_folder_id' => $context['drive_type_folder_id'],
+        'drive_month_folder_id' => $context['drive_month_folder_id']
+    );
     $driveName = cpms_approval_drive_build_file_name($date, $folderInfo['label'], cpms_approval_drive_drafter_name($docRow, $content), $originalName);
     $upload = cpms_drive_upload_file($localPath, $driveName, (string)$folder['folder_id'], $mimeType, $context);
     if (empty($upload['ok']) || !isset($upload['file']) || !is_array($upload['file'])) {
         $message = isset($upload['message']) ? $upload['message'] : 'Approval file Drive upload failed.';
-        return array('ok' => false, 'record' => cpms_approval_drive_failed_record($originalName, isset($fileMeta['local_path']) ? $fileMeta['local_path'] : '', $mimeType, $size, $userContext, $message), 'message' => $message, 'http_code' => isset($upload['http_code']) ? (int)$upload['http_code'] : 0);
+        return array('ok' => false, 'record' => cpms_approval_drive_failed_record($originalName, isset($fileMeta['local_path']) ? $fileMeta['local_path'] : '', $mimeType, $size, $userContext, $message, $folderMeta), 'message' => $message, 'http_code' => isset($upload['http_code']) ? (int)$upload['http_code'] : 0);
     }
 
-    $context['uploaded_at'] = date('Y-m-d H:i:s');
+    $context['uploaded_at'] = $uploadedAt;
     $record = cpms_drive_build_file_record($upload['file'], $context);
     $record['upload_status'] = 'uploaded';
     $record['drive_upload_error'] = '';
@@ -284,6 +345,11 @@ function cpms_approval_drive_save_file_row($pdo, $row) {
         'drive_folder_id' => isset($row['drive_folder_id']) ? (string)$row['drive_folder_id'] : '',
         'drive_web_view_link' => isset($row['drive_web_view_link']) ? (string)$row['drive_web_view_link'] : '',
         'drive_web_content_link' => isset($row['drive_web_content_link']) ? (string)$row['drive_web_content_link'] : '',
+        'document_year' => isset($row['document_year']) ? (string)$row['document_year'] : '',
+        'document_month' => isset($row['document_month']) ? (string)$row['document_month'] : '',
+        'drive_year_folder_id' => isset($row['drive_year_folder_id']) ? (string)$row['drive_year_folder_id'] : '',
+        'drive_type_folder_id' => isset($row['drive_type_folder_id']) ? (string)$row['drive_type_folder_id'] : '',
+        'drive_month_folder_id' => isset($row['drive_month_folder_id']) ? (string)$row['drive_month_folder_id'] : '',
         'mime_type' => isset($row['mime_type']) ? (string)$row['mime_type'] : '',
         'file_size' => (isset($row['size']) && $row['size'] !== '') ? (int)$row['size'] : null,
         'uploaded_by' => isset($row['uploaded_by']) ? (string)$row['uploaded_by'] : '',

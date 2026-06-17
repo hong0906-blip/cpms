@@ -635,7 +635,17 @@ function cpms_drive_build_file_record($fileInfo, $context) {
         'storage_type' => 'google_drive',
         'local_backup_path' => (string)cpms_drive_context_value($context, 'local_backup_path', ''),
         'local_temp_path' => (string)cpms_drive_context_value($context, 'local_temp_path', ''),
-        'upload_status' => (string)cpms_drive_context_value($context, 'upload_status', 'uploaded')
+        'upload_status' => (string)cpms_drive_context_value($context, 'upload_status', 'uploaded'),
+        'document_year' => (string)cpms_drive_context_value($context, 'document_year', ''),
+        'document_month' => (string)cpms_drive_context_value($context, 'document_month', ''),
+        'drive_year_folder_id' => (string)cpms_drive_context_value($context, 'drive_year_folder_id', ''),
+        'drive_type_folder_id' => (string)cpms_drive_context_value($context, 'drive_type_folder_id', ''),
+        'drive_month_folder_id' => (string)cpms_drive_context_value($context, 'drive_month_folder_id', ''),
+        'completed_pdf_year' => (string)cpms_drive_context_value($context, 'completed_pdf_year', cpms_drive_context_value($context, 'document_year', '')),
+        'completed_pdf_month' => (string)cpms_drive_context_value($context, 'completed_pdf_month', cpms_drive_context_value($context, 'document_month', '')),
+        'completed_pdf_year_folder_id' => (string)cpms_drive_context_value($context, 'completed_pdf_year_folder_id', cpms_drive_context_value($context, 'drive_year_folder_id', '')),
+        'completed_pdf_type_folder_id' => (string)cpms_drive_context_value($context, 'completed_pdf_type_folder_id', cpms_drive_context_value($context, 'drive_type_folder_id', '')),
+        'completed_pdf_month_folder_id' => (string)cpms_drive_context_value($context, 'completed_pdf_month_folder_id', cpms_drive_context_value($context, 'drive_month_folder_id', ''))
     );
 }}
 
@@ -674,6 +684,64 @@ function cpms_drive_project_folder_name($projectName, $projectId) {
     return cpms_drive_sanitize_folder_name($name . '_' . $projectId);
 }}
 
+if (!function_exists('cpms_drive_project_folder_schema')) {
+function cpms_drive_project_folder_schema() {
+    return array(
+        'public_affairs' => array(
+            'name' => urldecode('%30%31%5F%EA%B3%B5%EB%AC%B4'),
+            'children' => array(
+                'public_affairs_estimate' => urldecode('%EB%82%B4%EC%97%AD%EC%84%9C'),
+                'public_affairs_contract' => urldecode('%EA%B3%84%EC%95%BD%EC%84%9C'),
+                'public_affairs_site_docs' => urldecode('%ED%98%84%EC%84%A4%EC%9E%90%EB%A3%8C'),
+                'public_affairs_monthly_cost' => urldecode('%EC%9B%94%EB%B3%84%ED%88%AC%EC%9E%85%EB%B9%84'),
+                'public_affairs_progress' => urldecode('%EA%B8%B0%EC%84%B1')
+            )
+        ),
+        'management' => array(
+            'name' => urldecode('%30%32%5F%EA%B4%80%EB%A6%AC'),
+            'children' => array(
+                'management_statement' => urldecode('%EA%B1%B0%EB%9E%98%EB%AA%85%EC%84%B8%EC%84%9C'),
+                'management_tax_invoice' => urldecode('%EC%84%B8%EA%B8%88%EA%B3%84%EC%82%B0%EC%84%9C'),
+                'management_settlement' => urldecode('%EC%A0%95%EC%82%B0%EC%9E%90%EB%A3%8C'),
+                'management_labor' => urldecode('%EB%85%B8%EB%AC%B4%EC%9E%90%EB%A3%8C'),
+                'management_manpower' => urldecode('%EC%9D%B8%EB%A0%A5%EA%B4%80%EB%A6%AC')
+            )
+        ),
+        'construction' => array(
+            'name' => urldecode('%30%33%5F%EA%B3%B5%EC%82%AC'),
+            'children' => array(
+                'construction_material' => urldecode('%EC%9E%90%EC%9E%AC%EA%B5%AC%EC%9E%85%EB%B9%84'),
+                'construction_daily_report' => urldecode('%EC%9D%BC%EC%9D%BC%EB%B3%B4%EA%B3%A0'),
+                'construction_photo' => urldecode('%EA%B3%B5%EC%82%AC%EC%82%AC%EC%A7%84'),
+                'construction_status' => urldecode('%EC%83%81%ED%99%A9%EC%9E%90%EB%A3%8C'),
+                'construction_equipment' => urldecode('%EC%9E%A5%EB%B9%84%ED%88%AC%EC%9E%85')
+            )
+        ),
+        'safety_health' => array(
+            'name' => urldecode('%30%34%5F%EC%95%88%EC%A0%84%EB%B3%B4%EA%B1%B4'),
+            'children' => array(
+                'safety_health_safety_cost' => urldecode('%EC%95%88%EC%A0%84%EA%B4%80%EB%A6%AC%EB%B9%84'),
+                'safety_health_accident' => urldecode('%EC%95%88%EC%A0%84%EC%82%AC%EA%B3%A0'),
+                'safety_health_samsung_portal' => urldecode('%EC%82%BC%EC%84%B1%EC%83%81%EC%83%9D%ED%98%91%EB%A0%A5%ED%8F%AC%ED%83%88'),
+                'safety_health_ppe' => urldecode('%EB%B3%B4%ED%98%B8%EA%B5%AC'),
+                'safety_health_education' => urldecode('%EA%B5%90%EC%9C%A1'),
+                'safety_health_medical_checkup' => urldecode('%EA%B2%80%EC%A7%84')
+            )
+        ),
+        'quality' => array(
+            'name' => urldecode('%30%35%5F%ED%92%88%EC%A7%88'),
+            'children' => array(
+                'quality_material_approval' => urldecode('%EC%9E%90%EC%9E%AC%EC%8A%B9%EC%9D%B8'),
+                'quality_inspection' => urldecode('%EA%B2%80%EC%B8%A1'),
+                'quality_test_report' => urldecode('%EC%8B%9C%ED%97%98%EC%84%B1%EC%A0%81%EC%84%9C'),
+                'quality_cqi' => 'CQI',
+                'quality_submission' => urldecode('%EC%A0%9C%EC%B6%9C%EB%AC%B8%EC%84%9C')
+            )
+        )
+    );
+}}
+
+/*
 if (!function_exists('cpms_drive_project_folder_schema')) {
 function cpms_drive_project_folder_schema() {
     return array(
@@ -730,6 +798,8 @@ function cpms_drive_project_folder_schema() {
         )
     );
 }}
+
+*/
 
 if (!function_exists('cpms_drive_create_project_structure')) {
 function cpms_drive_create_project_structure($projectId, $projectName, $userContext) {
@@ -1013,6 +1083,91 @@ function cpms_drive_approval_folder_name($key) {
     return isset($names[$key]) ? $names[$key] : $names['other'];
 }}
 
+if (!function_exists('cpms_drive_parse_approval_year_month_value')) {
+function cpms_drive_parse_approval_year_month_value($value, $defaultYear) {
+    $raw = trim((string)$value);
+    $defaultYear = (int)$defaultYear > 0 ? (int)$defaultYear : (int)date('Y');
+    if ($raw === '') return array('ok' => false, 'year' => '', 'month' => '');
+
+    if (preg_match('/(\d{4})\D{0,5}(\d{1,2})/u', $raw, $m)) {
+        $year = (int)$m[1];
+        $month = (int)$m[2];
+        if ($year > 0 && $month >= 1 && $month <= 12) {
+            return array('ok' => true, 'year' => sprintf('%04d', $year), 'month' => sprintf('%02d', $month));
+        }
+        return array('ok' => false, 'year' => '', 'month' => '');
+    }
+
+    if (preg_match('/^\d{1,2}$/', $raw)) {
+        $monthOnly = (int)$raw;
+        if ($monthOnly >= 1 && $monthOnly <= 12) {
+            return array('ok' => true, 'year' => sprintf('%04d', $defaultYear), 'month' => sprintf('%02d', $monthOnly));
+        }
+        return array('ok' => false, 'year' => '', 'month' => '');
+    }
+
+    $ts = strtotime($raw);
+    if ($ts !== false) {
+        return array('ok' => true, 'year' => date('Y', $ts), 'month' => date('m', $ts));
+    }
+
+    return array('ok' => false, 'year' => '', 'month' => '');
+}}
+
+if (!function_exists('cpms_drive_approval_month_info')) {
+function cpms_drive_approval_month_info($year, $context) {
+    if (!is_array($context)) $context = array();
+    $year = (int)$year > 0 ? (int)$year : (int)date('Y');
+    $raw = '';
+    foreach (array('approval_month_value', 'document_date', 'completed_date', 'approval_date', 'date', 'document_month', 'completed_pdf_month', 'month') as $key) {
+        if (isset($context[$key]) && trim((string)$context[$key]) !== '') {
+            $raw = trim((string)$context[$key]);
+            break;
+        }
+    }
+
+    if ($raw !== '') {
+        $parsed = cpms_drive_parse_approval_year_month_value($raw, $year);
+        if (!empty($parsed['ok'])) {
+            return array(
+                'year' => (string)$parsed['year'],
+                'month' => (string)$parsed['month'],
+                'raw' => $raw,
+                'used_fallback' => false,
+                'message' => ''
+            );
+        }
+
+        $message = urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%9B%94%20%EA%B0%92%20%ED%99%95%EC%9D%B8%20%ED%95%84%EC%9A%94') . ': ' . $raw;
+        cpms_drive_log_upload_failure(array_merge($context, array('message' => $message)));
+        return array(
+            'year' => date('Y'),
+            'month' => date('m'),
+            'raw' => $raw,
+            'used_fallback' => true,
+            'message' => $message
+        );
+    }
+
+    $fallbackDate = '';
+    foreach (array('fallback_date', 'uploaded_at', 'created_at') as $fallbackKey) {
+        if (isset($context[$fallbackKey]) && trim((string)$context[$fallbackKey]) !== '') {
+            $fallbackDate = trim((string)$context[$fallbackKey]);
+            break;
+        }
+    }
+    $ts = $fallbackDate !== '' ? strtotime($fallbackDate) : false;
+    if ($ts === false) $ts = time();
+
+    return array(
+        'year' => date('Y', $ts),
+        'month' => date('m', $ts),
+        'raw' => '',
+        'used_fallback' => false,
+        'message' => ''
+    );
+}}
+
 if (!function_exists('cpms_drive_ensure_approval_folder')) {
 function cpms_drive_ensure_approval_folder($year, $folderKey, $context) {
     if (!is_array($context)) $context = array();
@@ -1022,11 +1177,17 @@ function cpms_drive_ensure_approval_folder($year, $folderKey, $context) {
     $names = cpms_drive_approval_folder_names();
     if (!isset($names[$folderKey])) $folderKey = 'other';
     $folderName = $names[$folderKey];
+    $monthInfo = cpms_drive_approval_month_info($year, $context);
+    $year = (int)$monthInfo['year'];
+    $month = (string)$monthInfo['month'];
     $approvalRoot = cpms_drive_folder_id('approval');
     $result = array(
         'ok' => false,
         'year' => $year,
+        'month' => $month,
         'year_folder_id' => '',
+        'type_folder_id' => '',
+        'month_folder_id' => '',
         'folder_key' => $folderKey,
         'folder_name' => $folderName,
         'folder_id' => '',
@@ -1067,9 +1228,23 @@ function cpms_drive_ensure_approval_folder($year, $folderKey, $context) {
         return $result;
     }
 
+    $typeFolderId = (string)$folder['file']['id'];
+    $result['type_folder_id'] = $typeFolderId;
+    $monthContext = $context;
+    $monthContext['section'] = 'approval';
+    $monthContext['target_folder_id'] = $typeFolderId;
+    $monthContext['original_name'] = $month;
+    $monthFolder = cpms_drive_find_or_create_folder($month, $typeFolderId, $monthContext);
+    $result['http_code'] = isset($monthFolder['http_code']) ? (int)$monthFolder['http_code'] : $result['http_code'];
+    if (!$monthFolder['ok'] || !is_array($monthFolder['file']) || !isset($monthFolder['file']['id'])) {
+        $result['message'] = isset($monthFolder['message']) ? $monthFolder['message'] : 'Approval month folder failed.';
+        return $result;
+    }
+
     $result['ok'] = true;
-    $result['folder_id'] = (string)$folder['file']['id'];
-    $result['message'] = 'Approval target folder is ready.';
+    $result['month_folder_id'] = (string)$monthFolder['file']['id'];
+    $result['folder_id'] = (string)$monthFolder['file']['id'];
+    $result['message'] = 'Approval monthly target folder is ready: ' . sprintf('%04d', $year) . ' / ' . $folderName . ' / ' . $month . '.';
     return $result;
 }}
 
@@ -1125,6 +1300,10 @@ function cpms_drive_run_connection_check($userContext) {
         'upload' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'delete' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'test_file' => array(),
+        'approval_root' => array('ok' => false, 'http_code' => 0, 'message' => ''),
+        'approval_year_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
+        'approval_type_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
+        'approval_month_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'approval_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'approval_upload' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'approval_delete' => array('ok' => false, 'http_code' => 0, 'message' => ''),
@@ -1191,16 +1370,45 @@ function cpms_drive_run_connection_check($userContext) {
         'section' => 'admin_drive_check_approval',
         'document_type' => cpms_drive_approval_folder_name('other'),
         'original_name' => $fileName,
-        'target_folder_id' => cpms_drive_folder_id('approval')
+        'target_folder_id' => cpms_drive_folder_id('approval'),
+        'document_date' => date('Y-m-d'),
+        'fallback_date' => date('Y-m-d H:i:s')
     );
+    $approvalRootId = cpms_drive_folder_id('approval');
+    if ($approvalRootId !== '') {
+        $approvalRootInfo = cpms_drive_get_file_info($approvalRootId);
+        $result['approval_root'] = array(
+            'ok' => !empty($approvalRootInfo['ok']),
+            'http_code' => isset($approvalRootInfo['http_code']) ? (int)$approvalRootInfo['http_code'] : 0,
+            'message' => isset($approvalRootInfo['message']) ? $approvalRootInfo['message'] : ''
+        );
+    } else {
+        $result['approval_root']['message'] = 'Approval Drive folder ID is not configured.';
+    }
     $approvalFolder = cpms_drive_ensure_approval_folder((int)date('Y'), 'other', $approvalContext);
     $result['approval_folder'] = array(
         'ok' => !empty($approvalFolder['ok']),
         'http_code' => isset($approvalFolder['http_code']) ? (int)$approvalFolder['http_code'] : 0,
         'message' => isset($approvalFolder['message']) ? $approvalFolder['message'] : ''
     );
+    $result['approval_year_folder'] = array(
+        'ok' => (!empty($approvalFolder['ok']) && isset($approvalFolder['year_folder_id']) && trim((string)$approvalFolder['year_folder_id']) !== ''),
+        'http_code' => isset($approvalFolder['http_code']) ? (int)$approvalFolder['http_code'] : 0,
+        'message' => !empty($approvalFolder['ok']) ? ('Approval year folder is ready: ' . (isset($approvalFolder['year']) ? (string)$approvalFolder['year'] : date('Y')) . '.') : (isset($approvalFolder['message']) ? $approvalFolder['message'] : '')
+    );
+    $result['approval_type_folder'] = array(
+        'ok' => (!empty($approvalFolder['ok']) && isset($approvalFolder['type_folder_id']) && trim((string)$approvalFolder['type_folder_id']) !== ''),
+        'http_code' => isset($approvalFolder['http_code']) ? (int)$approvalFolder['http_code'] : 0,
+        'message' => !empty($approvalFolder['ok']) ? ('Approval document-type folder is ready: ' . cpms_drive_approval_folder_name('other') . '.') : (isset($approvalFolder['message']) ? $approvalFolder['message'] : '')
+    );
+    $result['approval_month_folder'] = array(
+        'ok' => (!empty($approvalFolder['ok']) && isset($approvalFolder['month_folder_id']) && trim((string)$approvalFolder['month_folder_id']) !== ''),
+        'http_code' => isset($approvalFolder['http_code']) ? (int)$approvalFolder['http_code'] : 0,
+        'message' => !empty($approvalFolder['ok']) ? ('Approval month folder is ready: ' . (isset($approvalFolder['month']) ? (string)$approvalFolder['month'] : date('m')) . '.') : (isset($approvalFolder['message']) ? $approvalFolder['message'] : '')
+    );
     if (!empty($approvalFolder['ok']) && isset($approvalFolder['folder_id']) && trim((string)$approvalFolder['folder_id']) !== '') {
         $approvalContext['target_folder_id'] = (string)$approvalFolder['folder_id'];
+        $approvalContext['drive_folder_id'] = (string)$approvalFolder['folder_id'];
         $approvalUpload = cpms_drive_upload_file($tmpPath, 'CPMS_Approval_Drive_Check_' . date('Ymd_His') . '.txt', (string)$approvalFolder['folder_id'], 'text/plain', $approvalContext);
         $result['approval_upload'] = array(
             'ok' => $approvalUpload['ok'],
@@ -1213,16 +1421,20 @@ function cpms_drive_run_connection_check($userContext) {
                 'name' => isset($approvalUpload['file']['name']) ? (string)$approvalUpload['file']['name'] : '',
                 'webViewLink' => isset($approvalUpload['file']['webViewLink']) ? (string)$approvalUpload['file']['webViewLink'] : ''
             );
-            $approvalDelete = cpms_drive_delete_file($result['approval_test_file']['id'], $approvalContext);
-            $result['approval_delete'] = array(
-                'ok' => $approvalDelete['ok'],
-                'http_code' => isset($approvalDelete['http_code']) ? (int)$approvalDelete['http_code'] : 0,
-                'message' => isset($approvalDelete['message']) ? $approvalDelete['message'] : ''
-            );
+            if ($result['approval_test_file']['id'] !== '') {
+                $approvalDelete = cpms_drive_delete_file($result['approval_test_file']['id'], $approvalContext);
+                $result['approval_delete'] = array(
+                    'ok' => $approvalDelete['ok'],
+                    'http_code' => isset($approvalDelete['http_code']) ? (int)$approvalDelete['http_code'] : 0,
+                    'message' => (isset($approvalDelete['message']) ? $approvalDelete['message'] : '') . ' / file_id=' . $result['approval_test_file']['id']
+                );
+            } else {
+                $result['approval_delete'] = array('ok' => false, 'http_code' => 0, 'message' => 'Upload response did not include a Drive file ID.');
+            }
         }
     }
 
     @unlink($tmpPath);
-    $result['ok'] = (!empty($result['json']['ok']) && !empty($result['token']['ok']) && !empty($result['upload']['ok']) && !empty($result['delete']['ok']) && !empty($result['approval_folder']['ok']) && !empty($result['approval_upload']['ok']) && !empty($result['approval_delete']['ok']));
+    $result['ok'] = (!empty($result['json']['ok']) && !empty($result['token']['ok']) && !empty($result['upload']['ok']) && !empty($result['delete']['ok']) && !empty($result['approval_root']['ok']) && !empty($result['approval_year_folder']['ok']) && !empty($result['approval_type_folder']['ok']) && !empty($result['approval_month_folder']['ok']) && !empty($result['approval_upload']['ok']) && !empty($result['approval_delete']['ok']));
     return $result;
 }}

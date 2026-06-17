@@ -20,6 +20,11 @@ function cpms_approval_pdf_document_columns() {
         'completed_pdf_drive_folder_id' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_drive_folder_id VARCHAR(128) NULL",
         'completed_pdf_drive_web_view_link' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_drive_web_view_link TEXT NULL",
         'completed_pdf_drive_web_content_link' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_drive_web_content_link TEXT NULL",
+        'completed_pdf_year' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_year VARCHAR(4) NULL",
+        'completed_pdf_month' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_month VARCHAR(2) NULL",
+        'completed_pdf_year_folder_id' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_year_folder_id VARCHAR(128) NULL",
+        'completed_pdf_type_folder_id' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_type_folder_id VARCHAR(128) NULL",
+        'completed_pdf_month_folder_id' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_month_folder_id VARCHAR(128) NULL",
         'completed_pdf_name' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_name VARCHAR(255) NULL",
         'completed_pdf_mime_type' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_mime_type VARCHAR(190) NULL",
         'completed_pdf_size' => "ALTER TABLE cpms_approval_documents ADD COLUMN completed_pdf_size BIGINT NULL",
@@ -521,23 +526,47 @@ function cpms_approval_pdf_create_from_html($html, $pdfName, $context) {
 }}
 
 if (!function_exists('cpms_approval_pdf_completed_date')) {
-function cpms_approval_pdf_completed_date($docRow, $content) {
+function cpms_approval_pdf_completed_date($docRow, $content, $context = null) {
     $candidates = array();
     if (is_array($content)) {
-        foreach (array('completed_at', 'approved_at', 'updated_at') as $key) {
+        foreach (array('completed_at', 'completed_date', 'final_approved_at', 'last_approved_at', '_final_approved_at', 'approved_at', 'updated_at') as $key) {
             if (isset($content[$key])) $candidates[] = $content[$key];
         }
     }
     if (is_array($docRow)) {
-        foreach (array('updated_at', 'created_at') as $key) {
+        foreach (array('completed_at', 'approved_at', 'updated_at', 'created_at') as $key) {
             if (isset($docRow[$key])) $candidates[] = $docRow[$key];
         }
     }
+    $invalidRaw = '';
     for ($i = 0; $i < count($candidates); $i++) {
-        $ts = strtotime((string)$candidates[$i]);
+        $raw = trim((string)$candidates[$i]);
+        if ($raw === '') continue;
+        $parsed = function_exists('cpms_approval_drive_parse_date_value') ? cpms_approval_drive_parse_date_value($raw) : '';
+        if ($parsed !== '') return $parsed;
+        $ts = strtotime($raw);
         if ($ts !== false) return date('Y-m-d', $ts);
+        if ($invalidRaw === '') $invalidRaw = $raw;
+    }
+    if ($invalidRaw !== '' && is_array($context)) {
+        cpms_approval_pdf_log_failure(array_merge($context, array(
+            'message' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%9B%94%20%EA%B0%92%20%ED%99%95%EC%9D%B8%20%ED%95%84%EC%9A%94') . ': ' . $invalidRaw
+        )));
     }
     return date('Y-m-d');
+}}
+
+if (!function_exists('cpms_approval_pdf_final_approved_at')) {
+function cpms_approval_pdf_final_approved_at($pdo, $approvalId) {
+    if (!$pdo || (int)$approvalId <= 0) return '';
+    try {
+        $st = $pdo->prepare("SELECT acted_at FROM cpms_approval_lines WHERE document_id=:id AND UPPER(COALESCE(line_status,''))='APPROVED' AND acted_at IS NOT NULL AND acted_at<>'' ORDER BY line_order DESC, acted_at DESC LIMIT 1");
+        $st->execute(array(':id' => (int)$approvalId));
+        $value = $st->fetchColumn();
+        return trim((string)$value);
+    } catch (Exception $e) {
+        return '';
+    }
 }}
 
 if (!function_exists('cpms_approval_pdf_document_number')) {
@@ -649,6 +678,11 @@ function cpms_approval_pdf_save_drive_record($pdo, $approvalId, $record) {
         'completed_pdf_drive_folder_id' => isset($record['drive_folder_id']) ? (string)$record['drive_folder_id'] : '',
         'completed_pdf_drive_web_view_link' => isset($record['drive_web_view_link']) ? (string)$record['drive_web_view_link'] : '',
         'completed_pdf_drive_web_content_link' => isset($record['drive_web_content_link']) ? (string)$record['drive_web_content_link'] : '',
+        'completed_pdf_year' => isset($record['completed_pdf_year']) ? (string)$record['completed_pdf_year'] : (isset($record['document_year']) ? (string)$record['document_year'] : ''),
+        'completed_pdf_month' => isset($record['completed_pdf_month']) ? (string)$record['completed_pdf_month'] : (isset($record['document_month']) ? (string)$record['document_month'] : ''),
+        'completed_pdf_year_folder_id' => isset($record['completed_pdf_year_folder_id']) ? (string)$record['completed_pdf_year_folder_id'] : (isset($record['drive_year_folder_id']) ? (string)$record['drive_year_folder_id'] : ''),
+        'completed_pdf_type_folder_id' => isset($record['completed_pdf_type_folder_id']) ? (string)$record['completed_pdf_type_folder_id'] : (isset($record['drive_type_folder_id']) ? (string)$record['drive_type_folder_id'] : ''),
+        'completed_pdf_month_folder_id' => isset($record['completed_pdf_month_folder_id']) ? (string)$record['completed_pdf_month_folder_id'] : (isset($record['drive_month_folder_id']) ? (string)$record['drive_month_folder_id'] : ''),
         'completed_pdf_name' => isset($record['stored_name']) ? (string)$record['stored_name'] : '',
         'completed_pdf_mime_type' => isset($record['mime_type']) ? (string)$record['mime_type'] : 'application/pdf',
         'completed_pdf_size' => (isset($record['size']) && $record['size'] !== '') ? (int)$record['size'] : 0,
@@ -694,10 +728,14 @@ function cpms_approval_pdf_upload_completed_pdf($pdo, $approvalId, $userContext)
 
     $doc = isset($pdf['doc']) && is_array($pdf['doc']) ? $pdf['doc'] : $doc;
     $content = isset($pdf['content']) && is_array($pdf['content']) ? $pdf['content'] : $content;
-    $completedDate = cpms_approval_pdf_completed_date($doc, $content);
+    $finalApprovedAt = cpms_approval_pdf_final_approved_at($pdo, $approvalId);
+    if ($finalApprovedAt !== '') $content['_final_approved_at'] = $finalApprovedAt;
+    $folderContext = cpms_approval_pdf_context($doc, $content, $userContext, 'drive');
+    $completedDate = cpms_approval_pdf_completed_date($doc, $content, $folderContext);
     $year = (int)substr($completedDate, 0, 4);
     if ($year <= 0) $year = (int)date('Y');
-    $folderContext = cpms_approval_pdf_context($doc, $content, $userContext, 'drive');
+    $folderContext['completed_date'] = $completedDate;
+    $folderContext['fallback_date'] = date('Y-m-d H:i:s');
     $folder = cpms_drive_ensure_approval_folder($year, 'completed', $folderContext);
     if (empty($folder['ok'])) {
         $message = isset($folder['message']) ? $folder['message'] : 'Completed PDF Drive folder preparation failed.';
@@ -709,6 +747,16 @@ function cpms_approval_pdf_upload_completed_pdf($pdo, $approvalId, $userContext)
 
     $folderContext['target_folder_id'] = (string)$folder['folder_id'];
     $folderContext['drive_folder_id'] = (string)$folder['folder_id'];
+    $folderContext['document_year'] = isset($folder['year']) ? sprintf('%04d', (int)$folder['year']) : substr($completedDate, 0, 4);
+    $folderContext['document_month'] = isset($folder['month']) ? (string)$folder['month'] : substr($completedDate, 5, 2);
+    $folderContext['drive_year_folder_id'] = isset($folder['year_folder_id']) ? (string)$folder['year_folder_id'] : '';
+    $folderContext['drive_type_folder_id'] = isset($folder['type_folder_id']) ? (string)$folder['type_folder_id'] : '';
+    $folderContext['drive_month_folder_id'] = isset($folder['month_folder_id']) ? (string)$folder['month_folder_id'] : '';
+    $folderContext['completed_pdf_year'] = $folderContext['document_year'];
+    $folderContext['completed_pdf_month'] = $folderContext['document_month'];
+    $folderContext['completed_pdf_year_folder_id'] = $folderContext['drive_year_folder_id'];
+    $folderContext['completed_pdf_type_folder_id'] = $folderContext['drive_type_folder_id'];
+    $folderContext['completed_pdf_month_folder_id'] = $folderContext['drive_month_folder_id'];
     $folderContext['original_name'] = isset($pdf['name']) ? (string)$pdf['name'] : '';
     $folderContext['stored_name'] = isset($pdf['name']) ? (string)$pdf['name'] : '';
     $folderContext['mime_type'] = 'application/pdf';
@@ -805,6 +853,9 @@ function cpms_approval_pdf_run_admin_check($userContext) {
         'create' => array('ok' => false, 'message' => ''),
         'validate_size' => array('ok' => false, 'message' => ''),
         'validate_header' => array('ok' => false, 'message' => ''),
+        'approval_year_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
+        'approval_type_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
+        'approval_month_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'approval_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'upload' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'delete' => array('ok' => false, 'http_code' => 0, 'message' => ''),
@@ -864,7 +915,9 @@ function cpms_approval_pdf_run_admin_check($userContext) {
         'section' => 'admin_drive_check_completed_pdf',
         'document_type' => cpms_drive_approval_folder_name('completed'),
         'original_name' => $testName,
-        'target_folder_id' => cpms_drive_folder_id('approval')
+        'target_folder_id' => cpms_drive_folder_id('approval'),
+        'completed_date' => date('Y-m-d'),
+        'fallback_date' => date('Y-m-d H:i:s')
     );
     $pdf = cpms_approval_pdf_create_from_html($html, $testName, $context);
     $result['create'] = array(
@@ -901,9 +954,34 @@ function cpms_approval_pdf_run_admin_check($userContext) {
         'http_code' => isset($folder['http_code']) ? (int)$folder['http_code'] : 0,
         'message' => isset($folder['message']) ? $folder['message'] : ''
     );
+    $result['approval_year_folder'] = array(
+        'ok' => (!empty($folder['ok']) && isset($folder['year_folder_id']) && trim((string)$folder['year_folder_id']) !== ''),
+        'http_code' => isset($folder['http_code']) ? (int)$folder['http_code'] : 0,
+        'message' => !empty($folder['ok']) ? ('Completed PDF year folder is ready: ' . (isset($folder['year']) ? (string)$folder['year'] : date('Y')) . '.') : (isset($folder['message']) ? $folder['message'] : '')
+    );
+    $result['approval_type_folder'] = array(
+        'ok' => (!empty($folder['ok']) && isset($folder['type_folder_id']) && trim((string)$folder['type_folder_id']) !== ''),
+        'http_code' => isset($folder['http_code']) ? (int)$folder['http_code'] : 0,
+        'message' => !empty($folder['ok']) ? ('Completed PDF type folder is ready: ' . cpms_drive_approval_folder_name('completed') . '.') : (isset($folder['message']) ? $folder['message'] : '')
+    );
+    $result['approval_month_folder'] = array(
+        'ok' => (!empty($folder['ok']) && isset($folder['month_folder_id']) && trim((string)$folder['month_folder_id']) !== ''),
+        'http_code' => isset($folder['http_code']) ? (int)$folder['http_code'] : 0,
+        'message' => !empty($folder['ok']) ? ('Completed PDF month folder is ready: ' . (isset($folder['month']) ? (string)$folder['month'] : date('m')) . '.') : (isset($folder['message']) ? $folder['message'] : '')
+    );
     if (!empty($folder['ok']) && isset($folder['folder_id']) && trim((string)$folder['folder_id']) !== '') {
         $context['target_folder_id'] = (string)$folder['folder_id'];
         $context['drive_folder_id'] = (string)$folder['folder_id'];
+        $context['document_year'] = isset($folder['year']) ? sprintf('%04d', (int)$folder['year']) : date('Y');
+        $context['document_month'] = isset($folder['month']) ? (string)$folder['month'] : date('m');
+        $context['drive_year_folder_id'] = isset($folder['year_folder_id']) ? (string)$folder['year_folder_id'] : '';
+        $context['drive_type_folder_id'] = isset($folder['type_folder_id']) ? (string)$folder['type_folder_id'] : '';
+        $context['drive_month_folder_id'] = isset($folder['month_folder_id']) ? (string)$folder['month_folder_id'] : '';
+        $context['completed_pdf_year'] = $context['document_year'];
+        $context['completed_pdf_month'] = $context['document_month'];
+        $context['completed_pdf_year_folder_id'] = $context['drive_year_folder_id'];
+        $context['completed_pdf_type_folder_id'] = $context['drive_type_folder_id'];
+        $context['completed_pdf_month_folder_id'] = $context['drive_month_folder_id'];
         $context['mime_type'] = 'application/pdf';
         $context['size'] = isset($pdf['size']) ? (int)$pdf['size'] : 0;
         $upload = cpms_drive_upload_file($pdf['path'], $testName, (string)$folder['folder_id'], 'application/pdf', $context);
@@ -936,6 +1014,6 @@ function cpms_approval_pdf_run_admin_check($userContext) {
         'ok' => $cleanup ? true : false,
         'message' => $cleanup ? 'Temporary PDF file deleted.' : 'Temporary PDF file could not be deleted.'
     );
-    $result['ok'] = (!empty($result['mpdf_file']['ok']) && !empty($result['mpdf_load']['ok']) && !empty($result['mpdf_temp']['ok']) && !empty($result['temp_path']['ok']) && !empty($result['create']['ok']) && !empty($result['validate_size']['ok']) && !empty($result['validate_header']['ok']) && !empty($result['approval_folder']['ok']) && !empty($result['upload']['ok']) && !empty($result['delete']['ok']) && !empty($result['cleanup']['ok']));
+    $result['ok'] = (!empty($result['mpdf_file']['ok']) && !empty($result['mpdf_load']['ok']) && !empty($result['mpdf_temp']['ok']) && !empty($result['temp_path']['ok']) && !empty($result['create']['ok']) && !empty($result['validate_size']['ok']) && !empty($result['validate_header']['ok']) && !empty($result['approval_year_folder']['ok']) && !empty($result['approval_type_folder']['ok']) && !empty($result['approval_month_folder']['ok']) && !empty($result['upload']['ok']) && !empty($result['delete']['ok']) && !empty($result['cleanup']['ok']));
     return $result;
 }}
