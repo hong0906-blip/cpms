@@ -195,7 +195,8 @@ try {
     $uploadResult = cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, 'statement_file', $projectId, $materialId, $savedUsageRows, $ym);
     if (isset($uploadResult['has_file']) && $uploadResult['has_file']) {
         if (isset($uploadResult['ok']) && $uploadResult['ok']) {
-            flash_set('success', $baseMessage . ' 거래명세표를 첨부했습니다.');
+            $statementMessage = (isset($uploadResult['message']) && trim((string)$uploadResult['message']) !== '') ? (string)$uploadResult['message'] : '거래명세표를 첨부했습니다.';
+            flash_set('success', $baseMessage . ' ' . $statementMessage);
         } else {
             flash_set('error', $baseMessage . ' 다만 거래명세표 첨부 실패: ' . (isset($uploadResult['message']) ? $uploadResult['message'] : '알 수 없는 오류'));
         }

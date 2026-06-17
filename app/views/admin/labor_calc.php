@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/labor_consultant_helpers.php';
+require_once __DIR__ . '/../../services/ManagementDriveService.php';
 
 $pdo = \App\Core\Db::pdo();
 $user = \App\Core\Auth::user();
@@ -231,6 +232,16 @@ foreach ($rows as $row) {
             <div class="mt-3 text-sm text-gray-700">
               <div><span class="font-bold">파일명:</span> <?php echo h(isset($activeTemplate['original_name']) ? $activeTemplate['original_name'] : ''); ?></div>
               <div class="mt-1"><span class="font-bold">업로드일:</span> <?php echo h(isset($activeTemplate['uploaded_at']) ? $activeTemplate['uploaded_at'] : '-'); ?></div>
+              <?php if (isset($activeTemplate['storage_type']) && (string)$activeTemplate['storage_type'] === 'google_drive'): ?>
+                <div class="mt-2 flex flex-wrap gap-2 text-xs">
+                  <?php if (isset($activeTemplate['drive_web_view_link']) && trim((string)$activeTemplate['drive_web_view_link']) !== ''): ?>
+                    <a class="font-bold text-blue-700" href="<?php echo h($activeTemplate['drive_web_view_link']); ?>" target="_blank" rel="noopener"><?php echo h(cpms_management_drive_label('view')); ?></a>
+                  <?php endif; ?>
+                  <?php if (isset($activeTemplate['drive_web_content_link']) && trim((string)$activeTemplate['drive_web_content_link']) !== ''): ?>
+                    <a class="font-bold text-gray-700" href="<?php echo h($activeTemplate['drive_web_content_link']); ?>"><?php echo h(cpms_management_drive_label('download')); ?></a>
+                  <?php endif; ?>
+                </div>
+              <?php endif; ?>
             </div>
           <?php else: ?>
             <div class="mt-3 text-sm font-bold text-amber-800">등록된 노무사 확인용 양식이 없습니다. 먼저 엑셀 양식을 업로드해주세요.</div>

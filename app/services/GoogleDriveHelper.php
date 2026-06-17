@@ -700,11 +700,12 @@ function cpms_drive_project_folder_schema() {
         'management' => array(
             'name' => urldecode('%30%32%5F%EA%B4%80%EB%A6%AC'),
             'children' => array(
-                'management_statement' => urldecode('%EA%B1%B0%EB%9E%98%EB%AA%85%EC%84%B8%EC%84%9C'),
+                'management_statement' => urldecode('%EA%B1%B0%EB%9E%98%EB%AA%85%EC%84%B8%ED%91%9C'),
                 'management_tax_invoice' => urldecode('%EC%84%B8%EA%B8%88%EA%B3%84%EC%82%B0%EC%84%9C'),
                 'management_settlement' => urldecode('%EC%A0%95%EC%82%B0%EC%9E%90%EB%A3%8C'),
                 'management_labor' => urldecode('%EB%85%B8%EB%AC%B4%EC%9E%90%EB%A3%8C'),
-                'management_manpower' => urldecode('%EC%9D%B8%EB%A0%A5%EA%B4%80%EB%A6%AC')
+                'management_manpower' => urldecode('%EC%9D%B8%EB%A0%A5%EA%B4%80%EB%A6%AC'),
+                'management_etc' => urldecode('%EA%B8%B0%ED%83%80')
             )
         ),
         'construction' => array(

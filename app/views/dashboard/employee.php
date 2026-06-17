@@ -523,7 +523,7 @@ if($pdo&&$eid_att>0){
                 <?php foreach ($kpiRows as $r): ?>
                     <tr class="border-t border-gray-100">
                         <td class="p-3">
-                            <a class="font-bold text-indigo-600 hover:underline" href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$r['project_id']; ?>&tab=cost_progress&sub=summary&period=<?php echo h($period); ?>"><?php echo h($r['project_name']); ?></a>
+                            <a class="font-bold text-indigo-600 hover:underline" href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$r['project_id']; ?>&tab=status"><?php echo h($r['project_name']); ?></a>
                         </td>
                         <td class="p-3 text-center"><?php echo h($r['cost_rate_label']); ?><?php if ($r['cost_rate_note'] !== ''): ?> (<?php echo h($r['cost_rate_note']); ?>)<?php endif; ?></td>
                         <td class="p-3 text-center"><?php echo number_format((float)$r['progress_rate'], 2); ?>%</td>

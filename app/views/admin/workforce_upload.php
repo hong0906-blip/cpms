@@ -37,6 +37,11 @@ if (!(Auth::isMaster() || Auth::canManageEmployees())) {
     </label>
 
     <label class="block">
+      <span class="block text-sm font-bold text-gray-700 mb-1"><?php echo h(urldecode('%EA%B8%B0%EC%A4%80%EC%9B%94')); ?></span>
+      <input type="month" name="target_month" value="<?php echo h(date('Y-m')); ?>" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+    </label>
+
+    <label class="block">
       <span class="block text-sm font-bold text-gray-700 mb-1">전체 적용 업체명</span>
       <input name="default_agency_name" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="비워두면 엑셀 컬럼 매핑 값을 사용합니다.">
     </label>

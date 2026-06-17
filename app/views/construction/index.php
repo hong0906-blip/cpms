@@ -111,8 +111,6 @@ $tabs = array(
     'labor'    => '노무비',
     'equipment'=> '장비',
     'materials'=> '자재구입비',
-    'safety_cost' => '안전관리비',
-    'cost_progress' => '원가/공정',
     'issues'   => '이슈',
     'safety'   => '안전사고',
 );

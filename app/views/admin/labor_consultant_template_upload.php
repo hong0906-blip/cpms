@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/labor_consultant_helpers.php';
+require_once __DIR__ . '/../../services/ManagementDriveService.php';
 
 if (!\App\Core\Auth::check()) {
     header('Location: ?r=login');
@@ -28,6 +29,7 @@ if (!cpms_labor_consultant_can_access($pdo, $user)) {
 if (!cpms_labor_consultant_ensure_template_table($pdo) || !cpms_labor_consultant_ensure_storage_dir()) {
     cpms_labor_consultant_flash_redirect('error', '양식 저장소 준비에 실패했습니다.', $projectId, $ym, 'consultant');
 }
+cpms_management_drive_ensure_table_columns($pdo, 'cpms_labor_export_templates');
 
 if (!isset($_FILES['template_file']) || !is_array($_FILES['template_file'])) {
     cpms_labor_consultant_flash_redirect('error', '업로드할 엑셀 양식을 선택해주세요.', $projectId, $ym, 'consultant');
@@ -62,35 +64,75 @@ if (is_array($user) && isset($user['id'])) {
     $uploadedBy = (int)$user['id'];
 }
 
+$driveProjectId = is_numeric($projectId) ? (int)$projectId : 0;
+$driveUploadResult = cpms_management_drive_upload_local_file(
+    $pdo,
+    $driveProjectId,
+    $storedPath,
+    $originalName,
+    'labor',
+    $ym,
+    date('Y-m-d'),
+    array('date' => date('Y-m-d')),
+    $user
+);
+$driveRecord = (isset($driveUploadResult['record']) && is_array($driveUploadResult['record'])) ? $driveUploadResult['record'] : array();
+
 try {
     $pdo->beginTransaction();
     $stOff = $pdo->prepare("UPDATE cpms_labor_export_templates SET is_active = 0 WHERE template_type = :type AND is_active = 1");
     $stOff->bindValue(':type', cpms_labor_consultant_template_type());
     $stOff->execute();
 
-    $stIns = $pdo->prepare("INSERT INTO cpms_labor_export_templates
-        (template_type, original_name, stored_name, stored_path, file_size, uploaded_by, uploaded_at, is_active)
-        VALUES (:type, :original_name, :stored_name, :stored_path, :file_size, :uploaded_by, :uploaded_at, 1)");
-    $stIns->bindValue(':type', cpms_labor_consultant_template_type());
-    $stIns->bindValue(':original_name', $originalName);
-    $stIns->bindValue(':stored_name', $safeStoredName);
-    $stIns->bindValue(':stored_path', $dbStoredPath);
-    $stIns->bindValue(':file_size', $fileSize, PDO::PARAM_INT);
-    if ($uploadedBy > 0) {
-        $stIns->bindValue(':uploaded_by', $uploadedBy, PDO::PARAM_INT);
-    } else {
-        $stIns->bindValue(':uploaded_by', null, PDO::PARAM_NULL);
+    $insertMap = array(
+        'template_type' => cpms_labor_consultant_template_type(),
+        'original_name' => $originalName,
+        'stored_name' => $safeStoredName,
+        'stored_path' => $dbStoredPath,
+        'file_size' => $fileSize,
+        'uploaded_by' => $uploadedBy > 0 ? $uploadedBy : null,
+        'uploaded_at' => date('Y-m-d H:i:s'),
+        'is_active' => 1
+    );
+    if (is_array($driveRecord) && count($driveRecord) > 0) {
+        $driveValues = cpms_management_drive_record_values($driveRecord, $uploadedBy);
+        foreach ($driveValues as $column => $value) {
+            $insertMap[$column] = $value;
+        }
     }
-    $stIns->bindValue(':uploaded_at', date('Y-m-d H:i:s'));
+    $columns = array();
+    $holders = array();
+    $params = array();
+    foreach ($insertMap as $column => $value) {
+        if (!cpms_management_drive_column_exists($pdo, 'cpms_labor_export_templates', $column)) continue;
+        $columns[] = '`' . $column . '`';
+        $holders[] = ':' . $column;
+        $params[':' . $column] = $value;
+    }
+    $stIns = $pdo->prepare("INSERT INTO cpms_labor_export_templates (" . implode(',', $columns) . ") VALUES (" . implode(',', $holders) . ")");
+    foreach ($params as $key => $value) {
+        if ($value === null) $stIns->bindValue($key, null, PDO::PARAM_NULL);
+        else $stIns->bindValue($key, $value);
+    }
     $stIns->execute();
     $pdo->commit();
 } catch (Exception $e) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
     }
+    if (is_array($driveRecord) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+        cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+            'section' => 'management',
+            'project_id' => $driveProjectId,
+            'document_type' => 'labor',
+            'original_name' => $originalName,
+            'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
+            'message' => 'Labor template DB save failed after Drive upload.'
+        ));
+    }
     error_log('[labor_consultant_template_upload] ' . $e->getMessage());
     @unlink($storedPath);
     cpms_labor_consultant_flash_redirect('error', '양식 정보 저장에 실패했습니다.', $projectId, $ym, 'consultant');
 }
 
-cpms_labor_consultant_flash_redirect('success', '노무사 확인용 양식을 등록했습니다.', $projectId, $ym, 'consultant');
+cpms_labor_consultant_flash_redirect('success', cpms_management_drive_flash_message('노무사 확인용 양식을 등록했습니다.', $driveUploadResult), $projectId, $ym, 'consultant');

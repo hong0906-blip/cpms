@@ -4,6 +4,8 @@
  * - PHP 5.6 호환
  */
 
+require_once __DIR__ . '/../../../services/ManagementDriveService.php';
+
 if (!function_exists('cpms_material_statement_allowed_extensions')) {
 function cpms_material_statement_allowed_extensions() {
     return array('pdf'=>true, 'jpg'=>true, 'jpeg'=>true, 'png'=>true, 'xlsx'=>true, 'xls'=>true);
@@ -144,6 +146,8 @@ function cpms_material_statement_ensure_schema($pdo) {
             try { $pdo->exec($sqlIndex); } catch (Exception $e) {}
         }
     }
+
+    cpms_management_drive_ensure_table_columns($pdo, 'cpms_material_statement_files');
 
     return true;
 }
@@ -335,6 +339,7 @@ function cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, $field
         $result['message'] = 'DB 연결 실패';
         return $result;
     }
+    cpms_material_statement_ensure_schema($pdo);
     if (!cpms_material_statement_schema_ready($pdo)) {
         $result['ok'] = false;
         $result['message'] = '거래명세표 파일 테이블이 준비되지 않았습니다. 공사 DB 설정에서 자재구입비 테이블 생성/확인을 실행해주세요.';
@@ -357,9 +362,11 @@ function cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, $field
     }
 
     $firstUsageId = 0;
+    $firstUseDate = '';
     foreach ($usageRows as $usageRow) {
         if (is_array($usageRow) && isset($usageRow['id']) && (int)$usageRow['id'] > 0) {
             $firstUsageId = (int)$usageRow['id'];
+            $firstUseDate = isset($usageRow['use_date']) ? (string)$usageRow['use_date'] : '';
             break;
         }
     }
@@ -393,13 +400,24 @@ function cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, $field
     $uploadedBy = cpms_material_statement_current_user_id();
     $uploadedByName = class_exists('App\\Core\\Auth') ? (string)\App\Core\Auth::userName() : '';
     $now = date('Y-m-d H:i:s');
+    $userContext = class_exists('App\\Core\\Auth') ? \App\Core\Auth::user() : array();
+    $driveMonthValue = trim((string)$firstUseDate) !== '' ? $firstUseDate : (string)$ym;
+    $driveUploadResult = cpms_management_drive_upload_local_file(
+        $pdo,
+        (int)$projectId,
+        $storedPath,
+        $originalName,
+        'statement',
+        $driveMonthValue,
+        $now,
+        array('date' => trim((string)$firstUseDate) !== '' ? $firstUseDate : date('Y-m-d')),
+        $userContext
+    );
+    $driveRecord = (isset($driveUploadResult['record']) && is_array($driveUploadResult['record'])) ? $driveUploadResult['record'] : array();
+    $driveValues = is_array($driveRecord) ? cpms_management_drive_record_values($driveRecord, $uploadedBy) : array();
 
     try {
         $pdo->beginTransaction();
-        $st = $pdo->prepare("INSERT INTO cpms_material_statement_files
-            (project_id, material_id, material_usage_id, use_date, ym, original_name, stored_name, stored_path, mime_type, file_size, uploaded_by, uploaded_by_name, uploaded_at, is_deleted)
-            VALUES
-            (:project_id, :material_id, :material_usage_id, :use_date, :ym, :original_name, :stored_name, :stored_path, :mime_type, :file_size, :uploaded_by, :uploaded_by_name, :uploaded_at, 0)");
 
         $inserted = 0;
         foreach ($usageRows as $row) {
@@ -407,33 +425,55 @@ function cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, $field
             $usageId = isset($row['id']) ? (int)$row['id'] : 0;
             if ($usageId <= 0) continue;
             $useDate = isset($row['use_date']) ? (string)$row['use_date'] : null;
-            $st->bindValue(':project_id', (int)$projectId, PDO::PARAM_INT);
-            $st->bindValue(':material_id', (int)$materialId, PDO::PARAM_INT);
-            $st->bindValue(':material_usage_id', $usageId, PDO::PARAM_INT);
-            if ($useDate === '' || $useDate === null) {
-                $st->bindValue(':use_date', null, PDO::PARAM_NULL);
-            } else {
-                $st->bindValue(':use_date', $useDate);
+            $insertMap = array(
+                'project_id' => (int)$projectId,
+                'material_id' => (int)$materialId,
+                'material_usage_id' => $usageId,
+                'use_date' => ($useDate === '' || $useDate === null) ? null : $useDate,
+                'ym' => (string)$ym,
+                'original_name' => $originalName,
+                'stored_name' => $storedName,
+                'stored_path' => $storedPath,
+                'mime_type' => $mime,
+                'file_size' => $fileSize,
+                'uploaded_by' => $uploadedBy > 0 ? $uploadedBy : null,
+                'uploaded_by_name' => $uploadedByName,
+                'uploaded_at' => $now,
+                'is_deleted' => 0
+            );
+            foreach ($driveValues as $column => $value) {
+                $insertMap[$column] = $value;
             }
-            $st->bindValue(':ym', (string)$ym);
-            $st->bindValue(':original_name', $originalName);
-            $st->bindValue(':stored_name', $storedName);
-            $st->bindValue(':stored_path', $storedPath);
-            $st->bindValue(':mime_type', $mime);
-            $st->bindValue(':file_size', $fileSize, PDO::PARAM_INT);
-            if ($uploadedBy > 0) {
-                $st->bindValue(':uploaded_by', $uploadedBy, PDO::PARAM_INT);
-            } else {
-                $st->bindValue(':uploaded_by', null, PDO::PARAM_NULL);
+            $columns = array();
+            $holders = array();
+            $params = array();
+            foreach ($insertMap as $column => $value) {
+                if (!cpms_management_drive_column_exists($pdo, 'cpms_material_statement_files', $column)) continue;
+                $columns[] = '`' . $column . '`';
+                $holders[] = ':' . $column;
+                $params[':' . $column] = $value;
             }
-            $st->bindValue(':uploaded_by_name', $uploadedByName);
-            $st->bindValue(':uploaded_at', $now);
+            $st = $pdo->prepare("INSERT INTO cpms_material_statement_files (" . implode(',', $columns) . ") VALUES (" . implode(',', $holders) . ")");
+            foreach ($params as $key => $value) {
+                if ($value === null) $st->bindValue($key, null, PDO::PARAM_NULL);
+                else $st->bindValue($key, $value);
+            }
             $st->execute();
             $inserted++;
         }
 
         if ($inserted <= 0) {
             $pdo->rollBack();
+            if (is_array($driveRecord) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+                cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+                    'section' => 'management',
+                    'project_id' => (int)$projectId,
+                    'document_type' => 'statement',
+                    'original_name' => $originalName,
+                    'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
+                    'message' => 'Material statement DB save produced no rows after Drive upload.'
+                ));
+            }
             @unlink($storedPath);
             $result['ok'] = false;
             $result['message'] = '거래명세표를 연결할 사용내역이 없습니다.';
@@ -443,9 +483,22 @@ function cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, $field
         $pdo->commit();
         $result['inserted'] = $inserted;
         $result['message'] = '거래명세표를 첨부했습니다.';
+        if (is_array($driveUploadResult) && empty($driveUploadResult['ok'])) {
+            $result['message'] = cpms_management_drive_flash_message($result['message'], $driveUploadResult);
+        }
         return $result;
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
+        if (is_array($driveRecord) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+            cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+                'section' => 'management',
+                'project_id' => (int)$projectId,
+                'document_type' => 'statement',
+                'original_name' => $originalName,
+                'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
+                'message' => 'Material statement DB save failed after Drive upload.'
+            ));
+        }
         @unlink($storedPath);
         $result['ok'] = false;
         $result['message'] = '거래명세표 DB 저장 실패: ' . $e->getMessage();

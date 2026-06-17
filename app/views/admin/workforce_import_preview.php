@@ -29,6 +29,7 @@ $originalName = isset($file['name']) ? basename((string)$file['name']) : '';
 $fileSize = isset($file['size']) ? (int)$file['size'] : 0;
 $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
 $defaultAgencyName = isset($_POST['default_agency_name']) ? trim((string)$_POST['default_agency_name']) : '';
+$targetMonth = isset($_POST['target_month']) ? trim((string)$_POST['target_month']) : '';
 
 if ($errorCode !== UPLOAD_ERR_OK || $tmpName === '' || !is_uploaded_file($tmpName)) {
     flash_set('danger', '엑셀 파일 업로드에 실패했습니다.');
@@ -107,6 +108,7 @@ $_SESSION['worker_import_preview'][$token] = array(
     'original_filename' => $originalName,
     'stored_filename' => $storedName,
     'default_agency_name' => $defaultAgencyName,
+    'target_month' => $targetMonth,
     'mapping' => $mapping,
     'sheet_name' => isset($preview['sheet_name']) ? (string)$preview['sheet_name'] : '',
     'summary' => isset($preview['summary']) ? $preview['summary'] : array(),

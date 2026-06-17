@@ -48,6 +48,22 @@ if (!cpms_material_statement_user_can_download($pdo, $projectId)) {
     exit;
 }
 
+$storageType = isset($fileRow['storage_type']) ? trim((string)$fileRow['storage_type']) : '';
+if ($storageType === 'google_drive') {
+    $viewLink = isset($fileRow['drive_web_view_link']) ? trim((string)$fileRow['drive_web_view_link']) : '';
+    $downloadLink = isset($fileRow['drive_web_content_link']) ? trim((string)$fileRow['drive_web_content_link']) : '';
+    $wantDownload = isset($_GET['download']) && (string)$_GET['download'] === '1';
+    $target = ($wantDownload && $downloadLink !== '') ? $downloadLink : $viewLink;
+    if ($target === '' && $downloadLink !== '') $target = $downloadLink;
+    if ($target !== '') {
+        header('Location: ' . $target);
+        exit;
+    }
+    http_response_code(404);
+    echo '파일 확인 필요';
+    exit;
+}
+
 $path = cpms_material_statement_resolve_path(isset($fileRow['stored_path']) ? $fileRow['stored_path'] : '');
 if ($path === '' || !is_file($path)) {
     http_response_code(404);

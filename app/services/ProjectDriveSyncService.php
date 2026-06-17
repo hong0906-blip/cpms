@@ -209,6 +209,7 @@ function cpms_project_drive_sync_folder_aliases() {
         'public_affairs_monthly_cost' => array('public_affairs_monthly_input'),
         'public_affairs_progress' => array('public_affairs_progress_payment', 'public_affairs_progress_docs'),
         'management_statement' => array('management_transaction_statement'),
+        'management_etc' => array('management_other'),
         'safety_health_accident' => array('safety_health_incident'),
         'safety_health_ppe' => array('safety_health_protection'),
         'safety_health_medical_checkup' => array('safety_health_checkup')

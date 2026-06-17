@@ -8,6 +8,7 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/../../services/WorkerImportService.php';
 require_once __DIR__ . '/../../services/ExcelWorkerImporter.php';
+require_once __DIR__ . '/../../services/ManagementDriveService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -28,6 +29,10 @@ $preview = $_SESSION['worker_import_preview'][$token];
 $filePath = isset($preview['file_path']) ? (string)$preview['file_path'] : '';
 $originalFilename = isset($preview['original_filename']) ? (string)$preview['original_filename'] : '';
 $storedFilename = isset($preview['stored_filename']) ? (string)$preview['stored_filename'] : '';
+$targetMonth = isset($preview['target_month']) ? (string)$preview['target_month'] : '';
+if ($targetMonth === '' && isset($preview['created_at']) && (int)$preview['created_at'] > 0) {
+    $targetMonth = date('Y-m-d', (int)$preview['created_at']);
+}
 $defaultAgencyName = isset($_POST['default_agency_name']) ? trim((string)$_POST['default_agency_name']) : '';
 $mapping = isset($_POST['mapping']) && is_array($_POST['mapping']) ? $_POST['mapping'] : (isset($preview['mapping']) ? $preview['mapping'] : array());
 $updateDuplicate = isset($_POST['update_duplicate']) && (string)$_POST['update_duplicate'] === '1';
@@ -55,7 +60,37 @@ if (!is_array($result) || empty($result['ok'])) {
     exit;
 }
 
+$driveUploadResult = array('ok' => true, 'message' => '');
+if ($filePath !== '' && is_file($filePath) && isset($result['batch_id']) && (int)$result['batch_id'] > 0) {
+    cpms_management_drive_ensure_table_columns($pdo, 'worker_import_batches');
+    $driveUploadResult = cpms_management_drive_upload_local_file(
+        $pdo,
+        0,
+        $filePath,
+        $originalFilename,
+        'manpower',
+        $targetMonth,
+        date('Y-m-d'),
+        array('date' => date('Y-m-d')),
+        $user
+    );
+    if (isset($driveUploadResult['record']) && is_array($driveUploadResult['record'])) {
+        $apply = cpms_management_drive_apply_record_to_row($pdo, 'worker_import_batches', (int)$result['batch_id'], $driveUploadResult['record'], $userId, array(
+            'section' => 'management',
+            'is_common_file' => 1,
+            'document_type' => 'manpower',
+            'original_name' => $originalFilename,
+            'project_id' => 0
+        ));
+        if (empty($apply['ok'])) {
+            $driveUploadResult['ok'] = false;
+            $driveUploadResult['message'] = isset($apply['message']) ? (string)$apply['message'] : 'Management Drive metadata save failed.';
+        }
+    }
+}
+
 error_log('[workforce_import] batch_id=' . (int)$result['batch_id'] . ' user=' . (string)Auth::userEmail());
-flash_set('success', 'import 완료: 신규 ' . (int)$result['success_rows'] . '건 / 업데이트 ' . (int)$result['update_rows'] . '건 / 제외 ' . (int)$result['skip_rows'] . '건 / 오류 ' . (int)$result['error_rows'] . '건');
+$successMessage = 'import 완료: 신규 ' . (int)$result['success_rows'] . '건 / 업데이트 ' . (int)$result['update_rows'] . '건 / 제외 ' . (int)$result['skip_rows'] . '건 / 오류 ' . (int)$result['error_rows'] . '건';
+flash_set('success', cpms_management_drive_flash_message($successMessage, $driveUploadResult));
 header('Location: ?r=관리&tab=workforce');
 exit;
