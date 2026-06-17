@@ -58,6 +58,16 @@ if (count($rows) === 0) {
     cpms_project_create_preview_out(array('ok' => 0, 'message' => '가져올 단가내역 데이터가 없습니다.'));
 }
 
+$tmpDir = cpms_storage_root() . '/tmp/public_affairs_project_create';
+if (!cpms_ensure_dir($tmpDir)) {
+    cpms_project_create_preview_out(array('ok' => 0, 'message' => '내역서 임시 저장 폴더를 만들 수 없습니다.'));
+}
+$storedName = 'project_create_unit_price_' . date('Ymd_His') . '_' . substr(md5(uniqid('', true)), 0, 8) . '.xlsx';
+$storedPath = rtrim($tmpDir, '/\\') . '/' . $storedName;
+if (!@move_uploaded_file($tmpFile, $storedPath)) {
+    cpms_project_create_preview_out(array('ok' => 0, 'message' => '내역서 임시 저장에 실패했습니다.'));
+}
+
 $token = bin2hex(openssl_random_pseudo_bytes(16));
 if (!isset($_SESSION['project_create_unit_price']) || !is_array($_SESSION['project_create_unit_price'])) {
     $_SESSION['project_create_unit_price'] = array();
@@ -65,6 +75,8 @@ if (!isset($_SESSION['project_create_unit_price']) || !is_array($_SESSION['proje
 $_SESSION['project_create_unit_price'][$token] = array(
     'created_at' => time(),
     'file_name' => $fileName,
+    'stored_name' => $storedName,
+    'stored_path' => $storedPath,
     'rows' => $rows,
     'detected_columns' => isset($parsed['detected_columns']) ? $parsed['detected_columns'] : array(),
     'sheet_name' => isset($parsed['sheet_name']) ? $parsed['sheet_name'] : '',

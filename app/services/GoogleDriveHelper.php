@@ -683,7 +683,8 @@ function cpms_drive_project_folder_schema() {
                 'public_affairs_estimate' => '내역서',
                 'public_affairs_contract' => '계약서',
                 'public_affairs_site_docs' => '현설자료',
-                'public_affairs_monthly_cost' => '월별투입비'
+                'public_affairs_monthly_cost' => '월별투입비',
+                'public_affairs_progress' => '기성'
             )
         ),
         'management' => array(

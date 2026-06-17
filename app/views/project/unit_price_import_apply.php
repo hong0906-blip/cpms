@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -88,8 +89,36 @@ try {
     }
 
     $pdo->commit();
+    $driveUpload = null;
+    $sourcePath = isset($pack['stored_path']) ? trim((string)$pack['stored_path']) : '';
+    $originalName = isset($pack['file_name']) ? (string)$pack['file_name'] : '';
+    if ($sourcePath !== '' && is_file($sourcePath)) {
+        $versionsDir = cpms_storage_root() . '/contracts/' . (int)$projectId . '/versions';
+        if (cpms_ensure_dir($versionsDir)) {
+            $finalStoredName = 'unit_price_import_' . date('Ymd_His') . '_' . substr(md5(uniqid('', true)), 0, 8) . '.xlsx';
+            $finalPath = rtrim($versionsDir, '/\\') . '/' . $finalStoredName;
+            if (@rename($sourcePath, $finalPath)) $sourcePath = $finalPath;
+        }
+        $driveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $sourcePath, $originalName, 'unit_price_original', date('Y-m'), date('Y-m-d'), array('date' => date('Y-m-d')), Auth::user());
+        $driveRecord = (is_array($driveUpload) && isset($driveUpload['record']) && is_array($driveUpload['record'])) ? $driveUpload['record'] : array();
+        $user = Auth::user();
+        $userId = (is_array($user) && isset($user['id'])) ? (int)$user['id'] : 0;
+        $historySave = cpms_public_affairs_drive_insert_history_record($pdo, $projectId, 'unit_price_original', $originalName, basename($sourcePath), $sourcePath, array('message' => 'unit_price_import', 'rows' => $count), $driveRecord, $userId);
+        if (!empty($driveUpload['ok']) && empty($historySave['ok']) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+            cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+                'section' => 'public_affairs',
+                'project_id' => $projectId,
+                'document_type' => isset($driveRecord['document_type']) ? $driveRecord['document_type'] : 'unit_price_original',
+                'original_name' => $originalName,
+                'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
+                'message' => isset($historySave['message']) ? $historySave['message'] : 'Unit price import history save failed after Drive upload.'
+            ));
+            $driveUpload['ok'] = false;
+            $driveUpload['message'] = isset($historySave['message']) ? $historySave['message'] : 'Unit price import history save failed after Drive upload.';
+        }
+    }
     unset($_SESSION['unit_price_import'][$importToken]);
-    flash_set('success', '엑셀 단가표가 저장되었습니다. (저장된 행: ' . $count . ')');
+    flash_set('success', cpms_public_affairs_drive_flash_message('엑셀 단가표가 저장되었습니다. (저장된 행: ' . $count . ')', $driveUpload));
 } catch (Exception $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     flash_set('error', '저장 실패: ' . $e->getMessage());

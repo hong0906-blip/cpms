@@ -14,6 +14,7 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/../../services/GoogleDriveHelper.php';
+require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -86,6 +87,7 @@ $contract_amount = isset($_POST['contract_amount']) ? trim((string)$_POST['contr
 $mainManagerId = isset($_POST['main_manager_id']) ? (int)$_POST['main_manager_id'] : 0;
 $subManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
 $unitPriceToken = isset($_POST['unit_price_token']) ? trim((string)$_POST['unit_price_token']) : '';
+$projectCreateUnitPricePackForDrive = null;
 
 if ($name === '' || $mainManagerId <= 0) {
     flash_set('error', '프로젝트명/공사 담당자는 필수입니다.');
@@ -150,6 +152,7 @@ try {
  // 단가내역서(엑셀) 저장: 미리보기 토큰 기준 세션 데이터 반영
     if ($unitPriceToken !== '' && isset($_SESSION['project_create_unit_price'][$unitPriceToken])) {
         $pack = $_SESSION['project_create_unit_price'][$unitPriceToken];
+        $projectCreateUnitPricePackForDrive = $pack;
         $rows = (isset($pack['rows']) && is_array($pack['rows'])) ? $pack['rows'] : array();
 
         try {
@@ -219,7 +222,6 @@ try {
             // 단가 테이블이 없거나 실패해도 프로젝트 생성은 계속 진행
         }
 
-        unset($_SESSION['project_create_unit_price'][$unitPriceToken]);
     }
 
     /**
@@ -253,12 +255,65 @@ try {
     $driveSync = cpms_drive_sync_project_after_create($pdo, $projectId, $name, Auth::user(), 'project_create');
     $driveResult = isset($driveSync['drive_result']) ? $driveSync['drive_result'] : null;
     $driveSaved = isset($driveSync['saved']) ? (bool)$driveSync['saved'] : false;
+    $unitPriceDriveUpload = null;
+
+    if (is_array($projectCreateUnitPricePackForDrive)) {
+        $sourcePath = isset($projectCreateUnitPricePackForDrive['stored_path']) ? trim((string)$projectCreateUnitPricePackForDrive['stored_path']) : '';
+        $originalUnitPriceName = isset($projectCreateUnitPricePackForDrive['file_name']) ? (string)$projectCreateUnitPricePackForDrive['file_name'] : '';
+        if ($sourcePath !== '' && is_file($sourcePath)) {
+            $versionsDir = cpms_storage_root() . '/contracts/' . (int)$projectId . '/versions';
+            if (cpms_ensure_dir($versionsDir)) {
+                $ext = strtolower(pathinfo($originalUnitPriceName, PATHINFO_EXTENSION));
+                if ($ext === '') $ext = 'xlsx';
+                $finalStoredName = 'unit_price_original_' . date('Ymd_His') . '_' . substr(md5(uniqid('', true)), 0, 8) . '.' . $ext;
+                $finalPath = rtrim($versionsDir, '/\\') . '/' . $finalStoredName;
+                if (@rename($sourcePath, $finalPath)) {
+                    $sourcePath = $finalPath;
+                }
+            }
+            $unitPriceDriveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $sourcePath, $originalUnitPriceName, 'unit_price_original', ($startVal !== null ? $startVal : date('Y-m-d')), ($startVal !== null ? $startVal : date('Y-m-d')), array('date' => ($startVal !== null ? $startVal : date('Y-m-d'))), Auth::user());
+            $driveRecord = (is_array($unitPriceDriveUpload) && isset($unitPriceDriveUpload['record']) && is_array($unitPriceDriveUpload['record'])) ? $unitPriceDriveUpload['record'] : array();
+            $user = Auth::user();
+            $userId = (is_array($user) && isset($user['id'])) ? (int)$user['id'] : 0;
+            $historySave = cpms_public_affairs_drive_insert_history_record(
+                $pdo,
+                $projectId,
+                'unit_price_original',
+                $originalUnitPriceName,
+                basename($sourcePath),
+                $sourcePath,
+                array('message' => 'project_create_unit_price', 'rows' => isset($projectCreateUnitPricePackForDrive['rows']) && is_array($projectCreateUnitPricePackForDrive['rows']) ? count($projectCreateUnitPricePackForDrive['rows']) : 0),
+                $driveRecord,
+                $userId
+            );
+            if (!empty($unitPriceDriveUpload['ok']) && empty($historySave['ok']) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+                cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+                    'section' => 'public_affairs',
+                    'project_id' => $projectId,
+                    'document_type' => isset($driveRecord['document_type']) ? $driveRecord['document_type'] : 'unit_price_original',
+                    'original_name' => $originalUnitPriceName,
+                    'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
+                    'message' => isset($historySave['message']) ? $historySave['message'] : 'Project create unit price history save failed after Drive upload.'
+                ));
+                $unitPriceDriveUpload['ok'] = false;
+                $unitPriceDriveUpload['message'] = isset($historySave['message']) ? $historySave['message'] : 'Project create unit price history save failed after Drive upload.';
+            }
+        }
+    }
+
+    if ($unitPriceToken !== '' && isset($_SESSION['project_create_unit_price'][$unitPriceToken])) {
+        unset($_SESSION['project_create_unit_price'][$unitPriceToken]);
+    }
 
     if (is_array($driveResult) && !empty($driveResult['ok']) && $driveSaved) {
-        flash_set('success', '프로젝트가 생성되었습니다. Google Drive 프로젝트 폴더도 준비되었습니다.');
+        $message = '프로젝트가 생성되었습니다. Google Drive 프로젝트 폴더도 준비되었습니다.';
     } else {
-        flash_set('success', '프로젝트가 생성되었습니다. Google Drive 폴더 생성은 실패 상태로 기록했으니 관리자가 점검 후 다시 처리할 수 있습니다.');
+        $message = '프로젝트가 생성되었습니다. Google Drive 폴더 생성은 실패 상태로 기록했으니 관리자가 점검 후 다시 처리할 수 있습니다.';
     }
+    if (is_array($unitPriceDriveUpload) && empty($unitPriceDriveUpload['ok'])) {
+        $message = cpms_public_affairs_drive_flash_message($message, $unitPriceDriveUpload);
+    }
+    flash_set('success', $message);
     header('Location: ?r=project/detail&id=' . $projectId);
     exit;
 

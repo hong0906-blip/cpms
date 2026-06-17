@@ -5,6 +5,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -103,11 +104,20 @@ try {
     $st->bindValue(':created_at', $now);
     $st->bindValue(':updated_at', $now);
     $st->execute();
-    flash_set('success', '추가공사를 등록했습니다.');
+    $additionalId = (int)$pdo->lastInsertId();
+    $driveUpload = null;
+    if ($additionalId > 0 && isset($fileInfo['path']) && trim((string)$fileInfo['path']) !== '') {
+        $driveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $fileInfo['path'], $fileInfo['original'], 'additional_work_estimate', ($occurredOn !== '' ? $occurredOn : date('Y-m-d')), ($occurredOn !== '' ? $occurredOn : date('Y-m-d')), array('date' => ($occurredOn !== '' ? $occurredOn : date('Y-m-d'))), Auth::user());
+        $driveRecord = (is_array($driveUpload) && isset($driveUpload['record']) && is_array($driveUpload['record'])) ? $driveUpload['record'] : array();
+        cpms_public_affairs_drive_apply_record_to_row($pdo, 'cpms_contract_additional_works', $additionalId, $driveRecord, $userId, array(
+            'section' => 'public_affairs',
+            'project_id' => $projectId
+        ));
+    }
+    flash_set('success', cpms_public_affairs_drive_flash_message('추가공사를 등록했습니다.', $driveUpload));
 } catch (Exception $e) {
     flash_set('error', '추가공사 등록 실패: ' . $e->getMessage());
 }
 
 header('Location: ' . $redirect);
 exit;
-

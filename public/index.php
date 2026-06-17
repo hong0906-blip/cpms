@@ -333,6 +333,10 @@ if ($route === 'project/progress_download') {
     require_once __DIR__ . '/../app/views/project/progress_download.php';
     exit;
 }
+if ($route === 'project/public_affairs_file') {
+    require_once __DIR__ . '/../app/views/project/public_affairs_file.php';
+    exit;
+}
 
 if ($route === 'project/unit_price_add') {
     require_once __DIR__ . '/../app/views/project/unit_price_add.php';

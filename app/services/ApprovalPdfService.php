@@ -61,6 +61,84 @@ function cpms_approval_pdf_log_failure($context) {
     return cpms_drive_log_upload_failure($context);
 }}
 
+if (!function_exists('cpms_approval_pdf_root')) {
+function cpms_approval_pdf_root() {
+    return dirname(dirname(__DIR__));
+}}
+
+if (!function_exists('cpms_approval_pdf_mpdf_path')) {
+function cpms_approval_pdf_mpdf_path() {
+    return cpms_approval_pdf_root() . '/app/lib/mpdf/mpdf.php';
+}}
+
+if (!function_exists('cpms_approval_pdf_mpdf_temp_dir')) {
+function cpms_approval_pdf_mpdf_temp_dir() {
+    return cpms_drive_storage_root() . '/tmp/mpdf';
+}}
+
+if (!function_exists('cpms_approval_pdf_ensure_mpdf_temp_dir')) {
+function cpms_approval_pdf_ensure_mpdf_temp_dir() {
+    $dir = cpms_approval_pdf_mpdf_temp_dir();
+    if (!cpms_drive_ensure_dir($dir)) {
+        return array('ok' => false, 'path' => $dir, 'message' => 'mPDF temp directory could not be created.');
+    }
+    if (!is_writable($dir)) {
+        return array('ok' => false, 'path' => $dir, 'message' => 'mPDF temp directory is not writable.');
+    }
+    return array('ok' => true, 'path' => $dir, 'message' => 'mPDF temp directory is writable.');
+}}
+
+if (!function_exists('cpms_approval_pdf_load_mpdf')) {
+function cpms_approval_pdf_load_mpdf($context) {
+    static $loaded = null;
+    if (is_array($loaded)) return $loaded;
+    if (!is_array($context)) $context = array();
+
+    $path = cpms_approval_pdf_mpdf_path();
+    $result = array(
+        'ok' => false,
+        'path' => $path,
+        'class_loaded' => false,
+        'message' => ''
+    );
+    if (!is_file($path)) {
+        $result['message'] = 'mPDF core file was not found: app/lib/mpdf/mpdf.php';
+        cpms_approval_pdf_log_failure(array_merge($context, array(
+            'section' => 'approval_completed_pdf_mpdf_file_missing',
+            'message' => $result['message']
+        )));
+        $loaded = $result;
+        return $result;
+    }
+
+    $temp = cpms_approval_pdf_ensure_mpdf_temp_dir();
+    if (!empty($temp['ok']) && !defined('_MPDF_TEMP_PATH')) {
+        define('_MPDF_TEMP_PATH', rtrim($temp['path'], '/\\') . '/');
+    }
+
+    require_once $path;
+    if (!class_exists('mPDF', false)) {
+        $result['message'] = 'mPDF class was not loaded from app/lib/mpdf/mpdf.php';
+        cpms_approval_pdf_log_failure(array_merge($context, array(
+            'section' => 'approval_completed_pdf_mpdf_load',
+            'message' => $result['message']
+        )));
+        $loaded = $result;
+        return $result;
+    }
+
+    $result['ok'] = true;
+    $result['class_loaded'] = true;
+    $result['message'] = 'mPDF library is available.';
+    $loaded = $result;
+    return $result;
+}}
+
+if (!function_exists('cpms_approval_pdf_mpdf_is_available')) {
+function cpms_approval_pdf_mpdf_is_available($context) {
+    return cpms_approval_pdf_load_mpdf($context);
+}}
+
 if (!function_exists('cpms_approval_pdf_exec_disabled')) {
 function cpms_approval_pdf_exec_disabled($functionName) {
     $functionName = strtolower(trim((string)$functionName));
@@ -134,7 +212,17 @@ function cpms_approval_pdf_find_wkhtmltopdf() {
 
 if (!function_exists('cpms_approval_pdf_is_available')) {
 function cpms_approval_pdf_is_available() {
-    return cpms_approval_pdf_find_wkhtmltopdf();
+    $mpdf = cpms_approval_pdf_mpdf_is_available(array('section' => 'approval_completed_pdf_tool_check'));
+    if (!empty($mpdf['ok'])) {
+        $mpdf['engine'] = 'mpdf';
+        return $mpdf;
+    }
+    $wk = cpms_approval_pdf_find_wkhtmltopdf();
+    $wk['engine'] = 'wkhtmltopdf';
+    if (empty($wk['ok'])) {
+        $wk['message'] = 'mPDF unavailable: ' . (isset($mpdf['message']) ? $mpdf['message'] : '') . ' / wkhtmltopdf unavailable: ' . (isset($wk['message']) ? $wk['message'] : '');
+    }
+    return $wk;
 }}
 
 if (!function_exists('cpms_approval_pdf_temp_dir')) {
@@ -336,6 +424,56 @@ function cpms_approval_pdf_run_wkhtmltopdf($htmlPath, $pdfPath, $toolPath) {
     return array('ok' => false, 'message' => $message, 'size' => 0, 'output' => $lastOutput, 'exit_code' => $lastCode);
 }}
 
+if (!function_exists('cpms_approval_pdf_run_mpdf')) {
+function cpms_approval_pdf_run_mpdf($html, $pdfPath, $context) {
+    if (!is_array($context)) $context = array();
+    $mpdfInfo = cpms_approval_pdf_mpdf_is_available($context);
+    if (empty($mpdfInfo['ok'])) {
+        return array('ok' => false, 'message' => isset($mpdfInfo['message']) ? $mpdfInfo['message'] : 'mPDF is not available.', 'size' => 0);
+    }
+    $temp = cpms_approval_pdf_ensure_mpdf_temp_dir();
+    if (empty($temp['ok'])) {
+        cpms_approval_pdf_log_failure(array_merge($context, array(
+            'section' => 'approval_completed_pdf_mpdf_temp',
+            'message' => isset($temp['message']) ? $temp['message'] : 'mPDF temp directory failed.'
+        )));
+        return array('ok' => false, 'message' => isset($temp['message']) ? $temp['message'] : 'mPDF temp directory failed.', 'size' => 0);
+    }
+
+    try {
+        if (is_file($pdfPath)) @unlink($pdfPath);
+        $mpdf = new mPDF('utf-8', 'A4');
+        $mpdf->tempDir = $temp['path'];
+        $mpdf->autoScriptToLang = true;
+        $mpdf->autoLangToFont = true;
+        $mpdf->useSubstitutions = true;
+        if (method_exists($mpdf, 'SetDisplayMode')) {
+            $mpdf->SetDisplayMode('fullpage');
+        }
+        if (method_exists($mpdf, 'SetTitle')) {
+            $mpdf->SetTitle(approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%99%84%EB%A3%8C%EB%AC%B8%EC%84%9C'));
+        }
+        $mpdf->WriteHTML((string)$html);
+        $mpdf->Output($pdfPath, 'F');
+    } catch (Exception $e) {
+        cpms_approval_pdf_log_failure(array_merge($context, array(
+            'section' => 'approval_completed_pdf_pdf_create',
+            'message' => 'mPDF PDF creation failed: ' . $e->getMessage()
+        )));
+        return array('ok' => false, 'message' => 'mPDF PDF creation failed: ' . $e->getMessage(), 'size' => 0);
+    }
+
+    $valid = cpms_approval_pdf_validate_file($pdfPath);
+    if (empty($valid['ok'])) {
+        cpms_approval_pdf_log_failure(array_merge($context, array(
+            'section' => 'approval_completed_pdf_pdf_validate',
+            'message' => isset($valid['message']) ? $valid['message'] : 'Generated PDF validation failed.'
+        )));
+        return array('ok' => false, 'message' => isset($valid['message']) ? $valid['message'] : 'Generated PDF validation failed.', 'size' => isset($valid['size']) ? (int)$valid['size'] : 0);
+    }
+    return array('ok' => true, 'message' => 'PDF file created by mPDF.', 'size' => (int)$valid['size'], 'engine' => 'mpdf');
+}}
+
 if (!function_exists('cpms_approval_pdf_create_from_html')) {
 function cpms_approval_pdf_create_from_html($html, $pdfName, $context) {
     if (!is_array($context)) $context = array();
@@ -343,16 +481,33 @@ function cpms_approval_pdf_create_from_html($html, $pdfName, $context) {
     if (empty($dir['ok'])) {
         return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => $dir['message']);
     }
-    $tool = cpms_approval_pdf_is_available();
-    if (empty($tool['ok'])) {
-        return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => $tool['message']);
-    }
-    $htmlPath = cpms_approval_pdf_temp_path($pdfName, 'html');
     $pdfPath = cpms_approval_pdf_temp_path($pdfName, 'pdf');
-    if ($htmlPath === '' || $pdfPath === '') {
+    if ($pdfPath === '') {
         return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => 'Approval PDF temp paths could not be prepared.');
     }
+
+    $mpdf = cpms_approval_pdf_mpdf_is_available($context);
+    if (!empty($mpdf['ok'])) {
+        $run = cpms_approval_pdf_run_mpdf($html, $pdfPath, $context);
+        if (!empty($run['ok'])) {
+            return array('ok' => true, 'path' => $pdfPath, 'name' => $pdfName, 'mime_type' => 'application/pdf', 'size' => (int)$run['size'], 'message' => 'PDF file created by mPDF.', 'tool' => isset($mpdf['path']) ? $mpdf['path'] : '', 'engine' => 'mpdf');
+        }
+        cpms_approval_pdf_cleanup_temp_file($pdfPath);
+        return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => isset($run['size']) ? (int)$run['size'] : 0, 'message' => isset($run['message']) ? $run['message'] : 'mPDF PDF generation failed.');
+    }
+
+    $tool = cpms_approval_pdf_find_wkhtmltopdf();
+    if (empty($tool['ok'])) {
+        cpms_approval_pdf_cleanup_temp_file($pdfPath);
+        return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => 'mPDF unavailable: ' . (isset($mpdf['message']) ? $mpdf['message'] : '') . ' / wkhtmltopdf unavailable: ' . (isset($tool['message']) ? $tool['message'] : ''));
+    }
+    $htmlPath = cpms_approval_pdf_temp_path($pdfName, 'html');
+    if ($htmlPath === '') {
+        cpms_approval_pdf_cleanup_temp_file($pdfPath);
+        return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => 'Approval PDF source HTML temp path could not be prepared.');
+    }
     if (@file_put_contents($htmlPath, (string)$html, LOCK_EX) === false) {
+        cpms_approval_pdf_cleanup_temp_file($pdfPath);
         return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => 'Approval PDF source HTML could not be written.');
     }
 
@@ -362,7 +517,7 @@ function cpms_approval_pdf_create_from_html($html, $pdfName, $context) {
         cpms_approval_pdf_cleanup_temp_file($pdfPath);
         return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => isset($run['message']) ? $run['message'] : 'PDF generation failed.');
     }
-    return array('ok' => true, 'path' => $pdfPath, 'name' => $pdfName, 'mime_type' => 'application/pdf', 'size' => (int)$run['size'], 'message' => 'PDF file created.', 'tool' => $tool['path']);
+    return array('ok' => true, 'path' => $pdfPath, 'name' => $pdfName, 'mime_type' => 'application/pdf', 'size' => (int)$run['size'], 'message' => 'PDF file created by wkhtmltopdf.', 'tool' => $tool['path'], 'engine' => 'wkhtmltopdf');
 }}
 
 if (!function_exists('cpms_approval_pdf_completed_date')) {
@@ -639,9 +794,17 @@ if (!function_exists('cpms_approval_pdf_run_admin_check')) {
 function cpms_approval_pdf_run_admin_check($userContext) {
     $result = array(
         'ok' => false,
+        'mpdf_file' => array('ok' => false, 'message' => '', 'path' => ''),
+        'mpdf_load' => array('ok' => false, 'message' => ''),
+        'mbstring' => array('ok' => false, 'message' => ''),
+        'gd' => array('ok' => false, 'message' => ''),
+        'mpdf_temp' => array('ok' => false, 'message' => '', 'path' => ''),
+        'wkhtmltopdf' => array('ok' => false, 'message' => '', 'path' => ''),
         'tool' => array('ok' => false, 'message' => '', 'path' => ''),
         'temp_path' => array('ok' => false, 'message' => '', 'path' => ''),
         'create' => array('ok' => false, 'message' => ''),
+        'validate_size' => array('ok' => false, 'message' => ''),
+        'validate_header' => array('ok' => false, 'message' => ''),
         'approval_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'upload' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'delete' => array('ok' => false, 'http_code' => 0, 'message' => ''),
@@ -649,12 +812,40 @@ function cpms_approval_pdf_run_admin_check($userContext) {
         'test_file' => array()
     );
 
-    $tool = cpms_approval_pdf_is_available();
-    $result['tool'] = array(
-        'ok' => !empty($tool['ok']),
-        'message' => isset($tool['message']) ? $tool['message'] : '',
-        'path' => isset($tool['path']) ? $tool['path'] : ''
+    $mpdfPath = cpms_approval_pdf_mpdf_path();
+    $result['mpdf_file'] = array(
+        'ok' => is_file($mpdfPath),
+        'message' => is_file($mpdfPath) ? 'mPDF core file exists.' : 'mPDF core file is missing.',
+        'path' => $mpdfPath
     );
+    $mpdf = cpms_approval_pdf_mpdf_is_available(array('user' => $userContext, 'section' => 'admin_drive_check_completed_pdf'));
+    $result['mpdf_load'] = array(
+        'ok' => !empty($mpdf['ok']),
+        'message' => isset($mpdf['message']) ? $mpdf['message'] : ''
+    );
+    $result['mbstring'] = array(
+        'ok' => extension_loaded('mbstring'),
+        'message' => extension_loaded('mbstring') ? 'PHP mbstring extension is available.' : 'PHP mbstring extension is not available.'
+    );
+    $result['gd'] = array(
+        'ok' => extension_loaded('gd'),
+        'message' => extension_loaded('gd') ? 'PHP GD extension is available.' : 'PHP GD extension is not available.'
+    );
+    $mpdfTemp = cpms_approval_pdf_ensure_mpdf_temp_dir();
+    $result['mpdf_temp'] = array(
+        'ok' => !empty($mpdfTemp['ok']),
+        'message' => isset($mpdfTemp['message']) ? $mpdfTemp['message'] : '',
+        'path' => isset($mpdfTemp['path']) ? $mpdfTemp['path'] : ''
+    );
+    $wk = cpms_approval_pdf_find_wkhtmltopdf();
+    $result['wkhtmltopdf'] = array(
+        'ok' => !empty($wk['ok']),
+        'message' => isset($wk['message']) ? $wk['message'] : '',
+        'path' => isset($wk['path']) ? $wk['path'] : ''
+    );
+    $tool = !empty($mpdf['ok']) ? $mpdf : $wk;
+    $toolMessage = !empty($mpdf['ok']) ? 'mPDF will be used first.' : ('mPDF unavailable. ' . (isset($wk['message']) ? $wk['message'] : ''));
+    $result['tool'] = array('ok' => !empty($tool['ok']), 'message' => $toolMessage, 'path' => isset($tool['path']) ? $tool['path'] : '');
     $temp = cpms_approval_pdf_ensure_temp_dir();
     $result['temp_path'] = array(
         'ok' => !empty($temp['ok']),
@@ -678,11 +869,31 @@ function cpms_approval_pdf_run_admin_check($userContext) {
     $pdf = cpms_approval_pdf_create_from_html($html, $testName, $context);
     $result['create'] = array(
         'ok' => !empty($pdf['ok']),
-        'message' => isset($pdf['message']) ? $pdf['message'] : '',
+        'message' => (isset($pdf['message']) ? $pdf['message'] : '') . (isset($pdf['engine']) && trim((string)$pdf['engine']) !== '' ? ' / engine=' . $pdf['engine'] : ''),
         'path' => isset($pdf['path']) ? $pdf['path'] : '',
         'size' => isset($pdf['size']) ? (int)$pdf['size'] : 0
     );
     if (empty($pdf['ok'])) return $result;
+
+    $size = (isset($pdf['path']) && is_file($pdf['path'])) ? (int)@filesize($pdf['path']) : 0;
+    $result['validate_size'] = array(
+        'ok' => $size > 0,
+        'message' => $size > 0 ? ('Generated PDF size is ' . $size . ' bytes.') : 'Generated PDF file is empty.'
+    );
+    $head = '';
+    $fh = @fopen($pdf['path'], 'rb');
+    if ($fh) {
+        $head = @fread($fh, 4);
+        @fclose($fh);
+    }
+    $result['validate_header'] = array(
+        'ok' => ($head === '%PDF'),
+        'message' => ($head === '%PDF') ? 'Generated PDF header is valid.' : 'Generated PDF header is not %PDF.'
+    );
+    if (empty($result['validate_size']['ok']) || empty($result['validate_header']['ok'])) {
+        cpms_approval_pdf_cleanup_temp_file($pdf['path']);
+        return $result;
+    }
 
     $folder = cpms_drive_ensure_approval_folder((int)date('Y'), 'completed', $context);
     $result['approval_folder'] = array(
@@ -707,12 +918,16 @@ function cpms_approval_pdf_run_admin_check($userContext) {
                 'name' => isset($upload['file']['name']) ? (string)$upload['file']['name'] : '',
                 'webViewLink' => isset($upload['file']['webViewLink']) ? (string)$upload['file']['webViewLink'] : ''
             );
-            $delete = cpms_drive_delete_file($result['test_file']['id'], $context);
-            $result['delete'] = array(
-                'ok' => !empty($delete['ok']),
-                'http_code' => isset($delete['http_code']) ? (int)$delete['http_code'] : 0,
-                'message' => isset($delete['message']) ? $delete['message'] : ''
-            );
+            if ($result['test_file']['id'] !== '') {
+                $delete = cpms_drive_delete_file($result['test_file']['id'], $context);
+                $result['delete'] = array(
+                    'ok' => !empty($delete['ok']),
+                    'http_code' => isset($delete['http_code']) ? (int)$delete['http_code'] : 0,
+                    'message' => (isset($delete['message']) ? $delete['message'] : '') . ' / file_id=' . $result['test_file']['id']
+                );
+            } else {
+                $result['delete'] = array('ok' => false, 'http_code' => 0, 'message' => 'Upload response did not include a Drive file ID.');
+            }
         }
     }
 
@@ -721,6 +936,6 @@ function cpms_approval_pdf_run_admin_check($userContext) {
         'ok' => $cleanup ? true : false,
         'message' => $cleanup ? 'Temporary PDF file deleted.' : 'Temporary PDF file could not be deleted.'
     );
-    $result['ok'] = (!empty($result['tool']['ok']) && !empty($result['temp_path']['ok']) && !empty($result['create']['ok']) && !empty($result['approval_folder']['ok']) && !empty($result['upload']['ok']) && !empty($result['delete']['ok']) && !empty($result['cleanup']['ok']));
+    $result['ok'] = (!empty($result['mpdf_file']['ok']) && !empty($result['mpdf_load']['ok']) && !empty($result['mpdf_temp']['ok']) && !empty($result['temp_path']['ok']) && !empty($result['create']['ok']) && !empty($result['validate_size']['ok']) && !empty($result['validate_header']['ok']) && !empty($result['approval_folder']['ok']) && !empty($result['upload']['ok']) && !empty($result['delete']['ok']) && !empty($result['cleanup']['ok']));
     return $result;
 }}

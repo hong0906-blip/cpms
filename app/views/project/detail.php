@@ -3,6 +3,7 @@ use App\Core\Auth;
 use App\Core\Db;
 
 require_once __DIR__ . '/contract_change_helper.php';
+require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
 
 if (!function_exists('cpms_format_qty0')) {
 function cpms_format_qty0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format(round((float)$v), 0); }
@@ -235,7 +236,8 @@ if (is_file($contractMetaFile)) {
     $tmp = @json_decode($json, true);
     if (is_array($tmp) && isset($tmp['stored_name'])) {
         $stored = basename((string)$tmp['stored_name']);
-        if (is_file($contractDir . '/' . $stored)) {
+        $isDriveContract = (isset($tmp['storage_type']) && (string)$tmp['storage_type'] === 'google_drive' && isset($tmp['drive_file_id']) && trim((string)$tmp['drive_file_id']) !== '');
+        if (is_file($contractDir . '/' . $stored) || $isDriveContract) {
             $hasContract = true;
             $contractMeta = $tmp;
         }
@@ -375,10 +377,24 @@ if (is_file($contractMetaFile)) {
                 <div class="text-xs text-gray-500 mt-1">PDF/HWP/DOC/JPG 파일은 보관만 됩니다.</div>
             </div>
             <?php if ($hasContract): ?>
-            <a href="<?php echo h(base_url()); ?>/?r=project/contract_download&id=<?php echo (int)$projectId; ?>"
-               class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow hover:shadow-lg transition">
-                다운로드
-            </a>
+                <?php $contractIsDrive = (isset($contractMeta['storage_type']) && (string)$contractMeta['storage_type'] === 'google_drive'); ?>
+                <div class="flex flex-wrap items-center gap-2">
+                    <?php if ($contractIsDrive && isset($contractMeta['drive_web_view_link']) && trim((string)$contractMeta['drive_web_view_link']) !== ''): ?>
+                        <a href="<?php echo h(base_url()); ?>/?r=project/contract_download&id=<?php echo (int)$projectId; ?>&view=1"
+                           class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow hover:shadow-lg transition" target="_blank" rel="noopener">
+                            보기
+                        </a>
+                    <?php endif; ?>
+                    <?php if (!$contractIsDrive || (isset($contractMeta['drive_web_content_link']) && trim((string)$contractMeta['drive_web_content_link']) !== '')): ?>
+                        <a href="<?php echo h(base_url()); ?>/?r=project/contract_download&id=<?php echo (int)$projectId; ?><?php echo $contractIsDrive ? '&download=1' : ''; ?>"
+                           class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow hover:shadow-lg transition">
+                            다운로드
+                        </a>
+                    <?php endif; ?>
+                    <?php if ($contractIsDrive && (!isset($contractMeta['drive_web_view_link']) || trim((string)$contractMeta['drive_web_view_link']) === '') && (!isset($contractMeta['drive_web_content_link']) || trim((string)$contractMeta['drive_web_content_link']) === '')): ?>
+                        <span class="text-xs text-amber-700 font-bold">파일 확인 필요</span>
+                    <?php endif; ?>
+                </div>
             <?php endif; ?>
         </div>
         <div class="p-6">
@@ -477,7 +493,10 @@ if (is_file($contractMetaFile)) {
                                         <span class="px-2 py-1 rounded-xl bg-gray-50 text-gray-600 border border-gray-100 text-xs font-bold">보존</span>
                                     <?php endif; ?>
                                 </td>
-                                <td class="px-3 py-2 text-gray-700"><?php echo h(isset($versionRow['original_name']) ? $versionRow['original_name'] : ''); ?></td>
+                                <td class="px-3 py-2 text-gray-700">
+                                    <div><?php echo h(isset($versionRow['original_name']) ? $versionRow['original_name'] : ''); ?></div>
+                                    <div class="mt-1 text-xs"><?php echo cpms_public_affairs_drive_actions_html('contract_version', isset($versionRow['id']) ? (int)$versionRow['id'] : 0, $versionRow); ?></div>
+                                </td>
                                 <td class="px-3 py-2 text-gray-600"><?php echo h(isset($versionRow['applied_at']) ? $versionRow['applied_at'] : ''); ?></td>
                             </tr>
                         <?php endforeach; ?>
@@ -521,6 +540,10 @@ if (is_file($contractMetaFile)) {
                                 <span class="px-2 py-1 rounded-xl bg-amber-50 text-amber-800 border border-amber-100 text-xs font-extrabold"><?php echo h(isset($additionalRow['status']) ? $additionalRow['status'] : ''); ?></span>
                             </div>
                             <div class="mt-1 text-xs text-gray-500"><?php echo h(isset($additionalRow['occurred_on']) ? $additionalRow['occurred_on'] : ''); ?> <?php echo h(isset($additionalRow['request_ref']) ? $additionalRow['request_ref'] : ''); ?></div>
+                            <?php $additionalFileActions = cpms_public_affairs_drive_actions_html('additional_work', isset($additionalRow['id']) ? (int)$additionalRow['id'] : 0, $additionalRow); ?>
+                            <?php if ($additionalFileActions !== ''): ?>
+                                <div class="mt-2 text-xs"><?php echo $additionalFileActions; ?></div>
+                            <?php endif; ?>
                         </div>
                     <?php endforeach; ?>
                 </div>
@@ -583,8 +606,9 @@ if (is_file($contractMetaFile)) {
                                 <input form="<?php echo h($progressFormId); ?>" name="recognized_amount" required class="w-36 px-2 py-1 rounded-lg border border-gray-200 text-right" value="<?php echo h(cpms_format_amount0($progressDisplayAmount)); ?>">
                             </td>
                             <td class="px-3 py-2">
-                                <?php if (isset($progressRow['attachment_stored_path']) && trim((string)$progressRow['attachment_stored_path']) !== ''): ?>
-                                    <a class="text-blue-700 font-bold" href="<?php echo h(base_url()); ?>/?r=project/progress_download&id=<?php echo (int)$progressRow['id']; ?>">다운로드</a>
+                                <?php $progressFileActions = cpms_public_affairs_drive_actions_html('progress', isset($progressRow['id']) ? (int)$progressRow['id'] : 0, $progressRow); ?>
+                                <?php if ($progressFileActions !== ''): ?>
+                                    <?php echo $progressFileActions; ?>
                                 <?php endif; ?>
                                 <input form="<?php echo h($progressFormId); ?>" type="file" name="attachment_file" accept=".pdf,.hwp,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" class="mt-1 block w-40 text-xs">
                             </td>

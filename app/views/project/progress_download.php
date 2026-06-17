@@ -83,6 +83,22 @@ if (!cpms_progress_download_allowed($pdo, $projectId)) {
     exit;
 }
 
+$storageType = isset($row['storage_type']) ? trim((string)$row['storage_type']) : '';
+if ($storageType === 'google_drive') {
+    $viewLink = isset($row['drive_web_view_link']) ? trim((string)$row['drive_web_view_link']) : '';
+    $downloadLink = isset($row['drive_web_content_link']) ? trim((string)$row['drive_web_content_link']) : '';
+    $wantDownload = isset($_GET['download']) && (string)$_GET['download'] === '1';
+    $targetLink = ($wantDownload && $downloadLink !== '') ? $downloadLink : $viewLink;
+    if ($targetLink === '' && $downloadLink !== '') $targetLink = $downloadLink;
+    if ($targetLink !== '') {
+        header('Location: ' . $targetLink);
+        exit;
+    }
+    http_response_code(404);
+    echo 'File check required';
+    exit;
+}
+
 $path = cpms_progress_download_resolve(isset($row['attachment_stored_path']) ? $row['attachment_stored_path'] : '');
 if ($path === '' || !is_file($path)) { http_response_code(404); echo 'Not Found'; exit; }
 
@@ -110,4 +126,3 @@ header('X-Content-Type-Options: nosniff');
 header("Content-Disposition: attachment; filename=\"" . $encoded . "\"; filename*=UTF-8''" . $encoded);
 @readfile($path);
 exit;
-

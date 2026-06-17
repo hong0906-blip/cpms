@@ -99,6 +99,22 @@ $metaJson = @file_get_contents($metaFile);
 $meta = @json_decode($metaJson, true);
 if (!is_array($meta) || !isset($meta['stored_name'])) { http_response_code(404); echo 'No Contract'; exit; }
 
+$storageType = isset($meta['storage_type']) ? trim((string)$meta['storage_type']) : '';
+if ($storageType === 'google_drive') {
+    $viewLink = isset($meta['drive_web_view_link']) ? trim((string)$meta['drive_web_view_link']) : '';
+    $downloadLink = isset($meta['drive_web_content_link']) ? trim((string)$meta['drive_web_content_link']) : '';
+    $wantDownload = isset($_GET['download']) && (string)$_GET['download'] === '1';
+    $targetLink = ($wantDownload && $downloadLink !== '') ? $downloadLink : $viewLink;
+    if ($targetLink === '' && $downloadLink !== '') $targetLink = $downloadLink;
+    if ($targetLink !== '') {
+        header('Location: ' . $targetLink);
+        exit;
+    }
+    http_response_code(404);
+    echo 'File check required';
+    exit;
+}
+
 $stored = basename((string)$meta['stored_name']);
 $path = $dir . '/' . $stored;
 if (!is_file($path)) { http_response_code(404); echo 'No Contract'; exit; }

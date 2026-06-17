@@ -144,9 +144,15 @@ for ($r = $dataStart; $r < count($rows); $r++) {
 }
 if (count($parsed) === 0) { flash_set('error', '가져올 데이터가 없습니다.'); header('Location: ?r=project/detail&id=' . $projectId); exit; }
 
+$tmpDir = cpms_storage_root() . '/tmp/public_affairs_unit_price_import/' . (int)$projectId;
+if (!cpms_ensure_dir($tmpDir)) { flash_set('error', '내역서 임시 저장 폴더를 만들 수 없습니다.'); header('Location: ?r=project/detail&id=' . $projectId); exit; }
+$storedName = 'unit_price_import_' . date('Ymd_His') . '_' . substr(md5(uniqid('', true)), 0, 8) . '.xlsx';
+$storedPath = rtrim($tmpDir, '/\\') . '/' . $storedName;
+if (!@move_uploaded_file($tmp, $storedPath)) { flash_set('error', '내역서 임시 저장에 실패했습니다.'); header('Location: ?r=project/detail&id=' . $projectId); exit; }
+
 $importToken = bin2hex(openssl_random_pseudo_bytes(16));
 if (!isset($_SESSION['unit_price_import']) || !is_array($_SESSION['unit_price_import'])) $_SESSION['unit_price_import'] = array();
-$_SESSION['unit_price_import'][$importToken] = array('project_id' => $projectId, 'file_name' => $name, 'created_at' => time(), 'rows' => $parsed);
+$_SESSION['unit_price_import'][$importToken] = array('project_id' => $projectId, 'file_name' => $name, 'stored_name' => $storedName, 'stored_path' => $storedPath, 'created_at' => time(), 'rows' => $parsed);
 
 function hh($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 function cpms_format_qty0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return hh((string)$v); return number_format(round((float)$v), 0); }

@@ -5,6 +5,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -98,6 +99,7 @@ function cpms_progress_ensure_schema($pdo) {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             UNIQUE KEY uniq_project_ym (project_id, ym)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        cpms_public_affairs_drive_ensure_table_columns($pdo, 'cpms_progress_billings');
         return true;
     } catch (Exception $e) {
         return false;
@@ -236,6 +238,7 @@ try {
     cpms_progress_ensure_schema($pdo);
     $fileInfo = cpms_progress_store_file($projectId, $progressDate);
     $now = date('Y-m-d H:i:s');
+    $savedProgressId = 0;
     $pdo->beginTransaction();
 
     if ($action === 'delete') {
@@ -272,6 +275,7 @@ try {
             $st->bindValue(':attachment_stored_path', $fileInfo['path']);
         }
         $st->execute();
+        $savedProgressId = (int)$progressId;
     } else {
         $st = $pdo->prepare("INSERT INTO cpms_progress_billings
             (project_id, round_label, progress_date, requested_amount, recognized_amount, attachment_original_name, attachment_stored_name, attachment_stored_path, remark, created_by, created_at, updated_at)
@@ -292,11 +296,21 @@ try {
         $st->bindValue(':created_at', $now);
         $st->bindValue(':updated_at', $now);
         $st->execute();
+        $savedProgressId = (int)$pdo->lastInsertId();
     }
 
     cpms_progress_refresh_monthly_recognized($pdo, $projectId);
     $pdo->commit();
-    flash_set('success', '기성관리가 반영되었습니다.');
+    $driveUpload = null;
+    if ($action !== 'delete' && $savedProgressId > 0 && isset($fileInfo['path']) && trim((string)$fileInfo['path']) !== '') {
+        $driveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $fileInfo['path'], $fileInfo['original'], 'progress_attachment', $progressDate, $progressDate, array('date' => $progressDate), Auth::user());
+        $driveRecord = (is_array($driveUpload) && isset($driveUpload['record']) && is_array($driveUpload['record'])) ? $driveUpload['record'] : array();
+        cpms_public_affairs_drive_apply_record_to_row($pdo, 'cpms_progress_billings', $savedProgressId, $driveRecord, cpms_progress_current_user_id(), array(
+            'section' => 'public_affairs',
+            'project_id' => $projectId
+        ));
+    }
+    flash_set('success', cpms_public_affairs_drive_flash_message('기성관리가 반영되었습니다.', $driveUpload));
 } catch (Exception $e) {
     if ($pdo && $pdo->inTransaction()) $pdo->rollBack();
     flash_set('error', '기성관리 처리 실패: ' . $e->getMessage());

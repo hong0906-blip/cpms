@@ -6,6 +6,7 @@ use App\Core\Db;
 
 require_once __DIR__ . '/unit_price_parser.php';
 require_once __DIR__ . '/contract_change_helper.php';
+require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
 
 if (!function_exists('cpms_contract_upload_redirect')) {
 function cpms_contract_upload_redirect($projectId, $type, $message) {
@@ -46,41 +47,31 @@ function cpms_contract_upload_row_key($row) {
 }
 }
 
+if (!function_exists('cpms_contract_upload_file_type')) {
+function cpms_contract_upload_file_type($uploadMode) {
+    if ($uploadMode === 'unit_price_update') return 'unit_price_update';
+    if ($uploadMode === 'unit_price_original') return 'unit_price_original';
+    return 'contract_only';
+}
+}
+
 if (!function_exists('cpms_contract_upload_store_history')) {
-function cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $originalName, $storedName, $storedPath, $summary) {
-    if (!cpms_contract_upload_column_exists($pdo, 'cpms_project_contract_change_files', 'project_id')) return;
-
-    $columns = array();
-    $holders = array();
-    $values = array();
-
-    $map = array(
-        'project_id' => (int)$projectId,
-        'original_name' => (string)$originalName,
-        'stored_name' => (string)$storedName,
-        'stored_path' => (string)$storedPath,
-        'file_type' => ($uploadMode === 'unit_price_update' ? 'unit_price_update' : ($uploadMode === 'unit_price_original' ? 'unit_price_original' : 'contract_only')),
-        'uploaded_by' => cpms_contract_upload_current_user_id(),
-        'uploaded_at' => date('Y-m-d H:i:s'),
-        'applied_token' => '',
-        'change_summary' => json_encode($summary, JSON_UNESCAPED_UNICODE)
-    );
-
-    foreach ($map as $column => $value) {
-        if (!cpms_contract_upload_column_exists($pdo, 'cpms_project_contract_change_files', $column)) continue;
-        array_push($columns, '`' . $column . '`');
-        array_push($holders, ':' . $column);
-        $values[':' . $column] = $value;
+function cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $originalName, $storedName, $storedPath, $summary, $driveRecord = null) {
+    $fileType = cpms_contract_upload_file_type($uploadMode);
+    if (!is_array($driveRecord)) {
+        $driveRecord = array(
+            'storage_type' => 'local',
+            'document_type' => $fileType,
+            'section' => 'public_affairs',
+            'upload_status' => 'local',
+            'drive_upload_error' => '',
+            'local_backup_path' => (string)$storedPath
+        );
     }
-
-    if (count($columns) === 0) return;
-
-    try {
-        $sql = "INSERT INTO cpms_project_contract_change_files (" . implode(',', $columns) . ") VALUES (" . implode(',', $holders) . ")";
-        $st = $pdo->prepare($sql);
-        $st->execute($values);
-    } catch (Exception $e) {
+    if (function_exists('cpms_public_affairs_drive_insert_history_record')) {
+        return cpms_public_affairs_drive_insert_history_record($pdo, $projectId, $fileType, $originalName, $storedName, $storedPath, $summary, $driveRecord, cpms_contract_upload_current_user_id());
     }
+    return array('ok' => false, 'id' => 0, 'message' => 'Public affairs Drive service is not available.');
 }
 }
 
@@ -502,12 +493,34 @@ if ($uploadMode === 'unit_price_update' && $previewToken !== '') {
             $stVersionRows->execute();
         }
         $pdo->commit();
-        cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $originalName, $storedName, $storedPath, $summary);
+        $driveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $storedPath, $originalName, 'unit_price_update', date('Y-m'), date('Y-m-d'), array('date' => date('Y-m-d')), Auth::user());
+        $driveRecord = (is_array($driveUpload) && isset($driveUpload['record']) && is_array($driveUpload['record'])) ? $driveUpload['record'] : array();
+        $historySave = cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $originalName, $storedName, $storedPath, $summary, $driveRecord);
+        if (!empty($driveUpload['ok']) && empty($historySave['ok']) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+            cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+                'section' => 'public_affairs',
+                'project_id' => $projectId,
+                'document_type' => isset($driveRecord['document_type']) ? $driveRecord['document_type'] : 'unit_price_update',
+                'original_name' => $originalName,
+                'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
+                'message' => isset($historySave['message']) ? $historySave['message'] : 'Contract history save failed after Drive upload.'
+            ));
+            $driveUpload['ok'] = false;
+            $driveUpload['message'] = isset($historySave['message']) ? $historySave['message'] : 'Contract history save failed after Drive upload.';
+        }
+        if (!empty($driveUpload['ok']) && !empty($historySave['ok']) && $versionId > 0) {
+            cpms_public_affairs_drive_apply_record_to_row($pdo, 'cpms_contract_versions', $versionId, $driveRecord, cpms_contract_upload_current_user_id(), array(
+                'section' => 'public_affairs',
+                'project_id' => $projectId,
+                'skip_delete_on_failure' => true
+            ));
+        }
+        $successMessage = $versionTitle . ' 변경계약 내역서가 적용되었습니다. 변경 ' . (int)$summary['updated'] . '건 / 신규 ' . (int)$summary['inserted'] . '건 / 제외 ' . (int)$summary['deactivated'] . '건';
         unset($_SESSION['unit_price_update'][$previewToken]);
         cpms_contract_upload_redirect(
             $projectId,
             'success',
-            $versionTitle . ' 내역서가 적용되었습니다. 변경 ' . (int)$summary['updated'] . '건 / 신규 ' . (int)$summary['inserted'] . '건 / 제외 ' . (int)$summary['deactivated'] . '건'
+            cpms_public_affairs_drive_flash_message($successMessage, $driveUpload)
         );
     } catch (Exception $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
@@ -587,7 +600,6 @@ if ($uploadMode === 'contract_only') {
         if (is_array($oldMeta) && isset($oldMeta['stored_name'])) {
             $oldStored = basename((string)$oldMeta['stored_name']);
             $oldPath = $baseDir . '/' . $oldStored;
-            if (is_file($oldPath)) @unlink($oldPath);
         }
         @unlink($metaFile);
     }
@@ -597,6 +609,9 @@ if ($uploadMode === 'contract_only') {
         @rename($targetDir . '/' . $storedName, $storedPath);
     }
 
+    $driveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $storedPath, $originalName, 'contract_only', date('Y-m'), date('Y-m-d'), array('date' => date('Y-m-d')), Auth::user());
+    $driveRecord = (is_array($driveUpload) && isset($driveUpload['record']) && is_array($driveUpload['record'])) ? $driveUpload['record'] : array();
+
     $meta = array(
         'project_id' => $projectId,
         'original_name' => $originalName,
@@ -604,9 +619,27 @@ if ($uploadMode === 'contract_only') {
         'uploaded_at' => date('Y-m-d H:i:s'),
         'uploaded_by' => Auth::userEmail()
     );
-    @file_put_contents($metaFile, json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-    cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $originalName, $storedName, $storedPath, array('message' => 'stored'));
-    cpms_contract_upload_redirect($projectId, 'success', '계약서 파일이 업로드되었습니다.');
+    if (is_array($driveRecord)) {
+        foreach (array('storage_type', 'drive_file_id', 'drive_folder_id', 'drive_web_view_link', 'drive_web_content_link', 'drive_name', 'mime_type', 'file_size', 'document_type', 'document_year', 'document_month', 'drive_year_folder_id', 'drive_month_folder_id', 'upload_status', 'drive_upload_error') as $metaKey) {
+            if ($metaKey === 'drive_name' && isset($driveRecord['stored_name'])) $meta[$metaKey] = $driveRecord['stored_name'];
+            else if ($metaKey === 'file_size' && isset($driveRecord['size'])) $meta[$metaKey] = $driveRecord['size'];
+            else if (isset($driveRecord[$metaKey])) $meta[$metaKey] = $driveRecord[$metaKey];
+        }
+    }
+    $metaSaved = (@file_put_contents($metaFile, json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)) !== false);
+    if (!$metaSaved && !empty($driveUpload['ok']) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+        cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+            'section' => 'public_affairs',
+            'project_id' => $projectId,
+            'document_type' => isset($driveRecord['document_type']) ? $driveRecord['document_type'] : 'contract',
+            'original_name' => $originalName,
+            'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
+            'message' => 'Contract meta.json save failed after Drive upload.'
+        ));
+        $driveUpload['ok'] = false;
+    }
+    cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $originalName, $storedName, $storedPath, array('message' => 'stored'), $driveRecord);
+    cpms_contract_upload_redirect($projectId, 'success', cpms_public_affairs_drive_flash_message('계약서 파일이 업로드되었습니다.', $driveUpload));
 }
 
 try {
@@ -661,12 +694,34 @@ try {
     }
     $pdo->commit();
 
-    cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $originalName, $storedName, $storedPath, $summary);
+    $driveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $storedPath, $originalName, 'unit_price_original', date('Y-m'), date('Y-m-d'), array('date' => date('Y-m-d')), Auth::user());
+    $driveRecord = (is_array($driveUpload) && isset($driveUpload['record']) && is_array($driveUpload['record'])) ? $driveUpload['record'] : array();
+    $historySave = cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $originalName, $storedName, $storedPath, $summary, $driveRecord);
+    if (!empty($driveUpload['ok']) && empty($historySave['ok']) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+        cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+            'section' => 'public_affairs',
+            'project_id' => $projectId,
+            'document_type' => isset($driveRecord['document_type']) ? $driveRecord['document_type'] : 'unit_price_original',
+            'original_name' => $originalName,
+            'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
+            'message' => isset($historySave['message']) ? $historySave['message'] : 'Contract history save failed after Drive upload.'
+        ));
+        $driveUpload['ok'] = false;
+        $driveUpload['message'] = isset($historySave['message']) ? $historySave['message'] : 'Contract history save failed after Drive upload.';
+    }
+    if (!empty($driveUpload['ok']) && !empty($historySave['ok']) && $versionId > 0) {
+        cpms_public_affairs_drive_apply_record_to_row($pdo, 'cpms_contract_versions', $versionId, $driveRecord, cpms_contract_upload_current_user_id(), array(
+            'section' => 'public_affairs',
+            'project_id' => $projectId,
+            'skip_delete_on_failure' => true
+        ));
+    }
+    $successMessage = '당초 내역서가 현재 적용 내역서로 저장되었습니다. 신규 ' . (int)$summary['inserted'] . '건';
 
     cpms_contract_upload_redirect(
         $projectId,
         'success',
-        '당초 내역서가 현재 적용 내역서로 저장되었습니다. 신규 ' . (int)$summary['inserted'] . '건'
+        cpms_public_affairs_drive_flash_message($successMessage, $driveUpload)
     );
 } catch (Exception $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
