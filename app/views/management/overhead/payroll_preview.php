@@ -10,6 +10,7 @@ $previewOriginalName = isset($payrollPreview['uploaded_original_name']) ? (strin
 $existingPreviewVersion = ($previewYear !== '' && $previewMonth !== '') ? cpms_company_payroll_load_version($previewYear, $previewMonth) : null;
 ?>
 <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+  <form id="payrollPreviewConfirmForm" method="post" action="?r=management/payroll_upload_confirm" onsubmit="return confirm('선택한 직원만 급여 기준월로 확정 저장합니다. 진행하시겠습니까?');">
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div>
       <div class="font-extrabold text-amber-900">업로드 미리보기</div>
@@ -21,17 +22,24 @@ $existingPreviewVersion = ($previewYear !== '' && $previewMonth !== '') ? cpms_c
       <?php if (is_array($existingPreviewVersion)): ?>
         <div class="text-sm text-red-700 font-bold mt-2">이미 같은 적용월 급여 버전이 있습니다. 확정 저장 시 기존 버전은 history 폴더에 백업한 뒤 교체됩니다.</div>
       <?php endif; ?>
+      <div class="text-sm text-amber-800 font-bold mt-2">체크된 직원만 새 급여 기준월에 저장됩니다. 업로드 파일에 없거나 체크 해제한 직원은 이 기준월부터 제외됩니다.</div>
     </div>
-    <form method="post" action="?r=management/payroll_upload_confirm" onsubmit="return confirm('미리보기 급여대장을 확정 저장하시겠습니까?');">
+    <div>
       <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
       <input type="hidden" name="preview_token" value="<?php echo h($previewToken); ?>">
-      <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">확정 저장</button>
-    </form>
+      <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">선택 인원 확정 저장</button>
+    </div>
   </div>
   <div class="mt-4 overflow-x-auto">
     <table class="min-w-[1800px] w-full border-collapse text-xs bg-white">
       <thead>
         <tr class="bg-amber-100 text-amber-950">
+          <th class="p-2 border">
+            <label class="inline-flex items-center gap-1">
+              <input type="checkbox" id="payrollPreviewSelectAll" checked>
+              <span>선택</span>
+            </label>
+          </th>
           <th class="p-2 border">번호</th>
           <th class="p-2 border">재직</th>
           <th class="p-2 border">사원명</th>
@@ -46,10 +54,13 @@ $existingPreviewVersion = ($previewYear !== '' && $previewMonth !== '') ? cpms_c
       </thead>
       <tbody>
         <?php if (count($previewEmployees) === 0): ?>
-          <tr><td colspan="10" class="p-4 border text-center text-gray-500 font-bold">직원 데이터가 없습니다. 사원명 컬럼이 채워진 행만 저장됩니다.</td></tr>
+          <tr><td colspan="11" class="p-4 border text-center text-gray-500 font-bold">직원 데이터가 없습니다. 사원명 컬럼이 채워진 행만 저장됩니다.</td></tr>
         <?php endif; ?>
         <?php foreach ($previewEmployees as $previewEmployee): ?>
           <tr>
+            <td class="p-2 border text-center">
+              <input type="checkbox" class="payroll-preview-employee-check" name="employee_keys[]" value="<?php echo h(isset($previewEmployee['employee_key']) ? $previewEmployee['employee_key'] : ''); ?>" checked>
+            </td>
             <td class="p-2 border text-center"><?php echo h(isset($previewEmployee['no']) ? $previewEmployee['no'] : ''); ?></td>
             <td class="p-2 border text-center"><?php echo h(isset($previewEmployee['status']) ? $previewEmployee['status'] : ''); ?></td>
             <td class="p-2 border font-bold"><?php echo h(isset($previewEmployee['name']) ? $previewEmployee['name'] : ''); ?></td>
@@ -65,4 +76,17 @@ $existingPreviewVersion = ($previewYear !== '' && $previewMonth !== '') ? cpms_c
       </tbody>
     </table>
   </div>
+  </form>
 </div>
+
+<script>
+(function () {
+  var all = document.getElementById('payrollPreviewSelectAll');
+  var checks = document.querySelectorAll('.payroll-preview-employee-check');
+  if (all) {
+    all.onclick = function () {
+      for (var i = 0; i < checks.length; i++) checks[i].checked = all.checked;
+    };
+  }
+})();
+</script>

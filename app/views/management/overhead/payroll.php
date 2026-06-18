@@ -60,6 +60,7 @@ $payrollCanDownloadStatement = cpms_can_download_payroll_statement_pdf($overhead
 $payrollStatementResult = cpms_payroll_statement_load_month($payrollYear, $payrollMonth);
 $payrollStatementItems = cpms_payroll_statement_item_map($payrollStatementResult);
 $payrollStatementDueNotice = cpms_payroll_statement_run_due_notice($payrollYear, $payrollMonth);
+$payrollStatementTemplateMeta = cpms_payroll_statement_template_load_meta();
 
 if (!function_exists('cpms_payroll_view_statement_status')) {
 function cpms_payroll_view_statement_status($item) {
@@ -185,6 +186,40 @@ function cpms_payroll_view_account_text($employee) {
       <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-bold">대표/부사장은 조회 전용이며, 업로드는 마스터와 박지혜 계정만 가능합니다.</div>
     <?php endif; ?>
   </div>
+
+  <?php if ($payrollCanGenerateStatement): ?>
+    <div class="bg-white border border-gray-200 rounded-2xl p-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div class="font-extrabold text-gray-900">급여명세서 PDF 양식 업로드</div>
+          <div class="text-sm text-gray-500 mt-1">업로드한 XLSX 양식의 셀 병합, 열 너비, 행 구조를 읽어 직원별 급여명세서 PDF에 사용합니다.</div>
+          <?php if (is_array($payrollStatementTemplateMeta)): ?>
+            <div class="text-xs text-gray-500 mt-2">
+              현재 양식:
+              <?php echo h(isset($payrollStatementTemplateMeta['uploaded_original_name']) ? (string)$payrollStatementTemplateMeta['uploaded_original_name'] : '-'); ?>
+              /
+              <?php echo h(isset($payrollStatementTemplateMeta['uploaded_at']) ? (string)$payrollStatementTemplateMeta['uploaded_at'] : '-'); ?>
+              /
+              시트 <?php echo h(isset($payrollStatementTemplateMeta['sheet_name']) ? (string)$payrollStatementTemplateMeta['sheet_name'] : '-'); ?>
+            </div>
+          <?php else: ?>
+            <div class="text-xs text-amber-700 font-bold mt-2">아직 업로드된 급여명세서 PDF 양식이 없습니다. 없으면 기본 HTML 양식으로 생성됩니다.</div>
+          <?php endif; ?>
+        </div>
+        <div class="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-bold">마스터/박지혜</div>
+      </div>
+      <form method="post" action="?r=management/payroll_statement_template_upload" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end mt-4">
+        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+        <input type="hidden" name="year" value="<?php echo h((string)$payrollYear); ?>">
+        <input type="hidden" name="month" value="<?php echo h((string)$payrollMonth); ?>">
+        <label class="block text-sm font-bold text-gray-700 md:col-span-4">
+          <span class="block mb-2">급여명세서 양식 XLSX</span>
+          <input type="file" name="statement_template_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="w-full px-3 py-3 rounded-xl border border-gray-300 bg-white">
+        </label>
+        <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold" onclick="return confirm('급여명세서 PDF 양식을 교체합니다. 선택 월의 기존 생성 결과는 history로 보관됩니다. 진행하시겠습니까?');">양식 업로드</button>
+      </form>
+    </div>
+  <?php endif; ?>
 
   <?php if (is_array($payrollPreview)): ?>
     <?php require __DIR__ . '/payroll_preview.php'; ?>
@@ -411,6 +446,13 @@ function cpms_payroll_view_account_text($employee) {
                       <input type="hidden" name="employee_key" value="<?php echo h($employeeKey); ?>">
                       <input type="hidden" name="force" value="1">
                       <button type="submit" class="px-2 py-1 rounded border border-amber-300 text-amber-700 font-bold">재생성</button>
+                    </form>
+                    <form method="post" action="?r=management/payroll_employee_delete" onsubmit="return confirm('선택한 월 기준 급여 버전에서 이 직원을 삭제합니다. 이전 월 기준은 보존됩니다. 진행하시겠습니까?');">
+                      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                      <input type="hidden" name="year" value="<?php echo h((string)$payrollYear); ?>">
+                      <input type="hidden" name="month" value="<?php echo h((string)$payrollMonth); ?>">
+                      <input type="hidden" name="employee_key" value="<?php echo h($employeeKey); ?>">
+                      <button type="submit" class="px-2 py-1 rounded border border-red-300 text-red-700 font-bold">삭제</button>
                     </form>
                   <?php endif; ?>
                 </div>

@@ -727,12 +727,14 @@ if ($route === 'management/overhead_save') { require_once __DIR__ . '/../app/vie
 if ($route === 'management/overhead_delete') { require_once __DIR__ . '/../app/views/management/overhead_delete.php'; exit; }
 if ($route === 'management/payroll_upload_preview') { require_once __DIR__ . '/../app/views/management/payroll_upload_preview.php'; exit; }
 if ($route === 'management/payroll_upload_confirm') { require_once __DIR__ . '/../app/views/management/payroll_upload_confirm.php'; exit; }
+if ($route === 'management/payroll_employee_delete') { require_once __DIR__ . '/../app/views/management/payroll_employee_delete.php'; exit; }
 if ($route === 'management/payroll_resident_reveal') { require_once __DIR__ . '/../app/views/management/payroll_resident_reveal.php'; exit; }
 if ($route === 'management/payroll_bank_account_reveal') { require_once __DIR__ . '/../app/views/management/payroll_bank_account_reveal.php'; exit; }
 if ($route === 'management/payroll_statement') { require_once __DIR__ . '/../app/views/management/payroll_statement.php'; exit; }
 if ($route === 'management/payroll_statement_print') { require_once __DIR__ . '/../app/views/management/payroll_statement_print.php'; exit; }
 if ($route === 'management/payroll_statement_pdf') { require_once __DIR__ . '/../app/views/management/payroll_statement_pdf.php'; exit; }
 if ($route === 'management/payroll_statement_generate') { require_once __DIR__ . '/../app/views/management/payroll_statement_generate.php'; exit; }
+if ($route === 'management/payroll_statement_template_upload') { require_once __DIR__ . '/../app/views/management/payroll_statement_template_upload.php'; exit; }
 if ($route === 'management/payroll_statement_file') { require_once __DIR__ . '/../app/views/management/payroll_statement_file.php'; exit; }
 // db_setup_attendance 라우트
 if ($route === 'db_setup_attendance') {

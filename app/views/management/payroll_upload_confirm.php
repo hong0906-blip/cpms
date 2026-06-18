@@ -33,7 +33,8 @@ $token = isset($_POST['preview_token']) ? trim((string)$_POST['preview_token']) 
 $preview = cpms_company_payroll_get_preview($token);
 $year = is_array($preview) && isset($preview['effective_year']) ? (string)$preview['effective_year'] : date('Y');
 $month = is_array($preview) && isset($preview['effective_month']) ? (string)$preview['effective_month'] : date('m');
-$result = cpms_company_payroll_confirm_preview($token, $user);
+$selectedEmployeeKeys = isset($_POST['employee_keys']) && is_array($_POST['employee_keys']) ? $_POST['employee_keys'] : array();
+$result = cpms_company_payroll_confirm_preview($token, $user, $selectedEmployeeKeys);
 
 if (empty($result['ok'])) {
     flash_set('danger', isset($result['message']) ? $result['message'] : '급여대장을 확정 저장하지 못했습니다.');
@@ -42,6 +43,6 @@ if (empty($result['ok'])) {
 }
 
 if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
-flash_set('success', '급여 기준월 버전이 확정 저장되었습니다.');
+flash_set('success', isset($result['message']) ? $result['message'] : '급여 기준월 버전이 확정 저장되었습니다.');
 header('Location: ?r=' . urlencode('관리') . '&tab=company_overhead&oh=payroll&year=' . urlencode($year) . '&month=' . urlencode((string)(int)$month));
 exit;

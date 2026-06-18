@@ -9,7 +9,12 @@ require_once __DIR__ . '/CompanyOverheadDriveService.php';
 
 if (!function_exists('cpms_company_payroll_data_root')) {
 function cpms_company_payroll_data_root() {
-    return dirname(dirname(__DIR__)) . '/data/company_overhead';
+    $root = dirname(dirname(__DIR__));
+    $dataRoot = $root . '/data/company_overhead';
+    $storageRoot = function_exists('cpms_storage_root') ? cpms_storage_root() . '/company_overhead' : $root . '/storage/company_overhead';
+    if (is_dir($dataRoot) && is_writable($dataRoot)) return $dataRoot;
+    if (is_dir($storageRoot) || @mkdir($storageRoot, 0777, true)) return $storageRoot;
+    return $dataRoot;
 }}
 
 if (!function_exists('cpms_company_payroll_versions_root')) {
@@ -594,6 +599,51 @@ function cpms_company_payroll_public_version($version) {
     return $version;
 }}
 
+if (!function_exists('cpms_company_payroll_recalculate_employee_totals')) {
+function cpms_company_payroll_recalculate_employee_totals($data, $employees) {
+    if (!is_array($data)) $data = array();
+    if (!is_array($employees)) $employees = array();
+    $cleanEmployees = array();
+    $totalGross = 0.0;
+    $totalDeduction = 0.0;
+    $totalNet = 0.0;
+    foreach ($employees as $employee) {
+        if (!is_array($employee)) continue;
+        $cleanEmployees[] = $employee;
+        $totalGross += isset($employee['gross_pay']) ? (float)$employee['gross_pay'] : 0.0;
+        $totalDeduction += isset($employee['total_deduction']) ? (float)$employee['total_deduction'] : 0.0;
+        $totalNet += isset($employee['net_pay']) ? (float)$employee['net_pay'] : 0.0;
+    }
+    $data['employees'] = array_values($cleanEmployees);
+    $data['employee_count'] = count($cleanEmployees);
+    $data['total_gross_pay'] = $totalGross;
+    $data['total_deduction'] = $totalDeduction;
+    $data['total_net_pay'] = $totalNet;
+    return $data;
+}}
+
+if (!function_exists('cpms_company_payroll_filter_selected_employees')) {
+function cpms_company_payroll_filter_selected_employees($parsed, $selectedEmployeeKeys) {
+    if (!is_array($parsed)) $parsed = array();
+    $employees = isset($parsed['employees']) && is_array($parsed['employees']) ? $parsed['employees'] : array();
+    if ($selectedEmployeeKeys === null) {
+        return cpms_company_payroll_recalculate_employee_totals($parsed, $employees);
+    }
+    if (!is_array($selectedEmployeeKeys)) $selectedEmployeeKeys = array();
+    $selected = array();
+    foreach ($selectedEmployeeKeys as $selectedKey) {
+        $key = trim((string)$selectedKey);
+        if ($key !== '') $selected[$key] = true;
+    }
+    $filtered = array();
+    foreach ($employees as $employee) {
+        if (!is_array($employee)) continue;
+        $employeeKey = isset($employee['employee_key']) ? (string)$employee['employee_key'] : '';
+        if ($employeeKey !== '' && isset($selected[$employeeKey])) $filtered[] = $employee;
+    }
+    return cpms_company_payroll_recalculate_employee_totals($parsed, $filtered);
+}}
+
 if (!function_exists('cpms_company_payroll_create_preview')) {
 function cpms_company_payroll_create_preview($year, $month, $file, $user) {
     $ym = cpms_company_payroll_normalize_year_month($year, $month);
@@ -683,6 +733,23 @@ function cpms_company_payroll_backup_existing_version($year, $month) {
     return cpms_company_payroll_write_json($backup, $old);
 }}
 
+if (!function_exists('cpms_company_payroll_invalidate_statement_result')) {
+function cpms_company_payroll_invalidate_statement_result($year, $month, $reason) {
+    $ym = cpms_company_payroll_normalize_year_month($year, $month);
+    $root = cpms_company_payroll_data_root() . '/payroll_statements';
+    $file = $root . '/' . $ym['year'] . '/' . $ym['month'] . '.json';
+    if (!is_file($file)) return true;
+    $old = cpms_company_payroll_read_json($file);
+    if (!is_array($old)) return @unlink($file);
+    $dir = $root . '/' . $ym['year'] . '/' . $ym['month'] . '_history';
+    if (!cpms_company_payroll_ensure_dir($dir)) return false;
+    $old['invalidated_at'] = date('Y-m-d H:i:s');
+    $old['invalidated_reason'] = (string)$reason;
+    $backup = rtrim($dir, '/\\') . '/' . date('Ymd_His') . '_invalidated_payroll_statements.json';
+    if (!cpms_company_payroll_write_json($backup, $old)) return false;
+    return @unlink($file);
+}}
+
 if (!function_exists('cpms_company_payroll_build_drive_name')) {
 function cpms_company_payroll_build_drive_name($year, $month, $originalName, $user) {
     $ym = cpms_company_payroll_normalize_year_month($year, $month);
@@ -691,12 +758,16 @@ function cpms_company_payroll_build_drive_name($year, $month, $originalName, $us
 }}
 
 if (!function_exists('cpms_company_payroll_confirm_preview')) {
-function cpms_company_payroll_confirm_preview($token, $user) {
+function cpms_company_payroll_confirm_preview($token, $user, $selectedEmployeeKeys = null) {
     $preview = cpms_company_payroll_get_preview($token);
     if (!is_array($preview)) return array('ok' => false, 'message' => '확정할 미리보기 데이터를 찾지 못했습니다.');
     $year = isset($preview['effective_year']) ? (string)$preview['effective_year'] : date('Y');
     $month = isset($preview['effective_month']) ? (string)$preview['effective_month'] : date('m');
     $parsed = isset($preview['parsed']) && is_array($preview['parsed']) ? $preview['parsed'] : array();
+    $parsed = cpms_company_payroll_filter_selected_employees($parsed, $selectedEmployeeKeys);
+    if (!isset($parsed['employees']) || !is_array($parsed['employees']) || count($parsed['employees']) === 0) {
+        return array('ok' => false, 'message' => '확정 저장할 직원을 1명 이상 선택해주세요.');
+    }
     $tempPath = isset($preview['temp_path']) ? (string)$preview['temp_path'] : '';
     $originalName = isset($preview['uploaded_original_name']) ? (string)$preview['uploaded_original_name'] : 'payroll.xlsx';
     if ($tempPath === '' || !is_file($tempPath)) return array('ok' => false, 'message' => '원본 급여대장 임시 파일을 찾지 못했습니다.');
@@ -710,25 +781,31 @@ function cpms_company_payroll_confirm_preview($token, $user) {
         'document_month' => $month,
         'original_name' => $originalName,
     );
+    $driveRecord = array();
+    $driveStatus = 'failed';
+    $driveError = '';
     $target = cpms_company_overhead_drive_ensure_month_subfolder('payroll', '임직원월급', $year, $month, '원본급여대장', $context);
     if (empty($target['ok'])) {
-        return array('ok' => false, 'message' => isset($target['message']) ? $target['message'] : 'Drive 폴더를 준비하지 못했습니다.');
+        $driveError = isset($target['message']) ? (string)$target['message'] : 'Drive 폴더를 준비하지 못했습니다.';
+    } else {
+        $mimeType = cpms_drive_detect_mime_type($tempPath);
+        $driveName = cpms_company_payroll_build_drive_name($year, $month, $originalName, $user);
+        $context['target_folder_id'] = (string)$target['folder_id'];
+        $context['drive_year_folder_id'] = (string)$target['year_folder_id'];
+        $context['drive_type_folder_id'] = (string)$target['category_folder_id'];
+        $context['drive_month_folder_id'] = (string)$target['month_folder_id'];
+        $context['drive_payroll_original_folder_id'] = isset($target['sub_folder_id']) ? (string)$target['sub_folder_id'] : (string)$target['folder_id'];
+        $upload = cpms_drive_upload_file($tempPath, $driveName, (string)$target['folder_id'], $mimeType, $context);
+        if (empty($upload['ok']) || !isset($upload['file']) || !is_array($upload['file'])) {
+            $driveError = isset($upload['message']) ? (string)$upload['message'] : 'Drive 업로드에 실패했습니다.';
+        } else {
+            $driveStatus = 'success';
+            $driveRecord = cpms_drive_build_file_record($upload['file'], $context);
+            $driveRecord['drive_year_folder_id'] = (string)$target['year_folder_id'];
+            $driveRecord['drive_type_folder_id'] = (string)$target['category_folder_id'];
+            $driveRecord['drive_month_folder_id'] = (string)$target['month_folder_id'];
+        }
     }
-    $mimeType = cpms_drive_detect_mime_type($tempPath);
-    $driveName = cpms_company_payroll_build_drive_name($year, $month, $originalName, $user);
-    $context['target_folder_id'] = (string)$target['folder_id'];
-    $context['drive_year_folder_id'] = (string)$target['year_folder_id'];
-    $context['drive_type_folder_id'] = (string)$target['category_folder_id'];
-    $context['drive_month_folder_id'] = (string)$target['month_folder_id'];
-    $context['drive_payroll_original_folder_id'] = isset($target['sub_folder_id']) ? (string)$target['sub_folder_id'] : (string)$target['folder_id'];
-    $upload = cpms_drive_upload_file($tempPath, $driveName, (string)$target['folder_id'], $mimeType, $context);
-    if (empty($upload['ok']) || !isset($upload['file']) || !is_array($upload['file'])) {
-        return array('ok' => false, 'message' => isset($upload['message']) ? $upload['message'] : 'Drive 업로드에 실패했습니다.');
-    }
-    $driveRecord = cpms_drive_build_file_record($upload['file'], $context);
-    $driveRecord['drive_year_folder_id'] = (string)$target['year_folder_id'];
-    $driveRecord['drive_type_folder_id'] = (string)$target['category_folder_id'];
-    $driveRecord['drive_month_folder_id'] = (string)$target['month_folder_id'];
 
     $versionId = 'payroll_' . $year . '_' . $month . '_' . substr(md5($token . microtime(true)), 0, 10);
     $version = array(
@@ -741,6 +818,8 @@ function cpms_company_payroll_confirm_preview($token, $user) {
         'uploaded_drive_web_view_link' => isset($driveRecord['drive_web_view_link']) ? $driveRecord['drive_web_view_link'] : '',
         'uploaded_drive_web_content_link' => isset($driveRecord['drive_web_content_link']) ? $driveRecord['drive_web_content_link'] : '',
         'uploaded_stored_name' => isset($driveRecord['stored_name']) ? $driveRecord['stored_name'] : '',
+        'uploaded_drive_status' => $driveStatus,
+        'uploaded_drive_error' => $driveError,
         'uploaded_at' => date('Y-m-d H:i:s'),
         'uploaded_by' => cpms_company_payroll_user_label($user),
         'sheet_name' => isset($parsed['sheet_name']) ? $parsed['sheet_name'] : '',
@@ -752,16 +831,19 @@ function cpms_company_payroll_confirm_preview($token, $user) {
     );
 
     if (!cpms_company_payroll_backup_existing_version($year, $month)) {
-        cpms_drive_delete_file((string)$version['uploaded_drive_file_id'], array('user' => $user, 'section' => 'company_payroll', 'message' => 'Payroll backup failed after Drive upload.'));
+        if ((string)$version['uploaded_drive_file_id'] !== '') cpms_drive_delete_file((string)$version['uploaded_drive_file_id'], array('user' => $user, 'section' => 'company_payroll', 'message' => 'Payroll backup failed after Drive upload.'));
         return array('ok' => false, 'message' => '기존 급여 버전 백업에 실패했습니다.');
     }
     $saved = cpms_company_payroll_write_json(cpms_company_payroll_version_file($year, $month), $version);
     if (!$saved) {
-        cpms_drive_delete_file((string)$version['uploaded_drive_file_id'], array('user' => $user, 'section' => 'company_payroll', 'message' => 'Payroll JSON save failed after Drive upload.'));
+        if ((string)$version['uploaded_drive_file_id'] !== '') cpms_drive_delete_file((string)$version['uploaded_drive_file_id'], array('user' => $user, 'section' => 'company_payroll', 'message' => 'Payroll JSON save failed after Drive upload.'));
         return array('ok' => false, 'message' => '급여 기준월 버전을 저장하지 못했습니다.');
     }
+    cpms_company_payroll_invalidate_statement_result($year, $month, 'payroll_version_confirmed');
     cpms_company_payroll_clear_preview($token);
-    return array('ok' => true, 'message' => '급여 기준월 버전이 저장되었습니다.', 'version' => cpms_company_payroll_public_version($version));
+    $message = '급여 기준월 버전이 저장되었습니다.';
+    if ($driveStatus !== 'success') $message .= ' 다만 원본 급여대장 Drive 저장은 실패했습니다. 관리자 Drive 점검을 확인해주세요.';
+    return array('ok' => true, 'message' => $message, 'drive_status' => $driveStatus, 'drive_error' => $driveError, 'version' => cpms_company_payroll_public_version($version));
 }}
 
 if (!function_exists('cpms_company_payroll_load_version')) {
@@ -855,6 +937,63 @@ function cpms_company_payroll_find_employee_in_version($version, $employeeKey) {
         if (is_array($employee) && isset($employee['employee_key']) && (string)$employee['employee_key'] === $employeeKey) return $employee;
     }
     return null;
+}}
+
+if (!function_exists('cpms_company_payroll_delete_employee_for_month')) {
+function cpms_company_payroll_delete_employee_for_month($year, $month, $employeeKey, $user) {
+    $ym = cpms_company_payroll_normalize_year_month($year, $month);
+    $employeeKey = trim((string)$employeeKey);
+    if ($employeeKey === '') return array('ok' => false, 'message' => '삭제할 직원을 선택해주세요.');
+
+    $effective = cpms_company_payroll_effective_version($ym['year'], $ym['month']);
+    if (empty($effective['ok']) || !isset($effective['version']) || !is_array($effective['version'])) {
+        return array('ok' => false, 'message' => isset($effective['message']) ? $effective['message'] : '적용 중인 급여 기준월 버전이 없습니다.');
+    }
+
+    $sourceVersion = $effective['version'];
+    $employees = isset($sourceVersion['employees']) && is_array($sourceVersion['employees']) ? $sourceVersion['employees'] : array();
+    $remaining = array();
+    $deletedEmployee = null;
+    foreach ($employees as $employee) {
+        if (!is_array($employee)) continue;
+        $key = isset($employee['employee_key']) ? (string)$employee['employee_key'] : '';
+        if ($key === $employeeKey) {
+            $deletedEmployee = $employee;
+            continue;
+        }
+        $remaining[] = $employee;
+    }
+    if (!is_array($deletedEmployee)) return array('ok' => false, 'message' => '삭제할 직원 급여 데이터를 찾지 못했습니다.');
+
+    $newVersion = $sourceVersion;
+    $newVersion = cpms_company_payroll_recalculate_employee_totals($newVersion, $remaining);
+    $newVersion['version_id'] = 'payroll_' . $ym['year'] . '_' . $ym['month'] . '_delete_' . substr(md5($employeeKey . microtime(true)), 0, 10);
+    $newVersion['effective_year'] = $ym['year'];
+    $newVersion['effective_month'] = $ym['month'];
+    $newVersion['change_type'] = 'employee_delete';
+    $newVersion['source_payroll_version_year'] = isset($effective['effective_year']) ? (string)$effective['effective_year'] : '';
+    $newVersion['source_payroll_version_month'] = isset($effective['effective_month']) ? (string)$effective['effective_month'] : '';
+    $newVersion['source_version_id'] = isset($sourceVersion['version_id']) ? (string)$sourceVersion['version_id'] : '';
+    $newVersion['deleted_employee_key'] = $employeeKey;
+    $newVersion['deleted_employee_name'] = isset($deletedEmployee['name']) ? (string)$deletedEmployee['name'] : '';
+    $newVersion['updated_at'] = date('Y-m-d H:i:s');
+    $newVersion['updated_by'] = cpms_company_payroll_user_label($user);
+
+    if (!cpms_company_payroll_backup_existing_version($ym['year'], $ym['month'])) {
+        return array('ok' => false, 'message' => '기존 급여 버전 백업에 실패했습니다.');
+    }
+    if (!cpms_company_payroll_write_json(cpms_company_payroll_version_file($ym['year'], $ym['month']), $newVersion)) {
+        return array('ok' => false, 'message' => '직원 삭제 기준월 버전을 저장하지 못했습니다.');
+    }
+    cpms_company_payroll_invalidate_statement_result($ym['year'], $ym['month'], 'payroll_employee_deleted');
+    if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
+    return array(
+        'ok' => true,
+        'message' => '선택한 월 기준으로 직원이 삭제되었습니다.',
+        'deleted_employee_key' => $employeeKey,
+        'deleted_employee_name' => isset($deletedEmployee['name']) ? (string)$deletedEmployee['name'] : '',
+        'version' => cpms_company_payroll_public_version($newVersion)
+    );
 }}
 
 if (!function_exists('cpms_company_payroll_sensitive_log_file')) {
