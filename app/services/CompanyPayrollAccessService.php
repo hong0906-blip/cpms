@@ -11,6 +11,7 @@ function cpms_company_payroll_access_config() {
     return array(
         'allowed_names' => array('박지혜'),
         'allowed_emails' => array(),
+        'allowed_login_ids' => array(),
         'allowed_user_ids' => array(),
         'view_positions' => array('대표', '대표이사', '부사장'),
         'master_roles' => array('master'),
@@ -76,6 +77,7 @@ function cpms_company_payroll_access_is_named_allowed_user($user, $pdo) {
     $config = cpms_company_payroll_access_config();
     $allowedIds = isset($config['allowed_user_ids']) && is_array($config['allowed_user_ids']) ? $config['allowed_user_ids'] : array();
     $allowedEmails = isset($config['allowed_emails']) && is_array($config['allowed_emails']) ? $config['allowed_emails'] : array();
+    $allowedLoginIds = isset($config['allowed_login_ids']) && is_array($config['allowed_login_ids']) ? $config['allowed_login_ids'] : array();
     $allowedNames = isset($config['allowed_names']) && is_array($config['allowed_names']) ? $config['allowed_names'] : array();
 
     $values = array();
@@ -84,10 +86,26 @@ function cpms_company_payroll_access_is_named_allowed_user($user, $pdo) {
     if (is_array($dbRow)) $values[] = $dbRow;
 
     foreach ($values as $row) {
-        $id = isset($row['id']) ? (int)$row['id'] : 0;
-        if ($id > 0) {
+        $idCandidates = array();
+        if (isset($row['id'])) $idCandidates[] = $row['id'];
+        if (isset($row['user_id'])) $idCandidates[] = $row['user_id'];
+        foreach ($idCandidates as $idValue) {
+            $id = (int)$idValue;
+            if ($id <= 0) continue;
             foreach ($allowedIds as $allowedId) {
                 if ((int)$allowedId > 0 && $id === (int)$allowedId) return true;
+            }
+        }
+
+        $loginCandidates = array();
+        if (isset($row['login_id'])) $loginCandidates[] = $row['login_id'];
+        if (isset($row['username'])) $loginCandidates[] = $row['username'];
+        if (isset($row['account'])) $loginCandidates[] = $row['account'];
+        foreach ($loginCandidates as $loginValue) {
+            $login = cpms_company_payroll_access_normalize($loginValue);
+            if ($login === '') continue;
+            foreach ($allowedLoginIds as $allowedLoginId) {
+                if ($login === cpms_company_payroll_access_normalize($allowedLoginId)) return true;
             }
         }
 
@@ -168,5 +186,15 @@ function cpms_can_edit_company_payroll($user = null, $pdo = null) {
 
 if (!function_exists('cpms_can_reveal_payroll_resident_number')) {
 function cpms_can_reveal_payroll_resident_number($user = null, $pdo = null) {
+    return cpms_can_view_company_payroll($user, $pdo);
+}}
+
+if (!function_exists('cpms_can_generate_payroll_statement_pdf')) {
+function cpms_can_generate_payroll_statement_pdf($user = null, $pdo = null) {
+    return cpms_can_edit_company_payroll($user, $pdo);
+}}
+
+if (!function_exists('cpms_can_download_payroll_statement_pdf')) {
+function cpms_can_download_payroll_statement_pdf($user = null, $pdo = null) {
     return cpms_can_view_company_payroll($user, $pdo);
 }}

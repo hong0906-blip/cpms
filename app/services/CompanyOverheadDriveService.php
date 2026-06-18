@@ -84,7 +84,44 @@ function cpms_company_overhead_drive_ensure_month_folder($category, $categoryLab
         'category_folder_id' => $categoryId,
         'year_folder_id' => $yearId,
         'month_folder_id' => (string)$monthFolder['file']['id'],
+        'management_folder_web_view_link' => isset($management['file']['webViewLink']) ? (string)$management['file']['webViewLink'] : '',
+        'overhead_folder_web_view_link' => isset($overhead['file']['webViewLink']) ? (string)$overhead['file']['webViewLink'] : '',
+        'category_folder_web_view_link' => isset($categoryFolder['file']['webViewLink']) ? (string)$categoryFolder['file']['webViewLink'] : '',
+        'year_folder_web_view_link' => isset($yearFolder['file']['webViewLink']) ? (string)$yearFolder['file']['webViewLink'] : '',
+        'month_folder_web_view_link' => isset($monthFolder['file']['webViewLink']) ? (string)$monthFolder['file']['webViewLink'] : '',
         'message' => 'Company overhead Drive folder is ready.',
         'http_code' => isset($monthFolder['http_code']) ? (int)$monthFolder['http_code'] : 0,
     );
+}}
+
+if (!function_exists('cpms_company_overhead_drive_ensure_month_subfolder')) {
+function cpms_company_overhead_drive_ensure_month_subfolder($category, $categoryLabel, $year, $month, $subFolderName, $context) {
+    if (!is_array($context)) $context = array();
+    $base = cpms_company_overhead_drive_ensure_month_folder($category, $categoryLabel, $year, $month, $context);
+    if (empty($base['ok']) || !isset($base['month_folder_id']) || trim((string)$base['month_folder_id']) === '') {
+        return $base;
+    }
+
+    $subFolderName = cpms_drive_sanitize_folder_name($subFolderName);
+    if ($subFolderName === '') {
+        return array('ok' => false, 'message' => 'Company overhead sub folder name is empty.', 'http_code' => 0);
+    }
+
+    $context['target_folder_id'] = (string)$base['month_folder_id'];
+    $sub = cpms_drive_find_or_create_folder($subFolderName, (string)$base['month_folder_id'], $context);
+    if (empty($sub['ok']) || !isset($sub['file']['id'])) {
+        return array(
+            'ok' => false,
+            'message' => isset($sub['message']) ? (string)$sub['message'] : 'Company overhead month sub folder failed.',
+            'http_code' => isset($sub['http_code']) ? (int)$sub['http_code'] : 0
+        );
+    }
+
+    $base['folder_id'] = (string)$sub['file']['id'];
+    $base['sub_folder_id'] = (string)$sub['file']['id'];
+    $base['sub_folder_name'] = $subFolderName;
+    $base['sub_folder_web_view_link'] = isset($sub['file']['webViewLink']) ? (string)$sub['file']['webViewLink'] : '';
+    $base['message'] = 'Company overhead Drive month sub folder is ready.';
+    $base['http_code'] = isset($sub['http_code']) ? (int)$sub['http_code'] : 0;
+    return $base;
 }}

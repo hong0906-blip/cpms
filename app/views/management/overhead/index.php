@@ -18,25 +18,31 @@ $canEditCompanyOverhead = cpms_can_edit_company_overhead($overheadUser, $overhea
 $canViewCompanyPayroll = cpms_can_view_company_payroll($overheadUser, $overheadPdo);
 $canEditCompanyPayroll = cpms_can_edit_company_payroll($overheadUser, $overheadPdo);
 
-if (!$canViewCompanyOverhead) {
+$categories = cpms_company_overhead_categories();
+$overheadSection = isset($_GET['oh']) ? trim((string)$_GET['oh']) : 'summary';
+if ($overheadSection === '') $overheadSection = 'summary';
+if (!$canViewCompanyOverhead && $canViewCompanyPayroll && $overheadSection === 'summary') $overheadSection = 'payroll';
+if ($overheadSection !== 'summary' && !isset($categories[$overheadSection])) $overheadSection = 'summary';
+
+if (!$canViewCompanyOverhead && !($overheadSection === 'payroll' && $canViewCompanyPayroll)) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다.</div>';
     return;
 }
 
-$categories = cpms_company_overhead_categories();
-$overheadSection = isset($_GET['oh']) ? trim((string)$_GET['oh']) : 'summary';
-if ($overheadSection === '') $overheadSection = 'summary';
-if ($overheadSection !== 'summary' && !isset($categories[$overheadSection])) $overheadSection = 'summary';
 if ($overheadSection === 'payroll' && !$canViewCompanyPayroll) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">임직원 월급 관리 접근 권한이 없습니다.</div>';
     return;
 }
 
 $filters = cpms_company_overhead_normalize_filters($_GET);
-$summary = cpms_company_overhead_monthly_summary($filters);
+$summary = array();
 $listFilters = $filters;
 if ($overheadSection !== 'summary') $listFilters['category'] = $overheadSection;
-$items = ($overheadSection === 'payroll') ? array() : cpms_company_overhead_list($listFilters);
+$items = array();
+if ($overheadSection !== 'payroll') {
+    $summary = cpms_company_overhead_monthly_summary($filters);
+    $items = cpms_company_overhead_list($listFilters);
+}
 
 $editItem = null;
 if ($canEditCompanyOverhead && $overheadSection !== 'summary' && $overheadSection !== 'payroll' && isset($_GET['edit'])) {

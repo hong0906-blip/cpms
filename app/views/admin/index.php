@@ -10,14 +10,16 @@ use App\Core\Db;
 
 require_once __DIR__ . '/../../services/CompanyProfitAccessService.php';
 require_once __DIR__ . '/../../services/CompanyOverheadService.php';
+require_once __DIR__ . '/../../services/CompanyPayrollAccessService.php';
 
 $pdo = Db::pdo();
 $user = Auth::user();
 $canManage = (Auth::isMaster() || Auth::canManageEmployees());
 $canLaborManagement = cpms_is_management_department_user($pdo, $user);
 $canViewCompanyOverhead = cpms_can_view_company_overhead($user, $pdo);
+$canViewCompanyPayroll = cpms_can_view_company_payroll($user, $pdo);
 
-if (!$canManage && !$canLaborManagement && !$canViewCompanyOverhead) {
+if (!$canManage && !$canLaborManagement && !$canViewCompanyOverhead && !$canViewCompanyPayroll) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. 관리부서 전용 화면입니다.</div>';
     return;
 }
@@ -39,7 +41,7 @@ $tabs = array(
     'leave_management' => array('label' => '연차 관리', 'icon' => 'calendar-days'),
 );
 
-if ($canViewCompanyOverhead) {
+if ($canViewCompanyOverhead || $canViewCompanyPayroll) {
     $tabs['company_overhead'] = array('label' => '총관리비', 'icon' => 'building-2');
 }
 if (Auth::isMaster()) {
@@ -53,12 +55,12 @@ if (!$canManage && $canLaborManagement) {
     $tabs = array(
         'labor_calc' => array('label' => '노무비 계산', 'icon' => 'calculator'),
     );
-    if ($canViewCompanyOverhead) {
+    if ($canViewCompanyOverhead || $canViewCompanyPayroll) {
         $tabs['company_overhead'] = array('label' => '총관리비', 'icon' => 'building-2');
     }
 }
 
-if (!$canManage && !$canLaborManagement && $canViewCompanyOverhead) {
+if (!$canManage && !$canLaborManagement && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     $tabs = array(
         'company_overhead' => array('label' => '총관리비', 'icon' => 'building-2'),
     );
@@ -87,7 +89,13 @@ if (!function_exists('admin_tab_url')) {
 <div style="margin:0 0 16px 0; padding:12px; border:1px solid #e5e7eb; border-radius:12px; background:#fff;">
   <?php foreach ($tabs as $k => $t): ?>
     <?php $active = ($k === $tab); ?>
-    <a href="<?php echo admin_tab_url($k); ?>" style="display:inline-block;margin:4px 6px 4px 0;padding:10px 14px;border-radius:10px;text-decoration:none;font-weight:700;<?php echo $active ? 'background:#166534;color:#fff;border:1px solid #166534;' : 'background:#fff;color:#4b5563;border:1px solid #d1d5db;'; ?>">
+    <?php
+      $tabHref = admin_tab_url($k);
+      if ($k === 'company_overhead' && !$canViewCompanyOverhead && $canViewCompanyPayroll) {
+          $tabHref .= '&oh=payroll';
+      }
+    ?>
+    <a href="<?php echo $tabHref; ?>" style="display:inline-block;margin:4px 6px 4px 0;padding:10px 14px;border-radius:10px;text-decoration:none;font-weight:700;<?php echo $active ? 'background:#166534;color:#fff;border:1px solid #166534;' : 'background:#fff;color:#4b5563;border:1px solid #d1d5db;'; ?>">
       <?php echo h($t['label']); ?>
     </a>
   <?php endforeach; ?>
@@ -110,7 +118,10 @@ if ($tab === 'employees') {
     require __DIR__ . '/attendance.php';
 } elseif ($tab === 'leave_management') {
     require __DIR__ . '/leave_management.php';
-} elseif ($tab === 'company_overhead' && $canViewCompanyOverhead) {
+} elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
+    if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
+        $_GET['oh'] = 'payroll';
+    }
     require __DIR__ . '/../management/overhead/index.php';
 } elseif ($tab === 'drive_check' && Auth::isMaster()) {
     require __DIR__ . '/drive_check.php';

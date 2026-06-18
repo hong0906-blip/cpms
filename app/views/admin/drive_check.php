@@ -15,6 +15,7 @@ require_once __DIR__ . '/../../services/ConstructionDriveService.php';
 require_once __DIR__ . '/../../services/SafetyHealthDriveService.php';
 require_once __DIR__ . '/../../services/QualityDriveService.php';
 require_once __DIR__ . '/../../services/CompanyOverheadService.php';
+require_once __DIR__ . '/../../services/PayrollStatementService.php';
 
 if (!(Auth::isMaster() || Auth::canManageEmployees())) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. 마스터 관리자만 사용할 수 있습니다.</div>';
@@ -63,6 +64,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $checkResult['quality'] = cpms_quality_drive_run_admin_check(Db::pdo(), Auth::user(), $qualityProjectId);
             $checkResult['management'] = cpms_management_drive_run_admin_check(Db::pdo(), Auth::user(), $managementProjectId);
             $checkResult['company_overhead'] = cpms_company_overhead_drive_run_admin_check(Auth::user());
+            $checkResult['payroll_statement'] = cpms_payroll_statement_drive_run_admin_check(Auth::user());
         }
     }
 }
@@ -404,6 +406,35 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
             cpms_admin_drive_check_row('총관리비 테스트 파일 업로드', !empty($ohUpload['ok']), isset($ohUpload['message']) ? $ohUpload['message'] : '', isset($ohUpload['http_code']) ? $ohUpload['http_code'] : 0);
             cpms_admin_drive_check_row('총관리비 테스트 파일 삭제', !empty($ohDelete['ok']), isset($ohDelete['message']) ? $ohDelete['message'] : '', isset($ohDelete['http_code']) ? $ohDelete['http_code'] : 0);
             cpms_admin_drive_check_row('총관리비 삭제 API supportsAllDrives', !empty($ohSupports['ok']), isset($ohSupports['message']) ? $ohSupports['message'] : '', isset($ohSupports['http_code']) ? $ohSupports['http_code'] : 0);
+            $payrollStatementCheck = (isset($checkResult['payroll_statement']) && is_array($checkResult['payroll_statement'])) ? $checkResult['payroll_statement'] : array();
+            $psManagement = (isset($payrollStatementCheck['management_folder']) && is_array($payrollStatementCheck['management_folder'])) ? $payrollStatementCheck['management_folder'] : array();
+            $psOverhead = (isset($payrollStatementCheck['overhead_folder']) && is_array($payrollStatementCheck['overhead_folder'])) ? $payrollStatementCheck['overhead_folder'] : array();
+            $psPayroll = (isset($payrollStatementCheck['payroll_folder']) && is_array($payrollStatementCheck['payroll_folder'])) ? $payrollStatementCheck['payroll_folder'] : array();
+            $psYear = (isset($payrollStatementCheck['year_folder']) && is_array($payrollStatementCheck['year_folder'])) ? $payrollStatementCheck['year_folder'] : array();
+            $psMonth = (isset($payrollStatementCheck['month_folder']) && is_array($payrollStatementCheck['month_folder'])) ? $payrollStatementCheck['month_folder'] : array();
+            $psOriginal = (isset($payrollStatementCheck['original_folder']) && is_array($payrollStatementCheck['original_folder'])) ? $payrollStatementCheck['original_folder'] : array();
+            $psStatement = (isset($payrollStatementCheck['statement_folder']) && is_array($payrollStatementCheck['statement_folder'])) ? $payrollStatementCheck['statement_folder'] : array();
+            $psPdfUpload = (isset($payrollStatementCheck['test_pdf_upload']) && is_array($payrollStatementCheck['test_pdf_upload'])) ? $payrollStatementCheck['test_pdf_upload'] : array();
+            $psZipUpload = (isset($payrollStatementCheck['test_zip_upload']) && is_array($payrollStatementCheck['test_zip_upload'])) ? $payrollStatementCheck['test_zip_upload'] : array();
+            $psDelete = (isset($payrollStatementCheck['test_delete']) && is_array($payrollStatementCheck['test_delete'])) ? $payrollStatementCheck['test_delete'] : array();
+            $psSupports = (isset($payrollStatementCheck['supports_all_drives_delete']) && is_array($payrollStatementCheck['supports_all_drives_delete'])) ? $payrollStatementCheck['supports_all_drives_delete'] : array();
+            $psMpdf = (isset($payrollStatementCheck['mpdf']) && is_array($payrollStatementCheck['mpdf'])) ? $payrollStatementCheck['mpdf'] : array();
+            $psZip = (isset($payrollStatementCheck['ziparchive']) && is_array($payrollStatementCheck['ziparchive'])) ? $payrollStatementCheck['ziparchive'] : array();
+            $psCron = (isset($payrollStatementCheck['cron_script']) && is_array($payrollStatementCheck['cron_script'])) ? $payrollStatementCheck['cron_script'] : array();
+            cpms_admin_drive_check_row('급여명세서 04_관리부 폴더', !empty($psManagement['ok']), isset($psManagement['message']) ? $psManagement['message'] : '', isset($psManagement['http_code']) ? $psManagement['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 총관리비 폴더', !empty($psOverhead['ok']), isset($psOverhead['message']) ? $psOverhead['message'] : '', isset($psOverhead['http_code']) ? $psOverhead['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 임직원월급 폴더', !empty($psPayroll['ok']), isset($psPayroll['message']) ? $psPayroll['message'] : '', isset($psPayroll['http_code']) ? $psPayroll['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 현재연도 폴더', !empty($psYear['ok']), isset($psYear['message']) ? $psYear['message'] : '', isset($psYear['http_code']) ? $psYear['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 현재월 폴더', !empty($psMonth['ok']), isset($psMonth['message']) ? $psMonth['message'] : '', isset($psMonth['http_code']) ? $psMonth['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 원본급여대장 폴더', !empty($psOriginal['ok']), isset($psOriginal['message']) ? $psOriginal['message'] : '', isset($psOriginal['http_code']) ? $psOriginal['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 급여명세서 폴더', !empty($psStatement['ok']), isset($psStatement['message']) ? $psStatement['message'] : '', isset($psStatement['http_code']) ? $psStatement['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 테스트 PDF 업로드', !empty($psPdfUpload['ok']), isset($psPdfUpload['message']) ? $psPdfUpload['message'] : '', isset($psPdfUpload['http_code']) ? $psPdfUpload['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 테스트 ZIP 업로드', !empty($psZipUpload['ok']), isset($psZipUpload['message']) ? $psZipUpload['message'] : '', isset($psZipUpload['http_code']) ? $psZipUpload['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 테스트 파일 삭제', !empty($psDelete['ok']), isset($psDelete['message']) ? $psDelete['message'] : '', isset($psDelete['http_code']) ? $psDelete['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 supportsAllDrives 삭제', !empty($psSupports['ok']), isset($psSupports['message']) ? $psSupports['message'] : '', isset($psSupports['http_code']) ? $psSupports['http_code'] : 0);
+            cpms_admin_drive_check_row('급여명세서 mPDF 사용 가능', !empty($psMpdf['ok']), isset($psMpdf['message']) ? $psMpdf['message'] : '', 0);
+            cpms_admin_drive_check_row('급여명세서 ZipArchive 사용 가능', !empty($psZip['ok']), isset($psZip['message']) ? $psZip['message'] : '', 0);
+            cpms_admin_drive_check_row('급여명세서 cron 스크립트 파일', !empty($psCron['ok']), isset($psCron['message']) ? $psCron['message'] : '', 0);
           ?>
         </tbody>
       </table>

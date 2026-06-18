@@ -596,6 +596,32 @@ function cpms_drive_get_file_info($fileId) {
     return array('ok' => true, 'file' => $res['json'], 'message' => 'Drive file info loaded.', 'http_code' => $res['http_code']);
 }}
 
+if (!function_exists('cpms_drive_download_file')) {
+function cpms_drive_download_file($fileId) {
+    $fileId = trim((string)$fileId);
+    if ($fileId === '') return array('ok' => false, 'content' => '', 'message' => 'Drive file ID is empty.', 'http_code' => 0);
+    $params = array(
+        'supportsAllDrives' => 'true',
+        'alt' => 'media'
+    );
+    $res = cpms_drive_authorized_request('GET', 'files/' . rawurlencode($fileId), $params, null, array('Accept: application/octet-stream'), false, 120);
+    if (!$res['ok']) {
+        return array(
+            'ok' => false,
+            'content' => '',
+            'message' => 'Drive file download failed: ' . $res['error'],
+            'http_code' => $res['http_code'],
+            'response' => cpms_drive_redact_text($res['body'])
+        );
+    }
+    return array(
+        'ok' => true,
+        'content' => (string)$res['body'],
+        'message' => 'Drive file downloaded.',
+        'http_code' => $res['http_code']
+    );
+}}
+
 if (!function_exists('cpms_drive_delete_file')) {
 function cpms_drive_delete_file($fileId, $context) {
     if (!is_array($context)) $context = array();

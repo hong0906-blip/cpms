@@ -17,7 +17,7 @@ if (!Auth::check()) {
 
 $pdo = Db::pdo();
 $user = Auth::user();
-if (!cpms_can_view_company_payroll($user, $pdo)) {
+if (!cpms_can_download_payroll_statement_pdf($user, $pdo)) {
     http_response_code(403);
     echo '접근 권한이 없습니다.';
     exit;

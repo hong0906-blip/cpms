@@ -134,6 +134,25 @@ function cpms_company_payroll_mask_resident($resident) {
     return '******-*******';
 }}
 
+if (!function_exists('cpms_company_payroll_mask_bank_account')) {
+function cpms_company_payroll_mask_bank_account($account) {
+    $account = trim((string)$account);
+    if ($account === '') return '';
+    $digits = preg_replace('/\D+/', '', $account);
+    if ($digits === '') {
+        $len = function_exists('mb_strlen') ? mb_strlen($account, 'UTF-8') : strlen($account);
+        if ($len <= 4) return '****';
+        if (function_exists('mb_substr')) return '****' . mb_substr($account, -4, 4, 'UTF-8');
+        return '****' . substr($account, -4);
+    }
+    $last4 = substr($digits, -4);
+    $first4 = strlen($digits) >= 8 ? substr($digits, 0, 4) : '';
+    if ($first4 !== '' && strpos($account, '-') !== false) {
+        return $first4 . '-****-' . $last4;
+    }
+    return '****' . $last4;
+}}
+
 if (!function_exists('cpms_company_payroll_secret_paths')) {
 function cpms_company_payroll_secret_paths() {
     return array(
@@ -363,41 +382,43 @@ function cpms_company_payroll_fallback_column_map() {
         'name' => 4,
         'position' => 5,
         'resident_number' => 6,
-        'birth_date' => 7,
-        'joined_at' => 8,
-        'base_pay' => 9,
-        'overtime_pay' => 10,
-        'annual_leave_pay' => 11,
-        'employee_pension' => 12,
-        'meal_allowance' => 13,
-        'vehicle_allowance' => 14,
-        'research_allowance' => 15,
-        'childcare_allowance' => 16,
-        'annual_leave_pay_2' => 17,
-        'position_allowance' => 18,
-        'absence_deduction' => 19,
-        'advance_pay' => 20,
-        'gross_pay' => 21,
-        'income_tax' => 22,
-        'local_income_tax' => 23,
-        'employment_insurance' => 24,
-        'national_pension' => 25,
-        'health_insurance' => 26,
-        'long_term_care' => 27,
-        'income_tax_adjustment' => 28,
-        'local_tax_adjustment' => 29,
-        'health_insurance_adjustment' => 30,
-        'long_term_care_adjustment' => 31,
-        'other_deduction' => 32,
-        'total_deduction' => 33,
-        'net_pay' => 34,
-        'etc' => 35,
-        'income_tax_etc' => 36,
-        'local_income_tax_etc' => 37,
-        'social_insurance_etc' => 38,
-        'annual_salary_before_tax' => 40,
-        'annual_salary_after_tax' => 41,
-        'resident_reference' => 42,
+        'bank_name' => 7,
+        'bank_account' => 8,
+        'birth_date' => 9,
+        'joined_at' => 10,
+        'base_pay' => 11,
+        'overtime_pay' => 12,
+        'annual_leave_pay' => 13,
+        'employee_pension' => 14,
+        'meal_allowance' => 15,
+        'vehicle_allowance' => 16,
+        'research_allowance' => 17,
+        'childcare_allowance' => 18,
+        'annual_leave_pay_2' => 19,
+        'position_allowance' => 20,
+        'absence_deduction' => 21,
+        'advance_pay' => 22,
+        'gross_pay' => 23,
+        'income_tax' => 24,
+        'local_income_tax' => 25,
+        'employment_insurance' => 26,
+        'national_pension' => 27,
+        'health_insurance' => 28,
+        'long_term_care' => 29,
+        'income_tax_adjustment' => 30,
+        'local_tax_adjustment' => 31,
+        'health_insurance_adjustment' => 32,
+        'long_term_care_adjustment' => 33,
+        'other_deduction' => 34,
+        'total_deduction' => 35,
+        'net_pay' => 36,
+        'etc' => 37,
+        'income_tax_etc' => 38,
+        'local_income_tax_etc' => 39,
+        'social_insurance_etc' => 40,
+        'annual_salary_before_tax' => 41,
+        'annual_salary_after_tax' => 42,
+        'resident_reference' => 43,
     );
 }}
 
@@ -425,6 +446,8 @@ function cpms_company_payroll_header_column_map($rows) {
         if (cpms_company_payroll_xlsx_text_contains($text, '사원명') && !isset($map['name'])) $map['name'] = $col;
         if (cpms_company_payroll_xlsx_text_contains($text, '직급') && !isset($map['position'])) $map['position'] = $col;
         if (cpms_company_payroll_xlsx_text_contains($text, '주민번호') && !isset($map['resident_number'])) $map['resident_number'] = $col;
+        if ((cpms_company_payroll_xlsx_text_contains($text, '은행명') || cpms_company_payroll_xlsx_text_contains($text, '은행')) && !isset($map['bank_name'])) $map['bank_name'] = $col;
+        if ((cpms_company_payroll_xlsx_text_contains($text, '계좌번호') || cpms_company_payroll_xlsx_text_contains($text, '계좌')) && !isset($map['bank_account'])) $map['bank_account'] = $col;
         if (cpms_company_payroll_xlsx_text_contains($text, '생년월일') && !isset($map['birth_date'])) $map['birth_date'] = $col;
         if (cpms_company_payroll_xlsx_text_contains($text, '입사일') && !isset($map['joined_at'])) $map['joined_at'] = $col;
         if (cpms_company_payroll_xlsx_text_contains($text, '기본급')) $map['base_pay'] = $col;
@@ -519,6 +542,9 @@ function cpms_company_payroll_parse_xlsx($path) {
             'position' => $position,
             'resident_masked' => cpms_company_payroll_mask_resident($rawResident),
             'resident_encrypted' => cpms_company_payroll_encrypt_resident($rawResident),
+            'bank_name' => cpms_company_payroll_row_value($row, $map, 'bank_name'),
+            'bank_account' => cpms_company_payroll_row_value($row, $map, 'bank_account'),
+            'bank_account_masked' => cpms_company_payroll_mask_bank_account(cpms_company_payroll_row_value($row, $map, 'bank_account')),
             'birth_date' => $birth,
             'joined_at' => $joined,
             'etc' => cpms_company_payroll_row_value($row, $map, 'etc'),
@@ -546,9 +572,12 @@ function cpms_company_payroll_parse_xlsx($path) {
 }}
 
 if (!function_exists('cpms_company_payroll_public_employee')) {
-function cpms_company_payroll_public_employee($employee) {
+function cpms_company_payroll_public_employee($employee, $includeBankAccount = false) {
     if (!is_array($employee)) return array();
     if (isset($employee['resident_encrypted'])) unset($employee['resident_encrypted']);
+    $bankAccount = isset($employee['bank_account']) ? (string)$employee['bank_account'] : '';
+    $employee['bank_account_masked'] = cpms_company_payroll_mask_bank_account($bankAccount);
+    if (!$includeBankAccount && isset($employee['bank_account'])) unset($employee['bank_account']);
     return $employee;
 }}
 
@@ -681,7 +710,7 @@ function cpms_company_payroll_confirm_preview($token, $user) {
         'document_month' => $month,
         'original_name' => $originalName,
     );
-    $target = cpms_company_overhead_drive_ensure_month_folder('payroll', '임직원월급', $year, $month, $context);
+    $target = cpms_company_overhead_drive_ensure_month_subfolder('payroll', '임직원월급', $year, $month, '원본급여대장', $context);
     if (empty($target['ok'])) {
         return array('ok' => false, 'message' => isset($target['message']) ? $target['message'] : 'Drive 폴더를 준비하지 못했습니다.');
     }
@@ -691,6 +720,7 @@ function cpms_company_payroll_confirm_preview($token, $user) {
     $context['drive_year_folder_id'] = (string)$target['year_folder_id'];
     $context['drive_type_folder_id'] = (string)$target['category_folder_id'];
     $context['drive_month_folder_id'] = (string)$target['month_folder_id'];
+    $context['drive_payroll_original_folder_id'] = isset($target['sub_folder_id']) ? (string)$target['sub_folder_id'] : (string)$target['folder_id'];
     $upload = cpms_drive_upload_file($tempPath, $driveName, (string)$target['folder_id'], $mimeType, $context);
     if (empty($upload['ok']) || !isset($upload['file']) || !is_array($upload['file'])) {
         return array('ok' => false, 'message' => isset($upload['message']) ? $upload['message'] : 'Drive 업로드에 실패했습니다.');
@@ -855,6 +885,29 @@ function cpms_company_payroll_log_resident_reveal($user, $employee, $year, $mont
     return cpms_company_payroll_write_json($path, $logs);
 }}
 
+if (!function_exists('cpms_company_payroll_log_bank_account_reveal')) {
+function cpms_company_payroll_log_bank_account_reveal($user, $employee, $year, $month, $effectiveYear, $effectiveMonth) {
+    $path = cpms_company_payroll_sensitive_log_file($year, $month);
+    $logs = cpms_company_payroll_read_json($path);
+    if (!is_array($logs)) $logs = array();
+    $logs[] = array(
+        'viewed_at' => date('Y-m-d H:i:s'),
+        'action' => 'bank_account_reveal',
+        'viewer' => cpms_company_payroll_user_label($user),
+        'viewer_id' => is_array($user) && isset($user['id']) ? (string)$user['id'] : '',
+        'viewer_email' => is_array($user) && isset($user['email']) ? (string)$user['email'] : '',
+        'employee_name' => is_array($employee) && isset($employee['name']) ? (string)$employee['name'] : '',
+        'employee_key' => is_array($employee) && isset($employee['employee_key']) ? (string)$employee['employee_key'] : '',
+        'year' => sprintf('%04d', (int)$year),
+        'month' => sprintf('%02d', (int)$month),
+        'effective_year' => (string)$effectiveYear,
+        'effective_month' => (string)$effectiveMonth,
+        'ip' => isset($_SERVER['REMOTE_ADDR']) ? (string)$_SERVER['REMOTE_ADDR'] : '',
+        'user_agent' => isset($_SERVER['HTTP_USER_AGENT']) ? substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 500) : '',
+    );
+    return cpms_company_payroll_write_json($path, $logs);
+}}
+
 if (!function_exists('cpms_company_payroll_reveal_resident')) {
 function cpms_company_payroll_reveal_resident($year, $month, $employeeKey, $user) {
     $effective = cpms_company_payroll_effective_version($year, $month);
@@ -869,4 +922,24 @@ function cpms_company_payroll_reveal_resident($year, $month, $employeeKey, $user
     if ($plain === '') return array('ok' => false, 'message' => '주민번호 복호화 키가 없거나 복호화에 실패했습니다.');
     cpms_company_payroll_log_resident_reveal($user, $employee, $year, $month, $effective['effective_year'], $effective['effective_month']);
     return array('ok' => true, 'resident_number' => $plain, 'employee_key' => $employeeKey, 'message' => '주민번호를 조회했습니다.');
+}}
+
+if (!function_exists('cpms_company_payroll_reveal_bank_account')) {
+function cpms_company_payroll_reveal_bank_account($year, $month, $employeeKey, $user) {
+    $effective = cpms_company_payroll_effective_version($year, $month);
+    if (empty($effective['ok']) || !isset($effective['version']) || !is_array($effective['version'])) {
+        return array('ok' => false, 'message' => '적용 중인 급여 기준월 버전이 없습니다.');
+    }
+    $employee = cpms_company_payroll_find_employee_in_version($effective['version'], $employeeKey);
+    if (!is_array($employee)) return array('ok' => false, 'message' => '직원 급여 데이터를 찾지 못했습니다.');
+    $account = isset($employee['bank_account']) ? trim((string)$employee['bank_account']) : '';
+    if ($account === '') return array('ok' => false, 'message' => '저장된 계좌번호가 없습니다.');
+    cpms_company_payroll_log_bank_account_reveal($user, $employee, $year, $month, $effective['effective_year'], $effective['effective_month']);
+    return array(
+        'ok' => true,
+        'bank_name' => isset($employee['bank_name']) ? (string)$employee['bank_name'] : '',
+        'bank_account' => $account,
+        'employee_key' => $employeeKey,
+        'message' => '계좌번호를 조회했습니다.'
+    );
 }}
