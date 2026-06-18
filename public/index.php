@@ -86,6 +86,14 @@ if ($route === 'safety_home') {
     $route = '안전/보건';
 }
 
+if ($route === 'quality_home') {
+    $route = 'quality_home';
+}
+
+if ($route === 'company_profit' || $route === 'management_profit' || $route === 'company_profit_home' || $route === '회사손익') {
+    $route = '경영현황';
+}
+
 if ($route === 'construction_home') {
     $route = '공사';
 }
@@ -677,6 +685,14 @@ if ($route === 'safety/incident_update') {
     require_once __DIR__ . '/../app/views/safety/incident_update.php';
     exit;
 }
+if ($route === 'quality/file_upload') {
+    require_once __DIR__ . '/../app/views/quality/file_upload.php';
+    exit;
+}
+if ($route === 'quality/file_download') {
+    require_once __DIR__ . '/../app/views/quality/file_download.php';
+    exit;
+}
 if ($route === 'construction/safety_incident_action_save') {
     require_once __DIR__ . '/../app/views/construction/safety_incident_action_save.php';
     exit;
@@ -757,6 +773,51 @@ if ($route === '견적관리' && !\App\Core\Auth::canAccessEstimate()) {
     exit;
 }
 
+// ==========================
+//  경영현황 직접 URL 접근 차단
+// ==========================
+if ($route === '경영현황') {
+    require_once __DIR__ . '/../app/services/CompanyProfitAccessService.php';
+    $companyProfitPdo = \App\Core\Db::pdo();
+    if (!cpms_can_view_company_profit(\App\Core\Auth::user(), $companyProfitPdo)) {
+        http_response_code(403);
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+
+    require_once __DIR__ . '/../app/services/CompanyProfitSummaryService.php';
+    $companyProfitCacheKey = '';
+    if (is_array($_GET)) {
+        $cacheParams = $_GET;
+        ksort($cacheParams);
+        $companyProfitCacheKey = md5(serialize($cacheParams));
+    }
+    $companyProfitSummary = null;
+    if ($companyProfitCacheKey !== '' && isset($_SESSION['_company_profit_cache'][$companyProfitCacheKey]) && is_array($_SESSION['_company_profit_cache'][$companyProfitCacheKey])) {
+        $cached = $_SESSION['_company_profit_cache'][$companyProfitCacheKey];
+        if (isset($cached['time']) && isset($cached['data']) && (time() - (int)$cached['time']) <= 60 && is_array($cached['data'])) {
+            $companyProfitSummary = $cached['data'];
+        }
+    }
+    if (!is_array($companyProfitSummary)) {
+        $companyProfitSummary = cpms_company_profit_build_dashboard($companyProfitPdo, $_GET);
+        if ($companyProfitCacheKey !== '') {
+            if (!isset($_SESSION['_company_profit_cache']) || !is_array($_SESSION['_company_profit_cache'])) $_SESSION['_company_profit_cache'] = array();
+            $_SESSION['_company_profit_cache'][$companyProfitCacheKey] = array('time' => time(), 'data' => $companyProfitSummary);
+            if (count($_SESSION['_company_profit_cache']) > 8) {
+                array_shift($_SESSION['_company_profit_cache']);
+            }
+        }
+    }
+    \App\Core\View::render('company_profit/index', array(
+        'title' => '경영현황',
+        'selectedMenu' => '경영현황',
+        'dashboardType' => $dashboardType,
+        'companyProfitSummary' => $companyProfitSummary,
+    ));
+    exit;
+}
+
 
 // ==========================
 //  관리 라우트 강제 진단(debug_route=1)
@@ -828,6 +889,14 @@ if ($route === 'project/header_mapping') {
     \App\Core\View::render('project/header_mapping', array(
         'title' => '단가표 헤더 매핑',
         'selectedMenu' => '공무',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+if ($route === 'quality_home') {
+    \App\Core\View::render('quality/index', array(
+        'title' => urldecode('%ED%92%88%EC%A7%88'),
+        'selectedMenu' => urldecode('%ED%92%88%EC%A7%88'),
         'dashboardType' => $dashboardType,
     ));
     exit;

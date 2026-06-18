@@ -213,7 +213,12 @@ function cpms_project_drive_sync_folder_aliases() {
         'safety_health_accident' => array('safety_health_incident'),
         'safety_health_ppe' => array('safety_health_protection'),
         'safety_health_medical_checkup' => array('safety_health_checkup'),
-        'safety_health_etc' => array('safety_health_other')
+        'safety_health_etc' => array('safety_health_other'),
+        'quality_material_approval' => array('quality_material', 'quality_approval'),
+        'quality_inspection' => array('quality_inspect'),
+        'quality_test_report' => array('quality_test_reports'),
+        'quality_submission' => array('quality_submit'),
+        'quality_etc' => array('quality_other')
     );
 }}
 

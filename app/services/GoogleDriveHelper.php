@@ -742,7 +742,8 @@ function cpms_drive_project_folder_schema() {
                 'quality_inspection' => urldecode('%EA%B2%80%EC%B8%A1'),
                 'quality_test_report' => urldecode('%EC%8B%9C%ED%97%98%EC%84%B1%EC%A0%81%EC%84%9C'),
                 'quality_cqi' => 'CQI',
-                'quality_submission' => urldecode('%EC%A0%9C%EC%B6%9C%EB%AC%B8%EC%84%9C')
+                'quality_submission' => urldecode('%EC%A0%9C%EC%B6%9C%EB%AC%B8%EC%84%9C'),
+                'quality_etc' => urldecode('%EA%B8%B0%ED%83%80')
             )
         )
     );

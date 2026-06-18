@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
 require_once __DIR__ . '/../../services/ManagementDriveService.php';
 require_once __DIR__ . '/../../services/ConstructionDriveService.php';
 require_once __DIR__ . '/../../services/SafetyHealthDriveService.php';
+require_once __DIR__ . '/../../services/QualityDriveService.php';
 
 if (!(Auth::isMaster() || Auth::canManageEmployees())) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. 마스터 관리자만 사용할 수 있습니다.</div>';
@@ -51,12 +52,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $constructionProjectId = isset($_POST['construction_project_id']) ? (int)$_POST['construction_project_id'] : $publicAffairsProjectId;
         $managementProjectId = isset($_POST['management_project_id']) ? (int)$_POST['management_project_id'] : $publicAffairsProjectId;
         $safetyHealthProjectId = isset($_POST['safety_health_project_id']) ? (int)$_POST['safety_health_project_id'] : $publicAffairsProjectId;
+        $qualityProjectId = isset($_POST['quality_project_id']) ? (int)$_POST['quality_project_id'] : $publicAffairsProjectId;
         $checkResult = cpms_drive_run_connection_check(Auth::user());
         if (is_array($checkResult)) {
             $checkResult['completed_pdf'] = cpms_approval_pdf_run_admin_check(Auth::user());
             $checkResult['public_affairs'] = cpms_public_affairs_drive_run_admin_check(Db::pdo(), Auth::user(), $publicAffairsProjectId);
             $checkResult['construction'] = cpms_construction_drive_run_admin_check(Db::pdo(), Auth::user(), $constructionProjectId);
             $checkResult['safety_health'] = cpms_safety_health_drive_run_admin_check(Db::pdo(), Auth::user(), $safetyHealthProjectId);
+            $checkResult['quality'] = cpms_quality_drive_run_admin_check(Db::pdo(), Auth::user(), $qualityProjectId);
             $checkResult['management'] = cpms_management_drive_run_admin_check(Db::pdo(), Auth::user(), $managementProjectId);
         }
     }
@@ -139,6 +142,10 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
       <label class="block text-sm font-bold text-gray-700" for="management_project_id">
         <span class="block mb-2"><?php echo h(urldecode('%EA%B4%80%EB%A6%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8%20%49%44')); ?></span>
         <input id="management_project_id" name="management_project_id" type="number" min="1" class="w-48 px-3 py-3 rounded-xl border border-gray-300 text-sm" placeholder="미입력 시 첫 프로젝트">
+      </label>
+      <label class="block text-sm font-bold text-gray-700" for="quality_project_id">
+        <span class="block mb-2"><?php echo h(urldecode('%ED%92%88%EC%A7%88%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8%20%49%44')); ?></span>
+        <input id="quality_project_id" name="quality_project_id" type="number" min="1" class="w-48 px-3 py-3 rounded-xl border border-gray-300 text-sm" placeholder="미입력 시 첫 프로젝트">
       </label>
       <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold">연결 점검 실행</button>
     </div>
@@ -295,6 +302,43 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%20%EC%95%88%EC%A0%84%EB%B3%B4%EA%B1%B4%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%97%85%EB%A1%9C%EB%93%9C'), !empty($shCommonUpload['ok']), isset($shCommonUpload['message']) ? $shCommonUpload['message'] : '', isset($shCommonUpload['http_code']) ? $shCommonUpload['http_code'] : 0);
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%20%EC%95%88%EC%A0%84%EB%B3%B4%EA%B1%B4%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%82%AD%EC%A0%9C'), !empty($shCommonDelete['ok']), isset($shCommonDelete['message']) ? $shCommonDelete['message'] : '', isset($shCommonDelete['http_code']) ? $shCommonDelete['http_code'] : 0);
             cpms_admin_drive_check_row(urldecode('%EC%95%88%EC%A0%84%EB%B3%B4%EA%B1%B4%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%9E%84%EC%8B%9C%ED%8C%8C%EC%9D%BC%20%EC%82%AD%EC%A0%9C'), !empty($shCleanup['ok']), isset($shCleanup['message']) ? $shCleanup['message'] : '', 0);
+            $qualityCheck = (isset($checkResult['quality']) && is_array($checkResult['quality'])) ? $checkResult['quality'] : array();
+            $qaProject = (isset($qualityCheck['project']) && is_array($qualityCheck['project'])) ? $qualityCheck['project'] : array();
+            $qaRoot = (isset($qualityCheck['quality_folder']) && is_array($qualityCheck['quality_folder'])) ? $qualityCheck['quality_folder'] : array();
+            $qaMaterial = (isset($qualityCheck['material_approval_folder']) && is_array($qualityCheck['material_approval_folder'])) ? $qualityCheck['material_approval_folder'] : array();
+            $qaInspection = (isset($qualityCheck['inspection_folder']) && is_array($qualityCheck['inspection_folder'])) ? $qualityCheck['inspection_folder'] : array();
+            $qaTestReport = (isset($qualityCheck['test_report_folder']) && is_array($qualityCheck['test_report_folder'])) ? $qualityCheck['test_report_folder'] : array();
+            $qaCqi = (isset($qualityCheck['cqi_folder']) && is_array($qualityCheck['cqi_folder'])) ? $qualityCheck['cqi_folder'] : array();
+            $qaSubmission = (isset($qualityCheck['submission_folder']) && is_array($qualityCheck['submission_folder'])) ? $qualityCheck['submission_folder'] : array();
+            $qaYear = (isset($qualityCheck['year_folder']) && is_array($qualityCheck['year_folder'])) ? $qualityCheck['year_folder'] : array();
+            $qaMonth = (isset($qualityCheck['month_folder']) && is_array($qualityCheck['month_folder'])) ? $qualityCheck['month_folder'] : array();
+            $qaUpload = (isset($qualityCheck['upload']) && is_array($qualityCheck['upload'])) ? $qualityCheck['upload'] : array();
+            $qaDelete = (isset($qualityCheck['delete']) && is_array($qualityCheck['delete'])) ? $qualityCheck['delete'] : array();
+            $qaCommonRoot = (isset($qualityCheck['common_quality_folder']) && is_array($qualityCheck['common_quality_folder'])) ? $qualityCheck['common_quality_folder'] : array();
+            $qaCommonSubmission = (isset($qualityCheck['common_submission_folder']) && is_array($qualityCheck['common_submission_folder'])) ? $qualityCheck['common_submission_folder'] : array();
+            $qaCommonYear = (isset($qualityCheck['common_year_folder']) && is_array($qualityCheck['common_year_folder'])) ? $qualityCheck['common_year_folder'] : array();
+            $qaCommonMonth = (isset($qualityCheck['common_month_folder']) && is_array($qualityCheck['common_month_folder'])) ? $qualityCheck['common_month_folder'] : array();
+            $qaCommonUpload = (isset($qualityCheck['common_upload']) && is_array($qualityCheck['common_upload'])) ? $qualityCheck['common_upload'] : array();
+            $qaCommonDelete = (isset($qualityCheck['common_delete']) && is_array($qualityCheck['common_delete'])) ? $qualityCheck['common_delete'] : array();
+            $qaCleanup = (isset($qualityCheck['cleanup']) && is_array($qualityCheck['cleanup'])) ? $qualityCheck['cleanup'] : array();
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20%EC%A0%90%EA%B2%80%20%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8'), !empty($qaProject['ok']), isset($qaProject['message']) ? $qaProject['message'] : '', 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20%30%35%5F%ED%92%88%EC%A7%88%20%ED%8F%B4%EB%8D%94'), !empty($qaRoot['ok']), isset($qaRoot['message']) ? $qaRoot['message'] : '', isset($qaRoot['http_code']) ? $qaRoot['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20') . cpms_quality_drive_label('material_approval') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($qaMaterial['ok']), isset($qaMaterial['message']) ? $qaMaterial['message'] : '', isset($qaMaterial['http_code']) ? $qaMaterial['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20') . cpms_quality_drive_label('inspection') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($qaInspection['ok']), isset($qaInspection['message']) ? $qaInspection['message'] : '', isset($qaInspection['http_code']) ? $qaInspection['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20') . cpms_quality_drive_label('test_report') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($qaTestReport['ok']), isset($qaTestReport['message']) ? $qaTestReport['message'] : '', isset($qaTestReport['http_code']) ? $qaTestReport['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20') . cpms_quality_drive_label('cqi') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($qaCqi['ok']), isset($qaCqi['message']) ? $qaCqi['message'] : '', isset($qaCqi['http_code']) ? $qaCqi['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20') . cpms_quality_drive_label('submission') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($qaSubmission['ok']), isset($qaSubmission['message']) ? $qaSubmission['message'] : '', isset($qaSubmission['http_code']) ? $qaSubmission['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20%ED%98%84%EC%9E%AC%EC%97%B0%EB%8F%84%20%ED%8F%B4%EB%8D%94'), !empty($qaYear['ok']), isset($qaYear['message']) ? $qaYear['message'] : '', isset($qaYear['http_code']) ? $qaYear['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20%ED%98%84%EC%9E%AC%EC%9B%94%20%ED%8F%B4%EB%8D%94'), !empty($qaMonth['ok']), isset($qaMonth['message']) ? $qaMonth['message'] : '', isset($qaMonth['http_code']) ? $qaMonth['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%97%85%EB%A1%9C%EB%93%9C'), !empty($qaUpload['ok']), isset($qaUpload['message']) ? $qaUpload['message'] : '', isset($qaUpload['http_code']) ? $qaUpload['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%82%AD%EC%A0%9C'), !empty($qaDelete['ok']), isset($qaDelete['message']) ? $qaDelete['message'] : '', isset($qaDelete['http_code']) ? $qaDelete['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%ED%92%88%EC%A7%88%20%ED%8F%B4%EB%8D%94'), !empty($qaCommonRoot['ok']), isset($qaCommonRoot['message']) ? $qaCommonRoot['message'] : '', isset($qaCommonRoot['http_code']) ? $qaCommonRoot['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%ED%92%88%EC%A7%88%2F') . cpms_quality_drive_label('submission') . urldecode('%20%ED%8F%B4%EB%8D%94'), !empty($qaCommonSubmission['ok']), isset($qaCommonSubmission['message']) ? $qaCommonSubmission['message'] : '', isset($qaCommonSubmission['http_code']) ? $qaCommonSubmission['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%ED%92%88%EC%A7%88%20%ED%98%84%EC%9E%AC%EC%97%B0%EB%8F%84%20%ED%8F%B4%EB%8D%94'), !empty($qaCommonYear['ok']), isset($qaCommonYear['message']) ? $qaCommonYear['message'] : '', isset($qaCommonYear['http_code']) ? $qaCommonYear['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%ED%92%88%EC%A7%88%20%ED%98%84%EC%9E%AC%EC%9B%94%20%ED%8F%B4%EB%8D%94'), !empty($qaCommonMonth['ok']), isset($qaCommonMonth['message']) ? $qaCommonMonth['message'] : '', isset($qaCommonMonth['http_code']) ? $qaCommonMonth['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%20%ED%92%88%EC%A7%88%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%97%85%EB%A1%9C%EB%93%9C'), !empty($qaCommonUpload['ok']), isset($qaCommonUpload['message']) ? $qaCommonUpload['message'] : '', isset($qaCommonUpload['http_code']) ? $qaCommonUpload['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%20%ED%92%88%EC%A7%88%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%82%AD%EC%A0%9C'), !empty($qaCommonDelete['ok']), isset($qaCommonDelete['message']) ? $qaCommonDelete['message'] : '', isset($qaCommonDelete['http_code']) ? $qaCommonDelete['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%ED%92%88%EC%A7%88%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%9E%84%EC%8B%9C%ED%8C%8C%EC%9D%BC%20%EC%82%AD%EC%A0%9C'), !empty($qaCleanup['ok']), isset($qaCleanup['message']) ? $qaCleanup['message'] : '', 0);
             $managementCheck = (isset($checkResult['management']) && is_array($checkResult['management'])) ? $checkResult['management'] : array();
             $mgProject = (isset($managementCheck['project']) && is_array($managementCheck['project'])) ? $managementCheck['project'] : array();
             $mgRoot = (isset($managementCheck['management_folder']) && is_array($managementCheck['management_folder'])) ? $managementCheck['management_folder'] : array();
@@ -373,6 +417,18 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
         <div class="mt-2 text-xs text-gray-500">
           <?php echo h(urldecode('%EA%B3%B5%ED%86%B5%20%EC%95%88%EC%A0%84%EB%B3%B4%EA%B1%B4%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%ED%8C%8C%EC%9D%BC%20%49%44')); ?>: <code><?php echo h($checkResult['safety_health']['common_test_file']['id']); ?></code>
           / <?php echo h(urldecode('%ED%8C%8C%EC%9D%BC%EB%AA%85')); ?>: <code><?php echo h(isset($checkResult['safety_health']['common_test_file']['name']) ? $checkResult['safety_health']['common_test_file']['name'] : ''); ?></code>
+        </div>
+      <?php endif; ?>
+      <?php if (!empty($checkResult['quality']['test_file']['id'])): ?>
+        <div class="mt-2 text-xs text-gray-500">
+          <?php echo h(urldecode('%ED%92%88%EC%A7%88%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%ED%8C%8C%EC%9D%BC%20%49%44')); ?>: <code><?php echo h($checkResult['quality']['test_file']['id']); ?></code>
+          / <?php echo h(urldecode('%ED%8C%8C%EC%9D%BC%EB%AA%85')); ?>: <code><?php echo h(isset($checkResult['quality']['test_file']['name']) ? $checkResult['quality']['test_file']['name'] : ''); ?></code>
+        </div>
+      <?php endif; ?>
+      <?php if (!empty($checkResult['quality']['common_test_file']['id'])): ?>
+        <div class="mt-2 text-xs text-gray-500">
+          <?php echo h(urldecode('%EA%B3%B5%ED%86%B5%20%ED%92%88%EC%A7%88%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%ED%8C%8C%EC%9D%BC%20%49%44')); ?>: <code><?php echo h($checkResult['quality']['common_test_file']['id']); ?></code>
+          / <?php echo h(urldecode('%ED%8C%8C%EC%9D%BC%EB%AA%85')); ?>: <code><?php echo h(isset($checkResult['quality']['common_test_file']['name']) ? $checkResult['quality']['common_test_file']['name'] : ''); ?></code>
         </div>
       <?php endif; ?>
       <?php if (!empty($checkResult['management']['test_file']['id'])): ?>
