@@ -6,6 +6,7 @@
 
 require_once __DIR__ . '/GoogleDriveHelper.php';
 require_once __DIR__ . '/CompanyOverheadDriveService.php';
+require_once __DIR__ . '/DataArchiveSummaryService.php';
 
 if (!function_exists('cpms_company_payroll_data_root')) {
 function cpms_company_payroll_data_root() {
@@ -882,6 +883,13 @@ if (!function_exists('cpms_company_payroll_month_summary')) {
 function cpms_company_payroll_month_summary($year, $month) {
     $effective = cpms_company_payroll_effective_version($year, $month);
     if (empty($effective['ok']) || !isset($effective['version']) || !is_array($effective['version'])) {
+        if (function_exists('cpms_archive_summary_month_category_amount')) {
+            $archiveAmount = cpms_archive_summary_month_category_amount($year, $month, 'payroll');
+            if (!empty($archiveAmount['has_data'])) {
+                $amount = isset($archiveAmount['amount']) ? (float)$archiveAmount['amount'] : 0.0;
+                return array('has_data' => true, 'amount' => $amount, 'total_net_pay' => $amount, 'total_gross_pay' => 0.0, 'total_deduction' => 0.0, 'employee_count' => 0, 'effective_year' => sprintf('%04d', (int)$year), 'effective_month' => sprintf('%02d', (int)$month), 'version' => null, 'archive_summary' => true);
+            }
+        }
         return array('has_data' => false, 'amount' => 0.0, 'total_net_pay' => 0.0, 'total_gross_pay' => 0.0, 'total_deduction' => 0.0, 'employee_count' => 0, 'effective_year' => '', 'effective_month' => '', 'version' => null);
     }
     $version = $effective['version'];

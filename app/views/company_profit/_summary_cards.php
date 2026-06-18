@@ -29,7 +29,7 @@ $overheadHasData = !empty($overhead['has_data']);
     <div class="label">총 관리비</div>
     <div class="value"><?php echo h(cpms_company_profit_money($totalOverhead)); ?></div>
     <div class="sub">
-      임직원 월급, 고정비, 회사차량, 숙소, 법인카드, 사무실 관리비 등을 합산한 금액입니다.
+      임직원 월급, 고정비, 회사차량, 숙소, 법인카드, 사무실 관리비, 주유비 등을 합산한 금액입니다.
       <?php if (!$overheadHasData): ?><br><strong>총관리비 데이터 미등록</strong><?php endif; ?>
     </div>
   </div>

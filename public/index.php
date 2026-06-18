@@ -725,6 +725,9 @@ if ($route === 'management/attendance_geofence_save') { require_once __DIR__ . '
 if ($route === 'management/attendance_geofence_delete') { require_once __DIR__ . '/../app/views/management/attendance_geofence_delete.php'; exit; }
 if ($route === 'management/overhead_save') { require_once __DIR__ . '/../app/views/management/overhead_save.php'; exit; }
 if ($route === 'management/overhead_delete') { require_once __DIR__ . '/../app/views/management/overhead_delete.php'; exit; }
+if ($route === 'management/fuel_upload_preview') { require_once __DIR__ . '/../app/views/management/fuel_upload_preview.php'; exit; }
+if ($route === 'management/fuel_upload_confirm') { require_once __DIR__ . '/../app/views/management/fuel_upload_confirm.php'; exit; }
+if ($route === 'management/fuel_delete') { require_once __DIR__ . '/../app/views/management/fuel_delete.php'; exit; }
 if ($route === 'management/payroll_upload_preview') { require_once __DIR__ . '/../app/views/management/payroll_upload_preview.php'; exit; }
 if ($route === 'management/payroll_upload_confirm') { require_once __DIR__ . '/../app/views/management/payroll_upload_confirm.php'; exit; }
 if ($route === 'management/payroll_employee_delete') { require_once __DIR__ . '/../app/views/management/payroll_employee_delete.php'; exit; }

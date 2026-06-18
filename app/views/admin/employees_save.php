@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/leave_management_helpers.php';
+require_once __DIR__ . '/../../services/EmployeeVehicleService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -198,6 +199,8 @@ $canManageApprover = isset($_POST['approval_can_be_manage_approver']) ? 1 : 0;
 $googleChatEnabled = isset($_POST['google_chat_enabled']) ? 1 : 0;
 $googleChatUserName = isset($_POST['google_chat_user_name']) ? trim((string)$_POST['google_chat_user_name']) : '';
 $googleChatSpaceName = isset($_POST['google_chat_dm_space_name']) ? trim((string)$_POST['google_chat_dm_space_name']) : '';
+$vehicleNumbersPosted = isset($_POST['vehicle_numbers']);
+$vehicleNumbers = isset($_POST['vehicle_numbers']) ? trim((string)$_POST['vehicle_numbers']) : '';
 
 if ($googleChatEnabled === 1 && $googleChatUserName === '' && $email !== '') {
     $googleChatUserName = 'users/' . $email;
@@ -301,6 +304,8 @@ try {
     $st->execute();
 
     $savedId = ($id > 0) ? $id : (int)$pdo->lastInsertId();
+    $vehicleSaveOk = true;
+    if ($vehicleNumbersPosted) $vehicleSaveOk = cpms_employee_vehicle_save($pdo, $savedId, $vehicleNumbers, Auth::user());
     $photoError = '';
     if ($photoPathEnabled) {
         if ($hasNewPhoto) {
@@ -325,7 +330,11 @@ try {
 
     $msg = ($id > 0 ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.')
         . ' (id=' . $savedId . ', hire_date=' . ($hireDate === '' ? 'NULL' : $hireDate) . ', hire_date_column=' . ($hireDateEnabled ? 'yes' : 'no') . ')';
-    if ($photoError !== '') flash_set('error', '직원 정보는 저장되었지만 사진 업로드에 실패했습니다: ' . $photoError);
+    if (!$vehicleSaveOk) {
+        $vehicleError = function_exists('cpms_employee_vehicle_last_error') ? cpms_employee_vehicle_last_error() : '';
+        $msg .= ' 다만 차량번호 저장은 실패했습니다.' . ($vehicleError !== '' ? ' (' . $vehicleError . ')' : '');
+    }
+    if ($photoError !== '') flash_set('error', '직원 정보는 저장되었지만 사진 업로드에 실패했습니다: ' . $photoError . (!$vehicleSaveOk ? ' 차량번호 저장도 실패했습니다.' : ''));
     else flash_set('success', $msg);
 
     $currentUser = Auth::user();

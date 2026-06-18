@@ -129,6 +129,16 @@ function cpms_company_profit_available_years($pdo) {
         }
     }
 
+    if (function_exists('cpms_archive_summary_years')) {
+        $archiveYears = cpms_archive_summary_years();
+        foreach ($archiveYears as $archiveYear) {
+            if ((int)$archiveYear > 0) {
+                $minYear = min($minYear, (int)$archiveYear);
+                $maxYear = max($maxYear, (int)$archiveYear);
+            }
+        }
+    }
+
     if ($minYear > $maxYear) {
         $tmp = $minYear;
         $minYear = $maxYear;

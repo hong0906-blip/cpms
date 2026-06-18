@@ -3,6 +3,7 @@ use App\Core\Db;
 use App\Core\Auth;
 
 require_once __DIR__ . '/leave_management_helpers.php';
+require_once __DIR__ . '/../../services/EmployeeVehicleService.php';
 
 $canManage = Auth::canManageEmployees();
 if (!$canManage) {
@@ -82,6 +83,8 @@ $googleChatEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'google_chat_
 $googleChatUserEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'google_chat_user_name') : false;
 $googleChatSpaceEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'google_chat_dm_space_name') : false;
 $photoPathEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'photo_path') : false;
+$vehicleNumbersEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'vehicle_numbers') : false;
+$vehicleNumberEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'vehicle_number') : false;
 
 
 if ($dbOk) {
@@ -100,8 +103,10 @@ if ($dbOk) {
     $chatEnabledSelect = $googleChatEnabled ? 'google_chat_enabled' : '0 AS google_chat_enabled';
     $chatUserSelect = $googleChatUserEnabled ? 'google_chat_user_name' : "'' AS google_chat_user_name";
     $chatSpaceSelect = $googleChatSpaceEnabled ? 'google_chat_dm_space_name' : "'' AS google_chat_dm_space_name";
+    $vehicleNumbersSelect = $vehicleNumbersEnabled ? 'vehicle_numbers' : "'' AS vehicle_numbers";
+    $vehicleNumberSelect = $vehicleNumberEnabled ? 'vehicle_number' : "'' AS vehicle_number";
 
-    $sql = "SELECT id,email,name,department,{$positionSelect},{$hireDateSelect},{$resignDateSelect},{$wageSelect},{$lmSelect},{$laSelect},{$lhSelect},{$birthDateSelect},{$siteManagerSelect},{$teamLeaderSelect},{$gongmuSelect},{$manageSelect},{$chatEnabledSelect},{$chatUserSelect},{$chatSpaceSelect},role,photo_path,is_active FROM employees WHERE 1=1";
+    $sql = "SELECT id,email,name,department,{$positionSelect},{$hireDateSelect},{$resignDateSelect},{$wageSelect},{$lmSelect},{$laSelect},{$lhSelect},{$birthDateSelect},{$siteManagerSelect},{$teamLeaderSelect},{$gongmuSelect},{$manageSelect},{$chatEnabledSelect},{$chatUserSelect},{$chatSpaceSelect},{$vehicleNumbersSelect},{$vehicleNumberSelect},role,photo_path,is_active FROM employees WHERE 1=1";
     $params = array();
     if ($q !== '') {
         $sql .= " AND (email LIKE :q OR name LIKE :q OR department LIKE :q" . ($positionEnabled ? " OR position LIKE :q" : "") . ")";
@@ -123,6 +128,7 @@ if ($dbOk) {
                 if ($normalized['leave_monthly_balance'] !== null) $rows[$i]['leave_monthly_balance'] = $normalized['leave_monthly_balance'];
                 if ($normalized['leave_annual_balance'] !== null) $rows[$i]['leave_annual_balance'] = $normalized['leave_annual_balance'];
                 if ($normalized['leave_half_balance'] !== null) $rows[$i]['leave_half_balance'] = $normalized['leave_half_balance'];
+                $rows[$i]['vehicle_numbers_display'] = cpms_employee_vehicle_display(cpms_employee_vehicle_row_numbers($rows[$i]));
             }
         }
     } catch (\Exception $e) {
@@ -149,12 +155,12 @@ if ($dbOk) {
 
 <div class="bg-white/80 rounded-3xl shadow p-6 mb-6 border border-gray-100"><form method="get" class="flex gap-3 items-center"><input type="hidden" name="r" value="관리"><input type="hidden" name="tab" value="employees"><input class="w-full px-4 py-3 rounded-2xl border" name="q" value="<?php echo h($q); ?>" placeholder="이메일/이름/부서/직급 검색"><button class="px-5 py-3 rounded-2xl border bg-white">검색</button></form></div>
 
-<div class="bg-white/80 rounded-3xl shadow border border-gray-100 overflow-hidden"><div class="overflow-x-auto"><table class="min-w-full text-sm"><thead class="bg-gray-50"><tr><th class="px-4 py-3">사진</th><th class="px-4 py-3">이름</th><th class="px-4 py-3">이메일</th><th class="px-4 py-3">부서</th><th class="px-4 py-3">입사일</th><th class="px-4 py-3">직급</th><th class="px-4 py-3">권한</th><th class="px-4 py-3">상태</th><th class="px-4 py-3">관리</th></tr></thead><tbody class="divide-y">
+<div class="bg-white/80 rounded-3xl shadow border border-gray-100 overflow-hidden"><div class="overflow-x-auto"><table class="min-w-full text-sm"><thead class="bg-gray-50"><tr><th class="px-4 py-3">사진</th><th class="px-4 py-3">이름</th><th class="px-4 py-3">이메일</th><th class="px-4 py-3">부서</th><th class="px-4 py-3">입사일</th><th class="px-4 py-3">직급</th><th class="px-4 py-3">차량번호</th><th class="px-4 py-3">권한</th><th class="px-4 py-3">상태</th><th class="px-4 py-3">관리</th></tr></thead><tbody class="divide-y">
 <?php foreach($rows as $r): $first = mb_substr((string)$r['name'],0,1,'UTF-8'); $photoPath = isset($r['photo_path']) ? (string)$r['photo_path'] : ''; ?>
 <tr>
 <td class="px-4 py-3"><div class="w-10 h-10 rounded-2xl bg-emerald-100 flex items-center justify-center font-bold text-emerald-700 relative overflow-hidden"><?php if($photoPath !== ''): ?><img src="<?php echo h($photoPath); ?>" class="w-10 h-10 rounded-2xl object-cover absolute inset-0" onerror="this.style.display='none';"><?php endif; ?><span><?php echo h($first); ?></span></div></td>
-<td class="px-4 py-3 font-bold"><?php echo h($r['name']); ?></td><td class="px-4 py-3"><?php echo h($r['email']); ?></td><td class="px-4 py-3"><?php echo h($r['department']); ?></td><td class="px-4 py-3"><?php echo h($r['hire_date'] ? $r['hire_date'] : '-'); ?></td><td class="px-4 py-3"><?php echo h($r['position']); ?></td><td class="px-4 py-3"><?php echo h($r['role']==='executive'?'임원':'직원'); ?></td><td class="px-4 py-3"><?php echo ((int)$r['is_active']===1)?'활성':'비활성'; ?></td>
-<td class="px-4 py-3"><div class="flex gap-2"><button type="button" class="px-3 py-2 border rounded-2xl" data-emp-edit="<?php echo (int)$r['id']; ?>" data-emp-email="<?php echo h($r['email']); ?>" data-emp-name="<?php echo h($r['name']); ?>" data-emp-dept="<?php echo h($r['department']); ?>" data-emp-pos="<?php echo h($r['position']); ?>" data-emp-role="<?php echo h($r['role']); ?>" data-emp-active="<?php echo (int)$r['is_active']; ?>" data-emp-hire-date="<?php echo h($r['hire_date']); ?>" data-emp-resign-date="<?php echo h(isset($r['resign_date']) ? $r['resign_date'] : ''); ?>" data-emp-wage="<?php echo h(isset($r['monthly_regular_wage']) ? $r['monthly_regular_wage'] : ''); ?>" data-emp-lbm="<?php echo h($r['leave_monthly_balance']); ?>" data-emp-lba="<?php echo h($r['leave_annual_balance']); ?>" data-emp-lbh="<?php echo h($r['leave_half_balance']); ?>" data-emp-birth-date="<?php echo h(isset($r['birth_date']) ? $r['birth_date'] : ''); ?>" data-emp-can-site="<?php echo h(isset($r['approval_can_be_site_manager']) ? $r['approval_can_be_site_manager'] : '0'); ?>" data-emp-can-lead="<?php echo h(isset($r['approval_can_be_team_leader']) ? $r['approval_can_be_team_leader'] : '0'); ?>" data-emp-can-gongmu="<?php echo h(isset($r['approval_can_be_gongmu_approver']) ? $r['approval_can_be_gongmu_approver'] : '0'); ?>" data-emp-can-manage="<?php echo h(isset($r['approval_can_be_manage_approver']) ? $r['approval_can_be_manage_approver'] : '0'); ?>" data-emp-chat-enabled="<?php echo h(isset($r['google_chat_enabled']) ? $r['google_chat_enabled'] : '0'); ?>" data-emp-chat-user="<?php echo h(isset($r['google_chat_user_name']) ? $r['google_chat_user_name'] : ''); ?>" data-emp-chat-space="<?php echo h(isset($r['google_chat_dm_space_name']) ? $r['google_chat_dm_space_name'] : ''); ?>" data-emp-photo="<?php echo h(isset($r['photo_path']) ? $r['photo_path'] : ''); ?>">수정</button><button type="button" class="px-3 py-2 border border-red-200 text-red-700 rounded-2xl" data-emp-delete="<?php echo (int)$r['id']; ?>" data-emp-name-for="<?php echo h($r['name']); ?>">삭제</button></div></td>
+<td class="px-4 py-3 font-bold"><?php echo h($r['name']); ?></td><td class="px-4 py-3"><?php echo h($r['email']); ?></td><td class="px-4 py-3"><?php echo h($r['department']); ?></td><td class="px-4 py-3"><?php echo h($r['hire_date'] ? $r['hire_date'] : '-'); ?></td><td class="px-4 py-3"><?php echo h($r['position']); ?></td><td class="px-4 py-3"><?php echo h(isset($r['vehicle_numbers_display']) && $r['vehicle_numbers_display'] !== '' ? $r['vehicle_numbers_display'] : '-'); ?></td><td class="px-4 py-3"><?php echo h($r['role']==='executive'?'임원':'직원'); ?></td><td class="px-4 py-3"><?php echo ((int)$r['is_active']===1)?'활성':'비활성'; ?></td>
+<td class="px-4 py-3"><div class="flex gap-2"><button type="button" class="px-3 py-2 border rounded-2xl" data-emp-edit="<?php echo (int)$r['id']; ?>" data-emp-email="<?php echo h($r['email']); ?>" data-emp-name="<?php echo h($r['name']); ?>" data-emp-dept="<?php echo h($r['department']); ?>" data-emp-pos="<?php echo h($r['position']); ?>" data-emp-role="<?php echo h($r['role']); ?>" data-emp-active="<?php echo (int)$r['is_active']; ?>" data-emp-hire-date="<?php echo h($r['hire_date']); ?>" data-emp-resign-date="<?php echo h(isset($r['resign_date']) ? $r['resign_date'] : ''); ?>" data-emp-wage="<?php echo h(isset($r['monthly_regular_wage']) ? $r['monthly_regular_wage'] : ''); ?>" data-emp-lbm="<?php echo h($r['leave_monthly_balance']); ?>" data-emp-lba="<?php echo h($r['leave_annual_balance']); ?>" data-emp-lbh="<?php echo h($r['leave_half_balance']); ?>" data-emp-birth-date="<?php echo h(isset($r['birth_date']) ? $r['birth_date'] : ''); ?>" data-emp-can-site="<?php echo h(isset($r['approval_can_be_site_manager']) ? $r['approval_can_be_site_manager'] : '0'); ?>" data-emp-can-lead="<?php echo h(isset($r['approval_can_be_team_leader']) ? $r['approval_can_be_team_leader'] : '0'); ?>" data-emp-can-gongmu="<?php echo h(isset($r['approval_can_be_gongmu_approver']) ? $r['approval_can_be_gongmu_approver'] : '0'); ?>" data-emp-can-manage="<?php echo h(isset($r['approval_can_be_manage_approver']) ? $r['approval_can_be_manage_approver'] : '0'); ?>" data-emp-chat-enabled="<?php echo h(isset($r['google_chat_enabled']) ? $r['google_chat_enabled'] : '0'); ?>" data-emp-chat-user="<?php echo h(isset($r['google_chat_user_name']) ? $r['google_chat_user_name'] : ''); ?>" data-emp-chat-space="<?php echo h(isset($r['google_chat_dm_space_name']) ? $r['google_chat_dm_space_name'] : ''); ?>" data-emp-vehicle-numbers="<?php echo h(isset($r['vehicle_numbers_display']) ? $r['vehicle_numbers_display'] : ''); ?>" data-emp-photo="<?php echo h(isset($r['photo_path']) ? $r['photo_path'] : ''); ?>">수정</button><button type="button" class="px-3 py-2 border border-red-200 text-red-700 rounded-2xl" data-emp-delete="<?php echo (int)$r['id']; ?>" data-emp-name-for="<?php echo h($r['name']); ?>">삭제</button></div></td>
 </tr>
 <?php endforeach; ?>
 </tbody></table></div><div class="px-4 py-3 text-xs text-gray-600 bg-amber-50 border-t">휴가 차감 기준은 입사일 기준 1년 미만은 월차, 1년 이상은 연차입니다. 반차는 해당 기준에 따라 월차 또는 연차에서 0.5개 차감됩니다.</div></div>
@@ -190,8 +196,10 @@ function insertAfterId(anchorId, html) {
 }
 insertAfterId('empAddHireDate', '<input type="date" class="w-full px-4 py-2 border rounded-2xl mt-1" name="resign_date" id="empAddResignDate" placeholder="퇴사일">');
 insertAfterId('empAddResignDate', '<input type="number" step="0.01" class="px-3 py-2 border rounded-2xl" name="monthly_regular_wage" id="empAddWage" placeholder="통상임금(월)">');
+insertAfterId('empAddWage', '<input type="text" class="w-full px-4 py-2 border rounded-2xl" name="vehicle_numbers" id="empAddVehicleNumbers" placeholder="차량번호 (쉼표로 여러 대 입력)">');
 insertAfterId('empEditHireDate', '<input type="date" class="w-full px-4 py-2 border rounded-2xl mt-2" name="resign_date" id="empEditResignDate" placeholder="퇴사일">');
 insertAfterId('empEditResignDate', '<input type="number" step="0.01" class="w-full px-4 py-2 border rounded-2xl mt-2" name="monthly_regular_wage" id="empEditWage" placeholder="통상임금(월)">');
+insertAfterId('empEditWage', '<input type="text" class="w-full px-4 py-2 border rounded-2xl mt-2" name="vehicle_numbers" id="empEditVehicleNumbers" placeholder="차량번호 (예: 56로1245, 255도3829)">');
 document.addEventListener('click', function(e) {
     var t = e.target;
     var op = t.closest ? t.closest('[data-modal-open]') : null;
@@ -225,6 +233,7 @@ document.addEventListener('click', function(e) {
             setChecked('empEditChatEnabled', be.getAttribute('data-emp-chat-enabled') === '1');
             setValue('empEditChatUser', chatUser);
             setValue('empEditChatSpace', be.getAttribute('data-emp-chat-space') || '');
+            setValue('empEditVehicleNumbers', be.getAttribute('data-emp-vehicle-numbers') || '');
             var photoPath = be.getAttribute('data-emp-photo') || '';
             var photoPreview = document.getElementById('empEditPhotoPreview');
             if (photoPreview) {

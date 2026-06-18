@@ -16,6 +16,7 @@ require_once __DIR__ . '/../../services/SafetyHealthDriveService.php';
 require_once __DIR__ . '/../../services/QualityDriveService.php';
 require_once __DIR__ . '/../../services/CompanyOverheadService.php';
 require_once __DIR__ . '/../../services/PayrollStatementService.php';
+require_once __DIR__ . '/../../services/DataArchiveService.php';
 
 if (!(Auth::isMaster() || Auth::canManageEmployees())) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. 마스터 관리자만 사용할 수 있습니다.</div>';
@@ -65,6 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $checkResult['management'] = cpms_management_drive_run_admin_check(Db::pdo(), Auth::user(), $managementProjectId);
             $checkResult['company_overhead'] = cpms_company_overhead_drive_run_admin_check(Auth::user());
             $checkResult['payroll_statement'] = cpms_payroll_statement_drive_run_admin_check(Auth::user());
+            $checkResult['data_archive'] = cpms_archive_drive_run_admin_check(Auth::user(), (int)date('Y'));
         }
     }
 }
@@ -378,10 +380,34 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%EA%B4%80%EB%A6%AC%20%ED%98%84%EC%9E%AC%EC%9B%94%20%ED%8F%B4%EB%8D%94'), !empty($mgCommonMonth['ok']), isset($mgCommonMonth['message']) ? $mgCommonMonth['message'] : '', isset($mgCommonMonth['http_code']) ? $mgCommonMonth['http_code'] : 0);
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%EA%B4%80%EB%A6%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%97%85%EB%A1%9C%EB%93%9C'), !empty($mgCommonUpload['ok']), isset($mgCommonUpload['message']) ? $mgCommonUpload['message'] : '', isset($mgCommonUpload['http_code']) ? $mgCommonUpload['http_code'] : 0);
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%EA%B4%80%EB%A6%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%82%AD%EC%A0%9C'), !empty($mgCommonDelete['ok']), isset($mgCommonDelete['message']) ? $mgCommonDelete['message'] : '', isset($mgCommonDelete['http_code']) ? $mgCommonDelete['http_code'] : 0);
+            $archiveCheck = (isset($checkResult['data_archive']) && is_array($checkResult['data_archive'])) ? $checkResult['data_archive'] : array();
+            $arcSystemBackup = (isset($archiveCheck['system_backup_folder']) && is_array($archiveCheck['system_backup_folder'])) ? $archiveCheck['system_backup_folder'] : array();
+            $arcGeneralRoot = (isset($archiveCheck['general_archive_folder']) && is_array($archiveCheck['general_archive_folder'])) ? $archiveCheck['general_archive_folder'] : array();
+            $arcGeneralYear = (isset($archiveCheck['general_year_folder']) && is_array($archiveCheck['general_year_folder'])) ? $archiveCheck['general_year_folder'] : array();
+            $arcManagement = (isset($archiveCheck['management_folder']) && is_array($archiveCheck['management_folder'])) ? $archiveCheck['management_folder'] : array();
+            $arcManagementRoot = (isset($archiveCheck['management_archive_folder']) && is_array($archiveCheck['management_archive_folder'])) ? $archiveCheck['management_archive_folder'] : array();
+            $arcManagementYear = (isset($archiveCheck['management_year_folder']) && is_array($archiveCheck['management_year_folder'])) ? $archiveCheck['management_year_folder'] : array();
+            $arcUpload = (isset($archiveCheck['upload']) && is_array($archiveCheck['upload'])) ? $archiveCheck['upload'] : array();
+            $arcDownload = (isset($archiveCheck['download']) && is_array($archiveCheck['download'])) ? $archiveCheck['download'] : array();
+            $arcValidate = (isset($archiveCheck['json_validate']) && is_array($archiveCheck['json_validate'])) ? $archiveCheck['json_validate'] : array();
+            $arcDelete = (isset($archiveCheck['delete']) && is_array($archiveCheck['delete'])) ? $archiveCheck['delete'] : array();
+            $arcSupports = (isset($archiveCheck['supports_all_drives_delete']) && is_array($archiveCheck['supports_all_drives_delete'])) ? $archiveCheck['supports_all_drives_delete'] : array();
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%30%30%5F%EC%8B%9C%EC%8A%A4%ED%85%9C%EB%B0%B1%EC%97%85'), !empty($arcSystemBackup['ok']), isset($arcSystemBackup['message']) ? $arcSystemBackup['message'] : '', isset($arcSystemBackup['http_code']) ? $arcSystemBackup['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%EC%9D%BC%EB%B0%98%20%EB%A3%A8%ED%8A%B8'), !empty($arcGeneralRoot['ok']), isset($arcGeneralRoot['message']) ? $arcGeneralRoot['message'] : '', isset($arcGeneralRoot['http_code']) ? $arcGeneralRoot['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%EC%9D%BC%EB%B0%98%20%EC%97%B0%EB%8F%84%20%ED%8F%B4%EB%8D%94'), !empty($arcGeneralYear['ok']), isset($arcGeneralYear['message']) ? $arcGeneralYear['message'] : '', isset($arcGeneralYear['http_code']) ? $arcGeneralYear['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%30%34%5F%EA%B4%80%EB%A6%AC%EB%B6%80'), !empty($arcManagement['ok']), isset($arcManagement['message']) ? $arcManagement['message'] : '', isset($arcManagement['http_code']) ? $arcManagement['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%EB%AF%BC%EA%B0%90%20%EB%A3%A8%ED%8A%B8'), !empty($arcManagementRoot['ok']), isset($arcManagementRoot['message']) ? $arcManagementRoot['message'] : '', isset($arcManagementRoot['http_code']) ? $arcManagementRoot['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%EB%AF%BC%EA%B0%90%20%EC%97%B0%EB%8F%84%20%ED%8F%B4%EB%8D%94'), !empty($arcManagementYear['ok']), isset($arcManagementYear['message']) ? $arcManagementYear['message'] : '', isset($arcManagementYear['http_code']) ? $arcManagementYear['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%97%85%EB%A1%9C%EB%93%9C'), !empty($arcUpload['ok']), isset($arcUpload['message']) ? $arcUpload['message'] : '', isset($arcUpload['http_code']) ? $arcUpload['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C'), !empty($arcDownload['ok']), isset($arcDownload['message']) ? $arcDownload['message'] : '', isset($arcDownload['http_code']) ? $arcDownload['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%EC%95%95%EC%B6%95%2F%4A%53%4F%4E%20%EA%B2%80%EC%A6%9D'), !empty($arcValidate['ok']), isset($arcValidate['message']) ? $arcValidate['message'] : '', isset($arcValidate['http_code']) ? $arcValidate['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%82%AD%EC%A0%9C'), !empty($arcDelete['ok']), isset($arcDelete['message']) ? $arcDelete['message'] : '', isset($arcDelete['http_code']) ? $arcDelete['http_code'] : 0);
+            cpms_admin_drive_check_row(urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C%20supportsAllDrives%20%EC%82%AD%EC%A0%9C'), !empty($arcSupports['ok']), isset($arcSupports['message']) ? $arcSupports['message'] : '', isset($arcSupports['http_code']) ? $arcSupports['http_code'] : 0);
             $overheadCheck = (isset($checkResult['company_overhead']) && is_array($checkResult['company_overhead'])) ? $checkResult['company_overhead'] : array();
             $ohSharedDrive = (isset($overheadCheck['shared_drive']) && is_array($overheadCheck['shared_drive'])) ? $overheadCheck['shared_drive'] : array();
             $ohCompany = (isset($overheadCheck['management_folder']) && is_array($overheadCheck['management_folder'])) ? $overheadCheck['management_folder'] : ((isset($overheadCheck['company_management_folder']) && is_array($overheadCheck['company_management_folder'])) ? $overheadCheck['company_management_folder'] : array());
             $ohRoot = (isset($overheadCheck['overhead_folder']) && is_array($overheadCheck['overhead_folder'])) ? $overheadCheck['overhead_folder'] : array();
+            $ohFuelOriginal = (isset($overheadCheck['fuel_original_folder']) && is_array($overheadCheck['fuel_original_folder'])) ? $overheadCheck['fuel_original_folder'] : array();
             $ohUpload = (isset($overheadCheck['upload']) && is_array($overheadCheck['upload'])) ? $overheadCheck['upload'] : array();
             $ohDelete = (isset($overheadCheck['delete']) && is_array($overheadCheck['delete'])) ? $overheadCheck['delete'] : array();
             $ohSupports = (isset($overheadCheck['supports_all_drives_delete']) && is_array($overheadCheck['supports_all_drives_delete'])) ? $overheadCheck['supports_all_drives_delete'] : array();
@@ -403,9 +429,10 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
                 $ohLabel = isset($ohMonthRow['label']) ? (string)$ohMonthRow['label'] : '구분';
                 cpms_admin_drive_check_row('총관리비 ' . $ohLabel . ' 현재월 폴더', !empty($ohMonthRow['ok']), isset($ohMonthRow['message']) ? $ohMonthRow['message'] : '', isset($ohMonthRow['http_code']) ? $ohMonthRow['http_code'] : 0);
             }
-            cpms_admin_drive_check_row('총관리비 테스트 파일 업로드', !empty($ohUpload['ok']), isset($ohUpload['message']) ? $ohUpload['message'] : '', isset($ohUpload['http_code']) ? $ohUpload['http_code'] : 0);
-            cpms_admin_drive_check_row('총관리비 테스트 파일 삭제', !empty($ohDelete['ok']), isset($ohDelete['message']) ? $ohDelete['message'] : '', isset($ohDelete['http_code']) ? $ohDelete['http_code'] : 0);
-            cpms_admin_drive_check_row('총관리비 삭제 API supportsAllDrives', !empty($ohSupports['ok']), isset($ohSupports['message']) ? $ohSupports['message'] : '', isset($ohSupports['http_code']) ? $ohSupports['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 주유비 원본주유비엑셀 폴더', !empty($ohFuelOriginal['ok']), isset($ohFuelOriginal['message']) ? $ohFuelOriginal['message'] : '', isset($ohFuelOriginal['http_code']) ? $ohFuelOriginal['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 주유비 테스트 엑셀 업로드', !empty($ohUpload['ok']), isset($ohUpload['message']) ? $ohUpload['message'] : '', isset($ohUpload['http_code']) ? $ohUpload['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 주유비 테스트 파일 삭제', !empty($ohDelete['ok']), isset($ohDelete['message']) ? $ohDelete['message'] : '', isset($ohDelete['http_code']) ? $ohDelete['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 주유비 삭제 API supportsAllDrives', !empty($ohSupports['ok']), isset($ohSupports['message']) ? $ohSupports['message'] : '', isset($ohSupports['http_code']) ? $ohSupports['http_code'] : 0);
             $payrollStatementCheck = (isset($checkResult['payroll_statement']) && is_array($checkResult['payroll_statement'])) ? $checkResult['payroll_statement'] : array();
             $psManagement = (isset($payrollStatementCheck['management_folder']) && is_array($payrollStatementCheck['management_folder'])) ? $payrollStatementCheck['management_folder'] : array();
             $psOverhead = (isset($payrollStatementCheck['overhead_folder']) && is_array($payrollStatementCheck['overhead_folder'])) ? $payrollStatementCheck['overhead_folder'] : array();

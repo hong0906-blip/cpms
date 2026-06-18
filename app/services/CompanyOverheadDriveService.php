@@ -15,6 +15,7 @@ function cpms_company_overhead_drive_category_labels() {
         'dormitories' => '숙소',
         'corporate_cards' => '법인카드',
         'offices' => '사무실',
+        'fuel' => '주유비',
         'etc' => '기타',
     );
 }}

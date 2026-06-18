@@ -132,20 +132,146 @@ function cpms_payroll_statement_payment_date($year, $month, $employee) {
     return sprintf('%04d-%02d-15', (int)$year, (int)$month);
 }}
 
+if (!function_exists('cpms_payroll_statement_payment_period')) {
+function cpms_payroll_statement_payment_period($year, $month, $paymentDate) {
+    $paymentDate = trim((string)$paymentDate);
+    if (preg_match('/^(\d{4})[-\.\/](\d{1,2})[-\.\/](\d{1,2})/', $paymentDate, $m)) {
+        $y = (int)$m[1];
+        $mo = (int)$m[2];
+    } else {
+        $ym = cpms_company_payroll_normalize_year_month($year, $month);
+        $y = (int)$ym['year'];
+        $mo = (int)$ym['month'];
+    }
+    return array(
+        'year' => sprintf('%04d', $y),
+        'month' => sprintf('%02d', $mo),
+        'label' => sprintf('%04d년 %d월', $y, $mo),
+        'ym' => sprintf('%04d-%02d', $y, $mo)
+    );
+}}
+
+if (!function_exists('cpms_payroll_statement_db_column_exists')) {
+function cpms_payroll_statement_db_column_exists($pdo, $table, $column) {
+    if (!$pdo) return false;
+    $table = preg_replace('/[^A-Za-z0-9_]/', '', (string)$table);
+    $column = preg_replace('/[^A-Za-z0-9_]/', '', (string)$column);
+    if ($table === '' || $column === '') return false;
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM `" . $table . "` LIKE :col");
+        $st->execute(array(':col' => $column));
+        return (bool)$st->fetch();
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_payroll_statement_normalize_match_text')) {
+function cpms_payroll_statement_normalize_match_text($value) {
+    $value = trim((string)$value);
+    $value = preg_replace('/\s+/u', '', $value);
+    return $value;
+}}
+
+if (!function_exists('cpms_payroll_statement_employee_roster_department')) {
+function cpms_payroll_statement_employee_roster_department($employee) {
+    static $cache = array();
+    if (!is_array($employee)) return '';
+    $name = isset($employee['name']) ? trim((string)$employee['name']) : '';
+    $position = isset($employee['position']) ? trim((string)$employee['position']) : '';
+    if ($name === '' || $position === '') return '';
+    $cacheKey = cpms_payroll_statement_normalize_match_text($name) . '|' . cpms_payroll_statement_normalize_match_text($position);
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+    $cache[$cacheKey] = '';
+
+    if (!class_exists('App\\Core\\Db')) {
+        $dbPath = dirname(__DIR__) . '/core/Db.php';
+        if (is_file($dbPath)) require_once $dbPath;
+    }
+    if (!class_exists('App\\Core\\Db')) return '';
+    $pdo = \App\Core\Db::pdo();
+    if (!$pdo) return '';
+    if (!cpms_payroll_statement_db_column_exists($pdo, 'employees', 'department')) return '';
+    if (!cpms_payroll_statement_db_column_exists($pdo, 'employees', 'position')) return '';
+
+    try {
+        $activeOrder = cpms_payroll_statement_db_column_exists($pdo, 'employees', 'is_active') ? 'is_active DESC,' : '';
+        $st = $pdo->prepare("SELECT name, department, position FROM employees WHERE name = :name AND position = :position ORDER BY " . $activeOrder . " id ASC LIMIT 1");
+        $st->execute(array(':name' => $name, ':position' => $position));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (is_array($row) && isset($row['department']) && trim((string)$row['department']) !== '') {
+            $cache[$cacheKey] = trim((string)$row['department']);
+            return $cache[$cacheKey];
+        }
+
+        $st2 = $pdo->prepare("SELECT name, department, position FROM employees WHERE name = :name ORDER BY " . $activeOrder . " id ASC LIMIT 20");
+        $st2->execute(array(':name' => $name));
+        while ($row2 = $st2->fetch(PDO::FETCH_ASSOC)) {
+            if (!is_array($row2)) continue;
+            $rowPosition = isset($row2['position']) ? (string)$row2['position'] : '';
+            if (cpms_payroll_statement_normalize_match_text($rowPosition) !== cpms_payroll_statement_normalize_match_text($position)) continue;
+            if (isset($row2['department']) && trim((string)$row2['department']) !== '') {
+                $cache[$cacheKey] = trim((string)$row2['department']);
+                return $cache[$cacheKey];
+            }
+        }
+    } catch (Exception $e) {
+        return '';
+    }
+    return '';
+}}
+
+if (!function_exists('cpms_payroll_statement_belong_period')) {
+function cpms_payroll_statement_belong_period($year, $month, $paymentDate) {
+    $base = '';
+    $paymentDate = trim((string)$paymentDate);
+    if (preg_match('/^(\d{4})[-\.\/](\d{1,2})[-\.\/](\d{1,2})/', $paymentDate, $m)) {
+        $base = sprintf('%04d-%02d-01', (int)$m[1], (int)$m[2]);
+    }
+    if ($base === '') {
+        $ym = cpms_company_payroll_normalize_year_month($year, $month);
+        $base = $ym['year'] . '-' . $ym['month'] . '-01';
+    }
+    $ts = strtotime($base . ' -1 month');
+    if ($ts === false) $ts = strtotime(sprintf('%04d-%02d-01 -1 month', (int)$year, (int)$month));
+    if ($ts === false) $ts = time();
+    return array(
+        'year' => date('Y', $ts),
+        'month' => date('m', $ts),
+        'label' => date('Y', $ts) . '년 ' . (int)date('m', $ts) . '월',
+        'ym' => date('Y-m', $ts)
+    );
+}}
+
 if (!function_exists('cpms_payroll_statement_data_from_employee')) {
 function cpms_payroll_statement_data_from_employee($year, $month, $effectiveYear, $effectiveMonth, $version, $employee) {
     $ym = cpms_company_payroll_normalize_year_month($year, $month);
     $publicEmployee = cpms_company_payroll_public_employee($employee, true);
+    if (!isset($publicEmployee['department']) || trim((string)$publicEmployee['department']) === '') {
+        $rosterDepartment = cpms_payroll_statement_employee_roster_department($publicEmployee);
+        if ($rosterDepartment !== '') $publicEmployee['department'] = $rosterDepartment;
+    }
+    $paymentDate = cpms_payroll_statement_payment_date($ym['year'], $ym['month'], $publicEmployee);
+    $payment = cpms_payroll_statement_payment_period($ym['year'], $ym['month'], $paymentDate);
+    $belong = cpms_payroll_statement_belong_period($ym['year'], $ym['month'], $paymentDate);
     return array(
         'ok' => true,
         'year' => $ym['year'],
         'month' => $ym['month'],
+        'payment_year' => $payment['year'],
+        'payment_month' => $payment['month'],
+        'payment_ym' => $payment['ym'],
+        'payment_month_label' => $payment['label'],
+        'belong_year' => $belong['year'],
+        'belong_month' => $belong['month'],
+        'belong_ym' => $belong['ym'],
+        'belong_month_label' => $belong['label'],
         'effective_year' => (string)$effectiveYear,
         'effective_month' => (string)$effectiveMonth,
         'payroll_version_year' => (string)$effectiveYear,
         'payroll_version_month' => (string)$effectiveMonth,
         'company_name' => '주식회사 창명건설',
-        'payment_date' => cpms_payroll_statement_payment_date($ym['year'], $ym['month'], $publicEmployee),
+        'payment_date' => $paymentDate,
         'version' => cpms_company_payroll_public_version($version),
         'employee' => $publicEmployee,
     );
@@ -766,7 +892,7 @@ function cpms_payroll_statement_template_amount_key($label, &$payCounters) {
 if (!function_exists('cpms_payroll_statement_template_basic_value')) {
 function cpms_payroll_statement_template_basic_value($label, $data, $employee) {
     $norm = cpms_payroll_statement_template_normalize_label($label);
-    $belongMonth = $data['year'] . '년 ' . (int)$data['month'] . '월';
+    $belongMonth = isset($data['belong_month_label']) && trim((string)$data['belong_month_label']) !== '' ? (string)$data['belong_month_label'] : ($data['year'] . '년 ' . (int)$data['month'] . '월');
     $map = array(
         '사업장명' => array(isset($data['company_name']) ? $data['company_name'] : '주식회사 창명건설', 'right', false),
         '귀속연월' => array($belongMonth, 'right', false),
@@ -797,7 +923,8 @@ function cpms_payroll_statement_template_prepare($template, $data) {
     $payAmountCol = cpms_payroll_statement_template_find_header_col($template, '지급액');
     $deductAmountCol = cpms_payroll_statement_template_find_header_col($template, '공제액');
     $payCounters = array();
-    $title = $data['year'] . '년 ' . (int)$data['month'] . '월 급여명세서';
+    $titleMonth = isset($data['payment_month_label']) && trim((string)$data['payment_month_label']) !== '' ? (string)$data['payment_month_label'] : ($data['year'] . '년 ' . (int)$data['month'] . '월');
+    $title = $titleMonth . ' 급여명세서';
 
     for ($r = 1; $r <= $template['max_row']; $r++) {
         if (!isset($template['cells'][$r]) || !is_array($template['cells'][$r])) continue;
@@ -895,9 +1022,9 @@ function cpms_payroll_statement_template_scale_style($style, $scale) {
     $scale = (float)$scale;
     if ($scale <= 0) $scale = 1.0;
     return preg_replace_callback('/font-size:([0-9\.]+)pt;/i', function($m) use ($scale) {
-        $size = (float)$m[1] * $scale;
-        if ($size < 6) $size = 6;
-        if ($size > 22) $size = 22;
+        $size = ((float)$m[1] * $scale) + 5;
+        if ($size < 10) $size = 10;
+        if ($size > 30) $size = 30;
         return 'font-size:' . round($size, 2) . 'pt;';
     }, $style);
 }}
@@ -934,12 +1061,15 @@ function cpms_payroll_statement_render_uploaded_template_html($data) {
     $rightMm = isset($margins['right']) ? (float)$margins['right'] : 6.35;
     $topMm = isset($margins['top']) ? (float)$margins['top'] : 19.05;
     $bottomMm = isset($margins['bottom']) ? (float)$margins['bottom'] : 19.05;
+    if ($topMm > 6.0) $topMm = 6.0;
+    if ($bottomMm > 6.0) $bottomMm = 6.0;
     $pageSetup = isset($template['page_setup']) && is_array($template['page_setup']) ? $template['page_setup'] : array();
     $orientation = isset($pageSetup['orientation']) ? (string)$pageSetup['orientation'] : 'portrait';
     $pageWidthMm = ($orientation === 'landscape') ? 297.0 : 210.0;
     $pageHeightMm = ($orientation === 'landscape') ? 210.0 : 297.0;
     $availableWidthPx = (($pageWidthMm - $leftMm - $rightMm) / 25.4) * 96;
     if ($availableWidthPx < 560) $availableWidthPx = 560;
+    $availableWidthPx = $availableWidthPx * 0.84;
     $availableHeightPx = (($pageHeightMm - $topMm - $bottomMm) / 25.4) * 96;
     if ($availableHeightPx < 760) $availableHeightPx = 760;
     $fitWidthScale = $availableWidthPx / $rawTotalWidth;
@@ -951,18 +1081,18 @@ function cpms_payroll_statement_render_uploaded_template_html($data) {
     $widthScale = !empty($pageSetup['fit_to_page']) ? min($excelScale, $fitWidthScale) : min(1.0, $fitWidthScale);
     if ($widthScale <= 0) $widthScale = 1.0;
     $rowScale = $fitHeightScale;
-    if ($rowScale > 1.28) $rowScale = 1.28;
-    if ($rowScale < 0.72) $rowScale = 0.72;
-    $fontScale = min(1.0, max(0.78, min($rowScale, $widthScale * 1.22)));
+    if ($rowScale > 2.05) $rowScale = 2.05;
+    if ($rowScale < 1.00) $rowScale = 1.00;
+    $fontScale = min(1.08, max(0.90, min($rowScale, $widthScale * 1.65)));
     $totalWidth = (int)round($rawTotalWidth * $widthScale);
     if ($totalWidth < 1) $totalWidth = 1;
-    $baseFontSize = max(7.6, 10.5 * $fontScale);
-    $mobileFontSize = max(7.0, 9.5 * $fontScale);
-    $padY = max(1, round(2 * $rowScale, 2));
+    $baseFontSize = max(12.6, (10.5 * $fontScale) + 5);
+    $mobileFontSize = max(12.0, (9.5 * $fontScale) + 5);
+    $padY = max(3, round((2 * $rowScale) + 2, 2));
     $padX = max(2, round(5 * $widthScale, 2));
     $html = '<style>';
     $html .= '@page{margin:' . $topMm . 'mm ' . $rightMm . 'mm ' . $bottomMm . 'mm ' . $leftMm . 'mm;}';
-    $html .= 'body{font-family:"Malgun Gothic","Noto Sans CJK KR","NanumGothic",Arial,sans-serif;color:#111;margin:0;background:#fff}.payroll-template-wrap{width:' . (int)$totalWidth . 'px;margin:0 auto;padding:0;background:#fff;box-sizing:border-box}.payroll-template-table{border-collapse:collapse;table-layout:fixed;width:' . (int)$totalWidth . 'px;font-size:' . round($baseFontSize, 2) . 'pt;page-break-inside:avoid}.payroll-template-table td{padding:' . $padY . 'px ' . $padX . 'px;box-sizing:border-box;word-break:keep-all;white-space:normal;overflow:hidden;line-height:1.2}.payroll-template-table td.generated{text-align:center}.payroll-template-table td.amount{text-align:right}.payroll-template-table td.title-cell{font-size:' . round(max(13, 20 * $fontScale), 2) . 'pt;font-weight:bold;text-align:center}.payroll-template-empty{color:transparent}@media(max-width:900px){.payroll-template-wrap{width:100%;overflow-x:auto}.payroll-template-table{font-size:' . round($mobileFontSize, 2) . 'pt}}@media print{.actions{display:none}.payroll-template-wrap{margin:0 auto;padding:0}}';
+    $html .= 'body{font-family:"Malgun Gothic","Noto Sans CJK KR","NanumGothic",Arial,sans-serif;color:#111;margin:0;background:#fff}.payroll-template-wrap{width:' . (int)$totalWidth . 'px;margin:0 auto;padding:0;background:#fff;box-sizing:border-box}.payroll-template-table{border-collapse:collapse;table-layout:fixed;width:' . (int)$totalWidth . 'px;font-size:' . round($baseFontSize, 2) . 'pt;page-break-inside:avoid}.payroll-template-table td{padding:' . $padY . 'px ' . $padX . 'px;box-sizing:border-box;word-break:keep-all;white-space:normal;overflow:hidden;line-height:1.2}.payroll-template-table td.generated{text-align:center}.payroll-template-table td.amount{text-align:right}.payroll-template-table td.title-cell{font-size:' . round(max(18, (20 * $fontScale) + 5), 2) . 'pt;font-weight:bold;text-align:center}.payroll-template-empty{color:transparent}@media(max-width:900px){.payroll-template-wrap{width:100%;overflow-x:auto}.payroll-template-table{font-size:' . round($mobileFontSize, 2) . 'pt}}@media print{.actions{display:none}.payroll-template-wrap{margin:0 auto;padding:0}}';
     $html .= '</style><div class="payroll-template-wrap"><table class="payroll-template-table"><colgroup>';
     for ($col = $minCol; $col <= $maxCol; $col++) {
         $rawW = isset($template['col_widths'][$col]) ? (int)$template['col_widths'][$col] : $defaultColWidth;
@@ -976,8 +1106,8 @@ function cpms_payroll_statement_render_uploaded_template_html($data) {
         $baseRowHeight = isset($template['default_row_height']) ? (int)$template['default_row_height'] : 22;
         if ($baseRowHeight <= 0) $baseRowHeight = 22;
         $height = isset($template['row_heights'][$row]) ? (int)$template['row_heights'][$row] : $baseRowHeight;
-        $height = (int)round($height * $rowScale);
-        if ($height < 12) $height = 12;
+        $height = (int)round(($height * $rowScale) + 6);
+        if ($height < 18) $height = 18;
         $html .= '<tr style="height:' . $height . 'px">';
         for ($col2 = $minCol; $col2 <= $maxCol; $col2++) {
             if (isset($template['covered'][$row]) && !empty($template['covered'][$row][$col2])) continue;
@@ -1016,8 +1146,9 @@ function cpms_payroll_statement_render_html($data, $printMode) {
     $uploadedTemplateHtml = cpms_payroll_statement_render_uploaded_template_html($data);
     if ($uploadedTemplateHtml !== '') return $uploadedTemplateHtml;
     $e = $data['employee'];
-    $title = $data['year'] . '년 ' . (int)$data['month'] . '월 급여명세서';
-    $belongMonth = $data['year'] . '년 ' . (int)$data['month'] . '월';
+    $belongMonth = isset($data['belong_month_label']) && trim((string)$data['belong_month_label']) !== '' ? (string)$data['belong_month_label'] : ($data['year'] . '년 ' . (int)$data['month'] . '월');
+    $titleMonth = isset($data['payment_month_label']) && trim((string)$data['payment_month_label']) !== '' ? (string)$data['payment_month_label'] : ($data['year'] . '년 ' . (int)$data['month'] . '월');
+    $title = $titleMonth . ' 급여명세서';
     $paymentDate = isset($data['payment_date']) ? (string)$data['payment_date'] : '';
     $bankName = cpms_payroll_statement_value($e, 'bank_name', '');
     $bankAccount = cpms_payroll_statement_value($e, 'bank_account', '');

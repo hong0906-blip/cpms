@@ -46,6 +46,7 @@ if ($canViewCompanyOverhead || $canViewCompanyPayroll) {
 }
 if (Auth::isMaster()) {
     $tabs['drive_check'] = array('label' => 'Drive 점검', 'icon' => 'cloud');
+    $tabs['data_archive'] = array('label' => urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C'), 'icon' => 'archive');
 }
 if ($canManage) {
     $tabs['project_drive_sync'] = array('label' => '프로젝트 Drive 동기화', 'icon' => 'folder-sync');
@@ -125,6 +126,8 @@ if ($tab === 'employees') {
     require __DIR__ . '/../management/overhead/index.php';
 } elseif ($tab === 'drive_check' && Auth::isMaster()) {
     require __DIR__ . '/drive_check.php';
+} elseif ($tab === 'data_archive' && Auth::isMaster()) {
+    require __DIR__ . '/data_archive.php';
 } elseif ($tab === 'project_drive_sync' && $canManage) {
     require __DIR__ . '/project_drive_sync.php';
 } else {
