@@ -8,19 +8,25 @@
 use App\Core\Auth;
 use App\Core\Db;
 
+require_once __DIR__ . '/../../services/CompanyProfitAccessService.php';
+require_once __DIR__ . '/../../services/CompanyOverheadService.php';
+
 $pdo = Db::pdo();
 $user = Auth::user();
 $canManage = (Auth::isMaster() || Auth::canManageEmployees());
 $canLaborManagement = cpms_is_management_department_user($pdo, $user);
+$canViewCompanyOverhead = cpms_can_view_company_overhead($user, $pdo);
 
-if (!$canManage && !$canLaborManagement) {
+if (!$canManage && !$canLaborManagement && !$canViewCompanyOverhead) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. 관리부서 전용 화면입니다.</div>';
     return;
 }
 
 $tab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : '';
 if ($tab === '') {
-    $tab = $canManage ? 'employees' : 'labor_calc';
+    if ($canManage) $tab = 'employees';
+    else if ($canLaborManagement) $tab = 'labor_calc';
+    else $tab = 'company_overhead';
 }
 
 $tabs = array(
@@ -33,6 +39,9 @@ $tabs = array(
     'leave_management' => array('label' => '연차 관리', 'icon' => 'calendar-days'),
 );
 
+if ($canViewCompanyOverhead) {
+    $tabs['company_overhead'] = array('label' => '총관리비', 'icon' => 'building-2');
+}
 if (Auth::isMaster()) {
     $tabs['drive_check'] = array('label' => 'Drive 점검', 'icon' => 'cloud');
 }
@@ -44,10 +53,21 @@ if (!$canManage && $canLaborManagement) {
     $tabs = array(
         'labor_calc' => array('label' => '노무비 계산', 'icon' => 'calculator'),
     );
+    if ($canViewCompanyOverhead) {
+        $tabs['company_overhead'] = array('label' => '총관리비', 'icon' => 'building-2');
+    }
+}
+
+if (!$canManage && !$canLaborManagement && $canViewCompanyOverhead) {
+    $tabs = array(
+        'company_overhead' => array('label' => '총관리비', 'icon' => 'building-2'),
+    );
 }
 
 if (!isset($tabs[$tab])) {
-    $tab = $canManage ? 'employees' : 'labor_calc';
+    if ($canManage) $tab = 'employees';
+    else if ($canLaborManagement) $tab = 'labor_calc';
+    else $tab = 'company_overhead';
 }
 
 if (!function_exists('admin_tab_url')) {
@@ -90,6 +110,8 @@ if ($tab === 'employees') {
     require __DIR__ . '/attendance.php';
 } elseif ($tab === 'leave_management') {
     require __DIR__ . '/leave_management.php';
+} elseif ($tab === 'company_overhead' && $canViewCompanyOverhead) {
+    require __DIR__ . '/../management/overhead/index.php';
 } elseif ($tab === 'drive_check' && Auth::isMaster()) {
     require __DIR__ . '/drive_check.php';
 } elseif ($tab === 'project_drive_sync' && $canManage) {

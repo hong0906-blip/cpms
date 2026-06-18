@@ -14,6 +14,7 @@ require_once __DIR__ . '/../../services/ManagementDriveService.php';
 require_once __DIR__ . '/../../services/ConstructionDriveService.php';
 require_once __DIR__ . '/../../services/SafetyHealthDriveService.php';
 require_once __DIR__ . '/../../services/QualityDriveService.php';
+require_once __DIR__ . '/../../services/CompanyOverheadService.php';
 
 if (!(Auth::isMaster() || Auth::canManageEmployees())) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. 마스터 관리자만 사용할 수 있습니다.</div>';
@@ -61,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $checkResult['safety_health'] = cpms_safety_health_drive_run_admin_check(Db::pdo(), Auth::user(), $safetyHealthProjectId);
             $checkResult['quality'] = cpms_quality_drive_run_admin_check(Db::pdo(), Auth::user(), $qualityProjectId);
             $checkResult['management'] = cpms_management_drive_run_admin_check(Db::pdo(), Auth::user(), $managementProjectId);
+            $checkResult['company_overhead'] = cpms_company_overhead_drive_run_admin_check(Auth::user());
         }
     }
 }
@@ -374,6 +376,34 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%EA%B4%80%EB%A6%AC%20%ED%98%84%EC%9E%AC%EC%9B%94%20%ED%8F%B4%EB%8D%94'), !empty($mgCommonMonth['ok']), isset($mgCommonMonth['message']) ? $mgCommonMonth['message'] : '', isset($mgCommonMonth['http_code']) ? $mgCommonMonth['http_code'] : 0);
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%EA%B4%80%EB%A6%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%97%85%EB%A1%9C%EB%93%9C'), !empty($mgCommonUpload['ok']), isset($mgCommonUpload['message']) ? $mgCommonUpload['message'] : '', isset($mgCommonUpload['http_code']) ? $mgCommonUpload['http_code'] : 0);
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%EA%B4%80%EB%A6%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%82%AD%EC%A0%9C'), !empty($mgCommonDelete['ok']), isset($mgCommonDelete['message']) ? $mgCommonDelete['message'] : '', isset($mgCommonDelete['http_code']) ? $mgCommonDelete['http_code'] : 0);
+            $overheadCheck = (isset($checkResult['company_overhead']) && is_array($checkResult['company_overhead'])) ? $checkResult['company_overhead'] : array();
+            $ohCommon = (isset($overheadCheck['common_documents_folder']) && is_array($overheadCheck['common_documents_folder'])) ? $overheadCheck['common_documents_folder'] : array();
+            $ohCompany = (isset($overheadCheck['company_management_folder']) && is_array($overheadCheck['company_management_folder'])) ? $overheadCheck['company_management_folder'] : array();
+            $ohRoot = (isset($overheadCheck['overhead_folder']) && is_array($overheadCheck['overhead_folder'])) ? $overheadCheck['overhead_folder'] : array();
+            $ohUpload = (isset($overheadCheck['upload']) && is_array($overheadCheck['upload'])) ? $overheadCheck['upload'] : array();
+            $ohDelete = (isset($overheadCheck['delete']) && is_array($overheadCheck['delete'])) ? $overheadCheck['delete'] : array();
+            $ohSupports = (isset($overheadCheck['supports_all_drives_delete']) && is_array($overheadCheck['supports_all_drives_delete'])) ? $overheadCheck['supports_all_drives_delete'] : array();
+            cpms_admin_drive_check_row('총관리비 03_공통문서 폴더', !empty($ohCommon['ok']), isset($ohCommon['message']) ? $ohCommon['message'] : '', isset($ohCommon['http_code']) ? $ohCommon['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 회사관리 폴더', !empty($ohCompany['ok']), isset($ohCompany['message']) ? $ohCompany['message'] : '', isset($ohCompany['http_code']) ? $ohCompany['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 루트 폴더', !empty($ohRoot['ok']), isset($ohRoot['message']) ? $ohRoot['message'] : '', isset($ohRoot['http_code']) ? $ohRoot['http_code'] : 0);
+            $ohCategoryFolders = (isset($overheadCheck['category_folders']) && is_array($overheadCheck['category_folders'])) ? $overheadCheck['category_folders'] : array();
+            foreach ($ohCategoryFolders as $ohCategoryRow) {
+                $ohLabel = isset($ohCategoryRow['label']) ? (string)$ohCategoryRow['label'] : '구분';
+                cpms_admin_drive_check_row('총관리비 ' . $ohLabel . ' 폴더', !empty($ohCategoryRow['ok']), isset($ohCategoryRow['message']) ? $ohCategoryRow['message'] : '', isset($ohCategoryRow['http_code']) ? $ohCategoryRow['http_code'] : 0);
+            }
+            $ohYearFolders = (isset($overheadCheck['year_folders']) && is_array($overheadCheck['year_folders'])) ? $overheadCheck['year_folders'] : array();
+            foreach ($ohYearFolders as $ohYearRow) {
+                $ohLabel = isset($ohYearRow['label']) ? (string)$ohYearRow['label'] : '구분';
+                cpms_admin_drive_check_row('총관리비 ' . $ohLabel . ' 현재연도 폴더', !empty($ohYearRow['ok']), isset($ohYearRow['message']) ? $ohYearRow['message'] : '', isset($ohYearRow['http_code']) ? $ohYearRow['http_code'] : 0);
+            }
+            $ohMonthFolders = (isset($overheadCheck['month_folders']) && is_array($overheadCheck['month_folders'])) ? $overheadCheck['month_folders'] : array();
+            foreach ($ohMonthFolders as $ohMonthRow) {
+                $ohLabel = isset($ohMonthRow['label']) ? (string)$ohMonthRow['label'] : '구분';
+                cpms_admin_drive_check_row('총관리비 ' . $ohLabel . ' 현재월 폴더', !empty($ohMonthRow['ok']), isset($ohMonthRow['message']) ? $ohMonthRow['message'] : '', isset($ohMonthRow['http_code']) ? $ohMonthRow['http_code'] : 0);
+            }
+            cpms_admin_drive_check_row('총관리비 테스트 파일 업로드', !empty($ohUpload['ok']), isset($ohUpload['message']) ? $ohUpload['message'] : '', isset($ohUpload['http_code']) ? $ohUpload['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 테스트 파일 삭제', !empty($ohDelete['ok']), isset($ohDelete['message']) ? $ohDelete['message'] : '', isset($ohDelete['http_code']) ? $ohDelete['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 삭제 API supportsAllDrives', !empty($ohSupports['ok']), isset($ohSupports['message']) ? $ohSupports['message'] : '', isset($ohSupports['http_code']) ? $ohSupports['http_code'] : 0);
           ?>
         </tbody>
       </table>
@@ -441,6 +471,12 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
         <div class="mt-2 text-xs text-gray-500">
           <?php echo h(urldecode('%EA%B3%B5%ED%86%B5%20%EA%B4%80%EB%A6%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%ED%8C%8C%EC%9D%BC%20%49%44')); ?>: <code><?php echo h($checkResult['management']['common_test_file']['id']); ?></code>
           / <?php echo h(urldecode('%ED%8C%8C%EC%9D%BC%EB%AA%85')); ?>: <code><?php echo h(isset($checkResult['management']['common_test_file']['name']) ? $checkResult['management']['common_test_file']['name'] : ''); ?></code>
+        </div>
+      <?php endif; ?>
+      <?php if (!empty($checkResult['company_overhead']['test_file']['id'])): ?>
+        <div class="mt-2 text-xs text-gray-500">
+          총관리비 테스트 파일 ID: <code><?php echo h($checkResult['company_overhead']['test_file']['id']); ?></code>
+          / 파일명: <code><?php echo h(isset($checkResult['company_overhead']['test_file']['name']) ? $checkResult['company_overhead']['test_file']['name'] : ''); ?></code>
         </div>
       <?php endif; ?>
     </div>

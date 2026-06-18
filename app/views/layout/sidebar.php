@@ -18,7 +18,9 @@ $selectedMenu = isset($selectedMenu) ? (string)$selectedMenu : $route;
 $user = \App\Core\Auth::user();
 $role = \App\Core\Auth::userRole();
 require_once __DIR__ . '/../../services/CompanyProfitAccessService.php';
-$canViewCompanyProfitMenu = cpms_can_view_company_profit($user, \App\Core\Db::pdo());
+$sidebarPdo = \App\Core\Db::pdo();
+$canViewCompanyProfitMenu = cpms_can_view_company_profit($user, $sidebarPdo);
+$canViewCompanyOverheadMenu = cpms_can_view_company_overhead($user, $sidebarPdo);
 
 $dashboardType = isset($dashboardType) ? (string)$dashboardType : (isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee');
 if ($dashboardType !== 'employee' && $dashboardType !== 'executive') $dashboardType = 'employee';
@@ -225,6 +227,9 @@ if ($selectedMenu === $dashboardMenu) {
       array('menu' => 'work', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_input'),
       array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status'),
     );
+    if (\App\Core\Auth::canManageEmployees() || $canViewCompanyOverheadMenu) {
+      $mobileNavItems[] = array('menu' => 'management', 'label' => '관리', 'icon' => 'bar-chart-3', 'href' => '?r=' . rawurlencode('관리') . ($canViewCompanyOverheadMenu ? '&tab=company_overhead' : ''));
+    }
     if ($canViewCompanyProfitMenu) {
       $mobileNavItems[] = array('menu' => 'company_profit', 'label' => '경영현황', 'icon' => 'line-chart', 'href' => '?r=company_profit');
     }

@@ -93,6 +93,10 @@ if ($route === 'quality_home') {
 if ($route === 'company_profit' || $route === 'management_profit' || $route === 'company_profit_home' || $route === '회사손익') {
     $route = '경영현황';
 }
+if ($route === 'company_overhead' || $route === 'management_overhead' || $route === 'management/overhead' || $route === 'management/company_overhead' || $route === '총관리비') {
+    $_GET['tab'] = 'company_overhead';
+    $route = '관리';
+}
 
 if ($route === 'construction_home') {
     $route = '공사';
@@ -719,6 +723,8 @@ if ($route === 'management/leave_delete') { require_once __DIR__ . '/../app/view
 if ($route === 'management/attendance_settings_save') { require_once __DIR__ . '/../app/views/management/attendance_settings_save.php'; exit; }
 if ($route === 'management/attendance_geofence_save') { require_once __DIR__ . '/../app/views/management/attendance_geofence_save.php'; exit; }
 if ($route === 'management/attendance_geofence_delete') { require_once __DIR__ . '/../app/views/management/attendance_geofence_delete.php'; exit; }
+if ($route === 'management/overhead_save') { require_once __DIR__ . '/../app/views/management/overhead_save.php'; exit; }
+if ($route === 'management/overhead_delete') { require_once __DIR__ . '/../app/views/management/overhead_delete.php'; exit; }
 // db_setup_attendance 라우트
 if ($route === 'db_setup_attendance') {
     if (!(\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees())) {
