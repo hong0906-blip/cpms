@@ -725,6 +725,12 @@ if ($route === 'management/attendance_geofence_save') { require_once __DIR__ . '
 if ($route === 'management/attendance_geofence_delete') { require_once __DIR__ . '/../app/views/management/attendance_geofence_delete.php'; exit; }
 if ($route === 'management/overhead_save') { require_once __DIR__ . '/../app/views/management/overhead_save.php'; exit; }
 if ($route === 'management/overhead_delete') { require_once __DIR__ . '/../app/views/management/overhead_delete.php'; exit; }
+if ($route === 'management/payroll_upload_preview') { require_once __DIR__ . '/../app/views/management/payroll_upload_preview.php'; exit; }
+if ($route === 'management/payroll_upload_confirm') { require_once __DIR__ . '/../app/views/management/payroll_upload_confirm.php'; exit; }
+if ($route === 'management/payroll_resident_reveal') { require_once __DIR__ . '/../app/views/management/payroll_resident_reveal.php'; exit; }
+if ($route === 'management/payroll_statement') { require_once __DIR__ . '/../app/views/management/payroll_statement.php'; exit; }
+if ($route === 'management/payroll_statement_print') { require_once __DIR__ . '/../app/views/management/payroll_statement_print.php'; exit; }
+if ($route === 'management/payroll_statement_pdf') { require_once __DIR__ . '/../app/views/management/payroll_statement_pdf.php'; exit; }
 // db_setup_attendance 라우트
 if ($route === 'db_setup_attendance') {
     if (!(\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees())) {

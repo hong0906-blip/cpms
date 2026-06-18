@@ -9,11 +9,14 @@ use App\Core\Db;
 
 require_once __DIR__ . '/../../../services/CompanyProfitAccessService.php';
 require_once __DIR__ . '/../../../services/CompanyOverheadService.php';
+require_once __DIR__ . '/../../../services/CompanyPayrollAccessService.php';
 
 $overheadPdo = Db::pdo();
 $overheadUser = Auth::user();
 $canViewCompanyOverhead = cpms_can_view_company_overhead($overheadUser, $overheadPdo);
 $canEditCompanyOverhead = cpms_can_edit_company_overhead($overheadUser, $overheadPdo);
+$canViewCompanyPayroll = cpms_can_view_company_payroll($overheadUser, $overheadPdo);
+$canEditCompanyPayroll = cpms_can_edit_company_payroll($overheadUser, $overheadPdo);
 
 if (!$canViewCompanyOverhead) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다.</div>';
@@ -24,15 +27,19 @@ $categories = cpms_company_overhead_categories();
 $overheadSection = isset($_GET['oh']) ? trim((string)$_GET['oh']) : 'summary';
 if ($overheadSection === '') $overheadSection = 'summary';
 if ($overheadSection !== 'summary' && !isset($categories[$overheadSection])) $overheadSection = 'summary';
+if ($overheadSection === 'payroll' && !$canViewCompanyPayroll) {
+    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">임직원 월급 관리 접근 권한이 없습니다.</div>';
+    return;
+}
 
 $filters = cpms_company_overhead_normalize_filters($_GET);
 $summary = cpms_company_overhead_monthly_summary($filters);
 $listFilters = $filters;
 if ($overheadSection !== 'summary') $listFilters['category'] = $overheadSection;
-$items = cpms_company_overhead_list($listFilters);
+$items = ($overheadSection === 'payroll') ? array() : cpms_company_overhead_list($listFilters);
 
 $editItem = null;
-if ($canEditCompanyOverhead && $overheadSection !== 'summary' && isset($_GET['edit'])) {
+if ($canEditCompanyOverhead && $overheadSection !== 'summary' && $overheadSection !== 'payroll' && isset($_GET['edit'])) {
     $editId = trim((string)$_GET['edit']);
     if ($editId !== '') {
         $editItem = cpms_company_overhead_find($overheadSection, $editId, isset($_GET['edit_year']) ? (int)$_GET['edit_year'] : 0, isset($_GET['edit_month']) ? (int)$_GET['edit_month'] : 0);
@@ -65,6 +72,7 @@ function cpms_overhead_view_val($row, $key, $default) {
 
   <?php require __DIR__ . '/_tabs.php'; ?>
 
+  <?php if ($overheadSection !== 'payroll'): ?>
   <form method="get" action="" class="bg-white border border-gray-200 rounded-2xl p-4">
     <input type="hidden" name="r" value="관리">
     <input type="hidden" name="tab" value="company_overhead">
@@ -110,11 +118,14 @@ function cpms_overhead_view_val($row, $key, $default) {
       <a href="?r=<?php echo urlencode('관리'); ?>&tab=company_overhead&oh=<?php echo urlencode($overheadSection); ?>" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold">초기화</a>
     </div>
   </form>
+  <?php endif; ?>
 
   <?php if ($overheadSection === 'summary'): ?>
     <?php require __DIR__ . '/_summary_cards.php'; ?>
     <?php require __DIR__ . '/_bar_graph.php'; ?>
     <?php require __DIR__ . '/_monthly_table.php'; ?>
+  <?php elseif ($overheadSection === 'payroll'): ?>
+    <?php require __DIR__ . '/payroll.php'; ?>
   <?php else: ?>
     <?php require __DIR__ . '/form.php'; ?>
     <?php require __DIR__ . '/list.php'; ?>

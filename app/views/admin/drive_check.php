@@ -377,14 +377,14 @@ $folders = isset($config['folders']) && is_array($config['folders']) ? $config['
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%EA%B4%80%EB%A6%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%97%85%EB%A1%9C%EB%93%9C'), !empty($mgCommonUpload['ok']), isset($mgCommonUpload['message']) ? $mgCommonUpload['message'] : '', isset($mgCommonUpload['http_code']) ? $mgCommonUpload['http_code'] : 0);
             cpms_admin_drive_check_row(urldecode('%EA%B3%B5%ED%86%B5%EB%AC%B8%EC%84%9C%20%EA%B4%80%EB%A6%AC%20%ED%85%8C%EC%8A%A4%ED%8A%B8%20%EC%82%AD%EC%A0%9C'), !empty($mgCommonDelete['ok']), isset($mgCommonDelete['message']) ? $mgCommonDelete['message'] : '', isset($mgCommonDelete['http_code']) ? $mgCommonDelete['http_code'] : 0);
             $overheadCheck = (isset($checkResult['company_overhead']) && is_array($checkResult['company_overhead'])) ? $checkResult['company_overhead'] : array();
-            $ohCommon = (isset($overheadCheck['common_documents_folder']) && is_array($overheadCheck['common_documents_folder'])) ? $overheadCheck['common_documents_folder'] : array();
-            $ohCompany = (isset($overheadCheck['company_management_folder']) && is_array($overheadCheck['company_management_folder'])) ? $overheadCheck['company_management_folder'] : array();
+            $ohSharedDrive = (isset($overheadCheck['shared_drive']) && is_array($overheadCheck['shared_drive'])) ? $overheadCheck['shared_drive'] : array();
+            $ohCompany = (isset($overheadCheck['management_folder']) && is_array($overheadCheck['management_folder'])) ? $overheadCheck['management_folder'] : ((isset($overheadCheck['company_management_folder']) && is_array($overheadCheck['company_management_folder'])) ? $overheadCheck['company_management_folder'] : array());
             $ohRoot = (isset($overheadCheck['overhead_folder']) && is_array($overheadCheck['overhead_folder'])) ? $overheadCheck['overhead_folder'] : array();
             $ohUpload = (isset($overheadCheck['upload']) && is_array($overheadCheck['upload'])) ? $overheadCheck['upload'] : array();
             $ohDelete = (isset($overheadCheck['delete']) && is_array($overheadCheck['delete'])) ? $overheadCheck['delete'] : array();
             $ohSupports = (isset($overheadCheck['supports_all_drives_delete']) && is_array($overheadCheck['supports_all_drives_delete'])) ? $overheadCheck['supports_all_drives_delete'] : array();
-            cpms_admin_drive_check_row('총관리비 03_공통문서 폴더', !empty($ohCommon['ok']), isset($ohCommon['message']) ? $ohCommon['message'] : '', isset($ohCommon['http_code']) ? $ohCommon['http_code'] : 0);
-            cpms_admin_drive_check_row('총관리비 회사관리 폴더', !empty($ohCompany['ok']), isset($ohCompany['message']) ? $ohCompany['message'] : '', isset($ohCompany['http_code']) ? $ohCompany['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 CPMS_협업툴 공유드라이브', !empty($ohSharedDrive['ok']), isset($ohSharedDrive['message']) ? $ohSharedDrive['message'] : '', isset($ohSharedDrive['http_code']) ? $ohSharedDrive['http_code'] : 0);
+            cpms_admin_drive_check_row('총관리비 04_관리부 폴더', !empty($ohCompany['ok']), isset($ohCompany['message']) ? $ohCompany['message'] : '', isset($ohCompany['http_code']) ? $ohCompany['http_code'] : 0);
             cpms_admin_drive_check_row('총관리비 루트 폴더', !empty($ohRoot['ok']), isset($ohRoot['message']) ? $ohRoot['message'] : '', isset($ohRoot['http_code']) ? $ohRoot['http_code'] : 0);
             $ohCategoryFolders = (isset($overheadCheck['category_folders']) && is_array($overheadCheck['category_folders'])) ? $overheadCheck['category_folders'] : array();
             foreach ($ohCategoryFolders as $ohCategoryRow) {

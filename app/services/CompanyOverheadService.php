@@ -5,6 +5,8 @@
  */
 
 require_once __DIR__ . '/GoogleDriveHelper.php';
+require_once __DIR__ . '/CompanyOverheadDriveService.php';
+require_once __DIR__ . '/CompanyPayrollService.php';
 
 if (!function_exists('cpms_company_overhead_categories')) {
 function cpms_company_overhead_categories() {
@@ -368,8 +370,14 @@ function cpms_company_overhead_summary($months) {
         $month = substr($ym, 5, 2);
         foreach ($categories as $key => $meta) {
             $items = cpms_company_overhead_load_month($key, $year, $month, false);
-            if (count($items) === 0) continue;
-            $amount = cpms_company_overhead_sum_record($items);
+            if (count($items) === 0 && $key === 'payroll' && function_exists('cpms_company_payroll_month_summary')) {
+                $payrollSummary = cpms_company_payroll_month_summary($year, $month);
+                if (empty($payrollSummary['has_data'])) continue;
+                $amount = isset($payrollSummary['total_net_pay']) ? (float)$payrollSummary['total_net_pay'] : 0.0;
+            } else {
+                if (count($items) === 0) continue;
+                $amount = cpms_company_overhead_sum_record($items);
+            }
             $summary['categories'][$key]['amount'] += $amount;
             $summary['categories'][$key]['has_data'] = true;
             $summary['has_data'] = true;
@@ -490,10 +498,15 @@ function cpms_company_overhead_monthly_summary($filters) {
             $monthFilters = $filters;
             $monthFilters['category'] = $category;
             $items = cpms_company_overhead_load_month($category, $row['year'], $row['month'], false);
-            foreach ($items as $item) {
-                if (!is_array($item)) continue;
-                if (!isset($item['category'])) $item['category'] = $category;
-                if (cpms_company_overhead_record_matches($item, $monthFilters)) $amount += cpms_company_overhead_sum_record($item);
+            if (count($items) === 0 && $category === 'payroll' && trim((string)$filters['q']) === '' && function_exists('cpms_company_payroll_month_summary')) {
+                $payrollSummary = cpms_company_payroll_month_summary($row['year'], $row['month']);
+                if (!empty($payrollSummary['has_data'])) $amount += isset($payrollSummary['total_net_pay']) ? (float)$payrollSummary['total_net_pay'] : 0.0;
+            } else {
+                foreach ($items as $item) {
+                    if (!is_array($item)) continue;
+                    if (!isset($item['category'])) $item['category'] = $category;
+                    if (cpms_company_overhead_record_matches($item, $monthFilters)) $amount += cpms_company_overhead_sum_record($item);
+                }
             }
             $row['categories'][$category] = $amount;
             $row['total'] += $amount;
@@ -632,44 +645,12 @@ if (!function_exists('cpms_company_overhead_ensure_drive_month_folder')) {
 function cpms_company_overhead_ensure_drive_month_folder($category, $year, $month, $context) {
     $meta = cpms_company_overhead_category_meta($category);
     if (!is_array($meta)) return array('ok' => false, 'message' => 'Invalid company overhead category.', 'http_code' => 0);
-    $commonId = cpms_drive_folder_id('common_documents');
-    if ($commonId === '') return array('ok' => false, 'message' => 'Common documents folder ID is not configured.', 'http_code' => 0);
     if (!is_array($context)) $context = array();
     $context['section'] = 'company_overhead';
     $context['document_year'] = (string)$year;
     $context['document_month'] = (string)$month;
     $context['document_type'] = $meta['label'];
-
-    $company = cpms_drive_find_or_create_folder('회사관리', $commonId, $context);
-    if (empty($company['ok']) || !isset($company['file']['id'])) return array('ok' => false, 'message' => isset($company['message']) ? $company['message'] : 'Company management folder failed.', 'http_code' => isset($company['http_code']) ? (int)$company['http_code'] : 0);
-    $companyId = (string)$company['file']['id'];
-
-    $overhead = cpms_drive_find_or_create_folder('총관리비', $companyId, $context);
-    if (empty($overhead['ok']) || !isset($overhead['file']['id'])) return array('ok' => false, 'message' => isset($overhead['message']) ? $overhead['message'] : 'Company overhead folder failed.', 'http_code' => isset($overhead['http_code']) ? (int)$overhead['http_code'] : 0);
-    $overheadId = (string)$overhead['file']['id'];
-
-    $type = cpms_drive_find_or_create_folder($meta['drive_label'], $overheadId, $context);
-    if (empty($type['ok']) || !isset($type['file']['id'])) return array('ok' => false, 'message' => isset($type['message']) ? $type['message'] : 'Company overhead category folder failed.', 'http_code' => isset($type['http_code']) ? (int)$type['http_code'] : 0);
-    $typeId = (string)$type['file']['id'];
-
-    $yearFolder = cpms_drive_find_or_create_folder((string)$year, $typeId, $context);
-    if (empty($yearFolder['ok']) || !isset($yearFolder['file']['id'])) return array('ok' => false, 'message' => isset($yearFolder['message']) ? $yearFolder['message'] : 'Company overhead year folder failed.', 'http_code' => isset($yearFolder['http_code']) ? (int)$yearFolder['http_code'] : 0);
-    $yearId = (string)$yearFolder['file']['id'];
-
-    $monthFolder = cpms_drive_find_or_create_folder((string)$month, $yearId, $context);
-    if (empty($monthFolder['ok']) || !isset($monthFolder['file']['id'])) return array('ok' => false, 'message' => isset($monthFolder['message']) ? $monthFolder['message'] : 'Company overhead month folder failed.', 'http_code' => isset($monthFolder['http_code']) ? (int)$monthFolder['http_code'] : 0);
-
-    return array(
-        'ok' => true,
-        'folder_id' => (string)$monthFolder['file']['id'],
-        'company_management_folder_id' => $companyId,
-        'overhead_folder_id' => $overheadId,
-        'category_folder_id' => $typeId,
-        'year_folder_id' => $yearId,
-        'month_folder_id' => (string)$monthFolder['file']['id'],
-        'message' => 'Company overhead Drive folder is ready.',
-        'http_code' => isset($monthFolder['http_code']) ? (int)$monthFolder['http_code'] : 0,
-    );
+    return cpms_company_overhead_drive_ensure_month_folder($category, $meta['drive_label'], $year, $month, $context);
 }}
 
 if (!function_exists('cpms_company_overhead_build_drive_name')) {
@@ -871,7 +852,8 @@ function cpms_company_overhead_drive_run_admin_check($userContext) {
     $month = date('m');
     $categories = cpms_company_overhead_categories();
     $result = array(
-        'common_documents_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
+        'shared_drive' => array('ok' => false, 'http_code' => 0, 'message' => ''),
+        'management_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'company_management_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'overhead_folder' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'category_folders' => array(),
@@ -882,12 +864,12 @@ function cpms_company_overhead_drive_run_admin_check($userContext) {
         'supports_all_drives_delete' => array('ok' => false, 'http_code' => 0, 'message' => ''),
         'test_file' => array(),
     );
-    $commonId = cpms_drive_folder_id('common_documents');
-    if ($commonId !== '') {
-        $commonInfo = cpms_drive_get_file_info($commonId);
-        $result['common_documents_folder'] = array('ok' => !empty($commonInfo['ok']), 'http_code' => isset($commonInfo['http_code']) ? (int)$commonInfo['http_code'] : 0, 'message' => isset($commonInfo['message']) ? (string)$commonInfo['message'] : '');
+
+    $sharedDriveId = cpms_drive_shared_drive_id();
+    if ($sharedDriveId !== '') {
+        $result['shared_drive'] = array('ok' => true, 'http_code' => 0, 'message' => 'CPMS_협업툴 shared drive ID is configured.');
     } else {
-        $result['common_documents_folder']['message'] = 'Common documents folder ID is not configured.';
+        $result['shared_drive']['message'] = 'Shared drive ID is not configured.';
     }
 
     foreach ($categories as $category => $meta) {
@@ -896,18 +878,21 @@ function cpms_company_overhead_drive_run_admin_check($userContext) {
         $result['category_folders'][$category] = array('label' => $meta['drive_label'], 'ok' => !empty($target['category_folder_id']), 'http_code' => isset($target['http_code']) ? (int)$target['http_code'] : 0, 'message' => !empty($target['category_folder_id']) ? $meta['drive_label'] . ' folder is ready.' : (isset($target['message']) ? (string)$target['message'] : 'Folder check failed.'));
         $result['year_folders'][$category] = array('label' => $meta['drive_label'], 'ok' => !empty($target['year_folder_id']), 'http_code' => isset($target['http_code']) ? (int)$target['http_code'] : 0, 'message' => !empty($target['year_folder_id']) ? $year . ' folder is ready.' : (isset($target['message']) ? (string)$target['message'] : 'Year folder check failed.'));
         $result['month_folders'][$category] = array('label' => $meta['drive_label'], 'ok' => !empty($target['month_folder_id']), 'http_code' => isset($target['http_code']) ? (int)$target['http_code'] : 0, 'message' => !empty($target['month_folder_id']) ? $month . ' folder is ready.' : (isset($target['message']) ? (string)$target['message'] : 'Month folder check failed.'));
-        if (!empty($target['company_management_folder_id'])) $result['company_management_folder'] = array('ok' => true, 'http_code' => isset($target['http_code']) ? (int)$target['http_code'] : 0, 'message' => '회사관리 folder is ready.');
+        if (!empty($target['management_folder_id'])) {
+            $result['management_folder'] = array('ok' => true, 'http_code' => isset($target['http_code']) ? (int)$target['http_code'] : 0, 'message' => '04_관리부 folder is ready.');
+            $result['company_management_folder'] = $result['management_folder'];
+        }
         if (!empty($target['overhead_folder_id'])) $result['overhead_folder'] = array('ok' => true, 'http_code' => isset($target['http_code']) ? (int)$target['http_code'] : 0, 'message' => '총관리비 folder is ready.');
     }
 
-    $uploadTarget = cpms_company_overhead_ensure_drive_month_folder('etc', $year, $month, array('user' => $userContext, 'section' => 'admin_drive_check_company_overhead', 'document_type' => '기타', 'document_year' => $year, 'document_month' => $month));
+    $uploadTarget = cpms_company_overhead_ensure_drive_month_folder('payroll', $year, $month, array('user' => $userContext, 'section' => 'admin_drive_check_company_overhead', 'document_type' => '임직원월급', 'document_year' => $year, 'document_month' => $month));
     if (!empty($uploadTarget['ok'])) {
         $tmpDir = cpms_drive_storage_root() . '/tmp/company_overhead_drive_check';
         if (cpms_drive_ensure_dir($tmpDir)) {
             $tmpPath = @tempnam($tmpDir, 'oh_drive_');
             if ($tmpPath !== false && @file_put_contents($tmpPath, "CPMS company overhead Drive check\n" . date('Y-m-d H:i:s') . "\n") !== false) {
-                $fileName = 'CPMS_Company_Overhead_Check_' . date('Ymd_His') . '.txt';
-                $context2 = array('user' => $userContext, 'section' => 'admin_drive_check_company_overhead', 'document_type' => '기타', 'document_year' => $year, 'document_month' => $month, 'original_name' => $fileName, 'target_folder_id' => (string)$uploadTarget['folder_id']);
+                $fileName = 'CPMS_Payroll_Overhead_Check_' . date('Ymd_His') . '.txt';
+                $context2 = array('user' => $userContext, 'section' => 'admin_drive_check_company_overhead', 'document_type' => '임직원월급', 'document_year' => $year, 'document_month' => $month, 'original_name' => $fileName, 'target_folder_id' => (string)$uploadTarget['folder_id']);
                 $upload = cpms_drive_upload_file($tmpPath, $fileName, (string)$uploadTarget['folder_id'], 'text/plain', $context2);
                 $result['upload'] = array('ok' => !empty($upload['ok']), 'http_code' => isset($upload['http_code']) ? (int)$upload['http_code'] : 0, 'message' => isset($upload['message']) ? (string)$upload['message'] : '');
                 if (!empty($upload['ok']) && isset($upload['file']) && is_array($upload['file'])) {

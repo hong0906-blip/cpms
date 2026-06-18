@@ -35,6 +35,12 @@ $category = isset($_POST['category']) ? trim((string)$_POST['category']) : '';
 $id = isset($_POST['id']) ? trim((string)$_POST['id']) : '';
 $file = (isset($_FILES['attachment']) && is_array($_FILES['attachment'])) ? $_FILES['attachment'] : null;
 
+if ($category === 'payroll') {
+    flash_set('danger', '임직원 월급은 급여대장 업로드/확정 방식으로만 저장할 수 있습니다.');
+    header('Location: ?r=' . urlencode('관리') . '&tab=company_overhead&oh=payroll');
+    exit;
+}
+
 if ($id !== '') {
     $result = cpms_company_overhead_update($category, $id, $_POST, $file, $user);
 } else {

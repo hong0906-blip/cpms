@@ -36,6 +36,12 @@ $id = isset($_POST['id']) ? trim((string)$_POST['id']) : '';
 $year = isset($_POST['year']) ? (int)$_POST['year'] : 0;
 $month = isset($_POST['month']) ? (int)$_POST['month'] : 0;
 
+if ($category === 'payroll') {
+    flash_set('danger', '임직원 월급은 급여대장 기준월 버전으로 관리됩니다.');
+    header('Location: ?r=' . urlencode('관리') . '&tab=company_overhead&oh=payroll');
+    exit;
+}
+
 $result = cpms_company_overhead_delete($category, $id, $year, $month, $user);
 if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
 if (!empty($result['ok'])) {
