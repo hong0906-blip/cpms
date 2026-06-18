@@ -221,19 +221,111 @@ function cpms_payroll_statement_template_color_css($value) {
     return '#' . $value;
 }}
 
+if (!function_exists('cpms_payroll_statement_template_indexed_colors')) {
+function cpms_payroll_statement_template_indexed_colors() {
+    return array(
+        0 => '#000000', 1 => '#FFFFFF', 2 => '#FF0000', 3 => '#00FF00', 4 => '#0000FF', 5 => '#FFFF00',
+        6 => '#FF00FF', 7 => '#00FFFF', 8 => '#000000', 9 => '#FFFFFF', 10 => '#FF0000', 11 => '#00FF00',
+        12 => '#0000FF', 13 => '#FFFF00', 14 => '#FF00FF', 15 => '#00FFFF', 16 => '#800000', 17 => '#008000',
+        18 => '#000080', 19 => '#808000', 20 => '#800080', 21 => '#008080', 22 => '#C0C0C0', 23 => '#808080',
+        24 => '#9999FF', 25 => '#993366', 26 => '#FFFFCC', 27 => '#CCFFFF', 28 => '#660066', 29 => '#FF8080',
+        30 => '#0066CC', 31 => '#CCCCFF', 32 => '#000080', 33 => '#FF00FF', 34 => '#FFFF00', 35 => '#00FFFF',
+        36 => '#800080', 37 => '#800000', 38 => '#008080', 39 => '#0000FF', 40 => '#00CCFF', 41 => '#CCFFFF',
+        42 => '#CCFFCC', 43 => '#FFFF99', 44 => '#99CCFF', 45 => '#FF99CC', 46 => '#CC99FF', 47 => '#FFCC99',
+        48 => '#3366FF', 49 => '#33CCCC', 50 => '#99CC00', 51 => '#FFCC00', 52 => '#FF9900', 53 => '#FF6600',
+        54 => '#666699', 55 => '#969696', 56 => '#003366', 57 => '#339966', 58 => '#003300', 59 => '#333300',
+        60 => '#993300', 61 => '#993366', 62 => '#333399', 63 => '#333333', 64 => ''
+    );
+}}
+
+if (!function_exists('cpms_payroll_statement_template_apply_tint')) {
+function cpms_payroll_statement_template_apply_tint($hex, $tint) {
+    $hex = strtoupper(preg_replace('/[^0-9A-F]/', '', (string)$hex));
+    if (strlen($hex) >= 6) $hex = substr($hex, -6);
+    if (strlen($hex) !== 6) return '';
+    $tint = (float)$tint;
+    $out = '';
+    for ($i = 0; $i < 3; $i++) {
+        $part = substr($hex, $i * 2, 2);
+        $channel = hexdec($part);
+        if ($tint < 0) {
+            $channel = (int)round($channel * (1 + $tint));
+        } else if ($tint > 0) {
+            $channel = (int)round($channel + ((255 - $channel) * $tint));
+        }
+        if ($channel < 0) $channel = 0;
+        if ($channel > 255) $channel = 255;
+        $out .= sprintf('%02X', $channel);
+    }
+    return '#' . $out;
+}}
+
+if (!function_exists('cpms_payroll_statement_template_theme_colors')) {
+function cpms_payroll_statement_template_theme_colors($zip) {
+    $colors = array(
+        0 => '#FFFFFF', 1 => '#000000', 2 => '#EEECE1', 3 => '#1F497D',
+        4 => '#4F81BD', 5 => '#C0504D', 6 => '#9BBB59', 7 => '#8064A2',
+        8 => '#4BACC6', 9 => '#F79646', 10 => '#0000FF', 11 => '#800080'
+    );
+    $xml = $zip->getFromName('xl/theme/theme1.xml');
+    if ($xml === false) return $colors;
+    $theme = @simplexml_load_string($xml);
+    if (!$theme) return $colors;
+    $theme->registerXPathNamespace('a', 'http://schemas.openxmlformats.org/drawingml/2006/main');
+    $names = array('lt1', 'dk1', 'lt2', 'dk2', 'accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6', 'hlink', 'folHlink');
+    for ($i = 0; $i < count($names); $i++) {
+        $nodes = $theme->xpath('//a:clrScheme/a:' . $names[$i]);
+        if (!is_array($nodes) || count($nodes) < 1) continue;
+        $node = $nodes[0];
+        $found = '';
+        $children = $node->children('http://schemas.openxmlformats.org/drawingml/2006/main');
+        if (isset($children->srgbClr)) {
+            $attrs = $children->srgbClr->attributes();
+            if (isset($attrs['val'])) $found = cpms_payroll_statement_template_color_css((string)$attrs['val']);
+        }
+        if ($found === '' && isset($children->sysClr)) {
+            $attrs2 = $children->sysClr->attributes();
+            if (isset($attrs2['lastClr'])) $found = cpms_payroll_statement_template_color_css((string)$attrs2['lastClr']);
+        }
+        if ($found !== '') $colors[$i] = $found;
+    }
+    return $colors;
+}}
+
+if (!function_exists('cpms_payroll_statement_template_color_from_node')) {
+function cpms_payroll_statement_template_color_from_node($colorNode, $themeColors) {
+    if (!$colorNode) return '';
+    $attrs = $colorNode->attributes();
+    if (isset($attrs['rgb'])) return cpms_payroll_statement_template_color_css((string)$attrs['rgb']);
+    if (isset($attrs['indexed'])) {
+        $indexed = cpms_payroll_statement_template_indexed_colors();
+        $idx = (int)$attrs['indexed'];
+        return isset($indexed[$idx]) ? $indexed[$idx] : '';
+    }
+    if (isset($attrs['theme'])) {
+        $theme = (int)$attrs['theme'];
+        $base = isset($themeColors[$theme]) ? $themeColors[$theme] : '';
+        if ($base === '') return '';
+        if (isset($attrs['tint'])) return cpms_payroll_statement_template_apply_tint($base, (string)$attrs['tint']);
+        return $base;
+    }
+    return '';
+}}
+
 if (!function_exists('cpms_payroll_statement_template_border_css')) {
-function cpms_payroll_statement_template_border_css($sideNode, $sideName) {
+function cpms_payroll_statement_template_border_css($sideNode, $sideName, $themeColors) {
     if (!$sideNode || !isset($sideNode['style']) || trim((string)$sideNode['style']) === '') return '';
-    $width = ((string)$sideNode['style'] === 'medium' || (string)$sideNode['style'] === 'thick') ? '2px' : '1px';
+    $borderStyle = (string)$sideNode['style'];
+    $width = ($borderStyle === 'medium' || $borderStyle === 'thick' || $borderStyle === 'double') ? '2px' : '1px';
+    $cssStyle = ($borderStyle === 'dashed' || $borderStyle === 'dashDot' || $borderStyle === 'dashDotDot') ? 'dashed' : 'solid';
+    if ($borderStyle === 'dotted' || $borderStyle === 'hair') $cssStyle = 'dotted';
+    if ($borderStyle === 'double') $cssStyle = 'double';
     $color = '#111111';
     if (isset($sideNode->color)) {
-        $attrs = $sideNode->color->attributes();
-        if (isset($attrs['rgb'])) {
-            $parsed = cpms_payroll_statement_template_color_css((string)$attrs['rgb']);
-            if ($parsed !== '') $color = $parsed;
-        }
+        $parsed = cpms_payroll_statement_template_color_from_node($sideNode->color, $themeColors);
+        if ($parsed !== '') $color = $parsed;
     }
-    return 'border-' . $sideName . ':' . $width . ' solid ' . $color . ';';
+    return 'border-' . $sideName . ':' . $width . ' ' . $cssStyle . ' ' . $color . ';';
 }}
 
 if (!function_exists('cpms_payroll_statement_template_parse_styles')) {
@@ -243,19 +335,25 @@ function cpms_payroll_statement_template_parse_styles($zip) {
     if ($xml === false) return $styles;
     $sx = @simplexml_load_string($xml);
     if (!$sx) return $styles;
+    $themeColors = cpms_payroll_statement_template_theme_colors($zip);
 
     $fonts = array();
     if (isset($sx->fonts->font)) {
         foreach ($sx->fonts->font as $font) {
-            $item = array('bold' => false, 'size' => '', 'color' => '');
+            $item = array('bold' => false, 'italic' => false, 'underline' => false, 'size' => '', 'color' => '', 'family' => '');
             if (isset($font->b)) $item['bold'] = true;
+            if (isset($font->i)) $item['italic'] = true;
+            if (isset($font->u)) $item['underline'] = true;
             if (isset($font->sz)) {
                 $attrs = $font->sz->attributes();
                 if (isset($attrs['val'])) $item['size'] = (string)$attrs['val'];
             }
             if (isset($font->color)) {
-                $attrs2 = $font->color->attributes();
-                if (isset($attrs2['rgb'])) $item['color'] = cpms_payroll_statement_template_color_css((string)$attrs2['rgb']);
+                $item['color'] = cpms_payroll_statement_template_color_from_node($font->color, $themeColors);
+            }
+            if (isset($font->name)) {
+                $attrsName = $font->name->attributes();
+                if (isset($attrsName['val'])) $item['family'] = (string)$attrsName['val'];
             }
             $fonts[] = $item;
         }
@@ -265,9 +363,17 @@ function cpms_payroll_statement_template_parse_styles($zip) {
     if (isset($sx->fills->fill)) {
         foreach ($sx->fills->fill as $fill) {
             $color = '';
-            if (isset($fill->patternFill->fgColor)) {
-                $attrs3 = $fill->patternFill->fgColor->attributes();
-                if (isset($attrs3['rgb'])) $color = cpms_payroll_statement_template_color_css((string)$attrs3['rgb']);
+            if (isset($fill->patternFill)) {
+                $patternAttrs = $fill->patternFill->attributes();
+                $pattern = isset($patternAttrs['patternType']) ? (string)$patternAttrs['patternType'] : '';
+                if ($pattern !== 'none' && $pattern !== 'gray125') {
+                    if (isset($fill->patternFill->fgColor)) {
+                        $color = cpms_payroll_statement_template_color_from_node($fill->patternFill->fgColor, $themeColors);
+                    }
+                    if ($color === '' && isset($fill->patternFill->bgColor)) {
+                        $color = cpms_payroll_statement_template_color_from_node($fill->patternFill->bgColor, $themeColors);
+                    }
+                }
             }
             $fills[] = $color;
         }
@@ -277,10 +383,10 @@ function cpms_payroll_statement_template_parse_styles($zip) {
     if (isset($sx->borders->border)) {
         foreach ($sx->borders->border as $border) {
             $css = '';
-            $css .= cpms_payroll_statement_template_border_css(isset($border->left) ? $border->left : null, 'left');
-            $css .= cpms_payroll_statement_template_border_css(isset($border->right) ? $border->right : null, 'right');
-            $css .= cpms_payroll_statement_template_border_css(isset($border->top) ? $border->top : null, 'top');
-            $css .= cpms_payroll_statement_template_border_css(isset($border->bottom) ? $border->bottom : null, 'bottom');
+            $css .= cpms_payroll_statement_template_border_css(isset($border->left) ? $border->left : null, 'left', $themeColors);
+            $css .= cpms_payroll_statement_template_border_css(isset($border->right) ? $border->right : null, 'right', $themeColors);
+            $css .= cpms_payroll_statement_template_border_css(isset($border->top) ? $border->top : null, 'top', $themeColors);
+            $css .= cpms_payroll_statement_template_border_css(isset($border->bottom) ? $border->bottom : null, 'bottom', $themeColors);
             $borders[] = $css;
         }
     }
@@ -292,8 +398,11 @@ function cpms_payroll_statement_template_parse_styles($zip) {
             $fontId = isset($xf['fontId']) ? (int)$xf['fontId'] : -1;
             if ($fontId >= 0 && isset($fonts[$fontId])) {
                 if (!empty($fonts[$fontId]['bold'])) $css2 .= 'font-weight:bold;';
+                if (!empty($fonts[$fontId]['italic'])) $css2 .= 'font-style:italic;';
+                if (!empty($fonts[$fontId]['underline'])) $css2 .= 'text-decoration:underline;';
                 if ($fonts[$fontId]['size'] !== '') $css2 .= 'font-size:' . max(8, min(22, (float)$fonts[$fontId]['size'])) . 'pt;';
                 if ($fonts[$fontId]['color'] !== '') $css2 .= 'color:' . $fonts[$fontId]['color'] . ';';
+                if ($fonts[$fontId]['family'] !== '') $css2 .= 'font-family:"' . str_replace('"', '', $fonts[$fontId]['family']) . '","Malgun Gothic","Noto Sans CJK KR",sans-serif;';
             }
             $fillId = isset($xf['fillId']) ? (int)$xf['fillId'] : -1;
             if ($fillId > 1 && isset($fills[$fillId]) && $fills[$fillId] !== '') $css2 .= 'background-color:' . $fills[$fillId] . ';';
@@ -376,9 +485,22 @@ function cpms_payroll_statement_template_dimension($ref) {
     return array($maxRow, $maxCol);
 }}
 
+if (!function_exists('cpms_payroll_statement_template_col_width_px')) {
+function cpms_payroll_statement_template_col_width_px($width) {
+    $width = (float)$width;
+    if ($width <= 0) return 0;
+    if ($width < 1) return (int)round($width * 12);
+    return (int)floor(($width * 7) + 5);
+}}
+
+if (!function_exists('cpms_payroll_statement_template_inch_to_mm')) {
+function cpms_payroll_statement_template_inch_to_mm($value) {
+    return round(((float)$value) * 25.4, 2);
+}}
+
 if (!function_exists('cpms_payroll_statement_parse_template_file')) {
 function cpms_payroll_statement_parse_template_file($path) {
-    $result = array('ok' => false, 'message' => '', 'sheet_name' => '', 'cells' => array(), 'merges' => array(), 'covered' => array(), 'styles' => array(), 'col_widths' => array(), 'row_heights' => array(), 'max_row' => 1, 'max_col' => 1);
+    $result = array('ok' => false, 'message' => '', 'sheet_name' => '', 'cells' => array(), 'merges' => array(), 'covered' => array(), 'styles' => array(), 'col_widths' => array(), 'row_heights' => array(), 'max_row' => 1, 'max_col' => 1, 'default_col_width' => 64, 'default_row_height' => 22, 'page_margins_mm' => array(), 'page_setup' => array());
     if (!is_file($path)) {
         $result['message'] = '급여명세서 양식 파일을 찾지 못했습니다.';
         return $result;
@@ -410,6 +532,35 @@ function cpms_payroll_statement_parse_template_file($path) {
     $styles = cpms_payroll_statement_template_parse_styles($zip);
     $maxRow = 1;
     $maxCol = 1;
+    $defaultColWidth = 64;
+    $defaultRowHeight = 22;
+    if (isset($sheet->sheetFormatPr)) {
+        if (isset($sheet->sheetFormatPr['defaultColWidth'])) {
+            $defaultColWidth = cpms_payroll_statement_template_col_width_px((float)$sheet->sheetFormatPr['defaultColWidth']);
+        }
+        if (isset($sheet->sheetFormatPr['baseColWidth']) && !isset($sheet->sheetFormatPr['defaultColWidth'])) {
+            $defaultColWidth = cpms_payroll_statement_template_col_width_px((float)$sheet->sheetFormatPr['baseColWidth']);
+        }
+        if (isset($sheet->sheetFormatPr['defaultRowHeight'])) {
+            $defaultRowHeight = (int)round(max(12, min(90, (float)$sheet->sheetFormatPr['defaultRowHeight'] * 1.3333)));
+        }
+    }
+    if ($defaultColWidth <= 0) $defaultColWidth = 64;
+    if ($defaultRowHeight <= 0) $defaultRowHeight = 22;
+    $pageMargins = array('left' => 6.35, 'right' => 6.35, 'top' => 19.05, 'bottom' => 19.05);
+    if (isset($sheet->pageMargins)) {
+        foreach (array('left', 'right', 'top', 'bottom') as $marginName) {
+            if (isset($sheet->pageMargins[$marginName])) $pageMargins[$marginName] = cpms_payroll_statement_template_inch_to_mm((string)$sheet->pageMargins[$marginName]);
+        }
+    }
+    $pageSetup = array('orientation' => 'portrait', 'scale' => 100, 'fit_to_page' => false);
+    if (isset($sheet->pageSetup)) {
+        if (isset($sheet->pageSetup['orientation'])) $pageSetup['orientation'] = (string)$sheet->pageSetup['orientation'];
+        if (isset($sheet->pageSetup['scale'])) $pageSetup['scale'] = (int)$sheet->pageSetup['scale'];
+    }
+    if (isset($sheet->sheetPr->pageSetUpPr) && isset($sheet->sheetPr->pageSetUpPr['fitToPage']) && (string)$sheet->sheetPr->pageSetUpPr['fitToPage'] === '1') {
+        $pageSetup['fit_to_page'] = true;
+    }
     if (isset($sheet->dimension) && isset($sheet->dimension['ref'])) {
         $dim = cpms_payroll_statement_template_dimension((string)$sheet->dimension['ref']);
         $maxRow = max($maxRow, $dim[0]);
@@ -421,7 +572,9 @@ function cpms_payroll_statement_parse_template_file($path) {
             $min = isset($colNode['min']) ? (int)$colNode['min'] : 1;
             $max = isset($colNode['max']) ? (int)$colNode['max'] : $min;
             $width = isset($colNode['width']) ? (float)$colNode['width'] : 8.43;
-            $px = (int)round(max(18, min(160, $width * 7)));
+            $px = cpms_payroll_statement_template_col_width_px($width);
+            if ($px < 8) $px = 8;
+            if ($px > 240) $px = 240;
             for ($cc = $min; $cc <= $max; $cc++) $colWidths[$cc] = $px;
             if ($max > $maxCol) $maxCol = $max;
         }
@@ -432,7 +585,7 @@ function cpms_payroll_statement_parse_template_file($path) {
         $r = isset($rowNode['r']) ? (int)$rowNode['r'] : 0;
         if ($r <= 0) continue;
         if ($r > $maxRow) $maxRow = $r;
-        if (isset($rowNode['ht'])) $rowHeights[$r] = (int)round(max(14, min(70, (float)$rowNode['ht'] * 1.33)));
+        if (isset($rowNode['ht'])) $rowHeights[$r] = (int)round(max(12, min(90, (float)$rowNode['ht'] * 1.3333)));
         foreach ($rowNode->c as $cell) {
             $ref = isset($cell['r']) ? (string)$cell['r'] : '';
             $pos = cpms_payroll_statement_template_ref_to_pos($ref);
@@ -482,6 +635,10 @@ function cpms_payroll_statement_parse_template_file($path) {
     $result['row_heights'] = $rowHeights;
     $result['max_row'] = min(120, max(1, $maxRow));
     $result['max_col'] = min(40, max(1, $maxCol));
+    $result['default_col_width'] = $defaultColWidth;
+    $result['default_row_height'] = $defaultRowHeight;
+    $result['page_margins_mm'] = $pageMargins;
+    $result['page_setup'] = $pageSetup;
     $result['message'] = '급여명세서 양식을 읽었습니다.';
     return $result;
 }}
@@ -691,6 +848,60 @@ function cpms_payroll_statement_template_prepare($template, $data) {
     return $template;
 }}
 
+if (!function_exists('cpms_payroll_statement_template_render_bounds')) {
+function cpms_payroll_statement_template_render_bounds($template) {
+    $minRow = null;
+    $maxRow = null;
+    $minCol = null;
+    $maxCol = null;
+    $cells = isset($template['cells']) && is_array($template['cells']) ? $template['cells'] : array();
+    foreach ($cells as $r => $rowCells) {
+        $r = (int)$r;
+        if ($r <= 0 || (isset($template['hidden_rows'][$r]) && !empty($template['hidden_rows'][$r]))) continue;
+        if (!is_array($rowCells)) continue;
+        foreach ($rowCells as $c => $cell) {
+            $c = (int)$c;
+            if ($c <= 0) continue;
+            $value = is_array($cell) && isset($cell['value']) ? trim((string)$cell['value']) : '';
+            if ($value === '') continue;
+            $rowEnd = $r;
+            $colEnd = $c;
+            if (isset($template['merges'][$r]) && isset($template['merges'][$r][$c])) {
+                $merge = $template['merges'][$r][$c];
+                $rowEnd = $r + max(1, (int)$merge['rowspan']) - 1;
+                $colEnd = $c + max(1, (int)$merge['colspan']) - 1;
+            }
+            if ($minRow === null || $r < $minRow) $minRow = $r;
+            if ($maxRow === null || $rowEnd > $maxRow) $maxRow = $rowEnd;
+            if ($minCol === null || $c < $minCol) $minCol = $c;
+            if ($maxCol === null || $colEnd > $maxCol) $maxCol = $colEnd;
+        }
+    }
+    if ($minRow === null || $minCol === null) {
+        return array('min_row' => 1, 'max_row' => isset($template['max_row']) ? (int)$template['max_row'] : 1, 'min_col' => 1, 'max_col' => isset($template['max_col']) ? (int)$template['max_col'] : 1);
+    }
+    $templateMaxRow = isset($template['max_row']) ? (int)$template['max_row'] : $maxRow;
+    $templateMaxCol = isset($template['max_col']) ? (int)$template['max_col'] : $maxCol;
+    if ($minRow < 1) $minRow = 1;
+    if ($minCol < 1) $minCol = 1;
+    if ($maxRow > $templateMaxRow) $maxRow = $templateMaxRow;
+    if ($maxCol > $templateMaxCol) $maxCol = $templateMaxCol;
+    return array('min_row' => $minRow, 'max_row' => $maxRow, 'min_col' => $minCol, 'max_col' => $maxCol);
+}}
+
+if (!function_exists('cpms_payroll_statement_template_scale_style')) {
+function cpms_payroll_statement_template_scale_style($style, $scale) {
+    $style = (string)$style;
+    $scale = (float)$scale;
+    if ($scale <= 0) $scale = 1.0;
+    return preg_replace_callback('/font-size:([0-9\.]+)pt;/i', function($m) use ($scale) {
+        $size = (float)$m[1] * $scale;
+        if ($size < 6) $size = 6;
+        if ($size > 22) $size = 22;
+        return 'font-size:' . round($size, 2) . 'pt;';
+    }, $style);
+}}
+
 if (!function_exists('cpms_payroll_statement_render_uploaded_template_html')) {
 function cpms_payroll_statement_render_uploaded_template_html($data) {
     $path = cpms_payroll_statement_template_file();
@@ -698,40 +909,81 @@ function cpms_payroll_statement_render_uploaded_template_html($data) {
     $template = cpms_payroll_statement_parse_template_file($path);
     if (empty($template['ok'])) return '';
     $template = cpms_payroll_statement_template_prepare($template, $data);
-    $totalWidth = 0;
-    for ($c = 1; $c <= $template['max_col']; $c++) {
-        $totalWidth += isset($template['col_widths'][$c]) ? (int)$template['col_widths'][$c] : 36;
+    $bounds = cpms_payroll_statement_template_render_bounds($template);
+    $minRow = (int)$bounds['min_row'];
+    $maxRow = (int)$bounds['max_row'];
+    $minCol = (int)$bounds['min_col'];
+    $maxCol = (int)$bounds['max_col'];
+    $rawTotalWidth = 0;
+    $defaultColWidth = isset($template['default_col_width']) ? (int)$template['default_col_width'] : 64;
+    if ($defaultColWidth <= 0) $defaultColWidth = 64;
+    for ($c = $minCol; $c <= $maxCol; $c++) {
+        $rawTotalWidth += isset($template['col_widths'][$c]) ? (int)$template['col_widths'][$c] : $defaultColWidth;
     }
-    if ($totalWidth < 620) $totalWidth = 620;
-    if ($totalWidth > 820) $totalWidth = 820;
+    if ($rawTotalWidth < 1) $rawTotalWidth = 1;
+    $margins = isset($template['page_margins_mm']) && is_array($template['page_margins_mm']) ? $template['page_margins_mm'] : array();
+    $leftMm = isset($margins['left']) ? (float)$margins['left'] : 6.35;
+    $rightMm = isset($margins['right']) ? (float)$margins['right'] : 6.35;
+    $topMm = isset($margins['top']) ? (float)$margins['top'] : 19.05;
+    $bottomMm = isset($margins['bottom']) ? (float)$margins['bottom'] : 19.05;
+    $pageSetup = isset($template['page_setup']) && is_array($template['page_setup']) ? $template['page_setup'] : array();
+    $orientation = isset($pageSetup['orientation']) ? (string)$pageSetup['orientation'] : 'portrait';
+    $pageWidthMm = ($orientation === 'landscape') ? 297.0 : 210.0;
+    $availableWidthPx = (($pageWidthMm - $leftMm - $rightMm) / 25.4) * 96;
+    if ($availableWidthPx < 560) $availableWidthPx = 560;
+    $fitScale = $availableWidthPx / $rawTotalWidth;
+    if ($fitScale > 1) $fitScale = 1;
+    $excelScale = 1.0;
+    if (isset($pageSetup['scale']) && (int)$pageSetup['scale'] > 0) $excelScale = ((int)$pageSetup['scale']) / 100;
+    if ($excelScale <= 0 || $excelScale > 1) $excelScale = 1.0;
+    $scale = !empty($pageSetup['fit_to_page']) ? min($excelScale, $fitScale) : min(1.0, $fitScale);
+    if ($scale <= 0) $scale = 1.0;
+    $totalWidth = (int)round($rawTotalWidth * $scale);
+    if ($totalWidth < 520) $totalWidth = 520;
+    $baseFontSize = max(7.0, 10.5 * $scale);
+    $mobileFontSize = max(7.0, 9.5 * $scale);
+    $padY = max(1, round(2 * $scale, 2));
+    $padX = max(2, round(5 * $scale, 2));
     $html = '<style>';
-    $html .= 'body{font-family:"Malgun Gothic","Noto Sans CJK KR","NanumGothic",Arial,sans-serif;color:#111;margin:0;background:#fff}.payroll-template-wrap{width:' . (int)$totalWidth . 'px;margin:0 auto;padding:10px 6px;background:#fff;box-sizing:border-box}.payroll-template-table{border-collapse:collapse;table-layout:fixed;width:100%;font-size:10.5pt}.payroll-template-table td{padding:2px 5px;box-sizing:border-box;word-break:keep-all;white-space:normal;overflow:hidden;line-height:1.25}.payroll-template-table td.generated{text-align:center}.payroll-template-table td.amount{text-align:right}.payroll-template-table td.title-cell{font-size:20pt;font-weight:bold;text-align:center}.payroll-template-empty{color:transparent}@media(max-width:900px){.payroll-template-wrap{width:100%;overflow-x:auto}.payroll-template-table{font-size:9.5pt}}@media print{.actions{display:none}.payroll-template-wrap{width:auto;margin:0;padding:0}.payroll-template-table{font-size:10pt}}';
+    $html .= '@page{margin:' . $topMm . 'mm ' . $rightMm . 'mm ' . $bottomMm . 'mm ' . $leftMm . 'mm;}';
+    $html .= 'body{font-family:"Malgun Gothic","Noto Sans CJK KR","NanumGothic",Arial,sans-serif;color:#111;margin:0;background:#fff}.payroll-template-wrap{width:' . (int)$totalWidth . 'px;margin:0 auto;padding:0;background:#fff;box-sizing:border-box}.payroll-template-table{border-collapse:collapse;table-layout:fixed;width:' . (int)$totalWidth . 'px;font-size:' . round($baseFontSize, 2) . 'pt;page-break-inside:avoid}.payroll-template-table td{padding:' . $padY . 'px ' . $padX . 'px;box-sizing:border-box;word-break:keep-all;white-space:normal;overflow:hidden;line-height:1.2}.payroll-template-table td.generated{text-align:center}.payroll-template-table td.amount{text-align:right}.payroll-template-table td.title-cell{font-size:' . round(max(12, 20 * $scale), 2) . 'pt;font-weight:bold;text-align:center}.payroll-template-empty{color:transparent}@media(max-width:900px){.payroll-template-wrap{width:100%;overflow-x:auto}.payroll-template-table{font-size:' . round($mobileFontSize, 2) . 'pt}}@media print{.actions{display:none}.payroll-template-wrap{margin:0 auto;padding:0}}';
     $html .= '</style><div class="payroll-template-wrap"><table class="payroll-template-table"><colgroup>';
-    for ($col = 1; $col <= $template['max_col']; $col++) {
-        $w = isset($template['col_widths'][$col]) ? (int)$template['col_widths'][$col] : 36;
+    for ($col = $minCol; $col <= $maxCol; $col++) {
+        $rawW = isset($template['col_widths'][$col]) ? (int)$template['col_widths'][$col] : $defaultColWidth;
+        $w = (int)round($rawW * $scale);
+        if ($w < 4) $w = 4;
         $html .= '<col style="width:' . $w . 'px">';
     }
     $html .= '</colgroup><tbody>';
-    for ($row = 1; $row <= $template['max_row']; $row++) {
+    for ($row = $minRow; $row <= $maxRow; $row++) {
         if (isset($template['hidden_rows'][$row])) continue;
-        $height = isset($template['row_heights'][$row]) ? (int)$template['row_heights'][$row] : 20;
+        $baseRowHeight = isset($template['default_row_height']) ? (int)$template['default_row_height'] : 22;
+        if ($baseRowHeight <= 0) $baseRowHeight = 22;
+        $height = isset($template['row_heights'][$row]) ? (int)$template['row_heights'][$row] : $baseRowHeight;
+        $height = (int)round($height * $scale);
+        if ($height < 10) $height = 10;
         $html .= '<tr style="height:' . $height . 'px">';
-        for ($col2 = 1; $col2 <= $template['max_col']; $col2++) {
+        for ($col2 = $minCol; $col2 <= $maxCol; $col2++) {
             if (isset($template['covered'][$row]) && !empty($template['covered'][$row][$col2])) continue;
             $cell = isset($template['cells'][$row]) && isset($template['cells'][$row][$col2]) ? $template['cells'][$row][$col2] : array('value' => '', 'style' => 0);
             $merge = isset($template['merges'][$row]) && isset($template['merges'][$row][$col2]) ? $template['merges'][$row][$col2] : array('rowspan' => 1, 'colspan' => 1);
+            $rowspan = max(1, (int)$merge['rowspan']);
+            $colspan = max(1, (int)$merge['colspan']);
+            if ($row + $rowspan - 1 > $maxRow) $rowspan = $maxRow - $row + 1;
+            if ($col2 + $colspan - 1 > $maxCol) $colspan = $maxCol - $col2 + 1;
             $value = isset($cell['value']) ? (string)$cell['value'] : '';
             $styleIdx = isset($cell['style']) ? (int)$cell['style'] : 0;
             $style = isset($template['styles'][$styleIdx]) ? $template['styles'][$styleIdx] : '';
             if ($style === '') $style = 'border:none;';
+            $style = cpms_payroll_statement_template_scale_style($style, $scale);
             $class = '';
             if (!empty($cell['generated'])) $class .= ' generated';
             if (!empty($cell['amount'])) $class .= ' amount';
             if (strpos($value, '급여명세서') !== false) $class .= ' title-cell';
             if ($value === '') $class .= ' payroll-template-empty';
             $html .= '<td class="' . trim($class) . '" style="' . cpms_payroll_statement_h($style) . '"';
-            if ((int)$merge['rowspan'] > 1) $html .= ' rowspan="' . (int)$merge['rowspan'] . '"';
-            if ((int)$merge['colspan'] > 1) $html .= ' colspan="' . (int)$merge['colspan'] . '"';
+            if ($rowspan > 1) $html .= ' rowspan="' . $rowspan . '"';
+            if ($colspan > 1) $html .= ' colspan="' . $colspan . '"';
             $html .= '>' . ($value === '' ? '&nbsp;' : cpms_payroll_statement_h($value)) . '</td>';
         }
         $html .= '</tr>';
