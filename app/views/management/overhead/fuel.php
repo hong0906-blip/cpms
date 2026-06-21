@@ -64,17 +64,32 @@ function cpms_fuel_group_items_by_name($items) {
                 'vehicles' => array(),
                 'items' => array(),
                 'row_count' => 0,
+                'total_quantity' => 0.0,
                 'total_supply_amount' => 0.0,
                 'total_vat' => 0.0,
                 'total_amount' => 0.0,
+                'vehicle_quantities' => array(),
                 'matched_types' => array(),
             );
         }
-        if ($vehicle !== '') $groups[$key]['vehicles'][cpms_normalize_vehicle_number($vehicle)] = $vehicle;
+        $vehicleNorm = '';
+        if ($vehicle !== '') {
+            $vehicleNorm = cpms_normalize_vehicle_number($vehicle);
+            if ($vehicleNorm === '') $vehicleNorm = $vehicle;
+            $groups[$key]['vehicles'][$vehicleNorm] = $vehicle;
+        }
         $matchedType = isset($item['matched_type']) ? (string)$item['matched_type'] : '';
         if ($matchedType !== '') $groups[$key]['matched_types'][$matchedType] = true;
+        $quantity = isset($item['quantity']) ? (float)$item['quantity'] : 0.0;
         $groups[$key]['items'][] = $item;
         $groups[$key]['row_count']++;
+        $groups[$key]['total_quantity'] += $quantity;
+        if ($vehicleNorm !== '') {
+            if (!isset($groups[$key]['vehicle_quantities'][$vehicleNorm])) {
+                $groups[$key]['vehicle_quantities'][$vehicleNorm] = array('vehicle_number' => $vehicle, 'quantity' => 0.0);
+            }
+            $groups[$key]['vehicle_quantities'][$vehicleNorm]['quantity'] += $quantity;
+        }
         $groups[$key]['total_supply_amount'] += isset($item['supply_amount']) ? (float)$item['supply_amount'] : 0.0;
         $groups[$key]['total_vat'] += isset($item['vat']) ? (float)$item['vat'] : 0.0;
         $groups[$key]['total_amount'] += isset($item['total_amount']) ? (float)$item['total_amount'] : 0.0;
@@ -271,6 +286,16 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
             if (isset($fuelGroup['matched_types']) && is_array($fuelGroup['matched_types'])) {
                 foreach ($fuelGroup['matched_types'] as $mt => $unused) $groupMatchedLabels[] = cpms_fuel_matched_label($mt);
             }
+            $groupVehicleQuantityLabels = array();
+            if (isset($fuelGroup['vehicle_quantities']) && is_array($fuelGroup['vehicle_quantities'])) {
+                foreach ($fuelGroup['vehicle_quantities'] as $vehicleQuantity) {
+                    if (!is_array($vehicleQuantity)) continue;
+                    $vehicleLabel = isset($vehicleQuantity['vehicle_number']) ? trim((string)$vehicleQuantity['vehicle_number']) : '';
+                    if ($vehicleLabel === '') $vehicleLabel = '-';
+                    $vehicleQuantityTotal = isset($vehicleQuantity['quantity']) ? (float)$vehicleQuantity['quantity'] : 0.0;
+                    $groupVehicleQuantityLabels[] = $vehicleLabel . ' ' . cpms_fuel_view_number($vehicleQuantityTotal);
+                }
+            }
           ?>
           <section class="border border-gray-200 rounded-2xl overflow-hidden bg-white">
             <div class="p-4 bg-slate-50 border-b border-gray-200">
@@ -278,10 +303,14 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
                 <div>
                   <div class="text-lg font-extrabold text-gray-900"><?php echo h(isset($fuelGroup['display_name']) ? $fuelGroup['display_name'] : ''); ?></div>
                   <div class="mt-1 text-sm text-gray-600">차량번호: <?php echo h(count($groupVehicles) > 0 ? implode(', ', $groupVehicles) : '-'); ?></div>
+                  <?php if (count($groupVehicleQuantityLabels) > 0): ?>
+                    <div class="mt-1 text-sm text-gray-600">차량별 사용량: <?php echo h(implode(', ', $groupVehicleQuantityLabels)); ?></div>
+                  <?php endif; ?>
                   <div class="mt-1 text-xs text-gray-500">매칭상태: <?php echo h(count($groupMatchedLabels) > 0 ? implode(', ', $groupMatchedLabels) : '-'); ?></div>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-right">
+                <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-right">
                   <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">거래</div><div class="font-extrabold"><?php echo h((string)(isset($fuelGroup['row_count']) ? $fuelGroup['row_count'] : count($groupItems))); ?>건</div></div>
+                  <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">사용량 합계</div><div class="font-extrabold"><?php echo h(cpms_fuel_view_number(isset($fuelGroup['total_quantity']) ? $fuelGroup['total_quantity'] : 0)); ?></div></div>
                   <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">공급가액</div><div class="font-extrabold"><?php echo h(cpms_fuel_view_money(isset($fuelGroup['total_supply_amount']) ? $fuelGroup['total_supply_amount'] : 0)); ?>원</div></div>
                   <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">부가세</div><div class="font-extrabold"><?php echo h(cpms_fuel_view_money(isset($fuelGroup['total_vat']) ? $fuelGroup['total_vat'] : 0)); ?>원</div></div>
                   <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2"><div class="text-xs text-emerald-700 font-bold">합계금액</div><div class="font-extrabold text-emerald-700"><?php echo h(cpms_fuel_view_money(isset($fuelGroup['total_amount']) ? $fuelGroup['total_amount'] : 0)); ?>원</div></div>

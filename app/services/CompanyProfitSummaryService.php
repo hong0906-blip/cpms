@@ -178,7 +178,7 @@ function cpms_company_profit_normalize_filters($request, $pdo) {
     $viewMode = isset($request['view_mode']) ? trim((string)$request['view_mode']) : 'monthly';
     if ($viewMode !== 'monthly' && $viewMode !== 'quarterly' && $viewMode !== 'yearly') $viewMode = 'monthly';
 
-    $scope = isset($request['scope']) ? trim((string)$request['scope']) : 'month';
+    $scope = isset($request['scope']) ? trim((string)$request['scope']) : 'year';
     if ($scope !== 'year' && $scope !== 'month' && $scope !== 'custom' && $scope !== 'all') $scope = 'year';
 
     $month = isset($request['month']) ? (int)$request['month'] : 0;

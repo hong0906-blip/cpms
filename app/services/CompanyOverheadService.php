@@ -233,6 +233,25 @@ function cpms_company_overhead_month_valid($ym) {
     return preg_match('/^\d{4}-\d{2}$/', (string)$ym) ? true : false;
 }}
 
+if (!function_exists('cpms_company_overhead_current_month')) {
+function cpms_company_overhead_current_month() {
+    return date('Y-m');
+}}
+
+if (!function_exists('cpms_company_overhead_filter_months_until_current')) {
+function cpms_company_overhead_filter_months_until_current($months) {
+    $result = array();
+    if (!is_array($months)) return $result;
+    $currentMonth = cpms_company_overhead_current_month();
+    foreach ($months as $ym) {
+        $ym = trim((string)$ym);
+        if (!cpms_company_overhead_month_valid($ym)) continue;
+        if (strcmp($ym, $currentMonth) > 0) continue;
+        $result[] = $ym;
+    }
+    return $result;
+}}
+
 if (!function_exists('cpms_company_overhead_months_between')) {
 function cpms_company_overhead_months_between($startYm, $endYm) {
     $months = array();
@@ -358,10 +377,12 @@ function cpms_company_overhead_sum_record($record) {
 if (!function_exists('cpms_company_overhead_summary')) {
 function cpms_company_overhead_summary($months) {
     $categories = cpms_company_overhead_categories();
+    if (!is_array($months)) $months = array();
+    $months = cpms_company_overhead_filter_months_until_current($months);
     $summary = array(
         'total' => 0.0,
         'has_data' => false,
-        'months' => is_array($months) ? $months : array(),
+        'months' => $months,
         'categories' => array(),
         'missing_notice' => '총관리비 데이터 미등록',
     );
@@ -374,7 +395,6 @@ function cpms_company_overhead_summary($months) {
         );
     }
 
-    if (!is_array($months)) $months = array();
     foreach ($months as $ym) {
         if (!cpms_company_overhead_month_valid($ym)) continue;
         $year = substr($ym, 0, 4);
@@ -420,7 +440,10 @@ function cpms_company_overhead_normalize_filters($request) {
     $startMonth = isset($request['start_month']) ? trim((string)$request['start_month']) : '';
     $endMonth = isset($request['end_month']) ? trim((string)$request['end_month']) : '';
     if (!cpms_company_overhead_month_valid($startMonth)) $startMonth = sprintf('%04d-01', $year);
-    if (!cpms_company_overhead_month_valid($endMonth)) $endMonth = sprintf('%04d-12', $year);
+    if (!cpms_company_overhead_month_valid($endMonth)) {
+        $endMonth = sprintf('%04d-12', $year);
+        if ($year === (int)date('Y')) $endMonth = cpms_company_overhead_current_month();
+    }
     if ($month > 0) {
         $startMonth = sprintf('%04d-%02d', $year, $month);
         $endMonth = $startMonth;
@@ -499,6 +522,7 @@ if (!function_exists('cpms_company_overhead_monthly_summary')) {
 function cpms_company_overhead_monthly_summary($filters) {
     $filters = cpms_company_overhead_normalize_filters($filters);
     $months = cpms_company_overhead_months_between($filters['start_month'], $filters['end_month']);
+    $months = cpms_company_overhead_filter_months_until_current($months);
     $categories = cpms_company_overhead_categories();
     $result = array(
         'total' => 0.0,
