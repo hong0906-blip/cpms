@@ -30,8 +30,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check(isset($_POST['_csrf']) 
 }
 
 $year = cpms_company_overhead_normalize_upload_year(isset($_POST['apply_year']) ? $_POST['apply_year'] : date('Y'));
+$month = cpms_company_overhead_normalize_upload_month(isset($_POST['apply_month']) ? $_POST['apply_month'] : 1);
 $file = isset($_FILES['lease_file']) ? $_FILES['lease_file'] : null;
-$result = cpms_company_overhead_import_lease_xlsx($year, $file, $user);
+$result = cpms_company_overhead_import_lease_xlsx($year, $file, $user, $month);
 if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
 $redirectYear = isset($result['year']) ? (int)$result['year'] : (int)$year;
 
@@ -46,5 +47,5 @@ if (!empty($result['ok'])) {
     flash_set('danger', isset($result['message']) ? (string)$result['message'] : '임대차 엑셀 업로드에 실패했습니다.');
 }
 
-header('Location: ?r=' . urlencode('관리') . '&tab=company_overhead&oh=lease&year=' . urlencode((string)$redirectYear));
+header('Location: ?r=' . urlencode('관리') . '&tab=company_overhead&oh=lease&year=' . urlencode((string)$redirectYear) . '&month=' . urlencode((string)$month));
 exit;

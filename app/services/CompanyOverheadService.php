@@ -11,6 +11,7 @@ require_once __DIR__ . '/CompanyVehicleService.php';
 require_once __DIR__ . '/DataArchiveSummaryService.php';
 require_once __DIR__ . '/DataArchiveAccessService.php';
 require_once __DIR__ . '/../core/SimpleXlsxReader.php';
+require_once __DIR__ . '/../core/SimpleXlsReader.php';
 
 if (!function_exists('cpms_company_overhead_categories')) {
 function cpms_company_overhead_categories() {
@@ -54,10 +55,12 @@ function cpms_company_overhead_category_fields($category) {
             array('key' => 'auto_transfer_day', 'label' => '자동이체일', 'type' => 'text'),
         ),
         'corporate_cards' => array(
-            array('key' => 'card_name', 'label' => '카드명', 'type' => 'text'),
-            array('key' => 'card_last4', 'label' => '카드번호 뒷자리 4자리', 'type' => 'text'),
-            array('key' => 'purpose', 'label' => '사용목적', 'type' => 'text'),
-            array('key' => 'expense_type', 'label' => '비용구분', 'type' => 'text'),
+            array('key' => 'card_number', 'label' => '카드번호', 'type' => 'text'),
+            array('key' => 'card_user', 'label' => '사용자', 'type' => 'text'),
+            array('key' => 'card_alias', 'label' => '카드별칭', 'type' => 'text'),
+            array('key' => 'used_time', 'label' => '사용시간', 'type' => 'text'),
+            array('key' => 'content', 'label' => '내용', 'type' => 'text'),
+            array('key' => 'vendor_business_number', 'label' => '사용처사업자번호', 'type' => 'text'),
         ),
         'fuel' => array(),
         'etc' => array(),
@@ -89,6 +92,22 @@ function cpms_company_overhead_base_dirs() {
         $dirs[] = $root . '/storage/company_overhead';
     }
     return $dirs;
+}}
+
+if (!function_exists('cpms_company_overhead_writable_data_root')) {
+function cpms_company_overhead_writable_data_root($category, $year) {
+    $meta = cpms_company_overhead_category_meta($category);
+    if (!is_array($meta)) return cpms_company_overhead_data_root();
+    $year = sprintf('%04d', (int)$year);
+    $roots = cpms_company_overhead_base_dirs();
+    foreach ($roots as $root) {
+        $root = rtrim((string)$root, '/\\');
+        if ($root === '') continue;
+        $target = $root . '/' . $meta['path'] . '/' . $year;
+        if (is_dir($target) && is_writable($target)) return $root;
+        if (!is_dir($target) && @mkdir($target, 0777, true) && is_dir($target) && is_writable($target)) return $root;
+    }
+    return count($roots) > 0 ? rtrim((string)$roots[0], '/\\') : cpms_company_overhead_data_root();
 }}
 
 if (!function_exists('cpms_company_overhead_log')) {
@@ -306,7 +325,7 @@ function cpms_company_overhead_writable_month_file($category, $year, $month) {
     $meta = cpms_company_overhead_category_meta($category);
     if (!is_array($meta)) return '';
     $ym = sprintf('%04d-%02d', (int)$year, (int)$month);
-    return cpms_company_overhead_month_file(cpms_company_overhead_data_root(), $meta['path'], $ym);
+    return cpms_company_overhead_month_file(cpms_company_overhead_writable_data_root($category, $year), $meta['path'], $ym);
 }}
 
 if (!function_exists('cpms_company_overhead_normalize_items')) {
@@ -722,7 +741,7 @@ function cpms_company_overhead_prepare_record($category, $data, $existing, $user
     $row['employee_name'] = isset($data['employee_name']) ? trim((string)$data['employee_name']) : (isset($row['employee_name']) ? (string)$row['employee_name'] : '');
     $row['memo'] = isset($data['memo']) ? trim((string)$data['memo']) : (isset($row['memo']) ? (string)$row['memo'] : '');
 
-    $allKeys = array('department', 'position', 'base_salary', 'allowance', 'deduction', 'net_pay', 'is_recurring', 'vehicle_name', 'expense_type', 'driver_name', 'mileage', 'dormitory_name', 'address', 'occupants', 'card_name', 'card_last4', 'purpose', 'manager_primary', 'manager_secondary', 'deposit', 'payment_due', 'maintenance_fee', 'contract_period', 'restoration_obligation', 'landlord', 'auto_transfer_day', 'lease_group_id', 'source_contract_period');
+    $allKeys = array('department', 'position', 'base_salary', 'allowance', 'deduction', 'net_pay', 'is_recurring', 'vehicle_name', 'expense_type', 'driver_name', 'mileage', 'dormitory_name', 'address', 'occupants', 'card_name', 'card_number', 'card_last4', 'card_alias', 'card_user', 'used_time', 'content', 'vendor_business_number', 'proof', 'note', 'purpose', 'manager_primary', 'manager_secondary', 'deposit', 'payment_due', 'maintenance_fee', 'contract_period', 'restoration_obligation', 'landlord', 'auto_transfer_day', 'lease_group_id', 'source_contract_period');
     foreach ($allKeys as $key) {
         if (!isset($data[$key])) {
             if (!isset($row[$key])) $row[$key] = '';
@@ -742,6 +761,8 @@ function cpms_company_overhead_prepare_record($category, $data, $existing, $user
     }
     if ($category === 'payroll') $row['net_pay'] = $row['amount'];
     if ($category === 'corporate_cards') $row['card_last4'] = cpms_company_overhead_card_last4(isset($row['card_last4']) ? $row['card_last4'] : '');
+    if ($category === 'corporate_cards' && isset($row['card_number'])) $row['card_last4'] = cpms_company_overhead_card_last4($row['card_number']);
+    if ($category === 'corporate_cards' && isset($row['card_user']) && trim((string)$row['card_user']) !== '') $row['employee_name'] = trim((string)$row['card_user']);
     if ($category === 'lease' && isset($row['landlord'])) $row['vendor'] = trim((string)$row['landlord']);
 
     foreach (array('storage_type', 'drive_file_id', 'drive_folder_id', 'drive_web_view_link', 'drive_web_content_link', 'original_name', 'stored_name', 'mime_type', 'size', 'drive_year_folder_id', 'drive_type_folder_id', 'drive_month_folder_id', 'upload_status', 'drive_upload_error') as $fileKey) {
@@ -836,6 +857,348 @@ function cpms_company_overhead_apply_upload_record($row, $uploadRecord) {
         if (isset($uploadRecord[$key])) $row[$key] = $uploadRecord[$key];
     }
     return $row;
+}}
+
+if (!function_exists('cpms_company_overhead_card_text')) {
+function cpms_company_overhead_card_text($value) {
+    $value = trim((string)$value);
+    if ($value === '') return '';
+    return preg_replace('/\s+/u', ' ', $value);
+}}
+
+if (!function_exists('cpms_company_overhead_card_header_token')) {
+function cpms_company_overhead_card_header_token($value) {
+    $value = cpms_company_overhead_card_text($value);
+    return preg_replace('/[\s\(\)\[\]\/\\\\_]+/u', '', $value);
+}}
+
+if (!function_exists('cpms_company_overhead_card_cell')) {
+function cpms_company_overhead_card_cell($row, $index) {
+    if (!is_array($row)) return '';
+    $index = (int)$index;
+    return isset($row[$index]) ? cpms_company_overhead_card_text($row[$index]) : '';
+}}
+
+if (!function_exists('cpms_company_overhead_card_number_key')) {
+function cpms_company_overhead_card_number_key($value) {
+    $digits = preg_replace('/\D+/', '', (string)$value);
+    return $digits === '' ? cpms_company_overhead_card_text($value) : $digits;
+}}
+
+if (!function_exists('cpms_company_overhead_card_display_number')) {
+function cpms_company_overhead_card_display_number($value) {
+    $value = trim((string)$value);
+    if ($value !== '') return $value;
+    return '-';
+}}
+
+if (!function_exists('cpms_company_overhead_card_detect_columns')) {
+function cpms_company_overhead_card_detect_columns($rows) {
+    $fallback = array(
+        'used_date' => 0,
+        'used_time' => 1,
+        'vendor' => 2,
+        'vendor_business_number' => 3,
+        'card_number' => 4,
+        'card_alias' => 5,
+        'proof' => 6,
+        'amount' => 7,
+        'content' => 8,
+        'card_user' => 9,
+        'note' => 10,
+        'memo' => 11,
+    );
+    $best = array('header_index' => 1, 'columns' => $fallback);
+    if (!is_array($rows)) return $best;
+    foreach ($rows as $idx => $row) {
+        if (!is_array($row)) continue;
+        $columns = array();
+        foreach ($row as $col => $cell) {
+            $token = cpms_company_overhead_card_header_token($cell);
+            if ($token === '사용일자') $columns['used_date'] = $col;
+            else if ($token === '사용시간') $columns['used_time'] = $col;
+            else if ($token === '사용처') $columns['vendor'] = $col;
+            else if ($token === '사용처사업자번호') $columns['vendor_business_number'] = $col;
+            else if ($token === '카드번호') $columns['card_number'] = $col;
+            else if ($token === '카드별칭') $columns['card_alias'] = $col;
+            else if ($token === '증빙') $columns['proof'] = $col;
+            else if ($token === '사용금액') $columns['amount'] = $col;
+            else if ($token === '내용') $columns['content'] = $col;
+            else if ($token === '사용자') $columns['card_user'] = $col;
+            else if ($token === '비고') $columns['note'] = $col;
+            else if ($token === '메모') $columns['memo'] = $col;
+        }
+        if (isset($columns['used_date']) && isset($columns['card_number']) && isset($columns['amount']) && isset($columns['card_user'])) {
+            foreach ($fallback as $key => $fallbackIndex) {
+                if (!isset($columns[$key])) $columns[$key] = $fallbackIndex;
+            }
+            return array('header_index' => (int)$idx, 'columns' => $columns);
+        }
+    }
+    return $best;
+}}
+
+if (!function_exists('cpms_company_overhead_card_normalize_date')) {
+function cpms_company_overhead_card_normalize_date($value) {
+    $value = cpms_company_overhead_card_text($value);
+    if ($value === '') return '';
+    if (preg_match('/^(\d{4})[-\.\/](\d{1,2})[-\.\/](\d{1,2})$/', $value, $m)) {
+        return sprintf('%04d-%02d-%02d', (int)$m[1], (int)$m[2], (int)$m[3]);
+    }
+    return cpms_company_overhead_normalize_date($value);
+}}
+
+if (!function_exists('cpms_company_overhead_card_parse_rows')) {
+function cpms_company_overhead_card_parse_rows($rows, $year, $month, $user = null) {
+    $parsed = array('ok' => false, 'items' => array(), 'source_count' => 0, 'skipped_count' => 0, 'errors' => array());
+    $year = cpms_company_overhead_normalize_upload_year($year);
+    $month = cpms_company_overhead_normalize_upload_month($month);
+    if (!is_array($rows) || count($rows) === 0) {
+        $parsed['message'] = '엑셀에서 읽을 행이 없습니다.';
+        return $parsed;
+    }
+    $detected = cpms_company_overhead_card_detect_columns($rows);
+    $headerIndex = isset($detected['header_index']) ? (int)$detected['header_index'] : 1;
+    $cols = isset($detected['columns']) && is_array($detected['columns']) ? $detected['columns'] : array();
+    $now = date('Y-m-d H:i:s');
+    $userLabel = cpms_company_overhead_user_label($user);
+
+    for ($i = $headerIndex + 1; $i < count($rows); $i++) {
+        $row = $rows[$i];
+        if (!is_array($row)) continue;
+        $usedDate = cpms_company_overhead_card_normalize_date(cpms_company_overhead_card_cell($row, isset($cols['used_date']) ? $cols['used_date'] : 0));
+        $usedTime = cpms_company_overhead_card_cell($row, isset($cols['used_time']) ? $cols['used_time'] : 1);
+        $vendor = cpms_company_overhead_card_cell($row, isset($cols['vendor']) ? $cols['vendor'] : 2);
+        $cardNumber = cpms_company_overhead_card_cell($row, isset($cols['card_number']) ? $cols['card_number'] : 4);
+        $amount = cpms_company_overhead_money_value(cpms_company_overhead_card_cell($row, isset($cols['amount']) ? $cols['amount'] : 7));
+        if ($usedDate === '' && $vendor === '' && $cardNumber === '' && $amount <= 0) continue;
+        $parsed['source_count']++;
+        if ($usedDate === '' || $vendor === '' || $cardNumber === '' || $amount <= 0) {
+            $parsed['skipped_count']++;
+            $parsed['errors'][] = '행 ' . ($i + 1) . ': 필수값(사용일자/사용처/카드번호/사용금액)이 부족합니다.';
+            continue;
+        }
+        $cardUser = cpms_company_overhead_card_cell($row, isset($cols['card_user']) ? $cols['card_user'] : 9);
+        $content = cpms_company_overhead_card_cell($row, isset($cols['content']) ? $cols['content'] : 8);
+        $memo = cpms_company_overhead_card_cell($row, isset($cols['memo']) ? $cols['memo'] : 11);
+        $note = cpms_company_overhead_card_cell($row, isset($cols['note']) ? $cols['note'] : 10);
+        $record = array(
+            'id' => cpms_company_overhead_new_id(),
+            'category' => 'corporate_cards',
+            'category_name' => '법인카드',
+            'year' => sprintf('%04d', $year),
+            'month' => sprintf('%02d', $month),
+            'title' => $vendor,
+            'amount' => $amount,
+            'occurred_at' => $usedDate,
+            'paid_at' => $usedDate,
+            'used_time' => $usedTime,
+            'vendor' => $vendor,
+            'vendor_business_number' => cpms_company_overhead_card_cell($row, isset($cols['vendor_business_number']) ? $cols['vendor_business_number'] : 3),
+            'card_number' => $cardNumber,
+            'card_number_key' => cpms_company_overhead_card_number_key($cardNumber),
+            'card_last4' => cpms_company_overhead_card_last4($cardNumber),
+            'card_alias' => cpms_company_overhead_card_cell($row, isset($cols['card_alias']) ? $cols['card_alias'] : 5),
+            'proof' => cpms_company_overhead_card_cell($row, isset($cols['proof']) ? $cols['proof'] : 6),
+            'content' => $content,
+            'purpose' => $content,
+            'card_user' => $cardUser,
+            'employee_name' => $cardUser,
+            'note' => $note,
+            'memo' => trim($content . ($note !== '' ? ' / ' . $note : '') . ($memo !== '' ? ' / ' . $memo : '')),
+            'payment_method' => '법인카드',
+            'created_by' => $userLabel,
+            'created_at' => $now,
+            'updated_by' => $userLabel,
+            'updated_at' => $now,
+            'deleted_at' => '',
+            'deleted_by' => '',
+            'source_row' => $i + 1,
+        );
+        $parsed['items'][] = $record;
+    }
+    if (count($parsed['items']) === 0) {
+        $parsed['message'] = '저장 가능한 법인카드 사용내역을 찾지 못했습니다.';
+        return $parsed;
+    }
+    $parsed['ok'] = true;
+    $parsed['message'] = '법인카드 엑셀을 읽었습니다.';
+    return $parsed;
+}}
+
+if (!function_exists('cpms_company_overhead_read_card_excel')) {
+function cpms_company_overhead_read_card_excel($path, $ext) {
+    $ext = strtolower(trim((string)$ext));
+    if ($ext === 'xls') return \App\Core\SimpleXlsReader::readFirstSheet($path, 5000);
+    if ($ext === 'xlsx') return \App\Core\SimpleXlsxReader::readFirstSheet($path, 5000);
+    return array('rows' => array(), 'error' => '.xls 또는 .xlsx 파일만 업로드할 수 있습니다.');
+}}
+
+if (!function_exists('cpms_company_overhead_card_preview_root')) {
+function cpms_company_overhead_card_preview_root() {
+    $root = function_exists('cpms_storage_root') ? cpms_storage_root() : dirname(dirname(__DIR__)) . '/storage';
+    return $root . '/tmp/company_overhead_card_preview';
+}}
+
+if (!function_exists('cpms_company_overhead_card_ensure_dir')) {
+function cpms_company_overhead_card_ensure_dir($dir) {
+    if (function_exists('cpms_ensure_dir')) return cpms_ensure_dir($dir);
+    if (is_dir($dir)) return true;
+    return @mkdir($dir, 0777, true);
+}}
+
+if (!function_exists('cpms_company_overhead_card_new_token')) {
+function cpms_company_overhead_card_new_token() {
+    if (function_exists('openssl_random_pseudo_bytes')) {
+        $bytes = openssl_random_pseudo_bytes(16);
+        if ($bytes !== false) return bin2hex($bytes);
+    }
+    return md5(uniqid('', true) . mt_rand());
+}}
+
+if (!function_exists('cpms_company_overhead_validate_card_upload_file')) {
+function cpms_company_overhead_validate_card_upload_file($file) {
+    if (!is_array($file) || !isset($file['error']) || (int)$file['error'] === UPLOAD_ERR_NO_FILE) return array('ok' => false, 'message' => '업로드할 엑셀 파일을 선택해주세요.');
+    if ((int)$file['error'] !== UPLOAD_ERR_OK) return array('ok' => false, 'message' => '엑셀 파일 업로드에 실패했습니다. 오류코드: ' . (int)$file['error']);
+    $tmpPath = isset($file['tmp_name']) ? trim((string)$file['tmp_name']) : '';
+    $originalName = isset($file['name']) ? trim((string)$file['name']) : '';
+    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    if ($tmpPath === '' || !is_file($tmpPath)) return array('ok' => false, 'message' => '업로드 파일을 찾을 수 없습니다.');
+    if ($ext !== 'xls' && $ext !== 'xlsx') return array('ok' => false, 'message' => '.xls 또는 .xlsx 파일만 업로드할 수 있습니다.');
+    return array('ok' => true, 'tmp_path' => $tmpPath, 'original_name' => $originalName, 'ext' => $ext);
+}}
+
+if (!function_exists('cpms_company_overhead_group_card_items')) {
+function cpms_company_overhead_group_card_items($items) {
+    $groups = array();
+    if (!is_array($items)) $items = array();
+    foreach ($items as $item) {
+        if (!is_array($item)) continue;
+        if (isset($item['deleted_at']) && trim((string)$item['deleted_at']) !== '') continue;
+        $cardNumber = isset($item['card_number']) ? (string)$item['card_number'] : (isset($item['card_last4']) ? (string)$item['card_last4'] : '');
+        $key = isset($item['card_number_key']) && trim((string)$item['card_number_key']) !== '' ? (string)$item['card_number_key'] : cpms_company_overhead_card_number_key($cardNumber);
+        if ($key === '') $key = 'unknown';
+        if (!isset($groups[$key])) {
+            $userName = isset($item['card_user']) ? trim((string)$item['card_user']) : (isset($item['employee_name']) ? trim((string)$item['employee_name']) : '');
+            $groups[$key] = array(
+                'key' => $key,
+                'card_number' => $cardNumber,
+                'card_alias' => isset($item['card_alias']) ? (string)$item['card_alias'] : '',
+                'user_name' => $userName !== '' ? $userName : '-',
+                'total' => 0.0,
+                'count' => 0,
+                'items' => array(),
+            );
+        }
+        if ($groups[$key]['user_name'] === '-' && isset($item['card_user']) && trim((string)$item['card_user']) !== '') $groups[$key]['user_name'] = trim((string)$item['card_user']);
+        $groups[$key]['total'] += isset($item['amount']) ? cpms_company_overhead_numeric_value($item['amount']) : 0.0;
+        $groups[$key]['count']++;
+        $groups[$key]['items'][] = $item;
+    }
+    uasort($groups, 'cpms_company_overhead_card_group_sort');
+    return $groups;
+}}
+
+if (!function_exists('cpms_company_overhead_card_group_sort')) {
+function cpms_company_overhead_card_group_sort($a, $b) {
+    $at = isset($a['total']) ? (float)$a['total'] : 0.0;
+    $bt = isset($b['total']) ? (float)$b['total'] : 0.0;
+    if ($at == $bt) {
+        $an = isset($a['user_name']) ? (string)$a['user_name'] : '';
+        $bn = isset($b['user_name']) ? (string)$b['user_name'] : '';
+        if ($an === $bn) return 0;
+        return ($an < $bn) ? -1 : 1;
+    }
+    return ($at < $bt) ? 1 : -1;
+}}
+
+if (!function_exists('cpms_company_overhead_create_card_preview')) {
+function cpms_company_overhead_create_card_preview($year, $month, $file, $user = null) {
+    $year = cpms_company_overhead_normalize_upload_year($year);
+    $month = cpms_company_overhead_normalize_upload_month($month);
+    if ($year < 2000 || $year > 2100) return array('ok' => false, 'message' => '적용연도가 올바르지 않습니다.');
+    $valid = cpms_company_overhead_validate_card_upload_file($file);
+    if (empty($valid['ok'])) return $valid;
+    $read = cpms_company_overhead_read_card_excel($valid['tmp_path'], $valid['ext']);
+    if (!empty($read['error'])) return array('ok' => false, 'message' => (string)$read['error']);
+    $parsed = cpms_company_overhead_card_parse_rows(isset($read['rows']) ? $read['rows'] : array(), $year, $month, $user);
+    if (empty($parsed['ok'])) return $parsed;
+
+    $token = cpms_company_overhead_card_new_token();
+    $tmpDir = cpms_company_overhead_card_preview_root();
+    if (!cpms_company_overhead_card_ensure_dir($tmpDir)) return array('ok' => false, 'message' => '법인카드 업로드 임시 폴더를 만들 수 없습니다.');
+    $localPath = rtrim($tmpDir, '/\\') . '/' . $token . '.' . $valid['ext'];
+    $moved = false;
+    if (function_exists('move_uploaded_file')) $moved = @move_uploaded_file($valid['tmp_path'], $localPath);
+    if (!$moved) $moved = @copy($valid['tmp_path'], $localPath);
+    if (!$moved) return array('ok' => false, 'message' => '업로드 파일을 임시 보관하지 못했습니다.');
+
+    if (!isset($_SESSION['_company_overhead_card_preview']) || !is_array($_SESSION['_company_overhead_card_preview'])) $_SESSION['_company_overhead_card_preview'] = array();
+    $_SESSION['_company_overhead_card_preview'][$token] = array(
+        'token' => $token,
+        'created_at' => time(),
+        'year' => sprintf('%04d', $year),
+        'month' => sprintf('%02d', $month),
+        'uploaded_original_name' => $valid['original_name'],
+        'temp_path' => $localPath,
+        'parsed' => $parsed,
+        'groups' => cpms_company_overhead_group_card_items($parsed['items']),
+        'uploaded_by' => cpms_company_overhead_user_label($user),
+    );
+    return array('ok' => true, 'message' => '법인카드 업로드 미리보기가 생성되었습니다.', 'token' => $token, 'year' => sprintf('%04d', $year), 'month' => sprintf('%02d', $month));
+}}
+
+if (!function_exists('cpms_company_overhead_get_card_preview')) {
+function cpms_company_overhead_get_card_preview($token) {
+    $token = trim((string)$token);
+    if ($token === '' || !isset($_SESSION['_company_overhead_card_preview'][$token]) || !is_array($_SESSION['_company_overhead_card_preview'][$token])) return null;
+    $preview = $_SESSION['_company_overhead_card_preview'][$token];
+    if (!isset($preview['created_at']) || (time() - (int)$preview['created_at']) > 7200) {
+        if (isset($preview['temp_path']) && is_file($preview['temp_path'])) @unlink($preview['temp_path']);
+        unset($_SESSION['_company_overhead_card_preview'][$token]);
+        return null;
+    }
+    return $preview;
+}}
+
+if (!function_exists('cpms_company_overhead_clear_card_preview')) {
+function cpms_company_overhead_clear_card_preview($token) {
+    $preview = cpms_company_overhead_get_card_preview($token);
+    if (is_array($preview) && isset($preview['temp_path']) && is_file($preview['temp_path'])) @unlink($preview['temp_path']);
+    if (isset($_SESSION['_company_overhead_card_preview'][$token])) unset($_SESSION['_company_overhead_card_preview'][$token]);
+}}
+
+if (!function_exists('cpms_company_overhead_confirm_card_preview')) {
+function cpms_company_overhead_confirm_card_preview($token, $user = null) {
+    $preview = cpms_company_overhead_get_card_preview($token);
+    if (!is_array($preview)) return array('ok' => false, 'message' => '확정할 법인카드 미리보기를 찾을 수 없습니다.');
+    $year = isset($preview['year']) ? (string)$preview['year'] : date('Y');
+    $month = isset($preview['month']) ? (string)$preview['month'] : date('m');
+    $parsed = isset($preview['parsed']) && is_array($preview['parsed']) ? $preview['parsed'] : array();
+    $items = isset($parsed['items']) && is_array($parsed['items']) ? $parsed['items'] : array();
+    if (count($items) === 0) return array('ok' => false, 'message' => '저장할 법인카드 사용내역이 없습니다.');
+    $userLabel = cpms_company_overhead_user_label($user);
+    $now = date('Y-m-d H:i:s');
+    foreach ($items as $idx => $item) {
+        if (!is_array($item)) continue;
+        $items[$idx]['updated_by'] = $userLabel;
+        $items[$idx]['updated_at'] = $now;
+    }
+    if (!cpms_company_overhead_save_month('corporate_cards', $year, $month, $items)) {
+        $writeError = cpms_company_overhead_last_write_error();
+        return array('ok' => false, 'message' => '법인카드 월별 데이터를 저장하지 못했습니다.' . ($writeError !== '' ? ' 원인: ' . $writeError : ''));
+    }
+    cpms_company_overhead_clear_card_preview($token);
+    return array(
+        'ok' => true,
+        'message' => '법인카드 엑셀 업로드가 반영되었습니다.',
+        'year' => $year,
+        'month' => $month,
+        'source_count' => isset($parsed['source_count']) ? (int)$parsed['source_count'] : 0,
+        'skipped_count' => isset($parsed['skipped_count']) ? (int)$parsed['skipped_count'] : 0,
+        'inserted' => count($items),
+        'groups' => cpms_company_overhead_group_card_items($items),
+    );
 }}
 
 if (!function_exists('cpms_company_overhead_lease_upload_text')) {
@@ -1046,43 +1409,90 @@ function cpms_company_overhead_lease_find_existing_index($items, $importKey, $us
     return -1;
 }}
 
-if (!function_exists('cpms_company_overhead_import_lease_xlsx')) {
-function cpms_company_overhead_import_lease_xlsx($year, $file, $user = null) {
-    $year = cpms_company_overhead_normalize_upload_year($year);
-    if ($year < 2000 || $year > 2100) return array('ok' => false, 'message' => '적용연도가 올바르지 않습니다.');
-    if (!is_array($file) || !isset($file['error']) || (int)$file['error'] === UPLOAD_ERR_NO_FILE) return array('ok' => false, 'message' => '업로드할 엑셀 파일을 선택해주세요.');
-    if ((int)$file['error'] !== UPLOAD_ERR_OK) return array('ok' => false, 'message' => '엑셀 파일 업로드에 실패했습니다. 오류코드: ' . (int)$file['error']);
-    $tmpPath = isset($file['tmp_name']) ? trim((string)$file['tmp_name']) : '';
-    $originalName = isset($file['name']) ? trim((string)$file['name']) : '';
-    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-    if ($tmpPath === '' || !is_file($tmpPath)) return array('ok' => false, 'message' => '업로드 파일을 찾을 수 없습니다.');
-    if ($ext !== 'xlsx') return array('ok' => false, 'message' => '.xlsx 파일만 업로드할 수 있습니다.');
+if (!function_exists('cpms_company_overhead_normalize_upload_month')) {
+function cpms_company_overhead_normalize_upload_month($value) {
+    $month = (int)$value;
+    if ($month < 1 || $month > 12) $month = (int)date('m');
+    return $month;
+}}
 
+if (!function_exists('cpms_company_overhead_lease_tmp_root')) {
+function cpms_company_overhead_lease_tmp_root() {
+    $root = function_exists('cpms_storage_root') ? cpms_storage_root() : dirname(dirname(__DIR__)) . '/storage';
+    return $root . '/tmp/company_overhead_lease_preview';
+}}
+
+if (!function_exists('cpms_company_overhead_lease_new_token')) {
+function cpms_company_overhead_lease_new_token() {
+    if (function_exists('openssl_random_pseudo_bytes')) {
+        $bytes = openssl_random_pseudo_bytes(16);
+        if ($bytes !== false) return bin2hex($bytes);
+    }
+    return md5(uniqid('', true) . mt_rand());
+}}
+
+if (!function_exists('cpms_company_overhead_lease_ensure_dir')) {
+function cpms_company_overhead_lease_ensure_dir($dir) {
+    if (function_exists('cpms_ensure_dir')) return cpms_ensure_dir($dir);
+    if (is_dir($dir)) return true;
+    return @mkdir($dir, 0777, true);
+}}
+
+if (!function_exists('cpms_company_overhead_lease_parse_xlsx_file')) {
+function cpms_company_overhead_lease_parse_xlsx_file($tmpPath) {
+    $tmpPath = trim((string)$tmpPath);
+    if ($tmpPath === '' || !is_file($tmpPath)) return array('ok' => false, 'message' => '업로드 파일을 찾을 수 없습니다.');
     $read = \App\Core\SimpleXlsxReader::readFirstSheet($tmpPath, 3000);
     if (!empty($read['error'])) return array('ok' => false, 'message' => (string)$read['error']);
     $parsed = cpms_company_overhead_lease_parse_xlsx_rows(isset($read['rows']) ? $read['rows'] : array());
     $rows = isset($parsed['rows']) && is_array($parsed['rows']) ? $parsed['rows'] : array();
     if (count($rows) === 0) return array('ok' => false, 'message' => '임대차 양식에서 가져올 행을 찾지 못했습니다.');
+    $parsed['ok'] = true;
+    return $parsed;
+}}
 
-    $now = date('Y-m-d H:i:s');
-    $userLabel = cpms_company_overhead_user_label($user);
+if (!function_exists('cpms_company_overhead_lease_build_month_rows')) {
+function cpms_company_overhead_lease_build_month_rows($rows, $year, $startMonth) {
+    $year = cpms_company_overhead_normalize_upload_year($year);
+    $startMonth = cpms_company_overhead_normalize_upload_month($startMonth);
     $monthRows = array();
     $activeSourceKeys = array();
+    if (!is_array($rows)) $rows = array();
+
     foreach ($rows as $base) {
+        if (!is_array($base)) continue;
         $months = cpms_company_overhead_lease_active_months(isset($base['source_contract_period']) ? $base['source_contract_period'] : '', $year);
         if (count($months) === 0) continue;
-        $activeSourceKeys[$base['lease_import_key']] = true;
+        $usedInYear = false;
         foreach ($months as $month) {
-            $monthText = sprintf('%02d', (int)$month);
+            $monthInt = (int)$month;
+            if ($monthInt < $startMonth) continue;
+            $monthText = sprintf('%02d', $monthInt);
             if (!isset($monthRows[$monthText])) $monthRows[$monthText] = array();
             $row = $base;
             $row['year'] = sprintf('%04d', $year);
             $row['month'] = $monthText;
             $monthRows[$monthText][] = $row;
+            $usedInYear = true;
         }
+        if ($usedInYear && isset($base['lease_import_key'])) $activeSourceKeys[$base['lease_import_key']] = true;
     }
-    if (count($monthRows) === 0) return array('ok' => false, 'message' => '적용연도에 유효한 임대차 계약이 없습니다.');
+    ksort($monthRows);
+    return array(
+        'month_rows' => $monthRows,
+        'active_source_keys' => $activeSourceKeys,
+        'active_count' => count($activeSourceKeys),
+        'months' => array_keys($monthRows),
+    );
+}}
 
+if (!function_exists('cpms_company_overhead_lease_apply_month_rows')) {
+function cpms_company_overhead_lease_apply_month_rows($year, $monthRows, $parsed, $originalName, $user = null, $activeCount = 0) {
+    $year = cpms_company_overhead_normalize_upload_year($year);
+    if ($year < 2000 || $year > 2100) return array('ok' => false, 'message' => '적용연도가 올바르지 않습니다.');
+    if (!is_array($monthRows) || count($monthRows) === 0) return array('ok' => false, 'message' => '적용 시작월 이후 유효한 임대차 계약이 없습니다.', 'year' => $year);
+    $now = date('Y-m-d H:i:s');
+    $userLabel = cpms_company_overhead_user_label($user);
     $inserted = 0;
     $updated = 0;
     $monthsTouched = array();
@@ -1140,13 +1550,114 @@ function cpms_company_overhead_import_lease_xlsx($year, $file, $user = null) {
         'ok' => true,
         'message' => '임대차 엑셀 업로드가 반영되었습니다.',
         'source_count' => isset($parsed['source_count']) ? (int)$parsed['source_count'] : 0,
-        'active_count' => count($activeSourceKeys),
+        'active_count' => (int)$activeCount,
         'inserted' => $inserted,
         'updated' => $updated,
         'months' => $monthsTouched,
         'file_name' => $originalName,
         'year' => $year,
     );
+}}
+
+if (!function_exists('cpms_company_overhead_lease_validate_upload_file')) {
+function cpms_company_overhead_lease_validate_upload_file($file) {
+    if (!is_array($file) || !isset($file['error']) || (int)$file['error'] === UPLOAD_ERR_NO_FILE) return array('ok' => false, 'message' => '업로드할 엑셀 파일을 선택해주세요.');
+    if ((int)$file['error'] !== UPLOAD_ERR_OK) return array('ok' => false, 'message' => '엑셀 파일 업로드에 실패했습니다. 오류코드: ' . (int)$file['error']);
+    $tmpPath = isset($file['tmp_name']) ? trim((string)$file['tmp_name']) : '';
+    $originalName = isset($file['name']) ? trim((string)$file['name']) : '';
+    $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
+    if ($tmpPath === '' || !is_file($tmpPath)) return array('ok' => false, 'message' => '업로드 파일을 찾을 수 없습니다.');
+    if ($ext !== 'xlsx') return array('ok' => false, 'message' => '.xlsx 파일만 업로드할 수 있습니다.');
+    return array('ok' => true, 'tmp_path' => $tmpPath, 'original_name' => $originalName);
+}}
+
+if (!function_exists('cpms_company_overhead_import_lease_xlsx')) {
+function cpms_company_overhead_import_lease_xlsx($year, $file, $user = null, $startMonth = 1) {
+    $year = cpms_company_overhead_normalize_upload_year($year);
+    if ($year < 2000 || $year > 2100) return array('ok' => false, 'message' => '적용연도가 올바르지 않습니다.');
+    $valid = cpms_company_overhead_lease_validate_upload_file($file);
+    if (empty($valid['ok'])) return $valid;
+    $parsed = cpms_company_overhead_lease_parse_xlsx_file($valid['tmp_path']);
+    if (empty($parsed['ok'])) return $parsed;
+    $rows = isset($parsed['rows']) && is_array($parsed['rows']) ? $parsed['rows'] : array();
+    $build = cpms_company_overhead_lease_build_month_rows($rows, $year, $startMonth);
+    return cpms_company_overhead_lease_apply_month_rows($year, $build['month_rows'], $parsed, $valid['original_name'], $user, $build['active_count']);
+}}
+
+if (!function_exists('cpms_company_overhead_create_lease_preview')) {
+function cpms_company_overhead_create_lease_preview($year, $month, $file, $user = null) {
+    $year = cpms_company_overhead_normalize_upload_year($year);
+    $month = cpms_company_overhead_normalize_upload_month($month);
+    if ($year < 2000 || $year > 2100) return array('ok' => false, 'message' => '적용연도가 올바르지 않습니다.');
+    $valid = cpms_company_overhead_lease_validate_upload_file($file);
+    if (empty($valid['ok'])) return $valid;
+    $parsed = cpms_company_overhead_lease_parse_xlsx_file($valid['tmp_path']);
+    if (empty($parsed['ok'])) return $parsed;
+    $rows = isset($parsed['rows']) && is_array($parsed['rows']) ? $parsed['rows'] : array();
+    $build = cpms_company_overhead_lease_build_month_rows($rows, $year, $month);
+    if (!isset($build['month_rows']) || !is_array($build['month_rows']) || count($build['month_rows']) === 0) {
+        return array('ok' => false, 'message' => '적용 시작월 이후 유효한 임대차 계약이 없습니다.');
+    }
+
+    $token = cpms_company_overhead_lease_new_token();
+    $tmpDir = cpms_company_overhead_lease_tmp_root();
+    if (!cpms_company_overhead_lease_ensure_dir($tmpDir)) return array('ok' => false, 'message' => '임대차 업로드 임시 폴더를 만들 수 없습니다.');
+    $localPath = rtrim($tmpDir, '/\\') . '/' . $token . '.xlsx';
+    $moved = false;
+    if (function_exists('move_uploaded_file')) $moved = @move_uploaded_file($valid['tmp_path'], $localPath);
+    if (!$moved) $moved = @copy($valid['tmp_path'], $localPath);
+    if (!$moved) return array('ok' => false, 'message' => '업로드 파일을 임시 보관하지 못했습니다.');
+
+    if (!isset($_SESSION['_company_overhead_lease_preview']) || !is_array($_SESSION['_company_overhead_lease_preview'])) $_SESSION['_company_overhead_lease_preview'] = array();
+    $_SESSION['_company_overhead_lease_preview'][$token] = array(
+        'token' => $token,
+        'created_at' => time(),
+        'year' => sprintf('%04d', $year),
+        'month' => sprintf('%02d', $month),
+        'uploaded_original_name' => $valid['original_name'],
+        'temp_path' => $localPath,
+        'uploaded_by' => cpms_company_overhead_user_label($user),
+        'parsed' => $parsed,
+        'month_rows' => $build['month_rows'],
+        'months' => $build['months'],
+        'active_count' => $build['active_count'],
+    );
+
+    return array('ok' => true, 'message' => '임대차 엑셀 업로드 미리보기가 생성되었습니다.', 'token' => $token, 'year' => sprintf('%04d', $year), 'month' => sprintf('%02d', $month), 'preview' => $_SESSION['_company_overhead_lease_preview'][$token]);
+}}
+
+if (!function_exists('cpms_company_overhead_get_lease_preview')) {
+function cpms_company_overhead_get_lease_preview($token) {
+    $token = trim((string)$token);
+    if ($token === '' || !isset($_SESSION['_company_overhead_lease_preview'][$token]) || !is_array($_SESSION['_company_overhead_lease_preview'][$token])) return null;
+    $preview = $_SESSION['_company_overhead_lease_preview'][$token];
+    if (!isset($preview['created_at']) || (time() - (int)$preview['created_at']) > 7200) {
+        if (isset($preview['temp_path']) && is_file($preview['temp_path'])) @unlink($preview['temp_path']);
+        unset($_SESSION['_company_overhead_lease_preview'][$token]);
+        return null;
+    }
+    return $preview;
+}}
+
+if (!function_exists('cpms_company_overhead_clear_lease_preview')) {
+function cpms_company_overhead_clear_lease_preview($token) {
+    $preview = cpms_company_overhead_get_lease_preview($token);
+    if (is_array($preview) && isset($preview['temp_path']) && is_file($preview['temp_path'])) @unlink($preview['temp_path']);
+    if (isset($_SESSION['_company_overhead_lease_preview'][$token])) unset($_SESSION['_company_overhead_lease_preview'][$token]);
+}}
+
+if (!function_exists('cpms_company_overhead_confirm_lease_preview')) {
+function cpms_company_overhead_confirm_lease_preview($token, $user = null) {
+    $preview = cpms_company_overhead_get_lease_preview($token);
+    if (!is_array($preview)) return array('ok' => false, 'message' => '확정할 임대차 미리보기를 찾을 수 없습니다.');
+    $year = isset($preview['year']) ? (string)$preview['year'] : date('Y');
+    $parsed = isset($preview['parsed']) && is_array($preview['parsed']) ? $preview['parsed'] : array();
+    $monthRows = isset($preview['month_rows']) && is_array($preview['month_rows']) ? $preview['month_rows'] : array();
+    $originalName = isset($preview['uploaded_original_name']) ? (string)$preview['uploaded_original_name'] : '';
+    $activeCount = isset($preview['active_count']) ? (int)$preview['active_count'] : 0;
+    $result = cpms_company_overhead_lease_apply_month_rows($year, $monthRows, $parsed, $originalName, $user, $activeCount);
+    if (!empty($result['ok'])) cpms_company_overhead_clear_lease_preview($token);
+    return $result;
 }}
 
 if (!function_exists('cpms_company_overhead_lease_remove_group_from_month')) {

@@ -43,11 +43,11 @@ if ($overheadSection !== 'summary') $listFilters['category'] = $overheadSection;
 $items = array();
 if ($overheadSection !== 'payroll') {
     $summary = cpms_company_overhead_monthly_summary($filters);
-    if ($overheadSection !== 'fuel' && $overheadSection !== 'vehicles') $items = cpms_company_overhead_list($listFilters);
+    if ($overheadSection !== 'fuel' && $overheadSection !== 'vehicles' && $overheadSection !== 'corporate_cards') $items = cpms_company_overhead_list($listFilters);
 }
 
 $editItem = null;
-if ($canEditCompanyOverhead && $overheadSection !== 'summary' && $overheadSection !== 'payroll' && $overheadSection !== 'fuel' && $overheadSection !== 'vehicles' && isset($_GET['edit'])) {
+if ($canEditCompanyOverhead && $overheadSection !== 'summary' && $overheadSection !== 'payroll' && $overheadSection !== 'fuel' && $overheadSection !== 'vehicles' && $overheadSection !== 'corporate_cards' && isset($_GET['edit'])) {
     $editId = trim((string)$_GET['edit']);
     if ($editId !== '') {
         $editItem = cpms_company_overhead_find($overheadSection, $editId, isset($_GET['edit_year']) ? (int)$_GET['edit_year'] : 0, isset($_GET['edit_month']) ? (int)$_GET['edit_month'] : 0);
@@ -80,7 +80,7 @@ function cpms_overhead_view_val($row, $key, $default) {
 
   <?php require __DIR__ . '/_tabs.php'; ?>
 
-  <?php if ($overheadSection !== 'payroll' && $overheadSection !== 'fuel' && $overheadSection !== 'vehicles'): ?>
+  <?php if ($overheadSection !== 'payroll' && $overheadSection !== 'fuel' && $overheadSection !== 'vehicles' && $overheadSection !== 'corporate_cards'): ?>
   <form method="get" action="" class="bg-white border border-gray-200 rounded-2xl p-4">
     <input type="hidden" name="r" value="관리">
     <input type="hidden" name="tab" value="company_overhead">
@@ -138,6 +138,8 @@ function cpms_overhead_view_val($row, $key, $default) {
     <?php require __DIR__ . '/company_vehicles.php'; ?>
   <?php elseif ($overheadSection === 'fuel'): ?>
     <?php require __DIR__ . '/fuel.php'; ?>
+  <?php elseif ($overheadSection === 'corporate_cards'): ?>
+    <?php require __DIR__ . '/corporate_cards.php'; ?>
   <?php elseif ($overheadSection === 'lease'): ?>
     <?php require __DIR__ . '/lease.php'; ?>
   <?php else: ?>

@@ -4,6 +4,9 @@ $formItem = is_array($editItem) ? $editItem : array();
 $isLeaseEditing = is_array($editItem);
 $formYear = cpms_overhead_view_val($formItem, 'year', (string)$filters['year']);
 $formMonth = cpms_overhead_view_val($formItem, 'month', ($filters['month'] > 0 ? sprintf('%02d', (int)$filters['month']) : date('m')));
+$leaseApplyMonth = ($filters['month'] > 0) ? (int)$filters['month'] : 1;
+$leasePreviewToken = isset($_GET['lease_preview_token']) ? trim((string)$_GET['lease_preview_token']) : '';
+$leasePreview = ($canEditCompanyOverhead && $leasePreviewToken !== '') ? cpms_company_overhead_get_lease_preview($leasePreviewToken) : null;
 
 if (!function_exists('cpms_overhead_lease_val')) {
 function cpms_overhead_lease_val($row, $key) {
@@ -54,22 +57,88 @@ function cpms_overhead_lease_form_id($row) {
     </div>
   </div>
   <?php if ($canEditCompanyOverhead): ?>
-    <form method="post" action="?r=management/lease_upload" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end mt-4">
+    <form method="post" action="?r=management/lease_upload_preview" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end mt-4">
       <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
       <label class="block text-sm font-bold text-gray-700">
         <span class="block mb-2">적용연도</span>
         <input type="number" name="apply_year" min="2000" max="2100" value="<?php echo h((string)$filters['year']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
       </label>
+      <label class="block text-sm font-bold text-gray-700">
+        <span class="block mb-2">적용 시작월</span>
+        <select name="apply_month" class="w-full px-3 py-3 rounded-xl border border-gray-300">
+          <?php for ($am = 1; $am <= 12; $am++): ?>
+            <option value="<?php echo $am; ?>" <?php echo ((int)$leaseApplyMonth === $am) ? 'selected' : ''; ?>><?php echo sprintf('%02d', $am); ?></option>
+          <?php endfor; ?>
+        </select>
+      </label>
       <label class="block text-sm font-bold text-gray-700 md:col-span-2">
         <span class="block mb-2">임대차 엑셀 파일</span>
         <input type="file" name="lease_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="w-full px-3 py-3 rounded-xl border border-gray-300 bg-white">
       </label>
-      <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">엑셀 업로드</button>
+      <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">업로드 미리보기</button>
     </form>
   <?php else: ?>
     <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-bold">조회 권한만 있어 엑셀 업로드는 사용할 수 없습니다.</div>
   <?php endif; ?>
 </div>
+
+<?php if (is_array($leasePreview)): ?>
+  <?php
+    $leasePreviewParsed = isset($leasePreview['parsed']) && is_array($leasePreview['parsed']) ? $leasePreview['parsed'] : array();
+    $leasePreviewRows = isset($leasePreviewParsed['rows']) && is_array($leasePreviewParsed['rows']) ? $leasePreviewParsed['rows'] : array();
+    $leasePreviewMonths = isset($leasePreview['months']) && is_array($leasePreview['months']) ? $leasePreview['months'] : array();
+    $leasePreviewMonthRows = isset($leasePreview['month_rows']) && is_array($leasePreview['month_rows']) ? $leasePreview['month_rows'] : array();
+    $leasePreviewApplyCount = 0;
+    foreach ($leasePreviewMonthRows as $leasePreviewMonthItems) {
+        if (is_array($leasePreviewMonthItems)) $leasePreviewApplyCount += count($leasePreviewMonthItems);
+    }
+  ?>
+  <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+    <form method="post" action="?r=management/lease_upload_confirm" onsubmit="return confirm('임대차 미리보기 결과를 월별 데이터로 확정 저장합니다. 진행하시겠습니까?');">
+      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+      <input type="hidden" name="preview_token" value="<?php echo h($leasePreviewToken); ?>">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <div class="font-extrabold text-amber-900">업로드 미리보기</div>
+          <div class="text-sm text-amber-800 mt-1">
+            적용 시작: <?php echo h(isset($leasePreview['year']) ? $leasePreview['year'] : ''); ?>년 <?php echo h(isset($leasePreview['month']) ? $leasePreview['month'] : ''); ?>월 /
+            파일: <?php echo h(isset($leasePreview['uploaded_original_name']) ? $leasePreview['uploaded_original_name'] : ''); ?> /
+            유효 항목: <?php echo h(isset($leasePreview['active_count']) ? (string)(int)$leasePreview['active_count'] : '0'); ?>건 /
+            월별 생성: <?php echo h((string)$leasePreviewApplyCount); ?>건
+          </div>
+          <div class="text-sm text-amber-800 mt-1">반영 월: <?php echo h(count($leasePreviewMonths) > 0 ? implode(', ', $leasePreviewMonths) : '-'); ?></div>
+        </div>
+        <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">확정 저장</button>
+      </div>
+    </form>
+    <?php if (count($leasePreviewRows) > 0): ?>
+      <div class="mt-4 cpms-responsive-table-wrap">
+        <table class="cpms-responsive-table text-xs bg-white">
+          <thead>
+            <tr>
+              <th class="text-left p-3 border-b border-amber-200 bg-amber-100">구분</th>
+              <th class="text-left p-3 border-b border-amber-200 bg-amber-100">주소</th>
+              <th class="text-right p-3 border-b border-amber-200 bg-amber-100">월세</th>
+              <th class="text-left p-3 border-b border-amber-200 bg-amber-100">계약기간</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php foreach (array_slice($leasePreviewRows, 0, 12) as $previewRow): ?>
+              <tr>
+                <td class="p-3 border-b border-amber-100 font-bold"><?php echo h(cpms_overhead_lease_val($previewRow, 'title')); ?></td>
+                <td class="p-3 border-b border-amber-100" data-wrap="1"><?php echo h(cpms_overhead_lease_val($previewRow, 'address')); ?></td>
+                <td class="p-3 border-b border-amber-100 text-right"><?php echo h(cpms_overhead_lease_money_label(cpms_overhead_lease_val($previewRow, 'amount'))); ?></td>
+                <td class="p-3 border-b border-amber-100"><?php echo h(cpms_overhead_lease_val($previewRow, 'source_contract_period')); ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    <?php endif; ?>
+  </div>
+<?php elseif ($leasePreviewToken !== ''): ?>
+  <div class="bg-red-50 border border-red-200 rounded-2xl p-4 text-red-700 font-bold">미리보기 세션이 만료되었거나 찾을 수 없습니다. 다시 업로드해주세요.</div>
+<?php endif; ?>
 
 <div class="bg-white border border-gray-200 rounded-2xl p-4">
   <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
