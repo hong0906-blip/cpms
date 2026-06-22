@@ -440,6 +440,53 @@ function cpms_company_overhead_save_month($category, $year, $month, $items) {
     return true;
 }}
 
+if (!function_exists('cpms_company_overhead_path_key')) {
+function cpms_company_overhead_path_key($path) {
+    $path = trim((string)$path);
+    if ($path === '') return '';
+    $realPath = @realpath($path);
+    if ($realPath !== false && $realPath !== '') $path = $realPath;
+    $path = str_replace('\\', '/', $path);
+    if (function_exists('mb_strtolower')) return mb_strtolower($path, 'UTF-8');
+    return strtolower($path);
+}}
+
+if (!function_exists('cpms_company_overhead_clear_month_files_except')) {
+function cpms_company_overhead_clear_month_files_except($category, $year, $month, $keepPath) {
+    $meta = cpms_company_overhead_category_meta($category);
+    if (!is_array($meta)) return array('ok' => false, 'deleted' => array(), 'errors' => array('잘못된 관리비 분류입니다.'));
+    $ym = sprintf('%04d-%02d', (int)$year, (int)$month);
+    $keepKey = cpms_company_overhead_path_key($keepPath);
+    $deleted = array();
+    $errors = array();
+    $baseDirs = cpms_company_overhead_base_dirs();
+    foreach ($baseDirs as $baseDir) {
+        $path = cpms_company_overhead_month_file($baseDir, $meta['path'], $ym);
+        if ($path === '' || !is_file($path)) continue;
+        if ($keepKey !== '' && cpms_company_overhead_path_key($path) === $keepKey) continue;
+        if (!is_writable($path)) {
+            $errors[] = $path . ' (쓰기 권한 없음)';
+            continue;
+        }
+        if (@unlink($path)) {
+            $deleted[] = $path;
+            continue;
+        }
+        $err = error_get_last();
+        $errors[] = $path . (is_array($err) && isset($err['message']) ? ' / ' . $err['message'] : '');
+    }
+    if (count($errors) > 0) {
+        cpms_company_overhead_log('Company overhead stale month file delete failed.', array(
+            'category' => $category,
+            'year' => $year,
+            'month' => $month,
+            'keep_path' => $keepPath,
+            'errors' => $errors,
+        ));
+    }
+    return array('ok' => count($errors) === 0, 'deleted' => $deleted, 'errors' => $errors);
+}}
+
 if (!function_exists('cpms_company_overhead_sum_record')) {
 function cpms_company_overhead_sum_record($record) {
     if (!is_array($record)) return cpms_company_overhead_numeric_value($record);
@@ -1283,9 +1330,15 @@ function cpms_company_overhead_confirm_card_preview($token, $user = null) {
         $items[$idx]['updated_by'] = $userLabel;
         $items[$idx]['updated_at'] = $now;
     }
+    $savePath = cpms_company_overhead_writable_month_file('corporate_cards', $year, $month);
     if (!cpms_company_overhead_save_month('corporate_cards', $year, $month, $items)) {
         $writeError = cpms_company_overhead_last_write_error();
         return array('ok' => false, 'message' => '법인카드 월별 데이터를 저장하지 못했습니다.' . ($writeError !== '' ? ' 원인: ' . $writeError : ''));
+    }
+    $clearResult = cpms_company_overhead_clear_month_files_except('corporate_cards', $year, $month, $savePath);
+    if (empty($clearResult['ok'])) {
+        $errors = isset($clearResult['errors']) && is_array($clearResult['errors']) ? implode(', ', $clearResult['errors']) : '';
+        return array('ok' => false, 'message' => '법인카드 업로드 파일은 저장했지만 기존 월 데이터 파일을 삭제하지 못했습니다. 같은 적용월의 기존 데이터가 먼저 표시될 수 있습니다.' . ($errors !== '' ? ' 원인: ' . $errors : ''));
     }
     cpms_company_overhead_clear_card_preview($token);
     return array(
