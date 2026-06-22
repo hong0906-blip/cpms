@@ -12,9 +12,7 @@ $countPeriods = count($periodRows);
   <div class="cp-panel-title">
     <div>
       <h3>회사 손익 추이</h3>
-      <div class="cp-help">막대는 금액, 선은 총 원가율입니다. 총 투입원가는 현장 투입원가와 총관리비를 합산합니다.</div>
     </div>
-    <div class="cp-help">오른쪽 축 기준: 총 원가율</div>
   </div>
 
   <?php if ($countPeriods === 0): ?>

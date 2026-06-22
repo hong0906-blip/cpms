@@ -6,7 +6,6 @@ $projectGraphMax = cpms_company_profit_max_value($projects, array('sales', 'inpu
   <div class="cp-panel-title">
     <div>
       <h3>현장별 손익 가로 그래프</h3>
-      <div class="cp-help">현장별 원가율에는 총관리비를 안분하지 않습니다.</div>
     </div>
     <div class="cp-help">80% 미만 정상 · 80~90% 주의 · 90~100% 위험 · 100% 이상 적자</div>
   </div>

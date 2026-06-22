@@ -2,23 +2,9 @@
   <div class="cp-panel-title">
     <div>
       <h3>현장별 상세 목록</h3>
-      <div class="cp-help">매출기준은 선택 기간 안에서 기성 입력 월과 예상매출 대체 월의 조합으로 표시합니다.</div>
     </div>
     <div class="cp-help">총 <?php echo (int)count($projects); ?>개 현장</div>
   </div>
-
-  <?php if (isset($overhead['categories']) && is_array($overhead['categories']) && count($overhead['categories']) > 0): ?>
-    <div class="cp-help" style="margin-bottom:10px;">
-      총관리비 구성:
-      <?php
-      $parts = array();
-      foreach ($overhead['categories'] as $cat) {
-          $parts[] = (isset($cat['label']) ? (string)$cat['label'] : '-') . ' ' . cpms_company_profit_money(isset($cat['amount']) ? (float)$cat['amount'] : 0.0);
-      }
-      echo h(implode(' · ', $parts));
-      ?>
-    </div>
-  <?php endif; ?>
 
   <div class="cp-table-wrap">
     <table>

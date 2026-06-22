@@ -86,12 +86,7 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
   <div class="cp-panel">
     <div class="cp-panel-title">
       <div>
-        <div class="text-sm text-gray-500">숨겨진 경영 대시보드</div>
         <h2 class="text-2xl font-extrabold text-gray-900">경영현황</h2>
-      </div>
-      <div class="cp-help">
-        확정매출은 기성이 입력된 월은 기성금액을 사용하고, 기성이 없는 월은 예상매출을 임시 포함합니다.<br>
-        총관리비는 회사 전체 총 투입원가에만 포함하며 현장별 손익에는 안분하지 않습니다.
       </div>
     </div>
 

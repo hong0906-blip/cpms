@@ -112,7 +112,21 @@ if ($dbOk) {
         $sql .= " AND (email LIKE :q OR name LIKE :q OR department LIKE :q" . ($positionEnabled ? " OR position LIKE :q" : "") . ")";
         $params[':q'] = '%'.$q.'%';
     }
-    $sql .= " ORDER BY is_active DESC, role DESC, department ASC, name ASC, id DESC LIMIT 500";
+    $sql .= " ORDER BY CASE position"
+        . " WHEN '대표' THEN 1"
+        . " WHEN '대표이사' THEN 1"
+        . " WHEN '부사장' THEN 2"
+        . " WHEN '고문' THEN 3"
+        . " WHEN '전무' THEN 4"
+        . " WHEN '상무' THEN 5"
+        . " WHEN '부장' THEN 6"
+        . " WHEN '차장' THEN 7"
+        . " WHEN '과장' THEN 8"
+        . " WHEN '대리' THEN 9"
+        . " WHEN '주임' THEN 10"
+        . " ELSE 99 END ASC,"
+        . " CASE WHEN hire_date IS NULL OR CAST(hire_date AS CHAR) = '' THEN 1 ELSE 0 END ASC,"
+        . " hire_date ASC, name ASC, id DESC LIMIT 500";
 
     // 직원명부 안전 SELECT
     try {

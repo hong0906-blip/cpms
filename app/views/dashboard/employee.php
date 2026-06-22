@@ -194,11 +194,6 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
                 <?php endif; ?>
             <?php endif; ?>
             <button type='button' data-attendance-request-open class='cpms-mobile-hide px-5 py-3 rounded-2xl bg-blue-900/80 text-white font-extrabold text-base border border-white/40'>출퇴근 요청</button>
-            <?php if (!empty($attendanceGeofence['enabled'])): ?>
-                <div class='basis-full text-sm text-blue-100'>
-                    출퇴근은 <?php echo h(trim((string)$attendanceGeofence['name']) !== '' ? $attendanceGeofence['name'] : '관리팀 지정 위치'); ?> 반경 <?php echo number_format((float)$attendanceGeofence['radius_m']); ?>m 안에서만 가능합니다.
-                </div>
-            <?php endif; ?>
             <?php if ($debugAttendance): ?>
                 <div class='basis-full mt-1 p-3 rounded-xl bg-black/60 text-white text-xs leading-6'>
                     employee_id: <?php echo h((string)$eid_btn); ?><br>
@@ -331,7 +326,7 @@ if ($pdo && $eid_att > 0) {
 <div class='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 text-base'>
 <div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>오늘 상태</div><div class='font-extrabold text-lg'><?php echo h(isset($todayRow['status'])?$todayRow['status']:'출근 전');?></div></div>
 <div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>출근 / 퇴근</div><div class='font-extrabold text-lg'><?php if($todayMismatch){ ?>날짜 불일치 기록 감지<br><span class='text-red-600 text-base'>관리자 확인 필요</span><?php } else { ?><?php echo h(isset($todayRow['check_in'])&&$todayRow['check_in']?$todayRow['check_in']:'-');?> / <?php echo h(isset($todayRow['check_out'])&&$todayRow['check_out']?$todayRow['check_out']:'-');?><?php } ?></div></div>
-<div class='p-4 rounded-2xl bg-indigo-50'><div class='text-gray-500'>오늘 인정 근무시간</div><div class='font-extrabold text-lg text-indigo-700'><?php echo attendance_hm(isset($todayRow['work_minutes'])?(int)$todayRow['work_minutes']:0);?></div></div>
+<div class='p-4 rounded-2xl bg-indigo-50'><div class='text-gray-500'>오늘 근무시간</div><div class='font-extrabold text-lg text-indigo-700'><?php echo attendance_hm(isset($todayRow['work_minutes'])?(int)$todayRow['work_minutes']:0);?></div></div>
 <div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>이번 주 누적 근무시간</div><div class='font-extrabold text-lg'><?php echo attendance_hm($weekWork);?></div></div>
 <div class='p-4 rounded-2xl <?php echo ($weekWork>3120)?'bg-red-50':'bg-emerald-50';?>'><div class='text-gray-500'>52시간 초과 여부</div><div class='font-extrabold text-lg <?php echo ($weekWork>3120)?'text-red-700':'text-emerald-700';?>'><?php echo ($weekWork>3120)?'초과':'정상';?></div></div>
 <div class='p-4 rounded-2xl bg-amber-50'><div class='text-gray-500'>승인대기 요청</div><div class='font-extrabold text-lg text-amber-700'><?php echo (int)$pendingCnt;?>건</div></div>
@@ -414,20 +409,14 @@ if($pdo&&$eid_att>0){
     </div>
   </div>
 </div>
+<?php if($vac['display_type']!=='monthly'): ?>
 <div class='text-sm text-gray-600 mt-3'>
-  <?php if($vac['display_type']==='monthly'): ?>
-    입사 1년 미만은 월차 기준으로 표시됩니다.
-  <?php else: ?>
     입사 1년 이상은 연차 기준으로 표시됩니다.
-  <?php endif; ?>
 </div>
 <div class='text-sm text-gray-500 mt-1'>
-  <?php if($vac['display_type']==='monthly'): ?>
-    반차는 월차에서 0.5일 차감됩니다.
-  <?php else: ?>
     반차는 연차에서 0.5일 차감됩니다.
-  <?php endif; ?>
 </div>
+<?php endif; ?>
 <?php endif; ?>
 </div></div>
 <div id='attendanceRequestModal' class='fixed inset-0 z-50 hidden'><!-- 출퇴근 요청 모달 -->

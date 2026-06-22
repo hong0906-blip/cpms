@@ -629,6 +629,14 @@ function cpms_task_feed_for_employee($pdo, $employeeId, $employeeEmail, $employe
     return $cache[$cacheKey];
 }}
 
+if (!function_exists('cpms_task_feed_hide_executive_employee')) {
+function cpms_task_feed_hide_executive_employee($employee)
+{
+    $name = trim(isset($employee['name']) ? (string)$employee['name'] : '');
+    if ($name === '') return false;
+    return (strpos($name, '노욱형') !== false);
+}}
+
 if (!function_exists('cpms_task_feed_for_executive')) {
 function cpms_task_feed_for_executive($pdo, $filters)
 {
@@ -665,6 +673,9 @@ function cpms_task_feed_for_executive($pdo, $filters)
 
     foreach ($employees as $employee) {
         $employeeId = isset($employee['id']) ? (int)$employee['id'] : 0;
+        if (cpms_task_feed_hide_executive_employee($employee)) {
+            continue;
+        }
         $department = cpms_tasks_normalize_department(isset($employee['department']) ? $employee['department'] : '');
         if ($selectedDepartment !== '' && $selectedDepartment !== '전체' && $department !== $selectedDepartment) {
             continue;

@@ -82,7 +82,9 @@ function cpms_render_feed_lane($title, $description, $colorClass, $items, $curre
         <div class="flex items-center justify-between gap-3 mb-4">
             <div>
                 <h3 class="text-xl font-extrabold text-gray-900"><?php echo h($title); ?></h3>
-                <div class="text-sm text-gray-500 mt-1"><?php echo h($description); ?></div>
+                <?php if (trim((string)$description) !== ''): ?>
+                    <div class="text-sm text-gray-500 mt-1"><?php echo h($description); ?></div>
+                <?php endif; ?>
             </div>
             <span class="px-3 py-1 rounded-full text-sm font-bold <?php echo h($colorClass); ?>"><?php echo count($items); ?>건</span>
         </div>
@@ -162,7 +164,6 @@ function cpms_render_employee_task_dashboard($pdo)
                     <button type="button" id="cpmsEmployeeTasksToggle" class="px-3 py-2 rounded-2xl bg-white border border-gray-200 text-sm font-bold text-gray-700">숨기기 ▲</button>
                 </div>
                 <div data-cpms-employee-task-body class="cpms-task-summary">
-                <div class="text-sm text-gray-600 mt-1">업무 요청, 승인 요청, 마감 임박 업무를 한 곳에서 확인하고 바로 처리할 수 있습니다.</div>
                 <div class="mt-3 flex flex-wrap gap-2 text-sm">
                     <span class="px-3 py-2 rounded-full bg-slate-100 text-slate-700 font-bold">전체 <?php echo (int)$summary['all']; ?>건</span>
                     <span class="px-3 py-2 rounded-full bg-rose-50 text-rose-700 font-bold">긴급 <?php echo (int)$summary['urgent']; ?>건</span>
@@ -180,11 +181,11 @@ function cpms_render_employee_task_dashboard($pdo)
         </div>
 
         <div data-cpms-employee-task-body class="mt-6 space-y-5">
-            <?php cpms_render_feed_lane('긴급', '긴급 요청으로 표시된 업무입니다.', 'bg-rose-50 text-rose-700', $urgentItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('오늘 마감', '오늘 안에 챙기면 좋은 업무입니다.', 'bg-amber-50 text-amber-700', $todayItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('진행중', '이미 착수했거나 보완 중인 업무입니다.', 'bg-blue-50 text-blue-700', $progressItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('전자결재/승인', '기존 승인 기능도 함께 보여드립니다.', 'bg-indigo-50 text-indigo-700', $approvalItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('지연', '마감이 지나 지원이 필요할 수 있는 업무입니다.', 'bg-red-50 text-red-700', $delayedItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
+            <?php cpms_render_feed_lane('긴급', '', 'bg-rose-50 text-rose-700', $urgentItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
+            <?php cpms_render_feed_lane('오늘 마감', '', 'bg-amber-50 text-amber-700', $todayItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
+            <?php cpms_render_feed_lane('진행중', '', 'bg-blue-50 text-blue-700', $progressItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
+            <?php cpms_render_feed_lane('전자결재/승인', '', 'bg-indigo-50 text-indigo-700', $approvalItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
+            <?php cpms_render_feed_lane('지연', '', 'bg-red-50 text-red-700', $delayedItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
             <div class="rounded-3xl border border-gray-200 bg-white p-5">
                 <form method="get" action="" class="flex flex-wrap items-end gap-3">
                     <input type="hidden" name="r" value="대시보드">
@@ -195,7 +196,7 @@ function cpms_render_employee_task_dashboard($pdo)
                     <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">조회</button>
                 </form>
             </div>
-            <?php cpms_render_feed_lane('내가 요청한 업무', $requestedTaskDate . '에 요청한 업무입니다.', 'bg-slate-100 text-slate-700', $requested, (int)$currentEmployee['id'], $returnUrl, true); ?>
+            <?php cpms_render_feed_lane('내가 요청한 업무', '', 'bg-slate-100 text-slate-700', $requested, (int)$currentEmployee['id'], $returnUrl, true); ?>
         </div>
     </div>
 
