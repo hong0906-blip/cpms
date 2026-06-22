@@ -948,8 +948,9 @@ function cpms_company_overhead_card_detect_columns($rows) {
             else if ($token === '비고') $columns['note'] = $col;
             else if ($token === '메모') $columns['memo'] = $col;
         }
-        if (isset($columns['used_date']) && isset($columns['card_number']) && isset($columns['amount']) && isset($columns['card_user'])) {
+        if (isset($columns['used_date']) && (isset($columns['card_number']) || isset($columns['card_alias'])) && isset($columns['amount']) && isset($columns['card_user'])) {
             foreach ($fallback as $key => $fallbackIndex) {
+                if (($key === 'card_number' || $key === 'card_alias') && !isset($columns[$key])) continue;
                 if (!isset($columns[$key])) $columns[$key] = $fallbackIndex;
             }
             return array('header_index' => (int)$idx, 'columns' => $columns);
@@ -989,17 +990,19 @@ function cpms_company_overhead_card_parse_rows($rows, $year, $month, $user = nul
         $usedDate = cpms_company_overhead_card_normalize_date(cpms_company_overhead_card_cell($row, isset($cols['used_date']) ? $cols['used_date'] : 0));
         $usedTime = cpms_company_overhead_card_cell($row, isset($cols['used_time']) ? $cols['used_time'] : 1);
         $vendor = cpms_company_overhead_card_cell($row, isset($cols['vendor']) ? $cols['vendor'] : 2);
-        $cardNumber = cpms_company_overhead_card_cell($row, isset($cols['card_number']) ? $cols['card_number'] : 4);
+        $cardNumber = isset($cols['card_number']) ? cpms_company_overhead_card_cell($row, $cols['card_number']) : '';
+        $cardAlias = isset($cols['card_alias']) ? cpms_company_overhead_card_cell($row, $cols['card_alias']) : '';
+        $cardUser = cpms_company_overhead_card_cell($row, isset($cols['card_user']) ? $cols['card_user'] : 9);
+        $hasCardIdentity = ($cardNumber !== '' || ($cardAlias !== '' && $cardUser !== ''));
         $amount = cpms_company_overhead_numeric_value(cpms_company_overhead_card_cell($row, isset($cols['amount']) ? $cols['amount'] : 7));
         $amountEmpty = (abs($amount) < 0.000001);
         if ($usedDate === '' && $vendor === '' && $cardNumber === '' && $amountEmpty) continue;
         $parsed['source_count']++;
-        if ($usedDate === '' || $vendor === '' || $cardNumber === '' || $amountEmpty) {
+        if ($usedDate === '' || $vendor === '' || !$hasCardIdentity || $amountEmpty) {
             $parsed['skipped_count']++;
-            $parsed['errors'][] = '행 ' . ($i + 1) . ': 필수값(사용일자/사용처/카드번호/사용금액)이 부족합니다.';
+            $parsed['errors'][] = '행 ' . ($i + 1) . ': 필수값(사용일자/사용처/카드번호 또는 카드별칭+사용자/사용금액)이 부족합니다.';
             continue;
         }
-        $cardUser = cpms_company_overhead_card_cell($row, isset($cols['card_user']) ? $cols['card_user'] : 9);
         $content = cpms_company_overhead_card_cell($row, isset($cols['content']) ? $cols['content'] : 8);
         $memo = cpms_company_overhead_card_cell($row, isset($cols['memo']) ? $cols['memo'] : 11);
         $note = cpms_company_overhead_card_cell($row, isset($cols['note']) ? $cols['note'] : 10);
@@ -1019,7 +1022,7 @@ function cpms_company_overhead_card_parse_rows($rows, $year, $month, $user = nul
             'card_number' => $cardNumber,
             'card_number_key' => cpms_company_overhead_card_number_key($cardNumber),
             'card_last4' => cpms_company_overhead_card_last4($cardNumber),
-            'card_alias' => cpms_company_overhead_card_cell($row, isset($cols['card_alias']) ? $cols['card_alias'] : 5),
+            'card_alias' => $cardAlias,
             'proof' => cpms_company_overhead_card_cell($row, isset($cols['proof']) ? $cols['proof'] : 6),
             'content' => $content,
             'purpose' => $content,
@@ -1089,6 +1092,54 @@ function cpms_company_overhead_validate_card_upload_file($file) {
     return array('ok' => true, 'tmp_path' => $tmpPath, 'original_name' => $originalName, 'ext' => $ext);
 }}
 
+if (!function_exists('cpms_company_overhead_card_user_name')) {
+function cpms_company_overhead_card_user_name($item) {
+    if (!is_array($item)) $item = array();
+    $userName = isset($item['card_user']) ? trim((string)$item['card_user']) : '';
+    if ($userName === '' && isset($item['employee_name'])) $userName = trim((string)$item['employee_name']);
+    return $userName !== '' ? $userName : '-';
+}}
+
+if (!function_exists('cpms_company_overhead_card_text_key')) {
+function cpms_company_overhead_card_text_key($value) {
+    $value = trim((string)$value);
+    if ($value === '') return '';
+    if (function_exists('mb_strtolower')) $value = mb_strtolower($value, 'UTF-8');
+    else $value = strtolower($value);
+    return preg_replace('/\s+/u', ' ', $value);
+}}
+
+if (!function_exists('cpms_company_overhead_card_user_key')) {
+function cpms_company_overhead_card_user_key($item) {
+    $userName = cpms_company_overhead_card_user_name($item);
+    $key = cpms_company_overhead_card_text_key($userName);
+    return $key !== '' ? 'user:' . $key : 'user:unknown';
+}}
+
+if (!function_exists('cpms_company_overhead_card_bucket_key')) {
+function cpms_company_overhead_card_bucket_key($item, $userName) {
+    if (!is_array($item)) $item = array();
+    $cardNumber = isset($item['card_number']) ? (string)$item['card_number'] : (isset($item['card_last4']) ? (string)$item['card_last4'] : '');
+    $numberKey = isset($item['card_number_key']) && trim((string)$item['card_number_key']) !== '' ? trim((string)$item['card_number_key']) : cpms_company_overhead_card_number_key($cardNumber);
+    if ($numberKey !== '') return 'number:' . $numberKey;
+    $alias = isset($item['card_alias']) ? trim((string)$item['card_alias']) : '';
+    if ($alias !== '') return 'alias:' . cpms_company_overhead_card_text_key($userName) . ':' . cpms_company_overhead_card_text_key($alias);
+    return 'unknown:' . cpms_company_overhead_card_text_key($userName);
+}}
+
+if (!function_exists('cpms_company_overhead_card_bucket_sort')) {
+function cpms_company_overhead_card_bucket_sort($a, $b) {
+    $at = isset($a['total']) ? (float)$a['total'] : 0.0;
+    $bt = isset($b['total']) ? (float)$b['total'] : 0.0;
+    if ($at == $bt) {
+        $al = isset($a['label']) ? (string)$a['label'] : '';
+        $bl = isset($b['label']) ? (string)$b['label'] : '';
+        if ($al === $bl) return 0;
+        return ($al < $bl) ? -1 : 1;
+    }
+    return ($at < $bt) ? 1 : -1;
+}}
+
 if (!function_exists('cpms_company_overhead_group_card_items')) {
 function cpms_company_overhead_group_card_items($items) {
     $groups = array();
@@ -1097,24 +1148,51 @@ function cpms_company_overhead_group_card_items($items) {
         if (!is_array($item)) continue;
         if (isset($item['deleted_at']) && trim((string)$item['deleted_at']) !== '') continue;
         $cardNumber = isset($item['card_number']) ? (string)$item['card_number'] : (isset($item['card_last4']) ? (string)$item['card_last4'] : '');
-        $key = isset($item['card_number_key']) && trim((string)$item['card_number_key']) !== '' ? (string)$item['card_number_key'] : cpms_company_overhead_card_number_key($cardNumber);
-        if ($key === '') $key = 'unknown';
+        $cardAlias = isset($item['card_alias']) ? trim((string)$item['card_alias']) : '';
+        $userName = cpms_company_overhead_card_user_name($item);
+        $key = cpms_company_overhead_card_user_key($item);
+        $bucketKey = cpms_company_overhead_card_bucket_key($item, $userName);
         if (!isset($groups[$key])) {
-            $userName = isset($item['card_user']) ? trim((string)$item['card_user']) : (isset($item['employee_name']) ? trim((string)$item['employee_name']) : '');
             $groups[$key] = array(
                 'key' => $key,
+                'card_number' => '',
+                'card_alias' => '',
+                'user_name' => $userName,
+                'total' => 0.0,
+                'count' => 0,
+                'items' => array(),
+                'card_groups' => array(),
+            );
+        }
+        if ($groups[$key]['user_name'] === '-' && $userName !== '-') $groups[$key]['user_name'] = $userName;
+        if (!isset($groups[$key]['card_groups'][$bucketKey])) {
+            $displayNumber = cpms_company_overhead_card_display_number($cardNumber);
+            $bucketLabel = $displayNumber !== '-' ? $displayNumber : ($cardAlias !== '' ? $cardAlias : '-');
+            $groups[$key]['card_groups'][$bucketKey] = array(
+                'key' => $bucketKey,
+                'label' => $bucketLabel,
                 'card_number' => $cardNumber,
-                'card_alias' => isset($item['card_alias']) ? (string)$item['card_alias'] : '',
-                'user_name' => $userName !== '' ? $userName : '-',
+                'card_alias' => $cardAlias,
                 'total' => 0.0,
                 'count' => 0,
                 'items' => array(),
             );
         }
-        if ($groups[$key]['user_name'] === '-' && isset($item['card_user']) && trim((string)$item['card_user']) !== '') $groups[$key]['user_name'] = trim((string)$item['card_user']);
-        $groups[$key]['total'] += isset($item['amount']) ? cpms_company_overhead_numeric_value($item['amount']) : 0.0;
+        $amount = isset($item['amount']) ? cpms_company_overhead_numeric_value($item['amount']) : 0.0;
+        $groups[$key]['total'] += $amount;
         $groups[$key]['count']++;
         $groups[$key]['items'][] = $item;
+        $groups[$key]['card_groups'][$bucketKey]['total'] += $amount;
+        $groups[$key]['card_groups'][$bucketKey]['count']++;
+        $groups[$key]['card_groups'][$bucketKey]['items'][] = $item;
+        if ($groups[$key]['card_groups'][$bucketKey]['card_number'] === '' && $cardNumber !== '') $groups[$key]['card_groups'][$bucketKey]['card_number'] = $cardNumber;
+        if ($groups[$key]['card_groups'][$bucketKey]['card_alias'] === '' && $cardAlias !== '') $groups[$key]['card_groups'][$bucketKey]['card_alias'] = $cardAlias;
+    }
+    foreach ($groups as $key => $group) {
+        if (isset($group['card_groups']) && is_array($group['card_groups'])) {
+            uasort($group['card_groups'], 'cpms_company_overhead_card_bucket_sort');
+            $groups[$key]['card_groups'] = $group['card_groups'];
+        }
     }
     uasort($groups, 'cpms_company_overhead_card_group_sort');
     return $groups;

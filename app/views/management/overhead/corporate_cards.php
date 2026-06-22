@@ -62,8 +62,8 @@ function cpms_overhead_card_detail_sort($a, $b) {
     <div class="mt-2 text-2xl font-extrabold text-emerald-700"><?php echo h(cpms_overhead_card_money($cardTotal)); ?>원</div>
   </div>
   <div class="bg-white border border-gray-200 rounded-2xl p-4">
-    <div class="text-xs font-bold text-gray-500">카드 수</div>
-    <div class="mt-2 text-2xl font-extrabold"><?php echo h((string)count($cardGroups)); ?>개</div>
+    <div class="text-xs font-bold text-gray-500">사용자 수</div>
+    <div class="mt-2 text-2xl font-extrabold"><?php echo h((string)count($cardGroups)); ?>명</div>
   </div>
   <div class="bg-white border border-gray-200 rounded-2xl p-4">
     <div class="text-xs font-bold text-gray-500">사용 건수</div>
@@ -126,7 +126,7 @@ function cpms_overhead_card_detail_sort($a, $b) {
             적용월: <?php echo h(isset($cardPreview['year']) ? $cardPreview['year'] : ''); ?>년 <?php echo h(isset($cardPreview['month']) ? $cardPreview['month'] : ''); ?>월 /
             파일: <?php echo h(isset($cardPreview['uploaded_original_name']) ? $cardPreview['uploaded_original_name'] : ''); ?> /
             사용 건수: <?php echo h((string)count($previewItems)); ?>건 /
-            카드 수: <?php echo h((string)count($previewGroups)); ?>개 /
+            사용자 수: <?php echo h((string)count($previewGroups)); ?>명 /
             합계: <?php echo h(cpms_overhead_card_money($previewTotal)); ?>원
           </div>
           <?php if ($existingCount > 0): ?>
@@ -144,7 +144,7 @@ function cpms_overhead_card_detail_sort($a, $b) {
 <div class="bg-white border border-gray-200 rounded-2xl p-4">
   <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
     <div>
-      <div class="font-extrabold text-gray-900">카드별 사용내역</div>
+      <div class="font-extrabold text-gray-900">사용자별 사용내역</div>
       <div class="text-sm text-gray-500 mt-1"><?php echo h(sprintf('%04d/%02d', $cardYear, $cardMonth)); ?></div>
     </div>
   </div>
@@ -157,6 +157,18 @@ function cpms_overhead_card_detail_sort($a, $b) {
         <?php
           $detailId = 'card-detail-' . md5(isset($group['key']) ? (string)$group['key'] : uniqid('', true));
           $groupItems = isset($group['items']) && is_array($group['items']) ? $group['items'] : array();
+          $groupCardGroups = isset($group['card_groups']) && is_array($group['card_groups']) ? $group['card_groups'] : array();
+          if (count($groupCardGroups) === 0) {
+              $groupCardGroups = array(array(
+                  'key' => isset($group['key']) ? (string)$group['key'] : '',
+                  'label' => cpms_company_overhead_card_display_number(isset($group['card_number']) ? $group['card_number'] : ''),
+                  'card_number' => isset($group['card_number']) ? (string)$group['card_number'] : '',
+                  'card_alias' => isset($group['card_alias']) ? (string)$group['card_alias'] : '',
+                  'total' => isset($group['total']) ? (float)$group['total'] : 0.0,
+                  'count' => isset($group['count']) ? (int)$group['count'] : 0,
+                  'items' => $groupItems,
+              ));
+          }
           usort($groupItems, 'cpms_overhead_card_detail_sort');
         ?>
         <div class="border border-gray-200 rounded-2xl bg-white overflow-hidden">
@@ -164,9 +176,7 @@ function cpms_overhead_card_detail_sort($a, $b) {
             <div>
               <div class="font-extrabold text-gray-900"><?php echo h(isset($group['user_name']) ? $group['user_name'] : '-'); ?></div>
               <div class="text-xs text-gray-500 mt-1">
-                <?php echo h(cpms_company_overhead_card_display_number(isset($group['card_number']) ? $group['card_number'] : '')); ?>
-                <?php if (!empty($group['card_alias'])): ?> · <?php echo h($group['card_alias']); ?><?php endif; ?>
-                · <?php echo h(isset($group['count']) ? (string)(int)$group['count'] : '0'); ?>건
+                카드/별칭 <?php echo h((string)count($groupCardGroups)); ?>개 · <?php echo h(isset($group['count']) ? (string)(int)$group['count'] : '0'); ?>건
               </div>
             </div>
             <div class="flex items-center gap-3">
@@ -178,29 +188,57 @@ function cpms_overhead_card_detail_sort($a, $b) {
             </div>
           </div>
           <div id="<?php echo h($detailId); ?>" class="hidden border-t border-gray-200">
-            <div class="cpms-responsive-table-wrap">
-              <table class="cpms-responsive-table text-xs">
-                <thead>
-                  <tr>
-                    <th class="text-left p-3 border-b border-gray-200 bg-gray-50">사용일자</th>
-                    <th class="text-left p-3 border-b border-gray-200 bg-gray-50">사용시간</th>
-                    <th class="text-left p-3 border-b border-gray-200 bg-gray-50">사용처</th>
-                    <th class="text-right p-3 border-b border-gray-200 bg-gray-50">사용금액</th>
-                    <th class="text-left p-3 border-b border-gray-200 bg-gray-50">내용</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <?php foreach ($groupItems as $item): ?>
-                    <tr>
-                      <td class="p-3 border-b border-gray-100"><?php echo h(cpms_overhead_card_val($item, 'occurred_at')); ?></td>
-                      <td class="p-3 border-b border-gray-100"><?php echo h(cpms_overhead_card_val($item, 'used_time')); ?></td>
-                      <td class="p-3 border-b border-gray-100" data-wrap="1"><?php echo h(cpms_overhead_card_val($item, 'vendor')); ?></td>
-                      <td class="p-3 border-b border-gray-100 text-right font-bold"><?php echo h(cpms_overhead_card_money(cpms_overhead_card_val($item, 'amount'))); ?></td>
-                      <td class="p-3 border-b border-gray-100" data-wrap="1"><?php echo h(cpms_overhead_card_val($item, 'content')); ?></td>
-                    </tr>
-                  <?php endforeach; ?>
-                </tbody>
-              </table>
+            <div class="space-y-4 p-4 bg-slate-50">
+              <?php foreach ($groupCardGroups as $cardGroup): ?>
+                <?php
+                  $cardGroupItems = isset($cardGroup['items']) && is_array($cardGroup['items']) ? $cardGroup['items'] : array();
+                  usort($cardGroupItems, 'cpms_overhead_card_detail_sort');
+                  $cardNumberLabel = cpms_company_overhead_card_display_number(isset($cardGroup['card_number']) ? $cardGroup['card_number'] : '');
+                  $cardAliasLabel = isset($cardGroup['card_alias']) ? trim((string)$cardGroup['card_alias']) : '';
+                ?>
+                <div class="rounded-2xl border border-gray-200 bg-white overflow-hidden">
+                  <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
+                    <div>
+                      <div class="font-extrabold text-gray-900">
+                        <?php echo h($cardAliasLabel !== '' ? $cardAliasLabel : $cardNumberLabel); ?>
+                      </div>
+                      <div class="text-xs text-gray-500 mt-1">
+                        카드번호 <?php echo h($cardNumberLabel); ?>
+                        <?php if ($cardAliasLabel !== '' && $cardAliasLabel !== $cardNumberLabel): ?> · 별칭 <?php echo h($cardAliasLabel); ?><?php endif; ?>
+                        · <?php echo h(isset($cardGroup['count']) ? (string)(int)$cardGroup['count'] : '0'); ?>건
+                      </div>
+                    </div>
+                    <div class="text-right">
+                      <div class="text-xs font-bold text-gray-500">합계</div>
+                      <div class="text-base font-extrabold text-emerald-700"><?php echo h(cpms_overhead_card_money(isset($cardGroup['total']) ? $cardGroup['total'] : 0)); ?>원</div>
+                    </div>
+                  </div>
+                  <div class="cpms-responsive-table-wrap">
+                    <table class="cpms-responsive-table text-xs">
+                      <thead>
+                        <tr>
+                          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">사용일자</th>
+                          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">사용시간</th>
+                          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">사용처</th>
+                          <th class="text-right p-3 border-b border-gray-200 bg-gray-50">사용금액</th>
+                          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">내용</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <?php foreach ($cardGroupItems as $item): ?>
+                          <tr>
+                            <td class="p-3 border-b border-gray-100"><?php echo h(cpms_overhead_card_val($item, 'occurred_at')); ?></td>
+                            <td class="p-3 border-b border-gray-100"><?php echo h(cpms_overhead_card_val($item, 'used_time')); ?></td>
+                            <td class="p-3 border-b border-gray-100" data-wrap="1"><?php echo h(cpms_overhead_card_val($item, 'vendor')); ?></td>
+                            <td class="p-3 border-b border-gray-100 text-right font-bold"><?php echo h(cpms_overhead_card_money(cpms_overhead_card_val($item, 'amount'))); ?></td>
+                            <td class="p-3 border-b border-gray-100" data-wrap="1"><?php echo h(cpms_overhead_card_val($item, 'content')); ?></td>
+                          </tr>
+                        <?php endforeach; ?>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              <?php endforeach; ?>
             </div>
           </div>
         </div>
