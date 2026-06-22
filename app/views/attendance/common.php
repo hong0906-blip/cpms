@@ -26,6 +26,20 @@ function attendance_datetime_date_part($value){
     if($value === '') return '';
     return substr($value, 0, 10);
 }
+if (!function_exists('attendance_request_status_label')) {
+function attendance_request_status_label($status){
+    if ($status === 'pending') return attendance_text('%EC%8A%B9%EC%9D%B8%EB%8C%80%EA%B8%B0');
+    if ($status === 'approved') return attendance_text('%EC%8A%B9%EC%9D%B8%EC%99%84%EB%A3%8C');
+    if ($status === 'rejected') return attendance_text('%EB%B0%98%EB%A0%A4');
+    return (string)$status;
+}}
+if (!function_exists('attendance_request_type_label')) {
+function attendance_request_type_label($type){
+    if ($type === 'check_in') return attendance_text('%EC%B6%9C%EA%B7%BC%EC%8B%9C%EA%B0%84%20%EC%88%98%EC%A0%95');
+    if ($type === 'check_out') return attendance_text('%ED%87%B4%EA%B7%BC%EC%8B%9C%EA%B0%84%20%EC%88%98%EC%A0%95');
+    if ($type === 'both') return attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%20%EC%88%98%EC%A0%95');
+    return (string)$type;
+}}
 function attendance_record_datetime_matches_work_date($row){
     if(!$row || !isset($row['work_date'])) return true;
     $wd = (string)$row['work_date'];

@@ -278,6 +278,8 @@ function cpms_tasks_default_return_url()
     if ($dashboardType === 'executive') $url .= '&dv=executive';
     $departmentFilter = isset($_GET['task_department']) ? trim((string)$_GET['task_department']) : '';
     if ($departmentFilter !== '') $url .= '&task_department=' . urlencode($departmentFilter);
+    $requestedTaskDate = isset($_GET['requested_task_date']) ? trim((string)$_GET['requested_task_date']) : '';
+    if ($requestedTaskDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestedTaskDate)) $url .= '&requested_task_date=' . urlencode($requestedTaskDate);
     return $url;
 }}
 

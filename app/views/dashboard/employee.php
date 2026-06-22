@@ -216,7 +216,50 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
     </div>
 </div>
 
-<?php require_once __DIR__.'/../attendance/common.php'; $eid_att=attendance_employee_id($pdo); $today_att=attendance_today(); list($ws_att,$we_att)=attendance_week_range($today_att); $todayRow=array(); $todayInState='미처리'; $todayOutState='미처리'; $myReqs=array(); $pendingCnt=0; $weekWork=0; $todayMismatch=false; if($pdo&&$eid_att>0){ try{$stTodayRaw=$pdo->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d LIMIT 1");$stTodayRaw->execute(array(':e'=>$eid_att,':d'=>$today_att));$todayRaw=$stTodayRaw->fetch(PDO::FETCH_ASSOC);$todayMismatch=($todayRaw&&!attendance_record_datetime_matches_work_date($todayRaw));$todayRow=attendance_today_record($pdo,$eid_att); $st2=$pdo->prepare("SELECT * FROM cpms_attendance_requests WHERE employee_id=:e ORDER BY id DESC LIMIT 20");$st2->execute(array(':e'=>$eid_att));$myReqs=$st2->fetchAll(); $st3=$pdo->prepare("SELECT COALESCE(SUM(work_minutes),0) FROM cpms_attendance_records WHERE employee_id=:e AND work_date BETWEEN :s AND :w");$st3->execute(array(':e'=>$eid_att,':s'=>$ws_att,':w'=>$we_att));$weekWork=(int)$st3->fetchColumn(); $st4=$pdo->prepare("SELECT COUNT(*) FROM cpms_attendance_requests WHERE employee_id=:e AND status='pending'");$st4->execute(array(':e'=>$eid_att));$pendingCnt=(int)$st4->fetchColumn(); if($todayRow){$todayInState=(isset($todayRow['check_in'])&&$todayRow['check_in'])?'처리':'미처리';$todayOutState=(isset($todayRow['check_out'])&&$todayRow['check_out'])?'처리':'미처리';} }catch(Exception $e){} }
+<?php
+require_once __DIR__ . '/../attendance/common.php';
+$eid_att = attendance_employee_id($pdo);
+$today_att = attendance_today();
+list($ws_att, $we_att) = attendance_week_range($today_att);
+$attendanceRequestMonth = isset($_GET['attendance_request_month']) ? trim((string)$_GET['attendance_request_month']) : date('Y-m');
+if (!preg_match('/^\d{4}-\d{2}$/', $attendanceRequestMonth)) $attendanceRequestMonth = date('Y-m');
+$attendanceRequestMonthStart = $attendanceRequestMonth . '-01';
+$attendanceRequestMonthEnd = date('Y-m-t', strtotime($attendanceRequestMonthStart));
+$todayRow = array();
+$todayInState = '미처리';
+$todayOutState = '미처리';
+$myReqs = array();
+$pendingCnt = 0;
+$weekWork = 0;
+$todayMismatch = false;
+if ($pdo && $eid_att > 0) {
+    try {
+        $stTodayRaw = $pdo->prepare("SELECT * FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d LIMIT 1");
+        $stTodayRaw->execute(array(':e' => $eid_att, ':d' => $today_att));
+        $todayRaw = $stTodayRaw->fetch(PDO::FETCH_ASSOC);
+        $todayMismatch = ($todayRaw && !attendance_record_datetime_matches_work_date($todayRaw));
+        $todayRow = attendance_today_record($pdo, $eid_att);
+
+        $st2 = $pdo->prepare("SELECT * FROM cpms_attendance_requests WHERE employee_id=:e AND request_date BETWEEN :s AND :e2 ORDER BY id DESC LIMIT 100");
+        $st2->execute(array(':e' => $eid_att, ':s' => $attendanceRequestMonthStart, ':e2' => $attendanceRequestMonthEnd));
+        $myReqs = $st2->fetchAll();
+        if (!is_array($myReqs)) $myReqs = array();
+
+        $st3 = $pdo->prepare("SELECT COALESCE(SUM(work_minutes),0) FROM cpms_attendance_records WHERE employee_id=:e AND work_date BETWEEN :s AND :w");
+        $st3->execute(array(':e' => $eid_att, ':s' => $ws_att, ':w' => $we_att));
+        $weekWork = (int)$st3->fetchColumn();
+
+        $st4 = $pdo->prepare("SELECT COUNT(*) FROM cpms_attendance_requests WHERE employee_id=:e AND status='pending'");
+        $st4->execute(array(':e' => $eid_att));
+        $pendingCnt = (int)$st4->fetchColumn();
+
+        if ($todayRow) {
+            $todayInState = (isset($todayRow['check_in']) && $todayRow['check_in']) ? '처리' : '미처리';
+            $todayOutState = (isset($todayRow['check_out']) && $todayRow['check_out']) ? '처리' : '미처리';
+        }
+    } catch (Exception $e) {
+    }
+}
 ?>
 <script>
 (function(){
@@ -390,9 +433,110 @@ if($pdo&&$eid_att>0){
 <div id='attendanceRequestModal' class='fixed inset-0 z-50 hidden'><!-- 출퇴근 요청 모달 -->
 <div class='absolute inset-0 bg-black/50' data-attendance-request-close></div><div class='relative max-w-5xl mx-auto mt-10 mb-10 bg-white rounded-3xl border shadow-2xl p-6 max-h-[85vh] overflow-y-auto'>
 <div class='flex items-center justify-between mb-4'><h3 class='text-2xl font-extrabold'>출퇴근 수정 요청</h3><button type='button' data-attendance-request-close class='px-4 py-2 rounded-xl bg-gray-100 font-bold'>닫기</button></div>
-<form method='post' action='?r=attendance/request_save' class='grid grid-cols-1 md:grid-cols-2 gap-3 mb-6'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><div><div class='text-sm text-gray-600 mb-1'>요청 날짜</div><input class='w-full px-3 py-2 rounded-xl border' type='date' name='request_date' value='<?php echo h($today_att);?>'></div><div><div class='text-sm text-gray-600 mb-1'>요청 종류</div><select class='w-full px-3 py-2 rounded-xl border' name='request_type'><option value='check_in'>출근시간 수정</option><option value='check_out'>퇴근시간 수정</option><option value='both'>출근+퇴근 수정</option></select></div><div><div class='text-sm text-gray-600 mb-1'>요청 출근시간</div><input class='w-full px-3 py-2 rounded-xl border' type='datetime-local' name='requested_check_in'></div><div><div class='text-sm text-gray-600 mb-1'>요청 퇴근시간</div><input class='w-full px-3 py-2 rounded-xl border' type='datetime-local' name='requested_check_out'></div><div class='md:col-span-2 text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2'>출근/퇴근 시간을 선택하면 요청 날짜가 자동으로 맞춰집니다.</div><div class='md:col-span-2'><div class='text-sm text-gray-600 mb-1'>요청 사유</div><input class='w-full px-3 py-2 rounded-xl border' type='text' name='reason' placeholder='요청 사유'></div><div class='md:col-span-2'><button class='px-5 py-3 rounded-2xl bg-blue-600 text-white font-extrabold'>요청</button></div></form>
-<h4 class='text-xl font-extrabold mb-2'>내 요청 목록</h4><div class='overflow-x-auto border rounded-2xl'><table class='min-w-full text-sm'><tr class='bg-gray-50'><th class='p-2 text-left'>요청 날짜</th><th class='p-2 text-left'>요청 종류</th><th class='p-2 text-left'>요청 시간</th><th class='p-2 text-left'>상태</th><th class='p-2 text-left'>반려사유</th><th class='p-2 text-left'>요청일</th></tr><?php foreach($myReqs as $rq): ?><tr class='border-t'><td class='p-2'><?php echo h($rq['request_date']);?></td><td class='p-2'><?php echo h($rq['request_type']);?></td><td class='p-2'><?php echo h($rq['requested_check_in'].' / '.$rq['requested_check_out']);?></td><td class='p-2'><?php echo h($rq['status']);?></td><td class='p-2'><?php echo h($rq['reject_reason']);?></td><td class='p-2'><?php echo h($rq['created_at']);?></td></tr><?php endforeach; ?></table></div></div></div>
-<script>(function(){try{var m=document.getElementById('attendanceRequestModal');if(!m)return;var o=document.querySelector('[data-attendance-request-open]');var cs=m.querySelectorAll('[data-attendance-request-close]');var fDate=m.querySelector('input[name=\"request_date\"]');var fCi=m.querySelector('input[name=\"requested_check_in\"]');var fCo=m.querySelector('input[name=\"requested_check_out\"]');function syncDate(v){if(!fDate||!v)return;var d=(v+'').substr(0,10);if(d.length===10)fDate.value=d;}function op(){m.classList.remove('hidden');document.body.classList.add('overflow-hidden');}function cl(){m.classList.add('hidden');document.body.classList.remove('overflow-hidden');}if(o)o.addEventListener('click',op);for(var i=0;i<cs.length;i++){cs[i].addEventListener('click',cl);}if(fCi)fCi.addEventListener('change',function(){syncDate(this.value);});if(fCo)fCo.addEventListener('change',function(){syncDate(this.value);});document.addEventListener('keydown',function(e){if(e.key==='Escape')cl();});}catch(e){}})();</script>
+<form method='post' action='?r=attendance/request_save' class='grid grid-cols-1 md:grid-cols-2 gap-3 mb-6' data-attendance-request-form>
+    <input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'>
+    <div>
+        <div class='text-sm text-gray-600 mb-1'>요청 날짜</div>
+        <input class='w-full px-3 py-2 rounded-xl border' type='date' name='request_date' value='<?php echo h($today_att);?>' required>
+    </div>
+    <div>
+        <div class='text-sm text-gray-600 mb-1'>요청 종류</div>
+        <select class='w-full px-3 py-2 rounded-xl border' name='request_type'>
+            <option value='check_in'>출근시간 수정</option>
+            <option value='check_out'>퇴근시간 수정</option>
+            <option value='both'>출근+퇴근 수정</option>
+        </select>
+    </div>
+    <div>
+        <div class='text-sm text-gray-600 mb-1'>요청 출근시간</div>
+        <input class='w-full px-3 py-2 rounded-xl border' type='datetime-local' name='requested_check_in'>
+    </div>
+    <div>
+        <div class='text-sm text-gray-600 mb-1'>요청 퇴근시간</div>
+        <input class='w-full px-3 py-2 rounded-xl border' type='datetime-local' name='requested_check_out'>
+    </div>
+    <div class='md:col-span-2 text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2' data-attendance-request-help>출근시간 수정은 승인 시 출근중 상태로 반영되고, 퇴근시간은 입력할 수 없습니다.</div>
+    <div class='md:col-span-2'>
+        <div class='text-sm text-gray-600 mb-1'>요청 사유</div>
+        <input class='w-full px-3 py-2 rounded-xl border' type='text' name='reason' placeholder='요청 사유'>
+    </div>
+    <div class='md:col-span-2'>
+        <button type='submit' class='px-5 py-3 rounded-2xl bg-blue-600 text-white font-extrabold' data-attendance-request-submit>요청</button>
+    </div>
+</form>
+<div class='flex flex-wrap items-center justify-between gap-3 mb-2'>
+    <h4 class='text-xl font-extrabold'>내 요청 목록</h4>
+    <form method='get' action='' class='flex flex-wrap items-center gap-2'>
+        <input type='hidden' name='r' value='대시보드'>
+        <input type='month' name='attendance_request_month' value='<?php echo h($attendanceRequestMonth); ?>' class='px-3 py-2 rounded-xl border border-gray-200'>
+        <button type='submit' class='px-4 py-2 rounded-xl bg-gray-900 text-white font-bold'>월별 조회</button>
+    </form>
+</div>
+<div class='overflow-x-auto border rounded-2xl'>
+    <table class='min-w-full text-sm'>
+        <tr class='bg-gray-50'><th class='p-2 text-left'>요청 날짜</th><th class='p-2 text-left'>요청 종류</th><th class='p-2 text-left'>요청 시간</th><th class='p-2 text-left'>상태</th><th class='p-2 text-left'>반려사유</th><th class='p-2 text-left'>요청일</th></tr>
+        <?php if (count($myReqs) === 0): ?>
+            <tr><td colspan='6' class='p-4 text-center text-gray-500'>선택 월에 표시할 요청이 없습니다.</td></tr>
+        <?php else: ?>
+            <?php foreach($myReqs as $rq): ?>
+                <tr class='border-t'><td class='p-2'><?php echo h($rq['request_date']);?></td><td class='p-2'><?php echo h(attendance_request_type_label(isset($rq['request_type']) ? $rq['request_type'] : ''));?></td><td class='p-2'><?php echo h(trim((isset($rq['requested_check_in']) ? $rq['requested_check_in'] : '') . ' / ' . (isset($rq['requested_check_out']) ? $rq['requested_check_out'] : ''), ' /'));?></td><td class='p-2'><?php echo h(attendance_request_status_label(isset($rq['status']) ? $rq['status'] : ''));?></td><td class='p-2'><?php echo h(isset($rq['reject_reason']) ? $rq['reject_reason'] : '');?></td><td class='p-2'><?php echo h(isset($rq['created_at']) ? $rq['created_at'] : '');?></td></tr>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </table>
+</div></div></div>
+<script>
+(function(){
+    try{
+        var m=document.getElementById('attendanceRequestModal');
+        if(!m)return;
+        var o=document.querySelector('[data-attendance-request-open]');
+        var cs=m.querySelectorAll('[data-attendance-request-close]');
+        var form=m.querySelector('[data-attendance-request-form]');
+        var fDate=m.querySelector('input[name="request_date"]');
+        var fType=m.querySelector('select[name="request_type"]');
+        var fCi=m.querySelector('input[name="requested_check_in"]');
+        var fCo=m.querySelector('input[name="requested_check_out"]');
+        var help=m.querySelector('[data-attendance-request-help]');
+        var submitBtn=m.querySelector('[data-attendance-request-submit]');
+        var submitting=false;
+        function syncDate(v){if(!fDate||!v)return;var d=(v+'').substr(0,10);if(d.length===10)fDate.value=d;}
+        function setDisabled(input, disabled){if(!input)return;input.disabled=disabled;if(disabled)input.value='';}
+        function syncType(){
+            var type=fType?fType.value:'check_in';
+            if(type==='check_in'){
+                setDisabled(fCi,false);setDisabled(fCo,true);
+                if(fCi)fCi.required=true;if(fCo)fCo.required=false;
+                if(help)help.textContent='출근시간 수정은 승인 시 출근중 상태로 반영되고, 퇴근시간은 입력할 수 없습니다.';
+            }else if(type==='check_out'){
+                setDisabled(fCi,true);setDisabled(fCo,false);
+                if(fCi)fCi.required=false;if(fCo)fCo.required=true;
+                if(help)help.textContent='퇴근시간 수정은 출근시간을 입력할 수 없고, 승인 시 퇴근완료 상태로 반영됩니다.';
+            }else{
+                setDisabled(fCi,false);setDisabled(fCo,false);
+                if(fCi)fCi.required=true;if(fCo)fCo.required=true;
+                if(help)help.textContent='출근+퇴근 수정은 출근시간과 퇴근시간을 모두 선택할 수 있습니다.';
+            }
+        }
+        function op(){m.classList.remove('hidden');document.body.classList.add('overflow-hidden');}
+        function cl(){m.classList.add('hidden');document.body.classList.remove('overflow-hidden');}
+        if(o)o.addEventListener('click',op);
+        for(var i=0;i<cs.length;i++){cs[i].addEventListener('click',cl);}
+        if(fType)fType.addEventListener('change',syncType);
+        if(fCi)fCi.addEventListener('change',function(){syncDate(this.value);});
+        if(fCo)fCo.addEventListener('change',function(){syncDate(this.value);});
+        if(form){
+            form.addEventListener('submit',function(e){
+                if(submitting){e.preventDefault();return false;}
+                submitting=true;
+                if(submitBtn){submitBtn.disabled=true;submitBtn.textContent='요청 중...';}
+            });
+        }
+        syncType();
+        if(window.location.search.indexOf('attendance_request_month=')!==-1)op();
+        document.addEventListener('keydown',function(e){if(e.key==='Escape')cl();});
+    }catch(e){}
+})();
+</script>
 
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type']==='success')?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-red-50 border-red-200 text-red-700'; ?>">

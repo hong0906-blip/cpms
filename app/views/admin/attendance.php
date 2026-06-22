@@ -15,7 +15,10 @@ $routeManage = '?r=' . attendance_text('%EA%B4%80%EB%A6%AC');
 $pdo = Db::pdo();
 $date = isset($_GET['date']) ? (string)$_GET['date'] : date('Y-m-d');
 $tab = isset($_GET['atab']) ? (string)$_GET['atab'] : 'daily';
-$requestStatusFilter = isset($_GET['status']) ? (string)$_GET['status'] : 'all';
+$requestStatusFilter = isset($_GET['status']) ? trim((string)$_GET['status']) : 'all';
+if (!in_array($requestStatusFilter, array('all', 'pending', 'approved', 'rejected'), true)) $requestStatusFilter = 'all';
+$requestDateFilter = isset($_GET['request_date']) ? trim((string)$_GET['request_date']) : $date;
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestDateFilter)) $requestDateFilter = date('Y-m-d');
 $settings = attendance_settings($pdo);
 $geofence = attendance_geofence_settings($pdo);
 list($ws, $we) = attendance_week_range($date);
@@ -113,19 +116,32 @@ if ($pdo) {
         $attendanceErrors[] = attendance_text('%EC%9D%BC%EC%9D%BC%20%EC%B6%9C%ED%87%B4%EA%B7%BC%20%ED%98%84%ED%99%A9%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.') . ' ' . $e->getMessage();
     }
 
-    try {
-        $selectReviewer = $reviewedByEnabled ? ', reviewer.name AS reviewer_name' : ", '' AS reviewer_name";
-        $joinReviewer = $reviewedByEnabled ? ' LEFT JOIN employees reviewer ON reviewer.id = r.reviewed_by' : '';
-        $sql = "SELECT r.*, e.name, e.department, " . ($positionEnabled ? 'e.position' : "'' AS position") . $selectReviewer . "
-                FROM cpms_attendance_requests r
-                JOIN employees e ON e.id = r.employee_id
-                " . $joinReviewer . "
-                ORDER BY r.id DESC
-                LIMIT 100";
-        $reqs = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
-        if (!is_array($reqs)) $reqs = array();
-    } catch (Exception $e) {
-        $attendanceErrors[] = attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%20%EC%9A%94%EC%B2%AD%20%EB%AA%A9%EB%A1%9D%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.') . ' ' . $e->getMessage();
+    if ($tab === 'requests') {
+        try {
+            $selectReviewer = $reviewedByEnabled ? ', reviewer.name AS reviewer_name' : ", '' AS reviewer_name";
+            $joinReviewer = $reviewedByEnabled ? ' LEFT JOIN employees reviewer ON reviewer.id = r.reviewed_by' : '';
+            $where = array('r.request_date = :request_date');
+            $params = array(':request_date' => $requestDateFilter);
+            if ($requestStatusFilter === 'all') {
+                $where[] = "r.status = 'pending'";
+            } else {
+                $where[] = 'r.status = :status';
+                $params[':status'] = $requestStatusFilter;
+            }
+            $sql = "SELECT r.*, e.name, e.department, " . ($positionEnabled ? 'e.position' : "'' AS position") . $selectReviewer . "
+                    FROM cpms_attendance_requests r
+                    JOIN employees e ON e.id = r.employee_id
+                    " . $joinReviewer . "
+                    WHERE " . implode(' AND ', $where) . "
+                    ORDER BY r.id DESC
+                    LIMIT 200";
+            $stReq = $pdo->prepare($sql);
+            $stReq->execute($params);
+            $reqs = $stReq->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($reqs)) $reqs = array();
+        } catch (Exception $e) {
+            $attendanceErrors[] = attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%20%EC%9A%94%EC%B2%AD%20%EB%AA%A9%EB%A1%9D%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.') . ' ' . $e->getMessage();
+        }
     }
 
     try {
@@ -153,20 +169,30 @@ if ($editGeofenceId > 0) {
     }
 }
 
-$totalRequests = count($reqs);
+$totalRequests = 0;
 $pendingRequests = 0;
 $approvedRequests = 0;
 $rejectedRequests = 0;
-$filteredReqs = array();
-foreach ($reqs as $rq) {
-    $stVal = isset($rq['status']) ? (string)$rq['status'] : '';
-    if ($stVal === 'pending') $pendingRequests++;
-    if ($stVal === 'approved') $approvedRequests++;
-    if ($stVal === 'rejected') $rejectedRequests++;
-    if ($requestStatusFilter === 'all' || $requestStatusFilter === '' || $requestStatusFilter === $stVal) {
-        $filteredReqs[] = $rq;
+$filteredReqs = $reqs;
+if ($pdo && $tab === 'requests') {
+    try {
+        $stCount = $pdo->prepare("SELECT status, COUNT(*) AS cnt FROM cpms_attendance_requests WHERE request_date = :request_date GROUP BY status");
+        $stCount->execute(array(':request_date' => $requestDateFilter));
+        $countRows = $stCount->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($countRows)) {
+            foreach ($countRows as $countRow) {
+                $statusKey = isset($countRow['status']) ? (string)$countRow['status'] : '';
+                $cnt = isset($countRow['cnt']) ? (int)$countRow['cnt'] : 0;
+                if ($statusKey === 'pending') $pendingRequests = $cnt;
+                if ($statusKey === 'approved') $approvedRequests = $cnt;
+                if ($statusKey === 'rejected') $rejectedRequests = $cnt;
+            }
+        }
+    } catch (Exception $e) {
     }
 }
+$totalRequests = count($filteredReqs);
+$requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . urlencode($requestStatusFilter) . '&request_date=' . urlencode($requestDateFilter);
 ?>
 
 <div class='mb-4 flex gap-2 flex-wrap'>
@@ -227,17 +253,43 @@ foreach ($reqs as $rq) {
 
     <?php if($tab==='requests'): ?>
         <div class='grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-sm'>
-            <div class='rounded-xl border p-3 bg-gray-50'><div class='text-gray-500'><?php echo h(attendance_text('%EC%A0%84%EC%B2%B4%20%EC%9A%94%EC%B2%AD')); ?></div><div class='text-xl font-bold'><?php echo (int)$totalRequests; ?>건</div></div>
+            <div class='rounded-xl border p-3 bg-gray-50'><div class='text-gray-500'>표시 요청</div><div class='text-xl font-bold'><?php echo (int)$totalRequests; ?>건</div></div>
             <div class='rounded-xl border p-3 bg-amber-50'><div class='text-amber-700'><?php echo h(attendance_text('%EC%8A%B9%EC%9D%B8%EB%8C%80%EA%B8%B0')); ?></div><div class='text-xl font-bold'><?php echo (int)$pendingRequests; ?>건</div></div>
             <div class='rounded-xl border p-3 bg-emerald-50'><div class='text-emerald-700'><?php echo h(attendance_text('%EC%8A%B9%EC%9D%B8%EC%99%84%EB%A3%8C')); ?></div><div class='text-xl font-bold'><?php echo (int)$approvedRequests; ?>건</div></div>
             <div class='rounded-xl border p-3 bg-rose-50'><div class='text-rose-700'><?php echo h(attendance_text('%EB%B0%98%EB%A0%A4')); ?></div><div class='text-xl font-bold'><?php echo (int)$rejectedRequests; ?>건</div></div>
         </div>
 
+        <form method='get' action='' class='mb-3 rounded-2xl border border-gray-200 bg-gray-50 p-4'>
+            <input type='hidden' name='r' value='관리'>
+            <input type='hidden' name='tab' value='attendance'>
+            <input type='hidden' name='atab' value='requests'>
+            <div class='grid grid-cols-1 md:grid-cols-4 gap-3 items-end'>
+                <label class='block text-sm font-bold text-gray-700'>
+                    <span class='block mb-1'>요청 날짜</span>
+                    <input type='date' name='request_date' value='<?php echo h($requestDateFilter); ?>' class='w-full px-3 py-2 rounded-xl border border-gray-200 bg-white'>
+                </label>
+                <label class='block text-sm font-bold text-gray-700'>
+                    <span class='block mb-1'>상태</span>
+                    <select name='status' class='w-full px-3 py-2 rounded-xl border border-gray-200 bg-white'>
+                        <option value='all' <?php echo $requestStatusFilter === 'all' ? 'selected' : ''; ?>>전체</option>
+                        <option value='pending' <?php echo $requestStatusFilter === 'pending' ? 'selected' : ''; ?>>승인대기</option>
+                        <option value='approved' <?php echo $requestStatusFilter === 'approved' ? 'selected' : ''; ?>>승인완료</option>
+                        <option value='rejected' <?php echo $requestStatusFilter === 'rejected' ? 'selected' : ''; ?>>반려</option>
+                    </select>
+                </label>
+                <div class='md:col-span-2 flex flex-wrap gap-2'>
+                    <button type='submit' class='px-4 py-2 rounded-xl bg-gray-900 text-white font-bold'>조회</button>
+                    <a class='px-4 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 font-bold' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&request_date=' . urlencode(date('Y-m-d'))); ?>'>오늘</a>
+                </div>
+            </div>
+            <div class='mt-3 text-xs text-gray-500'>전체는 승인대기 요청만 표시합니다. 승인완료와 반려 건은 상태를 선택해서 날짜별로 확인합니다.</div>
+        </form>
+
         <div class='mb-4 flex gap-2 text-sm flex-wrap'>
-            <a class='px-3 py-1 rounded-lg border <?php echo $requestStatusFilter==='all'?'bg-gray-900 text-white':'bg-white';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&status=all'); ?>'><?php echo h(attendance_text('%EC%A0%84%EC%B2%B4')); ?></a>
-            <a class='px-3 py-1 rounded-lg border <?php echo $requestStatusFilter==='pending'?'bg-gray-900 text-white':'bg-white';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&status=pending'); ?>'><?php echo h(attendance_text('%EC%8A%B9%EC%9D%B8%EB%8C%80%EA%B8%B0')); ?></a>
-            <a class='px-3 py-1 rounded-lg border <?php echo $requestStatusFilter==='approved'?'bg-gray-900 text-white':'bg-white';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&status=approved'); ?>'><?php echo h(attendance_text('%EC%8A%B9%EC%9D%B8%EC%99%84%EB%A3%8C')); ?></a>
-            <a class='px-3 py-1 rounded-lg border <?php echo $requestStatusFilter==='rejected'?'bg-gray-900 text-white':'bg-white';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&status=rejected'); ?>'><?php echo h(attendance_text('%EB%B0%98%EB%A0%A4')); ?></a>
+            <a class='px-3 py-1 rounded-lg border <?php echo $requestStatusFilter==='all'?'bg-gray-900 text-white':'bg-white';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&status=all&request_date=' . urlencode($requestDateFilter)); ?>'><?php echo h(attendance_text('%EC%A0%84%EC%B2%B4')); ?></a>
+            <a class='px-3 py-1 rounded-lg border <?php echo $requestStatusFilter==='pending'?'bg-gray-900 text-white':'bg-white';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&status=pending&request_date=' . urlencode($requestDateFilter)); ?>'><?php echo h(attendance_text('%EC%8A%B9%EC%9D%B8%EB%8C%80%EA%B8%B0')); ?></a>
+            <a class='px-3 py-1 rounded-lg border <?php echo $requestStatusFilter==='approved'?'bg-gray-900 text-white':'bg-white';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&status=approved&request_date=' . urlencode($requestDateFilter)); ?>'><?php echo h(attendance_text('%EC%8A%B9%EC%9D%B8%EC%99%84%EB%A3%8C')); ?></a>
+            <a class='px-3 py-1 rounded-lg border <?php echo $requestStatusFilter==='rejected'?'bg-gray-900 text-white':'bg-white';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&status=rejected&request_date=' . urlencode($requestDateFilter)); ?>'><?php echo h(attendance_text('%EB%B0%98%EB%A0%A4')); ?></a>
         </div>
 
         <?php foreach($filteredReqs as $r): $st=isset($r['status'])?(string)$r['status']:''; ?>
@@ -263,11 +315,13 @@ foreach ($reqs as $rq) {
                         <form method='post' action='?r=management/attendance_request_approve' style='display:inline-block;'>
                             <input type='hidden' name='_csrf' value='<?php echo h(csrf_token()); ?>'>
                             <input type='hidden' name='id' value='<?php echo isset($r['id'])?(int)$r['id']:0; ?>'>
+                            <input type='hidden' name='return_url' value='<?php echo h($requestReturnUrl); ?>'>
                             <button type='submit' class='px-3 py-1 rounded-lg bg-emerald-600 text-white'><?php echo h(attendance_text('%EC%8A%B9%EC%9D%B8')); ?></button>
                         </form>
                         <form method='post' action='?r=management/attendance_request_reject' style='display:inline-flex;gap:6px;align-items:center;'>
                             <input type='hidden' name='_csrf' value='<?php echo h(csrf_token()); ?>'>
                             <input type='hidden' name='id' value='<?php echo isset($r['id'])?(int)$r['id']:0; ?>'>
+                            <input type='hidden' name='return_url' value='<?php echo h($requestReturnUrl); ?>'>
                             <input type='text' name='reject_reason' required placeholder='<?php echo h(attendance_text('%EB%B0%98%EB%A0%A4%20%EC%82%AC%EC%9C%A0')); ?>' class='px-2 py-1 rounded-lg border'>
                             <button type='submit' class='px-3 py-1 rounded-lg bg-rose-600 text-white'><?php echo h(attendance_text('%EB%B0%98%EB%A0%A4')); ?></button>
                         </form>
@@ -684,30 +738,4 @@ foreach ($reqs as $rq) {
             <?php endif; ?>
         </div>
     <?php endif; ?>
-</div>
-
-<div class='bg-white/80 rounded-3xl shadow p-5 border border-gray-100 mb-4'>
-    <h3 class='text-xl font-extrabold'><?php echo h(attendance_text('%ED%9C%B4%EA%B0%80%20%EB%93%B1%EB%A1%9D%28%EA%B4%80%EB%A6%AC%EB%B6%80%29')); ?></h3>
-    <form method='post' action='?r=management/leave_save' class='space-y-2'>
-        <input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'>
-        <select name='employee_id' required class='w-full px-3 py-2 rounded-xl border border-gray-200'>
-            <option value=''><?php echo h(attendance_text('%EC%A7%81%EC%9B%90%20%EC%84%A0%ED%83%9D')); ?></option>
-            <?php foreach($emps as $e): ?>
-                <option value='<?php echo (int)$e['id'];?>'><?php echo h($e['name']);?></option>
-            <?php endforeach; ?>
-        </select>
-        <input type='date' name='leave_date' value='<?php echo h($date);?>' required class='w-full px-3 py-2 rounded-xl border border-gray-200'>
-        <select name='leave_type' required class='w-full px-3 py-2 rounded-xl border border-gray-200'>
-            <option value='월차'><?php echo h(attendance_text('%EC%9B%94%EC%B0%A8')); ?></option>
-            <option value='연차'><?php echo h(attendance_text('%EC%97%B0%EC%B0%A8')); ?></option>
-            <option value='월차반차'><?php echo h(attendance_text('%EC%9B%94%EC%B0%A8%EB%B0%98%EC%B0%A8')); ?></option>
-            <option value='연차반차'><?php echo h(attendance_text('%EC%97%B0%EC%B0%A8%EB%B0%98%EC%B0%A8')); ?></option>
-            <option value='대체휴무'><?php echo h(attendance_text('%EB%8C%80%EC%B2%B4%ED%9C%B4%EB%AC%B4')); ?></option>
-            <option value='기타휴무'><?php echo h(attendance_text('%EA%B8%B0%ED%83%80%ED%9C%B4%EB%AC%B4')); ?></option>
-        </select>
-        <input type='number' step='0.5' min='0' name='leave_amount' placeholder='<?php echo h(attendance_text('%ED%9C%B4%EA%B0%80%20%EC%9D%BC%EC%88%98%28%EB%B9%84%EC%9A%B0%EB%A9%B4%20%EC%9E%90%EB%8F%99%29')); ?>' class='w-full px-3 py-2 rounded-xl border border-gray-200'>
-        <input type='text' name='reason' placeholder='<?php echo h(attendance_text('%EC%82%AC%EC%9C%A0')); ?>' class='w-full px-3 py-2 rounded-xl border border-gray-200'>
-        <button class='px-3 py-2 rounded-xl bg-blue-600 text-white'><?php echo h(attendance_text('%EB%93%B1%EB%A1%9D')); ?></button>
-    </form>
-    <div class='text-xs text-gray-500 mt-2'><?php echo h(attendance_text('%EB%B0%98%EC%B0%A8%20%EC%B0%A8%EA%B0%90%EC%9D%80%20%EC%9B%94%EC%B0%A8%EB%B0%98%EC%B0%A8%20%2F%20%EC%97%B0%EC%B0%A8%EB%B0%98%EC%B0%A8%EB%A5%BC%20%EC%84%A0%ED%83%9D%ED%95%98%EB%A9%B4%200.5%EC%9D%BC%EB%A1%9C%20%EB%B0%98%EC%98%81%EB%90%A9%EB%8B%88%EB%8B%A4.')); ?></div>
 </div>

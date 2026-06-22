@@ -9,8 +9,12 @@ if (!csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) exit;
 
 $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
 $rejectReason = isset($_POST['reject_reason']) ? trim((string)$_POST['reject_reason']) : '';
+$returnUrl = isset($_POST['return_url']) ? trim((string)$_POST['return_url']) : '';
+if ($returnUrl === '' || strpos($returnUrl, 'javascript:') === 0) {
+    $returnUrl = '?r=관리&tab=attendance&atab=requests';
+}
 if ($rejectReason === '') {
-    header('Location: ?r=관리&tab=attendance&atab=requests&msg=reject_reason_required');
+    header('Location: ' . $returnUrl . (strpos($returnUrl, '?') === false ? '?' : '&') . 'msg=reject_reason_required');
     exit;
 }
 
@@ -24,5 +28,5 @@ $st->execute(array(
     ':id' => $id
 ));
 
-header('Location: ?r=관리&tab=attendance&atab=requests');
+header('Location: ' . $returnUrl);
 exit;

@@ -106,7 +106,9 @@ function cpms_render_employee_task_dashboard($pdo)
     if ((int)$currentEmployee['id'] <= 0) return;
 
     $feed = cpms_task_feed_for_employee($pdo, (int)$currentEmployee['id'], isset($currentEmployee['email']) ? $currentEmployee['email'] : '', $currentEmployee);
-    $requested = cpms_task_feed_direct_tasks_requested_by_employee($pdo, (int)$currentEmployee['id']);
+    $requestedTaskDate = isset($_GET['requested_task_date']) ? trim((string)$_GET['requested_task_date']) : cpms_tasks_today();
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestedTaskDate)) $requestedTaskDate = cpms_tasks_today();
+    $requested = cpms_task_feed_direct_tasks_requested_by_employee($pdo, (int)$currentEmployee['id'], $requestedTaskDate);
     $employees = cpms_tasks_fetch_active_employees($pdo);
     $projects = cpms_tasks_fetch_projects($pdo);
     $returnUrl = cpms_tasks_default_return_url();
@@ -183,7 +185,17 @@ function cpms_render_employee_task_dashboard($pdo)
             <?php cpms_render_feed_lane('진행중', '이미 착수했거나 보완 중인 업무입니다.', 'bg-blue-50 text-blue-700', $progressItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
             <?php cpms_render_feed_lane('전자결재/승인', '기존 승인 기능도 함께 보여드립니다.', 'bg-indigo-50 text-indigo-700', $approvalItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
             <?php cpms_render_feed_lane('지연', '마감이 지나 지원이 필요할 수 있는 업무입니다.', 'bg-red-50 text-red-700', $delayedItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('내가 요청한 업무', '요청 후 진행 상황을 계속 확인할 수 있습니다.', 'bg-slate-100 text-slate-700', $requested, (int)$currentEmployee['id'], $returnUrl, true); ?>
+            <div class="rounded-3xl border border-gray-200 bg-white p-5">
+                <form method="get" action="" class="flex flex-wrap items-end gap-3">
+                    <input type="hidden" name="r" value="대시보드">
+                    <div>
+                        <div class="text-sm font-bold text-gray-700 mb-1">내가 요청한 업무 일자</div>
+                        <input type="date" name="requested_task_date" value="<?php echo h($requestedTaskDate); ?>" class="px-4 py-3 rounded-2xl border border-gray-200">
+                    </div>
+                    <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">조회</button>
+                </form>
+            </div>
+            <?php cpms_render_feed_lane('내가 요청한 업무', $requestedTaskDate . '에 요청한 업무입니다.', 'bg-slate-100 text-slate-700', $requested, (int)$currentEmployee['id'], $returnUrl, true); ?>
         </div>
     </div>
 

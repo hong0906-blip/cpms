@@ -26,6 +26,7 @@ function cpms_task_feed_item($row)
         'task_type' => isset($row['task_type']) ? (string)$row['task_type'] : 'general',
         'action_url' => isset($row['action_url']) ? (string)$row['action_url'] : '',
         'is_direct_task' => isset($row['is_direct_task']) ? (int)$row['is_direct_task'] : 0,
+        'created_at' => isset($row['created_at']) ? (string)$row['created_at'] : '',
     );
     $item['display_status'] = isset($row['display_status']) && trim((string)$row['display_status']) !== ''
         ? (string)$row['display_status']
@@ -56,6 +57,17 @@ function cpms_task_feed_sort($a, $b)
     return ($aId > $bId) ? -1 : 1;
 }}
 
+if (!function_exists('cpms_task_feed_should_show')) {
+function cpms_task_feed_should_show($item)
+{
+    if (!is_array($item)) return false;
+    $status = isset($item['status']) ? (string)$item['status'] : '';
+    if (cpms_tasks_is_closed_status($status)) return false;
+    $dueDate = isset($item['due_date']) ? trim((string)$item['due_date']) : '';
+    if ($dueDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate) && strcmp($dueDate, cpms_tasks_today()) < 0) return false;
+    return true;
+}}
+
 if (!function_exists('cpms_task_feed_merge')) {
 function cpms_task_feed_merge($lists)
 {
@@ -65,7 +77,9 @@ function cpms_task_feed_merge($lists)
         if (!is_array($list)) continue;
         foreach ($list as $row) {
             if (!is_array($row)) continue;
-            $merged[count($merged)] = cpms_task_feed_item($row);
+            $item = cpms_task_feed_item($row);
+            if (!cpms_task_feed_should_show($item)) continue;
+            $merged[count($merged)] = $item;
         }
     }
     usort($merged, 'cpms_task_feed_sort');
@@ -78,8 +92,12 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
     $rows = array();
     if (!$pdo || (int)$employeeId <= 0 || !cpms_tasks_table_exists($pdo, 'cpms_tasks')) return $rows;
     try {
-        $st = $pdo->prepare("SELECT * FROM cpms_tasks WHERE assignee_employee_id = :employee_id ORDER BY is_urgent DESC, due_date ASC, due_time ASC, id DESC");
-        $st->execute(array(':employee_id' => (int)$employeeId));
+        $st = $pdo->prepare("SELECT * FROM cpms_tasks
+                              WHERE assignee_employee_id = :employee_id
+                                AND (status IS NULL OR status NOT IN ('done','cancelled'))
+                                AND (due_date IS NULL OR due_date = '' OR due_date >= :today)
+                              ORDER BY is_urgent DESC, due_date ASC, due_time ASC, id DESC");
+        $st->execute(array(':employee_id' => (int)$employeeId, ':today' => cpms_tasks_today()));
         $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($tasks)) $tasks = array();
         foreach ($tasks as $task) {
@@ -104,6 +122,7 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
                 'display_status' => cpms_tasks_display_status($task),
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
+                'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
             );
         }
     } catch (Exception $e) {
@@ -113,13 +132,22 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
 }}
 
 if (!function_exists('cpms_task_feed_direct_tasks_requested_by_employee')) {
-function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId)
+function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $requestedDate = '')
 {
     $rows = array();
     if (!$pdo || (int)$employeeId <= 0 || !cpms_tasks_table_exists($pdo, 'cpms_tasks')) return $rows;
+    $requestedDate = trim((string)$requestedDate);
+    if ($requestedDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestedDate)) $requestedDate = '';
     try {
-        $st = $pdo->prepare("SELECT * FROM cpms_tasks WHERE requester_employee_id = :employee_id ORDER BY created_at DESC, id DESC");
-        $st->execute(array(':employee_id' => (int)$employeeId));
+        $sql = "SELECT * FROM cpms_tasks WHERE requester_employee_id = :employee_id";
+        $params = array(':employee_id' => (int)$employeeId);
+        if ($requestedDate !== '') {
+            $sql .= " AND DATE(created_at) = :requested_date";
+            $params[':requested_date'] = $requestedDate;
+        }
+        $sql .= " ORDER BY created_at DESC, id DESC";
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
         $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($tasks)) $tasks = array();
         foreach ($tasks as $task) {
@@ -144,6 +172,7 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId)
                 'display_status' => cpms_tasks_display_status($task),
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
+                'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
             );
         }
     } catch (Exception $e) {
