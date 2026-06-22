@@ -468,7 +468,7 @@ function cpms_find_company_vehicle_by_number($vehicleNumber) {
             foreach ($numbers as $number) {
                 if (cpms_normalize_vehicle_number($number) !== $norm) continue;
                 $owner = '';
-                foreach (array('owner_name', 'manager_name', 'driver_name', 'name', 'department') as $nameKey) {
+                foreach (array('driver_name', 'owner_name', 'manager_name', 'primary_manager', 'secondary_manager', 'name', 'department') as $nameKey) {
                     if (isset($row[$nameKey]) && trim((string)$row[$nameKey]) !== '') {
                         $owner = trim((string)$row[$nameKey]);
                         break;

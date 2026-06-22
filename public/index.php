@@ -728,6 +728,13 @@ if ($route === 'management/overhead_delete') { require_once __DIR__ . '/../app/v
 if ($route === 'management/fuel_upload_preview') { require_once __DIR__ . '/../app/views/management/fuel_upload_preview.php'; exit; }
 if ($route === 'management/fuel_upload_confirm') { require_once __DIR__ . '/../app/views/management/fuel_upload_confirm.php'; exit; }
 if ($route === 'management/fuel_delete') { require_once __DIR__ . '/../app/views/management/fuel_delete.php'; exit; }
+if ($route === 'management/company_vehicle_upload_preview') { require_once __DIR__ . '/../app/views/management/company_vehicle_upload_preview.php'; exit; }
+if ($route === 'management/company_vehicle_upload_confirm') { require_once __DIR__ . '/../app/views/management/company_vehicle_upload_confirm.php'; exit; }
+if ($route === 'management/company_vehicle_save') { require_once __DIR__ . '/../app/views/management/company_vehicle_save.php'; exit; }
+if ($route === 'management/company_vehicle_payment_update') { require_once __DIR__ . '/../app/views/management/company_vehicle_payment_update.php'; exit; }
+if ($route === 'management/company_vehicle_driver_update') { require_once __DIR__ . '/../app/views/management/company_vehicle_driver_update.php'; exit; }
+if ($route === 'management/company_vehicle_inspection_advance') { require_once __DIR__ . '/../app/views/management/company_vehicle_inspection_advance.php'; exit; }
+if ($route === 'management/company_vehicle_delete') { require_once __DIR__ . '/../app/views/management/company_vehicle_delete.php'; exit; }
 if ($route === 'management/payroll_upload_preview') { require_once __DIR__ . '/../app/views/management/payroll_upload_preview.php'; exit; }
 if ($route === 'management/payroll_upload_confirm') { require_once __DIR__ . '/../app/views/management/payroll_upload_confirm.php'; exit; }
 if ($route === 'management/payroll_employee_delete') { require_once __DIR__ . '/../app/views/management/payroll_employee_delete.php'; exit; }

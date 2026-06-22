@@ -11,6 +11,7 @@ require_once __DIR__ . '/../../../services/CompanyProfitAccessService.php';
 require_once __DIR__ . '/../../../services/CompanyOverheadService.php';
 require_once __DIR__ . '/../../../services/CompanyPayrollAccessService.php';
 require_once __DIR__ . '/../../../services/CompanyFuelService.php';
+require_once __DIR__ . '/../../../services/CompanyVehicleService.php';
 
 $overheadPdo = Db::pdo();
 $overheadUser = Auth::user();
@@ -42,11 +43,11 @@ if ($overheadSection !== 'summary') $listFilters['category'] = $overheadSection;
 $items = array();
 if ($overheadSection !== 'payroll') {
     $summary = cpms_company_overhead_monthly_summary($filters);
-    if ($overheadSection !== 'fuel') $items = cpms_company_overhead_list($listFilters);
+    if ($overheadSection !== 'fuel' && $overheadSection !== 'vehicles') $items = cpms_company_overhead_list($listFilters);
 }
 
 $editItem = null;
-if ($canEditCompanyOverhead && $overheadSection !== 'summary' && $overheadSection !== 'payroll' && $overheadSection !== 'fuel' && isset($_GET['edit'])) {
+if ($canEditCompanyOverhead && $overheadSection !== 'summary' && $overheadSection !== 'payroll' && $overheadSection !== 'fuel' && $overheadSection !== 'vehicles' && isset($_GET['edit'])) {
     $editId = trim((string)$_GET['edit']);
     if ($editId !== '') {
         $editItem = cpms_company_overhead_find($overheadSection, $editId, isset($_GET['edit_year']) ? (int)$_GET['edit_year'] : 0, isset($_GET['edit_month']) ? (int)$_GET['edit_month'] : 0);
@@ -79,7 +80,7 @@ function cpms_overhead_view_val($row, $key, $default) {
 
   <?php require __DIR__ . '/_tabs.php'; ?>
 
-  <?php if ($overheadSection !== 'payroll' && $overheadSection !== 'fuel'): ?>
+  <?php if ($overheadSection !== 'payroll' && $overheadSection !== 'fuel' && $overheadSection !== 'vehicles'): ?>
   <form method="get" action="" class="bg-white border border-gray-200 rounded-2xl p-4">
     <input type="hidden" name="r" value="관리">
     <input type="hidden" name="tab" value="company_overhead">
@@ -133,6 +134,8 @@ function cpms_overhead_view_val($row, $key, $default) {
     <?php require __DIR__ . '/_monthly_table.php'; ?>
   <?php elseif ($overheadSection === 'payroll'): ?>
     <?php require __DIR__ . '/payroll.php'; ?>
+  <?php elseif ($overheadSection === 'vehicles'): ?>
+    <?php require __DIR__ . '/company_vehicles.php'; ?>
   <?php elseif ($overheadSection === 'fuel'): ?>
     <?php require __DIR__ . '/fuel.php'; ?>
   <?php else: ?>

@@ -7,6 +7,7 @@
 require_once __DIR__ . '/GoogleDriveHelper.php';
 require_once __DIR__ . '/CompanyOverheadDriveService.php';
 require_once __DIR__ . '/CompanyPayrollService.php';
+require_once __DIR__ . '/CompanyVehicleService.php';
 require_once __DIR__ . '/DataArchiveSummaryService.php';
 require_once __DIR__ . '/DataArchiveAccessService.php';
 
@@ -305,6 +306,10 @@ function cpms_company_overhead_load_month($category, $year, $month, $includeDele
     $ym = sprintf('%04d-%02d', (int)$year, (int)$month);
     $baseDirs = cpms_company_overhead_base_dirs();
     $items = array();
+    $companyVehicleItems = array();
+    if ($category === 'vehicles' && function_exists('cpms_company_vehicle_month_items')) {
+        $companyVehicleItems = cpms_company_vehicle_month_items($year, $month);
+    }
     foreach ($baseDirs as $baseDir) {
         $path = cpms_company_overhead_month_file($baseDir, $meta['path'], $ym);
         if ($path === '' || !is_file($path)) continue;
@@ -318,9 +323,12 @@ function cpms_company_overhead_load_month($category, $year, $month, $includeDele
             $items = $archive['items'];
         }
     }
-    if ($includeDeleted) return $items;
+    if ($includeDeleted) return array_merge($companyVehicleItems, $items);
 
     $active = array();
+    foreach ($companyVehicleItems as $companyVehicleItem) {
+        if (is_array($companyVehicleItem)) $active[] = $companyVehicleItem;
+    }
     foreach ($items as $item) {
         if (is_array($item) && isset($item['deleted_at']) && trim((string)$item['deleted_at']) !== '') continue;
         $active[] = $item;
