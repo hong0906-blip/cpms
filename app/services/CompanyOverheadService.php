@@ -178,10 +178,30 @@ function cpms_company_overhead_numeric_value($value) {
     if (is_int($value) || is_float($value)) return (float)$value;
     $value = trim((string)$value);
     if ($value === '') return 0.0;
+
+    $value = str_replace(array(
+        "\xE2\x88\x92",
+        "\xEF\xBC\x8D",
+        "\xE2\x80\x90",
+        "\xE2\x80\x91",
+        "\xE2\x80\x92",
+        "\xE2\x80\x93",
+        "\xE2\x80\x94"
+    ), '-', $value);
+
+    $negative = false;
+    $trimmed = trim($value);
+    if ($trimmed !== '' && substr($trimmed, 0, 1) === '(' && substr($trimmed, -1) === ')') $negative = true;
+    if ($trimmed !== '' && (substr($trimmed, 0, 1) === '-' || substr($trimmed, -1) === '-')) $negative = true;
+    if (strpos($value, "\xE2\x96\xB3") !== false || strpos($value, "\xE2\x96\xB2") !== false) $negative = true;
+
     $value = str_replace(',', '', $value);
-    $value = preg_replace('/[^0-9.\-]/', '', $value);
-    if ($value === '' || $value === '-' || !is_numeric($value)) return 0.0;
-    return (float)$value;
+    $value = preg_replace('/[^0-9.]/', '', $value);
+    if ($value === '' || !is_numeric($value)) return 0.0;
+
+    $amount = (float)$value;
+    if ($negative && $amount > 0) return -1 * $amount;
+    return $amount;
 }}
 
 if (!function_exists('cpms_company_overhead_money_value')) {
@@ -970,10 +990,11 @@ function cpms_company_overhead_card_parse_rows($rows, $year, $month, $user = nul
         $usedTime = cpms_company_overhead_card_cell($row, isset($cols['used_time']) ? $cols['used_time'] : 1);
         $vendor = cpms_company_overhead_card_cell($row, isset($cols['vendor']) ? $cols['vendor'] : 2);
         $cardNumber = cpms_company_overhead_card_cell($row, isset($cols['card_number']) ? $cols['card_number'] : 4);
-        $amount = cpms_company_overhead_money_value(cpms_company_overhead_card_cell($row, isset($cols['amount']) ? $cols['amount'] : 7));
-        if ($usedDate === '' && $vendor === '' && $cardNumber === '' && $amount <= 0) continue;
+        $amount = cpms_company_overhead_numeric_value(cpms_company_overhead_card_cell($row, isset($cols['amount']) ? $cols['amount'] : 7));
+        $amountEmpty = (abs($amount) < 0.000001);
+        if ($usedDate === '' && $vendor === '' && $cardNumber === '' && $amountEmpty) continue;
         $parsed['source_count']++;
-        if ($usedDate === '' || $vendor === '' || $cardNumber === '' || $amount <= 0) {
+        if ($usedDate === '' || $vendor === '' || $cardNumber === '' || $amountEmpty) {
             $parsed['skipped_count']++;
             $parsed['errors'][] = '행 ' . ($i + 1) . ': 필수값(사용일자/사용처/카드번호/사용금액)이 부족합니다.';
             continue;
