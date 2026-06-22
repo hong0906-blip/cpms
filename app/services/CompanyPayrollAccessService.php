@@ -119,7 +119,14 @@ function cpms_company_payroll_access_is_named_allowed_user($user, $pdo) {
         $name = isset($row['name']) ? cpms_company_payroll_access_normalize($row['name']) : '';
         if ($name !== '') {
             foreach ($allowedNames as $allowedName) {
-                if ($name === cpms_company_payroll_access_normalize($allowedName)) return true;
+                if ($name !== cpms_company_payroll_access_normalize($allowedName)) continue;
+                if (function_exists('cpms_company_profit_access_is_park_jihye_deputy') && cpms_company_payroll_access_normalize($allowedName) === cpms_company_payroll_access_normalize('박지혜')) {
+                    $rowDept = isset($row['department']) ? (string)$row['department'] : '';
+                    $rowPosition = isset($row['position']) ? (string)$row['position'] : '';
+                    if (cpms_company_profit_access_is_park_jihye_deputy(isset($row['name']) ? (string)$row['name'] : '', $rowDept, $rowPosition)) return true;
+                    continue;
+                }
+                return true;
             }
         }
     }

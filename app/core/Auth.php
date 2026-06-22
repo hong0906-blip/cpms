@@ -223,11 +223,11 @@ class Auth
     public static function autoLoginFromPortal()
     {
         if (isset($_SESSION[self::CPMS_USER_KEY]) && is_array($_SESSION[self::CPMS_USER_KEY])) {
-            return;
+            return true;
         }
 
         $portalEmail = isset($_SESSION['user_email']) ? trim((string)$_SESSION['user_email']) : '';
-        if ($portalEmail === '') return;
+        if ($portalEmail === '') return false;
 
         // 기본 세션 먼저 생성
         $_SESSION[self::CPMS_USER_KEY] = array(
@@ -242,6 +242,7 @@ class Auth
 
         // DB에서 실제 값 로드
         self::loadFromEmployeesByEmail($portalEmail, true);
+        return true;
     }
 
     private static function normalizeDept($dept)

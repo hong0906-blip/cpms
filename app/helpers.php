@@ -66,6 +66,69 @@ function flash_get() {
 }
 }
 
+if (!function_exists('cpms_is_https_request')) {
+function cpms_is_https_request() {
+    if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') return true;
+    if (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443) return true;
+    if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string)$_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https') return true;
+    return false;
+}
+}
+
+if (!function_exists('cpms_current_absolute_url')) {
+function cpms_current_absolute_url() {
+    $scheme = cpms_is_https_request() ? 'https' : 'http';
+    $host = isset($_SERVER['HTTP_HOST']) && trim((string)$_SERVER['HTTP_HOST']) !== '' ? trim((string)$_SERVER['HTTP_HOST']) : 'cmbuild.kr';
+    $uri = isset($_SERVER['REQUEST_URI']) ? (string)$_SERVER['REQUEST_URI'] : '/cpms/public/';
+    if ($uri === '' || substr($uri, 0, 1) !== '/') $uri = '/' . $uri;
+    return $scheme . '://' . $host . $uri;
+}
+}
+
+if (!function_exists('cpms_portal_login_url')) {
+function cpms_portal_login_url($returnUrl) {
+    $configured = trim((string)getenv('CPMS_PORTAL_LOGIN_URL'));
+    $returnUrl = trim((string)$returnUrl);
+    if ($configured !== '') {
+        if (strpos($configured, '{return}') !== false) {
+            return str_replace('{return}', rawurlencode($returnUrl), $configured);
+        }
+        return $configured;
+    }
+
+    $scheme = cpms_is_https_request() ? 'https' : 'http';
+    $host = isset($_SERVER['HTTP_HOST']) && trim((string)$_SERVER['HTTP_HOST']) !== '' ? trim((string)$_SERVER['HTTP_HOST']) : 'cmbuild.kr';
+    return $scheme . '://' . $host . '/';
+}
+}
+
+if (!function_exists('cpms_safe_internal_redirect_url')) {
+function cpms_safe_internal_redirect_url($url, $fallback) {
+    $url = trim((string)$url);
+    $fallback = trim((string)$fallback);
+    if ($fallback === '') $fallback = '?r=대시보드';
+    if ($url === '' || preg_match('/[\r\n]/', $url)) return $fallback;
+    if (preg_match('/^https?:\/\//i', $url)) {
+        $host = isset($_SERVER['HTTP_HOST']) ? strtolower((string)$_SERVER['HTTP_HOST']) : '';
+        $parts = @parse_url($url);
+        $urlHost = is_array($parts) && isset($parts['host']) ? strtolower((string)$parts['host']) : '';
+        if ($host === '' || $urlHost === '' || $host !== $urlHost) return $fallback;
+    } else if (substr($url, 0, 1) !== '/' && substr($url, 0, 1) !== '?') {
+        return $fallback;
+    }
+    return $url;
+}
+}
+
+if (!function_exists('cpms_redirect_to_portal_login')) {
+function cpms_redirect_to_portal_login($returnUrl) {
+    $returnUrl = trim((string)$returnUrl);
+    if ($returnUrl === '') $returnUrl = cpms_current_absolute_url();
+    header('Location: ' . cpms_portal_login_url($returnUrl));
+    exit;
+}
+}
+
 function cpms_storage_root() {
     return dirname(__DIR__) . '/storage';
 }

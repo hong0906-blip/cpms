@@ -21,8 +21,7 @@ $dashboardType = isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboar
 
 if ($route === 'tasks/my_list') {
     if (!\App\Core\Auth::check()) {
-        header('Location: ?r=login');
-        exit;
+        cpms_redirect_to_portal_login(cpms_current_absolute_url());
     }
     \App\Core\View::render('tasks/my_list', array(
         'title' => urldecode('%EB%82%98%EC%9D%98%20%ED%95%A0%EC%9D%BC'),
@@ -34,8 +33,7 @@ if ($route === 'tasks/my_list') {
 
 if ($route === 'tasks/executive_summary') {
     if (!\App\Core\Auth::check()) {
-        header('Location: ?r=login');
-        exit;
+        cpms_redirect_to_portal_login(cpms_current_absolute_url());
     }
     if (!(\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive' || \App\Core\Auth::canManageEmployees())) {
         http_response_code(403);
@@ -765,24 +763,22 @@ if ($route === 'db_setup_attendance') {
 //  로그인/로그아웃
 // ==========================
 if ($route === 'login') {
-    \App\Core\View::render('auth/login', array(
-        'title' => '로그인',
-        'hideLayout' => true,
-    ));
-    exit;
+    if (\App\Core\Auth::check()) {
+        header('Location: ?r=대시보드');
+        exit;
+    }
+    cpms_redirect_to_portal_login(cpms_current_absolute_url());
 }
 if ($route === 'logout') {
     \App\Core\Auth::logout();
-    header('Location: ?r=login');
-    exit;
+    cpms_redirect_to_portal_login(cpms_current_absolute_url());
 }
 
 // ==========================
 //  로그인 체크
 // ==========================
 if (!\App\Core\Auth::check()) {
-    header('Location: ?r=login');
-    exit;
+    cpms_redirect_to_portal_login(cpms_current_absolute_url());
 }
 
 // ==========================

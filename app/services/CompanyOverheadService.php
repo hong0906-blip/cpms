@@ -1006,14 +1006,57 @@ function cpms_company_overhead_card_detect_columns($rows) {
     return $best;
 }}
 
+if (!function_exists('cpms_company_overhead_card_date_from_parts')) {
+function cpms_company_overhead_card_date_from_parts($year, $month, $day) {
+    $year = (int)$year;
+    $month = (int)$month;
+    $day = (int)$day;
+    if ($year <= 0 || $month < 1 || $month > 12 || $day < 1 || $day > 31) return '';
+    if (!checkdate($month, $day, $year)) return '';
+    return sprintf('%04d-%02d-%02d', $year, $month, $day);
+}}
+
+if (!function_exists('cpms_company_overhead_card_excel_serial_date')) {
+function cpms_company_overhead_card_excel_serial_date($value) {
+    $value = trim(str_replace(',', '', (string)$value));
+    if ($value === '' || !is_numeric($value)) return '';
+    $serial = (float)$value;
+    if ($serial < 20000 || $serial > 80000) return '';
+    $days = (int)floor($serial);
+    $ts = strtotime('1899-12-30 +' . $days . ' days');
+    if ($ts === false) return '';
+    return date('Y-m-d', $ts);
+}}
+
 if (!function_exists('cpms_company_overhead_card_normalize_date')) {
-function cpms_company_overhead_card_normalize_date($value) {
+function cpms_company_overhead_card_normalize_date($value, $year = null, $month = null) {
     $value = cpms_company_overhead_card_text($value);
     if ($value === '') return '';
-    if (preg_match('/^(\d{4})[-\.\/](\d{1,2})[-\.\/](\d{1,2})$/', $value, $m)) {
-        return sprintf('%04d-%02d-%02d', (int)$m[1], (int)$m[2], (int)$m[3]);
+    $year = cpms_company_overhead_normalize_upload_year($year);
+    $month = cpms_company_overhead_normalize_upload_month($month);
+
+    if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $value, $m)) {
+        return cpms_company_overhead_card_date_from_parts($m[1], $m[2], $m[3]);
     }
-    return cpms_company_overhead_normalize_date($value);
+    if (preg_match('/^(\d{4})\D+(\d{1,2})\D+(\d{1,2})(?:\D|$)/u', $value, $m)) {
+        return cpms_company_overhead_card_date_from_parts($m[1], $m[2], $m[3]);
+    }
+    if (preg_match('/^(\d{1,2})\s*월\s*(\d{1,2})\s*일?/u', $value, $m)) {
+        return cpms_company_overhead_card_date_from_parts($year, $m[1], $m[2]);
+    }
+    if (preg_match('/^(\d{1,2})[\.\/-](\d{1,2})(?:\D|$)/', $value, $m)) {
+        return cpms_company_overhead_card_date_from_parts($year, $m[1], $m[2]);
+    }
+    if (preg_match('/^(\d{1,2})\s*일?$/u', $value, $m)) {
+        return cpms_company_overhead_card_date_from_parts($year, $month, $m[1]);
+    }
+
+    $excelDate = cpms_company_overhead_card_excel_serial_date($value);
+    if ($excelDate !== '') return $excelDate;
+
+    $normalized = cpms_company_overhead_normalize_date($value);
+    if ($normalized !== '') return $normalized;
+    return '';
 }}
 
 if (!function_exists('cpms_company_overhead_card_parse_rows')) {
@@ -1034,7 +1077,7 @@ function cpms_company_overhead_card_parse_rows($rows, $year, $month, $user = nul
     for ($i = $headerIndex + 1; $i < count($rows); $i++) {
         $row = $rows[$i];
         if (!is_array($row)) continue;
-        $usedDate = cpms_company_overhead_card_normalize_date(cpms_company_overhead_card_cell($row, isset($cols['used_date']) ? $cols['used_date'] : 0));
+        $usedDate = cpms_company_overhead_card_normalize_date(cpms_company_overhead_card_cell($row, isset($cols['used_date']) ? $cols['used_date'] : 0), $year, $month);
         $usedTime = cpms_company_overhead_card_cell($row, isset($cols['used_time']) ? $cols['used_time'] : 1);
         $vendor = cpms_company_overhead_card_cell($row, isset($cols['vendor']) ? $cols['vendor'] : 2);
         $cardNumber = isset($cols['card_number']) ? cpms_company_overhead_card_cell($row, $cols['card_number']) : '';

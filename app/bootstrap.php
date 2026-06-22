@@ -17,7 +17,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     // ==========================
     $keepSeconds = 60 * 60 * 24 * 30; // 30일
     ini_set('session.gc_maxlifetime', (string)$keepSeconds);
-    ini_set('session.cookie_lifetime', '0'); // 브라우저 닫기 전까지 유지(포탈과 맞춤)
+    ini_set('session.cookie_lifetime', (string)$keepSeconds);
 
     // ==========================
     //  쿠키 옵션(환경별 안전 처리)
@@ -27,18 +27,25 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     $host = isset($_SERVER['HTTP_HOST']) ? (string)$_SERVER['HTTP_HOST'] : '';
     $host = preg_replace('/:\\d+$/', '', $host); // 포트 제거
 
+    $cookieDomain = '';
     if ($host !== '' && (substr($host, -9) === 'cmbuild.kr')) {
-        ini_set('session.cookie_domain', 'cmbuild.kr');
+        $cookieDomain = 'cmbuild.kr';
+        ini_set('session.cookie_domain', $cookieDomain);
     }
 
     ini_set('session.cookie_path', '/');
 
     $isHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
-        || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
+        || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)
+        || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string)$_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https');
     ini_set('session.cookie_secure', $isHttps ? '1' : '0');
     ini_set('session.cookie_httponly', '1');
 
     session_start();
+
+    if (session_id() !== '') {
+        @setcookie(session_name(), session_id(), time() + $keepSeconds, '/', $cookieDomain, $isHttps, true);
+    }
 }
 
 

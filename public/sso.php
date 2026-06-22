@@ -7,12 +7,14 @@
 
 require_once __DIR__ . '/../app/bootstrap.php';
 
+$returnUrl = isset($_GET['return']) ? (string)$_GET['return'] : '?r=대시보드';
+$returnUrl = cpms_safe_internal_redirect_url($returnUrl, '?r=대시보드');
+
 // 포탈 세션 기반 자동 로그인 시도
 if (\App\Core\Auth::autoLoginFromPortal() === true) {
-    header('Location: ?r=대시보드');
+    header('Location: ' . $returnUrl);
     exit;
 }
 
-// 포탈 로그인 정보가 없으면(세션 만료/미로그인) -> CPMS 로그인으로
-header('Location: ?r=login');
-exit;
+// 포탈 로그인 정보가 없으면(세션 만료/미로그인) -> 포탈 진입점으로 이동
+cpms_redirect_to_portal_login(cpms_current_absolute_url());

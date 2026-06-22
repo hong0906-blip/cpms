@@ -34,8 +34,6 @@ if ($tab === '') {
 $tabs = array(
     'employees' => array('label' => '직원명부', 'icon' => 'users'),
     'workforce' => array('label' => '인력관리', 'icon' => 'hard-hat'),
-    'direct_team' => array('label' => '직영팀 명부', 'icon' => 'clipboard-list'),
-    'direct_rates' => array('label' => '직영팀 설정', 'icon' => 'wallet'),
     'labor_calc' => array('label' => '노무비 계산', 'icon' => 'calculator'),
     'attendance' => array('label' => '출퇴근·근태관리', 'icon' => 'clock-3'),
     'leave_management' => array('label' => '연차 관리', 'icon' => 'calendar-days'),
@@ -48,7 +46,7 @@ if (Auth::isMaster()) {
     $tabs['drive_check'] = array('label' => 'Drive 점검', 'icon' => 'cloud');
     $tabs['data_archive'] = array('label' => urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C'), 'icon' => 'archive');
 }
-if ($canManage) {
+if (Auth::isMaster()) {
     $tabs['project_drive_sync'] = array('label' => '프로젝트 Drive 동기화', 'icon' => 'folder-sync');
 }
 
@@ -84,7 +82,7 @@ if (!function_exists('admin_tab_url')) {
 <div class="mb-6">
   <div class="text-sm text-gray-500">관리</div>
   <h2 class="text-2xl font-extrabold text-gray-900">관리부</h2>
-  <div class="text-sm text-gray-500 mt-1">직원명부 / 직영팀 설정 / 노무비 계산 / 출퇴근·근태를 한 화면에서 관리합니다.</div>
+  <div class="text-sm text-gray-500 mt-1">직원명부 / 인력관리 / 노무비 계산 / 출퇴근·근태를 한 화면에서 관리합니다.</div>
 </div>
 
 <div style="margin:0 0 16px 0; padding:12px; border:1px solid #e5e7eb; border-radius:12px; background:#fff;">
@@ -109,10 +107,6 @@ if ($tab === 'employees') {
     require __DIR__ . '/employees.php';
 } elseif ($tab === 'workforce') {
     require __DIR__ . '/workforce.php';
-} elseif ($tab === 'direct_team') {
-    require __DIR__ . '/direct_team.php';
-} elseif ($tab === 'direct_rates') {
-    require __DIR__ . '/direct_rates.php';
 } elseif ($tab === 'labor_calc') {
     require __DIR__ . '/labor_calc.php';
 } elseif ($tab === 'attendance') {
@@ -128,7 +122,7 @@ if ($tab === 'employees') {
     require __DIR__ . '/drive_check.php';
 } elseif ($tab === 'data_archive' && Auth::isMaster()) {
     require __DIR__ . '/data_archive.php';
-} elseif ($tab === 'project_drive_sync' && $canManage) {
+} elseif ($tab === 'project_drive_sync' && Auth::isMaster()) {
     require __DIR__ . '/project_drive_sync.php';
 } else {
     require __DIR__ . '/labor_calc.php';

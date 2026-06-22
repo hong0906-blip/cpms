@@ -87,6 +87,18 @@ function cpms_company_profit_access_has_executive_word($values) {
     return false;
 }}
 
+if (!function_exists('cpms_company_profit_access_is_park_jihye_deputy')) {
+function cpms_company_profit_access_is_park_jihye_deputy($name, $dept, $position) {
+    $name = cpms_company_profit_access_normalize_text($name);
+    $dept = cpms_company_profit_access_normalize_text($dept);
+    $position = cpms_company_profit_access_normalize_text($position);
+
+    if ($name === '' || strpos($name, cpms_company_profit_access_normalize_text('박지혜')) === false) return false;
+    if ($dept !== cpms_company_profit_access_normalize_text('관리') && $dept !== cpms_company_profit_access_normalize_text('관리부') && $dept !== cpms_company_profit_access_normalize_text('관리팀')) return false;
+    if ($position === '' || strpos($position, cpms_company_profit_access_normalize_text('대리')) === false) return false;
+    return true;
+}}
+
 if (!function_exists('cpms_company_finance_can_view')) {
 function cpms_company_finance_can_view($user = null, $pdo = null) {
     if (!class_exists('App\\Core\\Auth')) return false;
@@ -101,7 +113,6 @@ function cpms_company_finance_can_view($user = null, $pdo = null) {
 
     $dept = cpms_company_profit_access_user_value($user, 'department');
     if ($dept === '') $dept = (string)\App\Core\Auth::userDepartment();
-    if (cpms_company_profit_access_is_management_dept($dept)) return true;
 
     $position = cpms_company_profit_access_user_value($user, 'position');
     if ($position === '') $position = (string)\App\Core\Auth::userPosition();
@@ -110,18 +121,22 @@ function cpms_company_finance_can_view($user = null, $pdo = null) {
     if (cpms_company_profit_access_has_executive_word(array($role, $position, $name))) {
         return true;
     }
+    if (cpms_company_profit_access_is_park_jihye_deputy($name, $dept, $position)) {
+        return true;
+    }
 
     $dbRow = cpms_company_profit_access_employee_row($pdo, $user);
     if (is_array($dbRow)) {
         $dbDept = isset($dbRow['department']) ? (string)$dbRow['department'] : '';
-        if (cpms_company_profit_access_is_management_dept($dbDept)) return true;
-
         $dbRole = isset($dbRow['role']) ? (string)$dbRow['role'] : '';
         if (cpms_company_profit_access_normalize_text($dbRole) === 'master') return true;
 
         $dbPosition = isset($dbRow['position']) ? (string)$dbRow['position'] : '';
         $dbName = isset($dbRow['name']) ? (string)$dbRow['name'] : '';
         if (cpms_company_profit_access_has_executive_word(array($dbRole, $dbPosition, $dbName))) {
+            return true;
+        }
+        if (cpms_company_profit_access_is_park_jihye_deputy($dbName, $dbDept, $dbPosition)) {
             return true;
         }
     }
@@ -136,47 +151,27 @@ function cpms_can_view_company_profit($user = null, $pdo = null) {
 
 if (!function_exists('cpms_can_view_company_overhead')) {
 function cpms_can_view_company_overhead($user = null, $pdo = null) {
-    return cpms_company_finance_can_view($user, $pdo);
-}}
-
-if (!function_exists('cpms_can_edit_company_overhead')) {
-function cpms_can_edit_company_overhead($user = null, $pdo = null) {
     if (!class_exists('App\\Core\\Auth')) return false;
     if (!\App\Core\Auth::check()) return false;
-    if (\App\Core\Auth::isMaster()) return true;
+    if (cpms_company_finance_can_view($user, $pdo)) return true;
 
     if ($user === null) $user = \App\Core\Auth::user();
     if (!is_array($user)) return false;
 
-    $role = cpms_company_profit_access_user_value($user, 'role');
-    if (cpms_company_profit_access_normalize_text($role) === 'master') return true;
-
     $dept = cpms_company_profit_access_user_value($user, 'department');
     if ($dept === '') $dept = (string)\App\Core\Auth::userDepartment();
-    if (cpms_company_profit_access_is_management_dept($dept) && \App\Core\Auth::canManageEmployees()) {
-        return true;
-    }
-
-    $position = cpms_company_profit_access_user_value($user, 'position');
-    if ($position === '') $position = (string)\App\Core\Auth::userPosition();
-    $name = cpms_company_profit_access_user_value($user, 'name');
-    $authRole = (string)\App\Core\Auth::userRole();
-    if (\App\Core\Auth::canManageEmployees() && ($authRole === 'executive' || cpms_company_profit_access_has_executive_word(array($role, $position, $name)))) {
-        return true;
-    }
+    if (cpms_company_profit_access_is_management_dept($dept)) return true;
 
     $dbRow = cpms_company_profit_access_employee_row($pdo, $user);
     if (is_array($dbRow)) {
         $dbDept = isset($dbRow['department']) ? (string)$dbRow['department'] : '';
-        if (cpms_company_profit_access_is_management_dept($dbDept) && \App\Core\Auth::canManageEmployees()) return true;
-
-        $dbRole = isset($dbRow['role']) ? (string)$dbRow['role'] : '';
-        $dbPosition = isset($dbRow['position']) ? (string)$dbRow['position'] : '';
-        $dbName = isset($dbRow['name']) ? (string)$dbRow['name'] : '';
-        if (\App\Core\Auth::canManageEmployees() && ($dbRole === 'executive' || cpms_company_profit_access_has_executive_word(array($dbRole, $dbPosition, $dbName)))) {
-            return true;
-        }
+        if (cpms_company_profit_access_is_management_dept($dbDept)) return true;
     }
 
     return false;
+}}
+
+if (!function_exists('cpms_can_edit_company_overhead')) {
+function cpms_can_edit_company_overhead($user = null, $pdo = null) {
+    return cpms_can_view_company_overhead($user, $pdo);
 }}
