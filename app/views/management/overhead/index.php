@@ -138,6 +138,8 @@ function cpms_overhead_view_val($row, $key, $default) {
     <?php require __DIR__ . '/company_vehicles.php'; ?>
   <?php elseif ($overheadSection === 'fuel'): ?>
     <?php require __DIR__ . '/fuel.php'; ?>
+  <?php elseif ($overheadSection === 'lease'): ?>
+    <?php require __DIR__ . '/lease.php'; ?>
   <?php else: ?>
     <?php require __DIR__ . '/form.php'; ?>
     <?php require __DIR__ . '/list.php'; ?>

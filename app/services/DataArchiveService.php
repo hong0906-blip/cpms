@@ -107,11 +107,9 @@ function cpms_archive_type_definitions() {
             'sensitivity' => 'general',
             'paths' => array(
                 'company_overhead/fuel',
-                'company_overhead/fixed_cost',
                 'company_overhead/vehicles',
-                'company_overhead/dormitories',
+                'company_overhead/lease',
                 'company_overhead/corporate_cards',
-                'company_overhead/offices',
                 'company_overhead/etc'
             )
         ),

@@ -10,11 +10,9 @@ if (!function_exists('cpms_company_overhead_drive_category_labels')) {
 function cpms_company_overhead_drive_category_labels() {
     return array(
         'payroll' => '임직원월급',
-        'fixed_cost' => '고정비',
         'vehicles' => '회사차량',
-        'dormitories' => '숙소',
+        'lease' => '임대차',
         'corporate_cards' => '법인카드',
-        'offices' => '사무실',
         'fuel' => '주유비',
         'etc' => '기타',
     );
