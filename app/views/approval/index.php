@@ -58,7 +58,7 @@ $txt = array(
     'page_active' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%A7%84%ED%96%89%EB%AC%B8%EC%84%9C'),
     'page_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C'),
     'page_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C'),
-    'desc_active' => urldecode('%EA%B8%B0%EC%95%88%EC%84%9C%EC%99%80%20%ED%9C%B4%EA%B0%80%EA%B3%84%20%EB%93%B1%20%EC%A7%84%ED%96%89%20%EC%A4%91%EC%9D%B8%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AC%B8%EC%84%9C%EB%A5%BC%20%ED%99%95%EC%9D%B8%ED%95%A9%EB%8B%88%EB%8B%A4.'),
+    'desc_active' => '',
     'desc_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%90%9C%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AC%B8%EC%84%9C%EB%A7%8C%20%EB%AA%A8%EC%95%84%20%ED%99%95%EC%9D%B8%ED%95%98%EA%B3%A0%20%ED%95%84%EC%9A%94%20%EC%8B%9C%20%EC%82%AD%EC%A0%9C%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
     'desc_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%EB%A5%BC%20%EC%A2%85%EB%A5%98%2F%EC%A0%9C%EB%AA%A9%2F%EC%9E%91%EC%84%B1%EC%9E%90%2F%EC%9E%91%EC%84%B1%EC%9D%BC%EC%9E%90%20%EA%B8%B0%EC%A4%80%EC%9C%BC%EB%A1%9C%20%EA%B2%80%EC%83%89%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
     'db_setup' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20DB%20%EC%84%A4%EC%B9%98%2F%ED%99%95%EC%9D%B8'),
@@ -387,7 +387,9 @@ for ($i = 0; $i < count($rows); $i++) {
         <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
             <div class="min-w-0">
                 <h2 class="text-3xl font-extrabold"><?php echo h($pageTitle); ?></h2>
-                <p class="mt-2 text-indigo-100"><?php echo h($pageDesc); ?></p>
+                <?php if (trim((string)$pageDesc) !== ''): ?>
+                    <p class="mt-2 text-indigo-100"><?php echo h($pageDesc); ?></p>
+                <?php endif; ?>
             </div>
             <div class="flex flex-wrap items-center justify-start xl:justify-end gap-3 shrink-0 max-w-none">
                 <a class="cpms-mobile-hide inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl bg-white text-indigo-700" href="?r=approval_create&type=proposal"><?php echo h($txt['create_proposal']); ?></a>

@@ -29,6 +29,9 @@ if (!$task || !cpms_tasks_can_view($task, isset($currentEmployee['id']) ? (int)$
 $logs = cpms_tasks_fetch_logs($pdo, $taskId);
 $files = cpms_tasks_fetch_files($pdo, $taskId);
 $canChangeStatus = cpms_tasks_can_change_status($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
+$isMeetingTask = isset($task['task_type']) && (string)$task['task_type'] === 'meeting';
+$canMeetingResponse = cpms_tasks_can_respond_meeting($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
+$canCompleteMeeting = cpms_tasks_can_complete_meeting_after_response($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $canRevision = cpms_tasks_can_request_revision($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $canCancel = cpms_tasks_can_cancel($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $returnUrl = cpms_tasks_default_return_url();
@@ -55,7 +58,16 @@ ob_start();
             <h3 class="text-2xl font-extrabold text-gray-900"><?php echo h(isset($task['title']) ? $task['title'] : ''); ?></h3>
         </div>
         <div class="flex flex-wrap items-center gap-2">
-            <?php if ($canChangeStatus && !in_array(isset($task['status']) ? $task['status'] : '', array('progress', 'done', 'cancelled'), true)): ?>
+            <?php if ($isMeetingTask && $canMeetingResponse && !in_array(isset($task['status']) ? (string)$task['status'] : '', array('meeting_available', 'meeting_unavailable', 'cancelled'), true)): ?>
+                <form method="post" action="?r=tasks/meeting_response">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
+                    <input type="hidden" name="response" value="available">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <button type="submit" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-bold">참석가능</button>
+                </form>
+            <?php endif; ?>
+            <?php if (!$isMeetingTask && $canChangeStatus && !in_array(isset($task['status']) ? $task['status'] : '', array('progress', 'done', 'cancelled'), true)): ?>
                 <form method="post" action="?r=tasks/update_status">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
@@ -64,7 +76,16 @@ ob_start();
                     <button type="submit" class="px-4 py-2 rounded-2xl bg-blue-600 text-white font-bold">진행중</button>
                 </form>
             <?php endif; ?>
-            <?php if ($canChangeStatus && !in_array(isset($task['status']) ? $task['status'] : '', array('done', 'cancelled'), true)): ?>
+            <?php if ($isMeetingTask && $canCompleteMeeting): ?>
+                <form method="post" action="?r=tasks/complete">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
+                    <input type="hidden" name="completed_memo" value="">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <button type="submit" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-bold">완료</button>
+                </form>
+            <?php endif; ?>
+            <?php if (!$isMeetingTask && $canChangeStatus && !in_array(isset($task['status']) ? $task['status'] : '', array('done', 'cancelled'), true)): ?>
                 <button type="button"
                         data-task-complete-open
                         data-task-id="<?php echo (int)$taskId; ?>"
@@ -80,6 +101,18 @@ ob_start();
             <?php endif; ?>
         </div>
     </div>
+
+    <?php if ($isMeetingTask && $canMeetingResponse && !in_array(isset($task['status']) ? (string)$task['status'] : '', array('meeting_available', 'meeting_unavailable', 'cancelled'), true)): ?>
+        <form method="post" action="?r=tasks/meeting_response" class="p-4 rounded-2xl border border-rose-200 bg-rose-50 space-y-3">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
+            <input type="hidden" name="response" value="unavailable">
+            <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+            <div class="text-sm font-extrabold text-rose-800">참석불가능 사유</div>
+            <textarea name="reason" rows="3" required class="w-full px-4 py-3 rounded-2xl border border-rose-200 bg-white"></textarea>
+            <button type="submit" class="px-4 py-2 rounded-2xl bg-rose-600 text-white font-bold">참석불가능</button>
+        </form>
+    <?php endif; ?>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200">
@@ -99,7 +132,7 @@ ob_start();
             <div class="mt-1 font-bold text-slate-900"><?php echo h(isset($task['department']) && trim((string)$task['department']) !== '' ? cpms_tasks_normalize_department($task['department']) : '-'); ?></div>
         </div>
         <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 md:col-span-2">
-            <div class="text-xs font-bold text-slate-500">마감일 / 시간</div>
+            <div class="text-xs font-bold text-slate-500"><?php echo $isMeetingTask ? '회의 일자 / 시간' : '마감일 / 시간'; ?></div>
             <div class="mt-1 font-bold text-slate-900">
                 <?php
                 $dueText = '-';
@@ -161,12 +194,12 @@ ob_start();
 
     <?php if ($canCancel && (!isset($task['status']) || !in_array((string)$task['status'], array('cancelled', 'done'), true))): ?>
         <div class="pt-3 border-t border-gray-200">
-            <form method="post" action="?r=tasks/cancel" onsubmit="return confirm('이 업무 요청을 취소하시겠습니까?');" class="space-y-2">
+            <form method="post" action="?r=tasks/cancel" onsubmit="return confirm('<?php echo $isMeetingTask ? '이 회의 요청을 취소하시겠습니까?' : '이 업무 요청을 취소하시겠습니까?'; ?>');" class="space-y-2">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                 <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
                 <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
                 <textarea name="cancel_reason" rows="2" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="취소 사유를 남길 수 있습니다."></textarea>
-                <button type="submit" class="px-4 py-2 rounded-2xl bg-rose-600 text-white font-bold">업무 요청 취소</button>
+                <button type="submit" class="px-4 py-2 rounded-2xl bg-rose-600 text-white font-bold"><?php echo $isMeetingTask ? '회의 요청 취소' : '업무 요청 취소'; ?></button>
             </form>
         </div>
     <?php endif; ?>

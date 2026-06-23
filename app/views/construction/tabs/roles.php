@@ -53,7 +53,6 @@ $curSite    = $row ? (int)$row['site_employee_id'] : 0;
     <div class="flex items-center justify-between mb-4">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">담당 지정</h3>
-            <div class="text-sm text-gray-600 mt-1">공무에서 프로젝트를 넘겨주면, 공사에서 안전/품질 담당을 지정하고 시작합니다.</div>
         </div>
         <div class="p-3 bg-gradient-to-br from-yellow-500 to-orange-500 rounded-2xl shadow-lg shadow-yellow-500/30">
             <i data-lucide="users" class="w-5 h-5 text-white"></i>
@@ -109,7 +108,4 @@ $curSite    = $row ? (int)$row['site_employee_id'] : 0;
         <?php endif; ?>
     </form>
 
-    <div class="mt-6 text-xs text-gray-500">
-        * 이 정보는 <code>cpms_construction_roles</code> 테이블에 저장됩니다.
-    </div>
 </div>

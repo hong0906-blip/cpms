@@ -136,6 +136,7 @@ function cpms_tasks_type_options()
     return array(
         'general' => '일반업무',
         'urgent' => '긴급업무',
+        'meeting' => '회의요청',
         'approval' => '전자결재',
         'labor_gongsu' => '공수승인',
         'equipment_gongsu' => '장비공수승인',
@@ -159,12 +160,17 @@ function cpms_tasks_status_label($status)
         'pending' => '대기',
         'progress' => '진행중',
         'done' => '완료',
+        'meeting_owner' => '회의요청',
+        'meeting_available' => '참석가능',
+        'meeting_unavailable' => '참석불가능',
         'delayed' => '지연',
         'revision' => '보완요청',
         'cancelled' => '취소',
         'created' => '등록',
         'status_changed' => '상태 변경',
         'completed' => '완료 처리',
+        'meeting_available_action' => '참석가능',
+        'meeting_unavailable_action' => '참석불가능',
         'revision_requested' => '보완요청',
         'commented' => '메모',
         'PENDING' => '승인대기',
@@ -197,6 +203,9 @@ function cpms_tasks_badge_class($type, $value)
 {
     if ($type === 'status') {
         if ($value === 'done') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        if ($value === 'meeting_available') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        if ($value === 'meeting_unavailable') return 'bg-rose-50 text-rose-700 border-rose-200';
+        if ($value === 'meeting_owner') return 'bg-blue-50 text-blue-700 border-blue-200';
         if ($value === 'progress') return 'bg-blue-50 text-blue-700 border-blue-200';
         if ($value === 'revision') return 'bg-amber-50 text-amber-700 border-amber-200';
         if ($value === 'cancelled') return 'bg-slate-100 text-slate-600 border-slate-200';
@@ -223,6 +232,87 @@ function cpms_tasks_due_datetime($row)
     return $dueDate . ' ' . $dueTime;
 }}
 
+if (!function_exists('cpms_tasks_meeting_block_minutes')) {
+function cpms_tasks_meeting_block_minutes()
+{
+    return 60;
+}}
+
+if (!function_exists('cpms_tasks_normalize_time_value')) {
+function cpms_tasks_normalize_time_value($time)
+{
+    $time = trim((string)$time);
+    if ($time === '') return '';
+    if (preg_match('/^\d{1,2}:\d{2}$/', $time)) {
+        $parts = explode(':', $time);
+        if ((int)$parts[0] < 0 || (int)$parts[0] > 23 || (int)$parts[1] < 0 || (int)$parts[1] > 59) return '';
+        return sprintf('%02d:%02d:00', (int)$parts[0], (int)$parts[1]);
+    }
+    if (preg_match('/^\d{1,2}:\d{2}:\d{2}$/', $time)) {
+        $parts = explode(':', $time);
+        if ((int)$parts[0] < 0 || (int)$parts[0] > 23 || (int)$parts[1] < 0 || (int)$parts[1] > 59 || (int)$parts[2] < 0 || (int)$parts[2] > 59) return '';
+        return sprintf('%02d:%02d:%02d', (int)$parts[0], (int)$parts[1], (int)$parts[2]);
+    }
+    return '';
+}}
+
+if (!function_exists('cpms_tasks_meeting_time_text')) {
+function cpms_tasks_meeting_time_text($date, $time)
+{
+    $time = cpms_tasks_normalize_time_value($time);
+    if ($date === '' || $time === '') return '-';
+    return (string)$date . ' ' . substr($time, 0, 5);
+}}
+
+if (!function_exists('cpms_tasks_find_meeting_conflict')) {
+function cpms_tasks_find_meeting_conflict($pdo, $meetingDate, $meetingTime, $ignoreGroupKey)
+{
+    if (!$pdo || !cpms_tasks_table_exists($pdo, 'cpms_tasks')) return null;
+    $meetingDate = trim((string)$meetingDate);
+    $meetingTime = cpms_tasks_normalize_time_value($meetingTime);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $meetingDate) || $meetingTime === '') return null;
+    $startTs = strtotime($meetingDate . ' ' . $meetingTime);
+    if ($startTs === false) return null;
+    $endTs = $startTs + (cpms_tasks_meeting_block_minutes() * 60);
+    $ignoreGroupKey = trim((string)$ignoreGroupKey);
+
+    try {
+        $groupKeySelect = cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key') ? 'group_key' : "'' AS group_key";
+        $prevDate = date('Y-m-d', strtotime($meetingDate . ' -1 day'));
+        $nextDate = date('Y-m-d', strtotime($meetingDate . ' +1 day'));
+        $sql = "SELECT id,title,due_date,due_time,requester_name,assignee_name," . $groupKeySelect . " FROM cpms_tasks WHERE task_type='meeting' AND status='meeting_available' AND due_date IN (:due_date_prev,:due_date_current,:due_date_next)";
+        $params = array(
+            ':due_date_prev' => $prevDate,
+            ':due_date_current' => $meetingDate,
+            ':due_date_next' => $nextDate
+        );
+        if ($ignoreGroupKey !== '' && cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) {
+            $sql .= " AND (group_key IS NULL OR group_key='' OR group_key<>:ignore_group_key)";
+            $params[':ignore_group_key'] = $ignoreGroupKey;
+        }
+        $sql .= " ORDER BY due_time ASC, id ASC";
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) $rows = array();
+        for ($i = 0; $i < count($rows); $i++) {
+            $rowTime = isset($rows[$i]['due_time']) ? cpms_tasks_normalize_time_value($rows[$i]['due_time']) : '';
+            if ($rowTime === '') continue;
+            $rowDate = isset($rows[$i]['due_date']) ? trim((string)$rows[$i]['due_date']) : $meetingDate;
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $rowDate)) $rowDate = $meetingDate;
+            $rowStartTs = strtotime($rowDate . ' ' . $rowTime);
+            if ($rowStartTs === false) continue;
+            $rowEndTs = $rowStartTs + (cpms_tasks_meeting_block_minutes() * 60);
+            if ($startTs < $rowEndTs && $endTs > $rowStartTs) {
+                return $rows[$i];
+            }
+        }
+    } catch (Exception $e) {
+        return null;
+    }
+    return null;
+}}
+
 if (!function_exists('cpms_tasks_is_closed_status')) {
 function cpms_tasks_is_closed_status($status)
 {
@@ -234,6 +324,7 @@ function cpms_tasks_is_delayed($row)
 {
     $status = isset($row['status']) ? (string)$row['status'] : '';
     if (cpms_tasks_is_closed_status($status)) return false;
+    if (in_array($status, array('meeting_available', 'meeting_unavailable'), true)) return false;
     $dueAt = cpms_tasks_due_datetime($row);
     if ($dueAt === '') return false;
     $dueTs = strtotime($dueAt);
@@ -449,6 +540,16 @@ if (!function_exists('cpms_tasks_shared_group_key')) {
 function cpms_tasks_shared_group_key($type, $baseDate)
 {
     return 'unused_leave:' . trim((string)$type) . ':' . trim((string)$baseDate);
+}}
+
+if (!function_exists('cpms_tasks_should_sync_group_completion')) {
+function cpms_tasks_should_sync_group_completion($groupKey)
+{
+    $groupKey = trim((string)$groupKey);
+    if ($groupKey === '') return false;
+    if (strpos($groupKey, 'unused_leave:') === 0) return true;
+    if (strpos($groupKey, 'samsung_') === 0) return true;
+    return false;
 }}
 
 if (!function_exists('cpms_tasks_unused_leave_title')) {
@@ -738,6 +839,26 @@ function cpms_tasks_can_change_status($task, $currentEmployeeId)
     return ((int)$currentEmployeeId > 0 && (int)$task['assignee_employee_id'] === (int)$currentEmployeeId);
 }}
 
+if (!function_exists('cpms_tasks_can_respond_meeting')) {
+function cpms_tasks_can_respond_meeting($task, $currentEmployeeId)
+{
+    if (!$task || (int)$currentEmployeeId <= 0) return false;
+    if (!isset($task['task_type']) || (string)$task['task_type'] !== 'meeting') return false;
+    if (!isset($task['assignee_employee_id']) || (int)$task['assignee_employee_id'] !== (int)$currentEmployeeId) return false;
+    if (isset($task['requester_employee_id']) && (int)$task['requester_employee_id'] === (int)$currentEmployeeId) return false;
+    return true;
+}}
+
+if (!function_exists('cpms_tasks_can_complete_meeting_after_response')) {
+function cpms_tasks_can_complete_meeting_after_response($task, $currentEmployeeId)
+{
+    if (!$task || (int)$currentEmployeeId <= 0) return false;
+    if (!isset($task['task_type']) || (string)$task['task_type'] !== 'meeting') return false;
+    if (!isset($task['assignee_employee_id']) || (int)$task['assignee_employee_id'] !== (int)$currentEmployeeId) return false;
+    $status = isset($task['status']) ? (string)$task['status'] : '';
+    return in_array($status, array('meeting_available', 'meeting_unavailable'), true);
+}}
+
 if (!function_exists('cpms_tasks_can_request_revision')) {
 function cpms_tasks_can_request_revision($task, $currentEmployeeId)
 {
@@ -839,12 +960,67 @@ function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy)
                 'original_name' => $originalName,
                 'stored_name' => $storedName,
                 'stored_path' => $relativePath,
+                'file_size' => isset($sizes[$i]) ? (int)$sizes[$i] : 0,
+                'mime_type' => isset($types[$i]) ? (string)$types[$i] : '',
             );
         } catch (Exception $e) {
         }
     }
 
     return $saved;
+}}
+
+if (!function_exists('cpms_tasks_copy_saved_files_to_task')) {
+function cpms_tasks_copy_saved_files_to_task($pdo, $sourceFiles, $targetTaskId, $uploadedBy)
+{
+    $copied = array();
+    if (!$pdo || (int)$targetTaskId <= 0 || !is_array($sourceFiles) || !cpms_tasks_table_exists($pdo, 'cpms_task_files')) return $copied;
+    $targetDir = cpms_tasks_upload_abs_dir($targetTaskId);
+    if (!cpms_ensure_dir($targetDir)) return $copied;
+
+    for ($i = 0; $i < count($sourceFiles); $i++) {
+        $file = $sourceFiles[$i];
+        if (!is_array($file)) continue;
+        $storedName = isset($file['stored_name']) ? trim((string)$file['stored_name']) : '';
+        $storedPath = isset($file['stored_path']) ? ltrim(str_replace('\\', '/', (string)$file['stored_path']), '/') : '';
+        if ($storedName === '' || $storedPath === '') continue;
+
+        $sourcePath = cpms_tasks_public_root() . '/' . $storedPath;
+        if (!is_file($sourcePath)) continue;
+
+        $relativePath = cpms_tasks_upload_relative_dir($targetTaskId) . '/' . $storedName;
+        $targetPath = $targetDir . '/' . $storedName;
+        if (!@copy($sourcePath, $targetPath)) continue;
+
+        $fileSize = @filesize($targetPath);
+        if ($fileSize === false) $fileSize = isset($file['file_size']) ? (int)$file['file_size'] : 0;
+        $mimeType = isset($file['mime_type']) ? (string)$file['mime_type'] : '';
+        $originalName = isset($file['original_name']) ? (string)$file['original_name'] : $storedName;
+
+        try {
+            $st = $pdo->prepare("INSERT INTO cpms_task_files (task_id, original_name, stored_name, stored_path, file_size, mime_type, uploaded_by, uploaded_at) VALUES (:task_id, :original_name, :stored_name, :stored_path, :file_size, :mime_type, :uploaded_by, :uploaded_at)");
+            $st->execute(array(
+                ':task_id' => (int)$targetTaskId,
+                ':original_name' => $originalName,
+                ':stored_name' => $storedName,
+                ':stored_path' => $relativePath,
+                ':file_size' => (int)$fileSize,
+                ':mime_type' => $mimeType,
+                ':uploaded_by' => (int)$uploadedBy > 0 ? (int)$uploadedBy : null,
+                ':uploaded_at' => cpms_tasks_now(),
+            ));
+            $copied[count($copied)] = array(
+                'original_name' => $originalName,
+                'stored_name' => $storedName,
+                'stored_path' => $relativePath,
+                'file_size' => (int)$fileSize,
+                'mime_type' => $mimeType,
+            );
+        } catch (Exception $e) {
+        }
+    }
+
+    return $copied;
 }}
 
 if (!function_exists('cpms_tasks_find_task')) {
@@ -911,7 +1087,8 @@ if (!function_exists('cpms_tasks_build_create_message')) {
 function cpms_tasks_build_create_message($task)
 {
     $lines = array();
-    $lines[count($lines)] = '[CPMS 업무요청]';
+    $isMeeting = isset($task['task_type']) && (string)$task['task_type'] === 'meeting';
+    $lines[count($lines)] = $isMeeting ? '[CPMS 회의요청]' : '[CPMS 업무요청]';
     $lines[count($lines)] = '제목: ' . (isset($task['title']) ? (string)$task['title'] : '-');
     $lines[count($lines)] = '요청자: ' . (isset($task['requester_name']) ? (string)$task['requester_name'] : '-');
     $lines[count($lines)] = '담당자: ' . (isset($task['assignee_name']) ? (string)$task['assignee_name'] : '-');
@@ -920,7 +1097,7 @@ function cpms_tasks_build_create_message($task)
         $dueLine = (string)$task['due_date'];
         if (!empty($task['due_time'])) $dueLine .= ' ' . substr((string)$task['due_time'], 0, 5);
     }
-    $lines[count($lines)] = '기한: ' . $dueLine;
+    $lines[count($lines)] = ($isMeeting ? '일시: ' : '기한: ') . $dueLine;
     $lines[count($lines)] = '중요도: ' . cpms_tasks_priority_label(isset($task['priority']) ? $task['priority'] : 'normal');
     $lines[count($lines)] = '내용: ' . cpms_tasks_text_excerpt(isset($task['content']) ? $task['content'] : '', 100);
     $lines[count($lines)] = '대시보드 나의 할일에서 확인해주세요.';
@@ -938,6 +1115,21 @@ function cpms_tasks_build_complete_message($task)
     $lines[count($lines)] = '완료메모 : ' . cpms_tasks_text_excerpt(isset($task['completed_memo']) ? $task['completed_memo'] : '', 120);
     $lines[count($lines)] = '';
     $lines[count($lines)] = '요청한 업무에서 확인해주세요.';
+    return implode("\n", $lines);
+}}
+
+if (!function_exists('cpms_tasks_build_meeting_confirmed_message')) {
+function cpms_tasks_build_meeting_confirmed_message($task)
+{
+    $lines = array();
+    $lines[count($lines)] = '[CPMS 미팅확정]';
+    $lines[count($lines)] = '제목: ' . (isset($task['title']) ? (string)$task['title'] : '-');
+    $lines[count($lines)] = '참석자: ' . (isset($task['assignee_name']) ? (string)$task['assignee_name'] : '-');
+    $lines[count($lines)] = '일시: ' . cpms_tasks_meeting_time_text(isset($task['due_date']) ? $task['due_date'] : '', isset($task['due_time']) ? $task['due_time'] : '');
+    if (isset($task['content']) && trim((string)$task['content']) !== '') {
+        $lines[count($lines)] = '내용: ' . cpms_tasks_text_excerpt($task['content'], 100);
+    }
+    $lines[count($lines)] = '대시보드 내가 요청한 업무에서 확인해주세요.';
     return implode("\n", $lines);
 }}
 
@@ -981,6 +1173,20 @@ function cpms_tasks_send_created_notification($pdo, $task)
         error_log('[task_google_chat] send failed task_id=' . $taskId . ' error=' . $e->getMessage());
         return false;
     }
+}}
+
+if (!function_exists('cpms_tasks_send_meeting_confirmed_notification')) {
+function cpms_tasks_send_meeting_confirmed_notification($pdo, $task)
+{
+    if (!function_exists('cpms_send_google_chat_to_employee')) {
+        require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    }
+    if (!function_exists('cpms_send_google_chat_to_employee')) return false;
+    if (!$pdo || !is_array($task)) return false;
+    $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
+    $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+    if ($requesterId <= 0 || $requesterId === $assigneeId) return false;
+    return cpms_send_google_chat_to_employee($pdo, $requesterId, cpms_tasks_build_meeting_confirmed_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'MEETING_CONFIRMED', 'TASK');
 }}
 
 if (!function_exists('cpms_tasks_send_completed_notification')) {

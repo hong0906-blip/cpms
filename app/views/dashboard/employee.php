@@ -7,6 +7,7 @@
 require_once __DIR__ . '/../partials/TaskList.php';
 require_once __DIR__ . '/../partials/cost_metrics.php';
 require_once __DIR__ . '/../tasks/dashboard_sections.php';
+require_once __DIR__ . '/notice_board.php';
 
 use App\Core\Db;
 
@@ -210,6 +211,8 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
         </div>  
     </div>
 </div>
+
+<?php cpms_render_dashboard_notice_board($pdo); ?>
 
 <?php
 require_once __DIR__ . '/../attendance/common.php';

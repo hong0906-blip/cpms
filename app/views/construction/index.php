@@ -182,11 +182,7 @@ try {
 
 ?>
 
-<div class="cpms-construction-page flex items-start justify-between gap-3 mb-6">
-    <div class="min-w-0">
-        <h2 class="text-2xl font-extrabold text-gray-900">공사 관리</h2>
-    </div>
-
+<div class="cpms-construction-page flex items-start justify-end gap-3 mb-6">
     <?php if ($canEditSchedule): ?>
     <div class="cpms-mobile-hide flex items-center gap-2">
         <button type="button"

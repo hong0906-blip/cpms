@@ -36,9 +36,7 @@ function cpms_worker_form_value($worker, $key)
 
 <div class="cpms-workforce-page">
   <div class="mb-6">
-    <div class="text-sm text-gray-500">관리 / 인력관리</div>
     <h2 class="text-2xl font-extrabold text-gray-900"><?php echo $id > 0 ? '인력 수정' : '인력 추가'; ?></h2>
-    <div class="text-sm text-gray-500 mt-1">주민등록번호와 계좌번호는 저장 시 암호화됩니다.</div>
   </div>
 
   <form method="post" action="?r=admin/workforce_save" class="rounded-3xl border border-gray-200 bg-white p-6 space-y-5">

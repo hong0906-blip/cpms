@@ -17,9 +17,7 @@ if (!(Auth::isMaster() || Auth::canManageEmployees())) {
 
 <div class="cpms-workforce-page">
   <div class="mb-6">
-    <div class="text-sm text-gray-500">관리 / 인력관리</div>
     <h2 class="text-2xl font-extrabold text-gray-900">엑셀 업로드</h2>
-    <div class="text-sm text-gray-500 mt-1">근로자명단.xlsx 파일을 업로드하면 저장 전에 미리보기를 먼저 보여줍니다.</div>
   </div>
 
   <form method="post" action="?r=admin/workforce_import_preview" enctype="multipart/form-data" class="rounded-3xl border border-gray-200 bg-white p-6 space-y-5 max-w-3xl">
@@ -27,8 +25,6 @@ if (!(Auth::isMaster() || Auth::canManageEmployees())) {
 
     <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm text-gray-700">
       <div class="font-extrabold text-gray-900">업로드 기준</div>
-      <div class="mt-2">3행을 헤더로 보고, 4행부터 데이터를 읽습니다. 성명이 없는 행은 자동으로 제외합니다.</div>
-      <div class="mt-1">주민번호와 계좌번호는 평문 저장하지 않고 암호화 저장합니다.</div>
     </div>
 
     <label class="block">

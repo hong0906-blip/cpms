@@ -362,7 +362,6 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
     <div class="flex flex-col lg:flex-row lg:items-end gap-3 justify-between">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">장비</h3>
-            <div class="text-sm text-gray-600 mt-1">월별 양식 출력 + 월별 입력</div>
         </div>
 
         <form method="get" action="" class="flex items-end gap-2">
@@ -519,7 +518,6 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
         <div id="equipmentExcelUpload" class="mt-6 border border-gray-200 rounded-2xl p-4">
             <div class="flex flex-col gap-1 mb-4">
                 <div class="text-lg font-extrabold">월별 장비비 엑셀 업로드</div>
-                <div class="text-xs text-gray-600">장비비 양식의 2.장비비 또는 장비비 시트를 읽고, J~AE 날짜별 금액을 장비입력에 등록합니다.</div>
             </div>
 
             <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_excel_preview" enctype="multipart/form-data" class="space-y-3">

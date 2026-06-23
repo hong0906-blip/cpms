@@ -173,8 +173,85 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
                 'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
+                'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',
             );
         }
+
+        $grouped = array();
+        $order = array();
+        for ($i = 0; $i < count($rows); $i++) {
+            $row = $rows[$i];
+            $groupKey = isset($row['group_key']) ? trim((string)$row['group_key']) : '';
+            $key = $groupKey !== '' ? 'group:' . $groupKey : 'task:' . (isset($row['source_id']) ? (int)$row['source_id'] : 0);
+            if (!isset($grouped[$key])) {
+                $grouped[$key] = array(
+                    'row' => $row,
+                    'assignees' => array(),
+                    'statuses' => array()
+                );
+                $order[count($order)] = $key;
+            } else {
+                $existingAssigneeId = isset($grouped[$key]['row']['assignee_employee_id']) ? (int)$grouped[$key]['row']['assignee_employee_id'] : 0;
+                $currentAssigneeId = isset($row['assignee_employee_id']) ? (int)$row['assignee_employee_id'] : 0;
+                if ($existingAssigneeId === (int)$employeeId && $currentAssigneeId !== (int)$employeeId) {
+                    $grouped[$key]['row'] = $row;
+                }
+            }
+            $assigneeId = isset($row['assignee_employee_id']) ? (int)$row['assignee_employee_id'] : 0;
+            $assigneeName = isset($row['assignee_name']) ? trim((string)$row['assignee_name']) : '';
+            $assigneeKey = $assigneeId > 0 ? 'id:' . $assigneeId : 'name:' . $assigneeName;
+            if ($assigneeName !== '' && !isset($grouped[$key]['assignees'][$assigneeKey])) {
+                $grouped[$key]['assignees'][$assigneeKey] = array(
+                    'id' => $assigneeId,
+                    'name' => $assigneeName
+                );
+            }
+            $status = isset($row['status']) ? (string)$row['status'] : '';
+            if ($status !== '') {
+                $grouped[$key]['statuses'][$status] = true;
+            }
+        }
+
+        $dedupedRows = array();
+        for ($i = 0; $i < count($order); $i++) {
+            $key = $order[$i];
+            if (!isset($grouped[$key])) continue;
+            $row = $grouped[$key]['row'];
+            $assigneeRecords = $grouped[$key]['assignees'];
+            $names = array();
+            $allNames = array();
+            foreach ($assigneeRecords as $assigneeRecord) {
+                if (!is_array($assigneeRecord)) continue;
+                $name = isset($assigneeRecord['name']) ? trim((string)$assigneeRecord['name']) : '';
+                $id = isset($assigneeRecord['id']) ? (int)$assigneeRecord['id'] : 0;
+                if ($name === '') continue;
+                $allNames[count($allNames)] = $name;
+                if (count($assigneeRecords) > 1 && $id === (int)$employeeId) continue;
+                $names[count($names)] = $name;
+            }
+            if (count($names) === 0) {
+                $names = $allNames;
+            }
+            if (count($names) === 1) {
+                $row['assignee_name'] = $names[0];
+            } else if (count($names) > 1) {
+                $row['assignee_name'] = $names[0] . ' 외 ' . (count($names) - 1) . '명';
+            }
+            if (isset($row['task_type']) && (string)$row['task_type'] === 'meeting') {
+                $statuses = isset($grouped[$key]['statuses']) && is_array($grouped[$key]['statuses']) ? $grouped[$key]['statuses'] : array();
+                if (isset($statuses['meeting_available'])) {
+                    $row['status'] = 'meeting_available';
+                } else if (isset($statuses['pending'])) {
+                    $row['status'] = 'pending';
+                } else if (isset($statuses['meeting_unavailable'])) {
+                    $row['status'] = 'meeting_unavailable';
+                }
+                $row['display_status'] = cpms_tasks_display_status($row);
+            }
+            unset($row['group_key']);
+            $dedupedRows[count($dedupedRows)] = $row;
+        }
+        $rows = $dedupedRows;
     } catch (Exception $e) {
         $rows = array();
     }

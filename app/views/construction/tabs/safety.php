@@ -26,7 +26,6 @@ try {
     <div class="flex items-center justify-between mb-4">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">안전사고</h3>
-            <div class="text-sm text-gray-600 mt-1">공사에서 등록한 안전사고를 프로젝트 기준으로 봅니다.</div>
         </div>
         <div class="flex items-center gap-2">
             <?php if ($canEditSafety): ?>
@@ -66,5 +65,4 @@ try {
         </div>
     <?php endif; ?>
 
-    <div class="mt-4 text-xs text-gray-500">* 상태 변경은 안전팀/임원이 안전 메뉴에서 처리합니다.</div>
 </div>

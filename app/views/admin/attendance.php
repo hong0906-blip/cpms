@@ -282,7 +282,6 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
                     <a class='px-4 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 font-bold' href='<?php echo h($routeManage . '&tab=attendance&atab=requests&request_date=' . urlencode(date('Y-m-d'))); ?>'>오늘</a>
                 </div>
             </div>
-            <div class='mt-3 text-xs text-gray-500'>전체는 승인대기 요청만 표시합니다. 승인완료와 반려 건은 상태를 선택해서 날짜별로 확인합니다.</div>
         </form>
 
         <div class='mb-4 flex gap-2 text-sm flex-wrap'>
@@ -360,7 +359,6 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
                 <div class='flex flex-wrap items-center justify-between gap-3'>
                     <div>
                         <h4 class='text-xl font-extrabold text-gray-900'><?php echo h(attendance_text('%EA%B8%B0%EB%B3%B8%20%EA%B7%BC%ED%83%9C%20%EC%84%A4%EC%A0%95')); ?></h4>
-                        <div class='text-sm text-gray-600 mt-1'><?php echo h(attendance_text('%EA%B7%BC%EB%AC%B4%20%EC%8B%9C%EA%B0%84%EA%B3%BC%20%EC%B6%9C%ED%87%B4%EA%B7%BC%20%EC%9C%84%EC%B9%98%20%EC%A0%9C%ED%95%9C%20%EC%82%AC%EC%9A%A9%20%EC%97%AC%EB%B6%80%EB%A5%BC%20%EC%84%A4%EC%A0%95%ED%95%A9%EB%8B%88%EB%8B%A4.')); ?></div>
                     </div>
                     <label class='inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-white border border-blue-200 font-bold text-blue-900'>
                         <input type='checkbox' name='attendance_geofence_enabled' value='1' <?php echo !empty($geofence['enabled']) ? 'checked' : ''; ?>>
@@ -392,7 +390,6 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
                 <div class='flex flex-wrap items-center justify-between gap-3 mb-4'>
                     <div>
                         <h4 class='text-xl font-extrabold text-gray-900'><?php echo h(attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%20%ED%97%88%EC%9A%A9%20%EC%9C%84%EC%B9%98%20%EA%B4%80%EB%A6%AC')); ?></h4>
-                        <div class='text-sm text-blue-800 mt-1'><?php echo h(attendance_text('%EC%82%AC%EB%AC%B4%EC%8B%A4%2C%20%ED%98%84%EC%9E%A5%2C%20%EA%B8%B0%ED%83%80%20%EC%9E%A5%EC%86%8C%EB%A5%BC%20%EC%97%AC%EB%9F%AC%20%EA%B0%9C%20%EB%93%B1%EB%A1%9D%ED%95%B4%EB%91%90%EA%B3%A0%20%ED%95%B4%EB%8B%B9%20%EB%B0%98%EA%B2%BD%20%EC%95%88%EC%97%90%EC%84%9C%EB%A7%8C%20%EC%B6%9C%ED%87%B4%EA%B7%BC%EC%9D%84%20%ED%97%88%EC%9A%A9%ED%95%A9%EB%8B%88%EB%8B%A4.')); ?></div>
                     </div>
                     <div class='text-sm font-bold text-blue-900'>
                         <?php echo h(attendance_text('%ED%98%84%EC%9E%AC%20%ED%97%88%EC%9A%A9%20%EC%9C%84%EC%B9%98')); ?> <?php echo number_format(count($geofenceLocations)); ?><?php echo h(attendance_text('%EA%B0%9C')); ?>

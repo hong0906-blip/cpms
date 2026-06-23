@@ -16,10 +16,10 @@ $payrollYear = (int)$payrollYm['year'];
 $payrollMonth = (int)$payrollYm['month'];
 
 $payrollFilter = array(
-    'q' => isset($_GET['q']) ? trim((string)$_GET['q']) : '',
-    'status' => isset($_GET['payroll_status']) ? trim((string)$_GET['payroll_status']) : '',
-    'department' => isset($_GET['payroll_department']) ? trim((string)$_GET['payroll_department']) : '',
-    'position' => isset($_GET['payroll_position']) ? trim((string)$_GET['payroll_position']) : '',
+    'q' => '',
+    'status' => '',
+    'department' => '',
+    'position' => '',
 );
 
 if (!function_exists('cpms_payroll_view_money')) {
@@ -36,19 +36,6 @@ $payrollSummary = cpms_company_payroll_month_summary($payrollYear, $payrollMonth
 $payrollVersion = isset($payrollSummary['version']) && is_array($payrollSummary['version']) ? cpms_company_payroll_public_version($payrollSummary['version']) : null;
 $payrollAllEmployees = is_array($payrollVersion) && isset($payrollVersion['employees']) && is_array($payrollVersion['employees']) ? $payrollVersion['employees'] : array();
 $payrollEmployees = cpms_company_payroll_filter_employees($payrollAllEmployees, $payrollFilter);
-
-$payrollStatusOptions = array();
-$payrollDepartmentOptions = array();
-$payrollPositionOptions = array();
-foreach ($payrollAllEmployees as $employeeOption) {
-    if (!is_array($employeeOption)) continue;
-    $statusOption = isset($employeeOption['status']) ? trim((string)$employeeOption['status']) : '';
-    $departmentOption = isset($employeeOption['department']) ? trim((string)$employeeOption['department']) : '';
-    $positionOption = isset($employeeOption['position']) ? trim((string)$employeeOption['position']) : '';
-    if ($statusOption !== '') $payrollStatusOptions[$statusOption] = $statusOption;
-    if ($departmentOption !== '') $payrollDepartmentOptions[$departmentOption] = $departmentOption;
-    if ($positionOption !== '') $payrollPositionOptions[$positionOption] = $positionOption;
-}
 
 $previewToken = isset($_GET['preview_token']) ? trim((string)$_GET['preview_token']) : '';
 $payrollPreview = ($canEditCompanyPayroll && $previewToken !== '') ? cpms_company_payroll_get_preview($previewToken) : null;
@@ -81,86 +68,30 @@ function cpms_payroll_view_account_text($employee) {
 ?>
 
 <div class="space-y-5">
-  <form method="get" action="" class="bg-white border border-gray-200 rounded-2xl p-4">
-    <input type="hidden" name="r" value="관리">
-    <input type="hidden" name="tab" value="company_overhead">
-    <input type="hidden" name="oh" value="payroll">
-    <div class="grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">기준연도</span>
-        <input type="number" name="year" min="2000" max="2100" value="<?php echo h((string)$payrollYear); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">기준월</span>
-        <select name="month" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-          <?php for ($m = 1; $m <= 12; $m++): ?>
-            <option value="<?php echo $m; ?>" <?php echo ((int)$payrollMonth === $m) ? 'selected' : ''; ?>><?php echo sprintf('%02d', $m); ?></option>
-          <?php endfor; ?>
-        </select>
-      </label>
-      <div class="md:col-span-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-3">
-        <div class="text-xs font-bold text-emerald-700">적용 중인 급여 기준월</div>
-        <div class="font-extrabold text-emerald-900">
-          <?php if (!empty($payrollSummary['has_data'])): ?>
-            <?php echo h($payrollSummary['effective_year'] . '년 ' . $payrollSummary['effective_month'] . '월 급여대장'); ?>
-          <?php else: ?>
-            등록된 급여 기준월 없음
-          <?php endif; ?>
-        </div>
-      </div>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">검색어</span>
-        <input type="text" name="q" value="<?php echo h($payrollFilter['q']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300" placeholder="사원명/직급">
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">재직 상태</span>
-        <select name="payroll_status" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-          <option value="">전체</option>
-          <?php foreach ($payrollStatusOptions as $option): ?>
-            <option value="<?php echo h($option); ?>" <?php echo ($payrollFilter['status'] === $option) ? 'selected' : ''; ?>><?php echo h($option); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">직급</span>
-        <select name="payroll_position" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-          <option value="">전체</option>
-          <?php foreach ($payrollPositionOptions as $option2): ?>
-            <option value="<?php echo h($option2); ?>" <?php echo ($payrollFilter['position'] === $option2) ? 'selected' : ''; ?>><?php echo h($option2); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </label>
-    </div>
-    <div class="grid grid-cols-1 md:grid-cols-7 gap-3 items-end mt-3">
-      <label class="block text-sm font-bold text-gray-700 md:col-span-2">
-        <span class="block mb-2">부서</span>
-        <select name="payroll_department" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-          <option value="">전체</option>
-          <?php foreach ($payrollDepartmentOptions as $option3): ?>
-            <option value="<?php echo h($option3); ?>" <?php echo ($payrollFilter['department'] === $option3) ? 'selected' : ''; ?>><?php echo h($option3); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </label>
-      <div class="md:col-span-5 flex flex-wrap gap-2">
-        <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold">조회</button>
-        <a href="?r=<?php echo urlencode('관리'); ?>&tab=company_overhead&oh=payroll" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold">초기화</a>
-      </div>
-    </div>
-  </form>
-
   <div class="bg-white border border-gray-200 rounded-2xl p-4">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <div class="font-extrabold text-gray-900">급여대장 업로드</div>
-        <div class="text-sm text-gray-500 mt-1">업로드한 적용월부터 다음 급여대장 업로드 전까지 같은 급여 버전이 월별로 적용됩니다.</div>
-        <?php if (empty($payrollSecretInfo['ok'])): ?>
-          <div class="text-sm text-amber-700 font-bold mt-2">주민번호 복호화 키가 없어 마스킹 해제 기능은 비활성화됩니다. 목록과 합산은 정상 동작합니다.</div>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="font-extrabold text-gray-900">임직원 월급 관리</div>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold" data-modal-open="payrollUpload">급여대장 업로드</button>
+        <?php if ($payrollCanGenerateStatement): ?>
+          <button type="button" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold" data-modal-open="payrollTemplate">PDF 양식 업로드</button>
         <?php endif; ?>
-      </div>
-      <div class="px-3 py-2 rounded-xl border <?php echo $canEditCompanyPayroll ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'; ?> text-sm font-bold">
-        <?php echo $canEditCompanyPayroll ? '업로드 가능' : '조회 전용'; ?>
+        <button type="button" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold" data-modal-open="payrollStatementStatus">급여명세서 생성상태</button>
       </div>
     </div>
+  </div>
+
+  <div id="modal-payrollUpload" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40" data-modal-close="payrollUpload"></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+      <div class="w-full max-w-4xl bg-white rounded-3xl p-6" style="max-height:90vh;overflow-y:auto;position:relative;">
+        <button type="button" class="absolute right-4 top-4 px-3 py-1 border rounded-xl" data-modal-close="payrollUpload">닫기</button>
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div class="font-extrabold text-gray-900">급여대장 업로드</div>
+          <div class="px-3 py-2 rounded-xl border <?php echo $canEditCompanyPayroll ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'; ?> text-sm font-bold">
+            <?php echo $canEditCompanyPayroll ? '업로드 가능' : '조회 전용'; ?>
+          </div>
+        </div>
     <?php if ($canEditCompanyPayroll): ?>
       <form method="post" action="?r=management/payroll_upload_preview" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end mt-4">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -185,14 +116,19 @@ function cpms_payroll_view_account_text($employee) {
     <?php else: ?>
       <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-bold">대표/부사장은 조회 전용이며, 업로드는 마스터와 박지혜 계정만 가능합니다.</div>
     <?php endif; ?>
+      </div>
+    </div>
   </div>
 
   <?php if ($payrollCanGenerateStatement): ?>
-    <div class="bg-white border border-gray-200 rounded-2xl p-4">
+    <div id="modal-payrollTemplate" class="fixed inset-0 z-50 hidden">
+      <div class="absolute inset-0 bg-black/40" data-modal-close="payrollTemplate"></div>
+      <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-4xl bg-white rounded-3xl p-6" style="max-height:90vh;overflow-y:auto;position:relative;">
+          <button type="button" class="absolute right-4 top-4 px-3 py-1 border rounded-xl" data-modal-close="payrollTemplate">닫기</button>
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div class="font-extrabold text-gray-900">급여명세서 PDF 양식 업로드</div>
-          <div class="text-sm text-gray-500 mt-1">업로드한 XLSX 양식의 셀 병합, 열 너비, 행 구조를 읽어 직원별 급여명세서 PDF에 사용합니다.</div>
           <?php if (is_array($payrollStatementTemplateMeta)): ?>
             <div class="text-xs text-gray-500 mt-2">
               현재 양식:
@@ -218,6 +154,8 @@ function cpms_payroll_view_account_text($employee) {
         </label>
         <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold" onclick="return confirm('급여명세서 PDF 양식을 교체합니다. 선택 월의 기존 생성 결과는 history로 보관됩니다. 진행하시겠습니까?');">양식 업로드</button>
       </form>
+        </div>
+      </div>
     </div>
   <?php endif; ?>
 
@@ -227,7 +165,11 @@ function cpms_payroll_view_account_text($employee) {
     <div class="bg-red-50 border border-red-200 rounded-2xl p-4 text-red-700 font-bold">미리보기 세션이 만료되었거나 찾을 수 없습니다. 다시 업로드해주세요.</div>
   <?php endif; ?>
 
-  <div class="bg-white border border-gray-200 rounded-2xl p-4">
+  <div id="modal-payrollStatementStatus" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40" data-modal-close="payrollStatementStatus"></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+      <div class="w-full max-w-6xl bg-white rounded-3xl p-6" style="max-height:90vh;overflow-y:auto;position:relative;">
+        <button type="button" class="absolute right-4 top-4 px-3 py-1 border rounded-xl" data-modal-close="payrollStatementStatus">닫기</button>
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <div class="font-extrabold text-gray-900">급여명세서 생성 상태</div>
@@ -287,6 +229,8 @@ function cpms_payroll_view_account_text($employee) {
       <div class="rounded-xl border border-gray-200 bg-slate-50 p-3">
         <div class="text-xs font-bold text-gray-500">PDF 실패</div>
         <div class="font-extrabold mt-1 <?php echo is_array($payrollStatementResult) && isset($payrollStatementResult['failed_count']) && (int)$payrollStatementResult['failed_count'] > 0 ? 'text-red-700' : ''; ?>"><?php echo h(is_array($payrollStatementResult) && isset($payrollStatementResult['failed_count']) ? (string)(int)$payrollStatementResult['failed_count'] : '0'); ?>건</div>
+      </div>
+    </div>
       </div>
     </div>
   </div>

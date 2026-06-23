@@ -495,6 +495,10 @@ if ($route === 'tasks/update_status') {
     require_once __DIR__ . '/../app/views/tasks/update_status.php';
     exit;
 }
+if ($route === 'tasks/meeting_response') {
+    require_once __DIR__ . '/../app/views/tasks/meeting_response.php';
+    exit;
+}
 if ($route === 'tasks/complete') {
     require_once __DIR__ . '/../app/views/tasks/complete.php';
     exit;
@@ -509,6 +513,10 @@ if ($route === 'tasks/cancel') {
 }
 if ($route === 'tasks/detail') {
     require_once __DIR__ . '/../app/views/tasks/detail.php';
+    exit;
+}
+if ($route === 'dashboard_notice_save') {
+    require_once __DIR__ . '/../app/views/dashboard/notice_save.php';
     exit;
 }
 if ($route === 'db_setup_tasks') {

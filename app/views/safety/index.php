@@ -120,20 +120,6 @@ $selectedProjectName = is_array($selectedProject) && isset($selectedProject['nam
 $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
 ?>
 
-<div class="bg-gradient-to-r from-rose-600 to-orange-500 rounded-3xl p-8 text-white shadow-xl shadow-rose-500/20 mb-8">
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div class="flex items-start gap-4">
-            <div class="p-4 bg-white/20 rounded-3xl border border-white/20">
-                <i data-lucide="shield" class="w-8 h-8 text-yellow-200"></i>
-            </div>
-            <div class="flex-1 min-w-0">
-                <h2 class="text-3xl font-extrabold">안전/보건</h2>
-                <p class="text-rose-100 text-lg mt-2">프로젝트별 안전관리비와 안전사고를 관리합니다.</p>
-            </div>
-        </div>
-    </div>
-</div>
-
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type'] === 'success') ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'; ?>">
         <?php echo h($flash['message']); ?>
@@ -538,7 +524,6 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
             <div id="safety-cost-section" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-6">
                 <div class="mb-4">
                     <h3 class="text-xl font-extrabold text-gray-900">안전관리비 사용내역</h3>
-                    <div class="text-sm text-gray-600 mt-1">안전관리비 원본 입력/수정/PDF 업로드는 이 안전섹션에서만 처리합니다.</div>
                 </div>
 
                 <?php if (is_array($safetyCostSummary)): ?>
@@ -653,9 +638,9 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                             </div>
                         </div>
                         <div class="mt-3 flex flex-wrap items-center justify-between gap-2">
-                            <div class="text-xs text-gray-500">
-                                <?php echo ($editId !== '') ? '기존 PDF를 유지하려면 파일을 새로 선택하지 마세요.' : 'PDF는 선택사항이며, 등록 후 공무 월별 투입비 상세내역에서 조회할 수 있습니다.'; ?>
-                            </div>
+                            <?php if ($editId !== ''): ?>
+                                <div class="text-xs text-gray-500">기존 PDF를 유지하려면 파일을 새로 선택하지 마세요.</div>
+                            <?php endif; ?>
                             <div class="flex flex-wrap items-center gap-2">
                                 <?php if ($editId !== ''): ?>
                                     <a href="<?php echo h($baseSafetyUrl . '&tab=safety_cost#safety-cost-section'); ?>" class="px-4 py-2 rounded-xl border border-gray-300 bg-white font-bold text-sm">수정 취소</a>

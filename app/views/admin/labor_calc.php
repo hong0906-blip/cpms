@@ -49,7 +49,6 @@ foreach ($rows as $row) {
   <div class="flex flex-wrap items-start justify-between gap-4">
     <div>
       <div class="text-2xl font-black tracking-tight text-gray-900">노무비 계산</div>
-      <div class="mt-1 text-sm text-gray-500">관리부서 전용 노무사 확인용 조회와 양식 기반 엑셀 다운로드를 제공합니다.</div>
     </div>
     <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-right shadow-sm">
       <div class="text-xs text-gray-500">조회 합계</div>
@@ -90,7 +89,6 @@ foreach ($rows as $row) {
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <div class="text-lg font-extrabold text-gray-900">노무사 확인용</div>
-        <div class="mt-1 text-sm text-gray-500">공사섹션 노무비 계산 결과와 같은 기준으로 월별 노무비를 조회합니다.</div>
       </div>
       <form method="post" action="?r=admin/labor_consultant_setup" class="m-0">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -98,29 +96,6 @@ foreach ($rows as $row) {
         <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
         <button type="submit" class="rounded-xl border border-gray-200 bg-white px-4 py-2 font-bold text-gray-700 hover:bg-gray-50">관리 DB 설치/확인</button>
       </form>
-    </div>
-
-    <div class="mt-5 overflow-x-auto">
-      <table class="min-w-full border border-gray-200 text-sm">
-        <thead class="bg-gray-50">
-          <tr>
-            <th class="border border-gray-200 px-3 py-2 text-left">구분</th>
-            <th class="border border-gray-200 px-3 py-2 text-left">대상</th>
-            <th class="border border-gray-200 px-3 py-2 text-left">결과</th>
-            <th class="border border-gray-200 px-3 py-2 text-left">메시지</th>
-          </tr>
-        </thead>
-        <tbody>
-          <?php foreach ($setupRows as $setupRow): ?>
-            <tr>
-              <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($setupRow['kind']) ? $setupRow['kind'] : ''); ?></td>
-              <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($setupRow['target']) ? $setupRow['target'] : ''); ?></td>
-              <td class="border border-gray-200 px-3 py-2 <?php echo (isset($setupRow['status']) && $setupRow['status'] === '성공') ? 'text-emerald-700' : 'text-red-700'; ?>"><?php echo h(isset($setupRow['status']) ? $setupRow['status'] : ''); ?></td>
-              <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($setupRow['message']) ? $setupRow['message'] : ''); ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
     </div>
 
     <div class="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
@@ -253,7 +228,6 @@ foreach ($rows as $row) {
           <input type="hidden" name="project_id" value="<?php echo h($projectId); ?>">
           <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
           <div class="text-sm font-extrabold text-gray-900">노무사 확인용 엑셀 양식 업로드</div>
-          <div class="mt-1 text-xs text-gray-500">업로드한 .xlsx 양식을 이후 다운로드에 계속 재사용합니다.</div>
           <input type="file" name="template_file" accept=".xlsx" class="mt-4 w-full rounded-xl border border-gray-300 bg-white px-3 py-2" required>
           <button type="submit" class="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white">양식파일 업로드/교체</button>
         </form>

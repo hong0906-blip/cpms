@@ -1,7 +1,6 @@
 <?php
 /**
  * 작업 탭
- * - 작업내용 레이어 추가
  * - 작업 + 내역서 항목 묶음 관리
  * - PHP 5.6 호환
  */
@@ -158,7 +157,6 @@ if ($editingId > 0) {
     <div class="flex items-center justify-between gap-3">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">작업</h3>
-            <div class="text-sm text-gray-600 mt-1">작업내용을 만들고 내역서 항목을 여러 개 묶어서 공정표와 연결합니다.</div>
         </div>
     </div>
 
@@ -211,7 +209,6 @@ if ($editingId > 0) {
         <?php if ($canEditWork): ?>
         <div class="xl:col-span-8 border border-gray-200 rounded-2xl p-4">
             <div class="text-lg font-extrabold mb-1"><?php echo $editingRow ? '작업 수정' : '작업 추가'; ?></div>
-            <div class="text-xs text-gray-500 mb-3">변경 지점 주석: 작업내용 레이어 추가</div>
             <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/work_item_save" class="space-y-3">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                 <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">

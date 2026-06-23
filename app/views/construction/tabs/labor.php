@@ -246,7 +246,6 @@ foreach ($timesheetWorkers as $worker) {
     <div class="flex flex-wrap items-center gap-3 justify-between">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">노무비</h3>
-            <div class="text-sm text-gray-600 mt-1">공수 및 인원 정보를 월별로 관리합니다.</div>
         </div>
 
         <div class="flex flex-wrap items-end gap-3">
@@ -327,7 +326,6 @@ foreach ($timesheetWorkers as $worker) {
 <?php endif; ?>
 <div class="mt-3 bg-white rounded-3xl border border-gray-200 p-4 shadow-sm">
     <div class="font-extrabold text-gray-900 text-base">공수 수정 요청 내역</div>
-    <div class="text-xs text-gray-500 mt-1">승인대기/반려 내역을 확인합니다.</div>
     <div class="mt-3 space-y-2">
         <?php if (empty($overrideRequestRows)): ?>
             <div class="text-sm text-gray-500">요청 내역이 없습니다.</div>

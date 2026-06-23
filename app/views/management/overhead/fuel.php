@@ -15,11 +15,11 @@ $fuelData = cpms_company_fuel_load_month($fuelYear, $fuelMonth);
 $fuelItemsAll = (is_array($fuelData) && isset($fuelData['items']) && is_array($fuelData['items'])) ? $fuelData['items'] : array();
 $fuelItemsAll = cpms_company_fuel_refresh_matches($fuelItemsAll, isset($overheadPdo) ? $overheadPdo : null);
 $fuelFilters = array(
-    'name' => isset($_GET['fuel_name']) ? trim((string)$_GET['fuel_name']) : '',
-    'vehicle_number' => isset($_GET['fuel_vehicle_number']) ? trim((string)$_GET['fuel_vehicle_number']) : '',
-    'product_name' => isset($_GET['fuel_product_name']) ? trim((string)$_GET['fuel_product_name']) : '',
-    'matched_type' => isset($_GET['fuel_matched_type']) ? trim((string)$_GET['fuel_matched_type']) : '',
-    'q' => isset($_GET['fuel_q']) ? trim((string)$_GET['fuel_q']) : '',
+    'name' => '',
+    'vehicle_number' => '',
+    'product_name' => '',
+    'matched_type' => '',
+    'q' => '',
 );
 $fuelItems = cpms_company_fuel_filter_items($fuelItemsAll, $fuelFilters);
 $fuelSummary = cpms_company_fuel_summary_from_items($fuelItemsAll);
@@ -114,7 +114,7 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
     <input type="hidden" name="r" value="관리">
     <input type="hidden" name="tab" value="company_overhead">
     <input type="hidden" name="oh" value="fuel">
-    <div class="grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
       <label class="block text-sm font-bold text-gray-700">
         <span class="block mb-2">적용연도</span>
         <input type="number" name="year" min="2000" max="2100" value="<?php echo h((string)$fuelYear); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
@@ -127,35 +127,10 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
           <?php endfor; ?>
         </select>
       </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">이름</span>
-        <input type="text" name="fuel_name" value="<?php echo h($fuelFilters['name']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">차량번호</span>
-        <input type="text" name="fuel_vehicle_number" value="<?php echo h($fuelFilters['vehicle_number']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">상품명</span>
-        <input type="text" name="fuel_product_name" value="<?php echo h($fuelFilters['product_name']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">매칭상태</span>
-        <select name="fuel_matched_type" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-          <option value="">전체</option>
-          <?php foreach (array('employee' => '직원', 'company_vehicle' => '회사차량', 'vehicle_number' => '미매칭', 'unknown' => '알 수 없음') as $mtKey => $mtLabel): ?>
-            <option value="<?php echo h($mtKey); ?>" <?php echo $fuelFilters['matched_type'] === $mtKey ? 'selected' : ''; ?>><?php echo h($mtLabel); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">검색어</span>
-        <input type="text" name="fuel_q" value="<?php echo h($fuelFilters['q']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-      </label>
-    </div>
-    <div class="mt-3 flex flex-wrap gap-2">
-      <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold">조회</button>
-      <a href="?r=<?php echo urlencode('관리'); ?>&tab=company_overhead&oh=fuel&year=<?php echo urlencode((string)$fuelYear); ?>&month=<?php echo urlencode((string)$fuelMonth); ?>" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold">필터 초기화</a>
+      <div class="flex flex-wrap gap-2">
+        <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold">조회</button>
+        <a href="?r=<?php echo urlencode('관리'); ?>&tab=company_overhead&oh=fuel&year=<?php echo urlencode((string)$fuelYear); ?>&month=<?php echo urlencode((string)$fuelMonth); ?>" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold">초기화</a>
+      </div>
     </div>
   </form>
 
@@ -170,16 +145,26 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
   </div>
 
   <div class="bg-white border border-gray-200 rounded-2xl p-4">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div>
-        <div class="font-extrabold text-gray-900">주유비 엑셀 업로드</div>
-        <div class="text-sm text-gray-500 mt-1">A:I, K:S 좌우 거래명세서 표를 함께 읽고 차량번호 기준으로 직원명부와 매칭합니다.</div>
-      </div>
-      <div class="px-3 py-2 rounded-xl border <?php echo $canEditCompanyOverhead ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'; ?> text-sm font-bold">
-        <?php echo $canEditCompanyOverhead ? '업로드 가능' : '조회 전용'; ?>
-      </div>
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="font-extrabold text-gray-900">주유비 관리</div>
+      <?php if ($canEditCompanyOverhead): ?>
+        <button type="button" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold" data-modal-open="fuelUpload">엑셀 업로드</button>
+      <?php else: ?>
+        <div class="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 text-sm font-bold">조회 전용</div>
+      <?php endif; ?>
     </div>
-    <?php if ($canEditCompanyOverhead): ?>
+    <?php if (!$canEditCompanyOverhead): ?>
+      <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-bold">조회 권한만 있어 엑셀 업로드와 삭제는 사용할 수 없습니다.</div>
+    <?php endif; ?>
+  </div>
+
+  <?php if ($canEditCompanyOverhead): ?>
+  <div id="modal-fuelUpload" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40" data-modal-close="fuelUpload"></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+      <div class="w-full max-w-4xl bg-white rounded-3xl p-6" style="max-height:90vh;overflow-y:auto;position:relative;">
+        <button type="button" class="absolute right-4 top-4 px-3 py-1 border rounded-xl" data-modal-close="fuelUpload">닫기</button>
+        <div class="font-extrabold text-gray-900">주유비 엑셀 업로드</div>
       <form method="post" action="?r=management/fuel_upload_preview" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end mt-4">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
         <label class="block text-sm font-bold text-gray-700">
@@ -200,10 +185,10 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
         </label>
         <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">업로드 미리보기</button>
       </form>
-    <?php else: ?>
-      <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-bold">조회 권한만 있어 엑셀 업로드와 삭제는 사용할 수 없습니다.</div>
-    <?php endif; ?>
+      </div>
+    </div>
   </div>
+  <?php endif; ?>
 
   <?php if (is_array($fuelPreview)): ?>
     <?php

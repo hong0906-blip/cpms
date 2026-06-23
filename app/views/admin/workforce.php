@@ -57,9 +57,7 @@ function cpms_workforce_status_label($status)
 <div class="cpms-workforce-page">
   <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
     <div>
-      <div class="text-sm text-gray-500">관리 / 인력관리</div>
       <h2 class="text-2xl font-extrabold text-gray-900">인력관리</h2>
-      <div class="text-sm text-gray-500 mt-1">근로자 정보를 등록하고 공사 노무비 인원작성탭에서 가져다 씁니다.</div>
     </div>
     <div class="flex flex-wrap gap-2">
       <a href="?r=admin/workforce_form" class="px-4 py-3 rounded-2xl bg-emerald-600 text-white font-extrabold">인력 추가</a>

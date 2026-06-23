@@ -37,6 +37,23 @@ if ($overheadSection === 'payroll' && !$canViewCompanyPayroll) {
 }
 
 $filters = cpms_company_overhead_normalize_filters($_GET);
+if ($overheadSection === 'summary') {
+    $filterYear = isset($filters['year']) ? (int)$filters['year'] : (int)date('Y');
+    $filters['month'] = 0;
+    $filters['start_month'] = sprintf('%04d-01', $filterYear);
+    $filters['end_month'] = ($filterYear === (int)date('Y')) ? cpms_company_overhead_current_month() : sprintf('%04d-12', $filterYear);
+    $filters['category'] = '';
+    $filters['q'] = '';
+} elseif ($overheadSection === 'lease') {
+    $filterYear = isset($filters['year']) ? (int)$filters['year'] : (int)date('Y');
+    $filterMonth = isset($filters['month']) ? (int)$filters['month'] : 0;
+    if ($filterMonth < 1 || $filterMonth > 12) $filterMonth = ($filterYear === (int)date('Y')) ? (int)date('m') : 1;
+    $filters['month'] = $filterMonth;
+    $filters['start_month'] = sprintf('%04d-%02d', $filterYear, $filterMonth);
+    $filters['end_month'] = $filters['start_month'];
+    $filters['category'] = '';
+    $filters['q'] = '';
+}
 $summary = array();
 $listFilters = $filters;
 if ($overheadSection !== 'summary') $listFilters['category'] = $overheadSection;
@@ -69,9 +86,7 @@ function cpms_overhead_view_val($row, $key, $default) {
 <div class="space-y-5">
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div>
-      <div class="text-sm text-gray-500">관리 / 총관리비</div>
       <h3 class="text-2xl font-extrabold text-gray-900">총관리비</h3>
-      <div class="text-sm text-gray-500 mt-1">회사 전체 손익 계산에만 포함되는 월별 회사관리비입니다.</div>
     </div>
     <div class="px-3 py-2 rounded-xl border <?php echo $canEditCompanyOverhead ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'; ?> text-sm font-bold">
       <?php echo $canEditCompanyOverhead ? '등록/수정 가능' : '조회 전용'; ?>
@@ -85,45 +100,25 @@ function cpms_overhead_view_val($row, $key, $default) {
     <input type="hidden" name="r" value="관리">
     <input type="hidden" name="tab" value="company_overhead">
     <input type="hidden" name="oh" value="<?php echo h($overheadSection); ?>">
-    <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
       <label class="block text-sm font-bold text-gray-700">
         <span class="block mb-2">연도</span>
         <input type="number" name="year" min="2000" max="2100" value="<?php echo h((string)$filters['year']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
       </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">월</span>
-        <select name="month" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-          <option value="0">전체</option>
-          <?php for ($m = 1; $m <= 12; $m++): ?>
-            <option value="<?php echo $m; ?>" <?php echo ((int)$filters['month'] === $m) ? 'selected' : ''; ?>><?php echo sprintf('%02d', $m); ?></option>
-          <?php endfor; ?>
-        </select>
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">시작월</span>
-        <input type="month" name="start_month" value="<?php echo h($filters['start_month']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">종료월</span>
-        <input type="month" name="end_month" value="<?php echo h($filters['end_month']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">구분</span>
-        <select name="category" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-          <option value="">전체</option>
-          <?php foreach ($categories as $catKey => $catMeta): ?>
-            <option value="<?php echo h($catKey); ?>" <?php echo ($filters['category'] === $catKey) ? 'selected' : ''; ?>><?php echo h($catMeta['label']); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">검색어</span>
-        <input type="text" name="q" value="<?php echo h($filters['q']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300" placeholder="항목/지급처/메모">
-      </label>
-    </div>
-    <div class="mt-3 flex flex-wrap gap-2">
-      <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold">조회</button>
-      <a href="?r=<?php echo urlencode('관리'); ?>&tab=company_overhead&oh=<?php echo urlencode($overheadSection); ?>" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold">초기화</a>
+      <?php if ($overheadSection === 'lease'): ?>
+        <label class="block text-sm font-bold text-gray-700">
+          <span class="block mb-2">월</span>
+          <select name="month" class="w-full px-3 py-3 rounded-xl border border-gray-300">
+            <?php for ($searchMonth = 1; $searchMonth <= 12; $searchMonth++): ?>
+              <option value="<?php echo $searchMonth; ?>" <?php echo ((int)$filters['month'] === $searchMonth) ? 'selected' : ''; ?>><?php echo sprintf('%02d', $searchMonth); ?></option>
+            <?php endfor; ?>
+          </select>
+        </label>
+      <?php endif; ?>
+      <div class="flex flex-wrap gap-2">
+        <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold">조회</button>
+        <a href="?r=<?php echo urlencode('관리'); ?>&tab=company_overhead&oh=<?php echo urlencode($overheadSection); ?>" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold">초기화</a>
+      </div>
     </div>
   </form>
   <?php endif; ?>

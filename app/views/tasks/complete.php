@@ -31,6 +31,10 @@ if (!$task || !cpms_tasks_can_change_status($task, isset($currentEmployee['id'])
     flash_set('danger', '완료 처리 권한이 없습니다.');
     cpms_tasks_redirect_back();
 }
+if (isset($task['task_type']) && (string)$task['task_type'] === 'meeting' && !cpms_tasks_can_complete_meeting_after_response($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0)) {
+    flash_set('danger', '회의 요청은 참석가능 또는 참석불가능 선택 후 완료 처리해주세요.');
+    cpms_tasks_redirect_back();
+}
 
 $now = cpms_tasks_now();
 
@@ -44,7 +48,7 @@ try {
         ':id' => $taskId,
     ));
     $groupKey = (isset($task['group_key']) && trim((string)$task['group_key']) !== '') ? trim((string)$task['group_key']) : '';
-    if ($groupKey !== '' && cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) {
+    if ($groupKey !== '' && cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key') && cpms_tasks_should_sync_group_completion($groupKey)) {
         $syncMemo = $completedMemo;
         if ($syncMemo === '') {
             $syncMemo = urldecode('%EA%B3%B5%EC%9A%A9%20%ED%95%A0%EC%9D%BC%20%EB%AC%B6%EC%9D%8C%20%EC%9E%90%EB%8F%99%20%EC%99%84%EB%A3%8C');
@@ -81,7 +85,7 @@ try {
         cpms_samsung_portal_handle_task_completed($pdo, $task, $currentEmployee, $now);
     }
     $updatedTask = cpms_tasks_find_task($pdo, $taskId);
-    if ($updatedTask) {
+    if ($updatedTask && (!isset($updatedTask['task_type']) || (string)$updatedTask['task_type'] !== 'meeting')) {
         cpms_tasks_send_completed_notification($pdo, $updatedTask);
     }
     flash_set('success', '업무를 완료 처리했습니다.');

@@ -79,12 +79,6 @@ if (!function_exists('admin_tab_url')) {
 }
 ?>
 
-<div class="mb-6">
-  <div class="text-sm text-gray-500">관리</div>
-  <h2 class="text-2xl font-extrabold text-gray-900">관리부</h2>
-  <div class="text-sm text-gray-500 mt-1">직원명부 / 인력관리 / 노무비 계산 / 출퇴근·근태를 한 화면에서 관리합니다.</div>
-</div>
-
 <div style="margin:0 0 16px 0; padding:12px; border:1px solid #e5e7eb; border-radius:12px; background:#fff;">
   <?php foreach ($tabs as $k => $t): ?>
     <?php $active = ($k === $tab); ?>

@@ -251,7 +251,6 @@ if (is_file($contractMetaFile)) {
 
 <div class="flex items-start justify-between gap-3 mb-6">
     <div>
-        <div class="text-sm text-gray-500">프로젝트 상세</div>
         <h2 class="text-2xl font-extrabold text-gray-900"><?php echo h($project['name']); ?></h2>
         <div class="text-sm text-gray-600 mt-1">
             <?php echo h((string)$project['client']); ?>
@@ -374,7 +373,6 @@ if (is_file($contractMetaFile)) {
         <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
             <div>
                 <div class="font-extrabold text-gray-900">계약서 파일 보관</div>
-                <div class="text-xs text-gray-500 mt-1">PDF/HWP/DOC/JPG 파일은 보관만 됩니다.</div>
             </div>
             <?php if ($hasContract): ?>
                 <?php $contractIsDrive = (isset($contractMeta['storage_type']) && (string)$contractMeta['storage_type'] === 'google_drive'); ?>
@@ -425,7 +423,6 @@ if (is_file($contractMetaFile)) {
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-100">
             <div class="font-extrabold text-gray-900">당초 내역서 업로드</div>
-            <div class="text-xs text-gray-500 mt-1">CPMS 표준 양식 xlsx만 등록합니다. 현재 적용 내역서가 있으면 덮어쓰지 않습니다.</div>
         </div>
         <div class="p-6">
             <form method="post" action="<?php echo h(base_url()); ?>/?r=project/contract_upload" enctype="multipart/form-data" class="space-y-3">
@@ -443,7 +440,6 @@ if (is_file($contractMetaFile)) {
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-100">
             <div class="font-extrabold text-gray-900">변경 단가내역서 업로드</div>
-            <div class="text-xs text-gray-500 mt-1">변경된 엑셀 단가내역서를 업로드하면 공무 단가표와 공사 작업 탭의 내역서 항목이 갱신됩니다. 기존 공정표 연결을 유지하기 위해 기존 단가 ID는 최대한 유지합니다.</div>
         </div>
         <div class="p-6">
             <form method="post" action="<?php echo h(base_url()); ?>/?r=project/contract_change_preview" enctype="multipart/form-data" class="space-y-3">
@@ -464,7 +460,6 @@ if (is_file($contractMetaFile)) {
         <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
             <div>
                 <div class="font-extrabold text-gray-900">내역서 버전 이력</div>
-                <div class="text-xs text-gray-500 mt-1">당초/변경계약/추가공사 파일을 덮어쓰지 않고 보존합니다.</div>
             </div>
             <div class="text-xs text-gray-500">총 <?php echo count($contractVersions); ?>건</div>
         </div>
@@ -510,7 +505,6 @@ if (is_file($contractMetaFile)) {
     <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
         <div class="px-6 py-4 border-b border-gray-100">
             <div class="font-extrabold text-gray-900">추가공사 등록</div>
-            <div class="text-xs text-gray-500 mt-1">승인 상태와 관련 품의/요청을 별도로 관리합니다.</div>
         </div>
         <div class="p-6">
             <form method="post" action="<?php echo h(base_url()); ?>/?r=project/additional_work_save" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -556,7 +550,6 @@ if (is_file($contractMetaFile)) {
     <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
         <div>
             <div class="font-extrabold text-gray-900">기성관리</div>
-            <div class="text-xs text-gray-500 mt-1">기성금액을 확정매출로 저장하고 월별 집계에 반영합니다.</div>
         </div>
         <div class="text-right text-sm">
             <div class="font-extrabold text-gray-900">누적 확정매출 <?php echo cpms_format_amount0($progressRecognizedTotal); ?></div>
@@ -710,7 +703,6 @@ if (is_file($contractMetaFile)) {
             <div class="font-extrabold text-gray-900">내역 안내</div>
         </div>
         <div class="p-6 text-sm text-gray-700">
-            <div class="text-gray-600">변경 단가내역서를 적용하면 아래 단가표와 공사 작업 탭, 공정표에서 최신 항목명/기본수량/단가를 읽어 표시합니다.</div>
         </div>
     </div>
 </div>

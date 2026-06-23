@@ -361,9 +361,7 @@ for ($i = 0; $i < count($employees); $i++) {
 </style>
 
 <div class="mb-5">
-    <div class="text-sm text-gray-500">관리 / 연차 관리</div>
     <h3 class="text-2xl font-extrabold text-gray-900">연차 관리</h3>
-    <div class="text-sm text-gray-500 mt-1">조회 기준일에 따라 1년 이상자는 연차 현황, 1년 미만자는 월차 현황으로 나누어 표시합니다.</div>
 </div>
 
 <?php if (count($schemaWarnings) > 0) { ?>

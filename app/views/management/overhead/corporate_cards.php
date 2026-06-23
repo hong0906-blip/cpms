@@ -72,16 +72,26 @@ function cpms_overhead_card_detail_sort($a, $b) {
 </div>
 
 <div class="bg-white border border-gray-200 rounded-2xl p-4">
-  <div class="flex flex-wrap items-start justify-between gap-3">
-    <div>
-      <div class="font-extrabold text-gray-900">법인카드 엑셀 업로드</div>
-      <div class="text-sm text-gray-500 mt-1">매입(카드/페이) .xls 또는 .xlsx 파일을 선택 월 데이터로 미리보기 후 확정 저장합니다.</div>
-    </div>
-    <div class="px-3 py-2 rounded-xl border <?php echo $canEditCompanyOverhead ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'; ?> text-sm font-bold">
-      <?php echo $canEditCompanyOverhead ? '업로드 가능' : '조회 전용'; ?>
-    </div>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="font-extrabold text-gray-900">법인카드 관리</div>
+    <?php if ($canEditCompanyOverhead): ?>
+      <button type="button" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold" data-modal-open="cardUpload">엑셀 업로드</button>
+    <?php else: ?>
+      <div class="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 text-sm font-bold">조회 전용</div>
+    <?php endif; ?>
   </div>
-  <?php if ($canEditCompanyOverhead): ?>
+  <?php if (!$canEditCompanyOverhead): ?>
+    <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-bold">조회 권한만 있어 엑셀 업로드는 사용할 수 없습니다.</div>
+  <?php endif; ?>
+</div>
+
+<?php if ($canEditCompanyOverhead): ?>
+<div id="modal-cardUpload" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/40" data-modal-close="cardUpload"></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="w-full max-w-4xl bg-white rounded-3xl p-6" style="max-height:90vh;overflow-y:auto;position:relative;">
+      <button type="button" class="absolute right-4 top-4 px-3 py-1 border rounded-xl" data-modal-close="cardUpload">닫기</button>
+      <div class="font-extrabold text-gray-900">법인카드 엑셀 업로드</div>
     <form method="post" action="?r=management/corporate_card_upload_preview" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end mt-4">
       <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
       <label class="block text-sm font-bold text-gray-700">
@@ -102,10 +112,10 @@ function cpms_overhead_card_detail_sort($a, $b) {
       </label>
       <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">업로드 미리보기</button>
     </form>
-  <?php else: ?>
-    <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-bold">조회 권한만 있어 엑셀 업로드는 사용할 수 없습니다.</div>
-  <?php endif; ?>
+    </div>
+  </div>
 </div>
+<?php endif; ?>
 
 <?php if (is_array($cardPreview)): ?>
   <?php

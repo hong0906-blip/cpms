@@ -33,6 +33,10 @@ if (!$task || !cpms_tasks_can_change_status($task, isset($currentEmployee['id'])
     flash_set('danger', '상태 변경 권한이 없습니다.');
     cpms_tasks_redirect_back();
 }
+if (isset($task['task_type']) && (string)$task['task_type'] === 'meeting') {
+    flash_set('danger', '회의 요청은 참석가능 또는 참석불가능으로 처리해주세요.');
+    cpms_tasks_redirect_back();
+}
 
 try {
     $st = $pdo->prepare("UPDATE cpms_tasks SET status = :status, updated_at = :updated_at WHERE id = :id");

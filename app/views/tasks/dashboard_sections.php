@@ -11,10 +11,43 @@ function cpms_render_task_action_link($item)
     return '<a href="' . h(isset($item['action_url']) ? $item['action_url'] : '#') . '" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold text-slate-700">상세 이동</a>';
 }}
 
+if (!function_exists('cpms_render_task_assignee_options')) {
+function cpms_render_task_assignee_options($employees, $currentLeaveIndex)
+{
+    if (!is_array($employees)) return;
+    foreach ($employees as $employee) {
+        $employeeLeaveInfo = function_exists('approval_current_leave_info_from_index') ? approval_current_leave_info_from_index($currentLeaveIndex, $employee) : null;
+        $employeeLeaveLabel = is_array($employeeLeaveInfo) && isset($employeeLeaveInfo['status_label']) ? (string)$employeeLeaveInfo['status_label'] : '';
+        $employeeOptionName = isset($employee['name']) ? $employee['name'] : '-';
+        if ($employeeLeaveLabel !== '') {
+            $employeeOptionName .= ' (' . $employeeLeaveLabel . ')';
+        }
+        ?>
+        <option value="<?php echo (int)$employee['id']; ?>" data-department="<?php echo h(isset($employee['department']) ? $employee['department'] : ''); ?>" data-on-leave="<?php echo is_array($employeeLeaveInfo) ? '1' : '0'; ?>" <?php echo is_array($employeeLeaveInfo) ? 'disabled="disabled"' : ''; ?>>
+            <?php echo h($employeeOptionName . ' / ' . (isset($employee['department']) ? $employee['department'] : '-') . ' / ' . (isset($employee['position']) && trim((string)$employee['position']) !== '' ? $employee['position'] : '-')); ?>
+        </option>
+        <?php
+    }
+}}
+
 if (!function_exists('cpms_render_feed_card')) {
 function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requestedMode)
 {
     $statusKey = cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
+    $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
+    $canRespondMeeting = $isMeetingTask
+        && !$requestedMode
+        && (int)$currentEmployeeId > 0
+        && isset($item['assignee_employee_id'])
+        && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId
+        && (!isset($item['requester_employee_id']) || (int)$item['requester_employee_id'] !== (int)$currentEmployeeId)
+        && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('meeting_available', 'meeting_unavailable', 'cancelled'), true);
+    $canCompleteMeeting = $isMeetingTask
+        && !$requestedMode
+        && (int)$currentEmployeeId > 0
+        && isset($item['assignee_employee_id'])
+        && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId
+        && in_array(isset($item['status']) ? (string)$item['status'] : '', array('meeting_available', 'meeting_unavailable'), true);
     $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
     $hasProjectName = isset($item['project_name']) && trim((string)$item['project_name']) !== '';
     $dueText = '-';
@@ -44,7 +77,7 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
                 요청자: <?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?>
             <?php endif; ?>
         </div>
-        <div class="mt-1 text-sm text-slate-500">마감: <?php echo h($dueText); ?></div>
+        <div class="mt-1 text-sm text-slate-500"><?php echo $isMeetingTask ? '일시' : '마감'; ?>: <?php echo h($dueText); ?></div>
         <?php endif; ?>
         <?php if ($isConstructionSchedule): ?>
             <div class="mt-1 text-sm text-slate-500">공정일: <?php echo h($dueText); ?></div>
@@ -54,7 +87,17 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
         </div>
         <div class="mt-4 flex flex-wrap items-center gap-2">
             <?php echo cpms_render_task_action_link($item); ?>
-            <?php if (isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('progress', 'done', 'cancelled'), true)): ?>
+            <?php if ($canRespondMeeting): ?>
+                <form method="post" action="?r=tasks/meeting_response" class="inline">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
+                    <input type="hidden" name="response" value="available">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <button type="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">참석가능</button>
+                </form>
+                <button type="button" data-meeting-unavailable-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-bold">참석불가능</button>
+            <?php endif; ?>
+            <?php if (!$isMeetingTask && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('progress', 'done', 'cancelled'), true)): ?>
                 <form method="post" action="?r=tasks/update_status" class="inline">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
@@ -63,7 +106,7 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
                     <button type="submit" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">진행중</button>
                 </form>
             <?php endif; ?>
-            <?php if (isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('done', 'cancelled'), true)): ?>
+            <?php if (($canCompleteMeeting || !$isMeetingTask) && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('done', 'cancelled'), true)): ?>
                 <button type="button" data-task-complete-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">완료</button>
             <?php endif; ?>
             <?php if (isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && $requestedMode && (int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId && isset($item['status']) && (string)$item['status'] === 'done'): ?>
@@ -176,6 +219,7 @@ function cpms_render_employee_task_dashboard($pdo)
             </div>
             <div class="flex flex-wrap items-center gap-2">
                 <a href="?r=tasks/my_list" class="px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-700 font-bold">전체 보기</a>
+                <button type="button" data-modal-open="meetingCreate" class="px-5 py-3 rounded-2xl bg-blue-600 text-white font-extrabold shadow-lg">회의 요청</button>
                 <button type="button" data-modal-open="taskCreate" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg">업무 요청</button>
             </div>
         </div>
@@ -263,17 +307,17 @@ function cpms_render_employee_task_dashboard($pdo)
     <div id="modal-taskCreate" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-black/40" data-modal-close="taskCreate"></div>
         <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="w-full max-w-4xl rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+            <div class="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white shadow-2xl border border-gray-100">
                 <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
                     <div>
                         <div class="text-2xl font-extrabold text-gray-900">업무 요청</div>
-                        <div class="text-sm text-gray-500 mt-1">개인이 개인에게, 또는 부서와 관계없이 자유롭게 요청할 수 있습니다.</div>
                     </div>
                     <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="taskCreate">닫기</button>
                 </div>
                 <form method="post" action="?r=tasks/create" enctype="multipart/form-data" class="p-6 space-y-5">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <input type="hidden" name="task_kind" value="task">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div class="md:col-span-2">
                             <div class="text-sm font-bold text-gray-700 mb-1">업무 제목</div>
@@ -289,21 +333,8 @@ function cpms_render_employee_task_dashboard($pdo)
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">담당자</div>
-                            <select name="assignee_employee_id" id="taskAssigneeSelect" required class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
-                                <option value="">담당자 선택</option>
-                                <?php foreach ($employees as $employee): ?>
-                                    <?php
-                                    $employeeLeaveInfo = function_exists('approval_current_leave_info_from_index') ? approval_current_leave_info_from_index($currentLeaveIndex, $employee) : null;
-                                    $employeeLeaveLabel = is_array($employeeLeaveInfo) && isset($employeeLeaveInfo['status_label']) ? (string)$employeeLeaveInfo['status_label'] : '';
-                                    $employeeOptionName = isset($employee['name']) ? $employee['name'] : '-';
-                                    if ($employeeLeaveLabel !== '') {
-                                        $employeeOptionName .= ' (' . $employeeLeaveLabel . ')';
-                                    }
-                                    ?>
-                                    <option value="<?php echo (int)$employee['id']; ?>" data-department="<?php echo h(isset($employee['department']) ? $employee['department'] : ''); ?>" data-on-leave="<?php echo is_array($employeeLeaveInfo) ? '1' : '0'; ?>" <?php echo is_array($employeeLeaveInfo) ? 'disabled="disabled"' : ''; ?>>
-                                        <?php echo h($employeeOptionName . ' / ' . (isset($employee['department']) ? $employee['department'] : '-') . ' / ' . (isset($employee['position']) && trim((string)$employee['position']) !== '' ? $employee['position'] : '-')); ?>
-                                    </option>
-                                <?php endforeach; ?>
+                            <select name="assignee_employee_ids[]" id="taskAssigneeSelect" required multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <?php cpms_render_task_assignee_options($employees, $currentLeaveIndex); ?>
                             </select>
                         </div>
                         <div>
@@ -346,6 +377,70 @@ function cpms_render_employee_task_dashboard($pdo)
                     <div class="flex justify-end gap-2">
                         <button type="button" class="px-4 py-3 rounded-2xl border border-gray-200 font-bold" data-modal-close="taskCreate">취소</button>
                         <button type="submit" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">업무 요청 등록</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-meetingCreate" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/40" data-modal-close="meetingCreate"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white shadow-2xl border border-gray-100">
+                <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                    <div>
+                        <div class="text-2xl font-extrabold text-gray-900">회의 요청</div>
+                    </div>
+                    <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="meetingCreate">닫기</button>
+                </div>
+                <form method="post" action="?r=tasks/create" enctype="multipart/form-data" class="p-6 space-y-5">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <input type="hidden" name="task_kind" value="meeting">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="md:col-span-2">
+                            <div class="text-sm font-bold text-gray-700 mb-1">회의 제목</div>
+                            <input type="text" name="title" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div class="md:col-span-2">
+                            <div class="text-sm font-bold text-gray-700 mb-1">회의 내용</div>
+                            <textarea name="content" rows="4" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></textarea>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">참석자 검색</div>
+                            <input type="text" id="meetingAssigneeSearch" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="이름 / 부서 / 직책 검색">
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">참석자</div>
+                            <select name="assignee_employee_ids[]" id="meetingAssigneeSelect" required multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <?php cpms_render_task_assignee_options($employees, $currentLeaveIndex); ?>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">회의 일자</div>
+                            <input type="date" name="meeting_date" id="meetingDate" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">회의 시간</div>
+                            <input type="time" name="meeting_time" id="meetingTime" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">관련 현장</div>
+                            <select name="project_id" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <option value="0">선택 안함</option>
+                                <?php foreach ($projects as $project): ?>
+                                    <option value="<?php echo (int)$project['id']; ?>"><?php echo h(isset($project['name']) ? $project['name'] : '-'); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">첨부파일</div>
+                            <input type="file" name="attachments[]" multiple class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-3 rounded-2xl border border-gray-200 font-bold" data-modal-close="meetingCreate">취소</button>
+                        <button type="submit" class="px-5 py-3 rounded-2xl bg-blue-600 text-white font-extrabold">회의 요청 등록</button>
                     </div>
                 </form>
             </div>
@@ -396,6 +491,32 @@ function cpms_render_employee_task_dashboard($pdo)
         </div>
     </div>
 
+    <div id="modal-meetingUnavailable" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/40" data-modal-close="meetingUnavailable"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="w-full max-w-2xl rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                    <div class="text-2xl font-extrabold text-gray-900">참석불가능</div>
+                    <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="meetingUnavailable">닫기</button>
+                </div>
+                <form method="post" action="?r=tasks/meeting_response" class="p-6 space-y-4">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" id="meetingUnavailableTaskId" value="">
+                    <input type="hidden" name="response" value="unavailable">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <div>
+                        <div class="text-sm font-bold text-gray-700 mb-1">사유</div>
+                        <textarea name="reason" rows="4" required class="w-full px-4 py-3 rounded-2xl border border-gray-200"></textarea>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-3 rounded-2xl border border-gray-200 font-bold" data-modal-close="meetingUnavailable">취소</button>
+                        <button type="submit" class="px-5 py-3 rounded-2xl bg-rose-600 text-white font-extrabold">저장</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <div id="modal-taskRevision" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-black/40" data-modal-close="taskRevision"></div>
         <div class="absolute inset-0 flex items-center justify-center p-4">
@@ -438,11 +559,13 @@ function cpms_render_employee_task_dashboard($pdo)
         var taskUrgentToggle = document.getElementById('taskUrgentToggle');
         var assigneeSearch = document.getElementById('taskAssigneeSearch');
         var assigneeSelect = document.getElementById('taskAssigneeSelect');
+        var meetingAssigneeSearch = document.getElementById('meetingAssigneeSearch');
+        var meetingAssigneeSelect = document.getElementById('meetingAssigneeSelect');
         var departmentSelect = document.getElementById('taskDepartmentSelect');
-        var taskCreateForm = assigneeSelect ? assigneeSelect.form : null;
         var onLeaveMessage = <?php echo json_encode(approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?>;
         var taskDetailBody = document.getElementById('taskDetailBody');
         var completeTaskId = document.getElementById('taskCompleteTaskId');
+        var meetingUnavailableTaskId = document.getElementById('meetingUnavailableTaskId');
         var revisionTaskId = document.getElementById('taskRevisionTaskId');
         var revisionDueDate = document.getElementById('taskRevisionDueDate');
         var revisionDueTime = document.getElementById('taskRevisionDueTime');
@@ -464,46 +587,86 @@ function cpms_render_employee_task_dashboard($pdo)
             });
         }
 
-        if (assigneeSearch && assigneeSelect) {
-            assigneeSearch.addEventListener('input', function(){
-                var keyword = assigneeSearch.value.replace(/^\s+|\s+$/g, '').toLowerCase();
-                var options = assigneeSelect.options;
-                for (var i = 0; i < options.length; i++) {
-                    var option = options[i];
-                    if (!option.value) continue;
-                    var matched = keyword === '' || option.text.toLowerCase().indexOf(keyword) >= 0;
-                    option.hidden = !matched;
+        function selectedAssigneeOptions(select) {
+            var selected = [];
+            if (!select || !select.options) return selected;
+            for (var i = 0; i < select.options.length; i++) {
+                if (select.options[i].selected && select.options[i].value) {
+                    selected[selected.length] = select.options[i];
                 }
-            });
-            assigneeSelect.addEventListener('change', function(){
-                var selected = assigneeSelect.options[assigneeSelect.selectedIndex];
-                if (!selected) return;
-                if (selected.getAttribute('data-on-leave') === '1') {
-                    alert(onLeaveMessage);
-                    assigneeSelect.value = '';
-                    return;
-                }
-                if (departmentSelect && departmentSelect.value === '') {
-                    var dept = selected.getAttribute('data-department') || '';
-                    departmentSelect.value = dept;
-                }
-            });
-            if (taskCreateForm) {
-                taskCreateForm.addEventListener('submit', function(e){
-                    var selected = assigneeSelect.options[assigneeSelect.selectedIndex];
-                    if (selected && selected.getAttribute('data-on-leave') === '1') {
-                        e.preventDefault();
+            }
+            return selected;
+        }
+
+        function setupAssigneePicker(searchInput, select, targetDepartmentSelect, emptyMessage) {
+            if (!select) return;
+            if (searchInput) {
+                searchInput.addEventListener('input', function(){
+                    var keyword = searchInput.value.replace(/^\s+|\s+$/g, '').toLowerCase();
+                    var options = select.options;
+                    for (var i = 0; i < options.length; i++) {
+                        var option = options[i];
+                        if (!option.value) continue;
+                        var matched = keyword === '' || option.text.toLowerCase().indexOf(keyword) >= 0;
+                        option.hidden = !matched;
+                    }
+                });
+            }
+
+            select.addEventListener('change', function(){
+                var selected = selectedAssigneeOptions(select);
+                var firstAvailable = null;
+                for (var i = 0; i < selected.length; i++) {
+                    if (selected[i].getAttribute('data-on-leave') === '1') {
                         alert(onLeaveMessage);
-                        assigneeSelect.value = '';
+                        selected[i].selected = false;
+                        continue;
+                    }
+                    if (!firstAvailable) firstAvailable = selected[i];
+                }
+                if (targetDepartmentSelect && targetDepartmentSelect.value === '' && firstAvailable) {
+                    var dept = firstAvailable.getAttribute('data-department') || '';
+                    targetDepartmentSelect.value = dept;
+                }
+            });
+
+            if (select.form) {
+                select.form.addEventListener('submit', function(e){
+                    var selected = selectedAssigneeOptions(select);
+                    if (selected.length === 0) {
+                        e.preventDefault();
+                        alert(emptyMessage || '담당자를 선택해주세요.');
+                        return;
+                    }
+                    for (var i = 0; i < selected.length; i++) {
+                        if (selected[i].getAttribute('data-on-leave') === '1') {
+                            e.preventDefault();
+                            alert(onLeaveMessage);
+                            selected[i].selected = false;
+                            return;
+                        }
                     }
                 });
             }
         }
 
+        setupAssigneePicker(assigneeSearch, assigneeSelect, departmentSelect, '담당자를 선택해주세요.');
+        setupAssigneePicker(meetingAssigneeSearch, meetingAssigneeSelect, null, '참석자를 선택해주세요.');
+
         function openCompleteModal(taskId) {
             if (completeTaskId) completeTaskId.value = taskId;
             var modal = document.getElementById('modal-taskComplete');
             if (modal) modal.classList.remove('hidden');
+        }
+
+        function openMeetingUnavailableModal(taskId) {
+            if (meetingUnavailableTaskId) meetingUnavailableTaskId.value = taskId;
+            var modal = document.getElementById('modal-meetingUnavailable');
+            if (modal) {
+                var reason = modal.querySelector ? modal.querySelector('textarea[name="reason"]') : null;
+                if (reason) reason.value = '';
+                modal.classList.remove('hidden');
+            }
         }
 
         function openRevisionModal(taskId, dueDate, dueTime) {
@@ -539,6 +702,13 @@ function cpms_render_employee_task_dashboard($pdo)
             if (completeButton) {
                 e.preventDefault();
                 openCompleteModal(completeButton.getAttribute('data-task-id'));
+                return;
+            }
+
+            var meetingUnavailableButton = e.target && e.target.closest ? e.target.closest('[data-meeting-unavailable-open]') : null;
+            if (meetingUnavailableButton) {
+                e.preventDefault();
+                openMeetingUnavailableModal(meetingUnavailableButton.getAttribute('data-task-id'));
                 return;
             }
 

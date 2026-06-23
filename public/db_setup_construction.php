@@ -155,7 +155,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $msg = '원가/공정 입력 테이블 생성/확인 완료';
 
             } else if ($action === 'work_items') {
-                // 작업내용 레이어 추가
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_work_items (
                     id INT AUTO_INCREMENT PRIMARY KEY,
                     project_id INT NOT NULL,

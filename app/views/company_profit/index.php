@@ -21,7 +21,7 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
 
 <style>
 .cp-company-profit { color:#0f172a; }
-.cp-company-profit .cp-filter { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; align-items:end; }
+.cp-company-profit .cp-filter { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; align-items:end; }
 .cp-company-profit .cp-field label { display:block; margin-bottom:5px; font-size:12px; font-weight:800; color:#475569; }
 .cp-company-profit .cp-field input,
 .cp-company-profit .cp-field select { width:100%; border:1px solid #dbe3ef; border-radius:8px; padding:9px 10px; background:#fff; color:#0f172a; min-height:40px; }
@@ -96,8 +96,6 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
         <label>기간</label>
         <select name="scope">
           <option value="year" <?php echo $scope === 'year' ? 'selected' : ''; ?>>연도</option>
-          <option value="month" <?php echo $scope === 'month' ? 'selected' : ''; ?>>월</option>
-          <option value="custom" <?php echo $scope === 'custom' ? 'selected' : ''; ?>>시작월~종료월</option>
           <option value="all" <?php echo $scope === 'all' ? 'selected' : ''; ?>>전체기간</option>
         </select>
       </div>
@@ -110,42 +108,12 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
         </select>
       </div>
       <div class="cp-field">
-        <label>월</label>
-        <select name="month">
-          <option value="0">전체</option>
-          <?php for ($m = 1; $m <= 12; $m++): ?>
-            <option value="<?php echo (int)$m; ?>" <?php echo ($selectedMonth === $m) ? 'selected' : ''; ?>><?php echo (int)$m; ?>월</option>
-          <?php endfor; ?>
-        </select>
-      </div>
-      <div class="cp-field">
-        <label>시작월</label>
-        <input type="month" name="start_month" value="<?php echo h($startMonth); ?>">
-      </div>
-      <div class="cp-field">
-        <label>종료월</label>
-        <input type="month" name="end_month" value="<?php echo h($endMonth); ?>">
-      </div>
-      <div class="cp-field">
         <label>그래프 보기</label>
         <select name="view_mode">
           <option value="monthly" <?php echo $viewMode === 'monthly' ? 'selected' : ''; ?>>월별 보기</option>
           <option value="quarterly" <?php echo $viewMode === 'quarterly' ? 'selected' : ''; ?>>분기별 보기</option>
           <option value="yearly" <?php echo $viewMode === 'yearly' ? 'selected' : ''; ?>>연도별 보기</option>
         </select>
-      </div>
-      <div class="cp-field">
-        <label>프로젝트 상태</label>
-        <select name="status">
-          <option value="">전체</option>
-          <?php foreach ($statusOptions as $status): ?>
-            <option value="<?php echo h($status); ?>" <?php echo ($selectedStatus === (string)$status) ? 'selected' : ''; ?>><?php echo h($status); ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <div class="cp-field cp-field-wide">
-        <label>현장 검색</label>
-        <input type="text" name="q" value="<?php echo h($searchQuery); ?>" placeholder="현장명, 발주처, 시공사, 위치">
       </div>
       <div class="cp-action">
         <button type="submit" class="cp-btn"><i data-lucide="search"></i>조회</button>

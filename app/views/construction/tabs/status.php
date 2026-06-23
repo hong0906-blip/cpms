@@ -2,7 +2,6 @@
 /**
  * 공사 > 상황 탭(연도별 월/분기 비용+매출 그래프)
  * - 연도 선택 + 월별/분기별 5항목(노무/장비/안전/자재/매출) 막대그래프
- * - 매출·노무비: 1일~말일 / 자재·장비: 전월 26일 ~ 현월 25일 / 안전관리비: 안전섹션 원본
  * - PHP 5.6 호환
  */
 
@@ -727,7 +726,6 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         <div class="flex flex-wrap items-end justify-between gap-3">
             <div>
                 <h3 class="text-xl font-extrabold text-gray-900">상황</h3>
-                <div class="text-sm text-gray-600 mt-1">연도별 월/분기 비용/매출 현황<br>매출·노무비: 1일~말일 / 자재·장비: 전월 26일~현월 25일 / 안전관리비: 안전섹션 원본</div>
             </div>
         </div>
 
@@ -789,13 +787,6 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <div class="text-lg font-extrabold <?php echo ($safetyRemainRate < 0) ? 'text-red-700' : 'text-gray-900'; ?>"><?php echo h(cpms_safety_cost_rate_label($safetyRemainRate)); ?></div>
             </div>
         </div>
-        <div class="mt-2 text-xs text-gray-500">안전관리비 사용금액은 안전섹션의 안전관리비 사용내역 원본 기준입니다.</div>
-        <div class="mt-3 text-xs text-gray-500">
-            투입원가 = 노무비 + 장비비 + 자재구입비 / 안전관리비 제외 · 투입목표금액 = 매출 × 70%
-        </div>
-        <div class="mt-1 text-xs text-gray-500">
-            확정매출은 월별 기성 입력 금액을 우선 적용하고, 해당 월 기성 입력이 없으면 예상매출을 대체 적용합니다.
-        </div>
     </div>
 
     <div class="flex justify-end">
@@ -817,7 +808,6 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     <div class="chart-wrap">
         <div class="flex items-center justify-between">
             <h4 class="text-lg font-extrabold text-gray-900">월별 비용/매출 그래프</h4>
-            <div class="text-xs text-gray-500">매출·노무비: 1일~말일 / 자재·장비: 전월 26일~현월 25일 / 안전관리비: 안전섹션 원본</div>
         </div>
         <?php if ($debugMode && count($periodDiagnostics) > 0): ?>
             <div class="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">

@@ -46,41 +46,92 @@ function cpms_overhead_lease_form_id($row) {
 }}
 ?>
 
+<style>
+.cpms-lease-list-table { width:100%; min-width:0; table-layout:fixed; }
+.cpms-lease-list-table th { padding:6px 7px !important; white-space:nowrap; overflow:hidden; text-overflow:clip; }
+.cpms-lease-list-table td { padding:6px 7px !important; white-space:normal; word-break:keep-all; overflow-wrap:anywhere; overflow:visible; text-overflow:clip; vertical-align:top; }
+.cpms-lease-list-table td[data-wrap="1"] { white-space:normal !important; word-break:keep-all; overflow-wrap:anywhere; }
+.cpms-lease-list-table input { max-width:100%; }
+.cpms-lease-list-table th[data-lease-col="address"],
+.cpms-lease-list-table td[data-lease-col="address"] { width:18%; }
+.cpms-lease-list-table th[data-lease-col="manager_primary"],
+.cpms-lease-list-table td[data-lease-col="manager_primary"],
+.cpms-lease-list-table th[data-lease-col="manager_secondary"],
+.cpms-lease-list-table td[data-lease-col="manager_secondary"] { width:4%; }
+.cpms-lease-list-table th[data-lease-col="deposit"],
+.cpms-lease-list-table td[data-lease-col="deposit"],
+.cpms-lease-list-table th[data-lease-col="amount"],
+.cpms-lease-list-table td[data-lease-col="amount"] { width:8%; }
+.cpms-lease-list-table th[data-lease-col="payment_due"],
+.cpms-lease-list-table td[data-lease-col="payment_due"] { width:5%; }
+.cpms-lease-list-table th[data-lease-col="maintenance_fee"],
+.cpms-lease-list-table td[data-lease-col="maintenance_fee"],
+.cpms-lease-list-table th[data-lease-col="monthly_total"],
+.cpms-lease-list-table td[data-lease-col="monthly_total"] { width:7%; }
+.cpms-lease-list-table th[data-lease-col="contract_period"],
+.cpms-lease-list-table td[data-lease-col="contract_period"] { width:9%; }
+.cpms-lease-list-table th[data-lease-col="auto_transfer_day"],
+.cpms-lease-list-table td[data-lease-col="auto_transfer_day"],
+.cpms-lease-list-table th[data-lease-col="employee_name"],
+.cpms-lease-list-table td[data-lease-col="employee_name"] { width:6%; }
+.cpms-lease-list-table th[data-lease-col="payment_method"],
+.cpms-lease-list-table td[data-lease-col="payment_method"] { width:7%; }
+.cpms-lease-list-table th[data-lease-col="actions"],
+.cpms-lease-list-table td[data-lease-col="actions"] { width:11%; }
+.cpms-lease-list-table td[data-lease-col="actions"] { overflow:visible; }
+</style>
+
 <div class="bg-white border border-gray-200 rounded-2xl p-4">
-  <div class="flex flex-wrap items-start justify-between gap-3">
-    <div>
-      <div class="font-extrabold text-gray-900">임대차 엑셀 업로드</div>
-      <div class="text-sm text-gray-500 mt-1">법인임대차 관리대장 .xlsx 양식을 적용연도 월별 데이터로 반영합니다.</div>
-    </div>
-    <div class="px-3 py-2 rounded-xl border <?php echo $canEditCompanyOverhead ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'; ?> text-sm font-bold">
-      <?php echo $canEditCompanyOverhead ? '업로드 가능' : '조회 전용'; ?>
-    </div>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div class="font-extrabold text-gray-900">임대차 관리</div>
+    <?php if ($canEditCompanyOverhead): ?>
+      <div class="flex flex-wrap gap-2">
+        <button type="button" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold" data-modal-open="leaseForm">신규추가</button>
+        <button type="button" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold" data-modal-open="leaseUpload">엑셀 업로드</button>
+        <?php if ($isLeaseEditing): ?>
+          <a href="?r=<?php echo urlencode('관리'); ?>&tab=company_overhead&oh=lease" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold">수정 취소</a>
+        <?php endif; ?>
+      </div>
+    <?php else: ?>
+      <div class="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 text-slate-600 text-sm font-bold">조회 전용</div>
+    <?php endif; ?>
   </div>
-  <?php if ($canEditCompanyOverhead): ?>
-    <form method="post" action="?r=management/lease_upload_preview" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end mt-4">
-      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">적용연도</span>
-        <input type="number" name="apply_year" min="2000" max="2100" value="<?php echo h((string)$filters['year']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-      </label>
-      <label class="block text-sm font-bold text-gray-700">
-        <span class="block mb-2">적용 시작월</span>
-        <select name="apply_month" class="w-full px-3 py-3 rounded-xl border border-gray-300">
-          <?php for ($am = 1; $am <= 12; $am++): ?>
-            <option value="<?php echo $am; ?>" <?php echo ((int)$leaseApplyMonth === $am) ? 'selected' : ''; ?>><?php echo sprintf('%02d', $am); ?></option>
-          <?php endfor; ?>
-        </select>
-      </label>
-      <label class="block text-sm font-bold text-gray-700 md:col-span-2">
-        <span class="block mb-2">임대차 엑셀 파일</span>
-        <input type="file" name="lease_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="w-full px-3 py-3 rounded-xl border border-gray-300 bg-white">
-      </label>
-      <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">업로드 미리보기</button>
-    </form>
-  <?php else: ?>
-    <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-bold">조회 권한만 있어 엑셀 업로드는 사용할 수 없습니다.</div>
+  <?php if (!$canEditCompanyOverhead): ?>
+    <div class="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-600 font-bold">조회 권한만 있어 등록/수정/삭제와 엑셀 업로드는 사용할 수 없습니다.</div>
   <?php endif; ?>
 </div>
+
+<?php if ($canEditCompanyOverhead): ?>
+<div id="modal-leaseUpload" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/40" data-modal-close="leaseUpload"></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="w-full max-w-3xl bg-white rounded-3xl p-6" style="max-height:90vh;overflow-y:auto;position:relative;">
+      <button type="button" class="absolute right-4 top-4 px-3 py-1 border rounded-xl" data-modal-close="leaseUpload">닫기</button>
+      <div class="font-extrabold text-gray-900">임대차 엑셀 업로드</div>
+      <form method="post" action="?r=management/lease_upload_preview" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-5 gap-3 items-end mt-4">
+        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+        <label class="block text-sm font-bold text-gray-700">
+          <span class="block mb-2">적용연도</span>
+          <input type="number" name="apply_year" min="2000" max="2100" value="<?php echo h((string)$filters['year']); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300">
+        </label>
+        <label class="block text-sm font-bold text-gray-700">
+          <span class="block mb-2">적용 시작월</span>
+          <select name="apply_month" class="w-full px-3 py-3 rounded-xl border border-gray-300">
+            <?php for ($am = 1; $am <= 12; $am++): ?>
+              <option value="<?php echo $am; ?>" <?php echo ((int)$leaseApplyMonth === $am) ? 'selected' : ''; ?>><?php echo sprintf('%02d', $am); ?></option>
+            <?php endfor; ?>
+          </select>
+        </label>
+        <label class="block text-sm font-bold text-gray-700 md:col-span-2">
+          <span class="block mb-2">임대차 엑셀 파일</span>
+          <input type="file" name="lease_file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="w-full px-3 py-3 rounded-xl border border-gray-300 bg-white">
+        </label>
+        <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold">업로드 미리보기</button>
+      </form>
+    </div>
+  </div>
+</div>
+<?php endif; ?>
 
 <?php if (is_array($leasePreview)): ?>
   <?php
@@ -140,11 +191,19 @@ function cpms_overhead_lease_form_id($row) {
   <div class="bg-red-50 border border-red-200 rounded-2xl p-4 text-red-700 font-bold">미리보기 세션이 만료되었거나 찾을 수 없습니다. 다시 업로드해주세요.</div>
 <?php endif; ?>
 
-<div class="bg-white border border-gray-200 rounded-2xl p-4">
+<?php if ($canEditCompanyOverhead): ?>
+<div id="modal-leaseForm" class="fixed inset-0 z-50 <?php echo $isLeaseEditing ? '' : 'hidden'; ?>">
+  <div class="absolute inset-0 bg-black/40" data-modal-close="leaseForm"></div>
+  <div class="absolute inset-0 flex items-center justify-center p-4">
+    <div class="w-full max-w-6xl bg-white rounded-3xl p-6" style="max-height:90vh;overflow-y:auto;position:relative;">
+      <?php if ($isLeaseEditing): ?>
+        <a href="?r=<?php echo urlencode('관리'); ?>&tab=company_overhead&oh=lease" class="absolute right-4 top-4 px-3 py-1 border rounded-xl">닫기</a>
+      <?php else: ?>
+        <button type="button" class="absolute right-4 top-4 px-3 py-1 border rounded-xl" data-modal-close="leaseForm">닫기</button>
+      <?php endif; ?>
   <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
     <div>
-      <div class="font-extrabold text-gray-900">임대차 관리</div>
-      <div class="text-sm text-gray-500">숙소와 사무실 임대차를 같은 양식으로 관리합니다.</div>
+      <div class="font-extrabold text-gray-900"><?php echo $isLeaseEditing ? '임대차 수정' : '임대차 신규추가'; ?></div>
     </div>
     <?php if ($isLeaseEditing): ?>
       <a href="?r=<?php echo urlencode('관리'); ?>&tab=company_overhead&oh=lease" class="px-3 py-2 rounded-xl border border-gray-300 text-sm font-bold">수정 취소</a>
@@ -240,31 +299,40 @@ function cpms_overhead_lease_form_id($row) {
       <button type="submit" class="px-5 py-3 rounded-xl bg-emerald-700 text-white font-extrabold"><?php echo $isLeaseEditing ? '수정 저장' : '신규 추가'; ?></button>
     </form>
   <?php endif; ?>
+    </div>
+  </div>
 </div>
+<?php endif; ?>
 
 <div class="bg-white border border-gray-200 rounded-2xl p-4">
-  <div class="font-extrabold text-gray-900 mb-3">임대차 목록</div>
+  <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
+    <div class="font-extrabold text-gray-900">임대차 목록</div>
+    <div class="flex flex-wrap gap-2">
+      <button type="button" class="px-3 py-2 rounded-xl border border-gray-300 text-sm font-bold" data-lease-cols="hide">전체 숨기기</button>
+      <button type="button" class="px-3 py-2 rounded-xl border border-gray-300 text-sm font-bold" data-lease-cols="show">전체 보이기</button>
+    </div>
+  </div>
   <div class="cpms-responsive-table-wrap">
-    <table class="cpms-responsive-table text-xs">
+    <table class="cpms-responsive-table cpms-lease-list-table text-xs">
       <thead>
         <tr>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">연월</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">구분</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">주소</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">정</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">부</th>
-          <th class="text-right p-3 border-b border-gray-200 bg-gray-50">보증금</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">지급일</th>
-          <th class="text-right p-3 border-b border-gray-200 bg-gray-50">월세(vat포함)</th>
-          <th class="text-right p-3 border-b border-gray-200 bg-gray-50">관리비</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">계약기간</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">사무실 복구의무</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">임대인</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">자동이체일</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">입금방법</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">사용 직원</th>
-          <th class="text-right p-3 border-b border-gray-200 bg-gray-50">월 합계</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50">관리</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="year_month">연월</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="title">구분</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="address">주소</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="manager_primary">정</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="manager_secondary">부</th>
+          <th class="text-right p-3 border-b border-gray-200 bg-gray-50" data-lease-col="deposit">보증금</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="payment_due">지급일</th>
+          <th class="text-right p-3 border-b border-gray-200 bg-gray-50" data-lease-col="amount">월세(vat포함)</th>
+          <th class="text-right p-3 border-b border-gray-200 bg-gray-50" data-lease-col="maintenance_fee">관리비</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="contract_period">계약기간</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="restoration_obligation">사무실 복구의무</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="landlord">임대인</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="auto_transfer_day">자동이체일</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="payment_method">입금방법</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="employee_name">사용 직원</th>
+          <th class="text-right p-3 border-b border-gray-200 bg-gray-50" data-lease-col="monthly_total">월 합계</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="actions">관리</th>
         </tr>
       </thead>
       <tbody>
@@ -279,35 +347,35 @@ function cpms_overhead_lease_form_id($row) {
             $rowFormId = cpms_overhead_lease_form_id($row);
           ?>
           <tr>
-            <td class="p-3 border-b border-gray-100"><?php echo h($rowYear . '/' . $rowMonth); ?></td>
-            <td class="p-3 border-b border-gray-100 font-bold text-gray-900" data-wrap="1"><?php echo h(cpms_overhead_lease_val($row, 'title')); ?></td>
-            <td class="p-3 border-b border-gray-100" data-wrap="1"><?php echo h(cpms_overhead_lease_val($row, 'address')); ?></td>
-            <td class="p-3 border-b border-gray-100"><?php echo h(cpms_overhead_lease_val($row, 'manager_primary')); ?></td>
-            <td class="p-3 border-b border-gray-100"><?php echo h(cpms_overhead_lease_val($row, 'manager_secondary')); ?></td>
-            <td class="p-3 border-b border-gray-100 text-right"><?php echo h(cpms_overhead_lease_money_label(cpms_overhead_lease_val($row, 'deposit'))); ?></td>
-            <td class="p-3 border-b border-gray-100"><?php echo h(cpms_overhead_lease_val($row, 'payment_due')); ?></td>
-            <td class="p-3 border-b border-gray-100 text-right font-bold"><?php echo h(cpms_overhead_lease_money_label(cpms_overhead_lease_val($row, 'amount'))); ?></td>
-            <td class="p-3 border-b border-gray-100 text-right">
+            <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-lease-col="year_month"><?php echo h($rowYear . '/' . $rowMonth); ?></td>
+            <td class="p-3 border-b border-gray-100 font-bold text-gray-900 cpms-lease-toggle-col hidden" data-wrap="1" data-lease-col="title"><?php echo h(cpms_overhead_lease_val($row, 'title')); ?></td>
+            <td class="p-3 border-b border-gray-100" data-wrap="1" data-lease-col="address" title="<?php echo h(cpms_overhead_lease_val($row, 'address')); ?>"><?php echo h(cpms_overhead_lease_val($row, 'address')); ?></td>
+            <td class="p-3 border-b border-gray-100" data-lease-col="manager_primary"><?php echo h(cpms_overhead_lease_val($row, 'manager_primary')); ?></td>
+            <td class="p-3 border-b border-gray-100" data-lease-col="manager_secondary"><?php echo h(cpms_overhead_lease_val($row, 'manager_secondary')); ?></td>
+            <td class="p-3 border-b border-gray-100 text-right" data-lease-col="deposit"><?php echo h(cpms_overhead_lease_money_label(cpms_overhead_lease_val($row, 'deposit'))); ?></td>
+            <td class="p-3 border-b border-gray-100" data-lease-col="payment_due"><?php echo h(cpms_overhead_lease_val($row, 'payment_due')); ?></td>
+            <td class="p-3 border-b border-gray-100 text-right font-bold" data-lease-col="amount"><?php echo h(cpms_overhead_lease_money_label(cpms_overhead_lease_val($row, 'amount'))); ?></td>
+            <td class="p-3 border-b border-gray-100 text-right" data-lease-col="maintenance_fee">
               <?php if ($canEditCompanyOverhead): ?>
                 <input form="<?php echo h($rowFormId); ?>" type="text" name="maintenance_fee" value="<?php echo h(cpms_overhead_lease_money_input(cpms_overhead_lease_val($row, 'maintenance_fee'))); ?>" class="w-28 px-2 py-2 rounded-lg border border-gray-300 text-right">
               <?php else: ?>
                 <?php echo h(cpms_overhead_lease_money_label(cpms_overhead_lease_val($row, 'maintenance_fee'))); ?>
               <?php endif; ?>
             </td>
-            <td class="p-3 border-b border-gray-100">
+            <td class="p-3 border-b border-gray-100" data-lease-col="contract_period">
               <?php if ($canEditCompanyOverhead): ?>
                 <input form="<?php echo h($rowFormId); ?>" type="text" name="contract_period" value="<?php echo h(cpms_overhead_lease_val($row, 'contract_period')); ?>" class="w-40 px-2 py-2 rounded-lg border border-gray-300">
               <?php else: ?>
                 <?php echo h(cpms_overhead_lease_val($row, 'contract_period')); ?>
               <?php endif; ?>
             </td>
-            <td class="p-3 border-b border-gray-100" data-wrap="1"><?php echo h(cpms_overhead_lease_val($row, 'restoration_obligation')); ?></td>
-            <td class="p-3 border-b border-gray-100"><?php echo h(cpms_overhead_lease_val($row, 'landlord')); ?></td>
-            <td class="p-3 border-b border-gray-100"><?php echo h(cpms_overhead_lease_val($row, 'auto_transfer_day')); ?></td>
-            <td class="p-3 border-b border-gray-100" data-wrap="1"><?php echo h(cpms_overhead_lease_val($row, 'payment_method')); ?></td>
-            <td class="p-3 border-b border-gray-100" data-wrap="1"><?php echo h(cpms_overhead_lease_val($row, 'employee_name')); ?></td>
-            <td class="p-3 border-b border-gray-100 text-right font-extrabold"><?php echo h(cpms_overhead_view_money(cpms_overhead_lease_total($row))); ?></td>
-            <td class="p-3 border-b border-gray-100">
+            <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-wrap="1" data-lease-col="restoration_obligation"><?php echo h(cpms_overhead_lease_val($row, 'restoration_obligation')); ?></td>
+            <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-lease-col="landlord"><?php echo h(cpms_overhead_lease_val($row, 'landlord')); ?></td>
+            <td class="p-3 border-b border-gray-100" data-lease-col="auto_transfer_day"><?php echo h(cpms_overhead_lease_val($row, 'auto_transfer_day')); ?></td>
+            <td class="p-3 border-b border-gray-100" data-wrap="1" data-lease-col="payment_method"><?php echo h(cpms_overhead_lease_val($row, 'payment_method')); ?></td>
+            <td class="p-3 border-b border-gray-100" data-wrap="1" data-lease-col="employee_name"><?php echo h(cpms_overhead_lease_val($row, 'employee_name')); ?></td>
+            <td class="p-3 border-b border-gray-100 text-right font-extrabold" data-lease-col="monthly_total"><?php echo h(cpms_overhead_view_money(cpms_overhead_lease_total($row))); ?></td>
+            <td class="p-3 border-b border-gray-100" data-lease-col="actions">
               <?php if ($canEditCompanyOverhead): ?>
                 <div class="flex flex-wrap gap-2">
                   <form id="<?php echo h($rowFormId); ?>" method="post" action="?r=management/overhead_save">
@@ -341,3 +409,21 @@ function cpms_overhead_lease_form_id($row) {
     </table>
   </div>
 </div>
+
+<script>
+(function () {
+  function setLeaseColumns(show) {
+    var cells = document.querySelectorAll('.cpms-lease-toggle-col');
+    for (var i = 0; i < cells.length; i++) {
+      if (show) cells[i].classList.remove('hidden');
+      else cells[i].classList.add('hidden');
+    }
+  }
+  var buttons = document.querySelectorAll('[data-lease-cols]');
+  for (var j = 0; j < buttons.length; j++) {
+    buttons[j].onclick = function () {
+      setLeaseColumns((this.getAttribute('data-lease-cols') || '') === 'show');
+    };
+  }
+})();
+</script>

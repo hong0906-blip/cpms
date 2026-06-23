@@ -55,7 +55,6 @@ if (count($issues) > 0) {
     <div class="flex items-center justify-between mb-4">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">이슈</h3>
-            <div class="text-sm text-gray-600 mt-1">공정표 변경/기간 연장/공사중지 등 이슈를 등록해 공유합니다.</div>
         </div>
         <?php if ($canEditIssue): ?>
             <button type="button" class="px-4 py-2 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-extrabold hover:bg-rose-100" data-modal-open="issueAdd">
@@ -118,5 +117,4 @@ if (count($issues) > 0) {
         </div>
     <?php endif; ?>
 
-    <div class="mt-4 text-xs text-gray-500">* 이슈 상태 변경은 기존 로직(임원/등록자)에서 처리됩니다.</div>
 </div>

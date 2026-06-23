@@ -55,7 +55,7 @@ try {
     $tasks = $st->fetchAll();
 } catch (Exception $e) { $tasks = array(); }
 
-// 작업내용 목록/상세 (작업내용 레이어 추가)
+// 작업내용 목록/상세
 $workItems = array();
 $workMap = array();
 $workDetailMap = array();
@@ -453,9 +453,6 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     <div class="flex items-center justify-between mb-4">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">공정표</h3>
-            <div class="text-sm text-gray-600 mt-1">프로젝트 기간에 맞춰 공정을 배치하고, 일정 변경 시 이슈등록으로 공유합니다.</div>
-            <div class="text-xs text-gray-500 mt-1">공정표 기준 기간: <b><?php echo h(date('Y-m-d', $rangeStartTs)); ?></b> ~ <b><?php echo h(date('Y-m-d', $rangeEndTs)); ?></b></div>
-            <div class="text-xs text-blue-700 mt-1 font-bold">자동 완료수량은 공정 시작일부터 오늘 날짜까지 포함하여 계산됩니다. 수동 수정한 날짜는 자동 계산으로 덮어쓰지 않습니다.</div>
         </div>
 
         <div class="flex items-center gap-2">
@@ -631,7 +628,6 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
             <?php endforeach; ?>
         </div>
 
-              <div class="text-xs text-gray-500 mt-3">공정표(보기) 탭에서 파란색 공정 바를 클릭하면 작업 상세(내역서 묶음)를 확인할 수 있습니다.</div>
 
         <div id="ganttWorkDetail" class="mt-4 p-4 rounded-2xl border border-gray-200 bg-gray-50 hidden">
             <div class="text-sm font-extrabold text-gray-900" id="ganttWorkDetailTitle"></div>
@@ -948,7 +944,6 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                             <input type="checkbox" id="ganttAutoDistributionToggle" class="rounded border-gray-300" checked>
                             자동 분배 제안 사용
                         </label>
-                        <div class="text-xs text-gray-500">자동 완료수량은 공정 시작일부터 오늘 날짜까지 포함하여 계산됩니다. 수동 수정한 날짜는 자동 계산으로 덮어쓰지 않습니다.</div>
                     </div>
                     <div id="ganttShiftInfo" class="text-xs text-gray-600">이동 범위: 오늘 ~ 종료일 (과거 데이터 이동 금지)</div>
                     <?php if ($canEdit): ?>

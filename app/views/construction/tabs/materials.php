@@ -367,7 +367,6 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
     <div class="flex flex-col lg:flex-row lg:items-end gap-3 justify-between">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">자재구입비</h3>
-            <div class="text-sm text-gray-600 mt-1">월별 양식 출력 + 월별 입력</div>
         </div>
 
         <form method="get" action="" class="flex items-end gap-2">
@@ -471,7 +470,6 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             <div class="border border-gray-200 rounded-2xl p-4">
                 <div class="flex flex-col gap-1 mb-4">
                     <div class="text-lg font-extrabold">월별 자재구입비 엑셀 업로드</div>
-                    <div class="text-xs text-gray-600">선택한 월 기준으로 전월 26일 ~ 당월 25일 자료가 등록됩니다.</div>
                 </div>
 
                 <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save" enctype="multipart/form-data" class="space-y-3">
