@@ -212,7 +212,7 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
     </div>
 </div>
 
-<?php cpms_render_dashboard_notice_board($pdo); ?>
+<?php cpms_render_dashboard_notice_modal(); ?>
 
 <?php
 require_once __DIR__ . '/../attendance/common.php';

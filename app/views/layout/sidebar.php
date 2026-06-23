@@ -4,6 +4,7 @@
  */
 
 $dashboardMenu = '대시보드';
+$noticeMenu = '공지사항';
 $approvalMenu = '전자결재';
 $workMenu = '공무';
 $manageMenu = '관리';
@@ -64,6 +65,7 @@ $userDept = implode(' · ', $parts);
 
 $menuItems = array(
   array('id'=>$dashboardMenu,'label'=>$dashboardMenu,'icon'=>'layout-dashboard','gradient'=>'from-blue-500 to-cyan-500','iconBg'=>'bg-gradient-to-br from-blue-100 to-cyan-100','iconColor'=>'text-blue-600','hoverShadow'=>'hover:shadow-blue-200'),
+  array('id'=>$noticeMenu,'label'=>$noticeMenu,'icon'=>'megaphone','gradient'=>'from-sky-500 to-blue-500','iconBg'=>'bg-gradient-to-br from-sky-100 to-blue-100','iconColor'=>'text-sky-600','hoverShadow'=>'hover:shadow-sky-200'),
   array('id'=>$approvalMenu,'label'=>$approvalMenu,'icon'=>'file-check','gradient'=>'from-indigo-500 to-purple-500','iconBg'=>'bg-gradient-to-br from-indigo-100 to-purple-100','iconColor'=>'text-indigo-600','hoverShadow'=>'hover:shadow-indigo-200'),
   array('id'=>$workMenu,'label'=>$workMenu,'icon'=>'scroll-text','gradient'=>'from-orange-500 to-amber-500','iconBg'=>'bg-gradient-to-br from-orange-100 to-amber-100','iconColor'=>'text-orange-600','hoverShadow'=>'hover:shadow-orange-200'),
   array('id'=>$manageMenu,'label'=>$manageMenu,'icon'=>'bar-chart-3','gradient'=>'from-emerald-500 to-teal-500','iconBg'=>'bg-gradient-to-br from-emerald-100 to-teal-100','iconColor'=>'text-emerald-600','hoverShadow'=>'hover:shadow-emerald-200'),
@@ -225,6 +227,7 @@ if ($selectedMenu === $dashboardMenu) {
   <?php
     $mobileNavItems = array(
       array('menu' => 'dashboard', 'label' => '대시보드', 'icon' => 'layout-dashboard', 'href' => ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee')),
+      array('menu' => 'notice', 'label' => '공지사항', 'icon' => 'megaphone', 'href' => '?r=' . rawurlencode('공지사항')),
       array('menu' => 'approval', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
       array('menu' => 'work', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_input'),
       array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status'),

@@ -80,6 +80,9 @@ if ($route === 'dashboard_employee') {
     $_SESSION['dashboardType'] = 'employee';
     $route = '대시보드';
 }
+if ($route === 'notice' || $route === 'notices') {
+    $route = '공지사항';
+}
 if ($route === 'safety_home') {
     $route = '안전/보건';
 }
@@ -515,7 +518,7 @@ if ($route === 'tasks/detail') {
     require_once __DIR__ . '/../app/views/tasks/detail.php';
     exit;
 }
-if ($route === 'dashboard_notice_save') {
+if ($route === 'notice_save' || $route === 'dashboard_notice_save') {
     require_once __DIR__ . '/../app/views/dashboard/notice_save.php';
     exit;
 }
@@ -876,6 +879,7 @@ if ($route === '관리' && isset($_GET['debug_route']) && (string)$_GET['debug_r
 //  화면 매핑
 // ==========================
 $views = array(
+    '공지사항'    => 'notices/index',
     '공무'      => 'project/index',
     '공사'      => 'construction/index',
     '안전/보건' => 'safety/index',

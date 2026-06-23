@@ -74,7 +74,6 @@ function cpms_dashboard_notice_new_id() {
 if (!function_exists('cpms_dashboard_notice_flash_set')) {
 function cpms_dashboard_notice_flash_set($type, $message) {
     $_SESSION['_dashboard_notice_flash'] = array('type' => (string)$type, 'message' => (string)$message);
-    if (function_exists('flash_set')) flash_set($type, $message);
 }}
 
 if (!function_exists('cpms_dashboard_notice_flash_get')) {
@@ -92,7 +91,38 @@ function cpms_dashboard_notice_can_manage() {
     if (!class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return false;
     if (\App\Core\Auth::isMaster()) return true;
     if (\App\Core\Auth::userRole() === 'executive') return true;
-    if (method_exists('App\\Core\\Auth', 'canManageEmployees') && \App\Core\Auth::canManageEmployees()) return true;
+
+    $dept = trim((string)\App\Core\Auth::userDepartment());
+    $dept = str_replace(array(' ', "\t", "\r", "\n"), '', $dept);
+    $managementDepts = array(
+        urldecode('%EA%B4%80%EB%A6%AC'),
+        urldecode('%EA%B4%80%EB%A6%AC%EB%B6%80'),
+        urldecode('%EA%B4%80%EB%A6%AC%ED%8C%80')
+    );
+    if (in_array($dept, $managementDepts, true)) return true;
+
+    $roleText = trim((string)\App\Core\Auth::userRole());
+    $positionText = method_exists('App\\Core\\Auth', 'userPosition') ? trim((string)\App\Core\Auth::userPosition()) : '';
+    $checkText = $roleText . ' ' . $positionText;
+    $checkText = str_replace(array(' ', "\t", "\r", "\n", '-', '_'), '', $checkText);
+    if (function_exists('mb_strtolower')) $checkText = mb_strtolower($checkText, 'UTF-8');
+    else $checkText = strtolower($checkText);
+
+    $allowedWords = array(
+        urldecode('%EB%8C%80%ED%91%9C'),
+        urldecode('%EB%B6%80%EC%82%AC%EC%9E%A5'),
+        'ceo',
+        'president',
+        'vicepresident',
+        'vp'
+    );
+    foreach ($allowedWords as $word) {
+        $word = str_replace(array(' ', "\t", "\r", "\n", '-', '_'), '', (string)$word);
+        if (function_exists('mb_strtolower')) $word = mb_strtolower($word, 'UTF-8');
+        else $word = strtolower($word);
+        if ($word !== '' && strpos($checkText, $word) !== false) return true;
+    }
+
     return false;
 }}
 
@@ -212,9 +242,8 @@ if (!function_exists('cpms_render_dashboard_notice_board')) {
 function cpms_render_dashboard_notice_board($pdo) {
     $canManage = cpms_dashboard_notice_can_manage();
     $items = cpms_dashboard_notice_sorted_items($canManage);
-    $activeItems = cpms_dashboard_notice_sorted_items(false);
     $returnUrl = cpms_dashboard_notice_return_url();
-    $actionUrl = base_url() . '/?r=dashboard_notice_save';
+    $actionUrl = base_url() . '/?r=notice_save';
     $noticeFlash = cpms_dashboard_notice_flash_get();
     ?>
     <div id="cpmsDashboardNoticeBoard" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
@@ -367,43 +396,6 @@ function cpms_render_dashboard_notice_board($pdo) {
         <?php endif; ?>
     </div>
 
-    <?php if (count($activeItems) > 0): ?>
-        <div id="modal-dashboardNoticeAuto" class="fixed inset-0 z-50 hidden" data-dashboard-notice-auto="1">
-            <div class="absolute inset-0 bg-black/45" data-dashboard-notice-auto-close></div>
-            <div class="absolute inset-0 flex items-center justify-center p-4">
-                <div class="w-full max-w-3xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
-                    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
-                        <div>
-                            <div class="text-2xl font-extrabold text-gray-900"><?php echo h(cpms_dashboard_notice_label('notice')); ?></div>
-                            <div class="text-sm text-gray-500 mt-1"><?php echo h(cpms_dashboard_notice_label('recent')); ?></div>
-                        </div>
-                        <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-dashboard-notice-auto-close><?php echo h(cpms_dashboard_notice_label('close')); ?></button>
-                    </div>
-                    <div class="p-5 md:p-6 overflow-y-auto max-h-[66vh] space-y-4">
-                        <?php foreach ($activeItems as $notice): ?>
-                            <div class="rounded-2xl border border-gray-200 bg-slate-50 p-4">
-                                <div class="flex flex-wrap items-center gap-2">
-                                    <?php if ((int)$notice['is_pinned'] === 1): ?>
-                                        <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 text-xs font-extrabold">
-                                            <i data-lucide="pin" class="w-3 h-3"></i><?php echo h(cpms_dashboard_notice_label('pinned')); ?>
-                                        </span>
-                                    <?php endif; ?>
-                                    <div class="text-lg font-extrabold text-gray-900"><?php echo h(isset($notice['title']) ? $notice['title'] : ''); ?></div>
-                                </div>
-                                <div class="text-xs text-gray-500 mt-2"><?php echo h(cpms_dashboard_notice_meta($notice)); ?></div>
-                                <div class="mt-4 text-sm leading-7 text-gray-700 whitespace-normal"><?php echo nl2br(h(isset($notice['content']) ? $notice['content'] : '')); ?></div>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                    <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div class="text-xs text-gray-500"><?php echo h(cpms_dashboard_notice_label('today_hidden')); ?></div>
-                        <button type="button" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold" data-dashboard-notice-auto-close><?php echo h(cpms_dashboard_notice_label('close')); ?></button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    <?php endif; ?>
-
     <div id="modal-dashboardNoticeDetail" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-black/45" data-dashboard-notice-detail-close></div>
         <div class="absolute inset-0 flex items-center justify-center p-4">
@@ -422,38 +414,12 @@ function cpms_render_dashboard_notice_board($pdo) {
 
     <script>
     (function(){
-        var autoModal = document.getElementById('modal-dashboardNoticeAuto');
         var detailModal = document.getElementById('modal-dashboardNoticeDetail');
-        var storageKey = 'cpms_dashboard_notice_closed_until';
         var deleteMessage = <?php echo json_encode(cpms_dashboard_notice_label('confirm_delete')); ?>;
         var editSaveText = <?php echo json_encode(cpms_dashboard_notice_label('edit_save')); ?>;
         var saveText = <?php echo json_encode(cpms_dashboard_notice_label('save')); ?>;
         var newNoticeText = <?php echo json_encode(cpms_dashboard_notice_label('new_notice')); ?>;
 
-        function endOfTodayTime() {
-            var now = new Date();
-            return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
-        }
-        function shouldShowAuto() {
-            try {
-                var raw = window.localStorage ? localStorage.getItem(storageKey) : '';
-                var until = raw ? parseInt(raw, 10) : 0;
-                if (until && until >= new Date().getTime()) return false;
-            } catch (e) {}
-            return true;
-        }
-        function closeAuto() {
-            if (autoModal) autoModal.classList.add('hidden');
-            try {
-                if (window.localStorage) localStorage.setItem(storageKey, String(endOfTodayTime()));
-            } catch (e) {}
-            document.body.classList.remove('overflow-hidden');
-        }
-        function openAuto() {
-            if (!autoModal || !shouldShowAuto()) return;
-            autoModal.classList.remove('hidden');
-            document.body.classList.add('overflow-hidden');
-        }
         function closeDetail() {
             if (detailModal) detailModal.classList.add('hidden');
             document.body.classList.remove('overflow-hidden');
@@ -473,14 +439,6 @@ function cpms_render_dashboard_notice_board($pdo) {
             if (detailBody) detailBody.innerHTML = body ? body.innerHTML : '';
             detailModal.classList.remove('hidden');
             document.body.classList.add('overflow-hidden');
-        }
-
-        var autoCloseButtons = document.querySelectorAll('[data-dashboard-notice-auto-close]');
-        for (var i = 0; i < autoCloseButtons.length; i++) {
-            autoCloseButtons[i].addEventListener('click', function(e){
-                e.preventDefault();
-                closeAuto();
-            });
         }
 
         var detailCloseButtons = document.querySelectorAll('[data-dashboard-notice-detail-close]');
@@ -552,11 +510,93 @@ function cpms_render_dashboard_notice_board($pdo) {
 
         document.addEventListener('keydown', function(e){
             if (e.key === 'Escape') {
-                if (autoModal && !autoModal.classList.contains('hidden')) closeAuto();
                 if (detailModal && !detailModal.classList.contains('hidden')) closeDetail();
             }
         });
 
+        if (window.lucide) { try { lucide.createIcons(); } catch (ignore) {} }
+    })();
+    </script>
+    <?php
+}}
+
+if (!function_exists('cpms_render_dashboard_notice_modal')) {
+function cpms_render_dashboard_notice_modal() {
+    $activeItems = cpms_dashboard_notice_sorted_items(false);
+    if (count($activeItems) === 0) return;
+    ?>
+    <div id="modal-dashboardNoticeAuto" class="fixed inset-0 z-50 hidden" data-dashboard-notice-auto="1">
+        <div class="absolute inset-0 bg-black/45" data-dashboard-notice-auto-close></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="w-full max-w-3xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
+                <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                    <div>
+                        <div class="text-2xl font-extrabold text-gray-900"><?php echo h(cpms_dashboard_notice_label('notice')); ?></div>
+                        <div class="text-sm text-gray-500 mt-1"><?php echo h(cpms_dashboard_notice_label('recent')); ?></div>
+                    </div>
+                    <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-dashboard-notice-auto-close><?php echo h(cpms_dashboard_notice_label('close')); ?></button>
+                </div>
+                <div class="p-5 md:p-6 overflow-y-auto max-h-[66vh] space-y-4">
+                    <?php foreach ($activeItems as $notice): ?>
+                        <div class="rounded-2xl border border-gray-200 bg-slate-50 p-4">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <?php if ((int)$notice['is_pinned'] === 1): ?>
+                                    <span class="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 text-xs font-extrabold">
+                                        <i data-lucide="pin" class="w-3 h-3"></i><?php echo h(cpms_dashboard_notice_label('pinned')); ?>
+                                    </span>
+                                <?php endif; ?>
+                                <div class="text-lg font-extrabold text-gray-900"><?php echo h(isset($notice['title']) ? $notice['title'] : ''); ?></div>
+                            </div>
+                            <div class="text-xs text-gray-500 mt-2"><?php echo h(cpms_dashboard_notice_meta($notice)); ?></div>
+                            <div class="mt-4 text-sm leading-7 text-gray-700 whitespace-normal"><?php echo nl2br(h(isset($notice['content']) ? $notice['content'] : '')); ?></div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+                <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div class="text-xs text-gray-500"><?php echo h(cpms_dashboard_notice_label('today_hidden')); ?></div>
+                    <button type="button" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold" data-dashboard-notice-auto-close><?php echo h(cpms_dashboard_notice_label('close')); ?></button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function(){
+        var autoModal = document.getElementById('modal-dashboardNoticeAuto');
+        var storageKey = 'cpms_dashboard_notice_closed_until';
+        function endOfTodayTime() {
+            var now = new Date();
+            return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+        }
+        function shouldShowAuto() {
+            try {
+                var raw = window.localStorage ? localStorage.getItem(storageKey) : '';
+                var until = raw ? parseInt(raw, 10) : 0;
+                if (until && until >= new Date().getTime()) return false;
+            } catch (e) {}
+            return true;
+        }
+        function closeAuto() {
+            if (autoModal) autoModal.classList.add('hidden');
+            try {
+                if (window.localStorage) localStorage.setItem(storageKey, String(endOfTodayTime()));
+            } catch (e) {}
+            document.body.classList.remove('overflow-hidden');
+        }
+        function openAuto() {
+            if (!autoModal || !shouldShowAuto()) return;
+            autoModal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+        }
+        var closeButtons = document.querySelectorAll('[data-dashboard-notice-auto-close]');
+        for (var i = 0; i < closeButtons.length; i++) {
+            closeButtons[i].addEventListener('click', function(e){
+                e.preventDefault();
+                closeAuto();
+            });
+        }
+        document.addEventListener('keydown', function(e){
+            if (e.key === 'Escape' && autoModal && !autoModal.classList.contains('hidden')) closeAuto();
+        });
         openAuto();
         if (window.lucide) { try { lucide.createIcons(); } catch (ignore) {} }
     })();

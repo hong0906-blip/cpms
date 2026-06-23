@@ -10,8 +10,8 @@ if (!\App\Core\Auth::check()) {
     cpms_redirect_to_portal_login(cpms_current_absolute_url());
 }
 
-$returnUrl = isset($_POST['return_url']) ? (string)$_POST['return_url'] : '?r=dashboard';
-$returnUrl = cpms_safe_internal_redirect_url($returnUrl, '?r=dashboard');
+$returnUrl = isset($_POST['return_url']) ? (string)$_POST['return_url'] : '?r=notices';
+$returnUrl = cpms_safe_internal_redirect_url($returnUrl, '?r=notices');
 
 if (!cpms_dashboard_notice_can_manage()) {
     cpms_dashboard_notice_flash_set('error', cpms_dashboard_notice_label('forbidden'));

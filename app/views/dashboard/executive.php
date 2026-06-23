@@ -10,7 +10,6 @@ require_once __DIR__ . '/../construction/partials/equipment_gongsu_approval_help
 require_once __DIR__ . '/../tasks/dashboard_sections.php';
 require_once __DIR__ . '/../attendance/common.php';
 require_once __DIR__ . '/../approval/_common.php';
-require_once __DIR__ . '/notice_board.php';
 
 use App\Core\Db;
 
@@ -362,8 +361,6 @@ if ($pdo) {
         </div>
     </div>
 </div>
-
-<?php cpms_render_dashboard_notice_board($pdo); ?>
 
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type'] === 'success') ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'; ?>">
