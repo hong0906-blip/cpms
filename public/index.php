@@ -297,6 +297,10 @@ if ($route === 'project/monthly_deduction_delete') {
     require_once __DIR__ . '/../app/views/project/monthly_deduction_delete.php';
     exit;
 }
+if ($route === 'project/monthly_summary_remark_save') {
+    require_once __DIR__ . '/../app/views/project/monthly_summary_remark_save.php';
+    exit;
+}
 
 
 /**

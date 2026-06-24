@@ -24,11 +24,20 @@ function cpms_project_monthly_deduction_ensure_table($pdo) {
         return false;
     }
 }
+function cpms_project_monthly_deduction_return_url($route, $tab, $pid) {
+    $route = trim((string)$route);
+    $tab = trim((string)$tab);
+    if ($route !== '공무' && $route !== '공사') $route = '공무';
+    if ($tab === '') $tab = 'monthly_input';
+    return '?r=' . $route . '&tab=' . rawurlencode($tab) . '&pid=' . (int)$pid;
+}
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ?r=공무&tab=monthly_input'); exit; }
 if (!csrf_check(isset($_POST['_csrf'])?$_POST['_csrf']:'')) { flash_set('error','보안 토큰 오류'); header('Location: ?r=공무&tab=monthly_input'); exit; }
 $id=isset($_POST['id'])?(int)$_POST['id']:0; $pid=isset($_POST['pid'])?(int)$_POST['pid']:(isset($_POST['project_id'])?(int)$_POST['project_id']:0);
 $viewMonth=isset($_POST['view_month'])?trim((string)$_POST['view_month']):'';
-$redirect='?r=공무&tab=monthly_input&pid='.$pid;
+$returnRoute=isset($_POST['return_route'])?trim((string)$_POST['return_route']):'공무';
+$returnTab=isset($_POST['return_tab'])?trim((string)$_POST['return_tab']):'monthly_input';
+$redirect=cpms_project_monthly_deduction_return_url($returnRoute,$returnTab,$pid);
 if ($viewMonth === 'all' || preg_match('/^\d{4}-\d{2}$/',$viewMonth)) { $redirect .= '&view_month=' . rawurlencode($viewMonth); }
 if ($id>0) {
     try {

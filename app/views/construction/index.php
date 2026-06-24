@@ -111,6 +111,7 @@ $tabs = array(
     'labor'    => '노무비',
     'equipment'=> '장비',
     'materials'=> '자재구입비',
+    'monthly_input' => '투입비 상세',
     'issues'   => '이슈',
     'safety'   => '안전사고',
 );

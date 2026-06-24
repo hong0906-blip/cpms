@@ -2,9 +2,16 @@
 use App\Core\Db;
 
 $pdo = Db::pdo();
-$selectedProjectId = isset($_GET['pid']) ? (int)$_GET['pid'] : 0;
+$monthlyInputRoute = isset($cpmsMonthlyInputRoute) ? trim((string)$cpmsMonthlyInputRoute) : '공무';
+if ($monthlyInputRoute === '') $monthlyInputRoute = '공무';
+$monthlyInputTab = isset($cpmsMonthlyInputTab) ? trim((string)$cpmsMonthlyInputTab) : 'monthly_input';
+if ($monthlyInputTab === '') $monthlyInputTab = 'monthly_input';
+$monthlyInputFixedProjectId = isset($cpmsMonthlyInputSelectedProjectId) ? (int)$cpmsMonthlyInputSelectedProjectId : 0;
+$monthlyInputShowProjectFilter = isset($cpmsMonthlyInputShowProjectFilter) ? (bool)$cpmsMonthlyInputShowProjectFilter : true;
+$selectedProjectId = $monthlyInputFixedProjectId > 0 ? $monthlyInputFixedProjectId : (isset($_GET['pid']) ? (int)$_GET['pid'] : 0);
 $viewMonthParam = isset($_GET['view_month']) ? trim((string)$_GET['view_month']) : '';
 $monthlyProjects = array();
+$selectedProject = null;
 $allMonths = array();
 $displayMonths = array();
 $selectedViewMonth = '';
@@ -19,6 +26,9 @@ $workDateFallbackUsed = false;
 $salesDiagnostics = array();
 $laborDiagnostics = array();
 $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
+$monthlyInputDept = class_exists('App\\Core\\Auth') ? (string)\App\Core\Auth::userDepartment() : '';
+$monthlyInputRole = class_exists('App\\Core\\Auth') ? (string)\App\Core\Auth::userRole() : '';
+$canManageMonthlyDeductions = (class_exists('App\\Core\\Auth') && \App\Core\Auth::isMaster()) || $monthlyInputRole === 'executive' || $monthlyInputDept === '공무' || $monthlyInputDept === '관리' || $monthlyInputDept === '관리부';
 require_once __DIR__ . '/../construction/tabs/partials/sales_data_loader.php';
 require_once __DIR__ . '/../safety/safety_cost_helper.php';
 
@@ -672,15 +682,21 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 <div class="text-sm text-gray-700">등록된 프로젝트가 없습니다. [프로젝트 관리] 탭에서 신규 프로젝트를 먼저 생성해주세요.</div>
 <?php else: ?>
 <form method="get" class="cpms-monthly-filter mb-4 flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 rounded-2xl p-3">
-<input type="hidden" name="r" value="공무"><input type="hidden" name="tab" value="monthly_input">
+<input type="hidden" name="r" value="<?php echo h($monthlyInputRoute); ?>"><input type="hidden" name="tab" value="<?php echo h($monthlyInputTab); ?>">
+<?php if ($monthlyInputShowProjectFilter): ?>
 <div class="font-bold text-base">프로젝트 선택 :</div>
 <select name="pid" class="px-3 py-2 border rounded-xl min-w-[260px]"><?php foreach($monthlyProjects as $pp): ?><option value="<?php echo (int)$pp['id']; ?>" <?php echo ((int)$pp['id']===$selectedProjectId)?'selected':''; ?>><?php echo h($pp['name']); ?></option><?php endforeach; ?></select>
-<button type="submit" class="px-4 py-2 rounded-xl bg-amber-700 text-white">조회</button>
+<?php else: ?>
+<input type="hidden" name="pid" value="<?php echo (int)$selectedProjectId; ?>">
+<div class="font-bold text-base">현장 :</div>
+<div class="px-3 py-2 rounded-xl bg-white border border-amber-100 font-bold"><?php echo h(is_array($selectedProject) && isset($selectedProject['name']) ? $selectedProject['name'] : '-'); ?></div>
+<?php endif; ?>
 <div class="font-bold text-base ml-3">월 선택 :</div>
 <select name="view_month" class="px-3 py-2 border rounded-xl min-w-[160px]">
 <option value="all" <?php echo ($selectedViewMonth==='all')?'selected':''; ?>>전체보기</option>
 <?php foreach($allMonths as $ymOpt): ?><option value="<?php echo h($ymOpt); ?>" <?php echo ($selectedViewMonth===$ymOpt)?'selected':''; ?>><?php echo h(str_replace('-', '.', $ymOpt)); ?></option><?php endforeach; ?>
 </select>
+<button type="submit" class="px-4 py-2 rounded-xl bg-amber-700 text-white">조회</button>
 </form>
 <?php if (false): ?>
 <?php foreach($salesDiagnostics as $diag): ?><div class="mb-1 text-xs text-gray-700"><?php echo h($diag); ?></div><?php endforeach; ?>
@@ -758,6 +774,7 @@ if (!isset($row['내역_html']) && count($displayMonths) === 1 && isset($row['de
 </tbody></table>
 </div>
 
+<?php if ($canManageMonthlyDeductions): ?>
 <div class="cpms-monthly-deduction mt-4 p-3 border rounded-xl bg-gray-50">
 <div class="font-semibold mb-2">공제분 입력</div>
 <?php $deductionDefaultYm = $guideYm; if (!ym_valid($deductionDefaultYm) || !in_array($deductionDefaultYm, $allMonths, true)) { $deductionDefaultYm = (count($allMonths) > 0) ? $allMonths[count($allMonths)-1] : date('Y-m'); } ?>
@@ -765,6 +782,8 @@ if (!isset($row['내역_html']) && count($displayMonths) === 1 && isset($row['de
 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
 <input type="hidden" name="project_id" value="<?php echo (int)$selectedProjectId; ?>">
 <input type="hidden" name="view_month" value="<?php echo h($selectedViewMonth); ?>">
+<input type="hidden" name="return_route" value="<?php echo h($monthlyInputRoute); ?>">
+<input type="hidden" name="return_tab" value="<?php echo h($monthlyInputTab); ?>">
 <select name="ym" class="px-2 py-1 border rounded w-36">
 <?php foreach($allMonths as $deductYm): ?><option value="<?php echo h($deductYm); ?>" <?php echo ($deductYm===$deductionDefaultYm)?'selected':''; ?>><?php echo h(str_replace('-', '.', $deductYm)); ?></option><?php endforeach; ?>
 </select>
@@ -775,9 +794,10 @@ if (!isset($row['내역_html']) && count($displayMonths) === 1 && isset($row['de
 </form>
 <?php if (count($rowsBySection['공제분'])>0): ?><div class="mt-2 text-sm space-y-1"><?php foreach($rowsBySection['공제분'] as $d): ?>
 <div><?php echo h($d['내역']); ?> / <?php echo amount_fmt(row_total($d,$allMonths)); ?>
-<?php if (isset($d['id'])): ?><form method="post" action="?r=project/monthly_deduction_delete" class="inline"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="id" value="<?php echo (int)$d['id']; ?>"><input type="hidden" name="pid" value="<?php echo (int)$selectedProjectId; ?>"><input type="hidden" name="view_month" value="<?php echo h($selectedViewMonth); ?>"><button type="submit" class="text-red-600 ml-2" onclick="return confirm('공제분을 삭제하시겠습니까?');">삭제</button></form><?php endif; ?></div>
+<?php if (isset($d['id'])): ?><form method="post" action="?r=project/monthly_deduction_delete" class="inline"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="id" value="<?php echo (int)$d['id']; ?>"><input type="hidden" name="pid" value="<?php echo (int)$selectedProjectId; ?>"><input type="hidden" name="view_month" value="<?php echo h($selectedViewMonth); ?>"><input type="hidden" name="return_route" value="<?php echo h($monthlyInputRoute); ?>"><input type="hidden" name="return_tab" value="<?php echo h($monthlyInputTab); ?>"><button type="submit" class="text-red-600 ml-2" onclick="return confirm('공제분을 삭제하시겠습니까?');">삭제</button></form><?php endif; ?></div>
 <?php endforeach; ?></div><?php endif; ?>
 </div>
+<?php endif; ?>
 
 <?php endif; ?>
 </div>

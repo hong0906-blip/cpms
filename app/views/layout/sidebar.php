@@ -229,7 +229,7 @@ if ($selectedMenu === $dashboardMenu) {
       array('menu' => 'dashboard', 'label' => '대시보드', 'icon' => 'layout-dashboard', 'href' => ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee')),
       array('menu' => 'notice', 'label' => '공지사항', 'icon' => 'megaphone', 'href' => '?r=' . rawurlencode('공지사항')),
       array('menu' => 'approval', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
-      array('menu' => 'work', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_input'),
+      array('menu' => 'work', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_summary'),
       array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status'),
     );
     if (\App\Core\Auth::canManageEmployees() || $canViewCompanyOverheadMenu || $canViewCompanyPayrollMenu) {

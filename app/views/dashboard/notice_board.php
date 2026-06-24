@@ -524,6 +524,15 @@ if (!function_exists('cpms_render_dashboard_notice_modal')) {
 function cpms_render_dashboard_notice_modal() {
     $activeItems = cpms_dashboard_notice_sorted_items(false);
     if (count($activeItems) === 0) return;
+    $signatureParts = array();
+    foreach ($activeItems as $noticeSignatureRow) {
+        $signatureParts[] =
+            (isset($noticeSignatureRow['id']) ? (string)$noticeSignatureRow['id'] : '') . ':' .
+            (isset($noticeSignatureRow['created_at']) ? (string)$noticeSignatureRow['created_at'] : '') . ':' .
+            (isset($noticeSignatureRow['updated_at']) ? (string)$noticeSignatureRow['updated_at'] : '') . ':' .
+            md5((isset($noticeSignatureRow['title']) ? (string)$noticeSignatureRow['title'] : '') . "\n" . (isset($noticeSignatureRow['content']) ? (string)$noticeSignatureRow['content'] : ''));
+    }
+    $noticeSignature = md5(implode('|', $signatureParts));
     ?>
     <div id="modal-dashboardNoticeAuto" class="fixed inset-0 z-50 hidden" data-dashboard-notice-auto="1">
         <div class="absolute inset-0 bg-black/45" data-dashboard-notice-auto-close></div>
@@ -563,6 +572,8 @@ function cpms_render_dashboard_notice_modal() {
     (function(){
         var autoModal = document.getElementById('modal-dashboardNoticeAuto');
         var storageKey = 'cpms_dashboard_notice_closed_until';
+        var signatureKey = 'cpms_dashboard_notice_signature';
+        var noticeSignature = <?php echo json_encode($noticeSignature); ?>;
         function endOfTodayTime() {
             var now = new Date();
             return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
@@ -570,7 +581,9 @@ function cpms_render_dashboard_notice_modal() {
         function shouldShowAuto() {
             try {
                 var raw = window.localStorage ? localStorage.getItem(storageKey) : '';
+                var storedSignature = window.localStorage ? (localStorage.getItem(signatureKey) || '') : '';
                 var until = raw ? parseInt(raw, 10) : 0;
+                if (noticeSignature && storedSignature !== noticeSignature) return true;
                 if (until && until >= new Date().getTime()) return false;
             } catch (e) {}
             return true;
@@ -578,7 +591,10 @@ function cpms_render_dashboard_notice_modal() {
         function closeAuto() {
             if (autoModal) autoModal.classList.add('hidden');
             try {
-                if (window.localStorage) localStorage.setItem(storageKey, String(endOfTodayTime()));
+                if (window.localStorage) {
+                    localStorage.setItem(storageKey, String(endOfTodayTime()));
+                    localStorage.setItem(signatureKey, noticeSignature || '');
+                }
             } catch (e) {}
             document.body.classList.remove('overflow-hidden');
         }

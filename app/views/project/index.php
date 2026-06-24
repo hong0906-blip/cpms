@@ -40,9 +40,10 @@ if ($dbOk) {
 }
 
 $flash = flash_get();
-$activeTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'monthly_input';
-if ($activeTab === '') $activeTab = 'monthly_input';
-if ($activeTab !== 'monthly_input' && $activeTab !== 'project_manage') $activeTab = 'monthly_input';
+$activeTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'monthly_summary';
+if ($activeTab === '') $activeTab = 'monthly_summary';
+if ($activeTab === 'monthly_input') $activeTab = 'monthly_summary';
+if ($activeTab !== 'monthly_summary' && $activeTab !== 'project_manage') $activeTab = 'monthly_summary';
 
 function status_badge_class($status) {
     $status = trim((string)$status);
@@ -54,15 +55,15 @@ function status_badge_class($status) {
 
 <div class="cpms-project-page mb-5">
   <div class="mt-3 flex gap-2">
-    <a href="?r=공무&tab=monthly_input" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_input' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 상세내역</a>
+    <a href="?r=공무&tab=monthly_summary" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_summary' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 집계</a>
     <a href="?r=공무&tab=project_manage" class="cpms-project-manage-tab px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
   </div>
 </div>
 
-<?php if ($activeTab === 'monthly_input'): ?>
-  <?php try { require __DIR__ . '/monthly_input.php'; } catch (Exception $e) { ?>
+<?php if ($activeTab === 'monthly_summary'): ?>
+  <?php try { require __DIR__ . '/monthly_summary.php'; } catch (Exception $e) { ?>
   <div class="rounded-xl border border-red-200 bg-red-50 text-red-800 p-4">
-    <div class="font-bold">월별 투입비 상세내역을 불러오는 중 오류가 발생했습니다.</div>
+    <div class="font-bold">월별 투입비 집계를 불러오는 중 오류가 발생했습니다.</div>
     <div>공무 DB 설치/확인을 먼저 실행해주세요.</div>
     <div>오류: <?php echo h($e->getMessage()); ?></div>
   </div>

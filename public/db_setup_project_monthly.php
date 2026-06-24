@@ -43,6 +43,22 @@ if (!$pdo) {
     }
 
     try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_project_monthly_summary_remarks (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            project_id INT NOT NULL,
+            ym VARCHAR(7) NOT NULL,
+            remark TEXT NULL,
+            created_at DATETIME NULL,
+            updated_at DATETIME NULL,
+            UNIQUE KEY uk_project_monthly_summary_remark (project_id, ym),
+            KEY idx_ym (ym)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        add_result($results, 'TABLE', 'cpms_project_monthly_summary_remarks', '성공', '확인/생성 완료');
+    } catch (Exception $e) {
+        add_result($results, 'TABLE', 'cpms_project_monthly_summary_remarks', '오류', '처리 오류: ' . $e->getMessage());
+    }
+
+    try {
         $st = $pdo->prepare("SHOW TABLES LIKE 'cpms_project_unit_prices'");
         $st->execute();
         $tb = $st->fetch();
@@ -277,4 +293,4 @@ if (!$pdo) {
         add_result($results, 'COLUMN', 'cpms_material_items.category', '오류', '확인 오류: ' . $e->getMessage());
     }
 }
-?><!doctype html><html><head><meta charset="utf-8"><title>공무 DB 설치/확인</title><style>table{border-collapse:collapse;width:100%;max-width:1100px}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#f5f5f5}</style></head><body><h2>공무 DB 설치/확인</h2><table><thead><tr><th>구분</th><th>대상</th><th>결과</th><th>메시지</th></tr></thead><tbody><?php foreach($results as $row){ ?><tr><td><?php echo h($row['kind']); ?></td><td><?php echo h($row['target']); ?></td><td><?php echo h($row['status']); ?></td><td><?php echo h($row['message']); ?></td></tr><?php } ?></tbody></table><p><a href="?r=공무&tab=monthly_input">공무 화면으로 돌아가기</a></p></body></html>
+?><!doctype html><html><head><meta charset="utf-8"><title>공무 DB 설치/확인</title><style>table{border-collapse:collapse;width:100%;max-width:1100px}th,td{border:1px solid #ccc;padding:8px;text-align:left}th{background:#f5f5f5}</style></head><body><h2>공무 DB 설치/확인</h2><table><thead><tr><th>구분</th><th>대상</th><th>결과</th><th>메시지</th></tr></thead><tbody><?php foreach($results as $row){ ?><tr><td><?php echo h($row['kind']); ?></td><td><?php echo h($row['target']); ?></td><td><?php echo h($row['status']); ?></td><td><?php echo h($row['message']); ?></td></tr><?php } ?></tbody></table><p><a href="?r=공무&tab=monthly_summary">공무 화면으로 돌아가기</a></p></body></html>
