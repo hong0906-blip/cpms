@@ -9,9 +9,51 @@ $cardMonth = isset($filters['month']) && (int)$filters['month'] > 0 ? (int)$filt
 $cardPreviewToken = isset($_GET['card_preview_token']) ? trim((string)$_GET['card_preview_token']) : '';
 $cardPreview = ($canEditCompanyOverhead && $cardPreviewToken !== '') ? cpms_company_overhead_get_card_preview($cardPreviewToken) : null;
 $items = cpms_company_overhead_load_month('corporate_cards', $cardYear, $cardMonth, false);
-$cardGroups = cpms_company_overhead_group_card_items($items);
 $cardTotal = cpms_company_overhead_sum_record($items);
-$cardTransactionCount = count($items);
+
+if (!function_exists('cpms_overhead_card_hidden_keywords')) {
+function cpms_overhead_card_hidden_keywords() {
+    return array('노욱형', '신종기');
+}}
+
+if (!function_exists('cpms_overhead_card_text_contains')) {
+function cpms_overhead_card_text_contains($haystack, $needle) {
+    $haystack = (string)$haystack;
+    $needle = (string)$needle;
+    if ($needle === '') return false;
+    if (function_exists('mb_strpos')) return (mb_strpos($haystack, $needle, 0, 'UTF-8') !== false);
+    return (strpos($haystack, $needle) !== false);
+}}
+
+if (!function_exists('cpms_overhead_card_should_hide_item')) {
+function cpms_overhead_card_should_hide_item($item) {
+    if (!is_array($item)) return false;
+    $fields = array('card_user', 'employee_name', 'card_alias', 'card_name', 'title', 'vendor', 'content', 'purpose', 'memo', 'note');
+    $haystack = '';
+    foreach ($fields as $field) {
+        if (isset($item[$field]) && !is_array($item[$field])) $haystack .= ' ' . (string)$item[$field];
+    }
+    $keywords = cpms_overhead_card_hidden_keywords();
+    foreach ($keywords as $keyword) {
+        if (cpms_overhead_card_text_contains($haystack, $keyword)) return true;
+    }
+    return false;
+}}
+
+if (!function_exists('cpms_overhead_card_visible_items')) {
+function cpms_overhead_card_visible_items($items) {
+    $visible = array();
+    if (!is_array($items)) return $visible;
+    foreach ($items as $item) {
+        if (cpms_overhead_card_should_hide_item($item)) continue;
+        array_push($visible, $item);
+    }
+    return $visible;
+}}
+
+$cardVisibleItems = cpms_overhead_card_visible_items($items);
+$cardGroups = cpms_company_overhead_group_card_items($cardVisibleItems);
+$cardTransactionCount = count($cardVisibleItems);
 
 if (!function_exists('cpms_overhead_card_money')) {
 function cpms_overhead_card_money($value) {

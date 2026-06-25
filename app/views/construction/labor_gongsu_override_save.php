@@ -169,9 +169,12 @@ try {
     $effectiveEmail = strtolower(trim($authEmail !== '' ? $authEmail : ($rawCpmsUserEmail !== '' ? $rawCpmsUserEmail : $rawUserEmail)));
     $effectiveRole = trim($authRole !== '' ? $authRole : $rawCpmsUserRole);
     $effectiveDepartment = trim($authDepartment !== '' ? $authDepartment : $rawCpmsUserDepartment);
+    $effectiveDepartmentNorm = $effectiveDepartment;
+    if ($effectiveDepartmentNorm === '공사부' || $effectiveDepartmentNorm === '공사팀') $effectiveDepartmentNorm = '공사';
+    if ($effectiveDepartmentNorm === '공무부' || $effectiveDepartmentNorm === '공무팀') $effectiveDepartmentNorm = '공무';
     // [변경] 마스터 raw 이메일 통과
     $isMasterByRaw = in_array($effectiveEmail, array('hong0906@cmbuild.kr'), true);
-    $allowedByRaw = ($effectiveRole === 'executive' || $effectiveDepartment === '공사');
+    $allowedByRaw = ($effectiveRole === 'executive' || $effectiveDepartmentNorm === '공사' || $effectiveDepartmentNorm === '공무');
     
     if (!$authChecked) {
         cpms_gongsu_json_exit(false, '로그인 세션을 읽지 못했습니다. auth_email=' . $authEmail . ', auth_role=' . $authRole . ', auth_department=' . $authDepartment . ', master_by_auth=' . ($isMaster ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N') . ', session_id=' . session_id() . ', raw_user_email=' . $rawUserEmail . ', raw_cpms_user_email=' . $rawCpmsUserEmail . ', raw_cpms_user_role=' . $rawCpmsUserRole . ', raw_cpms_user_department=' . $rawCpmsUserDepartment . ', effective_email=' . $effectiveEmail . ', effective_role=' . $effectiveRole . ', effective_department=' . $effectiveDepartment . ', master_by_raw=' . ($isMasterByRaw ? 'Y' : 'N') . ', allowed_by_raw=' . ($allowedByRaw ? 'Y' : 'N'), array(
@@ -265,7 +268,7 @@ try {
     if (!$pdo) cpms_gongsu_json_exit(false, 'DB 연결을 확인할 수 없습니다.', array(), 200);
 
     // [변경] 마스터 담당 프로젝트 제한 예외 + 진단값 강화
-    if (!($isMaster || $isMasterByRaw || $effectiveRole === 'executive')) {
+    if (!($isMaster || $isMasterByRaw || $effectiveRole === 'executive' || $canManageConstruction || $effectiveDepartmentNorm === '공무')) {
         if (!cpms_is_project_member_or_executive($pdo, $projectId, $effectiveRole, $effectiveEmail)) {
             cpms_gongsu_json_exit(false,
                 '담당 프로젝트만 수정할 수 있습니다. auth_email=' . $authEmail . ', raw_user_email=' . $rawUserEmail . ', raw_cpms_user_email=' . $rawCpmsUserEmail . ', effective_email=' . $effectiveEmail . ', effective_role=' . $effectiveRole . ', effective_department=' . $effectiveDepartment . ', master_by_auth=' . ($isMaster ? 'Y' : 'N') . ', master_by_raw=' . ($isMasterByRaw ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N') . ', project_id=' . $projectId . ', route_file=labor_gongsu_override_save',

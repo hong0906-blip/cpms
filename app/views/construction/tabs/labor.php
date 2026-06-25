@@ -80,6 +80,7 @@ $excludedWorkers = isset($gongsuData['excluded_workers']) ? $gongsuData['exclude
 $attendanceGongsuMap = isset($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
 $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
 $attendanceOutputDays = isset($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
+$attendanceTimeMap = isset($gongsuData['time_map']) && is_array($gongsuData['time_map']) ? $gongsuData['time_map'] : array();
 
 $projectId = isset($pid) ? (int)$pid : 0;
 $overrideDataset = function_exists('cpms_apply_labor_overrides_to_dataset')
@@ -374,6 +375,7 @@ foreach ($timesheetWorkers as $worker) {
     $attendanceGongsuMap = $attendanceGongsuMap;
     $attendanceGongsuUnit = $attendanceGongsuUnit;
     $attendanceOutputDays = $attendanceOutputDays;
+    $attendanceTimeMap = $attendanceTimeMap;
     $showBankColumns = false;    
     $canEdit = $canEditLabor;
     require __DIR__ . '/partials/labor_sheet_table.php';
@@ -660,6 +662,14 @@ foreach ($timesheetWorkers as $worker) {
                         <div class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 bg-gray-50 text-gray-700" id="gongsuWorkerDate"></div>
                     </div>
                     <div>
+                        <label class="text-xs font-bold text-gray-500">출근시간</label>
+                        <div class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 bg-gray-50 text-gray-700" id="gongsuStartTime">-</div>
+                    </div>
+                    <div>
+                        <label class="text-xs font-bold text-gray-500">퇴근시간</label>
+                        <div class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 bg-gray-50 text-gray-700" id="gongsuEndTime">-</div>
+                    </div>
+                    <div>
                         <label class="text-xs font-bold text-gray-500">기존 공수</label>
                         <div class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 bg-gray-50 text-gray-700" id="gongsuCurrentValue"></div>
                     </div>
@@ -708,6 +718,8 @@ foreach ($timesheetWorkers as $worker) {
         document.getElementById('gongsuProjectName').textContent = projectName || '-';        
         document.getElementById('gongsuWorkerName').textContent = ctx.workerName;
         document.getElementById('gongsuWorkerDate').textContent = ctx.date;
+        document.getElementById('gongsuStartTime').textContent = ctx.startTime || '-';
+        document.getElementById('gongsuEndTime').textContent = ctx.endTime || '-';
         document.getElementById('gongsuCurrentValue').textContent = formatValue(ctx.oldValue);
         document.getElementById('gongsuRequestedValue').value = formatValue(ctx.oldValue);
         document.getElementById('gongsuRequestReason').value = '';
@@ -783,6 +795,8 @@ foreach ($timesheetWorkers as $worker) {
                 workerName:cell.getAttribute('data-worker-name'),
                 workerKey:(cell.getAttribute('data-worker-key') || '').trim(),
                 date:cell.getAttribute('data-date'),
+                startTime:cell.getAttribute('data-start-time') || '-',
+                endTime:cell.getAttribute('data-end-time') || '-',
                 oldValue:oldValue
             });
         });
@@ -893,6 +907,8 @@ foreach ($timesheetWorkers as $worker) {
         document.getElementById('gongsuProjectName').textContent = projectName || '-';
         document.getElementById('gongsuWorkerName').textContent = ctx.workerName;
         document.getElementById('gongsuWorkerDate').textContent = ctx.date;
+        document.getElementById('gongsuStartTime').textContent = ctx.startTime || '-';
+        document.getElementById('gongsuEndTime').textContent = ctx.endTime || '-';
         document.getElementById('gongsuCurrentValue').textContent = formatValue(ctx.oldValue);
         document.getElementById('gongsuRequestedValue').value = formatValue(ctx.oldValue);
         document.getElementById('gongsuRequestReason').value = '';
@@ -990,6 +1006,8 @@ foreach ($timesheetWorkers as $worker) {
                 workerName:cell.getAttribute('data-worker-name'),
                 workerKey:(cell.getAttribute('data-worker-key') || '').trim(),
                 date:cell.getAttribute('data-date'),
+                startTime:cell.getAttribute('data-start-time') || '-',
+                endTime:cell.getAttribute('data-end-time') || '-',
                 oldValue:oldValue
             };
             if (oldValueRaw === '') {
@@ -1014,6 +1032,8 @@ foreach ($timesheetWorkers as $worker) {
                 workerName:cell.getAttribute('data-worker-name'),
                 workerKey:(cell.getAttribute('data-worker-key') || '').trim(),
                 date:cell.getAttribute('data-date'),
+                startTime:cell.getAttribute('data-start-time') || '-',
+                endTime:cell.getAttribute('data-end-time') || '-',
                 oldValue:oldValue
             };
             if (oldValueRaw === '') {

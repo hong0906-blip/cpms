@@ -980,6 +980,70 @@ function cpms_samsung_portal_summary($records)
     return $summary;
 }}
 
+if (!function_exists('cpms_samsung_portal_name_match_key')) {
+function cpms_samsung_portal_name_match_key($name)
+{
+    $name = trim((string)$name);
+    $name = str_replace(array(' ', "\t", "\r", "\n"), '', $name);
+    if (function_exists('mb_strtolower')) return mb_strtolower($name, 'UTF-8');
+    return strtolower($name);
+}}
+
+if (!function_exists('cpms_samsung_portal_employee_name_map')) {
+function cpms_samsung_portal_employee_name_map($pdo)
+{
+    $map = array();
+    if (!$pdo || !cpms_safety_cost_table_exists($pdo, 'employees')) return $map;
+    static $cache = array();
+    $cacheKey = function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'pdo';
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+    try {
+        $select = 'id, name, department';
+        if (cpms_safety_cost_column_exists($pdo, 'employees', 'position')) $select .= ', position';
+        else $select .= ", '' AS position";
+        $where = '';
+        if (cpms_safety_cost_column_exists($pdo, 'employees', 'is_active')) $where = ' WHERE is_active = 1';
+        $st = $pdo->query('SELECT ' . $select . ' FROM employees' . $where);
+        $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+        if (!is_array($rows)) $rows = array();
+        foreach ($rows as $row) {
+            $name = isset($row['name']) ? trim((string)$row['name']) : '';
+            $key = cpms_samsung_portal_name_match_key($name);
+            if ($key === '') continue;
+            $map[$key] = array(
+                'id' => isset($row['id']) ? (int)$row['id'] : 0,
+                'name' => $name,
+                'department' => isset($row['department']) ? (string)$row['department'] : '',
+                'position' => isset($row['position']) ? (string)$row['position'] : '',
+            );
+        }
+    } catch (Exception $e) {
+        $map = array();
+    }
+    $cache[$cacheKey] = $map;
+    return $map;
+}}
+
+if (!function_exists('cpms_samsung_portal_split_records_by_employee')) {
+function cpms_samsung_portal_split_records_by_employee($pdo, $records)
+{
+    $groups = array('employees' => array(), 'external' => array());
+    if (!is_array($records)) return $groups;
+    $employeeMap = cpms_samsung_portal_employee_name_map($pdo);
+    foreach ($records as $row) {
+        if (!is_array($row)) continue;
+        $name = isset($row['name']) ? (string)$row['name'] : '';
+        $key = cpms_samsung_portal_name_match_key($name);
+        if ($key !== '' && isset($employeeMap[$key])) {
+            $row['_matched_employee'] = $employeeMap[$key];
+            $groups['employees'][] = $row;
+        } else {
+            $groups['external'][] = $row;
+        }
+    }
+    return $groups;
+}}
+
 if (!function_exists('cpms_samsung_portal_is_safety_department')) {
 function cpms_samsung_portal_is_safety_department($department)
 {

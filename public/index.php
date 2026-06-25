@@ -141,6 +141,22 @@ if ($route === 'estimate/bid_result') {
     $route = '견적관리';
 }
 
+$cpmsDeptForRestrictedRoute = '';
+if (\App\Core\Auth::check()) {
+    $cpmsDeptForRestrictedRoute = trim((string)\App\Core\Auth::userDepartment());
+    $cpmsDeptRestrictedMap = array(
+        '공무부' => '공무',
+        '공무팀' => '공무',
+    );
+    if (isset($cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute])) $cpmsDeptForRestrictedRoute = $cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute];
+}
+$cpmsIsRestrictedManagementRoute = ($route === '관리' || strpos($route, 'admin/') === 0 || strpos($route, 'management/') === 0);
+if ($cpmsDeptForRestrictedRoute === '공무' && !\App\Core\Auth::isMaster() && ($cpmsIsRestrictedManagementRoute || $route === '경영현황')) {
+    http_response_code(403);
+    echo '접근 권한이 없습니다.';
+    exit;
+}
+
 // ==========================
 //  액션(POST 처리) 라우트 먼저
 // ==========================
@@ -221,6 +237,11 @@ if ($route === 'admin/labor_consultant_export') {
 
 if ($route === 'db_setup_estimate') {
     require_once __DIR__ . '/db_setup_estimate.php';
+    exit;
+}
+
+if ($route === 'db_setup_estimate_versions') {
+    require_once __DIR__ . '/db_setup_estimate_versions.php';
     exit;
 }
 
@@ -565,6 +586,14 @@ if ($route === 'construction/daily_cost_save') {
 }
 if ($route === 'construction/recognized_save') {
     require_once __DIR__ . '/../app/views/construction/recognized_save.php';
+    exit;
+}
+if ($route === 'construction/target_cost_rate_save') {
+    require_once __DIR__ . '/../app/views/construction/target_cost_rate_save.php';
+    exit;
+}
+if ($route === 'construction/target_cost_rate_decide') {
+    require_once __DIR__ . '/../app/views/construction/target_cost_rate_decide.php';
     exit;
 }
 if ($route === 'construction/sample_c5_seed') {

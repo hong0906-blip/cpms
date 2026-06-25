@@ -64,18 +64,18 @@ function cpms_unit_price_bulk_column_exists($pdo, $column) {
 }
 
 try {
+    if (!cpms_unit_price_bulk_column_exists($pdo, 'is_active') || !cpms_unit_price_bulk_column_exists($pdo, 'is_current')) {
+        flash_set('error', '내역서 이력 보존 컬럼이 없습니다. db_setup_estimate_versions 페이지에서 DB 생성/확인을 먼저 실행해주세요.');
+        header('Location: ' . $redirect);
+        exit;
+    }
+
     if ($mode === 'all') {
-        $sql = "DELETE FROM cpms_project_unit_prices WHERE project_id = :pid";
-        if (cpms_unit_price_bulk_column_exists($pdo, 'is_active')) {
-            $sql .= " AND (is_active = 1 OR is_active IS NULL)";
-        }
-        if (cpms_unit_price_bulk_column_exists($pdo, 'is_current')) {
-            $sql .= " AND (is_current = 1 OR is_current IS NULL)";
-        }
+        $sql = "UPDATE cpms_project_unit_prices SET is_active = 0, is_current = 0, updated_at = NOW() WHERE project_id = :pid AND (is_active = 1 OR is_active IS NULL) AND (is_current = 1 OR is_current IS NULL)";
         $st = $pdo->prepare($sql);
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $st->execute();
-        flash_set('success', '단가 내역표 전체를 삭제했습니다. (삭제 ' . (int)$st->rowCount() . '건)');
+        flash_set('success', '단가 내역표 전체를 현재 적용 내역에서 제외했습니다. 기존 이력은 보존됩니다. (제외 ' . (int)$st->rowCount() . '건)');
         header('Location: ' . $redirect);
         exit;
     }
@@ -96,10 +96,10 @@ try {
 
     $holders = array();
     foreach ($ids as $idx => $id) {
-        $holders[] = ':id' . $idx;
+        array_push($holders, ':id' . $idx);
     }
 
-    $sql = "DELETE FROM cpms_project_unit_prices WHERE project_id = :pid AND id IN (" . implode(',', $holders) . ")";
+    $sql = "UPDATE cpms_project_unit_prices SET is_active = 0, is_current = 0, updated_at = NOW() WHERE project_id = :pid AND id IN (" . implode(',', $holders) . ")";
     $st = $pdo->prepare($sql);
     $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
     foreach ($ids as $idx => $id) {
@@ -107,7 +107,7 @@ try {
     }
     $st->execute();
 
-    flash_set('success', '선택한 단가 내역을 삭제했습니다. (삭제 ' . (int)$st->rowCount() . '건)');
+    flash_set('success', '선택한 단가 내역을 현재 적용 내역에서 제외했습니다. 기존 이력은 보존됩니다. (제외 ' . (int)$st->rowCount() . '건)');
     header('Location: ' . $redirect);
     exit;
 } catch (Exception $e) {

@@ -22,7 +22,7 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
   <script src="https://unpkg.com/lucide@latest"></script>
 
   <!-- App JS -->
-  <script defer src="<?php echo h(asset_url('assets/js/app.js')); ?>"></script>
+  <script defer src="<?php echo h(asset_url('assets/js/app.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/app.js')); ?>"></script>
 
   <!-- (중요) Sidebar 접힘/펼침에 따른 표시 제어 -->
   <style>
@@ -70,6 +70,93 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
       word-break: keep-all;
       overflow-wrap: anywhere;
       text-align: center;
+    }
+
+    .cpms-global-loading {
+      position: fixed;
+      inset: 0;
+      z-index: 2147483000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(15, 23, 42, 0.58);
+      pointer-events: auto;
+    }
+
+    .cpms-global-loading.is-visible {
+      display: flex;
+    }
+
+    .cpms-global-loading__box {
+      width: min(360px, 92vw);
+      padding: 28px 24px;
+      border-radius: 24px;
+      border: 1px solid rgba(255,255,255,.7);
+      background: rgba(255,255,255,.94);
+      box-shadow: 0 26px 80px rgba(15,23,42,.28);
+      text-align: center;
+    }
+
+    .cpms-global-loading__logo {
+      width: 86px;
+      height: 86px;
+      margin: 0 auto 16px;
+      padding: 10px;
+      border-radius: 24px;
+      border: 1px solid #e5e7eb;
+      background: #fff;
+      object-fit: contain;
+      animation: cpms-loading-pulse 1.35s ease-in-out infinite;
+    }
+
+    .cpms-global-loading__title {
+      color: #0f172a;
+      font-size: 20px;
+      line-height: 1.35;
+      font-weight: 900;
+      letter-spacing: 0;
+    }
+
+    .cpms-global-loading__text {
+      margin-top: 8px;
+      color: #475569;
+      font-size: 14px;
+      line-height: 1.55;
+      font-weight: 700;
+    }
+
+    .cpms-global-loading__bar {
+      position: relative;
+      overflow: hidden;
+      height: 6px;
+      margin-top: 18px;
+      border-radius: 999px;
+      background: #e2e8f0;
+    }
+
+    .cpms-global-loading__bar:before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 45%;
+      border-radius: inherit;
+      background: linear-gradient(90deg, #2563eb, #06b6d4);
+      animation: cpms-loading-slide 1.05s ease-in-out infinite;
+    }
+
+    body.cpms-loading-active {
+      cursor: wait;
+    }
+
+    @keyframes cpms-loading-pulse {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.045); opacity: .88; }
+    }
+
+    @keyframes cpms-loading-slide {
+      0% { left: -48%; }
+      100% { left: 104%; }
     }
 
     @media (max-width: 767px) {
@@ -358,4 +445,34 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
 </head>
 
 <body class="h-screen <?php echo h($bodyRouteClass . ' ' . $bodySelectedClass); ?>">
+  <div id="cpmsGlobalLoading" class="cpms-global-loading" role="status" aria-live="polite" aria-hidden="true">
+    <div class="cpms-global-loading__box">
+      <img src="<?php echo h(base_url()); ?>/assets/img/logo.png" alt="CPMS" class="cpms-global-loading__logo">
+      <div class="cpms-global-loading__title">잠시만 기다려주세요</div>
+      <div class="cpms-global-loading__text">요청을 처리하고 있습니다.</div>
+      <div class="cpms-global-loading__bar"></div>
+    </div>
+  </div>
+  <script>
+    (function(){
+      try {
+        var loadingKey = 'cpms_global_loading_next';
+        var loadingTtl = 15000;
+        if (!window.sessionStorage) return;
+        var loadingStartedAt = parseInt(sessionStorage.getItem(loadingKey) || '', 10);
+        if (!loadingStartedAt || (new Date()).getTime() - loadingStartedAt > loadingTtl) {
+          sessionStorage.removeItem(loadingKey);
+          return;
+        }
+        var el = document.getElementById('cpmsGlobalLoading');
+        if (el) {
+          el.className = el.className.replace(/\bis-visible\b/g, '').trim() + ' is-visible';
+          el.setAttribute('aria-hidden', 'false');
+        }
+        if (document.body) {
+          document.body.className = document.body.className.replace(/\bcpms-loading-active\b/g, '').trim() + ' cpms-loading-active';
+        }
+      } catch (e) {}
+    })();
+  </script>
   <div class="flex h-screen bg-gradient-to-br from-gray-50 via-blue-50/50 to-cyan-50/30">

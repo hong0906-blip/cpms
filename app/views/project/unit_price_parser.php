@@ -186,9 +186,63 @@ function cpms_project_unit_price_shared_strings($zip) {
     return $sharedStrings;
 }}
 
+if (!function_exists('cpms_project_unit_price_is_yellow_rgb')) {
+function cpms_project_unit_price_is_yellow_rgb($rgb) {
+    $rgb = strtoupper(trim((string)$rgb));
+    if ($rgb === '') return false;
+    if (strlen($rgb) > 6) $rgb = substr($rgb, -6);
+    if (in_array($rgb, array('FFFF00', 'FFF2CC', 'FFE699', 'FFD966', 'FFFF99', 'FFFFCC'), true)) return true;
+    if (strlen($rgb) !== 6 || !preg_match('/^[0-9A-F]{6}$/', $rgb)) return false;
+    $r = hexdec(substr($rgb, 0, 2));
+    $g = hexdec(substr($rgb, 2, 2));
+    $b = hexdec(substr($rgb, 4, 2));
+    return ($r >= 220 && $g >= 190 && $b <= 140);
+}}
+
+if (!function_exists('cpms_project_unit_price_yellow_style_ids')) {
+function cpms_project_unit_price_yellow_style_ids($zip) {
+    $styleIds = array();
+    $stylesXml = $zip->getFromName('xl/styles.xml');
+    if ($stylesXml === false) return $styleIds;
+    $sx = @simplexml_load_string($stylesXml);
+    if (!$sx) return $styleIds;
+
+    $yellowFillIds = array();
+    $fillIndex = 0;
+    if (isset($sx->fills) && isset($sx->fills->fill)) {
+        foreach ($sx->fills->fill as $fill) {
+            $isYellow = false;
+            if (isset($fill->patternFill)) {
+                if (isset($fill->patternFill->fgColor)) {
+                    $rgb = isset($fill->patternFill->fgColor['rgb']) ? (string)$fill->patternFill->fgColor['rgb'] : '';
+                    $indexed = isset($fill->patternFill->fgColor['indexed']) ? (int)$fill->patternFill->fgColor['indexed'] : -1;
+                    if (cpms_project_unit_price_is_yellow_rgb($rgb) || $indexed === 13) $isYellow = true;
+                }
+                if (!$isYellow && isset($fill->patternFill->bgColor)) {
+                    $rgb = isset($fill->patternFill->bgColor['rgb']) ? (string)$fill->patternFill->bgColor['rgb'] : '';
+                    $indexed = isset($fill->patternFill->bgColor['indexed']) ? (int)$fill->patternFill->bgColor['indexed'] : -1;
+                    if (cpms_project_unit_price_is_yellow_rgb($rgb) || $indexed === 13) $isYellow = true;
+                }
+            }
+            if ($isYellow) $yellowFillIds[$fillIndex] = true;
+            $fillIndex++;
+        }
+    }
+
+    $xfIndex = 0;
+    if (isset($sx->cellXfs) && isset($sx->cellXfs->xf)) {
+        foreach ($sx->cellXfs->xf as $xf) {
+            $fillId = isset($xf['fillId']) ? (int)$xf['fillId'] : -1;
+            if ($fillId >= 0 && isset($yellowFillIds[$fillId])) $styleIds[$xfIndex] = true;
+            $xfIndex++;
+        }
+    }
+    return $styleIds;
+}}
+
 if (!function_exists('cpms_project_unit_price_sheet_matrix')) {
 function cpms_project_unit_price_sheet_matrix($zip, $sheetPath, $sharedStrings, $maxRows, $maxCols) {
-    $result = array('ok'=>false, 'matrix'=>array(), 'max_row'=>0, 'max_col'=>0, 'message'=>'');
+    $result = array('ok'=>false, 'matrix'=>array(), 'yellow_cells'=>array(), 'max_row'=>0, 'max_col'=>0, 'message'=>'');
     $sheetXml = $zip->getFromName($sheetPath);
     if ($sheetXml === false) {
         $result['message'] = cpms_project_unit_price_lang('msg_sheet_data_missing');
@@ -205,6 +259,8 @@ function cpms_project_unit_price_sheet_matrix($zip, $sheetPath, $sharedStrings, 
     $maxRowFound = 0;
     $maxColFound = 0;
     $autoRow = 0;
+    $yellowCells = array();
+    $yellowStyleIds = cpms_project_unit_price_yellow_style_ids($zip);
 
     foreach ($sx->sheetData->row as $rowNode) {
         $autoRow++;
@@ -239,6 +295,11 @@ function cpms_project_unit_price_sheet_matrix($zip, $sheetPath, $sharedStrings, 
             }
 
             $matrix[$cellRow][$cellCol] = $value;
+            $styleId = isset($cellNode['s']) ? (int)$cellNode['s'] : -1;
+            if ($styleId >= 0 && isset($yellowStyleIds[$styleId])) {
+                if (!isset($yellowCells[$cellRow])) $yellowCells[$cellRow] = array();
+                $yellowCells[$cellRow][$cellCol] = true;
+            }
             if ($cellRow > $maxRowFound) $maxRowFound = $cellRow;
             if ($cellCol > $maxColFound) $maxColFound = $cellCol;
         }
@@ -276,6 +337,7 @@ function cpms_project_unit_price_sheet_matrix($zip, $sheetPath, $sharedStrings, 
 
     $result['ok'] = true;
     $result['matrix'] = $matrix;
+    $result['yellow_cells'] = $yellowCells;
     $result['max_row'] = $maxRowFound;
     $result['max_col'] = $maxColFound;
     return $result;
@@ -956,11 +1018,14 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
         if (mb_strpos($itemName, cpms_project_unit_price_lang('safety'), 0, 'UTF-8') !== false || mb_strpos($spec, cpms_project_unit_price_lang('safety'), 0, 'UTF-8') !== false) $isSafety = 1;
 
         $importOrder++;
-        array_push($rows, array(
+        $rowData = array(
             'trade_group' => $tradeGroup,
             'sub_trade' => $subTrade,
             'location_name' => $locationName,
+            'work_group' => $tradeGroup,
+            'sub_work_group' => $subTrade,
             'item_name' => $itemName,
+            'original_item_name' => $itemName,
             'spec' => $spec,
             'unit' => $unit,
             'qty' => $qty,
@@ -975,14 +1040,416 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
             'is_safety' => $isSafety,
             'remark' => $remark,
             'source_row' => $rowNumber,
+            'source_row_no' => $rowNumber,
+            'source_sheet_name' => isset($detected['sheet_name']) ? (string)$detected['sheet_name'] : '',
             'import_order' => $importOrder,
             'unit_price_validation' => $validationCode,
             'unit_price_validation_text' => $validationText
-        ));
+        );
+        $rowData['item_fingerprint'] = cpms_project_unit_price_fingerprint($rowData);
+        array_push($rows, $rowData);
         $rowNumber++;
     }
 
     return $rows;
+}}
+
+if (!function_exists('cpms_project_unit_price_decode')) {
+function cpms_project_unit_price_decode($value) {
+    return json_decode('"' . $value . '"');
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_text')) {
+function cpms_project_unit_price_standard_text($key) {
+    static $map = null;
+    if ($map === null) {
+        $map = array(
+            'sheet_name' => cpms_project_unit_price_decode('\\u0043\\u0050\\u004d\\u0053\\u005f\\uD45C\\uC900\\uB0B4\\uC5ED\\uC11C'),
+            'row_type' => cpms_project_unit_price_decode('\\uD589\\uAD6C\\uBD84'),
+            'trade_group' => cpms_project_unit_price_decode('\\uACF5\\uC885\\uADF8\\uB8F9'),
+            'sub_trade' => cpms_project_unit_price_decode('\\uC138\\uBD80\\uACF5\\uC885'),
+            'location_name' => cpms_project_unit_price_decode('\\uC704\\uCE58'),
+            'item_name' => cpms_project_unit_price_decode('\\uD488\\uBA85'),
+            'spec' => cpms_project_unit_price_decode('\\uADDC\\uACA9'),
+            'unit' => cpms_project_unit_price_decode('\\uB2E8\\uC704'),
+            'qty' => cpms_project_unit_price_decode('\\uC218\\uB7C9'),
+            'material_unit_price' => cpms_project_unit_price_decode('\\uC7AC\\uB8CC\\uBE44\\uB2E8\\uAC00'),
+            'labor_unit_price' => cpms_project_unit_price_decode('\\uB178\\uBB34\\uBE44\\uB2E8\\uAC00'),
+            'expense_unit_price' => cpms_project_unit_price_decode('\\uACBD\\uBE44\\uB2E8\\uAC00'),
+            'unit_price' => cpms_project_unit_price_decode('\\uD569\\uACC4\\uB2E8\\uAC00'),
+            'amount' => cpms_project_unit_price_decode('\\uAE08\\uC561'),
+            'remark' => cpms_project_unit_price_decode('\\uBE44\\uACE0'),
+            'location_type' => cpms_project_unit_price_decode('\\uC704\\uCE58'),
+            'work_type' => cpms_project_unit_price_decode('\\uACF5\\uC885'),
+            'detail_type' => cpms_project_unit_price_decode('\\uB0B4\\uC5ED'),
+            'normal' => cpms_project_unit_price_decode('\\uC815\\uC0C1'),
+            'missing_item' => cpms_project_unit_price_decode('\\uD488\\uBA85 \\uC5C6\\uC74C'),
+            'missing_qty' => cpms_project_unit_price_decode('\\uC218\\uB7C9 \\uC5C6\\uC74C'),
+            'missing_price' => cpms_project_unit_price_decode('\\uB2E8\\uAC00 \\uC5C6\\uC74C'),
+            'calculated_price' => cpms_project_unit_price_decode('\\uB2E8\\uAC00 \\uACC4\\uC0B0'),
+            'calculated_amount' => cpms_project_unit_price_decode('\\uAE08\\uC561 \\uACC4\\uC0B0'),
+            'not_standard' => cpms_project_unit_price_decode('\\u0043\\u0050\\u004d\\u0053 \\uD45C\\uC900\\uB0B4\\uC5ED\\uC11C \\uC591\\uC2DD\\uC774 \\uC544\\uB2D9\\uB2C8\\uB2E4.'),
+            'no_rows' => cpms_project_unit_price_decode('\\uC800\\uC7A5 \\uAC00\\uB2A5\\uD55C \\uB0B4\\uC5ED \\uD589\\uC774 \\uC5C6\\uC2B5\\uB2C8\\uB2E4.'),
+            'missing_column_prefix' => cpms_project_unit_price_decode('\\uD544\\uC218 \\uCEEC\\uB7FC ['),
+            'missing_column_suffix' => cpms_project_unit_price_decode(']\\uC744 \\uCC3E\\uC744 \\uC218 \\uC5C6\\uC2B5\\uB2C8\\uB2E4.'),
+            'sheet_fallback' => cpms_project_unit_price_decode('\\uC2DC\\uD2B8 [\\u0043\\u0050\\u004d\\u0053\\u005f\\uD45C\\uC900\\uB0B4\\uC5ED\\uC11C]\\uB97C \\uCC3E\\uC744 \\uC218 \\uC5C6\\uC5B4 \\uCCAB \\uBC88\\uC9F8 \\uC2DC\\uD2B8\\uB97C \\uAC80\\uC0AC\\uD588\\uC2B5\\uB2C8\\uB2E4.')
+        );
+    }
+    return isset($map[$key]) ? $map[$key] : '';
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_labels')) {
+function cpms_project_unit_price_standard_labels() {
+    return array(
+        'row_type' => cpms_project_unit_price_standard_text('row_type'),
+        'trade_group' => cpms_project_unit_price_standard_text('trade_group'),
+        'sub_trade' => cpms_project_unit_price_standard_text('sub_trade'),
+        'location_name' => cpms_project_unit_price_standard_text('location_name'),
+        'item_name' => cpms_project_unit_price_standard_text('item_name'),
+        'spec' => cpms_project_unit_price_standard_text('spec'),
+        'unit' => cpms_project_unit_price_standard_text('unit'),
+        'qty' => cpms_project_unit_price_standard_text('qty'),
+        'material_unit_price' => cpms_project_unit_price_standard_text('material_unit_price'),
+        'labor_unit_price' => cpms_project_unit_price_standard_text('labor_unit_price'),
+        'expense_unit_price' => cpms_project_unit_price_standard_text('expense_unit_price'),
+        'unit_price' => cpms_project_unit_price_standard_text('unit_price'),
+        'amount' => cpms_project_unit_price_standard_text('amount'),
+        'remark' => cpms_project_unit_price_standard_text('remark')
+    );
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_header')) {
+function cpms_project_unit_price_standard_header($matrix, $maxRow, $maxCol) {
+    $labels = cpms_project_unit_price_standard_labels();
+    $best = array('row'=>0, 'columns'=>array(), 'found'=>0, 'missing'=>array_keys($labels));
+    $lastRow = ((int)$maxRow < 80) ? (int)$maxRow : 80;
+    $r = 1;
+    while ($r <= $lastRow) {
+        $columns = array();
+        $c = 1;
+        while ($c <= (int)$maxCol) {
+            $cell = isset($matrix[$r][$c]) ? $matrix[$r][$c] : '';
+            $norm = cpms_project_unit_price_label_normalize($cell);
+            if ($norm !== '') {
+                foreach ($labels as $field => $label) {
+                    if (!isset($columns[$field]) && $norm === cpms_project_unit_price_label_normalize($label)) {
+                        $columns[$field] = $c;
+                    }
+                }
+            }
+            $c++;
+        }
+        $missing = array();
+        foreach ($labels as $field => $label) {
+            if (!isset($columns[$field])) array_push($missing, $field);
+        }
+        $found = count($labels) - count($missing);
+        if ($found > (int)$best['found']) {
+            $best = array('row'=>$r, 'columns'=>$columns, 'found'=>$found, 'missing'=>$missing);
+        }
+        if (count($missing) === 0) return array('ok'=>true, 'row'=>$r, 'columns'=>$columns, 'missing'=>array());
+        $r++;
+    }
+    $best['ok'] = false;
+    return $best;
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_cell')) {
+function cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, $field) {
+    if (!isset($columns[$field])) return '';
+    $col = (int)$columns[$field];
+    return isset($matrix[$rowNumber][$col]) ? cpms_project_unit_price_text_normalize($matrix[$rowNumber][$col]) : '';
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_row_text')) {
+function cpms_project_unit_price_standard_row_text($matrix, $rowNumber, $maxCol) {
+    $parts = array();
+    $c = 1;
+    while ($c <= (int)$maxCol) {
+        $value = isset($matrix[$rowNumber][$c]) ? trim((string)$matrix[$rowNumber][$c]) : '';
+        if ($value !== '') array_push($parts, $value);
+        $c++;
+    }
+    return implode(' ', $parts);
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_is_total_row')) {
+function cpms_project_unit_price_standard_is_total_row($text) {
+    $norm = cpms_project_unit_price_label_normalize($text);
+    if ($norm === '') return false;
+    $words = array(
+        cpms_project_unit_price_decode('\\uC18C\\uACC4'),
+        cpms_project_unit_price_decode('\\uD569\\uACC4'),
+        cpms_project_unit_price_decode('\\uCD1D\\uACC4'),
+        cpms_project_unit_price_decode('\\uACF5\\uAE09\\uAC00\\uC561'),
+        cpms_project_unit_price_decode('\\uBD80\\uAC00\\uC138'),
+        cpms_project_unit_price_decode('\\uD569\\uC0B0')
+    );
+    foreach ($words as $word) {
+        if (mb_strpos($norm, cpms_project_unit_price_label_normalize($word), 0, 'UTF-8') !== false) return true;
+    }
+    return false;
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_first_value')) {
+function cpms_project_unit_price_standard_first_value($matrix, $rowNumber, $maxCol, $skipCols) {
+    if (!is_array($skipCols)) $skipCols = array();
+    $c = 1;
+    while ($c <= (int)$maxCol) {
+        if (isset($skipCols[$c])) {
+            $c++;
+            continue;
+        }
+        $value = isset($matrix[$rowNumber][$c]) ? trim((string)$matrix[$rowNumber][$c]) : '';
+        if ($value !== '') return $value;
+        $c++;
+    }
+    return '';
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_group_name')) {
+function cpms_project_unit_price_standard_group_name($value) {
+    $value = trim((string)$value);
+    $value = preg_replace('/^[0-9]+[\.\)\-]\s*/u', '', $value);
+    return trim((string)$value);
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_yellow_count')) {
+function cpms_project_unit_price_standard_yellow_count($yellowCells, $rowNumber) {
+    if (!is_array($yellowCells) || !isset($yellowCells[$rowNumber]) || !is_array($yellowCells[$rowNumber])) return 0;
+    return count($yellowCells[$rowNumber]);
+}}
+
+if (!function_exists('cpms_project_unit_price_fingerprint')) {
+function cpms_project_unit_price_fingerprint($row) {
+    if (!is_array($row)) return '';
+    $values = array();
+    foreach (array('trade_group', 'sub_trade', 'location_name', 'item_name', 'spec', 'unit') as $field) {
+        $value = '';
+        if (isset($row[$field])) $value = $row[$field];
+        if ($field === 'trade_group' && $value === '' && isset($row['work_group'])) $value = $row['work_group'];
+        if ($field === 'sub_trade' && $value === '' && isset($row['sub_work_group'])) $value = $row['sub_work_group'];
+        array_push($values, cpms_project_unit_price_label_normalize($value));
+    }
+    $joined = implode('|', $values);
+    if (trim(str_replace('|', '', $joined)) === '') return '';
+    return sha1($joined);
+}}
+
+if (!function_exists('cpms_project_unit_price_standard_extract_rows')) {
+function cpms_project_unit_price_standard_extract_rows($matrix, $yellowCells, $maxRow, $maxCol, $detected) {
+    $rows = array();
+    $columns = isset($detected['columns']) ? $detected['columns'] : array();
+    $dataStartRow = isset($detected['data_start_row']) ? (int)$detected['data_start_row'] : 0;
+    if ($dataStartRow <= 0) return $rows;
+
+    $currentLocation = '';
+    $currentTradeGroup = '';
+    $blankCount = 0;
+    $importOrder = 0;
+    $rowNumber = $dataStartRow;
+    while ($rowNumber <= (int)$maxRow) {
+        $rowType = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'row_type');
+        $tradeGroup = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'trade_group');
+        $subTrade = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'sub_trade');
+        $locationName = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'location_name');
+        $itemName = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'item_name');
+        $spec = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'spec');
+        $unit = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'unit');
+        $qtyRaw = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'qty');
+        $materialRaw = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'material_unit_price');
+        $laborRaw = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'labor_unit_price');
+        $expenseRaw = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'expense_unit_price');
+        $totalRaw = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'unit_price');
+        $amountRaw = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'amount');
+        $remark = cpms_project_unit_price_standard_cell($matrix, $rowNumber, $columns, 'remark');
+        $rowText = cpms_project_unit_price_standard_row_text($matrix, $rowNumber, $maxCol);
+
+        if (trim($rowText) === '') {
+            $blankCount++;
+            if ($blankCount >= 50 && count($rows) > 0) break;
+            $rowNumber++;
+            continue;
+        }
+        $blankCount = 0;
+
+        $rowTypeNorm = cpms_project_unit_price_label_normalize($rowType);
+        $locationNorm = cpms_project_unit_price_label_normalize(cpms_project_unit_price_standard_text('location_type'));
+        $workNorm = cpms_project_unit_price_label_normalize(cpms_project_unit_price_standard_text('work_type'));
+        $detailNorm = cpms_project_unit_price_label_normalize(cpms_project_unit_price_standard_text('detail_type'));
+        $isLocationRowType = ($rowTypeNorm === $locationNorm || ($rowTypeNorm !== '' && $locationNorm !== '' && mb_strpos($rowTypeNorm, $locationNorm, 0, 'UTF-8') !== false));
+        $isWorkRowType = ($rowTypeNorm === $workNorm || ($rowTypeNorm !== '' && $workNorm !== '' && mb_strpos($rowTypeNorm, $workNorm, 0, 'UTF-8') !== false));
+        $itemYellow = (isset($columns['item_name']) && isset($yellowCells[$rowNumber]) && isset($yellowCells[$rowNumber][(int)$columns['item_name']]));
+        $rowYellow = (cpms_project_unit_price_standard_yellow_count($yellowCells, $rowNumber) >= 2);
+
+        if ($isLocationRowType || $itemYellow || $rowYellow) {
+            $skipCols = array();
+            if (isset($columns['row_type'])) $skipCols[(int)$columns['row_type']] = true;
+            $newLocation = ($locationName !== '') ? $locationName : (($itemName !== '') ? $itemName : cpms_project_unit_price_standard_first_value($matrix, $rowNumber, $maxCol, $skipCols));
+            if (trim((string)$newLocation) !== '') $currentLocation = trim((string)$newLocation);
+            $rowNumber++;
+            continue;
+        }
+
+        if ($isWorkRowType || ($itemName !== '' && $qtyRaw === '' && $unit === '' && cpms_project_unit_price_standard_group_name($itemName) !== $itemName)) {
+            $newGroup = ($tradeGroup !== '') ? $tradeGroup : (($itemName !== '') ? cpms_project_unit_price_standard_group_name($itemName) : '');
+            if ($newGroup !== '') $currentTradeGroup = $newGroup;
+            $rowNumber++;
+            continue;
+        }
+
+        if (cpms_project_unit_price_standard_is_total_row($rowText)) {
+            $rowNumber++;
+            continue;
+        }
+
+        if ($tradeGroup === '' && $currentTradeGroup !== '') $tradeGroup = $currentTradeGroup;
+        if ($locationName === '' && $currentLocation !== '') $locationName = $currentLocation;
+
+        if ($itemName === '' && trim((string)$qtyRaw) === '') {
+            if ($tradeGroup !== '' && $unit === '') $currentTradeGroup = $tradeGroup;
+            $rowNumber++;
+            continue;
+        }
+
+        $qty = cpms_project_unit_price_number_parse($qtyRaw);
+        $materialParsed = cpms_project_unit_price_number_parse($materialRaw);
+        $laborParsed = cpms_project_unit_price_number_parse($laborRaw);
+        $expenseParsed = cpms_project_unit_price_number_parse($expenseRaw);
+        $unitPriceParsed = cpms_project_unit_price_number_parse($totalRaw);
+        $amount = cpms_project_unit_price_number_parse($amountRaw);
+        $materialUnitPrice = ($materialParsed === null) ? 0.0 : $materialParsed;
+        $laborUnitPrice = ($laborParsed === null) ? 0.0 : $laborParsed;
+        $expenseUnitPrice = ($expenseParsed === null) ? 0.0 : $expenseParsed;
+        $calculatedUnitPrice = $materialUnitPrice + $laborUnitPrice + $expenseUnitPrice;
+        $priceCalculated = false;
+        if ($unitPriceParsed === null && ($materialParsed !== null || $laborParsed !== null || $expenseParsed !== null)) {
+            $unitPriceParsed = $calculatedUnitPrice;
+            $priceCalculated = true;
+        }
+        $amountCalculated = false;
+        if ($amount === null && $qty !== null && $unitPriceParsed !== null) {
+            $amount = (float)$qty * (float)$unitPriceParsed;
+            $amountCalculated = true;
+        }
+
+        $status = cpms_project_unit_price_standard_text('normal');
+        if ($itemName === '') $status = cpms_project_unit_price_standard_text('missing_item');
+        else if ($qty === null) $status = cpms_project_unit_price_standard_text('missing_qty');
+        else if ($unitPriceParsed === null) $status = cpms_project_unit_price_standard_text('missing_price');
+        else if ($priceCalculated) $status = cpms_project_unit_price_standard_text('calculated_price');
+        else if ($amountCalculated) $status = cpms_project_unit_price_standard_text('calculated_amount');
+
+        $isSafety = 0;
+        if (mb_strpos($itemName, cpms_project_unit_price_lang('safety'), 0, 'UTF-8') !== false || mb_strpos($spec, cpms_project_unit_price_lang('safety'), 0, 'UTF-8') !== false) $isSafety = 1;
+
+        $importOrder++;
+        $rowData = array(
+            'row_type' => $rowType,
+            'trade_group' => $tradeGroup,
+            'sub_trade' => $subTrade,
+            'location_name' => $locationName,
+            'work_group' => $tradeGroup,
+            'sub_work_group' => $subTrade,
+            'item_name' => $itemName,
+            'original_item_name' => $itemName,
+            'spec' => $spec,
+            'unit' => $unit,
+            'qty' => $qty,
+            'material_unit_price' => $materialUnitPrice,
+            'labor_unit_price' => $laborUnitPrice,
+            'expense_unit_price' => $expenseUnitPrice,
+            'unit_price' => $unitPriceParsed,
+            'total_unit_price' => $unitPriceParsed,
+            'calculated_unit_price' => $calculatedUnitPrice,
+            'excel_unit_price_total' => cpms_project_unit_price_number_parse($totalRaw),
+            'amount' => $amount,
+            'is_safety' => $isSafety,
+            'remark' => $remark,
+            'source_row' => $rowNumber,
+            'source_row_no' => $rowNumber,
+            'source_sheet_name' => isset($detected['sheet_name']) ? (string)$detected['sheet_name'] : '',
+            'import_order' => $importOrder,
+            'unit_price_validation' => $priceCalculated ? 'calculated' : 'ok',
+            'unit_price_validation_text' => $status,
+            'preview_status' => $status,
+            'is_importable' => ($itemName !== '' && $qty !== null && $unitPriceParsed !== null) ? 1 : 0
+        );
+        $rowData['item_fingerprint'] = cpms_project_unit_price_fingerprint($rowData);
+        array_push($rows, $rowData);
+        $rowNumber++;
+    }
+    return $rows;
+}}
+
+if (!function_exists('cpms_project_parse_standard_unit_price_from_zip')) {
+function cpms_project_parse_standard_unit_price_from_zip($zip, $sharedStrings, $sheets) {
+    $result = array('ok'=>false, 'header_found'=>false, 'rows'=>array(), 'message'=>cpms_project_unit_price_standard_text('not_standard'), 'detected_columns'=>array(), 'sheet_name'=>'', 'header_end_row'=>0, 'data_start_row'=>0, 'debug'=>array(), 'format_type'=>'standard');
+    if (!is_array($sheets) || count($sheets) === 0) return $result;
+
+    $standardName = cpms_project_unit_price_standard_text('sheet_name');
+    $orderedSheets = array();
+    foreach ($sheets as $sheet) {
+        $name = isset($sheet['name']) ? (string)$sheet['name'] : '';
+        if ($name === $standardName) array_push($orderedSheets, $sheet);
+    }
+    foreach ($sheets as $sheet) {
+        $name = isset($sheet['name']) ? (string)$sheet['name'] : '';
+        if ($name !== $standardName) array_push($orderedSheets, $sheet);
+    }
+
+    $bestMissing = array();
+    foreach ($orderedSheets as $sheet) {
+        $sheetName = isset($sheet['name']) ? (string)$sheet['name'] : '';
+        $sheetPath = isset($sheet['path']) ? (string)$sheet['path'] : '';
+        if ($sheetPath === '') continue;
+        $loaded = cpms_project_unit_price_sheet_matrix($zip, $sheetPath, $sharedStrings, 5000, 180);
+        if (empty($loaded['ok'])) continue;
+
+        $header = cpms_project_unit_price_standard_header($loaded['matrix'], (int)$loaded['max_row'], (int)$loaded['max_col']);
+        if (empty($header['ok'])) {
+            if (isset($header['found']) && (int)$header['found'] > 0) $bestMissing = isset($header['missing']) ? $header['missing'] : array();
+            continue;
+        }
+
+        $detected = array(
+            'columns' => isset($header['columns']) ? $header['columns'] : array(),
+            'sheet_name' => $sheetName,
+            'header_end_row' => (int)$header['row'],
+            'data_start_row' => ((int)$header['row']) + 1
+        );
+        $rows = cpms_project_unit_price_standard_extract_rows($loaded['matrix'], isset($loaded['yellow_cells']) ? $loaded['yellow_cells'] : array(), (int)$loaded['max_row'], (int)$loaded['max_col'], $detected);
+        $result['header_found'] = true;
+        if (count($rows) === 0) {
+            $result['message'] = cpms_project_unit_price_standard_text('no_rows');
+            return $result;
+        }
+
+        $detectedColumns = array();
+        foreach ($detected['columns'] as $field => $col) {
+            $detectedColumns[$field] = cpms_project_unit_price_col_to_letter((int)$col) . cpms_project_unit_price_lang('column_suffix');
+        }
+        $debug = array('sheet_name'=>$sheetName, 'first_rows'=>array_slice($rows, 0, 10));
+        if ($sheetName !== $standardName) $debug['notice'] = cpms_project_unit_price_standard_text('sheet_fallback');
+
+        $result['ok'] = true;
+        $result['rows'] = $rows;
+        $result['message'] = '';
+        $result['detected_columns'] = $detectedColumns;
+        $result['sheet_name'] = $sheetName;
+        $result['header_end_row'] = (int)$detected['header_end_row'];
+        $result['data_start_row'] = (int)$detected['data_start_row'];
+        $result['debug'] = $debug;
+        return $result;
+    }
+
+    if (count($bestMissing) > 0) {
+        $labels = cpms_project_unit_price_standard_labels();
+        $firstMissing = isset($bestMissing[0]) ? (string)$bestMissing[0] : '';
+        $label = isset($labels[$firstMissing]) ? $labels[$firstMissing] : $firstMissing;
+        $result['message'] = cpms_project_unit_price_standard_text('missing_column_prefix') . $label . cpms_project_unit_price_standard_text('missing_column_suffix');
+    }
+    return $result;
 }}
 
 if (!function_exists('cpms_project_parse_unit_price_xlsx')) {
@@ -1025,9 +1492,20 @@ function cpms_project_parse_unit_price_xlsx($pdo, $tmpFile) {
         return $result;
     }
 
+    $standard = cpms_project_parse_standard_unit_price_from_zip($zip, $sharedStrings, $sheets);
+    if (is_array($standard) && !empty($standard['ok'])) {
+        $zip->close();
+        return $standard;
+    }
+    if (is_array($standard) && !empty($standard['header_found'])) {
+        $zip->close();
+        $result['message'] = isset($standard['message']) ? $standard['message'] : cpms_project_unit_price_standard_text('no_rows');
+        return $result;
+    }
+
     $best = null;
     $bestScore = -1;
-    $bestMessage = cpms_project_unit_price_lang('msg_header_not_found');
+    $bestMessage = isset($standard['message']) ? $standard['message'] : cpms_project_unit_price_lang('msg_header_not_found');
 
     foreach ($sheets as $sheet) {
         $sheetName = isset($sheet['name']) ? (string)$sheet['name'] : '';
@@ -1076,5 +1554,6 @@ function cpms_project_parse_unit_price_xlsx($pdo, $tmpFile) {
     $result['header_end_row'] = isset($best['detected']['header_end_row']) ? (int)$best['detected']['header_end_row'] : 0;
     $result['data_start_row'] = isset($best['detected']['data_start_row']) ? (int)$best['detected']['data_start_row'] : 0;
     $result['debug'] = $debug;
+    $result['format_type'] = 'legacy';
     return $result;
 }}

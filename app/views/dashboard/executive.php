@@ -191,11 +191,16 @@ $myUserId = cpms_find_employee_id_by_email($pdo, $userEmail);
 $today = attendance_today();
 list($weekStart, $weekEnd) = attendance_week_range($today);
 $currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, $today) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
+$tomorrowTs = strtotime($today . ' +1 day');
+$tomorrow = ($tomorrowTs !== false) ? date('Y-m-d', $tomorrowTs) : date('Y-m-d', strtotime('+1 day'));
+$tomorrowLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, $tomorrow) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
 $risk52 = array();
 $absent = array();
 $presentPeople = array();
 $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? $currentLeaveIndex['people'] : array();
 $leaveToday = count($leavePeople);
+$leaveTomorrowPeople = isset($tomorrowLeaveIndex['people']) && is_array($tomorrowLeaveIndex['people']) ? $tomorrowLeaveIndex['people'] : array();
+$leaveTomorrow = count($leaveTomorrowPeople);
 $todayPresent = 0;
 
 $leaveExTypes = array('월차', '연차', '반차', '오전반차', '오후반차', '월차반차', '연차반차', '오전월차반차', '오후월차반차', '오전연차반차', '오후연차반차', '대체휴무', '기타휴무', '휴무');
@@ -307,6 +312,8 @@ if ($pdo) {
 
         $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? $currentLeaveIndex['people'] : array();
         $leaveToday = count($leavePeople);
+        $leaveTomorrowPeople = isset($tomorrowLeaveIndex['people']) && is_array($tomorrowLeaveIndex['people']) ? $tomorrowLeaveIndex['people'] : array();
+        $leaveTomorrow = count($leaveTomorrowPeople);
     } catch (Exception $e) {
     }
 
@@ -432,7 +439,7 @@ if ($pdo) {
                     </div>
                 </details>
             </div>
-            <div class="p-4 rounded-2xl bg-indigo-50 md:col-span-2 relative group cursor-pointer">
+            <div class="p-4 rounded-2xl bg-indigo-50 relative group cursor-pointer">
                 <div class="text-gray-600 text-lg font-bold">오늘 월차/연차/반차자 수</div>
                 <div class="text-4xl font-extrabold text-indigo-700 mt-2"><?php echo $leaveToday; ?>명</div>
                 <div class="hidden md:block absolute left-0 top-full mt-2 w-96 max-w-[92vw] p-4 rounded-2xl bg-white border border-gray-200 shadow-2xl z-[9999] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition">
@@ -455,6 +462,37 @@ if ($pdo) {
                         <?php else: ?>
                             <ul class="space-y-2">
                                 <?php foreach ($leavePeople as $person): ?>
+                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                <?php endforeach; ?>
+                            </ul>
+                        <?php endif; ?>
+                    </div>
+                </details>
+            </div>
+            <div class="p-4 rounded-2xl bg-violet-50 relative group cursor-pointer">
+                <div class="text-gray-600 text-lg font-bold">명일 월차/연차/반차자 수</div>
+                <div class="text-4xl font-extrabold text-violet-700 mt-2"><?php echo $leaveTomorrow; ?>명</div>
+                <div class="text-xs text-violet-700 font-bold mt-1"><?php echo h($tomorrow); ?> 기준</div>
+                <div class="hidden md:block absolute left-0 top-full mt-2 w-96 max-w-[92vw] p-4 rounded-2xl bg-white border border-gray-200 shadow-2xl z-[9999] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition">
+                    <div class="font-extrabold text-lg mb-2">명일 월차/연차/반차자 명단</div>
+                    <?php if (count($leaveTomorrowPeople) === 0): ?>
+                        <div class="text-base leading-8 text-gray-700">명일 월차/연차/반차자는 없습니다.</div>
+                    <?php else: ?>
+                        <ul class="space-y-2">
+                            <?php foreach ($leaveTomorrowPeople as $person): ?>
+                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    <?php endif; ?>
+                </div>
+                <details class="md:hidden mt-3">
+                    <summary class="inline-block px-3 py-2 rounded-xl bg-violet-100 text-base font-bold">명단 보기</summary>
+                    <div class="mt-3 p-3 rounded-xl bg-white border border-gray-200">
+                        <?php if (count($leaveTomorrowPeople) === 0): ?>
+                            <div class="text-base leading-8 text-gray-700">명일 월차/연차/반차자는 없습니다.</div>
+                        <?php else: ?>
+                            <ul class="space-y-2">
+                                <?php foreach ($leaveTomorrowPeople as $person): ?>
                                     <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                                 <?php endforeach; ?>
                             </ul>

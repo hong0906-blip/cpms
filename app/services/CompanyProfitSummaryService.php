@@ -696,6 +696,34 @@ function cpms_company_profit_build_period_rows($projectRows, $months, $viewMode,
     return array_values($rows);
 }}
 
+if (!function_exists('cpms_company_profit_safety_cost_total_summary')) {
+function cpms_company_profit_safety_cost_total_summary($pdo, $projects) {
+    $summary = array(
+        'project_count' => 0,
+        'contract_total' => 0.0,
+        'limit_110' => 0.0,
+        'used_total' => 0.0,
+        'remaining' => 0.0,
+        'use_rate' => 0.0,
+        'remaining_rate' => 0.0,
+        'limit_use_rate' => 0.0,
+    );
+    if (!$pdo || !is_array($projects)) return $summary;
+    foreach ($projects as $project) {
+        $projectId = isset($project['id']) ? (int)$project['id'] : 0;
+        if ($projectId <= 0) continue;
+        $summary['project_count']++;
+        $summary['contract_total'] += function_exists('cpms_safety_cost_contract_total') ? (float)cpms_safety_cost_contract_total($pdo, $projectId) : 0.0;
+        $summary['used_total'] += function_exists('cpms_safety_cost_total') ? (float)cpms_safety_cost_total($projectId) : 0.0;
+    }
+    $summary['limit_110'] = round($summary['contract_total'] * 1.1);
+    $summary['remaining'] = $summary['limit_110'] - $summary['used_total'];
+    $summary['use_rate'] = ($summary['contract_total'] > 0) ? (($summary['used_total'] / $summary['contract_total']) * 100) : 0.0;
+    $summary['remaining_rate'] = ($summary['limit_110'] > 0) ? (($summary['remaining'] / $summary['limit_110']) * 100) : 0.0;
+    $summary['limit_use_rate'] = ($summary['limit_110'] > 0) ? (($summary['used_total'] / $summary['limit_110']) * 100) : 0.0;
+    return $summary;
+}}
+
 if (!function_exists('cpms_company_profit_build_dashboard')) {
 function cpms_company_profit_build_dashboard($pdo, $request) {
     $filters = cpms_company_profit_normalize_filters(is_array($request) ? $request : array(), $pdo);
@@ -741,6 +769,16 @@ function cpms_company_profit_build_dashboard($pdo, $request) {
         'projects' => array(),
         'period_rows' => array(),
         'overhead' => $overheadSummary,
+        'safety_cost' => array(
+            'project_count' => 0,
+            'contract_total' => 0.0,
+            'limit_110' => 0.0,
+            'used_total' => 0.0,
+            'remaining' => 0.0,
+            'use_rate' => 0.0,
+            'remaining_rate' => 0.0,
+            'limit_use_rate' => 0.0,
+        ),
         'totals' => array(
             'sales' => 0.0,
             'project_input_cost' => 0.0,
@@ -761,6 +799,8 @@ function cpms_company_profit_build_dashboard($pdo, $request) {
     }
 
     $projects = cpms_company_profit_load_projects($pdo, $filters);
+    $safetyProjects = cpms_company_profit_load_projects($pdo, array('status' => '', 'q' => ''));
+    $result['safety_cost'] = cpms_company_profit_safety_cost_total_summary($pdo, $safetyProjects);
     foreach ($projects as $project) {
         try {
             $projectSummary = cpms_company_profit_project_summary($pdo, $project, $months);

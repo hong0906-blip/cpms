@@ -330,6 +330,7 @@ function cpms_render_employee_task_dashboard($pdo)
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">담당자 검색</div>
                             <input type="text" id="taskAssigneeSearch" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="이름 / 부서 / 직책 검색">
+                            <div id="taskAssigneeSelected" class="mt-2 flex flex-wrap gap-2 text-sm"></div>
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">담당자</div>
@@ -409,6 +410,7 @@ function cpms_render_employee_task_dashboard($pdo)
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">참석자 검색</div>
                             <input type="text" id="meetingAssigneeSearch" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="이름 / 부서 / 직책 검색">
+                            <div id="meetingAssigneeSelected" class="mt-2 flex flex-wrap gap-2 text-sm"></div>
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">참석자</div>
@@ -561,6 +563,8 @@ function cpms_render_employee_task_dashboard($pdo)
         var assigneeSelect = document.getElementById('taskAssigneeSelect');
         var meetingAssigneeSearch = document.getElementById('meetingAssigneeSearch');
         var meetingAssigneeSelect = document.getElementById('meetingAssigneeSelect');
+        var assigneeSelected = document.getElementById('taskAssigneeSelected');
+        var meetingAssigneeSelected = document.getElementById('meetingAssigneeSelected');
         var departmentSelect = document.getElementById('taskDepartmentSelect');
         var onLeaveMessage = <?php echo json_encode(approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?>;
         var taskDetailBody = document.getElementById('taskDetailBody');
@@ -598,20 +602,76 @@ function cpms_render_employee_task_dashboard($pdo)
             return selected;
         }
 
-        function setupAssigneePicker(searchInput, select, targetDepartmentSelect, emptyMessage) {
+        function assigneeOptionLabel(option) {
+            if (!option) return '';
+            return (option.text || '').replace(/^\s+|\s+$/g, '');
+        }
+
+        function dispatchAssigneeChange(select) {
+            var eventObj = document.createEvent('HTMLEvents');
+            eventObj.initEvent('change', true, false);
+            select.dispatchEvent(eventObj);
+        }
+
+        function applyAssigneeSearchFilter(searchInput, select) {
+            if (!select || !select.options) return;
+            var keyword = searchInput ? searchInput.value.replace(/^\s+|\s+$/g, '').toLowerCase() : '';
+            var options = select.options;
+            for (var i = 0; i < options.length; i++) {
+                var option = options[i];
+                if (!option.value) continue;
+                var matched = keyword === '' || option.text.toLowerCase().indexOf(keyword) >= 0;
+                option.hidden = !(matched || option.selected);
+            }
+        }
+
+        function renderSelectedAssignees(select, selectedWrap, emptyText) {
+            if (!selectedWrap) return;
+            selectedWrap.innerHTML = '';
+            var selected = selectedAssigneeOptions(select);
+            if (selected.length === 0) {
+                var empty = document.createElement('div');
+                empty.className = 'w-full px-3 py-2 rounded-xl bg-gray-50 border border-dashed border-gray-200 text-gray-500';
+                empty.textContent = emptyText || '선택된 담당자가 없습니다.';
+                selectedWrap.appendChild(empty);
+                return;
+            }
+            for (var i = 0; i < selected.length; i++) {
+                var chip = document.createElement('span');
+                chip.className = 'inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 font-bold';
+
+                var label = document.createElement('span');
+                label.textContent = assigneeOptionLabel(selected[i]);
+                chip.appendChild(label);
+
+                var removeButton = document.createElement('button');
+                removeButton.type = 'button';
+                removeButton.className = 'px-2 py-1 rounded-lg bg-white border border-blue-200 text-blue-700';
+                removeButton.setAttribute('data-assignee-remove', selected[i].value);
+                removeButton.textContent = '삭제';
+                chip.appendChild(removeButton);
+
+                selectedWrap.appendChild(chip);
+            }
+        }
+
+        function setupAssigneePicker(searchInput, select, targetDepartmentSelect, emptyMessage, selectedWrap, selectedEmptyText) {
             if (!select) return;
             if (searchInput) {
                 searchInput.addEventListener('input', function(){
-                    var keyword = searchInput.value.replace(/^\s+|\s+$/g, '').toLowerCase();
-                    var options = select.options;
-                    for (var i = 0; i < options.length; i++) {
-                        var option = options[i];
-                        if (!option.value) continue;
-                        var matched = keyword === '' || option.text.toLowerCase().indexOf(keyword) >= 0;
-                        option.hidden = !matched;
-                    }
+                    applyAssigneeSearchFilter(searchInput, select);
+                    renderSelectedAssignees(select, selectedWrap, selectedEmptyText);
                 });
             }
+
+            select.addEventListener('mousedown', function(e){
+                var option = e.target && e.target.tagName === 'OPTION' ? e.target : null;
+                if (!option || !option.value || option.disabled) return;
+                e.preventDefault();
+                select.focus();
+                option.selected = !option.selected;
+                dispatchAssigneeChange(select);
+            });
 
             select.addEventListener('change', function(){
                 var selected = selectedAssigneeOptions(select);
@@ -628,7 +688,25 @@ function cpms_render_employee_task_dashboard($pdo)
                     var dept = firstAvailable.getAttribute('data-department') || '';
                     targetDepartmentSelect.value = dept;
                 }
+                applyAssigneeSearchFilter(searchInput, select);
+                renderSelectedAssignees(select, selectedWrap, selectedEmptyText);
             });
+
+            if (selectedWrap) {
+                selectedWrap.addEventListener('click', function(e){
+                    var removeButton = e.target && e.target.closest ? e.target.closest('[data-assignee-remove]') : null;
+                    if (!removeButton) return;
+                    e.preventDefault();
+                    var removeValue = removeButton.getAttribute('data-assignee-remove');
+                    for (var i = 0; i < select.options.length; i++) {
+                        if (select.options[i].value === removeValue) {
+                            select.options[i].selected = false;
+                            break;
+                        }
+                    }
+                    dispatchAssigneeChange(select);
+                });
+            }
 
             if (select.form) {
                 select.form.addEventListener('submit', function(e){
@@ -648,10 +726,12 @@ function cpms_render_employee_task_dashboard($pdo)
                     }
                 });
             }
+            applyAssigneeSearchFilter(searchInput, select);
+            renderSelectedAssignees(select, selectedWrap, selectedEmptyText);
         }
 
-        setupAssigneePicker(assigneeSearch, assigneeSelect, departmentSelect, '담당자를 선택해주세요.');
-        setupAssigneePicker(meetingAssigneeSearch, meetingAssigneeSelect, null, '참석자를 선택해주세요.');
+        setupAssigneePicker(assigneeSearch, assigneeSelect, departmentSelect, '담당자를 선택해주세요.', assigneeSelected, '선택된 담당자가 없습니다.');
+        setupAssigneePicker(meetingAssigneeSearch, meetingAssigneeSelect, null, '참석자를 선택해주세요.', meetingAssigneeSelected, '선택된 참석자가 없습니다.');
 
         function openCompleteModal(taskId) {
             if (completeTaskId) completeTaskId.value = taskId;

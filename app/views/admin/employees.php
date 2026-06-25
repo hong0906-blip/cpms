@@ -21,7 +21,24 @@ if ($dbOk) {
     cpms_leave_apply_accruals_until($pdo, date('Y-m-d'));
 }
 
+if (!function_exists('cpms_employee_can_assign_development_department')) {
+function cpms_employee_can_assign_development_department() {
+    if (Auth::isMaster()) return true;
+    $values = array(Auth::userRole(), Auth::userPosition(), Auth::userName());
+    $words = array('대표', '대표이사', '부사장');
+    for ($i = 0; $i < count($values); $i++) {
+        $value = trim((string)$values[$i]);
+        if ($value === '') continue;
+        for ($j = 0; $j < count($words); $j++) {
+            if (strpos($value, $words[$j]) !== false) return true;
+        }
+    }
+    return false;
+}}
+
+$canAssignDevelopmentDept = cpms_employee_can_assign_development_department();
 $deptOptions = array('관리', '공무', '품질', '안전', '공사');
+if ($canAssignDevelopmentDept) $deptOptions[] = '개발';
 $positionOptions = array('주임','대리','과장','차장','부장','이사','전무','상무','부사장','고문','대표');
 
 if (!function_exists('cpms_balance_badge')) {

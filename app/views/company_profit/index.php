@@ -131,6 +131,7 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
   <?php endif; ?>
 
   <?php require __DIR__ . '/_summary_cards.php'; ?>
+  <?php require __DIR__ . '/_safety_cost_summary.php'; ?>
   <?php require __DIR__ . '/_period_graph.php'; ?>
   <?php require __DIR__ . '/_horizontal_graph.php'; ?>
   <?php require __DIR__ . '/_project_profit_rows.php'; ?>

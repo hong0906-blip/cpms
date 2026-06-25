@@ -394,7 +394,9 @@ if (!function_exists('cpms_map_gongsu_columns')) {
             'date' => array('work_date', 'attendance_date', 'date', 'workday', 'gongsu_date', 'workday_date'),
             'gongsu' => array('total_gongsu', 'gongsu', 'man_days', 'total_man_days', 'man_day', 'work_days', 'work_day'),
             'printed' => array('printed', 'print_yn', 'printed_yn', 'output_yn', 'is_printed', 'print_flag'),
-            'role' => array('role', 'job', 'position', 'duty', 'work_type', 'type', 'category', 'worker_role'),        
+            'role' => array('role', 'job', 'position', 'duty', 'work_type', 'type', 'category', 'worker_role'),
+            'start_time' => array('start_time_phone', 'start_time', 'clock_in', 'check_in', 'in_time', 'start_dt'),
+            'end_time' => array('stop_time_phone', 'end_time', 'clock_out', 'check_out', 'out_time', 'stop_dt'),
             );
 
         foreach ($aliases as $key => $list) {
@@ -595,6 +597,7 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
             'output_days' => array(),
             'excluded_workers' => array(),
             'role_map' => array(),
+            'time_map' => array(),
             );
 
         if (!$attendancePdo || $projectName === '' || $selectedMonth === '') return $result;
@@ -690,6 +693,7 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
 
         $workers = array();           // key => name
         $gongsuMap = array();         // key => [Y-m-d => gongsu]
+        $timeMap = array();           // key => [Y-m-d => 출근/퇴근시간]
         $outputDaysSet = array();     // key => [Y-m-d => true]
         $sumGongsu = array();         // key => float sum
 
@@ -720,6 +724,15 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
             if ($startTs === false) continue;
             $dateKey = date('Y-m-d', $startTs);
             if (strpos($dateKey, $selectedMonth) !== 0) continue;
+            if (!isset($timeMap[$key])) $timeMap[$key] = array();
+            if (!isset($timeMap[$key][$dateKey])) {
+                $timeMap[$key][$dateKey] = array('start' => $startPhone, 'end' => $stopPhone);
+            } else {
+                $oldStart = isset($timeMap[$key][$dateKey]['start']) ? (string)$timeMap[$key][$dateKey]['start'] : '';
+                $oldEnd = isset($timeMap[$key][$dateKey]['end']) ? (string)$timeMap[$key][$dateKey]['end'] : '';
+                if ($oldStart === '' || strtotime($startPhone) < strtotime($oldStart)) $timeMap[$key][$dateKey]['start'] = $startPhone;
+                if ($stopPhone !== '' && ($oldEnd === '' || strtotime($stopPhone) > strtotime($oldEnd))) $timeMap[$key][$dateKey]['end'] = $stopPhone;
+            }
 
             // 3-2) 공수탭 자동 입력은 "퇴근완료(done)"만
             $status = isset($row['status']) ? (string)$row['status'] : '';
@@ -785,6 +798,7 @@ if (!function_exists('cpms_load_gongsu_data_from_attendance_records')) {
         $result['output_days'] = $outputDays;
         $result['excluded_workers'] = array_values($excludedWorkers);
         $result['role_map'] = $roleMap;
+        $result['time_map'] = $timeMap;
         $cache[$cacheKey] = $result;
 
         return $result;
@@ -801,6 +815,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
             'output_days' => array(),
             'excluded_workers' => array(),
             'role_map' => array(),
+            'time_map' => array(),
         );
 
         $projectName = trim((string)$projectName);
@@ -849,6 +864,12 @@ if (!function_exists('cpms_load_gongsu_data')) {
         if (isset($cols['role'])) {
             $sql .= ", `" . $cols['role'] . "` AS role_value";
         }
+        if (isset($cols['start_time'])) {
+            $sql .= ", `" . $cols['start_time'] . "` AS start_time_value";
+        }
+        if (isset($cols['end_time'])) {
+            $sql .= ", `" . $cols['end_time'] . "` AS end_time_value";
+        }
         $sql .= " FROM `" . $table . "` WHERE `" . $cols['site'] . "` = :site AND `" . $cols['date'] . "` LIKE :month";
 
         try {
@@ -866,6 +887,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
         $excludedWorkers = array();
         $roleMap = array();
         $gongsuMap = array();
+        $timeMap = array();
         $gongsuUnit = array();
         $outputDays = array();
 
@@ -906,6 +928,12 @@ if (!function_exists('cpms_load_gongsu_data')) {
             if (!isset($gongsuMap[$key])) $gongsuMap[$key] = array();
 
             $gongsuMap[$key][$workDate] = $gongsuValue;
+            $startTimeValue = isset($row['start_time_value']) ? trim((string)$row['start_time_value']) : '';
+            $endTimeValue = isset($row['end_time_value']) ? trim((string)$row['end_time_value']) : '';
+            if ($startTimeValue !== '' || $endTimeValue !== '') {
+                if (!isset($timeMap[$key])) $timeMap[$key] = array();
+                $timeMap[$key][$workDate] = array('start' => $startTimeValue, 'end' => $endTimeValue);
+            }
 
             if (!isset($outputDays[$key])) $outputDays[$key] = 0;
             $outputDays[$key] += 1;
@@ -962,6 +990,7 @@ if (!function_exists('cpms_load_gongsu_data')) {
         $result['output_days'] = $outputDays;
         $result['excluded_workers'] = array_values($excludedWorkers);
         $result['role_map'] = $roleMap;
+        $result['time_map'] = $timeMap;
 
         $cache[$cacheKey] = $result;
         return $result;

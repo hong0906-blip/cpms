@@ -130,6 +130,9 @@ $editingId = isset($_GET['work_id']) ? (int)$_GET['work_id'] : 0;
 $editingRow = null;
 $editingLineMap = array();
 $editingScheduleCount = 0;
+$workViewMode = (isset($_GET['work_view']) && (string)$_GET['work_view'] === 'trade') ? 'trade' : 'location';
+$workViewUrlBase = base_url() . '/?r=공사&pid=' . (int)$pid . '&tab=work';
+if ($editingId > 0) $workViewUrlBase .= '&work_id=' . (int)$editingId;
 if ($editingId > 0) {
     foreach ($workItems as $it) {
         if ((int)$it['id'] === $editingId) { $editingRow = $it; break; }
@@ -225,6 +228,10 @@ if ($editingId > 0) {
 
                 <div>
                     <div class="text-xs font-bold text-gray-600 mb-2">내역서 항목 묶기 (선택)</div>
+                    <div class="mb-3 flex flex-wrap items-center gap-2">
+                        <a href="<?php echo h($workViewUrlBase . '&work_view=location'); ?>" class="px-3 py-2 rounded-xl border text-xs font-extrabold <?php echo ($workViewMode === 'location') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'; ?>">위치별 보기</a>
+                        <a href="<?php echo h($workViewUrlBase . '&work_view=trade'); ?>" class="px-3 py-2 rounded-xl border text-xs font-extrabold <?php echo ($workViewMode === 'trade') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-300'; ?>">공종별 보기</a>
+                    </div>
                     <div class="mb-3 grid grid-cols-1 md:grid-cols-3 gap-2">
                         <div class="md:col-span-2">
                             <label class="text-xs font-bold text-gray-600">내역서 검색</label>
@@ -264,8 +271,13 @@ if ($editingId > 0) {
                                     $tradeGroup = isset($u['trade_group']) ? trim((string)$u['trade_group']) : '';
                                     $subTrade = isset($u['sub_trade']) ? trim((string)$u['sub_trade']) : '';
                                     $locationName = isset($u['location_name']) ? trim((string)$u['location_name']) : '';
-                                    $groupLabel = ($locationName !== '') ? ('위치별 보기: ' . $locationName) : ('공종그룹별 보기: ' . ($tradeGroup !== '' ? $tradeGroup : '미분류'));
-                                    $groupKey = ($locationName !== '') ? ('loc:' . $locationName) : ('trade:' . $tradeGroup);
+                                    if ($workViewMode === 'trade') {
+                                        $groupLabel = '공종별 보기: ' . ($tradeGroup !== '' ? $tradeGroup : '미분류');
+                                        $groupKey = 'trade:' . $tradeGroup;
+                                    } else {
+                                        $groupLabel = ($locationName !== '') ? ('위치별 보기: ' . $locationName) : ('공종그룹별 보기: ' . ($tradeGroup !== '' ? $tradeGroup : '미분류'));
+                                        $groupKey = ($locationName !== '') ? ('loc:' . $locationName) : ('trade:' . $tradeGroup);
+                                    }
                                     $sel = isset($editingLineMap[$uid]);
                                     $unitPriceDisplay = isset($u['unit_price_total']) ? (float)$u['unit_price_total'] : cpms_work_unit_price_value($u);
                                     $contractQty = isset($u['contract_quantity']) ? (float)$u['contract_quantity'] : (isset($u['qty']) ? (float)$u['qty'] : 0.0);

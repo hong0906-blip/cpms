@@ -91,6 +91,111 @@ function cpms_contract_change_row_key_empty($key) {
 }
 }
 
+if (!function_exists('cpms_contract_change_match_value')) {
+function cpms_contract_change_match_value($row, $field) {
+    if (!is_array($row)) return '';
+    if (isset($row[$field])) return cpms_contract_change_normalize_value($row[$field]);
+    if ($field === 'trade_group' && isset($row['work_group'])) return cpms_contract_change_normalize_value($row['work_group']);
+    if ($field === 'sub_trade' && isset($row['sub_work_group'])) return cpms_contract_change_normalize_value($row['sub_work_group']);
+    return '';
+}
+}
+
+if (!function_exists('cpms_contract_change_item_fingerprint')) {
+function cpms_contract_change_item_fingerprint($row) {
+    if (!is_array($row)) return '';
+    $fingerprint = isset($row['item_fingerprint']) ? trim((string)$row['item_fingerprint']) : '';
+    if ($fingerprint !== '') return $fingerprint;
+    $parts = array();
+    foreach (array('trade_group', 'sub_trade', 'location_name', 'item_name', 'spec', 'unit') as $field) {
+        array_push($parts, cpms_contract_change_match_value($row, $field));
+    }
+    $joined = implode('|', $parts);
+    if (cpms_contract_change_row_key_empty($joined)) return '';
+    return sha1($joined);
+}
+}
+
+if (!function_exists('cpms_contract_change_match_key_for_fields')) {
+function cpms_contract_change_match_key_for_fields($row, $fields) {
+    if (!is_array($fields)) return '';
+    $parts = array();
+    foreach ($fields as $field) {
+        array_push($parts, cpms_contract_change_match_value($row, $field));
+    }
+    $joined = implode('|', $parts);
+    if (cpms_contract_change_row_key_empty($joined)) return '';
+    return $joined;
+}
+}
+
+if (!function_exists('cpms_contract_change_match_keys')) {
+function cpms_contract_change_match_keys($row) {
+    $keys = array();
+    $fingerprint = cpms_contract_change_item_fingerprint($row);
+    $keys['fingerprint'] = ($fingerprint !== '') ? ('fp:' . $fingerprint) : '';
+    $keys['full'] = cpms_contract_change_match_key_for_fields($row, array('trade_group', 'sub_trade', 'location_name', 'item_name', 'spec', 'unit'));
+    $keys['without_sub'] = cpms_contract_change_match_key_for_fields($row, array('trade_group', 'location_name', 'item_name', 'spec', 'unit'));
+    $keys['location_item'] = cpms_contract_change_match_key_for_fields($row, array('location_name', 'item_name', 'spec', 'unit'));
+    $keys['item_only'] = cpms_contract_change_match_key_for_fields($row, array('item_name', 'spec', 'unit'));
+    return $keys;
+}
+}
+
+if (!function_exists('cpms_contract_change_build_match_maps')) {
+function cpms_contract_change_build_match_maps($rows) {
+    $activeRows = array();
+    $maps = array(
+        'fingerprint' => array(),
+        'full' => array(),
+        'without_sub' => array(),
+        'location_item' => array(),
+        'item_only' => array()
+    );
+    if (!is_array($rows)) $rows = array();
+    foreach ($rows as $row) {
+        if (!is_array($row)) continue;
+        if (isset($row['is_active']) && (int)$row['is_active'] === 0) continue;
+        if (isset($row['is_current']) && (int)$row['is_current'] === 0) continue;
+        $index = count($activeRows);
+        $activeRows[$index] = $row;
+        $keys = cpms_contract_change_match_keys($row);
+        foreach ($maps as $priority => $mapRows) {
+            $key = isset($keys[$priority]) ? (string)$keys[$priority] : '';
+            if ($key === '') continue;
+            if (!isset($maps[$priority][$key])) $maps[$priority][$key] = array();
+            array_push($maps[$priority][$key], $index);
+        }
+    }
+    return array('rows'=>$activeRows, 'maps'=>$maps);
+}
+}
+
+if (!function_exists('cpms_contract_change_pick_match')) {
+function cpms_contract_change_pick_match($matchData, $row, $usedOld) {
+    $empty = array('index'=>-1, 'priority'=>'', 'ambiguous'=>false, 'candidates'=>array());
+    if (!is_array($matchData) || !isset($matchData['maps']) || !is_array($matchData['maps'])) return $empty;
+    if (!is_array($usedOld)) $usedOld = array();
+    $keys = cpms_contract_change_match_keys($row);
+    foreach (array('fingerprint', 'full', 'without_sub', 'location_item', 'item_only') as $priority) {
+        $key = isset($keys[$priority]) ? (string)$keys[$priority] : '';
+        if ($key === '') continue;
+        if (!isset($matchData['maps'][$priority][$key])) continue;
+        $candidates = array();
+        foreach ($matchData['maps'][$priority][$key] as $candidate) {
+            if (!isset($usedOld[$candidate])) array_push($candidates, (int)$candidate);
+        }
+        if (count($candidates) === 1) {
+            return array('index'=>(int)$candidates[0], 'priority'=>$priority, 'ambiguous'=>false, 'candidates'=>$candidates);
+        }
+        if (count($candidates) > 1) {
+            return array('index'=>(int)$candidates[0], 'priority'=>$priority, 'ambiguous'=>true, 'candidates'=>$candidates);
+        }
+    }
+    return $empty;
+}
+}
+
 if (!function_exists('cpms_contract_change_fmt')) {
 function cpms_contract_change_fmt($value) {
     if ($value === null || $value === '') return '';
@@ -115,18 +220,8 @@ function cpms_contract_change_compare_rows($oldRows, $newRows) {
     if (!is_array($oldRows)) $oldRows = array();
     if (!is_array($newRows)) $newRows = array();
 
-    $oldMap = array();
-    $activeOldRows = array();
-    foreach ($oldRows as $oldIndex => $oldRow) {
-        if (!is_array($oldRow)) continue;
-        if (isset($oldRow['is_active']) && (int)$oldRow['is_active'] === 0) continue;
-        $activeIndex = count($activeOldRows);
-        $activeOldRows[$activeIndex] = $oldRow;
-        $key = cpms_contract_change_row_key($oldRow);
-        if (cpms_contract_change_row_key_empty($key)) continue;
-        if (!isset($oldMap[$key])) $oldMap[$key] = array();
-        array_push($oldMap[$key], $activeIndex);
-    }
+    $matchData = cpms_contract_change_build_match_maps($oldRows);
+    $activeOldRows = isset($matchData['rows']) && is_array($matchData['rows']) ? $matchData['rows'] : array();
 
     $usedOld = array();
     $changes = array();
@@ -136,24 +231,18 @@ function cpms_contract_change_compare_rows($oldRows, $newRows) {
         'inserted' => 0,
         'excluded' => 0,
         'unit_price_changed' => 0,
+        'amount_changed' => 0,
         'quantity_increased' => 0,
         'quantity_decreased' => 0
     );
 
     foreach ($newRows as $newRow) {
         if (!is_array($newRow)) continue;
-        $key = cpms_contract_change_row_key($newRow);
+        $key = cpms_contract_change_match_key_for_fields($newRow, array('item_name', 'spec', 'unit'));
         if (cpms_contract_change_row_key_empty($key)) continue;
 
-        $matchIndex = -1;
-        if (isset($oldMap[$key])) {
-            foreach ($oldMap[$key] as $candidate) {
-                if (!isset($usedOld[$candidate])) {
-                    $matchIndex = (int)$candidate;
-                    break;
-                }
-            }
-        }
+        $match = cpms_contract_change_pick_match($matchData, $newRow, $usedOld);
+        $matchIndex = isset($match['index']) ? (int)$match['index'] : -1;
 
         if ($matchIndex < 0 || !isset($activeOldRows[$matchIndex])) {
             $summary['inserted']++;
@@ -170,6 +259,10 @@ function cpms_contract_change_compare_rows($oldRows, $newRows) {
         $usedOld[$matchIndex] = 1;
         $oldRow = $activeOldRows[$matchIndex];
         $badges = array();
+        $matchPriority = isset($match['priority']) ? (string)$match['priority'] : '';
+        if (!empty($match['ambiguous'])) {
+            array_push($badges, cpms_contract_change_badge('MATCH_AMBIGUOUS', '기존항목 연결 확인', null, null));
+        }
 
         $oldUnitPrice = cpms_contract_change_unit_price_value($oldRow);
         $newUnitPrice = cpms_contract_change_unit_price_value($newRow);
@@ -192,6 +285,13 @@ function cpms_contract_change_compare_rows($oldRows, $newRows) {
             }
         }
 
+        $oldAmount = isset($oldRow['amount']) ? $oldRow['amount'] : null;
+        $newAmount = isset($newRow['amount']) ? $newRow['amount'] : null;
+        if (!cpms_contract_change_number_same($oldAmount, $newAmount)) {
+            $summary['amount_changed']++;
+            array_push($badges, cpms_contract_change_badge('AMOUNT_CHANGED', '금액 변경', $oldAmount, $newAmount));
+        }
+
         if (count($badges) > 0) $summary['changed']++;
         else $summary['kept']++;
 
@@ -200,7 +300,9 @@ function cpms_contract_change_compare_rows($oldRows, $newRows) {
             'old_id' => isset($oldRow['id']) ? (int)$oldRow['id'] : 0,
             'old_row' => $oldRow,
             'row' => $newRow,
-            'badges' => $badges
+            'badges' => $badges,
+            'match_priority' => $matchPriority,
+            'match_ambiguous' => !empty($match['ambiguous']) ? 1 : 0
         ));
     }
 
@@ -248,6 +350,9 @@ function cpms_contract_change_badges_from_log($row) {
     }
     if ($type === 'QUANTITY_DECREASED') {
         return array(cpms_contract_change_badge('QUANTITY_DECREASED', '수량 감소', isset($row['old_quantity']) ? $row['old_quantity'] : null, isset($row['new_quantity']) ? $row['new_quantity'] : null));
+    }
+    if ($type === 'AMOUNT_CHANGED') {
+        return array(cpms_contract_change_badge('AMOUNT_CHANGED', '금액 변경', isset($row['old_amount']) ? $row['old_amount'] : null, isset($row['new_amount']) ? $row['new_amount'] : null));
     }
     if ($type === 'SPEC_CHANGED') return array(cpms_contract_change_badge('SPEC_CHANGED', '규격 변경', null, null));
     if ($type === 'UNIT_CHANGED') return array(cpms_contract_change_badge('UNIT_CHANGED', '단위 변경', null, null));

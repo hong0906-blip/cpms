@@ -99,25 +99,26 @@ if (!$project) {
     $selectedPid = (int)$project['id'];
 }
 
-$tab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'gantt';
-if ($tab === '') $tab = 'gantt';
+$defaultTab = 'status';
+$tab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : $defaultTab;
+if ($tab === '') $tab = $defaultTab;
 
 $tabs = array(
     // 상황 탭 추가
     'status'   => '상황',    
+    'monthly_input' => '투입비 상세',
     'roles'    => '담당지정',
     'gantt'    => '공정표',
     'work'     => '작업',    
     'labor'    => '노무비',
     'equipment'=> '장비',
     'materials'=> '자재구입비',
-    'monthly_input' => '투입비 상세',
     'issues'   => '이슈',
     'safety'   => '안전사고',
 );
-if (!isset($tabs[$tab])) $tab = 'gantt';
+if (!isset($tabs[$tab])) $tab = $defaultTab;
 
-$canEditSchedule = Auth::canManageConstruction(); // 요구사항: 공사팀+임원만
+$canEditSchedule = Auth::canManageConstruction(); // 공사/공무/임원 수정 권한
 
 $flash = flash_get();
 

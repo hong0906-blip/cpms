@@ -87,9 +87,25 @@ try {
     $st->bindValue(':pid', $pid, PDO::PARAM_INT);
     $st->execute();
 
-    $st = $pdo->prepare('DELETE FROM cpms_project_unit_prices WHERE project_id=:pid');
-    $st->bindValue(':pid', $pid, PDO::PARAM_INT);
-    $st->execute();
+    $canSoftHideUnitPrices = false;
+    try {
+        $stCheckActive = $pdo->prepare("SHOW COLUMNS FROM cpms_project_unit_prices LIKE :col");
+        $stCheckActive->bindValue(':col', 'is_active');
+        $stCheckActive->execute();
+        $hasActiveColumn = is_array($stCheckActive->fetch(PDO::FETCH_ASSOC));
+        $stCheckCurrent = $pdo->prepare("SHOW COLUMNS FROM cpms_project_unit_prices LIKE :col");
+        $stCheckCurrent->bindValue(':col', 'is_current');
+        $stCheckCurrent->execute();
+        $hasCurrentColumn = is_array($stCheckCurrent->fetch(PDO::FETCH_ASSOC));
+        $canSoftHideUnitPrices = ($hasActiveColumn && $hasCurrentColumn);
+    } catch (Exception $e) {
+        $canSoftHideUnitPrices = false;
+    }
+    if ($canSoftHideUnitPrices) {
+        $st = $pdo->prepare('UPDATE cpms_project_unit_prices SET is_active = 0, is_current = 0, updated_at = NOW() WHERE project_id=:pid');
+        $st->bindValue(':pid', $pid, PDO::PARAM_INT);
+        $st->execute();
+    }
 
     // 3) 단가표(총액 1,000만원)
     $st = $pdo->prepare('INSERT INTO cpms_project_unit_prices(project_id, item_name, spec, unit, qty, unit_price, labor_unit_price, material_unit_price, safety_unit_price, is_safety, remark) VALUES(:pid,:name,:spec,:unit,:qty,:up,:labor,:material,:safety,:is_safety,:remark)');

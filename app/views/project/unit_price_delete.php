@@ -52,13 +52,30 @@ if (!$pdo) {
     exit;
 }
 
+function cpms_unit_price_delete_column_exists($pdo, $column) {
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM cpms_project_unit_prices LIKE :col");
+        $st->bindValue(':col', (string)$column);
+        $st->execute();
+        return is_array($st->fetch(PDO::FETCH_ASSOC));
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
 try {
-    $st = $pdo->prepare("DELETE FROM cpms_project_unit_prices WHERE id = :id AND project_id = :pid");
+    if (!cpms_unit_price_delete_column_exists($pdo, 'is_active') || !cpms_unit_price_delete_column_exists($pdo, 'is_current')) {
+        flash_set('error', '내역서 이력 보존 컬럼이 없습니다. db_setup_estimate_versions 페이지에서 DB 생성/확인을 먼저 실행해주세요.');
+        header('Location: ?r=project/detail&id=' . $projectId);
+        exit;
+    }
+
+    $st = $pdo->prepare("UPDATE cpms_project_unit_prices SET is_active = 0, is_current = 0, updated_at = NOW() WHERE id = :id AND project_id = :pid");
     $st->bindValue(':id', $id, PDO::PARAM_INT);
     $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $st->execute();
 
-    flash_set('success', '삭제되었습니다.');
+    flash_set('success', '내역서 항목을 현재 적용 내역에서 제외했습니다. 기존 이력은 보존됩니다.');
     header('Location: ?r=project/detail&id=' . $projectId);
     exit;
 

@@ -48,6 +48,8 @@ $pos = ($user && isset($user['position'])) ? trim((string)$user['position']) : '
 $deptMap = array(
   '관리부' => '관리',
   '공무부' => '공무',
+  '개발부' => '개발',
+  '개발팀' => '개발',
   '품질부' => '품질',
   '안전부' => '안전',
   '공사부' => '공사',
@@ -56,6 +58,8 @@ $deptMap = array(
 );
 if (isset($deptMap[$dept])) $dept = $deptMap[$dept];
 if (substr($dept, -1) === '부') $dept = substr($dept, 0, -1);
+$isMasterUser = \App\Core\Auth::isMaster();
+$isPublicAffairsDept = ($dept === '공무' && !$isMasterUser);
 
 $parts = array();
 if ($role === 'executive') $parts[] = '임원';
@@ -73,7 +77,15 @@ $menuItems = array(
   array('id'=>$safetyMenu,'label'=>$safetyMenu,'icon'=>'shield-alert','gradient'=>'from-red-500 to-rose-500','iconBg'=>'bg-gradient-to-br from-red-100 to-rose-100','iconColor'=>'text-red-600','hoverShadow'=>'hover:shadow-red-200'),
   array('id'=>$qualityMenu,'label'=>$qualityMenu,'icon'=>'award','gradient'=>'from-cyan-500 to-blue-500','iconBg'=>'bg-gradient-to-br from-cyan-100 to-blue-100','iconColor'=>'text-cyan-600','hoverShadow'=>'hover:shadow-cyan-200'),
 );
-if ($canViewCompanyProfitMenu) {
+if ($isPublicAffairsDept) {
+    $filteredMenuItems = array();
+    foreach ($menuItems as $menuItem) {
+        if (isset($menuItem['id']) && $menuItem['id'] === $manageMenu) continue;
+        $filteredMenuItems[] = $menuItem;
+    }
+    $menuItems = $filteredMenuItems;
+}
+if ($canViewCompanyProfitMenu && !$isPublicAffairsDept) {
     $menuItems[] = array('id'=>$companyProfitMenu,'label'=>$companyProfitMenu,'icon'=>'line-chart','gradient'=>'from-slate-700 to-blue-600','iconBg'=>'bg-gradient-to-br from-slate-100 to-blue-100','iconColor'=>'text-slate-700','hoverShadow'=>'hover:shadow-slate-200');
 }
 
@@ -232,10 +244,10 @@ if ($selectedMenu === $dashboardMenu) {
       array('menu' => 'work', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_summary'),
       array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status'),
     );
-    if (\App\Core\Auth::canManageEmployees() || $canViewCompanyOverheadMenu || $canViewCompanyPayrollMenu) {
+    if (!$isPublicAffairsDept && (\App\Core\Auth::canManageEmployees() || $canViewCompanyOverheadMenu || $canViewCompanyPayrollMenu)) {
       $mobileNavItems[] = array('menu' => 'management', 'label' => '관리', 'icon' => 'bar-chart-3', 'href' => '?r=' . rawurlencode('관리') . (($canViewCompanyOverheadMenu || $canViewCompanyPayrollMenu) ? '&tab=company_overhead' . (!$canViewCompanyOverheadMenu && $canViewCompanyPayrollMenu ? '&oh=payroll' : '') : ''));
     }
-    if ($canViewCompanyProfitMenu) {
+    if ($canViewCompanyProfitMenu && !$isPublicAffairsDept) {
       $mobileNavItems[] = array('menu' => 'company_profit', 'label' => '경영현황', 'icon' => 'line-chart', 'href' => '?r=company_profit');
     }
   ?>

@@ -130,6 +130,42 @@ function cpms_employee_photo_upload($employeeId, $fileInfo) {
     return array('ok'=>true,'db_path'=>'/cpms/public/uploads/employees/' . $fileName);
 }}
 
+if (!function_exists('cpms_employee_save_normalize_department')) {
+function cpms_employee_save_normalize_department($department) {
+    $department = trim((string)$department);
+    $map = array(
+        '관리부' => '관리',
+        '관리팀' => '관리',
+        '공무부' => '공무',
+        '공무팀' => '공무',
+        '품질부' => '품질',
+        '품질팀' => '품질',
+        '안전부' => '안전',
+        '안전팀' => '안전',
+        '공사부' => '공사',
+        '공사팀' => '공사',
+        '개발부' => '개발',
+        '개발팀' => '개발',
+    );
+    if (isset($map[$department])) return $map[$department];
+    return $department;
+}}
+
+if (!function_exists('cpms_employee_save_can_assign_development_department')) {
+function cpms_employee_save_can_assign_development_department() {
+    if (Auth::isMaster()) return true;
+    $values = array(Auth::userRole(), Auth::userPosition(), Auth::userName());
+    $words = array('대표', '대표이사', '부사장');
+    for ($i = 0; $i < count($values); $i++) {
+        $value = trim((string)$values[$i]);
+        if ($value === '') continue;
+        for ($j = 0; $j < count($words); $j++) {
+            if (strpos($value, $words[$j]) !== false) return true;
+        }
+    }
+    return false;
+}}
+
 $action = isset($_POST['action']) ? (string)$_POST['action'] : 'save';
 $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
 
@@ -181,7 +217,7 @@ if (!$canManage) { http_response_code(403); echo '403 Forbidden'; exit; }
 
 $email = isset($_POST['email']) ? trim((string)$_POST['email']) : '';
 $name = isset($_POST['name']) ? trim((string)$_POST['name']) : '';
-$dept = isset($_POST['department']) ? trim((string)$_POST['department']) : '';
+$dept = isset($_POST['department']) ? cpms_employee_save_normalize_department($_POST['department']) : '';
 $pos = isset($_POST['position']) ? trim((string)$_POST['position']) : '';
 $role = isset($_POST['role']) ? (string)$_POST['role'] : 'employee';
 $isActive = isset($_POST['is_active']) ? (int)$_POST['is_active'] : 1;
@@ -218,7 +254,25 @@ if ($leaveHalf !== '' && is_numeric($leaveHalf)) {
 
 if ($email === '' || $name === '') { flash_set('error', '이메일/이름은 필수입니다.'); header('Location: ?r=관리&tab=employees'); exit; }
 
-$allowedDepts = array('관리', '공무', '품질', '안전', '공사');
+$existingDept = '';
+if ($id > 0) {
+    try {
+        $stExistingDept = $pdo->prepare("SELECT department FROM employees WHERE id = :id LIMIT 1");
+        $stExistingDept->bindValue(':id', $id, \PDO::PARAM_INT);
+        $stExistingDept->execute();
+        $existingDept = cpms_employee_save_normalize_department($stExistingDept->fetchColumn());
+    } catch (\Exception $e) {
+        $existingDept = '';
+    }
+}
+$canAssignDevelopmentDept = cpms_employee_save_can_assign_development_department();
+if (($dept === '개발' || $existingDept === '개발') && !$canAssignDevelopmentDept) {
+    flash_set('error', '개발부서 지정/변경은 마스터, 대표, 부사장만 가능합니다.');
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
+
+$allowedDepts = array('관리', '공무', '품질', '안전', '공사', '개발');
 $allowedPositions = array('주임','대리','과장','차장','부장','전무','상무','이사','부사장','고문','대표');
 if (!in_array($role, array('employee','executive'), true)) $role = 'employee';
 if ($isActive !== 0 && $isActive !== 1) $isActive = 1;

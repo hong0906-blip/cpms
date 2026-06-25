@@ -6,8 +6,12 @@ $dbOk = ($pdo !== null);
 
 $projects = array();
 $constructionEmployees = array();
+$activeTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'monthly_summary';
+if ($activeTab === '') $activeTab = 'monthly_summary';
+if ($activeTab === 'monthly_input') $activeTab = 'monthly_summary';
+if ($activeTab !== 'monthly_summary' && $activeTab !== 'project_manage') $activeTab = 'monthly_summary';
 
-if ($dbOk) {
+if ($dbOk && $activeTab === 'project_manage') {
     try {
         $st = $pdo->prepare("
             SELECT id, name, client, contractor, location, start_date, end_date, contract_amount, status
@@ -27,9 +31,12 @@ if ($dbOk) {
         $stEmployees = $pdo->prepare("
             SELECT id, name
               FROM employees
-             WHERE department = '공사'
-               AND is_active = 1
-             ORDER BY name ASC, id ASC
+             WHERE is_active = 1
+               AND (department = '공사' OR name IN ('김영기', '강영복', '고영성'))
+             ORDER BY
+               CASE WHEN department = '공사' THEN 0 ELSE 1 END,
+               name ASC,
+               id ASC
         ");
         $stEmployees->execute();
         $constructionEmployees = $stEmployees->fetchAll(PDO::FETCH_ASSOC);
@@ -40,10 +47,6 @@ if ($dbOk) {
 }
 
 $flash = flash_get();
-$activeTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'monthly_summary';
-if ($activeTab === '') $activeTab = 'monthly_summary';
-if ($activeTab === 'monthly_input') $activeTab = 'monthly_summary';
-if ($activeTab !== 'monthly_summary' && $activeTab !== 'project_manage') $activeTab = 'monthly_summary';
 
 function status_badge_class($status) {
     $status = trim((string)$status);

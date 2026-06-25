@@ -42,6 +42,15 @@ if ($projectId <= 0) {
     cpms_contract_change_preview_fail(0, '잘못된 프로젝트 ID입니다.');
 }
 
+$uploadMode = isset($_POST['upload_mode']) ? trim((string)$_POST['upload_mode']) : 'unit_price_update';
+if ($uploadMode !== 'unit_price_update' && $uploadMode !== 'unit_price_original' && $uploadMode !== 'unit_price_extra') $uploadMode = 'unit_price_update';
+$manualVersionNo = isset($_POST['version_no']) ? (int)$_POST['version_no'] : 0;
+if ($manualVersionNo < 0) $manualVersionNo = 0;
+$additionalWorkTitle = isset($_POST['additional_work_title']) ? trim((string)$_POST['additional_work_title']) : '';
+if ($uploadMode === 'unit_price_extra' && $additionalWorkTitle === '') {
+    cpms_contract_change_preview_fail($projectId, '추가공사명을 입력해주세요.');
+}
+
 $pdo = Db::pdo();
 if (!$pdo) {
     cpms_contract_change_preview_fail($projectId, 'DB 연결에 실패했습니다.');
@@ -90,30 +99,68 @@ if (count($newRows) === 0) {
 }
 
 $oldRows = array();
+$currentActiveCount = 0;
 try {
     $stOld = $pdo->prepare("SELECT * FROM cpms_project_unit_prices WHERE project_id = :pid ORDER BY id ASC");
     $stOld->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $stOld->execute();
     $tmpRows = $stOld->fetchAll(PDO::FETCH_ASSOC);
     if (is_array($tmpRows)) $oldRows = $tmpRows;
+    foreach ($oldRows as $oldRowForCount) {
+        if (!is_array($oldRowForCount)) continue;
+        if (isset($oldRowForCount['is_active']) && (int)$oldRowForCount['is_active'] === 0) continue;
+        if (isset($oldRowForCount['is_current']) && (int)$oldRowForCount['is_current'] === 0) continue;
+        $currentActiveCount++;
+    }
 } catch (Exception $e) {
     cpms_contract_change_preview_fail($projectId, '기존 단가내역 조회에 실패했습니다.');
 }
 
-$comparison = cpms_contract_change_compare_rows($oldRows, $newRows);
-$changes = isset($comparison['changes']) && is_array($comparison['changes']) ? $comparison['changes'] : array();
-$excluded = isset($comparison['excluded']) && is_array($comparison['excluded']) ? $comparison['excluded'] : array();
-$summary = isset($comparison['summary']) && is_array($comparison['summary']) ? $comparison['summary'] : array();
+$changes = array();
+$excluded = array();
+$summary = array('kept'=>0, 'changed'=>0, 'inserted'=>0, 'excluded'=>0, 'unit_price_changed'=>0, 'amount_changed'=>0, 'quantity_increased'=>0, 'quantity_decreased'=>0, 'duplicate_possible'=>0);
+if ($uploadMode === 'unit_price_update') {
+    $comparison = cpms_contract_change_compare_rows($oldRows, $newRows);
+    $changes = isset($comparison['changes']) && is_array($comparison['changes']) ? $comparison['changes'] : array();
+    $excluded = isset($comparison['excluded']) && is_array($comparison['excluded']) ? $comparison['excluded'] : array();
+    $summary = isset($comparison['summary']) && is_array($comparison['summary']) ? $comparison['summary'] : $summary;
+} else if ($uploadMode === 'unit_price_extra') {
+    $matchData = cpms_contract_change_build_match_maps($oldRows);
+    $usedOld = array();
+    foreach ($newRows as $newRow) {
+        if (!is_array($newRow)) continue;
+        $badges = array(cpms_contract_change_badge('ADDED', '추가항목', null, null));
+        $match = cpms_contract_change_pick_match($matchData, $newRow, $usedOld);
+        if (isset($match['index']) && (int)$match['index'] >= 0) {
+            array_push($badges, cpms_contract_change_badge('DUPLICATE_POSSIBLE', '중복 가능성', null, null));
+            $summary['duplicate_possible']++;
+        }
+        $summary['inserted']++;
+        array_push($changes, array('status'=>'추가항목', 'old_id'=>0, 'old_row'=>null, 'row'=>$newRow, 'badges'=>$badges));
+    }
+} else {
+    foreach ($newRows as $newRow) {
+        if (!is_array($newRow)) continue;
+        $summary['inserted']++;
+        array_push($changes, array('status'=>isset($newRow['preview_status']) ? $newRow['preview_status'] : '정상', 'old_id'=>0, 'old_row'=>null, 'row'=>$newRow, 'badges'=>array()));
+    }
+}
 
 $cpmsRoot = dirname(dirname(dirname(__DIR__)));
-$changeDir = $cpmsRoot . '/storage/contracts/' . $projectId . '/changes';
+$storageSubDir = 'changes';
+if ($uploadMode === 'unit_price_original') $storageSubDir = 'versions';
+else if ($uploadMode === 'unit_price_extra') $storageSubDir = 'extras';
+$changeDir = $cpmsRoot . '/storage/contracts/' . $projectId . '/' . $storageSubDir;
 if (!is_dir($changeDir)) @mkdir($changeDir, 0775, true);
 if (!is_dir($changeDir)) {
     cpms_contract_change_preview_fail($projectId, '업로드 폴더를 생성할 수 없습니다.');
 }
 
 $previewToken = bin2hex(openssl_random_pseudo_bytes(16));
-$storedName = 'unit_price_update_preview_' . date('Ymd_His') . '_' . $previewToken . '.xlsx';
+$storedPrefix = 'unit_price_update_preview_';
+if ($uploadMode === 'unit_price_original') $storedPrefix = 'unit_price_original_preview_';
+else if ($uploadMode === 'unit_price_extra') $storedPrefix = 'unit_price_extra_preview_';
+$storedName = $storedPrefix . date('Ymd_His') . '_' . $previewToken . '.xlsx';
 $storedPath = $changeDir . '/' . $storedName;
 if (!@move_uploaded_file($tmpFile, $storedPath)) {
     cpms_contract_change_preview_fail($projectId, '미리보기 파일 임시 저장에 실패했습니다.');
@@ -124,6 +171,9 @@ if (!isset($_SESSION['unit_price_update']) || !is_array($_SESSION['unit_price_up
 }
 $_SESSION['unit_price_update'][$previewToken] = array(
     'project_id' => $projectId,
+    'upload_mode' => $uploadMode,
+    'version_no' => $manualVersionNo,
+    'additional_work_title' => $additionalWorkTitle,
     'file_name' => $originalName,
     'stored_name' => $storedName,
     'stored_path' => $storedPath,
@@ -137,16 +187,21 @@ $_SESSION['unit_price_update'][$previewToken] = array(
 $changedCount = isset($summary['changed']) ? (int)$summary['changed'] : 0;
 $insertedCount = isset($summary['inserted']) ? (int)$summary['inserted'] : 0;
 $priceCount = isset($summary['unit_price_changed']) ? (int)$summary['unit_price_changed'] : 0;
+$amountCount = isset($summary['amount_changed']) ? (int)$summary['amount_changed'] : 0;
 $incCount = isset($summary['quantity_increased']) ? (int)$summary['quantity_increased'] : 0;
 $decCount = isset($summary['quantity_decreased']) ? (int)$summary['quantity_decreased'] : 0;
 $excludedCount = isset($summary['excluded']) ? (int)$summary['excluded'] : 0;
+$duplicateCount = isset($summary['duplicate_possible']) ? (int)$summary['duplicate_possible'] : 0;
+$previewTitle = '변경계약 내역서 미리보기';
+if ($uploadMode === 'unit_price_original') $previewTitle = '당초 내역서 미리보기';
+else if ($uploadMode === 'unit_price_extra') $previewTitle = '추가공사 내역서 미리보기';
 ?>
 <!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>변경 단가내역서 미리보기</title>
+<title><?php echo cpms_contract_change_preview_h($previewTitle); ?></title>
 <style>
 body{font-family:Arial,'Noto Sans KR',sans-serif;background:#f6f7fb;margin:0;padding:24px;color:#111827}
 .card{background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:18px;max-width:1360px;margin:0 auto}
@@ -166,30 +221,46 @@ th{background:#f9fafb;color:#4b5563}
 </head>
 <body>
 <div class="card">
-    <h2>변경 단가내역서 미리보기</h2>
+    <h2><?php echo cpms_contract_change_preview_h($previewTitle); ?></h2>
     <div class="muted">프로젝트: <b><?php echo cpms_contract_change_preview_h(isset($project['name']) ? $project['name'] : ''); ?></b> / 파일: <b><?php echo cpms_contract_change_preview_h($originalName); ?></b></div>
+    <?php if ($uploadMode === 'unit_price_original' && $currentActiveCount > 0): ?>
+        <div style="margin-top:12px;padding:12px;border-radius:12px;background:#fef3c7;border:1px solid #f59e0b;color:#111827;font-weight:800;">
+            이미 당초 내역서가 있습니다. 적용하면 기존 당초 내역은 이력으로 남기고 현재 적용 내역이 갱신됩니다.
+        </div>
+    <?php endif; ?>
     <div class="summary">
         <span>추가항목 <?php echo $insertedCount; ?>건</span>
         <span>단가 변경 <?php echo $priceCount; ?>건</span>
+        <span>금액 변경 <?php echo $amountCount; ?>건</span>
         <span>수량 증가 <?php echo $incCount; ?>건</span>
         <span>수량 감소 <?php echo $decCount; ?>건</span>
         <span>변경 합계 <?php echo $changedCount; ?>건</span>
         <span>삭제 의심 <?php echo $excludedCount; ?>건</span>
+        <?php if ($duplicateCount > 0): ?><span>중복 가능성 <?php echo $duplicateCount; ?>건</span><?php endif; ?>
     </div>
     <div class="actions">
         <a class="btn btn-ghost" href="<?php echo cpms_contract_change_preview_h(base_url()); ?>/?r=project/detail&id=<?php echo (int)$projectId; ?>">돌아가기</a>
         <form method="post" action="<?php echo cpms_contract_change_preview_h(base_url()); ?>/?r=project/contract_upload" style="margin:0">
             <input type="hidden" name="_csrf" value="<?php echo cpms_contract_change_preview_h(csrf_token()); ?>">
             <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
-            <input type="hidden" name="upload_mode" value="unit_price_update">
+            <input type="hidden" name="upload_mode" value="<?php echo cpms_contract_change_preview_h($uploadMode); ?>">
             <input type="hidden" name="preview_token" value="<?php echo cpms_contract_change_preview_h($previewToken); ?>">
-            <button type="submit" class="btn btn-primary">변경 단가내역 적용</button>
+            <button type="submit" class="btn btn-primary">내역서 적용</button>
         </form>
     </div>
 
     <table>
         <thead>
         <tr>
+            <th>공종그룹</th>
+            <th>세부공종</th>
+            <th>위치</th>
+            <th>품명</th>
+            <th>규격</th>
+            <th>단위</th>
+            <th class="num">수량</th>
+            <th class="num">합계단가</th>
+            <th class="num">금액</th>
             <th>변경내용</th>
             <th>품명</th>
             <th>규격</th>
@@ -208,6 +279,15 @@ th{background:#f9fafb;color:#4b5563}
             $badges = isset($change['badges']) && is_array($change['badges']) ? $change['badges'] : array();
             ?>
             <tr>
+                <td><?php echo cpms_contract_change_preview_h(isset($row['trade_group']) ? $row['trade_group'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($row['sub_trade']) ? $row['sub_trade'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($row['location_name']) ? $row['location_name'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($row['item_name']) ? $row['item_name'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($row['spec']) ? $row['spec'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($row['unit']) ? $row['unit'] : ''); ?></td>
+                <td class="num"><?php echo cpms_contract_change_preview_h(cpms_contract_change_fmt(isset($row['qty']) ? $row['qty'] : '')); ?></td>
+                <td class="num"><?php echo cpms_contract_change_preview_h(cpms_contract_change_fmt(cpms_contract_change_unit_price_value($row))); ?></td>
+                <td class="num"><?php echo cpms_contract_change_preview_h(cpms_contract_change_fmt(isset($row['amount']) ? $row['amount'] : '')); ?></td>
                 <td><?php echo cpms_contract_change_render_badges($badges); ?><?php if (count($badges) === 0): ?><span class="muted">유지</span><?php endif; ?></td>
                 <td><?php echo cpms_contract_change_preview_h(isset($row['item_name']) ? $row['item_name'] : ''); ?></td>
                 <td><?php echo cpms_contract_change_preview_h(isset($row['spec']) ? $row['spec'] : ''); ?></td>
@@ -220,6 +300,15 @@ th{background:#f9fafb;color:#4b5563}
         <?php endforeach; ?>
         <?php foreach ($excluded as $oldRow): ?>
             <tr>
+                <td><?php echo cpms_contract_change_preview_h(isset($oldRow['trade_group']) ? $oldRow['trade_group'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($oldRow['sub_trade']) ? $oldRow['sub_trade'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($oldRow['location_name']) ? $oldRow['location_name'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($oldRow['item_name']) ? $oldRow['item_name'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($oldRow['spec']) ? $oldRow['spec'] : ''); ?></td>
+                <td><?php echo cpms_contract_change_preview_h(isset($oldRow['unit']) ? $oldRow['unit'] : ''); ?></td>
+                <td class="num"><?php echo cpms_contract_change_preview_h(cpms_contract_change_fmt(isset($oldRow['qty']) ? $oldRow['qty'] : '')); ?></td>
+                <td class="num"><?php echo cpms_contract_change_preview_h(cpms_contract_change_fmt(cpms_contract_change_unit_price_value($oldRow))); ?></td>
+                <td class="num"><?php echo cpms_contract_change_preview_h(cpms_contract_change_fmt(isset($oldRow['amount']) ? $oldRow['amount'] : '')); ?></td>
                 <td><?php echo cpms_contract_change_render_badges(isset($oldRow['badges']) ? $oldRow['badges'] : array()); ?></td>
                 <td><?php echo cpms_contract_change_preview_h(isset($oldRow['item_name']) ? $oldRow['item_name'] : ''); ?></td>
                 <td><?php echo cpms_contract_change_preview_h(isset($oldRow['spec']) ? $oldRow['spec'] : ''); ?></td>

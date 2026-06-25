@@ -8,6 +8,7 @@
 require_once __DIR__ . '/partials/labor_data_loader.php';
 require_once __DIR__ . '/partials/sales_data_loader.php';
 require_once __DIR__ . '/../../safety/safety_cost_helper.php';
+require_once __DIR__ . '/../partials/target_cost_rate_helper.php';
 
 if (!function_exists('cpms_status_cache_key')) {
     function cpms_status_cache_key($pdo, $suffix) {
@@ -289,6 +290,49 @@ if (!function_exists('cpms_status_cost_rate_info')) {
     }
 }
 
+if (!function_exists('cpms_status_ym_valid')) {
+    function cpms_status_ym_valid($ym) {
+        return preg_match('/^\d{4}-\d{2}$/', (string)$ym) ? true : false;
+    }
+}
+
+if (!function_exists('cpms_status_months_between')) {
+    function cpms_status_months_between($fromYm, $toYm) {
+        $months = array();
+        if (!cpms_status_ym_valid($fromYm) || !cpms_status_ym_valid($toYm)) return $months;
+        try {
+            $cursor = new DateTime($fromYm . '-01');
+            $end = new DateTime($toYm . '-01');
+        } catch (Exception $e) {
+            return $months;
+        }
+        $guard = 0;
+        while ($cursor <= $end && $guard < 240) {
+            $months[] = $cursor->format('Y-m');
+            $cursor->modify('+1 month');
+            $guard++;
+        }
+        return $months;
+    }
+}
+
+if (!function_exists('cpms_status_ym_label')) {
+    function cpms_status_ym_label($ym) {
+        if (!cpms_status_ym_valid($ym)) return (string)$ym;
+        return substr((string)$ym, 2, 2) . '년 ' . substr((string)$ym, 5, 2) . '월';
+    }
+}
+
+if (!function_exists('cpms_status_rate_class')) {
+    function cpms_status_rate_class($costRate, $noSales) {
+        $costRate = (float)$costRate;
+        $noSales = (int)$noSales;
+        if ($noSales === 1 || $costRate > 100) return 'text-red-700 bg-red-50 border-red-100';
+        if ($costRate > 70) return 'text-orange-700 bg-orange-50 border-orange-100';
+        return 'text-blue-700 bg-blue-50 border-blue-100';
+    }
+}
+
 if (!function_exists('cpms_status_parse_money')) {
     function cpms_status_parse_money($value) {
         $value = trim((string)$value);
@@ -499,14 +543,40 @@ if (!in_array($selectedYear, $years, true)) {
     }
 }
 
+$fromYm = isset($_GET['from_ym']) ? trim((string)$_GET['from_ym']) : '';
+$toYm = isset($_GET['to_ym']) ? trim((string)$_GET['to_ym']) : '';
+if (!cpms_status_ym_valid($fromYm) || !cpms_status_ym_valid($toYm)) {
+    $fromYm = sprintf('%04d-01', $selectedYear);
+    $toYm = sprintf('%04d-12', $selectedYear);
+}
+if ($fromYm > $toYm) {
+    $tmpYm = $fromYm;
+    $fromYm = $toYm;
+    $toYm = $tmpYm;
+}
+$periodMonths = cpms_status_months_between($fromYm, $toYm);
+if (count($periodMonths) === 0) {
+    $fromYm = sprintf('%04d-01', $selectedYear);
+    $toYm = sprintf('%04d-12', $selectedYear);
+    $periodMonths = cpms_status_months_between($fromYm, $toYm);
+}
+$periodLabel = cpms_status_ym_label($fromYm) . ' ~ ' . cpms_status_ym_label($toYm);
+
+cpms_target_cost_rate_ensure_schema($pdo);
+$targetRateRow = cpms_target_cost_rate_current($pdo, (int)$pid);
+$targetRateValue = ($targetRateRow && isset($targetRateRow['target_rate'])) ? (float)$targetRateRow['target_rate'] : 0.0;
+$pendingTargetRateRequest = cpms_target_cost_rate_pending($pdo, (int)$pid);
+$canEditTargetRate = class_exists('App\\Core\\Auth') ? \App\Core\Auth::canManageConstruction() : false;
+$canApproveTargetRate = cpms_target_cost_rate_is_vp_user($pdo);
+
 // 상황탭 매출 추가/색상변경/상단금액구조 변경
 $categories = array(
+    'sales' => array('label' => '매출(확정우선)', 'color' => '#3B82F6'),
+    'used_total' => array('label' => '투입원가', 'color' => '#F97316'),
     'labor' => array('label' => '노무비', 'color' => '#FACC15'),
     'equipment' => array('label' => '장비비', 'color' => '#EF4444'),
     'safety' => array('label' => '안전관리비', 'color' => '#22C55E'),
     'materials' => array('label' => '자재구입비', 'color' => '#A855F7'),
-    'sales' => array('label' => '확정매출', 'color' => '#3B82F6'),
-    'target_amount' => array('label' => '투입목표금액', 'color' => '#14B8A6'),
 );
 
 $laborWageMap = cpms_status_labor_wage_map($pdo, (int)$pid);
@@ -514,11 +584,12 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
 $periodDiagnostics = array();
 
 $monthlyData = array();
-$yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'confirmed_sales' => 0, 'target_amount' => 0, 'used_total' => 0);
+$yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'expected_sales' => 0, 'confirmed_sales' => 0, 'used_total' => 0, 'profit' => 0);
 $maxMonthlyValue = 0;
 
-for ($m = 1; $m <= 12; $m++) {
-    $ym = sprintf('%04d-%02d', $selectedYear, $m);
+foreach ($periodMonths as $ym) {
+    $m = (int)substr($ym, 5, 2);
+    $rowYear = (int)substr($ym, 0, 4);
     $laborRange = cpms_cost_period_range($ym, 'labor');
     $costRange = cpms_cost_period_range($ym, 'material');
     $salesRange = cpms_cost_period_range($ym, 'sales');
@@ -548,12 +619,14 @@ for ($m = 1; $m <= 12; $m++) {
     $confirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
     $sales = ($confirmedSales > 0) ? $confirmedSales : $expectedSales;
     $usedTotal = $labor + $equipment + $materials;
-    $targetAmount = round($sales * 0.7);
+    $profit = $sales - $usedTotal;
     $costRateInfo = cpms_status_cost_rate_info($sales, $usedTotal);
 
     $row = array(
+        'ym' => $ym,
+        'year' => $rowYear,
         'month' => $m,
-        'label' => $m . '월',
+        'label' => cpms_status_ym_label($ym),
         'start' => $costStart,
         'end' => $costEnd,
         'cost_start' => $costStart,
@@ -569,8 +642,8 @@ for ($m = 1; $m <= 12; $m++) {
         'sales' => $sales,
         'expected_sales' => $expectedSales,
         'confirmed_sales' => $confirmedSales,
-        'target_amount' => $targetAmount,
         'used_total' => $usedTotal,
+        'profit' => $profit,
         'cost_rate' => $costRateInfo['cost_rate'],
         'cost_rate_label' => $costRateInfo['cost_rate_label'],
         'no_sales' => $costRateInfo['no_sales'],
@@ -579,9 +652,9 @@ for ($m = 1; $m <= 12; $m++) {
 
     foreach ($yearTotals as $key => $sumValue) {
         $yearTotals[$key] += isset($row[$key]) ? (float)$row[$key] : 0;
-        if ($key !== 'used_total' && isset($row[$key]) && (float)$row[$key] > $maxMonthlyValue) {
-            $maxMonthlyValue = (float)$row[$key];
-        }
+    }
+    foreach (array('sales', 'used_total', 'labor', 'equipment') as $barKey) {
+        if (isset($row[$barKey]) && (float)$row[$barKey] > $maxMonthlyValue) $maxMonthlyValue = (float)$row[$barKey];
     }
     if ((float)$row['matSafetyTotal'] > $maxMonthlyValue) {
         $maxMonthlyValue = (float)$row['matSafetyTotal'];
@@ -592,50 +665,51 @@ for ($m = 1; $m <= 12; $m++) {
 
 $quarterlyData = array();
 $maxQuarterValue = 0;
-for ($q = 1; $q <= 4; $q++) {
-    $startMonth = (($q - 1) * 3) + 1;
-    $endMonth = $startMonth + 2;
-
-    $qRow = array(
-        'quarter' => $q,
-        'label' => $q . 'Q',
-        'labor' => 0,
-        'equipment' => 0,
-        'safety' => 0,
-        'materials' => 0,
-        'sales' => 0,
-        'confirmed_sales' => 0,
-        'target_amount' => 0,
-        'used_total' => 0,
-        'cost_rate' => 0,
-        'cost_rate_label' => '0%',
-        'no_sales' => 0,
-        'matSafetyTotal' => 0,
-    );
-
-    foreach ($monthlyData as $mRow) {
-        $mm = isset($mRow['month']) ? (int)$mRow['month'] : 0;
-        if ($mm < $startMonth || $mm > $endMonth) continue;
-
-        foreach ($yearTotals as $key => $ignored) {
-            $qRow[$key] += isset($mRow[$key]) ? (float)$mRow[$key] : 0;
-        }
+$quarterlyMap = array();
+foreach ($monthlyData as $mRow) {
+    $mYear = isset($mRow['year']) ? (int)$mRow['year'] : $selectedYear;
+    $mm = isset($mRow['month']) ? (int)$mRow['month'] : 0;
+    if ($mm <= 0) continue;
+    $q = (int)ceil($mm / 3);
+    $qKey = sprintf('%04d-Q%d', $mYear, $q);
+    if (!isset($quarterlyMap[$qKey])) {
+        $quarterlyMap[$qKey] = array(
+            'quarter' => $q,
+            'year' => $mYear,
+            'label' => substr((string)$mYear, 2, 2) . '년 ' . $q . 'Q',
+            'labor' => 0,
+            'equipment' => 0,
+            'safety' => 0,
+            'materials' => 0,
+            'sales' => 0,
+            'expected_sales' => 0,
+            'confirmed_sales' => 0,
+            'used_total' => 0,
+            'profit' => 0,
+            'cost_rate' => 0,
+            'cost_rate_label' => '0%',
+            'no_sales' => 0,
+            'matSafetyTotal' => 0,
+        );
     }
 
     foreach ($yearTotals as $key => $ignored) {
-        if ($key !== 'used_total' && (float)$qRow[$key] > $maxQuarterValue) {
-            $maxQuarterValue = (float)$qRow[$key];
-        }
+        $quarterlyMap[$qKey][$key] += isset($mRow[$key]) ? (float)$mRow[$key] : 0;
     }
+}
+
+foreach ($quarterlyMap as $qRow) {
     $qRow['matSafetyTotal'] = (float)$qRow['materials'] + (float)$qRow['safety'];
     $qCostRateInfo = cpms_status_cost_rate_info(isset($qRow['sales']) ? $qRow['sales'] : 0, isset($qRow['used_total']) ? $qRow['used_total'] : 0);
     $qRow['cost_rate'] = $qCostRateInfo['cost_rate'];
     $qRow['cost_rate_label'] = $qCostRateInfo['cost_rate_label'];
     $qRow['no_sales'] = $qCostRateInfo['no_sales'];
+    foreach (array('sales', 'used_total', 'labor', 'equipment') as $barKey) {
+        if (isset($qRow[$barKey]) && (float)$qRow[$barKey] > $maxQuarterValue) $maxQuarterValue = (float)$qRow[$barKey];
+    }
     if ((float)$qRow['matSafetyTotal'] > $maxQuarterValue) {
         $maxQuarterValue = (float)$qRow['matSafetyTotal'];
     }
-
     $quarterlyData[] = $qRow;
 }
 
@@ -676,9 +750,9 @@ $safetyRemainRate = ($safetyLimit110 > 0) ? (($safetyRemaining / $safetyLimit110
 $overallTotals['safety'] = $safetyUsedTotal;
 $overallInputCostTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['materials'];
 $overallUsageTotal = $overallInputCostTotal;
-$overallTargetAmount = round($overallTotals['sales'] * 0.7);
 $overallCostRateInfo = cpms_status_cost_rate_info($overallTotals['sales'], $overallInputCostTotal);
 $overallNetTotal = $overallTotals['sales'] - $overallInputCostTotal;
+$periodCostRateInfo = cpms_status_cost_rate_info($yearTotals['sales'], $yearTotals['used_total']);
 
 if ($maxMonthlyValue <= 0) $maxMonthlyValue = 1;
 if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
@@ -704,6 +778,9 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 .cpms-status-wrap .summary-grid .text-3xl { word-break:keep-all; overflow-wrap:anywhere; }
 .cpms-status-wrap .cpms-status-rate-badge { min-width:52px; }
 .cpms-status-wrap .dot { width:12px; height:12px; border-radius:3px; display:inline-block; }
+.cpms-status-wrap .target-rate-card input,
+.cpms-status-wrap .target-rate-card textarea { font-size:12px; }
+.cpms-status-wrap .target-rate-card textarea { min-height:38px; resize:vertical; }
 @media (max-width: 980px) {
     .cpms-status-wrap .summary-grid { grid-template-columns:repeat(1,minmax(0,1fr)); }
 }
@@ -729,19 +806,23 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
             </div>
         </div>
 
-        <!-- 상황탭 매출 추가/색상변경/상단금액구조 변경 -->        
+        <!-- 상황탭 매출 추가/색상변경/상단금액구조 변경 -->
         <div class="mt-4 p-4 rounded-2xl bg-gray-900 text-white">
-            <div class="text-sm text-gray-200">확정 순이익 (총 확정매출 - 총 투입원가)</div>
+            <div class="text-sm text-gray-200">손익 (확정 우선 매출 - 총 투입원가)</div>
             <div class="text-3xl font-extrabold mt-1"><?php echo h(cpms_status_money($overallNetTotal)); ?></div>
         </div>
 
         <div class="summary-grid mt-3">
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                <div class="text-xs text-gray-500">총 <?php echo h($categories['sales']['label']); ?> (전체 누적)</div>
+                <div class="text-xs text-gray-500">총 적용매출 (확정 우선)</div>
                 <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['sales'])); ?></div>
             </div>
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                <div class="text-xs text-gray-500">총 예상매출 (아이템내역서)</div>
+                <div class="text-xs text-gray-500">총 확정매출</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['confirmed_sales'])); ?></div>
+            </div>
+            <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
+                <div class="text-xs text-gray-500">총 예상매출</div>
                 <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['expected_sales'])); ?></div>
             </div>
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
@@ -749,16 +830,67 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallInputCostTotal)); ?></div>
             </div>
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                <div class="text-xs text-gray-500">총 투입목표금액</div>
-                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTargetAmount)); ?></div>
-            </div>
-            <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                <div class="text-xs text-gray-500">총 원가율</div>
+                <div class="text-xs text-gray-500">총원가율(현재)</div>
                 <div class="text-lg font-extrabold text-gray-900"><?php echo h($overallCostRateInfo['cost_rate_label']); ?></div>
             </div>
-            <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
-                <div class="text-xs text-gray-500">총 사용금액 (안전관리비 제외)</div>
-                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallUsageTotal)); ?></div>
+            <div class="target-rate-card p-3 rounded-xl" style="border:1px solid #e5e7eb;">
+                <div class="flex items-start justify-between gap-2">
+                    <div>
+                        <div class="text-xs text-gray-500">목표원가율</div>
+                        <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_target_cost_rate_format($targetRateValue)); ?></div>
+                    </div>
+                    <?php if ($pendingTargetRateRequest): ?>
+                        <span class="px-2 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-100 text-xs font-extrabold">승인대기</span>
+                    <?php endif; ?>
+                </div>
+                <?php if ($pendingTargetRateRequest): ?>
+                    <div class="mt-2 text-xs text-gray-700">
+                        <?php echo h(cpms_target_cost_rate_format(isset($pendingTargetRateRequest['old_rate']) ? $pendingTargetRateRequest['old_rate'] : 0)); ?>
+                        &rarr;
+                        <?php echo h(cpms_target_cost_rate_format(isset($pendingTargetRateRequest['new_rate']) ? $pendingTargetRateRequest['new_rate'] : 0)); ?>
+                    </div>
+                    <?php if ($canApproveTargetRate): ?>
+                        <div class="mt-2 grid grid-cols-1 gap-2">
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/target_cost_rate_decide" class="space-y-2">
+                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                                <input type="hidden" name="request_id" value="<?php echo (int)$pendingTargetRateRequest['id']; ?>">
+                                <input type="hidden" name="decision" value="approve">
+                                <input type="hidden" name="year" value="<?php echo (int)$selectedYear; ?>">
+                                <input type="hidden" name="from_ym" value="<?php echo h($fromYm); ?>">
+                                <input type="hidden" name="to_ym" value="<?php echo h($toYm); ?>">
+                                <input name="memo" class="w-full px-2 py-2 rounded-lg border border-gray-200" placeholder="승인 메모">
+                                <button class="w-full px-3 py-2 rounded-lg bg-gray-900 text-white font-extrabold text-xs">승인</button>
+                            </form>
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/target_cost_rate_decide" class="space-y-2">
+                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                                <input type="hidden" name="request_id" value="<?php echo (int)$pendingTargetRateRequest['id']; ?>">
+                                <input type="hidden" name="decision" value="reject">
+                                <input type="hidden" name="year" value="<?php echo (int)$selectedYear; ?>">
+                                <input type="hidden" name="from_ym" value="<?php echo h($fromYm); ?>">
+                                <input type="hidden" name="to_ym" value="<?php echo h($toYm); ?>">
+                                <input name="memo" required class="w-full px-2 py-2 rounded-lg border border-gray-200" placeholder="반려 사유">
+                                <button class="w-full px-3 py-2 rounded-lg bg-red-600 text-white font-extrabold text-xs">반려</button>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+                <?php elseif ($canEditTargetRate): ?>
+                    <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/target_cost_rate_save" class="mt-2 space-y-2">
+                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                        <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                        <input type="hidden" name="year" value="<?php echo (int)$selectedYear; ?>">
+                        <input type="hidden" name="from_ym" value="<?php echo h($fromYm); ?>">
+                        <input type="hidden" name="to_ym" value="<?php echo h($toYm); ?>">
+                        <div class="flex gap-2">
+                            <input name="target_rate" required class="w-full px-2 py-2 rounded-lg border border-gray-200 text-right" value="<?php echo $targetRateValue > 0 ? h(number_format($targetRateValue, 1, '.', '')) : ''; ?>" placeholder="%">
+                            <button class="px-3 py-2 rounded-lg bg-gray-900 text-white font-extrabold text-xs">저장</button>
+                        </div>
+                        <?php if ($targetRateValue > 0): ?>
+                            <textarea name="reason" class="w-full px-2 py-2 rounded-lg border border-gray-200" placeholder="변경 사유"></textarea>
+                        <?php endif; ?>
+                    </form>
+                <?php endif; ?>
             </div>
         </div>
         <div class="summary-grid mt-3">
@@ -794,20 +926,32 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
             <input type="hidden" name="r" value="공사">
             <input type="hidden" name="pid" value="<?php echo (int)$pid; ?>">
             <input type="hidden" name="tab" value="status">
-            <label class="text-sm font-bold text-gray-700">연도</label>
-            <select name="year" class="px-3 py-2 rounded-xl border border-gray-300" onchange="this.form.submit()">
-                <?php foreach ($years as $yy): ?>
-                    <option value="<?php echo (int)$yy; ?>" <?php echo ($selectedYear === (int)$yy) ? 'selected' : ''; ?>>
-                        <?php echo (int)$yy; ?>년
-                    </option>
-                <?php endforeach; ?>
-            </select>
+            <div>
+                <label class="block text-sm font-bold text-gray-700">연도</label>
+                <select name="year" data-status-year class="px-3 py-2 rounded-xl border border-gray-300">
+                    <?php foreach ($years as $yy): ?>
+                        <option value="<?php echo (int)$yy; ?>" <?php echo ($selectedYear === (int)$yy) ? 'selected' : ''; ?>>
+                            <?php echo (int)$yy; ?>년
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-gray-700">시작월</label>
+                <input type="month" name="from_ym" data-status-from class="px-3 py-2 rounded-xl border border-gray-300" value="<?php echo h($fromYm); ?>">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-gray-700">종료월</label>
+                <input type="month" name="to_ym" data-status-to class="px-3 py-2 rounded-xl border border-gray-300" value="<?php echo h($toYm); ?>">
+            </div>
+            <button class="px-4 py-2 rounded-xl bg-gray-900 text-white font-extrabold">조회</button>
         </form>
     </div>
 
     <div class="chart-wrap">
         <div class="flex items-center justify-between">
             <h4 class="text-lg font-extrabold text-gray-900">월별 비용/매출 그래프</h4>
+            <div class="text-sm font-bold text-gray-500"><?php echo h($periodLabel); ?></div>
         </div>
         <?php if ($debugMode && count($periodDiagnostics) > 0): ?>
             <div class="mt-3 rounded-xl border border-blue-100 bg-blue-50 p-3 text-xs text-blue-900">
@@ -828,9 +972,9 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             $salesHeight = ($salesAmount <= 0) ? 2 : max(2, ($salesAmount / $maxMonthlyValue) * 100);
                             $salesTitle = $row['label'] . ' ' . $categories['sales']['label'] . ': ' . cpms_status_money($salesAmount) . ' (' . $row['sales_start'] . ' ~ ' . $row['sales_end'] . ')';
 
-                            $targetAmount = isset($row['target_amount']) ? (float)$row['target_amount'] : 0;
-                            $targetHeight = ($targetAmount <= 0) ? 2 : max(2, ($targetAmount / $maxMonthlyValue) * 100);
-                            $targetTitle = $row['label'] . ' ' . $categories['target_amount']['label'] . ': ' . cpms_status_money($targetAmount);
+                            $usedTotalAmount = isset($row['used_total']) ? (float)$row['used_total'] : 0;
+                            $usedTotalHeight = ($usedTotalAmount <= 0) ? 2 : max(2, ($usedTotalAmount / $maxMonthlyValue) * 100);
+                            $usedTotalTitle = $row['label'] . ' ' . $categories['used_total']['label'] . ': ' . cpms_status_money($usedTotalAmount) . ' (' . $row['cost_start'] . ' ~ ' . $row['cost_end'] . ')';
 
                             $laborAmount = isset($row['labor']) ? (float)$row['labor'] : 0;
                             $laborHeight = ($laborAmount <= 0) ? 2 : max(2, ($laborAmount / $maxMonthlyValue) * 100);
@@ -852,8 +996,8 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             <div class="bar" title="<?php echo h($salesTitle); ?>" style="height:<?php echo round($salesHeight, 2); ?>%; background:<?php echo h($categories['sales']['color']); ?>;">
                                 <span class="value"><?php echo h(number_format($salesAmount)); ?></span>
                             </div>
-                            <div class="bar" title="<?php echo h($targetTitle); ?>" style="height:<?php echo round($targetHeight, 2); ?>%; background:<?php echo h($categories['target_amount']['color']); ?>;">
-                                <span class="value"><?php echo h(number_format($targetAmount)); ?></span>
+                            <div class="bar" title="<?php echo h($usedTotalTitle); ?>" style="height:<?php echo round($usedTotalHeight, 2); ?>%; background:<?php echo h($categories['used_total']['color']); ?>;">
+                                <span class="value"><?php echo h(number_format($usedTotalAmount)); ?></span>
                             </div>
                             <div class="bar" title="<?php echo h($laborTitle); ?>" style="height:<?php echo round($laborHeight, 2); ?>%; background:<?php echo h($categories['labor']['color']); ?>;">
                                 <span class="value"><?php echo h(number_format($laborAmount)); ?></span>
@@ -883,10 +1027,11 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <thead class="bg-gray-50 text-gray-500">
                     <tr>
                         <th class="px-3 py-2 text-left font-bold">월</th>
-                        <th class="px-3 py-2 text-right font-bold"><?php echo h($categories['sales']['label']); ?></th>
+                        <th class="px-3 py-2 text-right font-bold">확정매출</th>
                         <th class="px-3 py-2 text-right font-bold">예상매출</th>
+                        <th class="px-3 py-2 text-right font-bold">적용매출</th>
                         <th class="px-3 py-2 text-right font-bold">투입원가</th>
-                        <th class="px-3 py-2 text-right font-bold">투입목표금액</th>
+                        <th class="px-3 py-2 text-right font-bold">손익</th>
                         <th class="px-3 py-2 text-right font-bold">원가율</th>
                     </tr>
                 </thead>
@@ -895,26 +1040,40 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                         <?php
                         $rowCostRate = isset($row['cost_rate']) ? (float)$row['cost_rate'] : 0.0;
                         $rowNoSales = isset($row['no_sales']) ? (int)$row['no_sales'] : 0;
-                        if ($rowNoSales === 1 || $rowCostRate > 100) {
-                            $rowRateClass = 'text-red-700 bg-red-50 border-red-100';
-                        } else if ($rowCostRate > 70) {
-                            $rowRateClass = 'text-orange-700 bg-orange-50 border-orange-100';
-                        } else {
-                            $rowRateClass = 'text-blue-700 bg-blue-50 border-blue-100';
-                        }
+                        $rowRateClass = cpms_status_rate_class($rowCostRate, $rowNoSales);
+                        $rowProfit = isset($row['profit']) ? (float)$row['profit'] : 0.0;
+                        $rowProfitClass = ($rowProfit < 0) ? 'text-red-700' : 'text-blue-700';
                         ?>
                         <tr class="border-t border-gray-100">
                             <td class="px-3 py-2 text-gray-700 font-bold"><?php echo h(isset($row['label']) ? $row['label'] : '-'); ?></td>
-                            <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['sales']) ? $row['sales'] : 0)); ?></td>
+                            <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['confirmed_sales']) ? $row['confirmed_sales'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['expected_sales']) ? $row['expected_sales'] : 0)); ?></td>
+                            <td class="px-3 py-2 text-right text-gray-900 font-bold"><?php echo h(cpms_status_money(isset($row['sales']) ? $row['sales'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['used_total']) ? $row['used_total'] : 0)); ?></td>
-                            <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['target_amount']) ? $row['target_amount'] : 0)); ?></td>
+                            <td class="px-3 py-2 text-right font-extrabold <?php echo h($rowProfitClass); ?>"><?php echo h(cpms_status_money($rowProfit)); ?></td>
                             <td class="px-3 py-2 text-right">
                                 <span class="cpms-chip cpms-status-rate-badge inline-flex px-2 py-1 rounded-xl border text-xs font-extrabold <?php echo $rowRateClass; ?>"><?php echo h(isset($row['cost_rate_label']) ? $row['cost_rate_label'] : '0%'); ?></span>
                             </td>
                         </tr>
                     <?php endforeach; ?>
                 </tbody>
+                <?php
+                $periodRateClass = cpms_status_rate_class(isset($periodCostRateInfo['cost_rate']) ? $periodCostRateInfo['cost_rate'] : 0, isset($periodCostRateInfo['no_sales']) ? $periodCostRateInfo['no_sales'] : 0);
+                $periodProfitClass = ((float)$yearTotals['profit'] < 0) ? 'text-red-700' : 'text-blue-700';
+                ?>
+                <tfoot class="bg-gray-50">
+                    <tr class="border-t border-gray-200">
+                        <td class="px-3 py-2 text-gray-900 font-extrabold">합계</td>
+                        <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['confirmed_sales'])); ?></td>
+                        <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['expected_sales'])); ?></td>
+                        <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['sales'])); ?></td>
+                        <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['used_total'])); ?></td>
+                        <td class="px-3 py-2 text-right font-extrabold <?php echo h($periodProfitClass); ?>"><?php echo h(cpms_status_money($yearTotals['profit'])); ?></td>
+                        <td class="px-3 py-2 text-right">
+                            <span class="cpms-chip cpms-status-rate-badge inline-flex px-2 py-1 rounded-xl border text-xs font-extrabold <?php echo $periodRateClass; ?>"><?php echo h(isset($periodCostRateInfo['cost_rate_label']) ? $periodCostRateInfo['cost_rate_label'] : '0%'); ?></span>
+                        </td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
     </div>
@@ -932,9 +1091,9 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             $salesHeight = ($salesAmount <= 0) ? 2 : max(2, ($salesAmount / $maxQuarterValue) * 100);
                             $salesTitle = $row['label'] . ' ' . $categories['sales']['label'] . ': ' . cpms_status_money($salesAmount);
 
-                            $targetAmount = isset($row['target_amount']) ? (float)$row['target_amount'] : 0;
-                            $targetHeight = ($targetAmount <= 0) ? 2 : max(2, ($targetAmount / $maxQuarterValue) * 100);
-                            $targetTitle = $row['label'] . ' ' . $categories['target_amount']['label'] . ': ' . cpms_status_money($targetAmount);
+                            $usedTotalAmount = isset($row['used_total']) ? (float)$row['used_total'] : 0;
+                            $usedTotalHeight = ($usedTotalAmount <= 0) ? 2 : max(2, ($usedTotalAmount / $maxQuarterValue) * 100);
+                            $usedTotalTitle = $row['label'] . ' ' . $categories['used_total']['label'] . ': ' . cpms_status_money($usedTotalAmount);
 
                             $laborAmount = isset($row['labor']) ? (float)$row['labor'] : 0;
                             $laborHeight = ($laborAmount <= 0) ? 2 : max(2, ($laborAmount / $maxQuarterValue) * 100);
@@ -956,8 +1115,8 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             <div class="bar" title="<?php echo h($salesTitle); ?>" style="height:<?php echo round($salesHeight, 2); ?>%; background:<?php echo h($categories['sales']['color']); ?>;">
                                 <span class="value"><?php echo h(number_format($salesAmount)); ?></span>
                             </div>
-                            <div class="bar" title="<?php echo h($targetTitle); ?>" style="height:<?php echo round($targetHeight, 2); ?>%; background:<?php echo h($categories['target_amount']['color']); ?>;">
-                                <span class="value"><?php echo h(number_format($targetAmount)); ?></span>
+                            <div class="bar" title="<?php echo h($usedTotalTitle); ?>" style="height:<?php echo round($usedTotalHeight, 2); ?>%; background:<?php echo h($categories['used_total']['color']); ?>;">
+                                <span class="value"><?php echo h(number_format($usedTotalAmount)); ?></span>
                             </div>
                             <div class="bar" title="<?php echo h($laborTitle); ?>" style="height:<?php echo round($laborHeight, 2); ?>%; background:<?php echo h($categories['labor']['color']); ?>;">
                                 <span class="value"><?php echo h(number_format($laborAmount)); ?></span>
@@ -984,3 +1143,18 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         </div>
     </div>
 </div>
+
+<script>
+(function(){
+    var yearEl = document.querySelector('[data-status-year]');
+    var fromEl = document.querySelector('[data-status-from]');
+    var toEl = document.querySelector('[data-status-to]');
+    if (!yearEl || !fromEl || !toEl) return;
+    yearEl.addEventListener('change', function(){
+        var y = String(yearEl.value || '');
+        if (!/^\d{4}$/.test(y)) return;
+        fromEl.value = y + '-01';
+        toEl.value = y + '-12';
+    });
+})();
+</script>

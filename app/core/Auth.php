@@ -50,6 +50,12 @@ class Auth
             if ($ne !== '' && in_array($ne, $masters, true)) return true;
         }
 
+        $dept = '';
+        if (isset($_SESSION[self::CPMS_USER_KEY]) && is_array($_SESSION[self::CPMS_USER_KEY]) && isset($_SESSION[self::CPMS_USER_KEY]['department'])) {
+            $dept = self::normalizeDept($_SESSION[self::CPMS_USER_KEY]['department']);
+        }
+        if ($dept === '개발') return true;
+
         return false;
     }
 
@@ -170,7 +176,7 @@ class Auth
 
         $role = self::userRole();
         $dept = self::normalizeDept(self::userDepartment());
-        return ($role === 'executive' || $dept === '공사');
+        return ($role === 'executive' || $dept === '공사' || $dept === '공무');
     }
 
     // 견적관리 접근 권한: 공무팀, 부사장/대표, 마스터 관리자
@@ -257,6 +263,8 @@ class Auth
             '안전부' => '안전',
             '공사부' => '공사',
             '공사팀' => '공사',
+            '개발부' => '개발',
+            '개발팀' => '개발',
             '안전/보건' => '안전',
             '안전보건' => '안전',
         );
@@ -328,13 +336,15 @@ class Auth
             }
         }
 
-        // 마스터 계정 권한: executive로 강제
+        $dept = self::normalizeDept($dept);
+
+        // 마스터 계정/개발부서 권한: executive로 강제
         $normalizedMasterEmails = array();
         foreach (self::masterEmails() as $masterEmail) {
             $normalizedMasterEmails[] = self::normalizeEmail($masterEmail);
         }
 
-        if (in_array($email, $normalizedMasterEmails, true)) {
+        if (in_array($email, $normalizedMasterEmails, true) || $dept === '개발') {
             $role = 'executive';
         }
 
@@ -342,8 +352,6 @@ class Auth
         if ($role !== 'executive') {
             if (in_array($email, self::executiveEmails(), true)) $role = 'executive';
         }
-
-        $dept = self::normalizeDept($dept);
 
         // 세션 반영
         if (!isset($_SESSION[self::CPMS_USER_KEY]) || !is_array($_SESSION[self::CPMS_USER_KEY])) {

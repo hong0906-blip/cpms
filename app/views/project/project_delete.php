@@ -43,6 +43,17 @@ if (!$pdo) {
     header('Location: ?r=공무'); exit;
 }
 
+function cpms_project_delete_column_exists($pdo, $table, $column) {
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM `" . $table . "` LIKE :col");
+        $st->bindValue(':col', (string)$column);
+        $st->execute();
+        return is_array($st->fetch(PDO::FETCH_ASSOC));
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
 try {
     $pdo->beginTransaction();
 
@@ -72,7 +83,11 @@ try {
     } catch (Exception $e) {}
 
     // 2) 단가표/멤버
-    try { $pdo->prepare("DELETE FROM cpms_project_unit_prices WHERE project_id = :pid")->execute(array(':pid'=>$projectId)); } catch (Exception $e) {}
+    try {
+        if (cpms_project_delete_column_exists($pdo, 'cpms_project_unit_prices', 'is_active') && cpms_project_delete_column_exists($pdo, 'cpms_project_unit_prices', 'is_current')) {
+            $pdo->prepare("UPDATE cpms_project_unit_prices SET is_active = 0, is_current = 0, updated_at = NOW() WHERE project_id = :pid")->execute(array(':pid'=>$projectId));
+        }
+    } catch (Exception $e) {}
     try { $pdo->prepare("DELETE FROM cpms_project_members WHERE project_id = :pid")->execute(array(':pid'=>$projectId)); } catch (Exception $e) {}
 
     // 3) 공사 뼈대(MVP) 관련 테이블들(없어도 try/catch로 안전)

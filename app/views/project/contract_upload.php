@@ -41,6 +41,80 @@ function cpms_contract_upload_current_user_id() {
 }
 }
 
+if (!function_exists('cpms_contract_upload_current_user_name')) {
+function cpms_contract_upload_current_user_name() {
+    $name = Auth::userName();
+    if ($name !== null && trim((string)$name) !== '') return (string)$name;
+    $email = Auth::userEmail();
+    return $email !== null ? (string)$email : '';
+}
+}
+
+if (!function_exists('cpms_contract_upload_source_type')) {
+function cpms_contract_upload_source_type($versionType) {
+    if ($versionType === 'change') return 'CHANGE';
+    if ($versionType === 'extra' || $versionType === 'additional') return 'EXTRA';
+    return 'ORIGINAL';
+}
+}
+
+if (!function_exists('cpms_contract_upload_estimate_next_version_no')) {
+function cpms_contract_upload_estimate_next_version_no($pdo, $projectId, $sourceType) {
+    if (!$pdo || !cpms_contract_change_table_exists($pdo, 'cpms_project_estimate_versions')) {
+        return ($sourceType === 'ORIGINAL') ? 1 : 1;
+    }
+    try {
+        $st = $pdo->prepare("SELECT COALESCE(MAX(version_no), 0) FROM cpms_project_estimate_versions WHERE project_id = :pid AND version_type = :type");
+        $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+        $st->bindValue(':type', (string)$sourceType);
+        $st->execute();
+        $maxNo = (int)$st->fetchColumn();
+        if ($sourceType === 'ORIGINAL') return ($maxNo > 0) ? $maxNo + 1 : 1;
+        return $maxNo + 1;
+    } catch (Exception $e) {
+        return 1;
+    }
+}
+}
+
+if (!function_exists('cpms_contract_upload_create_estimate_version')) {
+function cpms_contract_upload_create_estimate_version($pdo, $projectId, $sourceType, $versionNo, $title, $description, $originalName, $storedName, $storedPath, $summary, $itemCount) {
+    if (!$pdo || !cpms_contract_change_table_exists($pdo, 'cpms_project_estimate_versions')) return 0;
+    if (!is_array($summary)) $summary = array();
+    try {
+        $now = date('Y-m-d H:i:s');
+        $st = $pdo->prepare("INSERT INTO cpms_project_estimate_versions
+            (project_id, version_type, version_no, title, description, original_file_name, stored_file_path, uploaded_by, uploaded_by_name, uploaded_at, applied_at, status, item_count, added_count, changed_count, removed_count, created_at, updated_at)
+            VALUES
+            (:project_id, :version_type, :version_no, :title, :description, :original_file_name, :stored_file_path, :uploaded_by, :uploaded_by_name, :uploaded_at, :applied_at, 'APPLIED', :item_count, :added_count, :changed_count, :removed_count, :created_at, :updated_at)");
+        $st->bindValue(':project_id', (int)$projectId, PDO::PARAM_INT);
+        $st->bindValue(':version_type', (string)$sourceType);
+        $st->bindValue(':version_no', (int)$versionNo, PDO::PARAM_INT);
+        $st->bindValue(':title', (string)$title);
+        $st->bindValue(':description', (string)$description);
+        $st->bindValue(':original_file_name', (string)$originalName);
+        $st->bindValue(':stored_file_path', (string)$storedPath);
+        $userId = cpms_contract_upload_current_user_id();
+        if ($userId > 0) $st->bindValue(':uploaded_by', $userId, PDO::PARAM_INT);
+        else $st->bindValue(':uploaded_by', null, PDO::PARAM_NULL);
+        $st->bindValue(':uploaded_by_name', cpms_contract_upload_current_user_name());
+        $st->bindValue(':uploaded_at', $now);
+        $st->bindValue(':applied_at', $now);
+        $st->bindValue(':item_count', (int)$itemCount, PDO::PARAM_INT);
+        $st->bindValue(':added_count', isset($summary['inserted']) ? (int)$summary['inserted'] : (isset($summary['added']) ? (int)$summary['added'] : 0), PDO::PARAM_INT);
+        $st->bindValue(':changed_count', isset($summary['changed']) ? (int)$summary['changed'] : (isset($summary['updated']) ? (int)$summary['updated'] : 0), PDO::PARAM_INT);
+        $st->bindValue(':removed_count', isset($summary['deactivated']) ? (int)$summary['deactivated'] : (isset($summary['removed']) ? (int)$summary['removed'] : 0), PDO::PARAM_INT);
+        $st->bindValue(':created_at', $now);
+        $st->bindValue(':updated_at', $now);
+        $st->execute();
+        return (int)$pdo->lastInsertId();
+    } catch (Exception $e) {
+        error_log('[contract_upload] estimate version insert failed: ' . $e->getMessage());
+        return 0;
+    }
+}
+}
+
 if (!function_exists('cpms_contract_upload_row_key')) {
 function cpms_contract_upload_row_key($row) {
     return cpms_contract_change_row_key($row);
@@ -51,6 +125,7 @@ if (!function_exists('cpms_contract_upload_file_type')) {
 function cpms_contract_upload_file_type($uploadMode) {
     if ($uploadMode === 'unit_price_update') return 'unit_price_update';
     if ($uploadMode === 'unit_price_original') return 'unit_price_original';
+    if ($uploadMode === 'unit_price_extra') return 'unit_price_extra';
     return 'contract_only';
 }
 }
@@ -78,7 +153,7 @@ function cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $orig
 if (!function_exists('cpms_contract_upload_next_version_no')) {
 function cpms_contract_upload_next_version_no($pdo, $projectId, $versionType) {
     if (!$pdo || !cpms_contract_change_table_exists($pdo, 'cpms_contract_versions')) return 0;
-    if ($versionType === 'original') return 0;
+    if ($versionType === 'original') return 1;
     try {
         $st = $pdo->prepare("SELECT COALESCE(MAX(version_no), 0) FROM cpms_contract_versions WHERE project_id = :pid AND version_type = :type");
         $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
@@ -94,7 +169,7 @@ function cpms_contract_upload_next_version_no($pdo, $projectId, $versionType) {
 if (!function_exists('cpms_contract_upload_version_title')) {
 function cpms_contract_upload_version_title($versionType, $versionNo, $additionalTitle) {
     if ($versionType === 'original') return '당초 내역서';
-    if ($versionType === 'additional') {
+    if ($versionType === 'extra' || $versionType === 'additional') {
         $title = trim((string)$additionalTitle);
         return '추가공사 - ' . ($title !== '' ? $title : ('추가공사 ' . (int)$versionNo));
     }
@@ -143,6 +218,7 @@ if (!function_exists('cpms_contract_upload_build_data')) {
 function cpms_contract_upload_build_data($row, $columns, $extra) {
     if (!is_array($extra)) $extra = array();
     $source = array(
+        'estimate_version_id' => isset($extra['estimate_version_id']) ? (int)$extra['estimate_version_id'] : null,
         'contract_version_id' => isset($extra['contract_version_id']) ? (int)$extra['contract_version_id'] : null,
         'version_type' => isset($extra['version_type']) ? (string)$extra['version_type'] : 'current',
         'version_no' => isset($extra['version_no']) ? (int)$extra['version_no'] : null,
@@ -150,7 +226,10 @@ function cpms_contract_upload_build_data($row, $columns, $extra) {
         'trade_group' => isset($row['trade_group']) ? trim((string)$row['trade_group']) : '',
         'sub_trade' => isset($row['sub_trade']) ? trim((string)$row['sub_trade']) : '',
         'location_name' => isset($row['location_name']) ? trim((string)$row['location_name']) : '',
+        'work_group' => isset($row['work_group']) ? trim((string)$row['work_group']) : (isset($row['trade_group']) ? trim((string)$row['trade_group']) : ''),
+        'sub_work_group' => isset($row['sub_work_group']) ? trim((string)$row['sub_work_group']) : (isset($row['sub_trade']) ? trim((string)$row['sub_trade']) : ''),
         'item_name' => isset($row['item_name']) ? trim((string)$row['item_name']) : '',
+        'original_item_name' => isset($row['original_item_name']) ? trim((string)$row['original_item_name']) : (isset($row['item_name']) ? trim((string)$row['item_name']) : ''),
         'spec' => isset($row['spec']) ? trim((string)$row['spec']) : '',
         'unit' => isset($row['unit']) ? trim((string)$row['unit']) : '',
         'qty' => isset($row['qty']) ? $row['qty'] : null,
@@ -160,6 +239,11 @@ function cpms_contract_upload_build_data($row, $columns, $extra) {
         'expense_unit_price' => isset($row['expense_unit_price']) ? $row['expense_unit_price'] : null,
         'amount' => isset($row['amount']) ? $row['amount'] : null,
         'source_row' => isset($row['source_row']) ? (int)$row['source_row'] : null,
+        'source_row_no' => isset($row['source_row_no']) ? (int)$row['source_row_no'] : (isset($row['source_row']) ? (int)$row['source_row'] : null),
+        'source_sheet_name' => isset($row['source_sheet_name']) ? trim((string)$row['source_sheet_name']) : '',
+        'source_type' => isset($extra['source_type']) ? (string)$extra['source_type'] : cpms_contract_upload_source_type(isset($extra['version_type']) ? (string)$extra['version_type'] : 'original'),
+        'source_version_no' => isset($extra['source_version_no']) ? (int)$extra['source_version_no'] : (isset($extra['version_no']) ? (int)$extra['version_no'] : null),
+        'item_fingerprint' => isset($row['item_fingerprint']) ? trim((string)$row['item_fingerprint']) : cpms_contract_change_item_fingerprint($row),
         'import_order' => isset($row['import_order']) ? (int)$row['import_order'] : null,
         'is_safety' => isset($row['is_safety']) ? (int)$row['is_safety'] : 0,
         'remark' => isset($row['remark']) ? trim((string)$row['remark']) : ''
@@ -181,6 +265,18 @@ function cpms_contract_upload_build_data($row, $columns, $extra) {
     if (isset($columns['is_current'])) $data['is_current'] = 1;
     if (isset($columns['updated_at'])) $data['updated_at'] = date('Y-m-d H:i:s');
     return $data;
+}
+}
+
+if (!function_exists('cpms_contract_upload_unit_price_available_columns')) {
+function cpms_contract_upload_unit_price_available_columns($pdo) {
+    $availableColumns = array();
+    foreach (array('estimate_version_id', 'contract_version_id', 'version_type', 'version_no', 'additional_work_id', 'trade_group', 'sub_trade', 'location_name', 'work_group', 'sub_work_group', 'item_name', 'original_item_name', 'spec', 'unit', 'qty', 'unit_price', 'labor_unit_price', 'material_unit_price', 'expense_unit_price', 'amount', 'source_row', 'source_row_no', 'source_sheet_name', 'source_type', 'source_version_no', 'item_fingerprint', 'import_order', 'is_safety', 'remark', 'is_active', 'is_current', 'updated_at') as $column) {
+        if (cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', $column)) {
+            $availableColumns[$column] = true;
+        }
+    }
+    return $availableColumns;
 }
 }
 
@@ -254,10 +350,11 @@ function cpms_contract_upload_store_change_logs($pdo, $projectId, $contractItemI
     if (!cpms_contract_change_table_exists($pdo, 'cpms_contract_change_logs')) return;
 
     try {
-        $st = $pdo->prepare("INSERT INTO cpms_contract_change_logs
-            (project_id, contract_item_id, change_type, item_name, spec, unit, old_quantity, new_quantity, old_unit_price, new_unit_price, created_by, created_at)
-            VALUES
-            (:project_id, :contract_item_id, :change_type, :item_name, :spec, :unit, :old_quantity, :new_quantity, :old_unit_price, :new_unit_price, :created_by, :created_at)");
+        $hasOldAmount = cpms_contract_upload_column_exists($pdo, 'cpms_contract_change_logs', 'old_amount');
+        $hasNewAmount = cpms_contract_upload_column_exists($pdo, 'cpms_contract_change_logs', 'new_amount');
+        $hasEstimateVersionId = cpms_contract_upload_column_exists($pdo, 'cpms_contract_change_logs', 'estimate_version_id');
+        $hasSourceType = cpms_contract_upload_column_exists($pdo, 'cpms_contract_change_logs', 'source_type');
+        $hasSourceVersionNo = cpms_contract_upload_column_exists($pdo, 'cpms_contract_change_logs', 'source_version_no');
         foreach ($badges as $badge) {
             if (!is_array($badge)) continue;
             $type = isset($badge['type']) ? (string)$badge['type'] : '';
@@ -267,8 +364,19 @@ function cpms_contract_upload_store_change_logs($pdo, $projectId, $contractItemI
             $newQty = is_array($newRow) && isset($newRow['qty']) ? $newRow['qty'] : null;
             $oldUnitPrice = is_array($oldRow) ? cpms_contract_change_unit_price_value($oldRow) : null;
             $newUnitPrice = is_array($newRow) ? cpms_contract_change_unit_price_value($newRow) : null;
+            $oldAmount = is_array($oldRow) && isset($oldRow['amount']) ? $oldRow['amount'] : null;
+            $newAmount = is_array($newRow) && isset($newRow['amount']) ? $newRow['amount'] : null;
             $createdBy = cpms_contract_upload_current_user_id();
 
+            $columns = array('project_id', 'contract_item_id', 'change_type', 'item_name', 'spec', 'unit', 'old_quantity', 'new_quantity', 'old_unit_price', 'new_unit_price', 'created_by', 'created_at');
+            $holders = array(':project_id', ':contract_item_id', ':change_type', ':item_name', ':spec', ':unit', ':old_quantity', ':new_quantity', ':old_unit_price', ':new_unit_price', ':created_by', ':created_at');
+            if ($hasOldAmount) { array_push($columns, 'old_amount'); array_push($holders, ':old_amount'); }
+            if ($hasNewAmount) { array_push($columns, 'new_amount'); array_push($holders, ':new_amount'); }
+            if ($hasEstimateVersionId) { array_push($columns, 'estimate_version_id'); array_push($holders, ':estimate_version_id'); }
+            if ($hasSourceType) { array_push($columns, 'source_type'); array_push($holders, ':source_type'); }
+            if ($hasSourceVersionNo) { array_push($columns, 'source_version_no'); array_push($holders, ':source_version_no'); }
+
+            $st = $pdo->prepare("INSERT INTO cpms_contract_change_logs (" . implode(',', $columns) . ") VALUES (" . implode(',', $holders) . ")");
             $st->bindValue(':project_id', (int)$projectId, PDO::PARAM_INT);
             $st->bindValue(':contract_item_id', (int)$contractItemId > 0 ? (int)$contractItemId : null, (int)$contractItemId > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
             $st->bindValue(':change_type', $type);
@@ -281,6 +389,11 @@ function cpms_contract_upload_store_change_logs($pdo, $projectId, $contractItemI
             $st->bindValue(':new_unit_price', $newUnitPrice !== null ? $newUnitPrice : null, $newUnitPrice !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
             $st->bindValue(':created_by', $createdBy > 0 ? $createdBy : null, $createdBy > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
             $st->bindValue(':created_at', date('Y-m-d H:i:s'));
+            if ($hasOldAmount) $st->bindValue(':old_amount', $oldAmount !== null ? $oldAmount : null, $oldAmount !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            if ($hasNewAmount) $st->bindValue(':new_amount', $newAmount !== null ? $newAmount : null, $newAmount !== null ? PDO::PARAM_STR : PDO::PARAM_NULL);
+            if ($hasEstimateVersionId) $st->bindValue(':estimate_version_id', isset($rowForText['estimate_version_id']) ? (int)$rowForText['estimate_version_id'] : null, isset($rowForText['estimate_version_id']) ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            if ($hasSourceType) $st->bindValue(':source_type', isset($rowForText['source_type']) ? (string)$rowForText['source_type'] : null);
+            if ($hasSourceVersionNo) $st->bindValue(':source_version_no', isset($rowForText['source_version_no']) ? (int)$rowForText['source_version_no'] : null, isset($rowForText['source_version_no']) ? PDO::PARAM_INT : PDO::PARAM_NULL);
             $st->execute();
         }
     } catch (Exception $e) {
@@ -299,18 +412,14 @@ function cpms_contract_upload_apply_unit_price_update($pdo, $projectId, $rows, $
         'kept' => 0,
         'changed' => 0,
         'unit_price_changed' => 0,
+        'amount_changed' => 0,
         'quantity_increased' => 0,
         'quantity_decreased' => 0,
         'historical_snapshots' => 0
     );
 
     $requiredColumns = array('item_name', 'spec', 'unit', 'qty', 'unit_price');
-    $availableColumns = array();
-    foreach (array('contract_version_id', 'version_type', 'version_no', 'additional_work_id', 'trade_group', 'sub_trade', 'location_name', 'item_name', 'spec', 'unit', 'qty', 'unit_price', 'labor_unit_price', 'material_unit_price', 'expense_unit_price', 'amount', 'source_row', 'import_order', 'is_safety', 'remark', 'is_active', 'is_current', 'updated_at') as $column) {
-        if (cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', $column)) {
-            $availableColumns[$column] = true;
-        }
-    }
+    $availableColumns = cpms_contract_upload_unit_price_available_columns($pdo);
     foreach ($requiredColumns as $column) {
         if (!isset($availableColumns[$column])) {
             throw new Exception('cpms_project_unit_prices.' . $column . ' 컬럼이 없습니다.');
@@ -330,30 +439,17 @@ function cpms_contract_upload_apply_unit_price_update($pdo, $projectId, $rows, $
         array_push($activeRows, $row);
     }
 
-    $exactMap = array();
-    foreach ($activeRows as $index => $row) {
-        $key = cpms_contract_upload_row_key($row);
-        if (function_exists('cpms_contract_change_row_key_empty') && cpms_contract_change_row_key_empty($key)) continue;
-        if (!isset($exactMap[$key])) $exactMap[$key] = array();
-        array_push($exactMap[$key], $index);
-    }
+    $matchData = cpms_contract_change_build_match_maps($activeRows);
 
     $usedIndexes = array();
 
     foreach ($rows as $row) {
         if (!is_array($row)) continue;
-        $key = cpms_contract_upload_row_key($row);
+        $key = cpms_contract_change_match_key_for_fields($row, array('item_name', 'spec', 'unit'));
         if (function_exists('cpms_contract_change_row_key_empty') && cpms_contract_change_row_key_empty($key)) continue;
 
-        $matchIndex = -1;
-        if (isset($exactMap[$key])) {
-            foreach ($exactMap[$key] as $candidate) {
-                if (!isset($usedIndexes[$candidate])) {
-                    $matchIndex = (int)$candidate;
-                    break;
-                }
-            }
-        }
+        $match = cpms_contract_change_pick_match($matchData, $row, $usedIndexes);
+        $matchIndex = isset($match['index']) ? (int)$match['index'] : -1;
 
         $data = cpms_contract_upload_build_data($row, $availableColumns, $versionInfo);
 
@@ -379,6 +475,12 @@ function cpms_contract_upload_apply_unit_price_update($pdo, $projectId, $rows, $
                     $summary['quantity_decreased']++;
                     array_push($badges, cpms_contract_change_badge('QUANTITY_DECREASED', '수량 감소', $oldQty, $newQty));
                 }
+            }
+            $oldAmount = isset($oldRow['amount']) ? $oldRow['amount'] : null;
+            $newAmount = isset($row['amount']) ? $row['amount'] : null;
+            if (!cpms_contract_change_number_same($oldAmount, $newAmount)) {
+                $summary['amount_changed']++;
+                array_push($badges, cpms_contract_change_badge('AMOUNT_CHANGED', '금액 변경', $oldAmount, $newAmount));
             }
             if (isset($versionInfo['version_type']) && $versionInfo['version_type'] === 'change') {
                 $snapshotId = cpms_contract_upload_snapshot_current_row($pdo, $projectId, $oldRow, $availableColumns);
@@ -417,6 +519,95 @@ function cpms_contract_upload_apply_unit_price_update($pdo, $projectId, $rows, $
 }
 }
 
+if (!function_exists('cpms_contract_upload_deactivate_current_rows')) {
+function cpms_contract_upload_deactivate_current_rows($pdo, $projectId, $availableColumns) {
+    if (!$pdo || (int)$projectId <= 0 || !is_array($availableColumns)) return 0;
+    if (!isset($availableColumns['is_active']) && !isset($availableColumns['is_current'])) return 0;
+    $sets = array();
+    if (isset($availableColumns['is_active'])) array_push($sets, "is_active = 0");
+    if (isset($availableColumns['is_current'])) array_push($sets, "is_current = 0");
+    if (isset($availableColumns['updated_at'])) array_push($sets, "updated_at = :updated_at");
+    $sql = "UPDATE cpms_project_unit_prices SET " . implode(', ', $sets) . " WHERE project_id = :pid";
+    if (isset($availableColumns['is_active'])) $sql .= " AND (is_active = 1 OR is_active IS NULL)";
+    if (isset($availableColumns['is_current'])) $sql .= " AND (is_current = 1 OR is_current IS NULL)";
+    $st = $pdo->prepare($sql);
+    $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+    if (isset($availableColumns['updated_at'])) $st->bindValue(':updated_at', date('Y-m-d H:i:s'));
+    $st->execute();
+    return (int)$st->rowCount();
+}
+}
+
+if (!function_exists('cpms_contract_upload_apply_unit_price_replace')) {
+function cpms_contract_upload_apply_unit_price_replace($pdo, $projectId, $rows, $versionInfo, $deactivateBeforeInsert) {
+    if (!is_array($versionInfo)) $versionInfo = array();
+    $summary = array(
+        'updated' => 0,
+        'inserted' => 0,
+        'deactivated' => 0,
+        'kept' => 0,
+        'changed' => 0,
+        'unit_price_changed' => 0,
+        'amount_changed' => 0,
+        'quantity_increased' => 0,
+        'quantity_decreased' => 0,
+        'historical_snapshots' => 0
+    );
+
+    $requiredColumns = array('item_name', 'spec', 'unit', 'qty', 'unit_price');
+    $availableColumns = cpms_contract_upload_unit_price_available_columns($pdo);
+    foreach ($requiredColumns as $column) {
+        if (!isset($availableColumns[$column])) {
+            throw new Exception('cpms_project_unit_prices.' . $column . ' 컬럼이 없습니다.');
+        }
+    }
+
+    if ($deactivateBeforeInsert) {
+        $summary['deactivated'] = cpms_contract_upload_deactivate_current_rows($pdo, $projectId, $availableColumns);
+    }
+
+    foreach ($rows as $row) {
+        if (!is_array($row)) continue;
+        $item = isset($row['item_name']) ? trim((string)$row['item_name']) : '';
+        if ($item === '') continue;
+        $data = cpms_contract_upload_build_data($row, $availableColumns, $versionInfo);
+        cpms_contract_upload_insert_row($pdo, $projectId, $data);
+        $summary['inserted']++;
+    }
+
+    return $summary;
+}
+}
+
+if (!function_exists('cpms_contract_upload_attach_version_ids')) {
+function cpms_contract_upload_attach_version_ids($pdo, $projectId, $versionType, $sourceType, $versionNo, $contractVersionId, $estimateVersionId) {
+    if (!$pdo || (int)$projectId <= 0) return;
+    $sets = array();
+    if ((int)$contractVersionId > 0 && cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', 'contract_version_id')) {
+        array_push($sets, "contract_version_id = :contract_version_id");
+    }
+    if ((int)$estimateVersionId > 0 && cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', 'estimate_version_id')) {
+        array_push($sets, "estimate_version_id = :estimate_version_id");
+    }
+    if (count($sets) === 0) return;
+    $sql = "UPDATE cpms_project_unit_prices SET " . implode(', ', $sets) . " WHERE project_id = :pid";
+    if (cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', 'version_type')) $sql .= " AND version_type = :version_type";
+    if (cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', 'version_no')) $sql .= " AND version_no = :version_no";
+    if (cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', 'source_type')) $sql .= " AND source_type = :source_type";
+    if (cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', 'source_version_no')) $sql .= " AND source_version_no = :source_version_no";
+    if (cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', 'is_current')) $sql .= " AND (is_current = 1 OR is_current IS NULL)";
+    $st = $pdo->prepare($sql);
+    $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+    if ((int)$contractVersionId > 0) $st->bindValue(':contract_version_id', (int)$contractVersionId, PDO::PARAM_INT);
+    if ((int)$estimateVersionId > 0) $st->bindValue(':estimate_version_id', (int)$estimateVersionId, PDO::PARAM_INT);
+    if (strpos($sql, ':version_type') !== false) $st->bindValue(':version_type', (string)$versionType);
+    if (strpos($sql, ':version_no') !== false) $st->bindValue(':version_no', (int)$versionNo, PDO::PARAM_INT);
+    if (strpos($sql, ':source_type') !== false) $st->bindValue(':source_type', (string)$sourceType);
+    if (strpos($sql, ':source_version_no') !== false) $st->bindValue(':source_version_no', (int)$versionNo, PDO::PARAM_INT);
+    $st->execute();
+}
+}
+
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
 $role = Auth::userRole();
@@ -433,7 +624,7 @@ if (!csrf_check($csrf)) {
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $uploadMode = isset($_POST['upload_mode']) ? trim((string)$_POST['upload_mode']) : 'contract_only';
-if ($uploadMode !== 'unit_price_update' && $uploadMode !== 'unit_price_original') $uploadMode = 'contract_only';
+if ($uploadMode !== 'unit_price_update' && $uploadMode !== 'unit_price_original' && $uploadMode !== 'unit_price_extra') $uploadMode = 'contract_only';
 
 if ($projectId <= 0) {
     cpms_contract_upload_redirect(0, 'error', '잘못된 프로젝트 ID입니다.');
@@ -456,7 +647,7 @@ try {
 }
 
 $previewToken = isset($_POST['preview_token']) ? trim((string)$_POST['preview_token']) : '';
-if ($uploadMode === 'unit_price_update' && $previewToken !== '') {
+if (($uploadMode === 'unit_price_update' || $uploadMode === 'unit_price_original' || $uploadMode === 'unit_price_extra') && $previewToken !== '') {
     if (!isset($_SESSION['unit_price_update'][$previewToken]) || !is_array($_SESSION['unit_price_update'][$previewToken])) {
         cpms_contract_upload_redirect($projectId, 'error', '미리보기 데이터가 만료되었습니다.');
     }
@@ -472,35 +663,81 @@ if ($uploadMode === 'unit_price_update' && $previewToken !== '') {
     $storedPath = isset($pack['stored_path']) ? (string)$pack['stored_path'] : '';
     $storedName = isset($pack['stored_name']) ? (string)$pack['stored_name'] : basename($storedPath);
     $originalName = isset($pack['file_name']) ? (string)$pack['file_name'] : $storedName;
+    $additionalTitle = isset($pack['additional_work_title']) ? trim((string)$pack['additional_work_title']) : '';
+    $manualVersionNo = isset($pack['version_no']) ? (int)$pack['version_no'] : 0;
 
     try {
         $pdo->beginTransaction();
-        $versionNo = cpms_contract_upload_next_version_no($pdo, $projectId, 'change');
+        $versionType = 'change';
+        $sourceType = 'CHANGE';
+        if ($uploadMode === 'unit_price_original') {
+            $versionType = 'original';
+            $sourceType = 'ORIGINAL';
+        } else if ($uploadMode === 'unit_price_extra') {
+            $versionType = 'extra';
+            $sourceType = 'EXTRA';
+        }
+        if ($manualVersionNo > 0) {
+            $versionNo = $manualVersionNo;
+        } else if ($sourceType === 'ORIGINAL') {
+            $versionNo = cpms_contract_upload_estimate_next_version_no($pdo, $projectId, 'ORIGINAL');
+        } else {
+            $versionNo = cpms_contract_upload_estimate_next_version_no($pdo, $projectId, $sourceType);
+        }
+
+        $additionalWorkId = 0;
+        if ($uploadMode === 'unit_price_extra' && cpms_contract_change_table_exists($pdo, 'cpms_contract_additional_works')) {
+            $nowForAdditional = date('Y-m-d H:i:s');
+            $stAdditional = $pdo->prepare("INSERT INTO cpms_contract_additional_works
+                (project_id, title, occurred_on, request_ref, remark, status, attachment_original_name, attachment_stored_name, attachment_stored_path, created_by, created_at, updated_at)
+                VALUES
+                (:project_id, :title, NULL, '', '', '계약 반영 완료', :attachment_original_name, :attachment_stored_name, :attachment_stored_path, :created_by, :created_at, :updated_at)");
+            $stAdditional->bindValue(':project_id', $projectId, PDO::PARAM_INT);
+            $stAdditional->bindValue(':title', $additionalTitle !== '' ? $additionalTitle : ('추가공사 ' . (int)$versionNo));
+            $stAdditional->bindValue(':attachment_original_name', $originalName);
+            $stAdditional->bindValue(':attachment_stored_name', $storedName);
+            $stAdditional->bindValue(':attachment_stored_path', $storedPath);
+            $userIdForAdditional = cpms_contract_upload_current_user_id();
+            if ($userIdForAdditional > 0) $stAdditional->bindValue(':created_by', $userIdForAdditional, PDO::PARAM_INT);
+            else $stAdditional->bindValue(':created_by', null, PDO::PARAM_NULL);
+            $stAdditional->bindValue(':created_at', $nowForAdditional);
+            $stAdditional->bindValue(':updated_at', $nowForAdditional);
+            $stAdditional->execute();
+            $additionalWorkId = (int)$pdo->lastInsertId();
+        }
+
         $versionInfo = array(
             'contract_version_id' => 0,
-            'version_type' => 'change',
+            'estimate_version_id' => 0,
+            'version_type' => $versionType,
             'version_no' => $versionNo,
-            'additional_work_id' => 0
+            'additional_work_id' => $additionalWorkId,
+            'source_type' => $sourceType,
+            'source_version_no' => $versionNo
         );
-        $summary = cpms_contract_upload_apply_unit_price_update($pdo, $projectId, $rows, $versionInfo);
-        $versionTitle = cpms_contract_upload_version_title('change', $versionNo, '');
-        $versionId = cpms_contract_upload_create_version($pdo, $projectId, 'change', $versionNo, $versionTitle, $originalName, $storedName, $storedPath, $summary);
-        if ($versionId > 0 && cpms_contract_upload_column_exists($pdo, 'cpms_project_unit_prices', 'contract_version_id')) {
-            $stVersionRows = $pdo->prepare("UPDATE cpms_project_unit_prices SET contract_version_id = :vid WHERE project_id = :pid AND version_type = 'change' AND version_no = :vno AND is_current = 1");
-            $stVersionRows->bindValue(':vid', $versionId, PDO::PARAM_INT);
-            $stVersionRows->bindValue(':pid', $projectId, PDO::PARAM_INT);
-            $stVersionRows->bindValue(':vno', $versionNo, PDO::PARAM_INT);
-            $stVersionRows->execute();
+
+        if ($uploadMode === 'unit_price_update') {
+            $summary = cpms_contract_upload_apply_unit_price_update($pdo, $projectId, $rows, $versionInfo);
+        } else if ($uploadMode === 'unit_price_original') {
+            $summary = cpms_contract_upload_apply_unit_price_replace($pdo, $projectId, $rows, $versionInfo, true);
+        } else {
+            $summary = cpms_contract_upload_apply_unit_price_replace($pdo, $projectId, $rows, $versionInfo, false);
         }
+
+        $versionTitle = cpms_contract_upload_version_title($versionType, $versionNo, $additionalTitle);
+        $versionId = cpms_contract_upload_create_version($pdo, $projectId, $versionType, $versionNo, $versionTitle, $originalName, $storedName, $storedPath, $summary);
+        $estimateVersionId = cpms_contract_upload_create_estimate_version($pdo, $projectId, $sourceType, $versionNo, $versionTitle, isset($pack['description']) ? (string)$pack['description'] : '', $originalName, $storedName, $storedPath, $summary, count($rows));
+        cpms_contract_upload_attach_version_ids($pdo, $projectId, $versionType, $sourceType, $versionNo, $versionId, $estimateVersionId);
         $pdo->commit();
-        $driveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $storedPath, $originalName, 'unit_price_update', date('Y-m'), date('Y-m-d'), array('date' => date('Y-m-d')), Auth::user());
+        $driveDocumentType = cpms_contract_upload_file_type($uploadMode);
+        $driveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $storedPath, $originalName, $driveDocumentType, date('Y-m'), date('Y-m-d'), array('date' => date('Y-m-d')), Auth::user());
         $driveRecord = (is_array($driveUpload) && isset($driveUpload['record']) && is_array($driveUpload['record'])) ? $driveUpload['record'] : array();
         $historySave = cpms_contract_upload_store_history($pdo, $projectId, $uploadMode, $originalName, $storedName, $storedPath, $summary, $driveRecord);
         if (!empty($driveUpload['ok']) && empty($historySave['ok']) && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
             cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
                 'section' => 'public_affairs',
                 'project_id' => $projectId,
-                'document_type' => isset($driveRecord['document_type']) ? $driveRecord['document_type'] : 'unit_price_update',
+                'document_type' => isset($driveRecord['document_type']) ? $driveRecord['document_type'] : $driveDocumentType,
                 'original_name' => $originalName,
                 'target_folder_id' => isset($driveRecord['drive_folder_id']) ? $driveRecord['drive_folder_id'] : '',
                 'message' => isset($historySave['message']) ? $historySave['message'] : 'Contract history save failed after Drive upload.'
@@ -515,7 +752,14 @@ if ($uploadMode === 'unit_price_update' && $previewToken !== '') {
                 'skip_delete_on_failure' => true
             ));
         }
-        $successMessage = $versionTitle . ' 변경계약 내역서가 적용되었습니다. 변경 ' . (int)$summary['updated'] . '건 / 신규 ' . (int)$summary['inserted'] . '건 / 제외 ' . (int)$summary['deactivated'] . '건';
+        if (!empty($driveUpload['ok']) && !empty($historySave['ok']) && $estimateVersionId > 0) {
+            cpms_public_affairs_drive_apply_record_to_row($pdo, 'cpms_project_estimate_versions', $estimateVersionId, $driveRecord, cpms_contract_upload_current_user_id(), array(
+                'section' => 'public_affairs',
+                'project_id' => $projectId,
+                'skip_delete_on_failure' => true
+            ));
+        }
+        $successMessage = $versionTitle . ' 내역서가 적용되었습니다. 변경 ' . (int)$summary['updated'] . '건 / 신규 ' . (int)$summary['inserted'] . '건 / 이력 전환 ' . (int)$summary['deactivated'] . '건';
         unset($_SESSION['unit_price_update'][$previewToken]);
         cpms_contract_upload_redirect(
             $projectId,
@@ -528,8 +772,8 @@ if ($uploadMode === 'unit_price_update' && $previewToken !== '') {
     }
 }
 
-if ($uploadMode === 'unit_price_update') {
-    cpms_contract_upload_redirect($projectId, 'error', '변경계약 내역서는 먼저 비교 미리보기를 확인한 뒤 적용해야 합니다.');
+if ($uploadMode === 'unit_price_update' || $uploadMode === 'unit_price_original' || $uploadMode === 'unit_price_extra') {
+    cpms_contract_upload_redirect($projectId, 'error', '내역서는 먼저 미리보기를 확인한 뒤 적용해야 합니다.');
 }
 
 if (!isset($_FILES['contract_file']) || !is_array($_FILES['contract_file'])) {

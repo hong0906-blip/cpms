@@ -40,6 +40,7 @@ $canViewSamsungPortal = false;
 $canEditSamsungPortal = false;
 $samsungPortalSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
 $samsungPortalRecords = array();
+$samsungPortalGroups = array('employees' => array(), 'external' => array());
 $samsungPortalSummary = array('total' => 0, 'soon' => 0, 'today' => 0, 'expired' => 0, 'missing' => 0);
 
 $checklistData = array();
@@ -64,6 +65,7 @@ if ($pdo) {
     if ($canViewSamsungPortal) {
         cpms_samsung_portal_bootstrap_automations($pdo, false);
         $samsungPortalRecords = cpms_samsung_portal_records($samsungPortalSearch);
+        $samsungPortalGroups = cpms_samsung_portal_split_records_by_employee($pdo, $samsungPortalRecords);
         $samsungPortalSummary = cpms_samsung_portal_summary(cpms_samsung_portal_records(''));
     }
 
@@ -118,6 +120,7 @@ if ($pdo) {
 
 $selectedProjectName = is_array($selectedProject) && isset($selectedProject['name']) ? (string)$selectedProject['name'] : '';
 $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
+
 ?>
 
 <?php if ($flash): ?>
@@ -240,11 +243,37 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                     <?php endif; ?>
                 </form>
 
-                <div class="overflow-x-auto rounded-2xl border border-gray-200 bg-white">
+                <?php
+                $samsungPortalBoardGroups = array(
+                    array(
+                        'title' => '임직원',
+                        'empty' => ($samsungPortalSearch !== '') ? '검색 결과가 없습니다.' : '직원명부와 일치하는 인원이 없습니다.',
+                        'records' => isset($samsungPortalGroups['employees']) ? $samsungPortalGroups['employees'] : array()
+                    ),
+                    array(
+                        'title' => '일용직',
+                        'empty' => ($samsungPortalSearch !== '') ? '검색 결과가 없습니다.' : '표시할 일용직 인원이 없습니다.',
+                        'records' => isset($samsungPortalGroups['external']) ? $samsungPortalGroups['external'] : array()
+                    )
+                );
+                ?>
+                <div class="space-y-5 mb-5">
+                    <?php foreach ($samsungPortalBoardGroups as $samsungPortalBoardGroup): ?>
+                        <?php
+                        $samsungPortalGroupTitle = isset($samsungPortalBoardGroup['title']) ? (string)$samsungPortalBoardGroup['title'] : '';
+                        $samsungPortalGroupEmpty = isset($samsungPortalBoardGroup['empty']) ? (string)$samsungPortalBoardGroup['empty'] : '';
+                        $samsungPortalGroupRecords = (isset($samsungPortalBoardGroup['records']) && is_array($samsungPortalBoardGroup['records'])) ? $samsungPortalBoardGroup['records'] : array();
+                        ?>
+                        <div class="rounded-2xl border border-gray-200 bg-white overflow-hidden">
+                            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 px-4 py-3 border-b border-gray-200 bg-gray-50">
+                                <h4 class="text-lg font-extrabold text-gray-900"><?php echo h($samsungPortalGroupTitle); ?></h4>
+                                <span class="inline-flex items-center px-3 py-1 rounded-full border border-gray-200 bg-white text-xs font-bold text-gray-600"><?php echo number_format(count($samsungPortalGroupRecords)); ?>명</span>
+                            </div>
+                <div class="overflow-x-auto">
                     <table class="min-w-[1320px] w-full text-sm">
                         <thead class="bg-gray-50 text-gray-600 text-xs">
                             <tr>
-                                <th class="px-3 py-2 text-left font-bold">임직원</th>
+                                <th class="px-3 py-2 text-left font-bold">이름</th>
                                 <th class="px-3 py-2 text-left font-bold">아이디</th>
                                 <th class="px-3 py-2 text-left font-bold">비밀번호</th>
                                 <th class="px-3 py-2 text-left font-bold">휴대폰번호</th>
@@ -258,10 +287,10 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100">
-                            <?php if (count($samsungPortalRecords) === 0): ?>
-                                <tr><td colspan="11" class="px-3 py-5 text-center text-gray-500"><?php echo ($samsungPortalSearch !== '') ? '검색 결과가 없습니다.' : '업로드된 삼성 내방 인원 목록이 없습니다.'; ?></td></tr>
+                            <?php if (count($samsungPortalGroupRecords) === 0): ?>
+                                <tr><td colspan="11" class="px-3 py-5 text-center text-gray-500"><?php echo h($samsungPortalGroupEmpty); ?></td></tr>
                             <?php else: ?>
-                                <?php foreach ($samsungPortalRecords as $portalRow): ?>
+                                <?php foreach ($samsungPortalGroupRecords as $portalRow): ?>
                                     <?php
                                     $portalKey = isset($portalRow['record_key']) ? (string)$portalRow['record_key'] : '';
                                     $portalFormId = 'samsungPortalForm' . preg_replace('/[^A-Za-z0-9_\-]/', '', $portalKey);
@@ -344,6 +373,9 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                             <?php endif; ?>
                         </tbody>
                     </table>
+                </div>
+                        </div>
+                    <?php endforeach; ?>
                 </div>
 
                 <?php if ($canEditSamsungPortal): ?>

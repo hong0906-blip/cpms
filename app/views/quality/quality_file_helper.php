@@ -94,7 +94,9 @@ function cpms_quality_file_normalize_dept($dept) {
         urldecode('%ED%92%88%EC%A7%88%ED%8C%80') => urldecode('%ED%92%88%EC%A7%88'),
         urldecode('%ED%92%88%EC%A7%88%EA%B4%80%EB%A6%AC') => urldecode('%ED%92%88%EC%A7%88'),
         urldecode('%ED%92%88%EC%A7%88%EA%B4%80%EB%A6%AC%EB%B6%80') => urldecode('%ED%92%88%EC%A7%88'),
-        urldecode('%ED%92%88%EC%A7%88%EA%B4%80%EB%A6%AC%ED%8C%80') => urldecode('%ED%92%88%EC%A7%88')
+        urldecode('%ED%92%88%EC%A7%88%EA%B4%80%EB%A6%AC%ED%8C%80') => urldecode('%ED%92%88%EC%A7%88'),
+        '공무부' => '공무',
+        '공무팀' => '공무'
     );
     if (isset($map[$dept])) return $map[$dept];
     return $dept;
@@ -154,7 +156,7 @@ function cpms_quality_file_can_access_all() {
     if (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive') return true;
     if (method_exists('App\\Core\\Auth', 'canManageEmployees') && \App\Core\Auth::canManageEmployees()) return true;
     $dept = cpms_quality_file_normalize_dept(\App\Core\Auth::userDepartment());
-    return ($dept === urldecode('%ED%92%88%EC%A7%88'));
+    return ($dept === urldecode('%ED%92%88%EC%A7%88') || $dept === '공무');
 }}
 
 if (!function_exists('cpms_quality_file_can_view')) {

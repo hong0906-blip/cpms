@@ -155,6 +155,31 @@ try {
     $contractVersions = array();
 }
 
+$estimateVersions = array();
+$estimateOriginalVersions = array();
+$estimateChangeVersions = array();
+$estimateExtraVersions = array();
+try {
+    if (cpms_contract_change_table_exists($pdo, 'cpms_project_estimate_versions')) {
+        $stEstimateVersions = $pdo->prepare("SELECT * FROM cpms_project_estimate_versions WHERE project_id = :pid ORDER BY version_type ASC, version_no DESC, id DESC");
+        $stEstimateVersions->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stEstimateVersions->execute();
+        $tmpEstimateVersions = $stEstimateVersions->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($tmpEstimateVersions)) $estimateVersions = $tmpEstimateVersions;
+        foreach ($estimateVersions as $estimateVersionRow) {
+            $estimateType = isset($estimateVersionRow['version_type']) ? (string)$estimateVersionRow['version_type'] : '';
+            if ($estimateType === 'ORIGINAL') array_push($estimateOriginalVersions, $estimateVersionRow);
+            else if ($estimateType === 'CHANGE') array_push($estimateChangeVersions, $estimateVersionRow);
+            else if ($estimateType === 'EXTRA') array_push($estimateExtraVersions, $estimateVersionRow);
+        }
+    }
+} catch (Exception $e) {
+    $estimateVersions = array();
+    $estimateOriginalVersions = array();
+    $estimateChangeVersions = array();
+    $estimateExtraVersions = array();
+}
+
 $additionalWorks = array();
 try {
     if (cpms_contract_change_table_exists($pdo, 'cpms_contract_additional_works')) {
@@ -243,6 +268,7 @@ if (is_file($contractMetaFile)) {
         }
     }
 }
+$versionRowsForDisplay = (count($estimateVersions) > 0) ? $estimateVersions : $contractVersions;
 ?>
 
 <style>
@@ -425,13 +451,18 @@ if (is_file($contractMetaFile)) {
             <div class="font-extrabold text-gray-900">당초 내역서 업로드</div>
         </div>
         <div class="p-6">
-            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/contract_upload" enctype="multipart/form-data" class="space-y-3">
+            <?php if (is_array($unitPrices) && count($unitPrices) > 0): ?>
+                <div class="mb-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
+                    이미 당초 내역서가 있습니다. 새로 적용하면 기존 내역은 이력으로 남고 현재 적용 내역이 갱신됩니다.
+                </div>
+            <?php endif; ?>
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/contract_change_preview" enctype="multipart/form-data" class="space-y-3">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                 <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
                 <input type="hidden" name="upload_mode" value="unit_price_original">
                 <input type="file" name="contract_file" accept=".xlsx" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" required>
                 <button type="submit" class="px-6 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow">
-                    당초 내역서 저장
+                    당초 내역서 미리보기
                 </button>
             </form>
         </div>
@@ -446,6 +477,7 @@ if (is_file($contractMetaFile)) {
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                 <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
                 <input type="hidden" name="upload_mode" value="unit_price_update">
+                <input name="version_no" type="number" min="1" step="1" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" placeholder="변경계약 차수(비우면 자동)">
                 <input type="file" name="contract_file" accept=".xlsx" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" required>
                 <button type="submit" class="px-6 py-3 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-extrabold shadow">
                     변경내용 미리보기
@@ -461,10 +493,26 @@ if (is_file($contractMetaFile)) {
             <div>
                 <div class="font-extrabold text-gray-900">내역서 버전 이력</div>
             </div>
-            <div class="text-xs text-gray-500">총 <?php echo count($contractVersions); ?>건</div>
+            <div class="text-xs text-gray-500">총 <?php echo count($versionRowsForDisplay); ?>건</div>
         </div>
         <div class="p-6">
-            <?php if (count($contractVersions) === 0): ?>
+            <?php if (count($estimateVersions) > 0): ?>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+                    <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3">
+                        <div class="text-xs font-bold text-gray-500">당초 내역서</div>
+                        <div class="mt-1 text-lg font-extrabold text-gray-900"><?php echo count($estimateOriginalVersions); ?>건</div>
+                    </div>
+                    <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3">
+                        <div class="text-xs font-bold text-gray-500">변경계약</div>
+                        <div class="mt-1 text-lg font-extrabold text-gray-900"><?php echo count($estimateChangeVersions); ?>차수</div>
+                    </div>
+                    <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3">
+                        <div class="text-xs font-bold text-gray-500">추가공사</div>
+                        <div class="mt-1 text-lg font-extrabold text-gray-900"><?php echo count($estimateExtraVersions); ?>건</div>
+                    </div>
+                </div>
+            <?php endif; ?>
+            <?php if (count($versionRowsForDisplay) === 0): ?>
                 <div class="text-sm text-gray-600">등록된 내역서 버전이 없습니다.</div>
             <?php else: ?>
                 <div class="overflow-x-auto rounded-2xl border border-gray-200">
@@ -478,18 +526,20 @@ if (is_file($contractMetaFile)) {
                         </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100">
-                        <?php foreach ($contractVersions as $versionRow): ?>
+                        <?php foreach ($versionRowsForDisplay as $versionRow): ?>
                             <tr>
                                 <td class="px-3 py-2 font-bold text-gray-900"><?php echo h(isset($versionRow['title']) ? $versionRow['title'] : ''); ?></td>
                                 <td class="px-3 py-2">
-                                    <?php if (isset($versionRow['is_current']) && (int)$versionRow['is_current'] === 1): ?>
+                                    <?php $versionIsApplied = (isset($versionRow['status']) && (string)$versionRow['status'] === 'APPLIED') || (isset($versionRow['is_current']) && (int)$versionRow['is_current'] === 1); ?>
+                                    <?php if ($versionIsApplied): ?>
                                         <span class="px-2 py-1 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 text-xs font-extrabold">현재 적용</span>
                                     <?php else: ?>
                                         <span class="px-2 py-1 rounded-xl bg-gray-50 text-gray-600 border border-gray-100 text-xs font-bold">보존</span>
                                     <?php endif; ?>
                                 </td>
                                 <td class="px-3 py-2 text-gray-700">
-                                    <div><?php echo h(isset($versionRow['original_name']) ? $versionRow['original_name'] : ''); ?></div>
+                                    <?php $versionOriginalName = isset($versionRow['original_file_name']) ? $versionRow['original_file_name'] : (isset($versionRow['original_name']) ? $versionRow['original_name'] : ''); ?>
+                                    <div><?php echo h($versionOriginalName); ?></div>
                                     <div class="mt-1 text-xs"><?php echo cpms_public_affairs_drive_actions_html('contract_version', isset($versionRow['id']) ? (int)$versionRow['id'] : 0, $versionRow); ?></div>
                                 </td>
                                 <td class="px-3 py-2 text-gray-600"><?php echo h(isset($versionRow['applied_at']) ? $versionRow['applied_at'] : ''); ?></td>
@@ -507,6 +557,17 @@ if (is_file($contractMetaFile)) {
             <div class="font-extrabold text-gray-900">추가공사 등록</div>
         </div>
         <div class="p-6">
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=project/contract_change_preview" enctype="multipart/form-data" class="mb-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
+                <input type="hidden" name="upload_mode" value="unit_price_extra">
+                <input name="additional_work_title" required maxlength="255" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="추가공사명">
+                <input name="version_no" type="number" min="1" step="1" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="추가공사 차수(비우면 자동)">
+                <input type="file" name="contract_file" accept=".xlsx" class="px-4 py-3 rounded-2xl border border-gray-200 bg-white" required>
+                <button type="submit" class="md:col-span-3 px-6 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">
+                    추가공사 내역서 미리보기
+                </button>
+            </form>
             <form method="post" action="<?php echo h(base_url()); ?>/?r=project/additional_work_save" enctype="multipart/form-data" class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                 <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">

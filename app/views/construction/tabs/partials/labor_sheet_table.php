@@ -46,6 +46,16 @@ if (!function_exists('cpms_format_gongsu_value')) {
     }
 }
 
+if (!function_exists('cpms_format_labor_time_value')) {
+    function cpms_format_labor_time_value($value) {
+        $value = trim((string)$value);
+        if ($value === '') return '-';
+        $ts = strtotime($value);
+        if ($ts !== false) return date('H:i', $ts);
+        return $value;
+    }
+}
+
 if (!function_exists('cpms_parse_money_value')) {
     function cpms_parse_money_value($value) {
         $value = trim((string)$value);
@@ -72,6 +82,7 @@ $timesheetWorkers = isset($timesheetWorkers) && is_array($timesheetWorkers) ? $t
 $attendanceGongsuMap = isset($attendanceGongsuMap) && is_array($attendanceGongsuMap) ? $attendanceGongsuMap : array();
 $attendanceGongsuUnit = isset($attendanceGongsuUnit) && is_array($attendanceGongsuUnit) ? $attendanceGongsuUnit : array();
 $attendanceOutputDays = isset($attendanceOutputDays) && is_array($attendanceOutputDays) ? $attendanceOutputDays : array();
+$attendanceTimeMap = isset($attendanceTimeMap) && is_array($attendanceTimeMap) ? $attendanceTimeMap : array();
 $showBankColumns = isset($showBankColumns) ? (bool)$showBankColumns : true;
 $canEditTimesheet = isset($canEdit) ? (bool)$canEdit : false;
 $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
@@ -132,6 +143,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                 $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
                 $workerKey = cpms_timesheet_worker_key($workerName);
                 $dailyMap = isset($attendanceGongsuMap[$workerKey]) ? $attendanceGongsuMap[$workerKey] : array();
+                $timeDailyMap = isset($attendanceTimeMap[$workerKey]) && is_array($attendanceTimeMap[$workerKey]) ? $attendanceTimeMap[$workerKey] : array();
                 $outputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
                 $wageRate = function_exists('cpms_resolve_labor_wage_rate') ? cpms_resolve_labor_wage_rate($worker) : cpms_parse_money_value(isset($worker['deposit_rate']) ? $worker['deposit_rate'] : '');
                 $wageRateRaw = $wageRate > 0 ? number_format($wageRate) : '0';
@@ -152,6 +164,9 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                         $dateKey = $selectedMonth . '-' . str_pad((string)$d, 2, '0', STR_PAD_LEFT);
                         $gongsuValue = isset($dailyMap[$dateKey]) ? $dailyMap[$dateKey] : null;
                         $gongsuDisplay = cpms_format_gongsu_value($gongsuValue);
+                        $timeEntry = isset($timeDailyMap[$dateKey]) && is_array($timeDailyMap[$dateKey]) ? $timeDailyMap[$dateKey] : array();
+                        $startTimeDisplay = cpms_format_labor_time_value(isset($timeEntry['start']) ? $timeEntry['start'] : '');
+                        $endTimeDisplay = cpms_format_labor_time_value(isset($timeEntry['end']) ? $timeEntry['end'] : '');
                         ?>
                         <td class="cpms-gongsu-cell-slot border border-gray-200 px-0 py-0 text-center">
                             <?php if ($canEditTimesheet): ?>
@@ -162,6 +177,8 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                                     data-worker-name="<?php echo h($workerName); ?>"
                                     data-date="<?php echo h($dateKey); ?>"
                                     data-worker-key="<?php echo h($workerKey); ?>"
+                                    data-start-time="<?php echo h($startTimeDisplay); ?>"
+                                    data-end-time="<?php echo h($endTimeDisplay); ?>"
                                     data-old-value="<?php echo h($gongsuDisplay); ?>"><?php echo h($gongsuDisplay); ?></button>
                             <?php else: ?>
                                 <span class="flex w-full min-h-[28px] items-center justify-center px-1"><?php echo h($gongsuDisplay); ?></span>

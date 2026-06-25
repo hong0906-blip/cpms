@@ -33,26 +33,44 @@ function cpms_monthly_summary_ratio($a, $b) {
     return number_format(((float)$a / $b) * 100, 1) . '%';
 }
 
+function cpms_monthly_summary_cache_key($pdo, $suffix) {
+    $prefix = 'nopdo';
+    if ($pdo && function_exists('spl_object_hash')) {
+        $prefix = spl_object_hash($pdo);
+    }
+    return $prefix . ':' . (string)$suffix;
+}
+
 function cpms_monthly_summary_table_exists($pdo, $table) {
     if (!$pdo) return false;
+    static $cache = array();
+    $key = cpms_monthly_summary_cache_key($pdo, 'table:' . (string)$table);
+    if (isset($cache[$key])) return $cache[$key];
     try {
         $st = $pdo->prepare('SHOW TABLES LIKE :t');
         $st->bindValue(':t', $table);
         $st->execute();
-        return is_array($st->fetch());
+        $cache[$key] = is_array($st->fetch());
+        return $cache[$key];
     } catch (Exception $e) {
+        $cache[$key] = false;
         return false;
     }
 }
 
 function cpms_monthly_summary_column_exists($pdo, $table, $column) {
     if (!$pdo) return false;
+    static $cache = array();
+    $key = cpms_monthly_summary_cache_key($pdo, 'column:' . (string)$table . ':' . (string)$column);
+    if (isset($cache[$key])) return $cache[$key];
     try {
         $st = $pdo->prepare('SHOW COLUMNS FROM ' . $table . ' LIKE :c');
         $st->bindValue(':c', $column);
         $st->execute();
-        return is_array($st->fetch());
+        $cache[$key] = is_array($st->fetch());
+        return $cache[$key];
     } catch (Exception $e) {
+        $cache[$key] = false;
         return false;
     }
 }
@@ -129,6 +147,9 @@ function cpms_monthly_summary_month_options($projects, $selectedYm) {
 
 function cpms_monthly_summary_ensure_remark_table($pdo) {
     if (!$pdo) return false;
+    static $cache = array();
+    $key = cpms_monthly_summary_cache_key($pdo, 'remark-table');
+    if (isset($cache[$key])) return $cache[$key];
     try {
         $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_project_monthly_summary_remarks (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -140,8 +161,10 @@ function cpms_monthly_summary_ensure_remark_table($pdo) {
             UNIQUE KEY uk_project_monthly_summary_remark (project_id, ym),
             KEY idx_ym (ym)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $cache[$key] = true;
         return true;
     } catch (Exception $e) {
+        $cache[$key] = false;
         return false;
     }
 }
@@ -201,11 +224,20 @@ function cpms_monthly_summary_parse_money($value) {
 
 function cpms_monthly_summary_labor_breakdown($pdo, $projectId, $projectName, $ym) {
     $result = array('amount' => 0.0, 'output_day_sum' => 0.0, 'workers_considered' => 0);
-    if (!function_exists('cpms_load_gongsu_data') || !function_exists('cpms_build_timesheet_workers')) return $result;
-    $directTeamMembers = cpms_load_direct_team_members($pdo);
-    $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
-    $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
-    $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
+    if (!function_exists('cpms_load_gongsu_data') || !function_exists('cpms_build_timesheet_workers') || !function_exists('cpms_load_direct_team_members') || !function_exists('cpms_load_project_labor_workers') || !function_exists('cpms_build_project_worker_rows')) return $result;
+    static $directTeamCache = array();
+    static $timesheetCache = array();
+    $pdoKey = cpms_monthly_summary_cache_key($pdo, 'labor');
+    if (!isset($directTeamCache[$pdoKey])) {
+        $directTeamCache[$pdoKey] = cpms_load_direct_team_members($pdo);
+    }
+    $timesheetKey = $pdoKey . ':project:' . (int)$projectId;
+    if (!isset($timesheetCache[$timesheetKey])) {
+        $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
+        $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamCache[$pdoKey]);
+        $timesheetCache[$timesheetKey] = cpms_build_timesheet_workers($workerRows);
+    }
+    $timesheetWorkers = $timesheetCache[$timesheetKey];
     $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
     $attendanceGongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
     $attendanceGongsuUnit = isset($gongsuData['gongsu_unit']) && is_array($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
@@ -254,6 +286,7 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
     $months = cpms_monthly_summary_months_until($project, $selectedYm);
     $inputByMonth = cpms_monthly_summary_zero_map($months);
     $laborByMonth = cpms_monthly_summary_zero_map($months);
+    $costEndDate = $selectedYm . '-25';
     $equipmentCounts = array('excavator' => 0.0, 'dump' => 0.0, 'other' => 0.0, 'forklift' => 0.0);
     $workerOutputDays = 0.0;
 
@@ -261,8 +294,9 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
         if (cpms_monthly_summary_table_exists($pdo, 'cpms_material_items') && cpms_monthly_summary_table_exists($pdo, 'cpms_material_usage')) {
             try {
                 $deletedWhere = cpms_monthly_summary_column_exists($pdo, 'cpms_material_items', 'is_deleted') ? ' AND (m.is_deleted = 0 OR m.is_deleted IS NULL)' : '';
-                $st = $pdo->prepare('SELECT m.category, u.use_date, u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id = m.id AND u.project_id = m.project_id WHERE m.project_id = :pid' . $deletedWhere);
+                $st = $pdo->prepare('SELECT m.category, u.use_date, u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id = m.id AND u.project_id = m.project_id WHERE m.project_id = :pid AND u.use_date <= :cost_end' . $deletedWhere);
                 $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                $st->bindValue(':cost_end', $costEndDate);
                 $st->execute();
                 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
                 if (is_array($rows)) {
@@ -302,8 +336,9 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
                 if ($hasWorkUnit) $extra .= ', u.work_unit';
                 if ($hasBaseRate) $extra .= ', u.base_rate_snapshot';
                 $deletedWhere = $hasDeleted ? ' AND (e.is_deleted = 0 OR e.is_deleted IS NULL)' : '';
-                $st = $pdo->prepare('SELECT e.category, e.spec, e.base_rate, u.use_date, u.amount' . $extra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id = e.id AND u.project_id = e.project_id WHERE e.project_id = :pid' . $deletedWhere);
+                $st = $pdo->prepare('SELECT e.category, e.spec, e.base_rate, u.use_date, u.amount' . $extra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id = e.id AND u.project_id = e.project_id WHERE e.project_id = :pid AND u.use_date <= :cost_end' . $deletedWhere);
                 $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                $st->bindValue(':cost_end', $costEndDate);
                 $st->execute();
                 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
                 if (is_array($rows)) {
@@ -410,6 +445,39 @@ if (!$pdo) {
     }
 }
 
+$summaryTotals = array(
+    'contract_amount' => 0.0,
+    'previous_input' => 0.0,
+    'month_input' => 0.0,
+    'total_input' => 0.0,
+    'labor_amount' => 0.0,
+    'current_revenue' => 0.0,
+    'worker_output_days' => 0.0,
+    'equipment' => array(
+        'excavator' => 0.0,
+        'dump' => 0.0,
+        'other' => 0.0,
+        'forklift' => 0.0,
+    ),
+    'cumulative_input' => 0.0,
+    'cumulative_revenue' => 0.0,
+);
+foreach ($summaryRows as $row) {
+    $summaryTotals['contract_amount'] += isset($row['contract_amount']) ? (float)$row['contract_amount'] : 0.0;
+    $summaryTotals['previous_input'] += isset($row['previous_input']) ? (float)$row['previous_input'] : 0.0;
+    $summaryTotals['month_input'] += isset($row['month_input']) ? (float)$row['month_input'] : 0.0;
+    $summaryTotals['total_input'] += isset($row['total_input']) ? (float)$row['total_input'] : 0.0;
+    $summaryTotals['labor_amount'] += isset($row['labor_amount']) ? (float)$row['labor_amount'] : 0.0;
+    $summaryTotals['current_revenue'] += isset($row['current_revenue']) ? (float)$row['current_revenue'] : 0.0;
+    $summaryTotals['worker_output_days'] += isset($row['worker_output_days']) ? (float)$row['worker_output_days'] : 0.0;
+    $summaryTotals['cumulative_input'] += isset($row['cumulative_input']) ? (float)$row['cumulative_input'] : 0.0;
+    $summaryTotals['cumulative_revenue'] += isset($row['cumulative_revenue']) ? (float)$row['cumulative_revenue'] : 0.0;
+    $eqTotal = isset($row['equipment']) && is_array($row['equipment']) ? $row['equipment'] : array();
+    foreach ($summaryTotals['equipment'] as $bucket => $amount) {
+        $summaryTotals['equipment'][$bucket] += isset($eqTotal[$bucket]) ? (float)$eqTotal[$bucket] : 0.0;
+    }
+}
+
 $monthTitle = substr($selectedYm, 5, 2) . '월';
 ?>
 <div class="bg-white rounded-3xl border border-gray-100 p-5">
@@ -492,6 +560,27 @@ $monthTitle = substr($selectedYm, 5, 2) . '월';
               </tr>
             <?php endforeach; ?>
           </tbody>
+          <tfoot>
+            <?php $eqTotal = isset($summaryTotals['equipment']) && is_array($summaryTotals['equipment']) ? $summaryTotals['equipment'] : array(); ?>
+            <tr class="bg-gray-100 font-extrabold text-gray-900">
+              <td class="border p-2">합계</td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['contract_amount'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['previous_input'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['month_input'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['total_input'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['labor_amount'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['current_revenue'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count($summaryTotals['worker_output_days'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eqTotal['excavator']) ? $eqTotal['excavator'] : 0)); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eqTotal['dump']) ? $eqTotal['dump'] : 0)); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eqTotal['other']) ? $eqTotal['other'] : 0)); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eqTotal['forklift']) ? $eqTotal['forklift'] : 0)); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['cumulative_input'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['cumulative_revenue'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_ratio($summaryTotals['cumulative_input'], $summaryTotals['cumulative_revenue'])); ?></td>
+              <td class="border p-2 text-center">-</td>
+            </tr>
+          </tfoot>
         </table>
       </div>
       <div class="mt-3 flex justify-end">
