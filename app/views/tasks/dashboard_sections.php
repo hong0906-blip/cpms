@@ -35,6 +35,7 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
 {
     $statusKey = cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
     $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
+    $isPublicAffairsCollab = isset($item['source_type']) && (string)$item['source_type'] === 'public_affairs_collab';
     $canRespondMeeting = $isMeetingTask
         && !$requestedMode
         && (int)$currentEmployeeId > 0
@@ -63,6 +64,9 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
             <span class="px-3 py-1 rounded-full border text-xs font-bold bg-slate-100 text-slate-700 border-slate-200"><?php echo h(cpms_tasks_type_label(isset($item['task_type']) ? $item['task_type'] : 'general')); ?></span>
             <?php if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1): ?>
                 <span class="px-3 py-1 rounded-full border text-xs font-bold bg-rose-50 text-rose-700 border-rose-200">🔥 긴급</span>
+            <?php endif; ?>
+            <?php if ($isPublicAffairsCollab && isset($item['priority']) && trim((string)$item['priority']) !== ''): ?>
+                <span class="px-3 py-1 rounded-full border text-xs font-bold bg-blue-50 text-blue-700 border-blue-200">우선순위 <?php echo h($item['priority']); ?></span>
             <?php endif; ?>
         </div>
         <div class="mt-3 text-lg font-extrabold text-slate-900 leading-7"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>

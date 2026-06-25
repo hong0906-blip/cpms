@@ -2,6 +2,7 @@
 require_once __DIR__ . '/helpers.php';
 require_once dirname(__DIR__) . '/attendance/common.php';
 require_once dirname(__DIR__) . '/construction/partials/equipment_gongsu_approval_helper.php';
+require_once dirname(dirname(__DIR__)) . '/services/PublicAffairsCollaborationService.php';
 
 if (!function_exists('cpms_task_feed_item')) {
 function cpms_task_feed_item($row)
@@ -64,7 +65,8 @@ function cpms_task_feed_should_show($item)
     $status = isset($item['status']) ? (string)$item['status'] : '';
     if (cpms_tasks_is_closed_status($status)) return false;
     $dueDate = isset($item['due_date']) ? trim((string)$item['due_date']) : '';
-    if ($dueDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate) && strcmp($dueDate, cpms_tasks_today()) < 0) return false;
+    $sourceType = isset($item['source_type']) ? (string)$item['source_type'] : '';
+    if ($sourceType !== 'public_affairs_collab' && $dueDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate) && strcmp($dueDate, cpms_tasks_today()) < 0) return false;
     return true;
 }}
 
@@ -686,6 +688,53 @@ function cpms_task_feed_construction_schedule_items_for_employee($pdo, $employee
     return $rows;
 }}
 
+if (!function_exists('cpms_task_feed_public_affairs_collab_items_for_employee')) {
+function cpms_task_feed_public_affairs_collab_items_for_employee($pdo, $employeeId, $employeeEmail)
+{
+    // 대시보드 나의할일: 공무 협업툴 담당 업무를 기존 업무 피드에 합친다.
+    $rows = array();
+    $employeeId = (int)$employeeId;
+    $employeeEmail = strtolower(trim((string)$employeeEmail));
+    $tasks = cpms_public_affairs_collab_list_tasks();
+    foreach ($tasks as $task) {
+        if (!is_array($task)) continue;
+        $status = isset($task['status']) ? (string)$task['status'] : '';
+        if ($status === '완료') continue;
+        $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+        $assigneeEmail = isset($task['assignee_email']) ? strtolower(trim((string)$task['assignee_email'])) : '';
+        $matched = false;
+        if ($employeeId > 0 && $assigneeId === $employeeId) $matched = true;
+        if (!$matched && $employeeEmail !== '' && $assigneeEmail !== '' && $employeeEmail === $assigneeEmail) $matched = true;
+        if (!$matched) continue;
+        $priority = isset($task['priority']) ? (string)$task['priority'] : '보통';
+        $title = isset($task['title']) ? (string)$task['title'] : '';
+        $rows[] = array(
+            'source_type' => 'public_affairs_collab',
+            'source_id' => isset($task['id']) ? (int)$task['id'] : 0,
+            'title' => $title,
+            'content' => isset($task['content']) ? (string)$task['content'] : '',
+            'requester_name' => isset($task['requester_name']) ? (string)$task['requester_name'] : '',
+            'requester_employee_id' => isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0,
+            'assignee_name' => isset($task['assignee_name']) ? (string)$task['assignee_name'] : '',
+            'assignee_employee_id' => $assigneeId,
+            'department' => '공무',
+            'project_id' => isset($task['project_id']) ? (int)$task['project_id'] : 0,
+            'project_name' => isset($task['project_name']) ? (string)$task['project_name'] : '',
+            'due_date' => isset($task['due_date']) ? (string)$task['due_date'] : '',
+            'due_time' => isset($task['due_time']) ? (string)$task['due_time'] : '',
+            'priority' => $priority,
+            'is_urgent' => ($priority === '긴급') ? 1 : 0,
+            'status' => $status,
+            'display_status' => $status,
+            'task_type' => '공무 협업툴',
+            'action_url' => '?r=공무&tab=collaboration&task_id=' . (isset($task['id']) ? (int)$task['id'] : 0),
+            'is_direct_task' => 0,
+            'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
+        );
+    }
+    return $rows;
+}}
+
 if (!function_exists('cpms_task_feed_for_employee')) {
 function cpms_task_feed_for_employee($pdo, $employeeId, $employeeEmail, $employeeMeta)
 {
@@ -702,6 +751,7 @@ function cpms_task_feed_for_employee($pdo, $employeeId, $employeeEmail, $employe
         cpms_task_feed_attendance_items_for_employee($pdo, $employeeId, $employeeMeta),
         cpms_task_feed_issue_items_for_employee($pdo, $employeeId, $employeeEmail),
         cpms_task_feed_safety_items_for_employee($pdo, $employeeId, $employeeEmail),
+        cpms_task_feed_public_affairs_collab_items_for_employee($pdo, $employeeId, $employeeEmail),
     ));
     return $cache[$cacheKey];
 }}

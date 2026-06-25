@@ -102,6 +102,10 @@ if ($route === 'company_overhead' || $route === 'management_overhead' || $route 
 if ($route === 'construction_home') {
     $route = '공사';
 }
+if ($route === 'public_affairs_collab' || $route === 'public_affairs_collaboration' || $route === '공무 협업툴') {
+    $_GET['tab'] = 'collaboration';
+    $route = '공무';
+}
 if ($route === '공무/프로젝트상세' || $route === 'project_view') {
     $route = 'project/detail';
 }
@@ -373,6 +377,14 @@ if ($route === 'project/progress_download') {
 }
 if ($route === 'project/public_affairs_file') {
     require_once __DIR__ . '/../app/views/project/public_affairs_file.php';
+    exit;
+}
+if ($route === 'project/collaboration_action') {
+    require_once __DIR__ . '/../app/views/project/collaboration_action.php';
+    exit;
+}
+if ($route === 'project/collaboration_file') {
+    require_once __DIR__ . '/../app/views/project/collaboration_file.php';
     exit;
 }
 

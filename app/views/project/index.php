@@ -10,7 +10,7 @@ $activeTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'monthly_summary
 $createdProjectId = isset($_GET['created_project_id']) ? (int)$_GET['created_project_id'] : 0;
 if ($activeTab === '') $activeTab = 'monthly_summary';
 if ($activeTab === 'monthly_input') $activeTab = 'monthly_summary';
-if ($activeTab !== 'monthly_summary' && $activeTab !== 'project_manage') $activeTab = 'monthly_summary';
+if ($activeTab !== 'monthly_summary' && $activeTab !== 'project_manage' && $activeTab !== 'collaboration') $activeTab = 'monthly_summary';
 
 if ($dbOk && $activeTab === 'project_manage') {
     try {
@@ -58,9 +58,10 @@ function status_badge_class($status) {
 ?>
 
 <div class="cpms-project-page mb-5">
-  <div class="mt-3 flex gap-2">
+  <div class="mt-3 flex flex-wrap gap-2">
     <a href="?r=공무&tab=monthly_summary" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_summary' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 집계</a>
     <a href="?r=공무&tab=project_manage" class="cpms-project-manage-tab px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
+    <a href="?r=공무&tab=collaboration" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'collaboration' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">공무 협업툴</a>
   </div>
 </div>
 
@@ -72,6 +73,8 @@ function status_badge_class($status) {
     <div>오류: <?php echo h($e->getMessage()); ?></div>
   </div>
 <?php } ?>
+<?php elseif ($activeTab === 'collaboration'): ?>
+  <?php require __DIR__ . '/collaboration.php'; ?>
 <?php else: ?>
 <div class="flex items-center justify-between mb-6">
   <div>
