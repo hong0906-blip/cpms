@@ -90,6 +90,14 @@
     }
   }
 
+  function resetSubmittingForms() {
+    if (!document.querySelectorAll) return;
+    var forms = document.querySelectorAll('form[data-cpms-loading-submitting="1"]');
+    for (var i = 0; i < forms.length; i++) {
+      forms[i].removeAttribute('data-cpms-loading-submitting');
+    }
+  }
+
   function requestUrlText(input) {
     if (!input) return '';
     if (typeof input === 'string') return input;
@@ -200,6 +208,7 @@
   }
 
   function finishInitialLoading() {
+    resetSubmittingForms();
     if (startupLoadingFinished) return;
     startupLoadingFinished = true;
     window.setTimeout(function () {
@@ -216,7 +225,12 @@
   }
 
   if (window.addEventListener) {
-    window.addEventListener('pageshow', finishInitialLoading);
+    window.addEventListener('pageshow', function () {
+      resetSubmittingForms();
+      clearNextPageLoading();
+      pageStartedWithLoading = false;
+      hideGlobalLoading(true);
+    });
     window.addEventListener('load', function () {
       finishInitialLoading();
     });

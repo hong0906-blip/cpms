@@ -40,6 +40,36 @@ function cpms_project_save_number_or_null($value) {
     return (float)$clean;
 }}
 
+if (!function_exists('cpms_project_save_manage_url')) {
+function cpms_project_save_manage_url($projectId) {
+    return '?r=%EA%B3%B5%EB%AC%B4&tab=project_manage&created_project_id=' . (int)$projectId;
+}}
+
+if (!function_exists('cpms_project_save_mark_drive_pending')) {
+function cpms_project_save_mark_drive_pending($pdo, $projectId) {
+    if (!$pdo || (int)$projectId <= 0) return;
+    $setParts = array();
+    if (cpms_project_save_column_exists($pdo, 'cpms_projects', 'drive_status')) {
+        array_push($setParts, 'drive_status = :drive_status');
+    }
+    if (cpms_project_save_column_exists($pdo, 'cpms_projects', 'drive_error_message')) {
+        array_push($setParts, 'drive_error_message = :drive_error_message');
+    }
+    if (cpms_project_save_column_exists($pdo, 'cpms_projects', 'drive_updated_at')) {
+        array_push($setParts, 'drive_updated_at = :drive_updated_at');
+    }
+    if (count($setParts) <= 0) return;
+    try {
+        $st = $pdo->prepare("UPDATE cpms_projects SET " . implode(', ', $setParts) . " WHERE id = :project_id");
+        if (in_array('drive_status = :drive_status', $setParts)) $st->bindValue(':drive_status', 'pending');
+        if (in_array('drive_error_message = :drive_error_message', $setParts)) $st->bindValue(':drive_error_message', '');
+        if (in_array('drive_updated_at = :drive_updated_at', $setParts)) $st->bindValue(':drive_updated_at', date('Y-m-d H:i:s'));
+        $st->bindValue(':project_id', (int)$projectId, PDO::PARAM_INT);
+        $st->execute();
+    } catch (Exception $e) {
+    }
+}}
+
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
 // 권한: 임원 또는 공무/관리
@@ -252,12 +282,15 @@ try {
 
     $pdo->commit();
 
-    $driveSync = cpms_drive_sync_project_after_create($pdo, $projectId, $name, Auth::user(), 'project_create');
-    $driveResult = isset($driveSync['drive_result']) ? $driveSync['drive_result'] : null;
-    $driveSaved = isset($driveSync['saved']) ? (bool)$driveSync['saved'] : false;
+    $driveSync = null;
+    $driveResult = null;
+    $driveSaved = false;
     $unitPriceDriveUpload = null;
 
     if (is_array($projectCreateUnitPricePackForDrive)) {
+        $driveSync = cpms_drive_sync_project_after_create($pdo, $projectId, $name, Auth::user(), 'project_create');
+        $driveResult = isset($driveSync['drive_result']) ? $driveSync['drive_result'] : null;
+        $driveSaved = isset($driveSync['saved']) ? (bool)$driveSync['saved'] : false;
         $sourcePath = isset($projectCreateUnitPricePackForDrive['stored_path']) ? trim((string)$projectCreateUnitPricePackForDrive['stored_path']) : '';
         $originalUnitPriceName = isset($projectCreateUnitPricePackForDrive['file_name']) ? (string)$projectCreateUnitPricePackForDrive['file_name'] : '';
         if ($sourcePath !== '' && is_file($sourcePath)) {
@@ -299,13 +332,17 @@ try {
                 $unitPriceDriveUpload['message'] = isset($historySave['message']) ? $historySave['message'] : 'Project create unit price history save failed after Drive upload.';
             }
         }
+    } else {
+        cpms_project_save_mark_drive_pending($pdo, $projectId);
     }
 
     if ($unitPriceToken !== '' && isset($_SESSION['project_create_unit_price'][$unitPriceToken])) {
         unset($_SESSION['project_create_unit_price'][$unitPriceToken]);
     }
 
-    if (is_array($driveResult) && !empty($driveResult['ok']) && $driveSaved) {
+    if (!is_array($projectCreateUnitPricePackForDrive)) {
+        $message = '프로젝트가 생성되었습니다.';
+    } else if (is_array($driveResult) && !empty($driveResult['ok']) && $driveSaved) {
         $message = '프로젝트가 생성되었습니다. Google Drive 프로젝트 폴더도 준비되었습니다.';
     } else {
         $message = '프로젝트가 생성되었습니다. Google Drive 폴더 생성은 실패 상태로 기록했으니 관리자가 점검 후 다시 처리할 수 있습니다.';
@@ -314,7 +351,7 @@ try {
         $message = cpms_public_affairs_drive_flash_message($message, $unitPriceDriveUpload);
     }
     flash_set('success', $message);
-    header('Location: ?r=project/detail&id=' . $projectId);
+    header('Location: ' . cpms_project_save_manage_url($projectId));
     exit;
 
 } catch (Exception $e) {

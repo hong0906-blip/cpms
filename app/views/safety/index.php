@@ -560,16 +560,26 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
 
                 <?php if (is_array($safetyCostSummary)): ?>
                     <?php
+                    $summaryContractTotal = isset($safetyCostSummary['contract_total']) ? (float)$safetyCostSummary['contract_total'] : 0.0;
+                    $summaryHasLimit = ($summaryContractTotal > 0);
                     $summaryLimitRate = isset($safetyCostSummary['limit_use_rate']) ? (float)$safetyCostSummary['limit_use_rate'] : 0.0;
                     $summaryTone = 'border-emerald-200 bg-emerald-50 text-emerald-700';
                     $summaryMessage = '안전관리비 사용 현황이 정상 범위입니다.';
-                    if ($summaryLimitRate >= 100.0) {
+                    if (!$summaryHasLimit) {
+                        $summaryTone = 'border-slate-200 bg-slate-50 text-slate-700';
+                        $summaryMessage = '내역서 기준 안전관리비 총액이 없어 한도 차단 없이 저장합니다.';
+                    } else if ($summaryLimitRate >= 100.0) {
                         $summaryTone = 'border-red-200 bg-red-50 text-red-700';
-                        $summaryMessage = '110% 사용가능한도에 도달했거나 초과했습니다.';
+                        $summaryMessage = '110% 사용가능한도에 도달했거나 초과했습니다. 저장은 가능합니다.';
                     } else if ($summaryLimitRate >= 80.0) {
                         $summaryTone = 'border-amber-200 bg-amber-50 text-amber-700';
                         $summaryMessage = '110% 사용가능한도의 80% 이상을 사용했습니다.';
                     }
+                    $summaryRemainingNegative = ($summaryHasLimit && isset($safetyCostSummary['remaining']) && (float)$safetyCostSummary['remaining'] < 0);
+                    $summaryRemainingRateNegative = ($summaryHasLimit && isset($safetyCostSummary['remaining_rate']) && (float)$safetyCostSummary['remaining_rate'] < 0);
+                    $summaryLimitCardTone = $summaryHasLimit ? 'border-sky-200 bg-sky-50' : 'border-slate-200 bg-slate-50';
+                    $summaryRemainingCardTone = !$summaryHasLimit ? 'border-slate-200 bg-slate-50' : ($summaryRemainingNegative ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50');
+                    $summaryRemainingRateCardTone = !$summaryHasLimit ? 'border-slate-200 bg-slate-50' : ($summaryRemainingRateNegative ? 'border-red-200 bg-red-50' : 'border-teal-200 bg-teal-50');
                     ?>
                     <div class="mb-5 rounded-2xl border <?php echo h($summaryTone); ?> p-4">
                         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
@@ -580,29 +590,29 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                             <div class="text-xs font-bold">선택 프로젝트 기준</div>
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                            <div class="rounded-xl border border-white/70 bg-white/80 p-3 min-w-0">
+                            <div class="rounded-xl border border-indigo-200 bg-indigo-50 p-3 min-w-0">
                                 <div class="text-xs text-gray-500">안전관리비 총액</div>
-                                <div class="mt-1 text-lg font-extrabold text-gray-900" style="overflow-wrap:anywhere;"><?php echo h(cpms_safety_cost_money_label($safetyCostSummary['contract_total'])); ?></div>
+                                <div class="mt-1 text-lg font-extrabold text-gray-900" style="overflow-wrap:anywhere;"><?php echo h($summaryHasLimit ? cpms_safety_cost_money_label($safetyCostSummary['contract_total']) : '내역서 미등록'); ?></div>
                             </div>
-                            <div class="rounded-xl border border-white/70 bg-white/80 p-3 min-w-0">
+                            <div class="rounded-xl border <?php echo h($summaryLimitCardTone); ?> p-3 min-w-0">
                                 <div class="text-xs text-gray-500">110% 사용가능한도</div>
-                                <div class="mt-1 text-lg font-extrabold text-gray-900" style="overflow-wrap:anywhere;"><?php echo h(cpms_safety_cost_money_label($safetyCostSummary['limit_110'])); ?></div>
+                                <div class="mt-1 text-lg font-extrabold text-gray-900" style="overflow-wrap:anywhere;"><?php echo h($summaryHasLimit ? cpms_safety_cost_money_label($safetyCostSummary['limit_110']) : '한도 없음'); ?></div>
                             </div>
-                            <div class="rounded-xl border border-white/70 bg-white/80 p-3 min-w-0">
+                            <div class="rounded-xl border border-amber-200 bg-amber-50 p-3 min-w-0">
                                 <div class="text-xs text-gray-500">현재 사용금액</div>
                                 <div class="mt-1 text-lg font-extrabold text-gray-900" style="overflow-wrap:anywhere;"><?php echo h(cpms_safety_cost_money_label($safetyCostSummary['used_total'])); ?></div>
                             </div>
-                            <div class="rounded-xl border border-white/70 bg-white/80 p-3 min-w-0">
+                            <div class="rounded-xl border <?php echo h($summaryRemainingCardTone); ?> p-3 min-w-0">
                                 <div class="text-xs text-gray-500">남은금액</div>
-                                <div class="mt-1 text-lg font-extrabold <?php echo ((float)$safetyCostSummary['remaining'] < 0) ? 'text-red-700' : 'text-gray-900'; ?>" style="overflow-wrap:anywhere;"><?php echo h(cpms_safety_cost_money_label($safetyCostSummary['remaining'])); ?></div>
+                                <div class="mt-1 text-lg font-extrabold <?php echo $summaryRemainingNegative ? 'text-red-700' : 'text-gray-900'; ?>" style="overflow-wrap:anywhere;"><?php echo h($summaryHasLimit ? cpms_safety_cost_money_label($safetyCostSummary['remaining']) : '-'); ?></div>
                             </div>
-                            <div class="rounded-xl border border-white/70 bg-white/80 p-3 min-w-0">
+                            <div class="rounded-xl border border-violet-200 bg-violet-50 p-3 min-w-0">
                                 <div class="text-xs text-gray-500">사용률(총액 기준)</div>
-                                <div class="mt-1 text-lg font-extrabold text-gray-900" style="overflow-wrap:anywhere;"><?php echo h(cpms_safety_cost_rate_label($safetyCostSummary['use_rate'])); ?></div>
+                                <div class="mt-1 text-lg font-extrabold text-gray-900" style="overflow-wrap:anywhere;"><?php echo h($summaryHasLimit ? cpms_safety_cost_rate_label($safetyCostSummary['use_rate']) : '-'); ?></div>
                             </div>
-                            <div class="rounded-xl border border-white/70 bg-white/80 p-3 min-w-0">
+                            <div class="rounded-xl border <?php echo h($summaryRemainingRateCardTone); ?> p-3 min-w-0">
                                 <div class="text-xs text-gray-500">남은 퍼센트(110% 한도)</div>
-                                <div class="mt-1 text-lg font-extrabold <?php echo ((float)$safetyCostSummary['remaining_rate'] < 0) ? 'text-red-700' : 'text-gray-900'; ?>" style="overflow-wrap:anywhere;"><?php echo h(cpms_safety_cost_rate_label($safetyCostSummary['remaining_rate'])); ?></div>
+                                <div class="mt-1 text-lg font-extrabold <?php echo $summaryRemainingRateNegative ? 'text-red-700' : 'text-gray-900'; ?>" style="overflow-wrap:anywhere;"><?php echo h($summaryHasLimit ? cpms_safety_cost_rate_label($safetyCostSummary['remaining_rate']) : '-'); ?></div>
                             </div>
                         </div>
                     </div>

@@ -7,6 +7,7 @@ $dbOk = ($pdo !== null);
 $projects = array();
 $constructionEmployees = array();
 $activeTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'monthly_summary';
+$createdProjectId = isset($_GET['created_project_id']) ? (int)$_GET['created_project_id'] : 0;
 if ($activeTab === '') $activeTab = 'monthly_summary';
 if ($activeTab === 'monthly_input') $activeTab = 'monthly_summary';
 if ($activeTab !== 'monthly_summary' && $activeTab !== 'project_manage') $activeTab = 'monthly_summary';
@@ -122,7 +123,7 @@ function status_badge_class($status) {
             $endDate = (string)$project['end_date'];
             $status = (string)$project['status'];
           ?>
-          <div class="rounded-3xl border border-gray-100 bg-white hover:shadow-lg transition p-5">
+          <div class="rounded-3xl border <?php echo ($createdProjectId > 0 && $createdProjectId === $projectId) ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-gray-100 bg-white'; ?> hover:shadow-lg transition p-5">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <a href="<?php echo h('?r=project/detail&id=' . $projectId); ?>" class="font-extrabold text-gray-900 truncate hover:text-blue-700 block"><?php echo h($projectName); ?></a>

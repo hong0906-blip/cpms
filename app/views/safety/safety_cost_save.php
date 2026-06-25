@@ -109,16 +109,6 @@ try {
         $recordId = cpms_safety_cost_new_id();
     }
 
-    $safetyContractTotal = cpms_safety_cost_contract_total($pdo, $projectId);
-    $safetyLimit110 = round($safetyContractTotal * 1.1);
-    $usedExceptCurrent = cpms_safety_cost_total_except($projectId, $recordId);
-    $usedAfterSave = $usedExceptCurrent + $amount;
-    if ($usedAfterSave > $safetyLimit110 + 0.0001) {
-        flash_set('error', '안전관리비 110% 사용가능한도를 초과하여 저장할 수 없습니다. 사용가능한도: ' . cpms_safety_cost_money_label($safetyLimit110) . ' / 저장 후 사용금액: ' . cpms_safety_cost_money_label($usedAfterSave));
-        header('Location: ' . $redirect);
-        exit;
-    }
-
     $uploadMessage = '';
     $upload = cpms_safety_cost_store_uploaded_pdf('pdf_file', $projectId, $recordId, $useDate, $uploadMessage);
     if (isset($upload['has_file']) && (int)$upload['has_file'] === 1 && empty($upload['ok'])) {

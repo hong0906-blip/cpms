@@ -563,6 +563,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                         if ($bulkRowStatusType === 'error') $bulkRowClass = 'bg-red-50';
                                         else if ($bulkRowStatusType === 'excluded') $bulkRowClass = 'bg-amber-50';
                                         else if ($bulkRowStatusType === 'duplicate') $bulkRowClass = 'bg-gray-100';
+                                        else if ($bulkRowStatusType === 'negative') $bulkRowClass = 'bg-yellow-50';
                                         ?>
                                         <tr class="<?php echo h($bulkRowClass); ?>">
                                             <td class="p-2 border text-center">
@@ -692,8 +693,9 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                             <?php
                             $usageIdForList = isset($ur['id']) ? (int)$ur['id'] : 0;
                             $listFiles = ($usageIdForList > 0 && isset($statementFilesByUsage[$usageIdForList])) ? $statementFilesByUsage[$usageIdForList] : array();
+                            $usageIsNegative = (isset($ur['amount']) && (float)$ur['amount'] < 0);
                             ?>
-                            <tr>
+                            <tr class="<?php echo $usageIsNegative ? 'bg-yellow-50' : ''; ?>">
                                 <?php if ($canEditMaterials): ?>
                                     <td class="p-2 border text-center">
                                         <?php if ($usageIdForList > 0): ?>
@@ -705,7 +707,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                 <td class="p-2 border"><?php echo h(material_category_label(isset($ur['category']) ? $ur['category'] : '')); ?></td>
                                 <td class="p-2 border text-center"><?php echo h(cpms_material_advance_yn(isset($ur['advance_yn']) ? $ur['advance_yn'] : 'N')); ?></td>
                                 <td class="p-2 border"><?php echo h(isset($ur['vendor_name']) ? $ur['vendor_name'] : ''); ?></td>
-                                <td class="p-2 border text-right"><?php echo material_money(isset($ur['amount']) ? $ur['amount'] : 0); ?></td>
+                                <td class="p-2 border text-right <?php echo $usageIsNegative ? 'font-extrabold text-amber-800' : ''; ?>"><?php echo material_money(isset($ur['amount']) ? $ur['amount'] : 0); ?></td>
                                 <td class="p-2 border"><?php echo h(isset($ur['memo']) ? $ur['memo'] : ''); ?></td>
                                 <td class="p-2 border">
                                     <div class="flex flex-wrap gap-1">
@@ -1025,8 +1027,9 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                 </thead>
                 <tbody>
                 <?php if (count($monthlyRows) > 0): ?>
-                    <?php foreach ($monthlyRows as $row): ?>
-                        <tr>
+                        <?php foreach ($monthlyRows as $row): ?>
+                        <?php $monthlyRowIsNegative = (isset($row['amount']) && (float)$row['amount'] < 0); ?>
+                        <tr class="<?php echo $monthlyRowIsNegative ? 'bg-yellow-50' : ''; ?>">
                             <td class="text-center"><?php echo h(isset($row['date']) ? $row['date'] : ''); ?></td>
                             <td class="text-center"><?php echo h(isset($row['category']) ? $row['category'] : ''); ?></td>
                             <td class="text-center"><?php echo h(isset($row['advance_yn']) ? $row['advance_yn'] : 'N'); ?></td>
@@ -1035,7 +1038,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                             <td><?php echo h(isset($row['representative']) ? $row['representative'] : ''); ?></td>
                             <td><?php echo h(isset($row['phone']) ? $row['phone'] : ''); ?></td>
                             <td><?php echo h(isset($row['biz_no']) ? $row['biz_no'] : ''); ?></td>
-                            <td class="text-right"><?php echo material_money(isset($row['amount']) ? $row['amount'] : 0); ?></td>
+                            <td class="text-right <?php echo $monthlyRowIsNegative ? 'font-extrabold text-amber-800' : ''; ?>"><?php echo material_money(isset($row['amount']) ? $row['amount'] : 0); ?></td>
                             <td><?php echo h(isset($row['remark']) ? $row['remark'] : ''); ?></td>
                         </tr>
                     <?php endforeach; ?>

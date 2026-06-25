@@ -239,10 +239,19 @@ function material_bulk_parse_money($value)
 {
     $raw = trim((string)$value);
     if ($raw === '' || material_bulk_is_excel_error($raw)) return 0.0;
+    $isNegative = false;
+    if (preg_match('/^\((.*)\)$/', $raw, $m)) {
+        $isNegative = true;
+        $raw = isset($m[1]) ? (string)$m[1] : '';
+    }
+    $raw = str_replace(array('−', '–', '—', '－'), '-', $raw);
+    if (strpos($raw, '-') !== false) $isNegative = true;
     $raw = str_replace(array(',', ' ', "\t", '원'), '', $raw);
     $raw = preg_replace('/[^0-9.\-]/', '', $raw);
-    if ($raw === '' || $raw === '-' || $raw === '.' || !is_numeric($raw)) return 0.0;
-    return (float)$raw;
+    $raw = str_replace('-', '', $raw);
+    if ($raw === '' || $raw === '.' || !is_numeric($raw)) return 0.0;
+    $amount = (float)$raw;
+    return $isNegative ? ($amount * -1) : $amount;
 }
 
 function material_bulk_normalize_category($value)
@@ -585,7 +594,7 @@ function material_bulk_parse_preview_rows($pdo, $projectId, $ym, $filePath, &$me
             $errors[count($errors)] = '허용되지 않은 구분입니다.';
         }
         $amount = material_bulk_parse_money($rawAmount);
-        if ($amount <= 0) $errors[count($errors)] = '공급가액은 0원보다 커야 합니다.';
+        if (abs($amount) <= 0.0001) $errors[count($errors)] = '공급가액은 0원이 아닌 금액이어야 합니다.';
 
         $row = array(
             'row_no'=>$rowNo,
@@ -640,7 +649,10 @@ function material_bulk_parse_preview_rows($pdo, $projectId, $ym, $filePath, &$me
             } else {
                 $seen[$dupKey] = true;
                 $seenUsage[$usageKey] = true;
-                if ($hadFormulaError) {
+                if ($amount < 0) {
+                    $row['status_type'] = 'negative';
+                    $row['status'] = '정상 - 차감금액';
+                } else if ($hadFormulaError) {
                     $row['status'] = '정상 - 엑셀 수식 오류값은 빈 값 처리';
                 }
                 $meta['normal_count']++;
@@ -742,7 +754,7 @@ function material_bulk_save_row($pdo, $projectId, $row, $now)
     $detail = trim((string)(isset($row['detail']) ? $row['detail'] : ''));
     $advanceYn = material_bulk_normalize_advance(isset($row['advance_yn']) ? $row['advance_yn'] : 'N');
     $useDate = isset($row['use_date']) ? (string)$row['use_date'] : '';
-    if ($useDate === '' || $amount <= 0) return 0;
+    if ($useDate === '' || abs($amount) <= 0.0001) return 0;
 
     $sourceRow = array('representative'=>$representative, 'phone'=>$phone, 'biz_no'=>$bizNo, 'remark'=>$remark);
     $existingItem = cpms_find_existing_material_item($pdo, $projectId, $category, $vendorName, $bizNo, $amount);
@@ -768,7 +780,7 @@ function material_bulk_save_row($pdo, $projectId, $row, $now)
     }
     if ($materialId <= 0) return 0;
 
-    if ($vendorName !== '') {
+    if ($vendorName !== '' && $amount > 0) {
         try {
             $stPreset = $pdo->prepare("INSERT INTO cpms_material_vendor_presets (vendor_name, category, representative, phone, biz_no, base_rate, remark, created_at, updated_at) VALUES (:vendor, :category, :rep, :phone, :biz_no, :base_rate, :remark, :now, :now) ON DUPLICATE KEY UPDATE category=VALUES(category), representative=VALUES(representative), phone=VALUES(phone), biz_no=VALUES(biz_no), base_rate=VALUES(base_rate), remark=VALUES(remark), updated_at=VALUES(updated_at)");
             $stPreset->bindValue(':vendor', $vendorName);
@@ -857,7 +869,7 @@ function material_bulk_apply_action($pdo, $projectId, $fallbackYm)
             $skipped++;
             continue;
         }
-        if ((float)$row['amount'] <= 0) {
+        if (abs((float)$row['amount']) <= 0.0001) {
             $errors++;
             continue;
         }
