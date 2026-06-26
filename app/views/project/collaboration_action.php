@@ -10,9 +10,38 @@ use App\Core\Db;
 
 require_once __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
 
-if (!Auth::check()) { header('Location: ?r=login'); exit; }
+if (!function_exists('cpms_public_affairs_collab_action_wants_json')) {
+function cpms_public_affairs_collab_action_wants_json() {
+    if (isset($_POST['pa_ajax']) && (string)$_POST['pa_ajax'] === '1') return true;
+    if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') return true;
+    if (isset($_SERVER['HTTP_ACCEPT']) && strpos((string)$_SERVER['HTTP_ACCEPT'], 'application/json') !== false) return true;
+    return false;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_action_json')) {
+function cpms_public_affairs_collab_action_json($ok, $message, $extra) {
+    if (!is_array($extra)) $extra = array();
+    $payload = array_merge(array(
+        'ok' => $ok ? true : false,
+        'message' => (string)$message,
+    ), $extra);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    exit;
+}}
+
+if (!Auth::check()) {
+    if (cpms_public_affairs_collab_action_wants_json()) {
+        cpms_public_affairs_collab_action_json(false, '로그인이 필요합니다.', array('redirect_url' => '?r=login'));
+    }
+    header('Location: ?r=login');
+    exit;
+}
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { header('Location: ?r=공무&tab=collaboration'); exit; }
 if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
+    if (cpms_public_affairs_collab_action_wants_json()) {
+        cpms_public_affairs_collab_action_json(false, '보안 토큰이 유효하지 않습니다. 다시 시도해주세요.', array());
+    }
     flash_set('error', '보안 토큰이 유효하지 않습니다. 다시 시도해주세요.');
     header('Location: ?r=공무&tab=collaboration');
     exit;
@@ -26,12 +55,27 @@ function cpms_public_affairs_collab_action_return_url() {
 }}
 
 if (!function_exists('cpms_public_affairs_collab_action_finish')) {
-function cpms_public_affairs_collab_action_finish($ok, $message, $fallbackUrl) {
-    flash_set($ok ? 'success' : 'error', $message);
+function cpms_public_affairs_collab_action_finish($ok, $message, $fallbackUrl, $extra = array()) {
+    if (!is_array($extra)) $extra = array();
     $url = cpms_public_affairs_collab_action_return_url();
     if ($url === '') $url = $fallbackUrl;
+    if (cpms_public_affairs_collab_action_wants_json()) {
+        $extra['redirect_url'] = $url;
+        cpms_public_affairs_collab_action_json($ok, $message, $extra);
+    }
+    flash_set($ok ? 'success' : 'error', $message);
     header('Location: ' . $url);
     exit;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_action_task_extra')) {
+function cpms_public_affairs_collab_action_task_extra($taskId) {
+    $payload = cpms_public_affairs_collab_task_payload($taskId);
+    if (!is_array($payload)) return array('task_id' => (int)$taskId);
+    $actor = isset($GLOBALS['actor']) && is_array($GLOBALS['actor']) ? $GLOBALS['actor'] : array();
+    $payload['can_edit'] = isset($payload['task']) && is_array($payload['task']) && cpms_public_affairs_collab_user_can_edit_task($payload['task'], $actor) ? 1 : 0;
+    $payload['task_id'] = (int)$taskId;
+    return $payload;
 }}
 
 $pdo = Db::pdo();
@@ -51,7 +95,9 @@ if ($action === 'create') {
     if (isset($result['task_id']) && (int)$result['task_id'] > 0) {
         $_POST['return_url'] = '?r=공무&tab=collaboration&task_id=' . (int)$result['task_id'];
     }
-    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', $returnUrl);
+    $extra = array();
+    if (!empty($result['ok']) && isset($result['task_id'])) $extra = cpms_public_affairs_collab_action_task_extra((int)$result['task_id']);
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', $returnUrl, $extra);
 }
 
 if ($action === 'settings') {
@@ -59,12 +105,14 @@ if ($action === 'settings') {
     if (!cpms_public_affairs_collab_is_admin_user()) {
         cpms_public_affairs_collab_action_finish(false, '설정 저장 권한이 없습니다.', '?r=공무&tab=collaboration&view=settings');
     }
+    $currentSettings = cpms_public_affairs_collab_settings();
     $settings = array(
         'task_types' => isset($_POST['task_types']) ? $_POST['task_types'] : '',
         'statuses' => isset($_POST['statuses']) ? $_POST['statuses'] : '',
         'priorities' => isset($_POST['priorities']) ? $_POST['priorities'] : '',
         'quick_filters' => isset($_POST['quick_filters']) ? $_POST['quick_filters'] : '',
         'card_fields' => isset($_POST['card_fields']) ? $_POST['card_fields'] : '',
+        'status_transition_rules' => isset($currentSettings['status_transition_rules']) ? $currentSettings['status_transition_rules'] : array(),
         'default_assignee_employee_id' => isset($_POST['default_assignee_employee_id']) ? (int)$_POST['default_assignee_employee_id'] : 0,
     );
     $ok = cpms_public_affairs_collab_save_settings($settings);
@@ -83,6 +131,11 @@ if (!cpms_public_affairs_collab_user_can_view_task($task, $actor)) {
     cpms_public_affairs_collab_action_finish(false, '해당 업무를 볼 권한이 없습니다.', '?r=공무&tab=collaboration');
 }
 
+if ($action === 'detail') {
+    // 공무 협업툴 상세패널: 페이지 이동 없이 업무카드 상세를 AJAX로 조회한다.
+    cpms_public_affairs_collab_action_finish(true, '업무 상세를 불러왔습니다.', '?r=공무&tab=collaboration&task_id=' . $taskId, cpms_public_affairs_collab_action_task_extra($taskId));
+}
+
 if ($action === 'update' || $action === 'quick_update') {
     // 공무 협업툴 업무 상세: 상태/담당자/우선순위/마감일 등 기본정보를 수정한다.
     if (!cpms_public_affairs_collab_user_can_edit_task($task, $actor)) {
@@ -93,7 +146,8 @@ if ($action === 'update' || $action === 'quick_update') {
     if ($stateAction === 'reject') $_POST['status'] = '반려';
     if ($stateAction === 'hold') $_POST['status'] = '보류';
     $result = cpms_public_affairs_collab_update_task($taskId, $_POST, $actor, $projects, $employees);
-    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=공무&tab=collaboration&task_id=' . $taskId);
+    $extra = !empty($result['ok']) ? cpms_public_affairs_collab_action_task_extra($taskId) : array('task_id' => $taskId);
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=공무&tab=collaboration&task_id=' . $taskId, $extra);
 }
 
 if ($action === 'complete' || $action === 'reject' || $action === 'hold') {
@@ -105,13 +159,15 @@ if ($action === 'complete' || $action === 'reject' || $action === 'hold') {
     if ($action === 'reject') $_POST['status'] = '반려';
     if ($action === 'hold') $_POST['status'] = '보류';
     $result = cpms_public_affairs_collab_update_task($taskId, $_POST, $actor, $projects, $employees);
-    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=공무&tab=collaboration&task_id=' . $taskId);
+    $extra = !empty($result['ok']) ? cpms_public_affairs_collab_action_task_extra($taskId) : array('task_id' => $taskId);
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=공무&tab=collaboration&task_id=' . $taskId, $extra);
 }
 
 if ($action === 'comment') {
     // 공무 협업툴 업무 상세: 댓글 등록과 변경이력 기록.
     $result = cpms_public_affairs_collab_add_comment($task, isset($_POST['comment']) ? $_POST['comment'] : '', $actor);
-    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=공무&tab=collaboration&task_id=' . $taskId);
+    $extra = !empty($result['ok']) ? cpms_public_affairs_collab_action_task_extra($taskId) : array('task_id' => $taskId);
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=공무&tab=collaboration&task_id=' . $taskId, $extra);
 }
 
 if ($action === 'upload') {
@@ -121,7 +177,9 @@ if ($action === 'upload') {
     }
     $saved = cpms_public_affairs_collab_save_uploaded_files($task, isset($_FILES['attachments']) ? $_FILES['attachments'] : null, $actor);
     $count = is_array($saved) ? count($saved) : 0;
-    cpms_public_affairs_collab_action_finish($count > 0, $count > 0 ? '첨부파일이 등록되었습니다.' : '등록된 첨부파일이 없습니다. 파일 형식 또는 용량을 확인해주세요.', '?r=공무&tab=collaboration&task_id=' . $taskId);
+    $extra = $count > 0 ? cpms_public_affairs_collab_action_task_extra($taskId) : array('task_id' => $taskId);
+    $extra['saved_files'] = $saved;
+    cpms_public_affairs_collab_action_finish($count > 0, $count > 0 ? '첨부파일이 등록되었습니다.' : '등록된 첨부파일이 없습니다. 파일 형식 또는 용량을 확인해주세요.', '?r=공무&tab=collaboration&task_id=' . $taskId, $extra);
 }
 
 cpms_public_affairs_collab_action_finish(false, '처리할 수 없는 요청입니다.', '?r=공무&tab=collaboration');

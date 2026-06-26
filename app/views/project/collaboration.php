@@ -149,6 +149,31 @@ if (!$canAccessCollab) {
   </section>
 </div>
 
+<?php
+  // 공무 협업툴 AJAX 화면 구성값: 상세패널/카드 갱신/상태 이동에서 공통으로 사용한다.
+  $paCollabEmployeeOptions = array();
+  foreach ($employees as $employee) {
+      $paCollabEmployeeOptions[] = array(
+          'id' => isset($employee['id']) ? (int)$employee['id'] : 0,
+          'name' => isset($employee['name']) ? (string)$employee['name'] : '',
+          'department' => isset($employee['department']) ? (string)$employee['department'] : '',
+          'position' => isset($employee['position']) ? (string)$employee['position'] : '',
+      );
+  }
+  $paCollabJsConfig = array(
+      'csrf' => csrf_token(),
+      'actionUrl' => '?r=project/collaboration_action',
+      'fileUrl' => '?r=project/collaboration_file&id=',
+      'statuses' => $settings['statuses'],
+      'priorities' => $settings['priorities'],
+      'taskTypes' => $settings['task_types'],
+      'employees' => $paCollabEmployeeOptions,
+      'impactOptions' => array('없음', '있음', '확인필요'),
+  );
+?>
+<script>
+window.paCollabConfig = <?php echo json_encode($paCollabJsConfig, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+</script>
 <script defer src="<?php echo h(asset_url('assets/js/public_affairs_collaboration.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/public_affairs_collaboration.js')); ?>"></script>
     <?php
     return;
@@ -242,6 +267,8 @@ $sampleCards = array(
           <input type="hidden" name="quick" value="<?php echo h($quickFilter); ?>">
           <span class="pa-muted">검색</span>
           <input name="keyword" value="<?php echo h($filters['keyword']); ?>" placeholder="업무번호, 제목, 내용, 담당자">
+          <button type="button" class="pa-search-clear" data-pa-search-clear title="검색 초기화">초기화</button>
+          <button type="submit" class="pa-search-submit" title="검색">검색</button>
         </form>
         <div class="pa-view-tabs">
           <a class="<?php echo $viewMode === 'board' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'board', 'section' => 'board', 'task_id' => null))); ?>">보드</a>
@@ -370,8 +397,12 @@ $sampleCards = array(
               <tbody>
               <?php if (count($filteredTasks) === 0): ?><tr><td colspan="16" class="pa-muted">조회된 업무카드가 없습니다.</td></tr><?php endif; ?>
               <?php foreach ($filteredTasks as $task): ?>
-                <?php $taskId = isset($task['id']) ? (int)$task['id'] : 0; ?>
-                <tr>
+                <?php
+                  $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+                  $taskNo = cpms_public_affairs_collab_task_no($task);
+                  $searchText = $taskNo . ' ' . (isset($task['title']) ? $task['title'] : '') . ' ' . (isset($task['content']) ? $task['content'] : '') . ' ' . (isset($task['project_name']) ? $task['project_name'] : '') . ' ' . (isset($task['task_type']) ? $task['task_type'] : '') . ' ' . (isset($task['assignee_name']) ? $task['assignee_name'] : '') . ' ' . (isset($task['requester_name']) ? $task['requester_name'] : '') . ' ' . cpms_public_affairs_collab_task_ref_names($task);
+                ?>
+                <tr data-pa-list-task-id="<?php echo (int)$taskId; ?>" data-pa-search="<?php echo h($searchText); ?>">
                   <td><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b></td>
                   <td><?php echo h(isset($task['task_type']) ? $task['task_type'] : '-'); ?></td>
                   <td><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></td>
@@ -387,7 +418,7 @@ $sampleCards = array(
                   <td><?php echo h(isset($task['schedule_impact']) ? $task['schedule_impact'] : '없음'); ?></td>
                   <td><?php echo h(isset($task['created_at']) ? substr((string)$task['created_at'], 0, 16) : '-'); ?></td>
                   <td><?php echo h(isset($task['updated_at']) ? substr((string)$task['updated_at'], 0, 16) : '-'); ?></td>
-                  <td><a class="pa-btn" href="<?php echo h(pa_collab_url(array('task_id' => $taskId))); ?>">열기</a></td>
+                  <td><a class="pa-btn" data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => $taskId))); ?>">열기</a></td>
                 </tr>
               <?php endforeach; ?>
               </tbody>
@@ -397,9 +428,14 @@ $sampleCards = array(
           <section class="pa-backlog">
             <?php if (count($filteredTasks) === 0): ?><div class="pa-empty">대기 업무가 없습니다.</div><?php endif; ?>
             <?php foreach ($filteredTasks as $task): ?>
-              <?php $taskId = isset($task['id']) ? (int)$task['id'] : 0; $canEdit = cpms_public_affairs_collab_user_can_edit_task($task, $currentEmployee); ?>
-              <div class="pa-backlog-row">
-                <div><div><span class="pa-no"><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></span> <span class="pa-type"><?php echo h(isset($task['task_type']) ? $task['task_type'] : '-'); ?></span></div><a class="pa-card-title" href="<?php echo h(pa_collab_url(array('task_id' => $taskId))); ?>"><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></a><div class="pa-muted"><?php echo h(isset($task['project_name']) ? $task['project_name'] : '-'); ?></div></div>
+              <?php
+                $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+                $taskNo = cpms_public_affairs_collab_task_no($task);
+                $canEdit = cpms_public_affairs_collab_user_can_edit_task($task, $currentEmployee);
+                $searchText = $taskNo . ' ' . (isset($task['title']) ? $task['title'] : '') . ' ' . (isset($task['content']) ? $task['content'] : '') . ' ' . (isset($task['project_name']) ? $task['project_name'] : '') . ' ' . (isset($task['task_type']) ? $task['task_type'] : '') . ' ' . (isset($task['assignee_name']) ? $task['assignee_name'] : '') . ' ' . (isset($task['requester_name']) ? $task['requester_name'] : '') . ' ' . cpms_public_affairs_collab_task_ref_names($task);
+              ?>
+              <div class="pa-backlog-row" data-pa-list-task-id="<?php echo (int)$taskId; ?>" data-pa-search="<?php echo h($searchText); ?>">
+                <div><div><span class="pa-no"><?php echo h($taskNo); ?></span> <span class="pa-type"><?php echo h(isset($task['task_type']) ? $task['task_type'] : '-'); ?></span></div><a class="pa-card-title" data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => $taskId))); ?>"><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></a><div class="pa-muted"><?php echo h(isset($task['project_name']) ? $task['project_name'] : '-'); ?></div></div>
                 <?php if ($canEdit): ?>
                   <form method="post" action="?r=project/collaboration_action" class="pa-card-select" style="margin:0;">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="action" value="quick_update"><input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>"><input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array())); ?>">
@@ -447,10 +483,11 @@ $sampleCards = array(
                         $canEdit = cpms_public_affairs_collab_user_can_edit_task($task, $currentEmployee);
                         $commentCount = cpms_public_affairs_collab_count_for_task($taskCounts, $taskId, 'comments');
                         $fileCount = cpms_public_affairs_collab_count_for_task($taskCounts, $taskId, 'files');
+                        $searchText = $taskNo . ' ' . (isset($task['title']) ? $task['title'] : '') . ' ' . (isset($task['content']) ? $task['content'] : '') . ' ' . (isset($task['project_name']) ? $task['project_name'] : '') . ' ' . (isset($task['task_type']) ? $task['task_type'] : '') . ' ' . (isset($task['assignee_name']) ? $task['assignee_name'] : '') . ' ' . (isset($task['requester_name']) ? $task['requester_name'] : '') . ' ' . cpms_public_affairs_collab_task_ref_names($task);
                       ?>
-                      <div class="pa-card <?php echo $isUrgent ? 'is-urgent ' : ''; ?><?php echo $isDelayed ? 'is-delayed ' : ''; ?><?php echo $isDone ? 'is-done ' : ''; ?>" <?php echo $canEdit ? 'draggable="true"' : ''; ?> data-pa-task-id="<?php echo (int)$taskId; ?>">
+                      <div class="pa-card <?php echo $isUrgent ? 'is-urgent ' : ''; ?><?php echo $isDelayed ? 'is-delayed ' : ''; ?><?php echo $isDone ? 'is-done ' : ''; ?>" <?php echo $canEdit ? 'draggable="true"' : ''; ?> data-pa-task-id="<?php echo (int)$taskId; ?>" data-pa-task-no="<?php echo h($taskNo); ?>" data-pa-status="<?php echo h(isset($task['status']) ? $task['status'] : ''); ?>" data-pa-can-edit="<?php echo $canEdit ? '1' : '0'; ?>" data-pa-search="<?php echo h($searchText); ?>">
                         <div class="pa-card-top"><span class="pa-no"><?php echo h($taskNo); ?></span><span class="pa-type"><?php echo h(isset($task['task_type']) ? $task['task_type'] : '-'); ?></span></div>
-                        <a class="pa-card-title" href="<?php echo h(pa_collab_url(array('task_id' => $taskId))); ?>"><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></a>
+                        <a class="pa-card-title" data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => $taskId))); ?>"><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></a>
                         <div class="pa-card-meta">
                           <div><?php echo h(isset($task['project_name']) ? $task['project_name'] : '-'); ?></div>
                           <div>담당 <?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?> · 요청 <?php echo h(isset($task['requester_name']) ? $task['requester_name'] : '-'); ?></div>
@@ -462,7 +499,7 @@ $sampleCards = array(
                           <?php if ($isDelayed): ?><span class="pa-badge pa-delayed">지연</span><?php endif; ?>
                           <?php if (isset($task['contract_impact']) && (string)$task['contract_impact'] !== '없음'): ?><span class="pa-badge pa-impact">계약 <?php echo h($task['contract_impact']); ?></span><?php endif; ?>
                           <?php if (isset($task['schedule_impact']) && (string)$task['schedule_impact'] !== '없음'): ?><span class="pa-badge pa-impact">공기 <?php echo h($task['schedule_impact']); ?></span><?php endif; ?>
-                          <span class="pa-badge">댓글 <?php echo (int)$commentCount; ?></span><span class="pa-badge">첨부 <?php echo (int)$fileCount; ?></span>
+                          <span class="pa-badge" data-pa-comment-count>댓글 <?php echo (int)$commentCount; ?></span><span class="pa-badge" data-pa-file-count>첨부 <?php echo (int)$fileCount; ?></span>
                         </div>
                         <?php if ($canEdit): ?>
                           <form method="post" action="?r=project/collaboration_action" class="pa-card-select">

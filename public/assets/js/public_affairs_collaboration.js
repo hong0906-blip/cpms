@@ -1,8 +1,14 @@
 (function(){
-  // 공무 협업툴 전체화면 앱 모달: 공무 탭 클릭 시 CPMS 화면 위에 독립 보드를 연다.
+  // 공무 협업툴 전체화면 보드 앱: 모달, 칸반 이동, 상세패널, AJAX 저장을 담당한다.
   var appModal = document.getElementById('paCollabFullscreenModal');
-  var lastFocusedElement = null;
+  var cfg = window.paCollabConfig || {};
+  var actionUrl = cfg.actionUrl || '?r=project/collaboration_action';
+  var fileUrl = cfg.fileUrl || '?r=project/collaboration_file&id=';
   var hashValue = '#public-affairs-collaboration';
+  var lastFocusedElement = null;
+  var draggedTaskId = '';
+  var dragSourceColumn = null;
+  var dragSourceStatus = '';
 
   function hasClass(el, className) {
     return el && (' ' + el.className + ' ').indexOf(' ' + className + ' ') > -1;
@@ -23,6 +29,48 @@
     else if (target) target['on' + eventName] = handler;
   }
 
+  function closest(el, selector) {
+    while (el && el !== document) {
+      if (matches(el, selector)) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+
+  function matches(el, selector) {
+    if (!el || el.nodeType !== 1) return false;
+    var proto = el.matches || el.msMatchesSelector || el.webkitMatchesSelector;
+    if (proto) return proto.call(el, selector);
+    var nodes = (el.parentNode || document).querySelectorAll(selector);
+    for (var i = 0; i < nodes.length; i++) if (nodes[i] === el) return true;
+    return false;
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function(ch){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch];
+    });
+  }
+
+  function formDataSet(fd, key, value) {
+    if (fd.set) fd.set(key, value);
+    else fd.append(key, value);
+  }
+
+  function showNotice(message, ok) {
+    var box = document.getElementById('paCollabToast');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'paCollabToast';
+      box.className = 'pa-toast';
+      document.body.appendChild(box);
+    }
+    box.className = 'pa-toast ' + (ok ? 'is-ok' : 'is-error');
+    box.innerHTML = escapeHtml(message || (ok ? '처리되었습니다.' : '처리에 실패했습니다.'));
+    addClass(box, 'is-open');
+    window.setTimeout(function(){ removeClass(box, 'is-open'); }, 2600);
+  }
+
   function focusFirstControl() {
     if (!appModal) return;
     var target = appModal.querySelector('button, a, input, select, textarea');
@@ -31,20 +79,14 @@
 
   function setHash() {
     if (window.location.hash === hashValue) return;
-    if (window.history && window.history.pushState) {
-      window.history.pushState(null, '', hashValue);
-    } else {
-      window.location.hash = hashValue;
-    }
+    if (window.history && window.history.pushState) window.history.pushState(null, '', hashValue);
+    else window.location.hash = hashValue;
   }
 
   function clearHash() {
     if (window.location.hash !== hashValue) return;
-    if (window.history && window.history.replaceState) {
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    } else {
-      window.location.hash = '';
-    }
+    if (window.history && window.history.replaceState) window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    else window.location.hash = '';
   }
 
   function openAppModal(updateHash) {
@@ -65,6 +107,378 @@
     removeClass(appModal, 'pa-collab-menu-open');
     if (updateHash) clearHash();
     if (lastFocusedElement && lastFocusedElement.focus) lastFocusedElement.focus();
+  }
+
+  function ajaxFormData(fd, callback) {
+    formDataSet(fd, 'pa_ajax', '1');
+    var hasCsrf = false;
+    if (fd.get) hasCsrf = !!fd.get('_csrf');
+    if (cfg.csrf && !hasCsrf) fd.append('_csrf', cfg.csrf);
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', actionUrl, true);
+    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+    xhr.onreadystatechange = function(){
+      if (xhr.readyState !== 4) return;
+      var json = null;
+      try { json = JSON.parse(xhr.responseText); } catch (e) {}
+      if (!json) json = {ok:false, message:'서버 응답을 읽을 수 없습니다.'};
+      callback(json, xhr.status);
+    };
+    xhr.send(fd);
+  }
+
+  function actionRequest(action, taskId, data, callback) {
+    var fd = new FormData();
+    fd.append('_csrf', cfg.csrf || '');
+    fd.append('action', action);
+    if (taskId) fd.append('task_id', taskId);
+    if (data) {
+      for (var key in data) {
+        if (data.hasOwnProperty(key)) fd.append(key, data[key]);
+      }
+    }
+    ajaxFormData(fd, callback);
+  }
+
+  function getTaskIdFromHref(href) {
+    var m = String(href || '').match(/[?&]task_id=([0-9]+)/);
+    return m ? parseInt(m[1], 10) : 0;
+  }
+
+  function optionHtml(list, selected) {
+    var html = '';
+    list = list || [];
+    for (var i = 0; i < list.length; i++) {
+      var value = String(list[i]);
+      html += '<option value="' + escapeHtml(value) + '"' + (String(selected) === value ? ' selected' : '') + '>' + escapeHtml(value) + '</option>';
+    }
+    return html;
+  }
+
+  function employeeOptions(selected, multiple) {
+    var html = multiple ? '' : '<option value="">선택하세요</option>';
+    var selectedMap = {};
+    if (multiple && selected) {
+      for (var s = 0; s < selected.length; s++) selectedMap[String(selected[s])] = true;
+    }
+    var employees = cfg.employees || [];
+    for (var i = 0; i < employees.length; i++) {
+      var e = employees[i] || {};
+      var id = String(e.id || '');
+      var label = (e.name || '-') + ' / ' + (e.department || '-') + ' / ' + (e.position || '-');
+      var isSelected = multiple ? !!selectedMap[id] : String(selected || '') === id;
+      html += '<option value="' + escapeHtml(id) + '"' + (isSelected ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
+    }
+    return html;
+  }
+
+  function dueText(task) {
+    if (!task || !task.due_date) return '-';
+    return String(task.due_date) + (task.due_time ? ' ' + String(task.due_time) : '');
+  }
+
+  function fileSize(bytes) {
+    bytes = parseInt(bytes || 0, 10);
+    if (bytes >= 1048576) return Math.round(bytes / 104857.6) / 10 + 'MB';
+    if (bytes >= 1024) return Math.round(bytes / 102.4) / 10 + 'KB';
+    return bytes + 'B';
+  }
+
+  function mentionHtml(text) {
+    return escapeHtml(text || '').replace(/@([^\s@]+)/g, '<span class="pa-mention">@$1</span>');
+  }
+
+  function priorityClass(priority) {
+    if (priority === '긴급') return 'pa-priority-urgent';
+    if (priority === '높음') return 'pa-priority-high';
+    if (priority === '낮음') return 'pa-priority-low';
+    return 'pa-priority-normal';
+  }
+
+  function statusClass(status) {
+    if (status === '완료') return 'pa-status-done';
+    if (status === '반려') return 'pa-status-reject';
+    if (status === '보류') return 'pa-status-hold';
+    if (status === '결재대기') return 'pa-status-approval';
+    if (status === '자료대기') return 'pa-status-wait';
+    if (status === '진행중') return 'pa-status-progress';
+    return 'pa-status-new';
+  }
+
+  function cardHtml(task, canEdit) {
+    task = task || {};
+    var taskId = task.id || task.task_id || 0;
+    var taskNo = task.task_no || ('PA-' + taskId);
+    var classes = 'pa-card';
+    if (task.priority === '긴급') classes += ' is-urgent';
+    if (parseInt(task.is_delayed || 0, 10)) classes += ' is-delayed';
+    if (task.status === '완료') classes += ' is-done';
+    var searchText = [taskNo, task.title, task.content, task.project_name, task.task_type, task.assignee_name, task.requester_name, (task.reference_names || []).join(' ')].join(' ');
+    var html = '<div class="' + classes + '"' + (canEdit ? ' draggable="true"' : '') +
+      ' data-pa-task-id="' + escapeHtml(taskId) + '"' +
+      ' data-pa-task-no="' + escapeHtml(taskNo) + '"' +
+      ' data-pa-status="' + escapeHtml(task.status || '') + '"' +
+      ' data-pa-can-edit="' + (canEdit ? '1' : '0') + '"' +
+      ' data-pa-search="' + escapeHtml(searchText) + '">';
+    html += '<div class="pa-card-top"><span class="pa-no">' + escapeHtml(taskNo) + '</span><span class="pa-type">' + escapeHtml(task.task_type || '-') + '</span></div>';
+    html += '<a class="pa-card-title" data-pa-detail-link href="?r=공무&tab=collaboration&task_id=' + escapeHtml(taskId) + '">' + escapeHtml(task.title || '-') + '</a>';
+    html += '<div class="pa-card-meta"><div>' + escapeHtml(task.project_name || '-') + '</div><div>담당 ' + escapeHtml(task.assignee_name || '-') + ' · 요청 ' + escapeHtml(task.requester_name || '-') + '</div><div>마감 ' + escapeHtml(dueText(task)) + '</div></div>';
+    html += '<div class="pa-badges"><span class="pa-badge ' + priorityClass(task.priority) + '">' + escapeHtml(task.priority || '-') + '</span>';
+    if (parseInt(task.is_due_today || 0, 10)) html += '<span class="pa-badge pa-today">오늘 마감</span>';
+    if (parseInt(task.is_delayed || 0, 10)) html += '<span class="pa-badge pa-delayed">지연</span>';
+    if (task.contract_impact && task.contract_impact !== '없음') html += '<span class="pa-badge pa-impact">계약 ' + escapeHtml(task.contract_impact) + '</span>';
+    if (task.schedule_impact && task.schedule_impact !== '없음') html += '<span class="pa-badge pa-impact">공기 ' + escapeHtml(task.schedule_impact) + '</span>';
+    html += '<span class="pa-badge" data-pa-comment-count>댓글 ' + escapeHtml(task.comment_count || 0) + '</span><span class="pa-badge" data-pa-file-count>첨부 ' + escapeHtml(task.file_count || 0) + '</span></div>';
+    if (canEdit) {
+      html += '<form method="post" action="' + escapeHtml(actionUrl) + '" class="pa-card-select"><input type="hidden" name="_csrf" value="' + escapeHtml(cfg.csrf || '') + '"><input type="hidden" name="action" value="quick_update"><input type="hidden" name="task_id" value="' + escapeHtml(taskId) + '"><select name="status">' + optionHtml(cfg.statuses || [], task.status) + '</select><button type="submit">이동</button></form>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  function refreshColumnCounts() {
+    var columns = appModal ? appModal.querySelectorAll('[data-pa-drop-status]') : [];
+    for (var i = 0; i < columns.length; i++) {
+      var cards = columns[i].querySelectorAll('.pa-card:not(.is-sample)');
+      var count = cards.length;
+      var countEl = columns[i].querySelector('.pa-count');
+      var wipEl = columns[i].querySelector('.pa-wip');
+      if (countEl) countEl.innerHTML = count;
+      if (wipEl) wipEl.innerHTML = 'WIP ' + count;
+    }
+  }
+
+  function bindCardDrag(card) {
+    if (!card || card.getAttribute('data-pa-can-edit') !== '1') return;
+    bindEvent(card, 'dragstart', function(ev){
+      draggedTaskId = card.getAttribute('data-pa-task-id');
+      dragSourceColumn = closest(card, '[data-pa-drop-status]');
+      dragSourceStatus = card.getAttribute('data-pa-status') || '';
+      addClass(card, 'is-dragging');
+      if (ev.dataTransfer) ev.dataTransfer.setData('text/plain', draggedTaskId);
+    });
+    bindEvent(card, 'dragend', function(){ removeClass(card, 'is-dragging'); });
+  }
+
+  function addOrUpdateCard(payload) {
+    if (!payload || !payload.task) return;
+    var task = payload.task;
+    task.comment_count = task.comment_count || (payload.comments ? payload.comments.length : 0);
+    task.file_count = task.file_count || (payload.files ? payload.files.length : 0);
+    var canEdit = payload.can_edit === undefined ? true : !!payload.can_edit;
+    var oldCard = appModal ? appModal.querySelector('.pa-card[data-pa-task-id="' + task.id + '"]') : null;
+    var column = appModal ? appModal.querySelector('[data-pa-drop-status="' + cssEscape(task.status || '') + '"] .pa-column-body') : null;
+    if (!column) {
+      if (oldCard) {
+        oldCard.setAttribute('data-pa-status', task.status || '');
+        var cc = oldCard.querySelector('[data-pa-comment-count]');
+        var fc = oldCard.querySelector('[data-pa-file-count]');
+        if (cc) cc.innerHTML = '댓글 ' + (task.comment_count || 0);
+        if (fc) fc.innerHTML = '첨부 ' + (task.file_count || 0);
+      }
+      return;
+    }
+    var wrapper = document.createElement('div');
+    wrapper.innerHTML = cardHtml(task, canEdit);
+    var newCard = wrapper.firstChild;
+    if (oldCard && oldCard.parentNode) oldCard.parentNode.removeChild(oldCard);
+    column.appendChild(newCard);
+    bindCardDrag(newCard);
+    refreshColumnCounts();
+    addClass(newCard, 'is-selected');
+  }
+
+  function cssEscape(value) {
+    return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function renderDetail(payload) {
+    if (!payload || !payload.task || !appModal) return;
+    var task = payload.task;
+    var canEdit = payload.can_edit === undefined ? true : !!payload.can_edit;
+    var comments = payload.comments || [];
+    var files = payload.files || [];
+    var history = payload.history || [];
+    var old = appModal.querySelector('.pa-detail-panel');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    var refs = task.reference_employee_ids || [];
+    var disabled = canEdit ? '' : ' disabled';
+    var readonly = canEdit ? '' : ' readonly';
+    var html = '<aside class="pa-detail-panel" data-pa-detail-task-id="' + escapeHtml(task.id) + '">';
+    html += '<div class="pa-detail-head"><div><div><span class="pa-no">' + escapeHtml(task.task_no || '-') + '</span> <span class="pa-badge ' + statusClass(task.status) + '">' + escapeHtml(task.status || '-') + '</span> <span class="pa-badge ' + priorityClass(task.priority) + '">' + escapeHtml(task.priority || '-') + '</span></div><div class="pa-title" style="font-size:21px;margin-top:8px;">' + escapeHtml(task.title || '-') + '</div></div><button type="button" class="pa-btn" data-pa-detail-close>닫기</button></div>';
+    html += '<div class="pa-detail-body">';
+    html += '<form method="post" action="' + escapeHtml(actionUrl) + '" class="pa-detail-grid" data-pa-ajax-form><input type="hidden" name="_csrf" value="' + escapeHtml(cfg.csrf || '') + '"><input type="hidden" name="action" value="update"><input type="hidden" name="task_id" value="' + escapeHtml(task.id) + '"><input type="hidden" name="reference_employee_ids_present" value="1">';
+    html += '<div class="pa-panel-card"><div class="pa-panel-title">' + escapeHtml(task.task_no || '-') + ' 상세내용</div><div class="pa-form-grid">';
+    html += '<div class="full"><input name="title" value="' + escapeHtml(task.title || '') + '"' + readonly + ' class="pa-field"></div>';
+    html += '<div class="full"><textarea name="content" rows="8"' + readonly + ' class="pa-field" placeholder="상세내용">' + escapeHtml(task.content || '') + '</textarea></div>';
+    html += '<div class="full"><input name="document_link" value="' + escapeHtml(task.document_link || '') + '"' + readonly + ' class="pa-field" placeholder="관련 문서 링크"></div></div>';
+    if (canEdit) html += '<div class="pa-detail-actions"><button type="submit" name="state_action" value="complete" class="pa-btn pa-btn-primary">완료 처리</button><button type="submit" name="state_action" value="reject" class="pa-btn">반려 처리</button><button type="submit" name="state_action" value="hold" class="pa-btn">보류 처리</button><button type="submit" class="pa-btn pa-btn-dark">변경 저장</button></div>';
+    html += '</div><div class="pa-panel-card"><div class="pa-panel-title">속성</div><div class="pa-prop">';
+    html += '<div class="pa-prop-row"><b>업무번호</b><span>' + escapeHtml(task.task_no || '-') + '</span></div>';
+    html += '<div class="pa-prop-row"><b>담당자</b><span><select name="assignee_employee_id"' + disabled + ' class="pa-field">' + employeeOptions(task.assignee_employee_id, false) + '</select></span></div>';
+    html += '<div class="pa-prop-row"><b>요청자</b><span>' + escapeHtml(task.requester_name || '-') + '</span></div>';
+    html += '<div class="pa-prop-row"><b>참조자</b><span><select name="reference_employee_ids[]" multiple' + disabled + ' class="pa-field" style="min-height:82px;">' + employeeOptions(refs, true) + '</select></span></div>';
+    html += '<div class="pa-prop-row"><b>업무유형</b><span><select name="task_type"' + disabled + ' class="pa-field">' + optionHtml(cfg.taskTypes || [], task.task_type) + '</select></span></div>';
+    html += '<div class="pa-prop-row"><b>현장명</b><span><input name="project_name" value="' + escapeHtml(task.project_name || '') + '"' + readonly + ' class="pa-field"></span></div>';
+    html += '<div class="pa-prop-row"><b>상태</b><span><select name="status"' + disabled + ' class="pa-field">' + optionHtml(cfg.statuses || [], task.status) + '</select></span></div>';
+    html += '<div class="pa-prop-row"><b>우선순위</b><span><select name="priority"' + disabled + ' class="pa-field">' + optionHtml(cfg.priorities || [], task.priority) + '</select></span></div>';
+    html += '<div class="pa-prop-row"><b>마감일</b><span><input type="date" name="due_date" value="' + escapeHtml(task.due_date || '') + '"' + readonly + ' class="pa-field"></span></div>';
+    html += '<div class="pa-prop-row"><b>마감시간</b><span><input type="time" name="due_time" value="' + escapeHtml(task.due_time || '') + '"' + readonly + ' class="pa-field"></span></div>';
+    html += '<div class="pa-prop-row"><b>관련 금액</b><span><input name="related_amount" value="' + escapeHtml(task.related_amount || '') + '"' + readonly + ' class="pa-field"></span></div>';
+    html += '<div class="pa-prop-row"><b>계약 영향</b><span><select name="contract_impact"' + disabled + ' class="pa-field">' + optionHtml(cfg.impactOptions || [], task.contract_impact || '없음') + '</select></span></div>';
+    html += '<div class="pa-prop-row"><b>공기 영향</b><span><select name="schedule_impact"' + disabled + ' class="pa-field">' + optionHtml(cfg.impactOptions || [], task.schedule_impact || '없음') + '</select></span></div>';
+    html += '<div class="pa-prop-row"><b>생성일시</b><span>' + escapeHtml(task.created_at || '-') + '</span></div><div class="pa-prop-row"><b>수정일시</b><span>' + escapeHtml(task.updated_at || '-') + '</span></div><div class="pa-prop-row"><b>완료일시</b><span>' + escapeHtml(task.completed_at || '-') + '</span></div>';
+    html += '</div></div></form>';
+    html += '<div class="pa-detail-grid" style="margin-top:14px;"><div><div class="pa-panel-card"><div class="pa-panel-title">' + escapeHtml(task.task_no || '-') + ' 댓글</div>';
+    html += '<form method="post" action="' + escapeHtml(actionUrl) + '" data-pa-ajax-form><input type="hidden" name="_csrf" value="' + escapeHtml(cfg.csrf || '') + '"><input type="hidden" name="action" value="comment"><input type="hidden" name="task_id" value="' + escapeHtml(task.id) + '"><textarea name="comment" rows="3" class="pa-field" placeholder="@담당자 확인 부탁드립니다."></textarea><div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="submit" class="pa-btn pa-btn-primary">댓글 등록</button></div></form>';
+    if (comments.length === 0) html += '<div class="pa-muted" style="margin-top:10px;">댓글이 없습니다.</div>';
+    for (var c = 0; c < comments.length; c++) html += '<div class="pa-comment"><b>' + escapeHtml(comments[c].created_by_name || '-') + '</b> <span class="pa-muted">' + escapeHtml(comments[c].created_at || '') + '</span><div style="white-space:pre-wrap;margin-top:5px;">' + mentionHtml(comments[c].content || '') + '</div></div>';
+    html += '</div><div class="pa-panel-card" style="margin-top:12px;"><div class="pa-panel-title">' + escapeHtml(task.task_no || '-') + ' 첨부파일</div>';
+    if (files.length === 0) html += '<div class="pa-muted">첨부파일이 없습니다.</div>';
+    for (var f = 0; f < files.length; f++) html += '<a class="pa-file" style="display:block;" href="' + escapeHtml(fileUrl + files[f].id) + '"><b>' + escapeHtml(files[f].original_name || 'file') + '</b><div class="pa-muted">' + escapeHtml(files[f].uploaded_by_name || '-') + ' · ' + escapeHtml(files[f].uploaded_at || '') + ' · ' + escapeHtml(fileSize(files[f].file_size || 0)) + '</div></a>';
+    if (canEdit) html += '<form method="post" action="' + escapeHtml(actionUrl) + '" enctype="multipart/form-data" data-pa-ajax-form style="margin-top:10px;"><input type="hidden" name="_csrf" value="' + escapeHtml(cfg.csrf || '') + '"><input type="hidden" name="action" value="upload"><input type="hidden" name="task_id" value="' + escapeHtml(task.id) + '"><input type="file" name="attachments[]" multiple class="pa-field"><button type="submit" class="pa-btn pa-btn-dark" style="margin-top:8px;">첨부 등록</button></form>';
+    html += '</div></div><div class="pa-panel-card"><div class="pa-panel-title">' + escapeHtml(task.task_no || '-') + ' 변경이력</div>';
+    if (history.length === 0) html += '<div class="pa-muted">변경이력이 없습니다.</div>';
+    for (var h = 0; h < history.length; h++) html += '<div class="pa-history"><b>' + escapeHtml(history[h].action || '-') + '</b><div class="pa-muted">' + escapeHtml(history[h].actor_name || '-') + ' · ' + escapeHtml(history[h].created_at || '') + '</div><div style="font-size:12px;margin-top:5px;word-break:break-all;">' + escapeHtml(history[h].old_value || '') + ' → ' + escapeHtml(history[h].new_value || '') + '</div></div>';
+    html += '</div></div></div></aside>';
+    appModal.querySelector('.pa-collab-shell').insertAdjacentHTML('beforeend', html);
+    markSelectedCard(task.id);
+  }
+
+  function markSelectedCard(taskId) {
+    var cards = appModal ? appModal.querySelectorAll('.pa-card') : [];
+    for (var i = 0; i < cards.length; i++) removeClass(cards[i], 'is-selected');
+    var card = appModal ? appModal.querySelector('.pa-card[data-pa-task-id="' + taskId + '"]') : null;
+    if (card) addClass(card, 'is-selected');
+  }
+
+  function loadDetail(taskId) {
+    if (!taskId) return;
+    actionRequest('detail', taskId, null, function(json){
+      if (!json.ok) {
+        showNotice(json.message, false);
+        return;
+      }
+      renderDetail(json);
+    });
+  }
+
+  function transitionReason(targetStatus) {
+    if (targetStatus !== '반려' && targetStatus !== '보류') return '';
+    return window.prompt(targetStatus + ' 사유를 입력해주세요.', '') || '';
+  }
+
+  function prepareStatusReason(form) {
+    var statusEl = form.elements ? form.elements['status'] : null;
+    var stateEl = form.elements ? form.elements['state_action'] : null;
+    var active = document.activeElement;
+    if (active && active.form === form && active.name === 'state_action') stateEl = active;
+    var target = statusEl ? statusEl.value : '';
+    if (stateEl && stateEl.value === 'reject') target = '반려';
+    if (stateEl && stateEl.value === 'hold') target = '보류';
+    if (target === '반려' || target === '보류') {
+      var reason = transitionReason(target);
+      if (reason === '') return false;
+      var reasonInput = form.querySelector('input[name="transition_reason"]');
+      if (!reasonInput) {
+        reasonInput = document.createElement('input');
+        reasonInput.type = 'hidden';
+        reasonInput.name = 'transition_reason';
+        form.appendChild(reasonInput);
+      }
+      reasonInput.value = reason;
+    }
+    return true;
+  }
+
+  function handleAjaxResult(json, form) {
+    showNotice(json.message, !!json.ok);
+    if (!json.ok) return;
+    if (json.task) {
+      addOrUpdateCard(json);
+      renderDetail(json);
+    }
+    if (form && form.elements && form.elements['action'] && form.elements['action'].value === 'create') {
+      var modal = document.getElementById('paCreateModal');
+      removeClass(modal, 'is-open');
+      form.reset();
+    }
+  }
+
+  function bindInitialCards() {
+    var cards = appModal ? appModal.querySelectorAll('.pa-card[data-pa-task-id]') : [];
+    for (var i = 0; i < cards.length; i++) bindCardDrag(cards[i]);
+  }
+
+  function bindDropColumns() {
+    var columns = appModal ? appModal.querySelectorAll('[data-pa-drop-status]') : [];
+    for (var k = 0; k < columns.length; k++) {
+      bindEvent(columns[k], 'dragover', function(ev){
+        ev.preventDefault();
+        addClass(this, 'is-drop-ready');
+      });
+      bindEvent(columns[k], 'dragleave', function(){ removeClass(this, 'is-drop-ready'); });
+      bindEvent(columns[k], 'drop', function(ev){
+        ev.preventDefault();
+        removeClass(this, 'is-drop-ready');
+        var taskId = draggedTaskId;
+        if (!taskId && ev.dataTransfer) taskId = ev.dataTransfer.getData('text/plain');
+        var status = this.getAttribute('data-pa-drop-status');
+        var card = appModal.querySelector('.pa-card[data-pa-task-id="' + taskId + '"]');
+        if (!taskId || !status || !card) return;
+        if (status === card.getAttribute('data-pa-status')) return;
+        var reason = transitionReason(status);
+        if ((status === '반려' || status === '보류') && reason === '') return;
+        var originalColumn = dragSourceColumn || closest(card, '[data-pa-drop-status]');
+        var originalBody = originalColumn ? originalColumn.querySelector('.pa-column-body') : null;
+        var targetBody = this.querySelector('.pa-column-body');
+        if (targetBody) targetBody.appendChild(card);
+        refreshColumnCounts();
+        addClass(card, 'is-moving');
+        var data = {status: status};
+        if (reason !== '') data.transition_reason = reason;
+        actionRequest('quick_update', taskId, data, function(json){
+          removeClass(card, 'is-moving');
+          if (!json.ok) {
+            if (originalBody) originalBody.appendChild(card);
+            card.setAttribute('data-pa-status', dragSourceStatus);
+            refreshColumnCounts();
+            showNotice(json.message, false);
+            return;
+          }
+          showNotice(json.message, true);
+          if (json.task) addOrUpdateCard(json);
+        });
+      });
+    }
+  }
+
+  function filterCurrentDom(keyword) {
+    keyword = String(keyword || '').toLowerCase();
+    var count = 0;
+    var cards = appModal ? appModal.querySelectorAll('.pa-card[data-pa-search]') : [];
+    for (var i = 0; i < cards.length; i++) {
+      var hay = String(cards[i].getAttribute('data-pa-search') || '').toLowerCase();
+      var matched = keyword === '' || hay.indexOf(keyword) !== -1;
+      cards[i].style.display = matched ? '' : 'none';
+      if (matched) count++;
+    }
+    var rows = appModal ? appModal.querySelectorAll('[data-pa-list-task-id][data-pa-search]') : [];
+    for (var r = 0; r < rows.length; r++) {
+      var rowHay = String(rows[r].getAttribute('data-pa-search') || '').toLowerCase();
+      rows[r].style.display = (keyword === '' || rowHay.indexOf(keyword) !== -1) ? '' : 'none';
+    }
+    refreshColumnCounts();
+    var empty = appModal ? appModal.querySelector('[data-pa-search-empty]') : null;
+    if (!empty && appModal) {
+      empty = document.createElement('div');
+      empty.className = 'pa-empty pa-search-empty';
+      empty.setAttribute('data-pa-search-empty', '1');
+      empty.innerHTML = '검색 결과가 없습니다.';
+      var board = appModal.querySelector('.pa-board-wrap');
+      if (board) board.insertBefore(empty, board.firstChild);
+    }
+    if (empty) empty.style.display = keyword !== '' && count === 0 ? '' : 'none';
   }
 
   var appOpeners = document.querySelectorAll('[data-pa-collab-open]');
@@ -92,6 +506,24 @@
     };
   }
 
+  bindEvent(document, 'keydown', function(ev){
+    ev = ev || window.event;
+    var key = ev.key || ev.keyCode;
+    var createModal = document.getElementById('paCreateModal');
+    if (key === 'Escape' || key === 27) {
+      if (createModal && hasClass(createModal, 'is-open')) {
+        removeClass(createModal, 'is-open');
+        return;
+      }
+      var detail = appModal ? appModal.querySelector('.pa-detail-panel') : null;
+      if (detail && detail.parentNode) {
+        detail.parentNode.removeChild(detail);
+        return;
+      }
+      if (appModal && hasClass(appModal, 'is-open')) closeAppModal(true);
+    }
+  });
+
   function syncAppModalWithLocation() {
     if (!appModal) return;
     if (window.location.hash === hashValue) openAppModal(false);
@@ -105,47 +537,81 @@
   bindEvent(window, 'hashchange', syncAppModalWithLocation);
   bindEvent(window, 'popstate', syncAppModalWithLocation);
 
-  var modal = document.getElementById('paCreateModal');
-  var openers = document.querySelectorAll('[data-pa-modal-open="create"]');
-  for (var i = 0; i < openers.length; i++) {
-    openers[i].onclick = function(){ if (modal) addClass(modal, 'is-open'); };
-  }
-  var closers = document.querySelectorAll('[data-pa-modal-close="create"]');
-  for (var j = 0; j < closers.length; j++) {
-    closers[j].onclick = function(){ if (modal) removeClass(modal, 'is-open'); };
-  }
-  bindEvent(document, 'keydown', function(ev){
-    ev = ev || window.event;
-    var key = ev.key || ev.keyCode;
-    if (key === 'Escape' || key === 27) {
-      if (modal && hasClass(modal, 'is-open')) {
-        removeClass(modal, 'is-open');
-        return;
+  bindEvent(document, 'click', function(ev){
+    var target = ev.target || ev.srcElement;
+    var createOpen = closest(target, '[data-pa-modal-open="create"]');
+    if (createOpen) {
+      var createModal = document.getElementById('paCreateModal');
+      addClass(createModal, 'is-open');
+      ev.preventDefault();
+      return false;
+    }
+    var createClose = closest(target, '[data-pa-modal-close="create"]');
+    if (createClose) {
+      removeClass(document.getElementById('paCreateModal'), 'is-open');
+      ev.preventDefault();
+      return false;
+    }
+    var detailClose = closest(target, '[data-pa-detail-close]');
+    if (detailClose) {
+      var panel = closest(detailClose, '.pa-detail-panel');
+      if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
+      ev.preventDefault();
+      return false;
+    }
+    if (closest(target, 'form') || closest(target, 'select') || closest(target, 'input') || closest(target, 'button')) return true;
+    var detailLink = closest(target, '[data-pa-detail-link]');
+    if (!detailLink && closest(target, '.pa-card')) detailLink = closest(target, '.pa-card').querySelector('[data-pa-detail-link]');
+    if (detailLink && appModal && hasClass(appModal, 'is-open')) {
+      var id = getTaskIdFromHref(detailLink.getAttribute('href'));
+      if (!id) {
+        var card = closest(detailLink, '[data-pa-task-id]');
+        if (card) id = parseInt(card.getAttribute('data-pa-task-id'), 10);
       }
-      if (appModal && hasClass(appModal, 'is-open')) closeAppModal(true);
+      if (id) {
+        ev.preventDefault();
+        loadDetail(id);
+        return false;
+      }
+    }
+    var clear = closest(target, '[data-pa-search-clear]');
+    if (clear) {
+      var form = closest(clear, 'form');
+      var input = form ? form.querySelector('input[name="keyword"]') : null;
+      if (input) input.value = '';
+      filterCurrentDom('');
+      ev.preventDefault();
+      return false;
     }
   });
-  var draggedTaskId = '';
-  var cards = document.querySelectorAll('[data-pa-task-id]');
-  for (var c = 0; c < cards.length; c++) {
-    cards[c].addEventListener('dragstart', function(ev){
-      draggedTaskId = this.getAttribute('data-pa-task-id');
-      if (ev.dataTransfer) ev.dataTransfer.setData('text/plain', draggedTaskId);
-    });
-  }
-  var columns = document.querySelectorAll('[data-pa-drop-status]');
-  for (var k = 0; k < columns.length; k++) {
-    columns[k].addEventListener('dragover', function(ev){ ev.preventDefault(); });
-    columns[k].addEventListener('drop', function(ev){
+
+  bindEvent(document, 'submit', function(ev){
+    var form = ev.target || ev.srcElement;
+    if (!form || !appModal || !hasClass(appModal, 'is-open')) return true;
+    if (hasClass(form, 'pa-collab-header-search')) {
+      var kw = form.querySelector('input[name="keyword"]');
+      filterCurrentDom(kw ? kw.value : '');
       ev.preventDefault();
-      var taskId = draggedTaskId;
-      if (!taskId && ev.dataTransfer) taskId = ev.dataTransfer.getData('text/plain');
-      var status = this.getAttribute('data-pa-drop-status');
-      var form = document.getElementById('paStatusMoveForm');
-      if (!taskId || !status || !form) return;
-      form.elements['task_id'].value = taskId;
-      form.elements['status'].value = status;
-      form.submit();
+      return false;
+    }
+    if (String(form.getAttribute('action') || '').indexOf('project/collaboration_action') === -1) return true;
+    if (!window.FormData) return true;
+    if (!prepareStatusReason(form)) {
+      ev.preventDefault();
+      return false;
+    }
+    ev.preventDefault();
+    addClass(form, 'is-saving');
+    var fd = new FormData(form);
+    var active = document.activeElement;
+    if (active && active.form === form && active.name) fd.append(active.name, active.value);
+    ajaxFormData(fd, function(json){
+      removeClass(form, 'is-saving');
+      handleAjaxResult(json, form);
     });
-  }
+    return false;
+  });
+
+  bindInitialCards();
+  bindDropColumns();
 })();

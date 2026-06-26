@@ -61,5 +61,16 @@ return array(
         '계약 영향',
         '공기 영향',
     ),
+    'status_transition_rules' => array(
+        '요청' => array('접수'),
+        '접수' => array('진행중'),
+        '진행중' => array('자료대기', '검토중', '보류'),
+        '자료대기' => array('진행중'),
+        '검토중' => array('결재대기', '반려'),
+        '결재대기' => array('완료'),
+        '반려' => array('접수'),
+        '보류' => array('진행중'),
+        '완료' => array(),
+    ),
     'default_assignee_employee_id' => 0,
 );
