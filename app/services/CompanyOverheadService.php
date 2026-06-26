@@ -546,6 +546,16 @@ function cpms_company_overhead_summary($months) {
         $year = substr($ym, 0, 4);
         $month = substr($ym, 5, 2);
         foreach ($categories as $key => $meta) {
+            if ($key === 'payroll' && function_exists('cpms_company_payroll_load_manual_total')) {
+                $manualPayrollTotal = cpms_company_payroll_load_manual_total($year, $month);
+                if (is_array($manualPayrollTotal)) {
+                    $amount = isset($manualPayrollTotal['amount']) ? (float)$manualPayrollTotal['amount'] : 0.0;
+                    $summary['categories'][$key]['amount'] += $amount;
+                    $summary['categories'][$key]['has_data'] = true;
+                    $summary['has_data'] = true;
+                    continue;
+                }
+            }
             if (function_exists('cpms_archive_summary_month_category_amount')) {
                 $archiveAmount = cpms_archive_summary_month_category_amount($year, $month, $key);
                 if (!empty($archiveAmount['has_data'])) {
@@ -560,7 +570,7 @@ function cpms_company_overhead_summary($months) {
             if (count($items) === 0 && $key === 'payroll' && function_exists('cpms_company_payroll_month_summary')) {
                 $payrollSummary = cpms_company_payroll_month_summary($year, $month);
                 if (empty($payrollSummary['has_data'])) continue;
-                $amount = isset($payrollSummary['total_net_pay']) ? (float)$payrollSummary['total_net_pay'] : 0.0;
+                $amount = isset($payrollSummary['amount']) ? (float)$payrollSummary['amount'] : (isset($payrollSummary['total_net_pay']) ? (float)$payrollSummary['total_net_pay'] : 0.0);
             } else {
                 if (count($items) === 0) continue;
                 $amount = cpms_company_overhead_sum_record($items);
@@ -688,6 +698,16 @@ function cpms_company_overhead_monthly_summary($filters) {
             }
             $monthFilters = $filters;
             $monthFilters['category'] = $category;
+            if ($category === 'payroll' && trim((string)$filters['q']) === '' && function_exists('cpms_company_payroll_load_manual_total')) {
+                $manualPayrollTotal = cpms_company_payroll_load_manual_total($row['year'], $row['month']);
+                if (is_array($manualPayrollTotal)) {
+                    $amount += isset($manualPayrollTotal['amount']) ? (float)$manualPayrollTotal['amount'] : 0.0;
+                    $row['categories'][$category] = $amount;
+                    $row['total'] += $amount;
+                    $result['categories'][$category]['amount'] += $amount;
+                    continue;
+                }
+            }
             if (trim((string)$filters['q']) === '' && function_exists('cpms_archive_summary_month_category_amount')) {
                 $archiveAmount = cpms_archive_summary_month_category_amount($row['year'], $row['month'], $category);
                 if (!empty($archiveAmount['has_data'])) {
@@ -701,7 +721,7 @@ function cpms_company_overhead_monthly_summary($filters) {
             $items = cpms_company_overhead_load_month($category, $row['year'], $row['month'], false);
             if (count($items) === 0 && $category === 'payroll' && trim((string)$filters['q']) === '' && function_exists('cpms_company_payroll_month_summary')) {
                 $payrollSummary = cpms_company_payroll_month_summary($row['year'], $row['month']);
-                if (!empty($payrollSummary['has_data'])) $amount += isset($payrollSummary['total_net_pay']) ? (float)$payrollSummary['total_net_pay'] : 0.0;
+                if (!empty($payrollSummary['has_data'])) $amount += isset($payrollSummary['amount']) ? (float)$payrollSummary['amount'] : (isset($payrollSummary['total_net_pay']) ? (float)$payrollSummary['total_net_pay'] : 0.0);
             } else {
                 foreach ($items as $item) {
                     if (!is_array($item)) continue;

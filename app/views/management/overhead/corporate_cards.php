@@ -13,7 +13,7 @@ $cardTotal = cpms_company_overhead_sum_record($items);
 
 if (!function_exists('cpms_overhead_card_hidden_keywords')) {
 function cpms_overhead_card_hidden_keywords() {
-    return array('노욱형', '신종기');
+    return array('노욱형', '신종기', '관리부');
 }}
 
 if (!function_exists('cpms_overhead_card_text_contains')) {

@@ -19,22 +19,29 @@ if ($canEditCompanyOverhead && isset($_GET['edit_vehicle'])) {
 $vehicleFields = cpms_company_vehicle_fields();
 $vehicleHiddenFieldKeys = array(
     'sequence' => true,
+    'acquired_at' => true,
     'primary_manager' => true,
     'secondary_manager' => true,
     'site_name' => true,
+    'inspection_period' => true,
     'corporate_number' => true,
     'insurer' => true,
     'insurance_premium' => true,
+    'insurance_period' => true,
     'age_limit' => true,
     'driver_limit' => true,
     'vehicle_type' => true,
+    'note' => true,
+    'schedule_period' => true,
     'interest_rate' => true,
     'paid_count' => true,
     'total_count' => true,
     'payment_day' => true,
     'principal_amount' => true,
     'total_amount' => true,
+    'previous_insurance_premium' => true,
     'extra_note' => true,
+    'toll_device_card' => true,
     'sales_person' => true,
 );
 $vehicleMonthDefault = ((int)date('Y') === (int)$vehicleYear) ? (int)date('m') : 1;
@@ -68,18 +75,18 @@ function cpms_vehicle_view_safe_id($value) {
 ?>
 
 <style>
-.cpms-vehicle-table { width:100%; min-width:0; border-collapse:collapse; table-layout:fixed; font-size:12px; line-height:1.25; }
+.cpms-vehicle-table { width:100%; min-width:0; border-collapse:collapse; table-layout:fixed; font-size:14px; line-height:1.32; }
 .cpms-vehicle-table th,
-.cpms-vehicle-table td { padding:5px 5px; vertical-align:top; white-space:normal; word-break:keep-all; overflow-wrap:anywhere; overflow:visible; text-overflow:clip; }
-.cpms-vehicle-table th { padding:5px 5px; font-size:12px; font-weight:900; white-space:normal; word-break:keep-all; overflow:visible; text-overflow:clip; }
+.cpms-vehicle-table td { min-width:0; padding:8px 9px; vertical-align:top; white-space:normal; word-break:keep-all; overflow-wrap:anywhere; overflow:visible; text-overflow:clip; }
+.cpms-vehicle-table th { min-width:0; padding:8px 9px; font-size:13px; font-weight:900; white-space:nowrap; word-break:keep-all; overflow:visible; text-overflow:clip; }
 .cpms-vehicle-table th[data-vehicle-col="vehicle_name"],
-.cpms-vehicle-table td[data-vehicle-col="vehicle_name"] { width:5%; }
+.cpms-vehicle-table td[data-vehicle-col="vehicle_name"] { width:12%; }
 .cpms-vehicle-table th[data-vehicle-col="vehicle_number"],
-.cpms-vehicle-table td[data-vehicle-col="vehicle_number"] { width:6%; }
+.cpms-vehicle-table td[data-vehicle-col="vehicle_number"] { width:12%; }
 .cpms-vehicle-table th[data-vehicle-col="acquired_at"],
-.cpms-vehicle-table td[data-vehicle-col="acquired_at"] { width:6%; }
+.cpms-vehicle-table td[data-vehicle-col="acquired_at"] { width:9%; }
 .cpms-vehicle-table th[data-vehicle-col="driver_name"],
-.cpms-vehicle-table td[data-vehicle-col="driver_name"] { width:5%; }
+.cpms-vehicle-table td[data-vehicle-col="driver_name"] { width:10%; }
 .cpms-vehicle-table th[data-vehicle-col="inspection_period"],
 .cpms-vehicle-table td[data-vehicle-col="inspection_period"],
 .cpms-vehicle-table th[data-vehicle-col="finance_period"],
@@ -87,9 +94,9 @@ function cpms_vehicle_view_safe_id($value) {
 .cpms-vehicle-table th[data-vehicle-col="insurance_period"],
 .cpms-vehicle-table td[data-vehicle-col="insurance_period"],
 .cpms-vehicle-table th[data-vehicle-col="schedule_period"],
-.cpms-vehicle-table td[data-vehicle-col="schedule_period"] { width:7%; }
+.cpms-vehicle-table td[data-vehicle-col="schedule_period"] { width:14%; }
 .cpms-vehicle-table th[data-vehicle-col="note"],
-.cpms-vehicle-table td[data-vehicle-col="note"] { width:6%; }
+.cpms-vehicle-table td[data-vehicle-col="note"] { width:14%; }
 .cpms-vehicle-table th[data-vehicle-col="remaining_amount"],
 .cpms-vehicle-table td[data-vehicle-col="remaining_amount"],
 .cpms-vehicle-table th[data-vehicle-col="monthly_payment"],
@@ -97,14 +104,34 @@ function cpms_vehicle_view_safe_id($value) {
 .cpms-vehicle-table th[data-vehicle-col="previous_insurance_premium"],
 .cpms-vehicle-table td[data-vehicle-col="previous_insurance_premium"],
 .cpms-vehicle-table th[data-vehicle-col="cancellation_penalty"],
-.cpms-vehicle-table td[data-vehicle-col="cancellation_penalty"] { width:7%; }
+.cpms-vehicle-table td[data-vehicle-col="cancellation_penalty"] { width:11%; }
 .cpms-vehicle-table th[data-vehicle-col="toll_device_card"],
-.cpms-vehicle-table td[data-vehicle-col="toll_device_card"] { width:8%; }
+.cpms-vehicle-table td[data-vehicle-col="toll_device_card"] { width:13%; }
 .cpms-vehicle-table th:last-child,
-.cpms-vehicle-table td[data-vehicle-actions="1"] { width:10%; max-width:none; }
-.cpms-vehicle-table td[data-vehicle-actions="1"] .flex { gap:3px; }
+.cpms-vehicle-table td[data-vehicle-actions="1"] { width:19%; max-width:none; }
+.cpms-vehicle-table td[data-vehicle-actions="1"] .flex { gap:5px; }
 .cpms-vehicle-table td[data-vehicle-actions="1"] a,
-.cpms-vehicle-table td[data-vehicle-actions="1"] button { padding:4px 6px; border-radius:6px; font-size:10px; line-height:1.2; }
+.cpms-vehicle-table td[data-vehicle-actions="1"] button { padding:6px 8px; border-radius:7px; font-size:12px; line-height:1.2; }
+.cpms-vehicle-table.cpms-table-expanded { width:max-content; min-width:2600px; table-layout:auto; font-size:12px; line-height:1.25; }
+.cpms-vehicle-table.cpms-table-expanded th,
+.cpms-vehicle-table.cpms-table-expanded td { width:auto; min-width:110px; padding:6px 8px; }
+.cpms-vehicle-table.cpms-table-expanded th { font-size:12px; white-space:nowrap; }
+.cpms-vehicle-table.cpms-table-expanded th[data-vehicle-col="inspection_period"],
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-col="inspection_period"],
+.cpms-vehicle-table.cpms-table-expanded th[data-vehicle-col="finance_period"],
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-col="finance_period"],
+.cpms-vehicle-table.cpms-table-expanded th[data-vehicle-col="insurance_period"],
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-col="insurance_period"],
+.cpms-vehicle-table.cpms-table-expanded th[data-vehicle-col="schedule_period"],
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-col="schedule_period"] { min-width:160px; }
+.cpms-vehicle-table.cpms-table-expanded th[data-vehicle-col="note"],
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-col="note"] { min-width:180px; }
+.cpms-vehicle-table.cpms-table-expanded th[data-vehicle-col="toll_device_card"],
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-col="toll_device_card"] { min-width:170px; }
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-actions="1"] { min-width:210px; }
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-actions="1"] .flex { gap:3px; }
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-actions="1"] a,
+.cpms-vehicle-table.cpms-table-expanded td[data-vehicle-actions="1"] button { padding:4px 6px; border-radius:6px; font-size:10px; line-height:1.2; }
 .cpms-vehicle-table td.cpms-vehicle-modal-cell { padding:0; border:0; height:0; overflow:visible; white-space:normal; }
 .cpms-vehicle-month-grid { display:grid; width:100%; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:8px; max-width:none; }
 .cpms-vehicle-month-card { min-width:0; min-height:92px; border:1px solid #e5e7eb; background:#fff; border-radius:8px; padding:9px 10px; font-size:15px; line-height:1.24; color:#111827; }
@@ -369,7 +396,7 @@ function cpms_vehicle_view_safe_id($value) {
                 $scheduleRows = cpms_company_vehicle_schedule_for_year($vehicle, $vehicleYear);
                 $currentYm = sprintf('%04d-%02d', $vehicleYear, $vehicleMonthDefault);
                 $currentPayment = cpms_company_vehicle_payment_for_month($vehicle, $currentYm);
-                $currentDriver = cpms_company_vehicle_driver_for_month($vehicle, $currentYm);
+                $currentDriver = cpms_company_vehicle_latest_driver_name($vehicle);
                 $vehicleModalSafeId = cpms_vehicle_view_safe_id($vehicleId);
                 if ($vehicleModalSafeId === '') $vehicleModalSafeId = 'vehicle_' . md5($vehicleId);
                 $vehicleScheduleModalKey = 'vehicleSchedule_' . $vehicleModalSafeId;
@@ -381,7 +408,7 @@ function cpms_vehicle_view_safe_id($value) {
                   <?php $cellType = isset($field['type']) ? (string)$field['type'] : 'text'; ?>
                   <?php $vehicleFieldHidden = isset($vehicleHiddenFieldKeys[$fieldKey]); ?>
                   <td class="p-2 border <?php echo ($cellType === 'money' || $cellType === 'number' || $cellType === 'int') ? 'text-right' : 'text-left'; ?> <?php echo $vehicleFieldHidden ? 'cpms-vehicle-toggle-col hidden' : ''; ?>" data-vehicle-col="<?php echo h($fieldKey); ?>">
-                    <?php echo h(cpms_vehicle_view_field_value($vehicle, $fieldKey, $field)); ?>
+                    <?php echo h($fieldKey === 'driver_name' ? cpms_company_vehicle_latest_driver_name($vehicle) : cpms_vehicle_view_field_value($vehicle, $fieldKey, $field)); ?>
                   </td>
                 <?php endforeach; ?>
                 <td class="p-2 border" data-vehicle-actions="1">
@@ -553,6 +580,11 @@ function cpms_vehicle_view_safe_id($value) {
     for (var i = 0; i < cells.length; i++) {
       if (show) cells[i].classList.remove('hidden');
       else cells[i].classList.add('hidden');
+    }
+    var tables = document.querySelectorAll('.cpms-vehicle-table');
+    for (var t = 0; t < tables.length; t++) {
+      if (show) tables[t].classList.add('cpms-table-expanded');
+      else tables[t].classList.remove('cpms-table-expanded');
     }
   }
   var buttons = document.querySelectorAll('[data-vehicle-cols]');

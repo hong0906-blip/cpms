@@ -8,6 +8,7 @@ require_once __DIR__ . '/GoogleDriveHelper.php';
 require_once __DIR__ . '/CompanyOverheadService.php';
 require_once __DIR__ . '/CompanyOverheadDriveService.php';
 require_once __DIR__ . '/EmployeeVehicleService.php';
+require_once __DIR__ . '/CompanyVehicleService.php';
 require_once __DIR__ . '/DataArchiveAccessService.php';
 
 if (!function_exists('cpms_company_fuel_label')) {
@@ -160,6 +161,77 @@ function cpms_company_fuel_user_label($user) {
     }
     $txt = trim((string)$user);
     return $txt !== '' ? $txt : '-';
+}}
+
+if (!function_exists('cpms_company_fuel_manual_match_file')) {
+function cpms_company_fuel_manual_match_file() {
+    return cpms_company_fuel_writable_data_root() . '/fuel_vehicle_matches/matches.json';
+}}
+
+if (!function_exists('cpms_company_fuel_manual_match_file_candidates')) {
+function cpms_company_fuel_manual_match_file_candidates() {
+    $paths = array();
+    foreach (cpms_company_fuel_data_roots() as $root) {
+        $root = rtrim((string)$root, '/\\');
+        if ($root === '') continue;
+        $paths[] = $root . '/fuel_vehicle_matches/matches.json';
+    }
+    return $paths;
+}}
+
+if (!function_exists('cpms_company_fuel_manual_match_read_data')) {
+function cpms_company_fuel_manual_match_read_data() {
+    foreach (cpms_company_fuel_manual_match_file_candidates() as $path) {
+        $data = cpms_company_fuel_read_json($path);
+        if (!is_array($data)) continue;
+        if (!isset($data['matches']) || !is_array($data['matches'])) $data['matches'] = array();
+        if (!isset($data['version'])) $data['version'] = 1;
+        return $data;
+    }
+    return array('version' => 1, 'matches' => array());
+}}
+
+if (!function_exists('cpms_company_fuel_manual_match_find')) {
+function cpms_company_fuel_manual_match_find($vehicleNumber) {
+    $norm = cpms_normalize_vehicle_number($vehicleNumber);
+    if ($norm === '') return null;
+    $data = cpms_company_fuel_manual_match_read_data();
+    $matches = isset($data['matches']) && is_array($data['matches']) ? $data['matches'] : array();
+    if (!isset($matches[$norm]) || !is_array($matches[$norm])) return null;
+    $match = $matches[$norm];
+    $display = isset($match['display_name']) ? trim((string)$match['display_name']) : '';
+    if ($display === '') return null;
+    return $match;
+}}
+
+if (!function_exists('cpms_company_fuel_manual_match_save')) {
+function cpms_company_fuel_manual_match_save($vehicleNumber, $displayName, $user) {
+    $vehicleNumber = trim((string)$vehicleNumber);
+    $displayName = trim((string)$displayName);
+    $norm = cpms_normalize_vehicle_number($vehicleNumber);
+    if ($norm === '') return array('ok' => false, 'message' => '차량번호를 입력해주세요.');
+    if ($displayName === '') return array('ok' => false, 'message' => '표시 이름을 입력해주세요.');
+
+    $data = cpms_company_fuel_manual_match_read_data();
+    $matches = isset($data['matches']) && is_array($data['matches']) ? $data['matches'] : array();
+    $now = date('Y-m-d H:i:s');
+    $matches[$norm] = array(
+        'vehicle_number' => $vehicleNumber,
+        'vehicle_number_normalized' => $norm,
+        'display_name' => $displayName,
+        'updated_at' => $now,
+        'updated_by' => cpms_company_fuel_user_label($user),
+    );
+    $data['version'] = isset($data['version']) ? (int)$data['version'] : 1;
+    $data['matches'] = $matches;
+    $data['updated_at'] = $now;
+    $data['updated_by'] = cpms_company_fuel_user_label($user);
+
+    if (!cpms_company_fuel_write_json(cpms_company_fuel_manual_match_file(), $data)) {
+        $writeError = cpms_company_fuel_last_write_error();
+        return array('ok' => false, 'message' => '주유비 차량번호 매칭 이름을 저장하지 못했습니다.' . ($writeError !== '' ? ' (' . $writeError . ')' : ''));
+    }
+    return array('ok' => true, 'message' => '주유비 차량번호 매칭 이름이 저장되었습니다.', 'match' => $matches[$norm]);
 }}
 
 if (!function_exists('cpms_company_fuel_money_value')) {
@@ -439,16 +511,83 @@ function cpms_company_fuel_is_vehicle_total($value) {
 if (!function_exists('cpms_company_fuel_company_vehicle_files')) {
 function cpms_company_fuel_company_vehicle_files() {
     $root = dirname(dirname(__DIR__));
-    return array(
-        $root . '/data/company_overhead/company_vehicles/vehicles.json',
-        $root . '/data/company_vehicles/vehicles.json',
-    );
+    $paths = array();
+    if (function_exists('cpms_company_vehicle_data_file_candidates')) {
+        foreach (cpms_company_vehicle_data_file_candidates() as $path) $paths[] = $path;
+    }
+    $paths[] = $root . '/data/company_overhead/company_vehicles/vehicles.json';
+    $paths[] = $root . '/data/company_vehicles/vehicles.json';
+    return array_values(array_unique($paths));
+}}
+
+if (!function_exists('cpms_company_fuel_company_vehicle_display_name')) {
+function cpms_company_fuel_company_vehicle_display_name($vehicle, $ym, $fallbackVehicleNumber) {
+    if (!is_array($vehicle)) $vehicle = array();
+    $display = '';
+    $display = cpms_company_fuel_company_vehicle_latest_driver_name($vehicle);
+    if ($display === '' && isset($vehicle['driver_name'])) $display = trim((string)$vehicle['driver_name']);
+    $ym = trim((string)$ym);
+    if ($display === '' && $ym !== '' && function_exists('cpms_company_vehicle_driver_for_month')) {
+        $display = trim((string)cpms_company_vehicle_driver_for_month($vehicle, $ym));
+    }
+    if ($display === '' && isset($vehicle['owner_name'])) $display = trim((string)$vehicle['owner_name']);
+    if ($display === '' && isset($vehicle['manager_name'])) $display = trim((string)$vehicle['manager_name']);
+    if ($display === '' && isset($vehicle['primary_manager'])) $display = trim((string)$vehicle['primary_manager']);
+    if ($display === '' && isset($vehicle['secondary_manager'])) $display = trim((string)$vehicle['secondary_manager']);
+    if ($display === '' && isset($vehicle['name'])) $display = trim((string)$vehicle['name']);
+    if ($display === '' && isset($vehicle['department'])) $display = trim((string)$vehicle['department']);
+    if ($display === '' && isset($vehicle['vehicle_number'])) $display = trim((string)$vehicle['vehicle_number']);
+    if ($display === '') $display = trim((string)$fallbackVehicleNumber);
+    return $display;
+}}
+
+if (!function_exists('cpms_company_fuel_company_vehicle_latest_driver_name')) {
+function cpms_company_fuel_company_vehicle_latest_driver_name($vehicle) {
+    if (!is_array($vehicle)) return '';
+    if (function_exists('cpms_company_vehicle_latest_driver_name')) {
+        return cpms_company_vehicle_latest_driver_name($vehicle);
+    }
+    $changes = isset($vehicle['driver_changes']) && is_array($vehicle['driver_changes']) ? $vehicle['driver_changes'] : array();
+    $latestYm = '';
+    $latestDriver = '';
+    foreach ($changes as $change) {
+        if (!is_array($change)) continue;
+        $changeYm = isset($change['effective_ym']) ? trim((string)$change['effective_ym']) : '';
+        $changeDriver = isset($change['driver_name']) ? trim((string)$change['driver_name']) : '';
+        if ($changeDriver === '') continue;
+        if ($changeYm === '') $changeYm = '0000-00';
+        if ($latestDriver === '' || $changeYm >= $latestYm) {
+            $latestYm = $changeYm;
+            $latestDriver = $changeDriver;
+        }
+    }
+    return $latestDriver;
+}}
+
+if (!function_exists('cpms_company_fuel_company_vehicle_name')) {
+function cpms_company_fuel_company_vehicle_name($vehicle) {
+    if (!is_array($vehicle)) return '';
+    if (isset($vehicle['vehicle_name']) && trim((string)$vehicle['vehicle_name']) !== '') return trim((string)$vehicle['vehicle_name']);
+    if (isset($vehicle['name']) && trim((string)$vehicle['name']) !== '') return trim((string)$vehicle['name']);
+    return '';
 }}
 
 if (!function_exists('cpms_find_company_vehicle_by_number')) {
-function cpms_find_company_vehicle_by_number($vehicleNumber) {
+function cpms_find_company_vehicle_by_number($vehicleNumber, $ym = '') {
     $norm = cpms_normalize_vehicle_number($vehicleNumber);
     if ($norm === '') return null;
+    if (function_exists('cpms_company_vehicle_load_all')) {
+        $vehicles = cpms_company_vehicle_load_all(false);
+        foreach ($vehicles as $vehicle) {
+            if (!is_array($vehicle)) continue;
+            $candidateNorm = isset($vehicle['vehicle_number_normalized']) ? trim((string)$vehicle['vehicle_number_normalized']) : '';
+            if ($candidateNorm === '') $candidateNorm = cpms_normalize_vehicle_number(isset($vehicle['vehicle_number']) ? $vehicle['vehicle_number'] : '');
+            if ($candidateNorm !== $norm) continue;
+            $vehicle['_display_name'] = cpms_company_fuel_company_vehicle_display_name($vehicle, $ym, $vehicleNumber);
+            $vehicle['_vehicle_name'] = cpms_company_fuel_company_vehicle_name($vehicle);
+            return $vehicle;
+        }
+    }
     $files = cpms_company_fuel_company_vehicle_files();
     foreach ($files as $file) {
         $data = cpms_company_fuel_read_json($file);
@@ -467,14 +606,8 @@ function cpms_find_company_vehicle_by_number($vehicleNumber) {
             }
             foreach ($numbers as $number) {
                 if (cpms_normalize_vehicle_number($number) !== $norm) continue;
-                $owner = '';
-                foreach (array('driver_name', 'owner_name', 'manager_name', 'primary_manager', 'secondary_manager', 'name', 'department') as $nameKey) {
-                    if (isset($row[$nameKey]) && trim((string)$row[$nameKey]) !== '') {
-                        $owner = trim((string)$row[$nameKey]);
-                        break;
-                    }
-                }
-                $row['_display_name'] = $owner;
+                $row['_display_name'] = cpms_company_fuel_company_vehicle_display_name($row, $ym, $vehicleNumber);
+                $row['_vehicle_name'] = cpms_company_fuel_company_vehicle_name($row);
                 return $row;
             }
         }
@@ -483,11 +616,24 @@ function cpms_find_company_vehicle_by_number($vehicleNumber) {
 }}
 
 if (!function_exists('cpms_company_fuel_resolve_display')) {
-function cpms_company_fuel_resolve_display($pdo, $vehicleNumber) {
+function cpms_company_fuel_resolve_display($pdo, $vehicleNumber, $ym = '') {
     $vehicleNumber = trim((string)$vehicleNumber);
     $norm = cpms_normalize_vehicle_number($vehicleNumber);
     if ($norm === '') {
-        return array('display_name' => '', 'matched_type' => 'unknown', 'matched_employee_id' => '', 'matched_employee_name' => '', 'matched_company_vehicle_id' => '');
+        return array('display_name' => '', 'matched_type' => 'unknown', 'matched_employee_id' => '', 'matched_employee_name' => '', 'matched_company_vehicle_id' => '', 'matched_company_vehicle_name' => '');
+    }
+    $companyVehicle = cpms_find_company_vehicle_by_number($vehicleNumber, $ym);
+    if (is_array($companyVehicle)) {
+        $display = isset($companyVehicle['_display_name']) ? trim((string)$companyVehicle['_display_name']) : '';
+        if ($display === '') $display = $vehicleNumber;
+        return array(
+            'display_name' => $display,
+            'matched_type' => 'company_vehicle',
+            'matched_employee_id' => '',
+            'matched_employee_name' => '',
+            'matched_company_vehicle_id' => isset($companyVehicle['id']) ? (string)$companyVehicle['id'] : '',
+            'matched_company_vehicle_name' => isset($companyVehicle['_vehicle_name']) ? (string)$companyVehicle['_vehicle_name'] : '',
+        );
     }
     $employee = cpms_find_employee_by_vehicle_number($pdo, $vehicleNumber);
     if (is_array($employee)) {
@@ -497,9 +643,40 @@ function cpms_company_fuel_resolve_display($pdo, $vehicleNumber) {
             'matched_employee_id' => isset($employee['employee_id']) ? (string)$employee['employee_id'] : '',
             'matched_employee_name' => isset($employee['employee_name']) ? (string)$employee['employee_name'] : '',
             'matched_company_vehicle_id' => '',
+            'matched_company_vehicle_name' => '',
         );
     }
-    $companyVehicle = cpms_find_company_vehicle_by_number($vehicleNumber);
+    $manualMatch = cpms_company_fuel_manual_match_find($vehicleNumber);
+    if (is_array($manualMatch)) {
+        $display = isset($manualMatch['display_name']) ? trim((string)$manualMatch['display_name']) : '';
+        if ($display === '') $display = $vehicleNumber;
+        return array(
+            'display_name' => $display,
+            'matched_type' => 'manual',
+            'matched_employee_id' => '',
+            'matched_employee_name' => '',
+            'matched_company_vehicle_id' => '',
+            'matched_company_vehicle_name' => '',
+        );
+    }
+    return array(
+        'display_name' => $vehicleNumber,
+        'matched_type' => 'vehicle_number',
+        'matched_employee_id' => '',
+        'matched_employee_name' => '',
+        'matched_company_vehicle_id' => '',
+        'matched_company_vehicle_name' => '',
+    );
+}}
+
+if (!function_exists('cpms_company_fuel_resolve_display_with_employee_map')) {
+function cpms_company_fuel_resolve_display_with_employee_map($employeeMap, $vehicleNumber, $ym = '') {
+    $vehicleNumber = trim((string)$vehicleNumber);
+    $norm = cpms_normalize_vehicle_number($vehicleNumber);
+    if ($norm === '') {
+        return array('display_name' => '', 'matched_type' => 'unknown', 'matched_employee_id' => '', 'matched_employee_name' => '', 'matched_company_vehicle_id' => '', 'matched_company_vehicle_name' => '');
+    }
+    $companyVehicle = cpms_find_company_vehicle_by_number($vehicleNumber, $ym);
     if (is_array($companyVehicle)) {
         $display = isset($companyVehicle['_display_name']) ? trim((string)$companyVehicle['_display_name']) : '';
         if ($display === '') $display = $vehicleNumber;
@@ -509,23 +686,8 @@ function cpms_company_fuel_resolve_display($pdo, $vehicleNumber) {
             'matched_employee_id' => '',
             'matched_employee_name' => '',
             'matched_company_vehicle_id' => isset($companyVehicle['id']) ? (string)$companyVehicle['id'] : '',
+            'matched_company_vehicle_name' => isset($companyVehicle['_vehicle_name']) ? (string)$companyVehicle['_vehicle_name'] : '',
         );
-    }
-    return array(
-        'display_name' => $vehicleNumber,
-        'matched_type' => 'vehicle_number',
-        'matched_employee_id' => '',
-        'matched_employee_name' => '',
-        'matched_company_vehicle_id' => '',
-    );
-}}
-
-if (!function_exists('cpms_company_fuel_resolve_display_with_employee_map')) {
-function cpms_company_fuel_resolve_display_with_employee_map($employeeMap, $vehicleNumber) {
-    $vehicleNumber = trim((string)$vehicleNumber);
-    $norm = cpms_normalize_vehicle_number($vehicleNumber);
-    if ($norm === '') {
-        return array('display_name' => '', 'matched_type' => 'unknown', 'matched_employee_id' => '', 'matched_employee_name' => '', 'matched_company_vehicle_id' => '');
     }
     if (is_array($employeeMap) && isset($employeeMap[$norm]) && is_array($employeeMap[$norm])) {
         $employee = $employeeMap[$norm];
@@ -535,18 +697,20 @@ function cpms_company_fuel_resolve_display_with_employee_map($employeeMap, $vehi
             'matched_employee_id' => isset($employee['employee_id']) ? (string)$employee['employee_id'] : '',
             'matched_employee_name' => isset($employee['employee_name']) ? (string)$employee['employee_name'] : '',
             'matched_company_vehicle_id' => '',
+            'matched_company_vehicle_name' => '',
         );
     }
-    $companyVehicle = cpms_find_company_vehicle_by_number($vehicleNumber);
-    if (is_array($companyVehicle)) {
-        $display = isset($companyVehicle['_display_name']) ? trim((string)$companyVehicle['_display_name']) : '';
+    $manualMatch = cpms_company_fuel_manual_match_find($vehicleNumber);
+    if (is_array($manualMatch)) {
+        $display = isset($manualMatch['display_name']) ? trim((string)$manualMatch['display_name']) : '';
         if ($display === '') $display = $vehicleNumber;
         return array(
             'display_name' => $display,
-            'matched_type' => 'company_vehicle',
+            'matched_type' => 'manual',
             'matched_employee_id' => '',
             'matched_employee_name' => '',
-            'matched_company_vehicle_id' => isset($companyVehicle['id']) ? (string)$companyVehicle['id'] : '',
+            'matched_company_vehicle_id' => '',
+            'matched_company_vehicle_name' => '',
         );
     }
     return array(
@@ -555,6 +719,7 @@ function cpms_company_fuel_resolve_display_with_employee_map($employeeMap, $vehi
         'matched_employee_id' => '',
         'matched_employee_name' => '',
         'matched_company_vehicle_id' => '',
+        'matched_company_vehicle_name' => '',
     );
 }}
 
@@ -566,13 +731,19 @@ function cpms_company_fuel_refresh_matches($items, $pdo) {
     foreach ($items as $item) {
         if (!is_array($item)) continue;
         $vehicleNumber = isset($item['vehicle_number']) ? trim((string)$item['vehicle_number']) : '';
-        $resolve = cpms_company_fuel_resolve_display_with_employee_map($employeeMap, $vehicleNumber);
+        $itemYm = '';
+        if (isset($item['year']) && isset($item['month'])) {
+            $itemYmInfo = cpms_company_fuel_normalize_year_month($item['year'], $item['month']);
+            $itemYm = isset($itemYmInfo['ym']) ? (string)$itemYmInfo['ym'] : '';
+        }
+        $resolve = cpms_company_fuel_resolve_display_with_employee_map($employeeMap, $vehicleNumber, $itemYm);
         $item['vehicle_number_normalized'] = cpms_normalize_vehicle_number($vehicleNumber);
         $item['display_name'] = isset($resolve['display_name']) ? (string)$resolve['display_name'] : $vehicleNumber;
         $item['matched_type'] = isset($resolve['matched_type']) ? (string)$resolve['matched_type'] : 'vehicle_number';
         $item['matched_employee_id'] = isset($resolve['matched_employee_id']) ? (string)$resolve['matched_employee_id'] : '';
         $item['matched_employee_name'] = isset($resolve['matched_employee_name']) ? (string)$resolve['matched_employee_name'] : '';
         $item['matched_company_vehicle_id'] = isset($resolve['matched_company_vehicle_id']) ? (string)$resolve['matched_company_vehicle_id'] : '';
+        $item['matched_company_vehicle_name'] = isset($resolve['matched_company_vehicle_name']) ? (string)$resolve['matched_company_vehicle_name'] : '';
         $result[] = $item;
     }
     usort($result, 'cpms_company_fuel_sort_items');
@@ -638,7 +809,7 @@ function cpms_company_fuel_parse_area($records, $table, $year, $month, $areaName
         }
 
         $date = cpms_company_fuel_normalize_date($dateRaw, $year, $month, $errors, $rowLabel);
-        $resolve = cpms_company_fuel_resolve_display($pdo, $vehicleNumber);
+        $resolve = cpms_company_fuel_resolve_display($pdo, $vehicleNumber, sprintf('%04d-%02d', (int)$year, (int)$month));
         $item = array(
             'id' => cpms_company_fuel_new_item_id($year, $month, $areaName, $rowNumber),
             'category' => 'fuel',
@@ -653,6 +824,7 @@ function cpms_company_fuel_parse_area($records, $table, $year, $month, $areaName
             'matched_employee_id' => isset($resolve['matched_employee_id']) ? (string)$resolve['matched_employee_id'] : '',
             'matched_employee_name' => isset($resolve['matched_employee_name']) ? (string)$resolve['matched_employee_name'] : '',
             'matched_company_vehicle_id' => isset($resolve['matched_company_vehicle_id']) ? (string)$resolve['matched_company_vehicle_id'] : '',
+            'matched_company_vehicle_name' => isset($resolve['matched_company_vehicle_name']) ? (string)$resolve['matched_company_vehicle_name'] : '',
             'date' => $date,
             'occurred_at' => $date,
             'product_name' => $product,
@@ -688,6 +860,8 @@ function cpms_company_fuel_summary_from_items($items) {
     if (!is_array($items)) $items = array();
     $vehicleMap = array();
     $employeeMatchMap = array();
+    $companyVehicleMatchMap = array();
+    $manualMatchMap = array();
     $unmatchedMap = array();
     $totalSupply = 0.0;
     $totalVat = 0.0;
@@ -701,7 +875,9 @@ function cpms_company_fuel_summary_from_items($items) {
         if ($norm !== '') $vehicleMap[$norm] = isset($item['vehicle_number']) ? (string)$item['vehicle_number'] : $norm;
         $matchedType = isset($item['matched_type']) ? (string)$item['matched_type'] : '';
         if ($matchedType === 'employee' && $norm !== '') $employeeMatchMap[$norm] = true;
-        if ($matchedType !== 'employee' && $matchedType !== 'company_vehicle' && $norm !== '') $unmatchedMap[$norm] = isset($item['vehicle_number']) ? (string)$item['vehicle_number'] : $norm;
+        if ($matchedType === 'company_vehicle' && $norm !== '') $companyVehicleMatchMap[$norm] = true;
+        if ($matchedType === 'manual' && $norm !== '') $manualMatchMap[$norm] = true;
+        if ($matchedType !== 'employee' && $matchedType !== 'company_vehicle' && $matchedType !== 'manual' && $norm !== '') $unmatchedMap[$norm] = isset($item['vehicle_number']) ? (string)$item['vehicle_number'] : $norm;
     }
     return array(
         'total_supply_amount' => round($totalSupply, 2),
@@ -710,6 +886,8 @@ function cpms_company_fuel_summary_from_items($items) {
         'row_count' => count($items),
         'vehicle_count' => count($vehicleMap),
         'employee_matched_vehicle_count' => count($employeeMatchMap),
+        'company_vehicle_matched_vehicle_count' => count($companyVehicleMatchMap),
+        'manual_matched_vehicle_count' => count($manualMatchMap),
         'unmatched_vehicle_count' => count($unmatchedMap),
         'unmatched_vehicle_numbers' => array_values($unmatchedMap),
     );
@@ -1037,6 +1215,67 @@ function cpms_company_fuel_delete_month($year, $month, $user) {
     ));
     if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
     return array('ok' => true, 'message' => '선택 월 주유비 데이터가 삭제되었습니다. 기존 데이터는 history에 백업되었습니다.');
+}}
+
+if (!function_exists('cpms_company_fuel_save_vehicle_match')) {
+function cpms_company_fuel_save_vehicle_match($year, $month, $vehicleNumber, $displayName, $user, $pdo) {
+    $ym = cpms_company_fuel_normalize_year_month($year, $month);
+    $vehicleNumber = trim((string)$vehicleNumber);
+    $displayName = trim((string)$displayName);
+    $norm = cpms_normalize_vehicle_number($vehicleNumber);
+
+    $saved = cpms_company_fuel_manual_match_save($vehicleNumber, $displayName, $user);
+    if (empty($saved['ok'])) return $saved;
+
+    $updatedRows = 0;
+    $monthSaved = false;
+    $monthWriteError = '';
+    $monthData = cpms_company_fuel_load_month($ym['year'], $ym['month']);
+    if (is_array($monthData) && empty($monthData['archive_source']) && isset($monthData['items']) && is_array($monthData['items'])) {
+        $items = cpms_company_fuel_refresh_matches($monthData['items'], $pdo);
+        foreach ($items as $item) {
+            if (!is_array($item)) continue;
+            $itemNorm = isset($item['vehicle_number_normalized']) ? (string)$item['vehicle_number_normalized'] : cpms_normalize_vehicle_number(isset($item['vehicle_number']) ? $item['vehicle_number'] : '');
+            $matchedType = isset($item['matched_type']) ? (string)$item['matched_type'] : '';
+            if ($itemNorm === $norm && $matchedType === 'manual') $updatedRows++;
+        }
+        $summary = cpms_company_fuel_summary_from_items($items);
+        $monthData = array_merge($monthData, $summary);
+        $monthData['items'] = $items;
+        $monthData['manual_match_updated_at'] = date('Y-m-d H:i:s');
+        $monthData['manual_match_updated_by'] = cpms_company_fuel_user_label($user);
+
+        if (cpms_company_fuel_backup_existing($ym['year'], $ym['month'])) {
+            if (cpms_company_fuel_write_json(cpms_company_fuel_month_file($ym['year'], $ym['month']), $monthData)) {
+                $monthSaved = true;
+            } else {
+                $monthWriteError = cpms_company_fuel_last_write_error();
+            }
+        } else {
+            $monthWriteError = cpms_company_fuel_last_write_error();
+        }
+    }
+
+    cpms_company_fuel_append_log($ym['year'], $ym['month'], array(
+        'uploaded_at' => date('Y-m-d H:i:s'),
+        'uploaded_by' => cpms_company_fuel_user_label($user),
+        'year' => $ym['year'],
+        'month' => $ym['month'],
+        'action' => 'save_vehicle_match',
+        'vehicle_number' => $vehicleNumber,
+        'vehicle_number_normalized' => $norm,
+        'display_name' => $displayName,
+        'updated_row_count' => $updatedRows,
+        'month_json_saved' => $monthSaved ? true : false,
+        'month_json_error' => $monthWriteError,
+        'drive_upload_status' => 'not_applicable',
+    ));
+
+    if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
+    $message = '주유비 차량번호 매칭 이름이 저장되었습니다.';
+    if ($updatedRows > 0) $message .= ' 선택 월 거래 ' . $updatedRows . '건에 반영했습니다.';
+    if ($monthWriteError !== '') $message .= ' 화면에는 적용되지만 월별 JSON 갱신 중 오류가 있었습니다: ' . $monthWriteError;
+    return array('ok' => true, 'message' => $message, 'updated_row_count' => $updatedRows, 'month_json_saved' => $monthSaved);
 }}
 
 if (!function_exists('cpms_company_fuel_text_contains')) {

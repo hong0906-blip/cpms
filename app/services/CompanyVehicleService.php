@@ -634,6 +634,7 @@ function cpms_company_vehicle_update_driver($id, $year, $month, $driverName, $us
     $clean[] = array('effective_ym' => $ym, 'driver_name' => $driverName, 'updated_at' => date('Y-m-d H:i:s'), 'updated_by' => cpms_company_vehicle_user_label($user));
     usort($clean, 'cpms_company_vehicle_change_sort');
     $vehicle['driver_changes'] = $clean;
+    $vehicle['driver_name'] = $driverName;
     if (cpms_company_vehicle_compare_ym($ym, isset($vehicle['baseline_ym']) ? $vehicle['baseline_ym'] : '2026-01') <= 0) {
         $vehicle['driver_name'] = $driverName;
     }
@@ -728,6 +729,35 @@ function cpms_company_vehicle_driver_for_month($vehicle, $ym) {
     $vehicle = cpms_company_vehicle_normalize_record_runtime($vehicle);
     $default = isset($vehicle['driver_name']) ? (string)$vehicle['driver_name'] : '';
     return cpms_company_vehicle_effective_change_value(isset($vehicle['driver_changes']) ? $vehicle['driver_changes'] : array(), $ym, 'driver_name', $default);
+}}
+
+if (!function_exists('cpms_company_vehicle_latest_driver_name')) {
+function cpms_company_vehicle_latest_driver_name($vehicle) {
+    $vehicle = cpms_company_vehicle_normalize_record_runtime($vehicle);
+    $rowDriver = isset($vehicle['driver_name']) ? trim((string)$vehicle['driver_name']) : '';
+    $rowUpdatedAt = isset($vehicle['updated_at']) ? trim((string)$vehicle['updated_at']) : '';
+    $changes = isset($vehicle['driver_changes']) && is_array($vehicle['driver_changes']) ? $vehicle['driver_changes'] : array();
+    $latestYm = '';
+    $latestDriver = '';
+    $latestUpdatedAt = '';
+    foreach ($changes as $change) {
+        if (!is_array($change)) continue;
+        $changeYm = isset($change['effective_ym']) ? trim((string)$change['effective_ym']) : '';
+        $changeDriver = isset($change['driver_name']) ? trim((string)$change['driver_name']) : '';
+        $changeUpdatedAt = isset($change['updated_at']) ? trim((string)$change['updated_at']) : '';
+        if ($changeDriver === '') continue;
+        if ($changeYm === '') $changeYm = '0000-00';
+        if ($latestDriver === '' || $changeYm >= $latestYm) {
+            $latestYm = $changeYm;
+            $latestDriver = $changeDriver;
+            $latestUpdatedAt = $changeUpdatedAt;
+        }
+    }
+    if ($rowDriver !== '' && ($latestDriver === '' || ($rowUpdatedAt !== '' && $latestUpdatedAt !== '' && $rowUpdatedAt > $latestUpdatedAt) || ($rowUpdatedAt !== '' && $latestUpdatedAt === ''))) {
+        return $rowDriver;
+    }
+    if ($latestDriver !== '') return $latestDriver;
+    return $rowDriver;
 }}
 
 if (!function_exists('cpms_company_vehicle_is_payment_month')) {

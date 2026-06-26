@@ -47,38 +47,55 @@ function cpms_overhead_lease_form_id($row) {
 ?>
 
 <style>
-.cpms-lease-list-table { width:100%; min-width:0; table-layout:fixed; }
-.cpms-lease-list-table th { padding:6px 7px !important; white-space:nowrap; overflow:hidden; text-overflow:clip; }
-.cpms-lease-list-table td { padding:6px 7px !important; white-space:normal; word-break:keep-all; overflow-wrap:anywhere; overflow:visible; text-overflow:clip; vertical-align:top; }
+.cpms-lease-list-table { width:100%; min-width:0; table-layout:fixed; font-size:12px; }
+.cpms-lease-list-table th { min-width:0; padding:6px 6px !important; white-space:normal; word-break:keep-all; overflow:visible; text-overflow:clip; line-height:1.2; }
+.cpms-lease-list-table td { min-width:0; padding:6px 6px !important; white-space:normal; word-break:keep-all; overflow-wrap:anywhere; overflow:visible; text-overflow:clip; vertical-align:top; line-height:1.25; }
 .cpms-lease-list-table td[data-wrap="1"] { white-space:normal !important; word-break:keep-all; overflow-wrap:anywhere; }
 .cpms-lease-list-table input { max-width:100%; }
 .cpms-lease-list-table th[data-lease-col="address"],
-.cpms-lease-list-table td[data-lease-col="address"] { width:18%; }
+.cpms-lease-list-table td[data-lease-col="address"] { width:23%; }
 .cpms-lease-list-table th[data-lease-col="manager_primary"],
 .cpms-lease-list-table td[data-lease-col="manager_primary"],
 .cpms-lease-list-table th[data-lease-col="manager_secondary"],
-.cpms-lease-list-table td[data-lease-col="manager_secondary"] { width:4%; }
+.cpms-lease-list-table td[data-lease-col="manager_secondary"] { width:5%; }
 .cpms-lease-list-table th[data-lease-col="deposit"],
 .cpms-lease-list-table td[data-lease-col="deposit"],
 .cpms-lease-list-table th[data-lease-col="amount"],
-.cpms-lease-list-table td[data-lease-col="amount"] { width:8%; }
+.cpms-lease-list-table td[data-lease-col="amount"] { width:9%; }
 .cpms-lease-list-table th[data-lease-col="payment_due"],
-.cpms-lease-list-table td[data-lease-col="payment_due"] { width:5%; }
+.cpms-lease-list-table td[data-lease-col="payment_due"] { width:6%; }
 .cpms-lease-list-table th[data-lease-col="maintenance_fee"],
 .cpms-lease-list-table td[data-lease-col="maintenance_fee"],
 .cpms-lease-list-table th[data-lease-col="monthly_total"],
-.cpms-lease-list-table td[data-lease-col="monthly_total"] { width:7%; }
+.cpms-lease-list-table td[data-lease-col="monthly_total"] { width:9%; }
 .cpms-lease-list-table th[data-lease-col="contract_period"],
-.cpms-lease-list-table td[data-lease-col="contract_period"] { width:9%; }
+.cpms-lease-list-table td[data-lease-col="contract_period"] { width:13%; }
 .cpms-lease-list-table th[data-lease-col="auto_transfer_day"],
-.cpms-lease-list-table td[data-lease-col="auto_transfer_day"],
+.cpms-lease-list-table td[data-lease-col="auto_transfer_day"] { width:7%; }
 .cpms-lease-list-table th[data-lease-col="employee_name"],
-.cpms-lease-list-table td[data-lease-col="employee_name"] { width:6%; }
+.cpms-lease-list-table td[data-lease-col="employee_name"] { width:8%; }
 .cpms-lease-list-table th[data-lease-col="payment_method"],
-.cpms-lease-list-table td[data-lease-col="payment_method"] { width:7%; }
+.cpms-lease-list-table td[data-lease-col="payment_method"] { width:9%; }
 .cpms-lease-list-table th[data-lease-col="actions"],
-.cpms-lease-list-table td[data-lease-col="actions"] { width:11%; }
+.cpms-lease-list-table td[data-lease-col="actions"] { width:15%; }
 .cpms-lease-list-table td[data-lease-col="actions"] { overflow:visible; }
+.cpms-lease-list-table td[data-lease-col="maintenance_fee"] input { width:76px; }
+.cpms-lease-list-table td[data-lease-col="contract_period"] input { width:118px; }
+.cpms-lease-list-table td[data-lease-col="actions"] .flex { gap:4px; }
+.cpms-lease-list-table td[data-lease-col="actions"] a,
+.cpms-lease-list-table td[data-lease-col="actions"] button { padding:6px 8px; font-size:12px; line-height:1.15; }
+.cpms-lease-list-table.cpms-table-expanded { width:max-content; min-width:1850px; table-layout:auto; }
+.cpms-lease-list-table.cpms-table-expanded th,
+.cpms-lease-list-table.cpms-table-expanded td { width:auto; min-width:100px; padding:7px 9px !important; }
+.cpms-lease-list-table.cpms-table-expanded th { white-space:nowrap; }
+.cpms-lease-list-table.cpms-table-expanded th[data-lease-col="address"],
+.cpms-lease-list-table.cpms-table-expanded td[data-lease-col="address"] { min-width:260px; }
+.cpms-lease-list-table.cpms-table-expanded th[data-lease-col="contract_period"],
+.cpms-lease-list-table.cpms-table-expanded td[data-lease-col="contract_period"] { min-width:165px; }
+.cpms-lease-list-table.cpms-table-expanded th[data-lease-col="actions"],
+.cpms-lease-list-table.cpms-table-expanded td[data-lease-col="actions"] { min-width:190px; }
+.cpms-lease-list-table.cpms-table-expanded td[data-lease-col="maintenance_fee"] input { width:112px; }
+.cpms-lease-list-table.cpms-table-expanded td[data-lease-col="contract_period"] input { width:160px; }
 </style>
 
 <div class="bg-white border border-gray-200 rounded-2xl p-4">
@@ -319,18 +336,18 @@ function cpms_overhead_lease_form_id($row) {
           <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="year_month">연월</th>
           <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="title">구분</th>
           <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="address">주소</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="manager_primary">정</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="manager_secondary">부</th>
-          <th class="text-right p-3 border-b border-gray-200 bg-gray-50" data-lease-col="deposit">보증금</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="payment_due">지급일</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="manager_primary">정</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="manager_secondary">부</th>
+          <th class="text-right p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="deposit">보증금</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="payment_due">지급일</th>
           <th class="text-right p-3 border-b border-gray-200 bg-gray-50" data-lease-col="amount">월세(vat포함)</th>
           <th class="text-right p-3 border-b border-gray-200 bg-gray-50" data-lease-col="maintenance_fee">관리비</th>
           <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="contract_period">계약기간</th>
           <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="restoration_obligation">사무실 복구의무</th>
           <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="landlord">임대인</th>
           <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="auto_transfer_day">자동이체일</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="payment_method">입금방법</th>
-          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="employee_name">사용 직원</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50 cpms-lease-toggle-col hidden" data-lease-col="payment_method">입금방법</th>
+          <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="employee_name">사용<br>직원</th>
           <th class="text-right p-3 border-b border-gray-200 bg-gray-50" data-lease-col="monthly_total">월 합계</th>
           <th class="text-left p-3 border-b border-gray-200 bg-gray-50" data-lease-col="actions">관리</th>
         </tr>
@@ -350,10 +367,10 @@ function cpms_overhead_lease_form_id($row) {
             <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-lease-col="year_month"><?php echo h($rowYear . '/' . $rowMonth); ?></td>
             <td class="p-3 border-b border-gray-100 font-bold text-gray-900 cpms-lease-toggle-col hidden" data-wrap="1" data-lease-col="title"><?php echo h(cpms_overhead_lease_val($row, 'title')); ?></td>
             <td class="p-3 border-b border-gray-100" data-wrap="1" data-lease-col="address" title="<?php echo h(cpms_overhead_lease_val($row, 'address')); ?>"><?php echo h(cpms_overhead_lease_val($row, 'address')); ?></td>
-            <td class="p-3 border-b border-gray-100" data-lease-col="manager_primary"><?php echo h(cpms_overhead_lease_val($row, 'manager_primary')); ?></td>
-            <td class="p-3 border-b border-gray-100" data-lease-col="manager_secondary"><?php echo h(cpms_overhead_lease_val($row, 'manager_secondary')); ?></td>
-            <td class="p-3 border-b border-gray-100 text-right" data-lease-col="deposit"><?php echo h(cpms_overhead_lease_money_label(cpms_overhead_lease_val($row, 'deposit'))); ?></td>
-            <td class="p-3 border-b border-gray-100" data-lease-col="payment_due"><?php echo h(cpms_overhead_lease_val($row, 'payment_due')); ?></td>
+            <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-lease-col="manager_primary"><?php echo h(cpms_overhead_lease_val($row, 'manager_primary')); ?></td>
+            <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-lease-col="manager_secondary"><?php echo h(cpms_overhead_lease_val($row, 'manager_secondary')); ?></td>
+            <td class="p-3 border-b border-gray-100 text-right cpms-lease-toggle-col hidden" data-lease-col="deposit"><?php echo h(cpms_overhead_lease_money_label(cpms_overhead_lease_val($row, 'deposit'))); ?></td>
+            <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-lease-col="payment_due"><?php echo h(cpms_overhead_lease_val($row, 'payment_due')); ?></td>
             <td class="p-3 border-b border-gray-100 text-right font-bold" data-lease-col="amount"><?php echo h(cpms_overhead_lease_money_label(cpms_overhead_lease_val($row, 'amount'))); ?></td>
             <td class="p-3 border-b border-gray-100 text-right" data-lease-col="maintenance_fee">
               <?php if ($canEditCompanyOverhead): ?>
@@ -372,7 +389,7 @@ function cpms_overhead_lease_form_id($row) {
             <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-wrap="1" data-lease-col="restoration_obligation"><?php echo h(cpms_overhead_lease_val($row, 'restoration_obligation')); ?></td>
             <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-lease-col="landlord"><?php echo h(cpms_overhead_lease_val($row, 'landlord')); ?></td>
             <td class="p-3 border-b border-gray-100" data-lease-col="auto_transfer_day"><?php echo h(cpms_overhead_lease_val($row, 'auto_transfer_day')); ?></td>
-            <td class="p-3 border-b border-gray-100" data-wrap="1" data-lease-col="payment_method"><?php echo h(cpms_overhead_lease_val($row, 'payment_method')); ?></td>
+            <td class="p-3 border-b border-gray-100 cpms-lease-toggle-col hidden" data-wrap="1" data-lease-col="payment_method"><?php echo h(cpms_overhead_lease_val($row, 'payment_method')); ?></td>
             <td class="p-3 border-b border-gray-100" data-wrap="1" data-lease-col="employee_name"><?php echo h(cpms_overhead_lease_val($row, 'employee_name')); ?></td>
             <td class="p-3 border-b border-gray-100 text-right font-extrabold" data-lease-col="monthly_total"><?php echo h(cpms_overhead_view_money(cpms_overhead_lease_total($row))); ?></td>
             <td class="p-3 border-b border-gray-100" data-lease-col="actions">
@@ -417,6 +434,11 @@ function cpms_overhead_lease_form_id($row) {
     for (var i = 0; i < cells.length; i++) {
       if (show) cells[i].classList.remove('hidden');
       else cells[i].classList.add('hidden');
+    }
+    var tables = document.querySelectorAll('.cpms-lease-list-table');
+    for (var t = 0; t < tables.length; t++) {
+      if (show) tables[t].classList.add('cpms-table-expanded');
+      else tables[t].classList.remove('cpms-table-expanded');
     }
   }
   var buttons = document.querySelectorAll('[data-lease-cols]');

@@ -715,6 +715,76 @@ function cpms_company_payroll_version_file($year, $month) {
     return cpms_company_payroll_versions_root() . '/' . $ym['year'] . '/' . $ym['month'] . '.json';
 }}
 
+if (!function_exists('cpms_company_payroll_manual_totals_root')) {
+function cpms_company_payroll_manual_totals_root() {
+    return cpms_company_payroll_data_root() . '/payroll_manual_totals';
+}}
+
+if (!function_exists('cpms_company_payroll_manual_total_file')) {
+function cpms_company_payroll_manual_total_file($year, $month) {
+    $ym = cpms_company_payroll_normalize_year_month($year, $month);
+    return cpms_company_payroll_manual_totals_root() . '/' . $ym['year'] . '/' . $ym['month'] . '.json';
+}}
+
+if (!function_exists('cpms_company_payroll_load_manual_total')) {
+function cpms_company_payroll_load_manual_total($year, $month) {
+    $data = cpms_company_payroll_read_json(cpms_company_payroll_manual_total_file($year, $month));
+    if (!is_array($data) || !isset($data['amount'])) return null;
+    $ym = cpms_company_payroll_normalize_year_month($year, $month);
+    $data['year'] = isset($data['year']) ? (string)$data['year'] : $ym['year'];
+    $data['month'] = isset($data['month']) ? (string)$data['month'] : $ym['month'];
+    $data['amount'] = cpms_company_payroll_money_value($data['amount']);
+    return $data;
+}}
+
+if (!function_exists('cpms_company_payroll_manual_total_history_dir')) {
+function cpms_company_payroll_manual_total_history_dir($year, $month) {
+    $ym = cpms_company_payroll_normalize_year_month($year, $month);
+    return cpms_company_payroll_manual_totals_root() . '/' . $ym['year'] . '/' . $ym['month'] . '_history';
+}}
+
+if (!function_exists('cpms_company_payroll_backup_existing_manual_total')) {
+function cpms_company_payroll_backup_existing_manual_total($year, $month) {
+    $file = cpms_company_payroll_manual_total_file($year, $month);
+    if (!is_file($file)) return true;
+    $old = cpms_company_payroll_read_json($file);
+    if (!is_array($old)) return true;
+    $dir = cpms_company_payroll_manual_total_history_dir($year, $month);
+    if (!cpms_company_payroll_ensure_dir($dir)) return false;
+    $backup = rtrim($dir, '/\\') . '/' . date('Ymd_His') . '_manual_total.json';
+    return cpms_company_payroll_write_json($backup, $old);
+}}
+
+if (!function_exists('cpms_company_payroll_save_manual_total')) {
+function cpms_company_payroll_save_manual_total($year, $month, $amount, $user) {
+    $ym = cpms_company_payroll_normalize_year_month($year, $month);
+    if (!preg_match('/\d/', (string)$amount)) {
+        return array('ok' => false, 'message' => '월별 급여 총액을 숫자로 입력해 주세요.');
+    }
+    $money = cpms_company_payroll_money_value($amount);
+    if ($money < 0) {
+        return array('ok' => false, 'message' => '월별 급여 총액은 0원 이상으로 입력해 주세요.');
+    }
+
+    if (!cpms_company_payroll_backup_existing_manual_total($ym['year'], $ym['month'])) {
+        return array('ok' => false, 'message' => '기존 월별 급여 총액 백업에 실패했습니다.');
+    }
+
+    $record = array(
+        'year' => $ym['year'],
+        'month' => $ym['month'],
+        'amount' => $money,
+        'saved_at' => date('Y-m-d H:i:s'),
+        'saved_by' => cpms_company_payroll_user_label($user),
+    );
+
+    if (!cpms_company_payroll_write_json(cpms_company_payroll_manual_total_file($ym['year'], $ym['month']), $record)) {
+        return array('ok' => false, 'message' => '월별 급여 총액을 저장하지 못했습니다.');
+    }
+
+    return array('ok' => true, 'message' => '월별 급여 총액이 저장되었습니다.', 'manual_total' => $record);
+}}
+
 if (!function_exists('cpms_company_payroll_history_dir')) {
 function cpms_company_payroll_history_dir($year, $month) {
     $ym = cpms_company_payroll_normalize_year_month($year, $month);
@@ -881,7 +951,24 @@ function cpms_company_payroll_effective_version($year, $month) {
 
 if (!function_exists('cpms_company_payroll_month_summary')) {
 function cpms_company_payroll_month_summary($year, $month) {
+    $manualTotal = cpms_company_payroll_load_manual_total($year, $month);
     $effective = cpms_company_payroll_effective_version($year, $month);
+    if (is_array($manualTotal)) {
+        $version = (!empty($effective['ok']) && isset($effective['version']) && is_array($effective['version'])) ? $effective['version'] : null;
+        return array(
+            'has_data' => true,
+            'amount' => isset($manualTotal['amount']) ? (float)$manualTotal['amount'] : 0.0,
+            'total_net_pay' => isset($manualTotal['amount']) ? (float)$manualTotal['amount'] : 0.0,
+            'total_gross_pay' => is_array($version) && isset($version['total_gross_pay']) ? (float)$version['total_gross_pay'] : 0.0,
+            'total_deduction' => is_array($version) && isset($version['total_deduction']) ? (float)$version['total_deduction'] : 0.0,
+            'employee_count' => is_array($version) && isset($version['employee_count']) ? (int)$version['employee_count'] : (is_array($version) && isset($version['employees']) && is_array($version['employees']) ? count($version['employees']) : 0),
+            'effective_year' => isset($manualTotal['year']) ? (string)$manualTotal['year'] : sprintf('%04d', (int)$year),
+            'effective_month' => isset($manualTotal['month']) ? (string)$manualTotal['month'] : sprintf('%02d', (int)$month),
+            'version' => $version,
+            'manual_total' => $manualTotal,
+            'manual_total_applied' => true,
+        );
+    }
     if (empty($effective['ok']) || !isset($effective['version']) || !is_array($effective['version'])) {
         if (function_exists('cpms_archive_summary_month_category_amount')) {
             $archiveAmount = cpms_archive_summary_month_category_amount($year, $month, 'payroll');

@@ -33,6 +33,8 @@ function cpms_payroll_view_safe_id($value) {
 }}
 
 $payrollSummary = cpms_company_payroll_month_summary($payrollYear, $payrollMonth);
+$payrollManualTotal = cpms_company_payroll_load_manual_total($payrollYear, $payrollMonth);
+$payrollManualTotalAmount = is_array($payrollManualTotal) && isset($payrollManualTotal['amount']) ? (float)$payrollManualTotal['amount'] : 0.0;
 $payrollVersion = isset($payrollSummary['version']) && is_array($payrollSummary['version']) ? cpms_company_payroll_public_version($payrollSummary['version']) : null;
 $payrollAllEmployees = is_array($payrollVersion) && isset($payrollVersion['employees']) && is_array($payrollVersion['employees']) ? $payrollVersion['employees'] : array();
 $payrollEmployees = cpms_company_payroll_filter_employees($payrollAllEmployees, $payrollFilter);
@@ -78,6 +80,59 @@ function cpms_payroll_view_account_text($employee) {
         <?php endif; ?>
         <button type="button" class="px-4 py-3 rounded-xl border border-gray-300 text-gray-700 font-extrabold" data-modal-open="payrollStatementStatus">급여명세서 생성상태</button>
       </div>
+    </div>
+  </div>
+
+  <div class="bg-white border border-gray-200 rounded-2xl p-4">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <div class="font-extrabold text-gray-900">월별 급여 총액 강제 입력</div>
+        <div class="text-sm text-gray-500 mt-1">저장된 금액이 있으면 총관리비 합계에는 직원별 급여 합계보다 이 금액을 우선 적용합니다.</div>
+      </div>
+      <?php if (is_array($payrollManualTotal)): ?>
+        <div class="px-3 py-2 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-700 text-sm font-bold">
+          수동 총액 적용 중
+        </div>
+      <?php endif; ?>
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
+      <form method="get" action="" class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end rounded-xl border border-gray-200 bg-slate-50 p-3">
+        <input type="hidden" name="r" value="관리">
+        <input type="hidden" name="tab" value="company_overhead">
+        <input type="hidden" name="oh" value="payroll">
+        <label class="block text-sm font-bold text-gray-700">
+          <span class="block mb-2">연도</span>
+          <input type="number" name="year" min="2000" max="2100" value="<?php echo h((string)$payrollYear); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300 bg-white">
+        </label>
+        <label class="block text-sm font-bold text-gray-700">
+          <span class="block mb-2">월</span>
+          <select name="month" class="w-full px-3 py-3 rounded-xl border border-gray-300 bg-white">
+            <?php for ($manualMonth = 1; $manualMonth <= 12; $manualMonth++): ?>
+              <option value="<?php echo $manualMonth; ?>" <?php echo ((int)$payrollMonth === $manualMonth) ? 'selected' : ''; ?>><?php echo sprintf('%02d', $manualMonth); ?></option>
+            <?php endfor; ?>
+          </select>
+        </label>
+        <button type="submit" class="px-4 py-3 rounded-xl bg-gray-900 text-white font-extrabold">조회</button>
+      </form>
+      <form method="post" action="?r=management/payroll_manual_total_save" class="grid grid-cols-1 md:grid-cols-3 gap-3 items-end rounded-xl border border-gray-200 p-3">
+        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+        <input type="hidden" name="year" value="<?php echo h((string)$payrollYear); ?>">
+        <input type="hidden" name="month" value="<?php echo h((string)$payrollMonth); ?>">
+        <label class="block text-sm font-bold text-gray-700 md:col-span-2">
+          <span class="block mb-2"><?php echo h(sprintf('%04d/%02d', $payrollYear, $payrollMonth)); ?> 강제 총액</span>
+          <input type="text" name="manual_total_amount" inputmode="numeric" required value="<?php echo h(is_array($payrollManualTotal) ? number_format($payrollManualTotalAmount) : ''); ?>" class="w-full px-3 py-3 rounded-xl border border-gray-300" placeholder="예: 120,000,000">
+        </label>
+        <button type="submit" class="px-4 py-3 rounded-xl bg-emerald-700 text-white font-extrabold" <?php echo $canEditCompanyPayroll ? '' : 'disabled'; ?>>총액 저장</button>
+      </form>
+    </div>
+    <div class="text-sm text-gray-600 mt-3">
+      <?php if (is_array($payrollManualTotal)): ?>
+        현재 저장 총액: <span class="font-extrabold text-emerald-700"><?php echo h(cpms_payroll_view_money($payrollManualTotalAmount)); ?>원</span>
+        / 저장: <?php echo h(isset($payrollManualTotal['saved_at']) ? (string)$payrollManualTotal['saved_at'] : '-'); ?>
+        / 저장자: <?php echo h(isset($payrollManualTotal['saved_by']) ? (string)$payrollManualTotal['saved_by'] : '-'); ?>
+      <?php else: ?>
+        현재 선택 월에는 저장된 강제 총액이 없습니다.
+      <?php endif; ?>
     </div>
   </div>
 
@@ -264,7 +319,11 @@ function cpms_payroll_view_account_text($employee) {
         <div class="font-extrabold text-gray-900">직원별 급여 목록</div>
         <div class="text-sm text-gray-500 mt-1">
           <?php if (!empty($payrollSummary['has_data'])): ?>
-            <?php echo h(sprintf('%04d년 %02d월 급여 / 적용 기준: %s년 %s월 급여대장', $payrollYear, $payrollMonth, $payrollSummary['effective_year'], $payrollSummary['effective_month'])); ?>
+            <?php if (!empty($payrollSummary['manual_total_applied'])): ?>
+              <?php echo h(sprintf('%04d년 %02d월 급여 / 강제 총액 적용', $payrollYear, $payrollMonth)); ?>
+            <?php else: ?>
+              <?php echo h(sprintf('%04d년 %02d월 급여 / 적용 기준: %s년 %s월 급여대장', $payrollYear, $payrollMonth, $payrollSummary['effective_year'], $payrollSummary['effective_month'])); ?>
+            <?php endif; ?>
           <?php else: ?>
             선택 월에 적용할 급여대장이 없습니다.
           <?php endif; ?>

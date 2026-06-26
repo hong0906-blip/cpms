@@ -44,8 +44,31 @@ function cpms_fuel_matched_label($type) {
     $type = (string)$type;
     if ($type === 'employee') return '직원';
     if ($type === 'company_vehicle') return '회사차량';
+    if ($type === 'manual') return '강제매칭';
     if ($type === 'vehicle_number') return '미매칭';
     return '알 수 없음';
+}}
+
+if (!function_exists('cpms_fuel_group_manual_match_targets')) {
+function cpms_fuel_group_manual_match_targets($items) {
+    $targets = array();
+    if (!is_array($items)) return array();
+    foreach ($items as $item) {
+        if (!is_array($item)) continue;
+        $matchedType = isset($item['matched_type']) ? (string)$item['matched_type'] : '';
+        if ($matchedType !== 'vehicle_number' && $matchedType !== 'manual') continue;
+        $vehicle = isset($item['vehicle_number']) ? trim((string)$item['vehicle_number']) : '';
+        if ($vehicle === '') continue;
+        $norm = cpms_normalize_vehicle_number($vehicle);
+        if ($norm === '') $norm = $vehicle;
+        if (isset($targets[$norm])) continue;
+        $targets[$norm] = array(
+            'vehicle_number' => $vehicle,
+            'display_name' => ($matchedType === 'manual' && isset($item['display_name'])) ? trim((string)$item['display_name']) : '',
+            'matched_type' => $matchedType,
+        );
+    }
+    return array_values($targets);
 }}
 
 if (!function_exists('cpms_fuel_group_items_by_name')) {
@@ -57,10 +80,16 @@ function cpms_fuel_group_items_by_name($items) {
         $name = isset($item['display_name']) ? trim((string)$item['display_name']) : '';
         $vehicle = isset($item['vehicle_number']) ? trim((string)$item['vehicle_number']) : '';
         if ($name === '') $name = $vehicle !== '' ? $vehicle : '알 수 없음';
-        $key = $name;
+        $vehicleNorm = '';
+        if ($vehicle !== '') {
+            $vehicleNorm = cpms_normalize_vehicle_number($vehicle);
+            if ($vehicleNorm === '') $vehicleNorm = $vehicle;
+        }
+        $key = $vehicleNorm !== '' ? 'vehicle:' . $vehicleNorm : 'name:' . $name;
         if (!isset($groups[$key])) {
             $groups[$key] = array(
                 'display_name' => $name,
+                'sort_vehicle_number' => $vehicle,
                 'vehicles' => array(),
                 'items' => array(),
                 'row_count' => 0,
@@ -70,16 +99,21 @@ function cpms_fuel_group_items_by_name($items) {
                 'total_amount' => 0.0,
                 'vehicle_quantities' => array(),
                 'matched_types' => array(),
+                'company_vehicle_names' => array(),
             );
         }
-        $vehicleNorm = '';
         if ($vehicle !== '') {
-            $vehicleNorm = cpms_normalize_vehicle_number($vehicle);
-            if ($vehicleNorm === '') $vehicleNorm = $vehicle;
             $groups[$key]['vehicles'][$vehicleNorm] = $vehicle;
+            if (!isset($groups[$key]['sort_vehicle_number']) || trim((string)$groups[$key]['sort_vehicle_number']) === '') {
+                $groups[$key]['sort_vehicle_number'] = $vehicle;
+            }
         }
         $matchedType = isset($item['matched_type']) ? (string)$item['matched_type'] : '';
         if ($matchedType !== '') $groups[$key]['matched_types'][$matchedType] = true;
+        if ($matchedType === 'company_vehicle' && isset($item['matched_company_vehicle_name'])) {
+            $companyVehicleName = trim((string)$item['matched_company_vehicle_name']);
+            if ($companyVehicleName !== '') $groups[$key]['company_vehicle_names'][$companyVehicleName] = $companyVehicleName;
+        }
         $quantity = isset($item['quantity']) ? (float)$item['quantity'] : 0.0;
         $groups[$key]['items'][] = $item;
         $groups[$key]['row_count']++;
@@ -102,8 +136,11 @@ if (!function_exists('cpms_fuel_group_sort')) {
 function cpms_fuel_group_sort($a, $b) {
     $an = isset($a['display_name']) ? (string)$a['display_name'] : '';
     $bn = isset($b['display_name']) ? (string)$b['display_name'] : '';
-    if ($an === $bn) return 0;
-    return ($an < $bn) ? -1 : 1;
+    if ($an !== $bn) return ($an < $bn) ? -1 : 1;
+    $av = isset($a['sort_vehicle_number']) ? (string)$a['sort_vehicle_number'] : '';
+    $bv = isset($b['sort_vehicle_number']) ? (string)$b['sort_vehicle_number'] : '';
+    if ($av === $bv) return 0;
+    return ($av < $bv) ? -1 : 1;
 }}
 
 $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
@@ -134,13 +171,15 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
     </div>
   </form>
 
-  <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-3">
+  <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-9 gap-3">
     <div class="bg-white border border-emerald-200 rounded-2xl p-4"><div class="text-xs font-bold text-gray-500">총 합계금액</div><div class="mt-2 text-xl font-extrabold text-emerald-700"><?php echo h(cpms_fuel_view_money($fuelSummary['total_amount'])); ?>원</div></div>
     <div class="bg-white border border-gray-200 rounded-2xl p-4"><div class="text-xs font-bold text-gray-500">총 공급가액</div><div class="mt-2 text-xl font-extrabold"><?php echo h(cpms_fuel_view_money($fuelSummary['total_supply_amount'])); ?>원</div></div>
     <div class="bg-white border border-gray-200 rounded-2xl p-4"><div class="text-xs font-bold text-gray-500">총 부가세</div><div class="mt-2 text-xl font-extrabold"><?php echo h(cpms_fuel_view_money($fuelSummary['total_vat'])); ?>원</div></div>
     <div class="bg-white border border-gray-200 rounded-2xl p-4"><div class="text-xs font-bold text-gray-500">거래 건수</div><div class="mt-2 text-xl font-extrabold"><?php echo h((string)$fuelSummary['row_count']); ?>건</div></div>
     <div class="bg-white border border-gray-200 rounded-2xl p-4"><div class="text-xs font-bold text-gray-500">차량 수</div><div class="mt-2 text-xl font-extrabold"><?php echo h((string)$fuelSummary['vehicle_count']); ?>대</div></div>
     <div class="bg-white border border-gray-200 rounded-2xl p-4"><div class="text-xs font-bold text-gray-500">직원 매칭 수</div><div class="mt-2 text-xl font-extrabold"><?php echo h((string)$fuelSummary['employee_matched_vehicle_count']); ?>대</div></div>
+    <div class="bg-white border border-gray-200 rounded-2xl p-4"><div class="text-xs font-bold text-gray-500">회사차량 매칭 수</div><div class="mt-2 text-xl font-extrabold"><?php echo h((string)(isset($fuelSummary['company_vehicle_matched_vehicle_count']) ? $fuelSummary['company_vehicle_matched_vehicle_count'] : 0)); ?>대</div></div>
+    <div class="bg-white border border-gray-200 rounded-2xl p-4"><div class="text-xs font-bold text-gray-500">강제매칭 수</div><div class="mt-2 text-xl font-extrabold"><?php echo h((string)(isset($fuelSummary['manual_matched_vehicle_count']) ? $fuelSummary['manual_matched_vehicle_count'] : 0)); ?>대</div></div>
     <div class="bg-white border border-gray-200 rounded-2xl p-4"><div class="text-xs font-bold text-gray-500">미매칭 차량 수</div><div class="mt-2 text-xl font-extrabold <?php echo ((int)$fuelSummary['unmatched_vehicle_count'] > 0) ? 'text-amber-700' : ''; ?>"><?php echo h((string)$fuelSummary['unmatched_vehicle_count']); ?>대</div></div>
   </div>
 
@@ -263,14 +302,19 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
       <div class="p-6 rounded-2xl border border-dashed border-gray-300 text-center text-gray-500 font-bold">표시할 주유비 데이터가 없습니다.</div>
     <?php else: ?>
       <div class="space-y-4">
+        <?php $fuelGroupIndex = 0; ?>
         <?php foreach ($fuelGroups as $fuelGroup): ?>
           <?php
+            $fuelGroupIndex++;
             $groupVehicles = isset($fuelGroup['vehicles']) && is_array($fuelGroup['vehicles']) ? array_values($fuelGroup['vehicles']) : array();
             $groupItems = isset($fuelGroup['items']) && is_array($fuelGroup['items']) ? $fuelGroup['items'] : array();
             $groupMatchedLabels = array();
             if (isset($fuelGroup['matched_types']) && is_array($fuelGroup['matched_types'])) {
                 foreach ($fuelGroup['matched_types'] as $mt => $unused) $groupMatchedLabels[] = cpms_fuel_matched_label($mt);
             }
+            $groupManualMatchTargets = cpms_fuel_group_manual_match_targets($groupItems);
+            $fuelMatchModalKey = 'fuelMatchName' . $fuelGroupIndex;
+            $groupCompanyVehicleNames = isset($fuelGroup['company_vehicle_names']) && is_array($fuelGroup['company_vehicle_names']) ? array_values($fuelGroup['company_vehicle_names']) : array();
             $groupVehicleQuantityLabels = array();
             if (isset($fuelGroup['vehicle_quantities']) && is_array($fuelGroup['vehicle_quantities'])) {
                 foreach ($fuelGroup['vehicle_quantities'] as $vehicleQuantity) {
@@ -286,19 +330,31 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
             <div class="p-4 bg-slate-50 border-b border-gray-200">
               <div class="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <div class="text-lg font-extrabold text-gray-900"><?php echo h(isset($fuelGroup['display_name']) ? $fuelGroup['display_name'] : ''); ?></div>
+                  <div class="text-lg font-extrabold text-gray-900">
+                    <?php echo h(isset($fuelGroup['display_name']) ? $fuelGroup['display_name'] : ''); ?>
+                    <?php if (count($groupCompanyVehicleNames) > 0): ?>
+                      <span class="ml-2 align-middle text-sm font-bold text-indigo-700">차량명: <?php echo h(implode(', ', $groupCompanyVehicleNames)); ?></span>
+                    <?php endif; ?>
+                  </div>
                   <div class="mt-1 text-sm text-gray-600">차량번호: <?php echo h(count($groupVehicles) > 0 ? implode(', ', $groupVehicles) : '-'); ?></div>
                   <?php if (count($groupVehicleQuantityLabels) > 0): ?>
                     <div class="mt-1 text-sm text-gray-600">차량별 사용량: <?php echo h(implode(', ', $groupVehicleQuantityLabels)); ?></div>
                   <?php endif; ?>
                   <div class="mt-1 text-xs text-gray-500">매칭상태: <?php echo h(count($groupMatchedLabels) > 0 ? implode(', ', $groupMatchedLabels) : '-'); ?></div>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-right">
-                  <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">거래</div><div class="font-extrabold"><?php echo h((string)(isset($fuelGroup['row_count']) ? $fuelGroup['row_count'] : count($groupItems))); ?>건</div></div>
-                  <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">사용량 합계</div><div class="font-extrabold"><?php echo h(cpms_fuel_view_number(isset($fuelGroup['total_quantity']) ? $fuelGroup['total_quantity'] : 0)); ?></div></div>
-                  <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">공급가액</div><div class="font-extrabold"><?php echo h(cpms_fuel_view_money(isset($fuelGroup['total_supply_amount']) ? $fuelGroup['total_supply_amount'] : 0)); ?>원</div></div>
-                  <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">부가세</div><div class="font-extrabold"><?php echo h(cpms_fuel_view_money(isset($fuelGroup['total_vat']) ? $fuelGroup['total_vat'] : 0)); ?>원</div></div>
-                  <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2"><div class="text-xs text-emerald-700 font-bold">합계금액</div><div class="font-extrabold text-emerald-700"><?php echo h(cpms_fuel_view_money(isset($fuelGroup['total_amount']) ? $fuelGroup['total_amount'] : 0)); ?>원</div></div>
+                <div class="space-y-2">
+                  <?php if ($canEditCompanyOverhead && count($groupManualMatchTargets) > 0): ?>
+                    <div class="flex justify-end">
+                      <button type="button" class="px-3 py-2 rounded-lg border border-amber-200 text-amber-700 bg-white font-bold" data-modal-open="<?php echo h($fuelMatchModalKey); ?>">수정</button>
+                    </div>
+                  <?php endif; ?>
+                  <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-right">
+                    <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">거래</div><div class="font-extrabold"><?php echo h((string)(isset($fuelGroup['row_count']) ? $fuelGroup['row_count'] : count($groupItems))); ?>건</div></div>
+                    <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">사용량 합계</div><div class="font-extrabold"><?php echo h(cpms_fuel_view_number(isset($fuelGroup['total_quantity']) ? $fuelGroup['total_quantity'] : 0)); ?></div></div>
+                    <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">공급가액</div><div class="font-extrabold"><?php echo h(cpms_fuel_view_money(isset($fuelGroup['total_supply_amount']) ? $fuelGroup['total_supply_amount'] : 0)); ?>원</div></div>
+                    <div class="rounded-xl border border-gray-200 bg-white px-3 py-2"><div class="text-xs text-gray-500 font-bold">부가세</div><div class="font-extrabold"><?php echo h(cpms_fuel_view_money(isset($fuelGroup['total_vat']) ? $fuelGroup['total_vat'] : 0)); ?>원</div></div>
+                    <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2"><div class="text-xs text-emerald-700 font-bold">합계금액</div><div class="font-extrabold text-emerald-700"><?php echo h(cpms_fuel_view_money(isset($fuelGroup['total_amount']) ? $fuelGroup['total_amount'] : 0)); ?>원</div></div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -335,6 +391,37 @@ $fuelGroups = cpms_fuel_group_items_by_name($fuelItems);
               </table>
             </div>
           </section>
+          <?php if ($canEditCompanyOverhead && count($groupManualMatchTargets) > 0): ?>
+            <div id="modal-<?php echo h($fuelMatchModalKey); ?>" class="fixed inset-0 z-50 hidden">
+              <div class="absolute inset-0 bg-black/40" data-modal-close="<?php echo h($fuelMatchModalKey); ?>"></div>
+              <div class="absolute inset-0 flex items-center justify-center p-4">
+                <div class="w-full max-w-2xl bg-white rounded-3xl p-6" style="max-height:90vh;overflow-y:auto;position:relative;">
+                  <button type="button" class="absolute right-4 top-4 px-3 py-1 border rounded-xl" data-modal-close="<?php echo h($fuelMatchModalKey); ?>">닫기</button>
+                  <div class="text-xl font-extrabold text-gray-900">주유카드 이름 수정</div>
+                  <div class="mt-1 text-sm text-gray-500">차량번호별로 주유카드/표시 이름을 저장합니다.</div>
+                  <div class="mt-5 space-y-3">
+                    <?php foreach ($groupManualMatchTargets as $matchTarget): ?>
+                      <form method="post" action="?r=management/fuel_vehicle_match_save" class="rounded-2xl border border-gray-200 p-4">
+                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                        <input type="hidden" name="year" value="<?php echo h((string)$fuelYear); ?>">
+                        <input type="hidden" name="month" value="<?php echo h((string)$fuelMonth); ?>">
+                        <input type="hidden" name="vehicle_number" value="<?php echo h(isset($matchTarget['vehicle_number']) ? $matchTarget['vehicle_number'] : ''); ?>">
+                        <div class="text-xs font-bold text-gray-500">차량번호</div>
+                        <div class="mt-1 font-extrabold text-gray-900"><?php echo h(isset($matchTarget['vehicle_number']) ? $matchTarget['vehicle_number'] : ''); ?></div>
+                        <label class="block mt-3">
+                          <span class="block text-xs font-bold text-gray-500">주유카드/표시 이름</span>
+                          <input type="text" name="display_name" value="<?php echo h(isset($matchTarget['display_name']) ? $matchTarget['display_name'] : ''); ?>" placeholder="예: 회사소유 주유비카드" class="mt-1 w-full px-3 py-3 rounded-xl border border-gray-300 bg-white">
+                        </label>
+                        <div class="mt-3 flex justify-end">
+                          <button type="submit" class="px-4 py-3 rounded-xl bg-amber-600 text-white font-extrabold">저장</button>
+                        </div>
+                      </form>
+                    <?php endforeach; ?>
+                  </div>
+                </div>
+              </div>
+            </div>
+          <?php endif; ?>
         <?php endforeach; ?>
       </div>
     <?php endif; ?>
