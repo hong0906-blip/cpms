@@ -499,6 +499,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     <div class="rounded-xl bg-gray-50 border border-gray-200 p-3 text-xs text-gray-600 leading-5">
                         시트명은 3.구매,자재,경비를 먼저 읽고, 없으면 첫 번째 시트를 확인합니다. 3행 헤더, 4행 데이터부터 A~J열을 읽습니다.
                         A열 일이 26 이상이면 전월 날짜, 1~25이면 선택월 날짜로 변환합니다.
+                        구분이 안전관리비인 행은 선택한 프로젝트의 안전보건섹션에 해당 사용일자로 저장됩니다.
                     </div>
                     <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold">업로드/미리보기</button>
                 </form>
@@ -520,8 +521,8 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                 </div>
                             </div>
                             <div class="text-xs text-gray-600">
-                                정상 <?php echo (int)(isset($bulkPreviewMeta['normal_count']) ? $bulkPreviewMeta['normal_count'] : 0); ?>건 /
-                                제외 <?php echo (int)(isset($bulkPreviewMeta['excluded_count']) ? $bulkPreviewMeta['excluded_count'] : 0); ?>건 /
+                                자재 <?php echo (int)(isset($bulkPreviewMeta['normal_count']) ? $bulkPreviewMeta['normal_count'] : 0); ?>건 /
+                                안전관리비 <?php echo (int)(isset($bulkPreviewMeta['safety_count']) ? $bulkPreviewMeta['safety_count'] : 0); ?>건 /
                                 오류 <?php echo (int)(isset($bulkPreviewMeta['error_count']) ? $bulkPreviewMeta['error_count'] : 0); ?>건 /
                                 중복 <?php echo (int)(isset($bulkPreviewMeta['duplicate_count']) ? $bulkPreviewMeta['duplicate_count'] : 0); ?>건
                             </div>
@@ -561,7 +562,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                         $bulkRowSaveable = (isset($bulkRow['saveable']) && (int)$bulkRow['saveable'] === 1);
                                         $bulkRowClass = '';
                                         if ($bulkRowStatusType === 'error') $bulkRowClass = 'bg-red-50';
-                                        else if ($bulkRowStatusType === 'excluded') $bulkRowClass = 'bg-amber-50';
+                                        else if ($bulkRowStatusType === 'safety') $bulkRowClass = 'bg-emerald-50';
                                         else if ($bulkRowStatusType === 'duplicate') $bulkRowClass = 'bg-gray-100';
                                         else if ($bulkRowStatusType === 'negative') $bulkRowClass = 'bg-yellow-50';
                                         ?>
@@ -578,7 +579,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                             <td class="p-2 border">
                                                 <?php if ($bulkRowSaveable): ?>
                                                     <select name="rows[<?php echo (int)$bulkIdx; ?>][category]" class="w-full min-w-[90px] px-2 py-1 border rounded">
-                                                        <?php foreach (array('자재비', '구매품', '기타경비') as $bulkCategoryOption): ?>
+                                                        <?php foreach (array('자재비', '구매품', '기타경비', '안전관리비') as $bulkCategoryOption): ?>
                                                             <option value="<?php echo h($bulkCategoryOption); ?>" <?php echo ((isset($bulkRow['category']) ? (string)$bulkRow['category'] : '') === $bulkCategoryOption) ? 'selected' : ''; ?>><?php echo h($bulkCategoryOption); ?></option>
                                                         <?php endforeach; ?>
                                                     </select>
@@ -636,7 +637,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                             </div>
 
                             <div class="mt-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                                <div class="text-xs text-gray-500">정상 행만 기본 등록 대상입니다. 오류, 제외, 중복 행은 저장되지 않습니다.</div>
+                                <div class="text-xs text-gray-500">자재비/구매품/기타경비는 자재구입비로, 안전관리비는 안전보건섹션으로 저장됩니다. 오류, 중복 행은 저장되지 않습니다.</div>
                                 <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold" <?php echo ($bulkPreviewSaveableCount <= 0) ? 'disabled' : ''; ?>>일괄등록</button>
                             </div>
                         </form>
