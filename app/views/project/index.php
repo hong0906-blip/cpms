@@ -61,7 +61,10 @@ function status_badge_class($status) {
   <div class="mt-3 flex flex-wrap gap-2">
     <a href="?r=공무&tab=monthly_summary" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_summary' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 집계</a>
     <a href="?r=공무&tab=project_manage" class="cpms-project-manage-tab px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
-    <a href="?r=공무&tab=collaboration" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'collaboration' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">공무 협업툴</a>
+    <a href="?r=공무&tab=collaboration#public-affairs-collaboration"
+       class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'collaboration' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>"
+       data-pa-collab-open
+       aria-controls="paCollabFullscreenModal">공무 협업툴</a>
   </div>
 </div>
 
@@ -74,7 +77,16 @@ function status_badge_class($status) {
   </div>
 <?php } ?>
 <?php elseif ($activeTab === 'collaboration'): ?>
-  <?php require __DIR__ . '/collaboration.php'; ?>
+  <div class="rounded-3xl border border-teal-100 bg-teal-50 text-teal-900 p-6 shadow-sm">
+    <div class="text-xl font-extrabold">공무 협업툴은 전체화면 보드로 실행됩니다.</div>
+    <div class="mt-2 text-sm font-bold text-teal-700">기존 CPMS 화면 위에 독립 업무보드 앱을 띄워 사용합니다.</div>
+    <button type="button"
+            class="mt-4 px-5 py-3 rounded-2xl bg-teal-700 text-white font-extrabold shadow"
+            data-pa-collab-open
+            aria-controls="paCollabFullscreenModal">
+      공무 협업툴 열기
+    </button>
+  </div>
 <?php else: ?>
 <div class="flex items-center justify-between mb-6">
   <div>
@@ -429,3 +441,8 @@ function status_badge_class($status) {
 })();
 </script>
 <?php endif; ?>
+
+<?php
+  $paCollabAutoOpen = ($activeTab === 'collaboration');
+  require __DIR__ . '/collaboration.php';
+?>

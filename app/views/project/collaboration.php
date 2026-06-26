@@ -17,7 +17,11 @@ $currentEmployee = cpms_public_affairs_collab_current_employee($pdo);
 $canManageCollab = cpms_public_affairs_collab_is_admin_user();
 $canCreateCollab = cpms_public_affairs_collab_can_create_task();
 $canAccessCollab = cpms_public_affairs_collab_user_can_access_module($currentEmployee);
-$flash = isset($flash) ? $flash : flash_get();
+$paCollabRouteActive = (!empty($paCollabAutoOpen) || (isset($_GET['tab']) && $_GET['tab'] === 'collaboration'));
+$flash = null;
+if ($paCollabRouteActive) {
+    $flash = isset($flash) ? $flash : flash_get();
+}
 
 if (!function_exists('pa_collab_url')) {
 function pa_collab_url($overrides) {
@@ -115,10 +119,37 @@ function pa_user_is_assignee($task, $employee) {
 }}
 
 if (!$canAccessCollab) {
+    $paCollabInitiallyOpen = !empty($paCollabAutoOpen);
     ?>
-    <div class="rounded-2xl border border-red-200 bg-red-50 text-red-700 p-5 font-bold">
-        공무 협업툴 접근 권한이 없습니다. 로그인 후 이용해주세요.
+<link rel="stylesheet" href="<?php echo h(asset_url('assets/css/public_affairs_collaboration.css') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/css/public_affairs_collaboration.css')); ?>">
+
+<div id="paCollabFullscreenModal"
+     class="pa-collab-fullscreen<?php echo $paCollabInitiallyOpen ? ' is-open' : ''; ?>"
+     role="dialog"
+     aria-modal="true"
+     aria-hidden="<?php echo $paCollabInitiallyOpen ? 'false' : 'true'; ?>"
+     aria-label="공무 협업툴"
+     data-pa-collab-modal
+     data-pa-auto-open="<?php echo $paCollabInitiallyOpen ? '1' : '0'; ?>">
+  <section class="pa-collab-shell">
+    <header class="pa-collab-header">
+      <div class="pa-collab-brand">
+        <div>
+          <div class="pa-collab-title">공무 협업툴</div>
+          <div class="pa-collab-subtitle">공무 업무카드 기반 협업보드</div>
+        </div>
+      </div>
+      <a href="?r=공무&tab=monthly_summary" class="pa-collab-close" data-pa-collab-close aria-label="공무 협업툴 닫기">닫기 ×</a>
+    </header>
+    <div class="pa-collab-body" style="padding:24px;overflow:auto;">
+      <div class="rounded-2xl border border-red-200 bg-red-50 text-red-700 p-5 font-bold">
+          공무 협업툴 접근 권한이 없습니다. 로그인 후 이용해주세요.
+      </div>
     </div>
+  </section>
+</div>
+
+<script defer src="<?php echo h(asset_url('assets/js/public_affairs_collaboration.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/public_affairs_collaboration.js')); ?>"></script>
     <?php
     return;
 }
@@ -160,6 +191,7 @@ $selectedTask = $selectedTaskId > 0 ? cpms_public_affairs_collab_find_task($sele
 if (is_array($selectedTask) && !cpms_public_affairs_collab_user_can_view_task($selectedTask, $currentEmployee)) $selectedTask = null;
 $groups = cpms_public_affairs_collab_group_by_status($filteredTasks, $settings['statuses']);
 $defaultAssigneeId = isset($settings['default_assignee_employee_id']) ? (int)$settings['default_assignee_employee_id'] : 0;
+$paCollabInitiallyOpen = (!empty($paCollabAutoOpen) || $selectedTaskId > 0);
 
 $quickLinks = array(
     'all' => '전체',
@@ -182,75 +214,49 @@ $sampleCards = array(
 );
 ?>
 
-<style>
-.pa-board-app{--pa-bg:#f5f7fb;--pa-panel:#fff;--pa-ink:#172033;--pa-muted:#64748b;--pa-line:#dbe3ef;--pa-accent:#0f766e;--pa-accent-dark:#115e59;--pa-warn:#b45309;--pa-danger:#be123c;--pa-soft:#eef6f4;min-height:calc(100vh - 170px);margin:-6px -2px 0;border:1px solid var(--pa-line);border-radius:18px;background:var(--pa-bg);overflow:hidden;color:var(--pa-ink)}
-.pa-board-layout{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:calc(100vh - 172px)}
-.pa-sidebar{background:#111827;color:#d1d5db;padding:18px 14px;display:flex;flex-direction:column;gap:14px}
-.pa-sidebar-title{font-weight:900;color:#fff;font-size:18px;letter-spacing:0}
-.pa-sidebar-sub{font-size:12px;color:#9ca3af;margin-top:3px}
-.pa-side-link{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-radius:10px;color:#d1d5db;font-weight:800;font-size:14px}
-.pa-side-link:hover{background:#1f2937;color:#fff}
-.pa-side-link.is-active{background:#0f766e;color:#fff}
-.pa-side-count{font-size:11px;border-radius:999px;background:rgba(255,255,255,.12);padding:2px 7px}
-.pa-main{min-width:0;padding:18px;display:flex;flex-direction:column;gap:14px}
-.pa-topbar{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap}
-.pa-title{font-size:25px;font-weight:950;color:#111827;line-height:1.15}
-.pa-desc{color:var(--pa-muted);font-weight:700;margin-top:4px}
-.pa-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.pa-search{display:flex;align-items:center;gap:8px;background:#fff;border:1px solid var(--pa-line);border-radius:12px;padding:8px 10px;min-width:320px}
-.pa-search input{border:0;outline:0;min-width:0;flex:1;font-weight:700;color:#111827}
-.pa-btn{border:1px solid var(--pa-line);background:#fff;color:#273449;font-weight:900;border-radius:12px;padding:10px 13px;display:inline-flex;align-items:center;gap:7px}
-.pa-btn:hover{border-color:#b6c3d4;background:#f8fafc}
-.pa-btn-primary{background:var(--pa-accent);border-color:var(--pa-accent);color:#fff}
-.pa-btn-primary:hover{background:var(--pa-accent-dark);border-color:var(--pa-accent-dark)}
-.pa-btn-dark{background:#111827;border-color:#111827;color:#fff}
-.pa-view-tabs{display:flex;gap:6px;background:#e9eef6;padding:4px;border-radius:12px}
-.pa-view-tabs a{padding:8px 11px;border-radius:9px;font-weight:900;color:#475569}
-.pa-view-tabs a.is-active{background:#fff;color:#111827;box-shadow:0 1px 2px rgba(15,23,42,.08)}
-.pa-filterbar{background:#fff;border:1px solid var(--pa-line);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:10px}
-.pa-quick{display:flex;gap:7px;overflow-x:auto;padding-bottom:2px}
-.pa-chip{white-space:nowrap;border:1px solid #d7e1ef;background:#f8fafc;border-radius:999px;padding:8px 11px;font-size:13px;font-weight:900;color:#3f4c61}
-.pa-chip.is-active{background:#0f766e;color:#fff;border-color:#0f766e}
-.pa-filter-grid{display:grid;grid-template-columns:repeat(7,minmax(120px,1fr));gap:8px}
-.pa-field{border:1px solid var(--pa-line);border-radius:11px;background:#fff;padding:9px 10px;font-weight:750;color:#172033;min-width:0;width:100%}
-.pa-summary{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px}
-.pa-summary-card{background:#fff;border:1px solid var(--pa-line);border-radius:14px;padding:12px}
-.pa-summary-card b{font-size:22px;display:block;color:#111827}
-.pa-summary-card span{font-size:12px;color:#64748b;font-weight:900}
-.pa-board-wrap{position:relative;min-height:500px}
-.pa-kanban{display:flex;gap:12px;overflow-x:auto;padding-bottom:14px;min-height:560px}
-.pa-column{flex:0 0 292px;background:#e9eef6;border:1px solid #d7e1ef;border-radius:16px;display:flex;flex-direction:column;max-height:calc(100vh - 360px);min-height:540px}
-.pa-column-head{padding:12px 12px 10px;display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid #d7e1ef}
-.pa-column-title{font-weight:950;color:#1f2937}
-.pa-column-meta{display:flex;gap:5px;align-items:center}
-.pa-count,.pa-wip{border-radius:999px;background:#fff;color:#475569;font-size:12px;font-weight:900;padding:3px 8px}
-.pa-column-body{padding:10px;display:flex;flex-direction:column;gap:9px;overflow-y:auto}
-.pa-card{background:#fff;border:1px solid #d8e2ef;border-radius:13px;padding:11px;box-shadow:0 1px 0 rgba(15,23,42,.04);cursor:pointer}
-.pa-card:hover{border-color:#93c5bd;box-shadow:0 8px 18px rgba(15,23,42,.08)}
-.pa-card.is-urgent{border-left:5px solid #e11d48}
-.pa-card.is-delayed{background:#fff1f2;border-color:#fecdd3}
-.pa-card.is-done{background:#f8fafc;color:#64748b}
-.pa-card.is-sample{opacity:.75;border-style:dashed}
-.pa-card-top,.pa-card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.pa-no{font-size:12px;font-weight:950;color:#0f766e;background:#e6f5f2;border-radius:999px;padding:4px 8px}
-.pa-type{font-size:11px;font-weight:900;color:#475569;background:#eef2f7;border-radius:999px;padding:4px 7px}
-.pa-card-title{display:block;margin-top:8px;font-size:15px;line-height:1.35;font-weight:950;color:#111827}
-.pa-card-meta{margin-top:8px;display:grid;gap:3px;font-size:12px;color:#526173;font-weight:800}
-.pa-badges{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}
-.pa-badge{border-radius:999px;padding:3px 7px;font-size:11px;font-weight:950;border:1px solid transparent}
-.pa-priority-urgent{background:#ffe4e6;color:#be123c;border-color:#fecdd3}.pa-priority-high{background:#ffedd5;color:#c2410c;border-color:#fed7aa}.pa-priority-normal{background:#e0f2fe;color:#0369a1;border-color:#bae6fd}.pa-priority-low{background:#f1f5f9;color:#475569;border-color:#e2e8f0}
-.pa-status-new{background:#f1f5f9;color:#475569}.pa-status-progress{background:#dcfce7;color:#166534}.pa-status-wait{background:#fef3c7;color:#92400e}.pa-status-approval{background:#e0e7ff;color:#3730a3}.pa-status-hold{background:#e5e7eb;color:#374151}.pa-status-reject{background:#ffe4e6;color:#be123c}.pa-status-done{background:#d1fae5;color:#047857}
-.pa-impact{background:#fef2f2;color:#991b1b;border-color:#fecaca}.pa-today{background:#fef9c3;color:#854d0e;border-color:#fde68a}.pa-delayed{background:#be123c;color:#fff;border-color:#be123c}
-.pa-card-select{margin-top:9px;display:flex;gap:6px}.pa-card-select select{min-width:0;flex:1;border:1px solid #d7e1ef;border-radius:9px;padding:7px;font-size:12px;background:#fff}.pa-card-select button{border-radius:9px;padding:7px 9px;font-size:12px;font-weight:900;background:#111827;color:#fff}
-.pa-table-wrap{background:#fff;border:1px solid var(--pa-line);border-radius:16px;overflow:auto}.pa-table{width:100%;border-collapse:collapse;font-size:13px;min-width:1280px}.pa-table th{background:#f8fafc;color:#64748b;text-align:left;font-weight:950;padding:11px;border-bottom:1px solid var(--pa-line);white-space:nowrap}.pa-table td{padding:11px;border-bottom:1px solid #eef2f7;vertical-align:middle}
-.pa-backlog{display:grid;gap:10px}.pa-backlog-row{background:#fff;border:1px solid var(--pa-line);border-radius:14px;padding:12px;display:grid;grid-template-columns:minmax(260px,1fr) 160px 190px 150px auto;gap:10px;align-items:center}
-.pa-empty{background:#fff;border:1px dashed #cbd5e1;border-radius:16px;padding:28px;text-align:center;color:#64748b;font-weight:850}
-.pa-detail-panel{position:fixed;top:0;right:0;bottom:0;width:min(960px,96vw);background:#fff;z-index:60;border-left:1px solid #d7e1ef;box-shadow:-18px 0 40px rgba(15,23,42,.18);display:flex;flex-direction:column}
-.pa-detail-head{padding:16px 18px;border-bottom:1px solid #e5edf6;display:flex;justify-content:space-between;gap:12px;align-items:flex-start;background:#fbfdff}
-.pa-detail-body{padding:16px 18px;overflow:auto}.pa-detail-grid{display:grid;grid-template-columns:minmax(0,1.35fr) 310px;gap:14px}.pa-panel-card{border:1px solid #e5edf6;border-radius:14px;padding:13px;background:#fff}.pa-panel-title{font-weight:950;color:#111827;margin-bottom:9px}.pa-prop{display:grid;gap:8px}.pa-prop-row{display:grid;grid-template-columns:94px minmax(0,1fr);gap:8px;font-size:13px}.pa-prop-row b{color:#64748b}.pa-comment,.pa-history,.pa-file{border:1px solid #edf2f7;background:#f8fafc;border-radius:12px;padding:10px;margin-top:8px}.pa-muted{color:#64748b}.pa-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.pa-form-grid .full{grid-column:1/-1}.pa-modal{position:fixed;inset:0;z-index:70;display:none}.pa-modal.is-open{display:block}.pa-modal-bg{position:absolute;inset:0;background:rgba(15,23,42,.55)}.pa-modal-box{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(900px,94vw);max-height:92vh;background:#fff;border-radius:18px;box-shadow:0 24px 80px rgba(15,23,42,.32);display:flex;flex-direction:column;overflow:hidden}.pa-modal-head{padding:16px 18px;border-bottom:1px solid #e5edf6;display:flex;justify-content:space-between}.pa-modal-body{padding:18px;overflow:auto}.pa-modal-foot{padding:14px 18px;border-top:1px solid #e5edf6;display:flex;justify-content:flex-end;gap:8px}
-@media (max-width:900px){.pa-board-layout{grid-template-columns:1fr}.pa-sidebar{display:block}.pa-side-nav{display:flex;gap:6px;overflow-x:auto;margin-top:10px}.pa-side-link{white-space:nowrap}.pa-filter-grid{grid-template-columns:1fr 1fr}.pa-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.pa-kanban{display:block;overflow:visible}.pa-column{max-height:none;min-height:0;width:auto;margin-bottom:10px;flex:auto}.pa-column-body{max-height:none}.pa-detail-panel{width:100vw}.pa-detail-grid{grid-template-columns:1fr}.pa-backlog-row{grid-template-columns:1fr}.pa-search{min-width:0;width:100%}}
-</style>
+<link rel="stylesheet" href="<?php echo h(asset_url('assets/css/public_affairs_collaboration.css') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/css/public_affairs_collaboration.css')); ?>">
 
+<div id="paCollabFullscreenModal"
+     class="pa-collab-fullscreen<?php echo $paCollabInitiallyOpen ? ' is-open' : ''; ?>"
+     role="dialog"
+     aria-modal="true"
+     aria-hidden="<?php echo $paCollabInitiallyOpen ? 'false' : 'true'; ?>"
+     aria-label="공무 협업툴"
+     data-pa-collab-modal
+     data-pa-auto-open="<?php echo $paCollabInitiallyOpen ? '1' : '0'; ?>">
+  <section class="pa-collab-shell">
+    <header class="pa-collab-header">
+      <div class="pa-collab-brand">
+        <button type="button" class="pa-collab-menu-button" data-pa-menu-toggle aria-label="공무 협업툴 내부 메뉴">☰</button>
+        <div>
+          <div class="pa-collab-title">공무 협업툴</div>
+          <div class="pa-collab-subtitle">공무 업무카드 기반 협업보드</div>
+        </div>
+      </div>
+      <div class="pa-collab-header-actions">
+        <form method="get" action="" class="pa-search pa-collab-header-search">
+          <input type="hidden" name="r" value="공무">
+          <input type="hidden" name="tab" value="collaboration">
+          <input type="hidden" name="section" value="<?php echo h($section); ?>">
+          <input type="hidden" name="view_mode" value="<?php echo h($viewMode); ?>">
+          <input type="hidden" name="quick" value="<?php echo h($quickFilter); ?>">
+          <span class="pa-muted">검색</span>
+          <input name="keyword" value="<?php echo h($filters['keyword']); ?>" placeholder="업무번호, 제목, 내용, 담당자">
+        </form>
+        <div class="pa-view-tabs">
+          <a class="<?php echo $viewMode === 'board' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'board', 'section' => 'board', 'task_id' => null))); ?>">보드</a>
+          <a class="<?php echo $viewMode === 'list' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'list', 'section' => 'all', 'quick' => 'all', 'task_id' => null))); ?>">목록</a>
+          <a class="<?php echo $viewMode === 'backlog' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'backlog', 'section' => 'pending', 'quick' => 'pending', 'task_id' => null))); ?>">대기 업무</a>
+          <a class="<?php echo $section === 'settings' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'settings', 'view' => 'settings', 'task_id' => null))); ?>">설정</a>
+        </div>
+        <?php if ($canCreateCollab): ?>
+          <button type="button" class="pa-btn pa-btn-primary" data-pa-modal-open="create">업무 만들기</button>
+        <?php endif; ?>
+        <a class="pa-btn" href="?r=공무&tab=collaboration#public-affairs-collaboration" target="_blank" rel="noopener" title="공무 협업툴 새 창으로 열기">새 창으로 열기</a>
+        <a href="?r=공무&tab=monthly_summary" class="pa-collab-close" data-pa-collab-close aria-label="공무 협업툴 닫기">닫기 ×</a>
+      </div>
+    </header>
+    <div class="pa-collab-body">
 <div class="pa-board-app">
   <div class="pa-board-layout">
     <aside class="pa-sidebar">
@@ -280,32 +286,6 @@ $sampleCards = array(
         ?>
         <div class="border rounded-2xl p-4 font-bold <?php echo h($flashClass); ?>"><?php echo h(isset($flash['message']) ? $flash['message'] : ''); ?></div>
       <?php endif; ?>
-
-      <div class="pa-topbar">
-        <div>
-          <div class="pa-title">공무 협업툴</div>
-          <div class="pa-desc">공무 업무카드 기반 협업보드</div>
-        </div>
-        <div class="pa-actions">
-          <form method="get" action="" class="pa-search">
-            <input type="hidden" name="r" value="공무">
-            <input type="hidden" name="tab" value="collaboration">
-            <input type="hidden" name="section" value="<?php echo h($section); ?>">
-            <input type="hidden" name="view_mode" value="<?php echo h($viewMode); ?>">
-            <input type="hidden" name="quick" value="<?php echo h($quickFilter); ?>">
-            <span class="pa-muted">검색</span>
-            <input name="keyword" value="<?php echo h($filters['keyword']); ?>" placeholder="업무번호, 제목, 내용, 담당자">
-          </form>
-          <div class="pa-view-tabs">
-            <a class="<?php echo $viewMode === 'board' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'board', 'section' => 'board', 'task_id' => null))); ?>">보드</a>
-            <a class="<?php echo $viewMode === 'list' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'list', 'section' => 'all', 'quick' => 'all', 'task_id' => null))); ?>">목록</a>
-            <a class="<?php echo $viewMode === 'backlog' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'backlog', 'section' => 'pending', 'quick' => 'pending', 'task_id' => null))); ?>">대기 업무</a>
-          </div>
-          <?php if ($canCreateCollab): ?>
-            <button type="button" class="pa-btn pa-btn-primary" data-pa-modal-open="create">업무 만들기</button>
-          <?php endif; ?>
-        </div>
-      </div>
 
       <?php if ($section === 'settings'): ?>
         <section class="pa-panel-card">
@@ -648,39 +628,8 @@ $sampleCards = array(
   </div>
 <?php endif; ?>
 
-<script>
-(function(){
-  var modal = document.getElementById('paCreateModal');
-  var openers = document.querySelectorAll('[data-pa-modal-open="create"]');
-  for (var i = 0; i < openers.length; i++) {
-    openers[i].onclick = function(){ if (modal) modal.className = modal.className + ' is-open'; };
-  }
-  var closers = document.querySelectorAll('[data-pa-modal-close="create"]');
-  for (var j = 0; j < closers.length; j++) {
-    closers[j].onclick = function(){ if (modal) modal.className = modal.className.replace(' is-open', ''); };
-  }
-  var draggedTaskId = '';
-  var cards = document.querySelectorAll('[data-pa-task-id]');
-  for (var c = 0; c < cards.length; c++) {
-    cards[c].addEventListener('dragstart', function(ev){
-      draggedTaskId = this.getAttribute('data-pa-task-id');
-      if (ev.dataTransfer) ev.dataTransfer.setData('text/plain', draggedTaskId);
-    });
-  }
-  var columns = document.querySelectorAll('[data-pa-drop-status]');
-  for (var k = 0; k < columns.length; k++) {
-    columns[k].addEventListener('dragover', function(ev){ ev.preventDefault(); });
-    columns[k].addEventListener('drop', function(ev){
-      ev.preventDefault();
-      var taskId = draggedTaskId;
-      if (!taskId && ev.dataTransfer) taskId = ev.dataTransfer.getData('text/plain');
-      var status = this.getAttribute('data-pa-drop-status');
-      var form = document.getElementById('paStatusMoveForm');
-      if (!taskId || !status || !form) return;
-      form.elements['task_id'].value = taskId;
-      form.elements['status'].value = status;
-      form.submit();
-    });
-  }
-})();
-</script>
+    </div>
+  </section>
+</div>
+
+<script defer src="<?php echo h(asset_url('assets/js/public_affairs_collaboration.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/public_affairs_collaboration.js')); ?>"></script>
