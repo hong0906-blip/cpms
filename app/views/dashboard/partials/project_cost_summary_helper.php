@@ -104,6 +104,7 @@ function cpms_dashboard_project_rows($pdo)
     $select[count($select)] = cpms_dashboard_column_exists($pdo, 'cpms_projects', 'status') ? 'status' : "'' AS status";
 
     $where = array('1=1');
+    $where[count($where)] = "name NOT LIKE '(가제)%'";
     if (cpms_dashboard_column_exists($pdo, 'cpms_projects', 'is_deleted')) {
         $where[count($where)] = '(is_deleted = 0 OR is_deleted IS NULL)';
     }

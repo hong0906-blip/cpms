@@ -1,6 +1,8 @@
 <?php
 use App\Core\Db;
 
+require_once __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
+
 $pdo = Db::pdo();
 $dbOk = ($pdo !== null);
 
@@ -48,6 +50,7 @@ if ($dbOk && $activeTab === 'project_manage') {
 }
 
 $flash = flash_get();
+$collabProjectMetaStore = cpms_public_affairs_collab_load_project_meta();
 
 function status_badge_class($status) {
     $status = trim((string)$status);
@@ -137,11 +140,13 @@ function status_badge_class($status) {
             $startDate = (string)$project['start_date'];
             $endDate = (string)$project['end_date'];
             $status = (string)$project['status'];
+            $isCollabDraftProject = cpms_public_affairs_collab_is_draft_project($project, $collabProjectMetaStore);
           ?>
           <div class="rounded-3xl border <?php echo ($createdProjectId > 0 && $createdProjectId === $projectId) ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-gray-100 bg-white'; ?> hover:shadow-lg transition p-5">
             <div class="flex items-start justify-between gap-3">
               <div class="min-w-0">
                 <a href="<?php echo h('?r=project/detail&id=' . $projectId); ?>" class="font-extrabold text-gray-900 truncate hover:text-blue-700 block"><?php echo h($projectName); ?></a>
+                <?php if ($isCollabDraftProject): ?><div class="mt-2 inline-flex px-3 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-xs font-extrabold">가제 · 정식 프로젝트 전환 필요</div><?php endif; ?>
                 <div class="text-sm text-gray-600 mt-1 truncate"><?php echo h($client); ?></div>
               </div>
               <span class="px-3 py-1.5 rounded-full text-sm font-extrabold border whitespace-nowrap <?php echo h(status_badge_class($status)); ?>">
@@ -165,6 +170,12 @@ function status_badge_class($status) {
                  class="px-3 py-2 rounded-2xl bg-gray-100 border border-gray-200 text-gray-700 font-extrabold hover:bg-gray-200">
                 상세보기
               </a>
+              <?php if ($isCollabDraftProject): ?>
+                <a href="<?php echo h('?r=project/detail&id=' . $projectId); ?>"
+                   class="px-3 py-2 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 font-extrabold hover:bg-amber-100">
+                  정식 전환
+                </a>
+              <?php endif; ?>
 
               <form method="post" action="?r=project/project_delete" style="margin:0;">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">

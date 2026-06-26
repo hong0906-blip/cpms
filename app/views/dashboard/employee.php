@@ -93,6 +93,7 @@ if ($pdo && $userEmail !== '') {
                     JOIN cpms_project_members pm ON pm.project_id = p.id
                     WHERE pm.employee_id = :eid
                       AND LOWER(TRIM(pm.role)) IN ('main','sub')
+                      AND p.name NOT LIKE '(가제)%'
                     ORDER BY p.id DESC";
             $stP = $pdo->prepare($sql);
             $stP->bindValue(':eid', $eid2, PDO::PARAM_INT);

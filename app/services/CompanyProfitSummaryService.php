@@ -119,7 +119,7 @@ function cpms_company_profit_available_years($pdo) {
 
     if ($pdo && cpms_company_profit_table_exists($pdo, 'cpms_projects')) {
         try {
-            $sql = "SELECT MIN(YEAR(start_date)) AS min_start, MAX(YEAR(end_date)) AS max_end FROM cpms_projects";
+            $sql = "SELECT MIN(YEAR(start_date)) AS min_start, MAX(YEAR(end_date)) AS max_end FROM cpms_projects WHERE name NOT LIKE '(가제)%'";
             $row = $pdo->query($sql)->fetch(PDO::FETCH_ASSOC);
             if (is_array($row)) {
                 if (isset($row['min_start']) && (int)$row['min_start'] > 0) $minYear = min($minYear, (int)$row['min_start']);
@@ -156,7 +156,7 @@ function cpms_company_profit_status_options($pdo) {
     $rows = array();
     if (!$pdo || !cpms_company_profit_table_exists($pdo, 'cpms_projects')) return $rows;
     try {
-        $st = $pdo->query("SELECT DISTINCT status FROM cpms_projects WHERE status IS NOT NULL AND status <> '' ORDER BY status ASC");
+        $st = $pdo->query("SELECT DISTINCT status FROM cpms_projects WHERE status IS NOT NULL AND status <> '' AND name NOT LIKE '(가제)%' ORDER BY status ASC");
         while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
             $status = isset($row['status']) ? trim((string)$row['status']) : '';
             if ($status !== '') $rows[] = $status;
@@ -227,6 +227,7 @@ function cpms_company_profit_load_projects($pdo, $filters) {
     $params = array();
 
     $status = isset($filters['status']) ? trim((string)$filters['status']) : '';
+    $where[] = "name NOT LIKE '(가제)%'";
     if ($status !== '') {
         $where[] = "status = :status";
         $params[':status'] = $status;

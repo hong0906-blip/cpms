@@ -4,6 +4,7 @@ use App\Core\Db;
 
 require_once __DIR__ . '/contract_change_helper.php';
 require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
+require_once __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
 
 if (!function_exists('cpms_format_qty0')) {
 function cpms_format_qty0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format(round((float)$v), 0); }
@@ -58,6 +59,9 @@ if (!$project) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">프로젝트를 찾을 수 없습니다.</div>';
     return;
 }
+$collabProjectMetaStore = cpms_public_affairs_collab_load_project_meta();
+$isCollabDraftProject = cpms_public_affairs_collab_is_draft_project($project, $collabProjectMetaStore);
+$collabEmployeesForConvert = $isCollabDraftProject ? cpms_public_affairs_collab_fetch_employees($pdo) : array();
 
 $mainManager = null;
 $subManagers = array();
@@ -277,7 +281,10 @@ $versionRowsForDisplay = (count($estimateVersions) > 0) ? $estimateVersions : $c
 
 <div class="flex items-start justify-between gap-3 mb-6">
     <div>
-        <h2 class="text-2xl font-extrabold text-gray-900"><?php echo h($project['name']); ?></h2>
+        <h2 class="text-2xl font-extrabold text-gray-900">
+            <?php echo h($project['name']); ?>
+            <?php if ($isCollabDraftProject): ?><span class="ml-2 px-3 py-1 rounded-full bg-amber-100 text-amber-800 border border-amber-200 text-sm font-extrabold">가제</span><?php endif; ?>
+        </h2>
         <div class="text-sm text-gray-600 mt-1">
             <?php echo h((string)$project['client']); ?>
             <?php if ((string)$project['client'] !== '' && (string)$project['contractor'] !== ''): ?> / <?php endif; ?>
@@ -306,6 +313,41 @@ $versionRowsForDisplay = (count($estimateVersions) > 0) ? $estimateVersions : $c
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type'] === 'success') ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'; ?>">
         <?php echo h($flash['message']); ?>
+    </div>
+<?php endif; ?>
+
+<?php if ($isCollabDraftProject): ?>
+    <div class="mb-6 rounded-3xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
+        <div class="font-extrabold text-lg">정식 프로젝트 전환 필요</div>
+        <div class="mt-1 text-sm font-bold">이 프로젝트는 공무 협업툴에서 시작한 가제 프로젝트입니다. 정식 전환 전에는 경영현황/공사섹션/안전/품질/보건/관리 흐름에 반영되지 않습니다.</div>
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=project/collaboration_action" class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="action" value="project_convert">
+            <input type="hidden" name="project_id" value="<?php echo (int)$projectId; ?>">
+            <input type="hidden" name="return_url" value="<?php echo h(base_url()); ?>/?r=project/detail&id=<?php echo (int)$projectId; ?>">
+            <input name="name" value="<?php echo h(cpms_public_affairs_collab_official_project_name((string)$project['name'])); ?>" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold" placeholder="프로젝트명">
+            <input name="client" value="<?php echo h((string)$project['client']); ?>" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold" placeholder="발주처">
+            <input name="contractor" value="<?php echo h((string)$project['contractor']); ?>" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold" placeholder="시공사">
+            <input type="date" name="start_date" value="<?php echo h((string)$project['start_date']); ?>" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold">
+            <input type="date" name="end_date" value="<?php echo h((string)$project['end_date']); ?>" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold">
+            <input name="contract_amount" value="<?php echo h((string)$project['contract_amount']); ?>" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold" placeholder="계약금액">
+            <select name="status" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold">
+                <option value="계약중">계약중</option>
+                <option value="진행중">진행중</option>
+                <option value="대기중">대기중</option>
+            </select>
+            <select name="main_manager_id" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold">
+                <?php
+                  $draftMainManagerId = cpms_public_affairs_collab_project_main_manager_id($pdo, $projectId);
+                  foreach ($collabEmployeesForConvert as $employee):
+                    $eid = isset($employee['id']) ? (int)$employee['id'] : 0;
+                    if ($eid <= 0) continue;
+                ?>
+                    <option value="<?php echo (int)$eid; ?>" <?php echo $eid === $draftMainManagerId ? 'selected' : ''; ?>><?php echo h((isset($employee['name']) ? $employee['name'] : '-') . ' / ' . (isset($employee['department']) ? $employee['department'] : '-')); ?></option>
+                <?php endforeach; ?>
+            </select>
+            <button type="submit" class="px-5 py-3 rounded-2xl bg-amber-600 text-white font-extrabold">정식 프로젝트 전환</button>
+        </form>
     </div>
 <?php endif; ?>
 

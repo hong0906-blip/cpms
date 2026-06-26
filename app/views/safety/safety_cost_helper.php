@@ -276,7 +276,7 @@ function cpms_safety_cost_project_rows_for_user($pdo)
     $rows = array();
     if (!$pdo || !cpms_safety_cost_table_exists($pdo, 'cpms_projects')) return $rows;
     try {
-        $st = $pdo->query("SELECT id, name, start_date, end_date FROM cpms_projects ORDER BY id DESC");
+        $st = $pdo->query("SELECT id, name, start_date, end_date FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id DESC");
         $all = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
         if (!is_array($all)) $all = array();
         foreach ($all as $row) {

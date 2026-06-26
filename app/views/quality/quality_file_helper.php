@@ -202,7 +202,7 @@ function cpms_quality_file_projects_for_user($pdo) {
     $rows = array();
     if (!$pdo || !cpms_quality_file_table_exists($pdo, 'cpms_projects')) return $rows;
     try {
-        $st = $pdo->query("SELECT id, name FROM cpms_projects ORDER BY id DESC LIMIT 300");
+        $st = $pdo->query("SELECT id, name FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id DESC LIMIT 300");
         $all = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
         foreach ($all as $row) {
             $pid = isset($row['id']) ? (int)$row['id'] : 0;

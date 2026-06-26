@@ -354,7 +354,7 @@ function project_monthly_load_revenue($pdo, $projectId, $allMonths) {
 
 if ($pdo) {
     try {
-        $st = $pdo->query('SELECT id,name,start_date,end_date,contract_amount FROM cpms_projects ORDER BY id DESC');
+        $st = $pdo->query("SELECT id,name,start_date,end_date,contract_amount FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id DESC");
         $monthlyProjects = $st->fetchAll();
         if (!is_array($monthlyProjects)) { $monthlyProjects = array(); }
     } catch (Exception $e) {

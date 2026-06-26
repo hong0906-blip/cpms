@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
 $pdo = Db::pdo();
 $settings = cpms_public_affairs_collab_settings();
 $employees = cpms_public_affairs_collab_fetch_employees($pdo);
+$projects = cpms_public_affairs_collab_fetch_projects($pdo);
 $currentEmployee = cpms_public_affairs_collab_current_employee($pdo);
 $canManageCollab = cpms_public_affairs_collab_is_admin_user();
 $canCreateCollab = cpms_public_affairs_collab_can_create_task();
@@ -108,6 +109,64 @@ function pa_file_size($bytes) {
     return $bytes . 'B';
 }}
 
+if (!function_exists('pa_project_card')) {
+function pa_project_card($project) {
+    // 공무 협업툴 프로젝트 홈: 기존 CPMS 프로젝트/가제 프로젝트를 Jira Space 카드처럼 보여준다.
+    if (!is_array($project)) return;
+    $projectId = isset($project['id']) ? (int)$project['id'] : 0;
+    if ($projectId <= 0) return;
+    $stats = isset($project['stats']) && is_array($project['stats']) ? $project['stats'] : array();
+    $isDraft = isset($project['is_draft']) && (int)$project['is_draft'] === 1;
+    $status = isset($project['status']) && trim((string)$project['status']) !== '' ? (string)$project['status'] : (isset($project['phase']) ? (string)$project['phase'] : '-');
+    $client = isset($project['client']) ? (string)$project['client'] : '';
+    $contractor = isset($project['contractor']) ? (string)$project['contractor'] : '';
+    $manager = isset($project['manager_name']) && trim((string)$project['manager_name']) !== '' ? (string)$project['manager_name'] : '-';
+    $period = (isset($project['start_date']) && trim((string)$project['start_date']) !== '' ? (string)$project['start_date'] : '-') . ' ~ ' . (isset($project['end_date']) && trim((string)$project['end_date']) !== '' ? (string)$project['end_date'] : '-');
+    $last = isset($stats['last_activity_at']) && trim((string)$stats['last_activity_at']) !== '' ? substr((string)$stats['last_activity_at'], 0, 16) : '-';
+    ?>
+    <a class="pa-space-card <?php echo $isDraft ? 'is-draft' : 'is-official'; ?>" href="<?php echo h(pa_collab_url(array('space_project_id' => $projectId, 'section' => 'summary', 'quick' => 'hide_done', 'task_id' => null))); ?>">
+      <div class="pa-space-card-top">
+        <span class="pa-space-type <?php echo $isDraft ? 'is-draft' : 'is-official'; ?>"><?php echo $isDraft ? '가제' : '정식'; ?></span>
+        <span class="pa-muted"><?php echo h($status); ?></span>
+      </div>
+      <div class="pa-space-name"><?php echo h(isset($project['name']) ? $project['name'] : '-'); ?></div>
+      <?php if ($isDraft): ?><div class="pa-draft-note">정식 프로젝트 전환 전</div><?php endif; ?>
+      <div class="pa-space-meta">
+        <div>발주처 <?php echo h($client !== '' ? $client : '-'); ?></div>
+        <div>시공사 <?php echo h($contractor !== '' ? $contractor : '-'); ?></div>
+        <div>담당자 <?php echo h($manager); ?></div>
+        <div>기간 <?php echo h($period); ?></div>
+      </div>
+      <div class="pa-space-stats">
+        <span>전체 <?php echo isset($stats['total']) ? (int)$stats['total'] : 0; ?></span>
+        <span>진행 <?php echo isset($stats['active']) ? (int)$stats['active'] : 0; ?></span>
+        <span class="<?php echo (isset($stats['delayed']) && (int)$stats['delayed'] > 0) ? 'is-hot' : ''; ?>">지연 <?php echo isset($stats['delayed']) ? (int)$stats['delayed'] : 0; ?></span>
+      </div>
+      <div class="pa-space-last">마지막 활동 <?php echo h($last); ?></div>
+    </a>
+    <?php
+}}
+
+if (!function_exists('pa_project_section')) {
+function pa_project_section($title, $projects, $emptyText) {
+    // 공무 협업툴 프로젝트 홈: 최근/즐겨찾기/정식/가제 Space 묶음 출력.
+    ?>
+    <section class="pa-space-section">
+      <div class="pa-space-section-head">
+        <h3><?php echo h($title); ?></h3>
+        <span><?php echo is_array($projects) ? (int)count($projects) : 0; ?></span>
+      </div>
+      <?php if (!is_array($projects) || count($projects) === 0): ?>
+        <div class="pa-empty"><?php echo h($emptyText); ?></div>
+      <?php else: ?>
+        <div class="pa-space-grid">
+          <?php foreach ($projects as $project) pa_project_card($project); ?>
+        </div>
+      <?php endif; ?>
+    </section>
+    <?php
+}}
+
 if (!function_exists('pa_user_is_assignee')) {
 function pa_user_is_assignee($task, $employee) {
     if (!is_array($task) || !is_array($employee)) return false;
@@ -179,12 +238,14 @@ window.paCollabConfig = <?php echo json_encode($paCollabJsConfig, JSON_UNESCAPED
     return;
 }
 
-$section = isset($_GET['section']) ? trim((string)$_GET['section']) : 'board';
+$spaceProjectId = isset($_GET['space_project_id']) ? (int)$_GET['space_project_id'] : (isset($_GET['project_id']) ? (int)$_GET['project_id'] : 0);
+$section = isset($_GET['section']) ? trim((string)$_GET['section']) : 'home';
 $viewMode = isset($_GET['view_mode']) ? trim((string)$_GET['view_mode']) : 'board';
 $quickFilter = isset($_GET['quick']) ? trim((string)$_GET['quick']) : 'hide_done';
-if ($section === '') $section = 'board';
-if (!in_array($section, array('board', 'pending', 'mine', 'today', 'delayed', 'done', 'all', 'settings'), true)) $section = 'board';
+if ($section === '') $section = 'home';
+if (!in_array($section, array('home', 'summary', 'list', 'board', 'pending', 'mine', 'today', 'delayed', 'done', 'all', 'calendar', 'timeline', 'files', 'activity', 'reports', 'settings'), true)) $section = 'home';
 if (!in_array($viewMode, array('board', 'list', 'backlog'), true)) $viewMode = 'board';
+if ($section === 'list') $viewMode = 'list';
 if ($section === 'pending') { $viewMode = 'backlog'; $quickFilter = 'pending'; }
 if ($section === 'mine') $quickFilter = 'mine';
 if ($section === 'today') $quickFilter = 'today';
@@ -194,6 +255,7 @@ if ($section === 'all') $quickFilter = 'all';
 if ($section === 'board' && !isset($_GET['quick'])) $quickFilter = 'hide_done';
 
 $filters = array(
+    'project_id' => $spaceProjectId,
     'project_name' => isset($_GET['project_name']) ? $_GET['project_name'] : '',
     'assignee_employee_id' => isset($_GET['assignee_employee_id']) ? $_GET['assignee_employee_id'] : '',
     'requester_employee_id' => isset($_GET['requester_employee_id']) ? $_GET['requester_employee_id'] : '',
@@ -207,9 +269,44 @@ $filters = array(
 
 $allTasks = cpms_public_affairs_collab_list_tasks();
 $visibleTasks = cpms_public_affairs_collab_visible_tasks($allTasks, $currentEmployee);
+$spaceProjects = cpms_public_affairs_collab_project_spaces($pdo, $projects, $visibleTasks);
+$selectedSpace = cpms_public_affairs_collab_find_project_space($spaceProjects, $spaceProjectId);
+if ($spaceProjectId > 0 && !is_array($selectedSpace)) $spaceProjectId = 0;
+if ($spaceProjectId <= 0 && $section !== 'settings') $section = 'home';
+$filters['project_id'] = $spaceProjectId;
+$projectHomeSummary = cpms_public_affairs_collab_project_home_summary($spaceProjects);
+$selectedProjectTasks = $spaceProjectId > 0 ? cpms_public_affairs_collab_project_tasks($visibleTasks, $spaceProjectId) : array();
+$selectedProjectStats = cpms_public_affairs_collab_project_stats($selectedProjectTasks);
+$selectedProjectActivities = $spaceProjectId > 0 ? cpms_public_affairs_collab_project_activities($spaceProjectId, 40) : array();
+$selectedProjectMainManagerId = $spaceProjectId > 0 ? cpms_public_affairs_collab_project_main_manager_id($pdo, $spaceProjectId) : 0;
+$projectKeyword = isset($_GET['project_keyword']) ? cpms_public_affairs_collab_lower(trim((string)$_GET['project_keyword'])) : '';
+$homeProjects = array();
+foreach ($spaceProjects as $space) {
+    if (!is_array($space)) continue;
+    if ($projectKeyword !== '') {
+        $projectHaystack = cpms_public_affairs_collab_lower(
+            (isset($space['name']) ? $space['name'] : '') . ' ' .
+            (isset($space['client']) ? $space['client'] : '') . ' ' .
+            (isset($space['contractor']) ? $space['contractor'] : '') . ' ' .
+            (isset($space['manager_name']) ? $space['manager_name'] : '') . ' ' .
+            (isset($space['phase']) ? $space['phase'] : '')
+        );
+        if (strpos($projectHaystack, $projectKeyword) === false) continue;
+    }
+    $homeProjects[] = $space;
+}
+$recentProjects = array_slice($homeProjects, 0, 8);
+$favoriteProjects = array();
+$officialProjects = array();
+$draftProjects = array();
+foreach ($homeProjects as $space) {
+    if (isset($space['favorite']) && (int)$space['favorite'] === 1) $favoriteProjects[] = $space;
+    if (isset($space['is_draft']) && (int)$space['is_draft'] === 1) $draftProjects[] = $space;
+    else $officialProjects[] = $space;
+}
 $filteredTasks = cpms_public_affairs_collab_apply_filters($visibleTasks, $filters);
 $filteredTasks = cpms_public_affairs_collab_apply_quick_filter($filteredTasks, $quickFilter, $currentEmployee);
-$summary = cpms_public_affairs_collab_summary($visibleTasks, $currentEmployee);
+$summary = cpms_public_affairs_collab_summary($spaceProjectId > 0 ? $selectedProjectTasks : $visibleTasks, $currentEmployee);
 $taskCounts = cpms_public_affairs_collab_task_counts();
 $selectedTaskId = isset($_GET['task_id']) ? (int)$_GET['task_id'] : 0;
 $selectedTask = $selectedTaskId > 0 ? cpms_public_affairs_collab_find_task($selectedTaskId) : null;
@@ -224,7 +321,7 @@ $quickLinks = array(
     'today' => '오늘 마감',
     'delayed' => '지연',
     'urgent' => '긴급',
-    'approval' => '결재대기',
+    'approval' => '검토중',
     'contract' => '계약 영향',
     'schedule' => '공기 영향',
     'hide_done' => '완료 숨기기',
@@ -232,10 +329,10 @@ $quickLinks = array(
 
 $sampleCards = array(
     array('task_no' => 'PA-0001', 'task_type' => '변경계약', 'title' => '변경계약 2차 내역 검토', 'project_name' => '샘플 현장 A', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '긴급', 'status' => '진행중', 'due_date' => date('Y-m-d'), 'due_time' => '17:00', 'contract_impact' => '있음', 'schedule_impact' => '확인필요'),
-    array('task_no' => 'PA-0002', 'task_type' => '자료 제출', 'title' => '발주처 제출자료 취합', 'project_name' => '샘플 현장 B', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '높음', 'status' => '요청', 'due_date' => date('Y-m-d', strtotime('+1 day')), 'due_time' => '', 'contract_impact' => '없음', 'schedule_impact' => '없음'),
+    array('task_no' => 'PA-0002', 'task_type' => '자료 제출', 'title' => '발주처 제출자료 취합', 'project_name' => '샘플 현장 B', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '높음', 'status' => '할 일', 'due_date' => date('Y-m-d', strtotime('+1 day')), 'due_time' => '', 'contract_impact' => '없음', 'schedule_impact' => '없음'),
     array('task_no' => 'PA-0003', 'task_type' => '리스크 검토', 'title' => '공기연장 근거자료 정리', 'project_name' => '샘플 현장 C', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '보통', 'status' => '검토중', 'due_date' => date('Y-m-d', strtotime('+3 day')), 'due_time' => '', 'contract_impact' => '확인필요', 'schedule_impact' => '있음'),
-    array('task_no' => 'PA-0004', 'task_type' => '기성/청구', 'title' => '기성청구 첨부자료 검토', 'project_name' => '샘플 현장 D', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '높음', 'status' => '자료대기', 'due_date' => date('Y-m-d', strtotime('+2 day')), 'due_time' => '10:00', 'contract_impact' => '없음', 'schedule_impact' => '없음'),
-    array('task_no' => 'PA-0005', 'task_type' => '내역서 검토', 'title' => '협력업체 견적 비교', 'project_name' => '샘플 현장 E', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '보통', 'status' => '결재대기', 'due_date' => date('Y-m-d', strtotime('+5 day')), 'due_time' => '', 'contract_impact' => '확인필요', 'schedule_impact' => '없음'),
+    array('task_no' => 'PA-0004', 'task_type' => '기성/청구', 'title' => '기성청구 첨부자료 검토', 'project_name' => '샘플 현장 D', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '높음', 'status' => '대기', 'due_date' => date('Y-m-d', strtotime('+2 day')), 'due_time' => '10:00', 'contract_impact' => '없음', 'schedule_impact' => '없음'),
+    array('task_no' => 'PA-0005', 'task_type' => '내역서 검토', 'title' => '협력업체 견적 비교', 'project_name' => '샘플 현장 E', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '보통', 'status' => '검토중', 'due_date' => date('Y-m-d', strtotime('+5 day')), 'due_time' => '', 'contract_impact' => '확인필요', 'schedule_impact' => '없음'),
 );
 ?>
 
@@ -262,6 +359,7 @@ $sampleCards = array(
         <form method="get" action="" class="pa-search pa-collab-header-search">
           <input type="hidden" name="r" value="공무">
           <input type="hidden" name="tab" value="collaboration">
+          <input type="hidden" name="space_project_id" value="<?php echo (int)$spaceProjectId; ?>">
           <input type="hidden" name="section" value="<?php echo h($section); ?>">
           <input type="hidden" name="view_mode" value="<?php echo h($viewMode); ?>">
           <input type="hidden" name="quick" value="<?php echo h($quickFilter); ?>">
@@ -271,12 +369,18 @@ $sampleCards = array(
           <button type="submit" class="pa-search-submit" title="검색">검색</button>
         </form>
         <div class="pa-view-tabs">
-          <a class="<?php echo $viewMode === 'board' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'board', 'section' => 'board', 'task_id' => null))); ?>">보드</a>
-          <a class="<?php echo $viewMode === 'list' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'list', 'section' => 'all', 'quick' => 'all', 'task_id' => null))); ?>">목록</a>
-          <a class="<?php echo $viewMode === 'backlog' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'backlog', 'section' => 'pending', 'quick' => 'pending', 'task_id' => null))); ?>">대기 업무</a>
-          <a class="<?php echo $section === 'settings' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'settings', 'view' => 'settings', 'task_id' => null))); ?>">설정</a>
+          <a class="<?php echo $section === 'home' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'home', 'space_project_id' => null, 'task_id' => null))); ?>">프로젝트 홈</a>
+          <?php if (is_array($selectedSpace)): ?>
+            <a class="<?php echo $section === 'summary' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'summary', 'view_mode' => 'board', 'task_id' => null))); ?>">Summary</a>
+            <a class="<?php echo $section === 'board' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'board', 'section' => 'board', 'task_id' => null))); ?>">Board</a>
+            <a class="<?php echo $section === 'list' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('view_mode' => 'list', 'section' => 'list', 'quick' => 'all', 'task_id' => null))); ?>">List</a>
+            <a class="<?php echo $section === 'settings' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'settings', 'view' => 'settings', 'task_id' => null))); ?>">Settings</a>
+          <?php endif; ?>
         </div>
         <?php if ($canCreateCollab): ?>
+          <button type="button" class="pa-btn" data-pa-modal-open="project">프로젝트 만들기</button>
+        <?php endif; ?>
+        <?php if ($canCreateCollab && is_array($selectedSpace)): ?>
           <button type="button" class="pa-btn pa-btn-primary" data-pa-modal-open="create">업무 만들기</button>
         <?php endif; ?>
         <a class="pa-btn" href="?r=공무&tab=collaboration#public-affairs-collaboration" target="_blank" rel="noopener" title="공무 협업툴 새 창으로 열기">새 창으로 열기</a>
@@ -292,14 +396,21 @@ $sampleCards = array(
         <div class="pa-sidebar-sub">업무카드 전용 보드</div>
       </div>
       <nav class="pa-side-nav">
-        <a class="pa-side-link <?php echo $section === 'board' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'board', 'view_mode' => 'board', 'quick' => 'hide_done', 'task_id' => null))); ?>">보드 <span class="pa-side-count"><?php echo (int)$summary['all']; ?></span></a>
-        <a class="pa-side-link <?php echo $section === 'pending' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'pending', 'view_mode' => 'backlog', 'quick' => 'pending', 'task_id' => null))); ?>">대기 업무</a>
-        <a class="pa-side-link <?php echo $section === 'mine' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'mine', 'view_mode' => 'board', 'quick' => 'mine', 'task_id' => null))); ?>">내 담당 <span class="pa-side-count"><?php echo (int)$summary['mine']; ?></span></a>
-        <a class="pa-side-link <?php echo $section === 'today' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'today', 'view_mode' => 'board', 'quick' => 'today', 'task_id' => null))); ?>">오늘 마감 <span class="pa-side-count"><?php echo (int)$summary['today']; ?></span></a>
-        <a class="pa-side-link <?php echo $section === 'delayed' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'delayed', 'view_mode' => 'board', 'quick' => 'delayed', 'task_id' => null))); ?>">지연 <span class="pa-side-count"><?php echo (int)$summary['delayed']; ?></span></a>
-        <a class="pa-side-link <?php echo $section === 'done' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'done', 'view_mode' => 'board', 'quick' => 'done', 'task_id' => null))); ?>">완료 <span class="pa-side-count"><?php echo (int)$summary['done']; ?></span></a>
-        <a class="pa-side-link <?php echo $section === 'all' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'all', 'view_mode' => 'board', 'quick' => 'all', 'task_id' => null))); ?>">모든 업무</a>
-        <a class="pa-side-link <?php echo $section === 'settings' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'settings', 'view' => 'settings', 'task_id' => null))); ?>">설정</a>
+        <a class="pa-side-link <?php echo $section === 'home' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'home', 'space_project_id' => null, 'task_id' => null))); ?>">프로젝트 홈 <span class="pa-side-count"><?php echo (int)$projectHomeSummary['total']; ?></span></a>
+        <?php if (is_array($selectedSpace)): ?>
+          <div class="pa-side-project"><?php echo h(isset($selectedSpace['name']) ? $selectedSpace['name'] : '-'); ?></div>
+          <a class="pa-side-link <?php echo $section === 'summary' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'summary', 'view_mode' => 'board', 'task_id' => null))); ?>">Summary</a>
+          <a class="pa-side-link <?php echo $section === 'list' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'list', 'view_mode' => 'list', 'quick' => 'all', 'task_id' => null))); ?>">List</a>
+          <a class="pa-side-link <?php echo $section === 'board' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'board', 'view_mode' => 'board', 'quick' => 'hide_done', 'task_id' => null))); ?>">Board <span class="pa-side-count"><?php echo (int)$summary['all']; ?></span></a>
+          <a class="pa-side-link <?php echo $section === 'calendar' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'calendar', 'view_mode' => 'board', 'task_id' => null))); ?>">Calendar</a>
+          <a class="pa-side-link <?php echo $section === 'timeline' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'timeline', 'view_mode' => 'board', 'task_id' => null))); ?>">Timeline</a>
+          <a class="pa-side-link <?php echo $section === 'files' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'files', 'view_mode' => 'board', 'task_id' => null))); ?>">Files</a>
+          <a class="pa-side-link <?php echo $section === 'activity' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'activity', 'view_mode' => 'board', 'task_id' => null))); ?>">Activity</a>
+          <a class="pa-side-link <?php echo $section === 'reports' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'reports', 'view_mode' => 'board', 'task_id' => null))); ?>">Reports</a>
+          <a class="pa-side-link <?php echo $section === 'settings' ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => 'settings', 'view' => 'settings', 'task_id' => null))); ?>">Settings</a>
+        <?php else: ?>
+          <div class="pa-muted" style="font-size:12px;padding:8px 10px;">프로젝트를 선택하면 Summary/List/Board가 열립니다.</div>
+        <?php endif; ?>
       </nav>
     </aside>
 
@@ -314,9 +425,67 @@ $sampleCards = array(
         <div class="border rounded-2xl p-4 font-bold <?php echo h($flashClass); ?>"><?php echo h(isset($flash['message']) ? $flash['message'] : ''); ?></div>
       <?php endif; ?>
 
-      <?php if ($section === 'settings'): ?>
+      <?php if ($section === 'home'): ?>
+        <section class="pa-project-home">
+          <div class="pa-home-hero">
+            <div>
+              <div class="pa-title">공무 협업툴 프로젝트 홈</div>
+              <div class="pa-desc">기존 CPMS 공무 프로젝트를 Space로 사용하고, 계약 전 업무는 "(가제)" Space로 먼저 시작합니다.</div>
+            </div>
+            <form method="get" action="" class="pa-home-search">
+              <input type="hidden" name="r" value="공무">
+              <input type="hidden" name="tab" value="collaboration">
+              <input type="hidden" name="section" value="home">
+              <input class="pa-field" name="project_keyword" value="<?php echo h(isset($_GET['project_keyword']) ? (string)$_GET['project_keyword'] : ''); ?>" placeholder="프로젝트명, 발주처, 담당자 검색">
+              <button type="submit" class="pa-btn pa-btn-dark">검색</button>
+              <?php if ($canCreateCollab): ?><button type="button" class="pa-btn pa-btn-primary" data-pa-modal-open="project">프로젝트 만들기</button><?php endif; ?>
+            </form>
+          </div>
+
+          <div class="pa-summary">
+            <div class="pa-summary-card"><span>전체 프로젝트</span><b><?php echo (int)$projectHomeSummary['total']; ?></b></div>
+            <div class="pa-summary-card"><span>정식 프로젝트</span><b><?php echo (int)$projectHomeSummary['official']; ?></b></div>
+            <div class="pa-summary-card"><span>가제 프로젝트</span><b><?php echo (int)$projectHomeSummary['draft']; ?></b></div>
+            <div class="pa-summary-card"><span>지연 업무 있는 프로젝트</span><b><?php echo (int)$projectHomeSummary['delayed_projects']; ?></b></div>
+            <div class="pa-summary-card"><span>오늘 마감 업무</span><b><?php echo (int)$projectHomeSummary['today_tasks']; ?></b></div>
+          </div>
+
+          <?php pa_project_section('최근 프로젝트', $recentProjects, '표시할 최근 프로젝트가 없습니다.'); ?>
+          <?php pa_project_section('즐겨찾기', $favoriteProjects, '즐겨찾기한 프로젝트가 없습니다.'); ?>
+          <?php pa_project_section('정식 프로젝트', $officialProjects, '정식 프로젝트가 없습니다.'); ?>
+          <?php pa_project_section('가제 프로젝트', $draftProjects, '가제 프로젝트가 없습니다. 프로젝트 만들기로 계약 전 업무를 시작할 수 있습니다.'); ?>
+        </section>
+      <?php elseif ($section === 'settings'): ?>
         <section class="pa-panel-card">
           <div class="pa-panel-title">공무 협업툴 설정</div>
+          <?php if (is_array($selectedSpace)): ?>
+            <div class="pa-panel-card" style="margin-bottom:14px;">
+              <div class="pa-panel-title">프로젝트 Settings</div>
+              <div class="pa-desc"><?php echo h(isset($selectedSpace['name']) ? $selectedSpace['name'] : '-'); ?> · <?php echo (isset($selectedSpace['is_draft']) && (int)$selectedSpace['is_draft'] === 1) ? '가제 프로젝트' : '정식 프로젝트'; ?></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                <a class="pa-btn" href="<?php echo h('?r=project/detail&id=' . (int)$spaceProjectId); ?>" target="_blank" rel="noopener">공무 프로젝트 상세보기</a>
+                <a class="pa-btn" href="<?php echo h(pa_collab_url(array('section' => 'summary', 'task_id' => null))); ?>">Summary로 돌아가기</a>
+              </div>
+              <?php if ($canManageCollab && isset($selectedSpace['is_draft']) && (int)$selectedSpace['is_draft'] === 1): ?>
+                <form method="post" action="?r=project/collaboration_action" class="pa-form-grid" style="margin-top:14px;">
+                  <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                  <input type="hidden" name="action" value="project_convert">
+                  <input type="hidden" name="project_id" value="<?php echo (int)$spaceProjectId; ?>">
+                  <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array('section' => 'settings'))); ?>">
+                  <div class="full"><div class="pa-draft-banner">정식 전환 시 "(가제)" prefix가 제거되고, 이후 경영현황/공사섹션 흐름에 포함됩니다.</div></div>
+                  <div><label class="pa-muted">프로젝트명</label><input name="name" class="pa-field" value="<?php echo h(cpms_public_affairs_collab_official_project_name(isset($selectedSpace['name']) ? $selectedSpace['name'] : '')); ?>"></div>
+                  <div><label class="pa-muted">상태</label><select name="status" class="pa-field"><option value="계약중">계약중</option><option value="진행중">진행중</option><option value="대기중">대기중</option></select></div>
+                  <div><label class="pa-muted">발주처</label><input name="client" class="pa-field" value="<?php echo h(isset($selectedSpace['client']) ? $selectedSpace['client'] : ''); ?>"></div>
+                  <div><label class="pa-muted">시공사</label><input name="contractor" class="pa-field" value="<?php echo h(isset($selectedSpace['contractor']) ? $selectedSpace['contractor'] : ''); ?>"></div>
+                  <div><label class="pa-muted">공사 시작일</label><input type="date" name="start_date" class="pa-field" value="<?php echo h(isset($selectedSpace['start_date']) ? $selectedSpace['start_date'] : ''); ?>"></div>
+                  <div><label class="pa-muted">공사 종료일</label><input type="date" name="end_date" class="pa-field" value="<?php echo h(isset($selectedSpace['end_date']) ? $selectedSpace['end_date'] : ''); ?>"></div>
+                  <div><label class="pa-muted">계약금액</label><input name="contract_amount" class="pa-field" value="<?php echo h(isset($selectedSpace['contract_amount']) ? $selectedSpace['contract_amount'] : ''); ?>"></div>
+                  <div><label class="pa-muted">공사 담당자</label><select name="main_manager_id" class="pa-field"><?php pa_employee_options($employees, $selectedProjectMainManagerId, false); ?></select></div>
+                  <div class="full" style="display:flex;justify-content:flex-end;"><button type="submit" class="pa-btn pa-btn-primary">정식 프로젝트 전환</button></div>
+                </form>
+              <?php endif; ?>
+            </div>
+          <?php endif; ?>
           <?php if (!$canManageCollab): ?>
             <div class="pa-empty">설정은 관리자만 변경할 수 있습니다.</div>
           <?php else: ?>
@@ -359,6 +528,109 @@ $sampleCards = array(
           <?php endif; ?>
         </section>
       <?php else: ?>
+        <?php if (is_array($selectedSpace)): ?>
+          <section class="pa-space-header">
+            <div>
+              <div class="pa-space-title-line">
+                <span class="pa-space-type <?php echo (isset($selectedSpace['is_draft']) && (int)$selectedSpace['is_draft'] === 1) ? 'is-draft' : 'is-official'; ?>"><?php echo (isset($selectedSpace['is_draft']) && (int)$selectedSpace['is_draft'] === 1) ? '가제' : '정식'; ?></span>
+                <h2><?php echo h(isset($selectedSpace['name']) ? $selectedSpace['name'] : '-'); ?></h2>
+              </div>
+              <div class="pa-desc">
+                <?php echo h(isset($selectedSpace['client']) && trim((string)$selectedSpace['client']) !== '' ? $selectedSpace['client'] : '발주처 미입력'); ?>
+                · 담당 <?php echo h(isset($selectedSpace['manager_name']) && trim((string)$selectedSpace['manager_name']) !== '' ? $selectedSpace['manager_name'] : '-'); ?>
+                · 기간 <?php echo h((isset($selectedSpace['start_date']) && trim((string)$selectedSpace['start_date']) !== '' ? $selectedSpace['start_date'] : '-') . ' ~ ' . (isset($selectedSpace['end_date']) && trim((string)$selectedSpace['end_date']) !== '' ? $selectedSpace['end_date'] : '-')); ?>
+              </div>
+              <?php if (isset($selectedSpace['is_draft']) && (int)$selectedSpace['is_draft'] === 1): ?>
+                <div class="pa-draft-banner">이 프로젝트는 아직 정식 프로젝트가 아닙니다. 정식 전환 전에는 경영현황/공사섹션에 반영되지 않습니다.</div>
+              <?php endif; ?>
+            </div>
+            <div class="pa-space-header-actions">
+              <a class="pa-btn" href="<?php echo h('?r=project/detail&id=' . (int)$spaceProjectId); ?>" target="_blank" rel="noopener">프로젝트 상세</a>
+              <?php if (isset($selectedSpace['is_draft']) && (int)$selectedSpace['is_draft'] === 1): ?>
+                <a class="pa-btn pa-btn-primary" href="<?php echo h(pa_collab_url(array('section' => 'settings', 'task_id' => null))); ?>">정식 전환</a>
+              <?php endif; ?>
+            </div>
+          </section>
+
+          <nav class="pa-project-tabs">
+            <?php foreach (array('summary'=>'Summary','list'=>'List','board'=>'Board','calendar'=>'Calendar','timeline'=>'Timeline','files'=>'Files','activity'=>'Activity','reports'=>'Reports','settings'=>'Settings') as $tabKey => $tabLabel): ?>
+              <a class="<?php echo $section === $tabKey ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('section' => $tabKey, 'view_mode' => ($tabKey === 'list' ? 'list' : 'board'), 'quick' => ($tabKey === 'list' ? 'all' : 'hide_done'), 'task_id' => null))); ?>"><?php echo h($tabLabel); ?></a>
+            <?php endforeach; ?>
+          </nav>
+        <?php endif; ?>
+
+        <?php if ($section === 'summary'): ?>
+          <div class="pa-summary">
+            <div class="pa-summary-card"><span>전체 업무</span><b><?php echo (int)$selectedProjectStats['total']; ?></b></div>
+            <div class="pa-summary-card"><span>완료 업무</span><b><?php echo (int)$selectedProjectStats['done']; ?></b></div>
+            <div class="pa-summary-card"><span>진행중 업무</span><b><?php echo (int)$selectedProjectStats['active']; ?></b></div>
+            <div class="pa-summary-card"><span>지연 업무</span><b><?php echo (int)$selectedProjectStats['delayed']; ?></b></div>
+            <div class="pa-summary-card"><span>오늘 마감</span><b><?php echo (int)$selectedProjectStats['today']; ?></b></div>
+          </div>
+          <section class="pa-summary-grid">
+            <div class="pa-panel-card">
+              <div class="pa-panel-title">상태별 요약</div>
+              <?php foreach ($settings['statuses'] as $status): $count = isset($selectedProjectStats['by_status'][$status]) ? (int)$selectedProjectStats['by_status'][$status] : 0; ?>
+                <div class="pa-report-row"><span><?php echo h($status); ?></span><b><?php echo $count; ?></b><i style="width:<?php echo $selectedProjectStats['total'] > 0 ? min(100, round($count * 100 / $selectedProjectStats['total'])) : 0; ?>%"></i></div>
+              <?php endforeach; ?>
+            </div>
+            <div class="pa-panel-card">
+              <div class="pa-panel-title">우선순위별 요약</div>
+              <?php foreach ($settings['priorities'] as $priority): $count = isset($selectedProjectStats['by_priority'][$priority]) ? (int)$selectedProjectStats['by_priority'][$priority] : 0; ?>
+                <div class="pa-report-row"><span><?php echo h($priority); ?></span><b><?php echo $count; ?></b><i style="width:<?php echo $selectedProjectStats['total'] > 0 ? min(100, round($count * 100 / $selectedProjectStats['total'])) : 0; ?>%"></i></div>
+              <?php endforeach; ?>
+            </div>
+            <div class="pa-panel-card">
+              <div class="pa-panel-title">최근 활동</div>
+              <?php if (count($selectedProjectActivities) === 0): ?><div class="pa-muted">프로젝트 활동이 없습니다.</div><?php endif; ?>
+              <?php foreach (array_slice($selectedProjectActivities, 0, 8) as $activity): ?><div class="pa-history"><b><?php echo h(isset($activity['action']) ? $activity['action'] : '-'); ?></b><div class="pa-muted"><?php echo h(isset($activity['actor_name']) ? $activity['actor_name'] : '-'); ?> · <?php echo h(isset($activity['created_at']) ? $activity['created_at'] : ''); ?></div></div><?php endforeach; ?>
+            </div>
+            <div class="pa-panel-card">
+              <div class="pa-panel-title">마감/영향 업무</div>
+              <div class="pa-prop">
+                <div class="pa-prop-row"><b>이번 주 마감</b><span><?php echo (int)$selectedProjectStats['week']; ?>건</span></div>
+                <div class="pa-prop-row"><b>계약 영향</b><span><?php echo (int)$selectedProjectStats['contract_impact']; ?>건</span></div>
+                <div class="pa-prop-row"><b>공기 영향</b><span><?php echo (int)$selectedProjectStats['schedule_impact']; ?>건</span></div>
+              </div>
+            </div>
+          </section>
+        <?php elseif ($section === 'calendar'): ?>
+          <section class="pa-panel-card">
+            <div class="pa-panel-title">Calendar</div>
+            <div class="pa-calendar-grid">
+              <?php foreach ($selectedProjectTasks as $task): if (!isset($task['due_date']) || trim((string)$task['due_date']) === '') continue; ?>
+                <a data-pa-detail-link class="pa-calendar-item" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h($task['due_date']); ?></b><span><?php echo h(cpms_public_affairs_collab_task_no($task)); ?> <?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span></a>
+              <?php endforeach; ?>
+            </div>
+          </section>
+        <?php elseif ($section === 'timeline'): ?>
+          <section class="pa-panel-card">
+            <div class="pa-panel-title">Timeline</div>
+            <div class="pa-timeline-list">
+              <?php foreach ($selectedProjectTasks as $task): $start = isset($task['start_date']) && trim((string)$task['start_date']) !== '' ? $task['start_date'] : (isset($task['due_date']) ? $task['due_date'] : ''); $end = isset($task['due_date']) ? $task['due_date'] : ''; if ($start === '' && $end === '') continue; ?>
+                <a data-pa-detail-link class="pa-timeline-row" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><span><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></span><b><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></b><em><?php echo h(($start !== '' ? $start : '-') . ' ~ ' . ($end !== '' ? $end : '-')); ?></em></a>
+              <?php endforeach; ?>
+            </div>
+          </section>
+        <?php elseif ($section === 'files'): ?>
+          <section class="pa-table-wrap"><table class="pa-table"><thead><tr><th>업무번호</th><th>파일명</th><th>업로드자</th><th>업로드일시</th><th>크기</th><th>다운로드</th></tr></thead><tbody>
+            <?php $fileShown = 0; foreach ($selectedProjectTasks as $task): foreach (cpms_public_affairs_collab_files(isset($task['id']) ? (int)$task['id'] : 0) as $file): $fileShown++; ?><tr><td><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></td><td><?php echo h(isset($file['original_name']) ? $file['original_name'] : 'file'); ?></td><td><?php echo h(isset($file['uploaded_by_name']) ? $file['uploaded_by_name'] : '-'); ?></td><td><?php echo h(isset($file['uploaded_at']) ? $file['uploaded_at'] : '-'); ?></td><td><?php echo h(pa_file_size(isset($file['file_size']) ? $file['file_size'] : 0)); ?></td><td><a class="pa-btn" href="?r=project/collaboration_file&id=<?php echo (int)$file['id']; ?>">다운로드</a></td></tr><?php endforeach; endforeach; ?>
+            <?php if ($fileShown === 0): ?><tr><td colspan="6" class="pa-muted">프로젝트 파일이 없습니다.</td></tr><?php endif; ?>
+          </tbody></table></section>
+        <?php elseif ($section === 'activity'): ?>
+          <section class="pa-panel-card">
+            <div class="pa-panel-title">Activity</div>
+            <?php if (count($selectedProjectActivities) === 0): ?><div class="pa-muted">프로젝트 활동이 없습니다.</div><?php endif; ?>
+            <?php foreach ($selectedProjectActivities as $activity): ?><div class="pa-history"><b><?php echo h(isset($activity['action']) ? $activity['action'] : '-'); ?></b><div class="pa-muted"><?php echo h(isset($activity['actor_name']) ? $activity['actor_name'] : '-'); ?> · <?php echo h(isset($activity['created_at']) ? $activity['created_at'] : ''); ?></div><div><?php echo h(isset($activity['message']) ? $activity['message'] : ''); ?></div></div><?php endforeach; ?>
+          </section>
+        <?php elseif ($section === 'reports'): ?>
+          <section class="pa-summary-grid">
+            <div class="pa-panel-card"><div class="pa-panel-title">완료율</div><div class="pa-big-number"><?php echo $selectedProjectStats['total'] > 0 ? (int)round($selectedProjectStats['done'] * 100 / $selectedProjectStats['total']) : 0; ?>%</div></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">지연 업무</div><div class="pa-big-number"><?php echo (int)$selectedProjectStats['delayed']; ?></div></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">담당자별 업무 수</div><?php foreach ($selectedProjectStats['by_assignee'] as $name => $count): ?><div class="pa-report-row"><span><?php echo h($name); ?></span><b><?php echo (int)$count; ?></b><i style="width:<?php echo $selectedProjectStats['total'] > 0 ? min(100, round($count * 100 / $selectedProjectStats['total'])) : 0; ?>%"></i></div><?php endforeach; ?></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">계약/공기 영향</div><div class="pa-prop"><div class="pa-prop-row"><b>계약 영향</b><span><?php echo (int)$selectedProjectStats['contract_impact']; ?>건</span></div><div class="pa-prop-row"><b>공기 영향</b><span><?php echo (int)$selectedProjectStats['schedule_impact']; ?>건</span></div></div></div>
+          </section>
+        <?php else: ?>
         <div class="pa-summary">
           <div class="pa-summary-card"><span>전체 업무</span><b><?php echo (int)$summary['all']; ?></b></div>
           <div class="pa-summary-card"><span>내 담당</span><b><?php echo (int)$summary['mine']; ?></b></div>
@@ -376,6 +648,7 @@ $sampleCards = array(
           <form method="get" action="" class="pa-filter-grid">
             <input type="hidden" name="r" value="공무">
             <input type="hidden" name="tab" value="collaboration">
+            <input type="hidden" name="space_project_id" value="<?php echo (int)$spaceProjectId; ?>">
             <input type="hidden" name="section" value="<?php echo h($section); ?>">
             <input type="hidden" name="view_mode" value="<?php echo h($viewMode); ?>">
             <input type="hidden" name="quick" value="<?php echo h($quickFilter); ?>">
@@ -572,7 +845,9 @@ $sampleCards = array(
           <?php if ($canEditSelected): ?>
             <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;flex-wrap:wrap;">
               <button type="submit" name="state_action" value="complete" class="pa-btn pa-btn-primary">완료 처리</button>
+              <?php if (in_array('반려', $settings['statuses'], true)): ?>
               <button type="submit" name="state_action" value="reject" class="pa-btn">반려 처리</button>
+              <?php endif; ?>
               <button type="submit" name="state_action" value="hold" class="pa-btn">보류 처리</button>
               <button type="submit" class="pa-btn pa-btn-dark">변경 저장</button>
             </div>
@@ -589,6 +864,7 @@ $sampleCards = array(
             <div class="pa-prop-row"><b>현장명</b><span><input name="project_name" value="<?php echo h(isset($selectedTask['project_name']) ? $selectedTask['project_name'] : ''); ?>" <?php echo $canEditSelected ? '' : 'readonly'; ?> class="pa-field"></span></div>
             <div class="pa-prop-row"><b>상태</b><span><select name="status" <?php echo $canEditSelected ? '' : 'disabled'; ?> class="pa-field"><?php foreach ($settings['statuses'] as $status): ?><option value="<?php echo h($status); ?>" <?php echo pa_selected(isset($selectedTask['status']) ? $selectedTask['status'] : '', $status); ?>><?php echo h($status); ?></option><?php endforeach; ?></select></span></div>
             <div class="pa-prop-row"><b>우선순위</b><span><select name="priority" <?php echo $canEditSelected ? '' : 'disabled'; ?> class="pa-field"><?php foreach ($settings['priorities'] as $priority): ?><option value="<?php echo h($priority); ?>" <?php echo pa_selected(isset($selectedTask['priority']) ? $selectedTask['priority'] : '', $priority); ?>><?php echo h($priority); ?></option><?php endforeach; ?></select></span></div>
+            <div class="pa-prop-row"><b>시작일</b><span><input type="date" name="start_date" value="<?php echo h(isset($selectedTask['start_date']) ? $selectedTask['start_date'] : ''); ?>" <?php echo $canEditSelected ? '' : 'readonly'; ?> class="pa-field"></span></div>
             <div class="pa-prop-row"><b>마감일</b><span><input type="date" name="due_date" value="<?php echo h(isset($selectedTask['due_date']) ? $selectedTask['due_date'] : ''); ?>" <?php echo $canEditSelected ? '' : 'readonly'; ?> class="pa-field"></span></div>
             <div class="pa-prop-row"><b>마감시간</b><span><input type="time" name="due_time" value="<?php echo h(isset($selectedTask['due_time']) ? $selectedTask['due_time'] : ''); ?>" <?php echo $canEditSelected ? '' : 'readonly'; ?> class="pa-field"></span></div>
             <div class="pa-prop-row"><b>관련 금액</b><span><input name="related_amount" value="<?php echo h(isset($selectedTask['related_amount']) ? $selectedTask['related_amount'] : ''); ?>" <?php echo $canEditSelected ? '' : 'readonly'; ?> class="pa-field"></span></div>
@@ -638,18 +914,21 @@ $sampleCards = array(
       <form method="post" action="?r=project/collaboration_action" enctype="multipart/form-data">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
         <input type="hidden" name="action" value="create">
-        <input type="hidden" name="status" value="요청">
+        <input type="hidden" name="status" value="할 일">
+        <input type="hidden" name="project_id" value="<?php echo (int)$spaceProjectId; ?>">
+        <input type="hidden" name="project_name" value="<?php echo h(is_array($selectedSpace) && isset($selectedSpace['name']) ? $selectedSpace['name'] : ''); ?>">
         <input type="hidden" name="return_url" value="?r=공무&tab=collaboration">
         <div class="pa-modal-body">
           <div class="pa-form-grid">
             <div><label class="pa-muted">업무유형</label><select name="task_type" class="pa-field"><?php foreach ($settings['task_types'] as $type): ?><option value="<?php echo h($type); ?>"><?php echo h($type); ?></option><?php endforeach; ?></select></div>
-            <div><label class="pa-muted">현장명/프로젝트명 *</label><input name="project_name" required class="pa-field" placeholder="예: 평택 P4 공무"></div>
+            <div><label class="pa-muted">프로젝트 Space</label><input class="pa-field" value="<?php echo h(is_array($selectedSpace) && isset($selectedSpace['name']) ? $selectedSpace['name'] : ''); ?>" readonly></div>
             <div class="full"><label class="pa-muted">제목 *</label><input name="title" required class="pa-field" placeholder="예: 변경계약 2차 내역 검토"></div>
             <div class="full"><label class="pa-muted">상세내용</label><textarea name="content" rows="5" class="pa-field" placeholder="필요한 검토 내용과 요청사항을 적어주세요."></textarea></div>
             <div><label class="pa-muted">요청자</label><select name="requester_employee_id" class="pa-field"><?php pa_employee_options($employees, isset($currentEmployee['id']) ? $currentEmployee['id'] : 0, false); ?></select></div>
             <div><label class="pa-muted">담당자 *</label><select name="assignee_employee_id" required class="pa-field"><option value="">선택하세요</option><?php pa_employee_options($employees, $defaultAssigneeId, false); ?></select></div>
             <div class="full"><label class="pa-muted">참조자</label><select name="reference_employee_ids[]" multiple class="pa-field" style="min-height:100px;"><?php pa_employee_options($employees, array(), true); ?></select></div>
             <div><label class="pa-muted">우선순위</label><select name="priority" class="pa-field"><?php foreach ($settings['priorities'] as $priority): ?><option value="<?php echo h($priority); ?>" <?php echo $priority === '보통' ? 'selected' : ''; ?>><?php echo h($priority); ?></option><?php endforeach; ?></select></div>
+            <div><label class="pa-muted">시작일</label><input type="date" name="start_date" class="pa-field"></div>
             <div><label class="pa-muted">마감일</label><input type="date" name="due_date" class="pa-field"></div>
             <div><label class="pa-muted">마감시간</label><input type="time" name="due_time" class="pa-field"></div>
             <div><label class="pa-muted">관련 금액</label><input name="related_amount" class="pa-field" placeholder="숫자만 입력"></div>
@@ -660,6 +939,33 @@ $sampleCards = array(
           </div>
         </div>
         <div class="pa-modal-foot"><button type="button" class="pa-btn" data-pa-modal-close="create">취소</button><button type="submit" class="pa-btn pa-btn-primary">업무카드 생성</button></div>
+      </form>
+    </div>
+  </div>
+<?php endif; ?>
+
+<?php if ($canCreateCollab): ?>
+  <div class="pa-modal" id="paProjectModal">
+    <div class="pa-modal-bg" data-pa-modal-close="project"></div>
+    <div class="pa-modal-box">
+      <div class="pa-modal-head"><div><div class="pa-title" style="font-size:21px;">프로젝트 만들기</div><div class="pa-desc">계약 전/입찰 단계 업무를 "(가제)" 프로젝트 Space로 시작합니다.</div></div><button type="button" class="pa-btn" data-pa-modal-close="project">닫기</button></div>
+      <form method="post" action="?r=project/collaboration_action">
+        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+        <input type="hidden" name="action" value="project_create">
+        <input type="hidden" name="return_url" value="?r=공무&tab=collaboration&section=home">
+        <div class="pa-modal-body">
+          <div class="pa-form-grid">
+            <div class="full"><label class="pa-muted">프로젝트명 *</label><input name="project_name" required class="pa-field" placeholder="예: 삼성전자 FAB 배관공사 검토"></div>
+            <div class="full"><label class="pa-muted">설명</label><textarea name="description" rows="4" class="pa-field" placeholder="입찰/계약 검토 배경, 협업 목적을 적어주세요."></textarea></div>
+            <div><label class="pa-muted">발주처/거래처</label><input name="client" class="pa-field"></div>
+            <div><label class="pa-muted">담당자</label><select name="manager_employee_id" class="pa-field"><?php pa_employee_options($employees, isset($currentEmployee['id']) ? $currentEmployee['id'] : 0, false); ?></select></div>
+            <div><label class="pa-muted">시작 예정일</label><input type="date" name="start_date" class="pa-field"></div>
+            <div><label class="pa-muted">종료 예정일</label><input type="date" name="end_date" class="pa-field"></div>
+            <div><label class="pa-muted">단계</label><select name="phase" class="pa-field"><option value="입찰검토">입찰검토</option><option value="견적중">견적중</option><option value="계약검토">계약검토</option><option value="보류">보류</option><option value="정식전환대기">정식전환대기</option></select></div>
+            <label class="pa-check"><input type="checkbox" name="favorite" value="1"> 즐겨찾기에 추가</label>
+          </div>
+        </div>
+        <div class="pa-modal-foot"><button type="button" class="pa-btn" data-pa-modal-close="project">취소</button><button type="submit" class="pa-btn pa-btn-primary">가제 프로젝트 생성</button></div>
       </form>
     </div>
   </div>

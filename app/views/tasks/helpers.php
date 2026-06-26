@@ -466,7 +466,7 @@ function cpms_tasks_fetch_projects($pdo)
     $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':projects';
     if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     try {
-        $st = $pdo->query("SELECT id, name FROM cpms_projects ORDER BY id DESC");
+        $st = $pdo->query("SELECT id, name FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id DESC");
         $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
     } catch (Exception $e) {
         $rows = array();

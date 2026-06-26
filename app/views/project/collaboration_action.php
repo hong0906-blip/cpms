@@ -91,13 +91,39 @@ if ($action === 'create') {
         cpms_public_affairs_collab_action_finish(false, '공무 협업툴 업무 등록 권한이 없습니다.', '?r=공무&tab=collaboration');
     }
     $result = cpms_public_affairs_collab_create_task($pdo, $_POST, $_FILES, $actor, $projects, $employees);
-    $returnUrl = '?r=공무&tab=collaboration';
+    $createProjectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
+    $returnUrl = $createProjectId > 0 ? '?r=공무&tab=collaboration&space_project_id=' . $createProjectId . '&section=board' : '?r=공무&tab=collaboration';
     if (isset($result['task_id']) && (int)$result['task_id'] > 0) {
-        $_POST['return_url'] = '?r=공무&tab=collaboration&task_id=' . (int)$result['task_id'];
+        $_POST['return_url'] = $returnUrl . '&task_id=' . (int)$result['task_id'];
     }
     $extra = array();
     if (!empty($result['ok']) && isset($result['task_id'])) $extra = cpms_public_affairs_collab_action_task_extra((int)$result['task_id']);
     cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', $returnUrl, $extra);
+}
+
+if ($action === 'project_create') {
+    // 공무 협업툴 프로젝트 홈: 새 Space는 기존 cpms_projects에 "(가제)" 프로젝트로 저장한다.
+    if (!cpms_public_affairs_collab_can_create_task()) {
+        cpms_public_affairs_collab_action_finish(false, '가제 프로젝트 생성 권한이 없습니다.', '?r=공무&tab=collaboration');
+    }
+    $result = cpms_public_affairs_collab_create_draft_project($pdo, $_POST, $actor, $employees);
+    $projectId = isset($result['project_id']) ? (int)$result['project_id'] : 0;
+    $fallback = $projectId > 0 ? '?r=공무&tab=collaboration&space_project_id=' . $projectId . '&section=summary' : '?r=공무&tab=collaboration';
+    if (!empty($result['ok'])) $_POST['return_url'] = $fallback;
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', $fallback, array('project_id' => $projectId));
+}
+
+if ($action === 'project_convert') {
+    // 공무 협업툴 프로젝트 Settings/공무 프로젝트 상세: "(가제)" 프로젝트를 정식 CPMS 프로젝트로 전환한다.
+    if (!cpms_public_affairs_collab_is_admin_user()) {
+        cpms_public_affairs_collab_action_finish(false, '정식 프로젝트 전환 권한이 없습니다.', '?r=공무&tab=collaboration');
+    }
+    $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
+    $result = cpms_public_affairs_collab_convert_draft_project($pdo, $projectId, $_POST, $actor);
+    $fallback = $projectId > 0 ? '?r=공무&tab=collaboration&space_project_id=' . $projectId . '&section=settings' : '?r=공무&tab=collaboration';
+    $returnUrl = isset($_POST['return_url']) && trim((string)$_POST['return_url']) !== '' ? trim((string)$_POST['return_url']) : $fallback;
+    $_POST['return_url'] = $returnUrl;
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', $fallback, array('project_id' => $projectId));
 }
 
 if ($action === 'settings') {

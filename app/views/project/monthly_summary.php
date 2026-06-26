@@ -431,7 +431,7 @@ if (!$pdo) {
 } else {
     try {
         cpms_monthly_summary_ensure_remark_table($pdo);
-        $st = $pdo->query('SELECT id, name, start_date, end_date, contract_amount FROM cpms_projects ORDER BY id DESC');
+        $st = $pdo->query("SELECT id, name, start_date, end_date, contract_amount FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id DESC");
         $projects = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($projects)) $projects = array();
         $monthOptions = cpms_monthly_summary_month_options($projects, $selectedYm);

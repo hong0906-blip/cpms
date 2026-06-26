@@ -124,6 +124,7 @@ function cpms_project_drive_sync_load_projects($pdo, $scope, $projectId) {
         $params[':project_id'] = $projectId;
     }
 
+    $where[] = "name NOT LIKE '(가제)%'";
     $sql = 'SELECT * FROM cpms_projects';
     if (count($where) > 0) $sql .= ' WHERE ' . implode(' AND ', $where);
     $sql .= ' ORDER BY id ASC';
@@ -163,7 +164,7 @@ function cpms_project_drive_sync_backup_projects($pdo, $userContext) {
     }
 
     try {
-        $st = $pdo->query('SELECT * FROM cpms_projects ORDER BY id ASC');
+        $st = $pdo->query("SELECT * FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id ASC");
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($rows)) $rows = array();
     } catch (Exception $e) {

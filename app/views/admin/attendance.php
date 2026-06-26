@@ -97,9 +97,11 @@ if ($pdo) {
 
     try {
         $projectSql = "SELECT id, name FROM cpms_projects";
+        $projectWhere = array("name NOT LIKE '(가제)%'");
         if (cpms_column_exists($pdo, 'cpms_projects', 'is_deleted')) {
-            $projectSql .= " WHERE is_deleted = 0";
+            $projectWhere[] = "is_deleted = 0";
         }
+        $projectSql .= " WHERE " . implode(" AND ", $projectWhere);
         $projectSql .= " ORDER BY name ASC";
         $projectOptions = $pdo->query($projectSql)->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($projectOptions)) $projectOptions = array();

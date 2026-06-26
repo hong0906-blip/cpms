@@ -61,7 +61,7 @@ if (!$canViewAllProjects) {
 $projects = array();
 try {
     if ($canViewAllProjects) {
-        $st = $pdo->query("SELECT * FROM cpms_projects ORDER BY id DESC");
+        $st = $pdo->query("SELECT * FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id DESC");
         $projects = $st->fetchAll();
     } else {
         $sql = "SELECT DISTINCT p.*
@@ -69,6 +69,7 @@ try {
                 JOIN cpms_project_members pm ON pm.project_id = p.id
                 WHERE pm.employee_id = :eid
                   AND LOWER(TRIM(pm.role)) IN ('main','sub')
+                  AND p.name NOT LIKE '(가제)%'
                 ORDER BY p.id DESC";
         $st = $pdo->prepare($sql);
         $st->bindValue(':eid', $employeeId, \PDO::PARAM_INT);

@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -101,11 +102,17 @@ $startDateVal = ($startDate !== '') ? $startDate : null;
 $endDateVal = ($endDate !== '') ? $endDate : null;
 
 try {
-    $stExists = $pdo->prepare("SELECT id FROM cpms_projects WHERE id = :id LIMIT 1");
+    $stExists = $pdo->prepare("SELECT * FROM cpms_projects WHERE id = :id LIMIT 1");
     $stExists->bindValue(':id', $projectId, PDO::PARAM_INT);
     $stExists->execute();
-    if (!$stExists->fetch()) {
+    $existingProject = $stExists->fetch(PDO::FETCH_ASSOC);
+    if (!$existingProject) {
         cpms_project_update_fail_redirect($projectId, '프로젝트를 찾을 수 없습니다.');
+    }
+    $collabMetaStore = cpms_public_affairs_collab_load_project_meta();
+    if (cpms_public_affairs_collab_is_draft_project($existingProject, $collabMetaStore)) {
+        // 공무 협업툴 가제 프로젝트: 일반 수정에서는 "(가제)" 상태를 유지하고, 정식 전환 액션에서만 prefix를 제거한다.
+        $name = cpms_public_affairs_collab_draft_project_name($name);
     }
     if ($mainManagerId <= 0) {
         cpms_project_update_fail_redirect($projectId, '공사 담당자가 선택되지 않았고 기존 담당자도 없습니다.');

@@ -734,7 +734,7 @@ function cpms_safety_health_drive_select_admin_project($pdo, $projectId) {
             $row = $st->fetch(PDO::FETCH_ASSOC);
             if (is_array($row)) return $row;
         }
-        $st2 = $pdo->query("SELECT * FROM cpms_projects ORDER BY id ASC LIMIT 1");
+        $st2 = $pdo->query("SELECT * FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id ASC LIMIT 1");
         $row2 = $st2 ? $st2->fetch(PDO::FETCH_ASSOC) : false;
         return is_array($row2) ? $row2 : false;
     } catch (Exception $e) {

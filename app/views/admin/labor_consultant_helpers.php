@@ -228,7 +228,7 @@ if (!function_exists('cpms_labor_consultant_list_projects')) {
         $rows = array();
         if (!$pdo) return $rows;
         try {
-            $st = $pdo->query("SELECT * FROM cpms_projects ORDER BY name ASC, id ASC");
+            $st = $pdo->query("SELECT * FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY name ASC, id ASC");
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
             if (!is_array($rows)) $rows = array();
         } catch (Exception $e) {

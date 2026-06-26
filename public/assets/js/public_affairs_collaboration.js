@@ -312,7 +312,11 @@
     html += '<div class="full"><input name="title" value="' + escapeHtml(task.title || '') + '"' + readonly + ' class="pa-field"></div>';
     html += '<div class="full"><textarea name="content" rows="8"' + readonly + ' class="pa-field" placeholder="상세내용">' + escapeHtml(task.content || '') + '</textarea></div>';
     html += '<div class="full"><input name="document_link" value="' + escapeHtml(task.document_link || '') + '"' + readonly + ' class="pa-field" placeholder="관련 문서 링크"></div></div>';
-    if (canEdit) html += '<div class="pa-detail-actions"><button type="submit" name="state_action" value="complete" class="pa-btn pa-btn-primary">완료 처리</button><button type="submit" name="state_action" value="reject" class="pa-btn">반려 처리</button><button type="submit" name="state_action" value="hold" class="pa-btn">보류 처리</button><button type="submit" class="pa-btn pa-btn-dark">변경 저장</button></div>';
+    if (canEdit) {
+      html += '<div class="pa-detail-actions"><button type="submit" name="state_action" value="complete" class="pa-btn pa-btn-primary">완료 처리</button>';
+      if ((cfg.statuses || []).indexOf('반려') !== -1) html += '<button type="submit" name="state_action" value="reject" class="pa-btn">반려 처리</button>';
+      html += '<button type="submit" name="state_action" value="hold" class="pa-btn">보류 처리</button><button type="submit" class="pa-btn pa-btn-dark">변경 저장</button></div>';
+    }
     html += '</div><div class="pa-panel-card"><div class="pa-panel-title">속성</div><div class="pa-prop">';
     html += '<div class="pa-prop-row"><b>업무번호</b><span>' + escapeHtml(task.task_no || '-') + '</span></div>';
     html += '<div class="pa-prop-row"><b>담당자</b><span><select name="assignee_employee_id"' + disabled + ' class="pa-field">' + employeeOptions(task.assignee_employee_id, false) + '</select></span></div>';
@@ -322,6 +326,7 @@
     html += '<div class="pa-prop-row"><b>현장명</b><span><input name="project_name" value="' + escapeHtml(task.project_name || '') + '"' + readonly + ' class="pa-field"></span></div>';
     html += '<div class="pa-prop-row"><b>상태</b><span><select name="status"' + disabled + ' class="pa-field">' + optionHtml(cfg.statuses || [], task.status) + '</select></span></div>';
     html += '<div class="pa-prop-row"><b>우선순위</b><span><select name="priority"' + disabled + ' class="pa-field">' + optionHtml(cfg.priorities || [], task.priority) + '</select></span></div>';
+    html += '<div class="pa-prop-row"><b>시작일</b><span><input type="date" name="start_date" value="' + escapeHtml(task.start_date || '') + '"' + readonly + ' class="pa-field"></span></div>';
     html += '<div class="pa-prop-row"><b>마감일</b><span><input type="date" name="due_date" value="' + escapeHtml(task.due_date || '') + '"' + readonly + ' class="pa-field"></span></div>';
     html += '<div class="pa-prop-row"><b>마감시간</b><span><input type="time" name="due_time" value="' + escapeHtml(task.due_time || '') + '"' + readonly + ' class="pa-field"></span></div>';
     html += '<div class="pa-prop-row"><b>관련 금액</b><span><input name="related_amount" value="' + escapeHtml(task.related_amount || '') + '"' + readonly + ' class="pa-field"></span></div>';
@@ -394,6 +399,10 @@
   function handleAjaxResult(json, form) {
     showNotice(json.message, !!json.ok);
     if (!json.ok) return;
+    if (json.redirect_url && form && form.elements && form.elements['action'] && form.elements['action'].value === 'project_create') {
+      window.location.href = json.redirect_url + hashValue;
+      return;
+    }
     if (json.task) {
       addOrUpdateCard(json);
       renderDetail(json);
@@ -402,6 +411,9 @@
       var modal = document.getElementById('paCreateModal');
       removeClass(modal, 'is-open');
       form.reset();
+    }
+    if (form && form.elements && form.elements['action'] && form.elements['action'].value === 'project_convert' && json.redirect_url) {
+      window.location.href = json.redirect_url + hashValue;
     }
   }
 
@@ -510,9 +522,14 @@
     ev = ev || window.event;
     var key = ev.key || ev.keyCode;
     var createModal = document.getElementById('paCreateModal');
+    var projectModal = document.getElementById('paProjectModal');
     if (key === 'Escape' || key === 27) {
       if (createModal && hasClass(createModal, 'is-open')) {
         removeClass(createModal, 'is-open');
+        return;
+      }
+      if (projectModal && hasClass(projectModal, 'is-open')) {
+        removeClass(projectModal, 'is-open');
         return;
       }
       var detail = appModal ? appModal.querySelector('.pa-detail-panel') : null;
@@ -546,9 +563,22 @@
       ev.preventDefault();
       return false;
     }
+    var projectOpen = closest(target, '[data-pa-modal-open="project"]');
+    if (projectOpen) {
+      var projectModal = document.getElementById('paProjectModal');
+      addClass(projectModal, 'is-open');
+      ev.preventDefault();
+      return false;
+    }
     var createClose = closest(target, '[data-pa-modal-close="create"]');
     if (createClose) {
       removeClass(document.getElementById('paCreateModal'), 'is-open');
+      ev.preventDefault();
+      return false;
+    }
+    var projectClose = closest(target, '[data-pa-modal-close="project"]');
+    if (projectClose) {
+      removeClass(document.getElementById('paProjectModal'), 'is-open');
       ev.preventDefault();
       return false;
     }
