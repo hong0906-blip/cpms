@@ -751,7 +751,6 @@ function cpms_task_feed_for_employee($pdo, $employeeId, $employeeEmail, $employe
         cpms_task_feed_attendance_items_for_employee($pdo, $employeeId, $employeeMeta),
         cpms_task_feed_issue_items_for_employee($pdo, $employeeId, $employeeEmail),
         cpms_task_feed_safety_items_for_employee($pdo, $employeeId, $employeeEmail),
-        cpms_task_feed_public_affairs_collab_items_for_employee($pdo, $employeeId, $employeeEmail),
     ));
     return $cache[$cacheKey];
 }}

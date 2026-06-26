@@ -42,8 +42,8 @@ $action = isset($_POST['action']) ? trim((string)$_POST['action']) : '';
 $taskId = isset($_POST['task_id']) ? (int)$_POST['task_id'] : 0;
 
 if ($action === 'create') {
-    // 공무 협업툴 업무 등록: 공무/관리/임원 권한에서 신규 업무를 생성한다.
-    if (!cpms_public_affairs_collab_is_admin_user()) {
+    // 공무 협업툴 업무카드 생성: 독립 보드 안에서 새 카드를 만든다.
+    if (!cpms_public_affairs_collab_can_create_task()) {
         cpms_public_affairs_collab_action_finish(false, '공무 협업툴 업무 등록 권한이 없습니다.', '?r=공무&tab=collaboration');
     }
     $result = cpms_public_affairs_collab_create_task($pdo, $_POST, $_FILES, $actor, $projects, $employees);
@@ -55,7 +55,7 @@ if ($action === 'create') {
 }
 
 if ($action === 'settings') {
-    // 공무 협업툴 설정: 업무유형/상태/우선순위 목록을 JSON 설정으로 저장한다.
+    // 공무 협업툴 설정: 업무유형/상태/우선순위/카드 표시/빠른 필터를 JSON 설정으로 저장한다.
     if (!cpms_public_affairs_collab_is_admin_user()) {
         cpms_public_affairs_collab_action_finish(false, '설정 저장 권한이 없습니다.', '?r=공무&tab=collaboration&view=settings');
     }
@@ -63,6 +63,9 @@ if ($action === 'settings') {
         'task_types' => isset($_POST['task_types']) ? $_POST['task_types'] : '',
         'statuses' => isset($_POST['statuses']) ? $_POST['statuses'] : '',
         'priorities' => isset($_POST['priorities']) ? $_POST['priorities'] : '',
+        'quick_filters' => isset($_POST['quick_filters']) ? $_POST['quick_filters'] : '',
+        'card_fields' => isset($_POST['card_fields']) ? $_POST['card_fields'] : '',
+        'default_assignee_employee_id' => isset($_POST['default_assignee_employee_id']) ? (int)$_POST['default_assignee_employee_id'] : 0,
     );
     $ok = cpms_public_affairs_collab_save_settings($settings);
     cpms_public_affairs_collab_action_finish($ok, $ok ? '공무 협업툴 설정이 저장되었습니다.' : '설정 저장에 실패했습니다.', '?r=공무&tab=collaboration&view=settings');
@@ -113,6 +116,9 @@ if ($action === 'comment') {
 
 if ($action === 'upload') {
     // 공무 협업툴 업무 상세: 업무별 첨부파일 업로드.
+    if (!cpms_public_affairs_collab_user_can_edit_task($task, $actor)) {
+        cpms_public_affairs_collab_action_finish(false, '첨부파일 등록 권한이 없습니다.', '?r=공무&tab=collaboration&task_id=' . $taskId);
+    }
     $saved = cpms_public_affairs_collab_save_uploaded_files($task, isset($_FILES['attachments']) ? $_FILES['attachments'] : null, $actor);
     $count = is_array($saved) ? count($saved) : 0;
     cpms_public_affairs_collab_action_finish($count > 0, $count > 0 ? '첨부파일이 등록되었습니다.' : '등록된 첨부파일이 없습니다. 파일 형식 또는 용량을 확인해주세요.', '?r=공무&tab=collaboration&task_id=' . $taskId);
