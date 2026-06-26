@@ -570,6 +570,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                             <td class="p-2 border text-center">
                                                 <?php if ($bulkRowSaveable): ?>
                                                     <input type="checkbox" name="rows[<?php echo (int)$bulkIdx; ?>][include]" value="1" checked>
+                                                    <input type="hidden" name="rows[<?php echo (int)$bulkIdx; ?>][present]" value="1">
                                                 <?php else: ?>
                                                     <span class="text-gray-400">-</span>
                                                 <?php endif; ?>

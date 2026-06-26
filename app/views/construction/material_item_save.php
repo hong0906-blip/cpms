@@ -458,6 +458,85 @@ function material_bulk_append_safety_row($pdo, $projectId, $row, $now, &$store, 
     return 1;
 }
 
+function material_bulk_json_safe_value($value)
+{
+    if (is_array($value)) {
+        $out = array();
+        foreach ($value as $k => $v) {
+            $out[$k] = material_bulk_json_safe_value($v);
+        }
+        return $out;
+    }
+    if (is_string($value)) {
+        if (function_exists('mb_check_encoding') && mb_check_encoding($value, 'UTF-8')) return $value;
+        if (function_exists('iconv')) {
+            $fixed = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
+            if ($fixed !== false) return $fixed;
+        }
+        return utf8_encode($value);
+    }
+    return $value;
+}
+
+function material_bulk_write_safety_store_direct($store, &$message)
+{
+    $message = '';
+    if (!is_array($store)) $store = array();
+    if (!isset($store['items']) || !is_array($store['items'])) $store['items'] = array();
+    $store['updated_at'] = date('Y-m-d H:i:s');
+
+    $path = cpms_safety_cost_store_path();
+    $dir = dirname($path);
+    if (!cpms_ensure_dir($dir)) {
+        $message = '안전관리비 저장 폴더를 만들 수 없습니다: ' . $dir;
+        return false;
+    }
+
+    $options = 0;
+    if (defined('JSON_UNESCAPED_UNICODE')) $options = $options | JSON_UNESCAPED_UNICODE;
+    if (defined('JSON_PRETTY_PRINT')) $options = $options | JSON_PRETTY_PRINT;
+
+    $json = json_encode($store, $options);
+    if ($json === false || $json === '') {
+        $store = material_bulk_json_safe_value($store);
+        $json = json_encode($store, $options);
+    }
+    if ($json === false || $json === '') {
+        $message = function_exists('json_last_error_msg') ? json_last_error_msg() : 'JSON 변환 실패';
+        return false;
+    }
+
+    $bytes = @file_put_contents($path, $json, LOCK_EX);
+    if ($bytes === false) {
+        $message = '안전관리비 저장 파일을 쓸 수 없습니다: ' . $path;
+        return false;
+    }
+    if (!is_file($path)) {
+        $message = '안전관리비 저장 파일이 생성되지 않았습니다: ' . $path;
+        return false;
+    }
+    return true;
+}
+
+function material_bulk_verify_safety_record_ids($ids, &$missingCount)
+{
+    $missingCount = 0;
+    if (!is_array($ids) || count($ids) === 0) return true;
+    $path = cpms_safety_cost_store_path();
+    $store = cpms_read_json_file($path, array('items'=>array()));
+    $items = isset($store['items']) && is_array($store['items']) ? $store['items'] : array();
+    $seen = array();
+    foreach ($items as $item) {
+        if (is_array($item) && isset($item['id'])) {
+            $seen[(string)$item['id']] = true;
+        }
+    }
+    foreach ($ids as $id) {
+        if (!isset($seen[(string)$id])) $missingCount++;
+    }
+    return ($missingCount === 0);
+}
+
 function material_bulk_xlsx_col_index($cellRef)
 {
     $letters = preg_replace('/[^A-Z]/', '', strtoupper((string)$cellRef));
@@ -954,17 +1033,36 @@ function material_bulk_apply_action($pdo, $projectId, $fallbackYm)
     $userId = cpms_safety_cost_user_id();
     $userName = (string)Auth::userName();
     $userEmail = (string)Auth::userEmail();
+    $safetyCreatedIds = array();
+    $safetyWriteError = '';
+    $safetyCandidates = 0;
+    $safetySkipped = 0;
+    $postMissingRows = 0;
 
     foreach ($previewRows as $idx => $baseRow) {
         if (!is_array($baseRow) || !isset($baseRow['saveable']) || (int)$baseRow['saveable'] !== 1) {
             $skipped++;
             continue;
         }
-        if (!isset($postedRows[$idx]) || !is_array($postedRows[$idx]) || !isset($postedRows[$idx]['include'])) {
-            $skipped++;
-            continue;
+        $baseCategory = material_bulk_normalize_category(isset($baseRow['category']) ? $baseRow['category'] : '');
+        $baseIsSafetyRow = material_bulk_is_safety_category($baseCategory);
+        if ($baseIsSafetyRow) $safetyCandidates++;
+
+        $hasPostedRow = (isset($postedRows[$idx]) && is_array($postedRows[$idx]));
+        if ($hasPostedRow) {
+            $postRow = $postedRows[$idx];
+            if (!$baseIsSafetyRow && isset($postRow['include']) && (string)$postRow['include'] !== '1') {
+                $skipped++;
+                continue;
+            }
+            if (!$baseIsSafetyRow && !isset($postRow['include']) && isset($postRow['present'])) {
+                $skipped++;
+                continue;
+            }
+        } else {
+            $postMissingRows++;
+            $postRow = array();
         }
-        $postRow = $postedRows[$idx];
         $row = $baseRow;
         foreach (array('category', 'advance_yn', 'vendor_name', 'detail', 'representative', 'phone', 'biz_no', 'remark') as $field) {
             if (isset($postRow[$field])) $row[$field] = trim((string)$postRow[$field]);
@@ -975,29 +1073,35 @@ function material_bulk_apply_action($pdo, $projectId, $fallbackYm)
 
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', isset($row['use_date']) ? $row['use_date'] : '')) {
             $errors++;
+            if ($baseIsSafetyRow) $safetySkipped++;
             continue;
         }
         $isSafetyRow = material_bulk_is_safety_category($row['category']);
         if (!$isSafetyRow && !material_bulk_is_material_category($row['category'])) {
             $skipped++;
+            if ($baseIsSafetyRow) $safetySkipped++;
             continue;
         }
         if (abs((float)$row['amount']) <= 0.0001) {
             $errors++;
+            if ($baseIsSafetyRow) $safetySkipped++;
             continue;
         }
         $usageKey = material_bulk_usage_unique_key($row);
         if (isset($applySeen[$usageKey])) {
             $skipped++;
+            if ($baseIsSafetyRow) $safetySkipped++;
             continue;
         }
         if ($isSafetyRow) {
             if (material_bulk_existing_duplicate($pdo, $projectId, $row, true) || material_bulk_existing_duplicate($pdo, $projectId, $row, false) || material_bulk_existing_safety_duplicate($projectId, $row, true) || material_bulk_existing_safety_duplicate($projectId, $row, false)) {
                 $skipped++;
+                $safetySkipped++;
                 continue;
             }
         } else if (material_bulk_existing_duplicate($pdo, $projectId, $row, true) || material_bulk_existing_duplicate($pdo, $projectId, $row, false)) {
             $skipped++;
+            if ($baseIsSafetyRow) $safetySkipped++;
             continue;
         }
         try {
@@ -1009,26 +1113,41 @@ function material_bulk_apply_action($pdo, $projectId, $fallbackYm)
                     if (!isset($safetyStore['items']) || !is_array($safetyStore['items'])) $safetyStore['items'] = array();
                     $safetyProjectName = cpms_safety_cost_project_name($pdo, $projectId);
                 }
+                $beforeSafetyCount = isset($safetyStore['items']) && is_array($safetyStore['items']) ? count($safetyStore['items']) : 0;
                 $savedThisRow = material_bulk_append_safety_row($pdo, $projectId, $row, $now, $safetyStore, $safetyProjectName, $userId, $userName, $userEmail);
                 $safetySaved += $savedThisRow;
+                if ($savedThisRow > 0 && isset($safetyStore['items'][$beforeSafetyCount]) && is_array($safetyStore['items'][$beforeSafetyCount]) && isset($safetyStore['items'][$beforeSafetyCount]['id'])) {
+                    $safetyCreatedIds[count($safetyCreatedIds)] = (string)$safetyStore['items'][$beforeSafetyCount]['id'];
+                }
             } else {
                 $savedThisRow = material_bulk_save_row($pdo, $projectId, $row, $now);
                 $saved += $savedThisRow;
             }
             if ($savedThisRow <= 0) {
                 $skipped++;
+                if ($baseIsSafetyRow) $safetySkipped++;
                 continue;
             }
             $applySeen[$usageKey] = true;
         } catch (Exception $e) {
             $errors++;
+            if ($baseIsSafetyRow) $safetySkipped++;
         }
     }
 
     if ($safetySaved > 0) {
-        if (!cpms_safety_cost_write_store($safetyStore)) {
+        $writeMessage = '';
+        if (!material_bulk_write_safety_store_direct($safetyStore, $writeMessage)) {
             $errors += $safetySaved;
+            $safetyWriteError = ($writeMessage !== '') ? $writeMessage : '안전보건 저장소 쓰기 실패';
             $safetySaved = 0;
+        } else {
+            $missingSafetyCount = 0;
+            if (!material_bulk_verify_safety_record_ids($safetyCreatedIds, $missingSafetyCount)) {
+                $errors += $safetySaved;
+                $safetyWriteError = '안전보건 저장 검증 실패: ' . (int)$missingSafetyCount . '건이 저장 파일에서 확인되지 않았습니다.';
+                $safetySaved = 0;
+            }
         }
     }
 
@@ -1090,10 +1209,20 @@ function material_bulk_apply_action($pdo, $projectId, $fallbackYm)
 
     unset($_SESSION['material_bulk_preview'][$token]);
     $successMessage = '자재구입비 일괄등록 완료: 자재 저장 ' . (int)$saved . '건 / 안전보건 저장 ' . (int)$safetySaved . '건 / 제외·중복 ' . (int)$skipped . '건 / 오류 ' . (int)$errors . '건';
+    if ($safetyCandidates > 0 && $safetySaved <= 0) {
+        $successMessage .= ' / 안전관리비 대상 ' . (int)$safetyCandidates . '건 중 저장 0건';
+        if ($safetySkipped > 0) $successMessage .= ', 스킵 ' . (int)$safetySkipped . '건';
+        if ($postMissingRows > 0) $successMessage .= ', POST 누락 ' . (int)$postMissingRows . '행은 미리보기 원본으로 처리';
+    }
+    $flashType = 'success';
+    if ($safetyWriteError !== '') {
+        $successMessage .= ' / 안전보건 저장 실패: ' . $safetyWriteError;
+        $flashType = 'error';
+    }
     if (is_array($driveUploadResult)) {
         $successMessage = cpms_construction_drive_flash_message($successMessage, $driveUploadResult);
     }
-    flash_set('success', $successMessage);
+    flash_set($flashType, $successMessage);
     header('Location: ' . material_bulk_redirect_url($projectId, $bulkYm, ''));
     exit;
 }
