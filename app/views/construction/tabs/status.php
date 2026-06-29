@@ -290,6 +290,23 @@ if (!function_exists('cpms_status_cost_rate_info')) {
     }
 }
 
+if (!function_exists('cpms_status_target_cost_amount')) {
+    function cpms_status_target_cost_amount($sales, $targetRate) {
+        $sales = (float)$sales;
+        $targetRate = (float)$targetRate;
+        if ($sales <= 0 || $targetRate <= 0) return 0.0;
+        return round($sales * ($targetRate / 100));
+    }
+}
+
+if (!function_exists('cpms_status_target_cost_rate_with_amount')) {
+    function cpms_status_target_cost_rate_with_amount($targetRate, $targetAmount) {
+        $targetRate = (float)$targetRate;
+        if ($targetRate <= 0) return '-';
+        return cpms_target_cost_rate_format($targetRate) . ' (' . cpms_status_money($targetAmount) . ')';
+    }
+}
+
 if (!function_exists('cpms_status_ym_valid')) {
     function cpms_status_ym_valid($ym) {
         return preg_match('/^\d{4}-\d{2}$/', (string)$ym) ? true : false;
@@ -565,6 +582,7 @@ $periodLabel = cpms_status_ym_label($fromYm) . ' ~ ' . cpms_status_ym_label($toY
 cpms_target_cost_rate_ensure_schema($pdo);
 $targetRateRow = cpms_target_cost_rate_current($pdo, (int)$pid);
 $targetRateValue = ($targetRateRow && isset($targetRateRow['target_rate'])) ? (float)$targetRateRow['target_rate'] : 0.0;
+$targetRateByMonth = cpms_target_cost_rate_effective_map($pdo, (int)$pid, $periodMonths, $targetRateValue);
 $pendingTargetRateRequest = cpms_target_cost_rate_pending($pdo, (int)$pid);
 $canEditTargetRate = class_exists('App\\Core\\Auth') ? \App\Core\Auth::canManageConstruction() : false;
 $canApproveTargetRate = cpms_target_cost_rate_is_vp_user($pdo);
@@ -584,7 +602,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
 $periodDiagnostics = array();
 
 $monthlyData = array();
-$yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'expected_sales' => 0, 'confirmed_sales' => 0, 'used_total' => 0, 'profit' => 0);
+$yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'expected_sales' => 0, 'confirmed_sales' => 0, 'used_total' => 0, 'target_cost_amount' => 0, 'profit' => 0);
 $maxMonthlyValue = 0;
 
 foreach ($periodMonths as $ym) {
@@ -618,6 +636,8 @@ foreach ($periodMonths as $ym) {
     $expectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
     $confirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
     $sales = ($confirmedSales > 0) ? $confirmedSales : $expectedSales;
+    $targetCostRate = isset($targetRateByMonth[$ym]) ? (float)$targetRateByMonth[$ym] : $targetRateValue;
+    $targetCostAmount = cpms_status_target_cost_amount($sales, $targetCostRate);
     $usedTotal = $labor + $equipment + $materials;
     $profit = $sales - $usedTotal;
     $costRateInfo = cpms_status_cost_rate_info($sales, $usedTotal);
@@ -643,6 +663,9 @@ foreach ($periodMonths as $ym) {
         'expected_sales' => $expectedSales,
         'confirmed_sales' => $confirmedSales,
         'used_total' => $usedTotal,
+        'target_cost_rate' => $targetCostRate,
+        'target_cost_rate_label' => cpms_target_cost_rate_format($targetCostRate),
+        'target_cost_amount' => $targetCostAmount,
         'profit' => $profit,
         'cost_rate' => $costRateInfo['cost_rate'],
         'cost_rate_label' => $costRateInfo['cost_rate_label'],
@@ -685,6 +708,7 @@ foreach ($monthlyData as $mRow) {
             'expected_sales' => 0,
             'confirmed_sales' => 0,
             'used_total' => 0,
+            'target_cost_amount' => 0,
             'profit' => 0,
             'cost_rate' => 0,
             'cost_rate_label' => '0%',
@@ -750,6 +774,7 @@ $safetyRemainRate = ($safetyLimit110 > 0) ? (($safetyRemaining / $safetyLimit110
 $overallTotals['safety'] = $safetyUsedTotal;
 $overallInputCostTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['materials'];
 $overallUsageTotal = $overallInputCostTotal;
+$overallTargetCostAmount = cpms_status_target_cost_amount($overallTotals['sales'], $targetRateValue);
 $overallCostRateInfo = cpms_status_cost_rate_info($overallTotals['sales'], $overallInputCostTotal);
 $overallNetTotal = $overallTotals['sales'] - $overallInputCostTotal;
 $periodCostRateInfo = cpms_status_cost_rate_info($yearTotals['sales'], $yearTotals['used_total']);
@@ -795,6 +820,30 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     .cpms-status-wrap .legend-item { font-size:11px; }
     .cpms-status-wrap .summary-grid .text-lg { font-size:16px; }
     .cpms-status-wrap .cpms-status-filter { width:100%; justify-content:stretch; }
+    .cpms-status-wrap .cpms-status-monthly-chart .chart-scroll,
+    .cpms-status-wrap .cpms-status-monthly-chart .legend,
+    .cpms-status-wrap .cpms-status-quarterly-chart {
+        display:none !important;
+    }
+    .cpms-status-wrap .cpms-status-mobile-table {
+        min-width:0;
+    }
+    .cpms-status-wrap .cpms-status-mobile-table th:nth-child(2),
+    .cpms-status-wrap .cpms-status-mobile-table th:nth-child(3),
+    .cpms-status-wrap .cpms-status-mobile-table th:nth-child(4),
+    .cpms-status-wrap .cpms-status-mobile-table th:nth-child(5),
+    .cpms-status-wrap .cpms-status-mobile-table th:nth-child(6),
+    .cpms-status-wrap .cpms-status-mobile-table td:nth-child(2),
+    .cpms-status-wrap .cpms-status-mobile-table td:nth-child(3),
+    .cpms-status-wrap .cpms-status-mobile-table td:nth-child(4),
+    .cpms-status-wrap .cpms-status-mobile-table td:nth-child(5),
+    .cpms-status-wrap .cpms-status-mobile-table td:nth-child(6) {
+        display:none !important;
+    }
+    .cpms-status-wrap .cpms-status-mobile-table th,
+    .cpms-status-wrap .cpms-status-mobile-table td {
+        white-space:normal;
+    }
 }
 </style>
 
@@ -837,7 +886,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <div class="flex items-start justify-between gap-2">
                     <div>
                         <div class="text-xs text-gray-500">목표원가율</div>
-                        <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_target_cost_rate_format($targetRateValue)); ?></div>
+                        <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_target_cost_rate_with_amount($targetRateValue, $overallTargetCostAmount)); ?></div>
                     </div>
                     <?php if ($pendingTargetRateRequest): ?>
                         <span class="px-2 py-1 rounded-lg bg-amber-50 text-amber-700 border border-amber-100 text-xs font-extrabold">승인대기</span>
@@ -948,7 +997,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         </form>
     </div>
 
-    <div class="chart-wrap">
+    <div class="chart-wrap cpms-status-monthly-chart">
         <div class="flex items-center justify-between">
             <h4 class="text-lg font-extrabold text-gray-900">월별 비용/매출 그래프</h4>
             <div class="text-sm font-bold text-gray-500"><?php echo h($periodLabel); ?></div>
@@ -1023,7 +1072,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
             <?php endforeach; ?>
         </div>
         <div class="cpms-responsive-table-wrap mt-4 rounded-2xl border border-gray-200">
-            <table class="cpms-responsive-table text-sm">
+            <table class="cpms-responsive-table cpms-status-mobile-table text-sm">
                 <thead class="bg-gray-50 text-gray-500">
                     <tr>
                         <th class="px-3 py-2 text-left font-bold">월</th>
@@ -1031,6 +1080,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                         <th class="px-3 py-2 text-right font-bold">예상매출</th>
                         <th class="px-3 py-2 text-right font-bold">적용매출</th>
                         <th class="px-3 py-2 text-right font-bold">투입원가</th>
+                        <th class="px-3 py-2 text-right font-bold">목표원가</th>
                         <th class="px-3 py-2 text-right font-bold">손익</th>
                         <th class="px-3 py-2 text-right font-bold">원가율</th>
                     </tr>
@@ -1043,6 +1093,8 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                         $rowRateClass = cpms_status_rate_class($rowCostRate, $rowNoSales);
                         $rowProfit = isset($row['profit']) ? (float)$row['profit'] : 0.0;
                         $rowProfitClass = ($rowProfit < 0) ? 'text-red-700' : 'text-blue-700';
+                        $rowTargetRate = isset($row['target_cost_rate']) ? (float)$row['target_cost_rate'] : 0.0;
+                        $rowTargetRateLabel = cpms_target_cost_rate_format($rowTargetRate);
                         ?>
                         <tr class="border-t border-gray-100">
                             <td class="px-3 py-2 text-gray-700 font-bold"><?php echo h(isset($row['label']) ? $row['label'] : '-'); ?></td>
@@ -1050,6 +1102,10 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['expected_sales']) ? $row['expected_sales'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-900 font-bold"><?php echo h(cpms_status_money(isset($row['sales']) ? $row['sales'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['used_total']) ? $row['used_total'] : 0)); ?></td>
+                            <td class="px-3 py-2 text-right text-gray-800" title="<?php echo h('목표원가율 ' . $rowTargetRateLabel); ?>">
+                                <div><?php echo h(cpms_status_money(isset($row['target_cost_amount']) ? $row['target_cost_amount'] : 0)); ?></div>
+                                <?php if ($rowTargetRate > 0): ?><div class="text-xs text-gray-400"><?php echo h($rowTargetRateLabel); ?></div><?php endif; ?>
+                            </td>
                             <td class="px-3 py-2 text-right font-extrabold <?php echo h($rowProfitClass); ?>"><?php echo h(cpms_status_money($rowProfit)); ?></td>
                             <td class="px-3 py-2 text-right">
                                 <span class="cpms-chip cpms-status-rate-badge inline-flex px-2 py-1 rounded-xl border text-xs font-extrabold <?php echo $rowRateClass; ?>"><?php echo h(isset($row['cost_rate_label']) ? $row['cost_rate_label'] : '0%'); ?></span>
@@ -1068,6 +1124,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                         <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['expected_sales'])); ?></td>
                         <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['sales'])); ?></td>
                         <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['used_total'])); ?></td>
+                        <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['target_cost_amount'])); ?></td>
                         <td class="px-3 py-2 text-right font-extrabold <?php echo h($periodProfitClass); ?>"><?php echo h(cpms_status_money($yearTotals['profit'])); ?></td>
                         <td class="px-3 py-2 text-right">
                             <span class="cpms-chip cpms-status-rate-badge inline-flex px-2 py-1 rounded-xl border text-xs font-extrabold <?php echo $periodRateClass; ?>"><?php echo h(isset($periodCostRateInfo['cost_rate_label']) ? $periodCostRateInfo['cost_rate_label'] : '0%'); ?></span>
@@ -1078,7 +1135,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
         </div>
     </div>
 
-    <div class="chart-wrap">
+    <div class="chart-wrap cpms-status-quarterly-chart">
         <h4 class="text-lg font-extrabold text-gray-900">분기별 비용/매출 그래프</h4>
         <div class="chart-scroll">
             <div class="chart-row" style="min-width:520px;">

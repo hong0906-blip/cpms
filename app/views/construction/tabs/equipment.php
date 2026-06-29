@@ -29,14 +29,15 @@ if (!$canEditEquipment && $equipTab === 'input') {
     $equipTab = 'monthly';
 }
 
-$ym = isset($_GET['ym']) ? trim((string)$_GET['ym']) : date('Y-m');
+$defaultYm = cpms_construction_current_business_ym();
+$ym = isset($_GET['ym']) ? trim((string)$_GET['ym']) : $defaultYm;
 if (!preg_match('/^\d{4}-\d{2}$/', $ym)) {
-    $ym = date('Y-m');
+    $ym = $defaultYm;
 }
 $year = (int)substr($ym, 0, 4);
 $month = (int)substr($ym, 5, 2);
 if ($year < 2000 || $year > 2100 || $month < 1 || $month > 12) {
-    $ym = date('Y-m');
+    $ym = $defaultYm;
     $year = (int)substr($ym, 0, 4);
     $month = (int)substr($ym, 5, 2);
 }

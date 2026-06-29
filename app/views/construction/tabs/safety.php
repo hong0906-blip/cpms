@@ -60,6 +60,25 @@ try {
                         </div>
                         <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($badge); ?>"><?php echo h($stt); ?></span>
                     </div>
+                    <?php if ($canEditSafety): ?>
+                        <div class="cpms-construction-mobile-card-actions">
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/safety_incident_action_save" class="space-y-2">
+                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                <input type="hidden" name="incident_id" value="<?php echo (int)$it['id']; ?>">
+                                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                                <input type="hidden" name="redirect" value="construction">
+                                <label class="block text-xs font-extrabold text-gray-500">상태 수정</label>
+                                <select name="status" class="px-4 py-3 rounded-2xl border border-gray-200">
+                                    <option value="접수" <?php echo ($stt === '접수') ? 'selected' : ''; ?>>접수</option>
+                                    <option value="처리중" <?php echo ($stt === '처리중') ? 'selected' : ''; ?>>처리중</option>
+                                    <option value="처리완료" <?php echo ($stt === '처리완료') ? 'selected' : ''; ?>>처리완료</option>
+                                </select>
+                                <label class="block text-xs font-extrabold text-gray-500">댓글/후속조치</label>
+                                <textarea name="action_note" rows="3" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="댓글 또는 후속조치를 입력하세요."><?php echo h(isset($it['action_note']) ? $it['action_note'] : ''); ?></textarea>
+                                <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">수정 저장</button>
+                            </form>
+                        </div>
+                    <?php endif; ?>
                 </div>
             <?php endforeach; ?>
         </div>

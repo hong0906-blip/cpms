@@ -185,6 +185,52 @@ try {
 
 ?>
 
+<style>
+.cpms-construction-mobile-actions { display:none; }
+.cpms-construction-mobile-card-actions { display:none; }
+@media (max-width:767px) {
+    .cpms-construction-mobile-actions {
+        display:grid;
+        grid-template-columns:repeat(2,minmax(0,1fr));
+        gap:8px;
+        margin-bottom:12px;
+    }
+    .cpms-construction-mobile-actions button,
+    .cpms-construction-mobile-actions a {
+        min-height:48px;
+        border-radius:16px;
+        font-size:14px;
+    }
+    .cpms-construction-mobile-modal {
+        position:absolute;
+        inset:0;
+        display:flex;
+        align-items:flex-start;
+        justify-content:center;
+        padding:14px;
+        overflow-y:auto;
+    }
+    .cpms-construction-mobile-modal > div {
+        margin-top:8px !important;
+        width:100%;
+        border-radius:20px !important;
+        padding:18px !important;
+    }
+    .cpms-construction-mobile-card-actions {
+        display:block;
+        margin-top:12px;
+        padding-top:12px;
+        border-top:1px solid #f1f5f9;
+    }
+    .cpms-construction-mobile-card-actions form,
+    .cpms-construction-mobile-card-actions select,
+    .cpms-construction-mobile-card-actions textarea,
+    .cpms-construction-mobile-card-actions button {
+        width:100%;
+    }
+}
+</style>
+
 <div class="cpms-construction-page flex items-start justify-end gap-3 mb-6">
     <?php if ($canEditSchedule): ?>
     <div class="cpms-mobile-hide flex items-center gap-2">
@@ -203,6 +249,19 @@ try {
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type']==='success')?'bg-emerald-50 border-emerald-200 text-emerald-700':'bg-red-50 border-red-200 text-red-700'; ?>">
         <?php echo h($flash['message']); ?>
     </div>
+<?php endif; ?>
+
+<?php if ($canEditSchedule): ?>
+<div class="cpms-construction-mobile-actions">
+    <button type="button" class="inline-flex items-center justify-center gap-2 bg-rose-600 text-white font-extrabold" data-modal-open="issueAdd">
+        <i data-lucide="message-square-plus" class="w-4 h-4"></i>
+        이슈등록
+    </button>
+    <button type="button" class="inline-flex items-center justify-center gap-2 bg-gray-900 text-white font-extrabold" data-modal-open="safetyIncidentAdd">
+        <i data-lucide="siren" class="w-4 h-4"></i>
+        안전사고 등록
+    </button>
+</div>
 <?php endif; ?>
 
 <!-- 프로젝트 선택 -->
@@ -271,6 +330,7 @@ if (!file_exists($tabFile)) {
 <!-- 변경: 이슈등록/안전사고등록 모달/저장 -->
 <div id="modal-issueAdd" class="fixed inset-0 z-50 hidden">
   <div class="absolute inset-0 bg-black/40" data-modal-close="issueAdd"></div>
+  <div class="cpms-construction-mobile-modal">
   <div class="relative max-w-2xl mx-auto mt-16 bg-white rounded-3xl border p-6 shadow-xl">
     <div class="flex items-center justify-between mb-4"><h3 class="text-xl font-extrabold">이슈등록</h3><button type="button" data-modal-close="issueAdd">닫기</button></div>
     <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/issue_save" class="space-y-3">
@@ -284,13 +344,16 @@ if (!file_exists($tabFile)) {
       <button class="px-4 py-3 rounded-2xl bg-rose-600 text-white font-extrabold">저장</button>
     </form>
   </div>
+  </div>
 </div>
 <div id="modal-safetyIncidentAdd" class="fixed inset-0 z-50 hidden">
   <div class="absolute inset-0 bg-black/40" data-modal-close="safetyIncidentAdd"></div>
+  <div class="cpms-construction-mobile-modal">
   <div class="relative max-w-2xl mx-auto mt-16 bg-white rounded-3xl border p-6 shadow-xl">
     <div class="flex items-center justify-between mb-4"><h3 class="text-xl font-extrabold">안전사고 등록</h3><button type="button" data-modal-close="safetyIncidentAdd">닫기</button></div>
     <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/safety_incident_save" class="space-y-3">
       <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$selectedPid; ?>">
+      <input type="hidden" name="redirect" value="construction">
       <input name="title" required maxlength="200" class="w-full px-4 py-3 rounded-2xl border" placeholder="제목">
       <textarea name="description" class="w-full px-4 py-3 rounded-2xl border" rows="4" placeholder="사고내용"></textarea>
       <input type="datetime-local" name="occurred_at" class="w-full px-4 py-3 rounded-2xl border">
@@ -300,6 +363,7 @@ if (!file_exists($tabFile)) {
       </div>
       <button class="px-4 py-3 rounded-2xl bg-rose-600 text-white font-extrabold">저장</button>
     </form>
+  </div>
   </div>
 </div>
 <?php endif; ?>

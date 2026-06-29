@@ -22,6 +22,10 @@ if ($redirectInput === 'safety_home' && $postedProjectId > 0) {
     $redirect = '?r=safety_home&pid=' . (int)$postedProjectId . '&tab=incidents';
 } else if ($redirectInput === 'safety_home') {
     $redirect = '?r=safety_home';
+} else if ($redirectInput === 'construction' && $postedProjectId > 0) {
+    $redirect = '?r=construction_home&pid=' . (int)$postedProjectId . '&tab=safety';
+} else if ($redirectInput === 'construction') {
+    $redirect = '?r=construction_home&tab=safety';
 }
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
@@ -89,6 +93,8 @@ try {
     }
     if ($redirectInput === 'safety_home') {
         $redirect = '?r=safety_home&pid=' . (int)$incidentProjectId . '&tab=incidents';
+    } else if ($redirectInput === 'construction') {
+        $redirect = '?r=construction_home&pid=' . (int)$incidentProjectId . '&tab=safety';
     }
     if (!cpms_safety_cost_user_can_view_project($pdo, $incidentProjectId) || !cpms_safety_incident_user_can_manage_project($pdo, $incidentProjectId)) {
         flash_set('error', '안전사고 후속조치 저장 실패: 권한이 없습니다.');

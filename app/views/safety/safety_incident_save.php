@@ -17,7 +17,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Meth
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $redirectMode = isset($_POST['redirect']) ? trim((string)$_POST['redirect']) : '';
-$redirect = ($redirectMode === 'safety_home') ? ('?r=safety_home&pid=' . (int)$projectId . '&tab=incidents') : '?r=안전/보건';
+$redirect = '?r=안전/보건';
+if ($redirectMode === 'safety_home') {
+    $redirect = '?r=safety_home&pid=' . (int)$projectId . '&tab=incidents';
+} else if ($redirectMode === 'construction') {
+    $redirect = '?r=construction_home&pid=' . (int)$projectId . '&tab=safety';
+}
 
 $token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
 if (!csrf_check($token)) { flash_set('error','보안 토큰이 유효하지 않습니다.'); header('Location: ' . $redirect); exit; }

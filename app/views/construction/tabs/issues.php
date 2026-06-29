@@ -101,6 +101,21 @@ if (count($issues) > 0) {
                     <?php endif; ?>
 
                     <?php if ($canEditIssue): ?>
+                        <div class="cpms-construction-mobile-card-actions">
+                            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/issue_state_save" class="space-y-2">
+                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                <input type="hidden" name="issue_id" value="<?php echo (int)$iid; ?>">
+                                <input type="hidden" name="redirect" value="construction">
+                                <label class="block text-xs font-extrabold text-gray-500">상태 수정</label>
+                                <select name="status" class="px-4 py-3 rounded-2xl border border-gray-200">
+                                    <option value="접수" <?php echo ($stt === '접수') ? 'selected' : ''; ?>>접수</option>
+                                    <option value="처리중" <?php echo ($stt === '처리중') ? 'selected' : ''; ?>>처리중</option>
+                                    <option value="처리완료" <?php echo ($stt === '처리완료') ? 'selected' : ''; ?>>처리완료</option>
+                                </select>
+                                <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">수정 저장</button>
+                            </form>
+                        </div>
+
                         <!-- 댓글 작성(공사 전용 라우트: 리다이렉트가 공사로) -->
                         <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/issue_comment_create" class="mt-3 flex flex-col md:flex-row md:items-center gap-2">
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">

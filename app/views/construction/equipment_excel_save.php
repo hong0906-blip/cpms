@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../../services/EquipmentExcelImporter.php';
@@ -199,8 +200,9 @@ function equipment_excel_save_usage_row($pdo, $projectId, $equipmentId, $row, $n
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $token = isset($_POST['equipment_excel_token']) ? trim((string)$_POST['equipment_excel_token']) : '';
-$fallbackYm = isset($_POST['ym']) ? trim((string)$_POST['ym']) : date('Y-m');
-if (!preg_match('/^\d{4}-\d{2}$/', $fallbackYm)) $fallbackYm = date('Y-m');
+$defaultYm = cpms_construction_current_business_ym();
+$fallbackYm = isset($_POST['ym']) ? trim((string)$_POST['ym']) : $defaultYm;
+if (!preg_match('/^\d{4}-\d{2}$/', $fallbackYm)) $fallbackYm = $defaultYm;
 
 if ($projectId <= 0 || $token === '' || !isset($_SESSION['equipment_excel_preview'][$token]) || !is_array($_SESSION['equipment_excel_preview'][$token])) {
     flash_set('error', '미리보기 데이터가 만료되었습니다. 엑셀을 다시 업로드해주세요.');

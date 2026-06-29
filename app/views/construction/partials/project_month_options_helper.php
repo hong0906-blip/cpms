@@ -102,6 +102,22 @@ function cpms_construction_normalize_ym($value)
     return '';
 }}
 
+if (!function_exists('cpms_construction_settlement_ym_from_date')) {
+function cpms_construction_settlement_ym_from_date($dateValue)
+{
+    $date = cpms_construction_normalize_date($dateValue);
+    if ($date === '') return '';
+
+    $ym = substr($date, 0, 7);
+    $day = (int)substr($date, 8, 2);
+    if ($day >= 26) {
+        $nextTs = strtotime($ym . '-01 +1 month');
+        if ($nextTs !== false) return date('Y-m', $nextTs);
+    }
+
+    return $ym;
+}}
+
 if (!function_exists('cpms_construction_period_from_row')) {
 function cpms_construction_period_from_row($row, $startColumn, $endColumn)
 {
@@ -112,8 +128,8 @@ function cpms_construction_period_from_row($row, $startColumn, $endColumn)
     $endDate = cpms_construction_normalize_date($row[$endColumn]);
     if ($startDate === '' || $endDate === '') return null;
 
-    $startYm = substr($startDate, 0, 7);
-    $endYm = substr($endDate, 0, 7);
+    $startYm = cpms_construction_settlement_ym_from_date($startDate);
+    $endYm = cpms_construction_settlement_ym_from_date($endDate);
     if ($startYm === '' || $endYm === '' || strcmp($startYm, $endYm) > 0) return null;
 
     return array(
@@ -141,6 +157,25 @@ function cpms_construction_shift_ym($ym, $delta)
     if ($newYear < 1900 || $newYear > 2100) return '';
 
     return sprintf('%04d-%02d', $newYear, $newMonth);
+}}
+
+if (!function_exists('cpms_construction_current_business_ym')) {
+function cpms_construction_current_business_ym($dateValue = '')
+{
+    $dateValue = trim((string)$dateValue);
+    if ($dateValue === '') $dateValue = date('Y-m-d');
+
+    $date = cpms_construction_normalize_date($dateValue);
+    if ($date === '') $date = date('Y-m-d');
+
+    $ym = substr($date, 0, 7);
+    $day = (int)substr($date, 8, 2);
+    if ($day >= 26) {
+        $nextYm = cpms_construction_shift_ym($ym, 1);
+        if ($nextYm !== '') return $nextYm;
+    }
+
+    return $ym;
 }}
 
 if (!function_exists('cpms_construction_project_period')) {
@@ -229,7 +264,7 @@ if (!function_exists('cpms_construction_project_month_options')) {
 function cpms_construction_project_month_options($pdo, $projectId, $selectedYm)
 {
     $selectedYm = cpms_construction_normalize_ym($selectedYm);
-    if ($selectedYm === '') $selectedYm = date('Y-m');
+    if ($selectedYm === '') $selectedYm = cpms_construction_current_business_ym();
 
     $months = array();
     $startYm = '';
@@ -247,7 +282,7 @@ function cpms_construction_project_month_options($pdo, $projectId, $selectedYm)
             $message = '공사기간: ' . $startYm . ' ~ ' . $endYm . ' (현장 공사기간 기준)';
 
             if (!in_array($selectedYm, $months, true)) {
-                $currentYm = date('Y-m');
+                $currentYm = cpms_construction_current_business_ym();
                 if (in_array($currentYm, $months, true)) {
                     $selectedYm = $currentYm;
                 } else {

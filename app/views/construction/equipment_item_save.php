@@ -9,6 +9,7 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/partials/master_dedupe_helper.php';
+require_once __DIR__ . '/partials/project_month_options_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -32,8 +33,9 @@ if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $equipTab = isset($_POST['equip_tab']) ? trim((string)$_POST['equip_tab']) : 'input';
-$ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : date('Y-m');
-if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = date('Y-m');
+$defaultYm = cpms_construction_current_business_ym();
+$ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : $defaultYm;
+if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = $defaultYm;
 
 $redirect = '?r=공사&pid=' . $projectId . '&tab=equipment&equip_tab=' . urlencode($equipTab) . '&ym=' . urlencode($ym);
 if ($projectId <= 0) {
@@ -93,7 +95,12 @@ function equipment_parse_use_dates($text, $ym)
         }
 
         if (preg_match('/^\d{1,2}$/', $token)) {
-            $token = $ym . '-' . sprintf('%02d', (int)$token);
+            $dayNumber = (int)$token;
+            $targetYm = ($dayNumber >= 26) ? date('Y-m', strtotime($ym . '-01 -1 month')) : $ym;
+            $targetYear = (int)substr($targetYm, 0, 4);
+            $targetMonth = (int)substr($targetYm, 5, 2);
+            if (!checkdate($targetMonth, $dayNumber, $targetYear)) continue;
+            $token = $targetYm . '-' . sprintf('%02d', $dayNumber);
         }
 
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $token)) {

@@ -237,15 +237,26 @@ if ($selectedMenu === $dashboardMenu) {
   </header>
 
   <?php
+    $canViewSafetyMobileMenu = false;
+    if ($sidebarPdo) {
+      $safetyHelper = __DIR__ . '/../safety/safety_cost_helper.php';
+      if (file_exists($safetyHelper)) {
+        require_once $safetyHelper;
+        if (function_exists('cpms_safety_cost_project_rows_for_user')) {
+          $canViewSafetyMobileMenu = count(cpms_safety_cost_project_rows_for_user($sidebarPdo)) > 0;
+        }
+      }
+    }
+
     $mobileNavItems = array(
       array('menu' => 'dashboard', 'label' => '대시보드', 'icon' => 'layout-dashboard', 'href' => ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee')),
-      array('menu' => 'notice', 'label' => '공지사항', 'icon' => 'megaphone', 'href' => '?r=' . rawurlencode('공지사항')),
       array('menu' => 'approval', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
-      array('menu' => 'work', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . rawurlencode('공무') . '&tab=monthly_summary'),
-      array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status'),
     );
-    if (!$isPublicAffairsDept && (\App\Core\Auth::canManageEmployees() || $canViewCompanyOverheadMenu || $canViewCompanyPayrollMenu)) {
-      $mobileNavItems[] = array('menu' => 'management', 'label' => '관리', 'icon' => 'bar-chart-3', 'href' => '?r=' . rawurlencode('관리') . (($canViewCompanyOverheadMenu || $canViewCompanyPayrollMenu) ? '&tab=company_overhead' . (!$canViewCompanyOverheadMenu && $canViewCompanyPayrollMenu ? '&oh=payroll' : '') : ''));
+    if (\App\Core\Auth::canAccessConstruction()) {
+      $mobileNavItems[] = array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status');
+    }
+    if ($canViewSafetyMobileMenu) {
+      $mobileNavItems[] = array('menu' => 'safety', 'label' => '안전/보건', 'icon' => 'shield-alert', 'href' => '?r=safety_home');
     }
     if ($canViewCompanyProfitMenu && !$isPublicAffairsDept) {
       $mobileNavItems[] = array('menu' => 'company_profit', 'label' => '경영현황', 'icon' => 'line-chart', 'href' => '?r=company_profit');

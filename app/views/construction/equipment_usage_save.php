@@ -7,6 +7,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 
 use App\Core\Auth;
@@ -22,11 +23,12 @@ if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) { flash_
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $equipmentId = isset($_POST['equipment_id']) ? (int)$_POST['equipment_id'] : 0;
 $equipTab = isset($_POST['equip_tab']) ? trim((string)$_POST['equip_tab']) : 'input';
-$ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : date('Y-m');
+$defaultYm = cpms_construction_current_business_ym();
+$ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : $defaultYm;
 $usageDates = isset($_POST['usage_dates']) ? $_POST['usage_dates'] : array();
 $useDatesText = trim((string)(isset($_POST['use_dates']) ? $_POST['use_dates'] : ''));
 $memo = trim((string)(isset($_POST['memo']) ? $_POST['memo'] : ''));
-if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = date('Y-m');
+if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = $defaultYm;
 $redirect = '?r=공사&pid=' . $projectId . '&tab=equipment&equip_tab=' . urlencode($equipTab) . '&ym=' . urlencode($ym);
 
 if ($projectId <= 0 || $equipmentId <= 0) {
@@ -63,7 +65,14 @@ function equipment_parse_use_dates2($text, $ym)
             continue;
         }
 
-        if (preg_match('/^\d{1,2}$/', $token)) $token = $ym . '-' . sprintf('%02d', (int)$token);
+        if (preg_match('/^\d{1,2}$/', $token)) {
+            $dayNumber = (int)$token;
+            $targetYm = ($dayNumber >= 26) ? date('Y-m', strtotime($ym . '-01 -1 month')) : $ym;
+            $targetYear = (int)substr($targetYm, 0, 4);
+            $targetMonth = (int)substr($targetYm, 5, 2);
+            if (!checkdate($targetMonth, $dayNumber, $targetYear)) continue;
+            $token = $targetYm . '-' . sprintf('%02d', $dayNumber);
+        }
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $token)) {
             $ts = strtotime($token);
             if ($ts !== false && $rangeStart !== false && $rangeEnd !== false && $ts >= $rangeStart && $ts <= $rangeEnd) $result[date('Y-m-d', $ts)] = true;

@@ -177,6 +177,100 @@ function cpms_target_cost_rate_format($rate) {
     return $label . '%';
 }}
 
+if (!function_exists('cpms_target_cost_rate_approved_history')) {
+function cpms_target_cost_rate_approved_history($pdo, $projectId) {
+    $history = array();
+    if (!$pdo || (int)$projectId <= 0) return $history;
+    static $cache = array();
+    $pdoKey = function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'pdo';
+    $cacheKey = $pdoKey . ':' . (int)$projectId;
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+
+    try {
+        cpms_target_cost_rate_ensure_schema($pdo);
+        $st = $pdo->prepare("SELECT id, old_rate, new_rate, decided_at, updated_at, created_at
+            FROM cpms_project_target_cost_rate_requests
+            WHERE project_id=:pid AND status='approved'
+            ORDER BY COALESCE(decided_at, updated_at, created_at), id");
+        $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+        $st->execute();
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) $rows = array();
+
+        foreach ($rows as $row) {
+            $effectiveYm = '';
+            foreach (array('decided_at', 'updated_at', 'created_at') as $dateKey) {
+                $rawDate = isset($row[$dateKey]) ? trim((string)$row[$dateKey]) : '';
+                if (preg_match('/^\d{4}-\d{2}/', $rawDate)) {
+                    $effectiveYm = substr($rawDate, 0, 7);
+                    break;
+                }
+            }
+            if ($effectiveYm === '') $effectiveYm = date('Y-m');
+
+            $history[] = array(
+                'id' => isset($row['id']) ? (int)$row['id'] : 0,
+                'old_rate' => isset($row['old_rate']) ? (float)$row['old_rate'] : 0.0,
+                'new_rate' => isset($row['new_rate']) ? (float)$row['new_rate'] : 0.0,
+                'effective_ym' => $effectiveYm,
+            );
+        }
+    } catch (Exception $e) {
+        $history = array();
+    }
+
+    $cache[$cacheKey] = $history;
+    return $history;
+}}
+
+if (!function_exists('cpms_target_cost_rate_effective_map')) {
+function cpms_target_cost_rate_effective_map($pdo, $projectId, $months, $fallbackRate) {
+    $map = array();
+    if (!is_array($months) || count($months) === 0) return $map;
+
+    $monthSet = array();
+    foreach ($months as $ym) {
+        $ym = trim((string)$ym);
+        if (preg_match('/^\d{4}-\d{2}$/', $ym)) $monthSet[$ym] = true;
+    }
+    $sortedMonths = array_keys($monthSet);
+    sort($sortedMonths, SORT_STRING);
+    if (count($sortedMonths) === 0) return $map;
+
+    $history = cpms_target_cost_rate_approved_history($pdo, (int)$projectId);
+    $baseRate = (float)$fallbackRate;
+    if (is_array($history) && count($history) > 0) {
+        foreach ($history as $event) {
+            $oldRate = isset($event['old_rate']) ? (float)$event['old_rate'] : 0.0;
+            if ($oldRate > 0) {
+                $baseRate = $oldRate;
+                break;
+            }
+        }
+    }
+
+    $currentRate = $baseRate;
+    $eventIndex = 0;
+    $eventCount = is_array($history) ? count($history) : 0;
+
+    foreach ($sortedMonths as $ym) {
+        while ($eventIndex < $eventCount) {
+            $eventYm = isset($history[$eventIndex]['effective_ym']) ? (string)$history[$eventIndex]['effective_ym'] : '';
+            if ($eventYm === '' || $eventYm > $ym) break;
+            $newRate = isset($history[$eventIndex]['new_rate']) ? (float)$history[$eventIndex]['new_rate'] : 0.0;
+            if ($newRate > 0) $currentRate = $newRate;
+            $eventIndex++;
+        }
+        $map[$ym] = $currentRate;
+    }
+
+    foreach ($months as $ym) {
+        $ym = trim((string)$ym);
+        if ($ym !== '' && !isset($map[$ym])) $map[$ym] = $baseRate;
+    }
+    return $map;
+}}
+
 if (!function_exists('cpms_target_cost_rate_user_employee')) {
 function cpms_target_cost_rate_user_employee($pdo) {
     if (!$pdo || !class_exists('App\\Core\\Auth')) return null;

@@ -7,6 +7,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../../services/EquipmentExcelImporter.php';
 
@@ -23,12 +24,13 @@ if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
 }
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
+$defaultYm = cpms_construction_current_business_ym();
 $baseYm = isset($_POST['base_ym']) ? trim((string)$_POST['base_ym']) : '';
 if ($baseYm === '') {
-    $baseYm = isset($_POST['ym']) ? trim((string)$_POST['ym']) : date('Y-m');
+    $baseYm = isset($_POST['ym']) ? trim((string)$_POST['ym']) : $defaultYm;
 }
 if (!preg_match('/^\d{4}-\d{2}$/', $baseYm)) {
-    $baseYm = date('Y-m');
+    $baseYm = $defaultYm;
 }
 
 function equipment_excel_preview_redirect($projectId, $ym, $token)

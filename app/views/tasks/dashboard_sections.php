@@ -148,6 +148,108 @@ function cpms_render_feed_lane($title, $description, $colorClass, $items, $curre
     <?php
 }}
 
+if (!function_exists('cpms_mobile_task_due_text')) {
+function cpms_mobile_task_due_text($item)
+{
+    $dueText = '-';
+    if (isset($item['due_date']) && trim((string)$item['due_date']) !== '') {
+        $dueText = (string)$item['due_date'];
+        if (isset($item['due_time']) && trim((string)$item['due_time']) !== '') {
+            $dueText .= ' ' . substr((string)$item['due_time'], 0, 5);
+        }
+    }
+    return $dueText;
+}}
+
+if (!function_exists('cpms_render_mobile_today_task_row')) {
+function cpms_render_mobile_today_task_row($item)
+{
+    $statusKey = cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
+    $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
+    ?>
+    <button type="button" data-modal-open="mobileTasks" class="cpms-mobile-task-list-button">
+        <span class="cpms-mobile-task-list-main">
+            <span class="cpms-mobile-task-list-title"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></span>
+            <span class="cpms-mobile-task-list-meta"><?php echo h($isMeetingTask ? '일시' : '마감'); ?> <?php echo h(cpms_mobile_task_due_text($item)); ?></span>
+        </span>
+        <span class="cpms-mobile-task-list-status <?php echo h(cpms_tasks_badge_class('status', $statusKey)); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : cpms_tasks_status_label(isset($item['status']) ? $item['status'] : 'pending')); ?></span>
+    </button>
+    <?php
+}}
+
+if (!function_exists('cpms_render_mobile_task_card')) {
+function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
+{
+    $statusKey = cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
+    $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
+    $isDirectTask = isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1;
+    $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
+    $isAssignedToCurrent = (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId;
+    $canRespondMeeting = $isMeetingTask
+        && $isAssignedToCurrent
+        && (!isset($item['requester_employee_id']) || (int)$item['requester_employee_id'] !== (int)$currentEmployeeId)
+        && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('meeting_available', 'meeting_unavailable', 'cancelled'), true);
+    $canCompleteMeeting = $isMeetingTask
+        && $isAssignedToCurrent
+        && in_array(isset($item['status']) ? (string)$item['status'] : '', array('meeting_available', 'meeting_unavailable'), true);
+    $canStartTask = !$isMeetingTask
+        && $isDirectTask
+        && $isAssignedToCurrent
+        && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('progress', 'done', 'cancelled'), true);
+    $canCompleteTask = ($canCompleteMeeting || !$isMeetingTask)
+        && $isDirectTask
+        && $isAssignedToCurrent
+        && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('done', 'cancelled'), true);
+    $detailUrl = isset($item['action_url']) ? (string)$item['action_url'] : '#';
+    ?>
+    <div class="cpms-mobile-task-card">
+        <div class="flex items-start justify-between gap-2">
+            <span class="cpms-mobile-task-chip"><?php echo h(cpms_tasks_type_label(isset($item['task_type']) ? $item['task_type'] : 'general')); ?></span>
+            <span class="cpms-mobile-task-status <?php echo h(cpms_tasks_badge_class('status', $statusKey)); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : cpms_tasks_status_label(isset($item['status']) ? $item['status'] : 'pending')); ?></span>
+        </div>
+        <div class="mt-3 text-base font-extrabold text-slate-900 leading-6 break-words"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>
+        <?php if (isset($item['project_name']) && trim((string)$item['project_name']) !== ''): ?>
+            <div class="mt-2 text-sm text-slate-600">현장명: <?php echo h($item['project_name']); ?></div>
+        <?php endif; ?>
+        <?php if (!$isConstructionSchedule): ?>
+            <div class="mt-2 text-sm text-slate-600">요청자: <?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?></div>
+            <div class="mt-1 text-sm text-slate-500"><?php echo h($isMeetingTask ? '일시' : '마감'); ?>: <?php echo h(cpms_mobile_task_due_text($item)); ?></div>
+        <?php else: ?>
+            <div class="mt-2 text-sm text-slate-500">공정일: <?php echo h(cpms_mobile_task_due_text($item)); ?></div>
+        <?php endif; ?>
+        <div class="mt-4 flex flex-wrap gap-2">
+            <?php if ($isDirectTask): ?>
+                <button type="button" data-task-detail-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="cpms-mobile-task-button border border-gray-200 bg-white text-slate-700">확인</button>
+            <?php else: ?>
+                <a href="<?php echo h($detailUrl); ?>" class="cpms-mobile-task-button border border-gray-200 bg-white text-slate-700">확인</a>
+            <?php endif; ?>
+            <?php if ($canStartTask): ?>
+                <form method="post" action="?r=tasks/update_status" class="inline-flex">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
+                    <input type="hidden" name="status" value="progress">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <button type="submit" class="cpms-mobile-task-button bg-blue-600 text-white">진행중</button>
+                </form>
+            <?php endif; ?>
+            <?php if ($canRespondMeeting): ?>
+                <form method="post" action="?r=tasks/meeting_response" class="inline-flex">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
+                    <input type="hidden" name="response" value="available">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <button type="submit" class="cpms-mobile-task-button bg-emerald-600 text-white">참석가능</button>
+                </form>
+                <button type="button" data-meeting-unavailable-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="cpms-mobile-task-button bg-rose-600 text-white">참석불가</button>
+            <?php endif; ?>
+            <?php if ($canCompleteTask): ?>
+                <button type="button" data-task-complete-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="cpms-mobile-task-button bg-slate-900 text-white">완료</button>
+            <?php endif; ?>
+        </div>
+    </div>
+    <?php
+}}
+
 if (!function_exists('cpms_render_employee_task_dashboard')) {
 function cpms_render_employee_task_dashboard($pdo)
 {
@@ -202,7 +304,141 @@ function cpms_render_employee_task_dashboard($pdo)
             $approvalItems[count($approvalItems)] = $item;
         }
     }
+    $mobileTodayLimit = 4;
+    $mobileTodayItems = array_slice($todayItems, 0, $mobileTodayLimit);
     ?>
+    <style>
+    .cpms-mobile-task-actions,
+    .cpms-mobile-task-today {
+        display: none;
+    }
+    @media (max-width: 767px) {
+        #cpmsEmployeeTasksPanel {
+            padding: 16px !important;
+            margin-bottom: 18px !important;
+            border-radius: 20px !important;
+        }
+        #cpmsEmployeeTasksPanel .cpms-mobile-task-actions {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 8px;
+            margin-top: 14px;
+        }
+        #cpmsEmployeeTasksPanel .cpms-mobile-task-action {
+            min-height: 54px;
+            border-radius: 14px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            font-size: 12px;
+            font-weight: 800;
+            line-height: 1.15;
+            white-space: normal;
+        }
+        #cpmsEmployeeTasksPanel .cpms-mobile-task-action i {
+            width: 18px;
+            height: 18px;
+        }
+        #cpmsEmployeeTasksPanel .cpms-mobile-task-today {
+            display: block;
+            margin-top: 14px;
+        }
+        .cpms-mobile-task-list-button {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 14px;
+            background: #fff;
+            text-align: left;
+        }
+        .cpms-mobile-task-list-main {
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+        .cpms-mobile-task-list-title {
+            color: #111827;
+            font-size: 14px;
+            font-weight: 800;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .cpms-mobile-task-list-meta {
+            color: #64748b;
+            font-size: 12px;
+            font-weight: 700;
+        }
+        .cpms-mobile-task-list-status,
+        .cpms-mobile-task-status {
+            flex: 0 0 auto;
+            border-width: 1px;
+            border-style: solid;
+            border-radius: 999px;
+            padding: 5px 8px;
+            font-size: 11px;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+        #modal-mobileTasks .cpms-mobile-task-modal-shell {
+            align-items: flex-end;
+            padding: 0;
+        }
+        #modal-mobileTasks .cpms-mobile-task-modal-panel {
+            width: 100%;
+            max-height: 88vh;
+            overflow-y: auto;
+            border-radius: 20px 20px 0 0;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            box-shadow: 0 -18px 60px rgba(15, 23, 42, .22);
+        }
+        #modal-mobileTasks .cpms-mobile-task-card {
+            padding: 14px;
+            border: 1px solid #e5e7eb;
+            border-radius: 16px;
+            background: #f8fafc;
+        }
+        #modal-mobileTasks .cpms-mobile-task-chip {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 5px 8px;
+            background: #e0f2fe;
+            color: #0369a1;
+            font-size: 11px;
+            font-weight: 800;
+        }
+        #modal-mobileTasks .cpms-mobile-task-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 38px;
+            border-radius: 12px;
+            padding: 9px 12px;
+            font-size: 13px;
+            font-weight: 800;
+            line-height: 1.1;
+        }
+    }
+    @media (max-width: 380px) {
+        #cpmsEmployeeTasksPanel .cpms-mobile-task-actions {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+    @media (min-width: 768px) {
+        #modal-mobileTasks {
+            display: none !important;
+        }
+    }
+    </style>
     <div id="cpmsEmployeeTasksPanel" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
         <div class="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-4">
             <div class="flex-1 min-w-0">
@@ -220,12 +456,52 @@ function cpms_render_employee_task_dashboard($pdo)
                     <span class="px-3 py-2 rounded-full bg-indigo-50 text-indigo-700 font-bold">승인대기 <?php echo (int)$summary['approval']; ?>건</span>
                 </div>
                 </div>
+                <div class="cpms-mobile-task-actions">
+                    <button type="button" data-modal-open="taskCreate" class="cpms-mobile-task-action bg-gray-900 text-white">
+                        <i data-lucide="send"></i>
+                        <span>업무요청</span>
+                    </button>
+                    <button type="button" data-modal-open="meetingCreate" class="cpms-mobile-task-action bg-blue-600 text-white">
+                        <i data-lucide="calendar-plus"></i>
+                        <span>회의요청</span>
+                    </button>
+                    <button type="button" data-modal-open="mobileTasks" class="cpms-mobile-task-action bg-white border border-gray-200 text-gray-800">
+                        <i data-lucide="list-checks"></i>
+                        <span>나의 할일</span>
+                    </button>
+                </div>
             </div>
             <div class="flex flex-wrap items-center gap-2">
                 <a href="?r=tasks/my_list" class="px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-700 font-bold">전체 보기</a>
                 <button type="button" data-modal-open="meetingCreate" class="px-5 py-3 rounded-2xl bg-blue-600 text-white font-extrabold shadow-lg">회의 요청</button>
                 <button type="button" data-modal-open="taskCreate" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold shadow-lg">업무 요청</button>
             </div>
+        </div>
+
+        <div class="cpms-mobile-task-today">
+            <div class="flex items-center justify-between gap-2 mb-2">
+                <div class="text-sm font-extrabold text-gray-900">오늘 할일</div>
+                <button type="button" data-modal-open="mobileTasks" class="text-xs font-extrabold text-blue-700">전체 보기</button>
+            </div>
+            <?php if (count($mobileTodayItems) === 0): ?>
+                <button type="button" data-modal-open="mobileTasks" class="cpms-mobile-task-list-button">
+                    <span class="cpms-mobile-task-list-main">
+                        <span class="cpms-mobile-task-list-title">오늘 할일이 없습니다.</span>
+                        <span class="cpms-mobile-task-list-meta">나의 할일을 눌러 전체 요청을 확인하세요.</span>
+                    </span>
+                </button>
+            <?php else: ?>
+                <div class="space-y-2">
+                    <?php foreach ($mobileTodayItems as $mobileTodayItem): ?>
+                        <?php cpms_render_mobile_today_task_row($mobileTodayItem); ?>
+                    <?php endforeach; ?>
+                </div>
+                <?php if (count($todayItems) > $mobileTodayLimit): ?>
+                    <button type="button" data-modal-open="mobileTasks" class="mt-2 w-full py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-extrabold">
+                        외 <?php echo (int)(count($todayItems) - $mobileTodayLimit); ?>건 더 보기
+                    </button>
+                <?php endif; ?>
+            <?php endif; ?>
         </div>
 
         <div data-cpms-employee-task-body class="mt-6 space-y-5">
@@ -245,6 +521,30 @@ function cpms_render_employee_task_dashboard($pdo)
                 </form>
             </div>
             <?php cpms_render_feed_lane('내가 요청한 업무', '', 'bg-slate-100 text-slate-700', $requested, (int)$currentEmployee['id'], $returnUrl, true); ?>
+        </div>
+    </div>
+
+    <div id="modal-mobileTasks" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/40" data-modal-close="mobileTasks"></div>
+        <div class="absolute inset-0 flex cpms-mobile-task-modal-shell">
+            <div class="cpms-mobile-task-modal-panel">
+                <div class="sticky top-0 z-10 flex items-center justify-between gap-3 px-5 py-4 bg-white border-b border-gray-100">
+                    <div>
+                        <div class="text-xl font-extrabold text-gray-900">나의 할일</div>
+                        <div class="text-xs font-bold text-gray-500 mt-1">오늘 <?php echo (int)$summary['today']; ?>건 · 전체 <?php echo (int)$summary['all']; ?>건</div>
+                    </div>
+                    <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 text-sm font-extrabold text-gray-700" data-modal-close="mobileTasks">닫기</button>
+                </div>
+                <div class="p-4 space-y-3">
+                    <?php if (count($feed) === 0): ?>
+                        <div class="p-5 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500">표시할 할일이 없습니다.</div>
+                    <?php else: ?>
+                        <?php foreach ($feed as $mobileTaskItem): ?>
+                            <?php cpms_render_mobile_task_card($mobileTaskItem, (int)$currentEmployee['id'], $returnUrl); ?>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
         </div>
     </div>
 
