@@ -38,6 +38,20 @@ function cpms_pa_collab_app_bool_text($value) {
     return $value ? '정상' : '확인 필요';
 }}
 
+if (!function_exists('cpms_pa_collab_app_error_html')) {
+function cpms_pa_collab_app_error_html($title, $message) {
+    $title = htmlspecialchars((string)$title, ENT_QUOTES, 'UTF-8');
+    $message = htmlspecialchars((string)$message, ENT_QUOTES, 'UTF-8');
+    return '<main class="pa-safe-wrap"><section class="pa-safe-card pa-safe-error">'
+        . '<h1 class="pa-safe-title">' . $title . '</h1>'
+        . '<div>' . $message . '</div>'
+        . '<div class="pa-safe-actions">'
+        . '<a class="pa-safe-btn primary" href="?r=public_affairs_collab&safe=1">안전 모드로 열기</a>'
+        . '<a class="pa-safe-btn" href="?r=public_affairs_collab_debug" target="_blank">진단 페이지 열기</a>'
+        . '<a class="pa-safe-btn" href="?r=공무">공무 화면으로 돌아가기</a>'
+        . '</div></section></main>';
+}}
+
 $safeMode = (isset($_GET['safe']) && (string)$_GET['safe'] === '1');
 $rootDir = dirname(dirname(dirname(__DIR__)));
 $storageRoot = function_exists('cpms_storage_root') ? cpms_storage_root() : ($rootDir . '/storage');
@@ -49,6 +63,23 @@ try {
 } catch (Exception $e) {
     $pdo = null;
 }
+
+$paCollabRenderingMain = false;
+$paCollabBufferStarted = false;
+register_shutdown_function(function() use (&$paCollabRenderingMain, &$paCollabBufferStarted) {
+    if (!$paCollabRenderingMain) return;
+    $error = error_get_last();
+    if (!is_array($error) || !isset($error['type'])) return;
+    $fatalTypes = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR);
+    if (!in_array((int)$error['type'], $fatalTypes, true)) return;
+    if ($paCollabBufferStarted && ob_get_level() > 0) @ob_end_clean();
+    if (function_exists('http_response_code')) http_response_code(200);
+    echo cpms_pa_collab_app_error_html(
+        '공무 협업툴을 여는 중 문제가 발생했습니다',
+        '일반 모드 화면에서 서버 오류가 발생했습니다. 안전 모드 또는 진단 페이지에서 원인을 확인해주세요.'
+    );
+    echo '</body></html>';
+});
 
 ?><!doctype html>
 <html lang="ko">
@@ -115,45 +146,31 @@ try {
         </main>
         <?php
     } else {
-        $paCollabBufferStarted = false;
         try {
             $_GET['tab'] = 'collaboration';
             $paCollabAutoOpen = true;
+            $paCollabRenderingMain = true;
             ob_start();
             $paCollabBufferStarted = true;
             require $collaborationView;
             $paCollabContent = ob_get_clean();
             $paCollabBufferStarted = false;
+            $paCollabRenderingMain = false;
             if (trim((string)$paCollabContent) === '') {
-                ?>
-                <main class="pa-safe-wrap">
-                  <section class="pa-safe-card pa-safe-error">
-                    <h1 class="pa-safe-title">공무 협업툴 화면을 표시할 수 없습니다</h1>
-                    <div>협업툴 화면 출력이 비어 있습니다. 진단 페이지에서 파일과 저장소 상태를 확인해주세요.</div>
-                    <div class="pa-safe-actions">
-                      <a class="pa-safe-btn primary" href="?r=public_affairs_collab&safe=1">안전 모드로 열기</a>
-                      <a class="pa-safe-btn" href="?r=public_affairs_collab_debug" target="_blank">진단 페이지 열기</a>
-                    </div>
-                  </section>
-                </main>
-                <?php
+                echo cpms_pa_collab_app_error_html(
+                    '공무 협업툴 화면을 표시할 수 없습니다',
+                    '협업툴 화면 출력이 비어 있습니다. 진단 페이지에서 파일과 저장소 상태를 확인해주세요.'
+                );
             } else {
                 echo $paCollabContent;
             }
         } catch (Exception $e) {
+            $paCollabRenderingMain = false;
             if ($paCollabBufferStarted && ob_get_level() > 0) @ob_end_clean();
-            ?>
-            <main class="pa-safe-wrap">
-              <section class="pa-safe-card pa-safe-error">
-                <h1 class="pa-safe-title">공무 협업툴을 여는 중 문제가 발생했습니다</h1>
-                <div>저장소 권한 또는 설정 파일을 확인해주세요. 자세한 내용은 진단 페이지에서 확인할 수 있습니다.</div>
-                <div class="pa-safe-actions">
-                  <a class="pa-safe-btn primary" href="?r=public_affairs_collab&safe=1">안전 모드로 열기</a>
-                  <a class="pa-safe-btn" href="?r=public_affairs_collab_debug" target="_blank">진단 페이지 열기</a>
-                </div>
-              </section>
-            </main>
-            <?php
+            echo cpms_pa_collab_app_error_html(
+                '공무 협업툴을 여는 중 문제가 발생했습니다',
+                '저장소 권한 또는 설정 파일을 확인해주세요. 자세한 내용은 진단 페이지에서 확인할 수 있습니다.'
+            );
         }
     }
   ?>

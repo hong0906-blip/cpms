@@ -42,6 +42,7 @@ if ($route === 'public_affairs_collab_debug') {
     $collabStorage = $storageRoot . '/public_affairs_collab';
     $serviceFile = $rootDir . '/app/services/PublicAffairsCollaborationService.php';
     $appFile = $rootDir . '/app/views/project/collaboration_app.php';
+    $safeFile = $rootDir . '/app/views/project/collaboration_safe.php';
     $viewFile = $rootDir . '/app/views/project/collaboration.php';
     $actionFile = $rootDir . '/app/views/project/collaboration_action.php';
     $fileView = $rootDir . '/app/views/project/collaboration_file.php';
@@ -50,12 +51,36 @@ if ($route === 'public_affairs_collab_debug') {
     $tasksFile = $collabStorage . '/tasks.json';
     $settingsFile = $collabStorage . '/settings.json';
 
-    echo "CPMS Public Affairs Collaboration Debug\n";
-    echo "auth.check=" . (\App\Core\Auth::check() ? 'true' : 'false') . "\n";
-    echo "auth.email=" . (string)\App\Core\Auth::userEmail() . "\n";
-    echo "auth.name=" . (string)\App\Core\Auth::userName() . "\n";
-    echo "auth.department=" . (string)\App\Core\Auth::userDepartment() . "\n";
-    echo "auth.role=" . (string)\App\Core\Auth::userRole() . "\n";
+    $authClassExists = class_exists('\\App\\Core\\Auth');
+    $authCheck = false;
+    $authEmail = '';
+    $authName = '';
+    $authDepartment = '';
+    $authRole = '';
+    $authError = '';
+    if ($authClassExists) {
+        try {
+            $authCheck = \App\Core\Auth::check() ? true : false;
+            $authEmail = (string)\App\Core\Auth::userEmail();
+            $authName = (string)\App\Core\Auth::userName();
+            $authDepartment = (string)\App\Core\Auth::userDepartment();
+            $authRole = (string)\App\Core\Auth::userRole();
+        } catch (Exception $e) {
+            $authError = $e->getMessage();
+        }
+    }
+
+    echo "[PUBLIC AFFAIRS COLLAB DEBUG]\n";
+    echo "time=" . date('Y-m-d H:i:s') . "\n";
+    echo "php.version=" . PHP_VERSION . "\n";
+    echo "php.error_log=" . (string)ini_get('error_log') . "\n";
+    echo "class.Auth=" . ($authClassExists ? 'true' : 'false') . "\n";
+    echo "auth.check=" . ($authCheck ? 'true' : 'false') . "\n";
+    if ($authError !== '') echo "auth.error=" . $authError . "\n";
+    echo "auth.email=" . $authEmail . "\n";
+    echo "auth.name=" . $authName . "\n";
+    echo "auth.department=" . $authDepartment . "\n";
+    echo "auth.role=" . $authRole . "\n";
 
     $pdo = null;
     $dbError = '';
@@ -71,15 +96,20 @@ if ($route === 'public_affairs_collab_debug') {
 
     echo "file.service=" . (is_file($serviceFile) ? 'true' : 'false') . " " . $serviceFile . "\n";
     echo "file.collaboration_app=" . (is_file($appFile) ? 'true' : 'false') . " " . $appFile . "\n";
+    echo "file.collaboration_safe=" . (is_file($safeFile) ? 'true' : 'false') . " " . $safeFile . "\n";
     echo "file.collaboration_view=" . (is_file($viewFile) ? 'true' : 'false') . " " . $viewFile . "\n";
     echo "file.action=" . (is_file($actionFile) ? 'true' : 'false') . " " . $actionFile . "\n";
     echo "file.download=" . (is_file($fileView) ? 'true' : 'false') . " " . $fileView . "\n";
     echo "file.css=" . (is_file($cssFile) ? 'true' : 'false') . " " . $cssFile . "\n";
     echo "file.js=" . (is_file($jsFile) ? 'true' : 'false') . " " . $jsFile . "\n";
     echo "storage.root=" . $storageRoot . "\n";
+    echo "storage.root.exists=" . (is_dir($storageRoot) ? 'true' : 'false') . "\n";
+    echo "storage.root.writable=" . (is_dir($storageRoot) && is_writable($storageRoot) ? 'true' : 'false') . "\n";
     echo "storage.collab.exists=" . (is_dir($collabStorage) ? 'true' : 'false') . "\n";
     echo "storage.collab.writable=" . (is_dir($collabStorage) && is_writable($collabStorage) ? 'true' : 'false') . "\n";
+    echo "json.tasks.exists=" . (is_file($tasksFile) ? 'true' : 'false') . "\n";
     echo "json.tasks.readable=" . (is_file($tasksFile) && is_readable($tasksFile) ? 'true' : 'false') . "\n";
+    echo "json.settings.exists=" . (is_file($settingsFile) ? 'true' : 'false') . "\n";
     echo "json.settings.readable=" . (is_file($settingsFile) && is_readable($settingsFile) ? 'true' : 'false') . "\n";
 
     $projectCount = 'unknown';
@@ -95,15 +125,26 @@ if ($route === 'public_affairs_collab_debug') {
 }
 
 if ($route === 'public_affairs_collab' || $route === 'public_affairs_collaboration' || $route === $publicAffairsCollabTitle || ($route === $publicAffairsRouteName && isset($_GET['tab']) && (string)$_GET['tab'] === 'collaboration')) {
-    if (!\App\Core\Auth::check()) {
+    $paCollabAuthOk = false;
+    try {
+        $paCollabAuthOk = \App\Core\Auth::check() ? true : false;
+    } catch (Exception $e) {
+        $paCollabAuthOk = false;
+    }
+    if (!$paCollabAuthOk) {
         cpms_redirect_to_portal_login(cpms_current_absolute_url());
     }
-    \App\Core\View::render('project/collaboration_app', array(
-        'title' => $publicAffairsCollabTitle,
-        'selectedMenu' => $publicAffairsRouteName,
-        'dashboardType' => $dashboardType,
-        'hideLayout' => true,
-    ));
+    $paCollabAppFile = __DIR__ . '/../app/views/project/collaboration_app.php';
+    $paCollabSafeFile = __DIR__ . '/../app/views/project/collaboration_safe.php';
+    if (isset($_GET['safe']) && (string)$_GET['safe'] === '1') {
+        require $paCollabSafeFile;
+        exit;
+    }
+    if (!is_file($paCollabAppFile)) {
+        require $paCollabSafeFile;
+        exit;
+    }
+    require $paCollabAppFile;
     exit;
 }
 

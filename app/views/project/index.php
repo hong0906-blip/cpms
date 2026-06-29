@@ -102,6 +102,15 @@ function cpms_project_index_is_collab_draft_project($project) {
        class="mt-4 inline-flex px-5 py-3 rounded-2xl bg-teal-700 text-white font-extrabold shadow">
       공무 협업툴 열기
     </a>
+    <a href="?r=public_affairs_collab&safe=1"
+       class="mt-4 ml-2 inline-flex px-5 py-3 rounded-2xl bg-white text-teal-800 border border-teal-200 font-extrabold shadow">
+      안전 모드
+    </a>
+    <a href="?r=public_affairs_collab_debug"
+       class="mt-4 ml-2 inline-flex px-5 py-3 rounded-2xl bg-white text-gray-700 border border-gray-200 font-extrabold shadow"
+       target="_blank" rel="noopener">
+      진단 페이지
+    </a>
   </div>
 <?php else: ?>
 <div class="flex items-center justify-between mb-6">
