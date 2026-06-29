@@ -61,11 +61,23 @@ function cpms_public_affairs_collab_read_json($path, $defaultValue) {
     return is_array($data) ? $data : $defaultValue;
 }}
 
+if (!function_exists('cpms_public_affairs_collab_json_flags')) {
+function cpms_public_affairs_collab_json_flags($pretty) {
+    $flags = 0;
+    if (defined('JSON_UNESCAPED_UNICODE')) $flags |= JSON_UNESCAPED_UNICODE;
+    if ($pretty && defined('JSON_PRETTY_PRINT')) $flags |= JSON_PRETTY_PRINT;
+    if (defined('JSON_HEX_TAG')) $flags |= JSON_HEX_TAG;
+    if (defined('JSON_HEX_AMP')) $flags |= JSON_HEX_AMP;
+    if (defined('JSON_HEX_APOS')) $flags |= JSON_HEX_APOS;
+    if (defined('JSON_HEX_QUOT')) $flags |= JSON_HEX_QUOT;
+    return $flags;
+}}
+
 if (!function_exists('cpms_public_affairs_collab_write_json')) {
 function cpms_public_affairs_collab_write_json($path, $data) {
     $dir = dirname($path);
     if (!cpms_ensure_dir($dir)) return false;
-    $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+    $json = json_encode($data, cpms_public_affairs_collab_json_flags(true));
     if (!is_string($json)) return false;
     return (@file_put_contents($path, $json, LOCK_EX) !== false);
 }}

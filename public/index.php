@@ -112,6 +112,7 @@ if ($route === 'public_affairs_collab_debug') {
     echo "json.settings.exists=" . (is_file($settingsFile) ? 'true' : 'false') . "\n";
     echo "json.settings.readable=" . (is_file($settingsFile) && is_readable($settingsFile) ? 'true' : 'false') . "\n";
     echo "repair.url=?r=public_affairs_collab_repair\n";
+    echo "trace.url=?r=public_affairs_collab_trace\n";
 
     $bootstrapAvailable = false;
     $bootstrapResult = array('ok' => false, 'message' => '서비스 파일을 불러오지 않았습니다.');
@@ -225,6 +226,180 @@ if ($route === 'public_affairs_collab_repair') {
         echo "result=FAIL\n";
         echo "message=" . $e->getMessage() . "\n";
     }
+    exit;
+}
+
+if ($route === 'public_affairs_collab_trace') {
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "[PUBLIC AFFAIRS COLLAB TRACE]\n";
+    echo "time=" . date('Y-m-d H:i:s') . "\n";
+    echo "php.version=" . PHP_VERSION . "\n";
+
+    $traceActive = true;
+    $traceStage = 'trace_start';
+    register_shutdown_function(function() use (&$traceActive, &$traceStage) {
+        if (!$traceActive) return;
+        $error = error_get_last();
+        if (!is_array($error) || !isset($error['type'])) return;
+        if (!in_array((int)$error['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR), true)) return;
+        echo "fatal.stage=" . $traceStage . "\n";
+        echo "fatal.type=" . (isset($error['type']) ? (string)$error['type'] : '') . "\n";
+        echo "fatal.message=" . (isset($error['message']) ? (string)$error['message'] : '') . "\n";
+        echo "fatal.file=" . (isset($error['file']) ? (string)$error['file'] : '') . "\n";
+        echo "fatal.line=" . (isset($error['line']) ? (string)$error['line'] : '') . "\n";
+        echo "result=FAIL\n";
+    });
+
+    if (!function_exists('cpms_public_affairs_collab_trace_line')) {
+    function cpms_public_affairs_collab_trace_line($step, $label, $status, $extra) {
+        echo 'step.' . str_pad((string)$step, 2, '0', STR_PAD_LEFT) . ' ' . $label . ' = ' . $status;
+        if ($extra !== '') echo ' ' . $extra;
+        echo "\n";
+    }}
+
+    if (!function_exists('cpms_public_affairs_collab_trace_fail')) {
+    function cpms_public_affairs_collab_trace_fail($step, $label, $message) {
+        cpms_public_affairs_collab_trace_line($step, $label, 'FAIL', 'message=' . str_replace(array("\r", "\n"), ' ', (string)$message));
+        echo "result=FAIL\n";
+        exit;
+    }}
+
+    $rootDir = dirname(__DIR__);
+    $serviceFile = $rootDir . '/app/services/PublicAffairsCollaborationService.php';
+    $traceStage = 'step.01 bootstrap_loaded';
+    cpms_public_affairs_collab_trace_line(1, 'bootstrap.php loaded', 'OK', '');
+
+    $traceStage = 'step.02 auth';
+    $authOk = false;
+    $allowed = false;
+    try {
+        $authOk = \App\Core\Auth::check() ? true : false;
+        $role = (string)\App\Core\Auth::userRole();
+        $dept = (string)\App\Core\Auth::userDepartment();
+        $deptPublic = urldecode('%EA%B3%B5%EB%AC%B4');
+        $deptManage = urldecode('%EA%B4%80%EB%A6%AC');
+        $allowed = (\App\Core\Auth::isMaster() || $role === 'executive' || strpos($dept, $deptPublic) !== false || strpos($dept, $deptManage) !== false);
+        cpms_public_affairs_collab_trace_line(2, 'auth', ($authOk ? 'OK' : 'FAIL'), 'allowed=' . ($allowed ? 'true' : 'false') . ' user=' . (string)\App\Core\Auth::userEmail());
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(2, 'auth', $e->getMessage());
+    }
+    if (!$authOk || !$allowed) {
+        cpms_public_affairs_collab_trace_fail(2, 'auth', 'permission denied');
+    }
+
+    $traceStage = 'step.03 db';
+    $pdo = null;
+    try {
+        $pdo = \App\Core\Db::pdo();
+        cpms_public_affairs_collab_trace_line(3, 'db', 'OK', '');
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(3, 'db', $e->getMessage());
+    }
+
+    $traceStage = 'step.04 service_file_exists';
+    if (!is_file($serviceFile)) {
+        cpms_public_affairs_collab_trace_fail(4, 'service file exists', $serviceFile);
+    }
+    cpms_public_affairs_collab_trace_line(4, 'service file exists', 'OK', $serviceFile);
+
+    $traceStage = 'step.05 require_service';
+    try {
+        require_once $serviceFile;
+        cpms_public_affairs_collab_trace_line(5, 'require service', 'OK', '');
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(5, 'require service', $e->getMessage());
+    }
+
+    $traceStage = 'step.06 bootstrap_storage';
+    if (!function_exists('cpms_public_affairs_collab_bootstrap_storage')) {
+        cpms_public_affairs_collab_trace_fail(6, 'bootstrap storage', 'function missing');
+    }
+    try {
+        $bootstrap = cpms_public_affairs_collab_bootstrap_storage(true);
+        if (empty($bootstrap['ok'])) {
+            cpms_public_affairs_collab_trace_fail(6, 'bootstrap storage', isset($bootstrap['message']) ? (string)$bootstrap['message'] : 'bootstrap failed');
+        }
+        cpms_public_affairs_collab_trace_line(6, 'bootstrap storage', 'OK', '');
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(6, 'bootstrap storage', $e->getMessage());
+    }
+
+    $traceStage = 'step.07 settings';
+    try {
+        $settings = cpms_public_affairs_collab_settings();
+        cpms_public_affairs_collab_trace_line(7, 'settings', 'OK', 'statuses=' . (isset($settings['statuses']) && is_array($settings['statuses']) ? (string)count($settings['statuses']) : '0'));
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(7, 'settings', $e->getMessage());
+    }
+
+    $traceStage = 'step.08 fetch_employees';
+    try {
+        $employees = cpms_public_affairs_collab_fetch_employees($pdo);
+        cpms_public_affairs_collab_trace_line(8, 'fetch employees', 'OK', 'count=' . (is_array($employees) ? (string)count($employees) : '0'));
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(8, 'fetch employees', $e->getMessage());
+    }
+
+    $traceStage = 'step.09 fetch_projects';
+    try {
+        $projects = cpms_public_affairs_collab_fetch_projects($pdo);
+        cpms_public_affairs_collab_trace_line(9, 'fetch projects', 'OK', 'count=' . (is_array($projects) ? (string)count($projects) : '0'));
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(9, 'fetch projects', $e->getMessage());
+    }
+
+    $traceStage = 'step.10 current_employee';
+    try {
+        $currentEmployee = cpms_public_affairs_collab_current_employee($pdo);
+        cpms_public_affairs_collab_trace_line(10, 'current employee', 'OK', 'id=' . (isset($currentEmployee['id']) ? (string)$currentEmployee['id'] : '0'));
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(10, 'current employee', $e->getMessage());
+    }
+
+    $traceStage = 'step.11 list_tasks';
+    try {
+        $tasks = cpms_public_affairs_collab_list_tasks();
+        cpms_public_affairs_collab_trace_line(11, 'list tasks', 'OK', 'count=' . (is_array($tasks) ? (string)count($tasks) : '0'));
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(11, 'list tasks', $e->getMessage());
+    }
+
+    $traceStage = 'step.12 visible_tasks';
+    try {
+        $visibleTasks = cpms_public_affairs_collab_visible_tasks($tasks, $currentEmployee);
+        cpms_public_affairs_collab_trace_line(12, 'visible tasks', 'OK', 'count=' . (is_array($visibleTasks) ? (string)count($visibleTasks) : '0'));
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(12, 'visible tasks', $e->getMessage());
+    }
+
+    $traceStage = 'step.13 project_spaces';
+    try {
+        $spaces = cpms_public_affairs_collab_project_spaces($pdo, $projects, $visibleTasks);
+        cpms_public_affairs_collab_trace_line(13, 'project spaces', 'OK', 'count=' . (is_array($spaces) ? (string)count($spaces) : '0'));
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(13, 'project spaces', $e->getMessage());
+    }
+
+    $traceStage = 'step.14 home_summary';
+    try {
+        $summary = cpms_public_affairs_collab_project_home_summary($spaces);
+        cpms_public_affairs_collab_trace_line(14, 'home summary', 'OK', 'keys=' . (is_array($summary) ? (string)count($summary) : '0'));
+    } catch (Exception $e) {
+        cpms_public_affairs_collab_trace_fail(14, 'home summary', $e->getMessage());
+    }
+
+    $traceStage = 'step.15 selected_project';
+    if (is_array($spaces) && count($spaces) > 0 && function_exists('cpms_public_affairs_collab_find_project_space')) {
+        $firstSpace = reset($spaces);
+        $firstProjectId = (is_array($firstSpace) && isset($firstSpace['id'])) ? (int)$firstSpace['id'] : 0;
+        $selected = $firstProjectId > 0 ? cpms_public_affairs_collab_find_project_space($spaces, $firstProjectId) : null;
+        cpms_public_affairs_collab_trace_line(15, 'selected project', (is_array($selected) ? 'OK' : 'skip'), 'project_id=' . (string)$firstProjectId);
+    } else {
+        cpms_public_affairs_collab_trace_line(15, 'selected project', 'skip', '');
+    }
+
+    $traceActive = false;
+    echo "result=OK\n";
     exit;
 }
 

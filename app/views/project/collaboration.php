@@ -9,6 +9,7 @@
 use App\Core\Auth;
 use App\Core\Db;
 
+$GLOBALS['pa_collab_stage'] = 'collaboration_start';
 $paCollabLoadErrors = array();
 $paCollabDefaultSettings = array(
     'task_types' => array('계약 검토', '변경계약', '추가공사', '기성/청구', '내역서 검토', '실행내역 확인', '발주처 요청사항', '협력업체 요청사항', '자료 제출', '결재 요청', '회의 후속조치', '리스크 검토', '기타'),
@@ -43,6 +44,7 @@ function pa_collab_lower_safe($value) {
     return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
 }}
 
+$GLOBALS['pa_collab_stage'] = 'collaboration_service_file_check';
 $paCollabServiceFile = __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
 if (!is_file($paCollabServiceFile)) {
     ?>
@@ -55,7 +57,9 @@ if (!is_file($paCollabServiceFile)) {
     return;
 }
 
+$GLOBALS['pa_collab_stage'] = 'collaboration_require_service';
 require_once $paCollabServiceFile;
+$GLOBALS['pa_collab_stage'] = 'collaboration_require_service_done';
 
 $paCollabRequiredFunctions = array(
     'cpms_public_affairs_collab_settings',
@@ -106,6 +110,7 @@ foreach ($paCollabRequiredFunctions as $paCollabFunctionName) {
     }
 }
 
+$GLOBALS['pa_collab_stage'] = 'collaboration_db_pdo';
 $pdo = null;
 try {
     $pdo = Db::pdo();
@@ -113,13 +118,17 @@ try {
     $paCollabLoadErrors[] = 'DB 연결: ' . $e->getMessage();
 }
 
+$GLOBALS['pa_collab_stage'] = 'collaboration_settings';
 $settings = pa_collab_safe_call('cpms_public_affairs_collab_settings', array(), $paCollabDefaultSettings);
 if (!is_array($settings)) $settings = $paCollabDefaultSettings;
 foreach ($paCollabDefaultSettings as $paCollabSettingKey => $paCollabSettingValue) {
     if (!isset($settings[$paCollabSettingKey])) $settings[$paCollabSettingKey] = $paCollabSettingValue;
 }
+$GLOBALS['pa_collab_stage'] = 'collaboration_fetch_employees';
 $employees = pa_collab_safe_call('cpms_public_affairs_collab_fetch_employees', array($pdo), array());
+$GLOBALS['pa_collab_stage'] = 'collaboration_fetch_projects';
 $projects = pa_collab_safe_call('cpms_public_affairs_collab_fetch_projects', array($pdo), array());
+$GLOBALS['pa_collab_stage'] = 'collaboration_current_employee';
 $currentEmployee = pa_collab_safe_call('cpms_public_affairs_collab_current_employee', array($pdo), array(
     'id' => 0,
     'name' => (string)Auth::userName(),
@@ -127,6 +136,7 @@ $currentEmployee = pa_collab_safe_call('cpms_public_affairs_collab_current_emplo
     'department' => (string)Auth::userDepartment(),
     'role' => (string)Auth::userRole(),
 ));
+$GLOBALS['pa_collab_stage'] = 'collaboration_permissions';
 $canManageCollab = (bool)pa_collab_safe_call('cpms_public_affairs_collab_is_admin_user', array(), false);
 $canCreateCollab = (bool)pa_collab_safe_call('cpms_public_affairs_collab_can_create_task', array(), false);
 $canAccessCollab = (bool)pa_collab_safe_call('cpms_public_affairs_collab_user_can_access_module', array($currentEmployee), true);
@@ -347,13 +357,16 @@ body.pa-collab-open{overflow:hidden}
       'employees' => $paCollabEmployeeOptions,
       'impactOptions' => array('없음', '있음', '확인필요'),
   );
-  $paCollabJsConfigJson = json_encode($paCollabJsConfig, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+  $GLOBALS['pa_collab_stage'] = 'collaboration_js_config_access_denied';
+  $paCollabJsonFlags = function_exists('cpms_public_affairs_collab_json_flags') ? cpms_public_affairs_collab_json_flags(false) : 0;
+  $paCollabJsConfigJson = json_encode($paCollabJsConfig, $paCollabJsonFlags);
   if (!is_string($paCollabJsConfigJson) || $paCollabJsConfigJson === '') $paCollabJsConfigJson = '{}';
 ?>
 <script>
 window.paCollabConfig = <?php echo $paCollabJsConfigJson; ?>;
 </script>
 <script defer src="<?php echo h(asset_url('assets/js/public_affairs_collaboration.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/public_affairs_collaboration.js')); ?>"></script>
+<?php $GLOBALS['pa_collab_stage'] = 'collaboration_done'; ?>
     <?php
     return;
 }
@@ -387,13 +400,17 @@ $filters = array(
     'keyword' => isset($_GET['keyword']) ? $_GET['keyword'] : '',
 );
 
+$GLOBALS['pa_collab_stage'] = 'collaboration_load_tasks';
 $allTasks = pa_collab_safe_call('cpms_public_affairs_collab_list_tasks', array(), array());
+$GLOBALS['pa_collab_stage'] = 'collaboration_visible_tasks';
 $visibleTasks = pa_collab_safe_call('cpms_public_affairs_collab_visible_tasks', array($allTasks, $currentEmployee), array());
+$GLOBALS['pa_collab_stage'] = 'collaboration_project_spaces';
 $spaceProjects = pa_collab_safe_call('cpms_public_affairs_collab_project_spaces', array($pdo, $projects, $visibleTasks), array());
 $selectedSpace = pa_collab_safe_call('cpms_public_affairs_collab_find_project_space', array($spaceProjects, $spaceProjectId), null);
 if ($spaceProjectId > 0 && !is_array($selectedSpace)) $spaceProjectId = 0;
 if ($spaceProjectId <= 0 && $section !== 'settings') $section = 'home';
 $filters['project_id'] = $spaceProjectId;
+$GLOBALS['pa_collab_stage'] = 'collaboration_home_summary';
 $projectHomeSummary = pa_collab_safe_call('cpms_public_affairs_collab_project_home_summary', array($spaceProjects), array());
 $selectedProjectTasks = $spaceProjectId > 0 ? pa_collab_safe_call('cpms_public_affairs_collab_project_tasks', array($visibleTasks, $spaceProjectId), array()) : array();
 $selectedProjectStats = pa_collab_safe_call('cpms_public_affairs_collab_project_stats', array($selectedProjectTasks), array());
@@ -454,6 +471,7 @@ $sampleCards = array(
     array('task_no' => 'PA-0004', 'task_type' => '기성/청구', 'title' => '기성청구 첨부자료 검토', 'project_name' => '샘플 현장 D', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '높음', 'status' => '대기', 'due_date' => date('Y-m-d', strtotime('+2 day')), 'due_time' => '10:00', 'contract_impact' => '없음', 'schedule_impact' => '없음'),
     array('task_no' => 'PA-0005', 'task_type' => '내역서 검토', 'title' => '협력업체 견적 비교', 'project_name' => '샘플 현장 E', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '보통', 'status' => '검토중', 'due_date' => date('Y-m-d', strtotime('+5 day')), 'due_time' => '', 'contract_impact' => '확인필요', 'schedule_impact' => '없음'),
 );
+$GLOBALS['pa_collab_stage'] = 'collaboration_render_header';
 ?>
 
 <link rel="stylesheet" href="<?php echo h(asset_url('assets/css/public_affairs_collaboration.css') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/css/public_affairs_collaboration.css')); ?>">
@@ -925,6 +943,7 @@ body.pa-collab-open{overflow:hidden}
           </section>
         <?php endif; ?>
       <?php endif; ?>
+      <?php endif; ?>
     </main>
   </div>
 </div>
@@ -1122,7 +1141,9 @@ body.pa-collab-open{overflow:hidden}
       'employees' => $paCollabEmployeeOptions,
       'impactOptions' => array('없음', '있음', '확인필요'),
   );
-  $paCollabJsConfigJson = json_encode($paCollabJsConfig, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+  $GLOBALS['pa_collab_stage'] = 'collaboration_js_config';
+  $paCollabJsonFlags = function_exists('cpms_public_affairs_collab_json_flags') ? cpms_public_affairs_collab_json_flags(false) : 0;
+  $paCollabJsConfigJson = json_encode($paCollabJsConfig, $paCollabJsonFlags);
   if (!is_string($paCollabJsConfigJson) || $paCollabJsConfigJson === '') $paCollabJsConfigJson = '{}';
 ?>
 <script>
