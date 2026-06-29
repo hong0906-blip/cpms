@@ -37,6 +37,8 @@ $siteManagerEnabled = cpms_column_exists($pdo, 'employees', 'approval_can_be_sit
 $teamLeaderEnabled = cpms_column_exists($pdo, 'employees', 'approval_can_be_team_leader');
 $gongmuEnabled = cpms_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver');
 $manageEnabled = cpms_column_exists($pdo, 'employees', 'approval_can_be_manage_approver');
+$isTeamLeaderEnabled = cpms_column_exists($pdo, 'employees', 'is_team_leader');
+$teamLeaderIdEnabled = cpms_column_exists($pdo, 'employees', 'team_leader_id');
 $chatEnabledCol = cpms_column_exists($pdo, 'employees', 'google_chat_enabled');
 $chatUserEnabled = cpms_column_exists($pdo, 'employees', 'google_chat_user_name');
 $chatSpaceEnabled = cpms_column_exists($pdo, 'employees', 'google_chat_dm_space_name');
@@ -142,6 +144,8 @@ function cpms_employee_save_normalize_department($department) {
         '품질팀' => '품질',
         '안전부' => '안전',
         '안전팀' => '안전',
+        '보건부' => '보건',
+        '보건팀' => '보건',
         '공사부' => '공사',
         '공사팀' => '공사',
         '개발부' => '개발',
@@ -232,6 +236,8 @@ $canSite = isset($_POST['approval_can_be_site_manager']) ? 1 : 0;
 $canLead = isset($_POST['approval_can_be_team_leader']) ? 1 : 0;
 $canGongmu = isset($_POST['approval_can_be_gongmu_approver']) ? 1 : 0;
 $canManageApprover = isset($_POST['approval_can_be_manage_approver']) ? 1 : 0;
+$isTeamLeader = isset($_POST['is_team_leader']) ? (int)$_POST['is_team_leader'] : 0;
+$teamLeaderId = isset($_POST['team_leader_id']) ? (int)$_POST['team_leader_id'] : 0;
 $googleChatEnabled = isset($_POST['google_chat_enabled']) ? 1 : 0;
 $googleChatUserName = isset($_POST['google_chat_user_name']) ? trim((string)$_POST['google_chat_user_name']) : '';
 $googleChatSpaceName = isset($_POST['google_chat_dm_space_name']) ? trim((string)$_POST['google_chat_dm_space_name']) : '';
@@ -272,10 +278,12 @@ if (($dept === '개발' || $existingDept === '개발') && !$canAssignDevelopment
     exit;
 }
 
-$allowedDepts = array('관리', '공무', '품질', '안전', '공사', '개발');
+$allowedDepts = array('관리', '공무', '품질', '안전', '보건', '공사', '개발');
 $allowedPositions = array('주임','대리','과장','차장','부장','전무','상무','이사','부사장','고문','대표');
 if (!in_array($role, array('employee','executive'), true)) $role = 'employee';
 if ($isActive !== 0 && $isActive !== 1) $isActive = 1;
+if ($isTeamLeader !== 1) $isTeamLeader = 0;
+if ($isTeamLeader === 1 || ($id > 0 && $teamLeaderId === $id)) $teamLeaderId = 0;
 if ($dept !== '' && !in_array($dept, $allowedDepts, true)) $dept = '';
 if ($pos !== '' && !in_array($pos, $allowedPositions, true)) $pos = '';
 
@@ -305,6 +313,8 @@ try {
     if ($teamLeaderEnabled) $fields[] = 'approval_can_be_team_leader=:approval_can_be_team_leader';
     if ($gongmuEnabled) $fields[] = 'approval_can_be_gongmu_approver=:approval_can_be_gongmu_approver';
     if ($manageEnabled) $fields[] = 'approval_can_be_manage_approver=:approval_can_be_manage_approver';
+    if ($isTeamLeaderEnabled) $fields[] = 'is_team_leader=:is_team_leader';
+    if ($teamLeaderIdEnabled) $fields[] = 'team_leader_id=:team_leader_id';
     if ($chatEnabledCol) $fields[] = 'google_chat_enabled=:google_chat_enabled';
     if ($chatUserEnabled) $fields[] = 'google_chat_user_name=:google_chat_user_name';
     if ($chatSpaceEnabled) $fields[] = 'google_chat_dm_space_name=:google_chat_dm_space_name';
@@ -327,6 +337,8 @@ try {
         if ($teamLeaderEnabled) { $cols[] = 'approval_can_be_team_leader'; $vals[] = ':approval_can_be_team_leader'; }
         if ($gongmuEnabled) { $cols[] = 'approval_can_be_gongmu_approver'; $vals[] = ':approval_can_be_gongmu_approver'; }
         if ($manageEnabled) { $cols[] = 'approval_can_be_manage_approver'; $vals[] = ':approval_can_be_manage_approver'; }
+        if ($isTeamLeaderEnabled) { $cols[] = 'is_team_leader'; $vals[] = ':is_team_leader'; }
+        if ($teamLeaderIdEnabled) { $cols[] = 'team_leader_id'; $vals[] = ':team_leader_id'; }
         if ($chatEnabledCol) { $cols[] = 'google_chat_enabled'; $vals[] = ':google_chat_enabled'; }
         if ($chatUserEnabled) { $cols[] = 'google_chat_user_name'; $vals[] = ':google_chat_user_name'; }
         if ($chatSpaceEnabled) { $cols[] = 'google_chat_dm_space_name'; $vals[] = ':google_chat_dm_space_name'; }
@@ -351,6 +363,11 @@ try {
     if ($teamLeaderEnabled) $st->bindValue(':approval_can_be_team_leader', $canLead, \PDO::PARAM_INT);
     if ($gongmuEnabled) $st->bindValue(':approval_can_be_gongmu_approver', $canGongmu, \PDO::PARAM_INT);
     if ($manageEnabled) $st->bindValue(':approval_can_be_manage_approver', $canManageApprover, \PDO::PARAM_INT);
+    if ($isTeamLeaderEnabled) $st->bindValue(':is_team_leader', $isTeamLeader, \PDO::PARAM_INT);
+    if ($teamLeaderIdEnabled) {
+        if ($teamLeaderId > 0) $st->bindValue(':team_leader_id', $teamLeaderId, \PDO::PARAM_INT);
+        else $st->bindValue(':team_leader_id', null, \PDO::PARAM_NULL);
+    }
     if ($chatEnabledCol) $st->bindValue(':google_chat_enabled', $googleChatEnabled, \PDO::PARAM_INT);
     if ($chatUserEnabled) { if ($googleChatUserName === '') $st->bindValue(':google_chat_user_name', null, \PDO::PARAM_NULL); else $st->bindValue(':google_chat_user_name', $googleChatUserName); }
     if ($chatSpaceEnabled) { if ($googleChatSpaceName === '') $st->bindValue(':google_chat_dm_space_name', null, \PDO::PARAM_NULL); else $st->bindValue(':google_chat_dm_space_name', $googleChatSpaceName); }

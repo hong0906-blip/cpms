@@ -725,7 +725,7 @@ function cpms_public_affairs_drive_actions_html($type, $id, $row) {
     $viewLink = isset($row['drive_web_view_link']) ? trim((string)$row['drive_web_view_link']) : '';
     $downloadLink = isset($row['drive_web_content_link']) ? trim((string)$row['drive_web_content_link']) : '';
     $hasLocal = false;
-    foreach (array('stored_path', 'attachment_stored_path') as $pathKey) {
+    foreach (array('stored_path', 'stored_file_path', 'attachment_stored_path') as $pathKey) {
         if (isset($row[$pathKey]) && trim((string)$row[$pathKey]) !== '') $hasLocal = true;
     }
     if ($storageType === 'google_drive') {

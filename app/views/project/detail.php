@@ -163,6 +163,7 @@ $estimateVersions = array();
 $estimateOriginalVersions = array();
 $estimateChangeVersions = array();
 $estimateExtraVersions = array();
+$estimateHistoryVersions = array();
 try {
     if (cpms_contract_change_table_exists($pdo, 'cpms_project_estimate_versions')) {
         $stEstimateVersions = $pdo->prepare("SELECT * FROM cpms_project_estimate_versions WHERE project_id = :pid ORDER BY version_type ASC, version_no DESC, id DESC");
@@ -182,6 +183,29 @@ try {
     $estimateOriginalVersions = array();
     $estimateChangeVersions = array();
     $estimateExtraVersions = array();
+}
+
+try {
+    if (cpms_contract_change_table_exists($pdo, 'cpms_project_contract_change_files')) {
+        $stHistoryVersions = $pdo->prepare("SELECT * FROM cpms_project_contract_change_files WHERE project_id = :pid AND file_type IN ('unit_price_original', 'unit_price_update', 'unit_price_extra') ORDER BY id DESC");
+        $stHistoryVersions->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stHistoryVersions->execute();
+        $tmpHistoryVersions = $stHistoryVersions->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($tmpHistoryVersions)) {
+            foreach ($tmpHistoryVersions as $historyVersionRow) {
+                $historyFileType = isset($historyVersionRow['file_type']) ? (string)$historyVersionRow['file_type'] : '';
+                if ($historyFileType === 'unit_price_original') $historyVersionRow['title'] = '당초 내역서';
+                else if ($historyFileType === 'unit_price_extra') $historyVersionRow['title'] = '추가공사 내역서';
+                else $historyVersionRow['title'] = '변경계약 내역서';
+                $historyVersionRow['status'] = 'APPLIED';
+                $historyVersionRow['applied_at'] = isset($historyVersionRow['uploaded_at']) ? $historyVersionRow['uploaded_at'] : '';
+                $historyVersionRow['version_source'] = 'history_file';
+                array_push($estimateHistoryVersions, $historyVersionRow);
+            }
+        }
+    }
+} catch (Exception $e) {
+    $estimateHistoryVersions = array();
 }
 
 $additionalWorks = array();
@@ -272,7 +296,13 @@ if (is_file($contractMetaFile)) {
         }
     }
 }
-$versionRowsForDisplay = (count($estimateVersions) > 0) ? $estimateVersions : $contractVersions;
+if (count($estimateVersions) > 0) {
+    $versionRowsForDisplay = $estimateVersions;
+} else if (count($contractVersions) > 0) {
+    $versionRowsForDisplay = $contractVersions;
+} else {
+    $versionRowsForDisplay = $estimateHistoryVersions;
+}
 ?>
 
 <style>
@@ -581,8 +611,10 @@ $versionRowsForDisplay = (count($estimateVersions) > 0) ? $estimateVersions : $c
                                 </td>
                                 <td class="px-3 py-2 text-gray-700">
                                     <?php $versionOriginalName = isset($versionRow['original_file_name']) ? $versionRow['original_file_name'] : (isset($versionRow['original_name']) ? $versionRow['original_name'] : ''); ?>
+                                    <?php $versionFileType = isset($versionRow['original_file_name']) ? 'estimate_version' : 'contract_version'; ?>
+                                    <?php if (isset($versionRow['version_source']) && (string)$versionRow['version_source'] === 'history_file') $versionFileType = 'contract_history'; ?>
                                     <div><?php echo h($versionOriginalName); ?></div>
-                                    <div class="mt-1 text-xs"><?php echo cpms_public_affairs_drive_actions_html('contract_version', isset($versionRow['id']) ? (int)$versionRow['id'] : 0, $versionRow); ?></div>
+                                    <div class="mt-1 text-xs"><?php echo cpms_public_affairs_drive_actions_html($versionFileType, isset($versionRow['id']) ? (int)$versionRow['id'] : 0, $versionRow); ?></div>
                                 </td>
                                 <td class="px-3 py-2 text-gray-600"><?php echo h(isset($versionRow['applied_at']) ? $versionRow['applied_at'] : ''); ?></td>
                             </tr>

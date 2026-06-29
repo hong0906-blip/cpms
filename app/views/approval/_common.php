@@ -698,6 +698,8 @@ if (!function_exists('approval_move_to_next_pending_line')) {
             return $result;
         }
         $docType = isset($docRow['doc_type']) ? (string)$docRow['doc_type'] : '';
+        $docContent = approval_parse_content(isset($docRow['content']) ? $docRow['content'] : '');
+        $forceCeoActualFromContent = (is_array($docContent) && isset($docContent['approval_force_ceo_actual']) && (int)$docContent['approval_force_ceo_actual'] === 1);
         $baseDate = date('Y-m-d');
         $ceoRole = approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC');
         $vpRole = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5');
@@ -738,7 +740,7 @@ if (!function_exists('approval_move_to_next_pending_line')) {
                 approval_mark_line_delegated($pdo, $documentId, $line, approval_auto_delegate_reason_label('vp_leave_ceo_proxy'), $actor, $ceoRole);
                 continue;
             }
-            if ($docType === 'leave' && approval_role_is_ceo($role) && !$forceCeo) {
+            if ($docType === 'leave' && approval_role_is_ceo($role) && !$forceCeo && !$forceCeoActualFromContent) {
                 approval_mark_line_delegated($pdo, $documentId, $line, approval_auto_delegate_reason_label('leave_ceo_default'), $actor, $vpRole);
                 continue;
             }

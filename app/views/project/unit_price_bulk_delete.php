@@ -63,15 +63,32 @@ function cpms_unit_price_bulk_column_exists($pdo, $column) {
     }
 }
 
+function cpms_unit_price_bulk_ensure_column($pdo, $column, $sql) {
+    if (cpms_unit_price_bulk_column_exists($pdo, $column)) return true;
+    try {
+        $pdo->exec($sql);
+    } catch (Exception $e) {
+        return false;
+    }
+    return cpms_unit_price_bulk_column_exists($pdo, $column);
+}
+
 try {
-    if (!cpms_unit_price_bulk_column_exists($pdo, 'is_active') || !cpms_unit_price_bulk_column_exists($pdo, 'is_current')) {
+    $hasIsActive = cpms_unit_price_bulk_ensure_column($pdo, 'is_active', "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1");
+    $hasIsCurrent = cpms_unit_price_bulk_ensure_column($pdo, 'is_current', "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_current TINYINT(1) NOT NULL DEFAULT 1");
+    $hasUpdatedAt = cpms_unit_price_bulk_ensure_column($pdo, 'updated_at', "ALTER TABLE cpms_project_unit_prices ADD COLUMN updated_at DATETIME NULL");
+
+    if (!$hasIsActive || !$hasIsCurrent) {
         flash_set('error', '내역서 이력 보존 컬럼이 없습니다. db_setup_estimate_versions 페이지에서 DB 생성/확인을 먼저 실행해주세요.');
         header('Location: ' . $redirect);
         exit;
     }
 
+    $deleteSet = "is_active = 0, is_current = 0";
+    if ($hasUpdatedAt) $deleteSet .= ", updated_at = NOW()";
+
     if ($mode === 'all') {
-        $sql = "UPDATE cpms_project_unit_prices SET is_active = 0, is_current = 0, updated_at = NOW() WHERE project_id = :pid AND (is_active = 1 OR is_active IS NULL) AND (is_current = 1 OR is_current IS NULL)";
+        $sql = "UPDATE cpms_project_unit_prices SET " . $deleteSet . " WHERE project_id = :pid AND (is_active = 1 OR is_active IS NULL) AND (is_current = 1 OR is_current IS NULL)";
         $st = $pdo->prepare($sql);
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $st->execute();
@@ -99,7 +116,7 @@ try {
         array_push($holders, ':id' . $idx);
     }
 
-    $sql = "UPDATE cpms_project_unit_prices SET is_active = 0, is_current = 0, updated_at = NOW() WHERE project_id = :pid AND id IN (" . implode(',', $holders) . ")";
+    $sql = "UPDATE cpms_project_unit_prices SET " . $deleteSet . " WHERE project_id = :pid AND id IN (" . implode(',', $holders) . ")";
     $st = $pdo->prepare($sql);
     $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
     foreach ($ids as $idx => $id) {

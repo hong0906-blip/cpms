@@ -6,6 +6,7 @@ require_once __DIR__ . '/template_helpers.php';
 require_once __DIR__ . '/notification_helpers.php';
 require_once __DIR__ . '/../admin/leave_management_helpers.php';
 require_once __DIR__ . '/../../services/ApprovalDriveService.php';
+require_once __DIR__ . '/line_rules.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
@@ -33,7 +34,10 @@ if (!function_exists('approval_store_employee')) {
         }
         $hireColumn = approval_store_column_exists($pdo, 'employees', 'hire_date') ? 'hire_date' : "NULL AS hire_date";
         $roleColumn = approval_store_column_exists($pdo, 'employees', 'role') ? 'role' : "'' AS role";
-        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . "," . $hireColumn . " FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
+        $isTeamLeaderColumn = approval_store_column_exists($pdo, 'employees', 'is_team_leader') ? 'is_team_leader' : "0 AS is_team_leader";
+        $teamLeaderIdColumn = approval_store_column_exists($pdo, 'employees', 'team_leader_id') ? 'team_leader_id' : "0 AS team_leader_id";
+        $approvalLeadColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_team_leader') ? 'approval_can_be_team_leader' : "0 AS approval_can_be_team_leader";
+        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . "," . $hireColumn . "," . $isTeamLeaderColumn . "," . $teamLeaderIdColumn . "," . $approvalLeadColumn . " FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
         $st->execute(array(':id' => (int)$id));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         return $row ? $row : null;
@@ -44,7 +48,10 @@ if (!function_exists('approval_store_employee_by_name')) {
     function approval_store_employee_by_name($pdo, $name)
     {
         $roleColumn = approval_store_column_exists($pdo, 'employees', 'role') ? 'role' : "'' AS role";
-        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . " FROM employees WHERE name=:name AND is_active=1 LIMIT 1");
+        $isTeamLeaderColumn = approval_store_column_exists($pdo, 'employees', 'is_team_leader') ? 'is_team_leader' : "0 AS is_team_leader";
+        $teamLeaderIdColumn = approval_store_column_exists($pdo, 'employees', 'team_leader_id') ? 'team_leader_id' : "0 AS team_leader_id";
+        $approvalLeadColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_team_leader') ? 'approval_can_be_team_leader' : "0 AS approval_can_be_team_leader";
+        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . "," . $isTeamLeaderColumn . "," . $teamLeaderIdColumn . "," . $approvalLeadColumn . " FROM employees WHERE name=:name AND is_active=1 LIMIT 1");
         $st->execute(array(':name' => $name));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         return $row ? $row : null;
@@ -193,6 +200,12 @@ if (!function_exists('approval_store_apply_auto_delegation_rules')) {
         $forceCeoActual = false;
 
         for ($i = 0; $i < count($lines); $i++) {
+            if (!empty($lines[$i]['force_actual'])) {
+                $forceCeoActual = true;
+            }
+        }
+
+        for ($i = 0; $i < count($lines); $i++) {
             if (isset($lines[$i]['emp']) && approval_employee_identity_matches($lines[$i]['emp'], $creatorEmployeeId, $creatorEmail, $creatorName)) {
                 $creatorIndex = $i;
                 break;
@@ -210,7 +223,9 @@ if (!function_exists('approval_store_apply_auto_delegation_rules')) {
                     approval_store_mark_line_delegated($lines[$i], approval_auto_delegate_reason_label('previous_step'), null);
                 }
             }
-            approval_store_mark_line_delegated($lines[$creatorIndex], approval_auto_delegate_reason_label('self'), null);
+            if (empty($lines[$creatorIndex]['allow_self_approval'])) {
+                approval_store_mark_line_delegated($lines[$creatorIndex], approval_auto_delegate_reason_label('self'), null);
+            }
         }
 
         if ($docType === 'leave' && approval_employee_is_executive($creator)) {
@@ -229,6 +244,9 @@ if (!function_exists('approval_store_apply_auto_delegation_rules')) {
         for ($i = 0; $i < count($lines); $i++) {
             $role = isset($lines[$i]['role']) ? (string)$lines[$i]['role'] : '';
             $empId = approval_store_line_emp_id($lines[$i]);
+            if (!empty($lines[$i]['skip_auto_delegate'])) {
+                continue;
+            }
             if (approval_role_is_vp($role) && approval_is_employee_on_leave($pdo, $empId, $baseDate)) {
                 approval_store_mark_line_delegated($lines[$i], approval_auto_delegate_reason_label('vp_leave_ceo_proxy'), $ceoRole);
                 $vpLeaveRequiresCeo = true;
@@ -252,6 +270,9 @@ if (!function_exists('approval_store_apply_auto_delegation_rules')) {
             $role = isset($lines[$i]['role']) ? (string)$lines[$i]['role'] : '';
             $empId = approval_store_line_emp_id($lines[$i]);
             $isAlreadyDelegated = (isset($lines[$i]['delegated']) && (int)$lines[$i]['delegated'] === 1) || (isset($lines[$i]['status']) && strtoupper((string)$lines[$i]['status']) === 'DELEGATED');
+            if (!empty($lines[$i]['skip_auto_delegate'])) {
+                continue;
+            }
             if (!$isAlreadyDelegated && approval_is_employee_on_leave($pdo, $empId, $baseDate)) {
                 approval_store_mark_line_delegated($lines[$i], approval_auto_delegate_reason_label('on_leave'), null);
                 continue;
@@ -431,6 +452,21 @@ if ($isManagementOnlyDoc && !approval_is_management_department_user($pdo, $user)
     exit;
 }
 
+$postedConstructionTeamLeaderId = isset($_POST['construction_team_leader_id']) ? (int)$_POST['construction_team_leader_id'] : 0;
+if ($postedConstructionTeamLeaderId <= 0 && isset($_POST['team_leader_id'])) {
+    $postedConstructionTeamLeaderId = (int)$_POST['team_leader_id'];
+}
+if (!$isManagementOnlyDoc && in_array($docType, array('leave', 'proposal'), true) && approval_line_rules_requires_manual_team_leader($creatorEmployee)) {
+    if ($postedConstructionTeamLeaderId > 0) {
+        $creatorEmployee['team_leader_id'] = $postedConstructionTeamLeaderId;
+    }
+    if (!isset($creatorEmployee['team_leader_id']) || (int)$creatorEmployee['team_leader_id'] <= 0) {
+        flash_set('danger', approval_ko('%EA%B3%B5%EC%82%AC%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        header('Location: ?r=approval_create&type=' . $docType);
+        exit;
+    }
+}
+
 $vpRole = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5');
 $ceoRole = approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC');
 $siteRole = approval_ko('%EC%86%8C%EC%9E%A5');
@@ -441,21 +477,8 @@ $pmRole = 'PM';
 $parkName = approval_ko('%EB%B0%95%EC%9B%90%EB%8D%95');
 $goName = approval_ko('%EA%B3%A0%EC%98%81%EC%84%B1');
 
-$vp = approval_store_employee_by_name($pdo, $vpRole);
-if (!$vp) {
-    $st = $pdo->prepare("SELECT id,name,email,department,position FROM employees WHERE is_active=1 AND position=:pos LIMIT 1");
-    $st->execute(array(':pos' => $vpRole));
-    $vp = $st->fetch(PDO::FETCH_ASSOC);
-}
-$ceo = null;
-$st = $pdo->prepare("SELECT id,name,email,department,position FROM employees WHERE is_active=1 AND (position=:p1 OR position=:p2) LIMIT 1");
-$st->execute(array(':p1' => $ceoRole, ':p2' => approval_ko('%EB%8C%80%ED%91%9C')));
-$ceo = $st->fetch(PDO::FETCH_ASSOC);
-if (!$isManagementOnlyDoc && (!$vp || !$ceo)) {
-    flash_set('danger', approval_ko('%EC%A7%81%EC%9B%90%EB%AA%85%EB%B6%80%EC%97%90%EC%84%9C%20%EB%B6%80%EC%82%AC%EC%9E%A5%20%EB%98%90%EB%8A%94%20%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC%EA%B0%80%20%ED%99%95%EC%9D%B8%EB%90%98%EC%A7%80%20%EC%95%8A%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
-    header('Location: ?r=approval_create&type=' . $docType);
-    exit;
-}
+$vp = approval_line_rules_find_vp($pdo);
+$ceo = approval_line_rules_find_ceo($pdo);
 
 $contentData = array();
 $title = '';
@@ -535,13 +558,6 @@ if ($isManagementOnlyDoc) {
         'delegated' => 0
     );
 } else if ($docType === 'leave') {
-    $leadId = isset($_POST['team_lead_id']) ? (int)$_POST['team_lead_id'] : 0;
-    $lead = approval_store_employee($pdo, $leadId);
-    if (!$lead) {
-        flash_set('danger', approval_ko('%ED%8C%80%EC%9E%A5%20%EA%B2%B0%EC%9E%AC%EC%9E%90%EB%A5%BC%20%EC%84%A0%ED%83%9D%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'));
-        header('Location: ?r=approval_create&type=leave');
-        exit;
-    }
     $start = isset($_POST['leave_start_date']) ? trim((string)$_POST['leave_start_date']) : '';
     $end = isset($_POST['leave_end_date']) ? trim((string)$_POST['leave_end_date']) : '';
     if ($start === '' || $end === '' || strtotime($start) === false || strtotime($end) === false || strtotime($start) > strtotime($end)) {
@@ -572,12 +588,6 @@ if ($isManagementOnlyDoc) {
         }
     }
     $normDept = approval_norm_dept($department);
-    $leavePm = null;
-    if ($normDept === approval_ko('%EA%B3%B5%EC%82%AC') || $normDept === approval_ko('%EC%95%88%EC%A0%84')) {
-        $leavePm = approval_store_employee_by_name($pdo, $parkName);
-    } else if ($normDept === approval_ko('%EA%B3%B5%EB%AC%B4')) {
-        $leavePm = approval_store_employee_by_name($pdo, $goName);
-    }
     $contentData = array(
         'request_type' => isset($_POST['request_type']) ? trim((string)$_POST['request_type']) : '',
         'request_type_etc' => isset($_POST['request_type_etc']) ? trim((string)$_POST['request_type_etc']) : '',
@@ -594,45 +604,36 @@ if ($isManagementOnlyDoc) {
         'applicant_email' => $creatorEmail,
         'writer_email' => $creatorEmail,
         'ceo_name' => isset($ceo['name']) ? $ceo['name'] : '',
-        'delegate_level' => 'ceo'
+        'delegate_level' => 'none'
     );
     $title = approval_doc_label('leave') . ' - ' . $contentData['applicant_name'];
-    if (approval_employee_is_vp(is_array($creatorEmployee) ? $creatorEmployee : array('id' => $creatorEmployeeId, 'name' => $creatorName, 'email' => $creatorEmail))) {
-        $leaveManage = approval_store_default_approver_by_role($pdo, $manageRole);
-        $leaveGongmu = approval_store_default_approver_by_role($pdo, $gongmuRole);
-        if ($leaveManage) {
-            $lines[] = array('role' => $manageRole, 'emp' => $leaveManage, 'delegated' => 0);
-        }
-        if ($leaveGongmu) {
-            $lines[] = array('role' => $gongmuRole, 'emp' => $leaveGongmu, 'delegated' => 0);
-        }
-    }
-    $lines[] = array('role' => $teamRole, 'emp' => $lead, 'delegated' => 0);
-    if ($leavePm) {
-        $lines[] = array('role' => $pmRole, 'emp' => $leavePm, 'delegated' => 0);
-    }
-    $lines[] = array('role' => $vpRole, 'emp' => $vp, 'delegated' => 0);
-    $lines[] = array('role' => $ceoRole, 'emp' => $ceo, 'delegated' => 1, 'delegated_by_role' => $vpRole);
-    $delegateLevel = 'ceo';
-} else {
-    $sojang = approval_store_employee($pdo, isset($_POST['sojang_id']) ? (int)$_POST['sojang_id'] : 0);
-    $pm = approval_store_employee($pdo, isset($_POST['pm_id']) ? (int)$_POST['pm_id'] : 0);
-    $gongmu = approval_store_employee($pdo, isset($_POST['gongmu_id']) ? (int)$_POST['gongmu_id'] : 0);
-    $manage = approval_store_employee($pdo, isset($_POST['manage_id']) ? (int)$_POST['manage_id'] : 0);
-    if (!$sojang || !$gongmu || !$manage) {
-        flash_set('danger', approval_ko('%EC%86%8C%EC%9E%A5%2F%EA%B3%B5%EB%AC%B4%2F%EA%B4%80%EB%A6%AC%20%EA%B2%B0%EC%9E%AC%EC%9E%90%EB%A5%BC%20%EC%84%A0%ED%83%9D%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'));
-        header('Location: ?r=approval_create&type=proposal');
+    $ruleResult = approval_line_rules_build($pdo, $docType, $creatorEmployee, $contentData);
+    if (approval_line_rules_requires_manual_team_leader($creatorEmployee) && (!isset($ruleResult['team_lead']) || !is_array($ruleResult['team_lead']))) {
+        flash_set('danger', approval_ko('%EA%B3%B5%EC%82%AC%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        header('Location: ?r=approval_create&type=leave');
         exit;
     }
-    $delegateLevel = isset($_POST['delegate_level']) ? trim((string)$_POST['delegate_level']) : 'none';
-    if (!in_array($delegateLevel, array('none', 'vp', 'ceo'), true)) {
-        $delegateLevel = 'none';
+    $lines = isset($ruleResult['lines']) && is_array($ruleResult['lines']) ? $ruleResult['lines'] : array();
+    $contentData['approval_line_messages'] = isset($ruleResult['messages']) && is_array($ruleResult['messages']) ? $ruleResult['messages'] : array();
+    $contentData['approval_line_warnings'] = isset($ruleResult['warnings']) && is_array($ruleResult['warnings']) ? $ruleResult['warnings'] : array();
+    $contentData['approval_force_ceo_actual'] = isset($ruleResult['force_ceo_actual']) ? (int)$ruleResult['force_ceo_actual'] : 0;
+    $contentData['approval_line_preview'] = approval_line_rules_line_names($lines);
+    $delegateLevel = 'none';
+} else {
+    $delegateLevel = 'none';
+    $draftDepartment = isset($_POST['draft_department']) ? trim((string)$_POST['draft_department']) : '';
+    $drafterName = isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : $creatorName;
+    if (isset($creatorEmployee['department']) && trim((string)$creatorEmployee['department']) !== '') {
+        $draftDepartment = trim((string)$creatorEmployee['department']);
+    }
+    if (isset($creatorEmployee['name']) && trim((string)$creatorEmployee['name']) !== '') {
+        $drafterName = trim((string)$creatorEmployee['name']);
     }
     $contentData = array(
         'draft_date' => isset($_POST['draft_date']) ? trim((string)$_POST['draft_date']) : '',
         'effective_date' => isset($_POST['effective_date']) ? trim((string)$_POST['effective_date']) : '',
-        'draft_department' => isset($_POST['draft_department']) ? trim((string)$_POST['draft_department']) : '',
-        'drafter_name' => isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : $creatorName,
+        'draft_department' => $draftDepartment,
+        'drafter_name' => $drafterName,
         'draft_type' => isset($_POST['draft_type']) ? trim((string)$_POST['draft_type']) : '',
         'title' => isset($_POST['title']) ? trim((string)$_POST['title']) : '',
         'headline' => isset($_POST['headline']) ? trim((string)$_POST['headline']) : '',
@@ -645,19 +646,22 @@ if ($isManagementOnlyDoc) {
         'special_note_2' => isset($_POST['special_note_2']) ? trim((string)$_POST['special_note_2']) : '',
         'payment_request_date' => isset($_POST['payment_request_date']) ? trim((string)$_POST['payment_request_date']) : '',
         'budget_status' => isset($_POST['budget_status']) ? trim((string)$_POST['budget_status']) : '',
-        'writer_name' => isset($_POST['drafter_name']) ? trim((string)$_POST['drafter_name']) : $creatorName,
+        'writer_name' => $drafterName,
         'writer_email' => $creatorEmail,
         'delegate_level' => $delegateLevel
     );
     $title = $contentData['title'] !== '' ? $contentData['title'] : approval_doc_label('proposal');
-    $lines[] = array('role' => $siteRole, 'emp' => $sojang, 'delegated' => 0);
-    if ($pm) {
-        $lines[] = array('role' => $pmRole, 'emp' => $pm, 'delegated' => 0);
+    $ruleResult = approval_line_rules_build($pdo, $docType, $creatorEmployee, $contentData);
+    if (approval_line_rules_requires_manual_team_leader($creatorEmployee) && (!isset($ruleResult['team_lead']) || !is_array($ruleResult['team_lead']))) {
+        flash_set('danger', approval_ko('%EA%B3%B5%EC%82%AC%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        header('Location: ?r=approval_create&type=proposal');
+        exit;
     }
-    $lines[] = array('role' => $gongmuRole, 'emp' => $gongmu, 'delegated' => 0);
-    $lines[] = array('role' => $manageRole, 'emp' => $manage, 'delegated' => 0);
-    $lines[] = array('role' => $vpRole, 'emp' => $vp, 'delegated' => ($delegateLevel === 'vp') ? 1 : 0, 'delegated_by_role' => $manageRole);
-    $lines[] = array('role' => $ceoRole, 'emp' => $ceo, 'delegated' => ($delegateLevel === 'vp' || $delegateLevel === 'ceo') ? 1 : 0, 'delegated_by_role' => ($delegateLevel === 'vp' ? $manageRole : $vpRole));
+    $lines = isset($ruleResult['lines']) && is_array($ruleResult['lines']) ? $ruleResult['lines'] : array();
+    $contentData['approval_line_messages'] = isset($ruleResult['messages']) && is_array($ruleResult['messages']) ? $ruleResult['messages'] : array();
+    $contentData['approval_line_warnings'] = isset($ruleResult['warnings']) && is_array($ruleResult['warnings']) ? $ruleResult['warnings'] : array();
+    $contentData['approval_force_ceo_actual'] = isset($ruleResult['force_ceo_actual']) ? (int)$ruleResult['force_ceo_actual'] : 0;
+    $contentData['approval_line_preview'] = approval_line_rules_line_names($lines);
 }
 
 if ($projectId > 0 && is_array($contentData)) {
@@ -708,7 +712,8 @@ try {
         $emp = $line['emp'];
         $isDelegated = isset($line['delegated']) && (int)$line['delegated'] === 1;
         $isSelfApprover = false;
-        if (!$isDelegated) {
+        $allowSelfApproval = isset($line['allow_self_approval']) && (int)$line['allow_self_approval'] === 1;
+        if (!$isDelegated && !$allowSelfApproval) {
             if ($creatorEmployeeId > 0 && (int)$emp['id'] === (int)$creatorEmployeeId) {
                 $isSelfApprover = true;
             } else if ($creatorEmail !== '' && isset($emp['email']) && strtolower(trim((string)$emp['email'])) === strtolower($creatorEmail)) {

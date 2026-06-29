@@ -15,11 +15,18 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     $employees = isset($approvalOptions['employees']) ? $approvalOptions['employees'] : array();
     $pmCandidates = isset($approvalOptions['pm_candidates']) ? $approvalOptions['pm_candidates'] : array();
     $defaultPmId = isset($approvalOptions['default_pm_id']) ? (int)$approvalOptions['default_pm_id'] : 0;
+    $teamRole = approval_ko('%ED%8C%80%EC%9E%A5');
+    $showTeamLeaderSelect = ($mode === 'edit' && !empty($approvalOptions['requires_team_leader_select']));
+    $teamLeaderCandidates = isset($approvalOptions['team_leader_candidates']) && is_array($approvalOptions['team_leader_candidates']) ? $approvalOptions['team_leader_candidates'] : array();
+    $selectedTeamLeaderId = isset($approvalOptions['selected_team_leader_id']) ? (int)$approvalOptions['selected_team_leader_id'] : 0;
 
     $lineByRole = array();
+    $orderedRoles = array();
     for ($i = 0; $i < count($lines); $i++) {
-        if (isset($lines[$i]['role_type'])) {
-            $lineByRole[$lines[$i]['role_type']] = $lines[$i];
+        $roleKey = isset($lines[$i]['role_type']) ? $lines[$i]['role_type'] : (isset($lines[$i]['role']) ? $lines[$i]['role'] : '');
+        if ($roleKey !== '') {
+            $lineByRole[$roleKey] = $lines[$i];
+            $orderedRoles[] = $roleKey;
         }
     }
     $roleKeys = array(
@@ -30,6 +37,15 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
         approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5'),
         approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC')
     );
+    if (count($orderedRoles) > 0) {
+        $roleKeys = $orderedRoles;
+    }
+    if ($selectedTeamLeaderId <= 0 && isset($lineByRole[$teamRole]['approver_id'])) {
+        $selectedTeamLeaderId = (int)$lineByRole[$teamRole]['approver_id'];
+    }
+    if ($showTeamLeaderSelect && !in_array($teamRole, $roleKeys, true)) {
+        array_unshift($roleKeys, $teamRole);
+    }
 
     echo '<div class="approval-paper proposal-paper">';
     echo '<div class="doc-title">' . h(approval_ko('%EA%B8%B0%EC%95%88%EC%84%9C')) . '</div>';
@@ -42,8 +58,13 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     echo '</table>';
     echo '</td><td style="width:66%;padding:0">';
     echo '<table class="approval-line-table proposal-approval-line"><colgroup><col class="approval-side-col">';
-    for ($i = 0; $i < 7; $i++) {
-        echo '<col style="width:14.28%">';
+    $totalCols = count($roleKeys) + 1;
+    if ($totalCols <= 0) {
+        $totalCols = 1;
+    }
+    $colWidth = 100 / $totalCols;
+    for ($i = 0; $i < $totalCols; $i++) {
+        echo '<col style="width:' . number_format($colWidth, 2, '.', '') . '%">';
     }
     echo '</colgroup><tr><th rowspan="4">' . h(approval_ko('%EA%B2%B0%EC%9E%AC')) . '</th>';
     echo '<th>' . h(approval_ko('%EB%8B%B4%EB%8B%B9')) . '</th>';
@@ -58,16 +79,11 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     }
     echo '</tr><tr class="approval-name-row">';
     approval_render_name_cell(approval_doc_get($data, 'drafter_name', '-'));
-    if ($mode === 'edit') {
-        approval_render_select_cell('sojang_id', isset($approvalOptions['site']) ? $approvalOptions['site'] : array(), '', approval_ko('%EC%86%8C%EC%9E%A5%20%EC%84%A0%ED%83%9D'));
-        approval_render_select_cell('pm_id', $pmCandidates, $defaultPmId, 'PM');
-        approval_render_select_cell('gongmu_id', isset($approvalOptions['gongmu']) ? $approvalOptions['gongmu'] : array(), '', approval_ko('%EA%B3%B5%EB%AC%B4%20%EC%84%A0%ED%83%9D'));
-        approval_render_select_cell('manage_id', isset($approvalOptions['manage']) ? $approvalOptions['manage'] : array(), '', approval_ko('%EA%B4%80%EB%A6%AC%20%EC%84%A0%ED%83%9D'));
-        approval_render_name_cell(isset($approvalOptions['vp']['name']) ? $approvalOptions['vp']['name'] : '-');
-        approval_render_name_cell(isset($approvalOptions['ceo']['name']) ? $approvalOptions['ceo']['name'] : '-');
-    } else {
-        for ($i = 0; $i < count($roleKeys); $i++) {
-            $role = $roleKeys[$i];
+    for ($i = 0; $i < count($roleKeys); $i++) {
+        $role = $roleKeys[$i];
+        if ($role === $teamRole && $showTeamLeaderSelect) {
+            approval_render_select_cell('construction_team_leader_id', $teamLeaderCandidates, $selectedTeamLeaderId, approval_ko('%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%20%EC%84%A0%ED%83%9D'));
+        } else {
             approval_render_name_cell(isset($lineByRole[$role]['approver_name']) ? $lineByRole[$role]['approver_name'] : '-');
         }
     }
@@ -80,17 +96,44 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     echo '</tr></table>';
     echo '</td></tr></table>';
 
+    $lineMessages = array();
+    $previewParts = array();
+    for ($i = 0; $i < count($lines); $i++) {
+        $lineRole = isset($lines[$i]['role_type']) ? $lines[$i]['role_type'] : (isset($lines[$i]['role']) ? $lines[$i]['role'] : '');
+        $lineName = isset($lines[$i]['approver_name']) ? trim((string)$lines[$i]['approver_name']) : '';
+        if ($lineName === '' && isset($lines[$i]['emp']) && is_array($lines[$i]['emp']) && isset($lines[$i]['emp']['name'])) {
+            $lineName = trim((string)$lines[$i]['emp']['name']);
+        }
+        if ($lineName !== '') {
+            $previewParts[] = approval_role_label($lineRole) . ' ' . $lineName;
+        }
+    }
+    if (count($previewParts) > 0) {
+        $lineMessages[] = approval_ko('%EC%9E%90%EB%8F%99%20%EC%83%9D%EC%84%B1%EB%90%9C%20%EA%B2%B0%EC%9E%AC%EB%9D%BC%EC%9D%B8') . ': ' . implode(' -> ', $previewParts);
+    }
+    if (isset($approvalOptions['line_messages']) && is_array($approvalOptions['line_messages'])) {
+        $lineMessages = array_merge($lineMessages, $approvalOptions['line_messages']);
+    }
+    if (isset($approvalOptions['line_warnings']) && is_array($approvalOptions['line_warnings'])) {
+        $lineMessages = array_merge($lineMessages, $approvalOptions['line_warnings']);
+    }
+    if (is_array($data)) {
+        if (isset($data['approval_line_messages']) && is_array($data['approval_line_messages'])) {
+            $lineMessages = array_merge($lineMessages, $data['approval_line_messages']);
+        }
+        if (isset($data['approval_line_warnings']) && is_array($data['approval_line_warnings'])) {
+            $lineMessages = array_merge($lineMessages, $data['approval_line_warnings']);
+        }
+    }
+    if (count($lineMessages) > 0) {
+        echo '<div class="approval-reference-help" style="margin-top:8px">';
+        for ($i = 0; $i < count($lineMessages); $i++) {
+            echo '<div>' . h($lineMessages[$i]) . '</div>';
+        }
+        echo '</div>';
+    }
     if ($mode === 'edit') {
-        echo '<table><tr><th style="width:12%">' . h(approval_ko('%EC%A0%84%EA%B2%B0%20%EC%84%A0%ED%83%9D')) . '</th><td>';
-        echo '<select name="delegate_level" class="doc-select" style="max-width:240px">';
-        echo '<option value="none"' . ($delegateLevel === 'none' ? ' selected="selected"' : '') . '>' . h(approval_ko('%EC%97%86%EC%9D%8C')) . '</option>';
-        echo '<option value="vp"' . ($delegateLevel === 'vp' ? ' selected="selected"' : '') . '>' . h(approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5%20%EC%A0%84%EA%B2%B0')) . '</option>';
-        echo '<option value="ceo"' . ($delegateLevel === 'ceo' ? ' selected="selected"' : '') . '>' . h(approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC%20%EC%A0%84%EA%B2%B0')) . '</option>';
-        echo '</select>';
-        echo '</td></tr></table>';
         approval_render_reference_select($employees, array());
-    } else {
-        echo '<table><tr><th style="width:12%">' . h(approval_ko('%EC%A0%84%EA%B2%B0')) . '</th><td>' . h($delegateLevel === 'vp' ? approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5%20%EC%A0%84%EA%B2%B0') : ($delegateLevel === 'ceo' ? approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC%20%EC%A0%84%EA%B2%B0') : approval_ko('%EC%97%86%EC%9D%8C'))) . '</td></tr></table>';
     }
 
     echo '<table><tr><th style="width:12%">' . h(approval_ko('%EA%B8%B0%EC%95%88%EA%B5%AC%EB%B6%84')) . '</th><td>';

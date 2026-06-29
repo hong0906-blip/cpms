@@ -126,6 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 cpms_estimate_setup_add_column($pdo, 'cpms_project_unit_prices', 'item_fingerprint', "ALTER TABLE cpms_project_unit_prices ADD COLUMN item_fingerprint CHAR(40) DEFAULT ''" . cpms_estimate_setup_after_clause($pdo, 'cpms_project_unit_prices', 'source_version_no'), $added);
                 cpms_estimate_setup_add_column($pdo, 'cpms_project_unit_prices', 'is_active', "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1", $added);
                 cpms_estimate_setup_add_column($pdo, 'cpms_project_unit_prices', 'is_current', "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_current TINYINT(1) NOT NULL DEFAULT 1", $added);
+                cpms_estimate_setup_add_column($pdo, 'cpms_project_unit_prices', 'updated_at', "ALTER TABLE cpms_project_unit_prices ADD COLUMN updated_at DATETIME NULL", $added);
 
                 $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_project_unit_price_change_logs (
                     id INT AUTO_INCREMENT PRIMARY KEY,

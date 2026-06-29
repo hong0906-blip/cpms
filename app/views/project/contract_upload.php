@@ -33,6 +33,188 @@ function cpms_contract_upload_column_exists($pdo, $table, $column) {
 }
 }
 
+if (!function_exists('cpms_contract_upload_add_column_if_missing')) {
+function cpms_contract_upload_add_column_if_missing($pdo, $table, $column, $sql) {
+    if (!$pdo || trim((string)$table) === '' || trim((string)$column) === '') return false;
+    if (cpms_contract_upload_column_exists($pdo, $table, $column)) return true;
+    try {
+        $pdo->exec($sql);
+    } catch (Exception $e) {
+        error_log('[contract_upload] schema add column failed: ' . $table . '.' . $column . ' / ' . $e->getMessage());
+        return false;
+    }
+    return cpms_contract_upload_column_exists($pdo, $table, $column);
+}
+}
+
+if (!function_exists('cpms_contract_upload_ensure_contract_versions_schema')) {
+function cpms_contract_upload_ensure_contract_versions_schema($pdo) {
+    if (!$pdo) return false;
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_contract_versions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            project_id INT NOT NULL,
+            version_type VARCHAR(30) NOT NULL DEFAULT '',
+            version_no INT NOT NULL DEFAULT 0,
+            title VARCHAR(255) NOT NULL DEFAULT '',
+            status VARCHAR(30) NOT NULL DEFAULT 'draft',
+            is_current TINYINT(1) NOT NULL DEFAULT 0,
+            original_name VARCHAR(255) DEFAULT '',
+            stored_name VARCHAR(255) DEFAULT '',
+            stored_path VARCHAR(500) DEFAULT '',
+            uploaded_by INT NULL,
+            uploaded_at DATETIME NULL,
+            applied_at DATETIME NULL,
+            change_summary TEXT NULL,
+            KEY idx_project (project_id),
+            KEY idx_project_current (project_id, is_current),
+            KEY idx_project_type_no (project_id, version_type, version_no)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        $columns = array(
+            'project_id' => "ALTER TABLE cpms_contract_versions ADD COLUMN project_id INT NOT NULL DEFAULT 0",
+            'version_type' => "ALTER TABLE cpms_contract_versions ADD COLUMN version_type VARCHAR(30) NOT NULL DEFAULT ''",
+            'version_no' => "ALTER TABLE cpms_contract_versions ADD COLUMN version_no INT NOT NULL DEFAULT 0",
+            'title' => "ALTER TABLE cpms_contract_versions ADD COLUMN title VARCHAR(255) NOT NULL DEFAULT ''",
+            'status' => "ALTER TABLE cpms_contract_versions ADD COLUMN status VARCHAR(30) NOT NULL DEFAULT 'draft'",
+            'is_current' => "ALTER TABLE cpms_contract_versions ADD COLUMN is_current TINYINT(1) NOT NULL DEFAULT 0",
+            'original_name' => "ALTER TABLE cpms_contract_versions ADD COLUMN original_name VARCHAR(255) DEFAULT ''",
+            'stored_name' => "ALTER TABLE cpms_contract_versions ADD COLUMN stored_name VARCHAR(255) DEFAULT ''",
+            'stored_path' => "ALTER TABLE cpms_contract_versions ADD COLUMN stored_path VARCHAR(500) DEFAULT ''",
+            'uploaded_by' => "ALTER TABLE cpms_contract_versions ADD COLUMN uploaded_by INT NULL",
+            'uploaded_at' => "ALTER TABLE cpms_contract_versions ADD COLUMN uploaded_at DATETIME NULL",
+            'applied_at' => "ALTER TABLE cpms_contract_versions ADD COLUMN applied_at DATETIME NULL",
+            'change_summary' => "ALTER TABLE cpms_contract_versions ADD COLUMN change_summary TEXT NULL"
+        );
+        foreach ($columns as $column => $sql) {
+            cpms_contract_upload_add_column_if_missing($pdo, 'cpms_contract_versions', $column, $sql);
+        }
+        try { $pdo->exec("ALTER TABLE cpms_contract_versions ADD INDEX idx_project (project_id)"); } catch (Exception $eIdx1) {}
+        try { $pdo->exec("ALTER TABLE cpms_contract_versions ADD INDEX idx_project_current (project_id, is_current)"); } catch (Exception $eIdx2) {}
+        try { $pdo->exec("ALTER TABLE cpms_contract_versions ADD INDEX idx_project_type_no (project_id, version_type, version_no)"); } catch (Exception $eIdx3) {}
+        return cpms_contract_change_table_exists($pdo, 'cpms_contract_versions');
+    } catch (Exception $e) {
+        error_log('[contract_upload] contract version schema failed: ' . $e->getMessage());
+        return false;
+    }
+}
+}
+
+if (!function_exists('cpms_contract_upload_ensure_estimate_versions_schema')) {
+function cpms_contract_upload_ensure_estimate_versions_schema($pdo) {
+    if (!$pdo) return false;
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_project_estimate_versions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            project_id INT NOT NULL,
+            version_type VARCHAR(20) NOT NULL DEFAULT '',
+            version_no INT NOT NULL DEFAULT 1,
+            title VARCHAR(255) NOT NULL DEFAULT '',
+            description TEXT NULL,
+            original_file_name VARCHAR(255) DEFAULT '',
+            stored_file_path VARCHAR(500) DEFAULT '',
+            uploaded_by INT NULL,
+            uploaded_by_name VARCHAR(100) DEFAULT '',
+            uploaded_at DATETIME NULL,
+            applied_at DATETIME NULL,
+            status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
+            item_count INT NOT NULL DEFAULT 0,
+            added_count INT NOT NULL DEFAULT 0,
+            changed_count INT NOT NULL DEFAULT 0,
+            removed_count INT NOT NULL DEFAULT 0,
+            created_at DATETIME NULL,
+            updated_at DATETIME NULL,
+            KEY idx_project (project_id),
+            KEY idx_project_type_no (project_id, version_type, version_no),
+            KEY idx_status (status)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+
+        $columns = array(
+            'project_id' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN project_id INT NOT NULL DEFAULT 0",
+            'version_type' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN version_type VARCHAR(20) NOT NULL DEFAULT ''",
+            'version_no' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN version_no INT NOT NULL DEFAULT 1",
+            'title' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN title VARCHAR(255) NOT NULL DEFAULT ''",
+            'description' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN description TEXT NULL",
+            'original_file_name' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN original_file_name VARCHAR(255) DEFAULT ''",
+            'stored_file_path' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN stored_file_path VARCHAR(500) DEFAULT ''",
+            'uploaded_by' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN uploaded_by INT NULL",
+            'uploaded_by_name' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN uploaded_by_name VARCHAR(100) DEFAULT ''",
+            'uploaded_at' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN uploaded_at DATETIME NULL",
+            'applied_at' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN applied_at DATETIME NULL",
+            'status' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'DRAFT'",
+            'item_count' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN item_count INT NOT NULL DEFAULT 0",
+            'added_count' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN added_count INT NOT NULL DEFAULT 0",
+            'changed_count' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN changed_count INT NOT NULL DEFAULT 0",
+            'removed_count' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN removed_count INT NOT NULL DEFAULT 0",
+            'created_at' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN created_at DATETIME NULL",
+            'updated_at' => "ALTER TABLE cpms_project_estimate_versions ADD COLUMN updated_at DATETIME NULL"
+        );
+        foreach ($columns as $column => $sql) {
+            cpms_contract_upload_add_column_if_missing($pdo, 'cpms_project_estimate_versions', $column, $sql);
+        }
+        try { $pdo->exec("ALTER TABLE cpms_project_estimate_versions ADD INDEX idx_project (project_id)"); } catch (Exception $eIdx1) {}
+        try { $pdo->exec("ALTER TABLE cpms_project_estimate_versions ADD INDEX idx_project_type_no (project_id, version_type, version_no)"); } catch (Exception $eIdx2) {}
+        try { $pdo->exec("ALTER TABLE cpms_project_estimate_versions ADD INDEX idx_status (status)"); } catch (Exception $eIdx3) {}
+        return cpms_contract_change_table_exists($pdo, 'cpms_project_estimate_versions');
+    } catch (Exception $e) {
+        error_log('[contract_upload] estimate version schema failed: ' . $e->getMessage());
+        return false;
+    }
+}
+}
+
+if (!function_exists('cpms_contract_upload_ensure_unit_price_version_schema')) {
+function cpms_contract_upload_ensure_unit_price_version_schema($pdo) {
+    if (!$pdo || !cpms_contract_change_table_exists($pdo, 'cpms_project_unit_prices')) return false;
+    $columns = array(
+        'estimate_version_id' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN estimate_version_id INT NULL",
+        'contract_version_id' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN contract_version_id INT NULL",
+        'version_type' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN version_type VARCHAR(30) NOT NULL DEFAULT 'current'",
+        'version_no' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN version_no INT NULL",
+        'additional_work_id' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN additional_work_id INT NULL",
+        'trade_group' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN trade_group VARCHAR(255) DEFAULT ''",
+        'sub_trade' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN sub_trade VARCHAR(255) DEFAULT ''",
+        'location_name' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN location_name VARCHAR(255) DEFAULT ''",
+        'work_group' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN work_group VARCHAR(255) DEFAULT ''",
+        'sub_work_group' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN sub_work_group VARCHAR(255) DEFAULT ''",
+        'original_item_name' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN original_item_name VARCHAR(255) DEFAULT ''",
+        'expense_unit_price' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN expense_unit_price DECIMAL(18,4) NULL",
+        'amount' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN amount DECIMAL(18,4) NULL",
+        'source_row' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN source_row INT NULL",
+        'source_row_no' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN source_row_no INT NULL",
+        'source_sheet_name' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN source_sheet_name VARCHAR(100) DEFAULT ''",
+        'source_type' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN source_type VARCHAR(20) DEFAULT 'ORIGINAL'",
+        'source_version_no' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN source_version_no INT NULL",
+        'item_fingerprint' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN item_fingerprint CHAR(40) DEFAULT ''",
+        'import_order' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN import_order INT NULL",
+        'is_active' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1",
+        'is_current' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_current TINYINT(1) NOT NULL DEFAULT 1",
+        'updated_at' => "ALTER TABLE cpms_project_unit_prices ADD COLUMN updated_at DATETIME NULL"
+    );
+    foreach ($columns as $column => $sql) {
+        cpms_contract_upload_add_column_if_missing($pdo, 'cpms_project_unit_prices', $column, $sql);
+    }
+    try { $pdo->exec("ALTER TABLE cpms_project_unit_prices ADD INDEX idx_estimate_version_id (estimate_version_id)"); } catch (Exception $eIdx1) {}
+    try { $pdo->exec("ALTER TABLE cpms_project_unit_prices ADD INDEX idx_project_source (project_id, source_type, source_version_no)"); } catch (Exception $eIdx2) {}
+    try { $pdo->exec("ALTER TABLE cpms_project_unit_prices ADD INDEX idx_item_fingerprint (item_fingerprint)"); } catch (Exception $eIdx3) {}
+    return true;
+}
+}
+
+if (!function_exists('cpms_contract_upload_ensure_upload_schema')) {
+function cpms_contract_upload_ensure_upload_schema($pdo) {
+    if (!cpms_contract_upload_ensure_contract_versions_schema($pdo)) {
+        throw new Exception('cpms_contract_versions 테이블을 준비하지 못했습니다.');
+    }
+    if (!cpms_contract_upload_ensure_estimate_versions_schema($pdo)) {
+        throw new Exception('cpms_project_estimate_versions 테이블을 준비하지 못했습니다.');
+    }
+    if (!cpms_contract_upload_ensure_unit_price_version_schema($pdo)) {
+        throw new Exception('cpms_project_unit_prices 테이블을 준비하지 못했습니다.');
+    }
+}
+}
+
 if (!function_exists('cpms_contract_upload_current_user_id')) {
 function cpms_contract_upload_current_user_id() {
     $user = Auth::user();
@@ -646,6 +828,14 @@ try {
     cpms_contract_upload_redirect(0, 'error', '프로젝트 확인에 실패했습니다.');
 }
 
+if ($uploadMode === 'unit_price_update' || $uploadMode === 'unit_price_original' || $uploadMode === 'unit_price_extra') {
+    try {
+        cpms_contract_upload_ensure_upload_schema($pdo);
+    } catch (Exception $e) {
+        cpms_contract_upload_redirect($projectId, 'error', '내역서 DB 자동 보정 실패: ' . $e->getMessage());
+    }
+}
+
 $previewToken = isset($_POST['preview_token']) ? trim((string)$_POST['preview_token']) : '';
 if (($uploadMode === 'unit_price_update' || $uploadMode === 'unit_price_original' || $uploadMode === 'unit_price_extra') && $previewToken !== '') {
     if (!isset($_SESSION['unit_price_update'][$previewToken]) || !is_array($_SESSION['unit_price_update'][$previewToken])) {
@@ -727,6 +917,12 @@ if (($uploadMode === 'unit_price_update' || $uploadMode === 'unit_price_original
         $versionTitle = cpms_contract_upload_version_title($versionType, $versionNo, $additionalTitle);
         $versionId = cpms_contract_upload_create_version($pdo, $projectId, $versionType, $versionNo, $versionTitle, $originalName, $storedName, $storedPath, $summary);
         $estimateVersionId = cpms_contract_upload_create_estimate_version($pdo, $projectId, $sourceType, $versionNo, $versionTitle, isset($pack['description']) ? (string)$pack['description'] : '', $originalName, $storedName, $storedPath, $summary, count($rows));
+        if ($versionId <= 0) {
+            throw new Exception('계약 버전 이력을 저장하지 못했습니다.');
+        }
+        if ($estimateVersionId <= 0) {
+            throw new Exception('내역서 버전 이력을 저장하지 못했습니다.');
+        }
         cpms_contract_upload_attach_version_ids($pdo, $projectId, $versionType, $sourceType, $versionNo, $versionId, $estimateVersionId);
         $pdo->commit();
         $driveDocumentType = cpms_contract_upload_file_type($uploadMode);

@@ -173,7 +173,9 @@ $columns = array(
         'leave_monthly_balance' => "ALTER TABLE employees ADD COLUMN leave_monthly_balance DECIMAL(6,2) NULL",
         'leave_annual_balance' => "ALTER TABLE employees ADD COLUMN leave_annual_balance DECIMAL(6,2) NULL",
         'leave_half_balance' => "ALTER TABLE employees ADD COLUMN leave_half_balance DECIMAL(6,2) NULL",
-        'monthly_regular_wage' => "ALTER TABLE employees ADD COLUMN monthly_regular_wage DECIMAL(15,2) NULL"
+        'monthly_regular_wage' => "ALTER TABLE employees ADD COLUMN monthly_regular_wage DECIMAL(15,2) NULL",
+        'is_team_leader' => "ALTER TABLE employees ADD COLUMN is_team_leader TINYINT(1) NOT NULL DEFAULT 0",
+        'team_leader_id' => "ALTER TABLE employees ADD COLUMN team_leader_id INT NULL"
     ),
     'cpms_leave_adjustments' => array(
         'target_year' => "ALTER TABLE cpms_leave_adjustments ADD COLUMN target_year INT NULL",

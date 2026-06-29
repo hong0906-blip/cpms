@@ -63,14 +63,31 @@ function cpms_unit_price_delete_column_exists($pdo, $column) {
     }
 }
 
+function cpms_unit_price_delete_ensure_column($pdo, $column, $sql) {
+    if (cpms_unit_price_delete_column_exists($pdo, $column)) return true;
+    try {
+        $pdo->exec($sql);
+    } catch (Exception $e) {
+        return false;
+    }
+    return cpms_unit_price_delete_column_exists($pdo, $column);
+}
+
 try {
-    if (!cpms_unit_price_delete_column_exists($pdo, 'is_active') || !cpms_unit_price_delete_column_exists($pdo, 'is_current')) {
+    $hasIsActive = cpms_unit_price_delete_ensure_column($pdo, 'is_active', "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1");
+    $hasIsCurrent = cpms_unit_price_delete_ensure_column($pdo, 'is_current', "ALTER TABLE cpms_project_unit_prices ADD COLUMN is_current TINYINT(1) NOT NULL DEFAULT 1");
+    $hasUpdatedAt = cpms_unit_price_delete_ensure_column($pdo, 'updated_at', "ALTER TABLE cpms_project_unit_prices ADD COLUMN updated_at DATETIME NULL");
+
+    if (!$hasIsActive || !$hasIsCurrent) {
         flash_set('error', '내역서 이력 보존 컬럼이 없습니다. db_setup_estimate_versions 페이지에서 DB 생성/확인을 먼저 실행해주세요.');
         header('Location: ?r=project/detail&id=' . $projectId);
         exit;
     }
 
-    $st = $pdo->prepare("UPDATE cpms_project_unit_prices SET is_active = 0, is_current = 0, updated_at = NOW() WHERE id = :id AND project_id = :pid");
+    $sets = array("is_active = 0", "is_current = 0");
+    if ($hasUpdatedAt) array_push($sets, "updated_at = NOW()");
+
+    $st = $pdo->prepare("UPDATE cpms_project_unit_prices SET " . implode(', ', $sets) . " WHERE id = :id AND project_id = :pid");
     $st->bindValue(':id', $id, PDO::PARAM_INT);
     $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $st->execute();

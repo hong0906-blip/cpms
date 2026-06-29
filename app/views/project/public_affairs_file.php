@@ -18,6 +18,7 @@ if ($type === '' || $id <= 0) { http_response_code(400); echo 'Bad Request'; exi
 
 $defs = array(
     'contract_version' => array('table' => 'cpms_contract_versions', 'path' => 'stored_path', 'name' => 'original_name'),
+    'estimate_version' => array('table' => 'cpms_project_estimate_versions', 'path' => 'stored_file_path', 'name' => 'original_file_name'),
     'contract_history' => array('table' => 'cpms_project_contract_change_files', 'path' => 'stored_path', 'name' => 'original_name'),
     'additional_work' => array('table' => 'cpms_contract_additional_works', 'path' => 'attachment_stored_path', 'name' => 'attachment_original_name'),
     'progress' => array('table' => 'cpms_progress_billings', 'path' => 'attachment_stored_path', 'name' => 'attachment_original_name')

@@ -7,6 +7,7 @@ require_once __DIR__ . '/template_style.php';
 require_once __DIR__ . '/template_proposal.php';
 require_once __DIR__ . '/template_leave.php';
 require_once __DIR__ . '/template_unused_leave.php';
+require_once __DIR__ . '/line_rules.php';
 
 if (!function_exists('approval_create_fetch_employee_by_name')) {
     function approval_create_fetch_employee_by_name($pdo, $name)
@@ -99,11 +100,15 @@ if ($pdo) {
     $flagLead = approval_column_exists($pdo, 'employees', 'approval_can_be_team_leader');
     $flagGongmu = approval_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver');
     $flagManage = approval_column_exists($pdo, 'employees', 'approval_can_be_manage_approver');
+    $flagIsTeamLeader = approval_column_exists($pdo, 'employees', 'is_team_leader');
+    $flagTeamLeaderId = approval_column_exists($pdo, 'employees', 'team_leader_id');
     $sql = "SELECT id,name,email,department,position," . $birthSel . "," . $hireSel . "," .
         ($flagSite ? "approval_can_be_site_manager" : "0") . " AS approval_can_be_site_manager," .
         ($flagLead ? "approval_can_be_team_leader" : "0") . " AS approval_can_be_team_leader," .
         ($flagGongmu ? "approval_can_be_gongmu_approver" : "0") . " AS approval_can_be_gongmu_approver," .
-        ($flagManage ? "approval_can_be_manage_approver" : "0") . " AS approval_can_be_manage_approver " .
+        ($flagManage ? "approval_can_be_manage_approver" : "0") . " AS approval_can_be_manage_approver," .
+        ($flagIsTeamLeader ? "is_team_leader" : "0") . " AS is_team_leader," .
+        ($flagTeamLeaderId ? "team_leader_id" : "0") . " AS team_leader_id " .
         "FROM employees WHERE is_active=1 ORDER BY name";
     try {
         $employees = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
@@ -162,6 +167,18 @@ if ($pdo) {
     $ceo = approval_create_find_by_position($employees, array(approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC'), approval_ko('%EB%8C%80%ED%91%9C')));
     $constructionPm = approval_create_fetch_employee_by_name($pdo, $constructionPmName);
     $gongmuPm = approval_create_fetch_employee_by_name($pdo, $gongmuPmName);
+    $ruleVp = approval_line_rules_find_vp($pdo);
+    $ruleCeo = approval_line_rules_find_ceo($pdo);
+    $ruleConstructionPm = approval_line_rules_find_construction_pm($pdo);
+    if ($ruleVp) {
+        $vp = $ruleVp;
+    }
+    if ($ruleCeo) {
+        $ceo = $ruleCeo;
+    }
+    if ($ruleConstructionPm) {
+        $constructionPm = $ruleConstructionPm;
+    }
 }
 
 if (!empty($myEmp)) {
@@ -231,6 +248,24 @@ $init = array(
     'delegate_level' => 'none'
 );
 
+$ruleCreator = !empty($myEmp) ? $myEmp : array(
+    'id' => $creatorEmployeeId,
+    'name' => $name,
+    'email' => $email,
+    'department' => $dept,
+    'position' => $position
+);
+$requiresTeamLeaderSelect = approval_line_rules_requires_manual_team_leader($ruleCreator) ? 1 : 0;
+$selectedTeamLeaderId = isset($ruleCreator['team_leader_id']) ? (int)$ruleCreator['team_leader_id'] : 0;
+$teamLeaderCandidates = $requiresTeamLeaderSelect ? approval_line_rules_team_leader_candidates($pdo, 'construction', $creatorEmployeeId) : array();
+$lineRuleResult = array('lines' => array(), 'messages' => array(), 'warnings' => array());
+if (!$isManagementOnlyDoc) {
+    $lineRuleResult = approval_line_rules_build($pdo, $type, $ruleCreator, $init);
+}
+$previewLines = isset($lineRuleResult['lines']) && is_array($lineRuleResult['lines'])
+    ? approval_line_rules_to_template_lines($lineRuleResult['lines'])
+    : array();
+
 if ($isManagementOnlyDoc) {
     $init = array(
         'writer_email' => $email,
@@ -263,7 +298,13 @@ $approvalOptions = array(
     'default_pm_id' => ($defaultPm && isset($defaultPm['id'])) ? (int)$defaultPm['id'] : 0,
     'leave_pm' => $defaultPm,
     'employees' => $employees,
-    'writer_email' => $email
+    'writer_email' => $email,
+    'line_messages' => isset($lineRuleResult['messages']) && is_array($lineRuleResult['messages']) ? $lineRuleResult['messages'] : array(),
+    'line_warnings' => isset($lineRuleResult['warnings']) && is_array($lineRuleResult['warnings']) ? $lineRuleResult['warnings'] : array(),
+    'line_preview' => $previewLines,
+    'requires_team_leader_select' => $requiresTeamLeaderSelect,
+    'team_leader_candidates' => $teamLeaderCandidates,
+    'selected_team_leader_id' => $selectedTeamLeaderId
 );
 ?>
 <div class="mb-4 flex items-center justify-between">
@@ -277,13 +318,13 @@ $approvalOptions = array(
     <input type="hidden" name="doc_type" value="<?php echo h($type); ?>">
     <?php
     if ($isLeave) {
-        render_approval_leave_document($init, array(), 'edit', $approvalOptions);
+        render_approval_leave_document($init, $previewLines, 'edit', $approvalOptions);
     } else if ($isUnusedLeaveNotice) {
         render_approval_unused_leave_notice_document($init, array(), 'edit', $approvalOptions);
     } else if ($isUnusedLeavePlan) {
         render_approval_unused_leave_plan_document($init, array(), 'edit', $approvalOptions);
     } else {
-        render_approval_proposal_document($init, array(), 'edit', array(), $approvalOptions);
+        render_approval_proposal_document($init, $previewLines, 'edit', array(), $approvalOptions);
     }
     ?>
     <div class="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">

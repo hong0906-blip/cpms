@@ -82,6 +82,7 @@ if (!function_exists('approval_norm_dept')) {
         $d = str_replace(' ', '', $d);
         $construction = urldecode('%EA%B3%B5%EC%82%AC');
         $safety = urldecode('%EC%95%88%EC%A0%84');
+        $health = urldecode('%EB%B3%B4%EA%B1%B4');
         $gongmu = urldecode('%EA%B3%B5%EB%AC%B4');
         $manage = urldecode('%EA%B4%80%EB%A6%AC');
         $quality = urldecode('%ED%92%88%EC%A7%88');
@@ -90,6 +91,9 @@ if (!function_exists('approval_norm_dept')) {
         }
         if ($d === $safety . urldecode('%EB%B6%80') || $d === $safety . urldecode('%ED%8C%80')) {
             return $safety;
+        }
+        if ($d === $health . urldecode('%EB%B6%80') || $d === $health . urldecode('%ED%8C%80')) {
+            return $health;
         }
         if ($d === $gongmu . urldecode('%EB%B6%80') || $d === $gongmu . urldecode('%ED%8C%80')) {
             return $gongmu;

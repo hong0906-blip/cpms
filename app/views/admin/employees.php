@@ -37,7 +37,7 @@ function cpms_employee_can_assign_development_department() {
 }}
 
 $canAssignDevelopmentDept = cpms_employee_can_assign_development_department();
-$deptOptions = array('관리', '공무', '품질', '안전', '공사');
+$deptOptions = array('관리', '공무', '품질', '안전', '보건', '공사');
 if ($canAssignDevelopmentDept) $deptOptions[] = '개발';
 $positionOptions = array('주임','대리','과장','차장','부장','이사','전무','상무','부사장','고문','대표');
 
@@ -96,6 +96,8 @@ $siteManagerEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'approval_ca
 $teamLeaderEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'approval_can_be_team_leader') : false;
 $gongmuEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver') : false;
 $manageApproverEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'approval_can_be_manage_approver') : false;
+$isTeamLeaderEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'is_team_leader') : false;
+$teamLeaderIdEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'team_leader_id') : false;
 $googleChatEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'google_chat_enabled') : false;
 $googleChatUserEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'google_chat_user_name') : false;
 $googleChatSpaceEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'google_chat_dm_space_name') : false;
@@ -117,13 +119,15 @@ if ($dbOk) {
     $teamLeaderSelect = $teamLeaderEnabled ? 'approval_can_be_team_leader' : '0 AS approval_can_be_team_leader';
     $gongmuSelect = $gongmuEnabled ? 'approval_can_be_gongmu_approver' : '0 AS approval_can_be_gongmu_approver';
     $manageSelect = $manageApproverEnabled ? 'approval_can_be_manage_approver' : '0 AS approval_can_be_manage_approver';
+    $isTeamLeaderSelect = $isTeamLeaderEnabled ? 'is_team_leader' : '0 AS is_team_leader';
+    $teamLeaderIdSelect = $teamLeaderIdEnabled ? 'team_leader_id' : '0 AS team_leader_id';
     $chatEnabledSelect = $googleChatEnabled ? 'google_chat_enabled' : '0 AS google_chat_enabled';
     $chatUserSelect = $googleChatUserEnabled ? 'google_chat_user_name' : "'' AS google_chat_user_name";
     $chatSpaceSelect = $googleChatSpaceEnabled ? 'google_chat_dm_space_name' : "'' AS google_chat_dm_space_name";
     $vehicleNumbersSelect = $vehicleNumbersEnabled ? 'vehicle_numbers' : "'' AS vehicle_numbers";
     $vehicleNumberSelect = $vehicleNumberEnabled ? 'vehicle_number' : "'' AS vehicle_number";
 
-    $sql = "SELECT id,email,name,department,{$positionSelect},{$hireDateSelect},{$resignDateSelect},{$wageSelect},{$lmSelect},{$laSelect},{$lhSelect},{$birthDateSelect},{$siteManagerSelect},{$teamLeaderSelect},{$gongmuSelect},{$manageSelect},{$chatEnabledSelect},{$chatUserSelect},{$chatSpaceSelect},{$vehicleNumbersSelect},{$vehicleNumberSelect},role,photo_path,is_active FROM employees WHERE 1=1";
+    $sql = "SELECT id,email,name,department,{$positionSelect},{$hireDateSelect},{$resignDateSelect},{$wageSelect},{$lmSelect},{$laSelect},{$lhSelect},{$birthDateSelect},{$siteManagerSelect},{$teamLeaderSelect},{$gongmuSelect},{$manageSelect},{$isTeamLeaderSelect},{$teamLeaderIdSelect},{$chatEnabledSelect},{$chatUserSelect},{$chatSpaceSelect},{$vehicleNumbersSelect},{$vehicleNumberSelect},role,photo_path,is_active FROM employees WHERE 1=1";
     $params = array();
     if ($q !== '') {
         $sql .= " AND (email LIKE :q OR name LIKE :q OR department LIKE :q" . ($positionEnabled ? " OR position LIKE :q" : "") . ")";
@@ -167,6 +171,60 @@ if ($dbOk) {
         $employeeLoadError = '직원명부 조회 중 오류가 발생했습니다: '.$e->getMessage();
     }
 }
+
+if (!function_exists('cpms_employee_team_dept_key')) {
+function cpms_employee_team_dept_key($dept) {
+    $dept = trim((string)$dept);
+    $dept = str_replace(array(' ', "\t", "\r", "\n"), '', $dept);
+    $suffixes = array(urldecode('%EB%B6%80'), urldecode('%ED%8C%80'));
+    for ($i = 0; $i < count($suffixes); $i++) {
+        $suffix = $suffixes[$i];
+        $len = function_exists('mb_strlen') ? mb_strlen($suffix, 'UTF-8') : strlen($suffix);
+        if ($suffix !== '' && function_exists('mb_substr')) {
+            if (mb_substr($dept, -$len, $len, 'UTF-8') === $suffix) $dept = mb_substr($dept, 0, mb_strlen($dept, 'UTF-8') - $len, 'UTF-8');
+        }
+    }
+    $map = array(
+        'gongmu' => urldecode('%EA%B3%B5%EB%AC%B4'),
+        'manage' => urldecode('%EA%B4%80%EB%A6%AC'),
+        'construction' => urldecode('%EA%B3%B5%EC%82%AC'),
+        'safety' => urldecode('%EC%95%88%EC%A0%84'),
+        'health' => urldecode('%EB%B3%B4%EA%B1%B4'),
+        'quality' => urldecode('%ED%92%88%EC%A7%88')
+    );
+    foreach ($map as $key => $label) {
+        if ($dept === $label) return ($key === 'safety' || $key === 'health') ? 'quality' : $key;
+    }
+    return '';
+}}
+
+$teamLeaderCandidates = array();
+if ($dbOk && ($isTeamLeaderEnabled || $teamLeaderEnabled)) {
+    try {
+        $positionSelect2 = $positionEnabled ? 'position' : "'' AS position";
+        $isTeamLeaderSelect2 = $isTeamLeaderEnabled ? 'is_team_leader' : '0 AS is_team_leader';
+        $approvalLeadSelect2 = $teamLeaderEnabled ? 'approval_can_be_team_leader' : '0 AS approval_can_be_team_leader';
+        $where = array();
+        if ($isTeamLeaderEnabled) $where[] = 'is_team_leader=1';
+        if ($teamLeaderEnabled) $where[] = 'approval_can_be_team_leader=1';
+        $sqlLead = "SELECT id,name,department,{$positionSelect2},{$isTeamLeaderSelect2},{$approvalLeadSelect2} FROM employees WHERE is_active=1 AND (" . implode(' OR ', $where) . ") ORDER BY department ASC, name ASC";
+        $teamLeaderCandidates = $pdo->query($sqlLead)->fetchAll();
+        if (!is_array($teamLeaderCandidates)) $teamLeaderCandidates = array();
+    } catch (\Exception $e) {
+        $teamLeaderCandidates = array();
+    }
+}
+$teamLeaderOptionsHtml = '<option value="">(팀장 선택 없음)</option>';
+for ($i = 0; $i < count($teamLeaderCandidates); $i++) {
+    $tl = $teamLeaderCandidates[$i];
+    $tlId = isset($tl['id']) ? (int)$tl['id'] : 0;
+    if ($tlId <= 0) continue;
+    $tlLabel = isset($tl['name']) ? (string)$tl['name'] : '';
+    $tlDept = isset($tl['department']) ? trim((string)$tl['department']) : '';
+    $tlPos = isset($tl['position']) ? trim((string)$tl['position']) : '';
+    if ($tlDept !== '' || $tlPos !== '') $tlLabel .= ' / ' . $tlDept . ' / ' . $tlPos;
+    $teamLeaderOptionsHtml .= '<option value="' . $tlId . '" data-team-dept="' . h(cpms_employee_team_dept_key($tlDept)) . '">' . h($tlLabel) . '</option>';
+}
 ?>
 <div class="flex items-center justify-between mb-6">
   <div>
@@ -189,7 +247,7 @@ if ($dbOk) {
 <tr>
 <td class="px-4 py-3"><div class="w-10 h-10 rounded-2xl bg-emerald-100 flex items-center justify-center font-bold text-emerald-700 relative overflow-hidden"><?php if($photoPath !== ''): ?><img src="<?php echo h($photoPath); ?>" class="w-10 h-10 rounded-2xl object-cover absolute inset-0" onerror="this.style.display='none';"><?php endif; ?><span><?php echo h($first); ?></span></div></td>
 <td class="px-4 py-3 font-bold"><?php echo h($r['name']); ?></td><td class="px-4 py-3"><?php echo h($r['email']); ?></td><td class="px-4 py-3"><?php echo h($r['department']); ?></td><td class="px-4 py-3"><?php echo h($r['hire_date'] ? $r['hire_date'] : '-'); ?></td><td class="px-4 py-3"><?php echo h($r['position']); ?></td><td class="px-4 py-3"><?php echo h(isset($r['vehicle_numbers_display']) && $r['vehicle_numbers_display'] !== '' ? $r['vehicle_numbers_display'] : '-'); ?></td><td class="px-4 py-3"><?php echo h($r['role']==='executive'?'임원':'직원'); ?></td><td class="px-4 py-3"><?php echo ((int)$r['is_active']===1)?'활성':'비활성'; ?></td>
-<td class="px-4 py-3"><div class="flex gap-2"><button type="button" class="px-3 py-2 border rounded-2xl" data-emp-edit="<?php echo (int)$r['id']; ?>" data-emp-email="<?php echo h($r['email']); ?>" data-emp-name="<?php echo h($r['name']); ?>" data-emp-dept="<?php echo h($r['department']); ?>" data-emp-pos="<?php echo h($r['position']); ?>" data-emp-role="<?php echo h($r['role']); ?>" data-emp-active="<?php echo (int)$r['is_active']; ?>" data-emp-hire-date="<?php echo h($r['hire_date']); ?>" data-emp-resign-date="<?php echo h(isset($r['resign_date']) ? $r['resign_date'] : ''); ?>" data-emp-wage="<?php echo h(isset($r['monthly_regular_wage']) ? $r['monthly_regular_wage'] : ''); ?>" data-emp-lbm="<?php echo h($r['leave_monthly_balance']); ?>" data-emp-lba="<?php echo h($r['leave_annual_balance']); ?>" data-emp-lbh="<?php echo h($r['leave_half_balance']); ?>" data-emp-birth-date="<?php echo h(isset($r['birth_date']) ? $r['birth_date'] : ''); ?>" data-emp-can-site="<?php echo h(isset($r['approval_can_be_site_manager']) ? $r['approval_can_be_site_manager'] : '0'); ?>" data-emp-can-lead="<?php echo h(isset($r['approval_can_be_team_leader']) ? $r['approval_can_be_team_leader'] : '0'); ?>" data-emp-can-gongmu="<?php echo h(isset($r['approval_can_be_gongmu_approver']) ? $r['approval_can_be_gongmu_approver'] : '0'); ?>" data-emp-can-manage="<?php echo h(isset($r['approval_can_be_manage_approver']) ? $r['approval_can_be_manage_approver'] : '0'); ?>" data-emp-chat-enabled="<?php echo h(isset($r['google_chat_enabled']) ? $r['google_chat_enabled'] : '0'); ?>" data-emp-chat-user="<?php echo h(isset($r['google_chat_user_name']) ? $r['google_chat_user_name'] : ''); ?>" data-emp-chat-space="<?php echo h(isset($r['google_chat_dm_space_name']) ? $r['google_chat_dm_space_name'] : ''); ?>" data-emp-vehicle-numbers="<?php echo h(isset($r['vehicle_numbers_display']) ? $r['vehicle_numbers_display'] : ''); ?>" data-emp-photo="<?php echo h(isset($r['photo_path']) ? $r['photo_path'] : ''); ?>">수정</button><button type="button" class="px-3 py-2 border border-red-200 text-red-700 rounded-2xl" data-emp-delete="<?php echo (int)$r['id']; ?>" data-emp-name-for="<?php echo h($r['name']); ?>">삭제</button></div></td>
+<td class="px-4 py-3"><div class="flex gap-2"><button type="button" class="px-3 py-2 border rounded-2xl" data-emp-edit="<?php echo (int)$r['id']; ?>" data-emp-email="<?php echo h($r['email']); ?>" data-emp-name="<?php echo h($r['name']); ?>" data-emp-dept="<?php echo h($r['department']); ?>" data-emp-pos="<?php echo h($r['position']); ?>" data-emp-role="<?php echo h($r['role']); ?>" data-emp-active="<?php echo (int)$r['is_active']; ?>" data-emp-hire-date="<?php echo h($r['hire_date']); ?>" data-emp-resign-date="<?php echo h(isset($r['resign_date']) ? $r['resign_date'] : ''); ?>" data-emp-wage="<?php echo h(isset($r['monthly_regular_wage']) ? $r['monthly_regular_wage'] : ''); ?>" data-emp-lbm="<?php echo h($r['leave_monthly_balance']); ?>" data-emp-lba="<?php echo h($r['leave_annual_balance']); ?>" data-emp-lbh="<?php echo h($r['leave_half_balance']); ?>" data-emp-birth-date="<?php echo h(isset($r['birth_date']) ? $r['birth_date'] : ''); ?>" data-emp-can-site="<?php echo h(isset($r['approval_can_be_site_manager']) ? $r['approval_can_be_site_manager'] : '0'); ?>" data-emp-can-lead="<?php echo h(isset($r['approval_can_be_team_leader']) ? $r['approval_can_be_team_leader'] : '0'); ?>" data-emp-can-gongmu="<?php echo h(isset($r['approval_can_be_gongmu_approver']) ? $r['approval_can_be_gongmu_approver'] : '0'); ?>" data-emp-can-manage="<?php echo h(isset($r['approval_can_be_manage_approver']) ? $r['approval_can_be_manage_approver'] : '0'); ?>" data-emp-is-team-leader="<?php echo h(isset($r['is_team_leader']) ? $r['is_team_leader'] : '0'); ?>" data-emp-team-leader-id="<?php echo h(isset($r['team_leader_id']) ? $r['team_leader_id'] : ''); ?>" data-emp-chat-enabled="<?php echo h(isset($r['google_chat_enabled']) ? $r['google_chat_enabled'] : '0'); ?>" data-emp-chat-user="<?php echo h(isset($r['google_chat_user_name']) ? $r['google_chat_user_name'] : ''); ?>" data-emp-chat-space="<?php echo h(isset($r['google_chat_dm_space_name']) ? $r['google_chat_dm_space_name'] : ''); ?>" data-emp-vehicle-numbers="<?php echo h(isset($r['vehicle_numbers_display']) ? $r['vehicle_numbers_display'] : ''); ?>" data-emp-photo="<?php echo h(isset($r['photo_path']) ? $r['photo_path'] : ''); ?>">수정</button><button type="button" class="px-3 py-2 border border-red-200 text-red-700 rounded-2xl" data-emp-delete="<?php echo (int)$r['id']; ?>" data-emp-name-for="<?php echo h($r['name']); ?>">삭제</button></div></td>
 </tr>
 <?php endforeach; ?>
 </tbody></table></div></div>
@@ -223,6 +281,49 @@ function insertAfterId(anchorId, html) {
     var el = document.getElementById(anchorId);
     if (el && el.insertAdjacentHTML) el.insertAdjacentHTML('afterend', html);
 }
+var teamLeaderOptions = <?php echo json_encode($teamLeaderOptionsHtml); ?>;
+insertAfterId('empAddBirthDate', '<div class="border rounded-2xl p-3 space-y-2"><div class="font-bold">팀장 설정</div><label class="block text-sm font-semibold">팀장 여부</label><select class="w-full px-4 py-2 border rounded-2xl" name="is_team_leader" id="empAddIsTeamLeader"><option value="0">일반 직원</option><option value="1">팀장</option></select><label class="block text-sm font-semibold">팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="team_leader_id" id="empAddTeamLeaderId">' + teamLeaderOptions + '</select><div class="text-xs text-gray-500">공사 직원은 현장별 팀장을 선택하면 결재라인에 해당 팀장이 적용됩니다.</div></div>');
+insertAfterId('empEditBirthDate', '<div class="border rounded-2xl p-3 space-y-2"><div class="font-bold">팀장 설정</div><label class="block text-sm font-semibold">팀장 여부</label><select class="w-full px-4 py-2 border rounded-2xl" name="is_team_leader" id="empEditIsTeamLeader"><option value="0">일반 직원</option><option value="1">팀장</option></select><label class="block text-sm font-semibold">팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="team_leader_id" id="empEditTeamLeaderId">' + teamLeaderOptions + '</select><div class="text-xs text-gray-500">공사 직원은 현장별 팀장을 선택하면 결재라인에 해당 팀장이 적용됩니다.</div></div>');
+function syncTeamLeaderFields(prefix) {
+    var role = document.getElementById(prefix + 'IsTeamLeader');
+    var leader = document.getElementById(prefix + 'TeamLeaderId');
+    if (!role || !leader) return;
+    if (role.value === '1') {
+        leader.value = '';
+        leader.disabled = true;
+    } else {
+        leader.disabled = false;
+    }
+}
+function teamDeptKey(value) {
+    value = (value || '').replace(/\s/g, '');
+    value = value.replace(/(부|팀)$/, '');
+    if (value === '공무') return 'gongmu';
+    if (value === '관리') return 'manage';
+    if (value === '공사') return 'construction';
+    if (value === '품질') return 'quality';
+    if (value === '안전' || value === '보건') return 'quality';
+    return '';
+}
+function filterTeamLeaderOptions(prefix) {
+    var leader = document.getElementById(prefix + 'TeamLeaderId');
+    if (!leader) return;
+    var deptEl = prefix === 'empEdit' ? document.getElementById('empEditDept') : document.querySelector('#modal-empAdd select[name=department]');
+    var key = teamDeptKey(deptEl ? deptEl.value : '');
+    var selectedVisible = false;
+    for (var i = 0; i < leader.options.length; i++) {
+        var option = leader.options[i];
+        var optKey = option.getAttribute('data-team-dept') || '';
+        var visible = option.value === '' || key === '' || optKey === key;
+        option.style.display = visible ? '' : 'none';
+        if (visible && option.selected) selectedVisible = true;
+    }
+    if (!selectedVisible) leader.value = '';
+}
+syncTeamLeaderFields('empAdd');
+syncTeamLeaderFields('empEdit');
+filterTeamLeaderOptions('empAdd');
+filterTeamLeaderOptions('empEdit');
 insertAfterId('empAddHireDate', '<input type="date" class="w-full px-4 py-2 border rounded-2xl mt-1" name="resign_date" id="empAddResignDate" placeholder="퇴사일">');
 insertAfterId('empAddResignDate', '<input type="number" step="0.01" class="px-3 py-2 border rounded-2xl" name="monthly_regular_wage" id="empAddWage" placeholder="통상임금(월)">');
 insertAfterId('empAddWage', '<input type="text" class="w-full px-4 py-2 border rounded-2xl" name="vehicle_numbers" id="empAddVehicleNumbers" placeholder="차량번호 (쉼표로 여러 대 입력)">');
@@ -259,6 +360,10 @@ document.addEventListener('click', function(e) {
             setChecked('empEditCanLead', be.getAttribute('data-emp-can-lead') === '1');
             setChecked('empEditCanGongmu', be.getAttribute('data-emp-can-gongmu') === '1');
             setChecked('empEditCanManage', be.getAttribute('data-emp-can-manage') === '1');
+            setValue('empEditIsTeamLeader', be.getAttribute('data-emp-is-team-leader') === '1' ? '1' : '0');
+            setValue('empEditTeamLeaderId', be.getAttribute('data-emp-team-leader-id') || '');
+            filterTeamLeaderOptions('empEdit');
+            syncTeamLeaderFields('empEdit');
             setChecked('empEditChatEnabled', be.getAttribute('data-emp-chat-enabled') === '1');
             setValue('empEditChatUser', chatUser);
             setValue('empEditChatSpace', be.getAttribute('data-emp-chat-space') || '');
@@ -306,6 +411,14 @@ document.addEventListener('click', function(e) {
         e.preventDefault();
         return;
     }
+});
+document.addEventListener('change', function(e) {
+    var t = e.target;
+    if (!t) return;
+    if (t.id === 'empAddIsTeamLeader') syncTeamLeaderFields('empAdd');
+    if (t.id === 'empEditIsTeamLeader') syncTeamLeaderFields('empEdit');
+    if (t.name === 'department') filterTeamLeaderOptions('empAdd');
+    if (t.id === 'empEditDept') filterTeamLeaderOptions('empEdit');
 });
 })();
 </script>
