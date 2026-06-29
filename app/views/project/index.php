@@ -1,9 +1,12 @@
 <?php
 use App\Core\Db;
 
-require_once __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
-
-$pdo = Db::pdo();
+$pdo = null;
+try {
+    $pdo = Db::pdo();
+} catch (Exception $e) {
+    $pdo = null;
+}
 $dbOk = ($pdo !== null);
 
 $projects = array();
@@ -50,7 +53,6 @@ if ($dbOk && $activeTab === 'project_manage') {
 }
 
 $flash = flash_get();
-$collabProjectMetaStore = cpms_public_affairs_collab_load_project_meta();
 
 function status_badge_class($status) {
     $status = trim((string)$status);
@@ -58,16 +60,23 @@ function status_badge_class($status) {
     if ($status === '대기중') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
     return 'bg-blue-100 text-blue-800 border-blue-200';
 }
+
+if (!function_exists('cpms_project_index_is_collab_draft_project')) {
+function cpms_project_index_is_collab_draft_project($project) {
+    $name = isset($project['name']) ? trim((string)$project['name']) : '';
+    $status = isset($project['status']) ? trim((string)$project['status']) : '';
+    if ($name !== '' && strpos($name, '(가제)') === 0) return true;
+    if ($status === '가제' || $status === '입찰검토' || $status === '정식전환대기') return true;
+    return false;
+}}
 ?>
 
 <div class="cpms-project-page mb-5">
   <div class="mt-3 flex flex-wrap gap-2">
     <a href="?r=공무&tab=monthly_summary" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_summary' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 집계</a>
     <a href="?r=공무&tab=project_manage" class="cpms-project-manage-tab px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
-    <a href="?r=공무&tab=collaboration#public-affairs-collaboration"
-       class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'collaboration' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>"
-       data-pa-collab-open
-       aria-controls="paCollabFullscreenModal">공무 협업툴</a>
+    <a href="?r=public_affairs_collab"
+       class="px-4 py-2 rounded-2xl border font-bold bg-white text-gray-700 border-gray-200">공무 협업툴</a>
   </div>
 </div>
 
@@ -80,15 +89,19 @@ function status_badge_class($status) {
   </div>
 <?php } ?>
 <?php elseif ($activeTab === 'collaboration'): ?>
+  <script>
+    window.location.replace('?r=public_affairs_collab');
+  </script>
+  <noscript>
+    <meta http-equiv="refresh" content="0;url=?r=public_affairs_collab">
+  </noscript>
   <div class="rounded-3xl border border-teal-100 bg-teal-50 text-teal-900 p-6 shadow-sm">
-    <div class="text-xl font-extrabold">공무 협업툴은 전체화면 보드로 실행됩니다.</div>
-    <div class="mt-2 text-sm font-bold text-teal-700">기존 CPMS 화면 위에 독립 업무보드 앱을 띄워 사용합니다.</div>
-    <button type="button"
-            class="mt-4 px-5 py-3 rounded-2xl bg-teal-700 text-white font-extrabold shadow"
-            data-pa-collab-open
-            aria-controls="paCollabFullscreenModal">
+    <div class="text-xl font-extrabold">공무 협업툴로 이동하고 있습니다.</div>
+    <div class="mt-2 text-sm font-bold text-teal-700">자동으로 열리지 않으면 아래 버튼을 눌러주세요.</div>
+    <a href="?r=public_affairs_collab"
+       class="mt-4 inline-flex px-5 py-3 rounded-2xl bg-teal-700 text-white font-extrabold shadow">
       공무 협업툴 열기
-    </button>
+    </a>
   </div>
 <?php else: ?>
 <div class="flex items-center justify-between mb-6">
@@ -140,7 +153,7 @@ function status_badge_class($status) {
             $startDate = (string)$project['start_date'];
             $endDate = (string)$project['end_date'];
             $status = (string)$project['status'];
-            $isCollabDraftProject = cpms_public_affairs_collab_is_draft_project($project, $collabProjectMetaStore);
+            $isCollabDraftProject = cpms_project_index_is_collab_draft_project($project);
           ?>
           <div class="rounded-3xl border <?php echo ($createdProjectId > 0 && $createdProjectId === $projectId) ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-gray-100 bg-white'; ?> hover:shadow-lg transition p-5">
             <div class="flex items-start justify-between gap-3">
@@ -452,8 +465,3 @@ function status_badge_class($status) {
 })();
 </script>
 <?php endif; ?>
-
-<?php
-  $paCollabAutoOpen = ($activeTab === 'collaboration');
-  require __DIR__ . '/collaboration.php';
-?>

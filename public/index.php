@@ -18,6 +18,94 @@ if ($route === '') $route = '대시보드';
 //  - footer.php에서 주기적으로 호출해서 세션 만료(자동로그아웃)를 방지
 // ==========================
 $dashboardType = isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee';
+$publicAffairsRouteName = urldecode('%EA%B3%B5%EB%AC%B4');
+$publicAffairsCollabTitle = urldecode('%EA%B3%B5%EB%AC%B4%20%ED%98%91%EC%97%85%ED%88%B4');
+
+if (!function_exists('cpms_public_affairs_collab_debug_table_exists')) {
+function cpms_public_affairs_collab_debug_table_exists($pdo, $tableName) {
+    if (!$pdo) return false;
+    try {
+        $dbName = (string)$pdo->query('SELECT DATABASE()')->fetchColumn();
+        if ($dbName === '') return false;
+        $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :table_name");
+        $st->execute(array(':db' => $dbName, ':table_name' => (string)$tableName));
+        return ((int)$st->fetchColumn() > 0);
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if ($route === 'public_affairs_collab_debug') {
+    header('Content-Type: text/plain; charset=utf-8');
+    $rootDir = dirname(__DIR__);
+    $storageRoot = function_exists('cpms_storage_root') ? cpms_storage_root() : ($rootDir . '/storage');
+    $collabStorage = $storageRoot . '/public_affairs_collab';
+    $serviceFile = $rootDir . '/app/services/PublicAffairsCollaborationService.php';
+    $appFile = $rootDir . '/app/views/project/collaboration_app.php';
+    $viewFile = $rootDir . '/app/views/project/collaboration.php';
+    $actionFile = $rootDir . '/app/views/project/collaboration_action.php';
+    $fileView = $rootDir . '/app/views/project/collaboration_file.php';
+    $cssFile = $rootDir . '/public/assets/css/public_affairs_collaboration.css';
+    $jsFile = $rootDir . '/public/assets/js/public_affairs_collaboration.js';
+    $tasksFile = $collabStorage . '/tasks.json';
+    $settingsFile = $collabStorage . '/settings.json';
+
+    echo "CPMS Public Affairs Collaboration Debug\n";
+    echo "auth.check=" . (\App\Core\Auth::check() ? 'true' : 'false') . "\n";
+    echo "auth.email=" . (string)\App\Core\Auth::userEmail() . "\n";
+    echo "auth.name=" . (string)\App\Core\Auth::userName() . "\n";
+    echo "auth.department=" . (string)\App\Core\Auth::userDepartment() . "\n";
+    echo "auth.role=" . (string)\App\Core\Auth::userRole() . "\n";
+
+    $pdo = null;
+    $dbError = '';
+    try {
+        $pdo = \App\Core\Db::pdo();
+    } catch (Exception $e) {
+        $dbError = $e->getMessage();
+    }
+    echo "db.connected=" . ($pdo ? 'true' : 'false') . "\n";
+    if ($dbError !== '') echo "db.error=" . $dbError . "\n";
+    echo "table.cpms_projects=" . (cpms_public_affairs_collab_debug_table_exists($pdo, 'cpms_projects') ? 'true' : 'false') . "\n";
+    echo "table.employees=" . (cpms_public_affairs_collab_debug_table_exists($pdo, 'employees') ? 'true' : 'false') . "\n";
+
+    echo "file.service=" . (is_file($serviceFile) ? 'true' : 'false') . " " . $serviceFile . "\n";
+    echo "file.collaboration_app=" . (is_file($appFile) ? 'true' : 'false') . " " . $appFile . "\n";
+    echo "file.collaboration_view=" . (is_file($viewFile) ? 'true' : 'false') . " " . $viewFile . "\n";
+    echo "file.action=" . (is_file($actionFile) ? 'true' : 'false') . " " . $actionFile . "\n";
+    echo "file.download=" . (is_file($fileView) ? 'true' : 'false') . " " . $fileView . "\n";
+    echo "file.css=" . (is_file($cssFile) ? 'true' : 'false') . " " . $cssFile . "\n";
+    echo "file.js=" . (is_file($jsFile) ? 'true' : 'false') . " " . $jsFile . "\n";
+    echo "storage.root=" . $storageRoot . "\n";
+    echo "storage.collab.exists=" . (is_dir($collabStorage) ? 'true' : 'false') . "\n";
+    echo "storage.collab.writable=" . (is_dir($collabStorage) && is_writable($collabStorage) ? 'true' : 'false') . "\n";
+    echo "json.tasks.readable=" . (is_file($tasksFile) && is_readable($tasksFile) ? 'true' : 'false') . "\n";
+    echo "json.settings.readable=" . (is_file($settingsFile) && is_readable($settingsFile) ? 'true' : 'false') . "\n";
+
+    $projectCount = 'unknown';
+    if ($pdo && cpms_public_affairs_collab_debug_table_exists($pdo, 'cpms_projects')) {
+        try {
+            $projectCount = (string)(int)$pdo->query('SELECT COUNT(*) FROM cpms_projects')->fetchColumn();
+        } catch (Exception $e) {
+            $projectCount = 'error: ' . $e->getMessage();
+        }
+    }
+    echo "projects.count=" . $projectCount . "\n";
+    exit;
+}
+
+if ($route === 'public_affairs_collab' || $route === 'public_affairs_collaboration' || $route === $publicAffairsCollabTitle || ($route === $publicAffairsRouteName && isset($_GET['tab']) && (string)$_GET['tab'] === 'collaboration')) {
+    if (!\App\Core\Auth::check()) {
+        cpms_redirect_to_portal_login(cpms_current_absolute_url());
+    }
+    \App\Core\View::render('project/collaboration_app', array(
+        'title' => $publicAffairsCollabTitle,
+        'selectedMenu' => $publicAffairsRouteName,
+        'dashboardType' => $dashboardType,
+        'hideLayout' => true,
+    ));
+    exit;
+}
 
 if ($route === 'tasks/my_list') {
     if (!\App\Core\Auth::check()) {
@@ -101,10 +189,6 @@ if ($route === 'company_overhead' || $route === 'management_overhead' || $route 
 
 if ($route === 'construction_home') {
     $route = '공사';
-}
-if ($route === 'public_affairs_collab' || $route === 'public_affairs_collaboration' || $route === '공무 협업툴') {
-    $_GET['tab'] = 'collaboration';
-    $route = '공무';
 }
 if ($route === '공무/프로젝트상세' || $route === 'project_view') {
     $route = 'project/detail';

@@ -6,18 +6,130 @@
  * - PHP 5.6 호환 문법만 사용한다.
  */
 
+use App\Core\Auth;
 use App\Core\Db;
 
-require_once __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
+$paCollabLoadErrors = array();
+$paCollabDefaultSettings = array(
+    'task_types' => array('계약 검토', '변경계약', '추가공사', '기성/청구', '내역서 검토', '실행내역 확인', '발주처 요청사항', '협력업체 요청사항', '자료 제출', '결재 요청', '회의 후속조치', '리스크 검토', '기타'),
+    'statuses' => array('할 일', '진행중', '검토중', '대기', '완료', '보류'),
+    'priorities' => array('긴급', '높음', '보통', '낮음'),
+    'quick_filters' => array(),
+    'card_fields' => array(),
+    'default_assignee_employee_id' => 0,
+);
 
-$pdo = Db::pdo();
-$settings = cpms_public_affairs_collab_settings();
-$employees = cpms_public_affairs_collab_fetch_employees($pdo);
-$projects = cpms_public_affairs_collab_fetch_projects($pdo);
-$currentEmployee = cpms_public_affairs_collab_current_employee($pdo);
-$canManageCollab = cpms_public_affairs_collab_is_admin_user();
-$canCreateCollab = cpms_public_affairs_collab_can_create_task();
-$canAccessCollab = cpms_public_affairs_collab_user_can_access_module($currentEmployee);
+if (!function_exists('pa_collab_safe_call')) {
+function pa_collab_safe_call($functionName, $args, $default) {
+    global $paCollabLoadErrors;
+    if (!function_exists($functionName)) {
+        $paCollabLoadErrors[] = $functionName . ' 함수를 찾을 수 없습니다.';
+        return $default;
+    }
+    try {
+        return call_user_func_array($functionName, $args);
+    } catch (Exception $e) {
+        $paCollabLoadErrors[] = $functionName . ': ' . $e->getMessage();
+        return $default;
+    }
+}}
+
+if (!function_exists('pa_collab_lower_safe')) {
+function pa_collab_lower_safe($value) {
+    if (function_exists('cpms_public_affairs_collab_lower')) {
+        return cpms_public_affairs_collab_lower($value);
+    }
+    $value = trim((string)$value);
+    return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
+}}
+
+$paCollabServiceFile = __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
+if (!is_file($paCollabServiceFile)) {
+    ?>
+    <div style="max-width:900px;margin:40px auto;padding:24px;border:1px solid #fecaca;background:#fff1f2;color:#991b1b;border-radius:14px;font-family:Arial,'Malgun Gothic',sans-serif;">
+      <h1 style="margin:0 0 10px;font-size:22px;">공무 협업툴을 열 수 없습니다</h1>
+      <p>협업툴 서비스 파일을 찾을 수 없습니다. 진단 페이지에서 파일 상태를 확인해주세요.</p>
+      <p><a href="?r=public_affairs_collab&safe=1">안전 모드</a> | <a href="?r=public_affairs_collab_debug" target="_blank">진단 페이지</a></p>
+    </div>
+    <?php
+    return;
+}
+
+require_once $paCollabServiceFile;
+
+$paCollabRequiredFunctions = array(
+    'cpms_public_affairs_collab_settings',
+    'cpms_public_affairs_collab_fetch_employees',
+    'cpms_public_affairs_collab_fetch_projects',
+    'cpms_public_affairs_collab_current_employee',
+    'cpms_public_affairs_collab_is_admin_user',
+    'cpms_public_affairs_collab_can_create_task',
+    'cpms_public_affairs_collab_user_can_access_module',
+    'cpms_public_affairs_collab_list_tasks',
+    'cpms_public_affairs_collab_visible_tasks',
+    'cpms_public_affairs_collab_project_spaces',
+    'cpms_public_affairs_collab_find_project_space',
+    'cpms_public_affairs_collab_project_home_summary',
+    'cpms_public_affairs_collab_project_tasks',
+    'cpms_public_affairs_collab_project_stats',
+    'cpms_public_affairs_collab_project_activities',
+    'cpms_public_affairs_collab_project_main_manager_id',
+    'cpms_public_affairs_collab_apply_filters',
+    'cpms_public_affairs_collab_apply_quick_filter',
+    'cpms_public_affairs_collab_summary',
+    'cpms_public_affairs_collab_task_counts',
+    'cpms_public_affairs_collab_find_task',
+    'cpms_public_affairs_collab_user_can_view_task',
+    'cpms_public_affairs_collab_group_by_status',
+    'cpms_public_affairs_collab_lower',
+    'cpms_public_affairs_collab_official_project_name',
+    'cpms_public_affairs_collab_task_no',
+    'cpms_public_affairs_collab_task_ref_names',
+    'cpms_public_affairs_collab_count_for_task',
+    'cpms_public_affairs_collab_user_can_edit_task',
+    'cpms_public_affairs_collab_is_delayed',
+    'cpms_public_affairs_collab_is_due_today',
+    'cpms_public_affairs_collab_comments',
+    'cpms_public_affairs_collab_files',
+    'cpms_public_affairs_collab_history',
+);
+foreach ($paCollabRequiredFunctions as $paCollabFunctionName) {
+    if (!function_exists($paCollabFunctionName)) {
+        ?>
+        <div style="max-width:900px;margin:40px auto;padding:24px;border:1px solid #fecaca;background:#fff1f2;color:#991b1b;border-radius:14px;font-family:Arial,'Malgun Gothic',sans-serif;">
+          <h1 style="margin:0 0 10px;font-size:22px;">공무 협업툴을 여는 중 문제가 발생했습니다</h1>
+          <p>협업툴 서비스 함수가 준비되지 않았습니다. 안전 모드 또는 진단 페이지에서 상태를 확인해주세요.</p>
+          <p><a href="?r=public_affairs_collab&safe=1">안전 모드</a> | <a href="?r=public_affairs_collab_debug" target="_blank">진단 페이지</a></p>
+        </div>
+        <?php
+        return;
+    }
+}
+
+$pdo = null;
+try {
+    $pdo = Db::pdo();
+} catch (Exception $e) {
+    $paCollabLoadErrors[] = 'DB 연결: ' . $e->getMessage();
+}
+
+$settings = pa_collab_safe_call('cpms_public_affairs_collab_settings', array(), $paCollabDefaultSettings);
+if (!is_array($settings)) $settings = $paCollabDefaultSettings;
+foreach ($paCollabDefaultSettings as $paCollabSettingKey => $paCollabSettingValue) {
+    if (!isset($settings[$paCollabSettingKey])) $settings[$paCollabSettingKey] = $paCollabSettingValue;
+}
+$employees = pa_collab_safe_call('cpms_public_affairs_collab_fetch_employees', array($pdo), array());
+$projects = pa_collab_safe_call('cpms_public_affairs_collab_fetch_projects', array($pdo), array());
+$currentEmployee = pa_collab_safe_call('cpms_public_affairs_collab_current_employee', array($pdo), array(
+    'id' => 0,
+    'name' => (string)Auth::userName(),
+    'email' => (string)Auth::userEmail(),
+    'department' => (string)Auth::userDepartment(),
+    'role' => (string)Auth::userRole(),
+));
+$canManageCollab = (bool)pa_collab_safe_call('cpms_public_affairs_collab_is_admin_user', array(), false);
+$canCreateCollab = (bool)pa_collab_safe_call('cpms_public_affairs_collab_can_create_task', array(), false);
+$canAccessCollab = (bool)pa_collab_safe_call('cpms_public_affairs_collab_user_can_access_module', array($currentEmployee), true);
 $paCollabRouteActive = (!empty($paCollabAutoOpen) || (isset($_GET['tab']) && $_GET['tab'] === 'collaboration'));
 $flash = null;
 if ($paCollabRouteActive) {
@@ -275,24 +387,24 @@ $filters = array(
     'keyword' => isset($_GET['keyword']) ? $_GET['keyword'] : '',
 );
 
-$allTasks = cpms_public_affairs_collab_list_tasks();
-$visibleTasks = cpms_public_affairs_collab_visible_tasks($allTasks, $currentEmployee);
-$spaceProjects = cpms_public_affairs_collab_project_spaces($pdo, $projects, $visibleTasks);
-$selectedSpace = cpms_public_affairs_collab_find_project_space($spaceProjects, $spaceProjectId);
+$allTasks = pa_collab_safe_call('cpms_public_affairs_collab_list_tasks', array(), array());
+$visibleTasks = pa_collab_safe_call('cpms_public_affairs_collab_visible_tasks', array($allTasks, $currentEmployee), array());
+$spaceProjects = pa_collab_safe_call('cpms_public_affairs_collab_project_spaces', array($pdo, $projects, $visibleTasks), array());
+$selectedSpace = pa_collab_safe_call('cpms_public_affairs_collab_find_project_space', array($spaceProjects, $spaceProjectId), null);
 if ($spaceProjectId > 0 && !is_array($selectedSpace)) $spaceProjectId = 0;
 if ($spaceProjectId <= 0 && $section !== 'settings') $section = 'home';
 $filters['project_id'] = $spaceProjectId;
-$projectHomeSummary = cpms_public_affairs_collab_project_home_summary($spaceProjects);
-$selectedProjectTasks = $spaceProjectId > 0 ? cpms_public_affairs_collab_project_tasks($visibleTasks, $spaceProjectId) : array();
-$selectedProjectStats = cpms_public_affairs_collab_project_stats($selectedProjectTasks);
-$selectedProjectActivities = $spaceProjectId > 0 ? cpms_public_affairs_collab_project_activities($spaceProjectId, 40) : array();
-$selectedProjectMainManagerId = $spaceProjectId > 0 ? cpms_public_affairs_collab_project_main_manager_id($pdo, $spaceProjectId) : 0;
-$projectKeyword = isset($_GET['project_keyword']) ? cpms_public_affairs_collab_lower(trim((string)$_GET['project_keyword'])) : '';
+$projectHomeSummary = pa_collab_safe_call('cpms_public_affairs_collab_project_home_summary', array($spaceProjects), array());
+$selectedProjectTasks = $spaceProjectId > 0 ? pa_collab_safe_call('cpms_public_affairs_collab_project_tasks', array($visibleTasks, $spaceProjectId), array()) : array();
+$selectedProjectStats = pa_collab_safe_call('cpms_public_affairs_collab_project_stats', array($selectedProjectTasks), array());
+$selectedProjectActivities = $spaceProjectId > 0 ? pa_collab_safe_call('cpms_public_affairs_collab_project_activities', array($spaceProjectId, 40), array()) : array();
+$selectedProjectMainManagerId = $spaceProjectId > 0 ? (int)pa_collab_safe_call('cpms_public_affairs_collab_project_main_manager_id', array($pdo, $spaceProjectId), 0) : 0;
+$projectKeyword = isset($_GET['project_keyword']) ? pa_collab_lower_safe(trim((string)$_GET['project_keyword'])) : '';
 $homeProjects = array();
 foreach ($spaceProjects as $space) {
     if (!is_array($space)) continue;
     if ($projectKeyword !== '') {
-        $projectHaystack = cpms_public_affairs_collab_lower(
+        $projectHaystack = pa_collab_lower_safe(
             (isset($space['name']) ? $space['name'] : '') . ' ' .
             (isset($space['client']) ? $space['client'] : '') . ' ' .
             (isset($space['contractor']) ? $space['contractor'] : '') . ' ' .
@@ -312,14 +424,14 @@ foreach ($homeProjects as $space) {
     if (isset($space['is_draft']) && (int)$space['is_draft'] === 1) $draftProjects[] = $space;
     else $officialProjects[] = $space;
 }
-$filteredTasks = cpms_public_affairs_collab_apply_filters($visibleTasks, $filters);
-$filteredTasks = cpms_public_affairs_collab_apply_quick_filter($filteredTasks, $quickFilter, $currentEmployee);
-$summary = cpms_public_affairs_collab_summary($spaceProjectId > 0 ? $selectedProjectTasks : $visibleTasks, $currentEmployee);
-$taskCounts = cpms_public_affairs_collab_task_counts();
+$filteredTasks = pa_collab_safe_call('cpms_public_affairs_collab_apply_filters', array($visibleTasks, $filters), $visibleTasks);
+$filteredTasks = pa_collab_safe_call('cpms_public_affairs_collab_apply_quick_filter', array($filteredTasks, $quickFilter, $currentEmployee), $filteredTasks);
+$summary = pa_collab_safe_call('cpms_public_affairs_collab_summary', array($spaceProjectId > 0 ? $selectedProjectTasks : $visibleTasks, $currentEmployee), array());
+$taskCounts = pa_collab_safe_call('cpms_public_affairs_collab_task_counts', array(), array());
 $selectedTaskId = isset($_GET['task_id']) ? (int)$_GET['task_id'] : 0;
-$selectedTask = $selectedTaskId > 0 ? cpms_public_affairs_collab_find_task($selectedTaskId) : null;
-if (is_array($selectedTask) && !cpms_public_affairs_collab_user_can_view_task($selectedTask, $currentEmployee)) $selectedTask = null;
-$groups = cpms_public_affairs_collab_group_by_status($filteredTasks, $settings['statuses']);
+$selectedTask = $selectedTaskId > 0 ? pa_collab_safe_call('cpms_public_affairs_collab_find_task', array($selectedTaskId), null) : null;
+if (is_array($selectedTask) && !pa_collab_safe_call('cpms_public_affairs_collab_user_can_view_task', array($selectedTask, $currentEmployee), false)) $selectedTask = null;
+$groups = pa_collab_safe_call('cpms_public_affairs_collab_group_by_status', array($filteredTasks, $settings['statuses']), array());
 $defaultAssigneeId = isset($settings['default_assignee_employee_id']) ? (int)$settings['default_assignee_employee_id'] : 0;
 $paCollabInitiallyOpen = (!empty($paCollabAutoOpen) || $selectedTaskId > 0);
 
