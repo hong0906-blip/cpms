@@ -60,16 +60,53 @@ function status_badge_class($status) {
 }
 ?>
 
+<script>
+// 공무 협업툴 탭/열기 버튼: 외부 JS 바인딩이 실패해도 전체화면 모달을 직접 연다.
+window.cpmsOpenPublicAffairsCollab = function(ev) {
+  var modal = document.getElementById('paCollabFullscreenModal');
+  if (modal) {
+    if (modal.parentNode !== document.body) document.body.appendChild(modal);
+    if ((' ' + modal.className + ' ').indexOf(' is-open ') === -1) modal.className += ' is-open';
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = 'block';
+    if ((' ' + document.body.className + ' ').indexOf(' pa-collab-open ') === -1) document.body.className += ' pa-collab-open';
+    if (window.location.hash !== '#public-affairs-collaboration') {
+      if (window.history && window.history.pushState) window.history.pushState(null, '', '#public-affairs-collaboration');
+      else window.location.hash = 'public-affairs-collaboration';
+    }
+    if (ev && ev.preventDefault) ev.preventDefault();
+    return false;
+  }
+  window.location.href = '?r=public_affairs_collab#public-affairs-collaboration';
+  if (ev && ev.preventDefault) ev.preventDefault();
+  return false;
+};
+</script>
+
 <div class="cpms-project-page mb-5">
   <div class="mt-3 flex flex-wrap gap-2">
     <a href="?r=공무&tab=monthly_summary" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_summary' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 집계</a>
     <a href="?r=공무&tab=project_manage" class="cpms-project-manage-tab px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
-    <a href="?r=공무&tab=collaboration#public-affairs-collaboration"
+    <a href="?r=public_affairs_collab#public-affairs-collaboration"
        class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'collaboration' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>"
        data-pa-collab-open
+       onclick="return window.cpmsOpenPublicAffairsCollab ? window.cpmsOpenPublicAffairsCollab(event) : true;"
        aria-controls="paCollabFullscreenModal">공무 협업툴</a>
   </div>
 </div>
+
+<?php
+  // 공무 협업툴 전체화면 모달: 탭 클릭 즉시 열릴 수 있도록 본문 콘텐츠보다 먼저 렌더링한다.
+  // 월별 집계/프로젝트 관리 본문에서 오류가 나도 협업툴 탭의 모달 DOM은 먼저 준비되어야 한다.
+  $cpmsProjectIndexProjects = $projects;
+  $cpmsProjectIndexConstructionEmployees = $constructionEmployees;
+  $cpmsProjectIndexFlash = $flash;
+  $paCollabAutoOpen = ($activeTab === 'collaboration');
+  require __DIR__ . '/collaboration.php';
+  $projects = $cpmsProjectIndexProjects;
+  $constructionEmployees = $cpmsProjectIndexConstructionEmployees;
+  $flash = $cpmsProjectIndexFlash;
+?>
 
 <?php if ($activeTab === 'monthly_summary'): ?>
   <?php try { require __DIR__ . '/monthly_summary.php'; } catch (Exception $e) { ?>
@@ -83,12 +120,13 @@ function status_badge_class($status) {
   <div class="rounded-3xl border border-teal-100 bg-teal-50 text-teal-900 p-6 shadow-sm">
     <div class="text-xl font-extrabold">공무 협업툴은 전체화면 보드로 실행됩니다.</div>
     <div class="mt-2 text-sm font-bold text-teal-700">기존 CPMS 화면 위에 독립 업무보드 앱을 띄워 사용합니다.</div>
-    <button type="button"
-            class="mt-4 px-5 py-3 rounded-2xl bg-teal-700 text-white font-extrabold shadow"
-            data-pa-collab-open
-            aria-controls="paCollabFullscreenModal">
+    <a href="?r=public_affairs_collab#public-affairs-collaboration"
+       class="inline-flex mt-4 px-5 py-3 rounded-2xl bg-teal-700 text-white font-extrabold shadow"
+       data-pa-collab-open
+       onclick="return window.cpmsOpenPublicAffairsCollab ? window.cpmsOpenPublicAffairsCollab(event) : true;"
+       aria-controls="paCollabFullscreenModal">
       공무 협업툴 열기
-    </button>
+    </a>
   </div>
 <?php else: ?>
 <div class="flex items-center justify-between mb-6">
@@ -452,8 +490,3 @@ function status_badge_class($status) {
 })();
 </script>
 <?php endif; ?>
-
-<?php
-  $paCollabAutoOpen = ($activeTab === 'collaboration');
-  require __DIR__ . '/collaboration.php';
-?>

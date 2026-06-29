@@ -10,6 +10,13 @@
   var dragSourceColumn = null;
   var dragSourceStatus = '';
 
+  function getAppModal() {
+    // 공무 협업툴 전체화면 모달: 기존 CPMS 본문 레이아웃에 갇히지 않도록 body 바로 아래로 이동한다.
+    if (!appModal) appModal = document.getElementById('paCollabFullscreenModal');
+    if (appModal && appModal.parentNode !== document.body) document.body.appendChild(appModal);
+    return appModal;
+  }
+
   function hasClass(el, className) {
     return el && (' ' + el.className + ' ').indexOf(' ' + className + ' ') > -1;
   }
@@ -72,8 +79,9 @@
   }
 
   function focusFirstControl() {
-    if (!appModal) return;
-    var target = appModal.querySelector('button, a, input, select, textarea');
+    var modal = getAppModal();
+    if (!modal) return;
+    var target = modal.querySelector('button, a, input, select, textarea');
     if (target && target.focus) target.focus();
   }
 
@@ -90,21 +98,25 @@
   }
 
   function openAppModal(updateHash) {
-    if (!appModal) return;
-    if (!hasClass(appModal, 'is-open')) lastFocusedElement = document.activeElement;
-    addClass(appModal, 'is-open');
-    appModal.setAttribute('aria-hidden', 'false');
+    var modal = getAppModal();
+    if (!modal) return;
+    if (!hasClass(modal, 'is-open')) lastFocusedElement = document.activeElement;
+    addClass(modal, 'is-open');
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = 'block';
     addClass(document.body, 'pa-collab-open');
     if (updateHash) setHash();
     focusFirstControl();
   }
 
   function closeAppModal(updateHash) {
-    if (!appModal) return;
-    removeClass(appModal, 'is-open');
-    appModal.setAttribute('aria-hidden', 'true');
+    var modal = getAppModal();
+    if (!modal) return;
+    removeClass(modal, 'is-open');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.style.display = '';
     removeClass(document.body, 'pa-collab-open');
-    removeClass(appModal, 'pa-collab-menu-open');
+    removeClass(modal, 'pa-collab-menu-open');
     if (updateHash) clearHash();
     if (lastFocusedElement && lastFocusedElement.focus) lastFocusedElement.focus();
   }
@@ -221,7 +233,7 @@
       ' data-pa-can-edit="' + (canEdit ? '1' : '0') + '"' +
       ' data-pa-search="' + escapeHtml(searchText) + '">';
     html += '<div class="pa-card-top"><span class="pa-no">' + escapeHtml(taskNo) + '</span><span class="pa-type">' + escapeHtml(task.task_type || '-') + '</span></div>';
-    html += '<a class="pa-card-title" data-pa-detail-link href="?r=공무&tab=collaboration&task_id=' + escapeHtml(taskId) + '">' + escapeHtml(task.title || '-') + '</a>';
+    html += '<a class="pa-card-title" data-pa-detail-link href="?r=public_affairs_collab&task_id=' + escapeHtml(taskId) + '">' + escapeHtml(task.title || '-') + '</a>';
     html += '<div class="pa-card-meta"><div>' + escapeHtml(task.project_name || '-') + '</div><div>담당 ' + escapeHtml(task.assignee_name || '-') + ' · 요청 ' + escapeHtml(task.requester_name || '-') + '</div><div>마감 ' + escapeHtml(dueText(task)) + '</div></div>';
     html += '<div class="pa-badges"><span class="pa-badge ' + priorityClass(task.priority) + '">' + escapeHtml(task.priority || '-') + '</span>';
     if (parseInt(task.is_due_today || 0, 10)) html += '<span class="pa-badge pa-today">오늘 마감</span>';
@@ -493,6 +505,8 @@
     if (empty) empty.style.display = keyword !== '' && count === 0 ? '' : 'none';
   }
 
+  getAppModal();
+
   var appOpeners = document.querySelectorAll('[data-pa-collab-open]');
   for (var o = 0; o < appOpeners.length; o++) {
     appOpeners[o].onclick = function(ev){
@@ -511,10 +525,11 @@
   }
 
   var menuToggle = document.querySelector('[data-pa-menu-toggle]');
-  if (menuToggle && appModal) {
+  if (menuToggle && getAppModal()) {
     menuToggle.onclick = function(){
-      if (hasClass(appModal, 'pa-collab-menu-open')) removeClass(appModal, 'pa-collab-menu-open');
-      else addClass(appModal, 'pa-collab-menu-open');
+      var modal = getAppModal();
+      if (hasClass(modal, 'pa-collab-menu-open')) removeClass(modal, 'pa-collab-menu-open');
+      else addClass(modal, 'pa-collab-menu-open');
     };
   }
 
@@ -532,22 +547,26 @@
         removeClass(projectModal, 'is-open');
         return;
       }
-      var detail = appModal ? appModal.querySelector('.pa-detail-panel') : null;
+      var detailModal = getAppModal();
+      var detail = detailModal ? detailModal.querySelector('.pa-detail-panel') : null;
       if (detail && detail.parentNode) {
         detail.parentNode.removeChild(detail);
         return;
       }
-      if (appModal && hasClass(appModal, 'is-open')) closeAppModal(true);
+      var modal = getAppModal();
+      if (modal && hasClass(modal, 'is-open')) closeAppModal(true);
     }
   });
 
   function syncAppModalWithLocation() {
-    if (!appModal) return;
+    var modal = getAppModal();
+    if (!modal) return;
     if (window.location.hash === hashValue) openAppModal(false);
-    else if (hasClass(appModal, 'is-open')) closeAppModal(false);
+    else if (hasClass(modal, 'is-open')) closeAppModal(false);
   }
 
-  if (appModal && (appModal.getAttribute('data-pa-auto-open') === '1' || window.location.hash === hashValue)) {
+  var startupModal = getAppModal();
+  if (startupModal && (startupModal.getAttribute('data-pa-auto-open') === '1' || window.location.hash === hashValue)) {
     openAppModal(window.location.hash !== hashValue);
   }
 
@@ -556,6 +575,12 @@
 
   bindEvent(document, 'click', function(ev){
     var target = ev.target || ev.srcElement;
+    var appOpen = closest(target, '[data-pa-collab-open]');
+    if (appOpen && getAppModal()) {
+      openAppModal(true);
+      ev.preventDefault();
+      return false;
+    }
     var createOpen = closest(target, '[data-pa-modal-open="create"]');
     if (createOpen) {
       var createModal = document.getElementById('paCreateModal');

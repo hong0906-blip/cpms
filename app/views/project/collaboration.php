@@ -27,7 +27,7 @@ if ($paCollabRouteActive) {
 if (!function_exists('pa_collab_url')) {
 function pa_collab_url($overrides) {
     $params = $_GET;
-    $params['r'] = '공무';
+    $params['r'] = 'public_affairs_collab';
     $params['tab'] = 'collaboration';
     if (is_array($overrides)) {
         foreach ($overrides as $key => $value) {
@@ -181,6 +181,12 @@ if (!$canAccessCollab) {
     $paCollabInitiallyOpen = !empty($paCollabAutoOpen);
     ?>
 <link rel="stylesheet" href="<?php echo h(asset_url('assets/css/public_affairs_collaboration.css') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/css/public_affairs_collaboration.css')); ?>">
+<style>
+/* 공무 협업툴 접속 fallback: 외부 CSS가 늦게 로드되거나 실패해도 전체화면 모달은 열리게 한다. */
+.pa-collab-fullscreen{position:fixed;top:0;right:0;bottom:0;left:0;width:100vw;height:100vh;z-index:99999;display:none;background:rgba(15,23,42,.82);overflow:hidden}
+.pa-collab-fullscreen.is-open{display:block}
+body.pa-collab-open{overflow:hidden}
+</style>
 
 <div id="paCollabFullscreenModal"
      class="pa-collab-fullscreen<?php echo $paCollabInitiallyOpen ? ' is-open' : ''; ?>"
@@ -229,9 +235,11 @@ if (!$canAccessCollab) {
       'employees' => $paCollabEmployeeOptions,
       'impactOptions' => array('없음', '있음', '확인필요'),
   );
+  $paCollabJsConfigJson = json_encode($paCollabJsConfig, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+  if (!is_string($paCollabJsConfigJson) || $paCollabJsConfigJson === '') $paCollabJsConfigJson = '{}';
 ?>
 <script>
-window.paCollabConfig = <?php echo json_encode($paCollabJsConfig, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+window.paCollabConfig = <?php echo $paCollabJsConfigJson; ?>;
 </script>
 <script defer src="<?php echo h(asset_url('assets/js/public_affairs_collaboration.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/public_affairs_collaboration.js')); ?>"></script>
     <?php
@@ -337,6 +345,12 @@ $sampleCards = array(
 ?>
 
 <link rel="stylesheet" href="<?php echo h(asset_url('assets/css/public_affairs_collaboration.css') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/css/public_affairs_collaboration.css')); ?>">
+<style>
+/* 공무 협업툴 접속 fallback: 외부 CSS가 늦게 로드되거나 실패해도 전체화면 모달은 열리게 한다. */
+.pa-collab-fullscreen{position:fixed;top:0;right:0;bottom:0;left:0;width:100vw;height:100vh;z-index:99999;display:none;background:rgba(15,23,42,.82);overflow:hidden}
+.pa-collab-fullscreen.is-open{display:block}
+body.pa-collab-open{overflow:hidden}
+</style>
 
 <div id="paCollabFullscreenModal"
      class="pa-collab-fullscreen<?php echo $paCollabInitiallyOpen ? ' is-open' : ''; ?>"
@@ -383,7 +397,7 @@ $sampleCards = array(
         <?php if ($canCreateCollab && is_array($selectedSpace)): ?>
           <button type="button" class="pa-btn pa-btn-primary" data-pa-modal-open="create">업무 만들기</button>
         <?php endif; ?>
-        <a class="pa-btn" href="?r=공무&tab=collaboration#public-affairs-collaboration" target="_blank" rel="noopener" title="공무 협업툴 새 창으로 열기">새 창으로 열기</a>
+        <a class="pa-btn" href="?r=public_affairs_collab#public-affairs-collaboration" target="_blank" rel="noopener" title="공무 협업툴 새 창으로 열기">새 창으로 열기</a>
         <a href="?r=공무&tab=monthly_summary" class="pa-collab-close" data-pa-collab-close aria-label="공무 협업툴 닫기">닫기 ×</a>
       </div>
     </header>
@@ -433,7 +447,7 @@ $sampleCards = array(
               <div class="pa-desc">기존 CPMS 공무 프로젝트를 Space로 사용하고, 계약 전 업무는 "(가제)" Space로 먼저 시작합니다.</div>
             </div>
             <form method="get" action="" class="pa-home-search">
-              <input type="hidden" name="r" value="공무">
+              <input type="hidden" name="r" value="public_affairs_collab">
               <input type="hidden" name="tab" value="collaboration">
               <input type="hidden" name="section" value="home">
               <input class="pa-field" name="project_keyword" value="<?php echo h(isset($_GET['project_keyword']) ? (string)$_GET['project_keyword'] : ''); ?>" placeholder="프로젝트명, 발주처, 담당자 검색">
@@ -917,7 +931,7 @@ $sampleCards = array(
         <input type="hidden" name="status" value="할 일">
         <input type="hidden" name="project_id" value="<?php echo (int)$spaceProjectId; ?>">
         <input type="hidden" name="project_name" value="<?php echo h(is_array($selectedSpace) && isset($selectedSpace['name']) ? $selectedSpace['name'] : ''); ?>">
-        <input type="hidden" name="return_url" value="?r=공무&tab=collaboration">
+        <input type="hidden" name="return_url" value="?r=public_affairs_collab">
         <div class="pa-modal-body">
           <div class="pa-form-grid">
             <div><label class="pa-muted">업무유형</label><select name="task_type" class="pa-field"><?php foreach ($settings['task_types'] as $type): ?><option value="<?php echo h($type); ?>"><?php echo h($type); ?></option><?php endforeach; ?></select></div>
@@ -952,7 +966,7 @@ $sampleCards = array(
       <form method="post" action="?r=project/collaboration_action">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
         <input type="hidden" name="action" value="project_create">
-        <input type="hidden" name="return_url" value="?r=공무&tab=collaboration&section=home">
+        <input type="hidden" name="return_url" value="?r=public_affairs_collab&section=home">
         <div class="pa-modal-body">
           <div class="pa-form-grid">
             <div class="full"><label class="pa-muted">프로젝트명 *</label><input name="project_name" required class="pa-field" placeholder="예: 삼성전자 FAB 배관공사 검토"></div>
@@ -975,4 +989,92 @@ $sampleCards = array(
   </section>
 </div>
 
+<?php
+  // 공무 협업툴 접속/상세패널 공통 설정: 외부 JS가 로드되면 AJAX/상세 갱신에 사용한다.
+  $paCollabEmployeeOptions = array();
+  foreach ($employees as $employee) {
+      $paCollabEmployeeOptions[] = array(
+          'id' => isset($employee['id']) ? (int)$employee['id'] : 0,
+          'name' => isset($employee['name']) ? (string)$employee['name'] : '',
+          'department' => isset($employee['department']) ? (string)$employee['department'] : '',
+          'position' => isset($employee['position']) ? (string)$employee['position'] : '',
+      );
+  }
+  $paCollabJsConfig = array(
+      'csrf' => csrf_token(),
+      'actionUrl' => '?r=project/collaboration_action',
+      'fileUrl' => '?r=project/collaboration_file&id=',
+      'statuses' => $settings['statuses'],
+      'priorities' => $settings['priorities'],
+      'taskTypes' => $settings['task_types'],
+      'employees' => $paCollabEmployeeOptions,
+      'impactOptions' => array('없음', '있음', '확인필요'),
+  );
+  $paCollabJsConfigJson = json_encode($paCollabJsConfig, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+  if (!is_string($paCollabJsConfigJson) || $paCollabJsConfigJson === '') $paCollabJsConfigJson = '{}';
+?>
+<script>
+window.paCollabConfig = <?php echo $paCollabJsConfigJson; ?>;
+(function(){
+  // 공무 협업툴 접속 fallback: 외부 JS가 로드되지 않아도 탭/버튼으로 모달을 열고 닫는다.
+  var hashValue = '#public-affairs-collaboration';
+  function hasClass(el, name){ return el && (' ' + el.className + ' ').indexOf(' ' + name + ' ') > -1; }
+  function addClass(el, name){ if (el && !hasClass(el, name)) el.className = el.className + ' ' + name; }
+  function removeClass(el, name){ if (el) el.className = (' ' + el.className + ' ').replace(' ' + name + ' ', ' ').replace(/^\s+|\s+$/g, ''); }
+  function closest(el, attr){
+    while (el && el !== document) {
+      if (el.getAttribute && el.getAttribute(attr) !== null) return el;
+      el = el.parentNode;
+    }
+    return null;
+  }
+  function modal(){ return document.getElementById('paCollabFullscreenModal'); }
+  function openModal(updateHash){
+    var m = modal(); if (!m) return;
+    if (m.parentNode !== document.body) document.body.appendChild(m);
+    addClass(m, 'is-open');
+    m.setAttribute('aria-hidden', 'false');
+    m.style.display = 'block';
+    addClass(document.body, 'pa-collab-open');
+    if (updateHash && window.location.hash !== hashValue) {
+      if (window.history && window.history.pushState) window.history.pushState(null, '', hashValue);
+      else window.location.hash = hashValue;
+    }
+  }
+  function closeModal(updateHash){
+    var m = modal(); if (!m) return;
+    removeClass(m, 'is-open');
+    m.setAttribute('aria-hidden', 'true');
+    m.style.display = '';
+    removeClass(document.body, 'pa-collab-open');
+    if (updateHash && window.location.hash === hashValue && window.history && window.history.replaceState) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }
+  function bind(target, eventName, handler) {
+    if (target && target.addEventListener) target.addEventListener(eventName, handler, false);
+    else if (target && target.attachEvent) target.attachEvent('on' + eventName, handler);
+  }
+  bind(document, 'click', function(ev){
+    ev = ev || window.event;
+    var target = ev.target || ev.srcElement;
+    if (closest(target, 'data-pa-collab-open')) {
+      openModal(true);
+      if (ev.preventDefault) ev.preventDefault();
+      return false;
+    }
+    if (closest(target, 'data-pa-collab-close')) {
+      closeModal(true);
+      if (ev.preventDefault) ev.preventDefault();
+      return false;
+    }
+  });
+  bind(document, 'keydown', function(ev){
+    ev = ev || window.event;
+    var key = ev.key || ev.keyCode;
+    if ((key === 'Escape' || key === 27) && modal() && hasClass(modal(), 'is-open')) closeModal(true);
+  });
+  if ((modal() && modal().getAttribute('data-pa-auto-open') === '1') || window.location.hash === hashValue) openModal(false);
+})();
+</script>
 <script defer src="<?php echo h(asset_url('assets/js/public_affairs_collaboration.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/public_affairs_collaboration.js')); ?>"></script>
