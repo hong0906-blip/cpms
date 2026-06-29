@@ -111,6 +111,37 @@ if ($route === 'public_affairs_collab_debug') {
     echo "json.tasks.readable=" . (is_file($tasksFile) && is_readable($tasksFile) ? 'true' : 'false') . "\n";
     echo "json.settings.exists=" . (is_file($settingsFile) ? 'true' : 'false') . "\n";
     echo "json.settings.readable=" . (is_file($settingsFile) && is_readable($settingsFile) ? 'true' : 'false') . "\n";
+    echo "repair.url=?r=public_affairs_collab_repair\n";
+
+    $bootstrapAvailable = false;
+    $bootstrapResult = array('ok' => false, 'message' => '서비스 파일을 불러오지 않았습니다.');
+    $debugLoadingService = false;
+    register_shutdown_function(function() use (&$debugLoadingService) {
+        if (!$debugLoadingService) return;
+        $error = error_get_last();
+        if (!is_array($error) || !isset($error['type'])) return;
+        if (!in_array((int)$error['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR), true)) return;
+        echo "bootstrap.available=false\n";
+        echo "bootstrap.check.result=FAIL\n";
+        echo "bootstrap.message=서비스 파일을 불러오는 중 서버 오류가 발생했습니다.\n";
+    });
+    if (is_file($serviceFile)) {
+        try {
+            $debugLoadingService = true;
+            require_once $serviceFile;
+            $debugLoadingService = false;
+            $bootstrapAvailable = function_exists('cpms_public_affairs_collab_bootstrap_storage');
+            if ($bootstrapAvailable) {
+                $bootstrapResult = cpms_public_affairs_collab_bootstrap_storage(false);
+            }
+        } catch (Exception $e) {
+            $debugLoadingService = false;
+            $bootstrapResult = array('ok' => false, 'message' => $e->getMessage());
+        }
+    }
+    echo "bootstrap.available=" . ($bootstrapAvailable ? 'true' : 'false') . "\n";
+    echo "bootstrap.check.result=" . (!empty($bootstrapResult['ok']) ? 'OK' : 'FAIL') . "\n";
+    echo "bootstrap.message=" . (isset($bootstrapResult['message']) ? (string)$bootstrapResult['message'] : '') . "\n";
 
     $projectCount = 'unknown';
     if ($pdo && cpms_public_affairs_collab_debug_table_exists($pdo, 'cpms_projects')) {
@@ -121,6 +152,79 @@ if ($route === 'public_affairs_collab_debug') {
         }
     }
     echo "projects.count=" . $projectCount . "\n";
+    exit;
+}
+
+if ($route === 'public_affairs_collab_repair') {
+    header('Content-Type: text/plain; charset=utf-8');
+    echo "[PUBLIC AFFAIRS COLLAB REPAIR]\n";
+    $rootDir = dirname(__DIR__);
+    $serviceFile = $rootDir . '/app/services/PublicAffairsCollaborationService.php';
+    $storageRoot = function_exists('cpms_storage_root') ? cpms_storage_root() : ($rootDir . '/storage');
+    $collabStorage = $storageRoot . '/public_affairs_collab';
+
+    $authOk = false;
+    $allowed = false;
+    try {
+        $authOk = \App\Core\Auth::check() ? true : false;
+        $role = (string)\App\Core\Auth::userRole();
+        $dept = (string)\App\Core\Auth::userDepartment();
+        $allowed = (\App\Core\Auth::isMaster() || $role === 'executive' || strpos($dept, '공무') !== false);
+    } catch (Exception $e) {
+        echo "auth.error=" . $e->getMessage() . "\n";
+    }
+    echo "auth.check=" . ($authOk ? 'true' : 'false') . "\n";
+    echo "auth.allowed=" . ($allowed ? 'true' : 'false') . "\n";
+    if (!$authOk || !$allowed) {
+        echo "result=FAIL\n";
+        echo "message=공무 협업툴 저장소 복구 권한이 없습니다.\n";
+        exit;
+    }
+    if (!is_file($serviceFile)) {
+        echo "file.service=false " . $serviceFile . "\n";
+        echo "result=FAIL\n";
+        echo "message=서비스 파일을 찾을 수 없습니다.\n";
+        exit;
+    }
+
+    $repairLoadingService = false;
+    register_shutdown_function(function() use (&$repairLoadingService) {
+        if (!$repairLoadingService) return;
+        $error = error_get_last();
+        if (!is_array($error) || !isset($error['type'])) return;
+        if (!in_array((int)$error['type'], array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR), true)) return;
+        echo "result=FAIL\n";
+        echo "message=서비스 파일을 불러오는 중 서버 오류가 발생했습니다.\n";
+    });
+    try {
+        $repairLoadingService = true;
+        require_once $serviceFile;
+        $repairLoadingService = false;
+        if (!function_exists('cpms_public_affairs_collab_bootstrap_storage')) {
+            echo "bootstrap.available=false\n";
+            echo "result=FAIL\n";
+            echo "message=bootstrap 함수를 찾을 수 없습니다.\n";
+            exit;
+        }
+        $result = cpms_public_affairs_collab_bootstrap_storage(true);
+        echo "storage.root=" . $storageRoot . "\n";
+        echo "storage.root.exists=" . (is_dir($storageRoot) ? 'true' : 'false') . "\n";
+        echo "storage.root.writable=" . (is_dir($storageRoot) && is_writable($storageRoot) ? 'true' : 'false') . "\n";
+        echo "storage.collab=" . $collabStorage . "\n";
+        echo "storage.collab.exists=" . (is_dir($collabStorage) ? 'true' : 'false') . "\n";
+        echo "storage.collab.writable=" . (is_dir($collabStorage) && is_writable($collabStorage) ? 'true' : 'false') . "\n";
+        $created = isset($result['created']) && is_array($result['created']) ? $result['created'] : array();
+        foreach (array('tasks.json', 'comments.json', 'attachments.json', 'history.json', 'settings.json', 'collab_project_meta.json', 'project_activity.json') as $fileName) {
+            echo "created." . $fileName . "=" . (!empty($created[$fileName]) ? 'true' : 'false') . "\n";
+            echo "file." . $fileName . ".exists=" . (is_file($collabStorage . '/' . $fileName) ? 'true' : 'false') . "\n";
+        }
+        echo "result=" . (!empty($result['ok']) ? 'OK' : 'FAIL') . "\n";
+        echo "message=" . (isset($result['message']) ? (string)$result['message'] : '') . "\n";
+    } catch (Exception $e) {
+        $repairLoadingService = false;
+        echo "result=FAIL\n";
+        echo "message=" . $e->getMessage() . "\n";
+    }
     exit;
 }
 

@@ -46,6 +46,7 @@ function cpms_pa_collab_app_error_html($title, $message) {
         . '<h1 class="pa-safe-title">' . $title . '</h1>'
         . '<div>' . $message . '</div>'
         . '<div class="pa-safe-actions">'
+        . '<a class="pa-safe-btn primary" href="?r=public_affairs_collab_repair" target="_blank">저장소 복구 실행</a>'
         . '<a class="pa-safe-btn primary" href="?r=public_affairs_collab&safe=1">안전 모드로 열기</a>'
         . '<a class="pa-safe-btn" href="?r=public_affairs_collab_debug" target="_blank">진단 페이지 열기</a>'
         . '<a class="pa-safe-btn" href="?r=공무">공무 화면으로 돌아가기</a>'
@@ -124,6 +125,7 @@ register_shutdown_function(function() use (&$paCollabRenderingMain, &$paCollabBu
         <div><b>CSS/JS</b></div><div><?php echo h(cpms_pa_collab_app_bool_text(is_file($rootDir . '/public/assets/css/public_affairs_collaboration.css') && is_file($rootDir . '/public/assets/js/public_affairs_collaboration.js'))); ?></div>
       </div>
       <div class="pa-safe-actions">
+        <a class="pa-safe-btn primary" href="?r=public_affairs_collab_repair" target="_blank">저장소 복구 실행</a>
         <a class="pa-safe-btn primary" href="?r=public_affairs_collab">일반 모드로 열기</a>
         <a class="pa-safe-btn" href="?r=public_affairs_collab_debug" target="_blank">진단 페이지 열기</a>
         <a class="pa-safe-btn" href="?r=공무">공무 화면으로 돌아가기</a>
@@ -146,31 +148,61 @@ register_shutdown_function(function() use (&$paCollabRenderingMain, &$paCollabBu
         </main>
         <?php
     } else {
-        try {
-            $_GET['tab'] = 'collaboration';
-            $paCollabAutoOpen = true;
-            $paCollabRenderingMain = true;
-            ob_start();
-            $paCollabBufferStarted = true;
-            require $collaborationView;
-            $paCollabContent = ob_get_clean();
-            $paCollabBufferStarted = false;
-            $paCollabRenderingMain = false;
-            if (trim((string)$paCollabContent) === '') {
-                echo cpms_pa_collab_app_error_html(
-                    '공무 협업툴 화면을 표시할 수 없습니다',
-                    '협업툴 화면 출력이 비어 있습니다. 진단 페이지에서 파일과 저장소 상태를 확인해주세요.'
-                );
-            } else {
-                echo $paCollabContent;
-            }
-        } catch (Exception $e) {
-            $paCollabRenderingMain = false;
-            if ($paCollabBufferStarted && ob_get_level() > 0) @ob_end_clean();
+        $paCollabServiceFile = $rootDir . '/app/services/PublicAffairsCollaborationService.php';
+        if (!is_file($paCollabServiceFile)) {
             echo cpms_pa_collab_app_error_html(
-                '공무 협업툴을 여는 중 문제가 발생했습니다',
-                '저장소 권한 또는 설정 파일을 확인해주세요. 자세한 내용은 진단 페이지에서 확인할 수 있습니다.'
+                '공무 협업툴을 열 수 없습니다',
+                '협업툴 서비스 파일을 찾을 수 없습니다. 진단 페이지에서 파일 상태를 확인해주세요.'
             );
+        } else {
+            try {
+                $_GET['tab'] = 'collaboration';
+                $paCollabAutoOpen = true;
+                $paCollabRenderingMain = true;
+                ob_start();
+                $paCollabBufferStarted = true;
+                require_once $paCollabServiceFile;
+                if (!function_exists('cpms_public_affairs_collab_bootstrap_storage')) {
+                    $paCollabContent = ob_get_clean();
+                    $paCollabBufferStarted = false;
+                    $paCollabRenderingMain = false;
+                    echo cpms_pa_collab_app_error_html(
+                        '공무 협업툴 저장소를 준비하지 못했습니다',
+                        '저장소 초기화 함수를 찾을 수 없습니다. 진단 페이지에서 서비스 파일 상태를 확인해주세요.'
+                    );
+                } else {
+                    $bootstrap = cpms_public_affairs_collab_bootstrap_storage(true);
+                    if (empty($bootstrap['ok'])) {
+                        $paCollabContent = ob_get_clean();
+                        $paCollabBufferStarted = false;
+                        $paCollabRenderingMain = false;
+                        echo cpms_pa_collab_app_error_html(
+                            '공무 협업툴 저장소를 준비하지 못했습니다',
+                            isset($bootstrap['message']) ? (string)$bootstrap['message'] : 'storage/public_affairs_collab 폴더 또는 기본 JSON 파일을 만들 수 없습니다.'
+                        );
+                    } else {
+                        require $collaborationView;
+                        $paCollabContent = ob_get_clean();
+                        $paCollabBufferStarted = false;
+                        $paCollabRenderingMain = false;
+                        if (trim((string)$paCollabContent) === '') {
+                            echo cpms_pa_collab_app_error_html(
+                                '공무 협업툴 화면을 표시할 수 없습니다',
+                                '협업툴 화면 출력이 비어 있습니다. 진단 페이지에서 파일과 저장소 상태를 확인해주세요.'
+                            );
+                        } else {
+                            echo $paCollabContent;
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+                $paCollabRenderingMain = false;
+                if ($paCollabBufferStarted && ob_get_level() > 0) @ob_end_clean();
+                echo cpms_pa_collab_app_error_html(
+                    '공무 협업툴을 여는 중 문제가 발생했습니다',
+                    '저장소 권한 또는 설정 파일을 확인해주세요. 자세한 내용은 진단 페이지에서 확인할 수 있습니다.'
+                );
+            }
         }
     }
   ?>

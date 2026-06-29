@@ -15,6 +15,13 @@ function cpms_pa_collab_safe_bool($value) {
     return $value ? '정상' : '확인 필요';
 }}
 
+if (!function_exists('cpms_pa_collab_safe_storage_state')) {
+function cpms_pa_collab_safe_storage_state($exists, $writable) {
+    if (!$exists) return '존재하지 않음 - 복구 필요';
+    if (!$writable) return '쓰기 불가 - 권한 확인 필요';
+    return '정상';
+}}
+
 if (!function_exists('cpms_pa_collab_safe_table_exists')) {
 function cpms_pa_collab_safe_table_exists($pdo, $tableName) {
     if (!$pdo) return false;
@@ -101,8 +108,8 @@ $files = array(
         <div><b>프로젝트 테이블</b></div><div><?php echo cpms_pa_collab_safe_h(cpms_pa_collab_safe_bool(cpms_pa_collab_safe_table_exists($pdo, 'cpms_projects'))); ?></div>
         <div><b>직원 테이블</b></div><div><?php echo cpms_pa_collab_safe_h(cpms_pa_collab_safe_bool(cpms_pa_collab_safe_table_exists($pdo, 'employees'))); ?></div>
         <div><b>storage 경로</b></div><div><?php echo cpms_pa_collab_safe_h($storageRoot); ?></div>
-        <div><b>storage 존재/쓰기</b></div><div><?php echo cpms_pa_collab_safe_h(cpms_pa_collab_safe_bool(is_dir($storageRoot)) . ' / ' . cpms_pa_collab_safe_bool(is_dir($storageRoot) && is_writable($storageRoot))); ?></div>
-        <div><b>협업툴 storage 존재/쓰기</b></div><div><?php echo cpms_pa_collab_safe_h(cpms_pa_collab_safe_bool(is_dir($collabStorage)) . ' / ' . cpms_pa_collab_safe_bool(is_dir($collabStorage) && is_writable($collabStorage))); ?></div>
+        <div><b>storage 상태</b></div><div><?php echo cpms_pa_collab_safe_h(cpms_pa_collab_safe_storage_state(is_dir($storageRoot), is_dir($storageRoot) && is_writable($storageRoot))); ?></div>
+        <div><b>협업툴 storage 상태</b></div><div><?php echo cpms_pa_collab_safe_h(cpms_pa_collab_safe_storage_state(is_dir($collabStorage), is_dir($collabStorage) && is_writable($collabStorage))); ?></div>
         <div><b>tasks.json</b></div><div><?php echo cpms_pa_collab_safe_h(cpms_pa_collab_safe_bool(is_file($collabStorage . '/tasks.json'))); ?></div>
         <div><b>settings.json</b></div><div><?php echo cpms_pa_collab_safe_h(cpms_pa_collab_safe_bool(is_file($collabStorage . '/settings.json'))); ?></div>
         <?php foreach ($files as $label => $path): ?>
@@ -110,6 +117,7 @@ $files = array(
         <?php endforeach; ?>
       </div>
       <div class="actions">
+        <a class="btn primary" href="?r=public_affairs_collab_repair" target="_blank">저장소 복구 실행</a>
         <a class="btn primary" href="?r=public_affairs_collab">일반 모드로 열기</a>
         <a class="btn" href="?r=public_affairs_collab_debug" target="_blank">진단 페이지 열기</a>
         <a class="btn" href="?r=공무">공무 화면으로 돌아가기</a>

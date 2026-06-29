@@ -70,8 +70,115 @@ function cpms_public_affairs_collab_write_json($path, $data) {
     return (@file_put_contents($path, $json, LOCK_EX) !== false);
 }}
 
+if (!function_exists('cpms_public_affairs_collab_bootstrap_result')) {
+function cpms_public_affairs_collab_bootstrap_result() {
+    return isset($GLOBALS['cpms_public_affairs_collab_bootstrap_result']) && is_array($GLOBALS['cpms_public_affairs_collab_bootstrap_result'])
+        ? $GLOBALS['cpms_public_affairs_collab_bootstrap_result']
+        : array('ok' => false, 'message' => '초기화가 실행되지 않았습니다.');
+}}
+
+if (!function_exists('cpms_public_affairs_collab_bootstrap_storage')) {
+function cpms_public_affairs_collab_bootstrap_storage($create = true) {
+    $create = (bool)$create;
+    $root = function_exists('cpms_storage_root') ? cpms_storage_root() : dirname(dirname(__DIR__)) . '/storage';
+    $collabRoot = cpms_public_affairs_collab_root_dir();
+    $result = array(
+        'ok' => false,
+        'message' => '',
+        'storage_root' => $root,
+        'storage_root_exists' => is_dir($root) ? 1 : 0,
+        'storage_root_writable' => (is_dir($root) && is_writable($root)) ? 1 : 0,
+        'collab_root' => $collabRoot,
+        'collab_root_exists' => is_dir($collabRoot) ? 1 : 0,
+        'collab_root_writable' => (is_dir($collabRoot) && is_writable($collabRoot)) ? 1 : 0,
+        'created' => array(),
+    );
+
+    if (!is_dir($root)) {
+        if (!$create || !cpms_ensure_dir($root)) {
+            $result['message'] = 'storage root 폴더를 만들 수 없습니다.';
+            $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+            return $result;
+        }
+    }
+    $result['storage_root_exists'] = is_dir($root) ? 1 : 0;
+    $result['storage_root_writable'] = (is_dir($root) && is_writable($root)) ? 1 : 0;
+    if (!$result['storage_root_exists'] || !$result['storage_root_writable']) {
+        $result['message'] = 'storage root 폴더 쓰기 권한을 확인해주세요.';
+        $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+        return $result;
+    }
+
+    if (!is_dir($collabRoot)) {
+        if (!$create) {
+            $result['message'] = '공무 협업툴 storage 폴더가 없습니다. repair 라우트를 실행해주세요.';
+            $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+            return $result;
+        }
+        if (!cpms_ensure_dir($collabRoot)) {
+            $result['message'] = '공무 협업툴 storage 폴더를 만들 수 없습니다.';
+            $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+            return $result;
+        }
+    }
+    $result['collab_root_exists'] = is_dir($collabRoot) ? 1 : 0;
+    $result['collab_root_writable'] = (is_dir($collabRoot) && is_writable($collabRoot)) ? 1 : 0;
+    if (!$result['collab_root_exists'] || !$result['collab_root_writable']) {
+        $result['message'] = '공무 협업툴 storage 폴더 쓰기 권한을 확인해주세요.';
+        $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+        return $result;
+    }
+
+    $storeNames = array('tasks', 'comments', 'attachments', 'history', 'collab_project_meta', 'project_activity');
+    foreach ($storeNames as $storeName) {
+        $path = cpms_public_affairs_collab_store_path($storeName);
+        if (!is_file($path)) {
+            if (!$create) {
+                $result['message'] = $storeName . '.json 파일이 없습니다. repair 라우트를 실행해주세요.';
+                $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+                return $result;
+            }
+            $ok = cpms_public_affairs_collab_write_json($path, array('last_id' => 0, 'items' => array()));
+            $result['created'][$storeName . '.json'] = $ok ? 1 : 0;
+            if (!$ok) {
+                $result['message'] = $storeName . '.json 파일을 만들 수 없습니다.';
+                $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+                return $result;
+            }
+        } else {
+            $result['created'][$storeName . '.json'] = 0;
+        }
+    }
+
+    $settingsPath = cpms_public_affairs_collab_store_path('settings');
+    if (!is_file($settingsPath)) {
+        if (!$create) {
+            $result['message'] = 'settings.json 파일이 없습니다. repair 라우트를 실행해주세요.';
+            $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+            return $result;
+        }
+        $settings = cpms_public_affairs_collab_default_settings();
+        $settings['updated_at'] = date('Y-m-d H:i:s');
+        $ok = cpms_public_affairs_collab_write_json($settingsPath, $settings);
+        $result['created']['settings.json'] = $ok ? 1 : 0;
+        if (!$ok) {
+            $result['message'] = 'settings.json 파일을 만들 수 없습니다.';
+            $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+            return $result;
+        }
+    } else {
+        $result['created']['settings.json'] = 0;
+    }
+
+    $result['ok'] = true;
+    $result['message'] = 'OK';
+    $GLOBALS['cpms_public_affairs_collab_bootstrap_result'] = $result;
+    return $result;
+}}
+
 if (!function_exists('cpms_public_affairs_collab_load_store')) {
 function cpms_public_affairs_collab_load_store($name) {
+    cpms_public_affairs_collab_bootstrap_storage(true);
     $path = cpms_public_affairs_collab_store_path($name);
     $store = cpms_public_affairs_collab_read_json($path, array());
     if ((string)$name === 'attachments' && !is_file($path)) {
@@ -112,6 +219,7 @@ function cpms_public_affairs_collab_normalize_setting_list($value, $fallback) {
 
 if (!function_exists('cpms_public_affairs_collab_settings')) {
 function cpms_public_affairs_collab_settings() {
+    cpms_public_affairs_collab_bootstrap_storage(true);
     $defaults = cpms_public_affairs_collab_default_settings();
     $stored = cpms_public_affairs_collab_read_json(cpms_public_affairs_collab_store_path('settings'), array());
     $settings = array();
