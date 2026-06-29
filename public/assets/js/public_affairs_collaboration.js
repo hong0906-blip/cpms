@@ -510,6 +510,7 @@
   var appOpeners = document.querySelectorAll('[data-pa-collab-open]');
   for (var o = 0; o < appOpeners.length; o++) {
     appOpeners[o].onclick = function(ev){
+      if (!getAppModal()) return true;
       if (ev && ev.preventDefault) ev.preventDefault();
       openAppModal(true);
       return false;
