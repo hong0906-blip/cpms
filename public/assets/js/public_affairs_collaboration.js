@@ -305,7 +305,10 @@
   }
 
   function renderDetail(payload) {
-    if (!payload || !payload.task || !appModal) return;
+    if (!payload || !payload.task || !appModal) {
+      renderMissingDetail('업무를 찾을 수 없습니다.');
+      return;
+    }
     var task = payload.task;
     var canEdit = payload.can_edit === undefined ? true : !!payload.can_edit;
     var comments = payload.comments || [];
@@ -362,6 +365,14 @@
     markSelectedCard(task.id);
   }
 
+  function renderMissingDetail(message) {
+    if (!appModal) return;
+    var old = appModal.querySelector('.pa-detail-panel');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    var html = '<aside class="pa-detail-panel"><div class="pa-detail-head"><div><div class="pa-title" style="font-size:21px;">공무 협업툴 업무 상세</div><div class="pa-muted">업무를 불러오지 못했습니다.</div></div><button type="button" class="pa-btn" data-pa-detail-close>닫기</button></div><div class="pa-detail-body"><div class="pa-panel-card"><div class="pa-panel-title">안내</div><p class="pa-muted">' + escapeHtml(message || '업무를 찾을 수 없습니다.') + '</p><div style="display:flex;gap:8px;flex-wrap:wrap;"><a class="pa-btn" href="?r=public_affairs_collab&safe=1">안전 모드</a><a class="pa-btn" href="?r=public_affairs_collab_trace" target="_blank" rel="noopener">trace</a><a class="pa-btn" href="?r=public_affairs_collab_debug" target="_blank" rel="noopener">debug</a></div></div></div></aside>';
+    appModal.querySelector('.pa-collab-shell').insertAdjacentHTML('beforeend', html);
+  }
+
   function markSelectedCard(taskId) {
     var cards = appModal ? appModal.querySelectorAll('.pa-card') : [];
     for (var i = 0; i < cards.length; i++) removeClass(cards[i], 'is-selected');
@@ -374,6 +385,7 @@
     actionRequest('detail', taskId, null, function(json){
       if (!json.ok) {
         showNotice(json.message, false);
+        renderMissingDetail(json.message);
         return;
       }
       renderDetail(json);
@@ -627,6 +639,15 @@
       if (id) {
         ev.preventDefault();
         loadDetail(id);
+        return false;
+      }
+    }
+    var listRow = closest(target, '[data-pa-list-task-id]');
+    if (listRow && appModal && hasClass(appModal, 'is-open')) {
+      var rowId = parseInt(listRow.getAttribute('data-pa-list-task-id'), 10);
+      if (rowId) {
+        ev.preventDefault();
+        loadDetail(rowId);
         return false;
       }
     }

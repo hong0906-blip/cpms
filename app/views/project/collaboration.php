@@ -885,15 +885,49 @@ body.pa-collab-open{overflow:hidden}
             <?php endif; ?>
           </section>
         <?php elseif ($section === 'files'): ?>
-          <section class="pa-table-wrap"><table class="pa-table"><thead><tr><th>업무번호</th><th>파일명</th><th>업로드자</th><th>업로드일시</th><th>크기</th><th>다운로드</th></tr></thead><tbody>
-            <?php $fileShown = 0; foreach ($selectedProjectTasks as $task): foreach (cpms_public_affairs_collab_files(isset($task['id']) ? (int)$task['id'] : 0) as $file): $fileShown++; ?><tr><td><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></td><td><?php echo h(isset($file['original_name']) ? $file['original_name'] : 'file'); ?></td><td><?php echo h(isset($file['uploaded_by_name']) ? $file['uploaded_by_name'] : '-'); ?></td><td><?php echo h(isset($file['uploaded_at']) ? $file['uploaded_at'] : '-'); ?></td><td><?php echo h(pa_file_size(isset($file['file_size']) ? $file['file_size'] : 0)); ?></td><td><a class="pa-btn" href="?r=project/collaboration_file&id=<?php echo (int)$file['id']; ?>">다운로드</a></td></tr><?php endforeach; endforeach; ?>
-            <?php if ($fileShown === 0): ?><tr><td colspan="6" class="pa-muted">프로젝트 파일이 없습니다.</td></tr><?php endif; ?>
-          </tbody></table></section>
+          <section class="pa-panel-card">
+            <div class="pa-panel-title">Files</div>
+            <form method="get" action="" class="pa-filter-grid" style="margin-bottom:12px;">
+              <input type="hidden" name="r" value="public_affairs_collab">
+              <input type="hidden" name="tab" value="collaboration">
+              <input type="hidden" name="space_project_id" value="<?php echo (int)$spaceProjectId; ?>">
+              <input type="hidden" name="section" value="files">
+              <input class="pa-field" name="file_keyword" value="<?php echo h(isset($_GET['file_keyword']) ? (string)$_GET['file_keyword'] : ''); ?>" placeholder="파일명 또는 업무번호 검색">
+              <button type="submit" class="pa-btn pa-btn-dark">파일 검색</button>
+            </form>
+            <div class="pa-table-wrap"><table class="pa-table"><thead><tr><th>업무번호</th><th>업무 제목</th><th>파일명</th><th>업로드자</th><th>업로드일시</th><th>크기</th><th>다운로드</th></tr></thead><tbody>
+              <?php
+                $fileShown = 0;
+                $fileKeyword = isset($_GET['file_keyword']) ? pa_collab_lower_safe(trim((string)$_GET['file_keyword'])) : '';
+                foreach ($selectedProjectTasks as $task):
+                  $taskNo = cpms_public_affairs_collab_task_no($task);
+                  $taskTitle = isset($task['title']) ? (string)$task['title'] : '-';
+                  foreach (cpms_public_affairs_collab_files(isset($task['id']) ? (int)$task['id'] : 0) as $file):
+                    $fileName = isset($file['original_name']) ? (string)$file['original_name'] : 'file';
+                    if ($fileKeyword !== '') {
+                        $fileHaystack = pa_collab_lower_safe($taskNo . ' ' . $taskTitle . ' ' . $fileName);
+                        if (strpos($fileHaystack, $fileKeyword) === false) continue;
+                    }
+                    $fileShown++;
+              ?>
+                <tr>
+                  <td><a data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h($taskNo); ?></b></a></td>
+                  <td><?php echo h($taskTitle); ?></td>
+                  <td><?php echo h($fileName); ?></td>
+                  <td><?php echo h(isset($file['uploaded_by_name']) ? $file['uploaded_by_name'] : '-'); ?></td>
+                  <td><?php echo h(isset($file['uploaded_at']) ? $file['uploaded_at'] : '-'); ?></td>
+                  <td><?php echo h(pa_file_size(isset($file['file_size']) ? $file['file_size'] : 0)); ?></td>
+                  <td><a class="pa-btn" href="?r=project/collaboration_file&id=<?php echo (int)$file['id']; ?>">다운로드</a></td>
+                </tr>
+              <?php endforeach; endforeach; ?>
+              <?php if ($fileShown === 0): ?><tr><td colspan="7" class="pa-muted">첨부된 파일이 없습니다. 업무 상세에서 파일을 첨부할 수 있습니다.</td></tr><?php endif; ?>
+            </tbody></table></div>
+          </section>
         <?php elseif ($section === 'activity'): ?>
           <section class="pa-panel-card">
             <div class="pa-panel-title">Activity</div>
             <?php if (count($selectedProjectActivities) === 0): ?><div class="pa-muted">프로젝트 활동이 없습니다.</div><?php endif; ?>
-            <?php foreach ($selectedProjectActivities as $activity): ?><div class="pa-history"><b><?php echo h(isset($activity['action']) ? $activity['action'] : '-'); ?></b><div class="pa-muted"><?php echo h(isset($activity['actor_name']) ? $activity['actor_name'] : '-'); ?> · <?php echo h(isset($activity['created_at']) ? $activity['created_at'] : ''); ?></div><div><?php echo h(isset($activity['message']) ? $activity['message'] : ''); ?></div></div><?php endforeach; ?>
+            <?php foreach ($selectedProjectActivities as $activity): ?><div class="pa-history"><b><?php echo h(isset($activity['action']) ? $activity['action'] : '-'); ?></b><div class="pa-muted"><?php echo h(isset($activity['actor_name']) ? $activity['actor_name'] : '-'); ?> · <?php echo h(isset($activity['created_at']) ? $activity['created_at'] : ''); ?></div><?php if (isset($activity['task_id']) && (int)$activity['task_id'] > 0): ?><a data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => (int)$activity['task_id']))); ?>"><?php echo h(isset($activity['task_no']) ? $activity['task_no'] : '업무 보기'); ?></a><?php endif; ?><div><?php echo h(isset($activity['message']) ? $activity['message'] : ''); ?></div></div><?php endforeach; ?>
           </section>
         <?php elseif ($section === 'reports'): ?>
           <section class="pa-summary-grid">

@@ -141,6 +141,10 @@ function cpms_public_affairs_collab_bootstrap_storage($create = true) {
         return $result;
     }
 
+    if ($create) {
+        cpms_ensure_dir($collabRoot . '/files');
+    }
+
     $storeNames = array('tasks', 'comments', 'attachments', 'history', 'collab_project_meta', 'project_activity');
     foreach ($storeNames as $storeName) {
         $path = cpms_public_affairs_collab_store_path($storeName);
@@ -411,14 +415,18 @@ function cpms_public_affairs_collab_is_draft_project($project, $metaStore) {
 }}
 
 if (!function_exists('cpms_public_affairs_collab_add_project_activity')) {
-function cpms_public_affairs_collab_add_project_activity($projectId, $action, $field, $oldValue, $newValue, $message, $actor) {
+function cpms_public_affairs_collab_add_project_activity($projectId, $action, $field, $oldValue, $newValue, $message, $actor, $taskId = 0) {
     // 공무 협업툴 프로젝트 Activity: 가제 프로젝트 생성/전환 같은 Space 변경 이력을 별도 JSON에 남긴다.
     $store = cpms_public_affairs_collab_load_store('project_activity');
     $nextId = (int)$store['last_id'] + 1;
     $store['last_id'] = $nextId;
+    $taskId = (int)$taskId;
+    $activityTask = $taskId > 0 ? cpms_public_affairs_collab_find_task($taskId) : null;
     $store['items'][] = array(
         'id' => $nextId,
         'project_id' => (int)$projectId,
+        'task_id' => $taskId,
+        'task_no' => $taskId > 0 ? cpms_public_affairs_collab_task_no($activityTask) : '',
         'action' => (string)$action,
         'field' => (string)$field,
         'old_value' => is_array($oldValue) ? implode(', ', $oldValue) : (string)$oldValue,
@@ -438,13 +446,19 @@ function cpms_public_affairs_collab_project_activities($projectId, $limit) {
     if ($limit <= 0) $limit = 50;
     $store = cpms_public_affairs_collab_load_store('project_activity');
     $rows = array();
+    $activityKeys = array();
     foreach ($store['items'] as $row) {
-        if (is_array($row) && isset($row['project_id']) && (int)$row['project_id'] === $projectId) $rows[] = $row;
+        if (!is_array($row) || !isset($row['project_id']) || (int)$row['project_id'] !== $projectId) continue;
+        $rows[] = $row;
+        $key = (isset($row['action']) ? (string)$row['action'] : '') . '|' . (isset($row['field']) ? (string)$row['field'] : '') . '|' . (isset($row['actor_name']) ? (string)$row['actor_name'] : '') . '|' . (isset($row['created_at']) ? (string)$row['created_at'] : '');
+        if (isset($row['task_id']) && (int)$row['task_id'] > 0) $activityKeys[$key] = true;
     }
     $historyStore = cpms_public_affairs_collab_load_store('history');
     $historyItems = isset($historyStore['items']) && is_array($historyStore['items']) ? $historyStore['items'] : array();
     foreach ($historyItems as $row) {
         if (!is_array($row) || !isset($row['project_id']) || (int)$row['project_id'] !== $projectId) continue;
+        $key = (isset($row['action']) ? (string)$row['action'] : '') . '|' . (isset($row['field']) ? (string)$row['field'] : '') . '|' . (isset($row['actor_name']) ? (string)$row['actor_name'] : '') . '|' . (isset($row['created_at']) ? (string)$row['created_at'] : '');
+        if (isset($activityKeys[$key])) continue;
         $row['message'] = (isset($row['task_no']) ? $row['task_no'] . ' ' : '') . (isset($row['message']) ? $row['message'] : '');
         $rows[] = $row;
     }
@@ -1400,7 +1414,7 @@ function cpms_public_affairs_collab_create_task($pdo, $post, $files, $actor, $pr
         return array('ok' => false, 'message' => '업무 저장에 실패했습니다. storage 쓰기 권한을 확인해주세요.', 'task_id' => 0);
     }
     cpms_public_affairs_collab_add_history($taskId, $projectId, '업무 생성', 'task', '', $title, '공무 협업툴 업무가 생성되었습니다.', $actor);
-    cpms_public_affairs_collab_add_project_activity($projectId, '업무 생성', 'task', '', $taskNo . ' ' . $title, '공무 협업툴 업무카드가 생성되었습니다.', $actor);
+    cpms_public_affairs_collab_add_project_activity($projectId, '업무 생성', 'task', '', $taskNo . ' ' . $title, '공무 협업툴 업무카드가 생성되었습니다.', $actor, $taskId);
     cpms_public_affairs_collab_save_uploaded_files($task, isset($files['attachments']) ? $files['attachments'] : null, $actor);
     return array('ok' => true, 'message' => '업무가 등록되었습니다.', 'task_id' => $taskId, 'task_no' => $taskNo, 'task' => cpms_public_affairs_collab_normalize_task($task));
 }}
@@ -1496,7 +1510,11 @@ function cpms_public_affairs_collab_update_task($taskId, $post, $actor, $project
             $changes[] = array('상태 변경', 'status', $oldStatus, $new);
             $task['status'] = $new;
             if ($new === '완료') $task['completed_at'] = $now;
-            if ($oldStatus === '완료' && $new !== '완료') $task['completed_at'] = '';
+            if ($oldStatus === '완료' && $new !== '완료') {
+                $oldCompletedAt = isset($task['completed_at']) ? (string)$task['completed_at'] : '';
+                $task['completed_at'] = '';
+                $changes[] = array('완료 취소', 'completed_at', $oldCompletedAt, '');
+            }
             if ($new === '반려') $task['rejected_at'] = $now;
             if ($new === '보류') $task['held_at'] = $now;
             if ($new === '완료') $changes[] = array('완료 처리', 'status_action', $oldStatus, $new);
@@ -1532,7 +1550,7 @@ function cpms_public_affairs_collab_update_task($taskId, $post, $actor, $project
     if (isset($post['due_time'])) {
         $newTime = cpms_public_affairs_collab_time($post['due_time']);
         if ($newTime !== (string)$task['due_time']) {
-            $changes[] = array('마감일 변경', 'due_time', $task['due_time'], $newTime);
+            $changes[] = array('마감시간 변경', 'due_time', $task['due_time'], $newTime);
             $task['due_time'] = $newTime;
         }
     }
@@ -1573,7 +1591,11 @@ function cpms_public_affairs_collab_update_task($taskId, $post, $actor, $project
     if (!cpms_public_affairs_collab_save_store('tasks', $store)) return array('ok' => false, 'message' => '업무 수정 저장에 실패했습니다.');
     foreach ($changes as $change) {
         cpms_public_affairs_collab_add_history($taskId, isset($task['project_id']) ? (int)$task['project_id'] : 0, $change[0], $change[1], $change[2], $change[3], $change[0] . '이 기록되었습니다.', $actor);
-        cpms_public_affairs_collab_add_project_activity(isset($task['project_id']) ? (int)$task['project_id'] : 0, $change[0], $change[1], $change[2], $change[3], cpms_public_affairs_collab_task_no($task) . ' ' . $change[0] . '이 기록되었습니다.', $actor);
+        $activityAction = $change[0];
+        if ($change[0] === '완료 처리') $activityAction = '업무 완료';
+        if ($change[0] === '보류 처리') $activityAction = '업무 보류';
+        if ($change[0] === '반려 처리') $activityAction = '업무 반려';
+        cpms_public_affairs_collab_add_project_activity(isset($task['project_id']) ? (int)$task['project_id'] : 0, $activityAction, $change[1], $change[2], $change[3], cpms_public_affairs_collab_task_no($task) . ' ' . $activityAction . '이 기록되었습니다.', $actor, $taskId);
     }
     return array('ok' => true, 'message' => '업무가 수정되었습니다.', 'task_id' => $taskId, 'task' => cpms_public_affairs_collab_normalize_task($task));
 }}
@@ -1584,7 +1606,9 @@ function cpms_public_affairs_collab_comments($taskId) {
     $store = cpms_public_affairs_collab_load_store('comments');
     $rows = array();
     foreach ($store['items'] as $row) {
-        if (is_array($row) && isset($row['task_id']) && (int)$row['task_id'] === $taskId) $rows[] = $row;
+        if (!is_array($row) || !isset($row['task_id']) || (int)$row['task_id'] !== $taskId) continue;
+        if (isset($row['deleted_at']) && trim((string)$row['deleted_at']) !== '') continue;
+        $rows[] = $row;
     }
     usort($rows, 'cpms_public_affairs_collab_sort_asc');
     return $rows;
@@ -1614,12 +1638,16 @@ function cpms_public_affairs_collab_add_comment($task, $content, $actor) {
         'mentions' => cpms_public_affairs_collab_mentions_from_text($content),
         'created_by_id' => is_array($actor) && isset($actor['id']) ? (int)$actor['id'] : 0,
         'created_by_name' => cpms_public_affairs_collab_actor_label($actor),
+        'created_by_email' => is_array($actor) && isset($actor['email']) ? (string)$actor['email'] : '',
         'created_at' => date('Y-m-d H:i:s'),
+        'updated_at' => '',
+        'deleted_at' => '',
     );
     $store['items'][] = $comment;
     if (!cpms_public_affairs_collab_save_store('comments', $store)) return array('ok' => false, 'message' => '댓글 저장에 실패했습니다.');
     cpms_public_affairs_collab_add_history((int)$task['id'], isset($task['project_id']) ? (int)$task['project_id'] : 0, '댓글 등록', 'comment', '', $content, '댓글이 등록되었습니다.', $actor);
-    cpms_public_affairs_collab_add_project_activity(isset($task['project_id']) ? (int)$task['project_id'] : 0, '댓글 등록', 'comment', '', cpms_public_affairs_collab_task_no($task), '업무카드에 댓글이 등록되었습니다.', $actor);
+    cpms_public_affairs_collab_add_project_activity(isset($task['project_id']) ? (int)$task['project_id'] : 0, '댓글 등록', 'comment', '', cpms_public_affairs_collab_task_no($task), '업무카드에 댓글이 등록되었습니다.', $actor, (int)$task['id']);
+    cpms_public_affairs_collab_sync_task_counts((int)$task['id']);
     return array('ok' => true, 'message' => '댓글이 등록되었습니다.', 'comment' => $comment);
 }}
 
@@ -1629,7 +1657,9 @@ function cpms_public_affairs_collab_files($taskId) {
     $store = cpms_public_affairs_collab_load_store('attachments');
     $rows = array();
     foreach ($store['items'] as $row) {
-        if (is_array($row) && isset($row['task_id']) && (int)$row['task_id'] === $taskId) $rows[] = $row;
+        if (!is_array($row) || !isset($row['task_id']) || (int)$row['task_id'] !== $taskId) continue;
+        if (isset($row['deleted_at']) && trim((string)$row['deleted_at']) !== '') continue;
+        $rows[] = $row;
     }
     usort($rows, 'cpms_public_affairs_collab_sort_asc');
     return $rows;
@@ -1643,7 +1673,7 @@ function cpms_public_affairs_collab_history($taskId) {
     foreach ($store['items'] as $row) {
         if (is_array($row) && isset($row['task_id']) && (int)$row['task_id'] === $taskId) $rows[] = $row;
     }
-    usort($rows, 'cpms_public_affairs_collab_sort_asc');
+    usort($rows, 'cpms_public_affairs_collab_sort_created_desc');
     return $rows;
 }}
 
@@ -1655,6 +1685,7 @@ function cpms_public_affairs_collab_count_by_task($storeName) {
     $items = isset($store['items']) && is_array($store['items']) ? $store['items'] : array();
     foreach ($items as $row) {
         if (!is_array($row) || !isset($row['task_id'])) continue;
+        if (isset($row['deleted_at']) && trim((string)$row['deleted_at']) !== '') continue;
         $taskId = (int)$row['task_id'];
         if ($taskId <= 0) continue;
         if (!isset($counts[$taskId])) $counts[$taskId] = 0;
@@ -1677,6 +1708,33 @@ function cpms_public_affairs_collab_count_for_task($counts, $taskId, $key) {
     $taskId = (int)$taskId;
     if (!is_array($counts) || !isset($counts[$key]) || !is_array($counts[$key])) return 0;
     return isset($counts[$key][$taskId]) ? (int)$counts[$key][$taskId] : 0;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_sync_task_counts')) {
+function cpms_public_affairs_collab_sync_task_counts($taskId) {
+    // 공무 협업툴 상세패널: 댓글/첨부 저장 뒤 업무카드 JSON의 집계 필드를 실제 저장소 기준으로 맞춘다.
+    $taskId = (int)$taskId;
+    if ($taskId <= 0) return false;
+    $counts = cpms_public_affairs_collab_task_counts();
+    $commentCount = cpms_public_affairs_collab_count_for_task($counts, $taskId, 'comments');
+    $fileCount = cpms_public_affairs_collab_count_for_task($counts, $taskId, 'files');
+    $store = cpms_public_affairs_collab_load_store('tasks');
+    if (!isset($store['items']) || !is_array($store['items'])) return false;
+    $changed = false;
+    for ($i = 0; $i < count($store['items']); $i++) {
+        if (!is_array($store['items'][$i]) || !isset($store['items'][$i]['id']) || (int)$store['items'][$i]['id'] !== $taskId) continue;
+        if (!isset($store['items'][$i]['comment_count']) || (int)$store['items'][$i]['comment_count'] !== $commentCount) {
+            $store['items'][$i]['comment_count'] = $commentCount;
+            $changed = true;
+        }
+        if (!isset($store['items'][$i]['file_count']) || (int)$store['items'][$i]['file_count'] !== $fileCount) {
+            $store['items'][$i]['file_count'] = $fileCount;
+            $changed = true;
+        }
+        break;
+    }
+    if (!$changed) return true;
+    return cpms_public_affairs_collab_save_store('tasks', $store);
 }}
 
 if (!function_exists('cpms_public_affairs_collab_task_payload')) {
@@ -1704,7 +1762,11 @@ function cpms_public_affairs_collab_find_file($fileId) {
     $fileId = (int)$fileId;
     $store = cpms_public_affairs_collab_load_store('attachments');
     foreach ($store['items'] as $row) {
-        if (is_array($row) && isset($row['id']) && (int)$row['id'] === $fileId) return $row;
+        if (!is_array($row) || !isset($row['id']) || (int)$row['id'] !== $fileId) continue;
+        if (isset($row['deleted_at']) && trim((string)$row['deleted_at']) !== '') return null;
+        if (!isset($row['file_path']) && isset($row['stored_path'])) $row['file_path'] = $row['stored_path'];
+        if (!isset($row['stored_path']) && isset($row['file_path'])) $row['stored_path'] = $row['file_path'];
+        return $row;
     }
     return null;
 }}
@@ -1724,12 +1786,14 @@ function cpms_public_affairs_collab_save_uploaded_files($task, $files, $actor) {
     $taskNo = cpms_public_affairs_collab_task_no($task);
     $safeTaskNo = preg_replace('/[^A-Za-z0-9_\\-]/', '', $taskNo);
     if ($safeTaskNo === '') $safeTaskNo = 'TASK-' . $taskId;
-    $targetDir = cpms_public_affairs_collab_root_dir() . '/uploads/' . $safeTaskNo;
+    $targetDir = cpms_public_affairs_collab_root_dir() . '/files/' . $safeTaskNo;
     if (!cpms_ensure_dir($targetDir)) return $saved;
-    $allowed = array('pdf'=>true,'hwp'=>true,'hwpx'=>true,'doc'=>true,'docx'=>true,'xls'=>true,'xlsx'=>true,'ppt'=>true,'pptx'=>true,'jpg'=>true,'jpeg'=>true,'png'=>true,'gif'=>true,'zip'=>true,'txt'=>true);
+    $blocked = array('php'=>true,'phtml'=>true,'phar'=>true,'exe'=>true,'bat'=>true,'cmd'=>true,'sh'=>true,'js'=>true,'html'=>true,'htm'=>true);
+    $allowed = array('pdf'=>true,'doc'=>true,'docx'=>true,'xls'=>true,'xlsx'=>true,'ppt'=>true,'pptx'=>true,'jpg'=>true,'jpeg'=>true,'png'=>true,'gif'=>true,'zip'=>true,'txt'=>true);
     $store = cpms_public_affairs_collab_load_store('attachments');
     for ($i = 0; $i < count($names); $i++) {
         $originalName = isset($names[$i]) ? trim((string)$names[$i]) : '';
+        $originalName = basename(str_replace('\\', '/', $originalName));
         $tmpName = isset($tmpNames[$i]) ? (string)$tmpNames[$i] : '';
         $errorCode = isset($errors[$i]) ? (int)$errors[$i] : UPLOAD_ERR_NO_FILE;
         $size = isset($sizes[$i]) ? (int)$sizes[$i] : 0;
@@ -1737,7 +1801,7 @@ function cpms_public_affairs_collab_save_uploaded_files($task, $files, $actor) {
         if ($size <= 0 || $size > (50 * 1024 * 1024)) continue;
         if (!is_uploaded_file($tmpName)) continue;
         $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-        if ($ext === '' || !isset($allowed[$ext])) continue;
+        if ($ext === '' || isset($blocked[$ext]) || !isset($allowed[$ext])) continue;
         $storedName = 'pa_collab_' . $projectId . '_' . $taskId . '_' . date('Ymd_His') . '_' . substr(md5(uniqid('', true) . $originalName), 0, 10) . '.' . $ext;
         $storedPath = rtrim($targetDir, '/\\') . '/' . $storedName;
         if (!@move_uploaded_file($tmpName, $storedPath)) continue;
@@ -1751,18 +1815,21 @@ function cpms_public_affairs_collab_save_uploaded_files($task, $files, $actor) {
             'original_name' => $originalName,
             'stored_name' => $storedName,
             'stored_path' => $storedPath,
+            'file_path' => $storedPath,
             'file_size' => $size,
             'mime_type' => isset($types[$i]) ? (string)$types[$i] : '',
             'uploaded_by_id' => is_array($actor) && isset($actor['id']) ? (int)$actor['id'] : 0,
             'uploaded_by_name' => cpms_public_affairs_collab_actor_label($actor),
             'uploaded_at' => date('Y-m-d H:i:s'),
+            'deleted_at' => '',
         );
         $store['items'][] = $item;
         $saved[] = $item;
         cpms_public_affairs_collab_add_history($taskId, $projectId, '첨부파일 등록', 'attachment', '', $originalName, '첨부파일이 등록되었습니다.', $actor);
-        cpms_public_affairs_collab_add_project_activity($projectId, '첨부파일 등록', 'attachment', '', $taskNo . ' ' . $originalName, '업무카드에 첨부파일이 등록되었습니다.', $actor);
+        cpms_public_affairs_collab_add_project_activity($projectId, '첨부파일 등록', 'attachment', '', $taskNo . ' ' . $originalName, '업무카드에 첨부파일이 등록되었습니다.', $actor, $taskId);
     }
-    cpms_public_affairs_collab_save_store('attachments', $store);
+    if (count($saved) > 0 && !cpms_public_affairs_collab_save_store('attachments', $store)) return array();
+    if (count($saved) > 0) cpms_public_affairs_collab_sync_task_counts($taskId);
     return $saved;
 }}
 

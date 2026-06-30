@@ -26,7 +26,8 @@ function cpms_public_affairs_collab_action_json($ok, $message, $extra) {
         'message' => (string)$message,
     ), $extra);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE);
+    $flags = function_exists('cpms_public_affairs_collab_json_flags') ? cpms_public_affairs_collab_json_flags(false) : 0;
+    echo json_encode($payload, $flags);
     exit;
 }}
 
