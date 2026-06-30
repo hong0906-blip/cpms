@@ -196,6 +196,44 @@
     return bytes + 'B';
   }
 
+  function findTemplate(templateId) {
+    templateId = parseInt(templateId || 0, 10);
+    var templates = cfg.templates || [];
+    for (var i = 0; i < templates.length; i++) {
+      if (parseInt(templates[i].id || 0, 10) === templateId) return templates[i];
+    }
+    return null;
+  }
+
+  function replaceTemplateVars(text) {
+    var ctx = cfg.projectContext || {};
+    return String(text || '')
+      .replace(/\{\{project_name\}\}/g, ctx.project_name || '')
+      .replace(/\{\{today\}\}/g, ctx.today || '')
+      .replace(/\{\{client\}\}/g, ctx.client || '')
+      .replace(/\{\{contractor\}\}/g, ctx.contractor || '');
+  }
+
+  function dateFromDueDays(days) {
+    days = parseInt(days || 0, 10);
+    if (days <= 0) return '';
+    var d = new Date();
+    d.setDate(d.getDate() + days);
+    var yyyy = d.getFullYear();
+    var mm = String(d.getMonth() + 1);
+    var dd = String(d.getDate());
+    if (mm.length < 2) mm = '0' + mm;
+    if (dd.length < 2) dd = '0' + dd;
+    return yyyy + '-' + mm + '-' + dd;
+  }
+
+  function checklistText(task) {
+    var total = parseInt(task && task.checklist_total ? task.checklist_total : 0, 10);
+    var done = parseInt(task && task.checklist_done ? task.checklist_done : 0, 10);
+    if (total <= 0) return '';
+    return '체크 ' + done + '/' + total;
+  }
+
   function mentionHtml(text) {
     return escapeHtml(text || '').replace(/@([^\s@]+)/g, '<span class="pa-mention">@$1</span>');
   }
@@ -240,6 +278,7 @@
     if (parseInt(task.is_delayed || 0, 10)) html += '<span class="pa-badge pa-delayed">지연</span>';
     if (task.contract_impact && task.contract_impact !== '없음') html += '<span class="pa-badge pa-impact">계약 ' + escapeHtml(task.contract_impact) + '</span>';
     if (task.schedule_impact && task.schedule_impact !== '없음') html += '<span class="pa-badge pa-impact">공기 ' + escapeHtml(task.schedule_impact) + '</span>';
+    if (checklistText(task) !== '') html += '<span class="pa-badge pa-check-progress">' + escapeHtml(checklistText(task)) + '</span>';
     html += '<span class="pa-badge" data-pa-comment-count>댓글 ' + escapeHtml(task.comment_count || 0) + '</span><span class="pa-badge" data-pa-file-count>첨부 ' + escapeHtml(task.file_count || 0) + '</span></div>';
     if (canEdit) {
       html += '<form method="post" action="' + escapeHtml(actionUrl) + '" class="pa-card-select"><input type="hidden" name="_csrf" value="' + escapeHtml(cfg.csrf || '') + '"><input type="hidden" name="action" value="quick_update"><input type="hidden" name="task_id" value="' + escapeHtml(taskId) + '"><select name="status">' + optionHtml(cfg.statuses || [], task.status) + '</select><button type="submit">이동</button></form>';
@@ -277,6 +316,11 @@
     var task = payload.task;
     task.comment_count = task.comment_count || (payload.comments ? payload.comments.length : 0);
     task.file_count = task.file_count || (payload.files ? payload.files.length : 0);
+    if (payload.checklists) {
+      task.checklist_total = payload.checklists.length;
+      task.checklist_done = 0;
+      for (var p = 0; p < payload.checklists.length; p++) if (parseInt(payload.checklists[p].is_done || 0, 10)) task.checklist_done++;
+    }
     var canEdit = payload.can_edit === undefined ? true : !!payload.can_edit;
     var oldCard = appModal ? appModal.querySelector('.pa-card[data-pa-task-id="' + task.id + '"]') : null;
     var column = appModal ? appModal.querySelector('[data-pa-drop-status="' + cssEscape(task.status || '') + '"] .pa-column-body') : null;
@@ -314,6 +358,9 @@
     var comments = payload.comments || [];
     var files = payload.files || [];
     var history = payload.history || [];
+    var checklists = payload.checklists || [];
+    var checklistDone = 0;
+    for (var cl = 0; cl < checklists.length; cl++) if (parseInt(checklists[cl].is_done || 0, 10)) checklistDone++;
     var old = appModal.querySelector('.pa-detail-panel');
     if (old && old.parentNode) old.parentNode.removeChild(old);
     var refs = task.reference_employee_ids || [];
@@ -334,6 +381,8 @@
     }
     html += '</div><div class="pa-panel-card"><div class="pa-panel-title">속성</div><div class="pa-prop">';
     html += '<div class="pa-prop-row"><b>업무번호</b><span>' + escapeHtml(task.task_no || '-') + '</span></div>';
+    html += '<div class="pa-prop-row"><b>템플릿</b><span>' + escapeHtml(task.template_name || '-') + '</span></div>';
+    html += '<div class="pa-prop-row"><b>체크리스트</b><span>' + escapeHtml(checklistDone) + ' / ' + escapeHtml(checklists.length) + '</span></div>';
     html += '<div class="pa-prop-row"><b>담당자</b><span><select name="assignee_employee_id"' + disabled + ' class="pa-field">' + employeeOptions(task.assignee_employee_id, false) + '</select></span></div>';
     html += '<div class="pa-prop-row"><b>요청자</b><span>' + escapeHtml(task.requester_name || '-') + '</span></div>';
     html += '<div class="pa-prop-row"><b>참조자</b><span><select name="reference_employee_ids[]" multiple' + disabled + ' class="pa-field" style="min-height:82px;">' + employeeOptions(refs, true) + '</select></span></div>';
@@ -349,7 +398,17 @@
     html += '<div class="pa-prop-row"><b>공기 영향</b><span><select name="schedule_impact"' + disabled + ' class="pa-field">' + optionHtml(cfg.impactOptions || [], task.schedule_impact || '없음') + '</select></span></div>';
     html += '<div class="pa-prop-row"><b>생성일시</b><span>' + escapeHtml(task.created_at || '-') + '</span></div><div class="pa-prop-row"><b>수정일시</b><span>' + escapeHtml(task.updated_at || '-') + '</span></div><div class="pa-prop-row"><b>완료일시</b><span>' + escapeHtml(task.completed_at || '-') + '</span></div>';
     html += '</div></div></form>';
-    html += '<div class="pa-detail-grid" style="margin-top:14px;"><div><div class="pa-panel-card"><div class="pa-panel-title">' + escapeHtml(task.task_no || '-') + ' 댓글</div>';
+    html += '<div class="pa-detail-grid" style="margin-top:14px;"><div><div class="pa-panel-card"><div class="pa-panel-title">' + escapeHtml(task.task_no || '-') + ' 체크리스트 <span class="pa-muted">' + escapeHtml(checklistDone) + ' / ' + escapeHtml(checklists.length) + '</span></div>';
+    if (checklists.length === 0) html += '<div class="pa-muted">체크리스트가 없습니다. 필요하면 항목을 추가할 수 있습니다.</div>';
+    html += '<div class="pa-checklist">';
+    for (var ci = 0; ci < checklists.length; ci++) {
+      var item = checklists[ci] || {};
+      var nextDone = parseInt(item.is_done || 0, 10) ? '0' : '1';
+      html += '<form method="post" action="' + escapeHtml(actionUrl) + '" class="pa-checklist-item" data-pa-ajax-form><input type="hidden" name="_csrf" value="' + escapeHtml(cfg.csrf || '') + '"><input type="hidden" name="action" value="checklist_toggle"><input type="hidden" name="task_id" value="' + escapeHtml(task.id) + '"><input type="hidden" name="checklist_id" value="' + escapeHtml(item.id || 0) + '"><input type="hidden" name="is_done" value="' + nextDone + '"><button type="submit" class="pa-check-toggle"' + (canEdit ? '' : ' disabled') + '>' + (parseInt(item.is_done || 0, 10) ? '✓' : '') + '</button><span class="' + (parseInt(item.is_done || 0, 10) ? 'is-done' : '') + '">' + escapeHtml(item.title || '-') + '</span></form>';
+    }
+    html += '</div>';
+    if (canEdit) html += '<form method="post" action="' + escapeHtml(actionUrl) + '" class="pa-checklist-add" data-pa-ajax-form style="margin-top:10px;"><input type="hidden" name="_csrf" value="' + escapeHtml(cfg.csrf || '') + '"><input type="hidden" name="action" value="checklist_add"><input type="hidden" name="task_id" value="' + escapeHtml(task.id) + '"><input name="checklist_title" class="pa-field" placeholder="체크리스트 항목 추가"><button type="submit" class="pa-btn pa-btn-dark">추가</button></form>';
+    html += '</div><div class="pa-panel-card" style="margin-top:12px;"><div class="pa-panel-title">' + escapeHtml(task.task_no || '-') + ' 댓글</div>';
     html += '<form method="post" action="' + escapeHtml(actionUrl) + '" data-pa-ajax-form><input type="hidden" name="_csrf" value="' + escapeHtml(cfg.csrf || '') + '"><input type="hidden" name="action" value="comment"><input type="hidden" name="task_id" value="' + escapeHtml(task.id) + '"><textarea name="comment" rows="3" class="pa-field" placeholder="@담당자 확인 부탁드립니다."></textarea><div style="display:flex;justify-content:flex-end;margin-top:8px;"><button type="submit" class="pa-btn pa-btn-primary">댓글 등록</button></div></form>';
     if (comments.length === 0) html += '<div class="pa-muted" style="margin-top:10px;">댓글이 없습니다.</div>';
     for (var c = 0; c < comments.length; c++) html += '<div class="pa-comment"><b>' + escapeHtml(comments[c].created_by_name || '-') + '</b> <span class="pa-muted">' + escapeHtml(comments[c].created_at || '') + '</span><div style="white-space:pre-wrap;margin-top:5px;">' + mentionHtml(comments[c].content || '') + '</div></div>';
@@ -420,12 +479,43 @@
     return true;
   }
 
+  function setFormValue(form, name, value) {
+    if (!form || !form.elements || !form.elements[name]) return;
+    var el = form.elements[name];
+    if (el.length && el.tagName !== 'SELECT') {
+      for (var i = 0; i < el.length; i++) el[i].value = value;
+    } else {
+      el.value = value;
+    }
+  }
+
+  function applyTemplateToForm(selectEl) {
+    var template = findTemplate(selectEl ? selectEl.value : 0);
+    var form = closest(selectEl, 'form');
+    if (!template || !form) return;
+    setFormValue(form, 'task_type', template.task_type || '');
+    setFormValue(form, 'title', replaceTemplateVars(template.default_title || ''));
+    setFormValue(form, 'content', replaceTemplateVars(template.default_content || ''));
+    setFormValue(form, 'status', template.default_status || '할 일');
+    setFormValue(form, 'priority', template.default_priority || '보통');
+    setFormValue(form, 'contract_impact', template.default_contract_impact || '없음');
+    setFormValue(form, 'schedule_impact', template.default_schedule_impact || '없음');
+    setFormValue(form, 'due_date', dateFromDueDays(template.default_due_days || 0));
+  }
+
   function handleAjaxResult(json, form) {
     showNotice(json.message, !!json.ok);
     if (!json.ok) return;
     if (json.redirect_url && form && form.elements && form.elements['action'] && form.elements['action'].value === 'project_create') {
       window.location.href = json.redirect_url + hashValue;
       return;
+    }
+    if (json.redirect_url && form && form.elements && form.elements['action']) {
+      var reloadActions = {'saved_view_create':1,'saved_view_delete':1,'template_toggle':1,'template_reset':1,'settings':1};
+      if (reloadActions[form.elements['action'].value]) {
+        window.location.href = json.redirect_url + hashValue;
+        return;
+      }
     }
     if (json.task) {
       addOrUpdateCard(json);
@@ -659,6 +749,13 @@
       filterCurrentDom('');
       ev.preventDefault();
       return false;
+    }
+  });
+
+  bindEvent(document, 'change', function(ev){
+    var target = ev.target || ev.srcElement;
+    if (closest(target, '[data-pa-template-select]')) {
+      applyTemplateToForm(closest(target, '[data-pa-template-select]'));
     }
   });
 

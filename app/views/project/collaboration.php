@@ -96,6 +96,12 @@ $paCollabRequiredFunctions = array(
     'cpms_public_affairs_collab_comments',
     'cpms_public_affairs_collab_files',
     'cpms_public_affairs_collab_history',
+    'cpms_public_affairs_collab_templates',
+    'cpms_public_affairs_collab_checklists',
+    'cpms_public_affairs_collab_checklist_counts_by_task',
+    'cpms_public_affairs_collab_checklist_count_for_task',
+    'cpms_public_affairs_collab_saved_views',
+    'cpms_public_affairs_collab_saved_view_by_id',
 );
 foreach ($paCollabRequiredFunctions as $paCollabFunctionName) {
     if (!function_exists($paCollabFunctionName)) {
@@ -123,6 +129,13 @@ $settings = pa_collab_safe_call('cpms_public_affairs_collab_settings', array(), 
 if (!is_array($settings)) $settings = $paCollabDefaultSettings;
 foreach ($paCollabDefaultSettings as $paCollabSettingKey => $paCollabSettingValue) {
     if (!isset($settings[$paCollabSettingKey])) $settings[$paCollabSettingKey] = $paCollabSettingValue;
+}
+$templates = pa_collab_safe_call('cpms_public_affairs_collab_templates', array(false), array());
+$activeTemplates = array();
+if (is_array($templates)) {
+    foreach ($templates as $templateRow) {
+        if (is_array($templateRow) && !empty($templateRow['is_active'])) $activeTemplates[] = $templateRow;
+    }
 }
 $GLOBALS['pa_collab_stage'] = 'collaboration_fetch_employees';
 $employees = pa_collab_safe_call('cpms_public_affairs_collab_fetch_employees', array($pdo), array());
@@ -347,6 +360,29 @@ body.pa-collab-open{overflow:hidden}
           'position' => isset($employee['position']) ? (string)$employee['position'] : '',
       );
   }
+  $paCollabTemplateOptions = array();
+  foreach ($activeTemplates as $template) {
+      if (!is_array($template)) continue;
+      $paCollabTemplateOptions[] = array(
+          'id' => isset($template['id']) ? (int)$template['id'] : 0,
+          'template_name' => isset($template['template_name']) ? (string)$template['template_name'] : '',
+          'task_type' => isset($template['task_type']) ? (string)$template['task_type'] : '',
+          'default_title' => isset($template['default_title']) ? (string)$template['default_title'] : '',
+          'default_content' => isset($template['default_content']) ? (string)$template['default_content'] : '',
+          'default_status' => isset($template['default_status']) ? (string)$template['default_status'] : '',
+          'default_priority' => isset($template['default_priority']) ? (string)$template['default_priority'] : '',
+          'default_due_days' => isset($template['default_due_days']) ? (int)$template['default_due_days'] : 0,
+          'default_contract_impact' => isset($template['default_contract_impact']) ? (string)$template['default_contract_impact'] : '없음',
+          'default_schedule_impact' => isset($template['default_schedule_impact']) ? (string)$template['default_schedule_impact'] : '없음',
+          'checklist_items' => isset($template['checklist_items']) && is_array($template['checklist_items']) ? array_values($template['checklist_items']) : array(),
+      );
+  }
+  $paCollabProjectContext = array(
+      'project_name' => is_array($selectedSpace) && isset($selectedSpace['name']) ? (string)$selectedSpace['name'] : '',
+      'client' => is_array($selectedSpace) && isset($selectedSpace['client']) ? (string)$selectedSpace['client'] : '',
+      'contractor' => is_array($selectedSpace) && isset($selectedSpace['contractor']) ? (string)$selectedSpace['contractor'] : '',
+      'today' => date('Y-m-d'),
+  );
   $paCollabJsConfig = array(
       'csrf' => csrf_token(),
       'actionUrl' => '?r=project/collaboration_action',
@@ -355,6 +391,8 @@ body.pa-collab-open{overflow:hidden}
       'priorities' => $settings['priorities'],
       'taskTypes' => $settings['task_types'],
       'employees' => $paCollabEmployeeOptions,
+      'templates' => $paCollabTemplateOptions,
+      'projectContext' => $paCollabProjectContext,
       'impactOptions' => array('없음', '있음', '확인필요'),
   );
   $GLOBALS['pa_collab_stage'] = 'collaboration_js_config_access_denied';
@@ -410,6 +448,20 @@ $selectedSpace = pa_collab_safe_call('cpms_public_affairs_collab_find_project_sp
 if ($spaceProjectId > 0 && !is_array($selectedSpace)) $spaceProjectId = 0;
 if ($spaceProjectId <= 0 && $section !== 'settings') $section = 'home';
 $filters['project_id'] = $spaceProjectId;
+$savedViews = $spaceProjectId > 0 ? pa_collab_safe_call('cpms_public_affairs_collab_saved_views', array($spaceProjectId), array()) : array();
+$activeSavedViewId = isset($_GET['saved_view_id']) ? (int)$_GET['saved_view_id'] : 0;
+$activeSavedView = $activeSavedViewId > 0 && $spaceProjectId > 0 ? pa_collab_safe_call('cpms_public_affairs_collab_saved_view_by_id', array($activeSavedViewId, $spaceProjectId), null) : null;
+if (is_array($activeSavedView) && isset($activeSavedView['filters']) && is_array($activeSavedView['filters'])) {
+    foreach ($activeSavedView['filters'] as $filterKey => $filterValue) {
+        if (isset($filters[$filterKey])) $filters[$filterKey] = $filterValue;
+        if ($filterKey === 'section' && in_array((string)$filterValue, array('summary', 'list', 'board', 'calendar', 'timeline', 'files', 'activity', 'reports', 'settings'), true)) $section = (string)$filterValue;
+        if ($filterKey === 'view_mode' && in_array((string)$filterValue, array('board', 'list', 'backlog'), true)) $viewMode = (string)$filterValue;
+        if ($filterKey === 'quick') $quickFilter = (string)$filterValue;
+    }
+    if ($section === 'list') $viewMode = 'list';
+    if ($section === 'pending') { $viewMode = 'backlog'; $quickFilter = 'pending'; }
+    if ($section === 'board' && $viewMode === '') $viewMode = 'board';
+}
 $GLOBALS['pa_collab_stage'] = 'collaboration_home_summary';
 $projectHomeSummary = pa_collab_safe_call('cpms_public_affairs_collab_project_home_summary', array($spaceProjects), array());
 $selectedProjectTasks = $spaceProjectId > 0 ? pa_collab_safe_call('cpms_public_affairs_collab_project_tasks', array($visibleTasks, $spaceProjectId), array()) : array();
@@ -445,6 +497,9 @@ $filteredTasks = pa_collab_safe_call('cpms_public_affairs_collab_apply_filters',
 $filteredTasks = pa_collab_safe_call('cpms_public_affairs_collab_apply_quick_filter', array($filteredTasks, $quickFilter, $currentEmployee), $filteredTasks);
 $summary = pa_collab_safe_call('cpms_public_affairs_collab_summary', array($spaceProjectId > 0 ? $selectedProjectTasks : $visibleTasks, $currentEmployee), array());
 $taskCounts = pa_collab_safe_call('cpms_public_affairs_collab_task_counts', array(), array());
+if (!isset($taskCounts['comments']) || !is_array($taskCounts['comments'])) $taskCounts['comments'] = array();
+if (!isset($taskCounts['files']) || !is_array($taskCounts['files'])) $taskCounts['files'] = array();
+if (!isset($taskCounts['checklists']) || !is_array($taskCounts['checklists'])) $taskCounts['checklists'] = array();
 $selectedTaskId = isset($_GET['task_id']) ? (int)$_GET['task_id'] : 0;
 $selectedTask = $selectedTaskId > 0 ? pa_collab_safe_call('cpms_public_affairs_collab_find_task', array($selectedTaskId), null) : null;
 if (is_array($selectedTask) && !pa_collab_safe_call('cpms_public_affairs_collab_user_can_view_task', array($selectedTask, $currentEmployee), false)) $selectedTask = null;
@@ -705,6 +760,44 @@ body.pa-collab-open{overflow:hidden}
           <?php if (!$canManageCollab): ?>
             <div class="pa-empty">설정은 관리자만 변경할 수 있습니다.</div>
           <?php else: ?>
+            <div class="pa-panel-card" style="margin-bottom:14px;">
+              <div class="pa-panel-title">업무 템플릿 관리</div>
+              <div class="pa-desc">입찰/계약/변경계약/기성처럼 반복되는 공무 업무를 빠르게 만들기 위한 기본 템플릿입니다.</div>
+              <div class="pa-template-list">
+                <?php foreach ($templates as $template): ?>
+                  <div class="pa-template-row">
+                    <div>
+                      <b><?php echo h(isset($template['template_name']) ? $template['template_name'] : '-'); ?></b>
+                      <div class="pa-muted"><?php echo h(isset($template['task_type']) ? $template['task_type'] : '-'); ?> · <?php echo h(isset($template['default_priority']) ? $template['default_priority'] : '-'); ?> · 마감 +<?php echo (int)(isset($template['default_due_days']) ? $template['default_due_days'] : 0); ?>일</div>
+                      <div class="pa-muted">체크리스트 <?php echo isset($template['checklist_items']) && is_array($template['checklist_items']) ? count($template['checklist_items']) : 0; ?>개</div>
+                      <details class="pa-template-detail">
+                        <summary>템플릿 상세 보기</summary>
+                        <div class="pa-muted">기본 제목: <?php echo h(isset($template['default_title']) ? $template['default_title'] : ''); ?></div>
+                        <ul>
+                          <?php if (isset($template['checklist_items']) && is_array($template['checklist_items'])): foreach ($template['checklist_items'] as $templateChecklistItem): ?>
+                            <li><?php echo h($templateChecklistItem); ?></li>
+                          <?php endforeach; endif; ?>
+                        </ul>
+                      </details>
+                    </div>
+                    <form method="post" action="?r=project/collaboration_action" class="pa-inline-form">
+                      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                      <input type="hidden" name="action" value="template_toggle">
+                      <input type="hidden" name="template_id" value="<?php echo (int)$template['id']; ?>">
+                      <input type="hidden" name="is_active" value="<?php echo !empty($template['is_active']) ? '0' : '1'; ?>">
+                      <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array('section' => 'settings'))); ?>">
+                      <button type="submit" class="pa-btn"><?php echo !empty($template['is_active']) ? '비활성' : '활성'; ?></button>
+                    </form>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+              <form method="post" action="?r=project/collaboration_action" style="display:flex;justify-content:flex-end;margin-top:12px;">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="action" value="template_reset">
+                <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array('section' => 'settings'))); ?>">
+                <button type="submit" class="pa-btn pa-btn-dark">기본 템플릿 다시 생성</button>
+              </form>
+            </div>
             <form method="post" action="?r=project/collaboration_action" class="pa-form-grid">
               <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
               <input type="hidden" name="action" value="settings">
@@ -830,6 +923,8 @@ body.pa-collab-open{overflow:hidden}
                     <a data-pa-detail-link class="pa-calendar-task <?php echo pa_priority_class(isset($task['priority']) ? $task['priority'] : ''); ?>" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>">
                       <b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b>
                       <span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span>
+                      <?php $calendarTaskId = isset($task['id']) ? (int)$task['id'] : 0; $calendarChecklistTotal = cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $calendarTaskId, 'total'); ?>
+                      <?php if ($calendarChecklistTotal > 0): ?><span>체크 <?php echo (int)cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $calendarTaskId, 'done'); ?>/<?php echo (int)$calendarChecklistTotal; ?></span><?php endif; ?>
                     </a>
                   <?php endforeach; ?>
                 </div>
@@ -839,7 +934,8 @@ body.pa-collab-open{overflow:hidden}
               <div class="pa-calendar-nodue">
                 <div class="pa-panel-title">마감일 없는 업무</div>
                 <?php foreach ($calendarNoDueTasks as $task): ?>
-                  <a data-pa-detail-link class="pa-calendar-task" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span></a>
+                  <?php $calendarNoDueTaskId = isset($task['id']) ? (int)$task['id'] : 0; $calendarNoDueTotal = cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $calendarNoDueTaskId, 'total'); ?>
+                  <a data-pa-detail-link class="pa-calendar-task" href="<?php echo h(pa_collab_url(array('task_id' => $calendarNoDueTaskId))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span><?php if ($calendarNoDueTotal > 0): ?><span>체크 <?php echo (int)cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $calendarNoDueTaskId, 'done'); ?>/<?php echo (int)$calendarNoDueTotal; ?></span><?php endif; ?></a>
                 <?php endforeach; ?>
               </div>
             <?php endif; ?>
@@ -859,12 +955,13 @@ body.pa-collab-open{overflow:hidden}
                     <span><?php echo h(date('Y-m-d', $timelineRangeEndTs)); ?></span>
                   </div>
                 </div>
-                <?php foreach ($timelineRows as $row): $task = $row['task']; $isDelayed = cpms_public_affairs_collab_is_delayed($task); ?>
+                <?php foreach ($timelineRows as $row): $task = $row['task']; $isDelayed = cpms_public_affairs_collab_is_delayed($task); $timelineTaskId = isset($task['id']) ? (int)$task['id'] : 0; $timelineChecklistTotal = cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $timelineTaskId, 'total'); ?>
                   <div class="pa-timeline-chart-row">
                     <a data-pa-detail-link class="pa-timeline-label" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>">
                       <b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b>
                       <span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span>
                       <em><?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?></em>
+                      <?php if ($timelineChecklistTotal > 0): ?><em>체크 <?php echo (int)cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $timelineTaskId, 'done'); ?>/<?php echo (int)$timelineChecklistTotal; ?></em><?php endif; ?>
                     </a>
                     <div class="pa-timeline-track">
                       <a data-pa-detail-link class="pa-timeline-bar <?php echo $isDelayed ? 'is-delayed' : ''; ?>" style="left:<?php echo h($row['left_pct']); ?>%;width:<?php echo h($row['width_pct']); ?>%;" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>">
@@ -878,7 +975,8 @@ body.pa-collab-open{overflow:hidden}
                 <div class="pa-timeline-unknown">
                   <div class="pa-panel-title">일정 미정 업무</div>
                   <?php foreach ($timelineUnknownTasks as $task): ?>
-                    <a data-pa-detail-link class="pa-calendar-task" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span></a>
+                    <?php $timelineUnknownTaskId = isset($task['id']) ? (int)$task['id'] : 0; $timelineUnknownTotal = cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $timelineUnknownTaskId, 'total'); ?>
+                    <a data-pa-detail-link class="pa-calendar-task" href="<?php echo h(pa_collab_url(array('task_id' => $timelineUnknownTaskId))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span><?php if ($timelineUnknownTotal > 0): ?><span>체크 <?php echo (int)cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $timelineUnknownTaskId, 'done'); ?>/<?php echo (int)$timelineUnknownTotal; ?></span><?php endif; ?></a>
                   <?php endforeach; ?>
                 </div>
               <?php endif; ?>
@@ -930,11 +1028,75 @@ body.pa-collab-open{overflow:hidden}
             <?php foreach ($selectedProjectActivities as $activity): ?><div class="pa-history"><b><?php echo h(isset($activity['action']) ? $activity['action'] : '-'); ?></b><div class="pa-muted"><?php echo h(isset($activity['actor_name']) ? $activity['actor_name'] : '-'); ?> · <?php echo h(isset($activity['created_at']) ? $activity['created_at'] : ''); ?></div><?php if (isset($activity['task_id']) && (int)$activity['task_id'] > 0): ?><a data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => (int)$activity['task_id']))); ?>"><?php echo h(isset($activity['task_no']) ? $activity['task_no'] : '업무 보기'); ?></a><?php endif; ?><div><?php echo h(isset($activity['message']) ? $activity['message'] : ''); ?></div></div><?php endforeach; ?>
           </section>
         <?php elseif ($section === 'reports'): ?>
+          <?php
+            $reportTotal = isset($selectedProjectStats['total']) ? (int)$selectedProjectStats['total'] : 0;
+            $reportDone = isset($selectedProjectStats['done']) ? (int)$selectedProjectStats['done'] : 0;
+            $reportChecklistTotal = 0;
+            $reportChecklistDone = 0;
+            $reportTypeCounts = array();
+            $reportTemplateCounts = array();
+            $reportDelayedTasks = array();
+            $reportContractTasks = array();
+            $reportScheduleTasks = array();
+            $reportWeekTasks = array();
+            $reportAssigneeDelayed = array();
+            $weekEnd = date('Y-m-d', strtotime('+7 day'));
+            foreach ($selectedProjectTasks as $task) {
+                if (!is_array($task)) continue;
+                $taskIdForReport = isset($task['id']) ? (int)$task['id'] : 0;
+                $taskTypeForReport = isset($task['task_type']) && trim((string)$task['task_type']) !== '' ? (string)$task['task_type'] : '기타';
+                if (!isset($reportTypeCounts[$taskTypeForReport])) $reportTypeCounts[$taskTypeForReport] = 0;
+                $reportTypeCounts[$taskTypeForReport]++;
+                $templateNameForReport = isset($task['template_name']) && trim((string)$task['template_name']) !== '' ? (string)$task['template_name'] : '직접 생성';
+                if (!isset($reportTemplateCounts[$templateNameForReport])) $reportTemplateCounts[$templateNameForReport] = 0;
+                $reportTemplateCounts[$templateNameForReport]++;
+                $taskChecklistTotal = cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $taskIdForReport, 'total');
+                $taskChecklistDone = cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $taskIdForReport, 'done');
+                $reportChecklistTotal += $taskChecklistTotal;
+                $reportChecklistDone += $taskChecklistDone;
+                if (cpms_public_affairs_collab_is_delayed($task)) {
+                    $reportDelayedTasks[] = $task;
+                    $assigneeNameForReport = isset($task['assignee_name']) && trim((string)$task['assignee_name']) !== '' ? (string)$task['assignee_name'] : '미지정';
+                    if (!isset($reportAssigneeDelayed[$assigneeNameForReport])) $reportAssigneeDelayed[$assigneeNameForReport] = 0;
+                    $reportAssigneeDelayed[$assigneeNameForReport]++;
+                }
+                if (isset($task['contract_impact']) && (string)$task['contract_impact'] !== '없음') $reportContractTasks[] = $task;
+                if (isset($task['schedule_impact']) && (string)$task['schedule_impact'] !== '없음') $reportScheduleTasks[] = $task;
+                $dueForReport = isset($task['due_date']) ? (string)$task['due_date'] : '';
+                if ($dueForReport !== '' && strcmp($dueForReport, date('Y-m-d')) >= 0 && strcmp($dueForReport, $weekEnd) <= 0) $reportWeekTasks[] = $task;
+            }
+            arsort($reportTypeCounts);
+            arsort($reportTemplateCounts);
+            arsort($reportAssigneeDelayed);
+            $reportCompletionRate = $reportTotal > 0 ? (int)round($reportDone * 100 / $reportTotal) : 0;
+            $reportChecklistRate = $reportChecklistTotal > 0 ? (int)round($reportChecklistDone * 100 / $reportChecklistTotal) : 0;
+          ?>
+          <section class="pa-panel-card pa-print-header">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+              <div>
+                <div class="pa-panel-title">프로젝트 보고서</div>
+                <div class="pa-muted"><?php echo h(is_array($selectedSpace) && isset($selectedSpace['name']) ? $selectedSpace['name'] : '-'); ?> · 작성일 <?php echo h(date('Y-m-d')); ?></div>
+              </div>
+              <a class="pa-btn pa-btn-dark pa-no-print" href="<?php echo h(pa_collab_url(array('section' => 'reports', 'print' => 1, 'task_id' => null))); ?>" target="_blank" rel="noopener">보고서 인쇄</a>
+            </div>
+          </section>
           <section class="pa-summary-grid">
-            <div class="pa-panel-card"><div class="pa-panel-title">완료율</div><div class="pa-big-number"><?php echo $selectedProjectStats['total'] > 0 ? (int)round($selectedProjectStats['done'] * 100 / $selectedProjectStats['total']) : 0; ?>%</div></div>
-            <div class="pa-panel-card"><div class="pa-panel-title">지연 업무</div><div class="pa-big-number"><?php echo (int)$selectedProjectStats['delayed']; ?></div></div>
-            <div class="pa-panel-card"><div class="pa-panel-title">담당자별 업무 수</div><?php foreach ($selectedProjectStats['by_assignee'] as $name => $count): ?><div class="pa-report-row"><span><?php echo h($name); ?></span><b><?php echo (int)$count; ?></b><i style="width:<?php echo $selectedProjectStats['total'] > 0 ? min(100, round($count * 100 / $selectedProjectStats['total'])) : 0; ?>%"></i></div><?php endforeach; ?></div>
-            <div class="pa-panel-card"><div class="pa-panel-title">계약/공기 영향</div><div class="pa-prop"><div class="pa-prop-row"><b>계약 영향</b><span><?php echo (int)$selectedProjectStats['contract_impact']; ?>건</span></div><div class="pa-prop-row"><b>공기 영향</b><span><?php echo (int)$selectedProjectStats['schedule_impact']; ?>건</span></div></div></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">전체 업무</div><div class="pa-big-number"><?php echo (int)$reportTotal; ?></div></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">완료율</div><div class="pa-big-number"><?php echo (int)$reportCompletionRate; ?>%</div></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">체크리스트 평균 완료율</div><div class="pa-big-number"><?php echo (int)$reportChecklistRate; ?>%</div></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">지연 업무</div><div class="pa-big-number"><?php echo count($reportDelayedTasks); ?></div></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">계약 영향 업무</div><div class="pa-big-number"><?php echo count($reportContractTasks); ?></div></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">공기 영향 업무</div><div class="pa-big-number"><?php echo count($reportScheduleTasks); ?></div></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">업무유형별 업무 수</div><?php foreach ($reportTypeCounts as $name => $count): ?><div class="pa-report-row"><span><?php echo h($name); ?></span><b><?php echo (int)$count; ?></b><i style="width:<?php echo $reportTotal > 0 ? min(100, round($count * 100 / $reportTotal)) : 0; ?>%"></i></div><?php endforeach; ?></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">템플릿별 업무 수</div><?php foreach ($reportTemplateCounts as $name => $count): ?><div class="pa-report-row"><span><?php echo h($name); ?></span><b><?php echo (int)$count; ?></b><i style="width:<?php echo $reportTotal > 0 ? min(100, round($count * 100 / $reportTotal)) : 0; ?>%"></i></div><?php endforeach; ?></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">담당자별 업무 수</div><?php foreach ($selectedProjectStats['by_assignee'] as $name => $count): ?><div class="pa-report-row"><span><?php echo h($name); ?></span><b><?php echo (int)$count; ?></b><i style="width:<?php echo $reportTotal > 0 ? min(100, round($count * 100 / $reportTotal)) : 0; ?>%"></i></div><?php endforeach; ?></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">담당자별 지연 업무 수</div><?php foreach ($reportAssigneeDelayed as $name => $count): ?><div class="pa-report-row"><span><?php echo h($name); ?></span><b><?php echo (int)$count; ?></b><i style="width:<?php echo count($reportDelayedTasks) > 0 ? min(100, round($count * 100 / count($reportDelayedTasks))) : 0; ?>%"></i></div><?php endforeach; ?><?php if (count($reportAssigneeDelayed) === 0): ?><div class="pa-muted">지연 업무가 없습니다.</div><?php endif; ?></div>
+          </section>
+          <section class="pa-summary-grid" style="margin-top:12px;">
+            <div class="pa-panel-card"><div class="pa-panel-title">지연 업무 목록</div><?php foreach ($reportDelayedTasks as $task): ?><a class="pa-file" data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><div><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></div><div class="pa-muted"><?php echo h(pa_due_text($task)); ?> · <?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?></div></a><?php endforeach; ?><?php if (count($reportDelayedTasks) === 0): ?><div class="pa-muted">지연 업무가 없습니다.</div><?php endif; ?></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">이번 주 마감 업무</div><?php foreach ($reportWeekTasks as $task): ?><a class="pa-file" data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><div><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></div><div class="pa-muted"><?php echo h(pa_due_text($task)); ?> · <?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?></div></a><?php endforeach; ?><?php if (count($reportWeekTasks) === 0): ?><div class="pa-muted">이번 주 마감 업무가 없습니다.</div><?php endif; ?></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">계약 영향 업무</div><?php foreach ($reportContractTasks as $task): ?><a class="pa-file" data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><div><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></div><div class="pa-muted"><?php echo h(isset($task['contract_impact']) ? $task['contract_impact'] : '-'); ?></div></a><?php endforeach; ?><?php if (count($reportContractTasks) === 0): ?><div class="pa-muted">계약 영향 업무가 없습니다.</div><?php endif; ?></div>
+            <div class="pa-panel-card"><div class="pa-panel-title">공기 영향 업무</div><?php foreach ($reportScheduleTasks as $task): ?><a class="pa-file" data-pa-detail-link href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><div><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></div><div class="pa-muted"><?php echo h(isset($task['schedule_impact']) ? $task['schedule_impact'] : '-'); ?></div></a><?php endforeach; ?><?php if (count($reportScheduleTasks) === 0): ?><div class="pa-muted">공기 영향 업무가 없습니다.</div><?php endif; ?></div>
           </section>
         <?php else: ?>
         <div class="pa-summary">
@@ -946,6 +1108,43 @@ body.pa-collab-open{overflow:hidden}
         </div>
 
         <section class="pa-filterbar">
+          <div class="pa-saved-views">
+            <span class="pa-muted">Saved View</span>
+            <?php foreach ($savedViews as $savedView): ?>
+              <?php $savedFilters = isset($savedView['filters']) && is_array($savedView['filters']) ? $savedView['filters'] : array(); ?>
+              <a class="pa-chip <?php echo $activeSavedViewId === (int)$savedView['id'] ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array_merge($savedFilters, array('saved_view_id' => (int)$savedView['id'], 'space_project_id' => $spaceProjectId, 'task_id' => null)))); ?>"><?php echo h(isset($savedView['view_name']) ? $savedView['view_name'] : '-'); ?></a>
+              <?php if ($canManageCollab || (isset($savedView['created_by_id']) && isset($currentEmployee['id']) && (int)$savedView['created_by_id'] === (int)$currentEmployee['id'])): ?>
+                <form method="post" action="?r=project/collaboration_action" class="pa-inline-form">
+                  <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                  <input type="hidden" name="action" value="saved_view_delete">
+                  <input type="hidden" name="project_id" value="<?php echo (int)$spaceProjectId; ?>">
+                  <input type="hidden" name="saved_view_id" value="<?php echo (int)$savedView['id']; ?>">
+                  <input type="hidden" name="section" value="<?php echo h($section); ?>">
+                  <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array('saved_view_id' => null))); ?>">
+                  <button type="submit" class="pa-mini-btn" title="Saved View 삭제">삭제</button>
+                </form>
+              <?php endif; ?>
+            <?php endforeach; ?>
+            <form method="post" action="?r=project/collaboration_action" class="pa-inline-form pa-save-view-form">
+              <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+              <input type="hidden" name="action" value="saved_view_create">
+              <input type="hidden" name="project_id" value="<?php echo (int)$spaceProjectId; ?>">
+              <input type="hidden" name="section" value="<?php echo h($section); ?>">
+              <input type="hidden" name="view_mode" value="<?php echo h($viewMode); ?>">
+              <input type="hidden" name="quick" value="<?php echo h($quickFilter); ?>">
+              <input type="hidden" name="project_name" value="<?php echo h($filters['project_name']); ?>">
+              <input type="hidden" name="assignee_employee_id" value="<?php echo h($filters['assignee_employee_id']); ?>">
+              <input type="hidden" name="requester_employee_id" value="<?php echo h($filters['requester_employee_id']); ?>">
+              <input type="hidden" name="task_type" value="<?php echo h($filters['task_type']); ?>">
+              <input type="hidden" name="priority" value="<?php echo h($filters['priority']); ?>">
+              <input type="hidden" name="status" value="<?php echo h($filters['status']); ?>">
+              <input type="hidden" name="due_to" value="<?php echo h($filters['due_to']); ?>">
+              <input type="hidden" name="keyword" value="<?php echo h($filters['keyword']); ?>">
+              <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array())); ?>">
+              <input name="view_name" class="pa-field" placeholder="보기 이름" style="width:150px;">
+              <button type="submit" class="pa-btn">현재 필터 저장</button>
+            </form>
+          </div>
           <div class="pa-quick">
             <?php foreach ($quickLinks as $quickKey => $quickLabel): ?>
               <a class="pa-chip <?php echo $quickFilter === $quickKey ? 'is-active' : ''; ?>" href="<?php echo h(pa_collab_url(array('quick' => $quickKey, 'section' => 'board', 'task_id' => null))); ?>"><?php echo h($quickLabel); ?></a>
@@ -972,9 +1171,9 @@ body.pa-collab-open{overflow:hidden}
         <?php if ($viewMode === 'list'): ?>
           <section class="pa-table-wrap">
             <table class="pa-table">
-              <thead><tr><th>업무번호</th><th>업무유형</th><th>제목</th><th>현장명/프로젝트명</th><th>요청자</th><th>담당자</th><th>상태</th><th>우선순위</th><th>마감일</th><th>댓글</th><th>첨부</th><th>계약 영향</th><th>공기 영향</th><th>생성일시</th><th>수정일시</th><th>상세</th></tr></thead>
+              <thead><tr><th>업무번호</th><th>업무유형</th><th>제목</th><th>현장명/프로젝트명</th><th>요청자</th><th>담당자</th><th>상태</th><th>우선순위</th><th>마감일</th><th>체크리스트</th><th>댓글</th><th>첨부</th><th>계약 영향</th><th>공기 영향</th><th>생성일시</th><th>수정일시</th><th>상세</th></tr></thead>
               <tbody>
-              <?php if (count($filteredTasks) === 0): ?><tr><td colspan="16" class="pa-muted">조회된 업무카드가 없습니다.</td></tr><?php endif; ?>
+              <?php if (count($filteredTasks) === 0): ?><tr><td colspan="17" class="pa-muted">조회된 업무카드가 없습니다.</td></tr><?php endif; ?>
               <?php foreach ($filteredTasks as $task): ?>
                 <?php
                   $taskId = isset($task['id']) ? (int)$task['id'] : 0;
@@ -991,6 +1190,7 @@ body.pa-collab-open{overflow:hidden}
                   <td><span class="pa-badge <?php echo h(pa_status_class(isset($task['status']) ? $task['status'] : '')); ?>"><?php echo h(isset($task['status']) ? $task['status'] : '-'); ?></span></td>
                   <td><span class="pa-badge <?php echo h(pa_priority_class(isset($task['priority']) ? $task['priority'] : '')); ?>"><?php echo h(isset($task['priority']) ? $task['priority'] : '-'); ?></span></td>
                   <td><?php echo h(pa_due_text($task)); ?></td>
+                  <td><?php echo (int)cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $taskId, 'done'); ?> / <?php echo (int)cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $taskId, 'total'); ?></td>
                   <td><?php echo (int)cpms_public_affairs_collab_count_for_task($taskCounts, $taskId, 'comments'); ?></td>
                   <td><?php echo (int)cpms_public_affairs_collab_count_for_task($taskCounts, $taskId, 'files'); ?></td>
                   <td><?php echo h(isset($task['contract_impact']) ? $task['contract_impact'] : '없음'); ?></td>
@@ -1062,6 +1262,8 @@ body.pa-collab-open{overflow:hidden}
                         $canEdit = cpms_public_affairs_collab_user_can_edit_task($task, $currentEmployee);
                         $commentCount = cpms_public_affairs_collab_count_for_task($taskCounts, $taskId, 'comments');
                         $fileCount = cpms_public_affairs_collab_count_for_task($taskCounts, $taskId, 'files');
+                        $checklistTotal = cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $taskId, 'total');
+                        $checklistDone = cpms_public_affairs_collab_checklist_count_for_task($taskCounts['checklists'], $taskId, 'done');
                         $searchText = $taskNo . ' ' . (isset($task['title']) ? $task['title'] : '') . ' ' . (isset($task['content']) ? $task['content'] : '') . ' ' . (isset($task['project_name']) ? $task['project_name'] : '') . ' ' . (isset($task['task_type']) ? $task['task_type'] : '') . ' ' . (isset($task['assignee_name']) ? $task['assignee_name'] : '') . ' ' . (isset($task['requester_name']) ? $task['requester_name'] : '') . ' ' . cpms_public_affairs_collab_task_ref_names($task);
                       ?>
                       <div class="pa-card <?php echo $isUrgent ? 'is-urgent ' : ''; ?><?php echo $isDelayed ? 'is-delayed ' : ''; ?><?php echo $isDone ? 'is-done ' : ''; ?>" <?php echo $canEdit ? 'draggable="true"' : ''; ?> data-pa-task-id="<?php echo (int)$taskId; ?>" data-pa-task-no="<?php echo h($taskNo); ?>" data-pa-status="<?php echo h(isset($task['status']) ? $task['status'] : ''); ?>" data-pa-can-edit="<?php echo $canEdit ? '1' : '0'; ?>" data-pa-search="<?php echo h($searchText); ?>">
@@ -1078,6 +1280,7 @@ body.pa-collab-open{overflow:hidden}
                           <?php if ($isDelayed): ?><span class="pa-badge pa-delayed">지연</span><?php endif; ?>
                           <?php if (isset($task['contract_impact']) && (string)$task['contract_impact'] !== '없음'): ?><span class="pa-badge pa-impact">계약 <?php echo h($task['contract_impact']); ?></span><?php endif; ?>
                           <?php if (isset($task['schedule_impact']) && (string)$task['schedule_impact'] !== '없음'): ?><span class="pa-badge pa-impact">공기 <?php echo h($task['schedule_impact']); ?></span><?php endif; ?>
+                          <?php if ($checklistTotal > 0): ?><span class="pa-badge pa-check-progress">체크 <?php echo (int)$checklistDone; ?>/<?php echo (int)$checklistTotal; ?></span><?php endif; ?>
                           <span class="pa-badge" data-pa-comment-count>댓글 <?php echo (int)$commentCount; ?></span><span class="pa-badge" data-pa-file-count>첨부 <?php echo (int)$fileCount; ?></span>
                         </div>
                         <?php if ($canEdit): ?>
@@ -1125,6 +1328,11 @@ body.pa-collab-open{overflow:hidden}
     $comments = cpms_public_affairs_collab_comments($selectedTaskId);
     $files = cpms_public_affairs_collab_files($selectedTaskId);
     $history = cpms_public_affairs_collab_history($selectedTaskId);
+    $checklists = cpms_public_affairs_collab_checklists($selectedTaskId);
+    $checklistDone = 0;
+    foreach ($checklists as $checklistRow) {
+        if (!empty($checklistRow['is_done'])) $checklistDone++;
+    }
     $canEditSelected = cpms_public_affairs_collab_user_can_edit_task($selectedTask, $currentEmployee);
   ?>
   <aside class="pa-detail-panel">
@@ -1164,6 +1372,8 @@ body.pa-collab-open{overflow:hidden}
           <div class="pa-panel-title">속성</div>
           <div class="pa-prop">
             <div class="pa-prop-row"><b>업무번호</b><span><?php echo h($selectedTaskNo); ?></span></div>
+            <div class="pa-prop-row"><b>템플릿</b><span><?php echo h(isset($selectedTask['template_name']) && trim((string)$selectedTask['template_name']) !== '' ? $selectedTask['template_name'] : '-'); ?></span></div>
+            <div class="pa-prop-row"><b>체크리스트</b><span><?php echo (int)$checklistDone; ?> / <?php echo (int)count($checklists); ?></span></div>
             <div class="pa-prop-row"><b>담당자</b><span><select name="assignee_employee_id" <?php echo $canEditSelected ? '' : 'disabled'; ?> class="pa-field"><?php pa_employee_options($employees, isset($selectedTask['assignee_employee_id']) ? $selectedTask['assignee_employee_id'] : 0, false); ?></select></span></div>
             <div class="pa-prop-row"><b>요청자</b><span><?php echo h(isset($selectedTask['requester_name']) ? $selectedTask['requester_name'] : '-'); ?></span></div>
             <div class="pa-prop-row"><b>참조자</b><span><select name="reference_employee_ids[]" multiple <?php echo $canEditSelected ? '' : 'disabled'; ?> class="pa-field" style="min-height:82px;"><?php pa_employee_options($employees, isset($selectedTask['reference_employee_ids']) ? $selectedTask['reference_employee_ids'] : array(), true); ?></select></span></div>
@@ -1186,6 +1396,34 @@ body.pa-collab-open{overflow:hidden}
 
       <div class="pa-detail-grid" style="margin-top:14px;">
         <div>
+          <div class="pa-panel-card">
+            <div class="pa-panel-title"><?php echo h($selectedTaskNo); ?> 체크리스트 <span class="pa-muted"><?php echo (int)$checklistDone; ?> / <?php echo (int)count($checklists); ?></span></div>
+            <?php if (count($checklists) === 0): ?><div class="pa-muted">체크리스트가 없습니다. 필요하면 항목을 추가할 수 있습니다.</div><?php endif; ?>
+            <div class="pa-checklist">
+              <?php foreach ($checklists as $checklist): ?>
+                <form method="post" action="?r=project/collaboration_action" class="pa-checklist-item">
+                  <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                  <input type="hidden" name="action" value="checklist_toggle">
+                  <input type="hidden" name="task_id" value="<?php echo (int)$selectedTaskId; ?>">
+                  <input type="hidden" name="checklist_id" value="<?php echo (int)$checklist['id']; ?>">
+                  <input type="hidden" name="is_done" value="<?php echo !empty($checklist['is_done']) ? '0' : '1'; ?>">
+                  <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array('task_id' => $selectedTaskId))); ?>">
+                  <button type="submit" class="pa-check-toggle" <?php echo $canEditSelected ? '' : 'disabled'; ?> title="체크리스트 완료/해제"><?php echo !empty($checklist['is_done']) ? '✓' : ''; ?></button>
+                  <span class="<?php echo !empty($checklist['is_done']) ? 'is-done' : ''; ?>"><?php echo h(isset($checklist['title']) ? $checklist['title'] : '-'); ?></span>
+                </form>
+              <?php endforeach; ?>
+            </div>
+            <?php if ($canEditSelected): ?>
+              <form method="post" action="?r=project/collaboration_action" class="pa-checklist-add" style="margin-top:10px;">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="action" value="checklist_add">
+                <input type="hidden" name="task_id" value="<?php echo (int)$selectedTaskId; ?>">
+                <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array('task_id' => $selectedTaskId))); ?>">
+                <input name="checklist_title" class="pa-field" placeholder="체크리스트 항목 추가">
+                <button type="submit" class="pa-btn pa-btn-dark">추가</button>
+              </form>
+            <?php endif; ?>
+          </div>
           <div class="pa-panel-card">
             <div class="pa-panel-title"><?php echo h($selectedTaskNo); ?> 댓글</div>
             <form method="post" action="?r=project/collaboration_action">
@@ -1227,6 +1465,7 @@ body.pa-collab-open{overflow:hidden}
         <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array('section' => 'board', 'task_id' => null))); ?>">
         <div class="pa-modal-body">
           <div class="pa-form-grid">
+            <div class="full"><label class="pa-muted">템플릿 선택</label><select name="template_id" class="pa-field" data-pa-template-select><option value="0">직접 입력</option><?php foreach ($activeTemplates as $template): ?><option value="<?php echo (int)$template['id']; ?>"><?php echo h(isset($template['template_name']) ? $template['template_name'] : '-'); ?></option><?php endforeach; ?></select><div class="pa-muted" style="margin-top:5px;">템플릿을 선택하면 제목, 상세내용, 우선순위, 마감일, 체크리스트가 자동으로 채워집니다.</div></div>
             <div><label class="pa-muted">업무유형</label><select name="task_type" class="pa-field"><?php foreach ($settings['task_types'] as $type): ?><option value="<?php echo h($type); ?>"><?php echo h($type); ?></option><?php endforeach; ?></select></div>
             <div><label class="pa-muted">프로젝트 Space</label><input class="pa-field" value="<?php echo h(is_array($selectedSpace) && isset($selectedSpace['name']) ? $selectedSpace['name'] : ''); ?>" readonly></div>
             <div class="full"><label class="pa-muted">제목 *</label><input name="title" required class="pa-field" placeholder="예: 변경계약 2차 내역 검토"></div>

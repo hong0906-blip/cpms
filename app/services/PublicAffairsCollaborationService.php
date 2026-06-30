@@ -145,7 +145,7 @@ function cpms_public_affairs_collab_bootstrap_storage($create = true) {
         cpms_ensure_dir($collabRoot . '/files');
     }
 
-    $storeNames = array('tasks', 'comments', 'attachments', 'history', 'collab_project_meta', 'project_activity');
+    $storeNames = array('tasks', 'comments', 'attachments', 'history', 'collab_project_meta', 'project_activity', 'templates', 'checklists', 'saved_views');
     foreach ($storeNames as $storeName) {
         $path = cpms_public_affairs_collab_store_path($storeName);
         if (!is_file($path)) {
@@ -266,6 +266,423 @@ function cpms_public_affairs_collab_save_settings($settings) {
     }
     $data['updated_at'] = date('Y-m-d H:i:s');
     return cpms_public_affairs_collab_write_json(cpms_public_affairs_collab_store_path('settings'), $data);
+}}
+
+if (!function_exists('cpms_public_affairs_collab_template_seed_row')) {
+function cpms_public_affairs_collab_template_seed_row($sortOrder, $name, $taskType, $title, $content, $priority, $dueDays, $contractImpact, $scheduleImpact, $checklistItems) {
+    $now = date('Y-m-d H:i:s');
+    return array(
+        'id' => (int)$sortOrder,
+        'template_name' => (string)$name,
+        'task_type' => (string)$taskType,
+        'default_title' => (string)$title,
+        'default_content' => (string)$content,
+        'default_status' => '할 일',
+        'default_priority' => (string)$priority,
+        'default_due_days' => (int)$dueDays,
+        'default_contract_impact' => (string)$contractImpact,
+        'default_schedule_impact' => (string)$scheduleImpact,
+        'checklist_items' => is_array($checklistItems) ? array_values($checklistItems) : array(),
+        'is_active' => 1,
+        'sort_order' => (int)$sortOrder,
+        'created_at' => $now,
+        'updated_at' => $now,
+    );
+}}
+
+if (!function_exists('cpms_public_affairs_collab_default_templates')) {
+function cpms_public_affairs_collab_default_templates() {
+    // 공무 협업툴 업무 템플릿: 반복되는 입찰/계약/기성/변경계약 업무를 빠르게 생성하기 위한 기본값.
+    return array(
+        cpms_public_affairs_collab_template_seed_row(1, '입찰 검토', '기타', '입찰 검토 - {{project_name}}', '입찰 조건, 공사 범위, 제출 마감일, 리스크 사항을 확인해주세요.', '높음', 3, '확인필요', '확인필요', array('입찰 공고 확인', '현장 설명 조건 확인', '공사 범위 확인', '제출 마감일 확인', '필요 서류 확인', '리스크 사항 기록')),
+        cpms_public_affairs_collab_template_seed_row(2, '견적 요청', '기타', '견적 요청 - {{project_name}}', '견적 요청 범위와 협력업체 회신 일정을 정리해주세요.', '보통', 3, '없음', '확인필요', array('견적 요청 범위 정리', '협력업체 선정', '견적 요청 발송', '견적 회신 확인', '비교표 작성', '최종 단가 검토')),
+        cpms_public_affairs_collab_template_seed_row(3, '계약 검토', '계약 검토', '계약 검토 - {{project_name}}', '계약금액, 공사기간, 특수조건과 보증 조건을 검토해주세요.', '높음', 3, '있음', '확인필요', array('계약금액 확인', '공사기간 확인', '발주처/시공사 정보 확인', '계약 특수조건 확인', '지체상금 조건 확인', '하자보증 조건 확인', '내부 결재 필요 여부 확인')),
+        cpms_public_affairs_collab_template_seed_row(4, '단가내역서 검토', '내역서 검토', '단가내역서 검토 - {{project_name}}', '품명, 규격, 단위, 수량, 단가와 합계 금액을 검토해주세요.', '보통', 4, '있음', '확인필요', array('품명 누락 확인', '규격 확인', '단위 확인', '수량 확인', '단가 확인', '금액 합계 확인', '공정표 연동 가능 여부 확인')),
+        cpms_public_affairs_collab_template_seed_row(5, '실행내역 확인', '실행내역 확인', '실행내역 확인 - {{project_name}}', '실행예산 기준과 주요 공종 금액, 원가율 영향을 확인해주세요.', '보통', 4, '있음', '없음', array('실행예산 기준 확인', '주요 공종 금액 확인', '원가율 영향 확인', '누락 공종 확인', '위험 공종 표시', '담당자 확인')),
+        cpms_public_affairs_collab_template_seed_row(6, '변경계약 검토', '변경계약', '변경계약 검토 - {{project_name}}', '변경계약 사유, 변경금액, 공기 영향 여부를 확인해주세요.', '높음', 3, '있음', '확인필요', array('변경 사유 확인', '변경 전/후 내역 비교', '변경금액 확인', '공기 영향 확인', '발주처 승인 여부 확인', '내부 결재 필요 여부 확인')),
+        cpms_public_affairs_collab_template_seed_row(7, '추가공사 검토', '추가공사', '추가공사 검토 - {{project_name}}', '추가공사 발생 사유, 작업 범위, 근거자료와 계약 반영 여부를 확인해주세요.', '높음', 3, '있음', '확인필요', array('추가공사 발생 사유 확인', '작업 범위 확인', '사진/근거자료 첨부', '견적금액 확인', '발주처 승인 여부 확인', '계약 반영 여부 확인')),
+        cpms_public_affairs_collab_template_seed_row(8, '기성 청구 준비', '기성/청구', '기성 청구 준비 - {{project_name}}', '기성 기준월, 기성률, 증빙자료와 청구금액을 정리해주세요.', '높음', 5, '있음', '없음', array('기성 기준월 확인', '작업 완료 범위 확인', '기성률 확인', '증빙자료 첨부', '청구금액 확인', '발주처 제출 여부 확인')),
+        cpms_public_affairs_collab_template_seed_row(9, '발주처 요청사항 처리', '발주처 요청사항', '발주처 요청사항 처리 - {{project_name}}', '발주처 요청 내용과 회신 필요일, 담당자와 처리 결과를 기록해주세요.', '보통', 2, '확인필요', '확인필요', array('요청 내용 확인', '요청일 확인', '회신 필요일 확인', '담당자 지정', '관련 자료 첨부', '처리 결과 기록')),
+        cpms_public_affairs_collab_template_seed_row(10, '회의 후속조치', '회의 후속조치', '회의 후속조치 - {{project_name}}', '회의 결정사항과 담당자별 후속조치 마감일을 정리해주세요.', '보통', 2, '없음', '확인필요', array('회의 일자 확인', '참석자 확인', '결정사항 정리', '담당자 지정', '마감일 지정', '완료 여부 확인')),
+    );
+}}
+
+if (!function_exists('cpms_public_affairs_collab_sort_template')) {
+function cpms_public_affairs_collab_sort_template($a, $b) {
+    $aSort = is_array($a) && isset($a['sort_order']) ? (int)$a['sort_order'] : 0;
+    $bSort = is_array($b) && isset($b['sort_order']) ? (int)$b['sort_order'] : 0;
+    if ($aSort === $bSort) {
+        $aId = is_array($a) && isset($a['id']) ? (int)$a['id'] : 0;
+        $bId = is_array($b) && isset($b['id']) ? (int)$b['id'] : 0;
+        if ($aId === $bId) return 0;
+        return ($aId < $bId) ? -1 : 1;
+    }
+    return ($aSort < $bSort) ? -1 : 1;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_normalize_template')) {
+function cpms_public_affairs_collab_normalize_template($row) {
+    if (!is_array($row)) $row = array();
+    if (!isset($row['id'])) $row['id'] = 0;
+    if (!isset($row['template_name'])) $row['template_name'] = '';
+    if (!isset($row['task_type'])) $row['task_type'] = '기타';
+    if (!isset($row['default_title'])) $row['default_title'] = '';
+    if (!isset($row['default_content'])) $row['default_content'] = '';
+    if (!isset($row['default_status']) || trim((string)$row['default_status']) === '') $row['default_status'] = '할 일';
+    if (!isset($row['default_priority']) || trim((string)$row['default_priority']) === '') $row['default_priority'] = '보통';
+    if (!isset($row['default_due_days'])) $row['default_due_days'] = 0;
+    if (!isset($row['default_contract_impact']) || trim((string)$row['default_contract_impact']) === '') $row['default_contract_impact'] = '없음';
+    if (!isset($row['default_schedule_impact']) || trim((string)$row['default_schedule_impact']) === '') $row['default_schedule_impact'] = '없음';
+    if (!isset($row['checklist_items']) || !is_array($row['checklist_items'])) $row['checklist_items'] = array();
+    $cleanItems = array();
+    foreach ($row['checklist_items'] as $item) {
+        $item = trim((string)$item);
+        if ($item !== '') $cleanItems[] = $item;
+    }
+    $row['checklist_items'] = $cleanItems;
+    if (!isset($row['is_active'])) $row['is_active'] = 1;
+    if (!isset($row['sort_order'])) $row['sort_order'] = isset($row['id']) ? (int)$row['id'] : 0;
+    if (!isset($row['created_at'])) $row['created_at'] = '';
+    if (!isset($row['updated_at'])) $row['updated_at'] = '';
+    return $row;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_templates')) {
+function cpms_public_affairs_collab_templates($activeOnly = false) {
+    $store = cpms_public_affairs_collab_load_store('templates');
+    if (!isset($store['items']) || !is_array($store['items']) || count($store['items']) === 0) {
+        $items = cpms_public_affairs_collab_default_templates();
+        $store = array('last_id' => count($items), 'items' => $items);
+        cpms_public_affairs_collab_save_store('templates', $store);
+    }
+    $items = array();
+    foreach ($store['items'] as $row) {
+        $row = cpms_public_affairs_collab_normalize_template($row);
+        if ($activeOnly && empty($row['is_active'])) continue;
+        $items[] = $row;
+    }
+    usort($items, 'cpms_public_affairs_collab_sort_template');
+    return $items;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_template_by_id')) {
+function cpms_public_affairs_collab_template_by_id($templateId) {
+    $templateId = (int)$templateId;
+    if ($templateId <= 0) return null;
+    $items = cpms_public_affairs_collab_templates(false);
+    foreach ($items as $row) {
+        if (isset($row['id']) && (int)$row['id'] === $templateId) return $row;
+    }
+    return null;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_reset_templates')) {
+function cpms_public_affairs_collab_reset_templates($actor) {
+    if (!cpms_public_affairs_collab_is_admin_user()) return array('ok' => false, 'message' => '템플릿 관리 권한이 없습니다.');
+    $items = cpms_public_affairs_collab_default_templates();
+    $ok = cpms_public_affairs_collab_save_store('templates', array('last_id' => count($items), 'items' => $items));
+    if ($ok) {
+        cpms_public_affairs_collab_add_project_activity(0, '템플릿 기본값 재생성', 'template', '', '기본 템플릿', '공무 협업툴 기본 업무 템플릿을 다시 생성했습니다.', $actor, 0);
+    }
+    return array('ok' => $ok, 'message' => $ok ? '기본 템플릿을 다시 생성했습니다.' : '템플릿 저장에 실패했습니다.');
+}}
+
+if (!function_exists('cpms_public_affairs_collab_toggle_template')) {
+function cpms_public_affairs_collab_toggle_template($templateId, $isActive, $actor) {
+    if (!cpms_public_affairs_collab_is_admin_user()) return array('ok' => false, 'message' => '템플릿 관리 권한이 없습니다.');
+    $templateId = (int)$templateId;
+    $store = cpms_public_affairs_collab_load_store('templates');
+    $found = false;
+    $templateName = '';
+    for ($i = 0; $i < count($store['items']); $i++) {
+        if (!is_array($store['items'][$i]) || !isset($store['items'][$i]['id']) || (int)$store['items'][$i]['id'] !== $templateId) continue;
+        $store['items'][$i] = cpms_public_affairs_collab_normalize_template($store['items'][$i]);
+        $templateName = (string)$store['items'][$i]['template_name'];
+        $store['items'][$i]['is_active'] = $isActive ? 1 : 0;
+        $store['items'][$i]['updated_at'] = date('Y-m-d H:i:s');
+        $found = true;
+        break;
+    }
+    if (!$found) return array('ok' => false, 'message' => '템플릿을 찾을 수 없습니다.');
+    $ok = cpms_public_affairs_collab_save_store('templates', $store);
+    if ($ok) {
+        cpms_public_affairs_collab_add_project_activity(0, $isActive ? '템플릿 활성화' : '템플릿 비활성화', 'template', '', $templateName, '업무 템플릿 상태를 변경했습니다.', $actor, 0);
+    }
+    return array('ok' => $ok, 'message' => $ok ? '템플릿 상태를 변경했습니다.' : '템플릿 저장에 실패했습니다.');
+}}
+
+if (!function_exists('cpms_public_affairs_collab_apply_template_vars')) {
+function cpms_public_affairs_collab_apply_template_vars($text, $projectName, $project) {
+    $client = '';
+    $contractor = '';
+    if (is_array($project)) {
+        $client = isset($project['client']) ? (string)$project['client'] : '';
+        $contractor = isset($project['contractor']) ? (string)$project['contractor'] : '';
+    }
+    return str_replace(
+        array('{{project_name}}', '{{today}}', '{{client}}', '{{contractor}}'),
+        array((string)$projectName, date('Y-m-d'), $client, $contractor),
+        (string)$text
+    );
+}}
+
+if (!function_exists('cpms_public_affairs_collab_due_date_from_days')) {
+function cpms_public_affairs_collab_due_date_from_days($days) {
+    $days = (int)$days;
+    if ($days <= 0) return '';
+    return date('Y-m-d', strtotime('+' . $days . ' day'));
+}}
+
+if (!function_exists('cpms_public_affairs_collab_checklists')) {
+function cpms_public_affairs_collab_checklists($taskId) {
+    $taskId = (int)$taskId;
+    $store = cpms_public_affairs_collab_load_store('checklists');
+    $rows = array();
+    foreach ($store['items'] as $row) {
+        if (!is_array($row) || !isset($row['task_id']) || (int)$row['task_id'] !== $taskId) continue;
+        if (isset($row['deleted_at']) && trim((string)$row['deleted_at']) !== '') continue;
+        if (!isset($row['is_done'])) $row['is_done'] = 0;
+        if (!isset($row['sort_order'])) $row['sort_order'] = isset($row['id']) ? (int)$row['id'] : 0;
+        $rows[] = $row;
+    }
+    usort($rows, 'cpms_public_affairs_collab_sort_template');
+    return $rows;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_checklist_counts_by_task')) {
+function cpms_public_affairs_collab_checklist_counts_by_task() {
+    $store = cpms_public_affairs_collab_load_store('checklists');
+    $counts = array();
+    foreach ($store['items'] as $row) {
+        if (!is_array($row) || !isset($row['task_id'])) continue;
+        if (isset($row['deleted_at']) && trim((string)$row['deleted_at']) !== '') continue;
+        $taskId = (int)$row['task_id'];
+        if ($taskId <= 0) continue;
+        if (!isset($counts[$taskId])) $counts[$taskId] = array('total' => 0, 'done' => 0);
+        $counts[$taskId]['total']++;
+        if (!empty($row['is_done'])) $counts[$taskId]['done']++;
+    }
+    return $counts;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_checklist_count_for_task')) {
+function cpms_public_affairs_collab_checklist_count_for_task($counts, $taskId, $key) {
+    $taskId = (int)$taskId;
+    if (!is_array($counts) || !isset($counts[$taskId]) || !is_array($counts[$taskId])) return 0;
+    return isset($counts[$taskId][$key]) ? (int)$counts[$taskId][$key] : 0;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_sync_task_checklist_counts')) {
+function cpms_public_affairs_collab_sync_task_checklist_counts($taskId) {
+    $taskId = (int)$taskId;
+    if ($taskId <= 0) return false;
+    $counts = cpms_public_affairs_collab_checklist_counts_by_task();
+    $total = cpms_public_affairs_collab_checklist_count_for_task($counts, $taskId, 'total');
+    $done = cpms_public_affairs_collab_checklist_count_for_task($counts, $taskId, 'done');
+    $store = cpms_public_affairs_collab_load_store('tasks');
+    $changed = false;
+    for ($i = 0; $i < count($store['items']); $i++) {
+        if (!is_array($store['items'][$i]) || !isset($store['items'][$i]['id']) || (int)$store['items'][$i]['id'] !== $taskId) continue;
+        if (!isset($store['items'][$i]['checklist_total']) || (int)$store['items'][$i]['checklist_total'] !== $total) {
+            $store['items'][$i]['checklist_total'] = $total;
+            $changed = true;
+        }
+        if (!isset($store['items'][$i]['checklist_done']) || (int)$store['items'][$i]['checklist_done'] !== $done) {
+            $store['items'][$i]['checklist_done'] = $done;
+            $changed = true;
+        }
+        break;
+    }
+    if (!$changed) return true;
+    return cpms_public_affairs_collab_save_store('tasks', $store);
+}}
+
+if (!function_exists('cpms_public_affairs_collab_create_checklists_for_task')) {
+function cpms_public_affairs_collab_create_checklists_for_task($task, $items, $actor) {
+    if (!is_array($task) || !isset($task['id']) || !is_array($items) || count($items) === 0) return 0;
+    $store = cpms_public_affairs_collab_load_store('checklists');
+    $created = 0;
+    $now = date('Y-m-d H:i:s');
+    $sort = 1;
+    foreach ($items as $title) {
+        $title = cpms_public_affairs_collab_clean_text($title, 200);
+        if ($title === '') continue;
+        $nextId = (int)$store['last_id'] + 1;
+        $store['last_id'] = $nextId;
+        $store['items'][] = array(
+            'id' => $nextId,
+            'task_id' => (int)$task['id'],
+            'project_id' => isset($task['project_id']) ? (int)$task['project_id'] : 0,
+            'title' => $title,
+            'is_done' => 0,
+            'sort_order' => $sort,
+            'created_at' => $now,
+            'updated_at' => $now,
+            'completed_at' => '',
+            'completed_by_id' => 0,
+            'completed_by_name' => '',
+            'deleted_at' => '',
+        );
+        $sort++;
+        $created++;
+    }
+    if ($created <= 0) return 0;
+    if (!cpms_public_affairs_collab_save_store('checklists', $store)) return 0;
+    cpms_public_affairs_collab_sync_task_checklist_counts((int)$task['id']);
+    cpms_public_affairs_collab_add_history((int)$task['id'], isset($task['project_id']) ? (int)$task['project_id'] : 0, '체크리스트 생성', 'checklist', '', (string)$created . '개', '템플릿 체크리스트가 생성되었습니다.', $actor);
+    cpms_public_affairs_collab_add_project_activity(isset($task['project_id']) ? (int)$task['project_id'] : 0, '체크리스트 생성', 'checklist', '', cpms_public_affairs_collab_task_no($task), '업무 체크리스트가 생성되었습니다.', $actor, (int)$task['id']);
+    return $created;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_add_checklist_item')) {
+function cpms_public_affairs_collab_add_checklist_item($task, $title, $actor) {
+    if (!is_array($task)) return array('ok' => false, 'message' => '업무를 찾을 수 없습니다.');
+    $title = cpms_public_affairs_collab_clean_text($title, 200);
+    if ($title === '') return array('ok' => false, 'message' => '체크리스트 항목을 입력해주세요.');
+    $store = cpms_public_affairs_collab_load_store('checklists');
+    $nextId = (int)$store['last_id'] + 1;
+    $store['last_id'] = $nextId;
+    $rows = cpms_public_affairs_collab_checklists((int)$task['id']);
+    $now = date('Y-m-d H:i:s');
+    $store['items'][] = array(
+        'id' => $nextId,
+        'task_id' => (int)$task['id'],
+        'project_id' => isset($task['project_id']) ? (int)$task['project_id'] : 0,
+        'title' => $title,
+        'is_done' => 0,
+        'sort_order' => count($rows) + 1,
+        'created_at' => $now,
+        'updated_at' => $now,
+        'completed_at' => '',
+        'completed_by_id' => 0,
+        'completed_by_name' => '',
+        'deleted_at' => '',
+    );
+    if (!cpms_public_affairs_collab_save_store('checklists', $store)) return array('ok' => false, 'message' => '체크리스트 저장에 실패했습니다.');
+    cpms_public_affairs_collab_sync_task_checklist_counts((int)$task['id']);
+    cpms_public_affairs_collab_add_history((int)$task['id'], isset($task['project_id']) ? (int)$task['project_id'] : 0, '체크리스트 항목 추가', 'checklist', '', $title, '체크리스트 항목이 추가되었습니다.', $actor);
+    cpms_public_affairs_collab_add_project_activity(isset($task['project_id']) ? (int)$task['project_id'] : 0, '체크리스트 항목 추가', 'checklist', '', $title, '업무 체크리스트 항목이 추가되었습니다.', $actor, (int)$task['id']);
+    return array('ok' => true, 'message' => '체크리스트 항목을 추가했습니다.', 'checklist_id' => $nextId);
+}}
+
+if (!function_exists('cpms_public_affairs_collab_toggle_checklist_item')) {
+function cpms_public_affairs_collab_toggle_checklist_item($task, $checklistId, $isDone, $actor) {
+    if (!is_array($task)) return array('ok' => false, 'message' => '업무를 찾을 수 없습니다.');
+    $checklistId = (int)$checklistId;
+    $store = cpms_public_affairs_collab_load_store('checklists');
+    $found = false;
+    $title = '';
+    $oldValue = '';
+    $newValue = $isDone ? '완료' : '미완료';
+    for ($i = 0; $i < count($store['items']); $i++) {
+        if (!is_array($store['items'][$i]) || !isset($store['items'][$i]['id']) || (int)$store['items'][$i]['id'] !== $checklistId) continue;
+        if (!isset($store['items'][$i]['task_id']) || (int)$store['items'][$i]['task_id'] !== (int)$task['id']) continue;
+        $title = isset($store['items'][$i]['title']) ? (string)$store['items'][$i]['title'] : '';
+        $oldValue = !empty($store['items'][$i]['is_done']) ? '완료' : '미완료';
+        $store['items'][$i]['is_done'] = $isDone ? 1 : 0;
+        $store['items'][$i]['updated_at'] = date('Y-m-d H:i:s');
+        if ($isDone) {
+            $store['items'][$i]['completed_at'] = date('Y-m-d H:i:s');
+            $store['items'][$i]['completed_by_id'] = is_array($actor) && isset($actor['id']) ? (int)$actor['id'] : 0;
+            $store['items'][$i]['completed_by_name'] = cpms_public_affairs_collab_actor_label($actor);
+        } else {
+            $store['items'][$i]['completed_at'] = '';
+            $store['items'][$i]['completed_by_id'] = 0;
+            $store['items'][$i]['completed_by_name'] = '';
+        }
+        $found = true;
+        break;
+    }
+    if (!$found) return array('ok' => false, 'message' => '체크리스트 항목을 찾을 수 없습니다.');
+    if (!cpms_public_affairs_collab_save_store('checklists', $store)) return array('ok' => false, 'message' => '체크리스트 저장에 실패했습니다.');
+    cpms_public_affairs_collab_sync_task_checklist_counts((int)$task['id']);
+    $action = $isDone ? '체크리스트 완료' : '체크리스트 해제';
+    cpms_public_affairs_collab_add_history((int)$task['id'], isset($task['project_id']) ? (int)$task['project_id'] : 0, $action, 'checklist', $oldValue, $newValue, $title, $actor);
+    cpms_public_affairs_collab_add_project_activity(isset($task['project_id']) ? (int)$task['project_id'] : 0, $action, 'checklist', $oldValue, $newValue, $title, $actor, (int)$task['id']);
+    return array('ok' => true, 'message' => $isDone ? '체크리스트를 완료했습니다.' : '체크리스트 완료를 해제했습니다.');
+}}
+
+if (!function_exists('cpms_public_affairs_collab_saved_views')) {
+function cpms_public_affairs_collab_saved_views($projectId) {
+    $projectId = (int)$projectId;
+    $store = cpms_public_affairs_collab_load_store('saved_views');
+    $rows = array();
+    foreach ($store['items'] as $row) {
+        if (!is_array($row) || !isset($row['project_id']) || (int)$row['project_id'] !== $projectId) continue;
+        if (isset($row['deleted_at']) && trim((string)$row['deleted_at']) !== '') continue;
+        $rows[] = $row;
+    }
+    usort($rows, 'cpms_public_affairs_collab_sort_created_desc');
+    return $rows;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_saved_view_by_id')) {
+function cpms_public_affairs_collab_saved_view_by_id($viewId, $projectId) {
+    $viewId = (int)$viewId;
+    $rows = cpms_public_affairs_collab_saved_views($projectId);
+    foreach ($rows as $row) {
+        if (isset($row['id']) && (int)$row['id'] === $viewId) return $row;
+    }
+    return null;
+}}
+
+if (!function_exists('cpms_public_affairs_collab_save_view')) {
+function cpms_public_affairs_collab_save_view($projectId, $post, $actor) {
+    $projectId = (int)$projectId;
+    if ($projectId <= 0) return array('ok' => false, 'message' => '프로젝트를 선택해주세요.');
+    $name = cpms_public_affairs_collab_clean_text(isset($post['view_name']) ? $post['view_name'] : '', 80);
+    if ($name === '') return array('ok' => false, 'message' => '저장할 보기 이름을 입력해주세요.');
+    $allowedFilterKeys = array('project_name','assignee_employee_id','requester_employee_id','task_type','priority','status','due_to','due_from','keyword','quick','section','view_mode','contract_impact','schedule_impact');
+    $filters = array();
+    foreach ($allowedFilterKeys as $key) {
+        if (isset($post[$key])) $filters[$key] = is_array($post[$key]) ? array_values($post[$key]) : (string)$post[$key];
+    }
+    $store = cpms_public_affairs_collab_load_store('saved_views');
+    $nextId = (int)$store['last_id'] + 1;
+    $store['last_id'] = $nextId;
+    $now = date('Y-m-d H:i:s');
+    $store['items'][] = array(
+        'id' => $nextId,
+        'project_id' => $projectId,
+        'view_name' => $name,
+        'section' => isset($post['section']) ? (string)$post['section'] : 'board',
+        'filters' => $filters,
+        'created_by_id' => is_array($actor) && isset($actor['id']) ? (int)$actor['id'] : 0,
+        'created_by_name' => cpms_public_affairs_collab_actor_label($actor),
+        'created_at' => $now,
+        'updated_at' => $now,
+        'deleted_at' => '',
+    );
+    if (!cpms_public_affairs_collab_save_store('saved_views', $store)) return array('ok' => false, 'message' => '저장된 보기 저장에 실패했습니다.');
+    cpms_public_affairs_collab_add_project_activity($projectId, 'Saved View 생성', 'saved_view', '', $name, '필터 보기를 저장했습니다.', $actor, 0);
+    return array('ok' => true, 'message' => '현재 필터를 Saved View로 저장했습니다.', 'view_id' => $nextId);
+}}
+
+if (!function_exists('cpms_public_affairs_collab_delete_saved_view')) {
+function cpms_public_affairs_collab_delete_saved_view($viewId, $projectId, $actor) {
+    $viewId = (int)$viewId;
+    $projectId = (int)$projectId;
+    $store = cpms_public_affairs_collab_load_store('saved_views');
+    $found = false;
+    $viewName = '';
+    for ($i = 0; $i < count($store['items']); $i++) {
+        if (!is_array($store['items'][$i]) || !isset($store['items'][$i]['id']) || (int)$store['items'][$i]['id'] !== $viewId) continue;
+        if (!isset($store['items'][$i]['project_id']) || (int)$store['items'][$i]['project_id'] !== $projectId) continue;
+        $creatorId = isset($store['items'][$i]['created_by_id']) ? (int)$store['items'][$i]['created_by_id'] : 0;
+        $actorId = is_array($actor) && isset($actor['id']) ? (int)$actor['id'] : 0;
+        if (!cpms_public_affairs_collab_is_admin_user() && ($creatorId <= 0 || $creatorId !== $actorId)) {
+            return array('ok' => false, 'message' => 'Saved View 삭제 권한이 없습니다.');
+        }
+        $viewName = isset($store['items'][$i]['view_name']) ? (string)$store['items'][$i]['view_name'] : '';
+        $store['items'][$i]['deleted_at'] = date('Y-m-d H:i:s');
+        $store['items'][$i]['updated_at'] = date('Y-m-d H:i:s');
+        $found = true;
+        break;
+    }
+    if (!$found) return array('ok' => false, 'message' => 'Saved View를 찾을 수 없습니다.');
+    if (!cpms_public_affairs_collab_save_store('saved_views', $store)) return array('ok' => false, 'message' => 'Saved View 삭제 처리에 실패했습니다.');
+    cpms_public_affairs_collab_add_project_activity($projectId, 'Saved View 삭제', 'saved_view', $viewName, '', '저장된 필터 보기를 삭제했습니다.', $actor, 0);
+    return array('ok' => true, 'message' => 'Saved View를 삭제했습니다.');
 }}
 
 if (!function_exists('cpms_public_affairs_collab_normalize_dept')) {
@@ -784,6 +1201,10 @@ function cpms_public_affairs_collab_normalize_task($task) {
     if (!isset($task['document_link'])) $task['document_link'] = '';
     if (!isset($task['comment_count'])) $task['comment_count'] = 0;
     if (!isset($task['file_count'])) $task['file_count'] = 0;
+    if (!isset($task['template_id'])) $task['template_id'] = 0;
+    if (!isset($task['template_name'])) $task['template_name'] = '';
+    if (!isset($task['checklist_total'])) $task['checklist_total'] = 0;
+    if (!isset($task['checklist_done'])) $task['checklist_done'] = 0;
     if (!isset($task['archived'])) $task['archived'] = 0;
     if (!isset($task['created_at'])) $task['created_at'] = '';
     if (!isset($task['updated_at'])) $task['updated_at'] = '';
@@ -1341,6 +1762,31 @@ function cpms_public_affairs_collab_create_task($pdo, $post, $files, $actor, $pr
     if ($projectName === '' && $projectId > 0) $projectName = cpms_public_affairs_collab_project_name($projects, $projectId);
     if ($projectName === '') return array('ok' => false, 'message' => '프로젝트 정보를 찾을 수 없습니다.', 'task_id' => 0);
 
+    $projectContext = array();
+    if (is_array($projects)) {
+        foreach ($projects as $projectRow) {
+            if (is_array($projectRow) && isset($projectRow['id']) && (int)$projectRow['id'] === $projectId) {
+                $projectContext = $projectRow;
+                break;
+            }
+        }
+    }
+    $templateId = isset($post['template_id']) ? (int)$post['template_id'] : 0;
+    $template = $templateId > 0 ? cpms_public_affairs_collab_template_by_id($templateId) : null;
+    if (is_array($template) && !empty($template['is_active'])) {
+        if (!isset($post['task_type']) || trim((string)$post['task_type']) === '') $post['task_type'] = isset($template['task_type']) ? $template['task_type'] : '';
+        if (!isset($post['title']) || trim((string)$post['title']) === '') $post['title'] = cpms_public_affairs_collab_apply_template_vars(isset($template['default_title']) ? $template['default_title'] : '', $projectName, $projectContext);
+        if (!isset($post['content']) || trim((string)$post['content']) === '') $post['content'] = cpms_public_affairs_collab_apply_template_vars(isset($template['default_content']) ? $template['default_content'] : '', $projectName, $projectContext);
+        if (!isset($post['status']) || trim((string)$post['status']) === '') $post['status'] = isset($template['default_status']) ? $template['default_status'] : '';
+        if (!isset($post['priority']) || trim((string)$post['priority']) === '') $post['priority'] = isset($template['default_priority']) ? $template['default_priority'] : '';
+        if (!isset($post['contract_impact']) || trim((string)$post['contract_impact']) === '') $post['contract_impact'] = isset($template['default_contract_impact']) ? $template['default_contract_impact'] : '없음';
+        if (!isset($post['schedule_impact']) || trim((string)$post['schedule_impact']) === '') $post['schedule_impact'] = isset($template['default_schedule_impact']) ? $template['default_schedule_impact'] : '없음';
+        if (!isset($post['due_date']) || trim((string)$post['due_date']) === '') $post['due_date'] = cpms_public_affairs_collab_due_date_from_days(isset($template['default_due_days']) ? (int)$template['default_due_days'] : 0);
+    } else {
+        $templateId = 0;
+        $template = null;
+    }
+
     $title = cpms_public_affairs_collab_clean_text(isset($post['title']) ? $post['title'] : '', 200);
     if ($title === '') return array('ok' => false, 'message' => '업무 제목을 입력해주세요.', 'task_id' => 0);
 
@@ -1400,6 +1846,10 @@ function cpms_public_affairs_collab_create_task($pdo, $post, $files, $actor, $pr
         'contract_impact' => cpms_public_affairs_collab_clean_text(isset($post['contract_impact']) ? $post['contract_impact'] : '없음', 20),
         'schedule_impact' => cpms_public_affairs_collab_clean_text(isset($post['schedule_impact']) ? $post['schedule_impact'] : '없음', 20),
         'document_link' => cpms_public_affairs_collab_clean_text(isset($post['document_link']) ? $post['document_link'] : '', 500),
+        'template_id' => $templateId,
+        'template_name' => is_array($template) && isset($template['template_name']) ? (string)$template['template_name'] : '',
+        'checklist_total' => 0,
+        'checklist_done' => 0,
         'comment_count' => 0,
         'file_count' => 0,
         'archived' => 0,
@@ -1413,10 +1863,17 @@ function cpms_public_affairs_collab_create_task($pdo, $post, $files, $actor, $pr
     if (!cpms_public_affairs_collab_save_store('tasks', $store)) {
         return array('ok' => false, 'message' => '업무 저장에 실패했습니다. storage 쓰기 권한을 확인해주세요.', 'task_id' => 0);
     }
-    cpms_public_affairs_collab_add_history($taskId, $projectId, '업무 생성', 'task', '', $title, '공무 협업툴 업무가 생성되었습니다.', $actor);
-    cpms_public_affairs_collab_add_project_activity($projectId, '업무 생성', 'task', '', $taskNo . ' ' . $title, '공무 협업툴 업무카드가 생성되었습니다.', $actor, $taskId);
+    $createAction = $templateId > 0 ? '템플릿 업무 생성' : '업무 생성';
+    $createMessage = $templateId > 0 ? '업무 템플릿으로 공무 업무카드가 생성되었습니다.' : '공무 협업툴 업무가 생성되었습니다.';
+    cpms_public_affairs_collab_add_history($taskId, $projectId, $createAction, 'task', '', $title, $createMessage, $actor);
+    cpms_public_affairs_collab_add_project_activity($projectId, $createAction, 'task', '', $taskNo . ' ' . $title, $createMessage, $actor, $taskId);
+    if (is_array($template) && isset($template['checklist_items']) && is_array($template['checklist_items'])) {
+        cpms_public_affairs_collab_create_checklists_for_task($task, $template['checklist_items'], $actor);
+    }
     cpms_public_affairs_collab_save_uploaded_files($task, isset($files['attachments']) ? $files['attachments'] : null, $actor);
-    return array('ok' => true, 'message' => '업무가 등록되었습니다.', 'task_id' => $taskId, 'task_no' => $taskNo, 'task' => cpms_public_affairs_collab_normalize_task($task));
+    $freshTask = cpms_public_affairs_collab_find_task($taskId);
+    if (!is_array($freshTask)) $freshTask = $task;
+    return array('ok' => true, 'message' => '업무가 등록되었습니다.', 'task_id' => $taskId, 'task_no' => $taskNo, 'task' => cpms_public_affairs_collab_normalize_task($freshTask));
 }}
 
 if (!function_exists('cpms_public_affairs_collab_update_task')) {
@@ -1700,6 +2157,7 @@ function cpms_public_affairs_collab_task_counts() {
     return array(
         'comments' => cpms_public_affairs_collab_count_by_task('comments'),
         'files' => cpms_public_affairs_collab_count_by_task('attachments'),
+        'checklists' => cpms_public_affairs_collab_checklist_counts_by_task(),
     );
 }}
 
@@ -1718,6 +2176,8 @@ function cpms_public_affairs_collab_sync_task_counts($taskId) {
     $counts = cpms_public_affairs_collab_task_counts();
     $commentCount = cpms_public_affairs_collab_count_for_task($counts, $taskId, 'comments');
     $fileCount = cpms_public_affairs_collab_count_for_task($counts, $taskId, 'files');
+    $checklistTotal = cpms_public_affairs_collab_checklist_count_for_task($counts['checklists'], $taskId, 'total');
+    $checklistDone = cpms_public_affairs_collab_checklist_count_for_task($counts['checklists'], $taskId, 'done');
     $store = cpms_public_affairs_collab_load_store('tasks');
     if (!isset($store['items']) || !is_array($store['items'])) return false;
     $changed = false;
@@ -1729,6 +2189,14 @@ function cpms_public_affairs_collab_sync_task_counts($taskId) {
         }
         if (!isset($store['items'][$i]['file_count']) || (int)$store['items'][$i]['file_count'] !== $fileCount) {
             $store['items'][$i]['file_count'] = $fileCount;
+            $changed = true;
+        }
+        if (!isset($store['items'][$i]['checklist_total']) || (int)$store['items'][$i]['checklist_total'] !== $checklistTotal) {
+            $store['items'][$i]['checklist_total'] = $checklistTotal;
+            $changed = true;
+        }
+        if (!isset($store['items'][$i]['checklist_done']) || (int)$store['items'][$i]['checklist_done'] !== $checklistDone) {
+            $store['items'][$i]['checklist_done'] = $checklistDone;
             $changed = true;
         }
         break;
@@ -1745,14 +2213,22 @@ function cpms_public_affairs_collab_task_payload($taskId) {
     $comments = cpms_public_affairs_collab_comments($taskId);
     $files = cpms_public_affairs_collab_files($taskId);
     $history = cpms_public_affairs_collab_history($taskId);
+    $checklists = cpms_public_affairs_collab_checklists($taskId);
     $task['comment_count'] = count($comments);
     $task['file_count'] = count($files);
+    $checklistDone = 0;
+    foreach ($checklists as $row) {
+        if (!empty($row['is_done'])) $checklistDone++;
+    }
+    $task['checklist_total'] = count($checklists);
+    $task['checklist_done'] = $checklistDone;
     $task['is_delayed'] = cpms_public_affairs_collab_is_delayed($task) ? 1 : 0;
     $task['is_due_today'] = cpms_public_affairs_collab_is_due_today($task) ? 1 : 0;
     return array(
         'task' => $task,
         'comments' => $comments,
         'files' => $files,
+        'checklists' => $checklists,
         'history' => $history,
     );
 }}

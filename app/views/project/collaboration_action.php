@@ -146,6 +146,37 @@ if ($action === 'settings') {
     cpms_public_affairs_collab_action_finish($ok, $ok ? '공무 협업툴 설정이 저장되었습니다.' : '설정 저장에 실패했습니다.', '?r=public_affairs_collab&section=settings');
 }
 
+if ($action === 'template_reset') {
+    // 공무 협업툴 Settings: 업무유형별 기본 템플릿을 JSON으로 다시 생성한다.
+    $result = cpms_public_affairs_collab_reset_templates($actor);
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=public_affairs_collab&section=settings');
+}
+
+if ($action === 'template_toggle') {
+    // 공무 협업툴 Settings: 템플릿 활성/비활성만 빠르게 변경한다.
+    $templateId = isset($_POST['template_id']) ? (int)$_POST['template_id'] : 0;
+    $isActive = isset($_POST['is_active']) && (string)$_POST['is_active'] === '1';
+    $result = cpms_public_affairs_collab_toggle_template($templateId, $isActive, $actor);
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=public_affairs_collab&section=settings');
+}
+
+if ($action === 'saved_view_create') {
+    // 공무 협업툴 프로젝트 상세: 현재 필터를 프로젝트별 Saved View로 저장한다.
+    $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
+    $result = cpms_public_affairs_collab_save_view($projectId, $_POST, $actor);
+    $fallback = $projectId > 0 ? '?r=public_affairs_collab&space_project_id=' . $projectId . '&section=' . urlencode(isset($_POST['section']) ? (string)$_POST['section'] : 'board') : '?r=public_affairs_collab';
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', $fallback, array('saved_view_id' => isset($result['view_id']) ? (int)$result['view_id'] : 0));
+}
+
+if ($action === 'saved_view_delete') {
+    // 공무 협업툴 프로젝트 상세: 프로젝트별 Saved View를 보관 삭제한다.
+    $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
+    $viewId = isset($_POST['saved_view_id']) ? (int)$_POST['saved_view_id'] : 0;
+    $result = cpms_public_affairs_collab_delete_saved_view($viewId, $projectId, $actor);
+    $fallback = $projectId > 0 ? '?r=public_affairs_collab&space_project_id=' . $projectId . '&section=' . urlencode(isset($_POST['section']) ? (string)$_POST['section'] : 'board') : '?r=public_affairs_collab';
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', $fallback);
+}
+
 if ($taskId <= 0) {
     cpms_public_affairs_collab_action_finish(false, '업무 정보가 올바르지 않습니다.', '?r=public_affairs_collab');
 }
@@ -161,6 +192,28 @@ if (!cpms_public_affairs_collab_user_can_view_task($task, $actor)) {
 if ($action === 'detail') {
     // 공무 협업툴 상세패널: 페이지 이동 없이 업무카드 상세를 AJAX로 조회한다.
     cpms_public_affairs_collab_action_finish(true, '업무 상세를 불러왔습니다.', '?r=public_affairs_collab&task_id=' . $taskId, cpms_public_affairs_collab_action_task_extra($taskId));
+}
+
+if ($action === 'checklist_add') {
+    // 공무 협업툴 상세패널: 업무별 체크리스트 항목을 추가한다.
+    if (!cpms_public_affairs_collab_user_can_edit_task($task, $actor)) {
+        cpms_public_affairs_collab_action_finish(false, '체크리스트 수정 권한이 없습니다.', '?r=public_affairs_collab&task_id=' . $taskId);
+    }
+    $result = cpms_public_affairs_collab_add_checklist_item($task, isset($_POST['checklist_title']) ? $_POST['checklist_title'] : '', $actor);
+    $extra = !empty($result['ok']) ? cpms_public_affairs_collab_action_task_extra($taskId) : array('task_id' => $taskId);
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=public_affairs_collab&task_id=' . $taskId, $extra);
+}
+
+if ($action === 'checklist_toggle') {
+    // 공무 협업툴 상세패널: 체크리스트 완료/해제 상태를 저장한다.
+    if (!cpms_public_affairs_collab_user_can_edit_task($task, $actor)) {
+        cpms_public_affairs_collab_action_finish(false, '체크리스트 수정 권한이 없습니다.', '?r=public_affairs_collab&task_id=' . $taskId);
+    }
+    $checklistId = isset($_POST['checklist_id']) ? (int)$_POST['checklist_id'] : 0;
+    $isDone = isset($_POST['is_done']) && (string)$_POST['is_done'] === '1';
+    $result = cpms_public_affairs_collab_toggle_checklist_item($task, $checklistId, $isDone, $actor);
+    $extra = !empty($result['ok']) ? cpms_public_affairs_collab_action_task_extra($taskId) : array('task_id' => $taskId);
+    cpms_public_affairs_collab_action_finish(!empty($result['ok']), isset($result['message']) ? $result['message'] : '', '?r=public_affairs_collab&task_id=' . $taskId, $extra);
 }
 
 if ($action === 'update' || $action === 'quick_update') {
