@@ -940,6 +940,22 @@ function cpms_project_unit_price_should_skip_item($itemName) {
     return false;
 }}
 
+if (!function_exists('cpms_project_unit_price_is_safety_management_item')) {
+function cpms_project_unit_price_is_safety_management_item($itemName, $spec) {
+    $text = cpms_project_unit_price_label_normalize((string)$itemName . ' ' . (string)$spec);
+    if ($text === '') return false;
+    $keywords = array(
+        cpms_project_unit_price_label_normalize(cpms_project_unit_price_decode('\uC0B0\uC5C5\uC548\uC804\uAD00\uB9AC\uBE44')),
+        cpms_project_unit_price_label_normalize(cpms_project_unit_price_decode('\uC0B0\uC5C5\uC548\uC804\uBCF4\uAC74')),
+        cpms_project_unit_price_label_normalize(cpms_project_unit_price_decode('\uC548\uC804\uBCF4\uAC74\uAD00\uB9AC\uBE44')),
+        cpms_project_unit_price_label_normalize(cpms_project_unit_price_decode('\uC548\uC804\uAD00\uB9AC\uBE44'))
+    );
+    foreach ($keywords as $keyword) {
+        if ($keyword !== '' && mb_strpos($text, $keyword, 0, 'UTF-8') !== false) return true;
+    }
+    return false;
+}}
+
 if (!function_exists('cpms_project_unit_price_extract_rows')) {
 function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
     $rows = array();
@@ -947,7 +963,6 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
     $dataStartRow = isset($detected['data_start_row']) ? (int)$detected['data_start_row'] : 0;
     if ($dataStartRow <= 0) return $rows;
 
-    $blankCount = 0;
     $importOrder = 0;
     $rowNumber = $dataStartRow;
     while ($rowNumber <= $maxRow) {
@@ -966,27 +981,34 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
         $remark = isset($columns['remark']) && isset($matrix[$rowNumber][$columns['remark']]) ? cpms_project_unit_price_text_normalize($matrix[$rowNumber][$columns['remark']]) : '';
 
         if ($itemName === '' && trim((string)$unit) === '' && trim((string)$qtyRaw) === '' && trim((string)$materialRaw) === '' && trim((string)$laborRaw) === '' && trim((string)$expenseRaw) === '') {
-            $blankCount++;
-            if ($blankCount >= 50 && count($rows) > 0) break;
+            /* Estimate sheets can have large blank/hidden gaps between sections. */
             $rowNumber++;
             continue;
         }
-        $blankCount = 0;
 
         if (cpms_project_unit_price_should_skip_item($itemName)) {
             $rowNumber++;
             continue;
         }
-        if (trim((string)$unit) === '') {
-            $rowNumber++;
-            continue;
-        }
-
         $qty = cpms_project_unit_price_number_parse($qtyRaw);
         $materialParsed = cpms_project_unit_price_number_parse($materialRaw);
         $laborParsed = cpms_project_unit_price_number_parse($laborRaw);
         $expenseParsed = cpms_project_unit_price_number_parse($expenseRaw);
         $excelUnitPriceTotal = cpms_project_unit_price_number_parse($excelTotalRaw);
+        $amount = cpms_project_unit_price_number_parse($amountRaw);
+        $safetyManagementAmount = null;
+        if ($amount !== null && abs((float)$amount) > 0.0001) $safetyManagementAmount = $amount;
+        else if ($excelUnitPriceTotal !== null && abs((float)$excelUnitPriceTotal) > 0.0001) $safetyManagementAmount = $excelUnitPriceTotal;
+        if (cpms_project_unit_price_is_safety_management_item($itemName, $spec) && $safetyManagementAmount !== null) {
+            if (trim((string)$unit) === '') $unit = cpms_project_unit_price_decode('\uC2DD');
+            if ($qty === null) $qty = 1.0;
+            if ($excelUnitPriceTotal === null) $excelUnitPriceTotal = $safetyManagementAmount;
+            if ($amount === null || abs((float)$amount) < 0.0001) $amount = $safetyManagementAmount;
+        }
+        if (trim((string)$unit) === '') {
+            $rowNumber++;
+            continue;
+        }
         $hasAnyUnitPricePart = ($materialParsed !== null || $laborParsed !== null || $expenseParsed !== null || $excelUnitPriceTotal !== null);
         if ($qty === null || !$hasAnyUnitPricePart) {
             $rowNumber++;
@@ -998,7 +1020,6 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
         $expenseUnitPrice = ($expenseParsed === null) ? 0.0 : $expenseParsed;
         $calculatedUnitPrice = $materialUnitPrice + $laborUnitPrice + $expenseUnitPrice;
         $unitPrice = ($excelUnitPriceTotal !== null) ? $excelUnitPriceTotal : $calculatedUnitPrice;
-        $amount = cpms_project_unit_price_number_parse($amountRaw);
 
         if ($excelUnitPriceTotal !== null && $materialParsed === null && $laborParsed === null && $expenseParsed === null) {
             $validationCode = 'ok';
@@ -1013,9 +1034,6 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
             $validationCode = 'mismatch';
             $validationText = cpms_project_unit_price_lang('validation_mismatch');
         }
-
-        $isSafety = 0;
-        if (mb_strpos($itemName, cpms_project_unit_price_lang('safety'), 0, 'UTF-8') !== false || mb_strpos($spec, cpms_project_unit_price_lang('safety'), 0, 'UTF-8') !== false) $isSafety = 1;
 
         $importOrder++;
         $rowData = array(
@@ -1037,7 +1055,7 @@ function cpms_project_unit_price_extract_rows($matrix, $maxRow, $detected) {
             'calculated_unit_price' => $calculatedUnitPrice,
             'excel_unit_price_total' => $excelUnitPriceTotal,
             'amount' => $amount,
-            'is_safety' => $isSafety,
+            'is_safety' => 0,
             'remark' => $remark,
             'source_row' => $rowNumber,
             'source_row_no' => $rowNumber,
@@ -1245,7 +1263,6 @@ function cpms_project_unit_price_standard_extract_rows($matrix, $yellowCells, $m
 
     $currentLocation = '';
     $currentTradeGroup = '';
-    $blankCount = 0;
     $importOrder = 0;
     $rowNumber = $dataStartRow;
     while ($rowNumber <= (int)$maxRow) {
@@ -1266,23 +1283,22 @@ function cpms_project_unit_price_standard_extract_rows($matrix, $yellowCells, $m
         $rowText = cpms_project_unit_price_standard_row_text($matrix, $rowNumber, $maxCol);
 
         if (trim($rowText) === '') {
-            $blankCount++;
-            if ($blankCount >= 50 && count($rows) > 0) break;
+            /* Estimate sheets can have large blank/hidden gaps between sections. */
             $rowNumber++;
             continue;
         }
-        $blankCount = 0;
 
         $rowTypeNorm = cpms_project_unit_price_label_normalize($rowType);
         $locationNorm = cpms_project_unit_price_label_normalize(cpms_project_unit_price_standard_text('location_type'));
         $workNorm = cpms_project_unit_price_label_normalize(cpms_project_unit_price_standard_text('work_type'));
         $detailNorm = cpms_project_unit_price_label_normalize(cpms_project_unit_price_standard_text('detail_type'));
+        $isDetailRowType = ($rowTypeNorm === $detailNorm || ($rowTypeNorm !== '' && $detailNorm !== '' && mb_strpos($rowTypeNorm, $detailNorm, 0, 'UTF-8') !== false));
         $isLocationRowType = ($rowTypeNorm === $locationNorm || ($rowTypeNorm !== '' && $locationNorm !== '' && mb_strpos($rowTypeNorm, $locationNorm, 0, 'UTF-8') !== false));
         $isWorkRowType = ($rowTypeNorm === $workNorm || ($rowTypeNorm !== '' && $workNorm !== '' && mb_strpos($rowTypeNorm, $workNorm, 0, 'UTF-8') !== false));
         $itemYellow = (isset($columns['item_name']) && isset($yellowCells[$rowNumber]) && isset($yellowCells[$rowNumber][(int)$columns['item_name']]));
         $rowYellow = (cpms_project_unit_price_standard_yellow_count($yellowCells, $rowNumber) >= 2);
 
-        if ($isLocationRowType || $itemYellow || $rowYellow) {
+        if (!$isDetailRowType && ($isLocationRowType || $itemYellow || $rowYellow)) {
             $skipCols = array();
             if (isset($columns['row_type'])) $skipCols[(int)$columns['row_type']] = true;
             $newLocation = ($locationName !== '') ? $locationName : (($itemName !== '') ? $itemName : cpms_project_unit_price_standard_first_value($matrix, $rowNumber, $maxCol, $skipCols));
@@ -1291,7 +1307,7 @@ function cpms_project_unit_price_standard_extract_rows($matrix, $yellowCells, $m
             continue;
         }
 
-        if ($isWorkRowType || ($itemName !== '' && $qtyRaw === '' && $unit === '' && cpms_project_unit_price_standard_group_name($itemName) !== $itemName)) {
+        if (!$isDetailRowType && ($isWorkRowType || ($itemName !== '' && $qtyRaw === '' && $unit === '' && cpms_project_unit_price_standard_group_name($itemName) !== $itemName))) {
             $newGroup = ($tradeGroup !== '') ? $tradeGroup : (($itemName !== '') ? cpms_project_unit_price_standard_group_name($itemName) : '');
             if ($newGroup !== '') $currentTradeGroup = $newGroup;
             $rowNumber++;
@@ -1307,7 +1323,7 @@ function cpms_project_unit_price_standard_extract_rows($matrix, $yellowCells, $m
         if ($locationName === '' && $currentLocation !== '') $locationName = $currentLocation;
 
         if ($itemName === '' && trim((string)$qtyRaw) === '') {
-            if ($tradeGroup !== '' && $unit === '') $currentTradeGroup = $tradeGroup;
+            if (!$isDetailRowType && $tradeGroup !== '' && $unit === '') $currentTradeGroup = $tradeGroup;
             $rowNumber++;
             continue;
         }
@@ -1318,6 +1334,15 @@ function cpms_project_unit_price_standard_extract_rows($matrix, $yellowCells, $m
         $expenseParsed = cpms_project_unit_price_number_parse($expenseRaw);
         $unitPriceParsed = cpms_project_unit_price_number_parse($totalRaw);
         $amount = cpms_project_unit_price_number_parse($amountRaw);
+        $safetyManagementAmount = null;
+        if ($amount !== null && abs((float)$amount) > 0.0001) $safetyManagementAmount = $amount;
+        else if ($unitPriceParsed !== null && abs((float)$unitPriceParsed) > 0.0001) $safetyManagementAmount = $unitPriceParsed;
+        if (cpms_project_unit_price_is_safety_management_item($itemName, $spec) && $safetyManagementAmount !== null) {
+            if (trim((string)$unit) === '') $unit = cpms_project_unit_price_decode('\uC2DD');
+            if ($qty === null) $qty = 1.0;
+            if ($unitPriceParsed === null) $unitPriceParsed = $safetyManagementAmount;
+            if ($amount === null || abs((float)$amount) < 0.0001) $amount = $safetyManagementAmount;
+        }
         $materialUnitPrice = ($materialParsed === null) ? 0.0 : $materialParsed;
         $laborUnitPrice = ($laborParsed === null) ? 0.0 : $laborParsed;
         $expenseUnitPrice = ($expenseParsed === null) ? 0.0 : $expenseParsed;
@@ -1340,9 +1365,6 @@ function cpms_project_unit_price_standard_extract_rows($matrix, $yellowCells, $m
         else if ($priceCalculated) $status = cpms_project_unit_price_standard_text('calculated_price');
         else if ($amountCalculated) $status = cpms_project_unit_price_standard_text('calculated_amount');
 
-        $isSafety = 0;
-        if (mb_strpos($itemName, cpms_project_unit_price_lang('safety'), 0, 'UTF-8') !== false || mb_strpos($spec, cpms_project_unit_price_lang('safety'), 0, 'UTF-8') !== false) $isSafety = 1;
-
         $importOrder++;
         $rowData = array(
             'row_type' => $rowType,
@@ -1364,7 +1386,7 @@ function cpms_project_unit_price_standard_extract_rows($matrix, $yellowCells, $m
             'calculated_unit_price' => $calculatedUnitPrice,
             'excel_unit_price_total' => cpms_project_unit_price_number_parse($totalRaw),
             'amount' => $amount,
-            'is_safety' => $isSafety,
+            'is_safety' => 0,
             'remark' => $remark,
             'source_row' => $rowNumber,
             'source_row_no' => $rowNumber,

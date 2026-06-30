@@ -1280,7 +1280,7 @@ if ($route === '경영현황') {
     if (is_array($_GET)) {
         $cacheParams = $_GET;
         ksort($cacheParams);
-        $companyProfitCacheKey = md5(serialize($cacheParams));
+        $companyProfitCacheKey = md5('company_profit_period_v2:' . serialize($cacheParams));
     }
     $companyProfitSummary = null;
     if ($companyProfitCacheKey !== '' && isset($_SESSION['_company_profit_cache'][$companyProfitCacheKey]) && is_array($_SESSION['_company_profit_cache'][$companyProfitCacheKey])) {

@@ -33,7 +33,7 @@ if (!function_exists('cpms_project_cost_metrics')) {
             COALESCE(SUM(dw.done_qty * COALESCE(up.unit_price,0)),0) AS internal_amt,
             COALESCE(SUM(dw.done_qty * COALESCE(up.labor_unit_price,0)),0) AS planned_labor,
             COALESCE(SUM(dw.done_qty * COALESCE(up.material_unit_price,0)),0) AS planned_material,
-            COALESCE(SUM(dw.done_qty * (CASE WHEN up.safety_unit_price IS NOT NULL THEN up.safety_unit_price WHEN up.is_safety=1 THEN COALESCE(up.labor_unit_price,0) ELSE 0 END)),0) AS planned_safety
+            COALESCE(SUM(dw.done_qty * (CASE WHEN up.is_safety=1 THEN COALESCE(up.safety_unit_price, up.labor_unit_price, 0) ELSE 0 END)),0) AS planned_safety
             FROM cpms_daily_work_qty dw JOIN cpms_project_unit_prices up ON up.id = dw.unit_price_id
             WHERE dw.project_id=:pid AND dw.work_date BETWEEN :sd AND :ed";
         $st = $pdo->prepare($sqlP);

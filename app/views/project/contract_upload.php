@@ -638,6 +638,10 @@ function cpms_contract_upload_apply_unit_price_update($pdo, $projectId, $rows, $
         if ($matchIndex >= 0 && isset($activeRows[$matchIndex])) {
             $usedIndexes[$matchIndex] = 1;
             $oldRow = $activeRows[$matchIndex];
+            if (isset($availableColumns['is_safety'])) {
+                $data['is_safety'] = isset($oldRow['is_safety']) ? (int)$oldRow['is_safety'] : 0;
+                $row['is_safety'] = $data['is_safety'];
+            }
             $badges = array();
             $oldUnitPrice = cpms_contract_change_unit_price_value($oldRow);
             $newUnitPrice = cpms_contract_change_unit_price_value($row);

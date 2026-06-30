@@ -2,7 +2,7 @@
 /**
  * 공무 > 프로젝트 상세 > 단가표 업로드 미리보기
  * - 1줄 헤더/2줄 헤더 엑셀 파싱
- * - 노무/자재/안전 계획단가 분리 파싱 + 안전항목 자동판정
+ * - 노무/자재/안전 계획단가 분리 파싱, 안전항목은 사용자가 직접 선택
  * - PHP 5.6 호환
  */
 
@@ -134,7 +134,7 @@ for ($r = $dataStart; $r < count($rows); $r++) {
     if (isset($fieldToCol['material_unit_price'])) { $x = nclean(@$row[$fieldToCol['material_unit_price']]); if ($x !== '' && is_numeric($x)) $mup = (float)$x; }
     if (isset($fieldToCol['safety_unit_price'])) { $x = nclean(@$row[$fieldToCol['safety_unit_price']]); if ($x !== '' && is_numeric($x)) $sup = (float)$x; }
 
-    $isSafety = (mb_strpos($item, '안전', 0, 'UTF-8') !== false || mb_strpos($spec, '안전', 0, 'UTF-8') !== false) ? 1 : 0;
+    $isSafety = 0;
     $parsed[] = array(
         'trade_group' => $tradeGroup, 'sub_trade' => $subTrade, 'location_name' => $locationName,
         'item_name' => $item, 'spec' => $spec, 'unit' => $unit, 'qty' => $qty,

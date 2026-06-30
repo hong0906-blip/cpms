@@ -581,28 +581,13 @@ function cpms_safety_cost_contract_total_query($pdo, $projectId, $mode)
         $where[count($where)] = '(is_current = 1 OR is_current IS NULL)';
     }
 
-    if ($mode === 'exact') {
-        $where[count($where)] = "TRIM(COALESCE(item_name, '')) = :exact_name";
-    } else {
-        $or = array("item_name LIKE :keyword");
-        if (cpms_safety_cost_column_exists($pdo, 'cpms_project_unit_prices', 'spec')) {
-            $or[count($or)] = "spec LIKE :keyword";
-        }
-        if (cpms_safety_cost_column_exists($pdo, 'cpms_project_unit_prices', 'is_safety')) {
-            $or[count($or)] = "is_safety = 1";
-        }
-        $where[count($where)] = '(' . implode(' OR ', $or) . ')';
-    }
+    if (!cpms_safety_cost_column_exists($pdo, 'cpms_project_unit_prices', 'is_safety')) return $rows;
+    $where[count($where)] = 'is_safety = 1';
 
     try {
         $sql = 'SELECT ' . implode(', ', $select) . ' FROM cpms_project_unit_prices WHERE ' . implode(' AND ', $where);
         $st = $pdo->prepare($sql);
         $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
-        if ($mode === 'exact') {
-            $st->bindValue(':exact_name', '안전관리비');
-        } else {
-            $st->bindValue(':keyword', '%안전관리비%');
-        }
         $st->execute();
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($rows)) $rows = array();

@@ -111,7 +111,6 @@ foreach ($newRows as $nr) {
         $changed = $changed || !cpms_unit_price_update_preview_num_same(isset($or['material_unit_price']) ? $or['material_unit_price'] : null, isset($nr['material_unit_price']) ? $nr['material_unit_price'] : null);
         $changed = $changed || !cpms_unit_price_update_preview_num_same(isset($or['expense_unit_price']) ? $or['expense_unit_price'] : null, isset($nr['expense_unit_price']) ? $nr['expense_unit_price'] : null);
         $changed = $changed || !cpms_unit_price_update_preview_text_same(isset($or['remark']) ? $or['remark'] : '', isset($nr['remark']) ? $nr['remark'] : '');
-        $changed = $changed || ((int)(isset($or['is_safety']) ? $or['is_safety'] : 0) !== (int)(isset($nr['is_safety']) ? $nr['is_safety'] : 0));
         if ($changed) $summary['changed']++;
         else $summary['kept']++;
         array_push($changes, array(

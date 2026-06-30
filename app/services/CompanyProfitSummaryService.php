@@ -178,7 +178,8 @@ function cpms_company_profit_normalize_filters($request, $pdo) {
     $viewMode = isset($request['view_mode']) ? trim((string)$request['view_mode']) : 'monthly';
     if ($viewMode !== 'monthly' && $viewMode !== 'quarterly' && $viewMode !== 'yearly') $viewMode = 'monthly';
 
-    $scope = isset($request['scope']) ? trim((string)$request['scope']) : 'year';
+    $hasCustomRange = isset($request['start_month']) || isset($request['end_month']);
+    $scope = isset($request['scope']) ? trim((string)$request['scope']) : ($hasCustomRange ? 'custom' : 'year');
     if ($scope !== 'year' && $scope !== 'month' && $scope !== 'custom' && $scope !== 'all') $scope = 'year';
 
     $month = isset($request['month']) ? (int)$request['month'] : 0;
@@ -199,6 +200,11 @@ function cpms_company_profit_normalize_filters($request, $pdo) {
     } else if ($scope === 'all') {
         $startMonth = sprintf('%04d-01', $years[0]);
         $endMonth = sprintf('%04d-12', $years[count($years) - 1]);
+    }
+    if (strtotime($startMonth . '-01') > strtotime($endMonth . '-01')) {
+        $tmpMonth = $startMonth;
+        $startMonth = $endMonth;
+        $endMonth = $tmpMonth;
     }
 
     $status = isset($request['status']) ? trim((string)$request['status']) : '';
@@ -704,18 +710,24 @@ function cpms_company_profit_safety_cost_total_summary($pdo, $projects) {
         'contract_total' => 0.0,
         'limit_110' => 0.0,
         'used_total' => 0.0,
+        'used_current_year' => 0.0,
+        'current_year' => (int)date('Y'),
         'remaining' => 0.0,
         'use_rate' => 0.0,
         'remaining_rate' => 0.0,
         'limit_use_rate' => 0.0,
     );
     if (!$pdo || !is_array($projects)) return $summary;
+    $currentYear = (int)$summary['current_year'];
+    $currentYearStart = sprintf('%04d-01-01', $currentYear);
+    $currentYearEnd = sprintf('%04d-12-31', $currentYear);
     foreach ($projects as $project) {
         $projectId = isset($project['id']) ? (int)$project['id'] : 0;
         if ($projectId <= 0) continue;
         $summary['project_count']++;
         $summary['contract_total'] += function_exists('cpms_safety_cost_contract_total') ? (float)cpms_safety_cost_contract_total($pdo, $projectId) : 0.0;
         $summary['used_total'] += function_exists('cpms_safety_cost_total') ? (float)cpms_safety_cost_total($projectId) : 0.0;
+        $summary['used_current_year'] += function_exists('cpms_safety_cost_total_between') ? (float)cpms_safety_cost_total_between($projectId, $currentYearStart, $currentYearEnd) : 0.0;
     }
     $summary['limit_110'] = round($summary['contract_total'] * 1.1);
     $summary['remaining'] = $summary['limit_110'] - $summary['used_total'];
@@ -775,6 +787,8 @@ function cpms_company_profit_build_dashboard($pdo, $request) {
             'contract_total' => 0.0,
             'limit_110' => 0.0,
             'used_total' => 0.0,
+            'used_current_year' => 0.0,
+            'current_year' => (int)date('Y'),
             'remaining' => 0.0,
             'use_rate' => 0.0,
             'remaining_rate' => 0.0,

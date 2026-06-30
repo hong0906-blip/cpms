@@ -471,6 +471,78 @@ $sampleCards = array(
     array('task_no' => 'PA-0004', 'task_type' => '기성/청구', 'title' => '기성청구 첨부자료 검토', 'project_name' => '샘플 현장 D', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '높음', 'status' => '대기', 'due_date' => date('Y-m-d', strtotime('+2 day')), 'due_time' => '10:00', 'contract_impact' => '없음', 'schedule_impact' => '없음'),
     array('task_no' => 'PA-0005', 'task_type' => '내역서 검토', 'title' => '협력업체 견적 비교', 'project_name' => '샘플 현장 E', 'assignee_name' => '담당자', 'requester_name' => '요청자', 'priority' => '보통', 'status' => '검토중', 'due_date' => date('Y-m-d', strtotime('+5 day')), 'due_time' => '', 'contract_impact' => '확인필요', 'schedule_impact' => '없음'),
 );
+
+// 공무 협업툴 Calendar/Timeline: 같은 업무 JSON을 마감일 월간 보기와 기간 막대 보기로 재구성한다.
+$calendarMonth = isset($_GET['calendar_month']) ? trim((string)$_GET['calendar_month']) : date('Y-m');
+if (!preg_match('/^[0-9]{4}-[0-9]{2}$/', $calendarMonth)) $calendarMonth = date('Y-m');
+$calendarFirstTs = strtotime($calendarMonth . '-01');
+if ($calendarFirstTs === false) {
+    $calendarMonth = date('Y-m');
+    $calendarFirstTs = strtotime($calendarMonth . '-01');
+}
+$calendarDaysInMonth = (int)date('t', $calendarFirstTs);
+$calendarStartWeekday = (int)date('w', $calendarFirstTs);
+$calendarPrevMonth = date('Y-m', strtotime('-1 month', $calendarFirstTs));
+$calendarNextMonth = date('Y-m', strtotime('+1 month', $calendarFirstTs));
+$calendarTasksByDate = array();
+$calendarNoDueTasks = array();
+foreach ($filteredTasks as $task) {
+    if (!is_array($task)) continue;
+    $dueDate = isset($task['due_date']) ? trim((string)$task['due_date']) : '';
+    if ($dueDate !== '' && preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/', $dueDate)) {
+        if (substr($dueDate, 0, 7) === $calendarMonth) {
+            if (!isset($calendarTasksByDate[$dueDate])) $calendarTasksByDate[$dueDate] = array();
+            $calendarTasksByDate[$dueDate][] = $task;
+        }
+    } else {
+        $calendarNoDueTasks[] = $task;
+    }
+}
+
+$timelineRows = array();
+$timelineUnknownTasks = array();
+$timelineRangeStartTs = false;
+$timelineRangeEndTs = false;
+foreach ($filteredTasks as $task) {
+    if (!is_array($task)) continue;
+    $startDate = isset($task['start_date']) ? trim((string)$task['start_date']) : '';
+    $endDate = isset($task['due_date']) ? trim((string)$task['due_date']) : '';
+    if ($startDate === '' && $endDate === '') {
+        $timelineUnknownTasks[] = $task;
+        continue;
+    }
+    if ($startDate === '') $startDate = $endDate;
+    if ($endDate === '') $endDate = $startDate;
+    $startTs = strtotime($startDate);
+    $endTs = strtotime($endDate);
+    if ($startTs === false || $endTs === false) {
+        $timelineUnknownTasks[] = $task;
+        continue;
+    }
+    if ($endTs < $startTs) {
+        $tmpTs = $startTs;
+        $startTs = $endTs;
+        $endTs = $tmpTs;
+        $tmpDate = $startDate;
+        $startDate = $endDate;
+        $endDate = $tmpDate;
+    }
+    if ($timelineRangeStartTs === false || $startTs < $timelineRangeStartTs) $timelineRangeStartTs = $startTs;
+    if ($timelineRangeEndTs === false || $endTs > $timelineRangeEndTs) $timelineRangeEndTs = $endTs;
+    $timelineRows[] = array('task' => $task, 'start_date' => $startDate, 'end_date' => $endDate, 'start_ts' => $startTs, 'end_ts' => $endTs);
+}
+if ($timelineRangeStartTs === false) $timelineRangeStartTs = strtotime(date('Y-m-d'));
+if ($timelineRangeEndTs === false) $timelineRangeEndTs = strtotime('+7 day', $timelineRangeStartTs);
+$timelineRangeStartTs = strtotime('-1 day', $timelineRangeStartTs);
+$timelineRangeEndTs = strtotime('+1 day', $timelineRangeEndTs);
+$timelineTotalDays = max(1, (int)floor(($timelineRangeEndTs - $timelineRangeStartTs) / 86400) + 1);
+$timelineTodayLeft = (int)round(max(0, min(100, ((strtotime(date('Y-m-d')) - $timelineRangeStartTs) / 86400) * 100 / $timelineTotalDays)));
+for ($i = 0; $i < count($timelineRows); $i++) {
+    $left = (($timelineRows[$i]['start_ts'] - $timelineRangeStartTs) / 86400) * 100 / $timelineTotalDays;
+    $width = ((($timelineRows[$i]['end_ts'] - $timelineRows[$i]['start_ts']) / 86400) + 1) * 100 / $timelineTotalDays;
+    $timelineRows[$i]['left_pct'] = max(0, min(98, round($left, 2)));
+    $timelineRows[$i]['width_pct'] = max(3, min(100 - $timelineRows[$i]['left_pct'], round($width, 2)));
+}
 $GLOBALS['pa_collab_stage'] = 'collaboration_render_header';
 ?>
 
@@ -501,7 +573,7 @@ body.pa-collab-open{overflow:hidden}
       </div>
       <div class="pa-collab-header-actions">
         <form method="get" action="" class="pa-search pa-collab-header-search">
-          <input type="hidden" name="r" value="공무">
+          <input type="hidden" name="r" value="public_affairs_collab">
           <input type="hidden" name="tab" value="collaboration">
           <input type="hidden" name="space_project_id" value="<?php echo (int)$spaceProjectId; ?>">
           <input type="hidden" name="section" value="<?php echo h($section); ?>">
@@ -741,20 +813,76 @@ body.pa-collab-open{overflow:hidden}
         <?php elseif ($section === 'calendar'): ?>
           <section class="pa-panel-card">
             <div class="pa-panel-title">Calendar</div>
-            <div class="pa-calendar-grid">
-              <?php foreach ($selectedProjectTasks as $task): if (!isset($task['due_date']) || trim((string)$task['due_date']) === '') continue; ?>
-                <a data-pa-detail-link class="pa-calendar-item" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h($task['due_date']); ?></b><span><?php echo h(cpms_public_affairs_collab_task_no($task)); ?> <?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span></a>
-              <?php endforeach; ?>
+            <div class="pa-calendar-toolbar">
+              <a class="pa-btn" href="<?php echo h(pa_collab_url(array('section' => 'calendar', 'calendar_month' => $calendarPrevMonth, 'task_id' => null))); ?>">이전 월</a>
+              <strong><?php echo h(date('Y년 m월', $calendarFirstTs)); ?></strong>
+              <a class="pa-btn" href="<?php echo h(pa_collab_url(array('section' => 'calendar', 'calendar_month' => date('Y-m'), 'task_id' => null))); ?>">오늘</a>
+              <a class="pa-btn" href="<?php echo h(pa_collab_url(array('section' => 'calendar', 'calendar_month' => $calendarNextMonth, 'task_id' => null))); ?>">다음 월</a>
             </div>
+            <div class="pa-calendar-month">
+              <?php foreach (array('일','월','화','수','목','금','토') as $weekday): ?><div class="pa-calendar-weekday"><?php echo h($weekday); ?></div><?php endforeach; ?>
+              <?php for ($blank = 0; $blank < $calendarStartWeekday; $blank++): ?><div class="pa-calendar-day is-empty"></div><?php endfor; ?>
+              <?php for ($day = 1; $day <= $calendarDaysInMonth; $day++): ?>
+                <?php $dateKey = $calendarMonth . '-' . str_pad((string)$day, 2, '0', STR_PAD_LEFT); $dayTasks = isset($calendarTasksByDate[$dateKey]) ? $calendarTasksByDate[$dateKey] : array(); ?>
+                <div class="pa-calendar-day <?php echo $dateKey === date('Y-m-d') ? 'is-today' : ''; ?>">
+                  <div class="pa-calendar-date"><b><?php echo (int)$day; ?></b><span><?php echo count($dayTasks); ?>건</span></div>
+                  <?php foreach ($dayTasks as $task): ?>
+                    <a data-pa-detail-link class="pa-calendar-task <?php echo pa_priority_class(isset($task['priority']) ? $task['priority'] : ''); ?>" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>">
+                      <b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b>
+                      <span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span>
+                    </a>
+                  <?php endforeach; ?>
+                </div>
+              <?php endfor; ?>
+            </div>
+            <?php if (count($calendarNoDueTasks) > 0): ?>
+              <div class="pa-calendar-nodue">
+                <div class="pa-panel-title">마감일 없는 업무</div>
+                <?php foreach ($calendarNoDueTasks as $task): ?>
+                  <a data-pa-detail-link class="pa-calendar-task" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span></a>
+                <?php endforeach; ?>
+              </div>
+            <?php endif; ?>
           </section>
         <?php elseif ($section === 'timeline'): ?>
           <section class="pa-panel-card">
             <div class="pa-panel-title">Timeline</div>
-            <div class="pa-timeline-list">
-              <?php foreach ($selectedProjectTasks as $task): $start = isset($task['start_date']) && trim((string)$task['start_date']) !== '' ? $task['start_date'] : (isset($task['due_date']) ? $task['due_date'] : ''); $end = isset($task['due_date']) ? $task['due_date'] : ''; if ($start === '' && $end === '') continue; ?>
-                <a data-pa-detail-link class="pa-timeline-row" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><span><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></span><b><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></b><em><?php echo h(($start !== '' ? $start : '-') . ' ~ ' . ($end !== '' ? $end : '-')); ?></em></a>
-              <?php endforeach; ?>
-            </div>
+            <?php if (count($timelineRows) === 0 && count($timelineUnknownTasks) === 0): ?>
+              <div class="pa-empty">표시할 일정 업무가 없습니다.</div>
+            <?php else: ?>
+              <div class="pa-timeline-chart">
+                <div class="pa-timeline-head">
+                  <div>업무</div>
+                  <div class="pa-timeline-scale">
+                    <span><?php echo h(date('Y-m-d', $timelineRangeStartTs)); ?></span>
+                    <i style="left:<?php echo (int)$timelineTodayLeft; ?>%"></i>
+                    <span><?php echo h(date('Y-m-d', $timelineRangeEndTs)); ?></span>
+                  </div>
+                </div>
+                <?php foreach ($timelineRows as $row): $task = $row['task']; $isDelayed = cpms_public_affairs_collab_is_delayed($task); ?>
+                  <div class="pa-timeline-chart-row">
+                    <a data-pa-detail-link class="pa-timeline-label" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>">
+                      <b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b>
+                      <span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span>
+                      <em><?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?></em>
+                    </a>
+                    <div class="pa-timeline-track">
+                      <a data-pa-detail-link class="pa-timeline-bar <?php echo $isDelayed ? 'is-delayed' : ''; ?>" style="left:<?php echo h($row['left_pct']); ?>%;width:<?php echo h($row['width_pct']); ?>%;" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>">
+                        <span><?php echo h($row['start_date'] . ' ~ ' . $row['end_date']); ?></span>
+                      </a>
+                    </div>
+                  </div>
+                <?php endforeach; ?>
+              </div>
+              <?php if (count($timelineUnknownTasks) > 0): ?>
+                <div class="pa-timeline-unknown">
+                  <div class="pa-panel-title">일정 미정 업무</div>
+                  <?php foreach ($timelineUnknownTasks as $task): ?>
+                    <a data-pa-detail-link class="pa-calendar-task" href="<?php echo h(pa_collab_url(array('task_id' => isset($task['id']) ? (int)$task['id'] : 0))); ?>"><b><?php echo h(cpms_public_affairs_collab_task_no($task)); ?></b><span><?php echo h(isset($task['title']) ? $task['title'] : '-'); ?></span></a>
+                  <?php endforeach; ?>
+                </div>
+              <?php endif; ?>
+            <?php endif; ?>
           </section>
         <?php elseif ($section === 'files'): ?>
           <section class="pa-table-wrap"><table class="pa-table"><thead><tr><th>업무번호</th><th>파일명</th><th>업로드자</th><th>업로드일시</th><th>크기</th><th>다운로드</th></tr></thead><tbody>
@@ -790,7 +918,7 @@ body.pa-collab-open{overflow:hidden}
             <?php endforeach; ?>
           </div>
           <form method="get" action="" class="pa-filter-grid">
-            <input type="hidden" name="r" value="공무">
+            <input type="hidden" name="r" value="public_affairs_collab">
             <input type="hidden" name="tab" value="collaboration">
             <input type="hidden" name="space_project_id" value="<?php echo (int)$spaceProjectId; ?>">
             <input type="hidden" name="section" value="<?php echo h($section); ?>">
@@ -1062,7 +1190,7 @@ body.pa-collab-open{overflow:hidden}
         <input type="hidden" name="status" value="할 일">
         <input type="hidden" name="project_id" value="<?php echo (int)$spaceProjectId; ?>">
         <input type="hidden" name="project_name" value="<?php echo h(is_array($selectedSpace) && isset($selectedSpace['name']) ? $selectedSpace['name'] : ''); ?>">
-        <input type="hidden" name="return_url" value="?r=public_affairs_collab">
+        <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array('section' => 'board', 'task_id' => null))); ?>">
         <div class="pa-modal-body">
           <div class="pa-form-grid">
             <div><label class="pa-muted">업무유형</label><select name="task_type" class="pa-field"><?php foreach ($settings['task_types'] as $type): ?><option value="<?php echo h($type); ?>"><?php echo h($type); ?></option><?php endforeach; ?></select></div>

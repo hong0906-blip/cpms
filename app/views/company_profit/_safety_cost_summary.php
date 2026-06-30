@@ -1,5 +1,6 @@
 <?php
 $safetyCost = (isset($summary['safety_cost']) && is_array($summary['safety_cost'])) ? $summary['safety_cost'] : array();
+$safetyCurrentYear = isset($safetyCost['current_year']) ? (int)$safetyCost['current_year'] : (int)date('Y');
 $safetyLimitRate = isset($safetyCost['limit_use_rate']) ? (float)$safetyCost['limit_use_rate'] : 0.0;
 $safetyTone = 'cp-company-rate-normal';
 $safetyMessage = '전체 현장 안전관리비 사용 현황이 정상 범위입니다.';
@@ -44,8 +45,8 @@ function cpms_company_profit_safety_rate_label($value) {
       <div class="value"><?php echo h(cpms_company_profit_safety_money_label(isset($safetyCost['limit_110']) ? $safetyCost['limit_110'] : 0)); ?></div>
     </div>
     <div class="cp-summary-card">
-      <div class="label">현재 사용금액</div>
-      <div class="value"><?php echo h(cpms_company_profit_safety_money_label(isset($safetyCost['used_total']) ? $safetyCost['used_total'] : 0)); ?></div>
+      <div class="label"><?php echo (int)$safetyCurrentYear; ?>년 사용금액</div>
+      <div class="value"><?php echo h(cpms_company_profit_safety_money_label(isset($safetyCost['used_current_year']) ? $safetyCost['used_current_year'] : 0)); ?></div>
     </div>
     <div class="cp-summary-card">
       <div class="label">남은금액</div>
