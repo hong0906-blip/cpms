@@ -67,7 +67,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     start_date DATE NULL,
                     end_date DATE NULL,
                     contract_amount BIGINT NULL,
-                    status VARCHAR(50) DEFAULT '계약중',
+                    status VARCHAR(50) DEFAULT '진행중',
+                    settlement_completed_at DATE NULL,
                     drive_status VARCHAR(30) DEFAULT '',
                     drive_folder_id VARCHAR(128) DEFAULT '',
                     drive_folders_json TEXT NULL,
@@ -206,6 +207,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     array_push($added, 'drive_status');
                 }
 
+                if (!column_exists($pdo, 'cpms_projects', 'settlement_completed_at')) {
+                    execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN settlement_completed_at DATE NULL AFTER status");
+                    array_push($added, 'settlement_completed_at(정산완료일)');
+                }
+
                 if (!column_exists($pdo, 'cpms_projects', 'drive_folder_id')) {
                     execSql($pdo, "ALTER TABLE cpms_projects ADD COLUMN drive_folder_id VARCHAR(128) DEFAULT ''");
                     array_push($added, 'drive_folder_id');
@@ -226,7 +232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     array_push($added, 'drive_updated_at');
                 }
 
-                // status 기본값이 옛날 값이면 그대로 둬도 되지만, 신규 생성 시 기본값은 계약중으로 이미 설정됨.
+                // status 기본값이 옛날 값이면 그대로 둬도 되지만, 신규 생성 화면에서는 진행중을 기본으로 저장함.
 
                 $type = 'ok';
                 $msg = (count($added) === 0) ? '컬럼 업데이트: 이미 적용되어 있습니다.' : ('컬럼 업데이트 완료: ' . implode(', ', $added));

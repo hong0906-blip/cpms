@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/partials/master_dedupe_helper.php';
 require_once __DIR__ . '/partials/project_month_options_helper.php';
+require_once __DIR__ . '/partials/equipment_statement_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -156,7 +157,10 @@ function equipment_collect_usage_dates($usageDates, $text, $ym)
     return array_keys($result);
 }
 $pdo = Db::pdo();
-if ($pdo) cpms_equipment_gongsu_ensure_schema($pdo);
+if ($pdo) {
+    cpms_equipment_gongsu_ensure_schema($pdo);
+    cpms_equipment_statement_ensure_usage_columns($pdo);
+}
 if (!$pdo) {
     flash_set('error', 'DB 연결 실패');
     header('Location: ' . $redirect);
@@ -217,6 +221,7 @@ try {
             exit;
         }
     }    
+    $savedUsageRows = array();
     if ($equipmentId > 0 && count($dates) > 0) {
         $stU = $pdo->prepare("INSERT INTO cpms_equipment_usage
             (project_id, equipment_id, use_date, work_unit, base_rate_snapshot, amount, is_manual_unit, memo, created_at)
@@ -227,6 +232,7 @@ try {
                 base_rate_snapshot = IF(is_manual_unit = 1, base_rate_snapshot, VALUES(base_rate_snapshot)),
                 amount = IF(is_manual_unit = 1, amount, VALUES(amount)),
                 memo = VALUES(memo)");
+        $stFindUsage = $pdo->prepare("SELECT id, use_date FROM cpms_equipment_usage WHERE project_id = :pid AND equipment_id = :eid AND use_date = :d LIMIT 1");
         foreach ($dates as $d) {
             $stU->bindValue(':pid', $projectId, PDO::PARAM_INT);
             $stU->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
@@ -237,13 +243,34 @@ try {
             $stU->bindValue(':memo', '');
             $stU->bindValue(':created_at', $now);
             $stU->execute();
+
+            $stFindUsage->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stFindUsage->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
+            $stFindUsage->bindValue(':d', $d);
+            $stFindUsage->execute();
+            $usageRow = $stFindUsage->fetch(PDO::FETCH_ASSOC);
+            if (is_array($usageRow) && isset($usageRow['id'])) {
+                $savedUsageRows[count($savedUsageRows)] = $usageRow;
+            }
         }
     }
 
     if ($isReused) {
-        flash_set('success', '기존 장비에 사용일자를 추가했습니다.');
+        $baseMessage = '기존 장비에 사용일자를 추가했습니다.';
     } else {
-        flash_set('success', '새 장비를 등록했습니다.');
+        $baseMessage = '새 장비를 등록했습니다.';
+    }
+
+    $uploadResult = cpms_equipment_statement_store_uploaded_file_for_usage_rows($pdo, 'statement_file', $projectId, $equipmentId, $savedUsageRows, $ym);
+    if (isset($uploadResult['has_file']) && $uploadResult['has_file']) {
+        if (isset($uploadResult['ok']) && $uploadResult['ok']) {
+            $statementMessage = (isset($uploadResult['message']) && trim((string)$uploadResult['message']) !== '') ? (string)$uploadResult['message'] : '거래명세표를 첨부했습니다.';
+            flash_set('success', $baseMessage . ' ' . $statementMessage);
+        } else {
+            flash_set('error', $baseMessage . ' 다만 거래명세표 첨부 실패: ' . (isset($uploadResult['message']) ? $uploadResult['message'] : '알 수 없는 오류'));
+        }
+    } else {
+        flash_set('success', $baseMessage);
     }
     header('Location: ' . $redirect);
     exit;

@@ -32,6 +32,50 @@ function cpms_project_update_find_existing_main_manager_id($pdo, $projectId) {
 }
 }
 
+if (!function_exists('cpms_project_update_normalize_status')) {
+function cpms_project_update_normalize_status($status) {
+    $status = trim((string)$status);
+    if ($status === '' || $status === '진행 중') return '진행중';
+    if ($status === '대기중' || $status === '입찰검토' || $status === '가제' || $status === '정식전환대기') return '입찰 진행중';
+    if (in_array($status, array('입찰 진행중', '계약중', '진행중', '정산완료'), true)) return $status;
+    return '진행중';
+}}
+
+if (!function_exists('cpms_project_update_date_or_null')) {
+function cpms_project_update_date_or_null($date) {
+    $date = trim((string)$date);
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return $date;
+    return null;
+}}
+
+if (!function_exists('cpms_project_update_column_exists')) {
+function cpms_project_update_column_exists($pdo, $column) {
+    if (!$pdo) return false;
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM `cpms_projects` LIKE :col");
+        $st->bindValue(':col', (string)$column);
+        $st->execute();
+        return $st->fetch(PDO::FETCH_ASSOC) ? true : false;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_project_update_ensure_settlement_column')) {
+function cpms_project_update_ensure_settlement_column($pdo) {
+    if (!$pdo) return false;
+    if (cpms_project_update_column_exists($pdo, 'settlement_completed_at')) return true;
+    try {
+        $pdo->exec("ALTER TABLE `cpms_projects` ADD COLUMN `settlement_completed_at` DATE NULL AFTER `status`");
+    } catch (Exception $e) {
+        try {
+            $pdo->exec("ALTER TABLE `cpms_projects` ADD COLUMN `settlement_completed_at` DATE NULL");
+        } catch (Exception $e2) {
+        }
+    }
+    return cpms_project_update_column_exists($pdo, 'settlement_completed_at');
+}}
+
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
 $role = Auth::userRole();
@@ -69,9 +113,11 @@ $name = isset($_POST['name']) ? trim((string)$_POST['name']) : '';
 $client = isset($_POST['client']) ? trim((string)$_POST['client']) : '';
 $contractor = isset($_POST['contractor']) ? trim((string)$_POST['contractor']) : '';
 $status = isset($_POST['status']) ? trim((string)$_POST['status']) : '';
+$status = cpms_project_update_normalize_status($status);
 $location = isset($_POST['location']) ? trim((string)$_POST['location']) : '';
 $startDate = isset($_POST['start_date']) ? trim((string)$_POST['start_date']) : '';
 $endDate = isset($_POST['end_date']) ? trim((string)$_POST['end_date']) : '';
+$settlementCompletedAt = isset($_POST['settlement_completed_at']) ? trim((string)$_POST['settlement_completed_at']) : '';
 $contractAmount = isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '';
 $mainManagerId = isset($_POST['main_manager_id']) ? (int)$_POST['main_manager_id'] : 0;
 $subManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
@@ -84,6 +130,7 @@ $pdo = Db::pdo();
 if (!$pdo) {
     cpms_project_update_fail_redirect($projectId, 'DB 연결에 실패했습니다.');
 }
+$hasSettlementColumn = cpms_project_update_ensure_settlement_column($pdo);
 
 if ($mainManagerId <= 0) {
     $existingMainManagerId = cpms_project_update_find_existing_main_manager_id($pdo, $projectId);
@@ -118,8 +165,20 @@ try {
         cpms_project_update_fail_redirect($projectId, '공사 담당자가 선택되지 않았고 기존 담당자도 없습니다.');
     }
 
+    $settlementCompletedAtVal = null;
+    if ($hasSettlementColumn && $status === '정산완료') {
+        $settlementCompletedAtVal = cpms_project_update_date_or_null($settlementCompletedAt);
+        if ($settlementCompletedAtVal === null && isset($existingProject['status']) && cpms_project_update_normalize_status($existingProject['status']) === '정산완료') {
+            $settlementCompletedAtVal = cpms_project_update_date_or_null(isset($existingProject['settlement_completed_at']) ? $existingProject['settlement_completed_at'] : '');
+        }
+        if ($settlementCompletedAtVal === null) $settlementCompletedAtVal = cpms_project_update_date_or_null($endDateVal);
+        if ($settlementCompletedAtVal === null) $settlementCompletedAtVal = date('Y-m-d');
+    }
+
     $pdo->beginTransaction();
 
+    $settlementSetSql = $hasSettlementColumn ? ",
+               settlement_completed_at = :settlement_completed_at" : "";
     $stProject = $pdo->prepare("
         UPDATE cpms_projects
            SET name = :name,
@@ -129,7 +188,7 @@ try {
                location = :location,
                start_date = :start_date,
                end_date = :end_date,
-               contract_amount = :contract_amount
+               contract_amount = :contract_amount" . $settlementSetSql . "
          WHERE id = :id
     ");
     $stProject->bindValue(':name', $name);
@@ -140,6 +199,10 @@ try {
     $stProject->bindValue(':start_date', $startDateVal);
     $stProject->bindValue(':end_date', $endDateVal);
     $stProject->bindValue(':contract_amount', $contractAmountVal);
+    if ($hasSettlementColumn) {
+        if ($settlementCompletedAtVal === null) $stProject->bindValue(':settlement_completed_at', null, PDO::PARAM_NULL);
+        else $stProject->bindValue(':settlement_completed_at', $settlementCompletedAtVal);
+    }
     $stProject->bindValue(':id', $projectId, PDO::PARAM_INT);
     $stProject->execute();
 
@@ -186,6 +249,7 @@ try {
     }
 
     $pdo->commit();
+    if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
 
     flash_set('success', '프로젝트 정보가 수정되었습니다.');
     header('Location: ?r=project/detail&id=' . $projectId);

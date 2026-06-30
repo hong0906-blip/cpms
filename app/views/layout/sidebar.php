@@ -18,10 +18,13 @@ $selectedMenu = isset($selectedMenu) ? (string)$selectedMenu : $route;
 
 $user = \App\Core\Auth::user();
 $role = \App\Core\Auth::userRole();
+$displayRole = method_exists('App\\Core\\Auth', 'userStoredRole') ? \App\Core\Auth::userStoredRole() : $role;
 require_once __DIR__ . '/../../services/CompanyProfitAccessService.php';
 require_once __DIR__ . '/../../services/CompanyPayrollAccessService.php';
 $sidebarPdo = \App\Core\Db::pdo();
 $canViewCompanyProfitMenu = cpms_can_view_company_profit($user, $sidebarPdo);
+$isMasterUser = \App\Core\Auth::isMaster();
+if ($isMasterUser) $canViewCompanyProfitMenu = true;
 $canViewCompanyOverheadMenu = cpms_can_view_company_overhead($user, $sidebarPdo);
 $canViewCompanyPayrollMenu = cpms_can_view_company_payroll($user, $sidebarPdo);
 
@@ -58,11 +61,10 @@ $deptMap = array(
 );
 if (isset($deptMap[$dept])) $dept = $deptMap[$dept];
 if (substr($dept, -1) === '부') $dept = substr($dept, 0, -1);
-$isMasterUser = \App\Core\Auth::isMaster();
 $isPublicAffairsDept = ($dept === '공무' && !$isMasterUser);
 
 $parts = array();
-if ($role === 'executive') $parts[] = '임원';
+if ($displayRole === 'executive') $parts[] = '임원';
 else $parts[] = ($dept !== '' ? $dept : '직원');
 if ($pos !== '') $parts[] = $pos;
 $userDept = implode(' · ', $parts);
@@ -124,9 +126,10 @@ if ($selectedMenu === $dashboardMenu) {
     <ul class="space-y-2">
       <?php foreach ($menuItems as $it): ?>
         <?php $isSelected = ($selectedMenu === $it['id']); ?>
+        <?php $itemHref = ($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id'])); ?>
         <li>
           <a
-            href="<?php echo h('?r=' . urlencode($it['id'])); ?>"
+            href="<?php echo h($itemHref); ?>"
             class="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all duration-300 group relative
               <?php echo $isSelected
                 ? ('bg-gradient-to-r ' . $it['gradient'] . ' text-white shadow-lg scale-[1.02]')
@@ -146,9 +149,10 @@ if ($selectedMenu === $dashboardMenu) {
     <ul class="space-y-2">
       <?php foreach ($menuItems as $it): ?>
         <?php $isSelected = ($selectedMenu === $it['id']); ?>
+        <?php $itemHref = ($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id'])); ?>
         <li>
           <a
-            href="<?php echo h('?r=' . urlencode($it['id'])); ?>"
+            href="<?php echo h($itemHref); ?>"
             class="w-full flex items-center justify-center px-2 py-3.5 rounded-2xl transition-all duration-300 group relative
               <?php echo $isSelected
                 ? ('bg-gradient-to-r ' . $it['gradient'] . ' text-white shadow-lg scale-[1.02]')
@@ -215,11 +219,11 @@ if ($selectedMenu === $dashboardMenu) {
     <div class="flex items-center gap-4">
       <?php if ($selectedMenu === $dashboardMenu && $role === 'executive'): ?>
         <div class="flex gap-1 bg-gray-100/80 backdrop-blur-sm rounded-2xl p-1 shadow-sm">
-          <a href="<?php echo h('?r=' . urlencode($dashboardMenu) . '&dv=employee'); ?>"
+          <a href="<?php echo h('?r=dashboard_employee'); ?>"
              class="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-300 <?php echo ($dashboardType === 'employee') ? 'bg-white text-blue-600 shadow-md shadow-blue-500/10' : 'text-gray-600 hover:text-gray-900'; ?>">
             직원용
           </a>
-          <a href="<?php echo h('?r=' . urlencode($dashboardMenu) . '&dv=executive'); ?>"
+          <a href="<?php echo h('?r=dashboard_executive'); ?>"
              class="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-300 <?php echo ($dashboardType === 'executive') ? 'bg-white text-blue-600 shadow-md shadow-blue-500/10' : 'text-gray-600 hover:text-gray-900'; ?>">
             임원용
           </a>
@@ -229,7 +233,7 @@ if ($selectedMenu === $dashboardMenu) {
       <div class="cpms-user-chip flex items-center gap-3 text-sm bg-white/60 backdrop-blur-sm px-4 py-2 rounded-2xl border border-gray-200/50">
         <span class="font-semibold text-gray-900"><?php echo h($userName); ?></span>
         <span class="text-gray-300">|</span>
-        <span class="text-blue-600 font-medium"><?php echo ($role === 'executive') ? '임원' : '직원'; ?></span>
+        <span class="text-blue-600 font-medium"><?php echo ($displayRole === 'executive') ? '임원' : '직원'; ?></span>
         <span class="text-gray-300">|</span>
         <a href="?r=logout" class="text-gray-600 hover:text-red-600 font-medium transition-colors">로그아웃</a>
       </div>
@@ -254,6 +258,9 @@ if ($selectedMenu === $dashboardMenu) {
     );
     if (\App\Core\Auth::canAccessConstruction()) {
       $mobileNavItems[] = array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status');
+    }
+    if (\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees()) {
+      $mobileNavItems[] = array('menu' => 'management', 'label' => '관리', 'icon' => 'bar-chart-3', 'href' => '?r=' . urlencode('관리'));
     }
     if ($canViewSafetyMobileMenu) {
       $mobileNavItems[] = array('menu' => 'safety', 'label' => '안전/보건', 'icon' => 'shield-alert', 'href' => '?r=safety_home');

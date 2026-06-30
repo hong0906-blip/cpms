@@ -745,7 +745,7 @@ body.pa-collab-open{overflow:hidden}
                   <input type="hidden" name="return_url" value="<?php echo h(pa_collab_url(array('section' => 'settings'))); ?>">
                   <div class="full"><div class="pa-draft-banner">정식 전환 시 "(가제)" prefix가 제거되고, 이후 경영현황/공사섹션 흐름에 포함됩니다.</div></div>
                   <div><label class="pa-muted">프로젝트명</label><input name="name" class="pa-field" value="<?php echo h(cpms_public_affairs_collab_official_project_name(isset($selectedSpace['name']) ? $selectedSpace['name'] : '')); ?>"></div>
-                  <div><label class="pa-muted">상태</label><select name="status" class="pa-field"><option value="계약중">계약중</option><option value="진행중">진행중</option><option value="대기중">대기중</option></select></div>
+                  <div><label class="pa-muted">상태</label><select name="status" class="pa-field"><option value="입찰 진행중">입찰 진행중</option><option value="계약중">계약중</option><option value="진행중">진행중</option></select></div>
                   <div><label class="pa-muted">발주처</label><input name="client" class="pa-field" value="<?php echo h(isset($selectedSpace['client']) ? $selectedSpace['client'] : ''); ?>"></div>
                   <div><label class="pa-muted">시공사</label><input name="contractor" class="pa-field" value="<?php echo h(isset($selectedSpace['contractor']) ? $selectedSpace['contractor'] : ''); ?>"></div>
                   <div><label class="pa-muted">공사 시작일</label><input type="date" name="start_date" class="pa-field" value="<?php echo h(isset($selectedSpace['start_date']) ? $selectedSpace['start_date'] : ''); ?>"></div>

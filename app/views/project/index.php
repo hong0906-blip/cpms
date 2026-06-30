@@ -17,11 +17,30 @@ if ($activeTab === '') $activeTab = 'monthly_summary';
 if ($activeTab === 'monthly_input') $activeTab = 'monthly_summary';
 if ($activeTab !== 'monthly_summary' && $activeTab !== 'project_manage' && $activeTab !== 'collaboration') $activeTab = 'monthly_summary';
 
+$projectStatusTabs = array('입찰 진행중', '계약중', '진행중', '정산완료');
+$activeProjectStatus = isset($_GET['project_status']) ? trim((string)$_GET['project_status']) : '진행중';
+if (!in_array($activeProjectStatus, $projectStatusTabs, true)) $activeProjectStatus = '진행중';
+$projectStatusCounts = array();
+foreach ($projectStatusTabs as $projectStatusTab) $projectStatusCounts[$projectStatusTab] = 0;
+
+if (!function_exists('cpms_project_index_status_condition')) {
+function cpms_project_index_status_condition($status) {
+    $status = trim((string)$status);
+    if ($status === '입찰 진행중') {
+        return "(status IN ('입찰 진행중', '대기중', '입찰검토', '가제', '정식전환대기') OR name LIKE '(가제)%')";
+    }
+    if ($status === '계약중') return "name NOT LIKE '(가제)%' AND status = '계약중'";
+    if ($status === '정산완료') return "name NOT LIKE '(가제)%' AND status = '정산완료'";
+    return "name NOT LIKE '(가제)%' AND (status IS NULL OR status = '' OR status = '진행중' OR status = '진행 중')";
+}}
+
 if ($dbOk && $activeTab === 'project_manage') {
     try {
+        $statusCondition = cpms_project_index_status_condition($activeProjectStatus);
         $st = $pdo->prepare("
             SELECT id, name, client, contractor, location, start_date, end_date, contract_amount, status
               FROM cpms_projects
+             WHERE " . $statusCondition . "
              ORDER BY id DESC
              LIMIT 200
         ");
@@ -31,6 +50,15 @@ if ($dbOk && $activeTab === 'project_manage') {
     } catch (Exception $e) {
         $projects = array();
         flash_set('error', '프로젝트 목록 조회 실패: ' . $e->getMessage());
+    }
+
+    try {
+        foreach ($projectStatusTabs as $projectStatusTab) {
+            $countSql = "SELECT COUNT(*) FROM cpms_projects WHERE " . cpms_project_index_status_condition($projectStatusTab);
+            $projectStatusCounts[$projectStatusTab] = (int)$pdo->query($countSql)->fetchColumn();
+        }
+    } catch (Exception $e) {
+        foreach ($projectStatusTabs as $projectStatusTab) $projectStatusCounts[$projectStatusTab] = 0;
     }
 
     try {
@@ -57,7 +85,8 @@ $flash = flash_get();
 function status_badge_class($status) {
     $status = trim((string)$status);
     if ($status === '계약중') return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-    if ($status === '대기중') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    if ($status === '입찰 진행중' || $status === '대기중' || $status === '입찰검토' || $status === '가제' || $status === '정식전환대기') return 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    if ($status === '정산완료') return 'bg-slate-100 text-slate-700 border-slate-200';
     return 'bg-blue-100 text-blue-800 border-blue-200';
 }
 
@@ -142,11 +171,22 @@ function cpms_project_index_is_collab_draft_project($project) {
 
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 border border-gray-100 overflow-hidden">
   <div class="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-    <div class="font-extrabold text-gray-900">프로젝트 목록</div>
+    <div class="font-extrabold text-gray-900"><?php echo h($activeProjectStatus); ?> 프로젝트 목록</div>
     <div class="text-xs text-gray-500">총 <?php echo $dbOk ? (int)count($projects) : 0; ?>건</div>
   </div>
 
   <div class="p-6">
+    <div class="mb-5 flex flex-wrap gap-2">
+      <?php foreach ($projectStatusTabs as $projectStatusTab): ?>
+        <?php $projectStatusActive = ($projectStatusTab === $activeProjectStatus); ?>
+        <a href="<?php echo h('?r=공무&tab=project_manage&project_status=' . urlencode($projectStatusTab)); ?>"
+           class="px-4 py-2 rounded-2xl border font-extrabold inline-flex items-center gap-2 <?php echo $projectStatusActive ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'; ?>">
+          <span><?php echo h($projectStatusTab); ?></span>
+          <span class="text-xs px-2 py-0.5 rounded-full <?php echo $projectStatusActive ? 'bg-white/20 text-white' : 'bg-gray-100 text-gray-600'; ?>"><?php echo isset($projectStatusCounts[$projectStatusTab]) ? (int)$projectStatusCounts[$projectStatusTab] : 0; ?></span>
+        </a>
+      <?php endforeach; ?>
+    </div>
+
     <?php if (!$dbOk): ?>
       <div class="text-sm text-gray-600">DB 연결이 필요합니다.</div>
     <?php elseif (!is_array($projects) || count($projects) === 0): ?>
@@ -250,9 +290,10 @@ function cpms_project_index_is_collab_draft_project($project) {
             <div>
               <div class="text-sm font-bold text-gray-700 mb-1">상태</div>
               <select name="status" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white outline-none">
+                <option value="입찰 진행중">입찰 진행중</option>
                 <option value="계약중">계약중</option>
-                <option value="대기중">대기중</option>
                 <option value="진행중" selected>진행중</option>
+                <option value="정산완료">정산완료</option>
               </select>
             </div>
             <div class="md:col-span-2">

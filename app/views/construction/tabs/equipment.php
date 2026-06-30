@@ -11,8 +11,10 @@ use App\Core\Db;
 require_once __DIR__ . '/../partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../partials/project_month_options_helper.php';
+require_once __DIR__ . '/../partials/equipment_statement_helper.php';
 
 $canEditEquipment = isset($canEdit) ? (bool)$canEdit : false;
+$hideEquipmentExcelUploadUi = true; // 복구 시 false로 변경하면 엑셀 업로드 버튼/카드가 다시 보입니다.
 
 $pdo = Db::pdo();
 if (!$pdo) {
@@ -20,6 +22,7 @@ if (!$pdo) {
     return;
 }
 cpms_equipment_gongsu_ensure_schema($pdo);
+cpms_equipment_statement_ensure_usage_columns($pdo);
 
 $equipTab = isset($_GET['equip_tab']) ? trim((string)$_GET['equip_tab']) : 'monthly';
 if ($equipTab !== 'monthly' && $equipTab !== 'input') {
@@ -194,6 +197,16 @@ function equipment_gongsu($v)
     if (abs($n - round($n)) < 0.001) return number_format($n, 0);
     return rtrim(rtrim(number_format($n, 2, '.', ''), '0'), '.');
 }
+function equipment_statement_link_html($usageRow)
+{
+    if (!is_array($usageRow)) return '';
+    $usageId = isset($usageRow['id']) ? (int)$usageRow['id'] : 0;
+    $storedPath = isset($usageRow['statement_stored_path']) ? trim((string)$usageRow['statement_stored_path']) : '';
+    if ($usageId <= 0 || $storedPath === '') return '';
+    $originalName = isset($usageRow['statement_original_name']) ? (string)$usageRow['statement_original_name'] : '';
+    $url = base_url() . '/?r=construction/equipment_statement_download&id=' . $usageId;
+    return '<a class="inline-flex items-center justify-center px-1.5 py-0.5 rounded border border-emerald-200 bg-emerald-50 text-emerald-700 text-[10px] font-bold hover:bg-emerald-100" href="' . h($url) . '" target="_blank" rel="noopener" title="' . h($originalName) . '">명세표</a>';
+}
 function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
 {
     global $canEditEquipment;
@@ -219,6 +232,8 @@ function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
             $newValue = isset($pending['new_value']) ? (float)$pending['new_value'] : 0.0;
             $html .= '<div class="mt-1 text-[11px] text-amber-700 font-bold">' . h(equipment_gongsu($newValue)) . ' 승인대기</div>';
         }
+        $statementLink = equipment_statement_link_html($usageRow);
+        if ($statementLink !== '') $html .= '<div class="mt-1 flex justify-center">' . $statementLink . '</div>';
         $html .= '</td>';
         return $html;
     }
@@ -235,6 +250,8 @@ function equipment_render_gongsu_cell($usageRow, $pendingByUsage, $item)
         $newValue = isset($pending['new_value']) ? (float)$pending['new_value'] : 0.0;
         $html .= '<div class="mt-1 text-[11px] text-amber-700 font-bold">' . h(equipment_gongsu($newValue)) . ' 승인대기</div>';
     }
+    $statementLink = equipment_statement_link_html($usageRow);
+    if ($statementLink !== '') $html .= '<div class="mt-1 flex justify-center">' . $statementLink . '</div>';
     $html .= '</td>';
     return $html;
 }
@@ -254,6 +271,14 @@ function equipment_render_grouped_gongsu_cell($slotBundle, $pendingByUsage, $ite
     $html = '<td class="border p-1 text-center">';
     $html .= '<div class="font-bold text-gray-800">' . h(equipment_gongsu($totalUnit)) . '</div>';
     $html .= '<div class="text-[10px] text-amber-700">중복 묶음</div>';
+    $statementLinks = '';
+    foreach ($rows as $row) {
+        $link = equipment_statement_link_html($row);
+        if ($link !== '') $statementLinks .= $link;
+    }
+    if ($statementLinks !== '') {
+        $html .= '<div class="mt-1 flex flex-wrap justify-center gap-1">' . $statementLinks . '</div>';
+    }
     $html .= '</td>';
     return $html;
 }
@@ -394,7 +419,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
             <a href="<?php echo h($baseUrl . '&equip_tab=input&ym=' . urlencode($ym)); ?>"
                class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($equipTab === 'input') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">장비입력</a>
             <a href="<?php echo h($baseUrl . '&equip_tab=input&ym=' . urlencode($ym)); ?>#equipmentExcelUpload"
-               class="px-4 py-2 rounded-xl border font-bold text-sm bg-white text-blue-700 border-blue-200 hover:bg-blue-50">엑셀 업로드</a>
+               class="px-4 py-2 rounded-xl border font-bold text-sm bg-white text-blue-700 border-blue-200 hover:bg-blue-50" <?php echo $hideEquipmentExcelUploadUi ? 'style="display:none;" aria-hidden="true" data-hidden-for-restore="1"' : ''; ?>>엑셀 업로드</a>
         <?php endif; ?>
     </div>
 
@@ -402,7 +427,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
         <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="border border-gray-200 rounded-2xl p-4">
                 <div class="text-lg font-extrabold mb-3">새작성</div>
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_item_save" class="space-y-3" id="equipmentCreateForm">
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_item_save" class="space-y-3" id="equipmentCreateForm" enctype="multipart/form-data">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="equip_tab" value="input">
@@ -415,7 +440,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                         <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <input type="text" name="category" class="px-3 py-2 border rounded-xl" placeholder="구분" required>
                         <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required>
                         <input type="text" name="spec" class="px-3 py-2 border rounded-xl" placeholder="규격(직접입력)">
@@ -440,6 +465,12 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                         </div>
                         <div id="equipmentCreateDateChips" class="mt-2 flex flex-wrap gap-2"></div>
                         <div id="equipmentCreateDateInputs"></div>
+                    </div>
+
+                    <div class="border border-gray-200 rounded-xl p-3">
+                        <label class="text-sm font-bold text-gray-700">거래명세표 사진/파일 첨부</label>
+                        <input type="file" name="statement_file" accept="image/*,.pdf" capture="environment" class="mt-2 block w-full text-sm border rounded-xl px-3 py-2 bg-white">
+                        <div class="text-xs text-gray-500 mt-1">현장에서 사진 촬영 또는 PDF 파일 업로드 가능</div>
                     </div>
 
                     <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">저장</button>
@@ -471,7 +502,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                                     <td class="p-2 border"><?php echo h($it['spec']); ?></td>
                                     <td class="p-2 border text-right"><?php echo equipment_money($it['base_rate']); ?></td>
                                     <td class="p-2 border">
-                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_usage_save" class="space-y-2" data-usage-form>
+                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_usage_save" class="space-y-2" data-usage-form enctype="multipart/form-data">
                                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                                             <input type="hidden" name="equipment_id" value="<?php echo (int)$it['id']; ?>">
@@ -492,6 +523,10 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                                                 </div>
                                                 <div id="usageDateChips_<?php echo (int)$it['id']; ?>" class="mt-2 flex flex-wrap gap-1"></div>
                                                 <div id="usageDateInputs_<?php echo (int)$it['id']; ?>"></div>
+                                            </div>
+                                            <div class="border border-gray-200 rounded-lg p-2 bg-gray-50">
+                                                <label class="text-xs text-gray-700 font-bold">거래명세표 사진/파일</label>
+                                                <input type="file" name="statement_file" accept="image/*,.pdf" capture="environment" class="mt-1 block w-full text-xs border rounded-lg px-2 py-1 bg-white">
                                             </div>
                                             <button type="submit" class="px-3 py-1 rounded-lg bg-gray-800 text-white">추가</button>
                                         </form>
@@ -516,7 +551,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
             </div>
         </div>
 
-        <div id="equipmentExcelUpload" class="mt-6 border border-gray-200 rounded-2xl p-4">
+        <div id="equipmentExcelUpload" class="mt-6 border border-gray-200 rounded-2xl p-4" <?php echo $hideEquipmentExcelUploadUi ? 'style="display:none;" aria-hidden="true" data-hidden-for-restore="1"' : ''; ?>>
             <div class="flex flex-col gap-1 mb-4">
                 <div class="text-lg font-extrabold">월별 장비비 엑셀 업로드</div>
             </div>

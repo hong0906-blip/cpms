@@ -477,6 +477,24 @@ if ($route === '관리자') {
 //  - dashboard_executive ASCII 라우트
 //  - safety_home ASCII 라우트
 // ==========================
+$dashboardRouteName = urldecode('%EB%8C%80%EC%8B%9C%EB%B3%B4%EB%93%9C');
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && ($route === 'dashboard' || $route === $dashboardRouteName)) {
+    $targetDashboardRoute = 'dashboard_employee';
+    if (isset($_GET['dv']) && (string)$_GET['dv'] === 'executive') {
+        $targetDashboardRoute = 'dashboard_executive';
+    } else if (isset($_GET['dv']) && (string)$_GET['dv'] === 'employee') {
+        $targetDashboardRoute = 'dashboard_employee';
+    } else if (isset($_SESSION['dashboardType']) && (string)$_SESSION['dashboardType'] === 'executive') {
+        $targetDashboardRoute = 'dashboard_executive';
+    }
+    $redirectParams = array('r' => $targetDashboardRoute);
+    foreach ($_GET as $redirectKey => $redirectValue) {
+        if ($redirectKey === 'r' || $redirectKey === 'dv') continue;
+        $redirectParams[$redirectKey] = $redirectValue;
+    }
+    header('Location: ?' . http_build_query($redirectParams, '', '&'));
+    exit;
+}
 if ($route === 'dashboard') {
     $route = '대시보드';
 }
@@ -939,6 +957,14 @@ if ($route === 'tasks/update_status') {
     require_once __DIR__ . '/../app/views/tasks/update_status.php';
     exit;
 }
+if ($route === 'task_update_status') {
+    require_once __DIR__ . '/../app/views/tasks/update_status.php';
+    exit;
+}
+if ($route === 'task_progress') {
+    require_once __DIR__ . '/../app/views/tasks/update_status.php';
+    exit;
+}
 if ($route === 'tasks/meeting_response') {
     require_once __DIR__ . '/../app/views/tasks/meeting_response.php';
     exit;
@@ -1047,6 +1073,10 @@ if ($route === 'construction/equipment_gongsu_override_decide') {
 }
 if ($route === 'construction/equipment_usage_delete') {
     require_once __DIR__ . '/../app/views/construction/equipment_usage_delete.php';
+    exit;
+}
+if ($route === 'construction/equipment_statement_download') {
+    require_once __DIR__ . '/../app/views/construction/equipment_statement_download.php';
     exit;
 }
 if ($route === 'construction/material_item_save') {

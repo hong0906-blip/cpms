@@ -9,6 +9,7 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
+require_once __DIR__ . '/partials/equipment_statement_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -124,7 +125,10 @@ function equipment_collect_usage_dates2($usageDates, $text, $ym)
     return array_keys($result);
 }
 $pdo = Db::pdo();
-if ($pdo) cpms_equipment_gongsu_ensure_schema($pdo);
+if ($pdo) {
+    cpms_equipment_gongsu_ensure_schema($pdo);
+    cpms_equipment_statement_ensure_usage_columns($pdo);
+}
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
 
 try {
@@ -167,6 +171,8 @@ try {
             amount = IF(is_manual_unit = 1, amount, VALUES(amount)),
             memo = VALUES(memo)");
     $now = date('Y-m-d H:i:s');
+    $stFindUsage = $pdo->prepare("SELECT id, use_date FROM cpms_equipment_usage WHERE project_id = :pid AND equipment_id = :eid AND use_date = :d LIMIT 1");
+    $savedUsageRows = array();
     foreach ($dates as $d) {
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $st->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
@@ -177,9 +183,29 @@ try {
         $st->bindValue(':memo', $memo);
         $st->bindValue(':created_at', $now);
         $st->execute();
+
+        $stFindUsage->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stFindUsage->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
+        $stFindUsage->bindValue(':d', $d);
+        $stFindUsage->execute();
+        $usageRow = $stFindUsage->fetch(PDO::FETCH_ASSOC);
+        if (is_array($usageRow) && isset($usageRow['id'])) {
+            $savedUsageRows[count($savedUsageRows)] = $usageRow;
+        }
     }
 
-    flash_set('success', '사용일자를 저장했습니다.');
+    $baseMessage = '사용일자를 저장했습니다.';
+    $uploadResult = cpms_equipment_statement_store_uploaded_file_for_usage_rows($pdo, 'statement_file', $projectId, $equipmentId, $savedUsageRows, $ym);
+    if (isset($uploadResult['has_file']) && $uploadResult['has_file']) {
+        if (isset($uploadResult['ok']) && $uploadResult['ok']) {
+            $statementMessage = (isset($uploadResult['message']) && trim((string)$uploadResult['message']) !== '') ? (string)$uploadResult['message'] : '거래명세표를 첨부했습니다.';
+            flash_set('success', $baseMessage . ' ' . $statementMessage);
+        } else {
+            flash_set('error', $baseMessage . ' 다만 거래명세표 첨부 실패: ' . (isset($uploadResult['message']) ? $uploadResult['message'] : '알 수 없는 오류'));
+        }
+    } else {
+        flash_set('success', $baseMessage);
+    }
 } catch (Exception $e) {
     flash_set('error', '저장 실패: ' . $e->getMessage());
 }

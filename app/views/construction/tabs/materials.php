@@ -16,6 +16,7 @@ require_once __DIR__ . '/../partials/material_usage_helper.php';
 require_once __DIR__ . '/../../safety/safety_cost_helper.php';
 
 $canEditMaterials = isset($canEdit) ? (bool)$canEdit : false;
+$hideMaterialMonthlyExcelUploadCard = true; // 복구 시 false로 변경하면 월별 자재구입비 엑셀 업로드 카드가 다시 보입니다.
 
 $pdo = Db::pdo();
 if (!$pdo) {
@@ -403,7 +404,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
 
     <?php if ($materialsTab === 'input'): ?>
         <?php if ($canEditMaterials): ?>
-        <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="mt-6 grid grid-cols-1 <?php echo $hideMaterialMonthlyExcelUploadCard ? '' : 'lg:grid-cols-2'; ?> gap-6">
             <div class="border border-gray-200 rounded-2xl p-4">
                 <!-- 자재 입력 모달→토글형 인라인 통일 -->
                 <div class="flex items-center justify-between mb-3">
@@ -423,7 +424,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
                     </div>
 
-                    <div class="grid grid-cols-2 gap-2">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <select name="category" class="px-3 py-2 border rounded-xl" required>
                             <option value="자재비">자재비</option>
                             <option value="구매품">구매품</option>
@@ -460,15 +461,15 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
 
                     <div class="border border-gray-200 rounded-xl p-3">
                         <label class="text-sm font-bold text-gray-700">거래명세표 첨부</label>
-                        <input type="file" name="statement_file" accept=".pdf,.jpg,.jpeg,.png,.xlsx,.xls" class="mt-2 block w-full text-sm">
-                        <div class="text-xs text-gray-500 mt-1">PDF, 이미지, 엑셀 파일 업로드 가능</div>
+                        <input type="file" name="statement_file" accept="image/*,.pdf,.xlsx,.xls" capture="environment" class="mt-2 block w-full text-sm border rounded-xl px-3 py-2 bg-white">
+                        <div class="text-xs text-gray-500 mt-1">현장에서 사진 촬영 또는 PDF, 엑셀 파일 업로드 가능</div>
                     </div>
 
                     <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">저장</button>
                 </form>                
             </div>
 
-            <div class="border border-gray-200 rounded-2xl p-4">
+            <div id="materialMonthlyExcelUpload" class="border border-gray-200 rounded-2xl p-4" <?php echo $hideMaterialMonthlyExcelUploadCard ? 'style="display:none;" aria-hidden="true" data-hidden-for-restore="1"' : ''; ?>>
                 <div class="flex flex-col gap-1 mb-4">
                     <div class="text-lg font-extrabold">월별 자재구입비 엑셀 업로드</div>
                 </div>

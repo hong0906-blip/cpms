@@ -20,7 +20,7 @@ if (!csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) {
 $pdo = Db::pdo();
 $currentEmployee = cpms_tasks_current_employee($pdo);
 $taskId = isset($_POST['task_id']) ? (int)$_POST['task_id'] : 0;
-$status = trim((string)(isset($_POST['status']) ? $_POST['status'] : ''));
+$status = trim((string)(isset($_POST['task_state']) ? $_POST['task_state'] : (isset($_POST['status']) ? $_POST['status'] : '')));
 $allowedStatuses = array('pending', 'progress');
 
 if (!in_array($status, $allowedStatuses, true)) {

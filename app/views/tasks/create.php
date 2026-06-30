@@ -88,7 +88,7 @@ if ($isMeetingRequest) {
 }
 
 $requesterEmployeeId = (int)$currentEmployee['id'];
-if ($requesterEmployeeId > 0 && !isset($assigneeIdSeen[$requesterEmployeeId])) {
+if ($isMeetingRequest && $requesterEmployeeId > 0 && !isset($assigneeIdSeen[$requesterEmployeeId])) {
     $assigneeIdSeen[$requesterEmployeeId] = true;
     $assigneeEmployeeIds[count($assigneeEmployeeIds)] = $requesterEmployeeId;
 }

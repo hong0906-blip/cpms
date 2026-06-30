@@ -67,13 +67,13 @@ ob_start();
                     <button type="submit" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-bold">참석가능</button>
                 </form>
             <?php endif; ?>
-            <?php if (!$isMeetingTask && $canChangeStatus && !in_array(isset($task['status']) ? $task['status'] : '', array('progress', 'done', 'cancelled'), true)): ?>
-                <form method="post" action="?r=tasks/update_status">
+            <?php if (!$isMeetingTask && $canChangeStatus && isset($task['status']) && (string)$task['status'] === 'pending'): ?>
+                <form method="post" action="?r=task_progress" referrerpolicy="origin">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
-                    <input type="hidden" name="status" value="progress">
+                    <input type="hidden" name="task_state" value="progress">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
-                    <button type="submit" class="px-4 py-2 rounded-2xl bg-blue-600 text-white font-bold">진행중</button>
+                    <button type="submit" class="px-4 py-2 rounded-2xl bg-blue-600 text-white font-bold">대기</button>
                 </form>
             <?php endif; ?>
             <?php if ($isMeetingTask && $canCompleteMeeting): ?>

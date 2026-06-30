@@ -1685,6 +1685,9 @@ function cpms_public_affairs_collab_convert_draft_project($pdo, $projectId, $pos
     $client = cpms_public_affairs_collab_clean_text(isset($post['client']) ? $post['client'] : (isset($project['client']) ? $project['client'] : ''), 200);
     $contractor = cpms_public_affairs_collab_clean_text(isset($post['contractor']) ? $post['contractor'] : (isset($project['contractor']) ? $project['contractor'] : ''), 200);
     $status = cpms_public_affairs_collab_clean_text(isset($post['status']) ? $post['status'] : '계약중', 50);
+    if ($status === '대기중' || $status === '입찰검토' || $status === '가제' || $status === '정식전환대기') $status = '입찰 진행중';
+    if ($status === '' || $status === '진행 중') $status = '진행중';
+    if (!in_array($status, array('입찰 진행중', '계약중', '진행중', '정산완료'), true)) $status = '계약중';
     $location = cpms_public_affairs_collab_clean_text(isset($post['location']) ? $post['location'] : (isset($project['location']) ? $project['location'] : ''), 200);
     $startDate = cpms_public_affairs_collab_date(isset($post['start_date']) ? $post['start_date'] : (isset($project['start_date']) ? $project['start_date'] : ''));
     $endDate = cpms_public_affairs_collab_date(isset($post['end_date']) ? $post['end_date'] : (isset($project['end_date']) ? $project['end_date'] : ''));

@@ -157,9 +157,13 @@ function cpms_employee_save_normalize_department($department) {
 
 if (!function_exists('cpms_employee_save_can_assign_development_department')) {
 function cpms_employee_save_can_assign_development_department() {
-    if (Auth::isMaster()) return true;
+    if (method_exists('App\\Core\\Auth', 'canAssignDevelopmentDepartment')) {
+        return Auth::canAssignDevelopmentDepartment();
+    }
+    $dept = trim((string)Auth::userDepartment());
+    if ($dept === '관리' || $dept === '관리부' || $dept === '관리팀') return true;
     $values = array(Auth::userRole(), Auth::userPosition(), Auth::userName());
-    $words = array('대표', '대표이사', '부사장');
+    $words = array('대표', '대표이사', '대표님', '부사장');
     for ($i = 0; $i < count($values); $i++) {
         $value = trim((string)$values[$i]);
         if ($value === '') continue;
@@ -168,6 +172,14 @@ function cpms_employee_save_can_assign_development_department() {
         }
     }
     return false;
+}}
+
+if (!function_exists('cpms_employee_save_can_assign_executive_role')) {
+function cpms_employee_save_can_assign_executive_role() {
+    if (method_exists('App\\Core\\Auth', 'canAssignExecutiveRole')) {
+        return Auth::canAssignExecutiveRole();
+    }
+    return cpms_employee_save_can_assign_development_department();
 }}
 
 $action = isset($_POST['action']) ? (string)$_POST['action'] : 'save';
@@ -261,19 +273,25 @@ if ($leaveHalf !== '' && is_numeric($leaveHalf)) {
 if ($email === '' || $name === '') { flash_set('error', '이메일/이름은 필수입니다.'); header('Location: ?r=관리&tab=employees'); exit; }
 
 $existingDept = '';
+$existingRole = '';
 if ($id > 0) {
     try {
-        $stExistingDept = $pdo->prepare("SELECT department FROM employees WHERE id = :id LIMIT 1");
+        $stExistingDept = $pdo->prepare("SELECT department, role FROM employees WHERE id = :id LIMIT 1");
         $stExistingDept->bindValue(':id', $id, \PDO::PARAM_INT);
         $stExistingDept->execute();
-        $existingDept = cpms_employee_save_normalize_department($stExistingDept->fetchColumn());
+        $existingRow = $stExistingDept->fetch(\PDO::FETCH_ASSOC);
+        if (is_array($existingRow)) {
+            $existingDept = cpms_employee_save_normalize_department(isset($existingRow['department']) ? $existingRow['department'] : '');
+            $existingRole = isset($existingRow['role']) ? (string)$existingRow['role'] : '';
+        }
     } catch (\Exception $e) {
         $existingDept = '';
+        $existingRole = '';
     }
 }
 $canAssignDevelopmentDept = cpms_employee_save_can_assign_development_department();
 if (($dept === '개발' || $existingDept === '개발') && !$canAssignDevelopmentDept) {
-    flash_set('error', '개발부서 지정/변경은 마스터, 대표, 부사장만 가능합니다.');
+    flash_set('error', '개발 부서 지정/변경은 대표, 부사장, 관리부만 가능합니다.');
     header('Location: ?r=관리&tab=employees');
     exit;
 }
@@ -281,6 +299,21 @@ if (($dept === '개발' || $existingDept === '개발') && !$canAssignDevelopment
 $allowedDepts = array('관리', '공무', '품질', '안전', '보건', '공사', '개발');
 $allowedPositions = array('주임','대리','과장','차장','부장','전무','상무','이사','부사장','고문','대표');
 if (!in_array($role, array('employee','executive'), true)) $role = 'employee';
+$canAssignExecutiveRole = cpms_employee_save_can_assign_executive_role();
+if (!$canAssignExecutiveRole) {
+    if ($id > 0) {
+        if ($role !== $existingRole && ($role === 'executive' || $existingRole === 'executive')) {
+            flash_set('error', '임원 설정은 대표, 부사장, 관리부만 가능합니다.');
+            header('Location: ?r=관리&tab=employees');
+            exit;
+        }
+        $role = ($existingRole === 'executive') ? 'executive' : 'employee';
+    } else if ($role === 'executive') {
+        flash_set('error', '임원 설정은 대표, 부사장, 관리부만 가능합니다.');
+        header('Location: ?r=관리&tab=employees');
+        exit;
+    }
+}
 if ($isActive !== 0 && $isActive !== 1) $isActive = 1;
 if ($isTeamLeader !== 1) $isTeamLeader = 0;
 if ($isTeamLeader === 1 || ($id > 0 && $teamLeaderId === $id)) $teamLeaderId = 0;

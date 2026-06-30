@@ -101,13 +101,13 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
                 </form>
                 <button type="button" data-meeting-unavailable-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-bold">참석불가능</button>
             <?php endif; ?>
-            <?php if (!$isMeetingTask && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('progress', 'done', 'cancelled'), true)): ?>
-                <form method="post" action="?r=tasks/update_status" class="inline">
+            <?php if (!$isMeetingTask && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && isset($item['status']) && (string)$item['status'] === 'pending'): ?>
+                <form method="post" action="?r=task_progress" class="inline" referrerpolicy="origin">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
-                    <input type="hidden" name="status" value="progress">
+                    <input type="hidden" name="task_state" value="progress">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
-                    <button type="submit" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">진행중</button>
+                    <button type="submit" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">대기</button>
                 </form>
             <?php endif; ?>
             <?php if (($canCompleteMeeting || !$isMeetingTask) && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('done', 'cancelled'), true)): ?>
@@ -195,7 +195,8 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
     $canStartTask = !$isMeetingTask
         && $isDirectTask
         && $isAssignedToCurrent
-        && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('progress', 'done', 'cancelled'), true);
+        && isset($item['status'])
+        && (string)$item['status'] === 'pending';
     $canCompleteTask = ($canCompleteMeeting || !$isMeetingTask)
         && $isDirectTask
         && $isAssignedToCurrent
@@ -224,12 +225,12 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
                 <a href="<?php echo h($detailUrl); ?>" class="cpms-mobile-task-button border border-gray-200 bg-white text-slate-700">확인</a>
             <?php endif; ?>
             <?php if ($canStartTask): ?>
-                <form method="post" action="?r=tasks/update_status" class="inline-flex">
+                <form method="post" action="?r=task_progress" class="inline-flex" referrerpolicy="origin">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
-                    <input type="hidden" name="status" value="progress">
+                    <input type="hidden" name="task_state" value="progress">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
-                    <button type="submit" class="cpms-mobile-task-button bg-blue-600 text-white">진행중</button>
+                    <button type="submit" class="cpms-mobile-task-button bg-blue-600 text-white">대기</button>
                 </form>
             <?php endif; ?>
             <?php if ($canRespondMeeting): ?>
@@ -280,16 +281,13 @@ function cpms_render_employee_task_dashboard($pdo)
     $delayedItems = array();
 
     foreach ($feed as $item) {
-        $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
         if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1) {
             $summary['urgent']++;
             $urgentItems[count($urgentItems)] = $item;
         }
-        if (cpms_tasks_is_due_today($item)) {
-            if (!$isConstructionSchedule) {
-                $summary['today']++;
-                $todayItems[count($todayItems)] = $item;
-            }
+        if (cpms_task_feed_counts_as_today($item)) {
+            $summary['today']++;
+            $todayItems[count($todayItems)] = $item;
         }
         if (isset($item['status']) && in_array((string)$item['status'], array('progress', 'revision'), true)) {
             $summary['progress']++;
@@ -450,7 +448,7 @@ function cpms_render_employee_task_dashboard($pdo)
                 <div class="mt-3 flex flex-wrap gap-2 text-sm">
                     <span class="px-3 py-2 rounded-full bg-slate-100 text-slate-700 font-bold">전체 <?php echo (int)$summary['all']; ?>건</span>
                     <span class="px-3 py-2 rounded-full bg-rose-50 text-rose-700 font-bold">긴급 <?php echo (int)$summary['urgent']; ?>건</span>
-                    <span class="px-3 py-2 rounded-full bg-amber-50 text-amber-700 font-bold">오늘마감 <?php echo (int)$summary['today']; ?>건</span>
+                    <span class="px-3 py-2 rounded-full bg-amber-50 text-amber-700 font-bold">오늘 할일 <?php echo (int)$summary['today']; ?>건</span>
                     <span class="px-3 py-2 rounded-full bg-blue-50 text-blue-700 font-bold">진행중 <?php echo (int)$summary['progress']; ?>건</span>
                     <span class="px-3 py-2 rounded-full bg-red-50 text-red-700 font-bold">지연 <?php echo (int)$summary['delayed']; ?>건</span>
                     <span class="px-3 py-2 rounded-full bg-indigo-50 text-indigo-700 font-bold">승인대기 <?php echo (int)$summary['approval']; ?>건</span>
@@ -506,7 +504,7 @@ function cpms_render_employee_task_dashboard($pdo)
 
         <div data-cpms-employee-task-body class="mt-6 space-y-5">
             <?php cpms_render_feed_lane('긴급', '', 'bg-rose-50 text-rose-700', $urgentItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('오늘 마감', '', 'bg-amber-50 text-amber-700', $todayItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
+            <?php cpms_render_feed_lane('오늘 할일', '', 'bg-amber-50 text-amber-700', $todayItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
             <?php cpms_render_feed_lane('진행중', '', 'bg-blue-50 text-blue-700', $progressItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
             <?php cpms_render_feed_lane('전자결재/승인', '', 'bg-indigo-50 text-indigo-700', $approvalItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
             <?php cpms_render_feed_lane('지연', '', 'bg-red-50 text-red-700', $delayedItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
@@ -631,6 +629,12 @@ function cpms_render_employee_task_dashboard($pdo)
                             <div class="text-sm font-bold text-gray-700 mb-1">업무 내용</div>
                             <textarea name="content" rows="4" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></textarea>
                         </div>
+                        <div class="md:col-span-2">
+                            <label class="inline-flex items-center gap-3 px-4 py-3 rounded-2xl bg-blue-50 border border-blue-200 text-blue-700 font-bold">
+                                <input type="checkbox" name="assignee_employee_id" id="taskAssignToMeToggle" value="<?php echo (int)$currentEmployee['id']; ?>" class="w-4 h-4">
+                                나에게
+                            </label>
+                        </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">담당자 검색</div>
                             <input type="text" id="taskAssigneeSearch" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="이름 / 부서 / 직책 검색">
@@ -638,7 +642,7 @@ function cpms_render_employee_task_dashboard($pdo)
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">담당자</div>
-                            <select name="assignee_employee_ids[]" id="taskAssigneeSelect" required multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                            <select name="assignee_employee_ids[]" id="taskAssigneeSelect" multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
                                 <?php cpms_render_task_assignee_options($employees, $currentLeaveIndex); ?>
                             </select>
                         </div>
@@ -869,6 +873,7 @@ function cpms_render_employee_task_dashboard($pdo)
         var meetingAssigneeSelect = document.getElementById('meetingAssigneeSelect');
         var assigneeSelected = document.getElementById('taskAssigneeSelected');
         var meetingAssigneeSelected = document.getElementById('meetingAssigneeSelected');
+        var assignToMeToggle = document.getElementById('taskAssignToMeToggle');
         var departmentSelect = document.getElementById('taskDepartmentSelect');
         var onLeaveMessage = <?php echo json_encode(approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?>;
         var taskDetailBody = document.getElementById('taskDetailBody');
@@ -917,6 +922,15 @@ function cpms_render_employee_task_dashboard($pdo)
             select.dispatchEvent(eventObj);
         }
 
+        function findAssigneeOptionByValue(select, value) {
+            if (!select || !select.options) return null;
+            value = String(value);
+            for (var i = 0; i < select.options.length; i++) {
+                if (String(select.options[i].value) === value) return select.options[i];
+            }
+            return null;
+        }
+
         function applyAssigneeSearchFilter(searchInput, select) {
             if (!select || !select.options) return;
             var keyword = searchInput ? searchInput.value.replace(/^\s+|\s+$/g, '').toLowerCase() : '';
@@ -959,7 +973,7 @@ function cpms_render_employee_task_dashboard($pdo)
             }
         }
 
-        function setupAssigneePicker(searchInput, select, targetDepartmentSelect, emptyMessage, selectedWrap, selectedEmptyText) {
+        function setupAssigneePicker(searchInput, select, targetDepartmentSelect, emptyMessage, selectedWrap, selectedEmptyText, fallbackCheckbox) {
             if (!select) return;
             if (searchInput) {
                 searchInput.addEventListener('input', function(){
@@ -1008,6 +1022,9 @@ function cpms_render_employee_task_dashboard($pdo)
                             break;
                         }
                     }
+                    if (fallbackCheckbox && String(removeValue) === String(fallbackCheckbox.value)) {
+                        fallbackCheckbox.checked = false;
+                    }
                     dispatchAssigneeChange(select);
                 });
             }
@@ -1015,7 +1032,8 @@ function cpms_render_employee_task_dashboard($pdo)
             if (select.form) {
                 select.form.addEventListener('submit', function(e){
                     var selected = selectedAssigneeOptions(select);
-                    if (selected.length === 0) {
+                    var hasFallback = fallbackCheckbox && fallbackCheckbox.checked && fallbackCheckbox.value;
+                    if (selected.length === 0 && !hasFallback) {
                         e.preventDefault();
                         alert(emptyMessage || '담당자를 선택해주세요.');
                         return;
@@ -1034,8 +1052,24 @@ function cpms_render_employee_task_dashboard($pdo)
             renderSelectedAssignees(select, selectedWrap, selectedEmptyText);
         }
 
-        setupAssigneePicker(assigneeSearch, assigneeSelect, departmentSelect, '담당자를 선택해주세요.', assigneeSelected, '선택된 담당자가 없습니다.');
-        setupAssigneePicker(meetingAssigneeSearch, meetingAssigneeSelect, null, '참석자를 선택해주세요.', meetingAssigneeSelected, '선택된 참석자가 없습니다.');
+        if (assignToMeToggle && assigneeSelect) {
+            assignToMeToggle.addEventListener('change', function(){
+                var myOption = findAssigneeOptionByValue(assigneeSelect, assignToMeToggle.value);
+                if (myOption && !myOption.disabled) {
+                    if (assignToMeToggle.checked) {
+                        myOption.selected = true;
+                        myOption.setAttribute('data-selected-by-me', '1');
+                    } else if (myOption.getAttribute('data-selected-by-me') === '1') {
+                        myOption.selected = false;
+                        myOption.removeAttribute('data-selected-by-me');
+                    }
+                    dispatchAssigneeChange(assigneeSelect);
+                }
+            });
+        }
+
+        setupAssigneePicker(assigneeSearch, assigneeSelect, departmentSelect, '담당자를 선택해주세요.', assigneeSelected, '선택된 담당자가 없습니다.', assignToMeToggle);
+        setupAssigneePicker(meetingAssigneeSearch, meetingAssigneeSelect, null, '참석자를 선택해주세요.', meetingAssigneeSelected, '선택된 참석자가 없습니다.', null);
 
         function openCompleteModal(taskId) {
             if (completeTaskId) completeTaskId.value = taskId;

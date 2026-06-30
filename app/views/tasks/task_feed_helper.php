@@ -66,8 +66,26 @@ function cpms_task_feed_should_show($item)
     if (cpms_tasks_is_closed_status($status)) return false;
     $dueDate = isset($item['due_date']) ? trim((string)$item['due_date']) : '';
     $sourceType = isset($item['source_type']) ? (string)$item['source_type'] : '';
+    $taskType = isset($item['task_type']) ? (string)$item['task_type'] : '';
+    if ($sourceType === 'task' && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && $taskType !== 'meeting') return true;
     if ($sourceType !== 'public_affairs_collab' && $dueDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate) && strcmp($dueDate, cpms_tasks_today()) < 0) return false;
     return true;
+}}
+
+if (!function_exists('cpms_task_feed_counts_as_today')) {
+function cpms_task_feed_counts_as_today($item)
+{
+    if (!is_array($item)) return false;
+    $status = isset($item['status']) ? (string)$item['status'] : '';
+    if (cpms_tasks_is_closed_status($status)) return false;
+    $sourceType = isset($item['source_type']) ? (string)$item['source_type'] : '';
+    if ($sourceType === 'construction_schedule') return false;
+    $taskType = isset($item['task_type']) ? (string)$item['task_type'] : '';
+    if ($sourceType === 'task' && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && $taskType !== 'meeting') {
+        return true;
+    }
+    $dueDate = isset($item['due_date']) ? trim((string)$item['due_date']) : '';
+    return (cpms_tasks_is_due_today($item) || $dueDate === '');
 }}
 
 if (!function_exists('cpms_task_feed_merge')) {
@@ -97,9 +115,8 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
         $st = $pdo->prepare("SELECT * FROM cpms_tasks
                               WHERE assignee_employee_id = :employee_id
                                 AND (status IS NULL OR status NOT IN ('done','cancelled'))
-                                AND (due_date IS NULL OR due_date = '' OR due_date >= :today)
                               ORDER BY is_urgent DESC, due_date ASC, due_time ASC, id DESC");
-        $st->execute(array(':employee_id' => (int)$employeeId, ':today' => cpms_tasks_today()));
+        $st->execute(array(':employee_id' => (int)$employeeId));
         $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($tasks)) $tasks = array();
         foreach ($tasks as $task) {
@@ -818,7 +835,7 @@ function cpms_task_feed_for_executive($pdo, $filters)
         );
 
         foreach ($feed as $item) {
-            if (cpms_tasks_is_due_today($item) || $item['due_date'] === '') $metrics['today']++;
+            if (cpms_task_feed_counts_as_today($item)) $metrics['today']++;
             if (isset($item['status']) && (string)$item['status'] === 'done') $metrics['done']++;
             if (isset($item['status']) && in_array((string)$item['status'], array('progress', 'revision'), true)) $metrics['progress']++;
             if (cpms_tasks_is_delayed($item)) $metrics['delayed']++;

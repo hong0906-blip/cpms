@@ -8,7 +8,7 @@ require_once __DIR__ . '/../../../services/ConstructionDriveService.php';
 
 if (!function_exists('cpms_material_statement_allowed_extensions')) {
 function cpms_material_statement_allowed_extensions() {
-    return array('pdf'=>true, 'jpg'=>true, 'jpeg'=>true, 'png'=>true, 'xlsx'=>true, 'xls'=>true);
+    return array('pdf'=>true, 'jpg'=>true, 'jpeg'=>true, 'png'=>true, 'heic'=>true, 'heif'=>true, 'xlsx'=>true, 'xls'=>true);
 }
 }
 
@@ -20,6 +20,10 @@ function cpms_material_statement_allowed_mimes() {
         'image/pjpeg'=>true,
         'image/png'=>true,
         'image/x-png'=>true,
+        'image/heic'=>true,
+        'image/heif'=>true,
+        'image/heic-sequence'=>true,
+        'image/heif-sequence'=>true,
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'=>true,
         'application/vnd.ms-excel'=>true,
         'application/vnd.ms-office'=>true,
@@ -230,7 +234,7 @@ function cpms_material_statement_validate_upload($file, &$message, &$ext, &$mime
     $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
     $allowedExt = cpms_material_statement_allowed_extensions();
     if ($ext === '' || !isset($allowedExt[$ext])) {
-        $message = '허용되지 않은 파일 형식입니다. pdf, jpg, jpeg, png, xlsx, xls만 업로드할 수 있습니다.';
+        $message = '허용되지 않은 파일 형식입니다. pdf, jpg, jpeg, png, heic, heif, xlsx, xls만 업로드할 수 있습니다.';
         return false;
     }
 
@@ -578,6 +582,8 @@ function cpms_material_statement_content_type($fileName, $mimeType) {
     if ($ext === 'pdf') return 'application/pdf';
     if ($ext === 'jpg' || $ext === 'jpeg') return 'image/jpeg';
     if ($ext === 'png') return 'image/png';
+    if ($ext === 'heic') return 'image/heic';
+    if ($ext === 'heif') return 'image/heif';
     if ($ext === 'xlsx') return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     if ($ext === 'xls') return 'application/vnd.ms-excel';
     return 'application/octet-stream';

@@ -6,6 +6,8 @@
  */
 
 $canEditLabor = isset($canEdit) ? (bool)$canEdit : false;
+$hideLaborForceInputUi = true; // 복구 시 false로 변경하면 임원 전용 강제입력 칸이 다시 보입니다.
+$hideLaborForceSummaryUi = true; // 복구 시 false로 변경하면 강제입력 노무비 요약 카드가 다시 보입니다.
 $laborTab = isset($_GET['labor_tab']) ? trim((string)$_GET['labor_tab']) : 'timesheet';
 if ($laborTab === '') $laborTab = 'timesheet';
 
@@ -277,12 +279,13 @@ foreach ($timesheetWorkers as $worker) {
         </div>
     </div>
 
-    <div class="mt-5 grid grid-cols-1 <?php echo $canManageLaborForce ? 'md:grid-cols-3' : 'md:grid-cols-2'; ?> gap-3">
+    <?php $showLaborForceSummaryCard = ($canManageLaborForce && !$hideLaborForceSummaryUi); ?>
+    <div class="mt-5 grid grid-cols-1 <?php echo $showLaborForceSummaryCard ? 'md:grid-cols-3' : 'md:grid-cols-2'; ?> gap-3">
         <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div class="text-xs font-bold text-gray-500">공수 기준 노무비</div>
             <div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo number_format($laborBaseAmount); ?>원</div>
         </div>
-        <?php if ($canManageLaborForce): ?>
+        <?php if ($showLaborForceSummaryCard): ?>
         <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div class="text-xs font-bold text-gray-500">강제입력 노무비</div>
             <div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo number_format($laborForceAmount); ?>원</div>
@@ -295,7 +298,7 @@ foreach ($timesheetWorkers as $worker) {
     </div>
 
     <?php if ($canManageLaborForce): ?>
-        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_force_save" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_force_save" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4" <?php echo $hideLaborForceInputUi ? 'style="display:none;" aria-hidden="true" data-hidden-for-restore="1"' : ''; ?>>
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">

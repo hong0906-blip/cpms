@@ -25,6 +25,21 @@ function cpms_project_detail_unit_price_value($row) {
     return $material + $labor + $expense;
 }}
 
+if (!function_exists('cpms_project_detail_normalize_status')) {
+function cpms_project_detail_normalize_status($status) {
+    $status = trim((string)$status);
+    if ($status === '' || $status === '진행 중') return '진행중';
+    if ($status === '대기중' || $status === '입찰검토' || $status === '가제' || $status === '정식전환대기') return '입찰 진행중';
+    return $status;
+}}
+
+if (!function_exists('cpms_project_detail_status_options')) {
+function cpms_project_detail_status_options($includeSettlement) {
+    $options = array('입찰 진행중', '계약중', '진행중');
+    if ($includeSettlement) $options[] = '정산완료';
+    return $options;
+}}
+
 $pdo = Db::pdo();
 if (!$pdo) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">DB 연결 실패</div>';
@@ -58,6 +73,13 @@ try {
 if (!$project) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">프로젝트를 찾을 수 없습니다.</div>';
     return;
+}
+$projectStatusValue = cpms_project_detail_normalize_status(isset($project['status']) ? (string)$project['status'] : '');
+$projectSettlementCompletedAt = isset($project['settlement_completed_at']) ? trim((string)$project['settlement_completed_at']) : '';
+if ($projectSettlementCompletedAt === '0000-00-00') $projectSettlementCompletedAt = '';
+if ($projectSettlementCompletedAt === '' && $projectStatusValue === '정산완료') {
+    $projectEndDateForSettlement = isset($project['end_date']) ? trim((string)$project['end_date']) : '';
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $projectEndDateForSettlement)) $projectSettlementCompletedAt = $projectEndDateForSettlement;
 }
 $collabProjectMetaStore = cpms_public_affairs_collab_load_project_meta();
 $isCollabDraftProject = cpms_public_affairs_collab_is_draft_project($project, $collabProjectMetaStore);
@@ -362,9 +384,9 @@ if (count($estimateVersions) > 0) {
             <input type="date" name="end_date" value="<?php echo h((string)$project['end_date']); ?>" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold">
             <input name="contract_amount" value="<?php echo h((string)$project['contract_amount']); ?>" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold" placeholder="계약금액">
             <select name="status" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold">
-                <option value="계약중">계약중</option>
-                <option value="진행중">진행중</option>
-                <option value="대기중">대기중</option>
+                <?php foreach (cpms_project_detail_status_options(false) as $statusOption): ?>
+                    <option value="<?php echo h($statusOption); ?>" <?php echo $projectStatusValue === $statusOption ? 'selected' : ''; ?>><?php echo h($statusOption); ?></option>
+                <?php endforeach; ?>
             </select>
             <select name="main_manager_id" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white font-bold">
                 <?php
@@ -407,9 +429,9 @@ if (count($estimateVersions) > 0) {
             <div>
                 <div class="text-sm font-bold text-gray-700 mb-1">상태</div>
                 <select name="status" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white outline-none">
-                    <option value="계약중" <?php echo ((string)$project['status'] === '계약중') ? 'selected' : ''; ?>>계약중</option>
-                    <option value="대기중" <?php echo ((string)$project['status'] === '대기중') ? 'selected' : ''; ?>>대기중</option>
-                    <option value="진행중" <?php echo ((string)$project['status'] === '진행중') ? 'selected' : ''; ?>>진행중</option>
+                    <?php foreach (cpms_project_detail_status_options(true) as $statusOption): ?>
+                        <option value="<?php echo h($statusOption); ?>" <?php echo $projectStatusValue === $statusOption ? 'selected' : ''; ?>><?php echo h($statusOption); ?></option>
+                    <?php endforeach; ?>
                 </select>
             </div>
             <div class="md:col-span-2">
@@ -423,6 +445,10 @@ if (count($estimateVersions) > 0) {
             <div>
                 <div class="text-sm font-bold text-gray-700 mb-1">공사 종료일</div>
                 <input type="date" name="end_date" value="<?php echo h((string)$project['end_date']); ?>" class="w-full px-4 py-3 rounded-2xl border border-gray-200 outline-none">
+            </div>
+            <div>
+                <div class="text-sm font-bold text-gray-700 mb-1">정산완료일</div>
+                <input type="date" name="settlement_completed_at" value="<?php echo h($projectSettlementCompletedAt); ?>" class="w-full px-4 py-3 rounded-2xl border border-gray-200 outline-none">
             </div>
             <div class="md:col-span-2">
                 <div class="text-sm font-bold text-gray-700 mb-1">계약금액</div>

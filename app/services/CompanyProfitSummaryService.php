@@ -53,6 +53,20 @@ function cpms_company_profit_column_exists($pdo, $table, $column) {
     }
 }}
 
+if (!function_exists('cpms_company_profit_project_settlement_date_expr')) {
+function cpms_company_profit_project_settlement_date_expr($pdo) {
+    if (cpms_company_profit_column_exists($pdo, 'cpms_projects', 'settlement_completed_at')) {
+        return "COALESCE(NULLIF(settlement_completed_at, '0000-00-00'), NULLIF(end_date, '0000-00-00'))";
+    }
+    return "NULLIF(end_date, '0000-00-00')";
+}}
+
+if (!function_exists('cpms_company_profit_project_visible_end_expr')) {
+function cpms_company_profit_project_visible_end_expr($pdo) {
+    $settlementDateExpr = cpms_company_profit_project_settlement_date_expr($pdo);
+    return "CASE WHEN status = '정산완료' AND " . $settlementDateExpr . " IS NOT NULL THEN STR_TO_DATE(CONCAT(YEAR(" . $settlementDateExpr . "), '-12-31'), '%Y-%m-%d') ELSE NULLIF(end_date, '0000-00-00') END";
+}}
+
 if (!function_exists('cpms_company_profit_cost_period_range')) {
 function cpms_company_profit_cost_period_range($ym, $type) {
     $ym = trim((string)$ym);
@@ -119,7 +133,8 @@ function cpms_company_profit_available_years($pdo) {
 
     if ($pdo && cpms_company_profit_table_exists($pdo, 'cpms_projects')) {
         try {
-            $sql = "SELECT MIN(YEAR(start_date)) AS min_start, MAX(YEAR(end_date)) AS max_end FROM cpms_projects WHERE name NOT LIKE '(가제)%'";
+            $visibleEndExpr = cpms_company_profit_project_visible_end_expr($pdo);
+            $sql = "SELECT MIN(YEAR(start_date)) AS min_start, MAX(YEAR(" . $visibleEndExpr . ")) AS max_end FROM cpms_projects WHERE name NOT LIKE '(가제)%'";
             $row = $pdo->query($sql)->fetch(PDO::FETCH_ASSOC);
             if (is_array($row)) {
                 if (isset($row['min_start']) && (int)$row['min_start'] > 0) $minYear = min($minYear, (int)$row['min_start']);
@@ -245,8 +260,26 @@ function cpms_company_profit_load_projects($pdo, $filters) {
         $params[':q'] = '%' . $q . '%';
     }
 
+    $scope = isset($filters['scope']) ? trim((string)$filters['scope']) : '';
+    $startMonth = isset($filters['start_month']) ? trim((string)$filters['start_month']) : '';
+    $endMonth = isset($filters['end_month']) ? trim((string)$filters['end_month']) : '';
+    if ($scope !== 'all' && cpms_company_profit_month_valid($startMonth) && cpms_company_profit_month_valid($endMonth)) {
+        $periodStart = $startMonth . '-01';
+        $periodEnd = date('Y-m-t', strtotime($endMonth . '-01'));
+        if (strtotime($periodStart) > strtotime($periodEnd)) {
+            $tmpPeriod = $periodStart;
+            $periodStart = date('Y-m-01', strtotime($periodEnd));
+            $periodEnd = date('Y-m-t', strtotime($tmpPeriod));
+        }
+        $visibleEndExpr = cpms_company_profit_project_visible_end_expr($pdo);
+        $where[] = "((start_date IS NULL OR start_date = '0000-00-00' OR start_date <= :period_end) AND (" . $visibleEndExpr . " IS NULL OR " . $visibleEndExpr . " >= :period_start))";
+        $params[':period_start'] = $periodStart;
+        $params[':period_end'] = $periodEnd;
+    }
+
     try {
-        $sql = "SELECT id, name, client, contractor, location, start_date, end_date, contract_amount, status FROM cpms_projects";
+        $settlementSelect = cpms_company_profit_column_exists($pdo, 'cpms_projects', 'settlement_completed_at') ? ", settlement_completed_at" : ", NULL AS settlement_completed_at";
+        $sql = "SELECT id, name, client, contractor, location, start_date, end_date, contract_amount, status" . $settlementSelect . " FROM cpms_projects";
         if (count($where) > 0) $sql .= " WHERE " . implode(" AND ", $where);
         $sql .= " ORDER BY id DESC";
         $st = $pdo->prepare($sql);

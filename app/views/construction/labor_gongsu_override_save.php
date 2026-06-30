@@ -132,13 +132,13 @@ try {
     $hasUserEmailSession = ($rawUserEmail !== '');
 
     $authChecked = Auth::check();
-    if (!$authChecked && $hasUserEmailSession && method_exists('Auth', 'autoLoginFromPortal')) {
+    if (!$authChecked && $hasUserEmailSession && method_exists('App\\Core\\Auth', 'autoLoginFromPortal')) {
         Auth::autoLoginFromPortal();
         $authChecked = Auth::check();
     }
 
     // [변경] Auth 복구 후 재계산
-    $authEmailBeforeRepair = method_exists('Auth', 'userEmail') ? trim((string)Auth::userEmail()) : '';
+    $authEmailBeforeRepair = method_exists('App\\Core\\Auth', 'userEmail') ? trim((string)Auth::userEmail()) : '';
     if ($authEmailBeforeRepair === '') {
         $repairEmail = $rawCpmsUserEmail !== '' ? $rawCpmsUserEmail : $rawUserEmail;
         if ($repairEmail !== '') {
@@ -160,11 +160,11 @@ try {
     Auth::refreshCurrentUser(true);
     $authChecked = Auth::check();
 
-    $authEmail = method_exists('Auth', 'userEmail') ? trim((string)Auth::userEmail()) : '';
-    $authRole = method_exists('Auth', 'userRole') ? trim((string)Auth::userRole()) : '';
-    $authDepartment = method_exists('Auth', 'userDepartment') ? trim((string)Auth::userDepartment()) : '';
-    $isMaster = method_exists('Auth', 'isMaster') ? (bool)Auth::isMaster() : false;
-    $canManageConstruction = method_exists('Auth', 'canManageConstruction') ? (bool)Auth::canManageConstruction() : false;
+    $authEmail = method_exists('App\\Core\\Auth', 'userEmail') ? trim((string)Auth::userEmail()) : '';
+    $authRole = method_exists('App\\Core\\Auth', 'userRole') ? trim((string)Auth::userRole()) : '';
+    $authDepartment = method_exists('App\\Core\\Auth', 'userDepartment') ? trim((string)Auth::userDepartment()) : '';
+    $isMaster = method_exists('App\\Core\\Auth', 'isMaster') ? (bool)Auth::isMaster() : false;
+    $canManageConstruction = method_exists('App\\Core\\Auth', 'canManageConstruction') ? (bool)Auth::canManageConstruction() : false;
     // [변경] effective_email 계산
     $effectiveEmail = strtolower(trim($authEmail !== '' ? $authEmail : ($rawCpmsUserEmail !== '' ? $rawCpmsUserEmail : $rawUserEmail)));
     $effectiveRole = trim($authRole !== '' ? $authRole : $rawCpmsUserRole);
@@ -172,8 +172,8 @@ try {
     $effectiveDepartmentNorm = $effectiveDepartment;
     if ($effectiveDepartmentNorm === '공사부' || $effectiveDepartmentNorm === '공사팀') $effectiveDepartmentNorm = '공사';
     if ($effectiveDepartmentNorm === '공무부' || $effectiveDepartmentNorm === '공무팀') $effectiveDepartmentNorm = '공무';
-    // [변경] 마스터 raw 이메일 통과
-    $isMasterByRaw = in_array($effectiveEmail, array('hong0906@cmbuild.kr'), true);
+    // 이메일 기반 마스터 예외는 사용하지 않음
+    $isMasterByRaw = false;
     $allowedByRaw = ($effectiveRole === 'executive' || $effectiveDepartmentNorm === '공사' || $effectiveDepartmentNorm === '공무');
     
     if (!$authChecked) {

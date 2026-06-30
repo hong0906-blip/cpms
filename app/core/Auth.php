@@ -15,14 +15,13 @@ use App\Core\Db;
 class Auth
 {
     const CPMS_USER_KEY = 'cpms_user';
+    private static $sessionRefreshed = false;
 
-    // 마스터 계정 권한
-    // 마스터 계정 이메일이 다르면 여기에 추가
+    // 이메일 기반 마스터는 사용하지 않습니다.
+    // 마스터 권한은 직원명부의 부서가 "개발"일 때만 부여합니다.
     private static function masterEmails()
     {
-        return array(
-            'hong0906@cmbuild.kr',
-        );
+        return array();
     }
 
     // 마스터 권한 대소문자 무시
@@ -71,7 +70,6 @@ class Auth
             'sjw5523@cmbuild.kr',
             'emaetal@cmbuild.kr',
             'shhong@cmbuild.kr',
-            'hong0906@cmbuild.kr',
         );
     }
 
@@ -88,6 +86,11 @@ class Auth
         // 세션 없으면 포탈 기반 자동로그인 시도 (요청한 자동로그인 유지)
         if (!isset($_SESSION[self::CPMS_USER_KEY]) || !is_array($_SESSION[self::CPMS_USER_KEY])) {
             self::autoLoginFromPortal();
+        }
+        if (!self::$sessionRefreshed && isset($_SESSION[self::CPMS_USER_KEY]) && is_array($_SESSION[self::CPMS_USER_KEY])) {
+            self::$sessionRefreshed = true;
+            $email = isset($_SESSION[self::CPMS_USER_KEY]['email']) ? trim((string)$_SESSION[self::CPMS_USER_KEY]['email']) : '';
+            if ($email !== '') self::loadFromEmployeesByEmail($email, false);
         }
         return isset($_SESSION[self::CPMS_USER_KEY]) && is_array($_SESSION[self::CPMS_USER_KEY]);
     }
@@ -114,6 +117,15 @@ class Auth
         $u = self::user();
         if (self::isMaster()) return 'executive'; // 마스터 계정 권한
         return $u && isset($u['role']) ? $u['role'] : 'employee';
+    }
+
+    public static function userStoredRole()
+    {
+        $u = self::user();
+        if ($u && isset($u['employee_role']) && trim((string)$u['employee_role']) !== '') {
+            return (string)$u['employee_role'];
+        }
+        return $u && isset($u['role']) ? (string)$u['role'] : 'employee';
     }
 
     // ★ 부서
@@ -149,6 +161,32 @@ class Auth
     {
         if (self::isMaster()) return true;        
         return self::canManageEmployees();
+    }
+
+    public static function canAssignDevelopmentDepartment()
+    {
+        if (!self::check()) return false;
+
+        $dept = self::normalizeDept(self::userDepartment());
+        if ($dept === '관리') return true;
+
+        $values = array(self::userRole(), self::userPosition(), self::userName());
+        $words = array('대표', '대표이사', '대표님', '부사장');
+        foreach ($values as $value) {
+            $valueNorm = self::normalizeText($value);
+            if ($valueNorm === '') continue;
+            foreach ($words as $word) {
+                $wordNorm = self::normalizeText($word);
+                if ($wordNorm !== '' && strpos($valueNorm, $wordNorm) !== false) return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function canAssignExecutiveRole()
+    {
+        return self::canAssignDevelopmentDepartment();
     }
 
     
@@ -302,6 +340,7 @@ class Auth
 
         $name = '';
         $role = 'employee';
+        $storedRole = 'employee';
         $photo = null;
         $dept = '';
         $pos = '';
@@ -337,8 +376,9 @@ class Auth
         }
 
         $dept = self::normalizeDept($dept);
+        $storedRole = $role;
 
-        // 마스터 계정/개발부서 권한: executive로 강제
+        // 개발부서 권한: executive로 강제
         $normalizedMasterEmails = array();
         foreach (self::masterEmails() as $masterEmail) {
             $normalizedMasterEmails[] = self::normalizeEmail($masterEmail);
@@ -361,6 +401,7 @@ class Auth
         $_SESSION[self::CPMS_USER_KEY]['email'] = $email;
         $_SESSION[self::CPMS_USER_KEY]['name'] = ($name !== '' ? $name : $email);
         $_SESSION[self::CPMS_USER_KEY]['role'] = $role;
+        $_SESSION[self::CPMS_USER_KEY]['employee_role'] = $storedRole;
         $_SESSION[self::CPMS_USER_KEY]['photo_path'] = $photo;
         $_SESSION[self::CPMS_USER_KEY]['department'] = $dept;
         $_SESSION[self::CPMS_USER_KEY]['position'] = $pos;
