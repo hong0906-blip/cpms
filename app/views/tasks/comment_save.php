@@ -9,14 +9,34 @@ if (!Auth::check()) {
     exit;
 }
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    flash_set('error', '잘못된 요청 방식입니다.');
+$isAjax = (isset($_POST['ajax']) && (string)$_POST['ajax'] === '1')
+    || (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
+if (!function_exists('cpms_tasks_comment_json_response')) {
+function cpms_tasks_comment_json_response($ok, $message, $commentsHtml, $commentCount)
+{
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(array(
+        'ok' => $ok ? 1 : 0,
+        'message' => (string)$message,
+        'comments_html' => (string)$commentsHtml,
+        'comment_count' => (int)$commentCount,
+    ));
+    exit;
+}}
+if (!function_exists('cpms_tasks_comment_fail')) {
+function cpms_tasks_comment_fail($message, $isAjax)
+{
+    if ($isAjax) cpms_tasks_comment_json_response(false, $message, '', 0);
+    flash_set('error', $message);
     cpms_tasks_redirect_back();
+}}
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    cpms_tasks_comment_fail('잘못된 요청 방식입니다.', $isAjax);
 }
 
 if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
-    flash_set('error', '보안 토큰 검증에 실패했습니다.');
-    cpms_tasks_redirect_back();
+    cpms_tasks_comment_fail('보안 토큰 검증에 실패했습니다.', $isAjax);
 }
 
 $pdo = Db::pdo();
@@ -26,19 +46,16 @@ $parentCommentId = isset($_POST['parent_comment_id']) ? (int)$_POST['parent_comm
 $commentText = isset($_POST['comment_text']) ? trim((string)$_POST['comment_text']) : '';
 
 if (!$pdo || $taskId <= 0 || $commentText === '') {
-    flash_set('error', '댓글 등록에 필요한 값이 부족합니다.');
-    cpms_tasks_redirect_back();
+    cpms_tasks_comment_fail('댓글 등록에 필요한 값이 부족합니다.', $isAjax);
 }
 
 $task = cpms_tasks_find_task($pdo, $taskId);
 if (!$task || !cpms_tasks_can_view($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0)) {
-    flash_set('error', '업무를 찾을 수 없거나 댓글 권한이 없습니다.');
-    cpms_tasks_redirect_back();
+    cpms_tasks_comment_fail('업무를 찾을 수 없거나 댓글 권한이 없습니다.', $isAjax);
 }
 
 if (!cpms_tasks_ensure_comment_schema($pdo)) {
-    flash_set('error', '댓글 테이블 준비에 실패했습니다.');
-    cpms_tasks_redirect_back();
+    cpms_tasks_comment_fail('댓글 테이블 준비에 실패했습니다.', $isAjax);
 }
 
 $parentAuthorId = 0;
@@ -93,8 +110,16 @@ try {
     }
 
     cpms_tasks_send_comment_notifications($pdo, $task, $commentText, $currentEmployee, $parentAuthorId);
+    if ($isAjax) {
+        $freshComments = cpms_tasks_fetch_comments($pdo, $taskId);
+        ob_start();
+        cpms_tasks_render_comments($freshComments, $taskId, isset($_POST['return_url']) ? (string)$_POST['return_url'] : cpms_tasks_default_return_url());
+        $commentsHtml = ob_get_clean();
+        cpms_tasks_comment_json_response(true, '댓글을 등록했습니다.', $commentsHtml, count($freshComments));
+    }
     flash_set('success', '댓글을 등록했습니다.');
 } catch (Exception $e) {
+    if ($isAjax) cpms_tasks_comment_json_response(false, '댓글 등록 실패: ' . $e->getMessage(), '', 0);
     flash_set('error', '댓글 등록 실패: ' . $e->getMessage());
 }
 

@@ -168,6 +168,9 @@ function cpms_base64url_decode($value) {
 
 if (!function_exists('cpms_chat_login_secret')) {
 function cpms_chat_login_secret() {
+    $configured = trim((string)getenv('CPMS_CHAT_LINK_SECRET'));
+    if ($configured !== '') return hash('sha256', $configured);
+
     $secretDir = cpms_storage_root() . '/secrets';
     $secretFile = $secretDir . '/cpms_chat_link_secret.php';
     if (is_file($secretFile)) {
@@ -175,16 +178,26 @@ function cpms_chat_login_secret() {
         if (is_string($loaded) && trim($loaded) !== '') return trim($loaded);
     }
     if (!is_dir($secretDir)) @mkdir($secretDir, 0777, true);
-    if (!is_dir($secretDir) || !is_writable($secretDir)) return '';
+    if (!is_dir($secretDir) || !is_writable($secretDir)) {
+        $fallbackFile = $secretDir . '/google-chat-service-account.json';
+        if (is_file($fallbackFile) && is_readable($fallbackFile)) return hash_file('sha256', $fallbackFile);
+        return hash('sha256', __FILE__ . dirname(__DIR__) . (string)getenv('COMPUTERNAME') . (string)getenv('USERNAME'));
+    }
     $bytes = function_exists('openssl_random_pseudo_bytes') ? openssl_random_pseudo_bytes(32) : uniqid('', true);
     if ($bytes === false || $bytes === '') $bytes = uniqid('', true);
     $secret = hash('sha256', $bytes);
     $content = "<?php\nreturn '" . $secret . "';\n";
     $tmp = $secretFile . '.' . getmypid() . '.tmp';
-    if (@file_put_contents($tmp, $content, LOCK_EX) === false) return '';
+    if (@file_put_contents($tmp, $content, LOCK_EX) === false) {
+        $fallbackFile = $secretDir . '/google-chat-service-account.json';
+        if (is_file($fallbackFile) && is_readable($fallbackFile)) return hash_file('sha256', $fallbackFile);
+        return hash('sha256', __FILE__ . dirname(__DIR__) . (string)getenv('COMPUTERNAME') . (string)getenv('USERNAME'));
+    }
     if (!@rename($tmp, $secretFile)) {
         @unlink($tmp);
-        return '';
+        $fallbackFile = $secretDir . '/google-chat-service-account.json';
+        if (is_file($fallbackFile) && is_readable($fallbackFile)) return hash_file('sha256', $fallbackFile);
+        return hash('sha256', __FILE__ . dirname(__DIR__) . (string)getenv('COMPUTERNAME') . (string)getenv('USERNAME'));
     }
     return $secret;
 }
@@ -217,6 +230,72 @@ function cpms_chat_login_token_create($employeeId, $route) {
     $body = cpms_base64url_encode($json);
     $sig = hash_hmac('sha256', $body, $secret);
     return $body . '.' . $sig;
+}
+}
+
+if (!function_exists('cpms_chat_login_url_route')) {
+function cpms_chat_login_url_route($url) {
+    $url = trim((string)$url);
+    if ($url === '') return '';
+    $parts = @parse_url($url);
+    $query = '';
+    if (is_array($parts) && isset($parts['query'])) {
+        $query = (string)$parts['query'];
+    } else if (substr($url, 0, 1) === '?') {
+        $query = substr($url, 1);
+    }
+    if ($query === '') return '';
+    $params = array();
+    parse_str($query, $params);
+    return (isset($params['r']) && !is_array($params['r'])) ? trim((string)$params['r']) : '';
+}
+}
+
+if (!function_exists('cpms_chat_login_add_token_to_url')) {
+function cpms_chat_login_add_token_to_url($url, $employeeId) {
+    $url = trim((string)$url);
+    $employeeId = (int)$employeeId;
+    if ($url === '' || $employeeId <= 0 || strpos($url, '_clt=') !== false) return $url;
+    $route = cpms_chat_login_url_route($url);
+    if ($route === '') return $url;
+    $token = cpms_chat_login_token_create($employeeId, $route);
+    if ($token === '') return $url;
+
+    $fragment = '';
+    $hashPos = strpos($url, '#');
+    if ($hashPos !== false) {
+        $fragment = substr($url, $hashPos);
+        $url = substr($url, 0, $hashPos);
+    }
+    $separator = (strpos($url, '?') === false) ? '?' : '&';
+    return $url . $separator . '_clt=' . rawurlencode($token) . $fragment;
+}
+}
+
+if (!function_exists('cpms_chat_login_append_missing_tokens')) {
+function cpms_chat_login_append_missing_tokens($messageText, $employeeId) {
+    $employeeId = (int)$employeeId;
+    if ($employeeId <= 0) return (string)$messageText;
+    $lines = preg_split("/\r\n|\n|\r/", (string)$messageText);
+    if (!is_array($lines) || count($lines) === 0) return (string)$messageText;
+    $changed = false;
+    for ($i = 0; $i < count($lines); $i++) {
+        $line = (string)$lines[$i];
+        $trimmed = trim($line);
+        $newLine = $line;
+        if (preg_match('/^(URL\s*:\s*)(\S+)(.*)$/i', $trimmed, $m)) {
+            $newUrl = cpms_chat_login_add_token_to_url($m[2], $employeeId);
+            if ($newUrl !== $m[2]) $newLine = $m[1] . $newUrl . (isset($m[3]) ? $m[3] : '');
+        } else if (preg_match('/^(https?:\/\/\S+)(.*)$/i', $trimmed, $m)) {
+            $newUrl = cpms_chat_login_add_token_to_url($m[1], $employeeId);
+            if ($newUrl !== $m[1]) $newLine = $newUrl . (isset($m[2]) ? $m[2] : '');
+        }
+        if ($newLine !== $line) {
+            $lines[$i] = $newLine;
+            $changed = true;
+        }
+    }
+    return $changed ? implode("\n", $lines) : (string)$messageText;
 }
 }
 
@@ -856,6 +935,9 @@ function cpms_send_google_chat_to_employee($pdo, $employeeId, $messageText, $sou
         $spaceName = isset($emp['google_chat_dm_space_name']) ? trim((string)$emp['google_chat_dm_space_name']) : '';
         $userName = isset($emp['google_chat_user_name']) ? trim((string)$emp['google_chat_user_name']) : '';
         $enabled = isset($emp['google_chat_enabled']) ? (int)$emp['google_chat_enabled'] : 0;
+        if (function_exists('cpms_chat_login_append_missing_tokens')) {
+            $messageText = cpms_chat_login_append_missing_tokens($messageText, (int)$employeeId);
+        }
         if ($enabled === 1 && $spaceName === '' && $userName !== '' && function_exists('approval_google_chat_setting') && function_exists('approval_google_chat_setup_dm_space')) {
             $autoCreate = approval_google_chat_setting($pdo, 'google_chat_dm_auto_create_enabled', '0') === '1';
             if ($autoCreate) {

@@ -638,7 +638,29 @@ function cpms_dashboard_project_status_color($sales, $usedTotal)
 if (!function_exists('cpms_dashboard_project_count')) {
 function cpms_dashboard_project_count($pdo)
 {
-    return count(cpms_dashboard_project_rows($pdo));
+    static $cache = array();
+    if (!$pdo || !cpms_dashboard_table_exists($pdo, 'cpms_projects')) return 0;
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'project-count');
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+
+    $where = array('1=1');
+    if (cpms_dashboard_column_exists($pdo, 'cpms_projects', 'name')) {
+        $where[count($where)] = "name NOT LIKE '(媛??%'";
+    }
+    if (cpms_dashboard_column_exists($pdo, 'cpms_projects', 'is_deleted')) {
+        $where[count($where)] = '(is_deleted = 0 OR is_deleted IS NULL)';
+    }
+    if (cpms_dashboard_column_exists($pdo, 'cpms_projects', 'status')) {
+        $where[count($where)] = "(status IS NULL OR status = '' OR status NOT IN ('醫낅즺','痍⑥냼'))";
+    }
+
+    try {
+        $sql = 'SELECT COUNT(*) FROM cpms_projects WHERE ' . implode(' AND ', $where);
+        $cache[$cacheKey] = (int)$pdo->query($sql)->fetchColumn();
+    } catch (Exception $e) {
+        $cache[$cacheKey] = 0;
+    }
+    return $cache[$cacheKey];
 }}
 
 if (!function_exists('cpms_dashboard_project_cost_summary')) {

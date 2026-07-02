@@ -135,7 +135,7 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
         <div class="mt-4 flex flex-wrap items-center gap-2">
             <?php echo cpms_render_task_action_link($item); ?>
             <?php if ($canRespondMeeting): ?>
-                <form method="post" action="?r=tasks/meeting_response" class="inline">
+                <form method="post" action="?r=task_meeting_response" class="inline" data-task-meeting-response-form data-task-id="<?php echo (int)$item['source_id']; ?>">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
                     <input type="hidden" name="response" value="available">
@@ -188,6 +188,138 @@ function cpms_render_feed_lane($title, $description, $colorClass, $items, $curre
             </div>
         <?php endif; ?>
     </div>
+    <?php
+}}
+
+if (!function_exists('cpms_task_kanban_priority_rank')) {
+function cpms_task_kanban_priority_rank($priority)
+{
+    $priority = (string)$priority;
+    if ($priority === 'urgent') return 0;
+    if ($priority === 'high') return 1;
+    if ($priority === 'normal') return 2;
+    if ($priority === 'low') return 3;
+    return 2;
+}}
+
+if (!function_exists('cpms_task_kanban_sort')) {
+function cpms_task_kanban_sort($a, $b)
+{
+    $aUrgent = (isset($a['is_urgent']) && (int)$a['is_urgent'] === 1) || (isset($a['priority']) && (string)$a['priority'] === 'urgent');
+    $bUrgent = (isset($b['is_urgent']) && (int)$b['is_urgent'] === 1) || (isset($b['priority']) && (string)$b['priority'] === 'urgent');
+    if ($aUrgent !== $bUrgent) return $aUrgent ? -1 : 1;
+
+    $aDelayed = cpms_tasks_is_delayed($a);
+    $bDelayed = cpms_tasks_is_delayed($b);
+    if ($aDelayed !== $bDelayed) return $aDelayed ? -1 : 1;
+
+    $aPriority = cpms_task_kanban_priority_rank(isset($a['priority']) ? $a['priority'] : 'normal');
+    $bPriority = cpms_task_kanban_priority_rank(isset($b['priority']) ? $b['priority'] : 'normal');
+    if ($aPriority !== $bPriority) return ($aPriority < $bPriority) ? -1 : 1;
+
+    $aCreated = isset($a['created_at']) ? strtotime((string)$a['created_at']) : false;
+    $bCreated = isset($b['created_at']) ? strtotime((string)$b['created_at']) : false;
+    if ($aCreated !== false && $bCreated !== false && $aCreated !== $bCreated) return ($aCreated < $bCreated) ? -1 : 1;
+    if ($aCreated !== false && $bCreated === false) return -1;
+    if ($aCreated === false && $bCreated !== false) return 1;
+
+    $aId = isset($a['source_id']) ? (int)$a['source_id'] : 0;
+    $bId = isset($b['source_id']) ? (int)$b['source_id'] : 0;
+    if ($aId === $bId) return 0;
+    return ($aId < $bId) ? -1 : 1;
+}}
+
+if (!function_exists('cpms_task_kanban_lane_key')) {
+function cpms_task_kanban_lane_key($item)
+{
+    $status = isset($item['status']) ? (string)$item['status'] : 'pending';
+    if ($status === 'done' || $status === 'completed') return 'done';
+    if ($status === 'rejected' || $status === 'cancelled' || $status === 'meeting_unavailable') return 'rejected';
+    if (in_array($status, array('progress', 'processing', 'revision', 'meeting_available'), true)) return 'progress';
+    return 'pending';
+}}
+
+if (!function_exists('cpms_task_kanban_should_include')) {
+function cpms_task_kanban_should_include($item)
+{
+    if (!is_array($item)) return false;
+    $sourceType = isset($item['source_type']) ? (string)$item['source_type'] : '';
+    return ($sourceType === 'task' && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1);
+}}
+
+if (!function_exists('cpms_render_task_kanban_card')) {
+function cpms_render_task_kanban_card($item, $currentEmployeeId)
+{
+    $priority = isset($item['priority']) ? (string)$item['priority'] : 'normal';
+    $isUrgent = (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1) || $priority === 'urgent';
+    $isDelayed = cpms_tasks_is_delayed($item);
+    $statusKey = $isDelayed ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
+    $laneKey = cpms_task_kanban_lane_key($item);
+    $dueText = '-';
+    if (isset($item['due_date']) && trim((string)$item['due_date']) !== '') {
+        $dueText = (string)$item['due_date'];
+        if (isset($item['due_time']) && trim((string)$item['due_time']) !== '') $dueText .= ' ' . substr((string)$item['due_time'], 0, 5);
+    }
+    $canDrag = isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1
+        && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId;
+    $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
+    $canStatusAction = $canDrag && !$isMeetingTask;
+    ?>
+    <article class="cpms-kanban-card rounded-2xl border border-gray-200 bg-white p-4 shadow-sm shadow-gray-100"
+             data-kanban-card
+             data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>"
+             data-kanban-status="<?php echo h($laneKey); ?>"
+             data-kanban-priority="<?php echo h($priority); ?>"
+             data-kanban-priority-rank="<?php echo (int)cpms_task_kanban_priority_rank($priority); ?>"
+             data-kanban-is-urgent="<?php echo $isUrgent ? '1' : '0'; ?>"
+             data-kanban-delayed="<?php echo $isDelayed ? '1' : '0'; ?>"
+             data-kanban-created="<?php echo h(isset($item['created_at']) ? $item['created_at'] : ''); ?>"
+             draggable="<?php echo $canDrag ? 'true' : 'false'; ?>">
+        <div class="flex items-start justify-between gap-2">
+            <span class="px-2.5 py-1 rounded-full border text-xs font-extrabold <?php echo h(cpms_tasks_badge_class('priority', $priority)); ?>" data-kanban-priority-badge><?php echo h(cpms_tasks_priority_label($priority)); ?></span>
+            <span class="px-2.5 py-1 rounded-full border text-xs font-extrabold <?php echo h(cpms_tasks_badge_class('status', $statusKey)); ?>" data-kanban-status-badge><?php echo h(isset($item['display_status']) ? $item['display_status'] : cpms_tasks_status_label(isset($item['status']) ? $item['status'] : 'pending')); ?></span>
+        </div>
+        <div class="mt-3 text-base font-extrabold text-slate-900 leading-6 break-words"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>
+        <div class="mt-2 text-sm text-slate-600">요청자: <?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?></div>
+        <div class="mt-1 text-sm text-slate-500">마감: <?php echo h($dueText); ?></div>
+        <div class="mt-3 flex flex-wrap gap-2" data-kanban-flags>
+            <?php if ($isUrgent): ?>
+                <span class="px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-extrabold" data-kanban-urgent-chip>긴급</span>
+            <?php endif; ?>
+            <?php if ($isDelayed): ?>
+                <span class="px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-extrabold">지연</span>
+            <?php endif; ?>
+        </div>
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+            <?php if ($canStatusAction): ?>
+                <button type="button" data-kanban-status-action="progress" data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-extrabold <?php echo $laneKey === 'progress' || $laneKey === 'done' ? 'hidden' : ''; ?>">진행중</button>
+                <button type="button" data-kanban-status-action="done" data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-extrabold <?php echo $laneKey === 'done' ? 'hidden' : ''; ?>">완료</button>
+            <?php endif; ?>
+            <button type="button" data-task-detail-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">상세</button>
+        </div>
+    </article>
+    <?php
+}}
+
+if (!function_exists('cpms_render_task_kanban_lane')) {
+function cpms_render_task_kanban_lane($laneKey, $title, $items, $currentEmployeeId)
+{
+    ?>
+    <section class="cpms-kanban-lane rounded-2xl border border-gray-200 bg-slate-50 p-4 min-h-[280px]" data-kanban-lane="<?php echo h($laneKey); ?>">
+        <div class="flex items-center justify-between gap-3 mb-4">
+            <h3 class="text-lg font-extrabold text-gray-900"><?php echo h($title); ?></h3>
+            <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-sm font-extrabold text-gray-700" data-kanban-count><?php echo count($items); ?>건</span>
+        </div>
+        <div class="space-y-3 min-h-[180px]" data-kanban-drop="<?php echo h($laneKey); ?>">
+            <?php if (count($items) === 0): ?>
+                <div class="p-4 rounded-2xl border border-dashed border-gray-300 bg-white text-sm text-gray-500" data-kanban-empty>표시할 업무가 없습니다.</div>
+            <?php else: ?>
+                <?php foreach ($items as $item): ?>
+                    <?php cpms_render_task_kanban_card($item, $currentEmployeeId); ?>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </section>
     <?php
 }}
 
@@ -277,7 +409,7 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
                 </form>
             <?php endif; ?>
             <?php if ($canRespondMeeting): ?>
-                <form method="post" action="?r=tasks/meeting_response" class="inline-flex">
+                <form method="post" action="?r=task_meeting_response" class="inline-flex" data-task-meeting-response-form data-task-id="<?php echo (int)$item['source_id']; ?>">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
                     <input type="hidden" name="response" value="available">
@@ -327,17 +459,21 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
                         <?php if (isset($currentEmployee['id']) && (int)$currentEmployee['id'] > 0): ?>
                             <div class="md:col-span-2">
                                 <label class="inline-flex items-center gap-3 px-4 py-3 rounded-2xl bg-blue-50 border border-blue-200 text-blue-700 font-bold">
-                                    <input type="checkbox" name="assignee_employee_id" value="<?php echo (int)$currentEmployee['id']; ?>" class="w-4 h-4">
+                                    <input type="checkbox" name="assignee_employee_id" id="taskAssignToMeToggle" value="<?php echo (int)$currentEmployee['id']; ?>" class="w-4 h-4">
                                     나에게
                                 </label>
                             </div>
                         <?php endif; ?>
                         <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">담당자 검색</div>
+                            <input type="text" id="taskAssigneeSearch" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="이름 / 부서 / 직책 검색">
+                            <div id="taskAssigneeSelected" class="mt-2 flex flex-wrap gap-2 text-sm"></div>
+                        </div>
+                        <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">담당자</div>
-                            <select name="assignee_employee_ids[]" multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                            <select name="assignee_employee_ids[]" id="taskAssigneeSelect" multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
                                 <?php cpms_render_task_assignee_options($employees, $currentLeaveIndex); ?>
                             </select>
-                            <div class="text-xs text-gray-500 mt-1">여러 명 선택 시 Ctrl 키를 누른 상태에서 선택하세요.</div>
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">관련 현장</div>
@@ -350,7 +486,7 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">관련 부서</div>
-                            <select name="department" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                            <select name="department" id="taskDepartmentSelect" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
                                 <option value="">담당자 부서 사용</option>
                                 <?php foreach (cpms_tasks_department_options() as $department): ?>
                                     <option value="<?php echo h($department); ?>"><?php echo h($department); ?></option>
@@ -358,16 +494,24 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
                             </select>
                         </div>
                         <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">중요도</div>
+                            <select name="priority" id="taskPrioritySelect" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <?php foreach (cpms_tasks_priority_options() as $priorityValue => $priorityLabel): ?>
+                                    <option value="<?php echo h($priorityValue); ?>" <?php echo ($priorityValue === 'normal') ? 'selected' : ''; ?>><?php echo h($priorityLabel); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">마감일</div>
-                            <input type="date" name="due_date" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                            <input type="date" name="due_date" id="taskDueDate" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">마감시간</div>
-                            <input type="time" name="due_time" value="18:00" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                            <input type="time" name="due_time" id="taskDueTime" value="18:00" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
                         </div>
                         <div class="md:col-span-2">
                             <label class="inline-flex items-center gap-3 px-4 py-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-bold">
-                                <input type="checkbox" name="is_urgent" class="w-4 h-4">
+                                <input type="checkbox" name="is_urgent" id="taskUrgentToggle" class="w-4 h-4">
                                 긴급 요청
                             </label>
                         </div>
@@ -406,20 +550,25 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
                             <div class="text-sm font-bold text-gray-700 mb-1">회의 내용</div>
                             <textarea name="content" rows="4" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></textarea>
                         </div>
-                        <div class="md:col-span-2">
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">참석자 검색</div>
+                            <input type="text" id="meetingAssigneeSearch" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="이름 / 부서 / 직책 검색">
+                            <div id="meetingAssigneeSelected" class="mt-2 flex flex-wrap gap-2 text-sm"></div>
+                        </div>
+                        <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">참석자</div>
-                            <select name="assignee_employee_ids[]" required multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                            <select name="assignee_employee_ids[]" id="meetingAssigneeSelect" required multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
                                 <?php cpms_render_task_assignee_options($employees, $currentLeaveIndex); ?>
                             </select>
                             <div class="text-xs text-gray-500 mt-1">회의 요청자는 자동으로 참석자에 포함됩니다.</div>
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">회의 일자</div>
-                            <input type="date" name="meeting_date" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                            <input type="date" name="meeting_date" id="meetingDate" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">회의 시간</div>
-                            <input type="time" name="meeting_time" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                            <input type="time" name="meeting_time" id="meetingTime" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">관련 현장</div>
@@ -443,6 +592,183 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
             </div>
         </div>
     </div>
+    <script>
+    (function(){
+        var taskDueDate = document.getElementById('taskDueDate');
+        var taskDueTime = document.getElementById('taskDueTime');
+        var taskUrgentToggle = document.getElementById('taskUrgentToggle');
+        var taskPrioritySelect = document.getElementById('taskPrioritySelect');
+        var assigneeSearch = document.getElementById('taskAssigneeSearch');
+        var assigneeSelect = document.getElementById('taskAssigneeSelect');
+        var meetingAssigneeSearch = document.getElementById('meetingAssigneeSearch');
+        var meetingAssigneeSelect = document.getElementById('meetingAssigneeSelect');
+        var assigneeSelected = document.getElementById('taskAssigneeSelected');
+        var meetingAssigneeSelected = document.getElementById('meetingAssigneeSelected');
+        var assignToMeToggle = document.getElementById('taskAssignToMeToggle');
+        var departmentSelect = document.getElementById('taskDepartmentSelect');
+        var onLeaveMessage = <?php echo json_encode(approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?>;
+
+        function todayString() {
+            var now = new Date();
+            var month = String(now.getMonth() + 1);
+            var day = String(now.getDate());
+            if (month.length < 2) month = '0' + month;
+            if (day.length < 2) day = '0' + day;
+            return now.getFullYear() + '-' + month + '-' + day;
+        }
+        function applyUrgentDefaults() {
+            if (taskDueDate) taskDueDate.value = todayString();
+            if (taskDueTime && !taskDueTime.value) taskDueTime.value = '18:00';
+        }
+        if (taskUrgentToggle) {
+            taskUrgentToggle.addEventListener('change', function(){
+                if (!taskUrgentToggle.checked) return;
+                if (taskPrioritySelect) taskPrioritySelect.value = 'urgent';
+                applyUrgentDefaults();
+            });
+        }
+        if (taskPrioritySelect) {
+            taskPrioritySelect.addEventListener('change', function(){
+                if (taskPrioritySelect.value !== 'urgent') return;
+                if (taskUrgentToggle) taskUrgentToggle.checked = true;
+                applyUrgentDefaults();
+            });
+        }
+        function selectedOptions(select) {
+            var selected = [];
+            if (!select || !select.options) return selected;
+            for (var i = 0; i < select.options.length; i++) {
+                if (select.options[i].selected && select.options[i].value) selected[selected.length] = select.options[i];
+            }
+            return selected;
+        }
+        function dispatchChange(select) {
+            var eventObj = document.createEvent('HTMLEvents');
+            eventObj.initEvent('change', true, false);
+            select.dispatchEvent(eventObj);
+        }
+        function filterOptions(searchInput, select) {
+            if (!select || !select.options) return;
+            var keyword = searchInput ? searchInput.value.replace(/^\s+|\s+$/g, '').toLowerCase() : '';
+            for (var i = 0; i < select.options.length; i++) {
+                var option = select.options[i];
+                if (!option.value) continue;
+                var matched = keyword === '' || option.text.toLowerCase().indexOf(keyword) >= 0;
+                option.hidden = !(matched || option.selected);
+            }
+        }
+        function renderChips(select, wrap, emptyText) {
+            if (!wrap) return;
+            wrap.innerHTML = '';
+            var selected = selectedOptions(select);
+            if (selected.length === 0) {
+                var empty = document.createElement('div');
+                empty.className = 'w-full px-3 py-2 rounded-xl bg-gray-50 border border-dashed border-gray-200 text-gray-500';
+                empty.textContent = emptyText;
+                wrap.appendChild(empty);
+                return;
+            }
+            for (var i = 0; i < selected.length; i++) {
+                var chip = document.createElement('span');
+                chip.className = 'inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-blue-50 border border-blue-200 text-blue-800 font-bold';
+                var label = document.createElement('span');
+                label.textContent = (selected[i].text || '').replace(/^\s+|\s+$/g, '');
+                chip.appendChild(label);
+                var removeButton = document.createElement('button');
+                removeButton.type = 'button';
+                removeButton.className = 'px-2 py-1 rounded-lg bg-white border border-blue-200 text-blue-700';
+                removeButton.setAttribute('data-assignee-remove', selected[i].value);
+                removeButton.textContent = '삭제';
+                chip.appendChild(removeButton);
+                wrap.appendChild(chip);
+            }
+        }
+        function findOption(select, value) {
+            if (!select || !select.options) return null;
+            value = String(value);
+            for (var i = 0; i < select.options.length; i++) {
+                if (String(select.options[i].value) === value) return select.options[i];
+            }
+            return null;
+        }
+        function setupPicker(searchInput, select, targetDepartmentSelect, emptyMessage, wrap, wrapEmptyText, fallbackCheckbox) {
+            if (!select) return;
+            if (searchInput) searchInput.addEventListener('input', function(){ filterOptions(searchInput, select); renderChips(select, wrap, wrapEmptyText); });
+            select.addEventListener('mousedown', function(e){
+                var option = e.target && e.target.tagName === 'OPTION' ? e.target : null;
+                if (!option || !option.value || option.disabled) return;
+                e.preventDefault();
+                select.focus();
+                option.selected = !option.selected;
+                dispatchChange(select);
+            });
+            select.addEventListener('change', function(){
+                var selected = selectedOptions(select);
+                var firstAvailable = null;
+                for (var i = 0; i < selected.length; i++) {
+                    if (selected[i].getAttribute('data-on-leave') === '1') {
+                        alert(onLeaveMessage);
+                        selected[i].selected = false;
+                        continue;
+                    }
+                    if (!firstAvailable) firstAvailable = selected[i];
+                }
+                if (targetDepartmentSelect && targetDepartmentSelect.value === '' && firstAvailable) targetDepartmentSelect.value = firstAvailable.getAttribute('data-department') || '';
+                filterOptions(searchInput, select);
+                renderChips(select, wrap, wrapEmptyText);
+            });
+            if (wrap) {
+                wrap.addEventListener('click', function(e){
+                    var button = e.target && e.target.closest ? e.target.closest('[data-assignee-remove]') : null;
+                    if (!button) return;
+                    e.preventDefault();
+                    var value = button.getAttribute('data-assignee-remove');
+                    var option = findOption(select, value);
+                    if (option) option.selected = false;
+                    if (fallbackCheckbox && String(value) === String(fallbackCheckbox.value)) fallbackCheckbox.checked = false;
+                    dispatchChange(select);
+                });
+            }
+            if (select.form) {
+                select.form.addEventListener('submit', function(e){
+                    var selected = selectedOptions(select);
+                    var hasFallback = fallbackCheckbox && fallbackCheckbox.checked && fallbackCheckbox.value;
+                    if (selected.length === 0 && !hasFallback) {
+                        e.preventDefault();
+                        alert(emptyMessage);
+                        return;
+                    }
+                    for (var i = 0; i < selected.length; i++) {
+                        if (selected[i].getAttribute('data-on-leave') === '1') {
+                            e.preventDefault();
+                            alert(onLeaveMessage);
+                            selected[i].selected = false;
+                            return;
+                        }
+                    }
+                });
+            }
+            filterOptions(searchInput, select);
+            renderChips(select, wrap, wrapEmptyText);
+        }
+        if (assignToMeToggle && assigneeSelect) {
+            assignToMeToggle.addEventListener('change', function(){
+                var option = findOption(assigneeSelect, assignToMeToggle.value);
+                if (!option || option.disabled) return;
+                if (assignToMeToggle.checked) {
+                    option.selected = true;
+                    option.setAttribute('data-selected-by-me', '1');
+                } else if (option.getAttribute('data-selected-by-me') === '1') {
+                    option.selected = false;
+                    option.removeAttribute('data-selected-by-me');
+                }
+                dispatchChange(assigneeSelect);
+            });
+        }
+        setupPicker(assigneeSearch, assigneeSelect, departmentSelect, '담당자를 선택해주세요.', assigneeSelected, '선택된 담당자가 없습니다.', assignToMeToggle);
+        setupPicker(meetingAssigneeSearch, meetingAssigneeSelect, null, '참석자를 선택해주세요.', meetingAssigneeSelected, '선택된 참석자가 없습니다.', null);
+    })();
+    </script>
     <?php
 }}
 
@@ -474,8 +800,19 @@ function cpms_render_employee_task_dashboard($pdo)
     $progressItems = array();
     $approvalItems = array();
     $delayedItems = array();
+    $kanbanLanes = array(
+        'pending' => array(),
+        'progress' => array(),
+        'done' => array(),
+        'rejected' => array(),
+    );
 
     foreach ($feed as $item) {
+        if (cpms_task_kanban_should_include($item)) {
+            $laneKey = cpms_task_kanban_lane_key($item);
+            if (!isset($kanbanLanes[$laneKey])) $laneKey = 'pending';
+            $kanbanLanes[$laneKey][count($kanbanLanes[$laneKey])] = $item;
+        }
         if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1) {
             $summary['urgent']++;
             $urgentItems[count($urgentItems)] = $item;
@@ -496,6 +833,9 @@ function cpms_render_employee_task_dashboard($pdo)
             $summary['approval']++;
             $approvalItems[count($approvalItems)] = $item;
         }
+    }
+    foreach ($kanbanLanes as $kanbanLaneKey => $kanbanItems) {
+        usort($kanbanLanes[$kanbanLaneKey], 'cpms_task_kanban_sort');
     }
     $mobileTodayLimit = 4;
     $mobileTodayItems = array_slice($todayItems, 0, $mobileTodayLimit);
@@ -637,7 +977,6 @@ function cpms_render_employee_task_dashboard($pdo)
             <div class="flex-1 min-w-0">
                 <div class="flex flex-wrap items-center gap-3">
                     <h2 class="text-2xl font-extrabold text-gray-900">나의 할일</h2>
-                    <button type="button" id="cpmsEmployeeTasksToggle" class="px-3 py-2 rounded-2xl bg-white border border-gray-200 text-sm font-bold text-gray-700">숨기기 ▲</button>
                 </div>
                 <div data-cpms-employee-task-body class="cpms-task-summary">
                 <div class="mt-3 flex flex-wrap gap-2 text-sm">
@@ -697,15 +1036,16 @@ function cpms_render_employee_task_dashboard($pdo)
             <?php endif; ?>
         </div>
 
-        <div data-cpms-employee-task-body class="mt-6 space-y-5">
-            <?php cpms_render_feed_lane('긴급', '', 'bg-rose-50 text-rose-700', $urgentItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('오늘 할일', '', 'bg-amber-50 text-amber-700', $todayItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('진행중', '', 'bg-blue-50 text-blue-700', $progressItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('전자결재/승인', '', 'bg-indigo-50 text-indigo-700', $approvalItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
-            <?php cpms_render_feed_lane('지연', '', 'bg-red-50 text-red-700', $delayedItems, (int)$currentEmployee['id'], $returnUrl, false); ?>
+        <div data-cpms-employee-task-body class="mt-6 space-y-6">
+            <div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-4" data-task-kanban-board data-csrf="<?php echo h(csrf_token()); ?>">
+                <?php cpms_render_task_kanban_lane('pending', '대기중', $kanbanLanes['pending'], (int)$currentEmployee['id']); ?>
+                <?php cpms_render_task_kanban_lane('progress', '진행중', $kanbanLanes['progress'], (int)$currentEmployee['id']); ?>
+                <?php cpms_render_task_kanban_lane('done', '완료', $kanbanLanes['done'], (int)$currentEmployee['id']); ?>
+                <?php cpms_render_task_kanban_lane('rejected', '반려', $kanbanLanes['rejected'], (int)$currentEmployee['id']); ?>
+            </div>
             <div class="rounded-3xl border border-gray-200 bg-white p-5">
                 <form method="get" action="" class="flex flex-wrap items-end gap-3">
-                    <input type="hidden" name="r" value="대시보드">
+                    <input type="hidden" name="r" value="dashboard_employee">
                     <div>
                         <div class="text-sm font-bold text-gray-700 mb-1">내가 요청한 업무 일자</div>
                         <input type="date" name="requested_task_date" value="<?php echo h($requestedTaskDate); ?>" class="px-4 py-3 rounded-2xl border border-gray-200">
@@ -860,6 +1200,14 @@ function cpms_render_employee_task_dashboard($pdo)
                             </select>
                         </div>
                         <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">중요도</div>
+                            <select name="priority" id="taskPrioritySelect" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <?php foreach (cpms_tasks_priority_options() as $priorityValue => $priorityLabel): ?>
+                                    <option value="<?php echo h($priorityValue); ?>" <?php echo ($priorityValue === 'normal') ? 'selected' : ''; ?>><?php echo h($priorityLabel); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">마감일</div>
                             <input type="date" name="due_date" id="taskDueDate" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
                         </div>
@@ -1004,7 +1352,7 @@ function cpms_render_employee_task_dashboard($pdo)
                     <div class="text-2xl font-extrabold text-gray-900">참석불가능</div>
                     <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="meetingUnavailable">닫기</button>
                 </div>
-                <form method="post" action="?r=tasks/meeting_response" class="p-6 space-y-4">
+                <form method="post" action="?r=task_meeting_response" class="p-6 space-y-4" data-task-meeting-response-form>
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" id="meetingUnavailableTaskId" value="">
                     <input type="hidden" name="response" value="unavailable">
@@ -1062,6 +1410,7 @@ function cpms_render_employee_task_dashboard($pdo)
         var taskDueDate = document.getElementById('taskDueDate');
         var taskDueTime = document.getElementById('taskDueTime');
         var taskUrgentToggle = document.getElementById('taskUrgentToggle');
+        var taskPrioritySelect = document.getElementById('taskPrioritySelect');
         var assigneeSearch = document.getElementById('taskAssigneeSearch');
         var assigneeSelect = document.getElementById('taskAssigneeSelect');
         var meetingAssigneeSearch = document.getElementById('meetingAssigneeSearch');
@@ -1087,11 +1436,23 @@ function cpms_render_employee_task_dashboard($pdo)
             return now.getFullYear() + '-' + month + '-' + day;
         }
 
+        function applyUrgentDefaults() {
+            if (taskDueDate) taskDueDate.value = todayString();
+            if (taskDueTime && !taskDueTime.value) taskDueTime.value = '18:00';
+        }
+
         if (taskUrgentToggle) {
             taskUrgentToggle.addEventListener('change', function(){
                 if (!taskUrgentToggle.checked) return;
-                if (taskDueDate) taskDueDate.value = todayString();
-                if (taskDueTime && !taskDueTime.value) taskDueTime.value = '18:00';
+                if (taskPrioritySelect) taskPrioritySelect.value = 'urgent';
+                applyUrgentDefaults();
+            });
+        }
+        if (taskPrioritySelect) {
+            taskPrioritySelect.addEventListener('change', function(){
+                if (taskPrioritySelect.value !== 'urgent') return;
+                if (taskUrgentToggle) taskUrgentToggle.checked = true;
+                applyUrgentDefaults();
             });
         }
 
@@ -1290,6 +1651,555 @@ function cpms_render_employee_task_dashboard($pdo)
             if (modal) modal.classList.remove('hidden');
         }
 
+        function encodeFormData(form) {
+            var pairs = [];
+            var elements = form ? form.elements : [];
+            for (var i = 0; i < elements.length; i++) {
+                var el = elements[i];
+                if (!el.name || el.disabled) continue;
+                if ((el.type === 'checkbox' || el.type === 'radio') && !el.checked) continue;
+                pairs[pairs.length] = encodeURIComponent(el.name) + '=' + encodeURIComponent(el.value);
+            }
+            return pairs.join('&');
+        }
+
+        function parseJsonResponseText(text) {
+            text = text || '';
+            try { return JSON.parse(text || '{}'); } catch (err) {}
+            var start = text.indexOf('{');
+            var end = text.lastIndexOf('}');
+            if (start >= 0 && end > start) {
+                try { return JSON.parse(text.substring(start, end + 1)); } catch (err2) {}
+            }
+            return null;
+        }
+
+        function decodePostPart(value) {
+            value = String(value || '').replace(/\+/g, ' ');
+            try { return decodeURIComponent(value); } catch (err) { return value; }
+        }
+
+        function postEncoded(url, body, callback) {
+            var frameName = 'cpmsTaskPostFrame' + String(new Date().getTime()) + String(Math.floor(Math.random() * 100000));
+            var iframe = document.createElement('iframe');
+            iframe.name = frameName;
+            iframe.style.display = 'none';
+            iframe.setAttribute('aria-hidden', 'true');
+
+            var form = document.createElement('form');
+            form.method = 'post';
+            form.action = url;
+            form.target = frameName;
+            form.enctype = 'application/x-www-form-urlencoded';
+            form.acceptCharset = 'UTF-8';
+            form.style.display = 'none';
+
+            var parts = String(body || '').split('&');
+            for (var i = 0; i < parts.length; i++) {
+                if (parts[i] === '') continue;
+                var eq = parts[i].indexOf('=');
+                var name = eq >= 0 ? parts[i].substring(0, eq) : parts[i];
+                var value = eq >= 0 ? parts[i].substring(eq + 1) : '';
+                var input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = decodePostPart(name);
+                input.value = decodePostPart(value);
+                form.appendChild(input);
+            }
+
+            var submitted = false;
+            var completed = false;
+            iframe.onload = function() {
+                if (!submitted || completed) return;
+                var rawText = '';
+                try {
+                    var doc = iframe.contentDocument || (iframe.contentWindow ? iframe.contentWindow.document : null);
+                    if (doc && doc.body) rawText = doc.body.textContent || doc.body.innerText || '';
+                } catch (err) {
+                    rawText = '';
+                }
+                var response = parseJsonResponseText(rawText || '');
+                if (!rawText && !response) return;
+                completed = true;
+                var statusCode = ajaxOk(response) ? 200 : 400;
+                callback(statusCode, response, rawText || '');
+                setTimeout(function(){
+                    try { if (form.parentNode) form.parentNode.removeChild(form); } catch (err2) {}
+                    try { if (iframe.parentNode) iframe.parentNode.removeChild(iframe); } catch (err3) {}
+                }, 0);
+            };
+
+            document.body.appendChild(iframe);
+            document.body.appendChild(form);
+            submitted = true;
+            try {
+                form.submit();
+            } catch (err4) {
+                callback(0, null, err4 && err4.message ? err4.message : '');
+            }
+        }
+
+        function ajaxOk(response) {
+            return !!(response && (response.ok === true || response.ok === 1 || response.ok === '1'));
+        }
+
+        function ajaxMessage(response, fallback, statusCode, rawText) {
+            if (response && response.message) return response.message;
+            rawText = rawText || '';
+            if (rawText) {
+                var plain = rawText.replace(/<script[\s\S]*?<\/script>/gi, ' ')
+                    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+                    .replace(/<[^>]+>/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .replace(/^\s+|\s+$/g, '');
+                if (plain) return fallback + ' 서버응답: ' + plain.substring(0, 160);
+            }
+            if (statusCode || statusCode === 0) return fallback + ' HTTP ' + statusCode;
+            return fallback;
+        }
+
+        function setupKanbanDragDropLegacy() {
+            var board = document.querySelector('[data-task-kanban-board]');
+            if (!board) return;
+            var csrf = board.getAttribute('data-csrf') || '';
+            var dragged = null;
+            board.addEventListener('dragstart', function(e){
+                var card = e.target && e.target.closest ? e.target.closest('[data-kanban-card]') : null;
+                if (!card || card.getAttribute('draggable') !== 'true') return;
+                dragged = card;
+                if (e.dataTransfer) {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', card.getAttribute('data-task-id') || '');
+                }
+                card.classList.add('opacity-60');
+            });
+            board.addEventListener('dragend', function(){
+                if (dragged) dragged.classList.remove('opacity-60');
+                dragged = null;
+            });
+            board.addEventListener('dragover', function(e){
+                var drop = e.target && e.target.closest ? e.target.closest('[data-kanban-drop]') : null;
+                if (!drop || !dragged) return;
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                drop.classList.add('ring-2', 'ring-blue-300');
+            });
+            board.addEventListener('dragleave', function(e){
+                var drop = e.target && e.target.closest ? e.target.closest('[data-kanban-drop]') : null;
+                if (drop) drop.classList.remove('ring-2', 'ring-blue-300');
+            });
+            board.addEventListener('drop', function(e){
+                var drop = e.target && e.target.closest ? e.target.closest('[data-kanban-drop]') : null;
+                if (!drop || !dragged) return;
+                e.preventDefault();
+                drop.classList.remove('ring-2', 'ring-blue-300');
+                var taskId = dragged.getAttribute('data-task-id') || '';
+                var status = drop.getAttribute('data-kanban-drop') || '';
+                if (!taskId || !status) return;
+                var empty = drop.querySelector('[data-kanban-empty]');
+                if (empty) empty.parentNode.removeChild(empty);
+                drop.appendChild(dragged);
+                postEncoded('?r=task_progress', '_csrf=' + encodeURIComponent(csrf) + '&ajax=1&task_id=' + encodeURIComponent(taskId) + '&status=' + encodeURIComponent(status), function(statusCode, response, rawText){
+                    if (statusCode < 200 || statusCode >= 300 || !ajaxOk(response)) {
+                        alert(ajaxMessage(response, '업무 상태 변경에 실패했습니다.', statusCode, rawText));
+                        return;
+                    }
+                    return;
+                });
+            });
+        }
+
+        function getKanbanBoard() {
+            return document.querySelector('[data-task-kanban-board]');
+        }
+
+        function getKanbanDropFromTarget(target) {
+            if (!target || !target.closest) return null;
+            var drop = target.closest('[data-kanban-drop]');
+            if (drop) return drop;
+            var lane = target.closest('[data-kanban-lane]');
+            return lane ? lane.querySelector('[data-kanban-drop]') : null;
+        }
+
+        function clearKanbanDropHighlights() {
+            var board = getKanbanBoard();
+            if (!board) return;
+            var drops = board.querySelectorAll('[data-kanban-drop]');
+            for (var i = 0; i < drops.length; i++) {
+                drops[i].classList.remove('ring-2', 'ring-blue-300');
+            }
+        }
+
+        function removeKanbanEmpty(drop) {
+            if (!drop) return;
+            var empty = drop.querySelector('[data-kanban-empty]');
+            if (empty && empty.parentNode) empty.parentNode.removeChild(empty);
+        }
+
+        function ensureKanbanEmpty(drop) {
+            if (!drop) return;
+            if (drop.querySelector('[data-kanban-card]') || drop.querySelector('[data-kanban-empty]')) return;
+            var empty = document.createElement('div');
+            empty.className = 'p-4 rounded-2xl border border-dashed border-gray-300 bg-white text-sm text-gray-500';
+            empty.setAttribute('data-kanban-empty', '');
+            empty.textContent = '표시할 업무가 없습니다.';
+            drop.appendChild(empty);
+        }
+
+        function updateKanbanLaneCount(drop) {
+            if (!drop || !drop.closest) return;
+            var lane = drop.closest('[data-kanban-lane]');
+            var countNode = lane ? lane.querySelector('[data-kanban-count]') : null;
+            if (countNode) countNode.textContent = drop.querySelectorAll('[data-kanban-card]').length + '건';
+        }
+
+        function updateKanbanCounts(a, b) {
+            updateKanbanLaneCount(a);
+            if (b && b !== a) updateKanbanLaneCount(b);
+        }
+
+        function kanbanPriorityRank(priority) {
+            priority = String(priority || 'normal');
+            if (priority === 'urgent') return 0;
+            if (priority === 'high') return 1;
+            if (priority === 'normal') return 2;
+            if (priority === 'low') return 3;
+            return 2;
+        }
+
+        function kanbanCardSortValue(card) {
+            var urgent = card && card.getAttribute('data-kanban-is-urgent') === '1' ? 0 : 1;
+            var delayed = card && card.getAttribute('data-kanban-delayed') === '1' ? 0 : 1;
+            var rank = parseInt(card ? (card.getAttribute('data-kanban-priority-rank') || '2') : '2', 10);
+            if (isNaN(rank)) rank = 2;
+            var created = card ? (card.getAttribute('data-kanban-created') || '') : '';
+            var createdTs = created ? Date.parse(created.replace(' ', 'T')) : 0;
+            if (isNaN(createdTs)) createdTs = 0;
+            var id = parseInt(card ? (card.getAttribute('data-task-id') || '0') : '0', 10);
+            if (isNaN(id)) id = 0;
+            return [urgent, delayed, rank, createdTs || 9999999999999, id];
+        }
+
+        function compareKanbanCards(a, b) {
+            var av = kanbanCardSortValue(a);
+            var bv = kanbanCardSortValue(b);
+            for (var i = 0; i < av.length; i++) {
+                if (av[i] < bv[i]) return -1;
+                if (av[i] > bv[i]) return 1;
+            }
+            return 0;
+        }
+
+        function sortKanbanDrop(drop) {
+            if (!drop) return;
+            var cards = [];
+            var nodes = drop.querySelectorAll('[data-kanban-card]');
+            for (var i = 0; i < nodes.length; i++) cards[cards.length] = nodes[i];
+            cards.sort(compareKanbanCards);
+            for (var j = 0; j < cards.length; j++) drop.appendChild(cards[j]);
+            ensureKanbanEmpty(drop);
+        }
+
+        function moveKanbanCard(card, drop) {
+            if (!card || !drop) return null;
+            var oldDrop = card.parentNode;
+            removeKanbanEmpty(drop);
+            drop.appendChild(card);
+            ensureKanbanEmpty(oldDrop);
+            updateKanbanCounts(oldDrop, drop);
+            sortKanbanDrop(drop);
+            return oldDrop;
+        }
+
+        function restoreKanbanCard(card, originDrop, beforeNode, currentDrop) {
+            if (!card || !originDrop) return;
+            removeKanbanEmpty(originDrop);
+            if (beforeNode && beforeNode.parentNode === originDrop) originDrop.insertBefore(card, beforeNode);
+            else originDrop.appendChild(card);
+            ensureKanbanEmpty(currentDrop);
+            updateKanbanCounts(originDrop, currentDrop);
+        }
+
+        function findKanbanDropByLane(laneKey) {
+            var board = getKanbanBoard();
+            if (!board) return null;
+            var drops = board.querySelectorAll('[data-kanban-drop]');
+            for (var i = 0; i < drops.length; i++) {
+                if ((drops[i].getAttribute('data-kanban-drop') || '') === String(laneKey)) return drops[i];
+            }
+            return null;
+        }
+
+        function findKanbanCard(taskId) {
+            var board = getKanbanBoard();
+            if (!board) return null;
+            var cards = board.querySelectorAll('[data-kanban-card]');
+            for (var i = 0; i < cards.length; i++) {
+                if ((cards[i].getAttribute('data-task-id') || '') === String(taskId)) return cards[i];
+            }
+            return null;
+        }
+
+        function updateKanbanCardStatus(card, response, laneKey) {
+            if (!card) return;
+            if (laneKey) card.setAttribute('data-kanban-status', String(laneKey));
+            var badge = card.querySelector('[data-kanban-status-badge]');
+            if (badge && response) {
+                if (response.status_class) {
+                    badge.className = 'px-2.5 py-1 rounded-full border text-xs font-extrabold ' + response.status_class;
+                }
+                if (response.display_status || response.status_label) {
+                    badge.textContent = response.display_status || response.status_label;
+                }
+            }
+            updateKanbanCardActions(card, laneKey || card.getAttribute('data-kanban-status') || '');
+            var detailBadges = document.querySelectorAll('[data-task-status-badge]');
+            for (var i = 0; i < detailBadges.length; i++) {
+                if (response && response.status_class) detailBadges[i].className = 'px-3 py-1 rounded-full border text-xs font-bold ' + response.status_class;
+                if (response && (response.display_status || response.status_label)) detailBadges[i].textContent = response.display_status || response.status_label;
+            }
+        }
+
+        function updateKanbanCardActions(card, laneKey) {
+            if (!card) return;
+            laneKey = String(laneKey || '');
+            var buttons = card.querySelectorAll('[data-kanban-status-action]');
+            for (var i = 0; i < buttons.length; i++) {
+                var target = buttons[i].getAttribute('data-kanban-status-action') || '';
+                var hide = laneKey === 'done' || target === laneKey;
+                if (hide) buttons[i].classList.add('hidden');
+                else buttons[i].classList.remove('hidden');
+            }
+        }
+
+        function applyKanbanResponse(taskId, response, fallbackLane) {
+            var card = findKanbanCard(taskId);
+            if (!card) return;
+            var laneKey = response && response.lane_key ? response.lane_key : fallbackLane;
+            var drop = laneKey ? findKanbanDropByLane(laneKey) : null;
+            if (drop && card.parentNode !== drop) moveKanbanCard(card, drop);
+            updateKanbanCardStatus(card, response, laneKey);
+            if (card.parentNode) sortKanbanDrop(card.parentNode);
+        }
+
+        function setKanbanCardBusy(card, busy) {
+            if (!card) return;
+            var buttons = card.querySelectorAll('[data-kanban-status-action]');
+            for (var i = 0; i < buttons.length; i++) buttons[i].disabled = !!busy;
+        }
+
+        function submitKanbanStatusChange(card, status) {
+            if (!card || !status) return;
+            var targetDrop = findKanbanDropByLane(status);
+            if (!targetDrop || card.parentNode === targetDrop) return;
+            var board = getKanbanBoard();
+            var csrf = board ? (board.getAttribute('data-csrf') || '') : '';
+            var oldDrop = card.parentNode;
+            var oldNext = card.nextSibling;
+            var taskId = card.getAttribute('data-task-id') || '';
+            if (!taskId) return;
+            setKanbanCardBusy(card, true);
+            moveKanbanCard(card, targetDrop);
+            postEncoded('?r=task_progress', '_csrf=' + encodeURIComponent(csrf) + '&ajax=1&task_id=' + encodeURIComponent(taskId) + '&status=' + encodeURIComponent(status), function(statusCode, response, rawText){
+                setKanbanCardBusy(card, false);
+                if (statusCode < 200 || statusCode >= 300 || !ajaxOk(response)) {
+                    restoreKanbanCard(card, oldDrop, oldNext, targetDrop);
+                    alert(ajaxMessage(response, '업무변경에 실패했습니다.', statusCode, rawText));
+                    return;
+                }
+                applyKanbanResponse(taskId, response, status);
+            });
+        }
+
+        function updateTaskDetailPriority(response) {
+            if (!response) return;
+            var badges = document.querySelectorAll('[data-task-priority-badge]');
+            for (var i = 0; i < badges.length; i++) {
+                if (response.priority_class) badges[i].className = 'px-3 py-1 rounded-full border text-xs font-bold ' + response.priority_class;
+                if (response.priority_label) badges[i].textContent = response.priority_label;
+            }
+            var urgentChips = document.querySelectorAll('[data-task-urgent-chip]');
+            for (var j = 0; j < urgentChips.length; j++) {
+                if (String(response.is_urgent || '0') === '1') urgentChips[j].classList.remove('hidden');
+                else urgentChips[j].classList.add('hidden');
+            }
+        }
+
+        function updateKanbanCardPriority(card, response) {
+            if (!card || !response) return;
+            var priority = response.priority || 'normal';
+            card.setAttribute('data-kanban-priority', priority);
+            card.setAttribute('data-kanban-priority-rank', String(kanbanPriorityRank(priority)));
+            card.setAttribute('data-kanban-is-urgent', String(response.is_urgent || '0') === '1' ? '1' : '0');
+            var badge = card.querySelector('[data-kanban-priority-badge]');
+            if (badge) {
+                if (response.priority_class) badge.className = 'px-2.5 py-1 rounded-full border text-xs font-extrabold ' + response.priority_class;
+                if (response.priority_label) badge.textContent = response.priority_label;
+            }
+            var flags = card.querySelector('[data-kanban-flags]');
+            var urgentChip = card.querySelector('[data-kanban-urgent-chip]');
+            if (String(response.is_urgent || '0') === '1') {
+                if (!urgentChip && flags) {
+                    urgentChip = document.createElement('span');
+                    urgentChip.className = 'px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-extrabold';
+                    urgentChip.setAttribute('data-kanban-urgent-chip', '');
+                    urgentChip.textContent = '긴급';
+                    flags.insertBefore(urgentChip, flags.firstChild);
+                }
+            } else if (urgentChip && urgentChip.parentNode) {
+                urgentChip.parentNode.removeChild(urgentChip);
+            }
+            if (card.parentNode) sortKanbanDrop(card.parentNode);
+        }
+
+        function applyPriorityResponse(taskId, response) {
+            updateTaskDetailPriority(response);
+            var card = findKanbanCard(taskId || (response && response.task_id ? response.task_id : ''));
+            if (card) updateKanbanCardPriority(card, response);
+        }
+
+        function setupKanbanDragDrop() {
+            var board = getKanbanBoard();
+            if (!board) return;
+            var csrf = board.getAttribute('data-csrf') || '';
+            var dragged = null;
+            var originDrop = null;
+            var originNext = null;
+            board.addEventListener('dragstart', function(e){
+                var card = e.target && e.target.closest ? e.target.closest('[data-kanban-card]') : null;
+                if (!card || card.getAttribute('draggable') !== 'true') return;
+                dragged = card;
+                originDrop = card.parentNode;
+                originNext = card.nextSibling;
+                if (e.dataTransfer) {
+                    e.dataTransfer.effectAllowed = 'move';
+                    e.dataTransfer.setData('text/plain', card.getAttribute('data-task-id') || '');
+                }
+                card.classList.add('opacity-60');
+            });
+            board.addEventListener('dragend', function(){
+                if (dragged) dragged.classList.remove('opacity-60');
+                clearKanbanDropHighlights();
+                dragged = null;
+                originDrop = null;
+                originNext = null;
+            });
+            board.addEventListener('dragover', function(e){
+                var drop = getKanbanDropFromTarget(e.target);
+                if (!drop || !dragged) return;
+                e.preventDefault();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+                clearKanbanDropHighlights();
+                drop.classList.add('ring-2', 'ring-blue-300');
+            });
+            board.addEventListener('drop', function(e){
+                var drop = getKanbanDropFromTarget(e.target);
+                if (!drop || !dragged) return;
+                e.preventDefault();
+                clearKanbanDropHighlights();
+                var card = dragged;
+                var oldDrop = originDrop;
+                var oldNext = originNext;
+                var taskId = card.getAttribute('data-task-id') || '';
+                var status = drop.getAttribute('data-kanban-drop') || '';
+                if (!taskId || !status || oldDrop === drop) return;
+                submitKanbanStatusChange(card, status);
+            });
+            board.addEventListener('click', function(e){
+                var actionButton = e.target && e.target.closest ? e.target.closest('[data-kanban-status-action]') : null;
+                if (!actionButton) return;
+                e.preventDefault();
+                var card = actionButton.closest ? actionButton.closest('[data-kanban-card]') : null;
+                submitKanbanStatusChange(card, actionButton.getAttribute('data-kanban-status-action') || '');
+            });
+        }
+
+        setupKanbanDragDrop();
+
+        document.addEventListener('submit', function(e){
+            var meetingResponseForm = e.target && e.target.closest ? e.target.closest('[data-task-meeting-response-form]') : null;
+            if (meetingResponseForm) {
+                e.preventDefault();
+                var meetingButton = meetingResponseForm.querySelector('button[type="submit"]');
+                if (meetingButton) meetingButton.disabled = true;
+                postEncoded(meetingResponseForm.getAttribute('action') || '?r=task_meeting_response', encodeFormData(meetingResponseForm) + '&ajax=1', function(statusCode, response, rawText){
+                    if (meetingButton) meetingButton.disabled = false;
+                    if (statusCode < 200 || statusCode >= 300 || !ajaxOk(response)) {
+                        alert(ajaxMessage(response, '회의 응답 처리에 실패했습니다.', statusCode, rawText));
+                        return;
+                    }
+                    var taskId = meetingResponseForm.getAttribute('data-task-id') || '';
+                    if (!taskId) {
+                        var taskInput = meetingResponseForm.querySelector('input[name="task_id"]');
+                        if (taskInput) taskId = taskInput.value;
+                    }
+                    applyKanbanResponse(taskId, response, response && response.lane_key ? response.lane_key : '');
+                    var savedMeetingHtml = '<div class="px-4 py-3 rounded-2xl bg-emerald-50 text-emerald-700 text-sm font-extrabold">회의 응답이 저장되었습니다.</div>';
+                    if (taskDetailBody && taskDetailBody.contains && taskDetailBody.contains(meetingResponseForm)) {
+                        var responseForms = taskDetailBody.querySelectorAll('[data-task-meeting-response-form]');
+                        for (var i = 0; i < responseForms.length; i++) {
+                            responseForms[i].innerHTML = savedMeetingHtml;
+                        }
+                    } else {
+                        meetingResponseForm.innerHTML = savedMeetingHtml;
+                    }
+                    if (taskDetailBody && typeof response.detail_html !== 'undefined') {
+                        taskDetailBody.innerHTML = response.detail_html;
+                        if (window.lucide) { try { lucide.createIcons(); } catch (err) {} }
+                    }
+                });
+                return;
+            }
+
+            var commentForm = e.target && e.target.closest ? e.target.closest('[data-task-comment-form]') : null;
+            if (commentForm) {
+                e.preventDefault();
+                var submitButton = commentForm.querySelector('button[type="submit"]');
+                if (submitButton) submitButton.disabled = true;
+                postEncoded(commentForm.getAttribute('action') || '?r=task_comment_save', encodeFormData(commentForm) + '&ajax=1', function(statusCode, response, rawText){
+                    if (submitButton) submitButton.disabled = false;
+                    if (statusCode < 200 || statusCode >= 300 || !ajaxOk(response)) {
+                        alert(ajaxMessage(response, '댓글 등록에 실패했습니다.', statusCode, rawText));
+                        return;
+                    }
+                    var wrap = commentForm.closest ? commentForm.closest('[data-task-comments]') : null;
+                    if (wrap) {
+                        var oldList = wrap.querySelector('[data-task-comments-list]');
+                        if (oldList && typeof response.comments_html !== 'undefined') {
+                            oldList.outerHTML = response.comments_html;
+                        }
+                        var countNode = wrap.querySelector('[data-task-comments-count]');
+                        if (countNode && typeof response.comment_count !== 'undefined') countNode.textContent = response.comment_count;
+                    }
+                    commentForm.reset();
+                    if (window.lucide) { try { lucide.createIcons(); } catch (err) {} }
+                });
+                return;
+            }
+
+            var priorityForm = e.target && e.target.closest ? e.target.closest('[data-task-priority-form]') : null;
+            if (priorityForm) {
+                e.preventDefault();
+                var message = priorityForm.querySelector('[data-task-priority-message]');
+                if (message) message.textContent = '저장 중...';
+                postEncoded(priorityForm.getAttribute('action') || '?r=task_priority_save', encodeFormData(priorityForm) + '&ajax=1', function(statusCode, response, rawText){
+                    if (statusCode < 200 || statusCode >= 300 || !ajaxOk(response)) {
+                        if (message) message.textContent = ajaxMessage(response, '저장 실패', statusCode, rawText);
+                        return;
+                    }
+                    var badge = document.querySelector('[data-task-priority-badge]');
+                    if (badge) {
+                        badge.className = 'px-3 py-1 rounded-full border text-xs font-bold ' + (response.priority_class || '');
+                        badge.textContent = response.priority_label || '보통';
+                    }
+                    var taskInput = priorityForm.querySelector('input[name="task_id"]');
+                    applyPriorityResponse(taskInput ? taskInput.value : '', response);
+                    if (message) message.textContent = '저장되었습니다.';
+                });
+                return;
+            }
+        });
+
         document.addEventListener('click', function(e){
             var detailButton = e.target && e.target.closest ? e.target.closest('[data-task-detail-open]') : null;
             if (detailButton) {
@@ -1350,6 +2260,41 @@ function cpms_render_executive_task_dashboard($pdo)
     if (!$pdo || !(App\Core\Auth::isMaster() || App\Core\Auth::userRole() === 'executive' || App\Core\Auth::canManageEmployees())) return;
     $selectedDepartment = isset($_GET['task_department']) ? trim((string)$_GET['task_department']) : '전체';
     if ($selectedDepartment === '') $selectedDepartment = '전체';
+    $allDepartmentLabel = urldecode('%EC%A0%84%EC%B2%B4');
+    $isAllDepartmentSelected = (!isset($_GET['task_department']) || trim((string)$_GET['task_department']) === '' || $selectedDepartment === $allDepartmentLabel);
+    if ($isAllDepartmentSelected) {
+        $selectedDepartment = $allDepartmentLabel;
+        $departmentOptions = array_merge(array($allDepartmentLabel), cpms_tasks_department_options());
+        ?>
+        <div id="cpmsExecutiveTasksPanel" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
+            <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+                <div>
+                    <h2 class="text-2xl font-extrabold text-gray-900">부서별 업무 현황</h2>
+                </div>
+            </div>
+            <div class="mt-6">
+                <div class="text-sm font-bold text-gray-700 mb-2">부서 필터</div>
+                <div class="flex flex-wrap gap-2">
+                    <?php foreach ($departmentOptions as $departmentName): ?>
+                        <?php
+                        $isSelected = ($selectedDepartment === $departmentName);
+                        $departmentLabel = (($departmentName === '기타') ? '전원' : $departmentName);
+                        $url = '?r=dashboard_executive&exec_tab=department';
+                        if ($departmentName !== $allDepartmentLabel) $url .= '&task_department=' . urlencode($departmentName);
+                        ?>
+                        <a href="<?php echo h($url); ?>" class="px-4 py-2 rounded-2xl font-bold <?php echo $isSelected ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-700'; ?>">
+                            <?php echo h($departmentLabel); ?>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            </div>
+            <div class="mt-6 p-6 rounded-2xl border border-dashed border-gray-300 bg-slate-50 text-sm font-bold text-gray-600">
+                부서를 선택하면 해당 부서 인원의 업무 현황을 불러옵니다.
+            </div>
+        </div>
+        <?php
+        return;
+    }
     $summaryData = cpms_task_feed_for_executive($pdo, array('department' => $selectedDepartment));
     $currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, cpms_tasks_today()) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
     $departmentOptions = array_merge(array('전체'), cpms_tasks_department_options());

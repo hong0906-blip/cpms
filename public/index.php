@@ -967,6 +967,10 @@ if ($route === 'tasks/update_status') {
     require_once __DIR__ . '/../app/views/tasks/update_status.php';
     exit;
 }
+if ($route === 'tasks/priority_update' || $route === 'task_priority_update' || $route === 'task_priority_save') {
+    require_once __DIR__ . '/../app/views/tasks/priority_update.php';
+    exit;
+}
 if ($route === 'task_update_status') {
     require_once __DIR__ . '/../app/views/tasks/update_status.php';
     exit;
@@ -975,7 +979,7 @@ if ($route === 'task_progress') {
     require_once __DIR__ . '/../app/views/tasks/update_status.php';
     exit;
 }
-if ($route === 'tasks/meeting_response') {
+if ($route === 'tasks/meeting_response' || $route === 'task_meeting_response') {
     require_once __DIR__ . '/../app/views/tasks/meeting_response.php';
     exit;
 }
@@ -991,7 +995,7 @@ if ($route === 'tasks/cancel') {
     require_once __DIR__ . '/../app/views/tasks/cancel.php';
     exit;
 }
-if ($route === 'tasks/comment_save') {
+if ($route === 'tasks/comment_save' || $route === 'task_comment_save') {
     require_once __DIR__ . '/../app/views/tasks/comment_save.php';
     exit;
 }

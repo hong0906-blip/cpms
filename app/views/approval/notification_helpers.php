@@ -82,6 +82,9 @@ if (!function_exists('approval_queue_notification')) {
                 return;
             }
             $messageText = approval_notification_append_url($pdo, $documentId, $messageText, $receiverEmployeeId);
+            if (function_exists('cpms_chat_login_append_missing_tokens')) {
+                $messageText = cpms_chat_login_append_missing_tokens($messageText, (int)$receiverEmployeeId);
+            }
 
             $hasEnabled = approval_notification_column_exists($pdo, 'employees', 'google_chat_enabled');
             $hasDmSpace = approval_notification_column_exists($pdo, 'employees', 'google_chat_dm_space_name');

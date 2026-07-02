@@ -15,16 +15,50 @@ use App\Core\Db;
 
 $user = \App\Core\Auth::user();
 $pdo = Db::pdo();
-if (function_exists('cpms_tasks_process_delayed_notifications')) {
-    cpms_tasks_process_delayed_notifications($pdo, 50);
-}
 $userEmail = (string)\App\Core\Auth::userEmail();
 $flash = flash_get();
 
 $projectCostFragmentOnly = isset($projectCostFragmentOnly) ? (bool)$projectCostFragmentOnly : false;
 $debugProjectCost = isset($_GET['debug_project_cost']) && (string)$_GET['debug_project_cost'] === '1';
 $loadProjectCostSummary = $projectCostFragmentOnly || (isset($_GET['load_project_cost']) && (string)$_GET['load_project_cost'] === '1');
-$projectCostCount = function_exists('cpms_dashboard_project_count') ? (int)cpms_dashboard_project_count($pdo) : 0;
+
+$executiveTabKeys = array(
+    'main' => true,
+    'department' => true,
+    'approval' => true,
+    'siteIssues' => true,
+);
+$activeExecutiveTab = isset($_GET['exec_tab']) ? (string)$_GET['exec_tab'] : '';
+if ($activeExecutiveTab === '' && isset($_GET['task_department'])) {
+    $activeExecutiveTab = 'department';
+}
+if ($activeExecutiveTab === '') {
+    $activeExecutiveTab = 'main';
+}
+if ($activeExecutiveTab === 'siteissues' || $activeExecutiveTab === 'site_issues') {
+    $activeExecutiveTab = 'siteIssues';
+}
+if (!isset($executiveTabKeys[$activeExecutiveTab])) {
+    $activeExecutiveTab = 'main';
+}
+
+$needsMainData = ($activeExecutiveTab === 'main');
+$needsIssueData = ($activeExecutiveTab === 'main' || $activeExecutiveTab === 'siteIssues');
+$needsIssueCommentsData = ($activeExecutiveTab === 'siteIssues');
+$needsApprovalData = ($activeExecutiveTab === 'approval');
+$needsAttendanceData = ($activeExecutiveTab === 'main');
+
+if (!$projectCostFragmentOnly && function_exists('cpms_tasks_process_delayed_notifications')) {
+    $delayNotifyNow = time();
+    $delayNotifyKey = '_cpms_dashboard_delay_notify_at';
+    $delayNotifyLast = isset($_SESSION[$delayNotifyKey]) ? (int)$_SESSION[$delayNotifyKey] : 0;
+    if ($delayNotifyLast <= 0 || ($delayNotifyNow - $delayNotifyLast) >= 300) {
+        $_SESSION[$delayNotifyKey] = $delayNotifyNow;
+        cpms_tasks_process_delayed_notifications($pdo, 20);
+    }
+}
+
+$projectCostCount = (($projectCostFragmentOnly || $needsMainData) && function_exists('cpms_dashboard_project_count')) ? (int)cpms_dashboard_project_count($pdo) : 0;
 $projectCostSummary = $loadProjectCostSummary ? cpms_dashboard_project_cost_summary($pdo) : array('project_count' => $projectCostCount, 'projects' => array());
 
 if (!function_exists('cpms_render_executive_project_cost_summary_body')) {
@@ -189,14 +223,18 @@ $safetyIncidents = array();
 $issueCommentsByIssueId = array();
 $pendingGongsuOverrides = array();
 $pendingEquipmentGongsuOverrides = array();
-$myUserId = cpms_find_employee_id_by_email($pdo, $userEmail);
+$myUserId = $needsApprovalData ? cpms_find_employee_id_by_email($pdo, $userEmail) : 0;
 
 $today = attendance_today();
-list($weekStart, $weekEnd) = attendance_week_range($today);
-$currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, $today) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
+$weekStart = $today;
+$weekEnd = $today;
+if ($needsAttendanceData) {
+    list($weekStart, $weekEnd) = attendance_week_range($today);
+}
+$currentLeaveIndex = ($needsAttendanceData && function_exists('approval_current_leave_index')) ? approval_current_leave_index($pdo, $today) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
 $tomorrowTs = strtotime($today . ' +1 day');
 $tomorrow = ($tomorrowTs !== false) ? date('Y-m-d', $tomorrowTs) : date('Y-m-d', strtotime('+1 day'));
-$tomorrowLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, $tomorrow) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
+$tomorrowLeaveIndex = ($needsAttendanceData && function_exists('approval_current_leave_index')) ? approval_current_leave_index($pdo, $tomorrow) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
 $risk52 = array();
 $absent = array();
 $presentPeople = array();
@@ -232,6 +270,7 @@ $attendanceTimeLabel = function ($value) {
 };
 
 if ($pdo) {
+    if ($needsIssueData) {
     try {
         $issuesSql = "SELECT i.*, p.name AS project_name
                       FROM cpms_project_issues i
@@ -243,7 +282,9 @@ if ($pdo) {
     } catch (Exception $e) {
         $issues = array();
     }
+    }
 
+    if ($needsIssueData) {
     try {
         $safetySql = "SELECT i.*, p.name AS project_name
                       FROM cpms_safety_incidents i
@@ -255,8 +296,9 @@ if ($pdo) {
     } catch (Exception $e) {
         $safetyIncidents = array();
     }
+    }
 
-    if (count($issues) > 0) {
+    if ($needsIssueCommentsData && count($issues) > 0) {
         try {
             $issueIds = array();
             foreach ($issues as $issueRow) $issueIds[] = (int)$issueRow['id'];
@@ -283,6 +325,7 @@ if ($pdo) {
         }
     }
 
+    if ($needsAttendanceData) {
     try {
         $sql = "SELECT e.id, e.name, e.department, e.position, COALESCE(SUM(a.work_minutes), 0) AS m
                 FROM employees e
@@ -342,7 +385,9 @@ if ($pdo) {
         $leaveTomorrow = count($leaveTomorrowPeople);
     } catch (Exception $e) {
     }
+    }
 
+    if ($needsApprovalData) {
     try {
         cpms_ensure_labor_override_table($pdo);
         $sql = "SELECT o.id, o.project_id, o.month, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason,
@@ -363,7 +408,9 @@ if ($pdo) {
     } catch (Exception $e) {
         $pendingGongsuOverrides = array();
     }
+    }
 
+    if ($needsApprovalData) {
     try {
         cpms_equipment_gongsu_ensure_schema($pdo);
         $sqlEq = "SELECT o.*, p.name AS project_name, e.vendor_name, e.spec
@@ -381,27 +428,9 @@ if ($pdo) {
     } catch (Exception $e) {
         $pendingEquipmentGongsuOverrides = array();
     }
+    }
 }
 
-$executiveTabKeys = array(
-    'main' => true,
-    'department' => true,
-    'approval' => true,
-    'siteIssues' => true,
-);
-$activeExecutiveTab = isset($_GET['exec_tab']) ? (string)$_GET['exec_tab'] : '';
-if ($activeExecutiveTab === '' && isset($_GET['task_department'])) {
-    $activeExecutiveTab = 'department';
-}
-if ($activeExecutiveTab === '') {
-    $activeExecutiveTab = 'main';
-}
-if ($activeExecutiveTab === 'siteissues' || $activeExecutiveTab === 'site_issues') {
-    $activeExecutiveTab = 'siteIssues';
-}
-if (!isset($executiveTabKeys[$activeExecutiveTab])) {
-    $activeExecutiveTab = 'main';
-}
 $executiveTabBaseUrl = base_url() . '/?r=dashboard_executive';
 $executiveTaskReturnUrl = '?r=dashboard_executive&exec_tab=' . urlencode($activeExecutiveTab);
 if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !== '') {
@@ -417,11 +446,22 @@ if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !=
         <div class="flex-1">
             <h2 class="text-3xl font-extrabold">임원 대시보드</h2>
         </div>
-        <div class="flex flex-wrap items-center justify-end gap-3">
+        <div class="hidden md:flex flex-wrap items-center justify-end gap-3">
             <button type="button" data-modal-open="meetingCreate" class="px-5 py-3 rounded-2xl bg-white/20 text-white font-extrabold text-base border border-white/30 hover:bg-white/30">회의 요청</button>
             <button type="button" data-modal-open="taskCreate" class="px-5 py-3 rounded-2xl bg-white text-indigo-700 font-extrabold text-base shadow-lg shadow-indigo-900/10">업무 요청</button>
         </div>
     </div>
+</div>
+
+<div class="md:hidden grid grid-cols-2 gap-2 mb-6">
+    <button type="button" data-modal-open="taskCreate" class="min-h-[54px] rounded-[14px] bg-gray-900 text-white font-extrabold text-sm flex flex-col items-center justify-center gap-1">
+        <i data-lucide="send" class="w-5 h-5"></i>
+        <span>업무요청</span>
+    </button>
+    <button type="button" data-modal-open="meetingCreate" class="min-h-[54px] rounded-[14px] bg-blue-600 text-white font-extrabold text-sm flex flex-col items-center justify-center gap-1">
+        <i data-lucide="calendar-plus" class="w-5 h-5"></i>
+        <span>회의요청</span>
+    </button>
 </div>
 
 <?php cpms_render_task_request_modals($pdo, $executiveTaskReturnUrl); ?>

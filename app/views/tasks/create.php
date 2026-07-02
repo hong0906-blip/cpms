@@ -38,6 +38,9 @@ $dueTime = trim((string)(isset($_POST['due_time']) ? $_POST['due_time'] : ''));
 $meetingDate = trim((string)(isset($_POST['meeting_date']) ? $_POST['meeting_date'] : ''));
 $meetingTime = trim((string)(isset($_POST['meeting_time']) ? $_POST['meeting_time'] : ''));
 $isUrgent = isset($_POST['is_urgent']) ? 1 : 0;
+$priorityOptions = cpms_tasks_priority_options();
+$priority = trim((string)(isset($_POST['priority']) ? $_POST['priority'] : 'normal'));
+if (!isset($priorityOptions[$priority])) $priority = 'normal';
 
 $assigneeEmployeeIds = array();
 $assigneeIdSeen = array();
@@ -129,14 +132,17 @@ if ($dueTime === '') $dueTime = '18:00';
 if (strlen($dueTime) === 5) $dueTime .= ':00';
 
 $taskType = 'general';
-$priority = 'normal';
 if ($isMeetingRequest) {
     $taskType = 'meeting';
+    $priority = 'normal';
 } else if ($isUrgent === 1) {
     $taskType = 'urgent';
     $priority = 'urgent';
     $dueDate = cpms_tasks_today();
     $dueTime = '18:00:00';
+} else if ($priority === 'urgent') {
+    $taskType = 'urgent';
+    $isUrgent = 1;
 }
 
 if ($dueDate === '') {

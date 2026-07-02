@@ -315,6 +315,11 @@ if (!$canAssignExecutiveRole) {
     }
 }
 if ($isActive !== 0 && $isActive !== 1) $isActive = 1;
+if ($isActive === 0) {
+    if ($resignDate === '') $resignDate = date('Y-m-d');
+} else {
+    $resignDate = '';
+}
 if ($isTeamLeader !== 1) $isTeamLeader = 0;
 if ($isTeamLeader === 1 || ($id > 0 && $teamLeaderId === $id)) $teamLeaderId = 0;
 if ($dept !== '' && !in_array($dept, $allowedDepts, true)) $dept = '';
@@ -433,7 +438,7 @@ try {
     }
 
     $msg = ($id > 0 ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.')
-        . ' (id=' . $savedId . ', hire_date=' . ($hireDate === '' ? 'NULL' : $hireDate) . ', hire_date_column=' . ($hireDateEnabled ? 'yes' : 'no') . ')';
+        . ' (id=' . $savedId . ', 상태=' . ($isActive === 1 ? '재직' : '퇴직') . ', 퇴직일=' . ($resignDate === '' ? 'NULL' : $resignDate) . ')';
     if (!$vehicleSaveOk) {
         $vehicleError = function_exists('cpms_employee_vehicle_last_error') ? cpms_employee_vehicle_last_error() : '';
         $msg .= ' 다만 차량번호 저장은 실패했습니다.' . ($vehicleError !== '' ? ' (' . $vehicleError . ')' : '');
@@ -451,5 +456,6 @@ try {
     }
 } catch (\Exception $e) { flash_set('error', '저장 실패: ' . $e->getMessage()); }
 
-header('Location: ?r=관리&tab=employees');
+$redirectView = ($isActive === 0) ? 'retired' : 'active';
+header('Location: ?r=관리&tab=employees&employee_view=' . $redirectView);
 exit;

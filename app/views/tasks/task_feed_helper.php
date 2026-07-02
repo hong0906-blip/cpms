@@ -86,11 +86,15 @@ function cpms_task_feed_should_show($item)
 {
     if (!is_array($item)) return false;
     $status = isset($item['status']) ? (string)$item['status'] : '';
+    if (cpms_task_feed_is_direct_work_task($item)) {
+        if ($status === 'done') return cpms_task_feed_is_done_today($item);
+        if ($status === 'cancelled') return false;
+        return true;
+    }
     if ($status === 'done') return cpms_task_feed_is_done_today($item);
     if (cpms_tasks_is_closed_status($status)) return false;
     $dueDate = isset($item['due_date']) ? trim((string)$item['due_date']) : '';
     $sourceType = isset($item['source_type']) ? (string)$item['source_type'] : '';
-    if (cpms_task_feed_is_direct_work_task($item)) return true;
     if ($sourceType !== 'public_affairs_collab' && $dueDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate) && strcmp($dueDate, cpms_tasks_today()) < 0) return false;
     return true;
 }}

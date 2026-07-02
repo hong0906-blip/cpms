@@ -12,6 +12,26 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     flash_set('danger', '잘못된 요청입니다.');
     cpms_tasks_redirect_back();
 }
+$isAjax = (isset($_POST['ajax']) && (string)$_POST['ajax'] === '1')
+    || (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest');
+if (!function_exists('cpms_tasks_meeting_response_json_response')) {
+function cpms_tasks_meeting_response_json_response($ok, $message, $extra)
+{
+    header('Content-Type: application/json; charset=utf-8');
+    $payload = is_array($extra) ? $extra : array();
+    $payload['ok'] = $ok ? 1 : 0;
+    $payload['message'] = (string)$message;
+    echo json_encode($payload);
+    exit;
+}}
+if (!function_exists('cpms_tasks_meeting_response_lane_key')) {
+function cpms_tasks_meeting_response_lane_key($status)
+{
+    if ((string)$status === 'meeting_available') return 'progress';
+    if ((string)$status === 'meeting_unavailable') return 'rejected';
+    if ((string)$status === 'done') return 'done';
+    return 'pending';
+}}
 if (!csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) {
     flash_set('danger', '보안 토큰이 올바르지 않습니다.');
     cpms_tasks_redirect_back();
@@ -76,8 +96,21 @@ try {
     if ($response === 'available' && $updatedTask) {
         cpms_tasks_send_meeting_confirmed_notification($pdo, $updatedTask);
     }
+    if ($isAjax) {
+        $responseStatus = $updatedTask && isset($updatedTask['status']) ? (string)$updatedTask['status'] : $newStatus;
+        $displayStatusKey = ($updatedTask && cpms_tasks_is_delayed($updatedTask)) ? 'delayed' : $responseStatus;
+        cpms_tasks_meeting_response_json_response(true, $response === 'available' ? '참석가능으로 처리되었습니다.' : '참석불가능으로 처리되었습니다.', array(
+            'task_id' => $taskId,
+            'status' => $responseStatus,
+            'lane_key' => cpms_tasks_meeting_response_lane_key($responseStatus),
+            'status_label' => cpms_tasks_status_label($responseStatus),
+            'status_class' => cpms_tasks_badge_class('status', $displayStatusKey),
+            'display_status' => $updatedTask ? cpms_tasks_display_status($updatedTask) : cpms_tasks_status_label($responseStatus),
+        ));
+    }
     flash_set('success', $response === 'available' ? '참석가능으로 처리했습니다.' : '참석불가능으로 처리했습니다.');
 } catch (Exception $e) {
+    if ($isAjax) cpms_tasks_meeting_response_json_response(false, '회의 응답 처리에 실패했습니다.', array());
     flash_set('danger', '회의 참석 응답 저장에 실패했습니다.');
 }
 

@@ -174,6 +174,7 @@ function cpms_tasks_status_label($status)
         'meeting_unavailable_action' => '참석불가능',
         'revision_requested' => '보완요청',
         'commented' => '메모',
+        'priority_changed' => '중요도 변경',
         'PENDING' => '승인대기',
         'APPROVED' => '승인완료',
         'REJECTED' => '반려',
@@ -210,6 +211,7 @@ function cpms_tasks_badge_class($type, $value)
         if ($value === 'progress') return 'bg-blue-50 text-blue-700 border-blue-200';
         if ($value === 'revision') return 'bg-amber-50 text-amber-700 border-amber-200';
         if ($value === 'cancelled') return 'bg-slate-100 text-slate-600 border-slate-200';
+        if ($value === 'rejected') return 'bg-rose-50 text-rose-700 border-rose-200';
         if ($value === 'delayed') return 'bg-rose-50 text-rose-700 border-rose-200';
         return 'bg-gray-100 text-gray-700 border-gray-200';
     }
@@ -1221,7 +1223,7 @@ function cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $return
                         <div class="text-xs text-gray-500"><?php echo h(isset($comment['created_at']) ? $comment['created_at'] : ''); ?></div>
                     </div>
                     <div class="mt-2 text-sm text-gray-800 whitespace-pre-line"><?php echo h(isset($comment['comment_text']) ? $comment['comment_text'] : ''); ?></div>
-                    <form method="post" action="?r=tasks/comment_save" class="mt-3 flex flex-col sm:flex-row gap-2">
+                    <form method="post" action="?r=task_comment_save" class="mt-3 flex flex-col sm:flex-row gap-2" data-task-comment-form>
                         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                         <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
                         <input type="hidden" name="parent_comment_id" value="<?php echo (int)$commentId; ?>">
@@ -1259,7 +1261,7 @@ function cpms_tasks_render_comments($comments, $taskId, $returnUrl)
         }
     }
     ?>
-    <div class="space-y-3">
+    <div class="space-y-3" data-task-comments-list>
         <?php if (count($root) === 0): ?>
             <div class="p-4 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500">등록된 댓글이 없습니다.</div>
         <?php else: ?>

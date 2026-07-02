@@ -36,6 +36,8 @@ $canMeetingResponse = cpms_tasks_can_respond_meeting($task, isset($currentEmploy
 $canCompleteMeeting = cpms_tasks_can_complete_meeting_after_response($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $canRevision = cpms_tasks_can_request_revision($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $canCancel = cpms_tasks_can_cancel($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
+$currentEmployeeId = isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0;
+$canEditPriority = (!$readOnlyMode && !$isMeetingTask && $currentEmployeeId > 0 && isset($task['assignee_employee_id']) && (int)$task['assignee_employee_id'] === $currentEmployeeId);
 $returnUrl = cpms_tasks_default_return_url();
 if (isset($_GET['return_url'])) {
     $requestedReturnUrl = trim((string)$_GET['return_url']);
@@ -50,31 +52,52 @@ if ($readOnlyMode) {
     $canRevision = false;
     $canCancel = false;
 }
+if ($isModal && !$isMeetingTask) {
+    $canChangeStatus = false;
+    $canRevision = false;
+    $canCancel = false;
+}
 
 ob_start();
 ?>
 <div class="space-y-5">
     <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-            <div class="flex flex-wrap items-center gap-2 mb-2">
-                <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('priority', isset($task['priority']) ? $task['priority'] : 'normal')); ?>">
+            <div class="flex flex-wrap items-center gap-2 mb-2" data-task-detail-badges>
+                <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('priority', isset($task['priority']) ? $task['priority'] : 'normal')); ?>" data-task-priority-badge>
                     <?php echo h(cpms_tasks_priority_label(isset($task['priority']) ? $task['priority'] : 'normal')); ?>
                 </span>
-                <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', cpms_tasks_is_delayed($task) ? 'delayed' : (isset($task['status']) ? $task['status'] : 'pending'))); ?>">
+                <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', cpms_tasks_is_delayed($task) ? 'delayed' : (isset($task['status']) ? $task['status'] : 'pending'))); ?>" data-task-status-badge>
                     <?php echo h(cpms_tasks_display_status($task)); ?>
                 </span>
                 <span class="px-3 py-1 rounded-full border text-xs font-bold bg-slate-100 text-slate-700 border-slate-200">
                     <?php echo h(cpms_tasks_type_label(isset($task['task_type']) ? $task['task_type'] : 'general')); ?>
                 </span>
                 <?php if (isset($task['is_urgent']) && (int)$task['is_urgent'] === 1): ?>
-                    <span class="px-3 py-1 rounded-full border text-xs font-bold bg-rose-50 text-rose-700 border-rose-200">🔥 긴급 요청</span>
+                    <span class="px-3 py-1 rounded-full border text-xs font-bold bg-rose-50 text-rose-700 border-rose-200" data-task-urgent-chip>🔥 긴급 요청</span>
+                <?php else: ?>
+                    <span class="hidden px-3 py-1 rounded-full border text-xs font-bold bg-rose-50 text-rose-700 border-rose-200" data-task-urgent-chip>🔥 긴급 요청</span>
                 <?php endif; ?>
             </div>
             <h3 class="text-2xl font-extrabold text-gray-900"><?php echo h(isset($task['title']) ? $task['title'] : ''); ?></h3>
+            <?php if ($canEditPriority): ?>
+                <form method="post" action="?r=task_priority_save" class="mt-3 flex flex-wrap items-center gap-2" data-task-priority-form>
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <select name="priority" class="px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-bold">
+                        <?php foreach (cpms_tasks_priority_options() as $priorityValue => $priorityLabel): ?>
+                            <option value="<?php echo h($priorityValue); ?>" <?php echo ((isset($task['priority']) ? (string)$task['priority'] : 'normal') === (string)$priorityValue) ? 'selected' : ''; ?>><?php echo h($priorityLabel); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <button type="submit" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">중요도 저장</button>
+                    <span class="text-xs font-bold text-gray-500" data-task-priority-message></span>
+                </form>
+            <?php endif; ?>
         </div>
         <div class="flex flex-wrap items-center gap-2">
             <?php if ($isMeetingTask && $canMeetingResponse && !in_array(isset($task['status']) ? (string)$task['status'] : '', array('meeting_available', 'meeting_unavailable', 'cancelled'), true)): ?>
-                <form method="post" action="?r=tasks/meeting_response">
+                <form method="post" action="?r=task_meeting_response" data-task-meeting-response-form data-task-id="<?php echo (int)$taskId; ?>">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
                     <input type="hidden" name="response" value="available">
@@ -118,7 +141,7 @@ ob_start();
     </div>
 
     <?php if ($isMeetingTask && $canMeetingResponse && !in_array(isset($task['status']) ? (string)$task['status'] : '', array('meeting_available', 'meeting_unavailable', 'cancelled'), true)): ?>
-        <form method="post" action="?r=tasks/meeting_response" class="p-4 rounded-2xl border border-rose-200 bg-rose-50 space-y-3">
+        <form method="post" action="?r=task_meeting_response" class="p-4 rounded-2xl border border-rose-200 bg-rose-50 space-y-3" data-task-meeting-response-form data-task-id="<?php echo (int)$taskId; ?>">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
             <input type="hidden" name="response" value="unavailable">
@@ -207,13 +230,13 @@ ob_start();
         </div>
     </div>
 
-    <div>
+    <div data-task-comments="<?php echo (int)$taskId; ?>">
         <div class="flex items-center justify-between gap-3 mb-2">
             <div class="text-sm font-extrabold text-gray-900">댓글</div>
-            <div class="text-xs text-gray-500"><?php echo count($comments); ?>건</div>
+            <div class="text-xs text-gray-500"><span data-task-comments-count><?php echo count($comments); ?></span>건</div>
         </div>
         <?php cpms_tasks_render_comments($comments, $taskId, $returnUrl); ?>
-        <form method="post" action="?r=tasks/comment_save" class="mt-4 rounded-2xl border border-gray-200 bg-slate-50 p-4 space-y-3">
+        <form method="post" action="?r=task_comment_save" class="mt-4 rounded-2xl border border-gray-200 bg-slate-50 p-4 space-y-3" data-task-comment-form>
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
             <input type="hidden" name="parent_comment_id" value="0">

@@ -85,6 +85,84 @@ function attendance_employee_id($pdo){
 function attendance_is_manager(){
     return \App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees();
 }
+function attendance_normalize_department_name($value){
+    $value = trim((string)$value);
+    if ($value === '') return '';
+    return str_replace(array(' ', "\t", "\r", "\n", '[', ']', '(', ')', '{', '}', '-', '_', '/', '\\'), '', $value);
+}
+function attendance_is_settings_department_value($value){
+    $dept = attendance_normalize_department_name($value);
+    if ($dept === '') return false;
+    $allowed = array(
+        attendance_normalize_department_name(attendance_text('%EA%B4%80%EB%A6%AC')),
+        attendance_normalize_department_name(attendance_text('%EA%B4%80%EB%A6%AC%EB%B6%80')),
+        attendance_normalize_department_name(attendance_text('%EA%B4%80%EB%A6%AC%ED%8C%80')),
+        attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C')),
+        attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C%EB%B6%80')),
+        attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C%ED%8C%80'))
+    );
+    return in_array($dept, $allowed, true);
+}
+function attendance_is_blocked_executive_value($role, $position, $name){
+    $role = strtolower(trim((string)$role));
+    if ($role === 'executive') return true;
+    $values = array((string)$position, (string)$name);
+    $blocked = array(
+        attendance_text('%EB%8C%80%ED%91%9C'),
+        attendance_text('%EB%B6%80%EC%82%AC%EC%9E%A5')
+    );
+    for ($i = 0; $i < count($values); $i++) {
+        for ($j = 0; $j < count($blocked); $j++) {
+            if ($blocked[$j] !== '' && strpos($values[$i], $blocked[$j]) !== false) return true;
+        }
+    }
+    return false;
+}
+function attendance_can_manage_settings($pdo){
+    if (!\App\Core\Auth::check()) return false;
+
+    $email = (string)\App\Core\Auth::userEmail();
+    if ($pdo && $email !== '') {
+        try {
+            $positionSelect = attendance_table_exists($pdo, 'employees') && attendance_table_column_exists_for_settings($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+            $roleSelect = attendance_table_exists($pdo, 'employees') && attendance_table_column_exists_for_settings($pdo, 'employees', 'role') ? 'role' : "'' AS role";
+            $st = $pdo->prepare("SELECT name, department, " . $positionSelect . ", " . $roleSelect . " FROM employees WHERE email=:email LIMIT 1");
+            $st->execute(array(':email' => $email));
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (is_array($row)) {
+                $role = isset($row['role']) ? $row['role'] : '';
+                $position = isset($row['position']) ? $row['position'] : '';
+                $name = isset($row['name']) ? $row['name'] : '';
+                $department = isset($row['department']) ? $row['department'] : '';
+                if (attendance_is_blocked_executive_value($role, $position, $name)) return false;
+                return attendance_is_settings_department_value($department);
+            }
+        } catch (Exception $e) {
+        }
+    }
+
+    $user = \App\Core\Auth::user();
+    $department = (is_array($user) && isset($user['department'])) ? $user['department'] : \App\Core\Auth::userDepartment();
+    $position = (is_array($user) && isset($user['position'])) ? $user['position'] : \App\Core\Auth::userPosition();
+    $name = (is_array($user) && isset($user['name'])) ? $user['name'] : \App\Core\Auth::userName();
+    if (method_exists('App\\Core\\Auth', 'userStoredRole')) {
+        $role = \App\Core\Auth::userStoredRole();
+    } else {
+        $role = (is_array($user) && isset($user['role'])) ? $user['role'] : '';
+    }
+    if (attendance_is_blocked_executive_value($role, $position, $name)) return false;
+    return attendance_is_settings_department_value($department);
+}
+function attendance_table_column_exists_for_settings($pdo, $table, $column){
+    if (!$pdo) return false;
+    try {
+        $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=:tbl AND COLUMN_NAME=:col");
+        $st->execute(array(':tbl' => $table, ':col' => $column));
+        return ((int)$st->fetchColumn() > 0);
+    } catch (Exception $e) {
+        return false;
+    }
+}
 function attendance_settings($pdo){
     $d = array(
         'standard_weekly_hours'=>'40',

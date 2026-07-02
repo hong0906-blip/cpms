@@ -85,7 +85,7 @@ try {
         cpms_samsung_portal_handle_task_completed($pdo, $task, $currentEmployee, $now);
     }
     $updatedTask = cpms_tasks_find_task($pdo, $taskId);
-    if ($updatedTask && (!isset($updatedTask['task_type']) || (string)$updatedTask['task_type'] !== 'meeting')) {
+    if ($updatedTask) {
         cpms_tasks_send_completed_notification($pdo, $updatedTask);
     }
     flash_set('success', '업무를 완료 처리했습니다.');

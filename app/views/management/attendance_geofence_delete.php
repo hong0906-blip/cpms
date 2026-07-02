@@ -3,10 +3,10 @@ use App\Core\Db;
 
 require_once __DIR__ . '/../attendance/common.php';
 
-if (!attendance_is_manager()) exit;
+$pdo = Db::pdo();
+if (!attendance_can_manage_settings($pdo)) exit;
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) exit;
 
-$pdo = Db::pdo();
 $settingsRoute = '?r=' . attendance_text('%EA%B4%80%EB%A6%AC') . '&tab=attendance&atab=settings';
 $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
 

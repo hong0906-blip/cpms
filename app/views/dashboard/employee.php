@@ -14,7 +14,13 @@ use App\Core\Db;
 $user = \App\Core\Auth::user();
 $pdo = Db::pdo();
 if (function_exists('cpms_tasks_process_delayed_notifications')) {
-    cpms_tasks_process_delayed_notifications($pdo, 50);
+    $delayNotifyNow = time();
+    $delayNotifyKey = '_cpms_dashboard_delay_notify_at';
+    $delayNotifyLast = isset($_SESSION[$delayNotifyKey]) ? (int)$_SESSION[$delayNotifyKey] : 0;
+    if ($delayNotifyLast <= 0 || ($delayNotifyNow - $delayNotifyLast) >= 300) {
+        $_SESSION[$delayNotifyKey] = $delayNotifyNow;
+        cpms_tasks_process_delayed_notifications($pdo, 20);
+    }
 }
 
 $userEmail = '';
@@ -325,19 +331,13 @@ if ($pdo && $eid_att > 0) {
 })();
 </script>
 
-<?php cpms_render_employee_task_dashboard($pdo); ?>
-
-<div class="cpms-dashboard-desktop-extra cpms-mobile-hide">
+<div class="cpms-dashboard-attendance-block">
 <div class='bg-white/80 rounded-3xl p-6 border mb-6'><!-- 직원 대시보드 UI 정리 + 공제시간 표시 제거 -->
 <h3 class='text-2xl font-extrabold mb-4'>내 근태 현황</h3>
-<div class='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 text-base'>
+<div class='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 text-base'>
 <div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>오늘 상태</div><div class='font-extrabold text-lg'><?php echo h(isset($todayRow['status'])?$todayRow['status']:'출근 전');?></div></div>
 <div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>출근 / 퇴근</div><div class='font-extrabold text-lg'><?php if($todayMismatch){ ?>날짜 불일치 기록 감지<br><span class='text-red-600 text-base'>관리자 확인 필요</span><?php } else { ?><?php echo h(isset($todayRow['check_in'])&&$todayRow['check_in']?$todayRow['check_in']:'-');?> / <?php echo h(isset($todayRow['check_out'])&&$todayRow['check_out']?$todayRow['check_out']:'-');?><?php } ?></div></div>
-<div class='p-4 rounded-2xl bg-indigo-50'><div class='text-gray-500'>오늘 근무시간</div><div class='font-extrabold text-lg text-indigo-700'><?php echo attendance_hm(isset($todayRow['work_minutes'])?(int)$todayRow['work_minutes']:0);?></div></div>
 <div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>이번 주 누적 근무시간</div><div class='font-extrabold text-lg'><?php echo attendance_hm($weekWork);?></div></div>
-<div class='p-4 rounded-2xl <?php echo ($weekWork>3120)?'bg-red-50':'bg-emerald-50';?>'><div class='text-gray-500'>52시간 초과 여부</div><div class='font-extrabold text-lg <?php echo ($weekWork>3120)?'text-red-700':'text-emerald-700';?>'><?php echo ($weekWork>3120)?'초과':'정상';?></div></div>
-<div class='p-4 rounded-2xl bg-amber-50'><div class='text-gray-500'>승인대기 요청</div><div class='font-extrabold text-lg text-amber-700'><?php echo (int)$pendingCnt;?>건</div></div>
-</div>
 </div>
 
 <?php
@@ -395,9 +395,8 @@ if($pdo&&$eid_att>0){
  }catch(Exception $e){}
 }
 ?>
-<div class='mb-6'>
-<div class='bg-white/80 rounded-3xl p-6 border'><!-- 휴가 현황 잔여만 표시 -->
-<h3 class='text-2xl font-extrabold mb-4'>휴가 현황</h3>
+<div class='mt-5 pt-5 border-t border-gray-100'><!-- 휴가 현황 잔여만 표시 -->
+<h4 class='text-xl font-extrabold mb-4'>휴가 현황</h4>
 <?php if(!$vac['has_hire_date']): ?>
 <div class='p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800'>
   <div class='font-extrabold text-lg'>휴가 계산 불가</div>
@@ -539,6 +538,11 @@ if($pdo&&$eid_att>0){
         <?php echo h($flash['message']); ?>
     </div>
 <?php endif; ?>
+</div>
+
+<?php cpms_render_employee_task_dashboard($pdo); ?>
+
+<div class="cpms-dashboard-desktop-extra cpms-mobile-hide">
 
 
 <?php if (false): ?>
