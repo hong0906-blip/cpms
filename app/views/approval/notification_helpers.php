@@ -50,6 +50,24 @@ if (!function_exists('approval_setting_value')) {
     }
 }
 
+if (!function_exists('approval_notification_append_url')) {
+    function approval_notification_append_url($pdo, $documentId, $messageText, $receiverEmployeeId)
+    {
+        $messageText = (string)$messageText;
+        if (stripos($messageText, 'URL :') !== false || stripos($messageText, 'http://') !== false || stripos($messageText, 'https://') !== false) {
+            return $messageText;
+        }
+        if (!function_exists('cpms_app_approval_url')) {
+            return $messageText;
+        }
+        $url = cpms_app_approval_url($pdo, (int)$documentId, (int)$receiverEmployeeId);
+        if (trim((string)$url) === '') {
+            return $messageText;
+        }
+        return rtrim($messageText) . "\nURL : " . $url;
+    }
+}
+
 if (!function_exists('approval_queue_notification')) {
     function approval_queue_notification($pdo, $documentId, $eventType, $receiverEmployeeId, $messageText)
     {
@@ -63,6 +81,7 @@ if (!function_exists('approval_queue_notification')) {
             if (!approval_notification_table_exists($pdo, 'cpms_approval_settings')) {
                 return;
             }
+            $messageText = approval_notification_append_url($pdo, $documentId, $messageText, $receiverEmployeeId);
 
             $hasEnabled = approval_notification_column_exists($pdo, 'employees', 'google_chat_enabled');
             $hasDmSpace = approval_notification_column_exists($pdo, 'employees', 'google_chat_dm_space_name');

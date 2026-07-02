@@ -21,6 +21,14 @@ $dashboardType = isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboar
 $publicAffairsRouteName = urldecode('%EA%B3%B5%EB%AC%B4');
 $publicAffairsCollabTitle = urldecode('%EA%B3%B5%EB%AC%B4%20%ED%98%91%EC%97%85%ED%88%B4');
 
+if (isset($_GET['_clt']) && trim((string)$_GET['_clt']) !== '' && function_exists('cpms_try_chat_link_login')) {
+    $cpmsChatLinkTarget = cpms_try_chat_link_login($route);
+    if ($cpmsChatLinkTarget !== '') {
+        header('Location: ' . $cpmsChatLinkTarget);
+        exit;
+    }
+}
+
 if (!function_exists('cpms_public_affairs_collab_debug_table_exists')) {
 function cpms_public_affairs_collab_debug_table_exists($pdo, $tableName) {
     if (!$pdo) return false;
@@ -987,6 +995,10 @@ if ($route === 'tasks/comment_save') {
     require_once __DIR__ . '/../app/views/tasks/comment_save.php';
     exit;
 }
+if ($route === 'tasks/delayed_notify') {
+    require_once __DIR__ . '/../app/views/tasks/delayed_notify.php';
+    exit;
+}
 if ($route === 'tasks/detail') {
     require_once __DIR__ . '/../app/views/tasks/detail.php';
     exit;
@@ -1261,8 +1273,9 @@ if ($route === 'db_setup_attendance') {
 //  로그인/로그아웃
 // ==========================
 if ($route === 'login') {
+    $loginReturnUrl = isset($_GET['return']) ? cpms_safe_internal_redirect_url((string)$_GET['return'], '?r=대시보드') : '?r=대시보드';
     if (\App\Core\Auth::check()) {
-        header('Location: ?r=대시보드');
+        header('Location: ' . $loginReturnUrl);
         exit;
     }
     cpms_redirect_to_portal_login(cpms_current_absolute_url());

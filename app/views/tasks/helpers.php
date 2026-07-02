@@ -103,6 +103,7 @@ function cpms_tasks_normalize_department($department)
         '안전부' => '안전',
         '관리부' => '관리',
         '품질부' => '품질',
+        '개발부' => '개발',
         '안전/보건' => '안전',
         '안전보건' => '안전',
     );
@@ -116,7 +117,7 @@ function cpms_tasks_normalize_department($department)
 if (!function_exists('cpms_tasks_department_options')) {
 function cpms_tasks_department_options()
 {
-    return array('공사', '공무', '안전', '관리', '품질', '기타');
+    return array('공사', '공무', '안전', '관리', '품질', '개발', '기타');
 }}
 
 if (!function_exists('cpms_tasks_priority_options')) {
@@ -1286,11 +1287,62 @@ function cpms_tasks_text_excerpt($text, $limit)
     return $text;
 }}
 
+if (!function_exists('cpms_tasks_utf8_message')) {
+function cpms_tasks_utf8_message($escaped)
+{
+    if (function_exists('json_decode')) {
+        $decoded = json_decode('"' . (string)$escaped . '"');
+        if (is_string($decoded)) return $decoded;
+    }
+    return (string)$escaped;
+}}
+
+if (!function_exists('cpms_tasks_message_task_url')) {
+function cpms_tasks_message_task_url($pdo, $taskId, $chatEmployeeId = 0)
+{
+    $taskId = (int)$taskId;
+    if ($taskId <= 0) return '';
+    try {
+        if (function_exists('cpms_app_dashboard_employee_url')) {
+            $url = cpms_app_dashboard_employee_url($pdo, $taskId, $chatEmployeeId);
+            if (trim((string)$url) !== '') return (string)$url;
+        }
+    } catch (Exception $e) {
+    }
+    $base = '';
+    if (isset($_SERVER['HTTP_HOST']) && trim((string)$_SERVER['HTTP_HOST']) !== '') {
+        $scheme = 'http';
+        if ((isset($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off' && (string)$_SERVER['HTTPS'] !== '') || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)) {
+            $scheme = 'https';
+        }
+        $base = $scheme . '://' . trim((string)$_SERVER['HTTP_HOST']) . (function_exists('base_url') ? base_url() : '');
+    } else if (function_exists('base_url')) {
+        $base = base_url();
+    }
+    return rtrim($base, '/') . '/?r=dashboard_employee&task_id=' . $taskId;
+}}
+
 if (!function_exists('cpms_tasks_build_create_message')) {
-function cpms_tasks_build_create_message($task)
+function cpms_tasks_build_create_message($task, $pdo = null)
 {
     $lines = array();
     $isMeeting = isset($task['task_type']) && (string)$task['task_type'] === 'meeting';
+    $lines[count($lines)] = $isMeeting ? cpms_tasks_utf8_message('[CPMS \ud68c\uc758 \uc694\uccad]') : cpms_tasks_utf8_message('[CPMS \uc5c5\ubb34 \uc694\uccad]');
+    $lines[count($lines)] = $isMeeting ? cpms_tasks_utf8_message('\ud68c\uc758 \uc694\uccad\uc774 \ub4f1\ub85d\ub418\uc5c8\uc2b5\ub2c8\ub2e4.') : cpms_tasks_utf8_message('\uc5c5\ubb34 \uc694\uccad\uc774 \ub4f1\ub85d\ub418\uc5c8\uc2b5\ub2c8\ub2e4.');
+    $lines[count($lines)] = cpms_tasks_utf8_message('\uc81c\ubaa9 : ') . (isset($task['title']) ? (string)$task['title'] : '-');
+    $lines[count($lines)] = cpms_tasks_utf8_message('\uc694\uccad\uc790 : ') . (isset($task['requester_name']) ? (string)$task['requester_name'] : '-');
+    $lines[count($lines)] = cpms_tasks_utf8_message('\ub2f4\ub2f9\uc790 : ') . (isset($task['assignee_name']) ? (string)$task['assignee_name'] : '-');
+    $dueLine = '-';
+    if (!empty($task['due_date'])) {
+        $dueLine = (string)$task['due_date'];
+        if (!empty($task['due_time'])) $dueLine .= ' ' . substr((string)$task['due_time'], 0, 5);
+    }
+    $lines[count($lines)] = ($isMeeting ? cpms_tasks_utf8_message('\uc77c\uc2dc : ') : cpms_tasks_utf8_message('\uae30\ud55c : ')) . $dueLine;
+    $lines[count($lines)] = cpms_tasks_utf8_message('\uc911\uc694\ub3c4 : ') . cpms_tasks_priority_label(isset($task['priority']) ? $task['priority'] : 'normal');
+    $lines[count($lines)] = cpms_tasks_utf8_message('\ub0b4\uc6a9 : ') . cpms_tasks_text_excerpt(isset($task['content']) ? $task['content'] : '', 100);
+    $taskUrl = cpms_tasks_message_task_url($pdo, isset($task['id']) ? (int)$task['id'] : 0, isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0);
+    if ($taskUrl !== '') $lines[count($lines)] = 'URL : ' . $taskUrl;
+    return implode("\n", $lines);
     $lines[count($lines)] = $isMeeting ? '[CPMS 회의요청]' : '[CPMS 업무요청]';
     $lines[count($lines)] = '제목: ' . (isset($task['title']) ? (string)$task['title'] : '-');
     $lines[count($lines)] = '요청자: ' . (isset($task['requester_name']) ? (string)$task['requester_name'] : '-');
@@ -1336,16 +1388,36 @@ function cpms_tasks_build_meeting_confirmed_message($task)
     return implode("\n", $lines);
 }}
 
+if (!function_exists('cpms_tasks_chat_success_exists')) {
+function cpms_tasks_chat_success_exists($pdo, $sourceId, $eventType, $sourceType)
+{
+    if (!$pdo || (int)$sourceId <= 0 || trim((string)$eventType) === '') return false;
+    if (!cpms_tasks_table_exists($pdo, 'cpms_google_chat_notifications')) return false;
+    try {
+        $st = $pdo->prepare("SELECT id FROM cpms_google_chat_notifications
+                             WHERE source_id = :source_id
+                               AND event_type = :event_type
+                               AND source_type = :source_type
+                               AND send_status = 'SUCCESS'
+                             LIMIT 1");
+        $st->execute(array(
+            ':source_id' => (int)$sourceId,
+            ':event_type' => (string)$eventType,
+            ':source_type' => (string)$sourceType,
+        ));
+        return $st->fetchColumn() !== false;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
 if (!function_exists('cpms_tasks_send_created_notification')) {
 function cpms_tasks_send_created_notification($pdo, $task)
 {
     $taskId = isset($task['id']) ? (int)$task['id'] : 0;
     try {
         if (!$pdo || !is_array($task) || $taskId <= 0) return false;
-        if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'chat_notified_at')) {
-            $alreadyNotifiedAt = isset($task['chat_notified_at']) ? trim((string)$task['chat_notified_at']) : '';
-            if ($alreadyNotifiedAt !== '') return false;
-        }
+        if (cpms_tasks_chat_success_exists($pdo, $taskId, 'TASK_CREATED', 'TASK')) return false;
         if (!function_exists('cpms_send_google_chat_to_employee')) {
             require_once dirname(dirname(__DIR__)) . '/helpers.php';
         }
@@ -1359,7 +1431,7 @@ function cpms_tasks_send_created_notification($pdo, $task)
             return false;
         }
 
-        $ok = cpms_send_google_chat_to_employee($pdo, $assigneeId, cpms_tasks_build_create_message($task), $taskId, 'TASK_CREATED', 'TASK');
+        $ok = cpms_send_google_chat_to_employee($pdo, $assigneeId, cpms_tasks_build_create_message($task, $pdo), $taskId, 'TASK_CREATED', 'TASK');
         if ($ok) {
             if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'chat_notified_at')) {
                 $st = $pdo->prepare("UPDATE cpms_tasks SET chat_notified_at = :chat_notified_at WHERE id = :id AND chat_notified_at IS NULL");
@@ -1402,6 +1474,283 @@ function cpms_tasks_send_completed_notification($pdo, $task)
     $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
     if ($requesterId <= 0) return false;
     return cpms_send_google_chat_to_employee($pdo, $requesterId, cpms_tasks_build_complete_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_COMPLETED', 'TASK');
+}}
+
+if (!function_exists('cpms_tasks_ensure_delay_notification_schema')) {
+function cpms_tasks_ensure_delay_notification_schema($pdo)
+{
+    if (!$pdo) return false;
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_task_delay_notifications (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            task_id INT NOT NULL,
+            assignee_employee_id INT NOT NULL DEFAULT 0,
+            slot_key VARCHAR(100) NOT NULL,
+            slot_type VARCHAR(30) NOT NULL,
+            slot_date DATE NULL,
+            scheduled_at DATETIME NULL,
+            sent_at DATETIME NULL,
+            send_result TINYINT(1) NOT NULL DEFAULT 0,
+            created_at DATETIME NULL,
+            UNIQUE KEY uniq_task_delay_slot (task_id, slot_key),
+            KEY idx_task_delay_task (task_id),
+            KEY idx_task_delay_assignee (assignee_employee_id),
+            KEY idx_task_delay_slot_date (slot_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    } catch (Exception $e) {
+        return false;
+    }
+
+    $columns = array(
+        'task_id' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN task_id INT NOT NULL DEFAULT 0 AFTER id",
+        'assignee_employee_id' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN assignee_employee_id INT NOT NULL DEFAULT 0 AFTER task_id",
+        'slot_key' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN slot_key VARCHAR(100) NOT NULL AFTER assignee_employee_id",
+        'slot_type' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN slot_type VARCHAR(30) NOT NULL AFTER slot_key",
+        'slot_date' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN slot_date DATE NULL AFTER slot_type",
+        'scheduled_at' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN scheduled_at DATETIME NULL AFTER slot_date",
+        'sent_at' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN sent_at DATETIME NULL AFTER scheduled_at",
+        'send_result' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN send_result TINYINT(1) NOT NULL DEFAULT 0 AFTER sent_at",
+        'created_at' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN created_at DATETIME NULL AFTER send_result",
+    );
+    foreach ($columns as $column => $sql) {
+        if (!cpms_tasks_column_exists($pdo, 'cpms_task_delay_notifications', $column)) {
+            try { $pdo->exec($sql); } catch (Exception $e) {}
+        }
+    }
+
+    $indexes = array(
+        'uniq_task_delay_slot' => "ALTER TABLE cpms_task_delay_notifications ADD UNIQUE KEY uniq_task_delay_slot (task_id, slot_key)",
+        'idx_task_delay_task' => "ALTER TABLE cpms_task_delay_notifications ADD INDEX idx_task_delay_task (task_id)",
+        'idx_task_delay_assignee' => "ALTER TABLE cpms_task_delay_notifications ADD INDEX idx_task_delay_assignee (assignee_employee_id)",
+        'idx_task_delay_slot_date' => "ALTER TABLE cpms_task_delay_notifications ADD INDEX idx_task_delay_slot_date (slot_date)",
+    );
+    foreach ($indexes as $indexName => $sql) {
+        if (!cpms_tasks_index_exists($pdo, 'cpms_task_delay_notifications', $indexName)) {
+            try { $pdo->exec($sql); } catch (Exception $e) {}
+        }
+    }
+    return true;
+}}
+
+if (!function_exists('cpms_tasks_delay_notification_base_url')) {
+function cpms_tasks_delay_notification_base_url($pdo)
+{
+    if (function_exists('cpms_public_base_url')) {
+        return cpms_public_base_url($pdo);
+    }
+    $base = '';
+    try {
+        if (!function_exists('approval_google_chat_setting')) {
+            require_once dirname(__DIR__) . '/approval/google_chat_helpers.php';
+        }
+        if (function_exists('approval_google_chat_setting')) {
+            $base = trim((string)approval_google_chat_setting($pdo, 'google_chat_public_base_url', ''));
+        }
+    } catch (Exception $e) {
+        $base = '';
+    }
+    if ($base === '' && isset($_SERVER['HTTP_HOST']) && trim((string)$_SERVER['HTTP_HOST']) !== '') {
+        $scheme = 'http';
+        if ((isset($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off' && (string)$_SERVER['HTTPS'] !== '') || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)) {
+            $scheme = 'https';
+        }
+        $base = $scheme . '://' . trim((string)$_SERVER['HTTP_HOST']) . (function_exists('base_url') ? base_url() : '');
+    }
+    if ($base === '') $base = function_exists('base_url') ? base_url() : '';
+    return rtrim($base, '/');
+}}
+
+if (!function_exists('cpms_tasks_delay_task_url')) {
+function cpms_tasks_delay_task_url($pdo, $taskId, $chatEmployeeId = 0)
+{
+    if (function_exists('cpms_app_dashboard_employee_url')) {
+        return cpms_app_dashboard_employee_url($pdo, (int)$taskId, $chatEmployeeId);
+    }
+    $base = cpms_tasks_delay_notification_base_url($pdo);
+    $path = '/?r=dashboard_employee&task_id=' . (int)$taskId;
+    return $base !== '' ? $base . $path : $path;
+}}
+
+if (!function_exists('cpms_tasks_utf8_message')) {
+function cpms_tasks_utf8_message($escaped)
+{
+    if (function_exists('json_decode')) {
+        $decoded = json_decode('"' . (string)$escaped . '"');
+        if (is_string($decoded)) return $decoded;
+    }
+    return (string)$escaped;
+}}
+
+if (!function_exists('cpms_tasks_build_delay_message')) {
+function cpms_tasks_build_delay_message($pdo, $task, $slotType)
+{
+    $dueText = cpms_tasks_due_datetime($task);
+    $lines = array();
+    $lines[count($lines)] = cpms_tasks_utf8_message('[CPMS \uc5c5\ubb34 \uc9c0\uc5f0 \uc54c\ub9bc]');
+    $lines[count($lines)] = cpms_tasks_utf8_message('\uc5c5\ubb34\uac00 \uc9c0\uc5f0\ub42c\uc2b5\ub2c8\ub2e4 \ud655\uc778 \ud574\uc8fc\uc138\uc694');
+    $lines[count($lines)] = cpms_tasks_utf8_message('\uc5c5\ubb34\uba85 : ') . (isset($task['title']) ? (string)$task['title'] : '-');
+    $lines[count($lines)] = cpms_tasks_utf8_message('\ub2f4\ub2f9\uc790 : ') . (isset($task['assignee_name']) ? (string)$task['assignee_name'] : '-');
+    $lines[count($lines)] = cpms_tasks_utf8_message('\ub9c8\uac10 : ') . ($dueText !== '' ? $dueText : '-');
+    if (isset($task['project_name']) && trim((string)$task['project_name']) !== '') {
+        $lines[count($lines)] = cpms_tasks_utf8_message('\ud604\uc7a5 : ') . (string)$task['project_name'];
+    }
+    $lines[count($lines)] = 'URL : ' . cpms_tasks_delay_task_url($pdo, isset($task['id']) ? (int)$task['id'] : 0, isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0);
+    return implode("\n", $lines);
+}}
+
+if (!function_exists('cpms_tasks_reserve_delay_notification')) {
+function cpms_tasks_reserve_delay_notification($pdo, $task, $slotKey, $slotType, $slotDate, $scheduledAt)
+{
+    if (!$pdo || !is_array($task) || trim((string)$slotKey) === '') return false;
+    try {
+        $st = $pdo->prepare("INSERT IGNORE INTO cpms_task_delay_notifications
+            (task_id, assignee_employee_id, slot_key, slot_type, slot_date, scheduled_at, created_at)
+            VALUES (:task_id, :assignee_employee_id, :slot_key, :slot_type, :slot_date, :scheduled_at, :created_at)");
+        $st->execute(array(
+            ':task_id' => isset($task['id']) ? (int)$task['id'] : 0,
+            ':assignee_employee_id' => isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0,
+            ':slot_key' => (string)$slotKey,
+            ':slot_type' => (string)$slotType,
+            ':slot_date' => trim((string)$slotDate) !== '' ? (string)$slotDate : null,
+            ':scheduled_at' => trim((string)$scheduledAt) !== '' ? (string)$scheduledAt : null,
+            ':created_at' => cpms_tasks_now(),
+        ));
+        return ((int)$st->rowCount() > 0);
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_tasks_delay_notification_exists')) {
+function cpms_tasks_delay_notification_exists($pdo, $taskId, $slotKey)
+{
+    if (!$pdo || (int)$taskId <= 0 || trim((string)$slotKey) === '') return false;
+    try {
+        $st = $pdo->prepare("SELECT id FROM cpms_task_delay_notifications WHERE task_id = :task_id AND slot_key = :slot_key LIMIT 1");
+        $st->execute(array(
+            ':task_id' => (int)$taskId,
+            ':slot_key' => (string)$slotKey,
+        ));
+        return $st->fetchColumn() !== false;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_tasks_mark_delay_notification_sent')) {
+function cpms_tasks_mark_delay_notification_sent($pdo, $taskId, $slotKey, $ok)
+{
+    if (!$pdo || (int)$taskId <= 0 || trim((string)$slotKey) === '') return;
+    try {
+        $st = $pdo->prepare("UPDATE cpms_task_delay_notifications
+                             SET sent_at = :sent_at, send_result = :send_result
+                             WHERE task_id = :task_id AND slot_key = :slot_key");
+        $st->execute(array(
+            ':sent_at' => cpms_tasks_now(),
+            ':send_result' => $ok ? 1 : 0,
+            ':task_id' => (int)$taskId,
+            ':slot_key' => (string)$slotKey,
+        ));
+    } catch (Exception $e) {
+    }
+}}
+
+if (!function_exists('cpms_tasks_delay_slot_for_now')) {
+function cpms_tasks_delay_slot_for_now($task, $nowTs)
+{
+    $dueAt = cpms_tasks_due_datetime($task);
+    if ($dueAt === '') return null;
+    $dueTs = strtotime($dueAt);
+    if ($dueTs === false || $dueTs >= $nowTs) return null;
+    $dueSlotKey = 'due:' . date('YmdHi', $dueTs);
+
+    $dueDate = substr($dueAt, 0, 10);
+    $today = date('Y-m-d', $nowTs);
+    if (strcmp($today, $dueDate) <= 0) {
+        return array('key' => $dueSlotKey, 'type' => 'due', 'date' => $dueDate, 'scheduled_at' => date('Y-m-d H:i:s', $dueTs));
+    }
+
+    $hourMinute = date('H:i', $nowTs);
+    if ($hourMinute >= '17:00') {
+        return array('key' => 'pm:' . date('Ymd', $nowTs), 'type' => 'pm', 'date' => $today, 'scheduled_at' => $today . ' 17:00:00');
+    }
+    if ($hourMinute >= '08:00') {
+        return array('key' => 'am:' . date('Ymd', $nowTs), 'type' => 'am', 'date' => $today, 'scheduled_at' => $today . ' 08:00:00');
+    }
+    return array('key' => $dueSlotKey, 'type' => 'due', 'date' => $dueDate, 'scheduled_at' => date('Y-m-d H:i:s', $dueTs));
+}}
+
+if (!function_exists('cpms_tasks_process_delayed_notifications')) {
+function cpms_tasks_process_delayed_notifications($pdo, $limit)
+{
+    $result = array('checked' => 0, 'reserved' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0);
+    if (!$pdo || !cpms_tasks_table_exists($pdo, 'cpms_tasks') || !cpms_tasks_ensure_delay_notification_schema($pdo)) return $result;
+    if (!function_exists('cpms_send_google_chat_to_employee')) {
+        require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    }
+    if (!function_exists('cpms_send_google_chat_to_employee')) return $result;
+    $limit = (int)$limit;
+    if ($limit <= 0) $limit = 100;
+    if ($limit > 500) $limit = 500;
+
+    try {
+        $sql = "SELECT * FROM cpms_tasks
+                WHERE due_date IS NOT NULL AND due_date <> ''
+                  AND due_date <= :today
+                  AND assignee_employee_id IS NOT NULL AND assignee_employee_id > 0
+                  AND (status IS NULL OR status NOT IN ('done','cancelled','APPROVED','REJECTED','approved','rejected','meeting_owner','meeting_available','meeting_unavailable'))
+                ORDER BY due_date ASC, due_time ASC, id ASC
+                LIMIT " . (int)$limit;
+        $st = $pdo->prepare($sql);
+        $st->execute(array(':today' => cpms_tasks_today()));
+        $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($tasks)) $tasks = array();
+    } catch (Exception $e) {
+        return $result;
+    }
+
+    $nowTs = time();
+    foreach ($tasks as $task) {
+        $result['checked']++;
+        if (!cpms_tasks_is_delayed($task)) {
+            $result['skipped']++;
+            continue;
+        }
+        $slot = null;
+        $dueAt = cpms_tasks_due_datetime($task);
+        $dueTs = $dueAt !== '' ? strtotime($dueAt) : false;
+        $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+        if ($dueTs !== false && $dueTs < $nowTs) {
+            $dueSlotKey = 'due:' . date('YmdHi', $dueTs);
+            if (!cpms_tasks_delay_notification_exists($pdo, $taskId, $dueSlotKey)) {
+                $slot = array(
+                    'key' => $dueSlotKey,
+                    'type' => 'due',
+                    'date' => substr($dueAt, 0, 10),
+                    'scheduled_at' => date('Y-m-d H:i:s', $dueTs),
+                );
+            }
+        }
+        if (!is_array($slot)) {
+            $slot = cpms_tasks_delay_slot_for_now($task, $nowTs);
+        }
+        if (!is_array($slot) || !isset($slot['key'])) {
+            $result['skipped']++;
+            continue;
+        }
+        if (!cpms_tasks_reserve_delay_notification($pdo, $task, $slot['key'], isset($slot['type']) ? $slot['type'] : '', isset($slot['date']) ? $slot['date'] : '', isset($slot['scheduled_at']) ? $slot['scheduled_at'] : '')) {
+            $result['skipped']++;
+            continue;
+        }
+        $result['reserved']++;
+        $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+        $eventType = 'TASK_DELAYED_' . strtoupper((string)$slot['type']);
+        $ok = cpms_send_google_chat_to_employee($pdo, $assigneeId, cpms_tasks_build_delay_message($pdo, $task, isset($slot['type']) ? $slot['type'] : ''), $taskId, $eventType, 'TASK_DELAYED');
+        cpms_tasks_mark_delay_notification_sent($pdo, $taskId, $slot['key'], $ok);
+        if ($ok) $result['sent']++;
+        else $result['failed']++;
+    }
+    return $result;
 }}
 
 if (!function_exists('cpms_tasks_ensure_schema')) {
@@ -1472,6 +1821,22 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             created_by_email VARCHAR(190) NULL,
             created_by_photo_path VARCHAR(255) NULL,
             created_at DATETIME NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        'cpms_task_delay_notifications' => "CREATE TABLE IF NOT EXISTS cpms_task_delay_notifications (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            task_id INT NOT NULL,
+            assignee_employee_id INT NOT NULL DEFAULT 0,
+            slot_key VARCHAR(100) NOT NULL,
+            slot_type VARCHAR(30) NOT NULL,
+            slot_date DATE NULL,
+            scheduled_at DATETIME NULL,
+            sent_at DATETIME NULL,
+            send_result TINYINT(1) NOT NULL DEFAULT 0,
+            created_at DATETIME NULL,
+            UNIQUE KEY uniq_task_delay_slot (task_id, slot_key),
+            KEY idx_task_delay_task (task_id),
+            KEY idx_task_delay_assignee (assignee_employee_id),
+            KEY idx_task_delay_slot_date (slot_date)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
     );
 
@@ -1544,6 +1909,17 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'created_by_photo_path' => "ALTER TABLE cpms_task_comments ADD COLUMN created_by_photo_path VARCHAR(255) NULL AFTER created_by_email",
             'created_at' => "ALTER TABLE cpms_task_comments ADD COLUMN created_at DATETIME NULL AFTER created_by_photo_path",
         ),
+        'cpms_task_delay_notifications' => array(
+            'task_id' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN task_id INT NOT NULL DEFAULT 0 AFTER id",
+            'assignee_employee_id' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN assignee_employee_id INT NOT NULL DEFAULT 0 AFTER task_id",
+            'slot_key' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN slot_key VARCHAR(100) NOT NULL AFTER assignee_employee_id",
+            'slot_type' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN slot_type VARCHAR(30) NOT NULL AFTER slot_key",
+            'slot_date' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN slot_date DATE NULL AFTER slot_type",
+            'scheduled_at' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN scheduled_at DATETIME NULL AFTER slot_date",
+            'sent_at' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN sent_at DATETIME NULL AFTER scheduled_at",
+            'send_result' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN send_result TINYINT(1) NOT NULL DEFAULT 0 AFTER sent_at",
+            'created_at' => "ALTER TABLE cpms_task_delay_notifications ADD COLUMN created_at DATETIME NULL AFTER send_result",
+        ),
     );
 
     foreach ($columns as $tableName => $tableColumns) {
@@ -1582,6 +1958,12 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'idx_task_comments_task' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_task (task_id)",
             'idx_task_comments_parent' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_parent (parent_comment_id)",
             'idx_task_comments_created_by' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_created_by (created_by)",
+        ),
+        'cpms_task_delay_notifications' => array(
+            'uniq_task_delay_slot' => "ALTER TABLE cpms_task_delay_notifications ADD UNIQUE KEY uniq_task_delay_slot (task_id, slot_key)",
+            'idx_task_delay_task' => "ALTER TABLE cpms_task_delay_notifications ADD INDEX idx_task_delay_task (task_id)",
+            'idx_task_delay_assignee' => "ALTER TABLE cpms_task_delay_notifications ADD INDEX idx_task_delay_assignee (assignee_employee_id)",
+            'idx_task_delay_slot_date' => "ALTER TABLE cpms_task_delay_notifications ADD INDEX idx_task_delay_slot_date (slot_date)",
         ),
     );
 

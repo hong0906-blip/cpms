@@ -1519,9 +1519,12 @@ function cpms_samsung_portal_group_completed($pdo, $groupKey)
 }}
 
 if (!function_exists('cpms_samsung_portal_absolute_task_url')) {
-function cpms_samsung_portal_absolute_task_url($taskId)
+function cpms_samsung_portal_absolute_task_url($taskId, $chatEmployeeId = 0)
 {
-    $path = base_url() . '/?r=tasks/detail&id=' . (int)$taskId;
+    if (function_exists('cpms_app_dashboard_employee_url')) {
+        return cpms_app_dashboard_employee_url(null, (int)$taskId, (int)$chatEmployeeId);
+    }
+    $path = base_url() . '/?r=dashboard_employee&task_id=' . (int)$taskId;
     $host = isset($_SERVER['HTTP_HOST']) ? trim((string)$_SERVER['HTTP_HOST']) : '';
     if ($host === '') return $path;
     $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443);
@@ -1593,7 +1596,7 @@ function cpms_samsung_portal_sync_safety_task($pdo, $assignee, $groupKey, $title
         ));
         $taskId = (int)$pdo->lastInsertId();
         if ($taskId > 0) {
-            $linkedContent = cpms_samsung_portal_label('%EB%A7%81%ED%81%AC: ') . cpms_samsung_portal_absolute_task_url($taskId) . "\n" . $content;
+            $linkedContent = cpms_samsung_portal_label('%EB%A7%81%ED%81%AC: ') . cpms_samsung_portal_absolute_task_url($taskId, $assigneeId) . "\n" . $content;
             $up = $pdo->prepare("UPDATE cpms_tasks SET content=:content WHERE id=:id");
             $up->execute(array(':content' => $linkedContent, ':id' => $taskId));
             cpms_tasks_insert_log($pdo, $taskId, array('id' => 0, 'name' => cpms_samsung_portal_label('CPMS%20%EC%9E%90%EB%8F%99%EC%95%88%EB%82%B4')), 'created', $linkedContent, null, 'pending');

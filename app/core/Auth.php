@@ -446,6 +446,44 @@ class Auth
         self::clearRememberCookie();
     }
 
+    public static function loginFromEmployeeId($employeeId)
+    {
+        $employeeId = (int)$employeeId;
+        if ($employeeId <= 0) return false;
+
+        $pdo = Db::pdo();
+        if (!$pdo) return false;
+
+        try {
+            $st = $pdo->prepare("SELECT email, is_active FROM employees WHERE id = :id LIMIT 1");
+            $st->bindValue(':id', $employeeId);
+            $st->execute();
+            $row = $st->fetch();
+            if (!is_array($row)) return false;
+            if (isset($row['is_active']) && (int)$row['is_active'] !== 1) return false;
+
+            $email = isset($row['email']) ? self::normalizeEmail($row['email']) : '';
+            if ($email === '') return false;
+
+            $_SESSION['user_email'] = $email;
+            $_SESSION[self::CPMS_USER_KEY] = array(
+                'email'      => $email,
+                'name'       => $email,
+                'role'       => 'employee',
+                'photo_path' => null,
+                'department' => '',
+                'position'   => '',
+                'id'         => $employeeId,
+            );
+
+            if (!self::loadFromEmployeesByEmail($email, true)) return false;
+            self::refreshRememberCookieFromSession();
+            return true;
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
     // 직원명부 변경 후 즉시 반영용(있으면 employees_save.php에서 호출함)
     public static function refreshCurrentUser($force)
     {

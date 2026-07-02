@@ -15,6 +15,9 @@ use App\Core\Db;
 
 $user = \App\Core\Auth::user();
 $pdo = Db::pdo();
+if (function_exists('cpms_tasks_process_delayed_notifications')) {
+    cpms_tasks_process_delayed_notifications($pdo, 50);
+}
 $userEmail = (string)\App\Core\Auth::userEmail();
 $flash = flash_get();
 
@@ -400,6 +403,10 @@ if (!isset($executiveTabKeys[$activeExecutiveTab])) {
     $activeExecutiveTab = 'main';
 }
 $executiveTabBaseUrl = base_url() . '/?r=dashboard_executive';
+$executiveTaskReturnUrl = '?r=dashboard_executive&exec_tab=' . urlencode($activeExecutiveTab);
+if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !== '') {
+    $executiveTaskReturnUrl .= '&task_department=' . urlencode(trim((string)$_GET['task_department']));
+}
 ?>
 
 <div class="bg-gradient-to-r from-indigo-600 to-purple-500 rounded-3xl p-8 text-white shadow-xl shadow-indigo-500/20 mb-8">
@@ -410,8 +417,14 @@ $executiveTabBaseUrl = base_url() . '/?r=dashboard_executive';
         <div class="flex-1">
             <h2 class="text-3xl font-extrabold">임원 대시보드</h2>
         </div>
+        <div class="flex flex-wrap items-center justify-end gap-3">
+            <button type="button" data-modal-open="meetingCreate" class="px-5 py-3 rounded-2xl bg-white/20 text-white font-extrabold text-base border border-white/30 hover:bg-white/30">회의 요청</button>
+            <button type="button" data-modal-open="taskCreate" class="px-5 py-3 rounded-2xl bg-white text-indigo-700 font-extrabold text-base shadow-lg shadow-indigo-900/10">업무 요청</button>
+        </div>
     </div>
 </div>
+
+<?php cpms_render_task_request_modals($pdo, $executiveTaskReturnUrl); ?>
 
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type'] === 'success') ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'; ?>">

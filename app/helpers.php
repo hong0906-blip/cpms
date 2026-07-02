@@ -93,12 +93,18 @@ function cpms_portal_login_url($returnUrl) {
         if (strpos($configured, '{return}') !== false) {
             return str_replace('{return}', rawurlencode($returnUrl), $configured);
         }
+        if ($returnUrl !== '') {
+            $separator = (strpos($configured, '?') === false) ? '?' : '&';
+            return $configured . $separator . 'return=' . rawurlencode($returnUrl);
+        }
         return $configured;
     }
 
     $scheme = cpms_is_https_request() ? 'https' : 'http';
     $host = isset($_SERVER['HTTP_HOST']) && trim((string)$_SERVER['HTTP_HOST']) !== '' ? trim((string)$_SERVER['HTTP_HOST']) : 'cmbuild.kr';
-    return $scheme . '://' . $host . '/';
+    $url = $scheme . '://' . $host . '/';
+    if ($returnUrl !== '') $url .= '?return=' . rawurlencode($returnUrl);
+    return $url;
 }
 }
 
@@ -126,6 +132,205 @@ function cpms_redirect_to_portal_login($returnUrl) {
     if ($returnUrl === '') $returnUrl = cpms_current_absolute_url();
     header('Location: ' . cpms_portal_login_url($returnUrl));
     exit;
+}
+}
+
+if (!function_exists('cpms_hash_equals')) {
+function cpms_hash_equals($known, $user) {
+    if (function_exists('hash_equals')) {
+        return hash_equals((string)$known, (string)$user);
+    }
+    $known = (string)$known;
+    $user = (string)$user;
+    if (strlen($known) !== strlen($user)) return false;
+    $result = 0;
+    for ($i = 0; $i < strlen($known); $i++) {
+        $result |= ord($known[$i]) ^ ord($user[$i]);
+    }
+    return $result === 0;
+}
+}
+
+if (!function_exists('cpms_base64url_encode')) {
+function cpms_base64url_encode($value) {
+    return rtrim(strtr(base64_encode((string)$value), '+/', '-_'), '=');
+}
+}
+
+if (!function_exists('cpms_base64url_decode')) {
+function cpms_base64url_decode($value) {
+    $value = strtr((string)$value, '-_', '+/');
+    $pad = strlen($value) % 4;
+    if ($pad > 0) $value .= str_repeat('=', 4 - $pad);
+    return base64_decode($value, true);
+}
+}
+
+if (!function_exists('cpms_chat_login_secret')) {
+function cpms_chat_login_secret() {
+    $secretDir = cpms_storage_root() . '/secrets';
+    $secretFile = $secretDir . '/cpms_chat_link_secret.php';
+    if (is_file($secretFile)) {
+        $loaded = @include $secretFile;
+        if (is_string($loaded) && trim($loaded) !== '') return trim($loaded);
+    }
+    if (!is_dir($secretDir)) @mkdir($secretDir, 0777, true);
+    if (!is_dir($secretDir) || !is_writable($secretDir)) return '';
+    $bytes = function_exists('openssl_random_pseudo_bytes') ? openssl_random_pseudo_bytes(32) : uniqid('', true);
+    if ($bytes === false || $bytes === '') $bytes = uniqid('', true);
+    $secret = hash('sha256', $bytes);
+    $content = "<?php\nreturn '" . $secret . "';\n";
+    $tmp = $secretFile . '.' . getmypid() . '.tmp';
+    if (@file_put_contents($tmp, $content, LOCK_EX) === false) return '';
+    if (!@rename($tmp, $secretFile)) {
+        @unlink($tmp);
+        return '';
+    }
+    return $secret;
+}
+}
+
+if (!function_exists('cpms_chat_login_ttl_seconds')) {
+function cpms_chat_login_ttl_seconds() {
+    $ttl = (int)getenv('CPMS_CHAT_LINK_TTL_SECONDS');
+    if ($ttl <= 0) $ttl = 60 * 60 * 24 * 3;
+    if ($ttl < 300) $ttl = 300;
+    if ($ttl > 60 * 60 * 24 * 14) $ttl = 60 * 60 * 24 * 14;
+    return $ttl;
+}
+}
+
+if (!function_exists('cpms_chat_login_token_create')) {
+function cpms_chat_login_token_create($employeeId, $route) {
+    $employeeId = (int)$employeeId;
+    $route = trim((string)$route);
+    if ($employeeId <= 0 || $route === '') return '';
+    $secret = cpms_chat_login_secret();
+    if ($secret === '') return '';
+    $payload = array(
+        'eid' => $employeeId,
+        'route' => $route,
+        'exp' => time() + cpms_chat_login_ttl_seconds(),
+    );
+    $json = json_encode($payload);
+    if (!is_string($json) || $json === '') return '';
+    $body = cpms_base64url_encode($json);
+    $sig = hash_hmac('sha256', $body, $secret);
+    return $body . '.' . $sig;
+}
+}
+
+if (!function_exists('cpms_chat_login_token_payload')) {
+function cpms_chat_login_token_payload($token, $route) {
+    $token = trim((string)$token);
+    $route = trim((string)$route);
+    if ($token === '' || $route === '' || strpos($token, '.') === false) return false;
+    $parts = explode('.', $token, 2);
+    if (count($parts) !== 2) return false;
+    $secret = cpms_chat_login_secret();
+    if ($secret === '') return false;
+    $expected = hash_hmac('sha256', $parts[0], $secret);
+    if (!cpms_hash_equals($expected, $parts[1])) return false;
+    $json = cpms_base64url_decode($parts[0]);
+    if (!is_string($json) || $json === '') return false;
+    $payload = json_decode($json, true);
+    if (!is_array($payload)) return false;
+    if (!isset($payload['eid']) || (int)$payload['eid'] <= 0) return false;
+    if (!isset($payload['exp']) || (int)$payload['exp'] < time()) return false;
+    if (!isset($payload['route']) || (string)$payload['route'] !== $route) return false;
+    return $payload;
+}
+}
+
+if (!function_exists('cpms_current_query_without_params')) {
+function cpms_current_query_without_params($removeKeys) {
+    if (!is_array($removeKeys)) $removeKeys = array($removeKeys);
+    $params = $_GET;
+    foreach ($removeKeys as $key) {
+        if (isset($params[$key])) unset($params[$key]);
+    }
+    if (!isset($params['r']) || trim((string)$params['r']) === '') $params['r'] = 'dashboard_employee';
+    return '?' . http_build_query($params, '', '&');
+}
+}
+
+if (!function_exists('cpms_try_chat_link_login')) {
+function cpms_try_chat_link_login($route) {
+    $token = isset($_GET['_clt']) ? trim((string)$_GET['_clt']) : '';
+    if ($token === '') return '';
+    $payload = cpms_chat_login_token_payload($token, $route);
+    $target = cpms_current_query_without_params(array('_clt'));
+    if (!is_array($payload)) return $target;
+    if (!class_exists('\\App\\Core\\Auth')) return $target;
+    if (\App\Core\Auth::loginFromEmployeeId((int)$payload['eid'])) return $target;
+    return $target;
+}
+}
+
+if (!function_exists('cpms_public_base_url')) {
+function cpms_public_base_url($pdo = null) {
+    if (isset($_SERVER['HTTP_HOST']) && trim((string)$_SERVER['HTTP_HOST']) !== '') {
+        $basePath = function_exists('base_url') ? base_url() : '/cpms/public';
+        if ($basePath === '') $basePath = '/cpms/public';
+        return rtrim((cpms_is_https_request() ? 'https' : 'http') . '://' . trim((string)$_SERVER['HTTP_HOST']) . $basePath, '/');
+    }
+
+    $configured = '';
+    try {
+        if ($pdo && !function_exists('approval_google_chat_setting')) {
+            require_once __DIR__ . '/views/approval/google_chat_helpers.php';
+        }
+        if ($pdo && function_exists('approval_google_chat_setting')) {
+            $configured = trim((string)approval_google_chat_setting($pdo, 'google_chat_public_base_url', ''));
+        }
+    } catch (Exception $e) {
+        $configured = '';
+    }
+
+    if ($configured !== '') return rtrim($configured, '/');
+    return 'https://cmbuild.kr/cpms/public';
+}
+}
+
+if (!function_exists('cpms_app_route_url')) {
+function cpms_app_route_url($pdo, $route, $params = array(), $chatEmployeeId = 0) {
+    if (!is_array($params)) $params = array();
+    $route = (string)$route;
+    $query = array('r' => $route);
+    foreach ($params as $key => $value) {
+        if ($value === null) continue;
+        $query[(string)$key] = $value;
+    }
+    if ((int)$chatEmployeeId > 0) {
+        $token = cpms_chat_login_token_create((int)$chatEmployeeId, $route);
+        if ($token !== '') $query['_clt'] = $token;
+    }
+    return cpms_public_base_url($pdo) . '/?' . http_build_query($query, '', '&');
+}
+}
+
+if (!function_exists('cpms_app_dashboard_employee_url')) {
+function cpms_app_dashboard_employee_url($pdo, $taskId = 0, $chatEmployeeId = 0) {
+    $params = array();
+    if ((int)$taskId > 0) $params['task_id'] = (int)$taskId;
+    return cpms_app_route_url($pdo, 'dashboard_employee', $params, $chatEmployeeId);
+}
+}
+
+if (!function_exists('cpms_app_executive_approval_url')) {
+function cpms_app_executive_approval_url($pdo, $sourceType = '', $sourceId = 0, $chatEmployeeId = 0) {
+    $params = array('exec_tab' => 'approval');
+    if (trim((string)$sourceType) !== '') $params['focus_type'] = trim((string)$sourceType);
+    if ((int)$sourceId > 0) $params['focus_id'] = (int)$sourceId;
+    return cpms_app_route_url($pdo, 'dashboard_executive', $params, $chatEmployeeId);
+}
+}
+
+if (!function_exists('cpms_app_approval_url')) {
+function cpms_app_approval_url($pdo, $documentId = 0, $chatEmployeeId = 0) {
+    $params = array('view' => 'active');
+    if ((int)$documentId > 0) $params['document_id'] = (int)$documentId;
+    return cpms_app_route_url($pdo, 'approval_home', $params, $chatEmployeeId);
 }
 }
 
@@ -528,7 +733,7 @@ function cpms_load_labor_override_pending($projectId, $month) {
 
 function cpms_labor_employee_select_columns($pdo) {
     $cols = array('id', 'name', 'email', 'position', 'role');
-    $optional = array('google_chat_enabled', 'google_chat_dm_space_name');
+    $optional = array('google_chat_enabled', 'google_chat_user_name', 'google_chat_dm_space_name');
     foreach ($optional as $col) {
         $exists = false;
         try {
@@ -538,6 +743,7 @@ function cpms_labor_employee_select_columns($pdo) {
         } catch (Exception $e) { $exists = false; }
         if ($exists) $cols[] = $col;
         else if ($col === 'google_chat_enabled') $cols[] = '0 AS google_chat_enabled';
+        else if ($col === 'google_chat_user_name') $cols[] = "'' AS google_chat_user_name";
         else $cols[] = "'' AS google_chat_dm_space_name";
     }
     return implode(', ', $cols);
@@ -614,8 +820,27 @@ function cpms_labor_build_override_message($pdo, $row, $secondStage) {
     if ($secondStage) $lines[] = '1차 승인자 : ' . (isset($row['first_approver_name']) && trim((string)$row['first_approver_name']) !== '' ? trim((string)$row['first_approver_name']) : '박원덕');
     $lines[] = '';
     $lines[] = '요청내용 확인 바랍니다.';
+    if (function_exists('cpms_app_executive_approval_url')) {
+        $url = cpms_app_executive_approval_url($pdo, 'labor_gongsu', isset($row['id']) ? (int)$row['id'] : 0, isset($row['current_approver_employee_id']) ? (int)$row['current_approver_employee_id'] : 0);
+        if ($url !== '') $lines[] = 'URL : ' . $url;
+    }
     return implode("\n", $lines);
 }
+
+if (!function_exists('cpms_google_chat_strip_url_lines')) {
+function cpms_google_chat_strip_url_lines($messageText) {
+    $messageText = (string)$messageText;
+    $lines = preg_split("/\r\n|\n|\r/", $messageText);
+    if (!is_array($lines)) return $messageText;
+    $kept = array();
+    foreach ($lines as $line) {
+        $trimmed = trim((string)$line);
+        if (stripos($trimmed, 'URL') === 0) continue;
+        if (preg_match('/^https?:\/\//i', $trimmed)) continue;
+        $kept[count($kept)] = (string)$line;
+    }
+    return trim(implode("\n", $kept));
+}}
 
 function cpms_send_google_chat_to_employee($pdo, $employeeId, $messageText, $sourceId, $eventType, $sourceType) {
     try {
@@ -629,13 +854,43 @@ function cpms_send_google_chat_to_employee($pdo, $employeeId, $messageText, $sou
         $emp = $st->fetch(PDO::FETCH_ASSOC);
         if (!$emp) return false;
         $spaceName = isset($emp['google_chat_dm_space_name']) ? trim((string)$emp['google_chat_dm_space_name']) : '';
+        $userName = isset($emp['google_chat_user_name']) ? trim((string)$emp['google_chat_user_name']) : '';
         $enabled = isset($emp['google_chat_enabled']) ? (int)$emp['google_chat_enabled'] : 0;
+        if ($enabled === 1 && $spaceName === '' && $userName !== '' && function_exists('approval_google_chat_setting') && function_exists('approval_google_chat_setup_dm_space')) {
+            $autoCreate = approval_google_chat_setting($pdo, 'google_chat_dm_auto_create_enabled', '0') === '1';
+            if ($autoCreate) {
+                $createdSpaceName = approval_google_chat_setup_dm_space($pdo, $userName);
+                if (is_string($createdSpaceName) && trim($createdSpaceName) !== '') {
+                    $spaceName = trim($createdSpaceName);
+                    try {
+                        $up = $pdo->prepare("UPDATE employees SET google_chat_dm_space_name=:space_name WHERE id=:id");
+                        $up->execute(array(':space_name' => $spaceName, ':id' => (int)$employeeId));
+                    } catch (Exception $e) {
+                    }
+                }
+            }
+        }
         if ($enabled !== 1 || $spaceName === '') {
             if (function_exists('cpms_google_chat_log_notification')) cpms_google_chat_log_notification($pdo, array('source_type'=>$sourceType,'source_id'=>$sourceId,'event_type'=>$eventType,'receiver_employee_id'=>(int)$employeeId,'receiver_name'=>isset($emp['name'])?$emp['name']:'','receiver_email'=>isset($emp['email'])?$emp['email']:'','dm_space_name'=>$spaceName,'message_text'=>$messageText,'send_status'=>'SKIPPED','error_message'=>'Google Chat DM disabled or dm space empty','sent_at'=>null));
             return false;
         }
         $ok = approval_google_chat_send_message($pdo, $spaceName, $messageText);
         $lastError = function_exists('approval_google_chat_get_last_error') ? approval_google_chat_get_last_error() : '';
+        if (!$ok && (strpos((string)$messageText, 'http') !== false || stripos((string)$messageText, 'URL') !== false)) {
+            $retryMessageText = cpms_google_chat_strip_url_lines($messageText);
+            if ($retryMessageText !== '' && $retryMessageText !== (string)$messageText) {
+                error_log('[google_chat] retry without url source=' . (string)$sourceType . ' source_id=' . (int)$sourceId . ' event=' . (string)$eventType);
+                $retryOk = approval_google_chat_send_message($pdo, $spaceName, $retryMessageText);
+                $retryError = function_exists('approval_google_chat_get_last_error') ? approval_google_chat_get_last_error() : '';
+                if ($retryOk) {
+                    $ok = true;
+                    $messageText = $retryMessageText;
+                    $lastError = null;
+                } else {
+                    $lastError = $retryError !== '' ? $retryError : $lastError;
+                }
+            }
+        }
         if (function_exists('cpms_google_chat_log_notification')) cpms_google_chat_log_notification($pdo, array('source_type'=>$sourceType,'source_id'=>$sourceId,'event_type'=>$eventType,'receiver_employee_id'=>(int)$employeeId,'receiver_name'=>isset($emp['name'])?$emp['name']:'','receiver_email'=>isset($emp['email'])?$emp['email']:'','dm_space_name'=>$spaceName,'message_text'=>$messageText,'send_status'=>$ok?'SUCCESS':'FAILED','error_message'=>$ok?null:$lastError,'sent_at'=>$ok?date('Y-m-d H:i:s'):null));
         return (bool)$ok;
     } catch (Exception $e) { error_log('[labor_gongsu_chat] ' . $e->getMessage()); return false; }

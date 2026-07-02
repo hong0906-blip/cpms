@@ -225,7 +225,6 @@ try {
     for ($i = 0; $i < count($createdTaskIds); $i++) {
         $taskId = (int)$createdTaskIds[$i];
         $assigneeId = isset($createdAssigneeIds[$taskId]) ? (int)$createdAssigneeIds[$taskId] : 0;
-        if ($assigneeId === $requesterEmployeeId) continue;
         $task = cpms_tasks_find_task($pdo, $taskId);
         if ($task) {
             cpms_tasks_send_created_notification($pdo, $task);

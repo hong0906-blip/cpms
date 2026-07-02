@@ -13,6 +13,9 @@ use App\Core\Db;
 
 $user = \App\Core\Auth::user();
 $pdo = Db::pdo();
+if (function_exists('cpms_tasks_process_delayed_notifications')) {
+    cpms_tasks_process_delayed_notifications($pdo, 50);
+}
 
 $userEmail = '';
 $userName  = '';

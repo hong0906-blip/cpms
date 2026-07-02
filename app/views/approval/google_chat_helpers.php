@@ -188,13 +188,49 @@ function approval_google_chat_build_api_error_message($baseTitle, $statusCode, $
     return $safeError;
 }
 
+if (!function_exists('approval_google_chat_clean_utf8')) {
+function approval_google_chat_clean_utf8($value) {
+    if (is_array($value)) {
+        $clean = array();
+        foreach ($value as $key => $item) {
+            $clean[$key] = approval_google_chat_clean_utf8($item);
+        }
+        return $clean;
+    }
+    if (is_string($value)) {
+        if (function_exists('mb_check_encoding') && mb_check_encoding($value, 'UTF-8')) {
+            return $value;
+        }
+        if (function_exists('iconv')) {
+            $converted = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
+            if ($converted !== false) return $converted;
+        }
+        if (function_exists('mb_convert_encoding')) {
+            $converted = @mb_convert_encoding($value, 'UTF-8', 'UTF-8');
+            if ($converted !== false) return $converted;
+        }
+        return preg_replace('/[^\x09\x0A\x0D\x20-\x7E]/', '', $value);
+    }
+    return $value;
+}}
+
+if (!function_exists('approval_google_chat_json_encode')) {
+function approval_google_chat_json_encode($value) {
+    $json = json_encode($value);
+    if ($json !== false && $json !== null) return $json;
+    $clean = approval_google_chat_clean_utf8($value);
+    $json = json_encode($clean);
+    if ($json !== false && $json !== null) return $json;
+    return '{}';
+}}
+
 function approval_google_chat_api_post($pdo, $url, $bodyArray, $contextLabel) {
     approval_google_chat_set_last_error('');
     $token = approval_google_chat_get_access_token($pdo);
     if ($token === false) {
         return array('ok' => false, 'status' => 0, 'body' => '');
     }
-    $resp = approval_google_chat_http_request('POST', $url, array('Authorization: Bearer ' . $token, 'Content-Type: application/json; charset=utf-8'), json_encode($bodyArray));
+    $resp = approval_google_chat_http_request('POST', $url, array('Authorization: Bearer ' . $token, 'Content-Type: application/json; charset=utf-8'), approval_google_chat_json_encode($bodyArray));
     $ok = ($resp['status'] >= 200 && $resp['status'] < 300);
     if (!$ok) {
         $statusCode = (int)$resp['status'];

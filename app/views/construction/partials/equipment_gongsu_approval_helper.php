@@ -165,6 +165,10 @@ function cpms_equipment_gongsu_build_message($pdo, $row, $secondStage) {
     if ($secondStage) array_push($lines, '1차 승인자 : ' . (isset($row['first_approver_name']) && trim((string)$row['first_approver_name']) !== '' ? trim((string)$row['first_approver_name']) : '박원덕'));
     array_push($lines, '');
     array_push($lines, '요청내용 확인 바랍니다.');
+    if (function_exists('cpms_app_executive_approval_url')) {
+        $url = cpms_app_executive_approval_url($pdo, 'equipment_gongsu', isset($row['id']) ? (int)$row['id'] : 0, isset($row['current_approver_employee_id']) ? (int)$row['current_approver_employee_id'] : 0);
+        if ($url !== '') array_push($lines, 'URL : ' . $url);
+    }
     return implode("\n", $lines);
 }}
 

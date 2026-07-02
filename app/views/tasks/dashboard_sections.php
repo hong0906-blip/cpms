@@ -294,6 +294,158 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
     <?php
 }}
 
+if (!function_exists('cpms_render_task_request_modals')) {
+function cpms_render_task_request_modals($pdo, $returnUrl)
+{
+    $currentEmployee = cpms_tasks_current_employee($pdo);
+    $employees = cpms_tasks_fetch_active_employees($pdo);
+    $projects = cpms_tasks_fetch_projects($pdo);
+    $currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, cpms_tasks_today()) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
+    $returnUrl = trim((string)$returnUrl) !== '' ? (string)$returnUrl : cpms_tasks_default_return_url();
+    ?>
+    <div id="modal-taskCreate" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/40" data-modal-close="taskCreate"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white shadow-2xl border border-gray-100">
+                <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                    <div class="text-2xl font-extrabold text-gray-900">업무 요청</div>
+                    <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="taskCreate">닫기</button>
+                </div>
+                <form method="post" action="?r=tasks/create" enctype="multipart/form-data" class="p-6 space-y-5">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <input type="hidden" name="task_kind" value="task">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="md:col-span-2">
+                            <div class="text-sm font-bold text-gray-700 mb-1">업무 제목</div>
+                            <input type="text" name="title" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div class="md:col-span-2">
+                            <div class="text-sm font-bold text-gray-700 mb-1">업무 내용</div>
+                            <textarea name="content" rows="4" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></textarea>
+                        </div>
+                        <?php if (isset($currentEmployee['id']) && (int)$currentEmployee['id'] > 0): ?>
+                            <div class="md:col-span-2">
+                                <label class="inline-flex items-center gap-3 px-4 py-3 rounded-2xl bg-blue-50 border border-blue-200 text-blue-700 font-bold">
+                                    <input type="checkbox" name="assignee_employee_id" value="<?php echo (int)$currentEmployee['id']; ?>" class="w-4 h-4">
+                                    나에게
+                                </label>
+                            </div>
+                        <?php endif; ?>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">담당자</div>
+                            <select name="assignee_employee_ids[]" multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <?php cpms_render_task_assignee_options($employees, $currentLeaveIndex); ?>
+                            </select>
+                            <div class="text-xs text-gray-500 mt-1">여러 명 선택 시 Ctrl 키를 누른 상태에서 선택하세요.</div>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">관련 현장</div>
+                            <select name="project_id" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <option value="0">선택 안함</option>
+                                <?php foreach ($projects as $project): ?>
+                                    <option value="<?php echo (int)$project['id']; ?>"><?php echo h(isset($project['name']) ? $project['name'] : '-'); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">관련 부서</div>
+                            <select name="department" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <option value="">담당자 부서 사용</option>
+                                <?php foreach (cpms_tasks_department_options() as $department): ?>
+                                    <option value="<?php echo h($department); ?>"><?php echo h($department); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">마감일</div>
+                            <input type="date" name="due_date" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">마감시간</div>
+                            <input type="time" name="due_time" value="18:00" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div class="md:col-span-2">
+                            <label class="inline-flex items-center gap-3 px-4 py-3 rounded-2xl bg-rose-50 border border-rose-200 text-rose-700 font-bold">
+                                <input type="checkbox" name="is_urgent" class="w-4 h-4">
+                                긴급 요청
+                            </label>
+                        </div>
+                        <div class="md:col-span-2">
+                            <div class="text-sm font-bold text-gray-700 mb-1">첨부파일</div>
+                            <input type="file" name="attachments[]" multiple class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-3 rounded-2xl border border-gray-200 font-bold" data-modal-close="taskCreate">취소</button>
+                        <button type="submit" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">업무 요청 등록</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-meetingCreate" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/40" data-modal-close="meetingCreate"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white shadow-2xl border border-gray-100">
+                <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                    <div class="text-2xl font-extrabold text-gray-900">회의 요청</div>
+                    <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="meetingCreate">닫기</button>
+                </div>
+                <form method="post" action="?r=tasks/create" enctype="multipart/form-data" class="p-6 space-y-5">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <input type="hidden" name="task_kind" value="meeting">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div class="md:col-span-2">
+                            <div class="text-sm font-bold text-gray-700 mb-1">회의 제목</div>
+                            <input type="text" name="title" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div class="md:col-span-2">
+                            <div class="text-sm font-bold text-gray-700 mb-1">회의 내용</div>
+                            <textarea name="content" rows="4" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></textarea>
+                        </div>
+                        <div class="md:col-span-2">
+                            <div class="text-sm font-bold text-gray-700 mb-1">참석자</div>
+                            <select name="assignee_employee_ids[]" required multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <?php cpms_render_task_assignee_options($employees, $currentLeaveIndex); ?>
+                            </select>
+                            <div class="text-xs text-gray-500 mt-1">회의 요청자는 자동으로 참석자에 포함됩니다.</div>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">회의 일자</div>
+                            <input type="date" name="meeting_date" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">회의 시간</div>
+                            <input type="time" name="meeting_time" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">관련 현장</div>
+                            <select name="project_id" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                                <option value="0">선택 안함</option>
+                                <?php foreach ($projects as $project): ?>
+                                    <option value="<?php echo (int)$project['id']; ?>"><?php echo h(isset($project['name']) ? $project['name'] : '-'); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">첨부파일</div>
+                            <input type="file" name="attachments[]" multiple class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-3 rounded-2xl border border-gray-200 font-bold" data-modal-close="meetingCreate">취소</button>
+                        <button type="submit" class="px-5 py-3 rounded-2xl bg-blue-600 text-white font-extrabold">회의 요청 등록</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <?php
+}}
+
 if (!function_exists('cpms_render_employee_task_dashboard')) {
 function cpms_render_employee_task_dashboard($pdo)
 {
@@ -1369,8 +1521,11 @@ function cpms_render_executive_task_dashboard($pdo)
             <div class="space-y-3">
                 <?php foreach ($summaryData['departments'] as $departmentName => $departmentMetrics): ?>
                     <?php if ($selectedDepartment !== '전체' && $departmentName !== $selectedDepartment) continue; ?>
-                    <?php $departmentLabel = ($departmentName === '기타') ? '임원' : $departmentName; ?>
-                    <div class="px-4 py-3 rounded-2xl border border-gray-200 bg-white shadow-sm">
+                    <?php
+                    $departmentLabel = ($departmentName === '기타') ? '임원' : $departmentName;
+                    $departmentUrl = '?r=dashboard_executive&exec_tab=department&task_department=' . urlencode($departmentName);
+                    ?>
+                    <a href="<?php echo h($departmentUrl); ?>" class="block px-4 py-3 rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition">
                         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">
                             <div class="text-lg font-extrabold text-gray-900"><?php echo h($departmentLabel); ?></div>
                             <div class="cpms-chip-row text-sm">
@@ -1382,7 +1537,7 @@ function cpms_render_executive_task_dashboard($pdo)
                                 <span class="cpms-chip inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-50 text-amber-700 font-bold">마감 임박 <b class="text-base"><?php echo (int)$departmentMetrics['due_soon']; ?>건</b></span>
                             </div>
                         </div>
-                    </div>
+                    </a>
                 <?php endforeach; ?>
             </div>
         </div>
