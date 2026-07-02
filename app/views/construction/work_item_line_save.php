@@ -13,7 +13,7 @@ $uid = isset($_POST['unit_price_id']) ? (int)$_POST['unit_price_id'] : 0;
 $pqRaw = isset($_POST['planned_qty']) ? trim((string)$_POST['planned_qty']) : '';
 $note = isset($_POST['note']) ? trim((string)$_POST['note']) : '';
 $pq = ($pqRaw !== '' && is_numeric($pqRaw)) ? (float)$pqRaw : null;
-$redir = '?r=공사&pid=' . $pid . '&tab=work&work_id=' . $wid;
+$redir = '?r=공사&pid=' . $pid . '&tab=gantt&gantt_panel=work&work_id=' . $wid;
 $pdo = Db::pdo(); if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ' . $redir); exit; }
 try {
     $checkMap = array();

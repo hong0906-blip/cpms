@@ -324,7 +324,7 @@ function cpms_tasks_is_delayed($row)
 {
     $status = isset($row['status']) ? (string)$row['status'] : '';
     if (cpms_tasks_is_closed_status($status)) return false;
-    if (in_array($status, array('meeting_available', 'meeting_unavailable'), true)) return false;
+    if (in_array($status, array('meeting_owner', 'meeting_available', 'meeting_unavailable'), true)) return false;
     $dueAt = cpms_tasks_due_datetime($row);
     if ($dueAt === '') return false;
     $dueTs = strtotime($dueAt);

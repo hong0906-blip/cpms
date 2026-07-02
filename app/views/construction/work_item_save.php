@@ -14,10 +14,11 @@ $title = trim((string)(isset($_POST['title']) ? $_POST['title'] : ''));
 $desc = trim((string)(isset($_POST['description']) ? $_POST['description'] : ''));
 $selected = isset($_POST['selected_unit_price_ids']) && is_array($_POST['selected_unit_price_ids']) ? $_POST['selected_unit_price_ids'] : array();
 $plannedMap = isset($_POST['planned_qty_map']) && is_array($_POST['planned_qty_map']) ? $_POST['planned_qty_map'] : array();
-$redir = '?r=공사&pid=' . $pid . '&tab=work';
-if ($pid <= 0 || $title === '') { flash_set('error','프로젝트/작업명 확인'); header('Location: ' . $redir); exit; }
+$redir = '?r=공사&pid=' . $pid . '&tab=gantt&gantt_panel=work';
+$formRedir = $redir . ($wid > 0 ? '&work_id=' . $wid : '&work_modal=1');
+if ($pid <= 0 || $title === '') { flash_set('error','프로젝트/작업명 확인'); header('Location: ' . $formRedir); exit; }
 if (mb_strlen($title, 'UTF-8') > 200) $title = mb_substr($title, 0, 200, 'UTF-8');
-$pdo = Db::pdo(); if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ' . $redir); exit; }
+$pdo = Db::pdo(); if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ' . $formRedir); exit; }
 
 $oldPlannedMap = array();
 if ($wid > 0) {
@@ -51,7 +52,7 @@ foreach ($selected as $uidRaw) {
 $quantityValidation = cpms_validate_work_item_line_quantities($pdo, $pid, $wid, $candidatePlannedMap);
 if (empty($quantityValidation['ok'])) {
     flash_set('error', isset($quantityValidation['message']) ? $quantityValidation['message'] : '남은 수량보다 큰 수량은 입력할 수 없습니다.');
-    header('Location: ' . $redir . ($wid > 0 ? '&work_id=' . $wid : ''));
+    header('Location: ' . $formRedir);
     exit;
 }
 

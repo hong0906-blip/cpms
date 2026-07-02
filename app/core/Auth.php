@@ -15,7 +15,9 @@ use App\Core\Db;
 class Auth
 {
     const CPMS_USER_KEY = 'cpms_user';
+    const CPMS_REMEMBER_COOKIE = 'CPMSAUTH';
     private static $sessionRefreshed = false;
+    private static $rememberCookieRefreshed = false;
 
     // 이메일 기반 마스터는 사용하지 않습니다.
     // 마스터 권한은 직원명부의 부서가 "개발"일 때만 부여합니다.
@@ -28,6 +30,189 @@ class Auth
     private static function normalizeEmail($email)
     {
         return strtolower(trim((string)$email));
+    }
+
+    private static function keepSeconds()
+    {
+        if (defined('CPMS_SESSION_KEEP_SECONDS')) {
+            return (int)constant('CPMS_SESSION_KEEP_SECONDS');
+        }
+        return 60 * 60 * 12;
+    }
+
+    private static function cookieDomain()
+    {
+        $host = isset($_SERVER['HTTP_HOST']) ? (string)$_SERVER['HTTP_HOST'] : '';
+        $host = preg_replace('/:\\d+$/', '', $host);
+        $host = strtolower($host);
+        $baseCookieDomain = 'cmbuild.kr';
+        if ($host === $baseCookieDomain || substr($host, -1 * (strlen($baseCookieDomain) + 1)) === '.' . $baseCookieDomain) {
+            return $baseCookieDomain;
+        }
+        return '';
+    }
+
+    private static function isHttps()
+    {
+        return (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (isset($_SERVER['SERVER_PORT']) && (int)$_SERVER['SERVER_PORT'] === 443)
+            || (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string)$_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https');
+    }
+
+    private static function rememberSecret()
+    {
+        $rootDir = dirname(dirname(__DIR__));
+        $secretDir = $rootDir . '/storage/secrets';
+        $secretFile = $secretDir . '/cpms_auth_cookie_secret.php';
+
+        if (is_file($secretFile)) {
+            $loaded = @include $secretFile;
+            if (is_string($loaded) && trim($loaded) !== '') {
+                return trim($loaded);
+            }
+        }
+
+        if (!is_dir($secretDir)) {
+            @mkdir($secretDir, 0777, true);
+        }
+        if (!is_dir($secretDir) || !is_writable($secretDir)) {
+            return '';
+        }
+
+        $bytes = false;
+        if (function_exists('openssl_random_pseudo_bytes')) {
+            $bytes = @openssl_random_pseudo_bytes(32);
+        }
+        if ($bytes === false || strlen($bytes) < 32) {
+            $bytes = uniqid('', true) . '|' . mt_rand() . '|' . microtime(true) . '|' . __FILE__;
+        }
+        $secret = hash('sha256', $bytes);
+        $content = "<?php\nreturn '" . $secret . "';\n";
+        $tempFile = $secretFile . '.' . getmypid() . '.tmp';
+        if (@file_put_contents($tempFile, $content, LOCK_EX) === false) {
+            return '';
+        }
+        if (!@rename($tempFile, $secretFile)) {
+            @unlink($tempFile);
+            if (is_file($secretFile)) {
+                $loaded = @include $secretFile;
+                if (is_string($loaded) && trim($loaded) !== '') {
+                    return trim($loaded);
+                }
+            }
+            return '';
+        }
+
+        return $secret;
+    }
+
+    private static function hashEquals($known, $user)
+    {
+        if (function_exists('hash_equals')) {
+            return hash_equals((string)$known, (string)$user);
+        }
+        $known = (string)$known;
+        $user = (string)$user;
+        if (strlen($known) !== strlen($user)) return false;
+        $result = 0;
+        for ($i = 0; $i < strlen($known); $i++) {
+            $result |= ord($known[$i]) ^ ord($user[$i]);
+        }
+        return $result === 0;
+    }
+
+    private static function issueRememberCookie($email)
+    {
+        if (self::$rememberCookieRefreshed || headers_sent()) return;
+
+        $email = self::normalizeEmail($email);
+        if ($email === '') return;
+
+        $secret = self::rememberSecret();
+        if ($secret === '') return;
+
+        $sessionId = session_id();
+        if ($sessionId === '') return;
+
+        $expiresAt = time() + self::keepSeconds();
+        $data = $email . '|' . $sessionId . '|' . $expiresAt;
+        $signature = hash_hmac('sha256', $data, $secret);
+        $value = base64_encode($data . '|' . $signature);
+
+        @setcookie(self::CPMS_REMEMBER_COOKIE, $value, $expiresAt, '/', self::cookieDomain(), self::isHttps(), true);
+        $_COOKIE[self::CPMS_REMEMBER_COOKIE] = $value;
+        self::$rememberCookieRefreshed = true;
+    }
+
+    private static function clearRememberCookie()
+    {
+        if (!headers_sent()) {
+            @setcookie(self::CPMS_REMEMBER_COOKIE, '', time() - 3600, '/', self::cookieDomain(), self::isHttps(), true);
+        }
+        if (isset($_COOKIE[self::CPMS_REMEMBER_COOKIE])) {
+            unset($_COOKIE[self::CPMS_REMEMBER_COOKIE]);
+        }
+        self::$rememberCookieRefreshed = false;
+    }
+
+    private static function refreshRememberCookieFromSession()
+    {
+        if (!isset($_SESSION[self::CPMS_USER_KEY]) || !is_array($_SESSION[self::CPMS_USER_KEY])) return;
+        $email = isset($_SESSION[self::CPMS_USER_KEY]['email']) ? trim((string)$_SESSION[self::CPMS_USER_KEY]['email']) : '';
+        if ($email !== '') self::issueRememberCookie($email);
+    }
+
+    private static function autoLoginFromRememberCookie()
+    {
+        $raw = isset($_COOKIE[self::CPMS_REMEMBER_COOKIE]) ? (string)$_COOKIE[self::CPMS_REMEMBER_COOKIE] : '';
+        if ($raw === '') return false;
+
+        $decoded = base64_decode($raw, true);
+        if (!is_string($decoded) || $decoded === '') {
+            self::clearRememberCookie();
+            return false;
+        }
+
+        $parts = explode('|', $decoded);
+        if (count($parts) !== 4) {
+            self::clearRememberCookie();
+            return false;
+        }
+
+        $email = self::normalizeEmail($parts[0]);
+        $savedSessionId = (string)$parts[1];
+        $expiresAt = (int)$parts[2];
+        $signature = (string)$parts[3];
+        $currentSessionId = session_id();
+        $requestSessionId = isset($_COOKIE[session_name()]) ? (string)$_COOKIE[session_name()] : '';
+        if ($email === '' || $savedSessionId === '' || $currentSessionId === '' || $expiresAt < time()) {
+            self::clearRememberCookie();
+            return false;
+        }
+        if (!self::hashEquals($savedSessionId, $currentSessionId)
+            && ($requestSessionId === '' || !self::hashEquals($savedSessionId, $requestSessionId))) {
+            self::clearRememberCookie();
+            return false;
+        }
+
+        $secret = self::rememberSecret();
+        if ($secret === '') return false;
+
+        $data = $email . '|' . $savedSessionId . '|' . $expiresAt;
+        $expected = hash_hmac('sha256', $data, $secret);
+        if (!self::hashEquals($expected, $signature)) {
+            self::clearRememberCookie();
+            return false;
+        }
+
+        $_SESSION['user_email'] = $email;
+        if (self::loadFromEmployeesByEmail($email, true)) {
+            self::issueRememberCookie($email);
+            return true;
+        }
+
+        self::clearRememberCookie();
+        return false;
     }
 
     public static function isMaster()
@@ -87,10 +272,16 @@ class Auth
         if (!isset($_SESSION[self::CPMS_USER_KEY]) || !is_array($_SESSION[self::CPMS_USER_KEY])) {
             self::autoLoginFromPortal();
         }
+        if (!isset($_SESSION[self::CPMS_USER_KEY]) || !is_array($_SESSION[self::CPMS_USER_KEY])) {
+            self::autoLoginFromRememberCookie();
+        }
         if (!self::$sessionRefreshed && isset($_SESSION[self::CPMS_USER_KEY]) && is_array($_SESSION[self::CPMS_USER_KEY])) {
             self::$sessionRefreshed = true;
             $email = isset($_SESSION[self::CPMS_USER_KEY]['email']) ? trim((string)$_SESSION[self::CPMS_USER_KEY]['email']) : '';
             if ($email !== '') self::loadFromEmployeesByEmail($email, false);
+        }
+        if (isset($_SESSION[self::CPMS_USER_KEY]) && is_array($_SESSION[self::CPMS_USER_KEY])) {
+            self::refreshRememberCookieFromSession();
         }
         return isset($_SESSION[self::CPMS_USER_KEY]) && is_array($_SESSION[self::CPMS_USER_KEY]);
     }
@@ -252,6 +443,7 @@ class Auth
     public static function logout()
     {
         unset($_SESSION[self::CPMS_USER_KEY]);
+        self::clearRememberCookie();
     }
 
     // 직원명부 변경 후 즉시 반영용(있으면 employees_save.php에서 호출함)
@@ -267,13 +459,15 @@ class Auth
     public static function autoLoginFromPortal()
     {
         if (isset($_SESSION[self::CPMS_USER_KEY]) && is_array($_SESSION[self::CPMS_USER_KEY])) {
+            self::refreshRememberCookieFromSession();
             return true;
         }
 
         $portalEmail = isset($_SESSION['user_email']) ? trim((string)$_SESSION['user_email']) : '';
-        if ($portalEmail === '') return false;
+        if ($portalEmail === '') return self::autoLoginFromRememberCookie();
 
         // 기본 세션 먼저 생성
+        $_SESSION['user_email'] = $portalEmail;
         $_SESSION[self::CPMS_USER_KEY] = array(
             'email'      => $portalEmail,
             'name'       => $portalEmail,
@@ -286,6 +480,7 @@ class Auth
 
         // DB에서 실제 값 로드
         self::loadFromEmployeesByEmail($portalEmail, true);
+        self::refreshRememberCookieFromSession();
         return true;
     }
 

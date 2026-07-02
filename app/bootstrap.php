@@ -7,6 +7,10 @@
  * PHP 5.6 호환
  */
 
+if (!defined('CPMS_SESSION_KEEP_SECONDS')) {
+    define('CPMS_SESSION_KEEP_SECONDS', 60 * 60 * 12); // 12시간
+}
+
 // ===== 포탈과 공통 세션 설정 (반드시 session_start() 전에!) =====
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_name('CMSESSID');
@@ -15,7 +19,7 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     //  세션 만료(자동로그아웃) 방지 설정
     //  - 세션 파일이 너무 빨리 정리(gc)되면 "조금 안 쓰면 로그인으로 돌아감" 현상이 발생
     // ==========================
-    $keepSeconds = 60 * 60 * 24 * 30; // 30일
+    $keepSeconds = CPMS_SESSION_KEEP_SECONDS;
     ini_set('session.gc_maxlifetime', (string)$keepSeconds);
     ini_set('session.cookie_lifetime', (string)$keepSeconds);
 
@@ -26,10 +30,12 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     // ==========================
     $host = isset($_SERVER['HTTP_HOST']) ? (string)$_SERVER['HTTP_HOST'] : '';
     $host = preg_replace('/:\\d+$/', '', $host); // 포트 제거
+    $host = strtolower($host);
 
     $cookieDomain = '';
-    if ($host !== '' && (substr($host, -9) === 'cmbuild.kr')) {
-        $cookieDomain = 'cmbuild.kr';
+    $baseCookieDomain = 'cmbuild.kr';
+    if ($host === $baseCookieDomain || substr($host, -1 * (strlen($baseCookieDomain) + 1)) === '.' . $baseCookieDomain) {
+        $cookieDomain = $baseCookieDomain;
         ini_set('session.cookie_domain', $cookieDomain);
     }
 
@@ -42,6 +48,13 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     ini_set('session.cookie_httponly', '1');
 
     session_start();
+
+    // ping처럼 화면 변화가 없는 요청도 세션 파일 수정시간을 갱신하도록 값을 실제로 변경한다.
+    $now = time();
+    if (empty($_SESSION['_cpms_session_started_at'])) {
+        $_SESSION['_cpms_session_started_at'] = $now;
+    }
+    $_SESSION['_cpms_last_seen_at'] = $now;
 
     if (session_id() !== '') {
         @setcookie(session_name(), session_id(), time() + $keepSeconds, '/', $cookieDomain, $isHttps, true);

@@ -241,6 +241,8 @@ $viewMonth = isset($_GET['month']) ? trim((string)$_GET['month']) : '';
 $viewMonth = preg_match('/^\d{4}-\d{2}$/', $viewMonth) ? $viewMonth : '';
 $viewMode = isset($_GET['mode']) ? trim((string)$_GET['mode']) : '';
 $viewMode = ($viewMode === 'edit') ? 'edit' : 'overview';
+$ganttPanel = isset($_GET['gantt_panel']) ? trim((string)$_GET['gantt_panel']) : '';
+if (!in_array($ganttPanel, array('overview', 'board', 'progress', 'work'), true)) $ganttPanel = '';
 $baseStartTs = $rangeStartTs;
 $baseEndTs = $rangeEndTs;
 if ($viewMonth === '') {
@@ -476,6 +478,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     <div class="flex items-center gap-2 mt-6">
         <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" data-tab="overview">공정표</button>
         <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-extrabold" data-tab="board">공정표 수정</button>
+        <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-extrabold" data-tab="work">작업</button>
         <button type="button" class="gantt-tab px-4 py-2 rounded-2xl bg-gray-100 text-gray-700 font-extrabold" data-tab="progress">현재 진행률</button>
     </div>
     <?php if ($debugAutoProgress): ?>
@@ -875,6 +878,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         </table>
     </div>
 
+    <div class="mt-6 gantt-tab-panel hidden" data-tab-panel="work">
+        <?php require __DIR__ . '/work.php'; ?>
+    </div>
+
     <?php if (!$canEdit): ?>
         <div class="mt-4 text-sm text-gray-500">※ 수정/삭제 권한이 없습니다. (공사/임원만)</div>
     <?php endif; ?>
@@ -1079,6 +1086,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   var todayYmd = rangeSource.getAttribute('data-today-ymd') || '';
   var todayOffset = parseInt(rangeSource.getAttribute('data-today-offset'), 10);
   var initialMode = '<?php echo h($viewMode); ?>';
+  var initialPanel = '<?php echo h($ganttPanel); ?>';
   if (isNaN(todayOffset)) todayOffset = -1;
   // 공정표 자동저장 후 dirty 상태: 수정 데이터 변경 여부(보기 탭 최신화 트리거)
   if (typeof window.cpmsGanttDirty === 'undefined') window.cpmsGanttDirty = false;
@@ -1096,7 +1104,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
   function getActiveTab(){
     var activePanel = document.querySelector('.gantt-tab-panel:not(.hidden)');
-    if (!activePanel) return (initialMode === 'edit') ? 'board' : 'overview';
+    if (!activePanel) return initialPanel || ((initialMode === 'edit') ? 'board' : 'overview');
     return activePanel.getAttribute('data-tab-panel') || 'overview';
   }
 
@@ -1109,6 +1117,13 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     if (month) params.set('month', month);
     if (mode === 'edit') params.set('mode', 'edit');
     else params.delete('mode');
+    if (mode === 'work') params.set('gantt_panel', 'work');
+    else {
+      params.delete('gantt_panel');
+      params.delete('work_id');
+      params.delete('work_modal');
+      params.delete('work_view');
+    }
     // 캐시 방지 refresh 파라미터
     if (refreshTs) params.set('refresh', String(refreshTs));
     else params.delete('refresh');
@@ -1949,6 +1964,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       }
       if (target === 'board') {
         history.replaceState(null, '', buildGanttUrl('edit', window.cpmsGanttRefreshTs || 0));
+      } else if (target === 'work') {
+        history.replaceState(null, '', buildGanttUrl('work', window.cpmsGanttRefreshTs || 0));
       } else {
         history.replaceState(null, '', buildGanttUrl('overview', window.cpmsGanttRefreshTs || 0));
       }
@@ -1956,7 +1973,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     });
   });
 
-  if (initialMode === 'edit') {
+  if (initialPanel) {
+    var initialTabBtn = document.querySelector('.gantt-tab[data-tab="' + initialPanel + '"]');
+    if (initialTabBtn) initialTabBtn.click();
+  } else if (initialMode === 'edit') {
     var boardTabBtn = document.querySelector('.gantt-tab[data-tab="board"]');
     if (boardTabBtn) boardTabBtn.click();
   }

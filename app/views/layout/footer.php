@@ -9,7 +9,7 @@
 <!-- ==========================
      C:\www\cpms\app\views\layout\footer.php
      세션 유지(자동로그아웃 방지)
-     - 5분마다 ping 호출해서 세션 파일 갱신
+     - 1분마다 ping 호출해서 세션 파일 갱신
      - PHP 5.6 / 구형 브라우저도 동작하도록 XMLHttpRequest 사용
 ========================== -->
 <script>
@@ -27,8 +27,8 @@
     // 최초 1회
     ping();
 
-    // 5분마다(300,000ms)
-    setInterval(ping, 300000);
+    // 1분마다(60,000ms)
+    setInterval(ping, 60000);
 
     // 화면이 다시 활성화될 때도 1회 갱신
     if (document.addEventListener) {

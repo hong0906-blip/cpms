@@ -457,6 +457,8 @@ if ($route === 'tasks/executive_summary') {
 }
 
 if ($route === 'ping') {
+    $_SESSION['_cpms_ping_at'] = time();
+    \App\Core\Auth::check();
     header('Content-Type: text/plain; charset=utf-8');
     header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');

@@ -212,6 +212,22 @@ $statusBadgeClass = function ($status) {
     return 'bg-rose-50 text-rose-700 border-rose-100';
 };
 
+$hideFromTodayAttendanceCards = function ($person) {
+    $position = '';
+    if (is_array($person) && isset($person['position'])) {
+        $position = trim((string)$person['position']);
+    }
+    $position = str_replace(array(' ', "\t", "\r", "\n"), '', $position);
+    return ($position !== '' && strpos($position, '대표') !== false);
+};
+
+$attendanceTimeLabel = function ($value) {
+    $value = trim((string)$value);
+    if ($value === '') return '-';
+    if (preg_match('/\d{2}:\d{2}/', $value, $m)) return $m[0];
+    return $value;
+};
+
 if ($pdo) {
     try {
         $issuesSql = "SELECT i.*, p.name AS project_name
@@ -281,24 +297,30 @@ if ($pdo) {
         $leaveExMap = isset($currentLeaveIndex['by_id']) && is_array($currentLeaveIndex['by_id']) ? $currentLeaveIndex['by_id'] : array();
 
         $activeRows = $pdo->query("SELECT id, name, department, position FROM employees WHERE is_active = 1")->fetchAll();
-        $stAtt = $pdo->prepare("SELECT DISTINCT employee_id
+        $stAtt = $pdo->prepare("SELECT employee_id, MIN(check_in) AS check_in, MAX(check_out) AS check_out
                                 FROM cpms_attendance_records
                                 WHERE work_date = ?
-                                  AND (check_in IS NOT NULL OR status IN ('출근중','퇴근완료'))");
+                                  AND (check_in IS NOT NULL OR status IN ('출근중','퇴근완료'))
+                                GROUP BY employee_id");
         $stAtt->execute(array($today));
         $attMap = array();
-        foreach ($stAtt->fetchAll(PDO::FETCH_COLUMN, 0) as $eid) {
-            $attMap[(int)$eid] = 1;
+        foreach ($stAtt->fetchAll(PDO::FETCH_ASSOC) as $attRow) {
+            $attMap[(int)$attRow['employee_id']] = array(
+                'check_in' => isset($attRow['check_in']) ? $attRow['check_in'] : '',
+                'check_out' => isset($attRow['check_out']) ? $attRow['check_out'] : '',
+            );
         }
-        $todayPresent = count($attMap);
-
         foreach ($activeRows as $ar) {
+            if ($hideFromTodayAttendanceCards($ar)) continue;
+
             $eid = (int)$ar['id'];
             if (isset($attMap[$eid])) {
                 $presentPeople[] = array(
                     'name' => $ar['name'],
                     'department' => $ar['department'],
                     'position' => $ar['position'],
+                    'check_in' => isset($attMap[$eid]['check_in']) ? $attMap[$eid]['check_in'] : '',
+                    'check_out' => isset($attMap[$eid]['check_out']) ? $attMap[$eid]['check_out'] : '',
                 );
                 continue;
             }
@@ -309,6 +331,7 @@ if ($pdo) {
                 'position' => $ar['position'],
             );
         }
+        $todayPresent = count($presentPeople);
 
         $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? $currentLeaveIndex['people'] : array();
         $leaveToday = count($leavePeople);
@@ -375,6 +398,30 @@ if ($pdo) {
     </div>
 <?php endif; ?>
 
+<style>
+  .cpms-exec-tab-btn[aria-selected="true"] {
+    background: #111827;
+    border-color: #111827;
+    color: #fff;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, .14);
+  }
+  .cpms-exec-tab-btn[aria-selected="false"] {
+    background: #fff;
+    border-color: #e5e7eb;
+    color: #334155;
+  }
+</style>
+
+<div class="mb-6 flex flex-wrap items-center gap-2" role="tablist" aria-label="임원 대시보드 탭">
+    <button type="button" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="main" aria-selected="true">메인</button>
+    <button type="button" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="department" aria-selected="false">부서별 업무현황</button>
+    <button type="button" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="approval" aria-selected="false">승인대기</button>
+    <button type="button" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="siteIssues" aria-selected="false">현장별 이슈</button>
+</div>
+
+<div data-executive-tab-panels>
+<section data-executive-tab-panel="main">
+
 <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
     <div class="bg-white/80 rounded-3xl p-6 border overflow-visible">
         <h3 class="text-2xl font-extrabold mb-4">근태 리스크 현황</h3>
@@ -419,7 +466,11 @@ if ($pdo) {
                     <?php else: ?>
                         <ul class="space-y-2">
                             <?php foreach ($presentPeople as $person): ?>
-                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                <?php
+                                $checkInLabel = $attendanceTimeLabel(isset($person['check_in']) ? $person['check_in'] : '');
+                                $checkOutLabel = $attendanceTimeLabel(isset($person['check_out']) ? $person['check_out'] : '');
+                                ?>
+                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> <span class="font-bold text-sky-700">(<?php echo h($checkInLabel . ' / ' . $checkOutLabel); ?>)</span> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                             <?php endforeach; ?>
                         </ul>
                     <?php endif; ?>
@@ -432,7 +483,11 @@ if ($pdo) {
                         <?php else: ?>
                             <ul class="space-y-2">
                                 <?php foreach ($presentPeople as $person): ?>
-                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                    <?php
+                                    $checkInLabel = $attendanceTimeLabel(isset($person['check_in']) ? $person['check_in'] : '');
+                                    $checkOutLabel = $attendanceTimeLabel(isset($person['check_out']) ? $person['check_out'] : '');
+                                    ?>
+                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> <span class="font-bold text-sky-700">(<?php echo h($checkInLabel . ' / ' . $checkOutLabel); ?>)</span> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                                 <?php endforeach; ?>
                             </ul>
                         <?php endif; ?>
@@ -737,8 +792,6 @@ if ($pdo) {
     </div>
 </div>
 
-<?php cpms_render_executive_task_dashboard($pdo); ?>
-
 <script>
 (function(){
     var openButtons = document.querySelectorAll('[data-project-cost-modal-open]');
@@ -786,7 +839,19 @@ if ($pdo) {
 })();
 </script>
 
-<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
+</section>
+
+<section data-executive-tab-panel="department" class="hidden" style="display:none;">
+<?php cpms_render_executive_task_dashboard($pdo); ?>
+
+<div class="mt-8">
+    <?php render_task_list_sample(); ?>
+</div>
+</section>
+
+<section data-executive-tab-panel="approval" class="hidden" style="display:none;">
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
     <div class="flex items-start justify-between gap-4 mb-4">
         <div>
             <h3 class="text-2xl font-extrabold text-gray-900">공수 수정 승인대기</h3>
@@ -827,7 +892,7 @@ if ($pdo) {
     </div>
 </div>
 
-<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
+<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
     <div class="flex items-start justify-between gap-4 mb-4">
         <div>
             <h3 class="text-2xl font-extrabold text-gray-900">장비공수 수정 승인대기</h3>
@@ -872,7 +937,12 @@ if ($pdo) {
     </div>
 </div>
 
-<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-6">
+</div>
+</section>
+
+<section data-executive-tab-panel="siteIssues" class="hidden" style="display:none;">
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+<div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
     <div class="flex items-center justify-between mb-4">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">안전사고</h3>
@@ -979,7 +1049,64 @@ if ($pdo) {
         </div>
     <?php endif; ?>
 </div>
-
-<div class="mt-8">
-    <?php render_task_list_sample(); ?>
 </div>
+</section>
+</div>
+
+<script>
+(function(){
+    var storageKey = 'cpms_executive_dashboard_tab';
+    var buttons = document.querySelectorAll('[data-executive-tab]');
+    var panels = document.querySelectorAll('[data-executive-tab-panel]');
+    var valid = {};
+    for (var i = 0; i < buttons.length; i++) {
+        valid[buttons[i].getAttribute('data-executive-tab')] = true;
+    }
+
+    function removeClass(el, cls) {
+        if (!el) return;
+        el.className = (' ' + el.className + ' ').replace(' ' + cls + ' ', ' ').replace(/^\s+|\s+$/g, '');
+    }
+
+    function addClass(el, cls) {
+        if (!el) return;
+        removeClass(el, cls);
+        el.className = (el.className ? el.className + ' ' : '') + cls;
+    }
+
+    function activate(tabKey, persist) {
+        if (!valid[tabKey]) tabKey = 'main';
+        for (var i = 0; i < buttons.length; i++) {
+            var isActiveButton = buttons[i].getAttribute('data-executive-tab') === tabKey;
+            buttons[i].setAttribute('aria-selected', isActiveButton ? 'true' : 'false');
+        }
+        for (var j = 0; j < panels.length; j++) {
+            var isActivePanel = panels[j].getAttribute('data-executive-tab-panel') === tabKey;
+            if (isActivePanel) {
+                removeClass(panels[j], 'hidden');
+                panels[j].style.display = '';
+            } else {
+                addClass(panels[j], 'hidden');
+                panels[j].style.display = 'none';
+            }
+        }
+        if (persist) {
+            try { localStorage.setItem(storageKey, tabKey); } catch (e) {}
+        }
+    }
+
+    for (var k = 0; k < buttons.length; k++) {
+        buttons[k].onclick = function(){
+            activate(this.getAttribute('data-executive-tab'), true);
+            return false;
+        };
+    }
+
+    var initial = 'main';
+    try {
+        var saved = localStorage.getItem(storageKey);
+        if (valid[saved]) initial = saved;
+    } catch (e) {}
+    activate(initial, false);
+})();
+</script>

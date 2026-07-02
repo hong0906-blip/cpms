@@ -103,6 +103,12 @@ if (!$project) {
 $defaultTab = 'status';
 $tab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : $defaultTab;
 if ($tab === '') $tab = $defaultTab;
+if ($tab === 'work') {
+    $tab = 'gantt';
+    if (!isset($_GET['gantt_panel']) || trim((string)$_GET['gantt_panel']) === '') {
+        $_GET['gantt_panel'] = 'work';
+    }
+}
 
 $tabs = array(
     // 상황 탭 추가
@@ -110,7 +116,6 @@ $tabs = array(
     'monthly_input' => '투입비 상세',
     'roles'    => '담당지정',
     'gantt'    => '공정표',
-    'work'     => '작업',    
     'labor'    => '노무비',
     'equipment'=> '장비',
     'materials'=> '자재구입비',

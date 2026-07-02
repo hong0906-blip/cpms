@@ -28,6 +28,7 @@ function cpms_task_feed_item($row)
         'action_url' => isset($row['action_url']) ? (string)$row['action_url'] : '',
         'is_direct_task' => isset($row['is_direct_task']) ? (int)$row['is_direct_task'] : 0,
         'created_at' => isset($row['created_at']) ? (string)$row['created_at'] : '',
+        'completed_at' => isset($row['completed_at']) ? (string)$row['completed_at'] : '',
     );
     $item['display_status'] = isset($row['display_status']) && trim((string)$row['display_status']) !== ''
         ? (string)$row['display_status']
@@ -58,16 +59,38 @@ function cpms_task_feed_sort($a, $b)
     return ($aId > $bId) ? -1 : 1;
 }}
 
+if (!function_exists('cpms_task_feed_is_direct_work_task')) {
+function cpms_task_feed_is_direct_work_task($item)
+{
+    if (!is_array($item)) return false;
+    $sourceType = isset($item['source_type']) ? (string)$item['source_type'] : '';
+    $taskType = isset($item['task_type']) ? (string)$item['task_type'] : '';
+    return ($sourceType === 'task' && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && $taskType !== 'meeting');
+}}
+
+if (!function_exists('cpms_task_feed_is_done_today')) {
+function cpms_task_feed_is_done_today($item)
+{
+    if (!is_array($item)) return false;
+    $status = isset($item['status']) ? (string)$item['status'] : '';
+    if ($status !== 'done') return false;
+    $today = cpms_tasks_today();
+    $completedAt = isset($item['completed_at']) ? trim((string)$item['completed_at']) : '';
+    if ($completedAt !== '' && substr($completedAt, 0, 10) === $today) return true;
+    $dueDate = isset($item['due_date']) ? trim((string)$item['due_date']) : '';
+    return ($dueDate === $today);
+}}
+
 if (!function_exists('cpms_task_feed_should_show')) {
 function cpms_task_feed_should_show($item)
 {
     if (!is_array($item)) return false;
     $status = isset($item['status']) ? (string)$item['status'] : '';
+    if ($status === 'done') return cpms_task_feed_is_done_today($item);
     if (cpms_tasks_is_closed_status($status)) return false;
     $dueDate = isset($item['due_date']) ? trim((string)$item['due_date']) : '';
     $sourceType = isset($item['source_type']) ? (string)$item['source_type'] : '';
-    $taskType = isset($item['task_type']) ? (string)$item['task_type'] : '';
-    if ($sourceType === 'task' && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && $taskType !== 'meeting') return true;
+    if (cpms_task_feed_is_direct_work_task($item)) return true;
     if ($sourceType !== 'public_affairs_collab' && $dueDate !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dueDate) && strcmp($dueDate, cpms_tasks_today()) < 0) return false;
     return true;
 }}
@@ -77,13 +100,11 @@ function cpms_task_feed_counts_as_today($item)
 {
     if (!is_array($item)) return false;
     $status = isset($item['status']) ? (string)$item['status'] : '';
+    if ($status === 'done') return cpms_task_feed_is_done_today($item);
     if (cpms_tasks_is_closed_status($status)) return false;
     $sourceType = isset($item['source_type']) ? (string)$item['source_type'] : '';
     if ($sourceType === 'construction_schedule') return false;
-    $taskType = isset($item['task_type']) ? (string)$item['task_type'] : '';
-    if ($sourceType === 'task' && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && $taskType !== 'meeting') {
-        return true;
-    }
+    if (cpms_task_feed_is_direct_work_task($item)) return true;
     $dueDate = isset($item['due_date']) ? trim((string)$item['due_date']) : '';
     return (cpms_tasks_is_due_today($item) || $dueDate === '');
 }}
@@ -112,11 +133,18 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
     $rows = array();
     if (!$pdo || (int)$employeeId <= 0 || !cpms_tasks_table_exists($pdo, 'cpms_tasks')) return $rows;
     try {
+        $hasCompletedAt = cpms_tasks_column_exists($pdo, 'cpms_tasks', 'completed_at');
+        $params = array(':employee_id' => (int)$employeeId, ':today_due' => cpms_tasks_today());
+        $doneTodaySql = $hasCompletedAt
+            ? "(status IS NULL OR status <> 'done' OR DATE(completed_at) = :today_completed OR due_date = :today_due)"
+            : "(status IS NULL OR status <> 'done' OR due_date = :today_due)";
+        if ($hasCompletedAt) $params[':today_completed'] = cpms_tasks_today();
         $st = $pdo->prepare("SELECT * FROM cpms_tasks
                               WHERE assignee_employee_id = :employee_id
-                                AND (status IS NULL OR status NOT IN ('done','cancelled'))
+                                AND (status IS NULL OR status <> 'cancelled')
+                                AND " . $doneTodaySql . "
                               ORDER BY is_urgent DESC, due_date ASC, due_time ASC, id DESC");
-        $st->execute(array(':employee_id' => (int)$employeeId));
+        $st->execute($params);
         $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($tasks)) $tasks = array();
         foreach ($tasks as $task) {
@@ -142,6 +170,7 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
                 'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
+                'completed_at' => isset($task['completed_at']) ? (string)$task['completed_at'] : '',
             );
         }
     } catch (Exception $e) {
@@ -426,11 +455,10 @@ function cpms_task_feed_attendance_items_for_employee($pdo, $employeeId, $employ
     $rows = array();
     $canApprove = false;
     if (is_array($employeeMeta)) {
-        $role = isset($employeeMeta['role']) ? (string)$employeeMeta['role'] : '';
-        $department = cpms_tasks_normalize_department(isset($employeeMeta['department']) ? $employeeMeta['department'] : '');
-        $canApprove = ($role === 'executive' || $department === '관리');
+        $department = isset($employeeMeta['department']) ? $employeeMeta['department'] : '';
+        $canApprove = cpms_tasks_is_management_department($department);
     } else {
-        $canApprove = attendance_is_manager();
+        $canApprove = false;
     }
     if (!$pdo || !$canApprove || !cpms_tasks_table_exists($pdo, 'cpms_attendance_requests')) return $rows;
     $positionColumn = cpms_tasks_column_exists($pdo, 'employees', 'position') ? 'e.position' : "'' AS position";

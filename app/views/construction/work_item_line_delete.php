@@ -9,7 +9,7 @@ if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) { flash_
 $pid = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $wid = isset($_POST['work_id']) ? (int)$_POST['work_id'] : 0;
 $uid = isset($_POST['unit_price_id']) ? (int)$_POST['unit_price_id'] : 0;
-$redir = '?r=공사&pid=' . $pid . '&tab=work&work_id=' . $wid;
+$redir = '?r=공사&pid=' . $pid . '&tab=gantt&gantt_panel=work&work_id=' . $wid;
 $pdo = Db::pdo(); if (!$pdo) { flash_set('error','DB 연결 실패'); header('Location: ' . $redir); exit; }
 try {
     $st = $pdo->prepare("DELETE FROM cpms_work_item_lines WHERE work_id=:wid AND unit_price_id=:uid");
