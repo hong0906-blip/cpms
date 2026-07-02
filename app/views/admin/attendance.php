@@ -14,6 +14,7 @@ $routeManage = '?r=' . attendance_text('%EA%B4%80%EB%A6%AC');
 
 $pdo = Db::pdo();
 $canViewAttendanceSettings = attendance_can_manage_settings($pdo);
+$canEditAttendanceCells = $canViewAttendanceSettings;
 $date = isset($_GET['date']) ? (string)$_GET['date'] : date('Y-m-d');
 $tab = isset($_GET['atab']) ? (string)$_GET['atab'] : 'monthly';
 if ($tab === 'settings' && !$canViewAttendanceSettings) $tab = 'monthly';
@@ -21,8 +22,8 @@ $month = isset($_GET['month']) ? trim((string)$_GET['month']) : date('Y-m');
 if (!preg_match('/^\d{4}-\d{2}$/', $month)) $month = date('Y-m');
 $quickFilter = isset($_GET['filter']) ? trim((string)$_GET['filter']) : 'all';
 if (!in_array($quickFilter, array('all', 'late', 'vacation', 'missing_checkout'), true)) $quickFilter = 'all';
-$sort = isset($_GET['sort']) ? trim((string)$_GET['sort']) : 'name';
-if (!in_array($sort, array('name'), true)) $sort = 'name';
+$sort = isset($_GET['sort']) ? trim((string)$_GET['sort']) : 'department';
+if (!in_array($sort, array('department', 'name', 'position'), true)) $sort = 'department';
 $requestStatusFilter = isset($_GET['status']) ? trim((string)$_GET['status']) : 'all';
 if (!in_array($requestStatusFilter, array('all', 'pending', 'approved', 'rejected'), true)) $requestStatusFilter = 'all';
 $requestDateFilter = isset($_GET['request_date']) ? trim((string)$_GET['request_date']) : $date;
@@ -181,9 +182,24 @@ if ($pdo) {
     $hireSel = $hireDateEnabled ? 'hire_date' : 'NULL AS hire_date';
     $photoSel = $photoPathEnabled ? 'photo_path' : "'' AS photo_path";
     $activeSel = $isActiveEnabled ? 'is_active' : '1 AS is_active';
+    $employeeWhere = array();
+    if ($isActiveEnabled) {
+        $employeeWhere[] = "(is_active IS NULL OR is_active = 1)";
+    }
+    $employeeOrder = "department ASC, name ASC, id ASC";
+    if ($sort === 'name') {
+        $employeeOrder = "name ASC, id ASC";
+    } else if ($sort === 'position') {
+        $employeeOrder = "position ASC, department ASC, name ASC, id ASC";
+    }
 
     try {
-        $emps = $pdo->query("SELECT id,email,name,department," . $posSel . "," . $hireSel . "," . $photoSel . "," . $activeSel . " FROM employees ORDER BY name ASC, id ASC")->fetchAll(PDO::FETCH_ASSOC);
+        $employeeSql = "SELECT id,email,name,department," . $posSel . "," . $hireSel . "," . $photoSel . "," . $activeSel . " FROM employees";
+        if (count($employeeWhere) > 0) {
+            $employeeSql .= " WHERE " . implode(" AND ", $employeeWhere);
+        }
+        $employeeSql .= " ORDER BY " . $employeeOrder;
+        $emps = $pdo->query($employeeSql)->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($emps)) $emps = array();
     } catch (Exception $e) {
         $attendanceErrors[] = attendance_text('%EC%A7%81%EC%9B%90%20%EB%AA%A9%EB%A1%9D%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.') . ' ' . $e->getMessage();
@@ -204,7 +220,8 @@ if ($pdo) {
     }
 
     try {
-        $st = $pdo->prepare("SELECT e.name,e.department," . ($positionEnabled ? 'e.position' : "'' AS position") . ",a.* FROM cpms_attendance_records a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=:d ORDER BY e.name ASC");
+        $dailyActiveWhere = $isActiveEnabled ? " AND (e.is_active IS NULL OR e.is_active = 1)" : "";
+        $st = $pdo->prepare("SELECT e.name,e.department," . ($positionEnabled ? 'e.position' : "'' AS position") . ",a.* FROM cpms_attendance_records a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=:d" . $dailyActiveWhere . " ORDER BY e.name ASC");
         $st->execute(array(':d' => $date));
         $daily = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($daily)) $daily = array();
@@ -245,13 +262,18 @@ if ($pdo) {
     }
 
     try {
-        $st2 = $pdo->prepare("SELECT e.id,e.name,e.department,COALESCE(SUM(a.work_minutes),0) AS m
+        $weeklySql = "SELECT e.id,e.name,e.department,COALESCE(SUM(a.work_minutes),0) AS m
                               FROM employees e
                               LEFT JOIN cpms_attendance_records a
                                 ON a.employee_id=e.id
                                AND a.work_date BETWEEN :s AND :e
-                              GROUP BY e.id,e.name,e.department
-                              ORDER BY m DESC, e.name ASC");
+                              ";
+        if ($isActiveEnabled) {
+            $weeklySql .= " WHERE (e.is_active IS NULL OR e.is_active = 1)";
+        }
+        $weeklySql .= " GROUP BY e.id,e.name,e.department
+                              ORDER BY m DESC, e.name ASC";
+        $st2 = $pdo->prepare($weeklySql);
         $st2->execute(array(':s' => $ws, ':e' => $we));
         $weekly = $st2->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($weekly)) $weekly = array();
@@ -459,6 +481,7 @@ if ($pdo && $tab === 'requests') {
 }
 $totalRequests = count($filteredReqs);
 $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . urlencode($requestStatusFilter) . '&request_date=' . urlencode($requestDateFilter);
+$monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month) . '&sort=' . urlencode($sort) . '&filter=' . urlencode($quickFilter);
 ?>
 
 <div class='mb-4 flex gap-2 flex-wrap'>
@@ -529,6 +552,8 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
 .cpms-attendance-day-head.weekend{background:#fff1f2;color:#ef4444}
 .cpms-attendance-day-cell{width:56px;min-width:56px;height:86px;text-align:center;background:#fff;padding:6px 4px}
 .cpms-attendance-day-cell.status-normal{background:#f0fdf4}.cpms-attendance-day-cell.status-late{background:#fff7ed}.cpms-attendance-day-cell.status-vacation{background:#eff6ff}.cpms-attendance-day-cell.status-missing_checkout{background:#fff1f2}.cpms-attendance-day-cell.status-none{background:#fff}
+.cpms-attendance-day-cell.is-editable{cursor:pointer;transition:box-shadow .16s ease,transform .16s ease}
+.cpms-attendance-day-cell.is-editable:hover{box-shadow:inset 0 0 0 2px #1d4ed8;transform:translateY(-1px)}
 .cpms-attendance-time{line-height:1.35;color:#0f172a;font-weight:800;min-height:31px}
 .cpms-attendance-empty{color:#94a3b8;font-weight:900;margin-top:10px}
 .cpms-attendance-badge{display:inline-flex;align-items:center;gap:3px;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:950;margin-top:5px}
@@ -536,7 +561,29 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
 .cpms-attendance-alert{width:13px;height:13px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#ef4444;color:#fff;font-size:9px;line-height:1}
 .cpms-attendance-alert span{color:#fff}
 .cpms-attendance-empty-state{padding:28px;text-align:center;color:#64748b;font-weight:900}
+.cpms-attendance-modal{position:fixed;inset:0;z-index:80;display:none}
+.cpms-attendance-modal.is-open{display:block}
+.cpms-attendance-modal-backdrop{position:absolute;inset:0;background:rgba(15,23,42,.42)}
+.cpms-attendance-modal-shell{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px}
+.cpms-attendance-modal-card{width:100%;max-width:820px;max-height:92vh;overflow:auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 22px 60px rgba(15,23,42,.22);padding:22px}
+.cpms-attendance-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:16px}
+.cpms-attendance-modal-title{font-size:20px;font-weight:950;color:#0f172a}
+.cpms-attendance-modal-sub{font-size:13px;color:#64748b;font-weight:800;margin-top:4px}
+.cpms-attendance-close{width:36px;height:36px;border:1px solid #e5e7eb;border-radius:8px;background:#fff;color:#334155;font-weight:950}
+.cpms-attendance-time-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.cpms-attendance-time-box{border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:14px}
+.cpms-attendance-time-label{font-size:13px;font-weight:950;color:#0f172a;margin-bottom:10px}
+.cpms-attendance-time-preview{display:inline-flex;align-items:center;justify-content:center;min-width:86px;height:34px;border-radius:999px;background:#e0e7ff;color:#1e1b4b;font-weight:950;margin-bottom:12px}
+.cpms-attendance-picker-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.cpms-attendance-picker-btn{border:1px solid #dbe3ef;background:#fff;color:#334155;border-radius:8px;min-width:42px;height:34px;padding:0 10px;font-size:12px;font-weight:900}
+.cpms-attendance-picker-btn.is-active{background:#071a98;border-color:#071a98;color:#fff}
+.cpms-attendance-picker-btn.is-muted{background:#fff1f2;border-color:#fecdd3;color:#be123c}
+.cpms-attendance-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.cpms-attendance-modal-actions button{height:40px;border-radius:8px;padding:0 16px;font-weight:950}
+.cpms-attendance-cancel{border:1px solid #dbe3ef;background:#fff;color:#334155}
+.cpms-attendance-save{border:0;background:#071a98;color:#fff}
 @media (max-width:1200px){.cpms-attendance-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.cpms-attendance-filterbar{display:block}.cpms-attendance-legend{margin-top:12px;display:inline-flex}.cpms-attendance-header{align-items:flex-start;flex-direction:column}.cpms-attendance-actions{justify-content:flex-start}}
+@media (max-width:900px){.cpms-attendance-time-grid{grid-template-columns:1fr}.cpms-attendance-modal-shell{padding:12px}}
 </style>
 
 <div class='cpms-attendance-dashboard'>
@@ -557,7 +604,7 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
     </div>
 
     <div class='cpms-attendance-tabs'>
-        <a class='cpms-attendance-tab <?php echo $tab==='monthly'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month)); ?>'><?php echo h(attendance_text('%EC%9B%94%EA%B0%84%20%ED%98%84%ED%99%A9')); ?></a>
+        <a class='cpms-attendance-tab <?php echo $tab==='monthly'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month) . '&sort=' . urlencode($sort)); ?>'><?php echo h(attendance_text('%EC%9B%94%EA%B0%84%20%ED%98%84%ED%99%A9')); ?></a>
         <a class='cpms-attendance-tab <?php echo $tab==='requests'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests'); ?>'><?php echo h(attendance_text('%EC%9A%94%EC%B2%AD%20%EA%B4%80%EB%A6%AC')); ?></a>
         <a class='cpms-attendance-tab <?php echo $tab==='daily'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=daily'); ?>'><?php echo h(attendance_text('%EC%9D%BC%EC%9D%BC%20%ED%98%84%ED%99%A9')); ?></a>
         <a class='cpms-attendance-tab <?php echo $tab==='weekly'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=weekly'); ?>'><?php echo h(attendance_text('%EC%A3%BC%EA%B0%84%20%ED%98%84%ED%99%A9')); ?></a>
@@ -577,7 +624,9 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
                         <input type='hidden' name='filter' value='<?php echo h($quickFilter); ?>'>
                         <input type='month' name='month' value='<?php echo h($month); ?>' class='cpms-attendance-select' onchange='this.form.submit()'>
                         <select name='sort' class='cpms-attendance-select' onchange='this.form.submit()'>
-                            <option value='name' <?php echo $sort === 'name' ? 'selected' : ''; ?>><?php echo h(attendance_text('%EC%A0%95%EB%A0%AC%20%EC%9D%B4%EB%A6%84')); ?></option>
+                            <option value='department' <?php echo $sort === 'department' ? 'selected' : ''; ?>><?php echo h(attendance_text('%EB%B6%80%EC%84%9C%EB%B3%84')); ?></option>
+                            <option value='name' <?php echo $sort === 'name' ? 'selected' : ''; ?>><?php echo h(attendance_text('%EC%9D%B4%EB%A6%84%EC%88%9C')); ?></option>
+                            <option value='position' <?php echo $sort === 'position' ? 'selected' : ''; ?>><?php echo h(attendance_text('%EC%A7%81%EA%B8%89%EB%B3%84')); ?></option>
                         </select>
                     </form>
                     <div class='cpms-attendance-quick'>
@@ -661,8 +710,7 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
                                 <td class='cpms-attendance-emp-cell'>
                                     <div class='cpms-attendance-emp-card'>
                                         <div class='cpms-attendance-avatar'>
-                                            <?php if($photoPath !== ''): ?><img src='<?php echo h($photoPath); ?>' alt='' onerror='this.style.display="none";'><?php endif; ?>
-                                            <span><?php echo h($initial !== '' ? $initial : '?'); ?></span>
+                                            <?php if($photoPath !== ''): ?><img src='<?php echo h($photoPath); ?>' alt=''><?php else: ?><span><?php echo h($initial !== '' ? $initial : '?'); ?></span><?php endif; ?>
                                         </div>
                                         <div>
                                             <div class='cpms-attendance-code'><?php echo h(attendance_monthly_employee_code(isset($employee['id']) ? (int)$employee['id'] : 0)); ?></div>
@@ -681,8 +729,19 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
                                         $dateKey = isset($dateInfo['date']) ? $dateInfo['date'] : '';
                                         $cell = (isset($monthlyRow['cells']) && isset($monthlyRow['cells'][$dateKey])) ? $monthlyRow['cells'][$dateKey] : array('status'=>'none','label'=>'-','check_in'=>'','check_out'=>'','alert'=>false);
                                         $statusClass = isset($cell['status']) ? (string)$cell['status'] : 'none';
+                                        $cellEmployeeId = isset($employee['id']) ? (int)$employee['id'] : 0;
+                                        $cellCheckIn = isset($cell['check_in']) ? (string)$cell['check_in'] : '';
+                                        $cellCheckOut = isset($cell['check_out']) ? (string)$cell['check_out'] : '';
                                     ?>
-                                    <td class='cpms-attendance-day-cell status-<?php echo h($statusClass); ?>'>
+                                    <td class='cpms-attendance-day-cell status-<?php echo h($statusClass); ?><?php echo $canEditAttendanceCells ? ' is-editable' : ''; ?>'
+                                        <?php if($canEditAttendanceCells): ?>
+                                            data-attendance-cell-edit='1'
+                                            data-employee-id='<?php echo (int)$cellEmployeeId; ?>'
+                                            data-employee-name='<?php echo h($employeeName); ?>'
+                                            data-work-date='<?php echo h($dateKey); ?>'
+                                            data-check-in='<?php echo h($cellCheckIn); ?>'
+                                            data-check-out='<?php echo h($cellCheckOut); ?>'
+                                        <?php endif; ?>>
                                         <?php if($statusClass === 'none'): ?>
                                             <div class='cpms-attendance-empty'>-</div>
                                         <?php else: ?>
@@ -707,6 +766,187 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
                     </tbody>
                 </table>
             </div>
+            <?php if($canEditAttendanceCells): ?>
+                <div class='cpms-attendance-modal' id='attendanceCellEditModal' aria-hidden='true'>
+                    <div class='cpms-attendance-modal-backdrop' data-attendance-modal-close='1'></div>
+                    <div class='cpms-attendance-modal-shell'>
+                        <div class='cpms-attendance-modal-card'>
+                            <form method='post' action='?r=management/attendance_record_save' id='attendanceCellEditForm'>
+                                <input type='hidden' name='_csrf' value='<?php echo h(csrf_token()); ?>'>
+                                <input type='hidden' name='employee_id' id='attendanceEditEmployeeId' value=''>
+                                <input type='hidden' name='work_date' id='attendanceEditWorkDate' value=''>
+                                <input type='hidden' name='check_in_time' id='attendanceEditCheckIn' value=''>
+                                <input type='hidden' name='check_out_time' id='attendanceEditCheckOut' value=''>
+                                <input type='hidden' name='return_url' value='<?php echo h($monthlyReturnUrl); ?>'>
+                                <div class='cpms-attendance-modal-head'>
+                                    <div>
+                                        <div class='cpms-attendance-modal-title'><?php echo h(attendance_text('%EA%B7%BC%ED%83%9C%20%EC%8B%9C%EA%B0%84%20%EC%88%98%EC%A0%95')); ?></div>
+                                        <div class='cpms-attendance-modal-sub' id='attendanceEditSub'></div>
+                                    </div>
+                                    <button type='button' class='cpms-attendance-close' data-attendance-modal-close='1'>x</button>
+                                </div>
+                                <div class='cpms-attendance-time-grid'>
+                                    <?php
+                                        $attendanceEditFields = array(
+                                            array('key' => 'check_in', 'label' => attendance_text('%EC%B6%9C%EA%B7%BC%EC%8B%9C%EA%B0%84'), 'preview' => 'attendanceEditCheckInPreview'),
+                                            array('key' => 'check_out', 'label' => attendance_text('%ED%87%B4%EA%B7%BC%EC%8B%9C%EA%B0%84'), 'preview' => 'attendanceEditCheckOutPreview')
+                                        );
+                                        $attendanceMinutes = array('00','05','10','15','20','25','30','35','40','45','50','55');
+                                    ?>
+                                    <?php foreach($attendanceEditFields as $timeField): ?>
+                                        <div class='cpms-attendance-time-box'>
+                                            <div class='cpms-attendance-time-label'><?php echo h($timeField['label']); ?></div>
+                                            <div class='cpms-attendance-time-preview' id='<?php echo h($timeField['preview']); ?>'>--:--</div>
+                                            <?php if($timeField['key'] === 'check_out'): ?>
+                                                <div class='cpms-attendance-picker-row'>
+                                                    <button type='button' class='cpms-attendance-picker-btn is-muted' data-time-clear='check_out'><?php echo h(attendance_text('%ED%87%B4%EA%B7%BC%20%EC%97%86%EC%9D%8C')); ?></button>
+                                                </div>
+                                            <?php endif; ?>
+                                            <div class='cpms-attendance-picker-row'>
+                                                <button type='button' class='cpms-attendance-picker-btn' data-time-field='<?php echo h($timeField['key']); ?>' data-time-kind='period' data-time-value='AM'><?php echo h(attendance_text('%EC%98%A4%EC%A0%84')); ?></button>
+                                                <button type='button' class='cpms-attendance-picker-btn' data-time-field='<?php echo h($timeField['key']); ?>' data-time-kind='period' data-time-value='PM'><?php echo h(attendance_text('%EC%98%A4%ED%9B%84')); ?></button>
+                                            </div>
+                                            <div class='cpms-attendance-picker-row'>
+                                                <?php for($hourNo = 1; $hourNo <= 12; $hourNo++): ?>
+                                                    <button type='button' class='cpms-attendance-picker-btn' data-time-field='<?php echo h($timeField['key']); ?>' data-time-kind='hour' data-time-value='<?php echo (int)$hourNo; ?>'><?php echo (int)$hourNo; ?></button>
+                                                <?php endfor; ?>
+                                            </div>
+                                            <div class='cpms-attendance-picker-row'>
+                                                <?php foreach($attendanceMinutes as $minuteValue): ?>
+                                                    <button type='button' class='cpms-attendance-picker-btn' data-time-field='<?php echo h($timeField['key']); ?>' data-time-kind='minute' data-time-value='<?php echo h($minuteValue); ?>'><?php echo h($minuteValue); ?></button>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                                <div class='cpms-attendance-modal-actions'>
+                                    <button type='button' class='cpms-attendance-cancel' data-attendance-modal-close='1'><?php echo h(attendance_text('%EB%8B%AB%EA%B8%B0')); ?></button>
+                                    <button type='submit' class='cpms-attendance-save'><?php echo h(attendance_text('%EC%A0%80%EC%9E%A5')); ?></button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                (function(){
+                    var modal = document.getElementById('attendanceCellEditModal');
+                    var form = document.getElementById('attendanceCellEditForm');
+                    if (!modal || !form) return;
+                    var employeeInput = document.getElementById('attendanceEditEmployeeId');
+                    var dateInput = document.getElementById('attendanceEditWorkDate');
+                    var checkInInput = document.getElementById('attendanceEditCheckIn');
+                    var checkOutInput = document.getElementById('attendanceEditCheckOut');
+                    var sub = document.getElementById('attendanceEditSub');
+                    var preview = {
+                        check_in: document.getElementById('attendanceEditCheckInPreview'),
+                        check_out: document.getElementById('attendanceEditCheckOutPreview')
+                    };
+                    var state = {
+                        check_in: { period: 'AM', hour: 9, minute: '00', disabled: false },
+                        check_out: { period: 'PM', hour: 6, minute: '00', disabled: false }
+                    };
+                    function pad(value) {
+                        value = String(value);
+                        return value.length < 2 ? '0' + value : value;
+                    }
+                    function parseTime(value, fallbackPeriod, fallbackHour) {
+                        var match = /^(\d{2}):(\d{2})$/.exec(value || '');
+                        if (!match) return { period: fallbackPeriod, hour: fallbackHour, minute: '00', disabled: false };
+                        var hour24 = parseInt(match[1], 10);
+                        var minute = match[2];
+                        var period = hour24 >= 12 ? 'PM' : 'AM';
+                        var hour12 = hour24 % 12;
+                        if (hour12 === 0) hour12 = 12;
+                        return { period: period, hour: hour12, minute: minute, disabled: false };
+                    }
+                    function buildTime(field) {
+                        if (state[field].disabled) return '';
+                        var hour = parseInt(state[field].hour, 10);
+                        if (state[field].period === 'PM' && hour < 12) hour += 12;
+                        if (state[field].period === 'AM' && hour === 12) hour = 0;
+                        return pad(hour) + ':' + state[field].minute;
+                    }
+                    function eachButton(field, kind, callback) {
+                        var buttons = modal.querySelectorAll('[data-time-field="' + field + '"][data-time-kind="' + kind + '"]');
+                        for (var i = 0; i < buttons.length; i++) callback(buttons[i]);
+                    }
+                    function renderField(field) {
+                        var current = buildTime(field);
+                        if (field === 'check_in') checkInInput.value = current;
+                        if (field === 'check_out') checkOutInput.value = current;
+                        if (preview[field]) preview[field].textContent = current === '' ? '--:--' : current;
+                        eachButton(field, 'period', function(button){
+                            button.className = button.className.replace(/\s?is-active/g, '');
+                            if (!state[field].disabled && button.getAttribute('data-time-value') === state[field].period) button.className += ' is-active';
+                        });
+                        eachButton(field, 'hour', function(button){
+                            button.className = button.className.replace(/\s?is-active/g, '');
+                            if (!state[field].disabled && parseInt(button.getAttribute('data-time-value'), 10) === parseInt(state[field].hour, 10)) button.className += ' is-active';
+                        });
+                        eachButton(field, 'minute', function(button){
+                            button.className = button.className.replace(/\s?is-active/g, '');
+                            if (!state[field].disabled && button.getAttribute('data-time-value') === state[field].minute) button.className += ' is-active';
+                        });
+                    }
+                    function renderAll() {
+                        renderField('check_in');
+                        renderField('check_out');
+                    }
+                    function closestCell(target) {
+                        while (target && target !== document) {
+                            if (target.getAttribute && target.getAttribute('data-attendance-cell-edit') === '1') return target;
+                            target = target.parentNode;
+                        }
+                        return null;
+                    }
+                    function closeModal() {
+                        modal.className = modal.className.replace(/\s?is-open/g, '');
+                        modal.setAttribute('aria-hidden', 'true');
+                    }
+                    function openModal(cell) {
+                        employeeInput.value = cell.getAttribute('data-employee-id') || '';
+                        dateInput.value = cell.getAttribute('data-work-date') || '';
+                        state.check_in = parseTime(cell.getAttribute('data-check-in') || '', 'AM', 9);
+                        state.check_out = parseTime(cell.getAttribute('data-check-out') || '', 'PM', 6);
+                        if ((cell.getAttribute('data-check-in') || '') === '') state.check_in.disabled = true;
+                        if ((cell.getAttribute('data-check-out') || '') === '') state.check_out.disabled = true;
+                        if (sub) sub.textContent = (cell.getAttribute('data-employee-name') || '-') + ' · ' + (cell.getAttribute('data-work-date') || '');
+                        renderAll();
+                        modal.className += ' is-open';
+                        modal.setAttribute('aria-hidden', 'false');
+                    }
+                    document.addEventListener('click', function(event){
+                        var closeTarget = event.target.getAttribute ? event.target.getAttribute('data-attendance-modal-close') : '';
+                        if (closeTarget === '1') {
+                            closeModal();
+                            return;
+                        }
+                        var clearField = event.target.getAttribute ? event.target.getAttribute('data-time-clear') : '';
+                        if (clearField === 'check_out') {
+                            state.check_out.disabled = true;
+                            renderField('check_out');
+                            return;
+                        }
+                        var field = event.target.getAttribute ? event.target.getAttribute('data-time-field') : '';
+                        var kind = event.target.getAttribute ? event.target.getAttribute('data-time-kind') : '';
+                        var value = event.target.getAttribute ? event.target.getAttribute('data-time-value') : '';
+                        if (field && kind && state[field]) {
+                            state[field].disabled = false;
+                            if (kind === 'period') state[field].period = value;
+                            if (kind === 'hour') state[field].hour = parseInt(value, 10);
+                            if (kind === 'minute') state[field].minute = value;
+                            renderField(field);
+                            return;
+                        }
+                        var cell = closestCell(event.target);
+                        if (cell) openModal(cell);
+                    });
+                    document.addEventListener('keydown', function(event){
+                        if (event.keyCode === 27) closeModal();
+                    });
+                })();
+                </script>
+            <?php endif; ?>
         </div>
     <?php endif; ?>
 
