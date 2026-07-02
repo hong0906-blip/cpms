@@ -379,6 +379,27 @@ if ($pdo) {
         $pendingEquipmentGongsuOverrides = array();
     }
 }
+
+$executiveTabKeys = array(
+    'main' => true,
+    'department' => true,
+    'approval' => true,
+    'siteIssues' => true,
+);
+$activeExecutiveTab = isset($_GET['exec_tab']) ? (string)$_GET['exec_tab'] : '';
+if ($activeExecutiveTab === '' && isset($_GET['task_department'])) {
+    $activeExecutiveTab = 'department';
+}
+if ($activeExecutiveTab === '') {
+    $activeExecutiveTab = 'main';
+}
+if ($activeExecutiveTab === 'siteissues' || $activeExecutiveTab === 'site_issues') {
+    $activeExecutiveTab = 'siteIssues';
+}
+if (!isset($executiveTabKeys[$activeExecutiveTab])) {
+    $activeExecutiveTab = 'main';
+}
+$executiveTabBaseUrl = base_url() . '/?r=dashboard_executive';
 ?>
 
 <div class="bg-gradient-to-r from-indigo-600 to-purple-500 rounded-3xl p-8 text-white shadow-xl shadow-indigo-500/20 mb-8">
@@ -413,13 +434,14 @@ if ($pdo) {
 </style>
 
 <div class="mb-6 flex flex-wrap items-center gap-2" role="tablist" aria-label="임원 대시보드 탭">
-    <button type="button" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="main" aria-selected="true">메인</button>
-    <button type="button" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="department" aria-selected="false">부서별 업무현황</button>
-    <button type="button" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="approval" aria-selected="false">승인대기</button>
-    <button type="button" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="siteIssues" aria-selected="false">현장별 이슈</button>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=main'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="main" aria-selected="<?php echo ($activeExecutiveTab === 'main') ? 'true' : 'false'; ?>">메인</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=department'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="department" aria-selected="<?php echo ($activeExecutiveTab === 'department') ? 'true' : 'false'; ?>">부서별 업무현황</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=approval'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="approval" aria-selected="<?php echo ($activeExecutiveTab === 'approval') ? 'true' : 'false'; ?>">승인대기</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=siteIssues'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="siteIssues" aria-selected="<?php echo ($activeExecutiveTab === 'siteIssues') ? 'true' : 'false'; ?>">현장별 이슈</a>
 </div>
 
 <div data-executive-tab-panels>
+<?php if ($activeExecutiveTab === 'main'): ?>
 <section data-executive-tab-panel="main">
 
 <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
@@ -841,7 +863,8 @@ if ($pdo) {
 
 </section>
 
-<section data-executive-tab-panel="department" class="hidden" style="display:none;">
+<?php elseif ($activeExecutiveTab === 'department'): ?>
+<section data-executive-tab-panel="department">
 <?php cpms_render_executive_task_dashboard($pdo); ?>
 
 <div class="mt-8">
@@ -849,7 +872,8 @@ if ($pdo) {
 </div>
 </section>
 
-<section data-executive-tab-panel="approval" class="hidden" style="display:none;">
+<?php elseif ($activeExecutiveTab === 'approval'): ?>
+<section data-executive-tab-panel="approval">
 <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
     <div class="flex items-start justify-between gap-4 mb-4">
@@ -940,7 +964,8 @@ if ($pdo) {
 </div>
 </section>
 
-<section data-executive-tab-panel="siteIssues" class="hidden" style="display:none;">
+<?php elseif ($activeExecutiveTab === 'siteIssues'): ?>
+<section data-executive-tab-panel="siteIssues">
 <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
     <div class="flex items-center justify-between mb-4">
@@ -1051,62 +1076,5 @@ if ($pdo) {
 </div>
 </div>
 </section>
+<?php endif; ?>
 </div>
-
-<script>
-(function(){
-    var storageKey = 'cpms_executive_dashboard_tab';
-    var buttons = document.querySelectorAll('[data-executive-tab]');
-    var panels = document.querySelectorAll('[data-executive-tab-panel]');
-    var valid = {};
-    for (var i = 0; i < buttons.length; i++) {
-        valid[buttons[i].getAttribute('data-executive-tab')] = true;
-    }
-
-    function removeClass(el, cls) {
-        if (!el) return;
-        el.className = (' ' + el.className + ' ').replace(' ' + cls + ' ', ' ').replace(/^\s+|\s+$/g, '');
-    }
-
-    function addClass(el, cls) {
-        if (!el) return;
-        removeClass(el, cls);
-        el.className = (el.className ? el.className + ' ' : '') + cls;
-    }
-
-    function activate(tabKey, persist) {
-        if (!valid[tabKey]) tabKey = 'main';
-        for (var i = 0; i < buttons.length; i++) {
-            var isActiveButton = buttons[i].getAttribute('data-executive-tab') === tabKey;
-            buttons[i].setAttribute('aria-selected', isActiveButton ? 'true' : 'false');
-        }
-        for (var j = 0; j < panels.length; j++) {
-            var isActivePanel = panels[j].getAttribute('data-executive-tab-panel') === tabKey;
-            if (isActivePanel) {
-                removeClass(panels[j], 'hidden');
-                panels[j].style.display = '';
-            } else {
-                addClass(panels[j], 'hidden');
-                panels[j].style.display = 'none';
-            }
-        }
-        if (persist) {
-            try { localStorage.setItem(storageKey, tabKey); } catch (e) {}
-        }
-    }
-
-    for (var k = 0; k < buttons.length; k++) {
-        buttons[k].onclick = function(){
-            activate(this.getAttribute('data-executive-tab'), true);
-            return false;
-        };
-    }
-
-    var initial = 'main';
-    try {
-        var saved = localStorage.getItem(storageKey);
-        if (valid[saved]) initial = saved;
-    } catch (e) {}
-    activate(initial, false);
-})();
-</script>

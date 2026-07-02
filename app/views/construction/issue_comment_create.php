@@ -41,7 +41,7 @@ function cpms_issue_comment_ensure_columns($pdo)
 
 function cpms_issue_comment_redirect_url($redirectKey, $projectId)
 {
-    if ($redirectKey === 'dashboard_executive') return '?r=dashboard_executive';
+    if ($redirectKey === 'dashboard_executive') return '?r=dashboard_executive&exec_tab=siteIssues';
     if ($redirectKey === 'construction') {
         if ((int)$projectId > 0) return '?r=공사&pid=' . (int)$projectId . '&tab=issues';
         return '?r=공사&tab=issues';

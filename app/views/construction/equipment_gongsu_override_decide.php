@@ -7,7 +7,7 @@ use App\Core\Db;
 
 function cpms_equipment_gongsu_decide_redirect($type, $message) {
     flash_set($type, $message);
-    header('Location: ' . base_url() . '/?r=dashboard_executive');
+    header('Location: ' . base_url() . '/?r=dashboard_executive&exec_tab=approval');
     exit;
 }
 

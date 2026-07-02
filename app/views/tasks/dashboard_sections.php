@@ -11,6 +11,49 @@ function cpms_render_task_action_link($item)
     return '<a href="' . h(isset($item['action_url']) ? $item['action_url'] : '#') . '" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold text-slate-700">상세 이동</a>';
 }}
 
+if (!function_exists('cpms_executive_task_due_text')) {
+function cpms_executive_task_due_text($item)
+{
+    $dueText = '-';
+    if (isset($item['due_date']) && trim((string)$item['due_date']) !== '') {
+        $dueText = (string)$item['due_date'];
+        if (isset($item['due_time']) && trim((string)$item['due_time']) !== '') {
+            $dueText .= ' ' . substr((string)$item['due_time'], 0, 5);
+        }
+    }
+    return $dueText;
+}}
+
+if (!function_exists('cpms_executive_task_detail_button')) {
+function cpms_executive_task_detail_button($item, $label)
+{
+    $label = trim((string)$label) !== '' ? (string)$label : '상세 보기';
+    if (isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1) {
+        return '<button type="button" data-exec-task-detail-open data-task-id="' . (int)$item['source_id'] . '" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">' . h($label) . '</button>';
+    }
+    $meta = array();
+    if (isset($item['requester_name']) && trim((string)$item['requester_name']) !== '') $meta[] = '요청자: ' . (string)$item['requester_name'];
+    if (isset($item['assignee_name']) && trim((string)$item['assignee_name']) !== '') $meta[] = '담당자: ' . (string)$item['assignee_name'];
+    $dueText = cpms_executive_task_due_text($item);
+    if ($dueText !== '-') $meta[] = '기한: ' . $dueText;
+    return '<button type="button" data-exec-generic-detail-open'
+        . ' data-title="' . h(isset($item['title']) ? $item['title'] : '-') . '"'
+        . ' data-type="' . h(cpms_tasks_type_label(isset($item['task_type']) ? $item['task_type'] : 'general')) . '"'
+        . ' data-status="' . h(isset($item['display_status']) ? $item['display_status'] : '-') . '"'
+        . ' data-meta="' . h(implode(' / ', $meta)) . '"'
+        . ' data-content="' . h(isset($item['content']) && trim((string)$item['content']) !== '' ? $item['content'] : '-') . '"'
+        . ' class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">' . h($label) . '</button>';
+}}
+
+if (!function_exists('cpms_executive_add_summary_item')) {
+function cpms_executive_add_summary_item(&$bucket, &$seen, $item)
+{
+    $key = (isset($item['source_type']) ? (string)$item['source_type'] : 'task') . ':' . (isset($item['source_id']) ? (int)$item['source_id'] : 0);
+    if (isset($seen[$key])) return;
+    $seen[$key] = true;
+    $bucket[count($bucket)] = $item;
+}}
+
 if (!function_exists('cpms_render_task_assignee_options')) {
 function cpms_render_task_assignee_options($employees, $currentLeaveIndex)
 {
@@ -1104,7 +1147,10 @@ function cpms_render_employee_task_dashboard($pdo)
                 if (taskDetailBody) taskDetailBody.innerHTML = '<div class="text-sm text-gray-500">업무 정보를 불러오는 중입니다.</div>';
                 if (detailModal) detailModal.classList.remove('hidden');
                 var xhr = new XMLHttpRequest();
-                xhr.open('GET', '?r=tasks/detail&id=' + encodeURIComponent(taskId) + '&modal=1', true);
+                var detailUrl = '?r=tasks/detail&id=' + encodeURIComponent(taskId) + '&modal=1';
+                if (detailButton.getAttribute('data-task-readonly') === '1') detailUrl += '&readonly=1';
+                detailUrl += '&return_url=' + encodeURIComponent(window.location.pathname + window.location.search);
+                xhr.open('GET', detailUrl, true);
                 xhr.onreadystatechange = function() {
                     if (xhr.readyState !== 4) return;
                     if (!taskDetailBody) return;
@@ -1155,26 +1201,150 @@ function cpms_render_executive_task_dashboard($pdo)
     $summaryData = cpms_task_feed_for_executive($pdo, array('department' => $selectedDepartment));
     $currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, cpms_tasks_today()) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
     $departmentOptions = array_merge(array('전체'), cpms_tasks_department_options());
+    $executiveSummaryCards = array(
+        'today' => array('label' => '오늘 할일', 'card_class' => 'bg-slate-50 border-slate-200 hover:border-slate-300', 'label_class' => 'text-slate-500', 'count_class' => 'text-slate-900', 'items' => array()),
+        'urgent' => array('label' => '긴급 요청', 'card_class' => 'bg-rose-50 border-rose-200 hover:border-rose-300', 'label_class' => 'text-rose-500', 'count_class' => 'text-rose-700', 'items' => array()),
+        'due_soon' => array('label' => '마감 임박', 'card_class' => 'bg-amber-50 border-amber-200 hover:border-amber-300', 'label_class' => 'text-amber-500', 'count_class' => 'text-amber-700', 'items' => array()),
+        'delayed' => array('label' => '지연 업무', 'card_class' => 'bg-red-50 border-red-200 hover:border-red-300', 'label_class' => 'text-red-500', 'count_class' => 'text-red-700', 'items' => array()),
+        'done' => array('label' => '완료', 'card_class' => 'bg-emerald-50 border-emerald-200 hover:border-emerald-300', 'label_class' => 'text-emerald-500', 'count_class' => 'text-emerald-700', 'items' => array()),
+        'approval_pending' => array('label' => '승인대기', 'card_class' => 'bg-blue-50 border-blue-200 hover:border-blue-300', 'label_class' => 'text-blue-500', 'count_class' => 'text-blue-700', 'items' => array())
+    );
+    $executiveSummarySeen = array();
+    foreach ($executiveSummaryCards as $summaryKey => $summaryCard) {
+        $executiveSummarySeen[$summaryKey] = array();
+    }
+    if (isset($summaryData['employees']) && is_array($summaryData['employees'])) {
+        foreach ($summaryData['employees'] as $employeeRow) {
+            $feed = isset($employeeRow['feed']) && is_array($employeeRow['feed']) ? $employeeRow['feed'] : array();
+            foreach ($feed as $item) {
+                if (cpms_task_feed_counts_as_today($item)) {
+                    cpms_executive_add_summary_item($executiveSummaryCards['today']['items'], $executiveSummarySeen['today'], $item);
+                }
+                if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1) {
+                    cpms_executive_add_summary_item($executiveSummaryCards['urgent']['items'], $executiveSummarySeen['urgent'], $item);
+                }
+                if (cpms_tasks_is_due_soon($item)) {
+                    cpms_executive_add_summary_item($executiveSummaryCards['due_soon']['items'], $executiveSummarySeen['due_soon'], $item);
+                }
+                if (cpms_tasks_is_delayed($item)) {
+                    cpms_executive_add_summary_item($executiveSummaryCards['delayed']['items'], $executiveSummarySeen['delayed'], $item);
+                }
+                if (isset($item['status']) && (string)$item['status'] === 'done') {
+                    cpms_executive_add_summary_item($executiveSummaryCards['done']['items'], $executiveSummarySeen['done'], $item);
+                }
+                $sourceType = isset($item['source_type']) ? (string)$item['source_type'] : '';
+                if (in_array($sourceType, array('approval', 'labor_gongsu', 'equipment_gongsu', 'attendance'), true)) {
+                    cpms_executive_add_summary_item($executiveSummaryCards['approval_pending']['items'], $executiveSummarySeen['approval_pending'], $item);
+                }
+            }
+        }
+    }
     ?>
     <div id="cpmsExecutiveTasksPanel" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div>
                 <h2 class="text-2xl font-extrabold text-gray-900">부서별 업무 현황</h2>
             </div>
-            <div class="flex flex-wrap gap-2">
-                <button type="button" id="cpmsExecutiveTasksToggle" class="px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-700 font-bold">숨기기 ▲</button>
-                <a href="?r=tasks/executive_summary" class="px-4 py-3 rounded-2xl bg-white border border-gray-200 text-gray-700 font-bold">요약 보기</a>
-            </div>
         </div>
 
         <div data-cpms-executive-task-body>
         <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mt-6">
-            <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200"><div class="text-xs text-slate-500 font-bold">오늘 할일</div><div class="mt-2 text-3xl font-extrabold text-slate-900"><?php echo (int)$summaryData['summary']['today']; ?></div></div>
-            <div class="p-4 rounded-2xl bg-rose-50 border border-rose-200"><div class="text-xs text-rose-500 font-bold">긴급 요청</div><div class="mt-2 text-3xl font-extrabold text-rose-700"><?php echo (int)$summaryData['summary']['urgent']; ?></div></div>
-            <div class="p-4 rounded-2xl bg-amber-50 border border-amber-200"><div class="text-xs text-amber-500 font-bold">마감 임박</div><div class="mt-2 text-3xl font-extrabold text-amber-700"><?php echo (int)$summaryData['summary']['due_soon']; ?></div></div>
-            <div class="p-4 rounded-2xl bg-red-50 border border-red-200"><div class="text-xs text-red-500 font-bold">지연 업무</div><div class="mt-2 text-3xl font-extrabold text-red-700"><?php echo (int)$summaryData['summary']['delayed']; ?></div></div>
-            <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-200"><div class="text-xs text-emerald-500 font-bold">완료</div><div class="mt-2 text-3xl font-extrabold text-emerald-700"><?php echo (int)$summaryData['summary']['done']; ?></div></div>
-            <div class="p-4 rounded-2xl bg-blue-50 border border-blue-200"><div class="text-xs text-blue-500 font-bold">승인대기</div><div class="mt-2 text-3xl font-extrabold text-blue-700"><?php echo (int)$summaryData['summary']['approval_pending']; ?></div></div>
+            <?php foreach ($executiveSummaryCards as $summaryKey => $summaryCard): ?>
+                <button type="button" data-exec-summary-open="<?php echo h($summaryKey); ?>" class="p-4 rounded-2xl border text-left transition shadow-sm <?php echo h($summaryCard['card_class']); ?>">
+                    <div class="text-xs font-bold <?php echo h($summaryCard['label_class']); ?>"><?php echo h($summaryCard['label']); ?></div>
+                    <div class="mt-2 text-3xl font-extrabold <?php echo h($summaryCard['count_class']); ?>"><?php echo count($summaryCard['items']); ?></div>
+                </button>
+            <?php endforeach; ?>
+        </div>
+
+        <?php foreach ($executiveSummaryCards as $summaryKey => $summaryCard): ?>
+            <div id="modal-execSummary-<?php echo h($summaryKey); ?>" class="fixed inset-0 z-50 hidden">
+                <div class="absolute inset-0 bg-black/40" data-exec-summary-close="<?php echo h($summaryKey); ?>"></div>
+                <div class="absolute inset-0 flex items-center justify-center p-4">
+                    <div class="w-full max-w-5xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
+                        <div class="flex items-center justify-between gap-4 px-6 py-5 border-b border-gray-100">
+                            <div>
+                                <div class="text-2xl font-extrabold text-gray-900"><?php echo h($summaryCard['label']); ?></div>
+                                <div class="text-sm text-gray-500 mt-1"><?php echo count($summaryCard['items']); ?>건</div>
+                            </div>
+                            <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50" data-exec-summary-close="<?php echo h($summaryKey); ?>">닫기</button>
+                        </div>
+                        <div class="p-5 overflow-y-auto max-h-[72vh]">
+                            <?php if (count($summaryCard['items']) === 0): ?>
+                                <div class="p-6 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500">표시할 업무가 없습니다.</div>
+                            <?php else: ?>
+                                <div class="space-y-3">
+                                    <?php foreach ($summaryCard['items'] as $item): ?>
+                                        <div class="p-4 rounded-2xl border border-gray-200 bg-slate-50">
+                                            <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                                                <div class="min-w-0">
+                                                    <div class="flex flex-wrap items-center gap-2 mb-2">
+                                                        <span class="cpms-chip px-3 py-1 rounded-full border text-xs font-bold bg-slate-100 text-slate-700 border-slate-200"><?php echo h(cpms_tasks_type_label(isset($item['task_type']) ? $item['task_type'] : 'general')); ?></span>
+                                                        <span class="cpms-chip px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending'))); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?></span>
+                                                        <?php if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1): ?><span class="cpms-chip px-3 py-1 rounded-full border text-xs font-bold bg-rose-50 text-rose-700 border-rose-200">긴급</span><?php endif; ?>
+                                                    </div>
+                                                    <div class="font-extrabold text-gray-900 break-words"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>
+                                                    <div class="text-sm text-gray-600 mt-1">
+                                                        요청자: <?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?>
+                                                        / 담당자: <?php echo h(isset($item['assignee_name']) ? $item['assignee_name'] : '-'); ?>
+                                                    </div>
+                                                    <div class="text-sm text-gray-500 mt-1">마감: <?php echo h(cpms_executive_task_due_text($item)); ?></div>
+                                                    <?php if (isset($item['content']) && trim((string)$item['content']) !== ''): ?>
+                                                        <div class="text-sm text-gray-700 mt-2 whitespace-pre-line"><?php echo h(cpms_tasks_text_excerpt($item['content'], 120)); ?></div>
+                                                    <?php endif; ?>
+                                                </div>
+                                                <div class="shrink-0">
+                                                    <?php echo cpms_executive_task_detail_button($item, '상세 보기'); ?>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        <?php endforeach; ?>
+
+        <div id="modal-execGenericDetail" class="fixed inset-0 z-50 hidden">
+            <div class="absolute inset-0 bg-black/40" data-exec-generic-detail-close></div>
+            <div class="absolute inset-0 flex items-center justify-center p-4">
+                <div class="w-full max-w-3xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
+                    <div class="flex items-center justify-between gap-4 px-6 py-5 border-b border-gray-100">
+                        <div>
+                            <div class="text-2xl font-extrabold text-gray-900" id="execGenericDetailTitle">상세 보기</div>
+                            <div class="text-sm text-gray-500 mt-1" id="execGenericDetailMeta"></div>
+                        </div>
+                        <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50" data-exec-generic-detail-close>닫기</button>
+                    </div>
+                    <div class="p-6 overflow-y-auto max-h-[72vh] space-y-4">
+                        <div class="flex flex-wrap items-center gap-2">
+                            <span class="px-3 py-1 rounded-full border text-xs font-bold bg-slate-100 text-slate-700 border-slate-200" id="execGenericDetailType"></span>
+                            <span class="px-3 py-1 rounded-full border text-xs font-bold bg-blue-50 text-blue-700 border-blue-100" id="execGenericDetailStatus"></span>
+                        </div>
+                        <div class="rounded-2xl border border-gray-200 bg-slate-50 p-4">
+                            <div class="text-xs font-bold text-gray-500">내용</div>
+                            <div class="mt-2 text-sm text-gray-800 whitespace-pre-line" id="execGenericDetailContent"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="modal-execTaskDetail" class="fixed inset-0 z-50 hidden">
+            <div class="absolute inset-0 bg-black/40" data-exec-task-detail-close></div>
+            <div class="absolute inset-0 flex items-center justify-center p-4">
+                <div class="w-full max-w-4xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
+                    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                        <div class="text-2xl font-extrabold text-gray-900">업무 상세</div>
+                        <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50" data-exec-task-detail-close>닫기</button>
+                    </div>
+                    <div id="execTaskDetailBody" class="p-6 overflow-y-auto max-h-[74vh]">
+                        <div class="text-sm text-gray-500">업무 정보를 불러오는 중입니다.</div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="mt-6">
@@ -1184,7 +1354,7 @@ function cpms_render_executive_task_dashboard($pdo)
                     <?php
                     $isSelected = ($selectedDepartment === $departmentName);
                     $departmentLabel = (($departmentName === '기타') ? '임원' : $departmentName);
-                    $url = '?r=대시보드&dv=executive';
+                    $url = '?r=dashboard_executive&exec_tab=department';
                     if ($departmentName !== '전체') $url .= '&task_department=' . urlencode($departmentName);
                     ?>
                     <a href="<?php echo h($url); ?>" class="px-4 py-2 rounded-2xl font-bold <?php echo $isSelected ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-700'; ?>">
@@ -1217,10 +1387,11 @@ function cpms_render_executive_task_dashboard($pdo)
             </div>
         </div>
 
-        <div class="mt-8">
-            <h3 class="text-xl font-extrabold text-gray-900 mb-4">직원별 현황</h3>
-            <div class="space-y-3" data-cpms-executive-employee-list>
-                <?php foreach ($summaryData['employees'] as $employeeRow): ?>
+        <?php if ($selectedDepartment !== '전체'): ?>
+            <div class="mt-8">
+                <h3 class="text-xl font-extrabold text-gray-900 mb-4">직원별 현황</h3>
+                <div class="space-y-3" data-cpms-executive-employee-list>
+                    <?php foreach ($summaryData['employees'] as $employeeRow): ?>
                     <?php
                     $employee = isset($employeeRow['employee']) ? $employeeRow['employee'] : array();
                     $metrics = isset($employeeRow['metrics']) ? $employeeRow['metrics'] : array();
@@ -1283,11 +1454,7 @@ function cpms_render_executive_task_dashboard($pdo)
                                                     <div class="text-sm text-gray-500 mt-1">마감: <?php echo h(isset($item['due_date']) && $item['due_date'] !== '' ? $item['due_date'] . (isset($item['due_time']) && $item['due_time'] !== '' ? ' ' . substr((string)$item['due_time'], 0, 5) : '') : '-'); ?></div>
                                                 </div>
                                                 <div>
-                                                    <?php if (isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
-                                                        <a href="?r=tasks/detail&id=<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold text-slate-700">상세 이동</a>
-                                                    <?php else: ?>
-                                                        <a href="<?php echo h(isset($item['action_url']) ? $item['action_url'] : '#'); ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-sm font-bold text-slate-700">상세 이동</a>
-                                                    <?php endif; ?>
+                                                    <?php echo cpms_executive_task_detail_button($item, '상세 보기'); ?>
                                                 </div>
                                             </div>
                                         </div>
@@ -1296,37 +1463,13 @@ function cpms_render_executive_task_dashboard($pdo)
                             <?php endif; ?>
                         </div>
                     </div>
-                <?php endforeach; ?>
+                    <?php endforeach; ?>
+                </div>
             </div>
-        </div>
+        <?php endif; ?>
         </div>
     </div>
     <script>
-    (function(){
-        var key = 'cpms_executive_tasks_collapsed';
-        var toggle = document.getElementById('cpmsExecutiveTasksToggle');
-        var body = document.querySelector('[data-cpms-executive-task-body]');
-        if (!toggle || !body) return;
-        function readState() {
-            try { return window.localStorage && localStorage.getItem(key) === '1'; } catch (e) { return false; }
-        }
-        function saveState(collapsed) {
-            try { if (window.localStorage) localStorage.setItem(key, collapsed ? '1' : '0'); } catch (e) {}
-        }
-        function applyState(collapsed) {
-            if (collapsed) body.classList.add('hidden');
-            else body.classList.remove('hidden');
-            toggle.textContent = collapsed ? '보기 ▼' : '숨기기 ▲';
-            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        }
-        var collapsed = readState();
-        applyState(collapsed);
-        toggle.addEventListener('click', function(){
-            collapsed = !collapsed;
-            applyState(collapsed);
-            saveState(collapsed);
-        });
-    })();
     (function(){
         var toggles = document.querySelectorAll('[data-cpms-employee-toggle]');
         var closeButtons = document.querySelectorAll('[data-cpms-employee-close]');
@@ -1356,6 +1499,99 @@ function cpms_render_executive_task_dashboard($pdo)
                 if (panel) panel.classList.add('hidden');
             });
         }
+    })();
+    (function(){
+        function openSummary(key) {
+            var modal = document.getElementById('modal-execSummary-' + key);
+            if (modal) modal.classList.remove('hidden');
+        }
+        function closeSummary(key) {
+            var modal = document.getElementById('modal-execSummary-' + key);
+            if (modal) modal.classList.add('hidden');
+        }
+        function setText(id, value) {
+            var node = document.getElementById(id);
+            if (node) node.textContent = value || '-';
+        }
+        function openGenericDetail(button) {
+            setText('execGenericDetailTitle', button.getAttribute('data-title'));
+            setText('execGenericDetailMeta', button.getAttribute('data-meta'));
+            setText('execGenericDetailType', button.getAttribute('data-type'));
+            setText('execGenericDetailStatus', button.getAttribute('data-status'));
+            setText('execGenericDetailContent', button.getAttribute('data-content'));
+            var modal = document.getElementById('modal-execGenericDetail');
+            if (modal) modal.classList.remove('hidden');
+        }
+        function closeGenericDetail() {
+            var modal = document.getElementById('modal-execGenericDetail');
+            if (modal) modal.classList.add('hidden');
+        }
+        function openTaskDetail(taskId) {
+            var body = document.getElementById('execTaskDetailBody');
+            var modal = document.getElementById('modal-execTaskDetail');
+            if (body) body.innerHTML = '<div class="text-sm text-gray-500">업무 정보를 불러오는 중입니다.</div>';
+            if (modal) modal.classList.remove('hidden');
+            var xhr = new XMLHttpRequest();
+            var detailUrl = '?r=tasks/detail&id=' + encodeURIComponent(taskId) + '&modal=1&readonly=1';
+            detailUrl += '&return_url=' + encodeURIComponent(window.location.pathname + window.location.search);
+            xhr.open('GET', detailUrl, true);
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState !== 4) return;
+                if (!body) return;
+                if (xhr.status >= 200 && xhr.status < 300) body.innerHTML = xhr.responseText;
+                else body.innerHTML = '<div class="text-sm text-red-600">업무 정보를 불러오지 못했습니다.</div>';
+                if (window.lucide) { try { lucide.createIcons(); } catch (err) {} }
+            };
+            xhr.send(null);
+        }
+        function closeTaskDetail() {
+            var modal = document.getElementById('modal-execTaskDetail');
+            if (modal) modal.classList.add('hidden');
+        }
+
+        document.addEventListener('click', function(e){
+            var openButton = e.target && e.target.closest ? e.target.closest('[data-exec-summary-open]') : null;
+            if (openButton) {
+                e.preventDefault();
+                openSummary(openButton.getAttribute('data-exec-summary-open'));
+                return;
+            }
+
+            var closeButton = e.target && e.target.closest ? e.target.closest('[data-exec-summary-close]') : null;
+            if (closeButton) {
+                e.preventDefault();
+                closeSummary(closeButton.getAttribute('data-exec-summary-close'));
+                return;
+            }
+
+            var detailButton = e.target && e.target.closest ? e.target.closest('[data-exec-generic-detail-open]') : null;
+            if (detailButton) {
+                e.preventDefault();
+                openGenericDetail(detailButton);
+                return;
+            }
+
+            var taskDetailButton = e.target && e.target.closest ? e.target.closest('[data-exec-task-detail-open]') : null;
+            if (taskDetailButton) {
+                e.preventDefault();
+                openTaskDetail(taskDetailButton.getAttribute('data-task-id'));
+                return;
+            }
+
+            var detailCloseButton = e.target && e.target.closest ? e.target.closest('[data-exec-generic-detail-close]') : null;
+            if (detailCloseButton) {
+                e.preventDefault();
+                closeGenericDetail();
+                return;
+            }
+
+            var taskDetailCloseButton = e.target && e.target.closest ? e.target.closest('[data-exec-task-detail-close]') : null;
+            if (taskDetailCloseButton) {
+                e.preventDefault();
+                closeTaskDetail();
+                return;
+            }
+        });
     })();
     </script>
     <?php

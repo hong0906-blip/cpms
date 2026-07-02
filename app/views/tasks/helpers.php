@@ -403,6 +403,7 @@ function cpms_tasks_current_employee($pdo)
         'department' => cpms_tasks_normalize_department((string)Auth::userDepartment()),
         'position' => (string)Auth::userPosition(),
         'role' => (string)Auth::userRole(),
+        'photo_path' => '',
     );
     if (!$pdo || $result['email'] === '') return $result;
 
@@ -410,6 +411,7 @@ function cpms_tasks_current_employee($pdo)
     $columns[count($columns)] = cpms_tasks_column_exists($pdo, 'employees', 'department') ? 'department' : "'' AS department";
     $columns[count($columns)] = cpms_tasks_column_exists($pdo, 'employees', 'position') ? 'position' : "'' AS position";
     $columns[count($columns)] = cpms_tasks_column_exists($pdo, 'employees', 'role') ? 'role' : "'employee' AS role";
+    $columns[count($columns)] = cpms_tasks_column_exists($pdo, 'employees', 'photo_path') ? 'photo_path' : "'' AS photo_path";
     try {
         $st = $pdo->prepare("SELECT " . implode(', ', $columns) . " FROM employees WHERE LOWER(email) = LOWER(:email) LIMIT 1");
         $st->execute(array(':email' => $result['email']));
@@ -420,6 +422,7 @@ function cpms_tasks_current_employee($pdo)
             $result['department'] = cpms_tasks_normalize_department(isset($row['department']) ? $row['department'] : $result['department']);
             $result['position'] = isset($row['position']) ? (string)$row['position'] : $result['position'];
             $result['role'] = isset($row['role']) ? (string)$row['role'] : $result['role'];
+            $result['photo_path'] = isset($row['photo_path']) ? (string)$row['photo_path'] : '';
         }
     } catch (Exception $e) {
     }
@@ -503,8 +506,9 @@ function cpms_tasks_find_employee_by_id($pdo, $employeeId)
     if (!$pdo || $employeeId <= 0) return null;
     $departmentColumn = cpms_tasks_column_exists($pdo, 'employees', 'department') ? 'department' : "'' AS department";
     $positionColumn = cpms_tasks_column_exists($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+    $photoColumn = cpms_tasks_column_exists($pdo, 'employees', 'photo_path') ? 'photo_path' : "'' AS photo_path";
     try {
-        $st = $pdo->prepare("SELECT id, name, email, " . $departmentColumn . ", " . $positionColumn . " FROM employees WHERE id = :id LIMIT 1");
+        $st = $pdo->prepare("SELECT id, name, email, " . $departmentColumn . ", " . $positionColumn . ", " . $photoColumn . " FROM employees WHERE id = :id LIMIT 1");
         $st->execute(array(':id' => $employeeId));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         if ($row) {
@@ -1066,6 +1070,206 @@ function cpms_tasks_fetch_files($pdo, $taskId)
     return is_array($rows) ? $rows : array();
 }}
 
+if (!function_exists('cpms_tasks_ensure_comment_schema')) {
+function cpms_tasks_ensure_comment_schema($pdo)
+{
+    if (!$pdo) return false;
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_task_comments (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            task_id INT NOT NULL,
+            parent_comment_id INT NULL,
+            comment_text TEXT NOT NULL,
+            created_by INT NULL,
+            created_by_name VARCHAR(100) NULL,
+            created_by_email VARCHAR(190) NULL,
+            created_by_photo_path VARCHAR(255) NULL,
+            created_at DATETIME NULL,
+            KEY idx_task_comments_task (task_id),
+            KEY idx_task_comments_parent (parent_comment_id),
+            KEY idx_task_comments_created_by (created_by)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    } catch (Exception $e) {
+        return false;
+    }
+
+    $columns = array(
+        'task_id' => "ALTER TABLE cpms_task_comments ADD COLUMN task_id INT NOT NULL DEFAULT 0 AFTER id",
+        'parent_comment_id' => "ALTER TABLE cpms_task_comments ADD COLUMN parent_comment_id INT NULL AFTER task_id",
+        'comment_text' => "ALTER TABLE cpms_task_comments ADD COLUMN comment_text TEXT NOT NULL AFTER parent_comment_id",
+        'created_by' => "ALTER TABLE cpms_task_comments ADD COLUMN created_by INT NULL AFTER comment_text",
+        'created_by_name' => "ALTER TABLE cpms_task_comments ADD COLUMN created_by_name VARCHAR(100) NULL AFTER created_by",
+        'created_by_email' => "ALTER TABLE cpms_task_comments ADD COLUMN created_by_email VARCHAR(190) NULL AFTER created_by_name",
+        'created_by_photo_path' => "ALTER TABLE cpms_task_comments ADD COLUMN created_by_photo_path VARCHAR(255) NULL AFTER created_by_email",
+        'created_at' => "ALTER TABLE cpms_task_comments ADD COLUMN created_at DATETIME NULL AFTER created_by_photo_path",
+    );
+    foreach ($columns as $column => $sql) {
+        if (!cpms_tasks_column_exists($pdo, 'cpms_task_comments', $column)) {
+            try { $pdo->exec($sql); } catch (Exception $e) {}
+        }
+    }
+
+    $indexes = array(
+        'idx_task_comments_task' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_task (task_id)",
+        'idx_task_comments_parent' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_parent (parent_comment_id)",
+        'idx_task_comments_created_by' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_created_by (created_by)",
+    );
+    foreach ($indexes as $indexName => $sql) {
+        if (!cpms_tasks_index_exists($pdo, 'cpms_task_comments', $indexName)) {
+            try { $pdo->exec($sql); } catch (Exception $e) {}
+        }
+    }
+    return true;
+}}
+
+if (!function_exists('cpms_tasks_fetch_comments')) {
+function cpms_tasks_fetch_comments($pdo, $taskId)
+{
+    $rows = array();
+    if (!$pdo || (int)$taskId <= 0 || !cpms_tasks_ensure_comment_schema($pdo)) return $rows;
+    try {
+        $st = $pdo->prepare("SELECT * FROM cpms_task_comments WHERE task_id = :task_id ORDER BY parent_comment_id ASC, id ASC");
+        $st->execute(array(':task_id' => (int)$taskId));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        $rows = array();
+    }
+    return is_array($rows) ? $rows : array();
+}}
+
+if (!function_exists('cpms_tasks_photo_url')) {
+function cpms_tasks_photo_url($path)
+{
+    $path = trim((string)$path);
+    if ($path === '') return '';
+    if (preg_match('/^https?:\/\//i', $path)) return $path;
+    $path = str_replace('\\', '/', $path);
+    if (strpos($path, '/') === 0) return $path;
+    if (function_exists('base_url')) return base_url() . '/' . ltrim($path, '/');
+    return '/' . ltrim($path, '/');
+}}
+
+if (!function_exists('cpms_tasks_comment_initial')) {
+function cpms_tasks_comment_initial($name)
+{
+    $name = trim((string)$name);
+    if ($name === '') return '?';
+    if (function_exists('mb_substr')) return mb_substr($name, 0, 1, 'UTF-8');
+    return substr($name, 0, 1);
+}}
+
+if (!function_exists('cpms_tasks_build_comment_message')) {
+function cpms_tasks_build_comment_message($task, $commentText, $actorName, $isReply)
+{
+    $lines = array();
+    $lines[count($lines)] = $isReply ? '[CPMS 업무 대댓글]' : '[CPMS 업무 댓글]';
+    $lines[count($lines)] = '업무명 : ' . (isset($task['title']) ? (string)$task['title'] : '-');
+    $lines[count($lines)] = '작성자 : ' . (trim((string)$actorName) !== '' ? (string)$actorName : '-');
+    $lines[count($lines)] = '내용 : ' . cpms_tasks_text_excerpt($commentText, 160);
+    $lines[count($lines)] = '';
+    $lines[count($lines)] = '임원 대시보드 또는 나의 할일에서 확인해주세요.';
+    return implode("\n", $lines);
+}}
+
+if (!function_exists('cpms_tasks_send_comment_notifications')) {
+function cpms_tasks_send_comment_notifications($pdo, $task, $commentText, $actor, $parentAuthorId)
+{
+    if (!function_exists('cpms_send_google_chat_to_employee')) {
+        require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    }
+    if (!$pdo || !is_array($task) || !function_exists('cpms_send_google_chat_to_employee')) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    $actorId = isset($actor['id']) ? (int)$actor['id'] : 0;
+    $actorName = isset($actor['name']) ? (string)$actor['name'] : '';
+    $isReply = (int)$parentAuthorId > 0;
+    $recipients = array();
+
+    foreach (array('requester_employee_id', 'assignee_employee_id') as $field) {
+        $employeeId = isset($task[$field]) ? (int)$task[$field] : 0;
+        if ($employeeId > 0) $recipients[$employeeId] = $employeeId;
+    }
+    if ($actorId > 0) $recipients[$actorId] = $actorId;
+    if ((int)$parentAuthorId > 0) $recipients[(int)$parentAuthorId] = (int)$parentAuthorId;
+
+    $message = cpms_tasks_build_comment_message($task, $commentText, $actorName, $isReply);
+    foreach ($recipients as $employeeId) {
+        cpms_send_google_chat_to_employee($pdo, (int)$employeeId, $message, $taskId, $isReply ? 'TASK_REPLY_COMMENTED' : 'TASK_COMMENTED', 'TASK_COMMENT');
+    }
+    return true;
+}}
+
+if (!function_exists('cpms_tasks_render_comment_item')) {
+function cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $returnUrl, $depth)
+{
+    $commentId = isset($comment['id']) ? (int)$comment['id'] : 0;
+    $name = isset($comment['created_by_name']) && trim((string)$comment['created_by_name']) !== '' ? (string)$comment['created_by_name'] : '작성자';
+    $photoUrl = cpms_tasks_photo_url(isset($comment['created_by_photo_path']) ? $comment['created_by_photo_path'] : '');
+    $indentClass = ((int)$depth > 0) ? 'ml-8 border-l-4 border-slate-100 pl-4' : '';
+    ?>
+    <div class="<?php echo h($indentClass); ?>">
+        <div class="rounded-2xl border border-gray-200 bg-white p-4">
+            <div class="flex items-start gap-3">
+                <?php if ($photoUrl !== ''): ?>
+                    <img src="<?php echo h($photoUrl); ?>" alt="<?php echo h($name); ?>" class="w-10 h-10 rounded-full object-cover border border-gray-200">
+                <?php else: ?>
+                    <div class="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-sm font-extrabold text-slate-600"><?php echo h(cpms_tasks_comment_initial($name)); ?></div>
+                <?php endif; ?>
+                <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="font-extrabold text-gray-900"><?php echo h($name); ?></div>
+                        <div class="text-xs text-gray-500"><?php echo h(isset($comment['created_at']) ? $comment['created_at'] : ''); ?></div>
+                    </div>
+                    <div class="mt-2 text-sm text-gray-800 whitespace-pre-line"><?php echo h(isset($comment['comment_text']) ? $comment['comment_text'] : ''); ?></div>
+                    <form method="post" action="?r=tasks/comment_save" class="mt-3 flex flex-col sm:flex-row gap-2">
+                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                        <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
+                        <input type="hidden" name="parent_comment_id" value="<?php echo (int)$commentId; ?>">
+                        <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                        <input type="text" name="comment_text" required class="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm" placeholder="대댓글 입력">
+                        <button type="submit" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">대댓글</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php if (isset($childrenMap[$commentId]) && is_array($childrenMap[$commentId])): ?>
+            <div class="mt-3 space-y-3">
+                <?php foreach ($childrenMap[$commentId] as $childComment): ?>
+                    <?php cpms_tasks_render_comment_item($childComment, $childrenMap, $taskId, $returnUrl, ((int)$depth + 1)); ?>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+    <?php
+}}
+
+if (!function_exists('cpms_tasks_render_comments')) {
+function cpms_tasks_render_comments($comments, $taskId, $returnUrl)
+{
+    $childrenMap = array();
+    $root = array();
+    if (!is_array($comments)) $comments = array();
+    foreach ($comments as $comment) {
+        $parentId = isset($comment['parent_comment_id']) ? (int)$comment['parent_comment_id'] : 0;
+        if ($parentId > 0) {
+            if (!isset($childrenMap[$parentId])) $childrenMap[$parentId] = array();
+            $childrenMap[$parentId][count($childrenMap[$parentId])] = $comment;
+        } else {
+            $root[count($root)] = $comment;
+        }
+    }
+    ?>
+    <div class="space-y-3">
+        <?php if (count($root) === 0): ?>
+            <div class="p-4 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500">등록된 댓글이 없습니다.</div>
+        <?php else: ?>
+            <?php foreach ($root as $comment): ?>
+                <?php cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $returnUrl, 0); ?>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </div>
+    <?php
+}}
+
 if (!function_exists('cpms_tasks_text_excerpt')) {
 function cpms_tasks_text_excerpt($text, $limit)
 {
@@ -1258,6 +1462,17 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             uploaded_by INT NULL,
             uploaded_at DATETIME NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
+        'cpms_task_comments' => "CREATE TABLE IF NOT EXISTS cpms_task_comments (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            task_id INT NOT NULL,
+            parent_comment_id INT NULL,
+            comment_text TEXT NOT NULL,
+            created_by INT NULL,
+            created_by_name VARCHAR(100) NULL,
+            created_by_email VARCHAR(190) NULL,
+            created_by_photo_path VARCHAR(255) NULL,
+            created_at DATETIME NULL
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
     );
 
     foreach ($tableSql as $tableName => $sql) {
@@ -1319,6 +1534,16 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'uploaded_by' => "ALTER TABLE cpms_task_files ADD COLUMN uploaded_by INT NULL AFTER mime_type",
             'uploaded_at' => "ALTER TABLE cpms_task_files ADD COLUMN uploaded_at DATETIME NULL AFTER uploaded_by",
         ),
+        'cpms_task_comments' => array(
+            'task_id' => "ALTER TABLE cpms_task_comments ADD COLUMN task_id INT NOT NULL DEFAULT 0 AFTER id",
+            'parent_comment_id' => "ALTER TABLE cpms_task_comments ADD COLUMN parent_comment_id INT NULL AFTER task_id",
+            'comment_text' => "ALTER TABLE cpms_task_comments ADD COLUMN comment_text TEXT NOT NULL AFTER parent_comment_id",
+            'created_by' => "ALTER TABLE cpms_task_comments ADD COLUMN created_by INT NULL AFTER comment_text",
+            'created_by_name' => "ALTER TABLE cpms_task_comments ADD COLUMN created_by_name VARCHAR(100) NULL AFTER created_by",
+            'created_by_email' => "ALTER TABLE cpms_task_comments ADD COLUMN created_by_email VARCHAR(190) NULL AFTER created_by_name",
+            'created_by_photo_path' => "ALTER TABLE cpms_task_comments ADD COLUMN created_by_photo_path VARCHAR(255) NULL AFTER created_by_email",
+            'created_at' => "ALTER TABLE cpms_task_comments ADD COLUMN created_at DATETIME NULL AFTER created_by_photo_path",
+        ),
     );
 
     foreach ($columns as $tableName => $tableColumns) {
@@ -1352,6 +1577,11 @@ function cpms_tasks_ensure_schema($pdo, &$results)
         ),
         'cpms_task_files' => array(
             'idx_task_id' => "ALTER TABLE cpms_task_files ADD INDEX idx_task_id (task_id)",
+        ),
+        'cpms_task_comments' => array(
+            'idx_task_comments_task' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_task (task_id)",
+            'idx_task_comments_parent' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_parent (parent_comment_id)",
+            'idx_task_comments_created_by' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_created_by (created_by)",
         ),
     );
 

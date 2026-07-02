@@ -47,3 +47,8 @@ function render_task_list($tasks) {
     </div>
     <?php
 }
+
+if (!function_exists('render_task_list_sample')) {
+function render_task_list_sample() {
+    return;
+}}

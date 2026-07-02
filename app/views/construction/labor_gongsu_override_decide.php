@@ -7,7 +7,7 @@ use App\Core\Db;
 
 function cpms_labor_decide_redirect($type, $message) {
     flash_set($type, $message);
-    header('Location: ' . base_url() . '/?r=대시보드&dv=executive');
+    header('Location: ' . base_url() . '/?r=dashboard_executive&exec_tab=approval');
     exit;
 }
 

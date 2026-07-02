@@ -40,7 +40,7 @@ function cpms_issue_state_save_redirect_url($redirectKey, $projectId)
         return '?r=construction_home&tab=issues';
     }
 
-    return '?r=dashboard_executive';
+    return '?r=dashboard_executive&exec_tab=siteIssues';
 }
 
 if (!Auth::check()) {
@@ -66,7 +66,7 @@ $resolvedStatus = isset($statusMap[$statusRaw]) ? $statusMap[$statusRaw] : '';
 $pdo = Db::pdo();
 if (!$pdo) {
     flash_set('error', '이슈 상태 변경 실패: DB 연결에 실패했습니다.');
-    header('Location: ?r=dashboard_executive');
+    header('Location: ?r=dashboard_executive&exec_tab=siteIssues');
     exit;
 }
 

@@ -983,6 +983,10 @@ if ($route === 'tasks/cancel') {
     require_once __DIR__ . '/../app/views/tasks/cancel.php';
     exit;
 }
+if ($route === 'tasks/comment_save') {
+    require_once __DIR__ . '/../app/views/tasks/comment_save.php';
+    exit;
+}
 if ($route === 'tasks/detail') {
     require_once __DIR__ . '/../app/views/tasks/detail.php';
     exit;

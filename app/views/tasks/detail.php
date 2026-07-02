@@ -14,6 +14,7 @@ $currentEmployee = cpms_tasks_current_employee($pdo);
 $taskId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $task = cpms_tasks_find_task($pdo, $taskId);
 $isModal = isset($_GET['modal']) && (string)$_GET['modal'] === '1';
+$readOnlyMode = isset($_GET['readonly']) && (string)$_GET['readonly'] === '1';
 
 if (!$task || !cpms_tasks_can_view($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0)) {
     if ($isModal) {
@@ -28,6 +29,7 @@ if (!$task || !cpms_tasks_can_view($task, isset($currentEmployee['id']) ? (int)$
 
 $logs = cpms_tasks_fetch_logs($pdo, $taskId);
 $files = cpms_tasks_fetch_files($pdo, $taskId);
+$comments = cpms_tasks_fetch_comments($pdo, $taskId);
 $canChangeStatus = cpms_tasks_can_change_status($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $isMeetingTask = isset($task['task_type']) && (string)$task['task_type'] === 'meeting';
 $canMeetingResponse = cpms_tasks_can_respond_meeting($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
@@ -35,6 +37,19 @@ $canCompleteMeeting = cpms_tasks_can_complete_meeting_after_response($task, isse
 $canRevision = cpms_tasks_can_request_revision($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $canCancel = cpms_tasks_can_cancel($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $returnUrl = cpms_tasks_default_return_url();
+if (isset($_GET['return_url'])) {
+    $requestedReturnUrl = trim((string)$_GET['return_url']);
+    if ($requestedReturnUrl !== '' && stripos($requestedReturnUrl, 'javascript:') !== 0 && strpos($requestedReturnUrl, "\n") === false && strpos($requestedReturnUrl, "\r") === false) {
+        $returnUrl = $requestedReturnUrl;
+    }
+}
+if ($readOnlyMode) {
+    $canChangeStatus = false;
+    $canMeetingResponse = false;
+    $canCompleteMeeting = false;
+    $canRevision = false;
+    $canCancel = false;
+}
 
 ob_start();
 ?>
@@ -190,6 +205,25 @@ ob_start();
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
+    </div>
+
+    <div>
+        <div class="flex items-center justify-between gap-3 mb-2">
+            <div class="text-sm font-extrabold text-gray-900">댓글</div>
+            <div class="text-xs text-gray-500"><?php echo count($comments); ?>건</div>
+        </div>
+        <?php cpms_tasks_render_comments($comments, $taskId, $returnUrl); ?>
+        <form method="post" action="?r=tasks/comment_save" class="mt-4 rounded-2xl border border-gray-200 bg-slate-50 p-4 space-y-3">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
+            <input type="hidden" name="parent_comment_id" value="0">
+            <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+            <div class="text-sm font-bold text-gray-700">진행상태 댓글 입력</div>
+            <textarea name="comment_text" rows="3" required class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" placeholder="진행상태나 확인 내용을 입력하세요."></textarea>
+            <div class="flex justify-end">
+                <button type="submit" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">댓글 등록</button>
+            </div>
+        </form>
     </div>
 
     <?php if ($canCancel && (!isset($task['status']) || !in_array((string)$task['status'], array('cancelled', 'done'), true))): ?>
