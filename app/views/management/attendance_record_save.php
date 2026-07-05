@@ -34,7 +34,6 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check(isset($_POST['_csrf']) 
 
 $pdo = Db::pdo();
 if (!$pdo || !attendance_can_manage_settings($pdo)) {
-    flash_set('danger', attendance_text('%EA%B6%8C%ED%95%9C%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
     header('Location: ' . $returnUrl);
     exit;
 }

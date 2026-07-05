@@ -22,8 +22,8 @@ $month = isset($_GET['month']) ? trim((string)$_GET['month']) : date('Y-m');
 if (!preg_match('/^\d{4}-\d{2}$/', $month)) $month = date('Y-m');
 $quickFilter = isset($_GET['filter']) ? trim((string)$_GET['filter']) : 'all';
 if (!in_array($quickFilter, array('all', 'late', 'vacation', 'missing_checkout'), true)) $quickFilter = 'all';
-$sort = isset($_GET['sort']) ? trim((string)$_GET['sort']) : 'department';
-if (!in_array($sort, array('department', 'name', 'position'), true)) $sort = 'department';
+$sort = isset($_GET['sort']) ? trim((string)$_GET['sort']) : 'position';
+if (!in_array($sort, array('department', 'name', 'position'), true)) $sort = 'position';
 $requestStatusFilter = isset($_GET['status']) ? trim((string)$_GET['status']) : 'all';
 if (!in_array($requestStatusFilter, array('all', 'pending', 'approved', 'rejected'), true)) $requestStatusFilter = 'all';
 $requestDateFilter = isset($_GET['request_date']) ? trim((string)$_GET['request_date']) : $date;
@@ -125,7 +125,7 @@ if (!function_exists('attendance_monthly_is_late')) {
     {
         $time = attendance_monthly_time($checkIn);
         if ($time === '' || strlen($time) < 5) return false;
-        return (strcmp(substr($time, 0, 5), '09:00') > 0);
+        return (strcmp(substr($time, 0, 5), '08:00') > 0);
     }
 }
 
@@ -186,11 +186,11 @@ if ($pdo) {
     if ($isActiveEnabled) {
         $employeeWhere[] = "(is_active IS NULL OR is_active = 1)";
     }
-    $employeeOrder = "department ASC, name ASC, id ASC";
+    $employeeOrder = "position ASC, " . ($hireDateEnabled ? "CASE WHEN hire_date IS NULL OR CAST(hire_date AS CHAR) = '' THEN 1 ELSE 0 END ASC, hire_date ASC, " : "") . "name ASC, id ASC";
     if ($sort === 'name') {
         $employeeOrder = "name ASC, id ASC";
-    } else if ($sort === 'position') {
-        $employeeOrder = "position ASC, department ASC, name ASC, id ASC";
+    } else if ($sort === 'department') {
+        $employeeOrder = "department ASC, name ASC, id ASC";
     }
 
     try {
@@ -508,10 +508,6 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
 .cpms-attendance-header{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:16px}
 .cpms-attendance-title{display:flex;align-items:center;gap:14px;min-width:0}
 .cpms-attendance-title h3{font-size:28px;line-height:1.2;font-weight:900;margin:0;color:#020617;letter-spacing:0}
-.cpms-attendance-help{width:26px;height:26px;border:1px solid #94a3b8;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#1e3a8a;font-weight:900;background:#fff}
-.cpms-attendance-leave-toggle{display:inline-flex;align-items:center;gap:8px;color:#475569;font-weight:800;text-decoration:none;white-space:nowrap}
-.cpms-attendance-switch{width:38px;height:22px;border-radius:999px;background:#cbd5e1;position:relative;box-shadow:inset 0 1px 2px rgba(15,23,42,.14)}
-.cpms-attendance-switch:after{content:"";position:absolute;width:18px;height:18px;left:2px;top:2px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(15,23,42,.22)}
 .cpms-attendance-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 .cpms-attendance-action{height:42px;display:inline-flex;align-items:center;gap:8px;border:1px solid #dbe3ef;background:#fff;color:#0f172a;border-radius:8px;padding:0 14px;font-weight:900;text-decoration:none;box-shadow:0 1px 2px rgba(15,23,42,.04)}
 .cpms-attendance-action-primary{border-color:#081a86;background:#071a98;color:#fff;box-shadow:0 8px 18px rgba(7,26,152,.18)}
@@ -573,11 +569,8 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
 .cpms-attendance-time-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .cpms-attendance-time-box{border:1px solid #e5e7eb;border-radius:10px;background:#f8fafc;padding:14px}
 .cpms-attendance-time-label{font-size:13px;font-weight:950;color:#0f172a;margin-bottom:10px}
-.cpms-attendance-time-preview{display:inline-flex;align-items:center;justify-content:center;min-width:86px;height:34px;border-radius:999px;background:#e0e7ff;color:#1e1b4b;font-weight:950;margin-bottom:12px}
-.cpms-attendance-picker-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
-.cpms-attendance-picker-btn{border:1px solid #dbe3ef;background:#fff;color:#334155;border-radius:8px;min-width:42px;height:34px;padding:0 10px;font-size:12px;font-weight:900}
-.cpms-attendance-picker-btn.is-active{background:#071a98;border-color:#071a98;color:#fff}
-.cpms-attendance-picker-btn.is-muted{background:#fff1f2;border-color:#fecdd3;color:#be123c}
+.cpms-attendance-time-input{width:100%;height:48px;border:1px solid #dbe3ef;border-radius:12px;background:#fff;color:#0f172a;font-size:17px;font-weight:950;padding:0 14px}
+.cpms-attendance-time-hint{font-size:12px;color:#64748b;font-weight:800;margin-top:8px}
 .cpms-attendance-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
 .cpms-attendance-modal-actions button{height:40px;border-radius:8px;padding:0 16px;font-weight:950}
 .cpms-attendance-cancel{border:1px solid #dbe3ef;background:#fff;color:#334155}
@@ -590,16 +583,10 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
     <div class='cpms-attendance-header'>
         <div class='cpms-attendance-title'>
             <h3><?php echo h(attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%20%EA%B7%BC%ED%83%9C%EA%B4%80%EB%A6%AC')); ?></h3>
-            <span class='cpms-attendance-help'>?</span>
-            <a class='cpms-attendance-leave-toggle' href='<?php echo h($routeManage . '&tab=leave_management'); ?>'>
-                <span><?php echo h(attendance_text('%ED%9C%B4%EA%B0%80%20%EA%B4%80%EB%A6%AC')); ?></span>
-                <span class='cpms-attendance-switch'></span>
-            </a>
         </div>
         <div class='cpms-attendance-actions'>
             <button type='button' class='cpms-attendance-action'><i data-lucide='download' class='w-4 h-4'></i><?php echo h(attendance_text('%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C')); ?></button>
             <button type='button' class='cpms-attendance-action'><i data-lucide='upload' class='w-4 h-4'></i><?php echo h(attendance_text('%EC%97%85%EB%A1%9C%EB%93%9C')); ?></button>
-            <button type='button' class='cpms-attendance-action cpms-attendance-action-primary'><i data-lucide='plus' class='w-4 h-4'></i><?php echo h(attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%EA%B8%B0%EB%A1%9D%20%EC%B6%94%EA%B0%80')); ?></button>
         </div>
     </div>
 
@@ -624,9 +611,9 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                         <input type='hidden' name='filter' value='<?php echo h($quickFilter); ?>'>
                         <input type='month' name='month' value='<?php echo h($month); ?>' class='cpms-attendance-select' onchange='this.form.submit()'>
                         <select name='sort' class='cpms-attendance-select' onchange='this.form.submit()'>
-                            <option value='department' <?php echo $sort === 'department' ? 'selected' : ''; ?>><?php echo h(attendance_text('%EB%B6%80%EC%84%9C%EB%B3%84')); ?></option>
-                            <option value='name' <?php echo $sort === 'name' ? 'selected' : ''; ?>><?php echo h(attendance_text('%EC%9D%B4%EB%A6%84%EC%88%9C')); ?></option>
                             <option value='position' <?php echo $sort === 'position' ? 'selected' : ''; ?>><?php echo h(attendance_text('%EC%A7%81%EA%B8%89%EB%B3%84')); ?></option>
+                            <option value='name' <?php echo $sort === 'name' ? 'selected' : ''; ?>><?php echo h(attendance_text('%EC%9D%B4%EB%A6%84%EC%88%9C')); ?></option>
+                            <option value='department' <?php echo $sort === 'department' ? 'selected' : ''; ?>><?php echo h(attendance_text('%EB%B6%80%EC%84%9C%EB%B3%84')); ?></option>
                         </select>
                     </form>
                     <div class='cpms-attendance-quick'>
@@ -775,8 +762,6 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                                 <input type='hidden' name='_csrf' value='<?php echo h(csrf_token()); ?>'>
                                 <input type='hidden' name='employee_id' id='attendanceEditEmployeeId' value=''>
                                 <input type='hidden' name='work_date' id='attendanceEditWorkDate' value=''>
-                                <input type='hidden' name='check_in_time' id='attendanceEditCheckIn' value=''>
-                                <input type='hidden' name='check_out_time' id='attendanceEditCheckOut' value=''>
                                 <input type='hidden' name='return_url' value='<?php echo h($monthlyReturnUrl); ?>'>
                                 <div class='cpms-attendance-modal-head'>
                                     <div>
@@ -786,38 +771,16 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                                     <button type='button' class='cpms-attendance-close' data-attendance-modal-close='1'>x</button>
                                 </div>
                                 <div class='cpms-attendance-time-grid'>
-                                    <?php
-                                        $attendanceEditFields = array(
-                                            array('key' => 'check_in', 'label' => attendance_text('%EC%B6%9C%EA%B7%BC%EC%8B%9C%EA%B0%84'), 'preview' => 'attendanceEditCheckInPreview'),
-                                            array('key' => 'check_out', 'label' => attendance_text('%ED%87%B4%EA%B7%BC%EC%8B%9C%EA%B0%84'), 'preview' => 'attendanceEditCheckOutPreview')
-                                        );
-                                        $attendanceMinutes = array('00','05','10','15','20','25','30','35','40','45','50','55');
-                                    ?>
-                                    <?php foreach($attendanceEditFields as $timeField): ?>
-                                        <div class='cpms-attendance-time-box'>
-                                            <div class='cpms-attendance-time-label'><?php echo h($timeField['label']); ?></div>
-                                            <div class='cpms-attendance-time-preview' id='<?php echo h($timeField['preview']); ?>'>--:--</div>
-                                            <?php if($timeField['key'] === 'check_out'): ?>
-                                                <div class='cpms-attendance-picker-row'>
-                                                    <button type='button' class='cpms-attendance-picker-btn is-muted' data-time-clear='check_out'><?php echo h(attendance_text('%ED%87%B4%EA%B7%BC%20%EC%97%86%EC%9D%8C')); ?></button>
-                                                </div>
-                                            <?php endif; ?>
-                                            <div class='cpms-attendance-picker-row'>
-                                                <button type='button' class='cpms-attendance-picker-btn' data-time-field='<?php echo h($timeField['key']); ?>' data-time-kind='period' data-time-value='AM'><?php echo h(attendance_text('%EC%98%A4%EC%A0%84')); ?></button>
-                                                <button type='button' class='cpms-attendance-picker-btn' data-time-field='<?php echo h($timeField['key']); ?>' data-time-kind='period' data-time-value='PM'><?php echo h(attendance_text('%EC%98%A4%ED%9B%84')); ?></button>
-                                            </div>
-                                            <div class='cpms-attendance-picker-row'>
-                                                <?php for($hourNo = 1; $hourNo <= 12; $hourNo++): ?>
-                                                    <button type='button' class='cpms-attendance-picker-btn' data-time-field='<?php echo h($timeField['key']); ?>' data-time-kind='hour' data-time-value='<?php echo (int)$hourNo; ?>'><?php echo (int)$hourNo; ?></button>
-                                                <?php endfor; ?>
-                                            </div>
-                                            <div class='cpms-attendance-picker-row'>
-                                                <?php foreach($attendanceMinutes as $minuteValue): ?>
-                                                    <button type='button' class='cpms-attendance-picker-btn' data-time-field='<?php echo h($timeField['key']); ?>' data-time-kind='minute' data-time-value='<?php echo h($minuteValue); ?>'><?php echo h($minuteValue); ?></button>
-                                                <?php endforeach; ?>
-                                            </div>
-                                        </div>
-                                    <?php endforeach; ?>
+                                    <div class='cpms-attendance-time-box'>
+                                        <div class='cpms-attendance-time-label'><?php echo h(attendance_text('%EC%B6%9C%EA%B7%BC%EC%8B%9C%EA%B0%84')); ?></div>
+                                        <input type='time' name='check_in_time' id='attendanceEditCheckIn' value='08:00' required class='cpms-attendance-time-input w-full px-4 py-3 rounded-2xl border border-gray-200'>
+                                        <div class='cpms-attendance-time-hint'>08:00</div>
+                                    </div>
+                                    <div class='cpms-attendance-time-box'>
+                                        <div class='cpms-attendance-time-label'><?php echo h(attendance_text('%ED%87%B4%EA%B7%BC%EC%8B%9C%EA%B0%84')); ?></div>
+                                        <input type='time' name='check_out_time' id='attendanceEditCheckOut' value='18:00' class='cpms-attendance-time-input w-full px-4 py-3 rounded-2xl border border-gray-200'>
+                                        <div class='cpms-attendance-time-hint'>18:00</div>
+                                    </div>
                                 </div>
                                 <div class='cpms-attendance-modal-actions'>
                                     <button type='button' class='cpms-attendance-cancel' data-attendance-modal-close='1'><?php echo h(attendance_text('%EB%8B%AB%EA%B8%B0')); ?></button>
@@ -837,61 +800,6 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                     var checkInInput = document.getElementById('attendanceEditCheckIn');
                     var checkOutInput = document.getElementById('attendanceEditCheckOut');
                     var sub = document.getElementById('attendanceEditSub');
-                    var preview = {
-                        check_in: document.getElementById('attendanceEditCheckInPreview'),
-                        check_out: document.getElementById('attendanceEditCheckOutPreview')
-                    };
-                    var state = {
-                        check_in: { period: 'AM', hour: 9, minute: '00', disabled: false },
-                        check_out: { period: 'PM', hour: 6, minute: '00', disabled: false }
-                    };
-                    function pad(value) {
-                        value = String(value);
-                        return value.length < 2 ? '0' + value : value;
-                    }
-                    function parseTime(value, fallbackPeriod, fallbackHour) {
-                        var match = /^(\d{2}):(\d{2})$/.exec(value || '');
-                        if (!match) return { period: fallbackPeriod, hour: fallbackHour, minute: '00', disabled: false };
-                        var hour24 = parseInt(match[1], 10);
-                        var minute = match[2];
-                        var period = hour24 >= 12 ? 'PM' : 'AM';
-                        var hour12 = hour24 % 12;
-                        if (hour12 === 0) hour12 = 12;
-                        return { period: period, hour: hour12, minute: minute, disabled: false };
-                    }
-                    function buildTime(field) {
-                        if (state[field].disabled) return '';
-                        var hour = parseInt(state[field].hour, 10);
-                        if (state[field].period === 'PM' && hour < 12) hour += 12;
-                        if (state[field].period === 'AM' && hour === 12) hour = 0;
-                        return pad(hour) + ':' + state[field].minute;
-                    }
-                    function eachButton(field, kind, callback) {
-                        var buttons = modal.querySelectorAll('[data-time-field="' + field + '"][data-time-kind="' + kind + '"]');
-                        for (var i = 0; i < buttons.length; i++) callback(buttons[i]);
-                    }
-                    function renderField(field) {
-                        var current = buildTime(field);
-                        if (field === 'check_in') checkInInput.value = current;
-                        if (field === 'check_out') checkOutInput.value = current;
-                        if (preview[field]) preview[field].textContent = current === '' ? '--:--' : current;
-                        eachButton(field, 'period', function(button){
-                            button.className = button.className.replace(/\s?is-active/g, '');
-                            if (!state[field].disabled && button.getAttribute('data-time-value') === state[field].period) button.className += ' is-active';
-                        });
-                        eachButton(field, 'hour', function(button){
-                            button.className = button.className.replace(/\s?is-active/g, '');
-                            if (!state[field].disabled && parseInt(button.getAttribute('data-time-value'), 10) === parseInt(state[field].hour, 10)) button.className += ' is-active';
-                        });
-                        eachButton(field, 'minute', function(button){
-                            button.className = button.className.replace(/\s?is-active/g, '');
-                            if (!state[field].disabled && button.getAttribute('data-time-value') === state[field].minute) button.className += ' is-active';
-                        });
-                    }
-                    function renderAll() {
-                        renderField('check_in');
-                        renderField('check_out');
-                    }
                     function closestCell(target) {
                         while (target && target !== document) {
                             if (target.getAttribute && target.getAttribute('data-attendance-cell-edit') === '1') return target;
@@ -906,12 +814,9 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                     function openModal(cell) {
                         employeeInput.value = cell.getAttribute('data-employee-id') || '';
                         dateInput.value = cell.getAttribute('data-work-date') || '';
-                        state.check_in = parseTime(cell.getAttribute('data-check-in') || '', 'AM', 9);
-                        state.check_out = parseTime(cell.getAttribute('data-check-out') || '', 'PM', 6);
-                        if ((cell.getAttribute('data-check-in') || '') === '') state.check_in.disabled = true;
-                        if ((cell.getAttribute('data-check-out') || '') === '') state.check_out.disabled = true;
-                        if (sub) sub.textContent = (cell.getAttribute('data-employee-name') || '-') + ' · ' + (cell.getAttribute('data-work-date') || '');
-                        renderAll();
+                        checkInInput.value = cell.getAttribute('data-check-in') || '08:00';
+                        checkOutInput.value = cell.getAttribute('data-check-out') || '18:00';
+                        if (sub) sub.textContent = (cell.getAttribute('data-employee-name') || '-') + ' / ' + (cell.getAttribute('data-work-date') || '');
                         modal.className += ' is-open';
                         modal.setAttribute('aria-hidden', 'false');
                     }
@@ -919,23 +824,6 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                         var closeTarget = event.target.getAttribute ? event.target.getAttribute('data-attendance-modal-close') : '';
                         if (closeTarget === '1') {
                             closeModal();
-                            return;
-                        }
-                        var clearField = event.target.getAttribute ? event.target.getAttribute('data-time-clear') : '';
-                        if (clearField === 'check_out') {
-                            state.check_out.disabled = true;
-                            renderField('check_out');
-                            return;
-                        }
-                        var field = event.target.getAttribute ? event.target.getAttribute('data-time-field') : '';
-                        var kind = event.target.getAttribute ? event.target.getAttribute('data-time-kind') : '';
-                        var value = event.target.getAttribute ? event.target.getAttribute('data-time-value') : '';
-                        if (field && kind && state[field]) {
-                            state[field].disabled = false;
-                            if (kind === 'period') state[field].period = value;
-                            if (kind === 'hour') state[field].hour = parseInt(value, 10);
-                            if (kind === 'minute') state[field].minute = value;
-                            renderField(field);
                             return;
                         }
                         var cell = closestCell(event.target);

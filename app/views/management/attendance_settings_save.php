@@ -4,7 +4,11 @@ use App\Core\Db;
 require_once __DIR__ . '/../attendance/common.php';
 
 $pdo = Db::pdo();
-if (!attendance_can_manage_settings($pdo)) exit;
+$settingsFallbackRoute = '?r=' . attendance_text('%EA%B4%80%EB%A6%AC') . '&tab=attendance&atab=monthly';
+if (!attendance_can_manage_settings($pdo)) {
+    header('Location: ' . $settingsFallbackRoute);
+    exit;
+}
 if (!csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) exit;
 
 $now = attendance_now();
