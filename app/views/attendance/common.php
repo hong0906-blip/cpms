@@ -202,6 +202,144 @@ function attendance_week_range($date){
     $end = date('Y-m-d', strtotime('+'.(7-$w).' day', $ts));
     return array($start, $end);
 }
+if (!function_exists('attendance_position_rank')) {
+function attendance_position_rank($position){
+    $position = trim((string)$position);
+    if ($position === '') return 999;
+    $position = str_replace(array(' ', "\t", "\r", "\n"), '', $position);
+    $rankWords = array(
+        attendance_text('%EB%8C%80%ED%91%9C'),
+        attendance_text('%EB%B6%80%EC%82%AC%EC%9E%A5'),
+        attendance_text('%EC%A0%84%EB%AC%B4'),
+        attendance_text('%EC%83%81%EB%AC%B4'),
+        attendance_text('%EB%B6%80%EC%9E%A5'),
+        attendance_text('%EC%B0%A8%EC%9E%A5'),
+        attendance_text('%EA%B3%BC%EC%9E%A5'),
+        attendance_text('%EB%8C%80%EB%A6%AC'),
+        attendance_text('%EC%A3%BC%EC%9E%84')
+    );
+    for ($i = 0; $i < count($rankWords); $i++) {
+        $word = str_replace(array(' ', "\t", "\r", "\n"), '', $rankWords[$i]);
+        if ($word !== '' && ($position === $word || strpos($position, $word) === 0)) return $i + 1;
+    }
+    return 999;
+}}
+if (!function_exists('attendance_compare_employee_position')) {
+function attendance_compare_employee_position($a, $b){
+    $ar = attendance_position_rank(isset($a['position']) ? $a['position'] : '');
+    $br = attendance_position_rank(isset($b['position']) ? $b['position'] : '');
+    if ($ar !== $br) return ($ar < $br) ? -1 : 1;
+
+    $ah = isset($a['hire_date']) ? trim((string)$a['hire_date']) : '';
+    $bh = isset($b['hire_date']) ? trim((string)$b['hire_date']) : '';
+    if ($ah === '' && $bh !== '') return 1;
+    if ($ah !== '' && $bh === '') return -1;
+    if ($ah !== $bh) return ($ah < $bh) ? -1 : 1;
+
+    $an = isset($a['name']) ? trim((string)$a['name']) : '';
+    $bn = isset($b['name']) ? trim((string)$b['name']) : '';
+    if ($an !== $bn) return strcmp($an, $bn);
+
+    $aid = isset($a['id']) ? (int)$a['id'] : 0;
+    $bid = isset($b['id']) ? (int)$b['id'] : 0;
+    if ($aid === $bid) return 0;
+    return ($aid < $bid) ? -1 : 1;
+}}
+if (!function_exists('attendance_is_representative_employee')) {
+function attendance_is_representative_employee($row){
+    if (!is_array($row)) return false;
+    $name = isset($row['name']) ? trim((string)$row['name']) : '';
+    $position = isset($row['position']) ? trim((string)$row['position']) : '';
+    $needle = attendance_text('%EB%8C%80%ED%91%9C');
+    return (($position !== '' && strpos($position, $needle) !== false) || ($name !== '' && strpos($name, $needle) !== false));
+}}
+if (!function_exists('attendance_filter_representative_rows')) {
+function attendance_filter_representative_rows($rows){
+    if (!is_array($rows)) return array();
+    $filtered = array();
+    foreach ($rows as $row) {
+        if (attendance_is_representative_employee($row)) continue;
+        $filtered[count($filtered)] = $row;
+    }
+    return $filtered;
+}}
+if (!function_exists('attendance_month_week_options')) {
+function attendance_month_week_options($month){
+    $month = trim((string)$month);
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) $month = date('Y-m');
+    $monthStart = $month . '-01';
+    $monthStartTs = strtotime($monthStart);
+    if ($monthStartTs === false) {
+        $month = date('Y-m');
+        $monthStart = $month . '-01';
+        $monthStartTs = strtotime($monthStart);
+    }
+    $monthEnd = date('Y-m-t', $monthStartTs);
+    $monthEndTs = strtotime($monthEnd);
+    list($firstWeekStart, $firstWeekEnd) = attendance_week_range($monthStart);
+    $weekStartTs = strtotime($firstWeekStart);
+    $options = array();
+    $weekNo = 1;
+    while ($weekStartTs !== false && $monthEndTs !== false && $weekStartTs <= $monthEndTs) {
+        $weekStart = date('Y-m-d', $weekStartTs);
+        $weekEndTs = strtotime('+6 day', $weekStartTs);
+        $weekEnd = date('Y-m-d', $weekEndTs);
+        $options[count($options)] = array(
+            'value' => $weekStart,
+            'start' => $weekStart,
+            'end' => $weekEnd,
+            'week_no' => $weekNo,
+            'label' => date('n', $monthStartTs) . attendance_text('%EC%9B%94%20') . $weekNo . attendance_text('%EC%A3%BC%EC%B0%A8'),
+            'range_label' => $weekStart . ' ~ ' . $weekEnd
+        );
+        $weekStartTs = strtotime('+7 day', $weekStartTs);
+        $weekNo++;
+        if ($weekNo > 7) break;
+    }
+    return $options;
+}}
+if (!function_exists('attendance_month_week_selection')) {
+function attendance_month_week_selection($month, $weekStart, $defaultDate){
+    $defaultDate = trim((string)$defaultDate);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $defaultDate)) $defaultDate = attendance_today();
+    $month = trim((string)$month);
+    if (!preg_match('/^\d{4}-\d{2}$/', $month)) $month = substr($defaultDate, 0, 7);
+    $options = attendance_month_week_options($month);
+    $weekStart = trim((string)$weekStart);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $weekStart)) $weekStart = '';
+
+    $selected = null;
+    for ($i = 0; $i < count($options); $i++) {
+        if ($weekStart !== '' && $options[$i]['start'] === $weekStart) {
+            $selected = $options[$i];
+            break;
+        }
+    }
+    if ($selected === null && substr($defaultDate, 0, 7) === $month) {
+        list($defaultWeekStart, $defaultWeekEnd) = attendance_week_range($defaultDate);
+        for ($i = 0; $i < count($options); $i++) {
+            if ($options[$i]['start'] === $defaultWeekStart) {
+                $selected = $options[$i];
+                break;
+            }
+        }
+    }
+    if ($selected === null && count($options) > 0) $selected = $options[0];
+    if ($selected === null) {
+        list($fallbackStart, $fallbackEnd) = attendance_week_range($defaultDate);
+        $selected = array(
+            'value' => $fallbackStart,
+            'start' => $fallbackStart,
+            'end' => $fallbackEnd,
+            'week_no' => 1,
+            'label' => '',
+            'range_label' => $fallbackStart . ' ~ ' . $fallbackEnd
+        );
+    }
+    $selected['month'] = $month;
+    $selected['options'] = $options;
+    return $selected;
+}}
 function attendance_minutes($in,$out){
     if(!$in || !$out) return 0;
     $m = (int)((strtotime($out)-strtotime($in))/60);

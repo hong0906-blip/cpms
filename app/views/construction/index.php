@@ -120,6 +120,7 @@ $tabs = array(
     'equipment'=> '장비',
     'materials'=> '자재구입비',
     'issues'   => '이슈',
+    'security' => '보안사고',
     'safety'   => '안전사고',
 );
 if (!isset($tabs[$tab])) $tab = $defaultTab;
@@ -258,9 +259,23 @@ try {
 
 <?php if ($canEditSchedule): ?>
 <div class="cpms-construction-mobile-actions">
+    <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$selectedPid; ?>&tab=equipment&equip_tab=input"
+       class="inline-flex items-center justify-center gap-2 bg-blue-600 text-white font-extrabold">
+        <i data-lucide="truck" class="w-4 h-4"></i>
+        장비 입력
+    </a>
+    <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$selectedPid; ?>&tab=materials&materials_tab=input"
+       class="inline-flex items-center justify-center gap-2 bg-emerald-600 text-white font-extrabold">
+        <i data-lucide="package-plus" class="w-4 h-4"></i>
+        자재구입비 입력
+    </a>
     <button type="button" class="inline-flex items-center justify-center gap-2 bg-rose-600 text-white font-extrabold" data-modal-open="issueAdd">
         <i data-lucide="message-square-plus" class="w-4 h-4"></i>
         이슈등록
+    </button>
+    <button type="button" class="inline-flex items-center justify-center gap-2 bg-slate-800 text-white font-extrabold" data-modal-open="securityIssueAdd">
+        <i data-lucide="shield-alert" class="w-4 h-4"></i>
+        보안사고
     </button>
     <button type="button" class="inline-flex items-center justify-center gap-2 bg-gray-900 text-white font-extrabold" data-modal-open="safetyIncidentAdd">
         <i data-lucide="siren" class="w-4 h-4"></i>
@@ -340,6 +355,7 @@ if (!file_exists($tabFile)) {
     <div class="flex items-center justify-between mb-4"><h3 class="text-xl font-extrabold">이슈등록</h3><button type="button" data-modal-close="issueAdd">닫기</button></div>
     <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/issue_save" class="space-y-3">
       <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$selectedPid; ?>">
+      <input type="hidden" name="issue_kind" value="issue">
       <input name="title" required maxlength="200" class="w-full px-4 py-3 rounded-2xl border" placeholder="제목">
       <textarea name="description" class="w-full px-4 py-3 rounded-2xl border" rows="4" placeholder="내용"></textarea>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -347,6 +363,25 @@ if (!file_exists($tabFile)) {
         <select name="status" class="px-4 py-3 rounded-2xl border"><option selected>접수</option><option>처리중</option><option>처리완료</option></select>
       </div>
       <button class="px-4 py-3 rounded-2xl bg-rose-600 text-white font-extrabold">저장</button>
+    </form>
+  </div>
+  </div>
+</div>
+<div id="modal-securityIssueAdd" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/40" data-modal-close="securityIssueAdd"></div>
+  <div class="cpms-construction-mobile-modal">
+  <div class="relative max-w-2xl mx-auto mt-16 bg-white rounded-3xl border p-6 shadow-xl">
+    <div class="flex items-center justify-between mb-4"><h3 class="text-xl font-extrabold">보안사고 등록</h3><button type="button" data-modal-close="securityIssueAdd">닫기</button></div>
+    <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/issue_save" class="space-y-3">
+      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$selectedPid; ?>">
+      <input type="hidden" name="issue_kind" value="security">
+      <input name="title" required maxlength="200" class="w-full px-4 py-3 rounded-2xl border" placeholder="제목">
+      <textarea name="description" class="w-full px-4 py-3 rounded-2xl border" rows="4" placeholder="내용"></textarea>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <select name="priority" class="px-4 py-3 rounded-2xl border"><option>낮음</option><option selected>보통</option><option>높음</option><option>긴급</option></select>
+        <select name="status" class="px-4 py-3 rounded-2xl border"><option selected>접수</option><option>처리중</option><option>처리완료</option></select>
+      </div>
+      <button class="px-4 py-3 rounded-2xl bg-slate-800 text-white font-extrabold">저장</button>
     </form>
   </div>
   </div>

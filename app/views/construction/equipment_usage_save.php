@@ -19,7 +19,7 @@ $role = Auth::userRole();
 $dept = Auth::userDepartment();
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
-if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) { flash_set('error', '보안 토큰 오류'); header('Location: ?r=공사'); exit; }
+if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) { flash_set('error', '보안 토큰 오류'); header('Location: ?r=construction_home'); exit; }
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $equipmentId = isset($_POST['equipment_id']) ? (int)$_POST['equipment_id'] : 0;
@@ -29,8 +29,9 @@ $ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : $defaultYm;
 $usageDates = isset($_POST['usage_dates']) ? $_POST['usage_dates'] : array();
 $useDatesText = trim((string)(isset($_POST['use_dates']) ? $_POST['use_dates'] : ''));
 $memo = trim((string)(isset($_POST['memo']) ? $_POST['memo'] : ''));
+$amountSign = isset($_POST['amount_sign']) ? trim((string)$_POST['amount_sign']) : '';
 if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = $defaultYm;
-$redirect = '?r=공사&pid=' . $projectId . '&tab=equipment&equip_tab=' . urlencode($equipTab) . '&ym=' . urlencode($ym);
+$redirect = '?r=construction_home&pid=' . $projectId . '&tab=equipment&equip_tab=' . urlencode($equipTab) . '&ym=' . urlencode($ym);
 
 if ($projectId <= 0 || $equipmentId <= 0) {
     flash_set('error', '입력값이 올바르지 않습니다.');
@@ -124,6 +125,22 @@ function equipment_collect_usage_dates2($usageDates, $text, $ym)
 
     return array_keys($result);
 }
+
+function cpms_equipment_usage_save_apply_sign($amount, $signValue)
+{
+    $raw = trim((string)$amount);
+    $isNegative = (strpos($raw, '-') !== false);
+    $raw = str_replace(array(',', ' ', "\t", '원'), '', $raw);
+    $raw = preg_replace('/[^0-9.\-]/', '', $raw);
+    $amount = abs((float)$raw);
+    $signValue = trim((string)$signValue);
+    if ($signValue === '-' || $signValue === 'minus' || $signValue === 'deduct' || $signValue === 'negative') {
+        $isNegative = true;
+    } else if ($signValue === '+' || $signValue === 'plus' || $signValue === 'normal') {
+        $isNegative = false;
+    }
+    return $isNegative ? ($amount * -1) : $amount;
+}
 $pdo = Db::pdo();
 if ($pdo) {
     cpms_equipment_gongsu_ensure_schema($pdo);
@@ -145,7 +162,7 @@ try {
 
     $baseRate = (float)$item['base_rate'];
     $workUnit = 1.00;
-    $amount = $workUnit * $baseRate;
+    $amount = cpms_equipment_usage_save_apply_sign($workUnit * $baseRate, $amountSign);
     $dates = equipment_collect_usage_dates2($usageDates, $useDatesText, $ym);
     if (count($dates) <= 0) {
         flash_set('error', '유효한 사용일자가 없습니다.');
@@ -178,7 +195,7 @@ try {
         $st->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
         $st->bindValue(':d', $d);
         $st->bindValue(':work_unit', $workUnit);
-        $st->bindValue(':base_rate', $baseRate);
+        $st->bindValue(':base_rate', $amount);
         $st->bindValue(':amt', $amount);
         $st->bindValue(':memo', $memo);
         $st->bindValue(':created_at', $now);

@@ -37,7 +37,9 @@ if (!function_exists('approval_store_employee')) {
         $isTeamLeaderColumn = approval_store_column_exists($pdo, 'employees', 'is_team_leader') ? 'is_team_leader' : "0 AS is_team_leader";
         $teamLeaderIdColumn = approval_store_column_exists($pdo, 'employees', 'team_leader_id') ? 'team_leader_id' : "0 AS team_leader_id";
         $approvalLeadColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_team_leader') ? 'approval_can_be_team_leader' : "0 AS approval_can_be_team_leader";
-        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . "," . $hireColumn . "," . $isTeamLeaderColumn . "," . $teamLeaderIdColumn . "," . $approvalLeadColumn . " FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
+        $approvalGongmuColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver') ? 'approval_can_be_gongmu_approver' : "0 AS approval_can_be_gongmu_approver";
+        $approvalManageColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_manage_approver') ? 'approval_can_be_manage_approver' : "0 AS approval_can_be_manage_approver";
+        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . "," . $hireColumn . "," . $isTeamLeaderColumn . "," . $teamLeaderIdColumn . "," . $approvalLeadColumn . "," . $approvalGongmuColumn . "," . $approvalManageColumn . " FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
         $st->execute(array(':id' => (int)$id));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         return $row ? $row : null;
@@ -51,7 +53,9 @@ if (!function_exists('approval_store_employee_by_name')) {
         $isTeamLeaderColumn = approval_store_column_exists($pdo, 'employees', 'is_team_leader') ? 'is_team_leader' : "0 AS is_team_leader";
         $teamLeaderIdColumn = approval_store_column_exists($pdo, 'employees', 'team_leader_id') ? 'team_leader_id' : "0 AS team_leader_id";
         $approvalLeadColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_team_leader') ? 'approval_can_be_team_leader' : "0 AS approval_can_be_team_leader";
-        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . "," . $isTeamLeaderColumn . "," . $teamLeaderIdColumn . "," . $approvalLeadColumn . " FROM employees WHERE name=:name AND is_active=1 LIMIT 1");
+        $approvalGongmuColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver') ? 'approval_can_be_gongmu_approver' : "0 AS approval_can_be_gongmu_approver";
+        $approvalManageColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_manage_approver') ? 'approval_can_be_manage_approver' : "0 AS approval_can_be_manage_approver";
+        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . "," . $isTeamLeaderColumn . "," . $teamLeaderIdColumn . "," . $approvalLeadColumn . "," . $approvalGongmuColumn . "," . $approvalManageColumn . " FROM employees WHERE name=:name AND is_active=1 LIMIT 1");
         $st->execute(array(':name' => $name));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         return $row ? $row : null;
@@ -158,11 +162,13 @@ if (!function_exists('approval_store_force_line_actual_waiting')) {
 if (!function_exists('approval_store_auto_role_rank')) {
     function approval_store_auto_role_rank($role)
     {
+        $roleRawNorm = approval_normalize_compare_text($role);
         $roleNorm = approval_normalize_compare_text(approval_role_label($role));
         $manageNorm = approval_normalize_compare_text(approval_ko('%EA%B4%80%EB%A6%AC'));
         $gongmuNorm = approval_normalize_compare_text(approval_ko('%EA%B3%B5%EB%AC%B4'));
         $teamNorm = approval_normalize_compare_text(approval_ko('%ED%8C%80%EC%9E%A5'));
         $siteNorm = approval_normalize_compare_text(approval_ko('%EC%86%8C%EC%9E%A5'));
+        $constructionPmNorm = approval_normalize_compare_text(approval_ko('%EA%B3%B5%EC%82%AC%50%4D'));
         if ($roleNorm === $manageNorm) {
             return 1;
         }
@@ -172,7 +178,7 @@ if (!function_exists('approval_store_auto_role_rank')) {
         if ($roleNorm === $teamNorm || $roleNorm === $siteNorm) {
             return 3;
         }
-        if ($roleNorm === 'pm') {
+        if ($roleRawNorm === 'pm' || $roleNorm === 'pm' || $roleRawNorm === $constructionPmNorm || $roleNorm === $constructionPmNorm) {
             return 4;
         }
         if (approval_role_is_vp($role)) {
@@ -441,7 +447,7 @@ if (is_array($user)) {
     }
 }
 $docType = isset($_POST['doc_type']) ? trim((string)$_POST['doc_type']) : 'proposal';
-if (!in_array($docType, array('proposal', 'leave', 'unused_leave_notice', 'unused_leave_plan'), true)) {
+if (!in_array($docType, array('proposal', 'small_proposal', 'leave', 'unused_leave_notice', 'unused_leave_plan'), true)) {
     $docType = 'proposal';
 }
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
@@ -456,7 +462,7 @@ $postedConstructionTeamLeaderId = isset($_POST['construction_team_leader_id']) ?
 if ($postedConstructionTeamLeaderId <= 0 && isset($_POST['team_leader_id'])) {
     $postedConstructionTeamLeaderId = (int)$_POST['team_leader_id'];
 }
-if (!$isManagementOnlyDoc && in_array($docType, array('leave', 'proposal'), true) && approval_line_rules_requires_manual_team_leader($creatorEmployee)) {
+if (!$isManagementOnlyDoc && ($docType === 'leave' || approval_is_proposal_doc_type($docType)) && approval_line_rules_requires_manual_team_leader_for_doc($creatorEmployee, $docType)) {
     if ($postedConstructionTeamLeaderId > 0) {
         $creatorEmployee['team_leader_id'] = $postedConstructionTeamLeaderId;
     }
@@ -474,7 +480,6 @@ $teamRole = approval_ko('%ED%8C%80%EC%9E%A5');
 $gongmuRole = approval_ko('%EA%B3%B5%EB%AC%B4');
 $manageRole = approval_ko('%EA%B4%80%EB%A6%AC');
 $pmRole = 'PM';
-$parkName = approval_ko('%EB%B0%95%EC%9B%90%EB%8D%95');
 $goName = approval_ko('%EA%B3%A0%EC%98%81%EC%84%B1');
 
 $vp = approval_line_rules_find_vp($pdo);
@@ -650,11 +655,11 @@ if ($isManagementOnlyDoc) {
         'writer_email' => $creatorEmail,
         'delegate_level' => $delegateLevel
     );
-    $title = $contentData['title'] !== '' ? $contentData['title'] : approval_doc_label('proposal');
+    $title = $contentData['title'] !== '' ? $contentData['title'] : approval_doc_label($docType);
     $ruleResult = approval_line_rules_build($pdo, $docType, $creatorEmployee, $contentData);
-    if (approval_line_rules_requires_manual_team_leader($creatorEmployee) && (!isset($ruleResult['team_lead']) || !is_array($ruleResult['team_lead']))) {
+    if (approval_line_rules_requires_manual_team_leader_for_doc($creatorEmployee, $docType) && (!isset($ruleResult['team_lead']) || !is_array($ruleResult['team_lead']))) {
         flash_set('danger', approval_ko('%EA%B3%B5%EC%82%AC%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
-        header('Location: ?r=approval_create&type=proposal');
+        header('Location: ?r=approval_create&type=' . $docType);
         exit;
     }
     $lines = isset($ruleResult['lines']) && is_array($ruleResult['lines']) ? $ruleResult['lines'] : array();
@@ -676,7 +681,7 @@ $hasDelegateLevel = approval_store_column_exists($pdo, 'cpms_approval_documents'
 $hasLineDelegated = approval_store_column_exists($pdo, 'cpms_approval_lines', 'is_delegated');
 $hasLineDelegatedBy = approval_store_column_exists($pdo, 'cpms_approval_lines', 'delegated_by_role');
 $hasLineReason = approval_store_column_exists($pdo, 'cpms_approval_lines', 'reject_reason');
-$hasFileDriveColumns = ($docType === 'proposal') ? cpms_approval_drive_ensure_file_columns($pdo) : false;
+$hasFileDriveColumns = approval_is_proposal_doc_type($docType) ? cpms_approval_drive_ensure_file_columns($pdo) : false;
 $approvalDriveUploadedFiles = array();
 
 try {
@@ -833,7 +838,7 @@ try {
     }
 
     $uploadWarn = array();
-    if ($docType === 'proposal') {
+    if (approval_is_proposal_doc_type($docType)) {
         $allow = array('jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf');
         $labels = array(
             'order_doc' => array(approval_ko('%EB%B0%9C%EC%A3%BC%EC%84%9C'), 'order_doc_file'),

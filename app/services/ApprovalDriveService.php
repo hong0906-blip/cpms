@@ -104,7 +104,7 @@ function cpms_approval_drive_folder_key_from_value($value) {
     $raw = trim((string)$value);
     if ($raw === '') return '';
     $lower = strtolower($raw);
-    if ($lower === 'proposal' || $lower === 'draft' || $lower === 'draft_doc') return 'draft';
+    if ($lower === 'proposal' || $lower === 'small_proposal' || $lower === 'draft' || $lower === 'draft_doc') return 'draft';
     if ($lower === 'leave' || $lower === 'vacation') return 'leave';
     if ($lower === 'expense' || $lower === 'expense_resolution') return 'expense';
     if ($lower === 'unused_leave_notice' || $lower === 'unused_leave_plan') return 'unused_leave';

@@ -57,7 +57,7 @@ try {
     }
 
     $director = function_exists('cpms_labor_find_director_approver') ? cpms_labor_find_director_approver($pdo) : null;
-    if (!$director) cpms_equipment_gongsu_json(false, '박원덕 상무 승인자를 직원명부에서 찾을 수 없습니다.', array());
+    if (!$director) cpms_equipment_gongsu_json(false, '공사PM 승인자를 직원명부에서 찾을 수 없습니다.', array());
 
     $user = Auth::user();
     $userId = (is_array($user) && isset($user['id']) && is_numeric($user['id'])) ? (int)$user['id'] : null;

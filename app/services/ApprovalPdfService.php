@@ -313,7 +313,7 @@ function cpms_approval_pdf_fetch_lines($pdo, $approvalId) {
 if (!function_exists('cpms_approval_pdf_fetch_files_by_type')) {
 function cpms_approval_pdf_fetch_files_by_type($pdo, $approvalId, $docType) {
     $filesByType = array();
-    if (!$pdo || (int)$approvalId <= 0 || (string)$docType !== 'proposal') return $filesByType;
+    if (!$pdo || (int)$approvalId <= 0 || !approval_is_proposal_doc_type($docType)) return $filesByType;
     if (!approval_table_exists($pdo, 'cpms_approval_files')) return $filesByType;
     $fs = $pdo->prepare("SELECT * FROM cpms_approval_files WHERE document_id=:id ORDER BY id DESC");
     $fs->execute(array(':id' => (int)$approvalId));

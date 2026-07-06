@@ -226,17 +226,87 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 
 <?php
 require_once __DIR__ . '/../attendance/common.php';
+if (!function_exists('cpms_dashboard_attendance_time')) {
+function cpms_dashboard_attendance_time($value) {
+    $value = trim((string)$value);
+    if ($value === '') return '';
+    if (strlen($value) >= 16) return substr($value, 11, 5);
+    return $value;
+}}
+if (!function_exists('cpms_dashboard_attendance_is_late')) {
+function cpms_dashboard_attendance_is_late($checkIn) {
+    $time = cpms_dashboard_attendance_time($checkIn);
+    if ($time === '' || strlen($time) < 5) return false;
+    return (strcmp(substr($time, 0, 5), '08:00') > 0);
+}}
+if (!function_exists('cpms_dashboard_attendance_is_missing_checkout')) {
+function cpms_dashboard_attendance_is_missing_checkout($workDate, $checkIn, $checkOut, $today, $nowTime, $cutoffTime) {
+    $workDate = trim((string)$workDate);
+    $checkIn = trim((string)$checkIn);
+    $checkOut = trim((string)$checkOut);
+    if ($workDate === '' || $checkIn === '' || $checkOut !== '') return false;
+    if ($workDate < $today) return true;
+    if ($workDate === $today && strcmp($nowTime, $cutoffTime) >= 0) return true;
+    return false;
+}}
+if (!function_exists('cpms_dashboard_attendance_is_business_day')) {
+function cpms_dashboard_attendance_is_business_day($workDate) {
+    $ts = strtotime($workDate);
+    if ($ts === false) return false;
+    $weekNo = (int)date('N', $ts);
+    return ($weekNo >= 1 && $weekNo <= 5);
+}}
 $eid_att = attendance_employee_id($pdo);
 $today_att = attendance_today();
-list($ws_att, $we_att) = attendance_week_range($today_att);
+$attendanceNow_att = attendance_now();
+$attendanceNowTime_att = strlen($attendanceNow_att) >= 19 ? substr($attendanceNow_att, 11, 8) : date('H:i:s');
+$attendanceMissingCheckoutCutoff = '18:00:00';
+$attendanceWorkMonth = isset($_GET['attendance_work_month']) ? trim((string)$_GET['attendance_work_month']) : substr($today_att, 0, 7);
+$attendanceWorkWeekParam = isset($_GET['attendance_work_week']) ? trim((string)$_GET['attendance_work_week']) : '';
+$attendanceWorkWeekSelection = attendance_month_week_selection($attendanceWorkMonth, $attendanceWorkWeekParam, $today_att);
+$attendanceWorkMonth = isset($attendanceWorkWeekSelection['month']) ? $attendanceWorkWeekSelection['month'] : substr($today_att, 0, 7);
+$ws_att = isset($attendanceWorkWeekSelection['start']) ? $attendanceWorkWeekSelection['start'] : $today_att;
+$we_att = isset($attendanceWorkWeekSelection['end']) ? $attendanceWorkWeekSelection['end'] : $today_att;
+$attendanceWorkWeekOptions = isset($attendanceWorkWeekSelection['options']) && is_array($attendanceWorkWeekSelection['options']) ? $attendanceWorkWeekSelection['options'] : array();
+$attendanceWorkWeekLabel = isset($attendanceWorkWeekSelection['label']) ? (string)$attendanceWorkWeekSelection['label'] : '';
+$attendanceWorkWeekRangeLabel = isset($attendanceWorkWeekSelection['range_label']) ? (string)$attendanceWorkWeekSelection['range_label'] : ($ws_att . ' ~ ' . $we_att);
 $attendanceRequestMonth = isset($_GET['attendance_request_month']) ? trim((string)$_GET['attendance_request_month']) : date('Y-m');
 if (!preg_match('/^\d{4}-\d{2}$/', $attendanceRequestMonth)) $attendanceRequestMonth = date('Y-m');
 $attendanceRequestMonthStart = $attendanceRequestMonth . '-01';
 $attendanceRequestMonthEnd = date('Y-m-t', strtotime($attendanceRequestMonthStart));
+$attendanceIssueSince = '2026-07-01';
+$attendanceIssueSinceMonth = substr($attendanceIssueSince, 0, 7);
+$attendanceIssueCurrentMonth = substr($today_att, 0, 7);
+$attendanceIssueMonth = isset($_GET['attendance_issue_month']) ? trim((string)$_GET['attendance_issue_month']) : 'all';
+if ($attendanceIssueMonth !== 'all' && !preg_match('/^\d{4}-\d{2}$/', $attendanceIssueMonth)) $attendanceIssueMonth = 'all';
+if ($attendanceIssueMonth !== 'all' && $attendanceIssueMonth < $attendanceIssueSinceMonth) $attendanceIssueMonth = $attendanceIssueSinceMonth;
+$attendanceIssueMonthOptions = array();
+$issueMonthStartTs = strtotime($attendanceIssueSinceMonth . '-01');
+$issueMonthEndTs = strtotime($attendanceIssueCurrentMonth . '-01');
+if ($issueMonthEndTs !== false && $issueMonthStartTs !== false && $issueMonthEndTs < $issueMonthStartTs) $issueMonthEndTs = $issueMonthStartTs;
+while ($issueMonthStartTs !== false && $issueMonthEndTs !== false && $issueMonthStartTs <= $issueMonthEndTs) {
+    $attendanceIssueMonthOptions[count($attendanceIssueMonthOptions)] = array(
+        'value' => date('Y-m', $issueMonthStartTs),
+        'label' => date('Y년 n월', $issueMonthStartTs)
+    );
+    $issueMonthStartTs = strtotime('+1 month', $issueMonthStartTs);
+}
+$attendanceIssueRangeLabel = '전체(2026-07-01 이후)';
+if ($attendanceIssueMonth !== 'all') {
+    $issueSelectedTs = strtotime($attendanceIssueMonth . '-01');
+    if ($issueSelectedTs !== false) $attendanceIssueRangeLabel = date('Y년 n월', $issueSelectedTs);
+}
 $todayRow = array();
 $todayInState = '미처리';
 $todayOutState = '미처리';
 $myReqs = array();
+$myAttendanceIssues = array();
+$myMissingCheckoutCount = 0;
+$myLateCount = 0;
+$myAbsentCount = 0;
+$myFilteredMissingCheckoutCount = 0;
+$myFilteredLateCount = 0;
+$myFilteredAbsentCount = 0;
 $pendingCnt = 0;
 $weekWork = 0;
 $todayMismatch = false;
@@ -260,6 +330,110 @@ if ($pdo && $eid_att > 0) {
         $st4 = $pdo->prepare("SELECT COUNT(*) FROM cpms_attendance_requests WHERE employee_id=:e AND status='pending'");
         $st4->execute(array(':e' => $eid_att));
         $pendingCnt = (int)$st4->fetchColumn();
+
+        $attendanceRecordDateMap = array();
+        $attendanceLeaveMap = array();
+        if (attendance_table_exists($pdo, 'cpms_leave_records')) {
+            try {
+                $stLeave = $pdo->prepare("SELECT leave_date FROM cpms_leave_records WHERE employee_id=:e AND leave_date BETWEEN :s AND :t");
+                $stLeave->execute(array(':e' => $eid_att, ':s' => $attendanceIssueSince, ':t' => $today_att));
+                $leaveRows = $stLeave->fetchAll(PDO::FETCH_ASSOC);
+                if (is_array($leaveRows)) {
+                    foreach ($leaveRows as $leaveRow) {
+                        $leaveDate = isset($leaveRow['leave_date']) ? trim((string)$leaveRow['leave_date']) : '';
+                        if ($leaveDate !== '') $attendanceLeaveMap[$leaveDate] = true;
+                    }
+                }
+            } catch (Exception $e) {
+            }
+        }
+        if (attendance_table_exists($pdo, 'cpms_approval_documents')) {
+            try {
+                $stApprovalLeave = $pdo->prepare("SELECT content FROM cpms_approval_documents WHERE doc_type='leave' AND created_by_id=:e AND UPPER(COALESCE(doc_status,'')) IN ('APPROVED','COMPLETED') ORDER BY id DESC");
+                $stApprovalLeave->execute(array(':e' => $eid_att));
+                $approvalLeaveRows = $stApprovalLeave->fetchAll(PDO::FETCH_ASSOC);
+                if (is_array($approvalLeaveRows)) {
+                    foreach ($approvalLeaveRows as $approvalLeaveRow) {
+                        $content = array();
+                        $rawContent = isset($approvalLeaveRow['content']) ? trim((string)$approvalLeaveRow['content']) : '';
+                        if ($rawContent !== '') {
+                            $decodedContent = json_decode($rawContent, true);
+                            if (is_array($decodedContent)) $content = $decodedContent;
+                        }
+                        $leaveStart = isset($content['leave_start_date']) ? trim((string)$content['leave_start_date']) : '';
+                        $leaveEnd = isset($content['leave_end_date']) ? trim((string)$content['leave_end_date']) : '';
+                        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $leaveStart) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $leaveEnd)) continue;
+                        if ($leaveEnd < $attendanceIssueSince || $leaveStart > $today_att) continue;
+                        $cursorTs = strtotime($leaveStart < $attendanceIssueSince ? $attendanceIssueSince : $leaveStart);
+                        $endTs = strtotime($leaveEnd > $today_att ? $today_att : $leaveEnd);
+                        while ($cursorTs !== false && $endTs !== false && $cursorTs <= $endTs) {
+                            $leaveDate = date('Y-m-d', $cursorTs);
+                            if (cpms_dashboard_attendance_is_business_day($leaveDate)) $attendanceLeaveMap[$leaveDate] = true;
+                            $cursorTs = strtotime('+1 day', $cursorTs);
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+            }
+        }
+
+        $stIssue = $pdo->prepare("SELECT id,work_date,check_in,check_out,status,created_at,updated_at FROM cpms_attendance_records WHERE employee_id=:e AND work_date BETWEEN :issue_since AND :today ORDER BY work_date DESC, id DESC");
+        $stIssue->execute(array(':e' => $eid_att, ':issue_since' => $attendanceIssueSince, ':today' => $today_att));
+        $issueRows = $stIssue->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($issueRows)) {
+            foreach ($issueRows as $issueRow) {
+                $issueDateValue = isset($issueRow['work_date']) ? trim((string)$issueRow['work_date']) : '';
+                if ($issueDateValue === '' || $issueDateValue < $attendanceIssueSince) continue;
+                $issueCheckIn = isset($issueRow['check_in']) ? trim((string)$issueRow['check_in']) : '';
+                $issueCheckOut = isset($issueRow['check_out']) ? trim((string)$issueRow['check_out']) : '';
+                if ($issueCheckIn !== '') $attendanceRecordDateMap[$issueDateValue] = true;
+                $issueMissing = cpms_dashboard_attendance_is_missing_checkout($issueDateValue, $issueCheckIn, $issueCheckOut, $today_att, $attendanceNowTime_att, $attendanceMissingCheckoutCutoff);
+                $issueLate = cpms_dashboard_attendance_is_late($issueCheckIn);
+                if (!$issueMissing && !$issueLate) continue;
+                $issueRow['_missing_checkout'] = $issueMissing ? 1 : 0;
+                $issueRow['_late'] = $issueLate ? 1 : 0;
+                $issueRow['_absent'] = 0;
+                if ($issueMissing) $myMissingCheckoutCount++;
+                if ($issueLate) $myLateCount++;
+                if ($attendanceIssueMonth === 'all' || substr($issueDateValue, 0, 7) === $attendanceIssueMonth) {
+                    if ($issueMissing) $myFilteredMissingCheckoutCount++;
+                    if ($issueLate) $myFilteredLateCount++;
+                    $myAttendanceIssues[count($myAttendanceIssues)] = $issueRow;
+                }
+            }
+        }
+        $absenceTs = strtotime($attendanceIssueSince);
+        $absenceEndTs = strtotime($today_att);
+        while ($absenceTs !== false && $absenceEndTs !== false && $absenceTs <= $absenceEndTs) {
+            $absenceDate = date('Y-m-d', $absenceTs);
+            $showTodayAbsence = ($absenceDate < $today_att || ($absenceDate === $today_att && strcmp($attendanceNowTime_att, $attendanceMissingCheckoutCutoff) >= 0));
+            if ($showTodayAbsence && cpms_dashboard_attendance_is_business_day($absenceDate) && !isset($attendanceLeaveMap[$absenceDate]) && !isset($attendanceRecordDateMap[$absenceDate])) {
+                $absentRow = array(
+                    'id' => 0,
+                    'work_date' => $absenceDate,
+                    'check_in' => '',
+                    'check_out' => '',
+                    'status' => '미출근',
+                    'created_at' => '',
+                    'updated_at' => '',
+                    '_missing_checkout' => 0,
+                    '_late' => 0,
+                    '_absent' => 1
+                );
+                $myAbsentCount++;
+                if ($attendanceIssueMonth === 'all' || substr($absenceDate, 0, 7) === $attendanceIssueMonth) {
+                    $myFilteredAbsentCount++;
+                    $myAttendanceIssues[count($myAttendanceIssues)] = $absentRow;
+                }
+            }
+            $absenceTs = strtotime('+1 day', $absenceTs);
+        }
+        usort($myAttendanceIssues, function($a, $b) {
+            $ad = isset($a['work_date']) ? (string)$a['work_date'] : '';
+            $bd = isset($b['work_date']) ? (string)$b['work_date'] : '';
+            if ($ad === $bd) return 0;
+            return ($ad > $bd) ? -1 : 1;
+        });
 
         if ($todayRow) {
             $todayInState = (isset($todayRow['check_in']) && $todayRow['check_in']) ? '처리' : '미처리';
@@ -337,7 +511,24 @@ if ($pdo && $eid_att > 0) {
 <div class='grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 text-base'>
 <div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>오늘 상태</div><div class='font-extrabold text-lg'><?php echo h(isset($todayRow['status'])?$todayRow['status']:'출근 전');?></div></div>
 <div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>출근 / 퇴근</div><div class='font-extrabold text-lg'><?php if($todayMismatch){ ?>날짜 불일치 기록 감지<br><span class='text-red-600 text-base'>관리자 확인 필요</span><?php } else { ?><?php echo h(isset($todayRow['check_in'])&&$todayRow['check_in']?$todayRow['check_in']:'-');?> / <?php echo h(isset($todayRow['check_out'])&&$todayRow['check_out']?$todayRow['check_out']:'-');?><?php } ?></div></div>
-<div class='p-4 rounded-2xl bg-gray-50'><div class='text-gray-500'>이번 주 누적 근무시간</div><div class='font-extrabold text-lg'><?php echo attendance_hm($weekWork);?></div></div>
+<div class='p-4 rounded-2xl bg-gray-50'>
+    <div class='text-gray-500'>선택 주 누적 근무시간</div>
+    <div class='font-extrabold text-lg'><?php echo attendance_hm($weekWork);?></div>
+    <div class='text-xs text-gray-500 mt-1'><?php echo h($attendanceWorkWeekLabel !== '' ? $attendanceWorkWeekLabel : '선택 주'); ?> · <?php echo h($attendanceWorkWeekRangeLabel); ?></div>
+    <form method='get' action='' class='mt-3 flex flex-wrap items-center gap-2'>
+        <input type='hidden' name='r' value='대시보드'>
+        <input type='hidden' name='dv' value='employee'>
+        <input type='hidden' name='period' value='<?php echo h($period); ?>'>
+        <input type='month' name='attendance_work_month' value='<?php echo h($attendanceWorkMonth); ?>' class='px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm' onchange='this.form.submit()'>
+        <select name='attendance_work_week' class='px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm' onchange='this.form.submit()'>
+            <?php foreach($attendanceWorkWeekOptions as $weekOption): ?>
+                <option value='<?php echo h(isset($weekOption['value']) ? $weekOption['value'] : ''); ?>' <?php echo (isset($weekOption['start']) && $weekOption['start'] === $ws_att) ? 'selected' : ''; ?>>
+                    <?php echo h((isset($weekOption['label']) ? $weekOption['label'] : '') . ' (' . (isset($weekOption['range_label']) ? $weekOption['range_label'] : '') . ')'); ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+    </form>
+</div>
 </div>
 
 <?php
@@ -397,24 +588,41 @@ if($pdo&&$eid_att>0){
 ?>
 <div class='mt-5 pt-5 border-t border-gray-100'><!-- 휴가 현황 잔여만 표시 -->
 <h4 class='text-xl font-extrabold mb-4'>휴가 현황</h4>
+<div class='grid grid-cols-1 md:grid-cols-4 gap-3'>
 <?php if(!$vac['has_hire_date']): ?>
-<div class='p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800'>
+<div class='md:col-span-2 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800'>
   <div class='font-extrabold text-lg'>휴가 계산 불가</div>
   <div class='text-sm mt-1'>직원명부에서 입사일을 입력해주세요.</div>
 </div>
 <?php else: ?>
-<div class='grid grid-cols-1 md:grid-cols-2 gap-4'>
-  <div class='p-5 rounded-2xl bg-blue-50 border border-blue-100'>
+  <div class='p-4 rounded-2xl bg-blue-50 border border-blue-100'>
     <div class='text-gray-600 text-sm'><?php echo ($vac['display_type']==='monthly')?'월차 잔여':'연차 잔여';?></div>
-    <div class='font-extrabold text-4xl <?php echo ((float)$vac['display_balance']<0)?'text-rose-700':'text-blue-700';?> mt-2'><?php echo h(attendance_float_fmt($vac['display_balance']));?><span class='text-xl ml-1'>일</span></div><?php if((float)$vac['display_balance']<0){ ?><div class='mt-2 text-sm text-rose-700 font-bold'>마이너스 잔여 (청산필요)</div><?php } ?>
+    <div class='font-extrabold text-3xl <?php echo ((float)$vac['display_balance']<0)?'text-rose-700':'text-blue-700';?> mt-2'><?php echo h(attendance_float_fmt($vac['display_balance']));?><span class='text-base ml-1'>일</span></div><?php if((float)$vac['display_balance']<0){ ?><div class='mt-2 text-xs text-rose-700 font-bold'>마이너스 잔여 (청산필요)</div><?php } ?>
   </div>
-  <div class='p-5 rounded-2xl bg-gray-50 border border-gray-100'>
+  <div class='p-4 rounded-2xl bg-gray-50 border border-gray-100'>
     <div class='text-gray-600 text-sm'>반차 가능</div>
-    <div class='mt-3'>
-      <span class='inline-flex items-center px-4 py-1 rounded-full text-base font-extrabold <?php echo $vac['half_available']?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700';?>'><?php echo $vac['half_available']?'가능':'불가';?></span>
+    <div class='mt-2'>
+      <span class='inline-flex items-center px-3 py-1 rounded-full text-sm font-extrabold <?php echo $vac['half_available']?'bg-emerald-100 text-emerald-700':'bg-red-100 text-red-700';?>'><?php echo $vac['half_available']?'가능':'불가';?></span>
+    </div>
+  </div>
+<?php endif; ?>
+  <div class='md:col-span-2 p-4 rounded-2xl bg-rose-50 border border-rose-100 hover:bg-rose-100 transition cursor-pointer' data-attendance-issue-open role='button' tabindex='0'>
+    <div class='flex items-start justify-between gap-3'>
+      <div class='min-w-0'>
+        <div class='text-gray-700 text-sm font-bold'>나의 근태 미처리 현황</div>
+        <div class='mt-2 flex flex-wrap items-end gap-2'>
+          <span class='font-extrabold text-3xl text-rose-700'><?php echo (int)($myMissingCheckoutCount + $myAbsentCount); ?><span class='text-base ml-1'>건</span></span>
+          <span class='inline-flex items-center px-2 py-1 rounded-full text-xs font-extrabold bg-rose-100 text-rose-700'>퇴근 <?php echo (int)$myMissingCheckoutCount; ?>건</span>
+          <span class='inline-flex items-center px-2 py-1 rounded-full text-xs font-extrabold bg-slate-200 text-slate-800'>미출근 <?php echo (int)$myAbsentCount; ?>건</span>
+          <span class='inline-flex items-center px-2 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800'>지각 <?php echo (int)$myLateCount; ?>건</span>
+        </div>
+        <div class='mt-2 text-xs text-gray-600'>클릭하면 전체 미출근, 퇴근 미처리와 지각 기록을 확인합니다.</div>
+      </div>
+      <button type='button' data-attendance-request-open data-attendance-request-type='check_out' class='shrink-0 px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold'>요청보내기</button>
     </div>
   </div>
 </div>
+<?php if($vac['has_hire_date']): ?>
 <?php if($vac['display_type']!=='monthly'): ?>
 <div class='text-sm text-gray-600 mt-3'>
     입사 1년 이상은 연차 기준으로 표시됩니다.
@@ -424,6 +632,79 @@ if($pdo&&$eid_att>0){
 </div>
 <?php endif; ?>
 <?php endif; ?>
+</div></div>
+<div id='attendanceIssueModal' class='fixed inset-0 z-50 hidden'><!-- 내 퇴근 미처리/지각 현황 모달 -->
+<div class='absolute inset-0 bg-black/50' data-attendance-issue-close></div>
+<div class='relative max-w-5xl mx-auto mt-10 mb-10 bg-white rounded-3xl border shadow-2xl p-6 max-h-[85vh] overflow-y-auto'>
+<div class='flex flex-wrap items-start justify-between gap-3 mb-4'>
+    <div>
+        <h3 class='text-2xl font-extrabold'>나의 근태 미처리/지각 현황</h3>
+        <div class='text-sm text-gray-600 mt-1'>전체 퇴근 미처리 <?php echo (int)$myMissingCheckoutCount; ?>건 · 미출근 <?php echo (int)$myAbsentCount; ?>건 · 지각 <?php echo (int)$myLateCount; ?>건</div>
+    </div>
+    <div class='flex items-center gap-2'>
+        <button type='button' data-attendance-request-open data-attendance-request-type='check_out' class='px-4 py-2 rounded-xl bg-gray-900 text-white font-bold'>요청보내기</button>
+        <button type='button' data-attendance-issue-close class='px-4 py-2 rounded-xl bg-gray-100 font-bold'>닫기</button>
+    </div>
+</div>
+<div class='mb-3 flex flex-wrap items-end justify-between gap-3'>
+    <div>
+        <div class='text-sm font-bold text-gray-900'><?php echo h($attendanceIssueRangeLabel); ?></div>
+        <div class='text-xs text-gray-500 mt-1'>선택 범위 퇴근 미처리 <?php echo (int)$myFilteredMissingCheckoutCount; ?>건 · 미출근 <?php echo (int)$myFilteredAbsentCount; ?>건 · 지각 <?php echo (int)$myFilteredLateCount; ?>건 · 오늘 미출근/퇴근 미처리는 18:00 이후부터 표시됩니다.</div>
+    </div>
+    <form method='get' action='' class='flex items-center gap-2'>
+        <input type='hidden' name='r' value='대시보드'>
+        <select name='attendance_issue_month' class='px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold' onchange='this.form.submit()'>
+            <option value='all' <?php echo ($attendanceIssueMonth === 'all') ? 'selected' : ''; ?>>전체</option>
+            <?php foreach($attendanceIssueMonthOptions as $issueMonthOption): ?>
+                <option value='<?php echo h($issueMonthOption['value']); ?>' <?php echo ($attendanceIssueMonth === $issueMonthOption['value']) ? 'selected' : ''; ?>><?php echo h($issueMonthOption['label']); ?></option>
+            <?php endforeach; ?>
+        </select>
+        <button type='submit' class='px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-bold'>조회</button>
+    </form>
+</div>
+<div class='overflow-x-auto border rounded-2xl'>
+    <table class='min-w-full text-sm'>
+        <tr class='bg-gray-50'>
+            <th class='p-2 text-left'>근무일</th>
+            <th class='p-2 text-left'>구분</th>
+            <th class='p-2 text-left'>출근</th>
+            <th class='p-2 text-left'>퇴근</th>
+            <th class='p-2 text-left'>상태</th>
+            <th class='p-2 text-left'>요청</th>
+        </tr>
+        <?php if (count($myAttendanceIssues) === 0): ?>
+            <tr><td colspan='6' class='p-5 text-center text-gray-500'>미출근, 퇴근 미처리 또는 지각 기록이 없습니다.</td></tr>
+        <?php else: ?>
+            <?php foreach($myAttendanceIssues as $issueRow): ?>
+                <?php
+                $issueDate = isset($issueRow['work_date']) ? (string)$issueRow['work_date'] : '';
+                $issueCheckIn = isset($issueRow['check_in']) ? trim((string)$issueRow['check_in']) : '';
+                $issueCheckOut = isset($issueRow['check_out']) ? trim((string)$issueRow['check_out']) : '';
+                $issueMissing = !empty($issueRow['_missing_checkout']);
+                $issueLate = !empty($issueRow['_late']);
+                $issueAbsent = !empty($issueRow['_absent']);
+                $issueRequestType = $issueAbsent ? 'check_in' : (($issueMissing && $issueLate) ? 'both' : ($issueMissing ? 'check_out' : 'check_in'));
+                ?>
+                <tr class='border-t'>
+                    <td class='p-2 whitespace-nowrap font-bold text-gray-900'><?php echo h($issueDate); ?></td>
+                    <td class='p-2'>
+                        <div class='flex flex-wrap gap-1'>
+                            <?php if($issueAbsent): ?><span class='inline-flex items-center px-2 py-1 rounded-full text-xs font-extrabold bg-slate-200 text-slate-800'>미출근</span><?php endif; ?>
+                            <?php if($issueMissing): ?><span class='inline-flex items-center px-2 py-1 rounded-full text-xs font-extrabold bg-rose-100 text-rose-700'>퇴근 미처리</span><?php endif; ?>
+                            <?php if($issueLate): ?><span class='inline-flex items-center px-2 py-1 rounded-full text-xs font-extrabold bg-amber-100 text-amber-800'>지각</span><?php endif; ?>
+                        </div>
+                    </td>
+                    <td class='p-2 whitespace-nowrap'><?php echo h(cpms_dashboard_attendance_time($issueCheckIn)); ?></td>
+                    <td class='p-2 whitespace-nowrap'><?php echo h($issueCheckOut !== '' ? cpms_dashboard_attendance_time($issueCheckOut) : '-'); ?></td>
+                    <td class='p-2 whitespace-nowrap'><?php echo h(isset($issueRow['status']) ? (string)$issueRow['status'] : ''); ?></td>
+                    <td class='p-2 whitespace-nowrap'>
+                        <button type='button' data-attendance-request-open data-attendance-request-date='<?php echo h($issueDate); ?>' data-attendance-request-type='<?php echo h($issueRequestType); ?>' class='px-3 py-1 rounded-xl bg-blue-600 text-white text-xs font-extrabold'>요청보내기</button>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+        <?php endif; ?>
+    </table>
+</div>
 </div></div>
 <div id='attendanceRequestModal' class='fixed inset-0 z-50 hidden'><!-- 출퇴근 요청 모달 -->
 <div class='absolute inset-0 bg-black/50' data-attendance-request-close></div><div class='relative max-w-5xl mx-auto mt-10 mb-10 bg-white rounded-3xl border shadow-2xl p-6 max-h-[85vh] overflow-y-auto'>
@@ -482,17 +763,17 @@ if($pdo&&$eid_att>0){
 <script>
 (function(){
     try{
+        var issueModal=document.getElementById('attendanceIssueModal');
         var m=document.getElementById('attendanceRequestModal');
-        if(!m)return;
-        var o=document.querySelector('[data-attendance-request-open]');
-        var cs=m.querySelectorAll('[data-attendance-request-close]');
-        var form=m.querySelector('[data-attendance-request-form]');
-        var fDate=m.querySelector('input[name="request_date"]');
-        var fType=m.querySelector('select[name="request_type"]');
-        var fCi=m.querySelector('input[name="requested_check_in"]');
-        var fCo=m.querySelector('input[name="requested_check_out"]');
-        var help=m.querySelector('[data-attendance-request-help]');
-        var submitBtn=m.querySelector('[data-attendance-request-submit]');
+        var todayValue=<?php echo json_encode($today_att); ?>;
+        var cs=m?m.querySelectorAll('[data-attendance-request-close]'):[];
+        var form=m?m.querySelector('[data-attendance-request-form]'):null;
+        var fDate=m?m.querySelector('input[name="request_date"]'):null;
+        var fType=m?m.querySelector('select[name="request_type"]'):null;
+        var fCi=m?m.querySelector('input[name="requested_check_in"]'):null;
+        var fCo=m?m.querySelector('input[name="requested_check_out"]'):null;
+        var help=m?m.querySelector('[data-attendance-request-help]'):null;
+        var submitBtn=m?m.querySelector('[data-attendance-request-submit]'):null;
         var submitting=false;
         function syncDate(v){if(!fDate||!v)return;var d=(v+'').substr(0,10);if(d.length===10)fDate.value=d;}
         function setDisabled(input, disabled){if(!input)return;input.disabled=disabled;if(disabled)input.value='';}
@@ -512,10 +793,64 @@ if($pdo&&$eid_att>0){
                 if(help)help.textContent='출근+퇴근 수정은 출근시간과 퇴근시간을 모두 선택할 수 있습니다.';
             }
         }
-        function op(){m.classList.remove('hidden');document.body.classList.add('overflow-hidden');}
-        function cl(){m.classList.add('hidden');document.body.classList.remove('overflow-hidden');}
-        if(o)o.addEventListener('click',op);
-        for(var i=0;i<cs.length;i++){cs[i].addEventListener('click',cl);}
+        function bodyUnlockIfIdle(){
+            var requestOpen=(m && !m.classList.contains('hidden'));
+            var issueOpen=(issueModal && !issueModal.classList.contains('hidden'));
+            if(!requestOpen && !issueOpen)document.body.classList.remove('overflow-hidden');
+        }
+        function openIssue(){
+            if(!issueModal)return;
+            issueModal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+        }
+        function closeIssue(){
+            if(!issueModal)return;
+            issueModal.classList.add('hidden');
+            bodyUnlockIfIdle();
+        }
+        function openRequest(trigger,e){
+            if(e && e.stopPropagation)e.stopPropagation();
+            if(!m)return;
+            if(issueModal)issueModal.classList.add('hidden');
+            var reqDate=trigger?trigger.getAttribute('data-attendance-request-date'):'';
+            var reqType=trigger?trigger.getAttribute('data-attendance-request-type'):'';
+            if(fDate)fDate.value=reqDate?reqDate:todayValue;
+            if(fType)fType.value=reqType?reqType:'check_in';
+            if(fCi)fCi.value='';
+            if(fCo)fCo.value='';
+            syncType();
+            m.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+            setTimeout(function(){
+                var target=null;
+                var type=fType?fType.value:'check_in';
+                if(type==='check_out')target=fCo;
+                else target=fCi;
+                if(target && !target.disabled)target.focus();
+            },0);
+        }
+        function closeRequest(){
+            if(!m)return;
+            m.classList.add('hidden');
+            bodyUnlockIfIdle();
+        }
+        var issueOpeners=document.querySelectorAll('[data-attendance-issue-open]');
+        for(var oi=0;oi<issueOpeners.length;oi++){
+            issueOpeners[oi].addEventListener('click',function(e){openIssue();});
+            issueOpeners[oi].addEventListener('keydown',function(e){
+                var key=e.key||e.keyCode;
+                if(key==='Enter'||key===' '||key===13||key===32){e.preventDefault();openIssue();}
+            });
+        }
+        if(issueModal){
+            var issueClose=issueModal.querySelectorAll('[data-attendance-issue-close]');
+            for(var ic=0;ic<issueClose.length;ic++){issueClose[ic].addEventListener('click',closeIssue);}
+        }
+        var requestOpeners=document.querySelectorAll('[data-attendance-request-open]');
+        for(var ro=0;ro<requestOpeners.length;ro++){
+            requestOpeners[ro].addEventListener('click',function(e){openRequest(this,e);});
+        }
+        for(var i=0;i<cs.length;i++){cs[i].addEventListener('click',closeRequest);}
         if(fType)fType.addEventListener('change',syncType);
         if(fCi)fCi.addEventListener('change',function(){syncDate(this.value);});
         if(fCo)fCo.addEventListener('change',function(){syncDate(this.value);});
@@ -527,8 +862,14 @@ if($pdo&&$eid_att>0){
             });
         }
         syncType();
-        if(window.location.search.indexOf('attendance_request_month=')!==-1)op();
-        document.addEventListener('keydown',function(e){if(e.key==='Escape')cl();});
+        if(window.location.search.indexOf('attendance_issue_month=')!==-1)openIssue();
+        if(window.location.search.indexOf('attendance_request_month=')!==-1)openRequest(null,null);
+        document.addEventListener('keydown',function(e){
+            if(e.key==='Escape'||e.keyCode===27){
+                if(m && !m.classList.contains('hidden'))closeRequest();
+                else closeIssue();
+            }
+        });
     }catch(e){}
 })();
 </script>

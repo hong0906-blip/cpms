@@ -33,6 +33,13 @@ function cpms_issue_state_save_column_exists($pdo, $table, $column)
 
 function cpms_issue_state_save_redirect_url($redirectKey, $projectId)
 {
+    if ($redirectKey === 'construction_security' || $redirectKey === 'security') {
+        if ((int)$projectId > 0) {
+            return '?r=construction_home&pid=' . (int)$projectId . '&tab=security';
+        }
+        return '?r=construction_home&tab=security';
+    }
+
     if ($redirectKey === 'construction') {
         if ((int)$projectId > 0) {
             return '?r=construction_home&pid=' . (int)$projectId . '&tab=issues';

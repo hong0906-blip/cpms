@@ -18,6 +18,9 @@ $laborTabs = array(
 if (!$canEditLabor && isset($laborTabs['workers'])) unset($laborTabs['workers']);
 if (!isset($laborTabs[$laborTab])) $laborTab = 'timesheet';
 
+$laborSort = isset($_GET['labor_sort']) ? trim((string)$_GET['labor_sort']) : 'name';
+if (!in_array($laborSort, array('name', 'company'), true)) $laborSort = 'name';
+
 // 월 목록(프로젝트 기간 기준)
 $months = array();
 $monthLabels = array();
@@ -70,7 +73,7 @@ try {
     $canDownload = false;
 }
 
-$downloadUrl = base_url() . '/?r=construction/labor_sheet_download&pid=' . (int)$pid . '&month=' . urlencode($selectedMonth);
+$downloadUrl = base_url() . '/?r=construction/labor_sheet_download&pid=' . (int)$pid . '&month=' . urlencode($selectedMonth) . '&labor_sort=' . urlencode($laborSort);
 
 require_once __DIR__ . '/partials/labor_data_loader.php';
 
@@ -154,6 +157,9 @@ if (is_array($timesheetWorkers)) {
         $filteredTimesheetWorkers[] = $worker;
     }
     $timesheetWorkers = $filteredTimesheetWorkers;
+}
+if (function_exists('cpms_sort_labor_workers')) {
+    $timesheetWorkers = cpms_sort_labor_workers($timesheetWorkers, $laborSort);
 }
 
 $workerRowsForSelectedMonth = array();
@@ -255,7 +261,7 @@ foreach ($timesheetWorkers as $worker) {
             <div>
                 <label class="text-xs font-bold text-gray-500">월 선택</label>
                 <select class="mt-1 px-3 py-2 rounded-xl border border-gray-200 text-sm"
-                        onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=<?php echo h($laborTab); ?>&month=' + encodeURIComponent(this.value)">
+                        onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=<?php echo h($laborTab); ?>&labor_sort=<?php echo h($laborSort); ?>&month=' + encodeURIComponent(this.value)">
                     <?php foreach ($months as $ym): ?>
                         <option value="<?php echo h($ym); ?>" <?php echo ($ym === $selectedMonth) ? 'selected' : ''; ?>>
                             <?php echo h(isset($monthLabels[$ym]) ? $monthLabels[$ym] : $ym); ?>
@@ -263,6 +269,16 @@ foreach ($timesheetWorkers as $worker) {
                     <?php endforeach; ?>
                 </select>
             </div>
+            <?php if ($laborTab === 'timesheet'): ?>
+            <div>
+                <label class="text-xs font-bold text-gray-500">인원 정렬</label>
+                <select class="mt-1 px-3 py-2 rounded-xl border border-gray-200 text-sm"
+                        onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=timesheet&month=<?php echo h($selectedMonth); ?>&labor_sort=' + encodeURIComponent(this.value)">
+                    <option value="name" <?php echo ($laborSort === 'name') ? 'selected' : ''; ?>>이름순</option>
+                    <option value="company" <?php echo ($laborSort === 'company') ? 'selected' : ''; ?>>인력사업체명순</option>
+                </select>
+            </div>
+            <?php endif; ?>
 
             <?php if ($canEditLabor && $canDownload): ?>
                 <a href="<?php echo h($downloadUrl); ?>"
@@ -360,7 +376,7 @@ foreach ($timesheetWorkers as $worker) {
 
 <div class="flex flex-wrap gap-2 mt-4 mb-6">
     <?php foreach ($laborTabs as $k => $label): ?>
-        <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=<?php echo h($k); ?>&month=<?php echo h($selectedMonth); ?>"
+        <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=<?php echo h($k); ?>&month=<?php echo h($selectedMonth); ?>&labor_sort=<?php echo h($laborSort); ?>"
            class="px-4 py-2 rounded-2xl border font-extrabold <?php echo ($k===$laborTab)?'bg-gray-900 text-white border-gray-900':'bg-white text-gray-900 border-gray-200 hover:bg-gray-50'; ?>">
             <?php echo h($label); ?>
         </a>
@@ -648,8 +664,8 @@ foreach ($timesheetWorkers as $worker) {
             <div class="p-6 space-y-4">
                 <div class="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800 leading-6">
                     <div>1.2 미만은 즉시 반영됩니다.</div>
-                    <div>1.2 이상 1.4 미만은 박원덕 상무 승인 후 반영됩니다.</div>
-                    <div>1.4 이상은 박원덕 상무 승인 후 부사장 승인까지 완료되어야 반영됩니다.</div>
+                    <div>1.2 이상 1.4 미만은 공사PM 승인 후 반영됩니다.</div>
+                    <div>1.4 이상은 공사PM 승인 후 부사장 승인까지 완료되어야 반영됩니다.</div>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                     <div>

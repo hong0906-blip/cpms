@@ -63,7 +63,7 @@ if (!function_exists('approval_role_label')) {
         $map = array(
             'site_manager' => approval_ko('%EC%86%8C%EC%9E%A5'),
             'sojang' => approval_ko('%EC%86%8C%EC%9E%A5'),
-            'pm' => 'PM',
+            'pm' => approval_ko('%EA%B3%B5%EC%82%AC%50%4D'),
             'gongmu' => approval_ko('%EA%B3%B5%EB%AC%B4'),
             'manage' => approval_ko('%EA%B4%80%EB%A6%AC'),
             'admin' => approval_ko('%EA%B4%80%EB%A6%AC'),
@@ -104,6 +104,9 @@ if (!function_exists('approval_doc_label')) {
         if ($type === 'proposal') {
             return approval_ko('%EA%B8%B0%EC%95%88%EC%84%9C');
         }
+        if ($type === 'small_proposal') {
+            return approval_ko('%31%30%EB%A7%8C%EC%9B%90%20%EC%9D%B4%ED%95%98%20%EC%86%8C%EC%95%A1%EA%B8%B0%EC%95%88%EC%84%9C');
+        }
         if ($type === 'unused_leave_notice') {
             return approval_ko('%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EC%B4%89%EA%B5%AC%EC%84%9C');
         }
@@ -111,6 +114,14 @@ if (!function_exists('approval_doc_label')) {
             return approval_ko('%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EA%B3%84%ED%9A%8D%EC%84%9C');
         }
         return $type === '' ? approval_ko('%EB%AC%B8%EC%84%9C') : (string)$type;
+    }
+}
+
+if (!function_exists('approval_is_proposal_doc_type')) {
+    function approval_is_proposal_doc_type($type)
+    {
+        $type = strtolower(trim((string)$type));
+        return in_array($type, array('proposal', 'small_proposal'), true);
     }
 }
 
@@ -126,7 +137,7 @@ if (!function_exists('approval_auto_delegate_target_doc_type')) {
     function approval_auto_delegate_target_doc_type($type)
     {
         $type = strtolower(trim((string)$type));
-        return in_array($type, array('leave', 'proposal'), true);
+        return ($type === 'leave' || approval_is_proposal_doc_type($type));
     }
 }
 
@@ -196,9 +207,11 @@ if (!function_exists('approval_role_is_ceo')) {
 if (!function_exists('approval_role_is_team_or_pm')) {
     function approval_role_is_team_or_pm($role)
     {
+        $roleRawNorm = approval_normalize_compare_text($role);
         $roleNorm = approval_normalize_compare_text(approval_role_label($role));
         $teamNorm = approval_normalize_compare_text(approval_ko('%ED%8C%80%EC%9E%A5'));
-        return ($roleNorm === 'pm' || $roleNorm === $teamNorm);
+        $constructionPmNorm = approval_normalize_compare_text(approval_ko('%EA%B3%B5%EC%82%AC%50%4D'));
+        return ($roleRawNorm === 'pm' || $roleNorm === 'pm' || $roleRawNorm === $constructionPmNorm || $roleNorm === $constructionPmNorm || $roleNorm === $teamNorm);
     }
 }
 

@@ -56,7 +56,7 @@ $monthSelectMessage = isset($monthData['message']) ? (string)$monthData['message
 $year = (int)substr($ym, 0, 4);
 $month = (int)substr($ym, 5, 2);
 
-$baseUrl = base_url() . '/?r=공사&pid=' . (int)$pid . '&tab=materials';
+$baseUrl = base_url() . '/?r=construction_home&pid=' . (int)$pid . '&tab=materials';
 // 달력 전월/현월 계산 수정
 $currFirst = new DateTime($ym . '-01');
 $prevFirst = clone $currFirst;
@@ -404,6 +404,63 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
 
     <?php if ($materialsTab === 'input'): ?>
         <?php if ($canEditMaterials): ?>
+        <div class="mt-6 md:hidden border border-blue-200 bg-blue-50 rounded-2xl p-4">
+            <div class="text-lg font-extrabold text-gray-900 mb-3">모바일 간편 입력</div>
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_item_save" class="space-y-3" id="materialMobileQuickForm" enctype="multipart/form-data">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                <input type="hidden" name="materials_tab" value="input">
+                <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+                <input type="hidden" name="usage_dates[]" id="materialMobileQuickDate" value="">
+
+                <div class="grid grid-cols-1 gap-2">
+                    <select name="category" class="px-3 py-3 border rounded-xl bg-white" required>
+                        <option value="자재비">자재비</option>
+                        <option value="구매품">구매품</option>
+                        <option value="기타경비">기타경비</option>
+                    </select>
+                    <select name="advance_yn" class="px-3 py-3 border rounded-xl bg-white" required>
+                        <option value="N">선급 N</option>
+                        <option value="Y">선급 Y</option>
+                    </select>
+                    <input type="text" name="vendor_name" class="px-3 py-3 border rounded-xl bg-white" placeholder="업체명" required lang="ko" inputmode="text" autocomplete="off">
+                    <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-3 border rounded-xl bg-white" placeholder="공급가액" required>
+                    <select name="amount_sign" class="px-3 py-3 border rounded-xl bg-white" required>
+                        <option value="plus">+ 일반</option>
+                        <option value="minus">- 공제</option>
+                    </select>
+                    <input type="text" name="remark" class="px-3 py-3 border rounded-xl bg-white" placeholder="비고" lang="ko" inputmode="text" autocomplete="off">
+                </div>
+
+                <div class="rounded-xl border border-blue-100 bg-white p-3">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <div class="text-sm font-bold text-gray-700">사용일자</div>
+                        <div class="text-xs font-bold text-blue-700" id="materialMobileQuickDateLabel">날짜 미선택</div>
+                    </div>
+                    <div class="grid grid-cols-5 gap-1">
+                        <?php foreach ($dateSlots as $slot): ?>
+                            <?php if (!$slot['valid']) continue; ?>
+                            <button type="button"
+                                    class="h-9 rounded-lg border border-gray-200 bg-white text-xs font-bold text-gray-700"
+                                    data-material-quick-date
+                                    data-target="materialMobileQuickDate"
+                                    data-label-target="materialMobileQuickDateLabel"
+                                    data-date="<?php echo h($slot['date']); ?>">
+                                <?php echo h($slot['label']); ?>
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <div class="border border-blue-100 rounded-xl p-3 bg-white">
+                    <label class="text-sm font-bold text-gray-700">거래명세표 첨부</label>
+                    <input type="file" name="statement_file" accept="image/*,.pdf,.xlsx,.xls" capture="environment" class="mt-2 block w-full text-sm border rounded-xl px-3 py-2 bg-white">
+                </div>
+
+                <button type="submit" class="w-full px-4 py-3 rounded-xl bg-blue-600 text-white font-extrabold">간편 저장</button>
+            </form>
+        </div>
+
         <div class="mt-6 grid grid-cols-1 <?php echo $hideMaterialMonthlyExcelUploadCard ? '' : 'lg:grid-cols-2'; ?> gap-6">
             <div class="border border-gray-200 rounded-2xl p-4">
                 <!-- 자재 입력 모달→토글형 인라인 통일 -->
@@ -441,6 +498,10 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <input type="text" name="biz_no" class="px-3 py-2 border rounded-xl" placeholder="사업자등록번호" lang="ko" inputmode="text" autocomplete="off">
                         <!-- 자재: 공급가액 표기 -->
                         <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-2 border rounded-xl" placeholder="공급가액">
+                        <select name="amount_sign" class="px-3 py-2 border rounded-xl">
+                            <option value="plus">+ 일반</option>
+                            <option value="minus">- 공제</option>
+                        </select>
                         <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고" lang="ko" inputmode="text" autocomplete="off">
                     </div>
 
@@ -687,11 +748,14 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <th class="p-2 border text-right">금액</th>
                         <th class="p-2 border text-left">비고</th>
                         <th class="p-2 border text-left">거래명세표</th>
+                        <?php if ($canEditMaterials): ?>
+                            <th class="p-2 border text-center">수정</th>
+                        <?php endif; ?>
                     </tr>
                     </thead>
                     <tbody>
                     <?php if (count($usageRows) === 0): ?>
-                        <tr><td colspan="<?php echo $canEditMaterials ? 8 : 7; ?>" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
+                        <tr><td colspan="<?php echo $canEditMaterials ? 9 : 7; ?>" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
                     <?php else: ?>
                         <?php foreach ($usageRows as $ur): ?>
                             <?php
@@ -718,6 +782,21 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                         <?php echo material_statement_links_html($listFiles, '거래명세표 다운로드', $canDownloadMaterialStatements, '첨부 없음'); ?>
                                     </div>
                                 </td>
+                                <?php if ($canEditMaterials): ?>
+                                    <td class="p-2 border text-center">
+                                        <?php if ($usageIdForList > 0): ?>
+                                            <button type="button"
+                                                    class="px-3 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold"
+                                                    data-material-usage-edit
+                                                    data-usage-id="<?php echo (int)$usageIdForList; ?>"
+                                                    data-use-date="<?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?>"
+                                                    data-amount="<?php echo h(number_format(isset($ur['amount']) ? (float)$ur['amount'] : 0, 2, '.', '')); ?>"
+                                                    data-title="<?php echo h((isset($ur['vendor_name']) ? $ur['vendor_name'] : '') . ' / ' . material_category_label(isset($ur['category']) ? $ur['category'] : '')); ?>">
+                                                수정
+                                            </button>
+                                        <?php endif; ?>
+                                    </td>
+                                <?php endif; ?>
                             </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -728,6 +807,46 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             </form>
             <?php endif; ?>
         </div>
+
+        <?php if ($canEditMaterials): ?>
+        <div id="materialUsageEditModal" class="hidden fixed inset-0 z-50 bg-black/40 items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-md p-5">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <div class="text-lg font-extrabold text-gray-900">자재구입비 사용내역 수정</div>
+                        <div class="text-sm text-gray-500" id="materialUsageEditMeta"></div>
+                    </div>
+                    <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-material-usage-edit-close>닫기</button>
+                </div>
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_update" class="mt-4 space-y-3">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                    <input type="hidden" name="usage_id" id="materialUsageEditId" value="">
+                    <input type="hidden" name="materials_tab" value="input">
+                    <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">사용일자</span>
+                        <input type="date" name="use_date" id="materialUsageEditDate" min="<?php echo h($monthlyStart); ?>" max="<?php echo h($monthlyEnd); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                    </label>
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">금액 구분</span>
+                        <select name="amount_sign" id="materialUsageEditSign" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300">
+                            <option value="plus">+ 일반</option>
+                            <option value="minus">- 공제</option>
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">금액</span>
+                        <input type="number" step="0.01" name="amount" id="materialUsageEditAmount" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                    </label>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-2 rounded-xl border border-gray-300 font-bold" data-material-usage-edit-close>취소</button>
+                        <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">수정 저장</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <?php endif; ?>
 
 
         <script>
@@ -753,6 +872,75 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                 if (selected) return baseClass + ' bg-blue-600 text-white border-blue-600';
                 return baseClass + ' bg-white text-gray-700 border-gray-300 hover:bg-blue-50';
             }
+
+            function setMaterialQuickDateClass(btn, selected){
+                if (!btn) return;
+                btn.className = 'h-9 rounded-lg border text-xs font-bold ' + (selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-700');
+            }
+
+            document.addEventListener('click', function(e){
+                var dateBtn = e.target && e.target.closest ? e.target.closest('[data-material-quick-date]') : null;
+                if (!dateBtn) return;
+                var targetId = dateBtn.getAttribute('data-target') || '';
+                var labelTargetId = dateBtn.getAttribute('data-label-target') || '';
+                var value = dateBtn.getAttribute('data-date') || '';
+                var input = targetId ? document.getElementById(targetId) : null;
+                var label = labelTargetId ? document.getElementById(labelTargetId) : null;
+                if (input) input.value = value;
+                if (label) label.textContent = value || '날짜 미선택';
+                var form = dateBtn.closest('form');
+                if (form) {
+                    var buttons = form.querySelectorAll('[data-material-quick-date]');
+                    for (var i=0; i<buttons.length; i++) {
+                        setMaterialQuickDateClass(buttons[i], false);
+                    }
+                }
+                setMaterialQuickDateClass(dateBtn, true);
+            });
+
+            var materialQuickForm = document.getElementById('materialMobileQuickForm');
+            if (materialQuickForm) {
+                materialQuickForm.addEventListener('submit', function(e){
+                    var dateInput = document.getElementById('materialMobileQuickDate');
+                    if (!dateInput || dateInput.value === '') {
+                        e.preventDefault();
+                        alert('사용일자를 선택해주세요.');
+                    }
+                });
+            }
+
+            var materialUsageEditModal = document.getElementById('materialUsageEditModal');
+            var materialUsageEditId = document.getElementById('materialUsageEditId');
+            var materialUsageEditDate = document.getElementById('materialUsageEditDate');
+            var materialUsageEditAmount = document.getElementById('materialUsageEditAmount');
+            var materialUsageEditSign = document.getElementById('materialUsageEditSign');
+            var materialUsageEditMeta = document.getElementById('materialUsageEditMeta');
+            function showMaterialUsageEditModal(){
+                if (!materialUsageEditModal) return;
+                materialUsageEditModal.className = materialUsageEditModal.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').trim();
+                if (materialUsageEditModal.className.indexOf('flex') === -1) materialUsageEditModal.className += ' flex';
+            }
+            function hideMaterialUsageEditModal(){
+                if (!materialUsageEditModal) return;
+                materialUsageEditModal.className = materialUsageEditModal.className.replace(/\bflex\b/g, '').replace(/\s+/g, ' ').trim();
+                if (materialUsageEditModal.className.indexOf('hidden') === -1) materialUsageEditModal.className += ' hidden';
+            }
+            document.addEventListener('click', function(e){
+                var editBtn = e.target && e.target.closest ? e.target.closest('[data-material-usage-edit]') : null;
+                if (editBtn) {
+                    if (materialUsageEditId) materialUsageEditId.value = editBtn.getAttribute('data-usage-id') || '';
+                    if (materialUsageEditDate) materialUsageEditDate.value = editBtn.getAttribute('data-use-date') || '';
+                    var materialEditAmountRaw = parseFloat(editBtn.getAttribute('data-amount') || '0');
+                    if (materialUsageEditSign) materialUsageEditSign.value = materialEditAmountRaw < 0 ? 'minus' : 'plus';
+                    if (materialUsageEditAmount) materialUsageEditAmount.value = Math.abs(materialEditAmountRaw).toFixed(2);
+                    if (materialUsageEditMeta) materialUsageEditMeta.textContent = editBtn.getAttribute('data-title') || '';
+                    showMaterialUsageEditModal();
+                    return;
+                }
+                if (e.target && e.target.getAttribute && e.target.getAttribute('data-material-usage-edit-close') !== null) {
+                    hideMaterialUsageEditModal();
+                }
+            });
 
             // 업체 자동완성 이벤트 위임
             var createForm = document.getElementById('materialCreateForm');

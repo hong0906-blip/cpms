@@ -20,7 +20,7 @@ $role = Auth::userRole();
 $dept = Auth::userDepartment();
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
-if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) { flash_set('error', '보안 토큰 오류'); header('Location: ?r=공사'); exit; }
+if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) { flash_set('error', '보안 토큰 오류'); header('Location: ?r=construction_home'); exit; }
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $materialId = isset($_POST['material_id']) ? (int)$_POST['material_id'] : 0;
@@ -31,8 +31,9 @@ $usageDates = isset($_POST['usage_dates']) ? $_POST['usage_dates'] : array();
 $useDatesText = trim((string)(isset($_POST['use_dates']) ? $_POST['use_dates'] : ''));
 $memo = trim((string)(isset($_POST['memo']) ? $_POST['memo'] : ''));
 $advanceYn = cpms_material_advance_yn(isset($_POST['advance_yn']) ? $_POST['advance_yn'] : 'N');
+$amountSign = isset($_POST['amount_sign']) ? trim((string)$_POST['amount_sign']) : '';
 if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = $defaultYm;
-$redirect = '?r=공사&pid=' . $projectId . '&tab=materials&materials_tab=' . urlencode($materialsTab) . '&ym=' . urlencode($ym);
+$redirect = '?r=construction_home&pid=' . $projectId . '&tab=materials&materials_tab=' . urlencode($materialsTab) . '&ym=' . urlencode($ym);
 
 if ($projectId <= 0 || $materialId <= 0) {
     flash_set('error', '입력값이 올바르지 않습니다.');
@@ -126,6 +127,22 @@ function material_collect_usage_dates2($usageDates, $text, $ym)
 
     return array_keys($result);
 }
+
+function cpms_material_usage_save_apply_sign($amount, $signValue)
+{
+    $raw = trim((string)$amount);
+    $isNegative = (strpos($raw, '-') !== false);
+    $raw = str_replace(array(',', ' ', "\t", '원'), '', $raw);
+    $raw = preg_replace('/[^0-9.\-]/', '', $raw);
+    $amount = abs((float)$raw);
+    $signValue = trim((string)$signValue);
+    if ($signValue === '-' || $signValue === 'minus' || $signValue === 'deduct' || $signValue === 'negative') {
+        $isNegative = true;
+    } else if ($signValue === '+' || $signValue === 'plus' || $signValue === 'normal') {
+        $isNegative = false;
+    }
+    return $isNegative ? ($amount * -1) : $amount;
+}
 $pdo = Db::pdo();
 if ($pdo) cpms_material_usage_ensure_schema($pdo);
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
@@ -148,7 +165,8 @@ try {
         exit;
     }
 
-    $amount = isset($_POST['amount']) && $_POST['amount'] !== '' ? (float)$_POST['amount'] : (float)$item['base_rate'];
+    $amountSource = isset($_POST['amount']) && $_POST['amount'] !== '' ? $_POST['amount'] : $item['base_rate'];
+    $amount = cpms_material_usage_save_apply_sign($amountSource, $amountSign);
     $dates = material_collect_usage_dates2($usageDates, $useDatesText, $ym);
     if (count($dates) <= 0) {
         flash_set('error', '유효한 사용일자가 없습니다.');

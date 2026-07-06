@@ -141,7 +141,7 @@ if (!function_exists('approval_doc_type_label')) {
     function approval_doc_type_label($docType)
     {
         $t = trim((string)$docType);
-        if (in_array($t, array('leave', 'unused_leave_notice', 'unused_leave_plan'), true)) {
+        if (approval_is_proposal_doc_type($t) || in_array($t, array('leave', 'unused_leave_notice', 'unused_leave_plan'), true)) {
             return approval_doc_label($t);
         }
         return approval_doc_label('proposal');

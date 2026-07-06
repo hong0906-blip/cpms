@@ -99,6 +99,27 @@ function cpms_column_exists($pdo, $table, $column) {
     } catch (\Exception $e) { return false; }
 }}
 
+if (!function_exists('cpms_employee_table_exists')) {
+function cpms_employee_table_exists($pdo, $table) {
+    try {
+        $st = $pdo->prepare("SHOW TABLES LIKE :tbl");
+        $st->execute(array(':tbl' => $table));
+        return (bool)$st->fetch(PDO::FETCH_NUM);
+    } catch (\Exception $e) { return false; }
+}}
+
+if (!function_exists('cpms_employee_construction_pm_id')) {
+function cpms_employee_construction_pm_id($pdo) {
+    if (!$pdo || !cpms_employee_table_exists($pdo, 'cpms_approval_settings')) return 0;
+    try {
+        $st = $pdo->prepare("SELECT setting_value FROM cpms_approval_settings WHERE setting_key IN ('approval_construction_pm_employee_id','construction_pm_employee_id') AND setting_value IS NOT NULL AND TRIM(setting_value) <> '' ORDER BY CASE setting_key WHEN 'approval_construction_pm_employee_id' THEN 1 ELSE 2 END LIMIT 1");
+        $st->execute();
+        return (int)$st->fetchColumn();
+    } catch (\Exception $e) { return 0; }
+}}
+
+$constructionPmEmployeeId = $dbOk ? cpms_employee_construction_pm_id($pdo) : 0;
+
 // 직원명부 컬럼 존재 여부 체크
 $positionEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'position') : false;
 $hireDateEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'hire_date') : false;
@@ -315,19 +336,19 @@ function insertAfterId(anchorId, html) {
     var el = document.getElementById(anchorId);
     if (el && el.insertAdjacentHTML) el.insertAdjacentHTML('afterend', html);
 }
+function insertAfterInput(selector, html) {
+    var el = document.querySelector ? document.querySelector(selector) : null;
+    if (el && el.parentNode && el.parentNode.insertAdjacentHTML) el.parentNode.insertAdjacentHTML('afterend', html);
+}
 var teamLeaderOptions = <?php echo json_encode($teamLeaderOptionsHtml); ?>;
+insertAfterInput('#modal-empAdd input[name=approval_can_be_team_leader]', '<label class="block"><input type="checkbox" name="approval_can_be_construction_pm" id="empAddCanConstructionPm" value="1"> 공사PM 결재자</label>');
+insertAfterInput('#empEditCanLead', '<label class="block"><input type="checkbox" name="approval_can_be_construction_pm" id="empEditCanConstructionPm" value="1"> 공사PM 결재자</label>');
 insertAfterId('empAddBirthDate', '<div class="border rounded-2xl p-3 space-y-2"><div class="font-bold">팀장 설정</div><label class="block text-sm font-semibold">팀장 여부</label><select class="w-full px-4 py-2 border rounded-2xl" name="is_team_leader" id="empAddIsTeamLeader"><option value="0">일반 직원</option><option value="1">팀장</option></select><label class="block text-sm font-semibold">팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="team_leader_id" id="empAddTeamLeaderId">' + teamLeaderOptions + '</select><div class="text-xs text-gray-500">공사 직원은 현장별 팀장을 선택하면 결재라인에 해당 팀장이 적용됩니다.</div></div>');
 insertAfterId('empEditBirthDate', '<div class="border rounded-2xl p-3 space-y-2"><div class="font-bold">팀장 설정</div><label class="block text-sm font-semibold">팀장 여부</label><select class="w-full px-4 py-2 border rounded-2xl" name="is_team_leader" id="empEditIsTeamLeader"><option value="0">일반 직원</option><option value="1">팀장</option></select><label class="block text-sm font-semibold">팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="team_leader_id" id="empEditTeamLeaderId">' + teamLeaderOptions + '</select><div class="text-xs text-gray-500">공사 직원은 현장별 팀장을 선택하면 결재라인에 해당 팀장이 적용됩니다.</div></div>');
 function syncTeamLeaderFields(prefix) {
-    var role = document.getElementById(prefix + 'IsTeamLeader');
     var leader = document.getElementById(prefix + 'TeamLeaderId');
-    if (!role || !leader) return;
-    if (role.value === '1') {
-        leader.value = '';
-        leader.disabled = true;
-    } else {
-        leader.disabled = false;
-    }
+    if (!leader) return;
+    leader.disabled = false;
 }
 function teamDeptKey(value) {
     value = (value || '').replace(/\s/g, '');
@@ -344,15 +365,12 @@ function filterTeamLeaderOptions(prefix) {
     if (!leader) return;
     var deptEl = prefix === 'empEdit' ? document.getElementById('empEditDept') : document.querySelector('#modal-empAdd select[name=department]');
     var key = teamDeptKey(deptEl ? deptEl.value : '');
-    var selectedVisible = false;
     for (var i = 0; i < leader.options.length; i++) {
         var option = leader.options[i];
         var optKey = option.getAttribute('data-team-dept') || '';
-        var visible = option.value === '' || key === '' || optKey === key;
+        var visible = option.value === '' || key === '' || optKey === key || option.selected;
         option.style.display = visible ? '' : 'none';
-        if (visible && option.selected) selectedVisible = true;
     }
-    if (!selectedVisible) leader.value = '';
 }
 syncTeamLeaderFields('empAdd');
 syncTeamLeaderFields('empEdit');
@@ -367,7 +385,12 @@ insertAfterId('empEditWage', '<input type="text" class="w-full px-4 py-2 border 
 document.addEventListener('click', function(e) {
     var t = e.target;
     var op = t.closest ? t.closest('[data-modal-open]') : null;
-    if (op) { o(op.getAttribute('data-modal-open')); e.preventDefault(); return; }
+    if (op) {
+        if (op.getAttribute('data-modal-open') === 'empAdd') setChecked('empAddCanConstructionPm', false);
+        o(op.getAttribute('data-modal-open'));
+        e.preventDefault();
+        return;
+    }
     var cl = t.closest ? t.closest('[data-modal-close]') : null;
     if (cl) { c(cl.getAttribute('data-modal-close')); e.preventDefault(); return; }
     var be = t.closest ? t.closest('[data-emp-edit]') : null;
@@ -392,6 +415,7 @@ document.addEventListener('click', function(e) {
             setValue('empEditBirthDate', be.getAttribute('data-emp-birth-date') || '');
             setChecked('empEditCanSite', be.getAttribute('data-emp-can-site') === '1');
             setChecked('empEditCanLead', be.getAttribute('data-emp-can-lead') === '1');
+            setChecked('empEditCanConstructionPm', (be.getAttribute('data-emp-edit') || '') === '<?php echo (int)$constructionPmEmployeeId; ?>');
             setChecked('empEditCanGongmu', be.getAttribute('data-emp-can-gongmu') === '1');
             setChecked('empEditCanManage', be.getAttribute('data-emp-can-manage') === '1');
             setValue('empEditIsTeamLeader', be.getAttribute('data-emp-is-team-leader') === '1' ? '1' : '0');

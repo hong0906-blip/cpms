@@ -14,6 +14,8 @@ if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
 $projectId = isset($_GET['pid']) ? (int)$_GET['pid'] : 0;
 $selectedMonth = isset($_GET['month']) ? trim((string)$_GET['month']) : '';
+$laborSort = isset($_GET['labor_sort']) ? trim((string)$_GET['labor_sort']) : 'name';
+if (!in_array($laborSort, array('name', 'company'), true)) $laborSort = 'name';
 
 if ($projectId <= 0 || $selectedMonth === '') {
     http_response_code(400);
@@ -141,6 +143,9 @@ if (is_array($timesheetWorkers)) {
         $filteredTimesheetWorkers[] = $worker;
     }
     $timesheetWorkers = $filteredTimesheetWorkers;
+}
+if (function_exists('cpms_sort_labor_workers')) {
+    $timesheetWorkers = cpms_sort_labor_workers($timesheetWorkers, $laborSort);
 }
 $timesheetRows = count($timesheetWorkers);
 if ($timesheetRows < 1) $timesheetRows = 1;

@@ -25,6 +25,41 @@ function cpms_column_exists($pdo, $table, $column) {
     } catch (\Exception $e) { return false; }
 }}
 
+if (!function_exists('cpms_employee_save_table_exists')) {
+function cpms_employee_save_table_exists($pdo, $table) {
+    try {
+        $st = $pdo->prepare("SHOW TABLES LIKE :tbl");
+        $st->execute(array(':tbl' => $table));
+        return (bool)$st->fetch(\PDO::FETCH_NUM);
+    } catch (\Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_employee_save_sync_construction_pm')) {
+function cpms_employee_save_sync_construction_pm($pdo, $employeeId, $enabled) {
+    $employeeId = (int)$employeeId;
+    if (!$pdo || $employeeId <= 0 || !cpms_employee_save_table_exists($pdo, 'cpms_approval_settings')) return;
+    $keys = array('approval_construction_pm_employee_id', 'construction_pm_employee_id');
+    if ((int)$enabled === 1) {
+        for ($i = 0; $i < count($keys); $i++) {
+            $st = $pdo->prepare("UPDATE cpms_approval_settings SET setting_value=:v, updated_at=NOW() WHERE setting_key=:k");
+            $st->execute(array(':k' => $keys[$i], ':v' => (string)$employeeId));
+            $exists = $pdo->prepare("SELECT COUNT(*) FROM cpms_approval_settings WHERE setting_key=:k");
+            $exists->execute(array(':k' => $keys[$i]));
+            if ((int)$exists->fetchColumn() < 1) {
+                $ins = $pdo->prepare("INSERT INTO cpms_approval_settings (setting_key,setting_value,updated_at) VALUES (:k,:v,NOW())");
+                $ins->execute(array(':k' => $keys[$i], ':v' => (string)$employeeId));
+            }
+        }
+        return;
+    }
+    for ($i = 0; $i < count($keys); $i++) {
+        $st = $pdo->prepare("UPDATE cpms_approval_settings SET setting_value='', updated_at=NOW() WHERE setting_key=:k AND setting_value=:v");
+        $st->execute(array(':k' => $keys[$i], ':v' => (string)$employeeId));
+    }
+}}
+
 $positionEnabled = cpms_column_exists($pdo, 'employees', 'position');
 $hireDateEnabled = cpms_column_exists($pdo, 'employees', 'hire_date');
 $resignDateEnabled = cpms_column_exists($pdo, 'employees', 'resign_date');
@@ -246,6 +281,7 @@ $leaveHalf = isset($_POST['leave_half_balance']) ? trim((string)$_POST['leave_ha
 $birthDate = isset($_POST['birth_date']) ? trim((string)$_POST['birth_date']) : '';
 $canSite = isset($_POST['approval_can_be_site_manager']) ? 1 : 0;
 $canLead = isset($_POST['approval_can_be_team_leader']) ? 1 : 0;
+$canConstructionPm = isset($_POST['approval_can_be_construction_pm']) ? 1 : 0;
 $canGongmu = isset($_POST['approval_can_be_gongmu_approver']) ? 1 : 0;
 $canManageApprover = isset($_POST['approval_can_be_manage_approver']) ? 1 : 0;
 $isTeamLeader = isset($_POST['is_team_leader']) ? (int)$_POST['is_team_leader'] : 0;
@@ -321,7 +357,7 @@ if ($isActive === 0) {
     $resignDate = '';
 }
 if ($isTeamLeader !== 1) $isTeamLeader = 0;
-if ($isTeamLeader === 1 || ($id > 0 && $teamLeaderId === $id)) $teamLeaderId = 0;
+if ($id > 0 && $teamLeaderId === $id) $teamLeaderId = 0;
 if ($dept !== '' && !in_array($dept, $allowedDepts, true)) $dept = '';
 if ($pos !== '' && !in_array($pos, $allowedPositions, true)) $pos = '';
 
@@ -413,6 +449,7 @@ try {
     $st->execute();
 
     $savedId = ($id > 0) ? $id : (int)$pdo->lastInsertId();
+    cpms_employee_save_sync_construction_pm($pdo, $savedId, $canConstructionPm);
     $vehicleSaveOk = true;
     if ($vehicleNumbersPosted) $vehicleSaveOk = cpms_employee_vehicle_save($pdo, $savedId, $vehicleNumbers, Auth::user());
     $photoError = '';

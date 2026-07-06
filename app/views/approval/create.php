@@ -59,7 +59,7 @@ if (!function_exists('approval_create_employee_list_by_dept')) {
 
 $pdo = Db::pdo();
 $type = isset($_GET['type']) ? trim((string)$_GET['type']) : 'proposal';
-$allowedTypes = array('proposal', 'leave', 'unused_leave_notice', 'unused_leave_plan');
+$allowedTypes = array('proposal', 'small_proposal', 'leave', 'unused_leave_notice', 'unused_leave_plan');
 if (!in_array($type, $allowedTypes, true)) {
     $type = 'proposal';
 }
@@ -88,7 +88,7 @@ $vp = null;
 $ceo = null;
 $myBirth = '';
 $myEmp = array();
-$constructionPmName = approval_ko('%EB%B0%95%EC%9B%90%EB%8D%95');
+$constructionPmName = '';
 $gongmuPmName = approval_ko('%EA%B3%A0%EC%98%81%EC%84%B1');
 $constructionPm = null;
 $gongmuPm = null;
@@ -165,7 +165,7 @@ if ($pdo) {
 
     $vp = approval_create_find_by_position($employees, array(approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5')));
     $ceo = approval_create_find_by_position($employees, array(approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC'), approval_ko('%EB%8C%80%ED%91%9C')));
-    $constructionPm = approval_create_fetch_employee_by_name($pdo, $constructionPmName);
+    $constructionPm = $constructionPmName !== '' ? approval_create_fetch_employee_by_name($pdo, $constructionPmName) : null;
     $gongmuPm = approval_create_fetch_employee_by_name($pdo, $gongmuPmName);
     $ruleVp = approval_line_rules_find_vp($pdo);
     $ruleCeo = approval_line_rules_find_ceo($pdo);
@@ -255,7 +255,7 @@ $ruleCreator = !empty($myEmp) ? $myEmp : array(
     'department' => $dept,
     'position' => $position
 );
-$requiresTeamLeaderSelect = approval_line_rules_requires_manual_team_leader($ruleCreator) ? 1 : 0;
+$requiresTeamLeaderSelect = approval_line_rules_requires_manual_team_leader_for_doc($ruleCreator, $type) ? 1 : 0;
 $selectedTeamLeaderId = isset($ruleCreator['team_leader_id']) ? (int)$ruleCreator['team_leader_id'] : 0;
 $teamLeaderCandidates = $requiresTeamLeaderSelect ? approval_line_rules_team_leader_candidates($pdo, 'construction', $creatorEmployeeId) : array();
 $lineRuleResult = array('lines' => array(), 'messages' => array(), 'warnings' => array());

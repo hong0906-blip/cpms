@@ -30,6 +30,10 @@ $requestDateFilter = isset($_GET['request_date']) ? trim((string)$_GET['request_
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestDateFilter)) $requestDateFilter = date('Y-m-d');
 $settings = attendance_settings($pdo);
 $geofence = attendance_geofence_settings($pdo);
+$attendanceMonthlyToday = attendance_today();
+$attendanceMonthlyNow = attendance_now();
+$attendanceMonthlyNowTime = strlen($attendanceMonthlyNow) >= 19 ? substr($attendanceMonthlyNow, 11, 8) : date('H:i:s');
+$attendanceMissingCheckoutCutoff = '18:00:00';
 list($ws, $we) = attendance_week_range($date);
 $monthStart = $month . '-01';
 $monthStartTs = strtotime($monthStart);
@@ -129,6 +133,19 @@ if (!function_exists('attendance_monthly_is_late')) {
     }
 }
 
+if (!function_exists('attendance_monthly_is_missing_checkout')) {
+    function attendance_monthly_is_missing_checkout($workDate, $checkIn, $checkOut, $today, $nowTime, $cutoffTime)
+    {
+        $workDate = trim((string)$workDate);
+        $checkIn = trim((string)$checkIn);
+        $checkOut = trim((string)$checkOut);
+        if ($workDate === '' || $checkIn === '' || $checkOut !== '') return false;
+        if ($workDate < $today) return true;
+        if ($workDate === $today && strcmp($nowTime, $cutoffTime) >= 0) return true;
+        return false;
+    }
+}
+
 if (!function_exists('attendance_monthly_date_value')) {
     function attendance_monthly_date_value($value)
     {
@@ -152,6 +169,36 @@ if (!function_exists('attendance_monthly_add_leave_day')) {
                 'label' => trim((string)$label) !== '' ? trim((string)$label) : attendance_text('%ED%9C%B4%EA%B0%80')
             );
         }
+    }
+}
+
+if (!function_exists('attendance_monthly_leave_half_label')) {
+    function attendance_monthly_leave_half_label($label)
+    {
+        $label = trim((string)$label);
+        if ($label === '') return '';
+        $compact = str_replace(array(' ', "\t", "\r", "\n"), '', $label);
+        $half = attendance_text('%EB%B0%98%EC%B0%A8');
+        if (strpos($compact, $half) === false) return '';
+        if (strpos($compact, attendance_text('%EC%98%A4%EC%A0%84')) !== false) return attendance_text('%EC%98%A4%EC%A0%84%EB%B0%98%EC%B0%A8');
+        if (strpos($compact, attendance_text('%EC%98%A4%ED%9B%84')) !== false) return attendance_text('%EC%98%A4%ED%9B%84%EB%B0%98%EC%B0%A8');
+        return $half;
+    }
+}
+
+if (!function_exists('attendance_monthly_approval_leave_label')) {
+    function attendance_monthly_approval_leave_label($content)
+    {
+        if (!is_array($content)) return attendance_text('%ED%9C%B4%EA%B0%80');
+        $type = isset($content['request_type']) ? trim((string)$content['request_type']) : '';
+        $typeEtc = isset($content['request_type_etc']) ? trim((string)$content['request_type_etc']) : '';
+        if ($typeEtc !== '' && $type === attendance_text('%EA%B8%B0%ED%83%80')) return $typeEtc;
+        $daysRaw = isset($content['leave_days']) ? trim((string)$content['leave_days']) : '';
+        $daysRaw = str_replace(',', '', $daysRaw);
+        if ($type !== '' && attendance_monthly_leave_half_label($type) === '' && $daysRaw !== '' && is_numeric($daysRaw) && (float)$daysRaw <= 0.5) {
+            return attendance_text('%EB%B0%98%EC%B0%A8');
+        }
+        return $type !== '' ? $type : attendance_text('%ED%9C%B4%EA%B0%80');
     }
 }
 
@@ -201,6 +248,10 @@ if ($pdo) {
         $employeeSql .= " ORDER BY " . $employeeOrder;
         $emps = $pdo->query($employeeSql)->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($emps)) $emps = array();
+        $emps = attendance_filter_representative_rows($emps);
+        if ($sort === 'position' && function_exists('attendance_compare_employee_position')) {
+            usort($emps, 'attendance_compare_employee_position');
+        }
     } catch (Exception $e) {
         $attendanceErrors[] = attendance_text('%EC%A7%81%EC%9B%90%20%EB%AA%A9%EB%A1%9D%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.') . ' ' . $e->getMessage();
     }
@@ -225,6 +276,7 @@ if ($pdo) {
         $st->execute(array(':d' => $date));
         $daily = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($daily)) $daily = array();
+        $daily = attendance_filter_representative_rows($daily);
     } catch (Exception $e) {
         $attendanceErrors[] = attendance_text('%EC%9D%BC%EC%9D%BC%20%EC%B6%9C%ED%87%B4%EA%B7%BC%20%ED%98%84%ED%99%A9%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.') . ' ' . $e->getMessage();
     }
@@ -245,6 +297,15 @@ if ($pdo) {
                 $where[] = 'r.status = :status';
                 $params[':status'] = $requestStatusFilter;
             }
+            $representativeNeedle = '%' . attendance_text('%EB%8C%80%ED%91%9C') . '%';
+            if ($positionEnabled) {
+                $where[] = "(COALESCE(e.position, '') NOT LIKE :rep_pos AND COALESCE(e.name, '') NOT LIKE :rep_name)";
+                $params[':rep_pos'] = $representativeNeedle;
+                $params[':rep_name'] = $representativeNeedle;
+            } else {
+                $where[] = "COALESCE(e.name, '') NOT LIKE :rep_name";
+                $params[':rep_name'] = $representativeNeedle;
+            }
             $sql = "SELECT r.*, e.name, e.department, " . ($positionEnabled ? 'e.position' : "'' AS position") . $selectReviewer . "
                     FROM cpms_attendance_requests r
                     JOIN employees e ON e.id = r.employee_id
@@ -256,13 +317,14 @@ if ($pdo) {
             $stReq->execute($params);
             $reqs = $stReq->fetchAll(PDO::FETCH_ASSOC);
             if (!is_array($reqs)) $reqs = array();
+            $reqs = attendance_filter_representative_rows($reqs);
         } catch (Exception $e) {
             $attendanceErrors[] = attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%20%EC%9A%94%EC%B2%AD%20%EB%AA%A9%EB%A1%9D%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.') . ' ' . $e->getMessage();
         }
     }
 
     try {
-        $weeklySql = "SELECT e.id,e.name,e.department,COALESCE(SUM(a.work_minutes),0) AS m
+        $weeklySql = "SELECT e.id,e.name,e.department," . ($positionEnabled ? 'e.position' : "'' AS position") . ",COALESCE(SUM(a.work_minutes),0) AS m
                               FROM employees e
                               LEFT JOIN cpms_attendance_records a
                                 ON a.employee_id=e.id
@@ -271,12 +333,13 @@ if ($pdo) {
         if ($isActiveEnabled) {
             $weeklySql .= " WHERE (e.is_active IS NULL OR e.is_active = 1)";
         }
-        $weeklySql .= " GROUP BY e.id,e.name,e.department
+        $weeklySql .= " GROUP BY e.id,e.name,e.department" . ($positionEnabled ? ",e.position" : "") . "
                               ORDER BY m DESC, e.name ASC";
         $st2 = $pdo->prepare($weeklySql);
         $st2->execute(array(':s' => $ws, ':e' => $we));
         $weekly = $st2->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($weekly)) $weekly = array();
+        $weekly = attendance_filter_representative_rows($weekly);
     } catch (Exception $e) {
         $attendanceErrors[] = attendance_text('%EC%A3%BC%EA%B0%84%20%ED%98%84%ED%99%A9%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.') . ' ' . $e->getMessage();
     }
@@ -320,16 +383,21 @@ if ($pdo) {
 
         if (attendance_table_exists($pdo, 'cpms_leave_records')) {
             try {
-                $stLeave = $pdo->prepare("SELECT employee_id, leave_date, leave_type FROM cpms_leave_records WHERE leave_date BETWEEN :s AND :e ORDER BY leave_date ASC, employee_id ASC");
+                $stLeave = $pdo->prepare("SELECT employee_id, leave_date, leave_type, leave_amount FROM cpms_leave_records WHERE leave_date BETWEEN :s AND :e ORDER BY leave_date ASC, employee_id ASC");
                 $stLeave->execute(array(':s' => $monthStart, ':e' => $monthEnd));
                 $leaveRows = $stLeave->fetchAll(PDO::FETCH_ASSOC);
                 if (!is_array($leaveRows)) $leaveRows = array();
                 foreach ($leaveRows as $leaveRow) {
+                    $leaveTypeLabel = isset($leaveRow['leave_type']) ? trim((string)$leaveRow['leave_type']) : '';
+                    $leaveAmount = isset($leaveRow['leave_amount']) ? (float)$leaveRow['leave_amount'] : 0.0;
+                    if ($leaveAmount > 0 && $leaveAmount <= 0.5 && attendance_monthly_leave_half_label($leaveTypeLabel) === '') {
+                        $leaveTypeLabel = attendance_text('%EB%B0%98%EC%B0%A8');
+                    }
                     attendance_monthly_add_leave_day(
                         $monthlyLeaveMap,
                         isset($leaveRow['employee_id']) ? (int)$leaveRow['employee_id'] : 0,
                         isset($leaveRow['leave_date']) ? $leaveRow['leave_date'] : '',
-                        isset($leaveRow['leave_type']) ? $leaveRow['leave_type'] : ''
+                        $leaveTypeLabel
                     );
                 }
             } catch (Exception $e) {
@@ -361,7 +429,7 @@ if ($pdo) {
                     while ($cursorTs !== false && $endTs !== false && $cursorTs <= $endTs) {
                         $weekNo = (int)date('N', $cursorTs);
                         if ($weekNo < 6) {
-                            attendance_monthly_add_leave_day($monthlyLeaveMap, $employeeId, date('Y-m-d', $cursorTs), attendance_text('%ED%9C%B4%EA%B0%80'));
+                            attendance_monthly_add_leave_day($monthlyLeaveMap, $employeeId, date('Y-m-d', $cursorTs), attendance_monthly_approval_leave_label($content));
                         }
                         $cursorTs = strtotime('+1 day', $cursorTs);
                     }
@@ -390,18 +458,32 @@ if ($pdo) {
                     'check_out' => '',
                     'alert' => false
                 );
-                if (isset($monthlyLeaveMap[$employeeId]) && isset($monthlyLeaveMap[$employeeId][$dateKey])) {
+                $leaveInfo = (isset($monthlyLeaveMap[$employeeId]) && isset($monthlyLeaveMap[$employeeId][$dateKey])) ? $monthlyLeaveMap[$employeeId][$dateKey] : null;
+                $leaveLabel = is_array($leaveInfo) && isset($leaveInfo['label']) ? trim((string)$leaveInfo['label']) : '';
+                $halfLeaveLabel = attendance_monthly_leave_half_label($leaveLabel);
+                $hasRecord = (isset($monthlyRecordMap[$employeeId]) && isset($monthlyRecordMap[$employeeId][$dateKey]));
+                if ($leaveInfo !== null && ($halfLeaveLabel === '' || !$hasRecord)) {
                     $cell['status'] = 'vacation';
-                    $cell['label'] = attendance_text('%ED%9C%B4%EA%B0%80');
+                    $cell['label'] = $halfLeaveLabel !== '' ? $halfLeaveLabel : attendance_text('%ED%9C%B4%EA%B0%80');
                     $rowStats['vacation']++;
-                } else if (isset($monthlyRecordMap[$employeeId]) && isset($monthlyRecordMap[$employeeId][$dateKey])) {
+                } else if ($hasRecord) {
                     $record = $monthlyRecordMap[$employeeId][$dateKey];
                     $checkIn = isset($record['check_in']) ? trim((string)$record['check_in']) : '';
                     $checkOut = isset($record['check_out']) ? trim((string)$record['check_out']) : '';
                     $cell['check_in'] = attendance_monthly_time($checkIn);
                     $cell['check_out'] = attendance_monthly_time($checkOut);
                     if ($checkIn !== '') $rowStats['work_days']++;
-                    if ($checkIn !== '' && $checkOut === '') {
+                    if ($halfLeaveLabel !== '') {
+                        $cell['status'] = 'vacation';
+                        $cell['label'] = $halfLeaveLabel;
+                        $rowStats['vacation']++;
+                        if (attendance_monthly_is_missing_checkout($dateKey, $checkIn, $checkOut, $attendanceMonthlyToday, $attendanceMonthlyNowTime, $attendanceMissingCheckoutCutoff)) {
+                            $cell['status'] = 'missing_checkout';
+                            $cell['label'] = attendance_text('%EB%AF%B8%ED%87%B4%EA%B7%BC');
+                            $cell['alert'] = true;
+                            $rowStats['missing_checkout']++;
+                        }
+                    } else if (attendance_monthly_is_missing_checkout($dateKey, $checkIn, $checkOut, $attendanceMonthlyToday, $attendanceMonthlyNowTime, $attendanceMissingCheckoutCutoff)) {
                         $cell['status'] = 'missing_checkout';
                         $cell['label'] = attendance_text('%EB%AF%B8%ED%87%B4%EA%B7%BC');
                         $cell['alert'] = true;
@@ -464,8 +546,23 @@ $rejectedRequests = 0;
 $filteredReqs = $reqs;
 if ($pdo && $tab === 'requests') {
     try {
-        $stCount = $pdo->prepare("SELECT status, COUNT(*) AS cnt FROM cpms_attendance_requests WHERE status='pending' OR request_date = :request_date GROUP BY status");
-        $stCount->execute(array(':request_date' => $requestDateFilter));
+        $representativeNeedle = '%' . attendance_text('%EB%8C%80%ED%91%9C') . '%';
+        $countSql = "SELECT r.status, COUNT(*) AS cnt
+                       FROM cpms_attendance_requests r
+                       JOIN employees e ON e.id = r.employee_id
+                      WHERE (r.status='pending' OR r.request_date = :request_date)";
+        $countParams = array(':request_date' => $requestDateFilter);
+        if ($positionEnabled) {
+            $countSql .= " AND COALESCE(e.position, '') NOT LIKE :rep_pos AND COALESCE(e.name, '') NOT LIKE :rep_name";
+            $countParams[':rep_pos'] = $representativeNeedle;
+            $countParams[':rep_name'] = $representativeNeedle;
+        } else {
+            $countSql .= " AND COALESCE(e.name, '') NOT LIKE :rep_name";
+            $countParams[':rep_name'] = $representativeNeedle;
+        }
+        $countSql .= " GROUP BY r.status";
+        $stCount = $pdo->prepare($countSql);
+        $stCount->execute($countParams);
         $countRows = $stCount->fetchAll(PDO::FETCH_ASSOC);
         if (is_array($countRows)) {
             foreach ($countRows as $countRow) {
@@ -622,6 +719,7 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                         <a class='cpms-attendance-chip <?php echo $quickFilter==='vacation'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month) . '&sort=' . urlencode($sort) . '&filter=vacation'); ?>'><?php echo h(attendance_text('%ED%9C%B4%EA%B0%80%EC%9E%90%EB%A7%8C')); ?></a>
                         <a class='cpms-attendance-chip <?php echo $quickFilter==='missing_checkout'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month) . '&sort=' . urlencode($sort) . '&filter=missing_checkout'); ?>'><?php echo h(attendance_text('%EB%AF%B8%ED%87%B4%EA%B7%BC%EC%9E%90%EB%A7%8C')); ?></a>
                     </div>
+                    <div class='text-xs text-slate-500 mt-2'>오늘 미퇴근은 18:00 이후부터 표시됩니다.</div>
                 </div>
                 <div class='cpms-attendance-legend'>
                     <span><i class='cpms-attendance-dot normal'></i><?php echo h(attendance_text('%EC%A0%95%EC%83%81')); ?></span>

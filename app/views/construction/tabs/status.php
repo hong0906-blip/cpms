@@ -196,7 +196,11 @@ if (!function_exists('cpms_status_equipment_total_between')) {
                 $deletedWhere = " AND (e.is_deleted = 0 OR e.is_deleted IS NULL)";
             }
             if ($hasWorkUnit && $hasBaseRate) {
-                $amountExpr = "COALESCE(NULLIF(u.work_unit, 0), 1) * COALESCE(NULLIF(u.base_rate_snapshot, 0)" . ($hasAmount ? ", u.amount" : "") . ", 0)";
+                if ($hasAmount) {
+                    $amountExpr = "COALESCE(NULLIF(u.amount, 0), COALESCE(NULLIF(u.work_unit, 0), 1) * COALESCE(NULLIF(u.base_rate_snapshot, 0), 0))";
+                } else {
+                    $amountExpr = "COALESCE(NULLIF(u.work_unit, 0), 1) * COALESCE(NULLIF(u.base_rate_snapshot, 0), 0)";
+                }
                 $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND u.use_date BETWEEN :start AND :end" . $deletedWhere;
             } else {
                 $sql = "SELECT COALESCE(SUM(u.amount), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND u.use_date BETWEEN :start AND :end" . $deletedWhere;

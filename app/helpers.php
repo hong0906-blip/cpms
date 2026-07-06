@@ -828,13 +828,37 @@ function cpms_labor_employee_select_columns($pdo) {
     return implode(', ', $cols);
 }
 
+function cpms_labor_table_exists($pdo, $table) {
+    if (!$pdo || trim((string)$table) === '') return false;
+    try {
+        $st = $pdo->prepare("SHOW TABLES LIKE :tbl");
+        $st->execute(array(':tbl' => $table));
+        return (bool)$st->fetch(PDO::FETCH_NUM);
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+function cpms_labor_construction_pm_label() {
+    return urldecode('%EA%B3%B5%EC%82%AC%50%4D');
+}
+
 function cpms_labor_find_director_approver($pdo) {
     if (!$pdo) return null;
+    $selectColumns = cpms_labor_employee_select_columns($pdo);
     try {
-        $sql = "SELECT " . cpms_labor_employee_select_columns($pdo) . " FROM employees WHERE is_active = 1 AND name = '박원덕' AND position LIKE '%상무%' ORDER BY id ASC LIMIT 1";
-        $st = $pdo->query($sql);
-        $row = $st->fetch(PDO::FETCH_ASSOC);
-        if ($row) return $row;
+        if (cpms_labor_table_exists($pdo, 'cpms_approval_settings')) {
+            $stSetting = $pdo->prepare("SELECT setting_value FROM cpms_approval_settings WHERE setting_key IN ('approval_construction_pm_employee_id','construction_pm_employee_id') AND setting_value IS NOT NULL AND TRIM(setting_value) <> '' ORDER BY CASE setting_key WHEN 'approval_construction_pm_employee_id' THEN 1 ELSE 2 END LIMIT 1");
+            $stSetting->execute();
+            $employeeId = (int)$stSetting->fetchColumn();
+            if ($employeeId > 0) {
+                $sql = "SELECT " . $selectColumns . " FROM employees WHERE id=:id AND is_active = 1 LIMIT 1";
+                $st = $pdo->prepare($sql);
+                $st->execute(array(':id' => $employeeId));
+                $row = $st->fetch(PDO::FETCH_ASSOC);
+                if ($row) return $row;
+            }
+        }
     } catch (Exception $e) {}
     return null;
 }
@@ -896,7 +920,7 @@ function cpms_labor_build_override_message($pdo, $row, $secondStage) {
     $lines[] = '요청자 : ' . $requester;
     $lines[] = '요청 내용 : 공수 ' . cpms_labor_format_chat_gongsu(isset($row['old_value']) ? $row['old_value'] : 0) . ' -> ' . cpms_labor_format_chat_gongsu(isset($row['new_value']) ? $row['new_value'] : 0) . ' 변경';
     $lines[] = '요청 사유 : ' . ($reason !== '' ? $reason : '-');
-    if ($secondStage) $lines[] = '1차 승인자 : ' . (isset($row['first_approver_name']) && trim((string)$row['first_approver_name']) !== '' ? trim((string)$row['first_approver_name']) : '박원덕');
+    if ($secondStage) $lines[] = '1차 승인자 : ' . (isset($row['first_approver_name']) && trim((string)$row['first_approver_name']) !== '' ? trim((string)$row['first_approver_name']) : cpms_labor_construction_pm_label());
     $lines[] = '';
     $lines[] = '요청내용 확인 바랍니다.';
     if (function_exists('cpms_app_executive_approval_url')) {

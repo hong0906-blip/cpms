@@ -162,7 +162,7 @@ function cpms_equipment_gongsu_build_message($pdo, $row, $secondStage) {
     array_push($lines, '사용일자 : ' . (isset($row['use_date']) ? (string)$row['use_date'] : '-'));
     array_push($lines, '요청 내용 : 장비공수 ' . cpms_equipment_gongsu_format(isset($row['old_value']) ? $row['old_value'] : 0) . ' -> ' . cpms_equipment_gongsu_format(isset($row['new_value']) ? $row['new_value'] : 0) . ' 변경');
     array_push($lines, '요청 사유 : ' . ($reason !== '' ? $reason : '-'));
-    if ($secondStage) array_push($lines, '1차 승인자 : ' . (isset($row['first_approver_name']) && trim((string)$row['first_approver_name']) !== '' ? trim((string)$row['first_approver_name']) : '박원덕'));
+    if ($secondStage) array_push($lines, '1차 승인자 : ' . (isset($row['first_approver_name']) && trim((string)$row['first_approver_name']) !== '' ? trim((string)$row['first_approver_name']) : (function_exists('cpms_labor_construction_pm_label') ? cpms_labor_construction_pm_label() : '공사PM')));
     array_push($lines, '');
     array_push($lines, '요청내용 확인 바랍니다.');
     if (function_exists('cpms_app_executive_approval_url')) {

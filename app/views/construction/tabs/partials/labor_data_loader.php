@@ -1633,5 +1633,55 @@ if (!function_exists('cpms_build_timesheet_workers')) {
     }
 }
 
+if (!function_exists('cpms_labor_sort_text')) {
+    function cpms_labor_sort_text($value) {
+        $value = trim((string)$value);
+        if (function_exists('mb_strtolower')) {
+            $value = mb_strtolower($value, 'UTF-8');
+        } else {
+            $value = strtolower($value);
+        }
+        return $value;
+    }
+}
+
+if (!function_exists('cpms_labor_sort_worker_value')) {
+    function cpms_labor_sort_worker_value($worker, $field) {
+        if (!is_array($worker)) return '';
+        if ($field === 'company') {
+            return isset($worker['company_name']) ? cpms_labor_sort_text($worker['company_name']) : '';
+        }
+        return isset($worker['name']) ? cpms_labor_sort_text($worker['name']) : '';
+    }
+}
+
+if (!function_exists('cpms_sort_labor_workers')) {
+    function cpms_sort_labor_workers($workers, $sort) {
+        if (!is_array($workers)) return array();
+        $sort = trim((string)$sort);
+        if ($sort !== 'company') $sort = 'name';
+        usort($workers, function($a, $b) use ($sort) {
+            $secondary = ($sort === 'company') ? 'name' : 'company';
+            $av = cpms_labor_sort_worker_value($a, $sort);
+            $bv = cpms_labor_sort_worker_value($b, $sort);
+            if ($av === '' && $bv !== '') return 1;
+            if ($av !== '' && $bv === '') return -1;
+            if ($av !== $bv) return strcmp($av, $bv);
+
+            $as = cpms_labor_sort_worker_value($a, $secondary);
+            $bs = cpms_labor_sort_worker_value($b, $secondary);
+            if ($as === '' && $bs !== '') return 1;
+            if ($as !== '' && $bs === '') return -1;
+            if ($as !== $bs) return strcmp($as, $bs);
+
+            $ai = isset($a['worker_id']) ? (int)$a['worker_id'] : 0;
+            $bi = isset($b['worker_id']) ? (int)$b['worker_id'] : 0;
+            if ($ai === $bi) return 0;
+            return ($ai < $bi) ? -1 : 1;
+        });
+        return $workers;
+    }
+}
+
 
 // approved만 공수표 반영 / pending/rejected 미반영은 app/helpers.php cpms_load_labor_overrides()에서 status IN ('applied','approved')로 처리됩니다.

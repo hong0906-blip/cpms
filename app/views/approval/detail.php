@@ -41,7 +41,7 @@ if (!is_array($lines)) {
 
 $content = approval_parse_content(isset($d['content']) ? $d['content'] : '');
 $filesByType = array();
-if (isset($d['doc_type']) && $d['doc_type'] === 'proposal' && approval_table_exists($pdo, 'cpms_approval_files')) {
+if (isset($d['doc_type']) && approval_is_proposal_doc_type($d['doc_type']) && approval_table_exists($pdo, 'cpms_approval_files')) {
     $fs = $pdo->prepare("SELECT * FROM cpms_approval_files WHERE document_id=:id ORDER BY id DESC");
     $fs->execute(array(':id' => $id));
     $fileRows = $fs->fetchAll(PDO::FETCH_ASSOC);

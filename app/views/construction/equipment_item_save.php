@@ -28,7 +28,7 @@ if (!Auth::canManageConstruction()) {
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
 if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
     flash_set('error', '보안 토큰이 유효하지 않습니다.');
-    header('Location: ?r=공사');
+    header('Location: ?r=construction_home');
     exit;
 }
 
@@ -38,7 +38,7 @@ $defaultYm = cpms_construction_current_business_ym();
 $ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : $defaultYm;
 if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = $defaultYm;
 
-$redirect = '?r=공사&pid=' . $projectId . '&tab=equipment&equip_tab=' . urlencode($equipTab) . '&ym=' . urlencode($ym);
+$redirect = '?r=construction_home&pid=' . $projectId . '&tab=equipment&equip_tab=' . urlencode($equipTab) . '&ym=' . urlencode($ym);
 if ($projectId <= 0) {
     flash_set('error', '프로젝트 정보가 올바르지 않습니다.');
     header('Location: ' . $redirect);
@@ -51,7 +51,9 @@ $spec = trim((string)(isset($_POST['spec']) ? $_POST['spec'] : ''));
 $representative = trim((string)(isset($_POST['representative']) ? $_POST['representative'] : ''));
 $phone = trim((string)(isset($_POST['phone']) ? $_POST['phone'] : ''));
 $bizNo = trim((string)(isset($_POST['biz_no']) ? $_POST['biz_no'] : ''));
-$baseRate = isset($_POST['base_rate']) ? (float)$_POST['base_rate'] : 0;
+$amountSign = isset($_POST['amount_sign']) ? trim((string)$_POST['amount_sign']) : '';
+$baseRate = cpms_equipment_item_save_positive_money(isset($_POST['base_rate']) ? $_POST['base_rate'] : 0);
+$usageAmount = cpms_equipment_item_save_signed_money($baseRate, $amountSign);
 $remark = trim((string)(isset($_POST['remark']) ? $_POST['remark'] : ''));
 $usageDates = isset($_POST['usage_dates']) ? $_POST['usage_dates'] : array();
 $useDatesText = trim((string)(isset($_POST['use_dates']) ? $_POST['use_dates'] : ''));
@@ -156,6 +158,25 @@ function equipment_collect_usage_dates($usageDates, $text, $ym)
 
     return array_keys($result);
 }
+
+function cpms_equipment_item_save_positive_money($value)
+{
+    $raw = trim((string)$value);
+    $raw = str_replace(array(',', ' ', "\t", '원'), '', $raw);
+    $raw = preg_replace('/[^0-9.\-]/', '', $raw);
+    if ($raw === '' || $raw === '-' || $raw === '.') return 0.0;
+    return abs((float)$raw);
+}
+
+function cpms_equipment_item_save_signed_money($amount, $signValue)
+{
+    $amount = abs((float)$amount);
+    $signValue = trim((string)$signValue);
+    if ($signValue === '-' || $signValue === 'minus' || $signValue === 'deduct' || $signValue === 'negative') {
+        return $amount * -1;
+    }
+    return $amount;
+}
 $pdo = Db::pdo();
 if ($pdo) {
     cpms_equipment_gongsu_ensure_schema($pdo);
@@ -238,8 +259,8 @@ try {
             $stU->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
             $stU->bindValue(':d', $d);
             $stU->bindValue(':work_unit', 1.00);
-            $stU->bindValue(':base_rate', $baseRate);
-            $stU->bindValue(':amt', $baseRate);
+            $stU->bindValue(':base_rate', $usageAmount);
+            $stU->bindValue(':amt', $usageAmount);
             $stU->bindValue(':memo', '');
             $stU->bindValue(':created_at', $now);
             $stU->execute();

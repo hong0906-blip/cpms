@@ -228,9 +228,18 @@ $myUserId = $needsApprovalData ? cpms_find_employee_id_by_email($pdo, $userEmail
 $today = attendance_today();
 $weekStart = $today;
 $weekEnd = $today;
+$risk52Month = isset($_GET['risk52_month']) ? trim((string)$_GET['risk52_month']) : substr($today, 0, 7);
+$risk52WeekParam = isset($_GET['risk52_week']) ? trim((string)$_GET['risk52_week']) : '';
+$risk52WeekSelection = array('month' => substr($today, 0, 7), 'start' => $today, 'end' => $today, 'label' => '', 'range_label' => '', 'options' => array());
 if ($needsAttendanceData) {
-    list($weekStart, $weekEnd) = attendance_week_range($today);
+    $risk52WeekSelection = attendance_month_week_selection($risk52Month, $risk52WeekParam, $today);
+    $risk52Month = isset($risk52WeekSelection['month']) ? $risk52WeekSelection['month'] : substr($today, 0, 7);
+    $weekStart = isset($risk52WeekSelection['start']) ? $risk52WeekSelection['start'] : $today;
+    $weekEnd = isset($risk52WeekSelection['end']) ? $risk52WeekSelection['end'] : $today;
 }
+$risk52WeekOptions = isset($risk52WeekSelection['options']) && is_array($risk52WeekSelection['options']) ? $risk52WeekSelection['options'] : array();
+$risk52WeekLabel = isset($risk52WeekSelection['label']) ? (string)$risk52WeekSelection['label'] : '';
+$risk52WeekRangeLabel = isset($risk52WeekSelection['range_label']) ? (string)$risk52WeekSelection['range_label'] : ($weekStart . ' ~ ' . $weekEnd);
 $currentLeaveIndex = ($needsAttendanceData && function_exists('approval_current_leave_index')) ? approval_current_leave_index($pdo, $today) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
 $tomorrowTs = strtotime($today . ' +1 day');
 $tomorrow = ($tomorrowTs !== false) ? date('Y-m-d', $tomorrowTs) : date('Y-m-d', strtotime('+1 day'));
@@ -637,10 +646,24 @@ if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !=
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div>
                 <h3 class="text-2xl font-extrabold">52시간 초과자 명단</h3>
-                <div class="text-sm text-gray-500 mt-1">이번 주 누적 근무시간 기준</div>
+                <div class="text-sm text-gray-500 mt-1"><?php echo h($risk52WeekLabel !== '' ? $risk52WeekLabel : '선택 주'); ?> 기준 · <?php echo h($risk52WeekRangeLabel); ?></div>
             </div>
-            <div class="px-4 py-2 rounded-2xl bg-red-50 text-red-700 font-extrabold border border-red-100">
-                <?php echo count($risk52); ?>명
+            <div class="flex flex-wrap items-center gap-2">
+                <form method="get" action="" class="flex flex-wrap items-center gap-2">
+                    <input type="hidden" name="r" value="dashboard_executive">
+                    <input type="hidden" name="exec_tab" value="main">
+                    <input type="month" name="risk52_month" value="<?php echo h($risk52Month); ?>" class="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white" onchange="this.form.submit()">
+                    <select name="risk52_week" class="px-3 py-2 rounded-xl border border-gray-200 text-sm bg-white" onchange="this.form.submit()">
+                        <?php foreach ($risk52WeekOptions as $weekOption): ?>
+                            <option value="<?php echo h(isset($weekOption['value']) ? $weekOption['value'] : ''); ?>" <?php echo (isset($weekOption['start']) && $weekOption['start'] === $weekStart) ? 'selected' : ''; ?>>
+                                <?php echo h((isset($weekOption['label']) ? $weekOption['label'] : '') . ' (' . (isset($weekOption['range_label']) ? $weekOption['range_label'] : '') . ')'); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </form>
+                <div class="px-4 py-2 rounded-2xl bg-red-50 text-red-700 font-extrabold border border-red-100">
+                    <?php echo count($risk52); ?>명
+                </div>
             </div>
         </div>
         <?php if (count($risk52) === 0): ?>

@@ -52,7 +52,7 @@ $monthSelectMessage = isset($monthData['message']) ? (string)$monthData['message
 $year = (int)substr($ym, 0, 4);
 $month = (int)substr($ym, 5, 2);
 
-$baseUrl = base_url() . '/?r=공사&pid=' . (int)$pid . '&tab=equipment';
+$baseUrl = base_url() . '/?r=construction_home&pid=' . (int)$pid . '&tab=equipment';
 // 달력 전월/현월 계산 수정
 $currFirst = new DateTime($ym . '-01');
 $prevFirst = clone $currFirst;
@@ -108,7 +108,7 @@ try {
             if ($rateSnapshot <= 0 && $masterBaseRate > 0) $rateSnapshot = $masterBaseRate;
             $ur['_work_unit'] = $workUnit;
             $ur['_base_rate_snapshot'] = $rateSnapshot;
-            if ($storedAmount > 0) {
+            if (abs($storedAmount) > 0.0001) {
                 $ur['_calc_amount'] = $storedAmount;
             } else if ($rateSnapshot > 0) {
                 $ur['_calc_amount'] = $workUnit * $rateSnapshot;
@@ -424,6 +424,57 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
     </div>
 
     <?php if ($equipTab === 'input'): ?>
+        <?php if ($canEditEquipment): ?>
+        <div class="mt-6 md:hidden border border-blue-200 bg-blue-50 rounded-2xl p-4">
+            <div class="text-lg font-extrabold text-gray-900 mb-3">모바일 간편 입력</div>
+            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_item_save" class="space-y-3" id="equipmentMobileQuickForm" enctype="multipart/form-data">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                <input type="hidden" name="equip_tab" value="input">
+                <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+                <input type="hidden" name="usage_dates[]" id="equipmentMobileQuickDate" value="">
+
+                <div class="grid grid-cols-1 gap-2">
+                    <input type="text" name="category" class="px-3 py-3 border rounded-xl bg-white" placeholder="구분" required>
+                    <input type="text" name="vendor_name" class="px-3 py-3 border rounded-xl bg-white" placeholder="업체명" required>
+                    <input type="text" name="spec" class="px-3 py-3 border rounded-xl bg-white" placeholder="규격">
+                    <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-3 border rounded-xl bg-white" placeholder="금액" required>
+                    <select name="amount_sign" class="px-3 py-3 border rounded-xl bg-white" required>
+                        <option value="plus">+ 일반</option>
+                        <option value="minus">- 공제</option>
+                    </select>
+                </div>
+
+                <div class="rounded-xl border border-blue-100 bg-white p-3">
+                    <div class="flex items-center justify-between gap-2 mb-2">
+                        <div class="text-sm font-bold text-gray-700">사용일자</div>
+                        <div class="text-xs font-bold text-blue-700" id="equipmentMobileQuickDateLabel">날짜 미선택</div>
+                    </div>
+                    <div class="grid grid-cols-5 gap-1">
+                        <?php foreach ($dateSlots as $slot): ?>
+                            <?php if (!$slot['valid']) continue; ?>
+                            <button type="button"
+                                    class="h-9 rounded-lg border border-gray-200 bg-white text-xs font-bold text-gray-700"
+                                    data-quick-date
+                                    data-target="equipmentMobileQuickDate"
+                                    data-label-target="equipmentMobileQuickDateLabel"
+                                    data-date="<?php echo h($slot['date']); ?>">
+                                <?php echo h($slot['label']); ?>
+                            </button>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+
+                <div class="border border-blue-100 rounded-xl p-3 bg-white">
+                    <label class="text-sm font-bold text-gray-700">거래명세표 사진/파일</label>
+                    <input type="file" name="statement_file" accept="image/*,.pdf" capture="environment" class="mt-2 block w-full text-sm border rounded-xl px-3 py-2 bg-white">
+                </div>
+
+                <button type="submit" class="w-full px-4 py-3 rounded-xl bg-blue-600 text-white font-extrabold">간편 저장</button>
+            </form>
+        </div>
+        <?php endif; ?>
+
         <div class="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div class="border border-gray-200 rounded-2xl p-4">
                 <div class="text-lg font-extrabold mb-3">새작성</div>
@@ -448,6 +499,10 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                         <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호">
                         <input type="text" name="biz_no" class="px-3 py-2 border rounded-xl" placeholder="사업자등록번호">
                         <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-2 border rounded-xl" placeholder="기본단가">
+                        <select name="amount_sign" class="px-3 py-2 border rounded-xl">
+                            <option value="plus">+ 일반</option>
+                            <option value="minus">- 공제</option>
+                        </select>
                         <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고">
                     </div>
 
@@ -524,6 +579,10 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                                                 <div id="usageDateChips_<?php echo (int)$it['id']; ?>" class="mt-2 flex flex-wrap gap-1"></div>
                                                 <div id="usageDateInputs_<?php echo (int)$it['id']; ?>"></div>
                                             </div>
+                                            <select name="amount_sign" class="w-full px-2 py-1 rounded border text-xs bg-white">
+                                                <option value="plus">+ 일반</option>
+                                                <option value="minus">- 공제</option>
+                                            </select>
                                             <div class="border border-gray-200 rounded-lg p-2 bg-gray-50">
                                                 <label class="text-xs text-gray-700 font-bold">거래명세표 사진/파일</label>
                                                 <input type="file" name="statement_file" accept="image/*,.pdf" capture="environment" class="mt-1 block w-full text-xs border rounded-lg px-2 py-1 bg-white">
@@ -733,6 +792,108 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
             <?php endif; ?>
         </div>
 
+        <div class="mt-6 border border-gray-200 rounded-2xl p-4">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+                <div>
+                    <div class="text-lg font-extrabold">입력내역 목록</div>
+                    <div class="text-xs text-gray-500 mt-1">등록된 장비 사용내역의 금액과 사용일자를 수정할 수 있습니다.</div>
+                </div>
+            </div>
+            <div class="max-h-[420px] overflow-auto">
+                <table class="w-full text-sm border-collapse">
+                    <thead>
+                    <tr class="bg-gray-50">
+                        <th class="p-2 border text-left">사용일자</th>
+                        <th class="p-2 border text-left">구분</th>
+                        <th class="p-2 border text-left">업체명</th>
+                        <th class="p-2 border text-left">규격</th>
+                        <th class="p-2 border text-right">금액</th>
+                        <th class="p-2 border text-left">거래명세표</th>
+                        <?php if ($canEditEquipment): ?>
+                            <th class="p-2 border text-center">수정</th>
+                        <?php endif; ?>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <?php if (count($usageRows) === 0): ?>
+                        <tr><td colspan="<?php echo $canEditEquipment ? 7 : 6; ?>" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($usageRows as $ur): ?>
+                            <?php
+                            $usageIdForList = isset($ur['id']) ? (int)$ur['id'] : 0;
+                            $usageAmountForList = isset($ur['_calc_amount']) ? (float)$ur['_calc_amount'] : (isset($ur['amount']) ? (float)$ur['amount'] : 0.0);
+                            $usageIsNegative = ($usageAmountForList < 0);
+                            ?>
+                            <tr class="<?php echo $usageIsNegative ? 'bg-yellow-50' : ''; ?>">
+                                <td class="p-2 border whitespace-nowrap"><?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?></td>
+                                <td class="p-2 border"><?php echo h(isset($ur['category']) ? $ur['category'] : ''); ?></td>
+                                <td class="p-2 border"><?php echo h(isset($ur['vendor_name']) ? $ur['vendor_name'] : ''); ?></td>
+                                <td class="p-2 border"><?php echo h(isset($ur['spec']) ? $ur['spec'] : ''); ?></td>
+                                <td class="p-2 border text-right <?php echo $usageIsNegative ? 'font-extrabold text-amber-800' : ''; ?>"><?php echo equipment_money($usageAmountForList); ?></td>
+                                <td class="p-2 border"><?php echo equipment_statement_link_html($ur) !== '' ? equipment_statement_link_html($ur) : '<span class="text-gray-400 text-xs">첨부 없음</span>'; ?></td>
+                                <?php if ($canEditEquipment): ?>
+                                    <td class="p-2 border text-center">
+                                        <?php if ($usageIdForList > 0): ?>
+                                            <button type="button"
+                                                    class="px-3 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold"
+                                                    data-equipment-usage-edit
+                                                    data-usage-id="<?php echo (int)$usageIdForList; ?>"
+                                                    data-use-date="<?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?>"
+                                                    data-amount="<?php echo h(number_format($usageAmountForList, 2, '.', '')); ?>"
+                                                    data-title="<?php echo h((isset($ur['vendor_name']) ? $ur['vendor_name'] : '') . ' / ' . (isset($ur['spec']) ? $ur['spec'] : '')); ?>">
+                                                수정
+                                            </button>
+                                        <?php endif; ?>
+                                    </td>
+                                <?php endif; ?>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <?php if ($canEditEquipment): ?>
+        <div id="equipmentUsageEditModal" class="hidden fixed inset-0 z-50 bg-black/40 items-center justify-center p-4">
+            <div class="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-md p-5">
+                <div class="flex items-center justify-between gap-3">
+                    <div>
+                        <div class="text-lg font-extrabold text-gray-900">장비 사용내역 수정</div>
+                        <div class="text-sm text-gray-500" id="equipmentUsageEditMeta"></div>
+                    </div>
+                    <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-equipment-usage-edit-close>닫기</button>
+                </div>
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_usage_update" class="mt-4 space-y-3">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                    <input type="hidden" name="usage_id" id="equipmentUsageEditId" value="">
+                    <input type="hidden" name="equip_tab" value="input">
+                    <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">사용일자</span>
+                        <input type="date" name="use_date" id="equipmentUsageEditDate" min="<?php echo h($monthlyStart); ?>" max="<?php echo h($monthlyEnd); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                    </label>
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">금액 구분</span>
+                        <select name="amount_sign" id="equipmentUsageEditSign" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300">
+                            <option value="plus">+ 일반</option>
+                            <option value="minus">- 공제</option>
+                        </select>
+                    </label>
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">금액</span>
+                        <input type="number" step="0.01" min="0" name="amount" id="equipmentUsageEditAmount" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                    </label>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-2 rounded-xl border border-gray-300 font-bold" data-equipment-usage-edit-close>취소</button>
+                        <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">수정 저장</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <script>
         (function(){
             var selectedYm = <?php echo json_encode($ym); ?>;
@@ -756,6 +917,75 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                 if (selected) return baseClass + ' bg-blue-600 text-white border-blue-600';
                 return baseClass + ' bg-white text-gray-700 border-gray-300 hover:bg-blue-50';
             }
+
+            function setEquipmentQuickDateClass(btn, selected){
+                if (!btn) return;
+                btn.className = 'h-9 rounded-lg border text-xs font-bold ' + (selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-700');
+            }
+
+            document.addEventListener('click', function(e){
+                var dateBtn = e.target && e.target.closest ? e.target.closest('[data-quick-date]') : null;
+                if (!dateBtn) return;
+                var targetId = dateBtn.getAttribute('data-target') || '';
+                var labelTargetId = dateBtn.getAttribute('data-label-target') || '';
+                var value = dateBtn.getAttribute('data-date') || '';
+                var input = targetId ? document.getElementById(targetId) : null;
+                var label = labelTargetId ? document.getElementById(labelTargetId) : null;
+                if (input) input.value = value;
+                if (label) label.textContent = value || '날짜 미선택';
+                var form = dateBtn.closest('form');
+                if (form) {
+                    var buttons = form.querySelectorAll('[data-quick-date]');
+                    for (var i=0; i<buttons.length; i++) {
+                        setEquipmentQuickDateClass(buttons[i], false);
+                    }
+                }
+                setEquipmentQuickDateClass(dateBtn, true);
+            });
+
+            var equipmentQuickForm = document.getElementById('equipmentMobileQuickForm');
+            if (equipmentQuickForm) {
+                equipmentQuickForm.addEventListener('submit', function(e){
+                    var dateInput = document.getElementById('equipmentMobileQuickDate');
+                    if (!dateInput || dateInput.value === '') {
+                        e.preventDefault();
+                        alert('사용일자를 선택해주세요.');
+                    }
+                });
+            }
+
+            var equipmentUsageEditModal = document.getElementById('equipmentUsageEditModal');
+            var equipmentUsageEditId = document.getElementById('equipmentUsageEditId');
+            var equipmentUsageEditDate = document.getElementById('equipmentUsageEditDate');
+            var equipmentUsageEditAmount = document.getElementById('equipmentUsageEditAmount');
+            var equipmentUsageEditSign = document.getElementById('equipmentUsageEditSign');
+            var equipmentUsageEditMeta = document.getElementById('equipmentUsageEditMeta');
+            function showEquipmentUsageEditModal(){
+                if (!equipmentUsageEditModal) return;
+                equipmentUsageEditModal.className = equipmentUsageEditModal.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').trim();
+                if (equipmentUsageEditModal.className.indexOf('flex') === -1) equipmentUsageEditModal.className += ' flex';
+            }
+            function hideEquipmentUsageEditModal(){
+                if (!equipmentUsageEditModal) return;
+                equipmentUsageEditModal.className = equipmentUsageEditModal.className.replace(/\bflex\b/g, '').replace(/\s+/g, ' ').trim();
+                if (equipmentUsageEditModal.className.indexOf('hidden') === -1) equipmentUsageEditModal.className += ' hidden';
+            }
+            document.addEventListener('click', function(e){
+                var editBtn = e.target && e.target.closest ? e.target.closest('[data-equipment-usage-edit]') : null;
+                if (editBtn) {
+                    if (equipmentUsageEditId) equipmentUsageEditId.value = editBtn.getAttribute('data-usage-id') || '';
+                    if (equipmentUsageEditDate) equipmentUsageEditDate.value = editBtn.getAttribute('data-use-date') || '';
+                    var equipmentEditAmountRaw = parseFloat(editBtn.getAttribute('data-amount') || '0');
+                    if (equipmentUsageEditSign) equipmentUsageEditSign.value = equipmentEditAmountRaw < 0 ? 'minus' : 'plus';
+                    if (equipmentUsageEditAmount) equipmentUsageEditAmount.value = Math.abs(equipmentEditAmountRaw).toFixed(2);
+                    if (equipmentUsageEditMeta) equipmentUsageEditMeta.textContent = editBtn.getAttribute('data-title') || '';
+                    showEquipmentUsageEditModal();
+                    return;
+                }
+                if (e.target && e.target.getAttribute && e.target.getAttribute('data-equipment-usage-edit-close') !== null) {
+                    hideEquipmentUsageEditModal();
+                }
+            });
 
             // 업체 자동완성 이벤트 위임
             var createForm = document.getElementById('equipmentCreateForm');

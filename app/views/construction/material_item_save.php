@@ -30,7 +30,7 @@ if (!Auth::canManageConstruction()) {
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
 if (!csrf_check(isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '')) {
     flash_set('error', '보안 토큰이 유효하지 않습니다.');
-    header('Location: ?r=공사');
+    header('Location: ?r=construction_home');
     exit;
 }
 
@@ -40,7 +40,7 @@ $defaultYm = cpms_construction_current_business_ym();
 $ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : $defaultYm;
 if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = $defaultYm;
 
-$redirect = '?r=공사&pid=' . $projectId . '&tab=materials&materials_tab=' . urlencode($materialsTab) . '&ym=' . urlencode($ym);
+$redirect = '?r=construction_home&pid=' . $projectId . '&tab=materials&materials_tab=' . urlencode($materialsTab) . '&ym=' . urlencode($ym);
 if ($projectId <= 0) {
     flash_set('error', '프로젝트 정보가 올바르지 않습니다.');
     header('Location: ' . $redirect);
@@ -72,7 +72,9 @@ $spec = '';
 $representative = trim((string)(isset($_POST['representative']) ? $_POST['representative'] : ''));
 $phone = trim((string)(isset($_POST['phone']) ? $_POST['phone'] : ''));
 $bizNo = trim((string)(isset($_POST['biz_no']) ? $_POST['biz_no'] : ''));
-$baseRate = isset($_POST['base_rate']) ? (float)$_POST['base_rate'] : 0;
+$amountSign = isset($_POST['amount_sign']) ? trim((string)$_POST['amount_sign']) : '';
+$baseRate = cpms_material_item_save_positive_money(isset($_POST['base_rate']) ? $_POST['base_rate'] : 0);
+$usageAmount = cpms_material_item_save_signed_money($baseRate, $amountSign);
 $remark = trim((string)(isset($_POST['remark']) ? $_POST['remark'] : ''));
 $advanceYn = cpms_material_advance_yn(isset($_POST['advance_yn']) ? $_POST['advance_yn'] : 'N');
 $usageDates = isset($_POST['usage_dates']) ? $_POST['usage_dates'] : array();
@@ -188,9 +190,28 @@ function material_collect_usage_dates($usageDates, $text, $ym)
     return array_keys($result);
 }
 
+function cpms_material_item_save_positive_money($value)
+{
+    $raw = trim((string)$value);
+    $raw = str_replace(array(',', ' ', "\t", '원'), '', $raw);
+    $raw = preg_replace('/[^0-9.\-]/', '', $raw);
+    if ($raw === '' || $raw === '-' || $raw === '.') return 0.0;
+    return abs((float)$raw);
+}
+
+function cpms_material_item_save_signed_money($amount, $signValue)
+{
+    $amount = abs((float)$amount);
+    $signValue = trim((string)$signValue);
+    if ($signValue === '-' || $signValue === 'minus' || $signValue === 'deduct' || $signValue === 'negative') {
+        return $amount * -1;
+    }
+    return $amount;
+}
+
 function material_bulk_redirect_url($projectId, $ym, $token)
 {
-    $url = '?r=공사&pid=' . (int)$projectId . '&tab=materials&materials_tab=input&ym=' . urlencode((string)$ym);
+    $url = '?r=construction_home&pid=' . (int)$projectId . '&tab=materials&materials_tab=input&ym=' . urlencode((string)$ym);
     if ($token !== '') $url .= '&bulk_token=' . urlencode((string)$token);
     return $url;
 }
@@ -1316,7 +1337,7 @@ try {
             $stU->bindValue(':pid', $projectId, PDO::PARAM_INT);
             $stU->bindValue(':eid', $materialId, PDO::PARAM_INT);
             $stU->bindValue(':d', $d);
-            $stU->bindValue(':amt', $baseRate);
+            $stU->bindValue(':amt', $usageAmount);
             if ($hasMaterialAdvanceYn) $stU->bindValue(':advance_yn', $advanceYn);
             $stU->bindValue(':memo', '');
             $stU->bindValue(':created_at', $now);

@@ -301,7 +301,7 @@ try {
         $status = 'pending';
         $approvalStage = 'DIRECTOR_PENDING';
         $directorApprover = cpms_labor_find_director_approver($pdo);
-        if (!$directorApprover) cpms_gongsu_json_exit(false, '박원덕 상무 승인자를 직원명부에서 찾을 수 없습니다.', array(), 200);
+        if (!$directorApprover) cpms_gongsu_json_exit(false, '공사PM 승인자를 직원명부에서 찾을 수 없습니다.', array(), 200);
         $currentApprover = $directorApprover;
         $approvalRequiredLevel = ($newValue >= 1.4) ? 'DIRECTOR_THEN_VP' : 'DIRECTOR_ONLY';
     } else {
@@ -422,19 +422,19 @@ try {
 
     $returnValue = ($oldValue === null) ? number_format($newValue, 2, '.', '') : number_format($oldValue, 2, '.', '');
     if ($approvalRequiredLevel === 'DIRECTOR_THEN_VP') {
-        cpms_gongsu_json_exit(true, '박원덕 상무에게 1차 공수 수정 승인 요청을 보냈습니다. 승인 후 부사장에게 2차 승인 요청이 전달됩니다.', array(
+        cpms_gongsu_json_exit(true, '공사PM에게 1차 공수 수정 승인 요청을 보냈습니다. 승인 후 부사장에게 2차 승인 요청이 전달됩니다.', array(
             'mode' => 'pending',
             'approval_stage' => 'DIRECTOR_PENDING',
             'approval_required_level' => 'DIRECTOR_THEN_VP',
-            'approver_name' => '박원덕',
+            'approver_name' => $directorName !== null && trim((string)$directorName) !== '' ? $directorName : '공사PM',
             'value' => $returnValue,
             'pending_value' => number_format($newValue, 2, '.', '')
         ), 200);
     }
-    cpms_gongsu_json_exit(true, '박원덕 상무에게 공수 수정 승인 요청을 보냈습니다.', array(
+    cpms_gongsu_json_exit(true, '공사PM에게 공수 수정 승인 요청을 보냈습니다.', array(
         'mode' => 'pending',
         'approval_stage' => 'DIRECTOR_PENDING',
-        'approver_name' => '박원덕',        
+        'approver_name' => $directorName !== null && trim((string)$directorName) !== '' ? $directorName : '공사PM',
         'value' => $returnValue,
         'pending_value' => number_format($newValue, 2, '.', '')
     ), 200);
