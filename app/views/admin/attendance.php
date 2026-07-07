@@ -44,6 +44,9 @@ if ($monthStartTs === false) {
 }
 $monthEnd = date('Y-m-t', $monthStartTs);
 $monthDays = (int)date('t', $monthStartTs);
+$monthlyStatusDate = $attendanceMonthlyToday;
+if ($monthlyStatusDate < $monthStart) $monthlyStatusDate = $monthStart;
+if ($monthlyStatusDate > $monthEnd) $monthlyStatusDate = $monthEnd;
 
 $daily = array();
 $reqs = array();
@@ -505,26 +508,27 @@ if ($pdo) {
             $row = array(
                 'employee' => $empRow,
                 'cells' => $cells,
-                'stats' => $rowStats
+                'stats' => $rowStats,
+                'basis_status' => isset($cells[$monthlyStatusDate]) && isset($cells[$monthlyStatusDate]['status']) ? (string)$cells[$monthlyStatusDate]['status'] : 'none'
             );
             $monthlyRowsAll[count($monthlyRowsAll)] = $row;
         }
 
         $monthlySummary['total'] = count($monthlyRowsAll);
         foreach ($monthlyRowsAll as $monthlyRow) {
-            $stats = isset($monthlyRow['stats']) ? $monthlyRow['stats'] : array();
-            if (isset($stats['normal']) && (int)$stats['normal'] > 0) $monthlySummary['normal']++;
-            if (isset($stats['late']) && (int)$stats['late'] > 0) $monthlySummary['late']++;
-            if (isset($stats['vacation']) && (int)$stats['vacation'] > 0) $monthlySummary['vacation']++;
-            if (isset($stats['missing_checkout']) && (int)$stats['missing_checkout'] > 0) $monthlySummary['missing_checkout']++;
+            $basisStatus = isset($monthlyRow['basis_status']) ? (string)$monthlyRow['basis_status'] : 'none';
+            if ($basisStatus === 'normal') $monthlySummary['normal']++;
+            if ($basisStatus === 'late') $monthlySummary['late']++;
+            if ($basisStatus === 'vacation') $monthlySummary['vacation']++;
+            if ($basisStatus === 'missing_checkout') $monthlySummary['missing_checkout']++;
         }
 
         foreach ($monthlyRowsAll as $monthlyRow) {
-            $stats = isset($monthlyRow['stats']) ? $monthlyRow['stats'] : array();
+            $basisStatus = isset($monthlyRow['basis_status']) ? (string)$monthlyRow['basis_status'] : 'none';
             $includeRow = true;
-            if ($quickFilter === 'late' && (!isset($stats['late']) || (int)$stats['late'] <= 0)) $includeRow = false;
-            if ($quickFilter === 'vacation' && (!isset($stats['vacation']) || (int)$stats['vacation'] <= 0)) $includeRow = false;
-            if ($quickFilter === 'missing_checkout' && (!isset($stats['missing_checkout']) || (int)$stats['missing_checkout'] <= 0)) $includeRow = false;
+            if ($quickFilter === 'late' && $basisStatus !== 'late') $includeRow = false;
+            if ($quickFilter === 'vacation' && $basisStatus !== 'vacation') $includeRow = false;
+            if ($quickFilter === 'missing_checkout' && $basisStatus !== 'missing_checkout') $includeRow = false;
             if ($includeRow) $monthlyRows[count($monthlyRows)] = $monthlyRow;
         }
     }
@@ -719,7 +723,7 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                         <a class='cpms-attendance-chip <?php echo $quickFilter==='vacation'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month) . '&sort=' . urlencode($sort) . '&filter=vacation'); ?>'><?php echo h(attendance_text('%ED%9C%B4%EA%B0%80%EC%9E%90%EB%A7%8C')); ?></a>
                         <a class='cpms-attendance-chip <?php echo $quickFilter==='missing_checkout'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month) . '&sort=' . urlencode($sort) . '&filter=missing_checkout'); ?>'><?php echo h(attendance_text('%EB%AF%B8%ED%87%B4%EA%B7%BC%EC%9E%90%EB%A7%8C')); ?></a>
                     </div>
-                    <div class='text-xs text-slate-500 mt-2'>오늘 미퇴근은 18:00 이후부터 표시됩니다.</div>
+                    <div class='text-xs text-slate-500 mt-2'><?php echo h($monthlyStatusDate); ?> 기준으로 정상출근, 지각, 휴가, 미퇴근을 표시합니다. 오늘 미퇴근은 18:00 이후부터 표시됩니다.</div>
                 </div>
                 <div class='cpms-attendance-legend'>
                     <span><i class='cpms-attendance-dot normal'></i><?php echo h(attendance_text('%EC%A0%95%EC%83%81')); ?></span>
@@ -735,7 +739,7 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                     <div>
                         <div class='cpms-attendance-card-title'><?php echo h(attendance_text('%EC%B4%9D%20%EC%9D%B8%EC%9B%90')); ?></div>
                         <div class='cpms-attendance-card-value'><?php echo (int)$monthlySummary['total']; ?><?php echo h(attendance_text('%EB%AA%85')); ?></div>
-                        <div class='cpms-attendance-card-sub'><?php echo h(attendance_text('%EC%9B%94%EB%B3%84%20%EA%B8%B0%EC%A4%80')); ?></div>
+                        <div class='cpms-attendance-card-sub'><?php echo h($monthlyStatusDate); ?> 기준</div>
                     </div>
                 </div>
                 <div class='cpms-attendance-card'>
@@ -876,8 +880,9 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                                     </div>
                                     <div class='cpms-attendance-time-box'>
                                         <div class='cpms-attendance-time-label'><?php echo h(attendance_text('%ED%87%B4%EA%B7%BC%EC%8B%9C%EA%B0%84')); ?></div>
-                                        <input type='time' name='check_out_time' id='attendanceEditCheckOut' value='18:00' class='cpms-attendance-time-input w-full px-4 py-3 rounded-2xl border border-gray-200'>
-                                        <div class='cpms-attendance-time-hint'>18:00</div>
+                                        <input type='time' name='check_out_time' id='attendanceEditCheckOut' value='' class='cpms-attendance-time-input w-full px-4 py-3 rounded-2xl border border-gray-200'>
+                                        <div class='cpms-attendance-time-hint'>비워두면 출근중으로 저장됩니다.</div>
+                                        <button type='button' id='attendanceClearCheckOut' class='mt-2 px-3 py-2 rounded-xl border border-rose-200 bg-rose-50 text-rose-700 text-sm font-extrabold'>퇴근 취소</button>
                                     </div>
                                 </div>
                                 <div class='cpms-attendance-modal-actions'>
@@ -897,6 +902,7 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                     var dateInput = document.getElementById('attendanceEditWorkDate');
                     var checkInInput = document.getElementById('attendanceEditCheckIn');
                     var checkOutInput = document.getElementById('attendanceEditCheckOut');
+                    var clearCheckOutButton = document.getElementById('attendanceClearCheckOut');
                     var sub = document.getElementById('attendanceEditSub');
                     function closestCell(target) {
                         while (target && target !== document) {
@@ -913,10 +919,16 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
                         employeeInput.value = cell.getAttribute('data-employee-id') || '';
                         dateInput.value = cell.getAttribute('data-work-date') || '';
                         checkInInput.value = cell.getAttribute('data-check-in') || '08:00';
-                        checkOutInput.value = cell.getAttribute('data-check-out') || '18:00';
+                        checkOutInput.value = cell.getAttribute('data-check-out') || '';
                         if (sub) sub.textContent = (cell.getAttribute('data-employee-name') || '-') + ' / ' + (cell.getAttribute('data-work-date') || '');
                         modal.className += ' is-open';
                         modal.setAttribute('aria-hidden', 'false');
+                    }
+                    if (clearCheckOutButton) {
+                        clearCheckOutButton.addEventListener('click', function(){
+                            checkOutInput.value = '';
+                            checkOutInput.focus();
+                        });
                     }
                     document.addEventListener('click', function(event){
                         var closeTarget = event.target.getAttribute ? event.target.getAttribute('data-attendance-modal-close') : '';

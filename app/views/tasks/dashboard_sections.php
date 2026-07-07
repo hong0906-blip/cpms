@@ -773,8 +773,9 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
 }}
 
 if (!function_exists('cpms_render_employee_task_dashboard')) {
-function cpms_render_employee_task_dashboard($pdo)
+function cpms_render_employee_task_dashboard($pdo, $options = array())
 {
+    if (!is_array($options)) $options = array();
     $currentEmployee = cpms_tasks_current_employee($pdo);
     if ((int)$currentEmployee['id'] <= 0) return;
 
@@ -784,7 +785,19 @@ function cpms_render_employee_task_dashboard($pdo)
     $requested = cpms_task_feed_direct_tasks_requested_by_employee($pdo, (int)$currentEmployee['id'], $requestedTaskDate);
     $employees = cpms_tasks_fetch_active_employees($pdo);
     $projects = cpms_tasks_fetch_projects($pdo);
-    $returnUrl = cpms_tasks_default_return_url();
+    $returnUrl = isset($options['return_url']) ? trim((string)$options['return_url']) : '';
+    if ($returnUrl === '') $returnUrl = cpms_tasks_default_return_url();
+    if (isset($options['form_hidden_inputs']) && is_array($options['form_hidden_inputs'])) {
+        $dashboardHiddenInputs = $options['form_hidden_inputs'];
+    } else {
+        $dashboardHiddenInputs = array('r' => 'dashboard_employee');
+        $currentDashboardRoute = isset($_GET['r']) ? trim((string)$_GET['r']) : '';
+        if ($currentDashboardRoute === 'dashboard_executive') {
+            $dashboardHiddenInputs = array('r' => 'dashboard_executive');
+            $currentExecTab = isset($_GET['exec_tab']) ? trim((string)$_GET['exec_tab']) : 'myTasks';
+            if ($currentExecTab !== '') $dashboardHiddenInputs['exec_tab'] = $currentExecTab;
+        }
+    }
     $currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, cpms_tasks_today()) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
 
     $summary = array(
@@ -1045,7 +1058,9 @@ function cpms_render_employee_task_dashboard($pdo)
             </div>
             <div class="rounded-3xl border border-gray-200 bg-white p-5">
                 <form method="get" action="" class="flex flex-wrap items-end gap-3">
-                    <input type="hidden" name="r" value="dashboard_employee">
+                    <?php foreach ($dashboardHiddenInputs as $dashboardHiddenName => $dashboardHiddenValue): ?>
+                        <input type="hidden" name="<?php echo h($dashboardHiddenName); ?>" value="<?php echo h($dashboardHiddenValue); ?>">
+                    <?php endforeach; ?>
                     <div>
                         <div class="text-sm font-bold text-gray-700 mb-1">내가 요청한 업무 일자</div>
                         <input type="date" name="requested_task_date" value="<?php echo h($requestedTaskDate); ?>" class="px-4 py-3 rounded-2xl border border-gray-200">

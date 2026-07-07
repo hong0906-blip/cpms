@@ -24,6 +24,7 @@ $loadProjectCostSummary = $projectCostFragmentOnly || (isset($_GET['load_project
 
 $executiveTabKeys = array(
     'main' => true,
+    'myTasks' => true,
     'department' => true,
     'approval' => true,
     'siteIssues' => true,
@@ -55,6 +56,9 @@ if (!$projectCostFragmentOnly && function_exists('cpms_tasks_process_delayed_not
     if ($delayNotifyLast <= 0 || ($delayNotifyNow - $delayNotifyLast) >= 300) {
         $_SESSION[$delayNotifyKey] = $delayNotifyNow;
         cpms_tasks_process_delayed_notifications($pdo, 20);
+        if (function_exists('attendance_process_morning_missing_checkin_notifications')) {
+            attendance_process_morning_missing_checkin_notifications($pdo, 20);
+        }
     }
 }
 
@@ -473,7 +477,14 @@ if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !=
     </button>
 </div>
 
-<?php cpms_render_task_request_modals($pdo, $executiveTaskReturnUrl); ?>
+<?php
+$executiveEmployeeTaskAvailable = true;
+if ($activeExecutiveTab === 'myTasks' && function_exists('cpms_tasks_current_employee')) {
+    $executiveEmployeeTaskUser = cpms_tasks_current_employee($pdo);
+    $executiveEmployeeTaskAvailable = (isset($executiveEmployeeTaskUser['id']) && (int)$executiveEmployeeTaskUser['id'] > 0);
+}
+if ($activeExecutiveTab !== 'myTasks' || !$executiveEmployeeTaskAvailable) cpms_render_task_request_modals($pdo, $executiveTaskReturnUrl);
+?>
 
 <?php if ($flash): ?>
     <div class="mb-4 p-4 rounded-2xl border <?php echo ($flash['type'] === 'success') ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-red-50 border-red-200 text-red-700'; ?>">
@@ -497,6 +508,7 @@ if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !=
 
 <div class="mb-6 flex flex-wrap items-center gap-2" role="tablist" aria-label="임원 대시보드 탭">
     <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=main'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="main" aria-selected="<?php echo ($activeExecutiveTab === 'main') ? 'true' : 'false'; ?>">메인</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=myTasks'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="myTasks" aria-selected="<?php echo ($activeExecutiveTab === 'myTasks') ? 'true' : 'false'; ?>">나의할일</a>
     <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=department'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="department" aria-selected="<?php echo ($activeExecutiveTab === 'department') ? 'true' : 'false'; ?>">부서별 업무현황</a>
     <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=approval'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="approval" aria-selected="<?php echo ($activeExecutiveTab === 'approval') ? 'true' : 'false'; ?>">승인대기</a>
     <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=siteIssues'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="siteIssues" aria-selected="<?php echo ($activeExecutiveTab === 'siteIssues') ? 'true' : 'false'; ?>">현장별 이슈</a>
@@ -505,6 +517,14 @@ if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !=
 <div data-executive-tab-panels>
 <?php if ($activeExecutiveTab === 'main'): ?>
 <section data-executive-tab-panel="main">
+
+<?php
+$cpmsEmployeeAttendanceFormHiddenInputs = array('r' => 'dashboard_executive', 'exec_tab' => 'main');
+$cpmsEmployeeAttendanceReturnUrl = '?r=dashboard_executive&exec_tab=main';
+$cpmsEmployeeAttendanceShowFlash = false;
+require __DIR__ . '/partials/employee_attendance_section.php';
+unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl, $cpmsEmployeeAttendanceShowFlash);
+?>
 
 <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
     <div class="bg-white/80 rounded-3xl p-6 border overflow-visible">
@@ -937,6 +957,26 @@ if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !=
 })();
 </script>
 
+</section>
+
+<?php elseif ($activeExecutiveTab === 'myTasks'): ?>
+<section data-executive-tab-panel="myTasks">
+<?php
+if (!$executiveEmployeeTaskAvailable) {
+    ?>
+    <div class="bg-white/80 rounded-3xl p-6 border text-sm font-bold text-gray-600">직원 정보를 찾을 수 없어 나의할일을 불러올 수 없습니다.</div>
+    <?php
+} else {
+    $executiveMyTasksReturnUrl = '?r=dashboard_executive&exec_tab=myTasks';
+    if (isset($_GET['requested_task_date']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$_GET['requested_task_date'])) {
+        $executiveMyTasksReturnUrl .= '&requested_task_date=' . urlencode((string)$_GET['requested_task_date']);
+    }
+    cpms_render_employee_task_dashboard($pdo, array(
+        'return_url' => $executiveMyTasksReturnUrl,
+        'form_hidden_inputs' => array('r' => 'dashboard_executive', 'exec_tab' => 'myTasks')
+    ));
+}
+?>
 </section>
 
 <?php elseif ($activeExecutiveTab === 'department'): ?>

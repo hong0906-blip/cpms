@@ -3,9 +3,11 @@ use App\Core\Db;
 
 require_once __DIR__ . '/common.php';
 
+$attendanceRequestReturnUrl = isset($_POST['return_url']) ? cpms_safe_internal_redirect_url((string)$_POST['return_url'], '?r=대시보드') : '?r=대시보드';
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) {
     flash_set('danger', '잘못된 요청입니다.');
-    header('Location: ?r=대시보드');
+    header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }
 
@@ -22,18 +24,18 @@ $co = str_replace('T', ' ', $co);
 
 if (!$pdo || (int)$eid <= 0) {
     flash_set('danger', '직원 정보를 찾을 수 없습니다.');
-    header('Location: ?r=대시보드');
+    header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }
 
 if (!in_array($t, array('check_in', 'check_out', 'both'), true)) {
     flash_set('danger', '요청 종류가 올바르지 않습니다.');
-    header('Location: ?r=대시보드');
+    header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
     flash_set('danger', '요청 날짜가 올바르지 않습니다.');
-    header('Location: ?r=대시보드');
+    header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }
 if ($t === 'check_in') {
@@ -43,12 +45,12 @@ if ($t === 'check_in') {
 }
 if (($t === 'check_in' || $t === 'both') && $ci === '') {
     flash_set('danger', '요청 출근시간을 선택해주세요.');
-    header('Location: ?r=대시보드');
+    header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }
 if (($t === 'check_out' || $t === 'both') && $co === '') {
     flash_set('danger', '요청 퇴근시간을 선택해주세요.');
-    header('Location: ?r=대시보드');
+    header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }
 
@@ -56,17 +58,17 @@ $ciDate = attendance_datetime_date_part($ci);
 $coDate = attendance_datetime_date_part($co);
 if (($t === 'check_in' || $t === 'both') && $ciDate !== '' && $ciDate !== $d) {
     flash_set('danger', '요청 날짜와 출근시간의 날짜가 서로 다릅니다.');
-    header('Location: ?r=대시보드');
+    header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }
 if (($t === 'check_out' || $t === 'both') && $coDate !== '' && $coDate !== $d) {
     flash_set('danger', '요청 날짜와 퇴근시간의 날짜가 서로 다릅니다.');
-    header('Location: ?r=대시보드');
+    header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }
 if ($t === 'both' && $ciDate !== '' && $coDate !== '' && $ciDate !== $coDate) {
     flash_set('danger', '요청 날짜와 출퇴근 시간의 날짜가 서로 다릅니다. 요청 날짜를 ' . $ciDate . '로 선택해주세요.');
-    header('Location: ?r=대시보드');
+    header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }
 
@@ -82,7 +84,7 @@ try {
     }
     if (!$locked) {
         flash_set('danger', '요청 처리 중입니다. 잠시 후 다시 확인해주세요.');
-        header('Location: ?r=대시보드');
+        header('Location: ' . $attendanceRequestReturnUrl);
         exit;
     }
 
@@ -96,7 +98,7 @@ try {
         } catch (Exception $e) {
         }
         flash_set('success', '이미 승인대기 중인 같은 수정 요청이 있습니다. 기존 요청 1건만 유지됩니다.');
-        header('Location: ?r=대시보드');
+        header('Location: ' . $attendanceRequestReturnUrl);
         exit;
     }
 
@@ -193,5 +195,5 @@ try {
     flash_set('danger', '요청 저장 실패');
 }
 
-header('Location: ?r=대시보드');
+header('Location: ' . $attendanceRequestReturnUrl);
 exit;

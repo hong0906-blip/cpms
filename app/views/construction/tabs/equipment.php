@@ -864,7 +864,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                     </div>
                     <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-equipment-usage-edit-close>닫기</button>
                 </div>
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_usage_update" class="mt-4 space-y-3">
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_usage_edit_save" class="mt-4 space-y-3">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="usage_id" id="equipmentUsageEditId" value="">

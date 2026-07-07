@@ -369,6 +369,10 @@ function cpms_tasks_default_return_url()
 {
     $dashboardType = isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee';
     $url = ($dashboardType === 'executive') ? '?r=dashboard_executive' : '?r=dashboard_employee';
+    if ($dashboardType === 'executive') {
+        $execTab = isset($_GET['exec_tab']) ? trim((string)$_GET['exec_tab']) : '';
+        if ($execTab !== '') $url .= '&exec_tab=' . urlencode($execTab);
+    }
     $departmentFilter = isset($_GET['task_department']) ? trim((string)$_GET['task_department']) : '';
     if ($departmentFilter !== '') $url .= '&task_department=' . urlencode($departmentFilter);
     $requestedTaskDate = isset($_GET['requested_task_date']) ? trim((string)$_GET['requested_task_date']) : '';

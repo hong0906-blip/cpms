@@ -3,6 +3,7 @@ if (!class_exists('App\\Core\\Db')) {
     require_once dirname(dirname(__DIR__)) . '/bootstrap.php';
 }
 require_once __DIR__ . '/helpers.php';
+require_once dirname(__DIR__) . '/attendance/common.php';
 
 if (!function_exists('cpms_tasks_delayed_notify_json')) {
 function cpms_tasks_delayed_notify_json($ok, $result, $statusCode)
@@ -43,6 +44,9 @@ if ($limit <= 0) $limit = 200;
 try {
     $pdo = \App\Core\Db::pdo();
     $result = cpms_tasks_process_delayed_notifications($pdo, $limit);
+    if (function_exists('attendance_process_morning_missing_checkin_notifications')) {
+        $result['attendance_morning'] = attendance_process_morning_missing_checkin_notifications($pdo, $limit);
+    }
     cpms_tasks_delayed_notify_json(true, $result, 200);
 } catch (Exception $e) {
     cpms_tasks_delayed_notify_json(false, array('message' => $e->getMessage()), 500);

@@ -355,6 +355,216 @@ function attendance_hm($minutes){
     $m = $minutes%60;
     return $h . attendance_text('%EC%8B%9C%EA%B0%84%20') . $m . attendance_text('%EB%B6%84');
 }
+if (!function_exists('attendance_morning_checkin_leave_excludes')) {
+function attendance_morning_checkin_leave_excludes($label, $amount) {
+    $label = trim((string)$label);
+    $compact = str_replace(array(' ', "\t", "\r", "\n"), '', $label);
+    $amount = is_numeric($amount) ? (float)$amount : 0.0;
+    $morning = attendance_text('%EC%98%A4%EC%A0%84');
+    $afternoon = attendance_text('%EC%98%A4%ED%9B%84');
+    if (strpos($compact, $afternoon) !== false && strpos($compact, $morning) === false) return false;
+    if ($amount > 0 && $amount <= 0.5 && strpos($compact, $afternoon) !== false) return false;
+    return true;
+}}
+if (!function_exists('attendance_morning_checkin_leave_map')) {
+function attendance_morning_checkin_leave_map($pdo, $date) {
+    $map = array();
+    $date = trim((string)$date);
+    if (!$pdo || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return $map;
+    if (attendance_table_exists($pdo, 'cpms_leave_records')) {
+        try {
+            $st = $pdo->prepare("SELECT employee_id, leave_type, leave_amount FROM cpms_leave_records WHERE leave_date=:d");
+            $st->execute(array(':d' => $date));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (is_array($rows)) {
+                foreach ($rows as $row) {
+                    $employeeId = isset($row['employee_id']) ? (int)$row['employee_id'] : 0;
+                    if ($employeeId <= 0) continue;
+                    $label = isset($row['leave_type']) ? (string)$row['leave_type'] : '';
+                    $amount = isset($row['leave_amount']) ? $row['leave_amount'] : 0;
+                    if (attendance_morning_checkin_leave_excludes($label, $amount)) $map[$employeeId] = true;
+                }
+            }
+        } catch (Exception $e) {
+        }
+    }
+    if (attendance_table_exists($pdo, 'cpms_approval_documents') && attendance_table_column_exists_for_settings($pdo, 'cpms_approval_documents', 'created_by_id') && attendance_table_column_exists_for_settings($pdo, 'cpms_approval_documents', 'content')) {
+        try {
+            $st = $pdo->query("SELECT created_by_id, content FROM cpms_approval_documents WHERE doc_type='leave' AND UPPER(COALESCE(doc_status,'')) IN ('APPROVED','COMPLETED') ORDER BY id DESC");
+            $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+            if (is_array($rows)) {
+                foreach ($rows as $row) {
+                    $employeeId = isset($row['created_by_id']) ? (int)$row['created_by_id'] : 0;
+                    if ($employeeId <= 0) continue;
+                    $content = array();
+                    $raw = isset($row['content']) ? trim((string)$row['content']) : '';
+                    if ($raw !== '') {
+                        $decoded = json_decode($raw, true);
+                        if (is_array($decoded)) $content = $decoded;
+                    }
+                    $start = isset($content['leave_start_date']) ? substr(trim((string)$content['leave_start_date']), 0, 10) : '';
+                    $end = isset($content['leave_end_date']) ? substr(trim((string)$content['leave_end_date']), 0, 10) : '';
+                    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $start) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $end)) continue;
+                    if ($date < $start || $date > $end) continue;
+                    $label = isset($content['request_type']) ? (string)$content['request_type'] : '';
+                    $amount = isset($content['leave_days']) ? str_replace(',', '', (string)$content['leave_days']) : 0;
+                    if (attendance_morning_checkin_leave_excludes($label, $amount)) $map[$employeeId] = true;
+                }
+            }
+        } catch (Exception $e) {
+        }
+    }
+    return $map;
+}}
+if (!function_exists('attendance_morning_checkin_notification_exists')) {
+function attendance_morning_checkin_notification_exists($pdo, $date, $employeeId) {
+    if (!$pdo || (int)$employeeId <= 0) return false;
+    $sourceId = (int)str_replace('-', '', (string)$date);
+    if (attendance_table_exists($pdo, 'cpms_attendance_morning_checkin_notifications')) {
+        try {
+            $stReserved = $pdo->prepare("SELECT id FROM cpms_attendance_morning_checkin_notifications WHERE work_date=:work_date AND employee_id=:employee_id LIMIT 1");
+            $stReserved->execute(array(':work_date' => (string)$date, ':employee_id' => (int)$employeeId));
+            if ($stReserved->fetchColumn()) return true;
+        } catch (Exception $e) {
+        }
+    }
+    if (!attendance_table_exists($pdo, 'cpms_google_chat_notifications')) return false;
+    try {
+        $st = $pdo->prepare("SELECT id FROM cpms_google_chat_notifications WHERE source_type='ATTENDANCE_MISSING_CHECKIN' AND event_type='MORNING_CHECKIN_REMINDER' AND source_id=:source_id AND receiver_employee_id=:employee_id LIMIT 1");
+        $st->execute(array(':source_id' => $sourceId, ':employee_id' => (int)$employeeId));
+        return (bool)$st->fetchColumn();
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+if (!function_exists('attendance_morning_checkin_ensure_schema')) {
+function attendance_morning_checkin_ensure_schema($pdo) {
+    if (!$pdo) return false;
+    try {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_attendance_morning_checkin_notifications (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            work_date DATE NOT NULL,
+            employee_id INT NOT NULL,
+            source_id INT NOT NULL,
+            send_status VARCHAR(20) NULL,
+            created_at DATETIME NOT NULL,
+            sent_at DATETIME NULL,
+            updated_at DATETIME NULL,
+            UNIQUE KEY uniq_work_employee (work_date, employee_id),
+            KEY idx_work_date (work_date)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+if (!function_exists('attendance_morning_checkin_reserve_notification')) {
+function attendance_morning_checkin_reserve_notification($pdo, $date, $employeeId, $sourceId) {
+    if (!$pdo || (int)$employeeId <= 0) return false;
+    if (!attendance_morning_checkin_ensure_schema($pdo)) return !attendance_morning_checkin_notification_exists($pdo, $date, $employeeId);
+    try {
+        $now = attendance_now();
+        $st = $pdo->prepare("INSERT IGNORE INTO cpms_attendance_morning_checkin_notifications
+            (work_date, employee_id, source_id, send_status, created_at, updated_at)
+            VALUES (:work_date, :employee_id, :source_id, 'RESERVED', :created_at, :updated_at)");
+        $st->execute(array(
+            ':work_date' => (string)$date,
+            ':employee_id' => (int)$employeeId,
+            ':source_id' => (int)$sourceId,
+            ':created_at' => $now,
+            ':updated_at' => $now
+        ));
+        return ((int)$st->rowCount() > 0);
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+if (!function_exists('attendance_morning_checkin_mark_notification')) {
+function attendance_morning_checkin_mark_notification($pdo, $date, $employeeId, $ok) {
+    if (!$pdo || (int)$employeeId <= 0 || !attendance_table_exists($pdo, 'cpms_attendance_morning_checkin_notifications')) return false;
+    try {
+        $now = attendance_now();
+        $st = $pdo->prepare("UPDATE cpms_attendance_morning_checkin_notifications
+            SET send_status=:send_status, sent_at=:sent_at, updated_at=:updated_at
+            WHERE work_date=:work_date AND employee_id=:employee_id");
+        $st->execute(array(
+            ':send_status' => $ok ? 'SUCCESS' : 'FAILED',
+            ':sent_at' => $ok ? $now : null,
+            ':updated_at' => $now,
+            ':work_date' => (string)$date,
+            ':employee_id' => (int)$employeeId
+        ));
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+if (!function_exists('attendance_process_morning_missing_checkin_notifications')) {
+function attendance_process_morning_missing_checkin_notifications($pdo, $limit) {
+    $result = array('checked' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0);
+    if (!$pdo) return $result;
+    $today = attendance_today();
+    $now = attendance_now();
+    $nowTime = strlen($now) >= 19 ? substr($now, 11, 8) : date('H:i:s');
+    if (strcmp($nowTime, '08:00:00') < 0) return $result;
+    $weekNo = (int)date('N', strtotime($today));
+    if ($weekNo >= 6) return $result;
+    if (!function_exists('cpms_send_google_chat_to_employee')) {
+        require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    }
+    if (!function_exists('cpms_send_google_chat_to_employee')) return $result;
+
+    $limit = (int)$limit;
+    if ($limit < 200) $limit = 200;
+    if ($limit > 500) $limit = 500;
+    $sourceId = (int)str_replace('-', '', $today);
+    $leaveMap = attendance_morning_checkin_leave_map($pdo, $today);
+    $presentMap = array();
+    try {
+        $stPresent = $pdo->prepare("SELECT employee_id FROM cpms_attendance_records WHERE work_date=:d AND check_in IS NOT NULL AND TRIM(CAST(check_in AS CHAR)) <> ''");
+        $stPresent->execute(array(':d' => $today));
+        $presentRows = $stPresent->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($presentRows)) {
+            foreach ($presentRows as $presentRow) {
+                $presentMap[(int)$presentRow['employee_id']] = true;
+            }
+        }
+    } catch (Exception $e) {
+        return $result;
+    }
+    try {
+        $positionSelect = attendance_table_column_exists_for_settings($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+        $activeWhere = attendance_table_column_exists_for_settings($pdo, 'employees', 'is_active') ? " WHERE (is_active IS NULL OR is_active=1)" : "";
+        $sql = "SELECT id, name, email, department, " . $positionSelect . " FROM employees" . $activeWhere . " ORDER BY id ASC LIMIT " . (int)$limit;
+        $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) $rows = array();
+        $rows = attendance_filter_representative_rows($rows);
+    } catch (Exception $e) {
+        return $result;
+    }
+    foreach ($rows as $row) {
+        $employeeId = isset($row['id']) ? (int)$row['id'] : 0;
+        if ($employeeId <= 0) continue;
+        $result['checked']++;
+        if (isset($presentMap[$employeeId]) || isset($leaveMap[$employeeId])) {
+            $result['skipped']++;
+            continue;
+        }
+        if (attendance_morning_checkin_notification_exists($pdo, $today, $employeeId)) {
+            $result['skipped']++;
+            continue;
+        }
+        if (!attendance_morning_checkin_reserve_notification($pdo, $today, $employeeId, $sourceId)) {
+            $result['skipped']++;
+            continue;
+        }
+        $ok = cpms_send_google_chat_to_employee($pdo, $employeeId, '현재 미출근 중입니다. 출근 바랍니다.', $sourceId, 'MORNING_CHECKIN_REMINDER', 'ATTENDANCE_MISSING_CHECKIN');
+        attendance_morning_checkin_mark_notification($pdo, $today, $employeeId, $ok);
+        if ($ok) $result['sent']++;
+        else $result['failed']++;
+    }
+    return $result;
+}}
 function attendance_parse_coordinate($value){
     $value = trim((string)$value);
     if($value === '') return null;

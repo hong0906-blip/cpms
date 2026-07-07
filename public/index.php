@@ -1085,6 +1085,10 @@ if ($route === 'construction/equipment_usage_save') {
     require_once __DIR__ . '/../app/views/construction/equipment_usage_save.php';
     exit;
 }
+if ($route === 'construction/equipment_usage_edit_save') {
+    require_once __DIR__ . '/../app/views/construction/equipment_usage_update.php';
+    exit;
+}
 if ($route === 'construction/equipment_usage_update') {
     require_once __DIR__ . '/../app/views/construction/equipment_usage_update.php';
     exit;
@@ -1115,6 +1119,10 @@ if ($route === 'construction/material_item_delete') {
 }
 if ($route === 'construction/material_usage_save') {
     require_once __DIR__ . '/../app/views/construction/material_usage_save.php';
+    exit;
+}
+if ($route === 'construction/material_usage_edit_save') {
+    require_once __DIR__ . '/../app/views/construction/material_usage_update.php';
     exit;
 }
 if ($route === 'construction/material_usage_update') {
