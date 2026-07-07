@@ -34,7 +34,7 @@ function cpms_tasks_table_exists($pdo, $tableName)
     static $cache = array();
     if (!$pdo || trim((string)$tableName) === '') return false;
     $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':table:' . (string)$tableName;
-    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+    if (isset($cache[$cacheKey]) && $cache[$cacheKey]) return $cache[$cacheKey];
     try {
         $st = $pdo->prepare("SHOW TABLES LIKE :table_name");
         $st->execute(array(':table_name' => $tableName));
@@ -52,7 +52,7 @@ function cpms_tasks_column_exists($pdo, $tableName, $columnName)
     static $cache = array();
     if (!$pdo || trim((string)$tableName) === '' || trim((string)$columnName) === '') return false;
     $cacheKey = (function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'nopdo') . ':column:' . (string)$tableName . ':' . (string)$columnName;
-    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+    if (isset($cache[$cacheKey]) && $cache[$cacheKey]) return $cache[$cacheKey];
     try {
         $st = $pdo->prepare("SHOW COLUMNS FROM `" . str_replace('`', '``', $tableName) . "` LIKE :column_name");
         $st->execute(array(':column_name' => $columnName));
@@ -170,6 +170,8 @@ function cpms_tasks_status_label($status)
         'created' => '등록',
         'status_changed' => '상태 변경',
         'completed' => '완료 처리',
+        'request_read' => '요청 읽음',
+        'transferred' => '담당자 전달',
         'meeting_available_action' => '참석가능',
         'meeting_unavailable_action' => '참석불가능',
         'revision_requested' => '보완요청',
@@ -557,6 +559,7 @@ function cpms_tasks_should_sync_group_completion($groupKey)
 {
     $groupKey = trim((string)$groupKey);
     if ($groupKey === '') return false;
+    if (strpos($groupKey, 'task_request:') === 0) return true;
     if (strpos($groupKey, 'unused_leave:') === 0) return true;
     if (strpos($groupKey, 'samsung_') === 0) return true;
     return false;
@@ -906,6 +909,297 @@ function cpms_tasks_insert_log($pdo, $taskId, $actor, $actionType, $message, $ol
     }
 }}
 
+if (!function_exists('cpms_tasks_insert_comment')) {
+function cpms_tasks_insert_comment($pdo, $taskId, $actor, $commentText, $parentCommentId)
+{
+    if (!$pdo || (int)$taskId <= 0 || trim((string)$commentText) === '') return false;
+    if (!cpms_tasks_ensure_comment_schema($pdo)) return false;
+    $actorId = is_array($actor) && isset($actor['id']) ? (int)$actor['id'] : 0;
+    $actorName = is_array($actor) && isset($actor['name']) ? (string)$actor['name'] : '';
+    $actorEmail = is_array($actor) && isset($actor['email']) ? (string)$actor['email'] : '';
+    $actorPhoto = is_array($actor) && isset($actor['photo_path']) ? (string)$actor['photo_path'] : '';
+    try {
+        $st = $pdo->prepare("INSERT INTO cpms_task_comments
+            (task_id, parent_comment_id, comment_text, created_by, created_by_name, created_by_email, created_by_photo_path, created_at)
+            VALUES (:task_id, :parent_comment_id, :comment_text, :created_by, :created_by_name, :created_by_email, :created_by_photo_path, :created_at)");
+        $st->bindValue(':task_id', (int)$taskId, PDO::PARAM_INT);
+        if ((int)$parentCommentId > 0) $st->bindValue(':parent_comment_id', (int)$parentCommentId, PDO::PARAM_INT);
+        else $st->bindValue(':parent_comment_id', null, PDO::PARAM_NULL);
+        $st->bindValue(':comment_text', (string)$commentText, PDO::PARAM_STR);
+        if ($actorId > 0) $st->bindValue(':created_by', $actorId, PDO::PARAM_INT);
+        else $st->bindValue(':created_by', null, PDO::PARAM_NULL);
+        $st->bindValue(':created_by_name', $actorName, PDO::PARAM_STR);
+        $st->bindValue(':created_by_email', $actorEmail, PDO::PARAM_STR);
+        $st->bindValue(':created_by_photo_path', $actorPhoto, PDO::PARAM_STR);
+        $st->bindValue(':created_at', cpms_tasks_now(), PDO::PARAM_STR);
+        return $st->execute();
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_tasks_drive_helper_loaded')) {
+function cpms_tasks_drive_helper_loaded()
+{
+    if (function_exists('cpms_drive_upload_file')) return true;
+    $path = dirname(dirname(__DIR__)) . '/services/GoogleDriveHelper.php';
+    if (!is_file($path)) return false;
+    require_once $path;
+    return function_exists('cpms_drive_upload_file');
+}}
+
+if (!function_exists('cpms_tasks_drive_label')) {
+function cpms_tasks_drive_label($key)
+{
+    $labels = array(
+        'root' => '%30%35%5F%EB%82%98%EC%9D%98%ED%95%A0%EC%9D%BC',
+        'received' => '%EB%B0%9B%EC%9D%80%EC%9A%94%EC%B2%AD',
+        'completed' => '%EC%99%84%EB%A3%8C',
+        'unknown_employee' => '%EB%AF%B8%EC%A7%80%EC%A0%95',
+        'drive_failed_notice' => '%ED%8C%8C%EC%9D%BC%EC%9D%80%20%EC%A0%80%EC%9E%A5%EB%90%98%EC%97%88%EC%A7%80%EB%A7%8C%20Google%20Drive%20%EC%97%85%EB%A1%9C%EB%93%9C%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'
+    );
+    return isset($labels[$key]) ? urldecode($labels[$key]) : (string)$key;
+}}
+
+if (!function_exists('cpms_tasks_drive_file_role')) {
+function cpms_tasks_drive_file_role($fileRole)
+{
+    $fileRole = trim((string)$fileRole);
+    return $fileRole === 'complete' ? 'complete' : 'request';
+}}
+
+if (!function_exists('cpms_tasks_drive_stage_label')) {
+function cpms_tasks_drive_stage_label($fileRole)
+{
+    return cpms_tasks_drive_file_role($fileRole) === 'complete' ? cpms_tasks_drive_label('completed') : cpms_tasks_drive_label('received');
+}}
+
+if (!function_exists('cpms_tasks_drive_month_name')) {
+function cpms_tasks_drive_month_name($dateValue)
+{
+    $dateValue = trim((string)$dateValue);
+    $ts = $dateValue !== '' ? strtotime($dateValue) : false;
+    if ($ts === false) $ts = time();
+    return date('Y-m', $ts);
+}}
+
+if (!function_exists('cpms_tasks_drive_employee_for_file')) {
+function cpms_tasks_drive_employee_for_file($pdo, $task, $uploadedBy, $fileRole)
+{
+    $fileRole = cpms_tasks_drive_file_role($fileRole);
+    $employee = null;
+    if ($fileRole === 'complete' && (int)$uploadedBy > 0) {
+        $employee = cpms_tasks_find_employee_by_id($pdo, (int)$uploadedBy);
+    }
+    if (!$employee && is_array($task) && isset($task['assignee_employee_id']) && (int)$task['assignee_employee_id'] > 0) {
+        $employee = cpms_tasks_find_employee_by_id($pdo, (int)$task['assignee_employee_id']);
+    }
+    if (!$employee && is_array($task)) {
+        $employee = array(
+            'id' => isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0,
+            'name' => isset($task['assignee_name']) ? (string)$task['assignee_name'] : '',
+            'email' => isset($task['assignee_email']) ? (string)$task['assignee_email'] : ''
+        );
+    }
+    if (!is_array($employee)) $employee = array('id' => 0, 'name' => cpms_tasks_drive_label('unknown_employee'), 'email' => '');
+    if (!isset($employee['name']) || trim((string)$employee['name']) === '') $employee['name'] = cpms_tasks_drive_label('unknown_employee');
+    return $employee;
+}}
+
+if (!function_exists('cpms_tasks_drive_failed_record')) {
+function cpms_tasks_drive_failed_record($message, $fileRole)
+{
+    return array(
+        'storage_type' => 'local',
+        'drive_name' => '',
+        'drive_file_id' => '',
+        'drive_folder_id' => '',
+        'drive_web_view_link' => '',
+        'drive_web_content_link' => '',
+        'drive_root_folder_id' => '',
+        'drive_employee_folder_id' => '',
+        'drive_month_folder_id' => '',
+        'drive_stage_folder_id' => '',
+        'file_role' => cpms_tasks_drive_file_role($fileRole),
+        'upload_status' => trim((string)$message) === '' ? 'local_saved' : 'failed',
+        'drive_upload_error' => trim((string)$message)
+    );
+}}
+
+if (!function_exists('cpms_tasks_drive_ensure_folder')) {
+function cpms_tasks_drive_ensure_folder($name, $parentId, $context)
+{
+    $folder = cpms_drive_find_or_create_folder($name, $parentId, $context);
+    if (empty($folder['ok']) || !isset($folder['file']) || !is_array($folder['file']) || !isset($folder['file']['id'])) {
+        return array(
+            'ok' => false,
+            'folder_id' => '',
+            'message' => isset($folder['message']) ? (string)$folder['message'] : 'Drive folder prepare failed.',
+            'http_code' => isset($folder['http_code']) ? (int)$folder['http_code'] : 0
+        );
+    }
+    return array(
+        'ok' => true,
+        'folder_id' => (string)$folder['file']['id'],
+        'message' => isset($folder['message']) ? (string)$folder['message'] : '',
+        'http_code' => isset($folder['http_code']) ? (int)$folder['http_code'] : 0
+    );
+}}
+
+if (!function_exists('cpms_tasks_drive_ensure_target_folder')) {
+function cpms_tasks_drive_ensure_target_folder($pdo, $task, $uploadedBy, $fileRole, $originalName)
+{
+    if (!cpms_tasks_drive_helper_loaded()) {
+        return array('ok' => false, 'message' => 'Google Drive helper is not available.', 'http_code' => 0);
+    }
+    if (function_exists('cpms_drive_config') && cpms_drive_config('enabled') === false) {
+        return array('ok' => false, 'message' => 'Google Drive integration is disabled.', 'http_code' => 0);
+    }
+
+    $configuredRoot = cpms_drive_folder_id('my_tasks');
+    $parentId = $configuredRoot !== '' ? $configuredRoot : cpms_drive_folder_id('common_documents');
+    if ($parentId === '') {
+        return array('ok' => false, 'message' => 'My tasks Drive parent folder is not configured.', 'http_code' => 0);
+    }
+
+    $taskId = is_array($task) && isset($task['id']) ? (int)$task['id'] : 0;
+    $fileRole = cpms_tasks_drive_file_role($fileRole);
+    $employee = cpms_tasks_drive_employee_for_file($pdo, $task, $uploadedBy, $fileRole);
+    $employeeName = isset($employee['name']) ? trim((string)$employee['name']) : cpms_tasks_drive_label('unknown_employee');
+    if ($employeeName === '') $employeeName = cpms_tasks_drive_label('unknown_employee');
+    $fallbackDate = cpms_tasks_now();
+    if ($fileRole === 'request' && is_array($task) && isset($task['created_at']) && trim((string)$task['created_at']) !== '') $fallbackDate = (string)$task['created_at'];
+    if ($fileRole === 'complete' && is_array($task) && isset($task['completed_at']) && trim((string)$task['completed_at']) !== '') $fallbackDate = (string)$task['completed_at'];
+    $monthName = cpms_tasks_drive_month_name($fallbackDate);
+
+    $context = array(
+        'user' => $employee,
+        'uploaded_by' => $uploadedBy,
+        'section' => 'tasks',
+        'task_id' => $taskId,
+        'document_type' => cpms_tasks_drive_stage_label($fileRole),
+        'document_year' => substr($monthName, 0, 4),
+        'document_month' => substr($monthName, 5, 2),
+        'original_name' => (string)$originalName,
+        'target_folder_id' => $parentId
+    );
+
+    if ($configuredRoot !== '') {
+        $rootId = $configuredRoot;
+    } else {
+        $rootContext = $context;
+        $rootContext['original_name'] = cpms_tasks_drive_label('root');
+        $root = cpms_tasks_drive_ensure_folder(cpms_tasks_drive_label('root'), $parentId, $rootContext);
+        if (empty($root['ok'])) return $root;
+        $rootId = (string)$root['folder_id'];
+    }
+
+    $employeeContext = $context;
+    $employeeContext['target_folder_id'] = $rootId;
+    $employeeContext['original_name'] = $employeeName;
+    $employeeFolder = cpms_tasks_drive_ensure_folder($employeeName, $rootId, $employeeContext);
+    if (empty($employeeFolder['ok'])) return $employeeFolder;
+
+    $monthContext = $context;
+    $monthContext['target_folder_id'] = (string)$employeeFolder['folder_id'];
+    $monthContext['original_name'] = $monthName;
+    $monthFolder = cpms_tasks_drive_ensure_folder($monthName, (string)$employeeFolder['folder_id'], $monthContext);
+    if (empty($monthFolder['ok'])) return $monthFolder;
+
+    $stageName = cpms_tasks_drive_stage_label($fileRole);
+    $stageContext = $context;
+    $stageContext['target_folder_id'] = (string)$monthFolder['folder_id'];
+    $stageContext['original_name'] = $stageName;
+    $stageFolder = cpms_tasks_drive_ensure_folder($stageName, (string)$monthFolder['folder_id'], $stageContext);
+    if (empty($stageFolder['ok'])) return $stageFolder;
+
+    return array(
+        'ok' => true,
+        'folder_id' => (string)$stageFolder['folder_id'],
+        'root_folder_id' => $rootId,
+        'employee_folder_id' => (string)$employeeFolder['folder_id'],
+        'month_folder_id' => (string)$monthFolder['folder_id'],
+        'stage_folder_id' => (string)$stageFolder['folder_id'],
+        'month_name' => $monthName,
+        'stage_name' => $stageName,
+        'employee_name' => $employeeName,
+        'context' => $context,
+        'message' => 'Tasks Drive target folder is ready.',
+        'http_code' => isset($stageFolder['http_code']) ? (int)$stageFolder['http_code'] : 0
+    );
+}}
+
+if (!function_exists('cpms_tasks_drive_build_file_name')) {
+function cpms_tasks_drive_build_file_name($task, $fileRole, $originalName)
+{
+    $date = date('Y-m-d');
+    if (is_array($task) && cpms_tasks_drive_file_role($fileRole) === 'request' && !empty($task['created_at'])) {
+        $ts = strtotime((string)$task['created_at']);
+        if ($ts !== false) $date = date('Y-m-d', $ts);
+    }
+    if (is_array($task) && cpms_tasks_drive_file_role($fileRole) === 'complete' && !empty($task['completed_at'])) {
+        $ts2 = strtotime((string)$task['completed_at']);
+        if ($ts2 !== false) $date = date('Y-m-d', $ts2);
+    }
+    $title = is_array($task) && isset($task['title']) ? (string)$task['title'] : '';
+    $parts = array($date, cpms_tasks_drive_stage_label($fileRole), $title, date('His') . '_' . mt_rand(1000, 9999), (string)$originalName);
+    if (cpms_tasks_drive_helper_loaded()) return cpms_drive_sanitize_file_name(implode('_', $parts), 180);
+    return implode('_', $parts);
+}}
+
+if (!function_exists('cpms_tasks_drive_upload_local_file')) {
+function cpms_tasks_drive_upload_local_file($pdo, $task, $localPath, $originalName, $mimeType, $fileSize, $uploadedBy, $fileRole)
+{
+    $fileRole = cpms_tasks_drive_file_role($fileRole);
+    $localPath = trim((string)$localPath);
+    if ($localPath === '' || !is_file($localPath)) {
+        return cpms_tasks_drive_failed_record('Local task file is not available for Drive upload.', $fileRole);
+    }
+    if (!cpms_tasks_drive_helper_loaded()) {
+        return cpms_tasks_drive_failed_record('Google Drive helper is not available.', $fileRole);
+    }
+    $target = cpms_tasks_drive_ensure_target_folder($pdo, $task, $uploadedBy, $fileRole, $originalName);
+    if (empty($target['ok'])) {
+        $message = isset($target['message']) ? (string)$target['message'] : 'Task Drive folder preparation failed.';
+        return cpms_tasks_drive_failed_record($message, $fileRole);
+    }
+
+    $context = isset($target['context']) && is_array($target['context']) ? $target['context'] : array();
+    $context['target_folder_id'] = (string)$target['folder_id'];
+    $context['drive_folder_id'] = (string)$target['folder_id'];
+    $context['drive_root_folder_id'] = isset($target['root_folder_id']) ? (string)$target['root_folder_id'] : '';
+    $context['drive_employee_folder_id'] = isset($target['employee_folder_id']) ? (string)$target['employee_folder_id'] : '';
+    $context['drive_month_folder_id'] = isset($target['month_folder_id']) ? (string)$target['month_folder_id'] : '';
+    $context['drive_stage_folder_id'] = isset($target['stage_folder_id']) ? (string)$target['stage_folder_id'] : '';
+    $context['file_role'] = $fileRole;
+    $context['mime_type'] = (string)$mimeType;
+    $context['size'] = (int)$fileSize;
+
+    $driveName = cpms_tasks_drive_build_file_name($task, $fileRole, $originalName);
+    $upload = cpms_drive_upload_file($localPath, $driveName, (string)$target['folder_id'], $mimeType, $context);
+    if (empty($upload['ok']) || !isset($upload['file']) || !is_array($upload['file'])) {
+        $message2 = isset($upload['message']) ? (string)$upload['message'] : 'Task Drive file upload failed.';
+        return cpms_tasks_drive_failed_record($message2, $fileRole);
+    }
+
+    $record = cpms_drive_build_file_record($upload['file'], $context);
+    return array(
+        'storage_type' => 'google_drive',
+        'drive_name' => isset($record['stored_name']) ? (string)$record['stored_name'] : $driveName,
+        'drive_file_id' => isset($record['drive_file_id']) ? (string)$record['drive_file_id'] : '',
+        'drive_folder_id' => isset($record['drive_folder_id']) ? (string)$record['drive_folder_id'] : (string)$target['folder_id'],
+        'drive_web_view_link' => isset($record['drive_web_view_link']) ? (string)$record['drive_web_view_link'] : '',
+        'drive_web_content_link' => isset($record['drive_web_content_link']) ? (string)$record['drive_web_content_link'] : '',
+        'drive_root_folder_id' => isset($target['root_folder_id']) ? (string)$target['root_folder_id'] : '',
+        'drive_employee_folder_id' => isset($target['employee_folder_id']) ? (string)$target['employee_folder_id'] : '',
+        'drive_month_folder_id' => isset($target['month_folder_id']) ? (string)$target['month_folder_id'] : '',
+        'drive_stage_folder_id' => isset($target['stage_folder_id']) ? (string)$target['stage_folder_id'] : '',
+        'file_role' => $fileRole,
+        'upload_status' => 'uploaded',
+        'drive_upload_error' => ''
+    );
+}}
+
 if (!function_exists('cpms_tasks_upload_relative_dir')) {
 function cpms_tasks_upload_relative_dir($taskId)
 {
@@ -921,15 +1215,81 @@ function cpms_tasks_upload_abs_dir($taskId)
 if (!function_exists('cpms_tasks_file_url')) {
 function cpms_tasks_file_url($storedPath)
 {
+    if (is_array($storedPath)) {
+        $fileId = isset($storedPath['id']) ? (int)$storedPath['id'] : 0;
+        if ($fileId > 0) return base_url() . '/?r=tasks/file&id=' . $fileId;
+        if (isset($storedPath['drive_web_view_link']) && trim((string)$storedPath['drive_web_view_link']) !== '') return (string)$storedPath['drive_web_view_link'];
+        $storedPath = isset($storedPath['stored_path']) ? $storedPath['stored_path'] : '';
+    }
     $storedPath = ltrim(str_replace('\\', '/', (string)$storedPath), '/');
     return base_url() . '/' . $storedPath;
 }}
 
+if (!function_exists('cpms_tasks_local_file_path')) {
+function cpms_tasks_local_file_path($storedPath)
+{
+    $storedPath = ltrim(str_replace('\\', '/', (string)$storedPath), '/');
+    if ($storedPath === '') return '';
+    $root = realpath(cpms_tasks_public_root());
+    $candidate = cpms_tasks_public_root() . '/' . $storedPath;
+    $real = realpath($candidate);
+    if ($real === false || !is_file($real)) return '';
+    if ($root !== false) {
+        $rootNorm = str_replace('\\', '/', rtrim($root, '/\\')) . '/';
+        $realNorm = str_replace('\\', '/', $real);
+        if (strpos($realNorm, $rootNorm) !== 0) return '';
+    }
+    return $real;
+}}
+
+if (!function_exists('cpms_tasks_insert_file_row')) {
+function cpms_tasks_insert_file_row($pdo, $row)
+{
+    if (!$pdo || !is_array($row)) return false;
+    $columns = array(
+        'task_id', 'original_name', 'stored_name', 'stored_path', 'file_size', 'mime_type', 'uploaded_by', 'uploaded_at',
+        'file_role', 'storage_type', 'drive_name', 'drive_file_id', 'drive_folder_id', 'drive_web_view_link',
+        'drive_web_content_link', 'drive_root_folder_id', 'drive_employee_folder_id', 'drive_month_folder_id',
+        'drive_stage_folder_id', 'upload_status', 'drive_upload_error'
+    );
+    $params = array();
+    $marks = array();
+    for ($i = 0; $i < count($columns); $i++) {
+        $column = $columns[$i];
+        $params[':' . $column] = isset($row[$column]) ? $row[$column] : null;
+        $marks[$i] = ':' . $column;
+    }
+    try {
+        $sql = "INSERT INTO cpms_task_files (" . implode(',', $columns) . ") VALUES (" . implode(',', $marks) . ")";
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        return true;
+    } catch (Exception $e) {
+        try {
+            $st2 = $pdo->prepare("INSERT INTO cpms_task_files (task_id, original_name, stored_name, stored_path, file_size, mime_type, uploaded_by, uploaded_at) VALUES (:task_id, :original_name, :stored_name, :stored_path, :file_size, :mime_type, :uploaded_by, :uploaded_at)");
+            return $st2->execute(array(
+                ':task_id' => isset($row['task_id']) ? (int)$row['task_id'] : 0,
+                ':original_name' => isset($row['original_name']) ? (string)$row['original_name'] : '',
+                ':stored_name' => isset($row['stored_name']) ? (string)$row['stored_name'] : '',
+                ':stored_path' => isset($row['stored_path']) ? (string)$row['stored_path'] : '',
+                ':file_size' => isset($row['file_size']) ? (int)$row['file_size'] : 0,
+                ':mime_type' => isset($row['mime_type']) ? (string)$row['mime_type'] : '',
+                ':uploaded_by' => isset($row['uploaded_by']) && (int)$row['uploaded_by'] > 0 ? (int)$row['uploaded_by'] : null,
+                ':uploaded_at' => isset($row['uploaded_at']) ? (string)$row['uploaded_at'] : cpms_tasks_now(),
+            ));
+        } catch (Exception $e2) {
+            return false;
+        }
+    }
+}}
+
 if (!function_exists('cpms_tasks_save_uploaded_files')) {
-function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy)
+function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy, $fileRole = 'request')
 {
     if (!$pdo || (int)$taskId <= 0 || !is_array($files) || !isset($files['name'])) return array();
     $saved = array();
+    $fileRole = cpms_tasks_drive_file_role($fileRole);
+    $task = cpms_tasks_find_task($pdo, (int)$taskId);
     $names = is_array($files['name']) ? $files['name'] : array($files['name']);
     $tmpNames = is_array($files['tmp_name']) ? $files['tmp_name'] : array($files['tmp_name']);
     $errors = is_array($files['error']) ? $files['error'] : array($files['error']);
@@ -954,25 +1314,35 @@ function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy)
             continue;
         }
 
+        $fileSize = @filesize($absolutePath);
+        if ($fileSize === false) $fileSize = isset($sizes[$i]) ? (int)$sizes[$i] : 0;
+        $mimeType = '';
+        if (cpms_tasks_drive_helper_loaded()) $mimeType = cpms_drive_detect_mime_type($absolutePath);
+        if ($mimeType === '') $mimeType = isset($types[$i]) ? (string)$types[$i] : '';
+        if ($mimeType === '') $mimeType = 'application/octet-stream';
+        $driveRecord = cpms_tasks_drive_upload_local_file($pdo, $task, $absolutePath, $originalName, $mimeType, $fileSize, (int)$uploadedBy, $fileRole);
+        $row = array_merge(array(
+            'task_id' => (int)$taskId,
+            'original_name' => $originalName,
+            'stored_name' => $storedName,
+            'stored_path' => $relativePath,
+            'file_size' => (int)$fileSize,
+            'mime_type' => $mimeType,
+            'uploaded_by' => (int)$uploadedBy > 0 ? (int)$uploadedBy : null,
+            'uploaded_at' => cpms_tasks_now(),
+        ), is_array($driveRecord) ? $driveRecord : array());
+
         try {
-            $st = $pdo->prepare("INSERT INTO cpms_task_files (task_id, original_name, stored_name, stored_path, file_size, mime_type, uploaded_by, uploaded_at) VALUES (:task_id, :original_name, :stored_name, :stored_path, :file_size, :mime_type, :uploaded_by, :uploaded_at)");
-            $st->execute(array(
-                ':task_id' => (int)$taskId,
-                ':original_name' => $originalName,
-                ':stored_name' => $storedName,
-                ':stored_path' => $relativePath,
-                ':file_size' => isset($sizes[$i]) ? (int)$sizes[$i] : 0,
-                ':mime_type' => isset($types[$i]) ? (string)$types[$i] : '',
-                ':uploaded_by' => (int)$uploadedBy > 0 ? (int)$uploadedBy : null,
-                ':uploaded_at' => cpms_tasks_now(),
-            ));
-            $saved[count($saved)] = array(
-                'original_name' => $originalName,
-                'stored_name' => $storedName,
-                'stored_path' => $relativePath,
-                'file_size' => isset($sizes[$i]) ? (int)$sizes[$i] : 0,
-                'mime_type' => isset($types[$i]) ? (string)$types[$i] : '',
-            );
+            if (cpms_tasks_insert_file_row($pdo, $row)) {
+                $saved[count($saved)] = array(
+                    'original_name' => $originalName,
+                    'stored_name' => $storedName,
+                    'stored_path' => $relativePath,
+                    'file_size' => (int)$fileSize,
+                    'mime_type' => $mimeType,
+                    'file_role' => $fileRole,
+                );
+            }
         } catch (Exception $e) {
         }
     }
@@ -981,12 +1351,14 @@ function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy)
 }}
 
 if (!function_exists('cpms_tasks_copy_saved_files_to_task')) {
-function cpms_tasks_copy_saved_files_to_task($pdo, $sourceFiles, $targetTaskId, $uploadedBy)
+function cpms_tasks_copy_saved_files_to_task($pdo, $sourceFiles, $targetTaskId, $uploadedBy, $fileRole = 'request')
 {
     $copied = array();
     if (!$pdo || (int)$targetTaskId <= 0 || !is_array($sourceFiles) || !cpms_tasks_table_exists($pdo, 'cpms_task_files')) return $copied;
     $targetDir = cpms_tasks_upload_abs_dir($targetTaskId);
     if (!cpms_ensure_dir($targetDir)) return $copied;
+    $fileRole = cpms_tasks_drive_file_role($fileRole);
+    $targetTask = cpms_tasks_find_task($pdo, (int)$targetTaskId);
 
     for ($i = 0; $i < count($sourceFiles); $i++) {
         $file = $sourceFiles[$i];
@@ -1006,26 +1378,31 @@ function cpms_tasks_copy_saved_files_to_task($pdo, $sourceFiles, $targetTaskId, 
         if ($fileSize === false) $fileSize = isset($file['file_size']) ? (int)$file['file_size'] : 0;
         $mimeType = isset($file['mime_type']) ? (string)$file['mime_type'] : '';
         $originalName = isset($file['original_name']) ? (string)$file['original_name'] : $storedName;
+        if ($mimeType === '' && cpms_tasks_drive_helper_loaded()) $mimeType = cpms_drive_detect_mime_type($targetPath);
+        if ($mimeType === '') $mimeType = 'application/octet-stream';
+        $driveRecord = cpms_tasks_drive_upload_local_file($pdo, $targetTask, $targetPath, $originalName, $mimeType, $fileSize, (int)$uploadedBy, $fileRole);
+        $row = array_merge(array(
+            'task_id' => (int)$targetTaskId,
+            'original_name' => $originalName,
+            'stored_name' => $storedName,
+            'stored_path' => $relativePath,
+            'file_size' => (int)$fileSize,
+            'mime_type' => $mimeType,
+            'uploaded_by' => (int)$uploadedBy > 0 ? (int)$uploadedBy : null,
+            'uploaded_at' => cpms_tasks_now(),
+        ), is_array($driveRecord) ? $driveRecord : array());
 
         try {
-            $st = $pdo->prepare("INSERT INTO cpms_task_files (task_id, original_name, stored_name, stored_path, file_size, mime_type, uploaded_by, uploaded_at) VALUES (:task_id, :original_name, :stored_name, :stored_path, :file_size, :mime_type, :uploaded_by, :uploaded_at)");
-            $st->execute(array(
-                ':task_id' => (int)$targetTaskId,
-                ':original_name' => $originalName,
-                ':stored_name' => $storedName,
-                ':stored_path' => $relativePath,
-                ':file_size' => (int)$fileSize,
-                ':mime_type' => $mimeType,
-                ':uploaded_by' => (int)$uploadedBy > 0 ? (int)$uploadedBy : null,
-                ':uploaded_at' => cpms_tasks_now(),
-            ));
-            $copied[count($copied)] = array(
-                'original_name' => $originalName,
-                'stored_name' => $storedName,
-                'stored_path' => $relativePath,
-                'file_size' => (int)$fileSize,
-                'mime_type' => $mimeType,
-            );
+            if (cpms_tasks_insert_file_row($pdo, $row)) {
+                $copied[count($copied)] = array(
+                    'original_name' => $originalName,
+                    'stored_name' => $storedName,
+                    'stored_path' => $relativePath,
+                    'file_size' => (int)$fileSize,
+                    'mime_type' => $mimeType,
+                    'file_role' => $fileRole,
+                );
+            }
         } catch (Exception $e) {
         }
     }
@@ -1075,6 +1452,199 @@ function cpms_tasks_fetch_files($pdo, $taskId)
         $rows = array();
     }
     return is_array($rows) ? $rows : array();
+}}
+
+if (!function_exists('cpms_tasks_file_counts_for_task')) {
+function cpms_tasks_file_counts_for_task($pdo, $taskId)
+{
+    $counts = array('total' => 0, 'request' => 0, 'complete' => 0);
+    if (!$pdo || (int)$taskId <= 0 || !cpms_tasks_table_exists($pdo, 'cpms_task_files')) return $counts;
+    try {
+        $st = $pdo->prepare("SELECT
+                COUNT(*) AS total_count,
+                SUM(CASE WHEN file_role = 'complete' THEN 1 ELSE 0 END) AS complete_count,
+                SUM(CASE WHEN file_role IS NULL OR file_role = '' OR file_role = 'request' THEN 1 ELSE 0 END) AS request_count
+            FROM cpms_task_files
+            WHERE task_id = :task_id");
+        $st->execute(array(':task_id' => (int)$taskId));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $counts['total'] = isset($row['total_count']) ? (int)$row['total_count'] : 0;
+            $counts['request'] = isset($row['request_count']) ? (int)$row['request_count'] : 0;
+            $counts['complete'] = isset($row['complete_count']) ? (int)$row['complete_count'] : 0;
+        }
+    } catch (Exception $e) {
+        try {
+            $st2 = $pdo->prepare("SELECT COUNT(*) FROM cpms_task_files WHERE task_id = :task_id");
+            $st2->execute(array(':task_id' => (int)$taskId));
+            $counts['total'] = (int)$st2->fetchColumn();
+            $counts['request'] = $counts['total'];
+        } catch (Exception $e2) {
+        }
+    }
+    return $counts;
+}}
+
+if (!function_exists('cpms_tasks_mark_read')) {
+function cpms_tasks_mark_read($pdo, $task, $currentEmployee)
+{
+    if (!$pdo || !is_array($task) || !is_array($currentEmployee)) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    $currentEmployeeId = isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0;
+    if ($taskId <= 0 || $currentEmployeeId <= 0) return false;
+    if (!isset($task['assignee_employee_id']) || (int)$task['assignee_employee_id'] !== $currentEmployeeId) return false;
+    if (isset($task['requester_employee_id']) && (int)$task['requester_employee_id'] === $currentEmployeeId) return false;
+    if (isset($task['read_at']) && trim((string)$task['read_at']) !== '') return false;
+    try {
+        $sets = array('read_at = :read_at');
+        $params = array(
+            ':read_at' => cpms_tasks_now(),
+            ':id' => $taskId,
+        );
+        if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'read_by')) {
+            $sets[count($sets)] = 'read_by = :read_by';
+            $params[':read_by'] = $currentEmployeeId;
+        }
+        if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'updated_at')) {
+            $sets[count($sets)] = 'updated_at = :updated_at';
+            $params[':updated_at'] = cpms_tasks_now();
+        }
+        $st = $pdo->prepare("UPDATE cpms_tasks SET " . implode(', ', $sets) . " WHERE id = :id AND read_at IS NULL");
+        $ok = $st->execute($params);
+        if ($ok && $st->rowCount() > 0) {
+            cpms_tasks_insert_log($pdo, $taskId, $currentEmployee, 'request_read', '요청 읽음', isset($task['status']) ? $task['status'] : null, isset($task['status']) ? $task['status'] : null);
+        }
+        return $ok;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_tasks_can_transfer')) {
+function cpms_tasks_can_transfer($task, $currentEmployeeId)
+{
+    if (!$task || (int)$currentEmployeeId <= 0) return false;
+    if (isset($task['task_type']) && (string)$task['task_type'] === 'meeting') return false;
+    if (!isset($task['assignee_employee_id']) || (int)$task['assignee_employee_id'] !== (int)$currentEmployeeId) return false;
+    $status = isset($task['status']) ? (string)$task['status'] : '';
+    if (in_array($status, array('done', 'cancelled'), true)) return false;
+    return true;
+}}
+
+if (!function_exists('cpms_tasks_transfer_task')) {
+function cpms_tasks_transfer_task($pdo, $task, $newAssignee, $actor, $reason)
+{
+    if (!$pdo || !is_array($task) || !is_array($newAssignee) || !is_array($actor)) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    $newAssigneeId = isset($newAssignee['id']) ? (int)$newAssignee['id'] : 0;
+    if ($taskId <= 0 || $newAssigneeId <= 0) return false;
+    $oldStatus = isset($task['status']) ? (string)$task['status'] : null;
+    $oldAssigneeName = isset($task['assignee_name']) ? (string)$task['assignee_name'] : '';
+    $newAssigneeName = isset($newAssignee['name']) ? (string)$newAssignee['name'] : '';
+    $now = cpms_tasks_now();
+    $sets = array(
+        'assignee_employee_id = :assignee_employee_id',
+        'assignee_name = :assignee_name',
+        'assignee_email = :assignee_email',
+        'department = :department',
+        "status = 'pending'"
+    );
+    $params = array(
+        ':assignee_employee_id' => $newAssigneeId,
+        ':assignee_name' => $newAssigneeName,
+        ':assignee_email' => isset($newAssignee['email']) ? (string)$newAssignee['email'] : '',
+        ':department' => isset($newAssignee['department']) ? cpms_tasks_normalize_department($newAssignee['department']) : '',
+        ':id' => $taskId,
+    );
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'read_at')) $sets[count($sets)] = 'read_at = NULL';
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'read_by')) $sets[count($sets)] = 'read_by = NULL';
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transferred_from_employee_id')) {
+        $sets[count($sets)] = 'transferred_from_employee_id = :transferred_from_employee_id';
+        $params[':transferred_from_employee_id'] = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : null;
+    }
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transferred_from_name')) {
+        $sets[count($sets)] = 'transferred_from_name = :transferred_from_name';
+        $params[':transferred_from_name'] = $oldAssigneeName;
+    }
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transferred_by')) {
+        $sets[count($sets)] = 'transferred_by = :transferred_by';
+        $params[':transferred_by'] = isset($actor['id']) ? (int)$actor['id'] : null;
+    }
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transferred_at')) {
+        $sets[count($sets)] = 'transferred_at = :transferred_at';
+        $params[':transferred_at'] = $now;
+    }
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'updated_at')) {
+        $sets[count($sets)] = 'updated_at = :updated_at';
+        $params[':updated_at'] = $now;
+    }
+
+    try {
+        $st = $pdo->prepare("UPDATE cpms_tasks SET " . implode(', ', $sets) . " WHERE id = :id");
+        $ok = $st->execute($params);
+        if (!$ok) return false;
+        $message = '담당자 전달: ' . $oldAssigneeName . ' → ' . $newAssigneeName;
+        $reason = trim((string)$reason);
+        if ($reason !== '') $message .= "\n사유: " . $reason;
+        cpms_tasks_insert_log($pdo, $taskId, $actor, 'transferred', $message, $oldStatus, 'pending');
+        if ($reason !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $message, 0);
+        $updatedTask = cpms_tasks_find_task($pdo, $taskId);
+        if ($updatedTask) cpms_tasks_send_created_notification($pdo, $updatedTask);
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_tasks_complete_task_and_group')) {
+function cpms_tasks_complete_task_and_group($pdo, $task, $actor, $completedMemo, $now)
+{
+    $result = array('ok' => false, 'completed_ids' => array(), 'synced_ids' => array());
+    if (!$pdo || !is_array($task) || !is_array($actor)) return $result;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    if ($taskId <= 0) return $result;
+    $actorId = isset($actor['id']) ? (int)$actor['id'] : 0;
+    $completedMemo = trim((string)$completedMemo);
+    $now = trim((string)$now) !== '' ? (string)$now : cpms_tasks_now();
+
+    $st = $pdo->prepare("UPDATE cpms_tasks SET status = 'done', completed_at = :completed_at, completed_by = :completed_by, completed_memo = :completed_memo, updated_at = :updated_at WHERE id = :id");
+    $st->execute(array(
+        ':completed_at' => $now,
+        ':completed_by' => $actorId > 0 ? $actorId : null,
+        ':completed_memo' => $completedMemo !== '' ? $completedMemo : null,
+        ':updated_at' => $now,
+        ':id' => $taskId,
+    ));
+    $result['completed_ids'][count($result['completed_ids'])] = $taskId;
+    cpms_tasks_insert_log($pdo, $taskId, $actor, 'completed', $completedMemo, isset($task['status']) ? $task['status'] : null, 'done');
+    if ($completedMemo !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $completedMemo, 0);
+
+    $groupKey = (isset($task['group_key']) && trim((string)$task['group_key']) !== '') ? trim((string)$task['group_key']) : '';
+    if ($groupKey !== '' && cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key') && cpms_tasks_should_sync_group_completion($groupKey)) {
+        $syncMemo = $completedMemo !== '' ? $completedMemo : '공용 할일 묶음 자동 완료';
+        $st2 = $pdo->prepare("SELECT * FROM cpms_tasks WHERE group_key=:group_key AND id<>:id");
+        $st2->execute(array(':group_key' => $groupKey, ':id' => $taskId));
+        $siblings = $st2->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($siblings)) $siblings = array();
+        $up = $pdo->prepare("UPDATE cpms_tasks SET status='done', completed_at=:completed_at, completed_by=:completed_by, completed_memo=:completed_memo, updated_at=:updated_at WHERE id=:id");
+        for ($i = 0; $i < count($siblings); $i++) {
+            if (isset($siblings[$i]['status']) && in_array((string)$siblings[$i]['status'], array('done', 'cancelled'), true)) continue;
+            $siblingId = isset($siblings[$i]['id']) ? (int)$siblings[$i]['id'] : 0;
+            if ($siblingId <= 0) continue;
+            $up->execute(array(
+                ':completed_at' => $now,
+                ':completed_by' => $actorId > 0 ? $actorId : null,
+                ':completed_memo' => $syncMemo,
+                ':updated_at' => $now,
+                ':id' => $siblingId
+            ));
+            $result['completed_ids'][count($result['completed_ids'])] = $siblingId;
+            $result['synced_ids'][count($result['synced_ids'])] = $siblingId;
+            cpms_tasks_insert_log($pdo, $siblingId, $actor, 'completed', $syncMemo, isset($siblings[$i]['status']) ? $siblings[$i]['status'] : null, 'done');
+        }
+    }
+    $result['ok'] = true;
+    return $result;
 }}
 
 if (!function_exists('cpms_tasks_ensure_comment_schema')) {
@@ -1206,7 +1776,7 @@ function cpms_tasks_send_comment_notifications($pdo, $task, $commentText, $actor
 }}
 
 if (!function_exists('cpms_tasks_render_comment_item')) {
-function cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $returnUrl, $depth)
+function cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $returnUrl, $depth, $allowReplies = true)
 {
     $commentId = isset($comment['id']) ? (int)$comment['id'] : 0;
     $name = isset($comment['created_by_name']) && trim((string)$comment['created_by_name']) !== '' ? (string)$comment['created_by_name'] : '작성자';
@@ -1227,21 +1797,23 @@ function cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $return
                         <div class="text-xs text-gray-500"><?php echo h(isset($comment['created_at']) ? $comment['created_at'] : ''); ?></div>
                     </div>
                     <div class="mt-2 text-sm text-gray-800 whitespace-pre-line"><?php echo h(isset($comment['comment_text']) ? $comment['comment_text'] : ''); ?></div>
-                    <form method="post" action="?r=task_comment_save" class="mt-3 flex flex-col sm:flex-row gap-2" data-task-comment-form>
-                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                        <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
-                        <input type="hidden" name="parent_comment_id" value="<?php echo (int)$commentId; ?>">
-                        <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
-                        <input type="text" name="comment_text" required class="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm" placeholder="대댓글 입력">
-                        <button type="submit" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">대댓글</button>
-                    </form>
+                    <?php if ($allowReplies): ?>
+                        <form method="post" action="?r=task_comment_save" class="mt-3 flex flex-col sm:flex-row gap-2" data-task-comment-form>
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
+                            <input type="hidden" name="parent_comment_id" value="<?php echo (int)$commentId; ?>">
+                            <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                            <input type="text" name="comment_text" required class="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm" placeholder="대댓글 입력">
+                            <button type="submit" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">대댓글</button>
+                        </form>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
         <?php if (isset($childrenMap[$commentId]) && is_array($childrenMap[$commentId])): ?>
             <div class="mt-3 space-y-3">
                 <?php foreach ($childrenMap[$commentId] as $childComment): ?>
-                    <?php cpms_tasks_render_comment_item($childComment, $childrenMap, $taskId, $returnUrl, ((int)$depth + 1)); ?>
+                    <?php cpms_tasks_render_comment_item($childComment, $childrenMap, $taskId, $returnUrl, ((int)$depth + 1), $allowReplies); ?>
                 <?php endforeach; ?>
             </div>
         <?php endif; ?>
@@ -1250,7 +1822,7 @@ function cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $return
 }}
 
 if (!function_exists('cpms_tasks_render_comments')) {
-function cpms_tasks_render_comments($comments, $taskId, $returnUrl)
+function cpms_tasks_render_comments($comments, $taskId, $returnUrl, $allowReplies = true)
 {
     $childrenMap = array();
     $root = array();
@@ -1270,7 +1842,7 @@ function cpms_tasks_render_comments($comments, $taskId, $returnUrl)
             <div class="p-4 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500">등록된 댓글이 없습니다.</div>
         <?php else: ?>
             <?php foreach ($root as $comment): ?>
-                <?php cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $returnUrl, 0); ?>
+                <?php cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $returnUrl, 0, $allowReplies); ?>
             <?php endforeach; ?>
         <?php endif; ?>
     </div>
@@ -1793,7 +2365,14 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             created_by INT NULL,
             created_at DATETIME NULL,
             updated_at DATETIME NULL,
-            chat_notified_at DATETIME NULL
+            chat_notified_at DATETIME NULL,
+            read_at DATETIME NULL,
+            read_by INT NULL,
+            transferred_from_employee_id INT NULL,
+            transferred_from_name VARCHAR(100) NULL,
+            transferred_by INT NULL,
+            transferred_at DATETIME NULL,
+            group_key VARCHAR(190) NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         'cpms_task_logs' => "CREATE TABLE IF NOT EXISTS cpms_task_logs (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -1815,7 +2394,20 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             file_size INT NULL,
             mime_type VARCHAR(100) NULL,
             uploaded_by INT NULL,
-            uploaded_at DATETIME NULL
+            uploaded_at DATETIME NULL,
+            file_role VARCHAR(30) NULL,
+            storage_type VARCHAR(30) NULL,
+            drive_name VARCHAR(255) NULL,
+            drive_file_id VARCHAR(128) NULL,
+            drive_folder_id VARCHAR(128) NULL,
+            drive_web_view_link TEXT NULL,
+            drive_web_content_link TEXT NULL,
+            drive_root_folder_id VARCHAR(128) NULL,
+            drive_employee_folder_id VARCHAR(128) NULL,
+            drive_month_folder_id VARCHAR(128) NULL,
+            drive_stage_folder_id VARCHAR(128) NULL,
+            upload_status VARCHAR(30) NULL,
+            drive_upload_error TEXT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         'cpms_task_comments' => "CREATE TABLE IF NOT EXISTS cpms_task_comments (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -1884,6 +2476,12 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'updated_at' => "ALTER TABLE cpms_tasks ADD COLUMN updated_at DATETIME NULL AFTER created_at",
             'chat_notified_at' => "ALTER TABLE cpms_tasks ADD COLUMN chat_notified_at DATETIME NULL AFTER updated_at",
             'group_key' => "ALTER TABLE cpms_tasks ADD COLUMN group_key VARCHAR(190) NULL AFTER chat_notified_at",
+            'read_at' => "ALTER TABLE cpms_tasks ADD COLUMN read_at DATETIME NULL AFTER chat_notified_at",
+            'read_by' => "ALTER TABLE cpms_tasks ADD COLUMN read_by INT NULL AFTER read_at",
+            'transferred_from_employee_id' => "ALTER TABLE cpms_tasks ADD COLUMN transferred_from_employee_id INT NULL AFTER read_by",
+            'transferred_from_name' => "ALTER TABLE cpms_tasks ADD COLUMN transferred_from_name VARCHAR(100) NULL AFTER transferred_from_employee_id",
+            'transferred_by' => "ALTER TABLE cpms_tasks ADD COLUMN transferred_by INT NULL AFTER transferred_from_name",
+            'transferred_at' => "ALTER TABLE cpms_tasks ADD COLUMN transferred_at DATETIME NULL AFTER transferred_by",
         ),
         'cpms_task_logs' => array(
             'task_id' => "ALTER TABLE cpms_task_logs ADD COLUMN task_id INT NOT NULL DEFAULT 0 AFTER id",
@@ -1904,6 +2502,19 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'mime_type' => "ALTER TABLE cpms_task_files ADD COLUMN mime_type VARCHAR(100) NULL AFTER file_size",
             'uploaded_by' => "ALTER TABLE cpms_task_files ADD COLUMN uploaded_by INT NULL AFTER mime_type",
             'uploaded_at' => "ALTER TABLE cpms_task_files ADD COLUMN uploaded_at DATETIME NULL AFTER uploaded_by",
+            'file_role' => "ALTER TABLE cpms_task_files ADD COLUMN file_role VARCHAR(30) NULL AFTER uploaded_at",
+            'storage_type' => "ALTER TABLE cpms_task_files ADD COLUMN storage_type VARCHAR(30) NULL AFTER file_role",
+            'drive_name' => "ALTER TABLE cpms_task_files ADD COLUMN drive_name VARCHAR(255) NULL AFTER storage_type",
+            'drive_file_id' => "ALTER TABLE cpms_task_files ADD COLUMN drive_file_id VARCHAR(128) NULL AFTER drive_name",
+            'drive_folder_id' => "ALTER TABLE cpms_task_files ADD COLUMN drive_folder_id VARCHAR(128) NULL AFTER drive_file_id",
+            'drive_web_view_link' => "ALTER TABLE cpms_task_files ADD COLUMN drive_web_view_link TEXT NULL AFTER drive_folder_id",
+            'drive_web_content_link' => "ALTER TABLE cpms_task_files ADD COLUMN drive_web_content_link TEXT NULL AFTER drive_web_view_link",
+            'drive_root_folder_id' => "ALTER TABLE cpms_task_files ADD COLUMN drive_root_folder_id VARCHAR(128) NULL AFTER drive_web_content_link",
+            'drive_employee_folder_id' => "ALTER TABLE cpms_task_files ADD COLUMN drive_employee_folder_id VARCHAR(128) NULL AFTER drive_root_folder_id",
+            'drive_month_folder_id' => "ALTER TABLE cpms_task_files ADD COLUMN drive_month_folder_id VARCHAR(128) NULL AFTER drive_employee_folder_id",
+            'drive_stage_folder_id' => "ALTER TABLE cpms_task_files ADD COLUMN drive_stage_folder_id VARCHAR(128) NULL AFTER drive_month_folder_id",
+            'upload_status' => "ALTER TABLE cpms_task_files ADD COLUMN upload_status VARCHAR(30) NULL AFTER drive_stage_folder_id",
+            'drive_upload_error' => "ALTER TABLE cpms_task_files ADD COLUMN drive_upload_error TEXT NULL AFTER upload_status",
         ),
         'cpms_task_comments' => array(
             'task_id' => "ALTER TABLE cpms_task_comments ADD COLUMN task_id INT NOT NULL DEFAULT 0 AFTER id",
@@ -1952,6 +2563,7 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'idx_project_id' => "ALTER TABLE cpms_tasks ADD INDEX idx_project_id (project_id)",
             'idx_is_urgent' => "ALTER TABLE cpms_tasks ADD INDEX idx_is_urgent (is_urgent)",
             'idx_group_key' => "ALTER TABLE cpms_tasks ADD INDEX idx_group_key (group_key)",
+            'idx_read_at' => "ALTER TABLE cpms_tasks ADD INDEX idx_read_at (read_at)",
         ),
         'cpms_task_logs' => array(
             'idx_task_id' => "ALTER TABLE cpms_task_logs ADD INDEX idx_task_id (task_id)",
@@ -1959,6 +2571,8 @@ function cpms_tasks_ensure_schema($pdo, &$results)
         ),
         'cpms_task_files' => array(
             'idx_task_id' => "ALTER TABLE cpms_task_files ADD INDEX idx_task_id (task_id)",
+            'idx_file_role' => "ALTER TABLE cpms_task_files ADD INDEX idx_file_role (file_role)",
+            'idx_drive_file_id' => "ALTER TABLE cpms_task_files ADD INDEX idx_drive_file_id (drive_file_id)",
         ),
         'cpms_task_comments' => array(
             'idx_task_comments_task' => "ALTER TABLE cpms_task_comments ADD INDEX idx_task_comments_task (task_id)",

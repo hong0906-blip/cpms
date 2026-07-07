@@ -81,13 +81,14 @@ function cpms_daily_status_unit_price($row) {
 }}
 
 if (!function_exists('cpms_daily_status_add_sales')) {
-function cpms_daily_status_add_sales(&$days, $date, $taskName, $itemName, $doneQty, $unitPrice, $amount, $basis) {
+function cpms_daily_status_add_sales(&$days, $date, $taskName, $itemName, $doneQty, $unitPrice, $amount, $basis, $remainQty) {
     if (!isset($days[$date])) return;
     $days[$date]['sales'] += (float)$amount;
     $days[$date]['sales_details'][] = array(
         'task_name' => (string)$taskName,
         'item_name' => (string)$itemName,
         'done_qty' => cpms_daily_status_qty($doneQty),
+        'remain_qty' => ($remainQty === null ? '' : cpms_daily_status_qty($remainQty)),
         'unit_price' => (float)$unitPrice,
         'amount' => (float)$amount,
         'basis' => (string)$basis
@@ -172,9 +173,32 @@ $hasLaborUnitPrice = cpms_daily_status_column_exists($pdo, 'cpms_project_unit_pr
 $hasExpenseUnitPrice = cpms_daily_status_column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price');
 
 $itemProgressKeys = array();
+$itemCumulativeByDate = array();
+$itemTotalQtyByKey = array();
 if (cpms_daily_status_table_exists($pdo, 'cpms_schedule_task_item_progress')) {
     try {
-        $select = "p.task_id, p.unit_price_id, p.work_date, p.done_qty, p.is_auto, p.is_manual, st.name AS task_name, u.item_name, u.unit, u.unit_price";
+        $stCum = $pdo->prepare("SELECT task_id, unit_price_id, work_date, total_qty, done_qty FROM cpms_schedule_task_item_progress WHERE project_id=:pid AND work_date <= :e ORDER BY task_id ASC, unit_price_id ASC, work_date ASC");
+        $stCum->execute(array(':pid'=>$projectId, ':e'=>$monthEnd));
+        $cumRows = $stCum->fetchAll(PDO::FETCH_ASSOC);
+        $runningMap = array();
+        if (is_array($cumRows)) {
+            foreach ($cumRows as $cumRow) {
+                $cumTaskId = isset($cumRow['task_id']) ? (int)$cumRow['task_id'] : 0;
+                $cumUnitId = isset($cumRow['unit_price_id']) ? (int)$cumRow['unit_price_id'] : 0;
+                $cumDate = isset($cumRow['work_date']) ? (string)$cumRow['work_date'] : '';
+                if ($cumTaskId <= 0 || $cumUnitId <= 0 || $cumDate === '') continue;
+                $cumKey = $cumTaskId . '|' . $cumUnitId;
+                if (!isset($runningMap[$cumKey])) $runningMap[$cumKey] = 0.0;
+                $cumDone = isset($cumRow['done_qty']) && is_numeric((string)$cumRow['done_qty']) ? (float)$cumRow['done_qty'] : 0.0;
+                $runningMap[$cumKey] += $cumDone;
+                if (!isset($itemCumulativeByDate[$cumKey])) $itemCumulativeByDate[$cumKey] = array();
+                $itemCumulativeByDate[$cumKey][$cumDate] = $runningMap[$cumKey];
+                $cumTotal = isset($cumRow['total_qty']) && is_numeric((string)$cumRow['total_qty']) ? (float)$cumRow['total_qty'] : 0.0;
+                if ($cumTotal > 0) $itemTotalQtyByKey[$cumKey] = $cumTotal;
+            }
+        }
+
+        $select = "p.task_id, p.unit_price_id, p.work_date, p.total_qty, p.done_qty, p.is_auto, p.is_manual, st.name AS task_name, u.item_name, u.unit, u.unit_price";
         $select .= $hasMaterialUnitPrice ? ", u.material_unit_price" : ", NULL AS material_unit_price";
         $select .= $hasLaborUnitPrice ? ", u.labor_unit_price" : ", NULL AS labor_unit_price";
         $select .= $hasExpenseUnitPrice ? ", u.expense_unit_price" : ", NULL AS expense_unit_price";
@@ -192,12 +216,22 @@ if (cpms_daily_status_table_exists($pdo, 'cpms_schedule_task_item_progress')) {
                 $date = isset($row['work_date']) ? (string)$row['work_date'] : '';
                 $taskId = isset($row['task_id']) ? (int)$row['task_id'] : 0;
                 if ($date === '' || !isset($days[$date]) || $taskId <= 0) continue;
+                $unitPriceId = isset($row['unit_price_id']) ? (int)$row['unit_price_id'] : 0;
                 $doneQty = isset($row['done_qty']) ? (float)$row['done_qty'] : 0.0;
                 $unitPrice = cpms_daily_status_unit_price($row);
                 $amount = $doneQty * $unitPrice;
                 $basis = ((isset($row['is_manual']) && (int)$row['is_manual'] === 1) ? '수동수정' : ((isset($row['is_auto']) && (int)$row['is_auto'] === 1) ? '자동분배' : '저장값'));
                 $itemProgressKeys[$taskId . '|' . $date] = true;
-                cpms_daily_status_add_sales($days, $date, isset($row['task_name']) ? $row['task_name'] : '', isset($row['item_name']) ? $row['item_name'] : '', $doneQty, $unitPrice, $amount, $basis);
+                $itemKey = $taskId . '|' . $unitPriceId;
+                $totalQty = isset($row['total_qty']) && is_numeric((string)$row['total_qty']) ? (float)$row['total_qty'] : 0.0;
+                if ($totalQty <= 0 && isset($itemTotalQtyByKey[$itemKey])) $totalQty = (float)$itemTotalQtyByKey[$itemKey];
+                $doneToDate = (isset($itemCumulativeByDate[$itemKey]) && isset($itemCumulativeByDate[$itemKey][$date])) ? (float)$itemCumulativeByDate[$itemKey][$date] : $doneQty;
+                $remainQty = null;
+                if ($totalQty > 0) {
+                    $remainQty = $totalQty - $doneToDate;
+                    if ($remainQty < 0) $remainQty = 0;
+                }
+                cpms_daily_status_add_sales($days, $date, isset($row['task_name']) ? $row['task_name'] : '', isset($row['item_name']) ? $row['item_name'] : '', $doneQty, $unitPrice, $amount, $basis, $remainQty);
             }
         }
     } catch (Exception $e) {}
@@ -205,7 +239,7 @@ if (cpms_daily_status_table_exists($pdo, 'cpms_schedule_task_item_progress')) {
 
 if (cpms_daily_status_table_exists($pdo, 'cpms_schedule_progress') && cpms_daily_status_table_exists($pdo, 'cpms_work_item_lines')) {
     try {
-        $lineSelect = "wil.work_id, wil.unit_price_id, COALESCE(wil.planned_qty, u.qty, 0) AS line_qty, u.item_name, u.unit, u.unit_price";
+        $lineSelect = "wil.work_id, wil.unit_price_id, CASE WHEN wil.planned_qty IS NULL OR wil.planned_qty = '' THEN COALESCE(u.qty,0) ELSE wil.planned_qty END AS line_qty, u.item_name, u.unit, u.unit_price";
         $lineSelect .= $hasMaterialUnitPrice ? ", u.material_unit_price" : ", NULL AS material_unit_price";
         $lineSelect .= $hasLaborUnitPrice ? ", u.labor_unit_price" : ", NULL AS labor_unit_price";
         $lineSelect .= $hasExpenseUnitPrice ? ", u.expense_unit_price" : ", NULL AS expense_unit_price";
@@ -224,6 +258,23 @@ if (cpms_daily_status_table_exists($pdo, 'cpms_schedule_progress') && cpms_daily
                 if ($workId <= 0) continue;
                 if (!isset($linesByWork[$workId])) $linesByWork[$workId] = array();
                 $linesByWork[$workId][] = $line;
+            }
+        }
+
+        $taskCumulativeByDate = array();
+        $stTaskCum = $pdo->prepare("SELECT task_id, work_date, done_qty FROM cpms_schedule_progress WHERE project_id=:pid AND work_date <= :e ORDER BY task_id ASC, work_date ASC");
+        $stTaskCum->execute(array(':pid'=>$projectId, ':e'=>$monthEnd));
+        $taskCumRows = $stTaskCum->fetchAll(PDO::FETCH_ASSOC);
+        $taskRunningMap = array();
+        if (is_array($taskCumRows)) {
+            foreach ($taskCumRows as $taskCumRow) {
+                $cumTaskId = isset($taskCumRow['task_id']) ? (int)$taskCumRow['task_id'] : 0;
+                $cumDate = isset($taskCumRow['work_date']) ? (string)$taskCumRow['work_date'] : '';
+                if ($cumTaskId <= 0 || $cumDate === '') continue;
+                if (!isset($taskRunningMap[$cumTaskId])) $taskRunningMap[$cumTaskId] = 0.0;
+                $taskRunningMap[$cumTaskId] += isset($taskCumRow['done_qty']) && is_numeric((string)$taskCumRow['done_qty']) ? (float)$taskCumRow['done_qty'] : 0.0;
+                if (!isset($taskCumulativeByDate[$cumTaskId])) $taskCumulativeByDate[$cumTaskId] = array();
+                $taskCumulativeByDate[$cumTaskId][$cumDate] = $taskRunningMap[$cumTaskId];
             }
         }
 
@@ -246,6 +297,7 @@ if (cpms_daily_status_table_exists($pdo, 'cpms_schedule_progress') && cpms_daily
                 $taskDone = isset($row['done_qty']) ? (float)$row['done_qty'] : 0.0;
                 if ($taskDone <= 0) continue;
                 $totalLineQty = 0.0;
+                $taskDoneToDate = (isset($taskCumulativeByDate[$taskId]) && isset($taskCumulativeByDate[$taskId][$date])) ? (float)$taskCumulativeByDate[$taskId][$date] : $taskDone;
                 foreach ($linesByWork[$workId] as $line) {
                     $lineQty = isset($line['line_qty']) ? (float)$line['line_qty'] : 0.0;
                     if ($lineQty > 0) $totalLineQty += $lineQty;
@@ -255,11 +307,15 @@ if (cpms_daily_status_table_exists($pdo, 'cpms_schedule_progress') && cpms_daily
                 foreach ($linesByWork[$workId] as $line) {
                     $lineQty = isset($line['line_qty']) ? (float)$line['line_qty'] : 0.0;
                     if ($lineQty <= 0) continue;
-                    $doneQty = round($taskDone * ($lineQty / $totalLineQty), 4);
+                    $ratio = $lineQty / $totalLineQty;
+                    $doneQty = round($taskDone * $ratio, 4);
                     if ($doneQty <= 0) continue;
+                    $lineDoneToDate = round($taskDoneToDate * $ratio, 4);
+                    $remainQty = $lineQty - $lineDoneToDate;
+                    if ($remainQty < 0) $remainQty = 0;
                     $unitPrice = cpms_daily_status_unit_price($line);
                     $amount = $doneQty * $unitPrice;
-                    cpms_daily_status_add_sales($days, $date, isset($row['task_name']) ? $row['task_name'] : '', isset($line['item_name']) ? $line['item_name'] : '', $doneQty, $unitPrice, $amount, $basis);
+                    cpms_daily_status_add_sales($days, $date, isset($row['task_name']) ? $row['task_name'] : '', isset($line['item_name']) ? $line['item_name'] : '', $doneQty, $unitPrice, $amount, $basis, $remainQty);
                 }
             }
         }
@@ -463,7 +519,7 @@ $calendarData = array_values($days);
 <div id="dailyStatusModal" class="fixed inset-0 z-50 hidden">
     <div class="absolute inset-0 bg-black/40" data-daily-status-close></div>
     <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="w-full max-w-3xl bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+        <div class="w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
             <div class="p-5 border-b border-gray-100 flex items-center justify-between">
                 <div>
                     <h3 class="text-xl font-extrabold text-gray-900" id="dailyStatusModalTitle">일별 현황</h3>
@@ -481,6 +537,7 @@ $calendarData = array_values($days);
                                     <th class="p-2 border text-left">공정/작업명</th>
                                     <th class="p-2 border text-left">내역서 항목명</th>
                                     <th class="p-2 border text-right">완료수량</th>
+                                    <th class="p-2 border text-right">남은수량</th>
                                     <th class="p-2 border text-right">단가</th>
                                     <th class="p-2 border text-right">금액</th>
                                     <th class="p-2 border text-center">기준</th>
@@ -533,7 +590,7 @@ $calendarData = array_values($days);
         body.innerHTML = '';
         var sales = data.sales_details || [];
         if (!sales.length) {
-            body.innerHTML = '<tr><td class="p-4 border text-center text-gray-500" colspan="6">예상매출 산출 내역이 없습니다.</td></tr>';
+            body.innerHTML = '<tr><td class="p-4 border text-center text-gray-500" colspan="7">예상매출 산출 내역이 없습니다.</td></tr>';
         } else {
             for (var i = 0; i < sales.length; i++) {
                 var r = sales[i];
@@ -541,6 +598,7 @@ $calendarData = array_values($days);
                     '<td class="p-2 border">' + esc(r.task_name) + '</td>' +
                     '<td class="p-2 border">' + esc(r.item_name) + '</td>' +
                     '<td class="p-2 border text-right">' + esc(r.done_qty) + '</td>' +
+                    '<td class="p-2 border text-right">' + esc(r.remain_qty) + '</td>' +
                     '<td class="p-2 border text-right">' + money(r.unit_price) + '</td>' +
                     '<td class="p-2 border text-right font-bold">' + money(r.amount) + '</td>' +
                     '<td class="p-2 border text-center">' + esc(r.basis) + '</td>' +

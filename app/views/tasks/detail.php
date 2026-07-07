@@ -10,6 +10,8 @@ if (!Auth::check()) {
 }
 
 $pdo = Db::pdo();
+$setupResults = array();
+cpms_tasks_ensure_schema($pdo, $setupResults);
 $currentEmployee = cpms_tasks_current_employee($pdo);
 $taskId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $task = cpms_tasks_find_task($pdo, $taskId);
@@ -27,6 +29,9 @@ if (!$task || !cpms_tasks_can_view($task, isset($currentEmployee['id']) ? (int)$
     exit;
 }
 
+cpms_tasks_mark_read($pdo, $task, $currentEmployee);
+$task = cpms_tasks_find_task($pdo, $taskId);
+
 $logs = cpms_tasks_fetch_logs($pdo, $taskId);
 $files = cpms_tasks_fetch_files($pdo, $taskId);
 $comments = cpms_tasks_fetch_comments($pdo, $taskId);
@@ -38,6 +43,8 @@ $canRevision = cpms_tasks_can_request_revision($task, isset($currentEmployee['id
 $canCancel = cpms_tasks_can_cancel($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $currentEmployeeId = isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0;
 $canEditPriority = (!$readOnlyMode && !$isMeetingTask && $currentEmployeeId > 0 && isset($task['assignee_employee_id']) && (int)$task['assignee_employee_id'] === $currentEmployeeId);
+$canTransfer = (!$readOnlyMode && cpms_tasks_can_transfer($task, $currentEmployeeId));
+$transferEmployees = $canTransfer ? cpms_tasks_fetch_active_employees($pdo) : array();
 $returnUrl = cpms_tasks_default_return_url();
 if (isset($_GET['return_url'])) {
     $requestedReturnUrl = trim((string)$_GET['return_url']);
@@ -193,12 +200,34 @@ ob_start();
             <div class="text-sm font-extrabold text-gray-900 mb-2">첨부파일</div>
             <div class="space-y-2">
                 <?php foreach ($files as $file): ?>
-                    <a href="<?php echo h(cpms_tasks_file_url(isset($file['stored_path']) ? $file['stored_path'] : '')); ?>" target="_blank" class="flex items-center justify-between gap-3 p-3 rounded-2xl border border-gray-200 bg-white hover:bg-slate-50">
+                    <?php $fileRole = isset($file['file_role']) && (string)$file['file_role'] === 'complete' ? '완료' : '요청'; ?>
+                    <a href="<?php echo h(cpms_tasks_file_url($file)); ?>" target="_blank" class="flex items-center justify-between gap-3 p-3 rounded-2xl border border-gray-200 bg-white hover:bg-slate-50">
                         <span class="font-bold text-slate-800"><?php echo h(isset($file['original_name']) ? $file['original_name'] : '-'); ?></span>
+                        <span class="text-xs text-slate-500"><?php echo h($fileRole); ?> 파일</span>
                         <span class="text-xs text-slate-500">열기</span>
                     </a>
                 <?php endforeach; ?>
             </div>
+        </div>
+    <?php endif; ?>
+
+    <?php if ($canTransfer): ?>
+        <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <div class="text-sm font-extrabold text-amber-900 mb-3">다른 담당자에게 전달</div>
+            <form method="post" action="?r=tasks/transfer" class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
+                <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                <select name="assignee_employee_id" required class="px-4 py-3 rounded-2xl border border-amber-200 bg-white md:col-span-1">
+                    <option value="">담당자 선택</option>
+                    <?php foreach ($transferEmployees as $employee): ?>
+                        <?php if (isset($employee['id']) && (int)$employee['id'] === $currentEmployeeId) continue; ?>
+                        <option value="<?php echo (int)$employee['id']; ?>"><?php echo h((isset($employee['name']) ? $employee['name'] : '-') . ' / ' . (isset($employee['department']) ? $employee['department'] : '-')); ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <input type="text" name="transfer_reason" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white md:col-span-1" placeholder="전달 사유">
+                <button type="submit" class="px-4 py-3 rounded-2xl bg-amber-500 text-white font-extrabold md:col-span-1">전달</button>
+            </form>
         </div>
     <?php endif; ?>
 
@@ -207,7 +236,8 @@ ob_start();
             <div class="text-sm font-extrabold text-gray-900">댓글</div>
             <div class="text-xs text-gray-500"><span data-task-comments-count><?php echo count($comments); ?></span>건</div>
         </div>
-        <?php cpms_tasks_render_comments($comments, $taskId, $returnUrl); ?>
+        <?php cpms_tasks_render_comments($comments, $taskId, $returnUrl, !$readOnlyMode); ?>
+        <?php if (!$readOnlyMode): ?>
         <form method="post" action="?r=task_comment_save" class="mt-4 rounded-2xl border border-gray-200 bg-slate-50 p-4 space-y-3" data-task-comment-form>
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
@@ -219,6 +249,7 @@ ob_start();
                 <button type="submit" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">댓글 등록</button>
             </div>
         </form>
+        <?php endif; ?>
     </div>
 
     <?php if ($canCancel && (!isset($task['status']) || !in_array((string)$task['status'], array('cancelled', 'done'), true))): ?>

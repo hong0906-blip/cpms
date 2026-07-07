@@ -153,7 +153,7 @@ $project = cpms_tasks_resolve_project($pdo, $projectId);
 $now = cpms_tasks_now();
 $hasGroupKey = cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key');
 $groupKey = '';
-if ($hasGroupKey && count($assignees) > 1) {
+if ($hasGroupKey) {
     $groupPrefix = $isMeetingRequest ? 'meeting_request' : 'task_request';
     $groupKey = $groupPrefix . ':' . $requesterEmployeeId . ':' . date('YmdHis') . ':' . substr(md5(uniqid('', true)), 0, 8);
 }
@@ -219,11 +219,11 @@ try {
     }
 
     if ($firstTaskId > 0 && isset($_FILES['attachments'])) {
-        $savedFiles = cpms_tasks_save_uploaded_files($pdo, $firstTaskId, $_FILES['attachments'], (int)$currentEmployee['id']);
+        $savedFiles = cpms_tasks_save_uploaded_files($pdo, $firstTaskId, $_FILES['attachments'], (int)$currentEmployee['id'], 'request');
         if (is_array($savedFiles) && count($savedFiles) > 0 && count($createdTaskIds) > 1) {
             for ($i = 0; $i < count($createdTaskIds); $i++) {
                 if ((int)$createdTaskIds[$i] === (int)$firstTaskId) continue;
-                cpms_tasks_copy_saved_files_to_task($pdo, $savedFiles, (int)$createdTaskIds[$i], (int)$currentEmployee['id']);
+                cpms_tasks_copy_saved_files_to_task($pdo, $savedFiles, (int)$createdTaskIds[$i], (int)$currentEmployee['id'], 'request');
             }
         }
     }

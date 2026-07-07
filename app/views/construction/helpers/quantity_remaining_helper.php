@@ -88,7 +88,7 @@ function cpms_contract_item_used_quantity_excluding_task($pdo, $projectId, $cont
     if (!cpms_qr_column_exists($pdo, 'cpms_schedule_tasks', 'work_id')) return 0.0;
 
     try {
-        $sql = "SELECT COALESCE(SUM(COALESCE(l.planned_qty, u.qty, 0)), 0)
+        $sql = "SELECT COALESCE(SUM(CASE WHEN l.planned_qty IS NULL OR l.planned_qty = '' THEN COALESCE(u.qty, 0) ELSE l.planned_qty END), 0)
                   FROM cpms_schedule_tasks st
                   INNER JOIN cpms_work_item_lines l ON l.work_id = st.work_id
                   INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id AND u.project_id = st.project_id
@@ -122,7 +122,7 @@ function cpms_contract_item_used_quantity($pdo, $projectId, $contractItemId, $ex
     if (!cpms_qr_column_exists($pdo, 'cpms_schedule_tasks', 'work_id')) return 0.0;
 
     try {
-        $sql = "SELECT COALESCE(SUM(COALESCE(l.planned_qty, u.qty, 0)), 0)
+        $sql = "SELECT COALESCE(SUM(CASE WHEN l.planned_qty IS NULL OR l.planned_qty = '' THEN COALESCE(u.qty, 0) ELSE l.planned_qty END), 0)
                   FROM cpms_schedule_tasks st
                   INNER JOIN cpms_work_item_lines l ON l.work_id = st.work_id
                   INNER JOIN cpms_project_unit_prices u ON u.id = l.unit_price_id AND u.project_id = st.project_id

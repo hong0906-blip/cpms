@@ -79,7 +79,7 @@ try {
         $ph = implode(',', array_fill(0, count($unitIds), '?'));
         $taskWorkId = isset($taskRow['work_id']) ? (int)$taskRow['work_id'] : 0;
         if ($taskWorkId > 0) {
-            $stUnit = $pdo->prepare("SELECT u.id, COALESCE(l.planned_qty, u.qty, 0) AS qty FROM cpms_project_unit_prices u LEFT JOIN cpms_work_item_lines l ON l.unit_price_id = u.id AND l.work_id = ? WHERE u.project_id = ? AND u.id IN ($ph)");
+            $stUnit = $pdo->prepare("SELECT u.id, CASE WHEN l.planned_qty IS NULL OR l.planned_qty = '' THEN COALESCE(u.qty, 0) ELSE l.planned_qty END AS qty FROM cpms_project_unit_prices u LEFT JOIN cpms_work_item_lines l ON l.unit_price_id = u.id AND l.work_id = ? WHERE u.project_id = ? AND u.id IN ($ph)");
             $stUnit->bindValue(1, $taskWorkId, \PDO::PARAM_INT);
             $stUnit->bindValue(2, $projectId, \PDO::PARAM_INT);
             foreach ($unitIds as $idx => $uid) {

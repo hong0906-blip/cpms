@@ -264,7 +264,7 @@ function cpms_schedule_auto_work_lines($pdo, $projectId, $workId) {
     $lines = array();
     if (!$pdo || (int)$projectId <= 0 || (int)$workId <= 0) return $lines;
     try {
-        $stLines = $pdo->prepare("SELECT l.unit_price_id, COALESCE(l.planned_qty, u.qty, 0) AS qty FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id=l.unit_price_id WHERE l.work_id=:wid AND u.project_id=:pid ORDER BY u.id ASC");
+        $stLines = $pdo->prepare("SELECT l.unit_price_id, CASE WHEN l.planned_qty IS NULL OR l.planned_qty = '' THEN COALESCE(u.qty, 0) ELSE l.planned_qty END AS qty FROM cpms_work_item_lines l INNER JOIN cpms_project_unit_prices u ON u.id=l.unit_price_id WHERE l.work_id=:wid AND u.project_id=:pid ORDER BY u.id ASC");
         $stLines->execute(array(':wid'=>(int)$workId, ':pid'=>(int)$projectId));
         $rows = $stLines->fetchAll(PDO::FETCH_ASSOC);
         return is_array($rows) ? $rows : array();
@@ -277,6 +277,8 @@ if (!function_exists('cpms_schedule_auto_title_key')) {
 function cpms_schedule_auto_title_key($value) {
     $value = trim((string)$value);
     if ($value === '') return '';
+    $stripped = @preg_replace('/\s*\([^)]*\)\s*$/u', '', $value);
+    if ($stripped !== null && trim((string)$stripped) !== '') $value = trim((string)$stripped);
     $value = function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
     $normalized = @preg_replace('/[\s\-_.,()\[\]\/]+/u', '', $value);
     if ($normalized === null) {
@@ -294,7 +296,7 @@ function cpms_schedule_auto_resolve_work_id($pdo, $projectId, $taskName) {
     $pdoKey = function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'pdo';
     $cacheKey = $pdoKey . ':' . (int)$projectId;
     if (!isset($cache[$cacheKey])) {
-        $cache[$cacheKey] = array('exact' => array(), 'norm' => array());
+        $cache[$cacheKey] = array('exact' => array(), 'norm' => array(), 'items' => array());
         try {
             $st = $pdo->prepare("SELECT id, title FROM cpms_work_items WHERE project_id=:pid AND is_deleted=0 ORDER BY id ASC");
             $st->execute(array(':pid'=>(int)$projectId));
@@ -313,6 +315,7 @@ function cpms_schedule_auto_resolve_work_id($pdo, $projectId, $taskName) {
                     if ($normKey !== '') {
                         if (!isset($cache[$cacheKey]['norm'][$normKey])) $cache[$cacheKey]['norm'][$normKey] = array();
                         $cache[$cacheKey]['norm'][$normKey][] = $id;
+                        $cache[$cacheKey]['items'][] = array('id' => $id, 'norm' => $normKey);
                     }
                 }
             }
@@ -326,6 +329,22 @@ function cpms_schedule_auto_resolve_work_id($pdo, $projectId, $taskName) {
     $taskNormKey = cpms_schedule_auto_title_key($taskTitle);
     if ($taskNormKey !== '' && isset($cache[$cacheKey]['norm'][$taskNormKey]) && count($cache[$cacheKey]['norm'][$taskNormKey]) === 1) {
         return (int)$cache[$cacheKey]['norm'][$taskNormKey][0];
+    }
+    if ($taskNormKey !== '' && isset($cache[$cacheKey]['items']) && is_array($cache[$cacheKey]['items'])) {
+        $partialMatches = array();
+        foreach ($cache[$cacheKey]['items'] as $item) {
+            $itemNorm = isset($item['norm']) ? (string)$item['norm'] : '';
+            $itemId = isset($item['id']) ? (int)$item['id'] : 0;
+            if ($itemId <= 0 || $itemNorm === '') continue;
+            if (strlen($itemNorm) < 4 && strlen($taskNormKey) < 4) continue;
+            if (strpos($taskNormKey, $itemNorm) !== false || strpos($itemNorm, $taskNormKey) !== false) {
+                $partialMatches[$itemId] = $itemId;
+            }
+        }
+        if (count($partialMatches) === 1) {
+            $vals = array_values($partialMatches);
+            return (int)$vals[0];
+        }
     }
     return 0;
 }}

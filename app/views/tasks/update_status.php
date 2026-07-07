@@ -145,6 +145,7 @@ $currentEmployee = cpms_tasks_current_employee($pdo);
 $currentEmployeeId = isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0;
 $taskId = isset($_POST['task_id']) ? (int)$_POST['task_id'] : 0;
 $status = trim((string)(isset($_POST['task_state']) ? $_POST['task_state'] : (isset($_POST['status']) ? $_POST['status'] : '')));
+$completedMemo = trim((string)(isset($_POST['completed_memo']) ? $_POST['completed_memo'] : ''));
 $allowedStatuses = array('pending', 'progress', 'done', 'rejected');
 
 if (!in_array($status, $allowedStatuses, true)) {
@@ -159,13 +160,18 @@ $requestedStatus = $status;
 $isMeetingTask = isset($task['task_type']) && (string)$task['task_type'] === 'meeting';
 if ($isMeetingTask && $status === 'progress') $status = 'meeting_available';
 if ($isMeetingTask && $status === 'rejected') $status = 'meeting_unavailable';
+if ($status === 'done' && isset($task['status']) && in_array((string)$task['status'], array('done', 'cancelled'), true)) {
+    cpms_tasks_status_fail('이미 완료 또는 취소된 업무입니다.', $isAjax);
+}
+if (!$isMeetingTask && $status === 'done' && $completedMemo === '') {
+    cpms_tasks_status_fail('완료 처리 내용을 입력해주세요.', $isAjax);
+}
 
 try {
     $now = cpms_tasks_now();
     $notificationSent = false;
     if ($status === 'done') {
-        cpms_tasks_status_update_task($pdo, $taskId, 'done', $now, $currentEmployeeId, null, true);
-        cpms_tasks_insert_log($pdo, $taskId, $currentEmployee, 'completed', '', isset($task['status']) ? $task['status'] : null, 'done');
+        cpms_tasks_complete_task_and_group($pdo, $task, $currentEmployee, $completedMemo, $now);
         $updatedTask = cpms_tasks_find_task($pdo, $taskId);
         if ($updatedTask) $notificationSent = cpms_tasks_send_completed_notification($pdo, $updatedTask);
     } elseif ($isMeetingTask && in_array($status, array('meeting_available', 'meeting_unavailable'), true)) {

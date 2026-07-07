@@ -987,6 +987,10 @@ if ($route === 'tasks/complete') {
     require_once __DIR__ . '/../app/views/tasks/complete.php';
     exit;
 }
+if ($route === 'tasks/transfer') {
+    require_once __DIR__ . '/../app/views/tasks/transfer.php';
+    exit;
+}
 if ($route === 'tasks/revision') {
     require_once __DIR__ . '/../app/views/tasks/revision.php';
     exit;
@@ -1005,6 +1009,10 @@ if ($route === 'tasks/delayed_notify') {
 }
 if ($route === 'tasks/detail') {
     require_once __DIR__ . '/../app/views/tasks/detail.php';
+    exit;
+}
+if ($route === 'tasks/file') {
+    require_once __DIR__ . '/../app/views/tasks/file.php';
     exit;
 }
 if ($route === 'notice_save' || $route === 'dashboard_notice_save') {

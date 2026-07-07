@@ -1678,21 +1678,24 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return baseTotal;
   }
 
-  function getDoneBefore(taskId, taskDate){
-    if (!progressMap || !taskId || !taskDate) return 0;
+  function getDoneBefore(taskId, taskDate, baseTotal){
+    if (!taskId || !taskDate) return 0;
+    var range = getTaskDateRange(taskId);
+    var totalQty = getTaskBaseTotal(taskId, baseTotal);
     var sum = 0;
-    Object.keys(progressMap).forEach(function(key){
-      if (!Object.prototype.hasOwnProperty.call(progressMap, key)) return;
-      var parts = key.split('|');
-      if (!parts.length || parts[0] !== taskId) return;
-      var date = parts.slice(1).join('|');
-      if (!date || date >= taskDate) return;
-      var entry = progressMap[key] || {};
-      var done = toNumber(entry.done_qty);
-      if (done === null) return;
-      sum += done;
-    });
-    return sum;
+    if (!range.start || !range.end) return 0;
+    var cur = range.start;
+    var guard = 0;
+    while (cur && cur < taskDate && cur <= range.end && cur <= todayYmd && guard < 10000) {
+      var key = taskId + '|' + cur;
+      var entry = (progressMap && progressMap[key]) ? progressMap[key] : null;
+      var done = entry ? toNumber(entry.done_qty) : null;
+      if (done === null) done = getAutoDailyQtyForDate(totalQty, range.start, range.end, cur);
+      if (done !== null) sum += done;
+      cur = ymdAddDays(cur, 1);
+      guard++;
+    }
+    return roundQty4(sum);
   }
 
   function getTaskDailyEntries(taskId){
@@ -1709,49 +1712,77 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return out.sort(function(a,b){ return a.date < b.date ? -1 : (a.date > b.date ? 1 : 0); });
   }
 
-  function suggestAutoQty(taskId, taskDate, baseTotal){
-    var range = getTaskDateRange(taskId);
-    if (!range.start || !range.end || !taskDate || !baseTotal || taskDate < todayYmd) return null;
-    var remainingTotal = normalizeQty(baseTotal);
-    var manualMap = {};
-    getTaskDailyEntries(taskId).forEach(function(item){
-      if (item.done === null) return;
-      if (item.date < todayYmd) {
-        remainingTotal -= normalizeQty(item.done);
-      } else {
-        manualMap[item.date] = normalizeQty(item.done);
-      }
-    });
-    if (remainingTotal < 0) remainingTotal = 0;
-
-    var dates = [];
-    var cur = (range.start > todayYmd) ? range.start : todayYmd;
-    while (cur && cur <= range.end) {
-      dates.push(cur);
+  function getInclusiveDateCount(startDate, endDate){
+    if (!startDate || !endDate) return 0;
+    if (endDate < startDate) {
+      var tmp = startDate;
+      startDate = endDate;
+      endDate = tmp;
+    }
+    var count = 0;
+    var cur = startDate;
+    while (cur && cur <= endDate && count < 10000) {
+      count++;
       cur = ymdAddDays(cur, 1);
     }
-    if (!dates.length || dates.indexOf(taskDate) === -1) return null;
+    return count;
+  }
 
-    var freeDays = [];
-    var lockedTotal = 0;
-    dates.forEach(function(d){
-      if (Object.prototype.hasOwnProperty.call(manualMap, d)) lockedTotal += manualMap[d];
-      else freeDays.push(d);
-    });
-    var allocatable = remainingTotal - lockedTotal;
-    if (allocatable < 0) allocatable = 0;
-    if (Object.prototype.hasOwnProperty.call(manualMap, taskDate)) return manualMap[taskDate];
-    if (!freeDays.length) return 0;
-    var base = roundQty4(allocatable / freeDays.length);
-    var used = 0;
-    for (var i = 0; i < freeDays.length; i++) {
-      var d = freeDays[i];
-      var val = base;
-      if (i === freeDays.length - 1) val = roundQty4(allocatable - used);
-      used = roundQty4(used + val);
-      if (d === taskDate) return val;
+  function getDateIndexInRange(startDate, endDate, targetDate){
+    if (!startDate || !endDate || !targetDate) return 0;
+    if (endDate < startDate) {
+      var tmp = startDate;
+      startDate = endDate;
+      endDate = tmp;
     }
-    return null;
+    if (targetDate < startDate || targetDate > endDate) return 0;
+    var index = 0;
+    var cur = startDate;
+    while (cur && cur <= endDate && index < 10000) {
+      index++;
+      if (cur === targetDate) return index;
+      cur = ymdAddDays(cur, 1);
+    }
+    return 0;
+  }
+
+  function getAutoDailyQtyForDate(totalQty, startDate, endDate, targetDate){
+    var total = toNumber(totalQty);
+    if (total === null || total <= 0 || !startDate || !endDate || !targetDate) return null;
+    if (targetDate > todayYmd) return null;
+    var durationDays = getInclusiveDateCount(startDate, endDate);
+    var dayIndex = getDateIndexInRange(startDate, endDate, targetDate);
+    if (durationDays <= 0 || dayIndex <= 0) return null;
+    var base = roundQty4(total / durationDays);
+    if (dayIndex >= durationDays) return roundQty4(total - (base * (durationDays - 1)));
+    return base;
+  }
+
+  function getItemDoneBefore(taskId, unitPriceId, taskDate, contractQty, taskRange){
+    if (!taskId || !unitPriceId || !taskDate || !taskRange || !taskRange.start || !taskRange.end) return 0;
+    var doneMapByDate = (taskItemDoneMap && taskItemDoneMap[taskId]) ? taskItemDoneMap[taskId] : {};
+    var sum = 0;
+    var cur = taskRange.start;
+    var guard = 0;
+    while (cur && cur < taskDate && cur <= taskRange.end && cur <= todayYmd && guard < 10000) {
+      var done = null;
+      var doneMap = (doneMapByDate && doneMapByDate[cur]) ? doneMapByDate[cur] : {};
+      if (doneMap && Object.prototype.hasOwnProperty.call(doneMap, unitPriceId)) {
+        var saved = doneMap[unitPriceId];
+        done = toNumber((saved && typeof saved === 'object') ? saved.done_qty : saved);
+      }
+      if (done === null) done = getAutoDailyQtyForDate(contractQty, taskRange.start, taskRange.end, cur);
+      if (done !== null) sum += done;
+      cur = ymdAddDays(cur, 1);
+      guard++;
+    }
+    return roundQty4(sum);
+  }
+
+  function suggestAutoQty(taskId, taskDate, baseTotal){
+    var range = getTaskDateRange(taskId);
+    if (!range.start || !range.end || !taskDate) return null;
+    return getAutoDailyQtyForDate(baseTotal, range.start, range.end, taskDate);
   }
   
   var currentProgressContext = {
@@ -1793,8 +1824,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var doneMap = (taskDate && doneMapByDate && doneMapByDate[taskDate]) ? doneMapByDate[taskDate] : {};
     bodyEl.innerHTML = '';
     var taskRange = getTaskDateRange(taskId);
-    // 과거 공정 모달 자동완료 표시: 종료일이 오늘 00:00:00 이전이면 모달 기본 완료수량을 총수량으로 표시
-    var isPastTask = !!(taskRange && taskRange.end && todayYmd && taskRange.end < todayYmd);    
+    // 항목별 잔여수량은 선택일 전까지의 자동/수동 누적 완료량을 반영한다.
     var totalQtySum = 0;
     var doneQtySum = 0;
 
@@ -1826,9 +1856,16 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
           doneQty = savedDoneQty;
         }
       }
-      if (!hasSavedDoneQty && isPastTask) doneQty = contractQty;
+      if (!hasSavedDoneQty) {
+        var autoItemQty = getAutoDailyQtyForDate(contractQty, taskRange.start, taskRange.end, taskDate);
+        if (autoItemQty !== null) {
+          doneQty = autoItemQty;
+          statusSaved = { is_auto: 1, is_manual: 0 };
+        }
+      }
       if (doneQty < 0) doneQty = 0;
-      var remain = contractQty - doneQty;
+      var itemDoneBefore = getItemDoneBefore(taskId, uid, taskDate, contractQty, taskRange);
+      var remain = contractQty - (itemDoneBefore + doneQty);
       if (remain < 0) remain = 0;
       totalQtySum += contractQty;
       doneQtySum += doneQty;
@@ -1836,7 +1873,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var tr = document.createElement('tr');
       tr.innerHTML = '<td class="p-2 border">' + escapeHtml(item.item_name || '') + '</td>' +
         '<td class="p-2 border text-right">' + formatQty(contractQty) + '</td>' +
-        '<td class="p-2 border text-right"><input type="number" min="0" step="0.0001" class="gantt-item-done w-24 px-2 py-1 border border-gray-200 rounded text-right" data-unit-price-id="' + uid + '" data-contract-qty="' + contractQty + '" value="' + formatQty(doneQty) + '"></td>' +
+        '<td class="p-2 border text-right"><input type="number" min="0" step="0.0001" class="gantt-item-done w-24 px-2 py-1 border border-gray-200 rounded text-right" data-unit-price-id="' + uid + '" data-contract-qty="' + contractQty + '" data-done-before-date="' + itemDoneBefore + '" value="' + formatQty(doneQty) + '"></td>' +
         '<td class="p-2 border text-right"><span class="gantt-item-remain">' + formatQty(remain) + '</span></td>' +
         '<td class="p-2 border text-center">' + progressStatusBadgeHtml(statusSaved, workId) + '</td>';
       bodyEl.appendChild(tr);
@@ -1851,10 +1888,14 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         if (contractQty === null) contractQty = 0;
         var val = toNumber(input.value);
         if (val === null || val < 0) val = 0;
-        if (contractQty > 0 && val > contractQty) val = contractQty;
+        var doneBeforeItem = toNumber(input.getAttribute('data-done-before-date'));
+        if (doneBeforeItem === null) doneBeforeItem = 0;
+        var maxForDate = contractQty - doneBeforeItem;
+        if (maxForDate < 0) maxForDate = 0;
+        if (contractQty > 0 && val > maxForDate) val = maxForDate;
         input.value = formatQty(val);
         var remainEl = input.closest('tr').querySelector('.gantt-item-remain');
-        if (remainEl) remainEl.textContent = formatQty(contractQty - val);
+        if (remainEl) remainEl.textContent = formatQty(Math.max(0, contractQty - (doneBeforeItem + val)));
 
         var doneTotal = 0;
         bodyEl.querySelectorAll('.gantt-item-done').forEach(function(inp){
@@ -1922,7 +1963,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     currentProgressContext.taskId = taskId;
     currentProgressContext.taskDate = taskDate;
     currentProgressContext.baseTotal = baseTotal;
-    currentProgressContext.doneBefore = 0;
+    currentProgressContext.doneBefore = getDoneBefore(taskId, taskDate, baseTotal);
     renderTaskItemTable(taskId);
     var shiftInfoEl = document.getElementById('ganttShiftInfo');
     var taskRange = getTaskDateRange(taskId);

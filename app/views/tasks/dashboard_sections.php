@@ -132,6 +132,14 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
         <div class="mt-1">
             <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', $statusKey)); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : cpms_tasks_status_label(isset($item['status']) ? $item['status'] : 'pending')); ?></span>
         </div>
+        <div class="mt-2 flex flex-wrap gap-2">
+            <?php if (!$requestedMode && isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
+                <span class="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">[파일첨부되어있음]</span>
+            <?php endif; ?>
+            <?php if ($requestedMode && isset($item['read_at']) && trim((string)$item['read_at']) !== ''): ?>
+                <span class="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-extrabold">[요청 읽음]</span>
+            <?php endif; ?>
+        </div>
         <div class="mt-4 flex flex-wrap items-center gap-2">
             <?php echo cpms_render_task_action_link($item); ?>
             <?php if ($canRespondMeeting): ?>
@@ -247,6 +255,15 @@ function cpms_task_kanban_should_include($item)
     return ($sourceType === 'task' && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1);
 }}
 
+if (!function_exists('cpms_task_kanban_unique_key')) {
+function cpms_task_kanban_unique_key($item)
+{
+    if (!is_array($item)) return '';
+    $groupKey = isset($item['group_key']) ? trim((string)$item['group_key']) : '';
+    if ($groupKey !== '') return 'group:' . $groupKey;
+    return (isset($item['source_type']) ? (string)$item['source_type'] : 'task') . ':' . (isset($item['source_id']) ? (int)$item['source_id'] : 0);
+}}
+
 if (!function_exists('cpms_render_task_kanban_card')) {
 function cpms_render_task_kanban_card($item, $currentEmployeeId)
 {
@@ -264,6 +281,12 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
         && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId;
     $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
     $canStatusAction = $canDrag && !$isMeetingTask;
+    $personLabel = '요청자';
+    $personName = isset($item['requester_name']) ? $item['requester_name'] : '-';
+    if ((int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId && isset($item['assignee_name']) && trim((string)$item['assignee_name']) !== '') {
+        $personLabel = '담당자';
+        $personName = $item['assignee_name'];
+    }
     ?>
     <article class="cpms-kanban-card rounded-2xl border border-gray-200 bg-white p-4 shadow-sm shadow-gray-100"
              data-kanban-card
@@ -280,7 +303,7 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
             <span class="px-2.5 py-1 rounded-full border text-xs font-extrabold <?php echo h(cpms_tasks_badge_class('status', $statusKey)); ?>" data-kanban-status-badge><?php echo h(isset($item['display_status']) ? $item['display_status'] : cpms_tasks_status_label(isset($item['status']) ? $item['status'] : 'pending')); ?></span>
         </div>
         <div class="mt-3 text-base font-extrabold text-slate-900 leading-6 break-words"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>
-        <div class="mt-2 text-sm text-slate-600">요청자: <?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?></div>
+        <div class="mt-2 text-sm text-slate-600"><?php echo h($personLabel); ?>: <?php echo h($personName); ?></div>
         <div class="mt-1 text-sm text-slate-500">마감: <?php echo h($dueText); ?></div>
         <div class="mt-3 flex flex-wrap gap-2" data-kanban-flags>
             <?php if ($isUrgent): ?>
@@ -288,6 +311,12 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
             <?php endif; ?>
             <?php if ($isDelayed): ?>
                 <span class="px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-extrabold">지연</span>
+            <?php endif; ?>
+            <?php if (isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
+                <span class="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">[파일첨부되어있음]</span>
+            <?php endif; ?>
+            <?php if (isset($item['complete_file_count']) && (int)$item['complete_file_count'] > 0): ?>
+                <span class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-extrabold">완료파일</span>
             <?php endif; ?>
         </div>
         <div class="mt-4 flex flex-wrap justify-end gap-2">
@@ -335,6 +364,7 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId)
         $dueText = (string)$item['due_date'];
         if (isset($item['due_time']) && trim((string)$item['due_time']) !== '') $dueText .= ' ' . substr((string)$item['due_time'], 0, 5);
     }
+    $isRead = isset($item['read_at']) && trim((string)$item['read_at']) !== '';
     ?>
     <article class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm shadow-gray-100" data-requested-task-card draggable="false">
         <div class="flex items-start justify-between gap-2">
@@ -353,6 +383,12 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId)
             <?php endif; ?>
             <?php if ($isDelayed): ?>
                 <span class="px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-extrabold">지연</span>
+            <?php endif; ?>
+            <?php if ($isRead): ?>
+                <span class="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-extrabold">[요청 읽음]</span>
+            <?php endif; ?>
+            <?php if (isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
+                <span class="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">[파일첨부되어있음]</span>
             <?php endif; ?>
         </div>
         <div class="mt-4 flex flex-wrap justify-end gap-2">
@@ -465,6 +501,11 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
             <div class="mt-1 text-sm text-slate-500"><?php echo h($isMeetingTask ? '일시' : '마감'); ?>: <?php echo h(cpms_mobile_task_due_text($item)); ?></div>
         <?php else: ?>
             <div class="mt-2 text-sm text-slate-500">공정일: <?php echo h(cpms_mobile_task_due_text($item)); ?></div>
+        <?php endif; ?>
+        <?php if (isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
+            <div class="mt-3">
+                <span class="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">[파일첨부되어있음]</span>
+            </div>
         <?php endif; ?>
         <div class="mt-4 flex flex-wrap gap-2">
             <?php if ($isDirectTask): ?>
@@ -849,6 +890,8 @@ if (!function_exists('cpms_render_employee_task_dashboard')) {
 function cpms_render_employee_task_dashboard($pdo, $options = array())
 {
     if (!is_array($options)) $options = array();
+    $setupResults = array();
+    cpms_tasks_ensure_schema($pdo, $setupResults);
     $currentEmployee = cpms_tasks_current_employee($pdo);
     if ((int)$currentEmployee['id'] <= 0) return;
 
@@ -856,6 +899,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
     $requestedTaskDate = isset($_GET['requested_task_date']) ? trim((string)$_GET['requested_task_date']) : cpms_tasks_today();
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestedTaskDate)) $requestedTaskDate = cpms_tasks_today();
     $requested = cpms_task_feed_direct_tasks_requested_by_employee($pdo, (int)$currentEmployee['id'], $requestedTaskDate);
+    $completedRequested = cpms_task_feed_completed_requests_for_employee($pdo, (int)$currentEmployee['id']);
     $employees = cpms_tasks_fetch_active_employees($pdo);
     $projects = cpms_tasks_fetch_projects($pdo);
     $returnUrl = isset($options['return_url']) ? trim((string)$options['return_url']) : '';
@@ -893,11 +937,16 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
         'rejected' => array(),
     );
 
+    $kanbanSeen = array();
     foreach ($feed as $item) {
         if (cpms_task_kanban_should_include($item)) {
             $laneKey = cpms_task_kanban_lane_key($item);
             if (!isset($kanbanLanes[$laneKey])) $laneKey = 'pending';
-            $kanbanLanes[$laneKey][count($kanbanLanes[$laneKey])] = $item;
+            $uniqueKey = cpms_task_kanban_unique_key($item);
+            if ($uniqueKey === '' || !isset($kanbanSeen[$uniqueKey])) {
+                if ($uniqueKey !== '') $kanbanSeen[$uniqueKey] = true;
+                $kanbanLanes[$laneKey][count($kanbanLanes[$laneKey])] = $item;
+            }
         }
         if (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1) {
             $summary['urgent']++;
@@ -919,6 +968,14 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
             $summary['approval']++;
             $approvalItems[count($approvalItems)] = $item;
         }
+    }
+    for ($i = 0; $i < count($completedRequested); $i++) {
+        $requestedDone = $completedRequested[$i];
+        if (!cpms_task_kanban_should_include($requestedDone)) continue;
+        $uniqueKey = cpms_task_kanban_unique_key($requestedDone);
+        if ($uniqueKey !== '' && isset($kanbanSeen[$uniqueKey])) continue;
+        if ($uniqueKey !== '') $kanbanSeen[$uniqueKey] = true;
+        $kanbanLanes['done'][count($kanbanLanes['done'])] = $requestedDone;
     }
     foreach ($kanbanLanes as $kanbanLaneKey => $kanbanItems) {
         usort($kanbanLanes[$kanbanLaneKey], 'cpms_task_kanban_sort');
@@ -1393,18 +1450,24 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
     <div id="modal-taskComplete" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-black/40" data-modal-close="taskComplete"></div>
         <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="w-full max-w-2xl rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+            <div class="w-full max-w-4xl max-h-[90vh] rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden flex flex-col">
                 <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
                     <div class="text-2xl font-extrabold text-gray-900">완료 처리</div>
                     <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="taskComplete">닫기</button>
                 </div>
-                <form method="post" action="?r=tasks/complete" enctype="multipart/form-data" class="p-6 space-y-4">
+                <form method="post" action="?r=tasks/complete" enctype="multipart/form-data" class="p-6 space-y-4 overflow-y-auto">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" id="taskCompleteTaskId" value="">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
                     <div>
-                        <div class="text-sm font-bold text-gray-700 mb-1">완료 메모</div>
-                        <textarea name="completed_memo" rows="4" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="처리 내용을 남겨주세요."></textarea>
+                        <div class="text-sm font-bold text-gray-700 mb-2">업무 상세</div>
+                        <div id="taskCompleteDetailBody" class="rounded-2xl border border-gray-200 bg-slate-50 p-4">
+                            <div class="text-sm text-gray-500">업무 정보를 불러오는 중입니다.</div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-sm font-bold text-gray-700 mb-1">처리 내용 댓글</div>
+                        <textarea name="completed_memo" rows="4" required class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="어떻게 처리했는지 남겨주세요."></textarea>
                     </div>
                     <div>
                         <div class="text-sm font-bold text-gray-700 mb-1">첨부파일</div>
@@ -1496,6 +1559,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
         var departmentSelect = document.getElementById('taskDepartmentSelect');
         var onLeaveMessage = <?php echo json_encode(approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?>;
         var taskDetailBody = document.getElementById('taskDetailBody');
+        var taskCompleteDetailBody = document.getElementById('taskCompleteDetailBody');
         var completeTaskId = document.getElementById('taskCompleteTaskId');
         var meetingUnavailableTaskId = document.getElementById('meetingUnavailableTaskId');
         var revisionTaskId = document.getElementById('taskRevisionTaskId');
@@ -1705,6 +1769,26 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
         function openCompleteModal(taskId) {
             if (completeTaskId) completeTaskId.value = taskId;
             var modal = document.getElementById('modal-taskComplete');
+            if (modal) {
+                var memo = modal.querySelector ? modal.querySelector('textarea[name="completed_memo"]') : null;
+                var files = modal.querySelector ? modal.querySelector('input[type="file"]') : null;
+                if (memo) memo.value = '';
+                if (files) files.value = '';
+            }
+            if (taskCompleteDetailBody) {
+                taskCompleteDetailBody.innerHTML = '<div class="text-sm text-gray-500">업무 정보를 불러오는 중입니다.</div>';
+                var xhr = new XMLHttpRequest();
+                var detailUrl = '?r=tasks/detail&id=' + encodeURIComponent(taskId) + '&modal=1&readonly=1';
+                detailUrl += '&return_url=' + encodeURIComponent(window.location.pathname + window.location.search);
+                xhr.open('GET', detailUrl, true);
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState !== 4) return;
+                    if (xhr.status >= 200 && xhr.status < 300) taskCompleteDetailBody.innerHTML = xhr.responseText;
+                    else taskCompleteDetailBody.innerHTML = '<div class="text-sm text-red-600">업무 정보를 불러오지 못했습니다.</div>';
+                    if (window.lucide) { try { lucide.createIcons(); } catch (err) {} }
+                };
+                xhr.send(null);
+            }
             if (modal) modal.classList.remove('hidden');
         }
 
@@ -2065,6 +2149,10 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
 
         function submitKanbanStatusChange(card, status) {
             if (!card || !status) return;
+            if (status === 'done') {
+                openCompleteModal(card.getAttribute('data-task-id') || '');
+                return;
+            }
             var targetDrop = findKanbanDropByLane(status);
             if (!targetDrop || card.parentNode === targetDrop) return;
             var board = getKanbanBoard();

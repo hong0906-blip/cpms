@@ -11,6 +11,8 @@ if (!Auth::check()) {
 }
 
 $pdo = Db::pdo();
+$setupResults = array();
+cpms_tasks_ensure_schema($pdo, $setupResults);
 $currentEmployee = cpms_tasks_current_employee($pdo);
 $requestedTaskDate = isset($_GET['requested_task_date']) ? trim((string)$_GET['requested_task_date']) : cpms_tasks_today();
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestedTaskDate)) $requestedTaskDate = cpms_tasks_today();
@@ -33,10 +35,17 @@ $requested = cpms_task_feed_direct_tasks_requested_by_employee($pdo, isset($curr
                 <?php foreach ($feed as $item): ?>
                     <tr class="border-b border-gray-100">
                         <td class="py-3 pr-4"><?php echo h(cpms_tasks_type_label(isset($item['task_type']) ? $item['task_type'] : 'general')); ?></td>
-                        <td class="py-3 pr-4 font-bold text-gray-900"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></td>
+                        <td class="py-3 pr-4 font-bold text-gray-900">
+                            <?php echo h(isset($item['title']) ? $item['title'] : ''); ?>
+                        </td>
                         <td class="py-3 pr-4"><?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?></td>
                         <td class="py-3 pr-4"><?php echo h(isset($item['due_date']) && $item['due_date'] !== '' ? $item['due_date'] . (isset($item['due_time']) && $item['due_time'] !== '' ? ' ' . substr((string)$item['due_time'], 0, 5) : '') : '-'); ?></td>
-                        <td class="py-3 pr-4"><?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?></td>
+                        <td class="py-3 pr-4">
+                            <?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?>
+                            <?php if (isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
+                                <div class="mt-1 text-xs font-bold text-sky-700">[파일첨부되어있음]</div>
+                            <?php endif; ?>
+                        </td>
                         <td class="py-3">
                             <a href="<?php echo h(isset($item['action_url']) ? $item['action_url'] : '#'); ?>" class="text-blue-600 font-bold">상세 이동</a>
                         </td>
@@ -72,7 +81,12 @@ $requested = cpms_task_feed_direct_tasks_requested_by_employee($pdo, isset($curr
                         <td class="py-3 pr-4"><?php echo h(isset($item['assignee_name']) ? $item['assignee_name'] : '-'); ?></td>
                         <td class="py-3 pr-4 font-bold text-gray-900"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></td>
                         <td class="py-3 pr-4"><?php echo h(isset($item['due_date']) && $item['due_date'] !== '' ? $item['due_date'] . (isset($item['due_time']) && $item['due_time'] !== '' ? ' ' . substr((string)$item['due_time'], 0, 5) : '') : '-'); ?></td>
-                        <td class="py-3 pr-4"><?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?></td>
+                        <td class="py-3 pr-4">
+                            <?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?>
+                            <?php if (isset($item['read_at']) && trim((string)$item['read_at']) !== ''): ?>
+                                <div class="mt-1 text-xs font-bold text-indigo-700">[요청 읽음]</div>
+                            <?php endif; ?>
+                        </td>
                         <td class="py-3">
                             <a href="<?php echo h(isset($item['action_url']) ? $item['action_url'] : '#'); ?>" class="text-blue-600 font-bold">상세 이동</a>
                         </td>

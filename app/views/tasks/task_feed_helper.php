@@ -29,6 +29,12 @@ function cpms_task_feed_item($row)
         'is_direct_task' => isset($row['is_direct_task']) ? (int)$row['is_direct_task'] : 0,
         'created_at' => isset($row['created_at']) ? (string)$row['created_at'] : '',
         'completed_at' => isset($row['completed_at']) ? (string)$row['completed_at'] : '',
+        'group_key' => isset($row['group_key']) ? (string)$row['group_key'] : '',
+        'read_at' => isset($row['read_at']) ? (string)$row['read_at'] : '',
+        'read_by' => isset($row['read_by']) ? (int)$row['read_by'] : 0,
+        'file_count' => isset($row['file_count']) ? (int)$row['file_count'] : 0,
+        'request_file_count' => isset($row['request_file_count']) ? (int)$row['request_file_count'] : 0,
+        'complete_file_count' => isset($row['complete_file_count']) ? (int)$row['complete_file_count'] : 0,
     );
     $item['display_status'] = isset($row['display_status']) && trim((string)$row['display_status']) !== ''
         ? (string)$row['display_status']
@@ -152,6 +158,7 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
         $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($tasks)) $tasks = array();
         foreach ($tasks as $task) {
+            $fileCounts = cpms_tasks_file_counts_for_task($pdo, isset($task['id']) ? (int)$task['id'] : 0);
             $rows[count($rows)] = array(
                 'source_type' => 'task',
                 'source_id' => isset($task['id']) ? (int)$task['id'] : 0,
@@ -175,6 +182,12 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
                 'is_direct_task' => 1,
                 'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
                 'completed_at' => isset($task['completed_at']) ? (string)$task['completed_at'] : '',
+                'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',
+                'read_at' => isset($task['read_at']) ? (string)$task['read_at'] : '',
+                'read_by' => isset($task['read_by']) ? (int)$task['read_by'] : 0,
+                'file_count' => isset($fileCounts['total']) ? (int)$fileCounts['total'] : 0,
+                'request_file_count' => isset($fileCounts['request']) ? (int)$fileCounts['request'] : 0,
+                'complete_file_count' => isset($fileCounts['complete']) ? (int)$fileCounts['complete'] : 0,
             );
         }
     } catch (Exception $e) {
@@ -203,6 +216,7 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
         $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($tasks)) $tasks = array();
         foreach ($tasks as $task) {
+            $fileCounts = cpms_tasks_file_counts_for_task($pdo, isset($task['id']) ? (int)$task['id'] : 0);
             $rows[count($rows)] = array(
                 'source_type' => 'task',
                 'source_id' => isset($task['id']) ? (int)$task['id'] : 0,
@@ -225,7 +239,13 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
                 'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
+                'completed_at' => isset($task['completed_at']) ? (string)$task['completed_at'] : '',
                 'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',
+                'read_at' => isset($task['read_at']) ? (string)$task['read_at'] : '',
+                'read_by' => isset($task['read_by']) ? (int)$task['read_by'] : 0,
+                'file_count' => isset($fileCounts['total']) ? (int)$fileCounts['total'] : 0,
+                'request_file_count' => isset($fileCounts['request']) ? (int)$fileCounts['request'] : 0,
+                'complete_file_count' => isset($fileCounts['complete']) ? (int)$fileCounts['complete'] : 0,
             );
         }
 
@@ -239,7 +259,8 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                 $grouped[$key] = array(
                     'row' => $row,
                     'assignees' => array(),
-                    'statuses' => array()
+                    'statuses' => array(),
+                    'read_at' => ''
                 );
                 $order[count($order)] = $key;
             } else {
@@ -261,6 +282,10 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
             $status = isset($row['status']) ? (string)$row['status'] : '';
             if ($status !== '') {
                 $grouped[$key]['statuses'][$status] = true;
+            }
+            $readAt = isset($row['read_at']) ? trim((string)$row['read_at']) : '';
+            if ($readAt !== '' && (!isset($grouped[$key]['read_at']) || trim((string)$grouped[$key]['read_at']) === '' || strcmp($readAt, (string)$grouped[$key]['read_at']) < 0)) {
+                $grouped[$key]['read_at'] = $readAt;
             }
         }
 
@@ -300,10 +325,79 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                 }
                 $row['display_status'] = cpms_tasks_display_status($row);
             }
-            unset($row['group_key']);
+            if (isset($grouped[$key]['read_at']) && trim((string)$grouped[$key]['read_at']) !== '') {
+                $row['read_at'] = (string)$grouped[$key]['read_at'];
+            }
             $dedupedRows[count($dedupedRows)] = $row;
         }
         $rows = $dedupedRows;
+    } catch (Exception $e) {
+        $rows = array();
+    }
+    return $rows;
+}}
+
+if (!function_exists('cpms_task_feed_completed_requests_for_employee')) {
+function cpms_task_feed_completed_requests_for_employee($pdo, $employeeId)
+{
+    $rows = array();
+    if (!$pdo || (int)$employeeId <= 0 || !cpms_tasks_table_exists($pdo, 'cpms_tasks')) return $rows;
+    try {
+        $hasCompletedAt = cpms_tasks_column_exists($pdo, 'cpms_tasks', 'completed_at');
+        $params = array(':employee_id' => (int)$employeeId, ':today_due' => cpms_tasks_today());
+        $dateSql = $hasCompletedAt
+            ? "(DATE(completed_at) = :today_completed OR due_date = :today_due)"
+            : "due_date = :today_due";
+        if ($hasCompletedAt) $params[':today_completed'] = cpms_tasks_today();
+        $sql = "SELECT * FROM cpms_tasks
+                WHERE requester_employee_id = :employee_id
+                  AND status = 'done'
+                  AND " . $dateSql . "
+                ORDER BY completed_at DESC, updated_at DESC, id DESC";
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($tasks)) $tasks = array();
+
+        $seen = array();
+        for ($i = 0; $i < count($tasks); $i++) {
+            $task = $tasks[$i];
+            $groupKey = isset($task['group_key']) ? trim((string)$task['group_key']) : '';
+            $key = $groupKey !== '' ? 'group:' . $groupKey : 'task:' . (isset($task['id']) ? (int)$task['id'] : 0);
+            if (isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $fileCounts = cpms_tasks_file_counts_for_task($pdo, isset($task['id']) ? (int)$task['id'] : 0);
+            $rows[count($rows)] = array(
+                'source_type' => 'task',
+                'source_id' => isset($task['id']) ? (int)$task['id'] : 0,
+                'title' => isset($task['title']) ? (string)$task['title'] : '',
+                'content' => isset($task['content']) ? (string)$task['content'] : '',
+                'requester_name' => isset($task['requester_name']) ? (string)$task['requester_name'] : '',
+                'requester_employee_id' => isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0,
+                'assignee_name' => isset($task['assignee_name']) ? (string)$task['assignee_name'] : '',
+                'assignee_employee_id' => isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0,
+                'department' => isset($task['department']) ? (string)$task['department'] : '',
+                'project_id' => isset($task['project_id']) ? (int)$task['project_id'] : 0,
+                'project_name' => isset($task['project_name']) ? (string)$task['project_name'] : '',
+                'due_date' => isset($task['due_date']) ? (string)$task['due_date'] : '',
+                'due_time' => isset($task['due_time']) ? (string)$task['due_time'] : '',
+                'priority' => isset($task['priority']) ? (string)$task['priority'] : 'normal',
+                'is_urgent' => isset($task['is_urgent']) ? (int)$task['is_urgent'] : 0,
+                'status' => 'done',
+                'task_type' => isset($task['task_type']) ? (string)$task['task_type'] : 'general',
+                'display_status' => cpms_tasks_display_status($task),
+                'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
+                'is_direct_task' => 1,
+                'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
+                'completed_at' => isset($task['completed_at']) ? (string)$task['completed_at'] : '',
+                'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',
+                'read_at' => isset($task['read_at']) ? (string)$task['read_at'] : '',
+                'read_by' => isset($task['read_by']) ? (int)$task['read_by'] : 0,
+                'file_count' => isset($fileCounts['total']) ? (int)$fileCounts['total'] : 0,
+                'request_file_count' => isset($fileCounts['request']) ? (int)$fileCounts['request'] : 0,
+                'complete_file_count' => isset($fileCounts['complete']) ? (int)$fileCounts['complete'] : 0,
+            );
+        }
     } catch (Exception $e) {
         $rows = array();
     }
