@@ -100,6 +100,7 @@ $attendanceOutputDays = isset($overrideDataset['output_days']) && is_array($over
 $attendanceGongsuUnit = isset($overrideDataset['gongsu_unit']) && is_array($overrideDataset['gongsu_unit']) ? $overrideDataset['gongsu_unit'] : array();
 $pendingOverrideRows = cpms_load_labor_override_pending($projectId, $selectedMonth);
 $overrideRequestRows = array();
+$overrideHistoryMap = array();
 if (isset($pdo) && $pdo) {
     try {
         cpms_ensure_labor_override_table($pdo);
@@ -115,6 +116,35 @@ if (isset($pdo) && $pdo) {
         $overrideRequestRows = $st->fetchAll();
     } catch (Exception $e) {
         $overrideRequestRows = array();
+    }
+
+    try {
+        cpms_ensure_labor_override_table($pdo);
+        $sqlHistory = "SELECT id, worker_key, worker_name, work_date, old_value, new_value, is_deleted_entry, reason, status,
+                              requested_by_email, requested_by_name, created_at,
+                              first_approver_name, first_approver_email, first_approved_at,
+                              second_approver_name, second_approver_email, second_approved_at,
+                              approved_at, final_approved_at,
+                              rejected_by_name, rejected_by_email, rejected_at, reject_reason,
+                              approval_stage, approval_required_level
+                       FROM cpms_labor_gongsu_overrides
+                       WHERE project_id = :pid AND month = :month
+                       ORDER BY created_at DESC, id DESC";
+        $stHistory = $pdo->prepare($sqlHistory);
+        $stHistory->bindValue(':pid', $projectId, PDO::PARAM_INT);
+        $stHistory->bindValue(':month', $selectedMonth, PDO::PARAM_STR);
+        $stHistory->execute();
+        $historyRows = $stHistory->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($historyRows)) {
+            foreach ($historyRows as $historyRow) {
+                $historyKey = trim((string)(isset($historyRow['worker_key']) ? $historyRow['worker_key'] : '')) . '|' . trim((string)(isset($historyRow['work_date']) ? $historyRow['work_date'] : ''));
+                if ($historyKey === '|') continue;
+                if (!isset($overrideHistoryMap[$historyKey])) $overrideHistoryMap[$historyKey] = array();
+                $overrideHistoryMap[$historyKey][] = $historyRow;
+            }
+        }
+    } catch (Exception $e) {
+        $overrideHistoryMap = array();
     }
 }
 
@@ -702,6 +732,10 @@ foreach ($timesheetWorkers as $worker) {
                     <textarea id="gongsuRequestReason" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" rows="3" placeholder="예: 점심시간 없이 근무"></textarea>
                     <div class="mt-2 text-xs text-gray-500">1.2 이상 공수 수정은 요청 사유가 필요합니다. 예: 점심시간 없이 근무</div>
                 </div>
+                <div id="gongsuHistoryBox" class="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm hidden">
+                    <div class="text-sm font-extrabold text-gray-900 mb-3">이력</div>
+                    <div id="gongsuHistoryContent" class="space-y-3 text-gray-700"></div>
+                </div>
                 <div class="flex items-center justify-between gap-2">
                     <button type="button" class="px-4 py-2 rounded-2xl border border-red-200 text-red-600 font-extrabold hidden" id="gongsuRequestDelete">공수 삭제</button>
                     <div class="flex items-center justify-end gap-2 ml-auto">
@@ -844,6 +878,7 @@ foreach ($timesheetWorkers as $worker) {
 (function(){
     var csrf = <?php echo json_encode(csrf_token()); ?>;
     var projectName = <?php echo json_encode(isset($projectRow['name']) ? (string)$projectRow['name'] : ''); ?>;
+    var gongsuHistoryMap = <?php echo json_encode($overrideHistoryMap, JSON_UNESCAPED_UNICODE); ?>;
     var requestCtx = null;
     var addCtx = null;
     var savingCell = false;
@@ -921,6 +956,78 @@ foreach ($timesheetWorkers as $worker) {
         if (totalPayCell) totalPayCell.textContent = formatMoney(totalGongsu * (isNaN(wageRate) ? 0 : wageRate));
     }
 
+    function escHtml(value){
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function pickName(row, nameKey, emailKey, fallback){
+        var name = row && row[nameKey] ? String(row[nameKey]) : '';
+        var email = row && row[emailKey] ? String(row[emailKey]) : '';
+        if (name) return name;
+        if (email) return email;
+        return fallback || '-';
+    }
+
+    function historyStatusLabel(row){
+        var status = row && row.status ? String(row.status) : '';
+        if (status === 'rejected') return '반려';
+        if (status === 'applied') return '승인완료';
+        if (status === 'pending') return '승인대기';
+        if (status === 'deleted') return '삭제';
+        return status || '-';
+    }
+
+    function addHistoryLine(lines, label, value){
+        if (value === null || typeof value === 'undefined' || String(value) === '') return;
+        lines.push('<div><span class="font-bold text-gray-500">' + escHtml(label) + ':</span> ' + escHtml(value) + '</div>');
+    }
+
+    function renderGongsuHistory(ctx){
+        var box = document.getElementById('gongsuHistoryBox');
+        var content = document.getElementById('gongsuHistoryContent');
+        if (!box || !content) return;
+        content.innerHTML = '';
+        var key = String((ctx && ctx.workerKey) ? ctx.workerKey : '').replace(/^\s+|\s+$/g, '') + '|' + String((ctx && ctx.date) ? ctx.date : '');
+        var rows = (gongsuHistoryMap && gongsuHistoryMap[key]) ? gongsuHistoryMap[key] : [];
+        if (!rows.length) {
+            box.classList.add('hidden');
+            return;
+        }
+
+        var html = '';
+        for (var i = 0; i < rows.length; i++) {
+            var row = rows[i] || {};
+            var oldValue = (row.old_value === null || typeof row.old_value === 'undefined') ? '-' : formatValue(row.old_value);
+            var newValue = (String(row.is_deleted_entry || '0') === '1') ? '삭제' : formatValue(row.new_value);
+            var lines = [];
+            addHistoryLine(lines, '요청일시', row.created_at || '-');
+            addHistoryLine(lines, '요청자', pickName(row, 'requested_by_name', 'requested_by_email', '-'));
+            addHistoryLine(lines, '변경공수', oldValue + ' → ' + newValue);
+            addHistoryLine(lines, '사유', row.reason || '-');
+
+            if (row.first_approved_at || row.first_approver_name || row.first_approver_email) {
+                addHistoryLine(lines, '1차 승인', pickName(row, 'first_approver_name', 'first_approver_email', '-') + (row.first_approved_at ? ' / ' + row.first_approved_at : ''));
+            }
+            if (row.second_approved_at || row.second_approver_name || row.second_approver_email) {
+                addHistoryLine(lines, '2차 승인', pickName(row, 'second_approver_name', 'second_approver_email', '-') + (row.second_approved_at ? ' / ' + row.second_approved_at : ''));
+            }
+            if (row.rejected_at || row.rejected_by_name || row.rejected_by_email) {
+                addHistoryLine(lines, '반려자', pickName(row, 'rejected_by_name', 'rejected_by_email', '-') + (row.rejected_at ? ' / ' + row.rejected_at : ''));
+                addHistoryLine(lines, '반려사유', row.reject_reason || '-');
+            }
+            addHistoryLine(lines, '최종상태', historyStatusLabel(row));
+
+            html += '<div class="rounded-xl border border-gray-200 bg-white p-3 leading-6">' + lines.join('') + '</div>';
+        }
+        content.innerHTML = html;
+        box.classList.remove('hidden');
+    }
+
     function openRequestModal(cell, ctx){
         requestCtx = { cell:cell, ctx:ctx };
         document.getElementById('gongsuProjectName').textContent = projectName || '-';
@@ -936,6 +1043,7 @@ foreach ($timesheetWorkers as $worker) {
             if (ctx.oldValue > 0) deleteBtn.classList.remove('hidden');
             else deleteBtn.classList.add('hidden');
         }
+        renderGongsuHistory(ctx);
         openModal('modal-gongsuRequest');
         setTimeout(function(){
             var input = document.getElementById('gongsuRequestedValue');

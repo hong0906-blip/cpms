@@ -7,6 +7,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/partials/schedule_auto_progress_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -93,6 +94,7 @@ try {
     $st->bindValue(':task_id', $taskId, \PDO::PARAM_INT);
     $st->bindValue(':project_id', $projectId, \PDO::PARAM_INT);
     $st->execute();
+    cpms_schedule_apply_auto_progress($pdo, $projectId);
 
     schedule_move_json_exit(true, '저장되었습니다.', array(
         'task_id' => $taskId,

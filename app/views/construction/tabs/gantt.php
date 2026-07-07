@@ -46,6 +46,7 @@ cpms_construction_drive_ensure_table_columns($pdo, 'cpms_schedule_progress_photo
 cpms_schedule_apply_auto_progress($pdo, (int)$pid);
 $debugAutoProgress = isset($_GET['debug_auto_progress']) && (string)$_GET['debug_auto_progress'] === '1';
 $autoProgressDiagnostics = $debugAutoProgress ? cpms_schedule_auto_progress_diagnostics($pdo, (int)$pid) : array();
+$ganttTodayYmd = function_exists('cpms_schedule_auto_today') ? cpms_schedule_auto_today() : date('Y-m-d');
 
 $tasks = array();
 try {
@@ -232,7 +233,7 @@ if ($rangeStartTs > 0 && $rangeEndTs > 0 && $rangeEndTs < $rangeStartTs) {
 
 // 범위가 없으면 30일짜리 임시
 if ($rangeStartTs === 0 || $rangeEndTs === 0) {
-    $rangeStartTs = strtotime(date('Y-m-d') . ' 00:00:00');
+    $rangeStartTs = strtotime($ganttTodayYmd . ' 00:00:00');
     $rangeEndTs = strtotime(date('Y-m-d', $rangeStartTs + 86400 * 30) . ' 00:00:00');
 }
 
@@ -247,7 +248,7 @@ $baseStartTs = $rangeStartTs;
 $baseEndTs = $rangeEndTs;
 if ($viewMonth === '') {
     // 기본 월을 오늘로 변경(보기/수정 공통)
-    $nowTs = strtotime(date('Y-m-d') . ' 00:00:00');
+    $nowTs = strtotime($ganttTodayYmd . ' 00:00:00');
     if ($nowTs >= $baseStartTs && $nowTs <= $baseEndTs) {
         $viewMonth = date('Y-m', $nowTs);
     } else {
@@ -260,7 +261,7 @@ $rangeEndTs = strtotime(date('Y-m-t', $rangeStartTs) . ' 00:00:00');
 $rangeDays = (int)floor(($rangeEndTs - $rangeStartTs) / 86400);
 if ($rangeDays < 1) $rangeDays = 1;
 $gridDays = $rangeDays + 1;
-$todayYmd = date('Y-m-d');
+$todayYmd = $ganttTodayYmd;
 $todayTs = ymd_to_ts($todayYmd);
 $todayOffset = -1;
 if ($todayTs >= $rangeStartTs && $todayTs <= $rangeEndTs) {
@@ -489,6 +490,8 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                     <thead>
                     <tr class="bg-blue-100 text-blue-900">
                         <th class="p-2 border text-right">task_id</th>
+                        <th class="p-2 border text-right">work_id</th>
+                        <th class="p-2 border text-center">작업 연결</th>
                         <th class="p-2 border text-left">작업명</th>
                         <th class="p-2 border">start_date</th>
                         <th class="p-2 border">end_date</th>
@@ -504,11 +507,13 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                     </thead>
                     <tbody>
                     <?php if (count($autoProgressDiagnostics) === 0): ?>
-                        <tr><td class="p-3 border text-center text-gray-500" colspan="12">진단 가능한 작업이 없습니다.</td></tr>
+                        <tr><td class="p-3 border text-center text-gray-500" colspan="14">진단 가능한 작업이 없습니다.</td></tr>
                     <?php else: ?>
                         <?php foreach ($autoProgressDiagnostics as $diag): ?>
                             <tr>
                                 <td class="p-2 border text-right"><?php echo (int)$diag['task_id']; ?></td>
+                                <td class="p-2 border text-right"><?php echo (int)$diag['work_id']; ?></td>
+                                <td class="p-2 border text-center"><?php echo !empty($diag['work_linked']) ? '작업 연결됨' : '직접입력'; ?></td>
                                 <td class="p-2 border"><?php echo h($diag['task_name']); ?></td>
                                 <td class="p-2 border text-center"><?php echo h($diag['start_date']); ?></td>
                                 <td class="p-2 border text-center"><?php echo h($diag['end_date']); ?></td>
@@ -624,6 +629,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                                  style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%; min-width: 28px;">
                                 <?php /* 공정표 바 텍스트 복구 */ ?>
                                 <span class="gantt-bar-text"><?php echo h($t['name']); ?></span>
+                                <span class="gantt-status-badge"><?php echo $workId > 0 ? '작업 연결됨' : '직접입력'; ?></span>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -776,6 +782,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                                          style="left: <?php echo (float)$leftPct; ?>%; width: <?php echo (float)$widthPct; ?>%; min-width: 28px;"
                                          draggable="true">
                                         <span class="truncate"><?php echo h($t['name']); ?></span>
+                                        <span class="gantt-status-badge"><?php echo $workId > 0 ? '작업 연결됨' : '직접입력'; ?></span>
                                         <span class="gantt-handle gantt-handle-left"></span>
                                         <span class="gantt-handle gantt-handle-right"></span>
                                     </div>
@@ -938,6 +945,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
                                     <th class="p-2 border text-right">수량(계약수량)</th>
                                     <th class="p-2 border text-right">완료수량</th>
                                     <th class="p-2 border text-right">남은수량</th>
+                                    <th class="p-2 border text-center">상태</th>
                                 </tr>
                             </thead>
                             <tbody id="ganttItemQtyBody"></tbody>
@@ -1033,11 +1041,25 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     /* 공정표 바 텍스트 복구 */
   .gantt-bar-text {
     display: block;
-    width: 100%;
+    min-width: 0;
+    flex: 1 1 auto;
     color: #ffffff;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    pointer-events: none;
+  }
+  .gantt-status-badge {
+    flex: 0 0 auto;
+    margin-left: 6px;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.22);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1.2;
+    white-space: nowrap;
     pointer-events: none;
   }
   .gantt-bar.dragging { opacity: 0.7; cursor: grabbing; }
@@ -1159,10 +1181,15 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return tsToYmd(ts + (days * 86400));
   }
 
-  function normalizeInt(val){
+  function normalizeQty(val){
     var num = parseFloat(val);
     if (isNaN(num) || num < 0) return 0;
-    return Math.round(num);
+    return num;
+  }
+
+  function roundQty4(val){
+    var num = normalizeQty(val);
+    return Math.round(num * 10000) / 10000;
   }
 
   function getTaskRowById(taskId){
@@ -1368,11 +1395,21 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         var zoneRect = zone.getBoundingClientRect();
         var offsetX = e.clientX - zoneRect.left;
         var leftDays = dayFromOffset(offsetX);
-        var startTs = rangeStartTs + (leftDays * 86400);
-        var endTs = startTs + (3 * 86400);
-        saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0, dragWorkId || 0);
-        if (dragEl && dragEl.parentNode) {
-          dragEl.parentNode.removeChild(dragEl);
+        var existingRow = zone.closest('.gantt-row');
+        var existingTaskId = existingRow ? (parseInt(existingRow.getAttribute('data-task-id') || '0', 10) || 0) : 0;
+        if (existingTaskId > 0) {
+          var existingName = existingRow.getAttribute('data-task-name') || droppedName;
+          var existingStart = zone.getAttribute('data-start') || '';
+          var existingEnd = zone.getAttribute('data-end') || existingStart;
+          var existingProgress = existingRow.getAttribute('data-task-progress') || '0';
+          saveTask(existingTaskId, existingName, existingStart, existingEnd, existingProgress, dragWorkId || 0);
+        } else {
+          var startTs = rangeStartTs + (leftDays * 86400);
+          var endTs = startTs + (3 * 86400);
+          saveTask(0, droppedName, tsToYmd(startTs), tsToYmd(endTs), 0, dragWorkId || 0);
+          if (dragEl && dragEl.parentNode) {
+            dragEl.parentNode.removeChild(dragEl);
+          }
         }
         dragName = '';
         dragWorkId = '0';
@@ -1612,10 +1649,12 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     return num;
   }
 
-  function formatQty0(val){
+  function formatQty(val){
     var num = toNumber(val);
     if (num === null) return '';
-    return String(Math.round(num));
+    if (Math.abs(num - Math.round(num)) < 0.0001) return String(Math.round(num));
+    var formatted = (Math.round(num * 10000) / 10000).toFixed(4);
+    return formatted.replace(/0+$/,'').replace(/\.$/,'');
   }
 
   function getTaskBaseTotal(taskId, fallbackTotal){
@@ -1673,14 +1712,14 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   function suggestAutoQty(taskId, taskDate, baseTotal){
     var range = getTaskDateRange(taskId);
     if (!range.start || !range.end || !taskDate || !baseTotal || taskDate < todayYmd) return null;
-    var remainingTotal = normalizeInt(baseTotal);
+    var remainingTotal = normalizeQty(baseTotal);
     var manualMap = {};
     getTaskDailyEntries(taskId).forEach(function(item){
       if (item.done === null) return;
       if (item.date < todayYmd) {
-        remainingTotal -= normalizeInt(item.done);
+        remainingTotal -= normalizeQty(item.done);
       } else {
-        manualMap[item.date] = normalizeInt(item.done);
+        manualMap[item.date] = normalizeQty(item.done);
       }
     });
     if (remainingTotal < 0) remainingTotal = 0;
@@ -1703,12 +1742,13 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     if (allocatable < 0) allocatable = 0;
     if (Object.prototype.hasOwnProperty.call(manualMap, taskDate)) return manualMap[taskDate];
     if (!freeDays.length) return 0;
-    var base = Math.floor(allocatable / freeDays.length);
-    var remain = allocatable - (base * freeDays.length);
+    var base = roundQty4(allocatable / freeDays.length);
+    var used = 0;
     for (var i = 0; i < freeDays.length; i++) {
       var d = freeDays[i];
       var val = base;
-      if (i === freeDays.length - 1) val += remain;
+      if (i === freeDays.length - 1) val = roundQty4(allocatable - used);
+      used = roundQty4(used + val);
       if (d === taskDate) return val;
     }
     return null;
@@ -1723,6 +1763,22 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
   function escapeHtml(str){
     return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function progressStatusBadgeHtml(saved, workId){
+    var label = '';
+    var cls = 'bg-gray-100 text-gray-600 border-gray-200';
+    if (saved && typeof saved === 'object') {
+      if (parseInt(saved.is_manual || 0, 10) === 1) {
+        label = '수동수정됨';
+        cls = 'bg-amber-50 text-amber-700 border-amber-200';
+      } else if (parseInt(saved.is_auto || 0, 10) === 1) {
+        label = '자동분배';
+        cls = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      }
+    }
+    if (!label) label = workId > 0 ? '작업 연결됨' : '직접입력';
+    return '<span class="inline-flex items-center px-2 py-1 rounded-full border text-[11px] font-bold ' + cls + '">' + escapeHtml(label) + '</span>';
   }
 
   function renderTaskItemTable(taskId){
@@ -1744,10 +1800,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
     if (!rows || !rows.length) {
       if (workId > 0) {
-        bodyEl.innerHTML = '<tr><td class="p-3 border text-center text-gray-500" colspan="4">작업 탭에 연결된 내역서 항목이 없습니다.</td></tr>';
+        bodyEl.innerHTML = '<tr><td class="p-3 border text-center text-gray-500" colspan="5">작업 탭에 연결된 내역서 항목이 없습니다.</td></tr>';
       } else {
         // 모달에 작업-내역서 항목 표시
-        bodyEl.innerHTML = '<tr><td class="p-3 border text-center text-amber-700 bg-amber-50" colspan="4">연결된 작업내용이 없습니다(작업 탭에서 작업을 만들어 연결해주세요).</td></tr>';
+        bodyEl.innerHTML = '<tr><td class="p-3 border text-center text-amber-700 bg-amber-50" colspan="5">연결된 작업내용이 없습니다(작업 탭에서 작업을 만들어 연결해주세요).</td></tr>';
       }
       if (totalEl) totalEl.value = '0';
       if (doneEl) doneEl.value = '0';
@@ -1760,8 +1816,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       if (contractQty === null) contractQty = 0;
       var hasSavedDoneQty = false;
       var doneQty = 0;
+      var statusSaved = null;
       if (doneMap && Object.prototype.hasOwnProperty.call(doneMap, uid)) {
         var itemSaved = doneMap[uid];
+        statusSaved = (itemSaved && typeof itemSaved === 'object') ? itemSaved : null;
         var savedDoneQty = toNumber((itemSaved && typeof itemSaved === 'object') ? itemSaved.done_qty : itemSaved);
         if (savedDoneQty !== null) {
           hasSavedDoneQty = true;
@@ -1777,14 +1835,15 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
 
       var tr = document.createElement('tr');
       tr.innerHTML = '<td class="p-2 border">' + escapeHtml(item.item_name || '') + '</td>' +
-        '<td class="p-2 border text-right">' + formatQty0(contractQty) + '</td>' +
-        '<td class="p-2 border text-right"><input type="number" min="0" step="1" class="gantt-item-done w-24 px-2 py-1 border border-gray-200 rounded text-right" data-unit-price-id="' + uid + '" data-contract-qty="' + contractQty + '" value="' + formatQty0(doneQty) + '"></td>' +
-        '<td class="p-2 border text-right"><span class="gantt-item-remain">' + formatQty0(remain) + '</span></td>';
+        '<td class="p-2 border text-right">' + formatQty(contractQty) + '</td>' +
+        '<td class="p-2 border text-right"><input type="number" min="0" step="0.0001" class="gantt-item-done w-24 px-2 py-1 border border-gray-200 rounded text-right" data-unit-price-id="' + uid + '" data-contract-qty="' + contractQty + '" value="' + formatQty(doneQty) + '"></td>' +
+        '<td class="p-2 border text-right"><span class="gantt-item-remain">' + formatQty(remain) + '</span></td>' +
+        '<td class="p-2 border text-center">' + progressStatusBadgeHtml(statusSaved, workId) + '</td>';
       bodyEl.appendChild(tr);
     });
 
-    if (totalEl) totalEl.value = formatQty0(totalQtySum);
-    if (doneEl) doneEl.value = formatQty0(doneQtySum);
+    if (totalEl) totalEl.value = formatQty(totalQtySum);
+    if (doneEl) doneEl.value = formatQty(doneQtySum);
 
     bodyEl.querySelectorAll('.gantt-item-done').forEach(function(input){
       input.addEventListener('input', function(){
@@ -1793,16 +1852,16 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
         var val = toNumber(input.value);
         if (val === null || val < 0) val = 0;
         if (contractQty > 0 && val > contractQty) val = contractQty;
-        input.value = formatQty0(val);
+        input.value = formatQty(val);
         var remainEl = input.closest('tr').querySelector('.gantt-item-remain');
-        if (remainEl) remainEl.textContent = formatQty0(contractQty - val);
+        if (remainEl) remainEl.textContent = formatQty(contractQty - val);
 
         var doneTotal = 0;
         bodyEl.querySelectorAll('.gantt-item-done').forEach(function(inp){
           var iv = toNumber(inp.value);
           doneTotal += (iv === null ? 0 : iv);
         });
-        if (doneEl) doneEl.value = formatQty0(doneTotal);
+        if (doneEl) doneEl.value = formatQty(doneTotal);
         updateRemainQty();
       });
     });
@@ -1828,7 +1887,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
     var mapKey = taskId + '|' + taskDate;
     var saved = (progressMap && progressMap[mapKey]) ? progressMap[mapKey] : null;
     var baseTotal = getTaskBaseTotal(taskId, totalQty);
-    var totalVal = (baseTotal !== null && typeof baseTotal !== 'undefined') ? formatQty0(baseTotal) : '';
+    var totalVal = (baseTotal !== null && typeof baseTotal !== 'undefined') ? formatQty(baseTotal) : '';
     var doneVal = '0';
     var inputMode = 'manual';
     if (autoToggleEl) {
@@ -1836,12 +1895,12 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       autoToggleEl.checked = (savedAuto !== 'off');
     }
     if (saved && saved.done_qty !== null && typeof saved.done_qty !== 'undefined' && saved.done_qty !== '') {
-      doneVal = formatQty0(saved.done_qty);
+      doneVal = formatQty(saved.done_qty);
       inputMode = 'manual';
       if (hintEl) hintEl.textContent = '저장된 완료수량입니다.';
       if (sourceEl) {
-        if (parseInt(saved.is_manual || 0, 10) === 1) sourceEl.textContent = '수동 수정';
-        else if (parseInt(saved.is_auto || 0, 10) === 1) sourceEl.textContent = '자동 반영';
+        if (parseInt(saved.is_manual || 0, 10) === 1) sourceEl.textContent = '수동수정됨';
+        else if (parseInt(saved.is_auto || 0, 10) === 1) sourceEl.textContent = '자동분배';
         else sourceEl.textContent = '저장값';
       }
     } else {
@@ -1849,7 +1908,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       var useAuto = autoToggleEl ? !!autoToggleEl.checked : true;
       var suggested = useAuto ? suggestAutoQty(taskId, taskDate, baseTotal) : null;
       if (suggested !== null) {
-        doneVal = formatQty0(suggested);
+        doneVal = formatQty(suggested);
         inputMode = 'auto';
         if (hintEl) hintEl.textContent = '자동 제안값(저장 전 수정 가능)';
       } else if (hintEl) {
@@ -2019,7 +2078,7 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
       remainEl.textContent = '-';
       return;
     }
-    remainEl.textContent = formatQty0(remain);
+    remainEl.textContent = formatQty(remain);
   }
 
   document.querySelectorAll('.gantt-progress-date').forEach(function(btn){
@@ -2033,8 +2092,10 @@ function gantt_bar_metrics($sdTs, $edTs, $rangeStartTs, $rangeEndTs, $gridDays) 
   });
 
   var totalQtyInput = document.getElementById('ganttTotalQty');
+  if (totalQtyInput) totalQtyInput.setAttribute('step', '0.0001');
   if (totalQtyInput) totalQtyInput.addEventListener('input', updateRemainQty);
   var doneQtyInput = document.getElementById('ganttDoneQty');
+  if (doneQtyInput) doneQtyInput.setAttribute('step', '0.0001');
   if (doneQtyInput) doneQtyInput.addEventListener('input', function(){
     var modeEl = document.getElementById('ganttProgressInputMode');
     var hintEl = document.getElementById('ganttDoneQtyHint');

@@ -123,6 +123,11 @@ $tabs = array(
     'security' => '보안사고',
     'safety'   => '안전사고',
 );
+$tabs = array_merge(
+    array_slice($tabs, 0, 4, true),
+    array('daily_status' => '일별 현황'),
+    array_slice($tabs, 4, null, true)
+);
 if (!isset($tabs[$tab])) $tab = $defaultTab;
 
 $canEditSchedule = Auth::canManageConstruction(); // 공사/공무/임원 수정 권한

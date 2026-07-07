@@ -71,7 +71,7 @@ $totalQtyRaw = isset($_POST['total_qty']) ? (string)$_POST['total_qty'] : '';
 $doneQtyRaw = isset($_POST['done_qty']) ? (string)$_POST['done_qty'] : '';
 $action = isset($_POST['action']) ? trim((string)$_POST['action']) : 'save';
 $shiftDays = isset($_POST['shift_days']) ? (int)$_POST['shift_days'] : 0;
-$shiftFrom = isset($_POST['shift_from']) ? trim((string)$_POST['shift_from']) : date('Y-m-d');
+$shiftFrom = isset($_POST['shift_from']) ? trim((string)$_POST['shift_from']) : cpms_schedule_auto_today();
 
 if ($projectId <= 0 || $taskId <= 0) {
     flash_set('error', '프로젝트/공정 정보가 올바르지 않습니다.');
@@ -84,7 +84,7 @@ if ($workDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $workDate)) {
     exit;
 }
 if ($shiftFrom === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $shiftFrom)) {
-    $shiftFrom = date('Y-m-d');
+    $shiftFrom = cpms_schedule_auto_today();
 }
 
 $redirectMonth = substr($workDate, 0, 7);
@@ -175,10 +175,10 @@ try {
         if ($shiftDays === 0) {
             throw new Exception('이동 일수는 0일이 될 수 없습니다.');
         }
-        $today = date('Y-m-d');
+        $today = cpms_schedule_auto_today();
         if ($shiftFrom < $today) $shiftFrom = $today;
 
-        $stRows = $pdo->prepare("SELECT id, work_date, total_qty, done_qty FROM cpms_schedule_progress WHERE project_id=:pid AND task_id=:tid AND work_date >= :wf ORDER BY work_date ASC, id ASC");
+        $stRows = $pdo->prepare("SELECT id, work_date, total_qty, done_qty, is_auto, is_manual FROM cpms_schedule_progress WHERE project_id=:pid AND task_id=:tid AND work_date >= :wf AND is_manual=1 ORDER BY work_date ASC, id ASC");
         $stRows->bindValue(':pid', $projectId, \PDO::PARAM_INT);
         $stRows->bindValue(':tid', $taskId, \PDO::PARAM_INT);
         $stRows->bindValue(':wf', $shiftFrom);
@@ -240,7 +240,7 @@ try {
                     if ($oldTotal !== null) $mergedTotal = $oldTotal;
                 }
 
-                $up = $pdo->prepare("UPDATE cpms_schedule_progress SET total_qty=:tq, done_qty=:dq, updated_at=CURRENT_TIMESTAMP WHERE id=:id");
+                $up = $pdo->prepare("UPDATE cpms_schedule_progress SET total_qty=:tq, done_qty=:dq, is_auto=0, is_manual=1, updated_at=CURRENT_TIMESTAMP WHERE id=:id");
                 if ($mergedTotal === null) $up->bindValue(':tq', null, \PDO::PARAM_NULL);
                 else $up->bindValue(':tq', $mergedTotal);
                 if ($mergedDone === null) $up->bindValue(':dq', null, \PDO::PARAM_NULL);
@@ -248,7 +248,7 @@ try {
                 $up->bindValue(':id', $targetId, \PDO::PARAM_INT);
                 $up->execute();
             } else {
-                $insT = $pdo->prepare("INSERT INTO cpms_schedule_progress(project_id, task_id, work_date, total_qty, done_qty, created_at, updated_at) VALUES(:pid, :tid, :wd, :tq, :dq, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
+                $insT = $pdo->prepare("INSERT INTO cpms_schedule_progress(project_id, task_id, work_date, total_qty, done_qty, is_auto, is_manual, created_at, updated_at) VALUES(:pid, :tid, :wd, :tq, :dq, 0, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)");
                 $insT->bindValue(':pid', $projectId, \PDO::PARAM_INT);
                 $insT->bindValue(':tid', $taskId, \PDO::PARAM_INT);
                 $insT->bindValue(':wd', $targetDate);
@@ -296,6 +296,7 @@ try {
         $upTask->bindValue(':pid', $projectId, \PDO::PARAM_INT);
         $upTask->execute();
 
+        cpms_schedule_apply_auto_progress($pdo, $projectId);
         $recalculateTaskProgress($pdo, $projectId, $taskId);        
         $pdo->commit();
         flash_set('success', '일정 이동이 적용되었습니다. (오늘~미래 수동 입력값 이동, 충돌 시 합치기)');

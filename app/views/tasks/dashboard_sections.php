@@ -323,6 +323,79 @@ function cpms_render_task_kanban_lane($laneKey, $title, $items, $currentEmployee
     <?php
 }}
 
+if (!function_exists('cpms_render_requested_task_kanban_card')) {
+function cpms_render_requested_task_kanban_card($item, $currentEmployeeId)
+{
+    $priority = isset($item['priority']) ? (string)$item['priority'] : 'normal';
+    $isUrgent = (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1) || $priority === 'urgent';
+    $isDelayed = cpms_tasks_is_delayed($item);
+    $statusKey = $isDelayed ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
+    $dueText = '-';
+    if (isset($item['due_date']) && trim((string)$item['due_date']) !== '') {
+        $dueText = (string)$item['due_date'];
+        if (isset($item['due_time']) && trim((string)$item['due_time']) !== '') $dueText .= ' ' . substr((string)$item['due_time'], 0, 5);
+    }
+    ?>
+    <article class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm shadow-gray-100" data-requested-task-card draggable="false">
+        <div class="flex items-start justify-between gap-2">
+            <span class="px-2.5 py-1 rounded-full border text-xs font-extrabold <?php echo h(cpms_tasks_badge_class('priority', $priority)); ?>"><?php echo h(cpms_tasks_priority_label($priority)); ?></span>
+            <span class="px-2.5 py-1 rounded-full border text-xs font-extrabold <?php echo h(cpms_tasks_badge_class('status', $statusKey)); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : cpms_tasks_status_label(isset($item['status']) ? $item['status'] : 'pending')); ?></span>
+        </div>
+        <div class="mt-3 text-base font-extrabold text-slate-900 leading-6 break-words"><?php echo h(isset($item['title']) ? $item['title'] : ''); ?></div>
+        <?php if (isset($item['project_name']) && trim((string)$item['project_name']) !== ''): ?>
+            <div class="mt-2 text-sm text-slate-600">현장명: <?php echo h($item['project_name']); ?></div>
+        <?php endif; ?>
+        <div class="mt-2 text-sm text-slate-600">담당자: <?php echo h(isset($item['assignee_name']) && trim((string)$item['assignee_name']) !== '' ? $item['assignee_name'] : '-'); ?></div>
+        <div class="mt-1 text-sm text-slate-500">마감: <?php echo h($dueText); ?></div>
+        <div class="mt-3 flex flex-wrap gap-2">
+            <?php if ($isUrgent): ?>
+                <span class="px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-extrabold">긴급</span>
+            <?php endif; ?>
+            <?php if ($isDelayed): ?>
+                <span class="px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-extrabold">지연</span>
+            <?php endif; ?>
+        </div>
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+            <button type="button" data-task-detail-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">상세</button>
+            <?php if ((int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId && isset($item['status']) && (string)$item['status'] === 'done'): ?>
+                <button type="button" data-task-revision-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-amber-500 text-white text-sm font-extrabold">보완요청</button>
+            <?php endif; ?>
+        </div>
+    </article>
+    <?php
+}}
+
+if (!function_exists('cpms_render_requested_task_kanban_lane')) {
+function cpms_render_requested_task_kanban_lane($items, $currentEmployeeId, $requestedTaskDate, $dashboardHiddenInputs)
+{
+    if (!is_array($items)) $items = array();
+    if (!is_array($dashboardHiddenInputs)) $dashboardHiddenInputs = array();
+    ?>
+    <section class="rounded-2xl border border-gray-200 bg-slate-50 p-4 min-h-[280px]" data-requested-task-lane>
+        <div class="flex items-center justify-between gap-3 mb-4">
+            <h3 class="text-lg font-extrabold text-gray-900">내가 요청한 업무</h3>
+            <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-sm font-extrabold text-gray-700"><?php echo count($items); ?>건</span>
+        </div>
+        <form method="get" action="" class="mb-3 flex items-center gap-2">
+            <?php foreach ($dashboardHiddenInputs as $dashboardHiddenName => $dashboardHiddenValue): ?>
+                <input type="hidden" name="<?php echo h($dashboardHiddenName); ?>" value="<?php echo h($dashboardHiddenValue); ?>">
+            <?php endforeach; ?>
+            <input type="date" name="requested_task_date" value="<?php echo h($requestedTaskDate); ?>" class="min-w-0 flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm">
+            <button type="submit" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">조회</button>
+        </form>
+        <div class="space-y-3 min-h-[180px]">
+            <?php if (count($items) === 0): ?>
+                <div class="p-4 rounded-2xl border border-dashed border-gray-300 bg-white text-sm text-gray-500">표시할 업무가 없습니다.</div>
+            <?php else: ?>
+                <?php foreach ($items as $item): ?>
+                    <?php cpms_render_requested_task_kanban_card($item, $currentEmployeeId); ?>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </section>
+    <?php
+}}
+
 if (!function_exists('cpms_mobile_task_due_text')) {
 function cpms_mobile_task_due_text($item)
 {
@@ -1051,24 +1124,11 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
 
         <div data-cpms-employee-task-body class="mt-6 space-y-6">
             <div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-4" data-task-kanban-board data-csrf="<?php echo h(csrf_token()); ?>">
+                <?php cpms_render_requested_task_kanban_lane($requested, (int)$currentEmployee['id'], $requestedTaskDate, $dashboardHiddenInputs); ?>
                 <?php cpms_render_task_kanban_lane('pending', '대기중', $kanbanLanes['pending'], (int)$currentEmployee['id']); ?>
                 <?php cpms_render_task_kanban_lane('progress', '진행중', $kanbanLanes['progress'], (int)$currentEmployee['id']); ?>
                 <?php cpms_render_task_kanban_lane('done', '완료', $kanbanLanes['done'], (int)$currentEmployee['id']); ?>
-                <?php cpms_render_task_kanban_lane('rejected', '반려', $kanbanLanes['rejected'], (int)$currentEmployee['id']); ?>
             </div>
-            <div class="rounded-3xl border border-gray-200 bg-white p-5">
-                <form method="get" action="" class="flex flex-wrap items-end gap-3">
-                    <?php foreach ($dashboardHiddenInputs as $dashboardHiddenName => $dashboardHiddenValue): ?>
-                        <input type="hidden" name="<?php echo h($dashboardHiddenName); ?>" value="<?php echo h($dashboardHiddenValue); ?>">
-                    <?php endforeach; ?>
-                    <div>
-                        <div class="text-sm font-bold text-gray-700 mb-1">내가 요청한 업무 일자</div>
-                        <input type="date" name="requested_task_date" value="<?php echo h($requestedTaskDate); ?>" class="px-4 py-3 rounded-2xl border border-gray-200">
-                    </div>
-                    <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">조회</button>
-                </form>
-            </div>
-            <?php cpms_render_feed_lane('내가 요청한 업무', '', 'bg-slate-100 text-slate-700', $requested, (int)$currentEmployee['id'], $returnUrl, true); ?>
         </div>
     </div>
 
@@ -2539,7 +2599,7 @@ function cpms_render_executive_task_dashboard($pdo)
                         </div>
                     </button>
 
-                    <div id="panel-<?php echo h($modalId); ?>" class="hidden mt-2 mb-4 rounded-2xl border border-gray-200 bg-white shadow-sm" data-cpms-employee-panel>
+                    <div id="panel-<?php echo h($modalId); ?>" class="hidden mt-2 mb-4 rounded-2xl border border-gray-200 bg-white shadow-sm" data-cpms-employee-panel style="max-height:78vh;overflow-y:auto;">
                         <div class="flex items-center justify-between px-5 py-4 border-b border-gray-100">
                             <div>
                                 <div class="text-xl font-extrabold text-gray-900"><?php echo h(isset($employee['name']) ? $employee['name'] : '-'); ?> 업무 현황</div>
@@ -2588,11 +2648,22 @@ function cpms_render_executive_task_dashboard($pdo)
     (function(){
         var toggles = document.querySelectorAll('[data-cpms-employee-toggle]');
         var closeButtons = document.querySelectorAll('[data-cpms-employee-close]');
+        function resetPanel(panel) {
+            if (!panel) return;
+            panel.classList.add('hidden');
+        }
+        function positionPanel(panel, trigger) {
+            if (!panel || !trigger) return;
+            if (trigger.parentNode && panel.parentNode && trigger.nextSibling !== panel) {
+                trigger.parentNode.insertBefore(panel, trigger.nextSibling);
+            }
+            panel.classList.remove('hidden');
+        }
         function closeAll(exceptId) {
             var panels = document.querySelectorAll('[data-cpms-employee-panel]');
             for (var i = 0; i < panels.length; i++) {
                 if (exceptId && panels[i].id === 'panel-' + exceptId) continue;
-                panels[i].classList.add('hidden');
+                resetPanel(panels[i]);
             }
         }
         for (var i = 0; i < toggles.length; i++) {
@@ -2602,8 +2673,8 @@ function cpms_render_executive_task_dashboard($pdo)
                 if (!panel) return;
                 var willOpen = panel.classList.contains('hidden');
                 closeAll(willOpen ? key : null);
-                if (willOpen) panel.classList.remove('hidden');
-                else panel.classList.add('hidden');
+                if (willOpen) positionPanel(panel, this);
+                else resetPanel(panel);
             });
         }
         for (var j = 0; j < closeButtons.length; j++) {
@@ -2611,9 +2682,15 @@ function cpms_render_executive_task_dashboard($pdo)
                 e.preventDefault();
                 var key = this.getAttribute('data-cpms-employee-close');
                 var panel = document.getElementById('panel-' + key);
-                if (panel) panel.classList.add('hidden');
+                if (panel) resetPanel(panel);
             });
         }
+        document.addEventListener('click', function(e){
+            var panelTarget = e.target && e.target.closest ? e.target.closest('[data-cpms-employee-panel]') : null;
+            var toggleTarget = e.target && e.target.closest ? e.target.closest('[data-cpms-employee-toggle]') : null;
+            if (panelTarget || toggleTarget) return;
+            closeAll(null);
+        });
     })();
     (function(){
         function openSummary(key) {

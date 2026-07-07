@@ -202,34 +202,6 @@ ob_start();
         </div>
     <?php endif; ?>
 
-    <div>
-        <div class="text-sm font-extrabold text-gray-900 mb-2">처리 기록</div>
-        <div class="space-y-2">
-            <?php if (count($logs) === 0): ?>
-                <div class="p-4 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500">등록된 처리 기록이 없습니다.</div>
-            <?php else: ?>
-                <?php foreach ($logs as $log): ?>
-                    <div class="p-4 rounded-2xl border border-gray-200 bg-slate-50">
-                        <div class="flex flex-wrap items-center justify-between gap-2">
-                            <div class="font-bold text-slate-900"><?php echo h(cpms_tasks_status_label(isset($log['action_type']) ? $log['action_type'] : 'commented')); ?></div>
-                            <div class="text-xs text-slate-500"><?php echo h(isset($log['created_at']) ? $log['created_at'] : ''); ?></div>
-                        </div>
-                        <div class="text-sm text-slate-700 mt-1"><?php echo h(isset($log['actor_name']) && trim((string)$log['actor_name']) !== '' ? $log['actor_name'] : '-'); ?></div>
-                        <?php if (isset($log['message']) && trim((string)$log['message']) !== ''): ?>
-                            <div class="text-sm text-slate-700 mt-2 whitespace-pre-line"><?php echo h($log['message']); ?></div>
-                        <?php endif; ?>
-                        <?php if ((isset($log['old_status']) && $log['old_status'] !== null) || (isset($log['new_status']) && $log['new_status'] !== null)): ?>
-                            <div class="text-xs text-slate-500 mt-2">
-                                상태: <?php echo h(cpms_tasks_status_label(isset($log['old_status']) ? $log['old_status'] : '')); ?>
-                                → <?php echo h(cpms_tasks_status_label(isset($log['new_status']) ? $log['new_status'] : '')); ?>
-                            </div>
-                        <?php endif; ?>
-                    </div>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        </div>
-    </div>
-
     <div data-task-comments="<?php echo (int)$taskId; ?>">
         <div class="flex items-center justify-between gap-3 mb-2">
             <div class="text-sm font-extrabold text-gray-900">댓글</div>
@@ -260,6 +232,34 @@ ob_start();
             </form>
         </div>
     <?php endif; ?>
+
+    <div>
+        <div class="text-sm font-extrabold text-gray-900 mb-2">처리 기록</div>
+        <div class="space-y-2">
+            <?php if (count($logs) === 0): ?>
+                <div class="p-4 rounded-2xl border border-dashed border-gray-300 text-sm text-gray-500">등록된 처리 기록이 없습니다.</div>
+            <?php else: ?>
+                <?php foreach ($logs as $log): ?>
+                    <div class="p-4 rounded-2xl border border-gray-200 bg-slate-50">
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <div class="font-bold text-slate-900"><?php echo h(cpms_tasks_status_label(isset($log['action_type']) ? $log['action_type'] : 'commented')); ?></div>
+                            <div class="text-xs text-slate-500"><?php echo h(isset($log['created_at']) ? $log['created_at'] : ''); ?></div>
+                        </div>
+                        <div class="text-sm text-slate-700 mt-1"><?php echo h(isset($log['actor_name']) && trim((string)$log['actor_name']) !== '' ? $log['actor_name'] : '-'); ?></div>
+                        <?php if (isset($log['message']) && trim((string)$log['message']) !== ''): ?>
+                            <div class="text-sm text-slate-700 mt-2 whitespace-pre-line"><?php echo h($log['message']); ?></div>
+                        <?php endif; ?>
+                        <?php if ((isset($log['old_status']) && $log['old_status'] !== null) || (isset($log['new_status']) && $log['new_status'] !== null)): ?>
+                            <div class="text-xs text-slate-500 mt-2">
+                                상태: <?php echo h(cpms_tasks_status_label(isset($log['old_status']) ? $log['old_status'] : '')); ?>
+                                → <?php echo h(cpms_tasks_status_label(isset($log['new_status']) ? $log['new_status'] : '')); ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </div>
+    </div>
 </div>
 <?php
 $html = ob_get_clean();
