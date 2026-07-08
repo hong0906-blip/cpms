@@ -28,6 +28,7 @@ function cpms_task_feed_item($row)
         'action_url' => isset($row['action_url']) ? (string)$row['action_url'] : '',
         'is_direct_task' => isset($row['is_direct_task']) ? (int)$row['is_direct_task'] : 0,
         'created_by' => isset($row['created_by']) ? (int)$row['created_by'] : 0,
+        'assignee_read_statuses' => (isset($row['assignee_read_statuses']) && is_array($row['assignee_read_statuses'])) ? $row['assignee_read_statuses'] : array(),
         'created_at' => isset($row['created_at']) ? (string)$row['created_at'] : '',
         'completed_at' => isset($row['completed_at']) ? (string)$row['completed_at'] : '',
         'group_key' => isset($row['group_key']) ? (string)$row['group_key'] : '',
@@ -245,6 +246,13 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
                 'created_by' => isset($task['created_by']) ? (int)$task['created_by'] : 0,
+                'assignee_read_statuses' => array(array(
+                    'id' => isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0,
+                    'name' => isset($task['assignee_name']) ? (string)$task['assignee_name'] : '',
+                    'read_at' => isset($task['read_at']) ? (string)$task['read_at'] : '',
+                    'read_by' => isset($task['read_by']) ? (int)$task['read_by'] : 0,
+                    'self_request' => cpms_tasks_is_self_request($task) ? 1 : 0,
+                )),
                 'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
                 'completed_at' => isset($task['completed_at']) ? (string)$task['completed_at'] : '',
                 'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',
@@ -267,6 +275,7 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                     'row' => $row,
                     'assignees' => array(),
                     'statuses' => array(),
+                    'read_statuses' => array(),
                     'read_at' => ''
                 );
                 $order[count($order)] = $key;
@@ -286,11 +295,23 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                     'name' => $assigneeName
                 );
             }
+            $readAt = isset($row['read_at']) ? trim((string)$row['read_at']) : '';
+            if (!isset($grouped[$key]['read_statuses'][$assigneeKey])) {
+                $grouped[$key]['read_statuses'][$assigneeKey] = array(
+                    'id' => $assigneeId,
+                    'name' => $assigneeName,
+                    'read_at' => $readAt,
+                    'read_by' => isset($row['read_by']) ? (int)$row['read_by'] : 0,
+                    'self_request' => cpms_tasks_is_self_request($row) ? 1 : 0,
+                );
+            } else if ($readAt !== '') {
+                $grouped[$key]['read_statuses'][$assigneeKey]['read_at'] = $readAt;
+                $grouped[$key]['read_statuses'][$assigneeKey]['read_by'] = isset($row['read_by']) ? (int)$row['read_by'] : 0;
+            }
             $status = isset($row['status']) ? (string)$row['status'] : '';
             if ($status !== '') {
                 $grouped[$key]['statuses'][$status] = true;
             }
-            $readAt = isset($row['read_at']) ? trim((string)$row['read_at']) : '';
             if ($readAt !== '' && (!isset($grouped[$key]['read_at']) || trim((string)$grouped[$key]['read_at']) === '' || strcmp($readAt, (string)$grouped[$key]['read_at']) < 0)) {
                 $grouped[$key]['read_at'] = $readAt;
             }
@@ -335,6 +356,9 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
             if (isset($grouped[$key]['read_at']) && trim((string)$grouped[$key]['read_at']) !== '') {
                 $row['read_at'] = (string)$grouped[$key]['read_at'];
             }
+            $row['assignee_read_statuses'] = isset($grouped[$key]['read_statuses']) && is_array($grouped[$key]['read_statuses'])
+                ? array_values($grouped[$key]['read_statuses'])
+                : array();
             $dedupedRows[count($dedupedRows)] = $row;
         }
         $rows = $dedupedRows;
@@ -351,13 +375,17 @@ function cpms_task_feed_completed_requests_for_employee($pdo, $employeeId)
     if (!$pdo || (int)$employeeId <= 0 || !cpms_tasks_table_exists($pdo, 'cpms_tasks')) return $rows;
     try {
         $hasCompletedAt = cpms_tasks_column_exists($pdo, 'cpms_tasks', 'completed_at');
+        $hasCreatedBy = cpms_tasks_column_exists($pdo, 'cpms_tasks', 'created_by');
         $params = array(':employee_id' => (int)$employeeId, ':today_due' => cpms_tasks_today());
         $dateSql = $hasCompletedAt
             ? "(DATE(completed_at) = :today_completed OR due_date = :today_due)"
             : "due_date = :today_due";
         if ($hasCompletedAt) $params[':today_completed'] = cpms_tasks_today();
+        $requesterSql = $hasCreatedBy
+            ? "(requester_employee_id = :employee_id OR ((requester_employee_id IS NULL OR requester_employee_id = 0) AND created_by = :employee_id))"
+            : "requester_employee_id = :employee_id";
         $sql = "SELECT * FROM cpms_tasks
-                WHERE requester_employee_id = :employee_id
+                WHERE " . $requesterSql . "
                   AND status = 'done'
                   AND " . $dateSql . "
                 ORDER BY completed_at DESC, updated_at DESC, id DESC";
@@ -395,6 +423,14 @@ function cpms_task_feed_completed_requests_for_employee($pdo, $employeeId)
                 'display_status' => cpms_tasks_display_status($task),
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
+                'created_by' => isset($task['created_by']) ? (int)$task['created_by'] : 0,
+                'assignee_read_statuses' => array(array(
+                    'id' => isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0,
+                    'name' => isset($task['assignee_name']) ? (string)$task['assignee_name'] : '',
+                    'read_at' => isset($task['read_at']) ? (string)$task['read_at'] : '',
+                    'read_by' => isset($task['read_by']) ? (int)$task['read_by'] : 0,
+                    'self_request' => cpms_tasks_is_self_request($task) ? 1 : 0,
+                )),
                 'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
                 'completed_at' => isset($task['completed_at']) ? (string)$task['completed_at'] : '',
                 'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',

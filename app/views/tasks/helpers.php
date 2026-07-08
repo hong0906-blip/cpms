@@ -1609,7 +1609,7 @@ function cpms_tasks_mark_read($pdo, $task, $currentEmployee)
     $currentEmployeeId = isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0;
     if ($taskId <= 0 || $currentEmployeeId <= 0) return false;
     if (!isset($task['assignee_employee_id']) || (int)$task['assignee_employee_id'] !== $currentEmployeeId) return false;
-    if (isset($task['requester_employee_id']) && (int)$task['requester_employee_id'] === $currentEmployeeId) return false;
+    if (cpms_tasks_effective_requester_employee_id($task) === $currentEmployeeId) return false;
     if (isset($task['read_at']) && trim((string)$task['read_at']) !== '') return false;
     try {
         $sets = array('read_at = :read_at');
@@ -1625,7 +1625,7 @@ function cpms_tasks_mark_read($pdo, $task, $currentEmployee)
             $sets[count($sets)] = 'updated_at = :updated_at';
             $params[':updated_at'] = cpms_tasks_now();
         }
-        $st = $pdo->prepare("UPDATE cpms_tasks SET " . implode(', ', $sets) . " WHERE id = :id AND read_at IS NULL");
+        $st = $pdo->prepare("UPDATE cpms_tasks SET " . implode(', ', $sets) . " WHERE id = :id AND (read_at IS NULL OR read_at = '')");
         $ok = $st->execute($params);
         if ($ok && $st->rowCount() > 0) {
             cpms_tasks_insert_log($pdo, $taskId, $currentEmployee, 'request_read', '요청 읽음', isset($task['status']) ? $task['status'] : null, isset($task['status']) ? $task['status'] : null);
@@ -1634,6 +1634,64 @@ function cpms_tasks_mark_read($pdo, $task, $currentEmployee)
     } catch (Exception $e) {
         return false;
     }
+}}
+
+if (!function_exists('cpms_tasks_read_status_entries')) {
+function cpms_tasks_read_status_entries($item, $currentEmployeeId)
+{
+    $entries = array();
+    if (!is_array($item) || (int)$currentEmployeeId <= 0) return $entries;
+    $requesterId = cpms_tasks_effective_requester_employee_id($item);
+    if ($requesterId <= 0 || $requesterId !== (int)$currentEmployeeId) return $entries;
+    if (cpms_tasks_is_self_request($item)) return $entries;
+    $seen = array();
+    if (isset($item['assignee_read_statuses']) && is_array($item['assignee_read_statuses'])) {
+        foreach ($item['assignee_read_statuses'] as $statusRow) {
+            if (!is_array($statusRow)) continue;
+            $assigneeId = isset($statusRow['id']) ? (int)$statusRow['id'] : 0;
+            if ($assigneeId > 0 && $assigneeId === $requesterId) continue;
+            if (isset($statusRow['self_request']) && (int)$statusRow['self_request'] === 1) continue;
+            $assigneeName = isset($statusRow['name']) ? trim((string)$statusRow['name']) : '';
+            $key = $assigneeId > 0 ? 'id:' . $assigneeId : 'name:' . $assigneeName;
+            if ($key === 'name:' || isset($seen[$key])) continue;
+            $seen[$key] = true;
+            $readAt = isset($statusRow['read_at']) ? trim((string)$statusRow['read_at']) : '';
+            $entries[count($entries)] = array(
+                'name' => $assigneeName,
+                'read' => $readAt !== '' ? 1 : 0,
+            );
+        }
+    }
+    if (count($entries) === 0) {
+        $assigneeId = isset($item['assignee_employee_id']) ? (int)$item['assignee_employee_id'] : 0;
+        if ($assigneeId > 0 && $assigneeId === $requesterId) return $entries;
+        $assigneeName = isset($item['assignee_name']) ? trim((string)$item['assignee_name']) : '';
+        $readAt = isset($item['read_at']) ? trim((string)$item['read_at']) : '';
+        $entries[count($entries)] = array(
+            'name' => $assigneeName,
+            'read' => $readAt !== '' ? 1 : 0,
+        );
+    }
+    return $entries;
+}}
+
+if (!function_exists('cpms_tasks_read_status_badges_html')) {
+function cpms_tasks_read_status_badges_html($item, $currentEmployeeId, $includeNames)
+{
+    $entries = cpms_tasks_read_status_entries($item, $currentEmployeeId);
+    if (count($entries) === 0) return '';
+    $html = '';
+    for ($i = 0; $i < count($entries); $i++) {
+        $name = isset($entries[$i]['name']) ? trim((string)$entries[$i]['name']) : '';
+        $isRead = isset($entries[$i]['read']) && (int)$entries[$i]['read'] === 1;
+        $label = $isRead ? '[읽음]' : '[읽지않음]';
+        if ($includeNames && $name !== '') $label = $name . ' ' . $label;
+        $class = $isRead
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            : 'bg-slate-50 text-slate-600 border-slate-200';
+        $html .= '<span class="px-2.5 py-1 rounded-full border text-xs font-extrabold ' . $class . '">' . h($label) . '</span>';
+    }
+    return $html;
 }}
 
 if (!function_exists('cpms_tasks_can_transfer')) {

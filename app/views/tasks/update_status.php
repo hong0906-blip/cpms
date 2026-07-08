@@ -210,6 +210,9 @@ try {
         cpms_tasks_status_update_task($pdo, $taskId, $status, $now, $currentEmployeeId, null, false);
         cpms_tasks_insert_log($pdo, $taskId, $currentEmployee, 'status_changed', '', isset($task['status']) ? $task['status'] : null, $status);
     }
+    if ($requestedStatus === 'progress') {
+        cpms_tasks_mark_read($pdo, $task, $currentEmployee);
+    }
     if ($isAjax) {
         $updatedTask = cpms_tasks_find_task($pdo, $taskId);
         $responseStatus = $updatedTask && isset($updatedTask['status']) ? (string)$updatedTask['status'] : $status;

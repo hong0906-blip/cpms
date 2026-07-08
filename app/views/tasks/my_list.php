@@ -83,9 +83,9 @@ $requested = cpms_task_feed_direct_tasks_requested_by_employee($pdo, isset($curr
                         <td class="py-3 pr-4"><?php echo h(isset($item['due_date']) && $item['due_date'] !== '' ? $item['due_date'] . (isset($item['due_time']) && $item['due_time'] !== '' ? ' ' . substr((string)$item['due_time'], 0, 5) : '') : '-'); ?></td>
                         <td class="py-3 pr-4">
                             <?php echo h(isset($item['display_status']) ? $item['display_status'] : '-'); ?>
-                            <?php if (isset($item['read_at']) && trim((string)$item['read_at']) !== ''): ?>
-                                <div class="mt-1 text-xs font-bold text-indigo-700">[요청 읽음]</div>
-                            <?php endif; ?>
+                            <div class="mt-1 flex flex-wrap gap-1">
+                                <?php echo cpms_tasks_read_status_badges_html($item, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0, true); ?>
+                            </div>
                         </td>
                         <td class="py-3">
                             <a href="<?php echo h(isset($item['action_url']) ? $item['action_url'] : '#'); ?>" class="text-blue-600 font-bold">상세 이동</a>

@@ -218,9 +218,57 @@ function cpms_scheduler_employee_role($employee)
     return isset($employee['role']) ? trim((string)$employee['role']) : '';
 }}
 
+if (!function_exists('cpms_scheduler_employee_clean_name')) {
+function cpms_scheduler_employee_clean_name($employee)
+{
+    $name = is_array($employee) && isset($employee['name']) ? trim((string)$employee['name']) : '';
+    return preg_replace('/\s+/', '', $name);
+}}
+
+if (!function_exists('cpms_scheduler_is_public_affairs_team_override')) {
+function cpms_scheduler_is_public_affairs_team_override($employee)
+{
+    $name = cpms_scheduler_employee_clean_name($employee);
+    return ($name === '홍승찬' || $name === '고형준');
+}}
+
+if (!function_exists('cpms_scheduler_public_affairs_anchor_id')) {
+function cpms_scheduler_public_affairs_anchor_id($employees)
+{
+    for ($i = 0; $i < count($employees); $i++) {
+        $name = cpms_scheduler_employee_clean_name($employees[$i]);
+        if ($name === '김영기') {
+            return isset($employees[$i]['id']) ? (int)$employees[$i]['id'] : 0;
+        }
+    }
+    return 0;
+}}
+
+if (!function_exists('cpms_scheduler_team_anchor_id')) {
+function cpms_scheduler_team_anchor_id($employee, $publicAffairsAnchorId)
+{
+    $currentId = isset($employee['id']) ? (int)$employee['id'] : 0;
+    if ($publicAffairsAnchorId > 0 && ($currentId === $publicAffairsAnchorId || cpms_scheduler_is_public_affairs_team_override($employee))) {
+        return $publicAffairsAnchorId;
+    }
+    $isLeader = cpms_scheduler_employee_is_team_leader($employee);
+    $leaderId = isset($employee['team_leader_id']) ? (int)$employee['team_leader_id'] : 0;
+    return $isLeader ? $currentId : ($leaderId > 0 ? $leaderId : 0);
+}}
+
+if (!function_exists('cpms_scheduler_employee_team_leader_id')) {
+function cpms_scheduler_employee_team_leader_id($employee, $publicAffairsAnchorId)
+{
+    if ($publicAffairsAnchorId > 0 && cpms_scheduler_is_public_affairs_team_override($employee)) {
+        return $publicAffairsAnchorId;
+    }
+    return isset($employee['team_leader_id']) ? (int)$employee['team_leader_id'] : 0;
+}}
+
 if (!function_exists('cpms_scheduler_department_group')) {
 function cpms_scheduler_department_group($employee)
 {
+    if (cpms_scheduler_is_public_affairs_team_override($employee)) return '공무';
     $dept = cpms_scheduler_employee_department($employee);
     if ($dept === '개발') return '공무';
     if ($dept === '기타' || cpms_scheduler_employee_role($employee) === 'executive') return '임원';
@@ -265,13 +313,12 @@ function cpms_scheduler_visible_employees($employees, $currentEmployee, $canView
     $currentId = isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0;
     if ($currentId <= 0) return $visible;
 
-    $isLeader = cpms_scheduler_employee_is_team_leader($currentEmployee);
-    $leaderId = isset($currentEmployee['team_leader_id']) ? (int)$currentEmployee['team_leader_id'] : 0;
-    $teamAnchorId = $isLeader ? $currentId : ($leaderId > 0 ? $leaderId : 0);
+    $publicAffairsAnchorId = cpms_scheduler_public_affairs_anchor_id($employees);
+    $teamAnchorId = cpms_scheduler_team_anchor_id($currentEmployee, $publicAffairsAnchorId);
 
     for ($i = 0; $i < count($employees); $i++) {
         $employeeId = isset($employees[$i]['id']) ? (int)$employees[$i]['id'] : 0;
-        $employeeLeaderId = isset($employees[$i]['team_leader_id']) ? (int)$employees[$i]['team_leader_id'] : 0;
+        $employeeLeaderId = cpms_scheduler_employee_team_leader_id($employees[$i], $publicAffairsAnchorId);
         if ($employeeId <= 0) continue;
 
         if ($teamAnchorId > 0) {

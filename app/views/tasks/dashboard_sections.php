@@ -141,8 +141,8 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
             <?php if (!$requestedMode && isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
                 <span class="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">[파일첨부되어있음]</span>
             <?php endif; ?>
-            <?php if ($requestedMode && isset($item['read_at']) && trim((string)$item['read_at']) !== ''): ?>
-                <span class="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-extrabold">[요청 읽음]</span>
+            <?php if ($requestedMode): ?>
+                <?php echo cpms_tasks_read_status_badges_html($item, $currentEmployeeId, true); ?>
             <?php endif; ?>
         </div>
         <div class="mt-4 flex flex-wrap items-center gap-2">
@@ -301,7 +301,7 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
     $canStatusAction = $canDrag && !$isMeetingTask;
     $personLabel = '요청자';
     $personName = isset($item['requester_name']) ? $item['requester_name'] : '-';
-    if ((int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId && isset($item['assignee_name']) && trim((string)$item['assignee_name']) !== '') {
+    if ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($item) === (int)$currentEmployeeId && isset($item['assignee_name']) && trim((string)$item['assignee_name']) !== '') {
         $personLabel = '담당자';
         $personName = $item['assignee_name'];
     }
@@ -336,6 +336,7 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
             <?php if (isset($item['complete_file_count']) && (int)$item['complete_file_count'] > 0): ?>
                 <span class="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-extrabold">완료파일</span>
             <?php endif; ?>
+            <?php echo cpms_tasks_read_status_badges_html($item, $currentEmployeeId, true); ?>
         </div>
         <div class="mt-4 flex flex-wrap justify-end gap-2">
             <?php if ($canStatusAction): ?>
@@ -382,7 +383,6 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $retu
         $dueText = (string)$item['due_date'];
         if (isset($item['due_time']) && trim((string)$item['due_time']) !== '') $dueText .= ' ' . substr((string)$item['due_time'], 0, 5);
     }
-    $isRead = isset($item['read_at']) && trim((string)$item['read_at']) !== '';
     $currentStatus = isset($item['status']) ? (string)$item['status'] : '';
     $isRequester = ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($item) === (int)$currentEmployeeId);
     $canRequesterAct = $isRequester && $currentStatus === 'completion_pending';
@@ -407,9 +407,7 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $retu
             <?php if ($isDelayed): ?>
                 <span class="px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200 text-xs font-extrabold">지연</span>
             <?php endif; ?>
-            <?php if ($isRead): ?>
-                <span class="px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200 text-xs font-extrabold">[요청 읽음]</span>
-            <?php endif; ?>
+            <?php echo cpms_tasks_read_status_badges_html($item, $currentEmployeeId, true); ?>
             <?php if (isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
                 <span class="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">[파일첨부되어있음]</span>
             <?php endif; ?>
