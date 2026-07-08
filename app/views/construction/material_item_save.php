@@ -970,7 +970,7 @@ function material_bulk_save_row($pdo, $projectId, $row, $now)
     if ($useDate === '' || abs($amount) <= 0.0001) return 0;
 
     $sourceRow = array('representative'=>$representative, 'phone'=>$phone, 'biz_no'=>$bizNo, 'remark'=>$remark);
-    $existingItem = cpms_find_existing_material_item($pdo, $projectId, $category, $vendorName, $bizNo, $amount);
+    $existingItem = cpms_find_existing_material_item($pdo, $projectId, $category, $vendorName, $bizNo, $amount, $remark);
     if ($existingItem) {
         $materialId = isset($existingItem['id']) ? (int)$existingItem['id'] : 0;
         cpms_update_material_item_fill_blanks($pdo, $materialId, $sourceRow, $now);
@@ -1271,7 +1271,7 @@ try {
         'biz_no' => $bizNo,
         'remark' => $remark
     );
-    $existingItem = cpms_find_existing_material_item($pdo, $projectId, $category, $vendorName, $bizNo, $baseRate);
+    $existingItem = cpms_find_existing_material_item($pdo, $projectId, $category, $vendorName, $bizNo, $baseRate, $remark);
     $isReused = false;
     if ($existingItem) {
         $materialId = isset($existingItem['id']) ? (int)$existingItem['id'] : 0;

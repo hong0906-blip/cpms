@@ -746,6 +746,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <th class="p-2 border text-center">선급여부</th>
                         <th class="p-2 border text-left">업체명</th>
                         <th class="p-2 border text-right">금액</th>
+                        <th class="p-2 border text-left">내역</th>
                         <th class="p-2 border text-left">비고</th>
                         <th class="p-2 border text-left">거래명세표</th>
                         <?php if ($canEditMaterials): ?>
@@ -755,7 +756,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     </thead>
                     <tbody>
                     <?php if (count($usageRows) === 0): ?>
-                        <tr><td colspan="<?php echo $canEditMaterials ? 9 : 7; ?>" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
+                        <tr><td colspan="<?php echo $canEditMaterials ? 10 : 8; ?>" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
                     <?php else: ?>
                         <?php foreach ($usageRows as $ur): ?>
                             <?php
@@ -777,6 +778,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                 <td class="p-2 border"><?php echo h(isset($ur['vendor_name']) ? $ur['vendor_name'] : ''); ?></td>
                                 <td class="p-2 border text-right <?php echo $usageIsNegative ? 'font-extrabold text-amber-800' : ''; ?>"><?php echo material_money(isset($ur['amount']) ? $ur['amount'] : 0); ?></td>
                                 <td class="p-2 border"><?php echo h(isset($ur['memo']) ? $ur['memo'] : ''); ?></td>
+                                <td class="p-2 border"><?php echo h(isset($ur['remark']) ? $ur['remark'] : ''); ?></td>
                                 <td class="p-2 border">
                                     <div class="flex flex-wrap gap-1">
                                         <?php echo material_statement_links_html($listFiles, '거래명세표 다운로드', $canDownloadMaterialStatements, '첨부 없음'); ?>
@@ -791,6 +793,8 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                                     data-usage-id="<?php echo (int)$usageIdForList; ?>"
                                                     data-use-date="<?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?>"
                                                     data-amount="<?php echo h(number_format(isset($ur['amount']) ? (float)$ur['amount'] : 0, 2, '.', '')); ?>"
+                                                    data-memo="<?php echo h(isset($ur['memo']) ? $ur['memo'] : ''); ?>"
+                                                    data-remark="<?php echo h(isset($ur['remark']) ? $ur['remark'] : ''); ?>"
                                                     data-title="<?php echo h((isset($ur['vendor_name']) ? $ur['vendor_name'] : '') . ' / ' . material_category_label(isset($ur['category']) ? $ur['category'] : '')); ?>">
                                                 수정
                                             </button>
@@ -818,7 +822,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     </div>
                     <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-material-usage-edit-close>닫기</button>
                 </div>
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_edit_save" class="mt-4 space-y-3">
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_edit_save" class="mt-4 space-y-3" enctype="multipart/form-data">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="usage_id" id="materialUsageEditId" value="">
@@ -838,6 +842,14 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     <label class="block">
                         <span class="text-xs text-gray-500 font-bold">금액</span>
                         <input type="number" step="0.01" name="amount" id="materialUsageEditAmount" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                    </label>
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">비고</span>
+                        <textarea name="remark" id="materialUsageEditRemark" rows="3" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" lang="ko" inputmode="text" autocomplete="off"></textarea>
+                    </label>
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">거래명세표 추가</span>
+                        <input type="file" name="statement_file" accept="image/*,.pdf,.xlsx,.xls" capture="environment" class="mt-1 block w-full text-sm border rounded-xl px-3 py-2 bg-white">
                     </label>
                     <div class="flex justify-end gap-2">
                         <button type="button" class="px-4 py-2 rounded-xl border border-gray-300 font-bold" data-material-usage-edit-close>취소</button>
@@ -914,6 +926,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             var materialUsageEditDate = document.getElementById('materialUsageEditDate');
             var materialUsageEditAmount = document.getElementById('materialUsageEditAmount');
             var materialUsageEditSign = document.getElementById('materialUsageEditSign');
+            var materialUsageEditRemark = document.getElementById('materialUsageEditRemark');
             var materialUsageEditMeta = document.getElementById('materialUsageEditMeta');
             function showMaterialUsageEditModal(){
                 if (!materialUsageEditModal) return;
@@ -933,6 +946,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     var materialEditAmountRaw = parseFloat(editBtn.getAttribute('data-amount') || '0');
                     if (materialUsageEditSign) materialUsageEditSign.value = materialEditAmountRaw < 0 ? 'minus' : 'plus';
                     if (materialUsageEditAmount) materialUsageEditAmount.value = Math.abs(materialEditAmountRaw).toFixed(2);
+                    if (materialUsageEditRemark) materialUsageEditRemark.value = editBtn.getAttribute('data-remark') || '';
                     if (materialUsageEditMeta) materialUsageEditMeta.textContent = editBtn.getAttribute('data-title') || '';
                     showMaterialUsageEditModal();
                     return;
@@ -981,7 +995,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             }
             function hideSuggestList(listEl){ if(!listEl)return; listEl.innerHTML=''; if(listEl.className.indexOf('hidden')===-1) listEl.className += ' hidden'; listEl.style.display='none'; }
             function showSuggestList(listEl){ if(!listEl)return; listEl.className=listEl.className.replace(/\bhidden\b/g,'').replace(/\s+/g,' ').trim(); listEl.style.display='block'; }
-            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark']) formEl.elements['remark'].value=p.remark||''; }
+            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark'] && (formEl.elements['remark'].value||'')==='') formEl.elements['remark'].value=p.remark||''; }
             function renderMaterialSuggestions(inputEl, rows){ var wrap=inputEl?inputEl.closest('.vendor-search-wrap'):null; var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; listEl.innerHTML=''; if(!rows||!rows.length){ var empty=document.createElement('div'); empty.className='px-3 py-2 text-sm text-gray-500'; empty.textContent='검색 결과 없음'; listEl.appendChild(empty); showSuggestList(listEl); return; } for(var i=0;i<rows.length;i++){ (function(row){ var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.setAttribute('data-material-vendor-item','1'); btn.vendorData=row; btn.addEventListener('mousedown', function(ev){ ev.preventDefault(); }); listEl.appendChild(btn);} )(rows[i]); } showSuggestList(listEl); }
             document.addEventListener('input', function(e){ var inputEl=e.target; if(!inputEl||inputEl.className.indexOf('js-material-vendor-search')===-1) return; var wrap=inputEl.closest('.vendor-search-wrap'); var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; var q=(inputEl.value||'').trim(); if(materialVendorTimers[inputEl]) clearTimeout(materialVendorTimers[inputEl]); if(q.length<2){ hideSuggestList(listEl); return; } materialVendorTimers[inputEl]=setTimeout(function(){ // 프리셋 최신 검색
                 var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4)return; var rows=[]; if(xhr.status===200){ try{var json=JSON.parse(xhr.responseText); rows=(json&&json.items)?json.items:[];}catch(err){rows=[];} } renderMaterialSuggestions(inputEl, rows); }; xhr.send(); },250); });

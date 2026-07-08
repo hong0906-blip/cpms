@@ -86,6 +86,26 @@ $attendanceTimeMap = isset($attendanceTimeMap) && is_array($attendanceTimeMap) ?
 $showBankColumns = isset($showBankColumns) ? (bool)$showBankColumns : true;
 $canEditTimesheet = isset($canEdit) ? (bool)$canEdit : false;
 $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
+$laborSheetDownloadMode = isset($laborSheetDownloadMode) ? (bool)$laborSheetDownloadMode : false;
+$laborSort = isset($laborSort) ? trim((string)$laborSort) : 'name';
+$laborSortDir = isset($laborSortDir) ? trim((string)$laborSortDir) : 'asc';
+if ($laborSortDir !== 'desc') $laborSortDir = 'asc';
+$laborSheetProjectId = isset($pid) ? (int)$pid : (isset($projectId) ? (int)$projectId : 0);
+
+if (!function_exists('cpms_labor_sheet_sort_header')) {
+    function cpms_labor_sheet_sort_header($field, $label, $currentSort, $currentDir, $projectId, $selectedMonth) {
+        $field = trim((string)$field);
+        $currentSort = trim((string)$currentSort);
+        $currentDir = trim((string)$currentDir);
+        if ($currentDir !== 'desc') $currentDir = 'asc';
+        $isActive = ($currentSort === $field);
+        $arrow = ($isActive && $currentDir === 'desc') ? '▼' : '▲';
+        $nextDir = ($isActive && $currentDir === 'desc') ? 'asc' : 'desc';
+        $baseUrl = function_exists('base_url') ? base_url() : '';
+        $href = $baseUrl . '/?r=공사&pid=' . (int)$projectId . '&tab=labor&labor_tab=timesheet&month=' . urlencode($selectedMonth) . '&labor_sort=' . urlencode($field) . '&labor_sort_dir=' . urlencode($nextDir);
+        return '<a href="' . h($href) . '" class="inline-flex items-center justify-center gap-1 whitespace-nowrap hover:text-blue-700"><span>' . h($label) . '</span><span class="text-[10px] leading-none">' . h($arrow) . '</span></a>';
+    }
+}
 ?>
 
 <div class="overflow-x-auto">
@@ -116,19 +136,19 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
         <thead>
         <tr class="bg-gray-200 text-gray-800">
             <th class="border border-gray-200 px-2 py-2" rowspan="2">출력월</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">성명</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">외국인</th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '성명' : cpms_labor_sheet_sort_header('name', '성명', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '직종' : cpms_labor_sheet_sort_header('job_type', '직종', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
             <th class="border border-gray-200 px-2 py-2 text-center" colspan="<?php echo (int)$daysInMonth; ?>">출력일수</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">출력일수</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">총공수</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">임금단가</th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '출력일수' : cpms_labor_sheet_sort_header('output_days', '출력일수', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '총공수' : cpms_labor_sheet_sort_header('total_gongsu', '총공수', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '임금단가' : cpms_labor_sheet_sort_header('wage_rate', '임금단가', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">지급총액</th>
             <?php if ($showBankColumns): ?>            
             <th class="border border-gray-200 px-2 py-2" rowspan="2">영수인/예금주</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">은행명</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">계좌번호</th>
             <?php endif; ?>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2">인력사업체명</th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '인력사업체명' : cpms_labor_sheet_sort_header('company', '인력사업체명', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
         </tr>
         <tr class="bg-gray-200 text-gray-800">
             <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
@@ -141,6 +161,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
             <?php foreach ($timesheetWorkers as $idx => $worker): ?>
                 <?php
                 $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
+                $jobTypeSnapshot = isset($worker['job_type_snapshot']) ? trim((string)$worker['job_type_snapshot']) : '';
                 $workerKey = cpms_timesheet_worker_key($workerName);
                 $dailyMap = isset($attendanceGongsuMap[$workerKey]) ? $attendanceGongsuMap[$workerKey] : array();
                 $timeDailyMap = isset($attendanceTimeMap[$workerKey]) && is_array($attendanceTimeMap[$workerKey]) ? $attendanceTimeMap[$workerKey] : array();
@@ -158,7 +179,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
                 <tr class="cpms-timesheet-row <?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>" data-wage-rate="<?php echo h(number_format($wageRate, 2, '.', '')); ?>">
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h($workerName); ?></td>
-                    <td class="border border-gray-200 px-2 py-2 text-center"></td>
+                    <td class="border border-gray-200 px-2 py-2"><?php echo h($jobTypeSnapshot); ?></td>
                     <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
                         <?php
                         $dateKey = $selectedMonth . '-' . str_pad((string)$d, 2, '0', STR_PAD_LEFT);

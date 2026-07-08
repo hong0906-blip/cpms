@@ -84,7 +84,7 @@ try {
     }
 
     if (count($items) > 0) {
-        $stUsage = $pdo->prepare("SELECT u.*, i.category, i.vendor_name, i.spec
+        $stUsage = $pdo->prepare("SELECT u.*, i.category, i.vendor_name, i.spec, i.remark
             FROM cpms_equipment_usage u
             JOIN cpms_equipment_items i ON i.id = u.equipment_id
             WHERE u.project_id = :pid
@@ -808,6 +808,8 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                         <th class="p-2 border text-left">업체명</th>
                         <th class="p-2 border text-left">규격</th>
                         <th class="p-2 border text-right">금액</th>
+                        <th class="p-2 border text-left">내역</th>
+                        <th class="p-2 border text-left">비고</th>
                         <th class="p-2 border text-left">거래명세표</th>
                         <?php if ($canEditEquipment): ?>
                             <th class="p-2 border text-center">수정</th>
@@ -816,7 +818,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                     </thead>
                     <tbody>
                     <?php if (count($usageRows) === 0): ?>
-                        <tr><td colspan="<?php echo $canEditEquipment ? 7 : 6; ?>" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
+                        <tr><td colspan="<?php echo $canEditEquipment ? 9 : 8; ?>" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
                     <?php else: ?>
                         <?php foreach ($usageRows as $ur): ?>
                             <?php
@@ -830,6 +832,8 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                                 <td class="p-2 border"><?php echo h(isset($ur['vendor_name']) ? $ur['vendor_name'] : ''); ?></td>
                                 <td class="p-2 border"><?php echo h(isset($ur['spec']) ? $ur['spec'] : ''); ?></td>
                                 <td class="p-2 border text-right <?php echo $usageIsNegative ? 'font-extrabold text-amber-800' : ''; ?>"><?php echo equipment_money($usageAmountForList); ?></td>
+                                <td class="p-2 border"><?php echo h(isset($ur['memo']) ? $ur['memo'] : ''); ?></td>
+                                <td class="p-2 border"><?php echo h(isset($ur['remark']) ? $ur['remark'] : ''); ?></td>
                                 <td class="p-2 border"><?php echo equipment_statement_link_html($ur) !== '' ? equipment_statement_link_html($ur) : '<span class="text-gray-400 text-xs">첨부 없음</span>'; ?></td>
                                 <?php if ($canEditEquipment): ?>
                                     <td class="p-2 border text-center">
@@ -840,6 +844,8 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                                                     data-usage-id="<?php echo (int)$usageIdForList; ?>"
                                                     data-use-date="<?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?>"
                                                     data-amount="<?php echo h(number_format($usageAmountForList, 2, '.', '')); ?>"
+                                                    data-memo="<?php echo h(isset($ur['memo']) ? $ur['memo'] : ''); ?>"
+                                                    data-remark="<?php echo h(isset($ur['remark']) ? $ur['remark'] : ''); ?>"
                                                     data-title="<?php echo h((isset($ur['vendor_name']) ? $ur['vendor_name'] : '') . ' / ' . (isset($ur['spec']) ? $ur['spec'] : '')); ?>">
                                                 수정
                                             </button>
@@ -864,7 +870,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                     </div>
                     <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-equipment-usage-edit-close>닫기</button>
                 </div>
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_usage_edit_save" class="mt-4 space-y-3">
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/equipment_usage_edit_save" class="mt-4 space-y-3" enctype="multipart/form-data">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="usage_id" id="equipmentUsageEditId" value="">
@@ -884,6 +890,14 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                     <label class="block">
                         <span class="text-xs text-gray-500 font-bold">금액</span>
                         <input type="number" step="0.01" min="0" name="amount" id="equipmentUsageEditAmount" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                    </label>
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">비고</span>
+                        <textarea name="remark" id="equipmentUsageEditRemark" rows="3" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" lang="ko" inputmode="text" autocomplete="off"></textarea>
+                    </label>
+                    <label class="block">
+                        <span class="text-xs text-gray-500 font-bold">거래명세표 추가</span>
+                        <input type="file" name="statement_file" accept="image/*,.pdf" capture="environment" class="mt-1 block w-full text-sm border rounded-xl px-3 py-2 bg-white">
                     </label>
                     <div class="flex justify-end gap-2">
                         <button type="button" class="px-4 py-2 rounded-xl border border-gray-300 font-bold" data-equipment-usage-edit-close>취소</button>
@@ -959,6 +973,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
             var equipmentUsageEditDate = document.getElementById('equipmentUsageEditDate');
             var equipmentUsageEditAmount = document.getElementById('equipmentUsageEditAmount');
             var equipmentUsageEditSign = document.getElementById('equipmentUsageEditSign');
+            var equipmentUsageEditRemark = document.getElementById('equipmentUsageEditRemark');
             var equipmentUsageEditMeta = document.getElementById('equipmentUsageEditMeta');
             function showEquipmentUsageEditModal(){
                 if (!equipmentUsageEditModal) return;
@@ -978,6 +993,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                     var equipmentEditAmountRaw = parseFloat(editBtn.getAttribute('data-amount') || '0');
                     if (equipmentUsageEditSign) equipmentUsageEditSign.value = equipmentEditAmountRaw < 0 ? 'minus' : 'plus';
                     if (equipmentUsageEditAmount) equipmentUsageEditAmount.value = Math.abs(equipmentEditAmountRaw).toFixed(2);
+                    if (equipmentUsageEditRemark) equipmentUsageEditRemark.value = editBtn.getAttribute('data-remark') || '';
                     if (equipmentUsageEditMeta) equipmentUsageEditMeta.textContent = editBtn.getAttribute('data-title') || '';
                     showEquipmentUsageEditModal();
                     return;

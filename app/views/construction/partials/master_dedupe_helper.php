@@ -82,7 +82,7 @@ function cpms_equipment_master_group_key($row)
 }}
 
 if (!function_exists('cpms_find_existing_material_item')) {
-function cpms_find_existing_material_item($pdo, $projectId, $category, $vendorName, $bizNo, $baseRate)
+function cpms_find_existing_material_item($pdo, $projectId, $category, $vendorName, $bizNo, $baseRate, $remark = null)
 {
     if (!$pdo || (int)$projectId <= 0) return null;
     $sql = "SELECT *
@@ -102,10 +102,16 @@ function cpms_find_existing_material_item($pdo, $projectId, $category, $vendorNa
 
     $targetVendor = cpms_master_dedupe_text_key($vendorName);
     $targetBiz = cpms_master_dedupe_biz_key($bizNo);
+    $targetRemark = cpms_master_dedupe_text_key($remark);
+    $matchRemark = ($targetRemark !== '');
     foreach ($rows as $row) {
         $rowVendor = cpms_master_dedupe_text_key(isset($row['vendor_name']) ? $row['vendor_name'] : '');
         if ($rowVendor !== $targetVendor) continue;
         $rowBiz = cpms_master_dedupe_biz_key(isset($row['biz_no']) ? $row['biz_no'] : '');
+        if ($matchRemark) {
+            $rowRemark = cpms_master_dedupe_text_key(isset($row['remark']) ? $row['remark'] : '');
+            if ($rowRemark !== '' && $rowRemark !== $targetRemark) continue;
+        }
         if ($targetBiz !== '' && $rowBiz !== '') {
             if ($rowBiz === $targetBiz) return $row;
             continue;

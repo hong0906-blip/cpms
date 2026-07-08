@@ -1057,7 +1057,10 @@ function cpms_tasks_drive_ensure_target_folder($pdo, $task, $uploadedBy, $fileRo
     }
 
     $configuredRoot = cpms_drive_folder_id('my_tasks');
-    $parentId = $configuredRoot !== '' ? $configuredRoot : cpms_drive_folder_id('common_documents');
+    $configuredParent = cpms_drive_folder_id('my_tasks_parent');
+    $parentId = $configuredRoot !== '' ? $configuredRoot : $configuredParent;
+    if ($parentId === '' && function_exists('cpms_drive_shared_drive_id')) $parentId = cpms_drive_shared_drive_id();
+    if ($parentId === '') $parentId = cpms_drive_folder_id('common_documents');
     if ($parentId === '') {
         return array('ok' => false, 'message' => 'My tasks Drive parent folder is not configured.', 'http_code' => 0);
     }
@@ -1090,6 +1093,14 @@ function cpms_tasks_drive_ensure_target_folder($pdo, $task, $uploadedBy, $fileRo
         $rootContext = $context;
         $rootContext['original_name'] = cpms_tasks_drive_label('root');
         $root = cpms_tasks_drive_ensure_folder(cpms_tasks_drive_label('root'), $parentId, $rootContext);
+        $commonParentId = cpms_drive_folder_id('common_documents');
+        if (empty($root['ok']) && $commonParentId !== '' && $commonParentId !== $parentId) {
+            $parentId = $commonParentId;
+            $context['target_folder_id'] = $parentId;
+            $rootContext = $context;
+            $rootContext['original_name'] = cpms_tasks_drive_label('root');
+            $root = cpms_tasks_drive_ensure_folder(cpms_tasks_drive_label('root'), $parentId, $rootContext);
+        }
         if (empty($root['ok'])) return $root;
         $rootId = (string)$root['folder_id'];
     }
@@ -1295,37 +1306,36 @@ function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy, $fil
     $errors = is_array($files['error']) ? $files['error'] : array($files['error']);
     $sizes = is_array($files['size']) ? $files['size'] : array($files['size']);
     $types = is_array($files['type']) ? $files['type'] : array($files['type']);
-    $targetDir = cpms_tasks_upload_abs_dir($taskId);
-    if (!cpms_ensure_dir($targetDir)) return $saved;
 
     for ($i = 0; $i < count($names); $i++) {
         $originalName = isset($names[$i]) ? trim((string)$names[$i]) : '';
         $tmpName = isset($tmpNames[$i]) ? (string)$tmpNames[$i] : '';
         $errorCode = isset($errors[$i]) ? (int)$errors[$i] : UPLOAD_ERR_NO_FILE;
         if ($errorCode !== UPLOAD_ERR_OK || $originalName === '' || $tmpName === '') continue;
+        if (!is_file($tmpName)) continue;
 
         $extension = pathinfo($originalName, PATHINFO_EXTENSION);
         $storedName = date('YmdHis') . '_' . substr(md5(uniqid('', true) . $originalName), 0, 16);
         if ($extension !== '') $storedName .= '.' . strtolower($extension);
-        $relativePath = cpms_tasks_upload_relative_dir($taskId) . '/' . $storedName;
-        $absolutePath = $targetDir . '/' . $storedName;
 
-        if (!@move_uploaded_file($tmpName, $absolutePath)) {
-            continue;
-        }
-
-        $fileSize = @filesize($absolutePath);
+        $fileSize = @filesize($tmpName);
         if ($fileSize === false) $fileSize = isset($sizes[$i]) ? (int)$sizes[$i] : 0;
         $mimeType = '';
-        if (cpms_tasks_drive_helper_loaded()) $mimeType = cpms_drive_detect_mime_type($absolutePath);
+        if (cpms_tasks_drive_helper_loaded()) $mimeType = cpms_drive_detect_mime_type($tmpName);
         if ($mimeType === '') $mimeType = isset($types[$i]) ? (string)$types[$i] : '';
         if ($mimeType === '') $mimeType = 'application/octet-stream';
-        $driveRecord = cpms_tasks_drive_upload_local_file($pdo, $task, $absolutePath, $originalName, $mimeType, $fileSize, (int)$uploadedBy, $fileRole);
+        $driveRecord = cpms_tasks_drive_upload_local_file($pdo, $task, $tmpName, $originalName, $mimeType, $fileSize, (int)$uploadedBy, $fileRole);
+        if (!is_array($driveRecord) || !isset($driveRecord['storage_type']) || (string)$driveRecord['storage_type'] !== 'google_drive' || !isset($driveRecord['drive_file_id']) || trim((string)$driveRecord['drive_file_id']) === '') {
+            continue;
+        }
+        if (isset($driveRecord['drive_name']) && trim((string)$driveRecord['drive_name']) !== '') {
+            $storedName = (string)$driveRecord['drive_name'];
+        }
         $row = array_merge(array(
             'task_id' => (int)$taskId,
             'original_name' => $originalName,
             'stored_name' => $storedName,
-            'stored_path' => $relativePath,
+            'stored_path' => '',
             'file_size' => (int)$fileSize,
             'mime_type' => $mimeType,
             'uploaded_by' => (int)$uploadedBy > 0 ? (int)$uploadedBy : null,
@@ -1337,10 +1347,15 @@ function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy, $fil
                 $saved[count($saved)] = array(
                     'original_name' => $originalName,
                     'stored_name' => $storedName,
-                    'stored_path' => $relativePath,
+                    'stored_path' => '',
+                    'tmp_name' => $tmpName,
                     'file_size' => (int)$fileSize,
                     'mime_type' => $mimeType,
                     'file_role' => $fileRole,
+                    'storage_type' => 'google_drive',
+                    'drive_file_id' => isset($driveRecord['drive_file_id']) ? (string)$driveRecord['drive_file_id'] : '',
+                    'drive_web_view_link' => isset($driveRecord['drive_web_view_link']) ? (string)$driveRecord['drive_web_view_link'] : '',
+                    'drive_web_content_link' => isset($driveRecord['drive_web_content_link']) ? (string)$driveRecord['drive_web_content_link'] : '',
                 );
             }
         } catch (Exception $e) {
@@ -1355,37 +1370,32 @@ function cpms_tasks_copy_saved_files_to_task($pdo, $sourceFiles, $targetTaskId, 
 {
     $copied = array();
     if (!$pdo || (int)$targetTaskId <= 0 || !is_array($sourceFiles) || !cpms_tasks_table_exists($pdo, 'cpms_task_files')) return $copied;
-    $targetDir = cpms_tasks_upload_abs_dir($targetTaskId);
-    if (!cpms_ensure_dir($targetDir)) return $copied;
     $fileRole = cpms_tasks_drive_file_role($fileRole);
     $targetTask = cpms_tasks_find_task($pdo, (int)$targetTaskId);
 
     for ($i = 0; $i < count($sourceFiles); $i++) {
         $file = $sourceFiles[$i];
         if (!is_array($file)) continue;
-        $storedName = isset($file['stored_name']) ? trim((string)$file['stored_name']) : '';
-        $storedPath = isset($file['stored_path']) ? ltrim(str_replace('\\', '/', (string)$file['stored_path']), '/') : '';
-        if ($storedName === '' || $storedPath === '') continue;
+        $tmpName = isset($file['tmp_name']) ? (string)$file['tmp_name'] : '';
+        if ($tmpName === '' || !is_file($tmpName)) continue;
 
-        $sourcePath = cpms_tasks_public_root() . '/' . $storedPath;
-        if (!is_file($sourcePath)) continue;
-
-        $relativePath = cpms_tasks_upload_relative_dir($targetTaskId) . '/' . $storedName;
-        $targetPath = $targetDir . '/' . $storedName;
-        if (!@copy($sourcePath, $targetPath)) continue;
-
-        $fileSize = @filesize($targetPath);
+        $fileSize = @filesize($tmpName);
         if ($fileSize === false) $fileSize = isset($file['file_size']) ? (int)$file['file_size'] : 0;
         $mimeType = isset($file['mime_type']) ? (string)$file['mime_type'] : '';
-        $originalName = isset($file['original_name']) ? (string)$file['original_name'] : $storedName;
-        if ($mimeType === '' && cpms_tasks_drive_helper_loaded()) $mimeType = cpms_drive_detect_mime_type($targetPath);
+        $originalName = isset($file['original_name']) ? (string)$file['original_name'] : '';
+        if ($originalName === '') $originalName = isset($file['stored_name']) ? (string)$file['stored_name'] : 'task_file';
+        if ($mimeType === '' && cpms_tasks_drive_helper_loaded()) $mimeType = cpms_drive_detect_mime_type($tmpName);
         if ($mimeType === '') $mimeType = 'application/octet-stream';
-        $driveRecord = cpms_tasks_drive_upload_local_file($pdo, $targetTask, $targetPath, $originalName, $mimeType, $fileSize, (int)$uploadedBy, $fileRole);
+        $driveRecord = cpms_tasks_drive_upload_local_file($pdo, $targetTask, $tmpName, $originalName, $mimeType, $fileSize, (int)$uploadedBy, $fileRole);
+        if (!is_array($driveRecord) || !isset($driveRecord['storage_type']) || (string)$driveRecord['storage_type'] !== 'google_drive' || !isset($driveRecord['drive_file_id']) || trim((string)$driveRecord['drive_file_id']) === '') {
+            continue;
+        }
+        $storedName = isset($driveRecord['drive_name']) && trim((string)$driveRecord['drive_name']) !== '' ? (string)$driveRecord['drive_name'] : (isset($file['stored_name']) ? (string)$file['stored_name'] : $originalName);
         $row = array_merge(array(
             'task_id' => (int)$targetTaskId,
             'original_name' => $originalName,
             'stored_name' => $storedName,
-            'stored_path' => $relativePath,
+            'stored_path' => '',
             'file_size' => (int)$fileSize,
             'mime_type' => $mimeType,
             'uploaded_by' => (int)$uploadedBy > 0 ? (int)$uploadedBy : null,
@@ -1397,10 +1407,15 @@ function cpms_tasks_copy_saved_files_to_task($pdo, $sourceFiles, $targetTaskId, 
                 $copied[count($copied)] = array(
                     'original_name' => $originalName,
                     'stored_name' => $storedName,
-                    'stored_path' => $relativePath,
+                    'stored_path' => '',
+                    'tmp_name' => $tmpName,
                     'file_size' => (int)$fileSize,
                     'mime_type' => $mimeType,
                     'file_role' => $fileRole,
+                    'storage_type' => 'google_drive',
+                    'drive_file_id' => isset($driveRecord['drive_file_id']) ? (string)$driveRecord['drive_file_id'] : '',
+                    'drive_web_view_link' => isset($driveRecord['drive_web_view_link']) ? (string)$driveRecord['drive_web_view_link'] : '',
+                    'drive_web_content_link' => isset($driveRecord['drive_web_content_link']) ? (string)$driveRecord['drive_web_content_link'] : '',
                 );
             }
         } catch (Exception $e) {
@@ -1454,24 +1469,53 @@ function cpms_tasks_fetch_files($pdo, $taskId)
     return is_array($rows) ? $rows : array();
 }}
 
+if (!function_exists('cpms_tasks_file_effective_role')) {
+function cpms_tasks_file_effective_role($task, $file)
+{
+    if (is_array($file) && isset($file['file_role'])) {
+        $fileRole = trim((string)$file['file_role']);
+        if ($fileRole === 'complete') return 'complete';
+        if ($fileRole === 'request') return 'request';
+    }
+    if (!is_array($task) || !is_array($file)) return 'request';
+
+    $uploadedBy = isset($file['uploaded_by']) ? (int)$file['uploaded_by'] : 0;
+    $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
+    $completedBy = isset($task['completed_by']) ? (int)$task['completed_by'] : 0;
+    if ($uploadedBy > 0 && $completedBy > 0 && $uploadedBy === $completedBy && $uploadedBy !== $requesterId) {
+        return 'complete';
+    }
+
+    $uploadedAt = isset($file['uploaded_at']) ? trim((string)$file['uploaded_at']) : '';
+    $completedAt = isset($task['completed_at']) ? trim((string)$task['completed_at']) : '';
+    if ($uploadedAt !== '' && $completedAt !== '') {
+        $uploadedTs = strtotime($uploadedAt);
+        $completedTs = strtotime($completedAt);
+        if ($uploadedTs !== false && $completedTs !== false && $uploadedTs >= ($completedTs - 600)) {
+            return 'complete';
+        }
+    }
+    return 'request';
+}}
+
 if (!function_exists('cpms_tasks_file_counts_for_task')) {
 function cpms_tasks_file_counts_for_task($pdo, $taskId)
 {
     $counts = array('total' => 0, 'request' => 0, 'complete' => 0);
     if (!$pdo || (int)$taskId <= 0 || !cpms_tasks_table_exists($pdo, 'cpms_task_files')) return $counts;
     try {
-        $st = $pdo->prepare("SELECT
-                COUNT(*) AS total_count,
-                SUM(CASE WHEN file_role = 'complete' THEN 1 ELSE 0 END) AS complete_count,
-                SUM(CASE WHEN file_role IS NULL OR file_role = '' OR file_role = 'request' THEN 1 ELSE 0 END) AS request_count
-            FROM cpms_task_files
-            WHERE task_id = :task_id");
+        $task = cpms_tasks_find_task($pdo, (int)$taskId);
+        $st = $pdo->prepare("SELECT * FROM cpms_task_files WHERE task_id = :task_id");
         $st->execute(array(':task_id' => (int)$taskId));
-        $row = $st->fetch(PDO::FETCH_ASSOC);
-        if ($row) {
-            $counts['total'] = isset($row['total_count']) ? (int)$row['total_count'] : 0;
-            $counts['request'] = isset($row['request_count']) ? (int)$row['request_count'] : 0;
-            $counts['complete'] = isset($row['complete_count']) ? (int)$row['complete_count'] : 0;
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) $rows = array();
+        for ($i = 0; $i < count($rows); $i++) {
+            $counts['total']++;
+            if (cpms_tasks_file_effective_role($task, $rows[$i]) === 'complete') {
+                $counts['complete']++;
+            } else {
+                $counts['request']++;
+            }
         }
     } catch (Exception $e) {
         try {

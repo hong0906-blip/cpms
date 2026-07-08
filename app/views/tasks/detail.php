@@ -34,6 +34,15 @@ $task = cpms_tasks_find_task($pdo, $taskId);
 
 $logs = cpms_tasks_fetch_logs($pdo, $taskId);
 $files = cpms_tasks_fetch_files($pdo, $taskId);
+$requestFiles = array();
+$completeFiles = array();
+for ($i = 0; $i < count($files); $i++) {
+    if (cpms_tasks_file_effective_role($task, $files[$i]) === 'complete') {
+        $completeFiles[count($completeFiles)] = $files[$i];
+    } else {
+        $requestFiles[count($requestFiles)] = $files[$i];
+    }
+}
 $comments = cpms_tasks_fetch_comments($pdo, $taskId);
 $canChangeStatus = cpms_tasks_can_change_status($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $isMeetingTask = isset($task['task_type']) && (string)$task['task_type'] === 'meeting';
@@ -195,19 +204,34 @@ ob_start();
         </div>
     </div>
 
-    <?php if (count($files) > 0): ?>
-        <div>
-            <div class="text-sm font-extrabold text-gray-900 mb-2">첨부파일</div>
-            <div class="space-y-2">
-                <?php foreach ($files as $file): ?>
-                    <?php $fileRole = isset($file['file_role']) && (string)$file['file_role'] === 'complete' ? '완료' : '요청'; ?>
-                    <a href="<?php echo h(cpms_tasks_file_url($file)); ?>" target="_blank" class="flex items-center justify-between gap-3 p-3 rounded-2xl border border-gray-200 bg-white hover:bg-slate-50">
-                        <span class="font-bold text-slate-800"><?php echo h(isset($file['original_name']) ? $file['original_name'] : '-'); ?></span>
-                        <span class="text-xs text-slate-500"><?php echo h($fileRole); ?> 파일</span>
-                        <span class="text-xs text-slate-500">열기</span>
-                    </a>
-                <?php endforeach; ?>
-            </div>
+    <?php if (count($requestFiles) > 0 || count($completeFiles) > 0): ?>
+        <div class="space-y-4">
+            <?php if (count($requestFiles) > 0): ?>
+                <div>
+                    <div class="text-sm font-extrabold text-gray-900 mb-2">요청자가 올린 파일</div>
+                    <div class="space-y-2">
+                        <?php foreach ($requestFiles as $file): ?>
+                            <a href="<?php echo h(cpms_tasks_file_url($file)); ?>" target="_blank" class="flex items-center justify-between gap-3 p-3 rounded-2xl border border-sky-200 bg-sky-50 hover:bg-sky-100">
+                                <span class="font-bold text-slate-800"><?php echo h(isset($file['original_name']) ? $file['original_name'] : '-'); ?></span>
+                                <span class="text-xs font-bold text-sky-700">요청 파일 열기</span>
+                            </a>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
+            <?php if (count($completeFiles) > 0): ?>
+                <div>
+                    <div class="text-sm font-extrabold text-gray-900 mb-2">완료 처리자가 올린 파일</div>
+                    <div class="space-y-2">
+                        <?php foreach ($completeFiles as $file): ?>
+                            <a href="<?php echo h(cpms_tasks_file_url($file)); ?>" target="_blank" class="flex items-center justify-between gap-3 p-3 rounded-2xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100">
+                                <span class="font-bold text-slate-800"><?php echo h(isset($file['original_name']) ? $file['original_name'] : '-'); ?></span>
+                                <span class="text-xs font-bold text-emerald-700">완료 파일 열기</span>
+                            </a>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+            <?php endif; ?>
         </div>
     <?php endif; ?>
 

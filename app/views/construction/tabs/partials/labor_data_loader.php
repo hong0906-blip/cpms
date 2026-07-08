@@ -1646,8 +1646,32 @@ if (!function_exists('cpms_labor_sort_text')) {
 }
 
 if (!function_exists('cpms_labor_sort_worker_value')) {
-    function cpms_labor_sort_worker_value($worker, $field) {
+    function cpms_labor_sort_worker_value($worker, $field, $gongsuMap = array(), $outputDaysMap = array(), $selectedMonth = '') {
         if (!is_array($worker)) return '';
+        $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
+        $workerKey = function_exists('cpms_normalize_worker_key') ? cpms_normalize_worker_key($workerName) : cpms_labor_sort_text($workerName);
+        if ($field === 'job_type') {
+            return isset($worker['job_type_snapshot']) ? cpms_labor_sort_text($worker['job_type_snapshot']) : '';
+        }
+        if ($field === 'output_days') {
+            return ($workerKey !== '' && isset($outputDaysMap[$workerKey])) ? (int)$outputDaysMap[$workerKey] : 0;
+        }
+        if ($field === 'total_gongsu') {
+            $total = 0.0;
+            $dailyMap = ($workerKey !== '' && isset($gongsuMap[$workerKey]) && is_array($gongsuMap[$workerKey])) ? $gongsuMap[$workerKey] : array();
+            foreach ($dailyMap as $dateKey => $gongsuValue) {
+                if (!is_numeric($gongsuValue)) continue;
+                if ($selectedMonth !== '' && strpos((string)$dateKey, (string)$selectedMonth) !== 0) continue;
+                $total += (float)$gongsuValue;
+            }
+            return $total;
+        }
+        if ($field === 'wage_rate') {
+            if (function_exists('cpms_resolve_labor_wage_rate')) {
+                return (float)cpms_resolve_labor_wage_rate($worker);
+            }
+            return isset($worker['deposit_rate']) ? (float)str_replace(',', '', (string)$worker['deposit_rate']) : 0.0;
+        }
         if ($field === 'company') {
             return isset($worker['company_name']) ? cpms_labor_sort_text($worker['company_name']) : '';
         }
@@ -1656,23 +1680,42 @@ if (!function_exists('cpms_labor_sort_worker_value')) {
 }
 
 if (!function_exists('cpms_sort_labor_workers')) {
-    function cpms_sort_labor_workers($workers, $sort) {
+    function cpms_sort_labor_workers($workers, $sort, $direction = 'asc', $gongsuMap = array(), $outputDaysMap = array(), $selectedMonth = '') {
         if (!is_array($workers)) return array();
         $sort = trim((string)$sort);
-        if ($sort !== 'company') $sort = 'name';
-        usort($workers, function($a, $b) use ($sort) {
-            $secondary = ($sort === 'company') ? 'name' : 'company';
-            $av = cpms_labor_sort_worker_value($a, $sort);
-            $bv = cpms_labor_sort_worker_value($b, $sort);
-            if ($av === '' && $bv !== '') return 1;
-            if ($av !== '' && $bv === '') return -1;
-            if ($av !== $bv) return strcmp($av, $bv);
+        $allowedSorts = array('name', 'job_type', 'output_days', 'total_gongsu', 'wage_rate', 'company');
+        if (!in_array($sort, $allowedSorts, true)) $sort = 'name';
+        $direction = (trim((string)$direction) === 'desc') ? 'desc' : 'asc';
+        $numericSorts = array('output_days', 'total_gongsu', 'wage_rate');
+        usort($workers, function($a, $b) use ($sort, $direction, $gongsuMap, $outputDaysMap, $selectedMonth, $numericSorts) {
+            $isNumeric = in_array($sort, $numericSorts, true);
+            $av = cpms_labor_sort_worker_value($a, $sort, $gongsuMap, $outputDaysMap, $selectedMonth);
+            $bv = cpms_labor_sort_worker_value($b, $sort, $gongsuMap, $outputDaysMap, $selectedMonth);
+            if ($isNumeric) {
+                $af = (float)$av;
+                $bf = (float)$bv;
+                if (abs($af - $bf) > 0.0001) {
+                    $result = ($af < $bf) ? -1 : 1;
+                    return ($direction === 'desc') ? ($result * -1) : $result;
+                }
+            } else {
+                if ($av === '' && $bv !== '') return 1;
+                if ($av !== '' && $bv === '') return -1;
+                if ($av !== $bv) {
+                    $result = strcmp($av, $bv);
+                    return ($direction === 'desc') ? ($result * -1) : $result;
+                }
+            }
 
-            $as = cpms_labor_sort_worker_value($a, $secondary);
-            $bs = cpms_labor_sort_worker_value($b, $secondary);
-            if ($as === '' && $bs !== '') return 1;
-            if ($as !== '' && $bs === '') return -1;
-            if ($as !== $bs) return strcmp($as, $bs);
+            $secondaryFields = array('name', 'job_type', 'company');
+            foreach ($secondaryFields as $secondary) {
+                if ($secondary === $sort) continue;
+                $as = cpms_labor_sort_worker_value($a, $secondary, $gongsuMap, $outputDaysMap, $selectedMonth);
+                $bs = cpms_labor_sort_worker_value($b, $secondary, $gongsuMap, $outputDaysMap, $selectedMonth);
+                if ($as === '' && $bs !== '') return 1;
+                if ($as !== '' && $bs === '') return -1;
+                if ($as !== $bs) return strcmp($as, $bs);
+            }
 
             $ai = isset($a['worker_id']) ? (int)$a['worker_id'] : 0;
             $bi = isset($b['worker_id']) ? (int)$b['worker_id'] : 0;

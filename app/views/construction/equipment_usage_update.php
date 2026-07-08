@@ -8,6 +8,7 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
+require_once __DIR__ . '/partials/equipment_statement_helper.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -22,6 +23,10 @@ $usageId = isset($_POST['usage_id']) ? (int)$_POST['usage_id'] : 0;
 $useDate = isset($_POST['use_date']) ? trim((string)$_POST['use_date']) : '';
 $amountRaw = isset($_POST['amount']) ? (string)$_POST['amount'] : '';
 $amountSign = isset($_POST['amount_sign']) ? trim((string)$_POST['amount_sign']) : '';
+$memoWasPosted = isset($_POST['memo']);
+$memo = $memoWasPosted ? trim((string)$_POST['memo']) : '';
+$remarkWasPosted = isset($_POST['remark']);
+$remark = $remarkWasPosted ? trim((string)$_POST['remark']) : '';
 $equipTab = isset($_POST['equip_tab']) ? trim((string)$_POST['equip_tab']) : 'input';
 $defaultYm = cpms_construction_current_business_ym();
 $ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : $defaultYm;
@@ -78,9 +83,10 @@ if (!cpms_equipment_usage_update_in_range($useDate, $ym)) {
 $pdo = Db::pdo();
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
 cpms_equipment_gongsu_ensure_schema($pdo);
+cpms_equipment_statement_ensure_usage_columns($pdo);
 
 try {
-    $st = $pdo->prepare("SELECT u.*, e.is_deleted
+    $st = $pdo->prepare("SELECT u.*, e.is_deleted, e.remark
         FROM cpms_equipment_usage u
         JOIN cpms_equipment_items e ON e.id = u.equipment_id AND e.project_id = u.project_id
         WHERE u.id = :id AND u.project_id = :pid
@@ -93,6 +99,13 @@ try {
         flash_set('error', '수정할 장비 사용내역을 찾을 수 없습니다.');
         header('Location: ' . $redirect);
         exit;
+    }
+
+    if (!$memoWasPosted) {
+        $memo = isset($row['memo']) ? (string)$row['memo'] : '';
+    }
+    if (!$remarkWasPosted) {
+        $remark = isset($row['remark']) ? (string)$row['remark'] : '';
     }
 
     $equipmentId = isset($row['equipment_id']) ? (int)$row['equipment_id'] : 0;
@@ -112,19 +125,27 @@ try {
     if ($workUnit <= 0) $workUnit = 1.0;
     $baseRateSnapshot = $amount / $workUnit;
 
-    $fields = array('use_date = :use_date', 'amount = :amount');
+    $fields = array('use_date = :use_date', 'amount = :amount', 'memo = :memo');
     if (cpms_equipment_gongsu_column_exists($pdo, 'cpms_equipment_usage', 'base_rate_snapshot')) {
         $fields[] = 'base_rate_snapshot = :base_rate_snapshot';
     }
     $up = $pdo->prepare("UPDATE cpms_equipment_usage SET " . implode(', ', $fields) . " WHERE id = :id AND project_id = :pid");
     $up->bindValue(':use_date', $useDate);
     $up->bindValue(':amount', $amount);
+    $up->bindValue(':memo', $memo);
     if (in_array('base_rate_snapshot = :base_rate_snapshot', $fields, true)) {
         $up->bindValue(':base_rate_snapshot', $baseRateSnapshot);
     }
     $up->bindValue(':id', $usageId, PDO::PARAM_INT);
     $up->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $up->execute();
+
+    $upItem = $pdo->prepare("UPDATE cpms_equipment_items SET remark = :remark, updated_at = :updated_at WHERE id = :id AND project_id = :pid");
+    $upItem->bindValue(':remark', $remark);
+    $upItem->bindValue(':updated_at', date('Y-m-d H:i:s'));
+    $upItem->bindValue(':id', $equipmentId, PDO::PARAM_INT);
+    $upItem->bindValue(':pid', $projectId, PDO::PARAM_INT);
+    $upItem->execute();
 
     if (cpms_equipment_gongsu_column_exists($pdo, 'cpms_equipment_gongsu_overrides', 'use_date')) {
         $stOverride = $pdo->prepare("UPDATE cpms_equipment_gongsu_overrides SET use_date = :use_date, updated_at = :updated_at WHERE equipment_usage_id = :usage_id");
@@ -134,7 +155,18 @@ try {
         $stOverride->execute();
     }
 
-    flash_set('success', '장비 사용내역을 수정했습니다.');
+    $successMessage = '장비 사용내역을 수정했습니다.';
+    $uploadResult = cpms_equipment_statement_store_uploaded_file_for_usage_rows($pdo, 'statement_file', $projectId, $equipmentId, array(array('id'=>$usageId, 'use_date'=>$useDate)), $ym);
+    if (isset($uploadResult['has_file']) && $uploadResult['has_file']) {
+        if (isset($uploadResult['ok']) && $uploadResult['ok']) {
+            $successMessage .= ' ' . ((isset($uploadResult['message']) && trim((string)$uploadResult['message']) !== '') ? (string)$uploadResult['message'] : '거래명세표를 첨부했습니다.');
+            flash_set('success', $successMessage);
+        } else {
+            flash_set('error', $successMessage . ' 다만 거래명세표 첨부 실패: ' . (isset($uploadResult['message']) ? $uploadResult['message'] : '알 수 없는 오류'));
+        }
+    } else {
+        flash_set('success', $successMessage);
+    }
 } catch (Exception $e) {
     flash_set('error', '수정 실패: ' . $e->getMessage());
 }

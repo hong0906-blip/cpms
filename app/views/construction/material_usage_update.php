@@ -23,6 +23,10 @@ $usageId = isset($_POST['usage_id']) ? (int)$_POST['usage_id'] : 0;
 $useDate = isset($_POST['use_date']) ? trim((string)$_POST['use_date']) : '';
 $amountRaw = isset($_POST['amount']) ? (string)$_POST['amount'] : '';
 $amountSign = isset($_POST['amount_sign']) ? trim((string)$_POST['amount_sign']) : '';
+$memoWasPosted = isset($_POST['memo']);
+$memo = $memoWasPosted ? trim((string)$_POST['memo']) : '';
+$remarkWasPosted = isset($_POST['remark']);
+$remark = $remarkWasPosted ? trim((string)$_POST['remark']) : '';
 $materialsTab = isset($_POST['materials_tab']) ? trim((string)$_POST['materials_tab']) : 'input';
 $defaultYm = cpms_construction_current_business_ym();
 $ym = isset($_POST['ym']) ? trim((string)$_POST['ym']) : $defaultYm;
@@ -81,7 +85,7 @@ if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redi
 cpms_material_usage_ensure_schema($pdo);
 
 try {
-    $st = $pdo->prepare("SELECT u.*, i.is_deleted, i.category
+    $st = $pdo->prepare("SELECT u.*, i.is_deleted, i.category, i.vendor_name, i.representative, i.phone, i.biz_no, i.base_rate, i.remark
         FROM cpms_material_usage u
         JOIN cpms_material_items i ON i.id = u.material_id AND i.project_id = u.project_id
         WHERE u.id = :id AND u.project_id = :pid
@@ -101,6 +105,13 @@ try {
         exit;
     }
 
+    if (!$memoWasPosted) {
+        $memo = isset($row['memo']) ? (string)$row['memo'] : '';
+    }
+    if (!$remarkWasPosted) {
+        $remark = isset($row['remark']) ? (string)$row['remark'] : '';
+    }
+
     $materialId = isset($row['material_id']) ? (int)$row['material_id'] : 0;
     $stDup = $pdo->prepare("SELECT id FROM cpms_material_usage WHERE project_id = :pid AND material_id = :mid AND use_date = :use_date AND id <> :id LIMIT 1");
     $stDup->bindValue(':pid', $projectId, PDO::PARAM_INT);
@@ -114,12 +125,20 @@ try {
         exit;
     }
 
-    $up = $pdo->prepare("UPDATE cpms_material_usage SET use_date = :use_date, amount = :amount WHERE id = :id AND project_id = :pid");
+    $up = $pdo->prepare("UPDATE cpms_material_usage SET use_date = :use_date, amount = :amount, memo = :memo WHERE id = :id AND project_id = :pid");
     $up->bindValue(':use_date', $useDate);
     $up->bindValue(':amount', $amount);
+    $up->bindValue(':memo', $memo);
     $up->bindValue(':id', $usageId, PDO::PARAM_INT);
     $up->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $up->execute();
+
+    $upItem = $pdo->prepare("UPDATE cpms_material_items SET remark = :remark, updated_at = :updated_at WHERE id = :id AND project_id = :pid");
+    $upItem->bindValue(':remark', $remark);
+    $upItem->bindValue(':updated_at', date('Y-m-d H:i:s'));
+    $upItem->bindValue(':id', $materialId, PDO::PARAM_INT);
+    $upItem->bindValue(':pid', $projectId, PDO::PARAM_INT);
+    $upItem->execute();
 
     if (cpms_material_statement_ensure_schema($pdo) && cpms_material_statement_schema_ready($pdo)) {
         $stStatement = $pdo->prepare("UPDATE cpms_material_statement_files
@@ -132,7 +151,18 @@ try {
         $stStatement->execute();
     }
 
-    flash_set('success', '자재구입비 사용내역을 수정했습니다.');
+    $successMessage = '자재구입비 사용내역을 수정했습니다.';
+    $uploadResult = cpms_material_statement_store_uploaded_file_for_usage_rows($pdo, 'statement_file', $projectId, $materialId, array(array('id'=>$usageId, 'use_date'=>$useDate)), $ym);
+    if (isset($uploadResult['has_file']) && $uploadResult['has_file']) {
+        if (isset($uploadResult['ok']) && $uploadResult['ok']) {
+            $successMessage .= ' ' . ((isset($uploadResult['message']) && trim((string)$uploadResult['message']) !== '') ? (string)$uploadResult['message'] : '거래명세표를 첨부했습니다.');
+            flash_set('success', $successMessage);
+        } else {
+            flash_set('error', $successMessage . ' 다만 거래명세표 첨부 실패: ' . (isset($uploadResult['message']) ? $uploadResult['message'] : '알 수 없는 오류'));
+        }
+    } else {
+        flash_set('success', $successMessage);
+    }
 } catch (Exception $e) {
     flash_set('error', '수정 실패: ' . $e->getMessage());
 }

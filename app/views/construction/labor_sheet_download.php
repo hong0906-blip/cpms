@@ -15,7 +15,10 @@ if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $projectId = isset($_GET['pid']) ? (int)$_GET['pid'] : 0;
 $selectedMonth = isset($_GET['month']) ? trim((string)$_GET['month']) : '';
 $laborSort = isset($_GET['labor_sort']) ? trim((string)$_GET['labor_sort']) : 'name';
-if (!in_array($laborSort, array('name', 'company'), true)) $laborSort = 'name';
+$laborSortAllowed = array('name', 'job_type', 'output_days', 'total_gongsu', 'wage_rate', 'company');
+if (!in_array($laborSort, $laborSortAllowed, true)) $laborSort = 'name';
+$laborSortDir = isset($_GET['labor_sort_dir']) ? trim((string)$_GET['labor_sort_dir']) : 'asc';
+if ($laborSortDir !== 'desc') $laborSortDir = 'asc';
 
 if ($projectId <= 0 || $selectedMonth === '') {
     http_response_code(400);
@@ -145,10 +148,11 @@ if (is_array($timesheetWorkers)) {
     $timesheetWorkers = $filteredTimesheetWorkers;
 }
 if (function_exists('cpms_sort_labor_workers')) {
-    $timesheetWorkers = cpms_sort_labor_workers($timesheetWorkers, $laborSort);
+    $timesheetWorkers = cpms_sort_labor_workers($timesheetWorkers, $laborSort, $laborSortDir, $attendanceGongsuMap, $attendanceOutputDays, $selectedMonth);
 }
 $timesheetRows = count($timesheetWorkers);
 if ($timesheetRows < 1) $timesheetRows = 1;
+$laborSheetDownloadMode = true;
 require __DIR__ . '/tabs/partials/labor_sheet_table.php';
 ?>
 </body>
