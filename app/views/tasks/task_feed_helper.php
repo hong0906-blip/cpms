@@ -27,6 +27,7 @@ function cpms_task_feed_item($row)
         'task_type' => isset($row['task_type']) ? (string)$row['task_type'] : 'general',
         'action_url' => isset($row['action_url']) ? (string)$row['action_url'] : '',
         'is_direct_task' => isset($row['is_direct_task']) ? (int)$row['is_direct_task'] : 0,
+        'created_by' => isset($row['created_by']) ? (int)$row['created_by'] : 0,
         'created_at' => isset($row['created_at']) ? (string)$row['created_at'] : '',
         'completed_at' => isset($row['completed_at']) ? (string)$row['completed_at'] : '',
         'group_key' => isset($row['group_key']) ? (string)$row['group_key'] : '',
@@ -204,7 +205,12 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
     $requestedDate = trim((string)$requestedDate);
     if ($requestedDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestedDate)) $requestedDate = '';
     try {
-        $sql = "SELECT * FROM cpms_tasks WHERE requester_employee_id = :employee_id";
+        $hasCreatedBy = cpms_tasks_column_exists($pdo, 'cpms_tasks', 'created_by');
+        if ($hasCreatedBy) {
+            $sql = "SELECT * FROM cpms_tasks WHERE (requester_employee_id = :employee_id OR ((requester_employee_id IS NULL OR requester_employee_id = 0) AND created_by = :employee_id))";
+        } else {
+            $sql = "SELECT * FROM cpms_tasks WHERE requester_employee_id = :employee_id";
+        }
         $params = array(':employee_id' => (int)$employeeId);
         if ($requestedDate !== '') {
             $sql .= " AND DATE(created_at) = :requested_date";
@@ -238,6 +244,7 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                 'display_status' => cpms_tasks_display_status($task),
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
+                'created_by' => isset($task['created_by']) ? (int)$task['created_by'] : 0,
                 'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
                 'completed_at' => isset($task['completed_at']) ? (string)$task['completed_at'] : '',
                 'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',

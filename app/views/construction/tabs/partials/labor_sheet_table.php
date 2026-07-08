@@ -91,6 +91,9 @@ $laborSort = isset($laborSort) ? trim((string)$laborSort) : 'name';
 $laborSortDir = isset($laborSortDir) ? trim((string)$laborSortDir) : 'asc';
 if ($laborSortDir !== 'desc') $laborSortDir = 'asc';
 $laborSheetProjectId = isset($pid) ? (int)$pid : (isset($projectId) ? (int)$projectId : 0);
+$showLaborBulkSelector = ($canEditTimesheet && !$laborSheetDownloadMode);
+$todayDateKey = date('Y-m-d');
+$todayDay = (strpos($todayDateKey, (string)$selectedMonth) === 0) ? (int)substr($todayDateKey, 8, 2) : 0;
 
 if (!function_exists('cpms_labor_sheet_sort_header')) {
     function cpms_labor_sheet_sort_header($field, $label, $currentSort, $currentDir, $projectId, $selectedMonth) {
@@ -107,6 +110,30 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
     }
 }
 ?>
+
+<?php if (!$laborSheetDownloadMode): ?>
+<style>
+.cpms-labor-today-head,
+.cpms-labor-today-cell {
+    border-left: 4px solid #ef1717 !important;
+    border-right: 4px solid #ef1717 !important;
+}
+.cpms-labor-today-head {
+    border-top: 4px solid #ef1717 !important;
+    border-bottom: 4px solid #ef1717 !important;
+}
+.cpms-labor-today-cell {
+    background: #fffafa;
+}
+.cpms-gongsu-cell.cpms-gongsu-just-saved {
+    animation: cpmsGongsuJustSaved 620ms ease-out;
+}
+@keyframes cpmsGongsuJustSaved {
+    0% { background: #fef3c7; transform: scale(0.96); opacity: 0.35; }
+    100% { background: transparent; transform: scale(1); opacity: 1; }
+}
+</style>
+<?php endif; ?>
 
 <div class="overflow-x-auto">
     <table class="min-w-[1200px] w-full border border-gray-200 text-xs">
@@ -135,6 +162,11 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
     <table class="min-w-[1200px] w-full border border-gray-200 text-[11px] mt-3">
         <thead>
         <tr class="bg-gray-200 text-gray-800">
+            <?php if ($showLaborBulkSelector): ?>
+            <th class="border border-gray-200 px-2 py-2 w-10 text-center" rowspan="2">
+                <input type="checkbox" id="laborBulkSelectAll" class="cpms-labor-bulk-select-all align-middle" title="전체 선택">
+            </th>
+            <?php endif; ?>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">출력월</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '성명' : cpms_labor_sheet_sort_header('name', '성명', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '직종' : cpms_labor_sheet_sort_header('job_type', '직종', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
@@ -152,7 +184,7 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
         </tr>
         <tr class="bg-gray-200 text-gray-800">
             <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
-                <th class="border border-gray-200 px-1 py-1"><?php echo (int)$d; ?></th>
+                <th class="border border-gray-200 px-1 py-1 <?php echo ($todayDay === (int)$d) ? 'cpms-labor-today-head' : ''; ?>"><?php echo (int)$d; ?></th>
             <?php endfor; ?>
         </tr>
         </thead>
@@ -176,7 +208,12 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
                 }
                 $totalPay = $totalGongsu * $wageRate;
                 ?>
-                <tr class="cpms-timesheet-row <?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>" data-wage-rate="<?php echo h(number_format($wageRate, 2, '.', '')); ?>">
+                <tr class="cpms-timesheet-row <?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>" data-wage-rate="<?php echo h(number_format($wageRate, 2, '.', '')); ?>" data-worker-key="<?php echo h($workerKey); ?>" data-worker-name="<?php echo h($workerName); ?>">
+                    <?php if ($showLaborBulkSelector): ?>
+                    <td class="border border-gray-200 px-2 py-2 text-center">
+                        <input type="checkbox" class="cpms-labor-worker-check align-middle" value="<?php echo h($workerKey); ?>" title="<?php echo h($workerName); ?> 선택">
+                    </td>
+                    <?php endif; ?>
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h($workerName); ?></td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h($jobTypeSnapshot); ?></td>
@@ -189,7 +226,7 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
                         $startTimeDisplay = cpms_format_labor_time_value(isset($timeEntry['start']) ? $timeEntry['start'] : '');
                         $endTimeDisplay = cpms_format_labor_time_value(isset($timeEntry['end']) ? $timeEntry['end'] : '');
                         ?>
-                        <td class="cpms-gongsu-cell-slot border border-gray-200 px-0 py-0 text-center">
+                        <td class="cpms-gongsu-cell-slot border border-gray-200 px-0 py-0 text-center <?php echo ($dateKey === $todayDateKey) ? 'cpms-labor-today-cell' : ''; ?>" data-date="<?php echo h($dateKey); ?>">
                             <?php if ($canEditTimesheet): ?>
                             <button type="button"
                                     class="cpms-gongsu-cell flex w-full min-h-[28px] items-center justify-center rounded px-1 hover:bg-yellow-50"
@@ -219,7 +256,7 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
                 </tr>
                 <?php if ($debugMode): ?>
                 <tr class="bg-yellow-50">
-                    <td class="border border-gray-200 px-2 py-1 text-[10px] text-gray-700" colspan="<?php echo $showBankColumns ? (11 + (int)$daysInMonth) : (8 + (int)$daysInMonth); ?>">
+                    <td class="border border-gray-200 px-2 py-1 text-[10px] text-gray-700" colspan="<?php echo ($showBankColumns ? (11 + (int)$daysInMonth) : (8 + (int)$daysInMonth)) + ($showLaborBulkSelector ? 1 : 0); ?>">
                         <?php echo h($workerName); ?> / 총공수 <?php echo h(cpms_format_gongsu_value($totalGongsu)); ?> / 출력일수 <?php echo h((string)$outputDays); ?> / 임금단가원본 deposit_rate=<?php echo h(isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : ''); ?> / daily_wage=<?php echo h(isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : ''); ?> / 적용단가=<?php echo h((string)(int)round($wageRate)); ?> / 지급총액=<?php echo h((string)(int)round($totalPay)); ?>
                     </td>
                 </tr>
@@ -228,11 +265,15 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
         <?php else: ?>
             <?php for ($i = 1; $i <= $timesheetRows; $i++): ?>
                 <tr class="<?php echo ($i % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>">
+                    <?php if ($showLaborBulkSelector): ?>
+                    <td class="border border-gray-200 px-2 py-2 text-center"></td>
+                    <?php endif; ?>
                     <td class="border border-gray-200 px-2 py-2 text-center"><?php echo h(substr($selectedMonth, 5, 2)); ?>월</td>
                     <td class="border border-gray-200 px-2 py-2"></td>
                     <td class="border border-gray-200 px-2 py-2 text-center"></td>
                     <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
-                        <td class="border border-gray-200 px-1 py-1 text-center"></td>
+                        <?php $emptyDateKey = $selectedMonth . '-' . str_pad((string)$d, 2, '0', STR_PAD_LEFT); ?>
+                        <td class="border border-gray-200 px-1 py-1 text-center <?php echo ($emptyDateKey === $todayDateKey) ? 'cpms-labor-today-cell' : ''; ?>"></td>
                     <?php endfor; ?>
                     <td class="border border-gray-200 px-2 py-2 text-center">0</td>
                     <td class="border border-gray-200 px-2 py-2 text-right">0</td>

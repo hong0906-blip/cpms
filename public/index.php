@@ -464,6 +464,19 @@ if ($route === 'tasks/executive_summary') {
     exit;
 }
 
+if ($route === 'scheduler' || $route === urldecode('%EC%8A%A4%EC%BC%80%EC%A4%84%EB%9F%AC')) {
+    if (!\App\Core\Auth::check()) {
+        cpms_redirect_to_portal_login(cpms_current_absolute_url());
+    }
+    $schedulerTitle = urldecode('%EC%8A%A4%EC%BC%80%EC%A4%84%EB%9F%AC');
+    \App\Core\View::render('scheduler/index', array(
+        'title' => $schedulerTitle,
+        'selectedMenu' => $schedulerTitle,
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
 if ($route === 'ping') {
     $_SESSION['_cpms_ping_at'] = time();
     \App\Core\Auth::check();
@@ -995,8 +1008,12 @@ if ($route === 'tasks/completion_reject') {
     require_once __DIR__ . '/../app/views/tasks/completion_reject.php';
     exit;
 }
-if ($route === 'tasks/due_update') {
+if ($route === 'tasks/due_update' || $route === 'tasks/due_save' || $route === 'task_due_save') {
     require_once __DIR__ . '/../app/views/tasks/due_update.php';
+    exit;
+}
+if ($route === 'tasks/content_save' || $route === 'task_content_save') {
+    require_once __DIR__ . '/../app/views/tasks/content_save.php';
     exit;
 }
 if ($route === 'tasks/transfer') {

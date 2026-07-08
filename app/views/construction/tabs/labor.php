@@ -407,6 +407,17 @@ foreach ($timesheetWorkers as $worker) {
 </div>
 
 <?php if ($laborTab === 'timesheet'): ?>
+    <?php if ($canEditLabor): ?>
+    <div class="mb-3 flex flex-wrap items-center justify-end gap-2">
+        <button type="button" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="1">
+            1공수일괄
+        </button>
+        <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 bg-white text-gray-900 font-extrabold hover:bg-gray-50 transition" data-labor-bulk-value="0.5">
+            0.5공수 일괄
+        </button>
+        <span id="laborBulkStatus" class="text-xs font-bold text-gray-500"></span>
+    </div>
+    <?php endif; ?>
     <?php
     $projectRow = $projectRow;
     $selectedMonth = $selectedMonth;
@@ -871,6 +882,8 @@ foreach ($timesheetWorkers as $worker) {
 (function(){
     var csrf = <?php echo json_encode(csrf_token()); ?>;
     var projectName = <?php echo json_encode(isset($projectRow['name']) ? (string)$projectRow['name'] : ''); ?>;
+    var selectedMonth = <?php echo json_encode($selectedMonth); ?>;
+    var todayDate = <?php echo json_encode(date('Y-m-d')); ?>;
     var gongsuHistoryMap = <?php echo json_encode($overrideHistoryMap, JSON_UNESCAPED_UNICODE); ?>;
     var requestCtx = null;
     var addCtx = null;
@@ -1104,11 +1117,217 @@ foreach ($timesheetWorkers as $worker) {
             .then(function(){ savingCell = false; });
     }
 
+    function buildCellContext(cell){
+        var oldValue = parseCellValue(cell);
+        return {
+            projectId:cell.getAttribute('data-project-id'),
+            month:cell.getAttribute('data-month'),
+            workerName:cell.getAttribute('data-worker-name'),
+            workerKey:(cell.getAttribute('data-worker-key') || '').replace(/^\s+|\s+$/g, ''),
+            date:cell.getAttribute('data-date'),
+            startTime:cell.getAttribute('data-start-time') || '-',
+            endTime:cell.getAttribute('data-end-time') || '-',
+            oldValue:oldValue
+        };
+    }
+
+    function pad2(value){
+        value = parseInt(value, 10);
+        if (isNaN(value)) value = 0;
+        return value < 10 ? '0' + value : String(value);
+    }
+
+    function nowDateTimeText(){
+        var d = new Date();
+        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+    }
+
+    function pushGongsuHistory(ctx, oldValue, newValue, reason, isDeleted){
+        if (!ctx) return;
+        var key = String(ctx.workerKey || '').replace(/^\s+|\s+$/g, '') + '|' + String(ctx.date || '');
+        if (key === '|') return;
+        if (!gongsuHistoryMap[key]) gongsuHistoryMap[key] = [];
+        gongsuHistoryMap[key].unshift({
+            worker_key:ctx.workerKey || '',
+            worker_name:ctx.workerName || '',
+            work_date:ctx.date || '',
+            old_value:formatValue(oldValue),
+            new_value:formatValue(newValue),
+            is_deleted_entry:isDeleted ? '1' : '0',
+            reason:reason || '-',
+            status:'applied',
+            requested_by_email:'',
+            requested_by_name:'',
+            created_at:nowDateTimeText()
+        });
+    }
+
+    function flashGongsuCell(cell){
+        if (!cell || !cell.classList) return;
+        cell.classList.remove('cpms-gongsu-just-saved');
+        setTimeout(function(){
+            cell.classList.add('cpms-gongsu-just-saved');
+            setTimeout(function(){ cell.classList.remove('cpms-gongsu-just-saved'); }, 700);
+        }, 10);
+    }
+
+    function parseJsonResponse(r){
+        return r.text().then(function(text){
+            var data = null;
+            try { data = JSON.parse(text); } catch (e) {}
+            if (!data) throw new Error('서버 응답이 JSON이 아닙니다.');
+            if (!r.ok || !data.ok) throw new Error(data.message ? data.message : '저장 실패');
+            return data;
+        });
+    }
+
+    function saveGongsuBulkCell(cell, ctx, newValue, reason){
+        var body = [
+            '_csrf=' + encodeURIComponent(csrf),
+            'project_id=' + encodeURIComponent(ctx.projectId),
+            'month=' + encodeURIComponent(ctx.month),
+            'worker_name=' + encodeURIComponent(ctx.workerName),
+            'work_date=' + encodeURIComponent(ctx.date),
+            'worker_key=' + encodeURIComponent(ctx.workerKey),
+            'old_value=' + encodeURIComponent(String(ctx.oldValue)),
+            'new_value=' + encodeURIComponent(String(newValue)),
+            'reason=' + encodeURIComponent(reason || ''),
+            'delete_mode=0'
+        ].join('&');
+
+        return fetch('?r=construction/labor_gongsu_override_save', {
+            method:'POST',
+            credentials:'same-origin',
+            headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
+            body:body
+        })
+            .then(parseJsonResponse)
+            .then(function(data){
+                if (data.mode === 'pending') {
+                    setCellDisplay(cell, formatValue(ctx.oldValue), true);
+                    return data;
+                }
+                var value = (data && typeof data.value !== 'undefined') ? data.value : newValue;
+                var displayValue = formatValue(value);
+                setCellDisplay(cell, displayValue, false);
+                updateRowSummary(cell);
+                pushGongsuHistory(ctx, ctx.oldValue, value, reason, false);
+                flashGongsuCell(cell);
+                return data;
+            });
+    }
+
+    function setLaborBulkStatus(text){
+        var status = document.getElementById('laborBulkStatus');
+        if (status) status.textContent = text || '';
+    }
+
+    function setLaborBulkDisabled(disabled){
+        var buttons = document.querySelectorAll('[data-labor-bulk-value]');
+        for (var i = 0; i < buttons.length; i++) {
+            buttons[i].disabled = !!disabled;
+            if (disabled) buttons[i].classList.add('opacity-60', 'cursor-not-allowed');
+            else buttons[i].classList.remove('opacity-60', 'cursor-not-allowed');
+        }
+    }
+
+    function refreshLaborBulkSelectAll(){
+        var all = document.getElementById('laborBulkSelectAll');
+        if (!all) return;
+        var checks = document.querySelectorAll('.cpms-labor-worker-check');
+        var checked = 0;
+        for (var i = 0; i < checks.length; i++) {
+            if (checks[i].checked) checked++;
+        }
+        all.checked = (checks.length > 0 && checked === checks.length);
+        all.indeterminate = (checked > 0 && checked < checks.length);
+    }
+
+    function runLaborBulkInput(value){
+        if (todayDate.indexOf(selectedMonth + '-') !== 0) {
+            alert('오늘 날짜가 현재 출력월에 없습니다.');
+            return;
+        }
+        var checks = document.querySelectorAll('.cpms-labor-worker-check:checked');
+        if (!checks.length) {
+            alert('일괄 입력할 인원을 선택하세요.');
+            return;
+        }
+        var targets = [];
+        for (var i = 0; i < checks.length; i++) {
+            var row = checks[i].closest ? checks[i].closest('tr') : null;
+            var cell = row ? row.querySelector('.cpms-gongsu-cell[data-date="' + todayDate + '"]') : null;
+            if (cell) {
+                targets.push({cell:cell, ctx:buildCellContext(cell)});
+            }
+        }
+        if (!targets.length) {
+            alert('오늘 날짜에 입력할 수 있는 셀이 없습니다.');
+            return;
+        }
+
+        var reason = '일괄 공수 입력(' + formatValue(value) + '공수)';
+        var index = 0;
+        var success = 0;
+        var failed = 0;
+        setLaborBulkDisabled(true);
+        setLaborBulkStatus('0/' + targets.length + ' 저장 중');
+
+        function next(){
+            if (index >= targets.length) {
+                setLaborBulkDisabled(false);
+                setLaborBulkStatus(success + '/' + targets.length + ' 저장 완료' + (failed > 0 ? ' · 실패 ' + failed + '건' : ''));
+                return;
+            }
+            var target = targets[index];
+            index++;
+            target.ctx.oldValue = parseCellValue(target.cell);
+            saveGongsuBulkCell(target.cell, target.ctx, value, reason)
+                .then(function(){ success++; })
+                .catch(function(e){
+                    failed++;
+                    if (window.console && console.error) console.error('bulk gongsu save failed:', e);
+                })
+                .then(function(){
+                    setLaborBulkStatus(index + '/' + targets.length + ' 저장 중');
+                    next();
+                });
+        }
+        next();
+    }
+
     var modalCloseButtons = document.querySelectorAll('[data-modal-close="gongsuRequest"], [data-modal-close="gongsuAddConfirm"]');
     for (var i = 0; i < modalCloseButtons.length; i++) {
         modalCloseButtons[i].addEventListener('click', function(){
             closeModal('modal-' + this.getAttribute('data-modal-close'));
         }, true);
+    }
+
+    var laborBulkSelectAll = document.getElementById('laborBulkSelectAll');
+    if (laborBulkSelectAll) {
+        laborBulkSelectAll.addEventListener('change', function(){
+            var checks = document.querySelectorAll('.cpms-labor-worker-check');
+            for (var i = 0; i < checks.length; i++) {
+                checks[i].checked = laborBulkSelectAll.checked;
+            }
+            refreshLaborBulkSelectAll();
+        });
+    }
+
+    var laborWorkerChecks = document.querySelectorAll('.cpms-labor-worker-check');
+    for (var lw = 0; lw < laborWorkerChecks.length; lw++) {
+        laborWorkerChecks[lw].addEventListener('change', refreshLaborBulkSelectAll);
+    }
+    refreshLaborBulkSelectAll();
+
+    var laborBulkButtons = document.querySelectorAll('[data-labor-bulk-value]');
+    for (var lb = 0; lb < laborBulkButtons.length; lb++) {
+        laborBulkButtons[lb].addEventListener('click', function(event){
+            event.preventDefault();
+            var value = parseFloat(this.getAttribute('data-labor-bulk-value') || '0');
+            if (isNaN(value) || value <= 0) return;
+            runLaborBulkInput(value);
+        });
     }
 
     var slots = document.querySelectorAll('.cpms-gongsu-cell-slot');

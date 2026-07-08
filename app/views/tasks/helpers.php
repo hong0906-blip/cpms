@@ -99,11 +99,19 @@ function cpms_tasks_normalize_department($department)
     $department = trim((string)$department);
     $map = array(
         '공사부' => '공사',
+        '공사팀' => '공사',
         '공무부' => '공무',
+        '공무팀' => '공무',
         '안전부' => '안전',
+        '안전팀' => '안전',
         '관리부' => '관리',
+        '관리팀' => '관리',
         '품질부' => '품질',
+        '품질팀' => '품질',
         '개발부' => '개발',
+        '개발팀' => '개발',
+        '보건부' => '보건',
+        '보건팀' => '보건',
         '안전/보건' => '안전',
         '안전보건' => '안전',
     );
@@ -846,8 +854,17 @@ function cpms_tasks_can_view($task, $currentEmployeeId)
     if (cpms_tasks_is_overall_manager()) return true;
     if ((int)$currentEmployeeId <= 0) return false;
     if ((int)$task['assignee_employee_id'] === (int)$currentEmployeeId) return true;
-    if ((int)$task['requester_employee_id'] === (int)$currentEmployeeId) return true;
+    if (cpms_tasks_effective_requester_employee_id($task) === (int)$currentEmployeeId) return true;
     return false;
+}}
+
+if (!function_exists('cpms_tasks_effective_requester_employee_id')) {
+function cpms_tasks_effective_requester_employee_id($task)
+{
+    if (!$task || !is_array($task)) return 0;
+    $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
+    if ($requesterId > 0) return $requesterId;
+    return isset($task['created_by']) ? (int)$task['created_by'] : 0;
 }}
 
 if (!function_exists('cpms_tasks_can_change_status')) {
@@ -883,14 +900,14 @@ function cpms_tasks_can_request_revision($task, $currentEmployeeId)
 {
     if (!$task) return false;
     if (cpms_tasks_is_overall_manager()) return true;
-    return ((int)$currentEmployeeId > 0 && (int)$task['requester_employee_id'] === (int)$currentEmployeeId);
+    return ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($task) === (int)$currentEmployeeId);
 }}
 
 if (!function_exists('cpms_tasks_is_self_request')) {
 function cpms_tasks_is_self_request($task)
 {
     if (!$task) return false;
-    $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
+    $requesterId = cpms_tasks_effective_requester_employee_id($task);
     $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
     return ($requesterId > 0 && $requesterId === $assigneeId);
 }}
@@ -910,7 +927,7 @@ function cpms_tasks_can_approve_completion($task, $currentEmployeeId)
     $status = isset($task['status']) ? (string)$task['status'] : '';
     if ($status !== 'completion_pending') return false;
     if (cpms_tasks_is_overall_manager()) return true;
-    return ((int)$currentEmployeeId > 0 && isset($task['requester_employee_id']) && (int)$task['requester_employee_id'] === (int)$currentEmployeeId);
+    return ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($task) === (int)$currentEmployeeId);
 }}
 
 if (!function_exists('cpms_tasks_can_reject_completion')) {
@@ -924,7 +941,15 @@ function cpms_tasks_can_update_due_date($task, $currentEmployeeId)
 {
     if (!$task) return false;
     if (cpms_tasks_is_overall_manager()) return true;
-    return ((int)$currentEmployeeId > 0 && isset($task['requester_employee_id']) && (int)$task['requester_employee_id'] === (int)$currentEmployeeId);
+    return ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($task) === (int)$currentEmployeeId);
+}}
+
+if (!function_exists('cpms_tasks_can_update_content')) {
+function cpms_tasks_can_update_content($task, $currentEmployeeId)
+{
+    if (!$task) return false;
+    if (cpms_tasks_is_overall_manager()) return true;
+    return ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($task) === (int)$currentEmployeeId);
 }}
 
 if (!function_exists('cpms_tasks_can_cancel')) {
@@ -932,7 +957,7 @@ function cpms_tasks_can_cancel($task, $currentEmployeeId)
 {
     if (!$task) return false;
     if (cpms_tasks_is_overall_manager()) return true;
-    return ((int)$currentEmployeeId > 0 && (int)$task['requester_employee_id'] === (int)$currentEmployeeId);
+    return ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($task) === (int)$currentEmployeeId);
 }}
 
 if (!function_exists('cpms_tasks_insert_log')) {
@@ -1822,6 +1847,38 @@ function cpms_tasks_update_due_date($pdo, $task, $actor, $dueDate, $dueTime, $me
     $logMessage = '마감: ' . $oldDue . ' -> ' . $newDue;
     if ($message !== '') $logMessage .= "\n" . $message;
     cpms_tasks_insert_log($pdo, $taskId, $actor, 'due_date_changed', $logMessage, isset($task['status']) ? $task['status'] : null, isset($task['status']) ? $task['status'] : null);
+    if ($message !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $message, 0);
+    return true;
+}}
+
+if (!function_exists('cpms_tasks_update_content')) {
+function cpms_tasks_update_content($pdo, $task, $actor, $title, $content, $message, $now)
+{
+    if (!$pdo || !is_array($task) || !is_array($actor)) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    if ($taskId <= 0) return false;
+    $title = trim((string)$title);
+    $content = trim((string)$content);
+    $message = trim((string)$message);
+    $now = trim((string)$now) !== '' ? (string)$now : cpms_tasks_now();
+    if ($title === '') return false;
+
+    $oldTitle = isset($task['title']) ? (string)$task['title'] : '';
+    $oldContent = isset($task['content']) ? (string)$task['content'] : '';
+    $st = $pdo->prepare("UPDATE cpms_tasks SET title = :title, content = :content, updated_at = :updated_at WHERE id = :id");
+    $ok = $st->execute(array(
+        ':title' => $title,
+        ':content' => $content !== '' ? $content : null,
+        ':updated_at' => $now,
+        ':id' => $taskId,
+    ));
+    if (!$ok) return false;
+
+    $logMessage = '업무내용이 수정되었습니다.';
+    if ($oldTitle !== $title) $logMessage .= "\n" . '제목: ' . $oldTitle . ' -> ' . $title;
+    if ($oldContent !== $content) $logMessage .= "\n" . '내용 변경';
+    if ($message !== '') $logMessage .= "\n" . $message;
+    cpms_tasks_insert_log($pdo, $taskId, $actor, 'content_changed', $logMessage, isset($task['status']) ? $task['status'] : null, isset($task['status']) ? $task['status'] : null);
     if ($message !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $message, 0);
     return true;
 }}

@@ -347,7 +347,7 @@ if (count($estimateVersions) > 0) {
     </div>
 
     <div class="flex items-center gap-2">
-        <a href="<?php echo h(base_url()); ?>/?r=공무"
+        <a href="<?php echo h(base_url()); ?>/?r=공무&tab=project_manage"
            class="px-4 py-2 rounded-2xl bg-gray-100 text-gray-900 font-bold hover:bg-gray-200 transition">
             ← 목록
         </a>

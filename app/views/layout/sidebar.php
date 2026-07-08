@@ -12,6 +12,7 @@ $constructionMenu = '공사';
 $safetyMenu = '안전/보건';
 $qualityMenu = '품질';
 $companyProfitMenu = '경영현황';
+$schedulerMenu = urldecode('%EC%8A%A4%EC%BC%80%EC%A4%84%EB%9F%AC');
 
 $route = isset($_GET['r']) ? (string)$_GET['r'] : $dashboardMenu;
 $selectedMenu = isset($selectedMenu) ? (string)$selectedMenu : $route;
@@ -71,6 +72,7 @@ $userDept = implode(' · ', $parts);
 
 $menuItems = array(
   array('id'=>$dashboardMenu,'label'=>$dashboardMenu,'icon'=>'layout-dashboard','gradient'=>'from-blue-500 to-cyan-500','iconBg'=>'bg-gradient-to-br from-blue-100 to-cyan-100','iconColor'=>'text-blue-600','hoverShadow'=>'hover:shadow-blue-200'),
+  array('id'=>$schedulerMenu,'label'=>$schedulerMenu,'href'=>'?r=scheduler','icon'=>'calendar-days','gradient'=>'from-teal-500 to-cyan-500','iconBg'=>'bg-gradient-to-br from-teal-100 to-cyan-100','iconColor'=>'text-teal-600','hoverShadow'=>'hover:shadow-teal-200'),
   array('id'=>$noticeMenu,'label'=>$noticeMenu,'icon'=>'megaphone','gradient'=>'from-sky-500 to-blue-500','iconBg'=>'bg-gradient-to-br from-sky-100 to-blue-100','iconColor'=>'text-sky-600','hoverShadow'=>'hover:shadow-sky-200'),
   array('id'=>$approvalMenu,'label'=>$approvalMenu,'icon'=>'file-check','gradient'=>'from-indigo-500 to-purple-500','iconBg'=>'bg-gradient-to-br from-indigo-100 to-purple-100','iconColor'=>'text-indigo-600','hoverShadow'=>'hover:shadow-indigo-200'),
   array('id'=>$workMenu,'label'=>$workMenu,'icon'=>'scroll-text','gradient'=>'from-orange-500 to-amber-500','iconBg'=>'bg-gradient-to-br from-orange-100 to-amber-100','iconColor'=>'text-orange-600','hoverShadow'=>'hover:shadow-orange-200'),
@@ -126,7 +128,7 @@ if ($selectedMenu === $dashboardMenu) {
     <ul class="space-y-2">
       <?php foreach ($menuItems as $it): ?>
         <?php $isSelected = ($selectedMenu === $it['id']); ?>
-        <?php $itemHref = ($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id'])); ?>
+        <?php $itemHref = isset($it['href']) ? (string)$it['href'] : (($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id']))); ?>
         <li>
           <a
             href="<?php echo h($itemHref); ?>"
@@ -149,7 +151,7 @@ if ($selectedMenu === $dashboardMenu) {
     <ul class="space-y-2">
       <?php foreach ($menuItems as $it): ?>
         <?php $isSelected = ($selectedMenu === $it['id']); ?>
-        <?php $itemHref = ($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id'])); ?>
+        <?php $itemHref = isset($it['href']) ? (string)$it['href'] : (($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id']))); ?>
         <li>
           <a
             href="<?php echo h($itemHref); ?>"
@@ -254,6 +256,7 @@ if ($selectedMenu === $dashboardMenu) {
 
     $mobileNavItems = array(
       array('menu' => 'dashboard', 'label' => '대시보드', 'icon' => 'layout-dashboard', 'href' => ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee')),
+      array('menu' => 'scheduler', 'label' => $schedulerMenu, 'icon' => 'calendar-days', 'href' => '?r=scheduler'),
       array('menu' => 'approval', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
     );
     if (\App\Core\Auth::canAccessConstruction()) {

@@ -94,9 +94,10 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
         && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId
         && in_array(isset($item['status']) ? (string)$item['status'] : '', array('meeting_available', 'meeting_unavailable'), true);
     $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
-    $isRequester = ((int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId);
+    $isRequester = ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($item) === (int)$currentEmployeeId);
     $canRequesterAct = $requestedMode && $isRequester && $currentStatus === 'completion_pending';
     $canEditDue = $requestedMode && $isRequester && !in_array($currentStatus, array('done', 'cancelled'), true);
+    $canEditContent = $requestedMode && $isRequester && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !in_array($currentStatus, array('done', 'cancelled'), true);
     $hasProjectName = isset($item['project_name']) && trim((string)$item['project_name']) !== '';
     $dueText = '-';
     if (isset($item['due_date']) && trim((string)$item['due_date']) !== '') {
@@ -170,6 +171,9 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
             <?php endif; ?>
             <?php if ($canEditDue && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
                 <button type="button" data-task-due-open data-task-id="<?php echo (int)$item['source_id']; ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-slate-700 text-sm font-bold">마감 수정</button>
+            <?php endif; ?>
+            <?php if ($canEditContent): ?>
+                <button type="button" data-task-content-open data-task-id="<?php echo (int)$item['source_id']; ?>" data-task-title="<?php echo h(isset($item['title']) ? $item['title'] : ''); ?>" data-task-content="<?php echo h(isset($item['content']) ? $item['content'] : ''); ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-slate-700 text-sm font-bold">업무 수정</button>
             <?php endif; ?>
             <?php if ($canRequesterAct && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
                 <form method="post" action="?r=tasks/completion_approve" class="inline">
@@ -380,9 +384,10 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $retu
     }
     $isRead = isset($item['read_at']) && trim((string)$item['read_at']) !== '';
     $currentStatus = isset($item['status']) ? (string)$item['status'] : '';
-    $isRequester = ((int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId);
+    $isRequester = ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($item) === (int)$currentEmployeeId);
     $canRequesterAct = $isRequester && $currentStatus === 'completion_pending';
     $canEditDue = $isRequester && !in_array($currentStatus, array('done', 'cancelled'), true);
+    $canEditContent = $isRequester && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !in_array($currentStatus, array('done', 'cancelled'), true);
     ?>
     <article class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm shadow-gray-100" data-requested-task-card draggable="false">
         <div class="flex items-start justify-between gap-2">
@@ -413,6 +418,9 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $retu
             <button type="button" data-task-detail-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">상세</button>
             <?php if ($canEditDue): ?>
                 <button type="button" data-task-due-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-slate-700 text-sm font-extrabold">마감 수정</button>
+            <?php endif; ?>
+            <?php if ($canEditContent): ?>
+                <button type="button" data-task-content-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" data-task-title="<?php echo h(isset($item['title']) ? $item['title'] : ''); ?>" data-task-content="<?php echo h(isset($item['content']) ? $item['content'] : ''); ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-slate-700 text-sm font-extrabold">업무 수정</button>
             <?php endif; ?>
             <?php if ($canRequesterAct): ?>
                 <form method="post" action="?r=tasks/completion_approve" class="inline-flex">
@@ -1615,7 +1623,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                     <div class="text-2xl font-extrabold text-gray-900">마감 수정</div>
                     <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="taskDueUpdate">닫기</button>
                 </div>
-                <form method="post" action="?r=tasks/due_update" class="p-6 space-y-4">
+                <form method="post" action="?r=task_due_save" class="p-6 space-y-4">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" id="taskDueUpdateTaskId" value="">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
@@ -1635,6 +1643,39 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                     </div>
                     <div class="flex justify-end gap-2">
                         <button type="button" class="px-4 py-3 rounded-2xl border border-gray-200 font-bold" data-modal-close="taskDueUpdate">취소</button>
+                        <button type="submit" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">저장</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-taskContentUpdate" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/40" data-modal-close="taskContentUpdate"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="w-full max-w-2xl rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                    <div class="text-2xl font-extrabold text-gray-900">업무 수정</div>
+                    <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="taskContentUpdate">닫기</button>
+                </div>
+                <form method="post" action="?r=task_content_save" class="p-6 space-y-4">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" id="taskContentUpdateTaskId" value="">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <div>
+                        <div class="text-sm font-bold text-gray-700 mb-1">업무 제목</div>
+                        <input type="text" name="title" id="taskContentUpdateTitle" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                    </div>
+                    <div>
+                        <div class="text-sm font-bold text-gray-700 mb-1">업무 내용</div>
+                        <textarea name="content" id="taskContentUpdateContent" rows="6" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></textarea>
+                    </div>
+                    <div>
+                        <div class="text-sm font-bold text-gray-700 mb-1">수정 메모</div>
+                        <textarea name="message" id="taskContentUpdateMessage" rows="3" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="수정 사유를 남길 수 있습니다."></textarea>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-3 rounded-2xl border border-gray-200 font-bold" data-modal-close="taskContentUpdate">취소</button>
                         <button type="submit" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">저장</button>
                     </div>
                 </form>
@@ -1670,6 +1711,10 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
         var dueUpdateTaskId = document.getElementById('taskDueUpdateTaskId');
         var dueUpdateDueDate = document.getElementById('taskDueUpdateDueDate');
         var dueUpdateDueTime = document.getElementById('taskDueUpdateDueTime');
+        var contentUpdateTaskId = document.getElementById('taskContentUpdateTaskId');
+        var contentUpdateTitle = document.getElementById('taskContentUpdateTitle');
+        var contentUpdateContent = document.getElementById('taskContentUpdateContent');
+        var contentUpdateMessage = document.getElementById('taskContentUpdateMessage');
 
         function todayString() {
             var now = new Date();
@@ -1937,6 +1982,15 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                 if (message) message.value = '';
                 modal.classList.remove('hidden');
             }
+        }
+
+        function openContentUpdateModal(taskId, title, content) {
+            if (contentUpdateTaskId) contentUpdateTaskId.value = taskId || '';
+            if (contentUpdateTitle) contentUpdateTitle.value = title || '';
+            if (contentUpdateContent) contentUpdateContent.value = content || '';
+            if (contentUpdateMessage) contentUpdateMessage.value = '';
+            var modal = document.getElementById('modal-taskContentUpdate');
+            if (modal) modal.classList.remove('hidden');
         }
 
         function encodeFormData(form) {
@@ -2559,6 +2613,17 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                     dueButton.getAttribute('data-task-id'),
                     dueButton.getAttribute('data-task-due-date'),
                     dueButton.getAttribute('data-task-due-time')
+                );
+                return;
+            }
+
+            var contentButton = e.target && e.target.closest ? e.target.closest('[data-task-content-open]') : null;
+            if (contentButton) {
+                e.preventDefault();
+                openContentUpdateModal(
+                    contentButton.getAttribute('data-task-id'),
+                    contentButton.getAttribute('data-task-title'),
+                    contentButton.getAttribute('data-task-content')
                 );
                 return;
             }
