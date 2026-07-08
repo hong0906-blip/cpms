@@ -342,9 +342,9 @@ class Auth
         $role = self::userRole();
         if ($role === 'executive') return true;
 
-        $dept = self::userDepartment();
+        $dept = self::normalizeDept(self::userDepartment());
         // 기존 데이터(관리부) + 신규 데이터(관리) 모두 허용
-        return ($dept === '관리' || $dept === '관리부');
+        return ($dept === '관리');
     }
 
     // ★ 월급 설정 가능: 임원 OR 관리(관리부)
@@ -377,6 +377,10 @@ class Auth
 
     public static function canAssignExecutiveRole()
     {
+        if (!self::check()) return false;
+        if (self::isMaster()) return true;
+        $dept = self::normalizeDept(self::userDepartment());
+        if ($dept === '관리') return true;
         return self::canAssignDevelopmentDepartment();
     }
 
@@ -528,6 +532,7 @@ class Auth
         $map = array(
             '관리부' => '관리',
             '관리팀' => '관리',
+            '관리부서' => '관리',
             '공무부' => '공무',
             '공무팀' => '공무',
             '품질부' => '품질',

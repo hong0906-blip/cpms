@@ -243,28 +243,27 @@ function cpms_employee_team_dept_key($dept) {
         'quality' => urldecode('%ED%92%88%EC%A7%88')
     );
     foreach ($map as $key => $label) {
-        if ($dept === $label) return ($key === 'safety' || $key === 'health') ? 'quality' : $key;
+        if ($dept === $label) return $key;
     }
     return '';
 }}
 
 $teamLeaderCandidates = array();
-if ($dbOk && ($isTeamLeaderEnabled || $teamLeaderEnabled)) {
+if ($dbOk) {
     try {
         $positionSelect2 = $positionEnabled ? 'position' : "'' AS position";
         $isTeamLeaderSelect2 = $isTeamLeaderEnabled ? 'is_team_leader' : '0 AS is_team_leader';
         $approvalLeadSelect2 = $teamLeaderEnabled ? 'approval_can_be_team_leader' : '0 AS approval_can_be_team_leader';
-        $where = array();
-        if ($isTeamLeaderEnabled) $where[] = 'is_team_leader=1';
-        if ($teamLeaderEnabled) $where[] = 'approval_can_be_team_leader=1';
-        $sqlLead = "SELECT id,name,department,{$positionSelect2},{$isTeamLeaderSelect2},{$approvalLeadSelect2} FROM employees WHERE is_active=1 AND (" . implode(' OR ', $where) . ") ORDER BY department ASC, name ASC";
+        $isTeamLeaderOrder = $isTeamLeaderEnabled ? 'is_team_leader' : '0';
+        $approvalLeadOrder = $teamLeaderEnabled ? 'approval_can_be_team_leader' : '0';
+        $sqlLead = "SELECT id,name,department,{$positionSelect2},{$isTeamLeaderSelect2},{$approvalLeadSelect2} FROM employees WHERE is_active=1 ORDER BY department ASC, CASE WHEN {$isTeamLeaderOrder}=1 OR {$approvalLeadOrder}=1 THEN 0 ELSE 1 END ASC, name ASC";
         $teamLeaderCandidates = $pdo->query($sqlLead)->fetchAll();
         if (!is_array($teamLeaderCandidates)) $teamLeaderCandidates = array();
     } catch (\Exception $e) {
         $teamLeaderCandidates = array();
     }
 }
-$teamLeaderOptionsHtml = '<option value="">(팀장 선택 없음)</option>';
+$teamLeaderOptionsHtml = '<option value="">(나의 팀장 선택 없음)</option>';
 for ($i = 0; $i < count($teamLeaderCandidates); $i++) {
     $tl = $teamLeaderCandidates[$i];
     $tlId = isset($tl['id']) ? (int)$tl['id'] : 0;
@@ -341,36 +340,62 @@ function insertAfterInput(selector, html) {
     if (el && el.parentNode && el.parentNode.insertAdjacentHTML) el.parentNode.insertAdjacentHTML('afterend', html);
 }
 var teamLeaderOptions = <?php echo json_encode($teamLeaderOptionsHtml); ?>;
+var teamDepartmentKeys = <?php $teamDepartmentKeys = array(); foreach ($deptOptions as $d) { $teamDepartmentKeys[$d] = cpms_employee_team_dept_key($d); } echo json_encode($teamDepartmentKeys); ?>;
 insertAfterInput('#modal-empAdd input[name=approval_can_be_team_leader]', '<label class="block"><input type="checkbox" name="approval_can_be_construction_pm" id="empAddCanConstructionPm" value="1"> 공사PM 결재자</label>');
 insertAfterInput('#empEditCanLead', '<label class="block"><input type="checkbox" name="approval_can_be_construction_pm" id="empEditCanConstructionPm" value="1"> 공사PM 결재자</label>');
-insertAfterId('empAddBirthDate', '<div class="border rounded-2xl p-3 space-y-2"><div class="font-bold">팀장 설정</div><label class="block text-sm font-semibold">팀장 여부</label><select class="w-full px-4 py-2 border rounded-2xl" name="is_team_leader" id="empAddIsTeamLeader"><option value="0">일반 직원</option><option value="1">팀장</option></select><label class="block text-sm font-semibold">팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="team_leader_id" id="empAddTeamLeaderId">' + teamLeaderOptions + '</select><div class="text-xs text-gray-500">공사 직원은 현장별 팀장을 선택하면 결재라인에 해당 팀장이 적용됩니다.</div></div>');
-insertAfterId('empEditBirthDate', '<div class="border rounded-2xl p-3 space-y-2"><div class="font-bold">팀장 설정</div><label class="block text-sm font-semibold">팀장 여부</label><select class="w-full px-4 py-2 border rounded-2xl" name="is_team_leader" id="empEditIsTeamLeader"><option value="0">일반 직원</option><option value="1">팀장</option></select><label class="block text-sm font-semibold">팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="team_leader_id" id="empEditTeamLeaderId">' + teamLeaderOptions + '</select><div class="text-xs text-gray-500">공사 직원은 현장별 팀장을 선택하면 결재라인에 해당 팀장이 적용됩니다.</div></div>');
+insertAfterId('empAddBirthDate', '<div class="border rounded-2xl p-3 space-y-2"><div class="font-bold">팀장 설정</div><label class="block text-sm font-semibold">팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="is_team_leader" id="empAddIsTeamLeader"><option value="0">일반 직원</option><option value="1">팀장</option></select><label class="block text-sm font-semibold">나의 팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="team_leader_id" id="empAddTeamLeaderId">' + teamLeaderOptions + '</select><div class="text-xs text-gray-500">선택한 팀장은 전자결재 결재라인에 우선 적용됩니다.</div></div>');
+insertAfterId('empEditBirthDate', '<div class="border rounded-2xl p-3 space-y-2"><div class="font-bold">팀장 설정</div><label class="block text-sm font-semibold">팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="is_team_leader" id="empEditIsTeamLeader"><option value="0">일반 직원</option><option value="1">팀장</option></select><label class="block text-sm font-semibold">나의 팀장 선택</label><select class="w-full px-4 py-2 border rounded-2xl" name="team_leader_id" id="empEditTeamLeaderId">' + teamLeaderOptions + '</select><div class="text-xs text-gray-500">선택한 팀장은 전자결재 결재라인에 우선 적용됩니다.</div></div>');
 function syncTeamLeaderFields(prefix) {
     var leader = document.getElementById(prefix + 'TeamLeaderId');
     if (!leader) return;
     leader.disabled = false;
 }
 function teamDeptKey(value) {
+    var rawValue = value || '';
+    if (teamDepartmentKeys && Object.prototype.hasOwnProperty.call(teamDepartmentKeys, rawValue)) {
+        return teamDepartmentKeys[rawValue] || '';
+    }
     value = (value || '').replace(/\s/g, '');
     value = value.replace(/(부|팀)$/, '');
     if (value === '공무') return 'gongmu';
     if (value === '관리') return 'manage';
     if (value === '공사') return 'construction';
     if (value === '품질') return 'quality';
-    if (value === '안전' || value === '보건') return 'quality';
+    if (value === '안전') return 'safety';
+    if (value === '보건') return 'health';
     return '';
+}
+function teamDeptAllows(key, optKey) {
+    if (key === '' || optKey === '') return true;
+    if (key === optKey) return true;
+    if (key === 'safety' || key === 'health') {
+        return optKey === 'construction' || optKey === 'safety' || optKey === 'health' || optKey === 'quality';
+    }
+    if (key === 'quality') {
+        return optKey === 'quality' || optKey === 'safety' || optKey === 'health';
+    }
+    return false;
 }
 function filterTeamLeaderOptions(prefix) {
     var leader = document.getElementById(prefix + 'TeamLeaderId');
     if (!leader) return;
     var deptEl = prefix === 'empEdit' ? document.getElementById('empEditDept') : document.querySelector('#modal-empAdd select[name=department]');
     var key = teamDeptKey(deptEl ? deptEl.value : '');
+    var currentId = '';
+    if (prefix === 'empEdit') {
+        var currentIdEl = document.getElementById('empEditId');
+        currentId = currentIdEl ? currentIdEl.value : '';
+    }
+    var selectedVisible = (leader.value === '');
     for (var i = 0; i < leader.options.length; i++) {
         var option = leader.options[i];
         var optKey = option.getAttribute('data-team-dept') || '';
-        var visible = option.value === '' || key === '' || optKey === key || option.selected;
+        var visible = option.value === '' || teamDeptAllows(key, optKey);
+        if (currentId !== '' && option.value === currentId) visible = false;
+        if (option.selected && visible) selectedVisible = true;
         option.style.display = visible ? '' : 'none';
     }
+    if (!selectedVisible) leader.value = '';
 }
 syncTeamLeaderFields('empAdd');
 syncTeamLeaderFields('empEdit');

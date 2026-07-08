@@ -113,11 +113,36 @@ if (!function_exists('approval_line_rules_department_key')) {
 if (!function_exists('approval_line_rules_team_department_key')) {
     function approval_line_rules_team_department_key($department)
     {
+        return approval_line_rules_department_key($department);
+    }
+}
+
+if (!function_exists('approval_line_rules_team_department_keys')) {
+    function approval_line_rules_team_department_keys($department)
+    {
         $key = approval_line_rules_department_key($department);
         if ($key === 'safety' || $key === 'health') {
-            return 'quality';
+            return array('construction', 'safety', 'health', 'quality');
         }
-        return $key;
+        if ($key === 'quality') {
+            return array('quality', 'safety', 'health');
+        }
+        return array($key);
+    }
+}
+
+if (!function_exists('approval_line_rules_normalize_target_keys')) {
+    function approval_line_rules_normalize_target_keys($targetKey)
+    {
+        $values = is_array($targetKey) ? $targetKey : array($targetKey);
+        $result = array();
+        for ($i = 0; $i < count($values); $i++) {
+            $key = trim((string)$values[$i]);
+            if ($key !== '' && !in_array($key, $result, true)) {
+                $result[] = $key;
+            }
+        }
+        return $result;
     }
 }
 
@@ -129,6 +154,19 @@ if (!function_exists('approval_line_rules_employee_department_matches')) {
         }
         $dept = isset($employee['department']) ? $employee['department'] : '';
         return approval_line_rules_department_key($dept) === $targetKey;
+    }
+}
+
+if (!function_exists('approval_line_rules_employee_department_matches_any')) {
+    function approval_line_rules_employee_department_matches_any($employee, $targetKeys)
+    {
+        $keys = approval_line_rules_normalize_target_keys($targetKeys);
+        for ($i = 0; $i < count($keys); $i++) {
+            if (approval_line_rules_employee_department_matches($employee, $keys[$i])) {
+                return true;
+            }
+        }
+        return false;
     }
 }
 
@@ -174,7 +212,8 @@ if (!function_exists('approval_line_rules_requires_manual_team_leader')) {
         if (!is_array($employee) || approval_line_rules_is_marked_team_leader($employee) || approval_employee_is_executive($employee)) {
             return false;
         }
-        return approval_line_rules_department_key(isset($employee['department']) ? $employee['department'] : '') === 'construction';
+        $deptKey = approval_line_rules_department_key(isset($employee['department']) ? $employee['department'] : '');
+        return in_array($deptKey, array('construction', 'safety', 'health'), true);
     }
 }
 
@@ -186,7 +225,8 @@ if (!function_exists('approval_line_rules_requires_manual_team_leader_for_doc'))
             if (!is_array($employee) || approval_line_rules_is_team_leader_candidate($employee) || approval_employee_is_executive($employee)) {
                 return false;
             }
-            return approval_line_rules_department_key(isset($employee['department']) ? $employee['department'] : '') === 'construction';
+            $deptKey = approval_line_rules_department_key(isset($employee['department']) ? $employee['department'] : '');
+            return in_array($deptKey, array('construction', 'safety', 'health'), true);
         }
         return approval_line_rules_requires_manual_team_leader($employee);
     }
@@ -195,24 +235,32 @@ if (!function_exists('approval_line_rules_requires_manual_team_leader_for_doc'))
 if (!function_exists('approval_line_rules_team_leader_candidates')) {
     function approval_line_rules_team_leader_candidates($pdo, $targetKey, $creatorId)
     {
-        $result = array();
+        $preferred = array();
+        $others = array();
         $seen = array();
         $employees = approval_line_rules_all_employees($pdo);
-        $targetKey = trim((string)$targetKey);
+        $targetKeys = approval_line_rules_normalize_target_keys($targetKey);
         $creatorId = (int)$creatorId;
         for ($i = 0; $i < count($employees); $i++) {
             $employee = $employees[$i];
             $id = isset($employee['id']) ? (int)$employee['id'] : 0;
-            if ($id <= 0 || $id === $creatorId || isset($seen[$id]) || !approval_line_rules_is_team_leader_candidate($employee)) {
+            if ($id <= 0 || $id === $creatorId || isset($seen[$id])) {
                 continue;
             }
-            if (!approval_line_rules_employee_department_matches($employee, $targetKey)) {
+            if (approval_employee_is_executive($employee)) {
+                continue;
+            }
+            if (!approval_line_rules_employee_department_matches_any($employee, $targetKeys)) {
                 continue;
             }
             $seen[$id] = 1;
-            $result[] = $employee;
+            if (approval_line_rules_is_team_leader_candidate($employee)) {
+                $preferred[] = $employee;
+            } else {
+                $others[] = $employee;
+            }
         }
-        return $result;
+        return array_merge($preferred, $others);
     }
 }
 
@@ -226,19 +274,19 @@ if (!function_exists('approval_line_rules_find_team_leader')) {
         $creatorId = isset($creator['id']) ? (int)$creator['id'] : 0;
         $teamLeaderId = isset($creator['team_leader_id']) ? (int)$creator['team_leader_id'] : 0;
         $creatorDeptKey = approval_line_rules_department_key(isset($creator['department']) ? $creator['department'] : '');
-        $targetKey = approval_line_rules_team_department_key(isset($creator['department']) ? $creator['department'] : '');
+        $targetKeys = approval_line_rules_team_department_keys(isset($creator['department']) ? $creator['department'] : '');
         if ($teamLeaderId > 0 && $teamLeaderId !== $creatorId) {
             $selected = approval_line_rules_fetch_employee($pdo, $teamLeaderId);
-            if ($selected && approval_line_rules_is_team_leader_candidate($selected) && approval_line_rules_employee_department_matches($selected, $targetKey)) {
+            if ($selected && !approval_employee_is_executive($selected) && approval_line_rules_employee_department_matches_any($selected, $targetKeys)) {
                 $result['employee'] = $selected;
                 return $result;
             }
-            if ($creatorDeptKey === 'construction') {
-                $result['messages'][] = approval_ko('%EA%B3%B5%EC%82%AC%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%EC%9E%91%EC%84%B1%20%ED%99%94%EB%A9%B4%EC%97%90%EC%84%9C%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.');
+            if (in_array($creatorDeptKey, array('construction', 'safety', 'health'), true)) {
+                $result['messages'][] = approval_ko('%ED%95%B4%EB%8B%B9%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%EC%9E%91%EC%84%B1%20%ED%99%94%EB%A9%B4%EC%97%90%EC%84%9C%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.');
                 return $result;
             }
-        } else if ($creatorDeptKey === 'construction') {
-            $result['messages'][] = approval_ko('%EA%B3%B5%EC%82%AC%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%EC%9E%91%EC%84%B1%20%ED%99%94%EB%A9%B4%EC%97%90%EC%84%9C%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.');
+        } else if (in_array($creatorDeptKey, array('construction', 'safety', 'health'), true)) {
+            $result['messages'][] = approval_ko('%ED%95%B4%EB%8B%B9%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%EC%9E%91%EC%84%B1%20%ED%99%94%EB%A9%B4%EC%97%90%EC%84%9C%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.');
             return $result;
         }
 
@@ -247,7 +295,7 @@ if (!function_exists('approval_line_rules_find_team_leader')) {
             for ($i = 0; $i < count($employees); $i++) {
                 $employee = $employees[$i];
                 $id = isset($employee['id']) ? (int)$employee['id'] : 0;
-                if ($id <= 0 || $id === $creatorId || !approval_line_rules_employee_department_matches($employee, $targetKey)) {
+                if ($id <= 0 || $id === $creatorId || approval_employee_is_executive($employee) || !approval_line_rules_employee_department_matches_any($employee, $targetKeys)) {
                     continue;
                 }
                 if ($pass === 1 && approval_line_rules_is_marked_team_leader($employee)) {
@@ -616,7 +664,7 @@ if (!function_exists('approval_line_rules_build')) {
         }
 
         $teamLead = null;
-        $skipTeamStep = $isProposalDoc ? $isTeamLeader : ($isTeamLeader && !$hasAssignedTeamLeader);
+        $skipTeamStep = $isTeamLeader;
         if ($skipTeamStep) {
             $messages[] = approval_ko('%EC%9E%91%EC%84%B1%EC%9E%90%EA%B0%80%20%ED%8C%80%EC%9E%A5%EC%9C%BC%EB%A1%9C%20%EC%A7%80%EC%A0%95%EB%90%98%EC%96%B4%20%ED%8C%80%EC%9E%A5%20%EA%B2%B0%EC%9E%AC%20%EB%8B%A8%EA%B3%84%EB%A5%BC%20%EA%B1%B4%EB%84%88%EB%9B%B0%EC%97%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
         } else {

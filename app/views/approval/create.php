@@ -257,7 +257,8 @@ $ruleCreator = !empty($myEmp) ? $myEmp : array(
 );
 $requiresTeamLeaderSelect = approval_line_rules_requires_manual_team_leader_for_doc($ruleCreator, $type) ? 1 : 0;
 $selectedTeamLeaderId = isset($ruleCreator['team_leader_id']) ? (int)$ruleCreator['team_leader_id'] : 0;
-$teamLeaderCandidates = $requiresTeamLeaderSelect ? approval_line_rules_team_leader_candidates($pdo, 'construction', $creatorEmployeeId) : array();
+$teamLeaderTargetKeys = approval_line_rules_team_department_keys(isset($ruleCreator['department']) ? $ruleCreator['department'] : '');
+$teamLeaderCandidates = $requiresTeamLeaderSelect ? approval_line_rules_team_leader_candidates($pdo, $teamLeaderTargetKeys, $creatorEmployeeId) : array();
 $lineRuleResult = array('lines' => array(), 'messages' => array(), 'warnings' => array());
 if (!$isManagementOnlyDoc) {
     $lineRuleResult = approval_line_rules_build($pdo, $type, $ruleCreator, $init);

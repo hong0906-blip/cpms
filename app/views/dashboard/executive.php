@@ -275,6 +275,24 @@ $hideFromTodayAttendanceCards = function ($person) {
     return ($position !== '' && strpos($position, '대표') !== false);
 };
 
+$hideFromTodayAbsentCards = function ($person) {
+    $name = '';
+    if (is_array($person) && isset($person['name'])) {
+        $name = trim((string)$person['name']);
+    }
+    $name = str_replace(array(' ', "\t", "\r", "\n"), '', $name);
+    $hiddenNames = array(
+        attendance_text('%EC%9D%B4%ED%98%B8%EC%83%81'),
+        attendance_text('%EB%85%B8%EC%A4%80%ED%98%95')
+    );
+    for ($i = 0; $i < count($hiddenNames); $i++) {
+        if ($name === str_replace(array(' ', "\t", "\r", "\n"), '', $hiddenNames[$i])) {
+            return true;
+        }
+    }
+    return false;
+};
+
 $attendanceTimeLabel = function ($value) {
     $value = trim((string)$value);
     if ($value === '') return '-';
@@ -384,6 +402,7 @@ if ($pdo) {
                 continue;
             }
             if (isset($attMap[$eid]) || isset($leaveExMap[$eid])) continue;
+            if ($hideFromTodayAbsentCards($ar)) continue;
             $absent[] = array(
                 'name' => $ar['name'],
                 'department' => $ar['department'],

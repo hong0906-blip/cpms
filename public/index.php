@@ -987,6 +987,18 @@ if ($route === 'tasks/complete') {
     require_once __DIR__ . '/../app/views/tasks/complete.php';
     exit;
 }
+if ($route === 'tasks/completion_approve') {
+    require_once __DIR__ . '/../app/views/tasks/completion_approve.php';
+    exit;
+}
+if ($route === 'tasks/completion_reject') {
+    require_once __DIR__ . '/../app/views/tasks/completion_reject.php';
+    exit;
+}
+if ($route === 'tasks/due_update') {
+    require_once __DIR__ . '/../app/views/tasks/due_update.php';
+    exit;
+}
 if ($route === 'tasks/transfer') {
     require_once __DIR__ . '/../app/views/tasks/transfer.php';
     exit;

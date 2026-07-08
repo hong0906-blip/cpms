@@ -254,7 +254,7 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
         for ($i = 0; $i < count($rows); $i++) {
             $row = $rows[$i];
             $groupKey = isset($row['group_key']) ? trim((string)$row['group_key']) : '';
-            $key = $groupKey !== '' ? 'group:' . $groupKey : 'task:' . (isset($row['source_id']) ? (int)$row['source_id'] : 0);
+            $key = ($groupKey !== '' && strpos($groupKey, 'task_request:') !== 0) ? 'group:' . $groupKey : 'task:' . (isset($row['source_id']) ? (int)$row['source_id'] : 0);
             if (!isset($grouped[$key])) {
                 $grouped[$key] = array(
                     'row' => $row,
@@ -363,7 +363,7 @@ function cpms_task_feed_completed_requests_for_employee($pdo, $employeeId)
         for ($i = 0; $i < count($tasks); $i++) {
             $task = $tasks[$i];
             $groupKey = isset($task['group_key']) ? trim((string)$task['group_key']) : '';
-            $key = $groupKey !== '' ? 'group:' . $groupKey : 'task:' . (isset($task['id']) ? (int)$task['id'] : 0);
+            $key = ($groupKey !== '' && strpos($groupKey, 'task_request:') !== 0) ? 'group:' . $groupKey : 'task:' . (isset($task['id']) ? (int)$task['id'] : 0);
             if (isset($seen[$key])) continue;
             $seen[$key] = true;
             $fileCounts = cpms_tasks_file_counts_for_task($pdo, isset($task['id']) ? (int)$task['id'] : 0);
@@ -898,12 +898,56 @@ function cpms_task_feed_for_employee($pdo, $employeeId, $employeeEmail, $employe
     return $cache[$cacheKey];
 }}
 
+if (!function_exists('cpms_task_feed_employee_can_view_executive_dashboard')) {
+function cpms_task_feed_employee_can_view_executive_dashboard($employee)
+{
+    if (!is_array($employee)) return false;
+
+    $role = trim(isset($employee['role']) ? (string)$employee['role'] : '');
+    if ($role === 'executive') return true;
+
+    $department = cpms_tasks_normalize_department(isset($employee['department']) ? $employee['department'] : '');
+    if ($department === '개발') return true;
+
+    $email = strtolower(trim(isset($employee['email']) ? (string)$employee['email'] : ''));
+    $executiveEmails = array(
+        'chairman@cmbuild.kr',
+        'ceo@cmbuild.kr',
+        'shinbad@cmbuild.kr',
+        'hcsong@cmbuild.kr',
+        'ybkang@cmbuild.kr',
+        'sjw5523@cmbuild.kr',
+        'emaetal@cmbuild.kr',
+        'shhong@cmbuild.kr',
+    );
+
+    return ($email !== '' && in_array($email, $executiveEmails, true));
+}}
+
+if (!function_exists('cpms_task_feed_exclude_from_executive_group')) {
+function cpms_task_feed_exclude_from_executive_group($employee)
+{
+    if (!is_array($employee)) return false;
+
+    $department = cpms_tasks_normalize_department(isset($employee['department']) ? $employee['department'] : '');
+    if ($department === '개발') return true;
+
+    $values = array(
+        isset($employee['name']) ? (string)$employee['name'] : '',
+        isset($employee['position']) ? (string)$employee['position'] : '',
+        $department,
+    );
+    for ($i = 0; $i < count($values); $i++) {
+        if (strpos($values[$i], '대표') !== false) return true;
+    }
+
+    return false;
+}}
+
 if (!function_exists('cpms_task_feed_hide_executive_employee')) {
 function cpms_task_feed_hide_executive_employee($employee)
 {
-    $name = trim(isset($employee['name']) ? (string)$employee['name'] : '');
-    if ($name === '') return false;
-    return (strpos($name, '노욱형') !== false);
+    return cpms_task_feed_exclude_from_executive_group($employee);
 }}
 
 if (!function_exists('cpms_task_feed_for_executive')) {
@@ -926,6 +970,8 @@ function cpms_task_feed_for_executive($pdo, $filters)
     if (!$pdo) return $result;
 
     $selectedDepartment = isset($filters['department']) ? cpms_tasks_normalize_department($filters['department']) : '';
+    if ($selectedDepartment === '임원') $selectedDepartment = '기타';
+    $isExecutiveDepartmentSelected = ($selectedDepartment === '기타');
     $employees = cpms_tasks_fetch_active_employees($pdo);
     $departmentSeed = cpms_tasks_department_options();
     foreach ($departmentSeed as $departmentName) {
@@ -942,12 +988,20 @@ function cpms_task_feed_for_executive($pdo, $filters)
 
     foreach ($employees as $employee) {
         $employeeId = isset($employee['id']) ? (int)$employee['id'] : 0;
-        if (cpms_task_feed_hide_executive_employee($employee)) {
-            continue;
-        }
         $department = cpms_tasks_normalize_department(isset($employee['department']) ? $employee['department'] : '');
-        if ($selectedDepartment !== '' && $selectedDepartment !== '전체' && $department !== $selectedDepartment) {
-            continue;
+        $departmentForMetrics = $department;
+        if ($isExecutiveDepartmentSelected) {
+            if (!cpms_task_feed_employee_can_view_executive_dashboard($employee)) {
+                continue;
+            }
+            if (cpms_task_feed_hide_executive_employee($employee)) {
+                continue;
+            }
+            $departmentForMetrics = '기타';
+        } else {
+            if ($selectedDepartment !== '' && $selectedDepartment !== '전체' && $department !== $selectedDepartment) {
+                continue;
+            }
         }
         $feed = cpms_task_feed_for_employee($pdo, $employeeId, isset($employee['email']) ? $employee['email'] : '', $employee);
         $metrics = array(
@@ -972,9 +1026,9 @@ function cpms_task_feed_for_executive($pdo, $filters)
             }
         }
 
-        if (!isset($result['departments'][$department])) {
-            $result['departments'][$department] = array(
-                'department' => $department,
+        if (!isset($result['departments'][$departmentForMetrics])) {
+            $result['departments'][$departmentForMetrics] = array(
+                'department' => $departmentForMetrics,
                 'today' => 0,
                 'done' => 0,
                 'progress' => 0,
@@ -983,12 +1037,12 @@ function cpms_task_feed_for_executive($pdo, $filters)
                 'due_soon' => 0,
             );
         }
-        $result['departments'][$department]['today'] += $metrics['today'];
-        $result['departments'][$department]['done'] += $metrics['done'];
-        $result['departments'][$department]['progress'] += $metrics['progress'];
-        $result['departments'][$department]['delayed'] += $metrics['delayed'];
-        $result['departments'][$department]['urgent'] += $metrics['urgent'];
-        $result['departments'][$department]['due_soon'] += $metrics['due_soon'];
+        $result['departments'][$departmentForMetrics]['today'] += $metrics['today'];
+        $result['departments'][$departmentForMetrics]['done'] += $metrics['done'];
+        $result['departments'][$departmentForMetrics]['progress'] += $metrics['progress'];
+        $result['departments'][$departmentForMetrics]['delayed'] += $metrics['delayed'];
+        $result['departments'][$departmentForMetrics]['urgent'] += $metrics['urgent'];
+        $result['departments'][$departmentForMetrics]['due_soon'] += $metrics['due_soon'];
 
         $result['summary']['today'] += $metrics['today'];
         $result['summary']['urgent'] += $metrics['urgent'];
@@ -999,7 +1053,7 @@ function cpms_task_feed_for_executive($pdo, $filters)
 
         $employeeRow = array(
             'employee' => $employee,
-            'department' => $department,
+            'department' => $departmentForMetrics,
             'metrics' => $metrics,
             'feed' => $feed,
         );

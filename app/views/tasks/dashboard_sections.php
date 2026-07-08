@@ -77,6 +77,7 @@ if (!function_exists('cpms_render_feed_card')) {
 function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requestedMode)
 {
     $statusKey = cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
+    $currentStatus = isset($item['status']) ? (string)$item['status'] : '';
     $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
     $isPublicAffairsCollab = isset($item['source_type']) && (string)$item['source_type'] === 'public_affairs_collab';
     $canRespondMeeting = $isMeetingTask
@@ -93,6 +94,9 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
         && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId
         && in_array(isset($item['status']) ? (string)$item['status'] : '', array('meeting_available', 'meeting_unavailable'), true);
     $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
+    $isRequester = ((int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId);
+    $canRequesterAct = $requestedMode && $isRequester && $currentStatus === 'completion_pending';
+    $canEditDue = $requestedMode && $isRequester && !in_array($currentStatus, array('done', 'cancelled'), true);
     $hasProjectName = isset($item['project_name']) && trim((string)$item['project_name']) !== '';
     $dueText = '-';
     if (isset($item['due_date']) && trim((string)$item['due_date']) !== '') {
@@ -161,11 +165,20 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
                     <button type="submit" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">대기</button>
                 </form>
             <?php endif; ?>
-            <?php if (($canCompleteMeeting || !$isMeetingTask) && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('done', 'cancelled'), true)): ?>
+            <?php if (($canCompleteMeeting || !$isMeetingTask) && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('completion_pending', 'done', 'cancelled'), true)): ?>
                 <button type="button" data-task-complete-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">완료</button>
             <?php endif; ?>
-            <?php if (isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && $requestedMode && (int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId && isset($item['status']) && (string)$item['status'] === 'done'): ?>
-                <button type="button" data-task-revision-open data-task-id="<?php echo (int)$item['source_id']; ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-amber-500 text-white text-sm font-bold">보완요청</button>
+            <?php if ($canEditDue && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
+                <button type="button" data-task-due-open data-task-id="<?php echo (int)$item['source_id']; ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-slate-700 text-sm font-bold">마감 수정</button>
+            <?php endif; ?>
+            <?php if ($canRequesterAct && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
+                <form method="post" action="?r=tasks/completion_approve" class="inline">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <button type="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">완료 승인</button>
+                </form>
+                <button type="button" data-task-completion-reject-open data-task-id="<?php echo (int)$item['source_id']; ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-bold">반려</button>
             <?php endif; ?>
         </div>
     </div>
@@ -242,6 +255,7 @@ function cpms_task_kanban_lane_key($item)
 {
     $status = isset($item['status']) ? (string)$item['status'] : 'pending';
     if ($status === 'done' || $status === 'completed') return 'done';
+    if ($status === 'completion_pending') return 'completion_pending';
     if ($status === 'rejected' || $status === 'cancelled' || $status === 'meeting_unavailable') return 'rejected';
     if (in_array($status, array('progress', 'processing', 'revision', 'meeting_available'), true)) return 'progress';
     return 'pending';
@@ -260,7 +274,7 @@ function cpms_task_kanban_unique_key($item)
 {
     if (!is_array($item)) return '';
     $groupKey = isset($item['group_key']) ? trim((string)$item['group_key']) : '';
-    if ($groupKey !== '') return 'group:' . $groupKey;
+    if ($groupKey !== '' && strpos($groupKey, 'task_request:') !== 0) return 'group:' . $groupKey;
     return (isset($item['source_type']) ? (string)$item['source_type'] : 'task') . ':' . (isset($item['source_id']) ? (int)$item['source_id'] : 0);
 }}
 
@@ -321,8 +335,8 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
         </div>
         <div class="mt-4 flex flex-wrap justify-end gap-2">
             <?php if ($canStatusAction): ?>
-                <button type="button" data-kanban-status-action="progress" data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-extrabold <?php echo $laneKey === 'progress' || $laneKey === 'done' ? 'hidden' : ''; ?>">진행중</button>
-                <button type="button" data-kanban-status-action="done" data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-extrabold <?php echo $laneKey === 'done' ? 'hidden' : ''; ?>">완료</button>
+                <button type="button" data-kanban-status-action="progress" data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-extrabold <?php echo $laneKey === 'progress' || $laneKey === 'completion_pending' || $laneKey === 'done' ? 'hidden' : ''; ?>">진행중</button>
+                <button type="button" data-kanban-status-action="done" data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-extrabold <?php echo $laneKey === 'completion_pending' || $laneKey === 'done' ? 'hidden' : ''; ?>">완료 요청</button>
             <?php endif; ?>
             <button type="button" data-task-detail-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">상세</button>
         </div>
@@ -353,7 +367,7 @@ function cpms_render_task_kanban_lane($laneKey, $title, $items, $currentEmployee
 }}
 
 if (!function_exists('cpms_render_requested_task_kanban_card')) {
-function cpms_render_requested_task_kanban_card($item, $currentEmployeeId)
+function cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $returnUrl)
 {
     $priority = isset($item['priority']) ? (string)$item['priority'] : 'normal';
     $isUrgent = (isset($item['is_urgent']) && (int)$item['is_urgent'] === 1) || $priority === 'urgent';
@@ -365,6 +379,10 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId)
         if (isset($item['due_time']) && trim((string)$item['due_time']) !== '') $dueText .= ' ' . substr((string)$item['due_time'], 0, 5);
     }
     $isRead = isset($item['read_at']) && trim((string)$item['read_at']) !== '';
+    $currentStatus = isset($item['status']) ? (string)$item['status'] : '';
+    $isRequester = ((int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId);
+    $canRequesterAct = $isRequester && $currentStatus === 'completion_pending';
+    $canEditDue = $isRequester && !in_array($currentStatus, array('done', 'cancelled'), true);
     ?>
     <article class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm shadow-gray-100" data-requested-task-card draggable="false">
         <div class="flex items-start justify-between gap-2">
@@ -393,8 +411,17 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId)
         </div>
         <div class="mt-4 flex flex-wrap justify-end gap-2">
             <button type="button" data-task-detail-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">상세</button>
-            <?php if ((int)$currentEmployeeId > 0 && isset($item['requester_employee_id']) && (int)$item['requester_employee_id'] === (int)$currentEmployeeId && isset($item['status']) && (string)$item['status'] === 'done'): ?>
-                <button type="button" data-task-revision-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-amber-500 text-white text-sm font-extrabold">보완요청</button>
+            <?php if ($canEditDue): ?>
+                <button type="button" data-task-due-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-white border border-gray-200 text-slate-700 text-sm font-extrabold">마감 수정</button>
+            <?php endif; ?>
+            <?php if ($canRequesterAct): ?>
+                <form method="post" action="?r=tasks/completion_approve" class="inline-flex">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <button type="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-extrabold">완료 승인</button>
+                </form>
+                <button type="button" data-task-completion-reject-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-extrabold">반려</button>
             <?php endif; ?>
         </div>
     </article>
@@ -402,7 +429,7 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId)
 }}
 
 if (!function_exists('cpms_render_requested_task_kanban_lane')) {
-function cpms_render_requested_task_kanban_lane($items, $currentEmployeeId, $requestedTaskDate, $dashboardHiddenInputs)
+function cpms_render_requested_task_kanban_lane($items, $currentEmployeeId, $requestedTaskDate, $dashboardHiddenInputs, $returnUrl)
 {
     if (!is_array($items)) $items = array();
     if (!is_array($dashboardHiddenInputs)) $dashboardHiddenInputs = array();
@@ -424,7 +451,7 @@ function cpms_render_requested_task_kanban_lane($items, $currentEmployeeId, $req
                 <div class="p-4 rounded-2xl border border-dashed border-gray-300 bg-white text-sm text-gray-500">표시할 업무가 없습니다.</div>
             <?php else: ?>
                 <?php foreach ($items as $item): ?>
-                    <?php cpms_render_requested_task_kanban_card($item, $currentEmployeeId); ?>
+                    <?php cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $returnUrl); ?>
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
@@ -484,7 +511,7 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
     $canCompleteTask = ($canCompleteMeeting || !$isMeetingTask)
         && $isDirectTask
         && $isAssignedToCurrent
-        && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('done', 'cancelled'), true);
+        && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('completion_pending', 'done', 'cancelled'), true);
     $detailUrl = isset($item['action_url']) ? (string)$item['action_url'] : '#';
     ?>
     <div class="cpms-mobile-task-card">
@@ -933,6 +960,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
     $kanbanLanes = array(
         'pending' => array(),
         'progress' => array(),
+        'completion_pending' => array(),
         'done' => array(),
         'rejected' => array(),
     );
@@ -1180,10 +1208,11 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
         </div>
 
         <div data-cpms-employee-task-body class="mt-6 space-y-6">
-            <div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-4 gap-4" data-task-kanban-board data-csrf="<?php echo h(csrf_token()); ?>">
-                <?php cpms_render_requested_task_kanban_lane($requested, (int)$currentEmployee['id'], $requestedTaskDate, $dashboardHiddenInputs); ?>
+            <div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-5 gap-4" data-task-kanban-board data-csrf="<?php echo h(csrf_token()); ?>">
+                <?php cpms_render_requested_task_kanban_lane($requested, (int)$currentEmployee['id'], $requestedTaskDate, $dashboardHiddenInputs, $returnUrl); ?>
                 <?php cpms_render_task_kanban_lane('pending', '대기중', $kanbanLanes['pending'], (int)$currentEmployee['id']); ?>
                 <?php cpms_render_task_kanban_lane('progress', '진행중', $kanbanLanes['progress'], (int)$currentEmployee['id']); ?>
+                <?php cpms_render_task_kanban_lane('completion_pending', '완료 대기중', $kanbanLanes['completion_pending'], (int)$currentEmployee['id']); ?>
                 <?php cpms_render_task_kanban_lane('done', '완료', $kanbanLanes['done'], (int)$currentEmployee['id']); ?>
             </div>
         </div>
@@ -1543,6 +1572,76 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
         </div>
     </div>
 
+    <div id="modal-taskCompletionReject" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/40" data-modal-close="taskCompletionReject"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="w-full max-w-2xl rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                    <div class="text-2xl font-extrabold text-gray-900">완료 반려</div>
+                    <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="taskCompletionReject">닫기</button>
+                </div>
+                <form method="post" action="?r=tasks/completion_reject" class="p-6 space-y-4">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" id="taskCompletionRejectTaskId" value="">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <div>
+                        <div class="text-sm font-bold text-gray-700 mb-1">피드백</div>
+                        <textarea name="feedback" rows="4" required class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="보완해야 할 내용을 남겨주세요."></textarea>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">새 마감일</div>
+                            <input type="date" name="due_date" id="taskCompletionRejectDueDate" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">새 마감시간</div>
+                            <input type="time" name="due_time" id="taskCompletionRejectDueTime" value="18:00" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-3 rounded-2xl border border-gray-200 font-bold" data-modal-close="taskCompletionReject">취소</button>
+                        <button type="submit" class="px-5 py-3 rounded-2xl bg-rose-600 text-white font-extrabold">반려</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-taskDueUpdate" class="fixed inset-0 z-50 hidden">
+        <div class="absolute inset-0 bg-black/40" data-modal-close="taskDueUpdate"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="w-full max-w-2xl rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+                <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                    <div class="text-2xl font-extrabold text-gray-900">마감 수정</div>
+                    <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="taskDueUpdate">닫기</button>
+                </div>
+                <form method="post" action="?r=tasks/due_update" class="p-6 space-y-4">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" id="taskDueUpdateTaskId" value="">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">마감일</div>
+                            <input type="date" name="due_date" id="taskDueUpdateDueDate" required class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                        <div>
+                            <div class="text-sm font-bold text-gray-700 mb-1">마감시간</div>
+                            <input type="time" name="due_time" id="taskDueUpdateDueTime" value="18:00" class="w-full px-4 py-3 rounded-2xl border border-gray-200">
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-sm font-bold text-gray-700 mb-1">메모</div>
+                        <textarea name="message" rows="3" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="마감 변경 사유를 남길 수 있습니다."></textarea>
+                    </div>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" class="px-4 py-3 rounded-2xl border border-gray-200 font-bold" data-modal-close="taskDueUpdate">취소</button>
+                        <button type="submit" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">저장</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script>
     (function(){
         var taskDueDate = document.getElementById('taskDueDate');
@@ -1565,6 +1664,12 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
         var revisionTaskId = document.getElementById('taskRevisionTaskId');
         var revisionDueDate = document.getElementById('taskRevisionDueDate');
         var revisionDueTime = document.getElementById('taskRevisionDueTime');
+        var completionRejectTaskId = document.getElementById('taskCompletionRejectTaskId');
+        var completionRejectDueDate = document.getElementById('taskCompletionRejectDueDate');
+        var completionRejectDueTime = document.getElementById('taskCompletionRejectDueTime');
+        var dueUpdateTaskId = document.getElementById('taskDueUpdateTaskId');
+        var dueUpdateDueDate = document.getElementById('taskDueUpdateDueDate');
+        var dueUpdateDueTime = document.getElementById('taskDueUpdateDueTime');
 
         function todayString() {
             var now = new Date();
@@ -1808,6 +1913,30 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
             if (revisionDueTime) revisionDueTime.value = dueTime || '18:00';
             var modal = document.getElementById('modal-taskRevision');
             if (modal) modal.classList.remove('hidden');
+        }
+
+        function openCompletionRejectModal(taskId, dueDate, dueTime) {
+            if (completionRejectTaskId) completionRejectTaskId.value = taskId;
+            if (completionRejectDueDate) completionRejectDueDate.value = dueDate || '';
+            if (completionRejectDueTime) completionRejectDueTime.value = dueTime || '18:00';
+            var modal = document.getElementById('modal-taskCompletionReject');
+            if (modal) {
+                var feedback = modal.querySelector ? modal.querySelector('textarea[name="feedback"]') : null;
+                if (feedback) feedback.value = '';
+                modal.classList.remove('hidden');
+            }
+        }
+
+        function openDueUpdateModal(taskId, dueDate, dueTime) {
+            if (dueUpdateTaskId) dueUpdateTaskId.value = taskId;
+            if (dueUpdateDueDate) dueUpdateDueDate.value = dueDate || '';
+            if (dueUpdateDueTime) dueUpdateDueTime.value = dueTime || '18:00';
+            var modal = document.getElementById('modal-taskDueUpdate');
+            if (modal) {
+                var message = modal.querySelector ? modal.querySelector('textarea[name="message"]') : null;
+                if (message) message.value = '';
+                modal.classList.remove('hidden');
+            }
         }
 
         function encodeFormData(form) {
@@ -2125,7 +2254,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
             var buttons = card.querySelectorAll('[data-kanban-status-action]');
             for (var i = 0; i < buttons.length; i++) {
                 var target = buttons[i].getAttribute('data-kanban-status-action') || '';
-                var hide = laneKey === 'done' || target === laneKey;
+                var hide = laneKey === 'done' || laneKey === 'completion_pending' || target === laneKey;
                 if (hide) buttons[i].classList.add('hidden');
                 else buttons[i].classList.remove('hidden');
             }
@@ -2149,7 +2278,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
 
         function submitKanbanStatusChange(card, status) {
             if (!card || !status) return;
-            if (status === 'done') {
+            if (status === 'done' || status === 'completion_pending') {
                 openCompleteModal(card.getAttribute('data-task-id') || '');
                 return;
             }
@@ -2411,6 +2540,28 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                 );
                 return;
             }
+
+            var rejectButton = e.target && e.target.closest ? e.target.closest('[data-task-completion-reject-open]') : null;
+            if (rejectButton) {
+                e.preventDefault();
+                openCompletionRejectModal(
+                    rejectButton.getAttribute('data-task-id'),
+                    rejectButton.getAttribute('data-task-due-date'),
+                    rejectButton.getAttribute('data-task-due-time')
+                );
+                return;
+            }
+
+            var dueButton = e.target && e.target.closest ? e.target.closest('[data-task-due-open]') : null;
+            if (dueButton) {
+                e.preventDefault();
+                openDueUpdateModal(
+                    dueButton.getAttribute('data-task-id'),
+                    dueButton.getAttribute('data-task-due-date'),
+                    dueButton.getAttribute('data-task-due-time')
+                );
+                return;
+            }
         });
     })();
     </script>
@@ -2423,6 +2574,7 @@ function cpms_render_executive_task_dashboard($pdo)
     if (!$pdo || !(App\Core\Auth::isMaster() || App\Core\Auth::userRole() === 'executive' || App\Core\Auth::canManageEmployees())) return;
     $selectedDepartment = isset($_GET['task_department']) ? trim((string)$_GET['task_department']) : '전체';
     if ($selectedDepartment === '') $selectedDepartment = '전체';
+    if ($selectedDepartment === '임원') $selectedDepartment = '기타';
     $allDepartmentLabel = urldecode('%EC%A0%84%EC%B2%B4');
     $isAllDepartmentSelected = (!isset($_GET['task_department']) || trim((string)$_GET['task_department']) === '' || $selectedDepartment === $allDepartmentLabel);
     if ($isAllDepartmentSelected) {
@@ -2441,7 +2593,7 @@ function cpms_render_executive_task_dashboard($pdo)
                     <?php foreach ($departmentOptions as $departmentName): ?>
                         <?php
                         $isSelected = ($selectedDepartment === $departmentName);
-                        $departmentLabel = (($departmentName === '기타') ? '전원' : $departmentName);
+                        $departmentLabel = (($departmentName === '기타') ? '임원' : $departmentName);
                         $url = '?r=dashboard_executive&exec_tab=department';
                         if ($departmentName !== $allDepartmentLabel) $url .= '&task_department=' . urlencode($departmentName);
                         ?>
@@ -2812,7 +2964,7 @@ function cpms_render_executive_task_dashboard($pdo)
             if (body) body.innerHTML = '<div class="text-sm text-gray-500">업무 정보를 불러오는 중입니다.</div>';
             if (modal) modal.classList.remove('hidden');
             var xhr = new XMLHttpRequest();
-            var detailUrl = '?r=tasks/detail&id=' + encodeURIComponent(taskId) + '&modal=1&readonly=1';
+            var detailUrl = '?r=tasks/detail&id=' + encodeURIComponent(taskId) + '&modal=1&readonly=1&commentable=1';
             detailUrl += '&return_url=' + encodeURIComponent(window.location.pathname + window.location.search);
             xhr.open('GET', detailUrl, true);
             xhr.onreadystatechange = function() {

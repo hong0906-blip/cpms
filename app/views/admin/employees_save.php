@@ -25,6 +25,18 @@ function cpms_column_exists($pdo, $table, $column) {
     } catch (\Exception $e) { return false; }
 }}
 
+if (!function_exists('cpms_employee_save_ensure_column')) {
+function cpms_employee_save_ensure_column($pdo, $table, $column, $typeSql) {
+    if (!$pdo || trim((string)$table) === '' || trim((string)$column) === '' || trim((string)$typeSql) === '') return false;
+    if (cpms_column_exists($pdo, $table, $column)) return true;
+    try {
+        $pdo->exec("ALTER TABLE " . $table . " ADD COLUMN " . $column . " " . $typeSql);
+    } catch (\Exception $e) {
+        return false;
+    }
+    return cpms_column_exists($pdo, $table, $column);
+}}
+
 if (!function_exists('cpms_employee_save_table_exists')) {
 function cpms_employee_save_table_exists($pdo, $table) {
     try {
@@ -72,8 +84,16 @@ $siteManagerEnabled = cpms_column_exists($pdo, 'employees', 'approval_can_be_sit
 $teamLeaderEnabled = cpms_column_exists($pdo, 'employees', 'approval_can_be_team_leader');
 $gongmuEnabled = cpms_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver');
 $manageEnabled = cpms_column_exists($pdo, 'employees', 'approval_can_be_manage_approver');
+cpms_employee_save_ensure_column($pdo, 'employees', 'is_team_leader', 'TINYINT(1) NOT NULL DEFAULT 0');
+cpms_employee_save_ensure_column($pdo, 'employees', 'team_leader_id', 'INT NULL');
 $isTeamLeaderEnabled = cpms_column_exists($pdo, 'employees', 'is_team_leader');
 $teamLeaderIdEnabled = cpms_column_exists($pdo, 'employees', 'team_leader_id');
+$teamLeaderSettingPosted = (isset($_POST['is_team_leader']) || isset($_POST['team_leader_id']));
+if ($teamLeaderSettingPosted && (!$isTeamLeaderEnabled || !$teamLeaderIdEnabled)) {
+    flash_set('error', '팀장 설정 컬럼을 생성하지 못해 저장할 수 없습니다. DB 권한 또는 employees 테이블 상태를 확인해주세요.');
+    header('Location: ?r=관리&tab=employees');
+    exit;
+}
 $chatEnabledCol = cpms_column_exists($pdo, 'employees', 'google_chat_enabled');
 $chatUserEnabled = cpms_column_exists($pdo, 'employees', 'google_chat_user_name');
 $chatSpaceEnabled = cpms_column_exists($pdo, 'employees', 'google_chat_dm_space_name');

@@ -161,6 +161,7 @@ function cpms_tasks_status_label($status)
         'pending' => '대기',
         'progress' => '진행중',
         'done' => '완료',
+        'completion_pending' => '완료 대기중',
         'meeting_owner' => '회의요청',
         'meeting_available' => '참석가능',
         'meeting_unavailable' => '참석불가능',
@@ -170,6 +171,10 @@ function cpms_tasks_status_label($status)
         'created' => '등록',
         'status_changed' => '상태 변경',
         'completed' => '완료 처리',
+        'completion_requested' => '완료 검토 요청',
+        'completion_approved' => '완료 승인',
+        'completion_rejected' => '완료 반려',
+        'due_date_changed' => '마감 변경',
         'request_read' => '요청 읽음',
         'transferred' => '담당자 전달',
         'meeting_available_action' => '참석가능',
@@ -207,6 +212,7 @@ function cpms_tasks_badge_class($type, $value)
 {
     if ($type === 'status') {
         if ($value === 'done') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+        if ($value === 'completion_pending') return 'bg-amber-50 text-amber-700 border-amber-200';
         if ($value === 'meeting_available') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
         if ($value === 'meeting_unavailable') return 'bg-rose-50 text-rose-700 border-rose-200';
         if ($value === 'meeting_owner') return 'bg-blue-50 text-blue-700 border-blue-200';
@@ -329,7 +335,7 @@ function cpms_tasks_is_delayed($row)
 {
     $status = isset($row['status']) ? (string)$row['status'] : '';
     if (cpms_tasks_is_closed_status($status)) return false;
-    if (in_array($status, array('meeting_owner', 'meeting_available', 'meeting_unavailable'), true)) return false;
+    if (in_array($status, array('completion_pending', 'meeting_owner', 'meeting_available', 'meeting_unavailable'), true)) return false;
     $dueAt = cpms_tasks_due_datetime($row);
     if ($dueAt === '') return false;
     $dueTs = strtotime($dueAt);
@@ -559,7 +565,7 @@ function cpms_tasks_should_sync_group_completion($groupKey)
 {
     $groupKey = trim((string)$groupKey);
     if ($groupKey === '') return false;
-    if (strpos($groupKey, 'task_request:') === 0) return true;
+    if (strpos($groupKey, 'task_request:') === 0) return false;
     if (strpos($groupKey, 'unused_leave:') === 0) return true;
     if (strpos($groupKey, 'samsung_') === 0) return true;
     return false;
@@ -878,6 +884,47 @@ function cpms_tasks_can_request_revision($task, $currentEmployeeId)
     if (!$task) return false;
     if (cpms_tasks_is_overall_manager()) return true;
     return ((int)$currentEmployeeId > 0 && (int)$task['requester_employee_id'] === (int)$currentEmployeeId);
+}}
+
+if (!function_exists('cpms_tasks_is_self_request')) {
+function cpms_tasks_is_self_request($task)
+{
+    if (!$task) return false;
+    $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
+    $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+    return ($requesterId > 0 && $requesterId === $assigneeId);
+}}
+
+if (!function_exists('cpms_tasks_can_submit_completion')) {
+function cpms_tasks_can_submit_completion($task, $currentEmployeeId)
+{
+    if (!$task) return false;
+    if (cpms_tasks_is_overall_manager()) return true;
+    return ((int)$currentEmployeeId > 0 && isset($task['assignee_employee_id']) && (int)$task['assignee_employee_id'] === (int)$currentEmployeeId);
+}}
+
+if (!function_exists('cpms_tasks_can_approve_completion')) {
+function cpms_tasks_can_approve_completion($task, $currentEmployeeId)
+{
+    if (!$task) return false;
+    $status = isset($task['status']) ? (string)$task['status'] : '';
+    if ($status !== 'completion_pending') return false;
+    if (cpms_tasks_is_overall_manager()) return true;
+    return ((int)$currentEmployeeId > 0 && isset($task['requester_employee_id']) && (int)$task['requester_employee_id'] === (int)$currentEmployeeId);
+}}
+
+if (!function_exists('cpms_tasks_can_reject_completion')) {
+function cpms_tasks_can_reject_completion($task, $currentEmployeeId)
+{
+    return cpms_tasks_can_approve_completion($task, $currentEmployeeId);
+}}
+
+if (!function_exists('cpms_tasks_can_update_due_date')) {
+function cpms_tasks_can_update_due_date($task, $currentEmployeeId)
+{
+    if (!$task) return false;
+    if (cpms_tasks_is_overall_manager()) return true;
+    return ((int)$currentEmployeeId > 0 && isset($task['requester_employee_id']) && (int)$task['requester_employee_id'] === (int)$currentEmployeeId);
 }}
 
 if (!function_exists('cpms_tasks_can_cancel')) {
@@ -1571,7 +1618,7 @@ function cpms_tasks_can_transfer($task, $currentEmployeeId)
     if (isset($task['task_type']) && (string)$task['task_type'] === 'meeting') return false;
     if (!isset($task['assignee_employee_id']) || (int)$task['assignee_employee_id'] !== (int)$currentEmployeeId) return false;
     $status = isset($task['status']) ? (string)$task['status'] : '';
-    if (in_array($status, array('done', 'cancelled'), true)) return false;
+    if (in_array($status, array('completion_pending', 'done', 'cancelled'), true)) return false;
     return true;
 }}
 
@@ -1638,6 +1685,145 @@ function cpms_tasks_transfer_task($pdo, $task, $newAssignee, $actor, $reason)
     } catch (Exception $e) {
         return false;
     }
+}}
+
+if (!function_exists('cpms_tasks_due_text_from_values')) {
+function cpms_tasks_due_text_from_values($dueDate, $dueTime)
+{
+    $dueDate = trim((string)$dueDate);
+    $dueTime = trim((string)$dueTime);
+    if ($dueDate === '') return '-';
+    if ($dueTime !== '') return $dueDate . ' ' . substr($dueTime, 0, 5);
+    return $dueDate;
+}}
+
+if (!function_exists('cpms_tasks_request_completion')) {
+function cpms_tasks_request_completion($pdo, $task, $actor, $completedMemo, $now)
+{
+    if (!$pdo || !is_array($task) || !is_array($actor)) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    if ($taskId <= 0) return false;
+    $actorId = isset($actor['id']) ? (int)$actor['id'] : 0;
+    $completedMemo = trim((string)$completedMemo);
+    $now = trim((string)$now) !== '' ? (string)$now : cpms_tasks_now();
+
+    $st = $pdo->prepare("UPDATE cpms_tasks SET status = 'completion_pending', completed_at = NULL, completed_by = :completed_by, completed_memo = :completed_memo, updated_at = :updated_at WHERE id = :id");
+    $ok = $st->execute(array(
+        ':completed_by' => $actorId > 0 ? $actorId : null,
+        ':completed_memo' => $completedMemo !== '' ? $completedMemo : null,
+        ':updated_at' => $now,
+        ':id' => $taskId,
+    ));
+    if (!$ok) return false;
+    cpms_tasks_insert_log($pdo, $taskId, $actor, 'completion_requested', $completedMemo, isset($task['status']) ? $task['status'] : null, 'completion_pending');
+    if ($completedMemo !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $completedMemo, 0);
+    return true;
+}}
+
+if (!function_exists('cpms_tasks_approve_completion')) {
+function cpms_tasks_approve_completion($pdo, $task, $actor, $approvalMemo, $now)
+{
+    if (!$pdo || !is_array($task) || !is_array($actor)) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    if ($taskId <= 0) return false;
+    $actorId = isset($actor['id']) ? (int)$actor['id'] : 0;
+    $approvalMemo = trim((string)$approvalMemo);
+    $now = trim((string)$now) !== '' ? (string)$now : cpms_tasks_now();
+    $existingCompletedMemo = isset($task['completed_memo']) ? trim((string)$task['completed_memo']) : '';
+
+    $sets = array(
+        "status = 'done'",
+        'completed_at = :completed_at',
+        'completed_by = :completed_by',
+        'updated_at = :updated_at'
+    );
+    $params = array(
+        ':completed_at' => $now,
+        ':completed_by' => $actorId > 0 ? $actorId : null,
+        ':updated_at' => $now,
+        ':id' => $taskId,
+    );
+    if ($existingCompletedMemo === '' && $approvalMemo !== '') {
+        $sets[count($sets)] = 'completed_memo = :completed_memo';
+        $params[':completed_memo'] = $approvalMemo;
+    }
+
+    $st = $pdo->prepare("UPDATE cpms_tasks SET " . implode(', ', $sets) . " WHERE id = :id");
+    $ok = $st->execute($params);
+    if (!$ok) return false;
+    cpms_tasks_insert_log($pdo, $taskId, $actor, 'completion_approved', $approvalMemo, isset($task['status']) ? $task['status'] : null, 'done');
+    if ($approvalMemo !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $approvalMemo, 0);
+    return true;
+}}
+
+if (!function_exists('cpms_tasks_reject_completion')) {
+function cpms_tasks_reject_completion($pdo, $task, $actor, $feedback, $dueDate, $dueTime, $now)
+{
+    if (!$pdo || !is_array($task) || !is_array($actor)) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    if ($taskId <= 0) return false;
+    $feedback = trim((string)$feedback);
+    $dueDate = trim((string)$dueDate);
+    $dueTime = trim((string)$dueTime);
+    $now = trim((string)$now) !== '' ? (string)$now : cpms_tasks_now();
+
+    $sets = array(
+        "status = 'progress'",
+        'completed_at = NULL',
+        'completed_by = NULL',
+        'completed_memo = NULL',
+        'updated_at = :updated_at'
+    );
+    $params = array(
+        ':updated_at' => $now,
+        ':id' => $taskId,
+    );
+    if ($dueDate !== '') {
+        $sets[count($sets)] = 'due_date = :due_date';
+        $sets[count($sets)] = 'due_time = :due_time';
+        $params[':due_date'] = $dueDate;
+        $params[':due_time'] = $dueTime !== '' ? $dueTime : null;
+    }
+
+    $st = $pdo->prepare("UPDATE cpms_tasks SET " . implode(', ', $sets) . " WHERE id = :id");
+    $ok = $st->execute($params);
+    if (!$ok) return false;
+    $message = $feedback;
+    if ($dueDate !== '') {
+        $message .= ($message !== '' ? "\n" : '') . '마감: ' . cpms_tasks_due_text_from_values($dueDate, $dueTime);
+    }
+    cpms_tasks_insert_log($pdo, $taskId, $actor, 'completion_rejected', $message, isset($task['status']) ? $task['status'] : null, 'progress');
+    if ($feedback !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $feedback, 0);
+    return true;
+}}
+
+if (!function_exists('cpms_tasks_update_due_date')) {
+function cpms_tasks_update_due_date($pdo, $task, $actor, $dueDate, $dueTime, $message, $now)
+{
+    if (!$pdo || !is_array($task) || !is_array($actor)) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    if ($taskId <= 0) return false;
+    $dueDate = trim((string)$dueDate);
+    $dueTime = trim((string)$dueTime);
+    $message = trim((string)$message);
+    $now = trim((string)$now) !== '' ? (string)$now : cpms_tasks_now();
+
+    $st = $pdo->prepare("UPDATE cpms_tasks SET due_date = :due_date, due_time = :due_time, updated_at = :updated_at WHERE id = :id");
+    $ok = $st->execute(array(
+        ':due_date' => $dueDate !== '' ? $dueDate : null,
+        ':due_time' => $dueTime !== '' ? $dueTime : null,
+        ':updated_at' => $now,
+        ':id' => $taskId,
+    ));
+    if (!$ok) return false;
+
+    $oldDue = cpms_tasks_due_text_from_values(isset($task['due_date']) ? $task['due_date'] : '', isset($task['due_time']) ? $task['due_time'] : '');
+    $newDue = cpms_tasks_due_text_from_values($dueDate, $dueTime);
+    $logMessage = '마감: ' . $oldDue . ' -> ' . $newDue;
+    if ($message !== '') $logMessage .= "\n" . $message;
+    cpms_tasks_insert_log($pdo, $taskId, $actor, 'due_date_changed', $logMessage, isset($task['status']) ? $task['status'] : null, isset($task['status']) ? $task['status'] : null);
+    if ($message !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $message, 0);
+    return true;
 }}
 
 if (!function_exists('cpms_tasks_complete_task_and_group')) {
@@ -1995,6 +2181,39 @@ function cpms_tasks_build_complete_message($task)
     return implode("\n", $lines);
 }}
 
+if (!function_exists('cpms_tasks_build_completion_pending_message')) {
+function cpms_tasks_build_completion_pending_message($task)
+{
+    $lines = array();
+    $lines[count($lines)] = '[CPMS 업무 완료 검토 요청]';
+    $lines[count($lines)] = '';
+    $lines[count($lines)] = '업무명: ' . (isset($task['title']) ? (string)$task['title'] : '-');
+    $lines[count($lines)] = '담당자: ' . (isset($task['assignee_name']) ? (string)$task['assignee_name'] : '-');
+    $lines[count($lines)] = '완료 내용: ' . cpms_tasks_text_excerpt(isset($task['completed_memo']) ? $task['completed_memo'] : '', 120);
+    $lines[count($lines)] = '';
+    $lines[count($lines)] = '나의 요청 업무에서 완료 승인 또는 반려를 선택해주세요.';
+    return implode("\n", $lines);
+}}
+
+if (!function_exists('cpms_tasks_build_completion_rejected_message')) {
+function cpms_tasks_build_completion_rejected_message($task, $feedback)
+{
+    $lines = array();
+    $lines[count($lines)] = '[CPMS 업무 완료 반려]';
+    $lines[count($lines)] = '';
+    $lines[count($lines)] = '업무명: ' . (isset($task['title']) ? (string)$task['title'] : '-');
+    $lines[count($lines)] = '요청자: ' . (isset($task['requester_name']) ? (string)$task['requester_name'] : '-');
+    $lines[count($lines)] = '피드백: ' . cpms_tasks_text_excerpt($feedback, 160);
+    if (!empty($task['due_date'])) {
+        $dueLine = (string)$task['due_date'];
+        if (!empty($task['due_time'])) $dueLine .= ' ' . substr((string)$task['due_time'], 0, 5);
+        $lines[count($lines)] = '마감: ' . $dueLine;
+    }
+    $lines[count($lines)] = '';
+    $lines[count($lines)] = '나의 할일에서 다시 진행해주세요.';
+    return implode("\n", $lines);
+}}
+
 if (!function_exists('cpms_tasks_build_meeting_confirmed_message')) {
 function cpms_tasks_build_meeting_confirmed_message($task)
 {
@@ -2096,6 +2315,33 @@ function cpms_tasks_send_completed_notification($pdo, $task)
     $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
     if ($requesterId <= 0) return false;
     return cpms_send_google_chat_to_employee($pdo, $requesterId, cpms_tasks_build_complete_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_COMPLETED', 'TASK');
+}}
+
+if (!function_exists('cpms_tasks_send_completion_pending_notification')) {
+function cpms_tasks_send_completion_pending_notification($pdo, $task)
+{
+    if (!function_exists('cpms_send_google_chat_to_employee')) {
+        require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    }
+    if (!function_exists('cpms_send_google_chat_to_employee')) return false;
+    if (!$pdo || !is_array($task)) return false;
+    $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
+    $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+    if ($requesterId <= 0 || $requesterId === $assigneeId) return false;
+    return cpms_send_google_chat_to_employee($pdo, $requesterId, cpms_tasks_build_completion_pending_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_COMPLETION_PENDING', 'TASK');
+}}
+
+if (!function_exists('cpms_tasks_send_completion_rejected_notification')) {
+function cpms_tasks_send_completion_rejected_notification($pdo, $task, $feedback)
+{
+    if (!function_exists('cpms_send_google_chat_to_employee')) {
+        require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    }
+    if (!function_exists('cpms_send_google_chat_to_employee')) return false;
+    if (!$pdo || !is_array($task)) return false;
+    $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+    if ($assigneeId <= 0) return false;
+    return cpms_send_google_chat_to_employee($pdo, $assigneeId, cpms_tasks_build_completion_rejected_message($task, $feedback), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_COMPLETION_REJECTED', 'TASK');
 }}
 
 if (!function_exists('cpms_tasks_ensure_delay_notification_schema')) {

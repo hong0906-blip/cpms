@@ -17,6 +17,7 @@ $taskId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $task = cpms_tasks_find_task($pdo, $taskId);
 $isModal = isset($_GET['modal']) && (string)$_GET['modal'] === '1';
 $readOnlyMode = isset($_GET['readonly']) && (string)$_GET['readonly'] === '1';
+$commentsInputAllowed = (!$readOnlyMode || (isset($_GET['commentable']) && (string)$_GET['commentable'] === '1'));
 
 if (!$task || !cpms_tasks_can_view($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0)) {
     if ($isModal) {
@@ -139,7 +140,7 @@ ob_start();
                     <button type="submit" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-bold">완료</button>
                 </form>
             <?php endif; ?>
-            <?php if (!$isMeetingTask && $canChangeStatus && !in_array(isset($task['status']) ? $task['status'] : '', array('done', 'cancelled'), true)): ?>
+            <?php if (!$isMeetingTask && $canChangeStatus && !in_array(isset($task['status']) ? $task['status'] : '', array('completion_pending', 'done', 'cancelled'), true)): ?>
                 <button type="button"
                         data-task-complete-open
                         data-task-id="<?php echo (int)$taskId; ?>"
@@ -260,8 +261,8 @@ ob_start();
             <div class="text-sm font-extrabold text-gray-900">댓글</div>
             <div class="text-xs text-gray-500"><span data-task-comments-count><?php echo count($comments); ?></span>건</div>
         </div>
-        <?php cpms_tasks_render_comments($comments, $taskId, $returnUrl, !$readOnlyMode); ?>
-        <?php if (!$readOnlyMode): ?>
+        <?php cpms_tasks_render_comments($comments, $taskId, $returnUrl, $commentsInputAllowed); ?>
+        <?php if ($commentsInputAllowed): ?>
         <form method="post" action="?r=task_comment_save" class="mt-4 rounded-2xl border border-gray-200 bg-slate-50 p-4 space-y-3" data-task-comment-form>
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">

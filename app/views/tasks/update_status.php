@@ -87,6 +87,7 @@ function cpms_tasks_status_lane_key($status)
 {
     $status = (string)$status;
     if ($status === 'done' || $status === 'completed') return 'done';
+    if ($status === 'completion_pending') return 'completion_pending';
     if ($status === 'rejected' || $status === 'cancelled' || $status === 'meeting_unavailable') return 'rejected';
     if (in_array($status, array('progress', 'processing', 'revision', 'meeting_available'), true)) return 'progress';
     return 'pending';
@@ -146,31 +147,57 @@ $currentEmployeeId = isset($currentEmployee['id']) ? (int)$currentEmployee['id']
 $taskId = isset($_POST['task_id']) ? (int)$_POST['task_id'] : 0;
 $status = trim((string)(isset($_POST['task_state']) ? $_POST['task_state'] : (isset($_POST['status']) ? $_POST['status'] : '')));
 $completedMemo = trim((string)(isset($_POST['completed_memo']) ? $_POST['completed_memo'] : ''));
-$allowedStatuses = array('pending', 'progress', 'done', 'rejected');
+$allowedStatuses = array('pending', 'progress', 'completion_pending', 'done', 'rejected');
 
 if (!in_array($status, $allowedStatuses, true)) {
     cpms_tasks_status_fail('변경할 상태가 올바르지 않습니다.', $isAjax);
 }
 
 $task = cpms_tasks_find_task($pdo, $taskId);
-if (!$task || !cpms_tasks_can_change_status($task, $currentEmployeeId)) {
+if (!$task) {
     cpms_tasks_status_fail('상태 변경 권한이 없습니다.', $isAjax);
 }
 $requestedStatus = $status;
 $isMeetingTask = isset($task['task_type']) && (string)$task['task_type'] === 'meeting';
+$canApproveDone = (!$isMeetingTask && $status === 'done' && cpms_tasks_can_approve_completion($task, $currentEmployeeId));
+$canSelfComplete = (!$isMeetingTask && $status === 'done' && cpms_tasks_is_self_request($task) && cpms_tasks_can_submit_completion($task, $currentEmployeeId));
+$canSubmitCompletion = (!$isMeetingTask && $status === 'completion_pending' && cpms_tasks_can_submit_completion($task, $currentEmployeeId));
+$canChangeStatus = cpms_tasks_can_change_status($task, $currentEmployeeId);
+if (!$canApproveDone && !$canSelfComplete && !$canSubmitCompletion && !$canChangeStatus) {
+    cpms_tasks_status_fail('상태 변경 권한이 없습니다.', $isAjax);
+}
 if ($isMeetingTask && $status === 'progress') $status = 'meeting_available';
 if ($isMeetingTask && $status === 'rejected') $status = 'meeting_unavailable';
 if ($status === 'done' && isset($task['status']) && in_array((string)$task['status'], array('done', 'cancelled'), true)) {
     cpms_tasks_status_fail('이미 완료 또는 취소된 업무입니다.', $isAjax);
 }
-if (!$isMeetingTask && $status === 'done' && $completedMemo === '') {
+if (!$isMeetingTask && $requestedStatus === 'done' && !$canApproveDone && !$canSelfComplete) {
+    cpms_tasks_status_fail('완료는 요청자 승인 후 처리할 수 있습니다.', $isAjax);
+}
+if (!$isMeetingTask && isset($task['status']) && (string)$task['status'] === 'completion_pending' && !in_array($requestedStatus, array('done', 'completion_pending'), true)) {
+    cpms_tasks_status_fail('완료 대기중 업무는 요청자의 승인 또는 반려로만 변경할 수 있습니다.', $isAjax);
+}
+if (!$isMeetingTask && $status === 'done' && !$canApproveDone && $completedMemo === '') {
+    cpms_tasks_status_fail('완료 처리 내용을 입력해주세요.', $isAjax);
+}
+if (!$isMeetingTask && $status === 'completion_pending' && $completedMemo === '') {
     cpms_tasks_status_fail('완료 처리 내용을 입력해주세요.', $isAjax);
 }
 
 try {
     $now = cpms_tasks_now();
     $notificationSent = false;
-    if ($status === 'done') {
+    if ($status === 'done' && $canApproveDone) {
+        if (!cpms_tasks_approve_completion($pdo, $task, $currentEmployee, $completedMemo, $now)) {
+            throw new Exception('completion approve failed');
+        }
+    } elseif ($status === 'completion_pending') {
+        if (!cpms_tasks_request_completion($pdo, $task, $currentEmployee, $completedMemo, $now)) {
+            throw new Exception('completion request failed');
+        }
+        $updatedTask = cpms_tasks_find_task($pdo, $taskId);
+        if ($updatedTask) $notificationSent = cpms_tasks_send_completion_pending_notification($pdo, $updatedTask);
+    } elseif ($status === 'done') {
         cpms_tasks_complete_task_and_group($pdo, $task, $currentEmployee, $completedMemo, $now);
         $updatedTask = cpms_tasks_find_task($pdo, $taskId);
         if ($updatedTask) $notificationSent = cpms_tasks_send_completed_notification($pdo, $updatedTask);

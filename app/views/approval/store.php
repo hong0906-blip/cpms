@@ -467,7 +467,7 @@ if (!$isManagementOnlyDoc && ($docType === 'leave' || approval_is_proposal_doc_t
         $creatorEmployee['team_leader_id'] = $postedConstructionTeamLeaderId;
     }
     if (!isset($creatorEmployee['team_leader_id']) || (int)$creatorEmployee['team_leader_id'] <= 0) {
-        flash_set('danger', approval_ko('%EA%B3%B5%EC%82%AC%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        flash_set('danger', approval_ko('%ED%95%B4%EB%8B%B9%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
         header('Location: ?r=approval_create&type=' . $docType);
         exit;
     }
@@ -614,7 +614,7 @@ if ($isManagementOnlyDoc) {
     $title = approval_doc_label('leave') . ' - ' . $contentData['applicant_name'];
     $ruleResult = approval_line_rules_build($pdo, $docType, $creatorEmployee, $contentData);
     if (approval_line_rules_requires_manual_team_leader($creatorEmployee) && (!isset($ruleResult['team_lead']) || !is_array($ruleResult['team_lead']))) {
-        flash_set('danger', approval_ko('%EA%B3%B5%EC%82%AC%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        flash_set('danger', approval_ko('%ED%95%B4%EB%8B%B9%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
         header('Location: ?r=approval_create&type=leave');
         exit;
     }
@@ -658,7 +658,7 @@ if ($isManagementOnlyDoc) {
     $title = $contentData['title'] !== '' ? $contentData['title'] : approval_doc_label($docType);
     $ruleResult = approval_line_rules_build($pdo, $docType, $creatorEmployee, $contentData);
     if (approval_line_rules_requires_manual_team_leader_for_doc($creatorEmployee, $docType) && (!isset($ruleResult['team_lead']) || !is_array($ruleResult['team_lead']))) {
-        flash_set('danger', approval_ko('%EA%B3%B5%EC%82%AC%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
+        flash_set('danger', approval_ko('%ED%95%B4%EB%8B%B9%20%EC%9D%B8%EC%9B%90%EC%9D%80%20%ED%98%84%EC%9E%A5%20%ED%8C%80%EC%9E%A5%EC%9D%84%20%EC%84%A0%ED%83%9D%ED%95%B4%20%EC%A3%BC%EC%84%B8%EC%9A%94.'));
         header('Location: ?r=approval_create&type=' . $docType);
         exit;
     }
