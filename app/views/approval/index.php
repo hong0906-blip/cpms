@@ -116,7 +116,7 @@ if (isset($_GET['show_cancelled']) && (string)$_GET['show_cancelled'] === '1') {
 if (!in_array($view, array('active', 'cancelled', 'completed'), true)) {
     $view = 'active';
 }
-$isManagementCompletedViewer = ($view === 'completed' && approval_is_management_department_user($pdo, $u));
+$isCompletedAllViewer = ($view === 'completed' && approval_can_view_all_completed_documents($pdo, $u));
 
 $docTypeFilter = isset($_GET['doc_type']) ? trim((string)$_GET['doc_type']) : '';
 $titleFilter = isset($_GET['title']) ? trim((string)$_GET['title']) : '';
@@ -198,7 +198,7 @@ if ($pdo) {
     }
 
     $relatedParts = array();
-    if ($isManagementCompletedViewer) {
+    if ($isCompletedAllViewer) {
         $relatedParts[] = '1 = 1';
     }
     if (count($ownerParts) > 0) {
@@ -278,7 +278,10 @@ if ($pdo) {
     if (count($where) > 0) {
         $sql .= " WHERE " . implode(' AND ', $where);
     }
-    $sql .= " ORDER BY d.updated_at DESC, d.id DESC LIMIT 300";
+    $sql .= " ORDER BY d.updated_at DESC, d.id DESC";
+    if ($view !== 'completed') {
+        $sql .= " LIMIT 300";
+    }
 
     $debugInfo['params_keys'] = array_keys($params);
 

@@ -21,6 +21,7 @@ if (!$pdo || !$u) {
 $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
 $action = isset($_POST['action']) ? trim((string)$_POST['action']) : '';
 $reason = isset($_POST['reject_reason']) ? trim((string)$_POST['reject_reason']) : '';
+$approvalComment = isset($_POST['approval_comment']) ? trim((string)$_POST['approval_comment']) : '';
 $uid = approval_current_employee_id($pdo, $u);
 $userEmail = approval_current_user_email($u);
 $userName = approval_current_user_name($u);
@@ -69,6 +70,19 @@ if ($action === 'reject' && $reason === '') {
     flash_set('danger', approval_ko('%EB%B0%98%EB%A0%A4%EC%82%AC%EC%9C%A0%EB%8A%94%20%ED%95%84%EC%88%98%EC%9E%85%EB%8B%88%EB%8B%A4.'));
     header('Location: ?r=approval_detail&id=' . $id);
     exit;
+}
+
+$docType = isset($doc['doc_type']) ? strtolower(trim((string)$doc['doc_type'])) : '';
+$allowApprovalComment = ($docType === 'leave' || approval_is_proposal_doc_type($docType));
+if (!$allowApprovalComment) {
+    $approvalComment = '';
+}
+if ($approvalComment !== '') {
+    if (function_exists('mb_substr')) {
+        $approvalComment = mb_substr($approvalComment, 0, 2000, 'UTF-8');
+    } else {
+        $approvalComment = substr($approvalComment, 0, 2000);
+    }
 }
 
 $hasLineDelegated = approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated');
@@ -137,8 +151,8 @@ try {
         }
         $pdo->prepare("UPDATE cpms_approval_documents SET doc_status=:s,current_step_order=:o,updated_at=NOW() WHERE id=:id")
             ->execute(array(':s' => $docStatus, ':o' => $step, ':id' => $id));
-        $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,created_at) VALUES (:d,:l,:a,:n,:e,'APPROVE',NOW())")
-            ->execute(array(':d' => $id, ':l' => $line['id'], ':a' => $uid, ':n' => $actorName, ':e' => $actorEmail));
+        $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,:l,:a,:n,:e,'APPROVE',:m,NOW())")
+            ->execute(array(':d' => $id, ':l' => $line['id'], ':a' => $uid, ':n' => $actorName, ':e' => $actorEmail, ':m' => $approvalComment));
         if ($docStatus === 'APPROVED') {
             approval_deduct_leave_balance_on_final_approval($pdo, $id);
         }

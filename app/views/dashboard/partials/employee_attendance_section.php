@@ -411,7 +411,7 @@ if($pdo&&$eid_att>0){
         </div>
         <div class='mt-2 text-xs text-gray-600'>클릭하면 전체 미출근, 퇴근 미처리와 지각 기록을 확인합니다.</div>
       </div>
-      <button type='button' data-attendance-request-open data-attendance-request-type='check_out' class='shrink-0 px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold'>요청보내기</button>
+      <button type='button' data-attendance-issue-open class='shrink-0 px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold'>내역보기</button>
     </div>
   </div>
 </div>
@@ -435,7 +435,6 @@ if($pdo&&$eid_att>0){
         <div class='text-sm text-gray-600 mt-1'>전체 퇴근 미처리 <?php echo (int)$myMissingCheckoutCount; ?>건 · 미출근 <?php echo (int)$myAbsentCount; ?>건 · 지각 <?php echo (int)$myLateCount; ?>건</div>
     </div>
     <div class='flex items-center gap-2'>
-        <button type='button' data-attendance-request-open data-attendance-request-type='check_out' class='px-4 py-2 rounded-xl bg-gray-900 text-white font-bold'>요청보내기</button>
         <button type='button' data-attendance-issue-close class='px-4 py-2 rounded-xl bg-gray-100 font-bold'>닫기</button>
     </div>
 </div>
@@ -478,7 +477,7 @@ if($pdo&&$eid_att>0){
                 $issueMissing = !empty($issueRow['_missing_checkout']);
                 $issueLate = !empty($issueRow['_late']);
                 $issueAbsent = !empty($issueRow['_absent']);
-                $issueRequestType = $issueAbsent ? 'check_in' : (($issueMissing && $issueLate) ? 'both' : ($issueMissing ? 'check_out' : 'check_in'));
+                $issueRequestType = $issueAbsent ? 'both' : (($issueLate && $issueCheckOut === '') ? 'both' : ($issueMissing ? 'check_out' : 'check_in'));
                 ?>
                 <tr class='border-t'>
                     <td class='p-2 whitespace-nowrap font-bold text-gray-900'><?php echo h($issueDate); ?></td>
@@ -493,7 +492,7 @@ if($pdo&&$eid_att>0){
                     <td class='p-2 whitespace-nowrap'><?php echo h($issueCheckOut !== '' ? cpms_dashboard_attendance_time($issueCheckOut) : '-'); ?></td>
                     <td class='p-2 whitespace-nowrap'><?php echo h(isset($issueRow['status']) ? (string)$issueRow['status'] : ''); ?></td>
                     <td class='p-2 whitespace-nowrap'>
-                        <button type='button' data-attendance-request-open data-attendance-request-date='<?php echo h($issueDate); ?>' data-attendance-request-type='<?php echo h($issueRequestType); ?>' class='px-3 py-1 rounded-xl bg-blue-600 text-white text-xs font-extrabold'>요청보내기</button>
+                        <button type='button' data-attendance-request-open data-attendance-request-date='<?php echo h($issueDate); ?>' data-attendance-request-type='<?php echo h($issueRequestType); ?>' data-attendance-request-check-in='<?php echo h(cpms_dashboard_attendance_time($issueCheckIn)); ?>' data-attendance-request-check-out='<?php echo h(cpms_dashboard_attendance_time($issueCheckOut)); ?>' class='px-3 py-1 rounded-xl bg-blue-600 text-white text-xs font-extrabold'>요청보내기</button>
                     </td>
                 </tr>
             <?php endforeach; ?>
@@ -507,6 +506,8 @@ if($pdo&&$eid_att>0){
 <form method='post' action='?r=attendance/request_save' class='grid grid-cols-1 md:grid-cols-2 gap-3 mb-6' data-attendance-request-form>
     <input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'>
     <input type='hidden' name='return_url' value='<?php echo h($cpmsEmployeeAttendanceReturnUrl); ?>'>
+    <input type='hidden' name='request_date' value='' disabled data-attendance-request-date-hidden>
+    <input type='hidden' name='request_type' value='' disabled data-attendance-request-type-hidden>
     <div>
         <div class='text-sm text-gray-600 mb-1'>요청 날짜</div>
         <input class='w-full px-3 py-2 rounded-xl border' type='date' name='request_date' value='<?php echo h($today_att);?>' required>
@@ -521,13 +522,13 @@ if($pdo&&$eid_att>0){
     </div>
     <div>
         <div class='text-sm text-gray-600 mb-1'>요청 출근시간</div>
-        <input class='w-full px-3 py-2 rounded-xl border' type='datetime-local' name='requested_check_in'>
+        <input class='w-full px-3 py-2 rounded-xl border' type='time' name='requested_check_in'>
     </div>
     <div>
         <div class='text-sm text-gray-600 mb-1'>요청 퇴근시간</div>
-        <input class='w-full px-3 py-2 rounded-xl border' type='datetime-local' name='requested_check_out'>
+        <input class='w-full px-3 py-2 rounded-xl border' type='time' name='requested_check_out'>
     </div>
-    <div class='md:col-span-2 text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2' data-attendance-request-help>출근시간 수정은 승인 시 출근중 상태로 반영되고, 퇴근시간은 입력할 수 없습니다.</div>
+    <div class='md:col-span-2 text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2' data-attendance-request-help>출근시간 수정은 기존 퇴근기록을 유지하고 출근시간만 반영됩니다.</div>
     <div class='md:col-span-2'>
         <div class='text-sm text-gray-600 mb-1'>요청 사유</div>
         <input class='w-full px-3 py-2 rounded-xl border' type='text' name='reason' placeholder='요청 사유'>
@@ -566,29 +567,46 @@ if($pdo&&$eid_att>0){
         var todayValue=<?php echo json_encode($today_att); ?>;
         var cs=m?m.querySelectorAll('[data-attendance-request-close]'):[];
         var form=m?m.querySelector('[data-attendance-request-form]'):null;
-        var fDate=m?m.querySelector('input[name="request_date"]'):null;
+        var fDate=m?m.querySelector('input[type="date"][name="request_date"]'):null;
+        var fDateHidden=m?m.querySelector('[data-attendance-request-date-hidden]'):null;
         var fType=m?m.querySelector('select[name="request_type"]'):null;
+        var fTypeHidden=m?m.querySelector('[data-attendance-request-type-hidden]'):null;
         var fCi=m?m.querySelector('input[name="requested_check_in"]'):null;
         var fCo=m?m.querySelector('input[name="requested_check_out"]'):null;
         var help=m?m.querySelector('[data-attendance-request-help]'):null;
         var submitBtn=m?m.querySelector('[data-attendance-request-submit]'):null;
         var submitting=false;
-        function syncDate(v){if(!fDate||!v)return;var d=(v+'').substr(0,10);if(d.length===10)fDate.value=d;}
+        function normalizeTimeValue(v){
+            v=(v||'')+'';
+            if(v.length>=16)return v.substr(11,5);
+            if(v.length>=5)return v.substr(0,5);
+            return '';
+        }
+        function setLockedField(input, hidden, locked, value){
+            if(input){
+                if(value!==null)input.value=value;
+                input.disabled=locked;
+            }
+            if(hidden){
+                hidden.disabled=!locked;
+                hidden.value=locked?(value||''):'';
+            }
+        }
         function setDisabled(input, disabled){if(!input)return;input.disabled=disabled;if(disabled)input.value='';}
         function syncType(){
             var type=fType?fType.value:'check_in';
             if(type==='check_in'){
                 setDisabled(fCi,false);setDisabled(fCo,true);
                 if(fCi)fCi.required=true;if(fCo)fCo.required=false;
-                if(help)help.textContent='출근시간 수정은 승인 시 출근중 상태로 반영되고, 퇴근시간은 입력할 수 없습니다.';
+                if(help)help.textContent='출근시간 수정은 기존 퇴근기록을 유지하고 출근시간만 반영됩니다.';
             }else if(type==='check_out'){
                 setDisabled(fCi,true);setDisabled(fCo,false);
                 if(fCi)fCi.required=false;if(fCo)fCo.required=true;
-                if(help)help.textContent='퇴근시간 수정은 출근시간을 입력할 수 없고, 승인 시 퇴근완료 상태로 반영됩니다.';
+                if(help)help.textContent='퇴근시간 수정은 기존 출근기록을 유지하고 퇴근시간만 반영됩니다.';
             }else{
                 setDisabled(fCi,false);setDisabled(fCo,false);
                 if(fCi)fCi.required=true;if(fCo)fCo.required=true;
-                if(help)help.textContent='출근+퇴근 수정은 출근시간과 퇴근시간을 모두 선택할 수 있습니다.';
+                if(help)help.textContent='출근+퇴근 수정은 출근시간과 퇴근시간을 모두 입력합니다.';
             }
         }
         function bodyUnlockIfIdle(){
@@ -596,7 +614,8 @@ if($pdo&&$eid_att>0){
             var issueOpen=(issueModal && !issueModal.classList.contains('hidden'));
             if(!requestOpen && !issueOpen)document.body.classList.remove('overflow-hidden');
         }
-        function openIssue(){
+        function openIssue(e){
+            if(e && e.stopPropagation)e.stopPropagation();
             if(!issueModal)return;
             issueModal.classList.remove('hidden');
             document.body.classList.add('overflow-hidden');
@@ -612,11 +631,20 @@ if($pdo&&$eid_att>0){
             if(issueModal)issueModal.classList.add('hidden');
             var reqDate=trigger?trigger.getAttribute('data-attendance-request-date'):'';
             var reqType=trigger?trigger.getAttribute('data-attendance-request-type'):'';
-            if(fDate)fDate.value=reqDate?reqDate:todayValue;
-            if(fType)fType.value=reqType?reqType:'check_in';
+            var locked=!!(reqDate && reqDate.length===10);
+            var dateValue=locked?reqDate:todayValue;
+            var typeValue=reqType?reqType:'check_in';
+            setLockedField(fDate,fDateHidden,locked,dateValue);
+            setLockedField(fType,fTypeHidden,locked,typeValue);
             if(fCi)fCi.value='';
             if(fCo)fCo.value='';
             syncType();
+            if(trigger){
+                var ciValue=normalizeTimeValue(trigger.getAttribute('data-attendance-request-check-in'));
+                var coValue=normalizeTimeValue(trigger.getAttribute('data-attendance-request-check-out'));
+                if(fCi && !fCi.disabled)fCi.value=ciValue;
+                if(fCo && !fCo.disabled)fCo.value=coValue;
+            }
             m.classList.remove('hidden');
             document.body.classList.add('overflow-hidden');
             setTimeout(function(){
@@ -634,10 +662,10 @@ if($pdo&&$eid_att>0){
         }
         var issueOpeners=document.querySelectorAll('[data-attendance-issue-open]');
         for(var oi=0;oi<issueOpeners.length;oi++){
-            issueOpeners[oi].addEventListener('click',function(e){openIssue();});
+            issueOpeners[oi].addEventListener('click',function(e){openIssue(e);});
             issueOpeners[oi].addEventListener('keydown',function(e){
                 var key=e.key||e.keyCode;
-                if(key==='Enter'||key===' '||key===13||key===32){e.preventDefault();openIssue();}
+                if(key==='Enter'||key===' '||key===13||key===32){e.preventDefault();openIssue(e);}
             });
         }
         if(issueModal){
@@ -650,8 +678,6 @@ if($pdo&&$eid_att>0){
         }
         for(var i=0;i<cs.length;i++){cs[i].addEventListener('click',closeRequest);}
         if(fType)fType.addEventListener('change',syncType);
-        if(fCi)fCi.addEventListener('change',function(){syncDate(this.value);});
-        if(fCo)fCo.addEventListener('change',function(){syncDate(this.value);});
         if(form){
             form.addEventListener('submit',function(e){
                 if(submitting){e.preventDefault();return false;}

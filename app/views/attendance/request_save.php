@@ -3,6 +3,68 @@ use App\Core\Db;
 
 require_once __DIR__ . '/common.php';
 
+if (!function_exists('attendance_request_normalize_datetime_value')) {
+function attendance_request_normalize_datetime_value($requestDate, $value) {
+    $requestDate = trim((string)$requestDate);
+    $value = trim((string)$value);
+    if ($value === '') return '';
+    $value = str_replace('T', ' ', $value);
+    if (preg_match('/^([01][0-9]|2[0-3]):[0-5][0-9]$/', $value)) {
+        return $requestDate . ' ' . $value . ':00';
+    }
+    if (preg_match('/^([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/', $value)) {
+        return $requestDate . ' ' . $value;
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]$/', $value)) {
+        return $value . ':00';
+    }
+    if (preg_match('/^\d{4}-\d{2}-\d{2} ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]$/', $value)) {
+        return $value;
+    }
+    return $value;
+}}
+
+if (!function_exists('attendance_request_time_part')) {
+function attendance_request_time_part($value) {
+    $value = trim((string)$value);
+    if ($value === '') return '';
+    if (strlen($value) >= 16 && preg_match('/^\d{4}-\d{2}-\d{2}[ T]/', $value)) return substr($value, 11, 5);
+    if (strlen($value) >= 5) return substr($value, 0, 5);
+    return '';
+}}
+
+if (!function_exists('attendance_request_is_late_check_in')) {
+function attendance_request_is_late_check_in($checkIn) {
+    $time = attendance_request_time_part($checkIn);
+    if ($time === '' || strlen($time) < 5) return false;
+    return (strcmp(substr($time, 0, 5), '08:00') > 0);
+}}
+
+if (!function_exists('attendance_request_expected_type_for_date')) {
+function attendance_request_expected_type_for_date($pdo, $employeeId, $requestDate) {
+    if (!$pdo || (int)$employeeId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestDate)) return '';
+    try {
+        $stRecord = $pdo->prepare("SELECT check_in, check_out FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d LIMIT 1");
+        $stRecord->execute(array(':e' => $employeeId, ':d' => $requestDate));
+        $recordRow = $stRecord->fetch(PDO::FETCH_ASSOC);
+        if (!$recordRow) return 'both';
+
+        $recordCheckIn = isset($recordRow['check_in']) ? trim((string)$recordRow['check_in']) : '';
+        $recordCheckOut = isset($recordRow['check_out']) ? trim((string)$recordRow['check_out']) : '';
+        $hasCheckIn = ($recordCheckIn !== '');
+        $hasCheckOut = ($recordCheckOut !== '');
+        $isLate = attendance_request_is_late_check_in($recordCheckIn);
+
+        if (!$hasCheckIn && !$hasCheckOut) return 'both';
+        if (!$hasCheckIn && $hasCheckOut) return 'check_in';
+        if ($hasCheckIn && !$hasCheckOut) return $isLate ? 'both' : 'check_out';
+        if ($isLate) return 'check_in';
+    } catch (Exception $e) {
+        return '';
+    }
+    return '';
+}}
+
 $attendanceRequestReturnUrl = isset($_POST['return_url']) ? cpms_safe_internal_redirect_url((string)$_POST['return_url'], '?r=대시보드') : '?r=대시보드';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) {
@@ -35,6 +97,14 @@ if (!in_array($t, array('check_in', 'check_out', 'both'), true)) {
 }
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
     flash_set('danger', '요청 날짜가 올바르지 않습니다.');
+    header('Location: ' . $attendanceRequestReturnUrl);
+    exit;
+}
+$ci = attendance_request_normalize_datetime_value($d, $ci);
+$co = attendance_request_normalize_datetime_value($d, $co);
+$expectedType = attendance_request_expected_type_for_date($pdo, $eid, $d);
+if ($expectedType !== '' && $t !== $expectedType) {
+    flash_set('danger', '해당 날짜는 ' . attendance_request_type_label($expectedType) . ' 요청만 등록할 수 있습니다.');
     header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }

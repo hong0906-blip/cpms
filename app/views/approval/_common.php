@@ -285,6 +285,30 @@ if (!function_exists('approval_employee_is_executive')) {
     }
 }
 
+if (!function_exists('approval_employee_is_ceo')) {
+    function approval_employee_is_ceo($employee)
+    {
+        $blob = approval_employee_text_blob($employee);
+        if ($blob === '') {
+            return false;
+        }
+        $words = array(
+            approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC'),
+            approval_ko('%EB%8C%80%ED%91%9C%EB%8B%98'),
+            approval_ko('%EB%8C%80%ED%91%9C'),
+            'ceo',
+            'chiefexecutiveofficer'
+        );
+        for ($i = 0; $i < count($words); $i++) {
+            $w = approval_normalize_compare_text($words[$i]);
+            if ($w !== '' && strpos($blob, $w) !== false) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
 if (!function_exists('approval_leave_normalize_date')) {
     function approval_leave_normalize_date($value)
     {
@@ -1060,20 +1084,91 @@ if (!function_exists('approval_is_management_department_user')) {
     }
 }
 
+if (!function_exists('approval_is_ceo_user')) {
+    function approval_is_ceo_user($pdo, $user)
+    {
+        if (!is_array($user)) {
+            return false;
+        }
+
+        $employee = array(
+            'id' => isset($user['id']) ? (int)$user['id'] : 0,
+            'employee_id' => isset($user['employee_id']) ? (int)$user['employee_id'] : 0,
+            'name' => isset($user['name']) ? (string)$user['name'] : '',
+            'email' => isset($user['email']) ? (string)$user['email'] : '',
+            'role' => isset($user['role']) ? (string)$user['role'] : '',
+            'position' => isset($user['position']) ? (string)$user['position'] : '',
+            'department' => isset($user['department']) ? (string)$user['department'] : ''
+        );
+        if (approval_employee_is_ceo($employee)) {
+            return true;
+        }
+
+        if (!$pdo || !approval_table_exists($pdo, 'employees')) {
+            return false;
+        }
+
+        try {
+            $parts = array();
+            $params = array();
+            $employeeId = approval_current_employee_id($pdo, $user);
+            $email = approval_current_user_email($user);
+            $name = approval_current_user_name($user);
+
+            if ($employeeId > 0) {
+                $parts[] = 'id=:id';
+                $params[':id'] = $employeeId;
+            }
+            if ($email !== '') {
+                $parts[] = 'LOWER(TRIM(email))=LOWER(TRIM(:email))';
+                $params[':email'] = $email;
+            }
+            if ($name !== '') {
+                $parts[] = 'name=:name';
+                $params[':name'] = $name;
+            }
+            if (count($parts) === 0) {
+                return false;
+            }
+
+            $positionSelect = approval_table_column_exists($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+            $roleSelect = approval_table_column_exists($pdo, 'employees', 'role') ? 'role' : "'' AS role";
+            $departmentSelect = approval_table_column_exists($pdo, 'employees', 'department') ? 'department' : "'' AS department";
+            $sql = "SELECT id, name, email, " . $departmentSelect . ", " . $positionSelect . ", " . $roleSelect . " FROM employees WHERE " . implode(' OR ', $parts) . " LIMIT 1";
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            return approval_employee_is_ceo($row);
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('approval_can_view_all_completed_documents')) {
+    function approval_can_view_all_completed_documents($pdo, $user)
+    {
+        return approval_is_management_department_user($pdo, $user) || approval_is_ceo_user($pdo, $user);
+    }
+}
+
 if (!function_exists('approval_can_view_document')) {
     function approval_can_view_document($pdo, $docRow, $user)
     {
         if (!is_array($docRow) || !isset($docRow['id'])) {
             return false;
         }
+        $status = strtoupper(trim((string)(isset($docRow['doc_status']) ? $docRow['doc_status'] : '')));
         if (approval_is_management_only_doc_type(isset($docRow['doc_type']) ? $docRow['doc_type'] : '')) {
-            return approval_is_management_department_user($pdo, $user);
+            if (approval_is_management_department_user($pdo, $user)) {
+                return true;
+            }
+            return (in_array($status, array('APPROVED', 'COMPLETED'), true) && approval_is_ceo_user($pdo, $user));
         }
         if (approval_is_master_user()) {
             return true;
         }
-        $status = strtoupper(trim((string)(isset($docRow['doc_status']) ? $docRow['doc_status'] : '')));
-        if (in_array($status, array('APPROVED', 'COMPLETED'), true) && approval_is_management_department_user($pdo, $user)) {
+        if (in_array($status, array('APPROVED', 'COMPLETED'), true) && approval_can_view_all_completed_documents($pdo, $user)) {
             return true;
         }
         if (approval_is_document_owner($pdo, $docRow, $user)) {

@@ -172,6 +172,7 @@ function cpms_dashboard_notice_save_item($input) {
     $id = isset($input['id']) ? trim((string)$input['id']) : '';
     $now = date('Y-m-d H:i:s');
     $found = false;
+    $savedItem = null;
     $nextItems = array();
 
     $userName = class_exists('App\\Core\\Auth') ? (string)\App\Core\Auth::userName() : '';
@@ -186,12 +187,13 @@ function cpms_dashboard_notice_save_item($input) {
             $row['is_pinned'] = isset($input['is_pinned']) ? (int)$input['is_pinned'] : 0;
             $row['updated_at'] = $now;
             $found = true;
+            $savedItem = $row;
         }
         $nextItems[] = $row;
     }
 
     if (!$found) {
-        $nextItems[] = array(
+        $savedItem = array(
             'id' => cpms_dashboard_notice_new_id(),
             'title' => isset($input['title']) ? trim((string)$input['title']) : '',
             'content' => isset($input['content']) ? trim((string)$input['content']) : '',
@@ -202,10 +204,104 @@ function cpms_dashboard_notice_save_item($input) {
             'created_at' => $now,
             'updated_at' => ''
         );
+        $nextItems[] = $savedItem;
     }
 
     $store['items'] = $nextItems;
-    return cpms_dashboard_notice_write_store($store);
+    $ok = cpms_dashboard_notice_write_store($store);
+    return array(
+        'ok' => $ok ? true : false,
+        'created' => $found ? false : true,
+        'item' => is_array($savedItem) ? $savedItem : array()
+    );
+}}
+
+if (!function_exists('cpms_dashboard_notice_employee_column_exists')) {
+function cpms_dashboard_notice_employee_column_exists($pdo, $column) {
+    if (!$pdo) return false;
+    $column = trim((string)$column);
+    if ($column === '' || !preg_match('/^[a-zA-Z0-9_]+$/', $column)) return false;
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM employees LIKE :col");
+        $st->execute(array(':col' => $column));
+        return (bool)$st->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_dashboard_notice_receiver_employee_ids')) {
+function cpms_dashboard_notice_receiver_employee_ids($pdo) {
+    $ids = array();
+    if (!$pdo) return $ids;
+    if (!cpms_dashboard_notice_employee_column_exists($pdo, 'google_chat_enabled')) return $ids;
+
+    $where = array('google_chat_enabled = 1');
+    if (cpms_dashboard_notice_employee_column_exists($pdo, 'is_active')) {
+        $where[] = 'is_active = 1';
+    }
+
+    $hasDmSpace = cpms_dashboard_notice_employee_column_exists($pdo, 'google_chat_dm_space_name');
+    $hasUserName = cpms_dashboard_notice_employee_column_exists($pdo, 'google_chat_user_name');
+    $dmConditions = array();
+    if ($hasDmSpace) $dmConditions[] = "(google_chat_dm_space_name IS NOT NULL AND TRIM(google_chat_dm_space_name) <> '')";
+    if ($hasUserName) $dmConditions[] = "(google_chat_user_name IS NOT NULL AND TRIM(google_chat_user_name) <> '')";
+    if (count($dmConditions) === 0) return $ids;
+    $where[] = '(' . implode(' OR ', $dmConditions) . ')';
+
+    try {
+        $sql = 'SELECT id FROM employees WHERE ' . implode(' AND ', $where) . ' ORDER BY id ASC';
+        $st = $pdo->query($sql);
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $employeeId = isset($row['id']) ? (int)$row['id'] : 0;
+            if ($employeeId > 0) $ids[] = $employeeId;
+        }
+    } catch (Exception $e) {
+        error_log('[dashboard_notice_chat] receiver lookup failed: ' . $e->getMessage());
+    }
+    return $ids;
+}}
+
+if (!function_exists('cpms_dashboard_notice_build_created_dm_message')) {
+function cpms_dashboard_notice_build_created_dm_message($pdo, $notice, $employeeId) {
+    if (!is_array($notice)) $notice = array();
+    $title = isset($notice['title']) ? trim((string)$notice['title']) : '';
+    $author = isset($notice['author_name']) ? trim((string)$notice['author_name']) : '';
+    if ($author === '') $author = isset($notice['author_email']) ? trim((string)$notice['author_email']) : '';
+    if ($author === '') $author = '-';
+    if ($title === '') $title = '-';
+
+    if (function_exists('cpms_app_route_url')) {
+        $url = cpms_app_route_url($pdo, 'notices', array(), (int)$employeeId);
+    } else if (function_exists('cpms_public_base_url')) {
+        $url = cpms_public_base_url($pdo) . '/?r=notices';
+    } else {
+        $url = '?r=notices';
+    }
+
+    $lines = array();
+    $lines[] = urldecode('%EA%B3%B5%EC%A7%80%EC%82%AC%ED%95%AD%EC%9D%B4%20%EC%9E%91%EC%84%B1%EB%90%98%EC%97%88%EC%8A%B5%EB%8B%88%EB%8B%A4.%20%ED%99%95%EC%9D%B8%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.');
+    $lines[] = urldecode('%EC%9E%91%EC%84%B1%EC%9E%90') . ' : ' . $author;
+    $lines[] = urldecode('%EC%A0%9C%EB%AA%A9') . ' : ' . $title;
+    $lines[] = 'URL : ' . $url;
+    return implode("\n", $lines);
+}}
+
+if (!function_exists('cpms_dashboard_notice_send_created_dm')) {
+function cpms_dashboard_notice_send_created_dm($pdo, $notice) {
+    $result = array('total' => 0, 'sent' => 0, 'failed' => 0);
+    if (!$pdo || !is_array($notice)) return $result;
+    if (!function_exists('cpms_send_google_chat_to_employee')) return $result;
+
+    $employeeIds = cpms_dashboard_notice_receiver_employee_ids($pdo);
+    $result['total'] = count($employeeIds);
+    foreach ($employeeIds as $employeeId) {
+        $message = cpms_dashboard_notice_build_created_dm_message($pdo, $notice, (int)$employeeId);
+        $ok = cpms_send_google_chat_to_employee($pdo, (int)$employeeId, $message, 0, 'NOTICE_CREATED', 'DASHBOARD_NOTICE');
+        if ($ok) $result['sent']++;
+        else $result['failed']++;
+    }
+    return $result;
 }}
 
 if (!function_exists('cpms_dashboard_notice_delete_item')) {

@@ -58,7 +58,21 @@ $input = array(
     'is_pinned' => isset($_POST['is_pinned']) ? (int)$_POST['is_pinned'] : 0
 );
 
-cpms_dashboard_notice_save_item($input);
+$saveResult = cpms_dashboard_notice_save_item($input);
+if (is_array($saveResult)
+    && !empty($saveResult['ok'])
+    && !empty($saveResult['created'])
+    && isset($saveResult['item'])
+    && is_array($saveResult['item'])
+    && isset($saveResult['item']['is_active'])
+    && (int)$saveResult['item']['is_active'] === 1) {
+    try {
+        $pdo = \App\Core\Db::pdo();
+        cpms_dashboard_notice_send_created_dm($pdo, $saveResult['item']);
+    } catch (Exception $e) {
+        error_log('[dashboard_notice_chat] ' . $e->getMessage());
+    }
+}
 cpms_dashboard_notice_flash_set('success', cpms_dashboard_notice_label('saved'));
 header('Location: ' . $returnUrl);
 exit;

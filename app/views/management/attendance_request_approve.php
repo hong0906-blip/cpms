@@ -52,7 +52,6 @@ if ($r) {
     $co = $a ? $a['check_out'] : null;
     if ($r['request_type'] === 'check_in') {
         $ci = $r['requested_check_in'];
-        $co = null;
     } else if ($r['request_type'] === 'check_out') {
         $co = $r['requested_check_out'];
     } else if ($r['request_type'] === 'both') {

@@ -13,6 +13,7 @@ if ($laborTab === '') $laborTab = 'timesheet';
 
 $laborTabs = array(
     'timesheet' => '공수',
+    'outsourcing' => '외주비',
     'workers'   => '인원 작성',
 );
 if (!$canEditLabor && isset($laborTabs['workers'])) unset($laborTabs['workers']);
@@ -194,6 +195,18 @@ if (is_array($timesheetWorkers)) {
 if (function_exists('cpms_sort_labor_workers')) {
     $timesheetWorkers = cpms_sort_labor_workers($timesheetWorkers, $laborSort, $laborSortDir, $attendanceGongsuMap, $attendanceOutputDays, $selectedMonth);
 }
+
+$outsourcingTimesheetWorkers = array();
+if (is_array($timesheetWorkers)) {
+    foreach ($timesheetWorkers as $worker) {
+        $companyName = isset($worker['company_name']) ? trim((string)$worker['company_name']) : '';
+        if ($companyName === '') $companyName = '창명건설';
+        if ($companyName === '창명건설') continue;
+        $outsourcingTimesheetWorkers[] = $worker;
+    }
+}
+$outsourcingTimesheetRows = count($outsourcingTimesheetWorkers);
+if ($outsourcingTimesheetRows < 1) $outsourcingTimesheetRows = 1;
 
 $workerRowsForSelectedMonth = array();
 if (is_array($workerRows)) {
@@ -431,7 +444,26 @@ foreach ($timesheetWorkers as $worker) {
     $attendanceTimeMap = $attendanceTimeMap;
     $showBankColumns = false;    
     $canEdit = $canEditLabor;
+    $laborSheetTab = 'timesheet';
     require __DIR__ . '/partials/labor_sheet_table.php';
+    ?>
+<?php elseif ($laborTab === 'outsourcing'): ?>
+    <?php
+    $projectRow = $projectRow;
+    $selectedMonth = $selectedMonth;
+    $periodStart = $periodStart;
+    $timesheetRows = $outsourcingTimesheetRows;
+    $periodEnd = $periodEnd;
+    $timesheetWorkers = $outsourcingTimesheetWorkers;
+    $attendanceGongsuMap = $attendanceGongsuMap;
+    $attendanceGongsuUnit = $attendanceGongsuUnit;
+    $attendanceOutputDays = $attendanceOutputDays;
+    $attendanceTimeMap = $attendanceTimeMap;
+    $showBankColumns = false;
+    $canEdit = false;
+    $laborSheetTab = 'outsourcing';
+    require __DIR__ . '/partials/labor_sheet_table.php';
+    $canEdit = $canEditLabor;
     ?>
 <?php else: ?>
     <?php $showSensitiveLaborFields = (\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees()); ?>

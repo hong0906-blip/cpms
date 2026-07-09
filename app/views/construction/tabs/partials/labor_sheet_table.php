@@ -91,21 +91,25 @@ $laborSort = isset($laborSort) ? trim((string)$laborSort) : 'name';
 $laborSortDir = isset($laborSortDir) ? trim((string)$laborSortDir) : 'asc';
 if ($laborSortDir !== 'desc') $laborSortDir = 'asc';
 $laborSheetProjectId = isset($pid) ? (int)$pid : (isset($projectId) ? (int)$projectId : 0);
+$laborSheetTab = isset($laborSheetTab) ? trim((string)$laborSheetTab) : 'timesheet';
+if ($laborSheetTab === '') $laborSheetTab = 'timesheet';
 $showLaborBulkSelector = ($canEditTimesheet && !$laborSheetDownloadMode);
 $todayDateKey = date('Y-m-d');
 $todayDay = (strpos($todayDateKey, (string)$selectedMonth) === 0) ? (int)substr($todayDateKey, 8, 2) : 0;
 
 if (!function_exists('cpms_labor_sheet_sort_header')) {
-    function cpms_labor_sheet_sort_header($field, $label, $currentSort, $currentDir, $projectId, $selectedMonth) {
+    function cpms_labor_sheet_sort_header($field, $label, $currentSort, $currentDir, $projectId, $selectedMonth, $laborTab = 'timesheet') {
         $field = trim((string)$field);
         $currentSort = trim((string)$currentSort);
         $currentDir = trim((string)$currentDir);
+        $laborTab = trim((string)$laborTab);
+        if ($laborTab === '') $laborTab = 'timesheet';
         if ($currentDir !== 'desc') $currentDir = 'asc';
         $isActive = ($currentSort === $field);
         $arrow = ($isActive && $currentDir === 'desc') ? '▼' : '▲';
         $nextDir = ($isActive && $currentDir === 'desc') ? 'asc' : 'desc';
         $baseUrl = function_exists('base_url') ? base_url() : '';
-        $href = $baseUrl . '/?r=공사&pid=' . (int)$projectId . '&tab=labor&labor_tab=timesheet&month=' . urlencode($selectedMonth) . '&labor_sort=' . urlencode($field) . '&labor_sort_dir=' . urlencode($nextDir);
+        $href = $baseUrl . '/?r=공사&pid=' . (int)$projectId . '&tab=labor&labor_tab=' . urlencode($laborTab) . '&month=' . urlencode($selectedMonth) . '&labor_sort=' . urlencode($field) . '&labor_sort_dir=' . urlencode($nextDir);
         return '<a href="' . h($href) . '" class="inline-flex items-center justify-center gap-1 whitespace-nowrap hover:text-blue-700"><span>' . h($label) . '</span><span class="text-[10px] leading-none">' . h($arrow) . '</span></a>';
     }
 }
@@ -168,19 +172,19 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
             </th>
             <?php endif; ?>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">출력월</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '성명' : cpms_labor_sheet_sort_header('name', '성명', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '직종' : cpms_labor_sheet_sort_header('job_type', '직종', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '성명' : cpms_labor_sheet_sort_header('name', '성명', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth, $laborSheetTab); ?></th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '직종' : cpms_labor_sheet_sort_header('job_type', '직종', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth, $laborSheetTab); ?></th>
             <th class="border border-gray-200 px-2 py-2 text-center" colspan="<?php echo (int)$daysInMonth; ?>">출력일수</th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '출력일수' : cpms_labor_sheet_sort_header('output_days', '출력일수', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '총공수' : cpms_labor_sheet_sort_header('total_gongsu', '총공수', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '임금단가' : cpms_labor_sheet_sort_header('wage_rate', '임금단가', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '출력일수' : cpms_labor_sheet_sort_header('output_days', '출력일수', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth, $laborSheetTab); ?></th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '총공수' : cpms_labor_sheet_sort_header('total_gongsu', '총공수', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth, $laborSheetTab); ?></th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '임금단가' : cpms_labor_sheet_sort_header('wage_rate', '임금단가', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth, $laborSheetTab); ?></th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">지급총액</th>
             <?php if ($showBankColumns): ?>            
             <th class="border border-gray-200 px-2 py-2" rowspan="2">영수인/예금주</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">은행명</th>
             <th class="border border-gray-200 px-2 py-2" rowspan="2">계좌번호</th>
             <?php endif; ?>
-            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '인력사업체명' : cpms_labor_sheet_sort_header('company', '인력사업체명', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth); ?></th>
+            <th class="border border-gray-200 px-2 py-2" rowspan="2"><?php echo $laborSheetDownloadMode ? '인력사업체명' : cpms_labor_sheet_sort_header('company', '인력사업체명', $laborSort, $laborSortDir, $laborSheetProjectId, $selectedMonth, $laborSheetTab); ?></th>
         </tr>
         <tr class="bg-gray-200 text-gray-800">
             <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>

@@ -9,6 +9,38 @@ require_once __DIR__ . '/template_leave.php';
 require_once __DIR__ . '/template_unused_leave.php';
 require_once __DIR__ . '/../../services/ApprovalPdfService.php';
 
+if (!function_exists('approval_detail_render_comment_items')) {
+    function approval_detail_render_comment_items($approvalComments, $showEmpty)
+    {
+        $approvalComments = is_array($approvalComments) ? $approvalComments : array();
+        if (count($approvalComments) === 0) {
+            if ($showEmpty) {
+                echo '<div class="text-sm text-gray-500">' . h(approval_ko('%EB%93%B1%EB%A1%9D%EB%90%9C%20%EC%8A%B9%EC%9D%B8%20%EC%9D%98%EA%B2%AC%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')) . '</div>';
+            }
+            return;
+        }
+        echo '<div class="space-y-2">';
+        for ($ci = 0; $ci < count($approvalComments); $ci++) {
+            $comment = $approvalComments[$ci];
+            $role = isset($comment['role']) ? trim((string)$comment['role']) : '';
+            $actor = isset($comment['actor']) ? trim((string)$comment['actor']) : '';
+            $createdAt = isset($comment['created_at']) ? trim((string)$comment['created_at']) : '';
+            $note = isset($comment['note']) ? trim((string)$comment['note']) : '';
+            echo '<div class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">';
+            echo '<div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">';
+            echo '<span class="font-extrabold text-indigo-700">' . h($role !== '' ? approval_role_label($role) : '-') . '</span>';
+            echo '<span>' . h($actor !== '' ? $actor : '-') . '</span>';
+            if ($createdAt !== '') {
+                echo '<span>' . h($createdAt) . '</span>';
+            }
+            echo '</div>';
+            echo '<div class="mt-2 text-sm leading-6 text-gray-800">' . nl2br(h($note)) . '</div>';
+            echo '</div>';
+        }
+        echo '</div>';
+    }
+}
+
 $pdo = Db::pdo();
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $u = \App\Core\Auth::user();
@@ -91,6 +123,30 @@ for ($i = 0; $i < count($lines); $i++) {
 }
 $canDecide = (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && $myPendingLine);
 $isRecipientEditablePlan = ($canDecide && isset($d['doc_type']) && $d['doc_type'] === 'unused_leave_plan');
+$detailDocType = isset($d['doc_type']) ? strtolower(trim((string)$d['doc_type'])) : '';
+$approvalCommentsEnabled = ($detailDocType === 'leave' || approval_is_proposal_doc_type($detailDocType));
+$approvalComments = array();
+if ($approvalCommentsEnabled) {
+    for ($ci = 0; $ci < count($approvalLogs); $ci++) {
+        $log = $approvalLogs[$ci];
+        $actionType = isset($log['action_type']) ? strtoupper(trim((string)$log['action_type'])) : '';
+        $note = isset($log['action_note']) ? trim((string)$log['action_note']) : '';
+        if ($actionType !== 'APPROVE' || $note === '') {
+            continue;
+        }
+        $actor = isset($log['actor_name']) && trim((string)$log['actor_name']) !== '' ? trim((string)$log['actor_name']) : '';
+        if ($actor === '' && isset($log['line_approver_name'])) {
+            $actor = trim((string)$log['line_approver_name']);
+        }
+        $approvalComments[] = array(
+            'role' => isset($log['role_type']) ? $log['role_type'] : '',
+            'actor' => $actor,
+            'created_at' => isset($log['created_at']) ? $log['created_at'] : '',
+            'note' => $note
+        );
+    }
+}
+$showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($approvalComments) > 0);
 ?>
 <div class="space-y-4">
     <div class="no-print flex flex-wrap gap-2">
@@ -126,25 +182,101 @@ $isRecipientEditablePlan = ($canDecide && isset($d['doc_type']) && $d['doc_type'
     <?php echo cpms_approval_pdf_links_html($d); ?>
 
     <?php if (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && !$isRecipientEditablePlan) { ?>
-        <div class="no-print cpms-approval-decision-panel <?php echo (isset($d['doc_type']) && (string)$d['doc_type'] === 'leave') ? '' : 'cpms-mobile-hide'; ?> bg-white rounded-2xl border p-4 flex flex-wrap gap-3 items-center">
+        <div class="no-print cpms-approval-decision-panel <?php echo (isset($d['doc_type']) && (string)$d['doc_type'] === 'leave') ? '' : 'cpms-mobile-hide'; ?> bg-white rounded-2xl border p-4">
             <?php if ($canDecide) { ?>
-                <form method="post" action="?r=approval_decide" style="display:inline;">
-                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                    <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
-                    <input type="hidden" name="action" value="approve">
-                    <button type="submit" class="px-6 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%ED%95%98%EA%B8%B0')); ?></button>
-                </form>
-                <form method="post" action="?r=approval_decide" class="flex flex-wrap gap-2 items-center">
-                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                    <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
-                    <input type="hidden" name="action" value="reject">
-                    <input type="text" name="reject_reason" class="border rounded-xl px-3 py-2 min-w-[280px]" placeholder="<?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%EC%82%AC%EC%9C%A0%20%EC%9E%85%EB%A0%A5')); ?>" required>
-                    <button type="submit" class="px-6 py-3 rounded-xl bg-rose-600 text-white font-extrabold"><?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%ED%95%98%EA%B8%B0')); ?></button>
-                </form>
+                <div class="space-y-4">
+                    <?php if ($approvalCommentsEnabled) { ?>
+                        <div>
+                            <div class="font-extrabold text-gray-900 mb-2"><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%20%EC%9D%98%EA%B2%AC')); ?></div>
+                            <?php approval_detail_render_comment_items($approvalComments, true); ?>
+                        </div>
+                    <?php } ?>
+                    <div class="flex flex-col lg:flex-row lg:items-start gap-3">
+                        <form method="post" action="?r=approval_decide" class="flex-1 space-y-2">
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
+                            <input type="hidden" name="action" value="approve">
+                            <?php if ($approvalCommentsEnabled) { ?>
+                                <textarea name="approval_comment" rows="3" class="w-full border rounded-xl px-3 py-2" placeholder="<?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%20%EC%8B%9C%20%EB%82%A8%EA%B8%B8%20%EC%9D%98%EA%B2%AC%EC%9D%84%20%EC%9E%85%EB%A0%A5%ED%95%98%EC%84%B8%EC%9A%94.')); ?>"></textarea>
+                            <?php } ?>
+                            <button type="submit" class="px-6 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%ED%95%98%EA%B8%B0')); ?></button>
+                        </form>
+                        <form method="post" action="?r=approval_decide" class="flex flex-wrap gap-2 items-center">
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
+                            <input type="hidden" name="action" value="reject">
+                            <input type="text" name="reject_reason" class="border rounded-xl px-3 py-2 min-w-[280px]" placeholder="<?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%EC%82%AC%EC%9C%A0%20%EC%9E%85%EB%A0%A5')); ?>" required>
+                            <button type="submit" class="px-6 py-3 rounded-xl bg-rose-600 text-white font-extrabold"><?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%ED%95%98%EA%B8%B0')); ?></button>
+                        </form>
+                    </div>
+                </div>
             <?php } else { ?>
+                <?php if ($approvalCommentsEnabled && count($approvalComments) > 0) { ?>
+                    <div class="mb-4">
+                        <div class="font-extrabold text-gray-900 mb-2"><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%20%EC%9D%98%EA%B2%AC')); ?></div>
+                        <?php approval_detail_render_comment_items($approvalComments, false); ?>
+                    </div>
+                <?php } ?>
                 <div class="text-sm text-gray-600"><?php echo h(approval_ko('%ED%98%84%EC%9E%AC%20%EA%B2%B0%EC%9E%AC%EC%9E%90%EB%A7%8C%20%EC%8A%B9%EC%9D%B8%2F%EB%B0%98%EB%A0%A4%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?></div>
             <?php } ?>
         </div>
+    <?php } ?>
+
+    <?php if ($approvalCommentsEnabled && count($approvalComments) > 0 && (!isset($d['doc_status']) || $d['doc_status'] !== 'PENDING' || $isRecipientEditablePlan)) { ?>
+        <div class="no-print bg-white rounded-2xl border p-4">
+            <div class="font-extrabold text-gray-900 mb-2"><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%20%EC%9D%98%EA%B2%AC')); ?></div>
+            <?php approval_detail_render_comment_items($approvalComments, false); ?>
+        </div>
+    <?php } ?>
+
+    <?php if ($showApprovalCommentModal) { ?>
+        <div id="modal-approvalCommentsAuto" class="fixed inset-0 z-50 hidden">
+            <div class="absolute inset-0 bg-black/45" data-approval-comments-close></div>
+            <div class="absolute inset-0 flex items-center justify-center p-4">
+                <div class="w-full max-w-3xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
+                    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                        <div>
+                            <div class="text-2xl font-extrabold text-gray-900"><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%20%EC%9D%98%EA%B2%AC')); ?></div>
+                            <div class="text-sm text-gray-500 mt-1"><?php echo h(approval_ko('%EC%9D%B4%EC%A0%84%20%EA%B2%B0%EC%9E%AC%EC%9E%90%EA%B0%80%20%EB%82%A8%EA%B8%B4%20%EC%9D%98%EA%B2%AC')); ?></div>
+                        </div>
+                        <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-approval-comments-close><?php echo h(approval_ko('%EB%8B%AB%EA%B8%B0')); ?></button>
+                    </div>
+                    <div class="p-5 md:p-6 overflow-y-auto max-h-[66vh]">
+                        <?php approval_detail_render_comment_items($approvalComments, false); ?>
+                    </div>
+                    <div class="px-6 py-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+                        <button type="button" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold" data-approval-comments-close><?php echo h(approval_ko('%EB%8B%AB%EA%B8%B0')); ?></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function(){
+            var modal = document.getElementById('modal-approvalCommentsAuto');
+            function closeModal() {
+                if (modal) modal.classList.add('hidden');
+                document.body.classList.remove('overflow-hidden');
+            }
+            function openModal() {
+                if (!modal) return;
+                modal.classList.remove('hidden');
+                document.body.classList.add('overflow-hidden');
+            }
+            var closeButtons = document.querySelectorAll('[data-approval-comments-close]');
+            for (var i = 0; i < closeButtons.length; i++) {
+                closeButtons[i].addEventListener('click', function(e){
+                    e.preventDefault();
+                    closeModal();
+                });
+            }
+            document.addEventListener('keydown', function(e){
+                if ((e.key === 'Escape' || e.keyCode === 27) && modal && !modal.classList.contains('hidden')) {
+                    closeModal();
+                }
+            });
+            openModal();
+        })();
+        </script>
     <?php } ?>
 
     <?php if (isset($d['doc_status']) && $d['doc_status'] === 'REJECTED') { ?>
