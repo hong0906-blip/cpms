@@ -428,6 +428,7 @@ foreach ($timesheetWorkers as $worker) {
         <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 bg-white text-gray-900 font-extrabold hover:bg-gray-50 transition" data-labor-bulk-value="0.5">
             0.5공수 일괄
         </button>
+        <span id="laborBulkSelectedCount" class="px-3 py-2 rounded-2xl bg-blue-50 text-blue-700 text-xs font-extrabold">선택 0명</span>
         <span id="laborBulkStatus" class="text-xs font-bold text-gray-500"></span>
     </div>
     <?php endif; ?>
@@ -957,6 +958,58 @@ foreach ($timesheetWorkers as $worker) {
         return isNaN(n) ? 0 : n;
     }
 
+    function updateLaborSheetTotals(){
+        var rows = document.querySelectorAll('.cpms-timesheet-row');
+        var dailyTotals = {};
+        var totalOutputDays = 0;
+        var totalGongsu = 0;
+        var totalPay = 0;
+        var todayAttendanceCount = 0;
+        for (var r = 0; r < rows.length; r++) {
+            var row = rows[r];
+            var buttons = row.querySelectorAll('.cpms-gongsu-cell');
+            var rowOutputDays = 0;
+            var rowGongsu = 0;
+            for (var i = 0; i < buttons.length; i++) {
+                var value = parseCellValue(buttons[i]);
+                if (value <= 0) continue;
+                var date = buttons[i].getAttribute('data-date') || '';
+                rowOutputDays++;
+                rowGongsu += value;
+                if (date !== '') {
+                    if (!dailyTotals[date]) dailyTotals[date] = 0;
+                    dailyTotals[date] += value;
+                }
+            }
+            var wageRate = parseFloat(row.getAttribute('data-wage-rate') || '0');
+            if (isNaN(wageRate)) wageRate = 0;
+            totalOutputDays += rowOutputDays;
+            totalGongsu += rowGongsu;
+            totalPay += rowGongsu * wageRate;
+            if (todayDate) {
+                var todayCell = row.querySelector('.cpms-gongsu-cell[data-date="' + todayDate + '"]');
+                if (todayCell && parseCellValue(todayCell) > 0) todayAttendanceCount++;
+            }
+        }
+
+        var dayCells = document.querySelectorAll('.cpms-daily-total');
+        for (var d = 0; d < dayCells.length; d++) {
+            var day = dayCells[d].getAttribute('data-date') || '';
+            var dayValue = dailyTotals[day] || 0;
+            dayCells[d].textContent = dayValue > 0 ? formatValue(dayValue) : '0';
+        }
+        var outputTotalCell = document.querySelector('.cpms-sheet-output-days-total');
+        var gongsuTotalCell = document.querySelector('.cpms-sheet-gongsu-total');
+        var payTotalCell = document.querySelector('.cpms-sheet-pay-total');
+        var totalAttendanceCell = document.querySelector('.cpms-attendance-total-count');
+        var todayAttendanceCell = document.querySelector('.cpms-attendance-today-count');
+        if (outputTotalCell) outputTotalCell.textContent = String(totalOutputDays);
+        if (gongsuTotalCell) gongsuTotalCell.textContent = totalGongsu > 0 ? formatValue(totalGongsu) : '0';
+        if (payTotalCell) payTotalCell.textContent = formatMoney(totalPay);
+        if (totalAttendanceCell) totalAttendanceCell.textContent = totalGongsu > 0 ? formatValue(totalGongsu) : '0';
+        if (todayAttendanceCell) todayAttendanceCell.textContent = String(todayAttendanceCount);
+    }
+
     function setCellDisplay(cell, displayValue, isPending){
         if (!cell) return;
         while (cell.firstChild) cell.removeChild(cell.firstChild);
@@ -990,8 +1043,9 @@ foreach ($timesheetWorkers as $worker) {
         var totalPayCell = row.querySelector('.cpms-total-pay');
         var wageRate = parseFloat(row.getAttribute('data-wage-rate') || '0');
         if (outputDaysCell) outputDaysCell.textContent = String(outputDays);
-        if (totalGongsuCell) totalGongsuCell.textContent = formatValue(totalGongsu);
+        if (totalGongsuCell) totalGongsuCell.textContent = totalGongsu > 0 ? formatValue(totalGongsu) : '0';
         if (totalPayCell) totalPayCell.textContent = formatMoney(totalGongsu * (isNaN(wageRate) ? 0 : wageRate));
+        updateLaborSheetTotals();
     }
 
     function escHtml(value){
@@ -1254,6 +1308,20 @@ foreach ($timesheetWorkers as $worker) {
         if (status) status.textContent = text || '';
     }
 
+    function refreshLaborBulkSelectedCount(checked, total){
+        var label = document.getElementById('laborBulkSelectedCount');
+        if (!label) return;
+        if (typeof checked === 'undefined' || typeof total === 'undefined') {
+            var checks = document.querySelectorAll('.cpms-labor-worker-check');
+            total = checks.length;
+            checked = 0;
+            for (var i = 0; i < checks.length; i++) {
+                if (checks[i].checked) checked++;
+            }
+        }
+        label.textContent = '선택 ' + checked + '명 / 전체 ' + total + '명';
+    }
+
     function setLaborBulkDisabled(disabled){
         var buttons = document.querySelectorAll('[data-labor-bulk-value]');
         for (var i = 0; i < buttons.length; i++) {
@@ -1265,7 +1333,10 @@ foreach ($timesheetWorkers as $worker) {
 
     function refreshLaborBulkSelectAll(){
         var all = document.getElementById('laborBulkSelectAll');
-        if (!all) return;
+        if (!all) {
+            refreshLaborBulkSelectedCount();
+            return;
+        }
         var checks = document.querySelectorAll('.cpms-labor-worker-check');
         var checked = 0;
         for (var i = 0; i < checks.length; i++) {
@@ -1273,6 +1344,7 @@ foreach ($timesheetWorkers as $worker) {
         }
         all.checked = (checks.length > 0 && checked === checks.length);
         all.indeterminate = (checked > 0 && checked < checks.length);
+        refreshLaborBulkSelectedCount(checked, checks.length);
     }
 
     function runLaborBulkInput(value){
@@ -1351,6 +1423,9 @@ foreach ($timesheetWorkers as $worker) {
         laborWorkerChecks[lw].addEventListener('change', refreshLaborBulkSelectAll);
     }
     refreshLaborBulkSelectAll();
+    if (document.querySelector('.cpms-gongsu-cell')) {
+        updateLaborSheetTotals();
+    }
 
     var laborBulkButtons = document.querySelectorAll('[data-labor-bulk-value]');
     for (var lb = 0; lb < laborBulkButtons.length; lb++) {

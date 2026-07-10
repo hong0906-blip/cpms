@@ -8,6 +8,7 @@
 require_once __DIR__ . '/partials/labor_data_loader.php';
 require_once __DIR__ . '/partials/sales_data_loader.php';
 require_once __DIR__ . '/../../safety/safety_cost_helper.php';
+require_once __DIR__ . '/../partials/schedule_auto_progress_helper.php';
 require_once __DIR__ . '/../partials/target_cost_rate_helper.php';
 
 if (!function_exists('cpms_status_cache_key')) {
@@ -532,6 +533,9 @@ if (!function_exists('cpms_status_confirmed_sales_total_all')) {
 $projectStartDate = isset($projectRow['start_date']) ? (string)$projectRow['start_date'] : date('Y-m-d');
 $projectEndDate = isset($projectRow['end_date']) ? (string)$projectRow['end_date'] : date('Y-m-d');
 $projectName = isset($projectRow['name']) ? (string)$projectRow['name'] : '';
+if (isset($pdo) && isset($pid) && function_exists('cpms_schedule_apply_auto_progress')) {
+    cpms_schedule_apply_auto_progress($pdo, (int)$pid);
+}
 
 $startYear = (int)date('Y');
 $endYear = (int)date('Y');

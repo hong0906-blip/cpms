@@ -96,6 +96,40 @@ if ($laborSheetTab === '') $laborSheetTab = 'timesheet';
 $showLaborBulkSelector = ($canEditTimesheet && !$laborSheetDownloadMode);
 $todayDateKey = date('Y-m-d');
 $todayDay = (strpos($todayDateKey, (string)$selectedMonth) === 0) ? (int)substr($todayDateKey, 8, 2) : 0;
+$laborSheetDailyTotals = array();
+for ($d = 1; $d <= $daysInMonth; $d++) {
+    $laborSheetDailyTotals[$d] = 0.0;
+}
+$laborSheetTotalOutputDays = 0;
+$laborSheetTotalGongsu = 0.0;
+$laborSheetTotalPay = 0.0;
+$laborSheetTodayAttendanceCount = 0;
+if (is_array($timesheetWorkers)) {
+    foreach ($timesheetWorkers as $workerForTotal) {
+        $workerNameForTotal = isset($workerForTotal['name']) ? (string)$workerForTotal['name'] : '';
+        $workerKeyForTotal = cpms_timesheet_worker_key($workerNameForTotal);
+        if ($workerKeyForTotal === '') continue;
+        $dailyMapForTotal = isset($attendanceGongsuMap[$workerKeyForTotal]) && is_array($attendanceGongsuMap[$workerKeyForTotal]) ? $attendanceGongsuMap[$workerKeyForTotal] : array();
+        $outputDaysForTotal = isset($attendanceOutputDays[$workerKeyForTotal]) ? (int)$attendanceOutputDays[$workerKeyForTotal] : 0;
+        $rowTotalGongsuForTotal = 0.0;
+        for ($d = 1; $d <= $daysInMonth; $d++) {
+            $dateKeyForTotal = $selectedMonth . '-' . str_pad((string)$d, 2, '0', STR_PAD_LEFT);
+            $gongsuForTotal = isset($dailyMapForTotal[$dateKeyForTotal]) ? $dailyMapForTotal[$dateKeyForTotal] : null;
+            if (!is_numeric($gongsuForTotal)) continue;
+            $gongsuFloatForTotal = (float)$gongsuForTotal;
+            if ($gongsuFloatForTotal <= 0) continue;
+            $laborSheetDailyTotals[$d] += $gongsuFloatForTotal;
+            $rowTotalGongsuForTotal += $gongsuFloatForTotal;
+        }
+        if ($todayDay > 0 && isset($dailyMapForTotal[$todayDateKey]) && is_numeric($dailyMapForTotal[$todayDateKey]) && (float)$dailyMapForTotal[$todayDateKey] > 0) {
+            $laborSheetTodayAttendanceCount++;
+        }
+        $wageRateForTotal = function_exists('cpms_resolve_labor_wage_rate') ? cpms_resolve_labor_wage_rate($workerForTotal) : cpms_parse_money_value(isset($workerForTotal['deposit_rate']) ? $workerForTotal['deposit_rate'] : '');
+        $laborSheetTotalOutputDays += $outputDaysForTotal;
+        $laborSheetTotalGongsu += $rowTotalGongsuForTotal;
+        $laborSheetTotalPay += $rowTotalGongsuForTotal * $wageRateForTotal;
+    }
+}
 
 if (!function_exists('cpms_labor_sheet_sort_header')) {
     function cpms_labor_sheet_sort_header($field, $label, $currentSort, $currentDir, $projectId, $selectedMonth, $laborTab = 'timesheet') {
@@ -153,8 +187,8 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
             <td class="border border-gray-200 px-2 py-2" colspan="4"><?php echo h($siteName !== '' ? $siteName : '미지정'); ?></td>
         </tr>
         <tr class="bg-gray-100">
-            <th class="border border-gray-200 px-2 py-2 text-left font-extrabold">사업개시번호</th>
-            <td class="border border-gray-200 px-2 py-2" colspan="6"></td>
+            <th class="border border-gray-200 px-2 py-2 text-left font-extrabold">출근인원</th>
+            <td class="border border-gray-200 px-2 py-2" colspan="6">전체출근 <span class="cpms-attendance-total-count"><?php echo h(cpms_format_gongsu_value($laborSheetTotalGongsu)); ?></span>공수 / 금일 출근인원 <span class="cpms-attendance-today-count"><?php echo (int)$laborSheetTodayAttendanceCount; ?></span>명</td>
             <th class="border border-gray-200 px-2 py-2 text-left font-extrabold">출력기간</th>
             <td class="border border-gray-200 px-2 py-2" colspan="6"><?php echo h($periodStart); ?> ~ <?php echo h($periodEnd); ?></td>
             <th class="border border-gray-200 px-2 py-2 text-left font-extrabold">출력월</th>
@@ -292,6 +326,23 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
                 </tr>
             <?php endfor; ?>
         <?php endif; ?>
+        <tr class="bg-blue-50 text-blue-950 font-extrabold">
+            <td class="border border-gray-200 px-2 py-2 text-center" colspan="<?php echo 3 + ($showLaborBulkSelector ? 1 : 0); ?>">합계</td>
+            <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
+                <?php $dayTotal = isset($laborSheetDailyTotals[$d]) ? (float)$laborSheetDailyTotals[$d] : 0.0; ?>
+                <td class="cpms-daily-total border border-gray-200 px-1 py-2 text-center" data-date="<?php echo h($selectedMonth . '-' . str_pad((string)$d, 2, '0', STR_PAD_LEFT)); ?>"><?php echo h($dayTotal > 0 ? cpms_format_gongsu_value($dayTotal) : '0'); ?></td>
+            <?php endfor; ?>
+            <td class="cpms-sheet-output-days-total border border-gray-200 px-2 py-2 text-center"><?php echo h((string)(int)$laborSheetTotalOutputDays); ?></td>
+            <td class="cpms-sheet-gongsu-total border border-gray-200 px-2 py-2 text-right"><?php echo h(cpms_format_gongsu_value($laborSheetTotalGongsu)); ?></td>
+            <td class="border border-gray-200 px-2 py-2 text-center">-</td>
+            <td class="cpms-sheet-pay-total border border-gray-200 px-2 py-2 text-right"><?php echo h(cpms_format_money_value($laborSheetTotalPay)); ?></td>
+            <?php if ($showBankColumns): ?>
+            <td class="border border-gray-200 px-2 py-2"></td>
+            <td class="border border-gray-200 px-2 py-2"></td>
+            <td class="border border-gray-200 px-2 py-2"></td>
+            <?php endif; ?>
+            <td class="border border-gray-200 px-2 py-2"></td>
+        </tr>
         </tbody>
     </table>
 </div>

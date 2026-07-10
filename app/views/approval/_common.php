@@ -696,17 +696,126 @@ if (!function_exists('approval_document_requires_ceo_for_vp_leave')) {
     }
 }
 
+if (!function_exists('approval_find_ceo_employee_for_proxy')) {
+    function approval_find_ceo_employee_for_proxy($pdo)
+    {
+        if (!$pdo || !approval_table_exists($pdo, 'employees')) {
+            return null;
+        }
+        if (function_exists('approval_line_rules_find_ceo')) {
+            try {
+                $ceo = approval_line_rules_find_ceo($pdo);
+                if (is_array($ceo) && isset($ceo['id']) && (int)$ceo['id'] > 0) {
+                    return $ceo;
+                }
+            } catch (Exception $e) {
+            }
+        }
+
+        $roleColumn = approval_table_column_exists($pdo, 'employees', 'role') ? 'role' : "'' AS role";
+        $positionColumn = approval_table_column_exists($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+        $departmentColumn = approval_table_column_exists($pdo, 'employees', 'department') ? 'department' : "'' AS department";
+        $select = "id,name,email," . $departmentColumn . "," . $positionColumn . "," . $roleColumn;
+
+        if (approval_table_exists($pdo, 'cpms_approval_settings')) {
+            $keys = array('approval_ceo_employee_id', 'ceo_employee_id', 'representative_employee_id');
+            for ($i = 0; $i < count($keys); $i++) {
+                try {
+                    $st = $pdo->prepare("SELECT setting_value FROM cpms_approval_settings WHERE setting_key=:k LIMIT 1");
+                    $st->execute(array(':k' => $keys[$i]));
+                    $value = trim((string)$st->fetchColumn());
+                    if ($value === '' || !is_numeric($value)) {
+                        continue;
+                    }
+                    $empSt = $pdo->prepare("SELECT " . $select . " FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
+                    $empSt->execute(array(':id' => (int)$value));
+                    $emp = $empSt->fetch(PDO::FETCH_ASSOC);
+                    if ($emp) {
+                        return $emp;
+                    }
+                } catch (Exception $e) {
+                }
+            }
+        }
+
+        try {
+            $ceoWord = approval_ko('%EB%8C%80%ED%91%9C');
+            $conditions = array('name LIKE :ceo_word_name');
+            $params = array(':ceo_word_name' => '%' . $ceoWord . '%');
+            if (approval_table_column_exists($pdo, 'employees', 'position')) {
+                $conditions[] = 'position LIKE :ceo_word_position';
+                $params[':ceo_word_position'] = '%' . $ceoWord . '%';
+            }
+            if (approval_table_column_exists($pdo, 'employees', 'role')) {
+                $conditions[] = 'role LIKE :ceo_word_role';
+                $conditions[] = "LOWER(role) LIKE '%ceo%'";
+                $conditions[] = "LOWER(role) LIKE '%president%'";
+                $params[':ceo_word_role'] = '%' . $ceoWord . '%';
+            }
+            $sql = "SELECT " . $select . " FROM employees WHERE is_active=1 AND (" . implode(' OR ', $conditions) . ") ORDER BY id ASC LIMIT 1";
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            return $row ? $row : null;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+}
+
+if (!function_exists('approval_insert_ceo_line_for_vp_leave')) {
+    function approval_insert_ceo_line_for_vp_leave($pdo, $documentId, $lineOrder)
+    {
+        if (!$pdo || (int)$documentId <= 0 || !approval_table_exists($pdo, 'cpms_approval_lines')) {
+            return false;
+        }
+        $ceo = approval_find_ceo_employee_for_proxy($pdo);
+        if (!is_array($ceo) || !isset($ceo['id']) || (int)$ceo['id'] <= 0) {
+            return false;
+        }
+        $ceoRole = approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC');
+        $cols = array('document_id', 'line_order', 'role_type', 'approver_id', 'approver_name', 'approver_email', 'line_status');
+        $marks = array(':document_id', ':line_order', ':role_type', ':approver_id', ':approver_name', ':approver_email', ':line_status');
+        $params = array(
+            ':document_id' => (int)$documentId,
+            ':line_order' => ((int)$lineOrder > 0 ? (int)$lineOrder : 0) + 1,
+            ':role_type' => $ceoRole,
+            ':approver_id' => (int)$ceo['id'],
+            ':approver_name' => isset($ceo['name']) ? (string)$ceo['name'] : '',
+            ':approver_email' => isset($ceo['email']) ? (string)$ceo['email'] : '',
+            ':line_status' => 'WAITING'
+        );
+        if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated')) {
+            $cols[] = 'is_delegated';
+            $marks[] = ':is_delegated';
+            $params[':is_delegated'] = 0;
+        }
+        try {
+            $pdo->prepare("INSERT INTO cpms_approval_lines (" . implode(',', $cols) . ") VALUES (" . implode(',', $marks) . ")")->execute($params);
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
 if (!function_exists('approval_force_ceo_waiting_for_vp_leave')) {
     function approval_force_ceo_waiting_for_vp_leave($pdo, $documentId, $lines)
     {
         if (!$pdo || (int)$documentId <= 0 || !is_array($lines)) {
             return;
         }
+        $hasCeoLine = false;
+        $maxOrder = 0;
         for ($i = 0; $i < count($lines); $i++) {
             $line = $lines[$i];
+            if (isset($line['line_order']) && (int)$line['line_order'] > $maxOrder) {
+                $maxOrder = (int)$line['line_order'];
+            }
             if (!isset($line['id']) || !approval_role_is_ceo(isset($line['role_type']) ? $line['role_type'] : '')) {
                 continue;
             }
+            $hasCeoLine = true;
             $status = isset($line['line_status']) ? strtoupper(trim((string)$line['line_status'])) : '';
             if (in_array($status, array('APPROVED', 'REJECTED'), true)) {
                 continue;
@@ -723,6 +832,9 @@ if (!function_exists('approval_force_ceo_waiting_for_vp_leave')) {
                 $pdo->prepare("UPDATE cpms_approval_lines SET " . implode(',', $sets) . " WHERE id=:id")->execute($params);
             } catch (Exception $e) {
             }
+        }
+        if (!$hasCeoLine) {
+            approval_insert_ceo_line_for_vp_leave($pdo, $documentId, $maxOrder);
         }
     }
 }
@@ -764,6 +876,7 @@ if (!function_exists('approval_move_to_next_pending_line')) {
             } catch (Exception $e) {
                 $lines = array();
             }
+            $limit = count($lines);
         }
         for ($i = 0; $i < count($lines) && $i < $limit; $i++) {
             $line = $lines[$i];

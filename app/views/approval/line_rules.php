@@ -732,20 +732,40 @@ if (!function_exists('approval_line_rules_build')) {
             }
         }
 
+        $vpOnLeave = false;
         if ($vp) {
-            if (approval_line_rules_employee_on_leave($pdo, $vp, $baseDate)) {
-                if ($ceo) {
-                    approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array('force_actual' => 1));
-                    $forceCeoActual = true;
-                    $messages[] = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5%20%ED%9C%B4%EA%B0%80%20%EC%83%81%ED%83%9C%EB%A1%9C%20%EB%8C%80%ED%91%9C%20%EA%B2%B0%EC%9E%AC%EB%A1%9C%20%EB%8C%80%EC%B2%B4%EB%90%98%EC%97%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
-                } else {
-                    $warnings[] = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5%EC%9D%B4%20%ED%9C%B4%EA%B0%80%EC%9D%B4%EC%A7%80%EB%A7%8C%20%EB%8C%80%ED%91%9C%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');
-                }
+            $vpOnLeave = approval_line_rules_employee_on_leave($pdo, $vp, $baseDate);
+            if ($vpOnLeave) {
+                approval_line_rules_add_line($lines, $seen, $vpRole, $vp, array(
+                    'delegated' => 1,
+                    'status' => 'DELEGATED',
+                    'auto_reason' => approval_auto_delegate_reason_label('vp_leave_ceo_proxy'),
+                    'delegated_by_role' => $ceoRole
+                ));
             } else {
                 approval_line_rules_add_line($lines, $seen, $vpRole, $vp, array());
             }
         } else {
             $warnings[] = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.');
+        }
+
+        if ($ceo) {
+            if ($vpOnLeave) {
+                approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array('force_actual' => 1));
+                $forceCeoActual = true;
+                $messages[] = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5%20%ED%9C%B4%EA%B0%80%20%EC%83%81%ED%83%9C%EB%A1%9C%20%EB%8C%80%ED%91%9C%20%EA%B2%B0%EC%9E%AC%EB%A1%9C%20%EB%8C%80%EC%B2%B4%EB%90%98%EC%97%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+            } else {
+                approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array(
+                    'delegated' => 1,
+                    'status' => 'DELEGATED',
+                    'auto_reason' => approval_auto_delegate_reason_label('leave_ceo_default'),
+                    'delegated_by_role' => $vpRole
+                ));
+            }
+        } else if ($vpOnLeave) {
+            $warnings[] = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5%EC%9D%B4%20%ED%9C%B4%EA%B0%80%EC%9D%B4%EC%A7%80%EB%A7%8C%20%EB%8C%80%ED%91%9C%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+        } else {
+            $warnings[] = approval_ko('%ED%9C%B4%EA%B0%80%EA%B3%84%20%EB%8C%80%ED%91%9C%20%EA%B2%B0%EC%9E%AC%EC%9E%90%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.');
         }
 
         return array('lines' => $lines, 'messages' => $messages, 'warnings' => $warnings, 'vp' => $vp, 'ceo' => $ceo, 'construction_pm' => $constructionPm, 'team_lead' => $teamLead, 'force_ceo_actual' => $forceCeoActual ? 1 : 0);

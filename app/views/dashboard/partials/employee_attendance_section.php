@@ -49,6 +49,27 @@ function cpms_dashboard_attendance_is_business_day($workDate) {
     $weekNo = (int)date('N', $ts);
     return ($weekNo >= 1 && $weekNo <= 5);
 }}
+if (!function_exists('cpms_dashboard_attendance_pending_key')) {
+function cpms_dashboard_attendance_pending_key($requestDate, $requestType) {
+    return trim((string)$requestDate) . ':' . trim((string)$requestType);
+}}
+if (!function_exists('cpms_dashboard_attendance_pending_request_for_issue')) {
+function cpms_dashboard_attendance_pending_request_for_issue($pendingMap, $requestDate, $requestType) {
+    if (!is_array($pendingMap)) return null;
+    $requestDate = trim((string)$requestDate);
+    $requestType = trim((string)$requestType);
+    $types = array($requestType, 'both');
+    if ($requestType === 'both') {
+        $types = array('both', 'check_in', 'check_out');
+    }
+    for ($i = 0; $i < count($types); $i++) {
+        $key = cpms_dashboard_attendance_pending_key($requestDate, $types[$i]);
+        if (isset($pendingMap[$key]) && is_array($pendingMap[$key])) {
+            return $pendingMap[$key];
+        }
+    }
+    return null;
+}}
 $eid_att = attendance_employee_id($pdo);
 $today_att = attendance_today();
 $attendanceNow_att = attendance_now();
@@ -93,6 +114,7 @@ $todayRow = array();
 $todayInState = '미처리';
 $todayOutState = '미처리';
 $myReqs = array();
+$attendancePendingRequestMap = array();
 $myAttendanceIssues = array();
 $myMissingCheckoutCount = 0;
 $myLateCount = 0;
@@ -123,6 +145,18 @@ if ($pdo && $eid_att > 0) {
         $st4 = $pdo->prepare("SELECT COUNT(*) FROM cpms_attendance_requests WHERE employee_id=:e AND status='pending'");
         $st4->execute(array(':e' => $eid_att));
         $pendingCnt = (int)$st4->fetchColumn();
+
+        $stPendingIssue = $pdo->prepare("SELECT id,request_date,request_type,status,created_at FROM cpms_attendance_requests WHERE employee_id=:e AND request_date BETWEEN :s AND :t AND status='pending' ORDER BY id DESC");
+        $stPendingIssue->execute(array(':e' => $eid_att, ':s' => $attendanceIssueSince, ':t' => $today_att));
+        $pendingIssueRows = $stPendingIssue->fetchAll(PDO::FETCH_ASSOC);
+        if (is_array($pendingIssueRows)) {
+            foreach ($pendingIssueRows as $pendingIssueRow) {
+                $pendingDate = isset($pendingIssueRow['request_date']) ? trim((string)$pendingIssueRow['request_date']) : '';
+                $pendingType = isset($pendingIssueRow['request_type']) ? trim((string)$pendingIssueRow['request_type']) : '';
+                if ($pendingDate === '' || $pendingType === '') continue;
+                $attendancePendingRequestMap[cpms_dashboard_attendance_pending_key($pendingDate, $pendingType)] = $pendingIssueRow;
+            }
+        }
 
         $attendanceRecordDateMap = array();
         $attendanceLeaveMap = array();
@@ -478,6 +512,7 @@ if($pdo&&$eid_att>0){
                 $issueLate = !empty($issueRow['_late']);
                 $issueAbsent = !empty($issueRow['_absent']);
                 $issueRequestType = $issueAbsent ? 'both' : (($issueLate && $issueCheckOut === '') ? 'both' : ($issueMissing ? 'check_out' : 'check_in'));
+                $issuePendingRequest = cpms_dashboard_attendance_pending_request_for_issue($attendancePendingRequestMap, $issueDate, $issueRequestType);
                 ?>
                 <tr class='border-t'>
                     <td class='p-2 whitespace-nowrap font-bold text-gray-900'><?php echo h($issueDate); ?></td>
@@ -492,7 +527,11 @@ if($pdo&&$eid_att>0){
                     <td class='p-2 whitespace-nowrap'><?php echo h($issueCheckOut !== '' ? cpms_dashboard_attendance_time($issueCheckOut) : '-'); ?></td>
                     <td class='p-2 whitespace-nowrap'><?php echo h(isset($issueRow['status']) ? (string)$issueRow['status'] : ''); ?></td>
                     <td class='p-2 whitespace-nowrap'>
+                        <?php if ($issuePendingRequest): ?>
+                            <span class='inline-flex items-center px-3 py-1 rounded-xl bg-amber-100 text-amber-800 text-xs font-extrabold'><?php echo h(attendance_text('%EC%8A%B9%EC%9D%B8%EB%8C%80%EA%B8%B0%EC%A4%91')); ?></span>
+                        <?php else: ?>
                         <button type='button' data-attendance-request-open data-attendance-request-date='<?php echo h($issueDate); ?>' data-attendance-request-type='<?php echo h($issueRequestType); ?>' data-attendance-request-check-in='<?php echo h(cpms_dashboard_attendance_time($issueCheckIn)); ?>' data-attendance-request-check-out='<?php echo h(cpms_dashboard_attendance_time($issueCheckOut)); ?>' class='px-3 py-1 rounded-xl bg-blue-600 text-white text-xs font-extrabold'>요청보내기</button>
+                        <?php endif; ?>
                     </td>
                 </tr>
             <?php endforeach; ?>

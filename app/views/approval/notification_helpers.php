@@ -68,6 +68,89 @@ if (!function_exists('approval_notification_append_url')) {
     }
 }
 
+if (!function_exists('approval_find_ceo_notification_employee')) {
+    function approval_find_ceo_notification_employee($pdo, $documentId)
+    {
+        if (!$pdo) {
+            return null;
+        }
+        if ((int)$documentId > 0 && approval_notification_table_exists($pdo, 'cpms_approval_lines')) {
+            try {
+                $st = $pdo->prepare("SELECT approver_id AS id, approver_name AS name, approver_email AS email, role_type FROM cpms_approval_lines WHERE document_id=:document_id ORDER BY line_order ASC, id ASC");
+                $st->execute(array(':document_id' => (int)$documentId));
+                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+                if (is_array($rows)) {
+                    for ($i = 0; $i < count($rows); $i++) {
+                        $role = isset($rows[$i]['role_type']) ? $rows[$i]['role_type'] : '';
+                        if (approval_role_is_ceo($role) && isset($rows[$i]['id']) && (int)$rows[$i]['id'] > 0) {
+                            return $rows[$i];
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+            }
+        }
+        if (function_exists('approval_find_ceo_employee_for_proxy')) {
+            return approval_find_ceo_employee_for_proxy($pdo);
+        }
+        return null;
+    }
+}
+
+if (!function_exists('approval_build_final_approved_message')) {
+    function approval_build_final_approved_message($docType, $title, $creatorName)
+    {
+        $docTypeLabel = approval_doc_type_label($docType);
+        $safeTitle = trim((string)$title);
+        $safeCreatorName = trim((string)$creatorName);
+        if ($safeTitle === '') {
+            $safeTitle = approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AC%B8%EC%84%9C');
+        }
+        if ($safeCreatorName === '') {
+            $safeCreatorName = approval_ko('%EC%9E%91%EC%84%B1%EC%9E%90');
+        }
+        return implode("\n", array(
+            '[CPMS ' . $docTypeLabel . ' ' . approval_ko('%EC%B5%9C%EC%A2%85%EC%8A%B9%EC%9D%B8') . ']',
+            '',
+            approval_ko('%EB%AC%B8%EC%84%9C%EC%A2%85%EB%A5%98') . ' : ' . $docTypeLabel,
+            approval_ko('%EC%A0%9C%EB%AA%A9') . ' : ' . $safeTitle,
+            approval_ko('%EC%9E%91%EC%84%B1%EC%9E%90') . ' : ' . $safeCreatorName,
+            '',
+            approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%EC%97%90%EC%84%9C%20%ED%99%95%EC%9D%B8%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.')
+        ));
+    }
+}
+
+if (!function_exists('approval_queue_leave_final_approved_to_ceo')) {
+    function approval_queue_leave_final_approved_to_ceo($pdo, $documentId, $docRow, $skipEmployeeIds)
+    {
+        if (!$pdo || (int)$documentId <= 0 || !is_array($docRow)) {
+            return;
+        }
+        $docType = isset($docRow['doc_type']) ? strtolower(trim((string)$docRow['doc_type'])) : '';
+        if ($docType !== 'leave') {
+            return;
+        }
+        $ceo = approval_find_ceo_notification_employee($pdo, $documentId);
+        if (!is_array($ceo) || !isset($ceo['id']) || (int)$ceo['id'] <= 0) {
+            return;
+        }
+        $ceoId = (int)$ceo['id'];
+        $skipEmployeeIds = is_array($skipEmployeeIds) ? $skipEmployeeIds : array();
+        for ($i = 0; $i < count($skipEmployeeIds); $i++) {
+            if ($ceoId === (int)$skipEmployeeIds[$i]) {
+                return;
+            }
+        }
+        $msg = approval_build_final_approved_message(
+            $docType,
+            isset($docRow['title']) ? $docRow['title'] : '',
+            isset($docRow['created_by_name']) ? $docRow['created_by_name'] : ''
+        );
+        approval_queue_notification($pdo, $documentId, 'FINAL_APPROVED', $ceoId, $msg);
+    }
+}
+
 if (!function_exists('approval_queue_notification')) {
     function approval_queue_notification($pdo, $documentId, $eventType, $receiverEmployeeId, $messageText)
     {

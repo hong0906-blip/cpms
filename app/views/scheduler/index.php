@@ -762,6 +762,7 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
     .cpms-scheduler-row-display-none{display:none}
     .cpms-scheduler-filter-empty{display:none}
     .cpms-scheduler-filter-empty.is-visible{display:block}
+    .cpms-scheduler-period-body.is-collapsed{display:none}
     @media (max-width: 1023px){.cpms-scheduler-filter-grid{grid-template-columns:1fr}.cpms-scheduler-calendar{min-width:900px}}
 </style>
 
@@ -981,78 +982,86 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                 <h3 class="text-xl font-extrabold text-gray-900">기간 업무</h3>
                 <div class="mt-1 text-sm font-bold text-gray-500"><?php echo h($periodMonthBounds['label']); ?> · <?php echo (int)count($periodTasks); ?>건</div>
             </div>
-            <form method="get" action="" class="flex flex-wrap items-end gap-2">
-                <input type="hidden" name="r" value="scheduler">
-                <input type="hidden" name="view" value="<?php echo h($viewMode); ?>">
-                <input type="hidden" name="month" value="<?php echo h($monthInput); ?>">
-                <input type="hidden" name="week" value="<?php echo h($weekInput); ?>">
-                <input type="hidden" name="department" value="<?php echo h($selectedDepartment); ?>">
-                <input type="hidden" name="person_mode" value="<?php echo h($personMode); ?>">
-                <?php if ($personMode === 'employees'): ?>
-                    <?php for ($i = 0; $i < count($requestedEmployeeIds); $i++): ?>
-                        <input type="hidden" name="employee_ids[]" value="<?php echo (int)$requestedEmployeeIds[$i]; ?>">
-                    <?php endfor; ?>
-                <?php endif; ?>
-                <div>
-                    <label class="block text-xs font-extrabold text-gray-500 mb-1" for="schedulerPeriodMonth">기간 업무 월</label>
-                    <input id="schedulerPeriodMonth" type="month" name="period_month" value="<?php echo h($periodMonthBounds['month']); ?>" class="px-4 py-3 rounded-2xl border border-gray-200 bg-white font-bold">
-                </div>
-                <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">조회</button>
-            </form>
-        </div>
-        <?php if (count($periodTasks) === 0): ?>
-            <div class="rounded-2xl border border-dashed border-gray-300 bg-slate-50 p-6 text-sm font-bold text-gray-500">표시할 업무가 없습니다.</div>
-        <?php else: ?>
-            <div class="cpms-responsive-table-wrap">
-                <table class="cpms-responsive-table text-sm">
-                    <thead>
-                        <tr class="border-b border-gray-200 text-left text-gray-500">
-                            <th class="py-3 pr-4">담당자</th>
-                            <th class="py-3 pr-4 text-left">업무</th>
-                            <th class="py-3 pr-4">요청일</th>
-                            <th class="py-3 pr-4">마감일</th>
-                            <th class="py-3 pr-4">완료일</th>
-                            <th class="py-3 pr-4">상태</th>
-                            <th class="py-3">상세</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php for ($i = 0; $i < count($periodTasks); $i++): ?>
-                            <?php
-                            $task = $periodTasks[$i];
-                            $isDelayed = !empty($task['is_delayed']);
-                            $statusValue = $isDelayed ? 'delayed' : (isset($task['status']) ? (string)$task['status'] : 'pending');
-                            $dueText = isset($task['due_date']) ? (string)$task['due_date'] : '';
-                            if (isset($task['due_time']) && trim((string)$task['due_time']) !== '') $dueText .= ' ' . substr((string)$task['due_time'], 0, 5);
-                            $completedText = isset($task['completed_at']) && trim((string)$task['completed_at']) !== '' ? substr((string)$task['completed_at'], 0, 16) : '-';
-                            ?>
-                            <tr class="border-b border-gray-100" data-scheduler-period-row="1"<?php echo cpms_scheduler_filter_attrs($task); ?>>
-                                <td class="py-3 pr-4 font-bold text-gray-700"><?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?></td>
-                                <td class="py-3 pr-4 text-left" data-wrap="1">
-                                    <div class="font-extrabold text-gray-900"><?php echo h(isset($task['title']) ? $task['title'] : ''); ?></div>
-                                    <div class="mt-1 text-xs font-bold text-gray-500"><?php echo h(cpms_tasks_type_label(isset($task['task_type']) ? $task['task_type'] : 'general')); ?></div>
-                                </td>
-                                <td class="py-3 pr-4 font-bold text-gray-600"><?php echo h(isset($task['request_date']) ? $task['request_date'] : '-'); ?></td>
-                                <td class="py-3 pr-4 font-bold text-gray-600"><?php echo h($dueText !== '' ? $dueText : '-'); ?></td>
-                                <td class="py-3 pr-4 font-bold text-gray-600"><?php echo h($completedText); ?></td>
-                                <td class="py-3 pr-4">
-                                    <span class="cpms-chip px-3 py-1 rounded-full border text-xs font-extrabold <?php echo h(cpms_tasks_badge_class('status', $statusValue)); ?>">
-                                        <?php echo h($isDelayed ? '지연' : (isset($task['display_status']) ? $task['display_status'] : '-')); ?>
-                                    </span>
-                                </td>
-                                <td class="py-3">
-                                    <button type="button" class="inline-flex items-center gap-1 text-blue-600 font-extrabold" data-scheduler-detail-open="1" data-task-id="<?php echo isset($task['id']) ? (int)$task['id'] : 0; ?>">
-                                        상세
-                                        <i data-lucide="arrow-right" class="w-4 h-4"></i>
-                                    </button>
-                                </td>
-                            </tr>
+            <div class="flex flex-col sm:flex-row sm:items-end gap-2">
+                <form method="get" action="" class="flex flex-wrap items-end gap-2">
+                    <input type="hidden" name="r" value="scheduler">
+                    <input type="hidden" name="view" value="<?php echo h($viewMode); ?>">
+                    <input type="hidden" name="month" value="<?php echo h($monthInput); ?>">
+                    <input type="hidden" name="week" value="<?php echo h($weekInput); ?>">
+                    <input type="hidden" name="department" value="<?php echo h($selectedDepartment); ?>">
+                    <input type="hidden" name="person_mode" value="<?php echo h($personMode); ?>">
+                    <?php if ($personMode === 'employees'): ?>
+                        <?php for ($i = 0; $i < count($requestedEmployeeIds); $i++): ?>
+                            <input type="hidden" name="employee_ids[]" value="<?php echo (int)$requestedEmployeeIds[$i]; ?>">
                         <?php endfor; ?>
-                    </tbody>
-                </table>
+                    <?php endif; ?>
+                    <div>
+                        <label class="block text-xs font-extrabold text-gray-500 mb-1" for="schedulerPeriodMonth">기간 업무 월</label>
+                        <input id="schedulerPeriodMonth" type="month" name="period_month" value="<?php echo h($periodMonthBounds['month']); ?>" class="px-4 py-3 rounded-2xl border border-gray-200 bg-white font-bold">
+                    </div>
+                    <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">조회</button>
+                </form>
+                <button type="button" class="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-gray-200 bg-white text-gray-700 font-extrabold hover:bg-gray-50" data-scheduler-period-toggle aria-expanded="true" aria-controls="schedulerPeriodBody">
+                    <span data-scheduler-period-toggle-icon aria-hidden="true">▼</span>
+                    <span data-scheduler-period-toggle-text>숨기기</span>
+                </button>
             </div>
-            <div class="cpms-scheduler-filter-empty mt-4 rounded-2xl border border-dashed border-gray-300 bg-slate-50 p-5 text-sm font-bold text-gray-500" data-scheduler-filter-empty>선택한 상태에 해당하는 업무가 없습니다.</div>
-        <?php endif; ?>
+        </div>
+        <div id="schedulerPeriodBody" class="cpms-scheduler-period-body" data-scheduler-period-body>
+            <?php if (count($periodTasks) === 0): ?>
+                <div class="rounded-2xl border border-dashed border-gray-300 bg-slate-50 p-6 text-sm font-bold text-gray-500">표시할 업무가 없습니다.</div>
+            <?php else: ?>
+                <div class="cpms-responsive-table-wrap">
+                    <table class="cpms-responsive-table text-sm">
+                        <thead>
+                            <tr class="border-b border-gray-200 text-left text-gray-500">
+                                <th class="py-3 pr-4">담당자</th>
+                                <th class="py-3 pr-4 text-left">업무</th>
+                                <th class="py-3 pr-4">요청일</th>
+                                <th class="py-3 pr-4">마감일</th>
+                                <th class="py-3 pr-4">완료일</th>
+                                <th class="py-3 pr-4">상태</th>
+                                <th class="py-3">상세</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php for ($i = 0; $i < count($periodTasks); $i++): ?>
+                                <?php
+                                $task = $periodTasks[$i];
+                                $isDelayed = !empty($task['is_delayed']);
+                                $statusValue = $isDelayed ? 'delayed' : (isset($task['status']) ? (string)$task['status'] : 'pending');
+                                $dueText = isset($task['due_date']) ? (string)$task['due_date'] : '';
+                                if (isset($task['due_time']) && trim((string)$task['due_time']) !== '') $dueText .= ' ' . substr((string)$task['due_time'], 0, 5);
+                                $completedText = isset($task['completed_at']) && trim((string)$task['completed_at']) !== '' ? substr((string)$task['completed_at'], 0, 16) : '-';
+                                ?>
+                                <tr class="border-b border-gray-100" data-scheduler-period-row="1"<?php echo cpms_scheduler_filter_attrs($task); ?>>
+                                    <td class="py-3 pr-4 font-bold text-gray-700"><?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?></td>
+                                    <td class="py-3 pr-4 text-left" data-wrap="1">
+                                        <div class="font-extrabold text-gray-900"><?php echo h(isset($task['title']) ? $task['title'] : ''); ?></div>
+                                        <div class="mt-1 text-xs font-bold text-gray-500"><?php echo h(cpms_tasks_type_label(isset($task['task_type']) ? $task['task_type'] : 'general')); ?></div>
+                                    </td>
+                                    <td class="py-3 pr-4 font-bold text-gray-600"><?php echo h(isset($task['request_date']) ? $task['request_date'] : '-'); ?></td>
+                                    <td class="py-3 pr-4 font-bold text-gray-600"><?php echo h($dueText !== '' ? $dueText : '-'); ?></td>
+                                    <td class="py-3 pr-4 font-bold text-gray-600"><?php echo h($completedText); ?></td>
+                                    <td class="py-3 pr-4">
+                                        <span class="cpms-chip px-3 py-1 rounded-full border text-xs font-extrabold <?php echo h(cpms_tasks_badge_class('status', $statusValue)); ?>">
+                                            <?php echo h($isDelayed ? '지연' : (isset($task['display_status']) ? $task['display_status'] : '-')); ?>
+                                        </span>
+                                    </td>
+                                    <td class="py-3">
+                                        <button type="button" class="inline-flex items-center gap-1 text-blue-600 font-extrabold" data-scheduler-detail-open="1" data-task-id="<?php echo isset($task['id']) ? (int)$task['id'] : 0; ?>">
+                                            상세
+                                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                                        </button>
+                                    </td>
+                                </tr>
+                            <?php endfor; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="cpms-scheduler-filter-empty mt-4 rounded-2xl border border-dashed border-gray-300 bg-slate-50 p-5 text-sm font-bold text-gray-500" data-scheduler-filter-empty>선택한 상태에 해당하는 업무가 없습니다.</div>
+            <?php endif; ?>
+        </div>
     </div>
 </div>
 
@@ -1100,6 +1109,11 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
     }
 
     var schedulerFilter = 'all';
+    var periodBody = document.querySelector ? document.querySelector('[data-scheduler-period-body]') : null;
+    var periodToggle = document.querySelector ? document.querySelector('[data-scheduler-period-toggle]') : null;
+    var periodToggleIcon = document.querySelector ? document.querySelector('[data-scheduler-period-toggle-icon]') : null;
+    var periodToggleText = document.querySelector ? document.querySelector('[data-scheduler-period-toggle-text]') : null;
+    var periodStorageKey = 'cpms_scheduler_period_collapsed';
 
     function schedulerItemMatches(item, filter) {
         if (!item) return false;
@@ -1239,9 +1253,41 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
         return fallback;
     }
 
+    function setSchedulerPeriodCollapsed(collapsed, shouldStore) {
+        if (!periodBody || !periodToggle) return;
+        if (collapsed) addClass(periodBody, 'is-collapsed');
+        else removeClass(periodBody, 'is-collapsed');
+        periodToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+        periodToggle.setAttribute('title', collapsed ? '기간 업무 펼치기' : '기간 업무 숨기기');
+        if (periodToggleIcon) periodToggleIcon.innerHTML = collapsed ? '▶' : '▼';
+        if (periodToggleText) periodToggleText.innerHTML = collapsed ? '펼치기' : '숨기기';
+        if (shouldStore) {
+            try {
+                if (window.localStorage) localStorage.setItem(periodStorageKey, collapsed ? '1' : '0');
+            } catch (err) {}
+        }
+    }
+
+    function toggleSchedulerPeriod() {
+        setSchedulerPeriodCollapsed(!hasClass(periodBody, 'is-collapsed'), true);
+    }
+
+    if (periodBody && periodToggle) {
+        try {
+            setSchedulerPeriodCollapsed(window.localStorage && localStorage.getItem(periodStorageKey) === '1', false);
+        } catch (err) {
+            setSchedulerPeriodCollapsed(false, false);
+        }
+    }
+
     document.addEventListener('click', function(e) {
         var target = e.target;
         while (target && target !== document) {
+            if (target.getAttribute && target.hasAttribute('data-scheduler-period-toggle')) {
+                e.preventDefault();
+                toggleSchedulerPeriod();
+                return;
+            }
             if (target.getAttribute && target.getAttribute('data-scheduler-filter')) {
                 e.preventDefault();
                 applySchedulerStatusFilter(target.getAttribute('data-scheduler-filter') || 'all');

@@ -82,10 +82,31 @@ if (!function_exists('cpms_sales_is_no_multiply_unit')) {
     function cpms_sales_is_no_multiply_unit($unit) {
         static $noMultiplyUnits = null;
         if ($noMultiplyUnits === null) {
+            $noMultiplyUnits = array('EA' => true, 'SET' => true);
+            $noMultiplyUnits[json_decode('"\uC870"')] = true;
+            $noMultiplyUnits[json_decode('"\uBCF8"')] = true;
+            /*
+             * Legacy Korean unit labels in this line were stored with a broken
+             * encoding, so keep the old text out of the PHP parser.
+             */
+            /*
             $noMultiplyUnits = array('EA' => true, 'SET' => true, '조' => true, '본' => true);
+        }
+            */
         }
         $normalized = cpms_sales_normalize_unit($unit);
         return isset($noMultiplyUnits[$normalized]);
+    }
+}
+
+if (!function_exists('cpms_sales_unit_price_value')) {
+    function cpms_sales_unit_price_value($row) {
+        $unitPrice = (isset($row['unit_price']) && is_numeric((string)$row['unit_price'])) ? (float)$row['unit_price'] : 0.0;
+        if (abs($unitPrice) > 0.0001) return $unitPrice;
+        $material = (isset($row['material_unit_price']) && is_numeric((string)$row['material_unit_price'])) ? (float)$row['material_unit_price'] : 0.0;
+        $labor = (isset($row['labor_unit_price']) && is_numeric((string)$row['labor_unit_price'])) ? (float)$row['labor_unit_price'] : 0.0;
+        $expense = (isset($row['expense_unit_price']) && is_numeric((string)$row['expense_unit_price'])) ? (float)$row['expense_unit_price'] : 0.0;
+        return $material + $labor + $expense;
     }
 }
 
@@ -108,79 +129,223 @@ if (!function_exists('cpms_sales_period_range')) {
 
 if (!function_exists('cpms_sales_total_between')) {
     function cpms_sales_total_between($pdo, $projectId, $startDate, $endDate) {
-        $result = array('amount' => 0.0, 'stats' => array('schedule_task_rows' => 0, 'work_item_line_rows' => 0, 'unit_price_rows' => 0, 'completed_task_rows' => 0, 'sales_sum' => 0.0));
+        $result = array('amount' => 0.0, 'stats' => array('schedule_task_rows' => 0, 'work_item_line_rows' => 0, 'unit_price_rows' => 0, 'completed_task_rows' => 0, 'item_progress_rows' => 0, 'task_progress_rows' => 0, 'sales_sum' => 0.0));
         if (!$pdo || $projectId <= 0) return $result;
         static $cache = array();
         $cacheKey = cpms_sales_cache_key($pdo, 'sales-between:' . (int)$projectId . ':' . (string)$startDate . ':' . (string)$endDate);
         if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         if (!cpms_sales_table_exists($pdo, 'cpms_schedule_tasks')) return $result;
-        if (!cpms_sales_table_exists($pdo, 'cpms_work_item_lines')) return $result;
         if (!cpms_sales_table_exists($pdo, 'cpms_project_unit_prices')) return $result;
 
-        $requiredTaskCols = array('project_id', 'work_id', 'end_date', 'progress');
+        $requiredTaskCols = array('project_id');
         foreach ($requiredTaskCols as $col) { if (!cpms_sales_column_exists($pdo, 'cpms_schedule_tasks', $col)) return $result; }
-        $requiredLineCols = array('work_id', 'unit_price_id');
-        foreach ($requiredLineCols as $col) { if (!cpms_sales_column_exists($pdo, 'cpms_work_item_lines', $col)) return $result; }
         if (!cpms_sales_column_exists($pdo, 'cpms_project_unit_prices', 'id')) return $result;
         if (!cpms_sales_column_exists($pdo, 'cpms_project_unit_prices', 'unit_price')) return $result;
 
-        $hasLinePlannedQty = cpms_sales_column_exists($pdo, 'cpms_work_item_lines', 'planned_qty');
+        $hasWorkItemLines = cpms_sales_table_exists($pdo, 'cpms_work_item_lines');
+        $hasTaskWorkId = cpms_sales_column_exists($pdo, 'cpms_schedule_tasks', 'work_id');
+        $hasLinePlannedQty = $hasWorkItemLines ? cpms_sales_column_exists($pdo, 'cpms_work_item_lines', 'planned_qty') : false;
         $hasUnitQty = cpms_sales_column_exists($pdo, 'cpms_project_unit_prices', 'qty');
         $hasUnitCol = cpms_sales_column_exists($pdo, 'cpms_project_unit_prices', 'unit');
+        $hasMaterialUnitPrice = cpms_sales_column_exists($pdo, 'cpms_project_unit_prices', 'material_unit_price');
+        $hasLaborUnitPrice = cpms_sales_column_exists($pdo, 'cpms_project_unit_prices', 'labor_unit_price');
+        $hasExpenseUnitPrice = cpms_sales_column_exists($pdo, 'cpms_project_unit_prices', 'expense_unit_price');
 
         try {
             $today = date('Y-m-d');
-            $lineSelect = " st.id AS task_id, pup.id AS unit_price_id, wil.work_id AS work_item_work_id, pup.unit_price AS unit_price ";
-            $lineSelect .= $hasLinePlannedQty ? ", wil.planned_qty AS planned_qty" : ", NULL AS planned_qty";
-            $lineSelect .= $hasUnitQty ? ", pup.qty AS contract_qty" : ", NULL AS contract_qty";
-            $lineSelect .= $hasUnitCol ? ", pup.unit AS unit" : ", '' AS unit";
-
-            $sql = "SELECT " . $lineSelect . " FROM cpms_schedule_tasks st LEFT JOIN cpms_work_item_lines wil ON wil.work_id = st.work_id LEFT JOIN cpms_project_unit_prices pup ON pup.id = wil.unit_price_id WHERE st.project_id = :pid AND st.end_date IS NOT NULL AND st.end_date <> '' AND st.end_date BETWEEN :start AND :end AND ( COALESCE(st.progress, 0) >= 100 OR ( st.end_date < :today AND (st.progress IS NULL OR st.progress = 0) ) )";
-            $st = $pdo->prepare($sql);
-            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
-            $st->bindValue(':start', (string)$startDate);
-            $st->bindValue(':end', (string)$endDate);
-            $st->bindValue(':today', (string)$today);
-            $st->execute();
-            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-            if (!is_array($rows) || count($rows) === 0) {
-                $cache[$cacheKey] = $result;
-                return $result;
-            }
-
-            $taskSet = array(); $lineSet = array(); $unitSet = array();
+            $taskSet = array();
+            $lineSet = array();
+            $unitSet = array();
+            $progressTaskSet = array();
+            $itemProgressKeys = array();
             $totalSales = 0.0;
-            $workAmountByTask = array();
-            foreach ($rows as $row) {
-                $taskId = isset($row['task_id']) ? (int)$row['task_id'] : 0;
-                if ($taskId <= 0) continue;
-                $taskSet[$taskId] = true;
-                $lineKey = isset($row['work_item_work_id']) ? (string)$row['work_item_work_id'] : '';
-                if ($lineKey !== '') $lineSet[$lineKey] = true;
-                $upId = isset($row['unit_price_id']) ? (int)$row['unit_price_id'] : 0;
-                if ($upId > 0) $unitSet[$upId] = true;
 
-                $unitPrice = isset($row['unit_price']) && is_numeric((string)$row['unit_price']) ? (float)$row['unit_price'] : 0.0;
-                if (!isset($workAmountByTask[$taskId])) $workAmountByTask[$taskId] = 0.0;
-                if (!array_key_exists('unit_price', $row) || $row['unit_price'] === null) continue;
-                $plannedQtyRaw = isset($row['planned_qty']) ? $row['planned_qty'] : null;
-                $contractQtyRaw = isset($row['contract_qty']) ? $row['contract_qty'] : null;
-                if ($plannedQtyRaw !== null && trim((string)$plannedQtyRaw) !== '') {
-                    $qtyUsed = is_numeric((string)$plannedQtyRaw) ? (float)$plannedQtyRaw : 0.0;
-                } else {
-                    $qtyUsed = is_numeric((string)$contractQtyRaw) ? (float)$contractQtyRaw : 0.0;
+            if (
+                cpms_sales_table_exists($pdo, 'cpms_schedule_task_item_progress') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_task_item_progress', 'project_id') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_task_item_progress', 'task_id') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_task_item_progress', 'unit_price_id') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_task_item_progress', 'work_date') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_task_item_progress', 'done_qty')
+            ) {
+                $itemSelect = "p.task_id, p.unit_price_id, p.work_date, p.done_qty, u.unit_price";
+                $itemSelect .= $hasTaskWorkId ? ", st.work_id" : ", 0 AS work_id";
+                $itemSelect .= $hasMaterialUnitPrice ? ", u.material_unit_price" : ", NULL AS material_unit_price";
+                $itemSelect .= $hasLaborUnitPrice ? ", u.labor_unit_price" : ", NULL AS labor_unit_price";
+                $itemSelect .= $hasExpenseUnitPrice ? ", u.expense_unit_price" : ", NULL AS expense_unit_price";
+                $sqlItem = "SELECT " . $itemSelect . "
+                    FROM cpms_schedule_task_item_progress p
+                    INNER JOIN cpms_schedule_tasks st ON st.id=p.task_id AND st.project_id=p.project_id
+                    INNER JOIN cpms_project_unit_prices u ON u.id=p.unit_price_id AND u.project_id=p.project_id
+                    WHERE p.project_id=:pid AND p.work_date BETWEEN :start AND :end AND COALESCE(p.done_qty,0) <> 0
+                    ORDER BY p.work_date ASC, st.id ASC, u.id ASC";
+                $stItem = $pdo->prepare($sqlItem);
+                $stItem->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+                $stItem->bindValue(':start', (string)$startDate);
+                $stItem->bindValue(':end', (string)$endDate);
+                $stItem->execute();
+                $itemRows = $stItem->fetchAll(PDO::FETCH_ASSOC);
+                if (is_array($itemRows)) {
+                    foreach ($itemRows as $row) {
+                        $taskId = isset($row['task_id']) ? (int)$row['task_id'] : 0;
+                        $unitPriceId = isset($row['unit_price_id']) ? (int)$row['unit_price_id'] : 0;
+                        $workDate = isset($row['work_date']) ? (string)$row['work_date'] : '';
+                        if ($taskId <= 0 || $unitPriceId <= 0 || $workDate === '') continue;
+                        $doneQty = isset($row['done_qty']) && is_numeric((string)$row['done_qty']) ? (float)$row['done_qty'] : 0.0;
+                        if (abs($doneQty) <= 0.0001) continue;
+                        $unitPrice = cpms_sales_unit_price_value($row);
+                        $totalSales += $doneQty * $unitPrice;
+                        $taskSet[$taskId] = true;
+                        $progressTaskSet[$taskId] = true;
+                        $itemProgressKeys[$taskId . '|' . $workDate] = true;
+                        $unitSet[$unitPriceId] = true;
+                        $workId = isset($row['work_id']) ? (int)$row['work_id'] : 0;
+                        if ($workId > 0) $lineSet[$workId . '|' . $unitPriceId] = true;
+                        $result['stats']['item_progress_rows']++;
+                    }
                 }
-                $unitRaw = isset($row['unit']) ? (string)$row['unit'] : '';
-                $lineAmount = cpms_sales_is_no_multiply_unit($unitRaw) ? $unitPrice : ($qtyUsed * $unitPrice);
-                $workAmountByTask[$taskId] += $lineAmount;
             }
-            foreach ($workAmountByTask as $taskWorkAmount) { $totalSales += (float)$taskWorkAmount; }
+
+            $linesByWork = array();
+            if (
+                $hasWorkItemLines &&
+                cpms_sales_column_exists($pdo, 'cpms_work_item_lines', 'work_id') &&
+                cpms_sales_column_exists($pdo, 'cpms_work_item_lines', 'unit_price_id')
+            ) {
+                $unitQtyExpr = $hasUnitQty ? "COALESCE(u.qty,0)" : "0";
+                $qtyExpr = $hasLinePlannedQty ? "CASE WHEN wil.planned_qty IS NULL OR wil.planned_qty = '' THEN " . $unitQtyExpr . " ELSE wil.planned_qty END" : $unitQtyExpr;
+                $lineSelect = "wil.work_id, wil.unit_price_id, " . $qtyExpr . " AS line_qty, u.unit_price";
+                $lineSelect .= $hasUnitCol ? ", u.unit" : ", '' AS unit";
+                $lineSelect .= $hasMaterialUnitPrice ? ", u.material_unit_price" : ", NULL AS material_unit_price";
+                $lineSelect .= $hasLaborUnitPrice ? ", u.labor_unit_price" : ", NULL AS labor_unit_price";
+                $lineSelect .= $hasExpenseUnitPrice ? ", u.expense_unit_price" : ", NULL AS expense_unit_price";
+                $sqlLines = "SELECT " . $lineSelect . "
+                    FROM cpms_work_item_lines wil
+                    INNER JOIN cpms_project_unit_prices u ON u.id=wil.unit_price_id
+                    WHERE u.project_id=:pid
+                    ORDER BY wil.work_id ASC, u.id ASC";
+                $stLines = $pdo->prepare($sqlLines);
+                $stLines->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+                $stLines->execute();
+                $lineRows = $stLines->fetchAll(PDO::FETCH_ASSOC);
+                if (is_array($lineRows)) {
+                    foreach ($lineRows as $line) {
+                        $workId = isset($line['work_id']) ? (int)$line['work_id'] : 0;
+                        if ($workId <= 0) continue;
+                        if (!isset($linesByWork[$workId])) $linesByWork[$workId] = array();
+                        $linesByWork[$workId][] = $line;
+                    }
+                }
+            }
+
+            if (
+                count($linesByWork) > 0 &&
+                cpms_sales_table_exists($pdo, 'cpms_schedule_progress') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_progress', 'project_id') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_progress', 'task_id') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_progress', 'work_date') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_progress', 'done_qty') &&
+                $hasTaskWorkId
+            ) {
+                $sqlProgress = "SELECT p.task_id, p.work_date, p.done_qty, st.work_id
+                    FROM cpms_schedule_progress p
+                    INNER JOIN cpms_schedule_tasks st ON st.id=p.task_id AND st.project_id=p.project_id
+                    WHERE p.project_id=:pid AND p.work_date BETWEEN :start AND :end AND COALESCE(p.done_qty,0) <> 0 AND st.work_id IS NOT NULL AND st.work_id > 0
+                    ORDER BY p.work_date ASC, st.id ASC";
+                $stProgress = $pdo->prepare($sqlProgress);
+                $stProgress->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+                $stProgress->bindValue(':start', (string)$startDate);
+                $stProgress->bindValue(':end', (string)$endDate);
+                $stProgress->execute();
+                $progressRows = $stProgress->fetchAll(PDO::FETCH_ASSOC);
+                if (is_array($progressRows)) {
+                    foreach ($progressRows as $row) {
+                        $taskId = isset($row['task_id']) ? (int)$row['task_id'] : 0;
+                        $workDate = isset($row['work_date']) ? (string)$row['work_date'] : '';
+                        $workId = isset($row['work_id']) ? (int)$row['work_id'] : 0;
+                        if ($taskId <= 0 || $workDate === '' || $workId <= 0) continue;
+                        if (isset($itemProgressKeys[$taskId . '|' . $workDate])) continue;
+                        if (!isset($linesByWork[$workId]) || !is_array($linesByWork[$workId])) continue;
+                        $taskDone = isset($row['done_qty']) && is_numeric((string)$row['done_qty']) ? (float)$row['done_qty'] : 0.0;
+                        if (abs($taskDone) <= 0.0001) continue;
+                        $totalLineQty = 0.0;
+                        foreach ($linesByWork[$workId] as $line) {
+                            $lineQty = isset($line['line_qty']) && is_numeric((string)$line['line_qty']) ? (float)$line['line_qty'] : 0.0;
+                            if ($lineQty > 0) $totalLineQty += $lineQty;
+                        }
+                        if ($totalLineQty <= 0) continue;
+                        foreach ($linesByWork[$workId] as $line) {
+                            $lineQty = isset($line['line_qty']) && is_numeric((string)$line['line_qty']) ? (float)$line['line_qty'] : 0.0;
+                            if ($lineQty <= 0) continue;
+                            $doneQty = round($taskDone * ($lineQty / $totalLineQty), 4);
+                            if (abs($doneQty) <= 0.0001) continue;
+                            $unitPriceId = isset($line['unit_price_id']) ? (int)$line['unit_price_id'] : 0;
+                            $unitPrice = cpms_sales_unit_price_value($line);
+                            $totalSales += $doneQty * $unitPrice;
+                            $taskSet[$taskId] = true;
+                            $progressTaskSet[$taskId] = true;
+                            if ($unitPriceId > 0) $unitSet[$unitPriceId] = true;
+                            if ($unitPriceId > 0) $lineSet[$workId . '|' . $unitPriceId] = true;
+                            $result['stats']['task_progress_rows']++;
+                        }
+                    }
+                }
+            }
+
+            if (
+                count($linesByWork) > 0 &&
+                $hasTaskWorkId &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_tasks', 'end_date') &&
+                cpms_sales_column_exists($pdo, 'cpms_schedule_tasks', 'progress')
+            ) {
+                $lineSelect = "st.id AS task_id, pup.id AS unit_price_id, wil.work_id AS work_item_work_id, pup.unit_price AS unit_price";
+                $lineSelect .= $hasLinePlannedQty ? ", wil.planned_qty AS planned_qty" : ", NULL AS planned_qty";
+                $lineSelect .= $hasUnitQty ? ", pup.qty AS contract_qty" : ", NULL AS contract_qty";
+                $lineSelect .= $hasUnitCol ? ", pup.unit AS unit" : ", '' AS unit";
+                $lineSelect .= $hasMaterialUnitPrice ? ", pup.material_unit_price" : ", NULL AS material_unit_price";
+                $lineSelect .= $hasLaborUnitPrice ? ", pup.labor_unit_price" : ", NULL AS labor_unit_price";
+                $lineSelect .= $hasExpenseUnitPrice ? ", pup.expense_unit_price" : ", NULL AS expense_unit_price";
+
+                $sql = "SELECT " . $lineSelect . " FROM cpms_schedule_tasks st LEFT JOIN cpms_work_item_lines wil ON wil.work_id = st.work_id LEFT JOIN cpms_project_unit_prices pup ON pup.id = wil.unit_price_id WHERE st.project_id = :pid AND st.end_date IS NOT NULL AND st.end_date <> '' AND st.end_date BETWEEN :start AND :end AND ( COALESCE(st.progress, 0) >= 100 OR ( st.end_date < :today AND (st.progress IS NULL OR st.progress = 0) ) )";
+                $st = $pdo->prepare($sql);
+                $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+                $st->bindValue(':start', (string)$startDate);
+                $st->bindValue(':end', (string)$endDate);
+                $st->bindValue(':today', (string)$today);
+                $st->execute();
+                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+                $workAmountByTask = array();
+                if (is_array($rows)) {
+                    foreach ($rows as $row) {
+                        $taskId = isset($row['task_id']) ? (int)$row['task_id'] : 0;
+                        if ($taskId <= 0 || isset($progressTaskSet[$taskId])) continue;
+                        $lineKey = isset($row['work_item_work_id']) ? (string)$row['work_item_work_id'] : '';
+                        $upId = isset($row['unit_price_id']) ? (int)$row['unit_price_id'] : 0;
+                        $unitPrice = cpms_sales_unit_price_value($row);
+                        if (!isset($workAmountByTask[$taskId])) $workAmountByTask[$taskId] = 0.0;
+                        $plannedQtyRaw = isset($row['planned_qty']) ? $row['planned_qty'] : null;
+                        $contractQtyRaw = isset($row['contract_qty']) ? $row['contract_qty'] : null;
+                        if ($plannedQtyRaw !== null && trim((string)$plannedQtyRaw) !== '') {
+                            $qtyUsed = is_numeric((string)$plannedQtyRaw) ? (float)$plannedQtyRaw : 0.0;
+                        } else {
+                            $qtyUsed = is_numeric((string)$contractQtyRaw) ? (float)$contractQtyRaw : 0.0;
+                        }
+                        $unitRaw = isset($row['unit']) ? (string)$row['unit'] : '';
+                        $lineAmount = cpms_sales_is_no_multiply_unit($unitRaw) ? $unitPrice : ($qtyUsed * $unitPrice);
+                        $workAmountByTask[$taskId] += $lineAmount;
+                        $taskSet[$taskId] = true;
+                        if ($lineKey !== '' && $upId > 0) $lineSet[$lineKey . '|' . $upId] = true;
+                        if ($upId > 0) $unitSet[$upId] = true;
+                    }
+                }
+                foreach ($workAmountByTask as $taskWorkAmount) { $totalSales += (float)$taskWorkAmount; }
+                $result['stats']['completed_task_rows'] = count($workAmountByTask);
+            }
 
             $result['amount'] = (float)$totalSales;
             $result['stats']['schedule_task_rows'] = count($taskSet);
             $result['stats']['work_item_line_rows'] = count($lineSet);
             $result['stats']['unit_price_rows'] = count($unitSet);
-            $result['stats']['completed_task_rows'] = count($taskSet);
             $result['stats']['sales_sum'] = (float)$totalSales;
             $cache[$cacheKey] = $result;
             return $cache[$cacheKey];

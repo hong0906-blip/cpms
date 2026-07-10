@@ -142,11 +142,20 @@ try {
             $docStatus = 'APPROVED';
             $step = isset($advance['step']) && (int)$advance['step'] > 0 ? (int)$advance['step'] : (int)$line['line_order'];
             $creatorId = isset($doc['created_by_id']) ? (int)$doc['created_by_id'] : 0;
+            $finalApprovedMessage = approval_build_final_approved_message(
+                isset($doc['doc_type']) ? $doc['doc_type'] : '',
+                isset($doc['title']) ? $doc['title'] : '',
+                isset($doc['created_by_name']) ? $doc['created_by_name'] : ''
+            );
             if ($creatorId > 0) {
                 try {
-                    approval_queue_notification($pdo, $id, 'FINAL_APPROVED', $creatorId, implode("\n", array('[CPMS ' . approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%B5%9C%EC%A2%85%EC%8A%B9%EC%9D%B8') . ']', '', approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%EC%97%90%EC%84%9C%20%ED%99%95%EC%9D%B8%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'))));
+                    approval_queue_notification($pdo, $id, 'FINAL_APPROVED', $creatorId, $finalApprovedMessage);
                 } catch (Exception $e) {
                 }
+            }
+            try {
+                approval_queue_leave_final_approved_to_ceo($pdo, $id, $doc, array($creatorId));
+            } catch (Exception $e) {
             }
         }
         $pdo->prepare("UPDATE cpms_approval_documents SET doc_status=:s,current_step_order=:o,updated_at=NOW() WHERE id=:id")

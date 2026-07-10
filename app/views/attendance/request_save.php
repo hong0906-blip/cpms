@@ -65,6 +65,21 @@ function attendance_request_expected_type_for_date($pdo, $employeeId, $requestDa
     return '';
 }}
 
+if (!function_exists('attendance_request_pending_overlap_types')) {
+function attendance_request_pending_overlap_types($requestType) {
+    $requestType = trim((string)$requestType);
+    if ($requestType === 'both') {
+        return array('both', 'check_in', 'check_out');
+    }
+    if ($requestType === 'check_in') {
+        return array('check_in', 'both');
+    }
+    if ($requestType === 'check_out') {
+        return array('check_out', 'both');
+    }
+    return array($requestType);
+}}
+
 $attendanceRequestReturnUrl = isset($_POST['return_url']) ? cpms_safe_internal_redirect_url((string)$_POST['return_url'], '?r=대시보드') : '?r=대시보드';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) {
@@ -143,7 +158,7 @@ if ($t === 'both' && $ciDate !== '' && $coDate !== '' && $ciDate !== $coDate) {
 }
 
 try {
-    $lockName = 'attendance_request_' . (int)$eid . '_' . $d . '_' . $t;
+    $lockName = 'attendance_request_' . (int)$eid . '_' . $d;
     $locked = false;
     try {
         $stLock = $pdo->prepare("SELECT GET_LOCK(:lock_name, 3)");
@@ -158,8 +173,12 @@ try {
         exit;
     }
 
-    $stExisting = $pdo->prepare("SELECT id FROM cpms_attendance_requests WHERE employee_id=:e AND request_date=:d AND request_type=:t AND status='pending' ORDER BY id DESC LIMIT 1");
-    $stExisting->execute(array(':e' => $eid, ':d' => $d, ':t' => $t));
+    $pendingTypes = attendance_request_pending_overlap_types($t);
+    while (count($pendingTypes) < 3) {
+        $pendingTypes[count($pendingTypes)] = '__none_' . count($pendingTypes);
+    }
+    $stExisting = $pdo->prepare("SELECT id FROM cpms_attendance_requests WHERE employee_id=:e AND request_date=:d AND request_type IN (:t0,:t1,:t2) AND status='pending' ORDER BY id DESC LIMIT 1");
+    $stExisting->execute(array(':e' => $eid, ':d' => $d, ':t0' => $pendingTypes[0], ':t1' => $pendingTypes[1], ':t2' => $pendingTypes[2]));
     $existingId = (int)$stExisting->fetchColumn();
     if ($existingId > 0) {
         try {

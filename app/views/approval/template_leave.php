@@ -70,6 +70,25 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
     if (count($displayRoles) === 0) {
         $displayRoles[] = $teamRole;
     }
+    if (!in_array($ceoRole, $displayRoles, true)) {
+        $displayRoles[] = $ceoRole;
+    }
+    if (!isset($lineByRole[$ceoRole])) {
+        $ceoName = '';
+        if (isset($approvalOptions['ceo']) && is_array($approvalOptions['ceo']) && isset($approvalOptions['ceo']['name'])) {
+            $ceoName = trim((string)$approvalOptions['ceo']['name']);
+        }
+        if ($ceoName === '') {
+            $ceoName = approval_doc_get($data, 'ceo_name', '');
+        }
+        $lineByRole[$ceoRole] = array(
+            'role_type' => $ceoRole,
+            'approver_name' => $ceoName,
+            'line_status' => 'DELEGATED',
+            'is_delegated' => 1,
+            'reject_reason' => approval_auto_delegate_reason_label('leave_ceo_default')
+        );
+    }
     if ($showTeamLeaderSelect && !in_array($teamRole, $displayRoles, true)) {
         array_unshift($displayRoles, $teamRole);
     }
