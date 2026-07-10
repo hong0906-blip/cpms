@@ -532,6 +532,9 @@ if ($route === 'dashboard_employee') {
 if ($route === 'notice' || $route === 'notices') {
     $route = '공지사항';
 }
+if ($route === 'employees_directory' || $route === 'employee_directory') {
+    $route = '임직원';
+}
 if ($route === 'safety_home') {
     $route = '안전/보건';
 }
@@ -1436,6 +1439,7 @@ if ($route === '관리' && isset($_GET['debug_route']) && (string)$_GET['debug_r
 //  화면 매핑
 // ==========================
 $views = array(
+    '임직원'    => 'employees/directory',
     '공지사항'    => 'notices/index',
     '공무'      => 'project/index',
     '공사'      => 'construction/index',

@@ -98,6 +98,14 @@ $chatEnabledCol = cpms_column_exists($pdo, 'employees', 'google_chat_enabled');
 $chatUserEnabled = cpms_column_exists($pdo, 'employees', 'google_chat_user_name');
 $chatSpaceEnabled = cpms_column_exists($pdo, 'employees', 'google_chat_dm_space_name');
 $photoPathEnabled = cpms_column_exists($pdo, 'employees', 'photo_path');
+cpms_employee_save_ensure_column($pdo, 'employees', 'employee_no', 'VARCHAR(50) NULL');
+cpms_employee_save_ensure_column($pdo, 'employees', 'phone', 'VARCHAR(50) NULL');
+cpms_employee_save_ensure_column($pdo, 'employees', 'work_location', 'VARCHAR(100) NULL');
+cpms_employee_save_ensure_column($pdo, 'employees', 'signature_path', 'VARCHAR(255) NULL');
+$employeeNoEnabled = cpms_column_exists($pdo, 'employees', 'employee_no');
+$phoneEnabled = cpms_column_exists($pdo, 'employees', 'phone');
+$workLocationEnabled = cpms_column_exists($pdo, 'employees', 'work_location');
+$signaturePathEnabled = cpms_column_exists($pdo, 'employees', 'signature_path');
 
 if (!function_exists('cpms_employee_photo_delete_file')) {
 function cpms_employee_photo_delete_file($photoPath) {
@@ -105,6 +113,18 @@ function cpms_employee_photo_delete_file($photoPath) {
     $projectRoot = realpath(__DIR__ . '/../../..');
     if ($projectRoot === false) return;
     $filePath = $projectRoot . '/public/uploads/employees/' . basename($photoPath);
+    if (is_file($filePath)) @unlink($filePath);
+}}
+
+if (!function_exists('cpms_employee_signature_delete_file')) {
+function cpms_employee_signature_delete_file($signaturePath) {
+    $signaturePath = trim((string)$signaturePath);
+    if ($signaturePath === '') return;
+    $normalized = str_replace('\\', '/', $signaturePath);
+    if (strpos($normalized, 'storage/signatures/') !== 0) return;
+    $projectRoot = realpath(__DIR__ . '/../../..');
+    if ($projectRoot === false) return;
+    $filePath = $projectRoot . '/' . $normalized;
     if (is_file($filePath)) @unlink($filePath);
 }}
 
@@ -187,6 +207,37 @@ function cpms_employee_photo_upload($employeeId, $fileInfo) {
     return array('ok'=>true,'db_path'=>'/cpms/public/uploads/employees/' . $fileName);
 }}
 
+if (!function_exists('cpms_employee_signature_upload')) {
+function cpms_employee_signature_upload($employeeId, $email, $fileInfo) {
+    if (!is_array($fileInfo) || !isset($fileInfo['tmp_name']) || !is_uploaded_file($fileInfo['tmp_name'])) return array('ok'=>false,'message'=>'업로드 파일이 없습니다.');
+    if (!isset($fileInfo['error']) || (int)$fileInfo['error'] !== UPLOAD_ERR_OK) return array('ok'=>false,'message'=>'파일 업로드 중 오류가 발생했습니다.');
+    if (!isset($fileInfo['size']) || (int)$fileInfo['size'] > 5242880) return array('ok'=>false,'message'=>'파일 크기는 5MB 이하만 가능합니다.');
+    $imgInfo = @getimagesize($fileInfo['tmp_name']);
+    if (!is_array($imgInfo) || !isset($imgInfo['mime'])) return array('ok'=>false,'message'=>'이미지 파일만 업로드할 수 있습니다.');
+    $allowedMimeToExt = array('image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp');
+    $mime = strtolower((string)$imgInfo['mime']);
+    if (!isset($allowedMimeToExt[$mime])) return array('ok'=>false,'message'=>'JPG, PNG, WEBP 파일만 가능합니다.');
+    $origName = isset($fileInfo['name']) ? strtolower((string)$fileInfo['name']) : '';
+    $ext = pathinfo($origName, PATHINFO_EXTENSION);
+    if (!in_array($ext, array('jpg','jpeg','png','webp'), true)) return array('ok'=>false,'message'=>'JPG, PNG, WEBP 파일만 가능합니다.');
+    $projectRoot = realpath(__DIR__ . '/../../..');
+    if ($projectRoot === false) return array('ok'=>false,'message'=>'프로젝트 경로를 확인할 수 없습니다.');
+    $uploadDir = $projectRoot . '/storage/signatures';
+    if (!is_dir($uploadDir) && !@mkdir($uploadDir, 0775, true)) return array('ok'=>false,'message'=>'서명 저장 폴더를 생성할 수 없습니다.');
+    if (!is_dir($uploadDir) || !is_writable($uploadDir)) return array('ok'=>false,'message'=>'서명 저장 폴더에 쓰기 권한이 없습니다.');
+    $prefixParts = explode('@', (string)$email);
+    $prefix = isset($prefixParts[0]) ? trim((string)$prefixParts[0]) : '';
+    $prefix = preg_replace('/[^a-zA-Z0-9._-]+/', '_', $prefix);
+    if ($prefix === '') $prefix = 'employee_' . (int)$employeeId;
+    $safeExt = $allowedMimeToExt[$mime];
+    $fileName = $prefix . '_' . (int)$employeeId . '_' . date('YmdHis') . '_' . mt_rand(1000, 9999) . '.' . $safeExt;
+    $destPath = $uploadDir . '/' . $fileName;
+    if (!@move_uploaded_file($fileInfo['tmp_name'], $destPath)) return array('ok'=>false,'message'=>'서명 파일 저장에 실패했습니다.');
+    if (!is_file($destPath)) return array('ok'=>false,'message'=>'서명 파일 저장 후 실제 파일을 확인할 수 없습니다.');
+    @chmod($destPath, 0644);
+    return array('ok'=>true,'db_path'=>'storage/signatures/' . $fileName);
+}}
+
 if (!function_exists('cpms_employee_save_normalize_department')) {
 function cpms_employee_save_normalize_department($department) {
     $department = trim((string)$department);
@@ -245,15 +296,23 @@ if ($action === 'delete') {
     if ($id <= 0) { flash_set('error', '삭제 대상이 올바르지 않습니다.'); header('Location: ?r=관리&tab=employees'); exit; }
     try {
         $photoPath = null;
-        $st0 = $pdo->prepare("SELECT photo_path FROM employees WHERE id=:id LIMIT 1");
+        $signaturePath = null;
+        $deleteSelectParts = array();
+        if ($photoPathEnabled) $deleteSelectParts[] = 'photo_path';
+        if ($signaturePathEnabled) $deleteSelectParts[] = 'signature_path';
+        if (count($deleteSelectParts) < 1) $deleteSelectParts[] = 'id';
+        $deleteSelect = implode(', ', $deleteSelectParts);
+        $st0 = $pdo->prepare("SELECT " . $deleteSelect . " FROM employees WHERE id=:id LIMIT 1");
         $st0->bindValue(':id', $id, \PDO::PARAM_INT);
         $st0->execute();
         $row0 = $st0->fetch();
         if (is_array($row0)) $photoPath = isset($row0['photo_path']) ? $row0['photo_path'] : null;
+        if (is_array($row0)) $signaturePath = isset($row0['signature_path']) ? $row0['signature_path'] : null;
         $st = $pdo->prepare("DELETE FROM employees WHERE id=:id");
         $st->bindValue(':id', $id, \PDO::PARAM_INT);
         $st->execute();
         cpms_employee_photo_delete_file($photoPath);
+        cpms_employee_signature_delete_file($signaturePath);
         flash_set('success', '직원이 삭제되었습니다.');
     } catch (\Exception $e) { flash_set('error', '삭제 실패: ' . $e->getMessage()); }
     header('Location: ?r=관리&tab=employees'); exit;
@@ -311,6 +370,9 @@ $googleChatUserName = isset($_POST['google_chat_user_name']) ? trim((string)$_PO
 $googleChatSpaceName = isset($_POST['google_chat_dm_space_name']) ? trim((string)$_POST['google_chat_dm_space_name']) : '';
 $vehicleNumbersPosted = isset($_POST['vehicle_numbers']);
 $vehicleNumbers = isset($_POST['vehicle_numbers']) ? trim((string)$_POST['vehicle_numbers']) : '';
+$employeeNo = isset($_POST['employee_no']) ? trim((string)$_POST['employee_no']) : '';
+$phone = isset($_POST['phone']) ? trim((string)$_POST['phone']) : '';
+$workLocation = isset($_POST['work_location']) ? trim((string)$_POST['work_location']) : '';
 
 if ($googleChatEnabled === 1 && $googleChatUserName === '' && $email !== '') {
     $googleChatUserName = 'users/' . $email;
@@ -384,8 +446,12 @@ if ($pos !== '' && !in_array($pos, $allowedPositions, true)) $pos = '';
 try {
     $uploadedPhoto = (isset($_FILES['employee_photo']) && is_array($_FILES['employee_photo'])) ? $_FILES['employee_photo'] : null;
     $hasNewPhoto = ($uploadedPhoto && isset($uploadedPhoto['error']) && (int)$uploadedPhoto['error'] === UPLOAD_ERR_OK);
+    $uploadedSignature = (isset($_FILES['signature_file']) && is_array($_FILES['signature_file'])) ? $_FILES['signature_file'] : null;
+    $hasNewSignature = ($uploadedSignature && isset($uploadedSignature['error']) && (int)$uploadedSignature['error'] === UPLOAD_ERR_OK);
     $removePhoto = (isset($_POST['remove_photo']) && (string)$_POST['remove_photo'] === '1') ? 1 : 0;
+    $removeSignature = (isset($_POST['remove_signature']) && (string)$_POST['remove_signature'] === '1') ? 1 : 0;
     $oldPhotoPath = null;
+    $oldSignaturePath = null;
     if ($id > 0 && $photoPathEnabled) {
         $stOld = $pdo->prepare("SELECT photo_path FROM employees WHERE id=:id LIMIT 1");
         $stOld->bindValue(':id', $id, \PDO::PARAM_INT);
@@ -393,8 +459,18 @@ try {
         $oldRow = $stOld->fetch();
         if (is_array($oldRow) && isset($oldRow['photo_path'])) $oldPhotoPath = $oldRow['photo_path'];
     }
+    if ($id > 0 && $signaturePathEnabled) {
+        $stOldSign = $pdo->prepare("SELECT signature_path FROM employees WHERE id=:id LIMIT 1");
+        $stOldSign->bindValue(':id', $id, \PDO::PARAM_INT);
+        $stOldSign->execute();
+        $oldSignRow = $stOldSign->fetch();
+        if (is_array($oldSignRow) && isset($oldSignRow['signature_path'])) $oldSignaturePath = $oldSignRow['signature_path'];
+    }
 
     $fields = array('email=:email','name=:name','department=:dept','role=:role','is_active=:active');
+    if ($employeeNoEnabled) $fields[] = 'employee_no=:employee_no';
+    if ($phoneEnabled) $fields[] = 'phone=:phone';
+    if ($workLocationEnabled) $fields[] = 'work_location=:work_location';
     if ($positionEnabled) $fields[] = 'position=:pos';
     if ($hireDateEnabled) $fields[] = 'hire_date=:hire_date';
     if ($resignDateEnabled) $fields[] = 'resign_date=:resign_date';
@@ -419,6 +495,9 @@ try {
     } else {
         $cols = array('email','name','department','role','is_active');
         $vals = array(':email',':name',':dept',':role',':active');
+        if ($employeeNoEnabled) { $cols[] = 'employee_no'; $vals[] = ':employee_no'; }
+        if ($phoneEnabled) { $cols[] = 'phone'; $vals[] = ':phone'; }
+        if ($workLocationEnabled) { $cols[] = 'work_location'; $vals[] = ':work_location'; }
         if ($positionEnabled) { $cols[] = 'position'; $vals[] = ':pos'; }
         if ($hireDateEnabled) { $cols[] = 'hire_date'; $vals[] = ':hire_date'; }
         if ($resignDateEnabled) { $cols[] = 'resign_date'; $vals[] = ':resign_date'; }
@@ -445,6 +524,9 @@ try {
     $st->bindValue(':dept', $dept);
     $st->bindValue(':role', $role);
     $st->bindValue(':active', $isActive, \PDO::PARAM_INT);
+    if ($employeeNoEnabled) { if ($employeeNo === '') $st->bindValue(':employee_no', null, \PDO::PARAM_NULL); else $st->bindValue(':employee_no', $employeeNo); }
+    if ($phoneEnabled) { if ($phone === '') $st->bindValue(':phone', null, \PDO::PARAM_NULL); else $st->bindValue(':phone', $phone); }
+    if ($workLocationEnabled) { if ($workLocation === '') $st->bindValue(':work_location', null, \PDO::PARAM_NULL); else $st->bindValue(':work_location', $workLocation); }
     if ($positionEnabled) { if ($pos === '') $st->bindValue(':pos', null, \PDO::PARAM_NULL); else $st->bindValue(':pos', $pos); }
     if ($hireDateEnabled) { if ($hireDate === '') $st->bindValue(':hire_date', null, \PDO::PARAM_NULL); else $st->bindValue(':hire_date', $hireDate); }
     if ($resignDateEnabled) { if ($resignDate === '') $st->bindValue(':resign_date', null, \PDO::PARAM_NULL); else $st->bindValue(':resign_date', $resignDate); }
@@ -473,6 +555,7 @@ try {
     $vehicleSaveOk = true;
     if ($vehicleNumbersPosted) $vehicleSaveOk = cpms_employee_vehicle_save($pdo, $savedId, $vehicleNumbers, Auth::user());
     $photoError = '';
+    $signatureError = '';
     if ($photoPathEnabled) {
         if ($hasNewPhoto) {
             $up = cpms_employee_photo_upload($savedId, $uploadedPhoto);
@@ -493,6 +576,26 @@ try {
             cpms_employee_photo_delete_file($oldPhotoPath);
         }
     }
+    if ($signaturePathEnabled) {
+        if ($hasNewSignature) {
+            $upSign = cpms_employee_signature_upload($savedId, $email, $uploadedSignature);
+            if (isset($upSign['ok']) && $upSign['ok'] && isset($upSign['db_path'])) {
+                $newSignaturePath = (string)$upSign['db_path'];
+                $stSign = $pdo->prepare("UPDATE employees SET signature_path=:signature_path WHERE id=:id");
+                $stSign->bindValue(':signature_path', $newSignaturePath);
+                $stSign->bindValue(':id', $savedId, \PDO::PARAM_INT);
+                $stSign->execute();
+                if ($oldSignaturePath !== null && $oldSignaturePath !== $newSignaturePath) cpms_employee_signature_delete_file($oldSignaturePath);
+            } else {
+                $signatureError = isset($upSign['message']) ? (string)$upSign['message'] : '알 수 없는 오류';
+            }
+        } elseif ($id > 0 && $removeSignature === 1) {
+            $stSign = $pdo->prepare("UPDATE employees SET signature_path=NULL WHERE id=:id");
+            $stSign->bindValue(':id', $savedId, \PDO::PARAM_INT);
+            $stSign->execute();
+            cpms_employee_signature_delete_file($oldSignaturePath);
+        }
+    }
 
     $msg = ($id > 0 ? '직원 정보가 수정되었습니다.' : '직원이 추가되었습니다.')
         . ' (id=' . $savedId . ', 상태=' . ($isActive === 1 ? '재직' : '퇴직') . ', 퇴직일=' . ($resignDate === '' ? 'NULL' : $resignDate) . ')';
@@ -500,7 +603,7 @@ try {
         $vehicleError = function_exists('cpms_employee_vehicle_last_error') ? cpms_employee_vehicle_last_error() : '';
         $msg .= ' 다만 차량번호 저장은 실패했습니다.' . ($vehicleError !== '' ? ' (' . $vehicleError . ')' : '');
     }
-    if ($photoError !== '') flash_set('error', '직원 정보는 저장되었지만 사진 업로드에 실패했습니다: ' . $photoError . (!$vehicleSaveOk ? ' 차량번호 저장도 실패했습니다.' : ''));
+    if ($photoError !== '' || $signatureError !== '') flash_set('error', '직원 정보는 저장되었지만 파일 업로드에 실패했습니다: ' . ($photoError !== '' ? '사진 - ' . $photoError . ' ' : '') . ($signatureError !== '' ? '서명 - ' . $signatureError : '') . (!$vehicleSaveOk ? ' 차량번호 저장도 실패했습니다.' : ''));
     else flash_set('success', $msg);
 
     $currentUser = Auth::user();

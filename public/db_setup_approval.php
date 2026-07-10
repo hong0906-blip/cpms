@@ -174,6 +174,10 @@ $columns = array(
         'leave_annual_balance' => "ALTER TABLE employees ADD COLUMN leave_annual_balance DECIMAL(6,2) NULL",
         'leave_half_balance' => "ALTER TABLE employees ADD COLUMN leave_half_balance DECIMAL(6,2) NULL",
         'monthly_regular_wage' => "ALTER TABLE employees ADD COLUMN monthly_regular_wage DECIMAL(15,2) NULL",
+        'employee_no' => "ALTER TABLE employees ADD COLUMN employee_no VARCHAR(50) NULL",
+        'phone' => "ALTER TABLE employees ADD COLUMN phone VARCHAR(50) NULL",
+        'work_location' => "ALTER TABLE employees ADD COLUMN work_location VARCHAR(100) NULL",
+        'signature_path' => "ALTER TABLE employees ADD COLUMN signature_path VARCHAR(255) NULL",
         'is_team_leader' => "ALTER TABLE employees ADD COLUMN is_team_leader TINYINT(1) NOT NULL DEFAULT 0",
         'team_leader_id' => "ALTER TABLE employees ADD COLUMN team_leader_id INT NULL"
     ),

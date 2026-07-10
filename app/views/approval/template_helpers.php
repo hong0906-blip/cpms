@@ -9,6 +9,32 @@ if (!function_exists('approval_default_leave_agreement')) {
 if (!function_exists('approval_sign_path_by_email')) {
     function approval_sign_path_by_email($email)
     {
+        $emailValue = strtolower(trim((string)$email));
+        if ($emailValue !== '' && class_exists('\\App\\Core\\Db')) {
+            try {
+                $pdo = \App\Core\Db::pdo();
+                if ($pdo) {
+                    $stCol = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'employees' AND COLUMN_NAME = 'signature_path'");
+                    $stCol->execute();
+                    if ((int)$stCol->fetchColumn() > 0) {
+                        $st = $pdo->prepare("SELECT signature_path FROM employees WHERE LOWER(email) = :email AND signature_path IS NOT NULL AND TRIM(signature_path) <> '' LIMIT 1");
+                        $st->execute(array(':email' => $emailValue));
+                        $savedPath = trim((string)$st->fetchColumn());
+                        if ($savedPath !== '') {
+                            $root = dirname(dirname(dirname(__DIR__)));
+                            $normalized = str_replace('\\', '/', $savedPath);
+                            if (substr($normalized, 0, 1) === '/') $normalized = ltrim($normalized, '/');
+                            if (is_file($root . '/' . $normalized)) {
+                                return $normalized;
+                            }
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+                // 기존 이메일 기반 서명 검색으로 fallback
+            }
+        }
+
         $prefix = explode('@', (string)$email);
         $name = isset($prefix[0]) ? trim($prefix[0]) : '';
         if ($name === '') {
