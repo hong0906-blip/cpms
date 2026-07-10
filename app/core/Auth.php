@@ -37,7 +37,7 @@ class Auth
         if (defined('CPMS_SESSION_KEEP_SECONDS')) {
             return (int)constant('CPMS_SESSION_KEEP_SECONDS');
         }
-        return 60 * 60 * 12;
+        return 60 * 60 * 14;
     }
 
     private static function cookieDomain()

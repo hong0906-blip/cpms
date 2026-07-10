@@ -7,8 +7,10 @@
  * PHP 5.6 호환
  */
 
+require_once __DIR__ . '/session_config.php';
+
 if (!defined('CPMS_SESSION_KEEP_SECONDS')) {
-    define('CPMS_SESSION_KEEP_SECONDS', 60 * 60 * 12); // 12시간
+    define('CPMS_SESSION_KEEP_SECONDS', 60 * 60 * 14); // 14시간
 }
 
 // ===== 포탈과 공통 세션 설정 (반드시 session_start() 전에!) =====

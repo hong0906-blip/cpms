@@ -102,7 +102,7 @@ function cpms_portal_login_url($returnUrl) {
 
     $scheme = cpms_is_https_request() ? 'https' : 'http';
     $host = isset($_SERVER['HTTP_HOST']) && trim((string)$_SERVER['HTTP_HOST']) !== '' ? trim((string)$_SERVER['HTTP_HOST']) : 'cmbuild.kr';
-    $url = $scheme . '://' . $host . '/';
+    $url = $scheme . '://' . $host . '/portal/index.html';
     if ($returnUrl !== '') $url .= '?return=' . rawurlencode($returnUrl);
     return $url;
 }

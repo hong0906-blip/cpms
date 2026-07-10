@@ -1345,6 +1345,17 @@ if ($route === 'logout') {
     cpms_redirect_to_portal_login(cpms_current_absolute_url());
 }
 
+if ($route === 'portal_entry') {
+    if (!\App\Core\Auth::check()) {
+        cpms_redirect_to_portal_login(cpms_current_absolute_url());
+    }
+
+    $portalEntryRoute = (\App\Core\Auth::userRole() === 'executive') ? 'dashboard_executive' : 'dashboard_employee';
+    $_SESSION['dashboardType'] = ($portalEntryRoute === 'dashboard_executive') ? 'executive' : 'employee';
+    header('Location: ?r=' . $portalEntryRoute);
+    exit;
+}
+
 // ==========================
 //  로그인 체크
 // ==========================
