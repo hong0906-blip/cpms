@@ -72,7 +72,7 @@ if (!function_exists('cpms_shared_safe_redirect_url')) {
 function cpms_shared_safe_redirect_url($url, $fallback) {
     $url = trim((string)$url);
     $fallback = trim((string)$fallback);
-    if ($fallback === '') $fallback = '/cpms/public/?r=portal_entry';
+    if ($fallback === '') $fallback = '/cpms/public/?r=dashboard_employee';
     if ($url === '' || preg_match('/[\r\n]/', $url)) return $fallback;
 
     if (preg_match('/^https?:\/\//i', $url)) {
@@ -89,6 +89,35 @@ function cpms_shared_safe_redirect_url($url, $fallback) {
     }
 
     return $fallback;
+}
+}
+
+if (!function_exists('cpms_shared_dashboard_url')) {
+function cpms_shared_dashboard_url($role) {
+    $route = ((string)$role === 'executive') ? 'dashboard_executive' : 'dashboard_employee';
+    return 'https://cmbuild.kr/cpms/public/?r=' . $route;
+}
+}
+
+if (!function_exists('cpms_shared_is_portal_entry_url')) {
+function cpms_shared_is_portal_entry_url($url) {
+    $url = trim((string)$url);
+    if ($url === '') return false;
+
+    $query = '';
+    if (substr($url, 0, 1) === '?') {
+        $query = substr($url, 1);
+    } else {
+        $parts = @parse_url($url);
+        if (is_array($parts) && isset($parts['query'])) {
+            $query = (string)$parts['query'];
+        }
+    }
+    if ($query === '') return false;
+
+    $params = array();
+    parse_str($query, $params);
+    return isset($params['r']) && (string)$params['r'] === 'portal_entry';
 }
 }
 

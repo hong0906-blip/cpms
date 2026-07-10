@@ -704,6 +704,9 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">참석자</div>
+                            <div class="mb-2 flex justify-end">
+                                <button type="button" data-meeting-assignee-select-all class="px-3 py-2 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-xs font-extrabold">일괄 요청</button>
+                            </div>
                             <select name="assignee_employee_ids[]" id="meetingAssigneeSelect" required multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
                                 <?php cpms_render_task_assignee_options($employees, $currentLeaveIndex); ?>
                             </select>
@@ -751,6 +754,7 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
         var meetingAssigneeSelect = document.getElementById('meetingAssigneeSelect');
         var assigneeSelected = document.getElementById('taskAssigneeSelected');
         var meetingAssigneeSelected = document.getElementById('meetingAssigneeSelected');
+        var meetingAssigneeSelectAllButtons = document.querySelectorAll('[data-meeting-assignee-select-all]');
         var assignToMeToggle = document.getElementById('taskAssignToMeToggle');
         var departmentSelect = document.getElementById('taskDepartmentSelect');
         var onLeaveMessage = <?php echo json_encode(approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?>;
@@ -838,6 +842,17 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
             }
             return null;
         }
+        function selectAllMeetingAssignees(button) {
+            var form = button && button.form ? button.form : null;
+            var targetSelect = form && form.querySelector ? form.querySelector('select[name="assignee_employee_ids[]"]') : meetingAssigneeSelect;
+            if (!targetSelect || !targetSelect.options) return;
+            for (var i = 0; i < targetSelect.options.length; i++) {
+                var option = targetSelect.options[i];
+                if (!option.value || option.disabled || option.getAttribute('data-on-leave') === '1') continue;
+                option.selected = true;
+            }
+            dispatchChange(targetSelect);
+        }
         function setupPicker(searchInput, select, targetDepartmentSelect, emptyMessage, wrap, wrapEmptyText, fallbackCheckbox) {
             if (!select) return;
             if (searchInput) searchInput.addEventListener('input', function(){ filterOptions(searchInput, select); renderChips(select, wrap, wrapEmptyText); });
@@ -914,6 +929,11 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
         }
         setupPicker(assigneeSearch, assigneeSelect, departmentSelect, '담당자를 선택해주세요.', assigneeSelected, '선택된 담당자가 없습니다.', assignToMeToggle);
         setupPicker(meetingAssigneeSearch, meetingAssigneeSelect, null, '참석자를 선택해주세요.', meetingAssigneeSelected, '선택된 참석자가 없습니다.', null);
+        for (var meetingAllIndex = 0; meetingAllIndex < meetingAssigneeSelectAllButtons.length; meetingAllIndex++) {
+            meetingAssigneeSelectAllButtons[meetingAllIndex].addEventListener('click', function(){
+                selectAllMeetingAssignees(this);
+            });
+        }
     })();
     </script>
     <?php
@@ -1432,6 +1452,9 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                         </div>
                         <div>
                             <div class="text-sm font-bold text-gray-700 mb-1">참석자</div>
+                            <div class="mb-2 flex justify-end">
+                                <button type="button" data-meeting-assignee-select-all class="px-3 py-2 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 text-xs font-extrabold">일괄 요청</button>
+                            </div>
                             <select name="assignee_employee_ids[]" id="meetingAssigneeSelect" required multiple size="8" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
                                 <?php cpms_render_task_assignee_options($employees, $currentLeaveIndex); ?>
                             </select>
@@ -1693,6 +1716,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
         var meetingAssigneeSelect = document.getElementById('meetingAssigneeSelect');
         var assigneeSelected = document.getElementById('taskAssigneeSelected');
         var meetingAssigneeSelected = document.getElementById('meetingAssigneeSelected');
+        var meetingAssigneeSelectAllButtons = document.querySelectorAll('[data-meeting-assignee-select-all]');
         var assignToMeToggle = document.getElementById('taskAssignToMeToggle');
         var departmentSelect = document.getElementById('taskDepartmentSelect');
         var onLeaveMessage = <?php echo json_encode(approval_ko('%EC%84%A0%ED%83%9D%ED%95%9C%20%EB%8B%B4%EB%8B%B9%EC%9E%90%EB%8A%94%20%ED%98%84%EC%9E%AC%20%ED%9C%B4%EA%B0%80%EC%A4%91%EC%9D%B4%EB%AF%80%EB%A1%9C%20%EC%97%85%EB%AC%B4%EC%9A%94%EC%B2%AD%EC%9D%84%20%ED%95%A0%20%EC%88%98%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?>;
@@ -1772,6 +1796,18 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                 if (String(select.options[i].value) === value) return select.options[i];
             }
             return null;
+        }
+
+        function selectAllMeetingAssignees(button) {
+            var form = button && button.form ? button.form : null;
+            var targetSelect = form && form.querySelector ? form.querySelector('select[name="assignee_employee_ids[]"]') : meetingAssigneeSelect;
+            if (!targetSelect || !targetSelect.options) return;
+            for (var i = 0; i < targetSelect.options.length; i++) {
+                var option = targetSelect.options[i];
+                if (!option.value || option.disabled || option.getAttribute('data-on-leave') === '1') continue;
+                option.selected = true;
+            }
+            dispatchAssigneeChange(targetSelect);
         }
 
         function applyAssigneeSearchFilter(searchInput, select) {
@@ -1913,6 +1949,11 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
 
         setupAssigneePicker(assigneeSearch, assigneeSelect, departmentSelect, '담당자를 선택해주세요.', assigneeSelected, '선택된 담당자가 없습니다.', assignToMeToggle);
         setupAssigneePicker(meetingAssigneeSearch, meetingAssigneeSelect, null, '참석자를 선택해주세요.', meetingAssigneeSelected, '선택된 참석자가 없습니다.', null);
+        for (var meetingAllIndex = 0; meetingAllIndex < meetingAssigneeSelectAllButtons.length; meetingAllIndex++) {
+            meetingAssigneeSelectAllButtons[meetingAllIndex].addEventListener('click', function(){
+                selectAllMeetingAssignees(this);
+            });
+        }
 
         function openCompleteModal(taskId) {
             if (completeTaskId) completeTaskId.value = taskId;
@@ -2637,7 +2678,6 @@ function cpms_render_executive_task_dashboard($pdo)
     if (!$pdo || !(App\Core\Auth::isMaster() || App\Core\Auth::userRole() === 'executive' || App\Core\Auth::canManageEmployees())) return;
     $selectedDepartment = isset($_GET['task_department']) ? trim((string)$_GET['task_department']) : '전체';
     if ($selectedDepartment === '') $selectedDepartment = '전체';
-    if ($selectedDepartment === '임원') $selectedDepartment = '기타';
     $allDepartmentLabel = urldecode('%EC%A0%84%EC%B2%B4');
     $isAllDepartmentSelected = (!isset($_GET['task_department']) || trim((string)$_GET['task_department']) === '' || $selectedDepartment === $allDepartmentLabel);
     if ($isAllDepartmentSelected) {
@@ -2656,7 +2696,7 @@ function cpms_render_executive_task_dashboard($pdo)
                     <?php foreach ($departmentOptions as $departmentName): ?>
                         <?php
                         $isSelected = ($selectedDepartment === $departmentName);
-                        $departmentLabel = (($departmentName === '기타') ? '임원' : $departmentName);
+                        $departmentLabel = $departmentName;
                         $url = '?r=dashboard_executive&exec_tab=department';
                         if ($departmentName !== $allDepartmentLabel) $url .= '&task_department=' . urlencode($departmentName);
                         ?>
@@ -2828,7 +2868,7 @@ function cpms_render_executive_task_dashboard($pdo)
                 <?php foreach ($departmentOptions as $departmentName): ?>
                     <?php
                     $isSelected = ($selectedDepartment === $departmentName);
-                    $departmentLabel = (($departmentName === '기타') ? '임원' : $departmentName);
+                    $departmentLabel = $departmentName;
                     $url = '?r=dashboard_executive&exec_tab=department';
                     if ($departmentName !== '전체') $url .= '&task_department=' . urlencode($departmentName);
                     ?>
@@ -2845,7 +2885,7 @@ function cpms_render_executive_task_dashboard($pdo)
                 <?php foreach ($summaryData['departments'] as $departmentName => $departmentMetrics): ?>
                     <?php if ($selectedDepartment !== '전체' && $departmentName !== $selectedDepartment) continue; ?>
                     <?php
-                    $departmentLabel = ($departmentName === '기타') ? '임원' : $departmentName;
+                    $departmentLabel = $departmentName;
                     $departmentUrl = '?r=dashboard_executive&exec_tab=department&task_department=' . urlencode($departmentName);
                     ?>
                     <a href="<?php echo h($departmentUrl); ?>" class="block px-4 py-3 rounded-2xl border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition">
@@ -2877,7 +2917,7 @@ function cpms_render_executive_task_dashboard($pdo)
                     $modalId = 'executiveTaskEmployee' . (int)$employee['id'];
                     $employeeLeaveInfo = function_exists('approval_current_leave_info_from_index') ? approval_current_leave_info_from_index($currentLeaveIndex, $employee) : null;
                     $employeeLeaveLabel = is_array($employeeLeaveInfo) && isset($employeeLeaveInfo['status_label']) ? (string)$employeeLeaveInfo['status_label'] : '';
-                    $employeeDepartmentLabel = (isset($employee['department']) && trim((string)$employee['department']) !== '') ? (($employee['department'] === '기타') ? '임원' : $employee['department']) : '-';
+                    $employeeDepartmentLabel = (isset($employee['department']) && trim((string)$employee['department']) !== '') ? $employee['department'] : '-';
                     ?>
                     <button type="button" data-cpms-employee-toggle="<?php echo h($modalId); ?>" class="w-full text-left px-4 py-3 rounded-2xl border border-gray-200 bg-white shadow-sm hover:shadow-md hover:border-gray-300 transition">
                         <div class="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-3">

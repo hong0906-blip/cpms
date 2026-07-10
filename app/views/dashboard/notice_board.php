@@ -715,4 +715,229 @@ function cpms_render_dashboard_notice_modal() {
     </script>
     <?php
 }}
+
+if (!function_exists('cpms_dashboard_birthday_text')) {
+function cpms_dashboard_birthday_text($encoded) {
+    return urldecode($encoded);
+}}
+
+if (!function_exists('cpms_dashboard_birthday_today')) {
+function cpms_dashboard_birthday_today() {
+    if (function_exists('attendance_today')) return attendance_today();
+    try {
+        $dt = new DateTime('now', new DateTimeZone('Asia/Seoul'));
+        return $dt->format('Y-m-d');
+    } catch (Exception $e) {
+        return date('Y-m-d');
+    }
+}}
+
+if (!function_exists('cpms_dashboard_birthday_employee_column_exists')) {
+function cpms_dashboard_birthday_employee_column_exists($pdo, $column) {
+    if (!$pdo) return false;
+    $column = trim((string)$column);
+    if ($column === '' || !preg_match('/^[a-zA-Z0-9_]+$/', $column)) return false;
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM employees LIKE :col");
+        $st->execute(array(':col' => $column));
+        return (bool)$st->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_dashboard_birthday_month_day')) {
+function cpms_dashboard_birthday_month_day($value) {
+    $value = trim((string)$value);
+    if ($value === '' || $value === '0000-00-00') return array(0, 0);
+
+    $month = 0;
+    $day = 0;
+    if (preg_match('/^\d{4}[-\/.](\d{1,2})[-\/.](\d{1,2})$/', $value, $m)) {
+        $month = (int)$m[1];
+        $day = (int)$m[2];
+    } else if (preg_match('/^(\d{1,2})[-\/.](\d{1,2})$/', $value, $m)) {
+        $month = (int)$m[1];
+        $day = (int)$m[2];
+    } else if (preg_match('/(\d{1,2})\D+(\d{1,2})/', $value, $m)) {
+        $month = (int)$m[1];
+        $day = (int)$m[2];
+    }
+
+    if (!checkdate($month, $day, 2000)) return array(0, 0);
+    return array($month, $day);
+}}
+
+if (!function_exists('cpms_dashboard_birthday_message')) {
+function cpms_dashboard_birthday_message($person) {
+    $name = is_array($person) && isset($person['name']) ? trim((string)$person['name']) : '';
+    $position = is_array($person) && isset($person['position']) ? trim((string)$person['position']) : '';
+    $suffix = cpms_dashboard_birthday_text('%EC%83%9D%EC%9D%BC%EC%B6%95%ED%95%98%ED%95%A9%EB%8B%88%EB%8B%A4%21');
+    if ($name === '') return '';
+    if ($position !== '') return $name . ' ' . $position . cpms_dashboard_birthday_text('%EB%8B%98%20') . $suffix;
+    return $name . cpms_dashboard_birthday_text('%EB%8B%98%20') . $suffix;
+}}
+
+if (!function_exists('cpms_dashboard_birthday_today_employees')) {
+function cpms_dashboard_birthday_today_employees($pdo, $today) {
+    $items = array();
+    if (!$pdo) return $items;
+    if (!cpms_dashboard_birthday_employee_column_exists($pdo, 'name')) return $items;
+    if (!cpms_dashboard_birthday_employee_column_exists($pdo, 'birth_date')) return $items;
+
+    $todayParts = cpms_dashboard_birthday_month_day($today);
+    $todayMonth = isset($todayParts[0]) ? (int)$todayParts[0] : 0;
+    $todayDay = isset($todayParts[1]) ? (int)$todayParts[1] : 0;
+    if ($todayMonth < 1 || $todayDay < 1) return $items;
+
+    $positionSelect = cpms_dashboard_birthday_employee_column_exists($pdo, 'position') ? 'position' : "'' AS position";
+    $where = array("birth_date IS NOT NULL", "CAST(birth_date AS CHAR) <> ''", "CAST(birth_date AS CHAR) <> '0000-00-00'");
+    if (cpms_dashboard_birthday_employee_column_exists($pdo, 'is_active')) {
+        $where[] = 'is_active = 1';
+    }
+
+    try {
+        $sql = "SELECT id, name, " . $positionSelect . ", birth_date FROM employees WHERE " . implode(' AND ', $where) . " ORDER BY name ASC, id ASC";
+        $st = $pdo->query($sql);
+        if (!$st) return array();
+        while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+            $birthParts = cpms_dashboard_birthday_month_day(isset($row['birth_date']) ? $row['birth_date'] : '');
+            $birthMonth = isset($birthParts[0]) ? (int)$birthParts[0] : 0;
+            $birthDay = isset($birthParts[1]) ? (int)$birthParts[1] : 0;
+            if ($birthMonth !== $todayMonth || $birthDay !== $todayDay) continue;
+            $message = cpms_dashboard_birthday_message($row);
+            if ($message === '') continue;
+            $row['message'] = $message;
+            $items[] = $row;
+        }
+    } catch (Exception $e) {
+        return array();
+    }
+
+    return $items;
+}}
+
+if (!function_exists('cpms_render_dashboard_birthday_modal')) {
+function cpms_render_dashboard_birthday_modal($pdo) {
+    $today = cpms_dashboard_birthday_today();
+    $birthdays = cpms_dashboard_birthday_today_employees($pdo, $today);
+    if (count($birthdays) === 0) return;
+
+    $signatureParts = array($today);
+    foreach ($birthdays as $birthdayRow) {
+        $signatureParts[] =
+            (isset($birthdayRow['id']) ? (string)$birthdayRow['id'] : '') . ':' .
+            (isset($birthdayRow['name']) ? (string)$birthdayRow['name'] : '') . ':' .
+            (isset($birthdayRow['position']) ? (string)$birthdayRow['position'] : '') . ':' .
+            (isset($birthdayRow['birth_date']) ? (string)$birthdayRow['birth_date'] : '');
+    }
+    $birthdaySignature = md5(implode('|', $signatureParts));
+    $cakeSrc = function_exists('asset_url') ? asset_url('assets/img/birthday-cake.svg') : 'assets/img/birthday-cake.svg';
+    $fireworkSrc = function_exists('asset_url') ? asset_url('assets/img/birthday-fireworks.svg') : 'assets/img/birthday-fireworks.svg';
+    ?>
+    <style>
+      .cpms-birthday-modal-card{background:linear-gradient(135deg,#fff7ed 0%,#ffffff 48%,#ecfeff 100%)}
+      .cpms-birthday-visual{display:flex;align-items:center;justify-content:center;gap:14px;margin:6px auto 18px}
+      .cpms-birthday-img{display:block;max-width:100%;height:auto;filter:drop-shadow(0 16px 20px rgba(15,23,42,.18))}
+      .cpms-birthday-cake{width:132px;animation:cpms-birthday-cake-pop 1.4s ease-in-out infinite}
+      .cpms-birthday-firework{width:96px;animation:cpms-birthday-firework-pop 1.1s ease-in-out infinite}
+      .cpms-birthday-firework.is-right{animation-delay:.18s}
+      .cpms-birthday-message{word-break:keep-all;overflow-wrap:anywhere;letter-spacing:0}
+      @keyframes cpms-birthday-cake-pop{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-5px) scale(1.035)}}
+      @keyframes cpms-birthday-firework-pop{0%,100%{transform:scale(1);opacity:.92}50%{transform:scale(1.08);opacity:1}}
+      @media (max-width:640px){
+        .cpms-birthday-visual{gap:8px}
+        .cpms-birthday-cake{width:108px}
+        .cpms-birthday-firework{width:72px}
+      }
+      @media (prefers-reduced-motion:reduce){
+        .cpms-birthday-cake,.cpms-birthday-firework{animation:none}
+      }
+    </style>
+    <div id="modal-dashboardBirthdayAuto" class="fixed inset-0 hidden" style="z-index:60;" data-dashboard-birthday-auto="1">
+        <div class="absolute inset-0 bg-slate-950/55" data-dashboard-birthday-auto-close></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="cpms-birthday-modal-card relative w-full max-w-2xl max-h-[90vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-amber-100">
+                <div class="p-5 md:p-7 text-center">
+                    <div class="flex justify-end">
+                        <button type="button" class="px-4 py-2 rounded-2xl border border-amber-200 bg-white/80 text-gray-700 font-extrabold hover:bg-white" data-dashboard-birthday-auto-close><?php echo h(cpms_dashboard_notice_label('close')); ?></button>
+                    </div>
+                    <div class="cpms-birthday-visual" aria-hidden="true">
+                        <img class="cpms-birthday-img cpms-birthday-firework" src="<?php echo h($fireworkSrc); ?>" alt="<?php echo h(cpms_dashboard_birthday_text('%ED%8F%AD%EC%A3%BD%20%EC%9D%B4%EB%AF%B8%EC%A7%80')); ?>">
+                        <img class="cpms-birthday-img cpms-birthday-cake" src="<?php echo h($cakeSrc); ?>" alt="<?php echo h(cpms_dashboard_birthday_text('%EC%BC%80%EC%9D%B4%ED%81%AC%20%EC%9D%B4%EB%AF%B8%EC%A7%80')); ?>">
+                        <img class="cpms-birthday-img cpms-birthday-firework is-right" src="<?php echo h($fireworkSrc); ?>" alt="<?php echo h(cpms_dashboard_birthday_text('%ED%8F%AD%EC%A3%BD%20%EC%9D%B4%EB%AF%B8%EC%A7%80')); ?>">
+                    </div>
+                    <div class="inline-flex items-center justify-center px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-sm font-extrabold border border-amber-200"><?php echo h(cpms_dashboard_birthday_text('%EC%98%A4%EB%8A%98%20%EC%83%9D%EC%9D%BC%EC%9E%90')); ?></div>
+                    <?php if (count($birthdays) === 1): ?>
+                        <div class="cpms-birthday-message mt-4 text-2xl md:text-4xl leading-tight font-black text-gray-950"><?php echo h(isset($birthdays[0]['message']) ? $birthdays[0]['message'] : ''); ?></div>
+                    <?php else: ?>
+                        <div class="mt-4 space-y-2">
+                            <?php foreach ($birthdays as $birthday): ?>
+                                <div class="cpms-birthday-message rounded-2xl border border-amber-100 bg-white/80 px-4 py-3 text-xl md:text-2xl leading-snug font-black text-gray-950"><?php echo h(isset($birthday['message']) ? $birthday['message'] : ''); ?></div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
+                    <div class="mt-4 text-base md:text-lg font-extrabold text-slate-600"><?php echo h(cpms_dashboard_birthday_text('%ED%95%A8%EA%BB%98%20%EC%B6%95%ED%95%98%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.')); ?></div>
+                </div>
+                <div class="px-6 py-4 border-t border-amber-100 bg-white/70 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div class="text-xs text-gray-500"><?php echo h(cpms_dashboard_notice_label('today_hidden')); ?></div>
+                    <button type="button" class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold" data-dashboard-birthday-auto-close><?php echo h(cpms_dashboard_notice_label('close')); ?></button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function(){
+        var birthdayModal = document.getElementById('modal-dashboardBirthdayAuto');
+        var storageKey = 'cpms_dashboard_birthday_closed_until';
+        var signatureKey = 'cpms_dashboard_birthday_signature';
+        var birthdaySignature = <?php echo json_encode($birthdaySignature); ?>;
+        function endOfTodayTime() {
+            var now = new Date();
+            return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+        }
+        function shouldShowBirthday() {
+            try {
+                var raw = window.localStorage ? localStorage.getItem(storageKey) : '';
+                var storedSignature = window.localStorage ? (localStorage.getItem(signatureKey) || '') : '';
+                var until = raw ? parseInt(raw, 10) : 0;
+                if (birthdaySignature && storedSignature !== birthdaySignature) return true;
+                if (until && until >= new Date().getTime()) return false;
+            } catch (e) {}
+            return true;
+        }
+        function noticeModalOpen() {
+            var noticeModal = document.getElementById('modal-dashboardNoticeAuto');
+            return !!(noticeModal && !noticeModal.classList.contains('hidden'));
+        }
+        function closeBirthday() {
+            if (birthdayModal) birthdayModal.classList.add('hidden');
+            try {
+                if (window.localStorage) {
+                    localStorage.setItem(storageKey, String(endOfTodayTime()));
+                    localStorage.setItem(signatureKey, birthdaySignature || '');
+                }
+            } catch (e) {}
+            if (!noticeModalOpen()) document.body.classList.remove('overflow-hidden');
+        }
+        function openBirthday() {
+            if (!birthdayModal || !shouldShowBirthday()) return;
+            birthdayModal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+        }
+        var closeButtons = document.querySelectorAll('[data-dashboard-birthday-auto-close]');
+        for (var i = 0; i < closeButtons.length; i++) {
+            closeButtons[i].addEventListener('click', function(e){
+                e.preventDefault();
+                closeBirthday();
+            });
+        }
+        document.addEventListener('keydown', function(e){
+            if (e.key === 'Escape' && birthdayModal && !birthdayModal.classList.contains('hidden')) closeBirthday();
+        });
+        setTimeout(openBirthday, 120);
+    })();
+    </script>
+    <?php
+}}
 ?>

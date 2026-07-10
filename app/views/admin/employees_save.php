@@ -288,8 +288,136 @@ function cpms_employee_save_can_assign_executive_role() {
     return cpms_employee_save_can_assign_development_department();
 }}
 
+if (!function_exists('cpms_employee_save_employee_no_position_rank')) {
+function cpms_employee_save_employee_no_position_rank($position) {
+    $position = trim((string)$position);
+    $map = array(
+        '회장' => 1,
+        '대표' => 2,
+        'CEO' => 2,
+        '사장' => 3,
+        '부사장' => 4,
+        '고문' => 5,
+        '전무' => 6,
+        '상무' => 7,
+        '이사' => 8,
+        '부장' => 9,
+        '차장' => 10,
+        '과장' => 11,
+        '대리' => 12,
+        '주임' => 13
+    );
+    return isset($map[$position]) ? (int)$map[$position] : 99;
+}}
+
+if (!function_exists('cpms_employee_save_employee_no_date_key')) {
+function cpms_employee_save_employee_no_date_key($value) {
+    $value = trim((string)$value);
+    if ($value === '') return '';
+    if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})/', $value, $m)) {
+        if (!checkdate((int)$m[2], (int)$m[3], (int)$m[1])) return '';
+        return sprintf('%02d%02d%02d', ((int)$m[1]) % 100, (int)$m[2], (int)$m[3]);
+    }
+    $ts = strtotime($value);
+    if ($ts === false || $ts <= 0) return '';
+    return date('ymd', $ts);
+}}
+
+if (!function_exists('cpms_employee_save_employee_no_birth_key')) {
+function cpms_employee_save_employee_no_birth_key($value) {
+    $value = trim((string)$value);
+    if ($value === '') return '9999-99999999';
+    if (preg_match('/^(\d{4})-(\d{1,2})-(\d{1,2})/', $value, $m)) {
+        if (!checkdate((int)$m[2], (int)$m[3], (int)$m[1])) return '9999-99999999';
+        return sprintf('%02d%02d-%04d%02d%02d', (int)$m[2], (int)$m[3], (int)$m[1], (int)$m[2], (int)$m[3]);
+    }
+    $ts = strtotime($value);
+    if ($ts === false || $ts <= 0) return '9999-99999999';
+    return date('md-Ymd', $ts);
+}}
+
+if (!function_exists('cpms_employee_save_generate_employee_numbers')) {
+function cpms_employee_save_generate_employee_numbers($pdo, $positionEnabled, $birthDateEnabled) {
+    $positionSelect = $positionEnabled ? 'position' : "'' AS position";
+    $birthDateSelect = $birthDateEnabled ? 'birth_date' : "NULL AS birth_date";
+    $sql = "SELECT id,name,hire_date,{$positionSelect},{$birthDateSelect} FROM employees WHERE hire_date IS NOT NULL AND CAST(hire_date AS CHAR) <> '' ORDER BY hire_date ASC, id ASC";
+    $rows = $pdo->query($sql)->fetchAll(\PDO::FETCH_ASSOC);
+    if (!is_array($rows)) $rows = array();
+
+    $groups = array();
+    $skipped = 0;
+    for ($i = 0; $i < count($rows); $i++) {
+        $key = cpms_employee_save_employee_no_date_key(isset($rows[$i]['hire_date']) ? $rows[$i]['hire_date'] : '');
+        if ($key === '') {
+            $skipped++;
+            continue;
+        }
+        if (!isset($groups[$key])) $groups[$key] = array();
+        $groups[$key][] = $rows[$i];
+    }
+
+    $st = $pdo->prepare("UPDATE employees SET employee_no=:employee_no WHERE id=:id");
+    $updated = 0;
+    foreach ($groups as $dateKey => $items) {
+        usort($items, 'cpms_employee_save_employee_no_compare');
+        for ($i = 0; $i < count($items); $i++) {
+            $employeeNo = $dateKey . '-' . sprintf('%03d', $i + 1);
+            $st->bindValue(':employee_no', $employeeNo);
+            $st->bindValue(':id', (int)$items[$i]['id'], \PDO::PARAM_INT);
+            $st->execute();
+            $updated++;
+        }
+    }
+
+    return array('updated' => $updated, 'skipped' => $skipped, 'date_count' => count($groups));
+}}
+
+if (!function_exists('cpms_employee_save_employee_no_compare')) {
+function cpms_employee_save_employee_no_compare($a, $b) {
+    $rankA = cpms_employee_save_employee_no_position_rank(isset($a['position']) ? $a['position'] : '');
+    $rankB = cpms_employee_save_employee_no_position_rank(isset($b['position']) ? $b['position'] : '');
+    if ($rankA < $rankB) return -1;
+    if ($rankA > $rankB) return 1;
+
+    $birthA = cpms_employee_save_employee_no_birth_key(isset($a['birth_date']) ? $a['birth_date'] : '');
+    $birthB = cpms_employee_save_employee_no_birth_key(isset($b['birth_date']) ? $b['birth_date'] : '');
+    $birthCompare = strcmp($birthA, $birthB);
+    if ($birthCompare !== 0) return $birthCompare;
+
+    $nameCompare = strcmp((string)(isset($a['name']) ? $a['name'] : ''), (string)(isset($b['name']) ? $b['name'] : ''));
+    if ($nameCompare !== 0) return $nameCompare;
+
+    $idA = isset($a['id']) ? (int)$a['id'] : 0;
+    $idB = isset($b['id']) ? (int)$b['id'] : 0;
+    if ($idA == $idB) return 0;
+    return ($idA < $idB) ? -1 : 1;
+}}
+
 $action = isset($_POST['action']) ? (string)$_POST['action'] : 'save';
 $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
+
+if ($action === 'generate_employee_numbers') {
+    if (!$canManage) { http_response_code(403); echo '403 Forbidden'; exit; }
+    if (!$employeeNoEnabled) {
+        flash_set('error', '사번 컬럼을 생성하지 못했습니다. DB 권한 또는 employees 테이블 상태를 확인해주세요.');
+        header('Location: ?r=관리&tab=employees');
+        exit;
+    }
+    if (!$hireDateEnabled) {
+        flash_set('error', '입사날짜 컬럼이 없어 사번을 생성할 수 없습니다.');
+        header('Location: ?r=관리&tab=employees');
+        exit;
+    }
+    try {
+        $result = cpms_employee_save_generate_employee_numbers($pdo, $positionEnabled, $birthDateEnabled);
+        flash_set('success', '사번 일괄 생성 완료: ' . (int)$result['updated'] . '명 처리 / 입사일 그룹 ' . (int)$result['date_count'] . '개' . ((int)$result['skipped'] > 0 ? ' / 제외 ' . (int)$result['skipped'] . '명' : ''));
+    } catch (\Exception $e) {
+        flash_set('error', '사번 일괄 생성 실패: ' . $e->getMessage());
+    }
+    $redirectView = isset($_POST['employee_view']) && $_POST['employee_view'] === 'retired' ? 'retired' : 'active';
+    header('Location: ?r=관리&tab=employees&employee_view=' . $redirectView);
+    exit;
+}
 
 if ($action === 'delete') {
     if (!$canManage) { http_response_code(403); echo '403 Forbidden'; exit; }

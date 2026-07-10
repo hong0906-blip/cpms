@@ -231,6 +231,7 @@ if ($pdo && cpms_employee_directory_table_exists($pdo)) {
             cpms_employee_directory_select_column($pdo, 'hire_date', 'hire_date', 'NULL'),
             cpms_employee_directory_select_column($pdo, 'birth_date', 'birth_date', 'NULL'),
             cpms_employee_directory_select_column($pdo, 'photo_path', 'photo_path', "''"),
+            cpms_employee_directory_first_select_column($pdo, array('employee_no', 'employee_number', 'emp_no', 'staff_no'), 'employee_no', "''"),
             cpms_employee_directory_first_select_column($pdo, array('phone', 'mobile', 'phone_number', 'tel'), 'phone', "''"),
             cpms_employee_directory_first_select_column($pdo, array('work_location', 'office_location', 'work_site', 'location'), 'work_location', "''"),
         );
@@ -352,7 +353,7 @@ $initialSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
         </button>
       <?php endfor; ?>
     </div>
-    <input type="text" id="employeeDirectorySearch" class="employee-directory-search" value="<?php echo h($initialSearch); ?>" placeholder="이름, 부서, 직급, 위치, 이메일 검색">
+    <input type="text" id="employeeDirectorySearch" class="employee-directory-search" value="<?php echo h($initialSearch); ?>" placeholder="이름, 사번, 부서, 직급, 위치, 이메일 검색">
   </div>
 
   <?php if ($loadError !== ''): ?>
@@ -383,13 +384,14 @@ $initialSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
               $cardDeptLabel = ($sectionLabel === 'CEO' || $sectionLabel === '임원') ? $sectionLabel : $department;
               $birthday = cpms_employee_directory_birthday(isset($emp['birth_date']) ? $emp['birth_date'] : '');
               $photoSrc = cpms_employee_directory_photo_src(isset($emp['photo_path']) ? $emp['photo_path'] : '');
+              $employeeNo = cpms_employee_directory_value(isset($emp['employee_no']) ? $emp['employee_no'] : '', '-');
               $workLocation = cpms_employee_directory_value(isset($emp['work_location']) ? $emp['work_location'] : '', '-');
               $hireDate = cpms_employee_directory_value(isset($emp['hire_date']) ? $emp['hire_date'] : '', '-');
               $email = cpms_employee_directory_value(isset($emp['email']) ? $emp['email'] : '', '-');
               $phone = cpms_employee_directory_value(isset($emp['phone']) ? $emp['phone'] : '', '-');
               $filterGroup = cpms_employee_directory_filter_group($department, $sectionLabel);
               $nameLine = $position !== '' ? ($name . ' (' . $position . ')') : $name;
-              $searchText = $name . ' ' . $position . ' ' . $department . ' ' . $workLocation . ' ' . $email . ' ' . $phone . ' ' . $cardDeptLabel;
+              $searchText = $name . ' ' . $employeeNo . ' ' . $position . ' ' . $department . ' ' . $workLocation . ' ' . $email . ' ' . $phone . ' ' . $cardDeptLabel;
             ?>
             <div class="employee-directory-card<?php echo !empty($birthday['highlight']) ? ' is-birthday' : ''; ?>" data-filter="<?php echo h($filterGroup); ?>" data-search="<?php echo h($searchText); ?>">
               <?php if (!empty($birthday['highlight'])): ?>
@@ -404,6 +406,7 @@ $initialSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
               <div class="employee-directory-name"><?php echo h($nameLine); ?></div>
               <div class="employee-directory-dept"><?php echo h($cardDeptLabel); ?></div>
               <div class="employee-directory-info">
+                <div class="employee-directory-line"><i data-lucide="badge"></i><span>사번 <?php echo h($employeeNo); ?></span></div>
                 <div class="employee-directory-line"><i data-lucide="cake"></i><span><?php echo h($birthday['display']); ?></span></div>
                 <div class="employee-directory-line"><i data-lucide="building-2"></i><span><?php echo h($workLocation); ?></span></div>
                 <div class="employee-directory-line"><i data-lucide="calendar-days"></i><span><?php echo h($hireDate); ?></span></div>

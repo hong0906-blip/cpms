@@ -103,6 +103,28 @@ function attendance_is_settings_department_value($value){
     );
     return in_array($dept, $allowed, true);
 }
+if (!function_exists('attendance_is_development_department_value')) {
+function attendance_is_development_department_value($value){
+    $dept = attendance_normalize_department_name($value);
+    if ($dept === '') return false;
+    $allowed = array(
+        attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C')),
+        attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C%EB%B6%80')),
+        attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C%ED%8C%80'))
+    );
+    return in_array($dept, $allowed, true);
+}}
+if (!function_exists('attendance_is_representative_value')) {
+function attendance_is_representative_value($role, $position, $name){
+    $role = strtolower(attendance_normalize_department_name($role));
+    if ($role === 'ceo') return true;
+    $values = array((string)$role, (string)$position, (string)$name);
+    $needle = attendance_text('%EB%8C%80%ED%91%9C');
+    for ($i = 0; $i < count($values); $i++) {
+        if ($needle !== '' && strpos($values[$i], $needle) !== false) return true;
+    }
+    return false;
+}}
 function attendance_is_blocked_executive_value($role, $position, $name){
     $role = strtolower(trim((string)$role));
     if ($role === 'executive') return true;
@@ -153,6 +175,41 @@ function attendance_can_manage_settings($pdo){
     if (attendance_is_blocked_executive_value($role, $position, $name)) return false;
     return attendance_is_settings_department_value($department);
 }
+if (!function_exists('attendance_can_edit_monthly_records')) {
+function attendance_can_edit_monthly_records($pdo){
+    if (!\App\Core\Auth::check()) return false;
+
+    $row = null;
+    $email = (string)\App\Core\Auth::userEmail();
+    if ($pdo && $email !== '' && attendance_table_exists($pdo, 'employees')) {
+        try {
+            $positionSelect = attendance_table_column_exists_for_settings($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+            $roleSelect = attendance_table_column_exists_for_settings($pdo, 'employees', 'role') ? 'role' : "'' AS role";
+            $st = $pdo->prepare("SELECT name, department, " . $positionSelect . ", " . $roleSelect . " FROM employees WHERE email=:email LIMIT 1");
+            $st->execute(array(':email' => $email));
+            $found = $st->fetch(PDO::FETCH_ASSOC);
+            if (is_array($found)) $row = $found;
+        } catch (Exception $e) {
+        }
+    }
+
+    if (!is_array($row)) {
+        $user = \App\Core\Auth::user();
+        $row = array(
+            'name' => (is_array($user) && isset($user['name'])) ? $user['name'] : \App\Core\Auth::userName(),
+            'department' => (is_array($user) && isset($user['department'])) ? $user['department'] : \App\Core\Auth::userDepartment(),
+            'position' => (is_array($user) && isset($user['position'])) ? $user['position'] : \App\Core\Auth::userPosition(),
+            'role' => (is_array($user) && isset($user['role'])) ? $user['role'] : \App\Core\Auth::userRole()
+        );
+    }
+
+    $role = isset($row['role']) ? $row['role'] : '';
+    $position = isset($row['position']) ? $row['position'] : '';
+    $name = isset($row['name']) ? $row['name'] : '';
+    $department = isset($row['department']) ? $row['department'] : '';
+    if (attendance_is_representative_value($role, $position, $name)) return true;
+    return attendance_is_development_department_value($department);
+}}
 function attendance_table_column_exists_for_settings($pdo, $table, $column){
     if (!$pdo) return false;
     try {

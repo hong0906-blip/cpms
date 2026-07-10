@@ -50,6 +50,8 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
 .cp-company-profit table { width:100%; border-collapse:collapse; min-width:920px; font-size:13px; }
 .cp-company-profit th { background:#f8fafc; color:#64748b; font-size:12px; text-align:left; padding:10px; border-bottom:1px solid #e5e7eb; white-space:nowrap; }
 .cp-company-profit td { padding:10px; border-bottom:1px solid #eef2f7; vertical-align:middle; white-space:nowrap; }
+.cp-company-profit .cp-total-row th,
+.cp-company-profit .cp-total-row td { background:#f8fafc; border-top:2px solid #cbd5e1; font-weight:900; }
 .cp-company-profit td.text-right, .cp-company-profit th.text-right { text-align:right; }
 .cp-company-profit td[data-wrap="1"] { white-space:normal; min-width:180px; }
 .cp-company-profit .cp-graph-scroll { overflow-x:auto; -webkit-overflow-scrolling:touch; padding-bottom:2px; }

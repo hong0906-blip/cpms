@@ -524,6 +524,21 @@ function cpms_scheduler_task_sort($a, $b)
     return ($aId > $bId) ? -1 : 1;
 }}
 
+if (!function_exists('cpms_scheduler_period_task_sort')) {
+function cpms_scheduler_period_task_sort($a, $b)
+{
+    $aDate = isset($a['scheduler_date']) ? cpms_scheduler_valid_date($a['scheduler_date']) : cpms_scheduler_effective_date($a);
+    $bDate = isset($b['scheduler_date']) ? cpms_scheduler_valid_date($b['scheduler_date']) : cpms_scheduler_effective_date($b);
+    if ($aDate !== $bDate) return strcmp($bDate, $aDate);
+    $aTime = isset($a['due_time']) ? (string)$a['due_time'] : '';
+    $bTime = isset($b['due_time']) ? (string)$b['due_time'] : '';
+    if ($aTime !== $bTime) return strcmp($bTime, $aTime);
+    $aId = isset($a['id']) ? (int)$a['id'] : 0;
+    $bId = isset($b['id']) ? (int)$b['id'] : 0;
+    if ($aId === $bId) return 0;
+    return ($aId > $bId) ? -1 : 1;
+}}
+
 if (!function_exists('cpms_scheduler_event_sort')) {
 function cpms_scheduler_event_sort($a, $b)
 {
@@ -576,18 +591,30 @@ function cpms_scheduler_build_events($tasks, $viewMode, $startDate, $endDate)
     return $eventsByDate;
 }}
 
+if (!function_exists('cpms_scheduler_task_is_meeting')) {
+function cpms_scheduler_task_is_meeting($task)
+{
+    if (!is_array($task)) return false;
+    $taskType = isset($task['task_type']) ? (string)$task['task_type'] : '';
+    $status = isset($task['status']) ? (string)$task['status'] : '';
+    return ($taskType === 'meeting' || in_array($status, array('meeting_owner', 'meeting_available', 'meeting_unavailable'), true));
+}}
+
 if (!function_exists('cpms_scheduler_metrics')) {
 function cpms_scheduler_metrics($tasks)
 {
-    $metrics = array('total' => 0, 'delayed' => 0, 'urgent' => 0, 'done' => 0, 'progress' => 0);
+    $metrics = array('total' => 0, 'meeting' => 0, 'delayed' => 0, 'urgent' => 0, 'done' => 0, 'progress' => 0, 'completion_pending' => 0);
     for ($i = 0; $i < count($tasks); $i++) {
         $metrics['total']++;
         $isDelayed = !empty($tasks[$i]['is_delayed']);
         if ($isDelayed) $metrics['delayed']++;
         if (isset($tasks[$i]['is_urgent']) && (int)$tasks[$i]['is_urgent'] === 1) $metrics['urgent']++;
         $status = isset($tasks[$i]['status']) ? (string)$tasks[$i]['status'] : '';
+        $isMeeting = cpms_scheduler_task_is_meeting($tasks[$i]);
+        if ($isMeeting) $metrics['meeting']++;
+        if ($status === 'completion_pending') $metrics['completion_pending']++;
         if ($status === 'done') $metrics['done']++;
-        else if (!$isDelayed) $metrics['progress']++;
+        else if (!$isDelayed && !$isMeeting && $status !== 'completion_pending') $metrics['progress']++;
     }
     return $metrics;
 }}
@@ -599,11 +626,15 @@ function cpms_scheduler_filter_attrs($task)
     $isDelayed = !empty($task['is_delayed']);
     $isDone = ($status === 'done');
     $isUrgent = (isset($task['is_urgent']) && (int)$task['is_urgent'] === 1);
-    $isProgress = (!$isDone && !$isDelayed);
+    $isMeeting = cpms_scheduler_task_is_meeting($task);
+    $isCompletionPending = ($status === 'completion_pending');
+    $isProgress = (!$isDone && !$isDelayed && !$isMeeting && !$isCompletionPending);
     return ' data-scheduler-item="1"'
+        . ' data-scheduler-meeting="' . ($isMeeting ? '1' : '0') . '"'
         . ' data-scheduler-delayed="' . ($isDelayed ? '1' : '0') . '"'
         . ' data-scheduler-urgent="' . ($isUrgent ? '1' : '0') . '"'
         . ' data-scheduler-progress="' . ($isProgress ? '1' : '0') . '"'
+        . ' data-scheduler-completion_pending="' . ($isCompletionPending ? '1' : '0') . '"'
         . ' data-scheduler-done="' . ($isDone ? '1' : '0') . '"';
 }}
 
@@ -713,6 +744,7 @@ $calendarTasks = cpms_scheduler_fetch_tasks($pdo, $selectedEmployeeIds, $rangeSt
 $periodMonthDefault = $viewMode === 'week' ? substr($weekInput, 0, 7) : $monthInput;
 $periodMonthBounds = cpms_scheduler_month_bounds(isset($_GET['period_month']) ? (string)$_GET['period_month'] : $periodMonthDefault);
 $periodTasks = cpms_scheduler_fetch_tasks($pdo, $selectedEmployeeIds, $periodMonthBounds['month_start'], $periodMonthBounds['month_end'], 'month', $employeeIndex);
+usort($periodTasks, 'cpms_scheduler_period_task_sort');
 $eventsByDate = cpms_scheduler_build_events($calendarTasks, $viewMode, $rangeStart, $rangeEnd);
 $metrics = cpms_scheduler_metrics($calendarTasks);
 $calendarDays = cpms_scheduler_days_between($calendarStart, $calendarEnd);
@@ -731,14 +763,18 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
     .cpms-scheduler-weekday{height:42px;display:flex;align-items:center;justify-content:center;background:#f8fafc;border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;font-size:12px;font-weight:900;color:#475569}
     .cpms-scheduler-weekday.is-sunday{color:#dc2626;background:#fff5f5}
     .cpms-scheduler-weekday:nth-child(7n){border-right:0}
-    .cpms-scheduler-day{min-height:170px;border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;background:#fff;padding:10px;min-width:0}
+    .cpms-scheduler-day{min-height:170px;border-right:1px solid #e5e7eb;border-bottom:1px solid #e5e7eb;background:#fff;padding:10px;min-width:0;cursor:pointer;transition:background .16s ease,box-shadow .16s ease}
+    .cpms-scheduler-day:hover{background:#f8fbff;box-shadow:inset 0 0 0 2px #93c5fd}
     .cpms-scheduler-calendar.cpms-scheduler-week .cpms-scheduler-day{min-height:520px}
     .cpms-scheduler-day:nth-child(7n){border-right:0}
     .cpms-scheduler-day.is-muted{background:#f8fafc;color:#94a3b8}
+    .cpms-scheduler-day.is-muted:hover{background:#eef6ff}
     .cpms-scheduler-day.is-sunday .cpms-scheduler-date{color:#dc2626}
     .cpms-scheduler-day.is-today{box-shadow:inset 0 0 0 2px #2563eb}
+    .cpms-scheduler-day.is-today:hover{box-shadow:inset 0 0 0 2px #2563eb, inset 0 0 0 9999px rgba(37,99,235,.04)}
     .cpms-scheduler-day-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
-    .cpms-scheduler-date{font-size:13px;font-weight:900;color:#0f172a}
+    .cpms-scheduler-date{font-size:13px;font-weight:900;color:#0f172a;border:0;background:transparent;padding:0;cursor:pointer}
+    .cpms-scheduler-date:hover{text-decoration:underline}
     .cpms-scheduler-count{min-width:24px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;font-weight:900}
     .cpms-scheduler-events{display:flex;flex-direction:column;gap:6px;max-height:430px;overflow-y:auto;padding-right:2px}
     .cpms-scheduler-calendar:not(.cpms-scheduler-week) .cpms-scheduler-events{max-height:120px}
@@ -756,13 +792,18 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
     .cpms-scheduler-filter-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;align-items:end}
     .cpms-scheduler-filter-button{transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
     .cpms-scheduler-filter-button.is-active{transform:translateY(-2px);box-shadow:0 12px 28px rgba(15,23,42,.14)}
+    .cpms-scheduler-period-filter{transition:background .18s ease,color .18s ease,border-color .18s ease,transform .18s ease}
+    .cpms-scheduler-period-filter.is-active{background:#111827;color:#fff;border-color:#111827;transform:translateY(-1px)}
+    .cpms-scheduler-period-more{display:inline-flex}
+    .cpms-scheduler-period-more.hidden{display:none}
     .cpms-scheduler-event{max-height:160px;transition:opacity .2s ease,transform .2s ease,max-height .22s ease,margin .22s ease,padding .22s ease,border-width .22s ease}
     .cpms-scheduler-event.is-filter-hidden{opacity:0;transform:translateY(6px);max-height:0;margin:0;padding-top:0;padding-bottom:0;border-top-width:0;border-bottom-width:0;overflow:hidden;pointer-events:none}
     .cpms-scheduler-row-filter-hidden{opacity:0;transform:translateY(6px);transition:opacity .18s ease,transform .18s ease}
     .cpms-scheduler-row-display-none{display:none}
     .cpms-scheduler-filter-empty{display:none}
     .cpms-scheduler-filter-empty.is-visible{display:block}
-    .cpms-scheduler-period-body.is-collapsed{display:none}
+    .cpms-scheduler-day-modal-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;align-items:start}
+    .cpms-scheduler-day-modal-grid .cpms-scheduler-event{max-height:none;min-height:92px;height:100%;padding:8px 9px}
     @media (max-width: 1023px){.cpms-scheduler-filter-grid{grid-template-columns:1fr}.cpms-scheduler-calendar{min-width:900px}}
 </style>
 
@@ -779,10 +820,14 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                     <?php echo h($canViewAll ? '임원 조회' : '팀 조회'); ?> · <?php echo h($calendarLabel); ?>
                 </div>
             </div>
-            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 min-w-0" data-scheduler-status-filters>
+            <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 min-w-0" data-scheduler-status-filters>
                 <button type="button" class="cpms-scheduler-filter-button is-active rounded-2xl border border-gray-200 bg-slate-50 p-4 text-left" data-scheduler-filter="all">
                     <div class="text-xs font-extrabold text-gray-500">전체</div>
                     <div class="mt-1 text-2xl font-black text-gray-900"><?php echo (int)$metrics['total']; ?></div>
+                </button>
+                <button type="button" class="cpms-scheduler-filter-button rounded-2xl border border-violet-100 bg-violet-50 p-4 text-left" data-scheduler-filter="meeting">
+                    <div class="text-xs font-extrabold text-violet-500">회의요청</div>
+                    <div class="mt-1 text-2xl font-black text-violet-700"><?php echo (int)$metrics['meeting']; ?></div>
                 </button>
                 <button type="button" class="cpms-scheduler-filter-button rounded-2xl border border-red-100 bg-red-50 p-4 text-left" data-scheduler-filter="delayed">
                     <div class="text-xs font-extrabold text-red-500">지연</div>
@@ -931,9 +976,9 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                     $isToday = ($day === $today);
                     $isSunday = ((int)date('w', strtotime($day)) === 0);
                     ?>
-                    <div class="cpms-scheduler-day <?php echo $isMuted ? 'is-muted' : ''; ?> <?php echo $isToday ? 'is-today' : ''; ?> <?php echo $isSunday ? 'is-sunday' : ''; ?>">
+                    <div class="cpms-scheduler-day <?php echo $isMuted ? 'is-muted' : ''; ?> <?php echo $isToday ? 'is-today' : ''; ?> <?php echo $isSunday ? 'is-sunday' : ''; ?>" data-scheduler-day="<?php echo h($day); ?>" data-scheduler-day-label="<?php echo h(cpms_scheduler_date_label($day)); ?>">
                         <div class="cpms-scheduler-day-head">
-                            <div class="cpms-scheduler-date"><?php echo h(date('n/j', strtotime($day))); ?></div>
+                            <button type="button" class="cpms-scheduler-date" data-scheduler-day-open="1"><?php echo h(date('n/j', strtotime($day))); ?></button>
                             <?php if (count($events) > 0): ?><div class="cpms-scheduler-count" data-scheduler-day-count><?php echo count($events); ?></div><?php endif; ?>
                         </div>
                         <div class="cpms-scheduler-events">
@@ -948,17 +993,21 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                                 $requestDate = isset($event['request_date']) ? (string)$event['request_date'] : '';
                                 $dueDate = isset($event['due_date']) ? (string)$event['due_date'] : '';
                                 $isCompletedDateEvent = ($kind === 'completed');
+                                $eventTitle = isset($event['title']) ? (string)$event['title'] : '';
+                                $eventAssignee = isset($event['assignee_name']) && trim((string)$event['assignee_name']) !== '' ? (string)$event['assignee_name'] : '-';
+                                $eventDueText = cpms_scheduler_date_label($dueDate) . ($dueTime !== '' ? ' ' . $dueTime : '');
+                                $eventStatusText = $isDelayed ? '지연' : (isset($event['display_status']) ? (string)$event['display_status'] : '-');
                                 ?>
-                                <button type="button" class="cpms-scheduler-event <?php echo $isDelayed ? 'is-delayed' : ''; ?> <?php echo $isDone ? 'is-done' : ''; ?>" data-scheduler-detail-open="1" data-task-id="<?php echo isset($event['id']) ? (int)$event['id'] : 0; ?>"<?php echo cpms_scheduler_filter_attrs($event); ?>>
+                                <button type="button" class="cpms-scheduler-event <?php echo $isDelayed ? 'is-delayed' : ''; ?> <?php echo $isDone ? 'is-done' : ''; ?>" data-scheduler-detail-open="1" data-task-id="<?php echo isset($event['id']) ? (int)$event['id'] : 0; ?>" data-scheduler-modal-kind="<?php echo h(cpms_scheduler_kind_label($kind)); ?>" data-scheduler-modal-title="<?php echo h($eventTitle); ?>" data-scheduler-modal-assignee="<?php echo h($eventAssignee); ?>" data-scheduler-modal-due="<?php echo h($eventDueText); ?>" data-scheduler-modal-status="<?php echo h($eventStatusText); ?>"<?php echo cpms_scheduler_filter_attrs($event); ?>>
                                     <div class="flex flex-wrap items-center gap-1 mb-1">
                                         <span class="cpms-scheduler-pill kind"><?php echo h(cpms_scheduler_kind_label($kind)); ?></span>
                                         <?php if ($isDelayed): ?><span class="cpms-scheduler-pill delayed">지연</span><?php endif; ?>
                                         <?php if (isset($event['is_urgent']) && (int)$event['is_urgent'] === 1): ?><span class="cpms-scheduler-pill urgent">긴급</span><?php endif; ?>
                                         <?php if ($isDone): ?><span class="cpms-scheduler-pill done">완료</span><?php endif; ?>
                                     </div>
-                                    <div class="cpms-scheduler-event-title"><?php echo h(isset($event['title']) ? $event['title'] : ''); ?></div>
+                                    <div class="cpms-scheduler-event-title"><?php echo h($eventTitle); ?></div>
                                     <div class="cpms-scheduler-event-meta">
-                                        <?php echo h(isset($event['assignee_name']) && trim((string)$event['assignee_name']) !== '' ? $event['assignee_name'] : '-'); ?>
+                                        <?php echo h($eventAssignee); ?>
                                         <?php if ($viewMode === 'week'): ?>
                                             · 마감 <?php echo h(cpms_scheduler_date_label($dueDate)); ?><?php echo $dueTime !== '' ? ' ' . h($dueTime) : ''; ?>
                                         <?php elseif ($isCompletedDateEvent): ?>
@@ -982,7 +1031,7 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                 <h3 class="text-xl font-extrabold text-gray-900">기간 업무</h3>
                 <div class="mt-1 text-sm font-bold text-gray-500"><?php echo h($periodMonthBounds['label']); ?> · <?php echo (int)count($periodTasks); ?>건</div>
             </div>
-            <div class="flex flex-col sm:flex-row sm:items-end gap-2">
+            <div class="flex flex-col xl:flex-row xl:items-end gap-2">
                 <form method="get" action="" class="flex flex-wrap items-end gap-2">
                     <input type="hidden" name="r" value="scheduler">
                     <input type="hidden" name="view" value="<?php echo h($viewMode); ?>">
@@ -1001,10 +1050,14 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                     </div>
                     <button type="submit" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">조회</button>
                 </form>
-                <button type="button" class="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-gray-200 bg-white text-gray-700 font-extrabold hover:bg-gray-50" data-scheduler-period-toggle aria-expanded="true" aria-controls="schedulerPeriodBody">
-                    <span data-scheduler-period-toggle-icon aria-hidden="true">▼</span>
-                    <span data-scheduler-period-toggle-text>숨기기</span>
-                </button>
+                <div class="flex flex-wrap items-center gap-2" data-scheduler-period-filters>
+                    <button type="button" class="cpms-scheduler-period-filter is-active px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700" data-scheduler-period-filter="all">전체보기</button>
+                    <button type="button" class="cpms-scheduler-period-filter px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700" data-scheduler-period-filter="meeting">회의요청</button>
+                    <button type="button" class="cpms-scheduler-period-filter px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700" data-scheduler-period-filter="progress">진행중</button>
+                    <button type="button" class="cpms-scheduler-period-filter px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700" data-scheduler-period-filter="delayed">지연</button>
+                    <button type="button" class="cpms-scheduler-period-filter px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700" data-scheduler-period-filter="completion_pending">완료대기</button>
+                    <button type="button" class="cpms-scheduler-period-filter px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700" data-scheduler-period-filter="done">완료</button>
+                </div>
             </div>
         </div>
         <div id="schedulerPeriodBody" class="cpms-scheduler-period-body" data-scheduler-period-body>
@@ -1033,8 +1086,9 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                                 $dueText = isset($task['due_date']) ? (string)$task['due_date'] : '';
                                 if (isset($task['due_time']) && trim((string)$task['due_time']) !== '') $dueText .= ' ' . substr((string)$task['due_time'], 0, 5);
                                 $completedText = isset($task['completed_at']) && trim((string)$task['completed_at']) !== '' ? substr((string)$task['completed_at'], 0, 16) : '-';
+                                $initialRowHiddenClass = $i >= 20 ? ' cpms-scheduler-row-filter-hidden cpms-scheduler-row-display-none' : '';
                                 ?>
-                                <tr class="border-b border-gray-100" data-scheduler-period-row="1"<?php echo cpms_scheduler_filter_attrs($task); ?>>
+                                <tr class="border-b border-gray-100<?php echo $initialRowHiddenClass; ?>" data-scheduler-period-row="1"<?php echo cpms_scheduler_filter_attrs($task); ?>>
                                     <td class="py-3 pr-4 font-bold text-gray-700"><?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?></td>
                                     <td class="py-3 pr-4 text-left" data-wrap="1">
                                         <div class="font-extrabold text-gray-900"><?php echo h(isset($task['title']) ? $task['title'] : ''); ?></div>
@@ -1061,6 +1115,31 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                 </div>
                 <div class="cpms-scheduler-filter-empty mt-4 rounded-2xl border border-dashed border-gray-300 bg-slate-50 p-5 text-sm font-bold text-gray-500" data-scheduler-filter-empty>선택한 상태에 해당하는 업무가 없습니다.</div>
             <?php endif; ?>
+            <div class="mt-4 flex justify-center">
+                <button type="button" class="cpms-scheduler-period-more hidden items-center justify-center gap-2 px-4 py-3 rounded-2xl border border-gray-200 bg-white text-gray-700 font-extrabold hover:bg-gray-50" data-scheduler-period-more>
+                    <span data-scheduler-period-more-icon aria-hidden="true">▶</span>
+                    <span data-scheduler-period-more-text>펼치기</span>
+                    <span class="text-gray-400" data-scheduler-period-more-count></span>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="schedulerDayModal" class="fixed inset-0 z-40 hidden" aria-hidden="true">
+    <div class="absolute inset-0 bg-black/40" data-scheduler-day-close></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-6xl max-h-[86vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
+            <div class="flex items-center justify-between gap-4 px-6 py-5 border-b border-gray-100">
+                <div>
+                    <div id="schedulerDayModalTitle" class="text-2xl font-extrabold text-gray-900">일정</div>
+                    <div id="schedulerDayModalMeta" class="mt-1 text-sm font-bold text-gray-500"></div>
+                </div>
+                <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-700 hover:bg-gray-50" data-scheduler-day-close>닫기</button>
+            </div>
+            <div id="schedulerDayModalBody" class="p-5 overflow-y-auto max-h-[72vh]">
+                <div class="text-sm text-gray-500">일정을 불러오는 중입니다.</div>
+            </div>
         </div>
     </div>
 </div>
@@ -1109,11 +1188,17 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
     }
 
     var schedulerFilter = 'all';
-    var periodBody = document.querySelector ? document.querySelector('[data-scheduler-period-body]') : null;
-    var periodToggle = document.querySelector ? document.querySelector('[data-scheduler-period-toggle]') : null;
-    var periodToggleIcon = document.querySelector ? document.querySelector('[data-scheduler-period-toggle-icon]') : null;
-    var periodToggleText = document.querySelector ? document.querySelector('[data-scheduler-period-toggle-text]') : null;
-    var periodStorageKey = 'cpms_scheduler_period_collapsed';
+    var periodFilter = 'all';
+    var periodExpanded = false;
+    var periodLimit = 20;
+    var periodMoreButton = document.querySelector ? document.querySelector('[data-scheduler-period-more]') : null;
+    var periodMoreIcon = document.querySelector ? document.querySelector('[data-scheduler-period-more-icon]') : null;
+    var periodMoreText = document.querySelector ? document.querySelector('[data-scheduler-period-more-text]') : null;
+    var periodMoreCount = document.querySelector ? document.querySelector('[data-scheduler-period-more-count]') : null;
+    var dayModal = document.getElementById('schedulerDayModal');
+    var dayModalTitle = document.getElementById('schedulerDayModalTitle');
+    var dayModalMeta = document.getElementById('schedulerDayModalMeta');
+    var dayModalBody = document.getElementById('schedulerDayModalBody');
 
     function schedulerItemMatches(item, filter) {
         if (!item) return false;
@@ -1164,19 +1249,7 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
             else addClass(events[j], 'is-filter-hidden');
         }
         updateSchedulerDayCounts(schedulerFilter);
-
-        var rows = document.querySelectorAll ? document.querySelectorAll('[data-scheduler-period-row]') : [];
-        var visibleRows = 0;
-        for (var k = 0; k < rows.length; k++) {
-            var rowVisible = schedulerItemMatches(rows[k], schedulerFilter);
-            if (rowVisible) visibleRows++;
-            setSchedulerRowVisible(rows[k], rowVisible);
-        }
-        var empty = document.querySelector ? document.querySelector('[data-scheduler-filter-empty]') : null;
-        if (empty) {
-            if (rows.length > 0 && visibleRows === 0) addClass(empty, 'is-visible');
-            else removeClass(empty, 'is-visible');
-        }
+        applySchedulerPeriodVisibility();
     }
 
     var modal = document.getElementById('schedulerTaskDetailModal');
@@ -1253,39 +1326,126 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
         return fallback;
     }
 
-    function setSchedulerPeriodCollapsed(collapsed, shouldStore) {
-        if (!periodBody || !periodToggle) return;
-        if (collapsed) addClass(periodBody, 'is-collapsed');
-        else removeClass(periodBody, 'is-collapsed');
-        periodToggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        periodToggle.setAttribute('title', collapsed ? '기간 업무 펼치기' : '기간 업무 숨기기');
-        if (periodToggleIcon) periodToggleIcon.innerHTML = collapsed ? '▶' : '▼';
-        if (periodToggleText) periodToggleText.innerHTML = collapsed ? '펼치기' : '숨기기';
-        if (shouldStore) {
-            try {
-                if (window.localStorage) localStorage.setItem(periodStorageKey, collapsed ? '1' : '0');
-            } catch (err) {}
+    function setNodeText(node, text) {
+        if (!node) return;
+        if (typeof node.textContent !== 'undefined') node.textContent = text;
+        else node.innerHTML = text;
+    }
+
+    function updatePeriodMoreButton(matchedRows, hiddenOverflow) {
+        if (!periodMoreButton) return;
+        if (matchedRows > periodLimit) {
+            removeClass(periodMoreButton, 'hidden');
+            setNodeText(periodMoreIcon, periodExpanded ? '▼' : '▶');
+            setNodeText(periodMoreText, periodExpanded ? '숨기기' : '펼치기');
+            setNodeText(periodMoreCount, periodExpanded ? '(' + matchedRows + '건 전체)' : '(' + hiddenOverflow + '건 더)');
+        } else {
+            addClass(periodMoreButton, 'hidden');
+            setNodeText(periodMoreCount, '');
         }
     }
 
-    function toggleSchedulerPeriod() {
-        setSchedulerPeriodCollapsed(!hasClass(periodBody, 'is-collapsed'), true);
+    function applySchedulerPeriodVisibility() {
+        var rows = document.querySelectorAll ? document.querySelectorAll('[data-scheduler-period-row]') : [];
+        var matchedRows = 0;
+        var hiddenOverflow = 0;
+        for (var k = 0; k < rows.length; k++) {
+            var matches = schedulerItemMatches(rows[k], schedulerFilter) && schedulerItemMatches(rows[k], periodFilter);
+            var rowVisible = false;
+            if (matches) {
+                matchedRows++;
+                if (periodExpanded || matchedRows <= periodLimit) {
+                    rowVisible = true;
+                } else {
+                    hiddenOverflow++;
+                }
+            }
+            setSchedulerRowVisible(rows[k], rowVisible);
+        }
+        var empty = document.querySelector ? document.querySelector('[data-scheduler-filter-empty]') : null;
+        if (empty) {
+            if (rows.length > 0 && matchedRows === 0) addClass(empty, 'is-visible');
+            else removeClass(empty, 'is-visible');
+        }
+        updatePeriodMoreButton(matchedRows, hiddenOverflow);
     }
 
-    if (periodBody && periodToggle) {
-        try {
-            setSchedulerPeriodCollapsed(window.localStorage && localStorage.getItem(periodStorageKey) === '1', false);
-        } catch (err) {
-            setSchedulerPeriodCollapsed(false, false);
+    function setSchedulerPeriodFilter(filter) {
+        periodFilter = filter || 'all';
+        periodExpanded = false;
+        var buttons = document.querySelectorAll ? document.querySelectorAll('[data-scheduler-period-filter]') : [];
+        for (var i = 0; i < buttons.length; i++) {
+            if ((buttons[i].getAttribute('data-scheduler-period-filter') || 'all') === periodFilter) addClass(buttons[i], 'is-active');
+            else removeClass(buttons[i], 'is-active');
         }
+        applySchedulerPeriodVisibility();
     }
+
+    function closestSchedulerDay(node) {
+        while (node && node !== document) {
+            if (node.getAttribute && node.getAttribute('data-scheduler-day')) return node;
+            node = node.parentNode;
+        }
+        return null;
+    }
+
+    function closeDayModal() {
+        addClass(dayModal, 'hidden');
+        if (dayModal) dayModal.setAttribute('aria-hidden', 'true');
+    }
+
+    function openDayModal(trigger) {
+        if (!dayModal || !dayModalBody || !trigger) return;
+        var dayEl = closestSchedulerDay(trigger);
+        if (!dayEl) return;
+        var dayLabel = dayEl.getAttribute('data-scheduler-day-label') || '';
+        var events = dayEl.querySelectorAll ? dayEl.querySelectorAll('.cpms-scheduler-event[data-scheduler-item]') : [];
+        var visibleCount = 0;
+        dayModalBody.innerHTML = '';
+        var grid = document.createElement('div');
+        grid.className = 'cpms-scheduler-day-modal-grid';
+        for (var i = 0; i < events.length; i++) {
+            if (!schedulerItemMatches(events[i], schedulerFilter)) continue;
+            var clone = events[i].cloneNode(true);
+            removeClass(clone, 'is-filter-hidden');
+            grid.appendChild(clone);
+            visibleCount++;
+        }
+        if (visibleCount === 0) {
+            dayModalBody.innerHTML = '<div class="rounded-2xl border border-dashed border-gray-300 bg-slate-50 p-6 text-sm font-bold text-gray-500">선택한 필터에 해당하는 일정이 없습니다.</div>';
+        } else {
+            dayModalBody.appendChild(grid);
+        }
+        setNodeText(dayModalTitle, (dayLabel !== '' ? dayLabel : '선택한 날짜') + ' 일정');
+        setNodeText(dayModalMeta, schedulerFilter === 'all' ? visibleCount + '건' : visibleCount + '건 · 선택 필터 적용');
+        removeClass(dayModal, 'hidden');
+        dayModal.setAttribute('aria-hidden', 'false');
+    }
+
+    applySchedulerPeriodVisibility();
 
     document.addEventListener('click', function(e) {
         var target = e.target;
         while (target && target !== document) {
-            if (target.getAttribute && target.hasAttribute('data-scheduler-period-toggle')) {
+            if (target.getAttribute && target.getAttribute('data-scheduler-period-filter')) {
                 e.preventDefault();
-                toggleSchedulerPeriod();
+                setSchedulerPeriodFilter(target.getAttribute('data-scheduler-period-filter') || 'all');
+                return;
+            }
+            if (target.getAttribute && target.hasAttribute('data-scheduler-period-more')) {
+                e.preventDefault();
+                periodExpanded = !periodExpanded;
+                applySchedulerPeriodVisibility();
+                return;
+            }
+            if (target.getAttribute && target.getAttribute('data-scheduler-day-open') === '1') {
+                e.preventDefault();
+                openDayModal(target);
+                return;
+            }
+            if (target.getAttribute && target.hasAttribute('data-scheduler-day-close')) {
+                e.preventDefault();
+                closeDayModal();
                 return;
             }
             if (target.getAttribute && target.getAttribute('data-scheduler-filter')) {
@@ -1301,6 +1461,11 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
             if (target.getAttribute && target.hasAttribute('data-scheduler-detail-close')) {
                 e.preventDefault();
                 closeModal();
+                return;
+            }
+            if (target.getAttribute && target.getAttribute('data-scheduler-day')) {
+                e.preventDefault();
+                openDayModal(target);
                 return;
             }
             target = target.parentNode;
@@ -1332,7 +1497,10 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
     });
 
     document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape' || e.keyCode === 27) closeModal();
+        if (e.key === 'Escape' || e.keyCode === 27) {
+            closeModal();
+            closeDayModal();
+        }
     });
 })();
 </script>

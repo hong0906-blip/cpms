@@ -178,7 +178,7 @@ try {
     for ($i = 0; $i < count($assignees); $i++) {
         $assignee = $assignees[$i];
         $assigneeId = isset($assignee['id']) ? (int)$assignee['id'] : 0;
-        $assigneeDepartment = $department !== '' ? $department : (isset($assignee['department']) ? cpms_tasks_normalize_department($assignee['department']) : '');
+        $assigneeDepartment = $department !== '' ? $department : cpms_tasks_employee_department($assignee);
         $rowStatus = ($isMeetingRequest && $assigneeId === $requesterEmployeeId) ? 'meeting_owner' : 'pending';
         $params = array(
             ':title' => $title,

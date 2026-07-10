@@ -10,6 +10,7 @@ require_once __DIR__ . '/../construction/partials/equipment_gongsu_approval_help
 require_once __DIR__ . '/../tasks/dashboard_sections.php';
 require_once __DIR__ . '/../attendance/common.php';
 require_once __DIR__ . '/../approval/_common.php';
+require_once __DIR__ . '/notice_board.php';
 
 use App\Core\Db;
 
@@ -28,6 +29,7 @@ $executiveTabKeys = array(
     'department' => true,
     'approval' => true,
     'siteIssues' => true,
+    'attendanceManagement' => true,
 );
 $activeExecutiveTab = isset($_GET['exec_tab']) ? (string)$_GET['exec_tab'] : '';
 if ($activeExecutiveTab === '' && isset($_GET['task_department'])) {
@@ -38,6 +40,9 @@ if ($activeExecutiveTab === '') {
 }
 if ($activeExecutiveTab === 'siteissues' || $activeExecutiveTab === 'site_issues') {
     $activeExecutiveTab = 'siteIssues';
+}
+if ($activeExecutiveTab === 'attendance' || $activeExecutiveTab === 'attendance_management' || $activeExecutiveTab === 'attendanceManagement') {
+    $activeExecutiveTab = 'attendanceManagement';
 }
 if (!isset($executiveTabKeys[$activeExecutiveTab])) {
     $activeExecutiveTab = 'main';
@@ -260,6 +265,44 @@ $todayPresent = 0;
 $leaveExTypes = array('월차', '연차', '반차', '오전반차', '오후반차', '월차반차', '연차반차', '오전월차반차', '오후월차반차', '오전연차반차', '오후연차반차', '대체휴무', '기타휴무', '휴무');
 $leaveMainTypes = array('월차', '연차', '반차', '오전반차', '오후반차', '월차반차', '연차반차', '오전월차반차', '오후월차반차', '오전연차반차', '오후연차반차');
 
+if (!function_exists('cpms_executive_dashboard_compact_text')) {
+function cpms_executive_dashboard_compact_text($value) {
+    return str_replace(array(' ', "\t", "\r", "\n"), '', trim((string)$value));
+}}
+if (!function_exists('cpms_executive_dashboard_is_representative')) {
+function cpms_executive_dashboard_is_representative($person) {
+    $position = is_array($person) && isset($person['position']) ? cpms_executive_dashboard_compact_text($person['position']) : '';
+    if ($position !== '' && strpos($position, '대표') !== false) return true;
+    $role = is_array($person) && isset($person['role']) ? strtolower(cpms_executive_dashboard_compact_text($person['role'])) : '';
+    return ($role === 'ceo' || ($role !== '' && strpos($role, '대표') !== false));
+}}
+if (!function_exists('cpms_executive_dashboard_is_executive_person')) {
+function cpms_executive_dashboard_is_executive_person($person) {
+    if (!is_array($person)) return false;
+    $role = isset($person['role']) ? strtolower(trim((string)$person['role'])) : '';
+    if ($role === 'executive') return true;
+    $position = isset($person['position']) ? cpms_executive_dashboard_compact_text($person['position']) : '';
+    if ($position === '') return false;
+    $executiveWords = array('회장', '대표', '대표이사', '부사장', '고문', '전무', '상무', '이사', '임원');
+    for ($i = 0; $i < count($executiveWords); $i++) {
+        if (strpos($position, $executiveWords[$i]) !== false) return true;
+    }
+    return false;
+}}
+if (!function_exists('cpms_executive_dashboard_department_label')) {
+function cpms_executive_dashboard_department_label($person) {
+    if (cpms_executive_dashboard_is_executive_person($person)) return '임원';
+    $department = is_array($person) && isset($person['department']) ? trim((string)$person['department']) : '';
+    return $department !== '' ? $department : '-';
+}}
+$currentExecutiveDashboardPerson = array(
+    'name' => $user && isset($user['name']) ? $user['name'] : '',
+    'role' => $user && isset($user['role']) ? $user['role'] : \App\Core\Auth::userRole(),
+    'department' => $user && isset($user['department']) ? $user['department'] : \App\Core\Auth::userDepartment(),
+    'position' => $user && isset($user['position']) ? $user['position'] : \App\Core\Auth::userPosition()
+);
+$hideMyAttendanceSection = cpms_executive_dashboard_is_representative($currentExecutiveDashboardPerson);
+
 $statusBadgeClass = function ($status) {
     if ($status === '처리완료') return 'bg-emerald-50 text-emerald-700 border-emerald-100';
     if ($status === '처리중') return 'bg-blue-50 text-blue-700 border-blue-100';
@@ -267,12 +310,7 @@ $statusBadgeClass = function ($status) {
 };
 
 $hideFromTodayAttendanceCards = function ($person) {
-    $position = '';
-    if (is_array($person) && isset($person['position'])) {
-        $position = trim((string)$person['position']);
-    }
-    $position = str_replace(array(' ', "\t", "\r", "\n"), '', $position);
-    return ($position !== '' && strpos($position, '대표') !== false);
+    return cpms_executive_dashboard_is_representative($person);
 };
 
 $hideFromTodayAbsentCards = function ($person) {
@@ -358,13 +396,13 @@ if ($pdo) {
 
     if ($needsAttendanceData) {
     try {
-        $sql = "SELECT e.id, e.name, e.department, e.position, COALESCE(SUM(a.work_minutes), 0) AS m
+        $sql = "SELECT e.id, e.name, e.department, e.position, e.role, COALESCE(SUM(a.work_minutes), 0) AS m
                 FROM employees e
                 LEFT JOIN cpms_attendance_records a
                   ON a.employee_id = e.id
                  AND a.work_date BETWEEN :s AND :e
                 WHERE e.is_active = 1
-                GROUP BY e.id, e.name, e.department, e.position";
+                GROUP BY e.id, e.name, e.department, e.position, e.role";
         $st = $pdo->prepare($sql);
         $st->execute(array(':s' => $weekStart, ':e' => $weekEnd));
         foreach ($st->fetchAll() as $r) {
@@ -373,7 +411,7 @@ if ($pdo) {
 
         $leaveExMap = isset($currentLeaveIndex['by_id']) && is_array($currentLeaveIndex['by_id']) ? $currentLeaveIndex['by_id'] : array();
 
-        $activeRows = $pdo->query("SELECT id, name, department, position FROM employees WHERE is_active = 1")->fetchAll();
+        $activeRows = $pdo->query("SELECT id, name, department, position, role FROM employees WHERE is_active = 1")->fetchAll();
         $stAtt = $pdo->prepare("SELECT employee_id, MIN(check_in) AS check_in, MAX(check_out) AS check_out
                                 FROM cpms_attendance_records
                                 WHERE work_date = ?
@@ -396,6 +434,7 @@ if ($pdo) {
                     'name' => $ar['name'],
                     'department' => $ar['department'],
                     'position' => $ar['position'],
+                    'role' => isset($ar['role']) ? $ar['role'] : '',
                     'check_in' => isset($attMap[$eid]['check_in']) ? $attMap[$eid]['check_in'] : '',
                     'check_out' => isset($attMap[$eid]['check_out']) ? $attMap[$eid]['check_out'] : '',
                 );
@@ -407,8 +446,29 @@ if ($pdo) {
                 'name' => $ar['name'],
                 'department' => $ar['department'],
                 'position' => $ar['position'],
+                'role' => isset($ar['role']) ? $ar['role'] : '',
             );
         }
+        $attendanceSortTimeKey = function ($value) {
+            $value = trim((string)$value);
+            if ($value === '') return '99:99:99';
+            if (preg_match('/(\d{1,2}):(\d{2})(?::(\d{2}))?/', $value, $match)) {
+                $hour = isset($match[1]) ? (int)$match[1] : 99;
+                $minute = isset($match[2]) ? (int)$match[2] : 99;
+                $second = isset($match[3]) ? (int)$match[3] : 0;
+                return sprintf('%02d:%02d:%02d', $hour, $minute, $second);
+            }
+            return '99:99:99';
+        };
+        usort($presentPeople, function ($a, $b) use ($attendanceSortTimeKey) {
+            $aCheckIn = $attendanceSortTimeKey(isset($a['check_in']) ? $a['check_in'] : '');
+            $bCheckIn = $attendanceSortTimeKey(isset($b['check_in']) ? $b['check_in'] : '');
+            $timeCompare = strcmp($aCheckIn, $bCheckIn);
+            if ($timeCompare !== 0) return $timeCompare;
+            $aName = isset($a['name']) ? (string)$a['name'] : '';
+            $bName = isset($b['name']) ? (string)$b['name'] : '';
+            return strcmp($aName, $bName);
+        });
         $todayPresent = count($presentPeople);
 
         $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? $currentLeaveIndex['people'] : array();
@@ -485,6 +545,8 @@ if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !=
     </div>
 </div>
 
+<?php cpms_render_dashboard_birthday_modal($pdo); ?>
+
 <div class="md:hidden grid grid-cols-2 gap-2 mb-6">
     <button type="button" data-modal-open="taskCreate" class="min-h-[54px] rounded-[14px] bg-gray-900 text-white font-extrabold text-sm flex flex-col items-center justify-center gap-1">
         <i data-lucide="send" class="w-5 h-5"></i>
@@ -531,6 +593,7 @@ if ($activeExecutiveTab !== 'myTasks' || !$executiveEmployeeTaskAvailable) cpms_
     <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=department'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="department" aria-selected="<?php echo ($activeExecutiveTab === 'department') ? 'true' : 'false'; ?>">부서별 업무현황</a>
     <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=approval'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="approval" aria-selected="<?php echo ($activeExecutiveTab === 'approval') ? 'true' : 'false'; ?>">승인대기</a>
     <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=siteIssues'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="siteIssues" aria-selected="<?php echo ($activeExecutiveTab === 'siteIssues') ? 'true' : 'false'; ?>">현장별 이슈</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=attendanceManagement'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="attendanceManagement" aria-selected="<?php echo ($activeExecutiveTab === 'attendanceManagement') ? 'true' : 'false'; ?>">출퇴근 근태관리</a>
 </div>
 
 <div data-executive-tab-panels>
@@ -541,7 +604,9 @@ if ($activeExecutiveTab !== 'myTasks' || !$executiveEmployeeTaskAvailable) cpms_
 $cpmsEmployeeAttendanceFormHiddenInputs = array('r' => 'dashboard_executive', 'exec_tab' => 'main');
 $cpmsEmployeeAttendanceReturnUrl = '?r=dashboard_executive&exec_tab=main';
 $cpmsEmployeeAttendanceShowFlash = false;
-require __DIR__ . '/partials/employee_attendance_section.php';
+if (!$hideMyAttendanceSection) {
+    require __DIR__ . '/partials/employee_attendance_section.php';
+}
 unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl, $cpmsEmployeeAttendanceShowFlash);
 ?>
 
@@ -559,7 +624,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                     <?php else: ?>
                         <ul class="space-y-2">
                             <?php foreach ($absent as $person): ?>
-                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                             <?php endforeach; ?>
                         </ul>
                     <?php endif; ?>
@@ -572,7 +637,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                         <?php else: ?>
                             <ul class="space-y-2">
                                 <?php foreach ($absent as $person): ?>
-                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                                 <?php endforeach; ?>
                             </ul>
                         <?php endif; ?>
@@ -593,7 +658,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                                 $checkInLabel = $attendanceTimeLabel(isset($person['check_in']) ? $person['check_in'] : '');
                                 $checkOutLabel = $attendanceTimeLabel(isset($person['check_out']) ? $person['check_out'] : '');
                                 ?>
-                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> <span class="font-bold text-sky-700">(<?php echo h($checkInLabel . ' / ' . $checkOutLabel); ?>)</span> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> <span class="font-bold text-sky-700">(<?php echo h($checkInLabel . ' / ' . $checkOutLabel); ?>)</span> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                             <?php endforeach; ?>
                         </ul>
                     <?php endif; ?>
@@ -610,7 +675,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                                     $checkInLabel = $attendanceTimeLabel(isset($person['check_in']) ? $person['check_in'] : '');
                                     $checkOutLabel = $attendanceTimeLabel(isset($person['check_out']) ? $person['check_out'] : '');
                                     ?>
-                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> <span class="font-bold text-sky-700">(<?php echo h($checkInLabel . ' / ' . $checkOutLabel); ?>)</span> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> <span class="font-bold text-sky-700">(<?php echo h($checkInLabel . ' / ' . $checkOutLabel); ?>)</span> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                                 <?php endforeach; ?>
                             </ul>
                         <?php endif; ?>
@@ -627,7 +692,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                     <?php else: ?>
                         <ul class="space-y-2">
                             <?php foreach ($leavePeople as $person): ?>
-                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                             <?php endforeach; ?>
                         </ul>
                     <?php endif; ?>
@@ -640,7 +705,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                         <?php else: ?>
                             <ul class="space-y-2">
                                 <?php foreach ($leavePeople as $person): ?>
-                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                                 <?php endforeach; ?>
                             </ul>
                         <?php endif; ?>
@@ -658,7 +723,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                     <?php else: ?>
                         <ul class="space-y-2">
                             <?php foreach ($leaveTomorrowPeople as $person): ?>
-                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                             <?php endforeach; ?>
                         </ul>
                     <?php endif; ?>
@@ -671,7 +736,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                         <?php else: ?>
                             <ul class="space-y-2">
                                 <?php foreach ($leaveTomorrowPeople as $person): ?>
-                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h($person['department'] ?: '-'); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
+                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
                                 <?php endforeach; ?>
                             </ul>
                         <?php endif; ?>
@@ -715,7 +780,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                     <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 p-4 rounded-2xl border border-red-100 bg-red-50/70">
                         <div class="min-w-0">
                             <div class="text-lg font-extrabold text-gray-900"><?php echo h($person['name']); ?></div>
-                            <div class="text-sm text-gray-600 mt-1"><?php echo h(($person['department'] ?: '-') . ' / ' . ($person['position'] ?: '-')); ?></div>
+                            <div class="text-sm text-gray-600 mt-1"><?php echo h(cpms_executive_dashboard_department_label($person) . ' / ' . ($person['position'] ?: '-')); ?></div>
                         </div>
                         <div class="flex items-center gap-3">
                             <span class="px-3 py-1 rounded-full bg-white border border-red-100 text-sm font-bold text-gray-700">주간 누적</span>
@@ -745,7 +810,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                         <div class="text-lg font-extrabold text-gray-900 break-words"><?php echo h(isset($person['name']) ? $person['name'] : '-'); ?></div>
                         <span class="px-2 py-1 rounded-full bg-white text-indigo-700 border border-indigo-100 text-xs font-extrabold whitespace-nowrap"><?php echo h(isset($person['status_label']) ? $person['status_label'] : approval_ko('%ED%9C%B4%EA%B0%80%EC%A4%91')); ?></span>
                     </div>
-                    <div class="text-sm text-gray-600 mt-1"><?php echo h((isset($person['department']) && trim((string)$person['department']) !== '' ? $person['department'] : '-') . ' / ' . (isset($person['position']) && trim((string)$person['position']) !== '' ? $person['position'] : (isset($person['role']) && trim((string)$person['role']) !== '' ? $person['role'] : '-'))); ?></div>
+                    <div class="text-sm text-gray-600 mt-1"><?php echo h(cpms_executive_dashboard_department_label($person) . ' / ' . (isset($person['position']) && trim((string)$person['position']) !== '' ? $person['position'] : (isset($person['role']) && trim((string)$person['role']) !== '' ? $person['role'] : '-'))); ?></div>
                     <div class="text-sm font-bold text-gray-800 mt-2"><?php echo h(isset($person['period']) ? $person['period'] : '-'); ?></div>
                     <?php if (isset($person['type_label']) && trim((string)$person['type_label']) !== ''): ?>
                         <div class="text-xs text-gray-500 mt-1"><?php echo h($person['type_label']); ?></div>
@@ -1097,6 +1162,15 @@ if (!$executiveEmployeeTaskAvailable) {
 </div>
 
 </div>
+</section>
+
+<?php elseif ($activeExecutiveTab === 'attendanceManagement'): ?>
+<section data-executive-tab-panel="attendanceManagement">
+<?php
+$cpmsAttendanceEmbeddedInExecutiveDashboard = true;
+require __DIR__ . '/../admin/attendance.php';
+unset($cpmsAttendanceEmbeddedInExecutiveDashboard);
+?>
 </section>
 
 <?php elseif ($activeExecutiveTab === 'siteIssues'): ?>

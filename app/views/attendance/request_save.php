@@ -40,14 +40,14 @@ function attendance_request_is_late_check_in($checkIn) {
     return (strcmp(substr($time, 0, 5), '08:00') > 0);
 }}
 
-if (!function_exists('attendance_request_expected_type_for_date')) {
-function attendance_request_expected_type_for_date($pdo, $employeeId, $requestDate) {
-    if (!$pdo || (int)$employeeId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestDate)) return '';
+if (!function_exists('attendance_request_expected_types_for_date')) {
+function attendance_request_expected_types_for_date($pdo, $employeeId, $requestDate) {
+    if (!$pdo || (int)$employeeId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestDate)) return array();
     try {
         $stRecord = $pdo->prepare("SELECT check_in, check_out FROM cpms_attendance_records WHERE employee_id=:e AND work_date=:d LIMIT 1");
         $stRecord->execute(array(':e' => $employeeId, ':d' => $requestDate));
         $recordRow = $stRecord->fetch(PDO::FETCH_ASSOC);
-        if (!$recordRow) return 'both';
+        if (!$recordRow) return array('both');
 
         $recordCheckIn = isset($recordRow['check_in']) ? trim((string)$recordRow['check_in']) : '';
         $recordCheckOut = isset($recordRow['check_out']) ? trim((string)$recordRow['check_out']) : '';
@@ -55,14 +55,14 @@ function attendance_request_expected_type_for_date($pdo, $employeeId, $requestDa
         $hasCheckOut = ($recordCheckOut !== '');
         $isLate = attendance_request_is_late_check_in($recordCheckIn);
 
-        if (!$hasCheckIn && !$hasCheckOut) return 'both';
-        if (!$hasCheckIn && $hasCheckOut) return 'check_in';
-        if ($hasCheckIn && !$hasCheckOut) return $isLate ? 'both' : 'check_out';
-        if ($isLate) return 'check_in';
+        if (!$hasCheckIn && !$hasCheckOut) return array('both');
+        if (!$hasCheckIn && $hasCheckOut) return array('check_in');
+        if ($hasCheckIn && !$hasCheckOut) return $isLate ? array('check_in', 'check_out') : array('check_out');
+        if ($isLate) return array('check_in');
     } catch (Exception $e) {
-        return '';
+        return array();
     }
-    return '';
+    return array();
 }}
 
 if (!function_exists('attendance_request_pending_overlap_types')) {
@@ -117,9 +117,13 @@ if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $d)) {
 }
 $ci = attendance_request_normalize_datetime_value($d, $ci);
 $co = attendance_request_normalize_datetime_value($d, $co);
-$expectedType = attendance_request_expected_type_for_date($pdo, $eid, $d);
-if ($expectedType !== '' && $t !== $expectedType) {
-    flash_set('danger', '해당 날짜는 ' . attendance_request_type_label($expectedType) . ' 요청만 등록할 수 있습니다.');
+$expectedTypes = attendance_request_expected_types_for_date($pdo, $eid, $d);
+if (count($expectedTypes) > 0 && !in_array($t, $expectedTypes, true)) {
+    $expectedLabels = array();
+    for ($expectedIndex = 0; $expectedIndex < count($expectedTypes); $expectedIndex++) {
+        $expectedLabels[] = attendance_request_type_label($expectedTypes[$expectedIndex]);
+    }
+    flash_set('danger', '해당 날짜는 ' . implode(', ', $expectedLabels) . ' 요청만 등록할 수 있습니다.');
     header('Location: ' . $attendanceRequestReturnUrl);
     exit;
 }

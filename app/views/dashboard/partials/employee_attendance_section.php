@@ -511,7 +511,7 @@ if($pdo&&$eid_att>0){
                 $issueMissing = !empty($issueRow['_missing_checkout']);
                 $issueLate = !empty($issueRow['_late']);
                 $issueAbsent = !empty($issueRow['_absent']);
-                $issueRequestType = $issueAbsent ? 'both' : (($issueLate && $issueCheckOut === '') ? 'both' : ($issueMissing ? 'check_out' : 'check_in'));
+                $issueRequestType = $issueAbsent ? 'both' : ($issueLate ? 'check_in' : ($issueMissing ? 'check_out' : 'check_in'));
                 $issuePendingRequest = cpms_dashboard_attendance_pending_request_for_issue($attendancePendingRequestMap, $issueDate, $issueRequestType);
                 ?>
                 <tr class='border-t'>

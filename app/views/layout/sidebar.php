@@ -32,6 +32,9 @@ $canViewCompanyPayrollMenu = cpms_can_view_company_payroll($user, $sidebarPdo);
 
 $dashboardType = isset($dashboardType) ? (string)$dashboardType : (isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee');
 if ($dashboardType !== 'employee' && $dashboardType !== 'executive') $dashboardType = 'employee';
+$dashboardHref = ($role === 'executive') ? '?r=dashboard_executive' : '?r=dashboard_employee';
+$googleEmailIcon = 'https://www.google.com/s2/favicons?domain=mail.google.com&sz=64';
+$googleChatIcon = 'https://www.google.com/s2/favicons?domain=chat.google.com&sz=64';
 
 $initial = '?';
 if ($user && isset($user['name']) && $user['name'] !== '') {
@@ -71,6 +74,11 @@ else $parts[] = ($dept !== '' ? $dept : '직원');
 if ($pos !== '') $parts[] = $pos;
 $userDept = implode(' · ', $parts);
 
+$googleShortcutMenuItems = array(
+  array('id'=>'google_email_shortcut','label'=>'이메일 바로가기','href'=>'https://mail.google.com/','target'=>'_blank','rel'=>'noopener noreferrer','iconImg'=>$googleEmailIcon,'iconAlt'=>'Gmail','gradient'=>'from-red-500 to-amber-500','iconBg'=>'bg-white','iconColor'=>'text-red-600','hoverShadow'=>'hover:shadow-red-100'),
+  array('id'=>'google_chat_shortcut','label'=>'채팅 바로가기','href'=>'https://chat.google.com/','target'=>'_blank','rel'=>'noopener noreferrer','iconImg'=>$googleChatIcon,'iconAlt'=>'Google Chat','gradient'=>'from-emerald-500 to-blue-500','iconBg'=>'bg-white','iconColor'=>'text-emerald-600','hoverShadow'=>'hover:shadow-emerald-100'),
+);
+
 $menuItems = array(
   array('id'=>$dashboardMenu,'label'=>$dashboardMenu,'icon'=>'layout-dashboard','gradient'=>'from-blue-500 to-cyan-500','iconBg'=>'bg-gradient-to-br from-blue-100 to-cyan-100','iconColor'=>'text-blue-600','hoverShadow'=>'hover:shadow-blue-200'),
   array('id'=>$schedulerMenu,'label'=>$schedulerMenu,'href'=>'?r=scheduler','icon'=>'calendar-days','gradient'=>'from-teal-500 to-cyan-500','iconBg'=>'bg-gradient-to-br from-teal-100 to-cyan-100','iconColor'=>'text-teal-600','hoverShadow'=>'hover:shadow-teal-200'),
@@ -94,6 +102,9 @@ if ($isPublicAffairsDept) {
 if ($canViewCompanyProfitMenu && !$isPublicAffairsDept) {
     $menuItems[] = array('id'=>$companyProfitMenu,'label'=>$companyProfitMenu,'icon'=>'line-chart','gradient'=>'from-slate-700 to-blue-600','iconBg'=>'bg-gradient-to-br from-slate-100 to-blue-100','iconColor'=>'text-slate-700','hoverShadow'=>'hover:shadow-slate-200');
 }
+foreach ($googleShortcutMenuItems as $googleShortcutMenuItem) {
+    $menuItems[] = $googleShortcutMenuItem;
+}
 
 $pageTitle = $selectedMenu;
 if ($selectedMenu === $dashboardMenu) {
@@ -114,33 +125,41 @@ if ($selectedMenu === $dashboardMenu) {
   </button>
 
   <div class="p-6 px-6 when-expanded">
-    <div class="flex items-center gap-3">
+    <a href="<?php echo h($dashboardHref); ?>" class="flex items-center gap-3 group" aria-label="대시보드로 이동">
       <img src="<?php echo h(base_url()); ?>/assets/img/logo.png" alt="logo" class="w-12 h-12 rounded-2xl object-contain bg-white border border-gray-100 p-1">
       <span class="font-bold text-xl bg-gradient-to-r from-blue-600 to-cyan-600 bg-clip-text text-transparent">창명건설</span>
-    </div>
+    </a>
   </div>
 
   <div class="p-6 px-4 when-collapsed">
-    <div class="flex items-center justify-center">
+    <a href="<?php echo h($dashboardHref); ?>" class="flex items-center justify-center group" aria-label="대시보드로 이동" title="대시보드">
       <img src="<?php echo h(base_url()); ?>/assets/img/logo.png" alt="logo" class="w-10 h-10 rounded-2xl object-contain bg-white border border-gray-100 p-1">
-    </div>
+    </a>
   </div>
 
-  <nav class="flex-1 py-2 px-4 when-expanded">
-    <ul class="space-y-2">
+  <nav class="flex-1 py-1 px-4 when-expanded">
+    <ul class="space-y-1">
       <?php foreach ($menuItems as $it): ?>
         <?php $isSelected = ($selectedMenu === $it['id']); ?>
         <?php $itemHref = isset($it['href']) ? (string)$it['href'] : (($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id']))); ?>
+        <?php $itemTarget = isset($it['target']) ? trim((string)$it['target']) : ''; ?>
+        <?php $itemRel = isset($it['rel']) ? trim((string)$it['rel']) : ''; ?>
         <li>
           <a
             href="<?php echo h($itemHref); ?>"
-            class="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all duration-300 group relative
+            <?php if ($itemTarget !== ''): ?>target="<?php echo h($itemTarget); ?>"<?php endif; ?>
+            <?php if ($itemRel !== ''): ?>rel="<?php echo h($itemRel); ?>"<?php endif; ?>
+            class="w-full flex items-center gap-3 px-4 py-2 rounded-2xl transition-all duration-300 group relative
               <?php echo $isSelected
                 ? ('bg-gradient-to-r ' . $it['gradient'] . ' text-white shadow-lg scale-[1.02]')
                 : ('text-gray-700 hover:bg-white/80 hover:shadow-md ' . $it['hoverShadow']); ?>"
           >
-            <div class="p-2 rounded-xl transition-all duration-300 <?php echo $isSelected ? 'bg-white/20' : $it['iconBg']; ?>">
-              <i data-lucide="<?php echo h($it['icon']); ?>" class="w-5 h-5 <?php echo $isSelected ? 'text-white' : h($it['iconColor']); ?>"></i>
+            <div class="p-1.5 rounded-xl transition-all duration-300 <?php echo $isSelected ? 'bg-white/20' : $it['iconBg']; ?>">
+              <?php if (isset($it['iconImg']) && trim((string)$it['iconImg']) !== ''): ?>
+                <img src="<?php echo h((string)$it['iconImg']); ?>" alt="<?php echo h(isset($it['iconAlt']) ? (string)$it['iconAlt'] : (string)$it['label']); ?>" class="w-5 h-5 object-contain">
+              <?php else: ?>
+                <i data-lucide="<?php echo h($it['icon']); ?>" class="w-5 h-5 <?php echo $isSelected ? 'text-white' : h($it['iconColor']); ?>"></i>
+              <?php endif; ?>
             </div>
             <span class="font-semibold"><?php echo h($it['label']); ?></span>
           </a>
@@ -149,22 +168,30 @@ if ($selectedMenu === $dashboardMenu) {
     </ul>
   </nav>
 
-  <nav class="flex-1 py-2 px-2 when-collapsed">
-    <ul class="space-y-2">
+  <nav class="flex-1 py-1 px-2 when-collapsed">
+    <ul class="space-y-1">
       <?php foreach ($menuItems as $it): ?>
         <?php $isSelected = ($selectedMenu === $it['id']); ?>
         <?php $itemHref = isset($it['href']) ? (string)$it['href'] : (($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id']))); ?>
+        <?php $itemTarget = isset($it['target']) ? trim((string)$it['target']) : ''; ?>
+        <?php $itemRel = isset($it['rel']) ? trim((string)$it['rel']) : ''; ?>
         <li>
           <a
             href="<?php echo h($itemHref); ?>"
-            class="w-full flex items-center justify-center px-2 py-3.5 rounded-2xl transition-all duration-300 group relative
+            <?php if ($itemTarget !== ''): ?>target="<?php echo h($itemTarget); ?>"<?php endif; ?>
+            <?php if ($itemRel !== ''): ?>rel="<?php echo h($itemRel); ?>"<?php endif; ?>
+            class="w-full flex items-center justify-center px-2 py-2 rounded-2xl transition-all duration-300 group relative
               <?php echo $isSelected
                 ? ('bg-gradient-to-r ' . $it['gradient'] . ' text-white shadow-lg scale-[1.02]')
                 : ('text-gray-700 hover:bg-white/80 hover:shadow-md ' . $it['hoverShadow']); ?>"
             title="<?php echo h($it['label']); ?>"
           >
-            <div class="p-2 rounded-xl transition-all duration-300 <?php echo $isSelected ? 'bg-white/20' : $it['iconBg']; ?>">
-              <i data-lucide="<?php echo h($it['icon']); ?>" class="w-5 h-5 <?php echo $isSelected ? 'text-white' : h($it['iconColor']); ?>"></i>
+            <div class="p-1.5 rounded-xl transition-all duration-300 <?php echo $isSelected ? 'bg-white/20' : $it['iconBg']; ?>">
+              <?php if (isset($it['iconImg']) && trim((string)$it['iconImg']) !== ''): ?>
+                <img src="<?php echo h((string)$it['iconImg']); ?>" alt="<?php echo h(isset($it['iconAlt']) ? (string)$it['iconAlt'] : (string)$it['label']); ?>" class="w-5 h-5 object-contain">
+              <?php else: ?>
+                <i data-lucide="<?php echo h($it['icon']); ?>" class="w-5 h-5 <?php echo $isSelected ? 'text-white' : h($it['iconColor']); ?>"></i>
+              <?php endif; ?>
             </div>
 
             <div class="absolute left-full ml-2 px-3 py-2 bg-gray-900 text-white text-sm font-semibold rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 whitespace-nowrap shadow-lg z-50">

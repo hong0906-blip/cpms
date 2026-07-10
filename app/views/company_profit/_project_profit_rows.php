@@ -1,3 +1,24 @@
+<?php
+$projectTotalSales = isset($totals['sales']) ? (float)$totals['sales'] : 0.0;
+$projectTotalCost = isset($totals['project_input_cost']) ? (float)$totals['project_input_cost'] : 0.0;
+$projectTotalTarget = isset($totals['target_amount']) ? (float)$totals['target_amount'] : 0.0;
+$projectTotalNet = $projectTotalSales - $projectTotalCost;
+if (function_exists('cpms_company_profit_cost_rate_info')) {
+    $projectTotalRateInfo = cpms_company_profit_cost_rate_info($projectTotalSales, $projectTotalCost);
+} else if ($projectTotalSales > 0) {
+    $projectTotalRate = ($projectTotalCost / $projectTotalSales) * 100;
+    $projectTotalRateInfo = array('cost_rate' => $projectTotalRate, 'cost_rate_label' => number_format($projectTotalRate, 1) . '%', 'no_sales' => 0);
+} else if ($projectTotalCost > 0) {
+    $projectTotalRateInfo = array('cost_rate' => 999.0, 'cost_rate_label' => '매출 없음', 'no_sales' => 1);
+} else {
+    $projectTotalRateInfo = array('cost_rate' => 0.0, 'cost_rate_label' => '0%', 'no_sales' => 0);
+}
+$projectTotalRateState = cpms_company_profit_rate_state(
+    isset($projectTotalRateInfo['cost_rate']) ? (float)$projectTotalRateInfo['cost_rate'] : 0.0,
+    isset($projectTotalRateInfo['no_sales']) ? (int)$projectTotalRateInfo['no_sales'] : 0
+);
+?>
+
 <div class="cp-section cp-panel">
   <div class="cp-panel-title">
     <div>
@@ -56,6 +77,20 @@
           <?php endforeach; ?>
         <?php endif; ?>
       </tbody>
+      <?php if (count($projects) > 0): ?>
+        <tfoot>
+          <tr class="cp-total-row">
+            <th data-wrap="1">합계</th>
+            <td class="text-right"><?php echo h(cpms_company_profit_money($projectTotalSales)); ?></td>
+            <td class="text-right"><?php echo h(cpms_company_profit_money($projectTotalCost)); ?></td>
+            <td class="text-right"><?php echo h(cpms_company_profit_money($projectTotalTarget)); ?></td>
+            <td class="text-right"><span class="cp-rate-pill <?php echo h($projectTotalRateState['class']); ?>"><?php echo h(isset($projectTotalRateInfo['cost_rate_label']) ? $projectTotalRateInfo['cost_rate_label'] : '0%'); ?></span></td>
+            <td class="text-right <?php echo $projectTotalNet < 0 ? 'cp-negative' : 'cp-positive'; ?>"><?php echo h(cpms_company_profit_money($projectTotalNet)); ?></td>
+            <td>-</td>
+            <td>-</td>
+          </tr>
+        </tfoot>
+      <?php endif; ?>
     </table>
   </div>
 </div>

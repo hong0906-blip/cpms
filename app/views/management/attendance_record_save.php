@@ -33,7 +33,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !csrf_check(isset($_POST['_csrf']) 
 }
 
 $pdo = Db::pdo();
-if (!$pdo || !attendance_can_manage_settings($pdo)) {
+if (!$pdo || !attendance_can_edit_monthly_records($pdo)) {
     header('Location: ' . $returnUrl);
     exit;
 }

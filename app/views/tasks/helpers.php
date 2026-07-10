@@ -125,7 +125,16 @@ function cpms_tasks_normalize_department($department)
 if (!function_exists('cpms_tasks_department_options')) {
 function cpms_tasks_department_options()
 {
-    return array('공사', '공무', '안전', '관리', '품질', '개발', '기타');
+    return array('임원', '공사', '공무', '안전', '관리', '품질', '개발', '기타');
+}}
+
+if (!function_exists('cpms_tasks_employee_department')) {
+function cpms_tasks_employee_department($employee)
+{
+    if (!is_array($employee)) return cpms_tasks_normalize_department('');
+    $role = trim(isset($employee['role']) ? (string)$employee['role'] : '');
+    if ($role === 'executive') return '임원';
+    return cpms_tasks_normalize_department(isset($employee['department']) ? $employee['department'] : '');
 }}
 
 if (!function_exists('cpms_tasks_priority_options')) {
@@ -428,6 +437,7 @@ function cpms_tasks_current_employee($pdo)
         'role' => (string)Auth::userRole(),
         'photo_path' => '',
     );
+    $result['department'] = cpms_tasks_employee_department($result);
     if (!$pdo || $result['email'] === '') return $result;
 
     $columns = array('id', 'name', 'email');
@@ -442,9 +452,12 @@ function cpms_tasks_current_employee($pdo)
         if ($row) {
             $result['id'] = isset($row['id']) ? (int)$row['id'] : 0;
             $result['name'] = isset($row['name']) ? (string)$row['name'] : $result['name'];
-            $result['department'] = cpms_tasks_normalize_department(isset($row['department']) ? $row['department'] : $result['department']);
             $result['position'] = isset($row['position']) ? (string)$row['position'] : $result['position'];
             $result['role'] = isset($row['role']) ? (string)$row['role'] : $result['role'];
+            $result['department'] = cpms_tasks_employee_department(array(
+                'department' => isset($row['department']) ? $row['department'] : $result['department'],
+                'role' => $result['role'],
+            ));
             $result['photo_path'] = isset($row['photo_path']) ? (string)$row['photo_path'] : '';
         }
     } catch (Exception $e) {
@@ -476,7 +489,7 @@ function cpms_tasks_fetch_active_employees($pdo)
     }
     if (!is_array($rows)) $rows = array();
     foreach ($rows as $index => $row) {
-        $rows[$index]['department'] = cpms_tasks_normalize_department(isset($row['department']) ? $row['department'] : '');
+        $rows[$index]['department'] = cpms_tasks_employee_department($row);
     }
     $cache[$cacheKey] = $rows;
     return $rows;
@@ -529,13 +542,14 @@ function cpms_tasks_find_employee_by_id($pdo, $employeeId)
     if (!$pdo || $employeeId <= 0) return null;
     $departmentColumn = cpms_tasks_column_exists($pdo, 'employees', 'department') ? 'department' : "'' AS department";
     $positionColumn = cpms_tasks_column_exists($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+    $roleColumn = cpms_tasks_column_exists($pdo, 'employees', 'role') ? 'role' : "'employee' AS role";
     $photoColumn = cpms_tasks_column_exists($pdo, 'employees', 'photo_path') ? 'photo_path' : "'' AS photo_path";
     try {
-        $st = $pdo->prepare("SELECT id, name, email, " . $departmentColumn . ", " . $positionColumn . ", " . $photoColumn . " FROM employees WHERE id = :id LIMIT 1");
+        $st = $pdo->prepare("SELECT id, name, email, " . $departmentColumn . ", " . $positionColumn . ", " . $roleColumn . ", " . $photoColumn . " FROM employees WHERE id = :id LIMIT 1");
         $st->execute(array(':id' => $employeeId));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         if ($row) {
-            $row['department'] = cpms_tasks_normalize_department(isset($row['department']) ? $row['department'] : '');
+            $row['department'] = cpms_tasks_employee_department($row);
             return $row;
         }
     } catch (Exception $e) {

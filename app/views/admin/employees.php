@@ -318,7 +318,15 @@ for ($i = 0; $i < count($teamLeaderCandidates); $i++) {
   <div>
     <h2 class="text-2xl font-extrabold text-gray-900">직원명부</h2>
   </div>
-  <button type="button" class="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-extrabold" data-modal-open="empAdd">직원 추가</button>
+  <div class="flex flex-wrap gap-2 justify-end">
+    <form method="post" action="?r=admin/employees_save" onsubmit="return confirm('입사날짜 기준으로 기존 사번을 다시 생성합니다. 진행할까요?');">
+      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+      <input type="hidden" name="action" value="generate_employee_numbers">
+      <input type="hidden" name="employee_view" value="<?php echo h($employeeView); ?>">
+      <button type="submit" class="px-5 py-3 rounded-2xl border bg-white text-gray-800 font-extrabold">사번 일괄 생성</button>
+    </form>
+    <button type="button" class="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-extrabold" data-modal-open="empAdd">직원 추가</button>
+  </div>
 </div>
 <?php $flash = flash_get(); // 직원명부 flash 메시지 ?>
 <?php if (is_array($flash) && !empty($flash['message'])): ?>

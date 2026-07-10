@@ -227,6 +227,7 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
 </div>
 
 <?php cpms_render_dashboard_notice_modal(); ?>
+<?php cpms_render_dashboard_birthday_modal($pdo); ?>
 
 <?php require __DIR__ . '/partials/employee_attendance_section.php'; ?>
 

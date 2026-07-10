@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-label="Fireworks">
+  <defs>
+    <radialGradient id="sky" cx="50%" cy="45%" r="70%">
+      <stop offset="0" stop-color="#312e81"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </radialGradient>
+    <filter id="glow" x="-35%" y="-35%" width="170%" height="170%">
+      <feGaussianBlur stdDeviation="2.6" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="240" height="240" rx="48" fill="url(#sky)"/>
+  <g filter="url(#glow)" stroke-linecap="round" fill="none">
+    <g stroke="#facc15" stroke-width="6">
+      <path d="M79 51v42M79 153v36M28 120h42M88 120h42M43 84l30 30M85 126l30 30M115 84l-30 30M73 126l-30 30"/>
+    </g>
+    <g stroke="#38bdf8" stroke-width="5">
+      <path d="M166 36v30M166 106v32M122 87h30M180 87h36M135 56l22 22M175 96l24 24M197 56l-22 22M157 96l-22 22"/>
+    </g>
+    <g stroke="#fb7185" stroke-width="4">
+      <path d="M160 159v22M160 204v18M128 191h20M174 191h30M139 170l14 14M172 203l14 14M184 170l-14 14M150 203l-14 14"/>
+    </g>
+  </g>
+  <g fill="#fff7ed" opacity=".9">
+    <circle cx="44" cy="42" r="3"/>
+    <circle cx="210" cy="37" r="3"/>
+    <circle cx="204" cy="146" r="2.5"/>
+    <circle cx="41" cy="202" r="2.5"/>
+    <circle cx="116" cy="31" r="2"/>
+    <circle cx="102" cy="207" r="2"/>
+  </g>
+</svg>

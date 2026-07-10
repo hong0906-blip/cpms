@@ -1013,8 +1013,7 @@ function cpms_task_feed_for_executive($pdo, $filters)
     if (!$pdo) return $result;
 
     $selectedDepartment = isset($filters['department']) ? cpms_tasks_normalize_department($filters['department']) : '';
-    if ($selectedDepartment === '임원') $selectedDepartment = '기타';
-    $isExecutiveDepartmentSelected = ($selectedDepartment === '기타');
+    $isExecutiveDepartmentSelected = ($selectedDepartment === '임원');
     $employees = cpms_tasks_fetch_active_employees($pdo);
     $departmentSeed = cpms_tasks_department_options();
     foreach ($departmentSeed as $departmentName) {
@@ -1040,7 +1039,7 @@ function cpms_task_feed_for_executive($pdo, $filters)
             if (cpms_task_feed_hide_executive_employee($employee)) {
                 continue;
             }
-            $departmentForMetrics = '기타';
+            $departmentForMetrics = '임원';
         } else {
             if ($selectedDepartment !== '' && $selectedDepartment !== '전체' && $department !== $selectedDepartment) {
                 continue;

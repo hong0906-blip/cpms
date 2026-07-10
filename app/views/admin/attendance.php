@@ -4,17 +4,20 @@ use App\Core\Db;
 
 require_once __DIR__ . '/../attendance/common.php';
 
+$attendanceEmbeddedInExecutiveDashboard = !empty($cpmsAttendanceEmbeddedInExecutiveDashboard);
 $canManageAttendance = (Auth::isMaster() || attendance_is_manager());
-if (!$canManageAttendance) {
+$canViewAttendanceDashboard = ($canManageAttendance || ($attendanceEmbeddedInExecutiveDashboard && Auth::userRole() === 'executive'));
+if (!$canViewAttendanceDashboard) {
     echo attendance_text('%EA%B6%8C%ED%95%9C%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');
     return;
 }
 
-$routeManage = '?r=' . attendance_text('%EA%B4%80%EB%A6%AC');
+$routeManage = $attendanceEmbeddedInExecutiveDashboard ? '?r=dashboard_executive&exec_tab=attendanceManagement' : ('?r=' . attendance_text('%EA%B4%80%EB%A6%AC'));
+$attendanceRouteName = $attendanceEmbeddedInExecutiveDashboard ? 'dashboard_executive' : attendance_text('%EA%B4%80%EB%A6%AC');
 
 $pdo = Db::pdo();
 $canViewAttendanceSettings = attendance_can_manage_settings($pdo);
-$canEditAttendanceCells = $canViewAttendanceSettings;
+$canEditAttendanceCells = attendance_can_edit_monthly_records($pdo);
 $date = isset($_GET['date']) ? (string)$_GET['date'] : date('Y-m-d');
 $tab = isset($_GET['atab']) ? (string)$_GET['atab'] : 'monthly';
 if ($tab === 'settings' && !$canViewAttendanceSettings) $tab = 'monthly';
@@ -585,10 +588,12 @@ $requestReturnUrl = $routeManage . '&tab=attendance&atab=requests&status=' . url
 $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month) . '&sort=' . urlencode($sort) . '&filter=' . urlencode($quickFilter);
 ?>
 
+<?php if (!$attendanceEmbeddedInExecutiveDashboard): ?>
 <div class='mb-4 flex gap-2 flex-wrap'>
     <a class='px-3 py-2 rounded-2xl border bg-white' href='<?php echo h($routeManage); ?>'><?php echo h(attendance_text('%EA%B4%80%EB%A6%AC%EB%B6%80%20%EB%A9%94%EC%9D%B8')); ?></a>
     <a class='px-3 py-2 rounded-2xl border bg-white' href='<?php echo h($routeManage . '&tab=employees'); ?>'><?php echo h(attendance_text('%EC%A7%81%EC%9B%90%EB%AA%85%EB%B6%80')); ?></a>
 </div>
+<?php endif; ?>
 
 <?php if(!$hireDateEnabled): ?>
     <div class='mb-4 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900'>
@@ -706,7 +711,8 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
             <div class='cpms-attendance-filterbar'>
                 <div>
                     <form method='get' action='' class='cpms-attendance-controls'>
-                        <input type='hidden' name='r' value='<?php echo h(attendance_text('%EA%B4%80%EB%A6%AC')); ?>'>
+                        <input type='hidden' name='r' value='<?php echo h($attendanceRouteName); ?>'>
+                        <?php if ($attendanceEmbeddedInExecutiveDashboard): ?><input type='hidden' name='exec_tab' value='attendanceManagement'><?php endif; ?>
                         <input type='hidden' name='tab' value='attendance'>
                         <input type='hidden' name='atab' value='monthly'>
                         <input type='hidden' name='filter' value='<?php echo h($quickFilter); ?>'>
@@ -984,7 +990,8 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
         </div>
 
         <form method='get' action='' class='mb-3 rounded-2xl border border-gray-200 bg-gray-50 p-4'>
-            <input type='hidden' name='r' value='관리'>
+            <input type='hidden' name='r' value='<?php echo h($attendanceRouteName); ?>'>
+            <?php if ($attendanceEmbeddedInExecutiveDashboard): ?><input type='hidden' name='exec_tab' value='attendanceManagement'><?php endif; ?>
             <input type='hidden' name='tab' value='attendance'>
             <input type='hidden' name='atab' value='requests'>
             <div class='grid grid-cols-1 md:grid-cols-4 gap-3 items-end'>
