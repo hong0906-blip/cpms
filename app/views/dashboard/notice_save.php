@@ -68,7 +68,8 @@ if (is_array($saveResult)
     && (int)$saveResult['item']['is_active'] === 1) {
     try {
         $pdo = \App\Core\Db::pdo();
-        cpms_dashboard_notice_send_created_dm($pdo, $saveResult['item']);
+        // 회사 전체방 알림과 중복되지 않도록 기존 전 직원 개인 DM 발송 대신 전체방 1회 발송을 사용한다.
+        cpms_dashboard_notice_send_created_company_chat($pdo, $saveResult['item']);
     } catch (Exception $e) {
         error_log('[dashboard_notice_chat] ' . $e->getMessage());
     }

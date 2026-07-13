@@ -82,6 +82,82 @@ function cpms_google_chat_log_notification($pdo, $data) {
     } catch (Exception $e) { error_log('[google_chat_exec_notify] history log fail: '.$e->getMessage()); }
 }
 }
+if (!function_exists('cpms_google_chat_company_space_name')) {
+function cpms_google_chat_company_space_name($pdo) {
+    if (!$pdo) return '';
+    if (!function_exists('approval_google_chat_setting')) {
+        require_once __DIR__ . '/../approval/google_chat_helpers.php';
+    }
+    if (!function_exists('approval_google_chat_setting')) return '';
+    return trim((string)approval_google_chat_setting($pdo, 'google_chat_company_space_name', ''));
+}
+}
+if (!function_exists('cpms_google_chat_send_to_company_space')) {
+function cpms_google_chat_send_to_company_space($pdo, $messageText, $eventType, $sourceId, $sourceType) {
+    if (!function_exists('approval_google_chat_send_message')) {
+        require_once __DIR__ . '/../approval/google_chat_helpers.php';
+    }
+    $spaceName = cpms_google_chat_company_space_name($pdo);
+    $messageText = (string)$messageText;
+    $logData = array(
+        'source_type' => (string)$sourceType,
+        'source_id' => $sourceId,
+        'event_type' => (string)$eventType,
+        'receiver_employee_id' => null,
+        'receiver_name' => '회사 전체방',
+        'receiver_email' => null,
+        'dm_space_name' => $spaceName,
+        'message_text' => $messageText,
+        'send_status' => 'SKIPPED',
+        'error_message' => null,
+        'sent_at' => null
+    );
+
+    if (!$pdo || $spaceName === '') {
+        $errorMessage = 'google_chat_company_space_name 설정값이 비어 있습니다.';
+        if (function_exists('approval_google_chat_set_last_error')) approval_google_chat_set_last_error($errorMessage);
+        $logData['error_message'] = $errorMessage;
+        if ($pdo) cpms_google_chat_log_notification($pdo, $logData);
+        error_log('[google_chat_company] skipped: ' . $errorMessage);
+        return false;
+    }
+    $chatEnabled = function_exists('approval_google_chat_setting') ? approval_google_chat_setting($pdo, 'google_chat_enabled', '0') : '0';
+    if ((string)$chatEnabled !== '1') {
+        $errorMessage = 'google_chat_enabled 설정이 비활성화되어 있습니다.';
+        if (function_exists('approval_google_chat_set_last_error')) approval_google_chat_set_last_error($errorMessage);
+        $logData['error_message'] = $errorMessage;
+        cpms_google_chat_log_notification($pdo, $logData);
+        error_log('[google_chat_company] skipped: ' . $errorMessage);
+        return false;
+    }
+    if (strpos($spaceName, 'spaces/') !== 0) {
+        $errorMessage = '회사 전체방 Space Name은 spaces/로 시작해야 합니다.';
+        if (function_exists('approval_google_chat_set_last_error')) approval_google_chat_set_last_error($errorMessage);
+        $logData['send_status'] = 'FAILED';
+        $logData['error_message'] = $errorMessage;
+        cpms_google_chat_log_notification($pdo, $logData);
+        error_log('[google_chat_company] failed: invalid space name');
+        return false;
+    }
+
+    $ok = approval_google_chat_send_message($pdo, $spaceName, $messageText);
+    $lastError = function_exists('approval_google_chat_get_last_error') ? trim((string)approval_google_chat_get_last_error()) : '';
+    if ($ok) {
+        $logData['send_status'] = 'SUCCESS';
+        $logData['sent_at'] = date('Y-m-d H:i:s');
+        cpms_google_chat_log_notification($pdo, $logData);
+        error_log('[google_chat_company] sent source=' . (string)$sourceType . ' source_id=' . (int)$sourceId . ' event=' . (string)$eventType);
+        return true;
+    }
+
+    if ($lastError === '') $lastError = 'Google Chat API 메시지 전송에 실패했습니다.';
+    $logData['send_status'] = 'FAILED';
+    $logData['error_message'] = $lastError;
+    cpms_google_chat_log_notification($pdo, $logData);
+    error_log('[google_chat_company] failed source=' . (string)$sourceType . ' source_id=' . (int)$sourceId . ' event=' . (string)$eventType . ' error=' . $lastError);
+    return false;
+}
+}
 if (!function_exists('cpms_google_chat_send_to_executives')) {
 function cpms_google_chat_send_to_executives($pdo, $messageText, $eventType, $sourceId, $sourceType) {
     try {

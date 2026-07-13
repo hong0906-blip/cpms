@@ -304,6 +304,69 @@ function cpms_dashboard_notice_send_created_dm($pdo, $notice) {
     return $result;
 }}
 
+if (!function_exists('cpms_dashboard_notice_source_id')) {
+function cpms_dashboard_notice_source_id($notice) {
+    $noticeId = is_array($notice) && isset($notice['id']) ? trim((string)$notice['id']) : '';
+    if ($noticeId === '') $noticeId = date('YmdHis');
+    return (int)hexdec(substr(md5($noticeId), 0, 7));
+}}
+
+if (!function_exists('cpms_dashboard_notice_excerpt')) {
+function cpms_dashboard_notice_excerpt($content, $limit) {
+    $content = trim((string)$content);
+    $limit = (int)$limit;
+    if ($limit <= 0) return '';
+    if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+        if (mb_strlen($content, 'UTF-8') <= $limit) return $content;
+        return mb_substr($content, 0, $limit, 'UTF-8') . '...';
+    }
+    if (preg_match_all('/./us', $content, $matches) && isset($matches[0]) && is_array($matches[0])) {
+        if (count($matches[0]) <= $limit) return $content;
+        return implode('', array_slice($matches[0], 0, $limit)) . '...';
+    }
+    if (strlen($content) <= $limit) return $content;
+    return substr($content, 0, $limit) . '...';
+}}
+
+if (!function_exists('cpms_dashboard_notice_build_created_company_message')) {
+function cpms_dashboard_notice_build_created_company_message($notice) {
+    if (!is_array($notice)) $notice = array();
+    $title = isset($notice['title']) ? trim((string)$notice['title']) : '';
+    $content = isset($notice['content']) ? cpms_dashboard_notice_excerpt($notice['content'], 500) : '';
+    $author = isset($notice['author_name']) ? trim((string)$notice['author_name']) : '';
+    if ($author === '') $author = isset($notice['author_email']) ? trim((string)$notice['author_email']) : '';
+    if ($author === '') $author = '-';
+    if ($title === '') $title = '-';
+    if ($content === '') $content = '-';
+
+    $lines = array(
+        '[CPMS 공지사항]',
+        '',
+        '새 공지사항이 등록되었습니다.',
+        '',
+        '제목 : ' . $title,
+        '내용 :',
+        $content,
+        '',
+        '작성자 : ' . $author,
+        '',
+        '공지사항에서 확인해 주세요.'
+    );
+    return implode("\n", $lines);
+}}
+
+if (!function_exists('cpms_dashboard_notice_send_created_company_chat')) {
+function cpms_dashboard_notice_send_created_company_chat($pdo, $notice) {
+    if (!$pdo || !is_array($notice)) return false;
+    if (!function_exists('cpms_google_chat_send_to_company_space')) {
+        require_once __DIR__ . '/../common/chat_notification_helpers.php';
+    }
+    if (!function_exists('cpms_google_chat_send_to_company_space')) return false;
+    $message = cpms_dashboard_notice_build_created_company_message($notice);
+    $sourceId = cpms_dashboard_notice_source_id($notice);
+    return cpms_google_chat_send_to_company_space($pdo, $message, 'NOTICE_CREATED_COMPANY_SPACE', $sourceId, 'DASHBOARD_NOTICE');
+}}
+
 if (!function_exists('cpms_dashboard_notice_delete_item')) {
 function cpms_dashboard_notice_delete_item($id) {
     $id = trim((string)$id);

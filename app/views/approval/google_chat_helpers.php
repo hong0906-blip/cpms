@@ -65,6 +65,7 @@ function approval_google_chat_get_access_token($pdo) {
     }
     $sa = json_decode($raw, true);
     if (!is_array($sa)) {
+        approval_google_chat_set_last_error('서비스 계정 JSON 파일 형식이 올바르지 않습니다.');
         error_log('[google_chat] json decode fail');
         return false;
     }
@@ -72,6 +73,7 @@ function approval_google_chat_get_access_token($pdo) {
     $privateKey = isset($sa['private_key']) ? (string)$sa['private_key'] : '';
     $tokenUri = isset($sa['token_uri']) ? (string)$sa['token_uri'] : 'https://oauth2.googleapis.com/token';
     if ($clientEmail === '' || $privateKey === '') {
+        approval_google_chat_set_last_error('서비스 계정 JSON에 client_email 또는 private_key가 없습니다.');
         error_log('[google_chat] key missing');
         return false;
     }
@@ -100,6 +102,7 @@ function approval_google_chat_get_access_token($pdo) {
     $unsigned = $header . '.' . $payload;
     $signature = '';
     if (!openssl_sign($unsigned, $signature, $privateKey, OPENSSL_ALGO_SHA256)) {
+        approval_google_chat_set_last_error('서비스 계정 JWT 서명에 실패했습니다. private_key를 확인해 주세요.');
         error_log('[google_chat] sign fail');
         return false;
     }
@@ -111,6 +114,9 @@ function approval_google_chat_get_access_token($pdo) {
         $status = isset($resp['status']) ? (int)$resp['status'] : 0;
         if ($status > 0) {
             $safeError .= "\n상태: HTTP " . $status;
+        }
+        if (isset($resp['error']) && trim((string)$resp['error']) !== '') {
+            $safeError .= "\n통신 오류: " . trim((string)$resp['error']);
         }
         $errorCode = '';
         $errorDescription = '';
@@ -239,7 +245,11 @@ function approval_google_chat_api_post($pdo, $url, $bodyArray, $contextLabel) {
         } elseif ($statusCode === 400) {
             approval_google_chat_set_last_error(approval_google_chat_build_api_error_message('Google Chat API 400 요청 오류', $statusCode, $resp['body'], $contextLabel));
         } else {
-            approval_google_chat_set_last_error('Google Chat API 호출 실패 (HTTP ' . $statusCode . ')');
+            $apiError = approval_google_chat_build_api_error_message('Google Chat API 호출 실패', $statusCode, $resp['body'], $contextLabel);
+            if (isset($resp['error']) && trim((string)$resp['error']) !== '') {
+                $apiError .= "\n통신 오류: " . trim((string)$resp['error']);
+            }
+            approval_google_chat_set_last_error($apiError);
         }
         error_log('[google_chat] post fail status=' . $resp['status'] . ' body=' . (string)$resp['body']);
     }

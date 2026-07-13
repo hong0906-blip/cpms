@@ -20,13 +20,15 @@ $keys = array(
     'google_chat_impersonation_user',    
     'google_chat_public_base_url',
     'google_chat_dm_auto_create_enabled',
-    'google_chat_dm_enabled'
+    'google_chat_dm_enabled',
+    'google_chat_company_space_name'
 );
 
 $vals = array();
 foreach ($keys as $k) {
     $vals[$k] = approval_google_chat_setting($pdo, $k, '');
 }
+$chatFlash = function_exists('flash_get') ? flash_get() : null;
 
 $defaultJsonPath = '/www/cpms/storage/secrets/google-chat-service-account.json';
 $configuredJsonPath = trim((string)$vals['google_chat_service_account_json_path']);
@@ -99,6 +101,11 @@ $scopeHasComma = (strpos($scopeValue, ',') !== false);
 $impersonationHasUsersPrefix = ($impersonationValue !== '' && strpos($impersonationValue, 'users/') === 0);
 ?>
 <h2>Google Chat 설정</h2>
+<?php if (is_array($chatFlash) && isset($chatFlash['message']) && trim((string)$chatFlash['message']) !== '') { ?>
+  <div style="margin:0 0 12px 0;padding:10px;border:1px solid <?php echo (isset($chatFlash['type']) && (string)$chatFlash['type'] === 'success') ? '#86efac' : '#fca5a5'; ?>;white-space:pre-wrap;color:<?php echo (isset($chatFlash['type']) && (string)$chatFlash['type'] === 'success') ? '#166534' : '#991b1b'; ?>;">
+    <?php echo h($chatFlash['message']); ?>
+  </div>
+<?php } ?>
 <form method="post" action="?r=approval_google_chat_settings_save">
   <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
   <?php foreach($keys as $k){ ?>
@@ -109,6 +116,15 @@ $impersonationHasUsersPrefix = ($impersonationValue !== '' && strpos($impersonat
   <?php } ?>
   <button>저장</button>
 </form>
+
+<div style="margin-top:16px;padding:12px;border:1px solid #ddd;">
+  <h3 style="margin-top:0;">회사 전체 Google Chat 방 테스트</h3>
+  <div style="margin-bottom:8px;">Space Name 예시: <code>spaces/AAQAUsipV8I</code></div>
+  <form method="post" action="?r=approval_google_chat_company_test">
+    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+    <button type="submit">전체방 테스트 메시지 보내기</button>
+  </form>
+</div>
 
 
 <hr>
@@ -202,6 +218,37 @@ try {
     <td><?php echo h(isset($row['dm_space_name']) ? $row['dm_space_name'] : ''); ?></td>
     <td><?php echo h(isset($row['send_status']) ? $row['send_status'] : ''); ?></td>
     <td><?php echo h(isset($row['error_message']) ? $row['error_message'] : ''); ?></td>
+  </tr>
+  <?php }} ?>
+</table>
+
+<?php
+$companyNotiRows = array();
+try {
+    $st = $pdo->query("SELECT created_at, source_type, source_id, event_type, receiver_name, dm_space_name, send_status, error_message FROM cpms_google_chat_notifications ORDER BY id DESC LIMIT 30");
+    if ($st) $companyNotiRows = $st->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    $companyNotiRows = array();
+}
+?>
+<hr>
+<h3>최근 Google Chat 공통 알림 이력 (최근 30건)</h3>
+<table border="1" cellpadding="6" cellspacing="0">
+  <tr>
+    <th>created_at</th><th>source_type</th><th>source_id</th><th>event_type</th><th>receiver_name</th><th>space_name</th><th>send_status</th><th>error_message</th>
+  </tr>
+  <?php if (count($companyNotiRows) === 0) { ?>
+  <tr><td colspan="8">표시할 공통 알림 이력이 없습니다.</td></tr>
+  <?php } else { foreach ($companyNotiRows as $row) { ?>
+  <tr>
+    <td><?php echo h(isset($row['created_at']) ? $row['created_at'] : ''); ?></td>
+    <td><?php echo h(isset($row['source_type']) ? $row['source_type'] : ''); ?></td>
+    <td><?php echo h(isset($row['source_id']) ? $row['source_id'] : ''); ?></td>
+    <td><?php echo h(isset($row['event_type']) ? $row['event_type'] : ''); ?></td>
+    <td><?php echo h(isset($row['receiver_name']) ? $row['receiver_name'] : ''); ?></td>
+    <td><?php echo h(isset($row['dm_space_name']) ? $row['dm_space_name'] : ''); ?></td>
+    <td><?php echo h(isset($row['send_status']) ? $row['send_status'] : ''); ?></td>
+    <td style="white-space:pre-wrap;"><?php echo h(isset($row['error_message']) ? $row['error_message'] : ''); ?></td>
   </tr>
   <?php }} ?>
 </table>

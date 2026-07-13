@@ -506,6 +506,123 @@ function cpms_scheduler_fetch_tasks($pdo, $employeeIds, $startDate, $endDate, $v
     return $rows;
 }}
 
+if (!function_exists('cpms_scheduler_fetch_approved_leaves')) {
+function cpms_scheduler_fetch_approved_leaves($pdo, $employeeIds, $startDate, $endDate, $employeeIndex)
+{
+    $rows = array();
+    if (!$pdo || count($employeeIds) === 0 || !cpms_tasks_table_exists($pdo, 'cpms_approval_documents')) return $rows;
+
+    $startDate = cpms_scheduler_valid_date($startDate);
+    $endDate = cpms_scheduler_valid_date($endDate);
+    if ($startDate === '' || $endDate === '') return $rows;
+
+    $selectedMap = array();
+    for ($i = 0; $i < count($employeeIds); $i++) {
+        $selectedMap[(int)$employeeIds[$i]] = true;
+    }
+
+    $hasCreatedByEmail = cpms_tasks_column_exists($pdo, 'cpms_approval_documents', 'created_by_email');
+    $createdByEmailSelect = $hasCreatedByEmail ? 'd.created_by_email' : "'' AS created_by_email";
+    $employeeSelect = "'' AS employee_name, '' AS employee_email, '' AS employee_department, '' AS employee_position";
+    $joinSql = '';
+    if (cpms_tasks_table_exists($pdo, 'employees')) {
+        $employeeNameSelect = cpms_tasks_column_exists($pdo, 'employees', 'name') ? 'e.name' : "''";
+        $employeeEmailSelect = cpms_tasks_column_exists($pdo, 'employees', 'email') ? 'e.email' : "''";
+        $employeeDepartmentSelect = cpms_tasks_column_exists($pdo, 'employees', 'department') ? 'e.department' : "''";
+        $employeePositionSelect = cpms_tasks_column_exists($pdo, 'employees', 'position') ? 'e.position' : "''";
+        $employeeSelect = $employeeNameSelect . " AS employee_name, " . $employeeEmailSelect . " AS employee_email, " . $employeeDepartmentSelect . " AS employee_department, " . $employeePositionSelect . " AS employee_position";
+        $joinSql = ' LEFT JOIN employees e ON e.id = d.created_by_id';
+    }
+
+    try {
+        $sql = "SELECT d.id, d.created_by_id, d.created_by_name, " . $createdByEmailSelect . ", d.content, d.created_at, d.updated_at, " . $employeeSelect . "
+                FROM cpms_approval_documents d" . $joinSql . "
+                WHERE d.doc_type='leave'
+                  AND UPPER(COALESCE(d.doc_status,'')) IN ('APPROVED','COMPLETED')
+                ORDER BY d.updated_at DESC, d.id DESC";
+        $st = $pdo->query($sql);
+        $docs = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+    } catch (Exception $e) {
+        $docs = array();
+    }
+    if (!is_array($docs)) $docs = array();
+
+    for ($j = 0; $j < count($docs); $j++) {
+        $doc = $docs[$j];
+        $employeeId = isset($doc['created_by_id']) ? (int)$doc['created_by_id'] : 0;
+        if ($employeeId <= 0 || !isset($selectedMap[$employeeId])) continue;
+
+        $content = function_exists('approval_parse_content') ? approval_parse_content(isset($doc['content']) ? $doc['content'] : '') : array();
+        $leaveStart = cpms_scheduler_valid_date(isset($content['leave_start_date']) ? $content['leave_start_date'] : '');
+        $leaveEnd = cpms_scheduler_valid_date(isset($content['leave_end_date']) ? $content['leave_end_date'] : '');
+        if ($leaveStart === '' || $leaveEnd === '') continue;
+        if (strcmp($leaveEnd, $leaveStart) < 0) continue;
+        if (strcmp($leaveEnd, $startDate) < 0 || strcmp($leaveStart, $endDate) > 0) continue;
+
+        $name = '';
+        if (isset($employeeIndex[$employeeId]) && isset($employeeIndex[$employeeId]['name'])) $name = trim((string)$employeeIndex[$employeeId]['name']);
+        if ($name === '' && isset($doc['employee_name'])) $name = trim((string)$doc['employee_name']);
+        if ($name === '' && isset($doc['created_by_name'])) $name = trim((string)$doc['created_by_name']);
+        if ($name === '' && isset($content['applicant_name'])) $name = trim((string)$content['applicant_name']);
+        if ($name === '') $name = '-';
+
+        $department = '';
+        if (isset($employeeIndex[$employeeId]) && isset($employeeIndex[$employeeId]['department'])) $department = trim((string)$employeeIndex[$employeeId]['department']);
+        if ($department === '' && isset($doc['employee_department'])) $department = trim((string)$doc['employee_department']);
+        if ($department === '' && isset($content['department'])) $department = trim((string)$content['department']);
+
+        $email = '';
+        if (isset($employeeIndex[$employeeId]) && isset($employeeIndex[$employeeId]['email'])) $email = trim((string)$employeeIndex[$employeeId]['email']);
+        if ($email === '' && isset($doc['employee_email'])) $email = trim((string)$doc['employee_email']);
+        if ($email === '' && isset($doc['created_by_email'])) $email = trim((string)$doc['created_by_email']);
+        if ($email === '' && isset($content['applicant_email'])) $email = trim((string)$content['applicant_email']);
+
+        $typeLabel = function_exists('approval_leave_type_label_from_content') ? approval_leave_type_label_from_content($content) : '';
+        if (trim((string)$typeLabel) === '') $typeLabel = '휴가';
+        $requestDate = cpms_scheduler_valid_date(isset($content['request_date']) ? $content['request_date'] : '');
+        if ($requestDate === '') $requestDate = cpms_scheduler_valid_date(substr(isset($doc['created_at']) ? (string)$doc['created_at'] : '', 0, 10));
+        if ($requestDate === '') $requestDate = $leaveStart;
+
+        $overlapStart = strcmp($leaveStart, $startDate) > 0 ? $leaveStart : $startDate;
+        $overlapEnd = strcmp($leaveEnd, $endDate) < 0 ? $leaveEnd : $endDate;
+        $dayTs = strtotime($overlapStart);
+        $endTs = strtotime($overlapEnd);
+        while ($dayTs !== false && $dayTs <= $endTs) {
+            $day = date('Y-m-d', $dayTs);
+            $weekday = (int)date('w', $dayTs);
+            if ($weekday !== 0 && $weekday !== 6) {
+                $rows[] = array(
+                    'id' => 0,
+                    'source_type' => 'approval_leave',
+                    'task_type' => 'leave',
+                    'status' => 'leave_approved',
+                    'title' => $name . ' ' . $typeLabel,
+                    'request_date' => $requestDate,
+                    'due_date' => $day,
+                    'due_time' => '',
+                    'completed_at' => isset($doc['updated_at']) ? (string)$doc['updated_at'] : '',
+                    'assignee_employee_id' => $employeeId,
+                    'assignee_name' => $name,
+                    'assignee_email' => $email,
+                    'department' => cpms_tasks_normalize_department($department),
+                    'scheduler_date' => $day,
+                    'scheduler_date_kind' => 'leave',
+                    'display_status' => '승인휴가',
+                    'is_delayed' => 0,
+                    'is_urgent' => 0,
+                    'leave_start_date' => $leaveStart,
+                    'leave_end_date' => $leaveEnd,
+                    'leave_type_label' => $typeLabel,
+                    'approval_document_id' => isset($doc['id']) ? (int)$doc['id'] : 0
+                );
+            }
+            $dayTs = strtotime($day . ' +1 day');
+        }
+    }
+    usort($rows, 'cpms_scheduler_task_sort');
+    return $rows;
+}}
+
 if (!function_exists('cpms_scheduler_task_sort')) {
 function cpms_scheduler_task_sort($a, $b)
 {
@@ -600,6 +717,15 @@ function cpms_scheduler_task_is_meeting($task)
     return ($taskType === 'meeting' || in_array($status, array('meeting_owner', 'meeting_available', 'meeting_unavailable'), true));
 }}
 
+if (!function_exists('cpms_scheduler_task_is_leave')) {
+function cpms_scheduler_task_is_leave($task)
+{
+    if (!is_array($task)) return false;
+    if (isset($task['source_type']) && (string)$task['source_type'] === 'approval_leave') return true;
+    if (isset($task['task_type']) && (string)$task['task_type'] === 'leave') return true;
+    return false;
+}}
+
 if (!function_exists('cpms_scheduler_metrics')) {
 function cpms_scheduler_metrics($tasks)
 {
@@ -611,10 +737,11 @@ function cpms_scheduler_metrics($tasks)
         if (isset($tasks[$i]['is_urgent']) && (int)$tasks[$i]['is_urgent'] === 1) $metrics['urgent']++;
         $status = isset($tasks[$i]['status']) ? (string)$tasks[$i]['status'] : '';
         $isMeeting = cpms_scheduler_task_is_meeting($tasks[$i]);
+        $isLeave = cpms_scheduler_task_is_leave($tasks[$i]);
         if ($isMeeting) $metrics['meeting']++;
         if ($status === 'completion_pending') $metrics['completion_pending']++;
         if ($status === 'done') $metrics['done']++;
-        else if (!$isDelayed && !$isMeeting && $status !== 'completion_pending') $metrics['progress']++;
+        else if (!$isDelayed && !$isMeeting && !$isLeave && $status !== 'completion_pending') $metrics['progress']++;
     }
     return $metrics;
 }}
@@ -627,10 +754,12 @@ function cpms_scheduler_filter_attrs($task)
     $isDone = ($status === 'done');
     $isUrgent = (isset($task['is_urgent']) && (int)$task['is_urgent'] === 1);
     $isMeeting = cpms_scheduler_task_is_meeting($task);
+    $isLeave = cpms_scheduler_task_is_leave($task);
     $isCompletionPending = ($status === 'completion_pending');
-    $isProgress = (!$isDone && !$isDelayed && !$isMeeting && !$isCompletionPending);
+    $isProgress = (!$isDone && !$isDelayed && !$isMeeting && !$isLeave && !$isCompletionPending);
     return ' data-scheduler-item="1"'
         . ' data-scheduler-meeting="' . ($isMeeting ? '1' : '0') . '"'
+        . ' data-scheduler-leave="' . ($isLeave ? '1' : '0') . '"'
         . ' data-scheduler-delayed="' . ($isDelayed ? '1' : '0') . '"'
         . ' data-scheduler-urgent="' . ($isUrgent ? '1' : '0') . '"'
         . ' data-scheduler-progress="' . ($isProgress ? '1' : '0') . '"'
@@ -650,6 +779,7 @@ function cpms_scheduler_employee_badge_text($employee)
 if (!function_exists('cpms_scheduler_kind_label')) {
 function cpms_scheduler_kind_label($kind)
 {
+    if ($kind === 'leave') return '휴가';
     if ($kind === 'request') return '요청';
     if ($kind === 'progress') return '진행';
     if ($kind === 'single') return '당일';
@@ -741,9 +871,16 @@ $monthInput = isset($monthBounds['month']) ? $monthBounds['month'] : date('Y-m')
 $weekInput = isset($weekBounds['date']) ? $weekBounds['date'] : date('Y-m-d');
 
 $calendarTasks = cpms_scheduler_fetch_tasks($pdo, $selectedEmployeeIds, $rangeStart, $rangeEnd, $viewMode, $employeeIndex);
+$calendarLeaveTasks = cpms_scheduler_fetch_approved_leaves($pdo, $selectedEmployeeIds, $rangeStart, $rangeEnd, $employeeIndex);
+if (count($calendarLeaveTasks) > 0) {
+    $calendarTasks = array_merge($calendarTasks, $calendarLeaveTasks);
+    usort($calendarTasks, 'cpms_scheduler_task_sort');
+}
 $periodMonthDefault = $viewMode === 'week' ? substr($weekInput, 0, 7) : $monthInput;
 $periodMonthBounds = cpms_scheduler_month_bounds(isset($_GET['period_month']) ? (string)$_GET['period_month'] : $periodMonthDefault);
 $periodTasks = cpms_scheduler_fetch_tasks($pdo, $selectedEmployeeIds, $periodMonthBounds['month_start'], $periodMonthBounds['month_end'], 'month', $employeeIndex);
+$periodLeaveTasks = cpms_scheduler_fetch_approved_leaves($pdo, $selectedEmployeeIds, $periodMonthBounds['month_start'], $periodMonthBounds['month_end'], $employeeIndex);
+if (count($periodLeaveTasks) > 0) $periodTasks = array_merge($periodTasks, $periodLeaveTasks);
 usort($periodTasks, 'cpms_scheduler_period_task_sort');
 $eventsByDate = cpms_scheduler_build_events($calendarTasks, $viewMode, $rangeStart, $rangeEnd);
 $metrics = cpms_scheduler_metrics($calendarTasks);
@@ -782,6 +919,7 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
     .cpms-scheduler-event:hover{border-color:#cbd5e1;background:#f8fafc}
     .cpms-scheduler-event.is-delayed{border-left-color:#dc2626;background:#fff7f7}
     .cpms-scheduler-event.is-done{border-left-color:#059669;background:#f7fffb}
+    .cpms-scheduler-event.is-leave{border-left-color:#7c3aed;background:#fbf8ff}
     .cpms-scheduler-event-title{font-size:12px;font-weight:900;line-height:1.35;word-break:keep-all;overflow-wrap:anywhere}
     .cpms-scheduler-event-meta{margin-top:4px;font-size:11px;font-weight:700;color:#64748b;line-height:1.35;word-break:keep-all;overflow-wrap:anywhere}
     .cpms-scheduler-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:2px 6px;font-size:10px;font-weight:900;line-height:1.2;white-space:nowrap}
@@ -789,6 +927,7 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
     .cpms-scheduler-pill.delayed{background:#fee2e2;color:#b91c1c}
     .cpms-scheduler-pill.urgent{background:#fff1f2;color:#be123c}
     .cpms-scheduler-pill.done{background:#d1fae5;color:#047857}
+    .cpms-scheduler-pill.leave{background:#ede9fe;color:#6d28d9}
     .cpms-scheduler-filter-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:12px;align-items:end}
     .cpms-scheduler-filter-button{transition:transform .18s ease,box-shadow .18s ease,border-color .18s ease}
     .cpms-scheduler-filter-button.is-active{transform:translateY(-2px);box-shadow:0 12px 28px rgba(15,23,42,.14)}
@@ -997,10 +1136,19 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                                 $eventAssignee = isset($event['assignee_name']) && trim((string)$event['assignee_name']) !== '' ? (string)$event['assignee_name'] : '-';
                                 $eventDueText = cpms_scheduler_date_label($dueDate) . ($dueTime !== '' ? ' ' . $dueTime : '');
                                 $eventStatusText = $isDelayed ? '지연' : (isset($event['display_status']) ? (string)$event['display_status'] : '-');
+                                $isLeaveEvent = cpms_scheduler_task_is_leave($event);
+                                $eventClass = 'cpms-scheduler-event' . ($isDelayed ? ' is-delayed' : '') . ($isDone ? ' is-done' : '') . ($isLeaveEvent ? ' is-leave' : '');
+                                $eventDetailAttrs = $isLeaveEvent ? ' data-scheduler-leave-card="1"' : ' data-scheduler-detail-open="1" data-task-id="' . (isset($event['id']) ? (int)$event['id'] : 0) . '"';
+                                $leavePeriodText = '';
+                                if ($isLeaveEvent) {
+                                    $leaveStartText = isset($event['leave_start_date']) ? cpms_scheduler_date_label($event['leave_start_date']) : '';
+                                    $leaveEndText = isset($event['leave_end_date']) ? cpms_scheduler_date_label($event['leave_end_date']) : '';
+                                    $leavePeriodText = ($leaveStartText !== '' && $leaveEndText !== '' && $leaveStartText !== '-' && $leaveEndText !== '-') ? $leaveStartText . ' ~ ' . $leaveEndText : '';
+                                }
                                 ?>
-                                <button type="button" class="cpms-scheduler-event <?php echo $isDelayed ? 'is-delayed' : ''; ?> <?php echo $isDone ? 'is-done' : ''; ?>" data-scheduler-detail-open="1" data-task-id="<?php echo isset($event['id']) ? (int)$event['id'] : 0; ?>" data-scheduler-modal-kind="<?php echo h(cpms_scheduler_kind_label($kind)); ?>" data-scheduler-modal-title="<?php echo h($eventTitle); ?>" data-scheduler-modal-assignee="<?php echo h($eventAssignee); ?>" data-scheduler-modal-due="<?php echo h($eventDueText); ?>" data-scheduler-modal-status="<?php echo h($eventStatusText); ?>"<?php echo cpms_scheduler_filter_attrs($event); ?>>
+                                <button type="button" class="<?php echo h($eventClass); ?>"<?php echo $eventDetailAttrs; ?> data-scheduler-modal-kind="<?php echo h(cpms_scheduler_kind_label($kind)); ?>" data-scheduler-modal-title="<?php echo h($eventTitle); ?>" data-scheduler-modal-assignee="<?php echo h($eventAssignee); ?>" data-scheduler-modal-due="<?php echo h($eventDueText); ?>" data-scheduler-modal-status="<?php echo h($eventStatusText); ?>"<?php echo cpms_scheduler_filter_attrs($event); ?>>
                                     <div class="flex flex-wrap items-center gap-1 mb-1">
-                                        <span class="cpms-scheduler-pill kind"><?php echo h(cpms_scheduler_kind_label($kind)); ?></span>
+                                        <span class="cpms-scheduler-pill <?php echo $isLeaveEvent ? 'leave' : 'kind'; ?>"><?php echo h(cpms_scheduler_kind_label($kind)); ?></span>
                                         <?php if ($isDelayed): ?><span class="cpms-scheduler-pill delayed">지연</span><?php endif; ?>
                                         <?php if (isset($event['is_urgent']) && (int)$event['is_urgent'] === 1): ?><span class="cpms-scheduler-pill urgent">긴급</span><?php endif; ?>
                                         <?php if ($isDone): ?><span class="cpms-scheduler-pill done">완료</span><?php endif; ?>
@@ -1008,7 +1156,9 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                                     <div class="cpms-scheduler-event-title"><?php echo h($eventTitle); ?></div>
                                     <div class="cpms-scheduler-event-meta">
                                         <?php echo h($eventAssignee); ?>
-                                        <?php if ($viewMode === 'week'): ?>
+                                        <?php if ($isLeaveEvent && $leavePeriodText !== ''): ?>
+                                            · <?php echo h($leavePeriodText); ?>
+                                        <?php elseif ($viewMode === 'week'): ?>
                                             · 마감 <?php echo h(cpms_scheduler_date_label($dueDate)); ?><?php echo $dueTime !== '' ? ' ' . h($dueTime) : ''; ?>
                                         <?php elseif ($isCompletedDateEvent): ?>
                                             · 마감 <?php echo h(cpms_scheduler_date_label($dueDate)); ?><?php echo $dueTime !== '' ? ' ' . h($dueTime) : ''; ?>
@@ -1087,12 +1237,14 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                                 if (isset($task['due_time']) && trim((string)$task['due_time']) !== '') $dueText .= ' ' . substr((string)$task['due_time'], 0, 5);
                                 $completedText = isset($task['completed_at']) && trim((string)$task['completed_at']) !== '' ? substr((string)$task['completed_at'], 0, 16) : '-';
                                 $initialRowHiddenClass = $i >= 20 ? ' cpms-scheduler-row-filter-hidden cpms-scheduler-row-display-none' : '';
+                                $isLeaveTask = cpms_scheduler_task_is_leave($task);
+                                $taskTypeText = $isLeaveTask ? (isset($task['leave_type_label']) ? (string)$task['leave_type_label'] : '휴가') : cpms_tasks_type_label(isset($task['task_type']) ? $task['task_type'] : 'general');
                                 ?>
                                 <tr class="border-b border-gray-100<?php echo $initialRowHiddenClass; ?>" data-scheduler-period-row="1"<?php echo cpms_scheduler_filter_attrs($task); ?>>
                                     <td class="py-3 pr-4 font-bold text-gray-700"><?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?></td>
                                     <td class="py-3 pr-4 text-left" data-wrap="1">
                                         <div class="font-extrabold text-gray-900"><?php echo h(isset($task['title']) ? $task['title'] : ''); ?></div>
-                                        <div class="mt-1 text-xs font-bold text-gray-500"><?php echo h(cpms_tasks_type_label(isset($task['task_type']) ? $task['task_type'] : 'general')); ?></div>
+                                        <div class="mt-1 text-xs font-bold text-gray-500"><?php echo h($taskTypeText); ?></div>
                                     </td>
                                     <td class="py-3 pr-4 font-bold text-gray-600"><?php echo h(isset($task['request_date']) ? $task['request_date'] : '-'); ?></td>
                                     <td class="py-3 pr-4 font-bold text-gray-600"><?php echo h($dueText !== '' ? $dueText : '-'); ?></td>
@@ -1103,10 +1255,19 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                                         </span>
                                     </td>
                                     <td class="py-3">
-                                        <button type="button" class="inline-flex items-center gap-1 text-blue-600 font-extrabold" data-scheduler-detail-open="1" data-task-id="<?php echo isset($task['id']) ? (int)$task['id'] : 0; ?>">
-                                            상세
-                                            <i data-lucide="arrow-right" class="w-4 h-4"></i>
-                                        </button>
+                                        <?php if ($isLeaveTask && isset($task['approval_document_id']) && (int)$task['approval_document_id'] > 0): ?>
+                                            <a href="?r=approval/detail&id=<?php echo (int)$task['approval_document_id']; ?>" class="inline-flex items-center gap-1 text-violet-600 font-extrabold">
+                                                결재
+                                                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                                            </a>
+                                        <?php elseif (!$isLeaveTask): ?>
+                                            <button type="button" class="inline-flex items-center gap-1 text-blue-600 font-extrabold" data-scheduler-detail-open="1" data-task-id="<?php echo isset($task['id']) ? (int)$task['id'] : 0; ?>">
+                                                상세
+                                                <i data-lucide="arrow-right" class="w-4 h-4"></i>
+                                            </button>
+                                        <?php else: ?>
+                                            <span class="text-gray-400 font-bold">-</span>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endfor; ?>

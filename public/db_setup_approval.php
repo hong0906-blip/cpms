@@ -197,6 +197,7 @@ foreach ($columns as $table => $defs) {
 }
 
 approval_setup_add_index($pdo, 'cpms_approval_settings', 'uniq_setting_key', "ALTER TABLE cpms_approval_settings ADD UNIQUE KEY uniq_setting_key (setting_key)", $results);
+approval_setup_add_index($pdo, 'cpms_google_chat_notifications', 'idx_chat_notification_dedupe', "ALTER TABLE cpms_google_chat_notifications ADD INDEX idx_chat_notification_dedupe (source_type, event_type, source_id, receiver_employee_id, send_status)", $results);
 approval_setup_add_index($pdo, 'cpms_approval_references', 'idx_document_id', "ALTER TABLE cpms_approval_references ADD INDEX idx_document_id (document_id)", $results);
 approval_setup_add_index($pdo, 'cpms_approval_references', 'idx_employee_id', "ALTER TABLE cpms_approval_references ADD INDEX idx_employee_id (employee_id)", $results);
 approval_setup_add_index($pdo, 'cpms_approval_references', 'idx_employee_email', "ALTER TABLE cpms_approval_references ADD INDEX idx_employee_email (employee_email)", $results);
@@ -219,6 +220,7 @@ try {
         'google_chat_impersonation_user' => '',
         'google_chat_public_base_url' => 'https://cmbuild.kr/cpms/public/',
         'google_chat_dm_auto_create_enabled' => '1',
+        'google_chat_company_space_name' => '',
         'google_holiday_calendar_enabled' => '0',
         'google_holiday_calendar_id' => 'ko.south_korea#holiday@group.v.calendar.google.com',
         'google_holiday_calendar_api_key' => '',

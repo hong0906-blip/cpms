@@ -655,6 +655,7 @@ if ($route === 'ajax/workforce_match_shiftee') {
 
 if ($route === 'approval_google_chat_settings') { require_once __DIR__ . '/../app/views/approval/google_chat_settings.php'; exit; }
 if ($route === 'approval_google_chat_settings_save') { require_once __DIR__ . '/../app/views/approval/google_chat_settings_save.php'; exit; }
+if ($route === 'approval_google_chat_company_test') { require_once __DIR__ . '/../app/views/approval/google_chat_company_test.php'; exit; }
 if ($route === 'approval_google_chat_employee_dm_create') { require_once __DIR__ . '/../app/views/approval/google_chat_employee_dm_create.php'; exit; }
 if ($route === 'approval_google_chat_employee_test') { require_once __DIR__ . '/../app/views/approval/google_chat_employee_test.php'; exit; }
 if ($route === 'google_chat_event') { require_once __DIR__ . '/../app/views/approval/google_chat_event.php'; exit; }
