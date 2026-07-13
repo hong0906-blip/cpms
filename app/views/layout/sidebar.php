@@ -75,8 +75,8 @@ if ($pos !== '') $parts[] = $pos;
 $userDept = implode(' · ', $parts);
 
 $googleShortcutMenuItems = array(
-  array('id'=>'google_email_shortcut','label'=>'이메일 바로가기','href'=>'https://mail.google.com/','target'=>'_blank','rel'=>'noopener noreferrer','iconImg'=>$googleEmailIcon,'iconAlt'=>'Gmail','gradient'=>'from-red-500 to-amber-500','iconBg'=>'bg-white','iconColor'=>'text-red-600','hoverShadow'=>'hover:shadow-red-100'),
-  array('id'=>'google_chat_shortcut','label'=>'채팅 바로가기','href'=>'https://chat.google.com/','target'=>'_blank','rel'=>'noopener noreferrer','iconImg'=>$googleChatIcon,'iconAlt'=>'Google Chat','gradient'=>'from-emerald-500 to-blue-500','iconBg'=>'bg-white','iconColor'=>'text-emerald-600','hoverShadow'=>'hover:shadow-emerald-100'),
+  array('id'=>'google_email_shortcut','label'=>'이메일 바로가기','href'=>'https://mail.google.com/','target'=>'_blank','rel'=>'noopener noreferrer','iconImg'=>$googleEmailIcon,'iconAlt'=>'Gmail','gradient'=>'from-red-500 to-amber-500','itemBg'=>'bg-rose-50/60','iconBg'=>'bg-white','iconColor'=>'text-red-600','hoverShadow'=>'hover:shadow-red-100'),
+  array('id'=>'google_chat_shortcut','label'=>'채팅 바로가기','href'=>'https://chat.google.com/','target'=>'_blank','rel'=>'noopener noreferrer','iconImg'=>$googleChatIcon,'iconAlt'=>'Google Chat','gradient'=>'from-emerald-500 to-blue-500','itemBg'=>'bg-emerald-50/60','iconBg'=>'bg-white','iconColor'=>'text-emerald-600','hoverShadow'=>'hover:shadow-emerald-100'),
 );
 
 $menuItems = array(
@@ -152,7 +152,7 @@ if ($selectedMenu === $dashboardMenu) {
             class="w-full flex items-center gap-3 px-4 py-2 rounded-2xl transition-all duration-300 group relative
               <?php echo $isSelected
                 ? ('bg-gradient-to-r ' . $it['gradient'] . ' text-white shadow-lg scale-[1.02]')
-                : ('text-gray-700 hover:bg-white/80 hover:shadow-md ' . $it['hoverShadow']); ?>"
+                : ('text-gray-700 ' . (isset($it['itemBg']) ? $it['itemBg'] . ' ' : '') . 'hover:bg-white/80 hover:shadow-md ' . $it['hoverShadow']); ?>"
           >
             <div class="p-1.5 rounded-xl transition-all duration-300 <?php echo $isSelected ? 'bg-white/20' : $it['iconBg']; ?>">
               <?php if (isset($it['iconImg']) && trim((string)$it['iconImg']) !== ''): ?>
@@ -183,7 +183,7 @@ if ($selectedMenu === $dashboardMenu) {
             class="w-full flex items-center justify-center px-2 py-2 rounded-2xl transition-all duration-300 group relative
               <?php echo $isSelected
                 ? ('bg-gradient-to-r ' . $it['gradient'] . ' text-white shadow-lg scale-[1.02]')
-                : ('text-gray-700 hover:bg-white/80 hover:shadow-md ' . $it['hoverShadow']); ?>"
+                : ('text-gray-700 ' . (isset($it['itemBg']) ? $it['itemBg'] . ' ' : '') . 'hover:bg-white/80 hover:shadow-md ' . $it['hoverShadow']); ?>"
             title="<?php echo h($it['label']); ?>"
           >
             <div class="p-1.5 rounded-xl transition-all duration-300 <?php echo $isSelected ? 'bg-white/20' : $it['iconBg']; ?>">
