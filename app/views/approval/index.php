@@ -63,62 +63,31 @@ if (!function_exists('approval_index_created_desc_compare')) {
     }
 }
 
-if (!function_exists('approval_index_leave_applicant_key')) {
-    function approval_index_leave_applicant_key($row)
-    {
-        if (!is_array($row) || !isset($row['doc_type']) || strtolower(trim((string)$row['doc_type'])) !== 'leave') {
-            return '';
-        }
-        $content = approval_parse_content(isset($row['content']) ? $row['content'] : '');
-        $applicantName = isset($content['applicant_name']) ? trim((string)$content['applicant_name']) : '';
-        if ($applicantName === '' && isset($row['title'])) {
-            $title = trim((string)$row['title']);
-            $separatorPosition = strrpos($title, ' - ');
-            if ($separatorPosition !== false) {
-                $applicantName = trim(substr($title, $separatorPosition + 3));
-            }
-        }
-        if ($applicantName === '' && isset($row['created_by_name'])) {
-            $applicantName = trim((string)$row['created_by_name']);
-        }
-        $nameKey = approval_employee_person_name_base($applicantName);
-        if ($nameKey === '') {
-            return '';
-        }
-        $birthDate = isset($content['birth_date']) ? trim((string)$content['birth_date']) : '';
-        $department = isset($content['department']) ? approval_normalize_compare_text($content['department']) : '';
-        return $nameKey . '|' . $birthDate . '|' . $department;
-    }
-}
-
-if (!function_exists('approval_index_matches_completed_filters')) {
-    function approval_index_matches_completed_filters($row, $docTypeFilter, $titleFilter, $authorFilter, $dateFromFilter, $dateToFilter, $queryFilter)
-    {
-        if (!is_array($row)) {
-            return false;
-        }
-        $docType = isset($row['doc_type']) ? (string)$row['doc_type'] : '';
-        $title = isset($row['title']) ? (string)$row['title'] : '';
-        $author = isset($row['created_by_name']) ? (string)$row['created_by_name'] : '';
-        $createdDate = isset($row['created_at']) ? substr((string)$row['created_at'], 0, 10) : '';
-        if ($docTypeFilter !== '' && $docType !== $docTypeFilter) return false;
-        if ($titleFilter !== '' && stripos($title, $titleFilter) === false) return false;
-        if ($authorFilter !== '' && stripos($author, $authorFilter) === false) return false;
-        if ($dateFromFilter !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFromFilter) && $createdDate < $dateFromFilter) return false;
-        if ($dateToFilter !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateToFilter) && $createdDate > $dateToFilter) return false;
-        if ($queryFilter !== '' && stripos($title, $queryFilter) === false && stripos($author, $queryFilter) === false && stripos($docType, $queryFilter) === false) return false;
-        return true;
-    }
-}
-
 $pdo = Db::pdo();
 $u = \App\Core\Auth::user();
 $currentEmployeeIdentity = approval_current_employee_identity($pdo, $u);
 $uid = isset($currentEmployeeIdentity['id']) ? (int)$currentEmployeeIdentity['id'] : 0;
+$ownerUid = approval_current_employee_id($pdo, $u);
 $userEmail = isset($currentEmployeeIdentity['email']) ? trim((string)$currentEmployeeIdentity['email']) : '';
 $userName = isset($currentEmployeeIdentity['name']) ? trim((string)$currentEmployeeIdentity['name']) : '';
 $userEmails = isset($currentEmployeeIdentity['emails']) && is_array($currentEmployeeIdentity['emails']) ? $currentEmployeeIdentity['emails'] : array($userEmail);
 $userNames = isset($currentEmployeeIdentity['names']) && is_array($currentEmployeeIdentity['names']) ? $currentEmployeeIdentity['names'] : array($userName);
+$ownerNames = array();
+$ownerNameCandidates = array($userName, approval_current_user_name($u));
+for ($ownerNameCandidateIndex = 0; $ownerNameCandidateIndex < count($ownerNameCandidates); $ownerNameCandidateIndex++) {
+    $ownerNameCandidate = trim((string)$ownerNameCandidates[$ownerNameCandidateIndex]);
+    if ($ownerNameCandidate !== '' && !in_array($ownerNameCandidate, $ownerNames, true)) {
+        $ownerNames[] = $ownerNameCandidate;
+    }
+}
+$ownerEmails = array();
+$ownerEmailCandidates = array($userEmail, approval_current_user_email($u));
+for ($ownerEmailCandidateIndex = 0; $ownerEmailCandidateIndex < count($ownerEmailCandidates); $ownerEmailCandidateIndex++) {
+    $ownerEmailCandidate = strtolower(trim((string)$ownerEmailCandidates[$ownerEmailCandidateIndex]));
+    if ($ownerEmailCandidate !== '' && !in_array($ownerEmailCandidate, $ownerEmails, true)) {
+        $ownerEmails[] = $ownerEmailCandidate;
+    }
+}
 $isAdmin = approval_is_admin_user($u);
 $debugApproval = isset($_GET['debug_approval']) && (string)$_GET['debug_approval'] === '1';
 
@@ -219,8 +188,7 @@ $debugInfo = array(
     'params_keys' => array(),
     'sql_status' => 'not_run',
     'sql_error' => '',
-    'owner_fallback_count' => 0,
-    'owner_cluster_count' => 0
+    'owner_fallback_count' => 0
 );
 
 $docHasCreatedByEmail = false;
@@ -246,42 +214,64 @@ if ($pdo) {
     $lineParts = array();
     $refParts = array();
 
-    if ($uid > 0) {
+    if ($ownerUid > 0) {
         $ownerParts[] = "d.created_by_id = :owner_uid";
+        $params[':owner_uid'] = $ownerUid;
+    }
+    if ($uid > 0) {
         $lineParts[] = "x.approver_id = :line_uid";
         $refParts[] = "r.employee_id = :ref_uid";
-        $params[':owner_uid'] = $uid;
         $params[':line_uid'] = $uid;
         $params[':ref_uid'] = $uid;
+    }
+    for ($ownerEmailIndex = 0; $ownerEmailIndex < count($ownerEmails); $ownerEmailIndex++) {
+        $ownerIdentityEmail = strtolower(trim((string)$ownerEmails[$ownerEmailIndex]));
+        if ($ownerIdentityEmail === '') {
+            continue;
+        }
+        if ($docHasCreatedByEmail) {
+            $ownerEmailParam = ':owner_email_' . $ownerEmailIndex;
+            $ownerParts[] = "LOWER(TRIM(d.created_by_email)) = " . $ownerEmailParam;
+            $params[$ownerEmailParam] = $ownerIdentityEmail;
+        }
+        $contentEmailFields = array('writer_email', 'applicant_email', 'sender_email', 'creator_email', 'created_by_email');
+        for ($contentEmailIndex = 0; $contentEmailIndex < count($contentEmailFields); $contentEmailIndex++) {
+            $contentEmailField = $contentEmailFields[$contentEmailIndex];
+            $contentEmailParam = ':owner_content_email_' . $ownerEmailIndex . '_' . $contentEmailIndex;
+            $ownerParts[] = "LOCATE(" . $contentEmailParam . ", LOWER(COALESCE(d.content, ''))) > 0";
+            $params[$contentEmailParam] = '"' . $contentEmailField . '":"' . $ownerIdentityEmail . '"';
+        }
+    }
+    for ($ownerNameIndex = 0; $ownerNameIndex < count($ownerNames); $ownerNameIndex++) {
+        $ownerIdentityName = trim((string)$ownerNames[$ownerNameIndex]);
+        if ($ownerIdentityName === '') {
+            continue;
+        }
+        $ownerNameParam = ':owner_name_' . $ownerNameIndex;
+        $ownerParts[] = "d.created_by_name = " . $ownerNameParam;
+        $params[$ownerNameParam] = $ownerIdentityName;
+        $encodedOwnerName = json_encode($ownerIdentityName);
+        if ($encodedOwnerName !== false && $encodedOwnerName !== null) {
+            $contentNameFields = array('writer_name', 'drafter_name', 'applicant_name', 'sender_name', 'creator_name', 'created_by_name');
+            for ($contentNameIndex = 0; $contentNameIndex < count($contentNameFields); $contentNameIndex++) {
+                $contentNameField = $contentNameFields[$contentNameIndex];
+                $contentNameParam = ':owner_content_name_' . $ownerNameIndex . '_' . $contentNameIndex;
+                $ownerParts[] = "LOCATE(" . $contentNameParam . ", COALESCE(d.content, '')) > 0";
+                $params[$contentNameParam] = '"' . $contentNameField . '":' . $encodedOwnerName;
+            }
+        }
     }
     for ($userNameIndex = 0; $userNameIndex < count($userNames); $userNameIndex++) {
         $identityName = trim((string)$userNames[$userNameIndex]);
         if ($identityName === '') {
             continue;
         }
-        $ownerNameParam = ':owner_name_' . $userNameIndex;
-        $ownerNormalizedNameParam = ':owner_name_normalized_' . $userNameIndex;
         $lineNameParam = ':line_name_' . $userNameIndex;
         $refNameParam = ':ref_name_' . $userNameIndex;
-        $ownerParts[] = "d.created_by_name = " . $ownerNameParam;
-        $ownerParts[] = approval_sql_normalize_compare_text("COALESCE(d.created_by_name, '')") . " = " . $ownerNormalizedNameParam;
         $lineParts[] = "x.approver_name = " . $lineNameParam;
         $refParts[] = "r.employee_name = " . $refNameParam;
-        $params[$ownerNameParam] = $identityName;
-        $params[$ownerNormalizedNameParam] = approval_normalize_compare_text($identityName);
         $params[$lineNameParam] = $identityName;
         $params[$refNameParam] = $identityName;
-
-        $encodedUserName = json_encode($identityName);
-        if ($encodedUserName !== false && $encodedUserName !== null) {
-            $contentNameFields = array('writer_name', 'drafter_name', 'applicant_name', 'sender_name', 'creator_name', 'created_by_name');
-            for ($contentNameIndex = 0; $contentNameIndex < count($contentNameFields); $contentNameIndex++) {
-                $contentNameField = $contentNameFields[$contentNameIndex];
-                $contentNameParam = ':owner_content_name_' . $userNameIndex . '_' . $contentNameIndex;
-                $ownerParts[] = "LOCATE(" . $contentNameParam . ", COALESCE(d.content, '')) > 0";
-                $params[$contentNameParam] = '"' . $contentNameField . '":' . $encodedUserName;
-            }
-        }
     }
     for ($userEmailIndex = 0; $userEmailIndex < count($userEmails); $userEmailIndex++) {
         $identityEmail = strtolower(trim((string)$userEmails[$userEmailIndex]));
@@ -294,19 +284,6 @@ if ($pdo) {
         $refParts[] = "LOWER(TRIM(r.employee_email)) = " . $refEmailParam;
         $params[$lineEmailParam] = $identityEmail;
         $params[$refEmailParam] = $identityEmail;
-        if ($docHasCreatedByEmail) {
-            $ownerEmailParam = ':owner_email_' . $userEmailIndex;
-            $ownerParts[] = "LOWER(TRIM(d.created_by_email)) = " . $ownerEmailParam;
-            $params[$ownerEmailParam] = $identityEmail;
-        }
-
-        $contentEmailFields = array('writer_email', 'applicant_email', 'sender_email', 'creator_email', 'created_by_email');
-        for ($contentEmailIndex = 0; $contentEmailIndex < count($contentEmailFields); $contentEmailIndex++) {
-            $contentEmailField = $contentEmailFields[$contentEmailIndex];
-            $contentEmailParam = ':owner_content_email_' . $userEmailIndex . '_' . $contentEmailIndex;
-            $ownerParts[] = "LOCATE(" . $contentEmailParam . ", LOWER(COALESCE(d.content, ''))) > 0";
-            $params[$contentEmailParam] = '"' . $contentEmailField . '":"' . $identityEmail . '"';
-        }
     }
 
     $relatedParts = array();
@@ -314,7 +291,7 @@ if ($pdo) {
         $relatedParts[] = '1 = 1';
     }
     if ($isActiveAllViewer) {
-        $relatedParts[] = "UPPER(COALESCE(d.doc_status, '')) IN ('PENDING', 'DRAFT')";
+        $relatedParts[] = '1 = 1';
     }
     if (count($ownerParts) > 0) {
         $relatedParts[] = '(' . implode(' OR ', $ownerParts) . ')';
@@ -424,16 +401,9 @@ if ($pdo) {
     }
 }
 
-$ownerFallbackNeeded = (($view === 'active' && !$isActiveAllViewer) || ($view === 'completed' && !$isCompletedAllViewer) || $view === 'cancelled');
+$ownerFallbackNeeded = ($view === 'active' && !$isActiveAllViewer);
 if ($pdo && $ownerFallbackNeeded && $debugInfo['sql_status'] === 'success') {
     try {
-        if ($view === 'cancelled') {
-            $fallbackStatusWhere = "UPPER(COALESCE(d.doc_status, '')) = 'CANCELLED'";
-        } else if ($view === 'completed') {
-            $fallbackStatusWhere = "UPPER(COALESCE(d.doc_status, '')) IN ('APPROVED', 'COMPLETED')";
-        } else {
-            $fallbackStatusWhere = "UPPER(COALESCE(d.doc_status, '')) NOT IN ('CANCELLED', 'APPROVED', 'COMPLETED')";
-        }
         $fallbackSql = "SELECT d.*,
                                NULL AS my_line_status,
                                (SELECT cur.role_type
@@ -443,21 +413,12 @@ if ($pdo && $ownerFallbackNeeded && $debugInfo['sql_status'] === 'success') {
                                  ORDER BY cur.line_order ASC
                                  LIMIT 1) AS current_role
                           FROM cpms_approval_documents d
-                         WHERE " . $fallbackStatusWhere . "
+                         WHERE UPPER(COALESCE(d.doc_status, '')) NOT IN ('CANCELLED', 'APPROVED', 'COMPLETED')
                          ORDER BY d.created_at DESC, d.id DESC";
         $fallbackSt = $pdo->query($fallbackSql);
         $fallbackRows = $fallbackSt ? $fallbackSt->fetchAll(PDO::FETCH_ASSOC) : array();
         if (!is_array($fallbackRows)) {
             $fallbackRows = array();
-        }
-        if ($view === 'completed') {
-            $filteredFallbackRows = array();
-            for ($filterFallbackIndex = 0; $filterFallbackIndex < count($fallbackRows); $filterFallbackIndex++) {
-                if (approval_index_matches_completed_filters($fallbackRows[$filterFallbackIndex], $docTypeFilter, $titleFilter, $authorFilter, $dateFromFilter, $dateToFilter, $queryFilter)) {
-                    $filteredFallbackRows[] = $fallbackRows[$filterFallbackIndex];
-                }
-            }
-            $fallbackRows = $filteredFallbackRows;
         }
 
         $visibleDocumentIds = array();
@@ -467,42 +428,16 @@ if ($pdo && $ownerFallbackNeeded && $debugInfo['sql_status'] === 'success') {
             }
         }
 
-        $ownedLeaveApplicantKeys = array();
-        for ($ownedVisibleIndex = 0; $ownedVisibleIndex < count($rows); $ownedVisibleIndex++) {
-            if (!approval_is_document_owner($pdo, $rows[$ownedVisibleIndex], $u)) {
-                continue;
-            }
-            $ownedVisibleKey = approval_index_leave_applicant_key($rows[$ownedVisibleIndex]);
-            if ($ownedVisibleKey !== '') {
-                $ownedLeaveApplicantKeys[$ownedVisibleKey] = 1;
-            }
-        }
-        for ($ownedFallbackIndex = 0; $ownedFallbackIndex < count($fallbackRows); $ownedFallbackIndex++) {
-            if (!approval_is_document_owner($pdo, $fallbackRows[$ownedFallbackIndex], $u)) {
-                continue;
-            }
-            $ownedFallbackKey = approval_index_leave_applicant_key($fallbackRows[$ownedFallbackIndex]);
-            if ($ownedFallbackKey !== '') {
-                $ownedLeaveApplicantKeys[$ownedFallbackKey] = 1;
-            }
-        }
-
         for ($fallbackIndex = 0; $fallbackIndex < count($fallbackRows); $fallbackIndex++) {
             $fallbackRow = $fallbackRows[$fallbackIndex];
             $fallbackId = isset($fallbackRow['id']) ? (int)$fallbackRow['id'] : 0;
             if ($fallbackId <= 0 || isset($visibleDocumentIds[$fallbackId])) {
                 continue;
             }
-            $isDirectOwner = approval_is_document_owner($pdo, $fallbackRow, $u);
-            $fallbackApplicantKey = approval_index_leave_applicant_key($fallbackRow);
-            $isOwnedLeaveCluster = (!$isDirectOwner && $fallbackApplicantKey !== '' && isset($ownedLeaveApplicantKeys[$fallbackApplicantKey]));
-            if ($isDirectOwner || $isOwnedLeaveCluster) {
+            if (approval_is_document_owner($pdo, $fallbackRow, $u)) {
                 $rows[] = $fallbackRow;
                 $visibleDocumentIds[$fallbackId] = 1;
                 $debugInfo['owner_fallback_count']++;
-                if ($isOwnedLeaveCluster) {
-                    $debugInfo['owner_cluster_count']++;
-                }
             }
         }
         if ($debugInfo['owner_fallback_count'] > 0) {
@@ -604,7 +539,6 @@ $approvalPageParams['view'] = $view;
             <div>params: <?php echo h(implode(', ', $debugInfo['params_keys'])); ?></div>
             <div>sql: <?php echo h($debugInfo['sql_status']); ?></div>
             <div>ownerFallback: <?php echo (int)$debugInfo['owner_fallback_count']; ?></div>
-            <div>ownerCluster: <?php echo (int)$debugInfo['owner_cluster_count']; ?></div>
             <?php if ($debugInfo['sql_error'] !== '') { ?>
                 <div>error: <?php echo h($debugInfo['sql_error']); ?></div>
             <?php } ?>

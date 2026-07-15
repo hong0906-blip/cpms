@@ -422,9 +422,12 @@ if (!function_exists('approval_store_build_notice_message_safe')) {
 }
 
 $creatorIdentity = approval_current_employee_identity($pdo, $user);
-$creatorEmployeeId = isset($creatorIdentity['id']) ? (int)$creatorIdentity['id'] : 0;
-$creatorName = isset($creatorIdentity['name']) ? trim((string)$creatorIdentity['name']) : approval_current_user_name($user);
-$creatorEmail = isset($creatorIdentity['email']) ? trim((string)$creatorIdentity['email']) : approval_current_user_email($user);
+$documentOwnerEmployeeId = approval_current_employee_id($pdo, $user);
+$documentOwnerName = isset($creatorIdentity['name']) ? trim((string)$creatorIdentity['name']) : approval_current_user_name($user);
+$documentOwnerEmail = isset($creatorIdentity['email']) ? trim((string)$creatorIdentity['email']) : approval_current_user_email($user);
+$creatorEmployeeId = $documentOwnerEmployeeId;
+$creatorName = $documentOwnerName;
+$creatorEmail = $documentOwnerEmail;
 $creatorEmployee = null;
 if ($creatorEmployeeId > 0) {
     try {
@@ -626,7 +629,7 @@ if ($isManagementOnlyDoc) {
         if ($creatorEmployeeId > 0 && (int)$resolvedApplicantEmployee['id'] === (int)$creatorEmployeeId) {
             $resolvedApplicantMatchesCurrentUser = true;
         } else {
-            $currentIdentityNames = isset($creatorIdentity['names']) && is_array($creatorIdentity['names']) ? $creatorIdentity['names'] : array($creatorName);
+            $currentIdentityNames = array($documentOwnerName, approval_current_user_name($user));
             $applicantBaseName = approval_employee_person_name_base($contentData['applicant_name']);
             for ($currentIdentityNameIndex = 0; $currentIdentityNameIndex < count($currentIdentityNames); $currentIdentityNameIndex++) {
                 if ($applicantBaseName !== '' && $applicantBaseName === approval_employee_person_name_base($currentIdentityNames[$currentIdentityNameIndex])) {
@@ -637,17 +640,13 @@ if ($isManagementOnlyDoc) {
         }
     }
     if ($resolvedApplicantMatchesCurrentUser) {
-        $creatorEmployee = $resolvedApplicantEmployee;
-        $creatorEmployeeId = (int)$resolvedApplicantEmployee['id'];
         if (isset($resolvedApplicantEmployee['name']) && trim((string)$resolvedApplicantEmployee['name']) !== '') {
-            $creatorName = trim((string)$resolvedApplicantEmployee['name']);
-            $contentData['applicant_name'] = $creatorName;
-            $contentData['applicant_sign_name'] = $creatorName;
+            $resolvedApplicantName = trim((string)$resolvedApplicantEmployee['name']);
+            $contentData['applicant_name'] = $resolvedApplicantName;
+            $contentData['applicant_sign_name'] = $resolvedApplicantName;
         }
         if (isset($resolvedApplicantEmployee['email']) && trim((string)$resolvedApplicantEmployee['email']) !== '') {
-            $creatorEmail = trim((string)$resolvedApplicantEmployee['email']);
-            $contentData['applicant_email'] = $creatorEmail;
-            $contentData['writer_email'] = $creatorEmail;
+            $contentData['applicant_email'] = trim((string)$resolvedApplicantEmployee['email']);
         }
         if (isset($resolvedApplicantEmployee['department']) && trim((string)$resolvedApplicantEmployee['department']) !== '') {
             $contentData['department'] = trim((string)$resolvedApplicantEmployee['department']);
@@ -735,12 +734,12 @@ try {
     $initialDocStatus = 'PENDING';
     $docColumns = array('doc_type', 'title', 'content', 'doc_status', 'current_step_order', 'created_by_id', 'created_by_name', 'created_at', 'updated_at');
     $docValues = array(':t', ':ti', ':c', ':doc_status', '1', ':uid', ':un', 'NOW()', 'NOW()');
-    $docParams = array(':t' => $docType, ':ti' => $title, ':c' => json_encode($contentData), ':uid' => $creatorEmployeeId, ':un' => $creatorName);
+    $docParams = array(':t' => $docType, ':ti' => $title, ':c' => json_encode($contentData), ':uid' => $documentOwnerEmployeeId, ':un' => $documentOwnerName);
     $docParams[':doc_status'] = $initialDocStatus;
     if ($hasCreatorEmail) {
         $docColumns[] = 'created_by_email';
         $docValues[] = ':ue';
-        $docParams[':ue'] = $creatorEmail;
+        $docParams[':ue'] = $documentOwnerEmail;
     }
     if ($hasDelegateLevel) {
         $docColumns[] = 'delegate_level';
