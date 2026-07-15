@@ -145,11 +145,46 @@ if (!function_exists('approval_normalize_compare_text')) {
     function approval_normalize_compare_text($value)
     {
         $value = trim((string)$value);
-        $value = str_replace(array(' ', "\t", "\r", "\n", '-', '_', '/', '.', ','), '', $value);
+        $value = str_replace(array(' ', "\t", "\r", "\n", '-', '_', '/', '.', ',', "\xC2\xA0", "\xE2\x80\x8B", "\xEF\xBB\xBF"), '', $value);
+        $unicodeClean = @preg_replace('/[\p{Z}\p{C}]+/u', '', $value);
+        if ($unicodeClean !== null) {
+            $value = $unicodeClean;
+        }
         if (function_exists('mb_strtolower')) {
             return mb_strtolower($value, 'UTF-8');
         }
         return strtolower($value);
+    }
+}
+
+if (!function_exists('approval_sql_normalize_compare_text')) {
+    function approval_sql_normalize_compare_text($expression)
+    {
+        return "LOWER(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(" . $expression . "), ' ', ''), CHAR(9), ''), CHAR(13), ''), CHAR(10), ''), '-', ''), '_', ''), '/', ''), '.', ''), ',', ''), UNHEX('C2A0'), ''), UNHEX('E2808B'), ''), UNHEX('EFBBBF'), ''))";
+    }
+}
+
+if (!function_exists('approval_employee_person_name_base')) {
+    function approval_employee_person_name_base($value)
+    {
+        $name = approval_normalize_compare_text($value);
+        if ($name === '') {
+            return '';
+        }
+        $suffixes = array(
+            '대표이사', '전무이사', '상무이사', '사업부장', '현장소장',
+            '부사장', '본부장', '센터장', '실장', '팀장', '소장',
+            '부장', '차장', '과장', '대리', '주임', '사원',
+            '수석', '책임', '선임', '매니저', '전무', '상무', '이사'
+        );
+        for ($i = 0; $i < count($suffixes); $i++) {
+            $suffix = approval_normalize_compare_text($suffixes[$i]);
+            $suffixLength = strlen($suffix);
+            if ($suffixLength > 0 && strlen($name) > $suffixLength && substr($name, -$suffixLength) === $suffix) {
+                return substr($name, 0, strlen($name) - $suffixLength);
+            }
+        }
+        return $name;
     }
 }
 
@@ -1002,7 +1037,7 @@ if (!function_exists('approval_current_employee_id')) {
         $email = approval_current_user_email($user);
         if ($pdo && $email !== '') {
             try {
-                $st = $pdo->prepare("SELECT id FROM employees WHERE email=:email LIMIT 1");
+                $st = $pdo->prepare("SELECT id FROM employees WHERE LOWER(TRIM(email))=LOWER(TRIM(:email)) LIMIT 1");
                 $st->execute(array(':email' => $email));
                 $id = (int)$st->fetchColumn();
                 if ($id > 0) {
@@ -1015,8 +1050,8 @@ if (!function_exists('approval_current_employee_id')) {
         $name = approval_current_user_name($user);
         if ($pdo && $name !== '') {
             try {
-                $st = $pdo->prepare("SELECT id FROM employees WHERE name=:name LIMIT 1");
-                $st->execute(array(':name' => $name));
+                $st = $pdo->prepare("SELECT id FROM employees WHERE " . approval_sql_normalize_compare_text('name') . "=:name LIMIT 1");
+                $st->execute(array(':name' => approval_normalize_compare_text($name)));
                 $id = (int)$st->fetchColumn();
                 if ($id > 0) {
                     return $id;
@@ -1033,6 +1068,190 @@ if (!function_exists('approval_current_employee_id')) {
     }
 }
 
+if (!function_exists('approval_current_employee_identity')) {
+    function approval_current_employee_identity($pdo, $user)
+    {
+        $rawName = approval_current_user_name($user);
+        $rawEmail = approval_current_user_email($user);
+        $rawId = is_array($user) && isset($user['id']) ? (int)$user['id'] : 0;
+        $cacheKey = ($pdo && is_object($pdo) ? spl_object_hash($pdo) : 'no-pdo') . '|' . $rawId . '|' . strtolower($rawEmail) . '|' . $rawName;
+        static $cache = array();
+        if (isset($cache[$cacheKey])) {
+            return $cache[$cacheKey];
+        }
+
+        $identity = array(
+            'id' => approval_current_employee_id($pdo, $user),
+            'name' => $rawName,
+            'email' => $rawEmail,
+            'names' => array(),
+            'emails' => array()
+        );
+
+        $lineIdentityNames = array();
+        $lineIdentityEmails = array();
+        if ($pdo) {
+            try {
+                $row = null;
+                if ((int)$identity['id'] > 0) {
+                    $st = $pdo->prepare("SELECT id,name,email FROM employees WHERE id=:id LIMIT 1");
+                    $st->execute(array(':id' => (int)$identity['id']));
+                    $row = $st->fetch(PDO::FETCH_ASSOC);
+                }
+                if (!is_array($row) && $rawEmail !== '') {
+                    $st = $pdo->prepare("SELECT id,name,email FROM employees WHERE LOWER(TRIM(email))=LOWER(TRIM(:email)) LIMIT 1");
+                    $st->execute(array(':email' => $rawEmail));
+                    $row = $st->fetch(PDO::FETCH_ASSOC);
+                }
+                if (!is_array($row) && $rawName !== '') {
+                    $st = $pdo->prepare("SELECT id,name,email FROM employees WHERE " . approval_sql_normalize_compare_text('name') . "=:name LIMIT 1");
+                    $st->execute(array(':name' => approval_normalize_compare_text($rawName)));
+                    $row = $st->fetch(PDO::FETCH_ASSOC);
+                }
+                if (is_array($row)) {
+                    $identity['id'] = isset($row['id']) ? (int)$row['id'] : (int)$identity['id'];
+                    if (isset($row['name']) && trim((string)$row['name']) !== '') {
+                        $identity['name'] = trim((string)$row['name']);
+                    }
+                    if (isset($row['email']) && trim((string)$row['email']) !== '') {
+                        $identity['email'] = trim((string)$row['email']);
+                    }
+                }
+            } catch (Exception $e) {
+            }
+
+            try {
+                $lineIdentityParts = array();
+                $lineIdentityParams = array();
+                if ((int)$identity['id'] > 0) {
+                    $lineIdentityParts[] = 'approver_id=:identity_line_id';
+                    $lineIdentityParams[':identity_line_id'] = (int)$identity['id'];
+                }
+                $identityEmailCandidates = array($rawEmail, isset($identity['email']) ? $identity['email'] : '');
+                $seenIdentityEmails = array();
+                for ($i = 0; $i < count($identityEmailCandidates); $i++) {
+                    $identityLineEmail = strtolower(trim((string)$identityEmailCandidates[$i]));
+                    if ($identityLineEmail === '' || in_array($identityLineEmail, $seenIdentityEmails, true)) {
+                        continue;
+                    }
+                    $seenIdentityEmails[] = $identityLineEmail;
+                    $identityLineEmailParam = ':identity_line_email_' . $i;
+                    $lineIdentityParts[] = 'LOWER(TRIM(approver_email))=' . $identityLineEmailParam;
+                    $lineIdentityParams[$identityLineEmailParam] = $identityLineEmail;
+                }
+                if (count($lineIdentityParts) > 0) {
+                    $lineIdentitySql = "SELECT approver_id,approver_name,approver_email
+                                          FROM cpms_approval_lines
+                                         WHERE " . implode(' OR ', $lineIdentityParts) . "
+                                         ORDER BY id DESC
+                                         LIMIT 20";
+                    $lineIdentitySt = $pdo->prepare($lineIdentitySql);
+                    $lineIdentitySt->execute($lineIdentityParams);
+                    $lineIdentityRows = $lineIdentitySt->fetchAll(PDO::FETCH_ASSOC);
+                    if (!is_array($lineIdentityRows)) {
+                        $lineIdentityRows = array();
+                    }
+                    for ($i = 0; $i < count($lineIdentityRows); $i++) {
+                        $lineIdentityRow = $lineIdentityRows[$i];
+                        if ((int)$identity['id'] <= 0 && isset($lineIdentityRow['approver_id']) && (int)$lineIdentityRow['approver_id'] > 0) {
+                            $identity['id'] = (int)$lineIdentityRow['approver_id'];
+                        }
+                        if (isset($lineIdentityRow['approver_name']) && trim((string)$lineIdentityRow['approver_name']) !== '') {
+                            $lineIdentityNames[] = trim((string)$lineIdentityRow['approver_name']);
+                        }
+                        if (isset($lineIdentityRow['approver_email']) && trim((string)$lineIdentityRow['approver_email']) !== '') {
+                            $lineIdentityEmails[] = trim((string)$lineIdentityRow['approver_email']);
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+            }
+        }
+
+        $nameCandidates = array_merge(array($rawName, isset($identity['name']) ? $identity['name'] : ''), $lineIdentityNames);
+        $expandedNameCandidates = array();
+        for ($i = 0; $i < count($nameCandidates); $i++) {
+            $originalCandidate = trim((string)$nameCandidates[$i]);
+            if ($originalCandidate !== '') {
+                $expandedNameCandidates[] = $originalCandidate;
+                $baseCandidate = approval_employee_person_name_base($originalCandidate);
+                if ($baseCandidate !== '' && approval_normalize_compare_text($originalCandidate) !== $baseCandidate) {
+                    $expandedNameCandidates[] = $baseCandidate;
+                }
+            }
+        }
+        for ($i = 0; $i < count($expandedNameCandidates); $i++) {
+            $candidate = trim((string)$expandedNameCandidates[$i]);
+            $candidateKey = approval_normalize_compare_text($candidate);
+            if ($candidate === '' || $candidateKey === '') {
+                continue;
+            }
+            $exists = false;
+            for ($j = 0; $j < count($identity['names']); $j++) {
+                if (approval_normalize_compare_text($identity['names'][$j]) === $candidateKey) {
+                    $exists = true;
+                    break;
+                }
+            }
+            if (!$exists) {
+                $identity['names'][] = $candidate;
+            }
+        }
+
+        $emailCandidates = array_merge(array($rawEmail, isset($identity['email']) ? $identity['email'] : ''), $lineIdentityEmails);
+        for ($i = 0; $i < count($emailCandidates); $i++) {
+            $candidate = strtolower(trim((string)$emailCandidates[$i]));
+            if ($candidate !== '' && !in_array($candidate, $identity['emails'], true)) {
+                $identity['emails'][] = $candidate;
+            }
+        }
+
+        $cache[$cacheKey] = $identity;
+        return $identity;
+    }
+}
+
+if (!function_exists('approval_employees_by_person_name')) {
+    function approval_employees_by_person_name($pdo, $name)
+    {
+        static $cache = array();
+        $nameKey = approval_employee_person_name_base($name);
+        if (!$pdo || $nameKey === '') {
+            return array();
+        }
+        $cacheKey = (is_object($pdo) ? spl_object_hash($pdo) : 'no-pdo') . '|' . $nameKey;
+        if (isset($cache[$cacheKey])) {
+            return $cache[$cacheKey];
+        }
+        $rows = array();
+        try {
+            $sql = "SELECT id,name,email FROM employees WHERE " . approval_sql_normalize_compare_text('name') . "=:name ORDER BY is_active DESC,id ASC";
+            $st = $pdo->prepare($sql);
+            $st->execute(array(':name' => $nameKey));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($rows)) {
+                $rows = array();
+            }
+            if (count($rows) === 0) {
+                $allSt = $pdo->query("SELECT id,name,email FROM employees ORDER BY is_active DESC,id ASC");
+                $allRows = $allSt ? $allSt->fetchAll(PDO::FETCH_ASSOC) : array();
+                if (is_array($allRows)) {
+                    for ($allEmployeeIndex = 0; $allEmployeeIndex < count($allRows); $allEmployeeIndex++) {
+                        $allEmployeeName = isset($allRows[$allEmployeeIndex]['name']) ? $allRows[$allEmployeeIndex]['name'] : '';
+                        if (approval_employee_person_name_base($allEmployeeName) === $nameKey) {
+                            $rows[] = $allRows[$allEmployeeIndex];
+                        }
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            $rows = array();
+        }
+        $cache[$cacheKey] = $rows;
+        return $rows;
+    }
+}
+
 if (!function_exists('approval_is_document_owner')) {
     function approval_is_document_owner($pdo, $docRow, $user)
     {
@@ -1040,18 +1259,79 @@ if (!function_exists('approval_is_document_owner')) {
             return false;
         }
 
-        $uid = approval_current_employee_id($pdo, $user);
-        $userName = approval_current_user_name($user);
-        $userEmail = approval_current_user_email($user);
+        $identity = approval_current_employee_identity($pdo, $user);
+        $uid = isset($identity['id']) ? (int)$identity['id'] : 0;
+        $userName = isset($identity['name']) ? trim((string)$identity['name']) : '';
+        $userEmail = isset($identity['email']) ? trim((string)$identity['email']) : '';
+        $userNames = isset($identity['names']) && is_array($identity['names']) ? $identity['names'] : array($userName);
+        $userEmails = isset($identity['emails']) && is_array($identity['emails']) ? $identity['emails'] : array($userEmail);
 
         if ($uid > 0 && isset($docRow['created_by_id']) && (int)$docRow['created_by_id'] === (int)$uid) {
             return true;
         }
-        if ($userName !== '' && isset($docRow['created_by_name']) && trim((string)$docRow['created_by_name']) === $userName) {
-            return true;
+        if (isset($docRow['created_by_name'])) {
+            $documentCreatorName = approval_normalize_compare_text($docRow['created_by_name']);
+            for ($i = 0; $i < count($userNames); $i++) {
+                if ($documentCreatorName !== '' && $documentCreatorName === approval_normalize_compare_text($userNames[$i])) {
+                    return true;
+                }
+            }
         }
-        if ($userEmail !== '' && isset($docRow['created_by_email']) && trim((string)$docRow['created_by_email']) === $userEmail) {
-            return true;
+        if (isset($docRow['created_by_email'])) {
+            $documentCreatorEmail = strtolower(trim((string)$docRow['created_by_email']));
+            if ($documentCreatorEmail !== '' && in_array($documentCreatorEmail, $userEmails, true)) {
+                return true;
+            }
+        }
+
+        $content = approval_parse_content(isset($docRow['content']) ? $docRow['content'] : '');
+        if (is_array($content)) {
+            $docType = isset($docRow['doc_type']) ? strtolower(trim((string)$docRow['doc_type'])) : '';
+            $leaveApplicantName = isset($content['applicant_name']) ? trim((string)$content['applicant_name']) : '';
+            if ($docType === 'leave' && $leaveApplicantName === '' && isset($docRow['title'])) {
+                $leaveTitle = trim((string)$docRow['title']);
+                $leaveTitleSeparator = strrpos($leaveTitle, ' - ');
+                if ($leaveTitleSeparator !== false) {
+                    $leaveApplicantName = trim(substr($leaveTitle, $leaveTitleSeparator + 3));
+                }
+            }
+            if ($docType === 'leave' && $leaveApplicantName !== '') {
+                $applicantEmployees = approval_employees_by_person_name($pdo, $leaveApplicantName);
+                for ($applicantEmployeeIndex = 0; $applicantEmployeeIndex < count($applicantEmployees); $applicantEmployeeIndex++) {
+                    $applicantEmployee = $applicantEmployees[$applicantEmployeeIndex];
+                    if ($uid > 0 && isset($applicantEmployee['id']) && (int)$applicantEmployee['id'] === $uid) {
+                        return true;
+                    }
+                    $applicantEmployeeEmail = isset($applicantEmployee['email']) ? strtolower(trim((string)$applicantEmployee['email'])) : '';
+                    if ($applicantEmployeeEmail !== '' && in_array($applicantEmployeeEmail, $userEmails, true)) {
+                        return true;
+                    }
+                }
+            }
+            if (count($userEmails) > 0) {
+                $emailFields = array('writer_email', 'applicant_email', 'sender_email', 'creator_email', 'created_by_email');
+                for ($i = 0; $i < count($emailFields); $i++) {
+                    $field = $emailFields[$i];
+                    if (isset($content[$field]) && in_array(strtolower(trim((string)$content[$field])), $userEmails, true)) {
+                        return true;
+                    }
+                }
+            }
+            if (count($userNames) > 0) {
+                $nameFields = array('writer_name', 'drafter_name', 'applicant_name', 'sender_name', 'creator_name', 'created_by_name');
+                for ($i = 0; $i < count($nameFields); $i++) {
+                    $field = $nameFields[$i];
+                    if (!isset($content[$field])) {
+                        continue;
+                    }
+                    $contentName = approval_normalize_compare_text($content[$field]);
+                    for ($j = 0; $j < count($userNames); $j++) {
+                        if ($contentName !== '' && $contentName === approval_normalize_compare_text($userNames[$j])) {
+                            return true;
+                        }
+                    }
+                }
+            }
         }
         return false;
     }
@@ -1063,9 +1343,10 @@ if (!function_exists('approval_is_line_approver')) {
         if (!$pdo || (int)$documentId <= 0) {
             return false;
         }
-        $uid = approval_current_employee_id($pdo, $user);
-        $userEmail = approval_current_user_email($user);
-        $userName = approval_current_user_name($user);
+        $identity = approval_current_employee_identity($pdo, $user);
+        $uid = isset($identity['id']) ? (int)$identity['id'] : 0;
+        $userEmail = isset($identity['email']) ? trim((string)$identity['email']) : '';
+        $userName = isset($identity['name']) ? trim((string)$identity['name']) : '';
         $parts = array();
         $params = array(':document_id' => (int)$documentId);
         if ($uid > 0) {
@@ -1100,9 +1381,10 @@ if (!function_exists('approval_is_document_reference')) {
         if (!$pdo || (int)$documentId <= 0 || !approval_table_exists($pdo, 'cpms_approval_references')) {
             return false;
         }
-        $uid = approval_current_employee_id($pdo, $user);
-        $userEmail = approval_current_user_email($user);
-        $userName = approval_current_user_name($user);
+        $identity = approval_current_employee_identity($pdo, $user);
+        $uid = isset($identity['id']) ? (int)$identity['id'] : 0;
+        $userEmail = isset($identity['email']) ? trim((string)$identity['email']) : '';
+        $userName = isset($identity['name']) ? trim((string)$identity['name']) : '';
         $parts = array();
         $params = array(':document_id' => (int)$documentId);
         if ($uid > 0) {
@@ -1197,6 +1479,59 @@ if (!function_exists('approval_is_management_department_user')) {
     }
 }
 
+if (!function_exists('approval_is_development_department_value')) {
+    function approval_is_development_department_value($dept)
+    {
+        $dept = trim((string)$dept);
+        if ($dept === '개발' || $dept === '개발부' || $dept === '개발팀') {
+            return true;
+        }
+        return false;
+    }
+}
+
+if (!function_exists('approval_is_development_department_user')) {
+    function approval_is_development_department_user($pdo, $user)
+    {
+        if (is_array($user) && isset($user['department']) && approval_is_development_department_value($user['department'])) {
+            return true;
+        }
+        if (!$pdo || !is_array($user) || !approval_table_exists($pdo, 'employees') || !approval_table_column_exists($pdo, 'employees', 'department')) {
+            return false;
+        }
+        try {
+            $parts = array();
+            $params = array();
+            $employeeId = approval_current_employee_id($pdo, $user);
+            $email = approval_current_user_email($user);
+            $name = approval_current_user_name($user);
+
+            if ($employeeId > 0) {
+                $parts[] = 'id=:id';
+                $params[':id'] = $employeeId;
+            }
+            if ($email !== '') {
+                $parts[] = 'LOWER(TRIM(email))=LOWER(TRIM(:email))';
+                $params[':email'] = $email;
+            }
+            if ($name !== '') {
+                $parts[] = 'name=:name';
+                $params[':name'] = $name;
+            }
+            if (count($parts) === 0) {
+                return false;
+            }
+
+            $sql = "SELECT department FROM employees WHERE " . implode(' OR ', $parts) . " LIMIT 1";
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+            return approval_is_development_department_value($st->fetchColumn());
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
 if (!function_exists('approval_is_ceo_user')) {
     function approval_is_ceo_user($pdo, $user)
     {
@@ -1265,6 +1600,13 @@ if (!function_exists('approval_can_view_all_completed_documents')) {
     }
 }
 
+if (!function_exists('approval_can_view_all_active_documents')) {
+    function approval_can_view_all_active_documents($pdo, $user)
+    {
+        return approval_is_development_department_user($pdo, $user);
+    }
+}
+
 if (!function_exists('approval_can_view_document')) {
     function approval_can_view_document($pdo, $docRow, $user)
     {
@@ -1272,6 +1614,9 @@ if (!function_exists('approval_can_view_document')) {
             return false;
         }
         $status = strtoupper(trim((string)(isset($docRow['doc_status']) ? $docRow['doc_status'] : '')));
+        if (in_array($status, array('PENDING', 'DRAFT'), true) && approval_can_view_all_active_documents($pdo, $user)) {
+            return true;
+        }
         if (approval_is_management_only_doc_type(isset($docRow['doc_type']) ? $docRow['doc_type'] : '')) {
             if (approval_is_management_department_user($pdo, $user)) {
                 return true;

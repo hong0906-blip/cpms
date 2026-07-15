@@ -170,63 +170,10 @@ for ($i = count($allReq) - 1; $i >= 0; $i--) {
             <h2 class="text-3xl font-extrabold">대시보드</h2>
             <p class="text-blue-100 text-lg mt-2"><?php echo ($userName !== '') ? (h($userName) . '님, ') : ''; ?>오늘도 안전하게 진행하세요.</p>
         </div>
-        <div class="cpms-attendance-actions flex flex-wrap items-center gap-3"><!-- 직원 대시보드 UI 정리 -->
-            <?php
-            require_once __DIR__.'/../attendance/common.php';
-            $eid_btn = attendance_employee_id($pdo);
-            $today_btn = attendance_today();
-            $row_btn = attendance_today_record($pdo, $eid_btn);
-            $todayRecordId = ($row_btn && isset($row_btn['id'])) ? (int)$row_btn['id'] : 0;
-            $todayCheckIn = ($row_btn && isset($row_btn['check_in']) && $row_btn['check_in']) ? (string)$row_btn['check_in'] : '';
-            $todayCheckOut = ($row_btn && isset($row_btn['check_out']) && $row_btn['check_out']) ? (string)$row_btn['check_out'] : '';
-            $attendanceGeofence = attendance_geofence_settings($pdo);
-            $canCheckIn = false;
-            $canCheckOut = false;
-            $showDone = false;
-            $hasEmployee = ((int)$eid_btn > 0);
-            if ($hasEmployee) {
-                if (!$row_btn || $todayCheckIn === '') {
-                    $canCheckIn = true;
-                } else if ($todayCheckIn !== '' && $todayCheckOut === '') {
-                    $canCheckOut = true;
-                } else {
-                    $showDone = true;
-                }
-            }
-            $debugAttendance = isset($_GET['debug_attendance']) && (string)$_GET['debug_attendance'] === '1';
-            ?>
-            <?php if (!$hasEmployee): ?>
-                <div class='px-5 py-3 rounded-2xl bg-amber-100 text-amber-800 font-extrabold text-base'>직원 정보를 찾을 수 없습니다.</div>
-            <?php else: ?>
-                <?php if ($canCheckIn): ?>
-                    <form method='post' action='?r=attendance/check_in'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><button class='px-5 py-3 rounded-2xl bg-white text-blue-700 font-extrabold text-base'>출근</button></form>
-                <?php endif; ?>
-                <?php if ($canCheckOut): ?>
-                    <form method='post' action='?r=attendance/check_out'><input type='hidden' name='_csrf' value='<?php echo h(csrf_token());?>'><button class='px-5 py-3 rounded-2xl bg-emerald-100 text-emerald-700 font-extrabold text-base'>퇴근</button></form>
-                <?php endif; ?>
-                <?php if ($showDone): ?>
-                    <div class='px-5 py-3 rounded-2xl bg-slate-100 text-slate-700 font-extrabold text-base'>오늘 근무 완료</div>
-                <?php endif; ?>
-            <?php endif; ?>
-            <button type='button' data-attendance-request-open class='cpms-mobile-hide px-5 py-3 rounded-2xl bg-blue-900/80 text-white font-extrabold text-base border border-white/40'>출퇴근 요청</button>
-            <?php if ($debugAttendance): ?>
-                <div class='basis-full mt-1 p-3 rounded-xl bg-black/60 text-white text-xs leading-6'>
-                    employee_id: <?php echo h((string)$eid_btn); ?><br>
-                    attendance_today(): <?php echo h($today_btn); ?><br>
-                    attendance_now(): <?php echo h(attendance_now()); ?><br>
-                    today_record_id: <?php echo h($todayRecordId > 0 ? (string)$todayRecordId : '없음'); ?><br>
-                    today_record_work_date: <?php echo h(($row_btn && isset($row_btn['work_date']) && $row_btn['work_date']) ? (string)$row_btn['work_date'] : '없음'); ?><br>
-                    today_check_in: <?php echo h($todayCheckIn !== '' ? $todayCheckIn : '없음'); ?><br>
-                    today_check_out: <?php echo h($todayCheckOut !== '' ? $todayCheckOut : '없음'); ?><br>
-                    canCheckIn: <?php echo $canCheckIn ? 'true' : 'false'; ?><br>
-                    canCheckOut: <?php echo $canCheckOut ? 'true' : 'false'; ?>
-                </div>
-            <?php endif; ?>
-        </div>  
+        <?php require __DIR__ . '/partials/attendance_actions.php'; ?>
     </div>
 </div>
 
-<?php cpms_render_dashboard_notice_modal(); ?>
 <?php cpms_render_dashboard_birthday_modal($pdo); ?>
 
 <?php require __DIR__ . '/partials/employee_attendance_section.php'; ?>

@@ -68,6 +68,10 @@ if (is_array($saveResult)
     && (int)$saveResult['item']['is_active'] === 1) {
     try {
         $pdo = \App\Core\Db::pdo();
+        $currentEmployeeId = cpms_dashboard_notice_current_employee_id($pdo);
+        if ($currentEmployeeId > 0) {
+            cpms_dashboard_notice_mark_read($pdo, $saveResult['item']['id'], $currentEmployeeId);
+        }
         // 회사 전체방 알림과 중복되지 않도록 기존 전 직원 개인 DM 발송 대신 전체방 1회 발송을 사용한다.
         cpms_dashboard_notice_send_created_company_chat($pdo, $saveResult['item']);
     } catch (Exception $e) {

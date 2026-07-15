@@ -1075,6 +1075,7 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
                     bank_name VARCHAR(50) NULL,
                     account_holder VARCHAR(50) NULL,
                     company_name VARCHAR(80) NULL,
+                    is_outsourcing TINYINT(1) NOT NULL DEFAULT 0,
                     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
@@ -1104,6 +1105,7 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
                 'bank_name' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN bank_name VARCHAR(50) NULL AFTER bank_account",
                 'account_holder' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN account_holder VARCHAR(50) NULL AFTER bank_name",
                 'company_name' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN company_name VARCHAR(80) NULL AFTER account_holder",
+                'is_outsourcing' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN is_outsourcing TINYINT(1) NOT NULL DEFAULT 0 AFTER company_name",
             );
             foreach ($addCols as $col => $sql) {
                 if (isset($colMap[$col])) continue;
@@ -1541,6 +1543,7 @@ if (!function_exists('cpms_build_project_worker_rows')) {
                 'bank_name' => isset($worker['bank_name']) ? (string)$worker['bank_name'] : '',
                 'account_holder' => isset($worker['account_holder']) ? (string)$worker['account_holder'] : '',
                 'company_name' => (isset($worker['agency_name_snapshot']) && trim((string)$worker['agency_name_snapshot']) !== '') ? (string)$worker['agency_name_snapshot'] : (isset($worker['company_name']) ? (string)$worker['company_name'] : ''),
+                'is_outsourcing' => (isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 1 : 0,
                 'job_type_snapshot' => isset($worker['job_type_snapshot']) ? (string)$worker['job_type_snapshot'] : '',
                 'agency_name_snapshot' => isset($worker['agency_name_snapshot']) ? (string)$worker['agency_name_snapshot'] : '',
                 'worker_name_snapshot' => isset($worker['worker_name_snapshot']) ? (string)$worker['worker_name_snapshot'] : '',
@@ -1620,6 +1623,7 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'bank_name' => isset($data['bank_name']) ? (string)$data['bank_name'] : '',
                 'account_holder' => isset($data['account_holder']) ? (string)$data['account_holder'] : '',
                 'company_name' => (isset($data['company_name']) && trim((string)$data['company_name']) !== '') ? (string)$data['company_name'] : '창명건설',
+                'is_outsourcing' => (isset($data['is_outsourcing']) && (int)$data['is_outsourcing'] === 1) ? 1 : 0,
                 'job_type_snapshot' => isset($data['job_type_snapshot']) ? (string)$data['job_type_snapshot'] : '',
                 'agency_name_snapshot' => isset($data['agency_name_snapshot']) ? (string)$data['agency_name_snapshot'] : '',
                 'worker_name_snapshot' => isset($data['worker_name_snapshot']) ? (string)$data['worker_name_snapshot'] : '',

@@ -18,9 +18,11 @@ $attendanceRouteName = $attendanceEmbeddedInExecutiveDashboard ? 'dashboard_exec
 $pdo = Db::pdo();
 $canViewAttendanceSettings = attendance_can_manage_settings($pdo);
 $canEditAttendanceCells = attendance_can_edit_monthly_records($pdo);
+$canViewAttendanceRequests = attendance_can_manage_requests($pdo);
 $date = isset($_GET['date']) ? (string)$_GET['date'] : date('Y-m-d');
 $tab = isset($_GET['atab']) ? (string)$_GET['atab'] : 'monthly';
 if ($tab === 'settings' && !$canViewAttendanceSettings) $tab = 'monthly';
+if ($tab === 'requests' && !$canViewAttendanceRequests) $tab = 'monthly';
 $month = isset($_GET['month']) ? trim((string)$_GET['month']) : date('Y-m');
 if (!preg_match('/^\d{4}-\d{2}$/', $month)) $month = date('Y-m');
 $quickFilter = isset($_GET['filter']) ? trim((string)$_GET['filter']) : 'all';
@@ -131,11 +133,9 @@ if (!function_exists('attendance_monthly_time')) {
 }
 
 if (!function_exists('attendance_monthly_is_late')) {
-    function attendance_monthly_is_late($checkIn)
+    function attendance_monthly_is_late($checkIn, $position)
     {
-        $time = attendance_monthly_time($checkIn);
-        if ($time === '' || strlen($time) < 5) return false;
-        return (strcmp(substr($time, 0, 5), '08:00') > 0);
+        return attendance_is_late_check_in_value($checkIn, $position);
     }
 }
 
@@ -494,7 +494,7 @@ if ($pdo) {
                         $cell['label'] = attendance_text('%EB%AF%B8%ED%87%B4%EA%B7%BC');
                         $cell['alert'] = true;
                         $rowStats['missing_checkout']++;
-                    } else if ($checkIn !== '' && attendance_monthly_is_late($checkIn)) {
+                    } else if ($checkIn !== '' && attendance_monthly_is_late($checkIn, isset($empRow['position']) ? $empRow['position'] : '')) {
                         $cell['status'] = 'late';
                         $cell['label'] = attendance_text('%EC%A7%80%EA%B0%81');
                         $cell['alert'] = true;
@@ -698,7 +698,9 @@ $monthlyReturnUrl = $routeManage . '&tab=attendance&atab=monthly&month=' . urlen
 
     <div class='cpms-attendance-tabs'>
         <a class='cpms-attendance-tab <?php echo $tab==='monthly'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month) . '&sort=' . urlencode($sort)); ?>'><?php echo h(attendance_text('%EC%9B%94%EA%B0%84%20%ED%98%84%ED%99%A9')); ?></a>
-        <a class='cpms-attendance-tab <?php echo $tab==='requests'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests'); ?>'><?php echo h(attendance_text('%EC%9A%94%EC%B2%AD%20%EA%B4%80%EB%A6%AC')); ?></a>
+        <?php if($canViewAttendanceRequests): ?>
+            <a class='cpms-attendance-tab <?php echo $tab==='requests'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests'); ?>'><?php echo h(attendance_text('%EC%9A%94%EC%B2%AD%20%EA%B4%80%EB%A6%AC')); ?></a>
+        <?php endif; ?>
         <a class='cpms-attendance-tab <?php echo $tab==='daily'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=daily'); ?>'><?php echo h(attendance_text('%EC%9D%BC%EC%9D%BC%20%ED%98%84%ED%99%A9')); ?></a>
         <a class='cpms-attendance-tab <?php echo $tab==='weekly'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=weekly'); ?>'><?php echo h(attendance_text('%EC%A3%BC%EA%B0%84%20%ED%98%84%ED%99%A9')); ?></a>
         <?php if($canViewAttendanceSettings): ?>

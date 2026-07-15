@@ -4,7 +4,8 @@ use App\Core\Db;
 
 require_once __DIR__.'/../attendance/common.php';
 
-if (!attendance_is_manager()) exit;
+$pdo = Db::pdo();
+if (!attendance_can_manage_requests($pdo)) exit;
 if (!csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) exit;
 
 $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
@@ -18,7 +19,6 @@ if ($rejectReason === '') {
     exit;
 }
 
-$pdo = Db::pdo();
 $st = $pdo->prepare("UPDATE cpms_attendance_requests SET status='rejected',reject_reason=:rr,reviewed_by=:rb,reviewed_at=:ra,updated_at=:u WHERE id=:id");
 $st->execute(array(
     ':rr' => $rejectReason,

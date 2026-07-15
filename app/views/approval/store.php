@@ -55,8 +55,8 @@ if (!function_exists('approval_store_employee_by_name')) {
         $approvalLeadColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_team_leader') ? 'approval_can_be_team_leader' : "0 AS approval_can_be_team_leader";
         $approvalGongmuColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_gongmu_approver') ? 'approval_can_be_gongmu_approver' : "0 AS approval_can_be_gongmu_approver";
         $approvalManageColumn = approval_store_column_exists($pdo, 'employees', 'approval_can_be_manage_approver') ? 'approval_can_be_manage_approver' : "0 AS approval_can_be_manage_approver";
-        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . "," . $isTeamLeaderColumn . "," . $teamLeaderIdColumn . "," . $approvalLeadColumn . "," . $approvalGongmuColumn . "," . $approvalManageColumn . " FROM employees WHERE name=:name AND is_active=1 LIMIT 1");
-        $st->execute(array(':name' => $name));
+        $st = $pdo->prepare("SELECT id,name,email,department,position," . $roleColumn . "," . $isTeamLeaderColumn . "," . $teamLeaderIdColumn . "," . $approvalLeadColumn . "," . $approvalGongmuColumn . "," . $approvalManageColumn . " FROM employees WHERE " . approval_sql_normalize_compare_text('name') . "=:name AND is_active=1 LIMIT 1");
+        $st->execute(array(':name' => approval_normalize_compare_text($name)));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         return $row ? $row : null;
     }
@@ -421,9 +421,10 @@ if (!function_exists('approval_store_build_notice_message_safe')) {
     }
 }
 
-$creatorEmployeeId = approval_current_employee_id($pdo, $user);
-$creatorName = approval_current_user_name($user);
-$creatorEmail = approval_current_user_email($user);
+$creatorIdentity = approval_current_employee_identity($pdo, $user);
+$creatorEmployeeId = isset($creatorIdentity['id']) ? (int)$creatorIdentity['id'] : 0;
+$creatorName = isset($creatorIdentity['name']) ? trim((string)$creatorIdentity['name']) : approval_current_user_name($user);
+$creatorEmail = isset($creatorIdentity['email']) ? trim((string)$creatorIdentity['email']) : approval_current_user_email($user);
 $creatorEmployee = null;
 if ($creatorEmployeeId > 0) {
     try {
@@ -611,6 +612,50 @@ if ($isManagementOnlyDoc) {
         'ceo_name' => isset($ceo['name']) ? $ceo['name'] : '',
         'delegate_level' => 'none'
     );
+
+    $resolvedApplicantEmployee = null;
+    if ($contentData['applicant_name'] !== '') {
+        try {
+            $resolvedApplicantEmployee = approval_store_employee_by_name($pdo, $contentData['applicant_name']);
+        } catch (Exception $e) {
+            $resolvedApplicantEmployee = null;
+        }
+    }
+    $resolvedApplicantMatchesCurrentUser = false;
+    if (is_array($resolvedApplicantEmployee) && isset($resolvedApplicantEmployee['id']) && (int)$resolvedApplicantEmployee['id'] > 0) {
+        if ($creatorEmployeeId > 0 && (int)$resolvedApplicantEmployee['id'] === (int)$creatorEmployeeId) {
+            $resolvedApplicantMatchesCurrentUser = true;
+        } else {
+            $currentIdentityNames = isset($creatorIdentity['names']) && is_array($creatorIdentity['names']) ? $creatorIdentity['names'] : array($creatorName);
+            $applicantBaseName = approval_employee_person_name_base($contentData['applicant_name']);
+            for ($currentIdentityNameIndex = 0; $currentIdentityNameIndex < count($currentIdentityNames); $currentIdentityNameIndex++) {
+                if ($applicantBaseName !== '' && $applicantBaseName === approval_employee_person_name_base($currentIdentityNames[$currentIdentityNameIndex])) {
+                    $resolvedApplicantMatchesCurrentUser = true;
+                    break;
+                }
+            }
+        }
+    }
+    if ($resolvedApplicantMatchesCurrentUser) {
+        $creatorEmployee = $resolvedApplicantEmployee;
+        $creatorEmployeeId = (int)$resolvedApplicantEmployee['id'];
+        if (isset($resolvedApplicantEmployee['name']) && trim((string)$resolvedApplicantEmployee['name']) !== '') {
+            $creatorName = trim((string)$resolvedApplicantEmployee['name']);
+            $contentData['applicant_name'] = $creatorName;
+            $contentData['applicant_sign_name'] = $creatorName;
+        }
+        if (isset($resolvedApplicantEmployee['email']) && trim((string)$resolvedApplicantEmployee['email']) !== '') {
+            $creatorEmail = trim((string)$resolvedApplicantEmployee['email']);
+            $contentData['applicant_email'] = $creatorEmail;
+            $contentData['writer_email'] = $creatorEmail;
+        }
+        if (isset($resolvedApplicantEmployee['department']) && trim((string)$resolvedApplicantEmployee['department']) !== '') {
+            $contentData['department'] = trim((string)$resolvedApplicantEmployee['department']);
+        }
+        if (isset($resolvedApplicantEmployee['position']) && trim((string)$resolvedApplicantEmployee['position']) !== '') {
+            $contentData['position'] = trim((string)$resolvedApplicantEmployee['position']);
+        }
+    }
     $title = approval_doc_label('leave') . ' - ' . $contentData['applicant_name'];
     $ruleResult = approval_line_rules_build($pdo, $docType, $creatorEmployee, $contentData);
     if (approval_line_rules_requires_manual_team_leader($creatorEmployee) && (!isset($ruleResult['team_lead']) || !is_array($ruleResult['team_lead']))) {
@@ -796,6 +841,14 @@ try {
 
     if ($first < 0) {
         $pdo->prepare("UPDATE cpms_approval_documents SET doc_status='APPROVED', updated_at=NOW() WHERE id=:id")->execute(array(':id' => $did));
+        try {
+            approval_queue_final_approved_to_representative($pdo, $did, array(
+                'doc_type' => $docType,
+                'title' => $title,
+                'created_by_name' => $creatorName
+            ), array());
+        } catch (Exception $e) {
+        }
     } else {
         for ($i = 0; $i < count($prepared); $i++) {
             if ($prepared[$i]['status'] === 'PENDING') {

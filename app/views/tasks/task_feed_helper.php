@@ -199,7 +199,7 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
 }}
 
 if (!function_exists('cpms_task_feed_direct_tasks_requested_by_employee')) {
-function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $requestedDate = '')
+function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $requestedDate = '', $unfinishedOnly = false)
 {
     $rows = array();
     if (!$pdo || (int)$employeeId <= 0 || !cpms_tasks_table_exists($pdo, 'cpms_tasks')) return $rows;
@@ -213,11 +213,13 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
             $sql = "SELECT * FROM cpms_tasks WHERE requester_employee_id = :employee_id";
         }
         $params = array(':employee_id' => (int)$employeeId);
-        if ($requestedDate !== '') {
+        if ($unfinishedOnly) {
+            $sql .= " AND (status IS NULL OR status NOT IN ('done','cancelled'))";
+        } else if ($requestedDate !== '') {
             $sql .= " AND DATE(created_at) = :requested_date";
             $params[':requested_date'] = $requestedDate;
         }
-        $sql .= " ORDER BY created_at DESC, id DESC";
+        $sql .= $unfinishedOnly ? " ORDER BY created_at ASC, id ASC" : " ORDER BY created_at DESC, id DESC";
         $st = $pdo->prepare($sql);
         $st->execute($params);
         $tasks = $st->fetchAll(PDO::FETCH_ASSOC);

@@ -252,6 +252,7 @@ try {
                 $phone = isset($fields['phone']) ? trim((string)$fields['phone']) : '';
                 $address = isset($fields['address']) ? trim((string)$fields['address']) : '';
                 $companyName = isset($fields['company_name']) ? trim((string)$fields['company_name']) : '';
+                $isOutsourcing = (isset($fields['is_outsourcing']) && (int)$fields['is_outsourcing'] === 1) ? 1 : 0;
                 $jobTypeSnapshot = isset($fields['job_type_snapshot']) ? trim((string)$fields['job_type_snapshot']) : '';
                 $workerNameSnapshot = isset($fields['worker_name_snapshot']) ? trim((string)$fields['worker_name_snapshot']) : '';
                 $sourceType = isset($fields['source_type']) ? trim((string)$fields['source_type']) : 'manual';
@@ -282,6 +283,7 @@ try {
                     'source_type = :source_type',
                     'matched_status = :matched_status',
                     'company_name = :company_name',
+                    'is_outsourcing = :is_outsourcing',
                     'updated_at = :now'
                 );
                 $params = array(
@@ -296,6 +298,7 @@ try {
                     ':source_type' => $sourceType,
                     ':matched_status' => $matchedStatus,
                     ':company_name' => $companyName === '' ? null : $companyName,
+                    ':is_outsourcing' => $isOutsourcing,
                     ':now' => $now,
                     ':id' => $workerId,
                     ':pid' => $projectId,

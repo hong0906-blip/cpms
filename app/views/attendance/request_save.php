@@ -24,20 +24,9 @@ function attendance_request_normalize_datetime_value($requestDate, $value) {
     return $value;
 }}
 
-if (!function_exists('attendance_request_time_part')) {
-function attendance_request_time_part($value) {
-    $value = trim((string)$value);
-    if ($value === '') return '';
-    if (strlen($value) >= 16 && preg_match('/^\d{4}-\d{2}-\d{2}[ T]/', $value)) return substr($value, 11, 5);
-    if (strlen($value) >= 5) return substr($value, 0, 5);
-    return '';
-}}
-
 if (!function_exists('attendance_request_is_late_check_in')) {
-function attendance_request_is_late_check_in($checkIn) {
-    $time = attendance_request_time_part($checkIn);
-    if ($time === '' || strlen($time) < 5) return false;
-    return (strcmp(substr($time, 0, 5), '08:00') > 0);
+function attendance_request_is_late_check_in($checkIn, $position) {
+    return attendance_is_late_check_in_value($checkIn, $position);
 }}
 
 if (!function_exists('attendance_request_expected_types_for_date')) {
@@ -53,11 +42,12 @@ function attendance_request_expected_types_for_date($pdo, $employeeId, $requestD
         $recordCheckOut = isset($recordRow['check_out']) ? trim((string)$recordRow['check_out']) : '';
         $hasCheckIn = ($recordCheckIn !== '');
         $hasCheckOut = ($recordCheckOut !== '');
-        $isLate = attendance_request_is_late_check_in($recordCheckIn);
+        $employeePosition = attendance_employee_position($pdo, $employeeId);
+        $isLate = attendance_request_is_late_check_in($recordCheckIn, $employeePosition);
 
         if (!$hasCheckIn && !$hasCheckOut) return array('both');
         if (!$hasCheckIn && $hasCheckOut) return array('check_in');
-        if ($hasCheckIn && !$hasCheckOut) return $isLate ? array('check_in', 'check_out') : array('check_out');
+        if ($hasCheckIn && !$hasCheckOut) return $isLate ? array('check_in', 'check_out', 'both') : array('check_out');
         if ($isLate) return array('check_in');
     } catch (Exception $e) {
         return array();

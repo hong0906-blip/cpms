@@ -117,6 +117,7 @@ $tabs = array(
     'roles'    => '담당지정',
     'gantt'    => '공정표',
     'labor'    => '노무비',
+    'outsourcing' => '외주비',
     'equipment'=> '장비',
     'materials'=> '자재구입비',
     'issues'   => '이슈',

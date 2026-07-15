@@ -338,6 +338,73 @@ $attendanceTimeLabel = function ($value) {
     return $value;
 };
 
+if (!function_exists('cpms_render_executive_attendance_modal')) {
+function cpms_render_executive_attendance_modal($modalKey, $title, $people, $kind, $attendanceTimeLabel) {
+    $modalKey = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$modalKey);
+    if (!is_array($people)) $people = array();
+    $isPresent = ((string)$kind === 'present');
+    $accentClass = $isPresent ? 'text-sky-700 bg-sky-50 border-sky-100' : 'text-rose-700 bg-rose-50 border-rose-100';
+    ?>
+    <div id="modal-execAttendance-<?php echo h($modalKey); ?>" class="cpms-exec-attendance-modal fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="modal-execAttendance-title-<?php echo h($modalKey); ?>">
+        <div class="absolute inset-0 bg-slate-950/55" data-exec-attendance-close="<?php echo h($modalKey); ?>"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="relative w-full max-w-5xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
+                <div class="flex items-center justify-between gap-4 px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white">
+                    <div class="min-w-0">
+                        <div id="modal-execAttendance-title-<?php echo h($modalKey); ?>" class="text-xl font-extrabold text-gray-900"><?php echo h($title); ?></div>
+                        <div class="mt-1 text-sm text-gray-500">한 줄에 3명씩 표시됩니다.</div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="inline-flex px-3 py-1.5 rounded-full border text-sm font-extrabold <?php echo h($accentClass); ?>"><?php echo count($people); ?>명</span>
+                        <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700 hover:bg-gray-50" data-exec-attendance-close="<?php echo h($modalKey); ?>">닫기</button>
+                    </div>
+                </div>
+                <div class="p-4 md:p-5 overflow-y-auto max-h-[70vh]">
+                    <?php if (count($people) === 0): ?>
+                        <div class="p-8 rounded-2xl border border-dashed border-gray-200 bg-gray-50 text-center text-sm font-bold text-gray-500"><?php echo h($title); ?> 명단이 없습니다.</div>
+                    <?php else: ?>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                            <?php foreach ($people as $personIndex => $person): ?>
+                                <?php
+                                $isExtraPerson = ((int)$personIndex >= 10);
+                                $positionLabel = isset($person['position']) && trim((string)$person['position']) !== '' ? $person['position'] : '-';
+                                ?>
+                                <article class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition <?php echo $isExtraPerson ? 'hidden' : ''; ?>" <?php echo $isExtraPerson ? 'data-exec-attendance-extra="' . h($modalKey) . '"' : ''; ?>>
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div class="min-w-0">
+                                            <div class="text-base font-extrabold text-gray-900 truncate"><?php echo h(isset($person['name']) ? $person['name'] : '-'); ?></div>
+                                            <div class="mt-1 text-xs text-gray-500 break-words"><?php echo h(cpms_executive_dashboard_department_label($person)); ?> · <?php echo h($positionLabel); ?></div>
+                                        </div>
+                                        <span class="shrink-0 inline-flex w-9 h-9 items-center justify-center rounded-xl border font-black <?php echo h($accentClass); ?>"><?php echo $isPresent ? '출' : '미'; ?></span>
+                                    </div>
+                                    <?php if ($isPresent): ?>
+                                        <?php
+                                        $checkInLabel = call_user_func($attendanceTimeLabel, isset($person['check_in']) ? $person['check_in'] : '');
+                                        $checkOutLabel = call_user_func($attendanceTimeLabel, isset($person['check_out']) ? $person['check_out'] : '');
+                                        ?>
+                                        <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
+                                            <div class="rounded-xl bg-sky-50 px-3 py-2"><span class="block text-sky-600 font-bold">출근</span><b class="text-sky-900"><?php echo h($checkInLabel); ?></b></div>
+                                            <div class="rounded-xl bg-slate-50 px-3 py-2"><span class="block text-slate-500 font-bold">퇴근</span><b class="text-slate-800"><?php echo h($checkOutLabel); ?></b></div>
+                                        </div>
+                                    <?php else: ?>
+                                        <div class="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">오늘 출근 기록 없음</div>
+                                    <?php endif; ?>
+                                </article>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php if (count($people) > 10): ?>
+                            <div class="mt-5 text-center">
+                                <button type="button" class="inline-flex items-center justify-center px-5 py-3 rounded-2xl bg-gray-900 text-white text-sm font-extrabold shadow-lg shadow-gray-900/10" data-exec-attendance-more="<?php echo h($modalKey); ?>">더보기 (<?php echo count($people) - 10; ?>명)</button>
+                            </div>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php
+}}
+
 if ($pdo) {
     if ($needsIssueData) {
     try {
@@ -469,6 +536,11 @@ if ($pdo) {
             $bName = isset($b['name']) ? (string)$b['name'] : '';
             return strcmp($aName, $bName);
         });
+        usort($absent, function ($a, $b) {
+            $aName = isset($a['name']) ? (string)$a['name'] : '';
+            $bName = isset($b['name']) ? (string)$b['name'] : '';
+            return strcmp($aName, $bName);
+        });
         $todayPresent = count($presentPeople);
 
         $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? $currentLeaveIndex['people'] : array();
@@ -530,22 +602,46 @@ if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !=
 }
 ?>
 
-<div class="bg-gradient-to-r from-indigo-600 to-purple-500 rounded-3xl p-8 text-white shadow-xl shadow-indigo-500/20 mb-8">
-    <div class="flex items-start gap-4">
-        <div class="p-4 bg-white/20 rounded-3xl border border-white/20">
-            <i data-lucide="layout-dashboard" class="w-8 h-8 text-yellow-200"></i>
+<style>
+  @media (min-width: 1024px) {
+    .cpms-exec-dashboard .text-4xl { font-size: 1.75rem; line-height: 2rem; }
+    .cpms-exec-dashboard .text-3xl { font-size: 1.5rem; line-height: 1.8rem; }
+    .cpms-exec-dashboard .text-2xl { font-size: 1.25rem; line-height: 1.55rem; }
+    .cpms-exec-dashboard .text-xl { font-size: 1.1rem; line-height: 1.45rem; }
+    .cpms-exec-dashboard .text-lg { font-size: .95rem; line-height: 1.4rem; }
+    .cpms-exec-dashboard .p-8 { padding: 1.25rem; }
+    .cpms-exec-dashboard .p-7 { padding: 1.125rem; }
+    .cpms-exec-dashboard .p-6 { padding: 1rem; }
+    .cpms-exec-dashboard .gap-6 { gap: 1rem; }
+    .cpms-exec-dashboard .mb-8 { margin-bottom: 1.25rem; }
+    .cpms-exec-dashboard .mb-6 { margin-bottom: 1rem; }
+    .cpms-exec-dashboard .rounded-3xl { border-radius: 1.125rem; }
+  }
+</style>
+<div class="cpms-exec-dashboard">
+<div class="cpms-dashboard-hero bg-gradient-to-r from-indigo-600 to-purple-500 rounded-3xl p-5 text-white shadow-xl shadow-indigo-500/20 mb-5">
+    <div class="flex flex-wrap items-start gap-4">
+        <div class="p-3 bg-white/20 rounded-2xl border border-white/20">
+            <i data-lucide="layout-dashboard" class="w-6 h-6 text-yellow-200"></i>
         </div>
         <div class="flex-1">
-            <h2 class="text-3xl font-extrabold">임원 대시보드</h2>
+            <h2 class="text-2xl font-extrabold">임원 대시보드</h2>
         </div>
+        <?php
+        $cpmsAttendanceActionsShowRequest = false;
+        require __DIR__ . '/partials/attendance_actions.php';
+        unset($cpmsAttendanceActionsShowRequest);
+        ?>
         <div class="hidden md:flex flex-wrap items-center justify-end gap-3">
-            <button type="button" data-modal-open="meetingCreate" class="px-5 py-3 rounded-2xl bg-white/20 text-white font-extrabold text-base border border-white/30 hover:bg-white/30">회의 요청</button>
-            <button type="button" data-modal-open="taskCreate" class="px-5 py-3 rounded-2xl bg-white text-indigo-700 font-extrabold text-base shadow-lg shadow-indigo-900/10">업무 요청</button>
+            <button type="button" data-modal-open="meetingCreate" class="px-4 py-2 rounded-xl bg-white/20 text-white font-extrabold text-sm border border-white/30 hover:bg-white/30">회의 요청</button>
+            <button type="button" data-modal-open="taskCreate" class="px-4 py-2 rounded-xl bg-white text-indigo-700 font-extrabold text-sm shadow-lg shadow-indigo-900/10">업무 요청</button>
         </div>
     </div>
 </div>
 
-<?php cpms_render_dashboard_birthday_modal($pdo); ?>
+<?php if ($activeExecutiveTab === 'main'): ?>
+    <?php cpms_render_dashboard_birthday_modal($pdo); ?>
+<?php endif; ?>
 
 <div class="md:hidden grid grid-cols-2 gap-2 mb-6">
     <button type="button" data-modal-open="taskCreate" class="min-h-[54px] rounded-[14px] bg-gray-900 text-white font-extrabold text-sm flex flex-col items-center justify-center gap-1">
@@ -587,13 +683,13 @@ if ($activeExecutiveTab !== 'myTasks' || !$executiveEmployeeTaskAvailable) cpms_
   }
 </style>
 
-<div class="mb-6 flex flex-wrap items-center gap-2" role="tablist" aria-label="임원 대시보드 탭">
-    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=main'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="main" aria-selected="<?php echo ($activeExecutiveTab === 'main') ? 'true' : 'false'; ?>">메인</a>
-    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=myTasks'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="myTasks" aria-selected="<?php echo ($activeExecutiveTab === 'myTasks') ? 'true' : 'false'; ?>">나의할일</a>
-    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=department'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="department" aria-selected="<?php echo ($activeExecutiveTab === 'department') ? 'true' : 'false'; ?>">부서별 업무현황</a>
-    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=approval'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="approval" aria-selected="<?php echo ($activeExecutiveTab === 'approval') ? 'true' : 'false'; ?>">승인대기</a>
-    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=siteIssues'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="siteIssues" aria-selected="<?php echo ($activeExecutiveTab === 'siteIssues') ? 'true' : 'false'; ?>">현장별 이슈</a>
-    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=attendanceManagement'); ?>" role="tab" class="cpms-exec-tab-btn px-5 py-3 rounded-2xl border text-base font-extrabold transition" data-executive-tab="attendanceManagement" aria-selected="<?php echo ($activeExecutiveTab === 'attendanceManagement') ? 'true' : 'false'; ?>">출퇴근 근태관리</a>
+<div class="mb-4 flex flex-wrap items-center gap-2" role="tablist" aria-label="임원 대시보드 탭">
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=main'); ?>" role="tab" class="cpms-exec-tab-btn px-4 py-2 rounded-xl border text-sm font-extrabold transition" data-executive-tab="main" aria-selected="<?php echo ($activeExecutiveTab === 'main') ? 'true' : 'false'; ?>">메인</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=myTasks'); ?>" role="tab" class="cpms-exec-tab-btn px-4 py-2 rounded-xl border text-sm font-extrabold transition" data-executive-tab="myTasks" aria-selected="<?php echo ($activeExecutiveTab === 'myTasks') ? 'true' : 'false'; ?>">나의할일</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=department'); ?>" role="tab" class="cpms-exec-tab-btn px-4 py-2 rounded-xl border text-sm font-extrabold transition" data-executive-tab="department" aria-selected="<?php echo ($activeExecutiveTab === 'department') ? 'true' : 'false'; ?>">부서별 업무현황</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=approval'); ?>" role="tab" class="cpms-exec-tab-btn px-4 py-2 rounded-xl border text-sm font-extrabold transition" data-executive-tab="approval" aria-selected="<?php echo ($activeExecutiveTab === 'approval') ? 'true' : 'false'; ?>">승인대기</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=siteIssues'); ?>" role="tab" class="cpms-exec-tab-btn px-4 py-2 rounded-xl border text-sm font-extrabold transition" data-executive-tab="siteIssues" aria-selected="<?php echo ($activeExecutiveTab === 'siteIssues') ? 'true' : 'false'; ?>">현장별 이슈</a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=attendanceManagement'); ?>" role="tab" class="cpms-exec-tab-btn px-4 py-2 rounded-xl border text-sm font-extrabold transition" data-executive-tab="attendanceManagement" aria-selected="<?php echo ($activeExecutiveTab === 'attendanceManagement') ? 'true' : 'false'; ?>">출퇴근 근태관리</a>
 </div>
 
 <div data-executive-tab-panels>
@@ -614,74 +710,24 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
     <div class="bg-white/80 rounded-3xl p-6 border overflow-visible">
         <h3 class="text-2xl font-extrabold mb-4">근태 리스크 현황</h3>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="p-4 rounded-2xl bg-gray-50 relative group cursor-pointer">
-                <div class="text-gray-600 text-lg font-bold">오늘 미출근자 수</div>
-                <div class="text-4xl font-extrabold mt-2"><?php echo count($absent); ?>명</div>
-                <div class="hidden md:block absolute left-0 top-full mt-2 w-96 max-w-[92vw] p-4 rounded-2xl bg-white border border-gray-200 shadow-2xl z-[9999] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition">
-                    <div class="font-extrabold text-lg mb-2">오늘 미출근자 명단</div>
-                    <?php if (count($absent) === 0): ?>
-                        <div class="text-base leading-8 text-gray-700">오늘 미출근자는 없습니다.</div>
-                    <?php else: ?>
-                        <ul class="space-y-2">
-                            <?php foreach ($absent as $person): ?>
-                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
-                            <?php endforeach; ?>
-                        </ul>
-                    <?php endif; ?>
-                </div>
-                <details class="md:hidden mt-3">
-                    <summary class="inline-block px-3 py-2 rounded-xl bg-gray-200 text-base font-bold">명단 보기</summary>
-                    <div class="mt-3 p-3 rounded-xl bg-white border border-gray-200">
-                        <?php if (count($absent) === 0): ?>
-                            <div class="text-base leading-8 text-gray-700">오늘 미출근자는 없습니다.</div>
-                        <?php else: ?>
-                            <ul class="space-y-2">
-                                <?php foreach ($absent as $person): ?>
-                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
-                                <?php endforeach; ?>
-                            </ul>
-                        <?php endif; ?>
+            <button type="button" class="group p-4 rounded-2xl bg-rose-50 border border-rose-100 text-left hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-100/70 transition" data-exec-attendance-open="todayAbsent" aria-haspopup="dialog">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <div class="text-gray-600 text-base font-bold group-hover:text-rose-700">오늘 미출근자 수</div>
+                        <div class="text-4xl font-extrabold text-rose-700 mt-1"><?php echo count($absent); ?>명</div>
                     </div>
-                </details>
-            </div>
-            <div class="p-4 rounded-2xl bg-sky-50 relative group cursor-pointer">
-                <div class="text-gray-600 text-lg font-bold">오늘 출근자 수</div>
-                <div class="text-4xl font-extrabold text-sky-700 mt-2"><?php echo $todayPresent; ?>명</div>
-                <div class="hidden md:block absolute left-0 top-full mt-2 w-96 max-w-[92vw] p-4 rounded-2xl bg-white border border-gray-200 shadow-2xl z-[9999] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition">
-                    <div class="font-extrabold text-lg mb-2">오늘 출근자 명단</div>
-                    <?php if (count($presentPeople) === 0): ?>
-                        <div class="text-base leading-8 text-gray-700">오늘 출근자는 없습니다.</div>
-                    <?php else: ?>
-                        <ul class="space-y-2">
-                            <?php foreach ($presentPeople as $person): ?>
-                                <?php
-                                $checkInLabel = $attendanceTimeLabel(isset($person['check_in']) ? $person['check_in'] : '');
-                                $checkOutLabel = $attendanceTimeLabel(isset($person['check_out']) ? $person['check_out'] : '');
-                                ?>
-                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> <span class="font-bold text-sky-700">(<?php echo h($checkInLabel . ' / ' . $checkOutLabel); ?>)</span> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
-                            <?php endforeach; ?>
-                        </ul>
-                    <?php endif; ?>
+                    <span class="inline-flex items-center px-3 py-1.5 rounded-full bg-white text-rose-700 border border-rose-100 text-xs font-extrabold">명단 보기</span>
                 </div>
-                <details class="md:hidden mt-3">
-                    <summary class="inline-block px-3 py-2 rounded-xl bg-sky-100 text-base font-bold">명단 보기</summary>
-                    <div class="mt-3 p-3 rounded-xl bg-white border border-gray-200">
-                        <?php if (count($presentPeople) === 0): ?>
-                            <div class="text-base leading-8 text-gray-700">오늘 출근자는 없습니다.</div>
-                        <?php else: ?>
-                            <ul class="space-y-2">
-                                <?php foreach ($presentPeople as $person): ?>
-                                    <?php
-                                    $checkInLabel = $attendanceTimeLabel(isset($person['check_in']) ? $person['check_in'] : '');
-                                    $checkOutLabel = $attendanceTimeLabel(isset($person['check_out']) ? $person['check_out'] : '');
-                                    ?>
-                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> <span class="font-bold text-sky-700">(<?php echo h($checkInLabel . ' / ' . $checkOutLabel); ?>)</span> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
-                                <?php endforeach; ?>
-                            </ul>
-                        <?php endif; ?>
+            </button>
+            <button type="button" class="group p-4 rounded-2xl bg-sky-50 border border-sky-100 text-left hover:-translate-y-0.5 hover:shadow-lg hover:shadow-sky-100/70 transition" data-exec-attendance-open="todayPresent" aria-haspopup="dialog">
+                <div class="flex items-start justify-between gap-3">
+                    <div>
+                        <div class="text-gray-600 text-base font-bold group-hover:text-sky-700">오늘 출근자 수</div>
+                        <div class="text-4xl font-extrabold text-sky-700 mt-1"><?php echo $todayPresent; ?>명</div>
                     </div>
-                </details>
-            </div>
+                    <span class="inline-flex items-center px-3 py-1.5 rounded-full bg-white text-sky-700 border border-sky-100 text-xs font-extrabold">명단 보기</span>
+                </div>
+            </button>
             <div class="p-4 rounded-2xl bg-indigo-50 relative group cursor-pointer">
                 <div class="text-gray-600 text-lg font-bold">오늘 월차/연차/반차자 수</div>
                 <div class="text-4xl font-extrabold text-indigo-700 mt-2"><?php echo $leaveToday; ?>명</div>
@@ -793,6 +839,54 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
     </div>
 </div>
 
+<?php
+cpms_render_executive_attendance_modal('todayAbsent', '오늘 미출근자 명단', $absent, 'absent', $attendanceTimeLabel);
+cpms_render_executive_attendance_modal('todayPresent', '오늘 출근자 명단', $presentPeople, 'present', $attendanceTimeLabel);
+?>
+<script>
+(function(){
+    function modalByKey(key) {
+        return document.getElementById('modal-execAttendance-' + key);
+    }
+    function closeModal(key) {
+        var modal = modalByKey(key);
+        if (modal) modal.classList.add('hidden');
+        document.body.classList.remove('overflow-hidden');
+    }
+    var openButtons = document.querySelectorAll('[data-exec-attendance-open]');
+    for (var i = 0; i < openButtons.length; i++) {
+        openButtons[i].addEventListener('click', function(){
+            var key = this.getAttribute('data-exec-attendance-open') || '';
+            var modal = modalByKey(key);
+            if (!modal) return;
+            modal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
+        });
+    }
+    var closeButtons = document.querySelectorAll('[data-exec-attendance-close]');
+    for (var j = 0; j < closeButtons.length; j++) {
+        closeButtons[j].addEventListener('click', function(){
+            closeModal(this.getAttribute('data-exec-attendance-close') || '');
+        });
+    }
+    var moreButtons = document.querySelectorAll('[data-exec-attendance-more]');
+    for (var k = 0; k < moreButtons.length; k++) {
+        moreButtons[k].addEventListener('click', function(){
+            var key = this.getAttribute('data-exec-attendance-more') || '';
+            var extraPeople = document.querySelectorAll('[data-exec-attendance-extra="' + key + '"]');
+            for (var n = 0; n < extraPeople.length; n++) extraPeople[n].classList.remove('hidden');
+            this.classList.add('hidden');
+        });
+    }
+    document.addEventListener('keydown', function(event){
+        if (event.key !== 'Escape') return;
+        var openModals = document.querySelectorAll('.cpms-exec-attendance-modal:not(.hidden)');
+        for (var m = 0; m < openModals.length; m++) openModals[m].classList.add('hidden');
+        if (openModals.length > 0) document.body.classList.remove('overflow-hidden');
+    });
+})();
+</script>
+
 <div class="bg-white/80 rounded-3xl p-6 border mb-6">
     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
         <div>
@@ -830,14 +924,16 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
             <div class="text-4xl font-extrabold text-blue-700 mt-2"><?php echo $projectCostCount; ?>건</div>
             <div class="text-sm text-blue-700 font-bold mt-2">클릭해서 프로젝트별 원가율 보기</div>
     </button>
-    <div class="p-4 rounded-3xl bg-amber-50 border">
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=siteIssues'); ?>" class="group block p-4 rounded-3xl bg-amber-50 border border-amber-100 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-amber-100/70 transition">
         <div class="text-gray-600 font-bold">미처리 이슈</div>
         <div class="text-4xl font-extrabold text-amber-700 mt-2"><?php echo count($issues); ?>건</div>
-    </div>
-    <div class="p-4 rounded-3xl bg-rose-50 border">
+        <div class="mt-1 text-xs font-extrabold text-amber-700">현장별 이슈 탭으로 이동</div>
+    </a>
+    <a href="<?php echo h($executiveTabBaseUrl . '&exec_tab=siteIssues'); ?>" class="group block p-4 rounded-3xl bg-rose-50 border border-rose-100 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-100/70 transition">
         <div class="text-gray-600 font-bold">안전사고</div>
         <div class="text-4xl font-extrabold text-rose-700 mt-2"><?php echo count($safetyIncidents); ?>건</div>
-    </div>
+        <div class="mt-1 text-xs font-extrabold text-rose-700">현장별 이슈 탭으로 이동</div>
+    </a>
 </div>
 
 <div id="modal-projectCostSummary" class="fixed inset-0 z-50 hidden">
@@ -1228,15 +1324,15 @@ unset($cpmsAttendanceEmbeddedInExecutiveDashboard);
                 $issueComments = isset($issueCommentsByIssueId[$issueId]) ? $issueCommentsByIssueId[$issueId] : array();
                 ?>
                 <div class="p-4 rounded-2xl border border-gray-100 bg-white hover:shadow-md transition">
-                    <div class="flex items-start justify-between gap-3">
-                        <div class="min-w-0 flex-1">
-                            <div class="font-extrabold text-gray-900"><?php echo h(isset($it['title']) && trim((string)$it['title']) !== '' ? $it['title'] : (isset($it['reason']) ? $it['reason'] : '-')); ?></div>
+                    <div class="flex flex-col items-stretch gap-3 md:flex-row md:items-start md:justify-between">
+                        <div class="w-full min-w-0 flex-1">
+                            <div class="font-extrabold text-gray-900 break-words"><?php echo h(isset($it['title']) && trim((string)$it['title']) !== '' ? $it['title'] : (isset($it['reason']) ? $it['reason'] : '-')); ?></div>
                             <div class="text-xs text-gray-500 mt-1">
                                 현장명: <b><?php echo h($it['project_name']); ?></b>
                                 · 등록자: <?php echo h($it['created_by_name']); ?>
                                 · 등록일: <?php echo h($it['created_at']); ?>
                             </div>
-                            <div class="text-sm text-gray-700 mt-2 whitespace-pre-line"><?php echo h(isset($it['description']) && trim((string)$it['description']) !== '' ? $it['description'] : (isset($it['content']) ? $it['content'] : '-')); ?></div>
+                            <div class="text-sm text-gray-700 mt-2 whitespace-pre-line break-words"><?php echo h(isset($it['description']) && trim((string)$it['description']) !== '' ? $it['description'] : (isset($it['content']) ? $it['content'] : '-')); ?></div>
 
                             <div class="mt-4 p-3 rounded-xl bg-gray-50 border border-gray-200">
                                 <div class="text-sm font-bold text-gray-800 mb-2">댓글</div>
@@ -1263,18 +1359,18 @@ unset($cpmsAttendanceEmbeddedInExecutiveDashboard);
                             </div>
                         </div>
 
-                        <div class="flex flex-col items-end gap-2">
-                            <form method="post" action="?r=construction/issue_state_save" class="flex items-center gap-2">
+                        <div class="w-full md:w-auto">
+                            <form method="post" action="?r=construction/issue_state_save" class="flex w-full flex-wrap items-center gap-2 md:w-auto md:flex-nowrap">
                                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                 <input type="hidden" name="issue_id" value="<?php echo $issueId; ?>">
                                 <input type="hidden" name="redirect" value="dashboard_executive">
-                                <span class="text-xs font-bold px-3 py-1 rounded-full border <?php echo h($statusBadgeClass($stt)); ?>"><?php echo h($stt); ?></span>
-                                <select name="status" class="px-3 py-2 rounded-2xl border border-gray-200 text-sm">
+                                <span class="shrink-0 whitespace-nowrap text-xs font-bold px-3 py-1 rounded-full border <?php echo h($statusBadgeClass($stt)); ?>"><?php echo h($stt); ?></span>
+                                <select name="status" class="min-w-0 flex-1 px-3 py-2 rounded-2xl border border-gray-200 text-sm md:flex-none">
                                     <option value="접수" <?php echo ($stt === '접수') ? 'selected' : ''; ?>>접수</option>
                                     <option value="처리중" <?php echo ($stt === '처리중') ? 'selected' : ''; ?>>처리중</option>
                                     <option value="처리완료" <?php echo ($stt === '처리완료') ? 'selected' : ''; ?>>처리완료</option>
                                 </select>
-                                <button type="submit" class="px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
+                                <button type="submit" class="shrink-0 whitespace-nowrap px-3 py-2 rounded-2xl bg-gray-900 text-white font-extrabold text-sm">변경</button>
                             </form>
                         </div>
                     </div>
@@ -1286,4 +1382,5 @@ unset($cpmsAttendanceEmbeddedInExecutiveDashboard);
 </div>
 </section>
 <?php endif; ?>
+</div>
 </div>

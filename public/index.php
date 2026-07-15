@@ -12,6 +12,9 @@ require_once __DIR__ . '/../app/bootstrap.php';
 
 $route = isset($_GET['r']) ? trim($_GET['r']) : '대시보드';
 if ($route === '') $route = '대시보드';
+$requestedDashboardType = null;
+if ($route === 'dashboard_employee') $requestedDashboardType = 'employee';
+if ($route === 'dashboard_executive') $requestedDashboardType = 'executive';
 
 // ==========================
 //  세션 유지용 Ping
@@ -952,6 +955,10 @@ if ($route === 'construction/labor_sheet_download') {
     require_once __DIR__ . '/../app/views/construction/labor_sheet_download.php';
     exit;
 }
+if ($route === 'construction/outsourcing_cost_save') {
+    require_once __DIR__ . '/../app/views/construction/outsourcing_cost_save.php';
+    exit;
+}
 
 
 if ($route === 'construction/labor_cell_save') {
@@ -1050,6 +1057,14 @@ if ($route === 'tasks/file') {
 }
 if ($route === 'notice_save' || $route === 'dashboard_notice_save') {
     require_once __DIR__ . '/../app/views/dashboard/notice_save.php';
+    exit;
+}
+if ($route === 'notice_read' || $route === 'dashboard_notice_read') {
+    require_once __DIR__ . '/../app/views/dashboard/notice_read.php';
+    exit;
+}
+if ($route === 'birthday_comment_save' || $route === 'dashboard_birthday_comment_save') {
+    require_once __DIR__ . '/../app/views/dashboard/birthday_comment_save.php';
     exit;
 }
 if ($route === 'db_setup_tasks') {
@@ -1374,6 +1389,27 @@ if (isset($_GET['dv'])) {
     }
 }
 $dashboardType = isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee';
+$canSwitchDashboardViews = method_exists('App\\Core\\Auth', 'canSwitchDashboardViews')
+    ? \App\Core\Auth::canSwitchDashboardViews()
+    : false;
+if (!$canSwitchDashboardViews) {
+    $dashboardType = (\App\Core\Auth::userRole() === 'executive') ? 'executive' : 'employee';
+    $_SESSION['dashboardType'] = $dashboardType;
+}
+if ($_SERVER['REQUEST_METHOD'] === 'GET'
+    && !$canSwitchDashboardViews
+    && $requestedDashboardType !== null
+    && $requestedDashboardType !== $dashboardType) {
+    $canonicalDashboardParams = array(
+        'r' => ($dashboardType === 'executive') ? 'dashboard_executive' : 'dashboard_employee'
+    );
+    foreach ($_GET as $canonicalKey => $canonicalValue) {
+        if ($canonicalKey === 'r' || $canonicalKey === 'dv') continue;
+        $canonicalDashboardParams[$canonicalKey] = $canonicalValue;
+    }
+    header('Location: ?' . http_build_query($canonicalDashboardParams, '', '&'));
+    exit;
+}
 
 // ==========================
 //  견적관리 직접 URL 접근 차단
@@ -1466,6 +1502,9 @@ $views = array(
 //  대시보드
 // ==========================
 if ($route === '대시보드') {
+    if (!headers_sent()) {
+        header('Content-Type: text/html; charset=UTF-8');
+    }
     $role = \App\Core\Auth::userRole();
     if ($role === 'executive' && $dashboardType === 'executive') {
         $view = 'dashboard/executive';

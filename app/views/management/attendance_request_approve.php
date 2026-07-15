@@ -4,7 +4,8 @@ use App\Core\Db;
 
 require_once __DIR__ . '/../attendance/common.php';
 
-if (!attendance_is_manager()) exit;
+$pdo = Db::pdo();
+if (!attendance_can_manage_requests($pdo)) exit;
 if (!csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) exit;
 
 if (!function_exists('attendance_request_return_url')) {
@@ -16,7 +17,6 @@ function attendance_request_return_url() {
     return $url;
 }}
 
-$pdo = Db::pdo();
 $id = isset($_POST['id']) ? (int)$_POST['id'] : 0;
 $now = attendance_now();
 $returnUrl = attendance_request_return_url();

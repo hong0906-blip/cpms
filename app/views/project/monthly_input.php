@@ -17,7 +17,7 @@ $displayMonths = array();
 $selectedViewMonth = '';
 $months = array();
 $monthlyRevenue = array();
-$rowsBySection = array('구매품'=>array(),'자재비'=>array(),'장비비'=>array(),'노무비'=>array(),'기타경비'=>array(),'안전관리비'=>array(),'공제분'=>array());
+$rowsBySection = array('외주비'=>array(),'구매품'=>array(),'자재비'=>array(),'장비비'=>array(),'노무비'=>array(),'기타경비'=>array(),'안전관리비'=>array(),'공제분'=>array());
 $errors = array();
 $notices = array();
 $deductionTableMissing = false;
@@ -31,6 +31,8 @@ $monthlyInputRole = class_exists('App\\Core\\Auth') ? (string)\App\Core\Auth::us
 $canManageMonthlyDeductions = (class_exists('App\\Core\\Auth') && \App\Core\Auth::isMaster()) || $monthlyInputRole === 'executive' || $monthlyInputDept === '공무' || $monthlyInputDept === '관리' || $monthlyInputDept === '관리부';
 require_once __DIR__ . '/../construction/tabs/partials/sales_data_loader.php';
 require_once __DIR__ . '/../safety/safety_cost_helper.php';
+require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
+require_once __DIR__ . '/../construction/tabs/partials/outsourcing_data_helper.php';
 
 function monthly_zero_map($months) { $m = array(); foreach ($months as $ym) { $m[$ym] = 0; } return $m; }
 function amount_fmt($n){ if ((float)$n == 0) { return '-'; } return number_format((float)$n); }
@@ -139,7 +141,7 @@ function project_monthly_table_columns($pdo, $table) {
     }
 }
 function project_monthly_labor_breakdown($pdo, $projectId, $projectName, $ym) {
-    $result = array('amount'=>0.0, 'worker_rows'=>0, 'workers_considered'=>0, 'company_amounts'=>array());
+    $result = array('amount'=>0.0, 'outsourcing_amount'=>0.0, 'worker_rows'=>0, 'workers_considered'=>0, 'company_amounts'=>array(), 'outsourcing_company_amounts'=>array());
     if (!function_exists('cpms_load_gongsu_data') || !function_exists('cpms_build_timesheet_workers')) { return $result; }
     $directTeamMembers = cpms_load_direct_team_members($pdo);
     $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
@@ -181,9 +183,16 @@ function project_monthly_labor_breakdown($pdo, $projectId, $projectName, $ym) {
         if ($amount <= 0) { continue; }
         $companyName = isset($worker['company_name']) ? trim((string)$worker['company_name']) : '';
         if ($companyName === '') $companyName = '창명건설';
-        if (!isset($result['company_amounts'][$companyName])) $result['company_amounts'][$companyName] = 0.0;
-        $result['company_amounts'][$companyName] += $amount;
-        $sum += $amount;
+        $isOutsourcing = (isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1);
+        if ($isOutsourcing) {
+            if (!isset($result['outsourcing_company_amounts'][$companyName])) $result['outsourcing_company_amounts'][$companyName] = 0.0;
+            $result['outsourcing_company_amounts'][$companyName] += $amount;
+            $result['outsourcing_amount'] += $amount;
+        } else {
+            if (!isset($result['company_amounts'][$companyName])) $result['company_amounts'][$companyName] = 0.0;
+            $result['company_amounts'][$companyName] += $amount;
+            $sum += $amount;
+        }
         $result['workers_considered']++;
     }
     $forceAmount = function_exists('cpms_labor_force_amount') ? (float)cpms_labor_force_amount($pdo, $projectId, $ym) : 0.0;
@@ -204,6 +213,8 @@ function project_monthly_labor_amount($pdo, $projectId, $projectName, $ym) {
         'worker_rows' => isset($breakdown['worker_rows']) ? (int)$breakdown['worker_rows'] : 0,
         'workers_considered' => isset($breakdown['workers_considered']) ? (int)$breakdown['workers_considered'] : 0,
         'company_amounts' => isset($breakdown['company_amounts']) && is_array($breakdown['company_amounts']) ? $breakdown['company_amounts'] : array(),
+        'outsourcing_amount' => isset($breakdown['outsourcing_amount']) ? (float)$breakdown['outsourcing_amount'] : 0.0,
+        'outsourcing_company_amounts' => isset($breakdown['outsourcing_company_amounts']) && is_array($breakdown['outsourcing_company_amounts']) ? $breakdown['outsourcing_company_amounts'] : array(),
     );
 }
 function project_monthly_confirmed_revenue_map($pdo, $projectId, $allMonths) {
@@ -542,12 +553,12 @@ if ($pdo && is_array($selectedProject)) {
     } catch (Exception $e) { $errors[] = '장비비 데이터를 불러오지 못했습니다. 오류: ' . $e->getMessage(); }
 
     // 노무비: 공사 > 노무비 계산 로더 재사용
-    require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
     if (function_exists('cpms_load_gongsu_data') && is_array($selectedProject) && isset($selectedProject['name'])) {
         $projectName = (string)$selectedProject['name'];
         $laborMonths = monthly_zero_map($allMonths);
         $laborWorkerRows = 0;
         $otherCompanyRows = array();
+        $outsourcingCompanyRows = array();
         foreach ($allMonths as $ym) {
             $laborResult = project_monthly_labor_amount($pdo, $selectedProjectId, $projectName, $ym);
             $companyAmounts = isset($laborResult['company_amounts']) && is_array($laborResult['company_amounts']) ? $laborResult['company_amounts'] : array();
@@ -567,6 +578,23 @@ if ($pdo && is_array($selectedProject)) {
                     $otherCompanyRows[$companyName]['months'][$ym] += (float)$amount;
                 }
             }
+            $outsourcingCompanyAmounts = isset($laborResult['outsourcing_company_amounts']) && is_array($laborResult['outsourcing_company_amounts']) ? $laborResult['outsourcing_company_amounts'] : array();
+            foreach ($outsourcingCompanyAmounts as $companyName => $amount) {
+                $companyName = trim((string)$companyName);
+                if ($companyName === '') $companyName = '창명건설';
+                $outsourcingKey = 'labor|' . project_monthly_text_key($companyName);
+                if (!isset($outsourcingCompanyRows[$outsourcingKey])) {
+                    $outsourcingCompanyRows[$outsourcingKey] = array(
+                        'section' => '외주비',
+                        '업체명' => $companyName,
+                        '내역' => '노무비 연동 외주비',
+                        'months' => monthly_zero_map($allMonths)
+                    );
+                }
+                if (isset($outsourcingCompanyRows[$outsourcingKey]['months'][$ym])) {
+                    $outsourcingCompanyRows[$outsourcingKey]['months'][$ym] += (float)$amount;
+                }
+            }
             $laborWorkerRows = isset($laborResult['worker_rows']) ? (int)$laborResult['worker_rows'] : $laborWorkerRows;
         }
         $rowsBySection['노무비'][] = array('section'=>'노무비','업체명'=>'-','내역'=>'노무비 합계','months'=>$laborMonths);
@@ -575,6 +603,31 @@ if ($pdo && is_array($selectedProject)) {
             foreach ($otherCompanyRows as $companyRow) {
                 if (row_total($companyRow, $allMonths) <= 0) continue;
                 $rowsBySection['노무비'][] = $companyRow;
+            }
+        }
+        $manualOutsourcingRows = cpms_outsourcing_manual_rows($pdo, $selectedProjectId, '', '');
+        foreach ($manualOutsourcingRows as $manualOutsourcingRow) {
+            $expenseDate = isset($manualOutsourcingRow['expense_date']) ? (string)$manualOutsourcingRow['expense_date'] : '';
+            $expenseYm = preg_match('/^\d{4}-\d{2}-\d{2}$/', $expenseDate) ? substr($expenseDate, 0, 7) : '';
+            if ($expenseYm === '' || !in_array($expenseYm, $allMonths, true)) continue;
+            $companyName = isset($manualOutsourcingRow['company_name']) ? trim((string)$manualOutsourcingRow['company_name']) : '';
+            if ($companyName === '') $companyName = '-';
+            $outsourcingKey = 'manual|' . project_monthly_text_key($companyName);
+            if (!isset($outsourcingCompanyRows[$outsourcingKey])) {
+                $outsourcingCompanyRows[$outsourcingKey] = array(
+                    'section' => '외주비',
+                    '업체명' => $companyName,
+                    '내역' => '외주비 입력 합계',
+                    'months' => monthly_zero_map($allMonths)
+                );
+            }
+            $outsourcingCompanyRows[$outsourcingKey]['months'][$expenseYm] += isset($manualOutsourcingRow['amount']) ? (float)$manualOutsourcingRow['amount'] : 0.0;
+        }
+        if (count($outsourcingCompanyRows) > 0) {
+            ksort($outsourcingCompanyRows);
+            foreach ($outsourcingCompanyRows as $outsourcingCompanyRow) {
+                if (row_total($outsourcingCompanyRow, $allMonths) <= 0) continue;
+                $rowsBySection['외주비'][] = $outsourcingCompanyRow;
             }
         }
         $laborDiagnostics[] = '노무비 집계 기준: 공사 > 노무비 지급총액 기준';
@@ -604,7 +657,7 @@ if ($pdo && is_array($selectedProject)) {
 
 if ($workDateFallbackUsed) { $notices[] = 'work_date가 없거나 비어 있으면 공정 시작일 기준으로 임시 집계했습니다.'; }
 
-$labels = array('구매품'=>'1. 구매품','자재비'=>'2. 자재비','장비비'=>'3. 장비비','노무비'=>'4. 노무비','기타경비'=>'5. 기타경비','안전관리비'=>'6. 안전관리비','공제분'=>'7. 공제분');
+$labels = array('외주비'=>'1. 외주비','구매품'=>'2. 구매품','자재비'=>'3. 자재비','장비비'=>'4. 장비비','노무비'=>'5. 노무비','기타경비'=>'6. 기타경비','안전관리비'=>'7. 안전관리비','공제분'=>'8. 공제분');
 $sumBySection = array();
 foreach ($labels as $k=>$v) { $sumBySection[$k] = monthly_zero_map($allMonths); }
 foreach ($rowsBySection as $sec=>$rows) {
@@ -616,7 +669,7 @@ $subtotal1 = monthly_zero_map($allMonths);
 $finalTotal = monthly_zero_map($allMonths);
 $profit = monthly_zero_map($allMonths);
 foreach ($allMonths as $ym) {
-    $subtotal1[$ym] = $sumBySection['구매품'][$ym] + $sumBySection['자재비'][$ym] + $sumBySection['장비비'][$ym] + $sumBySection['노무비'][$ym] + $sumBySection['기타경비'][$ym];
+    $subtotal1[$ym] = $sumBySection['외주비'][$ym] + $sumBySection['구매품'][$ym] + $sumBySection['자재비'][$ym] + $sumBySection['장비비'][$ym] + $sumBySection['노무비'][$ym] + $sumBySection['기타경비'][$ym];
     $finalTotal[$ym] = $subtotal1[$ym] + $sumBySection['안전관리비'][$ym] + $sumBySection['공제분'][$ym];
     $profit[$ym] = (isset($monthlyRevenue[$ym]) ? (float)$monthlyRevenue[$ym] : 0) - $finalTotal[$ym];
 }

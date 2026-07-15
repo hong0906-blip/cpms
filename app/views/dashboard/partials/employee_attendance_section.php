@@ -27,10 +27,8 @@ function cpms_dashboard_attendance_time($value) {
     return $value;
 }}
 if (!function_exists('cpms_dashboard_attendance_is_late')) {
-function cpms_dashboard_attendance_is_late($checkIn) {
-    $time = cpms_dashboard_attendance_time($checkIn);
-    if ($time === '' || strlen($time) < 5) return false;
-    return (strcmp(substr($time, 0, 5), '08:00') > 0);
+function cpms_dashboard_attendance_is_late($checkIn, $position) {
+    return attendance_is_late_check_in_value($checkIn, $position);
 }}
 if (!function_exists('cpms_dashboard_attendance_is_missing_checkout')) {
 function cpms_dashboard_attendance_is_missing_checkout($workDate, $checkIn, $checkOut, $today, $nowTime, $cutoffTime) {
@@ -71,6 +69,7 @@ function cpms_dashboard_attendance_pending_request_for_issue($pendingMap, $reque
     return null;
 }}
 $eid_att = attendance_employee_id($pdo);
+$attendanceEmployeePosition = attendance_employee_position($pdo, $eid_att);
 $today_att = attendance_today();
 $attendanceNow_att = attendance_now();
 $attendanceNowTime_att = strlen($attendanceNow_att) >= 19 ? substr($attendanceNow_att, 11, 8) : date('H:i:s');
@@ -215,7 +214,7 @@ if ($pdo && $eid_att > 0) {
                 $issueCheckOut = isset($issueRow['check_out']) ? trim((string)$issueRow['check_out']) : '';
                 if ($issueCheckIn !== '') $attendanceRecordDateMap[$issueDateValue] = true;
                 $issueMissing = cpms_dashboard_attendance_is_missing_checkout($issueDateValue, $issueCheckIn, $issueCheckOut, $today_att, $attendanceNowTime_att, $attendanceMissingCheckoutCutoff);
-                $issueLate = cpms_dashboard_attendance_is_late($issueCheckIn);
+                $issueLate = cpms_dashboard_attendance_is_late($issueCheckIn, $attendanceEmployeePosition);
                 if (!$issueMissing && !$issueLate) continue;
                 $issueRow['_missing_checkout'] = $issueMissing ? 1 : 0;
                 $issueRow['_late'] = $issueLate ? 1 : 0;
@@ -270,68 +269,6 @@ if ($pdo && $eid_att > 0) {
     }
 }
 ?>
-<script>
-(function(){
-    try{
-        var forms = document.querySelectorAll("form[action='?r=attendance/check_in'], form[action='?r=attendance/check_out']");
-        if(!forms || !forms.length) return;
-        var geofenceEnabled = <?php echo !empty($attendanceGeofence['enabled']) ? 'true' : 'false'; ?>;
-        function ensureHidden(form, name){
-            var input = form.querySelector("input[name='" + name + "']");
-            if(!input){
-                input = document.createElement('input');
-                input.type = 'hidden';
-                input.name = name;
-                form.appendChild(input);
-            }
-            return input;
-        }
-        function restoreButton(button, text){
-            if(!button) return;
-            button.disabled = false;
-            button.textContent = text;
-        }
-        function handleSubmit(e){
-            var form = e.currentTarget;
-            if(!form || !geofenceEnabled) return;
-            if(form.getAttribute('data-geo-ready') === '1') return;
-            e.preventDefault();
-            if(!navigator.geolocation){
-                alert('이 브라우저에서는 위치 확인을 지원하지 않습니다.');
-                return;
-            }
-            var button = form.querySelector('button[type=\"submit\"], button:not([type])');
-            var originalText = button ? button.textContent : '';
-            if(button){
-                button.disabled = true;
-                button.textContent = '위치 확인 중...';
-            }
-            navigator.geolocation.getCurrentPosition(function(pos){
-                ensureHidden(form, 'geo_lat').value = pos.coords.latitude;
-                ensureHidden(form, 'geo_lng').value = pos.coords.longitude;
-                ensureHidden(form, 'geo_accuracy').value = pos.coords.accuracy;
-                form.setAttribute('data-geo-ready', '1');
-                form.submit();
-            }, function(err){
-                restoreButton(button, originalText);
-                if(err && err.code === 1){
-                    alert('위치 권한을 허용해야 출퇴근을 등록할 수 있습니다.');
-                    return;
-                }
-                alert('현재 위치를 확인하지 못했습니다. 잠시 후 다시 시도해주세요.');
-            }, {
-                enableHighAccuracy: true,
-                timeout: 12000,
-                maximumAge: 0
-            });
-        }
-        for(var i=0;i<forms.length;i++){
-            forms[i].addEventListener('submit', handleSubmit);
-        }
-    }catch(e){}
-})();
-</script>
-
 <div class="cpms-dashboard-attendance-block">
 <div class='bg-white/80 rounded-3xl p-6 border mb-6'><!-- 직원 대시보드 UI 정리 + 공제시간 표시 제거 -->
 <h3 class='text-2xl font-extrabold mb-4'>내 근태 현황</h3>
@@ -511,7 +448,7 @@ if($pdo&&$eid_att>0){
                 $issueMissing = !empty($issueRow['_missing_checkout']);
                 $issueLate = !empty($issueRow['_late']);
                 $issueAbsent = !empty($issueRow['_absent']);
-                $issueRequestType = $issueAbsent ? 'both' : ($issueLate ? 'check_in' : ($issueMissing ? 'check_out' : 'check_in'));
+                $issueRequestType = ($issueAbsent || ($issueLate && $issueMissing)) ? 'both' : ($issueLate ? 'check_in' : ($issueMissing ? 'check_out' : 'check_in'));
                 $issuePendingRequest = cpms_dashboard_attendance_pending_request_for_issue($attendancePendingRequestMap, $issueDate, $issueRequestType);
                 ?>
                 <tr class='border-t'>

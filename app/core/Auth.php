@@ -326,6 +326,17 @@ class Auth
         return $u && isset($u['department']) ? (string)$u['department'] : '';
     }
 
+    public static function isDevelopmentDepartment()
+    {
+        if (!self::check()) return false;
+        return self::normalizeDept(self::userDepartment()) === '개발';
+    }
+
+    public static function canSwitchDashboardViews()
+    {
+        return self::isDevelopmentDepartment();
+    }
+
     // ★ 직급
     public static function userPosition()
     {
@@ -541,6 +552,7 @@ class Auth
             '공사팀' => '공사',
             '개발부' => '개발',
             '개발팀' => '개발',
+            '개발부서' => '개발',
             '안전/보건' => '안전',
             '안전보건' => '안전',
         );

@@ -435,33 +435,70 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $retu
 }}
 
 if (!function_exists('cpms_render_requested_task_kanban_lane')) {
-function cpms_render_requested_task_kanban_lane($items, $currentEmployeeId, $requestedTaskDate, $dashboardHiddenInputs, $returnUrl)
+function cpms_render_requested_task_kanban_lane($items, $currentEmployeeId, $returnUrl)
 {
     if (!is_array($items)) $items = array();
-    if (!is_array($dashboardHiddenInputs)) $dashboardHiddenInputs = array();
+    usort($items, function($a, $b) {
+        $aCreated = isset($a['created_at']) ? trim((string)$a['created_at']) : '';
+        $bCreated = isset($b['created_at']) ? trim((string)$b['created_at']) : '';
+        if ($aCreated !== $bCreated) {
+            if ($aCreated === '') return 1;
+            if ($bCreated === '') return -1;
+            return strcmp($aCreated, $bCreated);
+        }
+        $aId = isset($a['source_id']) ? (int)$a['source_id'] : 0;
+        $bId = isset($b['source_id']) ? (int)$b['source_id'] : 0;
+        if ($aId === $bId) return 0;
+        return ($aId < $bId) ? -1 : 1;
+    });
+    $requestedVisibleLimit = 3;
+    $requestedVisibleItems = array_slice($items, 0, $requestedVisibleLimit);
+    $requestedHiddenItems = array_slice($items, $requestedVisibleLimit);
     ?>
     <section class="rounded-2xl border border-gray-200 bg-slate-50 p-4 min-h-[280px]" data-requested-task-lane>
         <div class="flex items-center justify-between gap-3 mb-4">
             <h3 class="text-lg font-extrabold text-gray-900">내가 요청한 업무</h3>
             <span class="px-3 py-1 rounded-full bg-white border border-gray-200 text-sm font-extrabold text-gray-700"><?php echo count($items); ?>건</span>
         </div>
-        <form method="get" action="" class="mb-3 flex items-center gap-2">
-            <?php foreach ($dashboardHiddenInputs as $dashboardHiddenName => $dashboardHiddenValue): ?>
-                <input type="hidden" name="<?php echo h($dashboardHiddenName); ?>" value="<?php echo h($dashboardHiddenValue); ?>">
-            <?php endforeach; ?>
-            <input type="date" name="requested_task_date" value="<?php echo h($requestedTaskDate); ?>" class="min-w-0 flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm">
-            <button type="submit" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">조회</button>
-        </form>
         <div class="space-y-3 min-h-[180px]">
             <?php if (count($items) === 0): ?>
                 <div class="p-4 rounded-2xl border border-dashed border-gray-300 bg-white text-sm text-gray-500">표시할 업무가 없습니다.</div>
             <?php else: ?>
-                <?php foreach ($items as $item): ?>
+                <?php foreach ($requestedVisibleItems as $item): ?>
                     <?php cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $returnUrl); ?>
                 <?php endforeach; ?>
+                <?php if (count($requestedHiddenItems) > 0): ?>
+                    <div class="hidden" data-requested-task-extra>
+                        <div class="space-y-3">
+                            <?php foreach ($requestedHiddenItems as $item): ?>
+                                <?php cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $returnUrl); ?>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <button type="button" class="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-sm font-extrabold" data-requested-task-more data-expand-text="더보기 (<?php echo count($requestedHiddenItems); ?>건)" data-collapse-text="접기">더보기 (<?php echo count($requestedHiddenItems); ?>건)</button>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
     </section>
+    <script>
+    (function(){
+        var buttons=document.querySelectorAll('[data-requested-task-more]');
+        for(var i=0;i<buttons.length;i++){
+            if(buttons[i].getAttribute('data-toggle-bound')==='1')continue;
+            buttons[i].setAttribute('data-toggle-bound','1');
+            buttons[i].addEventListener('click',function(){
+                var lane=this.parentNode;
+                while(lane&&lane!==document&&!lane.hasAttribute('data-requested-task-lane'))lane=lane.parentNode;
+                if(!lane)return;
+                var extra=lane.querySelector('[data-requested-task-extra]');
+                if(!extra)return;
+                var opening=extra.classList.contains('hidden');
+                if(opening)extra.classList.remove('hidden');else extra.classList.add('hidden');
+                this.textContent=opening?(this.getAttribute('data-collapse-text')||'접기'):(this.getAttribute('data-expand-text')||'더보기');
+            });
+        }
+    })();
+    </script>
     <?php
 }}
 
@@ -949,25 +986,12 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
     if ((int)$currentEmployee['id'] <= 0) return;
 
     $feed = cpms_task_feed_for_employee($pdo, (int)$currentEmployee['id'], isset($currentEmployee['email']) ? $currentEmployee['email'] : '', $currentEmployee);
-    $requestedTaskDate = isset($_GET['requested_task_date']) ? trim((string)$_GET['requested_task_date']) : cpms_tasks_today();
-    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestedTaskDate)) $requestedTaskDate = cpms_tasks_today();
-    $requested = cpms_task_feed_direct_tasks_requested_by_employee($pdo, (int)$currentEmployee['id'], $requestedTaskDate);
+    $requested = cpms_task_feed_direct_tasks_requested_by_employee($pdo, (int)$currentEmployee['id'], '', true);
     $completedRequested = cpms_task_feed_completed_requests_for_employee($pdo, (int)$currentEmployee['id']);
     $employees = cpms_tasks_fetch_active_employees($pdo);
     $projects = cpms_tasks_fetch_projects($pdo);
     $returnUrl = isset($options['return_url']) ? trim((string)$options['return_url']) : '';
     if ($returnUrl === '') $returnUrl = cpms_tasks_default_return_url();
-    if (isset($options['form_hidden_inputs']) && is_array($options['form_hidden_inputs'])) {
-        $dashboardHiddenInputs = $options['form_hidden_inputs'];
-    } else {
-        $dashboardHiddenInputs = array('r' => 'dashboard_employee');
-        $currentDashboardRoute = isset($_GET['r']) ? trim((string)$_GET['r']) : '';
-        if ($currentDashboardRoute === 'dashboard_executive') {
-            $dashboardHiddenInputs = array('r' => 'dashboard_executive');
-            $currentExecTab = isset($_GET['exec_tab']) ? trim((string)$_GET['exec_tab']) : 'myTasks';
-            if ($currentExecTab !== '') $dashboardHiddenInputs['exec_tab'] = $currentExecTab;
-        }
-    }
     $currentLeaveIndex = function_exists('approval_current_leave_index') ? approval_current_leave_index($pdo, cpms_tasks_today()) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
 
     $summary = array(
@@ -1235,7 +1259,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
 
         <div data-cpms-employee-task-body class="mt-6 space-y-6">
             <div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-5 gap-4" data-task-kanban-board data-csrf="<?php echo h(csrf_token()); ?>">
-                <?php cpms_render_requested_task_kanban_lane($requested, (int)$currentEmployee['id'], $requestedTaskDate, $dashboardHiddenInputs, $returnUrl); ?>
+                <?php cpms_render_requested_task_kanban_lane($requested, (int)$currentEmployee['id'], $returnUrl); ?>
                 <?php cpms_render_task_kanban_lane('pending', '대기중', $kanbanLanes['pending'], (int)$currentEmployee['id']); ?>
                 <?php cpms_render_task_kanban_lane('progress', '진행중', $kanbanLanes['progress'], (int)$currentEmployee['id']); ?>
                 <?php cpms_render_task_kanban_lane('completion_pending', '완료 대기중', $kanbanLanes['completion_pending'], (int)$currentEmployee['id']); ?>

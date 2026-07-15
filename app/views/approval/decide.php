@@ -154,7 +154,7 @@ try {
                 }
             }
             try {
-                approval_queue_leave_final_approved_to_ceo($pdo, $id, $doc, array($creatorId));
+                approval_queue_final_approved_to_representative($pdo, $id, $doc, array($creatorId));
             } catch (Exception $e) {
             }
         }

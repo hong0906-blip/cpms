@@ -46,11 +46,79 @@ if (!function_exists('approval_index_card_class')) {
     }
 }
 
+if (!function_exists('approval_index_created_desc_compare')) {
+    function approval_index_created_desc_compare($left, $right)
+    {
+        $leftCreated = is_array($left) && isset($left['created_at']) ? (string)$left['created_at'] : '';
+        $rightCreated = is_array($right) && isset($right['created_at']) ? (string)$right['created_at'] : '';
+        if ($leftCreated !== $rightCreated) {
+            return strcmp($rightCreated, $leftCreated);
+        }
+        $leftId = is_array($left) && isset($left['id']) ? (int)$left['id'] : 0;
+        $rightId = is_array($right) && isset($right['id']) ? (int)$right['id'] : 0;
+        if ($leftId === $rightId) {
+            return 0;
+        }
+        return ($leftId < $rightId) ? 1 : -1;
+    }
+}
+
+if (!function_exists('approval_index_leave_applicant_key')) {
+    function approval_index_leave_applicant_key($row)
+    {
+        if (!is_array($row) || !isset($row['doc_type']) || strtolower(trim((string)$row['doc_type'])) !== 'leave') {
+            return '';
+        }
+        $content = approval_parse_content(isset($row['content']) ? $row['content'] : '');
+        $applicantName = isset($content['applicant_name']) ? trim((string)$content['applicant_name']) : '';
+        if ($applicantName === '' && isset($row['title'])) {
+            $title = trim((string)$row['title']);
+            $separatorPosition = strrpos($title, ' - ');
+            if ($separatorPosition !== false) {
+                $applicantName = trim(substr($title, $separatorPosition + 3));
+            }
+        }
+        if ($applicantName === '' && isset($row['created_by_name'])) {
+            $applicantName = trim((string)$row['created_by_name']);
+        }
+        $nameKey = approval_employee_person_name_base($applicantName);
+        if ($nameKey === '') {
+            return '';
+        }
+        $birthDate = isset($content['birth_date']) ? trim((string)$content['birth_date']) : '';
+        $department = isset($content['department']) ? approval_normalize_compare_text($content['department']) : '';
+        return $nameKey . '|' . $birthDate . '|' . $department;
+    }
+}
+
+if (!function_exists('approval_index_matches_completed_filters')) {
+    function approval_index_matches_completed_filters($row, $docTypeFilter, $titleFilter, $authorFilter, $dateFromFilter, $dateToFilter, $queryFilter)
+    {
+        if (!is_array($row)) {
+            return false;
+        }
+        $docType = isset($row['doc_type']) ? (string)$row['doc_type'] : '';
+        $title = isset($row['title']) ? (string)$row['title'] : '';
+        $author = isset($row['created_by_name']) ? (string)$row['created_by_name'] : '';
+        $createdDate = isset($row['created_at']) ? substr((string)$row['created_at'], 0, 10) : '';
+        if ($docTypeFilter !== '' && $docType !== $docTypeFilter) return false;
+        if ($titleFilter !== '' && stripos($title, $titleFilter) === false) return false;
+        if ($authorFilter !== '' && stripos($author, $authorFilter) === false) return false;
+        if ($dateFromFilter !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateFromFilter) && $createdDate < $dateFromFilter) return false;
+        if ($dateToFilter !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateToFilter) && $createdDate > $dateToFilter) return false;
+        if ($queryFilter !== '' && stripos($title, $queryFilter) === false && stripos($author, $queryFilter) === false && stripos($docType, $queryFilter) === false) return false;
+        return true;
+    }
+}
+
 $pdo = Db::pdo();
 $u = \App\Core\Auth::user();
-$uid = approval_current_employee_id($pdo, $u);
-$userEmail = approval_current_user_email($u);
-$userName = approval_current_user_name($u);
+$currentEmployeeIdentity = approval_current_employee_identity($pdo, $u);
+$uid = isset($currentEmployeeIdentity['id']) ? (int)$currentEmployeeIdentity['id'] : 0;
+$userEmail = isset($currentEmployeeIdentity['email']) ? trim((string)$currentEmployeeIdentity['email']) : '';
+$userName = isset($currentEmployeeIdentity['name']) ? trim((string)$currentEmployeeIdentity['name']) : '';
+$userEmails = isset($currentEmployeeIdentity['emails']) && is_array($currentEmployeeIdentity['emails']) ? $currentEmployeeIdentity['emails'] : array($userEmail);
+$userNames = isset($currentEmployeeIdentity['names']) && is_array($currentEmployeeIdentity['names']) ? $currentEmployeeIdentity['names'] : array($userName);
 $isAdmin = approval_is_admin_user($u);
 $debugApproval = isset($_GET['debug_approval']) && (string)$_GET['debug_approval'] === '1';
 
@@ -117,6 +185,7 @@ if (!in_array($view, array('active', 'cancelled', 'completed'), true)) {
     $view = 'active';
 }
 $isCompletedAllViewer = ($view === 'completed' && approval_can_view_all_completed_documents($pdo, $u));
+$isActiveAllViewer = ($view === 'active' && approval_can_view_all_active_documents($pdo, $u));
 
 $docTypeFilter = isset($_GET['doc_type']) ? trim((string)$_GET['doc_type']) : '';
 $titleFilter = isset($_GET['title']) ? trim((string)$_GET['title']) : '';
@@ -149,7 +218,9 @@ $debugInfo = array(
     'is_admin' => $isAdmin ? 'Y' : 'N',
     'params_keys' => array(),
     'sql_status' => 'not_run',
-    'sql_error' => ''
+    'sql_error' => '',
+    'owner_fallback_count' => 0,
+    'owner_cluster_count' => 0
 );
 
 $docHasCreatedByEmail = false;
@@ -176,30 +247,74 @@ if ($pdo) {
     $refParts = array();
 
     if ($uid > 0) {
-        $ownerParts[] = "d.created_by_id = :uid";
-        $lineParts[] = "x.approver_id = :uid";
-        $refParts[] = "r.employee_id = :uid";
-        $params[':uid'] = $uid;
+        $ownerParts[] = "d.created_by_id = :owner_uid";
+        $lineParts[] = "x.approver_id = :line_uid";
+        $refParts[] = "r.employee_id = :ref_uid";
+        $params[':owner_uid'] = $uid;
+        $params[':line_uid'] = $uid;
+        $params[':ref_uid'] = $uid;
     }
-    if ($userName !== '') {
-        $ownerParts[] = "d.created_by_name = :uname";
-        $lineParts[] = "x.approver_name = :uname";
-        $refParts[] = "r.employee_name = :uname";
-        $params[':uname'] = $userName;
+    for ($userNameIndex = 0; $userNameIndex < count($userNames); $userNameIndex++) {
+        $identityName = trim((string)$userNames[$userNameIndex]);
+        if ($identityName === '') {
+            continue;
+        }
+        $ownerNameParam = ':owner_name_' . $userNameIndex;
+        $ownerNormalizedNameParam = ':owner_name_normalized_' . $userNameIndex;
+        $lineNameParam = ':line_name_' . $userNameIndex;
+        $refNameParam = ':ref_name_' . $userNameIndex;
+        $ownerParts[] = "d.created_by_name = " . $ownerNameParam;
+        $ownerParts[] = approval_sql_normalize_compare_text("COALESCE(d.created_by_name, '')") . " = " . $ownerNormalizedNameParam;
+        $lineParts[] = "x.approver_name = " . $lineNameParam;
+        $refParts[] = "r.employee_name = " . $refNameParam;
+        $params[$ownerNameParam] = $identityName;
+        $params[$ownerNormalizedNameParam] = approval_normalize_compare_text($identityName);
+        $params[$lineNameParam] = $identityName;
+        $params[$refNameParam] = $identityName;
+
+        $encodedUserName = json_encode($identityName);
+        if ($encodedUserName !== false && $encodedUserName !== null) {
+            $contentNameFields = array('writer_name', 'drafter_name', 'applicant_name', 'sender_name', 'creator_name', 'created_by_name');
+            for ($contentNameIndex = 0; $contentNameIndex < count($contentNameFields); $contentNameIndex++) {
+                $contentNameField = $contentNameFields[$contentNameIndex];
+                $contentNameParam = ':owner_content_name_' . $userNameIndex . '_' . $contentNameIndex;
+                $ownerParts[] = "LOCATE(" . $contentNameParam . ", COALESCE(d.content, '')) > 0";
+                $params[$contentNameParam] = '"' . $contentNameField . '":' . $encodedUserName;
+            }
+        }
     }
-    if ($userEmail !== '') {
-        $lineParts[] = "LOWER(TRIM(x.approver_email)) = LOWER(TRIM(:email))";
-        $refParts[] = "LOWER(TRIM(r.employee_email)) = LOWER(TRIM(:email))";
-        $params[':email'] = $userEmail;
+    for ($userEmailIndex = 0; $userEmailIndex < count($userEmails); $userEmailIndex++) {
+        $identityEmail = strtolower(trim((string)$userEmails[$userEmailIndex]));
+        if ($identityEmail === '') {
+            continue;
+        }
+        $lineEmailParam = ':line_email_' . $userEmailIndex;
+        $refEmailParam = ':ref_email_' . $userEmailIndex;
+        $lineParts[] = "LOWER(TRIM(x.approver_email)) = " . $lineEmailParam;
+        $refParts[] = "LOWER(TRIM(r.employee_email)) = " . $refEmailParam;
+        $params[$lineEmailParam] = $identityEmail;
+        $params[$refEmailParam] = $identityEmail;
         if ($docHasCreatedByEmail) {
-            $ownerParts[] = "LOWER(TRIM(d.created_by_email)) = LOWER(TRIM(:owner_email))";
-            $params[':owner_email'] = $userEmail;
+            $ownerEmailParam = ':owner_email_' . $userEmailIndex;
+            $ownerParts[] = "LOWER(TRIM(d.created_by_email)) = " . $ownerEmailParam;
+            $params[$ownerEmailParam] = $identityEmail;
+        }
+
+        $contentEmailFields = array('writer_email', 'applicant_email', 'sender_email', 'creator_email', 'created_by_email');
+        for ($contentEmailIndex = 0; $contentEmailIndex < count($contentEmailFields); $contentEmailIndex++) {
+            $contentEmailField = $contentEmailFields[$contentEmailIndex];
+            $contentEmailParam = ':owner_content_email_' . $userEmailIndex . '_' . $contentEmailIndex;
+            $ownerParts[] = "LOCATE(" . $contentEmailParam . ", LOWER(COALESCE(d.content, ''))) > 0";
+            $params[$contentEmailParam] = '"' . $contentEmailField . '":"' . $identityEmail . '"';
         }
     }
 
     $relatedParts = array();
     if ($isCompletedAllViewer) {
         $relatedParts[] = '1 = 1';
+    }
+    if ($isActiveAllViewer) {
+        $relatedParts[] = "UPPER(COALESCE(d.doc_status, '')) IN ('PENDING', 'DRAFT')";
     }
     if (count($ownerParts) > 0) {
         $relatedParts[] = '(' . implode(' OR ', $ownerParts) . ')';
@@ -249,13 +364,19 @@ if ($pdo) {
         $myLineWhere[] = "my.approver_id = :my_uid";
         $params[':my_uid'] = $uid;
     }
-    if ($userEmail !== '') {
-        $myLineWhere[] = "LOWER(TRIM(my.approver_email)) = LOWER(TRIM(:my_email))";
-        $params[':my_email'] = $userEmail;
+    for ($myEmailIndex = 0; $myEmailIndex < count($userEmails); $myEmailIndex++) {
+        $myEmail = strtolower(trim((string)$userEmails[$myEmailIndex]));
+        if ($myEmail === '') continue;
+        $myEmailParam = ':my_email_' . $myEmailIndex;
+        $myLineWhere[] = "LOWER(TRIM(my.approver_email)) = " . $myEmailParam;
+        $params[$myEmailParam] = $myEmail;
     }
-    if ($userName !== '') {
-        $myLineWhere[] = "my.approver_name = :my_uname";
-        $params[':my_uname'] = $userName;
+    for ($myNameIndex = 0; $myNameIndex < count($userNames); $myNameIndex++) {
+        $myName = trim((string)$userNames[$myNameIndex]);
+        if ($myName === '') continue;
+        $myNameParam = ':my_name_' . $myNameIndex;
+        $myLineWhere[] = "my.approver_name = " . $myNameParam;
+        $params[$myNameParam] = $myName;
     }
     if (count($myLineWhere) > 0) {
         $myLineSelect = "(SELECT my.line_status
@@ -278,9 +399,10 @@ if ($pdo) {
     if (count($where) > 0) {
         $sql .= " WHERE " . implode(' AND ', $where);
     }
-    $sql .= " ORDER BY d.updated_at DESC, d.id DESC";
-    if ($view !== 'completed') {
-        $sql .= " LIMIT 300";
+    if ($view === 'completed') {
+        $sql .= " ORDER BY COALESCE(d.updated_at, d.created_at) DESC, d.id DESC";
+    } else {
+        $sql .= " ORDER BY d.created_at DESC, d.id DESC";
     }
 
     $debugInfo['params_keys'] = array_keys($params);
@@ -299,6 +421,95 @@ if ($pdo) {
         $rows = array();
         $debugInfo['sql_status'] = 'failed';
         $debugInfo['sql_error'] = substr($e->getMessage(), 0, 300);
+    }
+}
+
+$ownerFallbackNeeded = (($view === 'active' && !$isActiveAllViewer) || ($view === 'completed' && !$isCompletedAllViewer) || $view === 'cancelled');
+if ($pdo && $ownerFallbackNeeded && $debugInfo['sql_status'] === 'success') {
+    try {
+        if ($view === 'cancelled') {
+            $fallbackStatusWhere = "UPPER(COALESCE(d.doc_status, '')) = 'CANCELLED'";
+        } else if ($view === 'completed') {
+            $fallbackStatusWhere = "UPPER(COALESCE(d.doc_status, '')) IN ('APPROVED', 'COMPLETED')";
+        } else {
+            $fallbackStatusWhere = "UPPER(COALESCE(d.doc_status, '')) NOT IN ('CANCELLED', 'APPROVED', 'COMPLETED')";
+        }
+        $fallbackSql = "SELECT d.*,
+                               NULL AS my_line_status,
+                               (SELECT cur.role_type
+                                  FROM cpms_approval_lines cur
+                                 WHERE cur.document_id = d.id
+                                   AND cur.line_status = 'PENDING'
+                                 ORDER BY cur.line_order ASC
+                                 LIMIT 1) AS current_role
+                          FROM cpms_approval_documents d
+                         WHERE " . $fallbackStatusWhere . "
+                         ORDER BY d.created_at DESC, d.id DESC";
+        $fallbackSt = $pdo->query($fallbackSql);
+        $fallbackRows = $fallbackSt ? $fallbackSt->fetchAll(PDO::FETCH_ASSOC) : array();
+        if (!is_array($fallbackRows)) {
+            $fallbackRows = array();
+        }
+        if ($view === 'completed') {
+            $filteredFallbackRows = array();
+            for ($filterFallbackIndex = 0; $filterFallbackIndex < count($fallbackRows); $filterFallbackIndex++) {
+                if (approval_index_matches_completed_filters($fallbackRows[$filterFallbackIndex], $docTypeFilter, $titleFilter, $authorFilter, $dateFromFilter, $dateToFilter, $queryFilter)) {
+                    $filteredFallbackRows[] = $fallbackRows[$filterFallbackIndex];
+                }
+            }
+            $fallbackRows = $filteredFallbackRows;
+        }
+
+        $visibleDocumentIds = array();
+        for ($visibleIndex = 0; $visibleIndex < count($rows); $visibleIndex++) {
+            if (isset($rows[$visibleIndex]['id'])) {
+                $visibleDocumentIds[(int)$rows[$visibleIndex]['id']] = 1;
+            }
+        }
+
+        $ownedLeaveApplicantKeys = array();
+        for ($ownedVisibleIndex = 0; $ownedVisibleIndex < count($rows); $ownedVisibleIndex++) {
+            if (!approval_is_document_owner($pdo, $rows[$ownedVisibleIndex], $u)) {
+                continue;
+            }
+            $ownedVisibleKey = approval_index_leave_applicant_key($rows[$ownedVisibleIndex]);
+            if ($ownedVisibleKey !== '') {
+                $ownedLeaveApplicantKeys[$ownedVisibleKey] = 1;
+            }
+        }
+        for ($ownedFallbackIndex = 0; $ownedFallbackIndex < count($fallbackRows); $ownedFallbackIndex++) {
+            if (!approval_is_document_owner($pdo, $fallbackRows[$ownedFallbackIndex], $u)) {
+                continue;
+            }
+            $ownedFallbackKey = approval_index_leave_applicant_key($fallbackRows[$ownedFallbackIndex]);
+            if ($ownedFallbackKey !== '') {
+                $ownedLeaveApplicantKeys[$ownedFallbackKey] = 1;
+            }
+        }
+
+        for ($fallbackIndex = 0; $fallbackIndex < count($fallbackRows); $fallbackIndex++) {
+            $fallbackRow = $fallbackRows[$fallbackIndex];
+            $fallbackId = isset($fallbackRow['id']) ? (int)$fallbackRow['id'] : 0;
+            if ($fallbackId <= 0 || isset($visibleDocumentIds[$fallbackId])) {
+                continue;
+            }
+            $isDirectOwner = approval_is_document_owner($pdo, $fallbackRow, $u);
+            $fallbackApplicantKey = approval_index_leave_applicant_key($fallbackRow);
+            $isOwnedLeaveCluster = (!$isDirectOwner && $fallbackApplicantKey !== '' && isset($ownedLeaveApplicantKeys[$fallbackApplicantKey]));
+            if ($isDirectOwner || $isOwnedLeaveCluster) {
+                $rows[] = $fallbackRow;
+                $visibleDocumentIds[$fallbackId] = 1;
+                $debugInfo['owner_fallback_count']++;
+                if ($isOwnedLeaveCluster) {
+                    $debugInfo['owner_cluster_count']++;
+                }
+            }
+        }
+        if ($debugInfo['owner_fallback_count'] > 0) {
+            usort($rows, 'approval_index_created_desc_compare');
+        }
+    } catch (Exception $e) {
+        error_log('[approval_index] owner fallback error: ' . $e->getMessage());
     }
 }
 
@@ -357,13 +568,24 @@ if ($view === 'cancelled') {
     );
 }
 
-$mobileLeaveRows = array();
-for ($i = 0; $i < count($rows); $i++) {
-    $docTypeForMobile = isset($rows[$i]['doc_type']) ? trim((string)$rows[$i]['doc_type']) : '';
-    if ($docTypeForMobile === 'leave') {
-        $mobileLeaveRows[] = $rows[$i];
-    }
+$approvalPageSize = 7;
+$approvalTotalRows = count($rows);
+$approvalTotalPages = 1;
+$approvalPage = isset($_GET['approval_page']) ? (int)$_GET['approval_page'] : 1;
+$approvalUsePagination = ($view === 'completed');
+if ($approvalUsePagination) {
+    $approvalTotalPages = max(1, (int)ceil($approvalTotalRows / $approvalPageSize));
+    if ($approvalPage < 1) $approvalPage = 1;
+    if ($approvalPage > $approvalTotalPages) $approvalPage = $approvalTotalPages;
+    $rows = array_slice($rows, ($approvalPage - 1) * $approvalPageSize, $approvalPageSize);
+} else {
+    $approvalPage = 1;
 }
+$mobileRows = $rows;
+$approvalPageParams = $_GET;
+if (!is_array($approvalPageParams)) $approvalPageParams = array();
+$approvalPageParams['r'] = 'approval_home';
+$approvalPageParams['view'] = $view;
 
 ?>
 <div class="cpms-approval-page space-y-5">
@@ -381,6 +603,8 @@ for ($i = 0; $i < count($rows); $i++) {
             <div>isAdmin: <?php echo h($debugInfo['is_admin']); ?></div>
             <div>params: <?php echo h(implode(', ', $debugInfo['params_keys'])); ?></div>
             <div>sql: <?php echo h($debugInfo['sql_status']); ?></div>
+            <div>ownerFallback: <?php echo (int)$debugInfo['owner_fallback_count']; ?></div>
+            <div>ownerCluster: <?php echo (int)$debugInfo['owner_cluster_count']; ?></div>
             <?php if ($debugInfo['sql_error'] !== '') { ?>
                 <div>error: <?php echo h($debugInfo['sql_error']); ?></div>
             <?php } ?>
@@ -479,16 +703,17 @@ for ($i = 0; $i < count($rows); $i++) {
             <div class="p-8 text-center text-gray-500"><?php echo h($emptyMessage); ?></div>
         <?php } else { ?>
             <div class="cpms-approval-mobile-list">
-                <?php if (count($mobileLeaveRows) === 0) { ?>
-                    <div class="p-5 text-center text-gray-500">모바일에서 처리할 휴가계 문서가 없습니다.</div>
+                <?php if (count($mobileRows) === 0) { ?>
+                    <div class="p-5 text-center text-gray-500"><?php echo h($emptyMessage); ?></div>
                 <?php } else { ?>
                     <div class="p-3 space-y-3">
-                        <?php for ($mi = 0; $mi < count($mobileLeaveRows); $mi++) {
-                            $row = $mobileLeaveRows[$mi];
+                        <?php for ($mi = 0; $mi < count($mobileRows); $mi++) {
+                            $row = $mobileRows[$mi];
                             $myLineStatus = isset($row['my_line_status']) ? trim((string)$row['my_line_status']) : '';
                             $docStatus = isset($row['doc_status']) ? trim((string)$row['doc_status']) : '';
                             $currentRole = isset($row['current_role']) ? trim((string)$row['current_role']) : '';
-                            $canMobileDecide = (strtoupper($docStatus) === 'PENDING' && strtoupper($myLineStatus) === 'PENDING');
+                            $mobileDocType = isset($row['doc_type']) ? trim((string)$row['doc_type']) : '';
+                            $canMobileDecide = ($mobileDocType === 'leave' && strtoupper($docStatus) === 'PENDING' && strtoupper($myLineStatus) === 'PENDING');
                         ?>
                             <div class="rounded-2xl border border-gray-200 bg-white p-4">
                                 <div class="flex items-start justify-between gap-3">
@@ -607,6 +832,21 @@ for ($i = 0; $i < count($rows); $i++) {
                     </tbody>
                 </table>
             </div>
+            <?php if ($approvalUsePagination && $approvalTotalPages > 1) { ?>
+                <nav class="px-4 py-5 border-t border-gray-100 bg-gray-50 flex flex-wrap items-center justify-center gap-2" aria-label="전자결재 문서 페이지">
+                    <?php for ($approvalPageNumber = 1; $approvalPageNumber <= $approvalTotalPages; $approvalPageNumber++) {
+                        $approvalPageParams['approval_page'] = $approvalPageNumber;
+                        $approvalPageUrl = '?' . http_build_query($approvalPageParams, '', '&');
+                        $approvalPageClass = ($approvalPageNumber === $approvalPage)
+                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                            : 'bg-white border-gray-200 text-gray-700 hover:bg-indigo-50 hover:text-indigo-700';
+                    ?>
+                        <a href="<?php echo h($approvalPageUrl); ?>"
+                           class="inline-flex min-w-[38px] h-10 items-center justify-center rounded-xl border px-3 text-sm font-extrabold <?php echo h($approvalPageClass); ?>"
+                           <?php echo ($approvalPageNumber === $approvalPage) ? 'aria-current="page"' : ''; ?>><?php echo $approvalPageNumber; ?></a>
+                    <?php } ?>
+                </nav>
+            <?php } ?>
         <?php } ?>
     </div>
 </div>

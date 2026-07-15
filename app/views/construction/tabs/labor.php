@@ -197,12 +197,15 @@ if (function_exists('cpms_sort_labor_workers')) {
 }
 
 $outsourcingTimesheetWorkers = array();
+$laborCostTimesheetWorkers = array();
 if (is_array($timesheetWorkers)) {
     foreach ($timesheetWorkers as $worker) {
-        $companyName = isset($worker['company_name']) ? trim((string)$worker['company_name']) : '';
-        if ($companyName === '') $companyName = '창명건설';
-        if ($companyName === '창명건설') continue;
-        $outsourcingTimesheetWorkers[] = $worker;
+        $isOutsourcing = (isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1);
+        if ($isOutsourcing) {
+            $outsourcingTimesheetWorkers[] = $worker;
+        } else {
+            $laborCostTimesheetWorkers[] = $worker;
+        }
     }
 }
 $outsourcingTimesheetRows = count($outsourcingTimesheetWorkers);
@@ -277,7 +280,7 @@ if (!function_exists('cpms_labor_tab_monthly_pay_total')) {
 $canManageLaborForce = (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive');
 $laborForceRow = function_exists('cpms_labor_force_load') ? cpms_labor_force_load(isset($pdo) ? $pdo : null, $projectId, $selectedMonth) : array('amount' => 0.0, 'memo' => '');
 $laborForceAmount = isset($laborForceRow['amount']) ? (float)$laborForceRow['amount'] : 0.0;
-$laborBaseAmount = cpms_labor_tab_monthly_pay_total($timesheetWorkers, $attendanceGongsuMap, $selectedMonth);
+$laborBaseAmount = cpms_labor_tab_monthly_pay_total($laborCostTimesheetWorkers, $attendanceGongsuMap, $selectedMonth);
 $laborTotalAmount = $laborBaseAmount + $laborForceAmount;
 
 $todayKey = date('Y-m-d');
@@ -334,7 +337,7 @@ foreach ($timesheetWorkers as $worker) {
     <?php $showLaborForceSummaryCard = ($canManageLaborForce && !$hideLaborForceSummaryUi); ?>
     <div class="mt-5 grid grid-cols-1 <?php echo $showLaborForceSummaryCard ? 'md:grid-cols-3' : 'md:grid-cols-2'; ?> gap-3">
         <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4">
-            <div class="text-xs font-bold text-gray-500">공수 기준 노무비</div>
+            <div class="text-xs font-bold text-gray-500">공수 기준 노무비(외주비 제외)</div>
             <div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo number_format($laborBaseAmount); ?>원</div>
         </div>
         <?php if ($showLaborForceSummaryCard): ?>
@@ -470,7 +473,7 @@ foreach ($timesheetWorkers as $worker) {
     <?php $showSensitiveLaborFields = (\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees()); ?>
     <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
         <h4 class="text-lg font-extrabold text-gray-900">인원 작성</h4>
-        <div class="text-sm text-gray-600 mt-1">임금 단가 및 계좌 정보를 등록합니다.</div>
+        <div class="text-sm text-gray-600 mt-1">임금 단가와 계좌 정보를 등록하고, 노무비에서 분리할 인원을 외주비로 선택합니다.</div>
         <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 선택해 프로젝트에 추가합니다.</div>
 
         <form id="workforceAddForm" method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" style="display:none;">
@@ -571,6 +574,7 @@ foreach ($timesheetWorkers as $worker) {
                     <thead class="bg-gray-100 text-gray-700">
                     <tr>
                         <th class="border border-gray-200 px-2 py-2">성명</th>
+                        <th class="border border-gray-200 px-2 py-2">외주비</th>
                         <th class="border border-gray-200 px-2 py-2">핸드폰 번호</th>
                         <th class="border border-gray-200 px-2 py-2">주소</th>
                         <th class="border border-gray-200 px-2 py-2">구분/직종</th>
@@ -599,6 +603,7 @@ foreach ($timesheetWorkers as $worker) {
                             $sourceType = isset($member['source_type']) ? trim((string)$member['source_type']) : 'manual';
                             $matchedStatus = isset($member['matched_status']) ? trim((string)$member['matched_status']) : 'manual';
                             $isMonthAssigned = (isset($member['month_assigned']) && (int)$member['month_assigned'] === 1);
+                            $isOutsourcing = (isset($member['is_outsourcing']) && (int)$member['is_outsourcing'] === 1);
                             $statusText = '수동입력';
                             if ($matchedStatus === 'matched') $statusText = '인력관리 등록됨';
                             else if ($matchedStatus === 'duplicate') $statusText = '동명이인 확인 필요';
@@ -612,6 +617,10 @@ foreach ($timesheetWorkers as $worker) {
                                     <input type="hidden" name="workers[<?php echo $workerId; ?>][source_type]" value="<?php echo h($sourceType); ?>">
                                     <input type="hidden" name="workers[<?php echo $workerId; ?>][matched_status]" value="<?php echo h($matchedStatus); ?>">
                                     <input class="w-full px-2 py-1 border border-gray-200 rounded-lg bg-gray-100" type="text" value="<?php echo h(isset($member['name']) ? $member['name'] : ''); ?>" placeholder="성명" readonly>
+                                </td>
+                                <td class="border border-gray-200 px-2 py-2 text-center">
+                                    <input type="hidden" name="workers[<?php echo $workerId; ?>][is_outsourcing]" value="0">
+                                    <input type="checkbox" name="workers[<?php echo $workerId; ?>][is_outsourcing]" value="1" <?php echo $isOutsourcing ? 'checked' : ''; ?> class="w-5 h-5 align-middle" title="선택하면 이 인원의 지급액이 노무비가 아닌 외주비로 집계됩니다.">
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
                                     <input name="workers[<?php echo $workerId; ?>][phone]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['phone']) ? $member['phone'] : ''); ?>" placeholder="핸드폰 번호">
@@ -659,7 +668,7 @@ foreach ($timesheetWorkers as $worker) {
                         <?php endforeach; ?>
                     <?php else: ?>
                         <tr class="bg-white">
-                            <td colspan="<?php echo $showSensitiveLaborFields ? 11 : 8; ?>" class="border border-gray-200 px-2 py-6 text-center text-gray-500">등록된 인원이 없습니다.</td>
+                            <td colspan="<?php echo $showSensitiveLaborFields ? 12 : 9; ?>" class="border border-gray-200 px-2 py-6 text-center text-gray-500">등록된 인원이 없습니다.</td>
                         </tr>
                     <?php endif; ?>
                     </tbody>
@@ -959,14 +968,18 @@ foreach ($timesheetWorkers as $worker) {
     }
 
     function updateLaborSheetTotals(){
+        if (document.querySelectorAll('.cpms-gongsu-cell').length === 0) return;
         var rows = document.querySelectorAll('.cpms-timesheet-row');
         var dailyTotals = {};
         var totalOutputDays = 0;
         var totalGongsu = 0;
         var totalPay = 0;
         var todayAttendanceCount = 0;
+        var groupTotals = {};
         for (var r = 0; r < rows.length; r++) {
             var row = rows[r];
+            var groupKey = row.getAttribute('data-group-key') || '';
+            if (!groupTotals[groupKey]) groupTotals[groupKey] = {daily:{}, outputDays:0, gongsu:0, pay:0};
             var buttons = row.querySelectorAll('.cpms-gongsu-cell');
             var rowOutputDays = 0;
             var rowGongsu = 0;
@@ -979,6 +992,8 @@ foreach ($timesheetWorkers as $worker) {
                 if (date !== '') {
                     if (!dailyTotals[date]) dailyTotals[date] = 0;
                     dailyTotals[date] += value;
+                    if (!groupTotals[groupKey].daily[date]) groupTotals[groupKey].daily[date] = 0;
+                    groupTotals[groupKey].daily[date] += value;
                 }
             }
             var wageRate = parseFloat(row.getAttribute('data-wage-rate') || '0');
@@ -986,6 +1001,9 @@ foreach ($timesheetWorkers as $worker) {
             totalOutputDays += rowOutputDays;
             totalGongsu += rowGongsu;
             totalPay += rowGongsu * wageRate;
+            groupTotals[groupKey].outputDays += rowOutputDays;
+            groupTotals[groupKey].gongsu += rowGongsu;
+            groupTotals[groupKey].pay += rowGongsu * wageRate;
             if (todayDate) {
                 var todayCell = row.querySelector('.cpms-gongsu-cell[data-date="' + todayDate + '"]');
                 if (todayCell && parseCellValue(todayCell) > 0) todayAttendanceCount++;
@@ -1008,6 +1026,25 @@ foreach ($timesheetWorkers as $worker) {
         if (payTotalCell) payTotalCell.textContent = formatMoney(totalPay);
         if (totalAttendanceCell) totalAttendanceCell.textContent = totalGongsu > 0 ? formatValue(totalGongsu) : '0';
         if (todayAttendanceCell) todayAttendanceCell.textContent = String(todayAttendanceCount);
+
+        var subtotalRows = document.querySelectorAll('.cpms-labor-subtotal-row');
+        for (var s = 0; s < subtotalRows.length; s++) {
+            var subtotalRow = subtotalRows[s];
+            var subtotalKey = subtotalRow.getAttribute('data-group-key') || '';
+            var subtotalData = groupTotals[subtotalKey] || {daily:{}, outputDays:0, gongsu:0, pay:0};
+            var subtotalDailyCells = subtotalRow.querySelectorAll('.cpms-subtotal-daily');
+            for (var sd = 0; sd < subtotalDailyCells.length; sd++) {
+                var subtotalDate = subtotalDailyCells[sd].getAttribute('data-date') || '';
+                var subtotalDayValue = subtotalData.daily[subtotalDate] || 0;
+                subtotalDailyCells[sd].textContent = subtotalDayValue > 0 ? formatValue(subtotalDayValue) : '0';
+            }
+            var subtotalOutputCell = subtotalRow.querySelector('.cpms-subtotal-output-days');
+            var subtotalGongsuCell = subtotalRow.querySelector('.cpms-subtotal-gongsu');
+            var subtotalPayCell = subtotalRow.querySelector('.cpms-subtotal-pay');
+            if (subtotalOutputCell) subtotalOutputCell.textContent = String(subtotalData.outputDays);
+            if (subtotalGongsuCell) subtotalGongsuCell.textContent = subtotalData.gongsu > 0 ? formatValue(subtotalData.gongsu) : '0';
+            if (subtotalPayCell) subtotalPayCell.textContent = formatMoney(subtotalData.pay);
+        }
     }
 
     function setCellDisplay(cell, displayValue, isPending){

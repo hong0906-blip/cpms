@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/partials/labor_data_loader.php';
+require_once __DIR__ . '/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/partials/sales_data_loader.php';
 require_once __DIR__ . '/../../safety/safety_cost_helper.php';
 require_once __DIR__ . '/../partials/schedule_auto_progress_helper.php';
@@ -437,10 +438,10 @@ if (!function_exists('cpms_status_labor_wage_map')) {
 }
 
 if (!function_exists('cpms_status_labor_total_between')) {
-    function cpms_status_labor_total_between($pdo, $projectId, $projectName, $startDate, $endDate, $laborWageMap) {
+    function cpms_status_labor_total_between($pdo, $projectId, $projectName, $startDate, $endDate, $laborWageMap, $outsourcingOnly = false) {
         static $cache = array();
         if (!$pdo || $projectId <= 0) return 0.0;
-        $cacheKey = cpms_status_cache_key($pdo, 'labor-between:' . (int)$projectId . ':' . trim((string)$projectName) . ':' . (string)$startDate . ':' . (string)$endDate);
+        $cacheKey = cpms_status_cache_key($pdo, 'labor-between:' . (int)$projectId . ':' . trim((string)$projectName) . ':' . (string)$startDate . ':' . (string)$endDate . ':' . ($outsourcingOnly ? 'outsourcing' : 'labor'));
         if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         $projectName = trim((string)$projectName);
         if ($projectName === '') return 0.0;
@@ -486,15 +487,30 @@ if (!function_exists('cpms_status_labor_total_between')) {
             }
         }
 
+        $outsourcingWorkerMap = array();
+        $directTeamMembers = cpms_load_direct_team_members($pdo);
+        $projectWorkers = cpms_load_project_labor_workers($pdo, (int)$projectId);
+        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers);
+        $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
+        foreach ($timesheetWorkers as $timesheetWorker) {
+            $timesheetWorkerName = isset($timesheetWorker['name']) ? (string)$timesheetWorker['name'] : '';
+            $timesheetWorkerKey = cpms_normalize_worker_key($timesheetWorkerName);
+            if ($timesheetWorkerKey === '') continue;
+            $outsourcingWorkerMap[$timesheetWorkerKey] = (isset($timesheetWorker['is_outsourcing']) && (int)$timesheetWorker['is_outsourcing'] === 1) ? 1 : 0;
+        }
+
         $totalLabor = 0.0;
         foreach ($sumGongsu as $workerKey => $workerSumGongsu) {
             $outputDays = isset($outputDaysSet[$workerKey]) && is_array($outputDaysSet[$workerKey]) ? count($outputDaysSet[$workerKey]) : 0;
             if ($outputDays <= 0) continue;
+            $isOutsourcing = isset($outsourcingWorkerMap[$workerKey]) && (int)$outsourcingWorkerMap[$workerKey] === 1;
+            if ($outsourcingOnly && !$isOutsourcing) continue;
+            if (!$outsourcingOnly && $isOutsourcing) continue;
             $wageRate = isset($laborWageMap[$workerKey]) ? (float)$laborWageMap[$workerKey] : 0.0;
             $totalLabor += ((float)$workerSumGongsu) * $wageRate;
         }
 
-        if (function_exists('cpms_labor_force_amount_between')) {
+        if (!$outsourcingOnly && function_exists('cpms_labor_force_amount_between')) {
             $totalLabor += cpms_labor_force_amount_between($pdo, (int)$projectId, $startDate, $endDate);
         }
 
@@ -603,6 +619,8 @@ $categories = array(
     'equipment' => array('label' => '장비비', 'color' => '#EF4444'),
     'safety' => array('label' => '안전관리비', 'color' => '#22C55E'),
     'materials' => array('label' => '자재구입비', 'color' => '#A855F7'),
+    'outsourcing' => array('label' => '외주비', 'color' => '#06B6D4'),
+    'purchase' => array('label' => '구매품', 'color' => '#EC4899'),
 );
 
 $laborWageMap = cpms_status_labor_wage_map($pdo, (int)$pid);
@@ -610,7 +628,7 @@ $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
 $periodDiagnostics = array();
 
 $monthlyData = array();
-$yearTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'expected_sales' => 0, 'confirmed_sales' => 0, 'used_total' => 0, 'target_cost_amount' => 0, 'profit' => 0);
+$yearTotals = array('labor' => 0, 'outsourcing' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'purchase' => 0, 'sales' => 0, 'expected_sales' => 0, 'confirmed_sales' => 0, 'used_total' => 0, 'target_cost_amount' => 0, 'profit' => 0);
 $maxMonthlyValue = 0;
 
 foreach ($periodMonths as $ym) {
@@ -634,11 +652,15 @@ foreach ($periodMonths as $ym) {
 
     $equipment = cpms_status_equipment_total_between($pdo, $pid, $costStart, $costEnd);
     $materialByCategory = cpms_status_material_category_sum_between($pdo, $pid, $costStart, $costEnd);
-    $materials = (float)$materialByCategory['자재비'] + (float)$materialByCategory['구매품'] + (float)$materialByCategory['기타경비'];
+    $materials = (float)$materialByCategory['자재비'] + (float)$materialByCategory['기타경비'];
+    $purchase = (float)$materialByCategory['구매품'];
     $safety = cpms_safety_cost_total_between((int)$pid, $costStart, $costEnd);
 
     // 상황탭 노무비=지급총액 합
     $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
+    $outsourcingLabor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap, true);
+    $outsourcingManual = cpms_outsourcing_manual_total_between($pdo, (int)$pid, $laborStart, $laborEnd);
+    $outsourcing = $outsourcingLabor + $outsourcingManual;
 
     // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
     $expectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
@@ -646,7 +668,7 @@ foreach ($periodMonths as $ym) {
     $sales = ($confirmedSales > 0) ? $confirmedSales : $expectedSales;
     $targetCostRate = isset($targetRateByMonth[$ym]) ? (float)$targetRateByMonth[$ym] : $targetRateValue;
     $targetCostAmount = cpms_status_target_cost_amount($sales, $targetCostRate);
-    $usedTotal = $labor + $equipment + $materials;
+    $usedTotal = $labor + $outsourcing + $equipment + $materials + $purchase;
     $profit = $sales - $usedTotal;
     $costRateInfo = cpms_status_cost_rate_info($sales, $usedTotal);
 
@@ -664,8 +686,10 @@ foreach ($periodMonths as $ym) {
         'sales_start' => $salesStart,
         'sales_end' => $salesEnd,
         'labor' => $labor,
+        'outsourcing' => $outsourcing,
         'equipment' => $equipment,
         'materials' => $materials,
+        'purchase' => $purchase,
         'safety' => $safety,
         'sales' => $sales,
         'expected_sales' => $expectedSales,
@@ -678,7 +702,7 @@ foreach ($periodMonths as $ym) {
         'cost_rate' => $costRateInfo['cost_rate'],
         'cost_rate_label' => $costRateInfo['cost_rate_label'],
         'no_sales' => $costRateInfo['no_sales'],
-        'matSafetyTotal' => $materials + $safety,
+        'stackedCostTotal' => $materials + $safety + $outsourcing + $purchase,
     );
 
     foreach ($yearTotals as $key => $sumValue) {
@@ -687,8 +711,8 @@ foreach ($periodMonths as $ym) {
     foreach (array('sales', 'used_total', 'labor', 'equipment') as $barKey) {
         if (isset($row[$barKey]) && (float)$row[$barKey] > $maxMonthlyValue) $maxMonthlyValue = (float)$row[$barKey];
     }
-    if ((float)$row['matSafetyTotal'] > $maxMonthlyValue) {
-        $maxMonthlyValue = (float)$row['matSafetyTotal'];
+    if ((float)$row['stackedCostTotal'] > $maxMonthlyValue) {
+        $maxMonthlyValue = (float)$row['stackedCostTotal'];
     }
 
     $monthlyData[] = $row;
@@ -709,9 +733,11 @@ foreach ($monthlyData as $mRow) {
             'year' => $mYear,
             'label' => substr((string)$mYear, 2, 2) . '년 ' . $q . 'Q',
             'labor' => 0,
+            'outsourcing' => 0,
             'equipment' => 0,
             'safety' => 0,
             'materials' => 0,
+            'purchase' => 0,
             'sales' => 0,
             'expected_sales' => 0,
             'confirmed_sales' => 0,
@@ -721,7 +747,7 @@ foreach ($monthlyData as $mRow) {
             'cost_rate' => 0,
             'cost_rate_label' => '0%',
             'no_sales' => 0,
-            'matSafetyTotal' => 0,
+            'stackedCostTotal' => 0,
         );
     }
 
@@ -731,7 +757,7 @@ foreach ($monthlyData as $mRow) {
 }
 
 foreach ($quarterlyMap as $qRow) {
-    $qRow['matSafetyTotal'] = (float)$qRow['materials'] + (float)$qRow['safety'];
+    $qRow['stackedCostTotal'] = (float)$qRow['materials'] + (float)$qRow['safety'] + (float)$qRow['outsourcing'] + (float)$qRow['purchase'];
     $qCostRateInfo = cpms_status_cost_rate_info(isset($qRow['sales']) ? $qRow['sales'] : 0, isset($qRow['used_total']) ? $qRow['used_total'] : 0);
     $qRow['cost_rate'] = $qCostRateInfo['cost_rate'];
     $qRow['cost_rate_label'] = $qCostRateInfo['cost_rate_label'];
@@ -739,14 +765,14 @@ foreach ($quarterlyMap as $qRow) {
     foreach (array('sales', 'used_total', 'labor', 'equipment') as $barKey) {
         if (isset($qRow[$barKey]) && (float)$qRow[$barKey] > $maxQuarterValue) $maxQuarterValue = (float)$qRow[$barKey];
     }
-    if ((float)$qRow['matSafetyTotal'] > $maxQuarterValue) {
-        $maxQuarterValue = (float)$qRow['matSafetyTotal'];
+    if ((float)$qRow['stackedCostTotal'] > $maxQuarterValue) {
+        $maxQuarterValue = (float)$qRow['stackedCostTotal'];
     }
     $quarterlyData[] = $qRow;
 }
 
 // 상황탭 매출 추가/색상변경/상단금액구조 변경: 상단 전체 누적 금액(연도 변경과 무관)
-$overallTotals = array('labor' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'sales' => 0, 'expected_sales' => 0, 'confirmed_sales' => 0);
+$overallTotals = array('labor' => 0, 'outsourcing' => 0, 'equipment' => 0, 'safety' => 0, 'materials' => 0, 'purchase' => 0, 'sales' => 0, 'expected_sales' => 0, 'confirmed_sales' => 0);
 foreach ($years as $yy) {
     for ($m = 1; $m <= 12; $m++) {
         $ym = sprintf('%04d-%02d', (int)$yy, $m);
@@ -763,8 +789,11 @@ foreach ($years as $yy) {
 
         $overallTotals['equipment'] += cpms_status_equipment_total_between($pdo, $pid, $costStart, $costEnd);
         $overallMaterialByCategory = cpms_status_material_category_sum_between($pdo, $pid, $costStart, $costEnd);
-        $overallTotals['materials'] += (float)$overallMaterialByCategory['자재비'] + (float)$overallMaterialByCategory['구매품'] + (float)$overallMaterialByCategory['기타경비'];
+        $overallTotals['materials'] += (float)$overallMaterialByCategory['자재비'] + (float)$overallMaterialByCategory['기타경비'];
+        $overallTotals['purchase'] += (float)$overallMaterialByCategory['구매품'];
         $overallTotals['labor'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
+        $overallTotals['outsourcing'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap, true);
+        $overallTotals['outsourcing'] += cpms_outsourcing_manual_total_between($pdo, (int)$pid, $laborStart, $laborEnd);
 
         $overallExpectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
         $overallConfirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
@@ -780,7 +809,7 @@ $safetyRemaining = $safetyLimit110 - $safetyUsedTotal;
 $safetyUseRate = ($safetyContractTotal > 0) ? (($safetyUsedTotal / $safetyContractTotal) * 100) : 0.0;
 $safetyRemainRate = ($safetyLimit110 > 0) ? (($safetyRemaining / $safetyLimit110) * 100) : 0.0;
 $overallTotals['safety'] = $safetyUsedTotal;
-$overallInputCostTotal = $overallTotals['labor'] + $overallTotals['equipment'] + $overallTotals['materials'];
+$overallInputCostTotal = $overallTotals['labor'] + $overallTotals['outsourcing'] + $overallTotals['equipment'] + $overallTotals['materials'] + $overallTotals['purchase'];
 $overallUsageTotal = $overallInputCostTotal;
 $overallTargetCostAmount = cpms_status_target_cost_amount($overallTotals['sales'], $targetRateValue);
 $overallCostRateInfo = cpms_status_cost_rate_info($overallTotals['sales'], $overallInputCostTotal);
@@ -1041,14 +1070,18 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             $equipmentHeight = ($equipmentAmount <= 0) ? 2 : max(2, ($equipmentAmount / $maxMonthlyValue) * 100);
                             $equipmentTitle = $row['label'] . ' ' . $categories['equipment']['label'] . ': ' . cpms_status_money($equipmentAmount) . ' (' . $row['cost_start'] . ' ~ ' . $row['cost_end'] . ')';
 
-                            // 안전 스택
+                            // 안전관리비/자재구입비/외주비/구매품 단일 스택
                             $materialsAmount = isset($row['materials']) ? (float)$row['materials'] : 0;
                             $safetyAmount = isset($row['safety']) ? (float)$row['safety'] : 0;
-                            $matSafetyTotal = isset($row['matSafetyTotal']) ? (float)$row['matSafetyTotal'] : ($materialsAmount + $safetyAmount);
-                            $matSafetyHeight = ($matSafetyTotal <= 0) ? 2 : max(2, ($matSafetyTotal / $maxMonthlyValue) * 100);
-                            $matPercent = ($matSafetyTotal > 0) ? (($materialsAmount / $matSafetyTotal) * 100) : 50;
-                            $safetyPercent = ($matSafetyTotal > 0) ? (($safetyAmount / $matSafetyTotal) * 100) : 50;
-                            $stackTitle = $row['label'] . ' 자재: ' . cpms_status_money($materialsAmount) . ' / 안전: ' . cpms_status_money($safetyAmount) . ' / 합계: ' . cpms_status_money($matSafetyTotal) . ' (' . $row['cost_start'] . ' ~ ' . $row['cost_end'] . ')';
+                            $outsourcingAmount = isset($row['outsourcing']) ? (float)$row['outsourcing'] : 0;
+                            $purchaseAmount = isset($row['purchase']) ? (float)$row['purchase'] : 0;
+                            $stackedCostTotal = isset($row['stackedCostTotal']) ? (float)$row['stackedCostTotal'] : ($materialsAmount + $safetyAmount + $outsourcingAmount + $purchaseAmount);
+                            $stackedCostHeight = ($stackedCostTotal <= 0) ? 2 : max(2, ($stackedCostTotal / $maxMonthlyValue) * 100);
+                            $materialsPercent = ($stackedCostTotal > 0) ? (($materialsAmount / $stackedCostTotal) * 100) : 25;
+                            $safetyPercent = ($stackedCostTotal > 0) ? (($safetyAmount / $stackedCostTotal) * 100) : 25;
+                            $outsourcingPercent = ($stackedCostTotal > 0) ? (($outsourcingAmount / $stackedCostTotal) * 100) : 25;
+                            $purchasePercent = ($stackedCostTotal > 0) ? (($purchaseAmount / $stackedCostTotal) * 100) : 25;
+                            $stackTitle = $row['label'] . ' 안전관리비: ' . cpms_status_money($safetyAmount) . ' / 자재구입비: ' . cpms_status_money($materialsAmount) . ' / 외주비: ' . cpms_status_money($outsourcingAmount) . ' / 구매품: ' . cpms_status_money($purchaseAmount) . ' / 합계: ' . cpms_status_money($stackedCostTotal) . ' (' . $row['cost_start'] . ' ~ ' . $row['cost_end'] . ')';
                             ?>
                             <div class="bar" title="<?php echo h($salesTitle); ?>" style="height:<?php echo round($salesHeight, 2); ?>%; background:<?php echo h($categories['sales']['color']); ?>;">
                                 <span class="value"><?php echo h(number_format($salesAmount)); ?></span>
@@ -1062,10 +1095,12 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             <div class="bar" title="<?php echo h($equipmentTitle); ?>" style="height:<?php echo round($equipmentHeight, 2); ?>%; background:<?php echo h($categories['equipment']['color']); ?>;">
                                 <span class="value"><?php echo h(number_format($equipmentAmount)); ?></span>
                             </div>
-                            <div class="bar stacked" title="<?php echo h($stackTitle); ?>" style="height:<?php echo round($matSafetyHeight, 2); ?>%;">
-                                <span class="segment" style="height:<?php echo round($matPercent, 2); ?>%; background:<?php echo h($categories['materials']['color']); ?>;"></span>
+                            <div class="bar stacked" title="<?php echo h($stackTitle); ?>" style="height:<?php echo round($stackedCostHeight, 2); ?>%;">
+                                <span class="segment" style="height:<?php echo round($materialsPercent, 2); ?>%; background:<?php echo h($categories['materials']['color']); ?>;"></span>
                                 <span class="segment" style="height:<?php echo round($safetyPercent, 2); ?>%; background:<?php echo h($categories['safety']['color']); ?>;"></span>
-                                <span class="value"><?php echo h(number_format($matSafetyTotal)); ?></span>
+                                <span class="segment" style="height:<?php echo round($outsourcingPercent, 2); ?>%; background:<?php echo h($categories['outsourcing']['color']); ?>;"></span>
+                                <span class="segment" style="height:<?php echo round($purchasePercent, 2); ?>%; background:<?php echo h($categories['purchase']['color']); ?>;"></span>
+                                <span class="value"><?php echo h(number_format($stackedCostTotal)); ?></span>
                             </div>
                         </div>
                         <div class="xlabel"><?php echo h($row['label']); ?></div>
@@ -1168,14 +1203,18 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             $equipmentHeight = ($equipmentAmount <= 0) ? 2 : max(2, ($equipmentAmount / $maxQuarterValue) * 100);
                             $equipmentTitle = $row['label'] . ' ' . $categories['equipment']['label'] . ': ' . cpms_status_money($equipmentAmount);
 
-                            // 안전 스택
+                            // 안전관리비/자재구입비/외주비/구매품 단일 스택
                             $materialsAmount = isset($row['materials']) ? (float)$row['materials'] : 0;
                             $safetyAmount = isset($row['safety']) ? (float)$row['safety'] : 0;
-                            $matSafetyTotal = isset($row['matSafetyTotal']) ? (float)$row['matSafetyTotal'] : ($materialsAmount + $safetyAmount);
-                            $matSafetyHeight = ($matSafetyTotal <= 0) ? 2 : max(2, ($matSafetyTotal / $maxQuarterValue) * 100);
-                            $matPercent = ($matSafetyTotal > 0) ? (($materialsAmount / $matSafetyTotal) * 100) : 50;
-                            $safetyPercent = ($matSafetyTotal > 0) ? (($safetyAmount / $matSafetyTotal) * 100) : 50;
-                            $stackTitle = $row['label'] . ' 자재: ' . cpms_status_money($materialsAmount) . ' / 안전: ' . cpms_status_money($safetyAmount) . ' / 합계: ' . cpms_status_money($matSafetyTotal);
+                            $outsourcingAmount = isset($row['outsourcing']) ? (float)$row['outsourcing'] : 0;
+                            $purchaseAmount = isset($row['purchase']) ? (float)$row['purchase'] : 0;
+                            $stackedCostTotal = isset($row['stackedCostTotal']) ? (float)$row['stackedCostTotal'] : ($materialsAmount + $safetyAmount + $outsourcingAmount + $purchaseAmount);
+                            $stackedCostHeight = ($stackedCostTotal <= 0) ? 2 : max(2, ($stackedCostTotal / $maxQuarterValue) * 100);
+                            $materialsPercent = ($stackedCostTotal > 0) ? (($materialsAmount / $stackedCostTotal) * 100) : 25;
+                            $safetyPercent = ($stackedCostTotal > 0) ? (($safetyAmount / $stackedCostTotal) * 100) : 25;
+                            $outsourcingPercent = ($stackedCostTotal > 0) ? (($outsourcingAmount / $stackedCostTotal) * 100) : 25;
+                            $purchasePercent = ($stackedCostTotal > 0) ? (($purchaseAmount / $stackedCostTotal) * 100) : 25;
+                            $stackTitle = $row['label'] . ' 안전관리비: ' . cpms_status_money($safetyAmount) . ' / 자재구입비: ' . cpms_status_money($materialsAmount) . ' / 외주비: ' . cpms_status_money($outsourcingAmount) . ' / 구매품: ' . cpms_status_money($purchaseAmount) . ' / 합계: ' . cpms_status_money($stackedCostTotal);
                             ?>
                             <div class="bar" title="<?php echo h($salesTitle); ?>" style="height:<?php echo round($salesHeight, 2); ?>%; background:<?php echo h($categories['sales']['color']); ?>;">
                                 <span class="value"><?php echo h(number_format($salesAmount)); ?></span>
@@ -1189,10 +1228,12 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                             <div class="bar" title="<?php echo h($equipmentTitle); ?>" style="height:<?php echo round($equipmentHeight, 2); ?>%; background:<?php echo h($categories['equipment']['color']); ?>;">
                                 <span class="value"><?php echo h(number_format($equipmentAmount)); ?></span>
                             </div>
-                            <div class="bar stacked" title="<?php echo h($stackTitle); ?>" style="height:<?php echo round($matSafetyHeight, 2); ?>%;">
-                                <span class="segment" style="height:<?php echo round($matPercent, 2); ?>%; background:<?php echo h($categories['materials']['color']); ?>;"></span>
+                            <div class="bar stacked" title="<?php echo h($stackTitle); ?>" style="height:<?php echo round($stackedCostHeight, 2); ?>%;">
+                                <span class="segment" style="height:<?php echo round($materialsPercent, 2); ?>%; background:<?php echo h($categories['materials']['color']); ?>;"></span>
                                 <span class="segment" style="height:<?php echo round($safetyPercent, 2); ?>%; background:<?php echo h($categories['safety']['color']); ?>;"></span>
-                                <span class="value"><?php echo h(number_format($matSafetyTotal)); ?></span>
+                                <span class="segment" style="height:<?php echo round($outsourcingPercent, 2); ?>%; background:<?php echo h($categories['outsourcing']['color']); ?>;"></span>
+                                <span class="segment" style="height:<?php echo round($purchasePercent, 2); ?>%; background:<?php echo h($categories['purchase']['color']); ?>;"></span>
+                                <span class="value"><?php echo h(number_format($stackedCostTotal)); ?></span>
                             </div>
                         </div>
                         <div class="xlabel"><?php echo h($row['label']); ?></div>

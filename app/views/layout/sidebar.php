@@ -32,7 +32,11 @@ $canViewCompanyPayrollMenu = cpms_can_view_company_payroll($user, $sidebarPdo);
 
 $dashboardType = isset($dashboardType) ? (string)$dashboardType : (isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee');
 if ($dashboardType !== 'employee' && $dashboardType !== 'executive') $dashboardType = 'employee';
+$canSwitchDashboardViews = method_exists('App\\Core\\Auth', 'canSwitchDashboardViews')
+  ? \App\Core\Auth::canSwitchDashboardViews()
+  : false;
 $dashboardHref = ($role === 'executive') ? '?r=dashboard_executive' : '?r=dashboard_employee';
+if ($canSwitchDashboardViews && $dashboardType === 'employee') $dashboardHref = '?r=dashboard_employee';
 $googleEmailIcon = 'https://www.google.com/s2/favicons?domain=mail.google.com&sz=64';
 $googleChatIcon = 'https://www.google.com/s2/favicons?domain=chat.google.com&sz=64';
 
@@ -58,6 +62,7 @@ $deptMap = array(
   '공무부' => '공무',
   '개발부' => '개발',
   '개발팀' => '개발',
+  '개발부서' => '개발',
   '품질부' => '품질',
   '안전부' => '안전',
   '공사부' => '공사',
@@ -141,7 +146,7 @@ if ($selectedMenu === $dashboardMenu) {
     <ul class="space-y-1">
       <?php foreach ($menuItems as $it): ?>
         <?php $isSelected = ($selectedMenu === $it['id']); ?>
-        <?php $itemHref = isset($it['href']) ? (string)$it['href'] : (($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id']))); ?>
+        <?php $itemHref = isset($it['href']) ? (string)$it['href'] : (($it['id'] === $dashboardMenu) ? $dashboardHref : ('?r=' . urlencode($it['id']))); ?>
         <?php $itemTarget = isset($it['target']) ? trim((string)$it['target']) : ''; ?>
         <?php $itemRel = isset($it['rel']) ? trim((string)$it['rel']) : ''; ?>
         <li>
@@ -172,7 +177,7 @@ if ($selectedMenu === $dashboardMenu) {
     <ul class="space-y-1">
       <?php foreach ($menuItems as $it): ?>
         <?php $isSelected = ($selectedMenu === $it['id']); ?>
-        <?php $itemHref = isset($it['href']) ? (string)$it['href'] : (($it['id'] === $dashboardMenu) ? ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee') : ('?r=' . urlencode($it['id']))); ?>
+        <?php $itemHref = isset($it['href']) ? (string)$it['href'] : (($it['id'] === $dashboardMenu) ? $dashboardHref : ('?r=' . urlencode($it['id']))); ?>
         <?php $itemTarget = isset($it['target']) ? trim((string)$it['target']) : ''; ?>
         <?php $itemRel = isset($it['rel']) ? trim((string)$it['rel']) : ''; ?>
         <li>
@@ -248,7 +253,7 @@ if ($selectedMenu === $dashboardMenu) {
     </div>
 
     <div class="flex items-center gap-4">
-      <?php if ($selectedMenu === $dashboardMenu && $role === 'executive'): ?>
+      <?php if ($selectedMenu === $dashboardMenu && $canSwitchDashboardViews): ?>
         <div class="flex gap-1 bg-gray-100/80 backdrop-blur-sm rounded-2xl p-1 shadow-sm">
           <a href="<?php echo h('?r=dashboard_employee'); ?>"
              class="px-5 py-2 rounded-xl text-sm font-semibold transition-all duration-300 <?php echo ($dashboardType === 'employee') ? 'bg-white text-blue-600 shadow-md shadow-blue-500/10' : 'text-gray-600 hover:text-gray-900'; ?>">
@@ -284,9 +289,10 @@ if ($selectedMenu === $dashboardMenu) {
     }
 
     $mobileNavItems = array(
-      array('menu' => 'dashboard', 'label' => '대시보드', 'icon' => 'layout-dashboard', 'href' => ($role === 'executive' ? '?r=dashboard_executive' : '?r=dashboard_employee')),
+      array('menu' => 'dashboard', 'label' => '대시보드', 'icon' => 'layout-dashboard', 'href' => $dashboardHref),
       array('menu' => 'scheduler', 'label' => $schedulerMenu, 'icon' => 'calendar-days', 'href' => '?r=scheduler'),
       array('menu' => 'employees', 'label' => '임직원', 'icon' => 'users', 'href' => '?r=employees_directory'),
+      array('menu' => 'notice', 'label' => $noticeMenu, 'icon' => 'megaphone', 'href' => '?r=notice'),
       array('menu' => 'approval', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
     );
     if (\App\Core\Auth::canAccessConstruction()) {

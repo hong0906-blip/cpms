@@ -121,6 +121,68 @@ if (!function_exists('approval_build_final_approved_message')) {
     }
 }
 
+if (!function_exists('approval_build_representative_final_approved_message')) {
+    function approval_build_representative_final_approved_message($docType, $title, $creatorName)
+    {
+        $docTypeLabel = approval_doc_type_label($docType);
+        $safeTitle = trim((string)$title);
+        $safeCreatorName = trim((string)$creatorName);
+        if ($safeTitle === '') {
+            $safeTitle = '전자결재 문서';
+        }
+        if ($safeCreatorName === '') {
+            $safeCreatorName = '작성자';
+        }
+        return implode("\n", array(
+            '[CPMS 승인완료 문서 안내]',
+            '',
+            '최종 승인되어 완료된 전자결재 문서가 있습니다.',
+            '',
+            '문서종류 : ' . $docTypeLabel,
+            '제목 : ' . $safeTitle,
+            '작성자 : ' . $safeCreatorName,
+            '',
+            '전자결재 완료된 문서에서 확인해주세요.'
+        ));
+    }
+}
+
+if (!function_exists('approval_queue_final_approved_to_representative')) {
+    function approval_queue_final_approved_to_representative($pdo, $documentId, $docRow, $skipEmployeeIds)
+    {
+        if (!$pdo || (int)$documentId <= 0 || !is_array($docRow)) {
+            return;
+        }
+        $representative = null;
+        if (function_exists('approval_find_ceo_employee_for_proxy')) {
+            try {
+                $representative = approval_find_ceo_employee_for_proxy($pdo);
+            } catch (Exception $e) {
+                $representative = null;
+            }
+        }
+        if (!is_array($representative) || !isset($representative['id']) || (int)$representative['id'] <= 0) {
+            $representative = approval_find_ceo_notification_employee($pdo, $documentId);
+        }
+        if (!is_array($representative) || !isset($representative['id']) || (int)$representative['id'] <= 0) {
+            return;
+        }
+        $representativeId = (int)$representative['id'];
+        $skipEmployeeIds = is_array($skipEmployeeIds) ? $skipEmployeeIds : array();
+        for ($i = 0; $i < count($skipEmployeeIds); $i++) {
+            if ($representativeId === (int)$skipEmployeeIds[$i]) {
+                return;
+            }
+        }
+        $msg = approval_build_representative_final_approved_message(
+            isset($docRow['doc_type']) ? $docRow['doc_type'] : '',
+            isset($docRow['title']) ? $docRow['title'] : '',
+            isset($docRow['created_by_name']) ? $docRow['created_by_name'] : ''
+        );
+        approval_queue_notification($pdo, $documentId, 'FINAL_APPROVED_REPRESENTATIVE', $representativeId, $msg);
+    }
+}
+
 if (!function_exists('approval_queue_leave_final_approved_to_ceo')) {
     function approval_queue_leave_final_approved_to_ceo($pdo, $documentId, $docRow, $skipEmployeeIds)
     {
@@ -131,23 +193,7 @@ if (!function_exists('approval_queue_leave_final_approved_to_ceo')) {
         if ($docType !== 'leave') {
             return;
         }
-        $ceo = approval_find_ceo_notification_employee($pdo, $documentId);
-        if (!is_array($ceo) || !isset($ceo['id']) || (int)$ceo['id'] <= 0) {
-            return;
-        }
-        $ceoId = (int)$ceo['id'];
-        $skipEmployeeIds = is_array($skipEmployeeIds) ? $skipEmployeeIds : array();
-        for ($i = 0; $i < count($skipEmployeeIds); $i++) {
-            if ($ceoId === (int)$skipEmployeeIds[$i]) {
-                return;
-            }
-        }
-        $msg = approval_build_final_approved_message(
-            $docType,
-            isset($docRow['title']) ? $docRow['title'] : '',
-            isset($docRow['created_by_name']) ? $docRow['created_by_name'] : ''
-        );
-        approval_queue_notification($pdo, $documentId, 'FINAL_APPROVED', $ceoId, $msg);
+        approval_queue_final_approved_to_representative($pdo, $documentId, $docRow, $skipEmployeeIds);
     }
 }
 
