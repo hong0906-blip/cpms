@@ -49,17 +49,66 @@ if (!function_exists('approval_index_card_class')) {
 if (!function_exists('approval_index_created_desc_compare')) {
     function approval_index_created_desc_compare($left, $right)
     {
-        $leftCreated = is_array($left) && isset($left['created_at']) ? (string)$left['created_at'] : '';
-        $rightCreated = is_array($right) && isset($right['created_at']) ? (string)$right['created_at'] : '';
+        $leftCreated = is_array($left) && isset($left['created_at']) && is_scalar($left['created_at']) ? (string)$left['created_at'] : '';
+        $rightCreated = is_array($right) && isset($right['created_at']) && is_scalar($right['created_at']) ? (string)$right['created_at'] : '';
         if ($leftCreated !== $rightCreated) {
             return strcmp($rightCreated, $leftCreated);
         }
-        $leftId = is_array($left) && isset($left['id']) ? (int)$left['id'] : 0;
-        $rightId = is_array($right) && isset($right['id']) ? (int)$right['id'] : 0;
+        $leftId = is_array($left) && isset($left['id']) && is_scalar($left['id']) ? (int)$left['id'] : 0;
+        $rightId = is_array($right) && isset($right['id']) && is_scalar($right['id']) ? (int)$right['id'] : 0;
         if ($leftId === $rightId) {
             return 0;
         }
         return ($leftId < $rightId) ? 1 : -1;
+    }
+}
+
+if (!function_exists('approval_index_scalar_text')) {
+    function approval_index_scalar_text($row, $key, $default)
+    {
+        if (!is_array($row) || !isset($row[$key]) || !is_scalar($row[$key])) {
+            return (string)$default;
+        }
+        return trim((string)$row[$key]);
+    }
+}
+
+if (!function_exists('approval_index_debug_shutdown')) {
+    function approval_index_debug_shutdown()
+    {
+        if (empty($GLOBALS['cpms_approval_debug_shutdown_enabled'])) {
+            return;
+        }
+
+        $error = error_get_last();
+        if (!is_array($error) || !isset($error['type'])) {
+            return;
+        }
+
+        $fatalTypes = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR);
+        if (!in_array((int)$error['type'], $fatalTypes, true)) {
+            return;
+        }
+
+        $state = isset($GLOBALS['cpms_approval_debug_render_state']) && is_array($GLOBALS['cpms_approval_debug_render_state'])
+            ? $GLOBALS['cpms_approval_debug_render_state']
+            : array();
+        $documentId = isset($state['document_id']) && is_scalar($state['document_id']) ? (string)$state['document_id'] : '';
+        $rowIndex = isset($state['row_index']) && is_scalar($state['row_index']) ? (string)$state['row_index'] : '';
+        $renderTarget = isset($state['render_target']) && is_scalar($state['render_target']) ? (string)$state['render_target'] : '';
+        $message = isset($error['message']) && is_scalar($error['message']) ? (string)$error['message'] : '';
+        $file = isset($error['file']) && is_scalar($error['file']) ? (string)$error['file'] : '';
+        $line = isset($error['line']) && is_scalar($error['line']) ? (string)$error['line'] : '';
+
+        echo "\n<!-- APPROVAL_FATAL_ERROR"
+            . ' type=' . h((string)$error['type'])
+            . ' message=' . h($message)
+            . ' file=' . h($file)
+            . ' line=' . h($line)
+            . ' document_id=' . h($documentId)
+            . ' row_index=' . h($rowIndex)
+            . ' render_target=' . h($renderTarget)
+            . " -->\n";
     }
 }
 
@@ -89,7 +138,7 @@ for ($ownerEmailCandidateIndex = 0; $ownerEmailCandidateIndex < count($ownerEmai
     }
 }
 $isAdmin = approval_is_admin_user($u);
-$debugApproval = isset($_GET['debug_approval']) && (string)$_GET['debug_approval'] === '1';
+$debugApprovalRequested = isset($_GET['debug_approval']) && (string)$_GET['debug_approval'] === '1';
 
 $txt = array(
     'page_active' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%A7%84%ED%96%89%EB%AC%B8%EC%84%9C'),
@@ -155,6 +204,17 @@ if (!in_array($view, array('active', 'cancelled', 'completed'), true)) {
 }
 $isCompletedAllViewer = ($view === 'completed' && approval_can_view_all_completed_documents($pdo, $u));
 $isActiveAllViewer = ($view === 'active' && approval_can_view_all_active_documents($pdo, $u));
+$debugApproval = ($debugApprovalRequested && $view === 'active' && ($isAdmin || $isActiveAllViewer));
+
+if ($debugApproval) {
+    $GLOBALS['cpms_approval_debug_shutdown_enabled'] = true;
+    $GLOBALS['cpms_approval_debug_render_state'] = array(
+        'document_id' => '',
+        'row_index' => '',
+        'render_target' => 'before_render'
+    );
+    register_shutdown_function('approval_index_debug_shutdown');
+}
 
 $docTypeFilter = isset($_GET['doc_type']) ? trim((string)$_GET['doc_type']) : '';
 $titleFilter = isset($_GET['title']) ? trim((string)$_GET['title']) : '';
@@ -188,7 +248,15 @@ $debugInfo = array(
     'params_keys' => array(),
     'sql_status' => 'not_run',
     'sql_error' => '',
-    'owner_fallback_count' => 0
+    'sql_row_count' => 0,
+    'owner_fallback_count' => 0,
+    'final_row_count' => 0,
+    'progress_count' => 0,
+    'desktop_row_count' => 0,
+    'mobile_row_count' => 0,
+    'file_path' => $debugApproval ? __FILE__ : '',
+    'file_mtime' => $debugApproval ? @filemtime(__FILE__) : 0,
+    'file_sha1' => $debugApproval ? @sha1_file(__FILE__) : ''
 );
 
 $docHasCreatedByEmail = false;
@@ -392,6 +460,7 @@ if ($pdo) {
             $rows = array();
         }
         $debugInfo['sql_status'] = 'success';
+        $debugInfo['sql_row_count'] = count($rows);
     } catch (Exception $e) {
         error_log('[approval_index] SQL error: ' . $e->getMessage());
         $fatalMessage = $txt['error_load'];
@@ -448,10 +517,13 @@ if ($pdo && $ownerFallbackNeeded && $debugInfo['sql_status'] === 'success') {
     }
 }
 
+$debugInfo['final_row_count'] = count($rows);
+
 if ($view === 'cancelled') {
     $mineCancelled = 0;
     for ($i = 0; $i < count($rows); $i++) {
-        if (approval_is_document_owner($pdo, $rows[$i], $u)) {
+        $counterRow = isset($rows[$i]) && is_array($rows[$i]) ? $rows[$i] : array();
+        if (approval_is_document_owner($pdo, $counterRow, $u)) {
             $mineCancelled++;
         }
     }
@@ -463,10 +535,11 @@ if ($view === 'cancelled') {
     $mineCompleted = 0;
     $approvedByMe = 0;
     for ($i = 0; $i < count($rows); $i++) {
-        if (approval_is_document_owner($pdo, $rows[$i], $u)) {
+        $counterRow = isset($rows[$i]) && is_array($rows[$i]) ? $rows[$i] : array();
+        if (approval_is_document_owner($pdo, $counterRow, $u)) {
             $mineCompleted++;
         }
-        if (isset($rows[$i]['my_line_status']) && trim((string)$rows[$i]['my_line_status']) !== '') {
+        if (approval_index_scalar_text($counterRow, 'my_line_status', '') !== '') {
             $approvedByMe++;
         }
     }
@@ -481,13 +554,14 @@ if ($view === 'cancelled') {
     $prog = 0;
     $rej = 0;
     for ($i = 0; $i < count($rows); $i++) {
-        if (approval_is_document_owner($pdo, $rows[$i], $u)) {
+        $counterRow = isset($rows[$i]) && is_array($rows[$i]) ? $rows[$i] : array();
+        if (approval_is_document_owner($pdo, $counterRow, $u)) {
             $mine++;
         }
-        if (isset($rows[$i]['my_line_status']) && trim((string)$rows[$i]['my_line_status']) !== '') {
+        if (approval_index_scalar_text($counterRow, 'my_line_status', '') !== '') {
             $recv++;
         }
-        $status = strtoupper(trim((string)(isset($rows[$i]['doc_status']) ? $rows[$i]['doc_status'] : '')));
+        $status = strtoupper(approval_index_scalar_text($counterRow, 'doc_status', ''));
         if ($status === 'PENDING' || $status === 'DRAFT') {
             $prog++;
         }
@@ -502,6 +576,7 @@ if ($view === 'cancelled') {
         array('label' => $txt['card_rejected'], 'count' => $rej)
     );
 }
+$debugInfo['progress_count'] = ($view === 'active' && isset($prog)) ? (int)$prog : 0;
 
 $approvalPageSize = 7;
 $approvalTotalRows = count($rows);
@@ -517,10 +592,14 @@ if ($approvalUsePagination) {
     $approvalPage = 1;
 }
 $mobileRows = $rows;
+$debugInfo['desktop_row_count'] = count($rows);
+$debugInfo['mobile_row_count'] = count($mobileRows);
 $approvalPageParams = $_GET;
 if (!is_array($approvalPageParams)) $approvalPageParams = array();
 $approvalPageParams['r'] = 'approval_home';
 $approvalPageParams['view'] = $view;
+$debugFileMtime = isset($debugInfo['file_mtime']) ? (int)$debugInfo['file_mtime'] : 0;
+$debugFileMtimeText = $debugFileMtime > 0 ? date('Y-m-d H:i:s', $debugFileMtime) . ' (' . $debugFileMtime . ')' : '';
 
 ?>
 <div class="cpms-approval-page space-y-5">
@@ -530,18 +609,76 @@ $approvalPageParams['view'] = $view;
 
     <?php if ($debugApproval) { ?>
         <div class="bg-yellow-50 border border-yellow-200 text-yellow-900 rounded-2xl p-4 text-sm">
-            <div><strong>debug_approval</strong></div>
+            <div class="font-extrabold">debug_approval</div>
+            <div>file: <?php echo h($debugInfo['file_path']); ?></div>
+            <div>filemtime: <?php echo h($debugFileMtimeText); ?></div>
+            <div>sha1: <?php echo h(is_scalar($debugInfo['file_sha1']) ? (string)$debugInfo['file_sha1'] : ''); ?></div>
             <div>view: <?php echo h($debugInfo['view']); ?></div>
-            <div>uid: <?php echo (int)$debugInfo['uid']; ?></div>
+            <div>uid: <?php echo h((string)$debugInfo['uid']); ?></div>
             <div>userEmail: <?php echo h($debugInfo['user_email']); ?></div>
             <div>userName: <?php echo h($debugInfo['user_name']); ?></div>
             <div>isAdmin: <?php echo h($debugInfo['is_admin']); ?></div>
             <div>params: <?php echo h(implode(', ', $debugInfo['params_keys'])); ?></div>
             <div>sql: <?php echo h($debugInfo['sql_status']); ?></div>
-            <div>ownerFallback: <?php echo (int)$debugInfo['owner_fallback_count']; ?></div>
+            <div>SQL 조회 직후 문서 수: <?php echo h((string)$debugInfo['sql_row_count']); ?></div>
+            <div>owner fallback 추가 문서 수: <?php echo h((string)$debugInfo['owner_fallback_count']); ?></div>
+            <div>최종 $rows 문서 수: <?php echo h((string)$debugInfo['final_row_count']); ?></div>
+            <div>진행중 카드 계산 결과: <?php echo h((string)$debugInfo['progress_count']); ?></div>
+            <div>모바일 출력 배열 문서 수: <?php echo h((string)$debugInfo['mobile_row_count']); ?></div>
+            <div>PC 출력 배열 문서 수: <?php echo h((string)$debugInfo['desktop_row_count']); ?></div>
             <?php if ($debugInfo['sql_error'] !== '') { ?>
                 <div>error: <?php echo h($debugInfo['sql_error']); ?></div>
             <?php } ?>
+            <div class="mt-4 overflow-x-auto">
+                <table class="min-w-full border-collapse text-xs">
+                    <thead>
+                        <tr>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">순번</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">문서 ID</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">종류</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">제목</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">상태</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">작성자 ID</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">작성자 이름</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">작성자 이메일</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">owner</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">my_line_status</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">current_role</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">created_at</th>
+                            <th class="border border-yellow-300 px-2 py-1 text-left">content JSON</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php for ($debugRowIndex = 0; $debugRowIndex < count($rows); $debugRowIndex++) {
+                            $debugRow = isset($rows[$debugRowIndex]) && is_array($rows[$debugRowIndex]) ? $rows[$debugRowIndex] : array();
+                            $debugContentJsonOk = false;
+                            if (isset($debugRow['content']) && is_array($debugRow['content'])) {
+                                $debugContentJsonOk = true;
+                            } else if (isset($debugRow['content']) && is_scalar($debugRow['content']) && trim((string)$debugRow['content']) !== '') {
+                                json_decode((string)$debugRow['content'], true);
+                                $debugContentJsonOk = (json_last_error() === JSON_ERROR_NONE);
+                            }
+                            $debugOwnerResult = approval_is_document_owner($pdo, $debugRow, $u) ? 'Y' : 'N';
+                        ?>
+                            <tr>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h((string)$debugRowIndex); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'id', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'doc_type', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'title', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'doc_status', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'created_by_id', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'created_by_name', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'created_by_email', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h($debugOwnerResult); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'my_line_status', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'current_role', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h(approval_index_scalar_text($debugRow, 'created_at', '')); ?></td>
+                                <td class="border border-yellow-300 px-2 py-1"><?php echo h($debugContentJsonOk ? 'Y' : 'N'); ?></td>
+                            </tr>
+                        <?php } ?>
+                    </tbody>
+                </table>
+            </div>
         </div>
     <?php } ?>
 
@@ -642,21 +779,35 @@ $approvalPageParams['view'] = $view;
                 <?php } else { ?>
                     <div class="p-3 space-y-3">
                         <?php for ($mi = 0; $mi < count($mobileRows); $mi++) {
-                            $row = $mobileRows[$mi];
-                            $myLineStatus = isset($row['my_line_status']) ? trim((string)$row['my_line_status']) : '';
-                            $docStatus = isset($row['doc_status']) ? trim((string)$row['doc_status']) : '';
-                            $currentRole = isset($row['current_role']) ? trim((string)$row['current_role']) : '';
-                            $mobileDocType = isset($row['doc_type']) ? trim((string)$row['doc_type']) : '';
+                            $row = isset($mobileRows[$mi]) && is_array($mobileRows[$mi]) ? $mobileRows[$mi] : array();
+                            $rowId = (int)approval_index_scalar_text($row, 'id', '0');
+                            $myLineStatus = approval_index_scalar_text($row, 'my_line_status', '');
+                            $docStatus = approval_index_scalar_text($row, 'doc_status', '');
+                            $currentRole = approval_index_scalar_text($row, 'current_role', '');
+                            $mobileDocType = approval_index_scalar_text($row, 'doc_type', '');
+                            $mobileTitle = approval_index_scalar_text($row, 'title', '');
+                            $mobileCreatedByName = approval_index_scalar_text($row, 'created_by_name', '');
+                            $mobileCreatedAt = approval_index_scalar_text($row, 'created_at', '');
                             $canMobileDecide = ($mobileDocType === 'leave' && strtoupper($docStatus) === 'PENDING' && strtoupper($myLineStatus) === 'PENDING');
+                            if ($debugApproval) {
+                                $GLOBALS['cpms_approval_debug_render_state'] = array(
+                                    'document_id' => $rowId,
+                                    'row_index' => $mi,
+                                    'render_target' => 'mobile'
+                                );
+                                echo "\n<!-- APPROVAL_MOBILE_ROW_START id=" . h((string)$rowId) . ' index=' . h((string)$mi) . " -->\n";
+                            }
                         ?>
-                            <div class="rounded-2xl border border-gray-200 bg-white p-4">
+                            <div class="rounded-2xl border border-gray-200 bg-white p-4"
+                                 data-approval-document-id="<?php echo h((string)$rowId); ?>"
+                                 data-approval-row-index="<?php echo h((string)$mi); ?>">
                                 <div class="flex items-start justify-between gap-3">
                                     <div class="min-w-0">
-                                        <div class="text-xs font-extrabold text-cyan-700"><?php echo h(approval_doc_label(isset($row['doc_type']) ? $row['doc_type'] : '')); ?></div>
-                                        <div class="mt-1 text-base font-extrabold text-gray-900 leading-6"><?php echo h(isset($row['title']) ? $row['title'] : ''); ?></div>
+                                        <div class="text-xs font-extrabold text-cyan-700"><?php echo h(approval_doc_label($mobileDocType)); ?></div>
+                                        <div class="mt-1 text-base font-extrabold text-gray-900 leading-6"><?php echo h($mobileTitle); ?></div>
                                         <div class="mt-2 text-xs text-gray-500">
-                                            <?php echo h(isset($row['created_by_name']) ? $row['created_by_name'] : ''); ?>
-                                            · <?php echo h(isset($row['created_at']) ? $row['created_at'] : ''); ?>
+                                            <?php echo h($mobileCreatedByName); ?>
+                                            · <?php echo h($mobileCreatedAt); ?>
                                         </div>
                                     </div>
                                     <span class="shrink-0 inline-flex items-center px-3 py-1 rounded-full border text-xs font-bold <?php echo h(approval_status_badge($docStatus)); ?>">
@@ -674,11 +825,11 @@ $approvalPageParams['view'] = $view;
                                     </div>
                                 </div>
                                 <div class="mt-3 flex flex-wrap gap-2">
-                                    <a href="?r=approval_detail&id=<?php echo (int)$row['id']; ?>" class="flex-1 inline-flex items-center justify-center px-3 py-3 rounded-xl bg-indigo-50 text-indigo-700 font-extrabold"><?php echo h($txt['detail']); ?></a>
+                                    <a href="?r=approval_detail&id=<?php echo $rowId; ?>" class="flex-1 inline-flex items-center justify-center px-3 py-3 rounded-xl bg-indigo-50 text-indigo-700 font-extrabold"><?php echo h($txt['detail']); ?></a>
                                     <?php if ($canMobileDecide) { ?>
                                         <form method="post" action="?r=approval_decide" class="flex-1">
                                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                                            <input type="hidden" name="id" value="<?php echo (int)$row['id']; ?>">
+                                            <input type="hidden" name="id" value="<?php echo $rowId; ?>">
                                             <input type="hidden" name="action" value="approve">
                                             <button type="submit" class="w-full px-3 py-3 rounded-xl bg-emerald-600 text-white font-extrabold">승인</button>
                                         </form>
@@ -687,13 +838,16 @@ $approvalPageParams['view'] = $view;
                                 <?php if ($canMobileDecide) { ?>
                                     <form method="post" action="?r=approval_decide" class="mt-2 flex gap-2">
                                         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                                        <input type="hidden" name="id" value="<?php echo (int)$row['id']; ?>">
+                                        <input type="hidden" name="id" value="<?php echo $rowId; ?>">
                                         <input type="hidden" name="action" value="reject">
                                         <input type="text" name="reject_reason" required class="min-w-0 flex-1 rounded-xl border border-gray-200 px-3 py-3" placeholder="반려 사유">
                                         <button type="submit" class="px-4 py-3 rounded-xl bg-rose-600 text-white font-extrabold">반려</button>
                                     </form>
                                 <?php } ?>
                             </div>
+                            <?php if ($debugApproval) {
+                                echo "\n<!-- APPROVAL_MOBILE_ROW_END id=" . h((string)$rowId) . ' index=' . h((string)$mi) . " -->\n";
+                            } ?>
                         <?php } ?>
                     </div>
                 <?php } ?>
@@ -719,18 +873,34 @@ $approvalPageParams['view'] = $view;
                     </thead>
                     <tbody class="divide-y divide-gray-100">
                         <?php for ($i = 0; $i < count($rows); $i++) {
-                            $row = $rows[$i];
-                            $currentRole = isset($row['current_role']) ? trim((string)$row['current_role']) : '';
-                            $myLineStatus = isset($row['my_line_status']) ? trim((string)$row['my_line_status']) : '';
-                            $completedAt = isset($row['updated_at']) ? (string)$row['updated_at'] : '';
+                            $row = isset($rows[$i]) && is_array($rows[$i]) ? $rows[$i] : array();
+                            $rowId = (int)approval_index_scalar_text($row, 'id', '0');
+                            $desktopDocType = approval_index_scalar_text($row, 'doc_type', '');
+                            $desktopTitle = approval_index_scalar_text($row, 'title', '');
+                            $desktopCreatedByName = approval_index_scalar_text($row, 'created_by_name', '');
+                            $desktopCreatedAt = approval_index_scalar_text($row, 'created_at', '');
+                            $desktopDocStatus = approval_index_scalar_text($row, 'doc_status', '');
+                            $currentRole = approval_index_scalar_text($row, 'current_role', '');
+                            $myLineStatus = approval_index_scalar_text($row, 'my_line_status', '');
+                            $completedAt = approval_index_scalar_text($row, 'updated_at', '');
+                            if ($debugApproval) {
+                                $GLOBALS['cpms_approval_debug_render_state'] = array(
+                                    'document_id' => $rowId,
+                                    'row_index' => $i,
+                                    'render_target' => 'desktop'
+                                );
+                                echo "\n<!-- APPROVAL_ROW_START id=" . h((string)$rowId) . ' index=' . h((string)$i) . " -->\n";
+                            }
                         ?>
-                            <tr class="hover:bg-gray-50">
-                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h(approval_doc_label(isset($row['doc_type']) ? $row['doc_type'] : '')); ?></td>
+                            <tr class="hover:bg-gray-50"
+                                data-approval-document-id="<?php echo h((string)$rowId); ?>"
+                                data-approval-row-index="<?php echo h((string)$i); ?>">
+                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h(approval_doc_label($desktopDocType)); ?></td>
                                 <td class="px-4 py-3 min-w-[280px]">
-                                    <div class="font-semibold text-gray-900"><?php echo h(isset($row['title']) ? $row['title'] : ''); ?></div>
+                                    <div class="font-semibold text-gray-900"><?php echo h($desktopTitle); ?></div>
                                 </td>
-                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h(isset($row['created_by_name']) ? $row['created_by_name'] : ''); ?></td>
-                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h(isset($row['created_at']) ? $row['created_at'] : ''); ?></td>
+                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h($desktopCreatedByName); ?></td>
+                                <td class="px-4 py-3 whitespace-nowrap"><?php echo h($desktopCreatedAt); ?></td>
                                 <?php if ($view === 'completed') { ?>
                                     <td class="px-4 py-3 whitespace-nowrap"><?php echo h($completedAt); ?></td>
                                 <?php } else { ?>
@@ -738,30 +908,33 @@ $approvalPageParams['view'] = $view;
                                 <?php } ?>
                                 <td class="px-4 py-3 whitespace-nowrap"><?php echo h($myLineStatus === '' ? '-' : approval_line_status_label($myLineStatus)); ?></td>
                                 <td class="px-4 py-3 whitespace-nowrap">
-                                    <span class="inline-flex items-center px-3 py-1 rounded-full border text-xs font-bold <?php echo h(approval_status_badge(isset($row['doc_status']) ? $row['doc_status'] : '')); ?>">
-                                        <?php echo h(approval_status_label(isset($row['doc_status']) ? $row['doc_status'] : '')); ?>
+                                    <span class="inline-flex items-center px-3 py-1 rounded-full border text-xs font-bold <?php echo h(approval_status_badge($desktopDocStatus)); ?>">
+                                        <?php echo h(approval_status_label($desktopDocStatus)); ?>
                                     </span>
                                 </td>
                                 <td class="px-4 py-3 whitespace-nowrap">
                                     <div class="flex flex-wrap gap-2">
-                                        <a href="?r=approval_detail&id=<?php echo (int)$row['id']; ?>" class="inline-flex items-center px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 font-bold"><?php echo h($txt['detail']); ?></a>
+                                        <a href="?r=approval_detail&id=<?php echo $rowId; ?>" class="inline-flex items-center px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 font-bold"><?php echo h($txt['detail']); ?></a>
                                         <?php if (approval_is_document_owner($pdo, $row, $u) && approval_can_cancel_document($row)) { ?>
                                             <form method="post" action="?r=approval_cancel" onsubmit="return confirm('<?php echo h($txt['confirm_cancel']); ?>');">
                                                 <?php echo csrf_field(); ?>
-                                                <input type="hidden" name="id" value="<?php echo (int)$row['id']; ?>">
+                                                <input type="hidden" name="id" value="<?php echo $rowId; ?>">
                                                 <button type="submit" class="inline-flex items-center px-3 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold"><?php echo h($txt['cancel']); ?></button>
                                             </form>
                                         <?php } ?>
                                         <?php if (approval_can_delete_document($pdo, $row, $u)) { ?>
                                             <form method="post" action="?r=approval_delete" onsubmit="return confirm('<?php echo h($txt['confirm_delete']); ?>');">
                                                 <?php echo csrf_field(); ?>
-                                                <input type="hidden" name="id" value="<?php echo (int)$row['id']; ?>">
+                                                <input type="hidden" name="id" value="<?php echo $rowId; ?>">
                                                 <button type="submit" class="inline-flex items-center px-3 py-2 rounded-xl bg-gray-100 text-gray-800 font-bold"><?php echo h($txt['delete']); ?></button>
                                             </form>
                                         <?php } ?>
                                     </div>
                                 </td>
                             </tr>
+                            <?php if ($debugApproval) {
+                                echo "\n<!-- APPROVAL_ROW_END id=" . h((string)$rowId) . ' index=' . h((string)$i) . " -->\n";
+                            } ?>
                         <?php } ?>
                     </tbody>
                 </table>
@@ -784,3 +957,10 @@ $approvalPageParams['view'] = $view;
         <?php } ?>
     </div>
 </div>
+<?php if ($debugApproval) {
+    $GLOBALS['cpms_approval_debug_render_state'] = array(
+        'document_id' => '',
+        'row_index' => '',
+        'render_target' => 'approval_render_complete'
+    );
+} ?>
