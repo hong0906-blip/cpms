@@ -9,6 +9,17 @@
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
+require_once __DIR__ . '/../app/services/UsageAnalyticsService.php';
+
+if (!function_exists('cpms_usage_track_request')) {
+function cpms_usage_track_request($route) {
+    try {
+        $requestMethod = isset($_SERVER['REQUEST_METHOD']) ? (string)$_SERVER['REQUEST_METHOD'] : 'GET';
+        \App\Services\UsageAnalyticsService::recordRequest($route, $requestMethod, $_GET);
+    } catch (Exception $e) {
+        error_log('[CPMS usage analytics] router tracking: ' . $e->getMessage());
+    }
+}}
 
 $route = isset($_GET['r']) ? trim($_GET['r']) : '대시보드';
 if ($route === '') $route = '대시보드';
@@ -424,6 +435,7 @@ if ($route === 'public_affairs_collab' || $route === 'public_affairs_collaborati
     if (!$paCollabAuthOk) {
         cpms_redirect_to_portal_login(cpms_current_absolute_url());
     }
+    cpms_usage_track_request($route);
     $paCollabAppFile = __DIR__ . '/../app/views/project/collaboration_app.php';
     $paCollabSafeFile = __DIR__ . '/../app/views/project/collaboration_safe.php';
     if (isset($_GET['safe']) && (string)$_GET['safe'] === '1') {
@@ -442,6 +454,7 @@ if ($route === 'tasks/my_list') {
     if (!\App\Core\Auth::check()) {
         cpms_redirect_to_portal_login(cpms_current_absolute_url());
     }
+    cpms_usage_track_request($route);
     \App\Core\View::render('tasks/my_list', array(
         'title' => urldecode('%EB%82%98%EC%9D%98%20%ED%95%A0%EC%9D%BC'),
         'selectedMenu' => urldecode('%EB%8C%80%EC%8B%9C%EB%B3%B4%EB%93%9C'),
@@ -459,6 +472,7 @@ if ($route === 'tasks/executive_summary') {
         echo '403 Forbidden';
         exit;
     }
+    cpms_usage_track_request($route);
     \App\Core\View::render('tasks/executive_summary', array(
         'title' => urldecode('%EB%B6%80%EC%84%9C%EB%B3%84%20%EC%97%85%EB%AC%B4%20%ED%98%84%ED%99%A9'),
         'selectedMenu' => urldecode('%EB%8C%80%EC%8B%9C%EB%B3%B4%EB%93%9C'),
@@ -471,6 +485,7 @@ if ($route === 'scheduler' || $route === urldecode('%EC%8A%A4%EC%BC%80%EC%A4%84%
     if (!\App\Core\Auth::check()) {
         cpms_redirect_to_portal_login(cpms_current_absolute_url());
     }
+    cpms_usage_track_request($route);
     $schedulerTitle = urldecode('%EC%8A%A4%EC%BC%80%EC%A4%84%EB%9F%AC');
     \App\Core\View::render('scheduler/index', array(
         'title' => $schedulerTitle,
@@ -609,6 +624,7 @@ if (\App\Core\Auth::check()) {
     );
     if (isset($cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute])) $cpmsDeptForRestrictedRoute = $cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute];
 }
+cpms_usage_track_request($route);
 $cpmsIsRestrictedManagementRoute = ($route === '관리' || strpos($route, 'admin/') === 0 || strpos($route, 'management/') === 0);
 if ($cpmsDeptForRestrictedRoute === '공무' && !\App\Core\Auth::isMaster() && ($cpmsIsRestrictedManagementRoute || $route === '경영현황')) {
     http_response_code(403);
@@ -1421,6 +1437,135 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET'
         $canonicalDashboardParams[$canonicalKey] = $canonicalValue;
     }
     header('Location: ?' . http_build_query($canonicalDashboardParams, '', '&'));
+    exit;
+}
+
+// ==========================
+//  사용현황 분석 전용 라우트 및 직접 URL 접근 차단
+// ==========================
+$usageAnalyticsRoutes = array(
+    'usage_analytics',
+    'usage_analytics/setup',
+    'usage_analytics/export',
+    'usage_analytics/cleanup',
+);
+if (in_array($route, $usageAnalyticsRoutes, true)) {
+    if (!\App\Core\Auth::canAccessUsageAnalytics()) {
+        http_response_code(403);
+        echo '사용현황 분석에 접근할 권한이 없습니다.';
+        exit;
+    }
+
+    $usageAnalyticsPdo = \App\Core\Db::pdo();
+
+    if ($route === 'usage_analytics/setup') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo '허용되지 않은 요청 방식입니다.';
+            exit;
+        }
+        $usageSetupToken = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
+        if (!csrf_check($usageSetupToken)) {
+            flash_set('danger', '보안 토큰이 올바르지 않습니다. 다시 시도해주세요.');
+            header('Location: ?r=usage_analytics');
+            exit;
+        }
+        $usageSetupResult = \App\Services\UsageAnalyticsService::installOrUpdate($usageAnalyticsPdo);
+        flash_set(!empty($usageSetupResult['ok']) ? 'success' : 'danger', isset($usageSetupResult['message']) ? $usageSetupResult['message'] : '설치 결과를 확인할 수 없습니다.');
+        header('Location: ?r=usage_analytics');
+        exit;
+    }
+
+    if ($route === 'usage_analytics/cleanup') {
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            http_response_code(405);
+            echo '허용되지 않은 요청 방식입니다.';
+            exit;
+        }
+        $usageCleanupToken = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
+        if (!csrf_check($usageCleanupToken)) {
+            flash_set('danger', '보안 토큰이 올바르지 않습니다. 다시 시도해주세요.');
+            header('Location: ?r=usage_analytics');
+            exit;
+        }
+        $usageCleanupResult = \App\Services\UsageAnalyticsService::cleanupOldEvents(
+            $usageAnalyticsPdo,
+            \App\Services\UsageAnalyticsService::DETAIL_RETENTION_DAYS
+        );
+        flash_set(!empty($usageCleanupResult['ok']) ? 'success' : 'danger', isset($usageCleanupResult['message']) ? $usageCleanupResult['message'] : '정리 결과를 확인할 수 없습니다.');
+        header('Location: ?r=usage_analytics');
+        exit;
+    }
+
+    $usageFilters = \App\Services\UsageAnalyticsService::filters($_GET);
+
+    if ($route === 'usage_analytics/export') {
+        if (!function_exists('cpms_usage_csv_value')) {
+            function cpms_usage_csv_value($value) {
+                $value = (string)$value;
+                if (preg_match('/^[=+\-@]/', $value)) return "'" . $value;
+                return $value;
+            }
+        }
+        try {
+            $usageExportRows = \App\Services\UsageAnalyticsService::exportEvents($usageAnalyticsPdo, $usageFilters);
+        } catch (Exception $e) {
+            error_log('[CPMS usage analytics] export: ' . $e->getMessage());
+            http_response_code(500);
+            echo '사용기록 내보내기에 실패했습니다.';
+            exit;
+        }
+        header('Content-Type: text/csv; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="cpms_usage_' . date('Ymd_His') . '.csv"');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        echo "\xEF\xBB\xBF";
+        $usageOutput = fopen('php://output', 'w');
+        fputcsv($usageOutput, array('일시', '이름', '이메일', '부서', '직급', '이벤트', '메뉴', '탭', '동작', '라우트'));
+        foreach ($usageExportRows as $usageExportRow) {
+            fputcsv($usageOutput, array(
+                cpms_usage_csv_value(isset($usageExportRow['event_at']) ? $usageExportRow['event_at'] : ''),
+                cpms_usage_csv_value(isset($usageExportRow['employee_name']) ? $usageExportRow['employee_name'] : ''),
+                cpms_usage_csv_value(isset($usageExportRow['email']) ? $usageExportRow['email'] : ''),
+                cpms_usage_csv_value(isset($usageExportRow['department']) ? $usageExportRow['department'] : ''),
+                cpms_usage_csv_value(isset($usageExportRow['position']) ? $usageExportRow['position'] : ''),
+                cpms_usage_csv_value(isset($usageExportRow['event_type']) ? $usageExportRow['event_type'] : ''),
+                cpms_usage_csv_value(isset($usageExportRow['menu_name']) ? $usageExportRow['menu_name'] : ''),
+                cpms_usage_csv_value(isset($usageExportRow['tab_name']) ? $usageExportRow['tab_name'] : ''),
+                cpms_usage_csv_value(isset($usageExportRow['action_name']) ? $usageExportRow['action_name'] : ''),
+                cpms_usage_csv_value(isset($usageExportRow['route_name']) ? $usageExportRow['route_name'] : ''),
+            ));
+        }
+        fclose($usageOutput);
+        exit;
+    }
+
+    $usageInstalled = \App\Services\UsageAnalyticsService::isInstalled($usageAnalyticsPdo);
+    $usageData = array();
+    $usageDetail = null;
+    $usageLoadError = '';
+    if ($usageInstalled) {
+        try {
+            $usageData = \App\Services\UsageAnalyticsService::dashboard($usageAnalyticsPdo, $usageFilters);
+            $usageDetailId = isset($_GET['user_id']) ? (int)$_GET['user_id'] : 0;
+            if ($usageDetailId > 0) {
+                $usageDetail = \App\Services\UsageAnalyticsService::userDetail($usageAnalyticsPdo, $usageDetailId, $usageFilters, $_GET);
+            }
+        } catch (Exception $e) {
+            error_log('[CPMS usage analytics] dashboard: ' . $e->getMessage());
+            $usageLoadError = '사용현황 통계를 불러오는 중 오류가 발생했습니다. 서버 로그를 확인해주세요.';
+        }
+    }
+
+    \App\Core\View::render('usage_analytics/index', array(
+        'title' => 'CPMS 사용현황 분석',
+        'selectedMenu' => '사용현황 분석',
+        'dashboardType' => $dashboardType,
+        'usageInstalled' => $usageInstalled,
+        'usageData' => $usageData,
+        'usageDetail' => $usageDetail,
+        'usageFilters' => $usageFilters,
+        'usageLoadError' => $usageLoadError,
+    ));
     exit;
 }
 

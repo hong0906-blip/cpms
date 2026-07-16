@@ -13,6 +13,7 @@ $constructionMenu = '공사';
 $safetyMenu = '안전/보건';
 $qualityMenu = '품질';
 $companyProfitMenu = '경영현황';
+$usageAnalyticsMenu = '사용현황 분석';
 $schedulerMenu = urldecode('%EC%8A%A4%EC%BC%80%EC%A4%84%EB%9F%AC');
 
 $route = isset($_GET['r']) ? (string)$_GET['r'] : $dashboardMenu;
@@ -29,6 +30,7 @@ $isMasterUser = \App\Core\Auth::isMaster();
 if ($isMasterUser) $canViewCompanyProfitMenu = true;
 $canViewCompanyOverheadMenu = cpms_can_view_company_overhead($user, $sidebarPdo);
 $canViewCompanyPayrollMenu = cpms_can_view_company_payroll($user, $sidebarPdo);
+$canAccessUsageAnalytics = \App\Core\Auth::canAccessUsageAnalytics();
 
 $dashboardType = isset($dashboardType) ? (string)$dashboardType : (isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee');
 if ($dashboardType !== 'employee' && $dashboardType !== 'executive') $dashboardType = 'employee';
@@ -106,6 +108,9 @@ if ($isPublicAffairsDept) {
 }
 if ($canViewCompanyProfitMenu && !$isPublicAffairsDept) {
     $menuItems[] = array('id'=>$companyProfitMenu,'label'=>$companyProfitMenu,'icon'=>'line-chart','gradient'=>'from-slate-700 to-blue-600','iconBg'=>'bg-gradient-to-br from-slate-100 to-blue-100','iconColor'=>'text-slate-700','hoverShadow'=>'hover:shadow-slate-200');
+}
+if ($canAccessUsageAnalytics) {
+    $menuItems[] = array('id'=>$usageAnalyticsMenu,'label'=>$usageAnalyticsMenu,'href'=>'?r=usage_analytics','icon'=>'activity','gradient'=>'from-violet-600 to-indigo-500','iconBg'=>'bg-gradient-to-br from-violet-100 to-indigo-100','iconColor'=>'text-violet-700','hoverShadow'=>'hover:shadow-violet-200');
 }
 foreach ($googleShortcutMenuItems as $googleShortcutMenuItem) {
     $menuItems[] = $googleShortcutMenuItem;
@@ -306,6 +311,9 @@ if ($selectedMenu === $dashboardMenu) {
     }
     if ($canViewCompanyProfitMenu && !$isPublicAffairsDept) {
       $mobileNavItems[] = array('menu' => 'company_profit', 'label' => '경영현황', 'icon' => 'line-chart', 'href' => '?r=company_profit');
+    }
+    if ($canAccessUsageAnalytics) {
+      $mobileNavItems[] = array('menu' => 'usage_analytics', 'label' => '사용현황 분석', 'icon' => 'activity', 'href' => '?r=usage_analytics');
     }
   ?>
   <nav class="cpms-mobile-bottom-nav" aria-label="mobile main menu">

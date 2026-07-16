@@ -332,9 +332,40 @@ class Auth
         return self::normalizeDept(self::userDepartment()) === '개발';
     }
 
+    public static function normalizeDepartmentValue($department)
+    {
+        return self::normalizeDept($department);
+    }
+
     public static function canSwitchDashboardViews()
     {
         return self::isDevelopmentDepartment();
+    }
+
+    /**
+     * 사용현황 분석 전용 접근 권한.
+     *
+     * 기존 executive/마스터/직원명부 관리 권한을 재사용하지 않고,
+     * 대표·대표이사·부사장 또는 개발부서만 정확하게 허용합니다.
+     */
+    public static function canAccessUsageAnalytics()
+    {
+        if (!self::check()) return false;
+        if (self::isDevelopmentDepartment()) return true;
+
+        $allowedValues = array('대표', '대표이사', '부사장');
+        $userValues = array(self::userPosition(), self::userStoredRole());
+
+        foreach ($userValues as $userValue) {
+            $normalizedValue = self::normalizeText($userValue);
+            if ($normalizedValue === '') continue;
+
+            foreach ($allowedValues as $allowedValue) {
+                if ($normalizedValue === self::normalizeText($allowedValue)) return true;
+            }
+        }
+
+        return false;
     }
 
     // ★ 직급
