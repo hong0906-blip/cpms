@@ -193,7 +193,9 @@ function cpms_tasks_status_label($status)
         'completion_rejected' => '완료 반려',
         'due_date_changed' => '마감 변경',
         'request_read' => '요청 읽음',
-        'transferred' => '담당자 전달',
+        'transfer_requested' => '담당자 변경 요청',
+        'transfer_approved' => '담당자 변경 승인',
+        'transferred' => '담당자 변경',
         'meeting_available_action' => '참석가능',
         'meeting_unavailable_action' => '참석불가능',
         'revision_requested' => '보완요청',
@@ -885,6 +887,7 @@ if (!function_exists('cpms_tasks_can_change_status')) {
 function cpms_tasks_can_change_status($task, $currentEmployeeId)
 {
     if (!$task) return false;
+    if (cpms_tasks_has_transfer_request($task)) return false;
     if (cpms_tasks_is_overall_manager()) return true;
     return ((int)$currentEmployeeId > 0 && (int)$task['assignee_employee_id'] === (int)$currentEmployeeId);
 }}
@@ -930,6 +933,7 @@ if (!function_exists('cpms_tasks_can_submit_completion')) {
 function cpms_tasks_can_submit_completion($task, $currentEmployeeId)
 {
     if (!$task) return false;
+    if (cpms_tasks_has_transfer_request($task)) return false;
     if (cpms_tasks_is_overall_manager()) return true;
     return ((int)$currentEmployeeId > 0 && isset($task['assignee_employee_id']) && (int)$task['assignee_employee_id'] === (int)$currentEmployeeId);
 }}
@@ -942,6 +946,64 @@ function cpms_tasks_can_approve_completion($task, $currentEmployeeId)
     if ($status !== 'completion_pending') return false;
     if (cpms_tasks_is_overall_manager()) return true;
     return ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($task) === (int)$currentEmployeeId);
+}}
+
+if (!function_exists('cpms_tasks_is_request_group_key')) {
+function cpms_tasks_is_request_group_key($groupKey)
+{
+    $groupKey = trim((string)$groupKey);
+    return ($groupKey !== '' && strpos($groupKey, 'task_request:') === 0);
+}}
+
+if (!function_exists('cpms_tasks_completion_group_summary')) {
+function cpms_tasks_completion_group_summary($pdo, $task)
+{
+    $result = array(
+        'rows' => array(),
+        'total_count' => 0,
+        'completion_pending_count' => 0,
+        'done_count' => 0,
+        'all_completion_pending' => false,
+        'ready_for_approval' => false,
+    );
+    if (!$pdo || !is_array($task)) return $result;
+
+    $groupKey = isset($task['group_key']) ? trim((string)$task['group_key']) : '';
+    if (cpms_tasks_is_request_group_key($groupKey) && cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) {
+        try {
+            $st = $pdo->prepare("SELECT * FROM cpms_tasks WHERE group_key = :group_key AND (status IS NULL OR status <> 'cancelled') ORDER BY id ASC");
+            $st->execute(array(':group_key' => $groupKey));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (is_array($rows)) $result['rows'] = $rows;
+        } catch (Exception $e) {
+            $result['rows'] = array();
+        }
+    } else {
+        $result['rows'][0] = $task;
+    }
+
+    for ($i = 0; $i < count($result['rows']); $i++) {
+        $status = isset($result['rows'][$i]['status']) ? (string)$result['rows'][$i]['status'] : '';
+        $result['total_count']++;
+        if ($status === 'completion_pending') $result['completion_pending_count']++;
+        if ($status === 'done') $result['done_count']++;
+    }
+    $result['all_completion_pending'] = ($result['total_count'] > 0 && $result['completion_pending_count'] === $result['total_count']);
+    $result['ready_for_approval'] = (
+        $result['total_count'] > 0
+        && $result['completion_pending_count'] > 0
+        && ($result['completion_pending_count'] + $result['done_count']) === $result['total_count']
+    );
+    return $result;
+}}
+
+if (!function_exists('cpms_tasks_can_approve_group_completion')) {
+function cpms_tasks_can_approve_group_completion($pdo, $task, $currentEmployeeId)
+{
+    if (!$pdo || !is_array($task) || (int)$currentEmployeeId <= 0) return false;
+    if (!cpms_tasks_is_overall_manager() && cpms_tasks_effective_requester_employee_id($task) !== (int)$currentEmployeeId) return false;
+    $summary = cpms_tasks_completion_group_summary($pdo, $task);
+    return isset($summary['ready_for_approval']) && $summary['ready_for_approval'];
 }}
 
 if (!function_exists('cpms_tasks_can_reject_completion')) {
@@ -1714,9 +1776,97 @@ function cpms_tasks_can_transfer($task, $currentEmployeeId)
     if (!$task || (int)$currentEmployeeId <= 0) return false;
     if (isset($task['task_type']) && (string)$task['task_type'] === 'meeting') return false;
     if (!isset($task['assignee_employee_id']) || (int)$task['assignee_employee_id'] !== (int)$currentEmployeeId) return false;
+    if (cpms_tasks_has_transfer_request($task)) return false;
     $status = isset($task['status']) ? (string)$task['status'] : '';
     if (in_array($status, array('completion_pending', 'done', 'cancelled'), true)) return false;
     return true;
+}}
+
+if (!function_exists('cpms_tasks_has_transfer_request')) {
+function cpms_tasks_has_transfer_request($task)
+{
+    if (!$task || !is_array($task)) return false;
+    return (isset($task['transfer_request_assignee_employee_id']) && (int)$task['transfer_request_assignee_employee_id'] > 0);
+}}
+
+if (!function_exists('cpms_tasks_can_approve_transfer_request')) {
+function cpms_tasks_can_approve_transfer_request($task, $currentEmployeeId)
+{
+    if (!$task || (int)$currentEmployeeId <= 0 || !cpms_tasks_has_transfer_request($task)) return false;
+    if (isset($task['task_type']) && (string)$task['task_type'] === 'meeting') return false;
+    $status = isset($task['status']) ? (string)$task['status'] : '';
+    if (in_array($status, array('completion_pending', 'done', 'cancelled'), true)) return false;
+    return (cpms_tasks_effective_requester_employee_id($task) === (int)$currentEmployeeId);
+}}
+
+if (!function_exists('cpms_tasks_request_transfer')) {
+function cpms_tasks_request_transfer($pdo, $task, $newAssignee, $actor, $reason)
+{
+    if (!$pdo || !is_array($task) || !is_array($newAssignee) || !is_array($actor)) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    $currentAssigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+    $newAssigneeId = isset($newAssignee['id']) ? (int)$newAssignee['id'] : 0;
+    $actorId = isset($actor['id']) ? (int)$actor['id'] : 0;
+    if ($taskId <= 0 || $currentAssigneeId <= 0 || $actorId !== $currentAssigneeId || $newAssigneeId <= 0 || $newAssigneeId === $currentAssigneeId) return false;
+    if (cpms_tasks_has_transfer_request($task)) return false;
+
+    $reason = trim((string)$reason);
+    $now = cpms_tasks_now();
+    try {
+        $st = $pdo->prepare("UPDATE cpms_tasks
+                            SET transfer_request_assignee_employee_id = :target_employee_id,
+                                transfer_request_assignee_name = :target_name,
+                                transfer_request_reason = :request_reason,
+                                transfer_requested_by = :requested_by,
+                                transfer_requested_by_name = :requested_by_name,
+                                transfer_requested_at = :requested_at,
+                                updated_at = :updated_at
+                            WHERE id = :id
+                              AND assignee_employee_id = :current_assignee_id
+                              AND (transfer_request_assignee_employee_id IS NULL OR transfer_request_assignee_employee_id = 0)
+                              AND (status IS NULL OR status NOT IN ('completion_pending','done','cancelled'))");
+        $ok = $st->execute(array(
+            ':target_employee_id' => $newAssigneeId,
+            ':target_name' => isset($newAssignee['name']) ? (string)$newAssignee['name'] : '',
+            ':request_reason' => $reason !== '' ? $reason : null,
+            ':requested_by' => $actorId,
+            ':requested_by_name' => isset($actor['name']) ? (string)$actor['name'] : '',
+            ':requested_at' => $now,
+            ':updated_at' => $now,
+            ':id' => $taskId,
+            ':current_assignee_id' => $currentAssigneeId,
+        ));
+        if (!$ok || $st->rowCount() !== 1) return false;
+
+        $message = '담당자 변경 요청: ' . (isset($task['assignee_name']) ? (string)$task['assignee_name'] : '') . ' → ' . (isset($newAssignee['name']) ? (string)$newAssignee['name'] : '');
+        if ($reason !== '') $message .= "\n사유: " . $reason;
+        cpms_tasks_insert_log($pdo, $taskId, $actor, 'transfer_requested', $message, isset($task['status']) ? $task['status'] : null, isset($task['status']) ? $task['status'] : null);
+        if ($reason !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $message, 0);
+
+        $updatedTask = cpms_tasks_find_task($pdo, $taskId);
+        if ($updatedTask) cpms_tasks_send_transfer_request_notification($pdo, $updatedTask);
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_tasks_approve_transfer_request')) {
+function cpms_tasks_approve_transfer_request($pdo, $task, $actor)
+{
+    if (!$pdo || !is_array($task) || !is_array($actor)) return false;
+    $actorId = isset($actor['id']) ? (int)$actor['id'] : 0;
+    if (!cpms_tasks_can_approve_transfer_request($task, $actorId)) return false;
+
+    $currentAssigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+    $requestedBy = isset($task['transfer_requested_by']) ? (int)$task['transfer_requested_by'] : 0;
+    $newAssigneeId = isset($task['transfer_request_assignee_employee_id']) ? (int)$task['transfer_request_assignee_employee_id'] : 0;
+    if ($currentAssigneeId <= 0 || $requestedBy !== $currentAssigneeId || $newAssigneeId <= 0 || $newAssigneeId === $currentAssigneeId) return false;
+
+    $newAssignee = cpms_tasks_find_employee_by_id($pdo, $newAssigneeId);
+    if (!$newAssignee) return false;
+    $reason = isset($task['transfer_request_reason']) ? trim((string)$task['transfer_request_reason']) : '';
+    return cpms_tasks_transfer_task($pdo, $task, $newAssignee, $actor, $reason);
 }}
 
 if (!function_exists('cpms_tasks_transfer_task')) {
@@ -1729,6 +1879,7 @@ function cpms_tasks_transfer_task($pdo, $task, $newAssignee, $actor, $reason)
     $oldStatus = isset($task['status']) ? (string)$task['status'] : null;
     $oldAssigneeName = isset($task['assignee_name']) ? (string)$task['assignee_name'] : '';
     $newAssigneeName = isset($newAssignee['name']) ? (string)$newAssignee['name'] : '';
+    $wasRequested = cpms_tasks_has_transfer_request($task);
     $now = cpms_tasks_now();
     $sets = array(
         'assignee_employee_id = :assignee_employee_id',
@@ -1766,18 +1917,36 @@ function cpms_tasks_transfer_task($pdo, $task, $newAssignee, $actor, $reason)
         $sets[count($sets)] = 'updated_at = :updated_at';
         $params[':updated_at'] = $now;
     }
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transfer_request_assignee_employee_id')) $sets[count($sets)] = 'transfer_request_assignee_employee_id = NULL';
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transfer_request_assignee_name')) $sets[count($sets)] = 'transfer_request_assignee_name = NULL';
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transfer_request_reason')) $sets[count($sets)] = 'transfer_request_reason = NULL';
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transfer_requested_by')) $sets[count($sets)] = 'transfer_requested_by = NULL';
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transfer_requested_by_name')) $sets[count($sets)] = 'transfer_requested_by_name = NULL';
+    if (cpms_tasks_column_exists($pdo, 'cpms_tasks', 'transfer_requested_at')) $sets[count($sets)] = 'transfer_requested_at = NULL';
 
     try {
-        $st = $pdo->prepare("UPDATE cpms_tasks SET " . implode(', ', $sets) . " WHERE id = :id");
+        $whereSql = 'id = :id';
+        if ($wasRequested) {
+            $whereSql .= ' AND assignee_employee_id = :transfer_current_assignee_id AND transfer_request_assignee_employee_id = :transfer_target_assignee_id';
+            $params[':transfer_current_assignee_id'] = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+            $params[':transfer_target_assignee_id'] = $newAssigneeId;
+        }
+        $st = $pdo->prepare("UPDATE cpms_tasks SET " . implode(', ', $sets) . " WHERE " . $whereSql);
         $ok = $st->execute($params);
-        if (!$ok) return false;
-        $message = '담당자 전달: ' . $oldAssigneeName . ' → ' . $newAssigneeName;
+        if (!$ok || $st->rowCount() !== 1) return false;
+        $message = ($wasRequested ? '담당자 변경 승인: ' : '담당자 변경: ') . $oldAssigneeName . ' → ' . $newAssigneeName;
+        if ($wasRequested && isset($task['transfer_requested_by_name']) && trim((string)$task['transfer_requested_by_name']) !== '') {
+            $message .= "\n변경 요청자: " . trim((string)$task['transfer_requested_by_name']);
+        }
         $reason = trim((string)$reason);
         if ($reason !== '') $message .= "\n사유: " . $reason;
-        cpms_tasks_insert_log($pdo, $taskId, $actor, 'transferred', $message, $oldStatus, 'pending');
+        cpms_tasks_insert_log($pdo, $taskId, $actor, $wasRequested ? 'transfer_approved' : 'transferred', $message, $oldStatus, 'pending');
         if ($reason !== '') cpms_tasks_insert_comment($pdo, $taskId, $actor, $message, 0);
         $updatedTask = cpms_tasks_find_task($pdo, $taskId);
-        if ($updatedTask) cpms_tasks_send_created_notification($pdo, $updatedTask);
+        if ($updatedTask) {
+            if ($wasRequested) cpms_tasks_send_transfer_approved_notification($pdo, $updatedTask);
+            else cpms_tasks_send_created_notification($pdo, $updatedTask);
+        }
         return true;
     } catch (Exception $e) {
         return false;
@@ -1826,6 +1995,57 @@ function cpms_tasks_approve_completion($pdo, $task, $actor, $approvalMemo, $now)
     $actorId = isset($actor['id']) ? (int)$actor['id'] : 0;
     $approvalMemo = trim((string)$approvalMemo);
     $now = trim((string)$now) !== '' ? (string)$now : cpms_tasks_now();
+    $groupKey = isset($task['group_key']) ? trim((string)$task['group_key']) : '';
+    if (cpms_tasks_is_request_group_key($groupKey)) {
+        $summary = cpms_tasks_completion_group_summary($pdo, $task);
+        if (!isset($summary['ready_for_approval']) || !$summary['ready_for_approval']) return false;
+        $groupRows = isset($summary['rows']) && is_array($summary['rows']) ? $summary['rows'] : array();
+        $transactionStarted = false;
+        try {
+            if (method_exists($pdo, 'inTransaction') && !$pdo->inTransaction()) {
+                $pdo->beginTransaction();
+                $transactionStarted = true;
+            }
+            $approvedCount = 0;
+            for ($i = 0; $i < count($groupRows); $i++) {
+                $groupTask = $groupRows[$i];
+                $groupStatus = isset($groupTask['status']) ? (string)$groupTask['status'] : '';
+                if ($groupStatus === 'done') continue;
+                if ($groupStatus !== 'completion_pending') throw new Exception('group completion is not ready');
+                $groupTaskId = isset($groupTask['id']) ? (int)$groupTask['id'] : 0;
+                if ($groupTaskId <= 0) throw new Exception('group task id missing');
+                $existingGroupMemo = isset($groupTask['completed_memo']) ? trim((string)$groupTask['completed_memo']) : '';
+                $sets = array(
+                    "status = 'done'",
+                    'completed_at = :completed_at',
+                    'completed_by = :completed_by',
+                    'updated_at = :updated_at'
+                );
+                $params = array(
+                    ':completed_at' => $now,
+                    ':completed_by' => $actorId > 0 ? $actorId : null,
+                    ':updated_at' => $now,
+                    ':id' => $groupTaskId,
+                );
+                if ($existingGroupMemo === '' && $approvalMemo !== '') {
+                    $sets[count($sets)] = 'completed_memo = :completed_memo';
+                    $params[':completed_memo'] = $approvalMemo;
+                }
+                $st = $pdo->prepare("UPDATE cpms_tasks SET " . implode(', ', $sets) . " WHERE id = :id AND status = 'completion_pending'");
+                $ok = $st->execute($params);
+                if (!$ok || $st->rowCount() !== 1) throw new Exception('group completion update failed');
+                cpms_tasks_insert_log($pdo, $groupTaskId, $actor, 'completion_approved', $approvalMemo, $groupStatus, 'done');
+                if ($approvalMemo !== '') cpms_tasks_insert_comment($pdo, $groupTaskId, $actor, $approvalMemo, 0);
+                $approvedCount++;
+            }
+            if ($approvedCount <= 0) throw new Exception('no group completion updated');
+            if ($transactionStarted && $pdo->inTransaction()) $pdo->commit();
+            return true;
+        } catch (Exception $e) {
+            if ($transactionStarted && method_exists($pdo, 'inTransaction') && $pdo->inTransaction()) $pdo->rollBack();
+            return false;
+        }
+    }
     $existingCompletedMemo = isset($task['completed_memo']) ? trim((string)$task['completed_memo']) : '';
 
     $sets = array(
@@ -2157,13 +2377,15 @@ function cpms_tasks_render_comment_item($comment, $childrenMap, $taskId, $return
                     </div>
                     <div class="mt-2 text-sm text-gray-800 whitespace-pre-line"><?php echo h(isset($comment['comment_text']) ? $comment['comment_text'] : ''); ?></div>
                     <?php if ($allowReplies): ?>
-                        <form method="post" action="?r=task_comment_save" class="mt-3 flex flex-col sm:flex-row gap-2" data-task-comment-form>
+                        <form method="post" action="?r=task_comment_save" class="mt-3 space-y-2" data-task-comment-form>
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                             <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
                             <input type="hidden" name="parent_comment_id" value="<?php echo (int)$commentId; ?>">
                             <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
-                            <input type="text" name="comment_text" required class="flex-1 px-3 py-2 rounded-xl border border-gray-200 text-sm" placeholder="대댓글 입력">
-                            <button type="submit" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">대댓글</button>
+                            <textarea name="comment_text" rows="4" wrap="soft" required class="block w-full min-h-[7rem] resize-y px-3 py-3 rounded-xl border border-gray-200 bg-white text-sm leading-6" placeholder="대댓글을 입력하세요. 줄바꿈과 긴 내용도 작성할 수 있습니다."></textarea>
+                            <div class="flex justify-end">
+                                <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">대댓글 등록</button>
+                            </div>
                         </form>
                     <?php endif; ?>
                 </div>
@@ -2324,6 +2546,36 @@ function cpms_tasks_build_completion_pending_message($task)
     return implode("\n", $lines);
 }}
 
+if (!function_exists('cpms_tasks_build_transfer_request_message')) {
+function cpms_tasks_build_transfer_request_message($task)
+{
+    $lines = array();
+    $lines[count($lines)] = '[CPMS 업무담당자 변경요청]';
+    $lines[count($lines)] = '';
+    $lines[count($lines)] = '업무명: ' . (isset($task['title']) ? (string)$task['title'] : '-');
+    $lines[count($lines)] = '현재 담당자: ' . (isset($task['assignee_name']) ? (string)$task['assignee_name'] : '-');
+    $lines[count($lines)] = '변경 요청 담당자: ' . (isset($task['transfer_request_assignee_name']) ? (string)$task['transfer_request_assignee_name'] : '-');
+    $reason = isset($task['transfer_request_reason']) ? trim((string)$task['transfer_request_reason']) : '';
+    if ($reason !== '') $lines[count($lines)] = '요청 사유: ' . cpms_tasks_text_excerpt($reason, 160);
+    $lines[count($lines)] = '';
+    $lines[count($lines)] = '내가 요청한 업무에서 담당자 변경을 승인해주세요.';
+    return implode("\n", $lines);
+}}
+
+if (!function_exists('cpms_tasks_build_transfer_approved_message')) {
+function cpms_tasks_build_transfer_approved_message($task)
+{
+    $lines = array();
+    $lines[count($lines)] = '[CPMS 업무담당자 변경완료]';
+    $lines[count($lines)] = '';
+    $lines[count($lines)] = '업무명: ' . (isset($task['title']) ? (string)$task['title'] : '-');
+    $lines[count($lines)] = '요청자: ' . (isset($task['requester_name']) ? (string)$task['requester_name'] : '-');
+    $lines[count($lines)] = '담당자로 지정되었습니다.';
+    $lines[count($lines)] = '';
+    $lines[count($lines)] = '나의 할일에서 업무를 확인해주세요.';
+    return implode("\n", $lines);
+}}
+
 if (!function_exists('cpms_tasks_build_completion_rejected_message')) {
 function cpms_tasks_build_completion_rejected_message($task, $feedback)
 {
@@ -2458,6 +2710,32 @@ function cpms_tasks_send_completion_pending_notification($pdo, $task)
     $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
     if ($requesterId <= 0 || $requesterId === $assigneeId) return false;
     return cpms_send_google_chat_to_employee($pdo, $requesterId, cpms_tasks_build_completion_pending_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_COMPLETION_PENDING', 'TASK');
+}}
+
+if (!function_exists('cpms_tasks_send_transfer_request_notification')) {
+function cpms_tasks_send_transfer_request_notification($pdo, $task)
+{
+    if (!function_exists('cpms_send_google_chat_to_employee')) {
+        require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    }
+    if (!function_exists('cpms_send_google_chat_to_employee')) return false;
+    if (!$pdo || !is_array($task)) return false;
+    $requesterId = cpms_tasks_effective_requester_employee_id($task);
+    if ($requesterId <= 0) return false;
+    return cpms_send_google_chat_to_employee($pdo, $requesterId, cpms_tasks_build_transfer_request_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_TRANSFER_REQUESTED', 'TASK');
+}}
+
+if (!function_exists('cpms_tasks_send_transfer_approved_notification')) {
+function cpms_tasks_send_transfer_approved_notification($pdo, $task)
+{
+    if (!function_exists('cpms_send_google_chat_to_employee')) {
+        require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    }
+    if (!function_exists('cpms_send_google_chat_to_employee')) return false;
+    if (!$pdo || !is_array($task)) return false;
+    $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+    if ($assigneeId <= 0) return false;
+    return cpms_send_google_chat_to_employee($pdo, $assigneeId, cpms_tasks_build_transfer_approved_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_TRANSFER_APPROVED', 'TASK');
 }}
 
 if (!function_exists('cpms_tasks_send_completion_rejected_notification')) {
@@ -2791,6 +3069,12 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             transferred_from_name VARCHAR(100) NULL,
             transferred_by INT NULL,
             transferred_at DATETIME NULL,
+            transfer_request_assignee_employee_id INT NULL,
+            transfer_request_assignee_name VARCHAR(100) NULL,
+            transfer_request_reason TEXT NULL,
+            transfer_requested_by INT NULL,
+            transfer_requested_by_name VARCHAR(100) NULL,
+            transfer_requested_at DATETIME NULL,
             group_key VARCHAR(190) NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
         'cpms_task_logs' => "CREATE TABLE IF NOT EXISTS cpms_task_logs (
@@ -2901,6 +3185,12 @@ function cpms_tasks_ensure_schema($pdo, &$results)
             'transferred_from_name' => "ALTER TABLE cpms_tasks ADD COLUMN transferred_from_name VARCHAR(100) NULL AFTER transferred_from_employee_id",
             'transferred_by' => "ALTER TABLE cpms_tasks ADD COLUMN transferred_by INT NULL AFTER transferred_from_name",
             'transferred_at' => "ALTER TABLE cpms_tasks ADD COLUMN transferred_at DATETIME NULL AFTER transferred_by",
+            'transfer_request_assignee_employee_id' => "ALTER TABLE cpms_tasks ADD COLUMN transfer_request_assignee_employee_id INT NULL AFTER transferred_at",
+            'transfer_request_assignee_name' => "ALTER TABLE cpms_tasks ADD COLUMN transfer_request_assignee_name VARCHAR(100) NULL AFTER transfer_request_assignee_employee_id",
+            'transfer_request_reason' => "ALTER TABLE cpms_tasks ADD COLUMN transfer_request_reason TEXT NULL AFTER transfer_request_assignee_name",
+            'transfer_requested_by' => "ALTER TABLE cpms_tasks ADD COLUMN transfer_requested_by INT NULL AFTER transfer_request_reason",
+            'transfer_requested_by_name' => "ALTER TABLE cpms_tasks ADD COLUMN transfer_requested_by_name VARCHAR(100) NULL AFTER transfer_requested_by",
+            'transfer_requested_at' => "ALTER TABLE cpms_tasks ADD COLUMN transfer_requested_at DATETIME NULL AFTER transfer_requested_by_name",
         ),
         'cpms_task_logs' => array(
             'task_id' => "ALTER TABLE cpms_task_logs ADD COLUMN task_id INT NOT NULL DEFAULT 0 AFTER id",

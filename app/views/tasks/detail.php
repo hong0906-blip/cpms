@@ -53,6 +53,7 @@ $canRevision = cpms_tasks_can_request_revision($task, isset($currentEmployee['id
 $canCancel = cpms_tasks_can_cancel($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $currentEmployeeId = isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0;
 $canEditPriority = (!$readOnlyMode && !$isMeetingTask && $currentEmployeeId > 0 && isset($task['assignee_employee_id']) && (int)$task['assignee_employee_id'] === $currentEmployeeId);
+$hasTransferRequest = cpms_tasks_has_transfer_request($task);
 $canTransfer = (!$readOnlyMode && cpms_tasks_can_transfer($task, $currentEmployeeId));
 $transferEmployees = $canTransfer ? cpms_tasks_fetch_active_employees($pdo) : array();
 $returnUrl = cpms_tasks_default_return_url();
@@ -236,22 +237,37 @@ ob_start();
         </div>
     <?php endif; ?>
 
+    <?php if ($hasTransferRequest): ?>
+        <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <div class="flex flex-wrap items-center gap-2">
+                <span class="px-3 py-1 rounded-full border border-amber-300 bg-white text-xs font-extrabold text-amber-800">업무담당자 변경요청</span>
+                <span class="text-sm font-extrabold text-amber-900">
+                    <?php echo h(isset($task['assignee_name']) ? $task['assignee_name'] : '-'); ?> → <?php echo h(isset($task['transfer_request_assignee_name']) ? $task['transfer_request_assignee_name'] : '-'); ?>
+                </span>
+            </div>
+            <?php if (isset($task['transfer_request_reason']) && trim((string)$task['transfer_request_reason']) !== ''): ?>
+                <div class="mt-2 text-sm text-amber-900 whitespace-pre-line">사유: <?php echo h($task['transfer_request_reason']); ?></div>
+            <?php endif; ?>
+            <div class="mt-2 text-xs font-bold text-amber-700">업무 요청자의 승인을 기다리고 있습니다.</div>
+        </div>
+    <?php endif; ?>
+
     <?php if ($canTransfer): ?>
         <div class="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-            <div class="text-sm font-extrabold text-amber-900 mb-3">다른 담당자에게 전달</div>
+            <div class="text-sm font-extrabold text-amber-900 mb-3">업무담당자 변경 요청</div>
             <form method="post" action="?r=tasks/transfer" class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                 <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
                 <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
                 <select name="assignee_employee_id" required class="px-4 py-3 rounded-2xl border border-amber-200 bg-white md:col-span-1">
-                    <option value="">담당자 선택</option>
+                    <option value="">변경 담당자 선택</option>
                     <?php foreach ($transferEmployees as $employee): ?>
                         <?php if (isset($employee['id']) && (int)$employee['id'] === $currentEmployeeId) continue; ?>
                         <option value="<?php echo (int)$employee['id']; ?>"><?php echo h((isset($employee['name']) ? $employee['name'] : '-') . ' / ' . (isset($employee['department']) ? $employee['department'] : '-')); ?></option>
                     <?php endforeach; ?>
                 </select>
-                <input type="text" name="transfer_reason" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white md:col-span-1" placeholder="전달 사유">
-                <button type="submit" class="px-4 py-3 rounded-2xl bg-amber-500 text-white font-extrabold md:col-span-1">전달</button>
+                <input type="text" name="transfer_reason" class="px-4 py-3 rounded-2xl border border-amber-200 bg-white md:col-span-1" placeholder="변경 요청 사유">
+                <button type="submit" class="px-4 py-3 rounded-2xl bg-amber-500 text-white font-extrabold md:col-span-1">요청</button>
             </form>
         </div>
     <?php endif; ?>

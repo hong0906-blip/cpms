@@ -4,6 +4,8 @@ if (!class_exists('App\\Core\\Db')) {
 }
 require_once __DIR__ . '/helpers.php';
 require_once dirname(__DIR__) . '/attendance/common.php';
+require_once dirname(__DIR__) . '/common/chat_notification_helpers.php';
+require_once dirname(__DIR__) . '/common/company_chat_daily_helpers.php';
 
 if (!function_exists('cpms_tasks_delayed_notify_json')) {
 function cpms_tasks_delayed_notify_json($ok, $result, $statusCode)
@@ -46,6 +48,12 @@ try {
     $result = cpms_tasks_process_delayed_notifications($pdo, $limit);
     if (function_exists('attendance_process_morning_missing_checkin_notifications')) {
         $result['attendance_morning'] = attendance_process_morning_missing_checkin_notifications($pdo, $limit);
+    }
+    if (function_exists('cpms_company_chat_process_daily_leave')) {
+        $result['company_leave'] = cpms_company_chat_process_daily_leave($pdo, false);
+    }
+    if (function_exists('cpms_company_chat_process_daily_leave_additions')) {
+        $result['company_leave_addition'] = cpms_company_chat_process_daily_leave_additions($pdo);
     }
     cpms_tasks_delayed_notify_json(true, $result, 200);
 } catch (Exception $e) {

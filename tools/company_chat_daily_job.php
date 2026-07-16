@@ -62,6 +62,9 @@ try {
     $results = array();
     if ($type === 'leave' || $type === 'all') {
         $results[count($results)] = cpms_company_chat_process_daily_leave($pdo, $force);
+        if (function_exists('cpms_company_chat_process_daily_leave_additions')) {
+            $results[count($results)] = cpms_company_chat_process_daily_leave_additions($pdo);
+        }
     }
     if ($type === 'missing_checkout' || $type === 'all') {
         $results[count($results)] = cpms_company_chat_process_missing_checkout($pdo, $force, $limit);

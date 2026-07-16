@@ -5,6 +5,8 @@ require_once __DIR__ . '/_common.php';
 require_once __DIR__ . '/template_helpers.php';
 require_once __DIR__ . '/notification_helpers.php';
 require_once __DIR__ . '/../admin/leave_management_helpers.php';
+require_once __DIR__ . '/../common/chat_notification_helpers.php';
+require_once __DIR__ . '/../common/company_chat_daily_helpers.php';
 require_once __DIR__ . '/../../services/ApprovalDriveService.php';
 require_once __DIR__ . '/line_rules.php';
 
@@ -691,8 +693,7 @@ if ($isManagementOnlyDoc) {
         'company_name' => isset($_POST['company_name']) ? trim((string)$_POST['company_name']) : '',
         'contract_amount' => isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '',
         'advance_amount' => isset($_POST['advance_amount']) ? trim((string)$_POST['advance_amount']) : '',
-        'special_note_1' => isset($_POST['special_note_1']) ? trim((string)$_POST['special_note_1']) : '',
-        'special_note_2' => isset($_POST['special_note_2']) ? trim((string)$_POST['special_note_2']) : '',
+        'special_note' => isset($_POST['special_note']) ? trim((string)$_POST['special_note']) : '',
         'payment_request_date' => isset($_POST['payment_request_date']) ? trim((string)$_POST['payment_request_date']) : '',
         'budget_status' => isset($_POST['budget_status']) ? trim((string)$_POST['budget_status']) : '',
         'writer_name' => $drafterName,
@@ -993,6 +994,13 @@ try {
     }
 
     $pdo->commit();
+    if ($first < 0 && $docType === 'leave' && function_exists('cpms_company_chat_queue_daily_leave_addition')) {
+        try {
+            cpms_company_chat_queue_daily_leave_addition($pdo, $did);
+        } catch (Exception $leaveAdditionException) {
+            error_log('[approval_store] daily leave addition queue failed: ' . $leaveAdditionException->getMessage());
+        }
+    }
     if (count($uploadWarn) > 0) {
         flash_set('danger', implode(', ', $uploadWarn));
     }

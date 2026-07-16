@@ -46,6 +46,27 @@ function cpms_company_chat_daily_time_reached($timeText) {
     return strcmp($now->format('H:i:s'), (string)$timeText) >= 0;
 }}
 
+if (!function_exists('cpms_company_chat_daily_lock_acquire')) {
+function cpms_company_chat_daily_lock_acquire($notificationType, $sourceId) {
+    $safeType = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)$notificationType);
+    if ($safeType === '') $safeType = 'notification';
+    $lockPath = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'cpms_company_chat_' . $safeType . '_' . (int)$sourceId . '.lock';
+    $lockHandle = @fopen($lockPath, 'c');
+    if (!$lockHandle) return false;
+    if (!@flock($lockHandle, LOCK_EX | LOCK_NB)) {
+        fclose($lockHandle);
+        return false;
+    }
+    return $lockHandle;
+}}
+
+if (!function_exists('cpms_company_chat_daily_lock_release')) {
+function cpms_company_chat_daily_lock_release($lockHandle) {
+    if (!is_resource($lockHandle)) return;
+    @flock($lockHandle, LOCK_UN);
+    fclose($lockHandle);
+}}
+
 if (!function_exists('cpms_company_chat_leave_date_label')) {
 function cpms_company_chat_leave_date_label($baseDate) {
     try {
@@ -70,6 +91,189 @@ function cpms_company_chat_leave_person_line($person) {
     $employeeText = $name . $position;
     if ($department !== '') $employeeText .= '/' . $department;
     return $employeeText . ' - ' . $leaveType;
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_member_event')) {
+function cpms_company_chat_daily_leave_member_event($baseDate) {
+    return 'INCLUDED_' . str_replace('-', '', (string)$baseDate);
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_pending_event')) {
+function cpms_company_chat_daily_leave_pending_event($baseDate) {
+    return 'PENDING_' . str_replace('-', '', (string)$baseDate);
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_snapshot_exists')) {
+function cpms_company_chat_daily_leave_snapshot_exists($pdo, $baseDate) {
+    if (!$pdo || !cpms_google_chat_table_exists($pdo, 'cpms_google_chat_notifications')) return false;
+    try {
+        $st = $pdo->prepare("SELECT id FROM cpms_google_chat_notifications WHERE source_type='DAILY_LEAVE_SNAPSHOT' AND event_type=:event_type AND source_id=:source_id AND send_status='SUCCESS' LIMIT 1");
+        $st->execute(array(':event_type' => 'SNAPSHOT_' . str_replace('-', '', (string)$baseDate), ':source_id' => cpms_company_chat_daily_source_id($baseDate)));
+        return (bool)$st->fetchColumn();
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_sent_message')) {
+function cpms_company_chat_daily_leave_sent_message($pdo, $baseDate) {
+    if (!$pdo || !cpms_google_chat_table_exists($pdo, 'cpms_google_chat_notifications')) return '';
+    try {
+        $st = $pdo->prepare("SELECT message_text FROM cpms_google_chat_notifications WHERE source_type='DAILY_LEAVE' AND event_type='DAILY_LEAVE_COMPANY_SPACE' AND source_id=:source_id AND send_status='SUCCESS' ORDER BY id ASC LIMIT 1");
+        $st->execute(array(':source_id' => cpms_company_chat_daily_source_id($baseDate)));
+        $messageText = $st->fetchColumn();
+        return $messageText !== false ? (string)$messageText : '';
+    } catch (Exception $e) {
+        error_log('[company_chat_daily] sent leave message lookup failed: ' . $e->getMessage());
+        return '';
+    }
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_people_in_sent_message')) {
+function cpms_company_chat_daily_leave_people_in_sent_message($messageText, $people) {
+    if (!is_array($people)) $people = array();
+    $messageText = str_replace(array("\r\n", "\r"), "\n", (string)$messageText);
+    if (trim($messageText) === '') return $people;
+    $messageText = "\n" . trim($messageText) . "\n";
+    $included = array();
+    for ($i = 0; $i < count($people); $i++) {
+        $personLine = trim(cpms_company_chat_leave_person_line($people[$i]));
+        if ($personLine !== '' && strpos($messageText, "\n" . $personLine . "\n") !== false) {
+            $included[count($included)] = $people[$i];
+        }
+    }
+    return $included;
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_member_exists')) {
+function cpms_company_chat_daily_leave_member_exists($pdo, $baseDate, $documentId) {
+    if (!$pdo || (int)$documentId <= 0 || !cpms_google_chat_table_exists($pdo, 'cpms_google_chat_notifications')) return false;
+    try {
+        $st = $pdo->prepare("SELECT id FROM cpms_google_chat_notifications WHERE source_type='DAILY_LEAVE_MEMBER' AND event_type=:event_type AND source_id=:source_id AND send_status='SUCCESS' LIMIT 1");
+        $st->execute(array(':event_type' => cpms_company_chat_daily_leave_member_event($baseDate), ':source_id' => (int)$documentId));
+        return (bool)$st->fetchColumn();
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_pending_exists')) {
+function cpms_company_chat_daily_leave_pending_exists($pdo, $baseDate, $documentId) {
+    if (!$pdo || (int)$documentId <= 0 || !cpms_google_chat_table_exists($pdo, 'cpms_google_chat_notifications')) return false;
+    try {
+        $st = $pdo->prepare("SELECT id FROM cpms_google_chat_notifications WHERE source_type='DAILY_LEAVE_ADDITION' AND event_type=:event_type AND source_id=:source_id AND send_status='RESERVED' LIMIT 1");
+        $st->execute(array(':event_type' => cpms_company_chat_daily_leave_pending_event($baseDate), ':source_id' => (int)$documentId));
+        return (bool)$st->fetchColumn();
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_mark_member')) {
+function cpms_company_chat_daily_leave_mark_member($pdo, $baseDate, $person) {
+    if (!$pdo || !is_array($person)) return false;
+    $documentId = isset($person['document_id']) ? (int)$person['document_id'] : 0;
+    if ($documentId <= 0 || cpms_company_chat_daily_leave_member_exists($pdo, $baseDate, $documentId)) return false;
+    cpms_google_chat_log_notification($pdo, array(
+        'source_type' => 'DAILY_LEAVE_MEMBER',
+        'source_id' => $documentId,
+        'event_type' => cpms_company_chat_daily_leave_member_event($baseDate),
+        'receiver_employee_id' => isset($person['employee_id']) && (int)$person['employee_id'] > 0 ? (int)$person['employee_id'] : null,
+        'receiver_name' => isset($person['name']) ? (string)$person['name'] : '',
+        'receiver_email' => isset($person['email']) ? (string)$person['email'] : '',
+        'dm_space_name' => cpms_google_chat_company_space_name($pdo),
+        'message_text' => cpms_company_chat_leave_person_line($person),
+        'send_status' => 'SUCCESS',
+        'error_message' => null,
+        'sent_at' => date('Y-m-d H:i:s')
+    ));
+    return true;
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_mark_snapshot')) {
+function cpms_company_chat_daily_leave_mark_snapshot($pdo, $baseDate, $people) {
+    if (!$pdo) return false;
+    if (!is_array($people)) $people = array();
+    for ($i = 0; $i < count($people); $i++) {
+        cpms_company_chat_daily_leave_mark_member($pdo, $baseDate, $people[$i]);
+    }
+    if (!cpms_company_chat_daily_leave_snapshot_exists($pdo, $baseDate)) {
+        cpms_google_chat_log_notification($pdo, array(
+            'source_type' => 'DAILY_LEAVE_SNAPSHOT',
+            'source_id' => cpms_company_chat_daily_source_id($baseDate),
+            'event_type' => 'SNAPSHOT_' . str_replace('-', '', (string)$baseDate),
+            'receiver_employee_id' => null,
+            'receiver_name' => '회사 전체방',
+            'receiver_email' => null,
+            'dm_space_name' => cpms_google_chat_company_space_name($pdo),
+            'message_text' => '08시 휴가자 기준 명단 ' . count($people) . '명',
+            'send_status' => 'SUCCESS',
+            'error_message' => null,
+            'sent_at' => date('Y-m-d H:i:s')
+        ));
+    }
+    return true;
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_person_by_document')) {
+function cpms_company_chat_daily_leave_person_by_document($pdo, $documentId, $baseDate) {
+    if (!$pdo || (int)$documentId <= 0) return null;
+    try {
+        $st = $pdo->prepare("SELECT d.id, d.created_by_id, d.created_by_name, d.created_by_email, d.content, e.name AS employee_name, e.email AS employee_email, e.department AS employee_department, e.position AS employee_position FROM cpms_approval_documents d LEFT JOIN employees e ON e.id=d.created_by_id WHERE d.id=:id AND d.doc_type='leave' AND UPPER(COALESCE(d.doc_status,'')) IN ('APPROVED','COMPLETED') LIMIT 1");
+        $st->execute(array(':id' => (int)$documentId));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) return null;
+        $content = function_exists('approval_parse_content') ? approval_parse_content(isset($row['content']) ? $row['content'] : '') : json_decode(isset($row['content']) ? (string)$row['content'] : '', true);
+        if (!is_array($content)) $content = array();
+        $start = isset($content['leave_start_date']) ? substr(trim((string)$content['leave_start_date']), 0, 10) : '';
+        $end = isset($content['leave_end_date']) ? substr(trim((string)$content['leave_end_date']), 0, 10) : '';
+        if ($start === '' || $end === '' || (string)$baseDate < $start || (string)$baseDate > $end) return null;
+        $name = isset($row['employee_name']) ? trim((string)$row['employee_name']) : '';
+        if ($name === '') $name = isset($row['created_by_name']) ? trim((string)$row['created_by_name']) : '';
+        if ($name === '' && isset($content['applicant_name'])) $name = trim((string)$content['applicant_name']);
+        $email = isset($row['employee_email']) ? trim((string)$row['employee_email']) : '';
+        if ($email === '') $email = isset($row['created_by_email']) ? trim((string)$row['created_by_email']) : '';
+        $department = isset($row['employee_department']) ? trim((string)$row['employee_department']) : '';
+        if ($department === '' && isset($content['department'])) $department = trim((string)$content['department']);
+        $position = isset($row['employee_position']) ? trim((string)$row['employee_position']) : '';
+        if ($position === '' && isset($content['position'])) $position = trim((string)$content['position']);
+        $typeLabel = function_exists('approval_leave_type_label_from_content') ? approval_leave_type_label_from_content($content) : (isset($content['request_type']) ? trim((string)$content['request_type']) : '');
+        return array('document_id' => (int)$row['id'], 'employee_id' => isset($row['created_by_id']) ? (int)$row['created_by_id'] : 0, 'name' => $name !== '' ? $name : '-', 'email' => $email, 'department' => $department, 'position' => $position, 'type_label' => $typeLabel !== '' ? $typeLabel : '휴가');
+    } catch (Exception $e) {
+        error_log('[company_chat_daily] leave document lookup failed: ' . $e->getMessage());
+        return null;
+    }
+}}
+
+if (!function_exists('cpms_company_chat_queue_daily_leave_addition')) {
+function cpms_company_chat_queue_daily_leave_addition($pdo, $documentId) {
+    if (!$pdo || (int)$documentId <= 0 || !cpms_company_chat_daily_time_reached('08:00:00')) return false;
+    $baseDate = (new DateTime('now', new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
+    $sourceId = cpms_company_chat_daily_source_id($baseDate);
+    if (!cpms_company_chat_notification_success_exists($pdo, 'DAILY_LEAVE', 'DAILY_LEAVE_COMPANY_SPACE', $sourceId, null)) return false;
+    $person = cpms_company_chat_daily_leave_person_by_document($pdo, $documentId, $baseDate);
+    if (!is_array($person)) return false;
+    $lockHandle = cpms_company_chat_daily_lock_acquire('daily_leave_addition', $sourceId);
+    if (!$lockHandle) return false;
+    if (cpms_company_chat_daily_leave_member_exists($pdo, $baseDate, $documentId) || cpms_company_chat_daily_leave_pending_exists($pdo, $baseDate, $documentId)) {
+        cpms_company_chat_daily_lock_release($lockHandle);
+        return false;
+    }
+    cpms_google_chat_log_notification($pdo, array(
+        'source_type' => 'DAILY_LEAVE_ADDITION',
+        'source_id' => (int)$documentId,
+        'event_type' => cpms_company_chat_daily_leave_pending_event($baseDate),
+        'receiver_employee_id' => isset($person['employee_id']) && (int)$person['employee_id'] > 0 ? (int)$person['employee_id'] : null,
+        'receiver_name' => isset($person['name']) ? (string)$person['name'] : '',
+        'receiver_email' => isset($person['email']) ? (string)$person['email'] : '',
+        'dm_space_name' => cpms_google_chat_company_space_name($pdo),
+        'message_text' => cpms_company_chat_leave_person_line($person),
+        'send_status' => 'RESERVED',
+        'error_message' => '추가 휴가자 10분 대기 중',
+        'sent_at' => null
+    ));
+    cpms_company_chat_daily_lock_release($lockHandle);
+    return true;
 }}
 
 if (!function_exists('cpms_company_chat_build_daily_leave_message')) {
@@ -103,7 +307,21 @@ function cpms_company_chat_process_daily_leave($pdo, $force) {
     $sourceId = cpms_company_chat_daily_source_id($baseDate);
     $sourceType = 'DAILY_LEAVE';
     $eventType = 'DAILY_LEAVE_COMPANY_SPACE';
+    $lockHandle = cpms_company_chat_daily_lock_acquire('daily_leave', $sourceId);
+    if (!$lockHandle) {
+        $result['skipped'] = 1;
+        $result['reason'] = '다른 휴가자 전체방 알림 작업이 실행 중입니다.';
+        return $result;
+    }
     if (!$force && cpms_company_chat_notification_success_exists($pdo, $sourceType, $eventType, $sourceId, null)) {
+        if (!cpms_company_chat_daily_leave_snapshot_exists($pdo, $baseDate)) {
+            $legacyPeople = function_exists('approval_current_leave_people') ? approval_current_leave_people($pdo, $baseDate) : array();
+            if (!is_array($legacyPeople)) $legacyPeople = array();
+            $legacyMessage = cpms_company_chat_daily_leave_sent_message($pdo, $baseDate);
+            $legacyIncludedPeople = cpms_company_chat_daily_leave_people_in_sent_message($legacyMessage, $legacyPeople);
+            cpms_company_chat_daily_leave_mark_snapshot($pdo, $baseDate, $legacyIncludedPeople);
+        }
+        cpms_company_chat_daily_lock_release($lockHandle);
         $result['skipped'] = 1;
         $result['reason'] = '이미 성공 발송된 날짜입니다.';
         return $result;
@@ -113,13 +331,148 @@ function cpms_company_chat_process_daily_leave($pdo, $force) {
     $result['checked'] = count($people);
     $message = cpms_company_chat_build_daily_leave_message($baseDate, $people);
     $ok = cpms_google_chat_send_to_company_space($pdo, $message, $eventType, $sourceId, $sourceType);
+    cpms_company_chat_daily_lock_release($lockHandle);
     if ($ok) {
+        cpms_company_chat_daily_leave_mark_snapshot($pdo, $baseDate, $people);
         $result['sent'] = 1;
     } else {
         $result['failed'] = 1;
         $result['reason'] = function_exists('approval_google_chat_get_last_error') ? trim((string)approval_google_chat_get_last_error()) : '';
         if ($result['reason'] === '') $result['reason'] = 'Google Chat API send failed.';
     }
+    return $result;
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_pending_rows')) {
+function cpms_company_chat_daily_leave_pending_rows($pdo, $baseDate) {
+    if (!$pdo || !cpms_google_chat_table_exists($pdo, 'cpms_google_chat_notifications')) return array();
+    try {
+        $st = $pdo->prepare("SELECT id, source_id, receiver_employee_id, receiver_name, receiver_email, message_text, created_at FROM cpms_google_chat_notifications WHERE source_type='DAILY_LEAVE_ADDITION' AND event_type=:event_type AND send_status='RESERVED' ORDER BY created_at ASC, id ASC");
+        $st->execute(array(':event_type' => cpms_company_chat_daily_leave_pending_event($baseDate)));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    } catch (Exception $e) {
+        error_log('[company_chat_daily] pending leave additions lookup failed: ' . $e->getMessage());
+        return array();
+    }
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_mark_pending')) {
+function cpms_company_chat_daily_leave_mark_pending($pdo, $historyId, $status, $errorMessage) {
+    if (!$pdo || (int)$historyId <= 0) return false;
+    try {
+        $st = $pdo->prepare("UPDATE cpms_google_chat_notifications SET send_status=:send_status, error_message=:error_message, sent_at=:sent_at WHERE id=:id AND send_status='RESERVED'");
+        $st->execute(array(':send_status' => (string)$status, ':error_message' => $errorMessage, ':sent_at' => (string)$status === 'SUCCESS' ? date('Y-m-d H:i:s') : null, ':id' => (int)$historyId));
+        return true;
+    } catch (Exception $e) {
+        error_log('[company_chat_daily] pending leave addition update failed: ' . $e->getMessage());
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_company_chat_build_daily_leave_addition_message')) {
+function cpms_company_chat_build_daily_leave_addition_message($baseDate, $people) {
+    if (!is_array($people)) $people = array();
+    $lines = array(cpms_company_chat_leave_date_label($baseDate) . ' 금일 휴가자 추가 전달드립니다.', '');
+    for ($i = 0; $i < count($people); $i++) {
+        $lines[count($lines)] = cpms_company_chat_leave_person_line($people[$i]);
+    }
+    return implode("\n", $lines);
+}}
+
+if (!function_exists('cpms_company_chat_process_daily_leave_additions')) {
+function cpms_company_chat_process_daily_leave_additions($pdo) {
+    $result = array('type' => 'leave_addition', 'checked' => 0, 'queued' => 0, 'pending' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0, 'reason' => '');
+    if (!$pdo || !cpms_company_chat_daily_time_reached('08:00:00')) {
+        $result['skipped'] = 1;
+        $result['reason'] = '08:00 이전에는 추가 휴가자 알림을 처리하지 않습니다.';
+        return $result;
+    }
+    $baseDate = (new DateTime('now', new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
+    $sourceId = cpms_company_chat_daily_source_id($baseDate);
+    if (!cpms_company_chat_notification_success_exists($pdo, 'DAILY_LEAVE', 'DAILY_LEAVE_COMPANY_SPACE', $sourceId, null)) {
+        $result['skipped'] = 1;
+        $result['reason'] = '08시 전체 휴가자 알림 성공 이력이 없습니다.';
+        return $result;
+    }
+    if (!cpms_company_chat_daily_leave_snapshot_exists($pdo, $baseDate)) {
+        $result['skipped'] = 1;
+        $result['reason'] = '08시 휴가자 기준 명단을 초기화하는 중입니다.';
+        return $result;
+    }
+
+    $people = function_exists('approval_current_leave_people') ? approval_current_leave_people($pdo, $baseDate) : array();
+    if (!is_array($people)) $people = array();
+    $result['checked'] = count($people);
+    for ($i = 0; $i < count($people); $i++) {
+        $documentId = isset($people[$i]['document_id']) ? (int)$people[$i]['document_id'] : 0;
+        if ($documentId > 0 && !cpms_company_chat_daily_leave_member_exists($pdo, $baseDate, $documentId) && !cpms_company_chat_daily_leave_pending_exists($pdo, $baseDate, $documentId)) {
+            if (cpms_company_chat_queue_daily_leave_addition($pdo, $documentId)) $result['queued']++;
+        }
+    }
+
+    $lockHandle = cpms_company_chat_daily_lock_acquire('daily_leave_addition', $sourceId);
+    if (!$lockHandle) {
+        $result['skipped']++;
+        $result['reason'] = '다른 추가 휴가자 알림 작업이 실행 중입니다.';
+        return $result;
+    }
+    $pendingRows = cpms_company_chat_daily_leave_pending_rows($pdo, $baseDate);
+    $result['pending'] = count($pendingRows);
+    if (count($pendingRows) === 0) {
+        cpms_company_chat_daily_lock_release($lockHandle);
+        return $result;
+    }
+    $readyRows = array();
+    $nowTimestamp = time();
+    for ($i = 0; $i < count($pendingRows); $i++) {
+        $createdAt = isset($pendingRows[$i]['created_at']) ? trim((string)$pendingRows[$i]['created_at']) : '';
+        $readyAt = $createdAt !== '' ? strtotime($createdAt . ' +10 minutes') : false;
+        if ($readyAt !== false && $nowTimestamp >= $readyAt) {
+            $readyRows[count($readyRows)] = $pendingRows[$i];
+        }
+    }
+    if (count($readyRows) === 0) {
+        cpms_company_chat_daily_lock_release($lockHandle);
+        $result['skipped']++;
+        $result['reason'] = '추가 휴가자 확인 후 10분 대기 중입니다.';
+        return $result;
+    }
+
+    $sendPeople = array();
+    $sendHistoryRows = array();
+    for ($i = 0; $i < count($readyRows); $i++) {
+        $documentId = isset($readyRows[$i]['source_id']) ? (int)$readyRows[$i]['source_id'] : 0;
+        if ($documentId <= 0 || cpms_company_chat_daily_leave_member_exists($pdo, $baseDate, $documentId)) {
+            cpms_company_chat_daily_leave_mark_pending($pdo, isset($readyRows[$i]['id']) ? (int)$readyRows[$i]['id'] : 0, 'SKIPPED', '이미 공지된 휴가자');
+            continue;
+        }
+        $person = cpms_company_chat_daily_leave_person_by_document($pdo, $documentId, $baseDate);
+        if (!is_array($person)) {
+            cpms_company_chat_daily_leave_mark_pending($pdo, isset($readyRows[$i]['id']) ? (int)$readyRows[$i]['id'] : 0, 'SKIPPED', '휴가 취소 또는 당일 대상 아님');
+            continue;
+        }
+        $sendPeople[count($sendPeople)] = $person;
+        $sendHistoryRows[count($sendHistoryRows)] = $readyRows[$i];
+    }
+    if (count($sendPeople) === 0) {
+        cpms_company_chat_daily_lock_release($lockHandle);
+        return $result;
+    }
+
+    $message = cpms_company_chat_build_daily_leave_addition_message($baseDate, $sendPeople);
+    $ok = cpms_google_chat_send_to_company_space($pdo, $message, 'DAILY_LEAVE_ADDITION_COMPANY_SPACE', $sourceId, 'DAILY_LEAVE_ADDITION');
+    if ($ok) {
+        for ($i = 0; $i < count($sendPeople); $i++) {
+            cpms_company_chat_daily_leave_mark_pending($pdo, isset($sendHistoryRows[$i]['id']) ? (int)$sendHistoryRows[$i]['id'] : 0, 'SUCCESS', null);
+            cpms_company_chat_daily_leave_mark_member($pdo, $baseDate, $sendPeople[$i]);
+        }
+        $result['sent'] = count($sendPeople);
+    } else {
+        $result['failed'] = count($sendPeople);
+        $result['reason'] = function_exists('approval_google_chat_get_last_error') ? trim((string)approval_google_chat_get_last_error()) : 'Google Chat API send failed.';
+    }
+    cpms_company_chat_daily_lock_release($lockHandle);
     return $result;
 }}
 

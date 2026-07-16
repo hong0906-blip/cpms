@@ -95,7 +95,12 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
         && in_array(isset($item['status']) ? (string)$item['status'] : '', array('meeting_available', 'meeting_unavailable'), true);
     $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
     $isRequester = ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($item) === (int)$currentEmployeeId);
-    $canRequesterAct = $requestedMode && $isRequester && $currentStatus === 'completion_pending';
+    $completionGroupReady = isset($item['completion_group_ready'])
+        ? (int)$item['completion_group_ready'] === 1
+        : $currentStatus === 'completion_pending';
+    $canRequesterAct = $requestedMode && $isRequester && $completionGroupReady;
+    $hasTransferRequest = cpms_tasks_has_transfer_request($item);
+    $canApproveTransfer = $requestedMode && cpms_tasks_can_approve_transfer_request($item, $currentEmployeeId);
     $canEditDue = $requestedMode && $isRequester && !in_array($currentStatus, array('done', 'cancelled'), true);
     $canEditContent = $requestedMode && $isRequester && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !in_array($currentStatus, array('done', 'cancelled'), true);
     $hasProjectName = isset($item['project_name']) && trim((string)$item['project_name']) !== '';
@@ -129,6 +134,15 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
                 요청자: <?php echo h(isset($item['requester_name']) ? $item['requester_name'] : '-'); ?>
             <?php endif; ?>
         </div>
+        <?php if ($requestedMode && isset($item['assignee_statuses']) && is_array($item['assignee_statuses']) && count($item['assignee_statuses']) > 1): ?>
+            <div class="mt-2 flex flex-wrap gap-1.5">
+                <?php foreach ($item['assignee_statuses'] as $assigneeStatus): ?>
+                    <span class="px-2.5 py-1 rounded-full border border-slate-200 bg-slate-50 text-xs font-bold text-slate-700">
+                        <?php echo h(isset($assigneeStatus['name']) ? $assigneeStatus['name'] : '-'); ?> · <?php echo h(isset($assigneeStatus['status_label']) ? $assigneeStatus['status_label'] : '-'); ?>
+                    </span>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
         <div class="mt-1 text-sm text-slate-500"><?php echo $isMeetingTask ? '일시' : '마감'; ?>: <?php echo h($dueText); ?></div>
         <?php endif; ?>
         <?php if ($isConstructionSchedule): ?>
@@ -138,6 +152,9 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
             <span class="px-3 py-1 rounded-full border text-xs font-bold <?php echo h(cpms_tasks_badge_class('status', $statusKey)); ?>"><?php echo h(isset($item['display_status']) ? $item['display_status'] : cpms_tasks_status_label(isset($item['status']) ? $item['status'] : 'pending')); ?></span>
         </div>
         <div class="mt-2 flex flex-wrap gap-2">
+            <?php if ($hasTransferRequest): ?>
+                <span class="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-xs font-extrabold">업무담당자 변경요청</span>
+            <?php endif; ?>
             <?php if (!$requestedMode && isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
                 <span class="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">[파일첨부되어있음]</span>
             <?php endif; ?>
@@ -157,7 +174,7 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
                 </form>
                 <button type="button" data-meeting-unavailable-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-bold">참석불가능</button>
             <?php endif; ?>
-            <?php if (!$isMeetingTask && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && isset($item['status']) && (string)$item['status'] === 'pending'): ?>
+            <?php if (!$hasTransferRequest && !$isMeetingTask && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && isset($item['status']) && (string)$item['status'] === 'pending'): ?>
                 <form method="post" action="?r=task_progress" class="inline" referrerpolicy="origin">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
@@ -166,7 +183,7 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
                     <button type="submit" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">대기</button>
                 </form>
             <?php endif; ?>
-            <?php if (($canCompleteMeeting || !$isMeetingTask) && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('completion_pending', 'done', 'cancelled'), true)): ?>
+            <?php if (!$hasTransferRequest && ($canCompleteMeeting || !$isMeetingTask) && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('completion_pending', 'done', 'cancelled'), true)): ?>
                 <button type="button" data-task-complete-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">완료</button>
             <?php endif; ?>
             <?php if ($canEditDue && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
@@ -180,9 +197,17 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
-                    <button type="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">완료 승인</button>
+                    <button type="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold"><?php echo isset($item['assignee_count']) && (int)$item['assignee_count'] > 1 ? '전체 완료 승인' : '완료 승인'; ?></button>
                 </form>
                 <button type="button" data-task-completion-reject-open data-task-id="<?php echo (int)$item['source_id']; ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-bold">반려</button>
+            <?php endif; ?>
+            <?php if ($canApproveTransfer && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
+                <form method="post" action="?r=tasks/transfer_approve" class="inline">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)$item['source_id']; ?>">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <button type="submit" class="px-3 py-2 rounded-xl bg-amber-500 text-white text-sm font-bold">담당자 변경 승인</button>
+                </form>
             <?php endif; ?>
         </div>
     </div>
@@ -298,7 +323,8 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
     $canDrag = isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1
         && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId;
     $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
-    $canStatusAction = $canDrag && !$isMeetingTask;
+    $hasTransferRequest = cpms_tasks_has_transfer_request($item);
+    $canStatusAction = $canDrag && !$isMeetingTask && !$hasTransferRequest;
     $personLabel = '요청자';
     $personName = isset($item['requester_name']) ? $item['requester_name'] : '-';
     if ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($item) === (int)$currentEmployeeId && isset($item['assignee_name']) && trim((string)$item['assignee_name']) !== '') {
@@ -324,6 +350,9 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
         <div class="mt-2 text-sm text-slate-600"><?php echo h($personLabel); ?>: <?php echo h($personName); ?></div>
         <div class="mt-1 text-sm text-slate-500">마감: <?php echo h($dueText); ?></div>
         <div class="mt-3 flex flex-wrap gap-2" data-kanban-flags>
+            <?php if ($hasTransferRequest): ?>
+                <span class="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-xs font-extrabold">담당자 변경 승인대기</span>
+            <?php endif; ?>
             <?php if ($isUrgent): ?>
                 <span class="px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-extrabold" data-kanban-urgent-chip>긴급</span>
             <?php endif; ?>
@@ -385,7 +414,12 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $retu
     }
     $currentStatus = isset($item['status']) ? (string)$item['status'] : '';
     $isRequester = ((int)$currentEmployeeId > 0 && cpms_tasks_effective_requester_employee_id($item) === (int)$currentEmployeeId);
-    $canRequesterAct = $isRequester && $currentStatus === 'completion_pending';
+    $completionGroupReady = isset($item['completion_group_ready'])
+        ? (int)$item['completion_group_ready'] === 1
+        : $currentStatus === 'completion_pending';
+    $canRequesterAct = $isRequester && $completionGroupReady;
+    $hasTransferRequest = cpms_tasks_has_transfer_request($item);
+    $canApproveTransfer = cpms_tasks_can_approve_transfer_request($item, $currentEmployeeId);
     $canEditDue = $isRequester && !in_array($currentStatus, array('done', 'cancelled'), true);
     $canEditContent = $isRequester && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !in_array($currentStatus, array('done', 'cancelled'), true);
     ?>
@@ -399,8 +433,28 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $retu
             <div class="mt-2 text-sm text-slate-600">현장명: <?php echo h($item['project_name']); ?></div>
         <?php endif; ?>
         <div class="mt-2 text-sm text-slate-600">담당자: <?php echo h(isset($item['assignee_name']) && trim((string)$item['assignee_name']) !== '' ? $item['assignee_name'] : '-'); ?></div>
+        <?php if (isset($item['assignee_statuses']) && is_array($item['assignee_statuses']) && count($item['assignee_statuses']) > 1): ?>
+            <div class="mt-2 flex flex-wrap gap-1.5">
+                <?php foreach ($item['assignee_statuses'] as $assigneeStatus): ?>
+                    <span class="px-2.5 py-1 rounded-full border border-slate-200 bg-slate-50 text-xs font-bold text-slate-700">
+                        <?php echo h(isset($assigneeStatus['name']) ? $assigneeStatus['name'] : '-'); ?> · <?php echo h(isset($assigneeStatus['status_label']) ? $assigneeStatus['status_label'] : '-'); ?>
+                    </span>
+                <?php endforeach; ?>
+            </div>
+            <?php if (!$completionGroupReady && isset($item['completion_pending_count']) && (int)$item['completion_pending_count'] > 0): ?>
+                <div class="mt-2 text-xs font-extrabold text-amber-700">전원이 완료 대기 상태가 되면 전체 완료 승인이 가능합니다. (<?php echo (int)$item['completion_pending_count']; ?>/<?php echo (int)(isset($item['group_active_count']) ? $item['group_active_count'] : count($item['assignee_statuses'])); ?>)</div>
+            <?php endif; ?>
+        <?php endif; ?>
+        <?php if ($hasTransferRequest): ?>
+            <div class="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">
+                변경 요청: <?php echo h(isset($item['transfer_requested_by_name']) && trim((string)$item['transfer_requested_by_name']) !== '' ? $item['transfer_requested_by_name'] : (isset($item['assignee_name']) ? $item['assignee_name'] : '-')); ?> → <?php echo h(isset($item['transfer_request_assignee_name']) ? $item['transfer_request_assignee_name'] : '-'); ?>
+            </div>
+        <?php endif; ?>
         <div class="mt-1 text-sm text-slate-500">마감: <?php echo h($dueText); ?></div>
         <div class="mt-3 flex flex-wrap gap-2">
+            <?php if ($hasTransferRequest): ?>
+                <span class="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-xs font-extrabold">업무담당자 변경요청</span>
+            <?php endif; ?>
             <?php if ($isUrgent): ?>
                 <span class="px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200 text-xs font-extrabold">긴급</span>
             <?php endif; ?>
@@ -425,9 +479,17 @@ function cpms_render_requested_task_kanban_card($item, $currentEmployeeId, $retu
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" value="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
-                    <button type="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-extrabold">완료 승인</button>
+                    <button type="submit" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-extrabold"><?php echo isset($item['assignee_count']) && (int)$item['assignee_count'] > 1 ? '전체 완료 승인' : '완료 승인'; ?></button>
                 </form>
                 <button type="button" data-task-completion-reject-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" data-task-due-date="<?php echo h(isset($item['due_date']) ? $item['due_date'] : ''); ?>" data-task-due-time="<?php echo h(isset($item['due_time']) ? substr((string)$item['due_time'], 0, 5) : '18:00'); ?>" class="px-3 py-2 rounded-xl bg-rose-600 text-white text-sm font-extrabold">반려</button>
+            <?php endif; ?>
+            <?php if ($canApproveTransfer): ?>
+                <form method="post" action="?r=tasks/transfer_approve" class="inline-flex">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="task_id" value="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>">
+                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                    <button type="submit" class="px-3 py-2 rounded-xl bg-amber-500 text-white text-sm font-extrabold">담당자 변경 승인</button>
+                </form>
             <?php endif; ?>
         </div>
     </article>
@@ -539,6 +601,7 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
     $isDirectTask = isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1;
     $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
     $isAssignedToCurrent = (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId;
+    $hasTransferRequest = cpms_tasks_has_transfer_request($item);
     $canRespondMeeting = $isMeetingTask
         && $isAssignedToCurrent
         && (!isset($item['requester_employee_id']) || (int)$item['requester_employee_id'] !== (int)$currentEmployeeId)
@@ -547,11 +610,13 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
         && $isAssignedToCurrent
         && in_array(isset($item['status']) ? (string)$item['status'] : '', array('meeting_available', 'meeting_unavailable'), true);
     $canStartTask = !$isMeetingTask
+        && !$hasTransferRequest
         && $isDirectTask
         && $isAssignedToCurrent
         && isset($item['status'])
         && (string)$item['status'] === 'pending';
     $canCompleteTask = ($canCompleteMeeting || !$isMeetingTask)
+        && !$hasTransferRequest
         && $isDirectTask
         && $isAssignedToCurrent
         && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('completion_pending', 'done', 'cancelled'), true);
@@ -572,9 +637,14 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
         <?php else: ?>
             <div class="mt-2 text-sm text-slate-500">공정일: <?php echo h(cpms_mobile_task_due_text($item)); ?></div>
         <?php endif; ?>
-        <?php if (isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
+        <?php if ($hasTransferRequest || (isset($item['request_file_count']) && (int)$item['request_file_count'] > 0)): ?>
             <div class="mt-3">
-                <span class="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">[파일첨부되어있음]</span>
+                <?php if ($hasTransferRequest): ?>
+                    <span class="px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-300 text-xs font-extrabold">담당자 변경 승인대기</span>
+                <?php endif; ?>
+                <?php if (isset($item['request_file_count']) && (int)$item['request_file_count'] > 0): ?>
+                    <span class="px-2.5 py-1 rounded-full bg-sky-50 text-sky-700 border border-sky-200 text-xs font-extrabold">[파일첨부되어있음]</span>
+                <?php endif; ?>
             </div>
         <?php endif; ?>
         <div class="mt-4 flex flex-wrap gap-2">

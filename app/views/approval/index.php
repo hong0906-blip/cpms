@@ -73,6 +73,24 @@ if (!function_exists('approval_index_scalar_text')) {
     }
 }
 
+if (!function_exists('approval_index_is_final_ceo_decision')) {
+    function approval_index_is_final_ceo_decision($row)
+    {
+        $docStatus = strtoupper(approval_index_scalar_text($row, 'doc_status', ''));
+        $myLineStatus = strtoupper(approval_index_scalar_text($row, 'my_line_status', ''));
+        $currentRole = approval_index_scalar_text($row, 'current_role', '');
+        $currentLineOrder = (int)approval_index_scalar_text($row, 'current_line_order', '0');
+        $finalLineOrder = (int)approval_index_scalar_text($row, 'final_line_order', '0');
+
+        return $docStatus === 'PENDING'
+            && $myLineStatus === 'PENDING'
+            && approval_role_is_ceo($currentRole)
+            && $currentLineOrder > 0
+            && $finalLineOrder > 0
+            && $currentLineOrder === $finalLineOrder;
+    }
+}
+
 if (!function_exists('approval_index_debug_shutdown')) {
     function approval_index_debug_shutdown()
     {
@@ -142,9 +160,11 @@ $debugApprovalRequested = isset($_GET['debug_approval']) && (string)$_GET['debug
 
 $txt = array(
     'page_active' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%A7%84%ED%96%89%EB%AC%B8%EC%84%9C'),
+    'page_rejected' => urldecode('%EB%B0%98%EB%A0%A4%EB%AC%B8%EC%84%9C%ED%95%A8'),
     'page_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C'),
     'page_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C'),
     'desc_active' => '',
+    'desc_rejected' => urldecode('%EB%B0%98%EB%A0%A4%EB%90%9C%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AC%B8%EC%84%9C%EB%A7%8C%20%EB%AA%A8%EC%95%84%20%ED%99%95%EC%9D%B8%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
     'desc_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%90%9C%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AC%B8%EC%84%9C%EB%A7%8C%20%EB%AA%A8%EC%95%84%20%ED%99%95%EC%9D%B8%ED%95%98%EA%B3%A0%20%ED%95%84%EC%9A%94%20%EC%8B%9C%20%EC%82%AD%EC%A0%9C%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
     'desc_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%EB%A5%BC%20%EC%A2%85%EB%A5%98%2F%EC%A0%9C%EB%AA%A9%2F%EC%9E%91%EC%84%B1%EC%9E%90%2F%EC%9E%91%EC%84%B1%EC%9D%BC%EC%9E%90%20%EA%B8%B0%EC%A4%80%EC%9C%BC%EB%A1%9C%20%EA%B2%80%EC%83%89%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
     'db_setup' => urldecode('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20DB%20%EC%84%A4%EC%B9%98%2F%ED%99%95%EC%9D%B8'),
@@ -155,6 +175,7 @@ $txt = array(
     'create_unused_leave_notice' => urldecode('%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EC%B4%89%EA%B5%AC%EC%84%9C'),
     'create_unused_leave_plan' => urldecode('%EB%AF%B8%EC%82%AC%EC%9A%A9%20%EC%97%B0%EC%B0%A8%20%EC%82%AC%EC%9A%A9%EA%B3%84%ED%9A%8D%EC%84%9C'),
     'view_active' => urldecode('%EC%A7%84%ED%96%89%EB%AC%B8%EC%84%9C%20%EB%B3%B4%EA%B8%B0'),
+    'view_rejected' => urldecode('%EB%B0%98%EB%A0%A4%EB%AC%B8%EC%84%9C%ED%95%A8%20%EB%B3%B4%EA%B8%B0'),
     'view_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C%20%EB%B3%B4%EA%B8%B0'),
     'view_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%20%EB%B3%B4%EA%B8%B0'),
     'filter_doc_type' => urldecode('%EB%AC%B8%EC%84%9C%20%EC%A2%85%EB%A5%98'),
@@ -170,6 +191,7 @@ $txt = array(
     'card_requested' => urldecode('%EB%82%98%EC%9D%98%20%EC%9A%94%EC%B2%AD'),
     'card_progress' => urldecode('%EC%A7%84%ED%96%89%EC%A4%91'),
     'card_rejected' => urldecode('%EB%B0%98%EB%A0%A4'),
+    'card_my_rejected' => urldecode('%EB%82%B4%EA%B0%80%20%EC%9E%91%EC%84%B1%ED%95%9C%20%EB%B0%98%EB%A0%A4%EB%AC%B8%EC%84%9C'),
     'card_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C'),
     'card_my_cancelled' => urldecode('%EB%82%B4%EA%B0%80%20%EC%B7%A8%EC%86%8C%ED%95%9C%20%EB%AC%B8%EC%84%9C'),
     'card_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%AC%B8%EC%84%9C'),
@@ -187,10 +209,13 @@ $txt = array(
     'table_actions' => urldecode('%EC%95%A1%EC%85%98'),
     'detail' => urldecode('%EC%83%81%EC%84%B8%EB%B3%B4%EA%B8%B0'),
     'cancel' => urldecode('%EC%9A%94%EC%B2%AD%EC%B7%A8%EC%86%8C'),
+    'cancel_approved_leave' => urldecode('%EC%8A%B9%EC%9D%B8%EC%B7%A8%EC%86%8C'),
     'delete' => urldecode('%EC%82%AD%EC%A0%9C'),
     'confirm_cancel' => urldecode('%EC%9D%B4%20%EB%AC%B8%EC%84%9C%20%EC%9A%94%EC%B2%AD%EC%9D%84%20%EC%B7%A8%EC%86%8C%ED%95%A0%EA%B9%8C%EC%9A%94%3F'),
+    'confirm_cancel_approved_leave' => urldecode('%EC%9D%B4%20%ED%9C%B4%EA%B0%80%EA%B3%84%EC%9D%98%20%EC%8A%B9%EC%9D%B8%EC%9D%84%20%EC%B7%A8%EC%86%8C%ED%95%98%EA%B3%A0%20%EC%B0%A8%EA%B0%90%EB%90%9C%20%ED%9C%B4%EA%B0%80%EB%A5%BC%20%EB%B3%B5%EA%B5%AC%ED%95%A0%EA%B9%8C%EC%9A%94%3F'),
     'confirm_delete' => urldecode('%EC%9D%B4%20%EC%B7%A8%EC%86%8C%20%EB%AC%B8%EC%84%9C%EB%A5%BC%20%EC%82%AD%EC%A0%9C%ED%95%A0%EA%B9%8C%EC%9A%94%3F'),
     'empty_active' => urldecode('%EC%A7%84%ED%96%89%EC%A4%91%EC%9D%B8%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
+    'empty_rejected' => urldecode('%EB%B0%98%EB%A0%A4%EB%90%9C%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
     'empty_cancelled' => urldecode('%EC%B7%A8%EC%86%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'),
     'empty_completed' => urldecode('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.')
 );
@@ -199,11 +224,12 @@ $view = isset($_GET['view']) ? trim((string)$_GET['view']) : 'active';
 if (isset($_GET['show_cancelled']) && (string)$_GET['show_cancelled'] === '1') {
     $view = 'cancelled';
 }
-if (!in_array($view, array('active', 'cancelled', 'completed'), true)) {
+if (!in_array($view, array('active', 'rejected', 'cancelled', 'completed'), true)) {
     $view = 'active';
 }
 $isCompletedAllViewer = ($view === 'completed' && approval_can_view_all_completed_documents($pdo, $u));
-$isActiveAllViewer = ($view === 'active' && approval_can_view_all_active_documents($pdo, $u));
+$isActiveAllViewer = (in_array($view, array('active', 'rejected'), true) && approval_can_view_all_active_documents($pdo, $u));
+$canCancelApprovedLeave = approval_user_can_cancel_approved_leave($pdo, $u);
 $debugApproval = ($debugApprovalRequested && $view === 'active' && ($isAdmin || $isActiveAllViewer));
 
 if ($debugApproval) {
@@ -226,7 +252,11 @@ $queryFilter = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
 $pageTitle = $txt['page_active'];
 $pageDesc = $txt['desc_active'];
 $emptyMessage = $txt['empty_active'];
-if ($view === 'cancelled') {
+if ($view === 'rejected') {
+    $pageTitle = $txt['page_rejected'];
+    $pageDesc = $txt['desc_rejected'];
+    $emptyMessage = $txt['empty_rejected'];
+} else if ($view === 'cancelled') {
     $pageTitle = $txt['page_cancelled'];
     $pageDesc = $txt['desc_cancelled'];
     $emptyMessage = $txt['empty_cancelled'];
@@ -261,21 +291,25 @@ $debugInfo = array(
 
 $docHasCreatedByEmail = false;
 $referenceTableExists = false;
+$approvalLogTableExists = false;
 if ($pdo) {
     $docHasCreatedByEmail = approval_table_column_exists($pdo, 'cpms_approval_documents', 'created_by_email');
     $referenceTableExists = approval_table_exists($pdo, 'cpms_approval_references');
+    $approvalLogTableExists = approval_table_exists($pdo, 'cpms_approval_logs');
 }
 
 if ($pdo) {
     $params = array();
     $where = array();
 
-    if ($view === 'cancelled') {
+    if ($view === 'rejected') {
+        $where[] = "UPPER(COALESCE(d.doc_status, '')) = 'REJECTED'";
+    } else if ($view === 'cancelled') {
         $where[] = "UPPER(COALESCE(d.doc_status, '')) = 'CANCELLED'";
     } else if ($view === 'completed') {
         $where[] = "UPPER(COALESCE(d.doc_status, '')) IN ('APPROVED', 'COMPLETED')";
     } else {
-        $where[] = "UPPER(COALESCE(d.doc_status, '')) NOT IN ('CANCELLED', 'APPROVED', 'COMPLETED')";
+        $where[] = "UPPER(COALESCE(d.doc_status, '')) IN ('PENDING', 'DRAFT')";
     }
 
     $ownerParts = array();
@@ -361,6 +395,12 @@ if ($pdo) {
     if ($isActiveAllViewer) {
         $relatedParts[] = '1 = 1';
     }
+    if ($view === 'completed' && $canCancelApprovedLeave && !$isCompletedAllViewer) {
+        $relatedParts[] = "LOWER(TRIM(COALESCE(d.doc_type, ''))) = 'leave'";
+    }
+    if ($view === 'cancelled' && $canCancelApprovedLeave && $approvalLogTableExists) {
+        $relatedParts[] = "(LOWER(TRIM(COALESCE(d.doc_type, ''))) = 'leave' AND EXISTS (SELECT 1 FROM cpms_approval_logs cancel_log WHERE cancel_log.document_id=d.id AND cancel_log.action_type='APPROVED_LEAVE_CANCEL'))";
+    }
     if (count($ownerParts) > 0) {
         $relatedParts[] = '(' . implode(' OR ', $ownerParts) . ')';
     }
@@ -438,8 +478,18 @@ if ($pdo) {
                       FROM cpms_approval_lines cur
                      WHERE cur.document_id = d.id
                        AND cur.line_status = 'PENDING'
+                      ORDER BY cur.line_order ASC
+                      LIMIT 1) AS current_role,
+                   (SELECT cur.line_order
+                      FROM cpms_approval_lines cur
+                     WHERE cur.document_id = d.id
+                       AND cur.line_status = 'PENDING'
                      ORDER BY cur.line_order ASC
-                     LIMIT 1) AS current_role
+                     LIMIT 1) AS current_line_order,
+                   (SELECT MAX(fin.line_order)
+                      FROM cpms_approval_lines fin
+                     WHERE fin.document_id = d.id
+                       AND UPPER(COALESCE(fin.line_status, '')) NOT IN ('DELEGATED', 'SKIPPED')) AS final_line_order
               FROM cpms_approval_documents d";
     if (count($where) > 0) {
         $sql .= " WHERE " . implode(' AND ', $where);
@@ -470,19 +520,32 @@ if ($pdo) {
     }
 }
 
-$ownerFallbackNeeded = ($view === 'active' && !$isActiveAllViewer);
+$ownerFallbackNeeded = (in_array($view, array('active', 'rejected'), true) && !$isActiveAllViewer);
 if ($pdo && $ownerFallbackNeeded && $debugInfo['sql_status'] === 'success') {
     try {
+        $fallbackStatusWhere = ($view === 'rejected')
+            ? "UPPER(COALESCE(d.doc_status, '')) = 'REJECTED'"
+            : "UPPER(COALESCE(d.doc_status, '')) IN ('PENDING', 'DRAFT')";
         $fallbackSql = "SELECT d.*,
                                NULL AS my_line_status,
                                (SELECT cur.role_type
                                   FROM cpms_approval_lines cur
                                  WHERE cur.document_id = d.id
                                    AND cur.line_status = 'PENDING'
+                                  ORDER BY cur.line_order ASC
+                                  LIMIT 1) AS current_role,
+                               (SELECT cur.line_order
+                                  FROM cpms_approval_lines cur
+                                 WHERE cur.document_id = d.id
+                                   AND cur.line_status = 'PENDING'
                                  ORDER BY cur.line_order ASC
-                                 LIMIT 1) AS current_role
+                                 LIMIT 1) AS current_line_order,
+                               (SELECT MAX(fin.line_order)
+                                  FROM cpms_approval_lines fin
+                                 WHERE fin.document_id = d.id
+                                   AND UPPER(COALESCE(fin.line_status, '')) NOT IN ('DELEGATED', 'SKIPPED')) AS final_line_order
                           FROM cpms_approval_documents d
-                         WHERE UPPER(COALESCE(d.doc_status, '')) NOT IN ('CANCELLED', 'APPROVED', 'COMPLETED')
+                         WHERE " . $fallbackStatusWhere . "
                          ORDER BY d.created_at DESC, d.id DESC";
         $fallbackSt = $pdo->query($fallbackSql);
         $fallbackRows = $fallbackSt ? $fallbackSt->fetchAll(PDO::FETCH_ASSOC) : array();
@@ -519,7 +582,19 @@ if ($pdo && $ownerFallbackNeeded && $debugInfo['sql_status'] === 'success') {
 
 $debugInfo['final_row_count'] = count($rows);
 
-if ($view === 'cancelled') {
+if ($view === 'rejected') {
+    $mineRejected = 0;
+    for ($i = 0; $i < count($rows); $i++) {
+        $counterRow = isset($rows[$i]) && is_array($rows[$i]) ? $rows[$i] : array();
+        if (approval_is_document_owner($pdo, $counterRow, $u)) {
+            $mineRejected++;
+        }
+    }
+    $countCards = array(
+        array('label' => $txt['card_rejected'], 'count' => count($rows)),
+        array('label' => $txt['card_my_rejected'], 'count' => $mineRejected)
+    );
+} else if ($view === 'cancelled') {
     $mineCancelled = 0;
     for ($i = 0; $i < count($rows); $i++) {
         $counterRow = isset($rows[$i]) && is_array($rows[$i]) ? $rows[$i] : array();
@@ -552,7 +627,6 @@ if ($view === 'cancelled') {
     $recv = 0;
     $mine = 0;
     $prog = 0;
-    $rej = 0;
     for ($i = 0; $i < count($rows); $i++) {
         $counterRow = isset($rows[$i]) && is_array($rows[$i]) ? $rows[$i] : array();
         if (approval_is_document_owner($pdo, $counterRow, $u)) {
@@ -565,15 +639,11 @@ if ($view === 'cancelled') {
         if ($status === 'PENDING' || $status === 'DRAFT') {
             $prog++;
         }
-        if ($status === 'REJECTED') {
-            $rej++;
-        }
     }
     $countCards = array(
         array('label' => $txt['card_received'], 'count' => $recv),
         array('label' => $txt['card_requested'], 'count' => $mine),
-        array('label' => $txt['card_progress'], 'count' => $prog),
-        array('label' => $txt['card_rejected'], 'count' => $rej)
+        array('label' => $txt['card_progress'], 'count' => $prog)
     );
 }
 $debugInfo['progress_count'] = ($view === 'active' && isset($prog)) ? (int)$prog : 0;
@@ -703,6 +773,7 @@ $debugFileMtimeText = $debugFileMtime > 0 ? date('Y-m-d H:i:s', $debugFileMtime)
 
         <div class="flex flex-wrap gap-2 mt-5">
             <a href="?r=approval_home&view=active" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl transition <?php echo approval_index_tab_class($view, 'active'); ?>"><?php echo h($txt['view_active']); ?></a>
+            <a href="?r=approval_home&view=rejected" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl transition <?php echo approval_index_tab_class($view, 'rejected'); ?>"><?php echo h($txt['view_rejected']); ?></a>
             <a href="?r=approval_home&view=cancelled" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl transition <?php echo approval_index_tab_class($view, 'cancelled'); ?>"><?php echo h($txt['view_cancelled']); ?></a>
             <a href="?r=approval_home&view=completed" class="inline-flex items-center justify-center whitespace-nowrap shrink-0 min-w-max px-4 py-2 rounded-xl transition <?php echo approval_index_tab_class($view, 'completed'); ?>"><?php echo h($txt['view_completed']); ?></a>
         </div>
@@ -788,7 +859,9 @@ $debugFileMtimeText = $debugFileMtime > 0 ? date('Y-m-d H:i:s', $debugFileMtime)
                             $mobileTitle = approval_index_scalar_text($row, 'title', '');
                             $mobileCreatedByName = approval_index_scalar_text($row, 'created_by_name', '');
                             $mobileCreatedAt = approval_index_scalar_text($row, 'created_at', '');
-                            $canMobileDecide = ($mobileDocType === 'leave' && strtoupper($docStatus) === 'PENDING' && strtoupper($myLineStatus) === 'PENDING');
+                            $isFinalCeoDecision = approval_index_is_final_ceo_decision($row);
+                            $canMobileDecide = (($mobileDocType === 'leave' && strtoupper($docStatus) === 'PENDING' && strtoupper($myLineStatus) === 'PENDING') || $isFinalCeoDecision);
+                            $canMobileCancelApprovedLeave = approval_can_cancel_approved_leave($pdo, $row, $u);
                             if ($debugApproval) {
                                 $GLOBALS['cpms_approval_debug_render_state'] = array(
                                     'document_id' => $rowId,
@@ -831,7 +904,14 @@ $debugFileMtimeText = $debugFileMtime > 0 ? date('Y-m-d H:i:s', $debugFileMtime)
                                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                             <input type="hidden" name="id" value="<?php echo $rowId; ?>">
                                             <input type="hidden" name="action" value="approve">
-                                            <button type="submit" class="w-full px-3 py-3 rounded-xl bg-emerald-600 text-white font-extrabold">승인</button>
+                                            <button type="submit" class="w-full px-3 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"<?php echo $isFinalCeoDecision ? ' onclick="return confirm(\'최종 승인하시겠습니까?\');"' : ''; ?>>승인</button>
+                                        </form>
+                                    <?php } ?>
+                                    <?php if ($canMobileCancelApprovedLeave) { ?>
+                                        <form method="post" action="?r=approval_cancel" class="flex-1" onsubmit="return confirm('<?php echo h($txt['confirm_cancel_approved_leave']); ?>');">
+                                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                            <input type="hidden" name="id" value="<?php echo $rowId; ?>">
+                                            <button type="submit" class="w-full px-3 py-3 rounded-xl bg-amber-50 text-amber-800 font-extrabold"><?php echo h($txt['cancel_approved_leave']); ?></button>
                                         </form>
                                     <?php } ?>
                                 </div>
@@ -917,14 +997,21 @@ $debugFileMtimeText = $debugFileMtime > 0 ? date('Y-m-d H:i:s', $debugFileMtime)
                                         <a href="?r=approval_detail&id=<?php echo $rowId; ?>" class="inline-flex items-center px-3 py-2 rounded-xl bg-indigo-50 text-indigo-700 font-bold"><?php echo h($txt['detail']); ?></a>
                                         <?php if (approval_is_document_owner($pdo, $row, $u) && approval_can_cancel_document($row)) { ?>
                                             <form method="post" action="?r=approval_cancel" onsubmit="return confirm('<?php echo h($txt['confirm_cancel']); ?>');">
-                                                <?php echo csrf_field(); ?>
+                                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                                 <input type="hidden" name="id" value="<?php echo $rowId; ?>">
                                                 <button type="submit" class="inline-flex items-center px-3 py-2 rounded-xl bg-rose-50 text-rose-700 font-bold"><?php echo h($txt['cancel']); ?></button>
                                             </form>
                                         <?php } ?>
+                                        <?php if (approval_can_cancel_approved_leave($pdo, $row, $u)) { ?>
+                                            <form method="post" action="?r=approval_cancel" onsubmit="return confirm('<?php echo h($txt['confirm_cancel_approved_leave']); ?>');">
+                                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                                <input type="hidden" name="id" value="<?php echo $rowId; ?>">
+                                                <button type="submit" class="inline-flex items-center px-3 py-2 rounded-xl bg-amber-50 text-amber-800 font-bold"><?php echo h($txt['cancel_approved_leave']); ?></button>
+                                            </form>
+                                        <?php } ?>
                                         <?php if (approval_can_delete_document($pdo, $row, $u)) { ?>
                                             <form method="post" action="?r=approval_delete" onsubmit="return confirm('<?php echo h($txt['confirm_delete']); ?>');">
-                                                <?php echo csrf_field(); ?>
+                                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                                 <input type="hidden" name="id" value="<?php echo $rowId; ?>">
                                                 <button type="submit" class="inline-flex items-center px-3 py-2 rounded-xl bg-gray-100 text-gray-800 font-bold"><?php echo h($txt['delete']); ?></button>
                                             </form>

@@ -5,6 +5,8 @@ require_once __DIR__ . '/_common.php';
 require_once __DIR__ . '/template_helpers.php';
 require_once __DIR__ . '/notification_helpers.php';
 require_once __DIR__ . '/leave_balance_helpers.php';
+require_once __DIR__ . '/../common/chat_notification_helpers.php';
+require_once __DIR__ . '/../common/company_chat_daily_helpers.php';
 require_once __DIR__ . '/../../services/ApprovalPdfService.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -182,6 +184,13 @@ try {
     }
 
     $pdo->commit();
+    if ($action === 'approve' && isset($docStatus) && $docStatus === 'APPROVED' && $docType === 'leave' && function_exists('cpms_company_chat_queue_daily_leave_addition')) {
+        try {
+            cpms_company_chat_queue_daily_leave_addition($pdo, $id);
+        } catch (Exception $leaveAdditionException) {
+            error_log('[approval_decide] daily leave addition queue failed: ' . $leaveAdditionException->getMessage());
+        }
+    }
     if ($action === 'approve' && isset($docStatus) && $docStatus === 'APPROVED') {
         try {
             cpms_approval_pdf_upload_completed_pdf($pdo, $id, $u);

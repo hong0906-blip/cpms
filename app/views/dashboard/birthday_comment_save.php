@@ -59,7 +59,7 @@ foreach ($todayBirthdays as $todayBirthday) {
     }
 }
 if (!is_array($birthdayRecipient)) {
-    cpms_birthday_comment_redirect($birthdayCommentReturnUrl, 'error', '오늘 생일자인 직원을 찾을 수 없습니다.');
+    cpms_birthday_comment_redirect($birthdayCommentReturnUrl, 'error', '오늘 축하할 생일자인 직원을 찾을 수 없습니다.');
 }
 if (!cpms_dashboard_birthday_comment_schema($pdo)) {
     cpms_birthday_comment_redirect($birthdayCommentReturnUrl, 'error', '댓글 저장 공간을 준비하지 못했습니다.');

@@ -103,29 +103,50 @@ if (approval_table_exists($pdo, 'cpms_approval_logs')) {
     }
 }
 $canCancel = approval_is_document_owner($pdo, $d, $u) && approval_can_cancel_document($d);
+$canCancelApprovedLeave = approval_can_cancel_approved_leave($pdo, $d, $u);
 $canDelete = approval_can_delete_document($pdo, $d, $u);
 
 $uid = approval_current_employee_id($pdo, $u);
 $userEmail = approval_current_user_email($u);
 $userName = approval_current_user_name($u);
 $myPendingLine = null;
+$finalActionLineOrder = 0;
 for ($i = 0; $i < count($lines); $i++) {
     $line = $lines[$i];
+    $lineStatus = isset($line['line_status']) ? strtoupper(trim((string)$line['line_status'])) : '';
+    $isDelegated = ($lineStatus === 'DELEGATED') || (isset($line['is_delegated']) && (int)$line['is_delegated'] === 1);
+    $isNonActionable = ($isDelegated || $lineStatus === 'SKIPPED');
+    $lineOrder = isset($line['line_order']) ? (int)$line['line_order'] : 0;
+    if (!$isNonActionable && $lineOrder > $finalActionLineOrder) {
+        $finalActionLineOrder = $lineOrder;
+    }
     $isPending = (isset($line['line_status']) && $line['line_status'] === 'PENDING');
     $isMineById = ($uid > 0 && isset($line['approver_id']) && (int)$line['approver_id'] === $uid);
     $isMineByEmail = ($userEmail !== '' && isset($line['approver_email']) && strtolower(trim((string)$line['approver_email'])) === strtolower($userEmail));
     $isMineByName = ($userName !== '' && isset($line['approver_name']) && trim((string)$line['approver_name']) === $userName);
-    $isDelegated = (isset($line['line_status']) && $line['line_status'] === 'DELEGATED') || (isset($line['is_delegated']) && (int)$line['is_delegated'] === 1);
-    if ($isPending && !$isDelegated && ($isMineById || $isMineByEmail || $isMineByName)) {
+    if ($myPendingLine === null && $isPending && !$isDelegated && ($isMineById || $isMineByEmail || $isMineByName)) {
         $myPendingLine = $line;
-        break;
     }
 }
 $canDecide = (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && $myPendingLine);
+$myPendingLineOrder = ($myPendingLine && isset($myPendingLine['line_order'])) ? (int)$myPendingLine['line_order'] : 0;
+$myPendingRole = ($myPendingLine && isset($myPendingLine['role_type'])) ? $myPendingLine['role_type'] : '';
+$isFinalCeoDecision = ($canDecide
+    && approval_role_is_ceo($myPendingRole)
+    && $myPendingLineOrder > 0
+    && $myPendingLineOrder === $finalActionLineOrder);
 $isRecipientEditablePlan = ($canDecide && isset($d['doc_type']) && $d['doc_type'] === 'unused_leave_plan');
 $detailDocType = isset($d['doc_type']) ? strtolower(trim((string)$d['doc_type'])) : '';
 $approvalCommentsEnabled = ($detailDocType === 'leave' || approval_is_proposal_doc_type($detailDocType));
 $approvalComments = array();
+$leaveRestoreLog = null;
+for ($restoreIndex = count($approvalLogs) - 1; $restoreIndex >= 0; $restoreIndex--) {
+    $restoreActionType = isset($approvalLogs[$restoreIndex]['action_type']) ? strtoupper(trim((string)$approvalLogs[$restoreIndex]['action_type'])) : '';
+    if ($restoreActionType === 'LEAVE_RESTORE') {
+        $leaveRestoreLog = $approvalLogs[$restoreIndex];
+        break;
+    }
+}
 if ($approvalCommentsEnabled) {
     for ($ci = 0; $ci < count($approvalLogs); $ci++) {
         $log = $approvalLogs[$ci];
@@ -160,6 +181,13 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
                 <button class="px-3 py-2 bg-rose-100 rounded"><?php echo h(approval_ko('%EC%9A%94%EC%B2%AD%EC%B7%A8%EC%86%8C')); ?></button>
             </form>
         <?php } ?>
+        <?php if ($canCancelApprovedLeave) { ?>
+            <form method="post" action="?r=approval_cancel" onsubmit="return confirm('<?php echo h(approval_ko('%EC%9D%B4%20%ED%9C%B4%EA%B0%80%EA%B3%84%EC%9D%98%20%EC%8A%B9%EC%9D%B8%EC%9D%84%20%EC%B7%A8%EC%86%8C%ED%95%98%EA%B3%A0%20%EC%B0%A8%EA%B0%90%EB%90%9C%20%ED%9C%B4%EA%B0%80%EB%A5%BC%20%EB%B3%B5%EA%B5%AC%ED%95%A0%EA%B9%8C%EC%9A%94%3F')); ?>');">
+                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
+                <button class="px-3 py-2 bg-amber-100 text-amber-900 rounded font-bold"><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%EC%B7%A8%EC%86%8C')); ?></button>
+            </form>
+        <?php } ?>
         <?php if ($canDelete) { ?>
             <form method="post" action="?r=approval_delete" onsubmit="return confirm('<?php echo h(approval_ko('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C%EB%A5%BC%20%EC%82%AD%EC%A0%9C%ED%95%A0%EA%B9%8C%EC%9A%94%3F')); ?>');">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -182,7 +210,7 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
     <?php echo cpms_approval_pdf_links_html($d); ?>
 
     <?php if (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && !$isRecipientEditablePlan) { ?>
-        <div class="no-print cpms-approval-decision-panel <?php echo (isset($d['doc_type']) && (string)$d['doc_type'] === 'leave') ? '' : 'cpms-mobile-hide'; ?> bg-white rounded-2xl border p-4">
+        <div class="no-print cpms-approval-decision-panel <?php echo ((isset($d['doc_type']) && (string)$d['doc_type'] === 'leave') || $isFinalCeoDecision) ? '' : 'cpms-mobile-hide'; ?> bg-white rounded-2xl border p-4">
             <?php if ($canDecide) { ?>
                 <div class="space-y-4">
                     <?php if ($approvalCommentsEnabled) { ?>
@@ -199,7 +227,7 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
                             <?php if ($approvalCommentsEnabled) { ?>
                                 <textarea name="approval_comment" rows="3" class="w-full border rounded-xl px-3 py-2" placeholder="<?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%20%EC%8B%9C%20%EB%82%A8%EA%B8%B8%20%EC%9D%98%EA%B2%AC%EC%9D%84%20%EC%9E%85%EB%A0%A5%ED%95%98%EC%84%B8%EC%9A%94.')); ?>"></textarea>
                             <?php } ?>
-                            <button type="submit" class="px-6 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%ED%95%98%EA%B8%B0')); ?></button>
+                            <button type="submit" class="px-6 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"<?php echo $isFinalCeoDecision ? ' onclick="return confirm(\'최종 승인하시겠습니까?\');"' : ''; ?>><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%ED%95%98%EA%B8%B0')); ?></button>
                         </form>
                         <form method="post" action="?r=approval_decide" class="flex flex-wrap gap-2 items-center">
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -360,6 +388,10 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
                                 $actionText = approval_ko('%EC%8A%B9%EC%9D%B8');
                             } else if ($actionType === 'REJECT') {
                                 $actionText = approval_ko('%EB%B0%98%EB%A0%A4');
+                            } else if ($actionType === 'APPROVED_LEAVE_CANCEL') {
+                                $actionText = approval_ko('%EC%8A%B9%EC%9D%B8%EC%B7%A8%EC%86%8C');
+                            } else if ($actionType === 'LEAVE_RESTORE') {
+                                $actionText = approval_ko('%ED%9C%B4%EA%B0%80%EB%B3%B5%EA%B5%AC');
                             }
                             $note = isset($log['action_note']) ? trim((string)$log['action_note']) : '';
                         ?>
@@ -383,13 +415,20 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
     ?>
         <div class="bg-white rounded-2xl border p-4 mt-3 no-print">
             <h3 class="font-extrabold"><?php echo h(approval_ko('%ED%9C%B4%EA%B0%80%20%EC%B0%A8%EA%B0%90')); ?></h3>
+            <?php if ($leaveRestoreLog) { ?>
+                <div class="mt-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                    <div class="font-extrabold"><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%20%EC%B7%A8%EC%86%8C%20%EB%B0%8F%20%ED%9C%B4%EA%B0%80%20%EB%B3%B5%EA%B5%AC%20%EC%99%84%EB%A3%8C')); ?></div>
+                    <div class="mt-1 text-sm"><?php echo h(isset($leaveRestoreLog['action_note']) ? $leaveRestoreLog['action_note'] : ''); ?></div>
+                    <div class="mt-1 text-xs"><?php echo h(isset($leaveRestoreLog['created_at']) ? $leaveRestoreLog['created_at'] : ''); ?></div>
+                </div>
+            <?php } ?>
             <?php if ($dr) { ?>
-                <div><?php echo h(approval_ko('%ED%9C%B4%EA%B0%80%20%EC%B0%A8%EA%B0%90%20%EC%99%84%EB%A3%8C')); ?></div>
+                <div><?php echo h($leaveRestoreLog ? approval_ko('%EA%B8%B0%EC%A1%B4%20%ED%9C%B4%EA%B0%80%20%EC%B0%A8%EA%B0%90%20%EA%B8%B0%EB%A1%9D') : approval_ko('%ED%9C%B4%EA%B0%80%20%EC%B0%A8%EA%B0%90%20%EC%99%84%EB%A3%8C')); ?></div>
                 <div><?php echo h(approval_ko('%EC%A2%85%EB%A5%98')); ?>: <?php echo h($dr['leave_type']); ?> / <?php echo h(approval_ko('%EC%B0%A8%EA%B0%90')); ?>: <?php echo h((string)$dr['deduct_amount']); ?></div>
                 <div><?php echo h(approval_ko('%EC%B0%A8%EA%B0%90%20%EC%A0%84')); ?>: <?php echo h((string)$dr['balance_before']); ?> / <?php echo h(approval_ko('%EC%B0%A8%EA%B0%90%20%ED%9B%84')); ?>: <?php echo h((string)$dr['balance_after']); ?></div>
                 <div><?php echo h(approval_ko('%EC%B0%A8%EA%B0%90%EC%9D%BC%EC%8B%9C')); ?>: <?php echo h($dr['deducted_at']); ?></div>
                 <div class="text-sm text-gray-600 mt-2"><?php echo h($dr['note']); ?></div>
-            <?php } else { ?>
+            <?php } else if (!$leaveRestoreLog) { ?>
                 <div><?php echo h(approval_ko('%EC%B5%9C%EC%A2%85%20%EC%8A%B9%EC%9D%B8%20%ED%9B%84%20%EC%B0%A8%EA%B0%90%20%EC%98%88%EC%A0%95')); ?></div>
             <?php } ?>
         </div>

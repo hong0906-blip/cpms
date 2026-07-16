@@ -399,26 +399,31 @@ function cpms_approval_drive_file_links_html($fileRow) {
     if (!is_array($fileRow)) return cpms_approval_drive_h(urldecode('%ED%8C%8C%EC%9D%BC%20%ED%99%95%EC%9D%B8%20%ED%95%84%EC%9A%94'));
     $id = isset($fileRow['id']) ? (int)$fileRow['id'] : 0;
     $storageType = cpms_approval_drive_file_storage_type($fileRow);
-    $viewText = cpms_approval_drive_h(urldecode('%EB%B3%B4%EA%B8%B0'));
+    $viewText = cpms_approval_drive_h(urldecode('%ED%8C%8C%EC%9D%BC%20%EB%B3%B4%EA%B8%B0'));
     $downText = cpms_approval_drive_h(urldecode('%EB%8B%A4%EC%9A%B4%EB%A1%9C%EB%93%9C'));
     $needText = cpms_approval_drive_h(urldecode('%ED%8C%8C%EC%9D%BC%20%ED%99%95%EC%9D%B8%20%ED%95%84%EC%9A%94'));
     if ($id <= 0) return '<span class="text-amber-700">' . $needText . '</span>';
     $base = '?r=approval_file&id=' . $id;
     $html = array();
     if ($storageType === 'google_drive') {
-        $hasView = (isset($fileRow['drive_web_view_link']) && trim((string)$fileRow['drive_web_view_link']) !== '');
-        $hasContent = (isset($fileRow['drive_web_content_link']) && trim((string)$fileRow['drive_web_content_link']) !== '');
-        if ($hasView) $html[] = '<a href="' . cpms_approval_drive_h($base) . '" target="_blank">' . $viewText . '</a>';
-        if ($hasContent) $html[] = '<a href="' . cpms_approval_drive_h($base . '&download=1') . '">' . $downText . '</a>';
+        $hasDriveFile = (isset($fileRow['drive_file_id']) && trim((string)$fileRow['drive_file_id']) !== '');
+        $hasDriveLink = (isset($fileRow['drive_web_view_link']) && trim((string)$fileRow['drive_web_view_link']) !== '')
+            || (isset($fileRow['drive_web_content_link']) && trim((string)$fileRow['drive_web_content_link']) !== '');
+        $hasLocalBackup = (isset($fileRow['file_path']) && trim((string)$fileRow['file_path']) !== '');
+        if ($hasDriveFile || $hasDriveLink || $hasLocalBackup) {
+            $html[] = '<span class="approval-attachment-drive-badge">Google Drive</span>';
+            $html[] = '<a class="approval-attachment-action approval-attachment-view" href="' . cpms_approval_drive_h($base) . '" target="_blank">' . $viewText . '</a>';
+            $html[] = '<a class="approval-attachment-action approval-attachment-download" href="' . cpms_approval_drive_h($base . '&download=1') . '">' . $downText . '</a>';
+        }
     } else {
         $hasLocal = (isset($fileRow['file_path']) && trim((string)$fileRow['file_path']) !== '');
         if ($hasLocal) {
-            $html[] = '<a href="' . cpms_approval_drive_h($base) . '" target="_blank">' . $viewText . '</a>';
-            $html[] = '<a href="' . cpms_approval_drive_h($base . '&download=1') . '">' . $downText . '</a>';
+            $html[] = '<a class="approval-attachment-action approval-attachment-view" href="' . cpms_approval_drive_h($base) . '" target="_blank">' . $viewText . '</a>';
+            $html[] = '<a class="approval-attachment-action approval-attachment-download" href="' . cpms_approval_drive_h($base . '&download=1') . '">' . $downText . '</a>';
         }
     }
     if (count($html) === 0) return '<span class="text-amber-700">' . $needText . '</span>';
-    return implode(' ', $html);
+    return '<span class="approval-attachment-actions">' . implode(' ', $html) . '</span>';
 }}
 
 if (!function_exists('cpms_approval_drive_is_absolute_path')) {

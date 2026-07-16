@@ -29,11 +29,29 @@ function cpms_task_feed_item($row)
         'is_direct_task' => isset($row['is_direct_task']) ? (int)$row['is_direct_task'] : 0,
         'created_by' => isset($row['created_by']) ? (int)$row['created_by'] : 0,
         'assignee_read_statuses' => (isset($row['assignee_read_statuses']) && is_array($row['assignee_read_statuses'])) ? $row['assignee_read_statuses'] : array(),
+        'assignee_statuses' => (isset($row['assignee_statuses']) && is_array($row['assignee_statuses'])) ? $row['assignee_statuses'] : array(),
+        'assignee_count' => isset($row['assignee_count']) ? (int)$row['assignee_count'] : 1,
+        'group_active_count' => isset($row['group_active_count']) ? (int)$row['group_active_count'] : 1,
+        'completion_pending_count' => isset($row['completion_pending_count'])
+            ? (int)$row['completion_pending_count']
+            : ((isset($row['status']) && (string)$row['status'] === 'completion_pending') ? 1 : 0),
+        'all_completion_pending' => isset($row['all_completion_pending'])
+            ? (int)$row['all_completion_pending']
+            : ((isset($row['status']) && (string)$row['status'] === 'completion_pending') ? 1 : 0),
+        'completion_group_ready' => isset($row['completion_group_ready'])
+            ? (int)$row['completion_group_ready']
+            : ((isset($row['status']) && (string)$row['status'] === 'completion_pending') ? 1 : 0),
         'created_at' => isset($row['created_at']) ? (string)$row['created_at'] : '',
         'completed_at' => isset($row['completed_at']) ? (string)$row['completed_at'] : '',
         'group_key' => isset($row['group_key']) ? (string)$row['group_key'] : '',
         'read_at' => isset($row['read_at']) ? (string)$row['read_at'] : '',
         'read_by' => isset($row['read_by']) ? (int)$row['read_by'] : 0,
+        'transfer_request_assignee_employee_id' => isset($row['transfer_request_assignee_employee_id']) ? (int)$row['transfer_request_assignee_employee_id'] : 0,
+        'transfer_request_assignee_name' => isset($row['transfer_request_assignee_name']) ? (string)$row['transfer_request_assignee_name'] : '',
+        'transfer_request_reason' => isset($row['transfer_request_reason']) ? (string)$row['transfer_request_reason'] : '',
+        'transfer_requested_by' => isset($row['transfer_requested_by']) ? (int)$row['transfer_requested_by'] : 0,
+        'transfer_requested_by_name' => isset($row['transfer_requested_by_name']) ? (string)$row['transfer_requested_by_name'] : '',
+        'transfer_requested_at' => isset($row['transfer_requested_at']) ? (string)$row['transfer_requested_at'] : '',
         'file_count' => isset($row['file_count']) ? (int)$row['file_count'] : 0,
         'request_file_count' => isset($row['request_file_count']) ? (int)$row['request_file_count'] : 0,
         'complete_file_count' => isset($row['complete_file_count']) ? (int)$row['complete_file_count'] : 0,
@@ -187,6 +205,12 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
                 'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',
                 'read_at' => isset($task['read_at']) ? (string)$task['read_at'] : '',
                 'read_by' => isset($task['read_by']) ? (int)$task['read_by'] : 0,
+                'transfer_request_assignee_employee_id' => isset($task['transfer_request_assignee_employee_id']) ? (int)$task['transfer_request_assignee_employee_id'] : 0,
+                'transfer_request_assignee_name' => isset($task['transfer_request_assignee_name']) ? (string)$task['transfer_request_assignee_name'] : '',
+                'transfer_request_reason' => isset($task['transfer_request_reason']) ? (string)$task['transfer_request_reason'] : '',
+                'transfer_requested_by' => isset($task['transfer_requested_by']) ? (int)$task['transfer_requested_by'] : 0,
+                'transfer_requested_by_name' => isset($task['transfer_requested_by_name']) ? (string)$task['transfer_requested_by_name'] : '',
+                'transfer_requested_at' => isset($task['transfer_requested_at']) ? (string)$task['transfer_requested_at'] : '',
                 'file_count' => isset($fileCounts['total']) ? (int)$fileCounts['total'] : 0,
                 'request_file_count' => isset($fileCounts['request']) ? (int)$fileCounts['request'] : 0,
                 'complete_file_count' => isset($fileCounts['complete']) ? (int)$fileCounts['complete'] : 0,
@@ -208,18 +232,29 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
     try {
         $hasCreatedBy = cpms_tasks_column_exists($pdo, 'cpms_tasks', 'created_by');
         if ($hasCreatedBy) {
-            $sql = "SELECT * FROM cpms_tasks WHERE (requester_employee_id = :employee_id OR ((requester_employee_id IS NULL OR requester_employee_id = 0) AND created_by = :employee_id))";
+            $sql = "SELECT task_main.* FROM cpms_tasks task_main WHERE (task_main.requester_employee_id = :employee_id OR ((task_main.requester_employee_id IS NULL OR task_main.requester_employee_id = 0) AND task_main.created_by = :employee_id))";
         } else {
-            $sql = "SELECT * FROM cpms_tasks WHERE requester_employee_id = :employee_id";
+            $sql = "SELECT task_main.* FROM cpms_tasks task_main WHERE task_main.requester_employee_id = :employee_id";
         }
         $params = array(':employee_id' => (int)$employeeId);
         if ($unfinishedOnly) {
-            $sql .= " AND (status IS NULL OR status NOT IN ('done','cancelled'))";
+            $sql .= " AND (
+                task_main.status IS NULL
+                OR task_main.status NOT IN ('done','cancelled')
+                OR (
+                    task_main.group_key LIKE 'task_request:%'
+                    AND EXISTS (
+                        SELECT 1 FROM cpms_tasks task_sibling
+                        WHERE task_sibling.group_key = task_main.group_key
+                          AND (task_sibling.status IS NULL OR task_sibling.status NOT IN ('done','cancelled'))
+                    )
+                )
+            )";
         } else if ($requestedDate !== '') {
-            $sql .= " AND DATE(created_at) = :requested_date";
+            $sql .= " AND DATE(task_main.created_at) = :requested_date";
             $params[':requested_date'] = $requestedDate;
         }
-        $sql .= $unfinishedOnly ? " ORDER BY created_at ASC, id ASC" : " ORDER BY created_at DESC, id DESC";
+        $sql .= $unfinishedOnly ? " ORDER BY task_main.created_at ASC, task_main.id ASC" : " ORDER BY task_main.created_at DESC, task_main.id DESC";
         $st = $pdo->prepare($sql);
         $st->execute($params);
         $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -260,6 +295,12 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                 'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',
                 'read_at' => isset($task['read_at']) ? (string)$task['read_at'] : '',
                 'read_by' => isset($task['read_by']) ? (int)$task['read_by'] : 0,
+                'transfer_request_assignee_employee_id' => isset($task['transfer_request_assignee_employee_id']) ? (int)$task['transfer_request_assignee_employee_id'] : 0,
+                'transfer_request_assignee_name' => isset($task['transfer_request_assignee_name']) ? (string)$task['transfer_request_assignee_name'] : '',
+                'transfer_request_reason' => isset($task['transfer_request_reason']) ? (string)$task['transfer_request_reason'] : '',
+                'transfer_requested_by' => isset($task['transfer_requested_by']) ? (int)$task['transfer_requested_by'] : 0,
+                'transfer_requested_by_name' => isset($task['transfer_requested_by_name']) ? (string)$task['transfer_requested_by_name'] : '',
+                'transfer_requested_at' => isset($task['transfer_requested_at']) ? (string)$task['transfer_requested_at'] : '',
                 'file_count' => isset($fileCounts['total']) ? (int)$fileCounts['total'] : 0,
                 'request_file_count' => isset($fileCounts['request']) ? (int)$fileCounts['request'] : 0,
                 'complete_file_count' => isset($fileCounts['complete']) ? (int)$fileCounts['complete'] : 0,
@@ -271,12 +312,13 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
         for ($i = 0; $i < count($rows); $i++) {
             $row = $rows[$i];
             $groupKey = isset($row['group_key']) ? trim((string)$row['group_key']) : '';
-            $key = ($groupKey !== '' && strpos($groupKey, 'task_request:') !== 0) ? 'group:' . $groupKey : 'task:' . (isset($row['source_id']) ? (int)$row['source_id'] : 0);
+            $key = $groupKey !== '' ? 'group:' . $groupKey : 'task:' . (isset($row['source_id']) ? (int)$row['source_id'] : 0);
             if (!isset($grouped[$key])) {
                 $grouped[$key] = array(
                     'row' => $row,
                     'assignees' => array(),
                     'statuses' => array(),
+                    'assignee_statuses' => array(),
                     'read_statuses' => array(),
                     'read_at' => ''
                 );
@@ -284,7 +326,15 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
             } else {
                 $existingAssigneeId = isset($grouped[$key]['row']['assignee_employee_id']) ? (int)$grouped[$key]['row']['assignee_employee_id'] : 0;
                 $currentAssigneeId = isset($row['assignee_employee_id']) ? (int)$row['assignee_employee_id'] : 0;
-                if ($existingAssigneeId === (int)$employeeId && $currentAssigneeId !== (int)$employeeId) {
+                $existingHasTransferRequest = cpms_tasks_has_transfer_request($grouped[$key]['row']);
+                $currentHasTransferRequest = cpms_tasks_has_transfer_request($row);
+                $existingStatus = isset($grouped[$key]['row']['status']) ? (string)$grouped[$key]['row']['status'] : '';
+                $currentStatus = isset($row['status']) ? (string)$row['status'] : '';
+                if (
+                    (!$existingHasTransferRequest && $currentHasTransferRequest)
+                    || ($existingHasTransferRequest === $currentHasTransferRequest && $existingStatus !== 'completion_pending' && $currentStatus === 'completion_pending')
+                    || ($existingHasTransferRequest === $currentHasTransferRequest && $existingStatus === $currentStatus && $existingAssigneeId === (int)$employeeId && $currentAssigneeId !== (int)$employeeId)
+                ) {
                     $grouped[$key]['row'] = $row;
                 }
             }
@@ -314,6 +364,14 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
             if ($status !== '') {
                 $grouped[$key]['statuses'][$status] = true;
             }
+            $taskStatusKey = 'task:' . (isset($row['source_id']) ? (int)$row['source_id'] : count($grouped[$key]['assignee_statuses']));
+            $grouped[$key]['assignee_statuses'][$taskStatusKey] = array(
+                'task_id' => isset($row['source_id']) ? (int)$row['source_id'] : 0,
+                'id' => $assigneeId,
+                'name' => $assigneeName,
+                'status' => $status,
+                'status_label' => cpms_tasks_status_label($status),
+            );
             if ($readAt !== '' && (!isset($grouped[$key]['read_at']) || trim((string)$grouped[$key]['read_at']) === '' || strcmp($readAt, (string)$grouped[$key]['read_at']) < 0)) {
                 $grouped[$key]['read_at'] = $readAt;
             }
@@ -325,24 +383,59 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
             if (!isset($grouped[$key])) continue;
             $row = $grouped[$key]['row'];
             $assigneeRecords = $grouped[$key]['assignees'];
-            $names = array();
             $allNames = array();
             foreach ($assigneeRecords as $assigneeRecord) {
                 if (!is_array($assigneeRecord)) continue;
                 $name = isset($assigneeRecord['name']) ? trim((string)$assigneeRecord['name']) : '';
-                $id = isset($assigneeRecord['id']) ? (int)$assigneeRecord['id'] : 0;
                 if ($name === '') continue;
                 $allNames[count($allNames)] = $name;
-                if (count($assigneeRecords) > 1 && $id === (int)$employeeId) continue;
-                $names[count($names)] = $name;
             }
-            if (count($names) === 0) {
-                $names = $allNames;
-            }
-            if (count($names) === 1) {
-                $row['assignee_name'] = $names[0];
-            } else if (count($names) > 1) {
-                $row['assignee_name'] = $names[0] . ' 외 ' . (count($names) - 1) . '명';
+            if (count($allNames) > 0) $row['assignee_name'] = implode(', ', $allNames);
+            $row['assignee_count'] = count($allNames);
+            $row['assignee_statuses'] = isset($grouped[$key]['assignee_statuses']) && is_array($grouped[$key]['assignee_statuses'])
+                ? array_values($grouped[$key]['assignee_statuses'])
+                : array();
+            $isTaskRequestGroup = cpms_tasks_is_request_group_key(isset($row['group_key']) ? $row['group_key'] : '');
+            if ($isTaskRequestGroup) {
+                $activeCount = 0;
+                $completionPendingCount = 0;
+                $doneCount = 0;
+                $cancelledCount = 0;
+                $hasProgress = false;
+                for ($j = 0; $j < count($row['assignee_statuses']); $j++) {
+                    $assigneeStatus = isset($row['assignee_statuses'][$j]['status']) ? (string)$row['assignee_statuses'][$j]['status'] : '';
+                    if ($assigneeStatus === 'cancelled') {
+                        $cancelledCount++;
+                        continue;
+                    }
+                    $activeCount++;
+                    if ($assigneeStatus === 'completion_pending') $completionPendingCount++;
+                    if ($assigneeStatus === 'done') $doneCount++;
+                    if (in_array($assigneeStatus, array('progress', 'revision'), true)) $hasProgress = true;
+                }
+                $allCompletionPending = ($activeCount > 0 && $completionPendingCount === $activeCount);
+                $completionGroupReady = ($activeCount > 0 && $completionPendingCount > 0 && ($completionPendingCount + $doneCount) === $activeCount);
+                $row['group_active_count'] = $activeCount;
+                $row['completion_pending_count'] = $completionPendingCount;
+                $row['all_completion_pending'] = $allCompletionPending ? 1 : 0;
+                $row['completion_group_ready'] = $completionGroupReady ? 1 : 0;
+                if ($allCompletionPending || $completionGroupReady) {
+                    $row['status'] = 'completion_pending';
+                    $row['display_status'] = $completionPendingCount === $activeCount
+                        ? '전원 완료 대기중'
+                        : '완료 대기 ' . $completionPendingCount . '/' . $activeCount;
+                } else if ($activeCount > 0 && $doneCount === $activeCount) {
+                    $row['status'] = 'done';
+                    $row['display_status'] = '완료';
+                } else if ($activeCount === 0 && $cancelledCount > 0) {
+                    $row['status'] = 'cancelled';
+                    $row['display_status'] = '취소';
+                } else {
+                    $row['status'] = $hasProgress ? 'progress' : 'pending';
+                    $row['display_status'] = $completionPendingCount > 0
+                        ? '완료 대기 ' . $completionPendingCount . '/' . $activeCount
+                        : cpms_tasks_status_label($row['status']);
+                }
             }
             if (isset($row['task_type']) && (string)$row['task_type'] === 'meeting') {
                 $statuses = isset($grouped[$key]['statuses']) && is_array($grouped[$key]['statuses']) ? $grouped[$key]['statuses'] : array();
@@ -396,13 +489,43 @@ function cpms_task_feed_completed_requests_for_employee($pdo, $employeeId)
         $tasks = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($tasks)) $tasks = array();
 
+        $completedGroups = array();
+        for ($i = 0; $i < count($tasks); $i++) {
+            $completedTask = $tasks[$i];
+            $completedGroupKey = isset($completedTask['group_key']) ? trim((string)$completedTask['group_key']) : '';
+            $completedKey = $completedGroupKey !== '' ? 'group:' . $completedGroupKey : 'task:' . (isset($completedTask['id']) ? (int)$completedTask['id'] : 0);
+            if (!isset($completedGroups[$completedKey])) {
+                $completedGroups[$completedKey] = array('assignees' => array(), 'statuses' => array(), 'read_statuses' => array());
+            }
+            $completedAssigneeId = isset($completedTask['assignee_employee_id']) ? (int)$completedTask['assignee_employee_id'] : 0;
+            $completedAssigneeName = isset($completedTask['assignee_name']) ? trim((string)$completedTask['assignee_name']) : '';
+            $completedAssigneeKey = $completedAssigneeId > 0 ? 'id:' . $completedAssigneeId : 'name:' . $completedAssigneeName;
+            if ($completedAssigneeName !== '') $completedGroups[$completedKey]['assignees'][$completedAssigneeKey] = $completedAssigneeName;
+            $completedGroups[$completedKey]['statuses'][] = array(
+                'task_id' => isset($completedTask['id']) ? (int)$completedTask['id'] : 0,
+                'id' => $completedAssigneeId,
+                'name' => $completedAssigneeName,
+                'status' => 'done',
+                'status_label' => cpms_tasks_status_label('done'),
+            );
+            $completedGroups[$completedKey]['read_statuses'][$completedAssigneeKey] = array(
+                'id' => $completedAssigneeId,
+                'name' => $completedAssigneeName,
+                'read_at' => isset($completedTask['read_at']) ? (string)$completedTask['read_at'] : '',
+                'read_by' => isset($completedTask['read_by']) ? (int)$completedTask['read_by'] : 0,
+                'self_request' => cpms_tasks_is_self_request($completedTask) ? 1 : 0,
+            );
+        }
+
         $seen = array();
         for ($i = 0; $i < count($tasks); $i++) {
             $task = $tasks[$i];
             $groupKey = isset($task['group_key']) ? trim((string)$task['group_key']) : '';
-            $key = ($groupKey !== '' && strpos($groupKey, 'task_request:') !== 0) ? 'group:' . $groupKey : 'task:' . (isset($task['id']) ? (int)$task['id'] : 0);
+            $key = $groupKey !== '' ? 'group:' . $groupKey : 'task:' . (isset($task['id']) ? (int)$task['id'] : 0);
             if (isset($seen[$key])) continue;
             $seen[$key] = true;
+            $completedGroup = isset($completedGroups[$key]) ? $completedGroups[$key] : array('assignees' => array(), 'statuses' => array(), 'read_statuses' => array());
+            $completedAssigneeNames = isset($completedGroup['assignees']) && is_array($completedGroup['assignees']) ? array_values($completedGroup['assignees']) : array();
             $fileCounts = cpms_tasks_file_counts_for_task($pdo, isset($task['id']) ? (int)$task['id'] : 0);
             $rows[count($rows)] = array(
                 'source_type' => 'task',
@@ -411,7 +534,7 @@ function cpms_task_feed_completed_requests_for_employee($pdo, $employeeId)
                 'content' => isset($task['content']) ? (string)$task['content'] : '',
                 'requester_name' => isset($task['requester_name']) ? (string)$task['requester_name'] : '',
                 'requester_employee_id' => isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0,
-                'assignee_name' => isset($task['assignee_name']) ? (string)$task['assignee_name'] : '',
+                'assignee_name' => count($completedAssigneeNames) > 0 ? implode(', ', $completedAssigneeNames) : (isset($task['assignee_name']) ? (string)$task['assignee_name'] : ''),
                 'assignee_employee_id' => isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0,
                 'department' => isset($task['department']) ? (string)$task['department'] : '',
                 'project_id' => isset($task['project_id']) ? (int)$task['project_id'] : 0,
@@ -426,13 +549,13 @@ function cpms_task_feed_completed_requests_for_employee($pdo, $employeeId)
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
                 'created_by' => isset($task['created_by']) ? (int)$task['created_by'] : 0,
-                'assignee_read_statuses' => array(array(
-                    'id' => isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0,
-                    'name' => isset($task['assignee_name']) ? (string)$task['assignee_name'] : '',
-                    'read_at' => isset($task['read_at']) ? (string)$task['read_at'] : '',
-                    'read_by' => isset($task['read_by']) ? (int)$task['read_by'] : 0,
-                    'self_request' => cpms_tasks_is_self_request($task) ? 1 : 0,
-                )),
+                'assignee_read_statuses' => isset($completedGroup['read_statuses']) && is_array($completedGroup['read_statuses']) ? array_values($completedGroup['read_statuses']) : array(),
+                'assignee_statuses' => isset($completedGroup['statuses']) && is_array($completedGroup['statuses']) ? $completedGroup['statuses'] : array(),
+                'assignee_count' => count($completedAssigneeNames),
+                'group_active_count' => count($completedAssigneeNames),
+                'completion_pending_count' => 0,
+                'all_completion_pending' => 0,
+                'completion_group_ready' => 0,
                 'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
                 'completed_at' => isset($task['completed_at']) ? (string)$task['completed_at'] : '',
                 'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',

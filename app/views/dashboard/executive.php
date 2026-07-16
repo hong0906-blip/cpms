@@ -10,6 +10,8 @@ require_once __DIR__ . '/../construction/partials/equipment_gongsu_approval_help
 require_once __DIR__ . '/../tasks/dashboard_sections.php';
 require_once __DIR__ . '/../attendance/common.php';
 require_once __DIR__ . '/../approval/_common.php';
+require_once __DIR__ . '/../common/chat_notification_helpers.php';
+require_once __DIR__ . '/../common/company_chat_daily_helpers.php';
 require_once __DIR__ . '/notice_board.php';
 
 use App\Core\Db;
@@ -63,6 +65,12 @@ if (!$projectCostFragmentOnly && function_exists('cpms_tasks_process_delayed_not
         cpms_tasks_process_delayed_notifications($pdo, 20);
         if (function_exists('attendance_process_morning_missing_checkin_notifications')) {
             attendance_process_morning_missing_checkin_notifications($pdo, 20);
+        }
+        if (function_exists('cpms_company_chat_process_daily_leave')) {
+            cpms_company_chat_process_daily_leave($pdo, false);
+        }
+        if (function_exists('cpms_company_chat_process_daily_leave_additions')) {
+            cpms_company_chat_process_daily_leave_additions($pdo);
         }
     }
 }

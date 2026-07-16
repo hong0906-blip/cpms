@@ -110,3 +110,103 @@ if (!function_exists('approval_deduct_leave_balance_on_final_approval')) {
         return $ret;
     }
 }
+
+if (!function_exists('approval_restore_leave_balance_on_approved_cancellation')) {
+    function approval_restore_leave_balance_on_approved_cancellation($pdo, $documentId, $actor)
+    {
+        $ret = array('ok' => 1, 'restored' => 0, 'message' => '');
+        $documentId = (int)$documentId;
+        if (!$pdo || $documentId <= 0) {
+            return array('ok' => 0, 'restored' => 0, 'message' => 'invalid_document');
+        }
+
+        $docSt = $pdo->prepare("SELECT id,doc_type,doc_status FROM cpms_approval_documents WHERE id=:id LIMIT 1 FOR UPDATE");
+        $docSt->execute(array(':id' => $documentId));
+        $doc = $docSt->fetch(PDO::FETCH_ASSOC);
+        $docType = $doc && isset($doc['doc_type']) ? strtolower(trim((string)$doc['doc_type'])) : '';
+        $docStatus = $doc && isset($doc['doc_status']) ? strtoupper(trim((string)$doc['doc_status'])) : '';
+        if (!$doc || $docType !== 'leave' || !in_array($docStatus, array('APPROVED', 'COMPLETED'), true)) {
+            return array('ok' => 0, 'restored' => 0, 'message' => 'invalid_status');
+        }
+
+        if (approval_table_exists($pdo, 'cpms_approval_logs')) {
+            $alreadySt = $pdo->prepare("SELECT COUNT(*) FROM cpms_approval_logs WHERE document_id=:id AND action_type='LEAVE_RESTORE'");
+            $alreadySt->execute(array(':id' => $documentId));
+            if ((int)$alreadySt->fetchColumn() > 0) {
+                $ret['message'] = 'already_restored';
+                return $ret;
+            }
+        }
+
+        if (!approval_table_exists($pdo, 'cpms_approval_leave_deductions')) {
+            $ret['message'] = approval_ko('%EC%9E%90%EB%8F%99%20%EC%B0%A8%EA%B0%90%20%EA%B8%B0%EB%A1%9D%EC%9D%B4%20%EC%97%86%EC%96%B4%20%EB%B3%B5%EA%B5%AC%ED%95%A0%20%ED%9C%B4%EA%B0%80%20%EC%9E%94%EC%95%A1%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+            return $ret;
+        }
+
+        $deductSt = $pdo->prepare("SELECT * FROM cpms_approval_leave_deductions WHERE document_id=:id LIMIT 1 FOR UPDATE");
+        $deductSt->execute(array(':id' => $documentId));
+        $deduction = $deductSt->fetch(PDO::FETCH_ASSOC);
+        if (!$deduction) {
+            $ret['message'] = approval_ko('%EC%9E%90%EB%8F%99%20%EC%B0%A8%EA%B0%90%20%EA%B8%B0%EB%A1%9D%EC%9D%B4%20%EC%97%86%EC%96%B4%20%EB%B3%B5%EA%B5%AC%ED%95%A0%20%ED%9C%B4%EA%B0%80%20%EC%9E%94%EC%95%A1%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+            return $ret;
+        }
+
+        $employeeId = isset($deduction['employee_id']) ? (int)$deduction['employee_id'] : 0;
+        $targetColumn = isset($deduction['target_column']) ? trim((string)$deduction['target_column']) : '';
+        $leaveBucket = isset($deduction['leave_bucket']) ? strtoupper(trim((string)$deduction['leave_bucket'])) : '';
+        if (!in_array($targetColumn, array('leave_monthly_balance', 'leave_annual_balance'), true)) {
+            if ($leaveBucket === 'MONTHLY') {
+                $targetColumn = 'leave_monthly_balance';
+            } else if ($leaveBucket === 'ANNUAL') {
+                $targetColumn = 'leave_annual_balance';
+            }
+        }
+        if ($employeeId <= 0 || !in_array($targetColumn, array('leave_monthly_balance', 'leave_annual_balance'), true)) {
+            return array('ok' => 0, 'restored' => 0, 'message' => 'invalid_deduction');
+        }
+
+        $amount = isset($deduction['deduct_amount']) ? cpms_leave_normalize_half_step($deduction['deduct_amount']) : 0.0;
+        if ($amount <= 0) {
+            $ret['message'] = approval_ko('%EB%B3%B5%EA%B5%AC%ED%95%A0%20%ED%9C%B4%EA%B0%80%20%EC%B0%A8%EA%B0%90%EB%9F%89%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+            return $ret;
+        }
+
+        $employeeSt = $pdo->prepare("SELECT id," . $targetColumn . " FROM employees WHERE id=:id LIMIT 1 FOR UPDATE");
+        $employeeSt->execute(array(':id' => $employeeId));
+        $employee = $employeeSt->fetch(PDO::FETCH_ASSOC);
+        if (!$employee) {
+            return array('ok' => 0, 'restored' => 0, 'message' => 'employee_not_found');
+        }
+
+        $before = isset($employee[$targetColumn]) && $employee[$targetColumn] !== null
+            ? cpms_leave_normalize_half_step($employee[$targetColumn])
+            : 0.0;
+        $after = cpms_leave_normalize_half_step($before + $amount);
+        $updateSt = $pdo->prepare("UPDATE employees SET " . $targetColumn . "=:balance WHERE id=:id");
+        $updateSt->execute(array(':balance' => $after, ':id' => $employeeId));
+
+        $columnLabel = $targetColumn === 'leave_monthly_balance'
+            ? approval_ko('%EC%9B%94%EC%B0%A8')
+            : approval_ko('%EC%97%B0%EC%B0%A8');
+        $note = approval_ko('%EC%8A%B9%EC%9D%B8%20%EC%B7%A8%EC%86%8C%EB%A1%9C%20%EC%B0%A8%EA%B0%90%EB%90%9C%20%ED%9C%B4%EA%B0%80%EB%A5%BC%20%EB%B3%B5%EA%B5%AC%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.')
+            . ' ' . $columnLabel . ' '
+            . cpms_leave_format_decimal($amount) . approval_ko('%EC%9D%BC')
+            . ' (' . cpms_leave_format_decimal($before) . ' -> ' . cpms_leave_format_decimal($after) . ')';
+
+        $actorId = is_array($actor) && isset($actor['id']) ? (int)$actor['id'] : 0;
+        $actorName = is_array($actor) && isset($actor['name']) ? trim((string)$actor['name']) : '';
+        $actorEmail = is_array($actor) && isset($actor['email']) ? trim((string)$actor['email']) : '';
+        $logSt = $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,:a,:n,:e,'LEAVE_RESTORE',:note,NOW())");
+        $logSt->execute(array(
+            ':d' => $documentId,
+            ':a' => $actorId,
+            ':n' => $actorName,
+            ':e' => $actorEmail,
+            ':note' => $note
+        ));
+
+        $ret['restored'] = 1;
+        $ret['message'] = $note;
+        return $ret;
+    }
+}

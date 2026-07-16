@@ -568,6 +568,10 @@ if ($route === 'approval_active') {
     $_GET['view'] = 'active';
     $route = '전자결재';
 }
+if ($route === 'approval_rejected') {
+    $_GET['view'] = 'rejected';
+    $route = '전자결재';
+}
 if ($route === 'approval_cancelled') {
     $_GET['view'] = 'cancelled';
     $route = '전자결재';
@@ -955,6 +959,10 @@ if ($route === 'construction/labor_sheet_download') {
     require_once __DIR__ . '/../app/views/construction/labor_sheet_download.php';
     exit;
 }
+if ($route === 'construction/monthly_cost_export') {
+    require_once __DIR__ . '/../app/views/construction/monthly_cost_export.php';
+    exit;
+}
 if ($route === 'construction/outsourcing_cost_save') {
     require_once __DIR__ . '/../app/views/construction/outsourcing_cost_save.php';
     exit;
@@ -1029,6 +1037,10 @@ if ($route === 'tasks/content_save' || $route === 'task_content_save') {
 }
 if ($route === 'tasks/transfer') {
     require_once __DIR__ . '/../app/views/tasks/transfer.php';
+    exit;
+}
+if ($route === 'tasks/transfer_approve') {
+    require_once __DIR__ . '/../app/views/tasks/transfer_approve.php';
     exit;
 }
 if ($route === 'tasks/revision') {
@@ -1297,6 +1309,7 @@ if ($route === 'attendance/check_in') { require_once __DIR__ . '/../app/views/at
 if ($route === 'attendance/check_out') { require_once __DIR__ . '/../app/views/attendance/check_out.php'; exit; }
 if ($route === 'attendance/request_save') { require_once __DIR__ . '/../app/views/attendance/request_save.php'; exit; }
 if ($route === 'management/attendance') { require_once __DIR__ . '/../app/views/management/attendance.php'; exit; }
+if ($route === 'management/attendance_export') { require_once __DIR__ . '/../app/views/management/attendance_export.php'; exit; }
 if ($route === 'management/attendance_request_approve') { require_once __DIR__ . '/../app/views/management/attendance_request_approve.php'; exit; }
 if ($route === 'management/attendance_request_reject') { require_once __DIR__ . '/../app/views/management/attendance_request_reject.php'; exit; }
 if ($route === 'management/attendance_record_save') { require_once __DIR__ . '/../app/views/management/attendance_record_save.php'; exit; }

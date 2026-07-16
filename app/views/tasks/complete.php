@@ -69,9 +69,19 @@ try {
         }
         $updatedTask = cpms_tasks_find_task($pdo, $taskId);
         if ($updatedTask) {
-            cpms_tasks_send_completion_pending_notification($pdo, $updatedTask);
+            $completionSummary = cpms_tasks_completion_group_summary($pdo, $updatedTask);
+            if (isset($completionSummary['ready_for_approval']) && $completionSummary['ready_for_approval']) {
+                cpms_tasks_send_completion_pending_notification($pdo, $updatedTask);
+            }
         }
-        flash_set('success', '완료 검토 요청이 등록되었습니다. 요청자가 승인하면 완료 처리됩니다.');
+        $completionSummary = isset($completionSummary) && is_array($completionSummary) ? $completionSummary : cpms_tasks_completion_group_summary($pdo, $task);
+        if (isset($completionSummary['ready_for_approval']) && $completionSummary['ready_for_approval'] && isset($completionSummary['total_count']) && (int)$completionSummary['total_count'] > 1) {
+            flash_set('success', '모든 담당자가 완료 대기 상태입니다. 요청자에게 전체 완료 승인을 요청했습니다.');
+        } else if (isset($completionSummary['ready_for_approval']) && $completionSummary['ready_for_approval']) {
+            flash_set('success', '완료 검토 요청이 등록되었습니다. 요청자가 승인하면 완료 처리됩니다.');
+        } else {
+            flash_set('success', '완료 대기로 변경했습니다. 다른 담당자들의 완료 처리를 기다립니다.');
+        }
     } else {
         $completionResult = cpms_tasks_complete_task_and_group($pdo, $task, $currentEmployee, $completedMemo, $now);
         if (isset($_FILES['attachments'])) {

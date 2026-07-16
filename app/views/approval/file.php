@@ -31,25 +31,48 @@ if (!$doc || !approval_can_view_document($pdo, $doc, $u)) {
 }
 
 $storageType = cpms_approval_drive_file_storage_type($file);
+$driveFallbackUrl = '';
+$driveFileId = '';
 if ($storageType === 'google_drive') {
+    $driveFileId = isset($file['drive_file_id']) ? trim((string)$file['drive_file_id']) : '';
     $viewUrl = isset($file['drive_web_view_link']) ? trim((string)$file['drive_web_view_link']) : '';
     $contentUrl = isset($file['drive_web_content_link']) ? trim((string)$file['drive_web_content_link']) : '';
-    $target = ($download && $contentUrl !== '') ? $contentUrl : $viewUrl;
-    if ($target === '') {
-        http_response_code(404);
-        exit(approval_ko('%ED%8C%8C%EC%9D%BC%20%ED%99%95%EC%9D%B8%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.'));
+    $driveFallbackUrl = ($download && $contentUrl !== '') ? $contentUrl : $viewUrl;
+    if ($driveFallbackUrl === '' && $contentUrl !== '') $driveFallbackUrl = $contentUrl;
+
+    if ($driveFileId !== '' && function_exists('cpms_drive_download_file')) {
+        $driveDownload = cpms_drive_download_file($driveFileId);
+        if (is_array($driveDownload) && !empty($driveDownload['ok'])) {
+            $driveName = isset($file['original_name']) && trim((string)$file['original_name']) !== '' ? trim((string)$file['original_name']) : 'approval_file';
+            $driveName = str_replace(array("\r", "\n"), '', $driveName);
+            $driveMime = isset($file['mime_type']) && trim((string)$file['mime_type']) !== '' ? trim((string)$file['mime_type']) : 'application/octet-stream';
+            $driveAsciiName = preg_replace('/[^A-Za-z0-9\.\_\-]+/', '_', $driveName);
+            if ($driveAsciiName === '') $driveAsciiName = 'approval_file';
+            $driveDisposition = $download ? 'attachment' : 'inline';
+            $driveContent = isset($driveDownload['content']) ? (string)$driveDownload['content'] : '';
+
+            header('Content-Type: ' . $driveMime);
+            header('Content-Length: ' . (string)strlen($driveContent));
+            header('Content-Disposition: ' . $driveDisposition . '; filename="' . $driveAsciiName . '"; filename*=UTF-8\'\'' . rawurlencode($driveName));
+            header('X-Content-Type-Options: nosniff');
+            echo $driveContent;
+            exit;
+        }
     }
-    header('Location: ' . $target);
-    exit;
 }
 
 $path = cpms_approval_drive_resolve_local_path(isset($file['file_path']) ? $file['file_path'] : '');
 if ($path === '') {
+    if ($storageType === 'google_drive' && $driveFileId === '' && $driveFallbackUrl !== '') {
+        header('Location: ' . $driveFallbackUrl);
+        exit;
+    }
     http_response_code(404);
     exit(approval_ko('%ED%8C%8C%EC%9D%BC%20%ED%99%95%EC%9D%B8%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.'));
 }
 
 $name = isset($file['original_name']) && trim((string)$file['original_name']) !== '' ? trim((string)$file['original_name']) : basename($path);
+$name = str_replace(array("\r", "\n"), '', $name);
 $mime = isset($file['mime_type']) && trim((string)$file['mime_type']) !== '' ? trim((string)$file['mime_type']) : cpms_drive_detect_mime_type($path);
 $asciiName = preg_replace('/[^A-Za-z0-9\.\_\-]+/', '_', $name);
 if ($asciiName === '') $asciiName = 'approval_file';

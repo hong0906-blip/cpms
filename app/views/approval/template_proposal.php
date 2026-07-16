@@ -156,26 +156,61 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     echo '<br>2. ' . h(approval_ko('%EB%82%B4%EC%9A%A9')) . ' : 1) ' . h(approval_ko('%EC%97%85%EC%B2%B4%EB%AA%85')) . ' : '; approval_doc_field($mode, 'company_name', approval_doc_get($data, 'company_name', ''), 'doc-input doc-inline-input', 'text', '');
     echo '<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2) ' . h(approval_ko('%EB%B0%9C%EC%A3%BC%EA%B8%88%EC%95%A1')) . ' : '; approval_doc_field($mode, 'contract_amount', approval_doc_format_amount(approval_doc_get($data, 'contract_amount', '')), 'doc-input doc-inline-input doc-money-input', 'number', ''); echo ' ' . h(approval_ko('%EC%9B%90'));
     echo '<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3) ' . h(approval_ko('%EC%84%A0%EA%B8%88%20%EC%A7%80%EA%B8%89%20%EC%9A%94%EC%B2%AD%EC%95%A1')) . ' : '; approval_doc_field($mode, 'advance_amount', approval_doc_format_amount(approval_doc_get($data, 'advance_amount', '')), 'doc-input doc-inline-input doc-money-input', 'number', ''); echo ' ' . h(approval_ko('%EC%9B%90'));
-    echo '<br>3. ' . h(approval_ko('%ED%8A%B9%EA%B8%B0%EC%82%AC%ED%95%AD%201')) . ' : '; approval_doc_field($mode, 'special_note_1', approval_doc_get($data, 'special_note_1', ''), 'doc-input doc-inline-input', 'text', '');
-    echo '<br>&nbsp;&nbsp;&nbsp;' . h(approval_ko('%ED%8A%B9%EA%B8%B0%EC%82%AC%ED%95%AD%202')) . ' : '; approval_doc_field($mode, 'special_note_2', approval_doc_get($data, 'special_note_2', ''), 'doc-input doc-inline-input', 'text', '');
-    echo '<br>4. ' . h(approval_ko('%EC%A7%80%EA%B8%89%EC%9A%94%EC%B2%AD%EC%9D%BC')) . ' : '; approval_doc_field($mode, 'payment_request_date', approval_doc_get($data, 'payment_request_date', date('Y-m-d')), 'doc-input doc-inline-input', 'date', '');
+    $specialNote = approval_doc_get($data, 'special_note', '');
+    if ($specialNote === '') {
+        $legacySpecialNotes = array();
+        $legacySpecialNote1 = approval_doc_get($data, 'special_note_1', '');
+        $legacySpecialNote2 = approval_doc_get($data, 'special_note_2', '');
+        if ($legacySpecialNote1 !== '') {
+            $legacySpecialNotes[] = $legacySpecialNote1;
+        }
+        if ($legacySpecialNote2 !== '') {
+            $legacySpecialNotes[] = $legacySpecialNote2;
+        }
+        if (count($legacySpecialNotes) > 0) {
+            $specialNote = implode("\n", $legacySpecialNotes);
+        }
+    }
+    echo '<table class="proposal-special-note-table"><tr>';
+    echo '<th>3. ' . h(approval_ko('%ED%8A%B9%EA%B8%B0%EC%82%AC%ED%95%AD')) . '</th>';
+    echo '<td>';
+    if ($mode === 'edit') {
+        echo '<textarea name="special_note" class="doc-textarea proposal-special-note-textarea" rows="7">' . h($specialNote) . '</textarea>';
+    } else {
+        echo '<div class="proposal-special-note-value">' . h($specialNote !== '' ? $specialNote : '-') . '</div>';
+    }
+    echo '</td></tr></table>';
+    echo '4. ' . h(approval_ko('%EC%A7%80%EA%B8%89%EC%9A%94%EC%B2%AD%EC%9D%BC')) . ' : '; approval_doc_field($mode, 'payment_request_date', approval_doc_get($data, 'payment_request_date', date('Y-m-d')), 'doc-input doc-inline-input', 'date', '');
     echo '<br>5. ' . h(approval_ko('%EC%98%88%EC%82%B0%ED%98%84%ED%99%A9')) . ' : '; approval_doc_field($mode, 'budget_status', approval_doc_get($data, 'budget_status', ''), 'doc-input doc-inline-input', 'text', '');
-    echo '</div><div class="doc-attach">' . h(approval_ko('%EC%B2%A8%EB%B6%80%EC%84%9C%EB%A5%98'));
+    echo '</div><div class="doc-attach">';
     $labels = array(
         'order_doc' => approval_ko('%EB%B0%9C%EC%A3%BC%EC%84%9C'),
         'business_license' => approval_ko('%EC%82%AC%EC%97%85%EC%9E%90%EB%93%B1%EB%A1%9D%EC%A6%9D'),
         'etc' => approval_ko('%EA%B8%B0%ED%83%80')
     );
+    $attachedFileCount = 0;
+    foreach ($labels as $fileKey => $fileLabel) {
+        if (isset($files[$fileKey]) && is_array($files[$fileKey])) $attachedFileCount++;
+    }
+    echo '<div class="doc-attach-heading"><strong>' . h(approval_ko('%EC%B2%A8%EB%B6%80%EC%84%9C%EB%A5%98')) . '</strong>';
+    if ($mode === 'edit') {
+        echo '<span class="doc-attach-guide">' . h(approval_ko('%EB%93%B1%EB%A1%9D%ED%95%9C%20%ED%8C%8C%EC%9D%BC%EC%9D%80%20Google%20Drive%EC%97%90%20%EC%A0%80%EC%9E%A5%EB%90%A9%EB%8B%88%EB%8B%A4.')) . '</span>';
+    } else {
+        echo '<span class="doc-attach-count">' . h((string)$attachedFileCount) . h(approval_ko('%EA%B0%9C%20%EC%B2%A8%EB%B6%80')) . '</span>';
+    }
+    echo '</div>';
     foreach ($labels as $k => $lb) {
-        echo '<div class="attach-row">' . h($lb);
+        $f = isset($files[$k]) && is_array($files[$k]) ? $files[$k] : null;
+        echo '<div class="attach-row' . ($f ? ' attach-row-present' : '') . '"><span class="attach-label">' . h($lb) . '</span>';
         if ($mode === 'edit') {
-            echo ' <input type="file" name="' . h($k) . '_file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf">';
+            echo '<input class="attach-file-input" type="file" name="' . h($k) . '_file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf">';
         } else {
-            $f = isset($files[$k]) ? $files[$k] : null;
             if ($f) {
-                echo ' : ' . h($f['original_name']) . ' ' . cpms_approval_drive_file_links_html($f);
+                $originalName = isset($f['original_name']) && is_scalar($f['original_name']) ? trim((string)$f['original_name']) : '';
+                if ($originalName === '') $originalName = approval_ko('%EC%B2%A8%EB%B6%80%ED%8C%8C%EC%9D%BC');
+                echo '<span class="attach-file-name">' . h($originalName) . '</span>' . cpms_approval_drive_file_links_html($f);
             } else {
-                echo ' : -';
+                echo '<span class="attach-empty">' . h(approval_ko('%EB%AF%B8%EC%B2%A8%EB%B6%80')) . '</span>';
             }
         }
         echo '</div>';

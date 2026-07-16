@@ -9,11 +9,19 @@
 .doc-inline-input{display:inline-block;width:auto;min-width:220px}
 .doc-money-input{width:140px;min-width:140px}
 .doc-textarea{border:0;width:100%;min-height:66px}
+.proposal-special-note-table{margin:10px 0}
+.proposal-special-note-table th{width:12%;vertical-align:top;padding-top:12px}
+.proposal-special-note-table td{height:156px;vertical-align:top;padding:6px}
+.proposal-special-note-textarea{box-sizing:border-box;display:block;min-height:144px;padding:8px;line-height:1.6;resize:vertical}
+.proposal-special-note-value{min-height:132px;white-space:pre-wrap;line-height:1.6}
 .doc-sign{display:block;max-width:100%;max-height:42px;width:auto;height:auto;object-fit:contain;margin:0 auto}
 .doc-time{font-size:11px;color:#444}
 .doc-select{width:100%;border:1px solid #888;background:#fff;font-size:12px;padding:3px}
 .doc-subline{font-size:13px;line-height:1.9}
-.doc-attach{font-size:12px;margin-top:42px}
+.doc-attach{font-size:13px;margin-top:36px;padding:14px;border:2px solid #2563eb;background:#f8fbff}
+.doc-attach-heading{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:17px}
+.doc-attach-guide{font-size:12px;font-weight:400;color:#475569}
+.doc-attach-count{display:inline-block;padding:3px 9px;border-radius:999px;background:#2563eb;color:#fff;font-size:12px;font-weight:700}
 .approval-line-table{table-layout:fixed}
 .approval-line-table th,.approval-line-table td{text-align:center;vertical-align:middle}
 .approval-line-table .approval-side-col{width:30px}
@@ -29,7 +37,17 @@
 .approval-reference-title{font-weight:800;margin-bottom:6px}
 .approval-reference-select{min-height:88px}
 .approval-reference-help{font-size:12px;color:#475569;margin-top:6px}
-.attach-row{margin-top:6px}
+.attach-row{display:flex;align-items:center;gap:10px;min-height:38px;margin-top:6px;padding:6px 9px;border:1px solid #d7deea;background:#fff}
+.attach-row-present{border-color:#93c5fd;background:#eff6ff}
+.attach-label{flex:0 0 112px;font-weight:700}
+.attach-file-input{min-width:0;max-width:100%}
+.attach-file-name{min-width:0;flex:1;overflow-wrap:anywhere;font-weight:700;color:#111827}
+.attach-empty{color:#94a3b8}
+.approval-attachment-actions{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.approval-attachment-drive-badge{display:inline-block;padding:3px 7px;border-radius:999px;background:#e8f0fe;color:#174ea6;font-size:11px;font-weight:700}
+.approval-attachment-action{display:inline-block;padding:5px 10px;border-radius:4px;text-decoration:none!important;font-size:12px;font-weight:700}
+.approval-attachment-view{background:#2563eb;color:#fff!important}
+.approval-attachment-download{border:1px solid #2563eb;background:#fff;color:#1d4ed8!important}
 .leave-approval-wrap{display:flex;justify-content:flex-end;margin-bottom:12px}
 .leave-request-date-big{text-align:center;font-size:40px;font-weight:800;line-height:1.2;margin:34px 0 22px 0}
 .leave-applicant-line{text-align:right;margin-top:28px;font-size:22px;font-weight:700}
@@ -39,5 +57,5 @@
 .leave-sign-text{position:absolute;left:0;right:0;bottom:4px;font-size:18px;color:#111;z-index:1}
 .leave-sign-overlay{position:absolute;left:50%;top:50%;max-width:115px;max-height:46px;transform:translate(-50%,-50%);opacity:.92;z-index:2}
 .leave-sign-empty{position:absolute;left:0;right:0;top:2px;font-size:11px;z-index:3}
-@media print{.no-print{display:none!important}body{margin:0;background:#fff}.approval-paper{box-shadow:none;margin:0 auto;border-color:#111}}
+@media print{.no-print,.approval-attachment-actions{display:none!important}body{margin:0;background:#fff}.approval-paper{box-shadow:none;margin:0 auto;border-color:#111}.doc-attach{border-color:#111;background:#fff}.attach-row,.attach-row-present{border-color:#bbb;background:#fff}}
 </style>

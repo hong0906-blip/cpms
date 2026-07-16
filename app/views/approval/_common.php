@@ -1590,6 +1590,88 @@ if (!function_exists('approval_can_view_all_completed_documents')) {
     }
 }
 
+if (!function_exists('approval_user_can_cancel_approved_leave')) {
+    function approval_user_can_cancel_approved_leave($pdo, $user)
+    {
+        if (!is_array($user)) {
+            return false;
+        }
+
+        if (approval_is_management_department_user($pdo, $user) || approval_is_development_department_user($pdo, $user)) {
+            return true;
+        }
+
+        $employee = array(
+            'name' => isset($user['name']) ? (string)$user['name'] : '',
+            'email' => isset($user['email']) ? (string)$user['email'] : '',
+            'position' => isset($user['position']) ? (string)$user['position'] : '',
+            'role' => isset($user['role']) ? (string)$user['role'] : '',
+            'department' => isset($user['department']) ? (string)$user['department'] : ''
+        );
+        if (approval_employee_is_vp($employee) || approval_employee_is_ceo($employee)) {
+            return true;
+        }
+
+        if (!$pdo || !approval_table_exists($pdo, 'employees')) {
+            return false;
+        }
+
+        try {
+            $parts = array();
+            $params = array();
+            $employeeId = approval_current_employee_id($pdo, $user);
+            $email = approval_current_user_email($user);
+            $name = approval_current_user_name($user);
+
+            if ($employeeId > 0) {
+                $parts[] = 'id=:id';
+                $params[':id'] = $employeeId;
+            }
+            if ($email !== '') {
+                $parts[] = 'LOWER(TRIM(email))=LOWER(TRIM(:email))';
+                $params[':email'] = $email;
+            }
+            if ($name !== '') {
+                $parts[] = 'name=:name';
+                $params[':name'] = $name;
+            }
+            if (count($parts) === 0) {
+                return false;
+            }
+
+            $positionSelect = approval_table_column_exists($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+            $roleSelect = approval_table_column_exists($pdo, 'employees', 'role') ? 'role' : "'' AS role";
+            $departmentSelect = approval_table_column_exists($pdo, 'employees', 'department') ? 'department' : "'' AS department";
+            $sql = "SELECT id, name, email, " . $departmentSelect . ", " . $positionSelect . ", " . $roleSelect . " FROM employees WHERE " . implode(' OR ', $parts) . " LIMIT 1";
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            $rowDepartment = is_array($row) && isset($row['department']) ? $row['department'] : '';
+            return approval_employee_is_vp($row)
+                || approval_employee_is_ceo($row)
+                || approval_is_management_department_value($rowDepartment)
+                || approval_is_development_department_value($rowDepartment);
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+}
+
+if (!function_exists('approval_can_cancel_approved_leave')) {
+    function approval_can_cancel_approved_leave($pdo, $docRow, $user)
+    {
+        if (!is_array($docRow)) {
+            return false;
+        }
+        $docType = strtolower(trim((string)(isset($docRow['doc_type']) ? $docRow['doc_type'] : '')));
+        $status = strtoupper(trim((string)(isset($docRow['doc_status']) ? $docRow['doc_status'] : '')));
+        if ($docType !== 'leave' || !in_array($status, array('APPROVED', 'COMPLETED'), true)) {
+            return false;
+        }
+        return approval_user_can_cancel_approved_leave($pdo, $user);
+    }
+}
+
 if (!function_exists('approval_can_view_all_active_documents')) {
     function approval_can_view_all_active_documents($pdo, $user)
     {
@@ -1604,6 +1686,14 @@ if (!function_exists('approval_can_view_document')) {
             return false;
         }
         $status = strtoupper(trim((string)(isset($docRow['doc_status']) ? $docRow['doc_status'] : '')));
+        if (approval_can_cancel_approved_leave($pdo, $docRow, $user)) {
+            return true;
+        }
+        if ($status === 'CANCELLED'
+            && strtolower(trim((string)(isset($docRow['doc_type']) ? $docRow['doc_type'] : ''))) === 'leave'
+            && approval_user_can_cancel_approved_leave($pdo, $user)) {
+            return true;
+        }
         if (!in_array($status, array('CANCELLED', 'APPROVED', 'COMPLETED'), true) && approval_can_view_all_active_documents($pdo, $user)) {
             return true;
         }
@@ -1654,6 +1744,17 @@ if (!function_exists('approval_can_delete_document')) {
         if ($status !== 'CANCELLED') {
             return false;
         }
+        if (isset($docRow['id']) && approval_table_exists($pdo, 'cpms_approval_logs')) {
+            try {
+                $cancelLog = $pdo->prepare("SELECT COUNT(*) FROM cpms_approval_logs WHERE document_id=:id AND action_type='APPROVED_LEAVE_CANCEL'");
+                $cancelLog->execute(array(':id' => (int)$docRow['id']));
+                if ((int)$cancelLog->fetchColumn() > 0) {
+                    return false;
+                }
+            } catch (Exception $e) {
+                return false;
+            }
+        }
         if (approval_is_document_owner($pdo, $docRow, $user)) {
             return true;
         }
@@ -1684,6 +1785,9 @@ if (!function_exists('approval_document_title_by_view')) {
         if ($view === 'cancelled') {
             return approval_ko('%EC%B7%A8%EC%86%8C%EB%AC%B8%EC%84%9C');
         }
+        if ($view === 'rejected') {
+            return approval_ko('%EB%B0%98%EB%A0%A4%EB%AC%B8%EC%84%9C%ED%95%A8');
+        }
         if ($view === 'completed') {
             return approval_ko('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C');
         }
@@ -1696,6 +1800,9 @@ if (!function_exists('approval_document_empty_message')) {
     {
         if ($view === 'cancelled') {
             return approval_ko('%EC%B7%A8%EC%86%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+        }
+        if ($view === 'rejected') {
+            return approval_ko('%EB%B0%98%EB%A0%A4%EB%90%9C%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');
         }
         if ($view === 'completed') {
             return approval_ko('%EC%99%84%EB%A3%8C%EB%90%9C%20%EB%AC%B8%EC%84%9C%EA%B0%80%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.');

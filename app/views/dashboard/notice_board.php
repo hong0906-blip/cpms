@@ -155,6 +155,12 @@ function cpms_dashboard_notice_sorted_items($includeInactive) {
         $items[] = $row;
     }
     usort($items, function($a, $b) {
+        $aPinned = isset($a['is_pinned']) ? (int)$a['is_pinned'] : 0;
+        $bPinned = isset($b['is_pinned']) ? (int)$b['is_pinned'] : 0;
+        if ($aPinned !== $bPinned) {
+            return ($aPinned > $bPinned) ? -1 : 1;
+        }
+
         $at = isset($a['created_at']) ? strtotime((string)$a['created_at']) : 0;
         $bt = isset($b['created_at']) ? strtotime((string)$b['created_at']) : 0;
         if ($at === $bt) {
@@ -400,9 +406,12 @@ function cpms_dashboard_notice_unread_employee_map($pdo, $notices, $excludeEmplo
         if (!is_array($employeeRows)) $employeeRows = array();
 
         $eligibleEmployees = array();
+        $excludedUnreadNames = array('노준형', '이호상');
         foreach ($employeeRows as $employeeRow) {
             $employeeId = isset($employeeRow['id']) ? (int)$employeeRow['id'] : 0;
             if ($employeeId <= 0 || ($excludeEmployeeId > 0 && $employeeId === $excludeEmployeeId)) continue;
+            $employeeName = isset($employeeRow['name']) ? trim((string)$employeeRow['name']) : '';
+            if (in_array($employeeName, $excludedUnreadNames, true)) continue;
             if (cpms_dashboard_notice_is_representative_or_vp(
                 isset($employeeRow['role']) ? $employeeRow['role'] : '',
                 isset($employeeRow['position']) ? $employeeRow['position'] : '',
@@ -599,13 +608,23 @@ function cpms_render_dashboard_notice_board($pdo) {
     $canManage = cpms_dashboard_notice_can_manage();
     $canViewUnread = cpms_dashboard_notice_can_view_unread($pdo);
     $items = cpms_dashboard_notice_sorted_items($canManage);
-    $noticePageSize = 5;
-    $noticeTotalCount = count($items);
+    $noticePageSize = 15;
+    $pinnedItems = array();
+    $regularItems = array();
+    foreach ($items as $noticeItem) {
+        if (isset($noticeItem['is_pinned']) && (int)$noticeItem['is_pinned'] === 1) {
+            $pinnedItems[] = $noticeItem;
+        } else {
+            $regularItems[] = $noticeItem;
+        }
+    }
+    $noticeTotalCount = count($regularItems);
     $noticeTotalPages = max(1, (int)ceil($noticeTotalCount / $noticePageSize));
     $noticePage = isset($_GET['notice_page']) ? (int)$_GET['notice_page'] : 1;
     if ($noticePage < 1) $noticePage = 1;
     if ($noticePage > $noticeTotalPages) $noticePage = $noticeTotalPages;
-    $pageItems = array_slice($items, ($noticePage - 1) * $noticePageSize, $noticePageSize);
+    $pageRegularItems = array_slice($regularItems, ($noticePage - 1) * $noticePageSize, $noticePageSize);
+    $pageItems = array_merge($pinnedItems, $pageRegularItems);
     $currentEmployeeId = cpms_dashboard_notice_current_employee_id($pdo);
     $unreadEmployeeMap = $canViewUnread ? cpms_dashboard_notice_unread_employee_map($pdo, $pageItems, $currentEmployeeId) : array();
     $unreadTrackingAvailable = is_array($unreadEmployeeMap);
@@ -620,43 +639,64 @@ function cpms_render_dashboard_notice_board($pdo) {
     $noticeFlash = cpms_dashboard_notice_flash_get();
     ?>
     <style>
+      #cpmsDashboardNoticeBoard .cpms-notice-mobile-meta { display: none; }
       @media (max-width: 767px) {
         #cpmsDashboardNoticeBoard { padding: 16px; border-radius: 20px; }
-        #cpmsDashboardNoticeBoard .cpms-notice-table { overflow: visible; border: 0; background: transparent; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table { overflow: hidden; border: 1px solid #e2e8f0; background: #fff; }
         #cpmsDashboardNoticeBoard .cpms-notice-table table,
+        #cpmsDashboardNoticeBoard .cpms-notice-table thead,
         #cpmsDashboardNoticeBoard .cpms-notice-table tbody,
-        #cpmsDashboardNoticeBoard .cpms-notice-table tr,
-        #cpmsDashboardNoticeBoard .cpms-notice-table td { display: block; width: 100%; min-width: 0; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table tr { display: block; width: 100%; min-width: 0; }
         #cpmsDashboardNoticeBoard .cpms-notice-table table { min-width: 0; }
-        #cpmsDashboardNoticeBoard .cpms-notice-table thead { display: none; }
-        #cpmsDashboardNoticeBoard .cpms-notice-table tr {
-          margin-bottom: 12px;
-          padding: 12px;
-          border: 1px solid #e2e8f0;
-          border-radius: 16px;
-          background: #fff;
-          box-shadow: 0 6px 18px rgba(15, 23, 42, .05);
-        }
-        #cpmsDashboardNoticeBoard .cpms-notice-table td {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 12px;
-          padding: 7px 4px;
+        #cpmsDashboardNoticeBoard .cpms-notice-table thead { display: block; background: #f8fafc; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table thead tr,
+        #cpmsDashboardNoticeBoard .cpms-notice-table tbody tr {
+          display: grid;
+          grid-template-columns: 60px minmax(0, 1fr) auto;
+          align-items: center;
+          margin: 0;
+          padding: 0;
           border: 0;
-          text-align: right;
+          border-top: 1px solid #e2e8f0;
+          border-radius: 0;
+          background: #fff;
+          box-shadow: none;
         }
-        #cpmsDashboardNoticeBoard .cpms-notice-table td::before {
-          content: attr(data-label);
-          flex: 0 0 64px;
-          color: #64748b;
+        #cpmsDashboardNoticeBoard .cpms-notice-table thead tr { border-top: 0; background: #f8fafc; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table th {
+          display: block;
+          width: auto;
+          min-width: 0;
+          padding: 10px 8px;
           font-size: 12px;
-          font-weight: 800;
+        }
+        #cpmsDashboardNoticeBoard .cpms-notice-table th:nth-child(3),
+        #cpmsDashboardNoticeBoard .cpms-notice-table th:nth-child(4),
+        #cpmsDashboardNoticeBoard .cpms-notice-table td[data-notice-writer-cell],
+        #cpmsDashboardNoticeBoard .cpms-notice-table td[data-notice-date-cell] { display: none; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table td {
+          display: block;
+          width: auto;
+          min-width: 0;
+          padding: 12px 8px;
+          border: 0;
           text-align: left;
         }
-        #cpmsDashboardNoticeBoard .cpms-notice-table td[data-notice-title-cell] { display: block; text-align: left; }
-        #cpmsDashboardNoticeBoard .cpms-notice-table td[data-notice-title-cell]::before { display: block; margin-bottom: 5px; }
-        #cpmsDashboardNoticeBoard .cpms-notice-table td[data-notice-manage-cell] > div { margin-left: auto; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table td::before { display: none; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table td[data-notice-title-cell] button { width: 100%; line-height: 1.45; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table td[data-notice-manage-cell] { padding-left: 4px; text-align: right; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table td[data-notice-manage-cell] > div { margin-left: 0; }
+        #cpmsDashboardNoticeBoard .cpms-notice-table .cpms-notice-mobile-meta {
+          display: block;
+          margin-top: 4px;
+          overflow: hidden;
+          color: #64748b;
+          font-size: 11px;
+          font-weight: 500;
+          line-height: 1.4;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
       }
     </style>
     <div id="cpmsDashboardNoticeBoard" class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100 mb-8">
@@ -680,9 +720,9 @@ function cpms_render_dashboard_notice_board($pdo) {
             <div class="flex flex-wrap items-center gap-2">
                 <span class="px-3 py-2 rounded-full bg-slate-100 text-slate-700 text-sm font-extrabold"><?php echo h(cpms_dashboard_notice_label('all')); ?> <?php echo count($items); ?><?php echo h(cpms_dashboard_notice_label('count_unit')); ?></span>
                 <?php if ($canManage): ?>
-                    <a href="#cpmsDashboardNoticeFormWrap" class="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-gray-900 text-white text-sm font-extrabold">
+                    <button type="button" data-dashboard-notice-create class="inline-flex items-center gap-2 px-4 py-3 rounded-2xl bg-gray-900 text-white text-sm font-extrabold">
                         <i data-lucide="plus" class="w-4 h-4"></i><?php echo h(cpms_dashboard_notice_label('create')); ?>
-                    </a>
+                    </button>
                 <?php endif; ?>
             </div>
         </div>
@@ -729,6 +769,11 @@ function cpms_render_dashboard_notice_board($pdo) {
                                     <button type="button" class="text-left font-extrabold text-gray-900 hover:text-sky-700 break-words" data-dashboard-notice-open="<?php echo h($noticeId); ?>">
                                         <?php echo h($noticeTitle); ?>
                                     </button>
+                                    <div class="cpms-notice-mobile-meta">
+                                        <?php echo h(isset($notice['author_name']) && trim((string)$notice['author_name']) !== '' ? $notice['author_name'] : '-'); ?>
+                                        <span aria-hidden="true">·</span>
+                                        <?php echo h($createdAt !== '' ? $createdAt : '-'); ?>
+                                    </div>
                                     <div id="cpmsDashboardNoticeContent-<?php echo h($noticeId); ?>" class="hidden">
                                         <div data-notice-title><?php echo h($noticeTitle); ?></div>
                                         <div data-notice-meta><?php echo h(cpms_dashboard_notice_meta($notice)); ?></div>
@@ -794,8 +839,8 @@ function cpms_render_dashboard_notice_board($pdo) {
                                         </div>
                                     </div>
                                 </td>
-                                <td class="px-4 py-3 align-top text-gray-600" data-label="<?php echo h(cpms_dashboard_notice_label('writer')); ?>"><?php echo h(isset($notice['author_name']) && trim((string)$notice['author_name']) !== '' ? $notice['author_name'] : '-'); ?></td>
-                                <td class="px-4 py-3 align-top text-gray-600" data-label="<?php echo h(cpms_dashboard_notice_label('date')); ?>"><?php echo h($createdAt !== '' ? $createdAt : '-'); ?></td>
+                                <td class="px-4 py-3 align-top text-gray-600" data-notice-writer-cell data-label="<?php echo h(cpms_dashboard_notice_label('writer')); ?>"><?php echo h(isset($notice['author_name']) && trim((string)$notice['author_name']) !== '' ? $notice['author_name'] : '-'); ?></td>
+                                <td class="px-4 py-3 align-top text-gray-600" data-notice-date-cell data-label="<?php echo h(cpms_dashboard_notice_label('date')); ?>"><?php echo h($createdAt !== '' ? $createdAt : '-'); ?></td>
                                 <?php if ($canManage): ?>
                                     <td class="px-4 py-3 align-top text-right" data-notice-manage-cell data-label="<?php echo h(cpms_dashboard_notice_label('manage')); ?>">
                                         <div class="inline-flex items-center gap-2">
@@ -845,44 +890,53 @@ function cpms_render_dashboard_notice_board($pdo) {
             <?php endif; ?>
         <?php endif; ?>
 
-        <?php if ($canManage): ?>
-            <div id="cpmsDashboardNoticeFormWrap" class="mt-5 rounded-2xl border border-gray-200 bg-slate-50 p-4">
-                <div class="font-extrabold text-gray-900 mb-3"><?php echo h(cpms_dashboard_notice_label('new_notice')); ?></div>
-                <form id="cpmsDashboardNoticeForm" method="post" action="<?php echo h($actionUrl); ?>" class="space-y-3">
-                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                    <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
-                    <input type="hidden" name="action" value="save">
-                    <input type="hidden" name="id" value="">
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-1"><?php echo h(cpms_dashboard_notice_label('notice_title')); ?></label>
-                        <input type="text" name="title" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" required>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-bold text-gray-700 mb-1"><?php echo h(cpms_dashboard_notice_label('notice_content')); ?></label>
-                        <textarea name="content" rows="5" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" required></textarea>
-                    </div>
-                    <div class="flex flex-wrap items-center justify-between gap-3">
-                        <div class="flex flex-wrap items-center gap-3">
-                            <label class="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white border border-gray-200 text-sm font-bold text-gray-700">
-                                <input type="hidden" name="is_active" value="0">
-                                <input type="checkbox" name="is_active" value="1" checked>
-                                <?php echo h(cpms_dashboard_notice_label('visible')); ?>
-                            </label>
-                            <label class="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white border border-gray-200 text-sm font-bold text-gray-700">
-                                <input type="hidden" name="is_pinned" value="0">
-                                <input type="checkbox" name="is_pinned" value="1">
-                                <?php echo h(cpms_dashboard_notice_label('fixed')); ?>
-                            </label>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button type="button" data-dashboard-notice-form-reset class="px-4 py-3 rounded-2xl border border-gray-200 bg-white text-gray-700 font-extrabold"><?php echo h(cpms_dashboard_notice_label('cancel')); ?></button>
-                            <button type="submit" data-dashboard-notice-submit class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold"><?php echo h(cpms_dashboard_notice_label('save')); ?></button>
-                        </div>
-                    </div>
-                </form>
-            </div>
-        <?php endif; ?>
     </div>
+
+    <?php if ($canManage): ?>
+        <div id="modal-dashboardNoticeForm" class="fixed inset-0 z-50 hidden">
+            <div class="absolute inset-0 bg-black/45" data-dashboard-notice-form-close></div>
+            <div class="absolute inset-0 flex items-center justify-center p-4">
+                <div id="cpmsDashboardNoticeFormWrap" class="w-full max-w-3xl max-h-[88vh] overflow-y-auto rounded-3xl bg-white shadow-2xl border border-gray-100">
+                    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+                        <div class="text-2xl font-extrabold text-gray-900" data-dashboard-notice-form-title><?php echo h(cpms_dashboard_notice_label('new_notice')); ?></div>
+                        <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-dashboard-notice-form-close><?php echo h(cpms_dashboard_notice_label('close')); ?></button>
+                    </div>
+                    <form id="cpmsDashboardNoticeForm" method="post" action="<?php echo h($actionUrl); ?>" class="p-5 md:p-6 space-y-3">
+                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                        <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                        <input type="hidden" name="action" value="save">
+                        <input type="hidden" name="id" value="">
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1"><?php echo h(cpms_dashboard_notice_label('notice_title')); ?></label>
+                            <input type="text" name="title" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-gray-700 mb-1"><?php echo h(cpms_dashboard_notice_label('notice_content')); ?></label>
+                            <textarea name="content" rows="5" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white" required></textarea>
+                        </div>
+                        <div class="flex flex-wrap items-center justify-between gap-3 pt-2">
+                            <div class="flex flex-wrap items-center gap-3">
+                                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white border border-gray-200 text-sm font-bold text-gray-700">
+                                    <input type="hidden" name="is_active" value="0">
+                                    <input type="checkbox" name="is_active" value="1" checked>
+                                    <?php echo h(cpms_dashboard_notice_label('visible')); ?>
+                                </label>
+                                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-2xl bg-white border border-gray-200 text-sm font-bold text-gray-700">
+                                    <input type="hidden" name="is_pinned" value="0">
+                                    <input type="checkbox" name="is_pinned" value="1">
+                                    <?php echo h(cpms_dashboard_notice_label('fixed')); ?>
+                                </label>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button type="button" data-dashboard-notice-form-reset class="px-4 py-3 rounded-2xl border border-gray-200 bg-white text-gray-700 font-extrabold"><?php echo h(cpms_dashboard_notice_label('cancel')); ?></button>
+                                <button type="submit" data-dashboard-notice-submit class="px-5 py-3 rounded-2xl bg-gray-900 text-white font-extrabold"><?php echo h(cpms_dashboard_notice_label('save')); ?></button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    <?php endif; ?>
 
     <div id="modal-dashboardNoticeDetail" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-black/45" data-dashboard-notice-detail-close></div>
@@ -903,6 +957,7 @@ function cpms_render_dashboard_notice_board($pdo) {
     <script>
     (function(){
         var detailModal = document.getElementById('modal-dashboardNoticeDetail');
+        var formModal = document.getElementById('modal-dashboardNoticeForm');
         var deleteMessage = <?php echo json_encode(cpms_dashboard_notice_label('confirm_delete')); ?>;
         var editSaveText = <?php echo json_encode(cpms_dashboard_notice_label('edit_save')); ?>;
         var saveText = <?php echo json_encode(cpms_dashboard_notice_label('save')); ?>;
@@ -923,6 +978,15 @@ function cpms_render_dashboard_notice_board($pdo) {
         function closeDetail() {
             if (detailModal) detailModal.classList.add('hidden');
             document.body.classList.remove('overflow-hidden');
+        }
+        function closeFormModal() {
+            if (formModal) formModal.classList.add('hidden');
+            document.body.classList.remove('overflow-hidden');
+        }
+        function openFormModal() {
+            if (!formModal) return;
+            formModal.classList.remove('hidden');
+            document.body.classList.add('overflow-hidden');
         }
         function openDetail(id) {
             if (!detailModal || !id) return;
@@ -986,7 +1050,7 @@ function cpms_render_dashboard_notice_board($pdo) {
 
         var form = document.getElementById('cpmsDashboardNoticeForm');
         if (form) {
-            var formTitle = document.querySelector('#cpmsDashboardNoticeFormWrap .font-extrabold');
+            var formTitle = formModal ? formModal.querySelector('[data-dashboard-notice-form-title]') : null;
             var submitButton = form.querySelector('[data-dashboard-notice-submit]');
             var idInput = form.querySelector('input[name="id"]');
             var titleInput = form.querySelector('input[name="title"]');
@@ -1007,6 +1071,24 @@ function cpms_render_dashboard_notice_board($pdo) {
                 resetButton.addEventListener('click', function(e){
                     e.preventDefault();
                     resetForm();
+                    closeFormModal();
+                });
+            }
+            var formCloseButtons = formModal ? formModal.querySelectorAll('[data-dashboard-notice-form-close]') : [];
+            for (var fidx = 0; fidx < formCloseButtons.length; fidx++) {
+                formCloseButtons[fidx].addEventListener('click', function(e){
+                    e.preventDefault();
+                    resetForm();
+                    closeFormModal();
+                });
+            }
+            var createButtons = document.querySelectorAll('[data-dashboard-notice-create]');
+            for (var cidx = 0; cidx < createButtons.length; cidx++) {
+                createButtons[cidx].addEventListener('click', function(e){
+                    e.preventDefault();
+                    resetForm();
+                    openFormModal();
+                    if (titleInput) titleInput.focus();
                 });
             }
             var editButtons = document.querySelectorAll('[data-dashboard-notice-edit]');
@@ -1020,7 +1102,8 @@ function cpms_render_dashboard_notice_board($pdo) {
                     if (pinnedInput) pinnedInput.checked = (this.getAttribute('data-pinned') === '1');
                     if (submitButton) submitButton.textContent = editSaveText;
                     if (formTitle) formTitle.textContent = editSaveText;
-                    try { form.scrollIntoView({behavior:'smooth', block:'start'}); } catch (err) { form.scrollIntoView(); }
+                    openFormModal();
+                    if (titleInput) titleInput.focus();
                 });
             }
         }
@@ -1028,6 +1111,7 @@ function cpms_render_dashboard_notice_board($pdo) {
         document.addEventListener('keydown', function(e){
             if (e.key === 'Escape') {
                 if (detailModal && !detailModal.classList.contains('hidden')) closeDetail();
+                else if (formModal && !formModal.classList.contains('hidden')) closeFormModal();
             }
         });
 
@@ -1189,6 +1273,103 @@ function cpms_dashboard_birthday_month_day($value) {
     return array($month, $day);
 }}
 
+if (!function_exists('cpms_dashboard_birthday_date_for_year')) {
+function cpms_dashboard_birthday_date_for_year($year, $month, $day) {
+    $year = (int)$year;
+    $month = (int)$month;
+    $day = (int)$day;
+    if ($year < 1 || !checkdate($month, $day, $year)) return '';
+    return sprintf('%04d-%02d-%02d', $year, $month, $day);
+}}
+
+if (!function_exists('cpms_dashboard_birthday_holiday_dates')) {
+function cpms_dashboard_birthday_holiday_dates($pdo, $startDate, $endDate) {
+    $holidayDates = array();
+    $startDate = trim((string)$startDate);
+    $endDate = trim((string)$endDate);
+
+    if ($pdo) {
+        try {
+            $st = $pdo->prepare("SELECT holiday_date FROM cpms_holiday_cache WHERE is_active=1 AND holiday_date BETWEEN :start_date AND :end_date");
+            $st->execute(array(
+                ':start_date' => $startDate,
+                ':end_date' => $endDate
+            ));
+            while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+                $holidayDate = isset($row['holiday_date']) ? trim((string)$row['holiday_date']) : '';
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $holidayDate)) {
+                    $holidayDates[$holidayDate] = true;
+                }
+            }
+        } catch (Exception $e) {
+            error_log('[dashboard_birthday] holiday lookup failed: ' . $e->getMessage());
+        }
+    }
+
+    /*
+     * 2026년에 새로 공휴일이 된 날짜는 기존 Google 공휴일 캐시에 아직
+     * 반영되지 않았을 수 있으므로 법정 공휴일을 코드에서도 보완한다.
+     * 나머지 공휴일과 대체공휴일은 위의 등록 공휴일 캐시를 사용한다.
+     */
+    if (preg_match('/^(\d{4})-\d{2}-\d{2}$/', $startDate, $startParts)
+        && preg_match('/^(\d{4})-\d{2}-\d{2}$/', $endDate, $endParts)) {
+        $startYear = (int)$startParts[1];
+        $endYear = (int)$endParts[1];
+        if ($endYear >= 2026) {
+            if ($startYear < 2026) $startYear = 2026;
+            for ($year = $startYear; $year <= $endYear; $year++) {
+                $newStatutoryDates = array(
+                    sprintf('%04d-05-01', $year),
+                    sprintf('%04d-07-17', $year)
+                );
+                foreach ($newStatutoryDates as $statutoryDate) {
+                    if ($statutoryDate >= $startDate && $statutoryDate <= $endDate) {
+                        $holidayDates[$statutoryDate] = true;
+                    }
+                }
+            }
+        }
+    }
+
+    return $holidayDates;
+}}
+
+if (!function_exists('cpms_dashboard_birthday_is_non_working_date')) {
+function cpms_dashboard_birthday_is_non_working_date($date, $holidayDates) {
+    $date = trim((string)$date);
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $parts)) return true;
+
+    $year = (int)$parts[1];
+    $month = (int)$parts[2];
+    $day = (int)$parts[3];
+    if (!checkdate($month, $day, $year)) return true;
+
+    $timestamp = mktime(12, 0, 0, $month, $day, $year);
+    $weekday = (int)date('N', $timestamp);
+    if ($weekday === 6 || $weekday === 7) return true;
+
+    return is_array($holidayDates) && isset($holidayDates[$date]);
+}}
+
+if (!function_exists('cpms_dashboard_birthday_celebration_date')) {
+function cpms_dashboard_birthday_celebration_date($birthdayDate, $holidayDates) {
+    $birthdayDate = trim((string)$birthdayDate);
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $birthdayDate, $parts)) return '';
+    if (!checkdate((int)$parts[2], (int)$parts[3], (int)$parts[1])) return '';
+
+    $celebrationDate = $birthdayDate;
+    for ($i = 0; $i < 370; $i++) {
+        if (!cpms_dashboard_birthday_is_non_working_date($celebrationDate, $holidayDates)) {
+            return $celebrationDate;
+        }
+        $timestamp = strtotime($celebrationDate . ' 12:00:00 -1 day');
+        if ($timestamp === false) return '';
+        $celebrationDate = date('Y-m-d', $timestamp);
+    }
+
+    return '';
+}}
+
 if (!function_exists('cpms_dashboard_birthday_message')) {
 function cpms_dashboard_birthday_message($person) {
     $name = is_array($person) && isset($person['name']) ? trim((string)$person['name']) : '';
@@ -1206,10 +1387,18 @@ function cpms_dashboard_birthday_today_employees($pdo, $today) {
     if (!cpms_dashboard_birthday_employee_column_exists($pdo, 'name')) return $items;
     if (!cpms_dashboard_birthday_employee_column_exists($pdo, 'birth_date')) return $items;
 
-    $todayParts = cpms_dashboard_birthday_month_day($today);
-    $todayMonth = isset($todayParts[0]) ? (int)$todayParts[0] : 0;
-    $todayDay = isset($todayParts[1]) ? (int)$todayParts[1] : 0;
-    if ($todayMonth < 1 || $todayDay < 1) return $items;
+    $today = trim((string)$today);
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $today, $todayParts)) return $items;
+    $todayYear = (int)$todayParts[1];
+    $todayMonth = (int)$todayParts[2];
+    $todayDay = (int)$todayParts[3];
+    if (!checkdate($todayMonth, $todayDay, $todayYear)) return $items;
+
+    $holidayDates = cpms_dashboard_birthday_holiday_dates(
+        $pdo,
+        sprintf('%04d-01-01', $todayYear - 1),
+        sprintf('%04d-12-31', $todayYear + 1)
+    );
 
     $positionSelect = cpms_dashboard_birthday_employee_column_exists($pdo, 'position') ? 'position' : "'' AS position";
     $where = array("birth_date IS NOT NULL", "CAST(birth_date AS CHAR) <> ''", "CAST(birth_date AS CHAR) <> '0000-00-00'");
@@ -1225,9 +1414,26 @@ function cpms_dashboard_birthday_today_employees($pdo, $today) {
             $birthParts = cpms_dashboard_birthday_month_day(isset($row['birth_date']) ? $row['birth_date'] : '');
             $birthMonth = isset($birthParts[0]) ? (int)$birthParts[0] : 0;
             $birthDay = isset($birthParts[1]) ? (int)$birthParts[1] : 0;
-            if ($birthMonth !== $todayMonth || $birthDay !== $todayDay) continue;
+            if ($birthMonth < 1 || $birthDay < 1) continue;
+
+            $birthdayDate = '';
+            $celebrationDate = '';
+            $candidateYears = array($todayYear, $todayYear + 1);
+            foreach ($candidateYears as $candidateYear) {
+                $candidateBirthdayDate = cpms_dashboard_birthday_date_for_year($candidateYear, $birthMonth, $birthDay);
+                if ($candidateBirthdayDate === '') continue;
+                $candidateCelebrationDate = cpms_dashboard_birthday_celebration_date($candidateBirthdayDate, $holidayDates);
+                if ($candidateCelebrationDate !== $today) continue;
+                $birthdayDate = $candidateBirthdayDate;
+                $celebrationDate = $candidateCelebrationDate;
+                break;
+            }
+            if ($celebrationDate === '') continue;
+
             $message = cpms_dashboard_birthday_message($row);
             if ($message === '') continue;
+            $row['birthday_date'] = $birthdayDate;
+            $row['celebration_date'] = $celebrationDate;
             $row['message'] = $message;
             $items[] = $row;
         }
@@ -1459,7 +1665,7 @@ function cpms_render_dashboard_birthday_modal($pdo) {
                         <img class="cpms-birthday-img cpms-birthday-cake" src="<?php echo h($cakeSrc); ?>" alt="<?php echo h(cpms_dashboard_birthday_text('%EC%BC%80%EC%9D%B4%ED%81%AC%20%EC%9D%B4%EB%AF%B8%EC%A7%80')); ?>">
                         <img class="cpms-birthday-img cpms-birthday-firework is-right" src="<?php echo h($fireworkSrc); ?>" alt="<?php echo h(cpms_dashboard_birthday_text('%ED%8F%AD%EC%A3%BD%20%EC%9D%B4%EB%AF%B8%EC%A7%80')); ?>">
                       </div>
-                      <div class="inline-flex items-center justify-center px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-sm font-extrabold border border-amber-200"><?php echo h(cpms_dashboard_birthday_text('%EC%98%A4%EB%8A%98%20%EC%83%9D%EC%9D%BC%EC%9E%90')); ?></div>
+                      <div class="inline-flex items-center justify-center px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-sm font-extrabold border border-amber-200"><?php echo h(cpms_dashboard_birthday_text('%EC%98%A4%EB%8A%98%20%EC%B6%95%ED%95%98%ED%95%A0%20%EC%83%9D%EC%9D%BC%EC%9E%90')); ?></div>
                     <?php if (count($birthdays) === 1): ?>
                         <div class="cpms-birthday-message mt-3 text-3xl md:text-5xl leading-tight font-black text-gray-950"><?php echo h(isset($birthdays[0]['message']) ? $birthdays[0]['message'] : ''); ?></div>
                     <?php else: ?>

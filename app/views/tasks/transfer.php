@@ -28,24 +28,31 @@ $reason = isset($_POST['transfer_reason']) ? trim((string)$_POST['transfer_reaso
 
 $task = cpms_tasks_find_task($pdo, $taskId);
 if (!$task || !cpms_tasks_can_transfer($task, $currentEmployeeId)) {
-    flash_set('danger', '업무 전달 권한이 없습니다.');
+    flash_set('danger', '담당자 변경 요청 권한이 없거나 이미 변경 요청이 진행 중입니다.');
     cpms_tasks_redirect_back();
 }
 if ($newAssigneeId <= 0 || $newAssigneeId === $currentEmployeeId) {
-    flash_set('danger', '전달할 담당자를 선택해주세요.');
+    flash_set('danger', '변경 요청할 담당자를 선택해주세요.');
     cpms_tasks_redirect_back();
 }
 
-$newAssignee = cpms_tasks_find_employee_by_id($pdo, $newAssigneeId);
+$newAssignee = null;
+$activeEmployees = cpms_tasks_fetch_active_employees($pdo);
+for ($i = 0; $i < count($activeEmployees); $i++) {
+    if (isset($activeEmployees[$i]['id']) && (int)$activeEmployees[$i]['id'] === $newAssigneeId) {
+        $newAssignee = $activeEmployees[$i];
+        break;
+    }
+}
 if (!$newAssignee) {
-    flash_set('danger', '전달할 담당자 정보를 찾을 수 없습니다.');
+    flash_set('danger', '변경 요청할 담당자 정보를 찾을 수 없습니다.');
     cpms_tasks_redirect_back();
 }
 
-if (cpms_tasks_transfer_task($pdo, $task, $newAssignee, $currentEmployee, $reason)) {
-    flash_set('success', '업무를 다른 담당자에게 전달했습니다.');
+if (cpms_tasks_request_transfer($pdo, $task, $newAssignee, $currentEmployee, $reason)) {
+    flash_set('success', '업무 요청자에게 담당자 변경 승인을 요청했습니다.');
 } else {
-    flash_set('danger', '업무 전달에 실패했습니다.');
+    flash_set('danger', '담당자 변경 요청에 실패했습니다.');
 }
 
 cpms_tasks_redirect_back();

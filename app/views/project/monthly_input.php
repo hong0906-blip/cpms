@@ -750,6 +750,9 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 <?php foreach($allMonths as $ymOpt): ?><option value="<?php echo h($ymOpt); ?>" <?php echo ($selectedViewMonth===$ymOpt)?'selected':''; ?>><?php echo h(str_replace('-', '.', $ymOpt)); ?></option><?php endforeach; ?>
 </select>
 <button type="submit" class="px-4 py-2 rounded-xl bg-amber-700 text-white">조회</button>
+<?php if ($monthlyInputRoute === '공사' && $selectedProjectId > 0): ?>
+<a href="<?php echo h(base_url()); ?>/?r=construction/monthly_cost_export&amp;pid=<?php echo (int)$selectedProjectId; ?>&amp;view_month=<?php echo h(urlencode($selectedViewMonth)); ?>&amp;month=<?php echo h(urlencode($guideYm)); ?>" class="px-4 py-2 rounded-xl bg-emerald-700 text-white font-bold hover:bg-emerald-800">통합 엑셀 다운로드</a>
+<?php endif; ?>
 </form>
 <?php if (false): ?>
 <?php foreach($salesDiagnostics as $diag): ?><div class="mb-1 text-xs text-gray-700"><?php echo h($diag); ?></div><?php endforeach; ?>

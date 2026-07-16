@@ -159,7 +159,7 @@ if (!$task) {
 }
 $requestedStatus = $status;
 $isMeetingTask = isset($task['task_type']) && (string)$task['task_type'] === 'meeting';
-$canApproveDone = (!$isMeetingTask && $status === 'done' && cpms_tasks_can_approve_completion($task, $currentEmployeeId));
+$canApproveDone = (!$isMeetingTask && $status === 'done' && cpms_tasks_can_approve_group_completion($pdo, $task, $currentEmployeeId));
 $canSelfComplete = (!$isMeetingTask && $status === 'done' && cpms_tasks_is_self_request($task) && cpms_tasks_can_submit_completion($task, $currentEmployeeId));
 $canSubmitCompletion = (!$isMeetingTask && $status === 'completion_pending' && cpms_tasks_can_submit_completion($task, $currentEmployeeId));
 $canChangeStatus = cpms_tasks_can_change_status($task, $currentEmployeeId);
@@ -196,7 +196,12 @@ try {
             throw new Exception('completion request failed');
         }
         $updatedTask = cpms_tasks_find_task($pdo, $taskId);
-        if ($updatedTask) $notificationSent = cpms_tasks_send_completion_pending_notification($pdo, $updatedTask);
+        if ($updatedTask) {
+            $completionSummary = cpms_tasks_completion_group_summary($pdo, $updatedTask);
+            if (isset($completionSummary['ready_for_approval']) && $completionSummary['ready_for_approval']) {
+                $notificationSent = cpms_tasks_send_completion_pending_notification($pdo, $updatedTask);
+            }
+        }
     } elseif ($status === 'done') {
         cpms_tasks_complete_task_and_group($pdo, $task, $currentEmployee, $completedMemo, $now);
         $updatedTask = cpms_tasks_find_task($pdo, $taskId);
