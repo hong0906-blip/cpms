@@ -28,6 +28,35 @@ if (!function_exists('approval_store_column_exists')) {
     }
 }
 
+if (!function_exists('approval_store_format_money_value')) {
+    function approval_store_format_money_value($value)
+    {
+        $digits = preg_replace('/[^0-9]/', '', (string)$value);
+        if ($digits === '') {
+            return '';
+        }
+        $digits = ltrim($digits, '0');
+        if ($digits === '') {
+            return '0';
+        }
+        return preg_replace('/\B(?=(\d{3})+(?!\d))/', ',', $digits);
+    }
+}
+
+if (!function_exists('approval_store_format_money_text_match')) {
+    function approval_store_format_money_text_match($matches)
+    {
+        return approval_store_format_money_value(isset($matches[0]) ? $matches[0] : '');
+    }
+}
+
+if (!function_exists('approval_store_format_money_text')) {
+    function approval_store_format_money_text($value)
+    {
+        return preg_replace_callback('/[0-9]+(?:,[0-9]+)*/', 'approval_store_format_money_text_match', (string)$value);
+    }
+}
+
 if (!function_exists('approval_store_employee')) {
     function approval_store_employee($pdo, $id)
     {
@@ -691,11 +720,11 @@ if ($isManagementOnlyDoc) {
         'intro_text' => isset($_POST['intro_text']) ? trim((string)$_POST['intro_text']) : '',
         'reason' => isset($_POST['reason']) ? trim((string)$_POST['reason']) : '',
         'company_name' => isset($_POST['company_name']) ? trim((string)$_POST['company_name']) : '',
-        'contract_amount' => isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '',
-        'advance_amount' => isset($_POST['advance_amount']) ? trim((string)$_POST['advance_amount']) : '',
+        'contract_amount' => approval_store_format_money_value(isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : ''),
+        'advance_amount' => approval_store_format_money_value(isset($_POST['advance_amount']) ? trim((string)$_POST['advance_amount']) : ''),
         'special_note' => isset($_POST['special_note']) ? trim((string)$_POST['special_note']) : '',
         'payment_request_date' => isset($_POST['payment_request_date']) ? trim((string)$_POST['payment_request_date']) : '',
-        'budget_status' => isset($_POST['budget_status']) ? trim((string)$_POST['budget_status']) : '',
+        'budget_status' => approval_store_format_money_text(isset($_POST['budget_status']) ? trim((string)$_POST['budget_status']) : ''),
         'writer_name' => $drafterName,
         'writer_email' => $creatorEmail,
         'delegate_level' => $delegateLevel

@@ -305,6 +305,7 @@ foreach ($usageRows as $ur) {
     );
 }
 
+$safetyRowsForMaterials = array();
 try {
     $safetyRowsForMaterials = cpms_safety_cost_project_items_between((int)$pid, $monthlyStart, $monthlyEnd);
     foreach ($safetyRowsForMaterials as $safetyRow) {
@@ -326,6 +327,41 @@ try {
         );
     }
 } catch (Exception $e) {}
+
+$inputUsageRows = array();
+foreach ($usageRows as $usageRowForInput) {
+    $usageRowForInput['_input_source'] = 'material';
+    $inputUsageRows[count($inputUsageRows)] = $usageRowForInput;
+}
+foreach ($safetyRowsForMaterials as $safetyRowForInput) {
+    if (!is_array($safetyRowForInput)) continue;
+    $safetyUseDateForInput = isset($safetyRowForInput['use_date']) ? cpms_safety_cost_valid_date($safetyRowForInput['use_date']) : '';
+    if ($safetyUseDateForInput === '') continue;
+    $inputUsageRows[count($inputUsageRows)] = array(
+        'id' => isset($safetyRowForInput['id']) ? (string)$safetyRowForInput['id'] : '',
+        'use_date' => $safetyUseDateForInput,
+        'category' => '안전관리비',
+        'advance_yn' => isset($safetyRowForInput['advance_yn']) ? cpms_material_advance_yn($safetyRowForInput['advance_yn']) : 'N',
+        'vendor_name' => isset($safetyRowForInput['vendor_name']) ? (string)$safetyRowForInput['vendor_name'] : '',
+        'amount' => cpms_safety_cost_row_amount($safetyRowForInput),
+        'memo' => material_monthly_detail_text($safetyRowForInput),
+        'remark' => isset($safetyRowForInput['remark']) ? (string)$safetyRowForInput['remark'] : '',
+        '_input_source' => 'safety',
+        '_safety_row' => $safetyRowForInput
+    );
+}
+usort($inputUsageRows, function($a, $b) {
+    $ad = isset($a['use_date']) ? (string)$a['use_date'] : '';
+    $bd = isset($b['use_date']) ? (string)$b['use_date'] : '';
+    if ($ad !== $bd) return strcmp($ad, $bd);
+    $ac = isset($a['category']) ? (string)$a['category'] : '';
+    $bc = isset($b['category']) ? (string)$b['category'] : '';
+    if ($ac !== $bc) return strcmp($ac, $bc);
+    $av = isset($a['vendor_name']) ? (string)$a['vendor_name'] : '';
+    $bv = isset($b['vendor_name']) ? (string)$b['vendor_name'] : '';
+    return strcmp($av, $bv);
+});
+$materialInputUsageCount = count($usageRows);
 
 usort($monthlyRows, function($a, $b) {
     $ad = isset($a['date']) ? (string)$a['date'] : '';
@@ -418,6 +454,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <option value="자재비">자재비</option>
                         <option value="구매품">구매품</option>
                         <option value="기타경비">기타경비</option>
+                        <option value="안전관리비">안전관리비</option>
                     </select>
                     <select name="advance_yn" class="px-3 py-3 border rounded-xl bg-white" required>
                         <option value="N">선급 N</option>
@@ -455,6 +492,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                 <div class="border border-blue-100 rounded-xl p-3 bg-white">
                     <label class="text-sm font-bold text-gray-700">거래명세표 첨부</label>
                     <input type="file" name="statement_file" accept="image/*,.pdf,.xlsx,.xls" capture="environment" class="mt-2 block w-full text-sm border rounded-xl px-3 py-2 bg-white">
+                    <div class="text-xs text-amber-700 mt-1">안전관리비 선택 시 PDF만 첨부할 수 있습니다.</div>
                 </div>
 
                 <button type="submit" class="w-full px-4 py-3 rounded-xl bg-blue-600 text-white font-extrabold">간편 저장</button>
@@ -486,6 +524,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                             <option value="자재비">자재비</option>
                             <option value="구매품">구매품</option>
                             <option value="기타경비">기타경비</option>
+                            <option value="안전관리비">안전관리비</option>
                         </select>
                         <select name="advance_yn" class="px-3 py-2 border rounded-xl" required>
                             <option value="N">선급 N</option>
@@ -524,6 +563,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <label class="text-sm font-bold text-gray-700">거래명세표 첨부</label>
                         <input type="file" name="statement_file" accept="image/*,.pdf,.xlsx,.xls" capture="environment" class="mt-2 block w-full text-sm border rounded-xl px-3 py-2 bg-white">
                         <div class="text-xs text-gray-500 mt-1">현장에서 사진 촬영 또는 PDF, 엑셀 파일 업로드 가능</div>
+                        <div class="text-xs text-amber-700 mt-1">안전관리비 선택 시 거래명세표는 PDF만 첨부할 수 있습니다.</div>
                     </div>
 
                     <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">저장</button>
@@ -715,15 +755,15 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
                 <div>
                     <div class="text-lg font-extrabold">입력내역 목록</div>
-                    <?php if ($canEditMaterials && count($usageRows) > 0): ?>
-                        <div class="text-xs text-gray-500 mt-1">잘못 업로드한 자료는 행을 체크한 뒤 선택 삭제할 수 있습니다.</div>
+                    <?php if ($canEditMaterials && $materialInputUsageCount > 0): ?>
+                        <div class="text-xs text-gray-500 mt-1">자재구입비 자료는 행을 체크한 뒤 선택 삭제할 수 있습니다. 안전관리비는 수정 화면에서 관리합니다.</div>
                     <?php endif; ?>
                 </div>
-                <?php if ($canEditMaterials && count($usageRows) > 0): ?>
+                <?php if ($canEditMaterials && $materialInputUsageCount > 0): ?>
                     <button type="submit" form="materialUsageBulkDeleteForm" class="px-3 py-2 rounded-xl border border-red-300 text-red-600 font-bold text-sm" onclick="return confirm('선택한 자재구입비 사용내역을 삭제할까요? 월별 자재구입비와 상황탭 집계에서도 제외됩니다.');">선택 삭제</button>
                 <?php endif; ?>
             </div>
-            <?php if ($canEditMaterials && count($usageRows) > 0): ?>
+            <?php if ($canEditMaterials && $materialInputUsageCount > 0): ?>
             <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_delete" id="materialUsageBulkDeleteForm">
                 <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                 <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
@@ -736,7 +776,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     <tr class="bg-gray-50">
                         <?php if ($canEditMaterials): ?>
                             <th class="p-2 border text-center w-12">
-                                <?php if (count($usageRows) > 0): ?>
+                                <?php if ($materialInputUsageCount > 0): ?>
                                     <input type="checkbox" id="materialUsageSelectAll" title="전체 선택">
                                 <?php endif; ?>
                             </th>
@@ -755,12 +795,15 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     </tr>
                     </thead>
                     <tbody>
-                    <?php if (count($usageRows) === 0): ?>
+                    <?php if (count($inputUsageRows) === 0): ?>
                         <tr><td colspan="<?php echo $canEditMaterials ? 10 : 8; ?>" class="p-3 border text-center text-gray-500">입력된 사용내역이 없습니다.</td></tr>
                     <?php else: ?>
-                        <?php foreach ($usageRows as $ur): ?>
+                        <?php foreach ($inputUsageRows as $ur): ?>
                             <?php
-                            $usageIdForList = isset($ur['id']) ? (int)$ur['id'] : 0;
+                            $isSafetyInputRow = (isset($ur['_input_source']) && (string)$ur['_input_source'] === 'safety');
+                            $usageIdForList = (!$isSafetyInputRow && isset($ur['id'])) ? (int)$ur['id'] : 0;
+                            $safetyIdForList = ($isSafetyInputRow && isset($ur['id'])) ? (string)$ur['id'] : '';
+                            $safetySourceRow = ($isSafetyInputRow && isset($ur['_safety_row']) && is_array($ur['_safety_row'])) ? $ur['_safety_row'] : array();
                             $listFiles = ($usageIdForList > 0 && isset($statementFilesByUsage[$usageIdForList])) ? $statementFilesByUsage[$usageIdForList] : array();
                             $usageIsNegative = (isset($ur['amount']) && (float)$ur['amount'] < 0);
                             ?>
@@ -769,6 +812,8 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                     <td class="p-2 border text-center">
                                         <?php if ($usageIdForList > 0): ?>
                                             <input type="checkbox" name="usage_ids[]" value="<?php echo (int)$usageIdForList; ?>" class="material-usage-delete-check">
+                                        <?php else: ?>
+                                            <span class="text-[11px] font-bold text-emerald-700">안전</span>
                                         <?php endif; ?>
                                     </td>
                                 <?php endif; ?>
@@ -781,12 +826,21 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                 <td class="p-2 border"><?php echo h(isset($ur['remark']) ? $ur['remark'] : ''); ?></td>
                                 <td class="p-2 border">
                                     <div class="flex flex-wrap gap-1">
-                                        <?php echo material_statement_links_html($listFiles, '거래명세표 다운로드', $canDownloadMaterialStatements, '첨부 없음'); ?>
+                                        <?php if ($isSafetyInputRow): ?>
+                                            <?php echo cpms_safety_cost_pdf_links_html($safetySourceRow); ?>
+                                        <?php else: ?>
+                                            <?php echo material_statement_links_html($listFiles, '거래명세표 다운로드', $canDownloadMaterialStatements, '첨부 없음'); ?>
+                                        <?php endif; ?>
                                     </div>
                                 </td>
                                 <?php if ($canEditMaterials): ?>
                                     <td class="p-2 border text-center">
-                                        <?php if ($usageIdForList > 0): ?>
+                                        <?php if ($isSafetyInputRow && $safetyIdForList !== ''): ?>
+                                            <a href="<?php echo h(base_url() . '/?r=safety_home&pid=' . (int)$pid . '&tab=safety_cost&safety_cost_edit=' . rawurlencode($safetyIdForList) . '#safety-cost-section'); ?>"
+                                               class="inline-flex px-3 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-bold">
+                                                안전관리비 수정
+                                            </a>
+                                        <?php elseif ($usageIdForList > 0): ?>
                                             <button type="button"
                                                     class="px-3 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold"
                                                     data-material-usage-edit
@@ -807,7 +861,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     </tbody>
                 </table>
             </div>
-            <?php if ($canEditMaterials && count($usageRows) > 0): ?>
+            <?php if ($canEditMaterials && $materialInputUsageCount > 0): ?>
             </form>
             <?php endif; ?>
         </div>
@@ -995,7 +1049,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             }
             function hideSuggestList(listEl){ if(!listEl)return; listEl.innerHTML=''; if(listEl.className.indexOf('hidden')===-1) listEl.className += ' hidden'; listEl.style.display='none'; }
             function showSuggestList(listEl){ if(!listEl)return; listEl.className=listEl.className.replace(/\bhidden\b/g,'').replace(/\s+/g,' ').trim(); listEl.style.display='block'; }
-            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark'] && (formEl.elements['remark'].value||'')==='') formEl.elements['remark'].value=p.remark||''; }
+            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1,'안전관리비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark'] && (formEl.elements['remark'].value||'')==='') formEl.elements['remark'].value=p.remark||''; }
             function renderMaterialSuggestions(inputEl, rows){ var wrap=inputEl?inputEl.closest('.vendor-search-wrap'):null; var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; listEl.innerHTML=''; if(!rows||!rows.length){ var empty=document.createElement('div'); empty.className='px-3 py-2 text-sm text-gray-500'; empty.textContent='검색 결과 없음'; listEl.appendChild(empty); showSuggestList(listEl); return; } for(var i=0;i<rows.length;i++){ (function(row){ var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.setAttribute('data-material-vendor-item','1'); btn.vendorData=row; btn.addEventListener('mousedown', function(ev){ ev.preventDefault(); }); listEl.appendChild(btn);} )(rows[i]); } showSuggestList(listEl); }
             document.addEventListener('input', function(e){ var inputEl=e.target; if(!inputEl||inputEl.className.indexOf('js-material-vendor-search')===-1) return; var wrap=inputEl.closest('.vendor-search-wrap'); var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; var q=(inputEl.value||'').trim(); if(materialVendorTimers[inputEl]) clearTimeout(materialVendorTimers[inputEl]); if(q.length<2){ hideSuggestList(listEl); return; } materialVendorTimers[inputEl]=setTimeout(function(){ // 프리셋 최신 검색
                 var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4)return; var rows=[]; if(xhr.status===200){ try{var json=JSON.parse(xhr.responseText); rows=(json&&json.items)?json.items:[];}catch(err){rows=[];} } renderMaterialSuggestions(inputEl, rows); }; xhr.send(); },250); });

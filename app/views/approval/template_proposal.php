@@ -154,8 +154,8 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     echo '<div style="text-align:center;margin:16px 0">- ' . h(approval_ko('%EB%8B%A4%20%EC%9D%8C')) . ' -</div>';
     echo '1. ' . h(approval_ko('%EC%82%AC%EC%9C%A0')) . ' : '; approval_doc_field($mode, 'reason', approval_doc_get($data, 'reason', ''), 'doc-input doc-inline-input', 'text', '');
     echo '<br>2. ' . h(approval_ko('%EB%82%B4%EC%9A%A9')) . ' : 1) ' . h(approval_ko('%EC%97%85%EC%B2%B4%EB%AA%85')) . ' : '; approval_doc_field($mode, 'company_name', approval_doc_get($data, 'company_name', ''), 'doc-input doc-inline-input', 'text', '');
-    echo '<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2) ' . h(approval_ko('%EB%B0%9C%EC%A3%BC%EA%B8%88%EC%95%A1')) . ' : '; approval_doc_field($mode, 'contract_amount', approval_doc_format_amount(approval_doc_get($data, 'contract_amount', '')), 'doc-input doc-inline-input doc-money-input', 'number', ''); echo ' ' . h(approval_ko('%EC%9B%90'));
-    echo '<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3) ' . h(approval_ko('%EC%84%A0%EA%B8%88%20%EC%A7%80%EA%B8%89%20%EC%9A%94%EC%B2%AD%EC%95%A1')) . ' : '; approval_doc_field($mode, 'advance_amount', approval_doc_format_amount(approval_doc_get($data, 'advance_amount', '')), 'doc-input doc-inline-input doc-money-input', 'number', ''); echo ' ' . h(approval_ko('%EC%9B%90'));
+    echo '<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;2) ' . h(approval_ko('%EB%B0%9C%EC%A3%BC%EA%B8%88%EC%95%A1')) . ' : '; approval_doc_field($mode, 'contract_amount', approval_doc_format_amount(approval_doc_get($data, 'contract_amount', '')), 'doc-input doc-inline-input doc-money-input js-proposal-money-input', 'text', ''); echo ' ' . h(approval_ko('%EC%9B%90'));
+    echo '<br>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;3) ' . h(approval_ko('%EC%84%A0%EA%B8%88%20%EC%A7%80%EA%B8%89%20%EC%9A%94%EC%B2%AD%EC%95%A1')) . ' : '; approval_doc_field($mode, 'advance_amount', approval_doc_format_amount(approval_doc_get($data, 'advance_amount', '')), 'doc-input doc-inline-input doc-money-input js-proposal-money-input', 'text', ''); echo ' ' . h(approval_ko('%EC%9B%90'));
     $specialNote = approval_doc_get($data, 'special_note', '');
     if ($specialNote === '') {
         $legacySpecialNotes = array();
@@ -181,7 +181,7 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     }
     echo '</td></tr></table>';
     echo '4. ' . h(approval_ko('%EC%A7%80%EA%B8%89%EC%9A%94%EC%B2%AD%EC%9D%BC')) . ' : '; approval_doc_field($mode, 'payment_request_date', approval_doc_get($data, 'payment_request_date', date('Y-m-d')), 'doc-input doc-inline-input', 'date', '');
-    echo '<br>5. ' . h(approval_ko('%EC%98%88%EC%82%B0%ED%98%84%ED%99%A9')) . ' : '; approval_doc_field($mode, 'budget_status', approval_doc_get($data, 'budget_status', ''), 'doc-input doc-inline-input', 'text', '');
+    echo '<br>5. ' . h(approval_ko('%EC%98%88%EC%82%B0%ED%98%84%ED%99%A9')) . ' : '; approval_doc_field($mode, 'budget_status', approval_doc_format_amount_text(approval_doc_get($data, 'budget_status', '')), 'doc-input doc-inline-input js-proposal-money-text-input', 'text', '');
     echo '</div><div class="doc-attach">';
     $labels = array(
         'order_doc' => approval_ko('%EB%B0%9C%EC%A3%BC%EC%84%9C'),
@@ -216,4 +216,13 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
         echo '</div>';
     }
     echo '</div></div>';
+    if ($mode === 'edit') {
+        echo '<script>(function(){';
+        echo 'function formatMoney(value){var digits=String(value||"").replace(/[^0-9]/g,"");if(digits===""){return "";}digits=digits.replace(/^0+(?=[0-9])/g,"");return digits.replace(/\B(?=(\d{3})+(?!\d))/g,",");}';
+        echo 'function formatMoneyText(value){return String(value||"").replace(/[0-9]+(?:,[0-9]+)*/g,function(part){return formatMoney(part);});}';
+        echo 'function applyFormat(input,formatter){var before=input.value;var start=typeof input.selectionStart==="number"?input.selectionStart:before.length;var end=typeof input.selectionEnd==="number"?input.selectionEnd:start;var after=formatter(before);if(after===before){return;}var newStart=formatter(before.substring(0,start)).length;var newEnd=formatter(before.substring(0,end)).length;input.value=after;if(input.setSelectionRange){input.setSelectionRange(newStart,newEnd);}}';
+        echo 'function bind(selector,formatter,useNumericKeyboard){var inputs=document.querySelectorAll(selector);for(var i=0;i<inputs.length;i++){(function(input){if(useNumericKeyboard){input.setAttribute("inputmode","numeric");}applyFormat(input,formatter);input.addEventListener("input",function(){applyFormat(input,formatter);});})(inputs[i]);}}';
+        echo 'bind(".js-proposal-money-input",formatMoney,true);bind(".js-proposal-money-text-input",formatMoneyText,false);';
+        echo '})();</script>';
+    }
 }

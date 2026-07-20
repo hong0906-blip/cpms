@@ -4,6 +4,8 @@
  * PHP 5.6 compatible.
  */
 
+require_once dirname(__DIR__) . '/attendance/common.php';
+
 if (!function_exists('cpms_company_chat_daily_source_id')) {
 function cpms_company_chat_daily_source_id($baseDate) {
     return (int)str_replace('-', '', (string)$baseDate);
@@ -44,6 +46,29 @@ if (!function_exists('cpms_company_chat_daily_time_reached')) {
 function cpms_company_chat_daily_time_reached($timeText) {
     $now = new DateTime('now', new DateTimeZone('Asia/Seoul'));
     return strcmp($now->format('H:i:s'), (string)$timeText) >= 0;
+}}
+
+if (!function_exists('cpms_company_chat_daily_time_matches_minute')) {
+function cpms_company_chat_daily_time_matches_minute($timeText) {
+    $timeText = substr(trim((string)$timeText), 0, 5);
+    if (!preg_match('/^\d{2}:\d{2}$/', $timeText)) return false;
+    $now = new DateTime('now', new DateTimeZone('Asia/Seoul'));
+    return $now->format('H:i') === $timeText;
+}}
+
+if (!function_exists('cpms_company_chat_daily_leave_is_send_day')) {
+function cpms_company_chat_daily_leave_is_send_day($pdo, $baseDate) {
+    $baseDate = trim((string)$baseDate);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $baseDate)) return false;
+    try {
+        $dateValue = new DateTime($baseDate . ' 00:00:00', new DateTimeZone('Asia/Seoul'));
+    } catch (Exception $e) {
+        return false;
+    }
+    $weekDay = (int)$dateValue->format('N');
+    if ($weekDay >= 6) return false;
+    if (function_exists('attendance_is_holiday') && attendance_is_holiday($pdo, $baseDate)) return false;
+    return true;
 }}
 
 if (!function_exists('cpms_company_chat_daily_lock_acquire')) {
@@ -249,6 +274,7 @@ if (!function_exists('cpms_company_chat_queue_daily_leave_addition')) {
 function cpms_company_chat_queue_daily_leave_addition($pdo, $documentId) {
     if (!$pdo || (int)$documentId <= 0 || !cpms_company_chat_daily_time_reached('08:00:00')) return false;
     $baseDate = (new DateTime('now', new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
+    if (!cpms_company_chat_daily_leave_is_send_day($pdo, $baseDate)) return false;
     $sourceId = cpms_company_chat_daily_source_id($baseDate);
     if (!cpms_company_chat_notification_success_exists($pdo, 'DAILY_LEAVE', 'DAILY_LEAVE_COMPANY_SPACE', $sourceId, null)) return false;
     $person = cpms_company_chat_daily_leave_person_by_document($pdo, $documentId, $baseDate);
@@ -298,12 +324,17 @@ function cpms_company_chat_process_daily_leave($pdo, $force) {
         $result['reason'] = 'DB connection is unavailable.';
         return $result;
     }
-    if (!cpms_company_chat_daily_time_reached('08:00:00')) {
+    $baseDate = (new DateTime('now', new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
+    if (!cpms_company_chat_daily_leave_is_send_day($pdo, $baseDate)) {
         $result['skipped'] = 1;
-        $result['reason'] = '08:00 이전에는 휴가자 알림을 발송하지 않습니다.';
+        $result['reason'] = '주말, 공휴일 또는 대체공휴일에는 연차자 전체 알림을 발송하지 않습니다.';
         return $result;
     }
-    $baseDate = (new DateTime('now', new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
+    if (!$force && !cpms_company_chat_daily_time_matches_minute('08:00')) {
+        $result['skipped'] = 1;
+        $result['reason'] = '당일 연차자 전체 알림은 08:00에만 발송합니다.';
+        return $result;
+    }
     $sourceId = cpms_company_chat_daily_source_id($baseDate);
     $sourceType = 'DAILY_LEAVE';
     $eventType = 'DAILY_LEAVE_COMPANY_SPACE';
@@ -389,6 +420,11 @@ function cpms_company_chat_process_daily_leave_additions($pdo) {
         return $result;
     }
     $baseDate = (new DateTime('now', new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
+    if (!cpms_company_chat_daily_leave_is_send_day($pdo, $baseDate)) {
+        $result['skipped'] = 1;
+        $result['reason'] = '주말, 공휴일 또는 대체공휴일에는 추가 연차자 알림을 발송하지 않습니다.';
+        return $result;
+    }
     $sourceId = cpms_company_chat_daily_source_id($baseDate);
     if (!cpms_company_chat_notification_success_exists($pdo, 'DAILY_LEAVE', 'DAILY_LEAVE_COMPANY_SPACE', $sourceId, null)) {
         $result['skipped'] = 1;

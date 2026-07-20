@@ -154,7 +154,25 @@ if (!function_exists('approval_doc_format_amount')) {
         if ($n === '') {
             return '';
         }
-        return number_format((float)$n);
+        $n = ltrim($n, '0');
+        if ($n === '') {
+            return '0';
+        }
+        return preg_replace('/\B(?=(\d{3})+(?!\d))/', ',', $n);
+    }
+}
+
+if (!function_exists('approval_doc_format_amount_text_match')) {
+    function approval_doc_format_amount_text_match($matches)
+    {
+        return approval_doc_format_amount(isset($matches[0]) ? $matches[0] : '');
+    }
+}
+
+if (!function_exists('approval_doc_format_amount_text')) {
+    function approval_doc_format_amount_text($v)
+    {
+        return preg_replace_callback('/[0-9]+(?:,[0-9]+)*/', 'approval_doc_format_amount_text_match', (string)$v);
     }
 }
 

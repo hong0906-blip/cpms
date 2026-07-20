@@ -65,7 +65,7 @@ if ($bulkAction === 'preview' || $bulkAction === 'apply') {
 }
 
 $category = trim((string)(isset($_POST['category']) ? $_POST['category'] : ''));
-$allowedMaterialCategories = array('자재비'=>true, '구매품'=>true, '기타경비'=>true);
+$allowedMaterialCategories = array('자재비'=>true, '구매품'=>true, '기타경비'=>true, '안전관리비'=>true);
 $vendorName = trim((string)(isset($_POST['vendor_name']) ? $_POST['vendor_name'] : ''));
 // 자재: 규격 제거
 $spec = '';
@@ -86,11 +86,7 @@ if ($category === '' || $vendorName === '') {
     exit;
 }
 if (!isset($allowedMaterialCategories[$category])) {
-    if ($category === '안전관리비') {
-        flash_set('error', '안전관리비 사용내역은 안전섹션에서 등록해주세요.');
-    } else {
-        flash_set('error', '허용되지 않은 구분입니다.');
-    }
+    flash_set('error', '허용되지 않은 구분입니다.');
     header('Location: ' . $redirect);
     exit;
 }
@@ -1262,6 +1258,178 @@ if (!$pdo) {
 }
 cpms_material_usage_ensure_schema($pdo);
 $hasMaterialAdvanceYn = cpms_material_usage_column_exists($pdo, 'advance_yn');
+
+if ($category === '안전관리비') {
+    $dates = material_collect_usage_dates($usageDates, $useDatesText, $ym);
+    if (count($dates) <= 0) {
+        flash_set('error', '안전관리비는 사용일자를 한 개 이상 선택해주세요.');
+        header('Location: ' . $redirect);
+        exit;
+    }
+    if (abs((float)$usageAmount) <= 0.0001) {
+        flash_set('error', '안전관리비 공급가액은 0원이 아닌 금액으로 입력해주세요.');
+        header('Location: ' . $redirect);
+        exit;
+    }
+
+    $uploadedStoredPath = '';
+    $driveUploadResult = null;
+    $driveUploadedRecord = null;
+    try {
+        $now = date('Y-m-d H:i:s');
+        $store = cpms_safety_cost_read_store();
+        if (!is_array($store)) $store = array();
+        if (!isset($store['items']) || !is_array($store['items'])) $store['items'] = array();
+
+        $projectName = cpms_safety_cost_project_name($pdo, $projectId);
+        $userId = cpms_safety_cost_user_id();
+        $userName = (string)Auth::userName();
+        $userEmail = (string)Auth::userEmail();
+        $createdIndexes = array();
+        $skipped = 0;
+
+        foreach ($dates as $useDate) {
+            if (!material_is_in_month_range($useDate, $ym)) continue;
+            $safetyRow = array(
+                'use_date' => $useDate,
+                'category' => '안전관리비',
+                'advance_yn' => $advanceYn,
+                'vendor_name' => $vendorName,
+                'detail' => ($remark !== '') ? $remark : '안전관리비 사용',
+                'representative' => $representative,
+                'phone' => $phone,
+                'biz_no' => $bizNo,
+                'amount' => $usageAmount,
+                'remark' => $remark
+            );
+            if (material_bulk_existing_duplicate($pdo, $projectId, $safetyRow, false)
+                || material_bulk_existing_safety_duplicate($projectId, $safetyRow, false)) {
+                $skipped++;
+                continue;
+            }
+
+            $newIndex = count($store['items']);
+            if (material_bulk_append_safety_row($pdo, $projectId, $safetyRow, $now, $store, $projectName, $userId, $userName, $userEmail) <= 0) {
+                $skipped++;
+                continue;
+            }
+            $store['items'][$newIndex]['source'] = 'material_manual_input';
+            $store['items'][$newIndex]['advance_yn'] = $advanceYn;
+            $createdIndexes[count($createdIndexes)] = $newIndex;
+        }
+
+        if (count($createdIndexes) <= 0) {
+            flash_set('error', '같은 안전관리비 사용내역이 이미 등록되어 있습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $uploadMessage = '';
+        $firstIndex = $createdIndexes[0];
+        $firstId = isset($store['items'][$firstIndex]['id']) ? (string)$store['items'][$firstIndex]['id'] : '';
+        $firstDate = isset($store['items'][$firstIndex]['use_date']) ? (string)$store['items'][$firstIndex]['use_date'] : $dates[0];
+        $upload = cpms_safety_cost_store_uploaded_pdf('statement_file', $projectId, $firstId, $firstDate, $uploadMessage);
+        if (isset($upload['has_file']) && (int)$upload['has_file'] === 1 && empty($upload['ok'])) {
+            flash_set('error', $uploadMessage !== '' ? $uploadMessage : '안전관리비 거래명세표 업로드에 실패했습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        if (isset($upload['ok']) && (int)$upload['ok'] === 1) {
+            $uploadedStoredPath = isset($upload['stored_path']) ? (string)$upload['stored_path'] : '';
+            $pdf = array(
+                'original_name' => isset($upload['original_name']) ? (string)$upload['original_name'] : '',
+                'stored_name' => isset($upload['stored_name']) ? (string)$upload['stored_name'] : '',
+                'stored_path' => $uploadedStoredPath,
+                'file_size' => isset($upload['file_size']) ? (int)$upload['file_size'] : 0,
+                'mime_type' => 'application/pdf',
+                'uploaded_at' => $now,
+                'uploaded_by' => $userId,
+                'uploaded_by_name' => $userName
+            );
+
+            $localPath = cpms_safety_cost_resolve_path($uploadedStoredPath);
+            if ($localPath !== '' && function_exists('cpms_safety_health_drive_upload_local_file')) {
+                $driveUploadResult = cpms_safety_health_drive_upload_local_file(
+                    $pdo,
+                    $projectId,
+                    $localPath,
+                    isset($upload['original_name']) ? (string)$upload['original_name'] : '',
+                    'safety_cost_pdf',
+                    $firstDate,
+                    $now,
+                    array('date' => $firstDate, 'project_name' => $projectName),
+                    Auth::user()
+                );
+                if (is_array($driveUploadResult) && isset($driveUploadResult['record']) && is_array($driveUploadResult['record'])) {
+                    $driveUploadedRecord = $driveUploadResult['record'];
+                    $pdf = array_merge($pdf, cpms_safety_health_drive_record_values($driveUploadedRecord, $userId));
+                }
+            }
+
+            foreach ($createdIndexes as $createdIndex) {
+                $store['items'][$createdIndex]['pdf'] = $pdf;
+            }
+        }
+
+        $writeMessage = '';
+        if (!material_bulk_write_safety_store_direct($store, $writeMessage)) {
+            if ($uploadedStoredPath !== '') {
+                $uploadedFile = cpms_safety_cost_resolve_path($uploadedStoredPath);
+                if ($uploadedFile !== '') @unlink($uploadedFile);
+            }
+            if (is_array($driveUploadedRecord) && function_exists('cpms_safety_health_drive_delete_uploaded_record')) {
+                cpms_safety_health_drive_delete_uploaded_record($driveUploadedRecord, array(
+                    'section' => 'safety_health',
+                    'project_id' => $projectId,
+                    'is_common_file' => '0',
+                    'original_name' => isset($driveUploadedRecord['original_name']) ? (string)$driveUploadedRecord['original_name'] : '',
+                    'message' => 'Safety cost metadata save failed after construction material input.'
+                ));
+            }
+            flash_set('error', $writeMessage !== '' ? $writeMessage : '안전관리비 사용내역 저장에 실패했습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        try {
+            $stPreset = $pdo->prepare("INSERT INTO cpms_material_vendor_presets (vendor_name, category, representative, phone, biz_no, base_rate, remark, created_at, updated_at) VALUES (:vendor, :category, :rep, :phone, :biz_no, :base_rate, :remark, :now, :now) ON DUPLICATE KEY UPDATE category=VALUES(category), representative=VALUES(representative), phone=VALUES(phone), biz_no=VALUES(biz_no), base_rate=VALUES(base_rate), remark=VALUES(remark), updated_at=VALUES(updated_at)");
+            $stPreset->bindValue(':vendor', $vendorName);
+            $stPreset->bindValue(':category', '안전관리비');
+            $stPreset->bindValue(':rep', $representative);
+            $stPreset->bindValue(':phone', $phone);
+            $stPreset->bindValue(':biz_no', $bizNo);
+            $stPreset->bindValue(':base_rate', $baseRate);
+            $stPreset->bindValue(':remark', $remark);
+            $stPreset->bindValue(':now', $now);
+            $stPreset->execute();
+        } catch (Exception $e) {}
+
+        $message = '안전관리비 사용내역 ' . count($createdIndexes) . '건을 등록했습니다.';
+        if ($skipped > 0) $message .= ' 중복 ' . (int)$skipped . '건은 제외했습니다.';
+        if (is_array($driveUploadResult)) $message = cpms_safety_health_drive_flash_message($message, $driveUploadResult);
+        flash_set('success', $message);
+        header('Location: ' . $redirect);
+        exit;
+    } catch (Exception $e) {
+        if ($uploadedStoredPath !== '') {
+            $uploadedFile = cpms_safety_cost_resolve_path($uploadedStoredPath);
+            if ($uploadedFile !== '') @unlink($uploadedFile);
+        }
+        if (is_array($driveUploadedRecord) && function_exists('cpms_safety_health_drive_delete_uploaded_record')) {
+            cpms_safety_health_drive_delete_uploaded_record($driveUploadedRecord, array(
+                'section' => 'safety_health',
+                'project_id' => $projectId,
+                'is_common_file' => '0',
+                'original_name' => isset($driveUploadedRecord['original_name']) ? (string)$driveUploadedRecord['original_name'] : '',
+                'message' => 'Safety cost save exception from construction material input: ' . $e->getMessage()
+            ));
+        }
+        flash_set('error', '안전관리비 저장 실패: ' . $e->getMessage());
+        header('Location: ' . $redirect);
+        exit;
+    }
+}
 
 try {
     $now = date('Y-m-d H:i:s');

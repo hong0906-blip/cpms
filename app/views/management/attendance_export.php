@@ -113,6 +113,7 @@ function cpms_attendance_xlsx_status_style($status)
     if ($status === 'late') return 18;
     if ($status === 'vacation') return 19;
     if ($status === 'missing_checkout') return 20;
+    if ($status === 'holiday') return 20;
     return 21;
 }}
 
@@ -127,7 +128,7 @@ function cpms_attendance_xlsx_status_text($cell)
     $checkOut = isset($cell['check_out']) ? trim((string)$cell['check_out']) : '';
     if ($checkIn !== '') $lines[] = $checkIn;
     if ($checkOut !== '') $lines[] = $checkOut;
-    if ($checkIn !== '' && $checkOut === '' && $status !== 'vacation') $lines[] = '-';
+    if ($checkIn !== '' && $checkOut === '' && $status !== 'vacation' && $status !== 'holiday') $lines[] = '-';
     $lines[] = isset($cell['label']) && trim((string)$cell['label']) !== '' ? (string)$cell['label'] : '-';
     return implode("\n", $lines);
 }}
@@ -184,7 +185,7 @@ for ($cardIndex = 0; $cardIndex < 5; $cardIndex++) {
 $sheetRows .= cpms_attendance_xlsx_row(4, $cardLabelCells, 23);
 $sheetRows .= cpms_attendance_xlsx_row(5, $cardValueCells, 31);
 $sheetRows .= cpms_attendance_xlsx_row(6, cpms_attendance_xlsx_filled_row($totalColumns, 0, ''), 8);
-$legendText = '● 정상   ● 지각   ● 휴가   ● 미퇴근    |    오늘 미퇴근은 18:00 이후부터 표시';
+$legendText = '● 정상   ● 지각   ● 휴가   ● 미퇴근   ● 공휴일/대체공휴일    |    오늘 미퇴근은 18:00 이후부터 표시';
 $sheetRows .= cpms_attendance_xlsx_row(7, cpms_attendance_xlsx_filled_row($totalColumns, 13, $legendText), 24);
 $mergeCells[] = 'A7:' . $lastColumn . '7';
 $sheetRows .= cpms_attendance_xlsx_row(8, cpms_attendance_xlsx_filled_row($totalColumns, 0, ''), 8);
@@ -196,7 +197,10 @@ foreach ($monthDates as $dateInfo) {
     $dayNo = isset($dateInfo['day']) ? (int)$dateInfo['day'] : 0;
     $weekDay = isset($dateInfo['week']) ? (string)$dateInfo['week'] : '';
     $dateLabel = $isWeeklyExport ? ($monthNo . '/' . $dayNo . '/' . $weekDay) : ($dayNo . '/' . $weekDay);
-    $headerCells[] = array($dateLabel, !empty($dateInfo['weekend']) ? 15 : 14);
+    if (!empty($dateInfo['holiday']) && isset($dateInfo['holiday_name']) && trim((string)$dateInfo['holiday_name']) !== '') {
+        $dateLabel .= "\n" . trim((string)$dateInfo['holiday_name']);
+    }
+    $headerCells[] = array($dateLabel, (!empty($dateInfo['weekend']) || !empty($dateInfo['holiday'])) ? 15 : 14);
 }
 while (count($headerCells) < $totalColumns) $headerCells[] = array('', 14);
 $sheetRows .= cpms_attendance_xlsx_row(9, $headerCells, 28);

@@ -13,6 +13,10 @@ function cpms_usage_detail_event_label($event) {
     $eventType = isset($event['event_type']) ? (string)$event['event_type'] : '';
     if ($eventType === 'session_start') return 'CPMS 접속 시작';
 
+    $routeName = isset($event['route_name']) ? strtolower(trim((string)$event['route_name'])) : '';
+    if ($routeName === 'attendance/check_in') return '출근 버튼 입력';
+    if ($routeName === 'attendance/check_out') return '퇴근 버튼 입력';
+
     $menuName = isset($event['menu_name']) ? trim((string)$event['menu_name']) : '';
     $tabName = isset($event['tab_name']) ? trim((string)$event['tab_name']) : '';
     $actionName = isset($event['action_name']) ? trim((string)$event['action_name']) : '';

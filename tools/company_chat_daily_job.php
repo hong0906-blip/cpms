@@ -3,8 +3,9 @@
  * Company Google Chat daily CLI job. PHP 5.6 compatible.
  *
  * Windows Task Scheduler examples:
- * 08:00 php C:\www\cpms\tools\company_chat_daily_job.php --type=leave
+ * 08:00 php C:\www\cpms\tools\company_chat_daily_job.php --type=leave (leave notice + missing check-in reminders)
  * 19:00 php C:\www\cpms\tools\company_chat_daily_job.php --type=missing_checkout
+ * Register the Windows 08:00 task with tools\register_company_chat_daily_task.ps1.
  *
  * Linux cron examples:
  * 0 8 * * * php /www/cpms/tools/company_chat_daily_job.php --type=leave
@@ -64,6 +65,11 @@ try {
         $results[count($results)] = cpms_company_chat_process_daily_leave($pdo, $force);
         if (function_exists('cpms_company_chat_process_daily_leave_additions')) {
             $results[count($results)] = cpms_company_chat_process_daily_leave_additions($pdo);
+        }
+        if (function_exists('attendance_process_morning_missing_checkin_notifications')) {
+            $morningCheckinResult = attendance_process_morning_missing_checkin_notifications($pdo, $limit);
+            $morningCheckinResult['type'] = 'morning_checkin';
+            $results[count($results)] = $morningCheckinResult;
         }
     }
     if ($type === 'missing_checkout' || $type === 'all') {

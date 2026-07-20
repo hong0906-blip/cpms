@@ -357,6 +357,7 @@ class UsageAnalyticsService
         $route = trim((string)$route);
         $lowerRoute = strtolower($route);
 
+        if ($lowerRoute === 'attendance/check_in' || $lowerRoute === 'attendance/check_out') return array('key' => 'dashboard', 'name' => '대시보드');
         if ($lowerRoute === 'usage_analytics' || strpos($lowerRoute, 'usage_analytics/') === 0) return array('key' => 'usage_analytics', 'name' => '사용현황 분석');
         if ($route === '대시보드' || strpos($lowerRoute, 'dashboard') === 0 || strpos($lowerRoute, 'tasks/') === 0 || strpos($lowerRoute, 'request/') === 0) return array('key' => 'dashboard', 'name' => '대시보드');
         if ($route === '스케줄러' || $lowerRoute === 'scheduler') return array('key' => 'scheduler', 'name' => '스케줄러');
@@ -446,6 +447,8 @@ class UsageAnalyticsService
     private static function actionName($route, $requestMethod)
     {
         $route = strtolower((string)$route);
+        if ($route === 'attendance/check_in') return '출근 버튼 입력';
+        if ($route === 'attendance/check_out') return '퇴근 버튼 입력';
         if (strpos($route, 'reject') !== false) return '반려';
         if (strpos($route, 'delete') !== false) return '삭제';
         if (strpos($route, 'cancel') !== false) return '취소';
@@ -470,6 +473,29 @@ class UsageAnalyticsService
                 (:session_id, :employee_id, :email, :employee_name, :department, :position,
                  :event_type, :menu_key, :menu_name, :route_name, :tab_key, :tab_name, :action_name, :event_at)";
         self::execute($pdo, $sql, $values);
+    }
+
+    private static function excludedEmployeeNames()
+    {
+        return array('노준형', '이호상');
+    }
+
+    private static function isExcludedEmployeeName($name)
+    {
+        return in_array(trim((string)$name), self::excludedEmployeeNames(), true);
+    }
+
+    private static function appendExcludedEmployeeFilter(&$where, &$params, $nameField, $prefix)
+    {
+        $placeholders = array();
+        foreach (self::excludedEmployeeNames() as $index => $name) {
+            $key = ':' . $prefix . '_excluded_name_' . $index;
+            $placeholders[] = $key;
+            $params[$key] = $name;
+        }
+        if (count($placeholders) > 0) {
+            $where[] = "COALESCE(TRIM(" . $nameField . "), '') NOT IN (" . implode(', ', $placeholders) . ')';
+        }
     }
 
     public static function recordRequest($route, $requestMethod, $get)
@@ -501,6 +527,7 @@ class UsageAnalyticsService
             $department = isset($user['department']) ? trim((string)$user['department']) : '';
             $position = isset($user['position']) ? trim((string)$user['position']) : '';
             if ($email === '') return;
+            if (self::isExcludedEmployeeName($employeeName)) return;
 
             $state = isset($_SESSION['_cpms_usage_analytics']) && is_array($_SESSION['_cpms_usage_analytics'])
                 ? $_SESSION['_cpms_usage_analytics']
@@ -759,6 +786,7 @@ class UsageAnalyticsService
 
     private static function appendPeopleFilters(&$where, &$params, $filters, $fields, $prefix)
     {
+        self::appendExcludedEmployeeFilter($where, $params, $fields['name'], $prefix);
         if ($filters['q'] !== '') {
             $key = ':' . $prefix . '_q';
             $where[] = $fields['name'] . " LIKE " . $key . " ESCAPE '\\\\'";
@@ -791,6 +819,8 @@ class UsageAnalyticsService
             self::appendPeopleFilters($where, $params, $filters, array(
                 'name' => 'employee_name', 'department' => 'department', 'position' => 'position'
             ), 'session_people');
+        } else {
+            self::appendExcludedEmployeeFilter($where, $params, 'employee_name', 'session');
         }
         $sql = "SELECT LOWER(TRIM(email)) AS email_key,
                        COUNT(*) AS connection_count,
@@ -803,18 +833,23 @@ class UsageAnalyticsService
 
     private static function onlineAggregate($pdo, $cutoffAt, $endAt)
     {
+        $where = array(
+            'last_activity_at >= :online_cutoff',
+            'last_activity_at < :online_end',
+            "TRIM(email) <> ''",
+        );
+        $params = array(
+            ':online_cutoff' => $cutoffAt,
+            ':online_end' => $endAt,
+        );
+        self::appendExcludedEmployeeFilter($where, $params, 'employee_name', 'online');
         $sql = "SELECT LOWER(TRIM(email)) AS email_key,
                        COUNT(*) AS connection_count,
                        MAX(last_activity_at) AS last_activity_at
                 FROM " . self::SESSION_TABLE . "
-                WHERE last_activity_at >= :online_cutoff
-                  AND last_activity_at < :online_end
-                  AND TRIM(email) <> ''
+                WHERE " . implode(' AND ', $where) . "
                 GROUP BY LOWER(TRIM(email))";
-        return self::fetchAll($pdo, $sql, array(
-            ':online_cutoff' => $cutoffAt,
-            ':online_end' => $endAt,
-        ));
+        return self::fetchAll($pdo, $sql, $params);
     }
 
     private static function eventAggregate($pdo, $startAt, $endAt, $filters, $applyMenuFilters, $applyPeopleFilters)
@@ -833,6 +868,8 @@ class UsageAnalyticsService
             self::appendPeopleFilters($where, $params, $filters, array(
                 'name' => 'employee_name', 'department' => 'department', 'position' => 'position'
             ), 'event_people');
+        } else {
+            self::appendExcludedEmployeeFilter($where, $params, 'employee_name', 'event');
         }
         $sql = "SELECT LOWER(TRIM(email)) AS email_key,
                        COUNT(*) AS activity_count,
@@ -1104,6 +1141,12 @@ class UsageAnalyticsService
                          ORDER BY name ASC
                          LIMIT 2000";
         $employees = self::fetchAll($pdo, $employeesSql, array());
+        $includedEmployees = array();
+        foreach ($employees as $employee) {
+            $employeeName = isset($employee['name']) ? $employee['name'] : '';
+            if (!self::isExcludedEmployeeName($employeeName)) $includedEmployees[] = $employee;
+        }
+        $employees = $includedEmployees;
         $now = self::nowDateTime();
         $todayStart = $now->format('Y-m-d') . ' 00:00:00';
         $todayEndObject = new \DateTime($todayStart, new \DateTimeZone('Asia/Seoul'));
@@ -1282,6 +1325,7 @@ class UsageAnalyticsService
         );
         $employee = $employeeStatement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($employee)) return null;
+        if (self::isExcludedEmployeeName(isset($employee['name']) ? $employee['name'] : '')) return null;
         $employee['department'] = Auth::normalizeDepartmentValue(isset($employee['department']) ? $employee['department'] : '');
 
         $email = isset($employee['email']) ? strtolower(trim((string)$employee['email'])) : '';

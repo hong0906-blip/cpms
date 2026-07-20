@@ -41,11 +41,12 @@ function cpms_dashboard_attendance_is_missing_checkout($workDate, $checkIn, $che
     return false;
 }}
 if (!function_exists('cpms_dashboard_attendance_is_business_day')) {
-function cpms_dashboard_attendance_is_business_day($workDate) {
+function cpms_dashboard_attendance_is_business_day($workDate, $holidayMap) {
     $ts = strtotime($workDate);
     if ($ts === false) return false;
     $weekNo = (int)date('N', $ts);
-    return ($weekNo >= 1 && $weekNo <= 5);
+    if ($weekNo < 1 || $weekNo > 5) return false;
+    return !(is_array($holidayMap) && isset($holidayMap[$workDate]));
 }}
 if (!function_exists('cpms_dashboard_attendance_pending_key')) {
 function cpms_dashboard_attendance_pending_key($requestDate, $requestType) {
@@ -88,6 +89,7 @@ if (!preg_match('/^\d{4}-\d{2}$/', $attendanceRequestMonth)) $attendanceRequestM
 $attendanceRequestMonthStart = $attendanceRequestMonth . '-01';
 $attendanceRequestMonthEnd = date('Y-m-t', strtotime($attendanceRequestMonthStart));
 $attendanceIssueSince = '2026-07-01';
+$attendanceIssueHolidayMap = attendance_holiday_map($pdo, $attendanceIssueSince, $today_att);
 $attendanceIssueSinceMonth = substr($attendanceIssueSince, 0, 7);
 $attendanceIssueCurrentMonth = substr($today_att, 0, 7);
 $attendanceIssueMonth = isset($_GET['attendance_issue_month']) ? trim((string)$_GET['attendance_issue_month']) : 'all';
@@ -194,7 +196,7 @@ if ($pdo && $eid_att > 0) {
                         $endTs = strtotime($leaveEnd > $today_att ? $today_att : $leaveEnd);
                         while ($cursorTs !== false && $endTs !== false && $cursorTs <= $endTs) {
                             $leaveDate = date('Y-m-d', $cursorTs);
-                            if (cpms_dashboard_attendance_is_business_day($leaveDate)) $attendanceLeaveMap[$leaveDate] = true;
+                            if (cpms_dashboard_attendance_is_business_day($leaveDate, $attendanceIssueHolidayMap)) $attendanceLeaveMap[$leaveDate] = true;
                             $cursorTs = strtotime('+1 day', $cursorTs);
                         }
                     }
@@ -233,7 +235,7 @@ if ($pdo && $eid_att > 0) {
         while ($absenceTs !== false && $absenceEndTs !== false && $absenceTs <= $absenceEndTs) {
             $absenceDate = date('Y-m-d', $absenceTs);
             $showTodayAbsence = ($absenceDate < $today_att || ($absenceDate === $today_att && strcmp($attendanceNowTime_att, $attendanceMissingCheckoutCutoff) >= 0));
-            if ($showTodayAbsence && cpms_dashboard_attendance_is_business_day($absenceDate) && !isset($attendanceLeaveMap[$absenceDate]) && !isset($attendanceRecordDateMap[$absenceDate])) {
+            if ($showTodayAbsence && cpms_dashboard_attendance_is_business_day($absenceDate, $attendanceIssueHolidayMap) && !isset($attendanceLeaveMap[$absenceDate]) && !isset($attendanceRecordDateMap[$absenceDate])) {
                 $absentRow = array(
                     'id' => 0,
                     'work_date' => $absenceDate,
@@ -449,6 +451,7 @@ if($pdo&&$eid_att>0){
                 $issueLate = !empty($issueRow['_late']);
                 $issueAbsent = !empty($issueRow['_absent']);
                 $issueRequestType = ($issueAbsent || ($issueLate && $issueMissing)) ? 'both' : ($issueLate ? 'check_in' : ($issueMissing ? 'check_out' : 'check_in'));
+                $issueCanChooseRequestType = ($issueLate && $issueMissing);
                 $issuePendingRequest = cpms_dashboard_attendance_pending_request_for_issue($attendancePendingRequestMap, $issueDate, $issueRequestType);
                 ?>
                 <tr class='border-t'>
@@ -467,7 +470,7 @@ if($pdo&&$eid_att>0){
                         <?php if ($issuePendingRequest): ?>
                             <span class='inline-flex items-center px-3 py-1 rounded-xl bg-amber-100 text-amber-800 text-xs font-extrabold'><?php echo h(attendance_text('%EC%8A%B9%EC%9D%B8%EB%8C%80%EA%B8%B0%EC%A4%91')); ?></span>
                         <?php else: ?>
-                        <button type='button' data-attendance-request-open data-attendance-request-date='<?php echo h($issueDate); ?>' data-attendance-request-type='<?php echo h($issueRequestType); ?>' data-attendance-request-check-in='<?php echo h(cpms_dashboard_attendance_time($issueCheckIn)); ?>' data-attendance-request-check-out='<?php echo h(cpms_dashboard_attendance_time($issueCheckOut)); ?>' class='px-3 py-1 rounded-xl bg-blue-600 text-white text-xs font-extrabold'>요청보내기</button>
+                        <button type='button' data-attendance-request-open data-attendance-request-date='<?php echo h($issueDate); ?>' data-attendance-request-type='<?php echo h($issueRequestType); ?>' data-attendance-request-type-selectable='<?php echo $issueCanChooseRequestType ? '1' : '0'; ?>' data-attendance-request-check-in='<?php echo h(cpms_dashboard_attendance_time($issueCheckIn)); ?>' data-attendance-request-check-out='<?php echo h(cpms_dashboard_attendance_time($issueCheckOut)); ?>' class='px-3 py-1 rounded-xl bg-blue-600 text-white text-xs font-extrabold'>요청보내기</button>
                         <?php endif; ?>
                     </td>
                 </tr>
@@ -607,11 +610,12 @@ if($pdo&&$eid_att>0){
             if(issueModal)issueModal.classList.add('hidden');
             var reqDate=trigger?trigger.getAttribute('data-attendance-request-date'):'';
             var reqType=trigger?trigger.getAttribute('data-attendance-request-type'):'';
+            var typeSelectable=!!(trigger && trigger.getAttribute('data-attendance-request-type-selectable')==='1');
             var locked=!!(reqDate && reqDate.length===10);
             var dateValue=locked?reqDate:todayValue;
             var typeValue=reqType?reqType:'check_in';
             setLockedField(fDate,fDateHidden,locked,dateValue);
-            setLockedField(fType,fTypeHidden,locked,typeValue);
+            setLockedField(fType,fTypeHidden,(locked && !typeSelectable),typeValue);
             if(fCi)fCi.value='';
             if(fCo)fCo.value='';
             syncType();

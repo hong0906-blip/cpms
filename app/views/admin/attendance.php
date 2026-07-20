@@ -76,6 +76,7 @@ $reqs = array();
 $emps = array();
 $monthlyRecordMap = array();
 $monthlyLeaveMap = array();
+$attendanceHolidayMap = array();
 $monthlyRows = array();
 $monthlyRowsAll = array();
 $monthDates = array();
@@ -326,6 +327,9 @@ if ($pdo) {
                 $where[] = "COALESCE(e.name, '') NOT LIKE :rep_name";
                 $params[':rep_name'] = $representativeNeedle;
             }
+            $where[] = "TRIM(COALESCE(e.name, '')) NOT IN (:excluded_name_one, :excluded_name_two)";
+            $params[':excluded_name_one'] = attendance_text('%EC%9D%B4%ED%98%B8%EC%83%81');
+            $params[':excluded_name_two'] = attendance_text('%EB%85%B8%EC%A4%80%ED%98%95');
             $sql = "SELECT r.*, e.name, e.department, " . ($positionEnabled ? 'e.position' : "'' AS position") . $selectReviewer . "
                     FROM cpms_attendance_requests r
                     JOIN employees e ON e.id = r.employee_id
@@ -344,6 +348,7 @@ if ($pdo) {
     }
 
     if ($tab === 'monthly' || $tab === 'weekly') {
+        $attendanceHolidayMap = attendance_holiday_map($pdo, $reportStart, $reportEnd);
         $reportCursorTs = strtotime($reportStart);
         $reportEndTs = strtotime($reportEnd);
         while ($reportCursorTs !== false && $reportEndTs !== false && $reportCursorTs <= $reportEndTs) {
@@ -364,7 +369,9 @@ if ($pdo) {
                 'day' => $dayNo,
                 'month' => (int)date('n', $reportCursorTs),
                 'week' => isset($weekLabels[$weekIndex]) ? $weekLabels[$weekIndex] : '',
-                'weekend' => ($weekIndex === 0 || $weekIndex === 6)
+                'weekend' => ($weekIndex === 0 || $weekIndex === 6),
+                'holiday' => isset($attendanceHolidayMap[$dateKey]),
+                'holiday_name' => isset($attendanceHolidayMap[$dateKey]['name']) ? (string)$attendanceHolidayMap[$dateKey]['name'] : ''
             );
             $reportDayCount++;
             $reportCursorTs = strtotime('+1 day', $reportCursorTs);
@@ -466,13 +473,28 @@ if ($pdo) {
                     'label' => '-',
                     'check_in' => '',
                     'check_out' => '',
-                    'alert' => false
+                    'alert' => false,
+                    'holiday' => false
                 );
+                $holidayInfo = isset($attendanceHolidayMap[$dateKey]) && is_array($attendanceHolidayMap[$dateKey]) ? $attendanceHolidayMap[$dateKey] : null;
                 $leaveInfo = (isset($monthlyLeaveMap[$employeeId]) && isset($monthlyLeaveMap[$employeeId][$dateKey])) ? $monthlyLeaveMap[$employeeId][$dateKey] : null;
                 $leaveLabel = is_array($leaveInfo) && isset($leaveInfo['label']) ? trim((string)$leaveInfo['label']) : '';
                 $halfLeaveLabel = attendance_monthly_leave_half_label($leaveLabel);
                 $hasRecord = (isset($monthlyRecordMap[$employeeId]) && isset($monthlyRecordMap[$employeeId][$dateKey]));
-                if ($leaveInfo !== null && ($halfLeaveLabel === '' || !$hasRecord)) {
+                if ($holidayInfo !== null) {
+                    $cell['status'] = 'holiday';
+                    $cell['label'] = isset($holidayInfo['name']) && trim((string)$holidayInfo['name']) !== '' ? (string)$holidayInfo['name'] : attendance_text('%EA%B3%B5%ED%9C%B4%EC%9D%BC');
+                    $cell['holiday'] = true;
+                    if ($hasRecord) {
+                        $record = $monthlyRecordMap[$employeeId][$dateKey];
+                        $checkIn = isset($record['check_in']) ? trim((string)$record['check_in']) : '';
+                        $checkOut = isset($record['check_out']) ? trim((string)$record['check_out']) : '';
+                        $cell['check_in'] = attendance_monthly_time($checkIn);
+                        $cell['check_out'] = attendance_monthly_time($checkOut);
+                        $rowStats['work_minutes'] += isset($record['work_minutes']) ? max(0, (int)$record['work_minutes']) : 0;
+                        if ($checkIn !== '') $rowStats['work_days']++;
+                    }
+                } else if ($leaveInfo !== null && ($halfLeaveLabel === '' || !$hasRecord)) {
                     $cell['status'] = 'vacation';
                     $cell['label'] = $halfLeaveLabel !== '' ? $halfLeaveLabel : attendance_text('%ED%9C%B4%EA%B0%80');
                     $rowStats['vacation']++;
@@ -587,6 +609,9 @@ if ($pdo && $tab === 'requests') {
             $countSql .= " AND COALESCE(e.name, '') NOT LIKE :rep_name";
             $countParams[':rep_name'] = $representativeNeedle;
         }
+        $countSql .= " AND TRIM(COALESCE(e.name, '')) NOT IN (:excluded_name_one, :excluded_name_two)";
+        $countParams[':excluded_name_one'] = attendance_text('%EC%9D%B4%ED%98%B8%EC%83%81');
+        $countParams[':excluded_name_two'] = attendance_text('%EB%85%B8%EC%A4%80%ED%98%95');
         $countSql .= " GROUP BY r.status";
         $stCount = $pdo->prepare($countSql);
         $stCount->execute($countParams);
@@ -666,7 +691,7 @@ if (!empty($cpmsAttendanceDataOnly)) return;
 .cpms-attendance-chip.is-active{background:#071a98;color:#fff;box-shadow:0 6px 12px rgba(7,26,152,.16)}
 .cpms-attendance-legend{display:flex;align-items:center;gap:16px;border:1px solid #e5e7eb;background:#fff;border-radius:8px;padding:10px 12px;font-size:12px;font-weight:900;color:#475569;white-space:nowrap}
 .cpms-attendance-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:5px}
-.cpms-attendance-dot.normal{background:#10b981}.cpms-attendance-dot.late{background:#f97316}.cpms-attendance-dot.vacation{background:#3b82f6}.cpms-attendance-dot.missing{background:#ef4444}
+.cpms-attendance-dot.normal{background:#10b981}.cpms-attendance-dot.late{background:#f97316}.cpms-attendance-dot.vacation{background:#3b82f6}.cpms-attendance-dot.missing{background:#ef4444}.cpms-attendance-dot.holiday{background:#dc2626}
 .cpms-attendance-summary{display:grid;grid-template-columns:repeat(5,minmax(150px,1fr));gap:14px;margin:12px 0 18px}
 .cpms-attendance-card{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:18px;display:grid;grid-template-columns:58px minmax(0,1fr);align-items:center;gap:12px;box-shadow:0 8px 18px rgba(15,23,42,.05)}
 .cpms-attendance-card-icon{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center}
@@ -702,15 +727,16 @@ if (!empty($cpmsAttendanceDataOnly)) return;
 .cpms-attendance-week-metric.is-over .cpms-attendance-week-metric-label{background:#fee2e2;color:#b91c1c}
 .cpms-attendance-week-metric.is-over .cpms-attendance-week-metric-value{background:#fff1f2;color:#dc2626}
 .cpms-attendance-week-metric.is-safe .cpms-attendance-week-metric-value{color:#64748b}
-.cpms-attendance-day-head.weekend{background:#fff1f2;color:#ef4444}
+.cpms-attendance-day-head.weekend,.cpms-attendance-day-head.holiday{background:#fff1f2;color:#dc2626}
+.cpms-attendance-holiday-name{display:block;max-width:76px;margin:2px auto 0;overflow:hidden;text-overflow:ellipsis;font-size:9px;line-height:1.1;color:#dc2626}
 .cpms-attendance-day-cell{width:56px;min-width:56px;height:86px;text-align:center;background:#fff;padding:6px 4px}
-.cpms-attendance-day-cell.status-normal{background:#f0fdf4}.cpms-attendance-day-cell.status-late{background:#fff7ed}.cpms-attendance-day-cell.status-vacation{background:#eff6ff}.cpms-attendance-day-cell.status-missing_checkout{background:#fff1f2}.cpms-attendance-day-cell.status-none{background:#fff}
+.cpms-attendance-day-cell.status-normal{background:#f0fdf4}.cpms-attendance-day-cell.status-late{background:#fff7ed}.cpms-attendance-day-cell.status-vacation{background:#eff6ff}.cpms-attendance-day-cell.status-missing_checkout{background:#fff1f2}.cpms-attendance-day-cell.status-holiday,.cpms-attendance-day-cell.is-holiday{background:#fff1f2;box-shadow:inset 0 3px 0 #ef4444}.cpms-attendance-day-cell.status-none{background:#fff}
 .cpms-attendance-day-cell.is-editable{cursor:pointer;transition:box-shadow .16s ease,transform .16s ease}
 .cpms-attendance-day-cell.is-editable:hover{box-shadow:inset 0 0 0 2px #1d4ed8;transform:translateY(-1px)}
 .cpms-attendance-time{line-height:1.35;color:#0f172a;font-weight:800;min-height:31px}
 .cpms-attendance-empty{color:#94a3b8;font-weight:900;margin-top:10px}
 .cpms-attendance-badge{display:inline-flex;align-items:center;gap:3px;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:950;margin-top:5px}
-.cpms-attendance-badge.status-normal{background:#dcfce7;color:#166534}.cpms-attendance-badge.status-late{background:#ffedd5;color:#c2410c}.cpms-attendance-badge.status-vacation{background:#dbeafe;color:#1d4ed8}.cpms-attendance-badge.status-missing_checkout{background:#fee2e2;color:#dc2626}
+.cpms-attendance-badge.status-normal{background:#dcfce7;color:#166534}.cpms-attendance-badge.status-late{background:#ffedd5;color:#c2410c}.cpms-attendance-badge.status-vacation{background:#dbeafe;color:#1d4ed8}.cpms-attendance-badge.status-missing_checkout,.cpms-attendance-badge.status-holiday{background:#fee2e2;color:#dc2626}
 .cpms-attendance-alert{width:13px;height:13px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:#ef4444;color:#fff;font-size:9px;line-height:1}
 .cpms-attendance-alert span{color:#fff}
 .cpms-attendance-empty-state{padding:28px;text-align:center;color:#64748b;font-weight:900}
@@ -809,6 +835,7 @@ if (!empty($cpmsAttendanceDataOnly)) return;
                     <span><i class='cpms-attendance-dot late'></i><?php echo h(attendance_text('%EC%A7%80%EA%B0%81')); ?></span>
                     <span><i class='cpms-attendance-dot vacation'></i><?php echo h(attendance_text('%ED%9C%B4%EA%B0%80')); ?></span>
                     <span><i class='cpms-attendance-dot missing'></i><?php echo h(attendance_text('%EB%AF%B8%ED%87%B4%EA%B7%BC')); ?></span>
+                    <span><i class='cpms-attendance-dot holiday'></i><?php echo h(attendance_text('%EA%B3%B5%ED%9C%B4%EC%9D%BC')); ?></span>
                 </div>
             </div>
 
@@ -861,7 +888,7 @@ if (!empty($cpmsAttendanceDataOnly)) return;
                         <tr>
                             <th class='cpms-attendance-emp-head'><?php echo h(attendance_text('%EC%A7%81%EC%9B%90%20%EC%A0%95%EB%B3%B4')); ?></th>
                             <?php foreach($monthDates as $dateInfo): ?>
-                                <th class='cpms-attendance-day-head <?php echo !empty($dateInfo['weekend']) ? 'weekend' : ''; ?>'><?php if($tab === 'weekly'): ?><?php echo isset($dateInfo['month']) ? (int)$dateInfo['month'] : 0; ?>/<?php endif; ?><?php echo (int)$dateInfo['day']; ?>/<?php echo h($dateInfo['week']); ?></th>
+                                <th class='cpms-attendance-day-head <?php echo !empty($dateInfo['weekend']) ? 'weekend ' : ''; ?><?php echo !empty($dateInfo['holiday']) ? 'holiday' : ''; ?>' title='<?php echo h(isset($dateInfo['holiday_name']) ? $dateInfo['holiday_name'] : ''); ?>'><?php if($tab === 'weekly'): ?><?php echo isset($dateInfo['month']) ? (int)$dateInfo['month'] : 0; ?>/<?php endif; ?><?php echo (int)$dateInfo['day']; ?>/<?php echo h($dateInfo['week']); ?><?php if(!empty($dateInfo['holiday'])): ?><span class='cpms-attendance-holiday-name'><?php echo h(isset($dateInfo['holiday_name']) ? $dateInfo['holiday_name'] : attendance_text('%EA%B3%B5%ED%9C%B4%EC%9D%BC')); ?></span><?php endif; ?></th>
                             <?php endforeach; ?>
                         </tr>
                     </thead>
@@ -947,7 +974,7 @@ if (!empty($cpmsAttendanceDataOnly)) return;
                                         $cellCheckIn = isset($cell['check_in']) ? (string)$cell['check_in'] : '';
                                         $cellCheckOut = isset($cell['check_out']) ? (string)$cell['check_out'] : '';
                                     ?>
-                                    <td class='cpms-attendance-day-cell status-<?php echo h($statusClass); ?><?php echo $canEditAttendanceCells ? ' is-editable' : ''; ?>'
+                                    <td class='cpms-attendance-day-cell status-<?php echo h($statusClass); ?><?php echo !empty($cell['holiday']) ? ' is-holiday' : ''; ?><?php echo $canEditAttendanceCells ? ' is-editable' : ''; ?>'
                                         <?php if($canEditAttendanceCells): ?>
                                             data-attendance-cell-edit='1'
                                             data-employee-id='<?php echo (int)$cellEmployeeId; ?>'
@@ -961,7 +988,7 @@ if (!empty($cpmsAttendanceDataOnly)) return;
                                         <?php else: ?>
                                             <div class='cpms-attendance-time'>
                                                 <?php if(isset($cell['check_in']) && $cell['check_in'] !== ''): ?><?php echo h($cell['check_in']); ?><?php else: ?>&nbsp;<?php endif; ?><br>
-                                                <?php if(isset($cell['check_out']) && $cell['check_out'] !== ''): ?><?php echo h($cell['check_out']); ?><?php else: ?><?php echo $statusClass === 'vacation' ? '&nbsp;' : '-'; ?><?php endif; ?>
+                                                <?php if(isset($cell['check_out']) && $cell['check_out'] !== ''): ?><?php echo h($cell['check_out']); ?><?php else: ?><?php echo ($statusClass === 'vacation' || $statusClass === 'holiday') ? '&nbsp;' : '-'; ?><?php endif; ?>
                                             </div>
                                             <span class='cpms-attendance-badge status-<?php echo h($statusClass); ?>'>
                                                 <?php echo h(isset($cell['label']) ? $cell['label'] : '-'); ?>

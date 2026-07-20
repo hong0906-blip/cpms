@@ -258,6 +258,7 @@ $risk52WeekOptions = isset($risk52WeekSelection['options']) && is_array($risk52W
 $risk52WeekLabel = isset($risk52WeekSelection['label']) ? (string)$risk52WeekSelection['label'] : '';
 $risk52WeekRangeLabel = isset($risk52WeekSelection['range_label']) ? (string)$risk52WeekSelection['range_label'] : ($weekStart . ' ~ ' . $weekEnd);
 $currentLeaveIndex = ($needsAttendanceData && function_exists('approval_current_leave_index')) ? approval_current_leave_index($pdo, $today) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
+$todayHolidayInfo = $needsAttendanceData ? attendance_holiday_info($pdo, $today) : null;
 $tomorrowTs = strtotime($today . ' +1 day');
 $tomorrow = ($tomorrowTs !== false) ? date('Y-m-d', $tomorrowTs) : date('Y-m-d', strtotime('+1 day'));
 $tomorrowLeaveIndex = ($needsAttendanceData && function_exists('approval_current_leave_index')) ? approval_current_leave_index($pdo, $tomorrow) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
@@ -269,6 +270,21 @@ $leaveToday = count($leavePeople);
 $leaveTomorrowPeople = isset($tomorrowLeaveIndex['people']) && is_array($tomorrowLeaveIndex['people']) ? $tomorrowLeaveIndex['people'] : array();
 $leaveTomorrow = count($leaveTomorrowPeople);
 $todayPresent = 0;
+
+if (!function_exists('cpms_executive_dashboard_filter_attendance_excluded')) {
+function cpms_executive_dashboard_filter_attendance_excluded($people) {
+    if (!is_array($people)) return array();
+    $filtered = array();
+    foreach ($people as $person) {
+        if (attendance_is_excluded_employee($person)) continue;
+        $filtered[count($filtered)] = $person;
+    }
+    return $filtered;
+}}
+$leavePeople = cpms_executive_dashboard_filter_attendance_excluded($leavePeople);
+$leaveToday = count($leavePeople);
+$leaveTomorrowPeople = cpms_executive_dashboard_filter_attendance_excluded($leaveTomorrowPeople);
+$leaveTomorrow = count($leaveTomorrowPeople);
 
 $leaveExTypes = array('월차', '연차', '반차', '오전반차', '오후반차', '월차반차', '연차반차', '오전월차반차', '오후월차반차', '오전연차반차', '오후연차반차', '대체휴무', '기타휴무', '휴무');
 $leaveMainTypes = array('월차', '연차', '반차', '오전반차', '오후반차', '월차반차', '연차반차', '오전월차반차', '오후월차반차', '오전연차반차', '오후연차반차');
@@ -318,25 +334,11 @@ $statusBadgeClass = function ($status) {
 };
 
 $hideFromTodayAttendanceCards = function ($person) {
-    return cpms_executive_dashboard_is_representative($person);
+    return cpms_executive_dashboard_is_representative($person) || attendance_is_excluded_employee($person);
 };
 
 $hideFromTodayAbsentCards = function ($person) {
-    $name = '';
-    if (is_array($person) && isset($person['name'])) {
-        $name = trim((string)$person['name']);
-    }
-    $name = str_replace(array(' ', "\t", "\r", "\n"), '', $name);
-    $hiddenNames = array(
-        attendance_text('%EC%9D%B4%ED%98%B8%EC%83%81'),
-        attendance_text('%EB%85%B8%EC%A4%80%ED%98%95')
-    );
-    for ($i = 0; $i < count($hiddenNames); $i++) {
-        if ($name === str_replace(array(' ', "\t", "\r", "\n"), '', $hiddenNames[$i])) {
-            return true;
-        }
-    }
-    return false;
+    return attendance_is_excluded_employee($person);
 };
 
 $attendanceTimeLabel = function ($value) {
@@ -481,6 +483,7 @@ if ($pdo) {
         $st = $pdo->prepare($sql);
         $st->execute(array(':s' => $weekStart, ':e' => $weekEnd));
         foreach ($st->fetchAll() as $r) {
+            if (attendance_is_excluded_employee($r)) continue;
             if ((int)$r['m'] > 3120) $risk52[] = $r;
         }
 
@@ -516,6 +519,7 @@ if ($pdo) {
                 continue;
             }
             if (isset($attMap[$eid]) || isset($leaveExMap[$eid])) continue;
+            if (is_array($todayHolidayInfo)) continue;
             if ($hideFromTodayAbsentCards($ar)) continue;
             $absent[] = array(
                 'name' => $ar['name'],
@@ -551,9 +555,9 @@ if ($pdo) {
         });
         $todayPresent = count($presentPeople);
 
-        $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? $currentLeaveIndex['people'] : array();
+        $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? cpms_executive_dashboard_filter_attendance_excluded($currentLeaveIndex['people']) : array();
         $leaveToday = count($leavePeople);
-        $leaveTomorrowPeople = isset($tomorrowLeaveIndex['people']) && is_array($tomorrowLeaveIndex['people']) ? $tomorrowLeaveIndex['people'] : array();
+        $leaveTomorrowPeople = isset($tomorrowLeaveIndex['people']) && is_array($tomorrowLeaveIndex['people']) ? cpms_executive_dashboard_filter_attendance_excluded($tomorrowLeaveIndex['people']) : array();
         $leaveTomorrow = count($leaveTomorrowPeople);
     } catch (Exception $e) {
     }

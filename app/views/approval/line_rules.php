@@ -540,6 +540,36 @@ if (!function_exists('approval_line_rules_line_names')) {
     }
 }
 
+if (!function_exists('approval_line_rules_contract_amount_is_under')) {
+    function approval_line_rules_contract_amount_is_under($contentData, $limit)
+    {
+        if (!is_array($contentData) || !isset($contentData['contract_amount'])) {
+            return false;
+        }
+        $rawAmount = trim((string)$contentData['contract_amount']);
+        if ($rawAmount === '') {
+            return false;
+        }
+        $digits = preg_replace('/[^0-9]/', '', $rawAmount);
+        if ($digits === '') {
+            return false;
+        }
+        $digits = ltrim($digits, '0');
+        if ($digits === '') {
+            $digits = '0';
+        }
+        $limitDigits = preg_replace('/[^0-9]/', '', (string)$limit);
+        $limitDigits = ltrim($limitDigits, '0');
+        if ($limitDigits === '') {
+            return false;
+        }
+        if (strlen($digits) !== strlen($limitDigits)) {
+            return strlen($digits) < strlen($limitDigits);
+        }
+        return strcmp($digits, $limitDigits) < 0;
+    }
+}
+
 if (!function_exists('approval_line_rules_build')) {
     function approval_line_rules_build($pdo, $docType, $creatorEmployee, $contentData)
     {
@@ -569,6 +599,9 @@ if (!function_exists('approval_line_rules_build')) {
         $isCeo = approval_line_rules_employee_is_ceo($creatorEmployee);
         $isVp = approval_employee_is_vp($creatorEmployee);
         $isExecutive = approval_employee_is_executive($creatorEmployee);
+        $isUnderProposalApprovalLimit = ($docType === 'proposal' && approval_line_rules_contract_amount_is_under($contentData, 1000000));
+        $underLimitDelegationReason = approval_ko('%EB%B0%9C%EC%A3%BC%EA%B8%88%EC%95%A1%20100%EB%A7%8C%EC%9B%90%20%EB%AF%B8%EB%A7%8C%20%EB%B6%80%EC%82%AC%EC%9E%A5%20%EC%A0%84%EA%B2%B0');
+        $underLimitDelegationMessage = approval_ko('%EB%B0%9C%EC%A3%BC%EA%B8%88%EC%95%A1%20100%EB%A7%8C%EC%9B%90%20%EB%AF%B8%EB%A7%8C%EC%9C%BC%EB%A1%9C%20%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC%20%EA%B2%B0%EC%9E%AC%EB%9D%BC%EC%9D%B8%EC%9D%84%20%EB%B6%80%EC%82%AC%EC%9E%A5%20%EC%A0%84%EA%B2%B0%20%EC%B2%98%EB%A6%AC%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
         $isTeamLeader = $isProposalDoc ? approval_line_rules_is_team_leader_candidate($creatorEmployee) : approval_line_rules_is_marked_team_leader($creatorEmployee);
         $assignedTeamLeaderId = isset($creatorEmployee['team_leader_id']) ? (int)$creatorEmployee['team_leader_id'] : 0;
         $creatorEmployeeId = isset($creatorEmployee['id']) ? (int)$creatorEmployee['id'] : 0;
@@ -625,6 +658,22 @@ if (!function_exists('approval_line_rules_build')) {
         }
 
         if ($isVp) {
+            if ($isUnderProposalApprovalLimit) {
+                $targetVp = $vp ? $vp : $creatorEmployee;
+                approval_line_rules_add_line($lines, $seen, $vpRole, $targetVp, array('allow_self_approval' => 1, 'skip_auto_delegate' => 1));
+                if ($ceo) {
+                    approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array(
+                        'delegated' => 1,
+                        'status' => 'DELEGATED',
+                        'auto_reason' => $underLimitDelegationReason,
+                        'delegated_by_role' => $vpRole
+                    ));
+                } else {
+                    $warnings[] = approval_ko('%EB%8C%80%ED%91%9C%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.');
+                }
+                $messages[] = $underLimitDelegationMessage;
+                return array('lines' => $lines, 'messages' => $messages, 'warnings' => $warnings, 'vp' => $targetVp, 'ceo' => $ceo, 'construction_pm' => $constructionPm, 'team_lead' => null, 'force_ceo_actual' => 0);
+            }
             if ($ceo) {
                 approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array('skip_auto_delegate' => 1));
                 $forceCeoActual = true;
@@ -636,8 +685,10 @@ if (!function_exists('approval_line_rules_build')) {
 
         if ($isExecutive) {
             $hadLeaveDelegation = false;
+            $vpOnLeave = false;
             if ($vp) {
-                if (approval_line_rules_employee_on_leave($pdo, $vp, $baseDate)) {
+                $vpOnLeave = approval_line_rules_employee_on_leave($pdo, $vp, $baseDate);
+                if ($vpOnLeave) {
                     approval_line_rules_add_line($lines, $seen, $vpRole, $vp, array('delegated' => 1, 'status' => 'DELEGATED', 'auto_reason' => approval_ko('%ED%9C%B4%EA%B0%80%EB%A1%9C%20%EC%9D%B8%ED%95%9C%20%EC%A0%84%EA%B2%B0%20%EC%B2%98%EB%A6%AC')));
                     $hadLeaveDelegation = true;
                 } else {
@@ -647,7 +698,15 @@ if (!function_exists('approval_line_rules_build')) {
                 $warnings[] = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.');
             }
             if ($ceo) {
-                if (approval_line_rules_employee_on_leave($pdo, $ceo, $baseDate)) {
+                if ($isUnderProposalApprovalLimit && $vp && !$vpOnLeave) {
+                    approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array(
+                        'delegated' => 1,
+                        'status' => 'DELEGATED',
+                        'auto_reason' => $underLimitDelegationReason,
+                        'delegated_by_role' => $vpRole
+                    ));
+                    $messages[] = $underLimitDelegationMessage;
+                } else if (approval_line_rules_employee_on_leave($pdo, $ceo, $baseDate)) {
                     approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array('delegated' => 1, 'status' => 'DELEGATED', 'auto_reason' => approval_ko('%ED%9C%B4%EA%B0%80%EB%A1%9C%20%EC%9D%B8%ED%95%9C%20%EC%A0%84%EA%B2%B0%20%EC%B2%98%EB%A6%AC')));
                     $hadLeaveDelegation = true;
                 } else {
@@ -698,8 +757,10 @@ if (!function_exists('approval_line_rules_build')) {
                 }
             }
 
+            $vpOnLeave = false;
             if ($vp) {
-                if (approval_line_rules_employee_on_leave($pdo, $vp, $baseDate)) {
+                $vpOnLeave = approval_line_rules_employee_on_leave($pdo, $vp, $baseDate);
+                if ($vpOnLeave) {
                     if ($ceo) {
                         approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array('force_actual' => 1));
                         $forceCeoActual = true;
@@ -715,8 +776,18 @@ if (!function_exists('approval_line_rules_build')) {
             }
 
             if ($ceo) {
-                approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array());
-                $forceCeoActual = true;
+                if ($isUnderProposalApprovalLimit && $vp && !$vpOnLeave) {
+                    approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array(
+                        'delegated' => 1,
+                        'status' => 'DELEGATED',
+                        'auto_reason' => $underLimitDelegationReason,
+                        'delegated_by_role' => $vpRole
+                    ));
+                    $messages[] = $underLimitDelegationMessage;
+                } else {
+                    approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array());
+                    $forceCeoActual = true;
+                }
             } else {
                 $warnings[] = approval_ko('%EA%B8%B0%EC%95%88%EC%84%9C%20%EB%A7%88%EC%A7%80%EB%A7%89%20%EB%8C%80%ED%91%9C%20%EA%B2%B0%EC%9E%AC%EC%9E%90%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.');
             }

@@ -382,8 +382,8 @@ function cpms_dashboard_notice_mark_read($pdo, $noticeId, $employeeId) {
     }
 }}
 
-if (!function_exists('cpms_dashboard_notice_unread_employee_map')) {
-function cpms_dashboard_notice_unread_employee_map($pdo, $notices, $excludeEmployeeId) {
+if (!function_exists('cpms_dashboard_notice_employee_read_map')) {
+function cpms_dashboard_notice_employee_read_map($pdo, $notices, $excludeEmployeeId) {
     if (!$pdo || !is_array($notices) || !cpms_dashboard_notice_ensure_read_schema($pdo)) return false;
     $excludeEmployeeId = (int)$excludeEmployeeId;
     $noticeMap = array();
@@ -447,13 +447,13 @@ function cpms_dashboard_notice_unread_employee_map($pdo, $notices, $excludeEmplo
                 $employeeId = isset($employeeRow['id']) ? (int)$employeeRow['id'] : 0;
                 $employeeEmail = isset($employeeRow['email']) ? strtolower(trim((string)$employeeRow['email'])) : '';
                 if ($authorEmail !== '' && $employeeEmail !== '' && $authorEmail === $employeeEmail) continue;
-                if (isset($readMap[$noticeId . ':' . $employeeId])) continue;
+                $employeeRow['is_read'] = isset($readMap[$noticeId . ':' . $employeeId]) ? 1 : 0;
                 $noticeMap[$noticeId][] = $employeeRow;
             }
         }
         return $noticeMap;
     } catch (Exception $e) {
-        error_log('[dashboard_notice_read] unread lookup failed: ' . $e->getMessage());
+        error_log('[dashboard_notice_read] employee read status lookup failed: ' . $e->getMessage());
         return false;
     }
 }}
@@ -626,8 +626,8 @@ function cpms_render_dashboard_notice_board($pdo) {
     $pageRegularItems = array_slice($regularItems, ($noticePage - 1) * $noticePageSize, $noticePageSize);
     $pageItems = array_merge($pinnedItems, $pageRegularItems);
     $currentEmployeeId = cpms_dashboard_notice_current_employee_id($pdo);
-    $unreadEmployeeMap = $canViewUnread ? cpms_dashboard_notice_unread_employee_map($pdo, $pageItems, $currentEmployeeId) : array();
-    $unreadTrackingAvailable = is_array($unreadEmployeeMap);
+    $employeeReadMap = $canViewUnread ? cpms_dashboard_notice_employee_read_map($pdo, $pageItems, $currentEmployeeId) : array();
+    $employeeReadTrackingAvailable = is_array($employeeReadMap);
     $noticePageParams = $_GET;
     if (!is_array($noticePageParams)) $noticePageParams = array();
     if (!isset($noticePageParams['r']) || trim((string)$noticePageParams['r']) === '') {
@@ -781,57 +781,68 @@ function cpms_render_dashboard_notice_board($pdo) {
                                             <div class="whitespace-normal"><?php echo nl2br(h($noticeContent)); ?></div>
                                             <?php if ($canViewUnread): ?>
                                                 <?php
-                                                $unreadEmployees = ($unreadTrackingAvailable && isset($unreadEmployeeMap[$notice['id']]) && is_array($unreadEmployeeMap[$notice['id']])) ? $unreadEmployeeMap[$notice['id']] : array();
-                                                $unreadCount = count($unreadEmployees);
-                                                $visibleUnreadEmployees = array_slice($unreadEmployees, 0, 10);
-                                                $extraUnreadEmployees = array_slice($unreadEmployees, 10);
+                                                $noticeEmployees = ($employeeReadTrackingAvailable && isset($employeeReadMap[$notice['id']]) && is_array($employeeReadMap[$notice['id']])) ? $employeeReadMap[$notice['id']] : array();
+                                                $employeeCount = count($noticeEmployees);
+                                                $readCount = 0;
+                                                for ($noticeEmployeeIndex = 0; $noticeEmployeeIndex < $employeeCount; $noticeEmployeeIndex++) {
+                                                    if (isset($noticeEmployees[$noticeEmployeeIndex]['is_read']) && (int)$noticeEmployees[$noticeEmployeeIndex]['is_read'] === 1) $readCount++;
+                                                }
+                                                $unreadCount = $employeeCount - $readCount;
+                                                $visibleNoticeEmployees = array_slice($noticeEmployees, 0, 10);
+                                                $extraNoticeEmployees = array_slice($noticeEmployees, 10);
                                                 ?>
                                                 <div class="mt-6 pt-5 border-t border-gray-200" data-notice-unread-section>
                                                     <div class="flex flex-wrap items-center justify-between gap-2">
-                                                        <div class="font-extrabold text-gray-900">미열람자</div>
-                                                        <?php if ($unreadTrackingAvailable): ?>
-                                                            <span class="inline-flex px-2 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-extrabold"><?php echo (int)$unreadCount; ?>명</span>
+                                                        <div class="font-extrabold text-gray-900">전체 직원</div>
+                                                        <?php if ($employeeReadTrackingAvailable): ?>
+                                                            <span class="inline-flex px-2 py-1 rounded-full bg-slate-100 text-slate-700 text-xs font-extrabold"><?php echo (int)$employeeCount; ?>명</span>
                                                         <?php endif; ?>
                                                     </div>
-                                                    <?php if (!$unreadTrackingAvailable): ?>
-                                                        <div class="mt-3 text-sm text-rose-600">미열람 정보를 불러오지 못했습니다.</div>
-                                                    <?php elseif ($unreadCount === 0): ?>
-                                                        <div class="mt-3 text-sm text-emerald-700 font-bold">모두 읽었습니다.</div>
+                                                    <?php if (!$employeeReadTrackingAvailable): ?>
+                                                        <div class="mt-3 text-sm text-rose-600">직원별 열람 정보를 불러오지 못했습니다.</div>
+                                                    <?php elseif ($employeeCount === 0): ?>
+                                                        <div class="mt-3 text-sm text-gray-500">표시할 직원이 없습니다.</div>
                                                     <?php else: ?>
+                                                        <div class="mt-3 flex flex-wrap gap-2 text-xs font-extrabold">
+                                                            <span class="inline-flex px-2 py-1 rounded-full bg-emerald-100 text-emerald-800">열람 <?php echo (int)$readCount; ?>명</span>
+                                                            <span class="inline-flex px-2 py-1 rounded-full bg-gray-100 text-gray-700">미열람 <?php echo (int)$unreadCount; ?>명</span>
+                                                        </div>
                                                         <div class="mt-3 flex flex-wrap gap-2">
-                                                            <?php foreach ($visibleUnreadEmployees as $unreadEmployee): ?>
+                                                            <?php foreach ($visibleNoticeEmployees as $noticeEmployee): ?>
                                                                 <?php
-                                                                $unreadName = isset($unreadEmployee['name']) ? trim((string)$unreadEmployee['name']) : '';
-                                                                if ($unreadName === '') $unreadName = isset($unreadEmployee['email']) ? trim((string)$unreadEmployee['email']) : '';
-                                                                if ($unreadName === '') $unreadName = '#' . (isset($unreadEmployee['id']) ? (int)$unreadEmployee['id'] : 0);
-                                                                $unreadMeta = array();
-                                                                if (isset($unreadEmployee['department']) && trim((string)$unreadEmployee['department']) !== '') $unreadMeta[] = trim((string)$unreadEmployee['department']);
-                                                                if (isset($unreadEmployee['position']) && trim((string)$unreadEmployee['position']) !== '') $unreadMeta[] = trim((string)$unreadEmployee['position']);
+                                                                $employeeName = isset($noticeEmployee['name']) ? trim((string)$noticeEmployee['name']) : '';
+                                                                if ($employeeName === '') $employeeName = isset($noticeEmployee['email']) ? trim((string)$noticeEmployee['email']) : '';
+                                                                if ($employeeName === '') $employeeName = '#' . (isset($noticeEmployee['id']) ? (int)$noticeEmployee['id'] : 0);
+                                                                $employeeMeta = array();
+                                                                if (isset($noticeEmployee['department']) && trim((string)$noticeEmployee['department']) !== '') $employeeMeta[] = trim((string)$noticeEmployee['department']);
+                                                                if (isset($noticeEmployee['position']) && trim((string)$noticeEmployee['position']) !== '') $employeeMeta[] = trim((string)$noticeEmployee['position']);
+                                                                $employeeIsRead = isset($noticeEmployee['is_read']) && (int)$noticeEmployee['is_read'] === 1;
                                                                 ?>
-                                                                <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-gray-100 text-gray-800 text-xs font-bold">
-                                                                    <?php echo h($unreadName); ?><?php if (count($unreadMeta) > 0): ?><span class="text-gray-500 font-normal">· <?php echo h(implode(' ', $unreadMeta)); ?></span><?php endif; ?>
+                                                                <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold <?php echo $employeeIsRead ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-800'; ?>">
+                                                                    <?php echo h($employeeName); ?><?php if (count($employeeMeta) > 0): ?><span class="<?php echo $employeeIsRead ? 'text-emerald-700' : 'text-gray-500'; ?> font-normal">· <?php echo h(implode(' ', $employeeMeta)); ?></span><?php endif; ?>
                                                                 </span>
                                                             <?php endforeach; ?>
                                                         </div>
-                                                        <?php if (count($extraUnreadEmployees) > 0): ?>
+                                                        <?php if (count($extraNoticeEmployees) > 0): ?>
                                                             <div class="hidden mt-2" data-notice-unread-extra>
                                                                 <div class="flex flex-wrap gap-2">
-                                                                <?php foreach ($extraUnreadEmployees as $unreadEmployee): ?>
+                                                                <?php foreach ($extraNoticeEmployees as $noticeEmployee): ?>
                                                                     <?php
-                                                                    $unreadName = isset($unreadEmployee['name']) ? trim((string)$unreadEmployee['name']) : '';
-                                                                    if ($unreadName === '') $unreadName = isset($unreadEmployee['email']) ? trim((string)$unreadEmployee['email']) : '';
-                                                                    if ($unreadName === '') $unreadName = '#' . (isset($unreadEmployee['id']) ? (int)$unreadEmployee['id'] : 0);
-                                                                    $unreadMeta = array();
-                                                                    if (isset($unreadEmployee['department']) && trim((string)$unreadEmployee['department']) !== '') $unreadMeta[] = trim((string)$unreadEmployee['department']);
-                                                                    if (isset($unreadEmployee['position']) && trim((string)$unreadEmployee['position']) !== '') $unreadMeta[] = trim((string)$unreadEmployee['position']);
+                                                                    $employeeName = isset($noticeEmployee['name']) ? trim((string)$noticeEmployee['name']) : '';
+                                                                    if ($employeeName === '') $employeeName = isset($noticeEmployee['email']) ? trim((string)$noticeEmployee['email']) : '';
+                                                                    if ($employeeName === '') $employeeName = '#' . (isset($noticeEmployee['id']) ? (int)$noticeEmployee['id'] : 0);
+                                                                    $employeeMeta = array();
+                                                                    if (isset($noticeEmployee['department']) && trim((string)$noticeEmployee['department']) !== '') $employeeMeta[] = trim((string)$noticeEmployee['department']);
+                                                                    if (isset($noticeEmployee['position']) && trim((string)$noticeEmployee['position']) !== '') $employeeMeta[] = trim((string)$noticeEmployee['position']);
+                                                                    $employeeIsRead = isset($noticeEmployee['is_read']) && (int)$noticeEmployee['is_read'] === 1;
                                                                     ?>
-                                                                    <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-gray-100 text-gray-800 text-xs font-bold">
-                                                                        <?php echo h($unreadName); ?><?php if (count($unreadMeta) > 0): ?><span class="text-gray-500 font-normal">· <?php echo h(implode(' ', $unreadMeta)); ?></span><?php endif; ?>
+                                                                    <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold <?php echo $employeeIsRead ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-800'; ?>">
+                                                                        <?php echo h($employeeName); ?><?php if (count($employeeMeta) > 0): ?><span class="<?php echo $employeeIsRead ? 'text-emerald-700' : 'text-gray-500'; ?> font-normal">· <?php echo h(implode(' ', $employeeMeta)); ?></span><?php endif; ?>
                                                                     </span>
                                                                 <?php endforeach; ?>
                                                                 </div>
                                                             </div>
-                                                            <button type="button" class="mt-3 px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-xs font-extrabold" data-notice-unread-toggle data-expand-text="더보기 (<?php echo count($extraUnreadEmployees); ?>명)" data-collapse-text="접기">더보기 (<?php echo count($extraUnreadEmployees); ?>명)</button>
+                                                            <button type="button" class="mt-3 px-3 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-xs font-extrabold" data-notice-unread-toggle data-expand-text="더보기 (<?php echo count($extraNoticeEmployees); ?>명)" data-collapse-text="접기">더보기 (<?php echo count($extraNoticeEmployees); ?>명)</button>
                                                         <?php endif; ?>
                                                     <?php endif; ?>
                                                 </div>

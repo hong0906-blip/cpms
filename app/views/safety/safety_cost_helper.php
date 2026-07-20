@@ -208,6 +208,14 @@ function cpms_safety_cost_user_can_manage_project($pdo, $projectId)
     if ($projectId <= 0 || !class_exists('App\\Core\\Auth') || !\App\Core\Auth::check()) return false;
     if (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive') return true;
 
+    if (method_exists('App\\Core\\Auth', 'canManageConstruction') && \App\Core\Auth::canManageConstruction()) {
+        if (cpms_safety_cost_user_can_view_all_projects()) return true;
+        if (cpms_safety_cost_user_has_project_role($pdo, $projectId, 'site_employee_id')) return true;
+        if (function_exists('cpms_is_project_member_or_executive')) {
+            if (cpms_is_project_member_or_executive($pdo, $projectId, \App\Core\Auth::userRole(), \App\Core\Auth::userEmail())) return true;
+        }
+    }
+
     $dept = cpms_safety_cost_normalize_dept(\App\Core\Auth::userDepartment());
     if ($dept !== '안전') return false;
 

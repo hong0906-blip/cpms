@@ -693,7 +693,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                     </form>
                 <?php else: ?>
                     <div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 font-bold">
-                        이 현장의 안전관리비 등록/수정/삭제는 지정 안전관리자가 안전섹션에서 처리합니다.
+                        이 현장의 안전관리비 등록/수정/삭제는 지정 안전관리자 또는 공사관리자가 처리합니다.
                     </div>
                 <?php endif; ?>
 

@@ -21,6 +21,128 @@ function attendance_today(){
     $dt = new DateTime('now', new DateTimeZone('Asia/Seoul'));
     return $dt->format('Y-m-d');
 }
+if (!function_exists('attendance_official_holiday_fallbacks')) {
+function attendance_official_holiday_fallbacks($startDate, $endDate){
+    $startDate = trim((string)$startDate);
+    $endDate = trim((string)$endDate);
+    $holidays = array();
+    if (!preg_match('/^(\d{4})-\d{2}-\d{2}$/', $startDate, $startParts)) return $holidays;
+    if (!preg_match('/^(\d{4})-\d{2}-\d{2}$/', $endDate, $endParts)) return $holidays;
+    if ($startDate > $endDate) return $holidays;
+
+    $fixedNames = array(
+        '01-01' => '신정',
+        '03-01' => '3·1절',
+        '05-01' => '노동절',
+        '05-05' => '어린이날',
+        '06-06' => '현충일',
+        '08-15' => '광복절',
+        '10-03' => '개천절',
+        '10-09' => '한글날',
+        '12-25' => '기독탄신일'
+    );
+    $startYear = (int)$startParts[1];
+    $endYear = (int)$endParts[1];
+    for ($year = $startYear; $year <= $endYear; $year++) {
+        foreach ($fixedNames as $monthDay => $holidayName) {
+            $date = sprintf('%04d-%s', $year, $monthDay);
+            if ($date >= $startDate && $date <= $endDate) {
+                $holidays[$date] = array('name'=>$holidayName, 'is_substitute'=>false, 'source'=>'STATUTORY');
+            }
+        }
+        if ($year >= 2026) {
+            $constitutionDate = sprintf('%04d-07-17', $year);
+            if ($constitutionDate >= $startDate && $constitutionDate <= $endDate) {
+                $holidays[$constitutionDate] = array('name'=>'제헌절', 'is_substitute'=>false, 'source'=>'STATUTORY');
+            }
+        }
+    }
+
+    /* 2026년 월력요항과 2026년 공휴일법·관공서공휴일규정 개정을 반영한 최신 보정표 */
+    $official2026 = array(
+        '2026-01-01' => array('신정', false),
+        '2026-02-16' => array('설날 전날', false),
+        '2026-02-17' => array('설날', false),
+        '2026-02-18' => array('설날 다음 날', false),
+        '2026-03-01' => array('3·1절', false),
+        '2026-03-02' => array('3·1절 대체공휴일', true),
+        '2026-05-01' => array('노동절', false),
+        '2026-05-05' => array('어린이날', false),
+        '2026-05-24' => array('부처님 오신 날', false),
+        '2026-05-25' => array('부처님 오신 날 대체공휴일', true),
+        '2026-06-03' => array('제9회 전국동시지방선거', false),
+        '2026-06-06' => array('현충일', false),
+        '2026-07-17' => array('제헌절', false),
+        '2026-08-15' => array('광복절', false),
+        '2026-08-17' => array('광복절 대체공휴일', true),
+        '2026-09-24' => array('추석 전날', false),
+        '2026-09-25' => array('추석', false),
+        '2026-09-26' => array('추석 다음 날', false),
+        '2026-10-03' => array('개천절', false),
+        '2026-10-05' => array('개천절 대체공휴일', true),
+        '2026-10-09' => array('한글날', false),
+        '2026-12-25' => array('기독탄신일', false)
+    );
+    foreach ($official2026 as $date => $holidayRow) {
+        if ($date < $startDate || $date > $endDate) continue;
+        $holidays[$date] = array(
+            'name' => isset($holidayRow[0]) ? (string)$holidayRow[0] : '공휴일',
+            'is_substitute' => !empty($holidayRow[1]),
+            'source' => 'OFFICIAL_2026'
+        );
+    }
+    return $holidays;
+}}
+if (!function_exists('attendance_holiday_map')) {
+function attendance_holiday_map($pdo, $startDate, $endDate){
+    static $cache = array();
+    $startDate = trim((string)$startDate);
+    $endDate = trim((string)$endDate);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $startDate)) return array();
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $endDate)) return array();
+    if ($startDate > $endDate) return array();
+    $pdoKey = is_object($pdo) && function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'no_pdo';
+    $cacheKey = $pdoKey . ':' . $startDate . ':' . $endDate;
+    if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+
+    $holidays = attendance_official_holiday_fallbacks($startDate, $endDate);
+    if ($pdo && attendance_table_exists($pdo, 'cpms_holiday_cache')) {
+        try {
+            $st = $pdo->prepare("SELECT holiday_date, holiday_name, source FROM cpms_holiday_cache WHERE is_active=1 AND holiday_date BETWEEN :start_date AND :end_date ORDER BY holiday_date ASC, id ASC");
+            $st->execute(array(':start_date'=>$startDate, ':end_date'=>$endDate));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (is_array($rows)) {
+                foreach ($rows as $row) {
+                    $date = isset($row['holiday_date']) ? trim((string)$row['holiday_date']) : '';
+                    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) continue;
+                    $name = isset($row['holiday_name']) ? trim((string)$row['holiday_name']) : '';
+                    if ($name === '') $name = '공휴일';
+                    $holidays[$date] = array(
+                        'name'=>$name,
+                        'is_substitute'=>(strpos(str_replace(' ', '', $name), '대체공휴일') !== false),
+                        'source'=>isset($row['source']) ? (string)$row['source'] : 'HOLIDAY_CACHE'
+                    );
+                }
+            }
+        } catch (Exception $e) {
+            error_log('[attendance_holiday_map] ' . $e->getMessage());
+        }
+    }
+    ksort($holidays);
+    $cache[$cacheKey] = $holidays;
+    return $holidays;
+}}
+if (!function_exists('attendance_holiday_info')) {
+function attendance_holiday_info($pdo, $date){
+    $date = trim((string)$date);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) return null;
+    $holidays = attendance_holiday_map($pdo, $date, $date);
+    return isset($holidays[$date]) ? $holidays[$date] : null;
+}}
+if (!function_exists('attendance_is_holiday')) {
+function attendance_is_holiday($pdo, $date){
+    return is_array(attendance_holiday_info($pdo, $date));
+}}
 function attendance_datetime_date_part($value){
     $value = trim((string)$value);
     if($value === '') return '';
@@ -36,6 +158,10 @@ function attendance_late_cutoff_time($position){
     if($position === attendance_text('%EB%B6%80%EC%82%AC%EC%9E%A5')) return '08:30';
     return '08:00';
 }
+if (!function_exists('attendance_morning_checkin_reminder_time')) {
+function attendance_morning_checkin_reminder_time(){
+    return '08:00';
+}}
 function attendance_is_late_check_in_value($checkIn, $position){
     $checkIn = trim((string)$checkIn);
     if($checkIn === '') return false;
@@ -404,12 +530,42 @@ function attendance_is_representative_employee($row){
     $needle = attendance_text('%EB%8C%80%ED%91%9C');
     return (($position !== '' && strpos($position, $needle) !== false) || ($name !== '' && strpos($name, $needle) !== false));
 }}
+if (!function_exists('attendance_is_vice_president_employee')) {
+function attendance_is_vice_president_employee($row){
+    if (!is_array($row)) return false;
+    $needle = attendance_text('%EB%B6%80%EC%82%AC%EC%9E%A5');
+    $position = attendance_normalize_position_name(isset($row['position']) ? $row['position'] : '');
+    $name = attendance_normalize_position_name(isset($row['name']) ? $row['name'] : '');
+    return (($position !== '' && strpos($position, $needle) !== false) || ($name !== '' && strpos($name, $needle) !== false));
+}}
+if (!function_exists('attendance_is_excluded_employee_name')) {
+function attendance_is_excluded_employee_name($name){
+    $name = str_replace(array(' ', "\t", "\r", "\n"), '', trim((string)$name));
+    return in_array($name, array('이호상', '노준형'), true);
+}}
+if (!function_exists('attendance_is_excluded_employee')) {
+function attendance_is_excluded_employee($row){
+    if (!is_array($row)) return false;
+    return attendance_is_excluded_employee_name(isset($row['name']) ? $row['name'] : '');
+}}
 if (!function_exists('attendance_filter_representative_rows')) {
 function attendance_filter_representative_rows($rows){
     if (!is_array($rows)) return array();
     $filtered = array();
     foreach ($rows as $row) {
         if (attendance_is_representative_employee($row)) continue;
+        if (attendance_is_excluded_employee($row)) continue;
+        $filtered[count($filtered)] = $row;
+    }
+    return $filtered;
+}}
+if (!function_exists('attendance_morning_checkin_filter_rows')) {
+function attendance_morning_checkin_filter_rows($rows){
+    if (!is_array($rows)) return array();
+    $filtered = array();
+    foreach ($rows as $row) {
+        if (attendance_is_excluded_employee($row)) continue;
+        if (attendance_is_representative_employee($row) && !attendance_is_vice_president_employee($row)) continue;
         $filtered[count($filtered)] = $row;
     }
     return $filtered;
@@ -655,9 +811,10 @@ function attendance_process_morning_missing_checkin_notifications($pdo, $limit) 
     $result = array('checked' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0);
     if (!$pdo) return $result;
     $today = attendance_today();
+    if (attendance_is_holiday($pdo, $today)) return $result;
     $now = attendance_now();
     $nowTime = strlen($now) >= 19 ? substr($now, 11, 8) : date('H:i:s');
-    if (strcmp($nowTime, '08:00:00') < 0) return $result;
+    if (strcmp($nowTime, attendance_morning_checkin_reminder_time() . ':00') < 0) return $result;
     $weekNo = (int)date('N', strtotime($today));
     if ($weekNo >= 6) return $result;
     if (!function_exists('cpms_send_google_chat_to_employee')) {
@@ -684,12 +841,33 @@ function attendance_process_morning_missing_checkin_notifications($pdo, $limit) 
         return $result;
     }
     try {
-        $positionSelect = attendance_table_column_exists_for_settings($pdo, 'employees', 'position') ? 'position' : "'' AS position";
+        $hasPosition = attendance_table_column_exists_for_settings($pdo, 'employees', 'position');
+        $positionSelect = $hasPosition ? 'position' : "'' AS position";
         $activeWhere = attendance_table_column_exists_for_settings($pdo, 'employees', 'is_active') ? " WHERE (is_active IS NULL OR is_active=1)" : "";
         $sql = "SELECT id, name, email, department, " . $positionSelect . " FROM employees" . $activeWhere . " ORDER BY id ASC LIMIT " . (int)$limit;
         $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($rows)) $rows = array();
-        $rows = attendance_filter_representative_rows($rows);
+        if ($hasPosition) {
+            $vpWhere = $activeWhere !== '' ? $activeWhere . " AND " : " WHERE ";
+            $vpSql = "SELECT id, name, email, department, position FROM employees" . $vpWhere . "position LIKE :vp_position ORDER BY id ASC";
+            $vpSt = $pdo->prepare($vpSql);
+            $vpSt->execute(array(':vp_position' => '%' . attendance_text('%EB%B6%80%EC%82%AC%EC%9E%A5') . '%'));
+            $vpRows = $vpSt->fetchAll(PDO::FETCH_ASSOC);
+            $knownIds = array();
+            foreach ($rows as $knownRow) {
+                $knownId = isset($knownRow['id']) ? (int)$knownRow['id'] : 0;
+                if ($knownId > 0) $knownIds[$knownId] = true;
+            }
+            if (is_array($vpRows)) {
+                foreach ($vpRows as $vpRow) {
+                    $vpId = isset($vpRow['id']) ? (int)$vpRow['id'] : 0;
+                    if ($vpId <= 0 || isset($knownIds[$vpId])) continue;
+                    $rows[count($rows)] = $vpRow;
+                    $knownIds[$vpId] = true;
+                }
+            }
+        }
+        $rows = attendance_morning_checkin_filter_rows($rows);
     } catch (Exception $e) {
         return $result;
     }

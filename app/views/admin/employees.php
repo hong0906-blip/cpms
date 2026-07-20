@@ -19,6 +19,7 @@ $isRetiredView = ($employeeView === 'retired');
 $rows = array();
 $dbOk = ($pdo !== null);
 $employeeLoadError = '';
+$activeEmployeeCount = 0;
 
 if ($dbOk) {
     cpms_leave_apply_accruals_until($pdo, date('Y-m-d'));
@@ -183,6 +184,11 @@ $vehicleNumberEnabled = $dbOk ? cpms_column_exists($pdo, 'employees', 'vehicle_n
 
 
 if ($dbOk) {
+    try {
+        $activeEmployeeCount = (int)$pdo->query("SELECT COUNT(*) FROM employees WHERE is_active=1")->fetchColumn();
+    } catch (\Exception $e) {
+        $activeEmployeeCount = 0;
+    }
     $positionSelect = $positionEnabled ? 'position' : "'' AS position";
     $hireDateSelect = $hireDateEnabled ? 'hire_date' : 'NULL AS hire_date';
     $resignDateSelect = $resignDateEnabled ? 'resign_date' : 'NULL AS resign_date';
@@ -345,9 +351,17 @@ for ($i = 0; $i < count($teamLeaderCandidates); $i++) {
 <?php endif; ?>
 <?php if (!empty($employeeLoadError)): ?><div class="mb-4 border border-red-300 bg-red-50 text-red-700 p-3 rounded"><?php echo h($employeeLoadError); ?></div><?php endif; ?>
 
-<div class="flex flex-wrap gap-2 mb-4">
-  <a class="px-4 py-2 rounded-2xl border font-bold <?php echo !$isRetiredView ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-gray-700 border-gray-200'; ?>" href="?r=관리&tab=employees&employee_view=active<?php echo ($q !== '') ? '&q=' . rawurlencode($q) : ''; ?>">재직자</a>
-  <a class="px-4 py-2 rounded-2xl border font-bold <?php echo $isRetiredView ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-700 border-gray-200'; ?>" href="?r=관리&tab=employees&employee_view=retired<?php echo ($q !== '') ? '&q=' . rawurlencode($q) : ''; ?>">퇴직자</a>
+<div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+  <div class="flex flex-wrap gap-2">
+    <a class="px-4 py-2 rounded-2xl border font-bold <?php echo !$isRetiredView ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white text-gray-700 border-gray-200'; ?>" href="?r=관리&tab=employees&employee_view=active<?php echo ($q !== '') ? '&q=' . rawurlencode($q) : ''; ?>">재직자</a>
+    <a class="px-4 py-2 rounded-2xl border font-bold <?php echo $isRetiredView ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-700 border-gray-200'; ?>" href="?r=관리&tab=employees&employee_view=retired<?php echo ($q !== '') ? '&q=' . rawurlencode($q) : ''; ?>">퇴직자</a>
+  </div>
+  <?php if (!$isRetiredView): ?>
+    <div class="inline-flex items-center gap-2 rounded-2xl border border-emerald-100 bg-emerald-50 px-3 py-2 shadow-sm">
+      <span class="text-xs font-bold text-emerald-700">총 직원수</span>
+      <span class="text-base font-extrabold text-emerald-900"><?php echo number_format($activeEmployeeCount); ?>명</span>
+    </div>
+  <?php endif; ?>
 </div>
 
 <div class="bg-white/80 rounded-3xl shadow p-6 mb-6 border border-gray-100"><form method="get" class="flex gap-3 items-center"><input type="hidden" name="r" value="관리"><input type="hidden" name="tab" value="employees"><input type="hidden" name="employee_view" value="<?php echo h($employeeView); ?>"><input class="w-full px-4 py-3 rounded-2xl border" name="q" value="<?php echo h($q); ?>" placeholder="이메일/이름/사번/연락처/위치/부서/직급 검색"><button class="px-5 py-3 rounded-2xl border bg-white">검색</button></form></div>
