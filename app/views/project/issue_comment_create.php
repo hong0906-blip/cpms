@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/ConstructionIssueCommentNotificationService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -82,6 +83,9 @@ try {
     $ins->bindValue(':created_by_name', $createdByName, PDO::PARAM_STR);
     $ins->bindValue(':created_by_email', $createdByEmail, PDO::PARAM_STR);
     $ins->execute();
+    $commentId = (int)$pdo->lastInsertId();
+
+    cpms_construction_issue_comment_send_dm($pdo, $commentId, true);
 
     flash_set('success', 'ISSUE_COMMENT_LOADED=Y 댓글을 등록했습니다.');
 } catch (Exception $e) {

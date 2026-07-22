@@ -11,7 +11,7 @@ use App\Core\Auth;
 use App\Core\Db;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
-if (!(Auth::isMaster() || Auth::userRole() === 'executive')) {
+if (!Auth::isDevelopmentDepartment()) {
     http_response_code(403);
     echo '403 Forbidden';
     exit;

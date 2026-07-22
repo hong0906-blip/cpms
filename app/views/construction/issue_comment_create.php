@@ -12,6 +12,7 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/ConstructionIssueCommentNotificationService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -142,6 +143,9 @@ try {
     $ins->bindValue(':nm', $userName);
     $ins->bindValue(':em', $userEmail);
     $ins->execute();
+    $commentId = (int)$pdo->lastInsertId();
+
+    cpms_construction_issue_comment_send_dm($pdo, $commentId, true);
 
     flash_set('success', '댓글이 등록되었습니다.');
 } catch (Exception $e) {

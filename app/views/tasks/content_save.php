@@ -44,7 +44,30 @@ if (isset($task['status']) && in_array((string)$task['status'], array('done', 'c
 
 try {
     if (cpms_tasks_update_content($pdo, $task, $currentEmployee, $title, $content, $message, cpms_tasks_now())) {
-        flash_set('success', '업무내용을 수정했습니다.');
+        $savedFileCount = 0;
+        if (isset($_FILES['attachments'])) {
+            $savedFiles = cpms_tasks_save_uploaded_files($pdo, $taskId, $_FILES['attachments'], $currentEmployeeId, 'request');
+            if (is_array($savedFiles) && count($savedFiles) > 0) {
+                $savedFileCount = count($savedFiles);
+                $groupKey = isset($task['group_key']) ? trim((string)$task['group_key']) : '';
+                if (cpms_tasks_is_request_group_key($groupKey)) {
+                    $groupSummary = cpms_tasks_completion_group_summary($pdo, $task);
+                    $groupRows = isset($groupSummary['rows']) ? $groupSummary['rows'] : array();
+                    if (is_array($groupRows)) {
+                        for ($i = 0; $i < count($groupRows); $i++) {
+                            $groupTaskId = isset($groupRows[$i]['id']) ? (int)$groupRows[$i]['id'] : 0;
+                            if ($groupTaskId <= 0 || $groupTaskId === $taskId) continue;
+                            cpms_tasks_copy_saved_files_to_task($pdo, $savedFiles, $groupTaskId, $currentEmployeeId, 'request');
+                        }
+                    }
+                }
+            }
+        }
+        if ($savedFileCount > 0) {
+            flash_set('success', '업무내용을 수정하고 첨부파일 ' . $savedFileCount . '개를 추가했습니다.');
+        } else {
+            flash_set('success', '업무내용을 수정했습니다.');
+        }
     } else {
         flash_set('danger', '업무내용 수정에 실패했습니다.');
     }

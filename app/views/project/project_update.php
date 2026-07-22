@@ -120,8 +120,15 @@ $endDate = isset($_POST['end_date']) ? trim((string)$_POST['end_date']) : '';
 $settlementCompletedAt = isset($_POST['settlement_completed_at']) ? trim((string)$_POST['settlement_completed_at']) : '';
 $contractAmount = isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '';
 $mainManagerId = isset($_POST['main_manager_id']) ? (int)$_POST['main_manager_id'] : 0;
-$subManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
-
+$postedSubManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
+$subManagerIds = array();
+$seenSubManagerIds = array();
+foreach ($postedSubManagerIds as $postedSubManagerId) {
+    $subManagerId = (int)$postedSubManagerId;
+    if ($subManagerId <= 0 || $subManagerId === $mainManagerId || isset($seenSubManagerIds[$subManagerId])) continue;
+    $seenSubManagerIds[$subManagerId] = true;
+    $subManagerIds[] = $subManagerId;
+}
 if ($name === '') {
     cpms_project_update_fail_redirect($projectId, '프로젝트명이 없습니다.');
 }
@@ -138,6 +145,17 @@ if ($mainManagerId <= 0) {
         $mainManagerId = $existingMainManagerId;
         error_log('[project_update] main_manager_id missing, fallback to existing main manager: ' . $mainManagerId);
     }
+}
+
+// 메인 담당자가 기존 값으로 보완된 경우에도 메인/서브 중복을 제거한다.
+$normalizedSubManagerIds = array();
+foreach ($subManagerIds as $subManagerId) {
+    if ((int)$subManagerId === $mainManagerId) continue;
+    $normalizedSubManagerIds[] = (int)$subManagerId;
+}
+$subManagerIds = $normalizedSubManagerIds;
+if (count($subManagerIds) > 4) {
+    cpms_project_update_fail_redirect($projectId, '서브 담당자는 최대 4명까지 지정할 수 있습니다.');
 }
 
 $contractAmountVal = null;

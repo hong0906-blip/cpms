@@ -6,8 +6,6 @@
  */
 
 $canEditLabor = isset($canEdit) ? (bool)$canEdit : false;
-$hideLaborForceInputUi = true; // 복구 시 false로 변경하면 임원 전용 강제입력 칸이 다시 보입니다.
-$hideLaborForceSummaryUi = true; // 복구 시 false로 변경하면 강제입력 노무비 요약 카드가 다시 보입니다.
 $laborTab = isset($_GET['labor_tab']) ? trim((string)$_GET['labor_tab']) : 'timesheet';
 if ($laborTab === '') $laborTab = 'timesheet';
 
@@ -277,7 +275,7 @@ if (!function_exists('cpms_labor_tab_monthly_pay_total')) {
     }
 }
 
-$canManageLaborForce = (\App\Core\Auth::isMaster() || \App\Core\Auth::userRole() === 'executive');
+$canManageLaborForce = \App\Core\Auth::isDevelopmentDepartment();
 $laborForceRow = function_exists('cpms_labor_force_load') ? cpms_labor_force_load(isset($pdo) ? $pdo : null, $projectId, $selectedMonth) : array('amount' => 0.0, 'memo' => '');
 $laborForceAmount = isset($laborForceRow['amount']) ? (float)$laborForceRow['amount'] : 0.0;
 $laborBaseAmount = cpms_labor_tab_monthly_pay_total($laborCostTimesheetWorkers, $attendanceGongsuMap, $selectedMonth);
@@ -334,7 +332,7 @@ foreach ($timesheetWorkers as $worker) {
         </div>
     </div>
 
-    <?php $showLaborForceSummaryCard = ($canManageLaborForce && !$hideLaborForceSummaryUi); ?>
+    <?php $showLaborForceSummaryCard = $canManageLaborForce; ?>
     <div class="mt-5 grid grid-cols-1 <?php echo $showLaborForceSummaryCard ? 'md:grid-cols-3' : 'md:grid-cols-2'; ?> gap-3">
         <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4">
             <div class="text-xs font-bold text-gray-500">공수 기준 노무비(외주비 제외)</div>
@@ -353,14 +351,14 @@ foreach ($timesheetWorkers as $worker) {
     </div>
 
     <?php if ($canManageLaborForce): ?>
-        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_force_save" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4" <?php echo $hideLaborForceInputUi ? 'style="display:none;" aria-hidden="true" data-hidden-for-restore="1"' : ''; ?>>
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_force_save" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
             <input type="hidden" name="labor_tab" value="<?php echo h($laborTab); ?>">
             <div class="grid grid-cols-1 md:grid-cols-[220px_1fr_auto] gap-3 items-end">
                 <div>
-                    <label class="text-xs font-bold text-amber-800">임원 전용 강제입력</label>
+                    <label class="text-xs font-bold text-amber-800">개발 부서 전용 강제입력</label>
                     <input type="text" name="amount" value="<?php echo h(number_format($laborForceAmount)); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-amber-200 bg-white text-right font-bold">
                 </div>
                 <div>

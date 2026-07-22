@@ -45,9 +45,8 @@ $storageType = isset($file['storage_type']) ? strtolower(trim((string)$file['sto
 $driveFileId = isset($file['drive_file_id']) ? trim((string)$file['drive_file_id']) : '';
 $viewUrl = isset($file['drive_web_view_link']) ? trim((string)$file['drive_web_view_link']) : '';
 $contentUrl = isset($file['drive_web_content_link']) ? trim((string)$file['drive_web_content_link']) : '';
-$target = ($download && $contentUrl !== '') ? $contentUrl : $viewUrl;
-if ($target === '' && $contentUrl !== '') $target = $contentUrl;
-if ($target !== '') {
+$target = $viewUrl !== '' ? $viewUrl : $contentUrl;
+if (!$download && $target !== '') {
     header('Location: ' . $target);
     exit;
 }
@@ -68,6 +67,11 @@ if ($storageType === 'google_drive' && $driveFileId !== '' && cpms_tasks_drive_h
         echo $content;
         exit;
     }
+}
+
+if ($download && $contentUrl !== '') {
+    header('Location: ' . $contentUrl);
+    exit;
 }
 
 $path = cpms_tasks_local_file_path(isset($file['stored_path']) ? $file['stored_path'] : '');

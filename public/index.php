@@ -1083,6 +1083,10 @@ if ($route === 'tasks/file') {
     require_once __DIR__ . '/../app/views/tasks/file.php';
     exit;
 }
+if ($route === 'tasks/files_download') {
+    require_once __DIR__ . '/../app/views/tasks/files_download.php';
+    exit;
+}
 if ($route === 'notice_save' || $route === 'dashboard_notice_save') {
     require_once __DIR__ . '/../app/views/dashboard/notice_save.php';
     exit;

@@ -699,6 +699,7 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
                 </div>
                 <form method="post" action="?r=tasks/create" enctype="multipart/form-data" class="p-6 space-y-5">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="request_token" value="<?php echo h(md5(uniqid('task_create_', true))); ?>">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
                     <input type="hidden" name="task_kind" value="task">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -793,6 +794,7 @@ function cpms_render_task_request_modals($pdo, $returnUrl)
                 </div>
                 <form method="post" action="?r=tasks/create" enctype="multipart/form-data" class="p-6 space-y-5">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="request_token" value="<?php echo h(md5(uniqid('meeting_create_', true))); ?>">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
                     <input type="hidden" name="task_kind" value="meeting">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1434,6 +1436,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                 </div>
                 <form method="post" action="?r=tasks/create" enctype="multipart/form-data" class="p-6 space-y-5">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="request_token" value="<?php echo h(md5(uniqid('task_create_', true))); ?>">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
                     <input type="hidden" name="task_kind" value="task">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1528,6 +1531,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                 </div>
                 <form method="post" action="?r=tasks/create" enctype="multipart/form-data" class="p-6 space-y-5">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="request_token" value="<?php echo h(md5(uniqid('meeting_create_', true))); ?>">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
                     <input type="hidden" name="task_kind" value="meeting">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1768,12 +1772,12 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
     <div id="modal-taskContentUpdate" class="fixed inset-0 z-50 hidden">
         <div class="absolute inset-0 bg-black/40" data-modal-close="taskContentUpdate"></div>
         <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="w-full max-w-2xl rounded-3xl bg-white shadow-2xl border border-gray-100 overflow-hidden">
+            <div class="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl bg-white shadow-2xl border border-gray-100">
                 <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
                     <div class="text-2xl font-extrabold text-gray-900">업무 수정</div>
                     <button type="button" class="p-3 rounded-2xl hover:bg-gray-100" data-modal-close="taskContentUpdate">닫기</button>
                 </div>
-                <form method="post" action="?r=task_content_save" class="p-6 space-y-4">
+                <form method="post" action="?r=task_content_save" enctype="multipart/form-data" class="p-6 space-y-4">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="task_id" id="taskContentUpdateTaskId" value="">
                     <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
@@ -1784,6 +1788,11 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
                     <div>
                         <div class="text-sm font-bold text-gray-700 mb-1">업무 내용</div>
                         <textarea name="content" id="taskContentUpdateContent" rows="6" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></textarea>
+                    </div>
+                    <div>
+                        <div class="text-sm font-bold text-gray-700 mb-1">첨부파일</div>
+                        <input type="file" name="attachments[]" id="taskContentUpdateAttachments" multiple class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white">
+                        <div class="mt-1 text-xs text-gray-500">빠뜨린 파일을 여러 개 선택해 추가할 수 있습니다.</div>
                     </div>
                     <div>
                         <div class="text-sm font-bold text-gray-700 mb-1">수정 메모</div>
@@ -1831,6 +1840,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
         var contentUpdateTitle = document.getElementById('taskContentUpdateTitle');
         var contentUpdateContent = document.getElementById('taskContentUpdateContent');
         var contentUpdateMessage = document.getElementById('taskContentUpdateMessage');
+        var contentUpdateAttachments = document.getElementById('taskContentUpdateAttachments');
 
         function todayString() {
             var now = new Date();
@@ -2122,6 +2132,7 @@ function cpms_render_employee_task_dashboard($pdo, $options = array())
             if (contentUpdateTitle) contentUpdateTitle.value = title || '';
             if (contentUpdateContent) contentUpdateContent.value = content || '';
             if (contentUpdateMessage) contentUpdateMessage.value = '';
+            if (contentUpdateAttachments) contentUpdateAttachments.value = '';
             var modal = document.getElementById('modal-taskContentUpdate');
             if (modal) modal.classList.remove('hidden');
         }

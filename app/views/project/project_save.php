@@ -149,7 +149,15 @@ $settlementCompletedAt = isset($_POST['settlement_completed_at']) ? trim((string
 $contract_amount = isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '';
 
 $mainManagerId = isset($_POST['main_manager_id']) ? (int)$_POST['main_manager_id'] : 0;
-$subManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
+$postedSubManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
+$subManagerIds = array();
+$seenSubManagerIds = array();
+foreach ($postedSubManagerIds as $postedSubManagerId) {
+    $subManagerId = (int)$postedSubManagerId;
+    if ($subManagerId <= 0 || $subManagerId === $mainManagerId || isset($seenSubManagerIds[$subManagerId])) continue;
+    $seenSubManagerIds[$subManagerId] = true;
+    $subManagerIds[] = $subManagerId;
+}
 $unitPriceToken = isset($_POST['unit_price_token']) ? trim((string)$_POST['unit_price_token']) : '';
 $projectCreateUnitPricePackForDrive = null;
 
@@ -175,6 +183,11 @@ if ($hasSettlementColumn && $status === '정산완료') {
     $settlementCompletedAtVal = cpms_project_save_date_or_null($settlementCompletedAt);
     if ($settlementCompletedAtVal === null) $settlementCompletedAtVal = cpms_project_save_date_or_null($endVal);
     if ($settlementCompletedAtVal === null) $settlementCompletedAtVal = date('Y-m-d');
+}
+if (count($subManagerIds) > 4) {
+    flash_set('error', '서브 담당자는 최대 4명까지 지정할 수 있습니다.');
+    header('Location: ?r=공무');
+    exit;
 }
 
 try {

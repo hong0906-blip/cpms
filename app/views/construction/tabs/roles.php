@@ -32,6 +32,13 @@ function load_employees_by_dept($pdo, $deptName) {
 $empsSafety  = load_employees_by_dept($pdo, '안전');
 $empsQuality = load_employees_by_dept($pdo, '품질');
 $empsSite    = load_employees_by_dept($pdo, '공사');
+$allEmployees = array();
+try {
+    $stAllEmployees = $pdo->query("SELECT id, name, department, position FROM employees WHERE is_active = 1 ORDER BY department, position, name");
+    $allEmployees = $stAllEmployees ? $stAllEmployees->fetchAll() : array();
+} catch (Exception $e) {
+    $allEmployees = array();
+}
 
 // 현재 값
 $row = null;
@@ -47,6 +54,18 @@ try {
 $curSafety  = $row ? (int)$row['safety_employee_id'] : 0;
 $curQuality = $row ? (int)$row['quality_employee_id'] : 0;
 $curSite    = $row ? (int)$row['site_employee_id'] : 0;
+$subManagerIds = array();
+try {
+    $stSubManagers = $pdo->prepare("SELECT employee_id FROM cpms_project_members WHERE project_id = :pid AND LOWER(TRIM(role)) = 'sub' ORDER BY employee_id");
+    $stSubManagers->bindValue(':pid', (int)$pid, \PDO::PARAM_INT);
+    $stSubManagers->execute();
+    $subRows = $stSubManagers->fetchAll();
+    foreach ($subRows as $subRow) {
+        $subManagerIds[] = (int)$subRow['employee_id'];
+    }
+} catch (Exception $e) {
+    $subManagerIds = array();
+}
 ?>
 
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">
@@ -63,8 +82,8 @@ $curSite    = $row ? (int)$row['site_employee_id'] : 0;
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
         <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
 
-        <div>
-            <label class="text-sm font-bold text-gray-700">현장 담당(공사)</label>
+        <div class="md:col-span-1">
+            <label class="text-sm font-bold text-gray-700">현장 담당(공사) 메인</label>
             <select name="site_employee_id" class="w-full mt-1 px-4 py-3 rounded-2xl border border-gray-200" <?php echo $canSave?'':'disabled'; ?>>
                 <option value="0">미지정</option>
                 <?php foreach ($empsSite as $e): ?>
@@ -73,10 +92,28 @@ $curSite    = $row ? (int)$row['site_employee_id'] : 0;
                     </option>
                 <?php endforeach; ?>
             </select>
+
+            <div class="mt-4 space-y-3">
+                <?php for ($subSlot = 0; $subSlot < 4; $subSlot++): ?>
+                    <?php $selectedSubManagerId = isset($subManagerIds[$subSlot]) ? (int)$subManagerIds[$subSlot] : 0; ?>
+                    <div>
+                        <label class="text-sm font-bold text-gray-700">현장 담당(공사) 서브 <?php echo (int)($subSlot + 1); ?></label>
+                        <select name="sub_manager_ids[]" data-sub-manager-slot class="w-full mt-1 px-4 py-3 rounded-2xl border border-gray-200" <?php echo $canSave?'':'disabled'; ?>>
+                            <option value="0">미지정</option>
+                            <?php foreach ($allEmployees as $e): ?>
+                                <option value="<?php echo (int)$e['id']; ?>" <?php echo ((int)$e['id'] === $selectedSubManagerId)?'selected':''; ?>>
+                                    <?php echo h($e['department'].' / '.$e['position'].' / '.$e['name']); ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                <?php endfor; ?>
+                <div class="text-xs text-gray-500">공무 섹션의 부담당자(서브)와 같은 명단으로 연동됩니다.</div>
+            </div>
         </div>
 
         <div>
-            <label class="text-sm font-bold text-gray-700">안전 담당(안전)</label>
+            <label class="text-sm font-bold text-gray-700">안전 담당(안전) 메인</label>
             <select name="safety_employee_id" class="w-full mt-1 px-4 py-3 rounded-2xl border border-gray-200" <?php echo $canSave?'':'disabled'; ?>>
                 <option value="0">미지정</option>
                 <?php foreach ($empsSafety as $e): ?>
@@ -88,7 +125,7 @@ $curSite    = $row ? (int)$row['site_employee_id'] : 0;
         </div>
 
         <div>
-            <label class="text-sm font-bold text-gray-700">품질 담당(품질)</label>
+            <label class="text-sm font-bold text-gray-700">품질 담당(품질) 메인</label>
             <select name="quality_employee_id" class="w-full mt-1 px-4 py-3 rounded-2xl border border-gray-200" <?php echo $canSave?'':'disabled'; ?>>
                 <option value="0">미지정</option>
                 <?php foreach ($empsQuality as $e): ?>
@@ -109,3 +146,22 @@ $curSite    = $row ? (int)$row['site_employee_id'] : 0;
     </form>
 
 </div>
+<script>
+(function () {
+    var slots = document.querySelectorAll('[data-sub-manager-slot]');
+    var i;
+    for (i = 0; i < slots.length; i++) {
+        slots[i].addEventListener('change', function () {
+            if (!this.value || this.value === '0') return;
+            var j;
+            for (j = 0; j < slots.length; j++) {
+                if (slots[j] !== this && slots[j].value === this.value) {
+                    this.value = '0';
+                    window.alert('같은 서브 담당자를 중복 지정할 수 없습니다.');
+                    return;
+                }
+            }
+        });
+    }
+}());
+</script>

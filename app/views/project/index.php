@@ -322,13 +322,13 @@ function cpms_project_index_is_collab_draft_project($project) {
               </select>
             </div>
             <div class="md:col-span-2">
-              <div class="text-sm font-bold text-gray-700 mb-1">부담당자(서브)</div>
+              <div class="text-sm font-bold text-gray-700 mb-1">부담당자(서브) <span class="text-gray-400 font-medium">최대 4명</span></div>
               <select name="sub_manager_ids[]" id="sub_manager_ids" multiple class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white outline-none" style="min-height:120px;">
                 <?php foreach ($constructionEmployees as $employee): ?>
                   <option value="<?php echo (int)$employee['id']; ?>"><?php echo h($employee['name']); ?></option>
                 <?php endforeach; ?>
               </select>
-              <div class="text-xs text-gray-500 mt-2">PC에서는 Ctrl 또는 Cmd를 누른 채 여러 명을 선택할 수 있습니다.</div>
+              <div class="text-xs text-gray-500 mt-2">PC에서는 Ctrl 또는 Cmd를 누른 채 선택하세요.</div>
             </div>
           </div>
 
@@ -501,6 +501,18 @@ function cpms_project_index_is_collab_draft_project($project) {
   }
 
   var createForm = document.getElementById('projectCreateForm');
+  var subManagerSelect = document.getElementById('sub_manager_ids');
+  if (subManagerSelect) {
+    subManagerSelect.addEventListener('change', function(){
+      var selected = [];
+      for (var i = 0; i < subManagerSelect.options.length; i++) {
+        if (subManagerSelect.options[i].selected) selected.push(subManagerSelect.options[i]);
+      }
+      if (selected.length <= 4) return;
+      selected[selected.length - 1].selected = false;
+      alert('서브 담당자는 최대 4명까지 지정할 수 있습니다.');
+    });
+  }
   if (createForm) {
     createForm.addEventListener('submit', function(e){
       var mainManager = document.getElementById('main_manager_id');

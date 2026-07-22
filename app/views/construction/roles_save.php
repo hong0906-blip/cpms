@@ -38,6 +38,21 @@ $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $siteId    = isset($_POST['site_employee_id']) ? (int)$_POST['site_employee_id'] : 0;
 $safetyId  = isset($_POST['safety_employee_id']) ? (int)$_POST['safety_employee_id'] : 0;
 $qualityId = isset($_POST['quality_employee_id']) ? (int)$_POST['quality_employee_id'] : 0;
+$postedSubManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
+$subManagerIds = array();
+$seenSubManagerIds = array();
+foreach ($postedSubManagerIds as $postedSubManagerId) {
+    $subManagerId = (int)$postedSubManagerId;
+    if ($subManagerId <= 0 || $subManagerId === $siteId || isset($seenSubManagerIds[$subManagerId])) continue;
+    $seenSubManagerIds[$subManagerId] = true;
+    $subManagerIds[] = $subManagerId;
+}
+
+if (count($subManagerIds) > 4) {
+    flash_set('error', '서브 담당자는 최대 4명까지 지정할 수 있습니다.');
+    header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
+    exit;
+}
 
 if ($projectId <= 0) {
     flash_set('error','프로젝트 정보가 올바르지 않습니다.');
@@ -53,6 +68,7 @@ if (!$pdo) {
 }
 
 try {
+    $pdo->beginTransaction();
     $st = $pdo->prepare("SELECT project_id FROM cpms_construction_roles WHERE project_id = :pid LIMIT 1");
     $st->bindValue(':pid', $projectId, \PDO::PARAM_INT);
     $st->execute();
@@ -79,11 +95,41 @@ try {
         $ins->execute();
     }
 
+    // 공무 섹션과 같은 프로젝트 멤버 데이터를 사용하여 메인/서브 담당자를 양방향 연동한다.
+    $deleteMain = $pdo->prepare("DELETE FROM cpms_project_members WHERE project_id = :pid AND LOWER(TRIM(role)) = 'main'");
+    $deleteMain->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+    $deleteMain->execute();
+    if ($siteId > 0) {
+        $insertMember = $pdo->prepare("INSERT INTO cpms_project_members(project_id, employee_id, role) VALUES(:pid, :eid, :role)");
+        $insertMember->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+        $insertMember->bindValue(':eid', $siteId, \PDO::PARAM_INT);
+        $insertMember->bindValue(':role', 'main');
+        $insertMember->execute();
+    } else {
+        $insertMember = null;
+    }
+
+    $deleteSubs = $pdo->prepare("DELETE FROM cpms_project_members WHERE project_id = :pid AND LOWER(TRIM(role)) = 'sub'");
+    $deleteSubs->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+    $deleteSubs->execute();
+    if ($insertMember === null) {
+        $insertMember = $pdo->prepare("INSERT INTO cpms_project_members(project_id, employee_id, role) VALUES(:pid, :eid, :role)");
+    }
+    foreach ($subManagerIds as $subManagerId) {
+        $insertMember->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+        $insertMember->bindValue(':eid', $subManagerId, \PDO::PARAM_INT);
+        $insertMember->bindValue(':role', 'sub');
+        $insertMember->execute();
+    }
+
+    $pdo->commit();
+
     flash_set('success','담당 지정이 저장되었습니다.');
     header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
     exit;
 
 } catch (Exception $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
     flash_set('error','저장 실패: '.$e->getMessage());
     header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
     exit;

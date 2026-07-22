@@ -96,6 +96,26 @@
     for (var i = 0; i < forms.length; i++) {
       forms[i].removeAttribute('data-cpms-loading-submitting');
     }
+    var disabledSubmitters = document.querySelectorAll('[data-cpms-loading-disabled="1"]');
+    for (var j = 0; j < disabledSubmitters.length; j++) {
+      disabledSubmitters[j].disabled = false;
+      disabledSubmitters[j].removeAttribute('data-cpms-loading-disabled');
+    }
+  }
+
+  function disableFormSubmitters(form) {
+    if (!form || !form.querySelectorAll) return;
+    var controls = form.querySelectorAll('button, input');
+    for (var i = 0; i < controls.length; i++) {
+      var control = controls[i];
+      var tagName = control.tagName || '';
+      var type = (control.getAttribute('type') || '').toLowerCase();
+      var isSubmitter = (tagName === 'BUTTON' && (type === '' || type === 'submit'))
+        || (tagName === 'INPUT' && (type === 'submit' || type === 'image'));
+      if (!isSubmitter || control.disabled) continue;
+      control.setAttribute('data-cpms-loading-disabled', '1');
+      control.disabled = true;
+    }
   }
 
   function requestUrlText(input) {
@@ -198,12 +218,16 @@
       if (!form || form.getAttribute('data-cpms-no-loading') === '1') return;
       if (event.defaultPrevented) return;
       if (form.target && form.target !== '_self') return;
-      if (form.getAttribute('data-cpms-loading-submitting') === '1') return;
+      if (form.getAttribute('data-cpms-loading-submitting') === '1') {
+        event.preventDefault();
+        return;
+      }
       event.preventDefault();
       form.setAttribute('data-cpms-loading-submitting', '1');
       markNextPageLoading();
       showGlobalLoadingNow();
       submitFormAfterLoading(form);
+      disableFormSubmitters(form);
     }, false);
   }
 

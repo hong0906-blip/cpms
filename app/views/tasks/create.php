@@ -17,6 +17,9 @@ if (!csrf_check(isset($_POST['_csrf']) ? $_POST['_csrf'] : '')) {
     cpms_tasks_redirect_back();
 }
 
+$taskKind = trim((string)(isset($_POST['task_kind']) ? $_POST['task_kind'] : 'task'));
+$isMeetingRequest = ($taskKind === 'meeting' || (isset($_POST['task_type']) && (string)$_POST['task_type'] === 'meeting'));
+
 $pdo = Db::pdo();
 $setupResults = array();
 cpms_tasks_ensure_schema($pdo, $setupResults);
@@ -29,8 +32,6 @@ if ((int)$currentEmployee['id'] <= 0) {
 
 $title = trim((string)(isset($_POST['title']) ? $_POST['title'] : ''));
 $content = trim((string)(isset($_POST['content']) ? $_POST['content'] : ''));
-$taskKind = trim((string)(isset($_POST['task_kind']) ? $_POST['task_kind'] : 'task'));
-$isMeetingRequest = ($taskKind === 'meeting' || (isset($_POST['task_type']) && (string)$_POST['task_type'] === 'meeting'));
 $department = trim((string)(isset($_POST['department']) ? $_POST['department'] : ''));
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $dueDate = trim((string)(isset($_POST['due_date']) ? $_POST['due_date'] : ''));
@@ -156,6 +157,30 @@ $groupKey = '';
 if ($hasGroupKey) {
     $groupPrefix = $isMeetingRequest ? 'meeting_request' : 'task_request';
     $groupKey = $groupPrefix . ':' . $requesterEmployeeId . ':' . date('YmdHis') . ':' . substr(md5(uniqid('', true)), 0, 8);
+}
+
+$requestToken = isset($_POST['request_token']) ? trim((string)$_POST['request_token']) : '';
+if (!preg_match('/^[a-f0-9]{32}$/', $requestToken)) {
+    flash_set('danger', '업무요청 식별값이 올바르지 않습니다. 화면을 새로고침한 뒤 다시 시도해주세요.');
+    cpms_tasks_redirect_back();
+}
+$requestTokenKey = 'tasks/create:' . $requestToken;
+if (!isset($_SESSION['_cpms_task_request_tokens']) || !is_array($_SESSION['_cpms_task_request_tokens'])) {
+    $_SESSION['_cpms_task_request_tokens'] = array();
+}
+$requestTokenNow = time();
+foreach ($_SESSION['_cpms_task_request_tokens'] as $savedTokenKey => $savedTokenAt) {
+    if ((int)$savedTokenAt < ($requestTokenNow - 3600)) {
+        unset($_SESSION['_cpms_task_request_tokens'][$savedTokenKey]);
+    }
+}
+if (isset($_SESSION['_cpms_task_request_tokens'][$requestTokenKey])) {
+    flash_set('danger', '같은 업무요청의 중복 제출을 차단했습니다. 최초 요청만 처리됩니다.');
+    cpms_tasks_redirect_back();
+}
+$_SESSION['_cpms_task_request_tokens'][$requestTokenKey] = $requestTokenNow;
+while (count($_SESSION['_cpms_task_request_tokens']) > 100) {
+    array_shift($_SESSION['_cpms_task_request_tokens']);
 }
 
 try {

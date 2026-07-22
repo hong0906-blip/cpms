@@ -466,8 +466,8 @@ if (count($estimateVersions) > 0) {
                 </select>
             </div>
             <div class="md:col-span-2">
-                <div class="text-sm font-bold text-gray-700 mb-1">부담당자(서브)</div>
-                <select name="sub_manager_ids[]" multiple class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white outline-none" style="min-height:120px;">
+                <div class="text-sm font-bold text-gray-700 mb-1">부담당자(서브) <span class="text-gray-400 font-medium">최대 4명</span></div>
+                <select name="sub_manager_ids[]" multiple data-project-sub-manager-select class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white outline-none" style="min-height:120px;">
                     <?php foreach ($employees as $employee): ?>
                         <?php $selectedSub = in_array((int)$employee['id'], $subManagerIds, true); ?>
                         <option value="<?php echo (int)$employee['id']; ?>" <?php echo $selectedSub ? 'selected' : ''; ?>>
@@ -475,7 +475,7 @@ if (count($estimateVersions) > 0) {
                         </option>
                     <?php endforeach; ?>
                 </select>
-                <div class="text-xs text-gray-500 mt-2">PC에서는 Ctrl 또는 Cmd를 누른 채 여러 명을 선택할 수 있습니다.</div>
+                <div class="text-xs text-gray-500 mt-2">공사 섹션의 서브 담당자와 연동됩니다. PC에서는 Ctrl 또는 Cmd를 누른 채 선택하세요.</div>
             </div>
         </div>
 
@@ -490,6 +490,25 @@ if (count($estimateVersions) > 0) {
         </div>
     </form>
 </div>
+<?php endif; ?>
+
+<?php if ($editMode): ?>
+<script>
+(function () {
+    var select = document.querySelector('[data-project-sub-manager-select]');
+    if (!select) return;
+    select.addEventListener('change', function () {
+        var selected = [];
+        var i;
+        for (i = 0; i < select.options.length; i++) {
+            if (select.options[i].selected) selected.push(select.options[i]);
+        }
+        if (selected.length <= 4) return;
+        selected[selected.length - 1].selected = false;
+        window.alert('서브 담당자는 최대 4명까지 지정할 수 있습니다.');
+    });
+}());
+</script>
 <?php endif; ?>
 
 <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
