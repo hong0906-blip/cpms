@@ -264,12 +264,12 @@ $tomorrow = ($tomorrowTs !== false) ? date('Y-m-d', $tomorrowTs) : date('Y-m-d',
 $tomorrowLeaveIndex = ($needsAttendanceData && function_exists('approval_current_leave_index')) ? approval_current_leave_index($pdo, $tomorrow) : array('by_id' => array(), 'by_email' => array(), 'by_name' => array(), 'people' => array());
 $risk52 = array();
 $absent = array();
-$presentPeople = array();
+$workingPeople = array();
+$checkedOutPeople = array();
 $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? $currentLeaveIndex['people'] : array();
-$leaveToday = count($leavePeople);
 $leaveTomorrowPeople = isset($tomorrowLeaveIndex['people']) && is_array($tomorrowLeaveIndex['people']) ? $tomorrowLeaveIndex['people'] : array();
 $leaveTomorrow = count($leaveTomorrowPeople);
-$todayPresent = 0;
+$todayWorkStatus = 0;
 
 if (!function_exists('cpms_executive_dashboard_filter_attendance_excluded')) {
 function cpms_executive_dashboard_filter_attendance_excluded($people) {
@@ -282,7 +282,6 @@ function cpms_executive_dashboard_filter_attendance_excluded($people) {
     return $filtered;
 }}
 $leavePeople = cpms_executive_dashboard_filter_attendance_excluded($leavePeople);
-$leaveToday = count($leavePeople);
 $leaveTomorrowPeople = cpms_executive_dashboard_filter_attendance_excluded($leaveTomorrowPeople);
 $leaveTomorrow = count($leaveTomorrowPeople);
 
@@ -415,6 +414,85 @@ function cpms_render_executive_attendance_modal($modalKey, $title, $people, $kin
     <?php
 }}
 
+if (!function_exists('cpms_render_executive_work_status_modal')) {
+function cpms_render_executive_work_status_modal($workingPeople, $checkedOutPeople, $attendanceTimeLabel) {
+    if (!is_array($workingPeople)) $workingPeople = array();
+    if (!is_array($checkedOutPeople)) $checkedOutPeople = array();
+    $totalPeople = count($workingPeople) + count($checkedOutPeople);
+    ?>
+    <div id="modal-execAttendance-todayWorkStatus" class="cpms-exec-attendance-modal fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="modal-execAttendance-title-todayWorkStatus">
+        <div class="absolute inset-0 bg-slate-950/55" data-exec-attendance-close="todayWorkStatus"></div>
+        <div class="absolute inset-0 flex items-center justify-center p-4">
+            <div class="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
+                <div class="flex items-center justify-between gap-4 px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-white">
+                    <div class="min-w-0">
+                        <div id="modal-execAttendance-title-todayWorkStatus" class="text-xl font-extrabold text-gray-900">오늘 근무 현황</div>
+                        <div class="mt-1 text-sm text-gray-500">근무중 인원과 퇴근한 사람을 구분해 표시합니다.</div>
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0">
+                        <span class="inline-flex px-3 py-1.5 rounded-full border border-emerald-100 bg-emerald-50 text-sm font-extrabold text-emerald-700"><?php echo $totalPeople; ?>명</span>
+                        <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700 hover:bg-gray-50" data-exec-attendance-close="todayWorkStatus">닫기</button>
+                    </div>
+                </div>
+                <div class="p-4 md:p-5 overflow-y-auto max-h-[76vh] space-y-6">
+                    <section>
+                        <div class="flex items-center justify-between gap-3 mb-3">
+                            <h4 class="text-lg font-extrabold text-emerald-800">근무중 인원</h4>
+                            <span class="px-3 py-1 rounded-full bg-emerald-50 border border-emerald-100 text-sm font-extrabold text-emerald-700"><?php echo count($workingPeople); ?>명</span>
+                        </div>
+                        <?php if (count($workingPeople) === 0): ?>
+                            <div class="p-5 rounded-2xl border border-dashed border-emerald-200 bg-emerald-50/50 text-center text-sm font-bold text-emerald-700">현재 근무중인 인원이 없습니다.</div>
+                        <?php else: ?>
+                            <div class="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2">
+                                <?php foreach ($workingPeople as $person): ?>
+                                    <?php $checkInLabel = call_user_func($attendanceTimeLabel, isset($person['check_in']) ? $person['check_in'] : ''); ?>
+                                    <div class="flex items-center justify-between gap-2 px-2.5 py-2.5 sm:px-3 sm:py-3 rounded-xl border border-gray-200 bg-white">
+                                        <div class="min-w-0">
+                                            <div class="text-sm sm:text-base font-extrabold text-gray-900 truncate"><?php echo h(isset($person['name']) ? $person['name'] : '-'); ?></div>
+                                            <div class="mt-0.5 text-[10px] sm:text-xs text-gray-500 truncate"><?php echo h(cpms_executive_dashboard_department_label($person)); ?> · <?php echo h(isset($person['position']) && trim((string)$person['position']) !== '' ? $person['position'] : '-'); ?></div>
+                                        </div>
+                                        <div class="shrink-0 text-right text-[10px] sm:text-xs text-gray-500">출근 <b class="sm:ml-1 text-emerald-800"><?php echo h($checkInLabel); ?></b></div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </section>
+
+                    <section class="pt-5 border-t border-gray-200">
+                        <div class="flex items-center justify-between gap-3 mb-3">
+                            <h4 class="text-lg font-extrabold text-slate-800">퇴근한 사람</h4>
+                            <span class="px-3 py-1 rounded-full bg-slate-100 border border-slate-200 text-sm font-extrabold text-slate-700"><?php echo count($checkedOutPeople); ?>명</span>
+                        </div>
+                        <?php if (count($checkedOutPeople) === 0): ?>
+                            <div class="p-5 rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-center text-sm font-bold text-slate-600">오늘 퇴근한 사람이 없습니다.</div>
+                        <?php else: ?>
+                            <div class="grid grid-cols-2 lg:grid-cols-4 gap-1.5 sm:gap-2">
+                                <?php foreach ($checkedOutPeople as $person): ?>
+                                    <?php
+                                    $checkInLabel = call_user_func($attendanceTimeLabel, isset($person['check_in']) ? $person['check_in'] : '');
+                                    $checkOutLabel = call_user_func($attendanceTimeLabel, isset($person['check_out']) ? $person['check_out'] : '');
+                                    ?>
+                                    <div class="flex items-center justify-between gap-2 px-2.5 py-2.5 sm:px-3 sm:py-3 rounded-xl border border-gray-200 bg-white">
+                                        <div class="min-w-0">
+                                            <div class="text-sm sm:text-base font-extrabold text-gray-900 truncate"><?php echo h(isset($person['name']) ? $person['name'] : '-'); ?></div>
+                                            <div class="mt-0.5 text-[10px] sm:text-xs text-gray-500 truncate"><?php echo h(cpms_executive_dashboard_department_label($person)); ?> · <?php echo h(isset($person['position']) && trim((string)$person['position']) !== '' ? $person['position'] : '-'); ?></div>
+                                        </div>
+                                        <div class="shrink-0 text-right text-[10px] sm:text-xs leading-4 sm:leading-5 text-gray-500">
+                                            <div>출근 <b class="sm:ml-1 text-sky-800"><?php echo h($checkInLabel); ?></b></div>
+                                            <div>퇴근 <b class="sm:ml-1 text-slate-800"><?php echo h($checkOutLabel); ?></b></div>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </section>
+                </div>
+            </div>
+        </div>
+    </div>
+    <?php
+}}
+
 if ($pdo) {
     if ($needsIssueData) {
     try {
@@ -488,6 +566,7 @@ if ($pdo) {
         }
 
         $leaveExMap = isset($currentLeaveIndex['by_id']) && is_array($currentLeaveIndex['by_id']) ? $currentLeaveIndex['by_id'] : array();
+        $leaveExNameMap = isset($currentLeaveIndex['by_name']) && is_array($currentLeaveIndex['by_name']) ? $currentLeaveIndex['by_name'] : array();
 
         $activeRows = $pdo->query("SELECT id, name, department, position, role FROM employees WHERE is_active = 1")->fetchAll();
         $stAtt = $pdo->prepare("SELECT employee_id, MIN(check_in) AS check_in, MAX(check_out) AS check_out
@@ -508,7 +587,7 @@ if ($pdo) {
 
             $eid = (int)$ar['id'];
             if (isset($attMap[$eid])) {
-                $presentPeople[] = array(
+                $presentPerson = array(
                     'name' => $ar['name'],
                     'department' => $ar['department'],
                     'position' => $ar['position'],
@@ -516,6 +595,16 @@ if ($pdo) {
                     'check_in' => isset($attMap[$eid]['check_in']) ? $attMap[$eid]['check_in'] : '',
                     'check_out' => isset($attMap[$eid]['check_out']) ? $attMap[$eid]['check_out'] : '',
                 );
+                $employeeName = isset($ar['name']) ? trim((string)$ar['name']) : '';
+                $isOnLeaveToday = isset($leaveExMap[$eid]) || ($employeeName !== '' && isset($leaveExNameMap[$employeeName]));
+                $checkIn = isset($attMap[$eid]['check_in']) ? trim((string)$attMap[$eid]['check_in']) : '';
+                $checkOut = isset($attMap[$eid]['check_out']) ? trim((string)$attMap[$eid]['check_out']) : '';
+                if (!$isOnLeaveToday && $checkIn !== '' && $checkOut === '') {
+                    $workingPeople[] = $presentPerson;
+                }
+                if ($checkIn !== '' && $checkOut !== '') {
+                    $checkedOutPeople[] = $presentPerson;
+                }
                 continue;
             }
             if (isset($attMap[$eid]) || isset($leaveExMap[$eid])) continue;
@@ -539,10 +628,19 @@ if ($pdo) {
             }
             return '99:99:99';
         };
-        usort($presentPeople, function ($a, $b) use ($attendanceSortTimeKey) {
+        usort($workingPeople, function ($a, $b) use ($attendanceSortTimeKey) {
             $aCheckIn = $attendanceSortTimeKey(isset($a['check_in']) ? $a['check_in'] : '');
             $bCheckIn = $attendanceSortTimeKey(isset($b['check_in']) ? $b['check_in'] : '');
             $timeCompare = strcmp($aCheckIn, $bCheckIn);
+            if ($timeCompare !== 0) return $timeCompare;
+            $aName = isset($a['name']) ? (string)$a['name'] : '';
+            $bName = isset($b['name']) ? (string)$b['name'] : '';
+            return strcmp($aName, $bName);
+        });
+        usort($checkedOutPeople, function ($a, $b) use ($attendanceSortTimeKey) {
+            $aCheckOut = $attendanceSortTimeKey(isset($a['check_out']) ? $a['check_out'] : '');
+            $bCheckOut = $attendanceSortTimeKey(isset($b['check_out']) ? $b['check_out'] : '');
+            $timeCompare = strcmp($aCheckOut, $bCheckOut);
             if ($timeCompare !== 0) return $timeCompare;
             $aName = isset($a['name']) ? (string)$a['name'] : '';
             $bName = isset($b['name']) ? (string)$b['name'] : '';
@@ -553,10 +651,9 @@ if ($pdo) {
             $bName = isset($b['name']) ? (string)$b['name'] : '';
             return strcmp($aName, $bName);
         });
-        $todayPresent = count($presentPeople);
+        $todayWorkStatus = count($workingPeople) + count($checkedOutPeople);
 
         $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? cpms_executive_dashboard_filter_attendance_excluded($currentLeaveIndex['people']) : array();
-        $leaveToday = count($leavePeople);
         $leaveTomorrowPeople = isset($tomorrowLeaveIndex['people']) && is_array($tomorrowLeaveIndex['people']) ? cpms_executive_dashboard_filter_attendance_excluded($tomorrowLeaveIndex['people']) : array();
         $leaveTomorrow = count($leaveTomorrowPeople);
     } catch (Exception $e) {
@@ -724,59 +821,27 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
 <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
     <div class="bg-white/80 rounded-3xl p-6 border overflow-visible">
         <h3 class="text-2xl font-extrabold mb-4">근태 리스크 현황</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <button type="button" class="group p-4 rounded-2xl bg-rose-50 border border-rose-100 text-left hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-100/70 transition" data-exec-attendance-open="todayAbsent" aria-haspopup="dialog">
-                <div class="flex items-start justify-between gap-3">
-                    <div>
-                        <div class="text-gray-600 text-base font-bold group-hover:text-rose-700">오늘 미출근자 수</div>
-                        <div class="text-4xl font-extrabold text-rose-700 mt-1"><?php echo count($absent); ?>명</div>
-                    </div>
-                    <span class="inline-flex items-center px-3 py-1.5 rounded-full bg-white text-rose-700 border border-rose-100 text-xs font-extrabold">명단 보기</span>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <button type="button" class="group min-w-0 p-4 rounded-2xl bg-rose-50 border border-rose-100 text-left hover:-translate-y-0.5 hover:shadow-lg hover:shadow-rose-100/70 transition" data-exec-attendance-open="todayAbsent" aria-haspopup="dialog">
+                <div class="font-bold text-gray-600 group-hover:text-rose-700 whitespace-nowrap leading-tight tracking-tight" style="font-size:clamp(.68rem,.9vw,.95rem)">오늘 미출근자 수</div>
+                <div class="flex items-end justify-between gap-2 mt-3">
+                    <div class="font-extrabold text-rose-700 leading-none" style="font-size:clamp(1.75rem,2.3vw,2.25rem)"><?php echo count($absent); ?>명</div>
+                    <span class="shrink-0 inline-flex items-center px-2 py-1.5 rounded-full bg-white text-rose-700 border border-rose-100 text-[11px] font-extrabold">명단 보기</span>
                 </div>
             </button>
-            <button type="button" class="group p-4 rounded-2xl bg-sky-50 border border-sky-100 text-left hover:-translate-y-0.5 hover:shadow-lg hover:shadow-sky-100/70 transition" data-exec-attendance-open="todayPresent" aria-haspopup="dialog">
-                <div class="flex items-start justify-between gap-3">
-                    <div>
-                        <div class="text-gray-600 text-base font-bold group-hover:text-sky-700">오늘 출근자 수</div>
-                        <div class="text-4xl font-extrabold text-sky-700 mt-1"><?php echo $todayPresent; ?>명</div>
-                    </div>
-                    <span class="inline-flex items-center px-3 py-1.5 rounded-full bg-white text-sky-700 border border-sky-100 text-xs font-extrabold">명단 보기</span>
+            <button type="button" class="group min-w-0 p-4 rounded-2xl bg-emerald-50 border border-emerald-100 text-left hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-100/70 transition" data-exec-attendance-open="todayWorkStatus" aria-haspopup="dialog">
+                <div class="font-bold text-gray-600 group-hover:text-emerald-700 whitespace-nowrap leading-tight tracking-tight" style="font-size:clamp(.68rem,.9vw,.95rem)">오늘 근무 현황</div>
+                <div class="flex items-end justify-between gap-2 mt-3">
+                    <div class="font-extrabold text-emerald-700 leading-none" style="font-size:clamp(1.75rem,2.3vw,2.25rem)"><?php echo $todayWorkStatus; ?>명</div>
+                    <span class="shrink-0 inline-flex items-center px-2 py-1.5 rounded-full bg-white text-emerald-700 border border-emerald-100 text-[11px] font-extrabold">현황 보기</span>
                 </div>
             </button>
-            <div class="p-4 rounded-2xl bg-indigo-50 relative group cursor-pointer">
-                <div class="text-gray-600 text-lg font-bold">오늘 월차/연차/반차자 수</div>
-                <div class="text-4xl font-extrabold text-indigo-700 mt-2"><?php echo $leaveToday; ?>명</div>
-                <div class="hidden md:block absolute left-0 top-full mt-2 w-96 max-w-[92vw] p-4 rounded-2xl bg-white border border-gray-200 shadow-2xl z-[9999] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition">
-                    <div class="font-extrabold text-lg mb-2">오늘 월차/연차/반차자 명단</div>
-                    <?php if (count($leavePeople) === 0): ?>
-                        <div class="text-base leading-8 text-gray-700">오늘 월차/연차/반차자는 없습니다.</div>
-                    <?php else: ?>
-                        <ul class="space-y-2">
-                            <?php foreach ($leavePeople as $person): ?>
-                                <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
-                            <?php endforeach; ?>
-                        </ul>
-                    <?php endif; ?>
+            <div class="min-w-0 p-4 rounded-2xl bg-violet-50 relative group cursor-pointer">
+                <div class="font-bold text-gray-600 whitespace-nowrap leading-tight tracking-tight" style="font-size:clamp(.68rem,.9vw,.95rem)">명일 월차/연차/반차자 수</div>
+                <div class="flex items-end justify-between gap-2 mt-3">
+                    <div class="font-extrabold text-violet-700 leading-none" style="font-size:clamp(1.75rem,2.3vw,2.25rem)"><?php echo $leaveTomorrow; ?>명</div>
+                    <div class="shrink-0 text-[10px] text-violet-700 font-bold"><?php echo h($tomorrow); ?></div>
                 </div>
-                <details class="md:hidden mt-3">
-                    <summary class="inline-block px-3 py-2 rounded-xl bg-indigo-100 text-base font-bold">명단 보기</summary>
-                    <div class="mt-3 p-3 rounded-xl bg-white border border-gray-200">
-                        <?php if (count($leavePeople) === 0): ?>
-                            <div class="text-base leading-8 text-gray-700">오늘 월차/연차/반차자는 없습니다.</div>
-                        <?php else: ?>
-                            <ul class="space-y-2">
-                                <?php foreach ($leavePeople as $person): ?>
-                                    <li class="text-base leading-8 text-gray-800"><?php echo h($person['name']); ?> / <?php echo h(cpms_executive_dashboard_department_label($person)); ?> / <?php echo h($person['position'] ?: '-'); ?></li>
-                                <?php endforeach; ?>
-                            </ul>
-                        <?php endif; ?>
-                    </div>
-                </details>
-            </div>
-            <div class="p-4 rounded-2xl bg-violet-50 relative group cursor-pointer">
-                <div class="text-gray-600 text-lg font-bold">명일 월차/연차/반차자 수</div>
-                <div class="text-4xl font-extrabold text-violet-700 mt-2"><?php echo $leaveTomorrow; ?>명</div>
-                <div class="text-xs text-violet-700 font-bold mt-1"><?php echo h($tomorrow); ?> 기준</div>
                 <div class="hidden md:block absolute left-0 top-full mt-2 w-96 max-w-[92vw] p-4 rounded-2xl bg-white border border-gray-200 shadow-2xl z-[9999] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition">
                     <div class="font-extrabold text-lg mb-2">명일 월차/연차/반차자 명단</div>
                     <?php if (count($leaveTomorrowPeople) === 0): ?>
@@ -856,7 +921,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
 
 <?php
 cpms_render_executive_attendance_modal('todayAbsent', '오늘 미출근자 명단', $absent, 'absent', $attendanceTimeLabel);
-cpms_render_executive_attendance_modal('todayPresent', '오늘 출근자 명단', $presentPeople, 'present', $attendanceTimeLabel);
+cpms_render_executive_work_status_modal($workingPeople, $checkedOutPeople, $attendanceTimeLabel);
 ?>
 <script>
 (function(){

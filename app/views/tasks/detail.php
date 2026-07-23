@@ -34,7 +34,7 @@ cpms_tasks_mark_read($pdo, $task, $currentEmployee);
 $task = cpms_tasks_find_task($pdo, $taskId);
 
 $logs = cpms_tasks_fetch_logs($pdo, $taskId);
-$files = cpms_tasks_fetch_files($pdo, $taskId);
+$files = cpms_tasks_fetch_visible_files($pdo, $task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $requestFiles = array();
 $completeFiles = array();
 for ($i = 0; $i < count($files); $i++) {
@@ -238,7 +238,12 @@ ob_start();
                         <?php foreach ($completeFiles as $file): ?>
                             <div class="flex items-center gap-3 p-3 rounded-2xl border border-emerald-200 bg-emerald-50">
                                 <input type="checkbox" name="file_ids[]" value="<?php echo (int)(isset($file['id']) ? $file['id'] : 0); ?>" class="w-4 h-4 shrink-0" aria-label="<?php echo h(isset($file['original_name']) ? $file['original_name'] : '파일'); ?> 선택">
-                                <span class="min-w-0 flex-1 font-bold text-slate-800 break-all"><?php echo h(isset($file['original_name']) ? $file['original_name'] : '-'); ?></span>
+                                <span class="min-w-0 flex-1">
+                                    <span class="block font-bold text-slate-800 break-all"><?php echo h(isset($file['original_name']) ? $file['original_name'] : '-'); ?></span>
+                                    <?php if (isset($file['_task_assignee_name']) && trim((string)$file['_task_assignee_name']) !== ''): ?>
+                                        <span class="mt-1 inline-flex px-2 py-0.5 rounded-full bg-white border border-emerald-200 text-xs font-extrabold text-emerald-700"><?php echo h($file['_task_assignee_name']); ?> 업로드</span>
+                                    <?php endif; ?>
+                                </span>
                                 <a href="<?php echo h(cpms_tasks_file_url($file)); ?>" target="_blank" class="shrink-0 text-xs font-bold text-emerald-700 hover:underline">열기</a>
                                 <a href="<?php echo h(cpms_tasks_file_url($file)); ?>&amp;download=1" class="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-700 text-xs font-extrabold text-white hover:bg-emerald-800">다운로드</a>
                             </div>

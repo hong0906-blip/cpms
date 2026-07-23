@@ -87,7 +87,7 @@ $showBankColumns = isset($showBankColumns) ? (bool)$showBankColumns : true;
 $canEditTimesheet = isset($canEdit) ? (bool)$canEdit : false;
 $debugMode = isset($_GET['debug']) && (string)$_GET['debug'] === '1';
 $laborSheetDownloadMode = isset($laborSheetDownloadMode) ? (bool)$laborSheetDownloadMode : false;
-$laborSort = isset($laborSort) ? trim((string)$laborSort) : 'name';
+$laborSort = isset($laborSort) ? trim((string)$laborSort) : 'job_type';
 $laborSortDir = isset($laborSortDir) ? trim((string)$laborSortDir) : 'asc';
 if ($laborSortDir !== 'desc') $laborSortDir = 'asc';
 $laborSheetProjectId = isset($pid) ? (int)$pid : (isset($projectId) ? (int)$projectId : 0);
@@ -116,6 +116,8 @@ if (!function_exists('cpms_labor_sheet_group_label')) {
 }
 $laborSheetGroupLastIndex = array();
 if ($laborSheetShowSubtotals && count($timesheetWorkers) > 0) {
+    // 공수 표는 업체를 1순위로 묶고, 각 업체 안에서는 앞서 적용된 직종/성명 순서를 유지합니다.
+    // 업체 행을 연속 배치해야 업체별 소계가 정확한 위치에 표시됩니다.
     $laborSheetCompanyGroups = array();
     foreach ($timesheetWorkers as $workerForGroup) {
         $groupKeyForSort = cpms_labor_sheet_group_key($workerForGroup);
@@ -125,15 +127,15 @@ if ($laborSheetShowSubtotals && count($timesheetWorkers) > 0) {
     uksort($laborSheetCompanyGroups, function($a, $b) use ($laborSort, $laborSortDir) {
         $labelA = cpms_labor_sheet_group_label($a);
         $labelB = cpms_labor_sheet_group_label($b);
-        if ($labelA === '창명건설' && $labelB !== '창명건설') $result = -1;
-        else if ($labelA !== '창명건설' && $labelB === '창명건설') $result = 1;
-        else $result = strcmp($labelA, $labelB);
+        $result = strcmp($labelA, $labelB);
         if ($laborSort === 'company' && $laborSortDir === 'desc') return $result * -1;
         return $result;
     });
     $groupedTimesheetWorkers = array();
     foreach ($laborSheetCompanyGroups as $groupKeyForSort => $groupWorkersForSort) {
-        foreach ($groupWorkersForSort as $groupWorkerForSort) $groupedTimesheetWorkers[] = $groupWorkerForSort;
+        foreach ($groupWorkersForSort as $groupWorkerForSort) {
+            $groupedTimesheetWorkers[] = $groupWorkerForSort;
+        }
         $laborSheetGroupLastIndex[$groupKeyForSort] = count($groupedTimesheetWorkers) - 1;
     }
     $timesheetWorkers = $groupedTimesheetWorkers;
@@ -307,6 +309,10 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
                 <?php
                 $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
                 $jobTypeSnapshot = isset($worker['job_type_snapshot']) ? trim((string)$worker['job_type_snapshot']) : '';
+                $workerCompanyName = isset($worker['company_name']) ? trim((string)$worker['company_name']) : '';
+                $workerRemark = isset($worker['remark']) ? trim((string)$worker['remark']) : '';
+                $workerCompanyDisplay = $workerCompanyName;
+                if ($workerRemark !== '') $workerCompanyDisplay .= ' (' . $workerRemark . ')';
                 $workerKey = cpms_timesheet_worker_key($workerName);
                 $dailyMap = isset($attendanceGongsuMap[$workerKey]) ? $attendanceGongsuMap[$workerKey] : array();
                 $timeDailyMap = isset($attendanceTimeMap[$workerKey]) && is_array($attendanceTimeMap[$workerKey]) ? $attendanceTimeMap[$workerKey] : array();
@@ -378,7 +384,7 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['bank_name']) ? $worker['bank_name'] : ''); ?></td>
                     <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['bank_account']) ? $worker['bank_account'] : ''); ?></td>
                     <?php endif; ?>
-                    <td class="border border-gray-200 px-2 py-2"><?php echo h(isset($worker['company_name']) ? $worker['company_name'] : ''); ?></td>
+                    <td class="border border-gray-200 px-2 py-2"><?php echo h($workerCompanyDisplay); ?></td>
                 </tr>
                 <?php if ($debugMode): ?>
                 <tr class="bg-yellow-50">

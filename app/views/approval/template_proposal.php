@@ -190,7 +190,14 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     );
     $attachedFileCount = 0;
     foreach ($labels as $fileKey => $fileLabel) {
-        if (isset($files[$fileKey]) && is_array($files[$fileKey])) $attachedFileCount++;
+        if (!isset($files[$fileKey]) || !is_array($files[$fileKey])) {
+            continue;
+        }
+        if (isset($files[$fileKey]['original_name'])) {
+            $attachedFileCount++;
+        } else {
+            $attachedFileCount += count($files[$fileKey]);
+        }
     }
     echo '<div class="doc-attach-heading"><strong>' . h(approval_ko('%EC%B2%A8%EB%B6%80%EC%84%9C%EB%A5%98')) . '</strong>';
     if ($mode === 'edit') {
@@ -200,15 +207,33 @@ function render_approval_proposal_document($data, $lines, $mode, $files, $approv
     }
     echo '</div>';
     foreach ($labels as $k => $lb) {
-        $f = isset($files[$k]) && is_array($files[$k]) ? $files[$k] : null;
-        echo '<div class="attach-row' . ($f ? ' attach-row-present' : '') . '"><span class="attach-label">' . h($lb) . '</span>';
+        $fileList = array();
+        if (isset($files[$k]) && is_array($files[$k])) {
+            if (isset($files[$k]['original_name'])) {
+                $fileList[] = $files[$k];
+            } else {
+                $fileList = $files[$k];
+            }
+        }
+        echo '<div class="attach-row' . (count($fileList) > 0 ? ' attach-row-present' : '') . '"><span class="attach-label">' . h($lb) . '</span>';
         if ($mode === 'edit') {
-            echo '<input class="attach-file-input" type="file" name="' . h($k) . '_file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf">';
+            echo '<div class="attach-file-picker">';
+            echo '<input class="attach-file-input" type="file" name="' . h($k) . '_file[]" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.xls,.xlsx" multiple>';
+            echo '<span class="attach-file-help">' . h('이미지, PDF, Excel(.xls, .xlsx) / 여러 파일 선택 가능') . '</span>';
+            echo '</div>';
         } else {
-            if ($f) {
-                $originalName = isset($f['original_name']) && is_scalar($f['original_name']) ? trim((string)$f['original_name']) : '';
-                if ($originalName === '') $originalName = approval_ko('%EC%B2%A8%EB%B6%80%ED%8C%8C%EC%9D%BC');
-                echo '<span class="attach-file-name">' . h($originalName) . '</span>' . cpms_approval_drive_file_links_html($f);
+            if (count($fileList) > 0) {
+                echo '<div class="attach-file-list">';
+                for ($fileIndex = 0; $fileIndex < count($fileList); $fileIndex++) {
+                    $f = $fileList[$fileIndex];
+                    if (!is_array($f)) {
+                        continue;
+                    }
+                    $originalName = isset($f['original_name']) && is_scalar($f['original_name']) ? trim((string)$f['original_name']) : '';
+                    if ($originalName === '') $originalName = approval_ko('%EC%B2%A8%EB%B6%80%ED%8C%8C%EC%9D%BC');
+                    echo '<div class="attach-file-item"><span class="attach-file-name">' . h($originalName) . '</span>' . cpms_approval_drive_file_links_html($f) . '</div>';
+                }
+                echo '</div>';
             } else {
                 echo '<span class="attach-empty">' . h(approval_ko('%EB%AF%B8%EC%B2%A8%EB%B6%80')) . '</span>';
             }

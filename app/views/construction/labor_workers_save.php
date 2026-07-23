@@ -36,9 +36,14 @@ $action = isset($_POST['action']) ? trim((string)$_POST['action']) : 'save';
 $deleteWorkerId = isset($_POST['delete_worker_id']) ? (int)$_POST['delete_worker_id'] : 0;
 $workers = isset($_POST['workers']) && is_array($_POST['workers']) ? $_POST['workers'] : array();
 if ($laborTab === '') $laborTab = 'workers';
+$workerSort = isset($_POST['worker_sort']) ? trim((string)$_POST['worker_sort']) : 'company';
+$workerSortAllowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'bank_account', 'bank_name', 'account_holder', 'remark');
+if (!in_array($workerSort, $workerSortAllowed, true)) $workerSort = 'company';
+$workerSortDir = isset($_POST['worker_sort_dir']) && (string)$_POST['worker_sort_dir'] === 'desc' ? 'desc' : 'asc';
 
 $redirect = '?r=공사&pid=' . $projectId . '&tab=labor&labor_tab=' . urlencode($laborTab);
 if ($month !== '') $redirect .= '&month=' . urlencode($month);
+$redirect .= '&worker_sort=' . urlencode($workerSort) . '&worker_sort_dir=' . urlencode($workerSortDir);
 
 if ($projectId <= 0) {
     flash_set('error', '프로젝트 정보가 올바르지 않습니다.');
@@ -290,6 +295,9 @@ try {
                 $phone = isset($fields['phone']) ? trim((string)$fields['phone']) : '';
                 $address = isset($fields['address']) ? trim((string)$fields['address']) : '';
                 $companyName = isset($fields['company_name']) ? trim((string)$fields['company_name']) : '';
+                $remark = isset($fields['remark']) ? trim((string)$fields['remark']) : '';
+                if (function_exists('mb_substr')) $remark = mb_substr($remark, 0, 255, 'UTF-8');
+                else $remark = substr($remark, 0, 255);
                 $outsourcingRatio = isset($validatedOutsourcingRatios[$workerId]) ? (int)$validatedOutsourcingRatios[$workerId] : 0;
                 $isOutsourcing = ($outsourcingRatio === 100) ? 1 : 0;
                 $jobTypeSnapshot = isset($fields['job_type_snapshot']) ? trim((string)$fields['job_type_snapshot']) : '';
@@ -333,6 +341,7 @@ try {
                     'source_type = :source_type',
                     'matched_status = :matched_status',
                     'company_name = :company_name',
+                    'remark = :remark',
                     'is_outsourcing = :is_outsourcing',
                     'updated_at = :now'
                 );
@@ -348,6 +357,7 @@ try {
                     ':source_type' => $sourceType,
                     ':matched_status' => $matchedStatus,
                     ':company_name' => $companyName === '' ? null : $companyName,
+                    ':remark' => $remark === '' ? null : $remark,
                     ':is_outsourcing' => $isOutsourcing,
                     ':now' => $now,
                     ':id' => $workerId,

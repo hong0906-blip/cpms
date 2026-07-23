@@ -13,6 +13,7 @@ $constructionMenu = '공사';
 $safetyMenu = '안전/보건';
 $qualityMenu = '품질';
 $companyProfitMenu = '경영현황';
+$representativeManagementMenu = '대표 경영현황';
 $usageAnalyticsMenu = '사용현황 분석';
 $schedulerMenu = urldecode('%EC%8A%A4%EC%BC%80%EC%A4%84%EB%9F%AC');
 
@@ -24,6 +25,7 @@ $role = \App\Core\Auth::userRole();
 $displayRole = method_exists('App\\Core\\Auth', 'userStoredRole') ? \App\Core\Auth::userStoredRole() : $role;
 require_once __DIR__ . '/../../services/CompanyProfitAccessService.php';
 require_once __DIR__ . '/../../services/CompanyPayrollAccessService.php';
+require_once __DIR__ . '/../../services/RepresentativeManagementService.php';
 $sidebarPdo = \App\Core\Db::pdo();
 $canViewCompanyProfitMenu = cpms_can_view_company_profit($user, $sidebarPdo);
 $isMasterUser = \App\Core\Auth::isMaster();
@@ -31,6 +33,7 @@ if ($isMasterUser) $canViewCompanyProfitMenu = true;
 $canViewCompanyOverheadMenu = cpms_can_view_company_overhead($user, $sidebarPdo);
 $canViewCompanyPayrollMenu = cpms_can_view_company_payroll($user, $sidebarPdo);
 $canAccessUsageAnalytics = \App\Core\Auth::canAccessUsageAnalytics();
+$canViewRepresentativeManagement = cpms_can_view_representative_management($sidebarPdo, $user);
 
 $dashboardType = isset($dashboardType) ? (string)$dashboardType : (isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee');
 if ($dashboardType !== 'employee' && $dashboardType !== 'executive') $dashboardType = 'employee';
@@ -108,6 +111,9 @@ if ($isPublicAffairsDept) {
 }
 if ($canViewCompanyProfitMenu && !$isPublicAffairsDept) {
     $menuItems[] = array('id'=>$companyProfitMenu,'label'=>$companyProfitMenu,'icon'=>'line-chart','gradient'=>'from-slate-700 to-blue-600','iconBg'=>'bg-gradient-to-br from-slate-100 to-blue-100','iconColor'=>'text-slate-700','hoverShadow'=>'hover:shadow-slate-200');
+}
+if ($canViewRepresentativeManagement) {
+    $menuItems[] = array('id'=>$representativeManagementMenu,'label'=>$representativeManagementMenu,'href'=>'?r=representative_management','icon'=>'briefcase-business','gradient'=>'from-indigo-700 to-cyan-600','iconBg'=>'bg-gradient-to-br from-indigo-100 to-cyan-100','iconColor'=>'text-indigo-700','hoverShadow'=>'hover:shadow-indigo-200');
 }
 if ($canAccessUsageAnalytics) {
     $menuItems[] = array('id'=>$usageAnalyticsMenu,'label'=>$usageAnalyticsMenu,'href'=>'?r=usage_analytics','icon'=>'activity','gradient'=>'from-violet-600 to-indigo-500','iconBg'=>'bg-gradient-to-br from-violet-100 to-indigo-100','iconColor'=>'text-violet-700','hoverShadow'=>'hover:shadow-violet-200');
@@ -312,13 +318,23 @@ if ($selectedMenu === $dashboardMenu) {
     if ($canViewCompanyProfitMenu && !$isPublicAffairsDept) {
       $mobileNavItems[] = array('menu' => 'company_profit', 'label' => '경영현황', 'icon' => 'line-chart', 'href' => '?r=company_profit');
     }
+    if ($canViewRepresentativeManagement) {
+      $mobileNavItems[] = array('menu' => 'representative_management', 'label' => '대표 경영현황', 'icon' => 'briefcase-business', 'href' => '?r=representative_management');
+    }
     if ($canAccessUsageAnalytics) {
       $mobileNavItems[] = array('menu' => 'usage_analytics', 'label' => '사용현황 분석', 'icon' => 'activity', 'href' => '?r=usage_analytics');
     }
   ?>
   <nav class="cpms-mobile-bottom-nav" aria-label="mobile main menu">
     <?php foreach ($mobileNavItems as $mobileItem): ?>
-      <a href="<?php echo h($mobileItem['href']); ?>">
+      <?php
+        $mobileIsActive = false;
+        if ($mobileItem['menu'] === 'representative_management' && $selectedMenu === $representativeManagementMenu) $mobileIsActive = true;
+        else if ($mobileItem['menu'] === 'company_profit' && $selectedMenu === $companyProfitMenu) $mobileIsActive = true;
+        else if ($mobileItem['menu'] === 'dashboard' && $selectedMenu === $dashboardMenu) $mobileIsActive = true;
+        else if (isset($mobileItem['label']) && (string)$selectedMenu === (string)$mobileItem['label']) $mobileIsActive = true;
+      ?>
+      <a href="<?php echo h($mobileItem['href']); ?>" class="<?php echo $mobileIsActive ? 'is-active' : ''; ?>">
         <i data-lucide="<?php echo h($mobileItem['icon']); ?>"></i>
         <span><?php echo h($mobileItem['label']); ?></span>
       </a>

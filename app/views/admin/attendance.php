@@ -22,9 +22,10 @@ $canViewAttendanceSettings = attendance_can_manage_settings($pdo);
 $canEditAttendanceCells = attendance_can_edit_monthly_records($pdo);
 $canViewAttendanceRequests = attendance_can_manage_requests($pdo);
 $date = isset($_GET['date']) ? (string)$_GET['date'] : date('Y-m-d');
-$tab = isset($_GET['atab']) ? (string)$_GET['atab'] : 'monthly';
-if ($tab === 'settings' && !$canViewAttendanceSettings) $tab = 'monthly';
-if ($tab === 'requests' && !$canViewAttendanceRequests) $tab = 'monthly';
+$tab = isset($_GET['atab']) ? (string)$_GET['atab'] : 'weekly';
+if (!in_array($tab, array('weekly', 'monthly', 'requests', 'settings'), true)) $tab = 'weekly';
+if ($tab === 'settings' && !$canViewAttendanceSettings) $tab = 'weekly';
+if ($tab === 'requests' && !$canViewAttendanceRequests) $tab = 'weekly';
 $month = isset($_GET['month']) ? trim((string)$_GET['month']) : date('Y-m');
 if (!preg_match('/^\d{4}-\d{2}$/', $month)) $month = date('Y-m');
 $quickFilter = isset($_GET['filter']) ? trim((string)$_GET['filter']) : 'all';
@@ -71,7 +72,6 @@ if ($tab === 'weekly') {
 }
 $reportDayCount = 0;
 
-$daily = array();
 $reqs = array();
 $emps = array();
 $monthlyRecordMap = array();
@@ -289,17 +289,6 @@ if ($pdo) {
         if (!is_array($projectOptions)) $projectOptions = array();
     } catch (Exception $e) {
         $projectOptions = array();
-    }
-
-    try {
-        $dailyActiveWhere = $isActiveEnabled ? " AND (e.is_active IS NULL OR e.is_active = 1)" : "";
-        $st = $pdo->prepare("SELECT e.name,e.department," . ($positionEnabled ? 'e.position' : "'' AS position") . ",a.* FROM cpms_attendance_records a JOIN employees e ON e.id=a.employee_id WHERE a.work_date=:d" . $dailyActiveWhere . " ORDER BY e.name ASC");
-        $st->execute(array(':d' => $date));
-        $daily = $st->fetchAll(PDO::FETCH_ASSOC);
-        if (!is_array($daily)) $daily = array();
-        $daily = attendance_filter_representative_rows($daily);
-    } catch (Exception $e) {
-        $attendanceErrors[] = attendance_text('%EC%9D%BC%EC%9D%BC%20%EC%B6%9C%ED%87%B4%EA%B7%BC%20%ED%98%84%ED%99%A9%EC%9D%84%20%EB%B6%88%EB%9F%AC%EC%98%A4%EC%A7%80%20%EB%AA%BB%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.') . ' ' . $e->getMessage();
     }
 
     if ($tab === 'requests') {
@@ -778,12 +767,11 @@ if (!empty($cpmsAttendanceDataOnly)) return;
     </div>
 
     <div class='cpms-attendance-tabs'>
+        <a class='cpms-attendance-tab <?php echo $tab==='weekly'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=weekly&month=' . urlencode($month) . '&week_start=' . urlencode($ws) . '&sort=' . urlencode($sort)); ?>'><?php echo h(attendance_text('%EC%A3%BC%EA%B0%84%20%ED%98%84%ED%99%A9')); ?></a>
         <a class='cpms-attendance-tab <?php echo $tab==='monthly'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=monthly&month=' . urlencode($month) . '&sort=' . urlencode($sort)); ?>'><?php echo h(attendance_text('%EC%9B%94%EA%B0%84%20%ED%98%84%ED%99%A9')); ?></a>
         <?php if($canViewAttendanceRequests): ?>
             <a class='cpms-attendance-tab <?php echo $tab==='requests'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=requests'); ?>'><?php echo h(attendance_text('%EC%9A%94%EC%B2%AD%20%EA%B4%80%EB%A6%AC')); ?></a>
         <?php endif; ?>
-        <a class='cpms-attendance-tab <?php echo $tab==='daily'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=daily'); ?>'><?php echo h(attendance_text('%EC%9D%BC%EC%9D%BC%20%ED%98%84%ED%99%A9')); ?></a>
-        <a class='cpms-attendance-tab <?php echo $tab==='weekly'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=weekly&month=' . urlencode($month) . '&week_start=' . urlencode($ws) . '&sort=' . urlencode($sort)); ?>'><?php echo h(attendance_text('%EC%A3%BC%EA%B0%84%20%ED%98%84%ED%99%A9')); ?></a>
         <?php if($canViewAttendanceSettings): ?>
             <a class='cpms-attendance-tab <?php echo $tab==='settings'?'is-active':'';?>' href='<?php echo h($routeManage . '&tab=attendance&atab=settings'); ?>'><?php echo h(attendance_text('%EC%84%A4%EC%A0%95')); ?></a>
         <?php endif; ?>
@@ -1097,33 +1085,6 @@ if (!empty($cpmsAttendanceDataOnly)) return;
                 })();
                 </script>
             <?php endif; ?>
-        </div>
-    <?php endif; ?>
-
-    <?php if($tab==='daily'): ?>
-        <div class='overflow-x-auto rounded-2xl border border-gray-200'>
-            <table class='min-w-full text-sm'>
-                <tr class='bg-gray-50'>
-                    <th class='p-3 text-left border-b'><?php echo h(attendance_text('%EC%A7%81%EC%9B%90%EB%AA%85')); ?></th>
-                    <th class='p-3 text-left border-b'><?php echo h(attendance_text('%EB%B6%80%EC%84%9C')); ?></th>
-                    <th class='p-3 text-left border-b'><?php echo h(attendance_text('%EC%A7%81%EC%B1%85')); ?></th>
-                    <th class='p-3 text-left border-b'><?php echo h(attendance_text('%EC%B6%9C%EA%B7%BC%EC%8B%9C%EA%B0%84')); ?></th>
-                    <th class='p-3 text-left border-b'><?php echo h(attendance_text('%ED%87%B4%EA%B7%BC%EC%8B%9C%EA%B0%84')); ?></th>
-                    <th class='p-3 text-left border-b'><?php echo h(attendance_text('%EC%83%81%ED%83%9C')); ?></th>
-                    <th class='p-3 text-left border-b'><?php echo h(attendance_text('%EA%B7%BC%EB%AC%B4%EC%8B%9C%EA%B0%84')); ?></th>
-                </tr>
-                <?php foreach($daily as $r): ?>
-                    <tr class='border-b last:border-b-0'>
-                        <td class='p-3'><?php echo h(isset($r['name'])?$r['name']:''); ?></td>
-                        <td class='p-3'><?php echo h(isset($r['department'])?$r['department']:''); ?></td>
-                        <td class='p-3'><?php echo h(isset($r['position'])?$r['position']:''); ?></td>
-                        <td class='p-3'><?php echo h(isset($r['check_in']) && $r['check_in'] ? $r['check_in'] : '-'); ?></td>
-                        <td class='p-3'><?php echo h(isset($r['check_out']) && $r['check_out'] ? $r['check_out'] : '-'); ?></td>
-                        <td class='p-3'><?php echo h(isset($r['status'])?$r['status']:'-'); ?></td>
-                        <td class='p-3'><?php echo isset($r['work_minutes']) ? number_format(((float)$r['work_minutes'])/60,2) . 'h' : '-'; ?></td>
-                    </tr>
-                <?php endforeach; ?>
-            </table>
         </div>
     <?php endif; ?>
 

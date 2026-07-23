@@ -215,7 +215,7 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
       }
 
       #cpmsContentMain {
-        padding: 14px 14px 96px !important;
+        padding: 14px 14px calc(94px + env(safe-area-inset-bottom)) !important;
         overflow: visible;
       }
 
@@ -229,10 +229,14 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
         right: 0;
         bottom: 0;
         z-index: 40;
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(54px, 1fr));
+        display: flex;
+        align-items: stretch;
         gap: 4px;
         padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+        overflow-x: auto;
+        overflow-y: hidden;
+        overscroll-behavior-x: contain;
+        scrollbar-width: none;
         border-top: 1px solid #e5e7eb;
         background: rgba(255,255,255,.96);
         box-shadow: 0 -10px 30px rgba(15,23,42,.08);
@@ -240,7 +244,8 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
       }
 
       .cpms-mobile-bottom-nav a {
-        min-width: 0;
+        flex: 0 0 72px;
+        min-width: 72px;
         height: 58px;
         display: flex;
         flex-direction: column;
@@ -252,6 +257,8 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
         font-size: 11px;
         font-weight: 800;
       }
+
+      .cpms-mobile-bottom-nav::-webkit-scrollbar { display: none; }
 
       .cpms-mobile-bottom-nav a.is-active {
         color: #0f172a;

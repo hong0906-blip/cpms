@@ -1075,6 +1075,7 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
                     bank_name VARCHAR(50) NULL,
                     account_holder VARCHAR(50) NULL,
                     company_name VARCHAR(80) NULL,
+                    remark VARCHAR(255) NULL,
                     is_outsourcing TINYINT(1) NOT NULL DEFAULT 0,
                     legacy_outsourcing_ratio TINYINT UNSIGNED NULL DEFAULT NULL,
                     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
@@ -1106,6 +1107,7 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
                 'bank_name' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN bank_name VARCHAR(50) NULL AFTER bank_account",
                 'account_holder' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN account_holder VARCHAR(50) NULL AFTER bank_name",
                 'company_name' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN company_name VARCHAR(80) NULL AFTER account_holder",
+                'remark' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN remark VARCHAR(255) NULL AFTER company_name",
                 'is_outsourcing' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN is_outsourcing TINYINT(1) NOT NULL DEFAULT 0 AFTER company_name",
                 // 파일: app/views/construction/tabs/partials/labor_data_loader.php
                 // 월별 비율 도입 뒤에도 과거 월의 기존 외주 여부가 바뀌지 않도록 최초 호환 기준값을 보존합니다.
@@ -1739,6 +1741,7 @@ if (!function_exists('cpms_build_project_worker_rows')) {
                 'bank_name' => isset($worker['bank_name']) ? (string)$worker['bank_name'] : '',
                 'account_holder' => isset($worker['account_holder']) ? (string)$worker['account_holder'] : '',
                 'company_name' => (isset($worker['agency_name_snapshot']) && trim((string)$worker['agency_name_snapshot']) !== '') ? (string)$worker['agency_name_snapshot'] : (isset($worker['company_name']) ? (string)$worker['company_name'] : ''),
+                'remark' => isset($worker['remark']) ? (string)$worker['remark'] : '',
                 'is_outsourcing' => (isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 1 : 0,
                 'legacy_outsourcing_ratio' => array_key_exists('legacy_outsourcing_ratio', $worker) ? $worker['legacy_outsourcing_ratio'] : null,
                 'outsourcing_ratio' => function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($worker) : ((isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 100 : 0),
@@ -1821,6 +1824,7 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'bank_name' => isset($data['bank_name']) ? (string)$data['bank_name'] : '',
                 'account_holder' => isset($data['account_holder']) ? (string)$data['account_holder'] : '',
                 'company_name' => (isset($data['company_name']) && trim((string)$data['company_name']) !== '') ? (string)$data['company_name'] : '창명건설',
+                'remark' => isset($data['remark']) ? (string)$data['remark'] : '',
                 'is_outsourcing' => (isset($data['is_outsourcing']) && (int)$data['is_outsourcing'] === 1) ? 1 : 0,
                 'legacy_outsourcing_ratio' => array_key_exists('legacy_outsourcing_ratio', $data) ? $data['legacy_outsourcing_ratio'] : null,
                 'outsourcing_ratio' => function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($data) : ((isset($data['is_outsourcing']) && (int)$data['is_outsourcing'] === 1) ? 100 : 0),
@@ -1835,6 +1839,76 @@ if (!function_exists('cpms_build_timesheet_workers')) {
             );
         }
         return $workers;
+    }
+}
+
+if (!function_exists('cpms_labor_worker_row_sort_value')) {
+    function cpms_labor_worker_row_sort_value($row, $field) {
+        $data = isset($row['data']) && is_array($row['data']) ? $row['data'] : array();
+        if ($field === 'company') {
+            $companyName = isset($data['company_name']) ? trim((string)$data['company_name']) : '';
+            return cpms_labor_sort_text($companyName === '' ? '창명건설' : $companyName);
+        }
+        if ($field === 'name') return cpms_labor_sort_text(isset($data['name']) ? $data['name'] : '');
+        if ($field === 'allocation') {
+            return function_exists('cpms_resolve_worker_outsourcing_ratio') ? (int)cpms_resolve_worker_outsourcing_ratio($data) : 0;
+        }
+        if ($field === 'phone') return cpms_labor_sort_text(isset($data['phone']) ? $data['phone'] : '');
+        if ($field === 'address') return cpms_labor_sort_text(isset($data['address']) ? $data['address'] : '');
+        if ($field === 'job_type') return cpms_labor_sort_text(isset($data['job_type_snapshot']) ? $data['job_type_snapshot'] : '');
+        if ($field === 'wage') {
+            return function_exists('cpms_resolve_labor_wage_rate') ? (float)cpms_resolve_labor_wage_rate($data) : 0.0;
+        }
+        if ($field === 'bank_account') return cpms_labor_sort_text(isset($data['bank_account']) ? $data['bank_account'] : '');
+        if ($field === 'bank_name') return cpms_labor_sort_text(isset($data['bank_name']) ? $data['bank_name'] : '');
+        if ($field === 'account_holder') return cpms_labor_sort_text(isset($data['account_holder']) ? $data['account_holder'] : '');
+        if ($field === 'remark') return cpms_labor_sort_text(isset($data['remark']) ? $data['remark'] : '');
+        return '';
+    }
+}
+
+if (!function_exists('cpms_sort_labor_worker_rows')) {
+    function cpms_sort_labor_worker_rows($rows, $sort, $direction = 'asc') {
+        if (!is_array($rows)) return array();
+        $allowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'bank_account', 'bank_name', 'account_holder', 'remark');
+        if (!in_array($sort, $allowed, true)) $sort = 'company';
+        $direction = ($direction === 'desc') ? 'desc' : 'asc';
+        $numeric = array('allocation', 'wage');
+        usort($rows, function($a, $b) use ($sort, $direction, $numeric) {
+            $isNumeric = in_array($sort, $numeric, true);
+            $av = cpms_labor_worker_row_sort_value($a, $sort);
+            $bv = cpms_labor_worker_row_sort_value($b, $sort);
+            if ($isNumeric) {
+                $af = (float)$av;
+                $bf = (float)$bv;
+                if (abs($af - $bf) > 0.0001) {
+                    $result = ($af < $bf) ? -1 : 1;
+                    return $direction === 'desc' ? ($result * -1) : $result;
+                }
+            } else {
+                if ($av === '' && $bv !== '') return 1;
+                if ($av !== '' && $bv === '') return -1;
+                if ($av !== $bv) {
+                    $result = strcmp($av, $bv);
+                    return $direction === 'desc' ? ($result * -1) : $result;
+                }
+            }
+
+            foreach (array('company', 'name', 'job_type') as $secondary) {
+                if ($secondary === $sort) continue;
+                $as = cpms_labor_worker_row_sort_value($a, $secondary);
+                $bs = cpms_labor_worker_row_sort_value($b, $secondary);
+                if ($as === '' && $bs !== '') return 1;
+                if ($as !== '' && $bs === '') return -1;
+                if ($as !== $bs) return strcmp($as, $bs);
+            }
+
+            $ai = isset($a['id']) ? (int)$a['id'] : 0;
+            $bi = isset($b['id']) ? (int)$b['id'] : 0;
+            if ($ai === $bi) return 0;
+            return ($ai < $bi) ? -1 : 1;
+        });
+        return $rows;
     }
 }
 
@@ -1903,10 +1977,18 @@ if (!function_exists('cpms_sort_labor_workers')) {
         if (!is_array($workers)) return array();
         $sort = trim((string)$sort);
         $allowedSorts = array('name', 'job_type', 'output_days', 'total_gongsu', 'wage_rate', 'company', 'labor_ratio', 'outsourcing_ratio', 'labor_amount', 'outsourcing_amount');
-        if (!in_array($sort, $allowedSorts, true)) $sort = 'name';
+        if (!in_array($sort, $allowedSorts, true)) $sort = 'job_type';
         $direction = (trim((string)$direction) === 'desc') ? 'desc' : 'asc';
         $numericSorts = array('output_days', 'total_gongsu', 'wage_rate', 'labor_ratio', 'outsourcing_ratio', 'labor_amount', 'outsourcing_amount');
         usort($workers, function($a, $b) use ($sort, $direction, $gongsuMap, $outputDaysMap, $selectedMonth, $numericSorts) {
+            // 안전담당자는 선택한 정렬 방향과 관계없이 항상 마지막에 배치합니다.
+            $aJobType = isset($a['job_type_snapshot']) ? trim((string)$a['job_type_snapshot']) : '';
+            $bJobType = isset($b['job_type_snapshot']) ? trim((string)$b['job_type_snapshot']) : '';
+            $aIsSafetyManager = ($aJobType !== '' && strpos($aJobType, '안전담당자') !== false);
+            $bIsSafetyManager = ($bJobType !== '' && strpos($bJobType, '안전담당자') !== false);
+            if ($aIsSafetyManager && !$bIsSafetyManager) return 1;
+            if (!$aIsSafetyManager && $bIsSafetyManager) return -1;
+
             $isNumeric = in_array($sort, $numericSorts, true);
             $av = cpms_labor_sort_worker_value($a, $sort, $gongsuMap, $outputDaysMap, $selectedMonth);
             $bv = cpms_labor_sort_worker_value($b, $sort, $gongsuMap, $outputDaysMap, $selectedMonth);

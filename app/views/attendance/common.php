@@ -258,9 +258,11 @@ function attendance_is_settings_department_value($value){
         attendance_normalize_department_name(attendance_text('%EA%B4%80%EB%A6%AC')),
         attendance_normalize_department_name(attendance_text('%EA%B4%80%EB%A6%AC%EB%B6%80')),
         attendance_normalize_department_name(attendance_text('%EA%B4%80%EB%A6%AC%ED%8C%80')),
+        attendance_normalize_department_name(attendance_text('%EA%B4%80%EB%A6%AC%EB%B6%80%EC%84%9C')),
         attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C')),
         attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C%EB%B6%80')),
-        attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C%ED%8C%80'))
+        attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C%ED%8C%80')),
+        attendance_normalize_department_name(attendance_text('%EA%B0%9C%EB%B0%9C%EB%B6%80%EC%84%9C'))
     );
     return in_array($dept, $allowed, true);
 }
@@ -289,9 +291,11 @@ function attendance_is_representative_value($role, $position, $name){
 }}
 function attendance_is_blocked_executive_value($role, $position, $name){
     $role = strtolower(trim((string)$role));
-    if ($role === 'executive') return true;
-    $values = array((string)$position, (string)$name);
+    $blockedRoles = array('executive', 'ceo', 'president', 'vicepresident', 'vice_president');
+    if (in_array($role, $blockedRoles, true)) return true;
+    $values = array((string)$role, (string)$position, (string)$name);
     $blocked = array(
+        attendance_text('%EC%9E%84%EC%9B%90'),
         attendance_text('%EB%8C%80%ED%91%9C'),
         attendance_text('%EB%B6%80%EC%82%AC%EC%9E%A5')
     );

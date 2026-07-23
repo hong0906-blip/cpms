@@ -81,8 +81,11 @@ if (isset($d['doc_type']) && approval_is_proposal_doc_type($d['doc_type']) && ap
         for ($i = 0; $i < count($fileRows); $i++) {
             $f = $fileRows[$i];
             $k = isset($f['file_type']) ? $f['file_type'] : '';
-            if ($k !== '' && !isset($filesByType[$k])) {
-                $filesByType[$k] = $f;
+            if ($k !== '') {
+                if (!isset($filesByType[$k]) || !is_array($filesByType[$k])) {
+                    $filesByType[$k] = array();
+                }
+                $filesByType[$k][] = $f;
             }
         }
     }

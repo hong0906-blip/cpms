@@ -18,11 +18,16 @@ $laborTabs = array(
 if (!$canEditLabor && isset($laborTabs['workers'])) unset($laborTabs['workers']);
 if (!isset($laborTabs[$laborTab])) $laborTab = 'timesheet';
 
-$laborSort = isset($_GET['labor_sort']) ? trim((string)$_GET['labor_sort']) : 'name';
+$laborSort = isset($_GET['labor_sort']) ? trim((string)$_GET['labor_sort']) : 'job_type';
 $laborSortAllowed = array('name', 'job_type', 'output_days', 'total_gongsu', 'wage_rate', 'company', 'labor_ratio', 'outsourcing_ratio', 'labor_amount', 'outsourcing_amount');
-if (!in_array($laborSort, $laborSortAllowed, true)) $laborSort = 'name';
+if (!in_array($laborSort, $laborSortAllowed, true)) $laborSort = 'job_type';
 $laborSortDir = isset($_GET['labor_sort_dir']) ? trim((string)$_GET['labor_sort_dir']) : 'asc';
 if ($laborSortDir !== 'desc') $laborSortDir = 'asc';
+$workerSort = isset($_GET['worker_sort']) ? trim((string)$_GET['worker_sort']) : 'company';
+$workerSortAllowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'bank_account', 'bank_name', 'account_holder', 'remark');
+if (!in_array($workerSort, $workerSortAllowed, true)) $workerSort = 'company';
+$workerSortDir = isset($_GET['worker_sort_dir']) ? trim((string)$_GET['worker_sort_dir']) : 'asc';
+if ($workerSortDir !== 'desc') $workerSortDir = 'asc';
 
 // 월 목록(프로젝트 기간 기준)
 $months = array();
@@ -226,6 +231,23 @@ if (is_array($workerRows)) {
         $workerRowsForSelectedMonth[] = $row;
     }
 }
+if (function_exists('cpms_sort_labor_worker_rows')) {
+    $workerRowsForSelectedMonth = cpms_sort_labor_worker_rows($workerRowsForSelectedMonth, $workerSort, $workerSortDir);
+}
+
+if (!function_exists('cpms_labor_worker_sort_header')) {
+    function cpms_labor_worker_sort_header($field, $label, $currentSort, $currentDir, $projectId, $selectedMonth, $laborSort, $laborSortDir) {
+        $isActive = ((string)$currentSort === (string)$field);
+        $arrow = ($isActive && $currentDir === 'desc') ? '▼' : '▲';
+        $nextDir = ($isActive && $currentDir === 'asc') ? 'desc' : 'asc';
+        $href = base_url() . '/?r=공사&pid=' . (int)$projectId
+            . '&tab=labor&labor_tab=workers&month=' . urlencode($selectedMonth)
+            . '&labor_sort=' . urlencode($laborSort) . '&labor_sort_dir=' . urlencode($laborSortDir)
+            . '&worker_sort=' . urlencode($field) . '&worker_sort_dir=' . urlencode($nextDir);
+        return '<a href="' . h($href) . '" class="inline-flex items-center justify-center gap-1 whitespace-nowrap hover:text-blue-700">'
+            . '<span>' . h($label) . '</span><span class="text-[10px] leading-none">' . h($arrow) . '</span></a>';
+    }
+}
 
 $timesheetRows = count($timesheetWorkers);
 if ($timesheetRows < 1) $timesheetRows = 1;
@@ -305,7 +327,7 @@ foreach ($timesheetWorkers as $worker) {
             <div>
                 <label class="text-xs font-bold text-gray-500">월 선택</label>
                 <select class="mt-1 px-3 py-2 rounded-xl border border-gray-200 text-sm"
-                        onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=<?php echo h($laborTab); ?>&labor_sort=<?php echo h($laborSort); ?>&labor_sort_dir=<?php echo h($laborSortDir); ?>&month=' + encodeURIComponent(this.value)">
+                        onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=<?php echo h($laborTab); ?>&labor_sort=<?php echo h($laborSort); ?>&labor_sort_dir=<?php echo h($laborSortDir); ?>&worker_sort=<?php echo h($workerSort); ?>&worker_sort_dir=<?php echo h($workerSortDir); ?>&month=' + encodeURIComponent(this.value)">
                     <?php foreach ($months as $ym): ?>
                         <option value="<?php echo h($ym); ?>" <?php echo ($ym === $selectedMonth) ? 'selected' : ''; ?>>
                             <?php echo h(isset($monthLabels[$ym]) ? $monthLabels[$ym] : $ym); ?>
@@ -375,6 +397,8 @@ foreach ($timesheetWorkers as $worker) {
             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
             <input type="hidden" name="labor_tab" value="<?php echo h($laborTab); ?>">
+            <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
+            <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
             <div class="grid grid-cols-1 md:grid-cols-[220px_1fr_auto] gap-3 items-end">
                 <div>
                     <label class="text-xs font-bold text-amber-800">개발 부서 전용 강제입력</label>
@@ -463,7 +487,7 @@ foreach ($timesheetWorkers as $worker) {
 
 <div class="flex flex-wrap gap-2 mt-4 mb-6">
     <?php foreach ($laborTabs as $k => $label): ?>
-        <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=<?php echo h($k); ?>&month=<?php echo h($selectedMonth); ?>&labor_sort=<?php echo h($laborSort); ?>&labor_sort_dir=<?php echo h($laborSortDir); ?>"
+        <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=<?php echo h($k); ?>&month=<?php echo h($selectedMonth); ?>&labor_sort=<?php echo h($laborSort); ?>&labor_sort_dir=<?php echo h($laborSortDir); ?>&worker_sort=<?php echo h($workerSort); ?>&worker_sort_dir=<?php echo h($workerSortDir); ?>"
            class="px-4 py-2 rounded-2xl border font-extrabold <?php echo ($k===$laborTab)?'bg-gray-900 text-white border-gray-900':'bg-white text-gray-900 border-gray-200 hover:bg-gray-50'; ?>">
             <?php echo h($label); ?>
         </a>
@@ -557,6 +581,8 @@ foreach ($timesheetWorkers as $worker) {
             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
             <input type="hidden" name="labor_tab" value="workers">
+            <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
+            <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
             <input type="hidden" name="workforce_worker_id" id="workforceAddWorkerId" value="">
         </form>
 
@@ -569,6 +595,8 @@ foreach ($timesheetWorkers as $worker) {
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
                     <input type="hidden" name="labor_tab" value="workers">
+                    <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
+                    <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
                     <button type="submit" name="action" value="apply_workforce_by_name" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-extrabold" onclick="return confirm('현재 현장 인원 명단을 인력관리 기준으로 전체 입력할까요?');">
                         현재 명단 전체 가져오기
                     </button>
@@ -583,6 +611,8 @@ foreach ($timesheetWorkers as $worker) {
                 <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                 <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
                 <input type="hidden" name="labor_tab" value="workers">
+                <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
+                <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
                 <div class="text-sm font-extrabold text-gray-900">직영팀에서 추가</div>
                 <div class="text-xs text-gray-500 mt-1">관리부 직영팀 명부에 등록된 인원을 프로젝트에 연결합니다.</div>
                 <div class="mt-3">
@@ -608,6 +638,8 @@ foreach ($timesheetWorkers as $worker) {
                 <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                 <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
                 <input type="hidden" name="labor_tab" value="workers">
+                <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
+                <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
                 <div class="text-sm font-extrabold text-gray-900">직접 인원 추가</div>
                 <div class="text-xs text-gray-500 mt-1">근로자 시프티에서 못 가져온 인원을 직접 추가합니다.</div>
                 <div class="mt-3 grid gap-3 md:grid-cols-2">
@@ -633,6 +665,8 @@ foreach ($timesheetWorkers as $worker) {
             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
             <input type="hidden" name="labor_tab" value="workers">
+            <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
+            <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
             <button type="submit" name="action" value="apply_latest_wage" class="px-4 py-2 rounded-2xl border border-emerald-200 text-emerald-700 font-extrabold" onclick="return confirm('인력관리의 최신 단가를 현재 프로젝트 인원에 적용할까요?');">
                 최신 단가 적용
             </button>
@@ -644,24 +678,26 @@ foreach ($timesheetWorkers as $worker) {
             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
             <input type="hidden" name="labor_tab" value="workers">
+            <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
+            <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
 
             <div class="overflow-x-auto">
                 <table class="min-w-[1250px] w-full border border-gray-200 text-sm">
                     <thead class="bg-gray-100 text-gray-700">
                     <tr>
-                        <th class="border border-gray-200 px-2 py-2">성명</th>
-                        <th class="border border-gray-200 px-2 py-2 min-w-[250px]">비용 배분 (<?php echo h($selectedMonth); ?>)</th>
-                        <th class="border border-gray-200 px-2 py-2">핸드폰 번호</th>
-                        <th class="border border-gray-200 px-2 py-2">주소</th>
-                        <th class="border border-gray-200 px-2 py-2">구분/직종</th>
-                        <th class="border border-gray-200 px-2 py-2">임금단가</th>
+                        <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('company', '인력사 업체명', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
+                        <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('name', '성명', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
+                        <th class="border border-gray-200 px-2 py-2 min-w-[250px]"><?php echo cpms_labor_worker_sort_header('allocation', '비용 배분 (' . $selectedMonth . ')', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
+                        <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('phone', '핸드폰 번호', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
+                        <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('address', '주소', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
+                        <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('job_type', '구분/직종', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
+                        <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('wage', '임금단가', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
                         <?php if ($showSensitiveLaborFields): ?>
-                            <th class="border border-gray-200 px-2 py-2">계좌번호</th>
-                            <th class="border border-gray-200 px-2 py-2">은행명</th>
-                            <th class="border border-gray-200 px-2 py-2">예금주</th>
+                            <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('bank_account', '계좌번호', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
+                            <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('bank_name', '은행명', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
+                            <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('account_holder', '예금주', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
                         <?php endif; ?>
-                        <th class="border border-gray-200 px-2 py-2">인력사업체명</th>
-                        <th class="border border-gray-200 px-2 py-2">상태</th>
+                        <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('remark', '비고', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
                         <th class="border border-gray-200 px-2 py-2">삭제</th>
                     </tr>
                     </thead>
@@ -676,19 +712,18 @@ foreach ($timesheetWorkers as $worker) {
                             if ($companyName === '') $companyName = '창명건설';
                             $masterWorkerId = isset($member['worker_id']) ? (int)$member['worker_id'] : 0;
                             $jobTypeSnapshot = isset($member['job_type_snapshot']) ? trim((string)$member['job_type_snapshot']) : '';
+                            $remark = isset($member['remark']) ? trim((string)$member['remark']) : '';
                             $sourceType = isset($member['source_type']) ? trim((string)$member['source_type']) : 'manual';
                             $matchedStatus = isset($member['matched_status']) ? trim((string)$member['matched_status']) : 'manual';
                             $isMonthAssigned = (isset($member['month_assigned']) && (int)$member['month_assigned'] === 1);
                             $outsourcingRatio = function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($member) : ((isset($member['is_outsourcing']) && (int)$member['is_outsourcing'] === 1) ? 100 : 0);
                             $laborRatio = 100 - $outsourcingRatio;
                             $allocationPreset = in_array($outsourcingRatio, array(0, 30, 40, 50, 100), true) ? (string)$outsourcingRatio : 'custom';
-                            $statusText = '수동입력';
-                            if ($matchedStatus === 'matched') $statusText = '인력관리 등록됨';
-                            else if ($matchedStatus === 'duplicate') $statusText = '동명이인 확인 필요';
-                            else if ($matchedStatus === 'not_found') $statusText = '인력관리 미등록';
-                            if ($isMonthAssigned) $statusText .= ' / ' . $selectedMonth . ' 추가';
                             ?>
                             <tr class="<?php echo ($rowIndex % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
+                                <td class="border border-gray-200 px-2 py-2">
+                                    <input name="workers[<?php echo $workerId; ?>][company_name]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h($companyName); ?>" placeholder="인력사 업체명">
+                                </td>
                                 <td class="border border-gray-200 px-2 py-2">
                                     <input type="hidden" name="workers[<?php echo $workerId; ?>][worker_id]" value="<?php echo (int)$masterWorkerId; ?>">
                                     <input type="hidden" name="workers[<?php echo $workerId; ?>][worker_name_snapshot]" value="<?php echo h(isset($member['name']) ? $member['name'] : ''); ?>">
@@ -741,10 +776,7 @@ foreach ($timesheetWorkers as $worker) {
                                     </td>
                                 <?php endif; ?>
                                 <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][company_name]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h($companyName); ?>" placeholder="인력사업체명">
-                                </td>
-                                <td class="border border-gray-200 px-2 py-2 text-xs font-bold text-gray-700">
-                                    <?php echo h($statusText); ?>
+                                    <input name="workers[<?php echo $workerId; ?>][remark]" class="w-full min-w-[150px] px-2 py-1 border border-gray-200 rounded-lg" type="text" maxlength="255" value="<?php echo h($remark); ?>" placeholder="비고">
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2 text-center">
                                     <?php if ($workerId > 0): ?>

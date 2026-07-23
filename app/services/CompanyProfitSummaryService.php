@@ -7,6 +7,7 @@
 require_once __DIR__ . '/CompanyOverheadService.php';
 require_once __DIR__ . '/CompanyProfitChartService.php';
 require_once __DIR__ . '/../views/construction/tabs/partials/labor_data_loader.php';
+require_once __DIR__ . '/../views/construction/tabs/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/../views/construction/tabs/partials/sales_data_loader.php';
 require_once __DIR__ . '/../views/safety/safety_cost_helper.php';
 
@@ -224,6 +225,7 @@ function cpms_company_profit_normalize_filters($request, $pdo) {
 
     $status = isset($request['status']) ? trim((string)$request['status']) : '';
     $q = isset($request['q']) ? trim((string)$request['q']) : '';
+    $projectId = isset($request['project_id']) ? (int)$request['project_id'] : 0;
 
     return array(
         'year' => $year,
@@ -234,6 +236,7 @@ function cpms_company_profit_normalize_filters($request, $pdo) {
         'view_mode' => $viewMode,
         'status' => $status,
         'q' => $q,
+        'project_id' => $projectId,
         'years' => $years,
         'status_options' => cpms_company_profit_status_options($pdo),
     );
@@ -249,6 +252,11 @@ function cpms_company_profit_load_projects($pdo, $filters) {
 
     $status = isset($filters['status']) ? trim((string)$filters['status']) : '';
     $where[] = "name NOT LIKE '(가제)%'";
+    $projectIdFilter = isset($filters['project_id']) ? (int)$filters['project_id'] : 0;
+    if ($projectIdFilter > 0) {
+        $where[] = "id = :project_id";
+        $params[':project_id'] = $projectIdFilter;
+    }
     if ($status !== '') {
         $where[] = "status = :status";
         $params[':status'] = $status;
@@ -584,9 +592,39 @@ function cpms_company_profit_project_month_metrics($pdo, $project, $ym, $laborWa
 
     $equipment = cpms_company_profit_equipment_total_between($pdo, $projectId, $costRange['start'], $costRange['end']);
     $materialByCategory = cpms_company_profit_material_category_sum_between($pdo, $projectId, $costRange['start'], $costRange['end']);
-    $materials = (float)$materialByCategory['자재비'] + (float)$materialByCategory['구매품'] + (float)$materialByCategory['기타경비'];
-    $labor = cpms_company_profit_labor_total_between($pdo, $projectId, $projectName, $laborRange['start'], $laborRange['end'], $laborWageMap);
-    $usedTotal = $labor + $equipment + $materials;
+    $materialCost = (float)$materialByCategory['자재비'];
+    $purchaseCost = (float)$materialByCategory['구매품'];
+    $otherCost = (float)$materialByCategory['기타경비'];
+    $materials = $materialCost + $purchaseCost + $otherCost;
+    $laborGross = cpms_company_profit_labor_total_between($pdo, $projectId, $projectName, $laborRange['start'], $laborRange['end'], $laborWageMap);
+    $laborOutsourcing = 0.0;
+    if (function_exists('cpms_outsourcing_labor_company_rows_for_month')) {
+        $laborOutsourcingRow = cpms_outsourcing_labor_company_rows_for_month($pdo, $projectId, $projectName, $ym);
+        $laborOutsourcing = isset($laborOutsourcingRow['total']) ? (float)$laborOutsourcingRow['total'] : 0.0;
+    }
+    if ($laborOutsourcing < 0) $laborOutsourcing = 0.0;
+    if ($laborOutsourcing > $laborGross) $laborOutsourcing = $laborGross;
+    $labor = $laborGross - $laborOutsourcing;
+    $manualOutsourcing = cpms_company_profit_table_exists($pdo, 'cpms_outsourcing_costs') && function_exists('cpms_outsourcing_manual_total_between')
+        ? (float)cpms_outsourcing_manual_total_between($pdo, $projectId, $laborRange['start'], $laborRange['end'])
+        : 0.0;
+    $outsourcing = $laborOutsourcing + $manualOutsourcing;
+    $safety = function_exists('cpms_safety_cost_total_between')
+        ? (float)cpms_safety_cost_total_between($projectId, $laborRange['start'], $laborRange['end'])
+        : 0.0;
+    $deduction = 0.0;
+    if (cpms_company_profit_table_exists($pdo, 'cpms_project_monthly_deductions')) {
+        try {
+            $stDeduction = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM cpms_project_monthly_deductions WHERE project_id = :pid AND ym = :ym");
+            $stDeduction->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stDeduction->bindValue(':ym', $ym);
+            $stDeduction->execute();
+            $deduction = (float)$stDeduction->fetchColumn();
+        } catch (Exception $e) {
+            $deduction = 0.0;
+        }
+    }
+    $usedTotal = $labor + $outsourcing + $equipment + $materials + $safety + $deduction;
     $targetAmount = round($sales * 0.7);
     $costRate = cpms_company_profit_cost_rate_info($sales, $usedTotal);
 
@@ -598,8 +636,16 @@ function cpms_company_profit_project_month_metrics($pdo, $project, $ym, $laborWa
         'has_confirmed' => $hasConfirmed ? 1 : 0,
         'confirmed_rows' => isset($confirmed['rows']) ? (int)$confirmed['rows'] : 0,
         'labor' => $labor,
+        'outsourcing' => $outsourcing,
+        'labor_outsourcing' => $laborOutsourcing,
+        'manual_outsourcing' => $manualOutsourcing,
         'equipment' => $equipment,
         'materials' => $materials,
+        'material_cost' => $materialCost,
+        'purchase_cost' => $purchaseCost,
+        'other_cost' => $otherCost,
+        'safety_cost' => $safety,
+        'deduction' => $deduction,
         'input_cost' => $usedTotal,
         'target_amount' => $targetAmount,
         'net_profit' => $sales - $usedTotal,
@@ -618,9 +664,19 @@ function cpms_company_profit_project_summary($pdo, $project, $months) {
         'name' => isset($project['name']) ? (string)$project['name'] : ('현장 #' . $projectId),
         'client' => isset($project['client']) ? (string)$project['client'] : '',
         'status' => isset($project['status']) ? (string)$project['status'] : '',
+        'start_date' => isset($project['start_date']) ? (string)$project['start_date'] : '',
+        'end_date' => isset($project['end_date']) ? (string)$project['end_date'] : '',
         'sales' => 0.0,
         'expected_sales' => 0.0,
         'confirmed_sales' => 0.0,
+        'labor' => 0.0,
+        'outsourcing' => 0.0,
+        'equipment' => 0.0,
+        'material_cost' => 0.0,
+        'purchase_cost' => 0.0,
+        'other_cost' => 0.0,
+        'safety_cost' => 0.0,
+        'deduction' => 0.0,
         'input_cost' => 0.0,
         'target_amount' => 0.0,
         'net_profit' => 0.0,
@@ -640,6 +696,14 @@ function cpms_company_profit_project_summary($pdo, $project, $months) {
         $row['sales'] += (float)$monthRow['sales'];
         $row['expected_sales'] += (float)$monthRow['expected_sales'];
         $row['confirmed_sales'] += (float)$monthRow['confirmed_sales'];
+        $row['labor'] += isset($monthRow['labor']) ? (float)$monthRow['labor'] : 0.0;
+        $row['outsourcing'] += isset($monthRow['outsourcing']) ? (float)$monthRow['outsourcing'] : 0.0;
+        $row['equipment'] += isset($monthRow['equipment']) ? (float)$monthRow['equipment'] : 0.0;
+        $row['material_cost'] += isset($monthRow['material_cost']) ? (float)$monthRow['material_cost'] : 0.0;
+        $row['purchase_cost'] += isset($monthRow['purchase_cost']) ? (float)$monthRow['purchase_cost'] : 0.0;
+        $row['other_cost'] += isset($monthRow['other_cost']) ? (float)$monthRow['other_cost'] : 0.0;
+        $row['safety_cost'] += isset($monthRow['safety_cost']) ? (float)$monthRow['safety_cost'] : 0.0;
+        $row['deduction'] += isset($monthRow['deduction']) ? (float)$monthRow['deduction'] : 0.0;
         $row['input_cost'] += (float)$monthRow['input_cost'];
         $row['target_amount'] += (float)$monthRow['target_amount'];
 
@@ -847,7 +911,9 @@ function cpms_company_profit_build_dashboard($pdo, $request) {
     }
 
     $projects = cpms_company_profit_load_projects($pdo, $filters);
-    $safetyProjects = cpms_company_profit_load_projects($pdo, array('status' => '', 'q' => ''));
+    $safetyProjects = !empty($filters['project_id'])
+        ? $projects
+        : cpms_company_profit_load_projects($pdo, array('status' => '', 'q' => ''));
     $result['safety_cost'] = cpms_company_profit_safety_cost_total_summary($pdo, $safetyProjects);
     foreach ($projects as $project) {
         try {

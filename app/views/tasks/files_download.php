@@ -50,6 +50,13 @@ if (!$task || !cpms_tasks_can_view($task, $currentEmployeeId)) {
     cpms_tasks_zip_error('첨부파일을 다운로드할 권한이 없습니다.', 403);
 }
 
+$availableFiles = cpms_tasks_fetch_visible_files($pdo, $task, $currentEmployeeId);
+$availableFilesById = array();
+for ($i = 0; $i < count($availableFiles); $i++) {
+    $availableFileId = isset($availableFiles[$i]['id']) ? (int)$availableFiles[$i]['id'] : 0;
+    if ($availableFileId > 0) $availableFilesById[$availableFileId] = $availableFiles[$i];
+}
+
 $selectedIds = array();
 if ($mode !== 'all') {
     $postedIds = isset($_POST['file_ids']) && is_array($_POST['file_ids']) ? $_POST['file_ids'] : array();
@@ -62,25 +69,16 @@ if ($mode !== 'all') {
     }
 }
 
-try {
-    if ($mode === 'all') {
-        $statement = $pdo->prepare("SELECT * FROM cpms_task_files WHERE task_id = :task_id ORDER BY id ASC");
-        $statement->execute(array(':task_id' => $taskId));
-    } else {
-        $placeholders = array();
-        $params = array(':task_id' => $taskId);
-        $selectedIds = array_values($selectedIds);
-        for ($i = 0; $i < count($selectedIds); $i++) {
-            $key = ':file_id_' . $i;
-            $placeholders[count($placeholders)] = $key;
-            $params[$key] = (int)$selectedIds[$i];
+$files = array();
+if ($mode === 'all') {
+    $files = array_values($availableFilesById);
+} else {
+    foreach ($selectedIds as $selectedFileId) {
+        $selectedFileId = (int)$selectedFileId;
+        if (isset($availableFilesById[$selectedFileId])) {
+            $files[count($files)] = $availableFilesById[$selectedFileId];
         }
-        $statement = $pdo->prepare("SELECT * FROM cpms_task_files WHERE task_id = :task_id AND id IN (" . implode(',', $placeholders) . ") ORDER BY id ASC");
-        $statement->execute($params);
     }
-    $files = $statement->fetchAll(PDO::FETCH_ASSOC);
-} catch (Exception $e) {
-    $files = array();
 }
 
 if (!is_array($files) || count($files) === 0) {

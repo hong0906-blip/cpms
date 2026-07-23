@@ -16,9 +16,9 @@ $projectId = isset($_GET['pid']) ? (int)$_GET['pid'] : 0;
 $selectedMonth = isset($_GET['month']) ? trim((string)$_GET['month']) : '';
 $laborSheetTab = isset($_GET['labor_tab']) ? trim((string)$_GET['labor_tab']) : 'timesheet';
 if (!in_array($laborSheetTab, array('timesheet', 'labor', 'outsourcing'), true)) $laborSheetTab = 'timesheet';
-$laborSort = isset($_GET['labor_sort']) ? trim((string)$_GET['labor_sort']) : 'name';
+$laborSort = isset($_GET['labor_sort']) ? trim((string)$_GET['labor_sort']) : 'job_type';
 $laborSortAllowed = array('name', 'job_type', 'output_days', 'total_gongsu', 'wage_rate', 'company', 'labor_ratio', 'outsourcing_ratio', 'labor_amount', 'outsourcing_amount');
-if (!in_array($laborSort, $laborSortAllowed, true)) $laborSort = 'name';
+if (!in_array($laborSort, $laborSortAllowed, true)) $laborSort = 'job_type';
 $laborSortDir = isset($_GET['labor_sort_dir']) ? trim((string)$_GET['labor_sort_dir']) : 'asc';
 if ($laborSortDir !== 'desc') $laborSortDir = 'asc';
 

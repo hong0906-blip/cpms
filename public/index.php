@@ -1587,6 +1587,79 @@ if ($route === '견적관리' && !\App\Core\Auth::canAccessEstimate()) {
 }
 
 // ==========================
+//  대표 경영현황 및 상세 JSON
+// ==========================
+if ($route === 'representative_management' || $route === '대표 경영현황' || $route === 'representative_management/project_detail') {
+    require_once __DIR__ . '/../app/services/RepresentativeManagementService.php';
+    $representativePdo = \App\Core\Db::pdo();
+    $representativeUser = \App\Core\Auth::user();
+    if (!cpms_can_view_representative_management($representativePdo, $representativeUser)) {
+        http_response_code(403);
+        if ($route === 'representative_management/project_detail') {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(array('ok' => false, 'message' => '접근 권한이 없습니다.'));
+        } else {
+            echo '접근 권한이 없습니다.';
+        }
+        exit;
+    }
+
+    $representativeCacheParams = is_array($_GET) ? $_GET : array();
+    ksort($representativeCacheParams);
+    $representativeCacheKey = md5('representative_management_v1:' . serialize($representativeCacheParams));
+    $representativeSummary = null;
+    if (isset($_SESSION['_representative_management_cache'][$representativeCacheKey]) && is_array($_SESSION['_representative_management_cache'][$representativeCacheKey])) {
+        $representativeCached = $_SESSION['_representative_management_cache'][$representativeCacheKey];
+        if (isset($representativeCached['time']) && isset($representativeCached['data']) && (time() - (int)$representativeCached['time']) <= 60 && is_array($representativeCached['data'])) {
+            $representativeSummary = $representativeCached['data'];
+        }
+    }
+    if (!is_array($representativeSummary)) {
+        $representativeSummary = cpms_representative_build_dashboard($representativePdo, $_GET);
+        if (!isset($_SESSION['_representative_management_cache']) || !is_array($_SESSION['_representative_management_cache'])) {
+            $_SESSION['_representative_management_cache'] = array();
+        }
+        $_SESSION['_representative_management_cache'][$representativeCacheKey] = array('time' => time(), 'data' => $representativeSummary);
+        if (count($_SESSION['_representative_management_cache']) > 12) {
+            $_SESSION['_representative_management_cache'] = array_slice($_SESSION['_representative_management_cache'], -12, null, true);
+        }
+    }
+    if ($route === 'representative_management/project_detail') {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        $projectId = isset($_GET['project_id']) ? (int)$_GET['project_id'] : 0;
+        $detailProject = null;
+        foreach (isset($representativeSummary['projects']) ? $representativeSummary['projects'] : array() as $detailCandidate) {
+            if (isset($detailCandidate['id']) && (int)$detailCandidate['id'] === $projectId) {
+                $detailProject = $detailCandidate;
+                break;
+            }
+        }
+        if (!is_array($detailProject)) {
+            http_response_code(404);
+            echo json_encode(array('ok' => false, 'message' => '현장을 찾을 수 없습니다.'));
+            exit;
+        }
+        $detailProject['basis_label'] = isset($detailProject['basis']) && $detailProject['basis'] === 'confirmed'
+            ? '확정매출 기준'
+            : (isset($detailProject['basis']) && $detailProject['basis'] === 'mixed'
+                ? '확정·예상 혼합'
+                : (isset($detailProject['basis']) && $detailProject['basis'] === 'expected' ? '예상매출 포함' : '매출 미등록'));
+        echo json_encode(array('ok' => true, 'project' => $detailProject));
+        exit;
+    }
+
+    \App\Core\View::render('representative/management', array(
+        'title' => '대표 경영현황',
+        'selectedMenu' => '대표 경영현황',
+        'dashboardType' => $dashboardType,
+        'representativeSummary' => $representativeSummary,
+        'isDevelopmentAccess' => cpms_representative_is_development_user($representativeUser, $representativePdo),
+    ));
+    exit;
+}
+
+// ==========================
 //  경영현황 직접 URL 접근 차단
 // ==========================
 if ($route === '경영현황') {

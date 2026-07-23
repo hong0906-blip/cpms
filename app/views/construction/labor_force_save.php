@@ -22,9 +22,14 @@ $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $month = isset($_POST['month']) ? trim((string)$_POST['month']) : '';
 $laborTab = isset($_POST['labor_tab']) ? trim((string)$_POST['labor_tab']) : 'timesheet';
 if ($laborTab === '') $laborTab = 'timesheet';
+$workerSort = isset($_POST['worker_sort']) ? trim((string)$_POST['worker_sort']) : 'company';
+$workerSortAllowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'bank_account', 'bank_name', 'account_holder', 'remark');
+if (!in_array($workerSort, $workerSortAllowed, true)) $workerSort = 'company';
+$workerSortDir = isset($_POST['worker_sort_dir']) && (string)$_POST['worker_sort_dir'] === 'desc' ? 'desc' : 'asc';
 
 $redirect = '?r=공사&pid=' . (int)$projectId . '&tab=labor&labor_tab=' . urlencode($laborTab);
 if ($month !== '') $redirect .= '&month=' . urlencode($month);
+$redirect .= '&worker_sort=' . urlencode($workerSort) . '&worker_sort_dir=' . urlencode($workerSortDir);
 
 $token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
 if (!csrf_check($token)) {

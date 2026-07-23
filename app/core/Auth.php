@@ -131,11 +131,11 @@ class Auth
         $secret = self::rememberSecret();
         if ($secret === '') return;
 
-        $sessionId = session_id();
-        if ($sessionId === '') return;
-
         $expiresAt = time() + self::keepSeconds();
-        $data = $email . '|' . $sessionId . '|' . $expiresAt;
+        // 세션 ID와 분리된 서명 쿠키를 사용한다.
+        // 모바일 브라우저/앱 내 웹뷰가 백그라운드 복귀 시 세션 ID를
+        // 새로 발급해도 PC와 같은 유지시간 동안 로그인을 복구할 수 있다.
+        $data = $email . '|' . $expiresAt;
         $signature = hash_hmac('sha256', $data, $secret);
         $value = base64_encode($data . '|' . $signature);
 
@@ -174,23 +174,17 @@ class Auth
         }
 
         $parts = explode('|', $decoded);
-        if (count($parts) !== 4) {
+        if (count($parts) !== 3 && count($parts) !== 4) {
             self::clearRememberCookie();
             return false;
         }
 
         $email = self::normalizeEmail($parts[0]);
-        $savedSessionId = (string)$parts[1];
-        $expiresAt = (int)$parts[2];
-        $signature = (string)$parts[3];
-        $currentSessionId = session_id();
-        $requestSessionId = isset($_COOKIE[session_name()]) ? (string)$_COOKIE[session_name()] : '';
-        if ($email === '' || $savedSessionId === '' || $currentSessionId === '' || $expiresAt < time()) {
-            self::clearRememberCookie();
-            return false;
-        }
-        if (!self::hashEquals($savedSessionId, $currentSessionId)
-            && ($requestSessionId === '' || !self::hashEquals($savedSessionId, $requestSessionId))) {
+        $isLegacyCookie = count($parts) === 4;
+        $savedSessionId = $isLegacyCookie ? (string)$parts[1] : '';
+        $expiresAt = (int)($isLegacyCookie ? $parts[2] : $parts[1]);
+        $signature = (string)($isLegacyCookie ? $parts[3] : $parts[2]);
+        if ($email === '' || $expiresAt < time()) {
             self::clearRememberCookie();
             return false;
         }
@@ -198,7 +192,11 @@ class Auth
         $secret = self::rememberSecret();
         if ($secret === '') return false;
 
-        $data = $email . '|' . $savedSessionId . '|' . $expiresAt;
+        // 기존 PC 로그인 쿠키도 만료 전까지 계속 허용하고, 복구 성공 시
+        // 세션 ID에 종속되지 않는 새 형식으로 즉시 갱신한다.
+        $data = $isLegacyCookie
+            ? $email . '|' . $savedSessionId . '|' . $expiresAt
+            : $email . '|' . $expiresAt;
         $expected = hash_hmac('sha256', $data, $secret);
         if (!self::hashEquals($expected, $signature)) {
             self::clearRememberCookie();

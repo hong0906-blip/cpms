@@ -36,11 +36,16 @@ $manualCompanyName = isset($_POST['manual_company_name']) ? trim((string)$_POST[
 $month = isset($_POST['month']) ? trim((string)$_POST['month']) : '';
 $laborTab = isset($_POST['labor_tab']) ? trim((string)$_POST['labor_tab']) : 'workers';
 if ($laborTab === '') $laborTab = 'workers';
+$workerSort = isset($_POST['worker_sort']) ? trim((string)$_POST['worker_sort']) : 'company';
+$workerSortAllowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'bank_account', 'bank_name', 'account_holder', 'remark');
+if (!in_array($workerSort, $workerSortAllowed, true)) $workerSort = 'company';
+$workerSortDir = isset($_POST['worker_sort_dir']) && (string)$_POST['worker_sort_dir'] === 'desc' ? 'desc' : 'asc';
 
 $redirect = '?r=공사&pid=' . $projectId . '&tab=labor&labor_tab=' . urlencode($laborTab);
 if ($month !== '') {
     $redirect .= '&month=' . urlencode($month);
 }
+$redirect .= '&worker_sort=' . urlencode($workerSort) . '&worker_sort_dir=' . urlencode($workerSortDir);
 
 if ($projectId <= 0) {
     flash_set('error', '프로젝트 정보가 올바르지 않습니다.');

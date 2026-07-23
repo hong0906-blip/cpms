@@ -1617,6 +1617,58 @@ function cpms_tasks_fetch_files($pdo, $taskId)
     return is_array($rows) ? $rows : array();
 }}
 
+if (!function_exists('cpms_tasks_file_with_task_owner')) {
+function cpms_tasks_file_with_task_owner($file, $task)
+{
+    if (!is_array($file)) $file = array();
+    if (!is_array($task)) $task = array();
+    $file['_task_id'] = isset($task['id']) ? (int)$task['id'] : 0;
+    $file['_task_assignee_employee_id'] = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
+    $file['_task_assignee_name'] = isset($task['assignee_name']) ? trim((string)$task['assignee_name']) : '';
+    return $file;
+}}
+
+if (!function_exists('cpms_tasks_fetch_visible_files')) {
+function cpms_tasks_fetch_visible_files($pdo, $task, $currentEmployeeId)
+{
+    $rows = array();
+    if (!$pdo || !is_array($task)) return $rows;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    if ($taskId <= 0 || !cpms_tasks_can_view($task, (int)$currentEmployeeId)) return $rows;
+
+    $seenFileIds = array();
+    $currentFiles = cpms_tasks_fetch_files($pdo, $taskId);
+    for ($i = 0; $i < count($currentFiles); $i++) {
+        $file = cpms_tasks_file_with_task_owner($currentFiles[$i], $task);
+        $fileId = isset($file['id']) ? (int)$file['id'] : 0;
+        if ($fileId > 0) $seenFileIds[$fileId] = true;
+        $rows[count($rows)] = $file;
+    }
+
+    $groupKey = isset($task['group_key']) ? trim((string)$task['group_key']) : '';
+    if (!cpms_tasks_is_request_group_key($groupKey)) return $rows;
+
+    $summary = cpms_tasks_completion_group_summary($pdo, $task);
+    $groupTasks = isset($summary['rows']) && is_array($summary['rows']) ? $summary['rows'] : array();
+    for ($i = 0; $i < count($groupTasks); $i++) {
+        $groupTask = $groupTasks[$i];
+        $groupTaskId = isset($groupTask['id']) ? (int)$groupTask['id'] : 0;
+        if ($groupTaskId <= 0 || $groupTaskId === $taskId) continue;
+        if (!cpms_tasks_can_view($groupTask, (int)$currentEmployeeId)) continue;
+
+        $groupFiles = cpms_tasks_fetch_files($pdo, $groupTaskId);
+        for ($j = 0; $j < count($groupFiles); $j++) {
+            if (cpms_tasks_file_effective_role($groupTask, $groupFiles[$j]) !== 'complete') continue;
+            $fileId = isset($groupFiles[$j]['id']) ? (int)$groupFiles[$j]['id'] : 0;
+            if ($fileId > 0 && isset($seenFileIds[$fileId])) continue;
+            if ($fileId > 0) $seenFileIds[$fileId] = true;
+            $rows[count($rows)] = cpms_tasks_file_with_task_owner($groupFiles[$j], $groupTask);
+        }
+    }
+
+    return $rows;
+}}
+
 if (!function_exists('cpms_tasks_file_effective_role')) {
 function cpms_tasks_file_effective_role($task, $file)
 {

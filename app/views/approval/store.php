@@ -354,6 +354,32 @@ if (!function_exists('approval_store_upload_error_message')) {
     }
 }
 
+if (!function_exists('approval_store_uploaded_files')) {
+    function approval_store_uploaded_files($fieldName)
+    {
+        if (!isset($_FILES[$fieldName]) || !is_array($_FILES[$fieldName])) {
+            return array();
+        }
+        $field = $_FILES[$fieldName];
+        if (!isset($field['name']) || !is_array($field['name'])) {
+            return array($field);
+        }
+
+        $files = array();
+        $count = count($field['name']);
+        for ($i = 0; $i < $count; $i++) {
+            $files[] = array(
+                'name' => isset($field['name'][$i]) ? $field['name'][$i] : '',
+                'type' => isset($field['type'][$i]) ? $field['type'][$i] : '',
+                'tmp_name' => isset($field['tmp_name'][$i]) ? $field['tmp_name'][$i] : '',
+                'error' => isset($field['error'][$i]) ? $field['error'][$i] : UPLOAD_ERR_NO_FILE,
+                'size' => isset($field['size'][$i]) ? $field['size'][$i] : 0
+            );
+        }
+        return $files;
+    }
+}
+
 if (!function_exists('approval_store_latest_annual_leave_snapshot')) {
     function approval_store_latest_annual_leave_snapshot($pdo, $employeeId)
     {
@@ -921,7 +947,7 @@ try {
 
     $uploadWarn = array();
     if (approval_is_proposal_doc_type($docType)) {
-        $allow = array('jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf');
+        $allow = array('jpg', 'jpeg', 'png', 'gif', 'webp', 'pdf', 'xls', 'xlsx');
         $labels = array(
             'order_doc' => array(approval_ko('%EB%B0%9C%EC%A3%BC%EC%84%9C'), 'order_doc_file'),
             'business_license' => array(approval_ko('%EC%82%AC%EC%97%85%EC%9E%90%EB%93%B1%EB%A1%9D%EC%A6%9D'), 'business_license_file'),
@@ -945,79 +971,85 @@ try {
         $driveFailUserMessage = approval_ko('%EC%B2%A8%EB%B6%80%ED%8C%8C%EC%9D%BC%20Drive%20%EC%97%85%EB%A1%9C%EB%93%9C%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.%20%EA%B4%80%EB%A6%AC%EC%9E%90%EC%97%90%EA%B2%8C%20%EB%AC%B8%EC%9D%98%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.');
         foreach ($labels as $ft => $meta) {
             $fname = $meta[1];
-            if (!isset($_FILES[$fname]) || !isset($_FILES[$fname]['tmp_name']) || $_FILES[$fname]['tmp_name'] === '') {
-                continue;
-            }
-            if ((int)$_FILES[$fname]['error'] !== UPLOAD_ERR_OK) {
-                $uploadWarn[] = $meta[0] . ' ' . approval_store_upload_error_message($_FILES[$fname]['error']);
-                continue;
-            }
-            $orig = (string)$_FILES[$fname]['name'];
-            $ext = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
-            if (!in_array($ext, $allow, true)) {
-                $uploadWarn[] = $meta[0] . ' ' . approval_ko('%ED%97%88%EC%9A%A9%EB%90%98%EC%A7%80%20%EC%95%8A%EB%8A%94%20%ED%99%95%EC%9E%A5%EC%9E%90%EC%9E%85%EB%8B%88%EB%8B%A4.');
-                continue;
-            }
-            $saved = $ft . '_' . date('YmdHis') . '_' . mt_rand(1000, 9999) . '.' . $ext;
-            $dest = $base . '/' . $saved;
-            if (!@move_uploaded_file($_FILES[$fname]['tmp_name'], $dest)) {
-                $uploadWarn[] = $meta[0] . ' ' . approval_ko('%EC%A0%80%EC%9E%A5%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
-                continue;
-            }
-            $rel = 'storage/approvals/' . $did . '/files/' . $saved;
-            $mimeType = cpms_drive_detect_mime_type($dest);
-            $fileSize = is_file($dest) ? (int)@filesize($dest) : 0;
-            $driveUploadOk = false;
-            $driveRecord = cpms_approval_drive_failed_record($orig, $rel, $mimeType, $fileSize, $user, 'Drive upload was not attempted.');
-            if ($driveColumnsReady) {
-                $driveUpload = cpms_approval_drive_upload_local_file($dest, $orig, $docForDrive, $contentData, array('file_type' => $ft, 'file_label' => $meta[0], 'local_path' => $rel), $user);
-                $driveRecord = isset($driveUpload['record']) && is_array($driveUpload['record']) ? $driveUpload['record'] : $driveRecord;
-                $driveUploadOk = !empty($driveUpload['ok']);
-                if (!$driveUploadOk || !isset($driveRecord['drive_file_id']) || trim((string)$driveRecord['drive_file_id']) === '') {
-                    $uploadWarn[] = $meta[0] . ' ' . $driveFailUserMessage;
+            $uploadedFiles = approval_store_uploaded_files($fname);
+            for ($uploadIndex = 0; $uploadIndex < count($uploadedFiles); $uploadIndex++) {
+                $uploadedFile = $uploadedFiles[$uploadIndex];
+                $uploadError = isset($uploadedFile['error']) ? (int)$uploadedFile['error'] : UPLOAD_ERR_NO_FILE;
+                $tmpName = isset($uploadedFile['tmp_name']) ? (string)$uploadedFile['tmp_name'] : '';
+                if ($uploadError === UPLOAD_ERR_NO_FILE && $tmpName === '') {
+                    continue;
                 }
-            } else {
-                cpms_drive_log_upload_failure(array(
-                    'user' => $user,
-                    'section' => 'approval',
-                    'approval_document_id' => $did,
-                    'document_type' => approval_doc_label($docType),
-                    'project_id' => $projectId > 0 ? $projectId : '',
-                    'original_name' => $orig,
-                    'target_folder_id' => cpms_drive_folder_id('approval'),
-                    'message' => 'Approval file Drive columns are not ready.'
-                ));
-                $uploadWarn[] = $meta[0] . ' ' . $driveFailUserMessage;
-            }
-            $fileRow = array_merge($driveRecord, array(
-                'document_id' => $did,
-                'original_name' => $orig,
-                'saved_name' => $saved,
-                'file_path' => $rel,
-                'file_label' => $meta[0],
-                'file_type' => $ft
-            ));
-            $saveFile = cpms_approval_drive_save_file_row($pdo, $fileRow);
-            if (empty($saveFile['ok'])) {
-                if ($driveUploadOk && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
-                    cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+                if ($uploadError !== UPLOAD_ERR_OK) {
+                    $uploadWarn[] = $meta[0] . ' ' . approval_store_upload_error_message($uploadError);
+                    continue;
+                }
+                $orig = isset($uploadedFile['name']) ? (string)$uploadedFile['name'] : '';
+                $ext = strtolower(pathinfo($orig, PATHINFO_EXTENSION));
+                if (!in_array($ext, $allow, true)) {
+                    $uploadWarn[] = $meta[0] . ' ' . approval_ko('%ED%97%88%EC%9A%A9%EB%90%98%EC%A7%80%20%EC%95%8A%EB%8A%94%20%ED%99%95%EC%9E%A5%EC%9E%90%EC%9E%85%EB%8B%88%EB%8B%A4.');
+                    continue;
+                }
+                $saved = $ft . '_' . date('YmdHis') . '_' . mt_rand(1000, 9999) . '.' . $ext;
+                $dest = $base . '/' . $saved;
+                if (!@move_uploaded_file($tmpName, $dest)) {
+                    $uploadWarn[] = $meta[0] . ' ' . approval_ko('%EC%A0%80%EC%9E%A5%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+                    continue;
+                }
+                $rel = 'storage/approvals/' . $did . '/files/' . $saved;
+                $mimeType = cpms_drive_detect_mime_type($dest);
+                $fileSize = is_file($dest) ? (int)@filesize($dest) : 0;
+                $driveUploadOk = false;
+                $driveRecord = cpms_approval_drive_failed_record($orig, $rel, $mimeType, $fileSize, $user, 'Drive upload was not attempted.');
+                if ($driveColumnsReady) {
+                    $driveUpload = cpms_approval_drive_upload_local_file($dest, $orig, $docForDrive, $contentData, array('file_type' => $ft, 'file_label' => $meta[0], 'local_path' => $rel), $user);
+                    $driveRecord = isset($driveUpload['record']) && is_array($driveUpload['record']) ? $driveUpload['record'] : $driveRecord;
+                    $driveUploadOk = !empty($driveUpload['ok']);
+                    if (!$driveUploadOk || !isset($driveRecord['drive_file_id']) || trim((string)$driveRecord['drive_file_id']) === '') {
+                        $uploadWarn[] = $meta[0] . ' ' . $driveFailUserMessage;
+                    }
+                } else {
+                    cpms_drive_log_upload_failure(array(
                         'user' => $user,
-                        'section' => 'approval_db_save_cleanup',
+                        'section' => 'approval',
                         'approval_document_id' => $did,
-                        'document_type' => isset($driveRecord['document_type']) ? (string)$driveRecord['document_type'] : approval_doc_label($docType),
+                        'document_type' => approval_doc_label($docType),
                         'project_id' => $projectId > 0 ? $projectId : '',
                         'original_name' => $orig,
-                        'target_folder_id' => isset($driveRecord['drive_folder_id']) ? (string)$driveRecord['drive_folder_id'] : ''
+                        'target_folder_id' => cpms_drive_folder_id('approval'),
+                        'message' => 'Approval file Drive columns are not ready.'
                     ));
+                    $uploadWarn[] = $meta[0] . ' ' . $driveFailUserMessage;
                 }
-                $uploadWarn[] = $meta[0] . ' ' . approval_ko('%ED%8C%8C%EC%9D%BC%20%EC%A0%95%EB%B3%B4%20%EC%A0%80%EC%9E%A5%20%EC%8B%A4%ED%8C%A8');
-            } else if ($driveUploadOk && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
-                $approvalDriveUploadedFiles[] = array(
-                    'id' => (string)$driveRecord['drive_file_id'],
+                $fileRow = array_merge($driveRecord, array(
+                    'document_id' => $did,
                     'original_name' => $orig,
-                    'target_folder_id' => isset($driveRecord['drive_folder_id']) ? (string)$driveRecord['drive_folder_id'] : '',
-                    'document_type' => isset($driveRecord['document_type']) ? (string)$driveRecord['document_type'] : ''
-                );
+                    'saved_name' => $saved,
+                    'file_path' => $rel,
+                    'file_label' => $meta[0],
+                    'file_type' => $ft
+                ));
+                $saveFile = cpms_approval_drive_save_file_row($pdo, $fileRow);
+                if (empty($saveFile['ok'])) {
+                    if ($driveUploadOk && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+                        cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
+                            'user' => $user,
+                            'section' => 'approval_db_save_cleanup',
+                            'approval_document_id' => $did,
+                            'document_type' => isset($driveRecord['document_type']) ? (string)$driveRecord['document_type'] : approval_doc_label($docType),
+                            'project_id' => $projectId > 0 ? $projectId : '',
+                            'original_name' => $orig,
+                            'target_folder_id' => isset($driveRecord['drive_folder_id']) ? (string)$driveRecord['drive_folder_id'] : ''
+                        ));
+                    }
+                    $uploadWarn[] = $meta[0] . ' ' . approval_ko('%ED%8C%8C%EC%9D%BC%20%EC%A0%95%EB%B3%B4%20%EC%A0%80%EC%9E%A5%20%EC%8B%A4%ED%8C%A8');
+                } else if ($driveUploadOk && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
+                    $approvalDriveUploadedFiles[] = array(
+                        'id' => (string)$driveRecord['drive_file_id'],
+                        'original_name' => $orig,
+                        'target_folder_id' => isset($driveRecord['drive_folder_id']) ? (string)$driveRecord['drive_folder_id'] : '',
+                        'document_type' => isset($driveRecord['document_type']) ? (string)$driveRecord['document_type'] : ''
+                    );
+                }
             }
         }
     }

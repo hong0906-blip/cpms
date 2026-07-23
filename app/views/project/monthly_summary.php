@@ -3,6 +3,7 @@ use App\Core\Db;
 
 require_once __DIR__ . '/../construction/tabs/partials/sales_data_loader.php';
 require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
+require_once __DIR__ . '/../construction/tabs/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/../safety/safety_cost_helper.php';
 
 $pdo = Db::pdo();
@@ -289,6 +290,7 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
     $costEndDate = $selectedYm . '-25';
     $equipmentCounts = array('excavator' => 0.0, 'dump' => 0.0, 'other' => 0.0, 'forklift' => 0.0);
     $workerOutputDays = 0.0;
+    $breakdown = array('labor' => 0.0, 'outsourcing' => 0.0, 'equipment' => 0.0, 'material' => 0.0, 'purchase' => 0.0, 'other' => 0.0, 'safety' => 0.0, 'deduction' => 0.0);
 
     if ($pdo && $projectId > 0) {
         if (cpms_monthly_summary_table_exists($pdo, 'cpms_material_items') && cpms_monthly_summary_table_exists($pdo, 'cpms_material_usage')) {
@@ -306,7 +308,13 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
                         $ym = cpms_monthly_summary_cost_ym(isset($row['use_date']) ? $row['use_date'] : '');
                         if ($ym === '' || $ym > $selectedYm) continue;
                         if (!isset($inputByMonth[$ym])) $inputByMonth[$ym] = 0.0;
-                        $inputByMonth[$ym] += isset($row['amount']) ? (float)$row['amount'] : 0.0;
+                        $materialAmount = isset($row['amount']) ? (float)$row['amount'] : 0.0;
+                        $inputByMonth[$ym] += $materialAmount;
+                        if ($ym === $selectedYm) {
+                            if ($category === '구매품') $breakdown['purchase'] += $materialAmount;
+                            else if ($category === '기타경비') $breakdown['other'] += $materialAmount;
+                            else $breakdown['material'] += $materialAmount;
+                        }
                     }
                 }
             } catch (Exception $e) {
@@ -322,7 +330,9 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
                     $ym = substr($useDate, 0, 7);
                     if ($ym > $selectedYm) continue;
                     if (!isset($inputByMonth[$ym])) $inputByMonth[$ym] = 0.0;
-                    $inputByMonth[$ym] += cpms_safety_cost_row_amount($row);
+                    $safetyAmount = cpms_safety_cost_row_amount($row);
+                    $inputByMonth[$ym] += $safetyAmount;
+                    if ($ym === $selectedYm) $breakdown['safety'] += $safetyAmount;
                 }
             }
         }
@@ -354,6 +364,7 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
                         if ($rate > 0) $amount = $workUnit * $rate;
                         if (!isset($inputByMonth[$ym])) $inputByMonth[$ym] = 0.0;
                         $inputByMonth[$ym] += $amount;
+                        if ($ym === $selectedYm) $breakdown['equipment'] += $amount;
                         $bucket = cpms_monthly_summary_equipment_bucket(isset($row['category']) ? $row['category'] : '', isset($row['spec']) ? $row['spec'] : '');
                         $equipmentCounts[$bucket] += $workUnit;
                     }
@@ -364,9 +375,24 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
 
         foreach ($months as $ym) {
             $labor = cpms_monthly_summary_labor_breakdown($pdo, $projectId, $projectName, $ym);
-            $laborAmount = isset($labor['amount']) ? (float)$labor['amount'] : 0.0;
+            $laborGrossAmount = isset($labor['amount']) ? (float)$labor['amount'] : 0.0;
+            $laborOutsourcingAmount = 0.0;
+            if (function_exists('cpms_outsourcing_labor_company_rows_for_month')) {
+                $laborOutsourcingRow = cpms_outsourcing_labor_company_rows_for_month($pdo, $projectId, $projectName, $ym);
+                $laborOutsourcingAmount = isset($laborOutsourcingRow['total']) ? (float)$laborOutsourcingRow['total'] : 0.0;
+            }
+            if ($laborOutsourcingAmount < 0) $laborOutsourcingAmount = 0.0;
+            if ($laborOutsourcingAmount > $laborGrossAmount) $laborOutsourcingAmount = $laborGrossAmount;
+            $laborAmount = $laborGrossAmount - $laborOutsourcingAmount;
+            $monthStart = $ym . '-01';
+            $monthEnd = date('Y-m-t', strtotime($monthStart));
+            $manualOutsourcingAmount = cpms_monthly_summary_table_exists($pdo, 'cpms_outsourcing_costs') && function_exists('cpms_outsourcing_manual_total_between') ? (float)cpms_outsourcing_manual_total_between($pdo, $projectId, $monthStart, $monthEnd) : 0.0;
             $laborByMonth[$ym] = $laborAmount;
-            $inputByMonth[$ym] += $laborAmount;
+            $inputByMonth[$ym] += $laborGrossAmount + $manualOutsourcingAmount;
+            if ($ym === $selectedYm) {
+                $breakdown['labor'] += $laborAmount;
+                $breakdown['outsourcing'] += $laborOutsourcingAmount + $manualOutsourcingAmount;
+            }
             $workerOutputDays += isset($labor['output_day_sum']) ? (float)$labor['output_day_sum'] : 0.0;
         }
 
@@ -382,7 +408,9 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
                         $ym = isset($row['ym']) ? (string)$row['ym'] : '';
                         if (!cpms_monthly_summary_ym_valid($ym)) continue;
                         if (!isset($inputByMonth[$ym])) $inputByMonth[$ym] = 0.0;
-                        $inputByMonth[$ym] += isset($row['amount']) ? (float)$row['amount'] : 0.0;
+                        $deductionAmount = isset($row['amount']) ? (float)$row['amount'] : 0.0;
+                        $inputByMonth[$ym] += $deductionAmount;
+                        if ($ym === $selectedYm) $breakdown['deduction'] += $deductionAmount;
                     }
                 }
             } catch (Exception $e) {
@@ -417,6 +445,7 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
         'equipment' => $equipmentCounts,
         'cumulative_input' => $totalInput,
         'cumulative_revenue' => $cumulativeRevenue,
+        'breakdown' => $breakdown,
         'remark' => (string)$remark,
     );
 }
@@ -461,6 +490,7 @@ $summaryTotals = array(
     ),
     'cumulative_input' => 0.0,
     'cumulative_revenue' => 0.0,
+    'breakdown' => array('labor' => 0.0, 'outsourcing' => 0.0, 'equipment' => 0.0, 'material' => 0.0, 'purchase' => 0.0, 'other' => 0.0, 'safety' => 0.0, 'deduction' => 0.0),
 );
 foreach ($summaryRows as $row) {
     $summaryTotals['contract_amount'] += isset($row['contract_amount']) ? (float)$row['contract_amount'] : 0.0;
@@ -472,6 +502,10 @@ foreach ($summaryRows as $row) {
     $summaryTotals['worker_output_days'] += isset($row['worker_output_days']) ? (float)$row['worker_output_days'] : 0.0;
     $summaryTotals['cumulative_input'] += isset($row['cumulative_input']) ? (float)$row['cumulative_input'] : 0.0;
     $summaryTotals['cumulative_revenue'] += isset($row['cumulative_revenue']) ? (float)$row['cumulative_revenue'] : 0.0;
+    $rowBreakdown = isset($row['breakdown']) && is_array($row['breakdown']) ? $row['breakdown'] : array();
+    foreach ($summaryTotals['breakdown'] as $breakdownKey => $breakdownAmount) {
+        $summaryTotals['breakdown'][$breakdownKey] += isset($rowBreakdown[$breakdownKey]) ? (float)$rowBreakdown[$breakdownKey] : 0.0;
+    }
     $eqTotal = isset($row['equipment']) && is_array($row['equipment']) ? $row['equipment'] : array();
     foreach ($summaryTotals['equipment'] as $bucket => $amount) {
         $summaryTotals['equipment'][$bucket] += isset($eqTotal[$bucket]) ? (float)$eqTotal[$bucket] : 0.0;
@@ -507,6 +541,31 @@ $monthTitle = substr($selectedYm, 5, 2) . '월';
   <?php if (count($summaryRows) === 0): ?>
     <div class="text-sm text-gray-600">표시할 프로젝트가 없습니다.</div>
   <?php else: ?>
+    <?php
+      $mobileMonthProfit = (float)$summaryTotals['current_revenue'] - (float)$summaryTotals['month_input'];
+      $mobileBreakdown = isset($summaryTotals['breakdown']) && is_array($summaryTotals['breakdown']) ? $summaryTotals['breakdown'] : array();
+      $mobileCards = array(
+        array('매출', $summaryTotals['current_revenue'], 'bg-slate-900 text-white'),
+        array('총투입비', $summaryTotals['month_input'], 'bg-white border border-gray-200 text-gray-900'),
+        array('손익', $mobileMonthProfit, 'bg-white border border-gray-200 ' . ($mobileMonthProfit < 0 ? 'text-red-600' : 'text-blue-700')),
+        array('노무비', isset($mobileBreakdown['labor']) ? $mobileBreakdown['labor'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
+        array('외주비', isset($mobileBreakdown['outsourcing']) ? $mobileBreakdown['outsourcing'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
+        array('장비비', isset($mobileBreakdown['equipment']) ? $mobileBreakdown['equipment'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
+        array('자재비', isset($mobileBreakdown['material']) ? $mobileBreakdown['material'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
+        array('구매품', isset($mobileBreakdown['purchase']) ? $mobileBreakdown['purchase'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
+        array('기타경비', isset($mobileBreakdown['other']) ? $mobileBreakdown['other'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
+        array('안전관리비', isset($mobileBreakdown['safety']) ? $mobileBreakdown['safety'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
+        array('공제분', isset($mobileBreakdown['deduction']) ? $mobileBreakdown['deduction'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900')
+      );
+    ?>
+    <div class="cpms-monthly-mobile-summary" aria-label="월별 투입비 모바일 합계">
+      <?php foreach ($mobileCards as $mobileCard): ?>
+        <div class="rounded-2xl p-4 <?php echo h($mobileCard[2]); ?>">
+          <div class="text-xs opacity-70 font-bold"><?php echo h($mobileCard[0]); ?></div>
+          <div class="mt-1 text-lg font-extrabold break-words"><?php echo h(cpms_monthly_summary_money($mobileCard[1])); ?></div>
+        </div>
+      <?php endforeach; ?>
+    </div>
     <form method="post" action="?r=project/monthly_summary_remark_save">
       <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
       <input type="hidden" name="ym" value="<?php echo h($selectedYm); ?>">

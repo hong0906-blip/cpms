@@ -4,7 +4,7 @@ use App\Core\Db;
 require_once __DIR__ . '/../attendance/common.php';
 
 $pdo = Db::pdo();
-$settingsFallbackRoute = '?r=' . attendance_text('%EA%B4%80%EB%A6%AC') . '&tab=attendance&atab=monthly';
+$settingsFallbackRoute = '?r=' . attendance_text('%EA%B4%80%EB%A6%AC') . '&tab=attendance&atab=weekly';
 if (!attendance_can_manage_settings($pdo)) {
     header('Location: ' . $settingsFallbackRoute);
     exit;

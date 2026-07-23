@@ -41,6 +41,10 @@
 .attach-row-present{border-color:#93c5fd;background:#eff6ff}
 .attach-label{flex:0 0 112px;font-weight:700}
 .attach-file-input{min-width:0;max-width:100%}
+.attach-file-picker{display:flex;min-width:0;flex:1;flex-direction:column;gap:4px}
+.attach-file-help{font-size:11px;color:#64748b}
+.attach-file-list{display:flex;min-width:0;flex:1;flex-direction:column;gap:6px}
+.attach-file-item{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .attach-file-name{min-width:0;flex:1;overflow-wrap:anywhere;font-weight:700;color:#111827}
 .attach-empty{color:#94a3b8}
 .approval-attachment-actions{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
