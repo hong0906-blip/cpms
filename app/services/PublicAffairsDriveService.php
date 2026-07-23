@@ -521,6 +521,9 @@ function cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $localPat
     $date = $monthInfo['year'] . '-' . $monthInfo['month'] . '-' . date('d');
     if (isset($extra['date']) && trim((string)$extra['date']) !== '') $date = trim((string)$extra['date']);
     $driveName = cpms_public_affairs_drive_build_file_name($date, isset($docInfo['document_label']) ? $docInfo['document_label'] : $documentType, $projectName, cpms_public_affairs_drive_user_name($userContext), $originalName);
+    if (isset($extra['drive_name']) && trim((string)$extra['drive_name']) !== '') {
+        $driveName = cpms_drive_sanitize_file_name((string)$extra['drive_name'], 180);
+    }
 
     $context['target_folder_id'] = (string)$target['folder_id'];
     $context['document_type'] = isset($docInfo['document_label']) ? $docInfo['document_label'] : $documentType;

@@ -851,6 +851,22 @@ if ($route === 'project/progress_download') {
     require_once __DIR__ . '/../app/views/project/progress_download.php';
     exit;
 }
+if ($route === 'project/progress_statement_action') {
+    require_once __DIR__ . '/../app/views/project/progress_statement_action.php';
+    exit;
+}
+if ($route === 'project/progress_statement_comment_save') {
+    require_once __DIR__ . '/../app/views/project/progress_statement_comment_save.php';
+    exit;
+}
+if ($route === 'project/progress_statement_file') {
+    require_once __DIR__ . '/../app/views/project/progress_statement_file.php';
+    exit;
+}
+if ($route === 'project/progress_statement_drive_retry') {
+    require_once __DIR__ . '/../app/views/project/progress_statement_drive_retry.php';
+    exit;
+}
 if ($route === 'project/public_affairs_file') {
     require_once __DIR__ . '/../app/views/project/public_affairs_file.php';
     exit;
@@ -969,6 +985,14 @@ if ($route === 'construction/labor_worker_delete') {
 // 인원작성 저장 기능
 if ($route === 'construction/labor_workers_save') {
     require_once __DIR__ . '/../app/views/construction/labor_workers_save.php';
+    exit;
+}
+if ($route === 'construction/progress_statement_upload') {
+    require_once __DIR__ . '/../app/views/construction/progress_statement_upload.php';
+    exit;
+}
+if ($route === 'construction/progress_statement_resubmit') {
+    require_once __DIR__ . '/../app/views/construction/progress_statement_resubmit.php';
     exit;
 }
 if ($route === 'construction/labor_force_save') {

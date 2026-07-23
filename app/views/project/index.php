@@ -15,7 +15,7 @@ $activeTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'monthly_summary
 $createdProjectId = isset($_GET['created_project_id']) ? (int)$_GET['created_project_id'] : 0;
 if ($activeTab === '') $activeTab = 'monthly_summary';
 if ($activeTab === 'monthly_input') $activeTab = 'monthly_summary';
-if ($activeTab !== 'monthly_summary' && $activeTab !== 'project_manage' && $activeTab !== 'collaboration') $activeTab = 'monthly_summary';
+if ($activeTab !== 'monthly_summary' && $activeTab !== 'project_manage' && $activeTab !== 'collaboration' && $activeTab !== 'progress_statement_review') $activeTab = 'monthly_summary';
 
 $projectStatusTabs = array('입찰 진행중', '계약중', '진행중', '정산완료');
 $activeProjectStatus = isset($_GET['project_status']) ? trim((string)$_GET['project_status']) : '진행중';
@@ -104,6 +104,7 @@ function cpms_project_index_is_collab_draft_project($project) {
   <div class="mt-3 flex flex-wrap gap-2">
     <a href="?r=공무&tab=monthly_summary" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_summary' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 집계</a>
     <a href="?r=공무&tab=project_manage" class="cpms-project-manage-tab px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
+    <a href="?r=공무&tab=progress_statement_review" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'progress_statement_review' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">기성내역서 검토</a>
     <a href="?r=public_affairs_collab"
        class="px-4 py-2 rounded-2xl border font-bold bg-white text-gray-700 border-gray-200">공무 협업툴</a>
   </div>
@@ -117,6 +118,8 @@ function cpms_project_index_is_collab_draft_project($project) {
     <div>오류: <?php echo h($e->getMessage()); ?></div>
   </div>
 <?php } ?>
+<?php elseif ($activeTab === 'progress_statement_review'): ?>
+  <?php require __DIR__ . '/progress_statement_review.php'; ?>
 <?php elseif ($activeTab === 'collaboration'): ?>
   <script>
     window.location.replace('?r=public_affairs_collab');
