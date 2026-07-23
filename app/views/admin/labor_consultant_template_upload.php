@@ -50,6 +50,13 @@ if ($ext !== 'xlsx') {
     cpms_labor_consultant_flash_redirect('error', '.xlsx 파일만 업로드할 수 있습니다.', $projectId, $ym, 'consultant');
 }
 
+// 파일: app/views/admin/labor_consultant_template_upload.php
+// 시스템이 생성한 노무비 결과 파일을 원본 양식으로 다시 올리는 실수를 서버에서도 차단합니다.
+$uploadedFileNameOnly = trim(basename(str_replace('\\', '/', $originalName)));
+if (strpos($uploadedFileNameOnly, '노무사확인용_노무비_') === 0) {
+    cpms_labor_consultant_flash_redirect('error', '다운로드한 노무비 결과 파일은 양식으로 등록할 수 없습니다. 비어 있는 원본 양식을 선택해주세요.', $projectId, $ym, 'consultant');
+}
+
 $safeStoredName = date('Ymd_His') . '_' . substr(md5(uniqid('', true)), 0, 8) . '.xlsx';
 $storedDir = cpms_labor_consultant_template_history_dir();
 $storedPath = $storedDir . '/' . $safeStoredName;

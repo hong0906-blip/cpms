@@ -223,6 +223,76 @@ if (!function_exists('cpms_labor_consultant_get_active_template')) {
     }
 }
 
+// 파일: app/views/admin/labor_consultant_helpers.php
+// 삭제하지 않고 보존된 노무사 양식 업로드 이력을 최신순으로 불러옵니다.
+if (!function_exists('cpms_labor_consultant_list_template_history')) {
+    function cpms_labor_consultant_list_template_history($pdo) {
+        $rows = array();
+        if (!$pdo || !cpms_labor_consultant_table_exists($pdo, 'cpms_labor_export_templates')) return $rows;
+        try {
+            $st = $pdo->prepare("SELECT t.*, e.name AS uploader_name, e.email AS uploader_email
+                                 FROM cpms_labor_export_templates t
+                                 LEFT JOIN employees e ON e.id = t.uploaded_by
+                                 WHERE t.template_type = :type
+                                 ORDER BY t.uploaded_at DESC, t.id DESC");
+            $st->bindValue(':type', cpms_labor_consultant_template_type());
+            $st->execute();
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            try {
+                $st = $pdo->prepare("SELECT * FROM cpms_labor_export_templates
+                                     WHERE template_type = :type
+                                     ORDER BY uploaded_at DESC, id DESC");
+                $st->bindValue(':type', cpms_labor_consultant_template_type());
+                $st->execute();
+                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            } catch (Exception $e2) {
+                $rows = array();
+            }
+        }
+        return is_array($rows) ? $rows : array();
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_find_template')) {
+    function cpms_labor_consultant_find_template($pdo, $templateId) {
+        $templateId = (int)$templateId;
+        if (!$pdo || $templateId <= 0 || !cpms_labor_consultant_table_exists($pdo, 'cpms_labor_export_templates')) return null;
+        try {
+            $st = $pdo->prepare("SELECT * FROM cpms_labor_export_templates WHERE id = :id AND template_type = :type LIMIT 1");
+            $st->bindValue(':id', $templateId, PDO::PARAM_INT);
+            $st->bindValue(':type', cpms_labor_consultant_template_type());
+            $st->execute();
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            return $row ? $row : null;
+        } catch (Exception $e) {
+            return null;
+        }
+    }
+}
+
+// DB 경로가 변조되어도 양식 보관 폴더 밖의 파일은 내려받지 못하도록 실제 경로를 검증합니다.
+if (!function_exists('cpms_labor_consultant_safe_template_path')) {
+    function cpms_labor_consultant_safe_template_path($templateRow) {
+        if (!is_array($templateRow)) return '';
+        $storedPath = isset($templateRow['stored_path']) ? (string)$templateRow['stored_path'] : '';
+        $resolvedPath = cpms_labor_consultant_resolve_stored_path($storedPath);
+        if ($resolvedPath === '' || !is_file($resolvedPath)) return '';
+
+        $templateRoot = realpath(cpms_labor_consultant_template_dir());
+        $filePath = realpath($resolvedPath);
+        if ($templateRoot === false || $filePath === false) return '';
+        $templateRoot = rtrim(str_replace('\\', '/', (string)$templateRoot), '/') . '/';
+        $filePathNormalized = str_replace('\\', '/', (string)$filePath);
+        if (DIRECTORY_SEPARATOR === '\\') {
+            $templateRoot = strtolower($templateRoot);
+            $filePathNormalized = strtolower($filePathNormalized);
+        }
+        if (strpos($filePathNormalized, $templateRoot) !== 0) return '';
+        return (string)$filePath;
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_list_projects')) {
     function cpms_labor_consultant_list_projects($pdo) {
         $rows = array();
@@ -347,6 +417,48 @@ if (!function_exists('cpms_labor_consultant_worker_detail_value')) {
     }
 }
 
+// 파일: app/views/admin/labor_consultant_helpers.php
+// 같은 표시 이름으로 남아 있는 과거 연결행은 최근 수정된 한 행만 선택하여 중복 출력과 중복 금액을 막습니다.
+if (!function_exists('cpms_labor_consultant_unique_project_workers')) {
+    function cpms_labor_consultant_unique_project_workers($projectWorkers) {
+        $selected = array();
+        $order = array();
+        if (!is_array($projectWorkers)) return array();
+
+        foreach ($projectWorkers as $worker) {
+            if (!is_array($worker)) continue;
+            $workerName = isset($worker['worker_name_snapshot']) && trim((string)$worker['worker_name_snapshot']) !== ''
+                ? trim((string)$worker['worker_name_snapshot'])
+                : (isset($worker['name']) ? trim((string)$worker['name']) : '');
+            $workerKey = function_exists('cpms_normalize_worker_key') ? cpms_normalize_worker_key($workerName) : strtolower($workerName);
+            if ($workerKey === '') continue;
+
+            if (!isset($selected[$workerKey])) {
+                $selected[$workerKey] = $worker;
+                $order[count($order)] = $workerKey;
+                continue;
+            }
+
+            $current = $selected[$workerKey];
+            $currentUpdatedAt = isset($current['updated_at']) ? strtotime((string)$current['updated_at']) : false;
+            $workerUpdatedAt = isset($worker['updated_at']) ? strtotime((string)$worker['updated_at']) : false;
+            $currentTimestamp = ($currentUpdatedAt === false) ? 0 : (int)$currentUpdatedAt;
+            $workerTimestamp = ($workerUpdatedAt === false) ? 0 : (int)$workerUpdatedAt;
+            $currentId = isset($current['id']) ? (int)$current['id'] : 0;
+            $workerId = isset($worker['id']) ? (int)$worker['id'] : 0;
+            if ($workerTimestamp > $currentTimestamp || ($workerTimestamp === $currentTimestamp && $workerId > $currentId)) {
+                $selected[$workerKey] = $worker;
+            }
+        }
+
+        $result = array();
+        foreach ($order as $workerKey) {
+            if (isset($selected[$workerKey])) $result[count($result)] = $selected[$workerKey];
+        }
+        return $result;
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
     function cpms_labor_consultant_load_project_month_rows($pdo, $projectRow, $ym) {
         require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
@@ -381,18 +493,29 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
         cpms_sync_project_labor_workers_from_attendance($pdo, $projectId, $attendanceWorkers);
 
         $projectWorkers = cpms_load_project_labor_workers($pdo, $projectId);
+        // 파일: app/views/admin/labor_consultant_helpers.php
+        // 관리부 노무사 확인용 자료도 공사섹션 노무비 탭과 같은 선택 월 배분비율을 사용합니다.
+        $laborWorkerRatioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $ym, $projectWorkers);
+        $projectWorkers = cpms_apply_project_labor_worker_month_ratios($projectWorkers, $laborWorkerRatioMap);
+        $projectWorkers = cpms_labor_consultant_unique_project_workers($projectWorkers);
         $directTeamMembers = cpms_load_direct_team_members($pdo);
         $directMemberMap = cpms_labor_consultant_direct_member_map($directTeamMembers);
         $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers);
         $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
         $roleMap = isset($gongsuData['role_map']) && is_array($gongsuData['role_map']) ? $gongsuData['role_map'] : array();
         $gongsuMap = isset($dataset['gongsu_map']) && is_array($dataset['gongsu_map']) ? $dataset['gongsu_map'] : array();
+        $processedWorkerKeys = array();
 
         foreach ($timesheetWorkers as $worker) {
             $workerName = isset($worker['name']) ? trim((string)$worker['name']) : '';
             if ($workerName === '') continue;
 
             $workerKey = function_exists('cpms_normalize_worker_key') ? cpms_normalize_worker_key($workerName) : strtolower($workerName);
+            if ($workerKey === '') continue;
+            // 파일: app/views/admin/labor_consultant_helpers.php
+            // 같은 근로자 연결행이 여러 개여도 동일 공수 맵을 반복 출력하지 않고 현장별 한 번만 사용합니다.
+            if (isset($processedWorkerKeys[$workerKey])) continue;
+            $processedWorkerKeys[$workerKey] = true;
             $dailyMap = isset($gongsuMap[$workerKey]) && is_array($gongsuMap[$workerKey]) ? $gongsuMap[$workerKey] : array();
             $days = array();
             $totalGongsu = 0.0;
@@ -415,6 +538,18 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
             if ($totalGongsu <= 0) continue;
 
             $wageRate = function_exists('cpms_resolve_labor_wage_rate') ? (float)cpms_resolve_labor_wage_rate($worker) : 0.0;
+            $outsourcingRatio = function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($worker) : ((isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 100 : 0);
+            // 공사섹션 노무비 탭과 동일하게 전액 외주비 인원은 노무사 확인용 자료에서 제외합니다.
+            if ($outsourcingRatio >= 100) continue;
+            $laborAmounts = function_exists('cpms_labor_calculate_amounts')
+                ? cpms_labor_calculate_amounts($totalGongsu, $wageRate, $outsourcingRatio)
+                : array(
+                    'total_amount' => round($totalGongsu * $wageRate),
+                    'outsourcing_ratio' => $outsourcingRatio,
+                    'labor_ratio' => 100 - $outsourcingRatio,
+                    'outsourcing_amount' => round(round($totalGongsu * $wageRate) * $outsourcingRatio / 100),
+                    'labor_amount' => round($totalGongsu * $wageRate) - round(round($totalGongsu * $wageRate) * $outsourcingRatio / 100),
+                );
             $rows[count($rows)] = array(
                 'project_id' => $projectId,
                 'project_name' => $projectName,
@@ -436,7 +571,13 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
                 'work_days_count' => $outputDays,
                 'output_days' => round($totalGongsu, 2),
                 'total_gongsu' => round($totalGongsu, 2),
-                'amount' => round($totalGongsu * $wageRate, 2),
+                // 노무사 확인용 지급액은 전체액이 아니라 선택 월의 노무비 반영금액입니다.
+                'total_amount' => isset($laborAmounts['total_amount']) ? (float)$laborAmounts['total_amount'] : 0.0,
+                'labor_ratio' => isset($laborAmounts['labor_ratio']) ? (int)$laborAmounts['labor_ratio'] : (100 - $outsourcingRatio),
+                'labor_amount' => isset($laborAmounts['labor_amount']) ? (float)$laborAmounts['labor_amount'] : 0.0,
+                'outsourcing_ratio' => isset($laborAmounts['outsourcing_ratio']) ? (int)$laborAmounts['outsourcing_ratio'] : $outsourcingRatio,
+                'outsourcing_amount' => isset($laborAmounts['outsourcing_amount']) ? (float)$laborAmounts['outsourcing_amount'] : 0.0,
+                'amount' => isset($laborAmounts['labor_amount']) ? (float)$laborAmounts['labor_amount'] : 0.0,
                 'days' => $days,
             );
         }
@@ -1159,11 +1300,12 @@ if (!function_exists('cpms_labor_consultant_find_or_create_cell')) {
 }
 
 if (!function_exists('cpms_labor_consultant_set_cell_value')) {
-    function cpms_labor_consultant_set_cell_value($sheetDoc, $rowNode, $colIndex, $value, $isNumeric) {
+    function cpms_labor_consultant_set_cell_value($sheetDoc, $rowNode, $colIndex, $value, $isNumeric, $replaceFormula = false) {
         $cellNode = cpms_labor_consultant_find_or_create_cell($sheetDoc, $rowNode, $colIndex);
         if (!$cellNode) return;
 
-        if (cpms_labor_consultant_cell_node_has_formula($cellNode)) {
+        $replaceFormula = ($replaceFormula === true);
+        if (cpms_labor_consultant_cell_node_has_formula($cellNode) && !$replaceFormula) {
             cpms_labor_consultant_formula_stats_add('skipped', $cellNode->getAttribute('r'));
             return;
         }
@@ -2390,13 +2532,11 @@ if (!function_exists('cpms_labor_consultant_update_known_formula_cached_values')
                 $totalWork = cpms_labor_consultant_number_value($rowData, 'output_days');
             }
             $wageRate = cpms_labor_consultant_number_value($rowData, 'wage_rate');
-            $grossAmount = round($totalWork * $wageRate, 2);
-            if ($grossAmount <= 0) $grossAmount = cpms_labor_consultant_number_value($rowData, 'amount');
+            $hasLaborAmount = array_key_exists('amount', $rowData) && is_numeric($rowData['amount']);
+            $grossAmount = $hasLaborAmount ? cpms_labor_consultant_number_value($rowData, 'amount') : round($totalWork * $wageRate);
             $deductionTotal = 0;
             $netAmount = round($grossAmount - $deductionTotal, 2);
 
-            $totalWorkRef = cpms_labor_consultant_xlsx_col_to_letter($cols['totalWorkCol']) . $rowTopNum;
-            $dailyRateRef = cpms_labor_consultant_xlsx_col_to_letter($cols['dailyRateCol']) . $rowTopNum;
             $grossRef = cpms_labor_consultant_xlsx_col_to_letter($cols['grossAmountCol']) . $rowTopNum;
             $deductionRef = cpms_labor_consultant_xlsx_col_to_letter($cols['deductionTotalCol']) . $rowBottomNum;
             $topDayFormulaRange = cpms_labor_consultant_xlsx_col_to_letter($topDays[1]) . $rowTopNum . ':' . cpms_labor_consultant_xlsx_col_to_letter($topDays[15]) . $rowTopNum;
@@ -2405,7 +2545,6 @@ if (!function_exists('cpms_labor_consultant_update_known_formula_cached_values')
             $bottomDeductionRange = cpms_labor_consultant_xlsx_col_to_letter($cols['residentTaxCol']) . $rowBottomNum . ':' . cpms_labor_consultant_xlsx_col_to_letter($cols['pensionCol']) . $rowBottomNum;
 
             cpms_labor_consultant_set_formula_text_if_empty($sheetDoc, $topRow, $cols['totalWorkCol'], 'SUM(' . $topDayFormulaRange . ',' . $bottomDayFormulaRange . ')');
-            cpms_labor_consultant_set_formula_text_if_empty($sheetDoc, $topRow, $cols['grossAmountCol'], $totalWorkRef . '*' . $dailyRateRef);
             cpms_labor_consultant_set_formula_text_if_empty($sheetDoc, $bottomRow, $cols['deductionTotalCol'], 'SUM(' . $topDeductionRange . ',' . $bottomDeductionRange . ')');
             cpms_labor_consultant_set_formula_text_if_empty($sheetDoc, $topRow, $cols['netAmountCol'], $grossRef . '-' . $deductionRef);
 
@@ -2468,7 +2607,9 @@ if (!function_exists('cpms_labor_consultant_fill_two_row_blocks')) {
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['foreignerCol'], cpms_labor_consultant_text_value($rowData, 'foreigner'), false);
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['totalWorkCol'], $outputDays, true);
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['dailyRateCol'], $wageRate, true);
-            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['grossAmountCol'], $amount, true);
+            // 파일: app/views/admin/labor_consultant_helpers.php
+            // 원본 양식의 공유수식을 새 수식으로 바꾸지 않고 셀 서식은 유지한 채 확정 노무비 금액만 기록합니다.
+            cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['grossAmountCol'], $amount, true, true);
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['earnedTaxCol'], 0, true);
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['healthInsuranceCol'], 0, true);
             cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $cols['employmentInsuranceCol'], 0, true);

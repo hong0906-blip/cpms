@@ -706,6 +706,10 @@ if ($route === 'admin/labor_consultant_template_upload') {
     require_once __DIR__ . '/../app/views/admin/labor_consultant_template_upload.php';
     exit;
 }
+if ($route === 'admin/labor_consultant_template_download') {
+    require_once __DIR__ . '/../app/views/admin/labor_consultant_template_download.php';
+    exit;
+}
 if ($route === 'admin/labor_consultant_export') {
     require_once __DIR__ . '/../app/views/admin/labor_consultant_export.php';
     exit;

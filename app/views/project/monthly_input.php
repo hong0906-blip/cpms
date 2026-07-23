@@ -145,6 +145,8 @@ function project_monthly_labor_breakdown($pdo, $projectId, $projectName, $ym) {
     if (!function_exists('cpms_load_gongsu_data') || !function_exists('cpms_build_timesheet_workers')) { return $result; }
     $directTeamMembers = cpms_load_direct_team_members($pdo);
     $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
+    $laborRatioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $ym, $projectLaborWorkers);
+    $projectLaborWorkers = cpms_apply_project_labor_worker_month_ratios($projectLaborWorkers, $laborRatioMap);
     $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
     $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
     $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
@@ -179,19 +181,24 @@ function project_monthly_labor_breakdown($pdo, $projectId, $projectName, $ym) {
             $wageRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
             $wageRate = project_monthly_parse_money($wageRateRaw);
         }
-        $amount = $totalGongsu * $wageRate;
-        if ($amount <= 0) { continue; }
+        $outsourcingRatio = cpms_resolve_worker_outsourcing_ratio($worker);
+        // 파일: app/views/project/monthly_input.php
+        // 전체 지급총액을 월별 비율로 한 번만 분할하여 노무비와 외주비 중복을 막습니다.
+        $amounts = cpms_labor_calculate_amounts($totalGongsu, $wageRate, $outsourcingRatio);
+        $laborAmount = isset($amounts['labor_amount']) ? (float)$amounts['labor_amount'] : 0.0;
+        $outsourcingAmount = isset($amounts['outsourcing_amount']) ? (float)$amounts['outsourcing_amount'] : 0.0;
+        if ($laborAmount <= 0 && $outsourcingAmount <= 0) { continue; }
         $companyName = isset($worker['company_name']) ? trim((string)$worker['company_name']) : '';
         if ($companyName === '') $companyName = '창명건설';
-        $isOutsourcing = (isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1);
-        if ($isOutsourcing) {
+        if ($outsourcingAmount > 0) {
             if (!isset($result['outsourcing_company_amounts'][$companyName])) $result['outsourcing_company_amounts'][$companyName] = 0.0;
-            $result['outsourcing_company_amounts'][$companyName] += $amount;
-            $result['outsourcing_amount'] += $amount;
-        } else {
+            $result['outsourcing_company_amounts'][$companyName] += $outsourcingAmount;
+            $result['outsourcing_amount'] += $outsourcingAmount;
+        }
+        if ($laborAmount > 0) {
             if (!isset($result['company_amounts'][$companyName])) $result['company_amounts'][$companyName] = 0.0;
-            $result['company_amounts'][$companyName] += $amount;
-            $sum += $amount;
+            $result['company_amounts'][$companyName] += $laborAmount;
+            $sum += $laborAmount;
         }
         $result['workers_considered']++;
     }
@@ -630,7 +637,7 @@ if ($pdo && is_array($selectedProject)) {
                 $rowsBySection['외주비'][] = $outsourcingCompanyRow;
             }
         }
-        $laborDiagnostics[] = '노무비 집계 기준: 공사 > 노무비 지급총액 기준';
+        $laborDiagnostics[] = '노무비/외주비 집계 기준: 공사 > 노무비 월별 비용 배분 반영금액 기준';
         if ($debugMode) { $laborDiagnostics[] = '노무비 근로자 rows: ' . number_format($laborWorkerRows); }
     }
 

@@ -244,6 +244,44 @@ try {
 
     // 인원작성 저장 기능: 인원별 임금/계좌 정보 저장
     if ($action === 'save') {
+        // 파일: app/views/construction/labor_workers_save.php
+        // 모든 비율을 먼저 검증해 잘못된 값이 하나라도 있으면 인원정보도 부분 저장하지 않습니다.
+        if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+            flash_set('error', '비용 배분을 저장할 적용 월이 올바르지 않습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+        if (!cpms_ensure_project_labor_worker_months_table($pdo)) {
+            flash_set('error', '월별 비용 배분 테이블을 확인할 수 없습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $validatedOutsourcingRatios = array();
+        foreach ($workers as $workerIdRaw => $fields) {
+            $workerId = (int)$workerIdRaw;
+            if ($workerId <= 0 || !is_array($fields)) continue;
+            if (array_key_exists('outsourcing_ratio', $fields)) {
+                $ratioRaw = trim((string)$fields['outsourcing_ratio']);
+            } else {
+                // 이전 화면에서 넘어온 요청도 기존 체크박스 의미를 유지합니다.
+                $ratioRaw = (isset($fields['is_outsourcing']) && (int)$fields['is_outsourcing'] === 1) ? '100' : '0';
+            }
+            if (!preg_match('/^\d{1,3}$/', $ratioRaw)) {
+                flash_set('error', '외주비 비율은 0부터 100 사이의 정수로 입력해 주세요.');
+                header('Location: ' . $redirect);
+                exit;
+            }
+            $outsourcingRatio = (int)$ratioRaw;
+            if ($outsourcingRatio < 0 || $outsourcingRatio > 100) {
+                flash_set('error', '외주비 비율은 0보다 작거나 100보다 클 수 없습니다.');
+                header('Location: ' . $redirect);
+                exit;
+            }
+            $validatedOutsourcingRatios[$workerId] = $outsourcingRatio;
+        }
+
+        $pdo->beginTransaction();
         if (count($workers) > 0) {
             foreach ($workers as $workerIdRaw => $fields) {
                 $workerId = (int)$workerIdRaw;
@@ -252,7 +290,8 @@ try {
                 $phone = isset($fields['phone']) ? trim((string)$fields['phone']) : '';
                 $address = isset($fields['address']) ? trim((string)$fields['address']) : '';
                 $companyName = isset($fields['company_name']) ? trim((string)$fields['company_name']) : '';
-                $isOutsourcing = (isset($fields['is_outsourcing']) && (int)$fields['is_outsourcing'] === 1) ? 1 : 0;
+                $outsourcingRatio = isset($validatedOutsourcingRatios[$workerId]) ? (int)$validatedOutsourcingRatios[$workerId] : 0;
+                $isOutsourcing = ($outsourcingRatio === 100) ? 1 : 0;
                 $jobTypeSnapshot = isset($fields['job_type_snapshot']) ? trim((string)$fields['job_type_snapshot']) : '';
                 $workerNameSnapshot = isset($fields['worker_name_snapshot']) ? trim((string)$fields['worker_name_snapshot']) : '';
                 $sourceType = isset($fields['source_type']) ? trim((string)$fields['source_type']) : 'manual';
@@ -270,6 +309,17 @@ try {
 
                 if ($sourceType === '') $sourceType = 'manual';
                 if ($matchedStatus === '') $matchedStatus = ($masterWorkerId > 0 ? 'matched' : 'manual');
+
+                // 최초 월별 비율 저장 전에 기존 이진 외주값을 보존하여 다른 월의 금액이 바뀌지 않게 합니다.
+                $stLegacyRatio = $pdo->prepare("UPDATE cpms_project_labor_workers
+                                                SET legacy_outsourcing_ratio = IF(is_outsourcing = 1, 100, 0)
+                                                WHERE id = :id
+                                                  AND project_id = :pid
+                                                  AND is_deleted = 0
+                                                  AND legacy_outsourcing_ratio IS NULL");
+                $stLegacyRatio->bindValue(':id', $workerId, PDO::PARAM_INT);
+                $stLegacyRatio->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                $stLegacyRatio->execute();
 
                 $set = array(
                     'phone = :phone',
@@ -332,10 +382,16 @@ try {
                     else $stUp->bindValue($paramName, $paramValue);
                 }
                 $stUp->execute();
+
+                if (!cpms_save_project_labor_worker_month_ratio($pdo, $projectId, $workerId, $month, $outsourcingRatio)) {
+                    throw new Exception('월별 외주비 비율을 저장하지 못했습니다.');
+                }
             }
         }
 
-        flash_set('success', '인원 정보를 저장했습니다.');
+        $pdo->commit();
+
+        flash_set('success', '인원 정보와 ' . $month . ' 비용 배분을 저장했습니다.');
         header('Location: ' . $redirect);
         exit;
     }
@@ -345,6 +401,7 @@ try {
     exit;
 
 } catch (Exception $e) {
+    if (isset($pdo) && $pdo && $pdo->inTransaction()) $pdo->rollBack();
     flash_set('error', '저장 실패: ' . $e->getMessage());
     header('Location: ' . $redirect);
     exit;

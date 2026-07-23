@@ -465,49 +465,48 @@ if (!function_exists('cpms_status_labor_total_between')) {
             $cursor->modify('+1 day');
         }
 
-        $sumGongsu = array();
-        $outputDaysSet = array();
+        $directTeamMembers = cpms_load_direct_team_members($pdo);
+        $baseProjectWorkers = cpms_load_project_labor_workers($pdo, (int)$projectId);
+        $totalLabor = 0.0;
 
         foreach ($months as $ym => $unused) {
             $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
             $gongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
             $gongsuMap = cpms_status_apply_overrides($gongsuMap, (int)$projectId, $ym);
 
+            // 파일: app/views/construction/tabs/status.php
+            // 적용 월마다 근로자 비율이 다를 수 있으므로 월 단위로 비율 맵을 다시 구성합니다.
+            $ratioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, (int)$projectId, $ym, $baseProjectWorkers);
+            $monthProjectWorkers = cpms_apply_project_labor_worker_month_ratios($baseProjectWorkers, $ratioMap);
+            $workerRows = cpms_build_project_worker_rows($monthProjectWorkers, $directTeamMembers);
+            $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
+            $workerRatioMap = array();
+            foreach ($timesheetWorkers as $timesheetWorker) {
+                $timesheetWorkerName = isset($timesheetWorker['name']) ? (string)$timesheetWorker['name'] : '';
+                $timesheetWorkerKey = cpms_normalize_worker_key($timesheetWorkerName);
+                if ($timesheetWorkerKey === '') continue;
+                $workerRatioMap[$timesheetWorkerKey] = cpms_resolve_worker_outsourcing_ratio($timesheetWorker);
+            }
+
             foreach ($gongsuMap as $workerKey => $dailyMap) {
                 if (!is_array($dailyMap)) continue;
-                if (!isset($sumGongsu[$workerKey])) $sumGongsu[$workerKey] = 0.0;
-                if (!isset($outputDaysSet[$workerKey])) $outputDaysSet[$workerKey] = array();
+                $workerMonthGongsu = 0.0;
 
                 foreach ($dailyMap as $dateKey => $gongsuValue) {
                     if (!is_numeric($gongsuValue)) continue;
                     if ((string)$dateKey < (string)$startDate || (string)$dateKey > (string)$endDate) continue;
-                    $sumGongsu[$workerKey] += (float)$gongsuValue;
-                    $outputDaysSet[$workerKey][$dateKey] = true;
+                    $workerMonthGongsu += (float)$gongsuValue;
+                }
+                if ($workerMonthGongsu <= 0) continue;
+                $wageRate = isset($laborWageMap[$workerKey]) ? (float)$laborWageMap[$workerKey] : 0.0;
+                $outsourcingRatio = isset($workerRatioMap[$workerKey]) ? (int)$workerRatioMap[$workerKey] : 0;
+                $amounts = cpms_labor_calculate_amounts($workerMonthGongsu, $wageRate, $outsourcingRatio);
+                if ($outsourcingOnly) {
+                    $totalLabor += isset($amounts['outsourcing_amount']) ? (float)$amounts['outsourcing_amount'] : 0.0;
+                } else {
+                    $totalLabor += isset($amounts['labor_amount']) ? (float)$amounts['labor_amount'] : 0.0;
                 }
             }
-        }
-
-        $outsourcingWorkerMap = array();
-        $directTeamMembers = cpms_load_direct_team_members($pdo);
-        $projectWorkers = cpms_load_project_labor_workers($pdo, (int)$projectId);
-        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers);
-        $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
-        foreach ($timesheetWorkers as $timesheetWorker) {
-            $timesheetWorkerName = isset($timesheetWorker['name']) ? (string)$timesheetWorker['name'] : '';
-            $timesheetWorkerKey = cpms_normalize_worker_key($timesheetWorkerName);
-            if ($timesheetWorkerKey === '') continue;
-            $outsourcingWorkerMap[$timesheetWorkerKey] = (isset($timesheetWorker['is_outsourcing']) && (int)$timesheetWorker['is_outsourcing'] === 1) ? 1 : 0;
-        }
-
-        $totalLabor = 0.0;
-        foreach ($sumGongsu as $workerKey => $workerSumGongsu) {
-            $outputDays = isset($outputDaysSet[$workerKey]) && is_array($outputDaysSet[$workerKey]) ? count($outputDaysSet[$workerKey]) : 0;
-            if ($outputDays <= 0) continue;
-            $isOutsourcing = isset($outsourcingWorkerMap[$workerKey]) && (int)$outsourcingWorkerMap[$workerKey] === 1;
-            if ($outsourcingOnly && !$isOutsourcing) continue;
-            if (!$outsourcingOnly && $isOutsourcing) continue;
-            $wageRate = isset($laborWageMap[$workerKey]) ? (float)$laborWageMap[$workerKey] : 0.0;
-            $totalLabor += ((float)$workerSumGongsu) * $wageRate;
         }
 
         if (!$outsourcingOnly && function_exists('cpms_labor_force_amount_between')) {
@@ -656,7 +655,7 @@ foreach ($periodMonths as $ym) {
     $purchase = (float)$materialByCategory['구매품'];
     $safety = cpms_safety_cost_total_between((int)$pid, $costStart, $costEnd);
 
-    // 상황탭 노무비=지급총액 합
+    // 상황탭 노무비/외주비는 월별 비용 배분 반영금액을 각각 합산합니다.
     $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
     $outsourcingLabor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap, true);
     $outsourcingManual = cpms_outsourcing_manual_total_between($pdo, (int)$pid, $laborStart, $laborEnd);

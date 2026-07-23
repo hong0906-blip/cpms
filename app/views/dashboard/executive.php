@@ -566,21 +566,21 @@ if ($pdo) {
     if ($needsApprovalData) {
     try {
         cpms_ensure_labor_override_table($pdo);
-        $sql = "SELECT o.id, o.project_id, o.month, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason,
+        $sql = "SELECT o.id, o.project_id, o.month, o.batch_token, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason, o.status,
                        o.requested_by, o.requested_by_email, o.requested_by_name, o.approval_stage,
-                       o.current_approver_employee_id, o.current_approver_email, o.created_at,
+                       o.current_approver_employee_id, o.current_approver_email, o.created_at, o.updated_at,
                        p.name AS project_name, e.name AS requested_emp_name
                 FROM cpms_labor_gongsu_overrides o
                 LEFT JOIN cpms_projects p ON p.id = o.project_id
                 LEFT JOIN employees e ON e.id = o.requested_by
                 WHERE o.status = 'pending'
                   AND (o.current_approver_employee_id = :my_employee_id OR LOWER(o.current_approver_email) = LOWER(:my_email))
-                ORDER BY o.created_at DESC";
+                ORDER BY o.updated_at DESC, o.id DESC";
         $st = $pdo->prepare($sql);
         $st->bindValue(':my_employee_id', (int)$myUserId, PDO::PARAM_INT);
         $st->bindValue(':my_email', (string)$userEmail, PDO::PARAM_STR);
         $st->execute();
-        $pendingGongsuOverrides = $st->fetchAll();
+        $pendingGongsuOverrides = cpms_labor_group_override_rows($st->fetchAll(PDO::FETCH_ASSOC));
     } catch (Exception $e) {
         $pendingGongsuOverrides = array();
     }
@@ -629,6 +629,9 @@ if (isset($_GET['task_department']) && trim((string)$_GET['task_department']) !=
     .cpms-exec-dashboard .mb-6 { margin-bottom: 1rem; }
     .cpms-exec-dashboard .rounded-3xl { border-radius: 1.125rem; }
   }
+  details.cpms-approval-collapsible > summary .cpms-collapse-close-label { display: none; }
+  details.cpms-approval-collapsible[open] > summary .cpms-collapse-open-label { display: none; }
+  details.cpms-approval-collapsible[open] > summary .cpms-collapse-close-label { display: inline; }
 </style>
 <div class="cpms-exec-dashboard">
 <div class="cpms-dashboard-hero bg-gradient-to-r from-indigo-600 to-purple-500 rounded-3xl p-5 text-white shadow-xl shadow-indigo-500/20 mb-5">
@@ -1190,18 +1193,33 @@ if (!$executiveEmployeeTaskAvailable) {
         </div>
         <span class="px-3 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-100 text-sm font-bold">대기 <?php echo count($pendingGongsuOverrides); ?>건</span>
     </div>
-    <div class="space-y-3">
+    <details class="cpms-approval-collapsible rounded-2xl border border-gray-200 bg-gray-50/70">
+        <summary class="cursor-pointer select-none px-4 py-3 text-sm font-extrabold text-gray-800">승인 요청 <span class="cpms-collapse-open-label">펼치기</span><span class="cpms-collapse-close-label">접기</span></summary>
+    <div class="space-y-3 px-4 pb-4">
         <?php if (count($pendingGongsuOverrides) === 0): ?>
             <div class="text-sm text-gray-500">승인 대기 중인 공수 수정 요청이 없습니다.</div>
         <?php else: ?>
             <?php foreach ($pendingGongsuOverrides as $ov): ?>
-                <?php $requesterName = trim((string)$ov['requested_by_name']) !== '' ? $ov['requested_by_name'] : (trim((string)$ov['requested_emp_name']) !== '' ? $ov['requested_emp_name'] : (trim((string)$ov['requested_by_email']) !== '' ? $ov['requested_by_email'] : '-')); ?>
+                <?php
+                // 파일: app/views/dashboard/executive.php - 일괄 요청은 전체 이름을 보여 주고 승인 버튼은 한 번만 제공합니다.
+                $requesterName = trim((string)$ov['requested_by_name']) !== '' ? $ov['requested_by_name'] : (trim((string)$ov['requested_emp_name']) !== '' ? $ov['requested_emp_name'] : (trim((string)$ov['requested_by_email']) !== '' ? $ov['requested_by_email'] : '-'));
+                $overrideWorkerCount = isset($ov['worker_count']) ? (int)$ov['worker_count'] : 1;
+                if ($overrideWorkerCount < 1) $overrideWorkerCount = 1;
+                $overrideWorkerNames = isset($ov['worker_names_text']) && trim((string)$ov['worker_names_text']) !== '' ? (string)$ov['worker_names_text'] : (isset($ov['worker_name']) ? (string)$ov['worker_name'] : '-');
+                $isBulkOverride = isset($ov['batch_token']) && trim((string)$ov['batch_token']) !== '' && $overrideWorkerCount > 1;
+                $overrideRequestedAt = isset($ov['created_at']) ? $ov['created_at'] : '';
+                ?>
                 <div class="p-4 rounded-2xl border bg-gray-50 border-gray-100">
-                    <div class="text-xs text-gray-500">요청일 <?php echo h($ov['created_at']); ?></div>
+                    <div class="text-xs text-gray-500">요청일 <?php echo h($overrideRequestedAt); ?></div>
                     <div class="font-bold text-gray-900 mt-1 text-lg">현장명: <?php echo h($ov['project_name'] ?: '-'); ?></div>
                     <div class="text-sm text-gray-700 mt-1">요청자: <?php echo h($requesterName); ?></div>
-                    <div class="text-sm text-gray-700 mt-1">작업자: <?php echo h($ov['worker_name']); ?> / 작업일자: <?php echo h($ov['work_date']); ?></div>
-                    <div class="text-sm text-gray-700">변경: <?php echo h($ov['old_value']); ?> → <span class="font-extrabold text-emerald-700"><?php echo h($ov['new_value']); ?></span></div>
+                    <div class="text-sm text-gray-700 mt-1">작업자: <span class="font-bold"><?php echo h($overrideWorkerNames); ?></span><?php if ($overrideWorkerCount > 1): ?> (총 <?php echo $overrideWorkerCount; ?>명)<?php endif; ?></div>
+                    <div class="text-sm text-gray-700">작업일자: <?php echo h($ov['work_date']); ?></div>
+                    <?php if ($isBulkOverride): ?>
+                        <div class="text-sm text-gray-700">변경: 전체 <?php echo $overrideWorkerCount; ?>명 → <span class="font-extrabold text-emerald-700"><?php echo h($ov['new_value']); ?>공수</span></div>
+                    <?php else: ?>
+                        <div class="text-sm text-gray-700">변경: <?php echo h($ov['old_value']); ?> → <span class="font-extrabold text-emerald-700"><?php echo h($ov['new_value']); ?></span></div>
+                    <?php endif; ?>
                     <div class="text-sm text-gray-700">사유: <?php echo h(trim((string)$ov['reason']) !== '' ? $ov['reason'] : '-'); ?></div>
                     <div class="flex flex-col sm:flex-row flex-wrap gap-2 mt-3">
                         <form method="post" action="?r=construction/labor_gongsu_override_decide">
@@ -1222,6 +1240,7 @@ if (!$executiveEmployeeTaskAvailable) {
             <?php endforeach; ?>
         <?php endif; ?>
     </div>
+    </details>
 </div>
 
 <div class="bg-white/80 backdrop-blur-sm rounded-3xl shadow-lg shadow-gray-200/50 p-6 border border-gray-100">

@@ -1,7 +1,8 @@
 <?php
 /**
+ * 파일: app/views/construction/tabs/outsourcing.php
  * 공사 > 외주비
- * - 월별 외주비: 노무비 연동 외주 인원 + 직접 입력 외주비
+ * - 월별 외주비: 노무비 월별 비율 연동 인원 + 직접 입력 외주비
  * - 외주비 입력
  * - PHP 5.6 호환
  */
@@ -72,7 +73,7 @@ if (!$editRow && strpos($inputDate, $selectedMonth) !== 0) $inputDate = $selecte
     <div class="flex flex-wrap items-center justify-between gap-3">
         <div>
             <h3 class="text-xl font-extrabold text-gray-900">외주비</h3>
-            <div class="mt-1 text-sm text-gray-600">노무비에서 외주비로 선택한 인원과 직접 입력한 외주비를 함께 조회합니다.</div>
+            <div class="mt-1 text-sm text-gray-600">인원별 월 외주비 반영금액과 직접 입력한 외주비를 함께 조회합니다.</div>
         </div>
         <?php if ($outsourcingTab === 'monthly'): ?>
         <div>
@@ -131,8 +132,8 @@ if (!$editRow && strpos($inputDate, $selectedMonth) !== 0) $inputDate = $selecte
             <?php $workerNames = isset($row['worker_names']) && is_array($row['worker_names']) ? implode(', ', $row['worker_names']) : ''; ?>
             <tr class="bg-blue-50/40">
                 <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['expense_date']) ? $row['expense_date'] : ''); ?></td>
-                <td class="border border-gray-200 px-3 py-2"><span class="px-2 py-1 rounded-lg bg-blue-100 text-blue-700 text-xs font-bold">노무비</span></td>
-                <td class="border border-gray-200 px-3 py-2 font-bold" title="<?php echo h($workerNames !== '' ? '외주 선택 인원: ' . $workerNames : ''); ?>"><?php echo h(isset($row['company_name']) ? $row['company_name'] : ''); ?></td>
+                <td class="border border-gray-200 px-3 py-2"><span class="px-2 py-1 rounded-lg bg-blue-100 text-blue-700 text-xs font-bold">인원 외주비</span></td>
+                <td class="border border-gray-200 px-3 py-2 font-bold" title="<?php echo h($workerNames !== '' ? '외주비 반영 인원: ' . $workerNames : ''); ?>"><?php echo h(isset($row['company_name']) ? $row['company_name'] : ''); ?></td>
                 <td class="border border-gray-200 px-3 py-2">-</td>
                 <td class="border border-gray-200 px-3 py-2">-</td>
                 <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['contact']) && trim((string)$row['contact']) !== '' ? $row['contact'] : '-'); ?></td>

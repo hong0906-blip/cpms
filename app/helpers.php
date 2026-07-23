@@ -686,6 +686,7 @@ function cpms_ensure_labor_override_table($pdo) {
             id INT AUTO_INCREMENT PRIMARY KEY,
             project_id INT NOT NULL,
             month CHAR(7) NOT NULL,
+            batch_token VARCHAR(64) NULL,
             worker_key VARCHAR(120) NOT NULL,
             worker_name VARCHAR(120) NOT NULL,
             work_date DATE NOT NULL,
@@ -719,10 +720,13 @@ function cpms_ensure_labor_override_table($pdo) {
             rejected_by_email VARCHAR(190) NULL,            
             rejected_at DATETIME NULL,
             reject_reason VARCHAR(255) NULL,
+            rejected_acknowledged_at DATETIME NULL,
+            rejected_acknowledged_by INT NULL,
             updated_at DATETIME NOT NULL,
             UNIQUE KEY uk_labor_override(project_id, worker_key, work_date),
             KEY idx_labor_override_project_month(project_id, month),
-            KEY idx_labor_override_status(status)
+            KEY idx_labor_override_status(status),
+            KEY idx_labor_override_batch(batch_token, status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
 
         $cols = array();
@@ -736,6 +740,8 @@ function cpms_ensure_labor_override_table($pdo) {
         }
         $adds = array(
             'month' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN month CHAR(7) NOT NULL AFTER project_id",
+            // 파일: app/helpers.php - 일괄 공수 요청을 한 번에 승인하기 위한 묶음 식별자입니다.
+            'batch_token' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN batch_token VARCHAR(64) NULL AFTER month",
             'worker_key' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN worker_key VARCHAR(120) NOT NULL AFTER month",
             'worker_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN worker_name VARCHAR(120) NOT NULL AFTER worker_key",
             'work_date' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN work_date DATE NOT NULL AFTER worker_name",
@@ -769,7 +775,10 @@ function cpms_ensure_labor_override_table($pdo) {
             'rejected_by_email' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_by_email VARCHAR(190) NULL AFTER rejected_by_name",
             'rejected_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_at DATETIME NULL AFTER rejected_by_email",
             'reject_reason' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN reject_reason VARCHAR(255) NULL AFTER rejected_at",
-            'updated_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN updated_at DATETIME NOT NULL AFTER reject_reason"
+            // 파일: app/helpers.php - 반려 확인 후 요청 목록에서만 숨기며 원본 이력은 보존합니다.
+            'rejected_acknowledged_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_acknowledged_at DATETIME NULL AFTER reject_reason",
+            'rejected_acknowledged_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_acknowledged_by INT NULL AFTER rejected_acknowledged_at",
+            'updated_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN updated_at DATETIME NOT NULL AFTER rejected_acknowledged_by"
         );
         foreach ($adds as $col => $sql) {
             if (!isset($cols[$col])) $pdo->exec($sql);
@@ -788,6 +797,7 @@ function cpms_ensure_labor_override_table($pdo) {
         if (!isset($idx['idx_labor_override_project_month'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_project_month(project_id, month)");
         if (!isset($idx['idx_labor_override_status'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_status(status)");
         if (!isset($idx['idx_labor_override_current_approver'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_current_approver(current_approver_employee_id, status)");
+        if (!isset($idx['idx_labor_override_batch'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_batch(batch_token, status)");
         cpms_labor_backfill_legacy_pending_approver($pdo);
         return true;
     } catch (Exception $e) {
@@ -795,16 +805,57 @@ function cpms_ensure_labor_override_table($pdo) {
     }
 }
 
+// 파일: app/helpers.php
+// 같은 batch_token으로 저장된 근로자별 요청 행을 화면과 업무 피드에서 한 건으로 묶습니다.
+function cpms_labor_group_override_rows($rows) {
+    $grouped = array();
+    $groupOrder = array();
+    if (!is_array($rows)) return array();
+
+    foreach ($rows as $rowIndex => $row) {
+        if (!is_array($row)) continue;
+        $batchToken = isset($row['batch_token']) ? trim((string)$row['batch_token']) : '';
+        $status = isset($row['status']) ? trim((string)$row['status']) : '';
+        $rowId = isset($row['id']) ? (int)$row['id'] : 0;
+        $groupKey = $batchToken !== '' ? 'batch:' . $batchToken . ':' . $status : 'single:' . ($rowId > 0 ? $rowId : $rowIndex);
+
+        if (!isset($grouped[$groupKey])) {
+            $grouped[$groupKey] = $row;
+            $grouped[$groupKey]['items'] = array();
+            $grouped[$groupKey]['worker_names'] = array();
+            $grouped[$groupKey]['worker_name_index'] = array();
+            $groupOrder[] = $groupKey;
+        }
+
+        $grouped[$groupKey]['items'][] = $row;
+        $workerName = isset($row['worker_name']) ? trim((string)$row['worker_name']) : '';
+        if ($workerName !== '' && !isset($grouped[$groupKey]['worker_name_index'][$workerName])) {
+            $grouped[$groupKey]['worker_name_index'][$workerName] = true;
+            $grouped[$groupKey]['worker_names'][] = $workerName;
+        }
+    }
+
+    $result = array();
+    foreach ($groupOrder as $groupKey) {
+        $group = $grouped[$groupKey];
+        $group['worker_count'] = count($group['worker_names']);
+        $group['worker_names_text'] = implode(', ', $group['worker_names']);
+        unset($group['worker_name_index']);
+        $result[] = $group;
+    }
+    return $result;
+}
+
 function cpms_load_labor_override_pending($projectId, $month) {
     $list = array();
     try {
         $pdo = \App\Core\Db::pdo();
         if (!$pdo || !cpms_ensure_labor_override_table($pdo)) return $list;
-        $st = $pdo->prepare("SELECT worker_name, work_date, old_value, new_value, reason, updated_at FROM cpms_labor_gongsu_overrides WHERE project_id=:pid AND month=:month AND status='pending' ORDER BY updated_at DESC");
+        $st = $pdo->prepare("SELECT id, batch_token, worker_name, work_date, old_value, new_value, reason, status, updated_at FROM cpms_labor_gongsu_overrides WHERE project_id=:pid AND month=:month AND status='pending' ORDER BY updated_at DESC, id DESC");
         $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
         $st->bindValue(':month', (string)$month, PDO::PARAM_STR);
         $st->execute();
-        return $st->fetchAll(PDO::FETCH_ASSOC);
+        return cpms_labor_group_override_rows($st->fetchAll(PDO::FETCH_ASSOC));
     } catch (Exception $e) {
         return $list;
     }
@@ -913,12 +964,44 @@ function cpms_labor_build_override_message($pdo, $row, $secondStage) {
     $requester = isset($row['requested_by_name']) && trim((string)$row['requested_by_name']) !== '' ? trim((string)$row['requested_by_name']) : (isset($row['requested_by_email']) ? trim((string)$row['requested_by_email']) : '');
     if ($requester === '') $requester = '-';
     $reason = isset($row['reason']) ? trim((string)$row['reason']) : '';
+    $batchRows = array($row);
+    $batchToken = isset($row['batch_token']) ? trim((string)$row['batch_token']) : '';
+    if ($pdo && $batchToken !== '') {
+        try {
+            // 파일: app/helpers.php - 일괄 요청 알림에는 선택한 전체 이름을 한 번에 표시합니다.
+            $stBatch = $pdo->prepare("SELECT worker_name, work_date, old_value, new_value FROM cpms_labor_gongsu_overrides WHERE batch_token=:batch_token ORDER BY id ASC");
+            $stBatch->bindValue(':batch_token', $batchToken, PDO::PARAM_STR);
+            $stBatch->execute();
+            $loadedBatchRows = $stBatch->fetchAll(PDO::FETCH_ASSOC);
+            if (is_array($loadedBatchRows) && count($loadedBatchRows) > 0) $batchRows = $loadedBatchRows;
+        } catch (Exception $e) {
+            $batchRows = array($row);
+        }
+    }
+    $workerNames = array();
+    $workerNameIndex = array();
+    foreach ($batchRows as $batchRow) {
+        $workerName = isset($batchRow['worker_name']) ? trim((string)$batchRow['worker_name']) : '';
+        if ($workerName !== '' && !isset($workerNameIndex[$workerName])) {
+            $workerNameIndex[$workerName] = true;
+            $workerNames[] = $workerName;
+        }
+    }
+    $workerCount = count($workerNames);
+    $workerNamesText = $workerCount > 0 ? implode(', ', $workerNames) : '-';
+    $workDate = isset($row['work_date']) ? trim((string)$row['work_date']) : '';
     $lines = array();
     $lines[] = $secondStage ? '[CPMS 공수 수정 2차 승인 요청]' : '[CPMS 공수 수정 요청]';
     $lines[] = '';
     $lines[] = '현장명 : ' . $projectName;
     $lines[] = '요청자 : ' . $requester;
-    $lines[] = '요청 내용 : 공수 ' . cpms_labor_format_chat_gongsu(isset($row['old_value']) ? $row['old_value'] : 0) . ' -> ' . cpms_labor_format_chat_gongsu(isset($row['new_value']) ? $row['new_value'] : 0) . ' 변경';
+    $lines[] = '요청 인원 : ' . $workerNamesText . ($workerCount > 1 ? ' (총 ' . $workerCount . '명)' : '');
+    if ($workDate !== '') $lines[] = '작업일자 : ' . $workDate;
+    if ($workerCount > 1) {
+        $lines[] = '요청 내용 : 전체 ' . $workerCount . '명 공수를 ' . cpms_labor_format_chat_gongsu(isset($row['new_value']) ? $row['new_value'] : 0) . '공수로 일괄 변경';
+    } else {
+        $lines[] = '요청 내용 : 공수 ' . cpms_labor_format_chat_gongsu(isset($row['old_value']) ? $row['old_value'] : 0) . ' -> ' . cpms_labor_format_chat_gongsu(isset($row['new_value']) ? $row['new_value'] : 0) . ' 변경';
+    }
     $lines[] = '요청 사유 : ' . ($reason !== '' ? $reason : '-');
     if ($secondStage) $lines[] = '1차 승인자 : ' . (isset($row['first_approver_name']) && trim((string)$row['first_approver_name']) !== '' ? trim((string)$row['first_approver_name']) : cpms_labor_construction_pm_label());
     $lines[] = '';

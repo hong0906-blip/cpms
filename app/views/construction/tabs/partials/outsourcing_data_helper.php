@@ -1,7 +1,7 @@
 <?php
 /**
  * 공사 > 외주비 공통 데이터 도우미
- * - 노무비 인원작성에서 외주비로 선택한 인원의 공수 지급액
+ * - 노무비 인원작성에서 설정한 월별 외주비 비율만큼의 공수 지급액
  * - 공사 > 외주비 입력 금액
  * - PHP 5.6 호환
  */
@@ -123,6 +123,8 @@ if (!function_exists('cpms_outsourcing_labor_company_rows_for_month')) {
 
         $directMembers = cpms_load_direct_team_members($pdo);
         $projectWorkers = cpms_load_project_labor_workers($pdo, (int)$projectId);
+        $ratioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, (int)$projectId, (string)$ym, $projectWorkers);
+        $projectWorkers = cpms_apply_project_labor_worker_month_ratios($projectWorkers, $ratioMap);
         $workerRows = cpms_build_project_worker_rows($projectWorkers, $directMembers);
         $workers = cpms_build_timesheet_workers($workerRows);
         $gongsuData = cpms_load_gongsu_data($pdo, (string)$projectName, (string)$ym);
@@ -138,7 +140,8 @@ if (!function_exists('cpms_outsourcing_labor_company_rows_for_month')) {
 
         $companyMap = array();
         foreach ($workers as $worker) {
-            if (!isset($worker['is_outsourcing']) || (int)$worker['is_outsourcing'] !== 1) continue;
+            $outsourcingRatio = cpms_resolve_worker_outsourcing_ratio($worker);
+            if ($outsourcingRatio <= 0) continue;
             $workerName = isset($worker['name']) ? trim((string)$worker['name']) : '';
             $workerKey = cpms_normalize_worker_key($workerName);
             if ($workerKey === '') continue;
@@ -154,7 +157,10 @@ if (!function_exists('cpms_outsourcing_labor_company_rows_for_month')) {
             }
             if ($totalGongsu <= 0) continue;
             $wageRate = function_exists('cpms_resolve_labor_wage_rate') ? (float)cpms_resolve_labor_wage_rate($worker) : cpms_outsourcing_money(isset($worker['deposit_rate']) ? $worker['deposit_rate'] : 0);
-            $amount = $totalGongsu * $wageRate;
+            // 파일: app/views/construction/tabs/partials/outsourcing_data_helper.php
+            // 분할 인원은 공수를 나누지 않고 전체 지급총액에서 외주비 반영금액만 가져옵니다.
+            $amounts = cpms_labor_calculate_amounts($totalGongsu, $wageRate, $outsourcingRatio);
+            $amount = isset($amounts['outsourcing_amount']) ? (float)$amounts['outsourcing_amount'] : 0.0;
             if ($amount <= 0) continue;
             $companyName = isset($worker['company_name']) ? trim((string)$worker['company_name']) : '';
             if ($companyName === '') $companyName = '창명건설';
@@ -162,7 +168,7 @@ if (!function_exists('cpms_outsourcing_labor_company_rows_for_month')) {
             if (!isset($companyMap[$companyKey])) {
                 $companyMap[$companyKey] = array(
                     'expense_date' => $lastWorkDate !== '' ? $lastWorkDate : ($ym . '-01'),
-                    'category' => '노무비',
+                    'category' => '인원 외주비',
                     'company_name' => $companyName,
                     'representative_name' => '',
                     'business_no' => '',

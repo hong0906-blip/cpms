@@ -23,6 +23,12 @@ $ym = cpms_labor_consultant_normalize_ym($ym);
 $debugLaborExport = isset($_GET['debug_labor_export']) && (string)$_GET['debug_labor_export'] === '1';
 $checkLaborExport = isset($_GET['check_labor_export']) && (string)$_GET['check_labor_export'] === '1';
 
+// 파일: app/views/admin/labor_consultant_export.php
+// 엑셀 검증·생성 중에는 인증 세션을 더 이상 변경하지 않으므로 잠금을 먼저 해제합니다.
+if (session_id() !== '') {
+    @session_write_close();
+}
+
 register_shutdown_function(function() use ($checkLaborExport) {
     $err = error_get_last();
     if (!$err || !isset($err['type'])) return;
@@ -130,6 +136,16 @@ if ($filePath === '' || !is_file($filePath)) {
     cpms_labor_consultant_render_message_page('엑셀 양식을 읽을 수 없습니다.');
 }
 
+// 파일: app/views/admin/labor_consultant_export.php
+// fread() 반복 중 빈 값이 반환되면 응답이 끝나지 않을 수 있어 완성 파일을 먼저 읽습니다.
+$fileContents = @file_get_contents($filePath);
+if ($fileContents === false) {
+    error_log('[labor_consultant_export] export file read failed');
+    @unlink($filePath);
+    cpms_labor_consultant_render_message_page('생성된 엑셀 파일을 읽을 수 없습니다.');
+}
+@unlink($filePath);
+
 if (headers_sent($sentFile, $sentLine)) {
     error_log('[labor_consultant_export] headers already sent: ' . $sentFile . ':' . $sentLine);
     cpms_labor_consultant_render_message_page('다운로드 헤더를 보낼 수 없습니다. 출력이 먼저 발생했습니다.');
@@ -142,15 +158,8 @@ while ($obLevel > 0) {
 
 header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 header('Content-Disposition: attachment; filename="' . rawurlencode($downloadName) . '"; filename*=UTF-8\'\'' . rawurlencode($downloadName));
+header('Content-Length: ' . (string)strlen($fileContents));
 header('Cache-Control: private, max-age=0, no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');
-
-$fp = fopen($filePath, 'rb');
-if ($fp) {
-    while (!feof($fp)) {
-        echo fread($fp, 8192);
-    }
-    fclose($fp);
-}
-@unlink($filePath);
+echo $fileContents;
 exit;

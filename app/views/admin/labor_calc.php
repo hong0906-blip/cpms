@@ -28,6 +28,7 @@ if (!$canAccess) {
 
 $setupRows = cpms_labor_consultant_setup_status($pdo, false);
 $activeTemplate = cpms_labor_consultant_get_active_template($pdo);
+$templateHistory = cpms_labor_consultant_list_template_history($pdo);
 if ($activeTemplate) {
     $activeTemplatePath = cpms_labor_consultant_resolve_stored_path(isset($activeTemplate['stored_path']) ? $activeTemplate['stored_path'] : '');
     if ($activeTemplatePath === '' || !is_file($activeTemplatePath)) {
@@ -51,7 +52,7 @@ foreach ($rows as $row) {
       <div class="text-2xl font-black tracking-tight text-gray-900">노무비 계산</div>
     </div>
     <div class="rounded-2xl border border-gray-200 bg-white px-4 py-3 text-right shadow-sm">
-      <div class="text-xs text-gray-500">조회 합계</div>
+      <div class="text-xs text-gray-500">노무비 조회 합계</div>
       <div class="text-2xl font-black text-gray-900"><?php echo h(number_format($totalAmount)); ?></div>
       <div class="text-xs text-gray-500"><?php echo h($ym); ?></div>
     </div>
@@ -89,6 +90,7 @@ foreach ($rows as $row) {
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <div class="text-lg font-extrabold text-gray-900">노무사 확인용</div>
+        <div class="mt-1 text-sm text-gray-600">공사섹션 노무비 탭과 동일하게 월별 배분비율이 적용된 노무비만 표시합니다.</div>
       </div>
       <form method="post" action="?r=admin/labor_consultant_setup" class="m-0">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -152,7 +154,7 @@ foreach ($rows as $row) {
                 <th class="border border-gray-200 px-3 py-2">계좌번호</th>
                 <th class="border border-gray-200 px-3 py-2">단가</th>
                 <th class="border border-gray-200 px-3 py-2">총 공수</th>
-                <th class="border border-gray-200 px-3 py-2">지급금액</th>
+                <th class="border border-gray-200 px-3 py-2">노무비 반영금액</th>
                 <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
                   <th class="border border-gray-200 px-2 py-2"><?php echo h((string)$d); ?></th>
                 <?php endfor; ?>
@@ -213,7 +215,7 @@ foreach ($rows as $row) {
                     <a class="font-bold text-blue-700" href="<?php echo h($activeTemplate['drive_web_view_link']); ?>" target="_blank" rel="noopener"><?php echo h(cpms_management_drive_label('view')); ?></a>
                   <?php endif; ?>
                   <?php if (isset($activeTemplate['drive_web_content_link']) && trim((string)$activeTemplate['drive_web_content_link']) !== ''): ?>
-                    <a class="font-bold text-gray-700" href="<?php echo h($activeTemplate['drive_web_content_link']); ?>"><?php echo h(cpms_management_drive_label('download')); ?></a>
+                    <a class="font-bold text-gray-700" href="<?php echo h($activeTemplate['drive_web_content_link']); ?>" target="_blank" rel="noopener noreferrer" data-cpms-no-loading="1"><?php echo h(cpms_management_drive_label('download')); ?></a>
                   <?php endif; ?>
                 </div>
               <?php endif; ?>
@@ -228,15 +230,75 @@ foreach ($rows as $row) {
           <input type="hidden" name="project_id" value="<?php echo h($projectId); ?>">
           <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
           <div class="text-sm font-extrabold text-gray-900">노무사 확인용 엑셀 양식 업로드</div>
+          <div class="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">노무비가 입력된 다운로드 결과 파일이 아니라, 비어 있는 원본 양식 파일을 올려주세요.</div>
           <input type="file" name="template_file" accept=".xlsx" class="mt-4 w-full rounded-xl border border-gray-300 bg-white px-3 py-2" required>
           <button type="submit" class="mt-4 w-full rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white">양식파일 업로드/교체</button>
         </form>
+
+        <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div class="flex items-center justify-between gap-3">
+            <div class="text-sm font-extrabold text-gray-900">양식 업로드 이력</div>
+            <div class="text-xs font-bold text-gray-500"><?php echo h(number_format(count($templateHistory))); ?>개</div>
+          </div>
+          <div class="mt-2 text-xs text-gray-500">현재 양식과 이전에 올린 원본 파일을 확인하고 다시 받을 수 있습니다.</div>
+
+          <?php if (count($templateHistory) > 0): ?>
+            <div class="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1">
+              <?php foreach ($templateHistory as $templateItem): ?>
+                <?php
+                $templateItemId = isset($templateItem['id']) ? (int)$templateItem['id'] : 0;
+                $templateItemActive = isset($templateItem['is_active']) && (int)$templateItem['is_active'] === 1;
+                $templateItemName = isset($templateItem['original_name']) ? trim((string)$templateItem['original_name']) : '';
+                if ($templateItemName === '') $templateItemName = '이름 없는 양식.xlsx';
+                $templateLooksGenerated = strpos($templateItemName, '노무사확인용_노무비_') === 0;
+                $templateUploader = isset($templateItem['uploader_name']) ? trim((string)$templateItem['uploader_name']) : '';
+                if ($templateUploader === '' && isset($templateItem['uploader_email'])) $templateUploader = trim((string)$templateItem['uploader_email']);
+                if ($templateUploader === '') $templateUploader = '-';
+                $templateUploadedAt = isset($templateItem['uploaded_at']) ? trim((string)$templateItem['uploaded_at']) : '';
+                if ($templateUploadedAt === '') $templateUploadedAt = '-';
+                $templateFileSize = isset($templateItem['file_size']) ? (int)$templateItem['file_size'] : 0;
+                $templateFileSizeText = $templateFileSize > 0 ? number_format($templateFileSize / 1024, 1) . ' KB' : '-';
+                $templateLocalPath = cpms_labor_consultant_safe_template_path($templateItem);
+                $templateDriveDownload = isset($templateItem['drive_web_content_link']) ? trim((string)$templateItem['drive_web_content_link']) : '';
+                $templateDriveDownloadAvailable = ($templateDriveDownload !== ''
+                    && strpos($templateDriveDownload, "\r") === false
+                    && strpos($templateDriveDownload, "\n") === false
+                    && preg_match('/^https:\/\//i', $templateDriveDownload));
+                $templateLocalDownloadAvailable = ($templateItemId > 0 && $templateLocalPath !== '');
+                $templateDownloadUrl = '?r=admin/labor_consultant_template_download&template_id=' . urlencode((string)$templateItemId);
+                ?>
+                <div class="rounded-xl border px-3 py-3 <?php echo $templateItemActive ? 'border-emerald-300 bg-emerald-50' : 'border-gray-200 bg-gray-50'; ?>">
+                  <div class="flex items-start justify-between gap-2">
+                    <div class="min-w-0">
+                      <div class="break-all text-xs font-extrabold text-gray-900"><?php echo h($templateItemName); ?></div>
+                      <div class="mt-1 text-[11px] text-gray-500"><?php echo h($templateUploadedAt); ?> · <?php echo h($templateUploader); ?> · <?php echo h($templateFileSizeText); ?></div>
+                    </div>
+                    <span class="shrink-0 rounded-full px-2 py-1 text-[10px] font-extrabold <?php echo $templateItemActive ? 'bg-emerald-600 text-white' : 'bg-gray-200 text-gray-600'; ?>"><?php echo $templateItemActive ? '현재 사용' : '이전 양식'; ?></span>
+                  </div>
+                  <?php if ($templateLooksGenerated): ?>
+                    <div class="mt-2 rounded-lg bg-red-100 px-2 py-1.5 text-[11px] font-extrabold text-red-700">결과파일 의심: 시스템에서 내려받은 노무비 파일명과 같습니다.</div>
+                  <?php endif; ?>
+                  <?php if ($templateLocalDownloadAvailable): ?>
+                    <a href="<?php echo h($templateDownloadUrl); ?>" download data-cpms-no-loading="1" class="mt-2 inline-flex rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-bold text-gray-700 hover:bg-gray-100">서버 원본 다운로드</a>
+                  <?php elseif ($templateDriveDownloadAvailable): ?>
+                    <a href="<?php echo h($templateDriveDownload); ?>" target="_blank" rel="noopener noreferrer" data-cpms-no-loading="1" class="mt-2 inline-flex rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100">Drive 원본 다운로드</a>
+                  <?php else: ?>
+                    <div class="mt-2 text-xs font-bold text-red-600">보관 파일을 찾을 수 없습니다.</div>
+                  <?php endif; ?>
+                </div>
+              <?php endforeach; ?>
+            </div>
+          <?php else: ?>
+            <div class="mt-3 rounded-xl bg-gray-50 px-3 py-4 text-center text-xs text-gray-500">아직 저장된 양식 이력이 없습니다.</div>
+          <?php endif; ?>
+        </div>
 
         <div class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <div class="text-sm font-extrabold text-gray-900">다운로드 안내</div>
           <ul class="mt-3 list-disc space-y-1 pl-5 text-xs text-gray-600">
             <li>노무비 기간은 해당 월 1일 ~ 말일 기준입니다.</li>
             <li>공수 수정 승인 완료 값만 반영됩니다.</li>
+            <li>전액 외주비 인원은 제외하고, 분할 인원은 노무비 비율만큼의 금액만 반영됩니다.</li>
             <li>엑셀은 업로드한 양식 파일을 그대로 기반으로 생성됩니다.</li>
           </ul>
         </div>
@@ -255,63 +317,19 @@ foreach ($rows as $row) {
     status.textContent = message;
   }
 
-  function cleanErrorText(text) {
-    text = String(text || '');
-    text = text.replace(/<script[\s\S]*?<\/script>/gi, ' ');
-    text = text.replace(/<style[\s\S]*?<\/style>/gi, ' ');
-    text = text.replace(/<[^>]*>/g, ' ');
-    text = text.replace(/\s+/g, ' ').trim();
-    if (text === '') text = '서버가 엑셀 파일 대신 오류 응답을 반환했습니다.';
-    return text.substring(0, 500);
-  }
-
-  function filenameFromDisposition(disposition) {
-    disposition = String(disposition || '');
-    var star = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-    if (star && star[1]) {
-      try { return decodeURIComponent(star[1].replace(/"/g, '')); } catch (e) {}
-    }
-    var plain = disposition.match(/filename="?([^";]+)"?/i);
-    if (plain && plain[1]) return plain[1];
-    return 'labor_consultant.xlsx';
-  }
-
-  function addQuery(url, key, value) {
-    var glue = url.indexOf('?') === -1 ? '?' : '&';
-    return url + glue + encodeURIComponent(key) + '=' + encodeURIComponent(value);
-  }
-
   button.addEventListener('click', function() {
     var url = button.getAttribute('data-url');
     if (!url || button.disabled) return;
-    if (!window.fetch) {
-      window.location.href = url;
-      return;
-    }
 
+    // 파일: app/views/admin/labor_calc.php
+    // 사전 검증과 실제 생성을 두 번 요청하던 방식을 없애 대기시간과 DB 조회를 절반으로 줄입니다.
     button.disabled = true;
     showStatus('엑셀 다운로드를 준비 중입니다.', false);
-
-    fetch(addQuery(url, 'check_labor_export', '1'), { credentials: 'same-origin' }).then(function(res) {
-      return res.text();
-    }).then(function(text) {
-      var message = cleanErrorText(text);
-      if (message !== 'OK') {
-        throw new Error(message);
-      }
-      window.location.href = url;
-      showStatus('엑셀 다운로드가 시작되었습니다.', false);
+    window.location.href = url;
+    window.setTimeout(function() {
+      showStatus('다운로드 요청을 보냈습니다. 파일 생성이 완료되면 자동으로 저장됩니다.', false);
       button.disabled = false;
-    }).catch(function(err) {
-      var message = err && err.message ? err.message : '알 수 없는 오류';
-      if (message === 'Failed to fetch') {
-        showStatus('다운로드 검증 요청이 실패했습니다. 직접 다운로드로 전환합니다.', true);
-        window.location.href = url;
-      } else {
-        showStatus('다운로드 실패: ' + message, true);
-      }
-      button.disabled = false;
-    });
+    }, 1000);
   });
 })();
 </script>

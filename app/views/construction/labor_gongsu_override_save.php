@@ -65,6 +65,7 @@ if (!function_exists('cpms_gongsu_ensure_override_table')) {
             id INT AUTO_INCREMENT PRIMARY KEY,
             project_id INT NOT NULL,
             month CHAR(7) NOT NULL,
+            batch_token VARCHAR(64) NULL,
             worker_key VARCHAR(120) NOT NULL,
             worker_name VARCHAR(120) NOT NULL,
             work_date DATE NOT NULL,
@@ -84,6 +85,7 @@ if (!function_exists('cpms_gongsu_ensure_override_table')) {
 
         $addColumns = array(
             'month' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN month CHAR(7) NOT NULL AFTER project_id",
+            'batch_token' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN batch_token VARCHAR(64) NULL AFTER month",
             'worker_key' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN worker_key VARCHAR(120) NOT NULL AFTER month",
             'worker_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN worker_name VARCHAR(120) NOT NULL AFTER worker_key",
             'work_date' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN work_date DATE NOT NULL AFTER worker_name",
@@ -96,6 +98,8 @@ if (!function_exists('cpms_gongsu_ensure_override_table')) {
             'requested_by_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by_name VARCHAR(80) NULL AFTER requested_by_email",            
             'approved_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_by INT NULL AFTER requested_by",
             'approved_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_at DATETIME NULL AFTER approved_by",
+            'rejected_acknowledged_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_acknowledged_at DATETIME NULL AFTER approved_at",
+            'rejected_acknowledged_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_acknowledged_by INT NULL AFTER rejected_acknowledged_at",
             'created_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN created_at DATETIME NOT NULL AFTER approved_at",
             'updated_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN updated_at DATETIME NOT NULL AFTER created_at"
         );
@@ -114,7 +118,69 @@ if (!function_exists('cpms_gongsu_ensure_override_table')) {
         if (!cpms_gongsu_index_exists($pdo, 'cpms_labor_gongsu_overrides', 'idx_labor_override_status')) {
             $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_status(status)");
         }
+        if (!cpms_gongsu_index_exists($pdo, 'cpms_labor_gongsu_overrides', 'idx_labor_override_batch')) {
+            $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_batch(batch_token, status)");
+        }
         return true;
+    }
+}
+
+if (!function_exists('cpms_gongsu_generate_batch_token')) {
+    // 파일: app/views/construction/labor_gongsu_override_save.php
+    // PHP 5.6에서도 사용할 수 있는 일괄 승인 묶음 식별자를 생성합니다.
+    function cpms_gongsu_generate_batch_token() {
+        $randomPart = '';
+        if (function_exists('openssl_random_pseudo_bytes')) {
+            $randomBytes = openssl_random_pseudo_bytes(16);
+            if ($randomBytes !== false) $randomPart = bin2hex($randomBytes);
+        }
+        if ($randomPart === '') $randomPart = sha1(uniqid((string)mt_rand(), true) . session_id());
+        return 'LAB-' . date('YmdHis') . '-' . substr($randomPart, 0, 40);
+    }
+}
+
+if (!function_exists('cpms_gongsu_override_upsert_sql')) {
+    // 파일: app/views/construction/labor_gongsu_override_save.php
+    // 단건과 일괄 요청이 동일한 저장 규칙을 사용하도록 SQL을 공통화합니다.
+    function cpms_gongsu_override_upsert_sql() {
+        return "INSERT INTO cpms_labor_gongsu_overrides
+          (project_id, month, batch_token, worker_key, worker_name, work_date, old_value, new_value, is_deleted_entry, reason, status, requested_by, requested_by_email, requested_by_name, approval_stage, approval_required_level, current_approver_employee_id, current_approver_name, current_approver_email, first_approver_employee_id, first_approver_name, first_approver_email, approved_by, approved_at, first_approved_at, second_approved_at, final_approved_at, rejected_by, rejected_by_name, rejected_by_email, rejected_at, reject_reason, rejected_acknowledged_at, rejected_acknowledged_by, created_at, updated_at)
+          VALUES
+          (:project_id, :month, :batch_token, :worker_key, :worker_name, :work_date, :old_value, :new_value, :is_deleted_entry, :reason, :status, :requested_by, :requested_by_email, :requested_by_name, :approval_stage, :approval_required_level, :current_approver_employee_id, :current_approver_name, :current_approver_email, :first_approver_employee_id, :first_approver_name, :first_approver_email, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :created_at, :updated_at)
+          ON DUPLICATE KEY UPDATE
+            month = VALUES(month),
+            batch_token = VALUES(batch_token),
+            worker_name = VALUES(worker_name),
+            old_value = VALUES(old_value),
+            new_value = VALUES(new_value),
+            is_deleted_entry = VALUES(is_deleted_entry),
+            reason = VALUES(reason),
+            status = VALUES(status),
+            requested_by = VALUES(requested_by),
+            requested_by_email = VALUES(requested_by_email),
+            requested_by_name = VALUES(requested_by_name),
+            approval_stage = VALUES(approval_stage),
+            approval_required_level = VALUES(approval_required_level),
+            current_approver_employee_id = VALUES(current_approver_employee_id),
+            current_approver_name = VALUES(current_approver_name),
+            current_approver_email = VALUES(current_approver_email),
+            first_approver_employee_id = VALUES(first_approver_employee_id),
+            first_approver_name = VALUES(first_approver_name),
+            first_approver_email = VALUES(first_approver_email),
+            approved_by = NULL,
+            approved_at = NULL,
+            first_approved_at = NULL,
+            second_approved_at = NULL,
+            final_approved_at = NULL,
+            rejected_by = NULL,
+            rejected_by_name = NULL,
+            rejected_by_email = NULL,
+            rejected_at = NULL,
+            reject_reason = NULL,
+            rejected_acknowledged_at = NULL,
+            rejected_acknowledged_by = NULL,
+            created_at = VALUES(created_at),
+            updated_at = VALUES(updated_at)";
     }
 }
 
@@ -233,36 +299,12 @@ try {
         );
     }
 
+    $action = isset($_POST['action']) ? trim((string)$_POST['action']) : '';
     $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
     $month = isset($_POST['month']) ? trim((string)$_POST['month']) : '';
-    $workerName = isset($_POST['worker_name']) ? trim((string)$_POST['worker_name']) : '';
-    $workerKey = isset($_POST['worker_key']) ? trim((string)$_POST['worker_key']) : '';
-    $workDate = isset($_POST['work_date']) ? trim((string)$_POST['work_date']) : '';
-    $oldValueRaw = isset($_POST['old_value']) ? trim((string)$_POST['old_value']) : '';
-    $newValueRaw = isset($_POST['new_value']) ? trim((string)$_POST['new_value']) : '';
-    $reason = isset($_POST['reason']) ? trim((string)$_POST['reason']) : '';
-    $deleteMode = (isset($_POST['delete_mode']) && (int)$_POST['delete_mode'] === 1);
 
     if ($projectId <= 0) cpms_gongsu_json_exit(false, 'project_id 값이 누락되었거나 올바르지 않습니다.', array(), 200);
     if (!preg_match('/^\d{4}\-\d{2}$/', $month)) cpms_gongsu_json_exit(false, 'month 형식이 올바르지 않습니다. (YYYY-MM)', array(), 200);
-    if ($workerName === '') cpms_gongsu_json_exit(false, 'worker_name 값이 필요합니다.', array(), 200);
-    if (!preg_match('/^\d{4}\-\d{2}\-\d{2}$/', $workDate)) cpms_gongsu_json_exit(false, 'work_date 형식이 올바르지 않습니다. (YYYY-MM-DD)', array(), 200);
-    if ($workerKey === '') $workerKey = cpms_gongsu_normalize_worker_key($workerName);
-    if ($workerKey === '') cpms_gongsu_json_exit(false, 'worker_key 생성에 실패했습니다.', array(), 200);
-    if ($newValueRaw === '' || !is_numeric($newValueRaw)) cpms_gongsu_json_exit(false, 'new_value는 숫자여야 합니다.', array(), 200);
-
-    $newValue = (float)$newValueRaw;
-    if ($newValue < 0) cpms_gongsu_json_exit(false, 'new_value는 0 이상이어야 합니다.', array(), 200);
-    if ($newValue > 999.99) cpms_gongsu_json_exit(false, 'new_value는 DECIMAL(5,2) 범위를 초과했습니다.', array(), 200);
-
-    $newValue = (float)number_format($newValue, 2, '.', '');
-    $oldValue = null;
-    if ($oldValueRaw !== '' && is_numeric($oldValueRaw)) $oldValue = (float)number_format((float)$oldValueRaw, 2, '.', '');
-    if ($deleteMode) {
-        $newValue = 0.0;
-        $reason = '';
-    }
-    if (!$deleteMode && $newValue >= 1.2 && $reason === '') cpms_gongsu_json_exit(false, '1.2 이상 공수 수정은 승인 요청사유가 필요합니다.', array(), 200);
 
     $pdo = Db::pdo();
     if (!$pdo) cpms_gongsu_json_exit(false, 'DB 연결을 확인할 수 없습니다.', array(), 200);
@@ -290,7 +332,178 @@ try {
         }
     }
 
-    cpms_gongsu_ensure_override_table($pdo);
+    if (!cpms_gongsu_ensure_override_table($pdo)) cpms_gongsu_json_exit(false, '공수 요청 테이블을 준비하지 못했습니다.', array(), 200);
+
+    // [변경] Auth::id 안전 처리
+    $userId = 0;
+    if (method_exists('App\\Core\\Auth', 'id')) {
+        $userId = (int)Auth::id();
+    }
+    if ($userId <= 0 && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['id'])) {
+        $userId = (int)$_SESSION['cpms_user']['id'];
+    }
+    $requestedBy = ($userId > 0) ? $userId : null;
+    $requestedByEmail = trim((string)($authEmail !== '' ? $authEmail : ($rawCpmsUserEmail !== '' ? $rawCpmsUserEmail : $rawUserEmail)));
+    $requestedByName = '';
+    if (method_exists('App\\Core\\Auth', 'user')) {
+        $u = Auth::user();
+        if (is_array($u) && isset($u['name'])) $requestedByName = trim((string)$u['name']);
+    }
+    if ($requestedByName === '' && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['name'])) {
+        $requestedByName = trim((string)$_SESSION['cpms_user']['name']);
+    }
+    $now = date('Y-m-d H:i:s');
+
+    if ($action === 'acknowledge_rejected') {
+        // 파일: app/views/construction/labor_gongsu_override_save.php
+        // 반려 요청은 삭제하지 않고 확인 시각만 남겨 요청 목록에서 숨깁니다.
+        $acknowledgeId = isset($_POST['override_id']) ? (int)$_POST['override_id'] : 0;
+        if ($acknowledgeId <= 0) cpms_gongsu_json_exit(false, '확인할 반려 요청 ID가 올바르지 않습니다.', array(), 200);
+
+        $pdo->beginTransaction();
+        $stAckRow = $pdo->prepare("SELECT id, batch_token FROM cpms_labor_gongsu_overrides WHERE id=:id AND project_id=:project_id AND month=:month AND status='rejected' FOR UPDATE");
+        $stAckRow->execute(array(':id'=>$acknowledgeId, ':project_id'=>$projectId, ':month'=>$month));
+        $ackRow = $stAckRow->fetch(PDO::FETCH_ASSOC);
+        if (!$ackRow) {
+            $pdo->rollBack();
+            cpms_gongsu_json_exit(false, '확인할 반려 요청을 찾을 수 없습니다.', array(), 200);
+        }
+        $ackBatchToken = isset($ackRow['batch_token']) ? trim((string)$ackRow['batch_token']) : '';
+        if ($ackBatchToken !== '') {
+            $stAck = $pdo->prepare("UPDATE cpms_labor_gongsu_overrides SET rejected_acknowledged_at=NOW(), rejected_acknowledged_by=:ack_by WHERE project_id=:project_id AND month=:month AND batch_token=:batch_token AND status='rejected'");
+            $stAck->execute(array(':ack_by'=>$requestedBy, ':project_id'=>$projectId, ':month'=>$month, ':batch_token'=>$ackBatchToken));
+        } else {
+            $stAck = $pdo->prepare("UPDATE cpms_labor_gongsu_overrides SET rejected_acknowledged_at=NOW(), rejected_acknowledged_by=:ack_by WHERE id=:id AND project_id=:project_id AND month=:month AND status='rejected'");
+            $stAck->execute(array(':ack_by'=>$requestedBy, ':id'=>$acknowledgeId, ':project_id'=>$projectId, ':month'=>$month));
+        }
+        $pdo->commit();
+        cpms_gongsu_json_exit(true, '반려 내용을 확인했습니다.', array('mode'=>'acknowledged'), 200);
+    }
+
+    $bulkEntriesJson = isset($_POST['bulk_entries']) ? trim((string)$_POST['bulk_entries']) : '';
+    if ($bulkEntriesJson !== '') {
+        // 파일: app/views/construction/labor_gongsu_override_save.php
+        // 1.5/2공수 일괄 요청은 모든 행을 먼저 검증한 뒤 한 트랜잭션과 한 batch_token으로 저장합니다.
+        $bulkEntriesRaw = json_decode($bulkEntriesJson, true);
+        if (!is_array($bulkEntriesRaw) || count($bulkEntriesRaw) < 1) cpms_gongsu_json_exit(false, '일괄 요청 인원 정보가 올바르지 않습니다.', array(), 200);
+        if (count($bulkEntriesRaw) > 500) cpms_gongsu_json_exit(false, '일괄 요청은 한 번에 500명까지 가능합니다.', array(), 200);
+
+        $newValueRaw = isset($_POST['new_value']) ? trim((string)$_POST['new_value']) : '';
+        if ($newValueRaw === '' || !is_numeric($newValueRaw)) cpms_gongsu_json_exit(false, '일괄 요청 공수는 숫자여야 합니다.', array(), 200);
+        $newValue = (float)number_format((float)$newValueRaw, 2, '.', '');
+        if (abs($newValue - 1.5) > 0.0001 && abs($newValue - 2.0) > 0.0001) cpms_gongsu_json_exit(false, '일괄 승인 요청은 1.5공수 또는 2공수만 가능합니다.', array(), 200);
+        $reason = isset($_POST['reason']) ? trim((string)$_POST['reason']) : '';
+        if ($reason === '') $reason = '일괄 공수 입력(' . cpms_labor_format_chat_gongsu($newValue) . '공수)';
+
+        $bulkEntries = array();
+        $bulkWorkerNames = array();
+        $bulkEntryIndex = array();
+        $bulkWorkDate = '';
+        foreach ($bulkEntriesRaw as $bulkEntryRaw) {
+            if (!is_array($bulkEntryRaw)) cpms_gongsu_json_exit(false, '일괄 요청 인원 정보가 올바르지 않습니다.', array(), 200);
+            $bulkWorkerName = isset($bulkEntryRaw['worker_name']) ? trim((string)$bulkEntryRaw['worker_name']) : '';
+            $bulkWorkerKey = isset($bulkEntryRaw['worker_key']) ? trim((string)$bulkEntryRaw['worker_key']) : '';
+            $entryWorkDate = isset($bulkEntryRaw['work_date']) ? trim((string)$bulkEntryRaw['work_date']) : '';
+            $entryOldValueRaw = isset($bulkEntryRaw['old_value']) ? trim((string)$bulkEntryRaw['old_value']) : '';
+            if ($bulkWorkerName === '') cpms_gongsu_json_exit(false, '일괄 요청에 이름이 없는 인원이 있습니다.', array(), 200);
+            if ($bulkWorkerKey === '') $bulkWorkerKey = cpms_gongsu_normalize_worker_key($bulkWorkerName);
+            if ($bulkWorkerKey === '') cpms_gongsu_json_exit(false, '일괄 요청 근로자 키를 만들지 못했습니다.', array(), 200);
+            if (!preg_match('/^\d{4}\-\d{2}\-\d{2}$/', $entryWorkDate) || strpos($entryWorkDate, $month . '-') !== 0) cpms_gongsu_json_exit(false, '일괄 요청 작업일자가 선택 월과 일치하지 않습니다.', array(), 200);
+            if ($bulkWorkDate === '') $bulkWorkDate = $entryWorkDate;
+            if ($bulkWorkDate !== $entryWorkDate) cpms_gongsu_json_exit(false, '일괄 요청은 같은 작업일자만 묶을 수 있습니다.', array(), 200);
+            $entryIndexKey = $bulkWorkerKey . '|' . $entryWorkDate;
+            if (isset($bulkEntryIndex[$entryIndexKey])) cpms_gongsu_json_exit(false, '같은 인원이 일괄 요청에 중복되어 있습니다.', array(), 200);
+            $bulkEntryIndex[$entryIndexKey] = true;
+            $entryOldValue = null;
+            if ($entryOldValueRaw !== '') {
+                if (!is_numeric($entryOldValueRaw)) cpms_gongsu_json_exit(false, '기존 공수 값이 올바르지 않습니다.', array(), 200);
+                $entryOldValue = (float)number_format((float)$entryOldValueRaw, 2, '.', '');
+            }
+            $bulkEntries[] = array('worker_name'=>$bulkWorkerName, 'worker_key'=>$bulkWorkerKey, 'work_date'=>$entryWorkDate, 'old_value'=>$entryOldValue);
+            $bulkWorkerNames[] = $bulkWorkerName;
+        }
+
+        $directorApprover = cpms_labor_find_director_approver($pdo);
+        if (!$directorApprover) cpms_gongsu_json_exit(false, '공사PM 승인자를 직원명부에서 찾을 수 없습니다.', array(), 200);
+        $directorId = isset($directorApprover['id']) ? (int)$directorApprover['id'] : null;
+        $directorName = isset($directorApprover['name']) ? (string)$directorApprover['name'] : null;
+        $directorEmail = isset($directorApprover['email']) ? (string)$directorApprover['email'] : null;
+        $batchToken = cpms_gongsu_generate_batch_token();
+
+        $pdo->beginTransaction();
+        $stBulk = $pdo->prepare(cpms_gongsu_override_upsert_sql());
+        foreach ($bulkEntries as $bulkEntry) {
+            $stBulk->execute(array(
+                ':project_id'=>$projectId,
+                ':month'=>$month,
+                ':batch_token'=>$batchToken,
+                ':worker_key'=>$bulkEntry['worker_key'],
+                ':worker_name'=>$bulkEntry['worker_name'],
+                ':work_date'=>$bulkEntry['work_date'],
+                ':old_value'=>$bulkEntry['old_value'],
+                ':new_value'=>$newValue,
+                ':is_deleted_entry'=>0,
+                ':reason'=>$reason,
+                ':status'=>'pending',
+                ':requested_by'=>$requestedBy,
+                ':requested_by_email'=>$requestedByEmail !== '' ? $requestedByEmail : null,
+                ':requested_by_name'=>$requestedByName !== '' ? $requestedByName : null,
+                ':approval_stage'=>'DIRECTOR_PENDING',
+                ':approval_required_level'=>'DIRECTOR_THEN_VP',
+                ':current_approver_employee_id'=>$directorId,
+                ':current_approver_name'=>$directorName,
+                ':current_approver_email'=>$directorEmail,
+                ':first_approver_employee_id'=>$directorId,
+                ':first_approver_name'=>$directorName,
+                ':first_approver_email'=>$directorEmail,
+                ':created_at'=>$now,
+                ':updated_at'=>$now
+            ));
+        }
+        $stBulkId = $pdo->prepare("SELECT id FROM cpms_labor_gongsu_overrides WHERE batch_token=:batch_token ORDER BY id ASC LIMIT 1");
+        $stBulkId->execute(array(':batch_token'=>$batchToken));
+        $bulkOverrideId = (int)$stBulkId->fetchColumn();
+        $pdo->commit();
+        if ($bulkOverrideId > 0) cpms_labor_send_override_notification($pdo, $bulkOverrideId, 'DIRECTOR_REQUEST');
+
+        cpms_gongsu_json_exit(true, '선택한 ' . count($bulkEntries) . '명의 ' . cpms_labor_format_chat_gongsu($newValue) . '공수 일괄 승인 요청을 보냈습니다.', array(
+            'mode'=>'pending',
+            'batch_token'=>$batchToken,
+            'requested_count'=>count($bulkEntries),
+            'worker_names'=>$bulkWorkerNames,
+            'approval_stage'=>'DIRECTOR_PENDING',
+            'approval_required_level'=>'DIRECTOR_THEN_VP',
+            'approver_name'=>$directorName !== null && trim((string)$directorName) !== '' ? $directorName : '공사PM',
+            'pending_value'=>number_format($newValue, 2, '.', '')
+        ), 200);
+    }
+
+    $workerName = isset($_POST['worker_name']) ? trim((string)$_POST['worker_name']) : '';
+    $workerKey = isset($_POST['worker_key']) ? trim((string)$_POST['worker_key']) : '';
+    $workDate = isset($_POST['work_date']) ? trim((string)$_POST['work_date']) : '';
+    $oldValueRaw = isset($_POST['old_value']) ? trim((string)$_POST['old_value']) : '';
+    $newValueRaw = isset($_POST['new_value']) ? trim((string)$_POST['new_value']) : '';
+    $reason = isset($_POST['reason']) ? trim((string)$_POST['reason']) : '';
+    $deleteMode = (isset($_POST['delete_mode']) && (int)$_POST['delete_mode'] === 1);
+
+    if ($workerName === '') cpms_gongsu_json_exit(false, 'worker_name 값이 필요합니다.', array(), 200);
+    if (!preg_match('/^\d{4}\-\d{2}\-\d{2}$/', $workDate)) cpms_gongsu_json_exit(false, 'work_date 형식이 올바르지 않습니다. (YYYY-MM-DD)', array(), 200);
+    if ($workerKey === '') $workerKey = cpms_gongsu_normalize_worker_key($workerName);
+    if ($workerKey === '') cpms_gongsu_json_exit(false, 'worker_key 생성에 실패했습니다.', array(), 200);
+    if ($newValueRaw === '' || !is_numeric($newValueRaw)) cpms_gongsu_json_exit(false, 'new_value는 숫자여야 합니다.', array(), 200);
+
+    $newValue = (float)$newValueRaw;
+    if ($newValue < 0) cpms_gongsu_json_exit(false, 'new_value는 0 이상이어야 합니다.', array(), 200);
+    if ($newValue > 999.99) cpms_gongsu_json_exit(false, 'new_value는 DECIMAL(5,2) 범위를 초과했습니다.', array(), 200);
+
+    $newValue = (float)number_format($newValue, 2, '.', '');
+    $oldValue = null;
+    if ($oldValueRaw !== '' && is_numeric($oldValueRaw)) $oldValue = (float)number_format((float)$oldValueRaw, 2, '.', '');
+    if ($deleteMode) {
+        $newValue = 0.0;
+        $reason = '';
+    }
+    if (!$deleteMode && $newValue >= 1.2 && $reason === '') cpms_gongsu_json_exit(false, '1.2 이상 공수 수정은 승인 요청사유가 필요합니다.', array(), 200);
 
     $approvalRequiredLevel = 'NONE';
     $approvalStage = 'COMPLETED';
@@ -307,27 +520,6 @@ try {
     } else {
         $status = 'applied';
     }
-    // [변경] Auth::id 안전 처리
-    $userId = 0;
-    if (method_exists('App\\Core\\Auth', 'id')) {
-        $userId = (int)Auth::id();
-    }
-    if ($userId <= 0 && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['id'])) {
-        $userId = (int)$_SESSION['cpms_user']['id'];
-    }
-    $requestedBy = ($userId > 0) ? $userId : null;
-    // [변경] 요청자 저장(requested_by_email, requested_by_name)
-    $requestedByEmail = trim((string)($authEmail !== '' ? $authEmail : ($rawCpmsUserEmail !== '' ? $rawCpmsUserEmail : $rawUserEmail)));
-    $requestedByName = '';
-    if (method_exists('App\\Core\\Auth', 'user')) {
-        $u = Auth::user();
-        if (is_array($u) && isset($u['name'])) $requestedByName = trim((string)$u['name']);
-    }
-    if ($requestedByName === '' && isset($_SESSION['cpms_user']) && is_array($_SESSION['cpms_user']) && isset($_SESSION['cpms_user']['name'])) {
-        $requestedByName = trim((string)$_SESSION['cpms_user']['name']);
-    }    
-    $now = date('Y-m-d H:i:s');
-
     $currentApproverId = ($currentApprover && isset($currentApprover['id'])) ? (int)$currentApprover['id'] : null;
     $currentApproverName = ($currentApprover && isset($currentApprover['name'])) ? (string)$currentApprover['name'] : null;
     $currentApproverEmail = ($currentApprover && isset($currentApprover['email'])) ? (string)$currentApprover['email'] : null;
@@ -335,44 +527,10 @@ try {
     $directorName = ($directorApprover && isset($directorApprover['name'])) ? (string)$directorApprover['name'] : null;
     $directorEmail = ($directorApprover && isset($directorApprover['email'])) ? (string)$directorApprover['email'] : null;
     
-    $sql = "INSERT INTO cpms_labor_gongsu_overrides
-      (project_id, month, worker_key, worker_name, work_date, old_value, new_value, is_deleted_entry, reason, status, requested_by, requested_by_email, requested_by_name, approval_stage, approval_required_level, current_approver_employee_id, current_approver_name, current_approver_email, first_approver_employee_id, first_approver_name, first_approver_email, approved_by, approved_at, first_approved_at, second_approved_at, final_approved_at, rejected_by, rejected_by_name, rejected_by_email, rejected_at, reject_reason, created_at, updated_at)
-      VALUES
-      (:project_id, :month, :worker_key, :worker_name, :work_date, :old_value, :new_value, :is_deleted_entry, :reason, :status, :requested_by, :requested_by_email, :requested_by_name, :approval_stage, :approval_required_level, :current_approver_employee_id, :current_approver_name, :current_approver_email, :first_approver_employee_id, :first_approver_name, :first_approver_email, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :created_at, :updated_at)
-      ON DUPLICATE KEY UPDATE
-        month = VALUES(month),
-        worker_name = VALUES(worker_name),
-        old_value = VALUES(old_value),
-        new_value = VALUES(new_value),
-        is_deleted_entry = VALUES(is_deleted_entry),
-        reason = VALUES(reason),
-        status = VALUES(status),
-        requested_by = VALUES(requested_by),
-        requested_by_email = VALUES(requested_by_email),
-        requested_by_name = VALUES(requested_by_name),
-        approval_stage = VALUES(approval_stage),
-        approval_required_level = VALUES(approval_required_level),
-        current_approver_employee_id = VALUES(current_approver_employee_id),
-        current_approver_name = VALUES(current_approver_name),
-        current_approver_email = VALUES(current_approver_email),
-        first_approver_employee_id = VALUES(first_approver_employee_id),
-        first_approver_name = VALUES(first_approver_name),
-        first_approver_email = VALUES(first_approver_email),
-        approved_by = NULL,
-        approved_at = NULL,
-        first_approved_at = NULL,
-        second_approved_at = NULL,
-        final_approved_at = NULL,
-        rejected_by = NULL,
-        rejected_by_name = NULL,
-        rejected_by_email = NULL,
-        rejected_at = NULL,
-        reject_reason = NULL,
-        updated_at = VALUES(updated_at)";
-
-    $st = $pdo->prepare($sql);
+    $st = $pdo->prepare(cpms_gongsu_override_upsert_sql());
     $st->bindValue(':project_id', $projectId, PDO::PARAM_INT);
     $st->bindValue(':month', $month, PDO::PARAM_STR);
+    $st->bindValue(':batch_token', null, PDO::PARAM_NULL);
     $st->bindValue(':worker_key', $workerKey, PDO::PARAM_STR);
     $st->bindValue(':worker_name', $workerName, PDO::PARAM_STR);
     $st->bindValue(':work_date', $workDate, PDO::PARAM_STR);
@@ -439,7 +597,9 @@ try {
         'pending_value' => number_format($newValue, 2, '.', '')
     ), 200);
 } catch (PDOException $e) {
+    if (isset($pdo) && $pdo && $pdo->inTransaction()) $pdo->rollBack();
     cpms_gongsu_json_exit(false, 'DB 처리 중 오류: ' . $e->getMessage(), array(), 200);
 } catch (Exception $e) {
+    if (isset($pdo) && $pdo && $pdo->inTransaction()) $pdo->rollBack();
     cpms_gongsu_json_exit(false, '저장 처리 중 오류: ' . $e->getMessage(), array(), 200);
 }

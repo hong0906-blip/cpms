@@ -1,6 +1,6 @@
 <?php
 /**
- * 공사 > 노무비 > 공수/인원작성 공통 데이터 로더
+ * 공사 > 노무비 > 공수/비용배분/인원작성 공통 데이터 로더
  * - attendance/admin_gongsu 데이터 연동
  * - PHP 5.6 호환
  */
@@ -1076,6 +1076,7 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
                     account_holder VARCHAR(50) NULL,
                     company_name VARCHAR(80) NULL,
                     is_outsourcing TINYINT(1) NOT NULL DEFAULT 0,
+                    legacy_outsourcing_ratio TINYINT UNSIGNED NULL DEFAULT NULL,
                     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
@@ -1106,6 +1107,9 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
                 'account_holder' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN account_holder VARCHAR(50) NULL AFTER bank_name",
                 'company_name' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN company_name VARCHAR(80) NULL AFTER account_holder",
                 'is_outsourcing' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN is_outsourcing TINYINT(1) NOT NULL DEFAULT 0 AFTER company_name",
+                // 파일: app/views/construction/tabs/partials/labor_data_loader.php
+                // 월별 비율 도입 뒤에도 과거 월의 기존 외주 여부가 바뀌지 않도록 최초 호환 기준값을 보존합니다.
+                'legacy_outsourcing_ratio' => "ALTER TABLE cpms_project_labor_workers ADD COLUMN legacy_outsourcing_ratio TINYINT UNSIGNED NULL DEFAULT NULL AFTER is_outsourcing",
             );
             foreach ($addCols as $col => $sql) {
                 if (isset($colMap[$col])) continue;
@@ -1157,22 +1161,214 @@ if (!function_exists('cpms_load_project_labor_workers')) {
 if (!function_exists('cpms_ensure_project_labor_worker_months_table')) {
     function cpms_ensure_project_labor_worker_months_table($pdo) {
         if (!$pdo) return false;
+        static $ensured = array();
+        $ensureKey = cpms_labor_cache_key($pdo, 'project-labor-worker-months-schema');
+        if (isset($ensured[$ensureKey])) return $ensured[$ensureKey];
         try {
             $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_project_labor_worker_months (
                 id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 project_id INT UNSIGNED NOT NULL,
                 labor_worker_id INT UNSIGNED NOT NULL,
                 month CHAR(7) NOT NULL,
+                outsourcing_ratio TINYINT UNSIGNED NOT NULL DEFAULT 0,
+                outsourcing_ratio_is_set TINYINT(1) NOT NULL DEFAULT 0,
                 is_deleted TINYINT(1) NOT NULL DEFAULT 0,
                 created_at DATETIME NOT NULL,
                 updated_at DATETIME NOT NULL,
                 UNIQUE KEY uk_project_labor_worker_month (project_id, labor_worker_id, month),
                 KEY idx_project_labor_worker_month_lookup(project_id, month, is_deleted)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+
+            // 파일: app/views/construction/tabs/partials/labor_data_loader.php
+            // MySQL 5.6에는 조건부 컬럼 추가 문법이 없으므로 컬럼 목록을 확인한 뒤 보강합니다.
+            $table = 'cpms_project_labor_worker_months';
+            $cols = cpms_table_columns($pdo, $table);
+            $colMap = array();
+            foreach ($cols as $col) $colMap[(string)$col] = true;
+            if (!isset($colMap['outsourcing_ratio'])) {
+                $pdo->exec("ALTER TABLE cpms_project_labor_worker_months ADD COLUMN outsourcing_ratio TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER month");
+            }
+            if (!isset($colMap['outsourcing_ratio_is_set'])) {
+                $pdo->exec("ALTER TABLE cpms_project_labor_worker_months ADD COLUMN outsourcing_ratio_is_set TINYINT(1) NOT NULL DEFAULT 0 AFTER outsourcing_ratio");
+            }
+            $ensured[$ensureKey] = true;
+            return true;
+        } catch (Exception $e) {
+            $ensured[$ensureKey] = false;
+            return false;
+        }
+    }
+}
+
+// 기존 이진 외주값을 월별 비율 도입 전 호환 비율(0%/100%)로 변환합니다.
+if (!function_exists('cpms_labor_legacy_outsourcing_ratio')) {
+    function cpms_labor_legacy_outsourcing_ratio($worker) {
+        if (!is_array($worker)) return 0;
+        if (array_key_exists('legacy_outsourcing_ratio', $worker) && $worker['legacy_outsourcing_ratio'] !== null && $worker['legacy_outsourcing_ratio'] !== '') {
+            $legacyRatio = (int)$worker['legacy_outsourcing_ratio'];
+            if ($legacyRatio < 0) $legacyRatio = 0;
+            if ($legacyRatio > 100) $legacyRatio = 100;
+            return $legacyRatio;
+        }
+        return (isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 100 : 0;
+    }
+}
+
+// 프로젝트·근로자·적용 월 기준의 유효 외주비 비율을 불러옵니다.
+if (!function_exists('cpms_load_project_labor_worker_month_ratio_map')) {
+    function cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $month, $projectWorkers) {
+        $map = array();
+        $projectId = (int)$projectId;
+        $month = trim((string)$month);
+        if (!is_array($projectWorkers)) $projectWorkers = array();
+
+        // 월별 값이 없는 기존 데이터는 보존된 호환 기준값 또는 is_outsourcing 값으로 계산합니다.
+        foreach ($projectWorkers as $worker) {
+            $workerId = isset($worker['id']) ? (int)$worker['id'] : 0;
+            if ($workerId <= 0) continue;
+            $map[$workerId] = cpms_labor_legacy_outsourcing_ratio($worker);
+        }
+
+        if (!$pdo || $projectId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return $map;
+        if (!cpms_ensure_project_labor_worker_months_table($pdo)) return $map;
+        try {
+            $st = $pdo->prepare("SELECT labor_worker_id, outsourcing_ratio, outsourcing_ratio_is_set
+                                 FROM cpms_project_labor_worker_months
+                                 WHERE project_id = :pid
+                                   AND month = :month
+                                   AND is_deleted = 0");
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->bindValue(':month', $month);
+            $st->execute();
+            while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+                $workerId = isset($row['labor_worker_id']) ? (int)$row['labor_worker_id'] : 0;
+                $isSet = isset($row['outsourcing_ratio_is_set']) && (int)$row['outsourcing_ratio_is_set'] === 1;
+                if ($workerId <= 0 || !$isSet) continue;
+                $ratio = isset($row['outsourcing_ratio']) ? (int)$row['outsourcing_ratio'] : 0;
+                if ($ratio < 0) $ratio = 0;
+                if ($ratio > 100) $ratio = 100;
+                $map[$workerId] = $ratio;
+            }
+        } catch (Exception $e) {
+            // 기존 호환값으로 안전하게 계속 표시합니다.
+        }
+        return $map;
+    }
+}
+
+// 월별 비율 맵을 기존 프로젝트 근로자 배열에 안전하게 덧붙입니다.
+if (!function_exists('cpms_apply_project_labor_worker_month_ratios')) {
+    function cpms_apply_project_labor_worker_month_ratios($projectWorkers, $ratioMap) {
+        if (!is_array($projectWorkers)) return array();
+        if (!is_array($ratioMap)) $ratioMap = array();
+        foreach ($projectWorkers as $index => $worker) {
+            $workerId = isset($worker['id']) ? (int)$worker['id'] : 0;
+            $ratio = ($workerId > 0 && isset($ratioMap[$workerId])) ? (int)$ratioMap[$workerId] : cpms_labor_legacy_outsourcing_ratio($worker);
+            if ($ratio < 0) $ratio = 0;
+            if ($ratio > 100) $ratio = 100;
+            $projectWorkers[$index]['outsourcing_ratio'] = $ratio;
+            $projectWorkers[$index]['labor_ratio'] = 100 - $ratio;
+        }
+        return $projectWorkers;
+    }
+}
+
+// 서버 검증을 통과한 월별 외주비 비율을 월 연결 행에 저장합니다.
+if (!function_exists('cpms_save_project_labor_worker_month_ratio')) {
+    function cpms_save_project_labor_worker_month_ratio($pdo, $projectId, $laborWorkerId, $month, $outsourcingRatio) {
+        $projectId = (int)$projectId;
+        $laborWorkerId = (int)$laborWorkerId;
+        $month = trim((string)$month);
+        if (!is_numeric($outsourcingRatio)) return false;
+        $outsourcingRatio = (int)$outsourcingRatio;
+        if (!$pdo || $projectId <= 0 || $laborWorkerId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return false;
+        if ($outsourcingRatio < 0 || $outsourcingRatio > 100) return false;
+        if (!cpms_ensure_project_labor_worker_months_table($pdo)) return false;
+        try {
+            $now = date('Y-m-d H:i:s');
+            $st = $pdo->prepare("INSERT INTO cpms_project_labor_worker_months
+                    (project_id, labor_worker_id, month, outsourcing_ratio, outsourcing_ratio_is_set, is_deleted, created_at, updated_at)
+                    SELECT :pid, plw.id, :month, :ratio, 1, 0, :now, :now
+                    FROM cpms_project_labor_workers plw
+                    WHERE plw.id = :wid
+                      AND plw.project_id = :pid_check
+                      AND plw.is_deleted = 0
+                    ON DUPLICATE KEY UPDATE outsourcing_ratio = VALUES(outsourcing_ratio),
+                                            outsourcing_ratio_is_set = 1,
+                                            is_deleted = 0,
+                                            updated_at = VALUES(updated_at)");
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->bindValue(':pid_check', $projectId, PDO::PARAM_INT);
+            $st->bindValue(':wid', $laborWorkerId, PDO::PARAM_INT);
+            $st->bindValue(':month', $month);
+            $st->bindValue(':ratio', $outsourcingRatio, PDO::PARAM_INT);
+            $st->bindValue(':now', $now);
+            $st->execute();
             return true;
         } catch (Exception $e) {
             return false;
         }
+    }
+}
+
+// 근로자 배열에서 월별 비율을 우선하고 없으면 기존 호환값을 사용합니다.
+if (!function_exists('cpms_resolve_worker_outsourcing_ratio')) {
+    function cpms_resolve_worker_outsourcing_ratio($worker) {
+        if (!is_array($worker)) return 0;
+        if (array_key_exists('outsourcing_ratio', $worker) && $worker['outsourcing_ratio'] !== null && $worker['outsourcing_ratio'] !== '') {
+            $ratio = (int)$worker['outsourcing_ratio'];
+        } else {
+            $ratio = cpms_labor_legacy_outsourcing_ratio($worker);
+        }
+        if ($ratio < 0) $ratio = 0;
+        if ($ratio > 100) $ratio = 100;
+        return $ratio;
+    }
+}
+
+// 공수·단가·외주비 비율로 전체/노무비/외주비 금액을 동일한 원 단위 기준으로 계산합니다.
+if (!function_exists('cpms_labor_calculate_amounts')) {
+    function cpms_labor_calculate_amounts($totalGongsu, $wageRate, $outsourcingRatio) {
+        $totalGongsu = is_numeric($totalGongsu) ? (float)$totalGongsu : 0.0;
+        $wageRate = is_numeric($wageRate) ? (float)$wageRate : 0.0;
+        $outsourcingRatio = is_numeric($outsourcingRatio) ? (int)$outsourcingRatio : 0;
+        if ($totalGongsu < 0) $totalGongsu = 0.0;
+        if ($wageRate < 0) $wageRate = 0.0;
+        if ($outsourcingRatio < 0) $outsourcingRatio = 0;
+        if ($outsourcingRatio > 100) $outsourcingRatio = 100;
+
+        // 파일: app/views/construction/tabs/partials/labor_data_loader.php
+        // 전체 금액과 외주비를 원 단위로 먼저 확정하고, 노무비는 차감 계산하여 합계 오차를 막습니다.
+        $totalAmount = round($totalGongsu * $wageRate);
+        $outsourcingAmount = round($totalAmount * $outsourcingRatio / 100);
+        $laborAmount = $totalAmount - $outsourcingAmount;
+        return array(
+            'total_amount' => (float)$totalAmount,
+            'outsourcing_ratio' => $outsourcingRatio,
+            'labor_ratio' => 100 - $outsourcingRatio,
+            'outsourcing_amount' => (float)$outsourcingAmount,
+            'labor_amount' => (float)$laborAmount,
+        );
+    }
+}
+
+// 근로자 한 명의 선택 월 총공수와 배분 금액을 공통 형식으로 반환합니다.
+if (!function_exists('cpms_labor_calculate_worker_month_amounts')) {
+    function cpms_labor_calculate_worker_month_amounts($worker, $gongsuMap, $selectedMonth) {
+        $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
+        $workerKey = cpms_normalize_worker_key($workerName);
+        $dailyMap = ($workerKey !== '' && isset($gongsuMap[$workerKey]) && is_array($gongsuMap[$workerKey])) ? $gongsuMap[$workerKey] : array();
+        $totalGongsu = 0.0;
+        foreach ($dailyMap as $dateKey => $gongsuValue) {
+            if (!is_numeric($gongsuValue)) continue;
+            if ($selectedMonth !== '' && strpos((string)$dateKey, (string)$selectedMonth) !== 0) continue;
+            $totalGongsu += (float)$gongsuValue;
+        }
+        $wageRate = cpms_resolve_labor_wage_rate($worker);
+        $amounts = cpms_labor_calculate_amounts($totalGongsu, $wageRate, cpms_resolve_worker_outsourcing_ratio($worker));
+        $amounts['total_gongsu'] = $totalGongsu;
+        $amounts['wage_rate'] = $wageRate;
+        return $amounts;
     }
 }
 
@@ -1544,6 +1740,8 @@ if (!function_exists('cpms_build_project_worker_rows')) {
                 'account_holder' => isset($worker['account_holder']) ? (string)$worker['account_holder'] : '',
                 'company_name' => (isset($worker['agency_name_snapshot']) && trim((string)$worker['agency_name_snapshot']) !== '') ? (string)$worker['agency_name_snapshot'] : (isset($worker['company_name']) ? (string)$worker['company_name'] : ''),
                 'is_outsourcing' => (isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 1 : 0,
+                'legacy_outsourcing_ratio' => array_key_exists('legacy_outsourcing_ratio', $worker) ? $worker['legacy_outsourcing_ratio'] : null,
+                'outsourcing_ratio' => function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($worker) : ((isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 100 : 0),
                 'job_type_snapshot' => isset($worker['job_type_snapshot']) ? (string)$worker['job_type_snapshot'] : '',
                 'agency_name_snapshot' => isset($worker['agency_name_snapshot']) ? (string)$worker['agency_name_snapshot'] : '',
                 'worker_name_snapshot' => isset($worker['worker_name_snapshot']) ? (string)$worker['worker_name_snapshot'] : '',
@@ -1624,6 +1822,9 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'account_holder' => isset($data['account_holder']) ? (string)$data['account_holder'] : '',
                 'company_name' => (isset($data['company_name']) && trim((string)$data['company_name']) !== '') ? (string)$data['company_name'] : '창명건설',
                 'is_outsourcing' => (isset($data['is_outsourcing']) && (int)$data['is_outsourcing'] === 1) ? 1 : 0,
+                'legacy_outsourcing_ratio' => array_key_exists('legacy_outsourcing_ratio', $data) ? $data['legacy_outsourcing_ratio'] : null,
+                'outsourcing_ratio' => function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($data) : ((isset($data['is_outsourcing']) && (int)$data['is_outsourcing'] === 1) ? 100 : 0),
+                'labor_ratio' => function_exists('cpms_resolve_worker_outsourcing_ratio') ? (100 - cpms_resolve_worker_outsourcing_ratio($data)) : ((isset($data['is_outsourcing']) && (int)$data['is_outsourcing'] === 1) ? 0 : 100),
                 'job_type_snapshot' => isset($data['job_type_snapshot']) ? (string)$data['job_type_snapshot'] : '',
                 'agency_name_snapshot' => isset($data['agency_name_snapshot']) ? (string)$data['agency_name_snapshot'] : '',
                 'worker_name_snapshot' => isset($data['worker_name_snapshot']) ? (string)$data['worker_name_snapshot'] : '',
@@ -1679,6 +1880,20 @@ if (!function_exists('cpms_labor_sort_worker_value')) {
         if ($field === 'company') {
             return isset($worker['company_name']) ? cpms_labor_sort_text($worker['company_name']) : '';
         }
+        if ($field === 'outsourcing_ratio') {
+            return function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($worker) : 0;
+        }
+        if ($field === 'labor_ratio') {
+            $outsourcingRatio = function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($worker) : 0;
+            return 100 - $outsourcingRatio;
+        }
+        if ($field === 'labor_amount' || $field === 'outsourcing_amount') {
+            if (function_exists('cpms_labor_calculate_worker_month_amounts')) {
+                $amounts = cpms_labor_calculate_worker_month_amounts($worker, $gongsuMap, $selectedMonth);
+                return isset($amounts[$field]) ? (float)$amounts[$field] : 0.0;
+            }
+            return 0.0;
+        }
         return isset($worker['name']) ? cpms_labor_sort_text($worker['name']) : '';
     }
 }
@@ -1687,10 +1902,10 @@ if (!function_exists('cpms_sort_labor_workers')) {
     function cpms_sort_labor_workers($workers, $sort, $direction = 'asc', $gongsuMap = array(), $outputDaysMap = array(), $selectedMonth = '') {
         if (!is_array($workers)) return array();
         $sort = trim((string)$sort);
-        $allowedSorts = array('name', 'job_type', 'output_days', 'total_gongsu', 'wage_rate', 'company');
+        $allowedSorts = array('name', 'job_type', 'output_days', 'total_gongsu', 'wage_rate', 'company', 'labor_ratio', 'outsourcing_ratio', 'labor_amount', 'outsourcing_amount');
         if (!in_array($sort, $allowedSorts, true)) $sort = 'name';
         $direction = (trim((string)$direction) === 'desc') ? 'desc' : 'asc';
-        $numericSorts = array('output_days', 'total_gongsu', 'wage_rate');
+        $numericSorts = array('output_days', 'total_gongsu', 'wage_rate', 'labor_ratio', 'outsourcing_ratio', 'labor_amount', 'outsourcing_amount');
         usort($workers, function($a, $b) use ($sort, $direction, $gongsuMap, $outputDaysMap, $selectedMonth, $numericSorts) {
             $isNumeric = in_array($sort, $numericSorts, true);
             $av = cpms_labor_sort_worker_value($a, $sort, $gongsuMap, $outputDaysMap, $selectedMonth);

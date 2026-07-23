@@ -14,8 +14,10 @@ if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
 $projectId = isset($_GET['pid']) ? (int)$_GET['pid'] : 0;
 $selectedMonth = isset($_GET['month']) ? trim((string)$_GET['month']) : '';
+$laborSheetTab = isset($_GET['labor_tab']) ? trim((string)$_GET['labor_tab']) : 'timesheet';
+if (!in_array($laborSheetTab, array('timesheet', 'labor', 'outsourcing'), true)) $laborSheetTab = 'timesheet';
 $laborSort = isset($_GET['labor_sort']) ? trim((string)$_GET['labor_sort']) : 'name';
-$laborSortAllowed = array('name', 'job_type', 'output_days', 'total_gongsu', 'wage_rate', 'company');
+$laborSortAllowed = array('name', 'job_type', 'output_days', 'total_gongsu', 'wage_rate', 'company', 'labor_ratio', 'outsourcing_ratio', 'labor_amount', 'outsourcing_amount');
 if (!in_array($laborSort, $laborSortAllowed, true)) $laborSort = 'name';
 $laborSortDir = isset($_GET['labor_sort_dir']) ? trim((string)$_GET['labor_sort_dir']) : 'asc';
 if ($laborSortDir !== 'desc') $laborSortDir = 'asc';
@@ -78,7 +80,8 @@ try {
     $periodEnd = $periodStart;
 }
 
-$fileName = '노무비_공수_' . $selectedMonth . '.xls';
+$downloadTypeLabel = $laborSheetTab === 'labor' ? '노무비' : ($laborSheetTab === 'outsourcing' ? '외주비' : '공수');
+$fileName = '노무비_' . $downloadTypeLabel . '_' . $selectedMonth . '.xls';
 
 header('Content-Type: application/vnd.ms-excel; charset=utf-8');
 header('Content-Disposition: attachment; filename="' . rawurlencode($fileName) . '"; filename*=UTF-8\'\'' . rawurlencode($fileName));
@@ -120,6 +123,8 @@ $attendanceGongsuUnit = isset($overrideDataset['gongsu_unit']) && is_array($over
 cpms_cleanup_project_labor_workers($pdo, $projectId, $excludedWorkers); // 장비기사 기존 기록 삭제(soft delete)
 cpms_sync_project_labor_workers_from_attendance($pdo, $projectId, $attendanceWorkers); // 장비기사 제외
 $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
+$laborWorkerRatioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $selectedMonth, $projectLaborWorkers);
+$projectLaborWorkers = cpms_apply_project_labor_worker_month_ratios($projectLaborWorkers, $laborWorkerRatioMap);
 $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
 $laborWorkerMonthMap = function_exists('cpms_load_project_labor_worker_month_map') ? cpms_load_project_labor_worker_month_map($pdo, $projectId, $selectedMonth) : array();
 if (is_array($workerRows) && is_array($laborWorkerMonthMap) && count($laborWorkerMonthMap) > 0) {
@@ -143,6 +148,9 @@ if (is_array($timesheetWorkers)) {
         $workerOutputDays = isset($attendanceOutputDays[$workerKey]) ? (int)$attendanceOutputDays[$workerKey] : 0;
         $isMonthAssigned = (isset($worker['month_assigned']) && (int)$worker['month_assigned'] === 1);
         if ($workerOutputDays <= 0 && !$isMonthAssigned) continue;
+        $outsourcingRatio = cpms_resolve_worker_outsourcing_ratio($worker);
+        if ($laborSheetTab === 'labor' && $outsourcingRatio >= 100) continue;
+        if ($laborSheetTab === 'outsourcing' && $outsourcingRatio <= 0) continue;
         $filteredTimesheetWorkers[] = $worker;
     }
     $timesheetWorkers = $filteredTimesheetWorkers;
@@ -153,6 +161,8 @@ if (function_exists('cpms_sort_labor_workers')) {
 $timesheetRows = count($timesheetWorkers);
 if ($timesheetRows < 1) $timesheetRows = 1;
 $laborSheetDownloadMode = true;
+// 파일: app/views/construction/labor_sheet_download.php
+// 선택한 내부 탭과 같은 대상/비율/반영금액을 공용 표로 내려받습니다.
 require __DIR__ . '/tabs/partials/labor_sheet_table.php';
 ?>
 </body>
