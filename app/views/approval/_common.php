@@ -402,6 +402,61 @@ if (!function_exists('approval_leave_status_label_from_type')) {
     }
 }
 
+if (!function_exists('approval_leave_half_day_period_from_type')) {
+    function approval_leave_half_day_period_from_type($requestType)
+    {
+        $norm = approval_normalize_compare_text($requestType);
+        $halfNorm = approval_normalize_compare_text(approval_ko('%EB%B0%98%EC%B0%A8'));
+        if ($norm === '' || $halfNorm === '' || strpos($norm, $halfNorm) === false) {
+            return '';
+        }
+
+        $morningNorm = approval_normalize_compare_text(approval_ko('%EC%98%A4%EC%A0%84'));
+        if ($morningNorm !== '' && strpos($norm, $morningNorm) !== false) {
+            return 'morning';
+        }
+
+        $afternoonNorm = approval_normalize_compare_text(approval_ko('%EC%98%A4%ED%9B%84'));
+        if ($afternoonNorm !== '' && strpos($norm, $afternoonNorm) !== false) {
+            return 'afternoon';
+        }
+
+        return '';
+    }
+}
+
+if (!function_exists('approval_leave_is_active_for_current_time')) {
+    function approval_leave_is_active_for_current_time($requestType, $leaveDate, $currentDateTime)
+    {
+        $halfDayPeriod = approval_leave_half_day_period_from_type($requestType);
+        if ($halfDayPeriod === '') {
+            return true;
+        }
+
+        $leaveDate = approval_leave_normalize_date($leaveDate);
+        $currentTs = strtotime(trim((string)$currentDateTime));
+        if ($leaveDate === '' || $currentTs === false) {
+            return true;
+        }
+
+        $currentDate = date('Y-m-d', $currentTs);
+        if ($leaveDate !== $currentDate) {
+            return true;
+        }
+
+        $currentTime = date('H:i:s', $currentTs);
+        // Morning and afternoon half-day status switches at noon.
+        if ($halfDayPeriod === 'morning') {
+            return strcmp($currentTime, '12:00:00') < 0;
+        }
+        if ($halfDayPeriod === 'afternoon') {
+            return strcmp($currentTime, '12:00:00') >= 0;
+        }
+
+        return true;
+    }
+}
+
 if (!function_exists('approval_leave_type_label_from_content')) {
     function approval_leave_type_label_from_content($content)
     {
@@ -496,6 +551,7 @@ if (!function_exists('approval_current_leave_index')) {
         }
 
         $seen = array();
+        $currentDateTime = date('Y-m-d H:i:s');
         for ($i = 0; $i < count($rows); $i++) {
             $row = $rows[$i];
             $content = approval_parse_content(isset($row['content']) ? $row['content'] : '');
@@ -541,6 +597,9 @@ if (!function_exists('approval_current_leave_index')) {
             }
             $role = isset($row['employee_role']) ? trim((string)$row['employee_role']) : '';
             $typeLabel = approval_leave_type_label_from_content($content);
+            if (!approval_leave_is_active_for_current_time($typeLabel, $baseDate, $currentDateTime)) {
+                continue;
+            }
             $statusLabel = approval_leave_status_label_from_type($typeLabel);
             $dedupeKey = $employeeId > 0 ? 'id:' . $employeeId : ($email !== '' ? 'email:' . strtolower($email) : 'name:' . $name);
             if ($dedupeKey === 'name:' || isset($seen[$dedupeKey])) {

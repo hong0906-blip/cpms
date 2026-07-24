@@ -314,7 +314,7 @@ $approvalOptions = array(
         <a href="?r=approval_home" class="px-4 py-2 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800"><?php echo h(approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AA%A9%EB%A1%9D')); ?></a>
     </div>
 </div>
-<form method="post" action="?r=approval_store" enctype="multipart/form-data">
+<form id="approvalCreateForm" method="post" action="?r=approval_store" enctype="multipart/form-data">
     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
     <input type="hidden" name="doc_type" value="<?php echo h($type); ?>">
     <?php
@@ -336,6 +336,54 @@ $approvalOptions = array(
             <a href="?r=approval_home" onclick="if(history.length>1){history.back();return false;}" class="px-4 py-3 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800"><?php echo h(approval_ko('%EB%92%A4%EB%A1%9C%EA%B0%80%EA%B8%B0')); ?></a>
             <a href="?r=approval_home" class="px-4 py-3 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800"><?php echo h(approval_ko('%EB%AA%A9%EB%A1%9D%EC%9C%BC%EB%A1%9C')); ?></a>
         </div>
-        <button type="submit" class="px-8 py-4 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-lg"><?php echo h(approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%B3%B4%EB%82%B4%EA%B8%B0')); ?></button>
+        <button id="approvalCreateSubmitButton" type="button" class="px-8 py-4 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-lg"><?php echo h(approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%B3%B4%EB%82%B4%EA%B8%B0')); ?></button>
     </div>
 </form>
+<script>
+(function () {
+    var form = document.getElementById('approvalCreateForm');
+    var submitButton = document.getElementById('approvalCreateSubmitButton');
+    var submitRequestedByButton = false;
+
+    if (!form || !submitButton) {
+        return;
+    }
+
+    form.addEventListener('keydown', function (event) {
+        var key = event.key || event.keyCode;
+        var target = event.target || event.srcElement;
+        var tagName = target && target.tagName ? target.tagName.toUpperCase() : '';
+        var isEditable = target && (target.isContentEditable || target.contentEditable === 'true');
+
+        if (key !== 'Enter' && key !== 13) {
+            return;
+        }
+        if (tagName === 'TEXTAREA' || tagName === 'SELECT' || isEditable) {
+            return;
+        }
+
+        event.preventDefault();
+    });
+
+    form.addEventListener('submit', function (event) {
+        if (!submitRequestedByButton) {
+            event.preventDefault();
+            return false;
+        }
+        submitRequestedByButton = false;
+    });
+
+    submitButton.addEventListener('click', function () {
+        submitRequestedByButton = true;
+
+        if (typeof form.requestSubmit === 'function') {
+            form.requestSubmit();
+            submitRequestedByButton = false;
+            return;
+        }
+
+        form.submit();
+        submitRequestedByButton = false;
+    });
+})();
+</script>
