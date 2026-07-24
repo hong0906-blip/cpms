@@ -255,7 +255,7 @@ try {
 
     try {
         require_once __DIR__ . '/../common/chat_notification_helpers.php';
-        cpms_google_chat_send_to_management_department(
+        cpms_google_chat_send_to_attendance_request_approvers(
             $pdo,
             $messageText,
             'ATTENDANCE_REQUEST_CREATED',

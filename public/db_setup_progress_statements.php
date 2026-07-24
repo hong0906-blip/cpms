@@ -80,12 +80,14 @@ $definitions = array(
     ),
     'cpms_progress_statement_comments' => array(
         'create' => "CREATE TABLE IF NOT EXISTS cpms_progress_statement_comments (
-            id INT AUTO_INCREMENT PRIMARY KEY, statement_id INT NOT NULL, author_employee_id INT NULL,
+            id INT AUTO_INCREMENT PRIMARY KEY, statement_id INT NOT NULL, parent_comment_id INT NULL, author_employee_id INT NULL,
             author_name VARCHAR(100) NOT NULL DEFAULT '', author_email VARCHAR(190) NOT NULL DEFAULT '',
-            comment_text TEXT NOT NULL, created_at DATETIME NOT NULL, KEY idx_statement_created (statement_id,created_at)
+            author_photo_path VARCHAR(500) NULL, comment_text TEXT NOT NULL, created_at DATETIME NOT NULL,
+            KEY idx_statement_created (statement_id,created_at), KEY idx_parent_comment (parent_comment_id)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4",
-        'columns' => array('id'=>"INT AUTO_INCREMENT PRIMARY KEY",'statement_id'=>"INT NOT NULL",'author_employee_id'=>"INT NULL",
-            'author_name'=>"VARCHAR(100) NOT NULL DEFAULT ''",'author_email'=>"VARCHAR(190) NOT NULL DEFAULT ''",'comment_text'=>"TEXT NULL",'created_at'=>"DATETIME NULL")
+        'columns' => array('id'=>"INT AUTO_INCREMENT PRIMARY KEY",'statement_id'=>"INT NOT NULL",'parent_comment_id'=>"INT NULL",'author_employee_id'=>"INT NULL",
+            'author_name'=>"VARCHAR(100) NOT NULL DEFAULT ''",'author_email'=>"VARCHAR(190) NOT NULL DEFAULT ''",
+            'author_photo_path'=>"VARCHAR(500) NULL",'comment_text'=>"TEXT NULL",'created_at'=>"DATETIME NULL")
     ),
     'cpms_progress_statement_histories' => array(
         'create' => "CREATE TABLE IF NOT EXISTS cpms_progress_statement_histories (
@@ -112,7 +114,8 @@ $indexDefinitions = array(
         'idx_statement'=>"ALTER TABLE cpms_progress_statement_files ADD KEY idx_statement (statement_id)"
     ),
     'cpms_progress_statement_comments' => array(
-        'idx_statement_created'=>"ALTER TABLE cpms_progress_statement_comments ADD KEY idx_statement_created (statement_id,created_at)"
+        'idx_statement_created'=>"ALTER TABLE cpms_progress_statement_comments ADD KEY idx_statement_created (statement_id,created_at)",
+        'idx_parent_comment'=>"ALTER TABLE cpms_progress_statement_comments ADD KEY idx_parent_comment (parent_comment_id)"
     ),
     'cpms_progress_statement_histories' => array(
         'idx_statement_created'=>"ALTER TABLE cpms_progress_statement_histories ADD KEY idx_statement_created (statement_id,created_at)",

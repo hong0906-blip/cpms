@@ -25,6 +25,9 @@ if (cpms_progress_statement_schema_ready($pdo)) {
         }
     } catch (Exception $e) { $psRows = array(); }
 }
+$psStatementIds = array();
+foreach ($psRows as $psMapRow) $psStatementIds[] = (int)$psMapRow['id'];
+$psRelated = cpms_progress_statement_related_maps($pdo, $psStatementIds);
 ?>
 <?php if (!cpms_progress_statement_schema_ready($pdo)): ?>
 <div class="rounded-2xl border border-amber-200 bg-amber-50 p-5 text-amber-900">
@@ -61,14 +64,14 @@ foreach ($psSummary as $psKey=>$psInfo):
 
 <div class="space-y-4">
 <?php if (count($psRows)===0): ?><div class="rounded-2xl border bg-white p-6 text-gray-500">제출된 기성내역서가 없습니다.</div><?php endif; ?>
-<?php foreach ($psRows as $psRow): $psFiles=cpms_progress_statement_files($pdo,$psRow['id']); $psComments=cpms_progress_statement_comments($pdo,$psRow['id']); $psHistories=cpms_progress_statement_histories($pdo,$psRow['id']); ?>
+<?php foreach ($psRows as $psRow): $psStatementId=(int)$psRow['id']; $psFiles=isset($psRelated['files'][$psStatementId])?$psRelated['files'][$psStatementId]:array(); $psComments=isset($psRelated['comments'][$psStatementId])?$psRelated['comments'][$psStatementId]:array(); $psHistories=isset($psRelated['histories'][$psStatementId])?$psRelated['histories'][$psStatementId]:array(); ?>
 <article class="bg-white rounded-3xl border border-gray-100 shadow-sm p-5">
     <div class="flex flex-col md:flex-row md:justify-between gap-3">
         <div class="min-w-0"><div class="flex flex-wrap gap-2 items-center"><span class="px-3 py-1 rounded-full border text-xs font-extrabold <?php echo h(cpms_progress_statement_status_class($psRow['status'])); ?>"><?php echo h(cpms_progress_statement_status_label($psRow['status'])); ?></span>
         <?php if ($psRow['drive_upload_status']==='failed'): ?><span class="px-3 py-1 rounded-full bg-red-800 text-white text-xs font-extrabold">Drive 저장 실패</span><?php endif; ?></div>
         <h3 class="mt-2 text-lg font-extrabold break-words"><?php echo h($psRow['title']); ?></h3>
         <div class="text-sm text-gray-500 mt-1"><?php echo (int)$psRow['target_year']; ?>년 <?php echo (int)$psRow['target_month']; ?>월 · <?php echo (int)$psRow['progress_round']; ?>차 · 제출 <?php echo h($psRow['submitted_at']); ?></div></div>
-        <a class="shrink-0 self-start px-4 py-2 rounded-2xl border font-bold" href="?r=project/progress_statement_file&file_id=<?php echo (int)$psRow['current_file_id']; ?>">현재 파일 다운로드</a>
+        <a class="shrink-0 self-start px-4 py-2 rounded-2xl border font-bold" data-cpms-no-loading="1" download href="?r=project/progress_statement_file&file_id=<?php echo (int)$psRow['current_file_id']; ?>">현재 파일 다운로드</a>
     </div>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4 text-sm">
         <div class="rounded-2xl bg-gray-50 p-3"><b>현재 파일</b><div class="break-all mt-1"><?php echo h($psRow['original_file_name']); ?> (v<?php echo (int)$psRow['version_no']; ?>)</div></div>
@@ -85,11 +88,11 @@ foreach ($psSummary as $psKey=>$psInfo):
     <?php if ($psRow['drive_upload_status']==='uploaded' && trim((string)$psRow['drive_web_view_link'])!==''): ?><a href="<?php echo h($psRow['drive_web_view_link']); ?>" target="_blank" rel="noopener" class="inline-flex mt-4 px-4 py-2 rounded-2xl bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">Google Drive에서 보기</a><?php endif; ?>
     <details class="mt-4 rounded-2xl border p-4"><summary class="font-extrabold cursor-pointer">이전 파일·댓글·처리이력</summary>
         <div class="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4 text-sm">
-            <div><b>파일 버전</b><?php foreach ($psFiles as $psFile): ?><a class="block mt-2 text-blue-700 break-all" href="?r=project/progress_statement_file&file_id=<?php echo (int)$psFile['id']; ?>">v<?php echo (int)$psFile['version_no']; ?> <?php echo h($psFile['original_file_name']); ?></a><?php endforeach; ?></div>
-            <div><b>댓글</b><?php foreach ($psComments as $psComment): ?><div class="mt-2 rounded-xl bg-gray-50 p-2"><span class="text-xs text-gray-500"><?php echo h($psComment['author_name']); ?> · <?php echo h($psComment['created_at']); ?></span><div class="whitespace-pre-line"><?php echo h($psComment['comment_text']); ?></div></div><?php endforeach; ?></div>
-            <div><b>처리이력</b><?php foreach ($psHistories as $psHistory): ?><div class="mt-2"><span class="font-bold"><?php echo h(cpms_progress_statement_event_label($psHistory['event_type'])); ?></span> · <?php echo h($psHistory['actor_name']); ?> · <?php echo h($psHistory['created_at']); ?></div><?php endforeach; ?></div>
+            <div><b>파일 버전</b><?php foreach ($psFiles as $psFile): ?><a class="block mt-2 text-blue-700 break-all" data-cpms-no-loading="1" download href="?r=project/progress_statement_file&file_id=<?php echo (int)$psFile['id']; ?>">v<?php echo (int)$psFile['version_no']; ?> <?php echo h($psFile['original_file_name']); ?></a><?php endforeach; ?></div>
+            <div class="lg:col-span-2"><b>댓글</b><div class="mt-2"><?php cpms_progress_statement_render_comments($psComments,$psStatementId,'?r=공사&pid='.(int)$pid.'&tab=progress_statement'); ?></div></div>
+            <div><b>처리이력</b><?php cpms_progress_statement_render_histories($psHistories); ?></div>
         </div>
-        <?php if (cpms_progress_statement_can_comment($pdo,$pid,$psActor)): ?><form method="post" action="?r=project/progress_statement_comment_save" class="mt-4 flex flex-col md:flex-row gap-2"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="statement_id" value="<?php echo (int)$psRow['id']; ?>"><input type="hidden" name="return_url" value="?r=공사&pid=<?php echo (int)$pid; ?>&tab=progress_statement"><textarea name="comment_text" required maxlength="2000" rows="2" class="flex-1 px-3 py-2 rounded-2xl border" placeholder="댓글 입력"></textarea><button class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">댓글 등록</button></form><?php endif; ?>
+        <?php if (cpms_progress_statement_can_comment($pdo,$pid,$psActor)): ?><form method="post" action="?r=project/progress_statement_comment_save" class="mt-4 flex flex-col md:flex-row gap-2"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="statement_id" value="<?php echo (int)$psRow['id']; ?>"><input type="hidden" name="parent_comment_id" value="0"><input type="hidden" name="return_url" value="?r=공사&pid=<?php echo (int)$pid; ?>&tab=progress_statement"><textarea name="comment_text" required maxlength="2000" rows="2" class="flex-1 px-3 py-2 rounded-2xl border" placeholder="댓글 입력"></textarea><button class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">댓글 등록</button></form><?php endif; ?>
     </details>
 </article>
 <?php endforeach; ?>

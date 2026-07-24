@@ -31,12 +31,17 @@ try {
     $reserve->execute(array(':updated_at'=>date('Y-m-d H:i:s'), ':id'=>$statementId));
     if ($reserve->rowCount() !== 1) throw new Exception('이미 다른 사용자가 재업로드를 처리하고 있습니다.');
     $driveAttempted = true;
+    flash_set('success', 'Drive 재업로드를 시작했습니다. 결과는 화면 상태와 알림으로 확인할 수 있습니다.');
+    cpms_progress_statement_flush_redirect($returnUrl);
     $result = cpms_progress_statement_drive_upload($pdo, $statementId, $actor, true);
     if (empty($result['ok'])) throw new Exception($result['message']);
     cpms_progress_statement_notify($pdo, $statementId, 'drive_retry_success', $actor, array('drive_message'=>'완료'));
-    flash_set('success', 'Drive 재업로드가 완료되었습니다.');
+    exit;
 } catch (Exception $e) {
-    if ($driveAttempted) cpms_progress_statement_notify($pdo, $statementId, 'drive_upload_failed', $actor, array('drive_message'=>$e->getMessage()));
+    if ($driveAttempted) {
+        cpms_progress_statement_notify($pdo, $statementId, 'drive_upload_failed', $actor, array('drive_message'=>$e->getMessage()));
+        exit;
+    }
     flash_set('error', 'Drive 재업로드 실패: ' . $e->getMessage());
 }
 header('Location: ' . $returnUrl); exit;

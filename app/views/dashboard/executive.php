@@ -419,7 +419,7 @@ if (!function_exists('cpms_render_executive_work_status_modal')) {
 function cpms_render_executive_work_status_modal($workingPeople, $checkedOutPeople, $attendanceTimeLabel) {
     if (!is_array($workingPeople)) $workingPeople = array();
     if (!is_array($checkedOutPeople)) $checkedOutPeople = array();
-    $totalPeople = count($workingPeople) + count($checkedOutPeople);
+    $totalPeople = count($workingPeople);
     ?>
     <div id="modal-execAttendance-todayWorkStatus" class="cpms-exec-attendance-modal fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="modal-execAttendance-title-todayWorkStatus">
         <div class="absolute inset-0 bg-slate-950/55" data-exec-attendance-close="todayWorkStatus"></div>
@@ -427,7 +427,7 @@ function cpms_render_executive_work_status_modal($workingPeople, $checkedOutPeop
             <div class="relative w-full max-w-6xl max-h-[90vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
                 <div class="flex items-center justify-between gap-4 px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-emerald-50 to-white">
                     <div class="min-w-0">
-                        <div id="modal-execAttendance-title-todayWorkStatus" class="text-xl font-extrabold text-gray-900">오늘 근무 현황</div>
+                        <div id="modal-execAttendance-title-todayWorkStatus" class="text-xl font-extrabold text-gray-900">근무 현황</div>
                         <div class="mt-1 text-sm text-gray-500">근무중 인원과 퇴근한 사람을 구분해 표시합니다.</div>
                     </div>
                     <div class="flex items-center gap-2 shrink-0">
@@ -652,7 +652,7 @@ if ($pdo) {
             $bName = isset($b['name']) ? (string)$b['name'] : '';
             return strcmp($aName, $bName);
         });
-        $todayWorkStatus = count($workingPeople) + count($checkedOutPeople);
+        $todayWorkStatus = count($workingPeople);
 
         $leavePeople = isset($currentLeaveIndex['people']) && is_array($currentLeaveIndex['people']) ? cpms_executive_dashboard_filter_attendance_excluded($currentLeaveIndex['people']) : array();
         $leaveTomorrowPeople = isset($tomorrowLeaveIndex['people']) && is_array($tomorrowLeaveIndex['people']) ? cpms_executive_dashboard_filter_attendance_excluded($tomorrowLeaveIndex['people']) : array();
@@ -832,7 +832,7 @@ unset($cpmsEmployeeAttendanceFormHiddenInputs, $cpmsEmployeeAttendanceReturnUrl,
                 </div>
             </button>
             <button type="button" class="group min-w-0 p-4 rounded-2xl bg-emerald-50 border border-emerald-100 text-left hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-100/70 transition" data-exec-attendance-open="todayWorkStatus" aria-haspopup="dialog">
-                <div class="font-bold text-gray-600 group-hover:text-emerald-700 whitespace-nowrap leading-tight tracking-tight" style="font-size:clamp(.68rem,.9vw,.95rem)">오늘 근무 현황</div>
+                <div class="font-bold text-gray-600 group-hover:text-emerald-700 whitespace-nowrap leading-tight tracking-tight" style="font-size:clamp(.68rem,.9vw,.95rem)">근무 현황</div>
                 <div class="flex items-end justify-between gap-2 mt-3">
                     <div class="font-extrabold text-emerald-700 leading-none" style="font-size:clamp(1.75rem,2.3vw,2.25rem)"><?php echo $todayWorkStatus; ?>명</div>
                     <span class="shrink-0 inline-flex items-center px-2 py-1.5 rounded-full bg-white text-emerald-700 border border-emerald-100 text-[11px] font-extrabold">현황 보기</span>

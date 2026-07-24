@@ -48,12 +48,13 @@ try {
     if ($st->rowCount() !== 1) throw new Exception('재제출 상태 변경에 실패했습니다.');
     cpms_progress_statement_add_history($pdo, $statementId, 'resubmitted', 'rejected', 'resubmitted', $actor, $message);
     $pdo->commit();
-    cpms_progress_statement_notify($pdo, $statementId, 'resubmitted', $actor, array());
     flash_set('success', '새 파일 버전으로 재검토 요청했습니다.');
+    cpms_progress_statement_flush_redirect($returnUrl);
+    cpms_progress_statement_notify($pdo, $statementId, 'resubmitted', $actor, array());
+    exit;
 } catch (Exception $e) {
     if ($pdo && $pdo->inTransaction()) $pdo->rollBack();
     cpms_progress_statement_remove_uncommitted_file($fileInfo);
     flash_set('error', $e->getMessage());
 }
 header('Location: ' . $returnUrl); exit;
-

@@ -32,9 +32,18 @@ try {
     header('Content-Type: ' . ((string)$file['mime_type'] !== '' ? (string)$file['mime_type'] : 'application/octet-stream'));
     header('Content-Length: ' . (string)filesize($path));
     header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: private, max-age=0, must-revalidate');
     header('Content-Disposition: attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($name));
-    readfile($path); exit;
+    @set_time_limit(0);
+    while (ob_get_level() > 0) @ob_end_clean();
+    $handle = @fopen($path, 'rb');
+    if (!$handle) throw new Exception('파일을 열 수 없습니다.');
+    while (!feof($handle)) {
+        echo fread($handle, 1048576);
+        @flush();
+    }
+    fclose($handle);
+    exit;
 } catch (Exception $e) {
     http_response_code(404); echo h($e->getMessage()); exit;
 }
-

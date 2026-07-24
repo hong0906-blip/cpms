@@ -9,6 +9,25 @@ require_once __DIR__ . '/ProgressStatementService.php';
 require_once __DIR__ . '/../views/common/chat_notification_helpers.php';
 require_once __DIR__ . '/../views/approval/google_chat_helpers.php';
 
+if (!function_exists('cpms_progress_statement_detail_url')) {
+function cpms_progress_statement_detail_url($pdo, $statementId, $employeeId) {
+    $base = '';
+    if ($pdo) {
+        try {
+            $base = trim((string)approval_google_chat_setting($pdo, 'google_chat_public_base_url', ''));
+        } catch (Exception $e) { $base = ''; }
+    }
+    if ($base === '' && function_exists('cpms_public_base_url')) $base = cpms_public_base_url($pdo);
+    if ($base === '') $base = 'https://cmbuild.kr/cpms/public';
+    $route = '공무';
+    $query = array('r'=>$route, 'tab'=>'progress_statement_review', 'statement_id'=>(int)$statementId);
+    if ((int)$employeeId > 0 && function_exists('cpms_chat_login_token_create')) {
+        $token = cpms_chat_login_token_create((int)$employeeId, $route);
+        if ($token !== '') $query['_clt'] = $token;
+    }
+    return rtrim($base, '/') . '/?' . http_build_query($query, '', '&');
+}}
+
 if (!function_exists('cpms_progress_statement_notification_recipients')) {
 function cpms_progress_statement_notification_recipients($pdo, $projectId) {
     $rows = array();
@@ -46,6 +65,7 @@ function cpms_progress_statement_notification_message($row, $eventType, $actor, 
         'drive_retry_success' => 'Drive 재업로드 성공'
     );
     $title = isset($titles[$eventType]) ? $titles[$eventType] : cpms_progress_statement_event_label($eventType);
+    if ($eventType === 'commented' && !empty($extra['is_reply'])) $title = '대댓글';
     $lines = array(
         '[CPMS 기성내역서 ' . $title . ']',
         '',
@@ -75,9 +95,10 @@ function cpms_progress_statement_notification_message($row, $eventType, $actor, 
     if ($eventType === 'approved' && isset($extra['drive_message'])) {
         $lines[] = 'Drive 저장 : ' . (string)$extra['drive_message'];
     }
-    $url = base_url() . '/?r=공무&tab=progress_statement_review&statement_id=' . (int)$row['id'];
+    $url = isset($extra['detail_url']) ? trim((string)$extra['detail_url']) : '';
+    if ($url === '') $url = cpms_progress_statement_detail_url(null, (int)$row['id'], 0);
     $lines[] = '';
-    $lines[] = $url;
+    $lines[] = 'URL : ' . $url;
     return implode("\n", $lines);
 }}
 
@@ -87,11 +108,14 @@ function cpms_progress_statement_notify($pdo, $statementId, $eventType, $actor, 
         if ((string)approval_google_chat_setting($pdo, 'google_chat_enabled', '0') !== '1') return;
         $row = cpms_progress_statement_find($pdo, $statementId, false);
         if (!is_array($row)) return;
-        $message = cpms_progress_statement_notification_message($row, $eventType, $actor, is_array($extra) ? $extra : array());
+        $extra = is_array($extra) ? $extra : array();
         $recipients = cpms_progress_statement_notification_recipients($pdo, (int)$row['project_id']);
         foreach ($recipients as $recipient) {
             $space = isset($recipient['google_chat_dm_space_name']) ? trim((string)$recipient['google_chat_dm_space_name']) : '';
             if ((int)$recipient['google_chat_enabled'] !== 1 || $space === '' || strpos($space, 'spaces/') !== 0) continue;
+            $recipientExtra = $extra;
+            $recipientExtra['detail_url'] = cpms_progress_statement_detail_url($pdo, (int)$row['id'], (int)$recipient['id']);
+            $message = cpms_progress_statement_notification_message($row, $eventType, $actor, $recipientExtra);
             $sendText = function_exists('cpms_chat_login_append_missing_tokens') ? cpms_chat_login_append_missing_tokens($message, (int)$recipient['id']) : $message;
             $ok = approval_google_chat_send_message($pdo, $space, $sendText);
             $error = $ok ? null : approval_google_chat_get_last_error();

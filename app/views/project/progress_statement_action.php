@@ -50,17 +50,19 @@ try {
     cpms_progress_statement_add_history($pdo, $statementId, $eventType, $oldStatus, $newStatus, $actor, $action === 'reject' ? $reason : '공무 검토 승인');
     $pdo->commit();
     if ($action === 'approve') {
+        flash_set('success', '승인되었습니다. Drive 저장과 알림은 백그라운드에서 처리됩니다.');
+        cpms_progress_statement_flush_redirect($returnUrl);
         $driveResult = cpms_progress_statement_drive_upload($pdo, $statementId, $actor, false);
         cpms_progress_statement_notify($pdo, $statementId, 'approved', $actor, array('drive_message'=>empty($driveResult['ok']) ? '실패' : '완료'));
         if (empty($driveResult['ok'])) {
             cpms_progress_statement_notify($pdo, $statementId, 'drive_upload_failed', $actor, array('drive_message'=>$driveResult['message']));
-            flash_set('error', '승인은 완료되었으나 Drive 저장에 실패했습니다: ' . $driveResult['message']);
-        } else {
-            flash_set('success', '승인 및 Google Drive 저장이 완료되었습니다.');
         }
+        exit;
     } else {
-        cpms_progress_statement_notify($pdo, $statementId, 'rejected', $actor, array('reject_reason'=>$reason));
         flash_set('success', '반려 처리되었습니다.');
+        cpms_progress_statement_flush_redirect($returnUrl);
+        cpms_progress_statement_notify($pdo, $statementId, 'rejected', $actor, array('reject_reason'=>$reason));
+        exit;
     }
 } catch (Exception $e) {
     if ($pdo && $pdo->inTransaction()) $pdo->rollBack();

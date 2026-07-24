@@ -26,21 +26,30 @@ try {
     if (!is_array($row)) throw new Exception('기성내역서를 찾을 수 없습니다.');
     if (!cpms_progress_statement_can_comment($pdo, (int)$row['project_id'], $actor)) throw new Exception('댓글 작성 권한이 없습니다.');
     $comment = trim(isset($_POST['comment_text']) ? (string)$_POST['comment_text'] : '');
+    $parentCommentId = isset($_POST['parent_comment_id']) ? (int)$_POST['parent_comment_id'] : 0;
     if ($comment === '') throw new Exception('댓글 내용을 입력해주세요.');
     if (function_exists('mb_strlen') && mb_strlen($comment, 'UTF-8') > 2000) throw new Exception('댓글은 2,000자 이하로 입력해주세요.');
+    if ($parentCommentId > 0) {
+        $parentSt = $pdo->prepare("SELECT id FROM cpms_progress_statement_comments WHERE id=:id AND statement_id=:statement_id LIMIT 1");
+        $parentSt->execute(array(':id'=>$parentCommentId, ':statement_id'=>$statementId));
+        if (!$parentSt->fetchColumn()) throw new Exception('답글 대상 댓글을 찾을 수 없습니다.');
+    }
     $pdo->beginTransaction();
     $st = $pdo->prepare("INSERT INTO cpms_progress_statement_comments
-        (statement_id,author_employee_id,author_name,author_email,comment_text,created_at)
-        VALUES (:statement_id,:author_employee_id,:author_name,:author_email,:comment_text,:created_at)");
+        (statement_id,parent_comment_id,author_employee_id,author_name,author_email,author_photo_path,comment_text,created_at)
+        VALUES (:statement_id,:parent_comment_id,:author_employee_id,:author_name,:author_email,:author_photo_path,:comment_text,:created_at)");
     $st->execute(array(':statement_id'=>$statementId, ':author_employee_id'=>$actor['id'] > 0 ? $actor['id'] : null,
-        ':author_name'=>$actor['name'], ':author_email'=>$actor['email'], ':comment_text'=>$comment, ':created_at'=>date('Y-m-d H:i:s')));
-    cpms_progress_statement_add_history($pdo, $statementId, 'commented', $row['status'], $row['status'], $actor, $comment);
+        ':parent_comment_id'=>$parentCommentId > 0 ? $parentCommentId : null,
+        ':author_name'=>$actor['name'], ':author_email'=>$actor['email'], ':author_photo_path'=>isset($actor['photo_path']) ? $actor['photo_path'] : '',
+        ':comment_text'=>$comment, ':created_at'=>date('Y-m-d H:i:s')));
+    cpms_progress_statement_add_history($pdo, $statementId, 'commented', $row['status'], $row['status'], $actor, ($parentCommentId > 0 ? '[대댓글] ' : '') . $comment);
     $pdo->commit();
-    cpms_progress_statement_notify($pdo, $statementId, 'commented', $actor, array('comment'=>$comment));
-    flash_set('success', '댓글이 등록되었습니다.');
+    flash_set('success', $parentCommentId > 0 ? '대댓글이 등록되었습니다.' : '댓글이 등록되었습니다.');
+    cpms_progress_statement_flush_redirect($returnUrl);
+    cpms_progress_statement_notify($pdo, $statementId, 'commented', $actor, array('comment'=>$comment, 'is_reply'=>$parentCommentId > 0));
+    exit;
 } catch (Exception $e) {
     if ($pdo && $pdo->inTransaction()) $pdo->rollBack();
     flash_set('error', $e->getMessage());
 }
 header('Location: ' . $returnUrl); exit;
-

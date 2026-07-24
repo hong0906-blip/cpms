@@ -264,6 +264,17 @@ if ($selectedMenu === $dashboardMenu) {
     </div>
 
     <div class="flex items-center gap-4">
+      <button
+        type="button"
+        id="cpmsGuideTourStart"
+        class="cpms-guide-start"
+        aria-label="현재 화면 사용법 보기"
+        title="현재 화면 사용법 보기"
+      >
+        <span class="cpms-guide-start__mark" aria-hidden="true">?</span>
+        <span class="cpms-guide-start__label">사용법</span>
+      </button>
+
       <?php if ($selectedMenu === $dashboardMenu && $canSwitchDashboardViews): ?>
         <div class="flex gap-1 bg-gray-100/80 backdrop-blur-sm rounded-2xl p-1 shadow-sm">
           <a href="<?php echo h('?r=dashboard_employee'); ?>"

@@ -51,12 +51,13 @@ try {
     $up->execute(array(':file_id'=>$fileId, ':id'=>$statementId));
     cpms_progress_statement_add_history($pdo, $statementId, 'submitted', '', 'pending', $actor, $message);
     $pdo->commit();
-    cpms_progress_statement_notify($pdo, $statementId, 'submitted', $actor, array());
     flash_set('success', '기성내역서가 검토대기로 제출되었습니다.');
+    cpms_progress_statement_flush_redirect($returnUrl);
+    cpms_progress_statement_notify($pdo, $statementId, 'submitted', $actor, array());
+    exit;
 } catch (Exception $e) {
     if ($pdo && $pdo->inTransaction()) $pdo->rollBack();
     cpms_progress_statement_remove_uncommitted_file($fileInfo);
     flash_set('error', $e->getMessage());
 }
 header('Location: ' . $returnUrl); exit;
-

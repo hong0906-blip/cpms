@@ -63,17 +63,19 @@ function cpms_progress_statement_is_executive() {
 
 if (!function_exists('cpms_progress_statement_actor')) {
 function cpms_progress_statement_actor($pdo) {
+    $authUser = Auth::user();
     $actor = array(
         'id' => 0,
         'name' => (string)Auth::userName(),
         'email' => (string)Auth::userEmail(),
         'department' => (string)Auth::userDepartment(),
         'position' => (string)Auth::userPosition(),
-        'role' => (string)Auth::userRole()
+        'role' => (string)Auth::userRole(),
+        'photo_path' => is_array($authUser) && isset($authUser['photo_path']) ? (string)$authUser['photo_path'] : ''
     );
     if (!$pdo || trim($actor['email']) === '') return $actor;
     try {
-        $st = $pdo->prepare("SELECT id, name, email, department, position, role FROM employees WHERE LOWER(TRIM(email)) = LOWER(TRIM(:email)) LIMIT 1");
+        $st = $pdo->prepare("SELECT id, name, email, department, position, role, photo_path FROM employees WHERE LOWER(TRIM(email)) = LOWER(TRIM(:email)) LIMIT 1");
         $st->execute(array(':email' => $actor['email']));
         $row = $st->fetch(PDO::FETCH_ASSOC);
         if (is_array($row)) {
@@ -290,7 +292,15 @@ if (!function_exists('cpms_progress_statement_comments')) {
 function cpms_progress_statement_comments($pdo, $statementId) {
     if (!$pdo || !cpms_progress_statement_schema_ready($pdo)) return array();
     try {
-        $st = $pdo->prepare("SELECT * FROM cpms_progress_statement_comments WHERE statement_id = :id ORDER BY created_at ASC, id ASC");
+        $st = $pdo->prepare("SELECT c.*,
+                    COALESCE(NULLIF(e_id.photo_path, ''), NULLIF(e_email.photo_path, ''), NULLIF(c.author_photo_path, '')) AS display_photo_path
+                FROM cpms_progress_statement_comments c
+                LEFT JOIN employees e_id ON e_id.id = c.author_employee_id
+                LEFT JOIN employees e_email
+                    ON e_id.id IS NULL
+                   AND TRIM(e_email.email) = TRIM(c.author_email)
+                WHERE c.statement_id = :id
+                ORDER BY c.parent_comment_id ASC, c.created_at ASC, c.id ASC");
         $st->execute(array(':id' => (int)$statementId));
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         return is_array($rows) ? $rows : array();
@@ -301,11 +311,206 @@ if (!function_exists('cpms_progress_statement_histories')) {
 function cpms_progress_statement_histories($pdo, $statementId) {
     if (!$pdo || !cpms_progress_statement_schema_ready($pdo)) return array();
     try {
-        $st = $pdo->prepare("SELECT * FROM cpms_progress_statement_histories WHERE statement_id = :id ORDER BY created_at ASC, id ASC");
+        $st = $pdo->prepare("SELECT h.*,
+                    COALESCE(NULLIF(e_id.photo_path, ''), NULLIF(e_email.photo_path, '')) AS actor_photo_path
+                FROM cpms_progress_statement_histories h
+                LEFT JOIN employees e_id ON e_id.id = h.actor_employee_id
+                LEFT JOIN employees e_email
+                    ON e_id.id IS NULL
+                   AND TRIM(e_email.email) = TRIM(h.actor_email)
+                WHERE h.statement_id = :id
+                ORDER BY h.created_at ASC, h.id ASC");
         $st->execute(array(':id' => (int)$statementId));
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         return is_array($rows) ? $rows : array();
     } catch (Exception $e) { return array(); }
+}}
+
+if (!function_exists('cpms_progress_statement_related_maps')) {
+function cpms_progress_statement_related_maps($pdo, $statementIds) {
+    $result = array('files' => array(), 'comments' => array(), 'histories' => array());
+    if (!$pdo || !is_array($statementIds) || count($statementIds) === 0 || !cpms_progress_statement_schema_ready($pdo)) return $result;
+    $ids = array();
+    foreach ($statementIds as $statementId) {
+        $statementId = (int)$statementId;
+        if ($statementId > 0) $ids[$statementId] = $statementId;
+    }
+    if (count($ids) === 0) return $result;
+    $in = implode(',', array_map('intval', array_values($ids)));
+    $queries = array(
+        'files' => "SELECT * FROM cpms_progress_statement_files WHERE statement_id IN (" . $in . ") ORDER BY statement_id ASC, version_no DESC, id DESC",
+        'comments' => "SELECT c.*,
+                COALESCE(NULLIF(e_id.photo_path, ''), NULLIF(e_email.photo_path, ''), NULLIF(c.author_photo_path, '')) AS display_photo_path
+            FROM cpms_progress_statement_comments c
+            LEFT JOIN employees e_id ON e_id.id = c.author_employee_id
+            LEFT JOIN employees e_email
+                ON e_id.id IS NULL
+               AND TRIM(e_email.email) = TRIM(c.author_email)
+            WHERE c.statement_id IN (" . $in . ")
+            ORDER BY c.statement_id ASC, c.parent_comment_id ASC, c.created_at ASC, c.id ASC",
+        'histories' => "SELECT h.*,
+                COALESCE(NULLIF(e_id.photo_path, ''), NULLIF(e_email.photo_path, '')) AS actor_photo_path
+            FROM cpms_progress_statement_histories h
+            LEFT JOIN employees e_id ON e_id.id = h.actor_employee_id
+            LEFT JOIN employees e_email
+                ON e_id.id IS NULL
+               AND TRIM(e_email.email) = TRIM(h.actor_email)
+            WHERE h.statement_id IN (" . $in . ")
+            ORDER BY h.statement_id ASC, h.created_at ASC, h.id ASC"
+    );
+    foreach ($queries as $mapKey => $sql) {
+        try {
+            $st = $pdo->query($sql);
+            while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+                $statementId = isset($row['statement_id']) ? (int)$row['statement_id'] : 0;
+                if ($statementId <= 0) continue;
+                if (!isset($result[$mapKey][$statementId])) $result[$mapKey][$statementId] = array();
+                $result[$mapKey][$statementId][] = $row;
+            }
+        } catch (Exception $e) {
+            $result[$mapKey] = array();
+        }
+    }
+    return $result;
+}}
+
+if (!function_exists('cpms_progress_statement_photo_url')) {
+function cpms_progress_statement_photo_url($path) {
+    $path = trim((string)$path);
+    if ($path === '') return '';
+    if (preg_match('/^https?:\/\//i', $path)) return $path;
+    $path = str_replace('\\', '/', $path);
+    if (strpos($path, '/') === 0) return $path;
+    return (function_exists('base_url') ? base_url() : '') . '/' . ltrim($path, '/');
+}}
+
+if (!function_exists('cpms_progress_statement_comment_initial')) {
+function cpms_progress_statement_comment_initial($name) {
+    $name = trim((string)$name);
+    if ($name === '') return '?';
+    return function_exists('mb_substr') ? mb_substr($name, 0, 1, 'UTF-8') : substr($name, 0, 1);
+}}
+
+if (!function_exists('cpms_progress_statement_render_comment_item')) {
+function cpms_progress_statement_render_comment_item($comment, $childrenMap, $statementId, $returnUrl, $depth) {
+    $commentId = isset($comment['id']) ? (int)$comment['id'] : 0;
+    $name = isset($comment['author_name']) && trim((string)$comment['author_name']) !== '' ? (string)$comment['author_name'] : '작성자';
+    $photoPath = isset($comment['display_photo_path']) && trim((string)$comment['display_photo_path']) !== ''
+        ? $comment['display_photo_path']
+        : (isset($comment['author_photo_path']) ? $comment['author_photo_path'] : '');
+    $photoUrl = cpms_progress_statement_photo_url($photoPath);
+    $indentClass = ((int)$depth > 0) ? 'ml-6 md:ml-10 border-l-4 border-slate-100 pl-3 md:pl-4' : '';
+    ?>
+    <div class="<?php echo h($indentClass); ?>">
+        <div class="rounded-2xl border border-gray-200 bg-white p-3">
+            <div class="flex items-start gap-3">
+                <?php if ($photoUrl !== ''): ?>
+                    <img src="<?php echo h($photoUrl); ?>" alt="<?php echo h($name); ?>" class="w-10 h-10 rounded-full object-cover border border-gray-200 shrink-0">
+                <?php else: ?>
+                    <div class="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-sm font-extrabold text-slate-600 shrink-0"><?php echo h(cpms_progress_statement_comment_initial($name)); ?></div>
+                <?php endif; ?>
+                <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2"><b><?php echo h($name); ?></b><span class="text-xs text-gray-500"><?php echo h(isset($comment['created_at']) ? $comment['created_at'] : ''); ?></span></div>
+                    <div class="mt-2 text-sm text-gray-800 whitespace-pre-line break-words"><?php echo h(isset($comment['comment_text']) ? $comment['comment_text'] : ''); ?></div>
+                    <details class="mt-2">
+                        <summary class="cursor-pointer text-xs font-bold text-blue-700">답글 쓰기</summary>
+                        <form method="post" action="?r=project/progress_statement_comment_save" class="mt-2 flex flex-col md:flex-row gap-2" data-cpms-progress-comment-form>
+                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                            <input type="hidden" name="statement_id" value="<?php echo (int)$statementId; ?>">
+                            <input type="hidden" name="parent_comment_id" value="<?php echo (int)$commentId; ?>">
+                            <input type="hidden" name="return_url" value="<?php echo h($returnUrl); ?>">
+                            <textarea name="comment_text" required maxlength="2000" rows="2" class="flex-1 px-3 py-2 rounded-xl border" placeholder="대댓글을 입력하세요."></textarea>
+                            <button class="px-4 py-2 rounded-xl bg-gray-900 text-white font-extrabold">대댓글 등록</button>
+                        </form>
+                    </details>
+                </div>
+            </div>
+        </div>
+        <?php if (isset($childrenMap[$commentId]) && is_array($childrenMap[$commentId])): ?>
+            <div class="mt-2 space-y-2">
+                <?php foreach ($childrenMap[$commentId] as $childComment): ?>
+                    <?php cpms_progress_statement_render_comment_item($childComment, $childrenMap, $statementId, $returnUrl, ((int)$depth + 1)); ?>
+                <?php endforeach; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+    <?php
+}}
+
+if (!function_exists('cpms_progress_statement_render_comments')) {
+function cpms_progress_statement_render_comments($comments, $statementId, $returnUrl) {
+    $childrenMap = array();
+    $root = array();
+    if (!is_array($comments)) $comments = array();
+    foreach ($comments as $comment) {
+        $parentId = isset($comment['parent_comment_id']) ? (int)$comment['parent_comment_id'] : 0;
+        if ($parentId > 0) {
+            if (!isset($childrenMap[$parentId])) $childrenMap[$parentId] = array();
+            $childrenMap[$parentId][] = $comment;
+        } else {
+            $root[] = $comment;
+        }
+    }
+    if (count($root) === 0) {
+        echo '<div class="rounded-xl border border-dashed border-gray-300 p-3 text-sm text-gray-500">등록된 댓글이 없습니다.</div>';
+        return;
+    }
+    echo '<div class="space-y-3">';
+    foreach ($root as $comment) cpms_progress_statement_render_comment_item($comment, $childrenMap, $statementId, $returnUrl, 0);
+    echo '</div>';
+}}
+
+if (!function_exists('cpms_progress_statement_render_histories')) {
+function cpms_progress_statement_render_histories($histories) {
+    if (!is_array($histories) || count($histories) === 0) {
+        echo '<div class="mt-2 rounded-xl border border-dashed border-gray-300 p-3 text-sm text-gray-500">등록된 처리이력이 없습니다.</div>';
+        return;
+    }
+    echo '<div class="mt-2 space-y-3">';
+    foreach ($histories as $history) {
+        $actorName = isset($history['actor_name']) && trim((string)$history['actor_name']) !== ''
+            ? (string)$history['actor_name']
+            : '처리자';
+        $photoUrl = cpms_progress_statement_photo_url(isset($history['actor_photo_path']) ? $history['actor_photo_path'] : '');
+        ?>
+        <div class="flex items-start gap-3 rounded-2xl border border-gray-200 bg-white p-3">
+            <?php if ($photoUrl !== ''): ?>
+                <img src="<?php echo h($photoUrl); ?>" alt="<?php echo h($actorName); ?>" class="w-10 h-10 rounded-full object-cover border border-gray-200 shrink-0">
+            <?php else: ?>
+                <div class="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-sm font-extrabold text-slate-600 shrink-0"><?php echo h(cpms_progress_statement_comment_initial($actorName)); ?></div>
+            <?php endif; ?>
+            <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <b class="text-gray-900"><?php echo h(cpms_progress_statement_event_label(isset($history['event_type']) ? $history['event_type'] : '')); ?></b>
+                    <span class="font-bold text-gray-700"><?php echo h($actorName); ?></span>
+                    <span class="text-xs text-gray-500"><?php echo h(isset($history['created_at']) ? $history['created_at'] : ''); ?></span>
+                </div>
+                <?php if (isset($history['description']) && trim((string)$history['description']) !== ''): ?>
+                    <div class="mt-1 text-sm text-gray-600 whitespace-pre-line break-words"><?php echo h($history['description']); ?></div>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php
+    }
+    echo '</div>';
+}}
+
+if (!function_exists('cpms_progress_statement_flush_redirect')) {
+function cpms_progress_statement_flush_redirect($url) {
+    $url = cpms_progress_statement_safe_return($url, '?r=대시보드');
+    if (headers_sent()) return false;
+    ignore_user_abort(true);
+    header('Location: ' . $url, true, 303);
+    header('Content-Length: 0');
+    header('Connection: close');
+    if (session_id() !== '') @session_write_close();
+    if (function_exists('fastcgi_finish_request')) {
+        @fastcgi_finish_request();
+        return true;
+    }
+    while (ob_get_level() > 0) @ob_end_flush();
+    @flush();
+    return true;
 }}
 
 if (!function_exists('cpms_progress_statement_safe_return')) {
