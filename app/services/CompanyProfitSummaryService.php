@@ -201,10 +201,11 @@ function cpms_company_profit_normalize_filters($request, $pdo) {
     $month = isset($request['month']) ? (int)$request['month'] : 0;
     if ($month < 1 || $month > 12) $month = 0;
 
+    $defaultEndMonth = ($year === $currentYear) ? date('Y-m') : sprintf('%04d-12', $year);
     $startMonth = isset($request['start_month']) ? trim((string)$request['start_month']) : '';
     $endMonth = isset($request['end_month']) ? trim((string)$request['end_month']) : '';
     if (!cpms_company_profit_month_valid($startMonth)) $startMonth = sprintf('%04d-01', $year);
-    if (!cpms_company_profit_month_valid($endMonth)) $endMonth = sprintf('%04d-12', $year);
+    if (!cpms_company_profit_month_valid($endMonth)) $endMonth = $defaultEndMonth;
 
     if ($scope === 'month') {
         if ($month <= 0) $month = (int)date('n');
@@ -212,7 +213,7 @@ function cpms_company_profit_normalize_filters($request, $pdo) {
         $endMonth = $startMonth;
     } else if ($scope === 'year') {
         $startMonth = sprintf('%04d-01', $year);
-        $endMonth = sprintf('%04d-12', $year);
+        $endMonth = $defaultEndMonth;
     } else if ($scope === 'all') {
         $startMonth = sprintf('%04d-01', $years[0]);
         $endMonth = sprintf('%04d-12', $years[count($years) - 1]);

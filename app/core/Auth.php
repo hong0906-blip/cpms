@@ -366,6 +366,33 @@ class Auth
         return false;
     }
 
+    /**
+     * 모바일 공무 메뉴 접근 권한.
+     *
+     * 공무/개발 부서와 대표·대표이사·부사장만 허용합니다.
+     */
+    public static function canAccessPublicAffairsMobile()
+    {
+        if (!self::check()) return false;
+
+        $dept = self::normalizeDept(self::userDepartment());
+        if ($dept === '공무' || $dept === '개발') return true;
+
+        $allowedValues = array('대표', '대표이사', '대표님', '부사장');
+        $userValues = array(self::userPosition(), self::userStoredRole());
+
+        foreach ($userValues as $userValue) {
+            $normalizedValue = self::normalizeText($userValue);
+            if ($normalizedValue === '') continue;
+
+            foreach ($allowedValues as $allowedValue) {
+                if ($normalizedValue === self::normalizeText($allowedValue)) return true;
+            }
+        }
+
+        return false;
+    }
+
     // ★ 직급
     public static function userPosition()
     {
@@ -575,6 +602,7 @@ class Auth
             '관리부서' => '관리',
             '공무부' => '공무',
             '공무팀' => '공무',
+            '공무부서' => '공무',
             '품질부' => '품질',
             '안전부' => '안전',
             '공사부' => '공사',

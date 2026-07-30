@@ -626,7 +626,7 @@ function cpms_task_feed_labor_gongsu_items_for_employee($pdo, $employeeId, $empl
     if (!$pdo || !cpms_tasks_table_exists($pdo, 'cpms_labor_gongsu_overrides')) return $rows;
     try {
         if (function_exists('cpms_ensure_labor_override_table')) cpms_ensure_labor_override_table($pdo);
-        $sql = "SELECT o.id, o.project_id, o.batch_token, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason, o.status, o.requested_by, o.requested_by_name, o.requested_by_email, o.approval_stage, o.created_at, o.updated_at, p.name AS project_name
+        $sql = "SELECT o.id, o.project_id, o.batch_token, o.request_scope, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason, o.status, o.requested_by, o.requested_by_name, o.requested_by_email, o.approval_stage, o.created_at, o.updated_at, p.name AS project_name
                 FROM cpms_labor_gongsu_overrides o
                 LEFT JOIN cpms_projects p ON p.id = o.project_id
                 WHERE o.status = 'pending'
@@ -642,11 +642,12 @@ function cpms_task_feed_labor_gongsu_items_for_employee($pdo, $employeeId, $empl
             $title = trim((string)$item['project_name']) !== '' ? (string)$item['project_name'] . ' 공수승인' : '공수승인 요청';
             $workerNamesText = isset($item['worker_names_text']) && trim((string)$item['worker_names_text']) !== '' ? (string)$item['worker_names_text'] : (isset($item['worker_name']) ? (string)$item['worker_name'] : '-');
             $workerCount = isset($item['worker_count']) ? (int)$item['worker_count'] : 1;
+            $isAllRequest = isset($item['request_scope']) && (string)$item['request_scope'] === 'all';
             $rows[count($rows)] = array(
                 'source_type' => 'labor_gongsu',
                 'source_id' => (int)$item['id'],
                 'title' => $title,
-                'content' => '작업자: ' . $workerNamesText . ($workerCount > 1 ? ' (총 ' . $workerCount . '명)' : '') . ' / 작업일자: ' . (isset($item['work_date']) ? (string)$item['work_date'] : '-'),
+                'content' => ($isAllRequest ? '[전체요청] ' : '') . '작업자: ' . $workerNamesText . ($workerCount > 1 ? ' (총 ' . $workerCount . '명)' : '') . ' / 작업일자: ' . (isset($item['work_date']) ? (string)$item['work_date'] : '-') . ' / 요청공수: ' . (isset($item['new_value']) ? (string)$item['new_value'] : '-') . ' / 사유: ' . (isset($item['reason']) && trim((string)$item['reason']) !== '' ? (string)$item['reason'] : '-'),
                 'requester_name' => trim((string)$item['requested_by_name']) !== '' ? (string)$item['requested_by_name'] : (string)$item['requested_by_email'],
                 'requester_employee_id' => isset($item['requested_by']) ? (int)$item['requested_by'] : 0,
                 'assignee_name' => '',

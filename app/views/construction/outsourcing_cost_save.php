@@ -45,6 +45,9 @@ try {
     $businessNo = isset($_POST['business_no']) ? trim((string)$_POST['business_no']) : '';
     $contact = isset($_POST['contact']) ? trim((string)$_POST['contact']) : '';
     $amount = cpms_outsourcing_money(isset($_POST['amount']) ? $_POST['amount'] : '');
+    $memo = isset($_POST['memo']) ? trim((string)$_POST['memo']) : '';
+    if (function_exists('mb_substr')) $memo = mb_substr($memo, 0, 500, 'UTF-8');
+    else $memo = substr($memo, 0, 500);
     if ($expenseDate === '') throw new Exception('일자를 올바르게 입력해주세요.');
     if ($companyName === '') throw new Exception('업체명을 입력해주세요.');
     if ($amount <= 0) throw new Exception('금액은 0보다 크게 입력해주세요.');
@@ -53,15 +56,15 @@ try {
         $sql = "UPDATE cpms_outsourcing_costs
                 SET expense_date = :expense_date, category = '외주비', company_name = :company_name,
                     representative_name = :representative_name, business_no = :business_no,
-                    contact = :contact, amount = :amount, updated_at = :now
+                    contact = :contact, amount = :amount, memo = :memo, updated_at = :now
                 WHERE id = :id AND project_id = :pid AND is_deleted = 0";
         $st = $pdo->prepare($sql);
         $st->bindValue(':id', $entryId, PDO::PARAM_INT);
     } else {
         $sql = "INSERT INTO cpms_outsourcing_costs
-                (project_id, expense_date, category, company_name, representative_name, business_no, contact, amount,
+                (project_id, expense_date, category, company_name, representative_name, business_no, contact, amount, memo,
                  created_by_name, created_by_email, is_deleted, created_at, updated_at)
-                VALUES (:pid, :expense_date, '외주비', :company_name, :representative_name, :business_no, :contact, :amount,
+                VALUES (:pid, :expense_date, '외주비', :company_name, :representative_name, :business_no, :contact, :amount, :memo,
                  :created_by_name, :created_by_email, 0, :now, :now)";
         $st = $pdo->prepare($sql);
         $st->bindValue(':created_by_name', (string)Auth::userName());
@@ -74,12 +77,24 @@ try {
     $st->bindValue(':business_no', $businessNo === '' ? null : $businessNo, $businessNo === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
     $st->bindValue(':contact', $contact === '' ? null : $contact, $contact === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
     $st->bindValue(':amount', number_format($amount, 2, '.', ''));
+    $st->bindValue(':memo', $memo === '' ? null : $memo, $memo === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
     $st->bindValue(':now', $now);
     $st->execute();
-    flash_set('success', $entryId > 0 ? '외주비 입력 내역을 수정했습니다.' : '외주비를 등록했습니다.');
+    $savedEntryId = $entryId > 0 ? $entryId : (int)$pdo->lastInsertId();
+    $uploadResult = cpms_outsourcing_file_store_uploads($pdo, 'attachments', $projectId, $savedEntryId, substr($expenseDate, 0, 7));
+    $successMessage = $entryId > 0 ? '외주비 입력 내역을 수정했습니다.' : '외주비를 등록했습니다.';
+    if (isset($uploadResult['has_file']) && $uploadResult['has_file']) {
+        if (isset($uploadResult['ok']) && $uploadResult['ok']) {
+            $successMessage .= ' ' . (isset($uploadResult['message']) ? $uploadResult['message'] : '');
+        } else {
+            flash_set('error', $successMessage . ' 다만 파일 첨부 실패: ' . (isset($uploadResult['message']) ? $uploadResult['message'] : '알 수 없는 오류'));
+            header('Location: ' . $redirect);
+            exit;
+        }
+    }
+    flash_set('success', trim($successMessage));
 } catch (Exception $e) {
     flash_set('error', '외주비 저장 실패: ' . $e->getMessage());
 }
 header('Location: ' . $redirect);
 exit;
-

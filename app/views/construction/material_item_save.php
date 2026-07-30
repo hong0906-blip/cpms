@@ -1258,9 +1258,15 @@ if (!$pdo) {
 }
 cpms_material_usage_ensure_schema($pdo);
 $hasMaterialAdvanceYn = cpms_material_usage_column_exists($pdo, 'advance_yn');
+$validatedUsageDates = material_collect_usage_dates($usageDates, $useDatesText, $ym);
+if (count($validatedUsageDates) > 1) {
+    flash_set('error', '사용일자는 한 번에 하나만 선택할 수 있습니다.');
+    header('Location: ' . $redirect);
+    exit;
+}
 
 if ($category === '안전관리비') {
-    $dates = material_collect_usage_dates($usageDates, $useDatesText, $ym);
+    $dates = $validatedUsageDates;
     if (count($dates) <= 0) {
         flash_set('error', '안전관리비는 사용일자를 한 개 이상 선택해주세요.');
         header('Location: ' . $redirect);
@@ -1476,7 +1482,7 @@ try {
     $stPreset->bindValue(':now', $now);
     $stPreset->execute();
 
-    $dates = material_collect_usage_dates($usageDates, $useDatesText, $ym);
+    $dates = $validatedUsageDates;
     foreach ($dates as $d) {
         if (!material_is_in_month_range($d, $ym)) {
             $range = material_month_range($ym);

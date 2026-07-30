@@ -69,6 +69,13 @@ try {
     if (isset($companyLeaveAdditionResult['reason']) && trim((string)$companyLeaveAdditionResult['reason']) !== '') {
         echo ' company_leave_addition_reason=' . str_replace(array("\r", "\n"), ' ', (string)$companyLeaveAdditionResult['reason']);
     }
+    $monthlySummaryResult = isset($result['monthly_summary']) && is_array($result['monthly_summary'])
+        ? $result['monthly_summary']
+        : array('ok' => true, 'skipped' => true, 'message' => 'not due');
+    echo ' monthly_summary=' . (!empty($monthlySummaryResult['skipped']) ? 'skipped' : (!empty($monthlySummaryResult['ok']) ? 'success' : 'failed'));
+    if (empty($monthlySummaryResult['ok']) && isset($monthlySummaryResult['message'])) {
+        echo ' monthly_summary_reason=' . str_replace(array("\r", "\n"), ' ', (string)$monthlySummaryResult['message']);
+    }
     echo PHP_EOL;
     exit(0);
 } catch (Exception $e) {

@@ -173,6 +173,11 @@ try {
         header('Location: ' . $redirect);
         exit;
     }
+    if (count($dates) > 1) {
+        flash_set('error', '사용일자는 한 번에 하나만 선택할 수 있습니다.');
+        header('Location: ' . $redirect);
+        exit;
+    }
     foreach ($dates as $d) {
         if (!material_is_in_month_range2($d, $ym)) {
             $range = material_month_range2($ym);

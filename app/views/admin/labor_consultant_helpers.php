@@ -539,10 +539,8 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
 
             $wageRate = function_exists('cpms_resolve_labor_wage_rate') ? (float)cpms_resolve_labor_wage_rate($worker) : 0.0;
             $outsourcingRatio = function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($worker) : ((isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 100 : 0);
-            // 공사섹션 노무비 탭과 동일하게 전액 외주비 인원은 노무사 확인용 자료에서 제외합니다.
-            if ($outsourcingRatio >= 100) continue;
-            $laborAmounts = function_exists('cpms_labor_calculate_amounts')
-                ? cpms_labor_calculate_amounts($totalGongsu, $wageRate, $outsourcingRatio)
+            $laborAmounts = function_exists('cpms_labor_calculate_worker_month_amounts')
+                ? cpms_labor_calculate_worker_month_amounts($worker, $gongsuMap, $ym)
                 : array(
                     'total_amount' => round($totalGongsu * $wageRate),
                     'outsourcing_ratio' => $outsourcingRatio,
@@ -550,6 +548,8 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
                     'outsourcing_amount' => round(round($totalGongsu * $wageRate) * $outsourcingRatio / 100),
                     'labor_amount' => round($totalGongsu * $wageRate) - round(round($totalGongsu * $wageRate) * $outsourcingRatio / 100),
                 );
+            // 선택 월의 적용기간까지 계산한 결과가 전액 외주비인 경우만 제외합니다.
+            if (!isset($laborAmounts['labor_amount']) || (float)$laborAmounts['labor_amount'] <= 0) continue;
             $rows[count($rows)] = array(
                 'project_id' => $projectId,
                 'project_name' => $projectName,

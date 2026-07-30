@@ -2,6 +2,7 @@
 storage/secrets/
 storage/logs/
 storage/tmp/
+storage/public_affairs_monthly_summary/
 cpms_private/
 **/cpms-drive-uploader.json
 tools/test_drive_upload.php

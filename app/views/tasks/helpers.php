@@ -3010,7 +3010,30 @@ function cpms_tasks_delay_slot_for_now($task, $nowTs)
 if (!function_exists('cpms_tasks_process_delayed_notifications')) {
 function cpms_tasks_process_delayed_notifications($pdo, $limit)
 {
-    $result = array('checked' => 0, 'reserved' => 0, 'sent' => 0, 'failed' => 0, 'skipped' => 0);
+    $result = array(
+        'checked' => 0,
+        'reserved' => 0,
+        'sent' => 0,
+        'failed' => 0,
+        'skipped' => 0,
+        'monthly_summary' => array('ok' => true, 'skipped' => true, 'message' => 'not due')
+    );
+    $monthlySummaryDay = (int)date('d');
+    $monthlySummaryLastDay = (int)date('t');
+    if ($pdo && date('H:i') === '23:59' && in_array($monthlySummaryDay, array(10, 20, 25, $monthlySummaryLastDay), true)) {
+        try {
+            require_once dirname(dirname(__DIR__)) . '/services/PublicAffairsMonthlySummaryPdfService.php';
+            $result['monthly_summary'] = cpms_public_affairs_monthly_summary_generate(
+                $pdo,
+                date('Y-m'),
+                date('Y-m-d'),
+                'system',
+                array('mode' => 'cron', 'force' => false)
+            );
+        } catch (Exception $e) {
+            $result['monthly_summary'] = array('ok' => false, 'skipped' => false, 'message' => $e->getMessage());
+        }
+    }
     if (!$pdo || !cpms_tasks_table_exists($pdo, 'cpms_tasks') || !cpms_tasks_ensure_delay_notification_schema($pdo)) return $result;
     if (!function_exists('cpms_send_google_chat_to_employee')) {
         require_once dirname(dirname(__DIR__)) . '/helpers.php';

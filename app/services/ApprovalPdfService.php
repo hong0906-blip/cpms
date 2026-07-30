@@ -391,11 +391,35 @@ function cpms_approval_pdf_validate_file($path) {
     return array('ok' => true, 'message' => 'PDF file created.', 'size' => $size);
 }}
 
+if (!function_exists('cpms_approval_pdf_page_count')) {
+function cpms_approval_pdf_page_count($path) {
+    $path = trim((string)$path);
+    if ($path === '' || !is_file($path)) return 0;
+    $content = @file_get_contents($path);
+    if ($content === false || $content === '') return 0;
+    $matches = array();
+    $count = preg_match_all('/\/Type\s*\/Page\b/', $content, $matches);
+    return $count !== false ? (int)$count : 0;
+}}
+
 if (!function_exists('cpms_approval_pdf_run_wkhtmltopdf')) {
-function cpms_approval_pdf_run_wkhtmltopdf($htmlPath, $pdfPath, $toolPath) {
+function cpms_approval_pdf_run_wkhtmltopdf($htmlPath, $pdfPath, $toolPath, $context = null) {
+    if (!is_array($context)) $context = array();
+    $pageFormat = isset($context['page_format']) ? strtoupper(trim((string)$context['page_format'])) : 'A4';
+    $pageSize = (strpos($pageFormat, 'A3') === 0) ? 'A3' : 'A4';
+    $orientation = (substr($pageFormat, -2) === '-L') ? 'Landscape' : 'Portrait';
+    $pageWidth = isset($context['page_width_mm']) ? (float)$context['page_width_mm'] : 0.0;
+    $pageHeight = isset($context['page_height_mm']) ? (float)$context['page_height_mm'] : 0.0;
+    $customPage = ($pageWidth >= 50 && $pageHeight >= 50 && $pageWidth <= 5000 && $pageHeight <= 5000);
+    $pageArguments = $customPage
+        ? (' --page-width ' . escapeshellarg(number_format($pageWidth, 2, '.', '') . 'mm')
+            . ' --page-height ' . escapeshellarg(number_format($pageHeight, 2, '.', '') . 'mm'))
+        : (' --page-size ' . escapeshellarg($pageSize)
+            . ' --orientation ' . escapeshellarg($orientation));
     $common = ' --encoding ' . escapeshellarg('utf-8')
         . ' --print-media-type'
         . ' --quiet'
+        . $pageArguments
         . ' --margin-top ' . escapeshellarg('8mm')
         . ' --margin-right ' . escapeshellarg('8mm')
         . ' --margin-bottom ' . escapeshellarg('8mm')
@@ -447,16 +471,32 @@ function cpms_approval_pdf_run_mpdf($html, $pdfPath, $context) {
 
     try {
         if (is_file($pdfPath)) @unlink($pdfPath);
-        $mpdf = new mPDF('utf-8', 'A4');
+        $pageFormat = isset($context['page_format']) ? strtoupper(trim((string)$context['page_format'])) : 'A4';
+        if (!in_array($pageFormat, array('A4', 'A4-L', 'A3', 'A3-L'), true)) $pageFormat = 'A4';
+        $pageWidth = isset($context['page_width_mm']) ? (float)$context['page_width_mm'] : 0.0;
+        $pageHeight = isset($context['page_height_mm']) ? (float)$context['page_height_mm'] : 0.0;
+        $customPage = ($pageWidth >= 50 && $pageHeight >= 50 && $pageWidth <= 5000 && $pageHeight <= 5000);
+        $mpdfPageFormat = $customPage ? array($pageWidth, $pageHeight) : $pageFormat;
+        $pdfTitle = isset($context['pdf_title']) ? trim((string)$context['pdf_title']) : '';
+        if ($pdfTitle === '') $pdfTitle = approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%99%84%EB%A3%8C%EB%AC%B8%EC%84%9C');
+        $mpdf = new mPDF('utf-8', $mpdfPageFormat);
         $mpdf->tempDir = $temp['path'];
         $mpdf->autoScriptToLang = true;
         $mpdf->autoLangToFont = true;
         $mpdf->useSubstitutions = true;
+        if (!empty($context['single_page'])) {
+            $mpdf->shrink_tables_to_fit = 2;
+            $mpdf->keep_table_proportions = true;
+            $mpdf->packTableData = true;
+            if (method_exists($mpdf, 'SetAutoPageBreak')) {
+                $mpdf->SetAutoPageBreak(false, 0);
+            }
+        }
         if (method_exists($mpdf, 'SetDisplayMode')) {
             $mpdf->SetDisplayMode('fullpage');
         }
         if (method_exists($mpdf, 'SetTitle')) {
-            $mpdf->SetTitle(approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%99%84%EB%A3%8C%EB%AC%B8%EC%84%9C'));
+            $mpdf->SetTitle($pdfTitle);
         }
         $mpdf->WriteHTML((string)$html);
         $mpdf->Output($pdfPath, 'F');
@@ -475,6 +515,13 @@ function cpms_approval_pdf_run_mpdf($html, $pdfPath, $context) {
             'message' => isset($valid['message']) ? $valid['message'] : 'Generated PDF validation failed.'
         )));
         return array('ok' => false, 'message' => isset($valid['message']) ? $valid['message'] : 'Generated PDF validation failed.', 'size' => isset($valid['size']) ? (int)$valid['size'] : 0);
+    }
+    if (!empty($context['single_page'])) {
+        $pageCount = cpms_approval_pdf_page_count($pdfPath);
+        if ($pageCount > 1) {
+            cpms_approval_pdf_cleanup_temp_file($pdfPath);
+            return array('ok' => false, 'message' => 'PDF가 ' . $pageCount . '장으로 분할되어 업로드를 중단했습니다.', 'size' => 0);
+        }
     }
     return array('ok' => true, 'message' => 'PDF file created by mPDF.', 'size' => (int)$valid['size'], 'engine' => 'mpdf');
 }}
@@ -516,11 +563,18 @@ function cpms_approval_pdf_create_from_html($html, $pdfName, $context) {
         return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => 'Approval PDF source HTML could not be written.');
     }
 
-    $run = cpms_approval_pdf_run_wkhtmltopdf($htmlPath, $pdfPath, $tool['path']);
+    $run = cpms_approval_pdf_run_wkhtmltopdf($htmlPath, $pdfPath, $tool['path'], $context);
     cpms_approval_pdf_cleanup_temp_file($htmlPath);
     if (empty($run['ok'])) {
         cpms_approval_pdf_cleanup_temp_file($pdfPath);
         return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => isset($run['message']) ? $run['message'] : 'PDF generation failed.');
+    }
+    if (!empty($context['single_page'])) {
+        $pageCount = cpms_approval_pdf_page_count($pdfPath);
+        if ($pageCount > 1) {
+            cpms_approval_pdf_cleanup_temp_file($pdfPath);
+            return array('ok' => false, 'path' => '', 'name' => $pdfName, 'size' => 0, 'message' => 'PDF가 ' . $pageCount . '장으로 분할되어 업로드를 중단했습니다.');
+        }
     }
     return array('ok' => true, 'path' => $pdfPath, 'name' => $pdfName, 'mime_type' => 'application/pdf', 'size' => (int)$run['size'], 'message' => 'PDF file created by wkhtmltopdf.', 'tool' => $tool['path'], 'engine' => 'wkhtmltopdf');
 }}

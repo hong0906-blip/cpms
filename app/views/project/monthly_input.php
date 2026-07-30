@@ -18,6 +18,7 @@ $selectedViewMonth = '';
 $months = array();
 $monthlyRevenue = array();
 $rowsBySection = array('외주비'=>array(),'구매품'=>array(),'자재비'=>array(),'장비비'=>array(),'노무비'=>array(),'기타경비'=>array(),'안전관리비'=>array(),'공제분'=>array());
+$deductionEntryRows = array();
 $errors = array();
 $notices = array();
 $deductionTableMissing = false;
@@ -184,7 +185,7 @@ function project_monthly_labor_breakdown($pdo, $projectId, $projectName, $ym) {
         $outsourcingRatio = cpms_resolve_worker_outsourcing_ratio($worker);
         // 파일: app/views/project/monthly_input.php
         // 전체 지급총액을 월별 비율로 한 번만 분할하여 노무비와 외주비 중복을 막습니다.
-        $amounts = cpms_labor_calculate_amounts($totalGongsu, $wageRate, $outsourcingRatio);
+        $amounts = cpms_labor_calculate_worker_month_amounts($worker, $attendanceGongsuMap, $ym);
         $laborAmount = isset($amounts['labor_amount']) ? (float)$amounts['labor_amount'] : 0.0;
         $outsourcingAmount = isset($amounts['outsourcing_amount']) ? (float)$amounts['outsourcing_amount'] : 0.0;
         if ($laborAmount <= 0 && $outsourcingAmount <= 0) { continue; }
@@ -589,12 +590,13 @@ if ($pdo && is_array($selectedProject)) {
             foreach ($outsourcingCompanyAmounts as $companyName => $amount) {
                 $companyName = trim((string)$companyName);
                 if ($companyName === '') $companyName = '창명건설';
-                $outsourcingKey = 'labor|' . project_monthly_text_key($companyName);
+                $outsourcingKey = project_monthly_text_key($companyName);
+                if ($outsourcingKey === '') $outsourcingKey = '-';
                 if (!isset($outsourcingCompanyRows[$outsourcingKey])) {
                     $outsourcingCompanyRows[$outsourcingKey] = array(
                         'section' => '외주비',
                         '업체명' => $companyName,
-                        '내역' => '노무비 연동 외주비',
+                        '내역' => '외주비 합계',
                         'months' => monthly_zero_map($allMonths)
                     );
                 }
@@ -619,12 +621,13 @@ if ($pdo && is_array($selectedProject)) {
             if ($expenseYm === '' || !in_array($expenseYm, $allMonths, true)) continue;
             $companyName = isset($manualOutsourcingRow['company_name']) ? trim((string)$manualOutsourcingRow['company_name']) : '';
             if ($companyName === '') $companyName = '-';
-            $outsourcingKey = 'manual|' . project_monthly_text_key($companyName);
+            $outsourcingKey = project_monthly_text_key($companyName);
+            if ($outsourcingKey === '') $outsourcingKey = '-';
             if (!isset($outsourcingCompanyRows[$outsourcingKey])) {
                 $outsourcingCompanyRows[$outsourcingKey] = array(
                     'section' => '외주비',
                     '업체명' => $companyName,
-                    '내역' => '외주비 입력 합계',
+                    '내역' => '외주비 합계',
                     'months' => monthly_zero_map($allMonths)
                 );
             }
@@ -648,10 +651,33 @@ if ($pdo && is_array($selectedProject)) {
             $stDed->execute();
             $dd = $stDed->fetchAll();
             if (!is_array($dd)) { $dd = array(); }
+            $deductionRowsByName = array();
             foreach ($dd as $r) {
-                $row = array('section'=>'공제분','업체명'=>'','내역'=>$r['deduction_name'],'memo'=>$r['memo'],'months'=>monthly_zero_map($allMonths),'id'=>(int)$r['id']);
-                if (isset($row['months'][$r['ym']])) { $row['months'][$r['ym']] = (float)$r['amount']; }
-                $rowsBySection['공제분'][] = $row;
+                $deductionName = isset($r['deduction_name']) ? trim((string)$r['deduction_name']) : '';
+                if ($deductionName === '') $deductionName = '-';
+                $entryRow = array('section'=>'공제분','업체명'=>'','내역'=>$deductionName,'memo'=>$r['memo'],'months'=>monthly_zero_map($allMonths),'id'=>(int)$r['id']);
+                if (isset($entryRow['months'][$r['ym']])) { $entryRow['months'][$r['ym']] = (float)$r['amount']; }
+                $deductionEntryRows[] = $entryRow;
+
+                $deductionKey = project_monthly_text_key($deductionName);
+                if ($deductionKey === '') $deductionKey = '-';
+                if (!isset($deductionRowsByName[$deductionKey])) {
+                    $deductionRowsByName[$deductionKey] = array(
+                        'section'=>'공제분',
+                        '업체명'=>'',
+                        '내역'=>$deductionName,
+                        'months'=>monthly_zero_map($allMonths)
+                    );
+                }
+                if (isset($deductionRowsByName[$deductionKey]['months'][$r['ym']])) {
+                    $deductionRowsByName[$deductionKey]['months'][$r['ym']] += (float)$r['amount'];
+                }
+            }
+            if (count($deductionRowsByName) > 0) {
+                ksort($deductionRowsByName);
+                foreach ($deductionRowsByName as $deductionRow) {
+                    $rowsBySection['공제분'][] = $deductionRow;
+                }
             }
         } else {
             $deductionTableMissing = true;
@@ -855,7 +881,7 @@ if (!isset($row['내역_html']) && count($displayMonths) === 1 && isset($row['de
 <input type="text" name="memo" placeholder="메모" class="px-2 py-1 border rounded w-56">
 <button type="submit" class="px-3 py-1 rounded bg-amber-700 text-white">공제분 저장</button>
 </form>
-<?php if (count($rowsBySection['공제분'])>0): ?><div class="mt-2 text-sm space-y-1"><?php foreach($rowsBySection['공제분'] as $d): ?>
+<?php if (count($deductionEntryRows)>0): ?><div class="mt-2 text-sm space-y-1"><?php foreach($deductionEntryRows as $d): ?>
 <div><?php echo h($d['내역']); ?> / <?php echo amount_fmt(row_total($d,$allMonths)); ?>
 <?php if (isset($d['id'])): ?><form method="post" action="?r=project/monthly_deduction_delete" class="inline"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="id" value="<?php echo (int)$d['id']; ?>"><input type="hidden" name="pid" value="<?php echo (int)$selectedProjectId; ?>"><input type="hidden" name="view_month" value="<?php echo h($selectedViewMonth); ?>"><input type="hidden" name="return_route" value="<?php echo h($monthlyInputRoute); ?>"><input type="hidden" name="return_tab" value="<?php echo h($monthlyInputTab); ?>"><button type="submit" class="text-red-600 ml-2" onclick="return confirm('공제분을 삭제하시겠습니까?');">삭제</button></form><?php endif; ?></div>
 <?php endforeach; ?></div><?php endif; ?>

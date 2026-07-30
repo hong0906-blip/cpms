@@ -114,7 +114,7 @@ $overrideHistoryMap = array();
 if (isset($pdo) && $pdo) {
     try {
         cpms_ensure_labor_override_table($pdo);
-        $sql = "SELECT id, batch_token, worker_name, work_date, old_value, new_value, reason, reject_reason, status, created_at, updated_at, rejected_at
+        $sql = "SELECT id, batch_token, request_scope, worker_name, work_date, old_value, new_value, reason, reject_reason, status, requested_by, requested_by_email, created_at, updated_at, rejected_at
                 FROM cpms_labor_gongsu_overrides
                 WHERE project_id = :pid AND month = :month
                   AND (status = 'pending' OR (status = 'rejected' AND rejected_acknowledged_at IS NULL))
@@ -208,9 +208,9 @@ $outsourcingTimesheetWorkers = array();
 $laborTimesheetWorkers = array();
 if (is_array($timesheetWorkers)) {
     foreach ($timesheetWorkers as $worker) {
-        $outsourcingRatio = cpms_resolve_worker_outsourcing_ratio($worker);
-        if ($outsourcingRatio > 0) $outsourcingTimesheetWorkers[] = $worker;
-        if ($outsourcingRatio < 100) $laborTimesheetWorkers[] = $worker;
+        $allocationAmounts = cpms_labor_calculate_worker_month_amounts($worker, $attendanceGongsuMap, $selectedMonth);
+        if (isset($allocationAmounts['outsourcing_amount']) && (float)$allocationAmounts['outsourcing_amount'] > 0) $outsourcingTimesheetWorkers[] = $worker;
+        if (isset($allocationAmounts['labor_amount']) && (float)$allocationAmounts['labor_amount'] > 0) $laborTimesheetWorkers[] = $worker;
     }
 }
 $laborTimesheetRows = count($laborTimesheetWorkers);
@@ -451,6 +451,13 @@ foreach ($timesheetWorkers as $worker) {
                 $requestWorkerNames = isset($rr['worker_names_text']) && trim((string)$rr['worker_names_text']) !== '' ? (string)$rr['worker_names_text'] : (isset($rr['worker_name']) ? (string)$rr['worker_name'] : '-');
                 $isBulkRequest = isset($rr['batch_token']) && trim((string)$rr['batch_token']) !== '' && $requestWorkerCount > 1;
                 $requestCreatedAt = isset($rr['created_at']) ? $rr['created_at'] : '';
+                $requestOwnerEmail = isset($rr['requested_by_email']) ? strtolower(trim((string)$rr['requested_by_email'])) : '';
+                $currentLaborUserEmail = strtolower(trim((string)\App\Core\Auth::userEmail()));
+                $requestOwnerId = isset($rr['requested_by']) ? (int)$rr['requested_by'] : 0;
+                $currentLaborUserId = method_exists('App\\Core\\Auth', 'id') ? (int)\App\Core\Auth::id() : 0;
+                $canCancelPendingRequest = \App\Core\Auth::isMaster()
+                    || ($requestOwnerId > 0 && $currentLaborUserId > 0 && $requestOwnerId === $currentLaborUserId)
+                    || ($requestOwnerEmail !== '' && $currentLaborUserEmail !== '' && $requestOwnerEmail === $currentLaborUserEmail);
                 ?>
                 <div class="rounded-2xl border border-gray-100 p-3 text-sm" data-override-request-card>
                     <div class="flex flex-wrap items-center gap-2">
@@ -476,6 +483,10 @@ foreach ($timesheetWorkers as $worker) {
                     <?php if ($isRejected): ?>
                         <div class="mt-3 flex justify-end">
                             <button type="button" class="px-3 py-2 rounded-xl bg-red-600 text-white text-xs font-extrabold" data-rejected-acknowledge data-override-id="<?php echo (int)$rr['id']; ?>">반려 확인</button>
+                        </div>
+                    <?php elseif ($canCancelPendingRequest): ?>
+                        <div class="mt-3 flex justify-end">
+                            <button type="button" class="px-3 py-2 rounded-xl border border-red-200 bg-white text-red-600 text-xs font-extrabold" data-pending-cancel data-override-id="<?php echo (int)$rr['id']; ?>">승인요청 취소</button>
                         </div>
                     <?php endif; ?>
                 </div>
@@ -575,6 +586,16 @@ foreach ($timesheetWorkers as $worker) {
         <h4 class="text-lg font-extrabold text-gray-900">인원 작성</h4>
         <div class="text-sm text-gray-600 mt-1">임금 단가와 계좌 정보를 등록하고, 선택한 월에 적용할 노무비·외주비 배분을 설정합니다.</div>
         <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 선택해 프로젝트에 추가합니다.</div>
+        <div class="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
+            <label class="text-sm font-extrabold text-blue-900">월별 보기</label>
+            <select class="mt-2 w-full max-w-xs px-3 py-2 rounded-xl border border-blue-200 bg-white text-sm font-bold"
+                    onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=workers&labor_sort=<?php echo h($laborSort); ?>&labor_sort_dir=<?php echo h($laborSortDir); ?>&worker_sort=<?php echo h($workerSort); ?>&worker_sort_dir=<?php echo h($workerSortDir); ?>&month=' + encodeURIComponent(this.value)">
+                <?php foreach ($months as $workerMonthOption): ?>
+                    <option value="<?php echo h($workerMonthOption); ?>" <?php echo $workerMonthOption === $selectedMonth ? 'selected' : ''; ?>><?php echo h(isset($monthLabels[$workerMonthOption]) ? $monthLabels[$workerMonthOption] : $workerMonthOption); ?></option>
+                <?php endforeach; ?>
+            </select>
+            <div class="mt-2 text-xs font-bold text-blue-800"><?php echo h($selectedMonth); ?>에 저장한 비용 배분과 외주비 적용기간은 다른 월에 영향을 주지 않습니다.</div>
+        </div>
 
         <form id="workforceAddForm" method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" style="display:none;">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -682,7 +703,7 @@ foreach ($timesheetWorkers as $worker) {
             <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
 
             <div class="overflow-x-auto">
-                <table class="min-w-[1250px] w-full border border-gray-200 text-sm">
+                <table class="min-w-[1450px] w-full border border-gray-200 text-sm">
                     <thead class="bg-gray-100 text-gray-700">
                     <tr>
                         <th class="border border-gray-200 px-2 py-2"><?php echo cpms_labor_worker_sort_header('company', '인력사 업체명', $workerSort, $workerSortDir, $pid, $selectedMonth, $laborSort, $laborSortDir); ?></th>
@@ -719,6 +740,8 @@ foreach ($timesheetWorkers as $worker) {
                             $outsourcingRatio = function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($member) : ((isset($member['is_outsourcing']) && (int)$member['is_outsourcing'] === 1) ? 100 : 0);
                             $laborRatio = 100 - $outsourcingRatio;
                             $allocationPreset = in_array($outsourcingRatio, array(0, 30, 40, 50, 100), true) ? (string)$outsourcingRatio : 'custom';
+                            $outsourcingStartDate = isset($member['outsourcing_start_date']) ? trim((string)$member['outsourcing_start_date']) : '';
+                            $outsourcingEndDate = isset($member['outsourcing_end_date']) ? trim((string)$member['outsourcing_end_date']) : '';
                             ?>
                             <tr class="<?php echo ($rowIndex % 2 === 0) ? 'bg-white' : 'bg-gray-50'; ?>">
                                 <td class="border border-gray-200 px-2 py-2">
@@ -750,6 +773,18 @@ foreach ($timesheetWorkers as $worker) {
                                     </div>
                                     <div class="mt-2 rounded-lg bg-gray-50 px-2 py-1 text-xs font-extrabold text-gray-700" data-allocation-summary>
                                         노무비 <?php echo (int)$laborRatio; ?>% + 외주비 <?php echo (int)$outsourcingRatio; ?>% = 100%
+                                    </div>
+                                    <div class="mt-2 rounded-xl border border-blue-100 bg-blue-50 p-2">
+                                        <div class="text-xs font-extrabold text-blue-900">외주비 적용기간</div>
+                                        <div class="mt-1 grid grid-cols-2 gap-2">
+                                            <label class="text-[11px] font-bold text-gray-600">시작일
+                                                <input type="date" name="workers[<?php echo $workerId; ?>][outsourcing_start_date]" min="<?php echo h($periodStart); ?>" max="<?php echo h($periodEnd); ?>" value="<?php echo h($outsourcingStartDate); ?>" class="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-1 text-xs" data-allocation-start-date>
+                                            </label>
+                                            <label class="text-[11px] font-bold text-gray-600">종료일
+                                                <input type="date" name="workers[<?php echo $workerId; ?>][outsourcing_end_date]" min="<?php echo h($periodStart); ?>" max="<?php echo h($periodEnd); ?>" value="<?php echo h($outsourcingEndDate); ?>" class="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-1 text-xs" data-allocation-end-date>
+                                            </label>
+                                        </div>
+                                        <div class="mt-1 text-[11px] text-blue-800">비워두면 선택 월 전체에 비율을 적용합니다.</div>
                                     </div>
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
@@ -901,6 +936,54 @@ foreach ($timesheetWorkers as $worker) {
                 <div class="mt-5 flex items-center justify-end gap-2">
                     <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 text-gray-700 font-extrabold" data-modal-close="gongsuAddConfirm">아니요</button>
                     <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" id="gongsuAddConfirmYes">예</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="modal-laborBulkRequest" class="fixed inset-0 z-50 hidden">
+    <div class="absolute inset-0 bg-black/40" data-labor-bulk-request-close></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+        <div class="w-full max-w-2xl max-h-[88vh] overflow-hidden bg-white rounded-3xl shadow-2xl border border-gray-100">
+            <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                    <h3 class="text-xl font-extrabold text-gray-900">일괄 공수 승인 요청</h3>
+                    <div class="text-xs text-gray-500 mt-1">공수 적용일자, 대상 인원, 요청 공수와 신청 사유를 확인합니다.</div>
+                </div>
+                <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 font-bold" data-labor-bulk-request-close>닫기</button>
+            </div>
+            <div class="p-6 space-y-4 overflow-y-auto max-h-[70vh]">
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                        <label class="text-xs font-bold text-blue-700" for="laborBulkRequestDate">공수 적용일자</label>
+                        <input type="date"
+                               id="laborBulkRequestDate"
+                               min="<?php echo h($periodStart); ?>"
+                               max="<?php echo h($periodEnd); ?>"
+                               class="mt-2 w-full rounded-xl border border-blue-200 bg-white px-3 py-2 text-sm font-extrabold text-blue-900"
+                               required>
+                    </div>
+                    <div class="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                        <div class="text-xs font-bold text-gray-500">요청 공수</div>
+                        <div class="mt-1 text-xl font-extrabold text-gray-900" id="laborBulkRequestValue">-</div>
+                    </div>
+                    <div class="rounded-2xl border border-violet-200 bg-violet-50 p-4">
+                        <div class="text-xs font-bold text-violet-700">요청 범위</div>
+                        <div class="mt-1 text-lg font-extrabold text-violet-900" id="laborBulkRequestScope">-</div>
+                    </div>
+                </div>
+                <div>
+                    <div class="text-xs font-bold text-gray-500">요청 인원</div>
+                    <div id="laborBulkRequestNames" class="mt-2 max-h-44 overflow-y-auto rounded-2xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700"></div>
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-gray-500" for="laborBulkRequestReason">신청 사유</label>
+                    <textarea id="laborBulkRequestReason" rows="4" maxlength="255" class="mt-1 w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="예: 점심시간 없이 연장 근무" required></textarea>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 font-extrabold" data-labor-bulk-request-close>취소</button>
+                    <button type="button" id="laborBulkRequestSubmit" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">승인 요청</button>
                 </div>
             </div>
         </div>
@@ -1111,6 +1194,7 @@ foreach ($timesheetWorkers as $worker) {
     var gongsuHistoryMap = <?php echo json_encode($overrideHistoryMap, JSON_UNESCAPED_UNICODE); ?>;
     var requestCtx = null;
     var addCtx = null;
+    var laborBulkApprovalState = null;
     var savingCell = false;
 
     function openModal(id){
@@ -1126,6 +1210,7 @@ foreach ($timesheetWorkers as $worker) {
     function closeAllModals(){
         closeModal('modal-gongsuRequest');
         closeModal('modal-gongsuAddConfirm');
+        closeModal('modal-laborBulkRequest');
     }
 
     function formatValue(v){
@@ -1289,6 +1374,7 @@ foreach ($timesheetWorkers as $worker) {
         if (status === 'rejected') return '반려';
         if (status === 'applied') return '승인완료';
         if (status === 'pending') return '승인대기';
+        if (status === 'cancelled') return '요청취소';
         if (status === 'deleted') return '삭제';
         return status || '-';
     }
@@ -1524,7 +1610,7 @@ foreach ($timesheetWorkers as $worker) {
 
     // 파일: app/views/construction/tabs/labor.php
     // 1.5/2공수는 선택 인원을 한 번의 HTTP 요청으로 보내 같은 승인 묶음으로 저장합니다.
-    function saveGongsuBulkApprovalRequest(targets, newValue, reason){
+    function saveGongsuBulkApprovalRequest(targets, newValue, reason, requestScope){
         var entries = [];
         for (var i = 0; i < targets.length; i++) {
             entries.push({
@@ -1540,6 +1626,7 @@ foreach ($timesheetWorkers as $worker) {
             'month=' + encodeURIComponent(targets[0].ctx.month),
             'new_value=' + encodeURIComponent(String(newValue)),
             'reason=' + encodeURIComponent(reason || ''),
+            'request_scope=' + encodeURIComponent(requestScope === 'all' ? 'all' : 'partial'),
             'bulk_entries=' + encodeURIComponent(JSON.stringify(entries))
         ].join('&');
 
@@ -1602,53 +1689,93 @@ foreach ($timesheetWorkers as $worker) {
         refreshLaborBulkSelectedCount(checked, checks.length);
     }
 
-    function runLaborBulkInput(value){
-        if (todayDate.indexOf(selectedMonth + '-') !== 0) {
-            alert('오늘 날짜가 현재 출력월에 없습니다.');
+    function laborBulkDefaultDate(){
+        if (todayDate.indexOf(selectedMonth + '-') === 0) return todayDate;
+        return selectedMonth + '-01';
+    }
+
+    function laborBulkTargetsForDate(checks, workDate){
+        var targets = [];
+        for (var i = 0; i < checks.length; i++) {
+            var row = checks[i].closest ? checks[i].closest('tr') : null;
+            var cell = row ? row.querySelector('.cpms-gongsu-cell[data-date="' + workDate + '"]') : null;
+            if (cell) {
+                var ctx = buildCellContext(cell);
+                ctx.oldValue = parseCellValue(cell);
+                targets.push({cell:cell, ctx:ctx});
+            }
+        }
+        return targets;
+    }
+
+    function refreshLaborBulkApprovalDate(showAlert){
+        if (!laborBulkApprovalState) return false;
+        var dateBox = document.getElementById('laborBulkRequestDate');
+        var workDate = dateBox ? String(dateBox.value || '') : '';
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(workDate) || workDate.indexOf(selectedMonth + '-') !== 0) {
+            if (showAlert) alert('선택한 출력월 안의 공수 적용일자를 선택해 주세요.');
+            if (dateBox) dateBox.focus();
+            return false;
+        }
+        var targets = laborBulkTargetsForDate(laborBulkApprovalState.checks, workDate);
+        if (!targets.length) {
+            if (showAlert) alert('선택한 날짜에 입력할 수 있는 인원이 없습니다.');
+            return false;
+        }
+        var selectedNames = [];
+        for (var nameIndex = 0; nameIndex < targets.length; nameIndex++) selectedNames.push(targets[nameIndex].ctx.workerName);
+        var totalWorkers = document.querySelectorAll('.cpms-labor-worker-check').length;
+        var requestScope = totalWorkers > 0 && targets.length === totalWorkers ? 'all' : 'partial';
+        laborBulkApprovalState.targets = targets;
+        laborBulkApprovalState.scope = requestScope;
+        laborBulkApprovalState.workDate = workDate;
+        var scopeBox = document.getElementById('laborBulkRequestScope');
+        var namesBox = document.getElementById('laborBulkRequestNames');
+        if (scopeBox) scopeBox.textContent = requestScope === 'all' ? '[전체요청] 전체 ' + targets.length + '명' : '선택요청 ' + targets.length + '명';
+        if (namesBox) namesBox.textContent = selectedNames.join(', ');
+        return true;
+    }
+
+    function openLaborBulkApproval(value, checks){
+        var selectedChecks = [];
+        for (var checkIndex = 0; checkIndex < checks.length; checkIndex++) selectedChecks.push(checks[checkIndex]);
+        laborBulkApprovalState = {checks:selectedChecks, targets:[], value:value, scope:'partial', workDate:''};
+        var dateBox = document.getElementById('laborBulkRequestDate');
+        var valueBox = document.getElementById('laborBulkRequestValue');
+        var reasonBox = document.getElementById('laborBulkRequestReason');
+        if (dateBox) dateBox.value = laborBulkDefaultDate();
+        if (valueBox) valueBox.textContent = formatValue(value) + '공수';
+        if (reasonBox) reasonBox.value = '';
+        if (!refreshLaborBulkApprovalDate(true)) {
+            laborBulkApprovalState = null;
             return;
         }
+        openModal('modal-laborBulkRequest');
+        if (dateBox) dateBox.focus();
+    }
+
+    function runLaborBulkInput(value){
         var checks = document.querySelectorAll('.cpms-labor-worker-check:checked');
         if (!checks.length) {
             alert('일괄 입력할 인원을 선택하세요.');
             return;
         }
-        var targets = [];
-        for (var i = 0; i < checks.length; i++) {
-            var row = checks[i].closest ? checks[i].closest('tr') : null;
-            var cell = row ? row.querySelector('.cpms-gongsu-cell[data-date="' + todayDate + '"]') : null;
-            if (cell) {
-                targets.push({cell:cell, ctx:buildCellContext(cell)});
-            }
+
+        if (value >= 1.2) {
+            openLaborBulkApproval(value, checks);
+            return;
         }
+
+        if (todayDate.indexOf(selectedMonth + '-') !== 0) {
+            alert('오늘 날짜가 현재 출력월에 없습니다.');
+            return;
+        }
+        var targets = laborBulkTargetsForDate(checks, todayDate);
         if (!targets.length) {
             alert('오늘 날짜에 입력할 수 있는 셀이 없습니다.');
             return;
         }
-
         var reason = '일괄 공수 입력(' + formatValue(value) + '공수)';
-        for (var targetIndex = 0; targetIndex < targets.length; targetIndex++) {
-            targets[targetIndex].ctx.oldValue = parseCellValue(targets[targetIndex].cell);
-        }
-
-        if (value >= 1.2) {
-            var selectedNames = [];
-            for (var nameIndex = 0; nameIndex < targets.length; nameIndex++) selectedNames.push(targets[nameIndex].ctx.workerName);
-            if (!window.confirm(selectedNames.join(', ') + '\n\n총 ' + targets.length + '명에게 ' + formatValue(value) + '공수를 일괄 승인 요청할까요?')) return;
-            setLaborBulkDisabled(true);
-            setLaborBulkStatus(targets.length + '명 일괄 승인 요청 중');
-            saveGongsuBulkApprovalRequest(targets, value, reason)
-                .then(function(data){
-                    setLaborBulkStatus(targets.length + '명 승인 요청 완료');
-                    alert(data && data.message ? data.message : '일괄 승인 요청을 보냈습니다.');
-                })
-                .catch(function(e){
-                    setLaborBulkStatus('일괄 승인 요청 실패');
-                    if (window.console && console.error) console.error('bulk approval request failed:', e);
-                    alert(e && e.message ? e.message : '일괄 승인 요청에 실패했습니다.');
-                })
-                .then(function(){ setLaborBulkDisabled(false); });
-            return;
-        }
 
         var index = 0;
         var success = 0;
@@ -1677,6 +1804,58 @@ foreach ($timesheetWorkers as $worker) {
                 });
         }
         next();
+    }
+
+    var laborBulkRequestCloseButtons = document.querySelectorAll('[data-labor-bulk-request-close]');
+    for (var bulkCloseIndex = 0; bulkCloseIndex < laborBulkRequestCloseButtons.length; bulkCloseIndex++) {
+        laborBulkRequestCloseButtons[bulkCloseIndex].addEventListener('click', function(){
+            closeModal('modal-laborBulkRequest');
+            laborBulkApprovalState = null;
+        });
+    }
+    var laborBulkRequestDate = document.getElementById('laborBulkRequestDate');
+    if (laborBulkRequestDate) {
+        laborBulkRequestDate.addEventListener('change', function(){
+            refreshLaborBulkApprovalDate(true);
+        });
+    }
+    var laborBulkRequestSubmit = document.getElementById('laborBulkRequestSubmit');
+    if (laborBulkRequestSubmit) {
+        laborBulkRequestSubmit.addEventListener('click', function(){
+            if (!laborBulkApprovalState) return;
+            if (!refreshLaborBulkApprovalDate(true)) return;
+            if (!laborBulkApprovalState.targets || !laborBulkApprovalState.targets.length) return;
+            var reasonBox = document.getElementById('laborBulkRequestReason');
+            var reason = reasonBox ? String(reasonBox.value || '').replace(/^\s+|\s+$/g, '') : '';
+            if (!reason) {
+                alert('일괄 공수 승인 요청사유를 입력해 주세요.');
+                if (reasonBox) reasonBox.focus();
+                return;
+            }
+            var state = laborBulkApprovalState;
+            laborBulkRequestSubmit.disabled = true;
+            laborBulkRequestSubmit.textContent = '요청 중';
+            setLaborBulkDisabled(true);
+            setLaborBulkStatus(state.targets.length + '명 일괄 승인 요청 중');
+            saveGongsuBulkApprovalRequest(state.targets, state.value, reason, state.scope)
+                .then(function(data){
+                    setLaborBulkStatus(state.targets.length + '명 승인 요청 완료');
+                    closeModal('modal-laborBulkRequest');
+                    laborBulkApprovalState = null;
+                    alert(data && data.message ? data.message : '일괄 승인 요청을 보냈습니다.');
+                    window.location.reload();
+                })
+                .catch(function(e){
+                    setLaborBulkStatus('일괄 승인 요청 실패');
+                    if (window.console && console.error) console.error('bulk approval request failed:', e);
+                    alert(e && e.message ? e.message : '일괄 승인 요청에 실패했습니다.');
+                })
+                .then(function(){
+                    setLaborBulkDisabled(false);
+                    laborBulkRequestSubmit.disabled = false;
+                    laborBulkRequestSubmit.textContent = '승인 요청';
+                });
+        });
     }
 
     var modalCloseButtons = document.querySelectorAll('[data-modal-close="gongsuRequest"], [data-modal-close="gongsuAddConfirm"]');
@@ -1745,6 +1924,42 @@ foreach ($timesheetWorkers as $worker) {
                     button.disabled = false;
                     button.textContent = '반려 확인';
                     alert(e && e.message ? e.message : '반려 확인 처리에 실패했습니다.');
+                });
+        });
+    }
+
+    var pendingCancelButtons = document.querySelectorAll('[data-pending-cancel]');
+    for (var pc = 0; pc < pendingCancelButtons.length; pc++) {
+        pendingCancelButtons[pc].addEventListener('click', function(event){
+            event.preventDefault();
+            var button = this;
+            var overrideId = parseInt(button.getAttribute('data-override-id') || '0', 10);
+            if (overrideId <= 0) return;
+            if (!window.confirm('이 공수 승인 요청을 취소할까요? 일괄 요청이면 묶음 전체가 취소됩니다.')) return;
+            button.disabled = true;
+            button.textContent = '취소 처리 중';
+            var body = [
+                '_csrf=' + encodeURIComponent(csrf),
+                'action=cancel_pending',
+                'project_id=' + encodeURIComponent(String(projectId)),
+                'month=' + encodeURIComponent(selectedMonth),
+                'override_id=' + encodeURIComponent(String(overrideId))
+            ].join('&');
+            fetch('?r=construction/labor_gongsu_override_save', {
+                method:'POST',
+                credentials:'same-origin',
+                headers:{'Content-Type':'application/x-www-form-urlencoded; charset=UTF-8'},
+                body:body
+            })
+                .then(parseJsonResponse)
+                .then(function(data){
+                    alert(data && data.message ? data.message : '승인 요청을 취소했습니다.');
+                    window.location.reload();
+                })
+                .catch(function(e){
+                    button.disabled = false;
+                    button.textContent = '승인요청 취소';
+                    alert(e && e.message ? e.message : '승인 요청 취소에 실패했습니다.');
                 });
         });
     }

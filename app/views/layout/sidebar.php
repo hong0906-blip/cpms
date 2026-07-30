@@ -65,6 +65,8 @@ $pos = ($user && isset($user['position'])) ? trim((string)$user['position']) : '
 $deptMap = array(
   '관리부' => '관리',
   '공무부' => '공무',
+  '공무팀' => '공무',
+  '공무부서' => '공무',
   '개발부' => '개발',
   '개발팀' => '개발',
   '개발부서' => '개발',
@@ -77,6 +79,9 @@ $deptMap = array(
 if (isset($deptMap[$dept])) $dept = $deptMap[$dept];
 if (substr($dept, -1) === '부') $dept = substr($dept, 0, -1);
 $isPublicAffairsDept = ($dept === '공무' && !$isMasterUser);
+$canViewPublicAffairsMobileMenu = method_exists('App\\Core\\Auth', 'canAccessPublicAffairsMobile')
+  ? \App\Core\Auth::canAccessPublicAffairsMobile()
+  : ($dept === '공무' || $canAccessUsageAnalytics);
 
 $parts = array();
 if ($displayRole === 'executive') $parts[] = '임원';
@@ -317,6 +322,9 @@ if ($selectedMenu === $dashboardMenu) {
       array('menu' => 'notice', 'label' => $noticeMenu, 'icon' => 'megaphone', 'href' => '?r=notice'),
       array('menu' => 'approval', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
     );
+    if ($canViewPublicAffairsMobileMenu) {
+      $mobileNavItems[] = array('menu' => 'public_affairs', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . urlencode($workMenu) . '&tab=monthly_summary');
+    }
     if (\App\Core\Auth::canAccessConstruction()) {
       $mobileNavItems[] = array('menu' => 'construction', 'label' => '공사', 'icon' => 'hard-hat', 'href' => '?r=construction_home&tab=status');
     }

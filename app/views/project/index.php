@@ -100,13 +100,13 @@ function cpms_project_index_is_collab_draft_project($project) {
 }}
 ?>
 
-<div class="cpms-project-page mb-5">
+<div class="cpms-project-page cpms-public-affairs-tabs mb-5">
   <div class="mt-3 flex flex-wrap gap-2">
     <a href="?r=공무&tab=monthly_summary" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'monthly_summary' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">월별 투입비 집계</a>
-    <a href="?r=공무&tab=project_manage" class="cpms-project-manage-tab px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
-    <a href="?r=공무&tab=progress_statement_review" class="px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'progress_statement_review' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">기성내역서 검토</a>
+    <a href="?r=공무&tab=project_manage" class="cpms-project-manage-tab cpms-public-affairs-desktop-only px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'project_manage' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">프로젝트 관리</a>
+    <a href="?r=공무&tab=progress_statement_review" class="cpms-public-affairs-desktop-only px-4 py-2 rounded-2xl border font-bold <?php echo $activeTab === 'progress_statement_review' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-700 border-gray-200'; ?>">기성내역서 검토</a>
     <a href="?r=public_affairs_collab"
-       class="px-4 py-2 rounded-2xl border font-bold bg-white text-gray-700 border-gray-200">공무 협업툴</a>
+       class="cpms-public-affairs-desktop-only px-4 py-2 rounded-2xl border font-bold bg-white text-gray-700 border-gray-200">공무 협업툴</a>
   </div>
 </div>
 

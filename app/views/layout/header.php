@@ -34,6 +34,7 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
     .cpms-mobile-bottom-nav { display: none; }
     .cpms-approval-mobile-list { display: none; }
     .cpms-monthly-mobile-summary { display: none; }
+    .cpms-public-affairs-mobile-table { display: none; }
     .cpms-responsive-table-wrap {
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
@@ -386,6 +387,10 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
         display: none !important;
       }
 
+      .cpms-public-affairs-desktop-only {
+        display: none !important;
+      }
+
       .cpms-monthly-filter {
         display: grid !important;
         grid-template-columns: 1fr;
@@ -408,6 +413,112 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
       .cpms-monthly-mobile-summary > div:first-child,
       .cpms-monthly-mobile-summary > div:nth-child(3) {
         grid-column: span 2;
+      }
+
+      .cpms-public-affairs-mobile-table {
+        display: block;
+        width: 100%;
+        margin-bottom: 0;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border: 1px solid #e5e7eb;
+        border-right: 0;
+        border-left: 0;
+        border-radius: 0;
+        background: #fff;
+      }
+
+      .cpms-public-affairs-mobile-table table {
+        width: 100%;
+        min-width: 626px;
+        table-layout: fixed;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-size: clamp(9px, 2.55vw, 11px);
+      }
+
+      .cpms-public-affairs-mobile-table th,
+      .cpms-public-affairs-mobile-table td {
+        padding: 7px 5px;
+        border-right: 1px solid #e5e7eb;
+        border-bottom: 1px solid #e5e7eb;
+        white-space: nowrap;
+      }
+
+      .cpms-public-affairs-mobile-table th:last-child,
+      .cpms-public-affairs-mobile-table td:last-child {
+        border-right: 0;
+      }
+
+      .cpms-public-affairs-mobile-table tfoot td {
+        border-bottom: 0;
+      }
+
+      .cpms-public-affairs-mobile-table th:first-child,
+      .cpms-public-affairs-mobile-table td:first-child {
+        min-width: 116px;
+        max-width: 116px;
+        white-space: normal;
+        word-break: keep-all;
+      }
+
+      .cpms-public-affairs-mobile-table col.cpms-mobile-site-col {
+        width: 116px;
+      }
+
+      .cpms-public-affairs-mobile-table col.cpms-mobile-money-col {
+        width: 86px;
+      }
+
+      .cpms-public-affairs-mobile-table col.cpms-mobile-material-col {
+        width: 94px;
+      }
+
+      .cpms-public-affairs-mobile-table col.cpms-mobile-total-col {
+        width: 92px;
+      }
+
+      .cpms-public-affairs-mobile-table col.cpms-mobile-ratio-col {
+        width: 66px;
+      }
+
+      .cpms-public-affairs-mobile-table .cpms-mobile-money {
+        font-size: clamp(9px, 2.5vw, 10.5px);
+        letter-spacing: -0.02em;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .cpms-public-affairs-mobile-table .cpms-mobile-money-sm {
+        font-size: clamp(8.5px, 2.3vw, 9.5px);
+        letter-spacing: -0.04em;
+      }
+
+      .cpms-public-affairs-mobile-table .cpms-mobile-money-xs {
+        font-size: clamp(8px, 2.1vw, 9px);
+        letter-spacing: -0.06em;
+      }
+
+      .cpms-monthly-summary-shell {
+        margin-right: -14px;
+        margin-left: -14px;
+        padding: 0 !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+      }
+
+      .cpms-monthly-summary-toolbar {
+        padding-right: 14px;
+        padding-left: 14px;
+      }
+
+      .cpms-monthly-summary-inset {
+        margin-right: 14px;
+        margin-left: 14px;
+      }
+
+      .cpms-monthly-summary-desktop {
+        display: none !important;
       }
 
       .cpms-monthly-table-scroll {

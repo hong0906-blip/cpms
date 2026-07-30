@@ -1174,6 +1174,8 @@ if (!function_exists('cpms_ensure_project_labor_worker_months_table')) {
                 month CHAR(7) NOT NULL,
                 outsourcing_ratio TINYINT UNSIGNED NOT NULL DEFAULT 0,
                 outsourcing_ratio_is_set TINYINT(1) NOT NULL DEFAULT 0,
+                outsourcing_start_date DATE NULL,
+                outsourcing_end_date DATE NULL,
                 is_deleted TINYINT(1) NOT NULL DEFAULT 0,
                 created_at DATETIME NOT NULL,
                 updated_at DATETIME NOT NULL,
@@ -1192,6 +1194,12 @@ if (!function_exists('cpms_ensure_project_labor_worker_months_table')) {
             }
             if (!isset($colMap['outsourcing_ratio_is_set'])) {
                 $pdo->exec("ALTER TABLE cpms_project_labor_worker_months ADD COLUMN outsourcing_ratio_is_set TINYINT(1) NOT NULL DEFAULT 0 AFTER outsourcing_ratio");
+            }
+            if (!isset($colMap['outsourcing_start_date'])) {
+                $pdo->exec("ALTER TABLE cpms_project_labor_worker_months ADD COLUMN outsourcing_start_date DATE NULL AFTER outsourcing_ratio_is_set");
+            }
+            if (!isset($colMap['outsourcing_end_date'])) {
+                $pdo->exec("ALTER TABLE cpms_project_labor_worker_months ADD COLUMN outsourcing_end_date DATE NULL AFTER outsourcing_start_date");
             }
             $ensured[$ensureKey] = true;
             return true;
@@ -1234,7 +1242,7 @@ if (!function_exists('cpms_load_project_labor_worker_month_ratio_map')) {
         if (!$pdo || $projectId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return $map;
         if (!cpms_ensure_project_labor_worker_months_table($pdo)) return $map;
         try {
-            $st = $pdo->prepare("SELECT labor_worker_id, outsourcing_ratio, outsourcing_ratio_is_set
+            $st = $pdo->prepare("SELECT labor_worker_id, outsourcing_ratio, outsourcing_ratio_is_set, outsourcing_start_date, outsourcing_end_date
                                  FROM cpms_project_labor_worker_months
                                  WHERE project_id = :pid
                                    AND month = :month
@@ -1250,6 +1258,11 @@ if (!function_exists('cpms_load_project_labor_worker_month_ratio_map')) {
                 if ($ratio < 0) $ratio = 0;
                 if ($ratio > 100) $ratio = 100;
                 $map[$workerId] = $ratio;
+                if (!isset($map['_settings'])) $map['_settings'] = array();
+                $map['_settings'][$workerId] = array(
+                    'outsourcing_start_date'=>isset($row['outsourcing_start_date']) ? (string)$row['outsourcing_start_date'] : '',
+                    'outsourcing_end_date'=>isset($row['outsourcing_end_date']) ? (string)$row['outsourcing_end_date'] : ''
+                );
             }
         } catch (Exception $e) {
             // 기존 호환값으로 안전하게 계속 표시합니다.
@@ -1270,6 +1283,9 @@ if (!function_exists('cpms_apply_project_labor_worker_month_ratios')) {
             if ($ratio > 100) $ratio = 100;
             $projectWorkers[$index]['outsourcing_ratio'] = $ratio;
             $projectWorkers[$index]['labor_ratio'] = 100 - $ratio;
+            $settings = isset($ratioMap['_settings']) && is_array($ratioMap['_settings']) && $workerId > 0 && isset($ratioMap['_settings'][$workerId]) ? $ratioMap['_settings'][$workerId] : array();
+            $projectWorkers[$index]['outsourcing_start_date'] = isset($settings['outsourcing_start_date']) ? (string)$settings['outsourcing_start_date'] : '';
+            $projectWorkers[$index]['outsourcing_end_date'] = isset($settings['outsourcing_end_date']) ? (string)$settings['outsourcing_end_date'] : '';
         }
         return $projectWorkers;
     }
@@ -1277,7 +1293,7 @@ if (!function_exists('cpms_apply_project_labor_worker_month_ratios')) {
 
 // 서버 검증을 통과한 월별 외주비 비율을 월 연결 행에 저장합니다.
 if (!function_exists('cpms_save_project_labor_worker_month_ratio')) {
-    function cpms_save_project_labor_worker_month_ratio($pdo, $projectId, $laborWorkerId, $month, $outsourcingRatio) {
+    function cpms_save_project_labor_worker_month_ratio($pdo, $projectId, $laborWorkerId, $month, $outsourcingRatio, $outsourcingStartDate, $outsourcingEndDate) {
         $projectId = (int)$projectId;
         $laborWorkerId = (int)$laborWorkerId;
         $month = trim((string)$month);
@@ -1285,18 +1301,28 @@ if (!function_exists('cpms_save_project_labor_worker_month_ratio')) {
         $outsourcingRatio = (int)$outsourcingRatio;
         if (!$pdo || $projectId <= 0 || $laborWorkerId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return false;
         if ($outsourcingRatio < 0 || $outsourcingRatio > 100) return false;
+        $outsourcingStartDate = trim((string)$outsourcingStartDate);
+        $outsourcingEndDate = trim((string)$outsourcingEndDate);
+        if (($outsourcingStartDate === '') !== ($outsourcingEndDate === '')) return false;
+        if ($outsourcingStartDate !== '') {
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $outsourcingStartDate) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $outsourcingEndDate)) return false;
+            if (strpos($outsourcingStartDate, $month . '-') !== 0 || strpos($outsourcingEndDate, $month . '-') !== 0) return false;
+            if ($outsourcingStartDate > $outsourcingEndDate) return false;
+        }
         if (!cpms_ensure_project_labor_worker_months_table($pdo)) return false;
         try {
             $now = date('Y-m-d H:i:s');
             $st = $pdo->prepare("INSERT INTO cpms_project_labor_worker_months
-                    (project_id, labor_worker_id, month, outsourcing_ratio, outsourcing_ratio_is_set, is_deleted, created_at, updated_at)
-                    SELECT :pid, plw.id, :month, :ratio, 1, 0, :now, :now
+                    (project_id, labor_worker_id, month, outsourcing_ratio, outsourcing_ratio_is_set, outsourcing_start_date, outsourcing_end_date, is_deleted, created_at, updated_at)
+                    SELECT :pid, plw.id, :month, :ratio, 1, :start_date, :end_date, 0, :now, :now
                     FROM cpms_project_labor_workers plw
                     WHERE plw.id = :wid
                       AND plw.project_id = :pid_check
                       AND plw.is_deleted = 0
                     ON DUPLICATE KEY UPDATE outsourcing_ratio = VALUES(outsourcing_ratio),
                                             outsourcing_ratio_is_set = 1,
+                                            outsourcing_start_date = VALUES(outsourcing_start_date),
+                                            outsourcing_end_date = VALUES(outsourcing_end_date),
                                             is_deleted = 0,
                                             updated_at = VALUES(updated_at)");
             $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
@@ -1304,6 +1330,8 @@ if (!function_exists('cpms_save_project_labor_worker_month_ratio')) {
             $st->bindValue(':wid', $laborWorkerId, PDO::PARAM_INT);
             $st->bindValue(':month', $month);
             $st->bindValue(':ratio', $outsourcingRatio, PDO::PARAM_INT);
+            $st->bindValue(':start_date', $outsourcingStartDate === '' ? null : $outsourcingStartDate, $outsourcingStartDate === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $st->bindValue(':end_date', $outsourcingEndDate === '' ? null : $outsourcingEndDate, $outsourcingEndDate === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
             $st->bindValue(':now', $now);
             $st->execute();
             return true;
@@ -1360,17 +1388,55 @@ if (!function_exists('cpms_labor_calculate_worker_month_amounts')) {
         $workerName = isset($worker['name']) ? (string)$worker['name'] : '';
         $workerKey = cpms_normalize_worker_key($workerName);
         $dailyMap = ($workerKey !== '' && isset($gongsuMap[$workerKey]) && is_array($gongsuMap[$workerKey])) ? $gongsuMap[$workerKey] : array();
+        $periodStart = preg_match('/^\d{4}-\d{2}$/', (string)$selectedMonth) ? $selectedMonth . '-01' : '';
+        $periodEnd = $periodStart !== '' ? date('Y-m-t', strtotime($periodStart)) : '';
+        return cpms_labor_calculate_worker_period_amounts($worker, $dailyMap, $periodStart, $periodEnd);
+    }
+}
+
+// 근로자 한 명의 일별 공수에 월별 외주비 적용기간을 반영합니다.
+if (!function_exists('cpms_labor_calculate_worker_period_amounts')) {
+    function cpms_labor_calculate_worker_period_amounts($worker, $dailyMap, $periodStart, $periodEnd) {
+        if (!is_array($worker)) $worker = array();
+        if (!is_array($dailyMap)) $dailyMap = array();
+        $periodStart = trim((string)$periodStart);
+        $periodEnd = trim((string)$periodEnd);
+        $outsourcingStart = isset($worker['outsourcing_start_date']) ? trim((string)$worker['outsourcing_start_date']) : '';
+        $outsourcingEnd = isset($worker['outsourcing_end_date']) ? trim((string)$worker['outsourcing_end_date']) : '';
+        $hasOutsourcingRange = preg_match('/^\d{4}-\d{2}-\d{2}$/', $outsourcingStart)
+            && preg_match('/^\d{4}-\d{2}-\d{2}$/', $outsourcingEnd)
+            && $outsourcingStart <= $outsourcingEnd;
         $totalGongsu = 0.0;
+        $outsourcingGongsu = 0.0;
         foreach ($dailyMap as $dateKey => $gongsuValue) {
             if (!is_numeric($gongsuValue)) continue;
-            if ($selectedMonth !== '' && strpos((string)$dateKey, (string)$selectedMonth) !== 0) continue;
-            $totalGongsu += (float)$gongsuValue;
+            $dateKey = (string)$dateKey;
+            if ($periodStart !== '' && $dateKey < $periodStart) continue;
+            if ($periodEnd !== '' && $dateKey > $periodEnd) continue;
+            $gongsu = (float)$gongsuValue;
+            if ($gongsu <= 0) continue;
+            $totalGongsu += $gongsu;
+            if (!$hasOutsourcingRange || ($dateKey >= $outsourcingStart && $dateKey <= $outsourcingEnd)) {
+                $outsourcingGongsu += $gongsu;
+            }
         }
         $wageRate = cpms_resolve_labor_wage_rate($worker);
-        $amounts = cpms_labor_calculate_amounts($totalGongsu, $wageRate, cpms_resolve_worker_outsourcing_ratio($worker));
-        $amounts['total_gongsu'] = $totalGongsu;
-        $amounts['wage_rate'] = $wageRate;
-        return $amounts;
+        $outsourcingRatio = cpms_resolve_worker_outsourcing_ratio($worker);
+        $totalAmount = round($totalGongsu * $wageRate);
+        $outsourcingAmount = round($outsourcingGongsu * $wageRate * $outsourcingRatio / 100);
+        if ($outsourcingAmount > $totalAmount) $outsourcingAmount = $totalAmount;
+        return array(
+            'total_gongsu'=>$totalGongsu,
+            'outsourcing_gongsu'=>$outsourcingGongsu,
+            'wage_rate'=>$wageRate,
+            'total_amount'=>(float)$totalAmount,
+            'outsourcing_ratio'=>$outsourcingRatio,
+            'labor_ratio'=>100 - $outsourcingRatio,
+            'outsourcing_amount'=>(float)$outsourcingAmount,
+            'labor_amount'=>(float)($totalAmount - $outsourcingAmount),
+            'outsourcing_start_date'=>$hasOutsourcingRange ? $outsourcingStart : '',
+            'outsourcing_end_date'=>$hasOutsourcingRange ? $outsourcingEnd : ''
+        );
     }
 }
 
@@ -1745,6 +1811,8 @@ if (!function_exists('cpms_build_project_worker_rows')) {
                 'is_outsourcing' => (isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 1 : 0,
                 'legacy_outsourcing_ratio' => array_key_exists('legacy_outsourcing_ratio', $worker) ? $worker['legacy_outsourcing_ratio'] : null,
                 'outsourcing_ratio' => function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($worker) : ((isset($worker['is_outsourcing']) && (int)$worker['is_outsourcing'] === 1) ? 100 : 0),
+                'outsourcing_start_date' => isset($worker['outsourcing_start_date']) ? (string)$worker['outsourcing_start_date'] : '',
+                'outsourcing_end_date' => isset($worker['outsourcing_end_date']) ? (string)$worker['outsourcing_end_date'] : '',
                 'job_type_snapshot' => isset($worker['job_type_snapshot']) ? (string)$worker['job_type_snapshot'] : '',
                 'agency_name_snapshot' => isset($worker['agency_name_snapshot']) ? (string)$worker['agency_name_snapshot'] : '',
                 'worker_name_snapshot' => isset($worker['worker_name_snapshot']) ? (string)$worker['worker_name_snapshot'] : '',
@@ -1829,6 +1897,8 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'legacy_outsourcing_ratio' => array_key_exists('legacy_outsourcing_ratio', $data) ? $data['legacy_outsourcing_ratio'] : null,
                 'outsourcing_ratio' => function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($data) : ((isset($data['is_outsourcing']) && (int)$data['is_outsourcing'] === 1) ? 100 : 0),
                 'labor_ratio' => function_exists('cpms_resolve_worker_outsourcing_ratio') ? (100 - cpms_resolve_worker_outsourcing_ratio($data)) : ((isset($data['is_outsourcing']) && (int)$data['is_outsourcing'] === 1) ? 0 : 100),
+                'outsourcing_start_date' => isset($data['outsourcing_start_date']) ? (string)$data['outsourcing_start_date'] : '',
+                'outsourcing_end_date' => isset($data['outsourcing_end_date']) ? (string)$data['outsourcing_end_date'] : '',
                 'job_type_snapshot' => isset($data['job_type_snapshot']) ? (string)$data['job_type_snapshot'] : '',
                 'agency_name_snapshot' => isset($data['agency_name_snapshot']) ? (string)$data['agency_name_snapshot'] : '',
                 'worker_name_snapshot' => isset($data['worker_name_snapshot']) ? (string)$data['worker_name_snapshot'] : '',

@@ -664,7 +664,7 @@ if ($pdo) {
     if ($needsApprovalData) {
     try {
         cpms_ensure_labor_override_table($pdo);
-        $sql = "SELECT o.id, o.project_id, o.month, o.batch_token, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason, o.status,
+        $sql = "SELECT o.id, o.project_id, o.month, o.batch_token, o.request_scope, o.worker_name, o.work_date, o.old_value, o.new_value, o.reason, o.status,
                        o.requested_by, o.requested_by_email, o.requested_by_name, o.approval_stage,
                        o.current_approver_employee_id, o.current_approver_email, o.created_at, o.updated_at,
                        p.name AS project_name, e.name AS requested_emp_name
@@ -1274,10 +1274,12 @@ if (!$executiveEmployeeTaskAvailable) {
                 if ($overrideWorkerCount < 1) $overrideWorkerCount = 1;
                 $overrideWorkerNames = isset($ov['worker_names_text']) && trim((string)$ov['worker_names_text']) !== '' ? (string)$ov['worker_names_text'] : (isset($ov['worker_name']) ? (string)$ov['worker_name'] : '-');
                 $isBulkOverride = isset($ov['batch_token']) && trim((string)$ov['batch_token']) !== '' && $overrideWorkerCount > 1;
+                $isAllOverride = isset($ov['request_scope']) && (string)$ov['request_scope'] === 'all';
                 $overrideRequestedAt = isset($ov['created_at']) ? $ov['created_at'] : '';
                 ?>
                 <div class="p-4 rounded-2xl border bg-gray-50 border-gray-100">
                     <div class="text-xs text-gray-500">요청일 <?php echo h($overrideRequestedAt); ?></div>
+                    <?php if ($isAllOverride): ?><span class="mt-2 inline-flex px-2 py-1 rounded-full bg-violet-100 text-violet-800 border border-violet-200 text-xs font-extrabold">[전체요청]</span><?php endif; ?>
                     <div class="font-bold text-gray-900 mt-1 text-lg">현장명: <?php echo h($ov['project_name'] ?: '-'); ?></div>
                     <div class="text-sm text-gray-700 mt-1">요청자: <?php echo h($requesterName); ?></div>
                     <div class="text-sm text-gray-700 mt-1">작업자: <span class="font-bold"><?php echo h($overrideWorkerNames); ?></span><?php if ($overrideWorkerCount > 1): ?> (총 <?php echo $overrideWorkerCount; ?>명)<?php endif; ?></div>
@@ -1288,6 +1290,22 @@ if (!$executiveEmployeeTaskAvailable) {
                         <div class="text-sm text-gray-700">변경: <?php echo h($ov['old_value']); ?> → <span class="font-extrabold text-emerald-700"><?php echo h($ov['new_value']); ?></span></div>
                     <?php endif; ?>
                     <div class="text-sm text-gray-700">사유: <?php echo h(trim((string)$ov['reason']) !== '' ? $ov['reason'] : '-'); ?></div>
+                    <details class="mt-3 rounded-xl border border-gray-200 bg-white">
+                        <summary class="cursor-pointer px-3 py-2 text-xs font-extrabold text-blue-700">상세</summary>
+                        <div class="border-t border-gray-100 p-3">
+                            <div class="grid grid-cols-1 gap-2">
+                                <?php $overrideItems = isset($ov['items']) && is_array($ov['items']) ? $ov['items'] : array($ov); ?>
+                                <?php foreach ($overrideItems as $overrideItem): ?>
+                                    <div class="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                                        <span class="font-extrabold"><?php echo h(isset($overrideItem['worker_name']) ? $overrideItem['worker_name'] : '-'); ?></span>
+                                        · <?php echo h(isset($overrideItem['work_date']) ? $overrideItem['work_date'] : '-'); ?>
+                                        · <?php echo h(isset($overrideItem['old_value']) ? $overrideItem['old_value'] : ''); ?> → <span class="font-extrabold text-emerald-700"><?php echo h(isset($overrideItem['new_value']) ? $overrideItem['new_value'] : ''); ?>공수</span>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                            <div class="mt-2 text-xs text-gray-700">요청사유: <?php echo h(trim((string)$ov['reason']) !== '' ? $ov['reason'] : '-'); ?></div>
+                        </div>
+                    </details>
                     <div class="flex flex-col sm:flex-row flex-wrap gap-2 mt-3">
                         <form method="post" action="?r=construction/labor_gongsu_override_decide">
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">

@@ -21,6 +21,15 @@ function cpms_monthly_summary_money($value) {
     return number_format((float)$value, 0);
 }
 
+function cpms_monthly_summary_mobile_money_class($value) {
+    $formatted = cpms_monthly_summary_money($value);
+    $digits = preg_replace('/[^0-9]/', '', $formatted);
+    $length = strlen((string)$digits);
+    if ($length >= 12) return 'cpms-mobile-money cpms-mobile-money-xs';
+    if ($length >= 9) return 'cpms-mobile-money cpms-mobile-money-sm';
+    return 'cpms-mobile-money';
+}
+
 function cpms_monthly_summary_count($value) {
     $n = (float)$value;
     if ($n == 0.0) return '-';
@@ -432,6 +441,14 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
         if ($ym === $selectedYm) $currentRevenue += (float)$amount;
     }
     $totalInput = $previousInput + $monthInput;
+    $equipmentAmount = isset($breakdown['equipment']) ? (float)$breakdown['equipment'] : 0.0;
+    $materialPurchaseAmount = 0.0;
+    $materialPurchaseAmount += isset($breakdown['material']) ? (float)$breakdown['material'] : 0.0;
+    $materialPurchaseAmount += isset($breakdown['purchase']) ? (float)$breakdown['purchase'] : 0.0;
+    $materialPurchaseAmount += isset($breakdown['other']) ? (float)$breakdown['other'] : 0.0;
+    $laborAmount = isset($laborByMonth[$selectedYm]) ? (float)$laborByMonth[$selectedYm] : 0.0;
+    $outsourcingAmount = isset($breakdown['outsourcing']) ? (float)$breakdown['outsourcing'] : 0.0;
+    $monthlyCostTotal = $laborAmount + $equipmentAmount + $materialPurchaseAmount + $outsourcingAmount;
     return array(
         'project_id' => $projectId,
         'project_name' => $projectName,
@@ -439,7 +456,11 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
         'previous_input' => $previousInput,
         'month_input' => $monthInput,
         'total_input' => $totalInput,
-        'labor_amount' => isset($laborByMonth[$selectedYm]) ? (float)$laborByMonth[$selectedYm] : 0.0,
+        'labor_amount' => $laborAmount,
+        'equipment_amount' => $equipmentAmount,
+        'material_purchase_amount' => $materialPurchaseAmount,
+        'outsourcing_amount' => $outsourcingAmount,
+        'monthly_cost_total' => $monthlyCostTotal,
         'current_revenue' => $currentRevenue,
         'worker_output_days' => $workerOutputDays,
         'equipment' => $equipmentCounts,
@@ -480,6 +501,10 @@ $summaryTotals = array(
     'month_input' => 0.0,
     'total_input' => 0.0,
     'labor_amount' => 0.0,
+    'equipment_amount' => 0.0,
+    'material_purchase_amount' => 0.0,
+    'outsourcing_amount' => 0.0,
+    'monthly_cost_total' => 0.0,
     'current_revenue' => 0.0,
     'worker_output_days' => 0.0,
     'equipment' => array(
@@ -498,6 +523,10 @@ foreach ($summaryRows as $row) {
     $summaryTotals['month_input'] += isset($row['month_input']) ? (float)$row['month_input'] : 0.0;
     $summaryTotals['total_input'] += isset($row['total_input']) ? (float)$row['total_input'] : 0.0;
     $summaryTotals['labor_amount'] += isset($row['labor_amount']) ? (float)$row['labor_amount'] : 0.0;
+    $summaryTotals['equipment_amount'] += isset($row['equipment_amount']) ? (float)$row['equipment_amount'] : 0.0;
+    $summaryTotals['material_purchase_amount'] += isset($row['material_purchase_amount']) ? (float)$row['material_purchase_amount'] : 0.0;
+    $summaryTotals['outsourcing_amount'] += isset($row['outsourcing_amount']) ? (float)$row['outsourcing_amount'] : 0.0;
+    $summaryTotals['monthly_cost_total'] += isset($row['monthly_cost_total']) ? (float)$row['monthly_cost_total'] : 0.0;
     $summaryTotals['current_revenue'] += isset($row['current_revenue']) ? (float)$row['current_revenue'] : 0.0;
     $summaryTotals['worker_output_days'] += isset($row['worker_output_days']) ? (float)$row['worker_output_days'] : 0.0;
     $summaryTotals['cumulative_input'] += isset($row['cumulative_input']) ? (float)$row['cumulative_input'] : 0.0;
@@ -513,138 +542,184 @@ foreach ($summaryRows as $row) {
 }
 
 $monthTitle = substr($selectedYm, 5, 2) . '월';
+
+// PDF 생성 서비스가 화면과 동일한 집계 데이터를 재사용할 때는
+// 아래의 화면 HTML만 출력하지 않는다.
+if (isset($cpmsMonthlySummaryDataOnly) && $cpmsMonthlySummaryDataOnly) {
+    return;
+}
 ?>
-<div class="bg-white rounded-3xl border border-gray-100 p-5">
-  <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+<div class="cpms-monthly-summary-shell bg-white rounded-3xl border border-gray-100 p-5">
+  <div class="cpms-monthly-summary-toolbar flex flex-wrap items-center justify-between gap-3 mb-4">
     <div>
       <h3 class="text-xl font-extrabold text-gray-900">월별 투입비 집계</h3>
-      <div class="text-sm text-gray-500 mt-1"><?php echo h(str_replace('-', '.', $selectedYm)); ?> 기준</div>
+      <div class="text-sm text-gray-500 mt-1">
+        <?php echo h(str_replace('-', '.', $selectedYm)); ?> 기준 · 오늘 날짜 <?php echo h(date('Y.m.d')); ?>
+      </div>
     </div>
-    <form method="get" class="flex flex-wrap items-center gap-2">
-      <input type="hidden" name="r" value="공무">
-      <input type="hidden" name="tab" value="monthly_summary">
-      <select name="ym" class="px-3 py-2 border rounded-xl min-w-[150px]">
-        <?php foreach ($monthOptions as $ymOpt): ?>
-          <option value="<?php echo h($ymOpt); ?>" <?php echo $ymOpt === $selectedYm ? 'selected' : ''; ?>><?php echo h(str_replace('-', '.', $ymOpt)); ?></option>
-        <?php endforeach; ?>
-      </select>
-      <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">조회</button>
-    </form>
+    <div class="flex flex-wrap items-center gap-2">
+      <form method="get" class="cpms-monthly-filter flex flex-wrap items-center gap-2">
+        <input type="hidden" name="r" value="공무">
+        <input type="hidden" name="tab" value="monthly_summary">
+        <select name="ym" class="px-3 py-2 border rounded-xl min-w-[150px]">
+          <?php foreach ($monthOptions as $ymOpt): ?>
+            <option value="<?php echo h($ymOpt); ?>" <?php echo $ymOpt === $selectedYm ? 'selected' : ''; ?>><?php echo h(str_replace('-', '.', $ymOpt)); ?></option>
+          <?php endforeach; ?>
+        </select>
+        <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">조회</button>
+      </form>
+      <?php
+        $monthlySummaryPdfAllowed = \App\Core\Auth::isMaster()
+          || \App\Core\Auth::userRole() === 'executive'
+          || in_array((string)\App\Core\Auth::userDepartment(), array('공무', '공무부', '공무팀', '관리', '관리부', '관리팀'), true);
+      ?>
+      <?php if ($monthlySummaryPdfAllowed): ?>
+        <form method="post"
+              action="?r=project/monthly_summary_pdf_drive"
+              onsubmit="var b=this.getElementsByTagName('button')[0];if(b){b.disabled=true;b.textContent='PDF 저장 중...';}">
+          <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+          <input type="hidden" name="ym" value="<?php echo h($selectedYm); ?>">
+          <button type="submit" class="px-4 py-2 rounded-xl bg-emerald-700 text-white font-bold hover:bg-emerald-800 disabled:opacity-60">
+            PDF로 Google Drive 저장
+          </button>
+        </form>
+      <?php endif; ?>
+    </div>
   </div>
 
+  <?php if (isset($flash) && !empty($flash) && is_array($flash)): ?>
+    <?php
+      $monthlySummaryFlashType = isset($flash['type']) ? (string)$flash['type'] : 'info';
+      $monthlySummaryFlashClass = 'border-blue-200 bg-blue-50 text-blue-800';
+      if ($monthlySummaryFlashType === 'success') $monthlySummaryFlashClass = 'border-emerald-200 bg-emerald-50 text-emerald-800';
+      if ($monthlySummaryFlashType === 'error' || $monthlySummaryFlashType === 'danger') $monthlySummaryFlashClass = 'border-red-200 bg-red-50 text-red-800';
+      $monthlySummaryDriveResult = isset($_SESSION['_monthly_summary_drive_result']) && is_array($_SESSION['_monthly_summary_drive_result'])
+        ? $_SESSION['_monthly_summary_drive_result']
+        : array();
+      unset($_SESSION['_monthly_summary_drive_result']);
+    ?>
+    <div class="cpms-monthly-summary-inset mb-3 rounded-xl border p-3 text-sm font-bold <?php echo h($monthlySummaryFlashClass); ?>">
+      <div><?php echo h(isset($flash['message']) ? $flash['message'] : ''); ?></div>
+      <?php if (!empty($monthlySummaryDriveResult['file_link'])): ?>
+        <a href="<?php echo h($monthlySummaryDriveResult['file_link']); ?>" target="_blank" rel="noopener"
+           class="inline-flex mt-2 mr-2 px-3 py-2 rounded-lg bg-emerald-700 text-white">저장된 PDF 바로 열기</a>
+      <?php endif; ?>
+      <?php if (!empty($monthlySummaryDriveResult['folder_link'])): ?>
+        <a href="<?php echo h($monthlySummaryDriveResult['folder_link']); ?>" target="_blank" rel="noopener"
+           class="inline-flex mt-2 px-3 py-2 rounded-lg border border-emerald-300 bg-white text-emerald-800">저장 폴더 열기</a>
+      <?php endif; ?>
+    </div>
+  <?php endif; ?>
+
   <?php if (count($errors) > 0): ?>
-    <div class="mb-3 rounded-xl border border-red-200 bg-red-50 text-red-800 p-3 text-sm">
+    <div class="cpms-monthly-summary-inset mb-3 rounded-xl border border-red-200 bg-red-50 text-red-800 p-3 text-sm">
       <?php foreach ($errors as $error): ?><div><?php echo h($error); ?></div><?php endforeach; ?>
     </div>
   <?php endif; ?>
 
   <?php if (count($summaryRows) === 0): ?>
-    <div class="text-sm text-gray-600">표시할 프로젝트가 없습니다.</div>
+    <div class="cpms-monthly-summary-inset text-sm text-gray-600">표시할 프로젝트가 없습니다.</div>
   <?php else: ?>
-    <?php
-      $mobileMonthProfit = (float)$summaryTotals['current_revenue'] - (float)$summaryTotals['month_input'];
-      $mobileBreakdown = isset($summaryTotals['breakdown']) && is_array($summaryTotals['breakdown']) ? $summaryTotals['breakdown'] : array();
-      $mobileCards = array(
-        array('매출', $summaryTotals['current_revenue'], 'bg-slate-900 text-white'),
-        array('총투입비', $summaryTotals['month_input'], 'bg-white border border-gray-200 text-gray-900'),
-        array('손익', $mobileMonthProfit, 'bg-white border border-gray-200 ' . ($mobileMonthProfit < 0 ? 'text-red-600' : 'text-blue-700')),
-        array('노무비', isset($mobileBreakdown['labor']) ? $mobileBreakdown['labor'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
-        array('외주비', isset($mobileBreakdown['outsourcing']) ? $mobileBreakdown['outsourcing'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
-        array('장비비', isset($mobileBreakdown['equipment']) ? $mobileBreakdown['equipment'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
-        array('자재비', isset($mobileBreakdown['material']) ? $mobileBreakdown['material'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
-        array('구매품', isset($mobileBreakdown['purchase']) ? $mobileBreakdown['purchase'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
-        array('기타경비', isset($mobileBreakdown['other']) ? $mobileBreakdown['other'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
-        array('안전관리비', isset($mobileBreakdown['safety']) ? $mobileBreakdown['safety'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900'),
-        array('공제분', isset($mobileBreakdown['deduction']) ? $mobileBreakdown['deduction'] : 0, 'bg-gray-50 border border-gray-200 text-gray-900')
-      );
-    ?>
-    <div class="cpms-monthly-mobile-summary" aria-label="월별 투입비 모바일 합계">
-      <?php foreach ($mobileCards as $mobileCard): ?>
-        <div class="rounded-2xl p-4 <?php echo h($mobileCard[2]); ?>">
-          <div class="text-xs opacity-70 font-bold"><?php echo h($mobileCard[0]); ?></div>
-          <div class="mt-1 text-lg font-extrabold break-words"><?php echo h(cpms_monthly_summary_money($mobileCard[1])); ?></div>
-        </div>
-      <?php endforeach; ?>
+    <div class="cpms-public-affairs-mobile-table" aria-label="월별 투입비 모바일 집계표">
+      <table>
+        <colgroup>
+          <col class="cpms-mobile-site-col">
+          <col class="cpms-mobile-money-col">
+          <col class="cpms-mobile-money-col">
+          <col class="cpms-mobile-material-col">
+          <col class="cpms-mobile-money-col">
+          <col class="cpms-mobile-total-col">
+          <col class="cpms-mobile-ratio-col">
+        </colgroup>
+        <thead>
+          <tr class="bg-[#d7aa8a] text-gray-900">
+            <th class="text-left" rowspan="2">현장명</th>
+            <th class="text-center" colspan="5"><?php echo h($monthTitle); ?> 투입금액</th>
+            <th class="text-right" rowspan="2">A/B</th>
+          </tr>
+          <tr class="bg-[#efd6c2] text-gray-900">
+            <th class="text-right">노무비</th>
+            <th class="text-right">장비비</th>
+            <th class="text-right">자재구입비</th>
+            <th class="text-right">외주비</th>
+            <th class="text-right">합계</th>
+          </tr>
+        </thead>
+        <tbody>
+          <?php foreach ($summaryRows as $row): ?>
+            <tr class="odd:bg-white even:bg-gray-50">
+              <td class="font-bold text-gray-900"><?php echo h($row['project_name']); ?></td>
+              <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($row['labor_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($row['labor_amount'])); ?></td>
+              <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($row['equipment_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($row['equipment_amount'])); ?></td>
+              <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($row['material_purchase_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($row['material_purchase_amount'])); ?></td>
+              <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($row['outsourcing_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($row['outsourcing_amount'])); ?></td>
+              <td class="text-right font-bold <?php echo h(cpms_monthly_summary_mobile_money_class($row['monthly_cost_total'])); ?>"><?php echo h(cpms_monthly_summary_money($row['monthly_cost_total'])); ?></td>
+              <td class="text-right"><?php echo h(cpms_monthly_summary_ratio($row['cumulative_input'], $row['cumulative_revenue'])); ?></td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+        <tfoot>
+          <tr class="bg-gray-100 font-extrabold text-gray-900">
+            <td>합계</td>
+            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['labor_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['labor_amount'])); ?></td>
+            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['equipment_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['equipment_amount'])); ?></td>
+            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['material_purchase_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['material_purchase_amount'])); ?></td>
+            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['outsourcing_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['outsourcing_amount'])); ?></td>
+            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['monthly_cost_total'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['monthly_cost_total'])); ?></td>
+            <td class="text-right"><?php echo h(cpms_monthly_summary_ratio($summaryTotals['cumulative_input'], $summaryTotals['cumulative_revenue'])); ?></td>
+          </tr>
+        </tfoot>
+      </table>
     </div>
-    <form method="post" action="?r=project/monthly_summary_remark_save">
-      <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-      <input type="hidden" name="ym" value="<?php echo h($selectedYm); ?>">
+    <div class="cpms-monthly-summary-desktop">
       <div class="overflow-x-auto">
-        <table class="min-w-[1500px] w-full text-xs border border-gray-200">
+        <table class="min-w-[1050px] w-full text-xs border border-gray-200">
           <thead>
             <tr class="bg-[#d7aa8a] text-gray-900">
               <th class="border p-2 align-middle" rowspan="2">현장명</th>
-              <th class="border p-2 align-middle text-right" rowspan="2">계약금액</th>
-              <th class="border p-2 text-center" colspan="4"><?php echo h($monthTitle); ?> 투입 금액</th>
-              <th class="border p-2 align-middle text-right" rowspan="2">금회 예상기성금액</th>
-              <th class="border p-2 align-middle text-right" rowspan="2">누적작업인원</th>
-              <th class="border p-2 align-middle text-right" rowspan="2">굴삭기</th>
-              <th class="border p-2 align-middle text-right" rowspan="2">덤프</th>
-              <th class="border p-2 align-middle text-right" rowspan="2">기타장비</th>
-              <th class="border p-2 align-middle text-right" rowspan="2">지게차</th>
+              <th class="border p-2 text-center" colspan="5"><?php echo h($monthTitle); ?> 투입금액</th>
               <th class="border p-2 align-middle text-right" rowspan="2">누적투입금액<br>(A)</th>
               <th class="border p-2 align-middle text-right" rowspan="2">누적기성금액<br>(B)</th>
               <th class="border p-2 align-middle text-right" rowspan="2">A/B</th>
-              <th class="border p-2 align-middle" rowspan="2">비고</th>
             </tr>
             <tr class="bg-[#efd6c2] text-gray-900">
-              <th class="border p-2 text-right">누적투입금액</th>
-              <th class="border p-2 text-right">월투입금액</th>
-              <th class="border p-2 text-right">합계</th>
               <th class="border p-2 text-right">노무비</th>
+              <th class="border p-2 text-right">장비비</th>
+              <th class="border p-2 text-right">자재구입비</th>
+              <th class="border p-2 text-right">외주비</th>
+              <th class="border p-2 text-right">합계</th>
             </tr>
           </thead>
           <tbody>
             <?php foreach ($summaryRows as $row): ?>
-              <?php $eq = isset($row['equipment']) && is_array($row['equipment']) ? $row['equipment'] : array(); ?>
               <tr class="odd:bg-white even:bg-gray-50">
                 <td class="border p-2 font-bold text-gray-900"><?php echo h($row['project_name']); ?></td>
-                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($row['contract_amount'])); ?></td>
-                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($row['previous_input'])); ?></td>
-                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($row['month_input'])); ?></td>
-                <td class="border p-2 text-right font-bold"><?php echo h(cpms_monthly_summary_money($row['total_input'])); ?></td>
                 <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($row['labor_amount'])); ?></td>
-                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($row['current_revenue'])); ?></td>
-                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count($row['worker_output_days'])); ?></td>
-                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eq['excavator']) ? $eq['excavator'] : 0)); ?></td>
-                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eq['dump']) ? $eq['dump'] : 0)); ?></td>
-                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eq['other']) ? $eq['other'] : 0)); ?></td>
-                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eq['forklift']) ? $eq['forklift'] : 0)); ?></td>
+                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($row['equipment_amount'])); ?></td>
+                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($row['material_purchase_amount'])); ?></td>
+                <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($row['outsourcing_amount'])); ?></td>
+                <td class="border p-2 text-right font-bold"><?php echo h(cpms_monthly_summary_money($row['monthly_cost_total'])); ?></td>
                 <td class="border p-2 text-right font-bold"><?php echo h(cpms_monthly_summary_money($row['cumulative_input'])); ?></td>
                 <td class="border p-2 text-right font-bold"><?php echo h(cpms_monthly_summary_money($row['cumulative_revenue'])); ?></td>
                 <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_ratio($row['cumulative_input'], $row['cumulative_revenue'])); ?></td>
-                <td class="border p-2">
-                  <input type="text" name="remarks[<?php echo (int)$row['project_id']; ?>]" value="<?php echo h($row['remark']); ?>" class="w-full min-w-[180px] px-2 py-1 border rounded-lg">
-                </td>
               </tr>
             <?php endforeach; ?>
           </tbody>
           <tfoot>
-            <?php $eqTotal = isset($summaryTotals['equipment']) && is_array($summaryTotals['equipment']) ? $summaryTotals['equipment'] : array(); ?>
             <tr class="bg-gray-100 font-extrabold text-gray-900">
               <td class="border p-2">합계</td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['contract_amount'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['previous_input'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['month_input'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['total_input'])); ?></td>
               <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['labor_amount'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['current_revenue'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count($summaryTotals['worker_output_days'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eqTotal['excavator']) ? $eqTotal['excavator'] : 0)); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eqTotal['dump']) ? $eqTotal['dump'] : 0)); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eqTotal['other']) ? $eqTotal['other'] : 0)); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_count(isset($eqTotal['forklift']) ? $eqTotal['forklift'] : 0)); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['equipment_amount'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['material_purchase_amount'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['outsourcing_amount'])); ?></td>
+              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['monthly_cost_total'])); ?></td>
               <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['cumulative_input'])); ?></td>
               <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['cumulative_revenue'])); ?></td>
               <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_ratio($summaryTotals['cumulative_input'], $summaryTotals['cumulative_revenue'])); ?></td>
-              <td class="border p-2 text-center">-</td>
             </tr>
           </tfoot>
         </table>
       </div>
-      <div class="mt-3 flex justify-end">
-        <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold">비고 저장</button>
-      </div>
-    </form>
+    </div>
   <?php endif; ?>
 </div>

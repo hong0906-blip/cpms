@@ -175,7 +175,7 @@ if (is_array($timesheetWorkers)) {
         }
         $wageRateForTotal = function_exists('cpms_resolve_labor_wage_rate') ? cpms_resolve_labor_wage_rate($workerForTotal) : cpms_parse_money_value(isset($workerForTotal['deposit_rate']) ? $workerForTotal['deposit_rate'] : '');
         $outsourcingRatioForTotal = function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($workerForTotal) : 0;
-        $amountsForTotal = function_exists('cpms_labor_calculate_amounts') ? cpms_labor_calculate_amounts($rowTotalGongsuForTotal, $wageRateForTotal, $outsourcingRatioForTotal) : array('total_amount' => round($rowTotalGongsuForTotal * $wageRateForTotal), 'labor_amount' => round($rowTotalGongsuForTotal * $wageRateForTotal), 'outsourcing_amount' => 0);
+        $amountsForTotal = function_exists('cpms_labor_calculate_worker_month_amounts') ? cpms_labor_calculate_worker_month_amounts($workerForTotal, $attendanceGongsuMap, $selectedMonth) : array('total_amount' => round($rowTotalGongsuForTotal * $wageRateForTotal), 'labor_amount' => round($rowTotalGongsuForTotal * $wageRateForTotal), 'outsourcing_amount' => 0);
         $groupKeyForTotal = cpms_labor_sheet_group_key($workerForTotal);
         if (!isset($laborSheetSubtotals[$groupKeyForTotal])) {
             $laborSheetSubtotals[$groupKeyForTotal] = array('daily' => array(), 'output_days' => 0, 'gongsu' => 0.0, 'pay' => 0.0, 'labor_amount' => 0.0, 'outsourcing_amount' => 0.0);
@@ -326,7 +326,7 @@ if (!function_exists('cpms_labor_sheet_sort_header')) {
                     $totalGongsu += (float)$gongsuValue;
                 }
                 $outsourcingRatio = function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($worker) : 0;
-                $workerAmounts = function_exists('cpms_labor_calculate_amounts') ? cpms_labor_calculate_amounts($totalGongsu, $wageRate, $outsourcingRatio) : array('total_amount' => round($totalGongsu * $wageRate), 'labor_ratio' => 100, 'labor_amount' => round($totalGongsu * $wageRate), 'outsourcing_ratio' => 0, 'outsourcing_amount' => 0);
+                $workerAmounts = function_exists('cpms_labor_calculate_worker_month_amounts') ? cpms_labor_calculate_worker_month_amounts($worker, $attendanceGongsuMap, $selectedMonth) : array('total_amount' => round($totalGongsu * $wageRate), 'labor_ratio' => 100, 'labor_amount' => round($totalGongsu * $wageRate), 'outsourcing_ratio' => 0, 'outsourcing_amount' => 0);
                 $totalPay = isset($workerAmounts['total_amount']) ? (float)$workerAmounts['total_amount'] : 0.0;
                 $laborRatio = isset($workerAmounts['labor_ratio']) ? (int)$workerAmounts['labor_ratio'] : (100 - $outsourcingRatio);
                 $laborAmount = isset($workerAmounts['labor_amount']) ? (float)$workerAmounts['labor_amount'] : $totalPay;

@@ -802,6 +802,10 @@ if ($route === 'project/monthly_summary_remark_save') {
     require_once __DIR__ . '/../app/views/project/monthly_summary_remark_save.php';
     exit;
 }
+if ($route === 'project/monthly_summary_pdf_drive') {
+    require_once __DIR__ . '/../app/views/project/monthly_summary_pdf_drive.php';
+    exit;
+}
 
 
 /**
@@ -1009,6 +1013,10 @@ if ($route === 'construction/monthly_cost_export') {
 }
 if ($route === 'construction/outsourcing_cost_save') {
     require_once __DIR__ . '/../app/views/construction/outsourcing_cost_save.php';
+    exit;
+}
+if ($route === 'construction/outsourcing_file_download') {
+    require_once __DIR__ . '/../app/views/construction/outsourcing_file_download.php';
     exit;
 }
 

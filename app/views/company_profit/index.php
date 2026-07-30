@@ -14,7 +14,8 @@ $selectedMonth = isset($filters['month']) ? (int)$filters['month'] : 0;
 $selectedStatus = isset($filters['status']) ? (string)$filters['status'] : '';
 $searchQuery = isset($filters['q']) ? (string)$filters['q'] : '';
 $startMonth = isset($filters['start_month']) ? (string)$filters['start_month'] : sprintf('%04d-01', $selectedYear);
-$endMonth = isset($filters['end_month']) ? (string)$filters['end_month'] : sprintf('%04d-12', $selectedYear);
+$defaultEndMonth = ($selectedYear === (int)date('Y')) ? date('Y-m') : sprintf('%04d-12', $selectedYear);
+$endMonth = isset($filters['end_month']) ? (string)$filters['end_month'] : $defaultEndMonth;
 $years = (isset($filters['years']) && is_array($filters['years'])) ? $filters['years'] : array((int)date('Y'));
 $statusOptions = (isset($filters['status_options']) && is_array($filters['status_options'])) ? $filters['status_options'] : array();
 ?>

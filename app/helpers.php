@@ -687,6 +687,7 @@ function cpms_ensure_labor_override_table($pdo) {
             project_id INT NOT NULL,
             month CHAR(7) NOT NULL,
             batch_token VARCHAR(64) NULL,
+            request_scope VARCHAR(20) NULL,
             worker_key VARCHAR(120) NOT NULL,
             worker_name VARCHAR(120) NOT NULL,
             work_date DATE NOT NULL,
@@ -742,6 +743,7 @@ function cpms_ensure_labor_override_table($pdo) {
             'month' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN month CHAR(7) NOT NULL AFTER project_id",
             // 파일: app/helpers.php - 일괄 공수 요청을 한 번에 승인하기 위한 묶음 식별자입니다.
             'batch_token' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN batch_token VARCHAR(64) NULL AFTER month",
+            'request_scope' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN request_scope VARCHAR(20) NULL AFTER batch_token",
             'worker_key' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN worker_key VARCHAR(120) NOT NULL AFTER month",
             'worker_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN worker_name VARCHAR(120) NOT NULL AFTER worker_key",
             'work_date' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN work_date DATE NOT NULL AFTER worker_name",
@@ -851,7 +853,7 @@ function cpms_load_labor_override_pending($projectId, $month) {
     try {
         $pdo = \App\Core\Db::pdo();
         if (!$pdo || !cpms_ensure_labor_override_table($pdo)) return $list;
-        $st = $pdo->prepare("SELECT id, batch_token, worker_name, work_date, old_value, new_value, reason, status, updated_at FROM cpms_labor_gongsu_overrides WHERE project_id=:pid AND month=:month AND status='pending' ORDER BY updated_at DESC, id DESC");
+        $st = $pdo->prepare("SELECT id, batch_token, request_scope, worker_name, work_date, old_value, new_value, reason, status, updated_at FROM cpms_labor_gongsu_overrides WHERE project_id=:pid AND month=:month AND status='pending' ORDER BY updated_at DESC, id DESC");
         $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
         $st->bindValue(':month', (string)$month, PDO::PARAM_STR);
         $st->execute();

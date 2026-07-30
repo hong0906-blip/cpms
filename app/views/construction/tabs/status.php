@@ -480,12 +480,12 @@ if (!function_exists('cpms_status_labor_total_between')) {
             $monthProjectWorkers = cpms_apply_project_labor_worker_month_ratios($baseProjectWorkers, $ratioMap);
             $workerRows = cpms_build_project_worker_rows($monthProjectWorkers, $directTeamMembers);
             $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
-            $workerRatioMap = array();
+            $workerAllocationMap = array();
             foreach ($timesheetWorkers as $timesheetWorker) {
                 $timesheetWorkerName = isset($timesheetWorker['name']) ? (string)$timesheetWorker['name'] : '';
                 $timesheetWorkerKey = cpms_normalize_worker_key($timesheetWorkerName);
                 if ($timesheetWorkerKey === '') continue;
-                $workerRatioMap[$timesheetWorkerKey] = cpms_resolve_worker_outsourcing_ratio($timesheetWorker);
+                $workerAllocationMap[$timesheetWorkerKey] = $timesheetWorker;
             }
 
             foreach ($gongsuMap as $workerKey => $dailyMap) {
@@ -499,8 +499,8 @@ if (!function_exists('cpms_status_labor_total_between')) {
                 }
                 if ($workerMonthGongsu <= 0) continue;
                 $wageRate = isset($laborWageMap[$workerKey]) ? (float)$laborWageMap[$workerKey] : 0.0;
-                $outsourcingRatio = isset($workerRatioMap[$workerKey]) ? (int)$workerRatioMap[$workerKey] : 0;
-                $amounts = cpms_labor_calculate_amounts($workerMonthGongsu, $wageRate, $outsourcingRatio);
+                $allocationWorker = isset($workerAllocationMap[$workerKey]) && is_array($workerAllocationMap[$workerKey]) ? $workerAllocationMap[$workerKey] : array('name'=>$workerKey, 'deposit_rate'=>$wageRate, 'outsourcing_ratio'=>0);
+                $amounts = cpms_labor_calculate_worker_period_amounts($allocationWorker, $dailyMap, $startDate, $endDate);
                 if ($outsourcingOnly) {
                     $totalLabor += isset($amounts['outsourcing_amount']) ? (float)$amounts['outsourcing_amount'] : 0.0;
                 } else {
@@ -583,21 +583,24 @@ if (!in_array($selectedYear, $years, true)) {
     }
 }
 
+$currentYm = date('Y-m');
+try {
+    $currentDate = new DateTime('now', new DateTimeZone('Asia/Seoul'));
+    $currentYm = $currentDate->format('Y-m');
+} catch (Exception $e) {
+    $currentYm = date('Y-m');
+}
 $fromYm = isset($_GET['from_ym']) ? trim((string)$_GET['from_ym']) : '';
-$toYm = isset($_GET['to_ym']) ? trim((string)$_GET['to_ym']) : '';
-if (!cpms_status_ym_valid($fromYm) || !cpms_status_ym_valid($toYm)) {
+$toYm = $currentYm;
+if (!cpms_status_ym_valid($fromYm)) {
     $fromYm = sprintf('%04d-01', $selectedYear);
-    $toYm = sprintf('%04d-12', $selectedYear);
 }
 if ($fromYm > $toYm) {
-    $tmpYm = $fromYm;
     $fromYm = $toYm;
-    $toYm = $tmpYm;
 }
 $periodMonths = cpms_status_months_between($fromYm, $toYm);
 if (count($periodMonths) === 0) {
-    $fromYm = sprintf('%04d-01', $selectedYear);
-    $toYm = sprintf('%04d-12', $selectedYear);
+    $fromYm = $toYm;
     $periodMonths = cpms_status_months_between($fromYm, $toYm);
 }
 $periodLabel = cpms_status_ym_label($fromYm) . ' ~ ' . cpms_status_ym_label($toYm);
@@ -801,15 +804,12 @@ foreach ($years as $yy) {
         $overallTotals['sales'] += ($overallConfirmedSales > 0) ? $overallConfirmedSales : $overallExpectedSales;
     }
 }
-$safetyContractTotal = cpms_safety_cost_contract_total($pdo, (int)$pid);
-$safetyLimit110 = round($safetyContractTotal * 1.1);
-$safetyUsedTotal = cpms_safety_cost_total((int)$pid);
-$safetyRemaining = $safetyLimit110 - $safetyUsedTotal;
-$safetyUseRate = ($safetyContractTotal > 0) ? (($safetyUsedTotal / $safetyContractTotal) * 100) : 0.0;
-$safetyRemainRate = ($safetyLimit110 > 0) ? (($safetyRemaining / $safetyLimit110) * 100) : 0.0;
-$overallTotals['safety'] = $safetyUsedTotal;
+$currentOutsourcingRange = cpms_cost_period_range($currentYm, 'labor');
+$currentOutsourcingStart = isset($currentOutsourcingRange['start']) ? (string)$currentOutsourcingRange['start'] : ($currentYm . '-01');
+$currentOutsourcingEnd = isset($currentOutsourcingRange['end']) ? (string)$currentOutsourcingRange['end'] : date('Y-m-t', strtotime($currentYm . '-01'));
+$currentOutsourcingTotal = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $currentOutsourcingStart, $currentOutsourcingEnd, $laborWageMap, true);
+$currentOutsourcingTotal += cpms_outsourcing_manual_total_between($pdo, (int)$pid, $currentOutsourcingStart, $currentOutsourcingEnd);
 $overallInputCostTotal = $overallTotals['labor'] + $overallTotals['outsourcing'] + $overallTotals['equipment'] + $overallTotals['materials'] + $overallTotals['purchase'];
-$overallUsageTotal = $overallInputCostTotal;
 $overallTargetCostAmount = cpms_status_target_cost_amount($overallTotals['sales'], $targetRateValue);
 $overallCostRateInfo = cpms_status_cost_rate_info($overallTotals['sales'], $overallInputCostTotal);
 $overallNetTotal = $overallTotals['sales'] - $overallInputCostTotal;
@@ -843,10 +843,14 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
 .cpms-status-wrap .target-rate-card textarea { font-size:12px; }
 .cpms-status-wrap .target-rate-card textarea { min-height:38px; resize:vertical; }
 @media (max-width: 980px) {
-    .cpms-status-wrap .summary-grid { grid-template-columns:repeat(1,minmax(0,1fr)); }
+    .cpms-status-wrap .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 }
 @media (max-width: 767px) {
     .cpms-status-wrap .card { border-radius:16px; }
+    .cpms-status-wrap .summary-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .cpms-status-wrap .summary-grid > div { padding:clamp(8px, 2.6vw, 12px); }
+    .cpms-status-wrap .summary-grid .text-xs { font-size:clamp(10px, 2.8vw, 12px); line-height:1.35; }
+    .cpms-status-wrap .summary-grid .text-lg { font-size:clamp(12px, 3.8vw, 16px); line-height:1.35; }
     .cpms-status-wrap .chart-wrap { padding:12px; border-radius:16px; }
     .cpms-status-wrap .chart-row { min-width:760px; height:230px; gap:8px; }
     .cpms-status-wrap .chart-row[style] { min-width:520px !important; }
@@ -854,7 +858,6 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     .cpms-status-wrap .bar .value { display:none; }
     .cpms-status-wrap .legend { gap:8px; }
     .cpms-status-wrap .legend-item { font-size:11px; }
-    .cpms-status-wrap .summary-grid .text-lg { font-size:16px; }
     .cpms-status-wrap .cpms-status-filter { width:100%; justify-content:stretch; }
     .cpms-status-wrap .cpms-status-monthly-chart .chart-scroll,
     .cpms-status-wrap .cpms-status-monthly-chart .legend,
@@ -979,29 +982,13 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
             </div>
         </div>
         <div class="summary-grid mt-3">
-            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
-                <div class="text-xs text-emerald-700">안전관리비 총액</div>
-                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($safetyContractTotal)); ?></div>
+            <div class="p-3 rounded-xl" style="border:1px solid #bae6fd; background:#f0f9ff;">
+                <div class="text-xs text-sky-700">총 외주비</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['outsourcing'])); ?></div>
             </div>
-            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
-                <div class="text-xs text-emerald-700">110% 사용가능한도</div>
-                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($safetyLimit110)); ?></div>
-            </div>
-            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
-                <div class="text-xs text-emerald-700">현재 사용금액</div>
-                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($safetyUsedTotal)); ?></div>
-            </div>
-            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
-                <div class="text-xs text-emerald-700">남은금액</div>
-                <div class="text-lg font-extrabold <?php echo ($safetyRemaining < 0) ? 'text-red-700' : 'text-gray-900'; ?>"><?php echo h(cpms_status_money($safetyRemaining)); ?></div>
-            </div>
-            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
-                <div class="text-xs text-emerald-700">사용률(총액 기준)</div>
-                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_safety_cost_rate_label($safetyUseRate)); ?></div>
-            </div>
-            <div class="p-3 rounded-xl" style="border:1px solid #bbf7d0; background:#f0fdf4;">
-                <div class="text-xs text-emerald-700">남은 퍼센트(110% 한도)</div>
-                <div class="text-lg font-extrabold <?php echo ($safetyRemainRate < 0) ? 'text-red-700' : 'text-gray-900'; ?>"><?php echo h(cpms_safety_cost_rate_label($safetyRemainRate)); ?></div>
+            <div class="p-3 rounded-xl" style="border:1px solid #bae6fd; background:#f0f9ff;">
+                <div class="text-xs text-sky-700">이번달 외주비</div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($currentOutsourcingTotal)); ?></div>
             </div>
         </div>
     </div>
@@ -1023,11 +1010,11 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
             </div>
             <div>
                 <label class="block text-sm font-bold text-gray-700">시작월</label>
-                <input type="month" name="from_ym" data-status-from class="px-3 py-2 rounded-xl border border-gray-300" value="<?php echo h($fromYm); ?>">
+                <input type="month" name="from_ym" data-status-from class="px-3 py-2 rounded-xl border border-gray-300" value="<?php echo h($fromYm); ?>" max="<?php echo h($currentYm); ?>">
             </div>
             <div>
                 <label class="block text-sm font-bold text-gray-700">종료월</label>
-                <input type="month" name="to_ym" data-status-to class="px-3 py-2 rounded-xl border border-gray-300" value="<?php echo h($toYm); ?>">
+                <input type="month" name="to_ym" data-status-to class="px-3 py-2 rounded-xl border border-gray-200 bg-gray-100 text-gray-500" value="<?php echo h($toYm); ?>" readonly aria-readonly="true" title="종료월은 이번 달로 고정됩니다.">
             </div>
             <button class="px-4 py-2 rounded-xl bg-gray-900 text-white font-extrabold">조회</button>
         </form>
@@ -1258,8 +1245,8 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
     yearEl.addEventListener('change', function(){
         var y = String(yearEl.value || '');
         if (!/^\d{4}$/.test(y)) return;
-        fromEl.value = y + '-01';
-        toEl.value = y + '-12';
+        var nextFrom = y + '-01';
+        fromEl.value = (nextFrom > toEl.value) ? toEl.value : nextFrom;
     });
 })();
 </script>

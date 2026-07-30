@@ -7,6 +7,7 @@
  */
 
 require_once __DIR__ . '/labor_data_loader.php';
+require_once __DIR__ . '/outsourcing_file_helper.php';
 
 if (!function_exists('cpms_outsourcing_cost_ensure_table')) {
     function cpms_outsourcing_cost_ensure_table($pdo) {
@@ -25,6 +26,7 @@ if (!function_exists('cpms_outsourcing_cost_ensure_table')) {
                 business_no VARCHAR(30) NULL,
                 contact VARCHAR(50) NULL,
                 amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+                memo VARCHAR(500) NULL,
                 created_by_name VARCHAR(100) NULL,
                 created_by_email VARCHAR(190) NULL,
                 is_deleted TINYINT(1) NOT NULL DEFAULT 0,
@@ -32,6 +34,15 @@ if (!function_exists('cpms_outsourcing_cost_ensure_table')) {
                 updated_at DATETIME NOT NULL,
                 KEY idx_outsourcing_project_date (project_id, expense_date, is_deleted)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+            $columnMap = array();
+            $stColumns = $pdo->query("SHOW COLUMNS FROM cpms_outsourcing_costs");
+            while ($columnRow = $stColumns->fetch(PDO::FETCH_ASSOC)) {
+                if (isset($columnRow['Field'])) $columnMap[(string)$columnRow['Field']] = true;
+            }
+            if (!isset($columnMap['memo'])) {
+                $pdo->exec("ALTER TABLE cpms_outsourcing_costs ADD COLUMN memo VARCHAR(500) NULL AFTER amount");
+            }
+            cpms_outsourcing_file_ensure_schema($pdo);
             $ensured[$cacheKey] = true;
             return true;
         } catch (Exception $e) {
@@ -159,7 +170,7 @@ if (!function_exists('cpms_outsourcing_labor_company_rows_for_month')) {
             $wageRate = function_exists('cpms_resolve_labor_wage_rate') ? (float)cpms_resolve_labor_wage_rate($worker) : cpms_outsourcing_money(isset($worker['deposit_rate']) ? $worker['deposit_rate'] : 0);
             // 파일: app/views/construction/tabs/partials/outsourcing_data_helper.php
             // 분할 인원은 공수를 나누지 않고 전체 지급총액에서 외주비 반영금액만 가져옵니다.
-            $amounts = cpms_labor_calculate_amounts($totalGongsu, $wageRate, $outsourcingRatio);
+            $amounts = cpms_labor_calculate_worker_month_amounts($worker, $gongsuMap, $ym);
             $amount = isset($amounts['outsourcing_amount']) ? (float)$amounts['outsourcing_amount'] : 0.0;
             if ($amount <= 0) continue;
             $companyName = isset($worker['company_name']) ? trim((string)$worker['company_name']) : '';

@@ -263,6 +263,7 @@ try {
         }
 
         $validatedOutsourcingRatios = array();
+        $validatedAllocationDates = array();
         foreach ($workers as $workerIdRaw => $fields) {
             $workerId = (int)$workerIdRaw;
             if ($workerId <= 0 || !is_array($fields)) continue;
@@ -284,6 +285,30 @@ try {
                 exit;
             }
             $validatedOutsourcingRatios[$workerId] = $outsourcingRatio;
+            $outsourcingStartDate = isset($fields['outsourcing_start_date']) ? trim((string)$fields['outsourcing_start_date']) : '';
+            $outsourcingEndDate = isset($fields['outsourcing_end_date']) ? trim((string)$fields['outsourcing_end_date']) : '';
+            if (($outsourcingStartDate === '') !== ($outsourcingEndDate === '')) {
+                flash_set('error', '외주비 적용 시작일과 종료일을 모두 입력해 주세요.');
+                header('Location: ' . $redirect);
+                exit;
+            }
+            if ($outsourcingStartDate !== '') {
+                $startParts = explode('-', $outsourcingStartDate);
+                $endParts = explode('-', $outsourcingEndDate);
+                $validStart = count($startParts) === 3 && checkdate((int)$startParts[1], (int)$startParts[2], (int)$startParts[0]);
+                $validEnd = count($endParts) === 3 && checkdate((int)$endParts[1], (int)$endParts[2], (int)$endParts[0]);
+                if (!$validStart || !$validEnd || strpos($outsourcingStartDate, $month . '-') !== 0 || strpos($outsourcingEndDate, $month . '-') !== 0) {
+                    flash_set('error', '외주비 적용기간은 선택한 월 안의 날짜만 입력할 수 있습니다.');
+                    header('Location: ' . $redirect);
+                    exit;
+                }
+                if ($outsourcingStartDate > $outsourcingEndDate) {
+                    flash_set('error', '외주비 적용 시작일은 종료일보다 늦을 수 없습니다.');
+                    header('Location: ' . $redirect);
+                    exit;
+                }
+            }
+            $validatedAllocationDates[$workerId] = array('start'=>$outsourcingStartDate, 'end'=>$outsourcingEndDate);
         }
 
         $pdo->beginTransaction();
@@ -393,7 +418,8 @@ try {
                 }
                 $stUp->execute();
 
-                if (!cpms_save_project_labor_worker_month_ratio($pdo, $projectId, $workerId, $month, $outsourcingRatio)) {
+                $allocationDates = isset($validatedAllocationDates[$workerId]) ? $validatedAllocationDates[$workerId] : array('start'=>'', 'end'=>'');
+                if (!cpms_save_project_labor_worker_month_ratio($pdo, $projectId, $workerId, $month, $outsourcingRatio, $allocationDates['start'], $allocationDates['end'])) {
                     throw new Exception('월별 외주비 비율을 저장하지 못했습니다.');
                 }
             }

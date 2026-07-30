@@ -461,7 +461,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <option value="Y">선급 Y</option>
                     </select>
                     <input type="text" name="vendor_name" class="px-3 py-3 border rounded-xl bg-white" placeholder="업체명" required lang="ko" inputmode="text" autocomplete="off">
-                    <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-3 border rounded-xl bg-white" placeholder="공급가액" required>
+                    <input type="text" inputmode="decimal" name="base_rate" data-material-money class="px-3 py-3 border rounded-xl bg-white text-right" placeholder="공급가액" required>
                     <select name="amount_sign" class="px-3 py-3 border rounded-xl bg-white" required>
                         <option value="plus">+ 일반</option>
                         <option value="minus">- 공제</option>
@@ -536,7 +536,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호" lang="ko" inputmode="text" autocomplete="off">
                         <input type="text" name="biz_no" class="px-3 py-2 border rounded-xl" placeholder="사업자등록번호" lang="ko" inputmode="text" autocomplete="off">
                         <!-- 자재: 공급가액 표기 -->
-                        <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-2 border rounded-xl" placeholder="공급가액">
+                        <input type="text" inputmode="decimal" name="base_rate" data-material-money class="px-3 py-2 border rounded-xl text-right" placeholder="공급가액" required>
                         <select name="amount_sign" class="px-3 py-2 border rounded-xl">
                             <option value="plus">+ 일반</option>
                             <option value="minus">- 공제</option>
@@ -544,19 +544,10 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <input type="text" name="remark" class="px-3 py-2 border rounded-xl" placeholder="비고" lang="ko" inputmode="text" autocomplete="off">
                     </div>
 
-                    <div class="border border-gray-200 rounded-xl p-3" data-calendar-wrapper data-ym="<?php echo h($ym); ?>" data-prev-ym="<?php echo h($prevYm); ?>" data-target="materialCreateDateInputs" data-chip-target="materialCreateDateChips" data-prev-grid-target="materialCreateCalPrev" data-curr-grid-target="materialCreateCalCurr">
-                        <div class="flex items-center justify-between gap-2 mb-2">
-                            <label class="text-sm font-bold text-gray-700">사용일자(<?php echo h($prevYm); ?> 26일~<?php echo h($ym); ?> 25일, 복수 선택)</label>
-                            <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-toggle-calendar>날짜 선택</button>
-                        </div>
-                        <div class="hidden border border-gray-200 rounded-lg p-2 bg-gray-50" data-calendar-box>
-                            <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                                <div id="materialCreateCalPrev"></div>
-                                <div id="materialCreateCalCurr"></div>
-                            </div>
-                        </div>
-                        <div id="materialCreateDateChips" class="mt-2 flex flex-wrap gap-2"></div>
-                        <div id="materialCreateDateInputs"></div>
+                    <div class="border border-gray-200 rounded-xl p-3">
+                        <label class="text-sm font-bold text-gray-700">사용일자(단일 선택)</label>
+                        <input type="date" name="usage_dates[]" min="<?php echo h($monthlyStart); ?>" max="<?php echo h($monthlyEnd); ?>" value="<?php echo h($ym . '-01'); ?>" class="mt-2 w-full px-3 py-2 rounded-xl border border-gray-300 bg-white" required>
+                        <div class="mt-1 text-xs text-gray-500">선택 가능 범위: <?php echo h($monthlyStart); ?> ~ <?php echo h($monthlyEnd); ?></div>
                     </div>
 
                     <div class="border border-gray-200 rounded-xl p-3">
@@ -895,7 +886,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     </label>
                     <label class="block">
                         <span class="text-xs text-gray-500 font-bold">금액</span>
-                        <input type="number" step="0.01" name="amount" id="materialUsageEditAmount" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                        <input type="text" inputmode="decimal" name="amount" id="materialUsageEditAmount" data-material-money class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 text-right" required>
                     </label>
                     <label class="block">
                         <span class="text-xs text-gray-500 font-bold">비고</span>
@@ -942,6 +933,32 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             function setMaterialQuickDateClass(btn, selected){
                 if (!btn) return;
                 btn.className = 'h-9 rounded-lg border text-xs font-bold ' + (selected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-200 bg-white text-gray-700');
+            }
+
+            function formatMaterialMoneyInput(input){
+                if (!input) return;
+                var raw = String(input.value || '').replace(/,/g, '').replace(/[^0-9.]/g, '');
+                if (raw === '') {
+                    input.value = '';
+                    return;
+                }
+                var dotIndex = raw.indexOf('.');
+                var integerPart = dotIndex >= 0 ? raw.substring(0, dotIndex) : raw;
+                var decimalPart = dotIndex >= 0 ? raw.substring(dotIndex + 1).replace(/\./g, '').substring(0, 2) : '';
+                integerPart = integerPart.replace(/^0+(?=\d)/, '');
+                if (integerPart === '') integerPart = '0';
+                integerPart = integerPart.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+                input.value = integerPart + (dotIndex >= 0 ? '.' + decimalPart : '');
+            }
+
+            document.addEventListener('input', function(e){
+                var target = e.target;
+                if (!target || !target.getAttribute || target.getAttribute('data-material-money') === null) return;
+                formatMaterialMoneyInput(target);
+            });
+            var initialMoneyInputs = document.querySelectorAll('[data-material-money]');
+            for (var moneyIndex = 0; moneyIndex < initialMoneyInputs.length; moneyIndex++) {
+                if (initialMoneyInputs[moneyIndex].value !== '') formatMaterialMoneyInput(initialMoneyInputs[moneyIndex]);
             }
 
             document.addEventListener('click', function(e){
@@ -999,7 +1016,10 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     if (materialUsageEditDate) materialUsageEditDate.value = editBtn.getAttribute('data-use-date') || '';
                     var materialEditAmountRaw = parseFloat(editBtn.getAttribute('data-amount') || '0');
                     if (materialUsageEditSign) materialUsageEditSign.value = materialEditAmountRaw < 0 ? 'minus' : 'plus';
-                    if (materialUsageEditAmount) materialUsageEditAmount.value = Math.abs(materialEditAmountRaw).toFixed(2);
+                    if (materialUsageEditAmount) {
+                        materialUsageEditAmount.value = Math.abs(materialEditAmountRaw).toFixed(2);
+                        formatMaterialMoneyInput(materialUsageEditAmount);
+                    }
                     if (materialUsageEditRemark) materialUsageEditRemark.value = editBtn.getAttribute('data-remark') || '';
                     if (materialUsageEditMeta) materialUsageEditMeta.textContent = editBtn.getAttribute('data-title') || '';
                     showMaterialUsageEditModal();
@@ -1049,7 +1069,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             }
             function hideSuggestList(listEl){ if(!listEl)return; listEl.innerHTML=''; if(listEl.className.indexOf('hidden')===-1) listEl.className += ' hidden'; listEl.style.display='none'; }
             function showSuggestList(listEl){ if(!listEl)return; listEl.className=listEl.className.replace(/\bhidden\b/g,'').replace(/\s+/g,' ').trim(); listEl.style.display='block'; }
-            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1,'안전관리비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=p.base_rate||''; if(formEl.elements['remark'] && (formEl.elements['remark'].value||'')==='') formEl.elements['remark'].value=p.remark||''; }
+            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1,'안전관리비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=''; if(formEl.elements['remark']) formEl.elements['remark'].value=''; }
             function renderMaterialSuggestions(inputEl, rows){ var wrap=inputEl?inputEl.closest('.vendor-search-wrap'):null; var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; listEl.innerHTML=''; if(!rows||!rows.length){ var empty=document.createElement('div'); empty.className='px-3 py-2 text-sm text-gray-500'; empty.textContent='검색 결과 없음'; listEl.appendChild(empty); showSuggestList(listEl); return; } for(var i=0;i<rows.length;i++){ (function(row){ var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.setAttribute('data-material-vendor-item','1'); btn.vendorData=row; btn.addEventListener('mousedown', function(ev){ ev.preventDefault(); }); listEl.appendChild(btn);} )(rows[i]); } showSuggestList(listEl); }
             document.addEventListener('input', function(e){ var inputEl=e.target; if(!inputEl||inputEl.className.indexOf('js-material-vendor-search')===-1) return; var wrap=inputEl.closest('.vendor-search-wrap'); var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; var q=(inputEl.value||'').trim(); if(materialVendorTimers[inputEl]) clearTimeout(materialVendorTimers[inputEl]); if(q.length<2){ hideSuggestList(listEl); return; } materialVendorTimers[inputEl]=setTimeout(function(){ // 프리셋 최신 검색
                 var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4)return; var rows=[]; if(xhr.status===200){ try{var json=JSON.parse(xhr.responseText); rows=(json&&json.items)?json.items:[];}catch(err){rows=[];} } renderMaterialSuggestions(inputEl, rows); }; xhr.send(); },250); });
