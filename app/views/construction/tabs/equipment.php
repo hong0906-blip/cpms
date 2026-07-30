@@ -8,10 +8,12 @@
  */
 
 use App\Core\Db;
+use App\Services\CostChangeService;
 require_once __DIR__ . '/../partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../partials/project_month_options_helper.php';
 require_once __DIR__ . '/../partials/equipment_statement_helper.php';
+require_once __DIR__ . '/../../../services/CostChangeService.php';
 
 $canEditEquipment = isset($canEdit) ? (bool)$canEdit : false;
 $hideEquipmentExcelUploadUi = true; // 복구 시 false로 변경하면 엑셀 업로드 버튼/카드가 다시 보입니다.
@@ -61,6 +63,7 @@ $prevYm = $prevFirst->format('Y-m');
 $prevLastDay = (int)$prevFirst->format('t');
 $monthlyStart = $prevYm . '-26';
 $monthlyEnd = $ym . '-25';
+$equipmentSelectedMonthLock = CostChangeService::lockInfo('equipment', $monthlyStart, $ym, date('Y-m-d'));
 
 $items = array();
 $itemMap = array();
@@ -84,16 +87,25 @@ try {
     }
 
     if (count($items) > 0) {
+        $equipmentMetaInstalled = CostChangeService::isInstalled($pdo);
+        $equipmentMetaJoin = $equipmentMetaInstalled ? " LEFT JOIN cpms_cost_record_meta crm ON crm.target_type='equipment' AND crm.target_id=CAST(u.id AS CHAR)" : "";
+        $equipmentMonthCondition = $equipmentMetaInstalled
+            ? " AND COALESCE(crm.is_deleted,0)=0
+                AND COALESCE(NULLIF(crm.settlement_ym,''),IF(DAY(u.use_date)>=26,DATE_FORMAT(DATE_ADD(u.use_date,INTERVAL 1 MONTH),'%Y-%m'),DATE_FORMAT(u.use_date,'%Y-%m'))) = :settlement_ym"
+            : " AND u.use_date BETWEEN :s AND :e";
         $stUsage = $pdo->prepare("SELECT u.*, i.category, i.vendor_name, i.spec, i.remark
             FROM cpms_equipment_usage u
-            JOIN cpms_equipment_items i ON i.id = u.equipment_id
+            JOIN cpms_equipment_items i ON i.id = u.equipment_id" . $equipmentMetaJoin . "
             WHERE u.project_id = :pid
-              AND i.is_deleted = 0
-              AND u.use_date BETWEEN :s AND :e
+              AND i.is_deleted = 0" . $equipmentMonthCondition . "
             ORDER BY i.category ASC, i.vendor_name ASC, i.spec ASC, u.use_date ASC");
         $stUsage->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
-        $stUsage->bindValue(':s', $monthlyStart);
-        $stUsage->bindValue(':e', $monthlyEnd);
+        if ($equipmentMetaInstalled) {
+            $stUsage->bindValue(':settlement_ym', $ym);
+        } else {
+            $stUsage->bindValue(':s', $monthlyStart);
+            $stUsage->bindValue(':e', $monthlyEnd);
+        }
         $stUsage->execute();
         $usageRows = $stUsage->fetchAll(PDO::FETCH_ASSOC);
 
@@ -420,6 +432,9 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($equipTab === 'input') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">장비입력</a>
             <a href="<?php echo h($baseUrl . '&equip_tab=input&ym=' . urlencode($ym)); ?>#equipmentExcelUpload"
                class="px-4 py-2 rounded-xl border font-bold text-sm bg-white text-blue-700 border-blue-200 hover:bg-blue-50" <?php echo $hideEquipmentExcelUploadUi ? 'style="display:none;" aria-hidden="true" data-hidden-for-restore="1"' : ''; ?>>엑셀 업로드</a>
+            <?php if (!empty($equipmentSelectedMonthLock['locked'])): ?>
+                <a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=equipment&request_type=ADD&return_url=<?php echo rawurlencode($baseUrl . '&equip_tab=input&ym=' . $ym); ?>" class="px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 font-bold text-sm">마감월 추가 승인 요청</a>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 
@@ -825,8 +840,15 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                             $usageIdForList = isset($ur['id']) ? (int)$ur['id'] : 0;
                             $usageAmountForList = isset($ur['_calc_amount']) ? (float)$ur['_calc_amount'] : (isset($ur['amount']) ? (float)$ur['amount'] : 0.0);
                             $usageIsNegative = ($usageAmountForList < 0);
+                            $equipmentUseDate = isset($ur['use_date']) ? (string)$ur['use_date'] : '';
+                            $equipmentSettlementYm = CostChangeService::effectiveSettlementYm($pdo, 'equipment', (string)$usageIdForList, 'equipment', $equipmentUseDate);
+                            $equipmentLock = CostChangeService::lockInfo('equipment', $equipmentUseDate, $equipmentSettlementYm, date('Y-m-d'));
+                            $equipmentActiveRequest = $usageIdForList > 0 ? CostChangeService::activeRequest($pdo, 'equipment', (string)$usageIdForList) : null;
+                            $equipmentHistoryCount = $usageIdForList > 0 ? CostChangeService::historyCount($pdo, 'equipment', (string)$usageIdForList) : 0;
+                            $equipmentLatestRequest = $equipmentHistoryCount > 0 ? CostChangeService::latestRequest($pdo, 'equipment', (string)$usageIdForList) : null;
+                            $equipmentReturnUrl = $baseUrl . '&equip_tab=input&ym=' . $ym;
                             ?>
-                            <tr class="<?php echo $usageIsNegative ? 'bg-yellow-50' : ''; ?>">
+                            <tr class="<?php echo !empty($equipmentLock['locked']) ? 'bg-gray-50' : ($usageIsNegative ? 'bg-yellow-50' : ''); ?>">
                                 <td class="p-2 border whitespace-nowrap"><?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?></td>
                                 <td class="p-2 border"><?php echo h(isset($ur['category']) ? $ur['category'] : ''); ?></td>
                                 <td class="p-2 border"><?php echo h(isset($ur['vendor_name']) ? $ur['vendor_name'] : ''); ?></td>
@@ -837,7 +859,16 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                                 <td class="p-2 border"><?php echo equipment_statement_link_html($ur) !== '' ? equipment_statement_link_html($ur) : '<span class="text-gray-400 text-xs">첨부 없음</span>'; ?></td>
                                 <?php if ($canEditEquipment): ?>
                                     <td class="p-2 border text-center">
-                                        <?php if ($usageIdForList > 0): ?>
+                                        <?php if (is_array($equipmentActiveRequest)): ?>
+                                            <div class="text-xs font-extrabold text-amber-700"><?php echo h(CostChangeService::statusLabel($equipmentActiveRequest['status'])); ?></div>
+                                            <a href="?r=cost_change/detail&id=<?php echo (int)$equipmentActiveRequest['id']; ?>" class="text-xs text-blue-700 underline">요청 상세</a>
+                                        <?php elseif ($usageIdForList > 0 && !empty($equipmentLock['locked'])): ?>
+                                            <div class="flex flex-wrap justify-center gap-1">
+                                                <?php foreach (array('MODIFY'=>'수정 승인 요청','MONTH_MOVE'=>'귀속월 변경 요청','DELETE'=>'삭제 승인 요청') as $requestCode=>$requestLabel): ?>
+                                                    <a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=equipment&target_id=<?php echo (int)$usageIdForList; ?>&request_type=<?php echo h($requestCode); ?>&return_url=<?php echo rawurlencode($equipmentReturnUrl); ?>" class="px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-bold"><?php echo h($requestLabel); ?></a>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        <?php elseif ($usageIdForList > 0): ?>
                                             <button type="button"
                                                     class="px-3 py-1 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-bold"
                                                     data-equipment-usage-edit
@@ -849,6 +880,9 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                                                     data-title="<?php echo h((isset($ur['vendor_name']) ? $ur['vendor_name'] : '') . ' / ' . (isset($ur['spec']) ? $ur['spec'] : '')); ?>">
                                                 수정
                                             </button>
+                                        <?php endif; ?>
+                                        <?php if ($equipmentHistoryCount > 0): ?>
+                                            <a href="?r=cost_change/history&target_type=equipment&target_id=<?php echo (int)$usageIdForList; ?>&project_id=<?php echo (int)$pid; ?>" class="mt-1 inline-flex text-[11px] font-bold text-blue-700 underline"><?php echo h(CostChangeService::historyBadgeLabel($equipmentLatestRequest, $equipmentHistoryCount)); ?></a>
                                         <?php endif; ?>
                                     </td>
                                 <?php endif; ?>

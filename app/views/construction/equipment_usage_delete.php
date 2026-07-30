@@ -6,9 +6,11 @@
  */
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $role = Auth::userRole();
@@ -35,6 +37,18 @@ $pdo = Db::pdo();
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
 
 try {
+    $stFind = $pdo->prepare("SELECT id, use_date FROM cpms_equipment_usage WHERE project_id = :pid AND equipment_id = :eid AND use_date = :d LIMIT 1");
+    $stFind->execute(array(':pid'=>$projectId, ':eid'=>$equipmentId, ':d'=>$useDate));
+    $row = $stFind->fetch(PDO::FETCH_ASSOC);
+    if (is_array($row)) {
+        $settlementYm = CostChangeService::effectiveSettlementYm($pdo, 'equipment', (string)$row['id'], 'equipment', $row['use_date']);
+        $lockInfo = CostChangeService::lockInfo('equipment', $row['use_date'], $settlementYm, date('Y-m-d'));
+        if (!empty($lockInfo['locked'])) {
+            flash_set('error', '마감된 기간의 자료는 일반 삭제할 수 없습니다. 삭제 승인 요청을 이용해주세요.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+    }
     $st = $pdo->prepare("DELETE FROM cpms_equipment_usage WHERE project_id = :pid AND equipment_id = :eid AND use_date = :d");
     $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $st->bindValue(':eid', $equipmentId, PDO::PARAM_INT);

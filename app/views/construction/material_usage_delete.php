@@ -8,9 +8,11 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/material_statement_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $role = Auth::userRole();
@@ -59,7 +61,7 @@ try {
         }
         $in = implode(',', $placeholders);
 
-        $stFind = $pdo->prepare("SELECT id, material_id FROM cpms_material_usage WHERE project_id = :pid AND id IN (" . $in . ")");
+        $stFind = $pdo->prepare("SELECT id, material_id, use_date FROM cpms_material_usage WHERE project_id = :pid AND id IN (" . $in . ")");
         $stFind->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $i = 0;
         foreach ($ids as $idValue) {
@@ -72,6 +74,18 @@ try {
             flash_set('error', '삭제할 사용내역을 찾지 못했습니다.');
             header('Location: ' . $redirect);
             exit;
+        }
+
+        foreach ($deleteRows as $deleteRow) {
+            $deleteId = isset($deleteRow['id']) ? (string)$deleteRow['id'] : '';
+            $deleteDate = isset($deleteRow['use_date']) ? (string)$deleteRow['use_date'] : '';
+            $deleteYm = CostChangeService::effectiveSettlementYm($pdo, 'material', $deleteId, 'material', $deleteDate);
+            $deleteLock = CostChangeService::lockInfo('material', $deleteDate, $deleteYm, date('Y-m-d'));
+            if (!empty($deleteLock['locked'])) {
+                flash_set('error', '마감된 기간의 자료는 일반 삭제할 수 없습니다. 삭제 승인 요청을 이용해주세요.');
+                header('Location: ' . $redirect);
+                exit;
+            }
         }
 
         $deleteUsageIds = array();
@@ -140,6 +154,18 @@ try {
         exit;
     }
 
+    $stFindSingle = $pdo->prepare("SELECT id, use_date FROM cpms_material_usage WHERE project_id = :pid AND material_id = :eid AND use_date = :d LIMIT 1");
+    $stFindSingle->execute(array(':pid'=>$projectId, ':eid'=>$materialId, ':d'=>$useDate));
+    $singleRow = $stFindSingle->fetch(PDO::FETCH_ASSOC);
+    if (is_array($singleRow)) {
+        $singleYm = CostChangeService::effectiveSettlementYm($pdo, 'material', (string)$singleRow['id'], 'material', $singleRow['use_date']);
+        $singleLock = CostChangeService::lockInfo('material', $singleRow['use_date'], $singleYm, date('Y-m-d'));
+        if (!empty($singleLock['locked'])) {
+            flash_set('error', '마감된 기간의 자료는 일반 삭제할 수 없습니다. 삭제 승인 요청을 이용해주세요.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+    }
     $st = $pdo->prepare("DELETE FROM cpms_material_usage WHERE project_id = :pid AND material_id = :eid AND use_date = :d");
     $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $st->bindValue(':eid', $materialId, PDO::PARAM_INT);

@@ -37,6 +37,7 @@ $tabs = array(
     'labor_calc' => array('label' => '노무비 계산', 'icon' => 'calculator'),
     'attendance' => array('label' => '출퇴근·근태관리', 'icon' => 'clock-3'),
     'leave_management' => array('label' => '연차 관리', 'icon' => 'calendar-days'),
+    'cost_change' => array('label' => '비용 변경 관리', 'icon' => 'history'),
 );
 
 if ($canViewCompanyOverhead || $canViewCompanyPayroll) {
@@ -107,6 +108,8 @@ if ($tab === 'employees') {
     require __DIR__ . '/attendance.php';
 } elseif ($tab === 'leave_management') {
     require __DIR__ . '/leave_management.php';
+} elseif ($tab === 'cost_change' && $canManage) {
+    require __DIR__ . '/cost_change.php';
 } elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
         $_GET['oh'] = 'payroll';

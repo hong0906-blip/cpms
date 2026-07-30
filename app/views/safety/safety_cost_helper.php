@@ -5,6 +5,7 @@
  */
 
 require_once dirname(dirname(__DIR__)) . '/services/SafetyHealthDriveService.php';
+require_once dirname(dirname(__DIR__)) . '/services/CostChangeService.php';
 
 if (!function_exists('cpms_safety_cost_store_path')) {
 function cpms_safety_cost_store_path()
@@ -355,6 +356,27 @@ function cpms_safety_cost_project_items_between($projectId, $startDate, $endDate
     $items = cpms_safety_cost_project_items((int)$projectId);
     foreach ($items as $row) {
         $date = isset($row['use_date']) ? cpms_safety_cost_valid_date($row['use_date']) : '';
+        /*
+         * 승인으로 귀속월만 이동한 안전·보건 비용은 실제 사용일자를 보존하면서
+         * 집계 범위에서는 이동된 귀속월의 마감일(25일)을 기준일로 사용한다.
+         */
+        if ($date !== '' && isset($row['id']) && class_exists('App\\Services\\CostChangeService') && class_exists('App\\Core\\Db')) {
+            try {
+                $pdo = \App\Core\Db::pdo();
+                $settlementYm = \App\Services\CostChangeService::effectiveSettlementYm(
+                    $pdo,
+                    'safety',
+                    (string)$row['id'],
+                    'safety',
+                    $date
+                );
+                if (\App\Services\CostChangeService::validYm($settlementYm) !== '') {
+                    $date = $settlementYm . '-25';
+                }
+            } catch (Exception $e) {
+                /* 기존 JSON 일자 집계 방식으로 안전하게 계속 처리한다. */
+            }
+        }
         if ($date === '' || $date < $startDate || $date > $endDate) continue;
         $result[count($result)] = $row;
     }

@@ -9,9 +9,11 @@ require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/partials/equipment_statement_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -97,6 +99,15 @@ try {
     $row = $st->fetch(PDO::FETCH_ASSOC);
     if (!is_array($row) || (isset($row['is_deleted']) && (int)$row['is_deleted'] === 1)) {
         flash_set('error', '수정할 장비 사용내역을 찾을 수 없습니다.');
+        header('Location: ' . $redirect);
+        exit;
+    }
+
+    $sourceYm = CostChangeService::effectiveSettlementYm($pdo, 'equipment', (string)$usageId, 'equipment', isset($row['use_date']) ? $row['use_date'] : '');
+    $sourceLock = CostChangeService::lockInfo('equipment', isset($row['use_date']) ? $row['use_date'] : '', $sourceYm, date('Y-m-d'));
+    $destinationLock = CostChangeService::lockInfo('equipment', $useDate, '', date('Y-m-d'));
+    if (!empty($sourceLock['locked']) || !empty($destinationLock['locked'])) {
+        flash_set('error', '마감된 기간의 자료입니다. 수정하려면 비용 변경 승인이 필요합니다.');
         header('Location: ' . $redirect);
         exit;
     }

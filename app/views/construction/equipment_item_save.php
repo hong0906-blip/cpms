@@ -11,9 +11,11 @@ require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/partials/master_dedupe_helper.php';
 require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_statement_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
@@ -186,6 +188,15 @@ if (!$pdo) {
     flash_set('error', 'DB 연결 실패');
     header('Location: ' . $redirect);
     exit;
+}
+$dates = equipment_collect_usage_dates($usageDates, $useDatesText, $ym);
+foreach ($dates as $lockDate) {
+    $lockInfo = CostChangeService::lockInfo('equipment', $lockDate, '', date('Y-m-d'));
+    if (!empty($lockInfo['locked'])) {
+        flash_set('error', '마감된 기간의 자료입니다. 추가하려면 비용 변경 승인이 필요합니다.');
+        header('Location: ' . $redirect);
+        exit;
+    }
 }
 
 try {

@@ -318,6 +318,9 @@ try {
         <button type="submit" class="px-5 py-3 rounded-2xl bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-extrabold shadow-lg">
             보기
         </button>
+        <a href="<?php echo h(base_url()); ?>/?r=cost_change/my" class="px-5 py-3 rounded-2xl border border-blue-200 bg-blue-50 text-blue-700 font-extrabold text-center">
+            나의 비용 변경 요청
+        </a>
     </form>
 
     <div class="mt-4 text-xs text-gray-600">

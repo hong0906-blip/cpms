@@ -8,6 +8,9 @@
  */
 
 require_once __DIR__ . '/partials/outsourcing_data_helper.php';
+require_once __DIR__ . '/../../../services/CostChangeService.php';
+
+use App\Services\CostChangeService;
 
 $outsourcingCanEdit = isset($canEdit) ? (bool)$canEdit : false;
 $outsourcingTab = isset($_GET['outsourcing_tab']) ? trim((string)$_GET['outsourcing_tab']) : 'monthly';
@@ -38,10 +41,13 @@ if (count($months) === 0) {
     $monthLabels[date('Y-m')] = date('Y년 m월');
 }
 if (!in_array($selectedMonth, $months, true)) {
-    $selectedMonth = in_array(date('Y-m'), $months, true) ? date('Y-m') : $months[count($months) - 1];
+    $currentOutsourcingYm = CostChangeService::currentSettlementYm('outsourcing', date('Y-m-d'));
+    $selectedMonth = in_array($currentOutsourcingYm, $months, true) ? $currentOutsourcingYm : $months[count($months) - 1];
 }
-$monthStart = $selectedMonth . '-01';
-$monthEnd = date('Y-m-t', strtotime($monthStart));
+$outsourcingPeriod = CostChangeService::periodForYm('outsourcing', $selectedMonth);
+$monthStart = $outsourcingPeriod['start'];
+$monthEnd = $outsourcingPeriod['end'];
+$outsourcingSelectedMonthLock = CostChangeService::lockInfo('outsourcing', $monthStart, $selectedMonth, date('Y-m-d'));
 $projectName = isset($projectRow['name']) ? (string)$projectRow['name'] : '';
 
 $laborOutsourcing = cpms_outsourcing_labor_company_rows_for_month($pdo, (int)$pid, $projectName, $selectedMonth);
@@ -99,6 +105,9 @@ if (!$editRow && strpos($inputDate, $selectedMonth) !== 0) $inputDate = $selecte
         <?php if ($outsourcingCanEdit): ?>
         <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=input&month=<?php echo h($selectedMonth); ?>"
            class="px-4 py-2 rounded-xl border font-extrabold text-sm <?php echo $outsourcingTab === 'input' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">외주비 입력</a>
+        <?php if (!empty($outsourcingSelectedMonthLock['locked'])): ?>
+        <a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=outsourcing&request_type=ADD&return_url=<?php echo rawurlencode('?r=공사&pid=' . (int)$pid . '&tab=outsourcing&outsourcing_tab=input&month=' . $selectedMonth); ?>" class="px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 font-extrabold text-sm">마감월 추가 승인 요청</a>
+        <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>
@@ -336,7 +345,17 @@ if (!$editRow && strpos($inputDate, $selectedMonth) !== 0) $inputDate = $selecte
         <thead class="bg-gray-100 text-gray-700"><tr><th class="border px-3 py-2">일자</th><th class="border px-3 py-2">구분</th><th class="border px-3 py-2">업체명</th><th class="border px-3 py-2">대표자명</th><th class="border px-3 py-2">사업자번호</th><th class="border px-3 py-2">연락처</th><th class="border px-3 py-2 text-right">금액</th><th class="border px-3 py-2">비고</th><th class="border px-3 py-2">파일</th><th class="border px-3 py-2">관리</th></tr></thead>
         <tbody>
         <?php foreach ($manualAllRows as $row): ?>
-            <tr>
+            <?php
+            $outsourcingRowId = isset($row['id']) ? (int)$row['id'] : 0;
+            $outsourcingRowDate = isset($row['expense_date']) ? (string)$row['expense_date'] : '';
+            $outsourcingRowYm = CostChangeService::effectiveSettlementYm($pdo, 'outsourcing', (string)$outsourcingRowId, 'outsourcing', $outsourcingRowDate);
+            $outsourcingRowLock = CostChangeService::lockInfo('outsourcing', $outsourcingRowDate, $outsourcingRowYm, date('Y-m-d'));
+            $outsourcingActiveRequest = $outsourcingRowId > 0 ? CostChangeService::activeRequest($pdo, 'outsourcing', (string)$outsourcingRowId) : null;
+            $outsourcingHistoryCount = $outsourcingRowId > 0 ? CostChangeService::historyCount($pdo, 'outsourcing', (string)$outsourcingRowId) : 0;
+            $outsourcingLatestRequest = $outsourcingHistoryCount > 0 ? CostChangeService::latestRequest($pdo, 'outsourcing', (string)$outsourcingRowId) : null;
+            $outsourcingReturnUrl = '?r=공사&pid=' . (int)$pid . '&tab=outsourcing&outsourcing_tab=input&month=' . $selectedMonth;
+            ?>
+            <tr class="<?php echo !empty($outsourcingRowLock['locked']) ? 'bg-gray-50' : ''; ?>">
                 <td class="border px-3 py-2"><?php echo h($row['expense_date']); ?></td><td class="border px-3 py-2">외주비</td><td class="border px-3 py-2 font-bold"><?php echo h($row['company_name']); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['representative_name']) ? $row['representative_name'] : ''); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['business_no']) ? $row['business_no'] : ''); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['contact']) ? $row['contact'] : ''); ?></td><td class="border px-3 py-2 text-right font-bold"><?php echo h(number_format((float)$row['amount'])); ?></td>
                 <td class="border px-3 py-2 whitespace-pre-line"><?php echo h(isset($row['memo']) && trim((string)$row['memo']) !== '' ? $row['memo'] : '-'); ?></td>
                 <td class="border px-3 py-2">
@@ -351,7 +370,21 @@ if (!$editRow && strpos($inputDate, $selectedMonth) !== 0) $inputDate = $selecte
                         </div>
                     <?php endif; ?>
                 </td>
-                <td class="border px-3 py-2"><div class="flex justify-center gap-2"><a href="?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=input&month=<?php echo h(substr((string)$row['expense_date'], 0, 7)); ?>&edit_id=<?php echo (int)$row['id']; ?>" class="px-2 py-1 rounded-lg border border-gray-300 text-xs font-bold">수정</a><form method="post" action="<?php echo h(base_url()); ?>/?r=construction/outsourcing_cost_save" onsubmit="return confirm('이 외주비 입력 내역을 삭제할까요?');"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>"><input type="hidden" name="month" value="<?php echo h(substr((string)$row['expense_date'], 0, 7)); ?>"><input type="hidden" name="entry_id" value="<?php echo (int)$row['id']; ?>"><button name="action" value="delete" class="px-2 py-1 rounded-lg border border-red-200 text-red-600 text-xs font-bold">삭제</button></form></div></td>
+                <td class="border px-3 py-2">
+                    <?php if (is_array($outsourcingActiveRequest)): ?>
+                        <div class="text-center text-xs font-extrabold text-amber-700"><?php echo h(CostChangeService::statusLabel($outsourcingActiveRequest['status'])); ?></div>
+                        <div class="text-center"><a href="?r=cost_change/detail&id=<?php echo (int)$outsourcingActiveRequest['id']; ?>" class="text-xs text-blue-700 underline">요청 상세</a></div>
+                    <?php elseif (!empty($outsourcingRowLock['locked'])): ?>
+                        <div class="flex flex-wrap justify-center gap-1">
+                            <?php foreach (array('MODIFY'=>'수정 승인 요청','MONTH_MOVE'=>'귀속월 변경 요청','DELETE'=>'삭제 승인 요청') as $requestCode=>$requestLabel): ?>
+                                <a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=outsourcing&target_id=<?php echo (int)$outsourcingRowId; ?>&request_type=<?php echo h($requestCode); ?>&return_url=<?php echo rawurlencode($outsourcingReturnUrl); ?>" class="px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-bold"><?php echo h($requestLabel); ?></a>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <div class="flex justify-center gap-2"><a href="?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=input&month=<?php echo h($outsourcingRowYm); ?>&edit_id=<?php echo (int)$row['id']; ?>" class="px-2 py-1 rounded-lg border border-gray-300 text-xs font-bold">수정</a><form method="post" action="<?php echo h(base_url()); ?>/?r=construction/outsourcing_cost_save" onsubmit="return confirm('이 외주비 입력 내역을 삭제할까요?');"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>"><input type="hidden" name="month" value="<?php echo h($outsourcingRowYm); ?>"><input type="hidden" name="entry_id" value="<?php echo (int)$row['id']; ?>"><button name="action" value="delete" class="px-2 py-1 rounded-lg border border-red-200 text-red-600 text-xs font-bold">삭제</button></form></div>
+                    <?php endif; ?>
+                    <?php if ($outsourcingHistoryCount > 0): ?><div class="mt-1 text-center"><a href="?r=cost_change/history&target_type=outsourcing&target_id=<?php echo (int)$outsourcingRowId; ?>&project_id=<?php echo (int)$pid; ?>" class="text-[11px] font-bold text-blue-700 underline"><?php echo h(CostChangeService::historyBadgeLabel($outsourcingLatestRequest, $outsourcingHistoryCount)); ?></a></div><?php endif; ?>
+                </td>
             </tr>
         <?php endforeach; ?>
         <?php if (count($manualAllRows) === 0): ?><tr><td colspan="10" class="border px-3 py-8 text-center text-gray-500">입력된 외주비가 없습니다.</td></tr><?php endif; ?>

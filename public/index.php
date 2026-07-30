@@ -1361,6 +1361,15 @@ if ($route === 'approval_delete') { require_once __DIR__ . '/../app/views/approv
 if ($route === 'approval_file') { require_once __DIR__ . '/../app/views/approval/file.php'; exit; }
 if ($route === 'approval_completed_pdf') { require_once __DIR__ . '/../app/views/approval/completed_pdf.php'; exit; }
 if ($route === 'db_setup_approval') { require_once __DIR__ . '/db_setup_approval.php'; exit; }
+
+// 비용 월마감/변경승인 액션 및 보호 파일 라우트
+if ($route === 'cost_change/store') { require_once __DIR__ . '/../app/views/cost_change/store.php'; exit; }
+if ($route === 'cost_change/decide') { require_once __DIR__ . '/../app/views/cost_change/decide.php'; exit; }
+if ($route === 'cost_change/cancel') { require_once __DIR__ . '/../app/views/cost_change/cancel.php'; exit; }
+if ($route === 'cost_change/setup') { require_once __DIR__ . '/../app/views/cost_change/setup.php'; exit; }
+if ($route === 'cost_change/file') { require_once __DIR__ . '/../app/views/cost_change/file.php'; exit; }
+if ($route === 'cost_change/export') { require_once __DIR__ . '/../app/views/cost_change/export.php'; exit; }
+if ($route === 'cost_change/month_info') { require_once __DIR__ . '/../app/views/cost_change/month_info.php'; exit; }
 if ($route === 'attendance/check_in') { require_once __DIR__ . '/../app/views/attendance/check_in.php'; exit; }
 if ($route === 'attendance/check_out') { require_once __DIR__ . '/../app/views/attendance/check_out.php'; exit; }
 if ($route === 'attendance/request_save') { require_once __DIR__ . '/../app/views/attendance/request_save.php'; exit; }
@@ -1477,6 +1486,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET'
         $canonicalDashboardParams[$canonicalKey] = $canonicalValue;
     }
     header('Location: ?' . http_build_query($canonicalDashboardParams, '', '&'));
+    exit;
+}
+
+// ==========================
+//  비용 월마감/변경승인 화면
+// ==========================
+$costChangeViews = array(
+    'cost_change/request' => array('view'=>'cost_change/request', 'title'=>'비용 변경 승인 요청', 'menu'=>'공사'),
+    'cost_change/my' => array('view'=>'cost_change/my', 'title'=>'나의 비용 변경 요청', 'menu'=>'공사'),
+    'cost_change/approvals' => array('view'=>'cost_change/approvals', 'title'=>'비용 변경 승인', 'menu'=>'대시보드'),
+    'cost_change/detail' => array('view'=>'cost_change/detail', 'title'=>'비용 변경 요청 상세', 'menu'=>'공사'),
+    'cost_change/history' => array('view'=>'cost_change/history', 'title'=>'비용 변경이력', 'menu'=>'공사'),
+    'cost_change/manage' => array('view'=>'cost_change/manage', 'title'=>'비용 변경 관리', 'menu'=>'관리'),
+    'cost_change/setup_preview' => array('view'=>'cost_change/setup_preview', 'title'=>'비용자료 초기화 미리보기', 'menu'=>'관리')
+);
+if (isset($costChangeViews[$route])) {
+    $costChangeView = $costChangeViews[$route];
+    \App\Core\View::render($costChangeView['view'], array(
+        'title'=>$costChangeView['title'],
+        'selectedMenu'=>$costChangeView['menu'],
+        'dashboardType'=>$dashboardType
+    ));
     exit;
 }
 

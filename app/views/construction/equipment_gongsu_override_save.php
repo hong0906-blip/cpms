@@ -1,9 +1,11 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 function cpms_equipment_gongsu_json($ok, $message, $extra) {
     header('Content-Type: application/json; charset=utf-8');
@@ -44,6 +46,11 @@ try {
     $equipmentId = isset($usage['equipment_id']) ? (int)$usage['equipment_id'] : 0;
     $useDate = isset($usage['use_date']) ? (string)$usage['use_date'] : '';
     if ($equipmentId <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $useDate)) cpms_equipment_gongsu_json(false, '장비 사용 정보가 올바르지 않습니다.', array());
+    $settlementYm = CostChangeService::effectiveSettlementYm($pdo, 'equipment', (string)$usageId, 'equipment', $useDate);
+    $lockInfo = CostChangeService::lockInfo('equipment', $useDate, $settlementYm, date('Y-m-d'));
+    if (!empty($lockInfo['locked'])) {
+        cpms_equipment_gongsu_json(false, '마감된 기간의 자료입니다. 장비비 목록의 수정 승인 요청을 이용해주세요.', array());
+    }
 
     if ($newValue < 1.2) {
         cpms_equipment_gongsu_apply_usage($pdo, $usageId, $newValue);

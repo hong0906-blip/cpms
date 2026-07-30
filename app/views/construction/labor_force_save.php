@@ -6,9 +6,11 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/tabs/partials/labor_data_loader.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::isDevelopmentDepartment()) {
@@ -40,6 +42,11 @@ if (!csrf_check($token)) {
 
 if ($projectId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) {
     flash_set('error', '프로젝트 또는 월 정보가 올바르지 않습니다.');
+    header('Location: ' . $redirect);
+    exit;
+}
+if ($month !== CostChangeService::currentSettlementYm('labor', date('Y-m-d'))) {
+    flash_set('error', '마감된 노무비 월입니다. 수정하려면 비용 변경 승인이 필요합니다.');
     header('Location: ' . $redirect);
     exit;
 }

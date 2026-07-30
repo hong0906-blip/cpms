@@ -8,6 +8,7 @@
 
 require_once __DIR__ . '/labor_data_loader.php';
 require_once __DIR__ . '/outsourcing_file_helper.php';
+require_once __DIR__ . '/../../../../services/CostChangeService.php';
 
 if (!function_exists('cpms_outsourcing_cost_ensure_table')) {
     function cpms_outsourcing_cost_ensure_table($pdo) {
@@ -76,22 +77,37 @@ if (!function_exists('cpms_outsourcing_manual_rows')) {
         if (!$pdo || (int)$projectId <= 0) return $rows;
         if (!cpms_outsourcing_cost_ensure_table($pdo)) return $rows;
         try {
+            $metaInstalled = \App\Services\CostChangeService::isInstalled($pdo);
             $sql = "SELECT * FROM cpms_outsourcing_costs
                     WHERE project_id = :pid
                       AND is_deleted = 0";
-            if ($startDate !== '' && $endDate !== '') {
+            if (!$metaInstalled && $startDate !== '' && $endDate !== '') {
                 $sql .= " AND expense_date BETWEEN :start_date AND :end_date";
             }
             $sql .= " ORDER BY expense_date DESC, id DESC";
             $st = $pdo->prepare($sql);
             $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
-            if ($startDate !== '' && $endDate !== '') {
+            if (!$metaInstalled && $startDate !== '' && $endDate !== '') {
                 $st->bindValue(':start_date', (string)$startDate);
                 $st->bindValue(':end_date', (string)$endDate);
             }
             $st->execute();
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
             if (!is_array($rows)) $rows = array();
+            if ($metaInstalled && $startDate !== '' && $endDate !== '') {
+                $filtered = array();
+                foreach ($rows as $row) {
+                    $rowId = isset($row['id']) ? (string)$row['id'] : '';
+                    $rowDate = isset($row['expense_date']) ? (string)$row['expense_date'] : '';
+                    if (\App\Services\CostChangeService::isTargetDeleted($pdo, 'outsourcing', $rowId)) continue;
+                    $rowYm = \App\Services\CostChangeService::effectiveSettlementYm($pdo, 'outsourcing', $rowId, 'outsourcing', $rowDate);
+                    $rowPeriod = \App\Services\CostChangeService::periodForYm('outsourcing', $rowYm);
+                    $bucketDate = isset($rowPeriod['end']) ? (string)$rowPeriod['end'] : $rowDate;
+                    if ($bucketDate < $startDate || $bucketDate > $endDate) continue;
+                    $filtered[] = $row;
+                }
+                $rows = $filtered;
+            }
         } catch (Exception $e) {
             $rows = array();
         }
@@ -108,16 +124,10 @@ if (!function_exists('cpms_outsourcing_manual_total_between')) {
         $cacheKey = $pdoKey . ':' . (int)$projectId . ':' . (string)$startDate . ':' . (string)$endDate;
         if (isset($cache[$cacheKey])) return $cache[$cacheKey];
         try {
-            $st = $pdo->prepare("SELECT COALESCE(SUM(amount), 0)
-                                 FROM cpms_outsourcing_costs
-                                 WHERE project_id = :pid
-                                   AND is_deleted = 0
-                                   AND expense_date BETWEEN :start_date AND :end_date");
-            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
-            $st->bindValue(':start_date', (string)$startDate);
-            $st->bindValue(':end_date', (string)$endDate);
-            $st->execute();
-            $cache[$cacheKey] = (float)$st->fetchColumn();
+            $rows = cpms_outsourcing_manual_rows($pdo, (int)$projectId, (string)$startDate, (string)$endDate);
+            $total = 0.0;
+            foreach ($rows as $row) $total += isset($row['amount']) ? (float)$row['amount'] : 0.0;
+            $cache[$cacheKey] = $total;
             return $cache[$cacheKey];
         } catch (Exception $e) {
             $cache[$cacheKey] = 0.0;

@@ -11,9 +11,11 @@ require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../../services/EquipmentExcelImporter.php';
 require_once __DIR__ . '/../../services/ConstructionDriveService.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -271,6 +273,11 @@ try {
         $row['business_no'] = equipment_excel_save_normalize_biz_no(isset($row['business_no']) ? $row['business_no'] : '');
 
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', isset($row['work_date']) ? (string)$row['work_date'] : '')) {
+            $errorCount++;
+            continue;
+        }
+        $rowLock = CostChangeService::lockInfo('equipment', (string)$row['work_date'], '', date('Y-m-d'));
+        if (!empty($rowLock['locked'])) {
             $errorCount++;
             continue;
         }

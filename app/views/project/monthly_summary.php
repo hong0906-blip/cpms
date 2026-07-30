@@ -5,6 +5,7 @@ require_once __DIR__ . '/../construction/tabs/partials/sales_data_loader.php';
 require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
 require_once __DIR__ . '/../construction/tabs/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/../safety/safety_cost_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 $pdo = Db::pdo();
 $selectedYm = isset($_GET['ym']) ? trim((string)$_GET['ym']) : date('Y-m');
@@ -300,21 +301,29 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
     $equipmentCounts = array('excavator' => 0.0, 'dump' => 0.0, 'other' => 0.0, 'forklift' => 0.0);
     $workerOutputDays = 0.0;
     $breakdown = array('labor' => 0.0, 'outsourcing' => 0.0, 'equipment' => 0.0, 'material' => 0.0, 'purchase' => 0.0, 'other' => 0.0, 'safety' => 0.0, 'deduction' => 0.0);
+    $costChangeInstalled = $pdo ? \App\Services\CostChangeService::isInstalled($pdo) : false;
 
     if ($pdo && $projectId > 0) {
         if (cpms_monthly_summary_table_exists($pdo, 'cpms_material_items') && cpms_monthly_summary_table_exists($pdo, 'cpms_material_usage')) {
             try {
                 $deletedWhere = cpms_monthly_summary_column_exists($pdo, 'cpms_material_items', 'is_deleted') ? ' AND (m.is_deleted = 0 OR m.is_deleted IS NULL)' : '';
-                $st = $pdo->prepare('SELECT m.category, u.use_date, u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id = m.id AND u.project_id = m.project_id WHERE m.project_id = :pid AND u.use_date <= :cost_end' . $deletedWhere);
+                $materialSql = 'SELECT m.category, u.id AS usage_id, u.use_date, u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id = m.id AND u.project_id = m.project_id WHERE m.project_id = :pid';
+                if (!$costChangeInstalled) $materialSql .= ' AND u.use_date <= :cost_end';
+                $materialSql .= $deletedWhere;
+                $st = $pdo->prepare($materialSql);
                 $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
-                $st->bindValue(':cost_end', $costEndDate);
+                if (!$costChangeInstalled) $st->bindValue(':cost_end', $costEndDate);
                 $st->execute();
                 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
                 if (is_array($rows)) {
                     foreach ($rows as $row) {
                         $category = isset($row['category']) ? trim((string)$row['category']) : '';
                         if ($category === '안전관리비') continue;
-                        $ym = cpms_monthly_summary_cost_ym(isset($row['use_date']) ? $row['use_date'] : '');
+                        if ($costChangeInstalled && \App\Services\CostChangeService::isTargetDeleted($pdo, 'material', isset($row['usage_id']) ? (string)$row['usage_id'] : '')) continue;
+                        $useDate = isset($row['use_date']) ? (string)$row['use_date'] : '';
+                        $ym = $costChangeInstalled
+                            ? \App\Services\CostChangeService::effectiveSettlementYm($pdo, 'material', isset($row['usage_id']) ? (string)$row['usage_id'] : '', 'material', $useDate)
+                            : cpms_monthly_summary_cost_ym($useDate);
                         if ($ym === '' || $ym > $selectedYm) continue;
                         if (!isset($inputByMonth[$ym])) $inputByMonth[$ym] = 0.0;
                         $materialAmount = isset($row['amount']) ? (float)$row['amount'] : 0.0;
@@ -336,7 +345,9 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
                 foreach ($safetyRows as $row) {
                     $useDate = isset($row['use_date']) ? cpms_safety_cost_valid_date($row['use_date']) : '';
                     if ($useDate === '') continue;
-                    $ym = substr($useDate, 0, 7);
+                    $ym = $costChangeInstalled
+                        ? \App\Services\CostChangeService::effectiveSettlementYm($pdo, 'safety', isset($row['id']) ? (string)$row['id'] : '', 'safety', $useDate)
+                        : \App\Services\CostChangeService::settlementYm('safety', $useDate);
                     if ($ym > $selectedYm) continue;
                     if (!isset($inputByMonth[$ym])) $inputByMonth[$ym] = 0.0;
                     $safetyAmount = cpms_safety_cost_row_amount($row);
@@ -355,14 +366,21 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
                 if ($hasWorkUnit) $extra .= ', u.work_unit';
                 if ($hasBaseRate) $extra .= ', u.base_rate_snapshot';
                 $deletedWhere = $hasDeleted ? ' AND (e.is_deleted = 0 OR e.is_deleted IS NULL)' : '';
-                $st = $pdo->prepare('SELECT e.category, e.spec, e.base_rate, u.use_date, u.amount' . $extra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id = e.id AND u.project_id = e.project_id WHERE e.project_id = :pid AND u.use_date <= :cost_end' . $deletedWhere);
+                $equipmentSql = 'SELECT e.category, e.spec, e.base_rate, u.id AS usage_id, u.use_date, u.amount' . $extra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id = e.id AND u.project_id = e.project_id WHERE e.project_id = :pid';
+                if (!$costChangeInstalled) $equipmentSql .= ' AND u.use_date <= :cost_end';
+                $equipmentSql .= $deletedWhere;
+                $st = $pdo->prepare($equipmentSql);
                 $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
-                $st->bindValue(':cost_end', $costEndDate);
+                if (!$costChangeInstalled) $st->bindValue(':cost_end', $costEndDate);
                 $st->execute();
                 $rows = $st->fetchAll(PDO::FETCH_ASSOC);
                 if (is_array($rows)) {
                     foreach ($rows as $row) {
-                        $ym = cpms_monthly_summary_cost_ym(isset($row['use_date']) ? $row['use_date'] : '');
+                        if ($costChangeInstalled && \App\Services\CostChangeService::isTargetDeleted($pdo, 'equipment', isset($row['usage_id']) ? (string)$row['usage_id'] : '')) continue;
+                        $useDate = isset($row['use_date']) ? (string)$row['use_date'] : '';
+                        $ym = $costChangeInstalled
+                            ? \App\Services\CostChangeService::effectiveSettlementYm($pdo, 'equipment', isset($row['usage_id']) ? (string)$row['usage_id'] : '', 'equipment', $useDate)
+                            : cpms_monthly_summary_cost_ym($useDate);
                         if ($ym === '' || $ym > $selectedYm) continue;
                         $workUnit = ($hasWorkUnit && isset($row['work_unit'])) ? (float)$row['work_unit'] : 1.0;
                         if ($workUnit <= 0) $workUnit = 1.0;
@@ -393,8 +411,9 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
             if ($laborOutsourcingAmount < 0) $laborOutsourcingAmount = 0.0;
             if ($laborOutsourcingAmount > $laborGrossAmount) $laborOutsourcingAmount = $laborGrossAmount;
             $laborAmount = $laborGrossAmount - $laborOutsourcingAmount;
-            $monthStart = $ym . '-01';
-            $monthEnd = date('Y-m-t', strtotime($monthStart));
+            $outsourcingPeriod = \App\Services\CostChangeService::periodForYm('outsourcing', $ym);
+            $monthStart = $outsourcingPeriod['start'];
+            $monthEnd = $outsourcingPeriod['end'];
             $manualOutsourcingAmount = cpms_monthly_summary_table_exists($pdo, 'cpms_outsourcing_costs') && function_exists('cpms_outsourcing_manual_total_between') ? (float)cpms_outsourcing_manual_total_between($pdo, $projectId, $monthStart, $monthEnd) : 0.0;
             $laborByMonth[$ym] = $laborAmount;
             $inputByMonth[$ym] += $laborGrossAmount + $manualOutsourcingAmount;
@@ -448,7 +467,8 @@ function cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $rema
     $materialPurchaseAmount += isset($breakdown['other']) ? (float)$breakdown['other'] : 0.0;
     $laborAmount = isset($laborByMonth[$selectedYm]) ? (float)$laborByMonth[$selectedYm] : 0.0;
     $outsourcingAmount = isset($breakdown['outsourcing']) ? (float)$breakdown['outsourcing'] : 0.0;
-    $monthlyCostTotal = $laborAmount + $equipmentAmount + $materialPurchaseAmount + $outsourcingAmount;
+    $safetyAmount = isset($breakdown['safety']) ? (float)$breakdown['safety'] : 0.0;
+    $monthlyCostTotal = $laborAmount + $equipmentAmount + $materialPurchaseAmount + $outsourcingAmount + $safetyAmount;
     return array(
         'project_id' => $projectId,
         'project_name' => $projectName,

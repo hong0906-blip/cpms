@@ -9,6 +9,7 @@ require_once __DIR__ . '/partials/labor_data_loader.php';
 require_once __DIR__ . '/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/partials/sales_data_loader.php';
 require_once __DIR__ . '/../../safety/safety_cost_helper.php';
+require_once __DIR__ . '/../../../services/CostChangeService.php';
 require_once __DIR__ . '/../partials/schedule_auto_progress_helper.php';
 require_once __DIR__ . '/../partials/target_cost_rate_helper.php';
 
@@ -189,13 +190,19 @@ if (!function_exists('cpms_status_equipment_total_between')) {
         try {
             $fromSql = "cpms_equipment_usage u";
             $deletedWhere = "";
+            $dateExpr = "u.use_date";
+            if (\App\Services\CostChangeService::isInstalled($pdo)) {
+                $fromSql .= " LEFT JOIN cpms_cost_record_meta ccm ON ccm.target_type = 'equipment' AND ccm.target_id = CAST(u.id AS CHAR)";
+                $dateExpr = "COALESCE(CONCAT(ccm.settlement_ym, '-25'), u.use_date)";
+                $deletedWhere .= " AND (ccm.is_deleted = 0 OR ccm.is_deleted IS NULL)";
+            }
             if (
                 cpms_status_table_exists($pdo, 'cpms_equipment_items') &&
                 cpms_status_column_exists($pdo, 'cpms_equipment_usage', 'equipment_id') &&
                 cpms_status_column_exists($pdo, 'cpms_equipment_items', 'is_deleted')
             ) {
                 $fromSql .= " INNER JOIN cpms_equipment_items e ON e.id = u.equipment_id AND e.project_id = u.project_id";
-                $deletedWhere = " AND (e.is_deleted = 0 OR e.is_deleted IS NULL)";
+                $deletedWhere .= " AND (e.is_deleted = 0 OR e.is_deleted IS NULL)";
             }
             if ($hasWorkUnit && $hasBaseRate) {
                 if ($hasAmount) {
@@ -203,9 +210,9 @@ if (!function_exists('cpms_status_equipment_total_between')) {
                 } else {
                     $amountExpr = "COALESCE(NULLIF(u.work_unit, 0), 1) * COALESCE(NULLIF(u.base_rate_snapshot, 0), 0)";
                 }
-                $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND u.use_date BETWEEN :start AND :end" . $deletedWhere;
+                $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND " . $dateExpr . " BETWEEN :start AND :end" . $deletedWhere;
             } else {
-                $sql = "SELECT COALESCE(SUM(u.amount), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND u.use_date BETWEEN :start AND :end" . $deletedWhere;
+                $sql = "SELECT COALESCE(SUM(u.amount), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND " . $dateExpr . " BETWEEN :start AND :end" . $deletedWhere;
             }
             $st = $pdo->prepare($sql);
             $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
@@ -236,11 +243,19 @@ if (!function_exists('cpms_status_material_category_sum_between')) {
 
         try {
             $deletedWhere = cpms_status_column_exists($pdo, 'cpms_material_items', 'is_deleted') ? " AND (i.is_deleted = 0 OR i.is_deleted IS NULL)" : "";
+            $metaJoin = "";
+            $dateExpr = "u.use_date";
+            if (\App\Services\CostChangeService::isInstalled($pdo)) {
+                $metaJoin = " LEFT JOIN cpms_cost_record_meta ccm ON ccm.target_type = 'material' AND ccm.target_id = CAST(u.id AS CHAR)";
+                $dateExpr = "COALESCE(CONCAT(ccm.settlement_ym, '-25'), u.use_date)";
+                $deletedWhere .= " AND (ccm.is_deleted = 0 OR ccm.is_deleted IS NULL)";
+            }
             $sql = "SELECT COALESCE(i.category, '') AS category, COALESCE(SUM(u.amount), 0) AS amount
                 FROM cpms_material_usage u
                 LEFT JOIN cpms_material_items i ON i.id = u.material_id
+                " . $metaJoin . "
                 WHERE u.project_id = :pid
-                  AND u.use_date BETWEEN :start AND :end" . $deletedWhere . "
+                  AND " . $dateExpr . " BETWEEN :start AND :end" . $deletedWhere . "
                 GROUP BY COALESCE(i.category, '')";
             $st = $pdo->prepare($sql);
             $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
@@ -661,7 +676,7 @@ foreach ($periodMonths as $ym) {
     // 상황탭 노무비/외주비는 월별 비용 배분 반영금액을 각각 합산합니다.
     $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
     $outsourcingLabor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap, true);
-    $outsourcingManual = cpms_outsourcing_manual_total_between($pdo, (int)$pid, $laborStart, $laborEnd);
+    $outsourcingManual = cpms_outsourcing_manual_total_between($pdo, (int)$pid, $costStart, $costEnd);
     $outsourcing = $outsourcingLabor + $outsourcingManual;
 
     // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
@@ -670,7 +685,7 @@ foreach ($periodMonths as $ym) {
     $sales = ($confirmedSales > 0) ? $confirmedSales : $expectedSales;
     $targetCostRate = isset($targetRateByMonth[$ym]) ? (float)$targetRateByMonth[$ym] : $targetRateValue;
     $targetCostAmount = cpms_status_target_cost_amount($sales, $targetCostRate);
-    $usedTotal = $labor + $outsourcing + $equipment + $materials + $purchase;
+    $usedTotal = $labor + $outsourcing + $equipment + $materials + $purchase + $safety;
     $profit = $sales - $usedTotal;
     $costRateInfo = cpms_status_cost_rate_info($sales, $usedTotal);
 

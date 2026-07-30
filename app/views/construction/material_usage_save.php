@@ -11,9 +11,11 @@ require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/material_statement_helper.php';
 require_once __DIR__ . '/partials/material_usage_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $role = Auth::userRole();
@@ -186,7 +188,15 @@ try {
             exit;
         }
     }
-    
+    foreach ($dates as $lockDate) {
+        $lockInfo = CostChangeService::lockInfo('material', $lockDate, '', date('Y-m-d'));
+        if (!empty($lockInfo['locked'])) {
+            flash_set('error', '마감된 기간의 자료입니다. 추가하려면 비용 변경 승인이 필요합니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+    }
+
     if ($hasMaterialAdvanceYn) {
         $st = $pdo->prepare("INSERT INTO cpms_material_usage
             (project_id, material_id, use_date, amount, advance_yn, memo, created_at)

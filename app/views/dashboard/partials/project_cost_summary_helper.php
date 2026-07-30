@@ -6,6 +6,7 @@
 
 require_once dirname(dirname(__DIR__)) . '/construction/tabs/partials/sales_data_loader.php';
 require_once dirname(dirname(__DIR__)) . '/construction/tabs/partials/labor_data_loader.php';
+require_once dirname(dirname(__DIR__)) . '/../services/CostChangeService.php';
 
 if (!function_exists('cpms_dashboard_cache_key')) {
 function cpms_dashboard_cache_key($pdo, $suffix)
@@ -143,13 +144,19 @@ function cpms_dashboard_equipment_total($pdo, $projectId)
     try {
         $fromSql = "cpms_equipment_usage u";
         $deletedWhere = "";
+        $dateExpr = "u.use_date";
+        if (\App\Services\CostChangeService::isInstalled($pdo)) {
+            $fromSql .= " LEFT JOIN cpms_cost_record_meta ccm ON ccm.target_type = 'equipment' AND ccm.target_id = CAST(u.id AS CHAR)";
+            $dateExpr = "COALESCE(CONCAT(ccm.settlement_ym, '-25'), u.use_date)";
+            $deletedWhere .= " AND (ccm.is_deleted = 0 OR ccm.is_deleted IS NULL)";
+        }
         if (
             cpms_dashboard_table_exists($pdo, 'cpms_equipment_items') &&
             cpms_dashboard_column_exists($pdo, 'cpms_equipment_usage', 'equipment_id') &&
             cpms_dashboard_column_exists($pdo, 'cpms_equipment_items', 'is_deleted')
         ) {
             $fromSql .= " INNER JOIN cpms_equipment_items e ON e.id = u.equipment_id AND e.project_id = u.project_id";
-            $deletedWhere = " AND (e.is_deleted = 0 OR e.is_deleted IS NULL)";
+            $deletedWhere .= " AND (e.is_deleted = 0 OR e.is_deleted IS NULL)";
         }
         if ($hasWorkUnit && $hasBaseRate) {
             if ($hasAmount) {
@@ -418,9 +425,9 @@ function cpms_dashboard_equipment_total_between($pdo, $projectId, $startDate, $e
             } else {
                 $amountExpr = "COALESCE(NULLIF(u.work_unit, 0), 1) * COALESCE(NULLIF(u.base_rate_snapshot, 0), 0)";
             }
-            $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND u.use_date BETWEEN :start AND :end" . $deletedWhere;
+            $sql = "SELECT COALESCE(SUM(" . $amountExpr . "), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND " . $dateExpr . " BETWEEN :start AND :end" . $deletedWhere;
         } else {
-            $sql = "SELECT COALESCE(SUM(u.amount), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND u.use_date BETWEEN :start AND :end" . $deletedWhere;
+            $sql = "SELECT COALESCE(SUM(u.amount), 0) FROM " . $fromSql . " WHERE u.project_id = :pid AND " . $dateExpr . " BETWEEN :start AND :end" . $deletedWhere;
         }
         $st = $pdo->prepare($sql);
         $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
@@ -452,11 +459,19 @@ function cpms_dashboard_material_total_between($pdo, $projectId, $startDate, $en
         $deletedWhere = cpms_dashboard_column_exists($pdo, 'cpms_material_items', 'is_deleted') ? " AND (i.is_deleted = 0 OR i.is_deleted IS NULL)" : "";
         $hasCategory = cpms_dashboard_column_exists($pdo, 'cpms_material_items', 'category');
         $categoryExpr = $hasCategory ? "COALESCE(i.category, '')" : "''";
+        $metaJoin = "";
+        $dateExpr = "u.use_date";
+        if (\App\Services\CostChangeService::isInstalled($pdo)) {
+            $metaJoin = " LEFT JOIN cpms_cost_record_meta ccm ON ccm.target_type = 'material' AND ccm.target_id = CAST(u.id AS CHAR)";
+            $dateExpr = "COALESCE(CONCAT(ccm.settlement_ym, '-25'), u.use_date)";
+            $deletedWhere .= " AND (ccm.is_deleted = 0 OR ccm.is_deleted IS NULL)";
+        }
         $sql = "SELECT " . $categoryExpr . " AS category, COALESCE(SUM(u.amount), 0) AS amount
                 FROM cpms_material_usage u
                 LEFT JOIN cpms_material_items i ON i.id = u.material_id
+                " . $metaJoin . "
                 WHERE u.project_id = :pid
-                  AND u.use_date BETWEEN :start AND :end" . $deletedWhere . "
+                  AND " . $dateExpr . " BETWEEN :start AND :end" . $deletedWhere . "
                 GROUP BY " . $categoryExpr;
         $st = $pdo->prepare($sql);
         $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);

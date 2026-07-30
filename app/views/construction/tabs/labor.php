@@ -4,6 +4,9 @@
  * - 하위 탭: 공수 / 노무비 / 외주비 / 인원작성
  * - PHP 5.6 호환
  */
+require_once __DIR__ . '/../../../services/CostChangeService.php';
+
+use App\Services\CostChangeService;
 
 $canEditLabor = isset($canEdit) ? (bool)$canEdit : false;
 $laborTab = isset($_GET['labor_tab']) ? trim((string)$_GET['labor_tab']) : 'timesheet';
@@ -392,6 +395,32 @@ foreach ($timesheetWorkers as $worker) {
     <?php endif; ?>
 
     <?php if ($canManageLaborForce && $laborTab === 'workers'): ?>
+        <?php
+        $laborForceTargetId = isset($laborForceRow['id']) ? (int)$laborForceRow['id'] : 0;
+        $laborForceLock = CostChangeService::lockInfo('labor', $selectedMonth . '-01', $selectedMonth, date('Y-m-d'));
+        $laborForceActiveRequest = $laborForceTargetId > 0 ? CostChangeService::activeRequest($pdo, 'labor_force', (string)$laborForceTargetId) : null;
+        $laborForceHistoryCount = $laborForceTargetId > 0 ? CostChangeService::historyCount($pdo, 'labor_force', (string)$laborForceTargetId) : 0;
+        $laborForceLatestRequest = $laborForceHistoryCount > 0 ? CostChangeService::latestRequest($pdo, 'labor_force', (string)$laborForceTargetId) : null;
+        $laborForceReturnUrl = '?r=공사&pid=' . (int)$pid . '&tab=labor&labor_tab=workers&month=' . $selectedMonth;
+        ?>
+        <?php if (!empty($laborForceLock['locked'])): ?>
+        <div class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+            <div class="font-extrabold text-amber-900">마감된 노무비 월입니다. 변경하려면 비용 변경 승인이 필요합니다.</div>
+            <div class="mt-3 flex flex-wrap gap-2">
+                <?php if (is_array($laborForceActiveRequest)): ?>
+                    <span class="px-3 py-2 rounded-xl bg-white text-amber-800 font-bold"><?php echo h(CostChangeService::statusLabel($laborForceActiveRequest['status'])); ?></span>
+                    <a href="?r=cost_change/detail&id=<?php echo (int)$laborForceActiveRequest['id']; ?>" class="px-3 py-2 rounded-xl border border-blue-200 bg-white text-blue-700 font-bold">요청 상세</a>
+                <?php elseif ($laborForceTargetId > 0): ?>
+                    <?php foreach (array('MODIFY'=>'수정 승인 요청','MONTH_MOVE'=>'귀속월 변경 요청','DELETE'=>'삭제 승인 요청') as $requestCode=>$requestLabel): ?>
+                        <a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=labor_force&target_id=<?php echo (int)$laborForceTargetId; ?>&request_type=<?php echo h($requestCode); ?>&return_url=<?php echo rawurlencode($laborForceReturnUrl); ?>" class="px-3 py-2 rounded-xl border border-amber-300 bg-white text-amber-800 font-bold"><?php echo h($requestLabel); ?></a>
+                    <?php endforeach; ?>
+                <?php else: ?>
+                    <a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=labor_force&request_type=ADD&return_url=<?php echo rawurlencode($laborForceReturnUrl); ?>" class="px-3 py-2 rounded-xl border border-amber-300 bg-white text-amber-800 font-bold">추가 승인 요청</a>
+                <?php endif; ?>
+                <?php if ($laborForceHistoryCount > 0): ?><a href="?r=cost_change/history&target_type=labor_force&target_id=<?php echo (int)$laborForceTargetId; ?>&project_id=<?php echo (int)$pid; ?>" class="px-3 py-2 rounded-xl border border-blue-200 bg-white text-blue-700 font-bold"><?php echo h(CostChangeService::historyBadgeLabel($laborForceLatestRequest, $laborForceHistoryCount)); ?></a><?php endif; ?>
+            </div>
+        </div>
+        <?php else: ?>
         <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_force_save" class="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
@@ -414,6 +443,7 @@ foreach ($timesheetWorkers as $worker) {
                 <div class="mt-2 text-xs text-amber-800">최근 저장: <?php echo h($laborForceRow['updated_at']); ?> <?php echo h(isset($laborForceRow['updated_by_name']) ? $laborForceRow['updated_by_name'] : ''); ?></div>
             <?php endif; ?>
         </form>
+        <?php endif; ?>
     <?php endif; ?>
 </div>
 <?php if ($laborTab === 'timesheet'): ?>

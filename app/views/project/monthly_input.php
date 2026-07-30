@@ -34,6 +34,7 @@ require_once __DIR__ . '/../construction/tabs/partials/sales_data_loader.php';
 require_once __DIR__ . '/../safety/safety_cost_helper.php';
 require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
 require_once __DIR__ . '/../construction/tabs/partials/outsourcing_data_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 function monthly_zero_map($months) { $m = array(); foreach ($months as $ym) { $m[$ym] = 0; } return $m; }
 function amount_fmt($n){ if ((float)$n == 0) { return '-'; } return number_format((float)$n); }
@@ -430,7 +431,7 @@ if ($pdo && is_array($selectedProject)) {
     try {
         $hasMatDeleted = project_monthly_column_exists($pdo, 'cpms_material_items', 'is_deleted');
         $matDeletedWhere = $hasMatDeleted ? ' AND (m.is_deleted = 0 OR m.is_deleted IS NULL)' : '';
-        $stMat = $pdo->prepare('SELECT m.id,m.category,m.vendor_name,m.representative,m.phone,m.biz_no,m.remark,u.use_date,u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id=m.id AND u.project_id=m.project_id WHERE m.project_id=:pid' . $matDeletedWhere);
+        $stMat = $pdo->prepare('SELECT m.id,m.category,m.vendor_name,m.representative,m.phone,m.biz_no,m.remark,u.id AS usage_id,u.use_date,u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id=m.id AND u.project_id=m.project_id WHERE m.project_id=:pid' . $matDeletedWhere);
         $stMat->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
         $stMat->execute();
         $mat = $stMat->fetchAll();
@@ -440,6 +441,7 @@ if ($pdo && is_array($selectedProject)) {
         foreach ($mat as $r) {
             $cat = trim((string)$r['category']);
             if ($cat === '안전관리비') { continue; }
+            if (\App\Services\CostChangeService::isTargetDeleted($pdo, 'material', isset($r['usage_id']) ? (string)$r['usage_id'] : '')) { continue; }
             if (!isset($map[$cat])) { $cat = '자재비'; }
             $sec = $map[$cat];
             $vendorName = isset($r['vendor_name']) ? trim((string)$r['vendor_name']) : '';
@@ -455,7 +457,13 @@ if ($pdo && is_array($selectedProject)) {
                     '_all_details'=>array()
                 );
             }
-            $ym = cpms_material_equipment_cost_ym($r['use_date']);
+            $ym = \App\Services\CostChangeService::effectiveSettlementYm(
+                $pdo,
+                'material',
+                isset($r['usage_id']) ? (string)$r['usage_id'] : '',
+                'material',
+                isset($r['use_date']) ? (string)$r['use_date'] : ''
+            );
             if (isset($tmp[$groupKey]['months'][$ym])) {
                 $tmp[$groupKey]['months'][$ym] += (float)$r['amount'];
                 $detail = isset($r['remark']) ? trim((string)$r['remark']) : '';
@@ -483,7 +491,13 @@ if ($pdo && is_array($selectedProject)) {
     foreach ($safetyCostRows as $safetyRow) {
         $useDate = isset($safetyRow['use_date']) ? cpms_safety_cost_valid_date($safetyRow['use_date']) : '';
         if ($useDate === '') { continue; }
-        $safetyYm = substr($useDate, 0, 7);
+        $safetyYm = \App\Services\CostChangeService::effectiveSettlementYm(
+            $pdo,
+            'safety',
+            isset($safetyRow['id']) ? (string)$safetyRow['id'] : '',
+            'safety',
+            $useDate
+        );
         if (!isset($monthlyRevenue[$safetyYm]) && !in_array($safetyYm, $allMonths, true)) { continue; }
         if (!in_array($safetyYm, $allMonths, true)) { continue; }
         $vendorName = isset($safetyRow['vendor_name']) ? trim((string)$safetyRow['vendor_name']) : '';
@@ -529,13 +543,14 @@ if ($pdo && is_array($selectedProject)) {
         if ($hasEqWorkUnit) $eqSelectExtra .= ',u.work_unit';
         if ($hasEqBaseRate) $eqSelectExtra .= ',u.base_rate_snapshot';
         $eqDeletedWhere = $hasEqDeleted ? ' AND (e.is_deleted = 0 OR e.is_deleted IS NULL)' : '';
-        $stEq = $pdo->prepare('SELECT e.id,e.vendor_name,e.spec,e.category,e.base_rate,u.use_date,u.amount' . $eqSelectExtra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid' . $eqDeletedWhere);
+        $stEq = $pdo->prepare('SELECT e.id,e.vendor_name,e.spec,e.category,e.base_rate,u.id AS usage_id,u.use_date,u.amount' . $eqSelectExtra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid' . $eqDeletedWhere);
         $stEq->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
         $stEq->execute();
         $eq = $stEq->fetchAll();
         if (!is_array($eq)) { $eq = array(); }
         $tmpEq = array();
         foreach ($eq as $r) {
+            if (\App\Services\CostChangeService::isTargetDeleted($pdo, 'equipment', isset($r['usage_id']) ? (string)$r['usage_id'] : '')) { continue; }
             $vendorName = isset($r['vendor_name']) ? trim((string)$r['vendor_name']) : '';
             $spec = isset($r['spec']) ? trim((string)$r['spec']) : '';
             $category = isset($r['category']) ? trim((string)$r['category']) : '';
@@ -545,7 +560,13 @@ if ($pdo && is_array($selectedProject)) {
                 $id = 'equipment|' . project_monthly_text_key($vendorName) . '|spec:' . project_monthly_text_key($spec);
             }
             if (!isset($tmpEq[$id])) { $tmpEq[$id] = array('section'=>'장비비','업체명'=>($vendorName !== '' ? $vendorName : '-'),'내역'=>($spec !== '' ? $spec : $category),'months'=>monthly_zero_map($allMonths)); }
-            $ym = cpms_material_equipment_cost_ym($r['use_date']);
+            $ym = \App\Services\CostChangeService::effectiveSettlementYm(
+                $pdo,
+                'equipment',
+                isset($r['usage_id']) ? (string)$r['usage_id'] : '',
+                'equipment',
+                isset($r['use_date']) ? (string)$r['use_date'] : ''
+            );
             $eqAmount = (float)$r['amount'];
             $workUnit = ($hasEqWorkUnit && isset($r['work_unit'])) ? (float)$r['work_unit'] : 1.0;
             if ($workUnit <= 0) $workUnit = 1.0;
@@ -617,7 +638,13 @@ if ($pdo && is_array($selectedProject)) {
         $manualOutsourcingRows = cpms_outsourcing_manual_rows($pdo, $selectedProjectId, '', '');
         foreach ($manualOutsourcingRows as $manualOutsourcingRow) {
             $expenseDate = isset($manualOutsourcingRow['expense_date']) ? (string)$manualOutsourcingRow['expense_date'] : '';
-            $expenseYm = preg_match('/^\d{4}-\d{2}-\d{2}$/', $expenseDate) ? substr($expenseDate, 0, 7) : '';
+            $expenseYm = \App\Services\CostChangeService::effectiveSettlementYm(
+                $pdo,
+                'outsourcing',
+                isset($manualOutsourcingRow['id']) ? (string)$manualOutsourcingRow['id'] : '',
+                'outsourcing',
+                $expenseDate
+            );
             if ($expenseYm === '' || !in_array($expenseYm, $allMonths, true)) continue;
             $companyName = isset($manualOutsourcingRow['company_name']) ? trim((string)$manualOutsourcingRow['company_name']) : '';
             if ($companyName === '') $companyName = '-';

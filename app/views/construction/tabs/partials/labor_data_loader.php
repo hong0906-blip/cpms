@@ -1532,13 +1532,13 @@ if (!function_exists('cpms_labor_force_parse_amount')) {
 
 if (!function_exists('cpms_labor_force_load')) {
     function cpms_labor_force_load($pdo, $projectId, $month) {
-        $empty = array('amount' => 0.0, 'memo' => '', 'updated_at' => '', 'updated_by_name' => '');
+        $empty = array('id' => 0, 'amount' => 0.0, 'memo' => '', 'updated_at' => '', 'updated_by_name' => '');
         $projectId = (int)$projectId;
         $month = trim((string)$month);
         if (!$pdo || $projectId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return $empty;
         if (!cpms_ensure_labor_force_adjustments_table($pdo)) return $empty;
         try {
-            $st = $pdo->prepare("SELECT amount, memo, updated_at, updated_by_name
+            $st = $pdo->prepare("SELECT id, amount, memo, updated_at, updated_by_name
                                  FROM cpms_labor_force_adjustments
                                  WHERE project_id = :pid AND month = :month
                                  LIMIT 1");
@@ -1548,6 +1548,7 @@ if (!function_exists('cpms_labor_force_load')) {
             $row = $st->fetch(PDO::FETCH_ASSOC);
             if (!$row) return $empty;
             return array(
+                'id' => isset($row['id']) ? (int)$row['id'] : 0,
                 'amount' => isset($row['amount']) ? (float)$row['amount'] : 0.0,
                 'memo' => isset($row['memo']) ? (string)$row['memo'] : '',
                 'updated_at' => isset($row['updated_at']) ? (string)$row['updated_at'] : '',

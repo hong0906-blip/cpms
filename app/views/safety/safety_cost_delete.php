@@ -6,9 +6,11 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/safety_cost_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
@@ -46,6 +48,14 @@ foreach ($store['items'] as $idx => $row) {
     if (!cpms_safety_cost_user_can_manage_project($pdo, $projectId)) {
         http_response_code(403);
         echo '403 Forbidden';
+        exit;
+    }
+    $useDate = isset($row['use_date']) ? (string)$row['use_date'] : '';
+    $settlementYm = CostChangeService::effectiveSettlementYm($pdo, 'safety', $id, 'safety', $useDate);
+    $lockInfo = CostChangeService::lockInfo('safety', $useDate, $settlementYm, date('Y-m-d'));
+    if (!empty($lockInfo['locked'])) {
+        flash_set('error', '마감된 기간의 자료는 일반 삭제할 수 없습니다. 삭제 승인 요청을 이용해주세요.');
+        header('Location: ' . $redirect);
         exit;
     }
     $store['items'][$idx]['status'] = 'deleted';

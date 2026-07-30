@@ -9,9 +9,11 @@ require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/material_statement_helper.php';
 require_once __DIR__ . '/partials/material_usage_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -101,6 +103,15 @@ try {
     }
     if (isset($row['category']) && trim((string)$row['category']) === '안전관리비') {
         flash_set('error', '안전관리비 사용내역은 안전섹션에서 수정해주세요.');
+        header('Location: ' . $redirect);
+        exit;
+    }
+
+    $sourceYm = CostChangeService::effectiveSettlementYm($pdo, 'material', (string)$usageId, 'material', isset($row['use_date']) ? $row['use_date'] : '');
+    $sourceLock = CostChangeService::lockInfo('material', isset($row['use_date']) ? $row['use_date'] : '', $sourceYm, date('Y-m-d'));
+    $destinationLock = CostChangeService::lockInfo('material', $useDate, '', date('Y-m-d'));
+    if (!empty($sourceLock['locked']) || !empty($destinationLock['locked'])) {
+        flash_set('error', '마감된 기간의 자료입니다. 수정하려면 비용 변경 승인이 필요합니다.');
         header('Location: ' . $redirect);
         exit;
     }

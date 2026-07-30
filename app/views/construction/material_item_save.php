@@ -13,9 +13,11 @@ require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/material_statement_helper.php';
 require_once __DIR__ . '/partials/material_usage_helper.php';
 require_once __DIR__ . '/../safety/safety_cost_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
@@ -1101,6 +1103,13 @@ function material_bulk_apply_action($pdo, $projectId, $fallbackYm)
             continue;
         }
         $isSafetyRow = material_bulk_is_safety_category($row['category']);
+        $bulkLockType = $isSafetyRow ? 'safety' : 'material';
+        $bulkLock = CostChangeService::lockInfo($bulkLockType, (string)$row['use_date'], '', date('Y-m-d'));
+        if (!empty($bulkLock['locked'])) {
+            $errors++;
+            if ($baseIsSafetyRow) $safetySkipped++;
+            continue;
+        }
         if (!$isSafetyRow && !material_bulk_is_material_category($row['category'])) {
             $skipped++;
             if ($baseIsSafetyRow) $safetySkipped++;
@@ -1263,6 +1272,15 @@ if (count($validatedUsageDates) > 1) {
     flash_set('error', '사용일자는 한 번에 하나만 선택할 수 있습니다.');
     header('Location: ' . $redirect);
     exit;
+}
+foreach ($validatedUsageDates as $validatedUsageDate) {
+    $validatedCostType = ($category === '안전관리비') ? 'safety' : 'material';
+    $validatedLock = CostChangeService::lockInfo($validatedCostType, $validatedUsageDate, '', date('Y-m-d'));
+    if (!empty($validatedLock['locked'])) {
+        flash_set('error', '마감된 기간의 자료입니다. 추가하려면 비용 변경 승인이 필요합니다.');
+        header('Location: ' . $redirect);
+        exit;
+    }
 }
 
 if ($category === '안전관리비') {

@@ -2,9 +2,11 @@
 /** 공사 > 외주비 입력 저장/수정/삭제 - PHP 5.6 호환 */
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/tabs/partials/outsourcing_data_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -30,6 +32,14 @@ try {
     $now = date('Y-m-d H:i:s');
     if ($action === 'delete') {
         if ($entryId <= 0) throw new Exception('삭제할 외주비 내역이 없습니다.');
+        $stOld = $pdo->prepare("SELECT id, expense_date FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
+        $stOld->execute(array(':id'=>$entryId, ':pid'=>$projectId));
+        $oldRow = $stOld->fetch(PDO::FETCH_ASSOC);
+        if ($oldRow) {
+            $oldYm = CostChangeService::effectiveSettlementYm($pdo, 'outsourcing', (string)$entryId, 'outsourcing', $oldRow['expense_date']);
+            $oldLock = CostChangeService::lockInfo('outsourcing', $oldRow['expense_date'], $oldYm, date('Y-m-d'));
+            if (!empty($oldLock['locked'])) throw new Exception('마감된 기간의 자료는 일반 삭제할 수 없습니다. 삭제 승인 요청을 이용해주세요.');
+        }
         $st = $pdo->prepare("UPDATE cpms_outsourcing_costs SET is_deleted = 1, updated_at = :now WHERE id = :id AND project_id = :pid");
         $st->bindValue(':now', $now);
         $st->bindValue(':id', $entryId, PDO::PARAM_INT);
@@ -51,8 +61,19 @@ try {
     if ($expenseDate === '') throw new Exception('일자를 올바르게 입력해주세요.');
     if ($companyName === '') throw new Exception('업체명을 입력해주세요.');
     if ($amount <= 0) throw new Exception('금액은 0보다 크게 입력해주세요.');
+    $destinationLock = CostChangeService::lockInfo('outsourcing', $expenseDate, '', date('Y-m-d'));
+    if (!empty($destinationLock['locked'])) {
+        throw new Exception('마감된 기간의 자료입니다. 추가 또는 수정하려면 비용 변경 승인이 필요합니다.');
+    }
 
     if ($entryId > 0) {
+        $stOld = $pdo->prepare("SELECT expense_date FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
+        $stOld->execute(array(':id'=>$entryId, ':pid'=>$projectId));
+        $oldRow = $stOld->fetch(PDO::FETCH_ASSOC);
+        if (!$oldRow) throw new Exception('수정할 외주비 내역을 찾을 수 없습니다.');
+        $oldYm = CostChangeService::effectiveSettlementYm($pdo, 'outsourcing', (string)$entryId, 'outsourcing', $oldRow['expense_date']);
+        $oldLock = CostChangeService::lockInfo('outsourcing', $oldRow['expense_date'], $oldYm, date('Y-m-d'));
+        if (!empty($oldLock['locked'])) throw new Exception('마감된 기간의 자료입니다. 수정하려면 비용 변경 승인이 필요합니다.');
         $sql = "UPDATE cpms_outsourcing_costs
                 SET expense_date = :expense_date, category = '외주비', company_name = :company_name,
                     representative_name = :representative_name, business_no = :business_no,

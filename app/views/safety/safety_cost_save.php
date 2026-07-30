@@ -6,9 +6,11 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/safety_cost_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
@@ -54,6 +56,9 @@ $bizNo = trim((string)(isset($_POST['biz_no']) ? $_POST['biz_no'] : ''));
 $itemName = trim((string)(isset($_POST['item_name']) ? $_POST['item_name'] : ''));
 $useContent = trim((string)(isset($_POST['use_content']) ? $_POST['use_content'] : ''));
 $remark = trim((string)(isset($_POST['remark']) ? $_POST['remark'] : ''));
+$category = trim((string)(isset($_POST['category']) ? $_POST['category'] : '안전관리비'));
+$allowedCategories = array('안전관리비','보호구 구입비','교육비','검진비','기타 안전·보건 비용');
+if (!in_array($category, $allowedCategories, true)) $category = '안전관리비';
 if ($itemName === '') $itemName = $useContent;
 if ($vendorName === '' || $useContent === '') {
     flash_set('error', '업체명과 품목 또는 사용내용을 입력해주세요.');
@@ -99,6 +104,14 @@ try {
             header('Location: ' . $redirect);
             exit;
         }
+        $oldUseDate = isset($store['items'][$idx]['use_date']) ? (string)$store['items'][$idx]['use_date'] : '';
+        $oldYm = CostChangeService::effectiveSettlementYm($pdo, 'safety', $recordId, 'safety', $oldUseDate);
+        $oldLock = CostChangeService::lockInfo('safety', $oldUseDate, $oldYm, date('Y-m-d'));
+        if (!empty($oldLock['locked'])) {
+            flash_set('error', '마감된 기간의 자료입니다. 수정하려면 비용 변경 승인이 필요합니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
         $oldProjectId = isset($store['items'][$idx]['project_id']) ? (int)$store['items'][$idx]['project_id'] : 0;
         if ($oldProjectId > 0 && !cpms_safety_cost_user_can_manage_project($pdo, $oldProjectId)) {
             http_response_code(403);
@@ -107,6 +120,12 @@ try {
         }
     } else {
         $recordId = cpms_safety_cost_new_id();
+    }
+    $destinationLock = CostChangeService::lockInfo('safety', $useDate, '', date('Y-m-d'));
+    if (!empty($destinationLock['locked'])) {
+        flash_set('error', '마감된 기간의 자료입니다. 추가 또는 수정하려면 비용 변경 승인이 필요합니다.');
+        header('Location: ' . $redirect);
+        exit;
     }
 
     $uploadMessage = '';
@@ -137,7 +156,7 @@ try {
     $base['project_id'] = $projectId;
     $base['project_name'] = $projectName;
     $base['use_date'] = $useDate;
-    $base['category'] = '안전관리비';
+    $base['category'] = $category;
     $base['vendor_name'] = $vendorName;
     $base['representative'] = $representative;
     $base['phone'] = $phone;

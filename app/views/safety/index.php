@@ -7,8 +7,10 @@
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
 
 require_once __DIR__ . '/safety_cost_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
 
 $flash = flash_get();
 $pdo = Db::pdo();
@@ -158,6 +160,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                 </select>
             </div>
             <button type="submit" class="px-5 py-3 rounded-2xl bg-gradient-to-r from-yellow-500 to-orange-500 text-white font-extrabold shadow-lg">보기</button>
+            <a href="<?php echo h(base_url()); ?>/?r=cost_change/my" class="px-5 py-3 rounded-2xl border border-blue-200 bg-blue-50 text-blue-700 font-extrabold text-center">나의 비용 변경 요청</a>
         </form>
         <?php if ($activeSafetyTab === 'samsung_portal'): ?>
             <div class="mt-4 text-sm text-gray-600">삼성 상생협력포탈 탭은 프로젝트 선택과 무관하게 전체 내방 인원 기준으로 조회합니다.</div>
@@ -619,6 +622,9 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                 <?php endif; ?>
 
                 <?php if ($canManageSafetyCost): ?>
+                    <div class="mb-4 flex flex-wrap justify-end gap-2">
+                        <a href="?r=cost_change/request&project_id=<?php echo (int)$selectedProjectId; ?>&target_type=safety&request_type=ADD&return_url=<?php echo rawurlencode($baseSafetyUrl . '&tab=safety_cost#safety-cost-section'); ?>" class="px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 font-extrabold text-sm">마감월 추가 승인 요청</a>
+                    </div>
                     <?php
                     $editId = is_array($editSafetyCost) && isset($editSafetyCost['id']) ? (string)$editSafetyCost['id'] : '';
                     $editUseDate = is_array($editSafetyCost) && isset($editSafetyCost['use_date']) ? (string)$editSafetyCost['use_date'] : date('Y-m-d');
@@ -629,6 +635,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                     $editContent = is_array($editSafetyCost) && isset($editSafetyCost['use_content']) ? (string)$editSafetyCost['use_content'] : (is_array($editSafetyCost) && isset($editSafetyCost['item_name']) ? (string)$editSafetyCost['item_name'] : '');
                     $editAmount = is_array($editSafetyCost) ? (string)cpms_safety_cost_row_amount($editSafetyCost) : '';
                     $editRemark = is_array($editSafetyCost) && isset($editSafetyCost['remark']) ? (string)$editSafetyCost['remark'] : '';
+                    $editCategory = is_array($editSafetyCost) && isset($editSafetyCost['category']) ? (string)$editSafetyCost['category'] : '안전관리비';
                     ?>
                     <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/safety_cost_save" enctype="multipart/form-data" class="mb-5 rounded-2xl border border-gray-200 bg-gray-50 p-4" id="safetyCostForm">
                         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -642,6 +649,14 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                            <div>
+                                <label class="text-xs font-bold text-gray-600">비용 구분</label>
+                                <select name="category" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 bg-white">
+                                    <?php foreach (array('안전관리비','보호구 구입비','교육비','검진비','기타 안전·보건 비용') as $safetyCategory): ?>
+                                        <option value="<?php echo h($safetyCategory); ?>" <?php echo $editCategory === $safetyCategory ? 'selected' : ''; ?>><?php echo h($safetyCategory); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
                             <div>
                                 <label class="text-xs font-bold text-gray-600">사용일자</label>
                                 <input type="date" name="use_date" value="<?php echo h($editUseDate); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 bg-white" required>
@@ -702,6 +717,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                         <thead class="bg-gray-50 text-gray-600">
                             <tr>
                                 <th class="px-3 py-2 text-left font-bold">사용일자</th>
+                                <th class="px-3 py-2 text-left font-bold">비용 구분</th>
                                 <th class="px-3 py-2 text-left font-bold">업체명</th>
                                 <th class="px-3 py-2 text-left font-bold">대표자명</th>
                                 <th class="px-3 py-2 text-left font-bold">전화번호</th>
@@ -716,7 +732,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                         </thead>
                         <tbody class="divide-y divide-gray-100">
                             <?php if (count($safetyCostItems) === 0): ?>
-                                <tr><td colspan="11" class="px-3 py-4 text-center text-gray-500">등록된 안전관리비 사용내역이 없습니다.</td></tr>
+                                <tr><td colspan="12" class="px-3 py-4 text-center text-gray-500">등록된 안전·보건 비용 사용내역이 없습니다.</td></tr>
                             <?php else: ?>
                                 <?php foreach ($safetyCostItems as $row): ?>
                                     <?php
@@ -725,9 +741,17 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                                     $rowContent = isset($row['use_content']) ? trim((string)$row['use_content']) : '';
                                     $rowDesc = trim($rowItem . (($rowItem !== '' && $rowContent !== '') ? ' / ' : '') . $rowContent);
                                     $rowRegistrant = isset($row['created_by_name']) && trim((string)$row['created_by_name']) !== '' ? (string)$row['created_by_name'] : (isset($row['created_by_email']) ? (string)$row['created_by_email'] : '-');
+                                    $safetyUseDate = isset($row['use_date']) ? (string)$row['use_date'] : '';
+                                    $safetySettlementYm = CostChangeService::effectiveSettlementYm($pdo, 'safety', $rowId, 'safety', $safetyUseDate);
+                                    $safetyRowLock = CostChangeService::lockInfo('safety', $safetyUseDate, $safetySettlementYm, date('Y-m-d'));
+                                    $safetyActiveRequest = $rowId !== '' ? CostChangeService::activeRequest($pdo, 'safety', $rowId) : null;
+                                    $safetyHistoryCount = $rowId !== '' ? CostChangeService::historyCount($pdo, 'safety', $rowId) : 0;
+                                    $safetyLatestRequest = $safetyHistoryCount > 0 ? CostChangeService::latestRequest($pdo, 'safety', $rowId) : null;
+                                    $safetyReturnUrl = $baseSafetyUrl . '&tab=safety_cost#safety-cost-section';
                                     ?>
-                                    <tr>
+                                    <tr class="<?php echo !empty($safetyRowLock['locked']) ? 'bg-gray-50' : ''; ?>">
                                         <td class="px-3 py-2 whitespace-nowrap"><?php echo h(isset($row['use_date']) ? $row['use_date'] : ''); ?></td>
+                                        <td class="px-3 py-2"><?php echo h(isset($row['category']) ? $row['category'] : '안전관리비'); ?></td>
                                         <td class="px-3 py-2"><?php echo h(isset($row['vendor_name']) ? $row['vendor_name'] : ''); ?></td>
                                         <td class="px-3 py-2"><?php echo h(isset($row['representative']) ? $row['representative'] : ''); ?></td>
                                         <td class="px-3 py-2 whitespace-nowrap"><?php echo h(isset($row['phone']) ? $row['phone'] : ''); ?></td>
@@ -740,13 +764,23 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                                         <td class="px-3 py-2 text-center">
                                             <?php if ($canManageSafetyCost): ?>
                                                 <div class="inline-flex flex-wrap justify-center gap-1">
-                                                    <a href="<?php echo h($baseSafetyUrl . '&tab=safety_cost&safety_cost_edit=' . rawurlencode($rowId) . '#safety-cost-section'); ?>" class="px-2 py-1 rounded-lg border border-gray-300 bg-white text-xs font-bold">수정</a>
-                                                    <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/safety_cost_delete" onsubmit="return confirm('삭제 처리할까요?');" style="display:inline;">
-                                                        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                                                        <input type="hidden" name="project_id" value="<?php echo (int)$selectedProjectId; ?>">
-                                                        <input type="hidden" name="safety_cost_id" value="<?php echo h($rowId); ?>">
-                                                        <button type="submit" class="px-2 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-bold">삭제</button>
-                                                    </form>
+                                                    <?php if (is_array($safetyActiveRequest)): ?>
+                                                        <span class="text-xs font-extrabold text-amber-700"><?php echo h(CostChangeService::statusLabel($safetyActiveRequest['status'])); ?></span>
+                                                        <a href="?r=cost_change/detail&id=<?php echo (int)$safetyActiveRequest['id']; ?>" class="text-xs text-blue-700 underline">요청 상세</a>
+                                                    <?php elseif (!empty($safetyRowLock['locked'])): ?>
+                                                        <?php foreach (array('MODIFY'=>'수정 승인 요청','MONTH_MOVE'=>'귀속월 변경 요청','DELETE'=>'삭제 승인 요청') as $requestCode=>$requestLabel): ?>
+                                                            <a href="?r=cost_change/request&project_id=<?php echo (int)$selectedProjectId; ?>&target_type=safety&target_id=<?php echo rawurlencode($rowId); ?>&request_type=<?php echo h($requestCode); ?>&return_url=<?php echo rawurlencode($safetyReturnUrl); ?>" class="px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-bold"><?php echo h($requestLabel); ?></a>
+                                                        <?php endforeach; ?>
+                                                    <?php else: ?>
+                                                        <a href="<?php echo h($baseSafetyUrl . '&tab=safety_cost&safety_cost_edit=' . rawurlencode($rowId) . '#safety-cost-section'); ?>" class="px-2 py-1 rounded-lg border border-gray-300 bg-white text-xs font-bold">수정</a>
+                                                        <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/safety_cost_delete" onsubmit="return confirm('삭제 처리할까요?');" style="display:inline;">
+                                                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                                            <input type="hidden" name="project_id" value="<?php echo (int)$selectedProjectId; ?>">
+                                                            <input type="hidden" name="safety_cost_id" value="<?php echo h($rowId); ?>">
+                                                            <button type="submit" class="px-2 py-1 rounded-lg border border-red-200 bg-red-50 text-red-700 text-xs font-bold">삭제</button>
+                                                        </form>
+                                                    <?php endif; ?>
+                                                    <?php if ($safetyHistoryCount > 0): ?><a href="?r=cost_change/history&target_type=safety&target_id=<?php echo rawurlencode($rowId); ?>&project_id=<?php echo (int)$selectedProjectId; ?>" class="text-[11px] font-bold text-blue-700 underline"><?php echo h(CostChangeService::historyBadgeLabel($safetyLatestRequest, $safetyHistoryCount)); ?></a><?php endif; ?>
                                                 </div>
                                             <?php else: ?>
                                                 <span class="text-xs text-gray-400">조회</span>

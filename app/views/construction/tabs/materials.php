@@ -9,11 +9,13 @@
  */
 
 use App\Core\Db;
+use App\Services\CostChangeService;
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../partials/project_month_options_helper.php';
 require_once __DIR__ . '/../partials/material_statement_helper.php';
 require_once __DIR__ . '/../partials/material_usage_helper.php';
 require_once __DIR__ . '/../../safety/safety_cost_helper.php';
+require_once __DIR__ . '/../../../services/CostChangeService.php';
 
 $canEditMaterials = isset($canEdit) ? (bool)$canEdit : false;
 $hideMaterialMonthlyExcelUploadCard = true; // 복구 시 false로 변경하면 월별 자재구입비 엑셀 업로드 카드가 다시 보입니다.
@@ -65,6 +67,7 @@ $prevYm = $prevFirst->format('Y-m');
 $prevLastDay = (int)$prevFirst->format('t');
 $monthlyStart = $prevYm . '-26';
 $monthlyEnd = $ym . '-25';
+$materialSelectedMonthLock = CostChangeService::lockInfo('material', $monthlyStart, $ym, date('Y-m-d'));
 
 $items = array();
 $itemMap = array();
@@ -89,17 +92,26 @@ try {
 
     if (count($items) > 0) {
         $usageSelect = $hasMaterialAdvanceYn ? "u.*" : "u.*, 'N' AS advance_yn";
+        $materialMetaInstalled = CostChangeService::isInstalled($pdo);
+        $materialMetaJoin = $materialMetaInstalled ? " LEFT JOIN cpms_cost_record_meta crm ON crm.target_type='material' AND crm.target_id=CAST(u.id AS CHAR)" : "";
+        $materialMonthCondition = $materialMetaInstalled
+            ? " AND COALESCE(crm.is_deleted,0)=0
+                AND COALESCE(NULLIF(crm.settlement_ym,''),IF(DAY(u.use_date)>=26,DATE_FORMAT(DATE_ADD(u.use_date,INTERVAL 1 MONTH),'%Y-%m'),DATE_FORMAT(u.use_date,'%Y-%m'))) = :settlement_ym"
+            : " AND u.use_date BETWEEN :s AND :e";
         $stUsage = $pdo->prepare("SELECT " . $usageSelect . ", i.category, i.vendor_name, i.representative, i.phone, i.biz_no, i.base_rate, i.remark
             FROM cpms_material_usage u
-            JOIN cpms_material_items i ON i.id = u.material_id
+            JOIN cpms_material_items i ON i.id = u.material_id" . $materialMetaJoin . "
             WHERE u.project_id = :pid
               AND i.is_deleted = 0
-              AND i.category <> '안전관리비'
-              AND u.use_date BETWEEN :s AND :e
+              AND i.category <> '안전관리비'" . $materialMonthCondition . "
             ORDER BY u.use_date ASC, i.category ASC, i.vendor_name ASC, u.id ASC");
         $stUsage->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
-        $stUsage->bindValue(':s', $monthlyStart);
-        $stUsage->bindValue(':e', $monthlyEnd);
+        if ($materialMetaInstalled) {
+            $stUsage->bindValue(':settlement_ym', $ym);
+        } else {
+            $stUsage->bindValue(':s', $monthlyStart);
+            $stUsage->bindValue(':e', $monthlyEnd);
+        }
         $stUsage->execute();
         $usageRows = $stUsage->fetchAll(PDO::FETCH_ASSOC);
 
@@ -435,6 +447,10 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
         <?php if ($canViewMaterialInput): ?>
             <a href="<?php echo h($baseUrl . '&materials_tab=input&ym=' . urlencode($ym)); ?>"
                class="px-4 py-2 rounded-xl border font-bold text-sm <?php echo ($materialsTab === 'input') ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">자재구입비입력</a>
+        <?php endif; ?>
+        <?php if ($canEditMaterials && !empty($materialSelectedMonthLock['locked'])): ?>
+            <a href="<?php echo h(base_url()); ?>/?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=material&request_type=ADD&return_url=<?php echo rawurlencode($baseUrl . '&materials_tab=input&ym=' . $ym); ?>"
+               class="px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 font-bold text-sm">마감월 추가 승인 요청</a>
         <?php endif; ?>
     </div>
 
@@ -797,12 +813,23 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                             $safetySourceRow = ($isSafetyInputRow && isset($ur['_safety_row']) && is_array($ur['_safety_row'])) ? $ur['_safety_row'] : array();
                             $listFiles = ($usageIdForList > 0 && isset($statementFilesByUsage[$usageIdForList])) ? $statementFilesByUsage[$usageIdForList] : array();
                             $usageIsNegative = (isset($ur['amount']) && (float)$ur['amount'] < 0);
+                            $costTargetType = $isSafetyInputRow ? 'safety' : 'material';
+                            $costTargetId = $isSafetyInputRow ? $safetyIdForList : (string)$usageIdForList;
+                            $costUseDate = isset($ur['use_date']) ? (string)$ur['use_date'] : '';
+                            $costSettlementYm = CostChangeService::effectiveSettlementYm($pdo, $costTargetType, $costTargetId, $costTargetType, $costUseDate);
+                            $costLock = CostChangeService::lockInfo($costTargetType, $costUseDate, $costSettlementYm, date('Y-m-d'));
+                            $costActiveRequest = $costTargetId !== '' ? CostChangeService::activeRequest($pdo, $costTargetType, $costTargetId) : null;
+                            $costHistoryCount = $costTargetId !== '' ? CostChangeService::historyCount($pdo, $costTargetType, $costTargetId) : 0;
+                            $costLatestRequest = $costHistoryCount > 0 ? CostChangeService::latestRequest($pdo, $costTargetType, $costTargetId) : null;
+                            $costReturnUrl = $baseUrl . '&materials_tab=input&ym=' . $ym;
                             ?>
-                            <tr class="<?php echo $usageIsNegative ? 'bg-yellow-50' : ''; ?>">
+                            <tr class="<?php echo !empty($costLock['locked']) ? 'bg-gray-50' : ($usageIsNegative ? 'bg-yellow-50' : ''); ?>">
                                 <?php if ($canEditMaterials): ?>
                                     <td class="p-2 border text-center">
-                                        <?php if ($usageIdForList > 0): ?>
+                                        <?php if ($usageIdForList > 0 && empty($costLock['locked'])): ?>
                                             <input type="checkbox" name="usage_ids[]" value="<?php echo (int)$usageIdForList; ?>" class="material-usage-delete-check">
+                                        <?php elseif (!empty($costLock['locked'])): ?>
+                                            <span class="text-[11px] font-bold text-gray-500">잠금</span>
                                         <?php else: ?>
                                             <span class="text-[11px] font-bold text-emerald-700">안전</span>
                                         <?php endif; ?>
@@ -826,7 +853,16 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                 </td>
                                 <?php if ($canEditMaterials): ?>
                                     <td class="p-2 border text-center">
-                                        <?php if ($isSafetyInputRow && $safetyIdForList !== ''): ?>
+                                        <?php if (is_array($costActiveRequest)): ?>
+                                            <div class="text-xs font-extrabold text-amber-700"><?php echo h(CostChangeService::statusLabel($costActiveRequest['status'])); ?></div>
+                                            <a href="?r=cost_change/detail&id=<?php echo (int)$costActiveRequest['id']; ?>" class="text-xs text-blue-700 underline">요청 상세</a>
+                                        <?php elseif (!empty($costLock['locked']) && $costTargetId !== ''): ?>
+                                            <div class="flex flex-wrap justify-center gap-1">
+                                                <?php foreach (array('MODIFY'=>'수정 승인 요청','MONTH_MOVE'=>'귀속월 변경 요청','DELETE'=>'삭제 승인 요청') as $requestCode=>$requestLabel): ?>
+                                                    <a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=<?php echo h($costTargetType); ?>&target_id=<?php echo rawurlencode($costTargetId); ?>&request_type=<?php echo h($requestCode); ?>&return_url=<?php echo rawurlencode($costReturnUrl); ?>" class="px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-bold"><?php echo h($requestLabel); ?></a>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        <?php elseif ($isSafetyInputRow && $safetyIdForList !== ''): ?>
                                             <a href="<?php echo h(base_url() . '/?r=safety_home&pid=' . (int)$pid . '&tab=safety_cost&safety_cost_edit=' . rawurlencode($safetyIdForList) . '#safety-cost-section'); ?>"
                                                class="inline-flex px-3 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-bold">
                                                 안전관리비 수정
@@ -843,6 +879,9 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                                     data-title="<?php echo h((isset($ur['vendor_name']) ? $ur['vendor_name'] : '') . ' / ' . material_category_label(isset($ur['category']) ? $ur['category'] : '')); ?>">
                                                 수정
                                             </button>
+                                        <?php endif; ?>
+                                        <?php if ($costHistoryCount > 0): ?>
+                                            <a href="?r=cost_change/history&target_type=<?php echo h($costTargetType); ?>&target_id=<?php echo rawurlencode($costTargetId); ?>&project_id=<?php echo (int)$pid; ?>" class="mt-1 inline-flex text-[11px] font-bold text-blue-700 underline"><?php echo h(CostChangeService::historyBadgeLabel($costLatestRequest, $costHistoryCount)); ?></a>
                                         <?php endif; ?>
                                     </td>
                                 <?php endif; ?>

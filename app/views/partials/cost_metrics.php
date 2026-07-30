@@ -4,6 +4,8 @@
  * PHP 5.6 호환
  */
 
+require_once __DIR__ . '/../../services/CostChangeService.php';
+
 if (!function_exists('cpms_period_range')) {
     function cpms_period_range($period) {
         $today = date('Y-m-d');
@@ -46,11 +48,44 @@ if (!function_exists('cpms_project_cost_metrics')) {
             $ret['planned_safety'] = (float)$pr['planned_safety'];
         }
 
-        $sqlA = "SELECT cost_type, COALESCE(SUM(amount),0) amt FROM cpms_daily_cost_entries WHERE project_id=:pid AND cost_date BETWEEN :sd AND :ed GROUP BY cost_type";
-        $st = $pdo->prepare($sqlA);
-        $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT); $st->bindValue(':sd', $startDate); $st->bindValue(':ed', $endDate); $st->execute();
+        if ($period === 'month') {
+            /*
+             * 월간 지표는 실제 날짜의 월 숫자가 아니라 공통 귀속월(노무 달력월,
+             * 그 외 26일~25일)과 승인으로 수동 이동된 귀속월을 사용한다.
+             */
+            $st = $pdo->prepare("SELECT id,cost_date,cost_type,amount FROM cpms_daily_cost_entries WHERE project_id=:pid");
+            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+            $st->execute();
+            $actualRows = array();
+            $wantedYm = substr($startDate, 0, 7);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $actualRow) {
+                $targetId = isset($actualRow['id']) ? (string)$actualRow['id'] : '';
+                if (\App\Services\CostChangeService::isTargetDeleted($pdo, 'daily_cost', $targetId)) continue;
+                $typeForMonth = isset($actualRow['cost_type']) && (string)$actualRow['cost_type'] === '노무' ? 'labor' : 'daily_cost';
+                $rowYm = \App\Services\CostChangeService::effectiveSettlementYm(
+                    $pdo,
+                    'daily_cost',
+                    $targetId,
+                    $typeForMonth,
+                    isset($actualRow['cost_date']) ? (string)$actualRow['cost_date'] : ''
+                );
+                if ($rowYm !== $wantedYm) continue;
+                $typeKey = isset($actualRow['cost_type']) ? (string)$actualRow['cost_type'] : '';
+                if (!isset($actualRows[$typeKey])) $actualRows[$typeKey] = array('cost_type'=>$typeKey, 'amt'=>0.0);
+                $actualRows[$typeKey]['amt'] += isset($actualRow['amount']) ? (float)$actualRow['amount'] : 0.0;
+            }
+            $actualRows = array_values($actualRows);
+        } else {
+            $sqlA = "SELECT cost_type, COALESCE(SUM(amount),0) amt FROM cpms_daily_cost_entries WHERE project_id=:pid AND cost_date BETWEEN :sd AND :ed GROUP BY cost_type";
+            $st = $pdo->prepare($sqlA);
+            $st->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
+            $st->bindValue(':sd', $startDate);
+            $st->bindValue(':ed', $endDate);
+            $st->execute();
+            $actualRows = $st->fetchAll(PDO::FETCH_ASSOC);
+        }
         $actualTotal = 0;
-        foreach ($st->fetchAll() as $r) {
+        foreach ($actualRows as $r) {
             $t = trim((string)$r['cost_type']); $amt = (float)$r['amt'];
             $actualTotal += $amt;
             if ($t === '노무') $ret['actual_labor'] = $amt;
