@@ -873,6 +873,12 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                                     data-material-usage-edit
                                                     data-usage-id="<?php echo (int)$usageIdForList; ?>"
                                                     data-use-date="<?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?>"
+                                                    data-category="<?php echo h(material_category_label(isset($ur['category']) ? $ur['category'] : '')); ?>"
+                                                    data-advance-yn="<?php echo h(cpms_material_advance_yn(isset($ur['advance_yn']) ? $ur['advance_yn'] : 'N')); ?>"
+                                                    data-vendor-name="<?php echo h(isset($ur['vendor_name']) ? $ur['vendor_name'] : ''); ?>"
+                                                    data-representative="<?php echo h(isset($ur['representative']) ? $ur['representative'] : ''); ?>"
+                                                    data-phone="<?php echo h(isset($ur['phone']) ? $ur['phone'] : ''); ?>"
+                                                    data-biz-no="<?php echo h(isset($ur['biz_no']) ? $ur['biz_no'] : ''); ?>"
                                                     data-amount="<?php echo h(number_format(isset($ur['amount']) ? (float)$ur['amount'] : 0, 2, '.', '')); ?>"
                                                     data-memo="<?php echo h(isset($ur['memo']) ? $ur['memo'] : ''); ?>"
                                                     data-remark="<?php echo h(isset($ur['remark']) ? $ur['remark'] : ''); ?>"
@@ -897,8 +903,9 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
         </div>
 
         <?php if ($canEditMaterials): ?>
+        <!-- 자재구입비 한 건 전체정보 수정 화면 -->
         <div id="materialUsageEditModal" class="hidden fixed inset-0 z-50 bg-black/40 items-center justify-center p-4">
-            <div class="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-md p-5">
+            <div class="bg-white rounded-2xl shadow-xl border border-gray-200 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-5">
                 <div class="flex items-center justify-between gap-3">
                     <div>
                         <div class="text-lg font-extrabold text-gray-900">자재구입비 사용내역 수정</div>
@@ -906,26 +913,69 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     </div>
                     <button type="button" class="px-3 py-1 rounded-lg border border-gray-300 text-sm" data-material-usage-edit-close>닫기</button>
                 </div>
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_edit_save" class="mt-4 space-y-3" enctype="multipart/form-data">
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/material_usage_edit_save" class="mt-4 space-y-4" enctype="multipart/form-data">
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="usage_id" id="materialUsageEditId" value="">
                     <input type="hidden" name="materials_tab" value="input">
                     <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+
+                    <div class="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                        이 수정은 선택한 자재구입비 한 건에만 적용됩니다.
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label class="block">
+                            <span class="text-xs text-gray-500 font-bold">사용일자</span>
+                            <input type="date" name="use_date" id="materialUsageEditDate" min="<?php echo h($monthlyStart); ?>" max="<?php echo h($monthlyEnd); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                        </label>
+                        <label class="block">
+                            <span class="text-xs text-gray-500 font-bold">구분</span>
+                            <select name="category" id="materialUsageEditCategory" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                                <option value="자재비">자재비</option>
+                                <option value="구매품">구매품</option>
+                                <option value="기타경비">기타경비</option>
+                            </select>
+                        </label>
+                        <label class="block">
+                            <span class="text-xs text-gray-500 font-bold">선급여부</span>
+                            <select name="advance_yn" id="materialUsageEditAdvanceYn" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
+                                <option value="N">선급 N</option>
+                                <option value="Y">선급 Y</option>
+                            </select>
+                        </label>
+                        <label class="block">
+                            <span class="text-xs text-gray-500 font-bold">업체명</span>
+                            <input type="text" name="vendor_name" id="materialUsageEditVendorName" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" lang="ko" inputmode="text" autocomplete="off" required>
+                        </label>
+                        <label class="block">
+                            <span class="text-xs text-gray-500 font-bold">대표자명</span>
+                            <input type="text" name="representative" id="materialUsageEditRepresentative" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" lang="ko" inputmode="text" autocomplete="off">
+                        </label>
+                        <label class="block">
+                            <span class="text-xs text-gray-500 font-bold">연락처</span>
+                            <input type="text" name="phone" id="materialUsageEditPhone" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" inputmode="tel" autocomplete="off">
+                        </label>
+                        <label class="block sm:col-span-2">
+                            <span class="text-xs text-gray-500 font-bold">사업자등록번호</span>
+                            <input type="text" name="biz_no" id="materialUsageEditBizNo" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" inputmode="text" autocomplete="off">
+                        </label>
+                        <label class="block">
+                            <span class="text-xs text-gray-500 font-bold">금액 구분</span>
+                            <select name="amount_sign" id="materialUsageEditSign" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300">
+                                <option value="plus">+ 일반</option>
+                                <option value="minus">- 공제</option>
+                            </select>
+                        </label>
+                        <label class="block">
+                            <span class="text-xs text-gray-500 font-bold">공급가액</span>
+                            <input type="text" inputmode="decimal" name="amount" id="materialUsageEditAmount" data-material-money class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 text-right" required>
+                        </label>
+                    </div>
+
                     <label class="block">
-                        <span class="text-xs text-gray-500 font-bold">사용일자</span>
-                        <input type="date" name="use_date" id="materialUsageEditDate" min="<?php echo h($monthlyStart); ?>" max="<?php echo h($monthlyEnd); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" required>
-                    </label>
-                    <label class="block">
-                        <span class="text-xs text-gray-500 font-bold">금액 구분</span>
-                        <select name="amount_sign" id="materialUsageEditSign" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300">
-                            <option value="plus">+ 일반</option>
-                            <option value="minus">- 공제</option>
-                        </select>
-                    </label>
-                    <label class="block">
-                        <span class="text-xs text-gray-500 font-bold">금액</span>
-                        <input type="text" inputmode="decimal" name="amount" id="materialUsageEditAmount" data-material-money class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 text-right" required>
+                        <span class="text-xs text-gray-500 font-bold">내역</span>
+                        <textarea name="memo" id="materialUsageEditMemo" rows="3" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" lang="ko" inputmode="text" autocomplete="off"></textarea>
                     </label>
                     <label class="block">
                         <span class="text-xs text-gray-500 font-bold">비고</span>
@@ -943,7 +993,6 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             </div>
         </div>
         <?php endif; ?>
-
 
         <script>
         (function(){
@@ -1034,8 +1083,15 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             var materialUsageEditModal = document.getElementById('materialUsageEditModal');
             var materialUsageEditId = document.getElementById('materialUsageEditId');
             var materialUsageEditDate = document.getElementById('materialUsageEditDate');
+            var materialUsageEditCategory = document.getElementById('materialUsageEditCategory');
+            var materialUsageEditAdvanceYn = document.getElementById('materialUsageEditAdvanceYn');
+            var materialUsageEditVendorName = document.getElementById('materialUsageEditVendorName');
+            var materialUsageEditRepresentative = document.getElementById('materialUsageEditRepresentative');
+            var materialUsageEditPhone = document.getElementById('materialUsageEditPhone');
+            var materialUsageEditBizNo = document.getElementById('materialUsageEditBizNo');
             var materialUsageEditAmount = document.getElementById('materialUsageEditAmount');
             var materialUsageEditSign = document.getElementById('materialUsageEditSign');
+            var materialUsageEditMemo = document.getElementById('materialUsageEditMemo');
             var materialUsageEditRemark = document.getElementById('materialUsageEditRemark');
             var materialUsageEditMeta = document.getElementById('materialUsageEditMeta');
             function showMaterialUsageEditModal(){
@@ -1053,12 +1109,19 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                 if (editBtn) {
                     if (materialUsageEditId) materialUsageEditId.value = editBtn.getAttribute('data-usage-id') || '';
                     if (materialUsageEditDate) materialUsageEditDate.value = editBtn.getAttribute('data-use-date') || '';
+                    if (materialUsageEditCategory) materialUsageEditCategory.value = editBtn.getAttribute('data-category') || '자재비';
+                    if (materialUsageEditAdvanceYn) materialUsageEditAdvanceYn.value = editBtn.getAttribute('data-advance-yn') || 'N';
+                    if (materialUsageEditVendorName) materialUsageEditVendorName.value = editBtn.getAttribute('data-vendor-name') || '';
+                    if (materialUsageEditRepresentative) materialUsageEditRepresentative.value = editBtn.getAttribute('data-representative') || '';
+                    if (materialUsageEditPhone) materialUsageEditPhone.value = editBtn.getAttribute('data-phone') || '';
+                    if (materialUsageEditBizNo) materialUsageEditBizNo.value = editBtn.getAttribute('data-biz-no') || '';
                     var materialEditAmountRaw = parseFloat(editBtn.getAttribute('data-amount') || '0');
                     if (materialUsageEditSign) materialUsageEditSign.value = materialEditAmountRaw < 0 ? 'minus' : 'plus';
                     if (materialUsageEditAmount) {
                         materialUsageEditAmount.value = Math.abs(materialEditAmountRaw).toFixed(2);
                         formatMaterialMoneyInput(materialUsageEditAmount);
                     }
+                    if (materialUsageEditMemo) materialUsageEditMemo.value = editBtn.getAttribute('data-memo') || '';
                     if (materialUsageEditRemark) materialUsageEditRemark.value = editBtn.getAttribute('data-remark') || '';
                     if (materialUsageEditMeta) materialUsageEditMeta.textContent = editBtn.getAttribute('data-title') || '';
                     showMaterialUsageEditModal();
