@@ -1,19 +1,47 @@
 <?php
 /**
  * 관리 > 비용 변경 관리.
- * 초기설정/기존자료 점검과 전체 변경이력 조회 전용 화면.
- * PHP 5.6 호환.
+ * - 초기설정/기존자료 점검과 전체 변경이력 조회 전용 화면
+ * - 비용 변경 공통 오류 표시를 사용해 빈 화면 방지
+ * - PHP 5.6 호환
  */
 
-require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../cost_change/_common.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
 
 $costChangePdo = Db::pdo();
-$costChangeInstalled = CostChangeService::isInstalled($costChangePdo);
-$costChangeApprovers = $costChangeInstalled ? CostChangeService::resolveApprovers($costChangePdo) : array('ok'=>false, 'first'=>null, 'final'=>null, 'message'=>'초기설정 필요');
+
+if (!$costChangePdo) {
+    cpms_cost_change_visible_panel(
+        '데이터베이스에 연결할 수 없습니다.',
+        '비용 변경 관리 화면에서 DB 연결을 확인하지 못했습니다. MySQL 실행 상태와 DB 설정을 확인해주세요.',
+        '?r=관리',
+        '관리 화면으로 돌아가기',
+        ''
+    );
+    return;
+}
+
+try {
+    $costChangeInstalled = CostChangeService::isInstalled($costChangePdo);
+    $costChangeApprovers = $costChangeInstalled
+        ? CostChangeService::resolveApprovers($costChangePdo)
+        : array('ok'=>false, 'first'=>null, 'final'=>null, 'message'=>'초기설정 필요');
+} catch (Exception $e) {
+    error_log('[CPMS cost change admin] ' . $e->getMessage());
+    cpms_cost_change_visible_panel(
+        '비용 변경 관리 정보를 불러오지 못했습니다.',
+        '데이터 구조를 확인하는 중 오류가 발생했습니다. 개발부서에서 서버 오류기록을 확인해주세요.',
+        '?r=관리',
+        '관리 화면으로 돌아가기',
+        (Auth::isMaster() || trim((string)Auth::userDepartment()) === '개발') ? $e->getMessage() : ''
+    );
+    return;
+}
+
 $firstCandidates = array();
 $finalCandidates = array();
 if ($costChangePdo) {
@@ -23,6 +51,7 @@ if ($costChangePdo) {
         $st = $costChangePdo->query("SELECT id,name,email,department,position FROM employees WHERE is_active=1 AND position LIKE '%부사장%' ORDER BY id ASC");
         $finalCandidates = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
     } catch (Exception $e) {
+        error_log('[CPMS cost change approver candidates] ' . $e->getMessage());
         $firstCandidates = array();
         $finalCandidates = array();
     }
@@ -38,7 +67,9 @@ $finalSelected = isset($costChangeApprovers['final']['id']) ? (int)$costChangeAp
                 <h2 class="text-xl font-extrabold text-gray-900">비용 변경 관리</h2>
                 <p class="mt-1 text-sm text-gray-500">스키마와 고정 승인자를 웹에서 설정하고 전체 변경이력을 조회합니다. 이 화면에서는 이력을 수정하거나 삭제할 수 없습니다.</p>
             </div>
-            <a href="?r=cost_change/manage" class="inline-flex px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-bold">전체 변경이력 조회</a>
+            <?php if ($costChangeInstalled): ?>
+                <a href="?r=cost_change/manage" class="inline-flex px-4 py-2 rounded-xl bg-gray-900 text-white text-sm font-bold">전체 변경이력 조회</a>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -47,6 +78,11 @@ $finalSelected = isset($costChangeApprovers['final']['id']) ? (int)$costChangeAp
             데이터 구조: <?php echo $costChangeInstalled ? '설치됨' : '초기설정 필요'; ?>
         </div>
         <p class="mt-1 text-sm text-gray-700">기존 비용자료는 변경하지 않습니다. 귀속월은 조회 시 날짜 기준으로 계산하며, 승인으로 수동 이동된 건만 별도 메타 기록을 사용합니다.</p>
+        <?php if (!$costChangeInstalled): ?>
+            <div class="mt-3 rounded-xl border border-amber-300 bg-white p-3 text-sm text-amber-800 font-bold">
+                조회 화면이 비어 보였던 원인은 이 데이터 구조가 만들어지기 전에 조회 화면으로 이동했기 때문입니다. 아래 버튼을 한 번 실행해주세요.
+            </div>
+        <?php endif; ?>
         <form method="post" action="?r=cost_change/setup" class="mt-3">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="action" value="install">
@@ -104,4 +140,3 @@ $finalSelected = isset($costChangeApprovers['final']['id']) ? (int)$costChangeAp
     </div>
     <?php endif; ?>
 </div>
-
