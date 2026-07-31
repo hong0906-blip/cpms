@@ -94,6 +94,26 @@ if (!defined('CPMS_COST_CHANGE_FATAL_HANDLER_REGISTERED')) {
 
 require_once __DIR__ . '/../../services/CostChangeService.php';
 
+/*
+ * 중요: PHP의 use 별칭은 선언된 현재 파일에서만 유효하다.
+ * my.php, setup.php, approvals.php 등 다른 비용 변경 파일은
+ * _common.php를 require해도 Auth / Db / CostChangeService 별칭을 상속받지 못한다.
+ *
+ * 기존 비용 변경 파일 전체를 일일이 수정하지 않고도 PHP 5.6에서
+ * 동일하게 동작하도록 공통 파일에서 짧은 클래스명을 전역 별칭으로 연결한다.
+ */
+if (!class_exists('Auth', false) && class_exists('App\\Core\\Auth')) {
+    class_alias('App\\Core\\Auth', 'Auth');
+}
+
+if (!class_exists('Db', false) && class_exists('App\\Core\\Db')) {
+    class_alias('App\\Core\\Db', 'Db');
+}
+
+if (!class_exists('CostChangeService', false) && class_exists('App\\Services\\CostChangeService')) {
+    class_alias('App\\Services\\CostChangeService', 'CostChangeService');
+}
+
 if (!function_exists('cpms_cost_change_redirect')) {
 function cpms_cost_change_redirect($type, $message, $url)
 {
