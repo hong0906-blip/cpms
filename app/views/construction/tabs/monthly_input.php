@@ -25,6 +25,18 @@ ob_start();
 require __DIR__ . '/../../project/monthly_input.php';
 $cpmsMonthlyInputHtml = ob_get_clean();
 
+require_once __DIR__ . '/../../project/partials/monthly_cost_detail_helper.php';
+$cpmsMonthlyInputDetailMonths = isset($displayMonths) && is_array($displayMonths) ? array_values($displayMonths) : array();
+$cpmsMonthlyInputProjectName = is_array($selectedProject) && isset($selectedProject['name']) ? trim((string)$selectedProject['name']) : '';
+$cpmsMonthlyCostDetailPayload = cpms_monthly_cost_detail_payload_for_project(
+    $pdo,
+    $cpmsMonthlyInputSelectedProjectId,
+    $cpmsMonthlyInputProjectName,
+    $cpmsMonthlyInputDetailMonths
+);
+$cpmsMonthlyInputDetailMonthsJson = json_encode($cpmsMonthlyInputDetailMonths, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+if (!is_string($cpmsMonthlyInputDetailMonthsJson) || $cpmsMonthlyInputDetailMonthsJson === '') $cpmsMonthlyInputDetailMonthsJson = '[]';
+
 $cpmsSelectedViewMonth = isset($selectedViewMonth) ? trim((string)$selectedViewMonth) : '';
 $cpmsAllMonths = isset($allMonths) && is_array($allMonths) ? $allMonths : array();
 $cpmsCumulativeMonths = array();
@@ -185,3 +197,89 @@ echo $cpmsMonthlyInputHtml;
     }
 })();
 </script>
+
+<script>
+(function () {
+    'use strict';
+
+    var projectId = <?php echo (int)$cpmsMonthlyInputSelectedProjectId; ?>;
+    var displayMonths = <?php echo $cpmsMonthlyInputDetailMonthsJson; ?>;
+    var tableWrap = document.querySelector('.cpms-monthly-table-scroll');
+    var table = tableWrap ? tableWrap.querySelector('table') : null;
+    if (!table || !table.tBodies || !table.tBodies.length || projectId <= 0) return;
+
+    var sectionMap = {
+        '1. 외주비': {type:'outsourcing', category:''},
+        '2. 구매품': {type:'material', category:'구매품'},
+        '3. 자재비': {type:'material', category:'자재비'},
+        '4. 장비비': {type:'equipment', category:''},
+        '5. 노무비': {type:'labor', category:''},
+        '6. 기타경비': {type:'material', category:'기타경비'}
+    };
+
+    function trimText(value) {
+        return String(value || '').replace(/^\s+|\s+$/g, '');
+    }
+
+    function hasAmount(value) {
+        value = trimText(value);
+        if (value === '' || value === '-' || value === '0') return false;
+        return /[0-9]/.test(value);
+    }
+
+    function makeButton(cell, config, ym, company, rowLabel) {
+        if (!cell || !hasAmount(cell.textContent)) return;
+        var originalText = trimText(cell.textContent);
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'cpms-monthly-input-detail-trigger';
+        button.textContent = originalText;
+        button.setAttribute('data-project-id', String(projectId));
+        button.setAttribute('data-ym', String(ym || ''));
+        button.setAttribute('data-detail-type', config.type);
+        button.setAttribute('data-company', company || '');
+        button.setAttribute('data-category', config.category || '');
+        button.setAttribute('data-row-label', rowLabel || '');
+        button.setAttribute('aria-label', (rowLabel || config.type) + ' 상세 보기');
+        cell.textContent = '';
+        cell.appendChild(button);
+    }
+
+    var rows = table.tBodies[0].rows;
+    var currentSectionTitle = '';
+    var currentConfig = null;
+
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        if (!row.cells || row.cells.length < 4) continue;
+        var firstText = trimText(row.cells[0].textContent);
+        var secondText = row.cells.length > 1 ? trimText(row.cells[1].textContent) : '';
+        var thirdText = row.cells.length > 2 ? trimText(row.cells[2].textContent) : '';
+
+        if (Object.prototype.hasOwnProperty.call(sectionMap, firstText)) {
+            currentSectionTitle = firstText;
+            currentConfig = sectionMap[firstText];
+            continue;
+        }
+
+        if (currentSectionTitle && firstText === currentSectionTitle + ' 소계') {
+            currentSectionTitle = '';
+            currentConfig = null;
+            continue;
+        }
+
+        if (!currentConfig || firstText !== '' || secondText === '데이터 없음') continue;
+
+        for (var monthIndex = 0; monthIndex < displayMonths.length; monthIndex++) {
+            var cellIndex = 3 + monthIndex;
+            if (cellIndex >= row.cells.length - 1) break;
+            makeButton(row.cells[cellIndex], currentConfig, displayMonths[monthIndex], secondText, thirdText);
+        }
+    }
+})();
+</script>
+<?php
+$cpmsMonthlyCostDetailTriggerSelector = '.cpms-monthly-input-detail-trigger';
+$cpmsMonthlyCostDetailDesktopOnly = true;
+require __DIR__ . '/../../project/partials/monthly_cost_detail_modal.php';
+?>

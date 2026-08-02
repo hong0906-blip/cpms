@@ -1,6 +1,9 @@
 <?php
 /**
- * 자재구입비 거래명세표 다운로드
+ * 파일: app/views/construction/material_statement_download.php
+ * 자재구입비 거래명세표 보기/다운로드
+ * - view=1: 브라우저에서 바로보기
+ * - download=1: 다운로드
  * - PHP 5.6 호환
  */
 
@@ -44,15 +47,16 @@ if (!is_array($fileRow)) {
 $projectId = isset($fileRow['project_id']) ? (int)$fileRow['project_id'] : 0;
 if (!cpms_material_statement_user_can_download($pdo, $projectId)) {
     http_response_code(403);
-    echo '거래명세표 다운로드 권한이 없습니다.';
+    echo '거래명세표 확인 권한이 없습니다.';
     exit;
 }
 
+$wantDownload = isset($_GET['download']) && (string)$_GET['download'] === '1';
+$wantView = isset($_GET['view']) && (string)$_GET['view'] === '1';
 $storageType = isset($fileRow['storage_type']) ? trim((string)$fileRow['storage_type']) : '';
 if ($storageType === 'google_drive') {
     $viewLink = isset($fileRow['drive_web_view_link']) ? trim((string)$fileRow['drive_web_view_link']) : '';
     $downloadLink = isset($fileRow['drive_web_content_link']) ? trim((string)$fileRow['drive_web_content_link']) : '';
-    $wantDownload = isset($_GET['download']) && (string)$_GET['download'] === '1';
     $target = ($wantDownload && $downloadLink !== '') ? $downloadLink : $viewLink;
     if ($target === '' && $downloadLink !== '') $target = $downloadLink;
     if ($target !== '') {
@@ -83,9 +87,7 @@ if ($originalName === '') $originalName = 'material_statement_' . $fileId;
 $contentType = cpms_material_statement_content_type($originalName, isset($fileRow['mime_type']) ? $fileRow['mime_type'] : '');
 $fileSize = filesize($path);
 
-while (ob_get_level() > 0) {
-    @ob_end_clean();
-}
+while (ob_get_level() > 0) @ob_end_clean();
 
 header('Content-Type: ' . $contentType);
 header('Content-Length: ' . $fileSize);
@@ -95,7 +97,8 @@ header('Pragma: no-cache');
 header('X-Content-Type-Options: nosniff');
 
 $encodedName = rawurlencode($originalName);
-header("Content-Disposition: attachment; filename=\"" . $encodedName . "\"; filename*=UTF-8''" . $encodedName);
+$disposition = ($wantView && !$wantDownload) ? 'inline' : 'attachment';
+header("Content-Disposition: " . $disposition . "; filename=\"" . $encodedName . "\"; filename*=UTF-8''" . $encodedName);
 
 @readfile($path);
 exit;

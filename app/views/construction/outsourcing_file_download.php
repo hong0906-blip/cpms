@@ -1,8 +1,12 @@
 <?php
 /**
- * 공사 > 외주비 첨부파일 다운로드
+ * 파일: app/views/construction/outsourcing_file_download.php
+ * 공사 > 외주비 첨부파일 보기/다운로드
+ * - view=1: 브라우저에서 바로보기
+ * - download=1: 다운로드
  * - PHP 5.6 호환
  */
+
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/tabs/partials/outsourcing_file_helper.php';
 
@@ -44,7 +48,7 @@ if (!$canDownload && function_exists('cpms_is_project_member_or_executive')) {
 }
 if (!$canDownload) {
     http_response_code(403);
-    echo '다운로드 권한이 없습니다.';
+    echo '파일 확인 권한이 없습니다.';
     exit;
 }
 
@@ -58,6 +62,8 @@ $originalName = basename(str_replace('\\', '/', isset($row['original_name']) ? (
 $originalName = str_replace(array("\r", "\n", '"'), '', $originalName);
 if ($originalName === '') $originalName = 'outsourcing_file_' . $fileId;
 $mime = isset($row['mime_type']) && trim((string)$row['mime_type']) !== '' ? trim((string)$row['mime_type']) : 'application/octet-stream';
+$wantDownload = isset($_GET['download']) && (string)$_GET['download'] === '1';
+$wantView = isset($_GET['view']) && (string)$_GET['view'] === '1';
 
 while (ob_get_level() > 0) @ob_end_clean();
 header('Content-Type: ' . $mime);
@@ -67,6 +73,7 @@ header('Cache-Control: private, max-age=0, no-cache, no-store, must-revalidate')
 header('Pragma: no-cache');
 header('X-Content-Type-Options: nosniff');
 $encodedName = rawurlencode($originalName);
-header("Content-Disposition: attachment; filename=\"" . $encodedName . "\"; filename*=UTF-8''" . $encodedName);
+$disposition = ($wantView && !$wantDownload) ? 'inline' : 'attachment';
+header("Content-Disposition: " . $disposition . "; filename=\"" . $encodedName . "\"; filename*=UTF-8''" . $encodedName);
 @readfile($path);
 exit;
