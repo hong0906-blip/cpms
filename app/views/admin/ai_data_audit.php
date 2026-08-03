@@ -66,6 +66,7 @@ $monthlyForecast = isset($aiAudit['monthly_forecast']) && is_array($aiAudit['mon
 $inputReliability = isset($aiAudit['input_reliability']) && is_array($aiAudit['input_reliability']) ? $aiAudit['input_reliability'] : array();
 $anomalyDetection = isset($aiAudit['anomaly_detection']) && is_array($aiAudit['anomaly_detection']) ? $aiAudit['anomaly_detection'] : array();
 $profitRisk = isset($aiAudit['profit_risk']) && is_array($aiAudit['profit_risk']) ? $aiAudit['profit_risk'] : array();
+$openAiExecutiveBrief = isset($aiAudit['openai_executive_brief']) && is_array($aiAudit['openai_executive_brief']) ? $aiAudit['openai_executive_brief'] : array();
 ?>
 
 <style>
@@ -272,6 +273,21 @@ $profitRisk = isset($aiAudit['profit_risk']) && is_array($aiAudit['profit_risk']
       <div class="ai-audit-snapshot-item"><span>주의 / 적자 위험</span><strong><?php echo h(number_format(isset($profitRisk['warning_count']) ? (int)$profitRisk['warning_count'] : 0)); ?> / <?php echo h(number_format(isset($profitRisk['critical_count']) ? (int)$profitRisk['critical_count'] : 0)); ?>개</strong></div>
       <div class="ai-audit-snapshot-item"><span>판단자료 부족</span><strong><?php echo h(number_format(isset($profitRisk['insufficient_count']) ? (int)$profitRisk['insufficient_count'] : 0)); ?>개</strong></div>
       <div class="ai-audit-snapshot-item"><span>최근 실행 상태 / 실패</span><strong><?php echo h(isset($profitRisk['latest_run_status']) && $profitRisk['latest_run_status'] !== '' ? $profitRisk['latest_run_status'] : '-'); ?> / <?php echo h(number_format(isset($profitRisk['latest_run_failure_count']) ? (int)$profitRisk['latest_run_failure_count'] : 0)); ?>건</strong></div>
+    </div>
+  </section>
+
+  <section class="ai-audit-snapshot-panel" style="border-color:#c7d2fe;background:linear-gradient(135deg,#fff 0%,#eef2ff 100%);">
+    <div class="ai-audit-snapshot-head"><div><h3>OpenAI 대표용 경영 브리핑</h3><p><?php echo h(isset($openAiExecutiveBrief['message']) && $openAiExecutiveBrief['message'] !== '' ? $openAiExecutiveBrief['message'] : 'OpenAI 경영 브리핑 상태를 확인할 수 없습니다.'); ?> 이 항목은 기존 AI 준비점수에는 반영하지 않습니다.</p></div><a class="ai-audit-snapshot-link" style="background:#4338ca;" href="?r=admin%2Fai_openai_setup">OpenAI 연결 설정</a></div>
+    <div class="ai-audit-snapshot-grid">
+      <div class="ai-audit-snapshot-item"><span>PHP cURL</span><strong><?php echo !empty($openAiExecutiveBrief['curl_available']) ? '사용 가능' : '확인 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>OpenAI API 키</span><strong><?php echo !empty($openAiExecutiveBrief['api_key_configured']) ? '설정됨' : '미설정'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>GPT 실행이력 테이블</span><strong><?php echo !empty($openAiExecutiveBrief['run_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>경영 브리핑 테이블</span><strong><?php echo !empty($openAiExecutiveBrief['brief_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>완료 / 실패 / 캐시</span><strong><?php echo h(number_format(isset($openAiExecutiveBrief['completed_count'])?(int)$openAiExecutiveBrief['completed_count']:0)); ?> / <?php echo h(number_format(isset($openAiExecutiveBrief['failed_count'])?(int)$openAiExecutiveBrief['failed_count']:0)); ?> / <?php echo h(number_format(isset($openAiExecutiveBrief['cached_count'])?(int)$openAiExecutiveBrief['cached_count']:0)); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 GPT 실행</span><strong><?php echo h(isset($openAiExecutiveBrief['latest_run_date'])&&$openAiExecutiveBrief['latest_run_date']!==''?$openAiExecutiveBrief['latest_run_date']:'-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 상태 / 모델</span><strong><?php echo h(isset($openAiExecutiveBrief['latest_run_status'])&&$openAiExecutiveBrief['latest_run_status']!==''?$openAiExecutiveBrief['latest_run_status']:'-'); ?> / <?php echo h(isset($openAiExecutiveBrief['latest_model'])&&$openAiExecutiveBrief['latest_model']!==''?$openAiExecutiveBrief['latest_model']:'-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최신 브리핑 생성일</span><strong><?php echo h(isset($openAiExecutiveBrief['latest_brief_date'])&&$openAiExecutiveBrief['latest_brief_date']!==''?$openAiExecutiveBrief['latest_brief_date']:'-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최신 브리핑 대상 월</span><strong><?php echo h(isset($openAiExecutiveBrief['latest_brief_target_ym'])&&$openAiExecutiveBrief['latest_brief_target_ym']!==''?$openAiExecutiveBrief['latest_brief_target_ym']:'-'); ?></strong></div>
     </div>
   </section>
 

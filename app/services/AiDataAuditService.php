@@ -13,6 +13,8 @@ use App\Core\Db;
 use PDO;
 use Exception;
 
+require_once __DIR__ . '/OpenAiResponsesClient.php';
+
 class AiDataAuditService
 {
     private $pdo;
@@ -473,6 +475,7 @@ class AiDataAuditService
         $reliabilityStatus = $this->auditInputReliability();
         $anomalyStatus = $this->auditAnomalyDetection();
         $profitRiskStatus = $this->auditProfitRisk();
+        $openAiStatus = $this->auditOpenAiExecutiveBrief();
         $overall = $this->calculateOverallScore($sections);
         $globalWarnings = array();
         $globalRecommendations = array();
@@ -512,6 +515,12 @@ class AiDataAuditService
         if (isset($profitRiskStatus['recommendation']) && $profitRiskStatus['recommendation'] !== '') {
             $globalRecommendations[] = $profitRiskStatus['recommendation'];
         }
+        if (isset($openAiStatus['warning']) && $openAiStatus['warning'] !== '') {
+            $globalWarnings[] = $openAiStatus['warning'];
+        }
+        if (isset($openAiStatus['recommendation']) && $openAiStatus['recommendation'] !== '') {
+            $globalRecommendations[] = $openAiStatus['recommendation'];
+        }
         foreach ($sections as $section) {
             if (!empty($section['warnings'])) $globalWarnings[] = $section['label'] . ': ' . $section['warnings'][0];
             if (!empty($section['recommendations'])) $globalRecommendations[] = $section['label'] . ': ' . $section['recommendations'][0];
@@ -542,10 +551,11 @@ class AiDataAuditService
             'input_reliability' => $reliabilityStatus,
             'anomaly_detection' => $anomalyStatus,
             'profit_risk' => $profitRiskStatus,
+            'openai_executive_brief' => $openAiStatus,
             'global_warnings' => $globalWarnings,
             'global_recommendations' => $globalRecommendations,
             'read_only' => true,
-            'gpt_connected' => false,
+            'gpt_connected' => !empty($openAiStatus['api_key_configured']) && !empty($openAiStatus['curl_available']),
         );
     }
 
@@ -905,6 +915,74 @@ class AiDataAuditService
             $result['warning'] = '최근 적자·원가율 위험분석 실행에서 일부 현장 분석 실패가 확인됐습니다.';
             $result['recommendation'] = '적자·원가율 위험 설정에서 최근 실행 상태를 확인해주세요.';
         }
+        return $result;
+    }
+
+    public function auditOpenAiExecutiveBrief()
+    {
+        $config = OpenAiResponsesClient::maskedConfigurationStatus();
+        $result = array(
+            'curl_available'=>!empty($config['curl_available']),
+            'api_key_configured'=>!empty($config['available']),
+            'api_key_source'=>isset($config['source'])?(string)$config['source']:'NONE',
+            'run_table_installed'=>false,'brief_table_installed'=>false,'installed'=>false,
+            'completed_count'=>0,'failed_count'=>0,'cached_count'=>0,
+            'latest_run_date'=>'','latest_run_status'=>'','latest_model'=>'',
+            'latest_brief_date'=>'','latest_brief_target_ym'=>'',
+            'message'=>'','warning'=>'','recommendation'=>''
+        );
+        if (!$this->pdo) {
+            $result['message'] = 'OpenAI 경영 브리핑 DB 상태를 확인할 수 없습니다.';
+            return $result;
+        }
+        $runTable='cpms_ai_gpt_runs';
+        $briefTable='cpms_ai_executive_briefs';
+        $runRequired=array('task_type','run_status','model_name','started_at');
+        $briefRequired=array('analysis_date','target_ym','generated_at');
+        $result['run_table_installed']=$this->tableExists($runTable);
+        $result['brief_table_installed']=$this->tableExists($briefTable);
+        foreach($runRequired as $column) if(!$this->columnExists($runTable,$column)) $result['run_table_installed']=false;
+        foreach($briefRequired as $column) if(!$this->columnExists($briefTable,$column)) $result['brief_table_installed']=false;
+        $result['installed']=$result['run_table_installed']&&$result['brief_table_installed'];
+        if (!$result['api_key_configured']) {
+            $result['warning']='OpenAI API 키가 아직 설정되지 않았습니다.';
+            $result['recommendation']='OpenAI 연결 설정에서 서버 비밀설정 상태를 확인해주세요.';
+        }
+        if (!$result['curl_available']) {
+            $result['warning']='서버의 PHP cURL 기능을 확인해주세요.';
+            $result['recommendation']='OpenAI 연결 설정에서 PHP cURL 사용 가능 여부를 확인해주세요.';
+        }
+        if (!$result['installed']) {
+            $result['message']='OpenAI 경영 브리핑 기능이 아직 설치되지 않았습니다.';
+            if ($result['recommendation']==='') $result['recommendation']='OpenAI 연결 설정에서 경영 브리핑 테이블을 설치해주세요.';
+            return $result;
+        }
+        $aggregate=$this->safeAggregate(
+            "SELECT COALESCE(SUM(CASE WHEN run_status='COMPLETED' THEN 1 ELSE 0 END),0) AS completed_count,COALESCE(SUM(CASE WHEN run_status='FAILED' OR run_status='REFUSED' THEN 1 ELSE 0 END),0) AS failed_count,COALESCE(SUM(CASE WHEN run_status='CACHED' THEN 1 ELSE 0 END),0) AS cached_count FROM `" . $runTable . "` WHERE task_type='EXECUTIVE_BRIEF'",
+            array(),
+            'OpenAI 실행이력 집계 실패'
+        );
+        if($aggregate['ok']) {
+            $row=$aggregate['row'];
+            foreach(array('completed_count','failed_count','cached_count') as $key) $result[$key]=isset($row[$key])?(int)$row[$key]:0;
+        }
+        try {
+            $st=$this->pdo->query("SELECT started_at,run_status,model_name FROM `" . $runTable . "` WHERE task_type='EXECUTIVE_BRIEF' ORDER BY started_at DESC,id DESC LIMIT 1");
+            $row=$st?$st->fetch(PDO::FETCH_ASSOC):false;
+            if(is_array($row)) {
+                $result['latest_run_date']=isset($row['started_at'])?(string)$row['started_at']:'';
+                $result['latest_run_status']=isset($row['run_status'])?(string)$row['run_status']:'';
+                $result['latest_model']=isset($row['model_name'])?(string)$row['model_name']:'';
+            }
+            $st=$this->pdo->query("SELECT generated_at,target_ym FROM `" . $briefTable . "` ORDER BY generated_at DESC,id DESC LIMIT 1");
+            $row=$st?$st->fetch(PDO::FETCH_ASSOC):false;
+            if(is_array($row)) {
+                $result['latest_brief_date']=isset($row['generated_at'])?(string)$row['generated_at']:'';
+                $result['latest_brief_target_ym']=isset($row['target_ym'])?(string)$row['target_ym']:'';
+            }
+        } catch(Exception $e) {
+        }
+        $result['message']=$result['latest_brief_date']===''?'OpenAI 연결 후 최신 위험분석을 이용해 경영 브리핑을 생성할 수 있습니다.':'최신 적자·원가율 위험분석을 이용한 대표용 경영 브리핑을 저장하고 있습니다.';
         return $result;
     }
 

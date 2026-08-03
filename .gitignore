@@ -7,4 +7,5 @@ cpms_private/
 **/cpms-drive-uploader.json
 tools/test_drive_upload.php
 tools/check_drive_ready.php
+app/config/openai.local.php
 

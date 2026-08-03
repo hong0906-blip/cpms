@@ -1,0 +1,9 @@
+<?php
+return array(
+    'api_key' => '',
+    'model' => 'gpt-5-mini',
+    'max_output_tokens' => 1800,
+    'timeout_seconds' => 60,
+    'connect_timeout_seconds' => 10,
+    'schema_version' => 'executive_brief_v1'
+);

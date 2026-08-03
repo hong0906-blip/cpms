@@ -552,6 +552,12 @@ if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_p
 if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_profit_risk_history') {
     $route = 'admin/ai_profit_risk_history';
 }
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_openai_setup') {
+    $route = 'admin/ai_openai_setup';
+}
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_executive_brief') {
+    $route = 'admin/ai_executive_brief';
+}
 
 
 // ==========================
@@ -1956,6 +1962,25 @@ if ($route === 'admin/ai_profit_risk_setup' || $route === 'admin/ai_profit_risk_
     $_GET['tab'] = $route === 'admin/ai_profit_risk_setup' ? 'ai_profit_risk_setup' : 'ai_profit_risk_history';
     \App\Core\View::render('admin/index', array(
         'title' => $route === 'admin/ai_profit_risk_setup' ? '적자·원가율 위험 분석 설정' : '현장별 적자·원가율 위험 분석 결과',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// ==========================
+// OpenAI 연결 설정 및 대표용 경영 브리핑
+// ==========================
+if ($route === 'admin/ai_openai_setup' || $route === 'admin/ai_executive_brief') {
+    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = $route === 'admin/ai_openai_setup' ? 'ai_openai_setup' : 'ai_executive_brief';
+    \App\Core\View::render('admin/index', array(
+        'title' => $route === 'admin/ai_openai_setup' ? 'OpenAI 연결 설정' : '대표용 경영 브리핑',
         'selectedMenu' => '관리',
         'dashboardType' => $dashboardType,
     ));
