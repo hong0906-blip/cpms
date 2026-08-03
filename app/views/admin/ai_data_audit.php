@@ -62,6 +62,7 @@ $minimumMonths = isset($aiAudit['minimum_learning_months']) ? (int)$aiAudit['min
 $globalWarnings = isset($aiAudit['global_warnings']) && is_array($aiAudit['global_warnings']) ? $aiAudit['global_warnings'] : array();
 $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($aiAudit['global_recommendations']) ? $aiAudit['global_recommendations'] : array();
 $dailySnapshot = isset($aiAudit['daily_snapshot']) && is_array($aiAudit['daily_snapshot']) ? $aiAudit['daily_snapshot'] : array();
+$monthlyForecast = isset($aiAudit['monthly_forecast']) && is_array($aiAudit['monthly_forecast']) ? $aiAudit['monthly_forecast'] : array();
 ?>
 
 <style>
@@ -210,6 +211,20 @@ $dailySnapshot = isset($aiAudit['daily_snapshot']) && is_array($aiAudit['daily_s
       <div class="ai-audit-snapshot-item"><span>최근 스냅샷</span><strong><?php echo h(isset($dailySnapshot['latest_snapshot_date']) && $dailySnapshot['latest_snapshot_date'] !== '' ? $dailySnapshot['latest_snapshot_date'] : '-'); ?></strong></div>
       <div class="ai-audit-snapshot-item"><span>최근 실행 상태</span><strong><?php echo h(isset($dailySnapshot['latest_run_status']) && $dailySnapshot['latest_run_status'] !== '' ? $dailySnapshot['latest_run_status'] : '-'); ?></strong></div>
       <div class="ai-audit-snapshot-item"><span>최근 실행 실패</span><strong><?php echo h(number_format(isset($dailySnapshot['latest_run_failure_count']) ? (int)$dailySnapshot['latest_run_failure_count'] : 0)); ?>건</strong></div>
+    </div>
+  </section>
+
+  <section class="ai-audit-snapshot-panel" style="border-color:#bfdbfe;background:linear-gradient(135deg,#fff 0%,#eff6ff 100%);">
+    <div class="ai-audit-snapshot-head"><div><h3>기본 월말 예상 투입비</h3><p><?php echo h(isset($monthlyForecast['message']) && $monthlyForecast['message'] !== '' ? $monthlyForecast['message'] : '기본 월말 예측 상태를 확인할 수 없습니다.'); ?> 이 항목은 초기 운영 중 기존 AI 준비점수를 크게 바꾸지 않도록 점수 계산에는 아직 반영하지 않습니다.</p></div><a class="ai-audit-snapshot-link" style="background:#1d4ed8;" href="?r=admin%2Fai_forecast_setup">기본 월말 예측 설정</a></div>
+    <div class="ai-audit-snapshot-grid">
+      <div class="ai-audit-snapshot-item"><span>실행이력 테이블</span><strong><?php echo !empty($monthlyForecast['run_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>예측 결과 테이블</span><strong><?php echo !empty($monthlyForecast['forecast_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>전체 예측 결과</span><strong><?php echo h(number_format(isset($monthlyForecast['result_count']) ? (int)$monthlyForecast['result_count'] : 0)); ?>건</strong></div>
+      <div class="ai-audit-snapshot-item"><span>예측된 프로젝트</span><strong><?php echo h(number_format(isset($monthlyForecast['project_count']) ? (int)$monthlyForecast['project_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 예측일</span><strong><?php echo h(isset($monthlyForecast['latest_forecast_date']) && $monthlyForecast['latest_forecast_date'] !== '' ? $monthlyForecast['latest_forecast_date'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 실행 상태</span><strong><?php echo h(isset($monthlyForecast['latest_run_status']) && $monthlyForecast['latest_run_status'] !== '' ? $monthlyForecast['latest_run_status'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 자료 부족 현장</span><strong><?php echo h(number_format(isset($monthlyForecast['latest_run_insufficient_count']) ? (int)$monthlyForecast['latest_run_insufficient_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>점수 반영</span><strong>현재 미반영</strong></div>
     </div>
   </section>
 

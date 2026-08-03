@@ -77,6 +77,8 @@ if ($canAiDataAudit) {
     $tabs['ai_data_history'] = array('label' => '통합 비용 이력', 'icon' => 'list-history');
     $tabs['ai_snapshot_setup'] = array('label' => '일일 스냅샷 설정', 'icon' => 'calendar-cog');
     $tabs['ai_snapshot_history'] = array('label' => '일일 스냅샷 이력', 'icon' => 'calendar-range');
+    $tabs['ai_forecast_setup'] = array('label' => '기본 월말 예측 설정', 'icon' => 'chart-no-axes-combined');
+    $tabs['ai_forecast_history'] = array('label' => '기본 월말 예측 결과', 'icon' => 'chart-spline');
 }
 
 if (!isset($tabs[$tab])) {
@@ -114,6 +116,12 @@ if (!function_exists('admin_tab_url')) {
       if ($k === 'ai_snapshot_history') {
           $tabHref = '?r=admin%2Fai_snapshot_history';
       }
+      if ($k === 'ai_forecast_setup') {
+          $tabHref = '?r=admin%2Fai_forecast_setup';
+      }
+      if ($k === 'ai_forecast_history') {
+          $tabHref = '?r=admin%2Fai_forecast_history';
+      }
       if ($k === 'company_overhead' && !$canViewCompanyOverhead && $canViewCompanyPayroll) {
           $tabHref .= '&oh=payroll';
       }
@@ -149,6 +157,10 @@ if ($tab === 'employees') {
     require __DIR__ . '/ai_snapshot_setup.php';
 } elseif ($tab === 'ai_snapshot_history' && $canAiDataAudit) {
     require __DIR__ . '/ai_snapshot_history.php';
+} elseif ($tab === 'ai_forecast_setup' && $canAiDataAudit) {
+    require __DIR__ . '/ai_forecast_setup.php';
+} elseif ($tab === 'ai_forecast_history' && $canAiDataAudit) {
+    require __DIR__ . '/ai_forecast_history.php';
 } elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
         $_GET['oh'] = 'payroll';

@@ -169,7 +169,7 @@ $pageBase = '?' . http_build_query($pageParams, '', '&');
 <div class="snapshot-history">
   <section class="sh-hero">
     <div><h2>현장별 일일 스냅샷 이력</h2><p>일일 스냅샷은 해당 날짜 기준 현장별 누적 금액을 기록합니다. 통합 비용 이력은 누가 언제 무엇을 입력·수정·삭제했는지 기록하며 두 자료의 역할이 다릅니다.</p></div>
-    <div class="sh-links"><a class="sh-link" href="?r=admin%2Fai_snapshot_setup">일일 스냅샷 설정</a><a class="sh-link secondary" href="?r=admin%2Fai_data_history">통합 비용 입력·변경이력</a></div>
+    <div class="sh-links"><a class="sh-link" href="?r=admin%2Fai_snapshot_setup">일일 스냅샷 설정</a><a class="sh-link secondary" href="?r=admin%2Fai_forecast_history">기본 월말 예측 결과</a><a class="sh-link secondary" href="?r=admin%2Fai_data_history">통합 비용 입력·변경이력</a></div>
   </section>
 
   <?php if (!$snapshotHistoryInstalled): ?><div class="sh-warning"><strong>일일 스냅샷 테이블이 아직 설치되지 않았습니다.</strong><br><a href="?r=admin%2Fai_snapshot_setup">일일 스냅샷 설정</a>에서 전용 테이블을 설치한 뒤 오늘 자료부터 저장할 수 있습니다.</div><?php endif; ?>

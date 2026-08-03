@@ -526,6 +526,12 @@ if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_s
 if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_snapshot_history') {
     $route = 'admin/ai_snapshot_history';
 }
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_forecast_setup') {
+    $route = 'admin/ai_forecast_setup';
+}
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_forecast_history') {
+    $route = 'admin/ai_forecast_history';
+}
 
 
 // ==========================
@@ -1854,6 +1860,25 @@ if ($route === 'admin/ai_snapshot_setup' || $route === 'admin/ai_snapshot_histor
     $_GET['tab'] = $route === 'admin/ai_snapshot_setup' ? 'ai_snapshot_setup' : 'ai_snapshot_history';
     \App\Core\View::render('admin/index', array(
         'title' => $route === 'admin/ai_snapshot_setup' ? '일일 스냅샷 설정' : '현장별 일일 스냅샷 이력',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// ==========================
+// 기본 월말 예상 투입비 설치/조회
+// ==========================
+if ($route === 'admin/ai_forecast_setup' || $route === 'admin/ai_forecast_history') {
+    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = $route === 'admin/ai_forecast_setup' ? 'ai_forecast_setup' : 'ai_forecast_history';
+    \App\Core\View::render('admin/index', array(
+        'title' => $route === 'admin/ai_forecast_setup' ? '기본 월말 예측 설정' : '기본 월말 예상 투입비',
         'selectedMenu' => '관리',
         'dashboardType' => $dashboardType,
     ));

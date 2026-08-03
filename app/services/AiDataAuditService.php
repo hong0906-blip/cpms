@@ -463,6 +463,7 @@ class AiDataAuditService
         }
 
         $snapshotStatus = $this->auditDailySnapshots();
+        $forecastStatus = $this->auditMonthlyForecasts();
         $overall = $this->calculateOverallScore($sections);
         $globalWarnings = array();
         $globalRecommendations = array();
@@ -477,6 +478,12 @@ class AiDataAuditService
         }
         if (isset($snapshotStatus['recommendation']) && $snapshotStatus['recommendation'] !== '') {
             $globalRecommendations[] = $snapshotStatus['recommendation'];
+        }
+        if (isset($forecastStatus['warning']) && $forecastStatus['warning'] !== '') {
+            $globalWarnings[] = $forecastStatus['warning'];
+        }
+        if (isset($forecastStatus['recommendation']) && $forecastStatus['recommendation'] !== '') {
+            $globalRecommendations[] = $forecastStatus['recommendation'];
         }
         foreach ($sections as $section) {
             if (!empty($section['warnings'])) $globalWarnings[] = $section['label'] . ': ' . $section['warnings'][0];
@@ -504,6 +511,7 @@ class AiDataAuditService
             'minimum_learning_judgement' => $this->learningJudgement($minimumMonths),
             'sections' => $sections,
             'daily_snapshot' => $snapshotStatus,
+            'monthly_forecast' => $forecastStatus,
             'global_warnings' => $globalWarnings,
             'global_recommendations' => $globalRecommendations,
             'read_only' => true,
@@ -586,6 +594,79 @@ class AiDataAuditService
         if ($result['latest_run_failure_count'] > 0) {
             $result['warning'] = '최근 일일 스냅샷 실행에서 일부 현장 집계 실패가 확인됐습니다.';
             $result['recommendation'] = '일일 스냅샷 설정에서 최근 실행 상태를 확인해주세요.';
+        }
+        return $result;
+    }
+
+    public function auditMonthlyForecasts()
+    {
+        $result = array(
+            'run_table_installed' => false,
+            'forecast_table_installed' => false,
+            'installed' => false,
+            'result_count' => 0,
+            'project_count' => 0,
+            'latest_forecast_date' => '',
+            'latest_run_status' => '',
+            'latest_run_insufficient_count' => 0,
+            'setup_required' => false,
+            'message' => '',
+            'warning' => '',
+            'recommendation' => '',
+        );
+        if (!$this->pdo) {
+            $result['setup_required'] = true;
+            $result['message'] = '기본 월말 예측 DB 상태를 확인할 수 없습니다.';
+            return $result;
+        }
+
+        $runTable = 'cpms_ai_forecast_runs';
+        $forecastTable = 'cpms_ai_monthly_forecasts';
+        $runRequired = array('forecast_date', 'run_status', 'insufficient_count', 'started_at');
+        $forecastRequired = array('forecast_date', 'project_id', 'data_status', 'last_calculated_at');
+        $result['run_table_installed'] = $this->tableExists($runTable);
+        $result['forecast_table_installed'] = $this->tableExists($forecastTable);
+        foreach ($runRequired as $column) {
+            if (!$this->columnExists($runTable, $column)) $result['run_table_installed'] = false;
+        }
+        foreach ($forecastRequired as $column) {
+            if (!$this->columnExists($forecastTable, $column)) $result['forecast_table_installed'] = false;
+        }
+        $result['installed'] = $result['run_table_installed'] && $result['forecast_table_installed'];
+        if (!$result['installed']) {
+            $result['setup_required'] = true;
+            $result['message'] = '기본 월말 예측 기능이 아직 설치되지 않았습니다.';
+            $result['warning'] = '기본 월말 예측 기능이 아직 설치되지 않았습니다.';
+            $result['recommendation'] = '기본 월말 예측 설정에서 테이블을 설치해주세요.';
+            return $result;
+        }
+
+        $forecastAgg = $this->safeAggregate(
+            "SELECT COUNT(*) AS result_count, COUNT(DISTINCT project_id) AS project_count, MAX(forecast_date) AS latest_date FROM `" . $forecastTable . "`",
+            array(),
+            '기본 월말 예측 결과 집계 실패'
+        );
+        if ($forecastAgg['ok']) {
+            $row = $forecastAgg['row'];
+            $result['result_count'] = isset($row['result_count']) ? (int)$row['result_count'] : 0;
+            $result['project_count'] = isset($row['project_count']) ? (int)$row['project_count'] : 0;
+            $result['latest_forecast_date'] = isset($row['latest_date']) && $row['latest_date'] !== null ? (string)$row['latest_date'] : '';
+        }
+
+        try {
+            $st = $this->pdo->query("SELECT run_status, insufficient_count FROM `" . $runTable . "` ORDER BY started_at DESC,id DESC LIMIT 1");
+            $run = $st ? $st->fetch(PDO::FETCH_ASSOC) : false;
+            if (is_array($run)) {
+                $result['latest_run_status'] = isset($run['run_status']) ? (string)$run['run_status'] : '';
+                $result['latest_run_insufficient_count'] = isset($run['insufficient_count']) ? (int)$run['insufficient_count'] : 0;
+            }
+        } catch (Exception $e) {
+        }
+
+        if ($result['result_count'] === 0) {
+            $result['message'] = '예측 구조는 설치됐으며 스냅샷 생성 후 예측을 실행할 수 있습니다.';
+        } else {
+            $result['message'] = '저장된 스냅샷을 기준으로 기본 월말 예측 결과를 기록하고 있습니다.';
         }
         return $result;
     }
