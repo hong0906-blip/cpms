@@ -7,12 +7,74 @@ use App\Services\AiCostForecastV2Service;
 use App\Services\AiDailyPipelineService;
 use App\Services\AiExecutiveChatService;
 use App\Services\AiExecutiveBriefService;
+use App\Services\AiInputCompletionPatternService;
 
 require_once __DIR__ . '/../../services/AiCeoIndexService.php';
 require_once __DIR__ . '/../../services/AiCostForecastV2Service.php';
 require_once __DIR__ . '/../../services/AiDailyPipelineService.php';
 require_once __DIR__ . '/../../services/AiExecutiveChatService.php';
 require_once __DIR__ . '/../../services/AiExecutiveBriefService.php';
+
+/* CEO Index의 모든 탭이 사용하는 표시 헬퍼. 이 진입 파일만으로 로딩을 보장한다. */
+if(!function_exists('cpms_ai_display_labels')){
+    function cpms_ai_display_labels(){
+        return array(
+            'INSUFFICIENT'=>'분석자료 부족','COLD_START'=>'학습자료 없음',
+            'INITIAL'=>'초기학습','INITIAL_EXPANDED'=>'초기학습 확대','NORMAL_LEARNING'=>'정상학습',
+            'BASIC_FORECAST'=>'기본 예측 적용','COMPLETION_PATTERN'=>'입력패턴 예측',
+            'COMPLETION_AND_PACE'=>'입력패턴·최근 흐름 예측','COMPLETION_AND_HISTORICAL'=>'입력패턴·과거자료 예측',
+            'HISTORICAL_MEDIAN'=>'과거 중간값 예측','RECENT_PACE'=>'최근 입력흐름 예측',
+            'COMPANY_CATEGORY_FALLBACK'=>'회사 비용항목 자료 참고',
+            'PROJECT_CATEGORY'=>'현장 비용항목 자료','PROJECT_ALL'=>'현장 전체 자료',
+            'COMPANY_CATEGORY'=>'회사 비용항목 자료 참고','COMPANY_ALL'=>'회사 전체 자료 참고',
+            'MIXED'=>'복합 예측 적용','READY'=>'분석 준비','LIMITED'=>'자료 제한적',
+            'NORMAL'=>'정상','WATCH'=>'관심','WARNING'=>'주의','CRITICAL'=>'위험',
+            'LOW'=>'낮음','MEDIUM'=>'보통','HIGH'=>'높음','VERY_LOW'=>'매우 낮음',
+            'SUCCESS'=>'정상 완료','COMPLETED'=>'정상 완료','PARTIAL'=>'일부 완료',
+            'FAILED'=>'실행 실패','SKIPPED'=>'실행 생략','RUNNING'=>'실행 중','PENDING'=>'실행 대기',
+            'CACHED'=>'저장 결과 사용','NOT_RUN'=>'실행 전','MISSING'=>'자료 없음',
+            'ANSWERED'=>'답변 완료','NOT_AVAILABLE'=>'확인 불가','REFUSED'=>'답변 제한'
+        );
+    }
+}
+if(!function_exists('cpms_ai_display_label')){
+    function cpms_ai_display_label($code,$developer){
+        $code=trim((string)$code);if($code==='')return '';$labels=cpms_ai_display_labels();$known=isset($labels[$code]);$label=$known?$labels[$code]:$code;
+        if(!$developer&&!$known&&preg_match('/^[A-Z0-9_]+$/',$code))return '확인 필요';
+        return $developer&&$label!==$code?$label.' ('.$code.')':$label;
+    }
+}
+if(!function_exists('cpms_ai_display_confidence')){
+    function cpms_ai_display_confidence($score,$grade){
+        $hasScore=$score!==null&&$score!==''&&is_numeric($score);$grade=trim((string)$grade);
+        if($grade==='INSUFFICIENT'||(!$hasScore&&$grade===''))return '분석자료 부족 · 아직 신뢰도를 산정할 수 없음';
+        $label=cpms_ai_display_label($grade,false);
+        if($hasScore)return number_format((float)$score,1).'점 · '.($label!==''?$label:'분석자료 부족');
+        return $label!==''?'신뢰도 '.$label:'분석자료 부족';
+    }
+}
+if(!function_exists('cpms_ai_project_name_map')){
+    function cpms_ai_project_name_map($pdo,$projectIds){
+        $map=array();if(!$pdo||!is_array($projectIds))return $map;$ids=array();
+        foreach($projectIds as $id){$id=(int)$id;if($id>0)$ids[$id]=$id;}
+        if(count($ids)===0)return $map;$holders=array();$params=array();$index=0;
+        foreach($ids as $id){$key=':p'.$index++;$holders[]=$key;$params[$key]=$id;}
+        try{$st=$pdo->prepare('SELECT id,name FROM cpms_projects WHERE id IN ('.implode(',',$holders).')');if(!$st||!$st->execute($params))return $map;$rows=$st->fetchAll(PDO::FETCH_ASSOC);if(!is_array($rows))return $map;foreach($rows as $row)$map[(int)$row['id']]=trim((string)$row['name'])!==''?(string)$row['name']:'현장정보 확인 필요';}catch(Exception $e){return array();}
+        return $map;
+    }
+}
+if(!function_exists('cpms_ai_project_name')){
+    function cpms_ai_project_name($map,$projectId){$projectId=(int)$projectId;return isset($map[$projectId])&&trim((string)$map[$projectId])!==''?(string)$map[$projectId]:'현장정보 확인 필요';}
+}
+if(!function_exists('cpms_ai_learning_period')){
+    function cpms_ai_learning_period($summary){
+        if(!is_array($summary)||empty($summary['month_count']))return '학습자료 없음';
+        $first=isset($summary['first_ym'])?(string)$summary['first_ym']:'';$last=isset($summary['last_ym'])?(string)$summary['last_ym']:'';
+        $firstLabel=preg_match('/^(\d{4})-(\d{2})$/',$first,$firstMatch)?$firstMatch[1].'년 '.(int)$firstMatch[2].'월':'';
+        $lastLabel=preg_match('/^(\d{4})-(\d{2})$/',$last,$lastMatch)?$lastMatch[1].'년 '.(int)$lastMatch[2].'월':'';
+        if($firstLabel!==''&&$first===$last)return $firstLabel;if($firstLabel!==''&&$lastLabel!=='')return $firstLabel.' ~ '.$lastLabel;return (int)$summary['month_count'].'개월';
+    }
+}
 
 $ceoSectionAllowed=Auth::check()&&Auth::canAccessCeoIndex();
 $ceoSectionDeveloper=Auth::check()&&Auth::isDevelopmentDepartment();
@@ -35,7 +97,21 @@ if(isset($_SERVER['REQUEST_METHOD'])&&$_SERVER['REQUEST_METHOD']==='POST'){
     else if($action==='archive_thread'){$ok=AiExecutiveChatService::archiveThread($ceoSectionPdo,isset($_POST['thread_id'])?(int)$_POST['thread_id']:0);$ceoActionResult=array('ok'=>$ok,'message'=>$ok?'대화방을 보관했습니다.':'대화방을 보관하지 못했습니다.');$ceoActiveTab='gpt_chat';}
     else $ceoActionResult=array('ok'=>false,'message'=>'요청값이 올바르지 않습니다.');
 }
-$ceoSummary=$ceoSectionPdo?AiCostForecastV2Service::latestCompanySummary($ceoSectionPdo,$ceoTargetYm):array('available'=>false);$ceoIndexV2=$ceoSectionPdo?AiCeoIndexService::latestNormalV2($ceoSectionPdo,$ceoTargetYm):array();$ceoV2Ready=!empty($ceoSummary['available'])&&isset($ceoSummary['calculation_version'])&&$ceoSummary['calculation_version']===AiCostForecastV2Service::CALCULATION_VERSION&&!empty($ceoIndexV2)&&isset($ceoIndexV2['calculation_version'])&&$ceoIndexV2['calculation_version']===AiCeoIndexService::V2_VERSION;
+$ceoSummary=array('available'=>false);
+$ceoIndexV2=array();
+$ceoV2Ready=false;
+$ceoLearning=array('month_count'=>0,'months'=>array(),'first_ym'=>'','last_ym'=>'','state'=>AiInputCompletionPatternService::learningState(0));
+if($ceoSectionPdo){
+    try{
+        $ceoSummary=AiCostForecastV2Service::latestCompanySummary($ceoSectionPdo,$ceoTargetYm);
+        $ceoIndexV2=AiCeoIndexService::latestNormalV2($ceoSectionPdo,$ceoTargetYm);
+        $ceoV2Ready=!empty($ceoSummary['available'])&&isset($ceoSummary['calculation_version'])&&$ceoSummary['calculation_version']===AiCostForecastV2Service::CALCULATION_VERSION&&!empty($ceoIndexV2)&&isset($ceoIndexV2['calculation_version'])&&$ceoIndexV2['calculation_version']===AiCeoIndexService::V2_VERSION;
+        if(!empty($ceoSummary['analysis_date']))$ceoLearning=AiInputCompletionPatternService::learningSummary($ceoSectionPdo,$ceoSummary['analysis_date'],$ceoTargetYm);
+    }catch(Exception $e){
+        $ceoSectionError=true;
+        error_log('[CEO Index] view data initialization failed');
+    }
+}
 if(!function_exists('cpms_ceo_v2_money')){function cpms_ceo_v2_money($value){return $value===null?'-':number_format((float)$value).'원';}}
 if(!function_exists('cpms_ceo_v2_rate')){function cpms_ceo_v2_rate($value){return $value===null?'-':number_format((float)$value,1).'%';}}
 if(!function_exists('cpms_ceo_v2_score')){function cpms_ceo_v2_score($value){return $value===null?'-':number_format((float)$value,1).'점';}}
@@ -47,7 +123,7 @@ if(!function_exists('cpms_ceo_v2_url')){function cpms_ceo_v2_url($tab,$ym,$extra
 <div class="ceo-v2">
  <section class="ceo-v2-hero"><h2>CEO Index</h2><p>입력 지연을 반영한 최종 투입비 예측과 현장 위험을 한곳에서 확인합니다. 현재 결과는 관리 참고자료이며 확정 손익이나 직원평가가 아닙니다.</p><div class="ceo-v2-actions"><form method="get"><input type="hidden" name="r" value="ceo_index"><input type="hidden" name="tab" value="<?php echo h($ceoActiveTab); ?>"><select name="target_ym" onchange="this.form.submit()" style="padding:10px;border:1px solid #cbd5e1;border-radius:10px"><?php if(count($ceoMonths)===0): ?><option value="<?php echo h($ceoTargetYm); ?>"><?php echo h($ceoTargetYm); ?></option><?php else:foreach($ceoMonths as $ym): ?><option value="<?php echo h($ym); ?>"<?php echo $ceoTargetYm===$ym?' selected':''; ?>><?php echo h($ym); ?></option><?php endforeach;endif; ?></select></form><?php if($ceoSectionDeveloper): ?><a class="ceo-v2-btn secondary" href="?r=admin%2Fai_pipeline_setup">개발 설정</a><?php endif; ?></div></section>
  <?php if($ceoActionResult): ?><div class="ceo-v2-message <?php echo !empty($ceoActionResult['ok'])?'ok':'error'; ?>"><?php echo h(isset($ceoActionResult['message'])?$ceoActionResult['message']:'요청을 처리했습니다.'); ?></div><?php endif; ?>
- <?php if($ceoSectionError||!$ceoSectionPdo): ?><div class="ceo-v2-message error">DB 연결 상태를 확인할 수 없습니다.</div><?php elseif(!$ceoV2Ready): ?><div class="ceo-v2-note">신규 투입비 예측이 아직 실행되지 않았습니다.<br>자동 파이프라인 또는 개발부서 수동 분석을 먼저 실행해주세요.</div><?php else: ?><div class="ceo-v2-note">현재 표시 자료: <?php echo h($ceoSummary['analysis_date']); ?> 정상 <?php echo h($ceoSummary['calculation_version']); ?> 결과</div><?php endif; ?>
+ <?php if($ceoSectionError||!$ceoSectionPdo): ?><div class="ceo-v2-message error">DB 연결 상태를 확인할 수 없습니다.</div><?php elseif(!$ceoV2Ready): ?><div class="ceo-v2-note">신규 투입비 예측이 아직 실행되지 않았습니다.<br>자동 파이프라인 또는 개발부서 수동 분석을 먼저 실행해주세요.</div><?php else: ?><div class="ceo-v2-note">현재 표시 자료는 <?php echo h($ceoSummary['analysis_date']); ?>에 계산된 정상 투입비 예측 결과입니다.</div><?php endif; ?>
  <?php require __DIR__ . '/_summary_bar.php'; ?>
  <?php require __DIR__ . '/_tabs.php'; ?>
  <?php $ceoPartial=__DIR__ . '/'.$ceoActiveTab.'.php'; if(is_file($ceoPartial))require $ceoPartial; ?>

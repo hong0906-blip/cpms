@@ -317,37 +317,14 @@ class AiEvidenceValueService
         $displayCheck = self::validateEvidenceMap($map);
         if (empty($displayCheck['ok'])) return $displayCheck;
         if (!is_array($segments)) return self::failure('SCHEMA_VALIDATION_FAILED', '응답 검증 대상을 확인하지 못했습니다.', '', '');
-        if (!is_array($projects)) $projects = array();
+        $violations=array();
         foreach ($segments as $segment) {
             if (!is_array($segment) || !isset($segment['text']) || !is_string($segment['text'])) continue;
-            $text = $segment['text'];
-            if (!preg_match('/\d/u', $text)) continue;
             $path = isset($segment['path']) ? (string)$segment['path'] : '';
-            $ids = isset($segment['evidence_ids']) && is_array($segment['evidence_ids']) ? $segment['evidence_ids'] : array();
-            if (count($ids) === 0) return self::failure('UNPROVIDED_NUMBER_FAILED', 'OpenAI 응답에 근거와 연결되지 않은 숫자가 포함되어 있습니다.', $path, self::firstNumberToken($text));
-            $allowed = array();
-            foreach ($ids as $id) {
-                $id = (string)$id;
-                if (!isset($map[$id])) return self::failure('EVIDENCE_VALIDATION_FAILED', 'OpenAI 응답에 확인할 수 없는 근거 ID가 포함되어 있습니다.', $path, '');
-                self::addUnique($allowed, $id);
-                if (isset($map[$id]['display_value'])) self::addUnique($allowed, $map[$id]['display_value']);
-                if (isset($map[$id]['allowed_display_values']) && is_array($map[$id]['allowed_display_values'])) foreach ($map[$id]['allowed_display_values'] as $display) self::addUnique($allowed, $display);
-            }
-            $projectIds = isset($segment['project_ids']) && is_array($segment['project_ids']) ? $segment['project_ids'] : array();
-            foreach ($projectIds as $projectId) {
-                $projectId = (int)$projectId;
-                if (!isset($projects[$projectId])) continue;
-                self::addUnique($allowed, (string)$projects[$projectId]);
-                self::addUnique($allowed, 'project_id: ' . $projectId);
-                self::addUnique($allowed, 'project_id ' . $projectId);
-                self::addUnique($allowed, '현장 ID ' . $projectId);
-                self::addUnique($allowed, '현장번호 ' . $projectId);
-            }
-            usort($allowed, array(__CLASS__, 'longerFirst'));
-            foreach ($allowed as $display) if ($display !== '') $text = str_replace($display, ' ', $text);
-            if (preg_match('/\d/u', $text)) return self::failure('UNPROVIDED_NUMBER_FAILED', 'OpenAI 응답에 허용되지 않은 숫자 표현이 포함되어 있습니다.', $path, self::firstNumberToken($text));
+            if (preg_match('/\d/u', $segment['text'])){$violations[]=array('field_path'=>substr($path,0,190),'invalid_number'=>substr(self::firstNumberToken($segment['text']),0,80));if(count($violations)>=10)break;}
         }
-        return array('ok'=>true, 'error_code'=>'', 'message'=>'응답 숫자 표시값을 확인했습니다.');
+        if(count($violations)){$failure=self::failure('UNPROVIDED_NUMBER_FAILED','OpenAI 자유문장에 허용되지 않은 숫자 표현이 포함되어 있습니다.',$violations[0]['field_path'],$violations[0]['invalid_number']);$failure['violations']=$violations;return $failure;}
+        return array('ok'=>true, 'error_code'=>'', 'message'=>'응답 자유문장 숫자 검증을 완료했습니다.');
     }
 }
 ?>

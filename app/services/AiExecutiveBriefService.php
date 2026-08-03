@@ -390,7 +390,7 @@ class AiExecutiveBriefService
                     $result['failed_count'] = isset($row['failed_count']) ? (int)$row['failed_count'] : 0;
                     $result['cached_count'] = isset($row['cached_count']) ? (int)$row['cached_count'] : 0;
                 }
-                $st = $pdo->query("SELECT id,analysis_date,target_ym,run_status,model_name,http_status,input_token_count,output_token_count,total_token_count,started_at,finished_at,error_code,error_summary FROM `" . self::RUN_TABLE . "` WHERE task_type='EXECUTIVE_BRIEF' ORDER BY started_at DESC,id DESC LIMIT 1");
+                $st = $pdo->query("SELECT id,analysis_date,target_ym,trigger_type,run_status,model_name,http_status,input_token_count,output_token_count,total_token_count,actor_name,started_at,finished_at,error_code,error_summary FROM `" . self::RUN_TABLE . "` WHERE task_type='EXECUTIVE_BRIEF' ORDER BY started_at DESC,id DESC LIMIT 1");
                 $row = $st ? $st->fetch(PDO::FETCH_ASSOC) : false;
                 $result['latest_run'] = is_array($row) ? $row : array();
             }
@@ -672,7 +672,7 @@ class AiExecutiveBriefService
     {
         $canonical = self::canonicalize(array(
             'schema_version'=>(string)$schemaVersion,'model_name'=>(string)$modelName,'target_ym'=>(string)$targetYm,
-            'analysis_date'=>(string)$analysisDate,'source_data'=>is_array($sourceData)?$sourceData:array()
+            'analysis_date'=>(string)$analysisDate,'output_policy'=>'FREE_TEXT_NO_ARABIC_DIGITS_V2','source_data'=>is_array($sourceData)?$sourceData:array()
         ));
         $json = self::encodeData($canonical);
         return is_string($json) ? hash('sha256', $json) : '';
@@ -690,8 +690,8 @@ class AiExecutiveBriefService
                 'executive_summary'=>array('type'=>'string'),
                 'executive_summary_evidence_ids'=>$stringArray,
                 'key_metrics'=>array('type'=>'array','items'=>array('type'=>'object','additionalProperties'=>false,'required'=>array('metric_id','label','interpretation'),'properties'=>array('metric_id'=>array('type'=>'string'),'label'=>array('type'=>'string'),'interpretation'=>array('type'=>'string')))),
-                'top_risks'=>array('type'=>'array','maxItems'=>5,'items'=>array('type'=>'object','additionalProperties'=>false,'required'=>array('project_id','project_name','severity','risk_type','title','explanation','evidence_ids','recommended_actions'),'properties'=>array(
-                    'project_id'=>array('type'=>'integer'),'project_name'=>array('type'=>'string'),'severity'=>array('type'=>'string','enum'=>array('WATCH','WARNING','CRITICAL','INSUFFICIENT')),
+                'top_risks'=>array('type'=>'array','maxItems'=>5,'items'=>array('type'=>'object','additionalProperties'=>false,'required'=>array('project_id','severity','risk_type','title','explanation','evidence_ids','recommended_actions'),'properties'=>array(
+                    'project_id'=>array('type'=>'integer'),'severity'=>array('type'=>'string','enum'=>array('WATCH','WARNING','CRITICAL','INSUFFICIENT')),
                     'risk_type'=>array('type'=>'string'),'title'=>array('type'=>'string'),'explanation'=>array('type'=>'string'),'evidence_ids'=>$stringArray,
                     'recommended_actions'=>array('type'=>'array','maxItems'=>3,'items'=>array('type'=>'string'))
                 ))),
@@ -707,13 +707,13 @@ class AiExecutiveBriefService
     {
         return "당신은 건설회사 대표에게 CPMS 경영예측 결과를 설명하는 경영관리 보조자입니다.\n"
             . "반드시 제공된 JSON 자료만 사용하고 지정된 JSON Schema 형식으로 한국어 응답을 작성하세요.\n"
-            . "숫자는 evidence의 display_value 또는 allowed_display_values에 있는 표현만 그대로 사용하고 새로 계산하거나 단위를 변환하지 마세요.\n"
-            . "제공되지 않은 숫자·날짜·기간·현장 수를 만들지 말고, 번호 목록은 1, 2, 3 대신 글머리표를 사용하며 '한 가지', '두 가지' 같은 수량도 새로 만들지 마세요.\n"
-            . "숫자가 있는 executive_summary에는 해당 executive_summary_evidence_ids를, 숫자가 있는 위험 설명에는 해당 evidence_ids를 반드시 넣으세요. 확정매출과 예상매출을 구분하세요.\n"
+            . "headline, executive_summary, label, interpretation, risk_type, title, explanation, recommended_actions, positive_signals, check_today, data_limitations, disclaimer 등 모든 자유문장에는 아라비아 숫자를 쓰지 마세요.\n"
+            . "숫자, 금액, 비율, 점수, 날짜, 시간, 현장 수를 직접 작성하거나 계산하지 마세요. 원·만원·억원 변환, 퍼센트 환산, 반올림, 범위·평균·순위·기간·차이 계산도 하지 마세요.\n"
+            . "수치는 evidence ID만 선택해 반환하며 PHP 화면이 evidence의 display_value로 별도 표시합니다. 숫자 목록 대신 글머리표를 사용하고 새로운 수량 표현도 만들지 마세요.\n"
             . "입력 신뢰도가 낮거나 판단자료가 부족하면 단정하지 말고 그 한계를 명시하세요. 적자나 손실이 확정됐다고 표현하지 마세요.\n"
             . "직원이나 현장 책임자를 비난하지 말고 문제 직원, 태만, 조작, 횡령 등의 표현을 사용하지 마세요. 회계감사나 법률판단처럼 표현하지 마세요.\n"
             . "대표가 바로 확인할 수 있는 행동을 간결하게 제안하고 같은 내용을 반복하지 마세요. 어려운 통계용어는 피하세요.\n"
-            . "evidence_ids에는 입력자료에 존재하는 ID만 사용하고 project_id와 project_name은 입력자료 그대로 사용하세요.\n"
+            . "evidence_ids에는 입력자료에 존재하는 ID만 사용하고 현장은 project_id만 반환하세요. 현장명은 작성하지 말고 해당 현장 또는 확인 대상 현장으로 표현하세요.\n"
             . "모든 결과가 CPMS 입력자료와 통계 예측을 설명한 관리 참고자료임을 disclaimer에 포함하세요.";
     }
 
@@ -803,8 +803,8 @@ class AiExecutiveBriefService
     private static function validationSummary($validation)
     {
         $summary=isset($validation['message'])?(string)$validation['message']:'OpenAI 응답 검증에 실패했습니다.';
-        if(!empty($validation['field_path']))$summary.=' 실패 필드: '.preg_replace('/[^A-Za-z0-9_.-]/','',(string)$validation['field_path']);
-        if(!empty($validation['invalid_number']))$summary.=' 허용되지 않은 숫자 표현: '.preg_replace('/[^0-9.,+\-%억만원점개건개월회명년월일\s]/u','',(string)$validation['invalid_number']);
+        $items=isset($validation['violations'])&&is_array($validation['violations'])?array_slice($validation['violations'],0,10):array($validation);
+        foreach($items as $item){if(!is_array($item))continue;$path=!empty($item['field_path'])?preg_replace('/[^A-Za-z0-9_.-]/','',(string)$item['field_path']):'';$number=!empty($item['invalid_number'])?preg_replace('/[^0-9.,+\-%억만원점개건개월회명년월일\s]/u','',(string)$item['invalid_number']):'';if($path!==''||$number!=='')$summary.=' ['.$path.($number!==''?'='.$number:'').']';}
         return self::shortText($summary,500);
     }
 
@@ -838,8 +838,8 @@ class AiExecutiveBriefService
         }
         if (!is_array($data['top_risks']) || count($data['top_risks']) > 5) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks');
         foreach ($data['top_risks'] as $risk) {
-            $keys = array('project_id','project_name','severity','risk_type','title','explanation','evidence_ids','recommended_actions');
-            if (!self::validateKeys($risk,$keys,$keys) || !is_int($risk['project_id']) || !isset($context['projects'][$risk['project_id']]) || !is_string($risk['project_name']) || $context['projects'][$risk['project_id']] !== $risk['project_name']) return self::validationFailure('PROJECT_VALIDATION_FAILED','OpenAI 응답에 확인할 수 없는 현장이 포함되어 있습니다.','top_risks.project');
+            $keys = array('project_id','severity','risk_type','title','explanation','evidence_ids','recommended_actions');
+            if (!self::validateKeys($risk,$keys,$keys) || !is_int($risk['project_id']) || !isset($context['projects'][$risk['project_id']])) return self::validationFailure('PROJECT_VALIDATION_FAILED','OpenAI 응답에 확인할 수 없는 현장이 포함되어 있습니다.','top_risks.project_id');
             if (!in_array($risk['severity'],array('WATCH','WARNING','CRITICAL','INSUFFICIENT'),true) || !is_string($risk['risk_type']) || !is_string($risk['title']) || !is_string($risk['explanation'])) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks');
             if (self::textLength($risk['risk_type'])>100 || self::textLength($risk['title'])>300 || self::textLength($risk['explanation'])>1500) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks.text');
             if (!is_array($risk['evidence_ids']) || count($risk['evidence_ids'])>20) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks.evidence_ids');
@@ -857,7 +857,7 @@ class AiExecutiveBriefService
     private static function normalizeTrigger($value)
     {
         $value = strtoupper(trim((string)$value));
-        return in_array($value,array('MANUAL','CLI','SYSTEM'),true) ? $value : 'SYSTEM';
+        return in_array($value,array('MANUAL','MANUAL_GPT_SUMMARY','CLI','SYSTEM'),true) ? $value : 'SYSTEM';
     }
 
     private static function now()
@@ -875,7 +875,7 @@ class AiExecutiveBriefService
 
     private static function resolveActor($trigger)
     {
-        if ($trigger !== 'MANUAL') return array('id'=>null,'name'=>'');
+        if ($trigger !== 'MANUAL' && $trigger !== 'MANUAL_GPT_SUMMARY') return array('id'=>null,'name'=>'');
         $user = Auth::user();
         $id = is_array($user) && isset($user['id']) && is_numeric($user['id']) ? (int)$user['id'] : 0;
         $name = self::redactText(Auth::userName(),100);
@@ -961,7 +961,7 @@ class AiExecutiveBriefService
 
     private static function repeatedTooSoon($pdo, $trigger)
     {
-        if ($trigger!=='MANUAL') return false;
+        if ($trigger!=='MANUAL' && $trigger!=='MANUAL_GPT_SUMMARY') return false;
         $actor=self::resolveActor($trigger);
         if ($actor['id']===null && $actor['name']==='') return false;
         try {
@@ -1037,7 +1037,7 @@ class AiExecutiveBriefService
                 $status=!empty($api['refused'])?'REFUSED':'FAILED';
                 self::finishRun($pdo,$runId,$status,$api,isset($api['error_code'])?$api['error_code']:'OPENAI_FAILED',isset($api['message'])?$api['message']:'OpenAI 요청에 실패했습니다.');
                 self::releaseLock($pdo,$lock);
-                return array_merge($empty,array('status'=>$status,'message'=>isset($api['message'])?$api['message']:$empty['message']));
+                return array_merge($empty,array('status'=>$status,'error_code'=>isset($api['error_code'])?$api['error_code']:'OPENAI_FAILED','message'=>isset($api['message'])?$api['message']:$empty['message']));
             }
             if(!isset($api['output_text'])||trim((string)$api['output_text'])===''){
                 self::finishRun($pdo,$runId,'FAILED',$api,'OUTPUT_TEXT_MISSING','OpenAI 응답 본문을 확인하지 못했습니다.');
@@ -1081,6 +1081,12 @@ class AiExecutiveBriefService
         } catch (Exception $e) { return array(); }
     }
 
+    public static function recentRuns($pdo = null,$limit = 10)
+    {
+        $pdo=self::pdo($pdo);$limit=max(1,min(50,(int)$limit));if(!$pdo||!self::tableExists($pdo,self::RUN_TABLE))return array();
+        try{$st=$pdo->prepare("SELECT id,analysis_date,target_ym,trigger_type,run_status,model_name,actor_name,started_at,finished_at,error_code,error_summary FROM `".self::RUN_TABLE."` WHERE task_type='EXECUTIVE_BRIEF' ORDER BY started_at DESC,id DESC LIMIT :limit");if(!$st||!$st->bindValue(':limit',$limit,PDO::PARAM_INT)||!$st->execute())return array();$rows=$st->fetchAll(PDO::FETCH_ASSOC);return is_array($rows)?$rows:array();}catch(Exception $e){return array();}
+    }
+
     public static function latestV2Brief($pdo = null, $targetYm = '')
     {
         $pdo=self::pdo($pdo);
@@ -1103,5 +1109,13 @@ class AiExecutiveBriefService
         $source=self::decodeArray(isset($brief['source_summary_data'])?$brief['source_summary_data']:'');
         if (isset($source['projects'])&&is_array($source['projects'])) foreach ($source['projects'] as $project) if (is_array($project)&&isset($project['project_id'])) $map[(int)$project['project_id']]=$project;
         return $map;
+    }
+
+    public static function briefEvidenceCards($brief)
+    {
+        if(!is_array($brief))return array();$source=self::decodeArray(isset($brief['source_summary_data'])?$brief['source_summary_data']:'');$metrics=self::decodeArray(isset($brief['key_metrics_data'])?$brief['key_metrics_data']:'');$map=array();
+        if(isset($source['company_metrics'])&&is_array($source['company_metrics']))foreach($source['company_metrics'] as $row)if(is_array($row)&&isset($row['metric_id']))$map[(string)$row['metric_id']]=$row;
+        $cards=array();foreach($metrics as $metric){if(!is_array($metric)||!isset($metric['metric_id']))continue;$id=(string)$metric['metric_id'];if(isset($map[$id]))$cards[]=$map[$id];}
+        return $cards;
     }
 }
