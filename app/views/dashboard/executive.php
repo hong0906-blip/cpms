@@ -57,17 +57,6 @@ $needsIssueCommentsData = ($activeExecutiveTab === 'siteIssues');
 $needsApprovalData = ($activeExecutiveTab === 'approval');
 $needsAttendanceData = ($activeExecutiveTab === 'main');
 
-$ceoIndexDashboardCard = array('available' => false);
-if ($needsMainData && !$projectCostFragmentOnly) {
-    try {
-        require_once __DIR__ . '/../../services/AiCeoIndexService.php';
-        $ceoIndexDashboardCard = \App\Services\AiCeoIndexService::latestDashboardCard($pdo);
-    } catch (Exception $e) {
-        $ceoIndexDashboardCard = array('available' => false);
-        error_log('[AiCeoIndex] executive dashboard card load failed');
-    }
-}
-
 if (!$projectCostFragmentOnly && function_exists('cpms_tasks_process_delayed_notifications')) {
     $delayNotifyNow = time();
     $delayNotifyKey = '_cpms_dashboard_delay_notify_at';
@@ -821,29 +810,6 @@ if ($activeExecutiveTab !== 'myTasks' || !$executiveEmployeeTaskAvailable) cpms_
 <div data-executive-tab-panels>
 <?php if ($activeExecutiveTab === 'main'): ?>
 <section data-executive-tab-panel="main">
-
-<div class="bg-white/90 rounded-3xl p-6 border border-emerald-100 mb-6 shadow-sm">
-    <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-            <div class="text-sm font-extrabold text-emerald-700">AI 경영예측</div>
-            <h3 class="text-2xl font-extrabold text-gray-900 mt-1">CEO Index</h3>
-            <p class="text-sm text-gray-500 mt-2">저장된 최신 결과만 표시하며 대시보드에서 자동 계산하거나 OpenAI API를 호출하지 않습니다.</p>
-        </div>
-        <a href="?r=admin%2Fai_ceo_index" class="inline-flex items-center justify-center px-4 py-3 rounded-2xl bg-emerald-700 text-white font-extrabold no-underline">상세보기</a>
-    </div>
-    <?php if (empty($ceoIndexDashboardCard['available'])): ?>
-        <div class="mt-4 p-4 rounded-2xl border border-dashed border-gray-300 bg-gray-50 text-sm text-gray-600">저장된 CEO Index 결과가 없습니다.</div>
-    <?php else: ?>
-        <div class="grid grid-cols-2 lg:grid-cols-7 gap-3 mt-5">
-            <div class="p-4 rounded-2xl bg-emerald-50 border border-emerald-100"><div class="text-xs font-bold text-gray-500">CEO Index</div><div class="text-2xl font-extrabold text-emerald-700 mt-1"><?php echo isset($ceoIndexDashboardCard['score']) && $ceoIndexDashboardCard['score'] !== null ? h(number_format((float)$ceoIndexDashboardCard['score'], 1) . '점') : '-'; ?></div><div class="text-xs font-bold text-emerald-700 mt-1"><?php echo h(\App\Services\AiCeoIndexService::gradeLabel(isset($ceoIndexDashboardCard['grade']) ? $ceoIndexDashboardCard['grade'] : 'INSUFFICIENT')); ?></div></div>
-            <div class="p-4 rounded-2xl bg-blue-50 border border-blue-100"><div class="text-xs font-bold text-gray-500">월 예상손익</div><div class="text-lg font-extrabold text-blue-700 mt-1"><?php echo h(number_format(isset($ceoIndexDashboardCard['monthly_profit']) ? (float)$ceoIndexDashboardCard['monthly_profit'] : 0) . '원'); ?></div></div>
-            <div class="p-4 rounded-2xl bg-rose-50 border border-rose-100"><div class="text-xs font-bold text-gray-500">긴급 확인 현장</div><div class="text-2xl font-extrabold text-rose-700 mt-1"><?php echo h((int)$ceoIndexDashboardCard['critical_count']); ?>개</div></div>
-            <div class="p-4 rounded-2xl bg-orange-50 border border-orange-100"><div class="text-xs font-bold text-gray-500">주의 현장</div><div class="text-2xl font-extrabold text-orange-700 mt-1"><?php echo h((int)$ceoIndexDashboardCard['warning_count']); ?>개</div></div>
-            <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200"><div class="text-xs font-bold text-gray-500">판단자료 부족</div><div class="text-2xl font-extrabold text-slate-700 mt-1"><?php echo h((int)$ceoIndexDashboardCard['insufficient_count']); ?>개</div></div>
-            <div class="p-4 rounded-2xl bg-gray-50 border border-gray-200 col-span-2"><div class="text-xs font-bold text-gray-500">최근 분석일</div><div class="text-lg font-extrabold text-gray-800 mt-1"><?php echo h(isset($ceoIndexDashboardCard['analysis_date']) && $ceoIndexDashboardCard['analysis_date'] !== '' ? $ceoIndexDashboardCard['analysis_date'] : '-'); ?></div></div>
-        </div>
-    <?php endif; ?>
-</div>
 
 <?php
 $cpmsEmployeeAttendanceFormHiddenInputs = array('r' => 'dashboard_executive', 'exec_tab' => 'main');

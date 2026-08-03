@@ -477,6 +477,7 @@ class AiDataAuditService
         $profitRiskStatus = $this->auditProfitRisk();
         $ceoIndexQaStatus = $this->auditCeoIndexAndQa();
         $openAiStatus = $this->auditOpenAiExecutiveBrief();
+        $aiV2Status = $this->auditAiV2Pipeline();
         $overall = $this->calculateOverallScore($sections);
         $globalWarnings = array();
         $globalRecommendations = array();
@@ -560,6 +561,7 @@ class AiDataAuditService
             'profit_risk' => $profitRiskStatus,
             'ceo_index_qa' => $ceoIndexQaStatus,
             'openai_executive_brief' => $openAiStatus,
+            'ai_v2_pipeline' => $aiV2Status,
             'global_warnings' => $globalWarnings,
             'global_recommendations' => $globalRecommendations,
             'read_only' => true,
@@ -1071,6 +1073,25 @@ class AiDataAuditService
             } catch (Exception $e) {
             }
         }
+        return $result;
+    }
+
+    public function auditAiV2Pipeline()
+    {
+        $result=array('installed'=>false,'pattern_table_installed'=>false,'forecast_tables_installed'=>false,'ceo_tables_installed'=>false,'pipeline_tables_installed'=>false,'chat_tables_installed'=>false,'pattern_count'=>0,'forecast_count'=>0,'pipeline_run_count'=>0,'latest_pipeline_status'=>'','latest_analysis_date'=>'','message'=>'');
+        if(!$this->pdo){$result['message']='AI V2 자동분석 DB 상태를 확인할 수 없습니다.';return $result;}
+        $result['pattern_table_installed']=$this->tableExists('cpms_ai_input_completion_patterns');
+        $result['forecast_tables_installed']=$this->tableExists('cpms_ai_cost_forecast_runs_v2')&&$this->tableExists('cpms_ai_cost_forecast_results_v2')&&$this->tableExists('cpms_ai_cost_forecast_category_results_v2');
+        $result['ceo_tables_installed']=$this->tableExists('cpms_ai_ceo_index_runs_v2')&&$this->tableExists('cpms_ai_ceo_index_results_v2')&&$this->tableExists('cpms_ai_ceo_project_results_v2');
+        $result['pipeline_tables_installed']=$this->tableExists('cpms_ai_pipeline_runs')&&$this->tableExists('cpms_ai_pipeline_steps');
+        $result['chat_tables_installed']=$this->tableExists('cpms_ai_chat_threads')&&$this->tableExists('cpms_ai_chat_messages');
+        $result['installed']=$result['pattern_table_installed']&&$result['forecast_tables_installed']&&$result['ceo_tables_installed']&&$result['pipeline_tables_installed']&&$result['chat_tables_installed'];
+        try{
+            if($result['pattern_table_installed']){$st=$this->pdo->query('SELECT COUNT(*) FROM `cpms_ai_input_completion_patterns`');$result['pattern_count']=$st?(int)$st->fetchColumn():0;}
+            if($result['forecast_tables_installed']){$st=$this->pdo->query('SELECT COUNT(*) FROM `cpms_ai_cost_forecast_results_v2`');$result['forecast_count']=$st?(int)$st->fetchColumn():0;$st=$this->pdo->query('SELECT analysis_date FROM `cpms_ai_cost_forecast_results_v2` ORDER BY analysis_date DESC,id DESC LIMIT 1');$value=$st?$st->fetchColumn():false;if($value!==false)$result['latest_analysis_date']=(string)$value;}
+            if($result['pipeline_tables_installed']){$st=$this->pdo->query('SELECT COUNT(*) FROM `cpms_ai_pipeline_runs`');$result['pipeline_run_count']=$st?(int)$st->fetchColumn():0;$st=$this->pdo->query('SELECT run_status FROM `cpms_ai_pipeline_runs` ORDER BY started_at DESC,id DESC LIMIT 1');$value=$st?$st->fetchColumn():false;if($value!==false)$result['latest_pipeline_status']=(string)$value;}
+        }catch(Exception $e){}
+        $result['message']=$result['installed']?($result['forecast_count']>0?'입력완료 패턴과 V2 최종 투입비 예측을 기록하고 있습니다.':'V2 분석구조는 설치됐으며 일일 파이프라인을 실행할 수 있습니다.'):'AI V2 자동분석 구조가 아직 모두 설치되지 않았습니다.';
         return $result;
     }
 

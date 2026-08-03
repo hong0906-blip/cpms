@@ -341,6 +341,28 @@ class Auth
     }
 
     /**
+     * CEO Index 독립 섹션 접근 권한.
+     * 직원관리 권한이나 일반 executive 역할을 재사용하지 않고
+     * 대표/대표이사 또는 개발부서만 허용한다.
+     */
+    public static function canAccessCeoIndex()
+    {
+        if (!self::check()) return false;
+        if (self::isDevelopmentDepartment()) return true;
+
+        $allowedValues = array('대표', '대표이사', '대표님', 'ceo', 'president');
+        $userValues = array(self::userPosition(), self::userStoredRole());
+        foreach ($userValues as $userValue) {
+            $normalizedValue = self::normalizeText($userValue);
+            if ($normalizedValue === '') continue;
+            foreach ($allowedValues as $allowedValue) {
+                if ($normalizedValue === self::normalizeText($allowedValue)) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 사용현황 분석 전용 접근 권한.
      *
      * 기존 executive/마스터/직원명부 관리 권한을 재사용하지 않고,
@@ -610,6 +632,7 @@ class Auth
             '개발부' => '개발',
             '개발팀' => '개발',
             '개발부서' => '개발',
+            '[개발]' => '개발',
             '안전/보건' => '안전',
             '안전보건' => '안전',
         );

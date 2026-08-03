@@ -1,0 +1,1 @@
+<nav class="ceo-v2-tabs" aria-label="CEO Index 탭"><?php foreach($ceoTabs as $key=>$label): ?><a class="<?php echo $ceoActiveTab===$key?'active':''; ?>" href="<?php echo h(cpms_ceo_v2_url($key,$ceoTargetYm)); ?>"><?php echo h($label); ?></a><?php endforeach; ?></nav>

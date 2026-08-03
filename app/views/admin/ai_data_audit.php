@@ -68,6 +68,7 @@ $anomalyDetection = isset($aiAudit['anomaly_detection']) && is_array($aiAudit['a
 $profitRisk = isset($aiAudit['profit_risk']) && is_array($aiAudit['profit_risk']) ? $aiAudit['profit_risk'] : array();
 $ceoIndexQa = isset($aiAudit['ceo_index_qa']) && is_array($aiAudit['ceo_index_qa']) ? $aiAudit['ceo_index_qa'] : array();
 $openAiExecutiveBrief = isset($aiAudit['openai_executive_brief']) && is_array($aiAudit['openai_executive_brief']) ? $aiAudit['openai_executive_brief'] : array();
+$aiV2Pipeline = isset($aiAudit['ai_v2_pipeline']) && is_array($aiAudit['ai_v2_pipeline']) ? $aiAudit['ai_v2_pipeline'] : array();
 ?>
 
 <style>
@@ -274,6 +275,20 @@ $openAiExecutiveBrief = isset($aiAudit['openai_executive_brief']) && is_array($a
       <div class="ai-audit-snapshot-item"><span>주의 / 적자 위험</span><strong><?php echo h(number_format(isset($profitRisk['warning_count']) ? (int)$profitRisk['warning_count'] : 0)); ?> / <?php echo h(number_format(isset($profitRisk['critical_count']) ? (int)$profitRisk['critical_count'] : 0)); ?>개</strong></div>
       <div class="ai-audit-snapshot-item"><span>판단자료 부족</span><strong><?php echo h(number_format(isset($profitRisk['insufficient_count']) ? (int)$profitRisk['insufficient_count'] : 0)); ?>개</strong></div>
       <div class="ai-audit-snapshot-item"><span>최근 실행 상태 / 실패</span><strong><?php echo h(isset($profitRisk['latest_run_status']) && $profitRisk['latest_run_status'] !== '' ? $profitRisk['latest_run_status'] : '-'); ?> / <?php echo h(number_format(isset($profitRisk['latest_run_failure_count']) ? (int)$profitRisk['latest_run_failure_count'] : 0)); ?>건</strong></div>
+    </div>
+  </section>
+
+  <section class="ai-audit-snapshot-panel" style="border-color:#99f6e4;background:linear-gradient(135deg,#fff 0%,#f0fdfa 100%);">
+    <div class="ai-audit-snapshot-head"><div><h3>입력완료 패턴·V2 예측·자동 분석</h3><p><?php echo h(isset($aiV2Pipeline['message'])&&$aiV2Pipeline['message']!==''?$aiV2Pipeline['message']:'AI V2 자동분석 상태를 확인할 수 없습니다.'); ?> 이 항목은 기존 AI 준비점수에는 아직 반영하지 않습니다.</p></div><a class="ai-audit-snapshot-link" style="background:#0f766e;" href="?r=admin%2Fai_pipeline_setup">AI 자동 분석 설정</a></div>
+    <div class="ai-audit-snapshot-grid">
+      <div class="ai-audit-snapshot-item"><span>입력완료 패턴</span><strong><?php echo !empty($aiV2Pipeline['pattern_table_installed'])?'설치 완료':'미설치'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>V2 투입비 예측</span><strong><?php echo !empty($aiV2Pipeline['forecast_tables_installed'])?'설치 완료':'미설치'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>CEO Index V2</span><strong><?php echo !empty($aiV2Pipeline['ceo_tables_installed'])?'설치 완료':'미설치'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>자동 파이프라인</span><strong><?php echo !empty($aiV2Pipeline['pipeline_tables_installed'])?'설치 완료':'미설치'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>연속 GPT 대화</span><strong><?php echo !empty($aiV2Pipeline['chat_tables_installed'])?'설치 완료':'미설치'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>패턴 / V2 결과</span><strong><?php echo h(number_format(isset($aiV2Pipeline['pattern_count'])?(int)$aiV2Pipeline['pattern_count']:0)); ?> / <?php echo h(number_format(isset($aiV2Pipeline['forecast_count'])?(int)$aiV2Pipeline['forecast_count']:0)); ?>건</strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 V2 분석일</span><strong><?php echo h(!empty($aiV2Pipeline['latest_analysis_date'])?$aiV2Pipeline['latest_analysis_date']:'-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>파이프라인 실행 / 상태</span><strong><?php echo h(number_format(isset($aiV2Pipeline['pipeline_run_count'])?(int)$aiV2Pipeline['pipeline_run_count']:0)); ?>건 / <?php echo h(!empty($aiV2Pipeline['latest_pipeline_status'])?$aiV2Pipeline['latest_pipeline_status']:'-'); ?></strong></div>
     </div>
   </section>
 

@@ -14,6 +14,7 @@ $safetyMenu = '안전/보건';
 $qualityMenu = '품질';
 $companyProfitMenu = '경영현황';
 $representativeManagementMenu = '대표 경영현황';
+$ceoIndexMenu = 'CEO Index';
 $usageAnalyticsMenu = '사용현황 분석';
 $schedulerMenu = urldecode('%EC%8A%A4%EC%BC%80%EC%A4%84%EB%9F%AC');
 
@@ -34,6 +35,7 @@ $canViewCompanyOverheadMenu = cpms_can_view_company_overhead($user, $sidebarPdo)
 $canViewCompanyPayrollMenu = cpms_can_view_company_payroll($user, $sidebarPdo);
 $canAccessUsageAnalytics = \App\Core\Auth::canAccessUsageAnalytics();
 $canViewRepresentativeManagement = cpms_can_view_representative_management($sidebarPdo, $user);
+$canAccessCeoIndex = method_exists('App\\Core\\Auth', 'canAccessCeoIndex') ? \App\Core\Auth::canAccessCeoIndex() : false;
 
 $dashboardType = isset($dashboardType) ? (string)$dashboardType : (isset($_SESSION['dashboardType']) ? (string)$_SESSION['dashboardType'] : 'employee');
 if ($dashboardType !== 'employee' && $dashboardType !== 'executive') $dashboardType = 'employee';
@@ -106,6 +108,9 @@ $menuItems = array(
   array('id'=>$safetyMenu,'label'=>$safetyMenu,'icon'=>'shield-alert','gradient'=>'from-red-500 to-rose-500','iconBg'=>'bg-gradient-to-br from-red-100 to-rose-100','iconColor'=>'text-red-600','hoverShadow'=>'hover:shadow-red-200'),
   array('id'=>$qualityMenu,'label'=>$qualityMenu,'icon'=>'award','gradient'=>'from-cyan-500 to-blue-500','iconBg'=>'bg-gradient-to-br from-cyan-100 to-blue-100','iconColor'=>'text-cyan-600','hoverShadow'=>'hover:shadow-cyan-200'),
 );
+if ($canAccessCeoIndex) {
+    array_splice($menuItems, 1, 0, array(array('id'=>$ceoIndexMenu,'label'=>$ceoIndexMenu,'href'=>'?r=ceo_index','icon'=>'gauge','gradient'=>'from-indigo-700 to-blue-600','iconBg'=>'bg-gradient-to-br from-indigo-100 to-blue-100','iconColor'=>'text-indigo-700','hoverShadow'=>'hover:shadow-indigo-200')));
+}
 if ($isPublicAffairsDept) {
     $filteredMenuItems = array();
     foreach ($menuItems as $menuItem) {
@@ -322,6 +327,9 @@ if ($selectedMenu === $dashboardMenu) {
       array('menu' => 'notice', 'label' => $noticeMenu, 'icon' => 'megaphone', 'href' => '?r=notice'),
       array('menu' => 'approval', 'label' => '전자결재', 'icon' => 'file-check-2', 'href' => '?r=approval_home&view=active'),
     );
+    if ($canAccessCeoIndex) {
+      array_splice($mobileNavItems, 1, 0, array(array('menu'=>'ceo_index','label'=>'CEO Index','icon'=>'gauge','href'=>'?r=ceo_index')));
+    }
     if ($canViewPublicAffairsMobileMenu) {
       $mobileNavItems[] = array('menu' => 'public_affairs', 'label' => '공무', 'icon' => 'scroll-text', 'href' => '?r=' . urlencode($workMenu) . '&tab=monthly_summary');
     }
@@ -349,6 +357,7 @@ if ($selectedMenu === $dashboardMenu) {
       <?php
         $mobileIsActive = false;
         if ($mobileItem['menu'] === 'representative_management' && $selectedMenu === $representativeManagementMenu) $mobileIsActive = true;
+        else if ($mobileItem['menu'] === 'ceo_index' && $selectedMenu === $ceoIndexMenu) $mobileIsActive = true;
         else if ($mobileItem['menu'] === 'company_profit' && $selectedMenu === $companyProfitMenu) $mobileIsActive = true;
         else if ($mobileItem['menu'] === 'dashboard' && $selectedMenu === $dashboardMenu) $mobileIsActive = true;
         else if (isset($mobileItem['label']) && (string)$selectedMenu === (string)$mobileItem['label']) $mobileIsActive = true;

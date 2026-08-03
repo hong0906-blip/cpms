@@ -13,6 +13,7 @@ use Exception;
 use PDO;
 
 require_once __DIR__ . '/OpenAiResponsesClient.php';
+require_once __DIR__ . '/AiCeoIndexService.php';
 
 class AiExecutiveBriefService
 {
@@ -467,12 +468,35 @@ class AiExecutiveBriefService
         return array('metric_id'=>$id,'label'=>$label,'value'=>$value,'unit'=>$unit);
     }
 
+    private static function buildV2SourceData($pdo)
+    {
+        $ceoTable='cpms_ai_ceo_index_results_v2';$projectTable='cpms_ai_ceo_project_results_v2';$snapshotTable='cpms_ai_daily_snapshots';
+        if(!$pdo||!self::tableExists($pdo,$ceoTable)||!self::tableExists($pdo,$projectTable)||!self::tableExists($pdo,$snapshotTable))return null;
+        try{
+            $company=AiCeoIndexService::latestNormalV2($pdo);if(!is_array($company)||(string)$company['calculation_version']!==AiCeoIndexService::V2_VERSION)return null;
+            $params=array(':date'=>$company['analysis_date'],':ym'=>$company['target_ym'],':run_id'=>(int)$company['run_id'],':version'=>AiCeoIndexService::V2_VERSION);
+            $sql='SELECT p.*,s.monthly_sales_amount,s.cumulative_sales_amount,s.cumulative_input_amount FROM `'.$projectTable.'` p LEFT JOIN `'.$snapshotTable.'` s ON s.snapshot_date=p.analysis_date AND s.target_ym=p.target_ym AND s.project_id=p.project_id WHERE p.analysis_date=:date AND p.target_ym=:ym AND p.run_id=:run_id AND p.calculation_version=:version ORDER BY CASE p.project_index_grade WHEN \'CRITICAL\' THEN 1 WHEN \'WARNING\' THEN 2 WHEN \'WATCH\' THEN 3 WHEN \'INSUFFICIENT\' THEN 4 ELSE 5 END,p.final_forecast_amount DESC,p.project_id LIMIT 20';
+            $detail=$pdo->prepare($sql);if(!$detail||!$detail->execute($params))return null;$rows=$detail->fetchAll(PDO::FETCH_ASSOC);if(!is_array($rows))$rows=array();
+            $metrics=array(self::metric('company.project_count','분석 현장 수',(int)$company['source_project_count'],'개'),self::metric('company.ceo_index_score','CEO Index',$company['ceo_index_score']===null?null:(float)$company['ceo_index_score'],'점'),self::metric('company.current_input_total','현재 입력 투입비 합계',(float)$company['current_input_total'],'원'),self::metric('company.expected_unentered_total','예상 미입력 투입비 합계',(float)$company['expected_unentered_total'],'원'),self::metric('company.final_forecast_total','최종 예상 투입비 합계',(float)$company['final_forecast_total'],'원'),self::metric('company.forecast_low_total','예상 하한 합계',(float)$company['forecast_low_total'],'원'),self::metric('company.forecast_high_total','예상 상한 합계',(float)$company['forecast_high_total'],'원'),self::metric('company.critical_count','위험 현장 수',(int)$company['critical_count'],'개'),self::metric('company.warning_count','주의 현장 수',(int)$company['warning_count'],'개'),self::metric('company.missing_count','누락 가능성 현장 수',(int)$company['missing_count'],'개'));
+            $projects=array();foreach($rows as $row){$id=(int)$row['project_id'];if($id<=0)continue;$sales=isset($row['monthly_sales_amount'])?(float)$row['monthly_sales_amount']:0.0;$forecast=(float)$row['final_forecast_amount'];$profit=$sales-$forecast;$projects[]=array('project_id'=>$id,'project_name'=>self::redactText($row['project_name_snapshot'],190),'project_status'=>self::redactText($row['project_status_snapshot'],50),'current_input_amount'=>(float)$row['current_input_amount'],'expected_completion_rate'=>$row['expected_completion_rate']===null?null:(float)$row['expected_completion_rate'],'expected_unentered_amount'=>(float)$row['expected_unentered_amount'],'final_forecast_amount'=>$forecast,'forecast_low_amount'=>(float)$row['forecast_low_amount'],'forecast_high_amount'=>(float)$row['forecast_high_amount'],'forecast_confidence_score'=>$row['forecast_confidence_score']===null?null:(float)$row['forecast_confidence_score'],'forecast_confidence_grade'=>(string)$row['forecast_confidence_grade'],'overinput_grade'=>(string)$row['overinput_grade'],'missing_possibility_grade'=>(string)$row['missing_possibility_grade'],'contract_risk_grade'=>(string)$row['contract_risk_grade'],'anomaly_count'=>(int)$row['anomaly_count'],'project_index_score'=>$row['project_index_score']===null?null:(float)$row['project_index_score'],'project_index_grade'=>(string)$row['project_index_grade'],'monthly_sales_amount'=>$sales,'monthly_forecast_profit_amount'=>$profit,'evidence_ids'=>array('project.'.$id.'.current_input_amount','project.'.$id.'.expected_unentered_amount','project.'.$id.'.final_forecast_amount','project.'.$id.'.forecast_confidence_score','project.'.$id.'.overinput_grade','project.'.$id.'.missing_possibility_grade','project.'.$id.'.project_index_score','project.'.$id.'.monthly_sales_amount','project.'.$id.'.monthly_forecast_profit_amount'));}
+            $source=array('analysis_date'=>$company['analysis_date'],'target_ym'=>$company['target_ym'],'calculation_version'=>AiCeoIndexService::V2_VERSION,'company_metrics'=>$metrics,'grade_summary'=>array('WARNING'=>(int)$company['warning_count'],'CRITICAL'=>(int)$company['critical_count'],'INSUFFICIENT'=>(int)$company['insufficient_count']),'detailed_project_count'=>count($projects),'omitted_project_count'=>max(0,(int)$company['source_project_count']-count($projects)),'projects'=>$projects,'data_notice'=>'모든 금액과 비율은 CPMS V2 PHP 계산결과이며 GPT는 재계산하지 않습니다.');$json=self::encodeData($source);while(is_string($json)&&strlen($json)>self::MAX_INPUT_BYTES&&count($source['projects'])>1){array_pop($source['projects']);$source['detailed_project_count']=count($source['projects']);$source['omitted_project_count']=max(0,(int)$company['source_project_count']-count($source['projects']));$json=self::encodeData($source);}if(!is_string($json))return null;return array('ok'=>true,'message'=>'V2 브리핑 입력자료를 준비했습니다.','analysis_date'=>$company['analysis_date'],'target_ym'=>$company['target_ym'],'project_count'=>(int)$company['source_project_count'],'source_data'=>$source,'input_bytes'=>strlen($json));
+        }catch(Exception $e){return null;}
+    }
+
     public static function buildSourceData($pdo = null)
     {
         $pdo = self::pdo($pdo);
-        $context = self::latestRiskContext($pdo);
-        $empty = array('ok'=>false,'message'=>'최신 적자·원가율 위험분석 결과가 없습니다.','analysis_date'=>'','target_ym'=>'','project_count'=>0,'source_data'=>array(),'input_bytes'=>0);
+        $empty = array('ok'=>false,'message'=>'신규 투입비 예측이 아직 실행되지 않았습니다. 자동 파이프라인 또는 개발부서 수동 분석을 먼저 실행해주세요.','analysis_date'=>'','target_ym'=>'','project_count'=>0,'source_data'=>array(),'input_bytes'=>0);
         if (!$pdo) { $empty['message'] = 'DB 연결 상태를 확인할 수 없습니다.'; return $empty; }
+        $v2Source=self::buildV2SourceData($pdo);
+        if(is_array($v2Source)&&!empty($v2Source['ok'])&&isset($v2Source['source_data']['calculation_version'])&&$v2Source['source_data']['calculation_version']===AiCeoIndexService::V2_VERSION)return $v2Source;
+        return $empty;
+    }
+
+    private static function buildLegacySourceData($pdo)
+    {
+        $context = self::latestRiskContext($pdo);
+        $empty = array('ok'=>false,'message'=>'기존 7-2 위험분석 결과가 없습니다.','analysis_date'=>'','target_ym'=>'','project_count'=>0,'source_data'=>array(),'input_bytes'=>0);
         if (empty($context['available'])) return $empty;
         $params = array(':analysis_date'=>$context['analysis_date'], ':target_ym'=>$context['target_ym']);
         try {
@@ -994,6 +1018,21 @@ class AiExecutiveBriefService
             $st=$pdo->query($sql); $row=$st?$st->fetch(PDO::FETCH_ASSOC):false;
             return is_array($row)?$row:array();
         } catch (Exception $e) { return array(); }
+    }
+
+    public static function latestV2Brief($pdo = null, $targetYm = '')
+    {
+        $pdo=self::pdo($pdo);
+        if(!$pdo||!self::tableExists($pdo,self::BRIEF_TABLE))return array();
+        $normal=AiCeoIndexService::latestNormalV2($pdo,$targetYm);
+        if(empty($normal)||(string)$normal['calculation_version']!==AiCeoIndexService::V2_VERSION)return array();
+        try{
+            $sql='SELECT id,run_id,analysis_date,target_ym,schema_version,model_name,source_project_count,company_status,headline,executive_summary,top_risk_count,check_today_count,key_metrics_data,top_risks_data,positive_signals_data,check_today_data,data_limitations_data,disclaimer,source_summary_data,generated_at,created_at,updated_at FROM `'.self::BRIEF_TABLE.'` WHERE target_ym=:target_ym ORDER BY generated_at DESC,id DESC LIMIT 50';
+            $st=$pdo->prepare($sql);if(!$st||!$st->execute(array(':target_ym'=>$normal['target_ym'])))return array();
+            $rows=$st->fetchAll(PDO::FETCH_ASSOC);if(!is_array($rows))return array();
+            foreach($rows as $row){$source=self::decodeArray(isset($row['source_summary_data'])?$row['source_summary_data']:'');if(isset($source['calculation_version'])&&$source['calculation_version']===AiCeoIndexService::V2_VERSION)return $row;}
+        }catch(Exception $e){}
+        return array();
     }
 
     public static function briefOriginalProjects($brief)

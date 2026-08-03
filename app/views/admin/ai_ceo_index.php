@@ -13,8 +13,8 @@ require_once __DIR__ . '/../../services/AiExecutiveBriefService.php';
 require_once __DIR__ . '/../../services/AiCeoIndexService.php';
 require_once __DIR__ . '/../../services/AiExecutiveQaService.php';
 
-$ceoCanView=Auth::check()&&(Auth::isDevelopmentDepartment()||Auth::canManageEmployees()||Auth::userRole()==='executive');
-$ceoCanManage=Auth::check()&&(Auth::isDevelopmentDepartment()||Auth::canManageEmployees());
+$ceoCanView=Auth::check()&&Auth::isDevelopmentDepartment();
+$ceoCanManage=$ceoCanView;
 if (!$ceoCanView) { http_response_code(403); echo '<div style="padding:16px;border:1px solid #fecaca;border-radius:14px;background:#fef2f2;color:#b91c1c;font-weight:800;">'.h('접근 권한이 없습니다.').'</div>'; return; }
 
 if (!function_exists('cpms_ceo_money')) { function cpms_ceo_money($value) { return $value===null?'-':number_format((float)$value).'원'; } }

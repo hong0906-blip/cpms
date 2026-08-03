@@ -564,6 +564,12 @@ if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_c
 if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_executive_qa_history') {
     $route = 'admin/ai_executive_qa_history';
 }
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_pipeline_setup') {
+    $route = 'admin/ai_pipeline_setup';
+}
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_pipeline_history') {
+    $route = 'admin/ai_pipeline_history';
+}
 
 
 // ==========================
@@ -1845,7 +1851,7 @@ if ($route === '관리' && isset($_GET['debug_route']) && (string)$_GET['debug_r
 //  AI 데이터 준비상태 점검(읽기 전용)
 // ==========================
 if ($route === 'admin/ai_data_audit') {
-    if (!(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=UTF-8');
         echo '접근 권한이 없습니다.';
@@ -1864,7 +1870,7 @@ if ($route === 'admin/ai_data_audit') {
 //  통합 비용 이력 설치/조회
 // ==========================
 if ($route === 'admin/ai_data_setup' || $route === 'admin/ai_data_history') {
-    if (!(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=UTF-8');
         echo '접근 권한이 없습니다.';
@@ -1883,7 +1889,7 @@ if ($route === 'admin/ai_data_setup' || $route === 'admin/ai_data_history') {
 //  현장별 일일 투입현황 스냅샷 설치/조회
 // ==========================
 if ($route === 'admin/ai_snapshot_setup' || $route === 'admin/ai_snapshot_history') {
-    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=UTF-8');
         echo '접근 권한이 없습니다.';
@@ -1902,7 +1908,7 @@ if ($route === 'admin/ai_snapshot_setup' || $route === 'admin/ai_snapshot_histor
 // 기본 월말 예상 투입비 설치/조회
 // ==========================
 if ($route === 'admin/ai_forecast_setup' || $route === 'admin/ai_forecast_history') {
-    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=UTF-8');
         echo '접근 권한이 없습니다.';
@@ -1921,7 +1927,7 @@ if ($route === 'admin/ai_forecast_setup' || $route === 'admin/ai_forecast_histor
 // 투입비 입력 신뢰도 및 입력 지연 분석 설치/조회
 // ==========================
 if ($route === 'admin/ai_reliability_setup' || $route === 'admin/ai_reliability_history') {
-    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=UTF-8');
         echo '접근 권한이 없습니다.';
@@ -1940,7 +1946,7 @@ if ($route === 'admin/ai_reliability_setup' || $route === 'admin/ai_reliability_
 // 현장별 비용 이상징후 탐지 설치/조회
 // ==========================
 if ($route === 'admin/ai_anomaly_setup' || $route === 'admin/ai_anomaly_history') {
-    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=UTF-8');
         echo '접근 권한이 없습니다.';
@@ -1959,7 +1965,7 @@ if ($route === 'admin/ai_anomaly_setup' || $route === 'admin/ai_anomaly_history'
 // 현장별 적자·원가율 위험 분석 설치/조회
 // ==========================
 if ($route === 'admin/ai_profit_risk_setup' || $route === 'admin/ai_profit_risk_history') {
-    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=UTF-8');
         echo '접근 권한이 없습니다.';
@@ -1978,7 +1984,7 @@ if ($route === 'admin/ai_profit_risk_setup' || $route === 'admin/ai_profit_risk_
 // OpenAI 연결 설정 및 대표용 경영 브리핑
 // ==========================
 if ($route === 'admin/ai_openai_setup' || $route === 'admin/ai_executive_brief') {
-    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=UTF-8');
         echo '접근 권한이 없습니다.';
@@ -1997,10 +2003,7 @@ if ($route === 'admin/ai_openai_setup' || $route === 'admin/ai_executive_brief')
 // CEO Index 및 대표 질문 이력
 // ==========================
 if ($route === 'admin/ai_ceo_index' || $route === 'admin/ai_executive_qa_history') {
-    $isAiManager = (\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees());
-    $canViewCeoIndex = $isAiManager || \App\Core\Auth::userRole() === 'executive';
-    $allowed = $route === 'admin/ai_ceo_index' ? $canViewCeoIndex : $isAiManager;
-    if (!\App\Core\Auth::check() || !$allowed) {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);
         header('Content-Type: text/plain; charset=UTF-8');
         echo '접근 권한이 없습니다.';
@@ -2010,6 +2013,43 @@ if ($route === 'admin/ai_ceo_index' || $route === 'admin/ai_executive_qa_history
     \App\Core\View::render('admin/index', array(
         'title' => $route === 'admin/ai_ceo_index' ? 'CEO Index' : '대표 질문·답변 이력',
         'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// ==========================
+// AI 자동 분석 파이프라인 설정 및 이력(개발부서 전용)
+// ==========================
+if ($route === 'admin/ai_pipeline_setup' || $route === 'admin/ai_pipeline_history') {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = $route === 'admin/ai_pipeline_setup' ? 'ai_pipeline_setup' : 'ai_pipeline_history';
+    \App\Core\View::render('admin/index', array(
+        'title' => $route === 'admin/ai_pipeline_setup' ? 'AI 자동 분석 설정' : 'AI 자동 분석 실행 이력',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// ==========================
+// 독립 CEO Index(대표 및 개발부서 전용)
+// ==========================
+if ($route === 'ceo_index' || $route === 'CEO Index') {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::canAccessCeoIndex()) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    \App\Core\View::render('ceo_index/index', array(
+        'title' => 'CEO Index',
+        'selectedMenu' => 'CEO Index',
         'dashboardType' => $dashboardType,
     ));
     exit;

@@ -15,7 +15,7 @@ require_once __DIR__ . '/../../services/CompanyPayrollAccessService.php';
 $pdo = Db::pdo();
 $user = Auth::user();
 $canManage = (Auth::isMaster() || Auth::canManageEmployees());
-$canAiDataAudit = (Auth::isDevelopmentDepartment() || Auth::canManageEmployees());
+$canAiDataAudit = Auth::isDevelopmentDepartment();
 $canLaborManagement = cpms_is_management_department_user($pdo, $user);
 $canViewCompanyOverhead = cpms_can_view_company_overhead($user, $pdo);
 $canViewCompanyPayroll = cpms_can_view_company_payroll($user, $pdo);
@@ -45,11 +45,11 @@ $tabs = array(
 if ($canViewCompanyOverhead || $canViewCompanyPayroll) {
     $tabs['company_overhead'] = array('label' => '총관리비', 'icon' => 'building-2');
 }
-if (Auth::isMaster()) {
+if ($canAiDataAudit) {
     $tabs['drive_check'] = array('label' => 'Drive 점검', 'icon' => 'cloud');
     $tabs['data_archive'] = array('label' => urldecode('%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%95%84%EC%B9%B4%EC%9D%B4%EB%B8%8C'), 'icon' => 'archive');
 }
-if (Auth::isMaster()) {
+if ($canAiDataAudit) {
     $tabs['project_drive_sync'] = array('label' => '프로젝트 Drive 동기화', 'icon' => 'folder-sync');
 }
 
@@ -87,8 +87,10 @@ if ($canAiDataAudit) {
     $tabs['ai_profit_risk_history'] = array('label' => '적자·원가율 위험 결과', 'icon' => 'chart-no-axes-column-increasing');
     $tabs['ai_openai_setup'] = array('label' => 'OpenAI 연결 설정', 'icon' => 'plug-zap');
     $tabs['ai_executive_brief'] = array('label' => '대표용 경영 브리핑', 'icon' => 'briefcase-business');
-    $tabs['ai_ceo_index'] = array('label' => 'CEO Index', 'icon' => 'gauge');
+    $tabs['ai_ceo_index'] = array('label' => 'CEO Index 진단', 'icon' => 'gauge');
     $tabs['ai_executive_qa_history'] = array('label' => '대표 질문 이력', 'icon' => 'messages-square');
+    $tabs['ai_pipeline_setup'] = array('label' => 'AI 자동 분석 설정', 'icon' => 'workflow');
+    $tabs['ai_pipeline_history'] = array('label' => 'AI 자동 분석 이력', 'icon' => 'list-checks');
 }
 
 if (!isset($tabs[$tab])) {
@@ -107,7 +109,13 @@ if (!function_exists('admin_tab_url')) {
 ?>
 
 <div style="margin:0 0 16px 0; padding:12px; border:1px solid #e5e7eb; border-radius:12px; background:#fff;">
+  <?php $adminAiGroupOpen = false; ?>
   <?php foreach ($tabs as $k => $t): ?>
+    <?php if (!$adminAiGroupOpen && strpos($k, 'ai_') === 0): $adminAiGroupOpen = true; ?>
+      <details<?php echo strpos($tab, 'ai_') === 0 ? ' open' : ''; ?> style="margin-top:10px;padding-top:10px;border-top:1px solid #e5e7eb;">
+        <summary style="cursor:pointer;font-weight:800;color:#334155;margin-bottom:6px;">AI·시스템 관리</summary>
+        <div>
+    <?php endif; ?>
     <?php $active = ($k === $tab); ?>
     <?php
       $tabHref = admin_tab_url($k);
@@ -162,6 +170,12 @@ if (!function_exists('admin_tab_url')) {
       if ($k === 'ai_executive_qa_history') {
           $tabHref = '?r=admin%2Fai_executive_qa_history';
       }
+      if ($k === 'ai_pipeline_setup') {
+          $tabHref = '?r=admin%2Fai_pipeline_setup';
+      }
+      if ($k === 'ai_pipeline_history') {
+          $tabHref = '?r=admin%2Fai_pipeline_history';
+      }
       if ($k === 'company_overhead' && !$canViewCompanyOverhead && $canViewCompanyPayroll) {
           $tabHref .= '&oh=payroll';
       }
@@ -170,6 +184,7 @@ if (!function_exists('admin_tab_url')) {
       <?php echo h($t['label']); ?>
     </a>
   <?php endforeach; ?>
+  <?php if ($adminAiGroupOpen): ?></div></details><?php endif; ?>
 </div>
 
 <?php
@@ -221,16 +236,20 @@ if ($tab === 'employees') {
     require __DIR__ . '/ai_ceo_index.php';
 } elseif ($tab === 'ai_executive_qa_history' && $canAiDataAudit) {
     require __DIR__ . '/ai_executive_qa_history.php';
+} elseif ($tab === 'ai_pipeline_setup' && $canAiDataAudit) {
+    require __DIR__ . '/ai_pipeline_setup.php';
+} elseif ($tab === 'ai_pipeline_history' && $canAiDataAudit) {
+    require __DIR__ . '/ai_pipeline_history.php';
 } elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
         $_GET['oh'] = 'payroll';
     }
     require __DIR__ . '/../management/overhead/index.php';
-} elseif ($tab === 'drive_check' && Auth::isMaster()) {
+} elseif ($tab === 'drive_check' && $canAiDataAudit) {
     require __DIR__ . '/drive_check.php';
-} elseif ($tab === 'data_archive' && Auth::isMaster()) {
+} elseif ($tab === 'data_archive' && $canAiDataAudit) {
     require __DIR__ . '/data_archive.php';
-} elseif ($tab === 'project_drive_sync' && Auth::isMaster()) {
+} elseif ($tab === 'project_drive_sync' && $canAiDataAudit) {
     require __DIR__ . '/project_drive_sync.php';
 } else {
     require __DIR__ . '/labor_calc.php';
