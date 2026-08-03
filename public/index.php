@@ -546,6 +546,12 @@ if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_a
 if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_anomaly_history') {
     $route = 'admin/ai_anomaly_history';
 }
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_profit_risk_setup') {
+    $route = 'admin/ai_profit_risk_setup';
+}
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_profit_risk_history') {
+    $route = 'admin/ai_profit_risk_history';
+}
 
 
 // ==========================
@@ -1931,6 +1937,25 @@ if ($route === 'admin/ai_anomaly_setup' || $route === 'admin/ai_anomaly_history'
     $_GET['tab'] = $route === 'admin/ai_anomaly_setup' ? 'ai_anomaly_setup' : 'ai_anomaly_history';
     \App\Core\View::render('admin/index', array(
         'title' => $route === 'admin/ai_anomaly_setup' ? '이상징후 탐지 설정' : '현장별 비용 이상징후 탐지 결과',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// ==========================
+// 현장별 적자·원가율 위험 분석 설치/조회
+// ==========================
+if ($route === 'admin/ai_profit_risk_setup' || $route === 'admin/ai_profit_risk_history') {
+    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = $route === 'admin/ai_profit_risk_setup' ? 'ai_profit_risk_setup' : 'ai_profit_risk_history';
+    \App\Core\View::render('admin/index', array(
+        'title' => $route === 'admin/ai_profit_risk_setup' ? '적자·원가율 위험 분석 설정' : '현장별 적자·원가율 위험 분석 결과',
         'selectedMenu' => '관리',
         'dashboardType' => $dashboardType,
     ));

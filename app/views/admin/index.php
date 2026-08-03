@@ -83,6 +83,8 @@ if ($canAiDataAudit) {
     $tabs['ai_reliability_history'] = array('label' => '입력 신뢰도 결과', 'icon' => 'activity');
     $tabs['ai_anomaly_setup'] = array('label' => '이상징후 탐지 설정', 'icon' => 'scan-search');
     $tabs['ai_anomaly_history'] = array('label' => '이상징후 탐지 결과', 'icon' => 'triangle-alert');
+    $tabs['ai_profit_risk_setup'] = array('label' => '적자·원가율 위험 설정', 'icon' => 'badge-alert');
+    $tabs['ai_profit_risk_history'] = array('label' => '적자·원가율 위험 결과', 'icon' => 'chart-no-axes-column-increasing');
 }
 
 if (!isset($tabs[$tab])) {
@@ -138,6 +140,12 @@ if (!function_exists('admin_tab_url')) {
       if ($k === 'ai_anomaly_history') {
           $tabHref = '?r=admin%2Fai_anomaly_history';
       }
+      if ($k === 'ai_profit_risk_setup') {
+          $tabHref = '?r=admin%2Fai_profit_risk_setup';
+      }
+      if ($k === 'ai_profit_risk_history') {
+          $tabHref = '?r=admin%2Fai_profit_risk_history';
+      }
       if ($k === 'company_overhead' && !$canViewCompanyOverhead && $canViewCompanyPayroll) {
           $tabHref .= '&oh=payroll';
       }
@@ -185,6 +193,10 @@ if ($tab === 'employees') {
     require __DIR__ . '/ai_anomaly_setup.php';
 } elseif ($tab === 'ai_anomaly_history' && $canAiDataAudit) {
     require __DIR__ . '/ai_anomaly_history.php';
+} elseif ($tab === 'ai_profit_risk_setup' && $canAiDataAudit) {
+    require __DIR__ . '/ai_profit_risk_setup.php';
+} elseif ($tab === 'ai_profit_risk_history' && $canAiDataAudit) {
+    require __DIR__ . '/ai_profit_risk_history.php';
 } elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
         $_GET['oh'] = 'payroll';

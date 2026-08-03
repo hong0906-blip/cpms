@@ -472,6 +472,7 @@ class AiDataAuditService
         $forecastStatus = $this->auditMonthlyForecasts();
         $reliabilityStatus = $this->auditInputReliability();
         $anomalyStatus = $this->auditAnomalyDetection();
+        $profitRiskStatus = $this->auditProfitRisk();
         $overall = $this->calculateOverallScore($sections);
         $globalWarnings = array();
         $globalRecommendations = array();
@@ -505,6 +506,12 @@ class AiDataAuditService
         if (isset($anomalyStatus['recommendation']) && $anomalyStatus['recommendation'] !== '') {
             $globalRecommendations[] = $anomalyStatus['recommendation'];
         }
+        if (isset($profitRiskStatus['warning']) && $profitRiskStatus['warning'] !== '') {
+            $globalWarnings[] = $profitRiskStatus['warning'];
+        }
+        if (isset($profitRiskStatus['recommendation']) && $profitRiskStatus['recommendation'] !== '') {
+            $globalRecommendations[] = $profitRiskStatus['recommendation'];
+        }
         foreach ($sections as $section) {
             if (!empty($section['warnings'])) $globalWarnings[] = $section['label'] . ': ' . $section['warnings'][0];
             if (!empty($section['recommendations'])) $globalRecommendations[] = $section['label'] . ': ' . $section['recommendations'][0];
@@ -534,6 +541,7 @@ class AiDataAuditService
             'monthly_forecast' => $forecastStatus,
             'input_reliability' => $reliabilityStatus,
             'anomaly_detection' => $anomalyStatus,
+            'profit_risk' => $profitRiskStatus,
             'global_warnings' => $globalWarnings,
             'global_recommendations' => $globalRecommendations,
             'read_only' => true,
@@ -833,6 +841,69 @@ class AiDataAuditService
         if ($result['latest_run_failure_count'] > 0) {
             $result['warning'] = '최근 이상징후 탐지 실행에서 일부 현장 분석 실패가 확인됐습니다.';
             $result['recommendation'] = '이상징후 탐지 설정에서 최근 실행 상태를 확인해주세요.';
+        }
+        return $result;
+    }
+
+    public function auditProfitRisk()
+    {
+        $result = array(
+            'run_table_installed'=>false,'result_table_installed'=>false,'installed'=>false,
+            'result_count'=>0,'project_count'=>0,'latest_analysis_date'=>'','normal_count'=>0,
+            'watch_count'=>0,'warning_count'=>0,'critical_count'=>0,'insufficient_count'=>0,
+            'latest_run_status'=>'','latest_run_failure_count'=>0,'setup_required'=>false,
+            'message'=>'','warning'=>'','recommendation'=>'',
+        );
+        if (!$this->pdo) {
+            $result['setup_required'] = true;
+            $result['message'] = '적자·원가율 위험분석 DB 상태를 확인할 수 없습니다.';
+            return $result;
+        }
+        $runTable = 'cpms_ai_profit_risk_runs';
+        $resultTable = 'cpms_ai_profit_risk_results';
+        $runRequired = array('analysis_date','run_status','failure_count','started_at');
+        $resultRequired = array('analysis_date','project_id','risk_grade','risk_score','last_calculated_at');
+        $result['run_table_installed'] = $this->tableExists($runTable);
+        $result['result_table_installed'] = $this->tableExists($resultTable);
+        foreach ($runRequired as $column) if (!$this->columnExists($runTable,$column)) $result['run_table_installed'] = false;
+        foreach ($resultRequired as $column) if (!$this->columnExists($resultTable,$column)) $result['result_table_installed'] = false;
+        $result['installed'] = $result['run_table_installed'] && $result['result_table_installed'];
+        if (!$result['installed']) {
+            $result['setup_required'] = true;
+            $result['message'] = '적자·원가율 위험분석 기능이 아직 설치되지 않았습니다.';
+            $result['warning'] = '적자·원가율 위험분석 기능이 아직 설치되지 않았습니다.';
+            $result['recommendation'] = '적자·원가율 위험 설정에서 분석 테이블을 설치해주세요.';
+            return $result;
+        }
+        $aggregate = $this->safeAggregate(
+            "SELECT COUNT(*) AS result_count,COUNT(DISTINCT project_id) AS project_count,MAX(analysis_date) AS latest_date,"
+            . "COALESCE(SUM(CASE WHEN risk_grade='NORMAL' THEN 1 ELSE 0 END),0) AS normal_count,"
+            . "COALESCE(SUM(CASE WHEN risk_grade='WATCH' THEN 1 ELSE 0 END),0) AS watch_count,"
+            . "COALESCE(SUM(CASE WHEN risk_grade='WARNING' THEN 1 ELSE 0 END),0) AS warning_count,"
+            . "COALESCE(SUM(CASE WHEN risk_grade='CRITICAL' THEN 1 ELSE 0 END),0) AS critical_count,"
+            . "COALESCE(SUM(CASE WHEN risk_grade='INSUFFICIENT' THEN 1 ELSE 0 END),0) AS insufficient_count FROM `" . $resultTable . "`",
+            array(),
+            '적자·원가율 위험분석 결과 집계 실패'
+        );
+        if ($aggregate['ok']) {
+            $row = $aggregate['row'];
+            foreach (array('result_count','project_count','normal_count','watch_count','warning_count','critical_count','insufficient_count') as $key) $result[$key] = isset($row[$key]) ? (int)$row[$key] : 0;
+            $result['latest_analysis_date'] = isset($row['latest_date']) && $row['latest_date'] !== null ? (string)$row['latest_date'] : '';
+        }
+        try {
+            $st = $this->pdo->query("SELECT run_status,failure_count FROM `" . $runTable . "` ORDER BY started_at DESC,id DESC LIMIT 1");
+            $run = $st ? $st->fetch(PDO::FETCH_ASSOC) : false;
+            if (is_array($run)) {
+                $result['latest_run_status'] = isset($run['run_status']) ? (string)$run['run_status'] : '';
+                $result['latest_run_failure_count'] = isset($run['failure_count']) ? (int)$run['failure_count'] : 0;
+            }
+        } catch (Exception $e) {
+        }
+        if ($result['result_count'] === 0) $result['message'] = '위험분석 구조는 설치됐으며 월말 예측 실행 후 분석할 수 있습니다.';
+        else $result['message'] = '저장된 스냅샷·월말 예측·입력 신뢰도·이상징후를 기준으로 손익 위험을 분석하고 있습니다.';
+        if ($result['latest_run_failure_count'] > 0) {
+            $result['warning'] = '최근 적자·원가율 위험분석 실행에서 일부 현장 분석 실패가 확인됐습니다.';
+            $result['recommendation'] = '적자·원가율 위험 설정에서 최근 실행 상태를 확인해주세요.';
         }
         return $result;
     }

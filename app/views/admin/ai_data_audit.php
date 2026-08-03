@@ -65,6 +65,7 @@ $dailySnapshot = isset($aiAudit['daily_snapshot']) && is_array($aiAudit['daily_s
 $monthlyForecast = isset($aiAudit['monthly_forecast']) && is_array($aiAudit['monthly_forecast']) ? $aiAudit['monthly_forecast'] : array();
 $inputReliability = isset($aiAudit['input_reliability']) && is_array($aiAudit['input_reliability']) ? $aiAudit['input_reliability'] : array();
 $anomalyDetection = isset($aiAudit['anomaly_detection']) && is_array($aiAudit['anomaly_detection']) ? $aiAudit['anomaly_detection'] : array();
+$profitRisk = isset($aiAudit['profit_risk']) && is_array($aiAudit['profit_risk']) ? $aiAudit['profit_risk'] : array();
 ?>
 
 <style>
@@ -256,6 +257,21 @@ $anomalyDetection = isset($aiAudit['anomaly_detection']) && is_array($aiAudit['a
       <div class="ai-audit-snapshot-item"><span>주의 / 긴급 확인</span><strong><?php echo h(number_format(isset($anomalyDetection['warning_count']) ? (int)$anomalyDetection['warning_count'] : 0)); ?> / <?php echo h(number_format(isset($anomalyDetection['critical_count']) ? (int)$anomalyDetection['critical_count'] : 0)); ?>개</strong></div>
       <div class="ai-audit-snapshot-item"><span>판단자료 부족</span><strong><?php echo h(number_format(isset($anomalyDetection['insufficient_count']) ? (int)$anomalyDetection['insufficient_count'] : 0)); ?>개</strong></div>
       <div class="ai-audit-snapshot-item"><span>최근 실행 상태 / 실패</span><strong><?php echo h(isset($anomalyDetection['latest_run_status']) && $anomalyDetection['latest_run_status'] !== '' ? $anomalyDetection['latest_run_status'] : '-'); ?> / <?php echo h(number_format(isset($anomalyDetection['latest_run_failure_count']) ? (int)$anomalyDetection['latest_run_failure_count'] : 0)); ?>건</strong></div>
+    </div>
+  </section>
+
+  <section class="ai-audit-snapshot-panel" style="border-color:#fecaca;background:linear-gradient(135deg,#fff 0%,#fef2f2 100%);">
+    <div class="ai-audit-snapshot-head"><div><h3>현장별 적자·원가율 위험 분석</h3><p><?php echo h(isset($profitRisk['message']) && $profitRisk['message'] !== '' ? $profitRisk['message'] : '적자·원가율 위험분석 상태를 확인할 수 없습니다.'); ?> 이 항목은 기존 AI 준비점수에는 아직 반영하지 않습니다.</p></div><a class="ai-audit-snapshot-link" style="background:#b91c1c;" href="?r=admin%2Fai_profit_risk_setup">적자·원가율 위험 설정</a></div>
+    <div class="ai-audit-snapshot-grid">
+      <div class="ai-audit-snapshot-item"><span>실행이력 테이블</span><strong><?php echo !empty($profitRisk['run_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>위험분석 결과 테이블</span><strong><?php echo !empty($profitRisk['result_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>전체 분석 결과</span><strong><?php echo h(number_format(isset($profitRisk['result_count']) ? (int)$profitRisk['result_count'] : 0)); ?>건</strong></div>
+      <div class="ai-audit-snapshot-item"><span>분석된 프로젝트</span><strong><?php echo h(number_format(isset($profitRisk['project_count']) ? (int)$profitRisk['project_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 분석일</span><strong><?php echo h(isset($profitRisk['latest_analysis_date']) && $profitRisk['latest_analysis_date'] !== '' ? $profitRisk['latest_analysis_date'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>정상 / 관심</span><strong><?php echo h(number_format(isset($profitRisk['normal_count']) ? (int)$profitRisk['normal_count'] : 0)); ?> / <?php echo h(number_format(isset($profitRisk['watch_count']) ? (int)$profitRisk['watch_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>주의 / 적자 위험</span><strong><?php echo h(number_format(isset($profitRisk['warning_count']) ? (int)$profitRisk['warning_count'] : 0)); ?> / <?php echo h(number_format(isset($profitRisk['critical_count']) ? (int)$profitRisk['critical_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>판단자료 부족</span><strong><?php echo h(number_format(isset($profitRisk['insufficient_count']) ? (int)$profitRisk['insufficient_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 실행 상태 / 실패</span><strong><?php echo h(isset($profitRisk['latest_run_status']) && $profitRisk['latest_run_status'] !== '' ? $profitRisk['latest_run_status'] : '-'); ?> / <?php echo h(number_format(isset($profitRisk['latest_run_failure_count']) ? (int)$profitRisk['latest_run_failure_count'] : 0)); ?>건</strong></div>
     </div>
   </section>
 
