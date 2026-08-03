@@ -80,8 +80,15 @@ class AiInputReliabilityService
         if (array_key_exists($key, self::$tableCache)) return self::$tableCache[$key];
         try {
             $st = $pdo->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=:table_name');
+            if (!$st) {
+                self::$tableCache[$key] = false;
+                return false;
+            }
             $st->bindValue(':table_name', $table, PDO::PARAM_STR);
-            $st->execute();
+            if (!$st->execute()) {
+                self::$tableCache[$key] = false;
+                return false;
+            }
             self::$tableCache[$key] = ((int)$st->fetchColumn() > 0);
         } catch (Exception $e) {
             self::$tableCache[$key] = false;
@@ -417,7 +424,7 @@ class AiInputReliabilityService
             $snapshotDate = self::validDate(isset($row['snapshot_date'])?$row['snapshot_date']:'');
             if ($forecastDate==='' || $targetYm==='') return $empty;
             $countSt = $pdo->prepare('SELECT COUNT(*) FROM `' . self::FORECAST_TABLE . '` WHERE forecast_date=:forecast_date AND target_ym=:target_ym');
-            $countSt->execute(array(':forecast_date'=>$forecastDate,':target_ym'=>$targetYm));
+            if (!$countSt || !$countSt->execute(array(':forecast_date'=>$forecastDate,':target_ym'=>$targetYm))) return $empty;
             return array('available'=>true,'forecast_date'=>$forecastDate,'target_ym'=>$targetYm,'snapshot_date'=>$snapshotDate,'project_count'=>(int)$countSt->fetchColumn());
         } catch (Exception $e) {
             return $empty;
@@ -441,7 +448,8 @@ class AiInputReliabilityService
         $result['installed'] = !empty($result['run']['installed']) && !empty($result['result']['installed']);
         if (!empty($result['result']['installed'])) {
             try {
-                $row = $pdo->query('SELECT COUNT(*) AS result_count,COUNT(DISTINCT project_id) AS project_count,MAX(analysis_date) AS latest_analysis_date,MAX(last_calculated_at) AS last_calculated_at FROM `' . self::RESULT_TABLE . '`')->fetch(PDO::FETCH_ASSOC);
+                $st = $pdo->query('SELECT COUNT(*) AS result_count,COUNT(DISTINCT project_id) AS project_count,MAX(analysis_date) AS latest_analysis_date,MAX(last_calculated_at) AS last_calculated_at FROM `' . self::RESULT_TABLE . '`');
+                $row = $st ? $st->fetch(PDO::FETCH_ASSOC) : false;
                 if (is_array($row)) {
                     $result['result_count'] = isset($row['result_count'])?(int)$row['result_count']:0;
                     $result['project_count'] = isset($row['project_count'])?(int)$row['project_count']:0;
@@ -1388,10 +1396,14 @@ class AiInputReliabilityService
         $pdo=self::pdo($pdo);
         if (!$pdo || !self::isInstalled($pdo)) return $result;
         try {
-            $result['projects']=$pdo->query('SELECT project_id,MAX(project_name_snapshot) AS project_name FROM `' . self::RESULT_TABLE . '` GROUP BY project_id ORDER BY project_name ASC,project_id ASC')->fetchAll(PDO::FETCH_ASSOC);
-            $result['statuses']=$pdo->query("SELECT DISTINCT project_status_snapshot AS status FROM `" . self::RESULT_TABLE . "` WHERE project_status_snapshot IS NOT NULL AND project_status_snapshot<>'' ORDER BY project_status_snapshot ASC")->fetchAll(PDO::FETCH_ASSOC);
-            $result['dates']=$pdo->query('SELECT DISTINCT analysis_date FROM `' . self::RESULT_TABLE . '` ORDER BY analysis_date DESC LIMIT 366')->fetchAll(PDO::FETCH_COLUMN);
-            $result['months']=$pdo->query('SELECT DISTINCT target_ym FROM `' . self::RESULT_TABLE . '` ORDER BY target_ym DESC')->fetchAll(PDO::FETCH_COLUMN);
+            $st=$pdo->query('SELECT project_id,MAX(project_name_snapshot) AS project_name FROM `' . self::RESULT_TABLE . '` GROUP BY project_id ORDER BY project_name ASC,project_id ASC');
+            if ($st) $result['projects']=$st->fetchAll(PDO::FETCH_ASSOC);
+            $st=$pdo->query("SELECT DISTINCT project_status_snapshot AS status FROM `" . self::RESULT_TABLE . "` WHERE project_status_snapshot IS NOT NULL AND project_status_snapshot<>'' ORDER BY project_status_snapshot ASC");
+            if ($st) $result['statuses']=$st->fetchAll(PDO::FETCH_ASSOC);
+            $st=$pdo->query('SELECT DISTINCT analysis_date FROM `' . self::RESULT_TABLE . '` ORDER BY analysis_date DESC LIMIT 366');
+            if ($st) $result['dates']=$st->fetchAll(PDO::FETCH_COLUMN);
+            $st=$pdo->query('SELECT DISTINCT target_ym FROM `' . self::RESULT_TABLE . '` ORDER BY target_ym DESC');
+            if ($st) $result['months']=$st->fetchAll(PDO::FETCH_COLUMN);
         } catch (Exception $e) {
         }
         return $result;

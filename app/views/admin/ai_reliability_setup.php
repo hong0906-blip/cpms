@@ -13,9 +13,24 @@ if (!Auth::check() || !(Auth::isDevelopmentDepartment() || Auth::canManageEmploy
 
 require_once __DIR__ . '/../../services/AiInputReliabilityService.php';
 
-$reliabilityPdo = Db::pdo();
+$reliabilityPdo = null;
+$reliabilityInitializationFailed = false;
+$reliabilityStatus = array(
+    'db_available'=>false,
+    'run'=>array('table_exists'=>false,'installed'=>false,'missing_columns'=>array(),'missing_indexes'=>array()),
+    'result'=>array('table_exists'=>false,'installed'=>false,'missing_columns'=>array(),'missing_indexes'=>array()),
+    'installed'=>false,
+    'latest_forecast'=>array('available'=>false,'forecast_date'=>'','target_ym'=>'','snapshot_date'=>'','project_count'=>0),
+    'result_count'=>0,'project_count'=>0,'latest_analysis_date'=>'','last_calculated_at'=>'','latest_run'=>array()
+);
+try {
+    $reliabilityPdo = Db::pdo();
+} catch (Exception $e) {
+    $reliabilityInitializationFailed = true;
+    error_log('[AI Reliability Setup] db initialization failed');
+}
 $reliabilityActionResult = null;
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
     $action = isset($_POST['action']) ? trim((string)$_POST['action']) : '';
     if (!csrf_check($token)) {
@@ -29,7 +44,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$reliabilityStatus = AiInputReliabilityService::schemaStatus($reliabilityPdo);
+if (!$reliabilityInitializationFailed) {
+    try {
+        $loadedReliabilityStatus = AiInputReliabilityService::schemaStatus($reliabilityPdo);
+        if (is_array($loadedReliabilityStatus)) {
+            $reliabilityStatus = array_merge($reliabilityStatus, $loadedReliabilityStatus);
+        } else {
+            $reliabilityInitializationFailed = true;
+        }
+    } catch (Exception $e) {
+        $reliabilityInitializationFailed = true;
+        error_log('[AI Reliability Setup] status initialization failed');
+    }
+}
+if (!isset($reliabilityStatus['run']) || !is_array($reliabilityStatus['run'])) $reliabilityStatus['run'] = array();
+if (!isset($reliabilityStatus['result']) || !is_array($reliabilityStatus['result'])) $reliabilityStatus['result'] = array();
+$reliabilityStatus['run'] = array_merge(array('table_exists'=>false,'installed'=>false,'missing_columns'=>array(),'missing_indexes'=>array()), $reliabilityStatus['run']);
+$reliabilityStatus['result'] = array_merge(array('table_exists'=>false,'installed'=>false,'missing_columns'=>array(),'missing_indexes'=>array()), $reliabilityStatus['result']);
+if (!is_array($reliabilityStatus['run']['missing_columns'])) $reliabilityStatus['run']['missing_columns'] = array();
+if (!is_array($reliabilityStatus['run']['missing_indexes'])) $reliabilityStatus['run']['missing_indexes'] = array();
+if (!is_array($reliabilityStatus['result']['missing_columns'])) $reliabilityStatus['result']['missing_columns'] = array();
+if (!is_array($reliabilityStatus['result']['missing_indexes'])) $reliabilityStatus['result']['missing_indexes'] = array();
+
 $reliabilityLatestRun = isset($reliabilityStatus['latest_run']) && is_array($reliabilityStatus['latest_run']) ? $reliabilityStatus['latest_run'] : array();
 $reliabilityLatestForecast = isset($reliabilityStatus['latest_forecast']) && is_array($reliabilityStatus['latest_forecast']) ? $reliabilityStatus['latest_forecast'] : array();
 $reliabilityExecutable = !empty($reliabilityStatus['installed']) && !empty($reliabilityLatestForecast['available']);
@@ -45,6 +81,8 @@ $reliabilityExecutable = !empty($reliabilityStatus['installed']) && !empty($reli
 
 <div class="rs-wrap">
   <section class="rs-hero"><h2>입력 신뢰도 설정</h2><p>저장된 최신 월말 예측, 해당 예측이 사용한 일일 스냅샷, 최근 90일 통합 비용 이벤트로 데이터의 충분성·최신성·입력 지연·예측 안정성을 계산합니다. <strong>입력 신뢰도는 확정금액이나 직원 평가점수가 아닙니다.</strong></p></section>
+
+  <?php if ($reliabilityInitializationFailed): ?><div class="rs-message error">입력 신뢰도 상태를 불러오지 못했습니다.</div><?php elseif (empty($reliabilityStatus['db_available'])): ?><div class="rs-message error">DB 연결 상태를 확인할 수 없습니다.</div><?php elseif (empty($reliabilityStatus['installed'])): ?><div class="rs-note">입력 신뢰도 테이블이 아직 설치되지 않았습니다.</div><?php endif; ?>
 
   <?php if (is_array($reliabilityActionResult)): ?><div class="rs-message <?php echo !empty($reliabilityActionResult['ok'])?'ok':'error'; ?>"><?php echo h(isset($reliabilityActionResult['message'])?$reliabilityActionResult['message']:'처리 결과를 확인할 수 없습니다.'); ?><?php if (isset($reliabilityActionResult['status'])): ?><div style="margin-top:5px;font-weight:700;">상태 <?php echo h($reliabilityActionResult['status']); ?> · 대상 <?php echo h(number_format((int)$reliabilityActionResult['projects'])); ?>개 · 성공 <?php echo h(number_format((int)$reliabilityActionResult['success'])); ?>개 · 판단자료 부족 <?php echo h(number_format((int)$reliabilityActionResult['insufficient'])); ?>개 · 실패 <?php echo h(number_format((int)$reliabilityActionResult['failed'])); ?>개</div><?php endif; ?></div><?php endif; ?>
 
