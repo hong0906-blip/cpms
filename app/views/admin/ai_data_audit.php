@@ -64,6 +64,7 @@ $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($
 $dailySnapshot = isset($aiAudit['daily_snapshot']) && is_array($aiAudit['daily_snapshot']) ? $aiAudit['daily_snapshot'] : array();
 $monthlyForecast = isset($aiAudit['monthly_forecast']) && is_array($aiAudit['monthly_forecast']) ? $aiAudit['monthly_forecast'] : array();
 $inputReliability = isset($aiAudit['input_reliability']) && is_array($aiAudit['input_reliability']) ? $aiAudit['input_reliability'] : array();
+$anomalyDetection = isset($aiAudit['anomaly_detection']) && is_array($aiAudit['anomaly_detection']) ? $aiAudit['anomaly_detection'] : array();
 ?>
 
 <style>
@@ -240,6 +241,21 @@ $inputReliability = isset($aiAudit['input_reliability']) && is_array($aiAudit['i
       <div class="ai-audit-snapshot-item"><span>평균 신뢰도</span><strong><?php echo isset($inputReliability['average_score']) && $inputReliability['average_score'] !== null ? h(number_format((float)$inputReliability['average_score'], 1) . '점') : '-'; ?></strong></div>
       <div class="ai-audit-snapshot-item"><span>자료 부족 현장</span><strong><?php echo h(number_format(isset($inputReliability['insufficient_count']) ? (int)$inputReliability['insufficient_count'] : 0)); ?>개</strong></div>
       <div class="ai-audit-snapshot-item"><span>최근 실행 상태 / 실패</span><strong><?php echo h(isset($inputReliability['latest_run_status']) && $inputReliability['latest_run_status'] !== '' ? $inputReliability['latest_run_status'] : '-'); ?> / <?php echo h(number_format(isset($inputReliability['latest_run_failure_count']) ? (int)$inputReliability['latest_run_failure_count'] : 0)); ?>건</strong></div>
+    </div>
+  </section>
+
+  <section class="ai-audit-snapshot-panel" style="border-color:#fed7aa;background:linear-gradient(135deg,#fff 0%,#fff7ed 100%);">
+    <div class="ai-audit-snapshot-head"><div><h3>현장별 비용 이상징후 탐지</h3><p><?php echo h(isset($anomalyDetection['message']) && $anomalyDetection['message'] !== '' ? $anomalyDetection['message'] : '이상징후 탐지 상태를 확인할 수 없습니다.'); ?> 이 항목은 기존 AI 준비점수에는 아직 반영하지 않습니다.</p></div><a class="ai-audit-snapshot-link" style="background:#c2410c;" href="?r=admin%2Fai_anomaly_setup">이상징후 탐지 설정</a></div>
+    <div class="ai-audit-snapshot-grid">
+      <div class="ai-audit-snapshot-item"><span>실행이력 테이블</span><strong><?php echo !empty($anomalyDetection['run_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>탐지 결과 테이블</span><strong><?php echo !empty($anomalyDetection['result_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>전체 탐지 결과</span><strong><?php echo h(number_format(isset($anomalyDetection['result_count']) ? (int)$anomalyDetection['result_count'] : 0)); ?>건</strong></div>
+      <div class="ai-audit-snapshot-item"><span>분석된 프로젝트</span><strong><?php echo h(number_format(isset($anomalyDetection['project_count']) ? (int)$anomalyDetection['project_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 분석일</span><strong><?php echo h(isset($anomalyDetection['latest_analysis_date']) && $anomalyDetection['latest_analysis_date'] !== '' ? $anomalyDetection['latest_analysis_date'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>정상 / 관심</span><strong><?php echo h(number_format(isset($anomalyDetection['normal_count']) ? (int)$anomalyDetection['normal_count'] : 0)); ?> / <?php echo h(number_format(isset($anomalyDetection['watch_count']) ? (int)$anomalyDetection['watch_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>주의 / 긴급 확인</span><strong><?php echo h(number_format(isset($anomalyDetection['warning_count']) ? (int)$anomalyDetection['warning_count'] : 0)); ?> / <?php echo h(number_format(isset($anomalyDetection['critical_count']) ? (int)$anomalyDetection['critical_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>판단자료 부족</span><strong><?php echo h(number_format(isset($anomalyDetection['insufficient_count']) ? (int)$anomalyDetection['insufficient_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 실행 상태 / 실패</span><strong><?php echo h(isset($anomalyDetection['latest_run_status']) && $anomalyDetection['latest_run_status'] !== '' ? $anomalyDetection['latest_run_status'] : '-'); ?> / <?php echo h(number_format(isset($anomalyDetection['latest_run_failure_count']) ? (int)$anomalyDetection['latest_run_failure_count'] : 0)); ?>건</strong></div>
     </div>
   </section>
 

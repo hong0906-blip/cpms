@@ -47,10 +47,11 @@ if (!function_exists('cpms_public_affairs_collab_debug_table_exists')) {
 function cpms_public_affairs_collab_debug_table_exists($pdo, $tableName) {
     if (!$pdo) return false;
     try {
-        $dbName = (string)$pdo->query('SELECT DATABASE()')->fetchColumn();
+        $dbSt = $pdo->query('SELECT DATABASE()');
+        $dbName = $dbSt ? (string)$dbSt->fetchColumn() : '';
         if ($dbName === '') return false;
         $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = :db AND TABLE_NAME = :table_name");
-        $st->execute(array(':db' => $dbName, ':table_name' => (string)$tableName));
+        if (!$st || !$st->execute(array(':db' => $dbName, ':table_name' => (string)$tableName))) return false;
         return ((int)$st->fetchColumn() > 0);
     } catch (Exception $e) {
         return false;
@@ -169,7 +170,8 @@ if ($route === 'public_affairs_collab_debug') {
     $projectCount = 'unknown';
     if ($pdo && cpms_public_affairs_collab_debug_table_exists($pdo, 'cpms_projects')) {
         try {
-            $projectCount = (string)(int)$pdo->query('SELECT COUNT(*) FROM cpms_projects')->fetchColumn();
+            $projectCountSt = $pdo->query('SELECT COUNT(*) FROM cpms_projects');
+            $projectCount = $projectCountSt ? (string)(int)$projectCountSt->fetchColumn() : 'error';
         } catch (Exception $e) {
             $projectCount = 'error: ' . $e->getMessage();
         }
@@ -537,6 +539,12 @@ if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_r
 }
 if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_reliability_history') {
     $route = 'admin/ai_reliability_history';
+}
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_anomaly_setup') {
+    $route = 'admin/ai_anomaly_setup';
+}
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_anomaly_history') {
+    $route = 'admin/ai_anomaly_history';
 }
 
 
@@ -1904,6 +1912,25 @@ if ($route === 'admin/ai_reliability_setup' || $route === 'admin/ai_reliability_
     $_GET['tab'] = $route === 'admin/ai_reliability_setup' ? 'ai_reliability_setup' : 'ai_reliability_history';
     \App\Core\View::render('admin/index', array(
         'title' => $route === 'admin/ai_reliability_setup' ? '입력 신뢰도 설정' : '투입비 입력 신뢰도 및 입력 지연 분석',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// ==========================
+// 현장별 비용 이상징후 탐지 설치/조회
+// ==========================
+if ($route === 'admin/ai_anomaly_setup' || $route === 'admin/ai_anomaly_history') {
+    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = $route === 'admin/ai_anomaly_setup' ? 'ai_anomaly_setup' : 'ai_anomaly_history';
+    \App\Core\View::render('admin/index', array(
+        'title' => $route === 'admin/ai_anomaly_setup' ? '이상징후 탐지 설정' : '현장별 비용 이상징후 탐지 결과',
         'selectedMenu' => '관리',
         'dashboardType' => $dashboardType,
     ));

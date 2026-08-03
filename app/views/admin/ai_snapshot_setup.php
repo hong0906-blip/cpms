@@ -110,6 +110,7 @@ $latestRun = isset($snapshotStatus['latest_run']) && is_array($snapshotStatus['l
       <a class="ss-btn secondary" href="?r=admin%2Fai_snapshot_history">스냅샷 이력 보기</a>
       <a class="ss-btn secondary" href="?r=admin%2Fai_forecast_setup">기본 월말 예측 설정</a>
       <a class="ss-btn secondary" href="?r=admin%2Fai_reliability_setup">입력 신뢰도 설정</a>
+      <a class="ss-btn secondary" href="?r=admin%2Fai_anomaly_setup">이상징후 탐지 설정</a>
       <a class="ss-btn secondary" href="?r=admin%2Fai_data_audit">AI 데이터 준비상태 점검</a>
     </div>
     <div class="ss-note">GET 요청은 상태만 확인하며 설치나 집계를 실행하지 않습니다. 같은 날짜를 다시 실행하면 새 행을 만들지 않고 최신 상태로 갱신하며 최초 저장시각은 유지합니다.</div>

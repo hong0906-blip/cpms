@@ -59,8 +59,10 @@ class AiDataAuditService
                   WHERE TABLE_SCHEMA = DATABASE()
                     AND TABLE_NAME = :table_name"
             );
-            $st->bindValue(':table_name', (string)$table);
-            $st->execute();
+            if (!$st || !$st->bindValue(':table_name', (string)$table) || !$st->execute()) {
+                $this->tableCache[$cacheKey] = false;
+                return false;
+            }
             $this->tableCache[$cacheKey] = ((int)$st->fetchColumn() > 0);
         } catch (Exception $e) {
             $this->tableCache[$cacheKey] = false;
@@ -86,8 +88,10 @@ class AiDataAuditService
                     AND TABLE_NAME = :table_name
                   ORDER BY ORDINAL_POSITION"
             );
-            $st->bindValue(':table_name', (string)$table);
-            $st->execute();
+            if (!$st || !$st->bindValue(':table_name', (string)$table) || !$st->execute()) {
+                $this->columnCache[$cacheKey] = array();
+                return $this->columnCache[$cacheKey];
+            }
             while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
                 if (!isset($row['COLUMN_NAME'])) continue;
                 $column = (string)$row['COLUMN_NAME'];
@@ -119,12 +123,14 @@ class AiDataAuditService
 
         try {
             $st = $pdo->prepare((string)$sql);
+            if (!$st) return $result;
             foreach ($params as $key => $value) {
-                if (is_int($value)) $st->bindValue($key, $value, PDO::PARAM_INT);
-                else if ($value === null) $st->bindValue($key, null, PDO::PARAM_NULL);
-                else $st->bindValue($key, (string)$value, PDO::PARAM_STR);
+                if (is_int($value)) $bound = $st->bindValue($key, $value, PDO::PARAM_INT);
+                else if ($value === null) $bound = $st->bindValue($key, null, PDO::PARAM_NULL);
+                else $bound = $st->bindValue($key, (string)$value, PDO::PARAM_STR);
+                if (!$bound) return $result;
             }
-            $st->execute();
+            if (!$st->execute()) return $result;
             $row = $st->fetch(PDO::FETCH_ASSOC);
             $result['ok'] = true;
             $result['row'] = is_array($row) ? $row : array();
@@ -465,6 +471,7 @@ class AiDataAuditService
         $snapshotStatus = $this->auditDailySnapshots();
         $forecastStatus = $this->auditMonthlyForecasts();
         $reliabilityStatus = $this->auditInputReliability();
+        $anomalyStatus = $this->auditAnomalyDetection();
         $overall = $this->calculateOverallScore($sections);
         $globalWarnings = array();
         $globalRecommendations = array();
@@ -491,6 +498,12 @@ class AiDataAuditService
         }
         if (isset($reliabilityStatus['recommendation']) && $reliabilityStatus['recommendation'] !== '') {
             $globalRecommendations[] = $reliabilityStatus['recommendation'];
+        }
+        if (isset($anomalyStatus['warning']) && $anomalyStatus['warning'] !== '') {
+            $globalWarnings[] = $anomalyStatus['warning'];
+        }
+        if (isset($anomalyStatus['recommendation']) && $anomalyStatus['recommendation'] !== '') {
+            $globalRecommendations[] = $anomalyStatus['recommendation'];
         }
         foreach ($sections as $section) {
             if (!empty($section['warnings'])) $globalWarnings[] = $section['label'] . ': ' . $section['warnings'][0];
@@ -520,6 +533,7 @@ class AiDataAuditService
             'daily_snapshot' => $snapshotStatus,
             'monthly_forecast' => $forecastStatus,
             'input_reliability' => $reliabilityStatus,
+            'anomaly_detection' => $anomalyStatus,
             'global_warnings' => $globalWarnings,
             'global_recommendations' => $globalRecommendations,
             'read_only' => true,
@@ -756,6 +770,69 @@ class AiDataAuditService
         if ($result['latest_run_failure_count'] > 0) {
             $result['warning'] = '최근 입력 신뢰도 실행에서 일부 현장 분석 실패가 확인됐습니다.';
             $result['recommendation'] = '입력 신뢰도 설정에서 최근 실행 상태를 확인해주세요.';
+        }
+        return $result;
+    }
+
+    public function auditAnomalyDetection()
+    {
+        $result = array(
+            'run_table_installed'=>false,'result_table_installed'=>false,'installed'=>false,
+            'result_count'=>0,'project_count'=>0,'latest_analysis_date'=>'','normal_count'=>0,
+            'watch_count'=>0,'warning_count'=>0,'critical_count'=>0,'insufficient_count'=>0,
+            'latest_run_status'=>'','latest_run_failure_count'=>0,'setup_required'=>false,
+            'message'=>'','warning'=>'','recommendation'=>'',
+        );
+        if (!$this->pdo) {
+            $result['setup_required'] = true;
+            $result['message'] = '이상징후 탐지 DB 상태를 확인할 수 없습니다.';
+            return $result;
+        }
+        $runTable = 'cpms_ai_anomaly_runs';
+        $resultTable = 'cpms_ai_anomaly_results';
+        $runRequired = array('analysis_date','run_status','failure_count','started_at');
+        $resultRequired = array('analysis_date','project_id','anomaly_grade','anomaly_count','last_calculated_at');
+        $result['run_table_installed'] = $this->tableExists($runTable);
+        $result['result_table_installed'] = $this->tableExists($resultTable);
+        foreach ($runRequired as $column) if (!$this->columnExists($runTable,$column)) $result['run_table_installed'] = false;
+        foreach ($resultRequired as $column) if (!$this->columnExists($resultTable,$column)) $result['result_table_installed'] = false;
+        $result['installed'] = $result['run_table_installed'] && $result['result_table_installed'];
+        if (!$result['installed']) {
+            $result['setup_required'] = true;
+            $result['message'] = '이상징후 탐지 기능이 아직 설치되지 않았습니다.';
+            $result['warning'] = '이상징후 탐지 기능이 아직 설치되지 않았습니다.';
+            $result['recommendation'] = '이상징후 탐지 설정에서 분석 테이블을 설치해주세요.';
+            return $result;
+        }
+        $aggregate = $this->safeAggregate(
+            "SELECT COUNT(*) AS result_count,COUNT(DISTINCT project_id) AS project_count,MAX(analysis_date) AS latest_date,"
+            . "COALESCE(SUM(CASE WHEN anomaly_grade='NORMAL' THEN 1 ELSE 0 END),0) AS normal_count,"
+            . "COALESCE(SUM(CASE WHEN anomaly_grade='WATCH' THEN 1 ELSE 0 END),0) AS watch_count,"
+            . "COALESCE(SUM(CASE WHEN anomaly_grade='WARNING' THEN 1 ELSE 0 END),0) AS warning_count,"
+            . "COALESCE(SUM(CASE WHEN anomaly_grade='CRITICAL' THEN 1 ELSE 0 END),0) AS critical_count,"
+            . "COALESCE(SUM(CASE WHEN anomaly_grade='INSUFFICIENT' THEN 1 ELSE 0 END),0) AS insufficient_count FROM `" . $resultTable . "`",
+            array(),
+            '이상징후 탐지 결과 집계 실패'
+        );
+        if ($aggregate['ok']) {
+            $row = $aggregate['row'];
+            foreach (array('result_count','project_count','normal_count','watch_count','warning_count','critical_count','insufficient_count') as $key) $result[$key] = isset($row[$key])?(int)$row[$key]:0;
+            $result['latest_analysis_date'] = isset($row['latest_date'])&&$row['latest_date']!==null?(string)$row['latest_date']:'';
+        }
+        try {
+            $st = $this->pdo->query("SELECT run_status,failure_count FROM `" . $runTable . "` ORDER BY started_at DESC,id DESC LIMIT 1");
+            $run = $st?$st->fetch(PDO::FETCH_ASSOC):false;
+            if (is_array($run)) {
+                $result['latest_run_status'] = isset($run['run_status'])?(string)$run['run_status']:'';
+                $result['latest_run_failure_count'] = isset($run['failure_count'])?(int)$run['failure_count']:0;
+            }
+        } catch (Exception $e) {
+        }
+        if ($result['result_count'] === 0) $result['message'] = '이상징후 탐지 구조는 설치됐으며 입력 신뢰도 계산 후 실행할 수 있습니다.';
+        else $result['message'] = '저장된 신뢰도·예측·스냅샷·통합 비용 이벤트를 기준으로 이상징후를 기록하고 있습니다.';
+        if ($result['latest_run_failure_count'] > 0) {
+            $result['warning'] = '최근 이상징후 탐지 실행에서 일부 현장 분석 실패가 확인됐습니다.';
+            $result['recommendation'] = '이상징후 탐지 설정에서 최근 실행 상태를 확인해주세요.';
         }
         return $result;
     }

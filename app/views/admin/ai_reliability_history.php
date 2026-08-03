@@ -181,7 +181,7 @@ $pageParams['r'] = 'admin/ai_reliability_history';
   <section class="rh-hero">
     <h2>투입비 입력 신뢰도 및 입력 지연 분석</h2>
     <p>저장된 월말 예측, 일일 스냅샷, 통합 비용 이벤트를 이용해 현장별 자료의 충분성·최신성·입력시점·예측 안정성을 점검합니다.</p>
-    <div class="rh-links"><a class="rh-link" href="?r=admin%2Fai_reliability_setup">입력 신뢰도 설정</a><a class="rh-link secondary" href="?r=admin%2Fai_forecast_history">기본 월말 예측 결과</a><a class="rh-link secondary" href="?r=admin%2Fai_data_history">통합 비용 이력</a><a class="rh-link secondary" href="?r=admin%2Fai_data_audit">AI 데이터 준비상태 점검</a></div>
+    <div class="rh-links"><a class="rh-link" href="?r=admin%2Fai_reliability_setup">입력 신뢰도 설정</a><a class="rh-link secondary" href="?r=admin%2Fai_anomaly_history">이상징후 탐지 결과</a><a class="rh-link secondary" href="?r=admin%2Fai_forecast_history">기본 월말 예측 결과</a><a class="rh-link secondary" href="?r=admin%2Fai_data_history">통합 비용 이력</a><a class="rh-link secondary" href="?r=admin%2Fai_data_audit">AI 데이터 준비상태 점검</a></div>
   </section>
 
   <div class="rh-note"><strong>입력 신뢰도는 현재 데이터의 충분성·최신성·예측근거를 점검한 참고지표이며 확정금액이나 직원 평가점수가 아닙니다.</strong><br>초기에는 이벤트와 스냅샷 표본이 적어 자료 제한적 또는 자료 부족으로 표시될 수 있습니다.</div>

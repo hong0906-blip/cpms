@@ -81,6 +81,8 @@ if ($canAiDataAudit) {
     $tabs['ai_forecast_history'] = array('label' => '기본 월말 예측 결과', 'icon' => 'chart-spline');
     $tabs['ai_reliability_setup'] = array('label' => '입력 신뢰도 설정', 'icon' => 'shield-check');
     $tabs['ai_reliability_history'] = array('label' => '입력 신뢰도 결과', 'icon' => 'activity');
+    $tabs['ai_anomaly_setup'] = array('label' => '이상징후 탐지 설정', 'icon' => 'scan-search');
+    $tabs['ai_anomaly_history'] = array('label' => '이상징후 탐지 결과', 'icon' => 'triangle-alert');
 }
 
 if (!isset($tabs[$tab])) {
@@ -130,6 +132,12 @@ if (!function_exists('admin_tab_url')) {
       if ($k === 'ai_reliability_history') {
           $tabHref = '?r=admin%2Fai_reliability_history';
       }
+      if ($k === 'ai_anomaly_setup') {
+          $tabHref = '?r=admin%2Fai_anomaly_setup';
+      }
+      if ($k === 'ai_anomaly_history') {
+          $tabHref = '?r=admin%2Fai_anomaly_history';
+      }
       if ($k === 'company_overhead' && !$canViewCompanyOverhead && $canViewCompanyPayroll) {
           $tabHref .= '&oh=payroll';
       }
@@ -173,6 +181,10 @@ if ($tab === 'employees') {
     require __DIR__ . '/ai_reliability_setup.php';
 } elseif ($tab === 'ai_reliability_history' && $canAiDataAudit) {
     require __DIR__ . '/ai_reliability_history.php';
+} elseif ($tab === 'ai_anomaly_setup' && $canAiDataAudit) {
+    require __DIR__ . '/ai_anomaly_setup.php';
+} elseif ($tab === 'ai_anomaly_history' && $canAiDataAudit) {
+    require __DIR__ . '/ai_anomaly_history.php';
 } elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
         $_GET['oh'] = 'payroll';
