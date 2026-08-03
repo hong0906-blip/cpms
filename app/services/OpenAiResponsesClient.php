@@ -10,12 +10,14 @@ use Exception;
 
 class OpenAiResponsesClient
 {
-    const DEFAULT_MODEL = 'gpt-5-mini';
+    const DEFAULT_MODEL = 'gpt-5.6-terra';
     const DEFAULT_ENDPOINT = 'https://api.openai.com/v1/responses';
     const DEFAULT_MAX_OUTPUT_TOKENS = 1800;
+    const DEFAULT_QA_MAX_OUTPUT_TOKENS = 1400;
     const DEFAULT_TIMEOUT_SECONDS = 60;
     const DEFAULT_CONNECT_TIMEOUT_SECONDS = 10;
     const DEFAULT_SCHEMA_VERSION = 'executive_brief_v1';
+    const DEFAULT_REASONING_EFFORT = 'low';
 
     private static $configCache = null;
 
@@ -25,7 +27,7 @@ class OpenAiResponsesClient
         if (!is_file($file) || !is_readable($file)) return $result;
         $contents = @file_get_contents($file);
         if (!is_string($contents) || $contents === '') return $result;
-        $stringKeys = array('api_key','model','endpoint','schema_version');
+        $stringKeys = array('api_key','model','qa_model','endpoint','schema_version','reasoning_effort','qa_reasoning_effort');
         foreach ($stringKeys as $key) {
             $quotedKey = preg_quote($key, '/');
             if (preg_match("/['\"]" . $quotedKey . "['\"]\\s*=>\\s*'((?:\\\\.|[^'\\\\])*)'/s", $contents, $match)) {
@@ -34,7 +36,7 @@ class OpenAiResponsesClient
                 $result[$key] = stripcslashes($match[1]);
             }
         }
-        foreach (array('max_output_tokens','timeout_seconds','connect_timeout_seconds') as $key) {
+        foreach (array('max_output_tokens','qa_max_output_tokens','timeout_seconds','connect_timeout_seconds') as $key) {
             $quotedKey = preg_quote($key, '/');
             if (preg_match('/[\'\"]' . $quotedKey . '[\'\"]\\s*=>\\s*([0-9]+)/', $contents, $match)) $result[$key] = (int)$match[1];
         }
@@ -54,8 +56,12 @@ class OpenAiResponsesClient
             'api_key' => '',
             'source' => 'NONE',
             'model' => self::DEFAULT_MODEL,
+            'qa_model' => self::DEFAULT_MODEL,
+            'reasoning_effort' => self::DEFAULT_REASONING_EFFORT,
+            'qa_reasoning_effort' => self::DEFAULT_REASONING_EFFORT,
             'endpoint' => self::DEFAULT_ENDPOINT,
             'max_output_tokens' => self::DEFAULT_MAX_OUTPUT_TOKENS,
+            'qa_max_output_tokens' => self::DEFAULT_QA_MAX_OUTPUT_TOKENS,
             'timeout_seconds' => self::DEFAULT_TIMEOUT_SECONDS,
             'connect_timeout_seconds' => self::DEFAULT_CONNECT_TIMEOUT_SECONDS,
             'schema_version' => self::DEFAULT_SCHEMA_VERSION,
@@ -64,22 +70,42 @@ class OpenAiResponsesClient
         $localFile = __DIR__ . '/../config/openai.local.php';
         $localConfig = self::readLocalConfig($localFile);
 
-        foreach (array('model', 'endpoint', 'schema_version') as $key) {
+        foreach (array('model', 'qa_model', 'reasoning_effort', 'qa_reasoning_effort', 'endpoint', 'schema_version') as $key) {
             if (isset($localConfig[$key]) && trim((string)$localConfig[$key]) !== '') {
                 $config[$key] = trim((string)$localConfig[$key]);
             }
         }
-        foreach (array('max_output_tokens', 'timeout_seconds', 'connect_timeout_seconds') as $key) {
+        foreach (array('max_output_tokens', 'qa_max_output_tokens', 'timeout_seconds', 'connect_timeout_seconds') as $key) {
             if (isset($localConfig[$key]) && is_numeric($localConfig[$key])) {
                 $config[$key] = (int)$localConfig[$key];
             }
         }
 
         $config['max_output_tokens'] = max(100, min(10000, (int)$config['max_output_tokens']));
+        $config['qa_max_output_tokens'] = max(100, min(10000, (int)$config['qa_max_output_tokens']));
         $config['timeout_seconds'] = max(5, min(180, (int)$config['timeout_seconds']));
         $config['connect_timeout_seconds'] = max(2, min(60, (int)$config['connect_timeout_seconds']));
         $config['endpoint'] = self::DEFAULT_ENDPOINT;
+        $envModel = getenv('OPENAI_MODEL');
+        if (is_string($envModel) && trim($envModel) !== '') $config['model'] = trim($envModel);
+        $envQaModel = getenv('OPENAI_QA_MODEL');
+        if (is_string($envQaModel) && trim($envQaModel) !== '') {
+            $config['qa_model'] = trim($envQaModel);
+        } else if (!isset($localConfig['qa_model']) || trim((string)$localConfig['qa_model']) === '') {
+            $config['qa_model'] = $config['model'];
+        }
+        $envReasoning = getenv('OPENAI_REASONING_EFFORT');
+        if (is_string($envReasoning) && trim($envReasoning) !== '') $config['reasoning_effort'] = trim($envReasoning);
+        $envQaReasoning = getenv('OPENAI_QA_REASONING_EFFORT');
+        if (is_string($envQaReasoning) && trim($envQaReasoning) !== '') {
+            $config['qa_reasoning_effort'] = trim($envQaReasoning);
+        } else if (!isset($localConfig['qa_reasoning_effort']) || trim((string)$localConfig['qa_reasoning_effort']) === '') {
+            $config['qa_reasoning_effort'] = $config['reasoning_effort'];
+        }
         if (!preg_match('/^[A-Za-z0-9._:-]{1,100}$/', $config['model'])) $config['model'] = self::DEFAULT_MODEL;
+        if (!preg_match('/^[A-Za-z0-9._:-]{1,100}$/', $config['qa_model'])) $config['qa_model'] = self::DEFAULT_MODEL;
+        $config['reasoning_effort'] = self::normalizeReasoningEffort($config['reasoning_effort']);
+        $config['qa_reasoning_effort'] = self::normalizeReasoningEffort($config['qa_reasoning_effort']);
         if (!preg_match('/^[A-Za-z0-9._-]{1,50}$/', $config['schema_version'])) $config['schema_version'] = self::DEFAULT_SCHEMA_VERSION;
 
         $envKey = getenv('OPENAI_API_KEY');
@@ -116,7 +142,11 @@ class OpenAiResponsesClient
             'source' => $available ? self::apiKeySource() : 'NONE',
             'source_label' => self::apiKeySource() === 'ENV' ? '환경변수 사용' : (self::apiKeySource() === 'LOCAL' ? '로컬 비밀설정 사용' : '설정 없음'),
             'model' => self::model(),
+            'qa_model' => self::qaModel(),
+            'reasoning_effort' => self::reasoningEffort(),
+            'qa_reasoning_effort' => self::qaReasoningEffort(),
             'max_output_tokens' => (int)$config['max_output_tokens'],
+            'qa_max_output_tokens' => (int)$config['qa_max_output_tokens'],
             'timeout_seconds' => (int)$config['timeout_seconds'],
             'connect_timeout_seconds' => (int)$config['connect_timeout_seconds'],
             'schema_version' => (string)$config['schema_version'],
@@ -129,6 +159,42 @@ class OpenAiResponsesClient
     {
         $config = self::loadConfig();
         return isset($config['model']) ? (string)$config['model'] : self::DEFAULT_MODEL;
+    }
+
+    public static function qaModel()
+    {
+        $config = self::loadConfig();
+        return isset($config['qa_model']) ? (string)$config['qa_model'] : self::DEFAULT_MODEL;
+    }
+
+    public static function normalizeReasoningEffort($value)
+    {
+        $value = strtolower(trim((string)$value));
+        return in_array($value, array('none','low','medium','high','xhigh','max'), true) ? $value : self::DEFAULT_REASONING_EFFORT;
+    }
+
+    public static function reasoningEffort()
+    {
+        $config = self::loadConfig();
+        return self::normalizeReasoningEffort(isset($config['reasoning_effort']) ? $config['reasoning_effort'] : self::DEFAULT_REASONING_EFFORT);
+    }
+
+    public static function qaReasoningEffort()
+    {
+        $config = self::loadConfig();
+        return self::normalizeReasoningEffort(isset($config['qa_reasoning_effort']) ? $config['qa_reasoning_effort'] : self::DEFAULT_REASONING_EFFORT);
+    }
+
+    public static function maxOutputTokens()
+    {
+        $config = self::loadConfig();
+        return isset($config['max_output_tokens']) ? (int)$config['max_output_tokens'] : self::DEFAULT_MAX_OUTPUT_TOKENS;
+    }
+
+    public static function qaMaxOutputTokens()
+    {
+        $config = self::loadConfig();
+        return isset($config['qa_max_output_tokens']) ? (int)$config['qa_max_output_tokens'] : self::DEFAULT_QA_MAX_OUTPUT_TOKENS;
     }
 
     public static function schemaVersion()
@@ -204,8 +270,10 @@ class OpenAiResponsesClient
             }
             return array('code' => 'OPENAI_NETWORK', 'message' => '서버에서 OpenAI API에 연결하지 못했습니다.');
         }
+        if ($httpStatus === 400) return array('code' => 'OPENAI_400', 'message' => 'OpenAI 요청 설정을 확인해주세요.');
         if ($httpStatus === 401) return array('code' => 'OPENAI_401', 'message' => 'OpenAI API 키가 올바르지 않거나 사용할 수 없습니다.');
-        if ($httpStatus === 403) return array('code' => 'OPENAI_403', 'message' => 'OpenAI 프로젝트 또는 모델 사용 권한을 확인해주세요.');
+        if ($httpStatus === 403) return array('code' => 'OPENAI_403', 'message' => 'OpenAI 프로젝트의 GPT-5.6 모델 사용 권한을 확인해주세요.');
+        if ($httpStatus === 404) return array('code' => 'OPENAI_404', 'message' => '설정된 OpenAI 모델 ID를 확인해주세요.');
         if ($httpStatus === 429) return array('code' => 'OPENAI_429', 'message' => 'OpenAI API 사용량 또는 호출 제한을 확인해주세요.');
         if ($httpStatus >= 500 && $httpStatus <= 599) return array('code' => 'OPENAI_5XX', 'message' => 'OpenAI 서비스가 일시적으로 응답하지 않습니다.');
         if ($httpStatus < 200 || $httpStatus > 299) return array('code' => 'OPENAI_HTTP', 'message' => 'OpenAI 요청을 처리하지 못했습니다.');
@@ -314,6 +382,7 @@ class OpenAiResponsesClient
         $payload = array(
             'model' => self::model(),
             'store' => false,
+            'reasoning' => array('effort' => self::reasoningEffort()),
             'instructions' => '연결 확인 요청입니다. 반드시 지정된 JSON 형식으로만 응답하세요.',
             'input' => array(array('role' => 'user', 'content' => array(array('type' => 'input_text', 'text' => 'CPMS OpenAI 연결 테스트입니다. 반드시 status 값에 OK만 반환하세요.')))),
             'max_output_tokens' => 100,

@@ -558,6 +558,12 @@ if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_o
 if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_executive_brief') {
     $route = 'admin/ai_executive_brief';
 }
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_ceo_index') {
+    $route = 'admin/ai_ceo_index';
+}
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_executive_qa_history') {
+    $route = 'admin/ai_executive_qa_history';
+}
 
 
 // ==========================
@@ -1981,6 +1987,28 @@ if ($route === 'admin/ai_openai_setup' || $route === 'admin/ai_executive_brief')
     $_GET['tab'] = $route === 'admin/ai_openai_setup' ? 'ai_openai_setup' : 'ai_executive_brief';
     \App\Core\View::render('admin/index', array(
         'title' => $route === 'admin/ai_openai_setup' ? 'OpenAI 연결 설정' : '대표용 경영 브리핑',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// ==========================
+// CEO Index 및 대표 질문 이력
+// ==========================
+if ($route === 'admin/ai_ceo_index' || $route === 'admin/ai_executive_qa_history') {
+    $isAiManager = (\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees());
+    $canViewCeoIndex = $isAiManager || \App\Core\Auth::userRole() === 'executive';
+    $allowed = $route === 'admin/ai_ceo_index' ? $canViewCeoIndex : $isAiManager;
+    if (!\App\Core\Auth::check() || !$allowed) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = $route === 'admin/ai_ceo_index' ? 'ai_ceo_index' : 'ai_executive_qa_history';
+    \App\Core\View::render('admin/index', array(
+        'title' => $route === 'admin/ai_ceo_index' ? 'CEO Index' : '대표 질문·답변 이력',
         'selectedMenu' => '관리',
         'dashboardType' => $dashboardType,
     ));

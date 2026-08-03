@@ -475,6 +475,7 @@ class AiDataAuditService
         $reliabilityStatus = $this->auditInputReliability();
         $anomalyStatus = $this->auditAnomalyDetection();
         $profitRiskStatus = $this->auditProfitRisk();
+        $ceoIndexQaStatus = $this->auditCeoIndexAndQa();
         $openAiStatus = $this->auditOpenAiExecutiveBrief();
         $overall = $this->calculateOverallScore($sections);
         $globalWarnings = array();
@@ -515,6 +516,12 @@ class AiDataAuditService
         if (isset($profitRiskStatus['recommendation']) && $profitRiskStatus['recommendation'] !== '') {
             $globalRecommendations[] = $profitRiskStatus['recommendation'];
         }
+        if (isset($ceoIndexQaStatus['warning']) && $ceoIndexQaStatus['warning'] !== '') {
+            $globalWarnings[] = $ceoIndexQaStatus['warning'];
+        }
+        if (isset($ceoIndexQaStatus['recommendation']) && $ceoIndexQaStatus['recommendation'] !== '') {
+            $globalRecommendations[] = $ceoIndexQaStatus['recommendation'];
+        }
         if (isset($openAiStatus['warning']) && $openAiStatus['warning'] !== '') {
             $globalWarnings[] = $openAiStatus['warning'];
         }
@@ -551,6 +558,7 @@ class AiDataAuditService
             'input_reliability' => $reliabilityStatus,
             'anomaly_detection' => $anomalyStatus,
             'profit_risk' => $profitRiskStatus,
+            'ceo_index_qa' => $ceoIndexQaStatus,
             'openai_executive_brief' => $openAiStatus,
             'global_warnings' => $globalWarnings,
             'global_recommendations' => $globalRecommendations,
@@ -983,6 +991,86 @@ class AiDataAuditService
         } catch(Exception $e) {
         }
         $result['message']=$result['latest_brief_date']===''?'OpenAI 연결 후 최신 위험분석을 이용해 경영 브리핑을 생성할 수 있습니다.':'최신 적자·원가율 위험분석을 이용한 대표용 경영 브리핑을 저장하고 있습니다.';
+        return $result;
+    }
+
+    public function auditCeoIndexAndQa()
+    {
+        $config = OpenAiResponsesClient::maskedConfigurationStatus();
+        $result = array(
+            'run_table_installed'=>false,'result_table_installed'=>false,'project_table_installed'=>false,'qa_table_installed'=>false,'installed'=>false,
+            'latest_score'=>null,'latest_grade'=>'','coverage_rate'=>null,'latest_analysis_date'=>'','latest_target_ym'=>'','latest_calculated_at'=>'',
+            'question_total_count'=>0,'question_completed_count'=>0,'question_failed_count'=>0,'latest_question_at'=>'',
+            'brief_model'=>isset($config['model'])?(string)$config['model']:'','qa_model'=>isset($config['qa_model'])?(string)$config['qa_model']:'',
+            'latest_brief_model'=>'','latest_qa_model'=>'','message'=>'','warning'=>'','recommendation'=>''
+        );
+        if (!$this->pdo) {
+            $result['message']='CEO Index와 대표 질문 DB 상태를 확인할 수 없습니다.';
+            return $result;
+        }
+        $tables=array(
+            'run'=>array('name'=>'cpms_ai_ceo_index_runs','required'=>array('analysis_date','run_status','started_at')),
+            'result'=>array('name'=>'cpms_ai_ceo_index_results','required'=>array('analysis_date','target_ym','ceo_index_score','ceo_index_grade','coverage_rate','last_calculated_at')),
+            'project'=>array('name'=>'cpms_ai_ceo_project_results','required'=>array('analysis_date','target_ym','project_id','project_index_grade')),
+            'qa'=>array('name'=>'cpms_ai_executive_qa_history','required'=>array('analysis_date','target_ym','answer_status','model_name','created_at'))
+        );
+        foreach ($tables as $key=>$definition) {
+            $installed=$this->tableExists($definition['name']);
+            foreach ($definition['required'] as $column) if (!$this->columnExists($definition['name'],$column)) $installed=false;
+            $result[$key . '_table_installed']=$installed;
+        }
+        $result['installed']=$result['run_table_installed']&&$result['result_table_installed']&&$result['project_table_installed']&&$result['qa_table_installed'];
+        if (!$result['run_table_installed']||!$result['result_table_installed']||!$result['project_table_installed']) {
+            $result['message']='CEO Index 기능이 아직 설치되지 않았습니다.';
+            $result['warning']='CEO Index 전용 테이블이 아직 설치되지 않았습니다.';
+            $result['recommendation']='CEO Index 화면에서 전용 테이블을 설치해주세요.';
+        } else {
+            try {
+                $st=$this->pdo->query("SELECT analysis_date,target_ym,ceo_index_score,ceo_index_grade,coverage_rate,last_calculated_at FROM `cpms_ai_ceo_index_results` ORDER BY analysis_date DESC,last_calculated_at DESC,id DESC LIMIT 1");
+                $row=$st?$st->fetch(PDO::FETCH_ASSOC):false;
+                if (is_array($row)) {
+                    $result['latest_score']=isset($row['ceo_index_score'])&&$row['ceo_index_score']!==null?round((float)$row['ceo_index_score'],2):null;
+                    $result['latest_grade']=isset($row['ceo_index_grade'])?(string)$row['ceo_index_grade']:'';
+                    $result['coverage_rate']=isset($row['coverage_rate'])&&$row['coverage_rate']!==null?round((float)$row['coverage_rate'],3):null;
+                    $result['latest_analysis_date']=isset($row['analysis_date'])?(string)$row['analysis_date']:'';
+                    $result['latest_target_ym']=isset($row['target_ym'])?(string)$row['target_ym']:'';
+                    $result['latest_calculated_at']=isset($row['last_calculated_at'])?(string)$row['last_calculated_at']:'';
+                }
+            } catch (Exception $e) {
+            }
+            $result['message']=$result['latest_analysis_date']===''?'CEO Index 구조는 설치됐으며 최신 위험분석 결과로 계산할 수 있습니다.':'저장된 위험분석 결과를 기준으로 CEO Index를 기록하고 있습니다.';
+        }
+        if (!$result['qa_table_installed']) {
+            if ($result['warning']==='') $result['warning']='대표 질문·답변 이력 테이블이 아직 설치되지 않았습니다.';
+            if ($result['recommendation']==='') $result['recommendation']='CEO Index 화면에서 대표 질문 이력 테이블을 설치해주세요.';
+        } else {
+            $aggregate=$this->safeAggregate(
+                "SELECT COUNT(*) AS total_count,COALESCE(SUM(CASE WHEN answer_status IN ('ANSWERED','LIMITED','NOT_AVAILABLE') THEN 1 ELSE 0 END),0) AS completed_count,COALESCE(SUM(CASE WHEN answer_status IN ('FAILED','REFUSED') THEN 1 ELSE 0 END),0) AS failed_count,MAX(created_at) AS latest_at FROM `cpms_ai_executive_qa_history`",
+                array(),
+                '대표 질문 이력 집계 실패'
+            );
+            if ($aggregate['ok']) {
+                $row=$aggregate['row'];
+                $result['question_total_count']=isset($row['total_count'])?(int)$row['total_count']:0;
+                $result['question_completed_count']=isset($row['completed_count'])?(int)$row['completed_count']:0;
+                $result['question_failed_count']=isset($row['failed_count'])?(int)$row['failed_count']:0;
+                $result['latest_question_at']=isset($row['latest_at'])&&$row['latest_at']!==null?(string)$row['latest_at']:'';
+            }
+            try {
+                $st=$this->pdo->query("SELECT model_name FROM `cpms_ai_executive_qa_history` ORDER BY created_at DESC,id DESC LIMIT 1");
+                $model=$st?$st->fetchColumn():false;
+                if ($model!==false&&$model!==null) $result['latest_qa_model']=(string)$model;
+            } catch (Exception $e) {
+            }
+        }
+        if ($this->tableExists('cpms_ai_executive_briefs')&&$this->columnExists('cpms_ai_executive_briefs','model_name')) {
+            try {
+                $st=$this->pdo->query("SELECT model_name FROM `cpms_ai_executive_briefs` ORDER BY generated_at DESC,id DESC LIMIT 1");
+                $model=$st?$st->fetchColumn():false;
+                if ($model!==false&&$model!==null) $result['latest_brief_model']=(string)$model;
+            } catch (Exception $e) {
+            }
+        }
         return $result;
     }
 

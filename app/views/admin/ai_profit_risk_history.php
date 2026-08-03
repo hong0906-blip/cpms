@@ -147,7 +147,7 @@ $pageParams['r']='admin/ai_profit_risk_history';
 </style>
 
 <div class="prh-wrap">
-  <section class="prh-hero"><h2>현장별 적자·원가율 위험분석 결과</h2><p>저장된 매출·스냅샷·월말 예측을 이용한 관리자용 관리 참고자료입니다.</p><div class="prh-links"><a class="prh-link" href="?r=admin%2Fai_profit_risk_setup">위험분석 설정</a><a class="prh-link secondary" href="?r=admin%2Fai_executive_brief">대표용 경영 브리핑</a><a class="prh-link secondary" href="?r=admin%2Fai_anomaly_history">이상징후 결과</a><a class="prh-link secondary" href="?r=admin%2Fai_reliability_history">입력 신뢰도 결과</a><a class="prh-link secondary" href="?r=admin%2Fai_forecast_history">월말 예측 결과</a></div></section>
+  <section class="prh-hero"><h2>현장별 적자·원가율 위험분석 결과</h2><p>저장된 매출·스냅샷·월말 예측을 이용한 관리자용 관리 참고자료입니다.</p><div class="prh-links"><a class="prh-link" href="?r=admin%2Fai_profit_risk_setup">위험분석 설정</a><a class="prh-link secondary" href="?r=admin%2Fai_ceo_index">CEO Index</a><a class="prh-link secondary" href="?r=admin%2Fai_executive_brief">대표용 경영 브리핑</a><a class="prh-link secondary" href="?r=admin%2Fai_anomaly_history">이상징후 결과</a><a class="prh-link secondary" href="?r=admin%2Fai_reliability_history">입력 신뢰도 결과</a><a class="prh-link secondary" href="?r=admin%2Fai_forecast_history">월말 예측 결과</a></div></section>
   <div class="prh-note"><strong>현재 결과는 입력된 매출과 월말 예상 투입비를 이용한 관리 참고자료이며 확정손익이 아닙니다.</strong><br>향후 잔여 공사비와 변경계약은 별도로 확인해야 합니다. 위험등급은 확인 우선순위이며 현장이나 책임자에 대한 평가가 아닙니다.</div>
   <?php if ($profitRiskHistoryDbFailed): ?><div class="prh-warning">위험분석 결과를 불러오지 못했습니다. DB 연결 상태를 확인해주세요.</div><?php elseif (!$profitRiskInstalled): ?><div class="prh-warning"><strong>적자·원가율 위험분석 기능이 아직 설치되지 않았습니다.</strong><br><a href="?r=admin%2Fai_profit_risk_setup">적자·원가율 위험 설정</a>에서 전용 테이블을 설치해주세요.</div><?php endif; ?>
 

@@ -87,6 +87,8 @@ if ($canAiDataAudit) {
     $tabs['ai_profit_risk_history'] = array('label' => '적자·원가율 위험 결과', 'icon' => 'chart-no-axes-column-increasing');
     $tabs['ai_openai_setup'] = array('label' => 'OpenAI 연결 설정', 'icon' => 'plug-zap');
     $tabs['ai_executive_brief'] = array('label' => '대표용 경영 브리핑', 'icon' => 'briefcase-business');
+    $tabs['ai_ceo_index'] = array('label' => 'CEO Index', 'icon' => 'gauge');
+    $tabs['ai_executive_qa_history'] = array('label' => '대표 질문 이력', 'icon' => 'messages-square');
 }
 
 if (!isset($tabs[$tab])) {
@@ -154,6 +156,12 @@ if (!function_exists('admin_tab_url')) {
       if ($k === 'ai_executive_brief') {
           $tabHref = '?r=admin%2Fai_executive_brief';
       }
+      if ($k === 'ai_ceo_index') {
+          $tabHref = '?r=admin%2Fai_ceo_index';
+      }
+      if ($k === 'ai_executive_qa_history') {
+          $tabHref = '?r=admin%2Fai_executive_qa_history';
+      }
       if ($k === 'company_overhead' && !$canViewCompanyOverhead && $canViewCompanyPayroll) {
           $tabHref .= '&oh=payroll';
       }
@@ -209,6 +217,10 @@ if ($tab === 'employees') {
     require __DIR__ . '/ai_openai_setup.php';
 } elseif ($tab === 'ai_executive_brief' && $canAiDataAudit) {
     require __DIR__ . '/ai_executive_brief.php';
+} elseif ($tab === 'ai_ceo_index' && $canAiDataAudit) {
+    require __DIR__ . '/ai_ceo_index.php';
+} elseif ($tab === 'ai_executive_qa_history' && $canAiDataAudit) {
+    require __DIR__ . '/ai_executive_qa_history.php';
 } elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
         $_GET['oh'] = 'payroll';

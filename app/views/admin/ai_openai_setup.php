@@ -19,7 +19,9 @@ $openAiPdo = null;
 $openAiInitializationFailed = false;
 $openAiStatus = array(
     'db_available'=>false,'curl_available'=>function_exists('curl_init'),'api_key_configured'=>false,'api_key_source'=>'NONE',
-    'model'=>OpenAiResponsesClient::DEFAULT_MODEL,'max_output_tokens'=>1800,'timeout_seconds'=>60,'connect_timeout_seconds'=>10,
+    'model'=>OpenAiResponsesClient::DEFAULT_MODEL,'qa_model'=>OpenAiResponsesClient::DEFAULT_MODEL,
+    'reasoning_effort'=>OpenAiResponsesClient::DEFAULT_REASONING_EFFORT,'qa_reasoning_effort'=>OpenAiResponsesClient::DEFAULT_REASONING_EFFORT,
+    'max_output_tokens'=>1800,'qa_max_output_tokens'=>1400,'timeout_seconds'=>60,'connect_timeout_seconds'=>10,
     'schema_version'=>OpenAiResponsesClient::DEFAULT_SCHEMA_VERSION,
     'run'=>array('table_exists'=>false,'installed'=>false,'missing_columns'=>array(),'missing_indexes'=>array()),
     'brief'=>array('table_exists'=>false,'installed'=>false,'missing_columns'=>array(),'missing_indexes'=>array()),
@@ -85,6 +87,7 @@ $openAiSource=isset($openAiStatus['api_key_source'])?(string)$openAiStatus['api_
   <?php if($openAiInitializationFailed): ?><div class="oas-message error">OpenAI 연결 상태를 불러오지 못했습니다.</div><?php elseif(empty($openAiStatus['db_available'])): ?><div class="oas-message error">DB 연결 상태를 확인할 수 없습니다. 설치 화면은 계속 사용할 수 있습니다.</div><?php elseif(empty($openAiStatus['installed'])): ?><div class="oas-note">OpenAI 경영 브리핑 테이블이 아직 설치되지 않았습니다.</div><?php endif; ?>
   <?php if(empty($openAiStatus['curl_available'])): ?><div class="oas-message error">서버의 PHP cURL 기능을 확인해주세요.</div><?php endif; ?>
   <?php if(empty($openAiStatus['api_key_configured'])): ?><div class="oas-note">OpenAI API 키가 아직 설정되지 않았습니다. 서버 환경변수 <strong>OPENAI_API_KEY</strong> 또는 Git에서 제외된 <strong>app/config/openai.local.php</strong>를 사용해주세요.</div><?php endif; ?>
+  <?php if(strtolower((string)$openAiStatus['model'])==='gpt-5-mini'||strtolower((string)$openAiStatus['qa_model'])==='gpt-5-mini'): ?><div class="oas-note">현재 이전 기본 모델이 설정되어 있습니다. GPT-5.6 Terra 사용을 권장합니다.</div><?php endif; ?>
   <?php if(is_array($openAiActionResult)): ?><div class="oas-message <?php echo !empty($openAiActionResult['ok'])?'ok':'error'; ?>"><?php echo h(isset($openAiActionResult['message'])?$openAiActionResult['message']:'처리 결과를 확인할 수 없습니다.'); ?><?php if(isset($openAiActionResult['elapsed_ms'])): ?><div>모델 <?php echo h(isset($openAiActionResult['model'])?$openAiActionResult['model']:'-'); ?> · 응답시간 <?php echo h(number_format((int)$openAiActionResult['elapsed_ms'])); ?>ms · HTTP <?php echo h(isset($openAiActionResult['http_status'])&&$openAiActionResult['http_status']!==null?(int)$openAiActionResult['http_status']:'-'); ?> · 응답 ID <?php echo !empty($openAiActionResult['response_id'])?'확인':'없음'; ?></div><?php endif; ?></div><?php endif; ?>
 
   <section class="oas-grid" aria-label="OpenAI 설정 상태">
@@ -93,6 +96,8 @@ $openAiSource=isset($openAiStatus['api_key_source'])?(string)$openAiStatus['api_
     <div class="oas-card"><div class="oas-label">API 키</div><div class="oas-value"><?php echo !empty($openAiStatus['api_key_configured'])?'설정됨':'미설정'; ?></div></div>
     <div class="oas-card"><div class="oas-label">API 키 출처</div><div class="oas-value"><?php echo h(isset($openAiSourceLabels[$openAiSource])?$openAiSourceLabels[$openAiSource]:'설정 없음'); ?></div></div>
     <div class="oas-card"><div class="oas-label">사용 모델</div><div class="oas-value"><?php echo h($openAiStatus['model']); ?></div></div>
+    <div class="oas-card"><div class="oas-label">질문 모델</div><div class="oas-value"><?php echo h($openAiStatus['qa_model']); ?></div></div>
+    <div class="oas-card"><div class="oas-label">브리핑 / 질문 추론</div><div class="oas-value"><?php echo h($openAiStatus['reasoning_effort']); ?> / <?php echo h($openAiStatus['qa_reasoning_effort']); ?></div></div>
     <div class="oas-card"><div class="oas-label">최대 출력 토큰</div><div class="oas-value"><?php echo h(number_format((int)$openAiStatus['max_output_tokens'])); ?></div></div>
     <div class="oas-card"><div class="oas-label">연결 / 전체 제한시간</div><div class="oas-value"><?php echo h((int)$openAiStatus['connect_timeout_seconds']); ?>초 / <?php echo h((int)$openAiStatus['timeout_seconds']); ?>초</div></div>
     <div class="oas-card"><div class="oas-label">스키마 버전</div><div class="oas-value"><?php echo h($openAiStatus['schema_version']); ?></div></div>
@@ -111,7 +116,7 @@ $openAiSource=isset($openAiStatus['api_key_source'])?(string)$openAiStatus['api_
     <div class="oas-actions">
       <form method="post" action="?r=admin%2Fai_openai_setup"><input type="hidden" name="_csrf" value="<?php echo h($openAiCsrfToken); ?>"><input type="hidden" name="action" value="install"><button class="oas-btn" type="submit">설치/확인</button></form>
       <form method="post" action="?r=admin%2Fai_openai_setup"><input type="hidden" name="_csrf" value="<?php echo h($openAiCsrfToken); ?>"><input type="hidden" name="action" value="test_connection"><button class="oas-btn" type="submit"<?php echo empty($openAiStatus['api_key_configured'])||empty($openAiStatus['curl_available'])?' disabled style="opacity:.45;cursor:not-allowed"':''; ?>>OpenAI 연결 테스트</button></form>
-      <a class="oas-btn secondary" href="?r=admin%2Fai_executive_brief">경영 브리핑 화면</a><a class="oas-btn secondary" href="?r=admin%2Fai_profit_risk_history">적자·원가율 위험 결과</a><a class="oas-btn secondary" href="?r=admin%2Fai_data_audit">AI 데이터 준비상태 점검</a>
+      <a class="oas-btn secondary" href="?r=admin%2Fai_ceo_index">CEO Index</a><a class="oas-btn secondary" href="?r=admin%2Fai_executive_brief">경영 브리핑 화면</a><a class="oas-btn secondary" href="?r=admin%2Fai_profit_risk_history">적자·원가율 위험 결과</a><a class="oas-btn secondary" href="?r=admin%2Fai_data_audit">AI 데이터 준비상태 점검</a>
     </div>
     <div class="oas-note">연결 테스트에는 회사자료를 보내지 않습니다. API 키 값, Authorization 헤더, 전체 API 응답은 화면이나 실행이력에 저장하지 않습니다.</div>
   </section>

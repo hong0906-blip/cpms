@@ -66,6 +66,7 @@ $monthlyForecast = isset($aiAudit['monthly_forecast']) && is_array($aiAudit['mon
 $inputReliability = isset($aiAudit['input_reliability']) && is_array($aiAudit['input_reliability']) ? $aiAudit['input_reliability'] : array();
 $anomalyDetection = isset($aiAudit['anomaly_detection']) && is_array($aiAudit['anomaly_detection']) ? $aiAudit['anomaly_detection'] : array();
 $profitRisk = isset($aiAudit['profit_risk']) && is_array($aiAudit['profit_risk']) ? $aiAudit['profit_risk'] : array();
+$ceoIndexQa = isset($aiAudit['ceo_index_qa']) && is_array($aiAudit['ceo_index_qa']) ? $aiAudit['ceo_index_qa'] : array();
 $openAiExecutiveBrief = isset($aiAudit['openai_executive_brief']) && is_array($aiAudit['openai_executive_brief']) ? $aiAudit['openai_executive_brief'] : array();
 ?>
 
@@ -277,6 +278,24 @@ $openAiExecutiveBrief = isset($aiAudit['openai_executive_brief']) && is_array($a
   </section>
 
   <section class="ai-audit-snapshot-panel" style="border-color:#c7d2fe;background:linear-gradient(135deg,#fff 0%,#eef2ff 100%);">
+    <div class="ai-audit-snapshot-head"><div><h3>CEO Index 및 대표 질문</h3><p><?php echo h(isset($ceoIndexQa['message']) && $ceoIndexQa['message'] !== '' ? $ceoIndexQa['message'] : 'CEO Index와 대표 질문 상태를 확인할 수 없습니다.'); ?> 이 항목은 기존 AI 준비점수에는 반영하지 않습니다.</p></div><a class="ai-audit-snapshot-link" style="background:#166534;" href="?r=admin%2Fai_ceo_index">CEO Index</a></div>
+    <div class="ai-audit-snapshot-grid">
+      <div class="ai-audit-snapshot-item"><span>CEO 실행이력 테이블</span><strong><?php echo !empty($ceoIndexQa['run_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>CEO 결과 테이블</span><strong><?php echo !empty($ceoIndexQa['result_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>현장별 CEO 결과 테이블</span><strong><?php echo !empty($ceoIndexQa['project_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>대표 질문 이력 테이블</span><strong><?php echo !empty($ceoIndexQa['qa_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최신 CEO Index / 등급</span><strong><?php echo isset($ceoIndexQa['latest_score']) && $ceoIndexQa['latest_score'] !== null ? h(number_format((float)$ceoIndexQa['latest_score'],1) . '점') : '-'; ?> / <?php echo h(isset($ceoIndexQa['latest_grade']) && $ceoIndexQa['latest_grade'] !== '' ? $ceoIndexQa['latest_grade'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>분석 가능 비율</span><strong><?php echo isset($ceoIndexQa['coverage_rate']) && $ceoIndexQa['coverage_rate'] !== null ? h(number_format((float)$ceoIndexQa['coverage_rate'],1) . '%') : '-'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 계산일 / 대상 월</span><strong><?php echo h(isset($ceoIndexQa['latest_analysis_date']) && $ceoIndexQa['latest_analysis_date'] !== '' ? $ceoIndexQa['latest_analysis_date'] : '-'); ?> / <?php echo h(isset($ceoIndexQa['latest_target_ym']) && $ceoIndexQa['latest_target_ym'] !== '' ? $ceoIndexQa['latest_target_ym'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>질문 전체 / 완료 / 실패</span><strong><?php echo h(number_format(isset($ceoIndexQa['question_total_count'])?(int)$ceoIndexQa['question_total_count']:0)); ?> / <?php echo h(number_format(isset($ceoIndexQa['question_completed_count'])?(int)$ceoIndexQa['question_completed_count']:0)); ?> / <?php echo h(number_format(isset($ceoIndexQa['question_failed_count'])?(int)$ceoIndexQa['question_failed_count']:0)); ?>건</strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 질문일</span><strong><?php echo h(isset($ceoIndexQa['latest_question_at']) && $ceoIndexQa['latest_question_at'] !== '' ? $ceoIndexQa['latest_question_at'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>브리핑 설정 / 최근 모델</span><strong><?php echo h(isset($ceoIndexQa['brief_model'])?$ceoIndexQa['brief_model']:'-'); ?> / <?php echo h(isset($ceoIndexQa['latest_brief_model'])&&$ceoIndexQa['latest_brief_model']!==''?$ceoIndexQa['latest_brief_model']:'-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>질문 설정 / 최근 모델</span><strong><?php echo h(isset($ceoIndexQa['qa_model'])?$ceoIndexQa['qa_model']:'-'); ?> / <?php echo h(isset($ceoIndexQa['latest_qa_model'])&&$ceoIndexQa['latest_qa_model']!==''?$ceoIndexQa['latest_qa_model']:'-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>점수 반영</span><strong>현재 미반영</strong></div>
+    </div>
+  </section>
+
+  <section class="ai-audit-snapshot-panel" style="border-color:#c7d2fe;background:linear-gradient(135deg,#fff 0%,#eef2ff 100%);">
     <div class="ai-audit-snapshot-head"><div><h3>OpenAI 대표용 경영 브리핑</h3><p><?php echo h(isset($openAiExecutiveBrief['message']) && $openAiExecutiveBrief['message'] !== '' ? $openAiExecutiveBrief['message'] : 'OpenAI 경영 브리핑 상태를 확인할 수 없습니다.'); ?> 이 항목은 기존 AI 준비점수에는 반영하지 않습니다.</p></div><a class="ai-audit-snapshot-link" style="background:#4338ca;" href="?r=admin%2Fai_openai_setup">OpenAI 연결 설정</a></div>
     <div class="ai-audit-snapshot-grid">
       <div class="ai-audit-snapshot-item"><span>PHP cURL</span><strong><?php echo !empty($openAiExecutiveBrief['curl_available']) ? '사용 가능' : '확인 필요'; ?></strong></div>
@@ -385,7 +404,7 @@ $openAiExecutiveBrief = isset($aiAudit['openai_executive_brief']) && is_array($a
       <div class="ai-audit-criteria-item"><strong>점수 의미</strong>이 점수는 AI가 똑똑한 정도가 아니라 향후 예측에 사용할 날짜, 시각, 담당자, 변경 전후 이력이 얼마나 잘 기록되어 있는지를 뜻합니다. 90점 이상 준비 우수, 75~89점 준비 양호, 60~74점 보완 필요, 59점 이하 준비 부족입니다.</div>
       <div class="ai-audit-criteria-item"><strong>데이터 보유기간</strong>0개월은 데이터 없음, 1~2개월은 학습자료 부족, 3~5개월은 시범 예측 가능, 6~11개월은 기본 예측 가능, 12개월 이상은 계절성 분석 가능으로 판단합니다.</div>
       <div class="ai-audit-criteria-item"><strong>확인 불가 영역</strong>DB 연결 또는 핵심 테이블을 전혀 확인할 수 없는 영역은 0점으로 처리하지 않습니다. 확인 가능한 영역끼리 원래 가중치 비율을 다시 계산하며 상단에 일부 자료 확인 불가 경고를 표시합니다.</div>
-      <div class="ai-audit-criteria-item"><strong>이번 단계 범위</strong>이 화면은 예측 결과가 아니라 준비상태 점검입니다. 데이터를 변경하거나 자동 보정하지 않으며 GPT API도 아직 연결하지 않았습니다.</div>
+      <div class="ai-audit-criteria-item"><strong>이번 화면 범위</strong>이 화면은 예측 결과가 아니라 준비상태 점검입니다. 데이터를 변경하거나 자동 보정하지 않으며 OpenAI 설명 기능과 CEO Index 상태는 기존 준비점수와 분리해 표시합니다.</div>
     </div>
   </section>
 </div>

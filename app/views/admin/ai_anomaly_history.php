@@ -161,7 +161,7 @@ $pageParams['r']='admin/ai_anomaly_history';
 </style>
 
 <div class="ah-wrap">
-  <section class="ah-hero"><h2>현장별 비용 이상징후 탐지 결과</h2><p>저장된 입력 신뢰도와 비교자료에서 확인이 필요한 변화를 찾은 관리자용 참고 화면입니다.</p><div class="ah-links"><a class="ah-link" href="?r=admin%2Fai_anomaly_setup">이상징후 탐지 설정</a><a class="ah-link secondary" href="?r=admin%2Fai_profit_risk_history">적자·원가율 위험 결과</a><a class="ah-link secondary" href="?r=admin%2Fai_reliability_history">입력 신뢰도 결과</a><a class="ah-link secondary" href="?r=admin%2Fai_forecast_history">기본 월말 예측 결과</a><a class="ah-link secondary" href="?r=admin%2Fai_snapshot_history">일일 스냅샷 이력</a></div></section>
+  <section class="ah-hero"><h2>현장별 비용 이상징후 탐지 결과</h2><p>저장된 입력 신뢰도와 비교자료에서 확인이 필요한 변화를 찾은 관리자용 참고 화면입니다.</p><div class="ah-links"><a class="ah-link" href="?r=admin%2Fai_anomaly_setup">이상징후 탐지 설정</a><a class="ah-link secondary" href="?r=admin%2Fai_ceo_index">CEO Index</a><a class="ah-link secondary" href="?r=admin%2Fai_profit_risk_history">적자·원가율 위험 결과</a><a class="ah-link secondary" href="?r=admin%2Fai_reliability_history">입력 신뢰도 결과</a><a class="ah-link secondary" href="?r=admin%2Fai_forecast_history">기본 월말 예측 결과</a><a class="ah-link secondary" href="?r=admin%2Fai_snapshot_history">일일 스냅샷 이력</a></div></section>
   <div class="ah-note"><strong>이상징후는 확인이 필요한 데이터 변화입니다. 실제 오류, 부정행위 또는 문제를 확정하는 결과가 아닙니다.</strong><br>공정단계 변화, 엑셀 일괄입력, 정상적인 정산으로도 동일한 변화가 나타날 수 있습니다. 이상징후 점수는 확인 우선순위이며 문제 발생 가능성이나 손실률을 의미하지 않습니다.</div>
   <?php if ($anomalyHistoryDbFailed): ?><div class="ah-warning">이상징후 결과를 불러오지 못했습니다. DB 연결 상태를 확인해주세요.</div><?php elseif (!$anomalyInstalled): ?><div class="ah-warning"><strong>이상징후 탐지 기능이 아직 설치되지 않았습니다.</strong><br><a href="?r=admin%2Fai_anomaly_setup">이상징후 탐지 설정</a>에서 전용 테이블을 설치해주세요.</div><?php endif; ?>
 

@@ -361,7 +361,11 @@ class AiExecutiveBriefService
         $result = array(
             'db_available'=>(bool)$pdo,'curl_available'=>!empty($config['curl_available']),'api_key_configured'=>!empty($config['available']),
             'api_key_source'=>isset($config['source'])?$config['source']:'NONE','model'=>isset($config['model'])?$config['model']:OpenAiResponsesClient::DEFAULT_MODEL,
+            'qa_model'=>isset($config['qa_model'])?$config['qa_model']:OpenAiResponsesClient::DEFAULT_MODEL,
+            'reasoning_effort'=>isset($config['reasoning_effort'])?$config['reasoning_effort']:OpenAiResponsesClient::DEFAULT_REASONING_EFFORT,
+            'qa_reasoning_effort'=>isset($config['qa_reasoning_effort'])?$config['qa_reasoning_effort']:OpenAiResponsesClient::DEFAULT_REASONING_EFFORT,
             'max_output_tokens'=>isset($config['max_output_tokens'])?(int)$config['max_output_tokens']:1800,
+            'qa_max_output_tokens'=>isset($config['qa_max_output_tokens'])?(int)$config['qa_max_output_tokens']:1400,
             'timeout_seconds'=>isset($config['timeout_seconds'])?(int)$config['timeout_seconds']:60,
             'connect_timeout_seconds'=>isset($config['connect_timeout_seconds'])?(int)$config['connect_timeout_seconds']:10,
             'schema_version'=>isset($config['schema_version'])?$config['schema_version']:OpenAiResponsesClient::DEFAULT_SCHEMA_VERSION,
@@ -646,13 +650,13 @@ class AiExecutiveBriefService
 
     public static function buildRequestPayload($sourceData)
     {
-        $config = OpenAiResponsesClient::loadConfig();
         $inputJson = self::encodeData($sourceData);
         if (!is_string($inputJson)) return array();
         return array(
             'model'=>OpenAiResponsesClient::model(),'store'=>false,'instructions'=>self::instructions(),
             'input'=>array(array('role'=>'user','content'=>array(array('type'=>'input_text','text'=>$inputJson)))),
-            'max_output_tokens'=>(int)$config['max_output_tokens'],
+            'max_output_tokens'=>OpenAiResponsesClient::maxOutputTokens(),
+            'reasoning'=>array('effort'=>OpenAiResponsesClient::reasoningEffort()),
             'text'=>array('format'=>array('type'=>'json_schema','name'=>'cpms_executive_brief','description'=>'CPMS 경영예측 결과를 설명하는 대표용 브리핑','strict'=>true,'schema'=>self::structuredSchema()))
         );
     }
