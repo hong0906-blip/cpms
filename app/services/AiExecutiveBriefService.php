@@ -14,6 +14,7 @@ use PDO;
 
 require_once __DIR__ . '/OpenAiResponsesClient.php';
 require_once __DIR__ . '/AiCeoIndexService.php';
+require_once __DIR__ . '/AiEvidenceValueService.php';
 
 class AiExecutiveBriefService
 {
@@ -463,9 +464,9 @@ class AiExecutiveBriefService
         return $result;
     }
 
-    private static function metric($id, $label, $value, $unit)
+    private static function metric($id, $label, $value, $unit, $valueType = '', $options = array())
     {
-        return array('metric_id'=>$id,'label'=>$label,'value'=>$value,'unit'=>$unit);
+        return AiEvidenceValueService::metric($id, $label, $value, $unit, $valueType, $options);
     }
 
     private static function buildV2SourceData($pdo)
@@ -477,8 +478,49 @@ class AiExecutiveBriefService
             $params=array(':date'=>$company['analysis_date'],':ym'=>$company['target_ym'],':run_id'=>(int)$company['run_id'],':version'=>AiCeoIndexService::V2_VERSION);
             $sql='SELECT p.*,s.monthly_sales_amount,s.cumulative_sales_amount,s.cumulative_input_amount FROM `'.$projectTable.'` p LEFT JOIN `'.$snapshotTable.'` s ON s.snapshot_date=p.analysis_date AND s.target_ym=p.target_ym AND s.project_id=p.project_id WHERE p.analysis_date=:date AND p.target_ym=:ym AND p.run_id=:run_id AND p.calculation_version=:version ORDER BY CASE p.project_index_grade WHEN \'CRITICAL\' THEN 1 WHEN \'WARNING\' THEN 2 WHEN \'WATCH\' THEN 3 WHEN \'INSUFFICIENT\' THEN 4 ELSE 5 END,p.final_forecast_amount DESC,p.project_id LIMIT 20';
             $detail=$pdo->prepare($sql);if(!$detail||!$detail->execute($params))return null;$rows=$detail->fetchAll(PDO::FETCH_ASSOC);if(!is_array($rows))$rows=array();
-            $metrics=array(self::metric('company.project_count','분석 현장 수',(int)$company['source_project_count'],'개'),self::metric('company.ceo_index_score','CEO Index',$company['ceo_index_score']===null?null:(float)$company['ceo_index_score'],'점'),self::metric('company.current_input_total','현재 입력 투입비 합계',(float)$company['current_input_total'],'원'),self::metric('company.expected_unentered_total','예상 미입력 투입비 합계',(float)$company['expected_unentered_total'],'원'),self::metric('company.final_forecast_total','최종 예상 투입비 합계',(float)$company['final_forecast_total'],'원'),self::metric('company.forecast_low_total','예상 하한 합계',(float)$company['forecast_low_total'],'원'),self::metric('company.forecast_high_total','예상 상한 합계',(float)$company['forecast_high_total'],'원'),self::metric('company.critical_count','위험 현장 수',(int)$company['critical_count'],'개'),self::metric('company.warning_count','주의 현장 수',(int)$company['warning_count'],'개'),self::metric('company.missing_count','누락 가능성 현장 수',(int)$company['missing_count'],'개'));
-            $projects=array();foreach($rows as $row){$id=(int)$row['project_id'];if($id<=0)continue;$sales=isset($row['monthly_sales_amount'])?(float)$row['monthly_sales_amount']:0.0;$forecast=(float)$row['final_forecast_amount'];$profit=$sales-$forecast;$projects[]=array('project_id'=>$id,'project_name'=>self::redactText($row['project_name_snapshot'],190),'project_status'=>self::redactText($row['project_status_snapshot'],50),'current_input_amount'=>(float)$row['current_input_amount'],'expected_completion_rate'=>$row['expected_completion_rate']===null?null:(float)$row['expected_completion_rate'],'expected_unentered_amount'=>(float)$row['expected_unentered_amount'],'final_forecast_amount'=>$forecast,'forecast_low_amount'=>(float)$row['forecast_low_amount'],'forecast_high_amount'=>(float)$row['forecast_high_amount'],'forecast_confidence_score'=>$row['forecast_confidence_score']===null?null:(float)$row['forecast_confidence_score'],'forecast_confidence_grade'=>(string)$row['forecast_confidence_grade'],'overinput_grade'=>(string)$row['overinput_grade'],'missing_possibility_grade'=>(string)$row['missing_possibility_grade'],'contract_risk_grade'=>(string)$row['contract_risk_grade'],'anomaly_count'=>(int)$row['anomaly_count'],'project_index_score'=>$row['project_index_score']===null?null:(float)$row['project_index_score'],'project_index_grade'=>(string)$row['project_index_grade'],'monthly_sales_amount'=>$sales,'monthly_forecast_profit_amount'=>$profit,'evidence_ids'=>array('project.'.$id.'.current_input_amount','project.'.$id.'.expected_unentered_amount','project.'.$id.'.final_forecast_amount','project.'.$id.'.forecast_confidence_score','project.'.$id.'.overinput_grade','project.'.$id.'.missing_possibility_grade','project.'.$id.'.project_index_score','project.'.$id.'.monthly_sales_amount','project.'.$id.'.monthly_forecast_profit_amount'));}
+            $metrics=array(
+                self::metric('analysis.date','분석 기준일',(string)$company['analysis_date'],'','DATE'),
+                self::metric('analysis.target_ym','분석 대상 월',(string)$company['target_ym'],'','DATE'),
+                self::metric('company.project_count','분석 현장 수',(int)$company['source_project_count'],'개','COUNT'),
+                self::metric('company.ceo_index_score','CEO Index',$company['ceo_index_score']===null?null:(float)$company['ceo_index_score'],'점','SCORE'),
+                self::metric('company.current_input_total','현재 입력 투입비 합계',(float)$company['current_input_total'],'원','MONEY_KRW'),
+                self::metric('company.expected_unentered_total','예상 미입력 투입비 합계',(float)$company['expected_unentered_total'],'원','MONEY_KRW'),
+                self::metric('company.final_forecast_total','최종 예상 투입비 합계',(float)$company['final_forecast_total'],'원','MONEY_KRW'),
+                self::metric('company.forecast_low_total','예상 하한 합계',(float)$company['forecast_low_total'],'원','MONEY_KRW'),
+                self::metric('company.forecast_high_total','예상 상한 합계',(float)$company['forecast_high_total'],'원','MONEY_KRW'),
+                AiEvidenceValueService::moneyRange('metric_id','company.forecast_range','회사 예상 투입비 범위',(float)$company['forecast_low_total'],(float)$company['forecast_high_total']),
+                self::metric('company.critical_count','위험 현장 수',(int)$company['critical_count'],'개','COUNT'),
+                self::metric('company.warning_count','주의 현장 수',(int)$company['warning_count'],'개','COUNT'),
+                self::metric('company.missing_count','누락 가능성 현장 수',(int)$company['missing_count'],'개','COUNT')
+            );
+            $projects=array();
+            foreach($rows as $row){
+                $id=(int)$row['project_id'];if($id<=0)continue;
+                $name=self::redactText($row['project_name_snapshot'],190);
+                $sales=isset($row['monthly_sales_amount'])?(float)$row['monthly_sales_amount']:0.0;
+                $forecast=(float)$row['final_forecast_amount'];$profit=$sales-$forecast;
+                $prefix='project.'.$id.'.';
+                $projectEvidence=array(
+                    self::metric($prefix.'current_input_amount',$name.' 현재 입력 투입비',(float)$row['current_input_amount'],'원','MONEY_KRW'),
+                    self::metric($prefix.'expected_completion_rate',$name.' 예상 입력완료율',$row['expected_completion_rate']===null?null:(float)$row['expected_completion_rate'],'%','PERCENT'),
+                    self::metric($prefix.'expected_unentered_amount',$name.' 예상 미입력 투입비',(float)$row['expected_unentered_amount'],'원','MONEY_KRW'),
+                    self::metric($prefix.'final_forecast_amount',$name.' 최종 예상 투입비',$forecast,'원','MONEY_KRW'),
+                    self::metric($prefix.'forecast_low_amount',$name.' 예상 하한',(float)$row['forecast_low_amount'],'원','MONEY_KRW'),
+                    self::metric($prefix.'forecast_high_amount',$name.' 예상 상한',(float)$row['forecast_high_amount'],'원','MONEY_KRW'),
+                    AiEvidenceValueService::moneyRange('metric_id',$prefix.'forecast_range',$name.' 예상 투입비 범위',(float)$row['forecast_low_amount'],(float)$row['forecast_high_amount']),
+                    self::metric($prefix.'forecast_confidence_score',$name.' 예측 신뢰도',$row['forecast_confidence_score']===null?null:(float)$row['forecast_confidence_score'],'점','SCORE'),
+                    self::metric($prefix.'overinput_grade',$name.' 과다투입 등급',(string)$row['overinput_grade'],'','TEXT'),
+                    self::metric($prefix.'missing_possibility_grade',$name.' 미입력 가능성 등급',(string)$row['missing_possibility_grade'],'','TEXT'),
+                    self::metric($prefix.'contract_risk_grade',$name.' 계약 대비 위험등급',(string)$row['contract_risk_grade'],'','TEXT'),
+                    self::metric($prefix.'anomaly_count',$name.' 이상징후 수',(int)$row['anomaly_count'],'건','COUNT'),
+                    self::metric($prefix.'project_index_score',$name.' 현장 CEO Index',$row['project_index_score']===null?null:(float)$row['project_index_score'],'점','SCORE'),
+                    self::metric($prefix.'project_index_grade',$name.' 현장 CEO Index 등급',(string)$row['project_index_grade'],'','TEXT'),
+                    self::metric($prefix.'monthly_sales_amount',$name.' 월 매출',$sales,'원','MONEY_KRW'),
+                    self::metric($prefix.'monthly_forecast_profit_amount',$name.' 월 예상손익',$profit,'원','MONEY_KRW')
+                );
+                $evidenceIds=array();foreach($projectEvidence as $evidenceRow)$evidenceIds[]=(string)$evidenceRow['metric_id'];
+                $projects[]=array('project_id'=>$id,'project_name'=>$name,'project_status'=>self::redactText($row['project_status_snapshot'],50),'current_input_amount'=>(float)$row['current_input_amount'],'expected_completion_rate'=>$row['expected_completion_rate']===null?null:(float)$row['expected_completion_rate'],'expected_unentered_amount'=>(float)$row['expected_unentered_amount'],'final_forecast_amount'=>$forecast,'forecast_low_amount'=>(float)$row['forecast_low_amount'],'forecast_high_amount'=>(float)$row['forecast_high_amount'],'forecast_confidence_score'=>$row['forecast_confidence_score']===null?null:(float)$row['forecast_confidence_score'],'forecast_confidence_grade'=>(string)$row['forecast_confidence_grade'],'overinput_grade'=>(string)$row['overinput_grade'],'missing_possibility_grade'=>(string)$row['missing_possibility_grade'],'contract_risk_grade'=>(string)$row['contract_risk_grade'],'anomaly_count'=>(int)$row['anomaly_count'],'project_index_score'=>$row['project_index_score']===null?null:(float)$row['project_index_score'],'project_index_grade'=>(string)$row['project_index_grade'],'monthly_sales_amount'=>$sales,'monthly_forecast_profit_amount'=>$profit,'evidence_ids'=>$evidenceIds,'evidence'=>$projectEvidence);
+            }
             $source=array('analysis_date'=>$company['analysis_date'],'target_ym'=>$company['target_ym'],'calculation_version'=>AiCeoIndexService::V2_VERSION,'company_metrics'=>$metrics,'grade_summary'=>array('WARNING'=>(int)$company['warning_count'],'CRITICAL'=>(int)$company['critical_count'],'INSUFFICIENT'=>(int)$company['insufficient_count']),'detailed_project_count'=>count($projects),'omitted_project_count'=>max(0,(int)$company['source_project_count']-count($projects)),'projects'=>$projects,'data_notice'=>'모든 금액과 비율은 CPMS V2 PHP 계산결과이며 GPT는 재계산하지 않습니다.');$json=self::encodeData($source);while(is_string($json)&&strlen($json)>self::MAX_INPUT_BYTES&&count($source['projects'])>1){array_pop($source['projects']);$source['detailed_project_count']=count($source['projects']);$source['omitted_project_count']=max(0,(int)$company['source_project_count']-count($source['projects']));$json=self::encodeData($source);}if(!is_string($json))return null;return array('ok'=>true,'message'=>'V2 브리핑 입력자료를 준비했습니다.','analysis_date'=>$company['analysis_date'],'target_ym'=>$company['target_ym'],'project_count'=>(int)$company['source_project_count'],'source_data'=>$source,'input_bytes'=>strlen($json));
         }catch(Exception $e){return null;}
     }
@@ -641,11 +683,12 @@ class AiExecutiveBriefService
         $stringArray = array('type'=>'array','items'=>array('type'=>'string'));
         return array(
             'type'=>'object','additionalProperties'=>false,
-            'required'=>array('company_status','headline','executive_summary','key_metrics','top_risks','positive_signals','check_today','data_limitations','disclaimer'),
+            'required'=>array('company_status','headline','executive_summary','executive_summary_evidence_ids','key_metrics','top_risks','positive_signals','check_today','data_limitations','disclaimer'),
             'properties'=>array(
                 'company_status'=>array('type'=>'string','enum'=>array('NORMAL','WATCH','WARNING','CRITICAL','INSUFFICIENT')),
                 'headline'=>array('type'=>'string'),
                 'executive_summary'=>array('type'=>'string'),
+                'executive_summary_evidence_ids'=>$stringArray,
                 'key_metrics'=>array('type'=>'array','items'=>array('type'=>'object','additionalProperties'=>false,'required'=>array('metric_id','label','interpretation'),'properties'=>array('metric_id'=>array('type'=>'string'),'label'=>array('type'=>'string'),'interpretation'=>array('type'=>'string')))),
                 'top_risks'=>array('type'=>'array','maxItems'=>5,'items'=>array('type'=>'object','additionalProperties'=>false,'required'=>array('project_id','project_name','severity','risk_type','title','explanation','evidence_ids','recommended_actions'),'properties'=>array(
                     'project_id'=>array('type'=>'integer'),'project_name'=>array('type'=>'string'),'severity'=>array('type'=>'string','enum'=>array('WATCH','WARNING','CRITICAL','INSUFFICIENT')),
@@ -664,7 +707,9 @@ class AiExecutiveBriefService
     {
         return "당신은 건설회사 대표에게 CPMS 경영예측 결과를 설명하는 경영관리 보조자입니다.\n"
             . "반드시 제공된 JSON 자료만 사용하고 지정된 JSON Schema 형식으로 한국어 응답을 작성하세요.\n"
-            . "숫자를 새로 계산하지 말고 제공되지 않은 숫자, 현장, 원인을 만들지 마세요. 확정매출과 예상매출을 구분하세요.\n"
+            . "숫자는 evidence의 display_value 또는 allowed_display_values에 있는 표현만 그대로 사용하고 새로 계산하거나 단위를 변환하지 마세요.\n"
+            . "제공되지 않은 숫자·날짜·기간·현장 수를 만들지 말고, 번호 목록은 1, 2, 3 대신 글머리표를 사용하며 '한 가지', '두 가지' 같은 수량도 새로 만들지 마세요.\n"
+            . "숫자가 있는 executive_summary에는 해당 executive_summary_evidence_ids를, 숫자가 있는 위험 설명에는 해당 evidence_ids를 반드시 넣으세요. 확정매출과 예상매출을 구분하세요.\n"
             . "입력 신뢰도가 낮거나 판단자료가 부족하면 단정하지 말고 그 한계를 명시하세요. 적자나 손실이 확정됐다고 표현하지 마세요.\n"
             . "직원이나 현장 책임자를 비난하지 말고 문제 직원, 태만, 조작, 횡령 등의 표현을 사용하지 마세요. 회계감사나 법률판단처럼 표현하지 마세요.\n"
             . "대표가 바로 확인할 수 있는 행동을 간결하게 제안하고 같은 내용을 반복하지 마세요. 어려운 통계용어는 피하세요.\n"
@@ -690,8 +735,8 @@ class AiExecutiveBriefService
         $context = array('projects'=>array(),'evidence'=>array(),'company_evidence'=>array());
         if (isset($sourceData['company_metrics']) && is_array($sourceData['company_metrics'])) {
             foreach ($sourceData['company_metrics'] as $metric) if (is_array($metric) && isset($metric['metric_id'])) {
-                $context['evidence'][(string)$metric['metric_id']] = true;
-                $context['company_evidence'][(string)$metric['metric_id']] = true;
+                $context['evidence'][(string)$metric['metric_id']] = $metric;
+                $context['company_evidence'][(string)$metric['metric_id']] = $metric;
             }
         }
         if (isset($sourceData['projects']) && is_array($sourceData['projects'])) {
@@ -699,7 +744,7 @@ class AiExecutiveBriefService
                 if (!is_array($project) || !isset($project['project_id'])) continue;
                 $id = (int)$project['project_id'];
                 $context['projects'][$id] = isset($project['project_name']) ? (string)$project['project_name'] : '';
-                if (isset($project['evidence_ids']) && is_array($project['evidence_ids'])) foreach ($project['evidence_ids'] as $evidence) $context['evidence'][(string)$evidence] = true;
+                if (isset($project['evidence']) && is_array($project['evidence'])) foreach ($project['evidence'] as $evidenceRow) if (is_array($evidenceRow) && isset($evidenceRow['metric_id'])) $context['evidence'][(string)$evidenceRow['metric_id']] = $evidenceRow;
             }
         }
         return $context;
@@ -730,38 +775,37 @@ class AiExecutiveBriefService
         return false;
     }
 
-    private static function normalizedNumbers($value)
+    private static function validationFailure($code, $message, $path)
     {
-        $text=is_string($value)?$value:self::encodeData($value);
-        if(!is_string($text)) return array();
-        $previous='';
-        while($previous!==$text) {
-            $previous=$text;
-            $replaced=preg_replace('/(-?\d+),(\d{3})(?=\D|$)/u','$1$2',$text);
-            if(is_string($replaced)) $text=$replaced; else break;
-        }
-        preg_match_all('/-?\d+(?:\.\d+)?/u',$text,$matches);
-        $result=array();
-        foreach(isset($matches[0])?$matches[0]:array() as $number) {
-            $negative=substr($number,0,1)==='-';
-            if($negative) $number=substr($number,1);
-            $parts=explode('.',$number,2);
-            $integer=ltrim($parts[0],'0');
-            if($integer==='') $integer='0';
-            $fraction=isset($parts[1])?rtrim($parts[1],'0'):'';
-            $normalized=$integer . ($fraction!==''?'.'.$fraction:'');
-            if($negative && $normalized!=='0') $normalized='-'.$normalized;
-            $result[$normalized]=true;
-        }
-        return $result;
+        return array('ok'=>false,'error_code'=>$code,'message'=>$message,'field_path'=>$path,'invalid_number'=>'');
     }
 
-    private static function containsUnprovidedNumber($data, $sourceData)
+    private static function numberSegments($data)
     {
-        $allowed=self::normalizedNumbers($sourceData);
-        $used=self::normalizedNumbers($data);
-        foreach($used as $number=>$unused) if(!isset($allowed[$number])) return true;
-        return false;
+        $segments=array();
+        $segments[]=array('path'=>'headline','text'=>$data['headline'],'evidence_ids'=>array(),'project_ids'=>array());
+        $segments[]=array('path'=>'executive_summary','text'=>$data['executive_summary'],'evidence_ids'=>$data['executive_summary_evidence_ids'],'project_ids'=>array());
+        foreach($data['key_metrics'] as $index=>$metric) {
+            $ids=array($metric['metric_id']);
+            $segments[]=array('path'=>'key_metrics.'.$index.'.label','text'=>$metric['label'],'evidence_ids'=>$ids,'project_ids'=>array());
+            $segments[]=array('path'=>'key_metrics.'.$index.'.interpretation','text'=>$metric['interpretation'],'evidence_ids'=>$ids,'project_ids'=>array());
+        }
+        foreach($data['top_risks'] as $index=>$risk) {
+            $projectIds=array((int)$risk['project_id']);
+            foreach(array('risk_type','title','explanation') as $key) $segments[]=array('path'=>'top_risks.'.$index.'.'.$key,'text'=>$risk[$key],'evidence_ids'=>$risk['evidence_ids'],'project_ids'=>$projectIds);
+            foreach($risk['recommended_actions'] as $actionIndex=>$action) $segments[]=array('path'=>'top_risks.'.$index.'.recommended_actions.'.$actionIndex,'text'=>$action,'evidence_ids'=>$risk['evidence_ids'],'project_ids'=>$projectIds);
+        }
+        foreach(array('positive_signals','check_today','data_limitations') as $key) foreach($data[$key] as $index=>$text) $segments[]=array('path'=>$key.'.'.$index,'text'=>$text,'evidence_ids'=>array(),'project_ids'=>array());
+        $segments[]=array('path'=>'disclaimer','text'=>$data['disclaimer'],'evidence_ids'=>array(),'project_ids'=>array());
+        return $segments;
+    }
+
+    private static function validationSummary($validation)
+    {
+        $summary=isset($validation['message'])?(string)$validation['message']:'OpenAI 응답 검증에 실패했습니다.';
+        if(!empty($validation['field_path']))$summary.=' 실패 필드: '.preg_replace('/[^A-Za-z0-9_.-]/','',(string)$validation['field_path']);
+        if(!empty($validation['invalid_number']))$summary.=' 허용되지 않은 숫자 표현: '.preg_replace('/[^0-9.,+\-%억만원점개건개월회명년월일\s]/u','',(string)$validation['invalid_number']);
+        return self::shortText($summary,500);
     }
 
     private static function validateStringArray($value, $maxItems, $maxLength)
@@ -778,30 +822,36 @@ class AiExecutiveBriefService
 
     public static function validateStructuredOutput($data, $sourceData)
     {
-        $required = array('company_status','headline','executive_summary','key_metrics','top_risks','positive_signals','check_today','data_limitations','disclaimer');
-        if (!self::validateKeys($data, $required, $required)) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
-        if (!in_array($data['company_status'], array('NORMAL','WATCH','WARNING','CRITICAL','INSUFFICIENT'), true)) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
-        if (!is_string($data['headline']) || self::textLength($data['headline']) > 300 || !is_string($data['executive_summary']) || self::textLength($data['executive_summary']) > 2000 || !is_string($data['disclaimer']) || self::textLength($data['disclaimer']) > 500) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
-        if (!self::validateStringArray($data['positive_signals'],5,500) || !self::validateStringArray($data['check_today'],7,500) || !self::validateStringArray($data['data_limitations'],7,500)) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
+        $required = array('company_status','headline','executive_summary','executive_summary_evidence_ids','key_metrics','top_risks','positive_signals','check_today','data_limitations','disclaimer');
+        if (!self::validateKeys($data, $required, $required)) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','');
+        if (!in_array($data['company_status'], array('NORMAL','WATCH','WARNING','CRITICAL','INSUFFICIENT'), true)) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','company_status');
+        if (!is_string($data['headline']) || self::textLength($data['headline']) > 300 || !is_string($data['executive_summary']) || self::textLength($data['executive_summary']) > 2000 || !is_string($data['disclaimer']) || self::textLength($data['disclaimer']) > 500) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','text');
+        if (!is_array($data['executive_summary_evidence_ids']) || count($data['executive_summary_evidence_ids'])>30) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','executive_summary_evidence_ids');
+        if (!self::validateStringArray($data['positive_signals'],5,500) || !self::validateStringArray($data['check_today'],7,500) || !self::validateStringArray($data['data_limitations'],7,500)) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','lists');
         $context = self::collectValidationContext($sourceData);
-        if (!is_array($data['key_metrics']) || count($data['key_metrics']) > 20) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
+        foreach($data['executive_summary_evidence_ids'] as $id) if(!is_string($id)||!isset($context['evidence'][$id])) return self::validationFailure('EVIDENCE_VALIDATION_FAILED','OpenAI 응답에 확인할 수 없는 근거 ID가 포함되어 있습니다.','executive_summary_evidence_ids');
+        if (!is_array($data['key_metrics']) || count($data['key_metrics']) > 20) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','key_metrics');
         foreach ($data['key_metrics'] as $metric) {
             $keys = array('metric_id','label','interpretation');
-            if (!self::validateKeys($metric,$keys,$keys) || !is_string($metric['metric_id']) || !isset($context['company_evidence'][$metric['metric_id']]) || !is_string($metric['label']) || !is_string($metric['interpretation']) || self::textLength($metric['label'])>120 || self::textLength($metric['interpretation'])>500) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
+            if (!self::validateKeys($metric,$keys,$keys) || !is_string($metric['metric_id']) || !is_string($metric['label']) || !is_string($metric['interpretation']) || self::textLength($metric['label'])>120 || self::textLength($metric['interpretation'])>500) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','key_metrics');
+            if(!isset($context['company_evidence'][$metric['metric_id']])) return self::validationFailure('EVIDENCE_VALIDATION_FAILED','OpenAI 응답에 확인할 수 없는 근거 ID가 포함되어 있습니다.','key_metrics.metric_id');
         }
-        if (!is_array($data['top_risks']) || count($data['top_risks']) > 5) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
+        if (!is_array($data['top_risks']) || count($data['top_risks']) > 5) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks');
         foreach ($data['top_risks'] as $risk) {
             $keys = array('project_id','project_name','severity','risk_type','title','explanation','evidence_ids','recommended_actions');
-            if (!self::validateKeys($risk,$keys,$keys) || !is_int($risk['project_id']) || !isset($context['projects'][$risk['project_id']]) || !is_string($risk['project_name']) || $context['projects'][$risk['project_id']] !== $risk['project_name']) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
-            if (!in_array($risk['severity'],array('WATCH','WARNING','CRITICAL','INSUFFICIENT'),true) || !is_string($risk['risk_type']) || !is_string($risk['title']) || !is_string($risk['explanation'])) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
-            if (self::textLength($risk['risk_type'])>100 || self::textLength($risk['title'])>300 || self::textLength($risk['explanation'])>1500) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
-            if (!is_array($risk['evidence_ids']) || count($risk['evidence_ids'])>20) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
-            foreach ($risk['evidence_ids'] as $evidence) if (!is_string($evidence) || !isset($context['evidence'][$evidence])) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
-            if (!self::validateStringArray($risk['recommended_actions'],3,500)) return array('ok'=>false,'message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
+            if (!self::validateKeys($risk,$keys,$keys) || !is_int($risk['project_id']) || !isset($context['projects'][$risk['project_id']]) || !is_string($risk['project_name']) || $context['projects'][$risk['project_id']] !== $risk['project_name']) return self::validationFailure('PROJECT_VALIDATION_FAILED','OpenAI 응답에 확인할 수 없는 현장이 포함되어 있습니다.','top_risks.project');
+            if (!in_array($risk['severity'],array('WATCH','WARNING','CRITICAL','INSUFFICIENT'),true) || !is_string($risk['risk_type']) || !is_string($risk['title']) || !is_string($risk['explanation'])) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks');
+            if (self::textLength($risk['risk_type'])>100 || self::textLength($risk['title'])>300 || self::textLength($risk['explanation'])>1500) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks.text');
+            if (!is_array($risk['evidence_ids']) || count($risk['evidence_ids'])>20) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks.evidence_ids');
+            foreach ($risk['evidence_ids'] as $evidence) if (!is_string($evidence) || !isset($context['evidence'][$evidence])) return self::validationFailure('EVIDENCE_VALIDATION_FAILED','OpenAI 응답에 확인할 수 없는 근거 ID가 포함되어 있습니다.','top_risks.evidence_ids');
+            if (!self::validateStringArray($risk['recommended_actions'],3,500)) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks.recommended_actions');
         }
-        if (self::containsUnsafeText($data)) return array('ok'=>false,'message'=>'OpenAI 응답에 저장할 수 없는 표현 또는 개인정보 형식이 포함되어 있습니다.');
-        if (self::containsUnprovidedNumber($data,$sourceData)) return array('ok'=>false,'message'=>'OpenAI 응답에 원본자료에서 확인되지 않은 숫자가 포함되어 있습니다.');
-        return array('ok'=>true,'message'=>'OpenAI 응답 형식을 확인했습니다.','data'=>$data);
+        if (self::containsUnsafeText($data)) return self::validationFailure('UNSAFE_TEXT_FAILED','OpenAI 응답에 저장할 수 없는 표현 또는 개인정보 형식이 포함되어 있습니다.','');
+        $displayCheck=AiEvidenceValueService::validateEvidenceMap($context['evidence']);
+        if(empty($displayCheck['ok']))return $displayCheck;
+        $numberCheck=AiEvidenceValueService::validateSegments(self::numberSegments($data),$context['evidence'],$context['projects']);
+        if(empty($numberCheck['ok']))return $numberCheck;
+        return array('ok'=>true,'error_code'=>'','message'=>'OpenAI 응답 형식을 확인했습니다.','data'=>$data);
     }
 
     private static function normalizeTrigger($value)
@@ -989,12 +1039,23 @@ class AiExecutiveBriefService
                 self::releaseLock($pdo,$lock);
                 return array_merge($empty,array('status'=>$status,'message'=>isset($api['message'])?$api['message']:$empty['message']));
             }
+            if(!isset($api['output_text'])||trim((string)$api['output_text'])===''){
+                self::finishRun($pdo,$runId,'FAILED',$api,'OUTPUT_TEXT_MISSING','OpenAI 응답 본문을 확인하지 못했습니다.');
+                self::releaseLock($pdo,$lock);
+                return array_merge($empty,array('message'=>'OpenAI 응답 형식을 확인하지 못했습니다.','error_code'=>'OUTPUT_TEXT_MISSING'));
+            }
             $decoded=json_decode($api['output_text'],true);
+            if(!is_array($decoded)){
+                self::finishRun($pdo,$runId,'FAILED',$api,'JSON_DECODE_FAILED','OpenAI JSON 응답을 해석하지 못했습니다.');
+                self::releaseLock($pdo,$lock);
+                return array_merge($empty,array('message'=>'GPT 요약 검증 실패. 오류코드: JSON_DECODE_FAILED','error_code'=>'JSON_DECODE_FAILED'));
+            }
             $validation=self::validateStructuredOutput($decoded,$source['source_data']);
             if (empty($validation['ok'])) {
-                self::finishRun($pdo,$runId,'FAILED',$api,'OUTPUT_VALIDATION_FAILED',isset($validation['message'])?$validation['message']:'OpenAI 응답 형식을 확인하지 못했습니다.');
+                $validationCode=isset($validation['error_code'])&&$validation['error_code']!==''?$validation['error_code']:'SCHEMA_VALIDATION_FAILED';
+                self::finishRun($pdo,$runId,'FAILED',$api,$validationCode,self::validationSummary($validation));
                 self::releaseLock($pdo,$lock);
-                return array_merge($empty,array('message'=>isset($validation['message'])?$validation['message']:$empty['message']));
+                return array_merge($empty,array('message'=>'GPT 요약 검증 실패. 오류코드: '.$validationCode,'error_code'=>$validationCode));
             }
             if (!self::saveBrief($pdo,$runId,$source,$fingerprint,$validation['data'])) throw new Exception('save unavailable');
             self::finishRun($pdo,$runId,'COMPLETED',$api,'','');

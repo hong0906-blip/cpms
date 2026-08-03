@@ -257,6 +257,21 @@ class OpenAiResponsesClient
         return $usage;
     }
 
+    public static function inspectResponseStatus($response)
+    {
+        if (!is_array($response)) return array('ok'=>false,'error_code'=>'JSON_DECODE_FAILED','message'=>'OpenAI 응답 형식을 확인하지 못했습니다.');
+        $status = isset($response['status']) ? strtolower(trim((string)$response['status'])) : '';
+        if ($status === '' || $status === 'completed') return array('ok'=>true,'error_code'=>'','message'=>'');
+        if ($status === 'incomplete') {
+            $reason = '';
+            if (isset($response['incomplete_details']) && is_array($response['incomplete_details']) && isset($response['incomplete_details']['reason'])) $reason = strtolower(trim((string)$response['incomplete_details']['reason']));
+            if ($reason === 'max_output_tokens') return array('ok'=>false,'error_code'=>'RESPONSE_INCOMPLETE_MAX_TOKENS','message'=>'OpenAI 출력 한도가 부족하여 요약을 완료하지 못했습니다.');
+            return array('ok'=>false,'error_code'=>'RESPONSE_INCOMPLETE','message'=>'OpenAI 응답이 완료되지 않았습니다.');
+        }
+        if ($status === 'failed' || $status === 'cancelled') return array('ok'=>false,'error_code'=>'OPENAI_RESPONSE_FAILED','message'=>'OpenAI 응답을 완료하지 못했습니다.');
+        return array('ok'=>false,'error_code'=>'OPENAI_RESPONSE_STATUS','message'=>'OpenAI 응답 상태를 확인하지 못했습니다.');
+    }
+
     public static function sanitizeError($httpStatus, $curlErrno, $curlError, $response)
     {
         $httpStatus = (int)$httpStatus;
@@ -351,6 +366,12 @@ class OpenAiResponsesClient
         $empty['response'] = $decoded;
         $empty['response_id'] = isset($decoded['id']) && is_string($decoded['id']) ? substr($decoded['id'], 0, 100) : '';
         $empty['usage'] = self::extractUsage($decoded);
+        $responseStatus = self::inspectResponseStatus($decoded);
+        if (empty($responseStatus['ok'])) {
+            $empty['error_code'] = $responseStatus['error_code'];
+            $empty['message'] = $responseStatus['message'];
+            return $empty;
+        }
         $refusal = self::extractRefusal($decoded);
         if ($refusal !== '') {
             $empty['refused'] = true;
@@ -360,7 +381,7 @@ class OpenAiResponsesClient
         }
         $empty['output_text'] = self::extractOutputText($decoded);
         if ($empty['output_text'] === '') {
-            $empty['error_code'] = 'OUTPUT_MISSING';
+            $empty['error_code'] = 'OUTPUT_TEXT_MISSING';
             $empty['message'] = 'OpenAI 응답 형식을 확인하지 못했습니다.';
             return $empty;
         }
