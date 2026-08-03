@@ -511,6 +511,9 @@ if ($route === 'ping') {
 if ($route === '관리자') {
     $route = '관리';
 }
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_data_audit') {
+    $route = 'admin/ai_data_audit';
+}
 
 
 // ==========================
@@ -624,7 +627,10 @@ if (\App\Core\Auth::check()) {
     );
     if (isset($cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute])) $cpmsDeptForRestrictedRoute = $cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute];
 }
-cpms_usage_track_request($route);
+// AI 데이터 준비상태 점검은 운영자료를 전혀 변경하지 않는 읽기 전용 화면이다.
+if ($route !== 'admin/ai_data_audit') {
+    cpms_usage_track_request($route);
+}
 $cpmsIsRestrictedManagementRoute = ($route === '관리' || strpos($route, 'admin/') === 0 || strpos($route, 'management/') === 0);
 if ($cpmsDeptForRestrictedRoute === '공무' && !\App\Core\Auth::isMaster() && ($cpmsIsRestrictedManagementRoute || $route === '경영현황')) {
     http_response_code(403);
@@ -1783,6 +1789,25 @@ if ($route === '관리' && isset($_GET['debug_route']) && (string)$_GET['debug_r
         echo '__FILE__=' . __FILE__ . "\n";
         exit;
     }
+}
+
+// ==========================
+//  AI 데이터 준비상태 점검(읽기 전용)
+// ==========================
+if ($route === 'admin/ai_data_audit') {
+    if (!(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = 'ai_data_audit';
+    \App\Core\View::render('admin/index', array(
+        'title' => 'AI 데이터 준비상태 점검',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
 }
 
 // ==========================

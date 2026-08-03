@@ -15,11 +15,12 @@ require_once __DIR__ . '/../../services/CompanyPayrollAccessService.php';
 $pdo = Db::pdo();
 $user = Auth::user();
 $canManage = (Auth::isMaster() || Auth::canManageEmployees());
+$canAiDataAudit = (Auth::isDevelopmentDepartment() || Auth::canManageEmployees());
 $canLaborManagement = cpms_is_management_department_user($pdo, $user);
 $canViewCompanyOverhead = cpms_can_view_company_overhead($user, $pdo);
 $canViewCompanyPayroll = cpms_can_view_company_payroll($user, $pdo);
 
-if (!$canManage && !$canLaborManagement && !$canViewCompanyOverhead && !$canViewCompanyPayroll) {
+if (!$canManage && !$canAiDataAudit && !$canLaborManagement && !$canViewCompanyOverhead && !$canViewCompanyPayroll) {
     echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. 관리부서 전용 화면입니다.</div>';
     return;
 }
@@ -28,6 +29,7 @@ $tab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : '';
 if ($tab === '') {
     if ($canManage) $tab = 'employees';
     else if ($canLaborManagement) $tab = 'labor_calc';
+    else if ($canAiDataAudit) $tab = 'ai_data_audit';
     else $tab = 'company_overhead';
 }
 
@@ -66,9 +68,17 @@ if (!$canManage && !$canLaborManagement && ($canViewCompanyOverhead || $canViewC
     );
 }
 
+if (!$canManage && !$canLaborManagement && !$canViewCompanyOverhead && !$canViewCompanyPayroll) {
+    $tabs = array();
+}
+if ($canAiDataAudit) {
+    $tabs['ai_data_audit'] = array('label' => 'AI 데이터 점검', 'icon' => 'database-zap');
+}
+
 if (!isset($tabs[$tab])) {
     if ($canManage) $tab = 'employees';
     else if ($canLaborManagement) $tab = 'labor_calc';
+    else if ($canAiDataAudit) $tab = 'ai_data_audit';
     else $tab = 'company_overhead';
 }
 
@@ -85,6 +95,9 @@ if (!function_exists('admin_tab_url')) {
     <?php $active = ($k === $tab); ?>
     <?php
       $tabHref = admin_tab_url($k);
+      if ($k === 'ai_data_audit') {
+          $tabHref = '?r=admin%2Fai_data_audit';
+      }
       if ($k === 'company_overhead' && !$canViewCompanyOverhead && $canViewCompanyPayroll) {
           $tabHref .= '&oh=payroll';
       }
@@ -110,6 +123,8 @@ if ($tab === 'employees') {
     require __DIR__ . '/leave_management.php';
 } elseif ($tab === 'cost_change' && $canManage) {
     require __DIR__ . '/cost_change.php';
+} elseif ($tab === 'ai_data_audit' && $canAiDataAudit) {
+    require __DIR__ . '/ai_data_audit.php';
 } elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
         $_GET['oh'] = 'payroll';
