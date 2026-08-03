@@ -10,10 +10,12 @@ require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/partials/equipment_statement_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -88,7 +90,7 @@ cpms_equipment_gongsu_ensure_schema($pdo);
 cpms_equipment_statement_ensure_usage_columns($pdo);
 
 try {
-    $st = $pdo->prepare("SELECT u.*, e.is_deleted, e.remark
+    $st = $pdo->prepare("SELECT u.*, e.is_deleted, e.category, e.vendor_name, e.spec, e.base_rate, e.remark
         FROM cpms_equipment_usage u
         JOIN cpms_equipment_items e ON e.id = u.equipment_id AND e.project_id = u.project_id
         WHERE u.id = :id AND u.project_id = :pid
@@ -164,6 +166,35 @@ try {
         $stOverride->bindValue(':updated_at', date('Y-m-d H:i:s'));
         $stOverride->bindValue(':usage_id', $usageId, PDO::PARAM_INT);
         $stOverride->execute();
+    }
+
+    try {
+        $stEventNew = $pdo->prepare("SELECT u.*, e.is_deleted, e.category, e.vendor_name, e.spec, e.base_rate, e.remark
+                                       FROM cpms_equipment_usage u
+                                       JOIN cpms_equipment_items e ON e.id = u.equipment_id AND e.project_id = u.project_id
+                                      WHERE u.id = :id AND u.project_id = :pid LIMIT 1");
+        $stEventNew->execute(array(':id' => $usageId, ':pid' => $projectId));
+        $eventNewRow = $stEventNew->fetch(PDO::FETCH_ASSOC);
+        if (is_array($eventNewRow)) {
+            CostDataEventService::recordChange($pdo, array(
+                'project_id' => $projectId,
+                'cost_type' => 'equipment',
+                'target_type' => 'equipment_usage',
+                'target_id' => (string)$usageId,
+                'event_action' => 'UPDATE',
+                'source_type' => 'DIRECT',
+                'actual_date' => $useDate,
+                'settlement_ym' => CostChangeService::settlementYm('equipment', $useDate),
+                'old_amount' => isset($row['amount']) ? $row['amount'] : null,
+                'new_amount' => isset($eventNewRow['amount']) ? $eventNewRow['amount'] : $amount,
+                'old_data' => $row,
+                'new_data' => $eventNewRow,
+                'reason' => $memo,
+                'source_file' => __FILE__,
+            ));
+        }
+    } catch (Exception $costEventException) {
+        error_log('[CostDataEvent] event capture failed');
     }
 
     $successMessage = '장비 사용내역을 수정했습니다.';

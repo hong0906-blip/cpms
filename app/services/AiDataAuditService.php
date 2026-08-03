@@ -921,10 +921,61 @@ class AiDataAuditService
     public function auditCostChangeHistory()
     {
         $section = $this->emptySection('cost_change', '비용 변경이력');
+        $section['history_setup_required'] = false;
         if (!$this->pdo) {
             $section['unavailable_reason'] = 'CPMS DB 연결 확인 불가';
             $this->addWarning($section, '테이블 확인 실패');
             return $this->finalizeSection($section, array());
+        }
+        $eventTable = 'cpms_cost_data_events';
+        $eventInstalled = $this->tableExists($eventTable);
+        if (!$eventInstalled) {
+            $section['history_setup_required'] = true;
+            $this->addMetric($section, '통합 비용 입력·변경이력', '미설치', null, '보완 필요', '일반 당월 입력·수정·삭제 이력을 저장하는 통합 테이블입니다.');
+            $this->addWarning($section, '통합 비용 입력·변경이력이 아직 설치되지 않았습니다.');
+            $this->addRecommendation($section, 'AI 데이터 이력 설정에서 통합 이력 테이블을 설치해주세요.');
+        } else {
+            $eventRequiredColumns = array('event_at', 'source_type', 'actor_employee_id', 'actor_name', 'old_amount', 'new_amount', 'cost_type');
+            $eventColumnsReady = true;
+            foreach ($eventRequiredColumns as $eventColumn) {
+                if (!$this->columnExists($eventTable, $eventColumn)) $eventColumnsReady = false;
+            }
+            if (!$eventColumnsReady) {
+                $section['history_setup_required'] = true;
+                $this->addMetric($section, '통합 비용 입력·변경이력', '구조 보완 필요', null, '보완 필요', '설치 화면에서 필수 컬럼과 인덱스를 다시 확인해주세요.');
+                $this->addWarning($section, '통합 비용 입력·변경이력의 필수 구조가 일부 부족합니다.');
+                $this->addRecommendation($section, 'AI 데이터 이력 설정에서 통합 이력 테이블 구조를 확인해주세요.');
+            } else {
+                $eventSql = "SELECT COUNT(*) AS event_count,"
+                    . " COUNT(DISTINCT DATE_FORMAT(event_at, '%Y-%m')) AS event_month_count,"
+                    . " COALESCE(SUM(CASE WHEN source_type IS NOT NULL AND TRIM(source_type) <> '' THEN 1 ELSE 0 END),0) AS source_count,"
+                    . " COALESCE(SUM(CASE WHEN actor_employee_id IS NOT NULL OR (actor_name IS NOT NULL AND TRIM(actor_name) <> '') THEN 1 ELSE 0 END),0) AS actor_count,"
+                    . " COALESCE(SUM(CASE WHEN old_amount IS NOT NULL OR new_amount IS NOT NULL THEN 1 ELSE 0 END),0) AS amount_trace_count,"
+                    . " COUNT(DISTINCT cost_type) AS cost_type_count, MAX(event_at) AS last_event_at"
+                    . " FROM `" . $eventTable . "`";
+                $eventAgg = $this->safeAggregate($eventSql, array(), '통합 비용 이력 집계 실패');
+                if ($eventAgg['ok']) {
+                    $eventRow = $eventAgg['row'];
+                    $eventTotal = isset($eventRow['event_count']) ? (int)$eventRow['event_count'] : 0;
+                    $eventMonthCount = isset($eventRow['event_month_count']) ? (int)$eventRow['event_month_count'] : 0;
+                    $eventSourceRate = $this->coverageRate(isset($eventRow['source_count']) ? $eventRow['source_count'] : 0, $eventTotal);
+                    $eventActorRate = $this->coverageRate(isset($eventRow['actor_count']) ? $eventRow['actor_count'] : 0, $eventTotal);
+                    $eventAmountRate = $this->coverageRate(isset($eventRow['amount_trace_count']) ? $eventRow['amount_trace_count'] : 0, $eventTotal);
+                    $this->addMetric($section, '통합 비용 입력·변경이력', '설치 완료', 100, '양호', '앞으로 발생하는 비용 이벤트를 통합 구조로 기록합니다.');
+                    $this->addMetric($section, '통합 이력 전체 이벤트', $this->countText($eventTotal), null, $eventTotal > 0 ? '확인' : '데이터 없음', '과거자료를 임의 생성하지 않고 설치 이후 이벤트만 집계합니다.');
+                    $this->addMetric($section, '통합 이력 보유월', $this->countText($eventMonthCount, '개월'), null, $this->learningJudgement($eventMonthCount), '실제 이벤트가 존재하는 서로 다른 연월 수입니다.');
+                    $this->addMetric($section, '입력 출처', $this->coverageResult(isset($eventRow['source_count']) ? $eventRow['source_count'] : 0, $eventTotal), $eventSourceRate, $this->rateJudgement($eventSourceRate, $eventTotal), '직접입력·엑셀·승인·강제입력 등의 출처 보유율입니다.');
+                    $this->addMetric($section, '통합 이력 처리자', $this->coverageResult(isset($eventRow['actor_count']) ? $eventRow['actor_count'] : 0, $eventTotal), $eventActorRate, $this->rateJudgement($eventActorRate, $eventTotal), '개인정보 목록 없이 처리자 식별정보 보유율만 집계합니다.');
+                    $this->addMetric($section, '변경 전후 금액 추적', $this->coverageResult(isset($eventRow['amount_trace_count']) ? $eventRow['amount_trace_count'] : 0, $eventTotal), $eventAmountRate, $this->rateJudgement($eventAmountRate, $eventTotal), '공수처럼 금액이 없는 조정은 전후 공수 자료로 별도 보존됩니다.');
+                    $this->addMetric($section, '최근 통합 이벤트', isset($eventRow['last_event_at']) && $eventRow['last_event_at'] !== null ? $eventRow['last_event_at'] : '-', null, $eventTotal > 0 ? '확인' : '데이터 없음', '가장 최근에 기록된 이벤트 시각입니다.');
+                    $this->addMetric($section, '기록 중인 비용 종류', $this->countText(isset($eventRow['cost_type_count']) ? $eventRow['cost_type_count'] : 0, '종류'), null, $eventTotal > 0 ? '확인' : '데이터 없음', '통합 이력에 실제 기록된 비용 종류 수입니다.');
+                    if ($eventTotal === 0) {
+                        $section['highlights'][] = '통합 이력 구조는 설치됐으며 앞으로 발생하는 변경부터 기록됩니다.';
+                    }
+                } else {
+                    $this->addWarning($section, '통합 비용 이력 집계 실패');
+                }
+            }
         }
         $tables = array(
             'cpms_cost_change_requests' => $this->tableExists('cpms_cost_change_requests'),

@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/_common.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 cpms_cost_change_require_login();
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -126,6 +127,7 @@ try {
         CostChangeService::logEvent($pdo, $requestId, 'FINAL_APPROVED', 'FINAL', $opinion, array());
         CostChangeService::logEvent($pdo, $requestId, 'APPLY_COMPLETED', 'SYSTEM', '승인 요청서 내용으로 자동 반영 완료', $applyResult);
         $pdo->commit();
+        CostChangeService::recordAppliedCostDataEvent($pdo, $request, $applyResult, __FILE__);
         $notifyType = 'APPLY_COMPLETED';
         $extraNotifyType = 'FINAL_APPROVED';
         $notifyReceiver = (int)$request['requester_employee_id'];

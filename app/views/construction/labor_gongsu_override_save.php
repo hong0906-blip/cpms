@@ -1,9 +1,11 @@
 <?php
 // 공수 수정 HTTP 500 방지 + JSON 응답 안정화
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostDataEventService;
 
 if (function_exists('ob_get_level')) {
     while (ob_get_level() > 0) {
@@ -614,7 +616,30 @@ try {
     $st->bindValue(':updated_at', $now, PDO::PARAM_STR);
     $st->execute();
 
+    $overrideId = (int)$pdo->lastInsertId();
+    if ($overrideId <= 0) {
+        $stFind = $pdo->prepare("SELECT id FROM cpms_labor_gongsu_overrides WHERE project_id=:project_id AND worker_key=:worker_key AND work_date=:work_date LIMIT 1");
+        $stFind->execute(array(':project_id'=>$projectId, ':worker_key'=>$workerKey, ':work_date'=>$workDate));
+        $overrideId = (int)$stFind->fetchColumn();
+    }
+
     if ($status === 'applied') {
+        CostDataEventService::recordChange($pdo, array(
+            'project_id' => $projectId,
+            'cost_type' => 'labor',
+            'target_type' => 'labor_gongsu_override',
+            'target_id' => (string)$overrideId,
+            'event_action' => 'ADJUST',
+            'source_type' => 'DIRECT',
+            'actual_date' => $workDate,
+            'settlement_ym' => $month,
+            'old_amount' => null,
+            'new_amount' => null,
+            'old_data' => array('project_id'=>$projectId, 'month'=>$month, 'use_date'=>$workDate, 'work_unit'=>$oldValue, 'is_deleted_entry'=>0),
+            'new_data' => array('project_id'=>$projectId, 'month'=>$month, 'use_date'=>$workDate, 'work_unit'=>$newValue, 'is_deleted_entry'=>$isDeletedEntry),
+            'reason' => $reason,
+            'source_file' => __FILE__,
+        ));
         cpms_gongsu_json_exit(true, $deleteMode ? '공수가 삭제되었습니다.' : '공수가 수정되었습니다.', array(
             'mode' => 'applied',
             'value' => $deleteMode ? '' : number_format($newValue, 2, '.', ''),
@@ -622,12 +647,6 @@ try {
         ), 200);
     }
 
-    $overrideId = (int)$pdo->lastInsertId();
-    if ($overrideId <= 0) {
-        $stFind = $pdo->prepare("SELECT id FROM cpms_labor_gongsu_overrides WHERE project_id=:project_id AND worker_key=:worker_key AND work_date=:work_date LIMIT 1");
-        $stFind->execute(array(':project_id'=>$projectId, ':worker_key'=>$workerKey, ':work_date'=>$workDate));
-        $overrideId = (int)$stFind->fetchColumn();
-    }
     cpms_labor_send_override_notification($pdo, $overrideId, 'DIRECTOR_REQUEST');
 
     $returnValue = ($oldValue === null) ? number_format($newValue, 2, '.', '') : number_format($oldValue, 2, '.', '');

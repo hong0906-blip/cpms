@@ -11,10 +11,12 @@ require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/material_statement_helper.php';
 require_once __DIR__ . '/partials/material_usage_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -339,6 +341,35 @@ try {
     }
 
     $pdo->commit();
+
+    try {
+        $stEventNew = $pdo->prepare("SELECT u.*, i.is_deleted, i.category, i.vendor_name, i.spec, i.base_rate, i.remark
+                                       FROM cpms_material_usage u
+                                       JOIN cpms_material_items i ON i.id = u.material_id AND i.project_id = u.project_id
+                                      WHERE u.id = :id AND u.project_id = :pid LIMIT 1");
+        $stEventNew->execute(array(':id' => $usageId, ':pid' => $projectId));
+        $eventNewRow = $stEventNew->fetch(PDO::FETCH_ASSOC);
+        if (is_array($eventNewRow)) {
+            CostDataEventService::recordChange($pdo, array(
+                'project_id' => $projectId,
+                'cost_type' => 'material',
+                'target_type' => 'material_usage',
+                'target_id' => (string)$usageId,
+                'event_action' => 'UPDATE',
+                'source_type' => 'DIRECT',
+                'actual_date' => $useDate,
+                'settlement_ym' => CostChangeService::settlementYm('material', $useDate),
+                'old_amount' => isset($row['amount']) ? $row['amount'] : null,
+                'new_amount' => isset($eventNewRow['amount']) ? $eventNewRow['amount'] : $amount,
+                'old_data' => $row,
+                'new_data' => $eventNewRow,
+                'reason' => $memo,
+                'source_file' => __FILE__,
+            ));
+        }
+    } catch (Exception $costEventException) {
+        error_log('[CostDataEvent] event capture failed');
+    }
 
     $successMessage = '자재구입비 사용내역과 업체정보를 수정했습니다.';
     $uploadResult = cpms_material_statement_store_uploaded_file_for_usage_rows(

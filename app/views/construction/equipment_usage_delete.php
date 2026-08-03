@@ -7,10 +7,12 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $role = Auth::userRole();
@@ -37,7 +39,11 @@ $pdo = Db::pdo();
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
 
 try {
-    $stFind = $pdo->prepare("SELECT id, use_date FROM cpms_equipment_usage WHERE project_id = :pid AND equipment_id = :eid AND use_date = :d LIMIT 1");
+    $stFind = $pdo->prepare("SELECT u.id, u.project_id, u.equipment_id, u.use_date, u.amount, u.memo,
+                                   i.category, i.vendor_name, i.spec, i.remark
+                              FROM cpms_equipment_usage u
+                              LEFT JOIN cpms_equipment_items i ON i.id = u.equipment_id AND i.project_id = u.project_id
+                             WHERE u.project_id = :pid AND u.equipment_id = :eid AND u.use_date = :d LIMIT 1");
     $stFind->execute(array(':pid'=>$projectId, ':eid'=>$equipmentId, ':d'=>$useDate));
     $row = $stFind->fetch(PDO::FETCH_ASSOC);
     if (is_array($row)) {
@@ -54,6 +60,23 @@ try {
     $st->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
     $st->bindValue(':d', $useDate);
     $st->execute();
+    if (is_array($row) && $st->rowCount() > 0) {
+        CostDataEventService::recordChange($pdo, array(
+            'project_id' => $projectId,
+            'cost_type' => 'equipment',
+            'target_type' => 'equipment_usage',
+            'target_id' => isset($row['id']) ? (string)$row['id'] : '',
+            'event_action' => 'DELETE',
+            'source_type' => 'DIRECT',
+            'actual_date' => isset($row['use_date']) ? $row['use_date'] : '',
+            'settlement_ym' => CostChangeService::settlementYm('equipment', isset($row['use_date']) ? $row['use_date'] : ''),
+            'old_amount' => isset($row['amount']) ? $row['amount'] : null,
+            'new_amount' => null,
+            'old_data' => $row,
+            'new_data' => array(),
+            'source_file' => __FILE__,
+        ));
+    }
     flash_set('success', '사용일자를 삭제했습니다.');
 } catch (Exception $e) {
     flash_set('error', '삭제 실패: ' . $e->getMessage());

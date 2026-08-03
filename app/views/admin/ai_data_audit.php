@@ -107,6 +107,8 @@ $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($
   .ai-audit-detail h4 { margin:0; font-size:13px; font-weight:900; }
   .ai-audit-detail ul { margin:9px 0 0; padding-left:18px; color:#475569; font-size:12px; line-height:1.65; }
   .ai-audit-highlight { margin:0 20px 16px; padding:13px 15px; border:1px solid #a7f3d0; border-radius:14px; background:#ecfdf5; color:#047857; font-size:13px; font-weight:800; line-height:1.55; }
+  .ai-audit-history-link { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 20px 16px; padding:13px 15px; border:1px solid #bfdbfe; border-radius:14px; background:#eff6ff; color:#1e40af; font-size:13px; font-weight:800; line-height:1.55; }
+  .ai-audit-history-link a { flex:0 0 auto; display:inline-flex; padding:8px 12px; border-radius:9px; background:#1d4ed8; color:#fff; text-decoration:none; font-weight:900; }
   .ai-audit-criteria { margin-top:16px; padding:20px; border:1px solid #cbd5e1; border-radius:18px; background:#fff; }
   .ai-audit-criteria h3 { margin:0; font-size:18px; font-weight:900; }
   .ai-audit-criteria-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
@@ -125,7 +127,8 @@ $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($
     .ai-audit-score strong { font-size:24px; }
     .ai-audit-facts { grid-template-columns:repeat(2,minmax(0,1fr)); padding:14px 16px; }
     .ai-audit-detail-grid { padding:14px 16px 16px; }
-    .ai-audit-highlight { margin:0 16px 14px; }
+    .ai-audit-highlight, .ai-audit-history-link { margin:0 16px 14px; }
+    .ai-audit-history-link { align-items:stretch; flex-direction:column; }
   }
 </style>
 
@@ -225,6 +228,10 @@ $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($
 
         <?php if (count($sectionHighlights) > 0): ?>
           <?php foreach ($sectionHighlights as $highlight): ?><div class="ai-audit-highlight"><?php echo h($highlight); ?></div><?php endforeach; ?>
+        <?php endif; ?>
+
+        <?php if (isset($section['history_setup_required']) && $section['history_setup_required']): ?>
+          <div class="ai-audit-history-link"><span>통합 비용 입력·변경이력 구조를 설치하거나 확인해주세요.</span><a href="?r=admin%2Fai_data_setup">AI 데이터 이력 설정</a></div>
         <?php endif; ?>
 
         <div class="ai-audit-table-wrap">

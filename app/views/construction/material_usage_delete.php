@@ -9,10 +9,12 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/material_statement_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $role = Auth::userRole();
@@ -61,7 +63,11 @@ try {
         }
         $in = implode(',', $placeholders);
 
-        $stFind = $pdo->prepare("SELECT id, material_id, use_date FROM cpms_material_usage WHERE project_id = :pid AND id IN (" . $in . ")");
+        $stFind = $pdo->prepare("SELECT u.id, u.project_id, u.material_id, u.use_date, u.amount, u.memo,
+                                       i.category, i.vendor_name, i.spec, i.remark
+                                  FROM cpms_material_usage u
+                                  LEFT JOIN cpms_material_items i ON i.id = u.material_id AND i.project_id = u.project_id
+                                 WHERE u.project_id = :pid AND u.id IN (" . $in . ")");
         $stFind->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $i = 0;
         foreach ($ids as $idValue) {
@@ -149,12 +155,35 @@ try {
         }
 
         $pdo->commit();
+        if ($deletedCount > 0 && $deletedCount === count($deleteRows)) {
+            foreach ($deleteRows as $deleteRow) {
+                CostDataEventService::recordChange($pdo, array(
+                    'project_id' => $projectId,
+                    'cost_type' => 'material',
+                    'target_type' => 'material_usage',
+                    'target_id' => isset($deleteRow['id']) ? (string)$deleteRow['id'] : '',
+                    'event_action' => 'DELETE',
+                    'source_type' => 'DIRECT',
+                    'actual_date' => isset($deleteRow['use_date']) ? $deleteRow['use_date'] : '',
+                    'settlement_ym' => CostChangeService::settlementYm('material', isset($deleteRow['use_date']) ? $deleteRow['use_date'] : ''),
+                    'old_amount' => isset($deleteRow['amount']) ? $deleteRow['amount'] : null,
+                    'new_amount' => null,
+                    'old_data' => $deleteRow,
+                    'new_data' => array(),
+                    'source_file' => __FILE__,
+                ));
+            }
+        }
         flash_set('success', '선택한 자재구입비 사용내역 ' . $deletedCount . '건을 삭제했습니다.');
         header('Location: ' . $redirect);
         exit;
     }
 
-    $stFindSingle = $pdo->prepare("SELECT id, use_date FROM cpms_material_usage WHERE project_id = :pid AND material_id = :eid AND use_date = :d LIMIT 1");
+    $stFindSingle = $pdo->prepare("SELECT u.id, u.project_id, u.material_id, u.use_date, u.amount, u.memo,
+                                         i.category, i.vendor_name, i.spec, i.remark
+                                    FROM cpms_material_usage u
+                                    LEFT JOIN cpms_material_items i ON i.id = u.material_id AND i.project_id = u.project_id
+                                   WHERE u.project_id = :pid AND u.material_id = :eid AND u.use_date = :d LIMIT 1");
     $stFindSingle->execute(array(':pid'=>$projectId, ':eid'=>$materialId, ':d'=>$useDate));
     $singleRow = $stFindSingle->fetch(PDO::FETCH_ASSOC);
     if (is_array($singleRow)) {
@@ -171,6 +200,23 @@ try {
     $st->bindValue(':eid', $materialId, PDO::PARAM_INT);
     $st->bindValue(':d', $useDate);
     $st->execute();
+    if (is_array($singleRow) && $st->rowCount() > 0) {
+        CostDataEventService::recordChange($pdo, array(
+            'project_id' => $projectId,
+            'cost_type' => 'material',
+            'target_type' => 'material_usage',
+            'target_id' => isset($singleRow['id']) ? (string)$singleRow['id'] : '',
+            'event_action' => 'DELETE',
+            'source_type' => 'DIRECT',
+            'actual_date' => isset($singleRow['use_date']) ? $singleRow['use_date'] : '',
+            'settlement_ym' => CostChangeService::settlementYm('material', isset($singleRow['use_date']) ? $singleRow['use_date'] : ''),
+            'old_amount' => isset($singleRow['amount']) ? $singleRow['amount'] : null,
+            'new_amount' => null,
+            'old_data' => $singleRow,
+            'new_data' => array(),
+            'source_file' => __FILE__,
+        ));
+    }
     flash_set('success', '사용일자를 삭제했습니다.');
 } catch (Exception $e) {
     if ($pdo && $pdo->inTransaction()) $pdo->rollBack();

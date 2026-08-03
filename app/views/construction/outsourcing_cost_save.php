@@ -3,10 +3,12 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/tabs/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -32,7 +34,7 @@ try {
     $now = date('Y-m-d H:i:s');
     if ($action === 'delete') {
         if ($entryId <= 0) throw new Exception('삭제할 외주비 내역이 없습니다.');
-        $stOld = $pdo->prepare("SELECT id, expense_date FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
+        $stOld = $pdo->prepare("SELECT id, project_id, expense_date, category, company_name, amount, memo, is_deleted FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
         $stOld->execute(array(':id'=>$entryId, ':pid'=>$projectId));
         $oldRow = $stOld->fetch(PDO::FETCH_ASSOC);
         if ($oldRow) {
@@ -45,6 +47,23 @@ try {
         $st->bindValue(':id', $entryId, PDO::PARAM_INT);
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $st->execute();
+        if (is_array($oldRow) && $st->rowCount() > 0) {
+            CostDataEventService::recordChange($pdo, array(
+                'project_id' => $projectId,
+                'cost_type' => 'outsourcing',
+                'target_type' => 'outsourcing_cost',
+                'target_id' => (string)$entryId,
+                'event_action' => 'DELETE',
+                'source_type' => 'DIRECT',
+                'actual_date' => isset($oldRow['expense_date']) ? $oldRow['expense_date'] : '',
+                'settlement_ym' => CostChangeService::settlementYm('outsourcing', isset($oldRow['expense_date']) ? $oldRow['expense_date'] : ''),
+                'old_amount' => isset($oldRow['amount']) ? $oldRow['amount'] : null,
+                'new_amount' => null,
+                'old_data' => $oldRow,
+                'new_data' => array(),
+                'source_file' => __FILE__,
+            ));
+        }
         flash_set('success', '외주비 입력 내역을 삭제했습니다.');
         header('Location: ' . $redirect); exit;
     }
@@ -67,7 +86,7 @@ try {
     }
 
     if ($entryId > 0) {
-        $stOld = $pdo->prepare("SELECT expense_date FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
+        $stOld = $pdo->prepare("SELECT id, project_id, expense_date, category, company_name, amount, memo, is_deleted FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
         $stOld->execute(array(':id'=>$entryId, ':pid'=>$projectId));
         $oldRow = $stOld->fetch(PDO::FETCH_ASSOC);
         if (!$oldRow) throw new Exception('수정할 외주비 내역을 찾을 수 없습니다.');
@@ -101,7 +120,33 @@ try {
     $st->bindValue(':memo', $memo === '' ? null : $memo, $memo === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
     $st->bindValue(':now', $now);
     $st->execute();
+    $writeAffectedRows = (int)$st->rowCount();
     $savedEntryId = $entryId > 0 ? $entryId : (int)$pdo->lastInsertId();
+    try {
+        $stEventNew = $pdo->prepare("SELECT id, project_id, expense_date, category, company_name, amount, memo, is_deleted FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid LIMIT 1");
+        $stEventNew->execute(array(':id' => $savedEntryId, ':pid' => $projectId));
+        $eventNewRow = $stEventNew->fetch(PDO::FETCH_ASSOC);
+        if (($entryId <= 0 || $writeAffectedRows > 0) && is_array($eventNewRow)) {
+            CostDataEventService::recordChange($pdo, array(
+                'project_id' => $projectId,
+                'cost_type' => 'outsourcing',
+                'target_type' => 'outsourcing_cost',
+                'target_id' => (string)$savedEntryId,
+                'event_action' => $entryId > 0 ? 'UPDATE' : 'CREATE',
+                'source_type' => 'DIRECT',
+                'actual_date' => $expenseDate,
+                'settlement_ym' => CostChangeService::settlementYm('outsourcing', $expenseDate),
+                'old_amount' => $entryId > 0 && isset($oldRow['amount']) ? $oldRow['amount'] : null,
+                'new_amount' => isset($eventNewRow['amount']) ? $eventNewRow['amount'] : $amount,
+                'old_data' => $entryId > 0 && is_array($oldRow) ? $oldRow : array(),
+                'new_data' => $eventNewRow,
+                'reason' => $memo,
+                'source_file' => __FILE__,
+            ));
+        }
+    } catch (Exception $costEventException) {
+        error_log('[CostDataEvent] event capture failed');
+    }
     $uploadResult = cpms_outsourcing_file_store_uploads($pdo, 'attachments', $projectId, $savedEntryId, substr($expenseDate, 0, 7));
     $successMessage = $entryId > 0 ? '외주비 입력 내역을 수정했습니다.' : '외주비를 등록했습니다.';
     if (isset($uploadResult['has_file']) && $uploadResult['has_file']) {

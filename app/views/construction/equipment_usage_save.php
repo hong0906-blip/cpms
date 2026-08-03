@@ -11,10 +11,12 @@ require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/partials/equipment_statement_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $role = Auth::userRole();
@@ -151,7 +153,7 @@ if ($pdo) {
 if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redirect); exit; }
 
 try {
-    $stE = $pdo->prepare("SELECT base_rate FROM cpms_equipment_items WHERE id = :id AND project_id = :pid AND is_deleted = 0 LIMIT 1");
+    $stE = $pdo->prepare("SELECT base_rate, category, vendor_name, spec, remark FROM cpms_equipment_items WHERE id = :id AND project_id = :pid AND is_deleted = 0 LIMIT 1");
     $stE->bindValue(':id', $equipmentId, PDO::PARAM_INT);
     $stE->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $stE->execute();
@@ -198,9 +200,18 @@ try {
             amount = IF(is_manual_unit = 1, amount, VALUES(amount)),
             memo = VALUES(memo)");
     $now = date('Y-m-d H:i:s');
-    $stFindUsage = $pdo->prepare("SELECT id, use_date FROM cpms_equipment_usage WHERE project_id = :pid AND equipment_id = :eid AND use_date = :d LIMIT 1");
+    $stFindUsage = $pdo->prepare("SELECT id, project_id, equipment_id, use_date, work_unit, base_rate_snapshot, amount, is_manual_unit, memo FROM cpms_equipment_usage WHERE project_id = :pid AND equipment_id = :eid AND use_date = :d LIMIT 1");
     $savedUsageRows = array();
     foreach ($dates as $d) {
+        $oldUsageRow = false;
+        $eventBeforeCaptured = false;
+        try {
+            $stFindUsage->execute(array(':pid' => $projectId, ':eid' => $equipmentId, ':d' => $d));
+            $oldUsageRow = $stFindUsage->fetch(PDO::FETCH_ASSOC);
+            $eventBeforeCaptured = true;
+        } catch (Exception $costEventException) {
+            error_log('[CostDataEvent] event capture failed');
+        }
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $st->bindValue(':eid', $equipmentId, PDO::PARAM_INT);
         $st->bindValue(':d', $d);
@@ -218,6 +229,28 @@ try {
         $usageRow = $stFindUsage->fetch(PDO::FETCH_ASSOC);
         if (is_array($usageRow) && isset($usageRow['id'])) {
             $savedUsageRows[count($savedUsageRows)] = $usageRow;
+            $itemSnapshot = array(
+                'category' => isset($item['category']) ? $item['category'] : '',
+                'vendor_name' => isset($item['vendor_name']) ? $item['vendor_name'] : '',
+                'spec' => isset($item['spec']) ? $item['spec'] : '',
+                'remark' => isset($item['remark']) ? $item['remark'] : '',
+            );
+            if ($eventBeforeCaptured) CostDataEventService::recordChange($pdo, array(
+                'project_id' => $projectId,
+                'cost_type' => 'equipment',
+                'target_type' => 'equipment_usage',
+                'target_id' => (string)$usageRow['id'],
+                'event_action' => is_array($oldUsageRow) ? 'UPDATE' : 'CREATE',
+                'source_type' => 'DIRECT',
+                'actual_date' => $d,
+                'settlement_ym' => CostChangeService::settlementYm('equipment', $d),
+                'old_amount' => is_array($oldUsageRow) && isset($oldUsageRow['amount']) ? $oldUsageRow['amount'] : null,
+                'new_amount' => isset($usageRow['amount']) ? $usageRow['amount'] : null,
+                'old_data' => is_array($oldUsageRow) ? array_merge($oldUsageRow, $itemSnapshot) : array(),
+                'new_data' => array_merge($usageRow, $itemSnapshot),
+                'reason' => $memo,
+                'source_file' => __FILE__,
+            ));
         }
     }
 

@@ -10,10 +10,12 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/tabs/partials/labor_data_loader.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) {
     header('Location: ?r=login');
@@ -126,6 +128,17 @@ try {
     $userName = (string)Auth::userName();
     $userEmail = (string)Auth::userEmail();
 
+    $oldEventRow = false;
+    $eventBeforeCaptured = false;
+    try {
+        $stEventRow = $pdo->prepare("SELECT id, project_id, month, amount, memo FROM cpms_labor_force_adjustments WHERE project_id=:pid AND month=:month LIMIT 1");
+        $stEventRow->execute(array(':pid' => $projectId, ':month' => $month));
+        $oldEventRow = $stEventRow->fetch(PDO::FETCH_ASSOC);
+        $eventBeforeCaptured = true;
+    } catch (Exception $costEventException) {
+        error_log('[CostDataEvent] event capture failed');
+    }
+
     $st = $pdo->prepare(
         "INSERT INTO cpms_labor_force_adjustments
             (
@@ -183,6 +196,32 @@ try {
     );
     $st->bindValue(':now', $now);
     $st->execute();
+
+    try {
+        $stEventNew = $pdo->prepare("SELECT id, project_id, month, amount, memo FROM cpms_labor_force_adjustments WHERE project_id=:pid AND month=:month LIMIT 1");
+        $stEventNew->execute(array(':pid' => $projectId, ':month' => $month));
+        $newEventRow = $stEventNew->fetch(PDO::FETCH_ASSOC);
+        if ($eventBeforeCaptured && is_array($newEventRow)) {
+            CostDataEventService::recordChange($pdo, array(
+                'project_id' => $projectId,
+                'cost_type' => 'labor',
+                'target_type' => 'labor_force_adjustment',
+                'target_id' => isset($newEventRow['id']) ? (string)$newEventRow['id'] : '',
+                'event_action' => 'ADJUST',
+                'source_type' => 'ADMIN_FORCE',
+                'actual_date' => $month . '-01',
+                'settlement_ym' => $month,
+                'old_amount' => is_array($oldEventRow) && isset($oldEventRow['amount']) ? $oldEventRow['amount'] : null,
+                'new_amount' => isset($newEventRow['amount']) ? $newEventRow['amount'] : $amount,
+                'old_data' => is_array($oldEventRow) ? $oldEventRow : array(),
+                'new_data' => $newEventRow,
+                'reason' => $memo,
+                'source_file' => __FILE__,
+            ));
+        }
+    } catch (Exception $costEventException) {
+        error_log('[CostDataEvent] event capture failed');
+    }
 
     flash_set('success', '노무비 강제입력 금액을 저장했습니다.');
     header('Location: ' . $redirect);

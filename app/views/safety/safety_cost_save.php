@@ -7,10 +7,12 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/safety_cost_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
@@ -151,6 +153,7 @@ try {
             'created_by_email' => $userEmail
         );
     }
+    $eventOldRow = $idx >= 0 ? $base : array();
 
     $base['id'] = $recordId;
     $base['project_id'] = $projectId;
@@ -232,6 +235,24 @@ try {
         header('Location: ' . $redirect);
         exit;
     }
+
+    CostDataEventService::recordChange($pdo, array(
+        'project_id' => $projectId,
+        'project_name_snapshot' => $projectName,
+        'cost_type' => $category,
+        'target_type' => 'safety_cost',
+        'target_id' => (string)$recordId,
+        'event_action' => $idx >= 0 ? 'UPDATE' : 'CREATE',
+        'source_type' => 'DIRECT',
+        'actual_date' => $useDate,
+        'settlement_ym' => CostChangeService::settlementYm('safety', $useDate),
+        'old_amount' => $idx >= 0 && isset($eventOldRow['amount']) ? $eventOldRow['amount'] : null,
+        'new_amount' => $amount,
+        'old_data' => $eventOldRow,
+        'new_data' => $base,
+        'reason' => $remark,
+        'source_file' => __FILE__,
+    ));
 
     if (is_array($driveUploadResult) && empty($driveUploadResult['ok'])) {
         $message = cpms_safety_health_drive_flash_message($message, $driveUploadResult);

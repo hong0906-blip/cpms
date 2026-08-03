@@ -12,10 +12,12 @@ require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/material_statement_helper.php';
 require_once __DIR__ . '/partials/material_usage_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $role = Auth::userRole();
@@ -151,7 +153,7 @@ if (!$pdo) { flash_set('error', 'DB 연결 실패'); header('Location: ' . $redi
 $hasMaterialAdvanceYn = cpms_material_usage_column_exists($pdo, 'advance_yn');
 
 try {
-    $stE = $pdo->prepare("SELECT base_rate, category FROM cpms_material_items WHERE id = :id AND project_id = :pid AND is_deleted = 0 LIMIT 1");
+    $stE = $pdo->prepare("SELECT base_rate, category, vendor_name, spec, remark FROM cpms_material_items WHERE id = :id AND project_id = :pid AND is_deleted = 0 LIMIT 1");
     $stE->bindValue(':id', $materialId, PDO::PARAM_INT);
     $stE->bindValue(':pid', $projectId, PDO::PARAM_INT);
     $stE->execute();
@@ -210,10 +212,19 @@ try {
             (:pid, :eid, :d, :amt, :memo, :created_at)
             ON DUPLICATE KEY UPDATE amount = VALUES(amount), memo = VALUES(memo)");
     }
-    $stFindUsage = $pdo->prepare("SELECT id, use_date FROM cpms_material_usage WHERE project_id = :pid AND material_id = :mid AND use_date = :d LIMIT 1");
+    $stFindUsage = $pdo->prepare("SELECT id, project_id, material_id, use_date, amount, " . ($hasMaterialAdvanceYn ? "advance_yn" : "'N' AS advance_yn") . ", memo FROM cpms_material_usage WHERE project_id = :pid AND material_id = :mid AND use_date = :d LIMIT 1");
     $now = date('Y-m-d H:i:s');
     $savedUsageRows = array();
     foreach ($dates as $d) {
+        $oldUsageRow = false;
+        $eventBeforeCaptured = false;
+        try {
+            $stFindUsage->execute(array(':pid' => $projectId, ':mid' => $materialId, ':d' => $d));
+            $oldUsageRow = $stFindUsage->fetch(PDO::FETCH_ASSOC);
+            $eventBeforeCaptured = true;
+        } catch (Exception $costEventException) {
+            error_log('[CostDataEvent] event capture failed');
+        }
         $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
         $st->bindValue(':eid', $materialId, PDO::PARAM_INT);
         $st->bindValue(':d', $d);
@@ -230,6 +241,34 @@ try {
         $usageRow = $stFindUsage->fetch(PDO::FETCH_ASSOC);
         if (is_array($usageRow) && isset($usageRow['id'])) {
             $savedUsageRows[count($savedUsageRows)] = $usageRow;
+            $oldSnapshot = is_array($oldUsageRow) ? array_merge($oldUsageRow, array(
+                'category' => isset($item['category']) ? $item['category'] : '',
+                'vendor_name' => isset($item['vendor_name']) ? $item['vendor_name'] : '',
+                'spec' => isset($item['spec']) ? $item['spec'] : '',
+                'remark' => isset($item['remark']) ? $item['remark'] : '',
+            )) : array();
+            $newSnapshot = array_merge($usageRow, array(
+                'category' => isset($item['category']) ? $item['category'] : '',
+                'vendor_name' => isset($item['vendor_name']) ? $item['vendor_name'] : '',
+                'spec' => isset($item['spec']) ? $item['spec'] : '',
+                'remark' => isset($item['remark']) ? $item['remark'] : '',
+            ));
+            if ($eventBeforeCaptured) CostDataEventService::recordChange($pdo, array(
+                'project_id' => $projectId,
+                'cost_type' => 'material',
+                'target_type' => 'material_usage',
+                'target_id' => (string)$usageRow['id'],
+                'event_action' => is_array($oldUsageRow) ? 'UPDATE' : 'CREATE',
+                'source_type' => 'DIRECT',
+                'actual_date' => $d,
+                'settlement_ym' => CostChangeService::settlementYm('material', $d),
+                'old_amount' => is_array($oldUsageRow) && isset($oldUsageRow['amount']) ? $oldUsageRow['amount'] : null,
+                'new_amount' => isset($usageRow['amount']) ? $usageRow['amount'] : $amount,
+                'old_data' => $oldSnapshot,
+                'new_data' => $newSnapshot,
+                'reason' => $memo,
+                'source_file' => __FILE__,
+            ));
         }
     }
 

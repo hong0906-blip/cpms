@@ -73,6 +73,8 @@ if (!$canManage && !$canLaborManagement && !$canViewCompanyOverhead && !$canView
 }
 if ($canAiDataAudit) {
     $tabs['ai_data_audit'] = array('label' => 'AI 데이터 점검', 'icon' => 'database-zap');
+    $tabs['ai_data_setup'] = array('label' => 'AI 데이터 이력 설정', 'icon' => 'database-cog');
+    $tabs['ai_data_history'] = array('label' => '통합 비용 이력', 'icon' => 'list-history');
 }
 
 if (!isset($tabs[$tab])) {
@@ -97,6 +99,12 @@ if (!function_exists('admin_tab_url')) {
       $tabHref = admin_tab_url($k);
       if ($k === 'ai_data_audit') {
           $tabHref = '?r=admin%2Fai_data_audit';
+      }
+      if ($k === 'ai_data_setup') {
+          $tabHref = '?r=admin%2Fai_data_setup';
+      }
+      if ($k === 'ai_data_history') {
+          $tabHref = '?r=admin%2Fai_data_history';
       }
       if ($k === 'company_overhead' && !$canViewCompanyOverhead && $canViewCompanyPayroll) {
           $tabHref .= '&oh=payroll';
@@ -125,6 +133,10 @@ if ($tab === 'employees') {
     require __DIR__ . '/cost_change.php';
 } elseif ($tab === 'ai_data_audit' && $canAiDataAudit) {
     require __DIR__ . '/ai_data_audit.php';
+} elseif ($tab === 'ai_data_setup' && $canAiDataAudit) {
+    require __DIR__ . '/ai_data_setup.php';
+} elseif ($tab === 'ai_data_history' && $canAiDataAudit) {
+    require __DIR__ . '/ai_data_history.php';
 } elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
         $_GET['oh'] = 'payroll';

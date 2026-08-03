@@ -12,10 +12,12 @@ require_once __DIR__ . '/partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../../services/EquipmentExcelImporter.php';
 require_once __DIR__ . '/../../services/ConstructionDriveService.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -163,7 +165,7 @@ function equipment_excel_save_usage_row($pdo, $projectId, $equipmentId, $row, $n
     $amount = isset($row['amount']) ? (float)$row['amount'] : 0.0;
     $baseRate = isset($row['base_price']) ? (float)$row['base_price'] : 0.0;
     if ($amount <= 0 || (int)$equipmentId <= 0) {
-        return false;
+        return array('ok' => false);
     }
 
     if ($baseRate > 0) {
@@ -176,6 +178,19 @@ function equipment_excel_save_usage_row($pdo, $projectId, $equipmentId, $row, $n
 
     $memo = trim((string)(isset($row['memo']) ? $row['memo'] : ''));
     $useDate = isset($row['work_date']) ? (string)$row['work_date'] : '';
+
+    $oldRow = false;
+    $eventCaptureReady = false;
+    try {
+        $stBefore = $pdo->prepare("SELECT id, project_id, equipment_id, use_date, work_unit, base_rate_snapshot, amount, is_manual_unit, memo
+                                     FROM cpms_equipment_usage
+                                    WHERE project_id = :pid AND equipment_id = :eid AND use_date = :use_date LIMIT 1");
+        $stBefore->execute(array(':pid' => (int)$projectId, ':eid' => (int)$equipmentId, ':use_date' => $useDate));
+        $oldRow = $stBefore->fetch(PDO::FETCH_ASSOC);
+        $eventCaptureReady = true;
+    } catch (Exception $costEventException) {
+        error_log('[CostDataEvent] event capture failed');
+    }
 
     $st = $pdo->prepare("INSERT INTO cpms_equipment_usage
         (project_id, equipment_id, use_date, work_unit, base_rate_snapshot, amount, is_manual_unit, memo, created_at)
@@ -197,7 +212,34 @@ function equipment_excel_save_usage_row($pdo, $projectId, $equipmentId, $row, $n
     $st->bindValue(':created_at', $now);
     $st->execute();
 
-    return true;
+    $newRow = false;
+    if ($eventCaptureReady) {
+        try {
+            $stBefore->execute(array(':pid' => (int)$projectId, ':eid' => (int)$equipmentId, ':use_date' => $useDate));
+            $newRow = $stBefore->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $costEventException) {
+            $eventCaptureReady = false;
+            error_log('[CostDataEvent] event capture failed');
+        }
+    }
+    $itemSnapshot = array(
+        'category' => isset($row['equipment_category']) ? $row['equipment_category'] : '',
+        'vendor_name' => isset($row['vendor_name']) ? $row['vendor_name'] : '',
+        'spec' => isset($row['equipment_spec']) ? $row['equipment_spec'] : '',
+        'remark' => $memo,
+    );
+    return array(
+        'ok' => true,
+        'event_ready' => ($eventCaptureReady && is_array($newRow)),
+        'old_data' => is_array($oldRow) ? array_merge($oldRow, $itemSnapshot) : array(),
+        'new_data' => is_array($newRow) ? array_merge($newRow, $itemSnapshot) : array(),
+        'target_id' => is_array($newRow) && isset($newRow['id']) ? (int)$newRow['id'] : 0,
+        'actual_date' => $useDate,
+        'old_amount' => is_array($oldRow) && isset($oldRow['amount']) ? $oldRow['amount'] : null,
+        'new_amount' => is_array($newRow) && isset($newRow['amount']) ? $newRow['amount'] : null,
+        'event_action' => is_array($oldRow) ? 'UPDATE' : 'CREATE',
+        'reason' => $memo,
+    );
 }
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
@@ -243,6 +285,8 @@ $logId = 0;
 $driveUploadResult = null;
 $currentUser = Auth::user();
 $currentUserId = (is_array($currentUser) && isset($currentUser['id'])) ? (int)$currentUser['id'] : 0;
+$costEventBatchKey = CostDataEventService::generateBatchKey('excel', $currentUserId);
+$pendingCostEvents = array();
 
 try {
     $pdo->beginTransaction();
@@ -297,13 +341,15 @@ try {
         }
         equipment_excel_save_upsert_preset($pdo, $row, $now);
 
-        if (equipment_excel_save_usage_row($pdo, $projectId, $equipmentId, $row, $now)) {
+        $usageSaveResult = equipment_excel_save_usage_row($pdo, $projectId, $equipmentId, $row, $now);
+        if (is_array($usageSaveResult) && !empty($usageSaveResult['ok'])) {
             if (isset($baseRow['status_type']) && (string)$baseRow['status_type'] === 'update') {
                 $updatedCount++;
             } else {
                 $savedCount++;
             }
             $totalAmount += (float)$row['amount'];
+            if (!empty($usageSaveResult['event_ready'])) $pendingCostEvents[count($pendingCostEvents)] = $usageSaveResult;
         } else {
             $errorCount++;
         }
@@ -336,6 +382,26 @@ try {
     }
 
     $pdo->commit();
+
+    foreach ($pendingCostEvents as $pendingCostEvent) {
+        CostDataEventService::recordChange($pdo, array(
+            'project_id' => $projectId,
+            'cost_type' => 'equipment',
+            'target_type' => 'equipment_usage',
+            'target_id' => isset($pendingCostEvent['target_id']) ? (string)$pendingCostEvent['target_id'] : '',
+            'event_action' => isset($pendingCostEvent['event_action']) ? $pendingCostEvent['event_action'] : 'UPDATE',
+            'source_type' => 'EXCEL',
+            'batch_key' => $costEventBatchKey,
+            'actual_date' => isset($pendingCostEvent['actual_date']) ? $pendingCostEvent['actual_date'] : '',
+            'settlement_ym' => CostChangeService::settlementYm('equipment', isset($pendingCostEvent['actual_date']) ? $pendingCostEvent['actual_date'] : ''),
+            'old_amount' => isset($pendingCostEvent['old_amount']) ? $pendingCostEvent['old_amount'] : null,
+            'new_amount' => isset($pendingCostEvent['new_amount']) ? $pendingCostEvent['new_amount'] : null,
+            'old_data' => isset($pendingCostEvent['old_data']) ? $pendingCostEvent['old_data'] : array(),
+            'new_data' => isset($pendingCostEvent['new_data']) ? $pendingCostEvent['new_data'] : array(),
+            'reason' => isset($pendingCostEvent['reason']) ? $pendingCostEvent['reason'] : '',
+            'source_file' => __FILE__,
+        ));
+    }
 
     if ($logId > 0 && isset($preview['stored_path']) && trim((string)$preview['stored_path']) !== '' && is_file((string)$preview['stored_path'])) {
         $excelStoredPath = (string)$preview['stored_path'];

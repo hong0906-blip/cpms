@@ -7,10 +7,12 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/safety_cost_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
@@ -40,6 +42,8 @@ if ($id === '') {
 $store = cpms_safety_cost_read_store();
 if (!isset($store['items']) || !is_array($store['items'])) $store['items'] = array();
 $found = false;
+$deletedEventRow = array();
+$deletedSettlementYm = '';
 foreach ($store['items'] as $idx => $row) {
     if (!is_array($row) || !isset($row['id']) || (string)$row['id'] !== $id) continue;
     $rowProjectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
@@ -63,6 +67,8 @@ foreach ($store['items'] as $idx => $row) {
     $store['items'][$idx]['deleted_at'] = date('Y-m-d H:i:s');
     $store['items'][$idx]['deleted_by'] = cpms_safety_cost_user_id();
     $store['items'][$idx]['deleted_by_name'] = (string)Auth::userName();
+    $deletedEventRow = $row;
+    $deletedSettlementYm = $settlementYm;
     $found = true;
     break;
 }
@@ -78,6 +84,23 @@ if (!cpms_safety_cost_write_store($store)) {
     header('Location: ' . $redirect);
     exit;
 }
+
+CostDataEventService::recordChange($pdo, array(
+    'project_id' => $projectId,
+    'project_name_snapshot' => isset($deletedEventRow['project_name']) ? $deletedEventRow['project_name'] : '',
+    'cost_type' => isset($deletedEventRow['category']) ? $deletedEventRow['category'] : 'safety',
+    'target_type' => 'safety_cost',
+    'target_id' => (string)$id,
+    'event_action' => 'DELETE',
+    'source_type' => 'DIRECT',
+    'actual_date' => isset($deletedEventRow['use_date']) ? $deletedEventRow['use_date'] : '',
+    'settlement_ym' => $deletedSettlementYm,
+    'old_amount' => isset($deletedEventRow['amount']) ? $deletedEventRow['amount'] : null,
+    'new_amount' => null,
+    'old_data' => $deletedEventRow,
+    'new_data' => array(),
+    'source_file' => __FILE__,
+));
 
 flash_set('success', '안전관리비 사용내역을 삭제 처리했습니다.');
 header('Location: ' . $redirect);

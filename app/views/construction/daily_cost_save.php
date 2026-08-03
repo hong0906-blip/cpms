@@ -7,10 +7,12 @@
 
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -59,6 +61,23 @@ try {
     $st->bindValue(':a', $amount);
     $st->bindValue(':m', $memo);
     $st->execute();
+    $dailyCostId = (int)$pdo->lastInsertId();
+    CostDataEventService::recordChange($pdo, array(
+        'project_id' => $projectId,
+        'cost_type' => $costType,
+        'target_type' => 'daily_cost',
+        'target_id' => (string)$dailyCostId,
+        'event_action' => 'CREATE',
+        'source_type' => 'DIRECT',
+        'actual_date' => $costDate,
+        'settlement_ym' => CostChangeService::settlementYm($costType, $costDate),
+        'old_amount' => null,
+        'new_amount' => $amount,
+        'old_data' => array(),
+        'new_data' => array('project_id'=>$projectId, 'cost_date'=>$costDate, 'cost_type'=>$costType, 'amount'=>$amount, 'memo'=>$memo),
+        'reason' => $memo,
+        'source_file' => __FILE__,
+    ));
     flash_set('success', '비용 입력을 저장했습니다.');
 } catch (Exception $e) {
     flash_set('error', '저장 실패: ' . $e->getMessage());

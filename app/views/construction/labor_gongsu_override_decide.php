@@ -1,9 +1,11 @@
 <?php
 // 공수 승인 처리 / 공수 반려 처리
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostDataEventService;
 
 function cpms_labor_decide_redirect($type, $message) {
     flash_set($type, $message);
@@ -14,6 +16,37 @@ function cpms_labor_decide_redirect($type, $message) {
 function cpms_labor_decide_ensure_columns($pdo) {
     if (!$pdo) return false;
     return cpms_ensure_labor_override_table($pdo);
+}
+
+function cpms_labor_record_applied_events($pdo, $rows, $batchToken) {
+    if (!is_array($rows)) return;
+    foreach ($rows as $eventRow) {
+        $eventId = isset($eventRow['id']) ? (int)$eventRow['id'] : 0;
+        if ($eventId <= 0) continue;
+        $projectId = isset($eventRow['project_id']) ? (int)$eventRow['project_id'] : 0;
+        $workDate = isset($eventRow['work_date']) ? (string)$eventRow['work_date'] : '';
+        $month = isset($eventRow['month']) ? (string)$eventRow['month'] : '';
+        $oldValue = isset($eventRow['old_value']) ? $eventRow['old_value'] : null;
+        $newValue = isset($eventRow['new_value']) ? $eventRow['new_value'] : null;
+        CostDataEventService::recordChange($pdo, array(
+            'project_id' => $projectId,
+            'cost_type' => 'labor',
+            'target_type' => 'labor_gongsu_override',
+            'target_id' => (string)$eventId,
+            'event_action' => 'ADJUST',
+            'source_type' => 'APPROVAL',
+            'batch_key' => trim((string)$batchToken) !== '' ? 'labor_gongsu:' . trim((string)$batchToken) : null,
+            'actual_date' => $workDate,
+            'settlement_ym' => $month,
+            'old_amount' => null,
+            'new_amount' => null,
+            'old_data' => array('project_id'=>$projectId, 'month'=>$month, 'use_date'=>$workDate, 'work_unit'=>$oldValue, 'is_deleted_entry'=>0),
+            'new_data' => array('project_id'=>$projectId, 'month'=>$month, 'use_date'=>$workDate, 'work_unit'=>$newValue, 'is_deleted_entry'=>isset($eventRow['is_deleted_entry']) ? (int)$eventRow['is_deleted_entry'] : 0),
+            'reason' => isset($eventRow['reason']) ? $eventRow['reason'] : '',
+            'dedupe_key' => 'labor_gongsu:' . $eventId,
+            'source_file' => __FILE__,
+        ));
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -164,6 +197,7 @@ try {
             $st->execute();
         }
         $pdo->commit();
+        cpms_labor_record_applied_events($pdo, $targetRows, $batchToken);
         cpms_labor_decide_redirect('success', $targetCount > 1 ? $targetCount . '명의 공수 일괄 요청을 최종 승인했습니다.' : '공수 수정 요청을 최종 승인했습니다.');
     }
 
@@ -179,6 +213,7 @@ try {
         $st->execute();
     }
     $pdo->commit();
+    cpms_labor_record_applied_events($pdo, $targetRows, $batchToken);
     cpms_labor_decide_redirect('success', $targetCount > 1 ? $targetCount . '명의 공수 일괄 요청을 승인했습니다.' : '공수 수정 요청을 승인했습니다.');
 } catch (Exception $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();

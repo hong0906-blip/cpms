@@ -1,9 +1,13 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/partials/equipment_gongsu_approval_helper.php';
+require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
+use App\Services\CostChangeService;
+use App\Services\CostDataEventService;
 
 function cpms_equipment_gongsu_decide_redirect($type, $message) {
     flash_set($type, $message);
@@ -83,6 +87,14 @@ try {
         cpms_equipment_gongsu_decide_redirect('success', '1차 승인 완료 후 2차 승인 요청으로 전달했습니다.');
     }
 
+    $oldUsageEvent = false;
+    try {
+        $stUsageEvent = $pdo->prepare("SELECT id, project_id, equipment_id, use_date, work_unit, base_rate_snapshot, amount, is_manual_unit, memo FROM cpms_equipment_usage WHERE id=:id AND project_id=:pid LIMIT 1 FOR UPDATE");
+        $stUsageEvent->execute(array(':id' => (int)$row['equipment_usage_id'], ':pid' => (int)$row['project_id']));
+        $oldUsageEvent = $stUsageEvent->fetch(PDO::FETCH_ASSOC);
+    } catch (Exception $costEventException) {
+        error_log('[CostDataEvent] event capture failed');
+    }
     cpms_equipment_gongsu_apply_usage($pdo, (int)$row['equipment_usage_id'], (float)$row['new_value']);
     if ($stage === 'VP_PENDING') {
         $up = $pdo->prepare("UPDATE cpms_equipment_gongsu_overrides SET status='applied', approval_stage='COMPLETED', second_approver_employee_id=:eid, second_approver_name=:name, second_approver_email=:email, second_approved_at=NOW(), approved_by=:uid, approved_at=NOW(), current_approver_employee_id=NULL, current_approver_name=NULL, current_approver_email=NULL, updated_at=NOW() WHERE id=:id");
@@ -90,7 +102,35 @@ try {
         $up = $pdo->prepare("UPDATE cpms_equipment_gongsu_overrides SET status='applied', approval_stage='COMPLETED', first_approver_employee_id=:eid, first_approver_name=:name, first_approver_email=:email, first_approved_at=NOW(), approved_by=:uid, approved_at=NOW(), current_approver_employee_id=NULL, current_approver_name=NULL, current_approver_email=NULL, updated_at=NOW() WHERE id=:id");
     }
     $up->execute(array(':eid'=>$actorId, ':name'=>$userName, ':email'=>$userEmail, ':uid'=>$actorId, ':id'=>$overrideId));
+    $newUsageEvent = false;
+    if (is_array($oldUsageEvent)) {
+        try {
+            $stUsageEvent->execute(array(':id' => (int)$row['equipment_usage_id'], ':pid' => (int)$row['project_id']));
+            $newUsageEvent = $stUsageEvent->fetch(PDO::FETCH_ASSOC);
+        } catch (Exception $costEventException) {
+            error_log('[CostDataEvent] event capture failed');
+        }
+    }
     $pdo->commit();
+    if (is_array($oldUsageEvent) && is_array($newUsageEvent)) {
+        CostDataEventService::recordChange($pdo, array(
+            'project_id' => (int)$row['project_id'],
+            'cost_type' => 'equipment',
+            'target_type' => 'equipment_usage',
+            'target_id' => (string)$row['equipment_usage_id'],
+            'event_action' => 'ADJUST',
+            'source_type' => 'APPROVAL',
+            'actual_date' => isset($row['use_date']) ? $row['use_date'] : '',
+            'settlement_ym' => CostChangeService::settlementYm('equipment', isset($row['use_date']) ? $row['use_date'] : ''),
+            'old_amount' => isset($oldUsageEvent['amount']) ? $oldUsageEvent['amount'] : null,
+            'new_amount' => isset($newUsageEvent['amount']) ? $newUsageEvent['amount'] : null,
+            'old_data' => $oldUsageEvent,
+            'new_data' => $newUsageEvent,
+            'reason' => isset($row['reason']) ? $row['reason'] : '',
+            'dedupe_key' => 'equipment_gongsu:' . $overrideId,
+            'source_file' => __FILE__,
+        ));
+    }
     cpms_equipment_gongsu_decide_redirect('success', '장비공수 수정 요청을 승인했습니다.');
 } catch (Exception $e) {
     if ($pdo && $pdo->inTransaction()) $pdo->rollBack();

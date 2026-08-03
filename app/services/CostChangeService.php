@@ -4057,6 +4057,64 @@ class CostChangeService
         );
     }
 
+    public static function recordAppliedCostDataEvent($pdo, $request, $applyResult, $sourceFile)
+    {
+        if (!$pdo || !is_array($request) || !is_array($applyResult)) {
+            return array('ok' => false, 'skipped' => true, 'reason' => 'invalid_options');
+        }
+
+        $actionMap = array(
+            self::REQUEST_MODIFY => 'UPDATE',
+            self::REQUEST_ADD => 'CREATE',
+            self::REQUEST_DELETE => 'DELETE',
+            self::REQUEST_MONTH_MOVE => 'UPDATE',
+        );
+        $targetTypeMap = array(
+            'material' => 'material_usage',
+            'equipment' => 'equipment_usage',
+            'outsourcing' => 'outsourcing_cost',
+            'labor_force' => 'labor_force_adjustment',
+            'daily_cost' => 'daily_cost',
+            'safety' => 'safety_cost',
+        );
+        $requestType = isset($request['request_type']) ? (string)$request['request_type'] : '';
+        $requestTargetType = isset($request['target_type']) ? (string)$request['target_type'] : '';
+        $eventAction = isset($actionMap[$requestType]) ? $actionMap[$requestType] : 'ADJUST';
+        $eventTargetType = isset($targetTypeMap[$requestTargetType]) ? $targetTypeMap[$requestTargetType] : $requestTargetType;
+        $oldData = self::jsonDecode(isset($request['old_data']) ? $request['old_data'] : '');
+        $newData = isset($applyResult['applied_data']) && is_array($applyResult['applied_data']) ? $applyResult['applied_data'] : array();
+        if ($requestType === self::REQUEST_MONTH_MOVE) {
+            $oldData['old_settlement_ym'] = isset($request['old_settlement_ym']) ? (string)$request['old_settlement_ym'] : '';
+            $newData['new_settlement_ym'] = isset($request['new_settlement_ym']) ? (string)$request['new_settlement_ym'] : '';
+        }
+        $eventCostType = $requestTargetType;
+        if (($eventCostType === 'safety' || $eventCostType === 'daily_cost') && isset($newData['category'])) {
+            $eventCostType = (string)$newData['category'];
+        }
+        $requestId = isset($request['id']) ? (int)$request['id'] : 0;
+        $targetId = isset($applyResult['target_id']) ? (string)$applyResult['target_id'] : '';
+
+        return CostDataEventService::recordChange($pdo, array(
+            'project_id' => isset($request['project_id']) ? (int)$request['project_id'] : 0,
+            'project_name_snapshot' => isset($request['project_name']) ? (string)$request['project_name'] : '',
+            'cost_type' => $eventCostType,
+            'target_type' => $eventTargetType,
+            'target_id' => $targetId,
+            'event_action' => $eventAction,
+            'source_type' => 'APPROVAL',
+            'actual_date' => isset($request['use_date']) ? (string)$request['use_date'] : '',
+            'settlement_ym' => isset($applyResult['settlement_ym']) ? (string)$applyResult['settlement_ym'] : '',
+            'old_amount' => isset($request['old_amount']) ? $request['old_amount'] : null,
+            'new_amount' => isset($request['new_amount']) ? $request['new_amount'] : null,
+            'old_data' => $oldData,
+            'new_data' => $newData,
+            'related_request_id' => $requestId,
+            'reason' => isset($request['reason']) ? (string)$request['reason'] : '',
+            'dedupe_key' => 'approval:' . $requestId . ':' . $requestType . ':' . $eventTargetType . ':' . $targetId,
+            'source_file' => $sourceFile,
+        ));
+    }
+
     private static function applySafetyRequest(
         $request,
         &$data,

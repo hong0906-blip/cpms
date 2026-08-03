@@ -514,6 +514,12 @@ if ($route === '관리자') {
 if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_data_audit') {
     $route = 'admin/ai_data_audit';
 }
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_data_setup') {
+    $route = 'admin/ai_data_setup';
+}
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_data_history') {
+    $route = 'admin/ai_data_history';
+}
 
 
 // ==========================
@@ -627,8 +633,8 @@ if (\App\Core\Auth::check()) {
     );
     if (isset($cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute])) $cpmsDeptForRestrictedRoute = $cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute];
 }
-// AI 데이터 준비상태 점검은 운영자료를 전혀 변경하지 않는 읽기 전용 화면이다.
-if ($route !== 'admin/ai_data_audit') {
+// AI 데이터 점검·이력 조회는 운영자료를 변경하지 않으며, 설치 화면은 전용 POST만 기록한다.
+if (strpos($route, 'admin/ai_data_') !== 0) {
     cpms_usage_track_request($route);
 }
 $cpmsIsRestrictedManagementRoute = ($route === '관리' || strpos($route, 'admin/') === 0 || strpos($route, 'management/') === 0);
@@ -1804,6 +1810,25 @@ if ($route === 'admin/ai_data_audit') {
     $_GET['tab'] = 'ai_data_audit';
     \App\Core\View::render('admin/index', array(
         'title' => 'AI 데이터 준비상태 점검',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// ==========================
+//  통합 비용 이력 설치/조회
+// ==========================
+if ($route === 'admin/ai_data_setup' || $route === 'admin/ai_data_history') {
+    if (!(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = $route === 'admin/ai_data_setup' ? 'ai_data_setup' : 'ai_data_history';
+    \App\Core\View::render('admin/index', array(
+        'title' => $route === 'admin/ai_data_setup' ? 'AI 데이터 이력 설정' : '통합 비용 입력·변경이력',
         'selectedMenu' => '관리',
         'dashboardType' => $dashboardType,
     ));
