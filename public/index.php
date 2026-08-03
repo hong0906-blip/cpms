@@ -520,6 +520,12 @@ if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_d
 if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_data_history') {
     $route = 'admin/ai_data_history';
 }
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_snapshot_setup') {
+    $route = 'admin/ai_snapshot_setup';
+}
+if ($route === '관리' && isset($_GET['tab']) && (string)$_GET['tab'] === 'ai_snapshot_history') {
+    $route = 'admin/ai_snapshot_history';
+}
 
 
 // ==========================
@@ -1829,6 +1835,25 @@ if ($route === 'admin/ai_data_setup' || $route === 'admin/ai_data_history') {
     $_GET['tab'] = $route === 'admin/ai_data_setup' ? 'ai_data_setup' : 'ai_data_history';
     \App\Core\View::render('admin/index', array(
         'title' => $route === 'admin/ai_data_setup' ? 'AI 데이터 이력 설정' : '통합 비용 입력·변경이력',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// ==========================
+//  현장별 일일 투입현황 스냅샷 설치/조회
+// ==========================
+if ($route === 'admin/ai_snapshot_setup' || $route === 'admin/ai_snapshot_history') {
+    if (!\App\Core\Auth::check() || !(\App\Core\Auth::isDevelopmentDepartment() || \App\Core\Auth::canManageEmployees())) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = $route === 'admin/ai_snapshot_setup' ? 'ai_snapshot_setup' : 'ai_snapshot_history';
+    \App\Core\View::render('admin/index', array(
+        'title' => $route === 'admin/ai_snapshot_setup' ? '일일 스냅샷 설정' : '현장별 일일 스냅샷 이력',
         'selectedMenu' => '관리',
         'dashboardType' => $dashboardType,
     ));

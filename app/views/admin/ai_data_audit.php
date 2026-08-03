@@ -61,6 +61,7 @@ $overallGrade = isset($aiAudit['overall_grade']) ? (string)$aiAudit['overall_gra
 $minimumMonths = isset($aiAudit['minimum_learning_months']) ? (int)$aiAudit['minimum_learning_months'] : 0;
 $globalWarnings = isset($aiAudit['global_warnings']) && is_array($aiAudit['global_warnings']) ? $aiAudit['global_warnings'] : array();
 $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($aiAudit['global_recommendations']) ? $aiAudit['global_recommendations'] : array();
+$dailySnapshot = isset($aiAudit['daily_snapshot']) && is_array($aiAudit['daily_snapshot']) ? $aiAudit['daily_snapshot'] : array();
 ?>
 
 <style>
@@ -109,12 +110,21 @@ $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($
   .ai-audit-highlight { margin:0 20px 16px; padding:13px 15px; border:1px solid #a7f3d0; border-radius:14px; background:#ecfdf5; color:#047857; font-size:13px; font-weight:800; line-height:1.55; }
   .ai-audit-history-link { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 20px 16px; padding:13px 15px; border:1px solid #bfdbfe; border-radius:14px; background:#eff6ff; color:#1e40af; font-size:13px; font-weight:800; line-height:1.55; }
   .ai-audit-history-link a { flex:0 0 auto; display:inline-flex; padding:8px 12px; border-radius:9px; background:#1d4ed8; color:#fff; text-decoration:none; font-weight:900; }
+  .ai-audit-snapshot-panel { margin-top:16px;padding:20px;border:1px solid #a5f3fc;border-radius:18px;background:linear-gradient(135deg,#fff 0%,#ecfeff 100%);box-shadow:0 8px 26px rgba(15,23,42,.05); }
+  .ai-audit-snapshot-head { display:flex;align-items:flex-start;justify-content:space-between;gap:14px; }
+  .ai-audit-snapshot-head h3 { margin:0;font-size:18px;font-weight:900; }
+  .ai-audit-snapshot-head p { margin:7px 0 0;color:#475569;font-size:13px;line-height:1.6; }
+  .ai-audit-snapshot-link { display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:8px 13px;border-radius:10px;background:#0e7490;color:#fff;text-decoration:none;font-weight:900;white-space:nowrap; }
+  .ai-audit-snapshot-grid { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-top:14px; }
+  .ai-audit-snapshot-item { padding:13px;border:1px solid #cffafe;border-radius:12px;background:#fff; }
+  .ai-audit-snapshot-item span { display:block;color:#64748b;font-size:11px;font-weight:800; }
+  .ai-audit-snapshot-item strong { display:block;margin-top:6px;font-size:14px;font-weight:900;overflow-wrap:anywhere; }
   .ai-audit-criteria { margin-top:16px; padding:20px; border:1px solid #cbd5e1; border-radius:18px; background:#fff; }
   .ai-audit-criteria h3 { margin:0; font-size:18px; font-weight:900; }
   .ai-audit-criteria-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-top:14px; }
   .ai-audit-criteria-item { padding:15px; border-radius:14px; background:#f8fafc; color:#475569; font-size:13px; line-height:1.65; }
   .ai-audit-criteria-item strong { display:block; margin-bottom:6px; color:#0f172a; }
-  @media (max-width:1100px) { .ai-audit-summary { grid-template-columns:repeat(3,minmax(0,1fr)); } .ai-audit-facts { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+  @media (max-width:1100px) { .ai-audit-summary { grid-template-columns:repeat(3,minmax(0,1fr)); } .ai-audit-facts { grid-template-columns:repeat(3,minmax(0,1fr)); }.ai-audit-snapshot-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
   @media (max-width:767px) {
     .ai-audit-hero { flex-direction:column; padding:18px; border-radius:18px; }
     .ai-audit-hero h2 { font-size:23px; }
@@ -129,6 +139,7 @@ $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($
     .ai-audit-detail-grid { padding:14px 16px 16px; }
     .ai-audit-highlight, .ai-audit-history-link { margin:0 16px 14px; }
     .ai-audit-history-link { align-items:stretch; flex-direction:column; }
+    .ai-audit-snapshot-head { flex-direction:column; }.ai-audit-snapshot-link { width:100%; }.ai-audit-snapshot-grid { grid-template-columns:1fr; }
   }
 </style>
 
@@ -185,6 +196,20 @@ $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($
       <?php else: ?>
         <ul><?php foreach ($globalRecommendations as $recommendation): ?><li><?php echo h($recommendation); ?></li><?php endforeach; ?></ul>
       <?php endif; ?>
+    </div>
+  </section>
+
+  <section class="ai-audit-snapshot-panel">
+    <div class="ai-audit-snapshot-head"><div><h3>현장별 일일 투입현황 스냅샷</h3><p><?php echo h(isset($dailySnapshot['message']) && $dailySnapshot['message'] !== '' ? $dailySnapshot['message'] : '일일 스냅샷 상태를 확인할 수 없습니다.'); ?> 이 항목은 초기 설치 직후 기존 AI 준비점수를 크게 바꾸지 않도록 점수 계산에는 아직 반영하지 않습니다.</p></div><a class="ai-audit-snapshot-link" href="?r=admin%2Fai_snapshot_setup">일일 스냅샷 설정</a></div>
+    <div class="ai-audit-snapshot-grid">
+      <div class="ai-audit-snapshot-item"><span>실행이력 테이블</span><strong><?php echo !empty($dailySnapshot['run_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>일일 스냅샷 테이블</span><strong><?php echo !empty($dailySnapshot['snapshot_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>저장된 날짜</span><strong><?php echo h(number_format(isset($dailySnapshot['snapshot_date_count']) ? (int)$dailySnapshot['snapshot_date_count'] : 0)); ?>일</strong></div>
+      <div class="ai-audit-snapshot-item"><span>저장된 프로젝트</span><strong><?php echo h(number_format(isset($dailySnapshot['project_count']) ? (int)$dailySnapshot['project_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>첫 스냅샷</span><strong><?php echo h(isset($dailySnapshot['first_snapshot_date']) && $dailySnapshot['first_snapshot_date'] !== '' ? $dailySnapshot['first_snapshot_date'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 스냅샷</span><strong><?php echo h(isset($dailySnapshot['latest_snapshot_date']) && $dailySnapshot['latest_snapshot_date'] !== '' ? $dailySnapshot['latest_snapshot_date'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 실행 상태</span><strong><?php echo h(isset($dailySnapshot['latest_run_status']) && $dailySnapshot['latest_run_status'] !== '' ? $dailySnapshot['latest_run_status'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 실행 실패</span><strong><?php echo h(number_format(isset($dailySnapshot['latest_run_failure_count']) ? (int)$dailySnapshot['latest_run_failure_count'] : 0)); ?>건</strong></div>
     </div>
   </section>
 

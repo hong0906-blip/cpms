@@ -75,6 +75,8 @@ if ($canAiDataAudit) {
     $tabs['ai_data_audit'] = array('label' => 'AI 데이터 점검', 'icon' => 'database-zap');
     $tabs['ai_data_setup'] = array('label' => 'AI 데이터 이력 설정', 'icon' => 'database-cog');
     $tabs['ai_data_history'] = array('label' => '통합 비용 이력', 'icon' => 'list-history');
+    $tabs['ai_snapshot_setup'] = array('label' => '일일 스냅샷 설정', 'icon' => 'calendar-cog');
+    $tabs['ai_snapshot_history'] = array('label' => '일일 스냅샷 이력', 'icon' => 'calendar-range');
 }
 
 if (!isset($tabs[$tab])) {
@@ -105,6 +107,12 @@ if (!function_exists('admin_tab_url')) {
       }
       if ($k === 'ai_data_history') {
           $tabHref = '?r=admin%2Fai_data_history';
+      }
+      if ($k === 'ai_snapshot_setup') {
+          $tabHref = '?r=admin%2Fai_snapshot_setup';
+      }
+      if ($k === 'ai_snapshot_history') {
+          $tabHref = '?r=admin%2Fai_snapshot_history';
       }
       if ($k === 'company_overhead' && !$canViewCompanyOverhead && $canViewCompanyPayroll) {
           $tabHref .= '&oh=payroll';
@@ -137,6 +145,10 @@ if ($tab === 'employees') {
     require __DIR__ . '/ai_data_setup.php';
 } elseif ($tab === 'ai_data_history' && $canAiDataAudit) {
     require __DIR__ . '/ai_data_history.php';
+} elseif ($tab === 'ai_snapshot_setup' && $canAiDataAudit) {
+    require __DIR__ . '/ai_snapshot_setup.php';
+} elseif ($tab === 'ai_snapshot_history' && $canAiDataAudit) {
+    require __DIR__ . '/ai_snapshot_history.php';
 } elseif ($tab === 'company_overhead' && ($canViewCompanyOverhead || $canViewCompanyPayroll)) {
     if (!$canViewCompanyOverhead && $canViewCompanyPayroll && (!isset($_GET['oh']) || trim((string)$_GET['oh']) === '')) {
         $_GET['oh'] = 'payroll';

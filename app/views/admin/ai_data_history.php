@@ -122,7 +122,10 @@ $pageBase = '?' . http_build_query($pageParams, '', '&');
 <div class="event-history">
   <section class="eh-hero">
     <div><h2>통합 비용 입력·변경이력</h2><p>앞으로 실제로 성공한 비용 등록·수정·삭제 및 최종 승인 반영 이벤트를 개인정보 없이 조회합니다.</p></div>
-    <a class="eh-link" href="?r=admin%2Fai_data_setup">AI 데이터 이력 설정</a>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;">
+      <a class="eh-link" href="?r=admin%2Fai_data_setup">AI 데이터 이력 설정</a>
+      <a class="eh-link" style="background:#fff;color:#334155;border:1px solid #cbd5e1;" href="?r=admin%2Fai_snapshot_history">일일 스냅샷 이력</a>
+    </div>
   </section>
 
   <?php if (!$historyInstalled): ?>

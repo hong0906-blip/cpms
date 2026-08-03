@@ -462,6 +462,7 @@ class AiDataAuditService
             }
         }
 
+        $snapshotStatus = $this->auditDailySnapshots();
         $overall = $this->calculateOverallScore($sections);
         $globalWarnings = array();
         $globalRecommendations = array();
@@ -470,6 +471,12 @@ class AiDataAuditService
         }
         if (!$this->pdo) {
             $globalWarnings[] = 'CPMS 데이터베이스 연결을 확인할 수 없습니다.';
+        }
+        if (isset($snapshotStatus['warning']) && $snapshotStatus['warning'] !== '') {
+            $globalWarnings[] = $snapshotStatus['warning'];
+        }
+        if (isset($snapshotStatus['recommendation']) && $snapshotStatus['recommendation'] !== '') {
+            $globalRecommendations[] = $snapshotStatus['recommendation'];
         }
         foreach ($sections as $section) {
             if (!empty($section['warnings'])) $globalWarnings[] = $section['label'] . ': ' . $section['warnings'][0];
@@ -496,11 +503,91 @@ class AiDataAuditService
             'minimum_learning_months' => (int)$minimumMonths,
             'minimum_learning_judgement' => $this->learningJudgement($minimumMonths),
             'sections' => $sections,
+            'daily_snapshot' => $snapshotStatus,
             'global_warnings' => $globalWarnings,
             'global_recommendations' => $globalRecommendations,
             'read_only' => true,
             'gpt_connected' => false,
         );
+    }
+
+    public function auditDailySnapshots()
+    {
+        $result = array(
+            'run_table_installed' => false,
+            'snapshot_table_installed' => false,
+            'installed' => false,
+            'snapshot_date_count' => 0,
+            'project_count' => 0,
+            'first_snapshot_date' => '',
+            'latest_snapshot_date' => '',
+            'latest_run_status' => '',
+            'latest_run_failure_count' => 0,
+            'setup_required' => false,
+            'message' => '',
+            'warning' => '',
+            'recommendation' => '',
+        );
+        if (!$this->pdo) {
+            $result['setup_required'] = true;
+            $result['message'] = '일일 스냅샷 DB 상태를 확인할 수 없습니다.';
+            return $result;
+        }
+
+        $runTable = 'cpms_ai_snapshot_runs';
+        $snapshotTable = 'cpms_ai_daily_snapshots';
+        $runRequired = array('snapshot_date', 'run_status', 'failure_count', 'started_at');
+        $snapshotRequired = array('snapshot_date', 'project_id', 'last_captured_at');
+        $result['run_table_installed'] = $this->tableExists($runTable);
+        $result['snapshot_table_installed'] = $this->tableExists($snapshotTable);
+        foreach ($runRequired as $column) {
+            if (!$this->columnExists($runTable, $column)) $result['run_table_installed'] = false;
+        }
+        foreach ($snapshotRequired as $column) {
+            if (!$this->columnExists($snapshotTable, $column)) $result['snapshot_table_installed'] = false;
+        }
+        $result['installed'] = $result['run_table_installed'] && $result['snapshot_table_installed'];
+        if (!$result['installed']) {
+            $result['setup_required'] = true;
+            $result['message'] = '일일 현황 스냅샷이 아직 설치되지 않았습니다.';
+            $result['warning'] = '일일 현황 스냅샷이 아직 설치되지 않았습니다.';
+            $result['recommendation'] = '일일 스냅샷 설정에서 테이블을 설치해주세요.';
+            return $result;
+        }
+
+        $snapshotAgg = $this->safeAggregate(
+            "SELECT COUNT(DISTINCT snapshot_date) AS date_count, COUNT(DISTINCT project_id) AS project_count, MIN(snapshot_date) AS first_date, MAX(snapshot_date) AS latest_date FROM `" . $snapshotTable . "`",
+            array(),
+            '일일 스냅샷 집계 실패'
+        );
+        if ($snapshotAgg['ok']) {
+            $row = $snapshotAgg['row'];
+            $result['snapshot_date_count'] = isset($row['date_count']) ? (int)$row['date_count'] : 0;
+            $result['project_count'] = isset($row['project_count']) ? (int)$row['project_count'] : 0;
+            $result['first_snapshot_date'] = isset($row['first_date']) && $row['first_date'] !== null ? (string)$row['first_date'] : '';
+            $result['latest_snapshot_date'] = isset($row['latest_date']) && $row['latest_date'] !== null ? (string)$row['latest_date'] : '';
+        }
+
+        try {
+            $st = $this->pdo->query("SELECT run_status, failure_count FROM `" . $runTable . "` ORDER BY started_at DESC LIMIT 1");
+            $run = $st ? $st->fetch(PDO::FETCH_ASSOC) : false;
+            if (is_array($run)) {
+                $result['latest_run_status'] = isset($run['run_status']) ? (string)$run['run_status'] : '';
+                $result['latest_run_failure_count'] = isset($run['failure_count']) ? (int)$run['failure_count'] : 0;
+            }
+        } catch (Exception $e) {
+        }
+
+        if ($result['snapshot_date_count'] === 0) {
+            $result['message'] = '스냅샷 구조는 설치됐으며 오늘 자료부터 저장할 수 있습니다.';
+        } else {
+            $result['message'] = '현장별 일일 투입현황 스냅샷을 저장하고 있습니다.';
+        }
+        if ($result['latest_run_failure_count'] > 0) {
+            $result['warning'] = '최근 일일 스냅샷 실행에서 일부 현장 집계 실패가 확인됐습니다.';
+            $result['recommendation'] = '일일 스냅샷 설정에서 최근 실행 상태를 확인해주세요.';
+        }
+        return $result;
     }
 
     public function calculateOverallScore($sections)
