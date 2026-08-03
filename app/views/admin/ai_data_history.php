@@ -125,6 +125,7 @@ $pageBase = '?' . http_build_query($pageParams, '', '&');
     <div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;">
       <a class="eh-link" href="?r=admin%2Fai_data_setup">AI 데이터 이력 설정</a>
       <a class="eh-link" style="background:#fff;color:#334155;border:1px solid #cbd5e1;" href="?r=admin%2Fai_snapshot_history">일일 스냅샷 이력</a>
+      <a class="eh-link" style="background:#fff;color:#334155;border:1px solid #cbd5e1;" href="?r=admin%2Fai_reliability_history">입력 신뢰도 결과</a>
     </div>
   </section>
 

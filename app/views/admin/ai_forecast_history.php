@@ -140,7 +140,7 @@ $pageParams['r'] = 'admin/ai_forecast_history';
   <section class="fh-hero">
     <h2>기본 월말 예상 투입비</h2>
     <p>저장된 최신 일일 스냅샷과 동일 현장의 과거 완료월 자료를 이용한 PHP 통계 계산 결과입니다. 통합 비용 이벤트의 증감액은 실제 투입비 계산에 사용하지 않습니다.</p>
-    <div class="fh-links"><a class="fh-link" href="?r=admin%2Fai_forecast_setup">기본 월말 예측 설정</a><a class="fh-link secondary" href="?r=admin%2Fai_snapshot_history">일일 스냅샷 이력</a><a class="fh-link secondary" href="?r=admin%2Fai_data_audit">AI 데이터 준비상태 점검</a></div>
+    <div class="fh-links"><a class="fh-link" href="?r=admin%2Fai_forecast_setup">기본 월말 예측 설정</a><a class="fh-link secondary" href="?r=admin%2Fai_reliability_history">입력 신뢰도 결과</a><a class="fh-link secondary" href="?r=admin%2Fai_snapshot_history">일일 스냅샷 이력</a><a class="fh-link secondary" href="?r=admin%2Fai_data_audit">AI 데이터 준비상태 점검</a></div>
   </section>
 
   <div class="fh-note"><strong>현재 결과는 기본 통계 예측이며 확정금액이 아닙니다.</strong><br>입력 신뢰도와 담당자별 입력 지연은 다음 단계에서 반영됩니다.</div>

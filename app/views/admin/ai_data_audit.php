@@ -63,6 +63,7 @@ $globalWarnings = isset($aiAudit['global_warnings']) && is_array($aiAudit['globa
 $globalRecommendations = isset($aiAudit['global_recommendations']) && is_array($aiAudit['global_recommendations']) ? $aiAudit['global_recommendations'] : array();
 $dailySnapshot = isset($aiAudit['daily_snapshot']) && is_array($aiAudit['daily_snapshot']) ? $aiAudit['daily_snapshot'] : array();
 $monthlyForecast = isset($aiAudit['monthly_forecast']) && is_array($aiAudit['monthly_forecast']) ? $aiAudit['monthly_forecast'] : array();
+$inputReliability = isset($aiAudit['input_reliability']) && is_array($aiAudit['input_reliability']) ? $aiAudit['input_reliability'] : array();
 ?>
 
 <style>
@@ -225,6 +226,20 @@ $monthlyForecast = isset($aiAudit['monthly_forecast']) && is_array($aiAudit['mon
       <div class="ai-audit-snapshot-item"><span>최근 실행 상태</span><strong><?php echo h(isset($monthlyForecast['latest_run_status']) && $monthlyForecast['latest_run_status'] !== '' ? $monthlyForecast['latest_run_status'] : '-'); ?></strong></div>
       <div class="ai-audit-snapshot-item"><span>최근 자료 부족 현장</span><strong><?php echo h(number_format(isset($monthlyForecast['latest_run_insufficient_count']) ? (int)$monthlyForecast['latest_run_insufficient_count'] : 0)); ?>개</strong></div>
       <div class="ai-audit-snapshot-item"><span>점수 반영</span><strong>현재 미반영</strong></div>
+    </div>
+  </section>
+
+  <section class="ai-audit-snapshot-panel" style="border-color:#ddd6fe;background:linear-gradient(135deg,#fff 0%,#f5f3ff 100%);">
+    <div class="ai-audit-snapshot-head"><div><h3>투입비 입력 신뢰도 및 입력 지연 분석</h3><p><?php echo h(isset($inputReliability['message']) && $inputReliability['message'] !== '' ? $inputReliability['message'] : '입력 신뢰도 분석 상태를 확인할 수 없습니다.'); ?> 이 항목은 기존 AI 준비점수에는 아직 반영하지 않습니다.</p></div><a class="ai-audit-snapshot-link" style="background:#7c3aed;" href="?r=admin%2Fai_reliability_setup">입력 신뢰도 설정</a></div>
+    <div class="ai-audit-snapshot-grid">
+      <div class="ai-audit-snapshot-item"><span>실행이력 테이블</span><strong><?php echo !empty($inputReliability['run_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>신뢰도 결과 테이블</span><strong><?php echo !empty($inputReliability['result_table_installed']) ? '설치 완료' : '미설치 또는 보완 필요'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>전체 분석 결과</span><strong><?php echo h(number_format(isset($inputReliability['result_count']) ? (int)$inputReliability['result_count'] : 0)); ?>건</strong></div>
+      <div class="ai-audit-snapshot-item"><span>분석된 프로젝트</span><strong><?php echo h(number_format(isset($inputReliability['project_count']) ? (int)$inputReliability['project_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 분석일</span><strong><?php echo h(isset($inputReliability['latest_analysis_date']) && $inputReliability['latest_analysis_date'] !== '' ? $inputReliability['latest_analysis_date'] : '-'); ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>평균 신뢰도</span><strong><?php echo isset($inputReliability['average_score']) && $inputReliability['average_score'] !== null ? h(number_format((float)$inputReliability['average_score'], 1) . '점') : '-'; ?></strong></div>
+      <div class="ai-audit-snapshot-item"><span>자료 부족 현장</span><strong><?php echo h(number_format(isset($inputReliability['insufficient_count']) ? (int)$inputReliability['insufficient_count'] : 0)); ?>개</strong></div>
+      <div class="ai-audit-snapshot-item"><span>최근 실행 상태 / 실패</span><strong><?php echo h(isset($inputReliability['latest_run_status']) && $inputReliability['latest_run_status'] !== '' ? $inputReliability['latest_run_status'] : '-'); ?> / <?php echo h(number_format(isset($inputReliability['latest_run_failure_count']) ? (int)$inputReliability['latest_run_failure_count'] : 0)); ?>건</strong></div>
     </div>
   </section>
 

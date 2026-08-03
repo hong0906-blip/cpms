@@ -464,6 +464,7 @@ class AiDataAuditService
 
         $snapshotStatus = $this->auditDailySnapshots();
         $forecastStatus = $this->auditMonthlyForecasts();
+        $reliabilityStatus = $this->auditInputReliability();
         $overall = $this->calculateOverallScore($sections);
         $globalWarnings = array();
         $globalRecommendations = array();
@@ -484,6 +485,12 @@ class AiDataAuditService
         }
         if (isset($forecastStatus['recommendation']) && $forecastStatus['recommendation'] !== '') {
             $globalRecommendations[] = $forecastStatus['recommendation'];
+        }
+        if (isset($reliabilityStatus['warning']) && $reliabilityStatus['warning'] !== '') {
+            $globalWarnings[] = $reliabilityStatus['warning'];
+        }
+        if (isset($reliabilityStatus['recommendation']) && $reliabilityStatus['recommendation'] !== '') {
+            $globalRecommendations[] = $reliabilityStatus['recommendation'];
         }
         foreach ($sections as $section) {
             if (!empty($section['warnings'])) $globalWarnings[] = $section['label'] . ': ' . $section['warnings'][0];
@@ -512,6 +519,7 @@ class AiDataAuditService
             'sections' => $sections,
             'daily_snapshot' => $snapshotStatus,
             'monthly_forecast' => $forecastStatus,
+            'input_reliability' => $reliabilityStatus,
             'global_warnings' => $globalWarnings,
             'global_recommendations' => $globalRecommendations,
             'read_only' => true,
@@ -667,6 +675,87 @@ class AiDataAuditService
             $result['message'] = '예측 구조는 설치됐으며 스냅샷 생성 후 예측을 실행할 수 있습니다.';
         } else {
             $result['message'] = '저장된 스냅샷을 기준으로 기본 월말 예측 결과를 기록하고 있습니다.';
+        }
+        return $result;
+    }
+
+    public function auditInputReliability()
+    {
+        $result = array(
+            'run_table_installed' => false,
+            'result_table_installed' => false,
+            'installed' => false,
+            'result_count' => 0,
+            'project_count' => 0,
+            'latest_analysis_date' => '',
+            'average_score' => null,
+            'insufficient_count' => 0,
+            'latest_run_status' => '',
+            'latest_run_failure_count' => 0,
+            'setup_required' => false,
+            'message' => '',
+            'warning' => '',
+            'recommendation' => '',
+        );
+        if (!$this->pdo) {
+            $result['setup_required'] = true;
+            $result['message'] = '입력 신뢰도 분석 DB 상태를 확인할 수 없습니다.';
+            return $result;
+        }
+
+        $runTable = 'cpms_ai_reliability_runs';
+        $resultTable = 'cpms_ai_input_reliability';
+        $runRequired = array('analysis_date', 'run_status', 'failure_count', 'started_at');
+        $resultRequired = array('analysis_date', 'project_id', 'reliability_score', 'reliability_grade', 'last_calculated_at');
+        $result['run_table_installed'] = $this->tableExists($runTable);
+        $result['result_table_installed'] = $this->tableExists($resultTable);
+        foreach ($runRequired as $column) {
+            if (!$this->columnExists($runTable, $column)) $result['run_table_installed'] = false;
+        }
+        foreach ($resultRequired as $column) {
+            if (!$this->columnExists($resultTable, $column)) $result['result_table_installed'] = false;
+        }
+        $result['installed'] = $result['run_table_installed'] && $result['result_table_installed'];
+        if (!$result['installed']) {
+            $result['setup_required'] = true;
+            $result['message'] = '입력 신뢰도 기능이 아직 설치되지 않았습니다.';
+            $result['warning'] = '입력 신뢰도 기능이 아직 설치되지 않았습니다.';
+            $result['recommendation'] = '입력 신뢰도 설정에서 분석 테이블을 설치해주세요.';
+            return $result;
+        }
+
+        $aggregate = $this->safeAggregate(
+            "SELECT COUNT(*) AS result_count, COUNT(DISTINCT project_id) AS project_count, MAX(analysis_date) AS latest_date, AVG(reliability_score) AS average_score, COALESCE(SUM(CASE WHEN reliability_grade='INSUFFICIENT' THEN 1 ELSE 0 END),0) AS insufficient_count FROM `" . $resultTable . "`",
+            array(),
+            '입력 신뢰도 결과 집계 실패'
+        );
+        if ($aggregate['ok']) {
+            $row = $aggregate['row'];
+            $result['result_count'] = isset($row['result_count']) ? (int)$row['result_count'] : 0;
+            $result['project_count'] = isset($row['project_count']) ? (int)$row['project_count'] : 0;
+            $result['latest_analysis_date'] = isset($row['latest_date']) && $row['latest_date'] !== null ? (string)$row['latest_date'] : '';
+            $result['average_score'] = isset($row['average_score']) && $row['average_score'] !== null ? round((float)$row['average_score'], 2) : null;
+            $result['insufficient_count'] = isset($row['insufficient_count']) ? (int)$row['insufficient_count'] : 0;
+        }
+
+        try {
+            $st = $this->pdo->query("SELECT run_status, failure_count FROM `" . $runTable . "` ORDER BY started_at DESC,id DESC LIMIT 1");
+            $run = $st ? $st->fetch(PDO::FETCH_ASSOC) : false;
+            if (is_array($run)) {
+                $result['latest_run_status'] = isset($run['run_status']) ? (string)$run['run_status'] : '';
+                $result['latest_run_failure_count'] = isset($run['failure_count']) ? (int)$run['failure_count'] : 0;
+            }
+        } catch (Exception $e) {
+        }
+
+        if ($result['result_count'] === 0) {
+            $result['message'] = '신뢰도 구조는 설치됐으며 월말 예측 실행 후 계산할 수 있습니다.';
+        } else {
+            $result['message'] = '저장된 예측·스냅샷·통합 비용 이벤트를 기준으로 입력 신뢰도를 기록하고 있습니다.';
+        }
+        if ($result['latest_run_failure_count'] > 0) {
+            $result['warning'] = '최근 입력 신뢰도 실행에서 일부 현장 분석 실패가 확인됐습니다.';
+            $result['recommendation'] = '입력 신뢰도 설정에서 최근 실행 상태를 확인해주세요.';
         }
         return $result;
     }
