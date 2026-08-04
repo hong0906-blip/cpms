@@ -15,67 +15,6 @@ require_once __DIR__ . '/../../services/AiDailyPipelineService.php';
 require_once __DIR__ . '/../../services/AiExecutiveChatService.php';
 require_once __DIR__ . '/../../services/AiExecutiveBriefService.php';
 
-/* CEO Index의 모든 탭이 사용하는 표시 헬퍼. 이 진입 파일만으로 로딩을 보장한다. */
-if(!function_exists('cpms_ai_display_labels')){
-    function cpms_ai_display_labels(){
-        return array(
-            'INSUFFICIENT'=>'분석자료 부족','COLD_START'=>'학습자료 없음',
-            'INITIAL'=>'초기학습','INITIAL_EXPANDED'=>'초기학습 확대','NORMAL_LEARNING'=>'정상학습',
-            'BASIC_FORECAST'=>'기본 예측 적용','COMPLETION_PATTERN'=>'입력패턴 예측',
-            'COMPLETION_AND_PACE'=>'입력패턴·최근 흐름 예측','COMPLETION_AND_HISTORICAL'=>'입력패턴·과거자료 예측',
-            'HISTORICAL_MEDIAN'=>'과거 중간값 예측','RECENT_PACE'=>'최근 입력흐름 예측',
-            'COMPANY_CATEGORY_FALLBACK'=>'회사 비용항목 자료 참고',
-            'PROJECT_CATEGORY'=>'현장 비용항목 자료','PROJECT_ALL'=>'현장 전체 자료',
-            'COMPANY_CATEGORY'=>'회사 비용항목 자료 참고','COMPANY_ALL'=>'회사 전체 자료 참고',
-            'MIXED'=>'복합 예측 적용','READY'=>'분석 준비','LIMITED'=>'자료 제한적',
-            'NORMAL'=>'정상','WATCH'=>'관심','WARNING'=>'주의','CRITICAL'=>'위험',
-            'LOW'=>'낮음','MEDIUM'=>'보통','HIGH'=>'높음','VERY_LOW'=>'매우 낮음',
-            'SUCCESS'=>'정상 완료','COMPLETED'=>'정상 완료','PARTIAL'=>'일부 완료',
-            'FAILED'=>'실행 실패','SKIPPED'=>'실행 생략','RUNNING'=>'실행 중','PENDING'=>'실행 대기',
-            'CACHED'=>'저장 결과 사용','NOT_RUN'=>'실행 전','MISSING'=>'자료 없음',
-            'ANSWERED'=>'답변 완료','NOT_AVAILABLE'=>'확인 불가','REFUSED'=>'답변 제한'
-        );
-    }
-}
-if(!function_exists('cpms_ai_display_label')){
-    function cpms_ai_display_label($code,$developer){
-        $code=trim((string)$code);if($code==='')return '';$labels=cpms_ai_display_labels();$known=isset($labels[$code]);$label=$known?$labels[$code]:$code;
-        if(!$developer&&!$known&&preg_match('/^[A-Z0-9_]+$/',$code))return '확인 필요';
-        return $developer&&$label!==$code?$label.' ('.$code.')':$label;
-    }
-}
-if(!function_exists('cpms_ai_display_confidence')){
-    function cpms_ai_display_confidence($score,$grade){
-        $hasScore=$score!==null&&$score!==''&&is_numeric($score);$grade=trim((string)$grade);
-        if($grade==='INSUFFICIENT'||(!$hasScore&&$grade===''))return '분석자료 부족 · 아직 신뢰도를 산정할 수 없음';
-        $label=cpms_ai_display_label($grade,false);
-        if($hasScore)return number_format((float)$score,1).'점 · '.($label!==''?$label:'분석자료 부족');
-        return $label!==''?'신뢰도 '.$label:'분석자료 부족';
-    }
-}
-if(!function_exists('cpms_ai_project_name_map')){
-    function cpms_ai_project_name_map($pdo,$projectIds){
-        $map=array();if(!$pdo||!is_array($projectIds))return $map;$ids=array();
-        foreach($projectIds as $id){$id=(int)$id;if($id>0)$ids[$id]=$id;}
-        if(count($ids)===0)return $map;$holders=array();$params=array();$index=0;
-        foreach($ids as $id){$key=':p'.$index++;$holders[]=$key;$params[$key]=$id;}
-        try{$st=$pdo->prepare('SELECT id,name FROM cpms_projects WHERE id IN ('.implode(',',$holders).')');if(!$st||!$st->execute($params))return $map;$rows=$st->fetchAll(PDO::FETCH_ASSOC);if(!is_array($rows))return $map;foreach($rows as $row)$map[(int)$row['id']]=trim((string)$row['name'])!==''?(string)$row['name']:'현장정보 확인 필요';}catch(Exception $e){return array();}
-        return $map;
-    }
-}
-if(!function_exists('cpms_ai_project_name')){
-    function cpms_ai_project_name($map,$projectId){$projectId=(int)$projectId;return isset($map[$projectId])&&trim((string)$map[$projectId])!==''?(string)$map[$projectId]:'현장정보 확인 필요';}
-}
-if(!function_exists('cpms_ai_learning_period')){
-    function cpms_ai_learning_period($summary){
-        if(!is_array($summary)||empty($summary['month_count']))return '학습자료 없음';
-        $first=isset($summary['first_ym'])?(string)$summary['first_ym']:'';$last=isset($summary['last_ym'])?(string)$summary['last_ym']:'';
-        $firstLabel=preg_match('/^(\d{4})-(\d{2})$/',$first,$firstMatch)?$firstMatch[1].'년 '.(int)$firstMatch[2].'월':'';
-        $lastLabel=preg_match('/^(\d{4})-(\d{2})$/',$last,$lastMatch)?$lastMatch[1].'년 '.(int)$lastMatch[2].'월':'';
-        if($firstLabel!==''&&$first===$last)return $firstLabel;if($firstLabel!==''&&$lastLabel!=='')return $firstLabel.' ~ '.$lastLabel;return (int)$summary['month_count'].'개월';
-    }
-}
-
 $ceoSectionAllowed=Auth::check()&&Auth::canAccessCeoIndex();
 $ceoSectionDeveloper=Auth::check()&&Auth::isDevelopmentDepartment();
 if(!$ceoSectionAllowed){http_response_code(403);echo '<div class="rounded-2xl border border-red-200 bg-red-50 p-4 font-bold text-red-700">'.h('접근 권한이 없습니다.').'</div>';return;}
