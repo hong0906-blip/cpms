@@ -8,10 +8,15 @@ if(!function_exists('cpms_ceo_label_text')){
             'HISTORICAL_MEDIAN'=>'과거 중간값 예측','RECENT_PACE'=>'최근 입력흐름 예측','COMPANY_CATEGORY_FALLBACK'=>'회사 비용항목 자료 참고',
             'PROJECT_CATEGORY'=>'현장 비용항목 자료','PROJECT_ALL'=>'현장 전체 자료','COMPANY_CATEGORY'=>'회사 비용항목 자료 참고','COMPANY_ALL'=>'회사 전체 자료 참고',
             'MIXED'=>'복합 예측 적용','READY'=>'분석 준비','LIMITED'=>'자료 제한적','NORMAL'=>'정상','WATCH'=>'관심','WARNING'=>'주의','CRITICAL'=>'위험',
-            'LOW'=>'낮음','MEDIUM'=>'보통','HIGH'=>'높음','VERY_LOW'=>'매우 낮음','SUCCESS'=>'정상 완료','COMPLETED'=>'정상 완료','PARTIAL'=>'일부 완료',
+            'LOW'=>'낮음','MEDIUM'=>'보통','HIGH'=>'높음','VERY_LOW'=>'낮음','SUCCESS'=>'정상 완료','COMPLETED'=>'정상 완료','PARTIAL'=>'일부 완료',
             'FAILED'=>'실행 실패','SKIPPED'=>'실행 생략','RUNNING'=>'실행 중','PENDING'=>'실행 대기','CACHED'=>'저장 결과 사용','NOT_RUN'=>'실행 전','MISSING'=>'자료 없음',
             'ANSWERED'=>'답변 완료','NOT_AVAILABLE'=>'확인 불가','REFUSED'=>'답변 제한'
         );
+        $labels['AMOUNT_ONLY']='과거 금액자료만 반영';
+        $labels['SAME_PROJECT_TYPE_MEDIAN']='같은 현장유형 자료 참고';
+        $labels['LIVE_EMPLOYEE_INPUT']='실제 직원 입력';
+        $labels['HISTORICAL_MIGRATION']='과거 이관 자료';
+        $labels['UNKNOWN_REVIEW']='자료 확인 필요';
         $code=trim((string)$code);if($code==='')return '';$known=isset($labels[$code]);$label=$known?$labels[$code]:$code;
         if(!$developer&&!$known&&preg_match('/^[A-Z0-9_]+$/',$code))return '확인 필요';
         return $developer&&$label!==$code?$label.' ('.$code.')':$label;
@@ -20,10 +25,9 @@ if(!function_exists('cpms_ceo_label_text')){
 if(!function_exists('cpms_ceo_confidence_text')){
     function cpms_ceo_confidence_text($score,$grade){
         $hasScore=$score!==null&&$score!==''&&is_numeric($score);$grade=trim((string)$grade);
-        if($grade==='INSUFFICIENT'||(!$hasScore&&$grade===''))return '분석자료 부족 · 아직 신뢰도를 산정할 수 없음';
+        if($grade==='INSUFFICIENT'||(!$hasScore&&$grade===''))return '산정 불가';
         $label=cpms_ceo_label_text($grade,false);
-        if($hasScore)return number_format((float)$score,1).'점 · '.($label!==''?$label:'분석자료 부족');
-        return $label!==''?'신뢰도 '.$label:'분석자료 부족';
+        return $label!==''?$label:'산정 불가';
     }
 }
 if(!function_exists('cpms_ceo_project_name_map')){
@@ -47,11 +51,11 @@ if(!function_exists('cpms_ceo_learning_period')){
 
 $ceoSummaryConfidenceScore=isset($ceoSummary['confidence_score'])?$ceoSummary['confidence_score']:null;
 $ceoSummaryConfidenceGrade=isset($ceoSummary['confidence_grade'])?$ceoSummary['confidence_grade']:'';
-$ceoSummaryConfidenceText='분석자료 부족 · 아직 신뢰도를 산정할 수 없음';
+$ceoSummaryConfidenceText='산정 불가';
 if($ceoSummaryConfidenceGrade!=='INSUFFICIENT'&&$ceoSummaryConfidenceScore!==null&&$ceoSummaryConfidenceScore!==''&&is_numeric($ceoSummaryConfidenceScore)){
-    $ceoSummaryConfidenceText=number_format((float)$ceoSummaryConfidenceScore,1).'점 · '.cpms_ceo_label_text($ceoSummaryConfidenceGrade,false);
+    $ceoSummaryConfidenceText=cpms_ceo_label_text($ceoSummaryConfidenceGrade,false);
 }elseif($ceoSummaryConfidenceGrade!==''&&$ceoSummaryConfidenceGrade!=='INSUFFICIENT'){
-    $ceoSummaryConfidenceText='신뢰도 '.cpms_ceo_label_text($ceoSummaryConfidenceGrade,false);
+    $ceoSummaryConfidenceText=cpms_ceo_label_text($ceoSummaryConfidenceGrade,false);
 }
 ?>
 <section class="ceo-v2-card"><div class="ceo-v2-grid">

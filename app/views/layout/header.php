@@ -25,6 +25,7 @@ $bodySelectedClass = 'cpms-selected-' . preg_replace('/[^a-z0-9_-]+/i', '-', iss
   <script defer src="<?php echo h(asset_url('assets/js/app.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/app.js')); ?>"></script>
   <link rel="stylesheet" href="<?php echo h(asset_url('assets/css/guide-tour.css') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/css/guide-tour.css')); ?>">
   <script defer src="<?php echo h(asset_url('assets/js/guide-tour.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/guide-tour.js')); ?>"></script>
+  <script defer src="<?php echo h(asset_url('assets/js/usage-workflow.js') . '?v=' . (string)@filemtime(dirname(dirname(dirname(__DIR__))) . '/public/assets/js/usage-workflow.js')); ?>"></script>
 
   <!-- (중요) Sidebar 접힘/펼침에 따른 표시 제어 -->
   <style>

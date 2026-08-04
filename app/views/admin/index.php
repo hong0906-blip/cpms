@@ -75,10 +75,12 @@ if ($canAiDataAudit) {
     $tabs['ai_data_audit'] = array('label' => 'AI 데이터 점검', 'icon' => 'database-zap');
     $tabs['ai_data_setup'] = array('label' => 'AI 데이터 이력 설정', 'icon' => 'database-cog');
     $tabs['ai_data_history'] = array('label' => '통합 비용 이력', 'icon' => 'list-history');
+    $tabs['ai_data_governance'] = array('label' => 'AI 데이터 원천·현장유형', 'icon' => 'database-zap');
     $tabs['ai_snapshot_setup'] = array('label' => '일일 스냅샷 설정', 'icon' => 'calendar-cog');
     $tabs['ai_snapshot_history'] = array('label' => '일일 스냅샷 이력', 'icon' => 'calendar-range');
     $tabs['ai_forecast_setup'] = array('label' => '기본 월말 예측 설정', 'icon' => 'chart-no-axes-combined');
     $tabs['ai_forecast_history'] = array('label' => '기본 월말 예측 결과', 'icon' => 'chart-spline');
+    $tabs['ai_forecast_accuracy'] = array('label' => '예측 정확도', 'icon' => 'chart-no-axes-combined');
     $tabs['ai_reliability_setup'] = array('label' => '입력 신뢰도 설정', 'icon' => 'shield-check');
     $tabs['ai_reliability_history'] = array('label' => '입력 신뢰도 결과', 'icon' => 'activity');
     $tabs['ai_anomaly_setup'] = array('label' => '이상징후 탐지 설정', 'icon' => 'scan-search');
@@ -208,6 +210,8 @@ if ($tab === 'employees') {
     require __DIR__ . '/ai_data_setup.php';
 } elseif ($tab === 'ai_data_history' && $canAiDataAudit) {
     require __DIR__ . '/ai_data_history.php';
+} elseif ($tab === 'ai_data_governance' && $canAiDataAudit) {
+    require __DIR__ . '/ai_data_governance.php';
 } elseif ($tab === 'ai_snapshot_setup' && $canAiDataAudit) {
     require __DIR__ . '/ai_snapshot_setup.php';
 } elseif ($tab === 'ai_snapshot_history' && $canAiDataAudit) {
@@ -216,6 +220,8 @@ if ($tab === 'employees') {
     require __DIR__ . '/ai_forecast_setup.php';
 } elseif ($tab === 'ai_forecast_history' && $canAiDataAudit) {
     require __DIR__ . '/ai_forecast_history.php';
+} elseif ($tab === 'ai_forecast_accuracy' && $canAiDataAudit) {
+    require __DIR__ . '/ai_forecast_accuracy.php';
 } elseif ($tab === 'ai_reliability_setup' && $canAiDataAudit) {
     require __DIR__ . '/ai_reliability_setup.php';
 } elseif ($tab === 'ai_reliability_history' && $canAiDataAudit) {

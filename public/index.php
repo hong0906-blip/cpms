@@ -1576,11 +1576,24 @@ if (isset($costChangeViews[$route])) {
 // ==========================
 //  사용현황 분석 전용 라우트 및 직접 URL 접근 차단
 // ==========================
+if ($route === 'usage_analytics/event') {
+    header('Content-Type: application/json; charset=UTF-8');
+    if (!\App\Core\Auth::check() || $_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(403); echo json_encode(array('ok'=>false,'message'=>'허용되지 않은 요청입니다.')); exit; }
+    $eventToken=isset($_POST['_csrf'])?(string)$_POST['_csrf']:'';
+    if(!csrf_check($eventToken)){http_response_code(403);echo json_encode(array('ok'=>false,'message'=>'보안 토큰이 올바르지 않습니다.'));exit;}
+    $eventMeta=array('workflow_id'=>isset($_POST['workflow_id'])?$_POST['workflow_id']:'','menu_key'=>isset($_POST['menu_key'])?$_POST['menu_key']:'','menu_name'=>isset($_POST['menu_name'])?$_POST['menu_name']:'','route_name'=>isset($_POST['route_name'])?$_POST['route_name']:'','tab_key'=>isset($_POST['tab_key'])?$_POST['tab_key']:'','tab_name'=>isset($_POST['tab_name'])?$_POST['tab_name']:'','action_name'=>isset($_POST['action_name'])?$_POST['action_name']:'','feature_name'=>isset($_POST['feature_name'])?$_POST['feature_name']:'','result_code'=>isset($_POST['result_code'])?$_POST['result_code']:'');
+    $eventOk=\App\Services\UsageAnalyticsService::recordWorkflowEvent(\App\Core\Db::pdo(),isset($_POST['event_type'])?$_POST['event_type']:'',isset($_POST['feature_key'])?$_POST['feature_key']:'',$eventMeta);
+    echo json_encode(array('ok'=>$eventOk));exit;
+}
+
 $usageAnalyticsRoutes = array(
     'usage_analytics',
     'usage_analytics/setup',
     'usage_analytics/export',
     'usage_analytics/cleanup',
+    'usage_analytics/review_refresh',
+    'usage_analytics/feature_save',
+    'usage_analytics/review_save',
 );
 if (in_array($route, $usageAnalyticsRoutes, true)) {
     if (!\App\Core\Auth::canAccessUsageAnalytics()) {
@@ -1590,6 +1603,16 @@ if (in_array($route, $usageAnalyticsRoutes, true)) {
     }
 
     $usageAnalyticsPdo = \App\Core\Db::pdo();
+
+    if (in_array($route,array('usage_analytics/review_refresh','usage_analytics/feature_save','usage_analytics/review_save'),true)) {
+        if (!\App\Core\Auth::isDevelopmentDepartment() || $_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(403); echo '접근 권한이 없습니다.'; exit; }
+        $reviewToken=isset($_POST['_csrf'])?(string)$_POST['_csrf']:'';
+        if(!csrf_check($reviewToken)){flash_set('danger','보안 토큰이 올바르지 않습니다.');header('Location: ?r=usage_analytics#review-targets');exit;}
+        if($route==='usage_analytics/review_refresh')$reviewResult=\App\Services\UsageAnalyticsService::refreshReviewTargets($usageAnalyticsPdo,isset($_POST['days'])?(int)$_POST['days']:30);
+        else if($route==='usage_analytics/feature_save')$reviewResult=\App\Services\UsageAnalyticsService::saveFeatureImportance($usageAnalyticsPdo,isset($_POST['feature_key'])?$_POST['feature_key']:'',isset($_POST['business_importance'])?$_POST['business_importance']:'NORMAL',$_POST);
+        else $reviewResult=\App\Services\UsageAnalyticsService::saveReviewDecision($usageAnalyticsPdo,isset($_POST['feature_key'])?$_POST['feature_key']:'',isset($_POST['review_status'])?$_POST['review_status']:'NEW',isset($_POST['owner_employee_id'])?(int)$_POST['owner_employee_id']:0,isset($_POST['review_comment'])?$_POST['review_comment']:'');
+        flash_set(!empty($reviewResult['ok'])?'success':'danger',isset($reviewResult['message'])?$reviewResult['message']:'처리 결과를 확인해주세요.');header('Location: ?r=usage_analytics#review-targets');exit;
+    }
 
     if ($route === 'usage_analytics/setup') {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -1676,6 +1699,7 @@ if (in_array($route, $usageAnalyticsRoutes, true)) {
     $usageData = array();
     $usageDetail = null;
     $usageLoadError = '';
+    $usageReviewTargets = array();
     if ($usageInstalled) {
         try {
             $usageData = \App\Services\UsageAnalyticsService::dashboard($usageAnalyticsPdo, $usageFilters);
@@ -1683,6 +1707,7 @@ if (in_array($route, $usageAnalyticsRoutes, true)) {
             if ($usageDetailId > 0) {
                 $usageDetail = \App\Services\UsageAnalyticsService::userDetail($usageAnalyticsPdo, $usageDetailId, $usageFilters, $_GET);
             }
+            if (\App\Core\Auth::isDevelopmentDepartment()) $usageReviewTargets = \App\Services\UsageAnalyticsService::listReviewTargets($usageAnalyticsPdo);
         } catch (Exception $e) {
             error_log('[CPMS usage analytics] dashboard: ' . $e->getMessage());
             $usageLoadError = '사용현황 통계를 불러오는 중 오류가 발생했습니다. 서버 로그를 확인해주세요.';
@@ -1698,6 +1723,7 @@ if (in_array($route, $usageAnalyticsRoutes, true)) {
         'usageDetail' => $usageDetail,
         'usageFilters' => $usageFilters,
         'usageLoadError' => $usageLoadError,
+        'usageReviewTargets' => $usageReviewTargets,
     ));
     exit;
 }
@@ -1879,6 +1905,23 @@ if ($route === 'admin/ai_data_setup' || $route === 'admin/ai_data_history') {
     $_GET['tab'] = $route === 'admin/ai_data_setup' ? 'ai_data_setup' : 'ai_data_history';
     \App\Core\View::render('admin/index', array(
         'title' => $route === 'admin/ai_data_setup' ? 'AI 데이터 이력 설정' : '통합 비용 입력·변경이력',
+        'selectedMenu' => '관리',
+        'dashboardType' => $dashboardType,
+    ));
+    exit;
+}
+
+// AI 데이터 원천·현장유형 및 예측 정확도(개발부서 전용)
+if ($route === 'admin/ai_data_governance' || $route === 'admin/ai_forecast_accuracy') {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    $_GET['tab'] = $route === 'admin/ai_data_governance' ? 'ai_data_governance' : 'ai_forecast_accuracy';
+    \App\Core\View::render('admin/index', array(
+        'title' => $route === 'admin/ai_data_governance' ? 'AI 데이터 원천·현장유형 관리' : '예측 정확도',
         'selectedMenu' => '관리',
         'dashboardType' => $dashboardType,
     ));

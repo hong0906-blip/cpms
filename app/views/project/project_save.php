@@ -15,6 +15,7 @@
 require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/../../services/GoogleDriveHelper.php';
 require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
+require_once __DIR__ . '/../../services/AiProjectTypeService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
@@ -147,6 +148,8 @@ $status = isset($_POST['status']) ? trim((string)$_POST['status']) : '진행 중
 $status = cpms_project_save_normalize_status($status);
 $settlementCompletedAt = isset($_POST['settlement_completed_at']) ? trim((string)$_POST['settlement_completed_at']) : '';
 $contract_amount = isset($_POST['contract_amount']) ? trim((string)$_POST['contract_amount']) : '';
+$hasProjectTypeInput = array_key_exists('project_type_id', $_POST);
+$projectTypeId = $hasProjectTypeInput ? (int)$_POST['project_type_id'] : 0;
 
 $mainManagerId = isset($_POST['main_manager_id']) ? (int)$_POST['main_manager_id'] : 0;
 $postedSubManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
@@ -344,6 +347,10 @@ try {
         // 공사 테이블이 아직 없으면 무시(프로젝트 생성 자체는 성공해야 함)
     }
 
+    if ($hasProjectTypeInput && \App\Services\AiProjectTypeService::isInstalled($pdo)) {
+        $typeResult = \App\Services\AiProjectTypeService::assignProject($pdo, $projectId, $projectTypeId, '프로젝트 생성 화면에서 지정');
+        if (empty($typeResult['ok'])) throw new Exception(isset($typeResult['message']) ? $typeResult['message'] : '현장유형 저장 실패');
+    }
     $pdo->commit();
     if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
 

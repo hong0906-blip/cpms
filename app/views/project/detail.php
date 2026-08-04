@@ -5,6 +5,7 @@ use App\Core\Db;
 require_once __DIR__ . '/contract_change_helper.php';
 require_once __DIR__ . '/../../services/PublicAffairsDriveService.php';
 require_once __DIR__ . '/../../services/PublicAffairsCollaborationService.php';
+require_once __DIR__ . '/../../services/AiProjectTypeService.php';
 
 if (!function_exists('cpms_format_qty0')) {
 function cpms_format_qty0($v) { if ($v === null || $v === '') return ''; if (!is_numeric((string)$v)) return h((string)$v); return number_format(round((float)$v), 0); }
@@ -75,6 +76,9 @@ if (!$project) {
     return;
 }
 $projectStatusValue = cpms_project_detail_normalize_status(isset($project['status']) ? (string)$project['status'] : '');
+$projectTypes = \App\Services\AiProjectTypeService::listTypes($pdo, true);
+$projectType = \App\Services\AiProjectTypeService::projectType($pdo, $projectId);
+$projectTypeId = !empty($projectType['assigned']) ? (int)$projectType['id'] : 0;
 $projectSettlementCompletedAt = isset($project['settlement_completed_at']) ? trim((string)$project['settlement_completed_at']) : '';
 if ($projectSettlementCompletedAt === '0000-00-00') $projectSettlementCompletedAt = '';
 if ($projectSettlementCompletedAt === '' && $projectStatusValue === '정산완료') {
@@ -453,6 +457,14 @@ if (count($estimateVersions) > 0) {
             <div class="md:col-span-2">
                 <div class="text-sm font-bold text-gray-700 mb-1">계약금액</div>
                 <input name="contract_amount" value="<?php echo h((string)$project['contract_amount']); ?>" class="w-full px-4 py-3 rounded-2xl border border-gray-200 outline-none">
+            </div>
+            <div class="md:col-span-2">
+                <div class="text-sm font-bold text-gray-700 mb-1">현장유형</div>
+                <select name="project_type_id" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white outline-none">
+                    <option value="0">미지정</option>
+                    <?php foreach ($projectTypes as $projectTypeOption): ?><option value="<?php echo (int)$projectTypeOption['id']; ?>" <?php echo (int)$projectTypeOption['id']===$projectTypeId?'selected':''; ?>><?php echo h($projectTypeOption['type_name']); ?></option><?php endforeach; ?>
+                </select>
+                <div class="text-xs text-gray-500 mt-2">미지정 시 유사 현장 비교자료 부족으로 표시됩니다.</div>
             </div>
             <div class="md:col-span-2">
                 <div class="text-sm font-bold text-gray-700 mb-1">공사 담당자(메인) *</div>

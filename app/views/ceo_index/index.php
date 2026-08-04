@@ -8,12 +8,14 @@ use App\Services\AiDailyPipelineService;
 use App\Services\AiExecutiveChatService;
 use App\Services\AiExecutiveBriefService;
 use App\Services\AiInputCompletionPatternService;
+use App\Services\AiMemoryService;
 
 require_once __DIR__ . '/../../services/AiCeoIndexService.php';
 require_once __DIR__ . '/../../services/AiCostForecastV2Service.php';
 require_once __DIR__ . '/../../services/AiDailyPipelineService.php';
 require_once __DIR__ . '/../../services/AiExecutiveChatService.php';
 require_once __DIR__ . '/../../services/AiExecutiveBriefService.php';
+require_once __DIR__ . '/../../services/AiMemoryService.php';
 
 $ceoSectionAllowed=Auth::check()&&Auth::canAccessCeoIndex();
 $ceoSectionDeveloper=Auth::check()&&Auth::isDevelopmentDepartment();
@@ -28,12 +30,17 @@ if(isset($_SERVER['REQUEST_METHOD'])&&$_SERVER['REQUEST_METHOD']==='POST'){
     if(!csrf_check($token))$ceoActionResult=array('ok'=>false,'message'=>'보안 토큰이 올바르지 않습니다.');
     else if(in_array($action,array('install','run_pipeline','force_pipeline','generate_summary'),true)&&!$ceoSectionDeveloper)$ceoActionResult=array('ok'=>false,'message'=>'개발부서 전용 기능입니다.');
     else if(!$ceoSectionPdo)$ceoActionResult=array('ok'=>false,'message'=>'DB 연결 상태를 확인할 수 없습니다.');
-    else if($action==='install'){$a=AiDailyPipelineService::installOrUpdate($ceoSectionPdo);$b=AiExecutiveChatService::installOrUpdate($ceoSectionPdo);$ceoActionResult=array('ok'=>!empty($a['ok'])&&!empty($b['ok']),'message'=>(isset($a['message'])?$a['message']:'').' '.(isset($b['message'])?$b['message']:''));}
+    else if($action==='install'){$a=AiDailyPipelineService::installOrUpdate($ceoSectionPdo);$b=AiExecutiveChatService::installOrUpdate($ceoSectionPdo);$c=AiMemoryService::installOrUpdate($ceoSectionPdo);$ceoActionResult=array('ok'=>!empty($a['ok'])&&!empty($b['ok'])&&!empty($c['ok']),'message'=>(isset($a['message'])?$a['message']:'').' '.(isset($b['message'])?$b['message']:'').' '.(isset($c['message'])?$c['message']:''));}
     else if($action==='run_pipeline'||$action==='force_pipeline')$ceoActionResult=AiDailyPipelineService::run($ceoSectionPdo,'MANUAL',$action==='force_pipeline');
     else if($action==='generate_summary')$ceoActionResult=AiExecutiveBriefService::generateLatest($ceoSectionPdo,'MANUAL',!empty($_POST['force']));
     else if($action==='new_thread'){$ceoActionResult=AiExecutiveChatService::createThread($ceoSectionPdo,isset($_POST['target_ym'])?$_POST['target_ym']:$ceoTargetYm);if(!empty($ceoActionResult['thread_id']))$_GET['thread_id']=$ceoActionResult['thread_id'];$ceoActiveTab='gpt_chat';}
     else if($action==='send_chat'){$ceoActionResult=AiExecutiveChatService::send($ceoSectionPdo,isset($_POST['thread_id'])?(int)$_POST['thread_id']:0,isset($_POST['question'])?$_POST['question']:'');$_GET['thread_id']=isset($_POST['thread_id'])?(int)$_POST['thread_id']:0;$ceoActiveTab='gpt_chat';}
     else if($action==='archive_thread'){$ok=AiExecutiveChatService::archiveThread($ceoSectionPdo,isset($_POST['thread_id'])?(int)$_POST['thread_id']:0);$ceoActionResult=array('ok'=>$ok,'message'=>$ok?'대화방을 보관했습니다.':'대화방을 보관하지 못했습니다.');$ceoActiveTab='gpt_chat';}
+    else if($action==='save_memory'){$memoryData=$_POST;$memoryData['confirmed']=!empty($_POST['confirmed']);$ceoActionResult=AiMemoryService::saveMemory($ceoSectionPdo,$memoryData);$ceoActiveTab='gpt_chat';}
+    else if($action==='review_memory'){$ceoActionResult=AiMemoryService::review($ceoSectionPdo,isset($_POST['memory_id'])?(int)$_POST['memory_id']:0,isset($_POST['decision'])?$_POST['decision']:'',isset($_POST['reason'])?$_POST['reason']:'');$ceoActiveTab='gpt_chat';}
+    else if($action==='deactivate_memory'){$ceoActionResult=AiMemoryService::deactivate($ceoSectionPdo,isset($_POST['memory_id'])?(int)$_POST['memory_id']:0,isset($_POST['reason'])?$_POST['reason']:'');$ceoActiveTab='gpt_chat';}
+    else if($action==='create_memory_version'){$memoryVersionData=$_POST;$memoryVersionData['confirmed']=!empty($_POST['confirmed']);$ceoActionResult=AiMemoryService::createVersion($ceoSectionPdo,isset($_POST['memory_id'])?(int)$_POST['memory_id']:0,$memoryVersionData);$ceoActiveTab='gpt_chat';}
+    else if($action==='reactivate_memory'){$ceoActionResult=AiMemoryService::reactivate($ceoSectionPdo,isset($_POST['memory_id'])?(int)$_POST['memory_id']:0,isset($_POST['reason'])?$_POST['reason']:'');$ceoActiveTab='gpt_chat';}
     else $ceoActionResult=array('ok'=>false,'message'=>'요청값이 올바르지 않습니다.');
 }
 $ceoSummary=array('available'=>false);

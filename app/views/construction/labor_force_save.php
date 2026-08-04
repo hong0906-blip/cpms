@@ -111,6 +111,11 @@ $memo = isset($_POST['memo']) ? trim((string)$_POST['memo']) : '';
 if (strlen($memo) > 255) {
     $memo = substr($memo, 0, 255);
 }
+if ($memo === '') {
+    flash_set('error', '관리자 보정 사유를 입력해주세요.');
+    header('Location: ' . $redirect);
+    exit;
+}
 
 $pdo = Db::pdo();
 if (!$pdo || !cpms_ensure_labor_force_adjustments_table($pdo)) {
@@ -209,7 +214,8 @@ try {
                 'target_id' => isset($newEventRow['id']) ? (string)$newEventRow['id'] : '',
                 'event_action' => 'ADJUST',
                 'source_type' => 'ADMIN_FORCE',
-                'actual_date' => $month . '-01',
+                // 월 집계 보정에는 실제 발생일 근거가 없으므로 귀속월과 분리해 NULL로 보존한다.
+                'actual_date' => '',
                 'settlement_ym' => $month,
                 'old_amount' => is_array($oldEventRow) && isset($oldEventRow['amount']) ? $oldEventRow['amount'] : null,
                 'new_amount' => isset($newEventRow['amount']) ? $newEventRow['amount'] : $amount,

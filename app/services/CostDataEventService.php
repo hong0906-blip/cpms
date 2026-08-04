@@ -14,6 +14,8 @@ use Exception;
 use PDO;
 use PDOException;
 
+require_once __DIR__ . '/AiCostDataGovernanceService.php';
+
 class CostDataEventService
 {
     const TABLE_NAME = 'cpms_cost_data_events';
@@ -52,8 +54,15 @@ class CostDataEventService
 
         try {
             $st = $pdo->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :table_name');
+            if (!$st) {
+                self::$tableCache[$key] = false;
+                return false;
+            }
             $st->bindValue(':table_name', $table, PDO::PARAM_STR);
-            $st->execute();
+            if (!$st->execute()) {
+                self::$tableCache[$key] = false;
+                return false;
+            }
             self::$tableCache[$key] = ((int)$st->fetchColumn() > 0);
         } catch (Exception $e) {
             self::$tableCache[$key] = false;
@@ -116,7 +125,7 @@ class CostDataEventService
         return array(
             'id', 'event_uid', 'dedupe_key', 'batch_key', 'project_id',
             'project_name_snapshot', 'cost_type', 'target_type', 'target_id',
-            'event_action', 'source_type', 'actual_date', 'settlement_ym',
+            'event_action', 'source_type', 'data_origin', 'actual_date', 'settlement_ym',
             'old_amount', 'new_amount', 'delta_amount', 'old_data', 'new_data',
             'actor_employee_id', 'actor_name', 'actor_department',
             'related_request_id', 'reason', 'source_file', 'event_at', 'created_at'
@@ -134,6 +143,7 @@ class CostDataEventService
             'idx_cost_event_target',
             'idx_cost_event_actor',
             'idx_cost_event_source',
+            'idx_cost_event_origin',
             'idx_cost_event_request',
             'idx_cost_event_settlement'
         );
@@ -188,6 +198,7 @@ class CostDataEventService
             . "    target_id VARCHAR(80) NULL,\n"
             . "    event_action VARCHAR(30) NOT NULL,\n"
             . "    source_type VARCHAR(30) NOT NULL,\n"
+            . "    data_origin VARCHAR(40) NOT NULL DEFAULT 'UNKNOWN_REVIEW',\n"
             . "    actual_date DATE NULL,\n"
             . "    settlement_ym CHAR(7) NULL,\n"
             . "    old_amount DECIMAL(18,2) NULL,\n"
@@ -210,6 +221,7 @@ class CostDataEventService
             . "    KEY idx_cost_event_target (target_type, target_id, event_at),\n"
             . "    KEY idx_cost_event_actor (actor_employee_id, event_at),\n"
             . "    KEY idx_cost_event_source (source_type, event_at),\n"
+            . "    KEY idx_cost_event_origin (data_origin, settlement_ym, cost_type),\n"
             . "    KEY idx_cost_event_request (related_request_id),\n"
             . "    KEY idx_cost_event_settlement (settlement_ym, cost_type)\n"
             . ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
@@ -245,6 +257,7 @@ class CostDataEventService
                 'target_id' => 'VARCHAR(80) NULL',
                 'event_action' => 'VARCHAR(30) NOT NULL',
                 'source_type' => 'VARCHAR(30) NOT NULL',
+                'data_origin' => "VARCHAR(40) NOT NULL DEFAULT 'UNKNOWN_REVIEW'",
                 'actual_date' => 'DATE NULL',
                 'settlement_ym' => 'CHAR(7) NULL',
                 'old_amount' => 'DECIMAL(18,2) NULL',
@@ -277,6 +290,7 @@ class CostDataEventService
                 'idx_cost_event_target' => 'KEY `idx_cost_event_target` (`target_type`,`target_id`,`event_at`)',
                 'idx_cost_event_actor' => 'KEY `idx_cost_event_actor` (`actor_employee_id`,`event_at`)',
                 'idx_cost_event_source' => 'KEY `idx_cost_event_source` (`source_type`,`event_at`)',
+                'idx_cost_event_origin' => 'KEY `idx_cost_event_origin` (`data_origin`,`settlement_ym`,`cost_type`)',
                 'idx_cost_event_request' => 'KEY `idx_cost_event_request` (`related_request_id`)',
                 'idx_cost_event_settlement' => 'KEY `idx_cost_event_settlement` (`settlement_ym`,`cost_type`)'
             );
@@ -330,11 +344,13 @@ class CostDataEventService
         $map = array(
             'labor' => 'labor', 'labor_force' => 'labor', '노무' => 'labor', '노무비' => 'labor',
             'material' => 'material', '자재' => 'material', '자재비' => 'material',
+            'purchase' => 'purchase', '구매품' => 'purchase',
             'equipment' => 'equipment', '장비' => 'equipment', '장비비' => 'equipment',
             'outsourcing' => 'outsourcing', '외주' => 'outsourcing', '외주비' => 'outsourcing',
             'safety' => 'safety', '안전' => 'safety', '안전관리비' => 'safety', '보호구 구입비' => 'safety', '교육비' => 'safety',
             'health' => 'health', '보건' => 'health', '보건비' => 'health', '검진비' => 'health',
-            'other' => 'other', '기타' => 'other', 'daily_cost' => 'other', '기타 안전·보건 비용' => 'other'
+            'other_expense' => 'other_expense', '기타경비' => 'other_expense',
+            'other' => 'other', '기타' => 'other', 'daily_cost' => 'other', 'monthly_deduction' => 'other', '기타 안전·보건 비용' => 'other'
         );
         return isset($map[$value]) ? $map[$value] : 'other';
     }
@@ -342,14 +358,14 @@ class CostDataEventService
     public static function normalizeEventAction($value)
     {
         $value = strtoupper(trim((string)$value));
-        $allowed = array('CREATE', 'UPDATE', 'DELETE', 'RESTORE', 'ADJUST');
+        $allowed = array('CREATE', 'UPDATE', 'DELETE', 'RESTORE', 'ADJUST', 'RE_ENTRY');
         return in_array($value, $allowed, true) ? $value : 'ADJUST';
     }
 
     public static function normalizeSourceType($value)
     {
         $value = strtoupper(trim((string)$value));
-        $allowed = array('DIRECT', 'EXCEL', 'ATTENDANCE', 'APPROVAL', 'ADMIN_FORCE', 'AUTO_CALC', 'SYSTEM');
+        $allowed = array('DIRECT', 'EXCEL', 'ATTENDANCE', 'APPROVAL', 'ADMIN_FORCE', 'AUTO_CALC', 'SYSTEM', 'MANUAL_BACKFILL', 'SYSTEM_IMPORT', 'HISTORICAL_MIGRATION');
         return in_array($value, $allowed, true) ? $value : 'SYSTEM';
     }
 
@@ -432,8 +448,9 @@ class CostDataEventService
         try {
             if (self::tableExists($pdo, 'cpms_projects') && self::columnExists($pdo, 'cpms_projects', 'name')) {
                 $st = $pdo->prepare('SELECT name FROM cpms_projects WHERE id = :id LIMIT 1');
+                if (!$st) return '';
                 $st->bindValue(':id', $projectId, PDO::PARAM_INT);
-                $st->execute();
+                if (!$st->execute()) return '';
                 $name = trim((string)$st->fetchColumn());
             }
         } catch (Exception $e) {
@@ -513,8 +530,9 @@ class CostDataEventService
         if (!$pdo || $dedupeKey === '' || !self::isInstalled($pdo)) return false;
         try {
             $st = $pdo->prepare('SELECT id FROM `' . self::TABLE_NAME . '` WHERE dedupe_key = :dedupe_key LIMIT 1');
+            if (!$st) return false;
             $st->bindValue(':dedupe_key', self::truncate($dedupeKey, 190), PDO::PARAM_STR);
-            $st->execute();
+            if (!$st->execute()) return false;
             return $st->fetchColumn() !== false;
         } catch (Exception $e) {
             return false;
@@ -538,7 +556,21 @@ class CostDataEventService
         try {
             $action = self::normalizeEventAction(isset($options['event_action']) ? $options['event_action'] : 'ADJUST');
             $source = self::normalizeSourceType(isset($options['source_type']) ? $options['source_type'] : 'SYSTEM');
-            $costType = self::normalizeCostType(isset($options['cost_type']) ? $options['cost_type'] : 'other');
+            $eventAt = isset($options['event_at']) ? trim((string)$options['event_at']) : '';
+            if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $eventAt)) $eventAt = date('Y-m-d H:i:s');
+            $originOptions = $options;
+            $originOptions['event_at'] = $eventAt;
+            $dataOrigin = AiCostDataGovernanceService::classifyOrigin($source, $action, $eventAt, $originOptions);
+            $reasonText = isset($options['reason']) ? trim((string)$options['reason']) : '';
+            if (AiCostDataGovernanceService::requiresChangeReason($dataOrigin) && $reasonText === '') {
+                return array('ok'=>false, 'skipped'=>true, 'reason'=>'admin_correction_reason_required');
+            }
+            $rawCostType = isset($options['cost_type']) ? $options['cost_type'] : 'other';
+            $targetTypeForCost = isset($options['target_type']) ? strtolower(trim((string)$options['target_type'])) : '';
+            if (($targetTypeForCost === 'material' || $targetTypeForCost === 'material_usage') && isset($options['new_data']) && is_array($options['new_data']) && !empty($options['new_data']['category'])) {
+                $rawCostType = $options['new_data']['category'];
+            }
+            $costType = self::normalizeCostType($rawCostType);
             $oldData = self::encodeSnapshot(isset($options['old_data']) ? $options['old_data'] : array());
             $newData = self::encodeSnapshot(isset($options['new_data']) ? $options['new_data'] : array());
             $amounts = self::amounts(
@@ -563,21 +595,19 @@ class CostDataEventService
             $actualDate = self::validDate(isset($options['actual_date']) ? $options['actual_date'] : '');
             $settlementYm = self::validYm(isset($options['settlement_ym']) ? $options['settlement_ym'] : '');
             $actor = self::resolveActor($options);
-            $eventAt = isset($options['event_at']) ? trim((string)$options['event_at']) : '';
-            if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $eventAt)) $eventAt = date('Y-m-d H:i:s');
             $sourceFile = isset($options['source_file']) ? str_replace('\\', '/', (string)$options['source_file']) : '';
             if ($sourceFile !== '') $sourceFile = basename($sourceFile);
 
             $sql = 'INSERT INTO `' . self::TABLE_NAME . '` ('
                 . 'event_uid,dedupe_key,batch_key,project_id,project_name_snapshot,cost_type,target_type,target_id,'
-                . 'event_action,source_type,actual_date,settlement_ym,old_amount,new_amount,delta_amount,old_data,new_data,'
+                . 'event_action,source_type,data_origin,actual_date,settlement_ym,old_amount,new_amount,delta_amount,old_data,new_data,'
                 . 'actor_employee_id,actor_name,actor_department,related_request_id,reason,source_file,event_at,created_at'
                 . ') VALUES ('
                 . ':event_uid,:dedupe_key,:batch_key,:project_id,:project_name_snapshot,:cost_type,:target_type,:target_id,'
-                . ':event_action,:source_type,:actual_date,:settlement_ym,:old_amount,:new_amount,:delta_amount,:old_data,:new_data,'
+                . ':event_action,:source_type,:data_origin,:actual_date,:settlement_ym,:old_amount,:new_amount,:delta_amount,:old_data,:new_data,'
                 . ':actor_employee_id,:actor_name,:actor_department,:related_request_id,:reason,:source_file,:event_at,:created_at)';
             $st = $pdo->prepare($sql);
-            $st->execute(array(
+            if (!$st || !$st->execute(array(
                 ':event_uid' => self::generateEventUid(),
                 ':dedupe_key' => $dedupeKey !== '' ? $dedupeKey : null,
                 ':batch_key' => isset($options['batch_key']) && trim((string)$options['batch_key']) !== '' ? self::truncate($options['batch_key'], 100) : null,
@@ -588,6 +618,7 @@ class CostDataEventService
                 ':target_id' => isset($options['target_id']) && trim((string)$options['target_id']) !== '' ? self::truncate($options['target_id'], 80) : null,
                 ':event_action' => $action,
                 ':source_type' => $source,
+                ':data_origin' => $dataOrigin,
                 ':actual_date' => $actualDate !== '' ? $actualDate : null,
                 ':settlement_ym' => $settlementYm !== '' ? $settlementYm : null,
                 ':old_amount' => $amounts['old_amount'],
@@ -599,12 +630,22 @@ class CostDataEventService
                 ':actor_name' => $actor['name'] !== '' ? $actor['name'] : null,
                 ':actor_department' => $actor['department'] !== '' ? $actor['department'] : null,
                 ':related_request_id' => isset($options['related_request_id']) && (int)$options['related_request_id'] > 0 ? (int)$options['related_request_id'] : null,
-                ':reason' => isset($options['reason']) && trim((string)$options['reason']) !== '' ? self::truncate(self::sanitizeText($options['reason']), 500) : null,
+                ':reason' => $reasonText !== '' ? self::truncate(self::sanitizeText($reasonText), 500) : null,
                 ':source_file' => $sourceFile !== '' ? self::truncate($sourceFile, 255) : null,
                 ':event_at' => $eventAt,
                 ':created_at' => date('Y-m-d H:i:s')
-            ));
-            return array('ok' => true, 'skipped' => false, 'id' => (int)$pdo->lastInsertId());
+            ))) return array('ok' => false, 'skipped' => true, 'reason' => 'record_failed');
+            $eventId = (int)$pdo->lastInsertId();
+            $syncOptions = $options;
+            $syncOptions['event_action'] = $action;
+            $syncOptions['source_type'] = $source;
+            $syncOptions['data_origin'] = $dataOrigin;
+            $syncOptions['cost_type'] = $costType;
+            $syncOptions['actual_date'] = $actualDate;
+            $syncOptions['settlement_ym'] = $settlementYm;
+            $syncOptions['event_at'] = $eventAt;
+            AiCostDataGovernanceService::syncEvent($pdo, $eventId, $syncOptions);
+            return array('ok' => true, 'skipped' => false, 'id' => $eventId, 'data_origin' => $dataOrigin);
         } catch (PDOException $e) {
             if ((string)$e->getCode() === '23000') return array('ok' => true, 'skipped' => true, 'reason' => 'duplicate');
             error_log('[CostDataEvent] event record failed');
@@ -694,7 +735,11 @@ class CostDataEventService
                 . " COALESCE(SUM(CASE WHEN event_action IN ('UPDATE','ADJUST','RESTORE') THEN 1 ELSE 0 END),0) AS update_count,"
                 . " COALESCE(SUM(CASE WHEN event_action='DELETE' THEN 1 ELSE 0 END),0) AS delete_count,"
                 . " MAX(event_at) AS last_event_at FROM `" . self::TABLE_NAME . '`';
-            $row = $pdo->query($sql)->fetch(PDO::FETCH_ASSOC);
+            $statement = $pdo->query($sql);
+            if (!$statement) {
+                return $empty;
+            }
+            $row = $statement->fetch(PDO::FETCH_ASSOC);
             return is_array($row) ? array_merge($empty, $row) : $empty;
         } catch (Exception $e) {
             return $empty;

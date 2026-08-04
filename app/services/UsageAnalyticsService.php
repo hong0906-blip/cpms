@@ -15,6 +15,9 @@ class UsageAnalyticsService
 {
     const SESSION_TABLE = 'cpms_usage_sessions';
     const EVENT_TABLE = 'cpms_usage_events';
+    const FEATURE_TABLE = 'cpms_usage_features';
+    const REVIEW_TABLE = 'cpms_usage_review_targets';
+    const REVIEW_HISTORY_TABLE = 'cpms_usage_review_history';
     const SESSION_TIMEOUT_SECONDS = 1800;
     const ONLINE_SECONDS = 600;
     const LAST_ACTIVITY_WRITE_SECONDS = 60;
@@ -23,6 +26,7 @@ class UsageAnalyticsService
 
     private static $installed = null;
     private static $requestRecorded = false;
+    private static $shutdownOutcome = array();
 
     private static function nowDateTime()
     {
@@ -32,7 +36,8 @@ class UsageAnalyticsService
     private static function execute($pdo, $sql, $params)
     {
         $statement = $pdo->prepare($sql);
-        $statement->execute(is_array($params) ? $params : array());
+        if (!$statement) throw new \Exception('prepare failed');
+        if (!$statement->execute(is_array($params) ? $params : array())) throw new \Exception('execute failed');
         return $statement;
     }
 
@@ -161,6 +166,7 @@ class UsageAnalyticsService
                 employee_name VARCHAR(100) NOT NULL DEFAULT '',
                 department VARCHAR(80) NOT NULL DEFAULT '',
                 position VARCHAR(80) NOT NULL DEFAULT '',
+                user_role VARCHAR(40) NOT NULL DEFAULT '',
                 event_type VARCHAR(30) NOT NULL DEFAULT 'menu_view',
                 menu_key VARCHAR(80) NOT NULL DEFAULT '',
                 menu_name VARCHAR(100) NOT NULL DEFAULT '',
@@ -201,6 +207,7 @@ class UsageAnalyticsService
                 'employee_name' => "VARCHAR(100) NOT NULL DEFAULT ''",
                 'department' => "VARCHAR(80) NOT NULL DEFAULT ''",
                 'position' => "VARCHAR(80) NOT NULL DEFAULT ''",
+                'user_role' => "VARCHAR(40) NOT NULL DEFAULT ''",
                 'event_type' => "VARCHAR(30) NOT NULL DEFAULT 'menu_view'",
                 'menu_key' => "VARCHAR(80) NOT NULL DEFAULT ''",
                 'menu_name' => "VARCHAR(100) NOT NULL DEFAULT ''",
@@ -208,6 +215,11 @@ class UsageAnalyticsService
                 'tab_key' => "VARCHAR(100) NOT NULL DEFAULT ''",
                 'tab_name' => "VARCHAR(120) NOT NULL DEFAULT ''",
                 'action_name' => "VARCHAR(80) NOT NULL DEFAULT ''",
+                'feature_key' => "VARCHAR(190) NOT NULL DEFAULT ''",
+                'workflow_id' => "VARCHAR(64) NOT NULL DEFAULT ''",
+                'workflow_step' => "VARCHAR(30) NOT NULL DEFAULT ''",
+                'device_type' => "VARCHAR(20) NOT NULL DEFAULT ''",
+                'result_code' => "VARCHAR(40) NOT NULL DEFAULT ''",
                 'event_at' => "DATETIME NULL",
             );
 
@@ -224,6 +236,74 @@ class UsageAnalyticsService
                 }
             }
 
+            self::execute($pdo, "CREATE TABLE IF NOT EXISTS " . self::FEATURE_TABLE . " (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                feature_key VARCHAR(190) NOT NULL,
+                feature_name VARCHAR(150) NOT NULL,
+                menu_path VARCHAR(300) NOT NULL DEFAULT '',
+                feature_type VARCHAR(30) NOT NULL DEFAULT 'ACTION',
+                business_importance VARCHAR(20) NOT NULL DEFAULT 'NORMAL',
+                target_user_count INT UNSIGNED NOT NULL DEFAULT 0,
+                department_limited TINYINT(1) NOT NULL DEFAULT 0,
+                seasonal_or_irregular TINYINT(1) NOT NULL DEFAULT 0,
+                alternative_feature_key VARCHAR(190) NULL,
+                is_active TINYINT(1) NOT NULL DEFAULT 1,
+                created_by INT UNSIGNED NULL,
+                created_at DATETIME NOT NULL,
+                updated_by INT UNSIGNED NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE KEY uk_usage_feature_key (feature_key),
+                KEY idx_usage_feature_importance (business_importance,is_active)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", array());
+            self::execute($pdo, "CREATE TABLE IF NOT EXISTS " . self::REVIEW_TABLE . " (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                feature_key VARCHAR(190) NOT NULL,
+                review_classification VARCHAR(30) NOT NULL DEFAULT 'INSUFFICIENT_DATA',
+                last_used_at DATETIME NULL,
+                recent_usage_count INT UNSIGNED NOT NULL DEFAULT 0,
+                unique_user_count INT UNSIGNED NOT NULL DEFAULT 0,
+                target_user_count INT UNSIGNED NOT NULL DEFAULT 0,
+                completion_rate DECIMAL(8,3) NULL,
+                error_rate DECIMAL(8,3) NULL,
+                exit_without_save_count INT UNSIGNED NOT NULL DEFAULT 0,
+                exit_rate DECIMAL(8,3) NULL,
+                pc_completion_rate DECIMAL(8,3) NULL,
+                mobile_completion_rate DECIMAL(8,3) NULL,
+                department_completion_data MEDIUMTEXT NULL,
+                role_completion_data MEDIUMTEXT NULL,
+                funnel_data MEDIUMTEXT NULL,
+                evidence_text VARCHAR(1000) NOT NULL DEFAULT '',
+                recommendation VARCHAR(500) NOT NULL DEFAULT '',
+                analysis_period_start DATE NULL,
+                analysis_period_end DATE NULL,
+                analyzed_at DATETIME NULL,
+                review_status VARCHAR(30) NOT NULL DEFAULT 'NEW',
+                owner_employee_id INT UNSIGNED NULL,
+                review_comment VARCHAR(1000) NULL,
+                human_updated_by INT UNSIGNED NULL,
+                human_updated_at DATETIME NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE KEY uk_usage_review_feature (feature_key),
+                KEY idx_usage_review_classification (review_classification,review_status)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", array());
+            self::execute($pdo, "CREATE TABLE IF NOT EXISTS " . self::REVIEW_HISTORY_TABLE . " (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                entity_type VARCHAR(30) NOT NULL,
+                feature_key VARCHAR(190) NOT NULL,
+                action_type VARCHAR(30) NOT NULL,
+                old_data MEDIUMTEXT NULL,
+                new_data MEDIUMTEXT NULL,
+                reason VARCHAR(500) NULL,
+                actor_employee_id INT UNSIGNED NULL,
+                actor_name VARCHAR(100) NULL,
+                changed_at DATETIME NOT NULL,
+                KEY idx_usage_review_history (feature_key,changed_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4", array());
+
+            $reviewColumns=array('exit_without_save_count'=>'INT UNSIGNED NOT NULL DEFAULT 0','exit_rate'=>'DECIMAL(8,3) NULL','department_completion_data'=>'MEDIUMTEXT NULL','role_completion_data'=>'MEDIUMTEXT NULL','funnel_data'=>'MEDIUMTEXT NULL');
+            foreach($reviewColumns as $reviewColumn=>$reviewDefinition){if(!self::columnExists($pdo,self::REVIEW_TABLE,$reviewColumn)){self::execute($pdo,'ALTER TABLE '.self::REVIEW_TABLE.' ADD COLUMN '.$reviewColumn.' '.$reviewDefinition,array());$result['details'][]=self::REVIEW_TABLE.'.'.$reviewColumn.' 컬럼 추가';}}
+
             $indexes = array(
                 array(self::SESSION_TABLE, 'idx_usage_sessions_started_at', 'started_at'),
                 array(self::SESSION_TABLE, 'idx_usage_sessions_last_activity', 'last_activity_at'),
@@ -237,6 +317,9 @@ class UsageAnalyticsService
                 array(self::EVENT_TABLE, 'idx_usage_events_tab', 'tab_key'),
                 array(self::EVENT_TABLE, 'idx_usage_events_session', 'session_id'),
                 array(self::EVENT_TABLE, 'idx_usage_events_time_menu', 'event_at, menu_key'),
+                array(self::EVENT_TABLE, 'idx_usage_events_feature_time', 'feature_key(150), event_at'),
+                array(self::EVENT_TABLE, 'idx_usage_events_workflow', 'workflow_id, workflow_step'),
+                array(self::EVENT_TABLE, 'idx_usage_events_funnel', 'feature_key(100), event_type(20), device_type(10), event_at'),
             );
             foreach ($indexes as $indexSpec) {
                 if (!self::indexExists($pdo, $indexSpec[0], $indexSpec[1])) {
@@ -340,7 +423,7 @@ class UsageAnalyticsService
         $route = strtolower(trim((string)$route));
         $exact = array(
             'ping', 'login', 'logout', 'portal_entry',
-            'usage_analytics/setup', 'usage_analytics/export', 'usage_analytics/cleanup',
+            'usage_analytics/setup', 'usage_analytics/export', 'usage_analytics/cleanup', 'usage_analytics/event',
             'public_affairs_collab_debug', 'public_affairs_collab_repair', 'public_affairs_collab_trace',
         );
         if (in_array($route, $exact, true)) return true;
@@ -466,13 +549,50 @@ class UsageAnalyticsService
 
     private static function insertEvent($pdo, $values)
     {
+        $defaults = array(
+            ':feature_key' => '', ':workflow_id' => '', ':workflow_step' => '',
+            ':device_type' => self::deviceType(), ':result_code' => '',
+            ':user_role' => method_exists('App\\Core\\Auth','userRole') ? (string)Auth::userRole() : ''
+        );
+        foreach ($defaults as $key => $value) {
+            if (!array_key_exists($key, $values)) $values[$key] = $value;
+        }
         $sql = "INSERT INTO " . self::EVENT_TABLE . "
-                (session_id, employee_id, email, employee_name, department, position,
-                 event_type, menu_key, menu_name, route_name, tab_key, tab_name, action_name, event_at)
+                (session_id, employee_id, email, employee_name, department, position, user_role,
+                 event_type, menu_key, menu_name, route_name, tab_key, tab_name, action_name,
+                 feature_key, workflow_id, workflow_step, device_type, result_code, event_at)
                 VALUES
-                (:session_id, :employee_id, :email, :employee_name, :department, :position,
-                 :event_type, :menu_key, :menu_name, :route_name, :tab_key, :tab_name, :action_name, :event_at)";
+                (:session_id, :employee_id, :email, :employee_name, :department, :position, :user_role,
+                 :event_type, :menu_key, :menu_name, :route_name, :tab_key, :tab_name, :action_name,
+                 :feature_key, :workflow_id, :workflow_step, :device_type, :result_code, :event_at)";
         self::execute($pdo, $sql, $values);
+    }
+
+    private static function deviceType()
+    {
+        $agent = isset($_SERVER['HTTP_USER_AGENT']) ? strtolower((string)$_SERVER['HTTP_USER_AGENT']) : '';
+        return preg_match('/mobile|android|iphone|ipad|ipod/', $agent) ? 'MOBILE' : 'PC';
+    }
+
+    private static function featureKey($menuKey, $tabKey, $route, $actionName)
+    {
+        $parts = array(trim((string)$menuKey), trim((string)$tabKey));
+        if (trim((string)$actionName) !== '') $parts[] = trim((string)$route);
+        $key = strtolower(implode(':', $parts));
+        $key = preg_replace('/[^a-z0-9_:\/\-]/', '_', $key);
+        return substr($key, 0, 190);
+    }
+
+    public static function workflowFeatureKey($route,$actionName='submit')
+    {
+        $key=strtolower(trim((string)$route).':'.trim((string)$actionName));$key=preg_replace('/[^a-z0-9_:\/\-]/','_',$key);return substr($key,0,190);
+    }
+
+    private static function registerFeature($pdo,$featureKey,$featureName,$menuPath,$featureType)
+    {
+        if(!$pdo||!self::tableExists($pdo,self::FEATURE_TABLE)||trim((string)$featureKey)==='')return false;$now=date('Y-m-d H:i:s');
+        $feature=$pdo->prepare('INSERT INTO `'.self::FEATURE_TABLE.'` (feature_key,feature_name,menu_path,feature_type,business_importance,created_at,updated_at) VALUES (:key,:name,:path,:type,\'NORMAL\',:created,:updated) ON DUPLICATE KEY UPDATE feature_name=IF(feature_name=\'\',VALUES(feature_name),feature_name),menu_path=IF(menu_path=\'\',VALUES(menu_path),menu_path),updated_at=VALUES(updated_at)');
+        return $feature&&$feature->execute(array(':key'=>$featureKey,':name'=>self::limitText($featureName,150),':path'=>self::limitText($menuPath,300),':type'=>$featureType,':created'=>$now,':updated'=>$now));
     }
 
     private static function excludedEmployeeNames()
@@ -599,10 +719,11 @@ class UsageAnalyticsService
                                      request_count = request_count + :request_count
                                  WHERE id = :id";
                     $touchStatement = $pdo->prepare($touchSql);
+                    if (!$touchStatement) throw new \Exception('usage session prepare failed');
                     $touchStatement->bindValue(':last_activity_at', $nowText);
                     $touchStatement->bindValue(':request_count', $pendingRequests, PDO::PARAM_INT);
                     $touchStatement->bindValue(':id', $stateSessionId, PDO::PARAM_INT);
-                    $touchStatement->execute();
+                    if (!$touchStatement->execute()) throw new \Exception('usage session update failed');
                     $state['last_db_touch_at'] = $nowTimestamp;
                     $state['pending_requests'] = 0;
                 }
@@ -632,14 +753,22 @@ class UsageAnalyticsService
             if (!is_array($menu)) return;
             $tab = self::resolveTab($menu['key'], $route, $get);
             $actionName = self::actionName($route, $requestMethod);
-            $eventType = $actionName !== '' ? 'action' : 'menu_view';
+            $eventType = $actionName !== '' ? 'ACTION_START' : 'PAGE_VIEW';
+            if ($actionName === '다운로드' || $actionName === '내보내기') $eventType = 'DOWNLOAD';
+            else if ($actionName === '취소') $eventType = 'CANCEL';
+            else if (strtoupper((string)$requestMethod) === 'GET' && is_array($get) && (isset($get['tab']) || isset($get['view']))) $eventType = 'TAB_VIEW';
+            if (strtoupper((string)$requestMethod) === 'POST' && preg_match('/save|store|create|update|delete|decide|approve|reject|upload|import/i', (string)$route)) {
+                $eventType = strpos(strtolower((string)$route), 'upload') !== false || strpos(strtolower((string)$route), 'import') !== false ? 'UPLOAD_ATTEMPT' : 'SAVE_ATTEMPT';
+            }
+            $featureKey = self::featureKey($menu['key'], $tab['key'], $route, $actionName);
+            if($eventType==='SAVE_ATTEMPT'||$eventType==='UPLOAD_ATTEMPT')$featureKey=self::workflowFeatureKey($route,'submit');
 
-            if ($eventType === 'menu_view') {
+            if ($eventType === 'PAGE_VIEW') {
                 $duplicateCutoff = clone $now;
                 $duplicateCutoff->modify('-' . self::DUPLICATE_VIEW_SECONDS . ' seconds');
                 $duplicateSql = "SELECT id FROM " . self::EVENT_TABLE . "
                                  WHERE LOWER(email) = :email
-                                   AND event_type = 'menu_view'
+                                   AND event_type IN ('menu_view','PAGE_VIEW')
                                    AND menu_key = :menu_key
                                    AND tab_key = :tab_key
                                    AND event_at >= :event_at
@@ -667,11 +796,45 @@ class UsageAnalyticsService
                 ':tab_key' => $tab['key'],
                 ':tab_name' => $tab['name'],
                 ':action_name' => $actionName,
+                ':feature_key' => $featureKey,
+                ':workflow_step' => $eventType,
                 ':event_at' => $nowText,
             ));
+            self::registerFeature($pdo,$featureKey,$actionName!==''?$actionName:$menu['name'],trim($menu['name'].($tab['name']!==''?' > '.$tab['name']:'').($actionName!==''?' > '.$actionName:'')),$actionName!==''?'ACTION':'SCREEN');
+            if (($eventType === 'SAVE_ATTEMPT' || $eventType === 'UPLOAD_ATTEMPT') && count(self::$shutdownOutcome) === 0) {
+                self::$shutdownOutcome = array(
+                    'pdo'=>$pdo, 'attempt_type'=>$eventType, 'feature_key'=>$featureKey,
+                    'route_name'=>substr((string)$route,0,190), 'menu_key'=>$menu['key'], 'menu_name'=>$menu['name'],
+                    'tab_key'=>$tab['key'], 'tab_name'=>$tab['name'], 'action_name'=>$actionName
+                );
+                register_shutdown_function(array(__CLASS__, 'recordShutdownOutcome'));
+            }
         } catch (\Exception $e) {
             self::logError('record request', $e);
         }
+    }
+
+    public static function recordShutdownOutcome()
+    {
+        if (count(self::$shutdownOutcome) === 0) return;
+        $context = self::$shutdownOutcome;
+        self::$shutdownOutcome = array();
+        $lastError = error_get_last();
+        $fatalTypes = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR);
+        $fatal = is_array($lastError) && isset($lastError['type']) && in_array((int)$lastError['type'], $fatalTypes, true);
+        $statusCode = http_response_code();
+        if (!is_int($statusCode) || $statusCode <= 0) $statusCode = 200;
+        $flashType = isset($_SESSION['_flash']['type']) ? strtolower(trim((string)$_SESSION['_flash']['type'])) : '';
+        $failed = $fatal || $statusCode >= 400 || in_array($flashType, array('danger','error','failed','failure'), true);
+        $upload = isset($context['attempt_type']) && $context['attempt_type'] === 'UPLOAD_ATTEMPT';
+        $eventType = $failed ? ($upload ? 'UPLOAD_FAILURE' : 'SAVE_FAILURE') : ($upload ? 'UPLOAD_SUCCESS' : 'SAVE_SUCCESS');
+        $resultCode = $fatal ? 'FATAL_ERROR' : ($flashType !== '' ? strtoupper($flashType) : 'HTTP_' . $statusCode);
+        self::recordWorkflowEvent(isset($context['pdo']) ? $context['pdo'] : null, $eventType, isset($context['feature_key']) ? $context['feature_key'] : '', array(
+            'route_name'=>isset($context['route_name'])?$context['route_name']:'',
+            'menu_key'=>isset($context['menu_key'])?$context['menu_key']:'', 'menu_name'=>isset($context['menu_name'])?$context['menu_name']:'',
+            'tab_key'=>isset($context['tab_key'])?$context['tab_key']:'', 'tab_name'=>isset($context['tab_name'])?$context['tab_name']:'',
+            'action_name'=>isset($context['action_name'])?$context['action_name']:'', 'result_code'=>$resultCode
+        ));
     }
 
     private static function limitText($value, $length)
@@ -1460,6 +1623,173 @@ class UsageAnalyticsService
                 ORDER BY event_at DESC, id DESC
                 LIMIT 10000";
         return self::fetchAll($pdo, $sql, $params);
+    }
+
+    private static function workflowEventTypes()
+    {
+        return array('PAGE_VIEW','TAB_VIEW','ACTION_START','FORM_INPUT','SAVE_ATTEMPT','SAVE_SUCCESS','SAVE_FAILURE','CANCEL','EXIT_WITHOUT_SAVE','DOWNLOAD','UPLOAD_ATTEMPT','UPLOAD_SUCCESS','UPLOAD_FAILURE');
+    }
+
+    /**
+     * Records workflow state only. Field values and document contents are never accepted or stored.
+     */
+    public static function recordWorkflowEvent($pdo, $eventType, $featureKey, $meta = array())
+    {
+        $pdo = $pdo ? $pdo : Db::pdo();
+        $eventType = strtoupper(trim((string)$eventType));
+        $featureKey = strtolower(trim((string)$featureKey));
+        $featureKey = preg_replace('/[^a-z0-9_:\/\-]/', '_', $featureKey);
+        $featureKey = substr($featureKey, 0, 190);
+        if (!$pdo || !self::isInstalled($pdo) || !Auth::check() || !in_array($eventType, self::workflowEventTypes(), true) || $featureKey === '') return false;
+        if (!is_array($meta)) $meta = array();
+        try {
+            $user = Auth::user();
+            if (!is_array($user)) return false;
+            $employeeName = isset($user['name']) ? trim((string)$user['name']) : '';
+            if (self::isExcludedEmployeeName($employeeName)) return false;
+            $state = isset($_SESSION['_cpms_usage_analytics']) && is_array($_SESSION['_cpms_usage_analytics']) ? $_SESSION['_cpms_usage_analytics'] : array();
+            $sessionId = isset($state['usage_session_id']) ? (int)$state['usage_session_id'] : 0;
+            $workflowId = isset($meta['workflow_id']) ? preg_replace('/[^A-Za-z0-9_\-]/', '', (string)$meta['workflow_id']) : '';
+            $workflowId = substr($workflowId, 0, 64);
+            $menuKey = isset($meta['menu_key']) ? self::limitText($meta['menu_key'], 80) : '';
+            $menuName = isset($meta['menu_name']) ? self::limitText($meta['menu_name'], 100) : '';
+            $route = isset($meta['route_name']) ? self::limitText($meta['route_name'], 190) : '';
+            $tabKey = isset($meta['tab_key']) ? self::limitText($meta['tab_key'], 100) : '';
+            $tabName = isset($meta['tab_name']) ? self::limitText($meta['tab_name'], 120) : '';
+            $action = isset($meta['action_name']) ? self::limitText($meta['action_name'], 80) : '';
+            $resultCode = isset($meta['result_code']) ? strtoupper(preg_replace('/[^A-Za-z0-9_\-]/', '', (string)$meta['result_code'])) : '';
+            $resultCode = substr($resultCode, 0, 40);
+            self::insertEvent($pdo, array(
+                ':session_id'=>$sessionId,
+                ':employee_id'=>isset($user['id'])?(int)$user['id']:0,
+                ':email'=>isset($user['email'])?strtolower(trim((string)$user['email'])):'',
+                ':employee_name'=>$employeeName,
+                ':department'=>isset($user['department'])?trim((string)$user['department']):'',
+                ':position'=>isset($user['position'])?trim((string)$user['position']):'',
+                ':event_type'=>$eventType,
+                ':menu_key'=>$menuKey,
+                ':menu_name'=>$menuName,
+                ':route_name'=>$route,
+                ':tab_key'=>$tabKey,
+                ':tab_name'=>$tabName,
+                ':action_name'=>$action,
+                ':feature_key'=>$featureKey,
+                ':workflow_id'=>$workflowId,
+                ':workflow_step'=>$eventType,
+                ':device_type'=>self::deviceType(),
+                ':result_code'=>$resultCode,
+                ':event_at'=>date('Y-m-d H:i:s')
+            ));
+            $featureName = isset($meta['feature_name']) ? self::limitText($meta['feature_name'],150) : ($action !== '' ? $action : $featureKey);
+            $path = trim($menuName . ($tabName !== '' ? ' > ' . $tabName : '') . ($action !== '' ? ' > ' . $action : ''));
+            $type = in_array($eventType,array('PAGE_VIEW','TAB_VIEW'),true)?'SCREEN':'ACTION';
+            self::registerFeature($pdo,$featureKey,$featureName,$path,$type);
+            return true;
+        } catch (\Exception $e) {
+            self::logError('record workflow event', $e);
+            return false;
+        }
+    }
+
+    private static function auditReviewChange($pdo,$entityType,$featureKey,$action,$old,$new,$reason)
+    {
+        $user=Auth::user();$actorId=is_array($user)&&isset($user['id'])?(int)$user['id']:0;$actorName=is_array($user)&&isset($user['name'])?(string)$user['name']:'';
+        $st=$pdo->prepare('INSERT INTO `'.self::REVIEW_HISTORY_TABLE.'` (entity_type,feature_key,action_type,old_data,new_data,reason,actor_employee_id,actor_name,changed_at) VALUES (:entity,:feature,:action,:old_data,:new_data,:reason,:actor,:actor_name,:changed)');
+        if(!$st)return false;$oldJson=json_encode($old,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);$newJson=json_encode($new,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        return $st->execute(array(':entity'=>$entityType,':feature'=>$featureKey,':action'=>$action,':old_data'=>is_string($oldJson)?$oldJson:null,':new_data'=>is_string($newJson)?$newJson:null,':reason'=>self::limitText($reason,500),':actor'=>$actorId>0?$actorId:null,':actor_name'=>$actorName,':changed'=>date('Y-m-d H:i:s')));
+    }
+
+    public static function saveFeatureImportance($pdo,$featureKey,$importance,$data=array())
+    {
+        $pdo=$pdo?$pdo:Db::pdo();$featureKey=strtolower(trim((string)$featureKey));$importance=strtoupper(trim((string)$importance));
+        if(!$pdo||!Auth::isDevelopmentDepartment()||!in_array($importance,array('REQUIRED','IMPORTANT','NORMAL','OPTIONAL'),true)||!preg_match('/^[a-z0-9_:\/\-]{1,190}$/',$featureKey))return array('ok'=>false,'message'=>'업무 중요도 저장 조건을 확인해주세요.');
+        try{
+            $old=array();$read=$pdo->prepare('SELECT * FROM `'.self::FEATURE_TABLE.'` WHERE feature_key=:key LIMIT 1');
+            if($read&&$read->execute(array(':key'=>$featureKey))){$row=$read->fetch(PDO::FETCH_ASSOC);if(is_array($row))$old=$row;}
+            $name=isset($data['feature_name'])?self::limitText($data['feature_name'],150):(isset($old['feature_name'])?$old['feature_name']:$featureKey);
+            $path=isset($data['menu_path'])?self::limitText($data['menu_path'],300):(isset($old['menu_path'])?$old['menu_path']:'');
+            $target=isset($data['target_user_count'])?max(0,(int)$data['target_user_count']):(isset($old['target_user_count'])?(int)$old['target_user_count']:0);
+            $department=!empty($data['department_limited'])?1:0;$seasonal=!empty($data['seasonal_or_irregular'])?1:0;
+            $alternative=isset($data['alternative_feature_key'])?strtolower(trim((string)$data['alternative_feature_key'])):(isset($old['alternative_feature_key'])?(string)$old['alternative_feature_key']:'');
+            if($alternative!==''&&!preg_match('/^[a-z0-9_:\/\-]{1,190}$/',$alternative))return array('ok'=>false,'message'=>'대체 기능 키 형식을 확인해주세요.');
+            $u=Auth::user();$actor=is_array($u)&&isset($u['id'])?(int)$u['id']:0;$now=date('Y-m-d H:i:s');
+            $sql='INSERT INTO `'.self::FEATURE_TABLE.'` (feature_key,feature_name,menu_path,feature_type,business_importance,target_user_count,department_limited,seasonal_or_irregular,alternative_feature_key,is_active,created_by,created_at,updated_by,updated_at) VALUES (:key,:name,:path,\'ACTION\',:importance,:target,:department,:seasonal,:alternative,1,:actor,:created,:updated_by,:updated) ON DUPLICATE KEY UPDATE feature_name=VALUES(feature_name),menu_path=VALUES(menu_path),business_importance=VALUES(business_importance),target_user_count=VALUES(target_user_count),department_limited=VALUES(department_limited),seasonal_or_irregular=VALUES(seasonal_or_irregular),alternative_feature_key=VALUES(alternative_feature_key),updated_by=VALUES(updated_by),updated_at=VALUES(updated_at)';
+            $st=$pdo->prepare($sql);if(!$st||!$st->execute(array(':key'=>$featureKey,':name'=>$name,':path'=>$path,':importance'=>$importance,':target'=>$target,':department'=>$department,':seasonal'=>$seasonal,':alternative'=>$alternative!==''?$alternative:null,':actor'=>$actor>0?$actor:null,':created'=>$now,':updated_by'=>$actor>0?$actor:null,':updated'=>$now)))return array('ok'=>false,'message'=>'업무 중요도를 저장하지 못했습니다.');
+            self::auditReviewChange($pdo,'FEATURE',$featureKey,'UPDATE_IMPORTANCE',$old,array('importance'=>$importance,'target_user_count'=>$target,'department_limited'=>$department,'seasonal_or_irregular'=>$seasonal,'alternative_feature_key'=>$alternative),'개발부서 설정');
+            return array('ok'=>true,'message'=>'업무 중요도를 저장했습니다.');
+        }catch(\Exception $e){self::logError('save feature importance',$e);return array('ok'=>false,'message'=>'업무 중요도 저장 중 오류가 발생했습니다.');}
+    }
+
+    private static function groupCompletionData($pdo,$featureKey,$startAt,$endAt,$column)
+    {
+        if(!in_array($column,array('department','user_role'),true))return array();
+        $rows=array();
+        try{
+            $sql='SELECT `'.$column.'` AS group_name,SUM(CASE WHEN event_type IN (\'SAVE_ATTEMPT\',\'UPLOAD_ATTEMPT\') THEN 1 ELSE 0 END) AS attempts,SUM(CASE WHEN event_type IN (\'SAVE_SUCCESS\',\'UPLOAD_SUCCESS\') THEN 1 ELSE 0 END) AS successes FROM `'.self::EVENT_TABLE.'` WHERE feature_key=:key AND event_at>=:start AND event_at<:end GROUP BY `'.$column.'` ORDER BY attempts DESC LIMIT 100';
+            $st=$pdo->prepare($sql);if(!$st||!$st->execute(array(':key'=>$featureKey,':start'=>$startAt,':end'=>$endAt)))return $rows;
+            foreach($st->fetchAll(PDO::FETCH_ASSOC) as $row){$attempts=(int)$row['attempts'];$rows[]=array('group'=>trim((string)$row['group_name'])!==''?(string)$row['group_name']:'미지정','attempts'=>$attempts,'successes'=>(int)$row['successes'],'completion_rate'=>$attempts>0?round((int)$row['successes']/$attempts*100,3):null);}
+        }catch(\Exception $e){return array();}
+        return $rows;
+    }
+
+    private static function funnelStepData($pdo,$featureKey,$startAt,$endAt,$attempts,$successes,$failures,$exits)
+    {
+        $counts=array('PROJECT_SELECT'=>0,'COST_TYPE_SELECT'=>0,'AMOUNT_INPUT'=>0,'FORM_INPUT'=>0,'SAVE_ATTEMPT'=>(int)$attempts,'SAVE_SUCCESS'=>(int)$successes,'SAVE_FAILURE'=>(int)$failures,'EXIT_WITHOUT_SAVE'=>(int)$exits);
+        try{
+            $st=$pdo->prepare('SELECT result_code,COUNT(*) AS step_count FROM `'.self::EVENT_TABLE.'` WHERE feature_key=:key AND event_type=\'FORM_INPUT\' AND event_at>=:start AND event_at<:end GROUP BY result_code');
+            if($st&&$st->execute(array(':key'=>$featureKey,':start'=>$startAt,':end'=>$endAt))){foreach($st->fetchAll(PDO::FETCH_ASSOC) as $row){$step=strtoupper(trim((string)$row['result_code']));if(isset($counts[$step]))$counts[$step]=(int)$row['step_count'];}}
+        }catch(\Exception $e){}
+        $base=max(1,$counts['PROJECT_SELECT'],$counts['COST_TYPE_SELECT'],$counts['AMOUNT_INPUT'],$counts['FORM_INPUT'],$counts['SAVE_ATTEMPT']);$result=array();
+        foreach($counts as $step=>$count)$result[]=array('step'=>$step,'count'=>(int)$count,'reach_rate'=>round((int)$count/$base*100,3));
+        return $result;
+    }
+
+    public static function classifyReviewTarget($importance,$usage,$attempts,$completion,$error,$pc,$mobile,$exitRate,$context=array())
+    {
+        $importance=strtoupper(trim((string)$importance));$usage=(int)$usage;$attempts=(int)$attempts;$context=is_array($context)?$context:array();
+        if($importance==='REQUIRED')return array('classification'=>'KEEP_REQUIRED','evidence'=>'업무상 필수로 지정된 기능입니다.','recommendation'=>'사용빈도와 무관하게 유지하고 접근성과 교육 필요성을 확인하세요.');
+        if(!empty($context['alternative_feature_key']))return array('classification'=>'MERGE_REVIEW','evidence'=>'관리자가 대체 가능 기능을 등록했습니다.','recommendation'=>'기능 차이와 자료 이전 영향을 사람이 확인한 뒤 통합 여부를 결정하세요.');
+        if($usage<5&&$importance==='OPTIONAL'&&empty($context['seasonal_or_irregular']))return array('classification'=>'HIDE_REVIEW','evidence'=>'선택 기능이며 분석기간 사용기록이 매우 적습니다.','recommendation'=>'대상 사용자와 대체 기능을 확인한 뒤 숨김 여부를 사람이 결정하세요.');
+        if($usage<5&&!empty($context['seasonal_or_irregular']))return array('classification'=>'LIMITED_USE','evidence'=>'비정기·계절 업무로 지정되어 단기 사용량만으로 판단할 수 없습니다.','recommendation'=>'실제 업무 발생기간을 포함해 다시 검토하세요.');
+        if($usage<5)return array('classification'=>'INSUFFICIENT_DATA','evidence'=>'분석기간의 사용기록이 충분하지 않습니다.','recommendation'=>'수집기간을 늘린 뒤 다시 검토하세요.');
+        if($attempts>0&&$error!==null&&(float)$error>=20)return array('classification'=>'USABILITY_REVIEW','evidence'=>'저장 시도 대비 실패율이 높습니다.','recommendation'=>'입력검증과 서버 오류를 점검하세요.');
+        if($exitRate!==null&&(float)$exitRate>=30)return array('classification'=>'USABILITY_REVIEW','evidence'=>'입력 시작 후 저장하지 않고 이탈한 비율이 높습니다.','recommendation'=>'입력단계와 중간 이탈 원인을 점검하세요.');
+        if($mobile!==null&&$pc!==null&&(float)$pc-(float)$mobile>=20)return array('classification'=>'USABILITY_REVIEW','evidence'=>'모바일 완료율이 PC보다 낮습니다.','recommendation'=>'모바일 입력 흐름을 점검하세요.');
+        if($attempts>0&&$completion!==null&&(float)$completion<50)return array('classification'=>'TRAINING_CANDIDATE','evidence'=>'저장 시도 대비 완료율이 낮지만 높은 오류율 근거는 확인되지 않았습니다.','recommendation'=>'대상 사용자의 사용방법과 업무 절차를 확인하세요.');
+        if($attempts===0||($usage>0&&$attempts/$usage<0.2))return array('classification'=>'LOCATION_REVIEW','evidence'=>'화면 또는 기능 이벤트에 비해 저장 시도 도달이 적습니다.','recommendation'=>'메뉴 위치와 기능 발견 가능성을 확인하세요.');
+        if($usage<20)return array('classification'=>'LIMITED_USE','evidence'=>'사용기록은 있으나 제한적입니다.','recommendation'=>'대상 사용자와 비정기 기능 여부를 확인하세요.');
+        return array('classification'=>'NORMAL_USE','evidence'=>'분석기간에 정상적인 사용흐름이 확인됩니다.','recommendation'=>'현재 상태를 유지하며 추이를 확인하세요.');
+    }
+
+    public static function refreshReviewTargets($pdo,$days=30)
+    {
+        $pdo=$pdo?$pdo:Db::pdo();$days=max(7,min(365,(int)$days));$out=array('ok'=>false,'updated'=>0,'message'=>'검토대상을 집계하지 못했습니다.');
+        if(!$pdo||!self::isInstalled($pdo)||!self::tableExists($pdo,self::FEATURE_TABLE))return $out;
+        $end=date('Y-m-d');$start=date('Y-m-d',strtotime($end.' -'.($days-1).' days'));$startAt=$start.' 00:00:00';$endAt=date('Y-m-d',strtotime($end.' +1 day')).' 00:00:00';
+        try{
+            $features=$pdo->query('SELECT * FROM `'.self::FEATURE_TABLE.'` WHERE is_active=1 ORDER BY feature_key');if(!$features)return $out;
+            foreach($features->fetchAll(PDO::FETCH_ASSOC) as $feature){
+                $key=(string)$feature['feature_key'];
+                $sql='SELECT COUNT(*) AS usage_count,COUNT(DISTINCT NULLIF(email,\'\')) AS user_count,MAX(event_at) AS last_used,SUM(CASE WHEN event_type IN (\'SAVE_ATTEMPT\',\'UPLOAD_ATTEMPT\') THEN 1 ELSE 0 END) AS attempts,SUM(CASE WHEN event_type IN (\'SAVE_SUCCESS\',\'UPLOAD_SUCCESS\') THEN 1 ELSE 0 END) AS successes,SUM(CASE WHEN event_type IN (\'SAVE_FAILURE\',\'UPLOAD_FAILURE\') THEN 1 ELSE 0 END) AS failures,SUM(CASE WHEN event_type=\'EXIT_WITHOUT_SAVE\' THEN 1 ELSE 0 END) AS exits,SUM(CASE WHEN device_type=\'PC\' AND event_type IN (\'SAVE_ATTEMPT\',\'UPLOAD_ATTEMPT\') THEN 1 ELSE 0 END) AS pc_attempts,SUM(CASE WHEN device_type=\'PC\' AND event_type IN (\'SAVE_SUCCESS\',\'UPLOAD_SUCCESS\') THEN 1 ELSE 0 END) AS pc_successes,SUM(CASE WHEN device_type=\'MOBILE\' AND event_type IN (\'SAVE_ATTEMPT\',\'UPLOAD_ATTEMPT\') THEN 1 ELSE 0 END) AS mobile_attempts,SUM(CASE WHEN device_type=\'MOBILE\' AND event_type IN (\'SAVE_SUCCESS\',\'UPLOAD_SUCCESS\') THEN 1 ELSE 0 END) AS mobile_successes FROM `'.self::EVENT_TABLE.'` WHERE feature_key=:key AND event_at>=:start AND event_at<:end';
+                $st=$pdo->prepare($sql);if(!$st||!$st->execute(array(':key'=>$key,':start'=>$startAt,':end'=>$endAt)))continue;$m=$st->fetch(PDO::FETCH_ASSOC);if(!is_array($m))continue;
+                $usage=(int)$m['usage_count'];$users=(int)$m['user_count'];$attempts=(int)$m['attempts'];$successes=(int)$m['successes'];$failures=(int)$m['failures'];$exits=(int)$m['exits'];
+                $completion=$attempts>0?round($successes/$attempts*100,3):null;$error=$attempts>0?round($failures/$attempts*100,3):null;$exitBase=$attempts+$exits;$exitRate=$exitBase>0?round($exits/$exitBase*100,3):null;$pc=(int)$m['pc_attempts']>0?round((int)$m['pc_successes']/(int)$m['pc_attempts']*100,3):null;$mobile=(int)$m['mobile_attempts']>0?round((int)$m['mobile_successes']/(int)$m['mobile_attempts']*100,3):null;
+                $decision=self::classifyReviewTarget($feature['business_importance'],$usage,$attempts,$completion,$error,$pc,$mobile,$exitRate,$feature);$departmentData=self::groupCompletionData($pdo,$key,$startAt,$endAt,'department');$roleData=self::groupCompletionData($pdo,$key,$startAt,$endAt,'user_role');$funnelData=self::funnelStepData($pdo,$key,$startAt,$endAt,$attempts,$successes,$failures,$exits);$departmentJson=json_encode($departmentData,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);$roleJson=json_encode($roleData,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);$funnelJson=json_encode($funnelData,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);$now=date('Y-m-d H:i:s');
+                $saveSql='INSERT INTO `'.self::REVIEW_TABLE.'` (feature_key,review_classification,last_used_at,recent_usage_count,unique_user_count,target_user_count,completion_rate,error_rate,exit_without_save_count,exit_rate,pc_completion_rate,mobile_completion_rate,department_completion_data,role_completion_data,funnel_data,evidence_text,recommendation,analysis_period_start,analysis_period_end,analyzed_at,review_status,created_at,updated_at) VALUES (:key,:classification,:last_used,:usage,:users,:target,:completion,:error,:exits,:exit_rate,:pc,:mobile,:departments,:roles,:funnel,:evidence,:recommendation,:start,:end,:analyzed,\'NEW\',:created,:updated) ON DUPLICATE KEY UPDATE review_classification=VALUES(review_classification),last_used_at=VALUES(last_used_at),recent_usage_count=VALUES(recent_usage_count),unique_user_count=VALUES(unique_user_count),target_user_count=VALUES(target_user_count),completion_rate=VALUES(completion_rate),error_rate=VALUES(error_rate),exit_without_save_count=VALUES(exit_without_save_count),exit_rate=VALUES(exit_rate),pc_completion_rate=VALUES(pc_completion_rate),mobile_completion_rate=VALUES(mobile_completion_rate),department_completion_data=VALUES(department_completion_data),role_completion_data=VALUES(role_completion_data),funnel_data=VALUES(funnel_data),evidence_text=VALUES(evidence_text),recommendation=VALUES(recommendation),analysis_period_start=VALUES(analysis_period_start),analysis_period_end=VALUES(analysis_period_end),analyzed_at=VALUES(analyzed_at),updated_at=VALUES(updated_at)';
+                $save=$pdo->prepare($saveSql);if($save&&$save->execute(array(':key'=>$key,':classification'=>$decision['classification'],':last_used'=>$m['last_used'],':usage'=>$usage,':users'=>$users,':target'=>(int)$feature['target_user_count'],':completion'=>$completion,':error'=>$error,':exits'=>$exits,':exit_rate'=>$exitRate,':pc'=>$pc,':mobile'=>$mobile,':departments'=>is_string($departmentJson)?$departmentJson:null,':roles'=>is_string($roleJson)?$roleJson:null,':funnel'=>is_string($funnelJson)?$funnelJson:null,':evidence'=>$decision['evidence'],':recommendation'=>$decision['recommendation'],':start'=>$start,':end'=>$end,':analyzed'=>$now,':created'=>$now,':updated'=>$now)))$out['updated']++;
+            }
+            $out['ok']=true;$out['message']='검토대상 집계를 완료했습니다. 사람의 검토상태와 의견은 유지했습니다.';return $out;
+        }catch(\Exception $e){self::logError('refresh review targets',$e);return $out;}
+    }
+
+    public static function saveReviewDecision($pdo,$featureKey,$status,$ownerId,$comment)
+    {
+        $pdo=$pdo?$pdo:Db::pdo();$allowed=array('NEW','CHECKING','KEEP','TRAINING','RELOCATE','IMPROVE','MERGE_PLANNED','HIDE_PLANNED','EXCLUDED','COMPLETED');$status=strtoupper(trim((string)$status));if(!$pdo||!Auth::isDevelopmentDepartment()||!in_array($status,$allowed,true))return array('ok'=>false,'message'=>'검토상태 저장 조건을 확인해주세요.');try{$read=$pdo->prepare('SELECT * FROM `'.self::REVIEW_TABLE.'` WHERE feature_key=:key LIMIT 1');if(!$read||!$read->execute(array(':key'=>$featureKey)))return array('ok'=>false,'message'=>'검토대상을 확인하지 못했습니다.');$old=$read->fetch(PDO::FETCH_ASSOC);if(!is_array($old))return array('ok'=>false,'message'=>'검토대상이 없습니다.');$u=Auth::user();$actor=is_array($u)&&isset($u['id'])?(int)$u['id']:0;$st=$pdo->prepare('UPDATE `'.self::REVIEW_TABLE.'` SET review_status=:status,owner_employee_id=:owner,review_comment=:comment,human_updated_by=:actor,human_updated_at=:human_at,updated_at=:updated WHERE feature_key=:key');if(!$st||!$st->execute(array(':status'=>$status,':owner'=>(int)$ownerId>0?(int)$ownerId:null,':comment'=>self::limitText($comment,1000),':actor'=>$actor>0?$actor:null,':human_at'=>date('Y-m-d H:i:s'),':updated'=>date('Y-m-d H:i:s'),':key'=>$featureKey)))return array('ok'=>false,'message'=>'검토상태를 저장하지 못했습니다.');self::auditReviewChange($pdo,'REVIEW',$featureKey,'HUMAN_DECISION',$old,array('review_status'=>$status,'owner_employee_id'=>(int)$ownerId,'review_comment'=>self::limitText($comment,1000)),'개발 담당자 검토');return array('ok'=>true,'message'=>'검토상태와 의견을 저장했습니다.');}catch(\Exception $e){return array('ok'=>false,'message'=>'검토상태 저장 중 오류가 발생했습니다.');}
+    }
+
+    public static function listReviewTargets($pdo)
+    {
+        $pdo=$pdo?$pdo:Db::pdo();if(!$pdo||!self::tableExists($pdo,self::REVIEW_TABLE))return array();try{$sql='SELECT r.*,f.feature_name,f.menu_path,f.feature_type,f.business_importance,f.department_limited,f.seasonal_or_irregular,f.alternative_feature_key FROM `'.self::REVIEW_TABLE.'` r LEFT JOIN `'.self::FEATURE_TABLE.'` f ON f.feature_key=r.feature_key ORDER BY CASE r.review_classification WHEN \'KEEP_REQUIRED\' THEN 1 WHEN \'USABILITY_REVIEW\' THEN 2 WHEN \'TRAINING_CANDIDATE\' THEN 3 WHEN \'LOCATION_REVIEW\' THEN 4 WHEN \'MERGE_REVIEW\' THEN 5 WHEN \'HIDE_REVIEW\' THEN 6 WHEN \'LIMITED_USE\' THEN 7 ELSE 8 END,r.recent_usage_count ASC,r.feature_key LIMIT 500';$st=$pdo->query($sql);if(!$st)return array();$rows=$st->fetchAll(PDO::FETCH_ASSOC);return is_array($rows)?$rows:array();}catch(\Exception $e){return array();}
     }
 
     public static function cleanupOldEvents($pdo, $days)

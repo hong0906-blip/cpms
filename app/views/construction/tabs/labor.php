@@ -435,7 +435,7 @@ foreach ($timesheetWorkers as $worker) {
                 </div>
                 <div>
                     <label class="text-xs font-bold text-amber-800">메모</label>
-                    <input type="text" name="memo" value="<?php echo h(isset($laborForceRow['memo']) ? $laborForceRow['memo'] : ''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-amber-200 bg-white" placeholder="예: 시프티 미등록 인원 노무비 보정">
+                    <input type="text" name="memo" value="<?php echo h(isset($laborForceRow['memo']) ? $laborForceRow['memo'] : ''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-amber-200 bg-white" placeholder="예: 시프티 미등록 인원 노무비 보정" required>
                 </div>
                 <button type="submit" class="px-4 py-2 rounded-xl bg-amber-600 text-white font-extrabold">저장</button>
             </div>

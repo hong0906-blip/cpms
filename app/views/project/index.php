@@ -1,5 +1,7 @@
 <?php
 use App\Core\Db;
+use App\Services\AiProjectTypeService;
+require_once __DIR__ . '/../../services/AiProjectTypeService.php';
 
 $pdo = null;
 try {
@@ -11,6 +13,7 @@ $dbOk = ($pdo !== null);
 
 $projects = array();
 $constructionEmployees = array();
+$projectTypes = array();
 $activeTab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : 'monthly_summary';
 $createdProjectId = isset($_GET['created_project_id']) ? (int)$_GET['created_project_id'] : 0;
 if ($activeTab === '') $activeTab = 'monthly_summary';
@@ -35,6 +38,7 @@ function cpms_project_index_status_condition($status) {
 }}
 
 if ($dbOk && $activeTab === 'project_manage') {
+    $projectTypes = AiProjectTypeService::listTypes($pdo, true);
     try {
         $statusCondition = cpms_project_index_status_condition($activeProjectStatus);
         $st = $pdo->prepare("
@@ -314,6 +318,14 @@ function cpms_project_index_is_collab_draft_project($project) {
             <div class="md:col-span-2">
               <div class="text-sm font-bold text-gray-700 mb-1">계약금액</div>
               <input name="contract_amount" class="w-full px-4 py-3 rounded-2xl border border-gray-200 outline-none">
+            </div>
+            <div class="md:col-span-2">
+              <div class="text-sm font-bold text-gray-700 mb-1">현장유형</div>
+              <select name="project_type_id" class="w-full px-4 py-3 rounded-2xl border border-gray-200 bg-white outline-none">
+                <option value="0">미지정</option>
+                <?php foreach ($projectTypes as $projectType): ?><option value="<?php echo (int)$projectType['id']; ?>"><?php echo h($projectType['type_name']); ?></option><?php endforeach; ?>
+              </select>
+              <div class="text-xs text-gray-500 mt-2">미지정 상태도 허용되며 자동으로 유형을 추정하지 않습니다.</div>
             </div>
             <div class="md:col-span-2">
               <div class="text-sm font-bold text-gray-700 mb-1">공사 담당자(메인) *</div>

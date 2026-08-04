@@ -10,6 +10,7 @@ $usageData = isset($usageData) && is_array($usageData) ? $usageData : array();
 $usageFilters = isset($usageFilters) && is_array($usageFilters) ? $usageFilters : array();
 $usageLoadError = isset($usageLoadError) ? (string)$usageLoadError : '';
 $usageDetail = isset($usageDetail) && is_array($usageDetail) ? $usageDetail : null;
+$usageReviewTargets = isset($usageReviewTargets) && is_array($usageReviewTargets) ? $usageReviewTargets : array();
 
 if (!function_exists('cpms_usage_view_datetime')) {
 function cpms_usage_view_datetime($value) {
@@ -216,6 +217,76 @@ $usageJsPath = dirname(dirname(dirname(__DIR__))) . '/public/assets/js/usage_ana
           <?php foreach ($usageData['department_stats'] as $row): ?><tr><td><strong><?php echo h($row['department']); ?></strong></td><td><?php echo number_format($row['employee_count']); ?></td><td><?php echo number_format($row['active_user_count']); ?></td><td><?php echo number_format($row['connection_count']); ?></td><td><?php echo number_format($row['activity_count']); ?></td></tr><?php endforeach; ?>
         </tbody></table></div>
       </section>
+
+      <?php if (\App\Core\Auth::isDevelopmentDepartment()): ?>
+      <?php
+        $usageReviewClassLabels = array(
+          'KEEP_REQUIRED' => '필수기능 유지',
+          'USABILITY_REVIEW' => '사용성 점검',
+          'TRAINING_CANDIDATE' => '교육 필요 가능성',
+          'LOCATION_REVIEW' => '위치 개선 검토',
+          'MERGE_REVIEW' => '통합 검토',
+          'HIDE_REVIEW' => '숨김 검토',
+          'LIMITED_USE' => '제한적 사용',
+          'NORMAL_USE' => '정상 사용',
+          'INSUFFICIENT_DATA' => '근거 부족'
+        );
+        $usageReviewStatusLabels = array('NEW'=>'신규 검토','CHECKING'=>'확인 중','KEEP'=>'유지 결정','TRAINING'=>'교육 진행','RELOCATE'=>'위치 개선 예정','IMPROVE'=>'사용성 개선 예정','MERGE_PLANNED'=>'통합 예정','HIDE_PLANNED'=>'숨김 예정','EXCLUDED'=>'제외','COMPLETED'=>'완료');
+        $usageFunnelStepLabels = array('PROJECT_SELECT'=>'현장 선택','COST_TYPE_SELECT'=>'비용항목 선택','AMOUNT_INPUT'=>'금액 입력','FORM_INPUT'=>'기타 입력','SAVE_ATTEMPT'=>'저장 시도','SAVE_SUCCESS'=>'저장 성공','SAVE_FAILURE'=>'저장 실패','EXIT_WITHOUT_SAVE'=>'저장 없이 이탈');
+      ?>
+      <section class="ua-panel" id="review-targets">
+        <div class="ua-panel-title">
+          <div><span>개발부서 전용 · 자동 삭제 없음</span><h2>기능별 사용흐름 검토 대상</h2></div>
+          <form method="post" action="?r=usage_analytics/review_refresh">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="days" value="30">
+            <button class="ua-button ua-button-primary" type="submit">최근 30일 근거 다시 계산</button>
+          </form>
+        </div>
+        <p>사용량만으로 기능을 없애지 않습니다. 업무상 필수 여부, 대상 인원, 부서 제한, 비정기 업무, 완료율과 오류율을 함께 확인하고 사람이 최종 결정을 기록합니다.</p>
+        <div class="ua-table-wrap"><table><thead><tr><th>기능·경로</th><th>자동 분류와 근거</th><th>30일 사용흐름</th><th>업무 기준</th><th>사람의 검토 결정</th></tr></thead><tbody>
+        <?php if (count($usageReviewTargets) === 0): ?><tr><td colspan="5" class="ua-empty">설치/업데이트 후 기능 이벤트가 쌓이면 검토 근거를 계산할 수 있습니다.</td></tr><?php endif; ?>
+        <?php foreach ($usageReviewTargets as $reviewRow): ?>
+          <?php
+            $reviewFeatureKey = isset($reviewRow['feature_key']) ? (string)$reviewRow['feature_key'] : '';
+            $reviewClass = isset($reviewRow['review_classification']) ? (string)$reviewRow['review_classification'] : 'INSUFFICIENT_DATA';
+            $reviewStatus = isset($reviewRow['review_status']) ? (string)$reviewRow['review_status'] : 'NEW';
+            $reviewCompletion = isset($reviewRow['completion_rate']) && $reviewRow['completion_rate'] !== null ? number_format((float)$reviewRow['completion_rate'], 1).'%' : '-';
+            $reviewError = isset($reviewRow['error_rate']) && $reviewRow['error_rate'] !== null ? number_format((float)$reviewRow['error_rate'], 1).'%' : '-';
+            $reviewDepartmentData = !empty($reviewRow['department_completion_data']) ? json_decode($reviewRow['department_completion_data'], true) : array();
+            $reviewRoleData = !empty($reviewRow['role_completion_data']) ? json_decode($reviewRow['role_completion_data'], true) : array();
+            $reviewFunnelData = !empty($reviewRow['funnel_data']) ? json_decode($reviewRow['funnel_data'], true) : array();
+            if (!is_array($reviewDepartmentData)) $reviewDepartmentData = array();
+            if (!is_array($reviewRoleData)) $reviewRoleData = array();
+            if (!is_array($reviewFunnelData)) $reviewFunnelData = array();
+          ?>
+          <tr>
+            <td><strong><?php echo h(isset($reviewRow['feature_name']) && trim((string)$reviewRow['feature_name']) !== '' ? $reviewRow['feature_name'] : $reviewFeatureKey); ?></strong><br><small><?php echo h(isset($reviewRow['menu_path']) ? $reviewRow['menu_path'] : ''); ?></small></td>
+            <td><span class="ua-status"><?php echo h(isset($usageReviewClassLabels[$reviewClass]) ? $usageReviewClassLabels[$reviewClass] : '확인 필요'); ?></span><br><small><?php echo h(isset($reviewRow['evidence_text']) ? $reviewRow['evidence_text'] : ''); ?></small><br><small><?php echo h(isset($reviewRow['recommendation']) ? $reviewRow['recommendation'] : ''); ?></small></td>
+            <td>이벤트 <?php echo number_format(isset($reviewRow['recent_usage_count']) ? (int)$reviewRow['recent_usage_count'] : 0); ?>회<br>사용자 <?php echo number_format(isset($reviewRow['unique_user_count']) ? (int)$reviewRow['unique_user_count'] : 0); ?>명 / 대상 <?php echo number_format(isset($reviewRow['target_user_count']) ? (int)$reviewRow['target_user_count'] : 0); ?>명<br>완료 <?php echo h($reviewCompletion); ?> · 오류 <?php echo h($reviewError); ?><br>저장 없이 이탈 <?php echo number_format(isset($reviewRow['exit_without_save_count']) ? (int)$reviewRow['exit_without_save_count'] : 0); ?>회<br>PC <?php echo isset($reviewRow['pc_completion_rate'])&&$reviewRow['pc_completion_rate']!==null?h(number_format((float)$reviewRow['pc_completion_rate'],1).'%'):'-'; ?> · 모바일 <?php echo isset($reviewRow['mobile_completion_rate'])&&$reviewRow['mobile_completion_rate']!==null?h(number_format((float)$reviewRow['mobile_completion_rate'],1).'%'):'-'; ?>
+              <?php if(count($reviewDepartmentData)>0||count($reviewRoleData)>0): ?><details style="margin-top:6px"><summary>부서·권한별 완료율</summary><?php foreach(array_slice($reviewDepartmentData,0,5) as $groupRow): ?><small style="display:block">부서 <?php echo h(isset($groupRow['group'])?$groupRow['group']:'미지정'); ?>: <?php echo isset($groupRow['completion_rate'])&&$groupRow['completion_rate']!==null?h(number_format((float)$groupRow['completion_rate'],1).'%'):'-'; ?></small><?php endforeach; ?><?php foreach(array_slice($reviewRoleData,0,5) as $groupRow): ?><small style="display:block">권한 <?php echo h(isset($groupRow['group'])?$groupRow['group']:'미지정'); ?>: <?php echo isset($groupRow['completion_rate'])&&$groupRow['completion_rate']!==null?h(number_format((float)$groupRow['completion_rate'],1).'%'):'-'; ?></small><?php endforeach; ?></details><?php endif; ?>
+              <?php if(count($reviewFunnelData)>0): ?><details style="margin-top:6px"><summary>단계별 도달률</summary><?php foreach($reviewFunnelData as $stepRow):$stepCode=isset($stepRow['step'])?(string)$stepRow['step']:''; ?><small style="display:block"><?php echo h(isset($usageFunnelStepLabels[$stepCode])?$usageFunnelStepLabels[$stepCode]:'확인 필요'); ?>: <?php echo number_format(isset($stepRow['count'])?(int)$stepRow['count']:0); ?>회 / <?php echo h(number_format(isset($stepRow['reach_rate'])?(float)$stepRow['reach_rate']:0,1).'%'); ?></small><?php endforeach; ?></details><?php endif; ?>
+            </td>
+            <td><form method="post" action="?r=usage_analytics/feature_save" style="display:grid;gap:6px;min-width:190px">
+              <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="feature_key" value="<?php echo h($reviewFeatureKey); ?>"><input type="hidden" name="feature_name" value="<?php echo h(isset($reviewRow['feature_name']) ? $reviewRow['feature_name'] : ''); ?>"><input type="hidden" name="menu_path" value="<?php echo h(isset($reviewRow['menu_path']) ? $reviewRow['menu_path'] : ''); ?>">
+              <select name="business_importance"><option value="NORMAL"<?php echo isset($reviewRow['business_importance']) && $reviewRow['business_importance']==='NORMAL'?' selected':''; ?>>보통</option><option value="IMPORTANT"<?php echo isset($reviewRow['business_importance']) && $reviewRow['business_importance']==='IMPORTANT'?' selected':''; ?>>중요</option><option value="REQUIRED"<?php echo isset($reviewRow['business_importance']) && $reviewRow['business_importance']==='REQUIRED'?' selected':''; ?>>필수</option><option value="OPTIONAL"<?php echo isset($reviewRow['business_importance']) && $reviewRow['business_importance']==='OPTIONAL'?' selected':''; ?>>선택</option></select>
+              <label>대상 인원 <input type="number" name="target_user_count" min="0" value="<?php echo (int)(isset($reviewRow['target_user_count']) ? $reviewRow['target_user_count'] : 0); ?>" style="width:75px"></label>
+              <label><input type="checkbox" name="department_limited" value="1"<?php echo !empty($reviewRow['department_limited'])?' checked':''; ?>> 특정 부서 한정</label><label><input type="checkbox" name="seasonal_or_irregular" value="1"<?php echo !empty($reviewRow['seasonal_or_irregular'])?' checked':''; ?>> 비정기·계절 업무</label>
+              <input name="alternative_feature_key" maxlength="190" value="<?php echo h(isset($reviewRow['alternative_feature_key']) ? $reviewRow['alternative_feature_key'] : ''); ?>" placeholder="대체 기능 키(확인된 경우만)">
+              <button class="ua-button ua-button-secondary" type="submit">업무 기준 저장</button>
+            </form></td>
+            <td><form method="post" action="?r=usage_analytics/review_save" style="display:grid;gap:6px;min-width:190px">
+              <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="feature_key" value="<?php echo h($reviewFeatureKey); ?>">
+              <select name="review_status"><?php foreach($usageReviewStatusLabels as $reviewStatusKey=>$reviewStatusLabel): ?><option value="<?php echo h($reviewStatusKey); ?>"<?php echo $reviewStatus===$reviewStatusKey?' selected':''; ?>><?php echo h($reviewStatusLabel); ?></option><?php endforeach; ?></select>
+              <input type="number" name="owner_employee_id" min="0" value="<?php echo (int)(isset($reviewRow['owner_employee_id']) ? $reviewRow['owner_employee_id'] : 0); ?>" placeholder="담당자 직원번호">
+              <textarea name="review_comment" maxlength="1000" placeholder="결정 사유·후속조치"><?php echo h(isset($reviewRow['review_comment']) ? $reviewRow['review_comment'] : ''); ?></textarea>
+              <button class="ua-button ua-button-primary" type="submit">검토 결정 저장</button>
+            </form></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody></table></div>
+      </section>
+      <?php endif; ?>
 
       <script>window.cpmsUsageTrendData = <?php echo json_encode($usageData['trend'], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;</script>
     <?php else: ?>

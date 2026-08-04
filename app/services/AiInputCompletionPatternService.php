@@ -10,6 +10,7 @@ use PDO;
 use Exception;
 
 require_once __DIR__ . '/CostChangeService.php';
+require_once __DIR__ . '/AiCostDataGovernanceService.php';
 
 class AiInputCompletionPatternService
 {
@@ -80,7 +81,7 @@ class AiInputCompletionPatternService
             . " analysis_date DATE NOT NULL,\n target_ym CHAR(7) NOT NULL,\n"
             . " scope_type VARCHAR(30) NOT NULL,\n project_id INT UNSIGNED NOT NULL DEFAULT 0,\n cost_type VARCHAR(40) NOT NULL,\n"
             . " progress_day INT UNSIGNED NOT NULL DEFAULT 0,\n progress_rate DECIMAL(8,3) NOT NULL DEFAULT 0,\n expected_completion_rate DECIMAL(8,3) NULL,\n"
-            . " sample_month_count INT UNSIGNED NOT NULL DEFAULT 0,\n event_count INT UNSIGNED NOT NULL DEFAULT 0,\n"
+            . " sample_month_count INT UNSIGNED NOT NULL DEFAULT 0,\n amount_pattern_month_count INT UNSIGNED NOT NULL DEFAULT 0,\n event_count INT UNSIGNED NOT NULL DEFAULT 0,\n"
             . " average_input_lag_days DECIMAL(8,3) NULL,\n completion_volatility DECIMAL(8,3) NULL,\n late_bulk_rate DECIMAL(8,3) NULL,\n correction_rate DECIMAL(8,3) NULL,\n month_move_rate DECIMAL(8,3) NULL,\n"
             . " fallback_level VARCHAR(40) NOT NULL,\n data_status VARCHAR(30) NOT NULL,\n calculation_version VARCHAR(40) NOT NULL,\n source_fingerprint CHAR(64) NOT NULL,\n"
             . " detail_data MEDIUMTEXT NULL,\n first_created_at DATETIME NOT NULL,\n last_calculated_at DATETIME NOT NULL,\n calculation_count INT UNSIGNED NOT NULL DEFAULT 1,\n created_at DATETIME NOT NULL,\n updated_at DATETIME NOT NULL,\n"
@@ -92,7 +93,7 @@ class AiInputCompletionPatternService
 
     public static function requiredColumns()
     {
-        return array('id','analysis_date','target_ym','scope_type','project_id','cost_type','progress_day','progress_rate','expected_completion_rate','sample_month_count','event_count','average_input_lag_days','completion_volatility','late_bulk_rate','correction_rate','month_move_rate','fallback_level','data_status','calculation_version','source_fingerprint','detail_data','first_created_at','last_calculated_at','calculation_count','created_at','updated_at');
+        return array('id','analysis_date','target_ym','scope_type','project_id','cost_type','progress_day','progress_rate','expected_completion_rate','sample_month_count','amount_pattern_month_count','event_count','average_input_lag_days','completion_volatility','late_bulk_rate','correction_rate','month_move_rate','fallback_level','data_status','calculation_version','source_fingerprint','detail_data','first_created_at','last_calculated_at','calculation_count','created_at','updated_at');
     }
 
     public static function installOrUpdate($pdo = null)
@@ -101,6 +102,11 @@ class AiInputCompletionPatternService
         if (!$pdo) return array('ok'=>false,'message'=>'DB 연결 상태를 확인할 수 없습니다.');
         try {
             if ($pdo->exec(self::createTableSql()) === false) return array('ok'=>false,'message'=>'입력패턴 테이블을 설치하지 못했습니다.');
+            if (!AiCostDataGovernanceService::columnExists($pdo, self::TABLE_NAME, 'amount_pattern_month_count')) {
+                if ($pdo->exec('ALTER TABLE `' . self::TABLE_NAME . '` ADD COLUMN `amount_pattern_month_count` INT UNSIGNED NOT NULL DEFAULT 0 AFTER `sample_month_count`') === false) {
+                    return array('ok'=>false,'message'=>'입력패턴의 금액표본 구조를 추가하지 못했습니다.');
+                }
+            }
             self::$tableCache = array();
             return array('ok'=>self::isInstalled($pdo),'message'=>self::isInstalled($pdo)?'입력패턴 테이블 설치를 확인했습니다.':'입력패턴 테이블 구조를 확인해주세요.');
         } catch (Exception $e) {
@@ -231,7 +237,8 @@ class AiInputCompletionPatternService
     {
         $result=array(); if(!self::tableExists($pdo,self::EVENT_TABLE)) return $result;
         $start=date('Y-m-d',strtotime($targetYm.'-01 -18 months')); $end=$targetYm.'-01';
-        $sql="SELECT project_id,cost_type,COUNT(*) AS event_count,AVG(CASE WHEN actual_date IS NOT NULL THEN GREATEST(0,DATEDIFF(DATE(event_at),actual_date)) ELSE NULL END) AS average_lag,SUM(CASE WHEN event_action IN ('UPDATE','ADJUST') THEN 1 ELSE 0 END) AS correction_count,SUM(CASE WHEN source_type IN ('EXCEL','APPROVAL') AND actual_date IS NOT NULL AND DATEDIFF(DATE(event_at),actual_date)>=7 THEN 1 ELSE 0 END) AS bulk_count,SUM(CASE WHEN event_action='UPDATE' AND old_data LIKE '%settlement_ym%' AND new_data LIKE '%settlement_ym%' THEN 1 ELSE 0 END) AS move_count FROM `" . self::EVENT_TABLE . "` WHERE event_at>=:start_date AND event_at<:end_date AND event_action<>'DELETE' GROUP BY project_id,cost_type";
+        $originWhere = AiCostDataGovernanceService::columnExists($pdo, self::EVENT_TABLE, 'data_origin') ? " AND data_origin='LIVE_EMPLOYEE_INPUT'" : ' AND 1=0';
+        $sql="SELECT project_id,cost_type,COUNT(*) AS event_count,AVG(CASE WHEN actual_date IS NOT NULL THEN GREATEST(0,DATEDIFF(DATE(event_at),actual_date)) ELSE NULL END) AS average_lag,SUM(CASE WHEN event_action IN ('UPDATE','ADJUST') THEN 1 ELSE 0 END) AS correction_count,SUM(CASE WHEN source_type IN ('EXCEL','APPROVAL') AND actual_date IS NOT NULL AND DATEDIFF(DATE(event_at),actual_date)>=7 THEN 1 ELSE 0 END) AS bulk_count,SUM(CASE WHEN event_action='UPDATE' AND old_data LIKE '%settlement_ym%' AND new_data LIKE '%settlement_ym%' THEN 1 ELSE 0 END) AS move_count FROM `" . self::EVENT_TABLE . "` WHERE event_at>=:start_date AND event_at<:end_date AND event_action<>'DELETE'" . $originWhere . " GROUP BY project_id,cost_type";
         try { $st=$pdo->prepare($sql); if(!$st||!$st->execute(array(':start_date'=>$start,':end_date'=>$end))) return $result; $rows=$st->fetchAll(PDO::FETCH_ASSOC); foreach($rows as $row){$project=(int)$row['project_id'];$cost=(string)$row['cost_type'];$count=max(0,(int)$row['event_count']);$result[$project.':'.$cost]=array('event_count'=>$count,'average_lag'=>$row['average_lag']===null?null:(float)$row['average_lag'],'correction_rate'=>$count?round((int)$row['correction_count']/$count*100,3):null,'bulk_rate'=>$count?round((int)$row['bulk_count']/$count*100,3):null,'move_rate'=>$count?round((int)$row['move_count']/$count*100,3):null);}} catch(Exception $e){}
         return $result;
     }
@@ -241,25 +248,38 @@ class AiInputCompletionPatternService
         $categories=self::categories(); $groups=array();
         foreach($rows as $row){$project=(int)$row['project_id'];$ym=(string)$row['target_ym'];foreach($categories as $cost=>$column){if(!self::finalizedYm($ym,$today,$cost))continue;$key=$project.':'.$ym.':'.$cost;if(!isset($groups[$key]))$groups[$key]=array();$groups[$key][]=$row;}}
         $samples=array();
-        foreach($groups as $key=>$monthRows){$parts=explode(':',$key,3);$project=(int)$parts[0];$ym=$parts[1];$cost=$parts[2];$column=$categories[$cost];$period=CostChangeService::periodForYm($cost,$ym);$final=null;foreach($monthRows as $row)if(!empty($period['end'])&&(string)$row['snapshot_date']>=(string)$period['end'])$final=$row;if(!$final)continue;$finalAmount=isset($final[$column])?(float)$final[$column]:0.0;if($finalAmount<=0)continue;$currentProgress=self::progress($context['snapshot_date'],$context['target_ym'],$cost);$best=null;$bestDistance=9999;foreach($monthRows as $row){$p=self::progress($row['snapshot_date'],$ym,$cost);$distance=abs((float)$p['rate']-(float)$currentProgress['rate']);if($distance<$bestDistance){$bestDistance=$distance;$best=$row;}}if(!$best)continue;$partial=isset($best[$column])?(float)$best[$column]:0.0;$rate=max(0,min(100,$partial/$finalAmount*100));$samples[]=array('project_id'=>$project,'cost_type'=>$cost,'ym'=>$ym,'completion_rate'=>$rate,'final_amount'=>$finalAmount,'progress_rate'=>$currentProgress['rate'],'progress_day'=>$currentProgress['day']);}
+        foreach($groups as $key=>$monthRows){
+            $parts=explode(':',$key,3);$project=(int)$parts[0];$ym=$parts[1];$cost=$parts[2];$column=$categories[$cost];
+            $period=CostChangeService::periodForYm($cost,$ym);$final=null;
+            foreach($monthRows as $row)if(!empty($period['end'])&&(string)$row['snapshot_date']>=(string)$period['end'])$final=$row;
+            if(!$final)continue;
+            $finalAmount=isset($final[$column])?(float)$final[$column]:0.0;if($finalAmount<=0)continue;
+            $governancePdo=isset($context['pdo'])?$context['pdo']:null;
+            if(!AiCostDataGovernanceService::amountGroupEligible($governancePdo,$project,$ym,$cost))continue;
+            $currentProgress=self::progress($context['snapshot_date'],$context['target_ym'],$cost);
+            $timingEligible=AiCostDataGovernanceService::timingGroupEligible($governancePdo,$project,$ym,$cost);$rate=null;
+            if($timingEligible){$best=null;$bestDistance=9999;foreach($monthRows as $row){$p=self::progress($row['snapshot_date'],$ym,$cost);$distance=abs((float)$p['rate']-(float)$currentProgress['rate']);if($distance<$bestDistance){$bestDistance=$distance;$best=$row;}}if($best){$partial=isset($best[$column])?(float)$best[$column]:0.0;$rate=max(0,min(100,$partial/$finalAmount*100));}}
+            $samples[]=array('project_id'=>$project,'cost_type'=>$cost,'ym'=>$ym,'completion_rate'=>$rate,'final_amount'=>$finalAmount,'timing_eligible'=>$timingEligible?1:0,'progress_rate'=>$currentProgress['rate'],'progress_day'=>$currentProgress['day']);
+        }
         return $samples;
     }
 
     private static function aggregateSamples($samples,$scope,$projectId,$costType,$eventStats)
     {
-        $rates=array();$months=array();$finals=array();$events=0;$lags=array();$bulk=array();$corrections=array();$moves=array();$seenEvent=array();
-        foreach($samples as $sample){if($scope==='PROJECT_CATEGORY'&&((int)$sample['project_id']!==$projectId||$sample['cost_type']!==$costType))continue;if($scope==='PROJECT_ALL'&&(int)$sample['project_id']!==$projectId)continue;if($scope==='COMPANY_CATEGORY'&&$sample['cost_type']!==$costType)continue;$rates[]=$sample['completion_rate'];$months[$sample['ym']]=true;$finals[]=$sample['final_amount'];$key=(int)$sample['project_id'].':'.$sample['cost_type'];if(isset($eventStats[$key])&&!isset($seenEvent[$key])){$seenEvent[$key]=true;$row=$eventStats[$key];$events+=(int)$row['event_count'];if($row['average_lag']!==null)$lags[]=$row['average_lag'];if($row['bulk_rate']!==null)$bulk[]=$row['bulk_rate'];if($row['correction_rate']!==null)$corrections[]=$row['correction_rate'];if($row['move_rate']!==null)$moves[]=$row['move_rate'];}}
+        $rates=array();$months=array();$amountMonths=array();$finals=array();$events=0;$lags=array();$bulk=array();$corrections=array();$moves=array();$seenEvent=array();
+        foreach($samples as $sample){if($scope==='PROJECT_CATEGORY'&&((int)$sample['project_id']!==$projectId||$sample['cost_type']!==$costType))continue;if($scope==='PROJECT_ALL'&&(int)$sample['project_id']!==$projectId)continue;if($scope==='COMPANY_CATEGORY'&&$sample['cost_type']!==$costType)continue;$amountMonths[$sample['ym']]=true;$finals[]=$sample['final_amount'];if(empty($sample['timing_eligible'])||$sample['completion_rate']===null)continue;$rates[]=$sample['completion_rate'];$months[$sample['ym']]=true;$key=(int)$sample['project_id'].':'.$sample['cost_type'];if(isset($eventStats[$key])&&!isset($seenEvent[$key])){$seenEvent[$key]=true;$row=$eventStats[$key];$events+=(int)$row['event_count'];if($row['average_lag']!==null)$lags[]=$row['average_lag'];if($row['bulk_rate']!==null)$bulk[]=$row['bulk_rate'];if($row['correction_rate']!==null)$corrections[]=$row['correction_rate'];if($row['move_rate']!==null)$moves[]=$row['move_rate'];}}
         $sampleMonths=array_keys($months);sort($sampleMonths,SORT_STRING);
-        return array('expected_completion_rate'=>self::median($rates),'sample_month_count'=>count($months),'sample_months'=>$sampleMonths,'event_count'=>$events,'average_input_lag_days'=>self::median($lags),'completion_volatility'=>self::volatility($rates),'late_bulk_rate'=>self::median($bulk),'correction_rate'=>self::median($corrections),'month_move_rate'=>self::median($moves),'historical_final_median'=>self::median($finals));
+        $amountSampleMonths=array_keys($amountMonths);sort($amountSampleMonths,SORT_STRING);
+        return array('expected_completion_rate'=>self::median($rates),'sample_month_count'=>count($months),'sample_months'=>$sampleMonths,'amount_pattern_month_count'=>count($amountMonths),'amount_sample_months'=>$amountSampleMonths,'event_count'=>$events,'average_input_lag_days'=>self::median($lags),'completion_volatility'=>self::volatility($rates),'late_bulk_rate'=>self::median($bulk),'correction_rate'=>self::median($corrections),'month_move_rate'=>self::median($moves),'historical_final_median'=>self::median($finals));
     }
 
     private static function savePattern($pdo,$context,$scope,$projectId,$costType,$progress,$stats,$fingerprint)
     {
         $fallback=array('PROJECT_CATEGORY'=>'PROJECT_CATEGORY','PROJECT_ALL'=>'PROJECT_ALL','COMPANY_CATEGORY'=>'COMPANY_CATEGORY','COMPANY_ALL'=>'COMPANY_ALL');
-        $status=$stats['expected_completion_rate']===null?'INSUFFICIENT':($stats['sample_month_count']>=3?'READY':'LIMITED');$now=date('Y-m-d H:i:s');
-        $sql='INSERT INTO `' . self::TABLE_NAME . '` (analysis_date,target_ym,scope_type,project_id,cost_type,progress_day,progress_rate,expected_completion_rate,sample_month_count,event_count,average_input_lag_days,completion_volatility,late_bulk_rate,correction_rate,month_move_rate,fallback_level,data_status,calculation_version,source_fingerprint,detail_data,first_created_at,last_calculated_at,calculation_count,created_at,updated_at) VALUES (:date,:ym,:scope,:project,:cost,:day,:progress,:completion,:months,:events,:lag,:volatility,:bulk,:correction,:move,:fallback,:status,:version,:fingerprint,:detail,:first,:last,1,:created,:updated) ON DUPLICATE KEY UPDATE progress_rate=VALUES(progress_rate),expected_completion_rate=VALUES(expected_completion_rate),sample_month_count=VALUES(sample_month_count),event_count=VALUES(event_count),average_input_lag_days=VALUES(average_input_lag_days),completion_volatility=VALUES(completion_volatility),late_bulk_rate=VALUES(late_bulk_rate),correction_rate=VALUES(correction_rate),month_move_rate=VALUES(month_move_rate),fallback_level=VALUES(fallback_level),data_status=VALUES(data_status),calculation_version=VALUES(calculation_version),source_fingerprint=VALUES(source_fingerprint),detail_data=VALUES(detail_data),last_calculated_at=VALUES(last_calculated_at),calculation_count=calculation_count+1,updated_at=VALUES(updated_at)';
+        $status=$stats['expected_completion_rate']===null?($stats['amount_pattern_month_count']>0?'AMOUNT_ONLY':'INSUFFICIENT'):($stats['sample_month_count']>=3?'READY':'LIMITED');$now=date('Y-m-d H:i:s');
+        $sql='INSERT INTO `' . self::TABLE_NAME . '` (analysis_date,target_ym,scope_type,project_id,cost_type,progress_day,progress_rate,expected_completion_rate,sample_month_count,amount_pattern_month_count,event_count,average_input_lag_days,completion_volatility,late_bulk_rate,correction_rate,month_move_rate,fallback_level,data_status,calculation_version,source_fingerprint,detail_data,first_created_at,last_calculated_at,calculation_count,created_at,updated_at) VALUES (:date,:ym,:scope,:project,:cost,:day,:progress,:completion,:months,:amount_months,:events,:lag,:volatility,:bulk,:correction,:move,:fallback,:status,:version,:fingerprint,:detail,:first,:last,1,:created,:updated) ON DUPLICATE KEY UPDATE progress_rate=VALUES(progress_rate),expected_completion_rate=VALUES(expected_completion_rate),sample_month_count=VALUES(sample_month_count),amount_pattern_month_count=VALUES(amount_pattern_month_count),event_count=VALUES(event_count),average_input_lag_days=VALUES(average_input_lag_days),completion_volatility=VALUES(completion_volatility),late_bulk_rate=VALUES(late_bulk_rate),correction_rate=VALUES(correction_rate),month_move_rate=VALUES(month_move_rate),fallback_level=VALUES(fallback_level),data_status=VALUES(data_status),calculation_version=VALUES(calculation_version),source_fingerprint=VALUES(source_fingerprint),detail_data=VALUES(detail_data),last_calculated_at=VALUES(last_calculated_at),calculation_count=calculation_count+1,updated_at=VALUES(updated_at)';
         $st=$pdo->prepare($sql);if(!$st)return false;
-        return $st->execute(array(':date'=>$context['snapshot_date'],':ym'=>$context['target_ym'],':scope'=>$scope,':project'=>$projectId,':cost'=>$costType,':day'=>$progress['day'],':progress'=>$progress['rate'],':completion'=>$stats['expected_completion_rate'],':months'=>$stats['sample_month_count'],':events'=>$stats['event_count'],':lag'=>$stats['average_input_lag_days'],':volatility'=>$stats['completion_volatility'],':bulk'=>$stats['late_bulk_rate'],':correction'=>$stats['correction_rate'],':move'=>$stats['month_move_rate'],':fallback'=>$fallback[$scope],':status'=>$status,':version'=>self::CALCULATION_VERSION,':fingerprint'=>$fingerprint,':detail'=>self::encode(array('historical_final_median'=>$stats['historical_final_median'],'sample_months'=>$stats['sample_months'])),':first'=>$now,':last'=>$now,':created'=>$now,':updated'=>$now));
+        return $st->execute(array(':date'=>$context['snapshot_date'],':ym'=>$context['target_ym'],':scope'=>$scope,':project'=>$projectId,':cost'=>$costType,':day'=>$progress['day'],':progress'=>$progress['rate'],':completion'=>$stats['expected_completion_rate'],':months'=>$stats['sample_month_count'],':amount_months'=>$stats['amount_pattern_month_count'],':events'=>$stats['event_count'],':lag'=>$stats['average_input_lag_days'],':volatility'=>$stats['completion_volatility'],':bulk'=>$stats['late_bulk_rate'],':correction'=>$stats['correction_rate'],':move'=>$stats['month_move_rate'],':fallback'=>$fallback[$scope],':status'=>$status,':version'=>self::CALCULATION_VERSION,':fingerprint'=>$fingerprint,':detail'=>self::encode(array('historical_final_median'=>$stats['historical_final_median'],'sample_months'=>$stats['sample_months'],'amount_sample_months'=>$stats['amount_sample_months'],'timing_origin'=>'LIVE_EMPLOYEE_INPUT_ONLY')),':first'=>$now,':last'=>$now,':created'=>$now,':updated'=>$now));
     }
 
     public static function calculateLatest($pdo = null,$triggerType = 'SYSTEM')
@@ -267,7 +287,7 @@ class AiInputCompletionPatternService
         $pdo=self::pdo($pdo);$empty=array('ok'=>false,'status'=>'FAILED','projects'=>0,'patterns'=>0,'message'=>'입력패턴을 계산하지 못했습니다.');
         if(!$pdo){$empty['message']='DB 연결 상태를 확인할 수 없습니다.';return $empty;}if(!self::isInstalled($pdo)){$empty['message']='입력패턴 테이블을 먼저 설치해주세요.';return $empty;}
         $context=self::latestContext($pdo);if(empty($context['available'])){$empty['message']='입력패턴을 계산하려면 일일 스냅샷이 필요합니다.';return $empty;}
-        $today=self::businessToday();$rows=self::historyRows($pdo,$context['target_ym'],$today,0);$samples=self::sampleSeries($rows,$today,0,$context);$events=self::eventStats($pdo,$context['target_ym']);
+        $context['pdo']=$pdo;$today=self::businessToday();$rows=self::historyRows($pdo,$context['target_ym'],$today,0);$samples=self::sampleSeries($rows,$today,0,$context);unset($context['pdo']);$events=self::eventStats($pdo,$context['target_ym']);
         $projects=array();foreach($samples as $sample)$projects[(int)$sample['project_id']]=true;$fingerprint=hash('sha256',self::encode(array('context'=>$context,'samples'=>$samples,'finalization'=>'PERIOD_END','version'=>self::CALCULATION_VERSION)));$saved=0;$failed=0;
         try{
             foreach(array_keys($projects) as $projectId){foreach(self::categories() as $cost=>$column){$progress=self::progress($context['snapshot_date'],$context['target_ym'],$cost);foreach(array('PROJECT_CATEGORY','PROJECT_ALL') as $scope){$scopeCost=$scope==='PROJECT_ALL'?'all':$cost;$stats=self::aggregateSamples($samples,$scope,$projectId,$cost,$events);if(self::savePattern($pdo,$context,$scope,$projectId,$scopeCost,$progress,$stats,$fingerprint))$saved++;else$failed++;}}}
@@ -281,8 +301,8 @@ class AiInputCompletionPatternService
     {
         $pdo=self::pdo($pdo);if(!$pdo||!self::isInstalled($pdo))return array('available'=>false,'fallback_level'=>'COLD_START');
         $candidates=array(array('PROJECT_CATEGORY',$projectId,$costType,true),array('PROJECT_ALL',$projectId,'all',false),array('COMPANY_CATEGORY',0,$costType,false),array('COMPANY_ALL',0,'all',false));
-        foreach($candidates as $candidate){try{$sql='SELECT * FROM `' . self::TABLE_NAME . '` WHERE analysis_date=:date AND target_ym=:ym AND scope_type=:scope AND project_id=:project AND cost_type=:cost ORDER BY progress_day DESC,id DESC LIMIT 1';$st=$pdo->prepare($sql);if(!$st||!$st->execute(array(':date'=>$analysisDate,':ym'=>$targetYm,':scope'=>$candidate[0],':project'=>$candidate[1],':cost'=>$candidate[2])))continue;$row=$st->fetch(PDO::FETCH_ASSOC);if(!is_array($row)||$row['expected_completion_rate']===null)continue;$row['available']=true;return $row;}catch(Exception $e){}}
-        return array('available'=>false,'fallback_level'=>'COLD_START','expected_completion_rate'=>null,'sample_month_count'=>0,'event_count'=>0);
+        foreach($candidates as $candidate){try{$sql='SELECT * FROM `' . self::TABLE_NAME . '` WHERE analysis_date=:date AND target_ym=:ym AND scope_type=:scope AND project_id=:project AND cost_type=:cost ORDER BY progress_day DESC,id DESC LIMIT 1';$st=$pdo->prepare($sql);if(!$st||!$st->execute(array(':date'=>$analysisDate,':ym'=>$targetYm,':scope'=>$candidate[0],':project'=>$candidate[1],':cost'=>$candidate[2])))continue;$row=$st->fetch(PDO::FETCH_ASSOC);if(!is_array($row))continue;$detail=self::decode(isset($row['detail_data'])?$row['detail_data']:'');$hasAmount=isset($detail['historical_final_median'])&&is_numeric($detail['historical_final_median']);if($row['expected_completion_rate']===null&&!$hasAmount)continue;$row['available']=true;return $row;}catch(Exception $e){}}
+        return array('available'=>false,'fallback_level'=>'COLD_START','expected_completion_rate'=>null,'sample_month_count'=>0,'amount_pattern_month_count'=>0,'event_count'=>0);
     }
 
     public static function learningState($monthCount)

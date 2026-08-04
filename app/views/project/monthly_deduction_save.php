@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/../../services/CostDataEventService.php';
 use App\Core\Auth; use App\Core\Db;
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 $dept = (string)Auth::userDepartment();
@@ -45,7 +46,16 @@ $pdo=Db::pdo();
 try {
     if (!cpms_project_monthly_deduction_ensure_table($pdo)) { throw new Exception('공제분 테이블을 확인/생성하지 못했습니다.'); }
     $st=$pdo->prepare('INSERT INTO cpms_project_monthly_deductions (project_id, ym, deduction_name, amount, memo, created_at, updated_at) VALUES (:pid,:ym,:nm,:am,:mm,NOW(),NOW())');
-    $st->bindValue(':pid',$pid,\PDO::PARAM_INT); $st->bindValue(':ym',$ym); $st->bindValue(':nm',$name); $st->bindValue(':am',$amount); $st->bindValue(':mm',$memo); $st->execute();
+    if (!$st) { throw new Exception('공제분 저장 준비에 실패했습니다.'); }
+    $st->bindValue(':pid',$pid,\PDO::PARAM_INT); $st->bindValue(':ym',$ym); $st->bindValue(':nm',$name); $st->bindValue(':am',$amount); $st->bindValue(':mm',$memo); if (!$st->execute()) { throw new Exception('공제분을 저장하지 못했습니다.'); }
+    $deductionId = (int)$pdo->lastInsertId();
+    \App\Services\CostDataEventService::recordChange($pdo, array(
+        'project_id'=>$pid, 'cost_type'=>'other', 'target_type'=>'monthly_deduction', 'target_id'=>(string)$deductionId,
+        'event_action'=>'CREATE', 'source_type'=>'DIRECT', 'actual_date'=>'', 'settlement_ym'=>$ym,
+        'old_amount'=>null, 'new_amount'=>$amount, 'old_data'=>array(),
+        'new_data'=>array('id'=>$deductionId,'project_id'=>$pid,'ym'=>$ym,'deduction_name'=>$name,'amount'=>$amount,'memo'=>$memo),
+        'reason'=>$memo, 'source_file'=>__FILE__
+    ));
     flash_set('success','공제분을 저장했습니다.');
 } catch (Exception $e) {
     flash_set('error','공제분 저장 실패: '.$e->getMessage());
