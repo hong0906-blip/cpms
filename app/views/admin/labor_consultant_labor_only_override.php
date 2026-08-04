@@ -1,4 +1,9 @@
 <?php
+
+if (!defined('CPMS_LABOR_CONSULTANT_EXCEL_FIX_VERSION')) {
+    define('CPMS_LABOR_CONSULTANT_EXCEL_FIX_VERSION', '2026-08-04-v4');
+}
+
 /**
  * C:\www\cpms\app\views\admin\labor_consultant_labor_only_override.php
  *
@@ -384,6 +389,44 @@ if (!function_exists('cpms_labor_consultant_prepare_target_rows')) {
  * - 아래 행: 총공수(1, 1.5 등 실제 공수)
  * - 출력월/공종/임금단가/지급총액/계좌정보/인력사업체명 등은 두 행 세로 병합
  */
+if (!function_exists('cpms_labor_consultant_detect_header_block_height')) {
+    function cpms_labor_consultant_detect_header_block_height($sheetDoc, $headerRow) {
+        $headerRow = (int)$headerRow;
+        if (!($sheetDoc instanceof DOMDocument) || $headerRow <= 0) return 1;
+
+        $height = 1;
+        $xpath = new DOMXPath($sheetDoc);
+        $mergeNodes = $xpath->query('/*[local-name()="worksheet"]/*[local-name()="mergeCells"]/*[local-name()="mergeCell"]');
+        foreach ($mergeNodes as $mergeNode) {
+            $ref = strtoupper(trim((string)$mergeNode->getAttribute('ref')));
+            if (!preg_match('/^([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)$/', $ref, $m)) continue;
+            $startRow = (int)$m[2];
+            $endRow = (int)$m[4];
+            if ($startRow !== $headerRow) continue;
+            if ($endRow < $headerRow || $endRow > $headerRow + 3) continue;
+            $candidate = ($endRow - $headerRow) + 1;
+            if ($candidate > $height) $height = $candidate;
+        }
+
+        // 세로 병합이 누락된 변형 양식이라도 다음 행에 1~31 날짜가 여러 개 있으면 2행 헤더입니다.
+        $nextRowNodes = $xpath->query('/*[local-name()="worksheet"]/*[local-name()="sheetData"]/*[local-name()="row"][@r="' . ($headerRow + 1) . '"]');
+        if ($nextRowNodes && $nextRowNodes->length > 0) {
+            $dayCount = 0;
+            $cellNodes = $xpath->query('./*[local-name()="c"]', $nextRowNodes->item(0));
+            foreach ($cellNodes as $cellNode) {
+                $valueNodes = $cellNode->getElementsByTagName('v');
+                if ($valueNodes->length <= 0) continue;
+                $raw = trim((string)$valueNodes->item(0)->textContent);
+                if (!preg_match('/^(?:[1-9]|[12][0-9]|3[01])(?:\.0+)?$/', $raw)) continue;
+                $dayCount++;
+            }
+            if ($dayCount >= 3 && $height < 2) $height = 2;
+        }
+
+        return $height;
+    }
+}
+
 if (!function_exists('cpms_labor_consultant_detect_worker_block_height')) {
     function cpms_labor_consultant_detect_worker_block_height($sheetDoc, $sampleRowNum) {
         $sampleRowNum = (int)$sampleRowNum;
@@ -402,8 +445,9 @@ if (!function_exists('cpms_labor_consultant_detect_worker_block_height')) {
             }
         }
 
-        // 공통정보 열이 여러 개 세로 병합된 양식만 2행 구조로 판단합니다.
-        return $verticalMergeCount >= 2 ? 2 : 1;
+        // 출력월/공종/임금단가/지급총액/계좌정보 등 한 열이라도 2행 병합이면
+        // 해당 근로자 양식은 위=출력일수, 아래=총공수의 2행 구조입니다.
+        return $verticalMergeCount >= 1 ? 2 : 1;
     }
 }
 
@@ -438,19 +482,54 @@ if (!function_exists('cpms_labor_consultant_prepare_target_row_blocks')) {
     function cpms_labor_consultant_prepare_target_row_blocks($sheetDoc, $headerRow, $dataCount) {
         $blocks = array();
         $dataCount = (int)$dataCount;
-        if (!($sheetDoc instanceof DOMDocument) || $dataCount <= 0) return $blocks;
+        $headerRow = (int)$headerRow;
+        if (!($sheetDoc instanceof DOMDocument) || $dataCount <= 0 || $headerRow <= 0) return $blocks;
 
         $xpath = new DOMXPath($sheetDoc);
         $sheetDataList = $xpath->query('//*[local-name()="worksheet"]/*[local-name()="sheetData"]');
         if (!$sheetDataList || $sheetDataList->length < 1) return $blocks;
         $sheetData = $sheetDataList->item(0);
 
+        // 핵심 수정:
+        // 기존 코드는 headerRow + 1을 근로자 행으로 잡아 날짜 번호가 적힌 두 번째 헤더 행을 복제했습니다.
+        // 원본 양식의 세로 병합을 확인해 헤더 높이를 먼저 계산한 뒤 실제 근로자 시작 행을 찾습니다.
+        $headerHeight = cpms_labor_consultant_detect_header_block_height($sheetDoc, $headerRow);
+        $dataStartRow = $headerRow + $headerHeight;
+
         $sampleRowNode = null;
-        $sampleRowNum = (int)$headerRow + 1;
-        $rowNodes = $xpath->query('./*[local-name()="row"]', $sheetData);
-        foreach ($rowNodes as $rowNode) {
-            $rowNum = (int)$rowNode->getAttribute('r');
-            if ($rowNum >= $sampleRowNum) {
+        $sampleRowNum = $dataStartRow;
+
+        // 먼저 실제 2행 근로자 블록의 세로 병합 시작 행을 찾습니다.
+        // 스타일만 있고 값이 비어 있는 원본 양식에서도 가장 정확한 기준입니다.
+        $mergeNodes = $xpath->query('/*[local-name()="worksheet"]/*[local-name()="mergeCells"]/*[local-name()="mergeCell"]');
+        $mergeStartCandidates = array();
+        foreach ($mergeNodes as $mergeNode) {
+            $ref = strtoupper(trim((string)$mergeNode->getAttribute('ref')));
+            if (!preg_match('/^([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)$/', $ref, $m)) continue;
+            $r1 = (int)$m[2];
+            $r2 = (int)$m[4];
+            if ($r1 < $dataStartRow || $r2 !== $r1 + 1) continue;
+            $mergeStartCandidates[$r1] = isset($mergeStartCandidates[$r1]) ? $mergeStartCandidates[$r1] + 1 : 1;
+        }
+        if (count($mergeStartCandidates) > 0) {
+            ksort($mergeStartCandidates);
+            foreach ($mergeStartCandidates as $candidateRow => $candidateCount) {
+                if ($candidateCount < 1) continue;
+                $candidateNode = cpms_labor_consultant_find_row_node($sheetDoc, (int)$candidateRow);
+                if ($candidateNode instanceof DOMElement) {
+                    $sampleRowNode = $candidateNode;
+                    $sampleRowNum = (int)$candidateRow;
+                    break;
+                }
+            }
+        }
+
+        // 병합 시작 행을 찾지 못한 단순 양식은 헤더 다음 실제 행을 사용합니다.
+        if (!($sampleRowNode instanceof DOMElement)) {
+            $rowNodes = $xpath->query('./*[local-name()="row"]', $sheetData);
+            foreach ($rowNodes as $rowNode) {
+                $rowNum = (int)$rowNode->getAttribute('r');
+                if ($rowNum < $dataStartRow) continue;
                 $sampleRowNode = $rowNode;
                 $sampleRowNum = $rowNum;
                 break;
@@ -473,7 +552,7 @@ if (!function_exists('cpms_labor_consultant_prepare_target_row_blocks')) {
         $mergeSpecs = cpms_labor_consultant_capture_block_merges($sheetDoc, $sampleRowNum, $blockHeight);
         $offset = ($dataCount - 1) * $blockHeight;
 
-        // 원본 근로자 블록 아래의 소계/합계 행과 병합을 블록 높이만큼 정확히 이동합니다.
+        // 첫 근로자 블록 아래의 소계/합계/다음 표를 정확히 이동합니다.
         cpms_labor_consultant_shift_sheet_rows($sheetDoc, $sampleEndRow, $offset);
         cpms_labor_consultant_shift_merged_cells($sheetDoc, $sampleEndRow, $offset);
 
@@ -484,16 +563,13 @@ if (!function_exists('cpms_labor_consultant_prepare_target_row_blocks')) {
             if ($workerIndex === 0) {
                 $blockRows = $sampleRows;
             } else {
-                $insertAfter = null;
-                if (count($blocks) > 0) {
-                    $previous = $blocks[count($blocks) - 1];
-                    $insertAfter = $previous[count($previous) - 1];
-                }
+                $previous = $blocks[count($blocks) - 1];
+                $insertAfter = $previous[count($previous) - 1];
 
                 for ($rowOffset = 0; $rowOffset < $blockHeight; $rowOffset++) {
                     $clone = $sampleRows[$rowOffset]->cloneNode(true);
                     cpms_labor_consultant_reindex_row_node($clone, $targetStartRow + $rowOffset);
-                    if ($insertAfter && $insertAfter->nextSibling) {
+                    if ($insertAfter->nextSibling) {
                         $sheetData->insertBefore($clone, $insertAfter->nextSibling);
                     } else {
                         $sheetData->appendChild($clone);
@@ -502,6 +578,8 @@ if (!function_exists('cpms_labor_consultant_prepare_target_row_blocks')) {
                     $insertAfter = $clone;
                 }
 
+                // 행 노드만 복제하면 병합 정의는 복제되지 않으므로
+                // 원본 근로자 블록의 모든 가로/세로 병합을 상대 위치 그대로 생성합니다.
                 foreach ($mergeSpecs as $mergeSpec) {
                     $ref = $mergeSpec['c1'] . ($targetStartRow + (int)$mergeSpec['r1_offset'])
                         . ':' . $mergeSpec['c2'] . ($targetStartRow + (int)$mergeSpec['r2_offset']);
