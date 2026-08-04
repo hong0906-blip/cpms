@@ -138,6 +138,16 @@ if ($filePath === '' || !is_file($filePath)) {
 }
 
 // 파일: app/views/admin/labor_consultant_export.php
+// 일별 공수 셀은 1, 1.5처럼 동일하게 표시하고, 복제된 행의 병합 상태를 최종 정리합니다.
+if (function_exists('cpms_labor_consultant_fix_export_workbook')) {
+    $workbookFixResult = cpms_labor_consultant_fix_export_workbook($filePath, $templatePath);
+    if (!isset($workbookFixResult['ok']) || !$workbookFixResult['ok']) {
+        error_log('[labor_consultant_export] workbook format fix skipped: '
+            . (isset($workbookFixResult['message']) ? $workbookFixResult['message'] : 'unknown'));
+    }
+}
+
+// 파일: app/views/admin/labor_consultant_export.php
 // fread() 반복 중 빈 값이 반환되면 응답이 끝나지 않을 수 있어 완성 파일을 먼저 읽습니다.
 $fileContents = @file_get_contents($filePath);
 if ($fileContents === false) {
