@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/../../bootstrap.php';
+require_once __DIR__ . '/labor_consultant_labor_only_override.php';
 require_once __DIR__ . '/labor_consultant_helpers.php';
 
 if (!\App\Core\Auth::check()) {

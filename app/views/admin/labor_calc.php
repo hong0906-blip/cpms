@@ -5,6 +5,7 @@
  * - PHP 5.6 호환
  */
 
+require_once __DIR__ . '/labor_consultant_labor_only_override.php';
 require_once __DIR__ . '/labor_consultant_helpers.php';
 require_once __DIR__ . '/../../services/ManagementDriveService.php';
 
@@ -90,7 +91,7 @@ foreach ($rows as $row) {
     <div class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <div class="text-lg font-extrabold text-gray-900">노무사 확인용</div>
-        <div class="mt-1 text-sm text-gray-600">공사섹션 노무비 탭과 동일하게 월별 배분비율이 적용된 노무비만 표시합니다.</div>
+        <div class="mt-1 text-sm text-gray-600">공사 &gt; 노무비 &gt; 노무비 탭에 표시되는 공수와 금액만 가져옵니다. 외주비 날짜와 전액 외주비 인원은 제외됩니다.</div>
       </div>
       <form method="post" action="?r=admin/labor_consultant_setup" class="m-0">
         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -140,7 +141,7 @@ foreach ($rows as $row) {
         <?php endif; ?>
 
         <div class="overflow-x-auto rounded-2xl border border-gray-200">
-          <table class="min-w-[2200px] w-full text-xs">
+          <table class="min-w-[2280px] w-full text-xs">
             <thead class="bg-gray-100">
               <tr>
                 <th class="border border-gray-200 px-3 py-2">현장명</th>
@@ -153,6 +154,7 @@ foreach ($rows as $row) {
                 <th class="border border-gray-200 px-3 py-2">은행명</th>
                 <th class="border border-gray-200 px-3 py-2">계좌번호</th>
                 <th class="border border-gray-200 px-3 py-2">단가</th>
+                <th class="border border-gray-200 px-3 py-2">출력일수</th>
                 <th class="border border-gray-200 px-3 py-2">총 공수</th>
                 <th class="border border-gray-200 px-3 py-2">노무비 반영금액</th>
                 <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
@@ -175,6 +177,7 @@ foreach ($rows as $row) {
                     <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['bank_name']) ? $row['bank_name'] : ''); ?></td>
                     <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['bank_account']) ? $row['bank_account'] : ''); ?></td>
                     <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(number_format(isset($row['wage_rate']) ? (float)$row['wage_rate'] : 0)); ?></td>
+                    <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(number_format(isset($row['work_days_count']) ? (int)$row['work_days_count'] : 0)); ?></td>
                     <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(rtrim(rtrim(number_format(isset($row['total_gongsu']) ? (float)$row['total_gongsu'] : 0, 2, '.', ''), '0'), '.')); ?></td>
                     <td class="border border-gray-200 px-3 py-2 text-right"><?php echo h(number_format(isset($row['amount']) ? (float)$row['amount'] : 0)); ?></td>
                     <?php for ($d = 1; $d <= $daysInMonth; $d++): ?>
@@ -194,7 +197,7 @@ foreach ($rows as $row) {
                 <?php endforeach; ?>
               <?php else: ?>
                 <tr>
-                  <td colspan="<?php echo h((string)(13 + $daysInMonth)); ?>" class="px-4 py-8 text-center text-sm text-gray-500">조회된 데이터가 없습니다.</td>
+                  <td colspan="<?php echo h((string)(14 + $daysInMonth)); ?>" class="px-4 py-8 text-center text-sm text-gray-500">조회된 데이터가 없습니다.</td>
                 </tr>
               <?php endif; ?>
             </tbody>
@@ -298,7 +301,8 @@ foreach ($rows as $row) {
           <ul class="mt-3 list-disc space-y-1 pl-5 text-xs text-gray-600">
             <li>노무비 기간은 해당 월 1일 ~ 말일 기준입니다.</li>
             <li>공수 수정 승인 완료 값만 반영됩니다.</li>
-            <li>전액 외주비 인원은 제외하고, 분할 인원은 노무비 비율만큼의 금액만 반영됩니다.</li>
+            <li>날짜로 선택한 외주비 기간은 일별 공수, 출력일수, 총공수에서 제외됩니다.</li>
+            <li>전액 외주비 인원은 제외하고, 비율 배분 인원은 노무비 비율만큼의 금액만 반영됩니다.</li>
             <li>엑셀은 업로드한 양식 파일을 그대로 기반으로 생성됩니다.</li>
           </ul>
         </div>
