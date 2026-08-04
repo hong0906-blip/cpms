@@ -671,15 +671,73 @@ class AiExecutiveBriefService
     {
         $canonical = self::canonicalize(array(
             'schema_version'=>(string)$schemaVersion,'model_name'=>(string)$modelName,'target_ym'=>(string)$targetYm,
-            'analysis_date'=>(string)$analysisDate,'output_policy'=>'FREE_TEXT_NO_ARABIC_DIGITS_V2','source_data'=>is_array($sourceData)?$sourceData:array()
+            'analysis_date'=>(string)$analysisDate,'output_policy'=>'FREE_TEXT_NO_ARABIC_DIGITS_V3_EVIDENCE_ENUM','source_data'=>is_array($sourceData)?$sourceData:array()
         ));
         $json = self::encodeData($canonical);
         return is_string($json) ? hash('sha256', $json) : '';
     }
 
-    public static function structuredSchema()
+    private static function enumSchema($type, $values)
     {
-        $stringArray = array('type'=>'array','items'=>array('type'=>'string'));
+        $schema = array('type'=>(string)$type);
+        if (is_array($values) && count($values) > 0) $schema['enum'] = array_values($values);
+        return $schema;
+    }
+
+    private static function groupedEvidenceIdSchema($context)
+    {
+        $groups = array();
+        $companyIds = isset($context['company_evidence']) && is_array($context['company_evidence']) ? array_keys($context['company_evidence']) : array();
+        if (count($companyIds) > 0) {
+            sort($companyIds, SORT_STRING);
+            $groups[] = self::enumSchema('string', $companyIds);
+        }
+        if (isset($context['project_evidence']) && is_array($context['project_evidence'])) {
+            foreach ($context['project_evidence'] as $evidenceMap) {
+                $projectEvidenceIds = is_array($evidenceMap) ? array_keys($evidenceMap) : array();
+                if (count($projectEvidenceIds) < 1) continue;
+                sort($projectEvidenceIds, SORT_STRING);
+                $groups[] = self::enumSchema('string', $projectEvidenceIds);
+            }
+        }
+        if (count($groups) < 1) return array('type'=>'string');
+        if (count($groups) === 1) return $groups[0];
+        return array('anyOf'=>$groups);
+    }
+
+    private static function riskObjectSchema($projectIdSchema, $evidenceIdSchema)
+    {
+        return array('type'=>'object','additionalProperties'=>false,'required'=>array('project_id','severity','risk_type','title','explanation','evidence_ids','recommended_actions'),'properties'=>array(
+            'project_id'=>$projectIdSchema,'severity'=>array('type'=>'string','enum'=>array('WATCH','WARNING','CRITICAL','INSUFFICIENT')),
+            'risk_type'=>array('type'=>'string'),'title'=>array('type'=>'string'),'explanation'=>array('type'=>'string'),'evidence_ids'=>array('type'=>'array','items'=>$evidenceIdSchema),
+            'recommended_actions'=>array('type'=>'array','maxItems'=>3,'items'=>array('type'=>'string'))
+        ));
+    }
+
+    private static function riskItemSchema($context)
+    {
+        $projectIds = isset($context['projects']) && is_array($context['projects']) ? array_keys($context['projects']) : array();
+        if (count($projectIds) < 1) return self::riskObjectSchema(array('type'=>'integer'), array('type'=>'string'));
+        sort($projectIds, SORT_NUMERIC);
+        $variants = array();
+        foreach ($projectIds as $projectId) {
+            $projectEvidenceIds = isset($context['project_evidence'][$projectId]) && is_array($context['project_evidence'][$projectId]) ? array_keys($context['project_evidence'][$projectId]) : array();
+            sort($projectEvidenceIds, SORT_STRING);
+            $variants[] = self::riskObjectSchema(self::enumSchema('integer', array((int)$projectId)), self::enumSchema('string', $projectEvidenceIds));
+        }
+        if (count($variants) === 1) return $variants[0];
+        return array('anyOf'=>$variants);
+    }
+
+    public static function structuredSchema($sourceData = array())
+    {
+        $context = self::collectValidationContext(is_array($sourceData) ? $sourceData : array());
+        $companyEvidenceIds = array_keys($context['company_evidence']);
+        sort($companyEvidenceIds, SORT_STRING);
+        $evidenceIdSchema = self::groupedEvidenceIdSchema($context);
+        $companyEvidenceIdSchema = self::enumSchema('string', $companyEvidenceIds);
+        $evidenceIdArray = array('type'=>'array','items'=>$evidenceIdSchema);
+        $riskItemSchema = self::riskItemSchema($context);
         return array(
             'type'=>'object','additionalProperties'=>false,
             'required'=>array('company_status','headline','executive_summary','executive_summary_evidence_ids','key_metrics','top_risks','positive_signals','check_today','data_limitations','disclaimer'),
@@ -687,13 +745,9 @@ class AiExecutiveBriefService
                 'company_status'=>array('type'=>'string','enum'=>array('NORMAL','WATCH','WARNING','CRITICAL','INSUFFICIENT')),
                 'headline'=>array('type'=>'string'),
                 'executive_summary'=>array('type'=>'string'),
-                'executive_summary_evidence_ids'=>$stringArray,
-                'key_metrics'=>array('type'=>'array','items'=>array('type'=>'object','additionalProperties'=>false,'required'=>array('metric_id','label','interpretation'),'properties'=>array('metric_id'=>array('type'=>'string'),'label'=>array('type'=>'string'),'interpretation'=>array('type'=>'string')))),
-                'top_risks'=>array('type'=>'array','maxItems'=>5,'items'=>array('type'=>'object','additionalProperties'=>false,'required'=>array('project_id','severity','risk_type','title','explanation','evidence_ids','recommended_actions'),'properties'=>array(
-                    'project_id'=>array('type'=>'integer'),'severity'=>array('type'=>'string','enum'=>array('WATCH','WARNING','CRITICAL','INSUFFICIENT')),
-                    'risk_type'=>array('type'=>'string'),'title'=>array('type'=>'string'),'explanation'=>array('type'=>'string'),'evidence_ids'=>$stringArray,
-                    'recommended_actions'=>array('type'=>'array','maxItems'=>3,'items'=>array('type'=>'string'))
-                ))),
+                'executive_summary_evidence_ids'=>$evidenceIdArray,
+                'key_metrics'=>array('type'=>'array','items'=>array('type'=>'object','additionalProperties'=>false,'required'=>array('metric_id','label','interpretation'),'properties'=>array('metric_id'=>$companyEvidenceIdSchema,'label'=>array('type'=>'string'),'interpretation'=>array('type'=>'string')))),
+                'top_risks'=>array('type'=>'array','maxItems'=>5,'items'=>$riskItemSchema),
                 'positive_signals'=>array('type'=>'array','maxItems'=>5,'items'=>array('type'=>'string')),
                 'check_today'=>array('type'=>'array','maxItems'=>7,'items'=>array('type'=>'string')),
                 'data_limitations'=>array('type'=>'array','maxItems'=>7,'items'=>array('type'=>'string')),
@@ -713,6 +767,7 @@ class AiExecutiveBriefService
             . "직원이나 현장 책임자를 비난하지 말고 문제 직원, 태만, 조작, 횡령 등의 표현을 사용하지 마세요. 회계감사나 법률판단처럼 표현하지 마세요.\n"
             . "대표가 바로 확인할 수 있는 행동을 간결하게 제안하고 같은 내용을 반복하지 마세요. 어려운 통계용어는 피하세요.\n"
             . "evidence_ids에는 입력자료에 존재하는 ID만 사용하고 현장은 project_id만 반환하세요. 현장명은 작성하지 말고 해당 현장 또는 확인 대상 현장으로 표현하세요.\n"
+            . "top_risks의 evidence_ids는 반드시 같은 항목의 project_id에 해당하는 현장 evidence_ids를 원문 그대로 복사하세요. 회사 지표나 다른 현장 ID를 넣거나 ID를 새로 만들거나 줄이거나 필드명만 반환하지 마세요.\n"
             . "모든 결과가 CPMS 입력자료와 통계 예측을 설명한 관리 참고자료임을 disclaimer에 포함하세요.";
     }
 
@@ -725,13 +780,13 @@ class AiExecutiveBriefService
             'input'=>array(array('role'=>'user','content'=>array(array('type'=>'input_text','text'=>$inputJson)))),
             'max_output_tokens'=>OpenAiResponsesClient::maxOutputTokens(),
             'reasoning'=>array('effort'=>OpenAiResponsesClient::reasoningEffort()),
-            'text'=>array('format'=>array('type'=>'json_schema','name'=>'cpms_executive_brief','description'=>'CPMS 경영예측 결과를 설명하는 대표용 브리핑','strict'=>true,'schema'=>self::structuredSchema()))
+            'text'=>array('format'=>array('type'=>'json_schema','name'=>'cpms_executive_brief','description'=>'CPMS 경영예측 결과를 설명하는 대표용 브리핑','strict'=>true,'schema'=>self::structuredSchema($sourceData)))
         );
     }
 
     private static function collectValidationContext($sourceData)
     {
-        $context = array('projects'=>array(),'evidence'=>array(),'company_evidence'=>array());
+        $context = array('projects'=>array(),'evidence'=>array(),'company_evidence'=>array(),'project_evidence'=>array());
         if (isset($sourceData['company_metrics']) && is_array($sourceData['company_metrics'])) {
             foreach ($sourceData['company_metrics'] as $metric) if (is_array($metric) && isset($metric['metric_id'])) {
                 $context['evidence'][(string)$metric['metric_id']] = $metric;
@@ -743,7 +798,12 @@ class AiExecutiveBriefService
                 if (!is_array($project) || !isset($project['project_id'])) continue;
                 $id = (int)$project['project_id'];
                 $context['projects'][$id] = isset($project['project_name']) ? (string)$project['project_name'] : '';
-                if (isset($project['evidence']) && is_array($project['evidence'])) foreach ($project['evidence'] as $evidenceRow) if (is_array($evidenceRow) && isset($evidenceRow['metric_id'])) $context['evidence'][(string)$evidenceRow['metric_id']] = $evidenceRow;
+                $context['project_evidence'][$id] = array();
+                if (isset($project['evidence']) && is_array($project['evidence'])) foreach ($project['evidence'] as $evidenceRow) if (is_array($evidenceRow) && isset($evidenceRow['metric_id'])) {
+                    $metricId = (string)$evidenceRow['metric_id'];
+                    $context['evidence'][$metricId] = $evidenceRow;
+                    $context['project_evidence'][$id][$metricId] = true;
+                }
             }
         }
         return $context;
@@ -842,7 +902,10 @@ class AiExecutiveBriefService
             if (!in_array($risk['severity'],array('WATCH','WARNING','CRITICAL','INSUFFICIENT'),true) || !is_string($risk['risk_type']) || !is_string($risk['title']) || !is_string($risk['explanation'])) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks');
             if (self::textLength($risk['risk_type'])>100 || self::textLength($risk['title'])>300 || self::textLength($risk['explanation'])>1500) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks.text');
             if (!is_array($risk['evidence_ids']) || count($risk['evidence_ids'])>20) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks.evidence_ids');
-            foreach ($risk['evidence_ids'] as $evidence) if (!is_string($evidence) || !isset($context['evidence'][$evidence])) return self::validationFailure('EVIDENCE_VALIDATION_FAILED','OpenAI 응답에 확인할 수 없는 근거 ID가 포함되어 있습니다.','top_risks.evidence_ids');
+            foreach ($risk['evidence_ids'] as $evidence) {
+                if (!is_string($evidence) || !isset($context['evidence'][$evidence])) return self::validationFailure('EVIDENCE_VALIDATION_FAILED','OpenAI 응답에 확인할 수 없는 근거 ID가 포함되어 있습니다.','top_risks.evidence_ids');
+                if (!isset($context['project_evidence'][$risk['project_id']][$evidence])) return self::validationFailure('EVIDENCE_VALIDATION_FAILED','OpenAI 응답의 근거 ID가 해당 현장 범위와 일치하지 않습니다.','top_risks.evidence_ids');
+            }
             if (!self::validateStringArray($risk['recommended_actions'],3,500)) return self::validationFailure('SCHEMA_VALIDATION_FAILED','OpenAI 응답 형식을 확인하지 못했습니다.','top_risks.recommended_actions');
         }
         if (self::containsUnsafeText($data)) return self::validationFailure('UNSAFE_TEXT_FAILED','OpenAI 응답에 저장할 수 없는 표현 또는 개인정보 형식이 포함되어 있습니다.','');

@@ -8,6 +8,7 @@ require_once dirname(__DIR__) . '/app/services/AiCostDataGovernanceService.php';
 require_once dirname(__DIR__) . '/app/services/AiForecastAccuracyService.php';
 require_once dirname(__DIR__) . '/app/services/UsageAnalyticsService.php';
 require_once dirname(__DIR__) . '/app/services/AiMemoryService.php';
+require_once dirname(__DIR__) . '/app/services/AiExecutiveBriefService.php';
 
 use App\Services\AiCostDataGovernanceService;
 use App\Services\AiCostForecastV2Service;
@@ -15,6 +16,7 @@ use App\Services\AiForecastAccuracyService;
 use App\Services\AiProjectTypeService;
 use App\Services\UsageAnalyticsService;
 use App\Services\AiMemoryService;
+use App\Services\AiExecutiveBriefService;
 use App\Services\CostChangeService;
 
 date_default_timezone_set('Asia/Seoul');
@@ -109,6 +111,33 @@ $memoryPriority=AiMemoryService::applicationPriority();
 cpms_ai_structure_same('Calculated evidence has highest memory priority', 'CALCULATED_EVIDENCE', $memoryPriority[0]);
 cpms_ai_structure_same('Project memory precedes company memory', 'PROJECT', $memoryPriority[1]);
 cpms_ai_structure_same('Personal preference cannot override company rule', 'PERSONAL', $memoryPriority[3]);
+
+$briefSource = array(
+    'company_metrics'=>array(array('metric_id'=>'company.ceo_index_score')),
+    'projects'=>array(
+        array('project_id'=>7,'project_name'=>'현장 가','evidence'=>array(array('metric_id'=>'project.7.overinput_grade'))),
+        array('project_id'=>8,'project_name'=>'현장 나','evidence'=>array(array('metric_id'=>'project.8.missing_possibility_grade')))
+    )
+);
+$briefSchema = AiExecutiveBriefService::structuredSchema($briefSource);
+$summaryEvidenceGroups = $briefSchema['properties']['executive_summary_evidence_ids']['items']['anyOf'];
+cpms_ai_structure_same('Brief summary company evidence is constrained to source IDs', array('company.ceo_index_score'), $summaryEvidenceGroups[0]['enum']);
+cpms_ai_structure_same('Brief summary project evidence is constrained to source IDs', array('project.7.overinput_grade'), $summaryEvidenceGroups[1]['enum']);
+cpms_ai_structure_same('Brief key metric is constrained to company IDs', array('company.ceo_index_score'), $briefSchema['properties']['key_metrics']['items']['properties']['metric_id']['enum']);
+$riskVariants = $briefSchema['properties']['top_risks']['items']['anyOf'];
+cpms_ai_structure_same('Brief risk project is constrained to source projects', array(7), $riskVariants[0]['properties']['project_id']['enum']);
+cpms_ai_structure_same('Brief risk evidence is constrained to the same project', array('project.7.overinput_grade'), $riskVariants[0]['properties']['evidence_ids']['items']['enum']);
+$crossProjectBrief = array(
+    'company_status'=>'WATCH','headline'=>'주의','executive_summary'=>'확인이 필요합니다','executive_summary_evidence_ids'=>array(),
+    'key_metrics'=>array(),'top_risks'=>array(array(
+        'project_id'=>7,'severity'=>'WATCH','risk_type'=>'확인 필요','title'=>'확인 대상','explanation'=>'점검이 필요합니다',
+        'evidence_ids'=>array('project.8.missing_possibility_grade'),'recommended_actions'=>array()
+    )),
+    'positive_signals'=>array(),'check_today'=>array(),'data_limitations'=>array(),'disclaimer'=>'관리 참고자료입니다'
+);
+$crossProjectValidation = AiExecutiveBriefService::validateStructuredOutput($crossProjectBrief, $briefSource);
+cpms_ai_structure_same('Brief rejects evidence from another project', 'EVIDENCE_VALIDATION_FAILED', $crossProjectValidation['error_code']);
+cpms_ai_structure_same('Brief reports scoped evidence path', 'top_risks.evidence_ids', $crossProjectValidation['field_path']);
 
 if (count($failures) > 0) {
     fwrite(STDERR, "FAIL: " . count($failures) . " / " . $checks . "\n");
