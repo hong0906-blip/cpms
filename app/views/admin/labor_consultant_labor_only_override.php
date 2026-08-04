@@ -377,6 +377,251 @@ if (!function_exists('cpms_labor_consultant_prepare_target_rows')) {
     }
 }
 
+
+/**
+ * 노무사 양식의 근로자 2행 구조를 감지합니다.
+ * - 위 행: 출력일수(근무한 날은 1)
+ * - 아래 행: 총공수(1, 1.5 등 실제 공수)
+ * - 출력월/공종/임금단가/지급총액/계좌정보/인력사업체명 등은 두 행 세로 병합
+ */
+if (!function_exists('cpms_labor_consultant_detect_worker_block_height')) {
+    function cpms_labor_consultant_detect_worker_block_height($sheetDoc, $sampleRowNum) {
+        $sampleRowNum = (int)$sampleRowNum;
+        if (!($sheetDoc instanceof DOMDocument) || $sampleRowNum <= 0) return 1;
+
+        $xpath = new DOMXPath($sheetDoc);
+        $mergeNodes = $xpath->query('/*[local-name()="worksheet"]/*[local-name()="mergeCells"]/*[local-name()="mergeCell"]');
+        $verticalMergeCount = 0;
+        foreach ($mergeNodes as $mergeNode) {
+            $ref = strtoupper(trim((string)$mergeNode->getAttribute('ref')));
+            if (!preg_match('/^([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)$/', $ref, $m)) continue;
+            $startRow = (int)$m[2];
+            $endRow = (int)$m[4];
+            if ($startRow === $sampleRowNum && $endRow === $sampleRowNum + 1) {
+                $verticalMergeCount++;
+            }
+        }
+
+        // 공통정보 열이 여러 개 세로 병합된 양식만 2행 구조로 판단합니다.
+        return $verticalMergeCount >= 2 ? 2 : 1;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_capture_block_merges')) {
+    function cpms_labor_consultant_capture_block_merges($sheetDoc, $startRow, $blockHeight) {
+        $result = array();
+        $startRow = (int)$startRow;
+        $blockHeight = (int)$blockHeight;
+        $endRow = $startRow + $blockHeight - 1;
+        if (!($sheetDoc instanceof DOMDocument) || $startRow <= 0 || $blockHeight <= 0) return $result;
+
+        $xpath = new DOMXPath($sheetDoc);
+        $mergeNodes = $xpath->query('/*[local-name()="worksheet"]/*[local-name()="mergeCells"]/*[local-name()="mergeCell"]');
+        foreach ($mergeNodes as $mergeNode) {
+            $ref = strtoupper(trim((string)$mergeNode->getAttribute('ref')));
+            if (!preg_match('/^([A-Z]+)([0-9]+):([A-Z]+)([0-9]+)$/', $ref, $m)) continue;
+            $r1 = (int)$m[2];
+            $r2 = (int)$m[4];
+            if ($r1 < $startRow || $r2 > $endRow) continue;
+            $result[] = array(
+                'c1' => $m[1],
+                'c2' => $m[3],
+                'r1_offset' => $r1 - $startRow,
+                'r2_offset' => $r2 - $startRow
+            );
+        }
+        return $result;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_prepare_target_row_blocks')) {
+    function cpms_labor_consultant_prepare_target_row_blocks($sheetDoc, $headerRow, $dataCount) {
+        $blocks = array();
+        $dataCount = (int)$dataCount;
+        if (!($sheetDoc instanceof DOMDocument) || $dataCount <= 0) return $blocks;
+
+        $xpath = new DOMXPath($sheetDoc);
+        $sheetDataList = $xpath->query('//*[local-name()="worksheet"]/*[local-name()="sheetData"]');
+        if (!$sheetDataList || $sheetDataList->length < 1) return $blocks;
+        $sheetData = $sheetDataList->item(0);
+
+        $sampleRowNode = null;
+        $sampleRowNum = (int)$headerRow + 1;
+        $rowNodes = $xpath->query('./*[local-name()="row"]', $sheetData);
+        foreach ($rowNodes as $rowNode) {
+            $rowNum = (int)$rowNode->getAttribute('r');
+            if ($rowNum >= $sampleRowNum) {
+                $sampleRowNode = $rowNode;
+                $sampleRowNum = $rowNum;
+                break;
+            }
+        }
+        if (!($sampleRowNode instanceof DOMElement)) return $blocks;
+
+        $blockHeight = cpms_labor_consultant_detect_worker_block_height($sheetDoc, $sampleRowNum);
+        $sampleRows = array($sampleRowNode);
+        if ($blockHeight === 2) {
+            $secondRow = cpms_labor_consultant_find_row_node($sheetDoc, $sampleRowNum + 1);
+            if ($secondRow instanceof DOMElement) {
+                $sampleRows[] = $secondRow;
+            } else {
+                $blockHeight = 1;
+            }
+        }
+
+        $sampleEndRow = $sampleRowNum + $blockHeight - 1;
+        $mergeSpecs = cpms_labor_consultant_capture_block_merges($sheetDoc, $sampleRowNum, $blockHeight);
+        $offset = ($dataCount - 1) * $blockHeight;
+
+        // 원본 근로자 블록 아래의 소계/합계 행과 병합을 블록 높이만큼 정확히 이동합니다.
+        cpms_labor_consultant_shift_sheet_rows($sheetDoc, $sampleEndRow, $offset);
+        cpms_labor_consultant_shift_merged_cells($sheetDoc, $sampleEndRow, $offset);
+
+        for ($workerIndex = 0; $workerIndex < $dataCount; $workerIndex++) {
+            $targetStartRow = $sampleRowNum + ($workerIndex * $blockHeight);
+            $blockRows = array();
+
+            if ($workerIndex === 0) {
+                $blockRows = $sampleRows;
+            } else {
+                $insertAfter = null;
+                if (count($blocks) > 0) {
+                    $previous = $blocks[count($blocks) - 1];
+                    $insertAfter = $previous[count($previous) - 1];
+                }
+
+                for ($rowOffset = 0; $rowOffset < $blockHeight; $rowOffset++) {
+                    $clone = $sampleRows[$rowOffset]->cloneNode(true);
+                    cpms_labor_consultant_reindex_row_node($clone, $targetStartRow + $rowOffset);
+                    if ($insertAfter && $insertAfter->nextSibling) {
+                        $sheetData->insertBefore($clone, $insertAfter->nextSibling);
+                    } else {
+                        $sheetData->appendChild($clone);
+                    }
+                    $blockRows[] = $clone;
+                    $insertAfter = $clone;
+                }
+
+                foreach ($mergeSpecs as $mergeSpec) {
+                    $ref = $mergeSpec['c1'] . ($targetStartRow + (int)$mergeSpec['r1_offset'])
+                        . ':' . $mergeSpec['c2'] . ($targetStartRow + (int)$mergeSpec['r2_offset']);
+                    cpms_labor_consultant_append_merge_ref($sheetDoc, $ref);
+                }
+            }
+
+            $blocks[] = $blockRows;
+        }
+
+        cpms_labor_consultant_update_dimension($sheetDoc);
+        return $blocks;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_clear_block_column')) {
+    function cpms_labor_consultant_clear_block_column($sheetDoc, $rowNode, $colIndex) {
+        $cellNode = cpms_labor_consultant_find_or_create_cell($sheetDoc, $rowNode, (int)$colIndex);
+        if ($cellNode instanceof DOMElement) cpms_labor_consultant_clear_cell_value($cellNode);
+    }
+}
+
+/**
+ * 노무사 양식에 데이터를 입력합니다.
+ * 2행 양식이면 위 행에는 출력일수 1, 아래 행에는 실제 총공수를 기록합니다.
+ */
+if (!function_exists('cpms_labor_consultant_fill_sheet_rows')) {
+    function cpms_labor_consultant_fill_sheet_rows($sheetDoc, $headers, $dataRows) {
+        $headerRow = isset($headers['row']) ? (int)$headers['row'] : 0;
+        $columns = isset($headers['columns']) && is_array($headers['columns']) ? $headers['columns'] : array();
+        if ($headerRow <= 0 || count($columns) === 0 || !is_array($dataRows)) return false;
+
+        $blocks = cpms_labor_consultant_prepare_target_row_blocks($sheetDoc, $headerRow, count($dataRows));
+        if (count($blocks) !== count($dataRows)) return false;
+
+        foreach ($blocks as $idx => $blockRows) {
+            if (!is_array($blockRows) || count($blockRows) < 1) continue;
+            $topRow = $blockRows[0];
+            $bottomRow = count($blockRows) > 1 ? $blockRows[1] : null;
+            $rowData = isset($dataRows[$idx]) && is_array($dataRows[$idx]) ? $dataRows[$idx] : array();
+
+            // 입력 대상 열만 비우고, 양식의 고정문구/수식/서식은 그대로 둡니다.
+            foreach ($columns as $columnKey => $columnIndex) {
+                cpms_labor_consultant_clear_block_column($sheetDoc, $topRow, $columnIndex);
+                if ($bottomRow instanceof DOMElement) {
+                    cpms_labor_consultant_clear_block_column($sheetDoc, $bottomRow, $columnIndex);
+                }
+            }
+
+            $textFields = array(
+                'project_name' => 'project_name',
+                'worker_name' => 'worker_name',
+                'role' => 'role',
+                'phone' => 'phone',
+                'resident_no' => 'resident_no',
+                'address' => 'address',
+                'account_holder' => 'account_holder',
+                'bank_name' => 'bank_name',
+                'bank_account' => 'bank_account',
+                'company_name' => 'company_name'
+            );
+            foreach ($textFields as $columnKey => $dataKey) {
+                if (!isset($columns[$columnKey])) continue;
+                cpms_labor_consultant_set_cell_value(
+                    $sheetDoc,
+                    $topRow,
+                    $columns[$columnKey],
+                    isset($rowData[$dataKey]) ? $rowData[$dataKey] : '',
+                    false
+                );
+            }
+
+            if (isset($columns['wage_rate'])) {
+                cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $columns['wage_rate'], isset($rowData['wage_rate']) ? $rowData['wage_rate'] : '', true);
+            }
+            if (isset($columns['amount'])) {
+                cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $columns['amount'], isset($rowData['amount']) ? $rowData['amount'] : '', true);
+            }
+
+            $outputDays = isset($rowData['output_days']) ? $rowData['output_days'] : (isset($rowData['work_days_count']) ? $rowData['work_days_count'] : '');
+            $totalGongsu = isset($rowData['total_gongsu']) ? $rowData['total_gongsu'] : '';
+
+            if ($bottomRow instanceof DOMElement) {
+                // 양식이 같은 열의 위/아래 셀로 출력일수와 총공수를 표시하는 경우입니다.
+                if (isset($columns['output_days'])) {
+                    cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $columns['output_days'], $outputDays, true);
+                    cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $columns['output_days'], $totalGongsu, true);
+                } else if (isset($columns['total_gongsu'])) {
+                    cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $columns['total_gongsu'], $outputDays, true);
+                    cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $columns['total_gongsu'], $totalGongsu, true);
+                }
+            } else {
+                if (isset($columns['output_days'])) {
+                    cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $columns['output_days'], $outputDays, true);
+                }
+                if (isset($columns['total_gongsu'])) {
+                    cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $columns['total_gongsu'], $totalGongsu, true);
+                }
+            }
+
+            if (isset($rowData['days']) && is_array($rowData['days'])) {
+                foreach ($rowData['days'] as $day => $value) {
+                    $dayKey = 'day_' . (int)$day;
+                    if (!isset($columns[$dayKey])) continue;
+                    $hasWork = ($value !== '' && is_numeric($value) && (float)$value > 0);
+                    if ($bottomRow instanceof DOMElement) {
+                        cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $columns[$dayKey], $hasWork ? 1 : '', $hasWork);
+                        cpms_labor_consultant_set_cell_value($sheetDoc, $bottomRow, $columns[$dayKey], $hasWork ? $value : '', $hasWork);
+                    } else {
+                        cpms_labor_consultant_set_cell_value($sheetDoc, $topRow, $columns[$dayKey], $value, ($value !== ''));
+                    }
+                }
+            }
+        }
+
+        cpms_labor_consultant_update_dimension($sheetDoc);
+        return true;
+    }
+}
+
 /**
  * XLSX 셀 주소를 행/열 번호로 변환합니다.
  * 파일: app/views/admin/labor_consultant_labor_only_override.php
@@ -947,7 +1192,7 @@ if (!function_exists('cpms_labor_consultant_fix_export_workbook')) {
                 $clone = $xfNodes[$baseId]->cloneNode(true);
                 // General 형식. 1.0 또는 1. 대신 1로, 1.5는 1.5로 표시됩니다.
                 $clone->setAttribute('numFmtId', '0');
-                $clone->setAttribute('applyNumberFormat', '0');
+                $clone->setAttribute('applyNumberFormat', '1');
                 $newStyleId = count($xfNodes);
                 $cellXfs->appendChild($clone);
                 $xfNodes[] = $clone;
