@@ -12,7 +12,7 @@ $remaining=isset($full['remaining_count'])?(int)$full['remaining_count']:0;
 $percent=$total>0?(int)floor(($processed/$total)*100):0;
 if ($percent>100) $percent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260805_4">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260805_5">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -41,7 +41,7 @@ if ($percent>100) $percent=100;
       </div>
 
       <div class="pm-settings-card pm-import-card" data-import-active="<?php echo !empty($full['active'])?'1':'0'; ?>" data-import-paused="<?php echo !empty($full['paused'])?'1':'0'; ?>">
-        <div class="pm-card-title"><div><strong>전체 메일 가져오기</strong><span>버튼은 한 번만 누르면 됩니다. 받은메일함·보낸메일함·사용자 메일함을 자동으로 이어서 가져옵니다.</span></div></div>
+        <div class="pm-card-title"><div><strong>전체 메일 가져오기</strong><span>버튼은 한 번만 누르면 됩니다. 받은메일함·네이버 보낸메일함·사용자 메일함을 자동으로 이어서 가져옵니다.</span></div></div>
         <div class="pm-progress-wrap"><div class="pm-progress-track"><span style="width:<?php echo $percent; ?>%"></span></div><div class="pm-progress-label"><strong><?php echo $percent; ?>%</strong><span><?php echo number_format($processed); ?> / <?php echo number_format($total); ?>건</span></div></div>
         <div class="pm-sync-state-list">
           <div><span>상태</span><strong><?php echo !empty($full['active'])?(!empty($full['paused'])?'일시중지':'가져오는 중'):(!empty($full['cancelled'])?'취소됨':($total>0&&$remaining===0?'완료':'대기')); ?></strong></div>
@@ -57,7 +57,7 @@ if ($percent>100) $percent=100;
           <button type="button" class="pm-btn pm-btn-light" data-full-import="resume"><i data-lucide="play"></i> 다시 시작</button>
           <button type="button" class="pm-btn pm-btn-danger" data-full-import="cancel"><i data-lucide="square"></i> 취소</button>
         </div>
-        <p class="pm-help-text">내부에서는 서버 시간초과를 막기 위해 여러 묶음으로 처리하지만, 사용자가 계속 버튼을 누를 필요는 없습니다. 화면을 닫아도 진행 위치가 저장됩니다.</p>
+        <p class="pm-help-text">내부에서는 서버 시간초과를 막기 위해 여러 묶음으로 처리하지만, 사용자가 계속 버튼을 누를 필요는 없습니다. 화면을 닫아도 진행 위치가 저장됩니다. Gmail에서 보낸 메일은 네이버 보낸메일함이 아니라 Gmail 보낸편지함에 남습니다.</p>
       </div>
 
       <div class="pm-settings-card">
@@ -68,6 +68,12 @@ if ($percent>100) $percent=100;
         <div class="pm-settings-actions"><button type="button" class="pm-btn pm-btn-primary" data-run-automation><i data-lucide="refresh-cw"></i> 지금 자동동기화 실행</button><form method="post" action="public_mail_action.php" onsubmit="return confirm('보안주소를 새로 만들면 기존 주소는 작동하지 않습니다. 계속할까요?');"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="regenerate_cron_token"><button type="submit" class="pm-btn pm-btn-light"><i data-lucide="key-round"></i> 보안주소 새로 만들기</button></form></div>
       </div>
 
+      <div class="pm-settings-card">
+        <div class="pm-card-title"><div><strong>첨부파일 저장정책</strong><span>메일 첨부파일을 CPMS 서버 디스크에 보관하지 않습니다.</span></div><span class="pm-status-dot is-on">서버 무저장</span></div>
+        <div class="pm-sync-state-list"><div><span>내 PC 다운로드</span><strong>네이버 → 브라우저 직접 전송</strong></div><div><span>Google Drive 저장</span><strong>네이버 → Drive 분할 전송</strong></div><div><span>CPMS 서버 저장</span><strong>사용 안 함</strong></div><div><span>기존 임시 캐시</span><strong>업데이트 시 자동 정리</strong></div></div>
+        <p class="pm-help-text">서버에는 메일 제목·발신자·분류정보와 Google Drive 파일 ID만 남습니다. 첨부파일 원본은 저장하지 않습니다.</p>
+      </div>
+
       <div class="pm-settings-card pm-danger-zone">
         <div class="pm-card-title"><div><strong>CPMS 메일정보 초기화</strong><span>네이버 원본메일은 삭제되지 않습니다.</span></div></div>
         <form method="post" action="public_mail_action.php" onsubmit="return confirm('CPMS에 저장된 분류와 처리정보를 초기화하시겠습니까?');"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="reset_mail_data"><label>확인 문구<input type="text" name="confirmation" placeholder="초기화 입력"></label><button type="submit" class="pm-btn pm-btn-danger"><i data-lucide="trash-2"></i> CPMS 메일정보 초기화</button></form>
@@ -75,4 +81,4 @@ if ($percent>100) $percent=100;
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260805_4"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260805_5"></script>

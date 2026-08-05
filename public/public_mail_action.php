@@ -77,6 +77,20 @@ try {
         PublicMailWebHelper::redirectWithMessage('public_mail.php?message='.rawurlencode($messageKey),'success',$result['message']);
     }
 
+    if ($action==='save_attachment_drive') {
+        $messageKey=isset($_POST['message_key'])?trim((string)$_POST['message_key']):'';
+        $partId=isset($_POST['part_id'])?trim((string)$_POST['part_id']):'';
+        $projectId=isset($_POST['project_id'])?(int)$_POST['project_id']:0;
+        if ($messageKey===''||$partId==='') throw new RuntimeException('Google Drive에 저장할 첨부파일을 확인할 수 없습니다.');
+        if (function_exists('session_write_close')) @session_write_close();
+        @set_time_limit(0);
+        @ignore_user_abort(true);
+        $record=$service->saveAttachmentToDrive($messageKey,$partId,$projectId,$currentUser);
+        $result=array('ok'=>true,'message'=>'첨부파일을 Google Drive에 저장했습니다.','record'=>$record);
+        if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
+        PublicMailWebHelper::redirectWithMessage('public_mail.php?message='.rawurlencode($messageKey),'success',$result['message']);
+    }
+
     if ($action==='repair_metadata') {
         PublicMailWebHelper::requireAdmin(); $repaired=$service->repairBrokenMetadataBatch(isset($_POST['limit'])?(int)$_POST['limit']:20);
         $result=array('ok'=>true,'repaired_count'=>$repaired,'message'=>$repaired>0?$repaired.'건의 제목과 본문 미리보기를 복구했습니다.':'추가로 복구할 메일이 없습니다.');

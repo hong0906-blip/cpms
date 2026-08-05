@@ -35,7 +35,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
     return 'public_mail.php?' . http_build_query($query, '', '&');
 };
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260805_4">
+<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260805_5">
 
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-csrf-token="<?php echo call_user_func($esc, $csrfToken); ?>">
     <div class="public-mail-shell">
@@ -101,6 +101,13 @@ $buildUrl = function ($changes) use ($filters, $page) {
                 <span>미처리</span><strong><?php echo (int)$counts['unfinished']; ?></strong><small>완료 전 메일</small>
             </a>
         </section>
+
+        <nav class="pm-mailbox-tabs" aria-label="네이버 메일함 구분">
+            <a class="<?php echo empty($filters['mailbox_type']) ? 'is-active' : ''; ?>" href="<?php echo call_user_func($esc,$buildUrl(array('mailbox_type'=>null,'mailbox'=>null,'page'=>1))); ?>"><i data-lucide="mails"></i> 전체메일</a>
+            <a class="<?php echo isset($filters['mailbox_type'])&&$filters['mailbox_type']==='inbox' ? 'is-active' : ''; ?>" href="<?php echo call_user_func($esc,$buildUrl(array('mailbox_type'=>'inbox','mailbox'=>null,'page'=>1))); ?>"><i data-lucide="inbox"></i> 받은메일함</a>
+            <a class="<?php echo isset($filters['mailbox_type'])&&$filters['mailbox_type']==='sent' ? 'is-active' : ''; ?>" href="<?php echo call_user_func($esc,$buildUrl(array('mailbox_type'=>'sent','mailbox'=>null,'page'=>1))); ?>"><i data-lucide="send"></i> 보낸메일함</a>
+            <a class="<?php echo isset($filters['mailbox_type'])&&$filters['mailbox_type']==='custom' ? 'is-active' : ''; ?>" href="<?php echo call_user_func($esc,$buildUrl(array('mailbox_type'=>'custom','mailbox'=>null,'page'=>1))); ?>"><i data-lucide="folder"></i> 사용자 메일함</a>
+        </nav>
 
         <section class="pm-filter-card">
             <form method="get" action="public_mail.php" class="pm-filter-form">
@@ -269,13 +276,27 @@ $buildUrl = function ($changes) use ($filters, $page) {
 
                         <?php if (!empty($detail['attachments'])): ?>
                             <div class="pm-attachments">
-                                <strong>첨부파일</strong>
+                                <div class="pm-attachments-title"><strong>첨부파일</strong><span>파일 자체는 CPMS 서버에 저장하지 않습니다.</span></div>
                                 <?php foreach ($detail['attachments'] as $attachment): ?>
-                                    <a data-mail-attachment-download target="pmMailDownloadFrame" href="<?php echo call_user_func($esc, base_url()); ?>/public_mail_attachment.php?message=<?php echo rawurlencode($detail['message_key']); ?>&part=<?php echo rawurlencode($attachment['part_id']); ?>">
-                                        <i data-lucide="paperclip"></i>
-                                        <span><?php echo call_user_func($esc, $attachment['filename']); ?></span>
-                                        <small><?php echo number_format((int)$attachment['size']); ?> bytes</small>
-                                    </a>
+                                    <?php
+                                    $savedDriveRecord=null;
+                                    if (!empty($detail['drive_records'])&&is_array($detail['drive_records'])) {
+                                        foreach ($detail['drive_records'] as $candidateRecord) {
+                                            if (is_array($candidateRecord)&&isset($candidateRecord['message_key'],$candidateRecord['part_id'])&&(string)$candidateRecord['message_key']===(string)$detail['message_key']&&(string)$candidateRecord['part_id']===(string)$attachment['part_id']) { $savedDriveRecord=$candidateRecord; break; }
+                                        }
+                                    }
+                                    ?>
+                                    <div class="pm-attachment-row <?php echo !empty($attachment['is_large'])?'is-large':''; ?>">
+                                        <div class="pm-attachment-info">
+                                            <i data-lucide="<?php echo !empty($attachment['is_large'])?'hard-drive-download':'paperclip'; ?>"></i>
+                                            <div><span><?php echo call_user_func($esc, $attachment['filename']); ?></span><small><?php echo !empty($attachment['is_large'])?'네이버 대용량 첨부':((int)$attachment['size']>0?number_format((int)$attachment['size']).' bytes':'용량 확인 중'); ?></small></div>
+                                        </div>
+                                        <div class="pm-attachment-actions">
+                                            <a class="pm-btn pm-btn-light" data-mail-attachment-download target="<?php echo !empty($attachment['is_large'])?'_blank':'pmMailDownloadFrame'; ?>" <?php echo !empty($attachment['is_large'])?'rel="noopener noreferrer"':''; ?> href="<?php echo call_user_func($esc, base_url()); ?>/public_mail_attachment.php?message=<?php echo rawurlencode($detail['message_key']); ?>&part=<?php echo rawurlencode($attachment['part_id']); ?>"><i data-lucide="download"></i> 내 PC로 다운로드</a>
+                                            <button type="button" class="pm-btn pm-btn-drive" data-save-attachment-drive data-message-key="<?php echo call_user_func($esc,$detail['message_key']); ?>" data-part-id="<?php echo call_user_func($esc,$attachment['part_id']); ?>" data-project-id="<?php echo call_user_func($esc,$selectedProjectId); ?>"><i data-lucide="cloud-upload"></i> Google Drive에 저장</button>
+                                            <?php if (is_array($savedDriveRecord)&&!empty($savedDriveRecord['drive_web_view_link'])): ?><a class="pm-btn pm-btn-success" target="_blank" rel="noopener noreferrer" href="<?php echo call_user_func($esc,$savedDriveRecord['drive_web_view_link']); ?>"><i data-lucide="external-link"></i> Drive에서 보기</a><?php endif; ?>
+                                        </div>
+                                    </div>
                                 <?php endforeach; ?>
                             </div>
                         <?php endif; ?>
@@ -437,4 +458,4 @@ $buildUrl = function ($changes) use ($filters, $page) {
 </div>
 
 <iframe name="pmMailDownloadFrame" title="첨부파일 다운로드" class="pm-download-frame" aria-hidden="true"></iframe>
-<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260805_4"></script>
+<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260805_5"></script>

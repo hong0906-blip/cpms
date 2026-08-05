@@ -81,7 +81,7 @@ function pm_install_patch_sidebar($sidebarPath)
 
     $variableBlock = "\n/* CPMS_PUBLIC_MAIL_VARIABLE_START */\n"
         . "\$publicMailMenu = '네이버 메일';\n"
-        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260805_4';\n"
+        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260805_5';\n"
         . "/* CPMS_PUBLIC_MAIL_VARIABLE_END */";
 
     $itemBlock = "/* CPMS_PUBLIC_MAIL_ITEM_START */\n"
@@ -353,9 +353,12 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
 }
 
 $requiredFiles = array(
+    'app/services/GoogleDriveHelper.php',
     'app/services/PublicMailStorageService.php',
     'app/services/PublicMailImapClient.php',
     'app/services/PublicMailClassifierService.php',
+    'app/services/PublicMailLargeAttachmentService.php',
+    'app/services/PublicMailDriveService.php',
     'app/services/PublicMailService.php',
     'app/services/PublicMailWebHelper.php',
     'app/views/public_mail/index.php',
@@ -398,7 +401,7 @@ $latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '�
 <div class="wrap">
     <div class="card">
         <h1>CPMS 네이버 메일 설치</h1>
-        <p class="sub">파일 확인 후 사이드바에 네이버 대표 N 아이콘과 1분 자동확인을 설치합니다. 24시간 자동수집은 연동 설정 화면의 웹 자동동기화 주소를 호스팅업체 예약작업에 등록합니다.</p>
+        <p class="sub">파일 확인 후 네이버 대표 N 아이콘, 보낸메일함, 대용량 첨부, 서버 무저장 다운로드와 Google Drive 저장 기능을 설치합니다. 24시간 자동수집은 연동 설정 화면의 웹 자동동기화 주소를 호스팅업체 예약작업에 등록합니다.</p>
 
         <?php if ($message !== ''): ?>
             <div class="alert <?php echo $messageType === 'error' ? 'error' : 'success'; ?>"><?php echo pm_install_h($message); ?><?php echo $backupPath !== '' ? '<br>백업: ' . pm_install_h($backupPath) : ''; ?></div>

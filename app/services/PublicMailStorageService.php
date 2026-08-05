@@ -2,8 +2,9 @@
 /**
  * 파일 경로: C:\www\cpms\app\services\PublicMailStorageService.php
  *
- * 네이버 메일 설정, 메일 목록, 처리상태, 전체수집 진행상태와 임시 캐시를
- * JSON 파일로 안전하게 저장합니다. PHP 5.6 호환 코드입니다.
+ * 네이버 메일 설정, 메일 목록, 처리상태, 전체수집 진행상태와
+ * Google Drive 저장 메타데이터를 JSON으로 관리합니다.
+ * 첨부파일 원본은 서버에 저장하지 않습니다. PHP 5.6 호환 코드입니다.
  */
 
 namespace App\Services;
@@ -15,6 +16,7 @@ class PublicMailStorageService
     const WORKFLOW_FILE = 'workflow.json';
     const SYNC_FILE = 'sync_state.json';
     const KEY_FILE = 'secret.key';
+    const DRIVE_RECORDS_FILE = 'drive_records.json';
 
     public static function rootPath()
     {
@@ -40,7 +42,8 @@ class PublicMailStorageService
             'include_spam' => false,
             'include_trash' => false,
             'updated_at' => '',
-            'updated_by' => ''
+            'updated_by' => '',
+            'store_attachment_cache' => false
         );
     }
 
@@ -88,7 +91,8 @@ class PublicMailStorageService
             self::SETTINGS_FILE => self::settingsDefaults(),
             self::MESSAGES_FILE => array(),
             self::WORKFLOW_FILE => array(),
-            self::SYNC_FILE => self::syncDefaults()
+            self::SYNC_FILE => self::syncDefaults(),
+            self::DRIVE_RECORDS_FILE => array()
         );
         foreach ($defaults as $fileName => $defaultValue) {
             $path = $root . DIRECTORY_SEPARATOR . $fileName;
@@ -96,6 +100,7 @@ class PublicMailStorageService
         }
         self::ensureEncryptionKey();
         self::ensureCronToken();
+        self::cleanupLegacyAttachmentCaches();
         return $root;
     }
 
@@ -153,7 +158,8 @@ class PublicMailStorageService
             'include_spam' => !empty($input['include_spam']),
             'include_trash' => !empty($input['include_trash']),
             'updated_at' => date('Y-m-d H:i:s'),
-            'updated_by' => (string)$updatedBy
+            'updated_by' => (string)$updatedBy,
+            'store_attachment_cache' => false
         );
         self::writeJsonFile(self::path(self::SETTINGS_FILE), $settings);
         return self::getSettings(false);
@@ -325,6 +331,7 @@ class PublicMailStorageService
         self::ensureStorage();
         self::writeJsonFile(self::path(self::MESSAGES_FILE), array());
         self::writeJsonFile(self::path(self::WORKFLOW_FILE), array());
+        self::writeJsonFile(self::path(self::DRIVE_RECORDS_FILE), array());
         self::writeJsonFile(self::path(self::SYNC_FILE), self::syncDefaults());
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . 'raw_cache');
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . 'attachment_cache');
@@ -332,41 +339,22 @@ class PublicMailStorageService
 
     public static function getCachedRawMessage($messageKey, $maxAgeSeconds)
     {
-        $path = self::rawCachePath($messageKey);
-        return self::readFreshCache($path, $maxAgeSeconds);
+        return '';
     }
 
     public static function saveCachedRawMessage($messageKey, $raw)
     {
-        $raw = (string)$raw;
-        if ($raw === '') return false;
-        $ok = self::writeCache(self::rawCachePath($messageKey), $raw);
-        self::cleanupCache('raw_cache', 21600, 20);
-        return $ok;
+        return false;
     }
 
     public static function getCachedAttachment($messageKey, $partId, $maxAgeSeconds)
     {
-        $path = self::attachmentCachePath($messageKey, $partId);
-        $content = self::readFreshCache($path . '.bin', $maxAgeSeconds);
-        if ($content === '') return null;
-        $meta = self::readJsonFile($path . '.json', array());
-        if (!is_array($meta)) $meta = array();
-        $meta['content'] = $content;
-        return $meta;
+        return null;
     }
 
     public static function saveCachedAttachment($messageKey, $partId, $attachment)
     {
-        if (!is_array($attachment) || !isset($attachment['content'])) return false;
-        $base = self::attachmentCachePath($messageKey, $partId);
-        $content = (string)$attachment['content'];
-        $meta = $attachment;
-        unset($meta['content']);
-        if (!self::writeCache($base . '.bin', $content)) return false;
-        self::writeJsonFile($base . '.json', $meta);
-        self::cleanupCache('attachment_cache', 21600, 40);
-        return true;
+        return false;
     }
 
     private static function rawCachePath($messageKey)
@@ -427,6 +415,42 @@ class PublicMailStorageService
         if (!is_dir($dir)) return;
         $files = @glob($dir . DIRECTORY_SEPARATOR . '*');
         if (is_array($files)) foreach ($files as $file) if (is_file($file)) @unlink($file);
+    }
+
+
+    public static function getDriveRecords()
+    {
+        self::ensureStorage();
+        $records = self::readJsonFile(self::path(self::DRIVE_RECORDS_FILE), array());
+        return is_array($records) ? $records : array();
+    }
+
+    public static function saveDriveRecord($record)
+    {
+        if (!is_array($record) || empty($record['record_id'])) throw new \InvalidArgumentException('Google Drive 저장기록이 올바르지 않습니다.');
+        $records = self::getDriveRecords();
+        $records[(string)$record['record_id']] = $record;
+        self::writeJsonFile(self::path(self::DRIVE_RECORDS_FILE), $records);
+        return $record;
+    }
+
+    public static function findDriveRecord($messageKey, $partId)
+    {
+        $records = self::getDriveRecords();
+        foreach ($records as $record) {
+            if (!is_array($record)) continue;
+            if (isset($record['message_key'], $record['part_id']) && (string)$record['message_key'] === (string)$messageKey && (string)$record['part_id'] === (string)$partId) return $record;
+        }
+        return null;
+    }
+
+    public static function cleanupLegacyAttachmentCaches()
+    {
+        $root = self::rootPath();
+        foreach (array('attachment_cache','raw_cache') as $name) {
+            $dir = $root . DIRECTORY_SEPARATOR . $name;
+            if (is_dir($dir)) self::cleanupDirectory($dir);
+        }
     }
 
     public static function acquireLock($name)

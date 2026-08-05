@@ -39,9 +39,42 @@
             if(!target||target===document)return;
             event.preventDefault(); event.stopPropagation(); if(event.stopImmediatePropagation) event.stopImmediatePropagation();
             hideLoading();
+            if((target.getAttribute('target')||'')==='_blank'){
+                var opened=window.open(target.href,'_blank','noopener,noreferrer');
+                if(opened) try{opened.opener=null;}catch(ignore){}
+                return;
+            }
             var frame=document.querySelector('iframe[name="pmMailDownloadFrame"]');
             if(!frame){ frame=document.createElement('iframe'); frame.name='pmMailDownloadFrame'; frame.className='pm-download-frame'; frame.setAttribute('aria-hidden','true'); document.body.appendChild(frame); }
             frame.src=target.href;
+        },true);
+    }
+
+
+    function showDriveProgress(message) {
+        hideDriveProgress();
+        var box=document.createElement('div'); box.className='pm-drive-progress'; box.setAttribute('data-drive-progress','1');
+        box.innerHTML='<strong>Google Drive 저장 중</strong><span>'+escapeHtml(message||'첨부파일을 서버에 보관하지 않고 Drive로 전송하고 있습니다.')+'</span>';
+        document.body.appendChild(box); return box;
+    }
+    function hideDriveProgress(){var box=document.querySelector('[data-drive-progress]');if(box&&box.parentNode)box.parentNode.removeChild(box);}
+
+    function bindDriveSaveButtons(){
+        document.addEventListener('click',function(event){
+            var button=event.target;
+            while(button&&button!==document&&!(button.getAttribute&&button.getAttribute('data-save-attachment-drive')!==null))button=button.parentNode;
+            if(!button||button===document)return;
+            event.preventDefault();
+            if(button.classList.contains('is-busy'))return;
+            var projectId=button.getAttribute('data-project-id')||'';
+            if(projectId===''&&!window.confirm('관련 현장이 지정되지 않았습니다. Google Drive의 네이버메일/미분류 폴더에 저장할까요?'))return;
+            button.classList.add('is-busy'); button.setAttribute('disabled','disabled');
+            showDriveProgress('대용량 파일은 시간이 걸릴 수 있지만 CPMS 서버 디스크에는 저장하지 않습니다.');
+            postJson({action:'save_attachment_drive',csrf_token:csrf(),response_type:'json',message_key:button.getAttribute('data-message-key')||'',part_id:button.getAttribute('data-part-id')||'',project_id:projectId},function(result){
+                button.classList.remove('is-busy'); button.removeAttribute('disabled'); hideDriveProgress();
+                if(!result||!result.ok){alert(result&&result.message?result.message:'Google Drive 저장에 실패했습니다.');return;}
+                alert(result.message||'Google Drive에 저장했습니다.'); window.location.reload();
+            });
         },true);
     }
 
@@ -126,7 +159,7 @@
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindRunAutomation(); bindCopyCron(); bindWorkflowNames(); bindTaskModal();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindRunAutomation(); bindCopyCron(); bindWorkflowNames(); bindTaskModal();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

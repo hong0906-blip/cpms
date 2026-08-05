@@ -23,6 +23,7 @@ $filters = array(
     'query'=>isset($_GET['query'])?trim((string)$_GET['query']):'',
     'period'=>isset($_GET['period'])?trim((string)$_GET['period']):'1y',
     'mailbox'=>isset($_GET['mailbox'])?trim((string)$_GET['mailbox']):'',
+    'mailbox_type'=>isset($_GET['mailbox_type'])?trim((string)$_GET['mailbox_type']):'',
     'department'=>isset($_GET['department'])?trim((string)$_GET['department']):'',
     'status'=>isset($_GET['status'])?trim((string)$_GET['status']):'',
     'priority'=>isset($_GET['priority'])?trim((string)$_GET['priority']):'',

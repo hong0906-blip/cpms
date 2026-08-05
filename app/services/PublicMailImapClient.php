@@ -205,6 +205,25 @@ class PublicMailImapClient
         return (string)$response['literals'][0];
     }
 
+    /**
+     * 첨부 MIME 부분을 지정한 범위만 읽습니다.
+     * 대용량 첨부를 서버 디스크에 저장하지 않고 작은 조각으로 전달할 때 사용합니다.
+     */
+    public function fetchMimePartChunk($uid, $partId, $offset, $count)
+    {
+        $this->assertMailboxSelected();
+        $uid = (int)$uid;
+        $partId = $this->validatePartId($partId);
+        $offset = max(0, (int)$offset);
+        $count = (int)$count;
+        if ($uid <= 0) throw new \InvalidArgumentException('메일 UID가 올바르지 않습니다.');
+        if ($count < 4096) $count = 1048576;
+        if ($count > 8388608) $count = 8388608;
+        $response = $this->command('UID FETCH ' . $uid . ' (BODY.PEEK[' . $partId . ']<'. $offset . '.' . $count . '>)', $count + 65536);
+        if (!$response['ok']) throw new \RuntimeException('첨부파일 조각을 읽지 못했습니다.');
+        return empty($response['literals']) ? '' : (string)$response['literals'][0];
+    }
+
     private function validatePartId($partId)
     {
         $partId = trim((string)$partId);

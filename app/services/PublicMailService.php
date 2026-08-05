@@ -11,16 +11,22 @@ namespace App\Services;
 require_once __DIR__ . '/PublicMailStorageService.php';
 require_once __DIR__ . '/PublicMailImapClient.php';
 require_once __DIR__ . '/PublicMailClassifierService.php';
+require_once __DIR__ . '/PublicMailLargeAttachmentService.php';
+require_once __DIR__ . '/PublicMailDriveService.php';
 
 class PublicMailService
 {
     private $storage;
     private $classifier;
+    private $largeAttachmentService;
+    private $driveService;
 
     public function __construct()
     {
         $this->storage = new PublicMailStorageService();
         $this->classifier = new PublicMailClassifierService();
+        $this->largeAttachmentService = new PublicMailLargeAttachmentService();
+        $this->driveService = new PublicMailDriveService();
         PublicMailStorageService::ensureStorage();
     }
 
@@ -107,7 +113,7 @@ class PublicMailService
                 $mailboxStates[$id] = array(
                     'raw_name'=>$mailbox['raw_name'], 'display_name'=>$mailbox['display_name'],
                     'total_count'=>$count, 'imported_count'=>0, 'remaining_count'=>$count,
-                    'last_uid'=>0, 'completed'=>($count === 0), 'last_error'=>''
+                    'last_uid'=>0, 'completed'=>($count === 0), 'last_error'=>'', 'mailbox_type'=>isset($mailbox['mailbox_type'])?$mailbox['mailbox_type']:$this->detectMailboxType($mailbox['raw_name'],$mailbox['display_name'],isset($mailbox['flags'])?$mailbox['flags']:array())
                 );
                 $total += $count;
             }
@@ -277,7 +283,7 @@ class PublicMailService
             if (empty($mailboxes)) {
                 foreach ($this->discoverMailboxes($client, $settings) as $box) {
                     $id = $this->mailboxStateId($box['raw_name']);
-                    $mailboxes[$id] = array('raw_name'=>$box['raw_name'],'display_name'=>$box['display_name'],'total_count'=>0,'imported_count'=>0,'remaining_count'=>0,'last_uid'=>0,'completed'=>false,'last_error'=>'');
+                    $mailboxes[$id] = array('raw_name'=>$box['raw_name'],'display_name'=>$box['display_name'],'total_count'=>0,'imported_count'=>0,'remaining_count'=>0,'last_uid'=>0,'completed'=>false,'last_error'=>'','mailbox_type'=>isset($box['mailbox_type'])?$box['mailbox_type']:$this->detectMailboxType($box['raw_name'],$box['display_name'],isset($box['flags'])?$box['flags']:array()));
                 }
             }
             $messages = PublicMailStorageService::getMessages();
@@ -377,52 +383,154 @@ class PublicMailService
         $message = $messages[$messageKey];
         $mailbox = isset($message['mailbox']) ? (string)$message['mailbox'] : $parsedKey['mailbox'];
         $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsedKey['uid'];
-        $raw = PublicMailStorageService::getCachedRawMessage($messageKey, 1800);
-        if ($raw === '') {
-            $settings = PublicMailStorageService::getSettings(true); $client = $this->createClient($settings);
-            try {
-                $client->connect(); $client->login($settings['username'],$settings['password']); $client->selectMailbox($mailbox);
-                $raw = $client->fetchRawMessage($uid, $this->rawFetchLimitForMessage($message));
-                PublicMailStorageService::saveCachedRawMessage($messageKey, $raw);
-            } finally { $client->logout(); }
-        }
+        $settings = PublicMailStorageService::getSettings(true);
+        $client = $this->createClient($settings);
+        try {
+            $client->connect();
+            $client->login($settings['username'],$settings['password']);
+            $client->selectMailbox($mailbox);
+            $raw = $client->fetchRawMessage($uid, $this->rawFetchLimitForMessage($message));
+        } finally { $client->logout(); }
+
         $parsed = $this->parseRawMessage($raw);
+        $large = $this->largeAttachmentService->extractFromBody(isset($parsed['body_html_raw'])?$parsed['body_html_raw']:(isset($parsed['body_html'])?$parsed['body_html']:''), isset($parsed['body_text'])?$parsed['body_text']:'');
+        $attachments = isset($parsed['attachments']) && is_array($parsed['attachments']) ? $parsed['attachments'] : array();
+        foreach ($large as $largeAttachment) $attachments[] = $largeAttachment;
+
         $detail = $this->normalizeStoredMessage($message);
         $detail['message_key']=$messageKey; $detail['uid']=$uid; $detail['mailbox']=$mailbox;
         $detail['mailbox_name']=isset($message['mailbox_name'])?$message['mailbox_name']:($mailbox==='INBOX'?'받은메일함':$mailbox);
-        $detail['body_text']=$parsed['body_text']; $detail['body_html']=$parsed['body_html']; $detail['attachments']=$parsed['attachments'];
+        $detail['mailbox_type']=isset($message['mailbox_type'])?$message['mailbox_type']:$this->detectMailboxType($mailbox,$detail['mailbox_name'],array());
+        $detail['body_text']=$parsed['body_text']; $detail['body_html']=$parsed['body_html']; $detail['attachments']=$attachments;
         $detail['workflow']=PublicMailStorageService::getWorkflowForKey($messageKey);
+        $detail['drive_records']=PublicMailStorageService::getDriveRecords();
         foreach (array('subject','from_text','from_email','to_text','cc_text') as $field) if (isset($parsed[$field]) && trim((string)$parsed[$field])!=='') { $detail[$field]=$parsed[$field]; $messages[$messageKey][$field]=$parsed[$field]; }
         $preview=$this->makePreviewText($parsed['body_text']); if ($preview!=='') { $detail['preview']=$preview; $messages[$messageKey]['preview']=$preview; }
-        $messages[$messageKey]['has_attachment']=!empty($parsed['attachments']); PublicMailStorageService::saveMessages($messages);
+        $messages[$messageKey]['has_attachment']=!empty($attachments);
+        $messages[$messageKey]['large_attachments']=array();
+        foreach ($large as $largeAttachment) $messages[$messageKey]['large_attachments'][$largeAttachment['large_id']]=$largeAttachment;
+        PublicMailStorageService::saveMessages($messages);
         return $detail;
     }
 
+    /**
+     * 구버전 호환용 소용량 첨부 반환 함수입니다.
+     * 대용량 파일은 메모리에 전체 적재하지 않도록 streamAttachment()를 사용해야 합니다.
+     */
     public function getAttachment($messageKey, $partId)
+    {
+        $buffer='';
+        $maximumBuffer=52428800; // 50MB 안전한도
+        $descriptor=$this->getAttachmentDescriptor($messageKey,$partId);
+        if (!empty($descriptor['is_large']) || (!empty($descriptor['size']) && (int)$descriptor['size']>$maximumBuffer)) {
+            throw new \RuntimeException('대용량 첨부파일은 스트리밍 다운로드 방식을 사용해야 합니다.');
+        }
+        $this->streamAttachment($messageKey,$partId,function($chunk) use (&$buffer,$maximumBuffer){
+            if (strlen($buffer)+strlen($chunk)>$maximumBuffer) throw new \RuntimeException('첨부파일이 메모리 안전한도를 초과했습니다.');
+            $buffer.=$chunk;
+        });
+        $descriptor['content']=$buffer;
+        $descriptor['size']=strlen($buffer);
+        return $descriptor;
+    }
+
+    public function getAttachmentDescriptor($messageKey,$partId,$inspectRemote=true)
     {
         $messageKey=(string)$messageKey; $partId=trim((string)$partId);
         $messages=PublicMailStorageService::getMessages();
         if (!isset($messages[$messageKey])) throw new \RuntimeException('메일 정보를 찾을 수 없습니다.');
-        $cached=PublicMailStorageService::getCachedAttachment($messageKey,$partId,21600); if (is_array($cached)) return $cached;
-        $parsedKey=PublicMailStorageService::parseMessageKey($messageKey); $message=$messages[$messageKey];
-        $mailbox=isset($message['mailbox'])?(string)$message['mailbox']:$parsedKey['mailbox']; $uid=isset($message['uid'])?(int)$message['uid']:(int)$parsedKey['uid'];
+        $message=$messages[$messageKey];
+        if (strpos($partId,'large_')===0) {
+            $id=substr($partId,6);
+            if (empty($message['large_attachments'][$id])) {
+                $this->getMessageDetail($messageKey);
+                $messages=PublicMailStorageService::getMessages(); $message=$messages[$messageKey];
+            }
+            if (empty($message['large_attachments'][$id])) throw new \RuntimeException('대용량 첨부파일 정보를 찾을 수 없습니다.');
+            $attachment=$message['large_attachments'][$id];
+            if (empty($attachment['source_url']) || !$this->largeAttachmentService->isAllowedNaverUrl($attachment['source_url'])) {
+                throw new \RuntimeException('대용량 첨부주소가 올바르지 않습니다.');
+            }
+            if ($inspectRemote) {
+                $info=$this->largeAttachmentService->inspectRemote($attachment['source_url']);
+                if (!empty($info['filename'])) $attachment['filename']=$info['filename'];
+                if (!empty($info['mime_type'])) $attachment['mime_type']=$info['mime_type'];
+                if (!empty($info['size'])) $attachment['size']=$info['size'];
+                if (!empty($info['url'])) $attachment['source_url']=$info['url'];
+            }
+            return $attachment;
+        }
+        $parsedKey=PublicMailStorageService::parseMessageKey($messageKey);
+        $mailbox=isset($message['mailbox'])?(string)$message['mailbox']:$parsedKey['mailbox'];
+        $uid=isset($message['uid'])?(int)$message['uid']:(int)$parsedKey['uid'];
         $settings=PublicMailStorageService::getSettings(true); $client=$this->createClient($settings);
         try {
             $client->connect(); $client->login($settings['username'],$settings['password']); $client->selectMailbox($mailbox);
-            $mimeHeader=$client->fetchMimeHeader($uid,$partId); $encodedBody=$client->fetchMimePart($uid,$partId,157286400);
+            $mimeHeader=$client->fetchMimeHeader($uid,$partId);
         } finally { $client->logout(); }
         $headers=$this->parseHeaders($mimeHeader);
-        $contentType=isset($headers['content-type'])?$headers['content-type']:'application/octet-stream';
-        $disposition=isset($headers['content-disposition'])?$headers['content-disposition']:'';
-        $typeInfo=$this->parseHeaderWithParameters($contentType); $dispInfo=$this->parseHeaderWithParameters($disposition);
-        $filename=''; if (isset($dispInfo['params']['filename'])) $filename=$dispInfo['params']['filename']; elseif (isset($typeInfo['params']['name'])) $filename=$typeInfo['params']['name'];
-        $filename=$this->safeFilename($this->decodeHeader(trim((string)$filename," \t\r\n\"'")));
-        $encoding=isset($headers['content-transfer-encoding'])?strtolower(trim((string)$headers['content-transfer-encoding'])):'';
-        $content=$this->decodeBody($encodedBody,$encoding);
-        if ($content==='') throw new \RuntimeException('첨부파일 내용이 비어 있습니다.');
-        $attachment=array('part_id'=>$partId,'filename'=>$filename,'mime_type'=>isset($typeInfo['value'])&&$typeInfo['value']!==''?strtolower($typeInfo['value']):'application/octet-stream','size'=>strlen($content),'content'=>$content);
-        PublicMailStorageService::saveCachedAttachment($messageKey,$partId,$attachment);
-        return $attachment;
+        $typeInfo=$this->parseHeaderWithParameters(isset($headers['content-type'])?$headers['content-type']:'application/octet-stream');
+        $dispInfo=$this->parseHeaderWithParameters(isset($headers['content-disposition'])?$headers['content-disposition']:'');
+        $filename=isset($dispInfo['params']['filename'])?$dispInfo['params']['filename']:(isset($typeInfo['params']['name'])?$typeInfo['params']['name']:'attachment.bin');
+        return array('part_id'=>$partId,'filename'=>$this->safeFilename($this->decodeHeader(trim((string)$filename," \t\r\n\"'"))),'mime_type'=>isset($typeInfo['value'])&&$typeInfo['value']!==''?strtolower($typeInfo['value']):'application/octet-stream','size'=>0,'is_large'=>false,'transfer_encoding'=>isset($headers['content-transfer-encoding'])?strtolower(trim((string)$headers['content-transfer-encoding'])):'');
+    }
+
+    public function streamAttachment($messageKey,$partId,$consumer)
+    {
+        if (!is_callable($consumer)) throw new \InvalidArgumentException('첨부파일 수신 함수가 올바르지 않습니다.');
+        $descriptor=$this->getAttachmentDescriptor($messageKey,$partId);
+        if (!empty($descriptor['is_large'])) return $this->largeAttachmentService->streamRemote($descriptor['source_url'],$consumer,4194304);
+        $messages=PublicMailStorageService::getMessages(); $message=$messages[(string)$messageKey];
+        $parsedKey=PublicMailStorageService::parseMessageKey($messageKey);
+        $mailbox=isset($message['mailbox'])?(string)$message['mailbox']:$parsedKey['mailbox'];
+        $uid=isset($message['uid'])?(int)$message['uid']:(int)$parsedKey['uid'];
+        $settings=PublicMailStorageService::getSettings(true); $client=$this->createClient($settings);
+        $encoding=isset($descriptor['transfer_encoding'])?(string)$descriptor['transfer_encoding']:'';
+        $offset=0; $requestSize=4194304; $carry=''; $decodedOffset=0;
+        try {
+            $client->connect(); $client->login($settings['username'],$settings['password']); $client->selectMailbox($mailbox);
+            while (true) {
+                $encoded=$client->fetchMimePartChunk($uid,$partId,$offset,$requestSize);
+                if ($encoded==='') break;
+                $offset+=strlen($encoded);
+                if ($encoding==='base64') {
+                    $clean=$carry.preg_replace('/\s+/','',$encoded);
+                    $usable=strlen($clean)-strlen($clean)%4;
+                    $decodeText=substr($clean,0,$usable); $carry=substr($clean,$usable);
+                    $decoded=$decodeText!==''?base64_decode($decodeText,true):'';
+                    if ($decoded===false) throw new \RuntimeException('첨부파일 Base64 해제에 실패했습니다.');
+                } elseif ($encoding==='quoted-printable') {
+                    $clean=$carry.$encoded; $carry='';
+                    if (substr($clean,-1)==='=') { $carry='='; $clean=substr($clean,0,-1); }
+                    $decoded=quoted_printable_decode($clean);
+                } else $decoded=$encoded;
+                if ($decoded!=='') { call_user_func($consumer,$decoded,$decodedOffset,0); $decodedOffset+=strlen($decoded); }
+                if (strlen($encoded)<$requestSize) break;
+            }
+            if ($carry!=='') {
+                $decoded=$encoding==='base64'?base64_decode($carry,true):quoted_printable_decode($carry);
+                if ($decoded!==false&&$decoded!=='') { call_user_func($consumer,$decoded,$decodedOffset,0); $decodedOffset+=strlen($decoded); }
+            }
+        } finally { $client->logout(); }
+        if ($decodedOffset<=0) throw new \RuntimeException('첨부파일 내용이 비어 있습니다.');
+        return array('bytes_streamed'=>$decodedOffset);
+    }
+
+    public function saveAttachmentToDrive($messageKey,$partId,$projectId,$actor)
+    {
+        $messages=PublicMailStorageService::getMessages();
+        if (!isset($messages[(string)$messageKey])) throw new \RuntimeException('메일 정보를 찾을 수 없습니다.');
+        $message=$messages[(string)$messageKey]; $message['message_key']=(string)$messageKey;
+        $attachment=$this->getAttachmentDescriptor($messageKey,$partId,false);
+        $self=$this;
+        return $this->driveService->saveAttachment($message,$attachment,$projectId,function($sink) use ($self,$messageKey,$partId){
+            $self->streamAttachment($messageKey,$partId,function($chunk) use ($sink){ call_user_func($sink,$chunk); });
+        },$actor);
+    }
+
+    public function getDriveRecord($messageKey,$partId)
+    {
+        return PublicMailStorageService::findDriveRecord($messageKey,$partId);
     }
 
     public function updateWorkflow($messageKey, $changes, $updatedBy)
@@ -574,7 +682,7 @@ class PublicMailService
         $rootHeaders = isset($root['headers']) && is_array($root['headers']) ? $root['headers'] : array();
         $fromText = $this->decodeHeader(isset($rootHeaders['from']) ? $rootHeaders['from'] : '');
         return array(
-            'body_text'=>$bodyText,'body_html'=>$this->sanitizeHtml($bodyHtml),'attachments'=>$attachments,'headers'=>$rootHeaders,
+            'body_text'=>$bodyText,'body_html_raw'=>$bodyHtml,'body_html'=>$this->sanitizeHtml($bodyHtml),'attachments'=>$attachments,'headers'=>$rootHeaders,
             'subject'=>$this->decodeHeader(isset($rootHeaders['subject'])?$rootHeaders['subject']:''),
             'from_text'=>$fromText,'from_email'=>$this->extractEmail($fromText),
             'to_text'=>$this->decodeHeader(isset($rootHeaders['to'])?$rootHeaders['to']:''),
@@ -622,9 +730,9 @@ class PublicMailService
             $isTrash=$this->mailboxMatches($raw,$display,$flags,array('\\Trash','trash','휴지통','삭제'));
             if ($isSpam && empty($settings['include_spam'])) continue;
             if ($isTrash && empty($settings['include_trash'])) continue;
-            $result[]=array('raw_name'=>$raw,'display_name'=>$display,'flags'=>$flags);
+            $result[]=array('raw_name'=>$raw,'display_name'=>$display,'flags'=>$flags,'mailbox_type'=>$this->detectMailboxType($raw,$display,$flags));
         }
-        if (empty($result)) $result[]=array('raw_name'=>'INBOX','display_name'=>'받은메일함','flags'=>array());
+        if (empty($result)) $result[]=array('raw_name'=>'INBOX','display_name'=>'받은메일함','flags'=>array(),'mailbox_type'=>'inbox');
         return $result;
     }
 
@@ -633,6 +741,17 @@ class PublicMailService
         $haystack=strtolower((string)$raw.' '.(string)$display.' '.implode(' ',$flags));
         foreach ($terms as $term) if (strpos($haystack,strtolower($term))!==false) return true;
         return false;
+    }
+
+    private function detectMailboxType($raw,$display,$flags)
+    {
+        $haystack=$this->lower((string)$raw.' '.(string)$display.' '.implode(' ',is_array($flags)?$flags:array()));
+        if ($this->contains($haystack,'\\sent')||$this->contains($haystack,'sent')||$this->contains($haystack,'보낸')||$this->contains($haystack,'보냄')) return 'sent';
+        if ($this->contains($haystack,'draft')||$this->contains($haystack,'임시')) return 'draft';
+        if ($this->contains($haystack,'spam')||$this->contains($haystack,'junk')||$this->contains($haystack,'스팸')) return 'spam';
+        if ($this->contains($haystack,'trash')||$this->contains($haystack,'휴지통')||$this->contains($haystack,'삭제')) return 'trash';
+        if (strcasecmp((string)$raw,'INBOX')===0||$this->contains($haystack,'받은')) return 'inbox';
+        return 'custom';
     }
 
     private function mailboxStateId($rawName)
@@ -670,7 +789,7 @@ class PublicMailService
         foreach ($flags as $flag) { if (strcasecmp($flag,'\\Seen')===0) $isSeen=true; if (strcasecmp($flag,'\\Flagged')===0) $isFlagged=true; }
         $uid=isset($headerData['uid'])?(int)$headerData['uid']:0; $key=PublicMailStorageService::messageKey($mailbox,$uid);
         return array(
-            'message_key'=>$key,'uid'=>$uid,'mailbox'=>$mailbox,'mailbox_name'=>$mailboxName,
+            'message_key'=>$key,'uid'=>$uid,'mailbox'=>$mailbox,'mailbox_name'=>$mailboxName,'mailbox_type'=>$this->detectMailboxType($mailbox,$mailboxName,array()),
             'message_id'=>isset($headers['message-id'])?trim((string)$headers['message-id']):'',
             'subject'=>$subject!==''?$subject:'(제목 없음)','from_text'=>$fromText,'from_email'=>$this->extractEmail($fromText),
             'to_text'=>$toText,'cc_text'=>$this->decodeHeader(isset($headers['cc'])?$headers['cc']:''),
@@ -710,6 +829,7 @@ class PublicMailService
         if ($period==='1m') $cutoff=strtotime('-1 month'); elseif ($period==='3m') $cutoff=strtotime('-3 months'); elseif ($period==='6m') $cutoff=strtotime('-6 months'); elseif ($period==='1y') $cutoff=strtotime('-1 year');
         if ($cutoff>0 && isset($message['timestamp']) && (int)$message['timestamp']<$cutoff) return false;
         $mailbox=isset($filters['mailbox'])?trim((string)$filters['mailbox']):''; if ($mailbox!=='' && (!isset($message['mailbox']) || (string)$message['mailbox']!==$mailbox)) return false;
+        $mailboxType=isset($filters['mailbox_type'])?trim((string)$filters['mailbox_type']):''; if ($mailboxType!=='' && (!isset($message['mailbox_type']) || (string)$message['mailbox_type']!==$mailboxType)) return false;
         $department=isset($filters['department'])?trim((string)$filters['department']):''; if ($department!=='') { $actual=!empty($workflow['department'])?$workflow['department']:(isset($classification['department'])?$classification['department']:''); if ($actual!==$department) return false; }
         $status=isset($filters['status'])?trim((string)$filters['status']):''; if ($status!=='' && (!isset($workflow['status']) || $workflow['status']!==$status)) return false;
         $priority=isset($filters['priority'])?trim((string)$filters['priority']):''; if ($priority!=='') { $actual=!empty($workflow['priority'])?$workflow['priority']:(isset($classification['priority'])?$classification['priority']:''); if ($actual!==$priority) return false; }
@@ -1177,6 +1297,7 @@ class PublicMailService
         if (isset($message['from_text'])) $message['from_email'] = $this->extractEmail($message['from_text']);
         if (empty($message['mailbox'])) $message['mailbox'] = 'INBOX';
         if (empty($message['mailbox_name'])) $message['mailbox_name'] = $message['mailbox'] === 'INBOX' ? '받은메일함' : $message['mailbox'];
+        if (empty($message['mailbox_type'])) $message['mailbox_type'] = $this->detectMailboxType($message['mailbox'],$message['mailbox_name'],array());
         if (empty($message['message_key']) && isset($message['uid'])) $message['message_key'] = PublicMailStorageService::messageKey($message['mailbox'], (int)$message['uid']);
         return $message;
     }
