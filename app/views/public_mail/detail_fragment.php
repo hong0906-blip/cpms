@@ -8,7 +8,6 @@ if (!isset($esc) || !is_callable($esc)) {
 }
 $attachments = isset($detail['attachments']) && is_array($detail['attachments']) ? $detail['attachments'] : array();
 $driveRecords = isset($detail['drive_records']) && is_array($detail['drive_records']) ? $detail['drive_records'] : array();
-$externalImageCount = isset($detail['external_image_count']) ? (int)$detail['external_image_count'] : 0;
 $bodyHtml = isset($detail['body_html']) ? (string)$detail['body_html'] : '';
 $messageKey = isset($detail['message_key']) ? (string)$detail['message_key'] : '';
 $baseUrl = isset($baseUrl) ? rtrim((string)$baseUrl, '/') : '';
@@ -19,15 +18,6 @@ $baseUrl = isset($baseUrl) ? rtrim((string)$baseUrl, '/') : '';
         <button type="button" class="pm-text-button" data-rebuild-body-cache data-message-key="<?php echo call_user_func($esc, $messageKey); ?>">원문 다시 읽기</button>
     </div>
 
-    <?php if ($externalImageCount > 0): ?>
-        <div class="pm-external-image-notice" data-external-image-notice>
-            <div>
-                <strong>외부 이미지 <?php echo $externalImageCount; ?>개가 차단되었습니다.</strong>
-                <span>메일을 여는 순간 발신자에게 열람정보가 전달되는 것을 막기 위한 보호기능입니다.</span>
-            </div>
-            <button type="button" class="pm-btn pm-btn-light" data-show-external-images>이번 메일에서 이미지 표시</button>
-        </div>
-    <?php endif; ?>
 
     <?php if (!empty($attachments)): ?>
         <div class="pm-attachments">

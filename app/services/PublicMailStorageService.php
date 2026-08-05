@@ -18,6 +18,7 @@ class PublicMailStorageService
     const KEY_FILE = 'secret.key';
     const DRIVE_RECORDS_FILE = 'drive_records.json';
     const BODY_CACHE_DIR = 'body_cache';
+    const BODY_CACHE_VERSION = 8;
 
     public static function rootPath()
     {
@@ -441,13 +442,14 @@ class PublicMailStorageService
         $path = self::bodyCachePath($messageKey);
         $cache = self::readJsonFile($path, array());
         if (!is_array($cache) || empty($cache['message_key'])) return null;
+        $version = isset($cache['cache_version']) ? (int)$cache['cache_version'] : 0;
+        if ($version !== self::BODY_CACHE_VERSION) return null;
         return $cache;
     }
 
     public static function hasBodyCache($messageKey)
     {
-        self::ensureStorage();
-        return is_file(self::bodyCachePath($messageKey));
+        return is_array(self::getBodyCache($messageKey));
     }
 
     public static function saveBodyCache($messageKey, $cache)
@@ -457,6 +459,7 @@ class PublicMailStorageService
         if ($messageKey === '') throw new \InvalidArgumentException('메일 본문 캐시 식별값이 비어 있습니다.');
         if (!is_array($cache)) $cache = array();
         $cache['message_key'] = $messageKey;
+        $cache['cache_version'] = self::BODY_CACHE_VERSION;
         $cache['cached_at'] = date('Y-m-d H:i:s');
         self::writeJsonFile(self::bodyCachePath($messageKey), $cache);
         return $cache;
@@ -482,7 +485,8 @@ class PublicMailStorageService
         $rows = array();
         foreach ($messages as $key => $message) {
             if (!is_array($message)) continue;
-            if (is_file(self::bodyCachePath($key))) continue;
+            $messageCacheVersion = isset($message['body_cache_version']) ? (int)$message['body_cache_version'] : 0;
+            if ($messageCacheVersion === self::BODY_CACHE_VERSION && is_file(self::bodyCachePath($key))) continue;
             $rows[] = array(
                 'key' => (string)$key,
                 'timestamp' => isset($message['timestamp']) ? (int)$message['timestamp'] : 0

@@ -164,17 +164,13 @@ class PublicMailService
     public function runAutomationTick($limit)
     {
         $state = PublicMailStorageService::getSyncState();
-        if (!empty($state['full_import']['active']) && empty($state['full_import']['paused'])) {
-            // 전체수집 중에는 제목/미리보기 수집을 우선하여 예약호출 제한시간을 넘기지 않습니다.
-            return $this->syncFullImportBatch($limit);
-        }
-        $result = $this->syncNewBatch($limit);
+        if (!empty($state['full_import']['active']) && empty($state['full_import']['paused'])) $result = $this->syncFullImportBatch($limit);
+        else $result = $this->syncNewBatch($limit);
+        try { $result['repaired_count'] = $this->repairBrokenMetadataBatch(2); } catch (\Exception $ignored) { $result['repaired_count'] = 0; }
         try {
             $prepared = $this->cacheUncachedBodiesBatch(1);
             $result['body_cached_count'] = isset($prepared['cached_count']) ? (int)$prepared['cached_count'] : 0;
-        } catch (\Exception $ignored) {
-            $result['body_cached_count'] = 0;
-        }
+        } catch (\Exception $ignored) { $result['body_cached_count'] = 0; }
         return $result;
     }
 
@@ -856,7 +852,8 @@ class PublicMailService
             $client->logout();
         }
 
-        if ($bodyText === '' && $bodyHtmlRaw !== '') $bodyText = $this->makePreviewText(strip_tags($bodyHtmlRaw));
+        $bodyText = $this->repairMojibake($bodyText);
+        if ($bodyText === '' && $bodyHtmlRaw !== '') $bodyText = $this->repairMojibake($this->makePreviewText(strip_tags($bodyHtmlRaw)));
         if ($bodyHtmlRaw === '' && $bodyText !== '') $bodyHtmlRaw = '<div class="pm-plain-mail">' . nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8')) . '</div>';
 
         $inlineMap = array();
@@ -877,7 +874,7 @@ class PublicMailService
             'attachments'=>$attachments,
             'inline_images'=>$inlineImages,
             'external_image_count'=>(int)$externalCount,
-            'source'=>'imap_bodystructure_v1',
+            'source'=>'imap_bodystructure_v2',
             'mailbox'=>$mailbox,
             'uid'=>$uid
         );
@@ -887,6 +884,7 @@ class PublicMailService
         $preview = $this->makePreviewText($bodyText !== '' ? $bodyText : strip_tags($bodyHtml));
         if ($preview !== '') $messages[$messageKey]['preview'] = $preview;
         $messages[$messageKey]['body_cached'] = true;
+        $messages[$messageKey]['body_cache_version'] = PublicMailStorageService::BODY_CACHE_VERSION;
         $messages[$messageKey]['body_cache_updated_at'] = isset($cache['cached_at']) ? $cache['cached_at'] : date('Y-m-d H:i:s');
         $messages[$messageKey]['has_attachment'] = !empty($attachments);
         $messages[$messageKey]['large_attachments'] = array();
@@ -1428,8 +1426,8 @@ class PublicMailService
         // 여러 줄로 나뉜 RFC 2047 encoded-word를 먼저 이어 붙입니다.
         $value = preg_replace('/\?=\s+=\?/', '?==?', $value);
 
-        // PHP 서버의 iconv가 KS_C_5601-1987을 그대로 반환하는 경우가 있어
-        // encoded-word를 직접 해석한 뒤 UTF-8로 변환합니다.
+        // RFC 2047 encoded-word를 직접 해석합니다. 정상 UTF-8은 다시 변환하지 않고,
+        // 잘못된 CP949/EUC-KR 이중변환 흔적이 있을 때만 점수 기반으로 복구합니다.
         $self = $this;
         $manual = preg_replace_callback('/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/', function ($matches) use ($self) {
             $charset = isset($matches[1]) ? $matches[1] : '';
@@ -1441,26 +1439,26 @@ class PublicMailService
             } else {
                 $raw = quoted_printable_decode(str_replace('_', ' ', $payload));
             }
-            return $self->convertToUtf8($raw, $charset);
+            return $self->repairMojibake($self->convertToUtf8($raw, $charset));
         }, $value);
         if (is_string($manual) && $manual !== '' && strpos($manual, '=?') === false) {
-            return $this->ensureUtf8($manual, '');
+            return $this->repairMojibake($this->ensureUtf8($manual, ''));
         }
 
         if (function_exists('iconv_mime_decode')) {
             $decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
             if ($decoded !== false && $decoded !== '' && strpos($decoded, '=?') === false) {
-                return $this->ensureUtf8($decoded, '');
+                return $this->repairMojibake($this->ensureUtf8($decoded, ''));
             }
         }
         if (function_exists('mb_decode_mimeheader')) {
             $decoded = @mb_decode_mimeheader($value);
             if ($decoded !== false && $decoded !== '' && strpos($decoded, '=?') === false) {
-                return $this->ensureUtf8($decoded, '');
+                return $this->repairMojibake($this->ensureUtf8($decoded, ''));
             }
         }
 
-        return $this->ensureUtf8(is_string($manual) ? $manual : $value, '');
+        return $this->repairMojibake($this->ensureUtf8(is_string($manual) ? $manual : $value, ''));
     }
 
     private function decodeRfc2231Value($value)
@@ -1515,7 +1513,7 @@ class PublicMailService
         $charset = $this->normalizeCharset($charset);
 
         if (($charset === '' || $charset === 'UTF-8' || $charset === 'US-ASCII') && $this->isValidUtf8($value)) {
-            return $value;
+            return $this->repairMojibake($value);
         }
 
         $candidates = array();
@@ -1524,25 +1522,103 @@ class PublicMailService
             if (!in_array($candidate, $candidates, true)) $candidates[] = $candidate;
         }
 
+        $best = '';
+        $bestScore = -999999;
+        // 선언된 문자셋이 틀렸더라도 원본 바이트가 이미 정상 UTF-8이면 후보로 유지합니다.
+        if ($this->isValidUtf8($value)) {
+            $best = $this->repairMojibake($value);
+            $bestScore = $this->textQualityScore($best);
+        }
         foreach ($candidates as $candidate) {
-            if (function_exists('iconv')) {
-                $converted = @iconv($candidate, 'UTF-8//IGNORE', $value);
-                if ($converted !== false && $converted !== '' && $this->isValidUtf8($converted)) return $converted;
-            }
-            if (function_exists('mb_convert_encoding')) {
+            $converted = false;
+            if (function_exists('iconv')) $converted = @iconv($candidate, 'UTF-8//IGNORE', $value);
+            if (($converted === false || $converted === '') && function_exists('mb_convert_encoding')) {
                 $converted = @mb_convert_encoding($value, 'UTF-8', $candidate);
-                if ($converted !== false && $converted !== '' && $this->isValidUtf8($converted)) return $converted;
+            }
+            if ($converted === false || $converted === '' || !$this->isValidUtf8($converted)) continue;
+            $converted = $this->repairMojibake($converted);
+            $score = $this->textQualityScore($converted);
+            if ($score > $bestScore) { $best = $converted; $bestScore = $score; }
+        }
+        if ($best !== '') return $best;
+
+        if ($this->isValidUtf8($value)) return $this->repairMojibake($value);
+        return preg_replace('/[\x80-\xFF]/', '?', $value);
+    }
+
+    /** UTF-8/CP949/EUC-KR 이중변환으로 깨진 문자열을 품질점수로 안전하게 복구합니다. */
+    private function repairMojibake($value)
+    {
+        $value = (string)$value;
+        if ($value === '' || !$this->isValidUtf8($value)) return $value;
+        $candidates = array($value);
+        foreach (array('CP949','EUC-KR','ISO-8859-1','WINDOWS-1252') as $target) {
+            if (!function_exists('iconv')) continue;
+            $bytes = @iconv('UTF-8', $target . '//IGNORE', $value);
+            if ($bytes !== false && $bytes !== '' && $this->isValidUtf8($bytes)) $candidates[] = $bytes;
+            if ($bytes !== false && $bytes !== '') {
+                foreach (array('CP949','EUC-KR','UTF-8') as $source) {
+                    $decoded = @iconv($source, 'UTF-8//IGNORE', $bytes);
+                    if ($decoded !== false && $decoded !== '' && $this->isValidUtf8($decoded)) $candidates[] = $decoded;
+                }
             }
         }
+        $best = $value;
+        $baseScore = $this->textQualityScore($value);
+        $bestScore = $baseScore;
+        foreach ($candidates as $candidate) {
+            $candidate = trim((string)$candidate);
+            if ($candidate === '' || !$this->isValidUtf8($candidate)) continue;
+            $score = $this->textQualityScore($candidate);
+            if ($score > $bestScore) { $best = $candidate; $bestScore = $score; }
+        }
+        return ($best !== $value && $bestScore >= $baseScore + 6) ? $best : $value;
+    }
 
-        // 화면 전체가 깨지는 것을 막기 위한 마지막 안전장치
-        if ($this->isValidUtf8($value)) return $value;
-        return preg_replace('/[\x80-\xFF]/', '?', $value);
+    private function textQualityScore($value)
+    {
+        $value = (string)$value;
+        if ($value === '') return 0;
+        $score = 0;
+        $hangul = preg_match_all('/[가-힣]/u', $value, $m);
+        $jamo = preg_match_all('/[ㄱ-ㅎㅏ-ㅣ]/u', $value, $m);
+        $cjk = preg_match_all('/[一-龥]/u', $value, $m);
+        $replacement = substr_count($value, "\xEF\xBF\xBD");
+        $question = substr_count($value, '?');
+        $control = preg_match_all('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $value, $m);
+        $latinMojibake = preg_match_all('/(?:Ã.|Â.|ì.|ë.|ê.|ð.|þ.|æ.|å.)/u', $value, $m);
+        $encodedWord = substr_count($value, '=?');
+        $score += (int)$hangul * 3;
+        $score += (int)$jamo;
+        $score -= (int)$cjk * 2;
+        $score -= (int)$replacement * 20;
+        $score -= (int)$control * 20;
+        $score -= (int)$latinMojibake * 5;
+        $score -= (int)$encodedWord * 12;
+        if ($question > 5) $score -= ($question - 5) * 2;
+        if (preg_match('/[가-힣]{2,}/u', $value)) $score += 8;
+        if (preg_match('/(메일|세금|계산서|발행|안내|현장|공사|요청|첨부|주식회사|담당자)/u', $value)) $score += 10;
+        return $score;
+    }
+
+    private function looksBrokenText($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '') return false;
+        if (!$this->isValidUtf8($value) || strpos($value, '=?') !== false || strpos($value, "\xEF\xBF\xBD") !== false) return true;
+        $hangulCount = preg_match_all('/[가-힣]/u', $value, $matches);
+        $cjkCount = preg_match_all('/[一-龥]/u', $value, $matches);
+        if ($hangulCount >= 4 && $cjkCount >= 1) return true;
+        $repaired = $this->repairMojibake($value);
+        return $repaired !== $value && $this->textQualityScore($repaired) >= $this->textQualityScore($value) + 6;
     }
 
     private function sanitizeHtml($html, $messageKey = '', $inlineMap = array(), &$externalCount = null)
     {
         $html = $this->ensureUtf8((string)$html, '');
+        // style/script 태그는 내부 내용까지 제거하여 CSS 코드가 본문에 노출되지 않게 합니다.
+        $html = preg_replace('#<(style|script|noscript|template|title)[^>]*>.*?</\\1>#is', '', $html);
+        $html = preg_replace('/<!--\\[if.*?<!\\[endif\\]-->/is', '', $html);
         $externalCount = 0;
         if ($html === '') return '';
         if (!class_exists('DOMDocument')) {
@@ -1587,11 +1663,12 @@ class PublicMailService
     private function sanitizeDomChildren($parent, $messageKey, $inlineMap, &$externalCount)
     {
         $allowedTags = array('p','br','div','span','strong','b','em','i','u','s','ul','ol','li','table','thead','tbody','tfoot','tr','th','td','colgroup','col','hr','blockquote','pre','code','h1','h2','h3','h4','h5','h6','a','img','center','font','small','big','sup','sub');
-        $dangerousTags = array('script','iframe','object','embed','form','input','button','textarea','select','option','meta','link','base','svg','math','video','audio','canvas');
+        $dangerousTags = array('script','style','noscript','template','title','iframe','object','embed','form','input','button','textarea','select','option','meta','link','base','svg','math','video','audio','canvas');
         $children = array();
         foreach ($parent->childNodes as $child) $children[] = $child;
         foreach ($children as $node) {
             if ($node->nodeType === XML_COMMENT_NODE) { $parent->removeChild($node); continue; }
+            if ($node->nodeType === XML_TEXT_NODE) { $node->nodeValue = $this->repairMojibake((string)$node->nodeValue); continue; }
             if ($node->nodeType !== XML_ELEMENT_NODE) continue;
             $tag = strtolower($node->nodeName);
             if (in_array($tag, $dangerousTags, true)) { $parent->removeChild($node); continue; }
@@ -1610,19 +1687,13 @@ class PublicMailService
         if ($node->hasAttributes()) foreach ($node->attributes as $attr) $attrs[] = $attr->name;
         $genericAllowed = array('title','width','height','align','valign','colspan','rowspan','cellpadding','cellspacing','border','bgcolor','alt','style','face','size');
         foreach ($attrs as $name) {
-            $lower = strtolower($name);
-            $value = $node->getAttribute($name);
+            $lower = strtolower($name); $value = $node->getAttribute($name);
             if (strpos($lower, 'on') === 0 || in_array($lower, array('srcset','formaction','poster','background','id','class'), true)) { $node->removeAttribute($name); continue; }
-            if ($lower === 'style') {
-                $style = $this->sanitizeInlineStyle($value);
-                if ($style === '') $node->removeAttribute($name); else $node->setAttribute('style', $style);
-                continue;
-            }
+            if ($lower === 'style') { $style = $this->sanitizeInlineStyle($value); if ($style === '') $node->removeAttribute($name); else $node->setAttribute('style', $style); continue; }
             if ($tag === 'a' && $lower === 'href') continue;
             if ($tag === 'img' && $lower === 'src') continue;
             if (!in_array($lower, $genericAllowed, true)) $node->removeAttribute($name);
         }
-
         if ($tag === 'a') {
             $href = trim((string)$node->getAttribute('href'));
             if (!$this->isSafeMailLink($href)) $node->removeAttribute('href');
@@ -1630,39 +1701,35 @@ class PublicMailService
         }
         if ($tag === 'img') {
             $src = trim((string)$node->getAttribute('src'));
-            $alt = trim((string)$node->getAttribute('alt'));
+            if (strpos($src, '//') === 0) $src = 'https:' . $src;
+            $alt = $this->repairMojibake(trim((string)$node->getAttribute('alt')));
             $width = (int)preg_replace('/[^0-9]/','',(string)$node->getAttribute('width'));
             $height = (int)preg_replace('/[^0-9]/','',(string)$node->getAttribute('height'));
+            $style = (string)$node->getAttribute('style');
             if (stripos($src, 'cid:') === 0) {
                 $cid = $this->normalizeContentId($src);
                 if (isset($inlineMap[$cid]) && is_array($inlineMap[$cid]) && !empty($inlineMap[$cid]['part_id'])) {
                     $url = 'public_mail_action.php?action=inline_image&message_key=' . rawurlencode($messageKey) . '&part_id=' . rawurlencode($inlineMap[$cid]['part_id']);
-                    $node->setAttribute('src', $url);
-                    $node->setAttribute('class', 'pm-inline-image');
-                    $node->setAttribute('loading', 'lazy');
-                    if ($alt === '' && !empty($inlineMap[$cid]['filename'])) $node->setAttribute('alt', (string)$inlineMap[$cid]['filename']);
-                } else {
-                    $node->removeAttribute('src');
-                    $node->setAttribute('class','pm-inline-image-missing');
-                    $node->setAttribute('alt',$alt!==''?$alt:'메일 본문 이미지');
-                }
+                    $node->setAttribute('src', $url); $node->setAttribute('class', 'pm-inline-image'); $node->setAttribute('loading', 'lazy'); $node->setAttribute('decoding', 'async');
+                    if ($alt === '' && !empty($inlineMap[$cid]['filename'])) $alt = (string)$inlineMap[$cid]['filename'];
+                    if ($alt !== '') $node->setAttribute('alt', $alt);
+                } else { if ($node->parentNode) $node->parentNode->removeChild($node); return; }
             } elseif (preg_match('#^data:image/(png|jpeg|jpg|gif|webp);base64,#i', $src) && strlen($src) <= 2097152) {
-                $node->setAttribute('class','pm-inline-image');
+                $node->setAttribute('class','pm-inline-image'); $node->setAttribute('loading','lazy'); $node->setAttribute('decoding','async');
             } elseif (preg_match('#^https?://#i', $src)) {
-                if (($width > 0 && $width <= 2) || ($height > 0 && $height <= 2) || preg_match('/(pixel|track|open\.gif|beacon)/i', $src)) {
-                    if ($node->parentNode) $node->parentNode->removeChild($node);
-                    return;
-                }
+                if ($this->isTrackingImage($src, $width, $height, $style)) { if ($node->parentNode) $node->parentNode->removeChild($node); return; }
                 $externalCount++;
-                $node->removeAttribute('src');
-                $node->setAttribute('data-pm-external-src', $src);
-                $node->setAttribute('class','pm-external-image is-blocked');
-                $node->setAttribute('alt',$alt!==''?$alt:'차단된 외부 이미지');
-            } else {
-                $node->removeAttribute('src');
-                $node->setAttribute('alt',$alt!==''?$alt:'메일 이미지');
-            }
+                $node->setAttribute('src', $src); $node->setAttribute('class','pm-external-image'); $node->setAttribute('loading','lazy'); $node->setAttribute('decoding','async'); $node->setAttribute('referrerpolicy','no-referrer');
+                if ($alt !== '') $node->setAttribute('alt',$alt);
+            } else { if ($node->parentNode) $node->parentNode->removeChild($node); return; }
         }
+    }
+
+    private function isTrackingImage($src, $width, $height, $style)
+    {
+        if (($width > 0 && $width <= 2) || ($height > 0 && $height <= 2)) return true;
+        if (preg_match('/(?:width|height)\s*:\s*(?:0|1|2)px/i', (string)$style)) return true;
+        return preg_match('/(?:pixel|tracking|track(?:er)?|open(?:ed)?[._-]?(?:gif|png)?|beacon|spacer\.gif|transparent\.gif|1x1)/i', (string)$src) === 1;
     }
 
     private function sanitizeInlineStyle($style)
@@ -1689,7 +1756,7 @@ class PublicMailService
 
     private function sanitizeHtmlFallback($html, $messageKey, $inlineMap, &$externalCount)
     {
-        $html = preg_replace('#<(script|iframe|object|embed|form|input|button|meta|link|style)[^>]*>.*?</\1>#is','',$html);
+        $html = preg_replace('#<(script|style|noscript|template|title|iframe|object|embed|form|input|button|meta|link)[^>]*>.*?</\1>#is','',$html);
         $html = preg_replace('/\son[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i','',$html);
         $self = $this;
         $html = preg_replace_callback('#<img\b([^>]*)>#is', function($m) use ($self,$messageKey,$inlineMap,&$externalCount){
@@ -1705,8 +1772,13 @@ class PublicMailService
                 if (preg_match('/\bwidth\s*=\s*(["\']?)([0-9]+)\1/i',$attrs,$wm)) $width=(int)$wm[2];
                 if (preg_match('/\bheight\s*=\s*(["\']?)([0-9]+)\1/i',$attrs,$hm)) $height=(int)$hm[2];
                 if (($width>0&&$width<=2)||($height>0&&$height<=2)||preg_match('/(pixel|track|open\.gif|beacon)/i',$src)) return '';
+                $width=0; $height=0; $style='';
+                if (preg_match('/\bwidth\s*=\s*(["\']?)([0-9]+)\1/i',$attrs,$wm)) $width=(int)$wm[2];
+                if (preg_match('/\bheight\s*=\s*(["\']?)([0-9]+)\1/i',$attrs,$hm)) $height=(int)$hm[2];
+                if (preg_match('/\bstyle\s*=\s*(["\'])(.*?)\1/is',$attrs,$stm)) $style=$stm[2];
+                if ($self->isTrackingImage($src,$width,$height,$style)) return '';
                 $externalCount++;
-                return '<img class="pm-external-image is-blocked" alt="'.htmlspecialchars($alt!==''?$alt:'차단된 외부 이미지',ENT_QUOTES,'UTF-8').'" data-pm-external-src="'.htmlspecialchars($src,ENT_QUOTES,'UTF-8').'">';
+                return '<img class="pm-external-image" loading="lazy" decoding="async" referrerpolicy="no-referrer" alt="'.htmlspecialchars($alt,ENT_QUOTES,'UTF-8').'" src="'.htmlspecialchars($src,ENT_QUOTES,'UTF-8').'">';
             }
             return '';
         },$html);
@@ -1716,7 +1788,7 @@ class PublicMailService
 
     private function makePreviewText($rawText)
     {
-        $text = $this->ensureUtf8((string)$rawText, '');
+        $text = $this->repairMojibake($this->ensureUtf8((string)$rawText, ''));
         if ($text === '') return '';
         $text = preg_replace('/<[^>]+>/', ' ', $text);
         $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
@@ -1808,13 +1880,15 @@ class PublicMailService
     }
 
 
-    /** 기존 버전에서 저장된 깨진 제목 또는 빈 미리보기를 조금씩 복구합니다. */
+    /** 기존 버전에서 저장된 깨진 제목, 발신자, 미리보기와 구버전 본문 캐시를 조금씩 복구합니다. */
     public function repairBrokenMetadataBatch($limit)
     {
         $limit=max(1,min(20,(int)$limit)); $messages=PublicMailStorageService::getMessages(); $targets=array();
         foreach ($messages as $key=>$message) {
-            if (!is_array($message)) continue; $subject=isset($message['subject'])?(string)$message['subject']:''; $preview=isset($message['preview'])?(string)$message['preview']:'';
-            $broken=$preview===''||strpos($subject,'=?')!==false||!$this->isValidUtf8($subject)||substr_count($preview,'?')>12;
+            if (!is_array($message)) continue;
+            $fields=array(isset($message['subject'])?(string)$message['subject']:'',isset($message['from_text'])?(string)$message['from_text']:'',isset($message['to_text'])?(string)$message['to_text']:'',isset($message['preview'])?(string)$message['preview']:'');
+            $broken=trim($fields[3])==='';
+            foreach ($fields as $fieldValue) if ($this->looksBrokenText($fieldValue)) { $broken=true; break; }
             if ($broken) { $targets[]=(string)$key; if (count($targets)>=$limit) break; }
         }
         if (empty($targets)) return 0;
@@ -1828,10 +1902,14 @@ class PublicMailService
                     if ($selected!==$mailbox) { $client->selectMailbox($mailbox); $selected=$mailbox; }
                     $box=array('raw_name'=>$mailbox,'display_name'=>isset($message['mailbox_name'])?$message['mailbox_name']:($mailbox==='INBOX'?'받은메일함':$mailbox));
                     $header=$client->fetchHeader($uid); $fresh=$this->buildMessageFromHeader($header,$box['raw_name'],$box['display_name']);
-                    $previewRaw=$client->fetchRawPreview($uid,65536);
-                    if ($previewRaw!=='') { $body=$this->parseRawMessage($previewRaw,false); $fresh['preview']=$this->makePreviewText($body['body_text']); $fresh['has_attachment']=!empty($body['attachments'])||$this->rawMessageLooksLikeAttachment($previewRaw); }
+                    $previewRaw=$client->fetchRawPreview($uid,131072);
+                    if ($previewRaw!=='') {
+                        $body=$this->parseRawMessage($previewRaw,false); $previewSource=isset($body['body_text'])?(string)$body['body_text']:'';
+                        if ($previewSource===''&&isset($body['body_html'])) $previewSource=strip_tags((string)$body['body_html']);
+                        $fresh['preview']=$this->repairMojibake($this->makePreviewText($previewSource)); $fresh['has_attachment']=!empty($body['attachments'])||$this->rawMessageLooksLikeAttachment($previewRaw);
+                    }
                     $fresh['classification']=isset($message['classification'])?$message['classification']:array(); $fresh['synced_at']=isset($message['synced_at'])?$message['synced_at']:date('Y-m-d H:i:s');
-                    $messages[$key]=array_merge($message,$fresh); $repaired++;
+                    $messages[$key]=array_merge($message,$fresh); PublicMailStorageService::deleteBodyCache($key); $messages[$key]['body_cached']=false; $messages[$key]['body_cache_version']=0; $messages[$key]['body_cache_updated_at']=''; $repaired++;
                 } catch (\Exception $ignored) {}
             }
         } finally { $client->logout(); }

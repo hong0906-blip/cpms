@@ -163,6 +163,19 @@
         if(headerButton&&headerInput)headerButton.addEventListener('click',function(){copyValue(headerInput,'요청 헤더 이름을 복사했습니다.');});
     }
 
+
+    function prepareMailImages(container) {
+        if(!container)return;
+        var images=container.querySelectorAll('.pm-message-body img'),i;
+        for(i=0;i<images.length;i++){
+            images[i].setAttribute('loading','lazy');
+            images[i].setAttribute('decoding','async');
+            if(images[i].getAttribute('data-pm-image-bound')==='1')continue;
+            images[i].setAttribute('data-pm-image-bound','1');
+            images[i].addEventListener('error',function(){this.style.display='none';});
+        }
+    }
+
     function loadMailDetail(container) {
         if(!container)return;
         var messageKey=container.getAttribute('data-message-key')||'';
@@ -179,6 +192,7 @@
             if(xhr.status>=200&&xhr.status<300){
                 container.innerHTML=xhr.responseText;
                 container.setAttribute('data-cache-ready','1');
+                prepareMailImages(container);
                 if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
             }else{
                 container.innerHTML=xhr.responseText||'<div class="pm-detail-load-error"><strong>메일 본문을 불러오지 못했습니다.</strong><p>네이버 연결이 지연되고 있습니다.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-detail>다시 시도</button></div>';
@@ -201,24 +215,6 @@
                 return;
             }
 
-            var external=event.target;
-            while(external&&external!==document&&!(external.getAttribute&&external.getAttribute('data-show-external-images')!==null))external=external.parentNode;
-            if(external&&external!==document){
-                event.preventDefault();
-                var container=external.closest?external.closest('[data-detail-fragment]'):document.querySelector('[data-detail-fragment]');
-                var images=container?container.querySelectorAll('img[data-pm-external-src]'):[];
-                var i;
-                for(i=0;i<images.length;i++){
-                    var source=images[i].getAttribute('data-pm-external-src')||'';
-                    if(/^https?:\/\//i.test(source)){
-                        images[i].setAttribute('src',source);
-                        images[i].classList.remove('is-blocked');
-                    }
-                }
-                var notice=container?container.querySelector('[data-external-image-notice]'):null;
-                if(notice&&notice.parentNode)notice.parentNode.removeChild(notice);
-                return;
-            }
 
             var rebuild=event.target;
             while(rebuild&&rebuild!==document&&!(rebuild.getAttribute&&rebuild.getAttribute('data-rebuild-body-cache')!==null))rebuild=rebuild.parentNode;
@@ -238,6 +234,7 @@
     function initDetailBody(){
         var container=document.querySelector('[data-mail-detail-content]');
         if(container&&container.getAttribute('data-cache-ready')!=='1')loadMailDetail(container);
+        else prepareMailImages(container);
     }
 
     function bindWorkflowNames() {

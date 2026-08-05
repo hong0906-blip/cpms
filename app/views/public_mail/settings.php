@@ -12,7 +12,7 @@ $remaining=isset($full['remaining_count'])?(int)$full['remaining_count']:0;
 $percent=$total>0?(int)floor(($processed/$total)*100):0;
 if ($percent>100) $percent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_7">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_71">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -61,6 +61,17 @@ if ($percent>100) $percent=100;
       </div>
 
       <div class="pm-settings-card">
+        <div class="pm-card-title"><div><strong>깨진 제목·본문 복구</strong><span>이전 버전에서 잘못 변환된 한글과 구버전 본문 캐시를 네이버 원본으로 다시 만듭니다.</span></div></div>
+        <div class="pm-alert pm-alert-success"><strong>한 번만 시작하면 됩니다.</strong><br>우선 20건을 복구하고, 이후 외부 자동동기화가 실행될 때마다 남은 메일을 조금씩 계속 복구합니다.</div>
+        <form method="post" action="public_mail_action.php" onsubmit="return confirm('깨진 메일 제목과 본문 캐시 복구를 시작할까요? 네이버 원본메일은 변경되지 않습니다.');">
+          <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
+          <input type="hidden" name="action" value="repair_metadata">
+          <input type="hidden" name="limit" value="20">
+          <button type="submit" class="pm-btn pm-btn-primary"><i data-lucide="languages"></i> 깨진 메일 제목·본문 전체 복구 시작</button>
+        </form>
+      </div>
+
+      <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>24시간 외부 자동동기화</strong><span>직원 브라우저와 서버업체 설정 없이 cron-job.org가 자동으로 호출합니다.</span></div><span class="pm-status-dot <?php echo !empty($syncState['last_cron_at'])?'is-on':''; ?>" data-cron-status><?php echo isset($syncState['last_cron_status'])&&$syncState['last_cron_status']==='success'?'정상':(isset($syncState['last_cron_status'])&&$syncState['last_cron_status']==='error'?'오류':(!empty($syncState['last_cron_at'])?'실행 기록 있음':'등록 대기')); ?></span></div>
         <div class="pm-alert pm-alert-success"><strong>직원 화면 자동수집: 사용 안 함</strong><br>이제 CPMS를 사용하는 동안 1분마다 로딩이 발생하지 않습니다.</div>
         <label>cron-job.org에 등록할 주소<div class="pm-copy-field"><input type="text" readonly value="<?php echo call_user_func($esc,isset($cronInfo['url'])?$cronInfo['url']:''); ?>" data-cron-url><button type="button" class="pm-btn pm-btn-light" data-copy-cron-url>주소 복사</button></div></label>
@@ -99,4 +110,4 @@ if ($percent>100) $percent=100;
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_7"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_71"></script>

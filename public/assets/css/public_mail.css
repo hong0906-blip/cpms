@@ -1295,16 +1295,13 @@ body.pm-modal-open {
 }
 
 .pm-message-body img.pm-inline-image,
-.pm-message-body img[data-pm-external-src] {
+.pm-message-body img.pm-external-image {
     display: inline-block;
     max-width: 100%;
     height: auto;
     vertical-align: middle;
 }
 
-.pm-message-body img.pm-external-image.is-blocked {
-    display: none;
-}
 
 .pm-message-body a {
     color: #2563eb;
