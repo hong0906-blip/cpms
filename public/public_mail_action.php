@@ -23,6 +23,13 @@ $action=isset($_POST['action'])?trim((string)$_POST['action']):''; $service=new 
 $currentUser=PublicMailWebHelper::currentUserName(); $isAjax=PublicMailWebHelper::isAjax();
 
 try {
+    if ($action==='get_sync_status') {
+        $state=$service->getSyncState();
+        $result=array('ok'=>true,'message'=>'동기화 상태를 확인했습니다.','state'=>$state);
+        if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
+        PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
+    }
+
     if ($action==='sync_new' || $action==='sync_initial' || $action==='automation_tick') {
         $limit=isset($_POST['limit'])?(int)$_POST['limit']:0;
         if ($action==='sync_initial') $result=$service->syncBatch($limit,'initial');
@@ -118,7 +125,7 @@ try {
 
     if ($action==='regenerate_cron_token') {
         PublicMailWebHelper::requireAdmin(); $service->regenerateCronToken($currentUser);
-        $result=array('ok'=>true,'message'=>'자동동기화 보안주소를 새로 만들었습니다. 기존 주소는 더 이상 작동하지 않습니다.');
+        $result=array('ok'=>true,'message'=>'자동동기화 요청 헤더의 비밀키를 새로 만들었습니다. 기존 비밀키는 더 이상 작동하지 않습니다.');
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }
@@ -131,7 +138,7 @@ try {
     throw new RuntimeException('지원하지 않는 요청입니다.');
 } catch (Exception $e) {
     if ($isAjax) PublicMailWebHelper::jsonResponse(array('ok'=>false,'message'=>$e->getMessage()),400);
-    $settingsActions=array('save_settings','test_connection','reset_mail_data','start_full_import','pause_full_import','resume_full_import','cancel_full_import','regenerate_cron_token','repair_metadata');
+    $settingsActions=array('save_settings','test_connection','reset_mail_data','start_full_import','pause_full_import','resume_full_import','cancel_full_import','regenerate_cron_token','repair_metadata','get_sync_status');
     $redirect=in_array($action,$settingsActions,true)?'public_mail_settings.php':'public_mail.php';
     if (!empty($_POST['message_key']) && $redirect==='public_mail.php') $redirect.='?message='.rawurlencode((string)$_POST['message_key']);
     PublicMailWebHelper::redirectWithMessage($redirect,'error',$e->getMessage());

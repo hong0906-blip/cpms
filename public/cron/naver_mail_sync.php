@@ -2,8 +2,9 @@
 /**
  * 파일 경로: C:\www\cpms\public\cron\naver_mail_sync.php
  *
- * 호스팅업체 CRON/예약 URL 또는 외부 웹 스케줄러가 호출하는 보안 동기화 주소입니다.
- * 브라우저 로그인과 Windows 작업 스케줄러가 필요하지 않습니다.
+ * cron-job.org 같은 외부 예약서비스가 호출하는 네이버 메일 자동동기화 주소입니다.
+ * 직원 브라우저에서는 이 파일을 자동 호출하지 않으므로 CPMS 화면 로딩을 방해하지 않습니다.
+ * 보안키는 URL이 아니라 X-CPMS-Mail-Key 요청 헤더로 전달합니다.
  * PHP 5.6 호환 코드입니다.
  */
 require_once dirname(dirname(__DIR__)) . '/app/bootstrap.php';
@@ -13,34 +14,98 @@ require_once dirname(dirname(__DIR__)) . '/app/services/PublicMailStorageService
 use App\Services\PublicMailService;
 use App\Services\PublicMailStorageService;
 
-header('Content-Type: application/json; charset=utf-8');
+header('Content-Type: text/plain; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('X-Content-Type-Options: nosniff');
 if (function_exists('session_write_close')) @session_write_close();
+@ignore_user_abort(true);
 @set_time_limit(180);
 
-$key = isset($_GET['key']) ? trim((string)$_GET['key']) : '';
+function pm_cron_header_value($name)
+{
+    $serverKey = 'HTTP_' . strtoupper(str_replace('-', '_', (string)$name));
+    if (isset($_SERVER[$serverKey])) return trim((string)$_SERVER[$serverKey]);
+    if (function_exists('getallheaders')) {
+        $headers = @getallheaders();
+        if (is_array($headers)) {
+            foreach ($headers as $key => $value) {
+                if (strcasecmp((string)$key, (string)$name) === 0) return trim((string)$value);
+            }
+        }
+    }
+    return '';
+}
+
+function pm_cron_finish_response($text)
+{
+    $text = trim((string)$text);
+    if ($text === '') $text = 'OK';
+    if (strlen($text) > 500) $text = substr($text, 0, 500);
+    header('Content-Length: ' . strlen($text));
+    header('Connection: close');
+    echo $text;
+    if (function_exists('fastcgi_finish_request')) {
+        @fastcgi_finish_request();
+        return true;
+    }
+    @ob_flush();
+    @flush();
+    return false;
+}
+
+$key = pm_cron_header_value('X-CPMS-Mail-Key');
 $service = new PublicMailService();
 if (!$service->verifyCronToken($key)) {
     http_response_code(403);
-    echo json_encode(array('ok'=>false,'message'=>'Forbidden'), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    echo 'FORBIDDEN';
     exit;
 }
 
+$startedAt = microtime(true);
+$startedText = date('Y-m-d H:i:s');
+PublicMailStorageService::saveSyncState(array(
+    'last_cron_at' => $startedText,
+    'last_cron_started_at' => $startedText,
+    'last_cron_status' => 'running',
+    'last_cron_result' => '자동동기화 실행 중'
+));
+
+$continuedInBackground = pm_cron_finish_response('ACCEPTED');
+
 try {
-    $result = $service->runAutomationTick(50);
-    $message = isset($result['message']) ? (string)$result['message'] : '완료';
+    /*
+     * 외부 서비스는 보통 30초 안에 응답을 요구합니다.
+     * PHP-FPM에서는 응답을 먼저 끝낸 뒤 서버에서 계속 처리합니다.
+     * 그 외 환경에서는 한 번에 10건만 처리하여 시간초과 가능성을 낮춥니다.
+     */
+    $limit = $continuedInBackground ? 30 : 10;
+    $result = $service->runAutomationTick($limit);
+    $message = isset($result['message']) ? trim((string)$result['message']) : '완료';
+    $added = isset($result['added_count']) ? (int)$result['added_count'] : 0;
+    $state = isset($result['state']) && is_array($result['state']) ? $result['state'] : PublicMailStorageService::getSyncState();
+    $remaining = isset($state['full_import']['remaining_count']) ? (int)$state['full_import']['remaining_count'] : (isset($state['remaining_count']) ? (int)$state['remaining_count'] : 0);
+    $duration = (int)round((microtime(true) - $startedAt) * 1000);
+    $summary = '성공: ' . $message . ' / 추가 ' . $added . '건 / 남음 ' . $remaining . '건';
     PublicMailStorageService::saveSyncState(array(
         'last_cron_at' => date('Y-m-d H:i:s'),
-        'last_cron_result' => $message
+        'last_cron_finished_at' => date('Y-m-d H:i:s'),
+        'last_cron_status' => 'success',
+        'last_cron_duration_ms' => $duration,
+        'last_cron_result' => $summary
     ));
-    $result['cron_at'] = date('Y-m-d H:i:s');
-    echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!$continuedInBackground) {
+        /* 이미 ACCEPTED를 출력했으므로 추가 출력은 하지 않습니다. */
+    }
 } catch (Exception $e) {
+    $duration = (int)round((microtime(true) - $startedAt) * 1000);
     PublicMailStorageService::saveSyncState(array(
         'last_cron_at' => date('Y-m-d H:i:s'),
+        'last_cron_finished_at' => date('Y-m-d H:i:s'),
+        'last_cron_status' => 'error',
+        'last_cron_duration_ms' => $duration,
         'last_cron_result' => '오류: ' . $e->getMessage()
     ));
-    http_response_code(500);
-    echo json_encode(array('ok'=>false,'message'=>$e->getMessage()), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!$continuedInBackground) {
+        /* 예약서비스에는 이미 짧은 응답을 보냈고, 상세 오류는 설정 화면에 기록됩니다. */
+    }
 }

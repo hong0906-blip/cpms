@@ -1,6 +1,9 @@
 /*
  * 파일 경로: C:\www\cpms\public\assets\js\public_mail.js
  * 네이버 메일 화면 동작 - PHP 5.6 서버 호환용 순수 JavaScript
+ *
+ * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
+ * 자동수집은 public/cron/naver_mail_sync.php를 외부 예약서비스가 호출합니다.
  */
 (function () {
     'use strict';
@@ -50,7 +53,6 @@
         },true);
     }
 
-
     function showDriveProgress(message) {
         hideDriveProgress();
         var box=document.createElement('div'); box.className='pm-drive-progress'; box.setAttribute('data-drive-progress','1');
@@ -94,53 +96,71 @@
         });
     }
 
-    var importBusy=false;
-    function runImportLoop() {
-        var card=document.querySelector('.pm-import-card'); if(!card||importBusy||card.getAttribute('data-import-active')!=='1'||card.getAttribute('data-import-paused')==='1')return;
-        importBusy=true;
-        postJson({action:'automation_tick',csrf_token:csrf(),response_type:'json',limit:50},function(result){
-            importBusy=false;
-            if(!result||!result.ok){ alert(result&&result.message?result.message:'전체 메일 가져오기에 실패했습니다.'); return; }
-            var state=result.state||{},full=state.full_import||{};
-            card.setAttribute('data-import-active',full.active?'1':'0'); card.setAttribute('data-import-paused',full.paused?'1':'0');
-            var total=parseInt(full.total_count,10)||0,processed=parseInt(full.processed_count,10)||0,remaining=parseInt(full.remaining_count,10)||0,percent=total>0?Math.floor(processed*100/total):0;
-            var bar=card.querySelector('.pm-progress-track span'),strong=card.querySelector('.pm-progress-label strong'),label=card.querySelector('.pm-progress-label span'),message=card.querySelector('[data-import-message]');
-            if(bar)bar.style.width=Math.min(100,percent)+'%'; if(strong)strong.textContent=Math.min(100,percent)+'%'; if(label)label.textContent=processed.toLocaleString()+' / '+total.toLocaleString()+'건'; if(message)message.textContent=result.message||'';
-            if(full.active&&!full.paused) window.setTimeout(runImportLoop,600); else window.setTimeout(function(){window.location.reload();},800);
-        });
-    }
-
     function fullImportAction(action) {
         var map={start:'start_full_import',pause:'pause_full_import',resume:'resume_full_import',cancel:'cancel_full_import'};
         if(!map[action])return;
         if(action==='cancel'&&!window.confirm('전체 메일 가져오기를 취소할까요? 이미 가져온 메일은 유지됩니다.'))return;
-        showLoading(action==='start'?'전체 메일함을 확인하는 중입니다.':'작업 상태를 변경하는 중입니다.');
+        showLoading(action==='start'?'전체 메일함을 준비하는 중입니다.':'작업 상태를 변경하는 중입니다.');
         postJson({action:map[action],csrf_token:csrf(),response_type:'json'},function(result){
             hideLoading(); if(!result||!result.ok){alert(result&&result.message?result.message:'요청 처리에 실패했습니다.');return;}
-            var card=document.querySelector('.pm-import-card'),full=result.state&&result.state.full_import?result.state.full_import:{};
-            if(card){card.setAttribute('data-import-active',full.active?'1':'0');card.setAttribute('data-import-paused',full.paused?'1':'0');}
-            if(action==='start'||action==='resume') runImportLoop(); else window.location.reload();
+            if(action==='start'||action==='resume') alert('전체메일 작업을 등록했습니다. 이제 외부 자동동기화가 백그라운드에서 계속 처리합니다. 이 화면을 닫아도 됩니다.');
+            window.location.reload();
         });
     }
 
     function bindFullImport() {
         var buttons=document.querySelectorAll('[data-full-import]'),i;
         for(i=0;i<buttons.length;i++) buttons[i].addEventListener('click',function(){fullImportAction(this.getAttribute('data-full-import'));});
-        window.setTimeout(runImportLoop,700);
+    }
+
+    function updateStatusView(state) {
+        state=state||{}; var full=state.full_import||{};
+        var total=parseInt(full.total_count,10)||0,processed=parseInt(full.processed_count,10)||0,remaining=parseInt(full.remaining_count,10)||0,percent=total>0?Math.floor(processed*100/total):0;
+        var card=document.querySelector('.pm-import-card');
+        if(card){
+            card.setAttribute('data-import-active',full.active?'1':'0'); card.setAttribute('data-import-paused',full.paused?'1':'0');
+            var bar=card.querySelector('.pm-progress-track span'),strong=card.querySelector('.pm-progress-label strong'),label=card.querySelector('.pm-progress-label span'),message=card.querySelector('[data-import-message]');
+            if(bar)bar.style.width=Math.min(100,percent)+'%'; if(strong)strong.textContent=Math.min(100,percent)+'%'; if(label)label.textContent=processed.toLocaleString()+' / '+total.toLocaleString()+'건'; if(message)message.textContent=full.last_message||'';
+            var remainingNode=card.querySelector('[data-import-remaining]'); if(remainingNode)remainingNode.textContent=remaining.toLocaleString()+'건';
+            var statusNode=card.querySelector('[data-import-status]'); if(statusNode)statusNode.textContent=full.active?(full.paused?'일시중지':'가져오는 중'):(full.cancelled?'취소됨':(total>0&&remaining===0?'완료':'대기'));
+        }
+        var cronAt=document.querySelector('[data-cron-last-at]'); if(cronAt)cronAt.textContent=state.last_cron_at||'아직 없음';
+        var cronResult=document.querySelector('[data-cron-last-result]'); if(cronResult)cronResult.textContent=state.last_cron_result||'아직 없음';
+        var cronStatus=document.querySelector('[data-cron-status]'); if(cronStatus)cronStatus.textContent=state.last_cron_status==='success'?'정상':(state.last_cron_status==='error'?'오류':(state.last_cron_status==='running'?'실행 중':'등록 대기'));
+    }
+
+    function bindStatusRefresh() {
+        var button=document.querySelector('[data-refresh-sync-status]'); if(!button)return;
+        button.addEventListener('click',function(){
+            if(button.classList.contains('is-busy'))return;
+            button.classList.add('is-busy'); button.setAttribute('disabled','disabled');
+            postJson({action:'get_sync_status',csrf_token:csrf(),response_type:'json'},function(result){
+                button.classList.remove('is-busy'); button.removeAttribute('disabled');
+                if(!result||!result.ok){alert(result&&result.message?result.message:'상태 확인에 실패했습니다.');return;}
+                updateStatusView(result.state||{});
+            });
+        });
     }
 
     function bindRunAutomation() {
         var button=document.querySelector('[data-run-automation]'); if(!button)return;
-        button.addEventListener('click',function(){ showLoading('자동동기화를 실행하는 중입니다.'); postJson({action:'automation_tick',csrf_token:csrf(),response_type:'json',limit:50},function(result){hideLoading();alert(result&&result.message?result.message:'자동동기화 결과를 확인할 수 없습니다.');if(result&&result.ok)window.location.reload();}); });
+        button.addEventListener('click',function(){ showLoading('자동동기화를 한 번 실행하는 중입니다.'); postJson({action:'automation_tick',csrf_token:csrf(),response_type:'json',limit:20},function(result){hideLoading();alert(result&&result.message?result.message:'자동동기화 결과를 확인할 수 없습니다.');if(result&&result.ok)window.location.reload();}); });
+    }
+
+    function copyValue(input, successMessage) {
+        if(!input)return;
+        input.focus(); input.select();
+        if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(input.value).then(function(){alert(successMessage);});
+        else { try{document.execCommand('copy');alert(successMessage);}catch(e){alert('값을 선택했습니다. Ctrl+C로 복사하세요.');} }
     }
 
     function bindCopyCron() {
-        var button=document.querySelector('[data-copy-cron-url]'),input=document.querySelector('[data-cron-url]'); if(!button||!input)return;
-        button.addEventListener('click',function(){
-            input.focus(); input.select();
-            if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(input.value).then(function(){alert('자동동기화 주소를 복사했습니다.');});
-            else { try{document.execCommand('copy');alert('자동동기화 주소를 복사했습니다.');}catch(e){alert('주소를 선택했습니다. Ctrl+C로 복사하세요.');} }
-        });
+        var urlButton=document.querySelector('[data-copy-cron-url]'),urlInput=document.querySelector('[data-cron-url]');
+        if(urlButton&&urlInput)urlButton.addEventListener('click',function(){copyValue(urlInput,'자동동기화 주소를 복사했습니다.');});
+        var keyButton=document.querySelector('[data-copy-cron-key]'),keyInput=document.querySelector('[data-cron-key]');
+        if(keyButton&&keyInput)keyButton.addEventListener('click',function(){copyValue(keyInput,'자동동기화 비밀키를 복사했습니다.');});
+        var headerButton=document.querySelector('[data-copy-cron-header]'),headerInput=document.querySelector('[data-cron-header]');
+        if(headerButton&&headerInput)headerButton.addEventListener('click',function(){copyValue(headerInput,'요청 헤더 이름을 복사했습니다.');});
     }
 
     function bindWorkflowNames() {
@@ -159,7 +179,7 @@
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindRunAutomation(); bindCopyCron(); bindWorkflowNames(); bindTaskModal();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindWorkflowNames(); bindTaskModal();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

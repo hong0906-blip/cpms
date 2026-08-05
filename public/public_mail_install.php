@@ -3,8 +3,8 @@
  * 파일 경로: C:\www\cpms\public\public_mail_install.php
  *
  * 네이버 메일 메뉴 설치·업데이트 도우미입니다.
- * - 기존 sidebar.php를 백업한 후 네이버 메일 메뉴와 1분 자동확인을 추가합니다.
- * - 호스팅용 웹 자동동기화 주소와 네이버 N 아이콘 파일을 확인합니다.
+ * - 기존 sidebar.php를 백업한 후 네이버 메일 메뉴만 추가합니다.
+ * - 기존 1분 브라우저 자동확인 코드를 제거하고 외부 예약서비스 방식으로 전환합니다.
  * - 설치 후 이 파일은 서버에서 삭제하세요.
  * PHP 5.6 호환 코드입니다.
  */
@@ -77,11 +77,10 @@ function pm_install_patch_sidebar($sidebarPath)
     $originalContent = $content;
     $variableAnchor = '$usageAnalyticsMenu = \'사용현황 분석\';';
     $itemAnchor = 'foreach ($googleShortcutMenuItems as $googleShortcutMenuItem) {';
-    $liveAnchor = '<div id="cpmsContentShell"';
 
     $variableBlock = "\n/* CPMS_PUBLIC_MAIL_VARIABLE_START */\n"
         . "\$publicMailMenu = '네이버 메일';\n"
-        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260805_5';\n"
+        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_6';\n"
         . "/* CPMS_PUBLIC_MAIL_VARIABLE_END */";
 
     $itemBlock = "/* CPMS_PUBLIC_MAIL_ITEM_START */\n"
@@ -99,166 +98,6 @@ function pm_install_patch_sidebar($sidebarPath)
         . ");\n"
         . "/* CPMS_PUBLIC_MAIL_ITEM_END */\n";
 
-    $liveSyncBlock = <<<'SIDEBAR'
-<!-- CPMS_PUBLIC_MAIL_LIVE_SYNC_START -->
-<script>
-(function () {
-    'use strict';
-
-    if (!window.fetch || !window.FormData) return;
-
-    var endpoint = <?php echo json_encode(base_url() . '/public_mail_action.php', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
-    var mailUrl = <?php echo json_encode(base_url() . '/public_mail.php', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
-    var csrfToken = <?php echo json_encode(csrf_token(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
-    var intervalMs = 60000;
-    var localAttemptKey = 'cpms_public_mail_live_attempt_at';
-    var localLastUidKey = 'cpms_public_mail_live_last_uid';
-    var localBadgeKey = 'cpms_public_mail_live_badge_count';
-    var busy = false;
-
-    function storageGet(key) {
-        try { return window.localStorage ? window.localStorage.getItem(key) : null; }
-        catch (e) { return null; }
-    }
-
-    function storageSet(key, value) {
-        try { if (window.localStorage) window.localStorage.setItem(key, String(value)); }
-        catch (e) {}
-    }
-
-    function findMenuLink() {
-        var links = document.querySelectorAll('a[href]');
-        var i;
-        for (i = 0; i < links.length; i++) {
-            var href = links[i].getAttribute('href') || '';
-            if (href === mailUrl || href.indexOf('/public_mail.php') !== -1) return links[i];
-        }
-        return null;
-    }
-
-    function renderBadge(count) {
-        count = parseInt(count, 10) || 0;
-        var link = findMenuLink();
-        if (!link) return;
-
-        var badge = link.querySelector('[data-public-mail-live-badge]');
-        if (count <= 0) {
-            if (badge && badge.parentNode) badge.parentNode.removeChild(badge);
-            return;
-        }
-
-        if (!badge) {
-            badge = document.createElement('span');
-            badge.setAttribute('data-public-mail-live-badge', '1');
-            badge.style.marginLeft = 'auto';
-            badge.style.minWidth = '20px';
-            badge.style.height = '20px';
-            badge.style.padding = '0 6px';
-            badge.style.borderRadius = '999px';
-            badge.style.background = '#ef4444';
-            badge.style.color = '#ffffff';
-            badge.style.fontSize = '11px';
-            badge.style.fontWeight = '800';
-            badge.style.display = 'inline-flex';
-            badge.style.alignItems = 'center';
-            badge.style.justifyContent = 'center';
-            link.appendChild(badge);
-        }
-        badge.textContent = count > 99 ? '99+' : String(count);
-    }
-
-    function clearBadge() {
-        storageSet(localBadgeKey, 0);
-        renderBadge(0);
-    }
-
-    function showToast(count) {
-        var old = document.getElementById('cpmsPublicMailLiveToast');
-        if (old && old.parentNode) old.parentNode.removeChild(old);
-
-        var toast = document.createElement('button');
-        toast.type = 'button';
-        toast.id = 'cpmsPublicMailLiveToast';
-        toast.textContent = '네이버 새 메일 ' + count + '건이 도착했습니다.';
-        toast.style.position = 'fixed';
-        toast.style.right = '24px';
-        toast.style.top = '24px';
-        toast.style.zIndex = '99999';
-        toast.style.border = '0';
-        toast.style.borderRadius = '12px';
-        toast.style.background = '#03c75a';
-        toast.style.color = '#ffffff';
-        toast.style.padding = '13px 17px';
-        toast.style.fontWeight = '800';
-        toast.style.boxShadow = '0 12px 30px rgba(0,0,0,.18)';
-        toast.style.cursor = 'pointer';
-        toast.onclick = function () { window.location.href = mailUrl; };
-        document.body.appendChild(toast);
-        window.setTimeout(function () {
-            if (toast && toast.parentNode) toast.parentNode.removeChild(toast);
-        }, 8000);
-    }
-
-    function handleSyncResult(result) {
-        if (!result || !result.ok) return;
-        var state = result.state && typeof result.state === 'object' ? result.state : {};
-        if (state.last_mode === 'full_import') return;
-        var addedCount = parseInt(result.added_count, 10) || 0;
-        if (addedCount > 0) {
-            var badgeCount = (parseInt(storageGet(localBadgeKey), 10) || 0) + addedCount;
-            storageSet(localBadgeKey, badgeCount);
-            renderBadge(badgeCount);
-            showToast(addedCount);
-        }
-    }
-
-    function syncNow() {
-        if (busy || document.hidden) return;
-
-        var now = new Date().getTime();
-        var previousAttempt = parseInt(storageGet(localAttemptKey), 10) || 0;
-        if (previousAttempt > 0 && now - previousAttempt < 55000) return;
-        storageSet(localAttemptKey, now);
-
-        busy = true;
-        var body = 'action=automation_tick'
-            + '&background=1'
-            + '&response_type=json'
-            + '&limit=20'
-            + '&csrf_token=' + encodeURIComponent(csrfToken);
-
-        window.fetch(endpoint, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-                'X-Requested-With': 'XMLHttpRequest'
-            },
-            body: body
-        }).then(function (response) {
-            return response.json();
-        }).then(function (result) {
-            handleSyncResult(result);
-        }).catch(function () {
-            /* 백그라운드 확인 오류는 업무화면을 방해하지 않습니다. */
-        }).then(function () {
-            busy = false;
-        });
-    }
-
-    var menuLink = findMenuLink();
-    if (menuLink) menuLink.addEventListener('click', clearBadge);
-    renderBadge(parseInt(storageGet(localBadgeKey), 10) || 0);
-
-    window.setTimeout(syncNow, 5000);
-    window.setInterval(syncNow, intervalMs);
-    document.addEventListener('visibilitychange', function () {
-        if (!document.hidden) syncNow();
-    });
-})();
-</script>
-<!-- CPMS_PUBLIC_MAIL_LIVE_SYNC_END -->
-SIDEBAR;
 
     if (strpos($content, 'CPMS_PUBLIC_MAIL_VARIABLE_START') !== false) {
         $content = preg_replace('#\n?/\* CPMS_PUBLIC_MAIL_VARIABLE_START \*/.*?/\* CPMS_PUBLIC_MAIL_VARIABLE_END \*/#s', $variableBlock, $content, 1);
@@ -278,17 +117,13 @@ SIDEBAR;
         $content = str_replace($itemAnchor, $itemBlock . $itemAnchor, $content);
     }
 
+    /* v1.6부터 직원 브라우저의 1분 자동수집 코드를 완전히 제거합니다. */
     if (strpos($content, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') !== false) {
-        $content = preg_replace('#<!-- CPMS_PUBLIC_MAIL_LIVE_SYNC_START -->.*?<!-- CPMS_PUBLIC_MAIL_LIVE_SYNC_END -->\n?#s', $liveSyncBlock . "\n", $content, 1);
-    } else {
-        if (strpos($content, $liveAnchor) === false) {
-            throw new RuntimeException('sidebar.php에서 실시간 확인 코드 추가 위치를 찾지 못했습니다.');
-        }
-        $content = str_replace($liveAnchor, $liveSyncBlock . "\n\n" . $liveAnchor, $content);
+        $content = preg_replace('#<!-- CPMS_PUBLIC_MAIL_LIVE_SYNC_START -->.*?<!-- CPMS_PUBLIC_MAIL_LIVE_SYNC_END -->\n?#s', '', $content, 1);
     }
 
     if ($content === $originalContent) {
-        return array('changed' => false, 'message' => '네이버 메일 메뉴와 1분 자동확인이 이미 최신 상태입니다.', 'backup' => '');
+        return array('changed' => false, 'message' => '네이버 메일 메뉴가 이미 최신 상태이며 브라우저 자동수집은 제거되어 있습니다.', 'backup' => '');
     }
 
     $backup = pm_install_backup($sidebarPath);
@@ -296,7 +131,7 @@ SIDEBAR;
         throw new RuntimeException('sidebar.php 수정에 실패했습니다.');
     }
 
-    return array('changed' => true, 'message' => '왼쪽 메뉴를 서버 내 네이버 대표 N 아이콘으로 변경하고 1분 자동확인을 적용했습니다.', 'backup' => $backup);
+    return array('changed' => true, 'message' => '왼쪽 메뉴를 네이버 대표 N 아이콘으로 적용하고, 업무를 방해하던 1분 브라우저 자동수집 코드를 제거했습니다.', 'backup' => $backup);
 }
 
 function pm_install_unpatch_sidebar($sidebarPath)
@@ -385,7 +220,7 @@ foreach ($requiredFiles as $relativePath) {
 
 $sidebarContent = is_file($sidebarPath) ? (string)@file_get_contents($sidebarPath) : '';
 $installed = strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_ITEM_START') !== false;
-$latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '네이버 메일';") !== false && strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') !== false && strpos($sidebarContent, 'assets/img/naver_n_icon.svg') !== false;
+$latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '네이버 메일';") !== false && strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') === false && strpos($sidebarContent, 'assets/img/naver_n_icon.svg') !== false;
 ?>
 <!DOCTYPE html>
 <html lang="ko">
@@ -401,7 +236,7 @@ $latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '�
 <div class="wrap">
     <div class="card">
         <h1>CPMS 네이버 메일 설치</h1>
-        <p class="sub">파일 확인 후 네이버 대표 N 아이콘, 보낸메일함, 대용량 첨부, 서버 무저장 다운로드와 Google Drive 저장 기능을 설치합니다. 24시간 자동수집은 연동 설정 화면의 웹 자동동기화 주소를 호스팅업체 예약작업에 등록합니다.</p>
+        <p class="sub">파일 확인 후 네이버 대표 N 아이콘과 메일 기능을 설치합니다. 기존 1분 브라우저 자동수집을 제거하여 화면 로딩을 없애고, 24시간 자동수집은 cron-job.org 같은 외부 예약서비스가 담당합니다.</p>
 
         <?php if ($message !== ''): ?>
             <div class="alert <?php echo $messageType === 'error' ? 'error' : 'success'; ?>"><?php echo pm_install_h($message); ?><?php echo $backupPath !== '' ? '<br>백업: ' . pm_install_h($backupPath) : ''; ?></div>
@@ -429,7 +264,7 @@ $latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '�
             <?php if ($installed): ?><a class="link" href="public_mail_settings.php">연동 설정 열기</a><?php endif; ?>
         </div>
 
-        <div class="note">설치가 끝나면 보안을 위해 public_mail_install.php 파일을 서버에서 삭제하세요.<br>24시간 자동수집 등록: 네이버 메일 → 연동 설정 → 웹 자동동기화 주소 복사</div>
+        <div class="note">설치가 끝나면 보안을 위해 public_mail_install.php 파일을 서버에서 삭제하세요.<br>24시간 자동수집 등록: 네이버 메일 → 연동 설정 → cron-job.org 주소·요청 헤더 복사</div>
     </div>
 </div>
 </body>

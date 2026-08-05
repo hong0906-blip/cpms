@@ -12,11 +12,11 @@ $remaining=isset($full['remaining_count'])?(int)$full['remaining_count']:0;
 $percent=$total>0?(int)floor(($processed/$total)*100):0;
 if ($percent>100) $percent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260805_5">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_6">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
-      <div><div class="public-mail-eyebrow">ADMIN SETTINGS</div><h1>네이버 메일 연동 설정</h1><p>서버 컴퓨터 없이 웹 예약호출과 CPMS 접속 화면에서 자동으로 동기화합니다.</p></div>
+      <div><div class="public-mail-eyebrow">ADMIN SETTINGS</div><h1>네이버 메일 연동 설정</h1><p>직원 화면에서는 자동수집을 실행하지 않습니다. 외부 예약서비스가 백그라운드에서 동기화합니다.</p></div>
       <div class="public-mail-actions"><a class="pm-btn pm-btn-light" href="public_mail.php"><i data-lucide="arrow-left"></i> 네이버 메일로 돌아가기</a></div>
     </section>
 
@@ -44,8 +44,8 @@ if ($percent>100) $percent=100;
         <div class="pm-card-title"><div><strong>전체 메일 가져오기</strong><span>버튼은 한 번만 누르면 됩니다. 받은메일함·네이버 보낸메일함·사용자 메일함을 자동으로 이어서 가져옵니다.</span></div></div>
         <div class="pm-progress-wrap"><div class="pm-progress-track"><span style="width:<?php echo $percent; ?>%"></span></div><div class="pm-progress-label"><strong><?php echo $percent; ?>%</strong><span><?php echo number_format($processed); ?> / <?php echo number_format($total); ?>건</span></div></div>
         <div class="pm-sync-state-list">
-          <div><span>상태</span><strong><?php echo !empty($full['active'])?(!empty($full['paused'])?'일시중지':'가져오는 중'):(!empty($full['cancelled'])?'취소됨':($total>0&&$remaining===0?'완료':'대기')); ?></strong></div>
-          <div><span>남은 메일</span><strong><?php echo number_format($remaining); ?>건</strong></div>
+          <div><span>상태</span><strong data-import-status><?php echo !empty($full['active'])?(!empty($full['paused'])?'일시중지':'가져오는 중'):(!empty($full['cancelled'])?'취소됨':($total>0&&$remaining===0?'완료':'대기')); ?></strong></div>
+          <div><span>남은 메일</span><strong data-import-remaining><?php echo number_format($remaining); ?>건</strong></div>
           <div><span>마지막 처리</span><strong><?php echo call_user_func($esc,isset($syncState['last_success_at'])&&$syncState['last_success_at']!==''?$syncState['last_success_at']:'아직 없음'); ?></strong></div>
           <div><span>최근 처리 건수</span><strong><?php echo isset($syncState['last_batch_count'])?(int)$syncState['last_batch_count']:0; ?>건</strong></div>
         </div>
@@ -57,15 +57,33 @@ if ($percent>100) $percent=100;
           <button type="button" class="pm-btn pm-btn-light" data-full-import="resume"><i data-lucide="play"></i> 다시 시작</button>
           <button type="button" class="pm-btn pm-btn-danger" data-full-import="cancel"><i data-lucide="square"></i> 취소</button>
         </div>
-        <p class="pm-help-text">내부에서는 서버 시간초과를 막기 위해 여러 묶음으로 처리하지만, 사용자가 계속 버튼을 누를 필요는 없습니다. 화면을 닫아도 진행 위치가 저장됩니다. Gmail에서 보낸 메일은 네이버 보낸메일함이 아니라 Gmail 보낸편지함에 남습니다.</p>
+        <p class="pm-help-text">버튼을 한 번 누르면 작업상태만 등록됩니다. 직원 브라우저는 반복 수집을 하지 않으며, 외부 예약서비스가 1분마다 다음 묶음을 처리합니다. 화면을 닫아도 진행됩니다. Gmail에서 보낸 메일은 네이버 보낸메일함이 아니라 Gmail 보낸편지함에 남습니다.</p>
       </div>
 
       <div class="pm-settings-card">
-        <div class="pm-card-title"><div><strong>24시간 웹 자동동기화</strong><span>Windows 작업 스케줄러나 BAT 파일을 사용하지 않습니다.</span></div><span class="pm-status-dot <?php echo !empty($syncState['last_cron_at'])?'is-on':''; ?>"><?php echo !empty($syncState['last_cron_at'])?'호출 기록 있음':'등록 대기'; ?></span></div>
-        <label>호스팅업체 예약호출 주소<div class="pm-copy-field"><input type="text" readonly value="<?php echo call_user_func($esc,isset($cronInfo['url'])?$cronInfo['url']:''); ?>" data-cron-url><button type="button" class="pm-btn pm-btn-light" data-copy-cron-url>주소 복사</button></div></label>
-        <div class="pm-sync-state-list"><div><span>권장 호출간격</span><strong>1~5분</strong></div><div><span>마지막 자동호출</span><strong><?php echo call_user_func($esc,!empty($syncState['last_cron_at'])?$syncState['last_cron_at']:'아직 없음'); ?></strong></div><div><span>최근 결과</span><strong><?php echo call_user_func($esc,!empty($syncState['last_cron_result'])?$syncState['last_cron_result']:'아직 없음'); ?></strong></div></div>
-        <p class="pm-help-text">호스팅업체 관리자 페이지의 CRON·예약 URL·웹 스케줄러 메뉴에 위 주소를 등록하세요. 해당 기능이 없으면 외부 웹 예약호출 서비스에 같은 주소를 등록할 수 있습니다.</p>
-        <div class="pm-settings-actions"><button type="button" class="pm-btn pm-btn-primary" data-run-automation><i data-lucide="refresh-cw"></i> 지금 자동동기화 실행</button><form method="post" action="public_mail_action.php" onsubmit="return confirm('보안주소를 새로 만들면 기존 주소는 작동하지 않습니다. 계속할까요?');"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="regenerate_cron_token"><button type="submit" class="pm-btn pm-btn-light"><i data-lucide="key-round"></i> 보안주소 새로 만들기</button></form></div>
+        <div class="pm-card-title"><div><strong>24시간 외부 자동동기화</strong><span>직원 브라우저와 서버업체 설정 없이 cron-job.org가 자동으로 호출합니다.</span></div><span class="pm-status-dot <?php echo !empty($syncState['last_cron_at'])?'is-on':''; ?>" data-cron-status><?php echo isset($syncState['last_cron_status'])&&$syncState['last_cron_status']==='success'?'정상':(isset($syncState['last_cron_status'])&&$syncState['last_cron_status']==='error'?'오류':(!empty($syncState['last_cron_at'])?'실행 기록 있음':'등록 대기')); ?></span></div>
+        <div class="pm-alert pm-alert-success"><strong>직원 화면 자동수집: 사용 안 함</strong><br>이제 CPMS를 사용하는 동안 1분마다 로딩이 발생하지 않습니다.</div>
+        <label>cron-job.org에 등록할 주소<div class="pm-copy-field"><input type="text" readonly value="<?php echo call_user_func($esc,isset($cronInfo['url'])?$cronInfo['url']:''); ?>" data-cron-url><button type="button" class="pm-btn pm-btn-light" data-copy-cron-url>주소 복사</button></div></label>
+        <label>요청 헤더 이름<div class="pm-copy-field"><input type="text" readonly value="<?php echo call_user_func($esc,isset($cronInfo['header_name'])?$cronInfo['header_name']:'X-CPMS-Mail-Key'); ?>" data-cron-header><button type="button" class="pm-btn pm-btn-light" data-copy-cron-header>이름 복사</button></div></label>
+        <label>요청 헤더 비밀키<div class="pm-copy-field"><input type="text" readonly value="<?php echo call_user_func($esc,isset($cronInfo['header_value'])?$cronInfo['header_value']:''); ?>" data-cron-key><button type="button" class="pm-btn pm-btn-light" data-copy-cron-key>비밀키 복사</button></div><small>비밀키는 네이버 비밀번호가 아닙니다. 공개 게시판이나 문서에 올리지 마세요.</small></label>
+        <div class="pm-sync-state-list">
+          <div><span>권장 호출간격</span><strong>1분</strong></div>
+          <div><span>마지막 자동호출</span><strong data-cron-last-at><?php echo call_user_func($esc,!empty($syncState['last_cron_at'])?$syncState['last_cron_at']:'아직 없음'); ?></strong></div>
+          <div><span>최근 결과</span><strong data-cron-last-result><?php echo call_user_func($esc,!empty($syncState['last_cron_result'])?$syncState['last_cron_result']:'아직 없음'); ?></strong></div>
+          <div><span>브라우저 주기실행</span><strong>완전 중지</strong></div>
+        </div>
+        <div class="pm-help-text">
+          <strong>cron-job.org 등록방법</strong><br>
+          1. cron-job.org 회원가입 후 CREATE CRONJOB을 누릅니다.<br>
+          2. 위 주소를 URL에 붙여넣고 실행주기를 Every minute으로 선택합니다.<br>
+          3. Advanced에서 Request headers를 열고, 위 헤더 이름과 비밀키를 각각 입력합니다.<br>
+          4. 저장 후 TEST RUN을 누르고 이 화면의 [상태만 새로고침]으로 정상 여부를 확인합니다.
+        </div>
+        <div class="pm-settings-actions pm-wrap-actions">
+          <button type="button" class="pm-btn pm-btn-light" data-refresh-sync-status><i data-lucide="activity"></i> 상태만 새로고침</button>
+          <button type="button" class="pm-btn pm-btn-primary" data-run-automation><i data-lucide="refresh-cw"></i> 지금 한 번 실행</button>
+          <form method="post" action="public_mail_action.php" onsubmit="return confirm('비밀키를 새로 만들면 기존 키는 작동하지 않습니다. cron-job.org 설정도 새 키로 바꿔야 합니다. 계속할까요?');"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="regenerate_cron_token"><button type="submit" class="pm-btn pm-btn-light"><i data-lucide="key-round"></i> 비밀키 새로 만들기</button></form>
+        </div>
       </div>
 
       <div class="pm-settings-card">
@@ -81,4 +99,4 @@ if ($percent>100) $percent=100;
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260805_5"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_6"></script>

@@ -60,7 +60,11 @@ class PublicMailStorageService
             'remaining_count' => 0,
             'completed_initial_sync' => false,
             'last_cron_at' => '',
+            'last_cron_started_at' => '',
+            'last_cron_finished_at' => '',
             'last_cron_result' => '',
+            'last_cron_status' => '',
+            'last_cron_duration_ms' => 0,
             'mailboxes' => array(),
             'full_import' => array(
                 'active' => false,

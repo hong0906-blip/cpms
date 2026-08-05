@@ -44,11 +44,16 @@ class PublicMailService
     {
         $baseUrl = rtrim((string)$baseUrl, '/');
         $token = PublicMailStorageService::getCronToken();
+        $state = $this->getSyncState();
         return array(
             'token' => $token,
-            'url' => $baseUrl . '/cron/naver_mail_sync.php?key=' . rawurlencode($token),
-            'recommended_interval' => '1~5분',
-            'last_cron_at' => isset($this->getSyncState()['last_cron_at']) ? $this->getSyncState()['last_cron_at'] : ''
+            'url' => $baseUrl . '/cron/naver_mail_sync.php',
+            'header_name' => 'X-CPMS-Mail-Key',
+            'header_value' => $token,
+            'recommended_interval' => '1분',
+            'last_cron_at' => isset($state['last_cron_at']) ? $state['last_cron_at'] : '',
+            'last_cron_result' => isset($state['last_cron_result']) ? $state['last_cron_result'] : '',
+            'browser_auto_sync' => false
         );
     }
 
