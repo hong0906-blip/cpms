@@ -4,7 +4,7 @@
  *
  * 네이버 메일 메뉴 설치·업데이트 도우미입니다.
  * - 기존 sidebar.php를 백업한 후 네이버 메일 메뉴와 1분 자동확인을 추가합니다.
- * - scripts 폴더의 24시간 자동수집 파일 존재 여부도 확인합니다.
+ * - 호스팅용 웹 자동동기화 주소와 네이버 N 아이콘 파일을 확인합니다.
  * - 설치 후 이 파일은 서버에서 삭제하세요.
  * PHP 5.6 호환 코드입니다.
  */
@@ -81,7 +81,7 @@ function pm_install_patch_sidebar($sidebarPath)
 
     $variableBlock = "\n/* CPMS_PUBLIC_MAIL_VARIABLE_START */\n"
         . "\$publicMailMenu = '네이버 메일';\n"
-        . "\$publicMailIcon = base_url() . '/assets/img/naver_mail.svg?v=20260805_3';\n"
+        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260805_4';\n"
         . "/* CPMS_PUBLIC_MAIL_VARIABLE_END */";
 
     $itemBlock = "/* CPMS_PUBLIC_MAIL_ITEM_START */\n"
@@ -201,18 +201,10 @@ function pm_install_patch_sidebar($sidebarPath)
 
     function handleSyncResult(result) {
         if (!result || !result.ok) return;
-
         var state = result.state && typeof result.state === 'object' ? result.state : {};
-        var currentUid = parseInt(state.last_uid, 10) || 0;
-        var previousUid = parseInt(storageGet(localLastUidKey), 10) || 0;
+        if (state.last_mode === 'full_import') return;
         var addedCount = parseInt(result.added_count, 10) || 0;
-
-        if (currentUid > 0) {
-            storageSet(localLastUidKey, currentUid);
-        }
-
-        if (previousUid > 0 && currentUid > previousUid) {
-            if (addedCount < 1) addedCount = 1;
+        if (addedCount > 0) {
             var badgeCount = (parseInt(storageGet(localBadgeKey), 10) || 0) + addedCount;
             storageSet(localBadgeKey, badgeCount);
             renderBadge(badgeCount);
@@ -229,7 +221,7 @@ function pm_install_patch_sidebar($sidebarPath)
         storageSet(localAttemptKey, now);
 
         busy = true;
-        var body = 'action=sync_new'
+        var body = 'action=automation_tick'
             + '&background=1'
             + '&response_type=json'
             + '&limit=20'
@@ -304,7 +296,7 @@ SIDEBAR;
         throw new RuntimeException('sidebar.php 수정에 실패했습니다.');
     }
 
-    return array('changed' => true, 'message' => '왼쪽 메뉴를 서버 내 네이버 메일 아이콘으로 변경하고 1분 자동확인을 적용했습니다.', 'backup' => $backup);
+    return array('changed' => true, 'message' => '왼쪽 메뉴를 서버 내 네이버 대표 N 아이콘으로 변경하고 1분 자동확인을 적용했습니다.', 'backup' => $backup);
 }
 
 function pm_install_unpatch_sidebar($sidebarPath)
@@ -373,12 +365,9 @@ $requiredFiles = array(
     'public/public_mail_action.php',
     'public/public_mail_attachment.php',
     'public/assets/css/public_mail.css',
-    'public/assets/img/naver_mail.svg',
+    'public/assets/img/naver_n_icon.svg',
     'public/assets/js/public_mail.js',
-    'scripts/public_mail_sync.php',
-    'scripts/run_public_mail_sync.bat',
-    'scripts/install_public_mail_task.bat',
-    'scripts/remove_public_mail_task.bat'
+    'public/cron/naver_mail_sync.php'
 );
 
 $checks = array();
@@ -393,7 +382,7 @@ foreach ($requiredFiles as $relativePath) {
 
 $sidebarContent = is_file($sidebarPath) ? (string)@file_get_contents($sidebarPath) : '';
 $installed = strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_ITEM_START') !== false;
-$latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '네이버 메일';") !== false && strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') !== false && strpos($sidebarContent, 'assets/img/naver_mail.svg') !== false;
+$latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '네이버 메일';") !== false && strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') !== false && strpos($sidebarContent, 'assets/img/naver_n_icon.svg') !== false;
 ?>
 <!DOCTYPE html>
 <html lang="ko">
@@ -409,7 +398,7 @@ $latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '�
 <div class="wrap">
     <div class="card">
         <h1>CPMS 네이버 메일 설치</h1>
-        <p class="sub">파일 확인 후 사이드바에 네이버 메일 아이콘과 1분 자동확인을 설치합니다. 24시간 자동수집은 설치 후 scripts\install_public_mail_task.bat를 관리자 권한으로 실행하세요.</p>
+        <p class="sub">파일 확인 후 사이드바에 네이버 대표 N 아이콘과 1분 자동확인을 설치합니다. 24시간 자동수집은 연동 설정 화면의 웹 자동동기화 주소를 호스팅업체 예약작업에 등록합니다.</p>
 
         <?php if ($message !== ''): ?>
             <div class="alert <?php echo $messageType === 'error' ? 'error' : 'success'; ?>"><?php echo pm_install_h($message); ?><?php echo $backupPath !== '' ? '<br>백업: ' . pm_install_h($backupPath) : ''; ?></div>
@@ -437,7 +426,7 @@ $latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '�
             <?php if ($installed): ?><a class="link" href="public_mail_settings.php">연동 설정 열기</a><?php endif; ?>
         </div>
 
-        <div class="note">설치가 끝나면 보안을 위해 public_mail_install.php 파일을 서버에서 삭제하세요.<br>24시간 자동수집 등록: C:\www\cpms\scripts\install_public_mail_task.bat를 관리자 권한으로 실행</div>
+        <div class="note">설치가 끝나면 보안을 위해 public_mail_install.php 파일을 서버에서 삭제하세요.<br>24시간 자동수집 등록: 네이버 메일 → 연동 설정 → 웹 자동동기화 주소 복사</div>
     </div>
 </div>
 </body>

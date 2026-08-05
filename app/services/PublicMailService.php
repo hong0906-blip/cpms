@@ -2,7 +2,7 @@
 /**
  * 파일 경로: C:\www\cpms\app\services\PublicMailService.php
  *
- * 공용메일 동기화, 조회, 본문/첨부파일 해석, Gmail 답장 연결을 담당합니다.
+ * 네이버 전체 메일함 자동수집, 조회, 본문/첨부파일 해석, Gmail 연결을 담당합니다.
  * PHP 5.6 호환 코드입니다.
  */
 
@@ -24,9 +24,9 @@ class PublicMailService
         PublicMailStorageService::ensureStorage();
     }
 
-    public function getSettings($includePassword)
+    public function getSettings($includeSecrets)
     {
-        return PublicMailStorageService::getSettings($includePassword);
+        return PublicMailStorageService::getSettings($includeSecrets);
     }
 
     public function saveSettings($input, $updatedBy)
@@ -34,182 +34,297 @@ class PublicMailService
         return PublicMailStorageService::saveSettings($input, $updatedBy);
     }
 
+    public function getCronInfo($baseUrl)
+    {
+        $baseUrl = rtrim((string)$baseUrl, '/');
+        $token = PublicMailStorageService::getCronToken();
+        return array(
+            'token' => $token,
+            'url' => $baseUrl . '/cron/naver_mail_sync.php?key=' . rawurlencode($token),
+            'recommended_interval' => '1~5분',
+            'last_cron_at' => isset($this->getSyncState()['last_cron_at']) ? $this->getSyncState()['last_cron_at'] : ''
+        );
+    }
+
+    public function regenerateCronToken($updatedBy)
+    {
+        return PublicMailStorageService::regenerateCronToken($updatedBy);
+    }
+
+    public function verifyCronToken($token)
+    {
+        $expected = PublicMailStorageService::getCronToken();
+        $token = trim((string)$token);
+        if ($expected === '' || $token === '') return false;
+        return function_exists('hash_equals') ? hash_equals($expected, $token) : ($expected === $token);
+    }
+
     public function testConnection($temporarySettings)
     {
         $settings = $this->mergeConnectionSettings($temporarySettings);
         $client = $this->createClient($settings);
-
         try {
             $client->connect();
             $client->login($settings['username'], $settings['password']);
-            $mailbox = $client->selectMailbox('INBOX');
-            return array(
-                'ok' => true,
-                'message' => '네이버 공용메일 연결이 정상입니다.',
-                'mail_count' => isset($mailbox['exists']) ? (int)$mailbox['exists'] : 0
-            );
+            $mailboxes = $this->discoverMailboxes($client, $settings);
+            $inboxCount = 0;
+            foreach ($mailboxes as $mailbox) {
+                if (strcasecmp($mailbox['raw_name'], 'INBOX') === 0) {
+                    $info = $client->selectMailbox($mailbox['raw_name']);
+                    $inboxCount = isset($info['exists']) ? (int)$info['exists'] : 0;
+                    break;
+                }
+            }
+            return array('ok'=>true,'message'=>'네이버 공용메일 연결이 정상입니다.','mail_count'=>$inboxCount,'mailbox_count'=>count($mailboxes));
         } finally {
             $client->logout();
         }
     }
 
-    public function syncBatch($limit, $mode)
+    public function startFullImport()
     {
-        $settings = PublicMailStorageService::getSettings(true);
-        if (empty($settings['enabled'])) {
-            throw new \RuntimeException('공용메일 연동이 사용 상태가 아닙니다. 관리자 설정을 확인하세요.');
-        }
-        if (empty($settings['username']) || empty($settings['password'])) {
-            throw new \RuntimeException('네이버 아이디 또는 애플리케이션 비밀번호가 설정되지 않았습니다.');
-        }
-
-        $limit = (int)$limit;
-        if ($limit < 1) {
-            $limit = isset($settings['batch_size']) ? (int)$settings['batch_size'] : 50;
-        }
-        if ($limit > 100) {
-            $limit = 100;
-        }
-
-        $mode = $mode === 'new' ? 'new' : 'initial';
+        $settings = $this->requireEnabledSettings();
+        $lock = PublicMailStorageService::acquireLock('sync');
+        if ($lock === false) throw new \RuntimeException('다른 사용자가 메일을 가져오는 중입니다. 잠시 후 다시 시도하세요.');
         $client = $this->createClient($settings);
-        $existingMessages = PublicMailStorageService::getMessages();
-        $projects = $this->getProjects();
-        $newMessages = array();
-        $gptUsed = 0;
-        $gptLimitPerBatch = 3;
-        $syncLock = PublicMailStorageService::acquireLock('sync');
-        if ($syncLock === false) {
-            throw new \RuntimeException('다른 사용자가 메일을 가져오는 중입니다. 잠시 후 다시 시도하세요.');
-        }
-
         try {
             $client->connect();
             $client->login($settings['username'], $settings['password']);
-            $mailboxInfo = $client->selectMailbox('INBOX');
-
-            if ($mode === 'new') {
-                $syncState = PublicMailStorageService::getSyncState();
-                $lastUid = isset($syncState['last_uid']) ? (int)$syncState['last_uid'] : 0;
-                $uids = $client->searchUidsAfter($lastUid);
-            } else {
-                $years = isset($settings['initial_years']) ? (int)$settings['initial_years'] : 1;
-                if ($years < 1) {
-                    $years = 1;
-                }
-                $sinceTimestamp = strtotime('-' . $years . ' year');
-                $uids = $client->searchUidsSince($sinceTimestamp);
-            }
-
-            rsort($uids, SORT_NUMERIC);
-            $missingUids = array();
-            foreach ($uids as $uid) {
-                $key = (string)(int)$uid;
-                if (!isset($existingMessages[$key])) {
-                    $missingUids[] = (int)$uid;
-                    if (count($missingUids) >= $limit) {
-                        break;
-                    }
-                }
-            }
-
-            foreach ($missingUids as $uid) {
-                $headerData = $client->fetchHeader($uid);
-                $message = $this->buildMessageFromHeader($headerData);
-                // 모든 메일에 본문 미리보기를 저장합니다. 화면 진입 때 네이버 서버를 기다리지 않게 합니다.
+            $mailboxes = $this->discoverMailboxes($client, $settings);
+            if (empty($mailboxes)) throw new \RuntimeException('가져올 수 있는 네이버 메일함을 찾지 못했습니다.');
+            $mailboxStates = array();
+            $order = array();
+            $total = 0;
+            foreach ($mailboxes as $mailbox) {
                 try {
-                    $previewRaw = $client->fetchRawPreview($uid, 65536);
-                    if ($previewRaw !== '') {
-                        $previewParsed = $this->parseRawMessage($previewRaw, false);
-                        $message['preview'] = $this->makePreviewText(
-                            isset($previewParsed['body_text']) ? $previewParsed['body_text'] : ''
-                        );
-                        $message['has_attachment'] = !empty($previewParsed['attachments'])
-                            || $this->rawMessageLooksLikeAttachment($previewRaw);
-                    }
-                } catch (\Exception $previewException) {
-                    $message['preview'] = '';
+                    $info = $client->selectMailbox($mailbox['raw_name']);
+                    $count = isset($info['exists']) ? (int)$info['exists'] : 0;
+                } catch (\Exception $ignored) {
+                    $count = 0;
                 }
-
-                $message['classification'] = $this->classifier->classify($message, $projects);
-
-                if (!empty($settings['use_gpt_classifier']) && $this->isAmbiguousClassification($message['classification'])) {
-                    if ($gptUsed < $gptLimitPerBatch) {
-                        $gptClassification = $this->classifier->classifyAmbiguousWithGpt($message, $projects, $message['classification']);
-                        if (is_array($gptClassification)) {
-                            $message['classification'] = $gptClassification;
-                            $gptUsed++;
-                        } else {
-                            $message['classification']['gpt_pending'] = true;
-                        }
-                    } else {
-                        $message['classification']['gpt_pending'] = true;
-                    }
-                }
-
-                $message['synced_at'] = date('Y-m-d H:i:s');
-                $newMessages[(string)$uid] = $message;
+                $id = $this->mailboxStateId($mailbox['raw_name']);
+                $order[] = $id;
+                $mailboxStates[$id] = array(
+                    'raw_name'=>$mailbox['raw_name'], 'display_name'=>$mailbox['display_name'],
+                    'total_count'=>$count, 'imported_count'=>0, 'remaining_count'=>$count,
+                    'last_uid'=>0, 'completed'=>($count === 0), 'last_error'=>''
+                );
+                $total += $count;
             }
-
-            if (!empty($newMessages)) {
-                PublicMailStorageService::upsertMessages($newMessages);
-            }
-
-            $allKnownMessages = PublicMailStorageService::getMessages();
-            $maximumUid = 0;
-            foreach ($allKnownMessages as $knownUid => $knownMessage) {
-                if ((int)$knownUid > $maximumUid) {
-                    $maximumUid = (int)$knownUid;
-                }
-            }
-
-            $remaining = 0;
-            foreach ($uids as $uid) {
-                if (!isset($allKnownMessages[(string)(int)$uid])) {
-                    $remaining++;
-                }
-            }
-
-            $previousState = PublicMailStorageService::getSyncState();
-            $initialCompleted = ($mode === 'initial')
-                ? ($remaining === 0)
-                : (!empty($previousState['completed_initial_sync']));
-
             $state = PublicMailStorageService::saveSyncState(array(
-                'last_success_at' => date('Y-m-d H:i:s'),
-                'last_error_at' => '',
-                'last_error' => '',
-                'last_uid' => $maximumUid,
-                'last_batch_count' => count($newMessages),
-                'last_gpt_count' => $gptUsed,
-                'last_search_count' => count($uids),
-                'last_mode' => $mode,
-                'mailbox_total' => isset($mailboxInfo['exists']) ? (int)$mailboxInfo['exists'] : 0,
-                'remaining_count' => $remaining,
-                'completed_initial_sync' => $initialCompleted
+                'mailboxes'=>$mailboxStates,
+                'remaining_count'=>$total,
+                'mailbox_total'=>$total,
+                'completed_initial_sync'=>($total === 0),
+                'full_import'=>array(
+                    'active'=>($total > 0), 'paused'=>false, 'cancelled'=>false,
+                    'started_at'=>date('Y-m-d H:i:s'), 'finished_at'=>$total === 0 ? date('Y-m-d H:i:s') : '',
+                    'current_mailbox_index'=>0, 'mailbox_order'=>$order,
+                    'processed_count'=>0, 'total_count'=>$total, 'remaining_count'=>$total,
+                    'last_message'=>$total > 0 ? '전체 메일 가져오기를 시작했습니다.' : '가져올 메일이 없습니다.'
+                )
             ));
+            return array('ok'=>true,'message'=>$total > 0 ? '전체 메일 가져오기를 시작했습니다.' : '가져올 메일이 없습니다.','state'=>$state);
+        } finally {
+            $client->logout();
+            PublicMailStorageService::releaseLock($lock);
+        }
+    }
 
-            return array(
-                'ok' => true,
-                'message' => count($newMessages) > 0
-                    ? count($newMessages) . '개의 메일을 새로 가져왔습니다.'
-                    : '새로 가져올 메일이 없습니다.',
-                'added_count' => count($newMessages),
-                'search_count' => count($uids),
-                'remaining_count' => $remaining,
-                'gpt_count' => $gptUsed,
-                'state' => $state
-            );
-        } catch (\Exception $e) {
-            PublicMailStorageService::saveSyncState(array(
-                'last_error_at' => date('Y-m-d H:i:s'),
-                'last_error' => $e->getMessage(),
-                'last_mode' => $mode
+    public function controlFullImport($command)
+    {
+        $state = PublicMailStorageService::getSyncState();
+        $full = $state['full_import'];
+        $command = trim((string)$command);
+        if ($command === 'pause') {
+            $full['paused'] = true; $full['last_message'] = '전체 메일 가져오기를 일시중지했습니다.';
+        } elseif ($command === 'resume') {
+            if (!empty($full['cancelled']) || empty($full['mailbox_order'])) return $this->startFullImport();
+            $full['active'] = true; $full['paused'] = false; $full['cancelled'] = false; $full['last_message'] = '전체 메일 가져오기를 다시 시작했습니다.';
+        } elseif ($command === 'cancel') {
+            $full['active'] = false; $full['paused'] = false; $full['cancelled'] = true; $full['finished_at'] = date('Y-m-d H:i:s'); $full['last_message'] = '전체 메일 가져오기를 취소했습니다.';
+        } else {
+            throw new \InvalidArgumentException('전체메일 작업 명령이 올바르지 않습니다.');
+        }
+        $state = PublicMailStorageService::saveSyncState(array('full_import'=>$full));
+        return array('ok'=>true,'message'=>$full['last_message'],'state'=>$state);
+    }
+
+    public function runAutomationTick($limit)
+    {
+        $state = PublicMailStorageService::getSyncState();
+        if (!empty($state['full_import']['active']) && empty($state['full_import']['paused'])) {
+            return $this->syncFullImportBatch($limit);
+        }
+        return $this->syncNewBatch($limit);
+    }
+
+    public function syncBatch($limit, $mode)
+    {
+        if ($mode === 'initial') {
+            $state = PublicMailStorageService::getSyncState();
+            if (empty($state['full_import']['active']) && empty($state['full_import']['mailbox_order'])) $this->startFullImport();
+            return $this->syncFullImportBatch($limit);
+        }
+        return $this->syncNewBatch($limit);
+    }
+
+    public function syncFullImportBatch($limit)
+    {
+        $settings = $this->requireEnabledSettings();
+        $limit = $this->normalizeBatchLimit($limit, $settings);
+        $lock = PublicMailStorageService::acquireLock('sync');
+        if ($lock === false) throw new \RuntimeException('다른 사용자가 메일을 가져오는 중입니다. 잠시 후 다시 시도하세요.');
+        $client = $this->createClient($settings);
+        try {
+            $state = PublicMailStorageService::getSyncState();
+            $full = $state['full_import'];
+            if (empty($full['active'])) return array('ok'=>true,'message'=>'전체메일 가져오기가 실행 중이 아닙니다.','added_count'=>0,'state'=>$state);
+            if (!empty($full['paused'])) return array('ok'=>true,'message'=>'전체메일 가져오기가 일시중지되어 있습니다.','added_count'=>0,'state'=>$state);
+            $client->connect();
+            $client->login($settings['username'], $settings['password']);
+            $messages = PublicMailStorageService::getMessages();
+            $projects = $this->getProjects();
+            $order = isset($full['mailbox_order']) && is_array($full['mailbox_order']) ? $full['mailbox_order'] : array();
+            $index = isset($full['current_mailbox_index']) ? (int)$full['current_mailbox_index'] : 0;
+            $mailboxes = isset($state['mailboxes']) && is_array($state['mailboxes']) ? $state['mailboxes'] : array();
+            $added = 0; $gptUsed = 0; $lastMessage = '';
+
+            while ($index < count($order) && $added < $limit) {
+                $id = $order[$index];
+                if (!isset($mailboxes[$id]) || !is_array($mailboxes[$id])) { $index++; continue; }
+                $box = $mailboxes[$id];
+                if (!empty($box['completed'])) { $index++; continue; }
+                try {
+                    $client->selectMailbox($box['raw_name']);
+                    $uids = $client->searchAllUids();
+                    rsort($uids, SORT_NUMERIC);
+                    $missing = array();
+                    foreach ($uids as $uid) {
+                        $key = PublicMailStorageService::messageKey($box['raw_name'], $uid);
+                        if (!isset($messages[$key])) {
+                            $missing[] = (int)$uid;
+                            if (count($missing) >= ($limit - $added)) break;
+                        }
+                    }
+                    foreach ($missing as $uid) {
+                        $message = $this->fetchAndBuildMessage($client, $box, $uid, $projects, $settings, $gptUsed);
+                        $key = $message['message_key'];
+                        $messages[$key] = $message;
+                        $added++;
+                    }
+                    if (!empty($missing)) PublicMailStorageService::saveMessages($messages);
+                    $imported = 0; $maxUid = 0;
+                    foreach ($uids as $uid) {
+                        if ((int)$uid > $maxUid) $maxUid = (int)$uid;
+                        if (isset($messages[PublicMailStorageService::messageKey($box['raw_name'], $uid)])) $imported++;
+                    }
+                    $box['total_count'] = count($uids);
+                    $box['imported_count'] = $imported;
+                    $box['remaining_count'] = max(0, count($uids) - $imported);
+                    $box['last_uid'] = $maxUid;
+                    $box['completed'] = $box['remaining_count'] === 0;
+                    $box['last_error'] = '';
+                    $mailboxes[$id] = $box;
+                    $lastMessage = $box['display_name'] . ' 메일함을 가져오는 중입니다.';
+                    if ($box['completed']) $index++;
+                    if ($added >= $limit) break;
+                } catch (\Exception $boxError) {
+                    $box['last_error'] = $boxError->getMessage();
+                    $box['completed'] = true;
+                    $mailboxes[$id] = $box;
+                    $index++;
+                }
+            }
+
+            $progress = $this->calculateImportProgress($mailboxes);
+            $completed = $index >= count($order) || $progress['remaining_count'] <= 0;
+            $full['current_mailbox_index'] = $index;
+            $full['processed_count'] = $progress['processed_count'];
+            $full['total_count'] = $progress['total_count'];
+            $full['remaining_count'] = $progress['remaining_count'];
+            $full['active'] = !$completed;
+            $full['finished_at'] = $completed ? date('Y-m-d H:i:s') : '';
+            $full['last_message'] = $completed ? '전체 메일 가져오기가 완료되었습니다.' : $lastMessage;
+            $state = PublicMailStorageService::saveSyncState(array(
+                'last_success_at'=>date('Y-m-d H:i:s'),'last_error_at'=>'','last_error'=>'',
+                'last_batch_count'=>$added,'last_gpt_count'=>$gptUsed,'last_mode'=>'full_import',
+                'mailboxes'=>$mailboxes,'mailbox_total'=>$progress['total_count'],
+                'remaining_count'=>$progress['remaining_count'],'completed_initial_sync'=>$completed,
+                'full_import'=>$full
             ));
+            return array('ok'=>true,'message'=>$full['last_message'],'added_count'=>$added,'remaining_count'=>$progress['remaining_count'],'state'=>$state);
+        } catch (\Exception $e) {
+            PublicMailStorageService::saveSyncState(array('last_error_at'=>date('Y-m-d H:i:s'),'last_error'=>$e->getMessage(),'last_mode'=>'full_import'));
             throw $e;
         } finally {
             $client->logout();
-            PublicMailStorageService::releaseLock($syncLock);
+            PublicMailStorageService::releaseLock($lock);
+        }
+    }
+
+    public function syncNewBatch($limit)
+    {
+        $settings = $this->requireEnabledSettings();
+        $limit = $this->normalizeBatchLimit($limit, $settings);
+        $lock = PublicMailStorageService::acquireLock('sync');
+        if ($lock === false) throw new \RuntimeException('다른 사용자가 메일을 가져오는 중입니다. 잠시 후 다시 시도하세요.');
+        $client = $this->createClient($settings);
+        try {
+            $client->connect(); $client->login($settings['username'], $settings['password']);
+            $state = PublicMailStorageService::getSyncState();
+            $mailboxes = isset($state['mailboxes']) && is_array($state['mailboxes']) ? $state['mailboxes'] : array();
+            if (empty($mailboxes)) {
+                foreach ($this->discoverMailboxes($client, $settings) as $box) {
+                    $id = $this->mailboxStateId($box['raw_name']);
+                    $mailboxes[$id] = array('raw_name'=>$box['raw_name'],'display_name'=>$box['display_name'],'total_count'=>0,'imported_count'=>0,'remaining_count'=>0,'last_uid'=>0,'completed'=>false,'last_error'=>'');
+                }
+            }
+            $messages = PublicMailStorageService::getMessages();
+            $projects = $this->getProjects();
+            $added = 0; $gptUsed = 0; $searched = 0;
+            foreach ($mailboxes as $id => $box) {
+                if ($added >= $limit) break;
+                try {
+                    $info = $client->selectMailbox($box['raw_name']);
+                    $lastUid = isset($box['last_uid']) ? (int)$box['last_uid'] : 0;
+                    if ($lastUid <= 0) $lastUid = $this->maximumKnownUid($messages, $box['raw_name']);
+                    $uids = $client->searchUidsAfter($lastUid);
+                    if ($lastUid <= 0) rsort($uids, SORT_NUMERIC); else sort($uids, SORT_NUMERIC);
+                    $searched += count($uids);
+                    $newLastUid = $lastUid;
+                    foreach ($uids as $uid) {
+                        if ($added >= $limit) break;
+                        $key = PublicMailStorageService::messageKey($box['raw_name'], $uid);
+                        if (isset($messages[$key])) { if ((int)$uid > $newLastUid) $newLastUid = (int)$uid; continue; }
+                        $message = $this->fetchAndBuildMessage($client, $box, $uid, $projects, $settings, $gptUsed);
+                        $messages[$key] = $message; $added++;
+                        if ((int)$uid > $newLastUid) $newLastUid = (int)$uid;
+                    }
+                    $box['last_uid'] = $newLastUid;
+                    $box['total_count'] = isset($info['exists']) ? (int)$info['exists'] : (isset($box['total_count']) ? (int)$box['total_count'] : 0);
+                    $box['imported_count'] = $this->countKnownMailboxMessages($messages, $box['raw_name']);
+                    $box['remaining_count'] = max(0, $box['total_count'] - $box['imported_count']);
+                    $box['last_error'] = '';
+                    $mailboxes[$id] = $box;
+                } catch (\Exception $boxError) {
+                    $box['last_error'] = $boxError->getMessage(); $mailboxes[$id] = $box;
+                }
+            }
+            if ($added > 0) PublicMailStorageService::saveMessages($messages);
+            $progress = $this->calculateImportProgress($mailboxes);
+            $state = PublicMailStorageService::saveSyncState(array(
+                'last_success_at'=>date('Y-m-d H:i:s'),'last_error_at'=>'','last_error'=>'',
+                'last_batch_count'=>$added,'last_gpt_count'=>$gptUsed,'last_search_count'=>$searched,
+                'last_mode'=>'new','mailboxes'=>$mailboxes,'mailbox_total'=>$progress['total_count'],
+                'remaining_count'=>isset($state['full_import']['remaining_count']) ? (int)$state['full_import']['remaining_count'] : 0
+            ));
+            return array('ok'=>true,'message'=>$added > 0 ? $added . '개의 새 메일을 가져왔습니다.' : '새로 가져올 메일이 없습니다.','added_count'=>$added,'search_count'=>$searched,'state'=>$state);
+        } catch (\Exception $e) {
+            PublicMailStorageService::saveSyncState(array('last_error_at'=>date('Y-m-d H:i:s'),'last_error'=>$e->getMessage(),'last_mode'=>'new'));
+            throw $e;
+        } finally {
+            $client->logout(); PublicMailStorageService::releaseLock($lock);
         }
     }
 
@@ -218,232 +333,110 @@ class PublicMailService
         $messages = PublicMailStorageService::getMessages();
         $workflow = PublicMailStorageService::getWorkflow();
         $items = array();
-
-        foreach ($messages as $uid => $message) {
-            if (!is_array($message)) {
-                continue;
-            }
-
-            $message['uid'] = (int)$uid;
-            $message['workflow'] = $this->workflowFromMap($workflow, $uid);
+        foreach ($messages as $messageKey => $message) {
+            if (!is_array($message)) continue;
+            $parsed = PublicMailStorageService::parseMessageKey($messageKey);
+            $message['message_key'] = (string)$messageKey;
+            $message['uid'] = isset($message['uid']) ? (int)$message['uid'] : (int)$parsed['uid'];
+            $message['mailbox'] = isset($message['mailbox']) ? (string)$message['mailbox'] : (string)$parsed['mailbox'];
+            $message['mailbox_name'] = isset($message['mailbox_name']) ? (string)$message['mailbox_name'] : ($message['mailbox'] === 'INBOX' ? '받은메일함' : $message['mailbox']);
+            $message['workflow'] = $this->workflowFromMap($workflow, $messageKey);
             $message = $this->normalizeStoredMessage($message);
-
-            if ($this->matchesFilters($message, $filters)) {
-                $items[] = $message;
-            }
+            if ($this->matchesFilters($message, $filters)) $items[] = $message;
         }
-
         usort($items, array($this, 'compareMessageDateDesc'));
-
-        $total = count($items);
-        $page = max(1, (int)$page);
-        $perPage = (int)$perPage;
-        if ($perPage < 10) {
-            $perPage = 30;
-        }
-        if ($perPage > 100) {
-            $perPage = 100;
-        }
-
-        $pageCount = max(1, (int)ceil($total / $perPage));
-        if ($page > $pageCount) {
-            $page = $pageCount;
-        }
-
-        $offset = ($page - 1) * $perPage;
-        $paged = array_slice($items, $offset, $perPage);
-
-        return array(
-            'items' => $paged,
-            'total' => $total,
-            'page' => $page,
-            'per_page' => $perPage,
-            'page_count' => $pageCount
-        );
+        $total = count($items); $page = max(1, (int)$page); $perPage = (int)$perPage;
+        if ($perPage < 10) $perPage = 30; if ($perPage > 100) $perPage = 100;
+        $pageCount = max(1, (int)ceil($total / $perPage)); if ($page > $pageCount) $page = $pageCount;
+        return array('items'=>array_slice($items, ($page-1)*$perPage, $perPage),'total'=>$total,'page'=>$page,'per_page'=>$perPage,'page_count'=>$pageCount);
     }
 
     public function getDashboardCounts()
     {
-        $messages = PublicMailStorageService::getMessages();
-        $workflow = PublicMailStorageService::getWorkflow();
-        $counts = array(
-            'all' => 0,
-            'unread' => 0,
-            'urgent' => 0,
-            'unclassified' => 0,
-            'unassigned' => 0,
-            'unfinished' => 0
-        );
-
-        foreach ($messages as $uid => $message) {
-            if (!is_array($message)) {
-                continue;
-            }
-            $counts['all']++;
-            if (empty($message['is_seen'])) {
-                $counts['unread']++;
-            }
-
-            $classification = isset($message['classification']) && is_array($message['classification'])
-                ? $message['classification'] : array();
-            if (isset($classification['priority']) && $classification['priority'] === '긴급') {
-                $counts['urgent']++;
-            }
-            if (empty($classification['department']) || $classification['department'] === '미분류') {
-                $counts['unclassified']++;
-            }
-
-            $itemWorkflow = $this->workflowFromMap($workflow, $uid);
-            if (empty($itemWorkflow['assignee_id']) && empty($itemWorkflow['assignee_name'])) {
-                $counts['unassigned']++;
-            }
-            if (!in_array($itemWorkflow['status'], array('처리완료', '발송완료'), true)) {
-                $counts['unfinished']++;
-            }
+        $messages = PublicMailStorageService::getMessages(); $workflow = PublicMailStorageService::getWorkflow();
+        $counts = array('all'=>0,'unread'=>0,'urgent'=>0,'unclassified'=>0,'unassigned'=>0,'unfinished'=>0);
+        foreach ($messages as $key=>$message) {
+            if (!is_array($message)) continue; $counts['all']++;
+            if (empty($message['is_seen'])) $counts['unread']++;
+            $classification = isset($message['classification']) && is_array($message['classification']) ? $message['classification'] : array();
+            $itemWorkflow = $this->workflowFromMap($workflow, $key);
+            if (isset($classification['priority']) && $classification['priority']==='긴급') $counts['urgent']++;
+            if (empty($classification['department']) || $classification['department']==='미분류') $counts['unclassified']++;
+            if (empty($itemWorkflow['assignee_id']) && empty($itemWorkflow['assignee_name'])) $counts['unassigned']++;
+            if (!in_array($itemWorkflow['status'], array('처리완료','발송완료'), true)) $counts['unfinished']++;
         }
-
         return $counts;
     }
 
-    public function getMessageDetail($uid)
+    public function getMessageDetail($messageKey)
     {
-        $uid = (int)$uid;
+        $messageKey = (string)$messageKey;
         $messages = PublicMailStorageService::getMessages();
-        if ($uid <= 0 || !isset($messages[(string)$uid])) {
-            throw new \RuntimeException('저장된 메일 정보를 찾을 수 없습니다.');
-        }
-
-        $raw = PublicMailStorageService::getCachedRawMessage($uid, 1800);
+        if (!isset($messages[$messageKey])) throw new \RuntimeException('저장된 메일 정보를 찾을 수 없습니다.');
+        $parsedKey = PublicMailStorageService::parseMessageKey($messageKey);
+        $message = $messages[$messageKey];
+        $mailbox = isset($message['mailbox']) ? (string)$message['mailbox'] : $parsedKey['mailbox'];
+        $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsedKey['uid'];
+        $raw = PublicMailStorageService::getCachedRawMessage($messageKey, 1800);
         if ($raw === '') {
-            $settings = PublicMailStorageService::getSettings(true);
-            $client = $this->createClient($settings);
+            $settings = PublicMailStorageService::getSettings(true); $client = $this->createClient($settings);
             try {
-                $client->connect();
-                $client->login($settings['username'], $settings['password']);
-                $client->selectMailbox('INBOX');
-                $maximumBytes = $this->rawFetchLimitForMessage($messages[(string)$uid]);
-                $raw = $client->fetchRawMessage($uid, $maximumBytes);
-                PublicMailStorageService::saveCachedRawMessage($uid, $raw);
-            } finally {
-                $client->logout();
-            }
+                $client->connect(); $client->login($settings['username'],$settings['password']); $client->selectMailbox($mailbox);
+                $raw = $client->fetchRawMessage($uid, $this->rawFetchLimitForMessage($message));
+                PublicMailStorageService::saveCachedRawMessage($messageKey, $raw);
+            } finally { $client->logout(); }
         }
-
         $parsed = $this->parseRawMessage($raw);
-        $detail = $this->normalizeStoredMessage($messages[(string)$uid]);
-        $detail['uid'] = $uid;
-        $detail['body_text'] = $parsed['body_text'];
-        $detail['body_html'] = $parsed['body_html'];
-        $detail['attachments'] = $parsed['attachments'];
-        $detail['workflow'] = PublicMailStorageService::getWorkflowForUid($uid);
-
-        // 원본 헤더를 기준으로 기존 인코딩 오류를 자동 복구합니다.
-        foreach (array('subject','from_text','from_email','to_text','cc_text') as $field) {
-            if (isset($parsed[$field]) && trim((string)$parsed[$field]) !== '') {
-                $detail[$field] = $parsed[$field];
-                $messages[(string)$uid][$field] = $parsed[$field];
-            }
-        }
-        $preview = $this->makePreviewText($parsed['body_text']);
-        if ($preview !== '') {
-            $detail['preview'] = $preview;
-            $messages[(string)$uid]['preview'] = $preview;
-        }
-        $messages[(string)$uid]['has_attachment'] = !empty($parsed['attachments']);
-        PublicMailStorageService::saveMessages($messages);
-
+        $detail = $this->normalizeStoredMessage($message);
+        $detail['message_key']=$messageKey; $detail['uid']=$uid; $detail['mailbox']=$mailbox;
+        $detail['mailbox_name']=isset($message['mailbox_name'])?$message['mailbox_name']:($mailbox==='INBOX'?'받은메일함':$mailbox);
+        $detail['body_text']=$parsed['body_text']; $detail['body_html']=$parsed['body_html']; $detail['attachments']=$parsed['attachments'];
+        $detail['workflow']=PublicMailStorageService::getWorkflowForKey($messageKey);
+        foreach (array('subject','from_text','from_email','to_text','cc_text') as $field) if (isset($parsed[$field]) && trim((string)$parsed[$field])!=='') { $detail[$field]=$parsed[$field]; $messages[$messageKey][$field]=$parsed[$field]; }
+        $preview=$this->makePreviewText($parsed['body_text']); if ($preview!=='') { $detail['preview']=$preview; $messages[$messageKey]['preview']=$preview; }
+        $messages[$messageKey]['has_attachment']=!empty($parsed['attachments']); PublicMailStorageService::saveMessages($messages);
         return $detail;
     }
 
-    public function getAttachment($uid, $partId)
+    public function getAttachment($messageKey, $partId)
     {
-        $uid = (int)$uid;
-        $partId = trim((string)$partId);
-        if ($uid <= 0 || $partId === '') {
-            throw new \InvalidArgumentException('첨부파일 요청값이 올바르지 않습니다.');
-        }
-
-        $messages = PublicMailStorageService::getMessages();
-        if (!isset($messages[(string)$uid])) {
-            throw new \RuntimeException('메일 정보를 찾을 수 없습니다.');
-        }
-
-        $raw = PublicMailStorageService::getCachedRawMessage($uid, 3600);
-        if ($raw === '') {
-            $settings = PublicMailStorageService::getSettings(true);
-            $client = $this->createClient($settings);
-            try {
-                $client->connect();
-                $client->login($settings['username'], $settings['password']);
-                $client->selectMailbox('INBOX');
-                $raw = $client->fetchRawMessage($uid, $this->rawFetchLimitForMessage($messages[(string)$uid]));
-                PublicMailStorageService::saveCachedRawMessage($uid, $raw);
-            } finally {
-                $client->logout();
-            }
-        }
-
-        $parsed = $this->parseRawMessage($raw, true);
-        foreach ($parsed['attachments'] as $attachment) {
-            if (isset($attachment['part_id']) && (string)$attachment['part_id'] === $partId) {
-                if (!isset($attachment['content']) || $attachment['content'] === '') {
-                    throw new \RuntimeException('첨부파일 내용이 비어 있습니다.');
-                }
-                return $attachment;
-            }
-        }
-
-        throw new \RuntimeException('첨부파일을 찾을 수 없습니다. 메일을 다시 열고 시도하세요.');
+        $messageKey=(string)$messageKey; $partId=trim((string)$partId);
+        $messages=PublicMailStorageService::getMessages();
+        if (!isset($messages[$messageKey])) throw new \RuntimeException('메일 정보를 찾을 수 없습니다.');
+        $cached=PublicMailStorageService::getCachedAttachment($messageKey,$partId,21600); if (is_array($cached)) return $cached;
+        $parsedKey=PublicMailStorageService::parseMessageKey($messageKey); $message=$messages[$messageKey];
+        $mailbox=isset($message['mailbox'])?(string)$message['mailbox']:$parsedKey['mailbox']; $uid=isset($message['uid'])?(int)$message['uid']:(int)$parsedKey['uid'];
+        $settings=PublicMailStorageService::getSettings(true); $client=$this->createClient($settings);
+        try {
+            $client->connect(); $client->login($settings['username'],$settings['password']); $client->selectMailbox($mailbox);
+            $mimeHeader=$client->fetchMimeHeader($uid,$partId); $encodedBody=$client->fetchMimePart($uid,$partId,157286400);
+        } finally { $client->logout(); }
+        $headers=$this->parseHeaders($mimeHeader);
+        $contentType=isset($headers['content-type'])?$headers['content-type']:'application/octet-stream';
+        $disposition=isset($headers['content-disposition'])?$headers['content-disposition']:'';
+        $typeInfo=$this->parseHeaderWithParameters($contentType); $dispInfo=$this->parseHeaderWithParameters($disposition);
+        $filename=''; if (isset($dispInfo['params']['filename'])) $filename=$dispInfo['params']['filename']; elseif (isset($typeInfo['params']['name'])) $filename=$typeInfo['params']['name'];
+        $filename=$this->safeFilename($this->decodeHeader(trim((string)$filename," \t\r\n\"'")));
+        $encoding=isset($headers['content-transfer-encoding'])?strtolower(trim((string)$headers['content-transfer-encoding'])):'';
+        $content=$this->decodeBody($encodedBody,$encoding);
+        if ($content==='') throw new \RuntimeException('첨부파일 내용이 비어 있습니다.');
+        $attachment=array('part_id'=>$partId,'filename'=>$filename,'mime_type'=>isset($typeInfo['value'])&&$typeInfo['value']!==''?strtolower($typeInfo['value']):'application/octet-stream','size'=>strlen($content),'content'=>$content);
+        PublicMailStorageService::saveCachedAttachment($messageKey,$partId,$attachment);
+        return $attachment;
     }
 
-    public function updateWorkflow($uid, $changes, $updatedBy)
+    public function updateWorkflow($messageKey, $changes, $updatedBy)
     {
-        return PublicMailStorageService::updateWorkflow($uid, $changes, $updatedBy);
+        return PublicMailStorageService::updateWorkflow($messageKey,$changes,$updatedBy);
     }
 
-    public function reclassify($uid)
+    public function reclassify($messageKey)
     {
-        $uid = (int)$uid;
-        $messages = PublicMailStorageService::getMessages();
-        if (!isset($messages[(string)$uid])) {
-            throw new \RuntimeException('분류할 메일을 찾을 수 없습니다.');
-        }
-
-        $projects = $this->getProjects();
-        $message = $messages[(string)$uid];
-        $classification = $this->classifier->classify($message, $projects);
-        $settings = PublicMailStorageService::getSettings(true);
-
-        if (!empty($settings['use_gpt_classifier']) && $this->isAmbiguousClassification($classification)) {
-            if (empty($message['preview'])) {
-                try {
-                    $client = $this->createClient($settings);
-                    $client->connect();
-                    $client->login($settings['username'], $settings['password']);
-                    $client->selectMailbox('INBOX');
-                    $message['preview'] = $this->makePreviewText($client->fetchTextPreview($uid, 32768));
-                    $client->logout();
-                } catch (\Exception $e) {
-                    if (isset($client)) {
-                        $client->logout();
-                    }
-                }
-            }
-
-            $gptClassification = $this->classifier->classifyAmbiguousWithGpt($message, $projects, $classification);
-            if (is_array($gptClassification)) {
-                $classification = $gptClassification;
-            } else {
-                $classification['gpt_pending'] = true;
-            }
-        }
-
-        $messages[(string)$uid]['preview'] = isset($message['preview']) ? $message['preview'] : '';
-        $messages[(string)$uid]['classification'] = $classification;
-        PublicMailStorageService::saveMessages($messages);
-        return $classification;
+        $messageKey=(string)$messageKey; $messages=PublicMailStorageService::getMessages();
+        if (!isset($messages[$messageKey])) throw new \RuntimeException('분류할 메일을 찾을 수 없습니다.');
+        $message=$messages[$messageKey]; $classification=$this->classifier->classify($message,$this->getProjects());
+        $messages[$messageKey]['classification']=$classification; PublicMailStorageService::saveMessages($messages); return $classification;
     }
-
     public function getEmployees()
     {
         $pdo = $this->getPdoSafely();
@@ -557,6 +550,7 @@ class PublicMailService
         return 'https://mail.google.com/mail/?' . http_build_query($query, '', '&');
     }
 
+
     public function getSyncState()
     {
         return PublicMailStorageService::getSyncState();
@@ -571,230 +565,175 @@ class PublicMailService
     {
         $includeAttachmentContent = !empty($includeAttachmentContent);
         $root = $this->parseMimeEntity((string)$raw, '1', $includeAttachmentContent);
-        $textBodies = array();
-        $htmlBodies = array();
-        $attachments = array();
+        $textBodies = array(); $htmlBodies = array(); $attachments = array();
         $this->collectMimeParts($root, $textBodies, $htmlBodies, $attachments);
-
         $bodyText = trim(implode("\n\n", $textBodies));
         $bodyHtml = trim(implode("<hr>", $htmlBodies));
-
-        if ($bodyHtml === '' && $bodyText !== '') {
-            $bodyHtml = nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8'));
-        }
-        if ($bodyText === '' && $bodyHtml !== '') {
-            $bodyText = trim(html_entity_decode(strip_tags($bodyHtml), ENT_QUOTES, 'UTF-8'));
-        }
-
+        if ($bodyHtml === '' && $bodyText !== '') $bodyHtml = nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8'));
+        if ($bodyText === '' && $bodyHtml !== '') $bodyText = trim(html_entity_decode(strip_tags($bodyHtml), ENT_QUOTES, 'UTF-8'));
         $rootHeaders = isset($root['headers']) && is_array($root['headers']) ? $root['headers'] : array();
         $fromText = $this->decodeHeader(isset($rootHeaders['from']) ? $rootHeaders['from'] : '');
         return array(
-            'body_text' => $bodyText,
-            'body_html' => $this->sanitizeHtml($bodyHtml),
-            'attachments' => $attachments,
-            'headers' => $rootHeaders,
-            'subject' => $this->decodeHeader(isset($rootHeaders['subject']) ? $rootHeaders['subject'] : ''),
-            'from_text' => $fromText,
-            'from_email' => $this->extractEmail($fromText),
-            'to_text' => $this->decodeHeader(isset($rootHeaders['to']) ? $rootHeaders['to'] : ''),
-            'cc_text' => $this->decodeHeader(isset($rootHeaders['cc']) ? $rootHeaders['cc'] : '')
+            'body_text'=>$bodyText,'body_html'=>$this->sanitizeHtml($bodyHtml),'attachments'=>$attachments,'headers'=>$rootHeaders,
+            'subject'=>$this->decodeHeader(isset($rootHeaders['subject'])?$rootHeaders['subject']:''),
+            'from_text'=>$fromText,'from_email'=>$this->extractEmail($fromText),
+            'to_text'=>$this->decodeHeader(isset($rootHeaders['to'])?$rootHeaders['to']:''),
+            'cc_text'=>$this->decodeHeader(isset($rootHeaders['cc'])?$rootHeaders['cc']:'')
         );
+    }
+
+    private function requireEnabledSettings()
+    {
+        $settings=PublicMailStorageService::getSettings(true);
+        if (empty($settings['enabled'])) throw new \RuntimeException('네이버 메일 연동이 사용 상태가 아닙니다. 관리자 설정을 확인하세요.');
+        if (empty($settings['username']) || empty($settings['password'])) throw new \RuntimeException('네이버 아이디 또는 애플리케이션 비밀번호가 설정되지 않았습니다.');
+        return $settings;
+    }
+
+    private function normalizeBatchLimit($limit,$settings)
+    {
+        $limit=(int)$limit; if ($limit<1) $limit=isset($settings['batch_size'])?(int)$settings['batch_size']:100;
+        if ($limit<20) $limit=20; if ($limit>200) $limit=200; return $limit;
     }
 
     private function createClient($settings)
     {
-        return new PublicMailImapClient(
-            isset($settings['imap_host']) ? $settings['imap_host'] : 'imap.naver.com',
-            isset($settings['imap_port']) ? $settings['imap_port'] : 993,
-            20
-        );
+        return new PublicMailImapClient(isset($settings['imap_host'])?$settings['imap_host']:'imap.naver.com',isset($settings['imap_port'])?$settings['imap_port']:993,20);
     }
 
     private function mergeConnectionSettings($temporarySettings)
     {
-        $saved = PublicMailStorageService::getSettings(true);
-        if (!is_array($temporarySettings)) {
-            $temporarySettings = array();
-        }
-
-        foreach (array('username', 'password') as $field) {
-            if (isset($temporarySettings[$field]) && trim((string)$temporarySettings[$field]) !== '') {
-                $saved[$field] = trim((string)$temporarySettings[$field]);
-            }
-        }
-
-        $saved['imap_host'] = 'imap.naver.com';
-        $saved['imap_port'] = 993;
-
-        if (empty($saved['username']) || empty($saved['password'])) {
-            throw new \RuntimeException('네이버 아이디와 애플리케이션 비밀번호를 입력하세요.');
-        }
-
+        $saved=PublicMailStorageService::getSettings(true); if (!is_array($temporarySettings)) $temporarySettings=array();
+        foreach (array('username','password') as $field) if (isset($temporarySettings[$field]) && trim((string)$temporarySettings[$field])!=='') $saved[$field]=trim((string)$temporarySettings[$field]);
+        $saved['imap_host']='imap.naver.com'; $saved['imap_port']=993;
+        if (empty($saved['username'])||empty($saved['password'])) throw new \RuntimeException('네이버 아이디와 애플리케이션 비밀번호를 입력하세요.');
         return $saved;
     }
 
-    private function buildMessageFromHeader($headerData)
+    private function discoverMailboxes($client,$settings)
     {
-        $headers = $this->parseHeaders(isset($headerData['header']) ? $headerData['header'] : '');
-        $subject = $this->decodeHeader(isset($headers['subject']) ? $headers['subject'] : '');
-        $fromText = $this->decodeHeader(isset($headers['from']) ? $headers['from'] : '');
-        $toText = $this->decodeHeader(isset($headers['to']) ? $headers['to'] : '');
-        $dateText = isset($headers['date']) ? trim((string)$headers['date']) : '';
-        $timestamp = $dateText !== '' ? strtotime($dateText) : false;
-        if ($timestamp === false) {
-            $timestamp = time();
+        $listed=$client->listMailboxes(); $result=array();
+        foreach ($listed as $box) {
+            if (empty($box['selectable'])) continue;
+            $raw=isset($box['raw_name'])?(string)$box['raw_name']:''; $display=isset($box['display_name'])?(string)$box['display_name']:$raw;
+            if ($raw==='') continue;
+            $flags=isset($box['flags'])&&is_array($box['flags'])?$box['flags']:array();
+            $isSpam=$this->mailboxMatches($raw,$display,$flags,array('\\Junk','spam','스팸'));
+            $isTrash=$this->mailboxMatches($raw,$display,$flags,array('\\Trash','trash','휴지통','삭제'));
+            if ($isSpam && empty($settings['include_spam'])) continue;
+            if ($isTrash && empty($settings['include_trash'])) continue;
+            $result[]=array('raw_name'=>$raw,'display_name'=>$display,'flags'=>$flags);
         }
+        if (empty($result)) $result[]=array('raw_name'=>'INBOX','display_name'=>'받은메일함','flags'=>array());
+        return $result;
+    }
 
-        $flags = isset($headerData['flags']) && is_array($headerData['flags']) ? $headerData['flags'] : array();
-        $isSeen = false;
-        $isFlagged = false;
-        foreach ($flags as $flag) {
-            if (strcasecmp($flag, '\\Seen') === 0) {
-                $isSeen = true;
+    private function mailboxMatches($raw,$display,$flags,$terms)
+    {
+        $haystack=strtolower((string)$raw.' '.(string)$display.' '.implode(' ',$flags));
+        foreach ($terms as $term) if (strpos($haystack,strtolower($term))!==false) return true;
+        return false;
+    }
+
+    private function mailboxStateId($rawName)
+    {
+        return sha1((string)$rawName);
+    }
+
+    private function fetchAndBuildMessage($client,$box,$uid,$projects,$settings,&$gptUsed)
+    {
+        $header=$client->fetchHeader($uid); $message=$this->buildMessageFromHeader($header,$box['raw_name'],$box['display_name']);
+        try {
+            $previewRaw=$client->fetchRawPreview($uid,65536);
+            if ($previewRaw!=='') {
+                $parsed=$this->parseRawMessage($previewRaw,false);
+                $message['preview']=$this->makePreviewText(isset($parsed['body_text'])?$parsed['body_text']:'');
+                $message['has_attachment']=!empty($parsed['attachments'])||$this->rawMessageLooksLikeAttachment($previewRaw);
             }
-            if (strcasecmp($flag, '\\Flagged') === 0) {
-                $isFlagged = true;
-            }
+        } catch (\Exception $ignored) { $message['preview']=''; }
+        $message['classification']=$this->classifier->classify($message,$projects);
+        if (!empty($settings['use_gpt_classifier']) && $this->isAmbiguousClassification($message['classification']) && $gptUsed<3) {
+            $gpt=$this->classifier->classifyAmbiguousWithGpt($message,$projects,$message['classification']);
+            if (is_array($gpt)) { $message['classification']=$gpt; $gptUsed++; } else $message['classification']['gpt_pending']=true;
         }
+        $message['synced_at']=date('Y-m-d H:i:s'); return $message;
+    }
 
+    private function buildMessageFromHeader($headerData,$mailbox,$mailboxName)
+    {
+        $headers=$this->parseHeaders(isset($headerData['header'])?$headerData['header']:'');
+        $subject=$this->decodeHeader(isset($headers['subject'])?$headers['subject']:'');
+        $fromText=$this->decodeHeader(isset($headers['from'])?$headers['from']:'');
+        $toText=$this->decodeHeader(isset($headers['to'])?$headers['to']:'');
+        $dateText=isset($headers['date'])?trim((string)$headers['date']):''; $timestamp=$dateText!==''?strtotime($dateText):false; if ($timestamp===false) $timestamp=time();
+        $flags=isset($headerData['flags'])&&is_array($headerData['flags'])?$headerData['flags']:array(); $isSeen=false; $isFlagged=false;
+        foreach ($flags as $flag) { if (strcasecmp($flag,'\\Seen')===0) $isSeen=true; if (strcasecmp($flag,'\\Flagged')===0) $isFlagged=true; }
+        $uid=isset($headerData['uid'])?(int)$headerData['uid']:0; $key=PublicMailStorageService::messageKey($mailbox,$uid);
         return array(
-            'uid' => isset($headerData['uid']) ? (int)$headerData['uid'] : 0,
-            'message_id' => isset($headers['message-id']) ? trim((string)$headers['message-id']) : '',
-            'subject' => $subject !== '' ? $subject : '(제목 없음)',
-            'from_text' => $fromText,
-            'from_email' => $this->extractEmail($fromText),
-            'to_text' => $toText,
-            'cc_text' => $this->decodeHeader(isset($headers['cc']) ? $headers['cc'] : ''),
-            'date_text' => date('Y-m-d H:i:s', $timestamp),
-            'timestamp' => (int)$timestamp,
-            'size' => isset($headerData['size']) ? (int)$headerData['size'] : 0,
-            'is_seen' => $isSeen,
-            'is_flagged' => $isFlagged,
-            'has_attachment' => $this->headerLooksLikeAttachment($headers),
-            'preview' => '',
-            'classification' => array()
+            'message_key'=>$key,'uid'=>$uid,'mailbox'=>$mailbox,'mailbox_name'=>$mailboxName,
+            'message_id'=>isset($headers['message-id'])?trim((string)$headers['message-id']):'',
+            'subject'=>$subject!==''?$subject:'(제목 없음)','from_text'=>$fromText,'from_email'=>$this->extractEmail($fromText),
+            'to_text'=>$toText,'cc_text'=>$this->decodeHeader(isset($headers['cc'])?$headers['cc']:''),
+            'date_text'=>date('Y-m-d H:i:s',$timestamp),'timestamp'=>(int)$timestamp,'size'=>isset($headerData['size'])?(int)$headerData['size']:0,
+            'is_seen'=>$isSeen,'is_flagged'=>$isFlagged,'has_attachment'=>$this->headerLooksLikeAttachment($headers),'preview'=>'','classification'=>array()
         );
     }
 
-    private function matchesFilters($message, $filters)
+    private function calculateImportProgress($mailboxes)
     {
-        if (!is_array($filters)) {
-            return true;
-        }
+        $total=0; $processed=0; $remaining=0;
+        foreach ($mailboxes as $box) { if (!is_array($box)) continue; $t=isset($box['total_count'])?(int)$box['total_count']:0; $i=isset($box['imported_count'])?(int)$box['imported_count']:0; $total+=$t; $processed+=min($t,$i); $remaining+=max(0,$t-$i); }
+        return array('total_count'=>$total,'processed_count'=>$processed,'remaining_count'=>$remaining);
+    }
 
-        $query = isset($filters['query']) ? trim((string)$filters['query']) : '';
-        if ($query !== '') {
-            $haystack = $this->lower(
-                (isset($message['subject']) ? $message['subject'] : '') . ' '
-                . (isset($message['from_text']) ? $message['from_text'] : '')
-            );
-            if (!$this->contains($haystack, $this->lower($query))) {
-                return false;
-            }
-        }
+    private function maximumKnownUid($messages,$mailbox)
+    {
+        $max=0; foreach ($messages as $key=>$message) { if (!is_array($message)) continue; $parsed=PublicMailStorageService::parseMessageKey($key); $box=isset($message['mailbox'])?$message['mailbox']:$parsed['mailbox']; if ((string)$box!==(string)$mailbox) continue; $uid=isset($message['uid'])?(int)$message['uid']:(int)$parsed['uid']; if ($uid>$max) $max=$uid; } return $max;
+    }
 
-        $classification = isset($message['classification']) && is_array($message['classification'])
-            ? $message['classification'] : array();
-        $workflow = isset($message['workflow']) && is_array($message['workflow'])
-            ? $message['workflow'] : array();
+    private function countKnownMailboxMessages($messages,$mailbox)
+    {
+        $count=0; foreach ($messages as $key=>$message) { if (!is_array($message)) continue; $parsed=PublicMailStorageService::parseMessageKey($key); $box=isset($message['mailbox'])?$message['mailbox']:$parsed['mailbox']; if ((string)$box===(string)$mailbox) $count++; } return $count;
+    }
 
-        $period = isset($filters['period']) ? trim((string)$filters['period']) : '';
-        $cutoff = 0;
-        if ($period === '1m') {
-            $cutoff = strtotime('-1 month');
-        } elseif ($period === '3m') {
-            $cutoff = strtotime('-3 months');
-        } elseif ($period === '6m') {
-            $cutoff = strtotime('-6 months');
-        } elseif ($period === '1y') {
-            $cutoff = strtotime('-1 year');
+    private function matchesFilters($message,$filters)
+    {
+        if (!is_array($filters)) return true;
+        $query=isset($filters['query'])?trim((string)$filters['query']):'';
+        if ($query!=='') {
+            $haystack=$this->lower((isset($message['subject'])?$message['subject']:'').' '.(isset($message['from_text'])?$message['from_text']:'').' '.(isset($message['preview'])?$message['preview']:''));
+            if (!$this->contains($haystack,$this->lower($query))) return false;
         }
-        if ($cutoff > 0 && isset($message['timestamp']) && (int)$message['timestamp'] < $cutoff) {
-            return false;
-        }
-
-        $department = isset($filters['department']) ? trim((string)$filters['department']) : '';
-        if ($department !== '') {
-            $actualDepartment = !empty($workflow['department'])
-                ? (string)$workflow['department']
-                : (isset($classification['department']) ? (string)$classification['department'] : '');
-            if ($actualDepartment !== $department) {
-                return false;
-            }
-        }
-
-        $status = isset($filters['status']) ? trim((string)$filters['status']) : '';
-        if ($status !== '' && (!isset($workflow['status']) || (string)$workflow['status'] !== $status)) {
-            return false;
-        }
-
-        $priority = isset($filters['priority']) ? trim((string)$filters['priority']) : '';
-        if ($priority !== '') {
-            $actualPriority = !empty($workflow['priority'])
-                ? (string)$workflow['priority']
-                : (isset($classification['priority']) ? (string)$classification['priority'] : '');
-            if ($actualPriority !== $priority) {
-                return false;
-            }
-        }
-
-        $projectId = isset($filters['project_id']) ? trim((string)$filters['project_id']) : '';
-        if ($projectId !== '') {
-            $actualProjectId = !empty($workflow['project_id'])
-                ? (string)$workflow['project_id']
-                : (isset($classification['project_id']) ? (string)$classification['project_id'] : '');
-            if ($actualProjectId !== $projectId) {
-                return false;
-            }
-        }
-
-        $assigneeId = isset($filters['assignee_id']) ? trim((string)$filters['assignee_id']) : '';
-        if ($assigneeId !== '' && (!isset($workflow['assignee_id']) || (string)$workflow['assignee_id'] !== $assigneeId)) {
-            return false;
-        }
-
-        $quick = isset($filters['quick']) ? trim((string)$filters['quick']) : '';
-        if ($quick === 'unread' && !empty($message['is_seen'])) {
-            return false;
-        }
-        if ($quick === 'urgent' && (!isset($classification['priority']) || $classification['priority'] !== '긴급')) {
-            return false;
-        }
-        if ($quick === 'unclassified' && isset($classification['department']) && $classification['department'] !== '' && $classification['department'] !== '미분류') {
-            return false;
-        }
-        if ($quick === 'unassigned' && (!empty($workflow['assignee_id']) || !empty($workflow['assignee_name']))) {
-            return false;
-        }
-        if ($quick === 'unfinished' && isset($workflow['status']) && in_array($workflow['status'], array('처리완료', '발송완료'), true)) {
-            return false;
-        }
-
+        $classification=isset($message['classification'])&&is_array($message['classification'])?$message['classification']:array();
+        $workflow=isset($message['workflow'])&&is_array($message['workflow'])?$message['workflow']:array();
+        $period=isset($filters['period'])?trim((string)$filters['period']):''; $cutoff=0;
+        if ($period==='1m') $cutoff=strtotime('-1 month'); elseif ($period==='3m') $cutoff=strtotime('-3 months'); elseif ($period==='6m') $cutoff=strtotime('-6 months'); elseif ($period==='1y') $cutoff=strtotime('-1 year');
+        if ($cutoff>0 && isset($message['timestamp']) && (int)$message['timestamp']<$cutoff) return false;
+        $mailbox=isset($filters['mailbox'])?trim((string)$filters['mailbox']):''; if ($mailbox!=='' && (!isset($message['mailbox']) || (string)$message['mailbox']!==$mailbox)) return false;
+        $department=isset($filters['department'])?trim((string)$filters['department']):''; if ($department!=='') { $actual=!empty($workflow['department'])?$workflow['department']:(isset($classification['department'])?$classification['department']:''); if ($actual!==$department) return false; }
+        $status=isset($filters['status'])?trim((string)$filters['status']):''; if ($status!=='' && (!isset($workflow['status']) || $workflow['status']!==$status)) return false;
+        $priority=isset($filters['priority'])?trim((string)$filters['priority']):''; if ($priority!=='') { $actual=!empty($workflow['priority'])?$workflow['priority']:(isset($classification['priority'])?$classification['priority']:''); if ($actual!==$priority) return false; }
+        $projectId=isset($filters['project_id'])?trim((string)$filters['project_id']):''; if ($projectId!=='') { $actual=!empty($workflow['project_id'])?(string)$workflow['project_id']:(isset($classification['project_id'])?(string)$classification['project_id']:''); if ($actual!==$projectId) return false; }
+        $assigneeId=isset($filters['assignee_id'])?trim((string)$filters['assignee_id']):''; if ($assigneeId!=='' && (!isset($workflow['assignee_id']) || (string)$workflow['assignee_id']!==$assigneeId)) return false;
+        $quick=isset($filters['quick'])?trim((string)$filters['quick']):'';
+        if ($quick==='unread'&&!empty($message['is_seen'])) return false;
+        if ($quick==='urgent'&&(!isset($classification['priority'])||$classification['priority']!=='긴급')) return false;
+        if ($quick==='unclassified'&&isset($classification['department'])&&$classification['department']!==''&&$classification['department']!=='미분류') return false;
+        if ($quick==='unassigned'&&(!empty($workflow['assignee_id'])||!empty($workflow['assignee_name']))) return false;
+        if ($quick==='unfinished'&&isset($workflow['status'])&&in_array($workflow['status'],array('처리완료','발송완료'),true)) return false;
         return true;
     }
 
     private function isAmbiguousClassification($classification)
     {
-        if (!is_array($classification)) {
-            return true;
-        }
-        $department = isset($classification['department']) ? (string)$classification['department'] : '';
-        $score = isset($classification['department_score']) ? (int)$classification['department_score'] : 0;
-        return $department === '' || $department === '미분류' || $score <= 1;
+        if (!is_array($classification)) return true; $department=isset($classification['department'])?(string)$classification['department']:''; $score=isset($classification['department_score'])?(int)$classification['department_score']:0;
+        return $department===''||$department==='미분류'||$score<=1;
     }
 
-    public function compareMessageDateDesc($a, $b)
+    public function compareMessageDateDesc($a,$b)
     {
-        $aTime = isset($a['timestamp']) ? (int)$a['timestamp'] : 0;
-        $bTime = isset($b['timestamp']) ? (int)$b['timestamp'] : 0;
-
-        if ($aTime === $bTime) {
-            return 0;
-        }
-
-        return $aTime > $bTime ? -1 : 1;
+        $at=isset($a['timestamp'])?(int)$a['timestamp']:0; $bt=isset($b['timestamp'])?(int)$b['timestamp']:0; if ($at===$bt) return 0; return $at>$bt?-1:1;
     }
-
     private function parseMimeEntity($raw, $partId, $includeAttachmentContent)
     {
         list($headerText, $body) = $this->splitHeaderBody($raw);
@@ -922,31 +861,45 @@ class PublicMailService
     {
         $segments = preg_split('/;(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)/', (string)$value);
         $result = array('value' => '', 'params' => array());
-
-        if (!is_array($segments) || empty($segments)) {
-            return $result;
-        }
-
+        if (!is_array($segments) || empty($segments)) return $result;
         $result['value'] = strtolower(trim(array_shift($segments)));
+        $continuations = array();
+        $continuationEncoded = array();
+
         foreach ($segments as $segment) {
             $position = strpos($segment, '=');
-            if ($position === false) {
-                continue;
-            }
+            if ($position === false) continue;
             $name = strtolower(trim(substr($segment, 0, $position)));
             $parameterValue = trim(substr($segment, $position + 1));
             $parameterValue = trim($parameterValue, " \t\r\n\"'");
+            if ($name === '') continue;
+
+            if (preg_match('/^(.+)\*([0-9]+)(\*)?$/', $name, $matches)) {
+                $baseName = $matches[1];
+                $index = (int)$matches[2];
+                if (!isset($continuations[$baseName])) $continuations[$baseName] = array();
+                $continuations[$baseName][$index] = $parameterValue;
+                if (!empty($matches[3])) $continuationEncoded[$baseName] = true;
+                continue;
+            }
 
             if (substr($name, -1) === '*') {
                 $name = substr($name, 0, -1);
                 $parameterValue = $this->decodeRfc2231Value($parameterValue);
             }
-
-            if ($name !== '') {
-                $result['params'][$name] = $parameterValue;
-            }
+            $result['params'][$name] = $this->decodeHeader($parameterValue);
         }
 
+        foreach ($continuations as $baseName => $pieces) {
+            ksort($pieces, SORT_NUMERIC);
+            $combined = implode('', $pieces);
+            if (!empty($continuationEncoded[$baseName]) || strpos($combined, "''") !== false) {
+                $combined = $this->decodeRfc2231Value($combined);
+            } else {
+                $combined = $this->ensureUtf8(rawurldecode($combined), '');
+            }
+            $result['params'][$baseName] = $this->decodeHeader($combined);
+        }
         return $result;
     }
 
@@ -1200,7 +1153,8 @@ class PublicMailService
         return substr($filename, 0, 180);
     }
 
-    private function workflowFromMap($workflow, $uid)
+
+    private function workflowFromMap($workflow, $messageKey)
     {
         $default = array(
             'department'=>'','project_id'=>'','project_name'=>'','assignee_id'=>'','assignee_name'=>'',
@@ -1208,7 +1162,7 @@ class PublicMailService
             'reply_completed'=>false,'reply_completed_at'=>'','reply_completed_by'=>'',
             'updated_at'=>'','updated_by'=>''
         );
-        $key = (string)(int)$uid;
+        $key = (string)$messageKey;
         return isset($workflow[$key]) && is_array($workflow[$key])
             ? array_merge($default, $workflow[$key]) : $default;
     }
@@ -1221,6 +1175,9 @@ class PublicMailService
         }
         if (isset($message['preview'])) $message['preview'] = $this->makePreviewText($message['preview']);
         if (isset($message['from_text'])) $message['from_email'] = $this->extractEmail($message['from_text']);
+        if (empty($message['mailbox'])) $message['mailbox'] = 'INBOX';
+        if (empty($message['mailbox_name'])) $message['mailbox_name'] = $message['mailbox'] === 'INBOX' ? '받은메일함' : $message['mailbox'];
+        if (empty($message['message_key']) && isset($message['uid'])) $message['message_key'] = PublicMailStorageService::messageKey($message['mailbox'], (int)$message['uid']);
         return $message;
     }
 
@@ -1252,59 +1209,36 @@ class PublicMailService
             || strpos($raw, 'content-type: multipart/mixed') !== false;
     }
 
-    /**
-     * 과거에 저장된 인코딩 깨짐/빈 미리보기를 백그라운드에서 조금씩 복구합니다.
-     */
+
+    /** 기존 버전에서 저장된 깨진 제목 또는 빈 미리보기를 조금씩 복구합니다. */
     public function repairBrokenMetadataBatch($limit)
     {
-        $limit = max(1, min(20, (int)$limit));
-        $messages = PublicMailStorageService::getMessages();
-        $targets = array();
-        foreach ($messages as $uid => $message) {
-            if (!is_array($message)) continue;
-            $subject = isset($message['subject']) ? (string)$message['subject'] : '';
-            $preview = isset($message['preview']) ? (string)$message['preview'] : '';
-            $broken = $preview === '' || strpos($subject, '=?') !== false || !$this->isValidUtf8($subject)
-                || substr_count($preview, '?') > 12;
-            if ($broken) {
-                $targets[] = (int)$uid;
-                if (count($targets) >= $limit) break;
-            }
+        $limit=max(1,min(20,(int)$limit)); $messages=PublicMailStorageService::getMessages(); $targets=array();
+        foreach ($messages as $key=>$message) {
+            if (!is_array($message)) continue; $subject=isset($message['subject'])?(string)$message['subject']:''; $preview=isset($message['preview'])?(string)$message['preview']:'';
+            $broken=$preview===''||strpos($subject,'=?')!==false||!$this->isValidUtf8($subject)||substr_count($preview,'?')>12;
+            if ($broken) { $targets[]=(string)$key; if (count($targets)>=$limit) break; }
         }
         if (empty($targets)) return 0;
-
-        $settings = PublicMailStorageService::getSettings(true);
-        $client = $this->createClient($settings);
-        $repaired = 0;
+        $settings=PublicMailStorageService::getSettings(true); $client=$this->createClient($settings); $repaired=0; $selected='';
         try {
-            $client->connect();
-            $client->login($settings['username'], $settings['password']);
-            $client->selectMailbox('INBOX');
-            foreach ($targets as $uid) {
+            $client->connect(); $client->login($settings['username'],$settings['password']);
+            foreach ($targets as $key) {
                 try {
-                    $header = $client->fetchHeader($uid);
-                    $fresh = $this->buildMessageFromHeader($header);
-                    $previewRaw = $client->fetchRawPreview($uid, 65536);
-                    if ($previewRaw !== '') {
-                        $parsed = $this->parseRawMessage($previewRaw, false);
-                        $fresh['preview'] = $this->makePreviewText($parsed['body_text']);
-                        $fresh['has_attachment'] = !empty($parsed['attachments']) || $this->rawMessageLooksLikeAttachment($previewRaw);
-                    }
-                    $fresh['classification'] = isset($messages[(string)$uid]['classification'])
-                        ? $messages[(string)$uid]['classification'] : array();
-                    $fresh['synced_at'] = isset($messages[(string)$uid]['synced_at'])
-                        ? $messages[(string)$uid]['synced_at'] : date('Y-m-d H:i:s');
-                    $messages[(string)$uid] = array_merge($messages[(string)$uid], $fresh);
-                    $repaired++;
+                    $parsed=PublicMailStorageService::parseMessageKey($key); $message=$messages[$key];
+                    $mailbox=isset($message['mailbox'])?(string)$message['mailbox']:$parsed['mailbox']; $uid=isset($message['uid'])?(int)$message['uid']:(int)$parsed['uid'];
+                    if ($selected!==$mailbox) { $client->selectMailbox($mailbox); $selected=$mailbox; }
+                    $box=array('raw_name'=>$mailbox,'display_name'=>isset($message['mailbox_name'])?$message['mailbox_name']:($mailbox==='INBOX'?'받은메일함':$mailbox));
+                    $header=$client->fetchHeader($uid); $fresh=$this->buildMessageFromHeader($header,$box['raw_name'],$box['display_name']);
+                    $previewRaw=$client->fetchRawPreview($uid,65536);
+                    if ($previewRaw!=='') { $body=$this->parseRawMessage($previewRaw,false); $fresh['preview']=$this->makePreviewText($body['body_text']); $fresh['has_attachment']=!empty($body['attachments'])||$this->rawMessageLooksLikeAttachment($previewRaw); }
+                    $fresh['classification']=isset($message['classification'])?$message['classification']:array(); $fresh['synced_at']=isset($message['synced_at'])?$message['synced_at']:date('Y-m-d H:i:s');
+                    $messages[$key]=array_merge($message,$fresh); $repaired++;
                 } catch (\Exception $ignored) {}
             }
-        } finally {
-            $client->logout();
-        }
-        if ($repaired > 0) PublicMailStorageService::saveMessages($messages);
-        return $repaired;
+        } finally { $client->logout(); }
+        if ($repaired>0) PublicMailStorageService::saveMessages($messages); return $repaired;
     }
-
     private function getPdoSafely()
     {
         try {

@@ -1135,3 +1135,44 @@ body.pm-modal-open {
     word-break: break-word;
 }
 .pm-mail-row.is-unread .pm-preview { color: #475569; }
+
+/* v1.4: 네이버 전체메일·웹 자동동기화·빠른 첨부파일 다운로드 */
+.pm-download-frame {
+    position: fixed;
+    width: 1px;
+    height: 1px;
+    left: -9999px;
+    top: -9999px;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+}
+.pm-mailbox-chip {
+    display: inline-flex;
+    align-items: center;
+    max-width: 130px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: #ecfdf5;
+    color: #047857;
+    font-size: 11px;
+    font-weight: 800;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.pm-progress-wrap { display:grid; gap:10px; margin:16px 0; }
+.pm-progress-track { height:12px; overflow:hidden; border-radius:999px; background:#e2e8f0; }
+.pm-progress-track span { display:block; height:100%; border-radius:999px; background:linear-gradient(90deg,#03c75a,#10b981); transition:width .3s ease; }
+.pm-progress-label { display:flex; justify-content:space-between; align-items:center; color:#475569; font-size:13px; }
+.pm-progress-label strong { color:#047857; font-size:18px; }
+.pm-wrap-actions { flex-wrap:wrap; }
+.pm-copy-field { display:flex; gap:8px; margin-top:7px; }
+.pm-copy-field input { flex:1; min-width:0; }
+.pm-copy-field .pm-btn { flex:0 0 auto; }
+.pm-settings-actions form { display:inline-flex; }
+.pm-import-card[data-import-active="1"] { border-color:#86efac; box-shadow:0 12px 32px rgba(3,199,90,.10); }
+@media (max-width:720px) {
+    .pm-copy-field { flex-direction:column; }
+    .pm-copy-field .pm-btn { width:100%; }
+}

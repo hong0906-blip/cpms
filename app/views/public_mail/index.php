@@ -15,6 +15,13 @@ $total = isset($list['total']) ? (int)$list['total'] : 0;
 $departmentOptions = array('공무', '공사', '안전/보건', '품질', '관리', '일반', '미분류');
 $statusOptions = array('미확인', '확인', '담당자 지정', '처리중', '회신대기', '발송완료', '처리완료', '보류');
 $priorityOptions = array('긴급', '높음', '보통', '낮음');
+$mailboxOptions = array();
+if (isset($syncState['mailboxes']) && is_array($syncState['mailboxes'])) {
+    foreach ($syncState['mailboxes'] as $mailboxState) {
+        if (!is_array($mailboxState) || empty($mailboxState['raw_name'])) continue;
+        $mailboxOptions[] = array('raw_name'=>(string)$mailboxState['raw_name'], 'display_name'=>isset($mailboxState['display_name'])?(string)$mailboxState['display_name']:(string)$mailboxState['raw_name']);
+    }
+}
 
 $buildUrl = function ($changes) use ($filters, $page) {
     $query = array_merge($filters, array('page' => $page));
@@ -28,7 +35,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
     return 'public_mail.php?' . http_build_query($query, '', '&');
 };
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260805_3">
+<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260805_4">
 
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-csrf-token="<?php echo call_user_func($esc, $csrfToken); ?>">
     <div class="public-mail-shell">
@@ -108,6 +115,12 @@ $buildUrl = function ($changes) use ($filters, $page) {
                     <option value="1y" <?php echo $filters['period'] === '1y' ? 'selected' : ''; ?>>최근 1년</option>
                     <option value="all" <?php echo $filters['period'] === 'all' ? 'selected' : ''; ?>>전체 수집기간</option>
                 </select>
+                <select name="mailbox" aria-label="메일함">
+                    <option value="">전체 메일함</option>
+                    <?php foreach ($mailboxOptions as $mailboxOption): ?>
+                        <option value="<?php echo call_user_func($esc, $mailboxOption['raw_name']); ?>" <?php echo isset($filters['mailbox']) && $filters['mailbox'] === $mailboxOption['raw_name'] ? 'selected' : ''; ?>><?php echo call_user_func($esc, $mailboxOption['display_name']); ?></option>
+                    <?php endforeach; ?>
+                </select>
                 <select name="department">
                     <option value="">전체 부서</option>
                     <?php foreach ($departmentOptions as $option): ?>
@@ -159,7 +172,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
                     <div class="pm-empty">
                         <i data-lucide="inbox"></i>
                         <strong>표시할 메일이 없습니다.</strong>
-                        <span>처음이라면 설정에서 최근 1년 메일 가져오기를 실행하세요.</span>
+                        <span>처음이라면 연동 설정에서 전체 메일 가져오기를 한 번 실행하세요.</span>
                     </div>
                 <?php else: ?>
                     <div class="pm-mail-list">
@@ -170,9 +183,9 @@ $buildUrl = function ($changes) use ($filters, $page) {
                             $department = !empty($workflow['department']) ? $workflow['department'] : (isset($classification['department']) ? $classification['department'] : '미분류');
                             $priority = !empty($workflow['priority']) ? $workflow['priority'] : (isset($classification['priority']) ? $classification['priority'] : '보통');
                             $projectName = !empty($workflow['project_name']) ? $workflow['project_name'] : (isset($classification['project_name']) ? $classification['project_name'] : '');
-                            $rowUrl = $buildUrl(array('uid' => $message['uid']));
+                            $rowUrl = $buildUrl(array('message' => $message['message_key']));
                             ?>
-                            <a class="pm-mail-row <?php echo $selectedUid === (int)$message['uid'] ? 'is-selected' : ''; ?> <?php echo empty($message['is_seen']) ? 'is-unread' : ''; ?>" href="<?php echo call_user_func($esc, $rowUrl); ?>">
+                            <a class="pm-mail-row <?php echo (string)$selectedMessageKey === (string)$message['message_key'] ? 'is-selected' : ''; ?> <?php echo empty($message['is_seen']) ? 'is-unread' : ''; ?>" href="<?php echo call_user_func($esc, $rowUrl); ?>">
                                 <div class="pm-mail-row-top">
                                     <span class="pm-badge pm-badge-<?php echo $priority === '긴급' ? 'danger' : ($priority === '높음' ? 'warning' : 'neutral'); ?>"><?php echo call_user_func($esc, $priority); ?></span>
                                     <span class="pm-department"><?php echo call_user_func($esc, $department); ?></span>
@@ -181,6 +194,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
                                 <div class="pm-subject"><?php echo call_user_func($esc, $message['subject']); ?></div>
                                 <div class="pm-mail-meta">
                                     <span><?php echo call_user_func($esc, $message['from_text']); ?></span>
+                                    <span class="pm-mailbox-chip"><?php echo call_user_func($esc, isset($message['mailbox_name']) ? $message['mailbox_name'] : '받은메일함'); ?></span>
                                     <?php if ($projectName !== ''): ?><span class="pm-project-chip"><?php echo call_user_func($esc, $projectName); ?></span><?php endif; ?>
                                 </div>
                                 <div class="pm-preview">
@@ -215,7 +229,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
                 ?>
                 <div class="pm-detail-panel">
                     <div class="pm-detail-toolbar">
-                        <a class="pm-icon-btn" href="<?php echo call_user_func($esc, $buildUrl(array('uid' => null))); ?>" title="상세 닫기"><i data-lucide="x"></i></a>
+                        <a class="pm-icon-btn" href="<?php echo call_user_func($esc, $buildUrl(array('message' => null))); ?>" title="상세 닫기"><i data-lucide="x"></i></a>
                         <div class="pm-detail-actions">
                             <a class="pm-btn pm-btn-gmail" href="<?php echo call_user_func($esc, $replyMailUrl); ?>" target="_blank" rel="noopener noreferrer"><i data-lucide="reply"></i> Gmail로 답장쓰기</a>
                             <?php if (!empty($employees)): ?>
@@ -224,7 +238,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
                             <form method="post" action="public_mail_action.php" class="pm-inline-form">
                                 <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc, $csrfToken); ?>">
                                 <input type="hidden" name="action" value="reply_completed">
-                                <input type="hidden" name="uid" value="<?php echo (int)$detail['uid']; ?>">
+                                <input type="hidden" name="message_key" value="<?php echo call_user_func($esc, $detail['message_key']); ?>">
                                 <button class="pm-btn pm-btn-light" type="submit"><i data-lucide="check"></i> 발송완료 처리</button>
                             </form>
                         </div>
@@ -232,6 +246,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
 
                     <article class="pm-message-card">
                         <div class="pm-message-labels">
+                            <span class="pm-badge pm-badge-neutral"><?php echo call_user_func($esc, isset($detail['mailbox_name']) ? $detail['mailbox_name'] : '받은메일함'); ?></span>
                             <span class="pm-badge pm-badge-neutral"><?php echo call_user_func($esc, $selectedDepartment); ?></span>
                             <span class="pm-badge pm-badge-<?php echo $selectedPriority === '긴급' ? 'danger' : ($selectedPriority === '높음' ? 'warning' : 'neutral'); ?>"><?php echo call_user_func($esc, $selectedPriority); ?></span>
                             <?php if (!empty($detailWorkflow['reply_completed'])): ?><span class="pm-badge pm-badge-success">발송완료</span><?php endif; ?>
@@ -256,7 +271,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
                             <div class="pm-attachments">
                                 <strong>첨부파일</strong>
                                 <?php foreach ($detail['attachments'] as $attachment): ?>
-                                    <a href="<?php echo call_user_func($esc, base_url()); ?>/public_mail_attachment.php?uid=<?php echo (int)$detail['uid']; ?>&part=<?php echo rawurlencode($attachment['part_id']); ?>">
+                                    <a data-mail-attachment-download target="pmMailDownloadFrame" href="<?php echo call_user_func($esc, base_url()); ?>/public_mail_attachment.php?message=<?php echo rawurlencode($detail['message_key']); ?>&part=<?php echo rawurlencode($attachment['part_id']); ?>">
                                         <i data-lucide="paperclip"></i>
                                         <span><?php echo call_user_func($esc, $attachment['filename']); ?></span>
                                         <small><?php echo number_format((int)$attachment['size']); ?> bytes</small>
@@ -271,7 +286,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
                     <form method="post" action="public_mail_action.php" class="pm-workflow-card" data-workflow-form>
                         <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc, $csrfToken); ?>">
                         <input type="hidden" name="action" value="update_workflow">
-                        <input type="hidden" name="uid" value="<?php echo (int)$detail['uid']; ?>">
+                        <input type="hidden" name="message_key" value="<?php echo call_user_func($esc, $detail['message_key']); ?>">
                         <input type="hidden" name="project_name" value="<?php echo call_user_func($esc, isset($detailWorkflow['project_name']) ? $detailWorkflow['project_name'] : ''); ?>" data-project-name>
                         <input type="hidden" name="assignee_name" value="<?php echo call_user_func($esc, isset($detailWorkflow['assignee_name']) ? $detailWorkflow['assignee_name'] : ''); ?>" data-assignee-name>
 
@@ -327,7 +342,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
                     <form method="post" action="public_mail_action.php" class="pm-reclassify-form">
                         <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc, $csrfToken); ?>">
                         <input type="hidden" name="action" value="reclassify">
-                        <input type="hidden" name="uid" value="<?php echo (int)$detail['uid']; ?>">
+                        <input type="hidden" name="message_key" value="<?php echo call_user_func($esc, $detail['message_key']); ?>">
                         <button type="submit">자동분류 다시 실행<?php echo !empty($settings['use_gpt_classifier']) ? ' (애매하면 GPT)' : ''; ?></button>
                         <span>현재 규칙 신뢰도: <?php echo isset($detailClass['confidence']) ? (int)$detailClass['confidence'] : 0; ?>%</span>
                     </form>
@@ -341,7 +356,8 @@ $buildUrl = function ($changes) use ($filters, $page) {
                             . '보낸 사람: ' . $detail['from_text'] . "\n"
                             . '수신일: ' . $detail['date_text'] . "\n"
                             . '메일 제목: ' . $detail['subject'] . "\n"
-                            . '네이버 메일 UID: ' . (int)$detail['uid'] . "\n\n"
+                            . '네이버 메일함: ' . (isset($detail['mailbox_name']) ? $detail['mailbox_name'] : '') . "\n"
+                            . '메일 식별값: ' . $detail['message_key'] . "\n\n"
                             . "처리할 내용을 아래에 작성하세요.\n";
                         ?>
                         <div class="pm-modal" data-task-modal hidden>
@@ -420,4 +436,5 @@ $buildUrl = function ($changes) use ($filters, $page) {
     </div>
 </div>
 
-<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260805_3"></script>
+<iframe name="pmMailDownloadFrame" title="첨부파일 다운로드" class="pm-download-frame" aria-hidden="true"></iframe>
+<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260805_4"></script>
