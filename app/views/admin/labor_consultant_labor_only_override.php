@@ -1,7 +1,7 @@
 <?php
 
 if (!defined('CPMS_LABOR_CONSULTANT_EXCEL_FIX_VERSION')) {
-    define('CPMS_LABOR_CONSULTANT_EXCEL_FIX_VERSION', '2026-08-04-v4');
+    define('CPMS_LABOR_CONSULTANT_EXCEL_FIX_VERSION', '2026-08-04-v5');
 }
 
 /**
@@ -1130,14 +1130,192 @@ if (!function_exists('cpms_labor_consultant_fix_replace_numeric_cell')) {
  * 1) 원본 양식의 헤더 병합을 반복 구간마다 그대로 복원
  * 2) 일별 공수 숫자를 General 형식으로 강제하여 1. 대신 1로 표시
  */
+if (!function_exists('cpms_labor_consultant_fix_project_key')) {
+    function cpms_labor_consultant_fix_project_key($name) {
+        $name = trim((string)$name);
+        if ($name === '') return '';
+        if (function_exists('mb_strtolower')) {
+            $name = mb_strtolower($name, 'UTF-8');
+        } else {
+            $name = strtolower($name);
+        }
+        $normalized = @preg_replace('/[^\p{L}\p{N}]+/u', '', $name);
+        if ($normalized === null) {
+            $normalized = str_replace(array(' ', "\r", "\n", "\t", '-', '_', '.', ',', '(', ')', '[', ']', '/', '\\'), '', $name);
+        }
+        return trim((string)$normalized);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fix_group_project_rows')) {
+    function cpms_labor_consultant_fix_group_project_rows($dataRows) {
+        $groups = array();
+        if (!is_array($dataRows)) return $groups;
+        foreach ($dataRows as $row) {
+            if (!is_array($row)) continue;
+            $projectName = isset($row['project_name']) ? trim((string)$row['project_name']) : '';
+            $key = cpms_labor_consultant_fix_project_key($projectName);
+            if ($key === '') continue;
+            if (!isset($groups[$key])) $groups[$key] = array();
+            $groups[$key][] = $row;
+        }
+        return $groups;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fix_sheet_project_name')) {
+    function cpms_labor_consultant_fix_sheet_project_name($rows, $fallbackName) {
+        if (is_array($rows)) {
+            for ($rowNum = 1; $rowNum <= 4; $rowNum++) {
+                if (!isset($rows[$rowNum]) || !is_array($rows[$rowNum])) continue;
+                ksort($rows[$rowNum]);
+                foreach ($rows[$rowNum] as $colNum => $cell) {
+                    $text = isset($cell['text']) ? trim((string)$cell['text']) : '';
+                    $key = cpms_labor_consultant_fix_label_key($text);
+                    if ($key !== '현장명') continue;
+                    for ($nextCol = (int)$colNum + 1; $nextCol <= (int)$colNum + 12; $nextCol++) {
+                        if (!isset($rows[$rowNum][$nextCol])) continue;
+                        $candidate = isset($rows[$rowNum][$nextCol]['text'])
+                            ? trim((string)$rows[$rowNum][$nextCol]['text'])
+                            : '';
+                        if ($candidate !== '') return $candidate;
+                    }
+                }
+            }
+        }
+        return trim((string)$fallbackName);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fix_find_row_node')) {
+    function cpms_labor_consultant_fix_find_row_node($sheetDoc, $rowNum) {
+        if (!($sheetDoc instanceof DOMDocument)) return null;
+        $rowNum = (int)$rowNum;
+        if ($rowNum <= 0) return null;
+        $xpath = new DOMXPath($sheetDoc);
+        $nodes = $xpath->query('/*[local-name()="worksheet"]/*[local-name()="sheetData"]/*[local-name()="row"][@r="' . $rowNum . '"]');
+        if ($nodes && $nodes->length > 0) return $nodes->item(0);
+        return null;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fix_find_or_create_cell_node')) {
+    function cpms_labor_consultant_fix_find_or_create_cell_node($sheetDoc, $rowNode, $colNum) {
+        if (!($sheetDoc instanceof DOMDocument) || !($rowNode instanceof DOMElement)) return null;
+        $colNum = (int)$colNum;
+        if ($colNum <= 0) return null;
+        $rowNum = (int)$rowNode->getAttribute('r');
+        $targetRef = cpms_labor_consultant_fix_col_letter($colNum) . $rowNum;
+        $insertBefore = null;
+        foreach ($rowNode->childNodes as $child) {
+            if (!($child instanceof DOMElement) || $child->localName !== 'c') continue;
+            list(, $existingCol) = cpms_labor_consultant_fix_ref_to_pos($child->getAttribute('r'));
+            if ($existingCol === $colNum) return $child;
+            if ($existingCol > $colNum) {
+                $insertBefore = $child;
+                break;
+            }
+        }
+        $namespace = $sheetDoc->documentElement instanceof DOMElement
+            ? $sheetDoc->documentElement->namespaceURI
+            : '';
+        $cellNode = $namespace !== ''
+            ? $sheetDoc->createElementNS($namespace, 'c')
+            : $sheetDoc->createElement('c');
+        $cellNode->setAttribute('r', $targetRef);
+        if ($insertBefore) $rowNode->insertBefore($cellNode, $insertBefore);
+        else $rowNode->appendChild($cellNode);
+        return $cellNode;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fix_clear_numeric_cell')) {
+    function cpms_labor_consultant_fix_clear_numeric_cell($cellNode) {
+        if (!($cellNode instanceof DOMElement)) return;
+        $remove = array();
+        foreach ($cellNode->childNodes as $child) {
+            if ($child instanceof DOMElement) $remove[] = $child;
+        }
+        foreach ($remove as $child) $cellNode->removeChild($child);
+        if ($cellNode->hasAttribute('t')) $cellNode->removeAttribute('t');
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fix_write_number')) {
+    function cpms_labor_consultant_fix_write_number($sheetDoc, $rowNode, $colNum, $value) {
+        $cellNode = cpms_labor_consultant_fix_find_or_create_cell_node($sheetDoc, $rowNode, $colNum);
+        if (!($cellNode instanceof DOMElement)) return null;
+        cpms_labor_consultant_fix_clear_numeric_cell($cellNode);
+        if ($value === '' || $value === null || !is_numeric($value)) return $cellNode;
+        $canonical = cpms_labor_consultant_fix_canonical_number($value);
+        if ($canonical === '') return $cellNode;
+        $namespace = $sheetDoc->documentElement instanceof DOMElement
+            ? $sheetDoc->documentElement->namespaceURI
+            : '';
+        $valueNode = $namespace !== ''
+            ? $sheetDoc->createElementNS($namespace, 'v')
+            : $sheetDoc->createElement('v');
+        $valueNode->appendChild($sheetDoc->createTextNode($canonical));
+        $cellNode->appendChild($valueNode);
+        return $cellNode;
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fix_add_style_target')) {
+    function cpms_labor_consultant_fix_add_style_target($cellNode, &$targetCells, &$styleIdsNeeded) {
+        if (!($cellNode instanceof DOMElement)) return;
+        $styleId = $cellNode->hasAttribute('s') ? (int)$cellNode->getAttribute('s') : 0;
+        $styleIdsNeeded[$styleId] = $styleId;
+        $targetCells[] = array('node' => $cellNode, 'style_id' => $styleId);
+    }
+}
+
+if (!function_exists('cpms_labor_consultant_fix_worker_merges')) {
+    function cpms_labor_consultant_fix_worker_merges($sheetDoc, $topRow, $bottomRow) {
+        $refs = array(
+            'A' . $topRow . ':A' . $bottomRow,
+            'B' . $topRow . ':C' . $topRow,
+            'B' . $bottomRow . ':C' . $bottomRow,
+            'X' . $topRow . ':X' . $bottomRow,
+            'Y' . $topRow . ':Y' . $bottomRow,
+            'AD' . $topRow . ':AD' . $bottomRow,
+            'AE' . $topRow . ':AE' . $bottomRow,
+            'AF' . $topRow . ':AF' . $bottomRow,
+            'AG' . $topRow . ':AG' . $bottomRow,
+            'AH' . $topRow . ':AH' . $bottomRow,
+            'AI' . $topRow . ':AI' . $bottomRow,
+            'E' . $bottomRow . ':F' . $bottomRow
+        );
+        $changed = 0;
+        foreach ($refs as $ref) {
+            if (cpms_labor_consultant_fix_apply_merge($sheetDoc, $ref)) $changed++;
+        }
+        return $changed;
+    }
+}
+
+/**
+ * 생성된 노무사 확인용 XLSX를 최종 보정합니다.
+ *
+ * 원본 양식의 실제 구조:
+ * - 근로자 1명당 2행
+ * - 1~15일: 윗행 G~U
+ * - 16~31일: 아랫행 G~V
+ * - W 윗행: 출력일수
+ * - W 아랫행: 총공수
+ * - 출력월/공종, 임금단가, 지급총액, 계좌정보, 인력사업체명은 각 2행 병합
+ *
+ * PHP 5.6 호환.
+ */
 if (!function_exists('cpms_labor_consultant_fix_export_workbook')) {
-    function cpms_labor_consultant_fix_export_workbook($filePath, $templatePath) {
+    function cpms_labor_consultant_fix_export_workbook($filePath, $templatePath, $dataRows) {
         $result = array(
             'ok' => false,
             'message' => '',
             'updated_cells' => 0,
             'updated_styles' => 0,
-            'restored_merges' => 0
+            'restored_merges' => 0,
+            'fixed_projects' => 0
         );
         $filePath = trim((string)$filePath);
         if ($filePath === '' || !is_file($filePath)) {
@@ -1149,6 +1327,7 @@ if (!function_exists('cpms_labor_consultant_fix_export_workbook')) {
             return $result;
         }
 
+        $projectGroups = cpms_labor_consultant_fix_group_project_rows($dataRows);
         $templatePatterns = cpms_labor_consultant_fix_template_merge_patterns($templatePath);
         $zip = new ZipArchive();
         if ($zip->open($filePath) !== true) {
@@ -1170,6 +1349,7 @@ if (!function_exists('cpms_labor_consultant_fix_export_workbook')) {
 
         foreach ($sheets as $sheet) {
             $sheetPath = isset($sheet['path']) ? (string)$sheet['path'] : '';
+            $sheetName = isset($sheet['name']) ? (string)$sheet['name'] : '';
             $sheetXml = $sheetPath !== '' ? $zip->getFromName($sheetPath) : false;
             if ($sheetXml === false || $sheetXml === '') continue;
 
@@ -1182,9 +1362,8 @@ if (!function_exists('cpms_labor_consultant_fix_export_workbook')) {
             $headerRows = cpms_labor_consultant_fix_header_rows($rows);
             if (count($headerRows) <= 0) continue;
 
-            // 원본 양식의 병합 패턴을 한 시트 안의 모든 반복 헤더에 적용합니다.
+            // 헤더 병합은 원본 양식 패턴을 그대로 복구합니다.
             foreach ($headerRows as $headerRow) {
-                $before = $result['restored_merges'];
                 if (count($templatePatterns) > 0) {
                     foreach ($templatePatterns as $pattern) {
                         $r1 = $headerRow + (int)$pattern['r1_offset'];
@@ -1197,47 +1376,69 @@ if (!function_exists('cpms_labor_consultant_fix_export_workbook')) {
                         }
                     }
                 }
-                // 양식 패턴을 못 읽었거나 일부 열이 빠진 경우 지정 헤더를 한 번 더 보정합니다.
                 $result['restored_merges'] += cpms_labor_consultant_fix_fallback_header_merges($sheetDoc, $rows, $headerRow);
             }
 
-            // 날짜 열 번호를 반복 헤더의 다음 행에서 수집합니다.
-            $dayColumns = array();
-            $dataStartRow = PHP_INT_MAX;
-            foreach ($headerRows as $headerRow) {
-                $dataStartRow = min($dataStartRow, $headerRow + 2);
-                foreach (array($headerRow, $headerRow + 1, $headerRow + 2) as $dayHeaderRow) {
-                    if (!isset($rows[$dayHeaderRow])) continue;
-                    foreach ($rows[$dayHeaderRow] as $colNum => $cell) {
-                        $text = trim((string)(isset($cell['text']) ? $cell['text'] : ''));
-                        if (preg_match('/^(?:[1-9]|[12][0-9]|3[01])(?:\.0+)?$/', $text)) {
-                            $dayColumns[(int)$colNum] = true;
-                        }
-                    }
-                }
+            $projectName = cpms_labor_consultant_fix_sheet_project_name($rows, $sheetName);
+            $projectKey = cpms_labor_consultant_fix_project_key($projectName);
+            if ($projectKey === '' || !isset($projectGroups[$projectKey])) {
+                $sheetEntries[] = array('path' => $sheetPath, 'doc' => $sheetDoc, 'cells' => array());
+                continue;
             }
 
-            $xpath = new DOMXPath($sheetDoc);
-            $cellNodes = $xpath->query('//*[local-name()="worksheet"]/*[local-name()="sheetData"]/*[local-name()="row"]/*[local-name()="c"]');
+            $projectRows = $projectGroups[$projectKey];
+            $dataStartRow = ((int)$headerRows[0]) + 2;
             $targetCells = array();
-            foreach ($cellNodes as $cellNode) {
-                $ref = (string)$cellNode->getAttribute('r');
-                list($rowNum, $colNum) = cpms_labor_consultant_fix_ref_to_pos($ref);
-                if ($rowNum < $dataStartRow || !isset($dayColumns[$colNum])) continue;
 
-                $rawText = cpms_labor_consultant_fix_cell_text($cellNode, $sharedStrings);
-                $rawText = trim((string)$rawText);
-                if ($rawText === '' || !preg_match('/^-?[0-9]+(?:\.[0-9]*)?$/', $rawText)) continue;
-                $canonical = cpms_labor_consultant_fix_canonical_number($rawText);
-                if ($canonical === '') continue;
+            foreach ($projectRows as $workerIndex => $rowData) {
+                $topRowNum = $dataStartRow + ((int)$workerIndex * 2);
+                $bottomRowNum = $topRowNum + 1;
+                $topRowNode = cpms_labor_consultant_fix_find_row_node($sheetDoc, $topRowNum);
+                $bottomRowNode = cpms_labor_consultant_fix_find_row_node($sheetDoc, $bottomRowNum);
+                if (!($topRowNode instanceof DOMElement) || !($bottomRowNode instanceof DOMElement)) continue;
 
-                cpms_labor_consultant_fix_replace_numeric_cell($sheetDoc, $cellNode, $canonical);
-                $styleId = $cellNode->hasAttribute('s') ? (int)$cellNode->getAttribute('s') : 0;
-                $styleIdsNeeded[$styleId] = $styleId;
-                $targetCells[] = array('node' => $cellNode, 'style_id' => $styleId);
-                $result['updated_cells']++;
+                // 원본 양식에서 근로자 1명마다 필요한 병합을 정확히 복원합니다.
+                $result['restored_merges'] += cpms_labor_consultant_fix_worker_merges($sheetDoc, $topRowNum, $bottomRowNum);
+
+                // 기존 생성기가 16~31일 값을 윗행에 덮어쓴 상태일 수 있으므로
+                // 날짜 입력칸을 모두 비운 뒤 실제 양식 위치에 다시 기록합니다.
+                for ($colNum = 7; $colNum <= 22; $colNum++) {
+                    $topCell = cpms_labor_consultant_fix_find_or_create_cell_node($sheetDoc, $topRowNode, $colNum);
+                    $bottomCell = cpms_labor_consultant_fix_find_or_create_cell_node($sheetDoc, $bottomRowNode, $colNum);
+                    cpms_labor_consultant_fix_clear_numeric_cell($topCell);
+                    cpms_labor_consultant_fix_clear_numeric_cell($bottomCell);
+                }
+
+                $days = isset($rowData['days']) && is_array($rowData['days']) ? $rowData['days'] : array();
+                for ($day = 1; $day <= 31; $day++) {
+                    $value = isset($days[$day]) ? $days[$day] : '';
+                    if ($value === '' || !is_numeric($value) || (float)$value <= 0) continue;
+                    if ($day <= 15) {
+                        $targetRowNode = $topRowNode;
+                        $targetColNum = 6 + $day; // 1일=G, 15일=U
+                    } else {
+                        $targetRowNode = $bottomRowNode;
+                        $targetColNum = $day - 9; // 16일=G, 31일=V
+                    }
+                    $cellNode = cpms_labor_consultant_fix_write_number($sheetDoc, $targetRowNode, $targetColNum, $value);
+                    cpms_labor_consultant_fix_add_style_target($cellNode, $targetCells, $styleIdsNeeded);
+                    $result['updated_cells']++;
+                }
+
+                // W 윗행은 출력일수, W 아랫행은 총공수입니다.
+                $outputDays = isset($rowData['output_days'])
+                    ? $rowData['output_days']
+                    : (isset($rowData['work_days_count']) ? $rowData['work_days_count'] : '');
+                $totalGongsu = isset($rowData['total_gongsu']) ? $rowData['total_gongsu'] : '';
+
+                $outputDaysCell = cpms_labor_consultant_fix_write_number($sheetDoc, $topRowNode, 23, $outputDays);
+                $totalGongsuCell = cpms_labor_consultant_fix_write_number($sheetDoc, $bottomRowNode, 23, $totalGongsu);
+                cpms_labor_consultant_fix_add_style_target($outputDaysCell, $targetCells, $styleIdsNeeded);
+                cpms_labor_consultant_fix_add_style_target($totalGongsuCell, $targetCells, $styleIdsNeeded);
+                $result['updated_cells'] += 2;
             }
 
+            $result['fixed_projects']++;
             $sheetEntries[] = array(
                 'path' => $sheetPath,
                 'doc' => $sheetDoc,
@@ -1245,6 +1446,7 @@ if (!function_exists('cpms_labor_consultant_fix_export_workbook')) {
             );
         }
 
+        // 기존 테두리/배경/정렬은 유지하고 숫자 형식만 General로 복제합니다.
         $stylesDoc = new DOMDocument('1.0', 'UTF-8');
         $stylesDoc->preserveWhiteSpace = true;
         $stylesDoc->formatOutput = false;
@@ -1268,7 +1470,6 @@ if (!function_exists('cpms_labor_consultant_fix_export_workbook')) {
                 $baseId = isset($xfNodes[$styleId]) ? $styleId : 0;
                 if (!isset($xfNodes[$baseId])) continue;
                 $clone = $xfNodes[$baseId]->cloneNode(true);
-                // General 형식. 1.0 또는 1. 대신 1로, 1.5는 1.5로 표시됩니다.
                 $clone->setAttribute('numFmtId', '0');
                 $clone->setAttribute('applyNumberFormat', '1');
                 $newStyleId = count($xfNodes);
@@ -1295,7 +1496,7 @@ if (!function_exists('cpms_labor_consultant_fix_export_workbook')) {
         $zip->close();
 
         $result['ok'] = true;
-        $result['message'] = '원본 양식 병합과 일별 공수 표시형식을 복구했습니다.';
+        $result['message'] = '근로자 2행 구조, 병합, 출력일수와 총공수를 원본 양식 기준으로 복구했습니다.';
         return $result;
     }
 }

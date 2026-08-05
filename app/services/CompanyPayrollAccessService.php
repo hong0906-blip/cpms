@@ -134,6 +134,26 @@ function cpms_company_payroll_access_is_named_allowed_user($user, $pdo) {
     return false;
 }}
 
+if (!function_exists('cpms_company_payroll_access_is_view_allowed_name')) {
+function cpms_company_payroll_access_is_view_allowed_name($user, $pdo) {
+    $config = cpms_company_payroll_access_config();
+    $allowedNames = isset($config['allowed_names']) && is_array($config['allowed_names']) ? $config['allowed_names'] : array();
+
+    $values = array();
+    if (is_array($user)) $values[] = $user;
+    $dbRow = cpms_company_payroll_access_employee_row($pdo, $user);
+    if (is_array($dbRow)) $values[] = $dbRow;
+
+    foreach ($values as $row) {
+        $name = isset($row['name']) ? cpms_company_payroll_access_normalize($row['name']) : '';
+        if ($name === '') continue;
+        foreach ($allowedNames as $allowedName) {
+            if ($name === cpms_company_payroll_access_normalize($allowedName)) return true;
+        }
+    }
+    return false;
+}}
+
 if (!function_exists('cpms_company_payroll_access_is_executive_allowed')) {
 function cpms_company_payroll_access_is_executive_allowed($user, $pdo) {
     $config = cpms_company_payroll_access_config();
@@ -174,6 +194,8 @@ function cpms_can_view_company_payroll($user = null, $pdo = null) {
     $roleValues = array(cpms_company_payroll_access_user_value($user, 'role'), \App\Core\Auth::userRole());
     if (cpms_company_payroll_access_is_master_role($roleValues)) return true;
     if (cpms_company_payroll_access_is_executive_allowed($user, $pdo)) return true;
+    // 박지혜 사용자는 부서/직급 값과 무관하게 임직원 월급 탭을 조회할 수 있습니다.
+    if (cpms_company_payroll_access_is_view_allowed_name($user, $pdo)) return true;
     if (cpms_company_payroll_access_is_named_allowed_user($user, $pdo)) return true;
     return false;
 }}
@@ -188,6 +210,11 @@ function cpms_can_edit_company_payroll($user = null, $pdo = null) {
 
     $roleValues = array(cpms_company_payroll_access_user_value($user, 'role'), \App\Core\Auth::userRole());
     if (cpms_company_payroll_access_is_master_role($roleValues)) return true;
+
+    // 박지혜 사용자는 부서/직급 저장값과 무관하게 임직원 월급을 등록·수정할 수 있습니다.
+    // 이 권한은 총액 저장, 급여대장 업로드, 급여명세서 생성 등 기존 편집 기능에 동일하게 적용됩니다.
+    if (cpms_company_payroll_access_is_view_allowed_name($user, $pdo)) return true;
+
     return cpms_company_payroll_access_is_named_allowed_user($user, $pdo);
 }}
 
