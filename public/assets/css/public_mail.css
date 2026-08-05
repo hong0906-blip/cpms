@@ -1121,3 +1121,17 @@ body.pm-modal-open {
     color: #334155;
     line-height: 1.65;
 }
+
+/* v1.3: 메일 목록 본문 미리보기 */
+.pm-preview {
+    margin-top: 7px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+}
+.pm-mail-row.is-unread .pm-preview { color: #475569; }

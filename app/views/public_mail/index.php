@@ -28,9 +28,9 @@ $buildUrl = function ($changes) use ($filters, $page) {
     return 'public_mail.php?' . http_build_query($query, '', '&');
 };
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260805">
+<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260805_3">
 
-<main class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-csrf-token="<?php echo call_user_func($esc, $csrfToken); ?>">
+<div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-csrf-token="<?php echo call_user_func($esc, $csrfToken); ?>">
     <div class="public-mail-shell">
         <section class="public-mail-hero">
             <div>
@@ -183,6 +183,9 @@ $buildUrl = function ($changes) use ($filters, $page) {
                                     <span><?php echo call_user_func($esc, $message['from_text']); ?></span>
                                     <?php if ($projectName !== ''): ?><span class="pm-project-chip"><?php echo call_user_func($esc, $projectName); ?></span><?php endif; ?>
                                 </div>
+                                <div class="pm-preview">
+                                    <?php echo call_user_func($esc, !empty($message['preview']) ? $message['preview'] : '본문 미리보기를 준비 중입니다.'); ?>
+                                </div>
                                 <div class="pm-mail-status">
                                     <span><?php echo call_user_func($esc, isset($workflow['status']) ? $workflow['status'] : '미확인'); ?></span>
                                     <span><?php echo call_user_func($esc, !empty($workflow['assignee_name']) ? $workflow['assignee_name'] : '담당자 없음'); ?></span>
@@ -253,7 +256,7 @@ $buildUrl = function ($changes) use ($filters, $page) {
                             <div class="pm-attachments">
                                 <strong>첨부파일</strong>
                                 <?php foreach ($detail['attachments'] as $attachment): ?>
-                                    <a href="public_mail_attachment.php?uid=<?php echo (int)$detail['uid']; ?>&part=<?php echo rawurlencode($attachment['part_id']); ?>">
+                                    <a href="<?php echo call_user_func($esc, base_url()); ?>/public_mail_attachment.php?uid=<?php echo (int)$detail['uid']; ?>&part=<?php echo rawurlencode($attachment['part_id']); ?>">
                                         <i data-lucide="paperclip"></i>
                                         <span><?php echo call_user_func($esc, $attachment['filename']); ?></span>
                                         <small><?php echo number_format((int)$attachment['size']); ?> bytes</small>
@@ -415,6 +418,6 @@ $buildUrl = function ($changes) use ($filters, $page) {
             <?php endif; ?>
         </section>
     </div>
-</main>
+</div>
 
-<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260805"></script>
+<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260805_3"></script>

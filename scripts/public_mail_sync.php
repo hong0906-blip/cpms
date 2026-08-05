@@ -93,6 +93,8 @@ try {
 
     $service = new PublicMailService();
     $result = $service->syncBatch($limit, $mode);
+    // 기존에 저장된 인코딩 깨짐/빈 미리보기를 매 실행마다 최대 5건씩 자동 복구합니다.
+    $repairedCount = $service->repairBrokenMetadataBatch(5);
 
     $addedCount = isset($result['added_count']) ? (int)$result['added_count'] : 0;
     $remainingCount = isset($result['remaining_count']) ? (int)$result['remaining_count'] : 0;
@@ -113,6 +115,7 @@ try {
         'OK mode=' . $mode
         . ' added=' . $addedCount
         . ' remaining=' . $remainingCount
+        . ' repaired=' . $repairedCount
     );
 } catch (Exception $e) {
     $exitCode = 1;

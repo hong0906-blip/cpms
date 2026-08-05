@@ -7,9 +7,9 @@
 use App\Services\PublicMailWebHelper;
 $esc = array('App\\Services\\PublicMailWebHelper', 'h');
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260805">
+<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260805_3">
 
-<main class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-csrf-token="<?php echo call_user_func($esc, $csrfToken); ?>">
+<div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-csrf-token="<?php echo call_user_func($esc, $csrfToken); ?>">
     <div class="public-mail-shell pm-settings-shell">
         <section class="public-mail-hero">
             <div>
@@ -112,7 +112,8 @@ $esc = array('App\\Services\\PublicMailWebHelper', 'h');
                 <?php endif; ?>
 
                 <button type="button" class="pm-btn pm-btn-primary pm-full-button" data-sync-mail="initial"><i data-lucide="download-cloud"></i> 다음 묶음 가져오기</button>
-                <p class="pm-help-text">버튼을 누를 때마다 설정한 수만큼 가져오며, 중간에 멈춰도 다음 실행에서 이어집니다.</p>
+                <button type="button" class="pm-btn pm-btn-light pm-full-button" data-repair-mail><i data-lucide="wrench"></i> 기존 깨진 제목·미리보기 20건 복구</button>
+                <p class="pm-help-text">가져오기는 중간에 멈춰도 이어집니다. 복구 버튼은 기존 버전에서 깨진 한글 제목과 빈 본문 미리보기를 20건씩 다시 읽습니다.</p>
             </div>
 
             <div class="pm-settings-card pm-danger-zone">
@@ -130,6 +131,6 @@ $esc = array('App\\Services\\PublicMailWebHelper', 'h');
             </div>
         </section>
     </div>
-</main>
+</div>
 
-<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260805"></script>
+<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260805_3"></script>

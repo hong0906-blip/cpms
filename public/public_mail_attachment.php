@@ -28,9 +28,13 @@ try {
         : 'application/octet-stream';
     $content = isset($attachment['content']) ? $attachment['content'] : '';
 
+    if (ob_get_level() > 0) { while (ob_get_level() > 0) @ob_end_clean(); }
+    $asciiFilename = preg_replace('/[^A-Za-z0-9._-]/', '_', $filename);
+    if ($asciiFilename === '') $asciiFilename = 'attachment.bin';
     header('Content-Type: ' . $mimeType);
+    header('Content-Transfer-Encoding: binary');
     header('Content-Length: ' . strlen($content));
-    header("Content-Disposition: attachment; filename*=UTF-8''" . rawurlencode($filename));
+    header('Content-Disposition: attachment; filename="' . $asciiFilename . '"; filename*=UTF-8\'\'' . rawurlencode($filename));
     header('X-Content-Type-Options: nosniff');
     header('Cache-Control: private, no-store, max-age=0');
     echo $content;

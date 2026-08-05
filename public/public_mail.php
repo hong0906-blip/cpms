@@ -7,6 +7,14 @@
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
+
+// 이 전용 진입 파일에서 사이드바의 ?r=... 링크를 누르면
+// CPMS 메인 라우터(index.php)로 돌려보내 다른 메뉴가 정상 이동하도록 합니다.
+if (isset($_GET['r']) && trim((string)$_GET['r']) !== '') {
+    $routerQuery = $_GET;
+    header('Location: index.php?' . http_build_query($routerQuery, '', '&'));
+    exit;
+}
 require_once __DIR__ . '/../app/services/PublicMailService.php';
 require_once __DIR__ . '/../app/services/PublicMailWebHelper.php';
 

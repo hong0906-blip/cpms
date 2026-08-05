@@ -310,6 +310,71 @@ class PublicMailStorageService
     }
 
     /**
+     * 상세보기와 첨부파일 다운로드 때 같은 메일을 네이버에서 반복 수신하지 않도록
+     * 원본 EML을 짧은 시간만 임시 보관합니다. 전체 메일을 영구 복사하지 않습니다.
+     */
+    public static function getCachedRawMessage($uid, $maxAgeSeconds)
+    {
+        $uid = (int)$uid;
+        $maxAgeSeconds = max(60, (int)$maxAgeSeconds);
+        if ($uid <= 0) return '';
+
+        $path = self::rawCachePath($uid);
+        if (!is_file($path)) return '';
+        $modified = @filemtime($path);
+        if ($modified === false || (time() - (int)$modified) > $maxAgeSeconds) {
+            @unlink($path);
+            return '';
+        }
+        $content = @file_get_contents($path);
+        return is_string($content) ? $content : '';
+    }
+
+    public static function saveCachedRawMessage($uid, $raw)
+    {
+        $uid = (int)$uid;
+        $raw = (string)$raw;
+        if ($uid <= 0 || $raw === '') return false;
+
+        $path = self::rawCachePath($uid);
+        $dir = dirname($path);
+        if (!is_dir($dir) && !@mkdir($dir, 0770, true) && !is_dir($dir)) return false;
+        $temp = $path . '.tmp.' . uniqid('', true);
+        if (@file_put_contents($temp, $raw, LOCK_EX) === false) return false;
+        @chmod($temp, 0660);
+        if (!@rename($temp, $path)) {
+            @unlink($temp);
+            return false;
+        }
+        self::cleanupRawCache(21600, 20);
+        return true;
+    }
+
+    public static function cleanupRawCache($maxAgeSeconds, $maximumDeletes)
+    {
+        $dir = self::rootPath() . DIRECTORY_SEPARATOR . 'raw_cache';
+        if (!is_dir($dir)) return 0;
+        $maxAgeSeconds = max(300, (int)$maxAgeSeconds);
+        $maximumDeletes = max(1, (int)$maximumDeletes);
+        $deleted = 0;
+        $files = @glob($dir . DIRECTORY_SEPARATOR . '*.eml');
+        if (!is_array($files)) return 0;
+        foreach ($files as $file) {
+            $modified = @filemtime($file);
+            if ($modified !== false && (time() - (int)$modified) > $maxAgeSeconds) {
+                if (@unlink($file)) $deleted++;
+                if ($deleted >= $maximumDeletes) break;
+            }
+        }
+        return $deleted;
+    }
+
+    private static function rawCachePath($uid)
+    {
+        return self::rootPath() . DIRECTORY_SEPARATOR . 'raw_cache' . DIRECTORY_SEPARATOR . ((int)$uid) . '.eml';
+    }
+
+    /**
      * 같은 시간에 여러 사용자가 동기화를 실행하지 못하도록 잠금 파일을 잡습니다.
      * 반환된 파일 손잡이는 작업 종료 후 releaseLock()으로 반드시 해제해야 합니다.
      */

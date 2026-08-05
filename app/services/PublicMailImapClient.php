@@ -218,6 +218,20 @@ class PublicMailImapClient
         return (string)$response['literals'][0];
     }
 
+    public function fetchRawPreview($uid, $maximumBytes)
+    {
+        $this->assertMailboxSelected();
+        $uid = (int)$uid;
+        $maximumBytes = (int)$maximumBytes;
+        if ($uid <= 0) throw new \InvalidArgumentException('메일 UID가 올바르지 않습니다.');
+        if ($maximumBytes < 16384) $maximumBytes = 65536;
+        if ($maximumBytes > 262144) $maximumBytes = 262144;
+
+        $response = $this->command('UID FETCH ' . $uid . ' (BODY.PEEK[]<0.' . $maximumBytes . '>)', $maximumBytes + 8192);
+        if (!$response['ok'] || empty($response['literals'])) return '';
+        return (string)$response['literals'][0];
+    }
+
     public function fetchRawMessage($uid, $maximumBytes)
     {
         $this->assertMailboxSelected();
@@ -228,7 +242,10 @@ class PublicMailImapClient
             throw new \InvalidArgumentException('메일 UID가 올바르지 않습니다.');
         }
         if ($maximumBytes <= 0) {
-            $maximumBytes = 31457280;
+            $maximumBytes = 83886080;
+        }
+        if ($maximumBytes > 104857600) {
+            $maximumBytes = 104857600;
         }
 
         $response = $this->command('UID FETCH ' . $uid . ' (UID RFC822.SIZE BODY.PEEK[])', $maximumBytes);

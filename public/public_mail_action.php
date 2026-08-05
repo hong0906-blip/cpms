@@ -76,6 +76,14 @@ try {
             $result = $service->syncBatch($limit, $mode);
         }
 
+        // 기존 버전에서 깨진 제목/본문 미리보기도 화면과 별개로 조금씩 복구합니다.
+        $repairLimit = $isBackground ? 2 : 5;
+        try {
+            $result['repaired_count'] = $service->repairBrokenMetadataBatch($repairLimit);
+        } catch (Exception $repairException) {
+            $result['repaired_count'] = 0;
+        }
+
         if ($isAjax) {
             PublicMailWebHelper::jsonResponse($result, 200);
         }
@@ -130,6 +138,21 @@ try {
             PublicMailWebHelper::jsonResponse($result, 200);
         }
         PublicMailWebHelper::redirectWithMessage('public_mail.php?uid=' . $uid, 'success', $result['message']);
+    }
+
+    if ($action === 'repair_metadata') {
+        PublicMailWebHelper::requireAdmin();
+        $limit = isset($_POST['limit']) ? (int)$_POST['limit'] : 20;
+        $repaired = $service->repairBrokenMetadataBatch($limit);
+        $result = array(
+            'ok' => true,
+            'repaired_count' => $repaired,
+            'message' => $repaired > 0
+                ? $repaired . '건의 제목과 본문 미리보기를 복구했습니다.'
+                : '추가로 복구할 메일이 없습니다.'
+        );
+        if ($isAjax) PublicMailWebHelper::jsonResponse($result, 200);
+        PublicMailWebHelper::redirectWithMessage('public_mail_settings.php', 'success', $result['message']);
     }
 
     if ($action === 'save_settings') {

@@ -116,21 +116,22 @@ class PublicMailService
             foreach ($missingUids as $uid) {
                 $headerData = $client->fetchHeader($uid);
                 $message = $this->buildMessageFromHeader($headerData);
-                $message['classification'] = $this->classifier->classify($message, $projects);
-
-                if (
-                    !isset($message['classification']['department'])
-                    || $message['classification']['department'] === '미분류'
-                    || (isset($message['classification']['department_score']) && (int)$message['classification']['department_score'] <= 1)
-                ) {
-                    try {
-                        $previewRaw = $client->fetchTextPreview($uid, 32768);
-                        $message['preview'] = $this->makePreviewText($previewRaw);
-                        $message['classification'] = $this->classifier->classify($message, $projects);
-                    } catch (\Exception $previewException) {
-                        $message['preview'] = '';
+                // 모든 메일에 본문 미리보기를 저장합니다. 화면 진입 때 네이버 서버를 기다리지 않게 합니다.
+                try {
+                    $previewRaw = $client->fetchRawPreview($uid, 65536);
+                    if ($previewRaw !== '') {
+                        $previewParsed = $this->parseRawMessage($previewRaw, false);
+                        $message['preview'] = $this->makePreviewText(
+                            isset($previewParsed['body_text']) ? $previewParsed['body_text'] : ''
+                        );
+                        $message['has_attachment'] = !empty($previewParsed['attachments'])
+                            || $this->rawMessageLooksLikeAttachment($previewRaw);
                     }
+                } catch (\Exception $previewException) {
+                    $message['preview'] = '';
                 }
+
+                $message['classification'] = $this->classifier->classify($message, $projects);
 
                 if (!empty($settings['use_gpt_classifier']) && $this->isAmbiguousClassification($message['classification'])) {
                     if ($gptUsed < $gptLimitPerBatch) {
@@ -224,9 +225,8 @@ class PublicMailService
             }
 
             $message['uid'] = (int)$uid;
-            $message['workflow'] = isset($workflow[(string)$uid]) && is_array($workflow[(string)$uid])
-                ? array_merge(PublicMailStorageService::getWorkflowForUid($uid), $workflow[(string)$uid])
-                : PublicMailStorageService::getWorkflowForUid($uid);
+            $message['workflow'] = $this->workflowFromMap($workflow, $uid);
+            $message = $this->normalizeStoredMessage($message);
 
             if ($this->matchesFilters($message, $filters)) {
                 $items[] = $message;
@@ -293,9 +293,7 @@ class PublicMailService
                 $counts['unclassified']++;
             }
 
-            $itemWorkflow = isset($workflow[(string)$uid]) && is_array($workflow[(string)$uid])
-                ? array_merge(PublicMailStorageService::getWorkflowForUid($uid), $workflow[(string)$uid])
-                : PublicMailStorageService::getWorkflowForUid($uid);
+            $itemWorkflow = $this->workflowFromMap($workflow, $uid);
             if (empty($itemWorkflow['assignee_id']) && empty($itemWorkflow['assignee_name'])) {
                 $counts['unassigned']++;
             }
@@ -315,27 +313,46 @@ class PublicMailService
             throw new \RuntimeException('저장된 메일 정보를 찾을 수 없습니다.');
         }
 
-        $settings = PublicMailStorageService::getSettings(true);
-        $client = $this->createClient($settings);
-
-        try {
-            $client->connect();
-            $client->login($settings['username'], $settings['password']);
-            $client->selectMailbox('INBOX');
-            $raw = $client->fetchRawMessage($uid, 31457280);
-            $parsed = $this->parseRawMessage($raw);
-
-            $detail = $messages[(string)$uid];
-            $detail['uid'] = $uid;
-            $detail['body_text'] = $parsed['body_text'];
-            $detail['body_html'] = $parsed['body_html'];
-            $detail['attachments'] = $parsed['attachments'];
-            $detail['workflow'] = PublicMailStorageService::getWorkflowForUid($uid);
-
-            return $detail;
-        } finally {
-            $client->logout();
+        $raw = PublicMailStorageService::getCachedRawMessage($uid, 1800);
+        if ($raw === '') {
+            $settings = PublicMailStorageService::getSettings(true);
+            $client = $this->createClient($settings);
+            try {
+                $client->connect();
+                $client->login($settings['username'], $settings['password']);
+                $client->selectMailbox('INBOX');
+                $maximumBytes = $this->rawFetchLimitForMessage($messages[(string)$uid]);
+                $raw = $client->fetchRawMessage($uid, $maximumBytes);
+                PublicMailStorageService::saveCachedRawMessage($uid, $raw);
+            } finally {
+                $client->logout();
+            }
         }
+
+        $parsed = $this->parseRawMessage($raw);
+        $detail = $this->normalizeStoredMessage($messages[(string)$uid]);
+        $detail['uid'] = $uid;
+        $detail['body_text'] = $parsed['body_text'];
+        $detail['body_html'] = $parsed['body_html'];
+        $detail['attachments'] = $parsed['attachments'];
+        $detail['workflow'] = PublicMailStorageService::getWorkflowForUid($uid);
+
+        // 원본 헤더를 기준으로 기존 인코딩 오류를 자동 복구합니다.
+        foreach (array('subject','from_text','from_email','to_text','cc_text') as $field) {
+            if (isset($parsed[$field]) && trim((string)$parsed[$field]) !== '') {
+                $detail[$field] = $parsed[$field];
+                $messages[(string)$uid][$field] = $parsed[$field];
+            }
+        }
+        $preview = $this->makePreviewText($parsed['body_text']);
+        if ($preview !== '') {
+            $detail['preview'] = $preview;
+            $messages[(string)$uid]['preview'] = $preview;
+        }
+        $messages[(string)$uid]['has_attachment'] = !empty($parsed['attachments']);
+        PublicMailStorageService::saveMessages($messages);
+
+        return $detail;
     }
 
     public function getAttachment($uid, $partId)
@@ -346,26 +363,37 @@ class PublicMailService
             throw new \InvalidArgumentException('첨부파일 요청값이 올바르지 않습니다.');
         }
 
-        $settings = PublicMailStorageService::getSettings(true);
-        $client = $this->createClient($settings);
-
-        try {
-            $client->connect();
-            $client->login($settings['username'], $settings['password']);
-            $client->selectMailbox('INBOX');
-            $raw = $client->fetchRawMessage($uid, 31457280);
-            $parsed = $this->parseRawMessage($raw, true);
-
-            foreach ($parsed['attachments'] as $attachment) {
-                if (isset($attachment['part_id']) && (string)$attachment['part_id'] === $partId) {
-                    return $attachment;
-                }
-            }
-
-            throw new \RuntimeException('첨부파일을 찾을 수 없습니다.');
-        } finally {
-            $client->logout();
+        $messages = PublicMailStorageService::getMessages();
+        if (!isset($messages[(string)$uid])) {
+            throw new \RuntimeException('메일 정보를 찾을 수 없습니다.');
         }
+
+        $raw = PublicMailStorageService::getCachedRawMessage($uid, 3600);
+        if ($raw === '') {
+            $settings = PublicMailStorageService::getSettings(true);
+            $client = $this->createClient($settings);
+            try {
+                $client->connect();
+                $client->login($settings['username'], $settings['password']);
+                $client->selectMailbox('INBOX');
+                $raw = $client->fetchRawMessage($uid, $this->rawFetchLimitForMessage($messages[(string)$uid]));
+                PublicMailStorageService::saveCachedRawMessage($uid, $raw);
+            } finally {
+                $client->logout();
+            }
+        }
+
+        $parsed = $this->parseRawMessage($raw, true);
+        foreach ($parsed['attachments'] as $attachment) {
+            if (isset($attachment['part_id']) && (string)$attachment['part_id'] === $partId) {
+                if (!isset($attachment['content']) || $attachment['content'] === '') {
+                    throw new \RuntimeException('첨부파일 내용이 비어 있습니다.');
+                }
+                return $attachment;
+            }
+        }
+
+        throw new \RuntimeException('첨부파일을 찾을 수 없습니다. 메일을 다시 열고 시도하세요.');
     }
 
     public function updateWorkflow($uid, $changes, $updatedBy)
@@ -558,11 +586,18 @@ class PublicMailService
             $bodyText = trim(html_entity_decode(strip_tags($bodyHtml), ENT_QUOTES, 'UTF-8'));
         }
 
+        $rootHeaders = isset($root['headers']) && is_array($root['headers']) ? $root['headers'] : array();
+        $fromText = $this->decodeHeader(isset($rootHeaders['from']) ? $rootHeaders['from'] : '');
         return array(
             'body_text' => $bodyText,
             'body_html' => $this->sanitizeHtml($bodyHtml),
             'attachments' => $attachments,
-            'headers' => isset($root['headers']) ? $root['headers'] : array()
+            'headers' => $rootHeaders,
+            'subject' => $this->decodeHeader(isset($rootHeaders['subject']) ? $rootHeaders['subject'] : ''),
+            'from_text' => $fromText,
+            'from_email' => $this->extractEmail($fromText),
+            'to_text' => $this->decodeHeader(isset($rootHeaders['to']) ? $rootHeaders['to'] : ''),
+            'cc_text' => $this->decodeHeader(isset($rootHeaders['cc']) ? $rootHeaders['cc'] : '')
         );
     }
 
@@ -635,7 +670,7 @@ class PublicMailService
             'size' => isset($headerData['size']) ? (int)$headerData['size'] : 0,
             'is_seen' => $isSeen,
             'is_flagged' => $isFlagged,
-            'has_attachment' => false,
+            'has_attachment' => $this->headerLooksLikeAttachment($headers),
             'preview' => '',
             'classification' => array()
         );
@@ -941,6 +976,7 @@ class PublicMailService
         $current = array();
         $inside = false;
 
+        $closed = false;
         foreach ($lines as $line) {
             if ($line === $delimiter) {
                 if ($inside && !empty($current)) {
@@ -954,11 +990,16 @@ class PublicMailService
                 if ($inside && !empty($current)) {
                     $parts[] = implode("\r\n", $current);
                 }
+                $closed = true;
                 break;
             }
             if ($inside) {
                 $current[] = $line;
             }
+        }
+        // 미리보기용 부분 수신은 마지막 boundary가 잘릴 수 있으므로 현재 part도 사용합니다.
+        if (!$closed && $inside && !empty($current)) {
+            $parts[] = implode("\r\n", $current);
         }
 
         return $parts;
@@ -980,61 +1021,121 @@ class PublicMailService
     private function decodeHeader($value)
     {
         $value = trim((string)$value);
-        if ($value === '') {
-            return '';
+        if ($value === '') return '';
+
+        // 여러 줄로 나뉜 RFC 2047 encoded-word를 먼저 이어 붙입니다.
+        $value = preg_replace('/\?=\s+=\?/', '?==?', $value);
+
+        // PHP 서버의 iconv가 KS_C_5601-1987을 그대로 반환하는 경우가 있어
+        // encoded-word를 직접 해석한 뒤 UTF-8로 변환합니다.
+        $self = $this;
+        $manual = preg_replace_callback('/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/', function ($matches) use ($self) {
+            $charset = isset($matches[1]) ? $matches[1] : '';
+            $mode = isset($matches[2]) ? strtoupper($matches[2]) : 'Q';
+            $payload = isset($matches[3]) ? $matches[3] : '';
+            if ($mode === 'B') {
+                $raw = base64_decode($payload, true);
+                if ($raw === false) $raw = '';
+            } else {
+                $raw = quoted_printable_decode(str_replace('_', ' ', $payload));
+            }
+            return $self->convertToUtf8($raw, $charset);
+        }, $value);
+        if (is_string($manual) && $manual !== '' && strpos($manual, '=?') === false) {
+            return $this->ensureUtf8($manual, '');
         }
 
         if (function_exists('iconv_mime_decode')) {
             $decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
-            if ($decoded !== false && $decoded !== '') {
-                return $decoded;
+            if ($decoded !== false && $decoded !== '' && strpos($decoded, '=?') === false) {
+                return $this->ensureUtf8($decoded, '');
             }
         }
-
         if (function_exists('mb_decode_mimeheader')) {
             $decoded = @mb_decode_mimeheader($value);
-            if ($decoded !== false && $decoded !== '') {
-                return $decoded;
+            if ($decoded !== false && $decoded !== '' && strpos($decoded, '=?') === false) {
+                return $this->ensureUtf8($decoded, '');
             }
         }
 
-        return $value;
+        return $this->ensureUtf8(is_string($manual) ? $manual : $value, '');
     }
 
     private function decodeRfc2231Value($value)
     {
         $value = (string)$value;
         if (preg_match("/^([^']*)'[^']*'(.*)$/", $value, $matches)) {
-            $charset = trim($matches[1]);
-            $decoded = rawurldecode($matches[2]);
-            return $this->convertToUtf8($decoded, $charset);
+            return $this->convertToUtf8(rawurldecode($matches[2]), trim($matches[1]));
         }
-        return rawurldecode($value);
+        return $this->ensureUtf8(rawurldecode($value), '');
+    }
+
+    private function normalizeCharset($charset)
+    {
+        $charset = strtoupper(trim((string)$charset, " \t\r\n\"'"));
+        $charset = str_replace('_', '-', $charset);
+        $map = array(
+            'KS-C-5601-1987' => 'CP949',
+            'KS-C-5601-1989' => 'CP949',
+            'KSC5601' => 'CP949',
+            'KSC-5601' => 'CP949',
+            'WINDOWS-949' => 'CP949',
+            'X-WINDOWS-949' => 'CP949',
+            'MS949' => 'CP949',
+            'CP-949' => 'CP949',
+            'UHC' => 'CP949',
+            'EUC-KR' => 'EUC-KR',
+            'UTF8' => 'UTF-8'
+        );
+        return isset($map[$charset]) ? $map[$charset] : $charset;
+    }
+
+    private function isValidUtf8($value)
+    {
+        return $value === '' || @preg_match('//u', (string)$value) === 1;
+    }
+
+    private function ensureUtf8($value, $declaredCharset)
+    {
+        $value = (string)$value;
+        if ($value === '') return '';
+        $declaredCharset = $this->normalizeCharset($declaredCharset);
+        if (($declaredCharset === '' || $declaredCharset === 'UTF-8' || $declaredCharset === 'US-ASCII') && $this->isValidUtf8($value)) {
+            return $value;
+        }
+        return $this->convertToUtf8($value, $declaredCharset);
     }
 
     private function convertToUtf8($value, $charset)
     {
         $value = (string)$value;
-        $charset = trim((string)$charset);
-        if ($charset === '' || strcasecmp($charset, 'UTF-8') === 0 || strcasecmp($charset, 'US-ASCII') === 0) {
+        if ($value === '') return '';
+        $charset = $this->normalizeCharset($charset);
+
+        if (($charset === '' || $charset === 'UTF-8' || $charset === 'US-ASCII') && $this->isValidUtf8($value)) {
             return $value;
         }
 
-        if (function_exists('iconv')) {
-            $converted = @iconv($charset, 'UTF-8//IGNORE', $value);
-            if ($converted !== false) {
-                return $converted;
+        $candidates = array();
+        if ($charset !== '' && $charset !== 'UTF-8' && $charset !== 'US-ASCII') $candidates[] = $charset;
+        foreach (array('CP949','EUC-KR','ISO-8859-1') as $candidate) {
+            if (!in_array($candidate, $candidates, true)) $candidates[] = $candidate;
+        }
+
+        foreach ($candidates as $candidate) {
+            if (function_exists('iconv')) {
+                $converted = @iconv($candidate, 'UTF-8//IGNORE', $value);
+                if ($converted !== false && $converted !== '' && $this->isValidUtf8($converted)) return $converted;
+            }
+            if (function_exists('mb_convert_encoding')) {
+                $converted = @mb_convert_encoding($value, 'UTF-8', $candidate);
+                if ($converted !== false && $converted !== '' && $this->isValidUtf8($converted)) return $converted;
             }
         }
 
-        if (function_exists('mb_convert_encoding')) {
-            $converted = @mb_convert_encoding($value, 'UTF-8', $charset);
-            if ($converted !== false) {
-                return $converted;
-            }
-        }
-
-        return $value;
+        // 화면 전체가 깨지는 것을 막기 위한 마지막 안전장치
+        if ($this->isValidUtf8($value)) return $value;
+        return preg_replace('/[\x80-\xFF]/', '?', $value);
     }
 
     private function sanitizeHtml($html)
@@ -1065,24 +1166,13 @@ class PublicMailService
 
     private function makePreviewText($rawText)
     {
-        $text = (string)$rawText;
-        if ($text === '') {
-            return '';
-        }
-
-        if (stripos($text, 'Content-Transfer-Encoding: quoted-printable') !== false) {
-            $text = quoted_printable_decode($text);
-        }
-
+        $text = $this->ensureUtf8((string)$rawText, '');
+        if ($text === '') return '';
         $text = preg_replace('/<[^>]+>/', ' ', $text);
         $text = html_entity_decode($text, ENT_QUOTES, 'UTF-8');
         $text = preg_replace('/\s+/u', ' ', $text);
         $text = trim($text);
-
-        if (function_exists('mb_substr')) {
-            return mb_substr($text, 0, 1000, 'UTF-8');
-        }
-
+        if (function_exists('mb_substr')) return mb_substr($text, 0, 1000, 'UTF-8');
         return substr($text, 0, 1000);
     }
 
@@ -1108,6 +1198,111 @@ class PublicMailService
             return mb_substr($filename, 0, 180, 'UTF-8');
         }
         return substr($filename, 0, 180);
+    }
+
+    private function workflowFromMap($workflow, $uid)
+    {
+        $default = array(
+            'department'=>'','project_id'=>'','project_name'=>'','assignee_id'=>'','assignee_name'=>'',
+            'status'=>'미확인','priority'=>'보통','important'=>false,'memo'=>'',
+            'reply_completed'=>false,'reply_completed_at'=>'','reply_completed_by'=>'',
+            'updated_at'=>'','updated_by'=>''
+        );
+        $key = (string)(int)$uid;
+        return isset($workflow[$key]) && is_array($workflow[$key])
+            ? array_merge($default, $workflow[$key]) : $default;
+    }
+
+    private function normalizeStoredMessage($message)
+    {
+        if (!is_array($message)) return array();
+        foreach (array('subject','from_text','to_text','cc_text') as $field) {
+            if (isset($message[$field])) $message[$field] = $this->decodeHeader($message[$field]);
+        }
+        if (isset($message['preview'])) $message['preview'] = $this->makePreviewText($message['preview']);
+        if (isset($message['from_text'])) $message['from_email'] = $this->extractEmail($message['from_text']);
+        return $message;
+    }
+
+    private function rawFetchLimitForMessage($message)
+    {
+        $size = is_array($message) && isset($message['size']) ? (int)$message['size'] : 0;
+        $limit = $size > 0 ? $size + 1048576 : 52428800;
+        if ($limit < 31457280) $limit = 31457280;
+        if ($limit > 104857600) $limit = 104857600;
+        return $limit;
+    }
+
+    private function headerLooksLikeAttachment($headers)
+    {
+        if (!is_array($headers)) return false;
+        $contentType = isset($headers['content-type']) ? strtolower((string)$headers['content-type']) : '';
+        $disposition = isset($headers['content-disposition']) ? strtolower((string)$headers['content-disposition']) : '';
+        return strpos($contentType, 'multipart/mixed') !== false
+            || strpos($contentType, 'name=') !== false
+            || strpos($disposition, 'attachment') !== false
+            || strpos($disposition, 'filename=') !== false;
+    }
+
+    private function rawMessageLooksLikeAttachment($raw)
+    {
+        $raw = strtolower(substr((string)$raw, 0, 131072));
+        return strpos($raw, 'content-disposition: attachment') !== false
+            || strpos($raw, 'filename=') !== false
+            || strpos($raw, 'content-type: multipart/mixed') !== false;
+    }
+
+    /**
+     * 과거에 저장된 인코딩 깨짐/빈 미리보기를 백그라운드에서 조금씩 복구합니다.
+     */
+    public function repairBrokenMetadataBatch($limit)
+    {
+        $limit = max(1, min(20, (int)$limit));
+        $messages = PublicMailStorageService::getMessages();
+        $targets = array();
+        foreach ($messages as $uid => $message) {
+            if (!is_array($message)) continue;
+            $subject = isset($message['subject']) ? (string)$message['subject'] : '';
+            $preview = isset($message['preview']) ? (string)$message['preview'] : '';
+            $broken = $preview === '' || strpos($subject, '=?') !== false || !$this->isValidUtf8($subject)
+                || substr_count($preview, '?') > 12;
+            if ($broken) {
+                $targets[] = (int)$uid;
+                if (count($targets) >= $limit) break;
+            }
+        }
+        if (empty($targets)) return 0;
+
+        $settings = PublicMailStorageService::getSettings(true);
+        $client = $this->createClient($settings);
+        $repaired = 0;
+        try {
+            $client->connect();
+            $client->login($settings['username'], $settings['password']);
+            $client->selectMailbox('INBOX');
+            foreach ($targets as $uid) {
+                try {
+                    $header = $client->fetchHeader($uid);
+                    $fresh = $this->buildMessageFromHeader($header);
+                    $previewRaw = $client->fetchRawPreview($uid, 65536);
+                    if ($previewRaw !== '') {
+                        $parsed = $this->parseRawMessage($previewRaw, false);
+                        $fresh['preview'] = $this->makePreviewText($parsed['body_text']);
+                        $fresh['has_attachment'] = !empty($parsed['attachments']) || $this->rawMessageLooksLikeAttachment($previewRaw);
+                    }
+                    $fresh['classification'] = isset($messages[(string)$uid]['classification'])
+                        ? $messages[(string)$uid]['classification'] : array();
+                    $fresh['synced_at'] = isset($messages[(string)$uid]['synced_at'])
+                        ? $messages[(string)$uid]['synced_at'] : date('Y-m-d H:i:s');
+                    $messages[(string)$uid] = array_merge($messages[(string)$uid], $fresh);
+                    $repaired++;
+                } catch (\Exception $ignored) {}
+            }
+        } finally {
+            $client->logout();
+        }
+        if ($repaired > 0) PublicMailStorageService::saveMessages($messages);
+        return $repaired;
     }
 
     private function getPdoSafely()

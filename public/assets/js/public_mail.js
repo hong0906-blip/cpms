@@ -130,6 +130,24 @@
         });
     }
 
+    function bindRepairButton() {
+        var button = document.querySelector('[data-repair-mail]');
+        if (!button) return;
+        button.addEventListener('click', function () {
+            var loading = showLoading('기존 메일의 한글 제목과 본문 미리보기를 복구하는 중입니다.');
+            postJson({
+                action: 'repair_metadata',
+                csrf_token: csrfToken(),
+                response_type: 'json',
+                limit: 20
+            }, function (result) {
+                hideLoading(loading);
+                alert(result && result.message ? result.message : '복구 작업을 확인할 수 없습니다.');
+                if (result && result.ok && parseInt(result.repaired_count, 10) > 0) window.location.reload();
+            });
+        });
+    }
+
     function bindWorkflowNames() {
         var form = document.querySelector('[data-workflow-form]');
         if (!form) {
@@ -230,6 +248,7 @@
         }
         bindSyncButtons();
         bindConnectionTest();
+        bindRepairButton();
         bindWorkflowNames();
         bindTaskModal();
         // 새 메일 자동확인은 사이드바 공통 1분 동기화가 담당합니다.

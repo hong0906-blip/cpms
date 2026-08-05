@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">네이버 메일</title>
+  <desc id="desc">초록색 네이버 메일 전용 아이콘</desc>
+  <rect width="64" height="64" rx="15" fill="#03C75A"/>
+  <path d="M13 18.5h38c2.2 0 4 1.8 4 4v24c0 2.2-1.8 4-4 4H13c-2.2 0-4-1.8-4-4v-24c0-2.2 1.8-4 4-4Z" fill="#fff"/>
+  <path d="m12.5 22 19.5 15L51.5 22" fill="none" stroke="#03C75A" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M22 44V27.5h5.2l9.6 9.7v-9.7H42V44h-5.1l-9.7-9.8V44H22Z" fill="#03C75A"/>
+</svg>
