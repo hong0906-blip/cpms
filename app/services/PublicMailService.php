@@ -165,9 +165,17 @@ class PublicMailService
     {
         $state = PublicMailStorageService::getSyncState();
         if (!empty($state['full_import']['active']) && empty($state['full_import']['paused'])) {
+            // 전체수집 중에는 제목/미리보기 수집을 우선하여 예약호출 제한시간을 넘기지 않습니다.
             return $this->syncFullImportBatch($limit);
         }
-        return $this->syncNewBatch($limit);
+        $result = $this->syncNewBatch($limit);
+        try {
+            $prepared = $this->cacheUncachedBodiesBatch(1);
+            $result['body_cached_count'] = isset($prepared['cached_count']) ? (int)$prepared['cached_count'] : 0;
+        } catch (\Exception $ignored) {
+            $result['body_cached_count'] = 0;
+        }
+        return $result;
     }
 
     public function syncBatch($limit, $mode)
@@ -379,43 +387,91 @@ class PublicMailService
         return $counts;
     }
 
+    /**
+     * 저장된 목록정보와 본문 캐시만 읽습니다.
+     * 이 함수는 네이버 IMAP에 접속하지 않으므로 메일 선택 화면이 즉시 열립니다.
+     */
+    public function getMessageShell($messageKey)
+    {
+        $messageKey = trim((string)$messageKey);
+        $messages = PublicMailStorageService::getMessages();
+        if (!isset($messages[$messageKey]) || !is_array($messages[$messageKey])) {
+            throw new \RuntimeException('저장된 메일 정보를 찾을 수 없습니다.');
+        }
+        $message = $messages[$messageKey];
+        $parsedKey = PublicMailStorageService::parseMessageKey($messageKey);
+        $detail = $this->normalizeStoredMessage($message);
+        $detail['message_key'] = $messageKey;
+        $detail['uid'] = isset($message['uid']) ? (int)$message['uid'] : (int)$parsedKey['uid'];
+        $detail['mailbox'] = isset($message['mailbox']) ? (string)$message['mailbox'] : (string)$parsedKey['mailbox'];
+        $detail['mailbox_name'] = isset($message['mailbox_name']) ? (string)$message['mailbox_name'] : ($detail['mailbox'] === 'INBOX' ? '받은메일함' : $detail['mailbox']);
+        $detail['mailbox_type'] = isset($message['mailbox_type']) ? (string)$message['mailbox_type'] : $this->detectMailboxType($detail['mailbox'], $detail['mailbox_name'], array());
+        $detail['workflow'] = PublicMailStorageService::getWorkflowForKey($messageKey);
+        $detail['drive_records'] = PublicMailStorageService::getDriveRecords();
+        $cache = PublicMailStorageService::getBodyCache($messageKey);
+        $detail['body_cache_ready'] = is_array($cache);
+        $detail['body_html'] = is_array($cache) && isset($cache['body_html']) ? (string)$cache['body_html'] : '';
+        $detail['body_text'] = is_array($cache) && isset($cache['body_text']) ? (string)$cache['body_text'] : '';
+        $detail['attachments'] = is_array($cache) && isset($cache['attachments']) && is_array($cache['attachments']) ? $cache['attachments'] : array();
+        $detail['inline_images'] = is_array($cache) && isset($cache['inline_images']) && is_array($cache['inline_images']) ? $cache['inline_images'] : array();
+        $detail['external_image_count'] = is_array($cache) && isset($cache['external_image_count']) ? (int)$cache['external_image_count'] : 0;
+        $detail['body_cache_updated_at'] = is_array($cache) && isset($cache['cached_at']) ? (string)$cache['cached_at'] : '';
+        return $detail;
+    }
+
+    /**
+     * 본문 캐시가 있으면 즉시 반환하고, 없을 때만 네이버에서 본문 구조를 읽어 캐시합니다.
+     * 첨부파일 원본과 EML 원문은 서버 디스크에 저장하지 않습니다.
+     */
     public function getMessageDetail($messageKey)
     {
-        $messageKey = (string)$messageKey;
-        $messages = PublicMailStorageService::getMessages();
-        if (!isset($messages[$messageKey])) throw new \RuntimeException('저장된 메일 정보를 찾을 수 없습니다.');
-        $parsedKey = PublicMailStorageService::parseMessageKey($messageKey);
-        $message = $messages[$messageKey];
-        $mailbox = isset($message['mailbox']) ? (string)$message['mailbox'] : $parsedKey['mailbox'];
-        $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsedKey['uid'];
-        $settings = PublicMailStorageService::getSettings(true);
-        $client = $this->createClient($settings);
-        try {
-            $client->connect();
-            $client->login($settings['username'],$settings['password']);
-            $client->selectMailbox($mailbox);
-            $raw = $client->fetchRawMessage($uid, $this->rawFetchLimitForMessage($message));
-        } finally { $client->logout(); }
+        $messageKey = trim((string)$messageKey);
+        $cache = PublicMailStorageService::getBodyCache($messageKey);
+        if (!is_array($cache)) $this->buildBodyCache($messageKey, false);
+        return $this->getMessageShell($messageKey);
+    }
 
-        $parsed = $this->parseRawMessage($raw);
-        $large = $this->largeAttachmentService->extractFromBody(isset($parsed['body_html_raw'])?$parsed['body_html_raw']:(isset($parsed['body_html'])?$parsed['body_html']:''), isset($parsed['body_text'])?$parsed['body_text']:'');
-        $attachments = isset($parsed['attachments']) && is_array($parsed['attachments']) ? $parsed['attachments'] : array();
-        foreach ($large as $largeAttachment) $attachments[] = $largeAttachment;
+    public function rebuildBodyCache($messageKey)
+    {
+        PublicMailStorageService::deleteBodyCache($messageKey);
+        $this->buildBodyCache($messageKey, true);
+        return $this->getMessageShell($messageKey);
+    }
 
-        $detail = $this->normalizeStoredMessage($message);
-        $detail['message_key']=$messageKey; $detail['uid']=$uid; $detail['mailbox']=$mailbox;
-        $detail['mailbox_name']=isset($message['mailbox_name'])?$message['mailbox_name']:($mailbox==='INBOX'?'받은메일함':$mailbox);
-        $detail['mailbox_type']=isset($message['mailbox_type'])?$message['mailbox_type']:$this->detectMailboxType($mailbox,$detail['mailbox_name'],array());
-        $detail['body_text']=$parsed['body_text']; $detail['body_html']=$parsed['body_html']; $detail['attachments']=$attachments;
-        $detail['workflow']=PublicMailStorageService::getWorkflowForKey($messageKey);
-        $detail['drive_records']=PublicMailStorageService::getDriveRecords();
-        foreach (array('subject','from_text','from_email','to_text','cc_text') as $field) if (isset($parsed[$field]) && trim((string)$parsed[$field])!=='') { $detail[$field]=$parsed[$field]; $messages[$messageKey][$field]=$parsed[$field]; }
-        $preview=$this->makePreviewText($parsed['body_text']); if ($preview!=='') { $detail['preview']=$preview; $messages[$messageKey]['preview']=$preview; }
-        $messages[$messageKey]['has_attachment']=!empty($attachments);
-        $messages[$messageKey]['large_attachments']=array();
-        foreach ($large as $largeAttachment) $messages[$messageKey]['large_attachments'][$largeAttachment['large_id']]=$largeAttachment;
-        PublicMailStorageService::saveMessages($messages);
-        return $detail;
+    /**
+     * 외부 예약호출이 한 번 실행될 때 최근 메일부터 소량의 본문 캐시를 준비합니다.
+     * 전체메일 수집을 방해하지 않도록 최대 2건으로 제한합니다.
+     */
+    public function cacheUncachedBodiesBatch($limit)
+    {
+        $limit = max(1, min(2, (int)$limit));
+        $keys = PublicMailStorageService::getUncachedMessageKeys($limit);
+        $done = 0; $errors = array();
+        foreach ($keys as $key) {
+            try { $this->buildBodyCache($key, false); $done++; }
+            catch (\Exception $e) { $errors[] = $e->getMessage(); }
+        }
+        return array('cached_count'=>$done, 'errors'=>$errors);
+    }
+
+    public function getInlineImageDescriptor($messageKey, $partId)
+    {
+        $cache = PublicMailStorageService::getBodyCache($messageKey);
+        if (!is_array($cache)) $cache = $this->buildBodyCache($messageKey, false);
+        $images = isset($cache['inline_images']) && is_array($cache['inline_images']) ? $cache['inline_images'] : array();
+        foreach ($images as $image) {
+            if (!is_array($image)) continue;
+            if (isset($image['part_id']) && (string)$image['part_id'] === (string)$partId) return $image;
+        }
+        throw new \RuntimeException('메일 본문 이미지를 찾을 수 없습니다.');
+    }
+
+    public function streamInlineImage($messageKey, $partId, $consumer)
+    {
+        $descriptor = $this->getInlineImageDescriptor($messageKey, $partId);
+        $mime = isset($descriptor['mime_type']) ? strtolower((string)$descriptor['mime_type']) : '';
+        if (strpos($mime, 'image/') !== 0) throw new \RuntimeException('이미지 형식이 올바르지 않습니다.');
+        return $this->streamRegularMimePart($messageKey, $partId, $descriptor, $consumer);
     }
 
     /**
@@ -465,6 +521,18 @@ class PublicMailService
             }
             return $attachment;
         }
+        $bodyCache = PublicMailStorageService::getBodyCache($messageKey);
+        if (is_array($bodyCache) && isset($bodyCache['attachments']) && is_array($bodyCache['attachments'])) {
+            foreach ($bodyCache['attachments'] as $cachedAttachment) {
+                if (!is_array($cachedAttachment) || !isset($cachedAttachment['part_id'])) continue;
+                if ((string)$cachedAttachment['part_id'] === (string)$partId && empty($cachedAttachment['is_large'])) {
+                    $cachedAttachment['filename'] = $this->safeFilename(isset($cachedAttachment['filename']) ? $cachedAttachment['filename'] : 'attachment.bin');
+                    $cachedAttachment['mime_type'] = !empty($cachedAttachment['mime_type']) ? strtolower((string)$cachedAttachment['mime_type']) : 'application/octet-stream';
+                    $cachedAttachment['transfer_encoding'] = isset($cachedAttachment['transfer_encoding']) ? strtolower((string)$cachedAttachment['transfer_encoding']) : '';
+                    return $cachedAttachment;
+                }
+            }
+        }
         $parsedKey=PublicMailStorageService::parseMessageKey($messageKey);
         $mailbox=isset($message['mailbox'])?(string)$message['mailbox']:$parsedKey['mailbox'];
         $uid=isset($message['uid'])?(int)$message['uid']:(int)$parsedKey['uid'];
@@ -485,13 +553,21 @@ class PublicMailService
         if (!is_callable($consumer)) throw new \InvalidArgumentException('첨부파일 수신 함수가 올바르지 않습니다.');
         $descriptor=$this->getAttachmentDescriptor($messageKey,$partId);
         if (!empty($descriptor['is_large'])) return $this->largeAttachmentService->streamRemote($descriptor['source_url'],$consumer,4194304);
-        $messages=PublicMailStorageService::getMessages(); $message=$messages[(string)$messageKey];
+        return $this->streamRegularMimePart($messageKey,$partId,$descriptor,$consumer);
+    }
+
+    private function streamRegularMimePart($messageKey,$partId,$descriptor,$consumer)
+    {
+        if (!is_callable($consumer)) throw new \InvalidArgumentException('파일 수신 함수가 올바르지 않습니다.');
+        $messages=PublicMailStorageService::getMessages();
+        if (!isset($messages[(string)$messageKey])) throw new \RuntimeException('메일 정보를 찾을 수 없습니다.');
+        $message=$messages[(string)$messageKey];
         $parsedKey=PublicMailStorageService::parseMessageKey($messageKey);
         $mailbox=isset($message['mailbox'])?(string)$message['mailbox']:$parsedKey['mailbox'];
         $uid=isset($message['uid'])?(int)$message['uid']:(int)$parsedKey['uid'];
         $settings=PublicMailStorageService::getSettings(true); $client=$this->createClient($settings);
-        $encoding=isset($descriptor['transfer_encoding'])?(string)$descriptor['transfer_encoding']:'';
-        $offset=0; $requestSize=4194304; $carry=''; $decodedOffset=0;
+        $encoding=isset($descriptor['transfer_encoding'])?strtolower((string)$descriptor['transfer_encoding']):'';
+        $offset=0; $requestSize=1048576; $carry=''; $decodedOffset=0;
         try {
             $client->connect(); $client->login($settings['username'],$settings['password']); $client->selectMailbox($mailbox);
             while (true) {
@@ -503,11 +579,13 @@ class PublicMailService
                     $usable=strlen($clean)-strlen($clean)%4;
                     $decodeText=substr($clean,0,$usable); $carry=substr($clean,$usable);
                     $decoded=$decodeText!==''?base64_decode($decodeText,true):'';
-                    if ($decoded===false) throw new \RuntimeException('첨부파일 Base64 해제에 실패했습니다.');
+                    if ($decoded===false) throw new \RuntimeException('파일 Base64 해제에 실패했습니다.');
                 } elseif ($encoding==='quoted-printable') {
                     $clean=$carry.$encoded; $carry='';
-                    if (substr($clean,-1)==='=') { $carry='='; $clean=substr($clean,0,-1); }
-                    $decoded=quoted_printable_decode($clean);
+                    $tail='';
+                    if (substr($clean,-1)==='=') { $tail='='; $clean=substr($clean,0,-1); }
+                    elseif (substr($clean,-2)==="=\r") { $tail="=\r"; $clean=substr($clean,0,-2); }
+                    $carry=$tail; $decoded=quoted_printable_decode($clean);
                 } else $decoded=$encoded;
                 if ($decoded!=='') { call_user_func($consumer,$decoded,$decodedOffset,0); $decodedOffset+=strlen($decoded); }
                 if (strlen($encoded)<$requestSize) break;
@@ -517,7 +595,7 @@ class PublicMailService
                 if ($decoded!==false&&$decoded!=='') { call_user_func($consumer,$decoded,$decodedOffset,0); $decodedOffset+=strlen($decoded); }
             }
         } finally { $client->logout(); }
-        if ($decodedOffset<=0) throw new \RuntimeException('첨부파일 내용이 비어 있습니다.');
+        if ($decodedOffset<=0) throw new \RuntimeException('파일 내용이 비어 있습니다.');
         return array('bytes_streamed'=>$decodedOffset);
     }
 
@@ -693,6 +771,252 @@ class PublicMailService
             'to_text'=>$this->decodeHeader(isset($rootHeaders['to'])?$rootHeaders['to']:''),
             'cc_text'=>$this->decodeHeader(isset($rootHeaders['cc'])?$rootHeaders['cc']:'')
         );
+    }
+
+    /**
+     * MIME BODYSTRUCTURE를 이용해 본문과 첨부 메타정보만 가져옵니다.
+     * 첨부파일 원본은 다운로드하지 않으므로 큰 메일도 상세화면을 빠르게 준비할 수 있습니다.
+     */
+    private function buildBodyCache($messageKey, $force)
+    {
+        $messageKey = trim((string)$messageKey);
+        if (!$force) {
+            $cached = PublicMailStorageService::getBodyCache($messageKey);
+            if (is_array($cached)) return $cached;
+        }
+        $messages = PublicMailStorageService::getMessages();
+        if (!isset($messages[$messageKey]) || !is_array($messages[$messageKey])) throw new \RuntimeException('저장된 메일 정보를 찾을 수 없습니다.');
+        $message = $messages[$messageKey];
+        $parsedKey = PublicMailStorageService::parseMessageKey($messageKey);
+        $mailbox = isset($message['mailbox']) ? (string)$message['mailbox'] : (string)$parsedKey['mailbox'];
+        $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsedKey['uid'];
+        if ($uid <= 0) throw new \RuntimeException('메일 UID가 올바르지 않습니다.');
+
+        $settings = $this->requireEnabledSettings();
+        $client = $this->createClient($settings);
+        $bodyHtmlRaw = ''; $bodyText = ''; $attachments = array(); $inlineImages = array();
+        $headerFields = array();
+        try {
+            $client->connect();
+            $client->login($settings['username'], $settings['password']);
+            $client->selectMailbox($mailbox);
+            $headerData = $client->fetchHeader($uid);
+            $fresh = $this->buildMessageFromHeader($headerData, $mailbox, isset($message['mailbox_name']) ? $message['mailbox_name'] : $mailbox);
+            foreach (array('subject','from_text','from_email','to_text','cc_text','date_text','timestamp','message_id') as $field) {
+                if (isset($fresh[$field])) $headerFields[$field] = $fresh[$field];
+            }
+
+            try {
+                $structureText = $client->fetchBodyStructure($uid);
+                $structure = $this->parseBodyStructure($structureText);
+                $parts = array();
+                $this->flattenBodyStructure($structure, '', $parts);
+                $htmlPart = null; $textPart = null;
+                foreach ($parts as $part) {
+                    if (!is_array($part)) continue;
+                    $mime = isset($part['mime_type']) ? strtolower((string)$part['mime_type']) : '';
+                    if (!empty($part['is_inline_image'])) {
+                        $inlineImages[] = array(
+                            'part_id'=>(string)$part['part_id'],
+                            'content_id'=>isset($part['content_id'])?(string)$part['content_id']:'',
+                            'filename'=>isset($part['filename'])?(string)$part['filename']:'',
+                            'mime_type'=>$mime !== '' ? $mime : 'image/octet-stream',
+                            'size'=>isset($part['size'])?(int)$part['size']:0,
+                            'transfer_encoding'=>isset($part['transfer_encoding'])?(string)$part['transfer_encoding']:''
+                        );
+                        continue;
+                    }
+                    if (!empty($part['is_attachment'])) {
+                        $attachments[] = array(
+                            'part_id'=>(string)$part['part_id'],
+                            'filename'=>$this->safeFilename(isset($part['filename'])&&$part['filename']!==''?$part['filename']:('attachment_'.str_replace('.','_',(string)$part['part_id']))),
+                            'mime_type'=>$mime !== '' ? $mime : 'application/octet-stream',
+                            'size'=>isset($part['size'])?(int)$part['size']:0,
+                            'is_large'=>false,
+                            'transfer_encoding'=>isset($part['transfer_encoding'])?(string)$part['transfer_encoding']:''
+                        );
+                        continue;
+                    }
+                    if ($mime === 'text/html' && $htmlPart === null) $htmlPart = $part;
+                    if ($mime === 'text/plain' && $textPart === null) $textPart = $part;
+                }
+                if (is_array($htmlPart)) $bodyHtmlRaw = $this->fetchTextBodyPart($client, $uid, $htmlPart);
+                if (is_array($textPart)) $bodyText = $this->fetchTextBodyPart($client, $uid, $textPart);
+            } catch (\Exception $structureError) {
+                // 일부 오래된 메일은 BODYSTRUCTURE가 비정상입니다. 본문 앞부분만 읽어 안전하게 대체합니다.
+                $previewRaw = $client->fetchRawPreview($uid, 262144);
+                if ($previewRaw !== '') {
+                    $fallback = $this->parseRawMessage($previewRaw, false);
+                    $bodyHtmlRaw = isset($fallback['body_html_raw']) ? (string)$fallback['body_html_raw'] : '';
+                    $bodyText = isset($fallback['body_text']) ? (string)$fallback['body_text'] : '';
+                    $attachments = isset($fallback['attachments']) && is_array($fallback['attachments']) ? $fallback['attachments'] : array();
+                }
+            }
+        } finally {
+            $client->logout();
+        }
+
+        if ($bodyText === '' && $bodyHtmlRaw !== '') $bodyText = $this->makePreviewText(strip_tags($bodyHtmlRaw));
+        if ($bodyHtmlRaw === '' && $bodyText !== '') $bodyHtmlRaw = '<div class="pm-plain-mail">' . nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8')) . '</div>';
+
+        $inlineMap = array();
+        foreach ($inlineImages as $image) {
+            $cid = isset($image['content_id']) ? $this->normalizeContentId($image['content_id']) : '';
+            if ($cid !== '') $inlineMap[$cid] = $image;
+        }
+        $externalCount = 0;
+        $bodyHtml = $this->sanitizeHtml($bodyHtmlRaw, $messageKey, $inlineMap, $externalCount);
+        if ($bodyHtml === '' && $bodyText !== '') $bodyHtml = '<div class="pm-plain-mail">' . nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8')) . '</div>';
+
+        $large = $this->largeAttachmentService->extractFromBody($bodyHtmlRaw, $bodyText);
+        foreach ($large as $largeAttachment) $attachments[] = $largeAttachment;
+
+        $cache = array(
+            'body_html'=>$bodyHtml,
+            'body_text'=>$bodyText,
+            'attachments'=>$attachments,
+            'inline_images'=>$inlineImages,
+            'external_image_count'=>(int)$externalCount,
+            'source'=>'imap_bodystructure_v1',
+            'mailbox'=>$mailbox,
+            'uid'=>$uid
+        );
+        $cache = PublicMailStorageService::saveBodyCache($messageKey, $cache);
+
+        foreach ($headerFields as $field=>$value) if ($value !== '') $messages[$messageKey][$field] = $value;
+        $preview = $this->makePreviewText($bodyText !== '' ? $bodyText : strip_tags($bodyHtml));
+        if ($preview !== '') $messages[$messageKey]['preview'] = $preview;
+        $messages[$messageKey]['body_cached'] = true;
+        $messages[$messageKey]['body_cache_updated_at'] = isset($cache['cached_at']) ? $cache['cached_at'] : date('Y-m-d H:i:s');
+        $messages[$messageKey]['has_attachment'] = !empty($attachments);
+        $messages[$messageKey]['large_attachments'] = array();
+        foreach ($large as $largeAttachment) if (isset($largeAttachment['large_id'])) $messages[$messageKey]['large_attachments'][$largeAttachment['large_id']] = $largeAttachment;
+        PublicMailStorageService::saveMessages($messages);
+        return $cache;
+    }
+
+    private function fetchTextBodyPart($client, $uid, $part)
+    {
+        $partId = isset($part['part_id']) ? (string)$part['part_id'] : '';
+        if ($partId === '') return '';
+        $size = isset($part['size']) ? (int)$part['size'] : 0;
+        $maximum = max(1048576, min(12582912, $size > 0 ? $size + 65536 : 8388608));
+        $raw = $client->fetchMimePart($uid, $partId, $maximum);
+        $encoding = isset($part['transfer_encoding']) ? strtolower((string)$part['transfer_encoding']) : '';
+        $decoded = $this->decodeBody($raw, $encoding);
+        return $this->convertToUtf8($decoded, isset($part['charset']) ? (string)$part['charset'] : '');
+    }
+
+    private function parseBodyStructure($text)
+    {
+        $position = 0;
+        $value = $this->parseBodyStructureValue((string)$text, $position);
+        if (!is_array($value)) throw new \RuntimeException('메일 본문 구조가 올바르지 않습니다.');
+        return $value;
+    }
+
+    private function parseBodyStructureValue($text, &$position)
+    {
+        $length = strlen($text);
+        while ($position < $length && preg_match('/\s/', $text[$position])) $position++;
+        if ($position >= $length) return null;
+        if ($text[$position] === '(') {
+            $position++; $list = array();
+            while ($position < $length) {
+                while ($position < $length && preg_match('/\s/', $text[$position])) $position++;
+                if ($position < $length && $text[$position] === ')') { $position++; break; }
+                $list[] = $this->parseBodyStructureValue($text, $position);
+            }
+            return $list;
+        }
+        if ($text[$position] === '"') {
+            $position++; $value = ''; $escaped = false;
+            while ($position < $length) {
+                $char = $text[$position++];
+                if ($escaped) { $value .= $char; $escaped = false; continue; }
+                if ($char === '\\') { $escaped = true; continue; }
+                if ($char === '"') break;
+                $value .= $char;
+            }
+            return $value;
+        }
+        $start = $position;
+        while ($position < $length && !preg_match('/[\s()]/', $text[$position])) $position++;
+        $atom = substr($text, $start, $position - $start);
+        if (strcasecmp($atom, 'NIL') === 0) return null;
+        if ($atom !== '' && ctype_digit($atom)) return (int)$atom;
+        return $atom;
+    }
+
+    private function flattenBodyStructure($node, $prefix, &$parts)
+    {
+        if (!is_array($node) || empty($node)) return;
+        if (isset($node[0]) && is_array($node[0])) {
+            $childIndex = 1;
+            foreach ($node as $child) {
+                if (!is_array($child)) break;
+                $partId = $prefix === '' ? (string)$childIndex : $prefix . '.' . $childIndex;
+                $this->flattenBodyStructure($child, $partId, $parts);
+                $childIndex++;
+            }
+            return;
+        }
+        $type = isset($node[0]) ? strtolower((string)$node[0]) : 'application';
+        $subtype = isset($node[1]) ? strtolower((string)$node[1]) : 'octet-stream';
+        $params = $this->bodyStructureParameters(isset($node[2]) ? $node[2] : array());
+        $contentId = isset($node[3]) ? $this->normalizeContentId((string)$node[3]) : '';
+        $encoding = isset($node[5]) ? strtolower((string)$node[5]) : '';
+        $size = isset($node[6]) ? (int)$node[6] : 0;
+        $disposition = ''; $dispositionParams = array();
+        for ($i=7; $i<count($node); $i++) {
+            if (!is_array($node[$i]) || empty($node[$i]) || is_array($node[$i][0])) continue;
+            $candidate = strtolower((string)$node[$i][0]);
+            if ($candidate === 'inline' || $candidate === 'attachment') {
+                $disposition = $candidate;
+                $dispositionParams = $this->bodyStructureParameters(isset($node[$i][1]) ? $node[$i][1] : array());
+                break;
+            }
+        }
+        $filename = '';
+        if (isset($dispositionParams['filename*'])) $filename = $dispositionParams['filename*'];
+        elseif (isset($dispositionParams['filename'])) $filename = $dispositionParams['filename'];
+        elseif (isset($params['name*'])) $filename = $params['name*'];
+        elseif (isset($params['name'])) $filename = $params['name'];
+        $filename = $this->decodeHeader($this->decodeRfc2231Value((string)$filename));
+        $mime = $type . '/' . $subtype;
+        $isInlineImage = $type === 'image' && ($contentId !== '' || $disposition === 'inline') && $disposition !== 'attachment';
+        $isAttachment = !$isInlineImage && ($filename !== '' || $disposition === 'attachment');
+        $parts[] = array(
+            'part_id'=>$prefix === '' ? '1' : $prefix,
+            'mime_type'=>$mime,
+            'charset'=>isset($params['charset'])?(string)$params['charset']:'',
+            'content_id'=>$contentId,
+            'transfer_encoding'=>$encoding,
+            'size'=>$size,
+            'disposition'=>$disposition,
+            'filename'=>$filename,
+            'is_inline_image'=>$isInlineImage,
+            'is_attachment'=>$isAttachment
+        );
+    }
+
+    private function bodyStructureParameters($value)
+    {
+        $result = array();
+        if (!is_array($value)) return $result;
+        for ($i=0; $i+1<count($value); $i+=2) {
+            $key = strtolower(trim((string)$value[$i]));
+            if ($key === '') continue;
+            $result[$key] = is_scalar($value[$i+1]) ? (string)$value[$i+1] : '';
+        }
+        return $result;
+    }
+
+    private function normalizeContentId($value)
+    {
+        $value = trim((string)$value);
+        if (stripos($value, 'cid:') === 0) $value = substr($value, 4);
+        return strtolower(trim($value, "<> \t\r\n\"'"));
     }
 
     private function requireEnabledSettings()
@@ -1216,30 +1540,178 @@ class PublicMailService
         return preg_replace('/[\x80-\xFF]/', '?', $value);
     }
 
-    private function sanitizeHtml($html)
+    private function sanitizeHtml($html, $messageKey = '', $inlineMap = array(), &$externalCount = null)
     {
-        $html = (string)$html;
-        if ($html === '') {
-            return '';
+        $html = $this->ensureUtf8((string)$html, '');
+        $externalCount = 0;
+        if ($html === '') return '';
+        if (!class_exists('DOMDocument')) {
+            return $this->sanitizeHtmlFallback($html, $messageKey, $inlineMap, $externalCount);
         }
 
-        $html = preg_replace('#<(script|style|iframe|object|embed|form|input|button|meta|link)[^>]*>.*?</\1>#is', '', $html);
-        $html = preg_replace('#<(script|style|iframe|object|embed|form|input|button|meta|link)[^>]*/?>#is', '', $html);
+        $previous = libxml_use_internal_errors(true);
+        $dom = new \DOMDocument('1.0', 'UTF-8');
+        $wrapped = '<!DOCTYPE html><html><body><div id="pm-mail-root">' . $html . '</div></body></html>';
+        $options = 0;
+        if (defined('LIBXML_HTML_NOIMPLIED')) $options |= LIBXML_HTML_NOIMPLIED;
+        if (defined('LIBXML_HTML_NODEFDTD')) $options |= LIBXML_HTML_NODEFDTD;
+        $loaded = @$dom->loadHTML('<?xml encoding="UTF-8">' . $wrapped, $options);
+        if (!$loaded) {
+            libxml_clear_errors(); libxml_use_internal_errors($previous);
+            return $this->sanitizeHtmlFallback($html, $messageKey, $inlineMap, $externalCount);
+        }
+        $documentChildren = array();
+        for ($documentIndex = 0; $documentIndex < $dom->childNodes->length; $documentIndex++) {
+            $documentChildren[] = $dom->childNodes->item($documentIndex);
+        }
+        foreach ($documentChildren as $child) {
+            if ($child && $child->nodeType === XML_PI_NODE && $child->parentNode) $child->parentNode->removeChild($child);
+        }
+        $root = $dom->getElementById('pm-mail-root');
+        if (!$root) {
+            $nodes = $dom->getElementsByTagName('div');
+            $root = $nodes->length > 0 ? $nodes->item(0) : null;
+        }
+        if (!$root) {
+            libxml_clear_errors(); libxml_use_internal_errors($previous);
+            return $this->sanitizeHtmlFallback($html, $messageKey, $inlineMap, $externalCount);
+        }
 
-        // 외부 이미지와 링크는 열람만으로 추적 요청이 발생할 수 있으므로 제거합니다.
-        // 링크의 글자와 이미지의 대체문구는 가능한 한 본문에 남깁니다.
-        $html = preg_replace_callback('#<img\b[^>]*\balt\s*=\s*(["\'])(.*?)\1[^>]*>#is', function ($matches) {
-            return isset($matches[2]) && trim((string)$matches[2]) !== ''
-                ? ' [이미지: ' . htmlspecialchars(strip_tags($matches[2]), ENT_QUOTES, 'UTF-8') . '] '
-                : ' [외부 이미지 제거] ';
-        }, $html);
-        $html = preg_replace('#<img\b[^>]*>#is', ' [외부 이미지 제거] ', $html);
-        $html = preg_replace('#</?a\b[^>]*>#is', '', $html);
-        $html = preg_replace('/\son[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $html);
-        $html = preg_replace('/\s(style|class|id|src|srcset|background)\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $html);
+        $this->sanitizeDomChildren($root, $messageKey, is_array($inlineMap)?$inlineMap:array(), $externalCount);
+        $output = '';
+        foreach ($root->childNodes as $child) $output .= $dom->saveHTML($child);
+        libxml_clear_errors(); libxml_use_internal_errors($previous);
+        return trim($output);
+    }
 
-        $allowed = '<p><br><div><span><strong><b><em><i><u><ul><ol><li><table><thead><tbody><tr><th><td><hr><blockquote><pre><code><h1><h2><h3><h4><h5><h6>';
-        return strip_tags($html, $allowed);
+    private function sanitizeDomChildren($parent, $messageKey, $inlineMap, &$externalCount)
+    {
+        $allowedTags = array('p','br','div','span','strong','b','em','i','u','s','ul','ol','li','table','thead','tbody','tfoot','tr','th','td','colgroup','col','hr','blockquote','pre','code','h1','h2','h3','h4','h5','h6','a','img','center','font','small','big','sup','sub');
+        $dangerousTags = array('script','iframe','object','embed','form','input','button','textarea','select','option','meta','link','base','svg','math','video','audio','canvas');
+        $children = array();
+        foreach ($parent->childNodes as $child) $children[] = $child;
+        foreach ($children as $node) {
+            if ($node->nodeType === XML_COMMENT_NODE) { $parent->removeChild($node); continue; }
+            if ($node->nodeType !== XML_ELEMENT_NODE) continue;
+            $tag = strtolower($node->nodeName);
+            if (in_array($tag, $dangerousTags, true)) { $parent->removeChild($node); continue; }
+            if (!in_array($tag, $allowedTags, true)) {
+                while ($node->firstChild) $parent->insertBefore($node->firstChild, $node);
+                $parent->removeChild($node); continue;
+            }
+            $this->sanitizeDomElement($node, $tag, $messageKey, $inlineMap, $externalCount);
+            if ($node->parentNode) $this->sanitizeDomChildren($node, $messageKey, $inlineMap, $externalCount);
+        }
+    }
+
+    private function sanitizeDomElement($node, $tag, $messageKey, $inlineMap, &$externalCount)
+    {
+        $attrs = array();
+        if ($node->hasAttributes()) foreach ($node->attributes as $attr) $attrs[] = $attr->name;
+        $genericAllowed = array('title','width','height','align','valign','colspan','rowspan','cellpadding','cellspacing','border','bgcolor','alt','style','face','size');
+        foreach ($attrs as $name) {
+            $lower = strtolower($name);
+            $value = $node->getAttribute($name);
+            if (strpos($lower, 'on') === 0 || in_array($lower, array('srcset','formaction','poster','background','id','class'), true)) { $node->removeAttribute($name); continue; }
+            if ($lower === 'style') {
+                $style = $this->sanitizeInlineStyle($value);
+                if ($style === '') $node->removeAttribute($name); else $node->setAttribute('style', $style);
+                continue;
+            }
+            if ($tag === 'a' && $lower === 'href') continue;
+            if ($tag === 'img' && $lower === 'src') continue;
+            if (!in_array($lower, $genericAllowed, true)) $node->removeAttribute($name);
+        }
+
+        if ($tag === 'a') {
+            $href = trim((string)$node->getAttribute('href'));
+            if (!$this->isSafeMailLink($href)) $node->removeAttribute('href');
+            else { $node->setAttribute('target','_blank'); $node->setAttribute('rel','noopener noreferrer nofollow'); }
+        }
+        if ($tag === 'img') {
+            $src = trim((string)$node->getAttribute('src'));
+            $alt = trim((string)$node->getAttribute('alt'));
+            $width = (int)preg_replace('/[^0-9]/','',(string)$node->getAttribute('width'));
+            $height = (int)preg_replace('/[^0-9]/','',(string)$node->getAttribute('height'));
+            if (stripos($src, 'cid:') === 0) {
+                $cid = $this->normalizeContentId($src);
+                if (isset($inlineMap[$cid]) && is_array($inlineMap[$cid]) && !empty($inlineMap[$cid]['part_id'])) {
+                    $url = 'public_mail_action.php?action=inline_image&message_key=' . rawurlencode($messageKey) . '&part_id=' . rawurlencode($inlineMap[$cid]['part_id']);
+                    $node->setAttribute('src', $url);
+                    $node->setAttribute('class', 'pm-inline-image');
+                    $node->setAttribute('loading', 'lazy');
+                    if ($alt === '' && !empty($inlineMap[$cid]['filename'])) $node->setAttribute('alt', (string)$inlineMap[$cid]['filename']);
+                } else {
+                    $node->removeAttribute('src');
+                    $node->setAttribute('class','pm-inline-image-missing');
+                    $node->setAttribute('alt',$alt!==''?$alt:'메일 본문 이미지');
+                }
+            } elseif (preg_match('#^data:image/(png|jpeg|jpg|gif|webp);base64,#i', $src) && strlen($src) <= 2097152) {
+                $node->setAttribute('class','pm-inline-image');
+            } elseif (preg_match('#^https?://#i', $src)) {
+                if (($width > 0 && $width <= 2) || ($height > 0 && $height <= 2) || preg_match('/(pixel|track|open\.gif|beacon)/i', $src)) {
+                    if ($node->parentNode) $node->parentNode->removeChild($node);
+                    return;
+                }
+                $externalCount++;
+                $node->removeAttribute('src');
+                $node->setAttribute('data-pm-external-src', $src);
+                $node->setAttribute('class','pm-external-image is-blocked');
+                $node->setAttribute('alt',$alt!==''?$alt:'차단된 외부 이미지');
+            } else {
+                $node->removeAttribute('src');
+                $node->setAttribute('alt',$alt!==''?$alt:'메일 이미지');
+            }
+        }
+    }
+
+    private function sanitizeInlineStyle($style)
+    {
+        $allowed = array('width','min-width','max-width','height','min-height','max-height','text-align','vertical-align','background','background-color','color','font-size','font-family','font-weight','font-style','text-decoration','white-space','border','border-top','border-right','border-bottom','border-left','border-color','border-width','border-style','border-collapse','border-spacing','padding','padding-top','padding-right','padding-bottom','padding-left','margin','margin-top','margin-right','margin-bottom','margin-left','display','line-height','word-break','word-wrap','overflow-wrap');
+        $safe = array();
+        foreach (explode(';',(string)$style) as $declaration) {
+            $pos = strpos($declaration, ':'); if ($pos === false) continue;
+            $name = strtolower(trim(substr($declaration,0,$pos))); $value = trim(substr($declaration,$pos+1));
+            if (!in_array($name,$allowed,true) || $value==='') continue;
+            if (preg_match('/url\s*\(|expression\s*\(|javascript:|behavior\s*:|@import|-moz-binding/i',$value)) continue;
+            if (strlen($value)>300) continue;
+            $safe[] = $name . ':' . $value;
+        }
+        return implode(';', $safe);
+    }
+
+    private function isSafeMailLink($href)
+    {
+        $href = trim((string)$href);
+        if ($href === '') return false;
+        return preg_match('#^(https?://|mailto:|tel:)#i', $href) === 1;
+    }
+
+    private function sanitizeHtmlFallback($html, $messageKey, $inlineMap, &$externalCount)
+    {
+        $html = preg_replace('#<(script|iframe|object|embed|form|input|button|meta|link|style)[^>]*>.*?</\1>#is','',$html);
+        $html = preg_replace('/\son[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)/i','',$html);
+        $self = $this;
+        $html = preg_replace_callback('#<img\b([^>]*)>#is', function($m) use ($self,$messageKey,$inlineMap,&$externalCount){
+            $attrs=$m[1]; $src=''; $alt='';
+            if (preg_match('/\bsrc\s*=\s*(["\'])(.*?)\1/is',$attrs,$sm)) $src=trim($sm[2]);
+            if (preg_match('/\balt\s*=\s*(["\'])(.*?)\1/is',$attrs,$am)) $alt=trim($am[2]);
+            if (stripos($src,'cid:')===0) {
+                $cid=$self->normalizeContentId($src);
+                if (isset($inlineMap[$cid])&&!empty($inlineMap[$cid]['part_id'])) return '<img class="pm-inline-image" loading="lazy" alt="'.htmlspecialchars($alt,ENT_QUOTES,'UTF-8').'" src="public_mail_action.php?action=inline_image&amp;message_key='.rawurlencode($messageKey).'&amp;part_id='.rawurlencode($inlineMap[$cid]['part_id']).'">';
+            }
+            if (preg_match('#^https?://#i',$src)) {
+                $width=0; $height=0;
+                if (preg_match('/\bwidth\s*=\s*(["\']?)([0-9]+)\1/i',$attrs,$wm)) $width=(int)$wm[2];
+                if (preg_match('/\bheight\s*=\s*(["\']?)([0-9]+)\1/i',$attrs,$hm)) $height=(int)$hm[2];
+                if (($width>0&&$width<=2)||($height>0&&$height<=2)||preg_match('/(pixel|track|open\.gif|beacon)/i',$src)) return '';
+                $externalCount++;
+                return '<img class="pm-external-image is-blocked" alt="'.htmlspecialchars($alt!==''?$alt:'차단된 외부 이미지',ENT_QUOTES,'UTF-8').'" data-pm-external-src="'.htmlspecialchars($src,ENT_QUOTES,'UTF-8').'">';
+            }
+            return '';
+        },$html);
+        $allowed='<p><br><div><span><strong><b><em><i><u><s><ul><ol><li><table><thead><tbody><tfoot><tr><th><td><colgroup><col><hr><blockquote><pre><code><h1><h2><h3><h4><h5><h6><a><img><center><font><small><big><sup><sub>';
+        return strip_tags($html,$allowed);
     }
 
     private function makePreviewText($rawText)

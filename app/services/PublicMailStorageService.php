@@ -17,6 +17,7 @@ class PublicMailStorageService
     const SYNC_FILE = 'sync_state.json';
     const KEY_FILE = 'secret.key';
     const DRIVE_RECORDS_FILE = 'drive_records.json';
+    const BODY_CACHE_DIR = 'body_cache';
 
     public static function rootPath()
     {
@@ -102,6 +103,13 @@ class PublicMailStorageService
             $path = $root . DIRECTORY_SEPARATOR . $fileName;
             if (!is_file($path)) self::writeJsonFile($path, $defaultValue);
         }
+        $bodyCacheDir = $root . DIRECTORY_SEPARATOR . self::BODY_CACHE_DIR;
+        if (!is_dir($bodyCacheDir)) {
+            if (!@mkdir($bodyCacheDir, 0770, true) && !is_dir($bodyCacheDir)) {
+                throw new \RuntimeException('메일 본문 캐시 폴더를 만들 수 없습니다: ' . $bodyCacheDir);
+            }
+        }
+
         self::ensureEncryptionKey();
         self::ensureCronToken();
         self::cleanupLegacyAttachmentCaches();
@@ -339,6 +347,7 @@ class PublicMailStorageService
         self::writeJsonFile(self::path(self::SYNC_FILE), self::syncDefaults());
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . 'raw_cache');
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . 'attachment_cache');
+        self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . self::BODY_CACHE_DIR);
     }
 
     public static function getCachedRawMessage($messageKey, $maxAgeSeconds)
@@ -419,6 +428,81 @@ class PublicMailStorageService
         if (!is_dir($dir)) return;
         $files = @glob($dir . DIRECTORY_SEPARATOR . '*');
         if (is_array($files)) foreach ($files as $file) if (is_file($file)) @unlink($file);
+    }
+
+
+    /**
+     * 메일 본문 표시용 캐시를 읽습니다.
+     * 첨부파일 원본이나 EML 원문은 저장하지 않습니다.
+     */
+    public static function getBodyCache($messageKey)
+    {
+        self::ensureStorage();
+        $path = self::bodyCachePath($messageKey);
+        $cache = self::readJsonFile($path, array());
+        if (!is_array($cache) || empty($cache['message_key'])) return null;
+        return $cache;
+    }
+
+    public static function hasBodyCache($messageKey)
+    {
+        self::ensureStorage();
+        return is_file(self::bodyCachePath($messageKey));
+    }
+
+    public static function saveBodyCache($messageKey, $cache)
+    {
+        self::ensureStorage();
+        $messageKey = trim((string)$messageKey);
+        if ($messageKey === '') throw new \InvalidArgumentException('메일 본문 캐시 식별값이 비어 있습니다.');
+        if (!is_array($cache)) $cache = array();
+        $cache['message_key'] = $messageKey;
+        $cache['cached_at'] = date('Y-m-d H:i:s');
+        self::writeJsonFile(self::bodyCachePath($messageKey), $cache);
+        return $cache;
+    }
+
+    public static function deleteBodyCache($messageKey)
+    {
+        self::ensureStorage();
+        $path = self::bodyCachePath($messageKey);
+        return !is_file($path) || @unlink($path);
+    }
+
+    public static function bodyCachePath($messageKey)
+    {
+        $safe = sha1((string)$messageKey);
+        return self::rootPath() . DIRECTORY_SEPARATOR . self::BODY_CACHE_DIR . DIRECTORY_SEPARATOR . $safe . '.json';
+    }
+
+    public static function getUncachedMessageKeys($limit)
+    {
+        $limit = max(1, min(20, (int)$limit));
+        $messages = self::getMessages();
+        $rows = array();
+        foreach ($messages as $key => $message) {
+            if (!is_array($message)) continue;
+            if (is_file(self::bodyCachePath($key))) continue;
+            $rows[] = array(
+                'key' => (string)$key,
+                'timestamp' => isset($message['timestamp']) ? (int)$message['timestamp'] : 0
+            );
+        }
+        usort($rows, array(__CLASS__, 'compareUncachedMessageRows'));
+        $result = array();
+        foreach ($rows as $row) {
+            $result[] = $row['key'];
+            if (count($result) >= $limit) break;
+        }
+        return $result;
+    }
+
+    public static function compareUncachedMessageRows($a, $b)
+    {
+        $at = isset($a['timestamp']) ? (int)$a['timestamp'] : 0;
+        $bt = isset($b['timestamp']) ? (int)$b['timestamp'] : 0;
+        if ($at === $bt) return strcmp(isset($b['key']) ? $b['key'] : '', isset($a['key']) ? $a['key'] : '');
+        return $at > $bt ? -1 : 1;
     }
 
 

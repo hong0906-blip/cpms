@@ -42,7 +42,7 @@ try {
     $settings=array('enabled'=>false,'username'=>''); $syncState=array(); $employees=array(); $projects=array();
 }
 if ($selectedMessageKey !== '') {
-    try { $detail=$service->getMessageDetail($selectedMessageKey); }
+    try { $detail=$service->getMessageShell($selectedMessageKey); }
     catch (Exception $e) { $detail=null; $detailError='메일 상세내용을 불러오지 못했습니다: '.$e->getMessage(); $errorMessage=$errorMessage!==''?$errorMessage.' / '.$detailError:$detailError; }
 }
 $currentEmail=PublicMailWebHelper::currentUserEmail();

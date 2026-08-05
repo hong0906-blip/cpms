@@ -142,6 +142,27 @@ class PublicMailImapClient
         return $filtered;
     }
 
+    /**
+     * 메일의 MIME BODYSTRUCTURE 문자열만 읽습니다.
+     * 첨부파일 본문은 내려받지 않으므로 상세화면 준비가 훨씬 가볍습니다.
+     */
+    public function fetchBodyStructure($uid)
+    {
+        $this->assertMailboxSelected();
+        $uid = (int)$uid;
+        if ($uid <= 0) throw new \InvalidArgumentException('메일 UID가 올바르지 않습니다.');
+        $response = $this->command('UID FETCH ' . $uid . ' (BODYSTRUCTURE)', 1048576);
+        if (!$response['ok']) throw new \RuntimeException('메일 본문 구조를 읽지 못했습니다: UID ' . $uid);
+        $text = implode('', isset($response['lines']) && is_array($response['lines']) ? $response['lines'] : array());
+        $position = stripos($text, 'BODYSTRUCTURE');
+        if ($position === false) throw new \RuntimeException('메일 본문 구조 응답을 찾지 못했습니다: UID ' . $uid);
+        $open = strpos($text, '(', $position + strlen('BODYSTRUCTURE'));
+        if ($open === false) throw new \RuntimeException('메일 본문 구조 시작점을 찾지 못했습니다: UID ' . $uid);
+        $balanced = $this->extractBalancedParentheses($text, $open);
+        if ($balanced === '') throw new \RuntimeException('메일 본문 구조를 해석할 수 없습니다: UID ' . $uid);
+        return $balanced;
+    }
+
     public function fetchHeader($uid)
     {
         $this->assertMailboxSelected();
@@ -222,6 +243,33 @@ class PublicMailImapClient
         $response = $this->command('UID FETCH ' . $uid . ' (BODY.PEEK[' . $partId . ']<'. $offset . '.' . $count . '>)', $count + 65536);
         if (!$response['ok']) throw new \RuntimeException('첨부파일 조각을 읽지 못했습니다.');
         return empty($response['literals']) ? '' : (string)$response['literals'][0];
+    }
+
+    private function extractBalancedParentheses($text, $start)
+    {
+        $text = (string)$text;
+        $length = strlen($text);
+        $start = (int)$start;
+        if ($start < 0 || $start >= $length || $text[$start] !== '(') return '';
+        $depth = 0;
+        $quoted = false;
+        $escaped = false;
+        for ($i = $start; $i < $length; $i++) {
+            $char = $text[$i];
+            if ($quoted) {
+                if ($escaped) { $escaped = false; continue; }
+                if ($char === '\\') { $escaped = true; continue; }
+                if ($char === '"') $quoted = false;
+                continue;
+            }
+            if ($char === '"') { $quoted = true; continue; }
+            if ($char === '(') $depth++;
+            if ($char === ')') {
+                $depth--;
+                if ($depth === 0) return substr($text, $start, $i - $start + 1);
+            }
+        }
+        return '';
     }
 
     private function validatePartId($partId)
