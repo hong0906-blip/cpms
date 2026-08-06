@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.12';
+    const VERSION = '1.7.13';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -604,10 +604,10 @@ class PublicMailService
         return array('part_id'=>$partId,'filename'=>$this->safeFilename($this->decodeHeader(trim((string)$filename," \t\r\n\"'"))),'mime_type'=>isset($typeInfo['value'])&&$typeInfo['value']!==''?strtolower($typeInfo['value']):'application/octet-stream','size'=>0,'is_large'=>false,'transfer_encoding'=>isset($headers['content-transfer-encoding'])?strtolower(trim((string)$headers['content-transfer-encoding'])):'');
     }
 
-    public function streamAttachment($messageKey,$partId,$consumer)
+    public function streamAttachment($messageKey,$partId,$consumer,$descriptor=null)
     {
         if (!is_callable($consumer)) throw new \InvalidArgumentException('첨부파일 수신 함수가 올바르지 않습니다.');
-        $descriptor=$this->getAttachmentDescriptor($messageKey,$partId);
+        if (!is_array($descriptor)) $descriptor=$this->getAttachmentDescriptor($messageKey,$partId);
         if (!empty($descriptor['is_large'])) return $this->largeAttachmentService->streamRemote($descriptor['source_url'],$consumer,4194304);
         return $this->streamRegularMimePart($messageKey,$partId,$descriptor,$consumer);
     }
@@ -623,13 +623,17 @@ class PublicMailService
         $uid=isset($message['uid'])?(int)$message['uid']:(int)$parsedKey['uid'];
         $settings=PublicMailStorageService::getSettings(true); $client=$this->createClient($settings);
         $encoding=isset($descriptor['transfer_encoding'])?strtolower((string)$descriptor['transfer_encoding']):'';
+        $declaredSize=isset($descriptor['size'])?max(0,(int)$descriptor['size']):0;
+        $maximumEncodedBytes=$declaredSize>0?min(209715200,max(8388608,$declaredSize*2+1048576)):209715200;
         $offset=0; $requestSize=1048576; $carry=''; $decodedOffset=0;
         try {
             $client->connect(); $client->login($settings['username'],$settings['password']); $client->selectMailbox($mailbox);
             while (true) {
                 $encoded=$client->fetchMimePartChunk($uid,$partId,$offset,$requestSize);
                 if ($encoded==='') break;
-                $offset+=strlen($encoded);
+                $encodedLength=strlen($encoded);
+                $offset+=$encodedLength;
+                if ($offset>$maximumEncodedBytes) throw new \RuntimeException('첨부파일 크기가 안전한 스트리밍 한도를 초과했습니다.');
                 if ($encoding==='base64') {
                     $clean=$carry.preg_replace('/\s+/','',$encoded);
                     $usable=strlen($clean)-strlen($clean)%4;
@@ -638,21 +642,24 @@ class PublicMailService
                     if ($decoded===false) throw new \RuntimeException('파일 Base64 해제에 실패했습니다.');
                 } elseif ($encoding==='quoted-printable') {
                     $clean=$carry.$encoded; $carry='';
-                    $tail='';
-                    if (substr($clean,-1)==='=') { $tail='='; $clean=substr($clean,0,-1); }
-                    elseif (substr($clean,-2)==="=\r") { $tail="=\r"; $clean=substr($clean,0,-2); }
-                    $carry=$tail; $decoded=quoted_printable_decode($clean);
+                    if (preg_match('/(=\r|=[0-9A-Fa-f])$/',$clean,$tailMatch)) {
+                        $carry=$tailMatch[1];
+                        $clean=substr($clean,0,-strlen($carry));
+                    }
+                    $decoded=quoted_printable_decode($clean);
                 } else $decoded=$encoded;
                 if ($decoded!=='') { call_user_func($consumer,$decoded,$decodedOffset,0); $decodedOffset+=strlen($decoded); }
-                if (strlen($encoded)<$requestSize) break;
+
+                /* 마지막 조각이 요청 크기보다 작아도 다음 위치를 한 번 더 확인합니다. */
             }
             if ($carry!=='') {
                 $decoded=$encoding==='base64'?base64_decode($carry,true):quoted_printable_decode($carry);
-                if ($decoded!==false&&$decoded!=='') { call_user_func($consumer,$decoded,$decodedOffset,0); $decodedOffset+=strlen($decoded); }
+                if ($decoded===false) throw new \RuntimeException('첨부파일의 마지막 인코딩을 해제하지 못했습니다.');
+                if ($decoded!=='') { call_user_func($consumer,$decoded,$decodedOffset,0); $decodedOffset+=strlen($decoded); }
             }
         } finally { $client->logout(); }
         if ($decodedOffset<=0) throw new \RuntimeException('파일 내용이 비어 있습니다.');
-        return array('bytes_streamed'=>$decodedOffset);
+        return array('bytes_streamed'=>$decodedOffset,'encoded_bytes_read'=>$offset);
     }
 
     public function saveAttachmentToDrive($messageKey,$partId,$projectId,$actor)

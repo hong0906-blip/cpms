@@ -3,12 +3,12 @@
  * 네이버 메일 화면 동작 - PHP 5.6 서버 호환용 순수 JavaScript
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
- * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 제목은 수집·목록·상세·검색 단계에서 로컬 자동보정합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.12
+ * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 첨부파일은 브라우저 기본 다운로드로 처리합니다.
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.13
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.12';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.13';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -77,21 +77,17 @@
     }
 
     function bindAttachmentDownloads() {
+        /*
+         * 다운로드 링크는 브라우저의 기본 동작을 그대로 사용합니다.
+         * 숨겨진 iframe을 사용하면 서버 오류가 사용자에게 보이지 않고,
+         * 일부 모바일 브라우저에서는 다운로드 자체가 차단될 수 있습니다.
+         */
         document.addEventListener('click',function(event){
             var target=event.target;
             while(target&&target!==document&&!(target.getAttribute&&target.getAttribute('data-mail-attachment-download')!==null)) target=target.parentNode;
             if(!target||target===document)return;
-            event.preventDefault(); event.stopPropagation(); if(event.stopImmediatePropagation) event.stopImmediatePropagation();
             hideLoading();
-            if((target.getAttribute('target')||'')==='_blank'){
-                var opened=window.open(target.href,'_blank','noopener,noreferrer');
-                if(opened) try{opened.opener=null;}catch(ignore){}
-                return;
-            }
-            var frame=document.querySelector('iframe[name="pmMailDownloadFrame"]');
-            if(!frame){ frame=document.createElement('iframe'); frame.name='pmMailDownloadFrame'; frame.className='pm-download-frame'; frame.setAttribute('aria-hidden','true'); document.body.appendChild(frame); }
-            frame.src=target.href;
-        },true);
+        },false);
     }
 
     function showDriveProgress(message) {

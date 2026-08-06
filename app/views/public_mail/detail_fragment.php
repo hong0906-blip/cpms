@@ -2,6 +2,7 @@
 /**
  * 파일 경로: C:\www\cpms\app\views\public_mail\detail_fragment.php
  * 메일 본문과 첨부파일만 비동기로 출력합니다. PHP 5.6 호환 코드입니다.
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.13
  */
 if (!isset($esc) || !is_callable($esc)) {
     $esc = function ($value) { return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'); };
@@ -48,7 +49,7 @@ $baseUrl = isset($baseUrl) ? rtrim((string)$baseUrl, '/') : '';
                         </div>
                     </div>
                     <div class="pm-attachment-actions">
-                        <a class="pm-btn pm-btn-light" data-mail-attachment-download target="<?php echo $isLarge ? '_blank' : 'pmMailDownloadFrame'; ?>" <?php echo $isLarge ? 'rel="noopener noreferrer"' : ''; ?> href="<?php echo call_user_func($esc, $baseUrl); ?>/public_mail_attachment.php?message=<?php echo rawurlencode($messageKey); ?>&amp;part=<?php echo rawurlencode($partId); ?>">
+                        <a class="pm-btn pm-btn-light" data-mail-attachment-download <?php echo $isLarge ? 'target="_blank" rel="noopener noreferrer"' : 'download="' . call_user_func($esc, $fileName) . '"'; ?> href="<?php echo call_user_func($esc, $baseUrl); ?>/public_mail_attachment.php?message=<?php echo rawurlencode($messageKey); ?>&amp;part=<?php echo rawurlencode($partId); ?>" aria-label="<?php echo call_user_func($esc, $fileName); ?> 내 PC로 다운로드">
                             <i data-lucide="download"></i> 내 PC로 다운로드
                         </a>
                         <button type="button" class="pm-btn pm-btn-drive" data-save-attachment-drive data-message-key="<?php echo call_user_func($esc,$messageKey); ?>" data-part-id="<?php echo call_user_func($esc,$partId); ?>" data-project-id="<?php echo call_user_func($esc,$selectedProjectId); ?>">
