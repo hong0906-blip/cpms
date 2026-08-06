@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.10';
+    const VERSION = '1.7.11';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -168,50 +168,24 @@ class PublicMailService
     public function runAutomationTick($limit)
     {
         /*
-         * v1.7.10: 깨진 한글 복구를 메일 수집보다 먼저 실행합니다.
-         * 네이버 새메일 수집이 오류나거나 오래 걸려도 복구 진행률은 매 호출마다 남습니다.
+         * v1.7.11: 깨진 제목 전체 재조회 작업은 제거했습니다.
+         * 자동호출은 새 메일 수집과 본문 캐시 준비만 담당하고,
+         * 제목은 수집/목록/상세/검색 단계에서 로컬 자동보정합니다.
          */
-        $repairResult = array('processed_count'=>0,'repaired_count'=>0,'failed_count'=>0);
-        try {
-            $repairState = PublicMailStorageService::getSyncState();
-            if (!empty($repairState['metadata_repair']['active']) && empty($repairState['metadata_repair']['paused'])) {
-                $repairResult = $this->runMetadataRepairBatch(50, 12);
-            }
-        } catch (\Exception $repairError) {
-            PublicMailStorageService::saveSyncState(array('metadata_repair'=>array(
-                'status'=>'error',
-                'last_run_at'=>date('Y-m-d H:i:s'),
-                'last_run_result'=>'오류: ' . $repairError->getMessage(),
-                'last_error'=>$repairError->getMessage(),
-                'last_message'=>'복구 작업 중 오류가 발생했습니다. 다음 자동호출에서 다시 이어갑니다.',
-                'lock_status'=>'idle',
-                'lock_acquired_at'=>'',
-                'lock_released_at'=>date('Y-m-d H:i:s')
-            )));
-            $repairResult['error'] = $repairError->getMessage();
+        $state = PublicMailStorageService::getSyncState();
+        if (!empty($state['full_import']['active']) && empty($state['full_import']['paused'])) {
+            $result = $this->syncFullImportBatch($limit);
+        } else {
+            $result = $this->syncNewBatch($limit);
         }
 
-        $state = PublicMailStorageService::getSyncState();
-        if (!empty($state['full_import']['active']) && empty($state['full_import']['paused'])) $result = $this->syncFullImportBatch($limit);
-        else $result = $this->syncNewBatch($limit);
-
-        $result['repaired_count'] = isset($repairResult['repaired_count']) ? (int)$repairResult['repaired_count'] : 0;
-        $result['repair_processed_count'] = isset($repairResult['processed_count']) ? (int)$repairResult['processed_count'] : 0;
-        $result['repair_failed_count'] = isset($repairResult['failed_count']) ? (int)$repairResult['failed_count'] : 0;
-        if (isset($repairResult['error'])) $result['repair_error'] = $repairResult['error'];
-
-        $latestState = PublicMailStorageService::getSyncState();
-        if (empty($latestState['metadata_repair']['active'])) {
-            try {
-                $prepared = $this->cacheUncachedBodiesBatch(1);
-                $result['body_cached_count'] = isset($prepared['cached_count']) ? (int)$prepared['cached_count'] : 0;
-            } catch (\Exception $ignored) { $result['body_cached_count'] = 0; }
-        } else {
+        try {
+            $prepared = $this->cacheUncachedBodiesBatch(1);
+            $result['body_cached_count'] = isset($prepared['cached_count']) ? (int)$prepared['cached_count'] : 0;
+        } catch (\Exception $ignored) {
             $result['body_cached_count'] = 0;
         }
-        if (!empty($result['repaired_count'])) {
-            $result['message'] = (isset($result['message']) ? (string)$result['message'] : '자동동기화 완료') . ' / 깨진 한글 ' . (int)$result['repaired_count'] . '건 복구';
-        }
+        $result['title_normalization'] = 'local';
         $result['state'] = PublicMailStorageService::getSyncState();
         return $result;
     }
@@ -410,6 +384,7 @@ class PublicMailService
             }
             $message = $messages[$messageKey];
         }
+        $message = $this->normalizeAndPersistMessageTitle($messageKey, $message, true);
         $parsedKey = PublicMailStorageService::parseMessageKey($messageKey);
         $detail = $this->normalizeStoredMessage($message);
         $detail['message_key'] = $messageKey;
@@ -835,6 +810,175 @@ class PublicMailService
     }
 
 
+    /**
+     * 저장된 전체 제목을 네이버에 접속하지 않고 한 번에 정리하고 검색 색인을 다시 만듭니다.
+     */
+    public function normalizeStoredMailTitles()
+    {
+        $lock = PublicMailStorageService::acquireLock('title_normalization');
+        if ($lock === false) {
+            return array('ok'=>false,'message'=>'다른 제목 정리 작업이 실행 중입니다. 잠시 후 다시 눌러주세요.');
+        }
+        $checked = 0; $changed = 0; $unresolved = 0;
+        try {
+            $path = PublicMailStorageService::path(PublicMailStorageService::MESSAGES_FILE);
+            $messages = PublicMailStorageService::readJsonFile($path, array());
+            if (!is_array($messages)) $messages = array();
+            foreach ($messages as $messageKey => $message) {
+                if (!is_array($message)) continue;
+                $checked++;
+                $original = isset($message['subject']) ? (string)$message['subject'] : '';
+                $normalized = PublicMailStorageService::normalizeMailText($original);
+                if ($normalized === '' && trim($original) === '') $normalized = '(제목 없음)';
+                if ($normalized !== '' && $normalized !== $original) {
+                    $messages[$messageKey]['subject'] = $normalized;
+                    $messages[$messageKey]['subject_normalized_at'] = date('Y-m-d H:i:s');
+                    $messages[$messageKey]['subject_normalization_source'] = 'local_v1711';
+                    $changed++;
+                }
+                $finalSubject = isset($messages[$messageKey]['subject']) ? (string)$messages[$messageKey]['subject'] : $normalized;
+                if (PublicMailStorageService::looksBrokenMailText($finalSubject)) $unresolved++;
+            }
+
+            if ($changed > 0) PublicMailStorageService::saveMessages($messages);
+            else PublicMailIndexService::rebuild($messages, null);
+
+            $legacy = PublicMailStorageService::getSyncState();
+            $legacyRepair = isset($legacy['metadata_repair']) && is_array($legacy['metadata_repair']) ? $legacy['metadata_repair'] : array();
+            $legacyRepair['active'] = false;
+            $legacyRepair['paused'] = false;
+            $legacyRepair['cancelled'] = true;
+            $legacyRepair['status'] = 'replaced_by_local_normalization';
+            $legacyRepair['remaining_count'] = 0;
+            $legacyRepair['target_keys'] = array();
+            $legacyRepair['message_attempts'] = array();
+            $legacyRepair['last_error'] = '';
+            $legacyRepair['last_message'] = '기존 네이버 전체 재조회 복구는 제거되고 로컬 제목 자동보정으로 전환되었습니다.';
+
+            $message = number_format($checked) . '건의 제목을 CPMS 내부에서 확인해 ' . number_format($changed) . '건을 정리했습니다.';
+            if ($unresolved > 0) $message .= ' 로컬에서 확정하기 어려운 ' . number_format($unresolved) . '건은 해당 메일을 열 때 원본 제목만 한 번 확인합니다.';
+            else $message .= ' 추가 확인이 필요한 제목은 없습니다.';
+
+            $state = PublicMailStorageService::saveSyncState(array(
+                'metadata_repair'=>$legacyRepair,
+                'title_normalization'=>array(
+                    'enabled'=>true,
+                    'status'=>'completed',
+                    'last_run_at'=>date('Y-m-d H:i:s'),
+                    'checked_count'=>$checked,
+                    'changed_count'=>$changed,
+                    'unresolved_count'=>$unresolved,
+                    'last_message'=>$message
+                )
+            ));
+            return array('ok'=>true,'message'=>$message,'checked_count'=>$checked,'changed_count'=>$changed,'unresolved_count'=>$unresolved,'state'=>$state);
+        } finally {
+            PublicMailStorageService::releaseLock($lock);
+        }
+    }
+
+    /** 구형 전체 자동복구 상태를 안전하게 종료합니다. */
+    public function disableLegacyMetadataRepair()
+    {
+        $state = PublicMailStorageService::saveSyncState(array('metadata_repair'=>array(
+            'active'=>false,'paused'=>false,'cancelled'=>true,'status'=>'replaced_by_local_normalization',
+            'remaining_count'=>0,'target_keys'=>array(),'message_attempts'=>array(),'last_error'=>'',
+            'last_message'=>'구형 전체 자동복구는 제거되었습니다. 제목은 CPMS 내부에서 자동보정합니다.'
+        )));
+        return array('ok'=>true,'message'=>'구형 전체 자동복구를 종료했습니다. 제목 자동보정은 계속 적용됩니다.','state'=>$state);
+    }
+
+    /**
+     * 목록/상세에서 제목을 로컬 보정해 저장합니다.
+     * 로컬 보정으로도 깨진 제목만 7일에 한 번 해당 메일 헤더 한 건을 네이버에서 확인합니다.
+     */
+    private function normalizeAndPersistMessageTitle($messageKey, $fallbackMessage, $allowOriginalFetch)
+    {
+        /* 정상 제목은 기존의 빠른 색인값을 그대로 사용해 messages.json 전체 읽기를 피합니다. */
+        $fallbackMessage = is_array($fallbackMessage) ? $fallbackMessage : array();
+        $fallbackOriginal = isset($fallbackMessage['subject']) ? (string)$fallbackMessage['subject'] : '';
+        $fallbackNormalized = PublicMailStorageService::normalizeMailText($fallbackOriginal);
+        if ($fallbackNormalized !== '') $fallbackMessage['subject'] = $fallbackNormalized;
+        $needsPersistence = $fallbackNormalized !== '' && $fallbackNormalized !== $fallbackOriginal;
+        $needsOriginCheck = $allowOriginalFetch && PublicMailStorageService::looksBrokenMailText(isset($fallbackMessage['subject']) ? $fallbackMessage['subject'] : '');
+        if (!$needsPersistence && !$needsOriginCheck) return $fallbackMessage;
+
+        $path = PublicMailStorageService::path(PublicMailStorageService::MESSAGES_FILE);
+        $messages = PublicMailStorageService::readJsonFile($path, array());
+        if (!is_array($messages) || !isset($messages[$messageKey]) || !is_array($messages[$messageKey])) {
+            if (is_array($fallbackMessage) && isset($fallbackMessage['subject'])) {
+                $fallbackMessage['subject'] = PublicMailStorageService::normalizeMailText($fallbackMessage['subject']);
+            }
+            return is_array($fallbackMessage) ? $fallbackMessage : array();
+        }
+
+        $message = $messages[$messageKey];
+        $original = isset($message['subject']) ? (string)$message['subject'] : '';
+        $normalized = PublicMailStorageService::normalizeMailText($original);
+        $changed = false;
+        if ($normalized !== '' && $normalized !== $original) {
+            $message['subject'] = $normalized;
+            $message['subject_normalized_at'] = date('Y-m-d H:i:s');
+            $message['subject_normalization_source'] = 'local_display_v1711';
+            $changed = true;
+        }
+
+        $subject = isset($message['subject']) ? (string)$message['subject'] : '';
+        $lastAttempt = isset($message['title_origin_refetch_attempted_at']) ? strtotime((string)$message['title_origin_refetch_attempted_at']) : false;
+        $canAttempt = $lastAttempt === false || (time() - (int)$lastAttempt) >= 604800;
+        if ($allowOriginalFetch && $canAttempt && PublicMailStorageService::looksBrokenMailText($subject)) {
+            $message['title_origin_refetch_attempted_at'] = date('Y-m-d H:i:s');
+            try {
+                $freshSubject = $this->fetchSingleMessageSubject($messageKey, $message);
+                if ($freshSubject !== '' && !PublicMailStorageService::looksBrokenMailText($freshSubject)) {
+                    $message['subject'] = $freshSubject;
+                    $message['title_origin_refetch_at'] = date('Y-m-d H:i:s');
+                    $message['title_origin_refetch_error'] = '';
+                } else {
+                    $message['title_origin_refetch_error'] = '원본 제목을 자동으로 확정하지 못했습니다.';
+                }
+            } catch (\Exception $e) {
+                $message['title_origin_refetch_error'] = PublicMailStorageService::sanitizeText($e->getMessage(), 300);
+            }
+            $changed = true;
+        }
+
+        if ($changed) {
+            $messages[$messageKey] = $message;
+            PublicMailStorageService::saveMessagesCheckpoint($messages);
+            $this->indexService->refreshMessage($messageKey, $message);
+        }
+        return $message;
+    }
+
+    /** 로컬 복구가 불가능한 메일 한 건의 제목 헤더만 읽습니다. */
+    private function fetchSingleMessageSubject($messageKey, $message)
+    {
+        $settings = PublicMailStorageService::getSettings(true);
+        if (empty($settings['enabled']) || empty($settings['username']) || empty($settings['password'])) {
+            throw new \RuntimeException('네이버 메일 연동이 꺼져 있어 원본 제목을 확인하지 않았습니다.');
+        }
+        $parsed = PublicMailStorageService::parseMessageKey($messageKey);
+        $mailbox = isset($message['mailbox']) && trim((string)$message['mailbox']) !== '' ? (string)$message['mailbox'] : (string)$parsed['mailbox'];
+        $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsed['uid'];
+        if ($mailbox === '' || $uid <= 0) throw new \RuntimeException('메일함 또는 메일 번호를 확인할 수 없습니다.');
+
+        $lock = PublicMailStorageService::acquireLock('title_refetch');
+        if ($lock === false) throw new \RuntimeException('다른 제목 확인 작업이 실행 중입니다.');
+        $client = $this->createClient($settings);
+        try {
+            $client->connect();
+            $client->login($settings['username'], $settings['password']);
+            $client->selectMailbox($mailbox);
+            $header = $client->fetchHeader($uid);
+            $headers = $this->parseHeaders(isset($header['header']) ? (string)$header['header'] : '');
+            return PublicMailStorageService::normalizeMailText($this->decodeHeader(isset($headers['subject']) ? $headers['subject'] : ''));
+        } finally {
+            try { $client->logout(); } catch (\Exception $ignored) {}
+            PublicMailStorageService::releaseLock($lock);
+        }
+    }
+
     public function getIndexStatus()
     {
         return $this->indexService->getStatus();
@@ -1221,9 +1365,9 @@ class PublicMailService
     private function buildMessageFromHeader($headerData,$mailbox,$mailboxName)
     {
         $headers=$this->parseHeaders(isset($headerData['header'])?$headerData['header']:'');
-        $subject=$this->decodeHeader(isset($headers['subject'])?$headers['subject']:'');
-        $fromText=$this->decodeHeader(isset($headers['from'])?$headers['from']:'');
-        $toText=$this->decodeHeader(isset($headers['to'])?$headers['to']:'');
+        $subject=PublicMailStorageService::normalizeMailText($this->decodeHeader(isset($headers['subject'])?$headers['subject']:''));
+        $fromText=PublicMailStorageService::normalizeMailText($this->decodeHeader(isset($headers['from'])?$headers['from']:''));
+        $toText=PublicMailStorageService::normalizeMailText($this->decodeHeader(isset($headers['to'])?$headers['to']:''));
         $dateText=isset($headers['date'])?trim((string)$headers['date']):''; $timestamp=$dateText!==''?strtotime($dateText):false; if ($timestamp===false) $timestamp=time();
         $flags=isset($headerData['flags'])&&is_array($headerData['flags'])?$headerData['flags']:array(); $isSeen=false; $isFlagged=false;
         foreach ($flags as $flag) { if (strcasecmp($flag,'\\Seen')===0) $isSeen=true; if (strcasecmp($flag,'\\Flagged')===0) $isFlagged=true; }
@@ -1232,7 +1376,7 @@ class PublicMailService
             'message_key'=>$key,'uid'=>$uid,'mailbox'=>$mailbox,'mailbox_name'=>$mailboxName,'mailbox_type'=>$this->detectMailboxType($mailbox,$mailboxName,array()),
             'message_id'=>isset($headers['message-id'])?trim((string)$headers['message-id']):'',
             'subject'=>$subject!==''?$subject:'(제목 없음)','from_text'=>$fromText,'from_email'=>$this->extractEmail($fromText),
-            'to_text'=>$toText,'cc_text'=>$this->decodeHeader(isset($headers['cc'])?$headers['cc']:''),
+            'to_text'=>$toText,'cc_text'=>PublicMailStorageService::normalizeMailText($this->decodeHeader(isset($headers['cc'])?$headers['cc']:'')),
             'date_text'=>date('Y-m-d H:i:s',$timestamp),'timestamp'=>(int)$timestamp,'size'=>isset($headerData['size'])?(int)$headerData['size']:0,
             'is_seen'=>$isSeen,'is_flagged'=>$isFlagged,'has_attachment'=>$this->headerLooksLikeAttachment($headers),'preview'=>'','classification'=>array()
         );
@@ -1555,23 +1699,23 @@ class PublicMailService
             return $self->repairMojibake($self->convertToUtf8($raw, $charset));
         }, $value);
         if (is_string($manual) && $manual !== '' && strpos($manual, '=?') === false) {
-            return $this->repairMojibake($this->ensureUtf8($manual, ''));
+            return PublicMailStorageService::normalizeMailText($this->repairMojibake($this->ensureUtf8($manual, '')));
         }
 
         if (function_exists('iconv_mime_decode')) {
             $decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
             if ($decoded !== false && $decoded !== '' && strpos($decoded, '=?') === false) {
-                return $this->repairMojibake($this->ensureUtf8($decoded, ''));
+                return PublicMailStorageService::normalizeMailText($this->repairMojibake($this->ensureUtf8($decoded, '')));
             }
         }
         if (function_exists('mb_decode_mimeheader')) {
             $decoded = @mb_decode_mimeheader($value);
             if ($decoded !== false && $decoded !== '' && strpos($decoded, '=?') === false) {
-                return $this->repairMojibake($this->ensureUtf8($decoded, ''));
+                return PublicMailStorageService::normalizeMailText($this->repairMojibake($this->ensureUtf8($decoded, '')));
             }
         }
 
-        return $this->repairMojibake($this->ensureUtf8(is_string($manual) ? $manual : $value, ''));
+        return PublicMailStorageService::normalizeMailText($this->repairMojibake($this->ensureUtf8(is_string($manual) ? $manual : $value, '')));
     }
 
     private function decodeRfc2231Value($value)
@@ -1960,7 +2104,7 @@ class PublicMailService
     {
         if (!is_array($message)) return array();
         foreach (array('subject','from_text','to_text','cc_text') as $field) {
-            if (isset($message[$field])) $message[$field] = $this->decodeHeader($message[$field]);
+            if (isset($message[$field])) $message[$field] = PublicMailStorageService::normalizeMailText($this->decodeHeader($message[$field]));
         }
         if (isset($message['preview'])) $message['preview'] = $this->makePreviewText($message['preview']);
         if (isset($message['from_text'])) $message['from_email'] = $this->extractEmail($message['from_text']);
@@ -2012,7 +2156,7 @@ class PublicMailService
     }
 
     /**
-     * v1.7.8에서 진행 중이던 전체목록 방식 작업을 v1.7.10 대상목록 방식으로 자동 변환합니다.
+     * v1.7.8에서 진행 중이던 전체목록 방식 작업을 v1.7.11 대상목록 방식으로 자동 변환합니다.
      * 이미 복구된 메일은 다시 네이버에 요청하지 않고 남아 있는 깨진 메일만 대기열에 넣습니다.
      */
     private function prepareMetadataRepairQueue($repair, $messages)

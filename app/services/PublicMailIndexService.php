@@ -13,8 +13,8 @@ require_once __DIR__ . '/PublicMailStorageService.php';
 
 class PublicMailIndexService
 {
-    const VERSION = '1.7.10';
-    const INDEX_VERSION = 4;
+    const VERSION = '1.7.11';
+    const INDEX_VERSION = 5;
     const INDEX_FILE = 'mail_index.json';
 
     private $memoryIndex = null;
@@ -46,6 +46,7 @@ class PublicMailIndexService
 
         foreach ($items as $item) {
             if (!is_array($item)) continue;
+            $item = self::normalizeIndexItem($item);
             if ($this->matchesFilters($item, $filters)) $matched[] = $item;
         }
 
@@ -86,11 +87,11 @@ class PublicMailIndexService
 
         if (isset($positions[$messageKey])) {
             $position = (int)$positions[$messageKey];
-            if (isset($items[$position]) && is_array($items[$position])) return $items[$position];
+            if (isset($items[$position]) && is_array($items[$position])) return self::normalizeIndexItem($items[$position]);
         }
 
         foreach ($items as $item) {
-            if (is_array($item) && isset($item['message_key']) && (string)$item['message_key'] === $messageKey) return $item;
+            if (is_array($item) && isset($item['message_key']) && (string)$item['message_key'] === $messageKey) return self::normalizeIndexItem($item);
         }
         return null;
     }
@@ -221,9 +222,11 @@ class PublicMailIndexService
 
         $classification = isset($message['classification']) && is_array($message['classification']) ? $message['classification'] : array();
         $workflow = self::workflowFromMap($workflowMap, $messageKey);
-        $subject = isset($message['subject']) ? trim((string)$message['subject']) : '(제목 없음)';
+        $subject = PublicMailStorageService::normalizeMailText(isset($message['subject']) ? (string)$message['subject'] : '');
         if ($subject === '') $subject = '(제목 없음)';
-        $fromText = isset($message['from_text']) ? trim((string)$message['from_text']) : '';
+        $fromText = PublicMailStorageService::normalizeMailText(isset($message['from_text']) ? (string)$message['from_text'] : '');
+        $toText = PublicMailStorageService::normalizeMailText(isset($message['to_text']) ? (string)$message['to_text'] : '');
+        $ccText = PublicMailStorageService::normalizeMailText(isset($message['cc_text']) ? (string)$message['cc_text'] : '');
         $preview = isset($message['preview']) ? trim((string)$message['preview']) : '';
 
         return array(
@@ -237,8 +240,8 @@ class PublicMailIndexService
             'subject' => $subject,
             'from_text' => $fromText,
             'from_email' => isset($message['from_email']) ? (string)$message['from_email'] : '',
-            'to_text' => isset($message['to_text']) ? (string)$message['to_text'] : '',
-            'cc_text' => isset($message['cc_text']) ? (string)$message['cc_text'] : '',
+            'to_text' => $toText,
+            'cc_text' => $ccText,
             'preview' => $preview,
             'is_seen' => !empty($message['is_seen']),
             'size' => isset($message['size']) ? (int)$message['size'] : 0,
@@ -246,6 +249,53 @@ class PublicMailIndexService
             'workflow' => $workflow,
             'search_text' => self::lower($subject . ' ' . $fromText . ' ' . (isset($message['to_text']) ? (string)$message['to_text'] : '') . ' ' . $preview)
         );
+    }
+
+    /** 제목 한 건만 바뀐 경우 전체 색인을 다시 계산하지 않고 해당 항목만 갱신합니다. */
+    public function refreshMessage($messageKey, $message)
+    {
+        $messageKey = trim((string)$messageKey);
+        if ($messageKey === '' || !is_array($message)) return null;
+        PublicMailStorageService::ensureStorage();
+        $path = PublicMailStorageService::path(self::INDEX_FILE);
+        $index = PublicMailStorageService::readJsonFile($path, array());
+        if (!is_array($index) || !isset($index['items']) || !is_array($index['items']) || !isset($index['index_version']) || (int)$index['index_version'] !== self::INDEX_VERSION) {
+            $this->memoryIndex = self::rebuild();
+            return $this->memoryIndex;
+        }
+
+        $workflowMap = PublicMailStorageService::getWorkflow();
+        $item = self::buildItem($messageKey, $message, $workflowMap);
+        $positions = isset($index['positions']) && is_array($index['positions']) ? $index['positions'] : array();
+        if (isset($positions[$messageKey]) && isset($index['items'][(int)$positions[$messageKey]])) {
+            $index['items'][(int)$positions[$messageKey]] = $item;
+        } else {
+            $index['items'][] = $item;
+            usort($index['items'], array(__CLASS__, 'compareItems'));
+        }
+        $index['positions'] = array();
+        foreach ($index['items'] as $position => $current) {
+            if (is_array($current) && isset($current['message_key'])) $index['positions'][(string)$current['message_key']] = (int)$position;
+        }
+        $index['updated_at'] = date('Y-m-d H:i:s');
+        $index['package_version'] = self::VERSION;
+        $index['source_signature'] = self::sourceSignature();
+        PublicMailStorageService::writeJsonFile($path, $index);
+        $this->memoryIndex = $index;
+        return $item;
+    }
+
+    private static function normalizeIndexItem($item)
+    {
+        if (!is_array($item)) return array();
+        $item['subject'] = PublicMailStorageService::normalizeMailText(isset($item['subject']) ? (string)$item['subject'] : '');
+        if ($item['subject'] === '') $item['subject'] = '(제목 없음)';
+        $item['from_text'] = PublicMailStorageService::normalizeMailText(isset($item['from_text']) ? (string)$item['from_text'] : '');
+        $item['to_text'] = PublicMailStorageService::normalizeMailText(isset($item['to_text']) ? (string)$item['to_text'] : '');
+        $item['cc_text'] = PublicMailStorageService::normalizeMailText(isset($item['cc_text']) ? (string)$item['cc_text'] : '');
+        $preview = isset($item['preview']) ? (string)$item['preview'] : '';
+        $item['search_text'] = self::lower($item['subject'] . ' ' . $item['from_text'] . ' ' . $item['to_text'] . ' ' . $preview);
+        return $item;
     }
 
     private static function workflowFromMap($workflowMap, $messageKey)

@@ -3,12 +3,12 @@
  * 네이버 메일 화면 동작 - PHP 5.6 서버 호환용 순수 JavaScript
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
- * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 깨진 한글 복구만 개발부서 연동 설정 화면에서 자동 연속 실행합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.10
+ * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 제목은 수집·목록·상세·검색 단계에서 로컬 자동보정합니다.
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.11
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.10';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.11';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -65,14 +65,14 @@
                     ok:false,
                     error_code:sessionLike?'session_expired':'invalid_json',
                     retryable:!sessionLike,
-                    message:sessionLike?'로그인이 만료되었습니다. 페이지를 새로고침해 다시 로그인해 주세요.':(xhr.status>=500?'서버가 잠시 응답하지 않습니다. 저장된 위치부터 자동으로 다시 시도합니다.':'서버 응답 형식을 확인할 수 없습니다. 자동으로 다시 시도합니다.'),
+                    message:sessionLike?'로그인이 만료되었습니다. 페이지를 새로고침해 다시 로그인해 주세요.':(xhr.status>=500?'서버가 잠시 응답하지 않습니다. 잠시 후 다시 눌러주세요.':'서버 응답 형식을 확인할 수 없습니다. 페이지를 새로고침한 뒤 다시 눌러주세요.'),
                     response_excerpt:raw.substring(0,300)
                 };
             }
             complete(result);
         };
-        xhr.onerror=function(){complete({ok:false,retryable:true,error_code:'network_error',message:'네트워크 연결이 잠시 불안정합니다. 자동으로 다시 시도합니다.'});};
-        xhr.ontimeout=function(){complete({ok:false,retryable:true,error_code:'timeout',message:'서버 응답이 늦어지고 있습니다. 저장된 위치부터 자동으로 다시 시도합니다.'});};
+        xhr.onerror=function(){complete({ok:false,retryable:true,error_code:'network_error',message:'네트워크 연결이 잠시 불안정합니다. 연결을 확인한 뒤 다시 눌러주세요.'});};
+        xhr.ontimeout=function(){complete({ok:false,retryable:true,error_code:'timeout',message:'서버 응답이 늦어지고 있습니다. 잠시 후 다시 눌러주세요.'});};
         xhr.send(encodeForm(data));
     }
 
@@ -154,190 +154,21 @@
         for(i=0;i<buttons.length;i++) buttons[i].addEventListener('click',function(){fullImportAction(this.getAttribute('data-full-import'));});
     }
 
-    var metadataRepairTimer=null;
-    var metadataRepairRequestRunning=false;
-    var metadataRepairBatchSize=50;
-    var metadataRepairRetryCount=0;
-    var metadataRepairNextDelay=800;
-
-    function repairCard(){return document.querySelector('.pm-repair-card');}
-
-    function setRepairRunnerStatus(text){
-        var card=repairCard(),node=card?card.querySelector('[data-repair-runner-status]'):null;
-        if(node)node.textContent=text||'';
-    }
-
-    function setRepairInlineError(message,kind){
-        var card=repairCard(),node=card?card.querySelector('[data-repair-error]'):null;
-        if(!node)return;
-        node.classList.remove('pm-alert-error','pm-alert-warning','pm-alert-success');
-        if(message){
-            node.classList.add(kind==='error'?'pm-alert-error':'pm-alert-warning');
-            node.textContent=message;
-            node.hidden=false;
-        }else{
-            node.textContent='';
-            node.hidden=true;
-        }
-    }
-
-    function retryDelayForCount(count){
-        if(count<=1)return 3000;
-        if(count===2)return 10000;
-        if(count===3)return 30000;
-        return 60000;
-    }
-
-    function stopMetadataRepairLoop(statusText){
-        if(metadataRepairTimer!==null){window.clearTimeout(metadataRepairTimer);metadataRepairTimer=null;}
-        if(statusText)setRepairRunnerStatus(statusText);
-    }
-
-    function scheduleMetadataRepairLoop(delay,statusText){
-        var card=repairCard();
-        if(!card||card.getAttribute('data-repair-active')!=='1'||card.getAttribute('data-repair-paused')==='1'){
-            stopMetadataRepairLoop(card&&card.getAttribute('data-repair-paused')==='1'?'일시중지':'대기');
-            return;
-        }
-        if(metadataRepairTimer!==null)window.clearTimeout(metadataRepairTimer);
-        setRepairRunnerStatus(statusText||'다음 고속 묶음 준비 중');
-        metadataRepairTimer=window.setTimeout(runMetadataRepairLoop,Math.max(300,parseInt(delay,10)||metadataRepairNextDelay));
-    }
-
-    function isSessionFailure(result,status){
-        var code=result&&result.error_code?String(result.error_code):'';
-        return status===401||status===403||status===419||code==='session_expired';
-    }
-
-    function handleMetadataRepairFailure(result,status){
-        if(isSessionFailure(result,status)){
-            stopMetadataRepairLoop('로그인 다시 필요');
-            setRepairInlineError('로그인이 만료되었습니다. 이 페이지를 새로고침한 뒤 다시 로그인하면 저장된 위치부터 이어집니다.','error');
-            return;
-        }
-        metadataRepairRetryCount++;
-        var delay=retryDelayForCount(metadataRepairRetryCount);
-        var seconds=Math.ceil(delay/1000);
-        var message=result&&result.message?result.message:'서버 연결이 잠시 불안정합니다.';
-        setRepairInlineError(message+' '+seconds+'초 후 자동으로 다시 시도합니다.','warning');
-        setRepairRunnerStatus(seconds+'초 후 자동 재시도');
-        scheduleMetadataRepairLoop(delay,seconds+'초 후 자동 재시도');
-    }
-
-    function runMetadataRepairLoop(){
-        var card=repairCard();
-        metadataRepairTimer=null;
-        if(!card||card.getAttribute('data-repair-active')!=='1'||card.getAttribute('data-repair-paused')==='1'){
-            stopMetadataRepairLoop(card&&card.getAttribute('data-repair-paused')==='1'?'일시중지':'대기');
-            return;
-        }
-        if(document.hidden){scheduleMetadataRepairLoop(2000,'화면 복귀 대기 중');return;}
-        if(metadataRepairRequestRunning){scheduleMetadataRepairLoop(1000,'현재 묶음 완료 대기 중');return;}
-
-        metadataRepairRequestRunning=true;
-        setRepairRunnerStatus(metadataRepairBatchSize+'건 고속 처리 중');
-        setRepairInlineError('');
-        postJson({
-            action:'run_metadata_repair_once',
-            csrf_token:csrf(),
-            response_type:'json',
-            batch_size:metadataRepairBatchSize
-        },function(result,status){
-            metadataRepairRequestRunning=false;
-
-            if(!result||!result.ok){
-                handleMetadataRepairFailure(result||{},status);
-                return;
-            }
-
-            if(result.state)updateStatusView(result.state);
-
-            var recommended=parseInt(result.recommended_batch_size,10)||metadataRepairBatchSize;
-            metadataRepairBatchSize=Math.max(30,Math.min(100,recommended));
-
-            if(result.retryable){
-                handleMetadataRepairFailure(result,status);
-                return;
-            }
-
-            metadataRepairRetryCount=0;
-            setRepairInlineError('');
-            card=repairCard();
-            if(card&&card.getAttribute('data-repair-active')==='1'&&card.getAttribute('data-repair-paused')!=='1'){
-                scheduleMetadataRepairLoop(metadataRepairNextDelay,'다음 '+metadataRepairBatchSize+'건 준비 중');
-            }else{
-                stopMetadataRepairLoop(card&&card.getAttribute('data-repair-paused')==='1'?'일시중지':'복구 완료');
-            }
-        },{timeout:24000});
-    }
-
-    function metadataRepairAction(action) {
-        var map={start:'start_metadata_repair',run_once:'run_metadata_repair_once',pause:'pause_metadata_repair',resume:'resume_metadata_repair',cancel:'cancel_metadata_repair'};
-        if(!map[action])return;
-        if(action==='start'&&!window.confirm('깨진 메일 전체 복구를 시작할까요? 50건부터 시작해 서버 상태에 따라 최대 100건씩 자동으로 처리합니다.'))return;
-        if(action==='cancel'&&!window.confirm('깨진 메일 복구를 취소할까요? 이미 복구된 메일은 유지됩니다.'))return;
-        if(action==='pause'||action==='cancel')stopMetadataRepairLoop(action==='pause'?'일시중지':'취소 처리 중');
-
-        showLoading(action==='start'?'복구 대상을 빠르게 확인해 작업을 등록하는 중입니다.':(action==='run_once'?'깨진 메일 복구를 지금 한 번 실행하는 중입니다.':'복구 작업 상태를 변경하는 중입니다.'));
-        var payload={action:map[action],csrf_token:csrf(),response_type:'json'};
-        if(action==='run_once')payload.batch_size=metadataRepairBatchSize;
-
-        postJson(payload,function(result,status){
-            hideLoading();
-            if(!result||!result.ok){
-                if(action==='run_once'){handleMetadataRepairFailure(result||{},status);return;}
-                alert(result&&result.message?result.message:'복구 작업 요청에 실패했습니다.');
-                return;
-            }
-            if(result.state)updateStatusView(result.state);else window.location.reload();
-
-            if(action==='start'||action==='resume'){
-                metadataRepairRetryCount=0;
-                metadataRepairBatchSize=50;
-                setRepairInlineError('');
-                alert((result.message||'복구 작업을 시작했습니다.')+'\n\n이 설정 화면을 열어 두면 자동으로 계속 진행됩니다.');
-                scheduleMetadataRepairLoop(500,'첫 고속 묶음 준비 중');
-            }else if(action==='run_once'){
-                if(result.retryable){
-                    handleMetadataRepairFailure(result,status);
-                    return;
-                }
-                metadataRepairRetryCount=0;
-                metadataRepairBatchSize=Math.max(30,Math.min(100,parseInt(result.recommended_batch_size,10)||metadataRepairBatchSize));
-                alert(result.message||'복구 작업을 한 번 실행했습니다.');
-                var card=repairCard();
-                if(card&&card.getAttribute('data-repair-active')==='1'&&card.getAttribute('data-repair-paused')!=='1')scheduleMetadataRepairLoop(metadataRepairNextDelay);
-            }else{
-                alert(result.message||'복구 작업 상태를 변경했습니다.');
-            }
-        },{timeout:30000});
-    }
-
-    function bindMetadataRepair() {
-        var buttons=document.querySelectorAll('[data-metadata-repair]'),i;
-        for(i=0;i<buttons.length;i++)buttons[i].addEventListener('click',function(){metadataRepairAction(this.getAttribute('data-metadata-repair'));});
-    }
-
-    function bindMetadataRepairAutoRunner(){
-        var settingsPage=document.querySelector('[data-public-mail-settings]'),card=repairCard();
-        if(!settingsPage||!card)return;
-
-        var stateBatch=parseInt(card.getAttribute('data-repair-batch-size'),10)||50;
-        metadataRepairBatchSize=Math.max(30,Math.min(100,stateBatch));
-
-        if(card.getAttribute('data-repair-active')==='1'&&card.getAttribute('data-repair-paused')!=='1'){
-            setRepairRunnerStatus('자동 재개 준비');
-            scheduleMetadataRepairLoop(1000,'자동 재개 준비');
-        }else{
-            setRepairRunnerStatus(card.getAttribute('data-repair-paused')==='1'?'일시중지':'대기');
-        }
-
-        document.addEventListener('visibilitychange',function(){
-            if(!document.hidden&&card.getAttribute('data-repair-active')==='1'&&card.getAttribute('data-repair-paused')!=='1'&&!metadataRepairRequestRunning){
-                scheduleMetadataRepairLoop(500,'화면 복귀 후 재개');
-            }
+    function bindLocalTitleCleanup(){
+        var button=document.querySelector('[data-local-title-cleanup]');
+        if(!button)return;
+        button.addEventListener('click',function(){
+            if(button.classList.contains('is-busy'))return;
+            if(!window.confirm('저장된 메일 제목을 CPMS 내부에서 한 번에 재정리할까요? 네이버 전체메일을 다시 받지 않습니다.'))return;
+            button.classList.add('is-busy');button.setAttribute('disabled','disabled');
+            showLoading('저장된 제목과 검색 색인을 로컬에서 정리하는 중입니다.');
+            postJson({action:'rebuild_local_titles',csrf_token:csrf(),response_type:'json'},function(result,status){
+                hideLoading();button.classList.remove('is-busy');button.removeAttribute('disabled');
+                if(!result||!result.ok){alert(result&&result.message?result.message:'제목 재정리에 실패했습니다.');return;}
+                alert(result.message||'메일 제목 재정리를 완료했습니다.');
+                window.location.reload();
+            },{timeout:120000});
         });
-        window.addEventListener('beforeunload',function(){stopMetadataRepairLoop();});
     }
 
     function updateStatusView(state) {
@@ -350,33 +181,6 @@
             if(bar)bar.style.width=Math.min(100,percent)+'%'; if(strong)strong.textContent=Math.min(100,percent)+'%'; if(label)label.textContent=processed.toLocaleString()+' / '+total.toLocaleString()+'건'; if(message)message.textContent=full.last_message||'';
             var remainingNode=card.querySelector('[data-import-remaining]'); if(remainingNode)remainingNode.textContent=remaining.toLocaleString()+'건';
             var statusNode=card.querySelector('[data-import-status]'); if(statusNode)statusNode.textContent=full.active?(full.paused?'일시중지':'가져오는 중'):(full.cancelled?'취소됨':(total>0&&remaining===0?'완료':'대기'));
-        }
-        var repair=state.metadata_repair||{};
-        var repairTotal=parseInt(repair.total_count,10)||0,repairTargets=parseInt(repair.target_count,10)||0,repairProcessed=parseInt(repair.processed_count,10)||0,repairRemaining=parseInt(repair.remaining_count,10)||0,repairRepaired=parseInt(repair.repaired_count,10)||0,repairFailed=parseInt(repair.failed_count,10)||0;
-        var repairPercent=repairTotal>0?Math.floor(repairProcessed*100/repairTotal):0;
-        var repairCard=document.querySelector('.pm-repair-card');
-        if(repairCard){
-            repairCard.setAttribute('data-repair-active',repair.active?'1':'0');repairCard.setAttribute('data-repair-paused',repair.paused?'1':'0');
-            var repairBar=repairCard.querySelector('[data-repair-progress-bar]'),repairPercentNode=repairCard.querySelector('[data-repair-progress-percent]'),repairLabel=repairCard.querySelector('[data-repair-progress-label]');
-            if(repairBar)repairBar.style.width=Math.min(100,repairPercent)+'%';
-            if(repairPercentNode)repairPercentNode.textContent=Math.min(100,repairPercent)+'%';
-            if(repairLabel)repairLabel.textContent=repairProcessed.toLocaleString()+' / '+repairTotal.toLocaleString()+'건 복구 확인';
-            var repairStatus=repairCard.querySelector('[data-repair-status]');if(repairStatus)repairStatus.textContent=repair.active?(repair.paused?'일시중지':'복구 중'):(repair.cancelled?'취소됨':(repairTotal>0&&repairRemaining===0?'완료':'대기'));
-            var repairDot=repairCard.querySelector('[data-repair-status-dot]');if(repairDot){repairDot.textContent=repair.active?(repair.paused?'일시중지':'진행 중'):(repair.cancelled?'취소됨':(repairTotal>0&&repairRemaining===0?'완료':'대기'));if(repair.active)repairDot.classList.add('is-on');else repairDot.classList.remove('is-on');}
-            var repairTargetsNode=repairCard.querySelector('[data-repair-targets]');if(repairTargetsNode)repairTargetsNode.textContent=repairTargets.toLocaleString()+'건';
-            var repairRemainingNode=repairCard.querySelector('[data-repair-remaining]');if(repairRemainingNode)repairRemainingNode.textContent=repairRemaining.toLocaleString()+'건';
-            var repairRepairedNode=repairCard.querySelector('[data-repair-repaired]');if(repairRepairedNode)repairRepairedNode.textContent=repairRepaired.toLocaleString()+'건';
-            var repairFailedNode=repairCard.querySelector('[data-repair-failed]');if(repairFailedNode)repairFailedNode.textContent=repairFailed.toLocaleString()+'건';
-            var repairLastRun=repairCard.querySelector('[data-repair-last-run]');if(repairLastRun)repairLastRun.textContent=repair.last_run_at||'아직 없음';
-            var repairLastProcessed=repairCard.querySelector('[data-repair-last-processed]');if(repairLastProcessed)repairLastProcessed.textContent=(parseInt(repair.last_run_processed_count,10)||0).toLocaleString()+'건';
-            var repairBatchNode=repairCard.querySelector('[data-repair-batch-size]');if(repairBatchNode)repairBatchNode.textContent=(parseInt(repair.recommended_batch_size,10)||metadataRepairBatchSize).toLocaleString()+'건';
-            var repairRetryNode=repairCard.querySelector('[data-repair-retry-count]');if(repairRetryNode)repairRetryNode.textContent=(parseInt(repair.retry_count,10)||0).toLocaleString()+'회';
-            var repairDurationNode=repairCard.querySelector('[data-repair-duration]');if(repairDurationNode)repairDurationNode.textContent=((parseInt(repair.last_run_duration_ms,10)||0)/1000).toFixed(1)+'초';
-            if(parseInt(repair.recommended_batch_size,10)>0)metadataRepairBatchSize=Math.max(30,Math.min(100,parseInt(repair.recommended_batch_size,10)));
-            var repairLockStatus=repairCard.querySelector('[data-repair-lock-status]');if(repairLockStatus)repairLockStatus.textContent=repair.lock_is_active?'실행 중':'해제';
-            var repairRunnerStatus=repairCard.querySelector('[data-repair-runner-status]');
-            if(repairRunnerStatus){repairRunnerStatus.textContent=repair.active?(repair.paused?'일시중지':(metadataRepairRequestRunning?metadataRepairBatchSize+'건 고속 처리 중':'다음 '+metadataRepairBatchSize+'건 준비 중')):(repair.cancelled?'취소됨':(repairTotal>0&&repairRemaining===0?'완료':'대기'));}
-            var repairMessage=repairCard.querySelector('[data-repair-message]');if(repairMessage)repairMessage.textContent=repair.last_message||'아직 복구 작업을 시작하지 않았습니다.';
         }
         var cronAt=document.querySelector('[data-cron-last-at]'); if(cronAt)cronAt.textContent=state.last_cron_at||'아직 없음';
         var cronResult=document.querySelector('[data-cron-last-result]'); if(cronResult)cronResult.textContent=state.last_cron_result||'아직 없음';
@@ -394,17 +198,6 @@
                 updateStatusView(result.state||{});
             });
         });
-    }
-
-    /* 설정 화면의 별도 상태 새로고침입니다. 실제 복구는 위의 연속 실행기가 한 번씩 안전하게 호출합니다. */
-    function bindRepairStatusPolling() {
-        var settingsPage=document.querySelector('[data-public-mail-settings]');
-        var repairCard=document.querySelector('.pm-repair-card');
-        if(!settingsPage||!repairCard)return;
-        window.setInterval(function(){
-            if(repairCard.getAttribute('data-repair-active')!=='1'||document.hidden)return;
-            postJson({action:'get_sync_status',csrf_token:csrf(),response_type:'json'},function(result){if(result&&result.ok)updateStatusView(result.state||{});});
-        },15000);
     }
 
     function bindRunAutomation() {
@@ -762,7 +555,7 @@
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindMetadataRepairAutoRunner(); bindStatusRefresh(); bindRepairStatusPolling(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMobileSearch(); bindMailNavigation(); openInitialMessage();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindLocalTitleCleanup(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMobileSearch(); bindMailNavigation(); openInitialMessage();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

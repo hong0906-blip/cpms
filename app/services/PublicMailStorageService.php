@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.10';
+    const VERSION = '1.7.11';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -121,6 +121,15 @@ class PublicMailStorageService
                 'last_error_code' => '',
                 'last_message' => '',
                 'last_error' => ''
+            ),
+            'title_normalization' => array(
+                'enabled' => true,
+                'status' => 'ready',
+                'last_run_at' => '',
+                'checked_count' => 0,
+                'changed_count' => 0,
+                'unresolved_count' => 0,
+                'last_message' => '새 메일과 기존 메일 제목을 CPMS 내부에서 자동으로 보정합니다.'
             )
         );
     }
@@ -297,25 +306,33 @@ class PublicMailStorageService
     {
         self::ensureStorage();
         $messages = self::readJsonFile(self::path(self::MESSAGES_FILE), array());
-        return is_array($messages) ? $messages : array();
+        if (!is_array($messages)) return array();
+
+        /*
+         * v1.7.11: 목록/상세/검색에서 사용하는 순간 제목을 로컬에서 보정합니다.
+         * 네이버 서버에 다시 접속하지 않으므로 수천 건의 메일도 안전하게 읽을 수 있습니다.
+         */
+        return self::normalizeMessageSubjectsInArray($messages);
     }
 
     public static function saveMessages($messages)
     {
         self::ensureStorage();
         if (!is_array($messages)) $messages = array();
+        $messages = self::normalizeMessageSubjectsInArray($messages);
         self::writeJsonFile(self::path(self::MESSAGES_FILE), $messages);
         self::refreshIndexSafely($messages, null);
     }
 
     /**
-     * 대량 복구 중간 체크포인트용 저장입니다.
-     * messages.json만 안전하게 저장하고, 무거운 목록 색인은 묶음이 끝날 때 한 번만 갱신합니다.
+     * 대량 작업 중간 체크포인트용 저장입니다.
+     * messages.json만 안전하게 저장하고, 목록 색인은 묶음이 끝날 때 갱신합니다.
      */
     public static function saveMessagesCheckpoint($messages)
     {
         self::ensureStorage();
         if (!is_array($messages)) $messages = array();
+        $messages = self::normalizeMessageSubjectsInArray($messages);
         self::writeJsonFile(self::path(self::MESSAGES_FILE), $messages);
     }
 
@@ -388,6 +405,8 @@ class PublicMailStorageService
         $state['full_import'] = array_merge($defaults['full_import'], isset($saved['full_import']) && is_array($saved['full_import']) ? $saved['full_import'] : array());
         $state['metadata_repair'] = array_merge($defaults['metadata_repair'], isset($saved['metadata_repair']) && is_array($saved['metadata_repair']) ? $saved['metadata_repair'] : array());
         $state['metadata_repair'] = self::sanitizeUtf8Value($state['metadata_repair']);
+        $state['title_normalization'] = array_merge($defaults['title_normalization'], isset($saved['title_normalization']) && is_array($saved['title_normalization']) ? $saved['title_normalization'] : array());
+        $state['title_normalization'] = self::sanitizeUtf8Value($state['title_normalization']);
         if (!isset($state['mailboxes']) || !is_array($state['mailboxes'])) $state['mailboxes'] = array();
 
         /*
@@ -417,6 +436,9 @@ class PublicMailStorageService
         }
         if (isset($changes['metadata_repair']) && is_array($changes['metadata_repair'])) {
             $changes['metadata_repair'] = array_merge($state['metadata_repair'], $changes['metadata_repair']);
+        }
+        if (isset($changes['title_normalization']) && is_array($changes['title_normalization'])) {
+            $changes['title_normalization'] = array_merge($state['title_normalization'], $changes['title_normalization']);
         }
         $state = array_merge($state, $changes);
         self::writeJsonFile(self::path(self::SYNC_FILE), $state);
@@ -728,6 +750,188 @@ class PublicMailStorageService
         }
     }
 
+
+    /**
+     * 메일 제목과 주소 표시문자에 남은 RFC 2047, CP949, EUC-KR, 이중변환 흔적을
+     * 네이버 재접속 없이 CPMS 서버 안에서만 정리합니다. PHP 5.6 호환 코드입니다.
+     */
+    public static function normalizeMailText($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '') return '';
+
+        $value = preg_replace('/\?=\s+=\?/', '?==?', $value);
+        $manual = preg_replace_callback('/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/', function ($matches) {
+            $charset = isset($matches[1]) ? (string)$matches[1] : '';
+            $mode = isset($matches[2]) ? strtoupper((string)$matches[2]) : 'Q';
+            $payload = isset($matches[3]) ? (string)$matches[3] : '';
+            if ($mode === 'B') {
+                $raw = base64_decode($payload, true);
+                if ($raw === false) $raw = '';
+            } else {
+                $raw = quoted_printable_decode(str_replace('_', ' ', $payload));
+            }
+            return PublicMailStorageService::mailBytesToUtf8($raw, $charset);
+        }, $value);
+
+        $candidate = is_string($manual) && $manual !== '' ? $manual : $value;
+        if (strpos($candidate, '=?') !== false && function_exists('iconv_mime_decode')) {
+            $decoded = @iconv_mime_decode($candidate, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+            if ($decoded !== false && $decoded !== '') $candidate = $decoded;
+        }
+        if (strpos($candidate, '=?') !== false && function_exists('mb_decode_mimeheader')) {
+            $decoded = @mb_decode_mimeheader($candidate);
+            if ($decoded !== false && $decoded !== '') $candidate = $decoded;
+        }
+
+        $candidate = self::mailBytesToUtf8($candidate, '');
+        $candidate = self::repairMailMojibake($candidate);
+        $candidate = self::sanitizeText($candidate, 0);
+        return trim((string)$candidate);
+    }
+
+    /** 저장/조회되는 메일 배열의 제목만 안전하게 로컬 보정합니다. */
+    public static function normalizeMessageSubjectsInArray($messages)
+    {
+        if (!is_array($messages)) return array();
+        foreach ($messages as $messageKey => $message) {
+            if (!is_array($message)) continue;
+            $subject = isset($message['subject']) ? (string)$message['subject'] : '';
+            $normalized = self::normalizeMailText($subject);
+            if ($normalized === '' && trim($subject) === '') $normalized = '(제목 없음)';
+            if ($normalized !== '') $messages[$messageKey]['subject'] = $normalized;
+        }
+        return $messages;
+    }
+
+    /** 로컬 보정 후에도 원본 재확인이 필요한 제목인지 판단합니다. */
+    public static function looksBrokenMailText($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '') return false;
+        if (!self::isValidMailUtf8($value)) return true;
+        if (strpos($value, '=?') !== false || strpos($value, "\xEF\xBF\xBD") !== false) return true;
+        if (preg_match('/(?:Ã.|Â.|ì.|ë.|ê.|ã.|ð.|þ.|æ.|å.)/u', $value)) return true;
+        $hangul = preg_match_all('/[가-힣]/u', $value, $m);
+        $cjk = preg_match_all('/[一-龥]/u', $value, $m);
+        if ($hangul >= 3 && $cjk >= 1) return true;
+        $repaired = self::repairMailMojibake($value);
+        return $repaired !== $value && self::mailTextQualityScore($repaired) >= self::mailTextQualityScore($value) + 6;
+    }
+
+    private static function normalizeMailCharset($charset)
+    {
+        $charset = strtoupper(trim((string)$charset, " \t\r\n\"'"));
+        $charset = str_replace('_', '-', $charset);
+        $map = array(
+            'KS-C-5601-1987'=>'CP949','KS-C-5601-1989'=>'CP949','KSC5601'=>'CP949',
+            'KSC-5601'=>'CP949','WINDOWS-949'=>'CP949','X-WINDOWS-949'=>'CP949',
+            'MS949'=>'CP949','CP-949'=>'CP949','UHC'=>'CP949','UTF8'=>'UTF-8'
+        );
+        return isset($map[$charset]) ? $map[$charset] : $charset;
+    }
+
+    private static function isValidMailUtf8($value)
+    {
+        return $value === '' || @preg_match('//u', (string)$value) === 1;
+    }
+
+    private static function mailBytesToUtf8($value, $charset)
+    {
+        $value = (string)$value;
+        if ($value === '') return '';
+        $charset = self::normalizeMailCharset($charset);
+        if (($charset === '' || $charset === 'UTF-8' || $charset === 'US-ASCII') && self::isValidMailUtf8($value)) {
+            return self::repairMailMojibake($value);
+        }
+
+        $sources = array();
+        if ($charset !== '' && $charset !== 'UTF-8' && $charset !== 'US-ASCII') $sources[] = $charset;
+        foreach (array('CP949','EUC-KR','UTF-8','ISO-8859-1','WINDOWS-1252') as $source) {
+            if (!in_array($source, $sources, true)) $sources[] = $source;
+        }
+
+        $best = self::isValidMailUtf8($value) ? self::repairMailMojibake($value) : '';
+        $bestScore = $best !== '' ? self::mailTextQualityScore($best) : -999999;
+        foreach ($sources as $source) {
+            $converted = false;
+            if (function_exists('iconv')) $converted = @iconv($source, 'UTF-8//IGNORE', $value);
+            if (($converted === false || $converted === '') && function_exists('mb_convert_encoding')) {
+                $converted = @mb_convert_encoding($value, 'UTF-8', $source);
+            }
+            if ($converted === false || $converted === '' || !self::isValidMailUtf8($converted)) continue;
+            $converted = self::repairMailMojibake($converted);
+            $score = self::mailTextQualityScore($converted);
+            if ($score > $bestScore) { $best = $converted; $bestScore = $score; }
+        }
+        return $best !== '' ? $best : self::sanitizeText($value, 0);
+    }
+
+    private static function repairMailMojibake($value)
+    {
+        $value = (string)$value;
+        if ($value === '' || !self::isValidMailUtf8($value)) return $value;
+        $candidates = array($value);
+        $seen = array($value => true);
+        $frontier = array($value);
+
+        for ($depth = 0; $depth < 2; $depth++) {
+            $next = array();
+            foreach ($frontier as $current) {
+                foreach (array('ISO-8859-1','WINDOWS-1252','CP949','EUC-KR') as $target) {
+                    if (!function_exists('iconv')) continue;
+                    $bytes = @iconv('UTF-8', $target . '//IGNORE', $current);
+                    if ($bytes === false || $bytes === '') continue;
+                    foreach (array('UTF-8','CP949','EUC-KR') as $source) {
+                        $decoded = @iconv($source, 'UTF-8//IGNORE', $bytes);
+                        if ($decoded === false || $decoded === '' || !self::isValidMailUtf8($decoded)) continue;
+                        $decoded = trim((string)$decoded);
+                        if ($decoded === '' || isset($seen[$decoded])) continue;
+                        $seen[$decoded] = true;
+                        $candidates[] = $decoded;
+                        $next[] = $decoded;
+                    }
+                }
+            }
+            $frontier = $next;
+            if (empty($frontier)) break;
+        }
+
+        $best = $value;
+        $baseScore = self::mailTextQualityScore($value);
+        $bestScore = $baseScore;
+        foreach ($candidates as $candidate) {
+            $candidate = trim((string)$candidate);
+            if ($candidate === '' || !self::isValidMailUtf8($candidate)) continue;
+            $score = self::mailTextQualityScore($candidate);
+            if ($score > $bestScore) { $best = $candidate; $bestScore = $score; }
+        }
+        return ($best !== $value && $bestScore >= $baseScore + 6) ? $best : $value;
+    }
+
+    private static function mailTextQualityScore($value)
+    {
+        $value = (string)$value;
+        if ($value === '') return 0;
+        $score = 0;
+        $hangul = preg_match_all('/[가-힣]/u', $value, $m);
+        $jamo = preg_match_all('/[ㄱ-ㅎㅏ-ㅣ]/u', $value, $m);
+        $cjk = preg_match_all('/[一-龥]/u', $value, $m);
+        $replacement = substr_count($value, "\xEF\xBF\xBD");
+        $control = preg_match_all('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $value, $m);
+        $mojibake = preg_match_all('/(?:Ã.|Â.|ì.|ë.|ê.|ã.|ð.|þ.|æ.|å.)/u', $value, $m);
+        $encodedWord = substr_count($value, '=?');
+        $score += (int)$hangul * 3;
+        $score += (int)$jamo;
+        $score -= (int)$cjk * 2;
+        $score -= (int)$replacement * 20;
+        $score -= (int)$control * 20;
+        $score -= (int)$mojibake * 7;
+        $score -= (int)$encodedWord * 12;
+        if (preg_match('/[가-힣]{2,}/u', $value)) $score += 8;
+        if (preg_match('/(메일|세금|계산서|발행|안내|현장|공사|요청|첨부|주식회사|담당자|견적|계약|입금|회의)/u', $value)) $score += 10;
+        return $score;
+    }
 
     /**
      * 메일 목록/처리상태가 바뀐 경우 가벼운 화면 색인을 갱신합니다.

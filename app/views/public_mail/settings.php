@@ -11,21 +11,13 @@ $processed=isset($full['processed_count'])?(int)$full['processed_count']:0;
 $remaining=isset($full['remaining_count'])?(int)$full['remaining_count']:0;
 $percent=$total>0?(int)floor(($processed/$total)*100):0;
 if ($percent>100) $percent=100;
-$repair=isset($syncState['metadata_repair'])&&is_array($syncState['metadata_repair'])?$syncState['metadata_repair']:array();
-$repairTotal=isset($repair['total_count'])?(int)$repair['total_count']:0;
-$repairTargets=isset($repair['target_count'])?(int)$repair['target_count']:0;
-$repairProcessed=isset($repair['processed_count'])?(int)$repair['processed_count']:0;
-$repairRepaired=isset($repair['repaired_count'])?(int)$repair['repaired_count']:0;
-$repairFailed=isset($repair['failed_count'])?(int)$repair['failed_count']:0;
-$repairRemaining=isset($repair['remaining_count'])?(int)$repair['remaining_count']:0;
-$repairPercent=$repairTotal>0?(int)floor(($repairProcessed/$repairTotal)*100):0;
-if ($repairPercent>100) $repairPercent=100;
-$repairLockActive=!empty($repair['lock_is_active']);
-$repairBatchSize=isset($repair['recommended_batch_size'])?max(30,min(100,(int)$repair['recommended_batch_size'])):50;
-$repairRetryCount=isset($repair['retry_count'])?(int)$repair['retry_count']:0;
-$repairDurationMs=isset($repair['last_run_duration_ms'])?(int)$repair['last_run_duration_ms']:0;
+$titleNormalization=isset($syncState['title_normalization'])&&is_array($syncState['title_normalization'])?$syncState['title_normalization']:array();
+$titleChecked=isset($titleNormalization['checked_count'])?(int)$titleNormalization['checked_count']:0;
+$titleChanged=isset($titleNormalization['changed_count'])?(int)$titleNormalization['changed_count']:0;
+$titleUnresolved=isset($titleNormalization['unresolved_count'])?(int)$titleNormalization['unresolved_count']:0;
+$titleLastRun=isset($titleNormalization['last_run_at'])?(string)$titleNormalization['last_run_at']:'';
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_710">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_711">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -77,7 +69,7 @@ $repairDurationMs=isset($repair['last_run_duration_ms'])?(int)$repair['last_run_
       <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>설치 버전·목록 속도 상태</strong><span>실제 적용된 핵심 파일과 메일 색인 상태를 확인합니다.</span></div><span class="pm-status-dot <?php echo !empty($indexStatus['writable'])?'is-on':''; ?>"><?php echo !empty($indexStatus['writable'])?'정상':'확인 필요'; ?></span></div>
         <div class="pm-sync-state-list">
-          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.10'); ?></strong></div>
+          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.11'); ?></strong></div>
           <div><span>목록 색인 버전</span><strong><?php echo isset($indexStatus['version'])?(int)$indexStatus['version']:0; ?></strong></div>
           <div><span>색인 메일 수</span><strong><?php echo number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0); ?>건</strong></div>
           <div><span>마지막 색인 갱신</span><strong><?php echo call_user_func($esc,!empty($indexStatus['updated_at'])?$indexStatus['updated_at']:'아직 없음'); ?></strong></div>
@@ -93,37 +85,24 @@ $repairDurationMs=isset($repair['last_run_duration_ms'])?(int)$repair['last_run_
           <div><span>본문 미준비</span><strong><?php echo number_format(isset($cacheStats['missing_messages'])?(int)$cacheStats['missing_messages']:0); ?>건</strong></div>
           <div><span>구버전 캐시</span><strong><?php echo number_format(isset($cacheStats['legacy_messages'])?(int)$cacheStats['legacy_messages']:0); ?>건</strong></div>
         </div>
-        <p class="pm-help-text">구버전 캐시가 있어도 네이버에서 본문을 다시 받지 않습니다. 메일을 열 때 저장된 HTML만 빠르게 변환하며, 제목 복구 작업도 본문 캐시를 삭제하지 않습니다.</p>
+        <p class="pm-help-text">구버전 캐시가 있어도 네이버에서 본문을 다시 받지 않습니다. 메일을 열 때 저장된 HTML만 빠르게 변환하며, 제목 자동보정도 본문 캐시를 삭제하지 않습니다.</p>
       </div>
 
-      <div class="pm-settings-card pm-repair-card" data-repair-active="<?php echo !empty($repair['active'])?'1':'0'; ?>" data-repair-paused="<?php echo !empty($repair['paused'])?'1':'0'; ?>" data-repair-batch-size="<?php echo $repairBatchSize; ?>">
-        <div class="pm-card-title"><div><strong>깨진 제목·한글 전체 자동복구</strong><span>50건부터 시작해 서버 상태에 따라 최대 100건까지 자동으로 빠르게 처리합니다.</span></div><span class="pm-status-dot <?php echo !empty($repair['active'])?'is-on':''; ?>" data-repair-status-dot><?php echo !empty($repair['active'])?(!empty($repair['paused'])?'일시중지':'진행 중'):(!empty($repair['cancelled'])?'취소됨':($repairTotal>0&&$repairRemaining===0?'완료':'대기')); ?></span></div>
-        <div class="pm-alert pm-alert-success"><strong>cron-job.org 설정이 필요하지 않습니다.</strong><br>이 화면을 열어 두면 50~100건씩 처리하고 약 1초 뒤 다음 묶음을 이어갑니다. 일시적인 통신 오류가 생겨도 3초·10초·30초 간격으로 자동 재시도하며, 다시 접속하면 저장된 체크포인트부터 재개합니다.</div>
-        <div class="pm-progress-wrap"><div class="pm-progress-track"><span data-repair-progress-bar style="width:<?php echo $repairPercent; ?>%"></span></div><div class="pm-progress-label"><strong data-repair-progress-percent><?php echo $repairPercent; ?>%</strong><span data-repair-progress-label><?php echo number_format($repairProcessed); ?> / <?php echo number_format($repairTotal); ?>건 복구 확인</span></div></div>
+      <div class="pm-settings-card pm-title-normalization-card">
+        <div class="pm-card-title"><div><strong>메일 제목 자동보정</strong><span>네이버 전체메일을 다시 내려받지 않고 CPMS 내부에서 제목을 바로 정리합니다.</span></div><span class="pm-status-dot is-on">적용 중</span></div>
+        <div class="pm-alert pm-alert-success"><strong>별도의 자동복구 진행화면이 필요하지 않습니다.</strong><br>새 메일은 수집할 때 즉시 보정하고, 기존 메일은 목록·상세·검색에서 사용할 때 자동으로 보정합니다.</div>
         <div class="pm-sync-state-list">
-          <div><span>상태</span><strong data-repair-status><?php echo !empty($repair['active'])?(!empty($repair['paused'])?'일시중지':'복구 중'):(!empty($repair['cancelled'])?'취소됨':($repairTotal>0&&$repairRemaining===0?'완료':'대기')); ?></strong></div>
-          <div><span>브라우저 자동처리</span><strong data-repair-runner-status><?php echo !empty($repair['active'])&&!empty($repair['paused'])?'일시중지':(!empty($repair['active'])?'자동 재개 준비':'대기'); ?></strong></div>
-          <div><span>처음 발견된 복구 대상</span><strong data-repair-targets><?php echo number_format($repairTargets); ?>건</strong></div>
-          <div><span>복구 완료</span><strong data-repair-repaired><?php echo number_format($repairRepaired); ?>건</strong></div>
-          <div><span>남은 복구 대상</span><strong data-repair-remaining><?php echo number_format($repairRemaining); ?>건</strong></div>
-          <div><span>확인 실패</span><strong data-repair-failed><?php echo number_format($repairFailed); ?>건</strong></div>
-          <div><span>최근 실행</span><strong data-repair-last-run><?php echo call_user_func($esc,!empty($repair['last_run_at'])?$repair['last_run_at']:'아직 없음'); ?></strong></div>
-          <div><span>최근 실행 처리</span><strong data-repair-last-processed><?php echo number_format(isset($repair['last_run_processed_count'])?(int)$repair['last_run_processed_count']:0); ?>건</strong></div>
-          <div><span>다음 처리 묶음</span><strong data-repair-batch-size><?php echo number_format($repairBatchSize); ?>건</strong></div>
-          <div><span>자동 재시도</span><strong data-repair-retry-count><?php echo number_format($repairRetryCount); ?>회</strong></div>
-          <div><span>최근 응답시간</span><strong data-repair-duration><?php echo number_format($repairDurationMs/1000,1); ?>초</strong></div>
-          <div><span>복구 잠금</span><strong data-repair-lock-status><?php echo $repairLockActive?'실행 중':'해제'; ?></strong></div>
+          <div><span>자동보정 상태</span><strong>항상 적용</strong></div>
+          <div><span>최근 전체 확인</span><strong data-title-last-run><?php echo call_user_func($esc,$titleLastRun!==''?$titleLastRun:'아직 없음'); ?></strong></div>
+          <div><span>확인한 제목</span><strong data-title-checked><?php echo number_format($titleChecked); ?>건</strong></div>
+          <div><span>로컬 정리 완료</span><strong data-title-changed><?php echo number_format($titleChanged); ?>건</strong></div>
+          <div><span>메일 열 때 원본 확인 대상</span><strong data-title-unresolved><?php echo number_format($titleUnresolved); ?>건</strong></div>
         </div>
-        <?php if (!empty($repair['last_message'])): ?><div class="pm-alert pm-alert-success" data-repair-message><?php echo call_user_func($esc,$repair['last_message']); ?></div><?php else: ?><div class="pm-help-text" data-repair-message>아직 복구 작업을 시작하지 않았습니다.</div><?php endif; ?>
-        <?php if (!empty($repair['last_error'])): ?><div class="pm-alert <?php echo isset($repair['status'])&&$repair['status']==='retry_wait'?'pm-alert-warning':'pm-alert-error'; ?>" data-repair-error><?php echo call_user_func($esc,$repair['last_error']); ?></div><?php else: ?><div class="pm-alert pm-alert-warning" data-repair-error hidden></div><?php endif; ?>
+        <?php if (!empty($titleNormalization['last_message'])): ?><div class="pm-alert pm-alert-success" data-title-message><?php echo call_user_func($esc,$titleNormalization['last_message']); ?></div><?php else: ?><div class="pm-help-text" data-title-message>기존 제목 재정리를 아직 실행하지 않았습니다.</div><?php endif; ?>
         <div class="pm-settings-actions pm-wrap-actions">
-          <button type="button" class="pm-btn pm-btn-primary" data-metadata-repair="start"><i data-lucide="languages"></i> 깨진 메일 전체 복구 시작</button>
-          <button type="button" class="pm-btn pm-btn-light" data-metadata-repair="run_once"><i data-lucide="play-circle"></i> 지금 1회 실행</button>
-          <button type="button" class="pm-btn pm-btn-light" data-metadata-repair="pause"><i data-lucide="pause"></i> 일시중지</button>
-          <button type="button" class="pm-btn pm-btn-light" data-metadata-repair="resume"><i data-lucide="play"></i> 다시 시작</button>
-          <button type="button" class="pm-btn pm-btn-danger" data-metadata-repair="cancel"><i data-lucide="square"></i> 취소</button>
+          <button type="button" class="pm-btn pm-btn-primary" data-local-title-cleanup><i data-lucide="languages"></i> 기존 제목 지금 재정리</button>
         </div>
-        <p class="pm-help-text">메일 본문 전체나 첨부파일을 다시 받지 않고 실제로 깨진 메일의 제목·보낸사람·받는사람 헤더만 네이버 원본에서 읽습니다. 전체 5천여 건을 매번 훑지 않고 복구 대상목록만 처리하므로 이전 버전보다 훨씬 빠릅니다. 이 자동 실행은 개발부서의 연동 설정 화면에서만 동작합니다.</p>
+        <p class="pm-help-text">이 버튼은 네이버 서버에 접속하지 않고 저장된 제목과 검색 색인만 한 번에 정리합니다. 로컬 정보만으로 원래 제목을 확정할 수 없는 일부 메일은 그 메일을 열 때 제목 헤더 한 건만 확인하고 이후에는 다시 조회하지 않습니다.</p>
       </div>
 
       <div class="pm-settings-card">
@@ -165,4 +144,4 @@ $repairDurationMs=isset($repair['last_run_duration_ms'])?(int)$repair['last_run_
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_710"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_711"></script>
