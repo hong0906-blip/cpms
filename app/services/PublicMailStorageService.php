@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.11';
+    const VERSION = '1.7.12';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -123,13 +123,33 @@ class PublicMailStorageService
                 'last_error' => ''
             ),
             'title_normalization' => array(
-                'enabled' => true,
-                'status' => 'ready',
+                'enabled' => false,
+                'status' => 'disabled_for_speed',
                 'last_run_at' => '',
                 'checked_count' => 0,
                 'changed_count' => 0,
                 'unresolved_count' => 0,
-                'last_message' => '새 메일과 기존 메일 제목을 CPMS 내부에서 자동으로 보정합니다.'
+                'last_message' => '일반 메일 화면에서는 제목 보정 작업을 실행하지 않습니다.'
+            ),
+            'title_refresh' => array(
+                'active' => false,
+                'paused' => false,
+                'cancelled' => false,
+                'status' => 'ready',
+                'started_at' => '',
+                'finished_at' => '',
+                'last_run_at' => '',
+                'mailbox_order' => array(),
+                'current_mailbox_index' => 0,
+                'last_uid' => 0,
+                'total_count' => 0,
+                'processed_count' => 0,
+                'updated_count' => 0,
+                'failed_count' => 0,
+                'remaining_count' => 0,
+                'last_batch_count' => 0,
+                'last_message' => '네이버 원본 제목 재수집을 아직 시작하지 않았습니다.',
+                'last_error' => ''
             )
         );
     }
@@ -309,17 +329,16 @@ class PublicMailStorageService
         if (!is_array($messages)) return array();
 
         /*
-         * v1.7.11: 목록/상세/검색에서 사용하는 순간 제목을 로컬에서 보정합니다.
-         * 네이버 서버에 다시 접속하지 않으므로 수천 건의 메일도 안전하게 읽을 수 있습니다.
+         * v1.7.12: 평상시 메일 화면에서는 저장된 값을 그대로 반환합니다.
+         * 전체 제목 변환이나 네이버 재조회는 연동 설정의 전용 작업에서만 실행합니다.
          */
-        return self::normalizeMessageSubjectsInArray($messages);
+        return $messages;
     }
 
     public static function saveMessages($messages)
     {
         self::ensureStorage();
         if (!is_array($messages)) $messages = array();
-        $messages = self::normalizeMessageSubjectsInArray($messages);
         self::writeJsonFile(self::path(self::MESSAGES_FILE), $messages);
         self::refreshIndexSafely($messages, null);
     }
@@ -332,7 +351,6 @@ class PublicMailStorageService
     {
         self::ensureStorage();
         if (!is_array($messages)) $messages = array();
-        $messages = self::normalizeMessageSubjectsInArray($messages);
         self::writeJsonFile(self::path(self::MESSAGES_FILE), $messages);
     }
 
@@ -407,6 +425,8 @@ class PublicMailStorageService
         $state['metadata_repair'] = self::sanitizeUtf8Value($state['metadata_repair']);
         $state['title_normalization'] = array_merge($defaults['title_normalization'], isset($saved['title_normalization']) && is_array($saved['title_normalization']) ? $saved['title_normalization'] : array());
         $state['title_normalization'] = self::sanitizeUtf8Value($state['title_normalization']);
+        $state['title_refresh'] = array_merge($defaults['title_refresh'], isset($saved['title_refresh']) && is_array($saved['title_refresh']) ? $saved['title_refresh'] : array());
+        $state['title_refresh'] = self::sanitizeUtf8Value($state['title_refresh']);
         if (!isset($state['mailboxes']) || !is_array($state['mailboxes'])) $state['mailboxes'] = array();
 
         /*
@@ -439,6 +459,9 @@ class PublicMailStorageService
         }
         if (isset($changes['title_normalization']) && is_array($changes['title_normalization'])) {
             $changes['title_normalization'] = array_merge($state['title_normalization'], $changes['title_normalization']);
+        }
+        if (isset($changes['title_refresh']) && is_array($changes['title_refresh'])) {
+            $changes['title_refresh'] = array_merge($state['title_refresh'], $changes['title_refresh']);
         }
         $state = array_merge($state, $changes);
         self::writeJsonFile(self::path(self::SYNC_FILE), $state);

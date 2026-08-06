@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 제목은 수집·목록·상세·검색 단계에서 로컬 자동보정합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.11
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.12
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.11';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.12';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -154,21 +154,14 @@
         for(i=0;i<buttons.length;i++) buttons[i].addEventListener('click',function(){fullImportAction(this.getAttribute('data-full-import'));});
     }
 
-    function bindLocalTitleCleanup(){
-        var button=document.querySelector('[data-local-title-cleanup]');
-        if(!button)return;
-        button.addEventListener('click',function(){
-            if(button.classList.contains('is-busy'))return;
-            if(!window.confirm('저장된 메일 제목을 CPMS 내부에서 한 번에 재정리할까요? 네이버 전체메일을 다시 받지 않습니다.'))return;
-            button.classList.add('is-busy');button.setAttribute('disabled','disabled');
-            showLoading('저장된 제목과 검색 색인을 로컬에서 정리하는 중입니다.');
-            postJson({action:'rebuild_local_titles',csrf_token:csrf(),response_type:'json'},function(result,status){
-                hideLoading();button.classList.remove('is-busy');button.removeAttribute('disabled');
-                if(!result||!result.ok){alert(result&&result.message?result.message:'제목 재정리에 실패했습니다.');return;}
-                alert(result.message||'메일 제목 재정리를 완료했습니다.');
-                window.location.reload();
-            },{timeout:120000});
-        });
+    function bindOriginalTitleRefreshAutoSubmit(){
+        var form=document.querySelector('[data-title-refresh-auto-form]');
+        if(!form)return;
+        window.setTimeout(function(){
+            if(form.getAttribute('data-submitted')==='1')return;
+            form.setAttribute('data-submitted','1');
+            form.submit();
+        },900);
     }
 
     function updateStatusView(state) {
@@ -555,7 +548,7 @@
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindLocalTitleCleanup(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMobileSearch(); bindMailNavigation(); openInitialMessage();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindOriginalTitleRefreshAutoSubmit(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMobileSearch(); bindMailNavigation(); openInitialMessage();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

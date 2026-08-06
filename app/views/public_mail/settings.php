@@ -11,13 +11,16 @@ $processed=isset($full['processed_count'])?(int)$full['processed_count']:0;
 $remaining=isset($full['remaining_count'])?(int)$full['remaining_count']:0;
 $percent=$total>0?(int)floor(($processed/$total)*100):0;
 if ($percent>100) $percent=100;
-$titleNormalization=isset($syncState['title_normalization'])&&is_array($syncState['title_normalization'])?$syncState['title_normalization']:array();
-$titleChecked=isset($titleNormalization['checked_count'])?(int)$titleNormalization['checked_count']:0;
-$titleChanged=isset($titleNormalization['changed_count'])?(int)$titleNormalization['changed_count']:0;
-$titleUnresolved=isset($titleNormalization['unresolved_count'])?(int)$titleNormalization['unresolved_count']:0;
-$titleLastRun=isset($titleNormalization['last_run_at'])?(string)$titleNormalization['last_run_at']:'';
+$titleRefresh=isset($syncState['title_refresh'])&&is_array($syncState['title_refresh'])?$syncState['title_refresh']:array();
+$titleTotal=isset($titleRefresh['total_count'])?(int)$titleRefresh['total_count']:0;
+$titleProcessed=isset($titleRefresh['processed_count'])?(int)$titleRefresh['processed_count']:0;
+$titleUpdated=isset($titleRefresh['updated_count'])?(int)$titleRefresh['updated_count']:0;
+$titleFailed=isset($titleRefresh['failed_count'])?(int)$titleRefresh['failed_count']:0;
+$titleRemaining=isset($titleRefresh['remaining_count'])?(int)$titleRefresh['remaining_count']:0;
+$titlePercent=$titleTotal>0?(int)floor(($titleProcessed/$titleTotal)*100):0;
+if($titlePercent>100)$titlePercent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_711">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_712">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -69,7 +72,7 @@ $titleLastRun=isset($titleNormalization['last_run_at'])?(string)$titleNormalizat
       <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>설치 버전·목록 속도 상태</strong><span>실제 적용된 핵심 파일과 메일 색인 상태를 확인합니다.</span></div><span class="pm-status-dot <?php echo !empty($indexStatus['writable'])?'is-on':''; ?>"><?php echo !empty($indexStatus['writable'])?'정상':'확인 필요'; ?></span></div>
         <div class="pm-sync-state-list">
-          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.11'); ?></strong></div>
+          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.12'); ?></strong></div>
           <div><span>목록 색인 버전</span><strong><?php echo isset($indexStatus['version'])?(int)$indexStatus['version']:0; ?></strong></div>
           <div><span>색인 메일 수</span><strong><?php echo number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0); ?>건</strong></div>
           <div><span>마지막 색인 갱신</span><strong><?php echo call_user_func($esc,!empty($indexStatus['updated_at'])?$indexStatus['updated_at']:'아직 없음'); ?></strong></div>
@@ -85,24 +88,34 @@ $titleLastRun=isset($titleNormalization['last_run_at'])?(string)$titleNormalizat
           <div><span>본문 미준비</span><strong><?php echo number_format(isset($cacheStats['missing_messages'])?(int)$cacheStats['missing_messages']:0); ?>건</strong></div>
           <div><span>구버전 캐시</span><strong><?php echo number_format(isset($cacheStats['legacy_messages'])?(int)$cacheStats['legacy_messages']:0); ?>건</strong></div>
         </div>
-        <p class="pm-help-text">구버전 캐시가 있어도 네이버에서 본문을 다시 받지 않습니다. 메일을 열 때 저장된 HTML만 빠르게 변환하며, 제목 자동보정도 본문 캐시를 삭제하지 않습니다.</p>
+        <p class="pm-help-text">구버전 캐시가 있어도 네이버에서 본문을 다시 받지 않습니다. 메일을 열 때 저장된 HTML만 빠르게 변환하며, 제목 재수집도 본문 캐시를 삭제하지 않습니다.</p>
       </div>
 
-      <div class="pm-settings-card pm-title-normalization-card">
-        <div class="pm-card-title"><div><strong>메일 제목 자동보정</strong><span>네이버 전체메일을 다시 내려받지 않고 CPMS 내부에서 제목을 바로 정리합니다.</span></div><span class="pm-status-dot is-on">적용 중</span></div>
-        <div class="pm-alert pm-alert-success"><strong>별도의 자동복구 진행화면이 필요하지 않습니다.</strong><br>새 메일은 수집할 때 즉시 보정하고, 기존 메일은 목록·상세·검색에서 사용할 때 자동으로 보정합니다.</div>
+      <div class="pm-settings-card pm-title-normalization-card" id="title-refresh">
+        <div class="pm-card-title"><div><strong>기존 메일 원본 제목 재수집</strong><span>평상시 메일 화면과 완전히 분리해 네이버 제목 헤더만 100건씩 가져옵니다.</span></div><span class="pm-status-dot <?php echo !empty($titleRefresh['active'])&&!empty($titleRefresh['paused'])?'':(!empty($titleRefresh['active'])?'is-on':''); ?>"><?php echo !empty($titleRefresh['active'])?(!empty($titleRefresh['paused'])?'일시중지':'진행 중'):(isset($titleRefresh['status'])&&$titleRefresh['status']==='completed'?'완료':'대기'); ?></span></div>
+        <div class="pm-alert pm-alert-success"><strong>메일 메뉴 속도와 제목 복구 작업을 분리했습니다.</strong><br>메일 메뉴 진입·목록·상세에서는 전체 제목 검사나 네이버 제목 조회를 전혀 실행하지 않습니다.</div>
+        <div class="pm-progress-label"><strong><?php echo $titlePercent; ?>%</strong><span><?php echo number_format($titleProcessed); ?> / <?php echo number_format($titleTotal); ?>건</span></div>
+        <div class="pm-progress-track"><span style="width:<?php echo $titlePercent; ?>%"></span></div>
         <div class="pm-sync-state-list">
-          <div><span>자동보정 상태</span><strong>항상 적용</strong></div>
-          <div><span>최근 전체 확인</span><strong data-title-last-run><?php echo call_user_func($esc,$titleLastRun!==''?$titleLastRun:'아직 없음'); ?></strong></div>
-          <div><span>확인한 제목</span><strong data-title-checked><?php echo number_format($titleChecked); ?>건</strong></div>
-          <div><span>로컬 정리 완료</span><strong data-title-changed><?php echo number_format($titleChanged); ?>건</strong></div>
-          <div><span>메일 열 때 원본 확인 대상</span><strong data-title-unresolved><?php echo number_format($titleUnresolved); ?>건</strong></div>
+          <div><span>확인 완료</span><strong><?php echo number_format($titleProcessed); ?>건</strong></div>
+          <div><span>실제 제목 변경</span><strong><?php echo number_format($titleUpdated); ?>건</strong></div>
+          <div><span>확인 실패</span><strong><?php echo number_format($titleFailed); ?>건</strong></div>
+          <div><span>남은 제목</span><strong><?php echo number_format($titleRemaining); ?>건</strong></div>
+          <div><span>최근 실행</span><strong><?php echo call_user_func($esc,!empty($titleRefresh['last_run_at'])?$titleRefresh['last_run_at']:'아직 없음'); ?></strong></div>
         </div>
-        <?php if (!empty($titleNormalization['last_message'])): ?><div class="pm-alert pm-alert-success" data-title-message><?php echo call_user_func($esc,$titleNormalization['last_message']); ?></div><?php else: ?><div class="pm-help-text" data-title-message>기존 제목 재정리를 아직 실행하지 않았습니다.</div><?php endif; ?>
+        <?php if (!empty($titleRefresh['last_error'])): ?><div class="pm-alert pm-alert-error"><strong>실제 오류</strong><br><?php echo call_user_func($esc,$titleRefresh['last_error']); ?></div><?php endif; ?>
+        <?php if (!empty($titleRefresh['last_message'])): ?><div class="pm-help-text"><?php echo call_user_func($esc,$titleRefresh['last_message']); ?></div><?php endif; ?>
         <div class="pm-settings-actions pm-wrap-actions">
-          <button type="button" class="pm-btn pm-btn-primary" data-local-title-cleanup><i data-lucide="languages"></i> 기존 제목 지금 재정리</button>
+          <form method="post" action="public_mail_action.php" onsubmit="return confirm('네이버 원본 제목을 100건씩 다시 가져올까요? 메일 본문과 첨부파일은 받지 않습니다.');"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="start_original_title_refresh"><button type="submit" class="pm-btn pm-btn-primary"><i data-lucide="refresh-cw"></i> 원본 제목 다시 가져오기</button></form>
+          <form method="post" action="public_mail_action.php"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="process_original_title_refresh_batch"><input type="hidden" name="limit" value="100"><button type="submit" class="pm-btn pm-btn-light"><i data-lucide="chevrons-right"></i> 지금 100건 처리</button></form>
+          <form method="post" action="public_mail_action.php"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="pause_original_title_refresh"><button type="submit" class="pm-btn pm-btn-light"><i data-lucide="pause"></i> 일시중지</button></form>
+          <form method="post" action="public_mail_action.php"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="resume_original_title_refresh"><button type="submit" class="pm-btn pm-btn-light"><i data-lucide="play"></i> 다시 시작</button></form>
+          <form method="post" action="public_mail_action.php" onsubmit="return confirm('제목 재수집을 취소할까요? 이미 바뀐 제목은 유지됩니다.');"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="cancel_original_title_refresh"><button type="submit" class="pm-btn pm-btn-danger"><i data-lucide="square"></i> 취소</button></form>
         </div>
-        <p class="pm-help-text">이 버튼은 네이버 서버에 접속하지 않고 저장된 제목과 검색 색인만 한 번에 정리합니다. 로컬 정보만으로 원래 제목을 확정할 수 없는 일부 메일은 그 메일을 열 때 제목 헤더 한 건만 확인하고 이후에는 다시 조회하지 않습니다.</p>
+        <p class="pm-help-text">진행 중에는 이 설정 화면이 일반 POST 요청으로 100건씩 다음 페이지를 엽니다. JSON 비동기 응답을 사용하지 않습니다. 화면을 닫으면 안전하게 멈추고, 다시 설정 화면을 열면 저장 위치부터 이어집니다.</p>
+        <?php if (!empty($titleRefresh['active']) && empty($titleRefresh['paused'])): ?>
+          <form method="post" action="public_mail_action.php" data-title-refresh-auto-form hidden><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="process_original_title_refresh_batch"><input type="hidden" name="limit" value="100"></form>
+        <?php endif; ?>
       </div>
 
       <div class="pm-settings-card">
@@ -144,4 +157,4 @@ $titleLastRun=isset($titleNormalization['last_run_at'])?(string)$titleNormalizat
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_711"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_712"></script>

@@ -180,6 +180,56 @@ class PublicMailImapClient
         return array('uid' => $uid, 'flags' => is_array($flags) ? $flags : array(), 'size' => $size, 'header' => $headerText);
     }
 
+    /**
+     * 여러 UID의 SUBJECT 헤더만 한 번의 IMAP 명령으로 가져옵니다.
+     * 본문과 첨부파일은 내려받지 않으며 최대 100건으로 제한합니다.
+     */
+    public function fetchSubjectHeaders($uids)
+    {
+        $this->assertMailboxSelected();
+        if (!is_array($uids)) $uids = array();
+        $clean = array();
+        foreach ($uids as $uid) {
+            $uid = (int)$uid;
+            if ($uid > 0) $clean[$uid] = $uid;
+            if (count($clean) >= 100) break;
+        }
+        $clean = array_values($clean);
+        sort($clean, SORT_NUMERIC);
+        if (empty($clean)) return array();
+
+        $response = $this->command(
+            'UID FETCH ' . implode(',', $clean) . ' (UID BODY.PEEK[HEADER.FIELDS (SUBJECT)])',
+            4194304
+        );
+        if (!$response['ok']) throw new \RuntimeException('메일 제목 묶음을 읽지 못했습니다: ' . $response['final']);
+
+        $result = array();
+        $contexts = isset($response['literal_contexts']) && is_array($response['literal_contexts'])
+            ? $response['literal_contexts'] : array();
+        foreach ($contexts as $context) {
+            if (!is_array($context)) continue;
+            $line = isset($context['line']) ? (string)$context['line'] : '';
+            $literal = isset($context['literal']) ? (string)$context['literal'] : '';
+            if ($literal === '' || !preg_match('/\bUID\s+([0-9]+)/i', $line, $match)) continue;
+            $result[(int)$match[1]] = $literal;
+        }
+
+        /* 일부 서버가 UID를 리터럴 직전 줄과 분리하는 경우 응답 순서로 보완합니다. */
+        if (count($result) < count($clean) && !empty($response['literals'])) {
+            $responseUids = array();
+            foreach ($response['lines'] as $line) {
+                if (preg_match('/\bUID\s+([0-9]+)/i', (string)$line, $match)) $responseUids[] = (int)$match[1];
+            }
+            foreach ($response['literals'] as $position => $literal) {
+                if (isset($responseUids[$position]) && !isset($result[$responseUids[$position]])) {
+                    $result[$responseUids[$position]] = (string)$literal;
+                }
+            }
+        }
+        return $result;
+    }
+
     public function fetchRawPreview($uid, $maximumBytes)
     {
         $this->assertMailboxSelected();
@@ -332,7 +382,7 @@ class PublicMailImapClient
     private function readResponse($tag, $maximumLiteralBytes)
     {
         $maximumLiteralBytes = (int)$maximumLiteralBytes > 0 ? (int)$maximumLiteralBytes : 52428800;
-        $result = array('ok'=>false,'status'=>'','final'=>'','lines'=>array(),'literals'=>array());
+        $result = array('ok'=>false,'status'=>'','final'=>'','lines'=>array(),'literals'=>array(),'literal_contexts'=>array());
         while (!feof($this->socket)) {
             $line = @fgets($this->socket, 16384);
             if ($line === false) {
@@ -351,6 +401,7 @@ class PublicMailImapClient
                     $literal .= $chunk; $remaining -= strlen($chunk);
                 }
                 $result['literals'][] = $literal;
+                $result['literal_contexts'][] = array('line'=>$line, 'literal'=>$literal);
             }
             if (strpos($line, $tag . ' ') === 0) {
                 $result['final'] = trim($line);

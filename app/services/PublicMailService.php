@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.11';
+    const VERSION = '1.7.12';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -168,9 +168,8 @@ class PublicMailService
     public function runAutomationTick($limit)
     {
         /*
-         * v1.7.11: 깨진 제목 전체 재조회 작업은 제거했습니다.
-         * 자동호출은 새 메일 수집과 본문 캐시 준비만 담당하고,
-         * 제목은 수집/목록/상세/검색 단계에서 로컬 자동보정합니다.
+         * v1.7.12: 자동호출은 새 메일 수집과 본문 캐시 준비만 담당합니다.
+         * 기존 제목 재수집은 연동 설정의 일반 페이지 요청에서만 실행합니다.
          */
         $state = PublicMailStorageService::getSyncState();
         if (!empty($state['full_import']['active']) && empty($state['full_import']['paused'])) {
@@ -185,7 +184,7 @@ class PublicMailService
         } catch (\Exception $ignored) {
             $result['body_cached_count'] = 0;
         }
-        $result['title_normalization'] = 'local';
+        $result['title_refresh'] = 'settings_only';
         $result['state'] = PublicMailStorageService::getSyncState();
         return $result;
     }
@@ -384,7 +383,6 @@ class PublicMailService
             }
             $message = $messages[$messageKey];
         }
-        $message = $this->normalizeAndPersistMessageTitle($messageKey, $message, true);
         $parsedKey = PublicMailStorageService::parseMessageKey($messageKey);
         $detail = $this->normalizeStoredMessage($message);
         $detail['message_key'] = $messageKey;
@@ -811,172 +809,250 @@ class PublicMailService
 
 
     /**
-     * 저장된 전체 제목을 네이버에 접속하지 않고 한 번에 정리하고 검색 색인을 다시 만듭니다.
+     * 네이버 원본 제목 재수집 작업을 등록합니다.
+     * 실제 처리는 설정 화면의 일반 POST 요청에서 메일함별 100건씩 진행합니다.
      */
-    public function normalizeStoredMailTitles()
+    public function startOriginalTitleRefresh()
     {
-        $lock = PublicMailStorageService::acquireLock('title_normalization');
-        if ($lock === false) {
-            return array('ok'=>false,'message'=>'다른 제목 정리 작업이 실행 중입니다. 잠시 후 다시 눌러주세요.');
+        $messages = PublicMailStorageService::getMessages();
+        $mailboxCounts = array();
+        $total = 0;
+        foreach ($messages as $messageKey => $message) {
+            if (!is_array($message)) continue;
+            $parsed = PublicMailStorageService::parseMessageKey($messageKey);
+            $mailbox = isset($message['mailbox']) && trim((string)$message['mailbox']) !== ''
+                ? (string)$message['mailbox'] : (string)$parsed['mailbox'];
+            $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsed['uid'];
+            if ($mailbox === '' || $uid <= 0) continue;
+            if (!isset($mailboxCounts[$mailbox])) $mailboxCounts[$mailbox] = 0;
+            $mailboxCounts[$mailbox]++;
+            $total++;
         }
-        $checked = 0; $changed = 0; $unresolved = 0;
+        $order = array_keys($mailboxCounts);
+        usort($order, function ($a, $b) {
+            if (strcasecmp((string)$a, 'INBOX') === 0) return -1;
+            if (strcasecmp((string)$b, 'INBOX') === 0) return 1;
+            return strcmp((string)$a, (string)$b);
+        });
+
+        $refresh = array(
+            'active'=>$total > 0,
+            'paused'=>false,
+            'cancelled'=>false,
+            'status'=>$total > 0 ? 'running' : 'completed',
+            'started_at'=>date('Y-m-d H:i:s'),
+            'finished_at'=>$total > 0 ? '' : date('Y-m-d H:i:s'),
+            'last_run_at'=>'',
+            'mailbox_order'=>$order,
+            'current_mailbox_index'=>0,
+            'last_uid'=>0,
+            'total_count'=>$total,
+            'processed_count'=>0,
+            'updated_count'=>0,
+            'failed_count'=>0,
+            'remaining_count'=>$total,
+            'last_batch_count'=>0,
+            'last_message'=>$total > 0
+                ? '네이버 원본 제목 재수집을 시작했습니다. 설정 화면을 열어두면 100건씩 계속 진행합니다.'
+                : '재수집할 저장 메일이 없습니다.',
+            'last_error'=>''
+        );
+        $state = PublicMailStorageService::saveSyncState(array(
+            'title_normalization'=>array('enabled'=>false,'status'=>'disabled_for_speed','last_message'=>'평상시 화면 제목 자동보정을 중지했습니다.'),
+            'metadata_repair'=>array('active'=>false,'paused'=>false,'cancelled'=>true,'status'=>'replaced_by_title_refresh','remaining_count'=>0,'last_error'=>''),
+            'title_refresh'=>$refresh
+        ));
+        return array('ok'=>true,'message'=>$refresh['last_message'],'state'=>$state);
+    }
+
+    public function controlOriginalTitleRefresh($command)
+    {
+        $command = trim((string)$command);
+        $state = PublicMailStorageService::getSyncState();
+        $refresh = isset($state['title_refresh']) && is_array($state['title_refresh']) ? $state['title_refresh'] : array();
+        if ($command === 'pause') {
+            $refresh['active'] = true;
+            $refresh['paused'] = true;
+            $refresh['status'] = 'paused';
+            $refresh['last_message'] = '원본 제목 재수집을 일시중지했습니다.';
+        } elseif ($command === 'resume') {
+            if (empty($refresh['mailbox_order']) || (int)$refresh['remaining_count'] <= 0) {
+                return $this->startOriginalTitleRefresh();
+            }
+            $refresh['active'] = true;
+            $refresh['paused'] = false;
+            $refresh['cancelled'] = false;
+            $refresh['status'] = 'running';
+            $refresh['last_error'] = '';
+            $refresh['last_message'] = '원본 제목 재수집을 다시 시작했습니다.';
+        } elseif ($command === 'cancel') {
+            $refresh['active'] = false;
+            $refresh['paused'] = false;
+            $refresh['cancelled'] = true;
+            $refresh['status'] = 'cancelled';
+            $refresh['finished_at'] = date('Y-m-d H:i:s');
+            $refresh['last_message'] = '원본 제목 재수집을 취소했습니다. 이미 바뀐 제목은 유지됩니다.';
+            PublicMailIndexService::rebuild();
+        } else {
+            throw new \InvalidArgumentException('제목 재수집 명령이 올바르지 않습니다.');
+        }
+        $state = PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+        return array('ok'=>true,'message'=>$refresh['last_message'],'state'=>$state);
+    }
+
+    /**
+     * 같은 메일함의 제목 최대 100건을 한 번의 UID FETCH 명령으로 가져옵니다.
+     * JSON 비동기 응답을 사용하지 않고 일반 페이지 요청 한 번으로 한 묶음을 끝냅니다.
+     */
+    public function processOriginalTitleRefreshBatch($limit)
+    {
+        $limit = max(20, min(100, (int)$limit));
+        $settings = $this->requireEnabledSettings();
+        $lock = PublicMailStorageService::acquireLock('title_refresh');
+        if ($lock === false) throw new \RuntimeException('다른 제목 재수집 요청이 실행 중입니다. 잠시 후 다시 시도하세요.');
+        $client = $this->createClient($settings);
+        $refresh = array();
         try {
-            $path = PublicMailStorageService::path(PublicMailStorageService::MESSAGES_FILE);
-            $messages = PublicMailStorageService::readJsonFile($path, array());
-            if (!is_array($messages)) $messages = array();
-            foreach ($messages as $messageKey => $message) {
-                if (!is_array($message)) continue;
-                $checked++;
-                $original = isset($message['subject']) ? (string)$message['subject'] : '';
-                $normalized = PublicMailStorageService::normalizeMailText($original);
-                if ($normalized === '' && trim($original) === '') $normalized = '(제목 없음)';
-                if ($normalized !== '' && $normalized !== $original) {
-                    $messages[$messageKey]['subject'] = $normalized;
-                    $messages[$messageKey]['subject_normalized_at'] = date('Y-m-d H:i:s');
-                    $messages[$messageKey]['subject_normalization_source'] = 'local_v1711';
-                    $changed++;
+            $state = PublicMailStorageService::getSyncState();
+            $refresh = isset($state['title_refresh']) && is_array($state['title_refresh']) ? $state['title_refresh'] : array();
+            if (empty($refresh['active'])) return array('ok'=>true,'message'=>'원본 제목 재수집이 실행 중이 아닙니다.','state'=>$state);
+            if (!empty($refresh['paused'])) return array('ok'=>true,'message'=>'원본 제목 재수집이 일시중지되어 있습니다.','state'=>$state);
+
+            $messages = PublicMailStorageService::getMessages();
+            $order = isset($refresh['mailbox_order']) && is_array($refresh['mailbox_order']) ? $refresh['mailbox_order'] : array();
+            $mailboxIndex = isset($refresh['current_mailbox_index']) ? (int)$refresh['current_mailbox_index'] : 0;
+            $lastUid = isset($refresh['last_uid']) ? (int)$refresh['last_uid'] : 0;
+            $selectedMailbox = '';
+            $candidates = array();
+
+            while ($mailboxIndex < count($order) && empty($candidates)) {
+                $selectedMailbox = (string)$order[$mailboxIndex];
+                foreach ($messages as $messageKey => $message) {
+                    if (!is_array($message)) continue;
+                    $parsed = PublicMailStorageService::parseMessageKey($messageKey);
+                    $mailbox = isset($message['mailbox']) && trim((string)$message['mailbox']) !== ''
+                        ? (string)$message['mailbox'] : (string)$parsed['mailbox'];
+                    $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsed['uid'];
+                    if ($mailbox !== $selectedMailbox || $uid <= $lastUid) continue;
+                    $candidates[] = array('message_key'=>(string)$messageKey,'uid'=>$uid);
                 }
-                $finalSubject = isset($messages[$messageKey]['subject']) ? (string)$messages[$messageKey]['subject'] : $normalized;
-                if (PublicMailStorageService::looksBrokenMailText($finalSubject)) $unresolved++;
+                usort($candidates, function ($a, $b) {
+                    $au = isset($a['uid']) ? (int)$a['uid'] : 0;
+                    $bu = isset($b['uid']) ? (int)$b['uid'] : 0;
+                    if ($au === $bu) return 0;
+                    return $au < $bu ? -1 : 1;
+                });
+                if (empty($candidates)) {
+                    $mailboxIndex++;
+                    $lastUid = 0;
+                }
             }
 
-            if ($changed > 0) PublicMailStorageService::saveMessages($messages);
-            else PublicMailIndexService::rebuild($messages, null);
+            if ($mailboxIndex >= count($order)) {
+                $refresh['active'] = false;
+                $refresh['paused'] = false;
+                $refresh['status'] = 'completed';
+                $refresh['remaining_count'] = 0;
+                $refresh['finished_at'] = date('Y-m-d H:i:s');
+                $refresh['last_message'] = '네이버 원본 제목 재수집과 검색 색인 갱신을 완료했습니다.';
+                PublicMailIndexService::rebuild($messages, null);
+                $state = PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+                return array('ok'=>true,'message'=>$refresh['last_message'],'completed'=>true,'state'=>$state);
+            }
 
-            $legacy = PublicMailStorageService::getSyncState();
-            $legacyRepair = isset($legacy['metadata_repair']) && is_array($legacy['metadata_repair']) ? $legacy['metadata_repair'] : array();
-            $legacyRepair['active'] = false;
-            $legacyRepair['paused'] = false;
-            $legacyRepair['cancelled'] = true;
-            $legacyRepair['status'] = 'replaced_by_local_normalization';
-            $legacyRepair['remaining_count'] = 0;
-            $legacyRepair['target_keys'] = array();
-            $legacyRepair['message_attempts'] = array();
-            $legacyRepair['last_error'] = '';
-            $legacyRepair['last_message'] = '기존 네이버 전체 재조회 복구는 제거되고 로컬 제목 자동보정으로 전환되었습니다.';
+            $candidates = array_slice($candidates, 0, $limit);
+            $uids = array();
+            foreach ($candidates as $candidate) $uids[] = (int)$candidate['uid'];
 
-            $message = number_format($checked) . '건의 제목을 CPMS 내부에서 확인해 ' . number_format($changed) . '건을 정리했습니다.';
-            if ($unresolved > 0) $message .= ' 로컬에서 확정하기 어려운 ' . number_format($unresolved) . '건은 해당 메일을 열 때 원본 제목만 한 번 확인합니다.';
-            else $message .= ' 추가 확인이 필요한 제목은 없습니다.';
+            $client->connect();
+            $client->login($settings['username'], $settings['password']);
+            $client->selectMailbox($selectedMailbox);
+            $headerMap = $client->fetchSubjectHeaders($uids);
 
-            $state = PublicMailStorageService::saveSyncState(array(
-                'metadata_repair'=>$legacyRepair,
-                'title_normalization'=>array(
-                    'enabled'=>true,
-                    'status'=>'completed',
-                    'last_run_at'=>date('Y-m-d H:i:s'),
-                    'checked_count'=>$checked,
-                    'changed_count'=>$changed,
-                    'unresolved_count'=>$unresolved,
-                    'last_message'=>$message
-                )
-            ));
-            return array('ok'=>true,'message'=>$message,'checked_count'=>$checked,'changed_count'=>$changed,'unresolved_count'=>$unresolved,'state'=>$state);
+            $processedThisRun = 0;
+            $updatedThisRun = 0;
+            $failedThisRun = 0;
+            $changed = false;
+            foreach ($candidates as $candidate) {
+                $messageKey = (string)$candidate['message_key'];
+                $uid = (int)$candidate['uid'];
+                $lastUid = max($lastUid, $uid);
+                $processedThisRun++;
+                if (!isset($headerMap[$uid]) || trim((string)$headerMap[$uid]) === '') {
+                    $failedThisRun++;
+                    continue;
+                }
+                $headers = $this->parseHeaders((string)$headerMap[$uid]);
+                $freshSubject = PublicMailStorageService::normalizeMailText(
+                    $this->decodeHeader(isset($headers['subject']) ? $headers['subject'] : '')
+                );
+                if ($freshSubject === '') {
+                    $failedThisRun++;
+                    continue;
+                }
+                $oldSubject = isset($messages[$messageKey]['subject']) ? (string)$messages[$messageKey]['subject'] : '';
+                if ($freshSubject !== $oldSubject) {
+                    $messages[$messageKey]['subject'] = $freshSubject;
+                    $messages[$messageKey]['subject_refreshed_at'] = date('Y-m-d H:i:s');
+                    $messages[$messageKey]['subject_refresh_source'] = 'naver_batch_v1712';
+                    $updatedThisRun++;
+                    $changed = true;
+                }
+            }
+
+            if ($changed) PublicMailStorageService::saveMessagesCheckpoint($messages);
+            $refresh['current_mailbox_index'] = $mailboxIndex;
+            $refresh['last_uid'] = $lastUid;
+            $refresh['processed_count'] = (int)$refresh['processed_count'] + $processedThisRun;
+            $refresh['updated_count'] = (int)$refresh['updated_count'] + $updatedThisRun;
+            $refresh['failed_count'] = (int)$refresh['failed_count'] + $failedThisRun;
+            $refresh['remaining_count'] = max(0, (int)$refresh['total_count'] - (int)$refresh['processed_count']);
+            $refresh['last_batch_count'] = $processedThisRun;
+            $refresh['last_run_at'] = date('Y-m-d H:i:s');
+            $refresh['status'] = 'running';
+            $refresh['last_error'] = '';
+            $refresh['last_message'] = $selectedMailbox . ' 메일함 제목 ' . number_format($processedThisRun) . '건을 확인해 ' . number_format($updatedThisRun) . '건을 바꿨습니다.';
+
+            $state = PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+            return array(
+                'ok'=>true,
+                'message'=>$refresh['last_message'],
+                'processed_count'=>$processedThisRun,
+                'updated_count'=>$updatedThisRun,
+                'failed_count'=>$failedThisRun,
+                'completed'=>false,
+                'state'=>$state
+            );
+        } catch (\Exception $e) {
+            $refresh['active'] = true;
+            $refresh['paused'] = true;
+            $refresh['status'] = 'error';
+            $refresh['last_run_at'] = date('Y-m-d H:i:s');
+            $refresh['last_error'] = PublicMailStorageService::sanitizeText($e->getMessage(), 500);
+            $refresh['last_message'] = '제목 재수집을 잠시 멈췄습니다. 아래 실제 오류를 확인한 뒤 다시 시작하세요.';
+            PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+            throw $e;
         } finally {
+            try { $client->logout(); } catch (\Exception $ignored) {}
             PublicMailStorageService::releaseLock($lock);
         }
+    }
+
+    /** v1.7.11의 구형 버튼이 남아 있어도 새 원본 제목 재수집을 시작합니다. */
+    public function normalizeStoredMailTitles()
+    {
+        return $this->startOriginalTitleRefresh();
     }
 
     /** 구형 전체 자동복구 상태를 안전하게 종료합니다. */
     public function disableLegacyMetadataRepair()
     {
         $state = PublicMailStorageService::saveSyncState(array('metadata_repair'=>array(
-            'active'=>false,'paused'=>false,'cancelled'=>true,'status'=>'replaced_by_local_normalization',
+            'active'=>false,'paused'=>false,'cancelled'=>true,'status'=>'replaced_by_title_refresh',
             'remaining_count'=>0,'target_keys'=>array(),'message_attempts'=>array(),'last_error'=>'',
-            'last_message'=>'구형 전체 자동복구는 제거되었습니다. 제목은 CPMS 내부에서 자동보정합니다.'
+            'last_message'=>'구형 전체 자동복구를 종료했습니다. 기존 제목은 원본 제목 재수집에서 처리합니다.'
         )));
-        return array('ok'=>true,'message'=>'구형 전체 자동복구를 종료했습니다. 제목 자동보정은 계속 적용됩니다.','state'=>$state);
-    }
-
-    /**
-     * 목록/상세에서 제목을 로컬 보정해 저장합니다.
-     * 로컬 보정으로도 깨진 제목만 7일에 한 번 해당 메일 헤더 한 건을 네이버에서 확인합니다.
-     */
-    private function normalizeAndPersistMessageTitle($messageKey, $fallbackMessage, $allowOriginalFetch)
-    {
-        /* 정상 제목은 기존의 빠른 색인값을 그대로 사용해 messages.json 전체 읽기를 피합니다. */
-        $fallbackMessage = is_array($fallbackMessage) ? $fallbackMessage : array();
-        $fallbackOriginal = isset($fallbackMessage['subject']) ? (string)$fallbackMessage['subject'] : '';
-        $fallbackNormalized = PublicMailStorageService::normalizeMailText($fallbackOriginal);
-        if ($fallbackNormalized !== '') $fallbackMessage['subject'] = $fallbackNormalized;
-        $needsPersistence = $fallbackNormalized !== '' && $fallbackNormalized !== $fallbackOriginal;
-        $needsOriginCheck = $allowOriginalFetch && PublicMailStorageService::looksBrokenMailText(isset($fallbackMessage['subject']) ? $fallbackMessage['subject'] : '');
-        if (!$needsPersistence && !$needsOriginCheck) return $fallbackMessage;
-
-        $path = PublicMailStorageService::path(PublicMailStorageService::MESSAGES_FILE);
-        $messages = PublicMailStorageService::readJsonFile($path, array());
-        if (!is_array($messages) || !isset($messages[$messageKey]) || !is_array($messages[$messageKey])) {
-            if (is_array($fallbackMessage) && isset($fallbackMessage['subject'])) {
-                $fallbackMessage['subject'] = PublicMailStorageService::normalizeMailText($fallbackMessage['subject']);
-            }
-            return is_array($fallbackMessage) ? $fallbackMessage : array();
-        }
-
-        $message = $messages[$messageKey];
-        $original = isset($message['subject']) ? (string)$message['subject'] : '';
-        $normalized = PublicMailStorageService::normalizeMailText($original);
-        $changed = false;
-        if ($normalized !== '' && $normalized !== $original) {
-            $message['subject'] = $normalized;
-            $message['subject_normalized_at'] = date('Y-m-d H:i:s');
-            $message['subject_normalization_source'] = 'local_display_v1711';
-            $changed = true;
-        }
-
-        $subject = isset($message['subject']) ? (string)$message['subject'] : '';
-        $lastAttempt = isset($message['title_origin_refetch_attempted_at']) ? strtotime((string)$message['title_origin_refetch_attempted_at']) : false;
-        $canAttempt = $lastAttempt === false || (time() - (int)$lastAttempt) >= 604800;
-        if ($allowOriginalFetch && $canAttempt && PublicMailStorageService::looksBrokenMailText($subject)) {
-            $message['title_origin_refetch_attempted_at'] = date('Y-m-d H:i:s');
-            try {
-                $freshSubject = $this->fetchSingleMessageSubject($messageKey, $message);
-                if ($freshSubject !== '' && !PublicMailStorageService::looksBrokenMailText($freshSubject)) {
-                    $message['subject'] = $freshSubject;
-                    $message['title_origin_refetch_at'] = date('Y-m-d H:i:s');
-                    $message['title_origin_refetch_error'] = '';
-                } else {
-                    $message['title_origin_refetch_error'] = '원본 제목을 자동으로 확정하지 못했습니다.';
-                }
-            } catch (\Exception $e) {
-                $message['title_origin_refetch_error'] = PublicMailStorageService::sanitizeText($e->getMessage(), 300);
-            }
-            $changed = true;
-        }
-
-        if ($changed) {
-            $messages[$messageKey] = $message;
-            PublicMailStorageService::saveMessagesCheckpoint($messages);
-            $this->indexService->refreshMessage($messageKey, $message);
-        }
-        return $message;
-    }
-
-    /** 로컬 복구가 불가능한 메일 한 건의 제목 헤더만 읽습니다. */
-    private function fetchSingleMessageSubject($messageKey, $message)
-    {
-        $settings = PublicMailStorageService::getSettings(true);
-        if (empty($settings['enabled']) || empty($settings['username']) || empty($settings['password'])) {
-            throw new \RuntimeException('네이버 메일 연동이 꺼져 있어 원본 제목을 확인하지 않았습니다.');
-        }
-        $parsed = PublicMailStorageService::parseMessageKey($messageKey);
-        $mailbox = isset($message['mailbox']) && trim((string)$message['mailbox']) !== '' ? (string)$message['mailbox'] : (string)$parsed['mailbox'];
-        $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsed['uid'];
-        if ($mailbox === '' || $uid <= 0) throw new \RuntimeException('메일함 또는 메일 번호를 확인할 수 없습니다.');
-
-        $lock = PublicMailStorageService::acquireLock('title_refetch');
-        if ($lock === false) throw new \RuntimeException('다른 제목 확인 작업이 실행 중입니다.');
-        $client = $this->createClient($settings);
-        try {
-            $client->connect();
-            $client->login($settings['username'], $settings['password']);
-            $client->selectMailbox($mailbox);
-            $header = $client->fetchHeader($uid);
-            $headers = $this->parseHeaders(isset($header['header']) ? (string)$header['header'] : '');
-            return PublicMailStorageService::normalizeMailText($this->decodeHeader(isset($headers['subject']) ? $headers['subject'] : ''));
-        } finally {
-            try { $client->logout(); } catch (\Exception $ignored) {}
-            PublicMailStorageService::releaseLock($lock);
-        }
+        return array('ok'=>true,'message'=>'구형 전체 자동복구를 종료했습니다.','state'=>$state);
     }
 
     public function getIndexStatus()
@@ -2103,8 +2179,9 @@ class PublicMailService
     private function normalizeStoredMessage($message)
     {
         if (!is_array($message)) return array();
+        /* v1.7.12: 이미 저장된 제목과 주소를 상세화면에서 다시 변환하지 않습니다. */
         foreach (array('subject','from_text','to_text','cc_text') as $field) {
-            if (isset($message[$field])) $message[$field] = PublicMailStorageService::normalizeMailText($this->decodeHeader($message[$field]));
+            if (isset($message[$field])) $message[$field] = (string)$message[$field];
         }
         if (isset($message['preview'])) $message['preview'] = $this->makePreviewText($message['preview']);
         if (isset($message['from_text'])) $message['from_email'] = $this->extractEmail($message['from_text']);

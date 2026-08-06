@@ -13,8 +13,8 @@ require_once __DIR__ . '/PublicMailStorageService.php';
 
 class PublicMailIndexService
 {
-    const VERSION = '1.7.11';
-    const INDEX_VERSION = 5;
+    const VERSION = '1.7.12';
+    const INDEX_VERSION = 6;
     const INDEX_FILE = 'mail_index.json';
 
     private $memoryIndex = null;
@@ -46,7 +46,6 @@ class PublicMailIndexService
 
         foreach ($items as $item) {
             if (!is_array($item)) continue;
-            $item = self::normalizeIndexItem($item);
             if ($this->matchesFilters($item, $filters)) $matched[] = $item;
         }
 
@@ -87,11 +86,11 @@ class PublicMailIndexService
 
         if (isset($positions[$messageKey])) {
             $position = (int)$positions[$messageKey];
-            if (isset($items[$position]) && is_array($items[$position])) return self::normalizeIndexItem($items[$position]);
+            if (isset($items[$position]) && is_array($items[$position])) return $items[$position];
         }
 
         foreach ($items as $item) {
-            if (is_array($item) && isset($item['message_key']) && (string)$item['message_key'] === $messageKey) return self::normalizeIndexItem($item);
+            if (is_array($item) && isset($item['message_key']) && (string)$item['message_key'] === $messageKey) return $item;
         }
         return null;
     }
@@ -183,7 +182,12 @@ class PublicMailIndexService
         if (!isset($index['index_version']) || (int)$index['index_version'] !== self::INDEX_VERSION) return false;
         if (!isset($index['items']) || !is_array($index['items'])) return false;
         if (!isset($index['source_signature']) || !is_array($index['source_signature'])) return false;
-        return $index['source_signature'] === self::sourceSignature();
+        if ($index['source_signature'] !== self::sourceSignature()) {
+            $state = PublicMailStorageService::getSyncState();
+            /* 제목 재수집 중에는 마지막 완성 색인을 그대로 사용해 메뉴 진입 속도를 유지합니다. */
+            if (empty($state['title_refresh']['active'])) return false;
+        }
+        return true;
     }
 
     private static function sourceSignature()
@@ -222,11 +226,11 @@ class PublicMailIndexService
 
         $classification = isset($message['classification']) && is_array($message['classification']) ? $message['classification'] : array();
         $workflow = self::workflowFromMap($workflowMap, $messageKey);
-        $subject = PublicMailStorageService::normalizeMailText(isset($message['subject']) ? (string)$message['subject'] : '');
+        $subject = isset($message['subject']) ? trim((string)$message['subject']) : '';
         if ($subject === '') $subject = '(제목 없음)';
-        $fromText = PublicMailStorageService::normalizeMailText(isset($message['from_text']) ? (string)$message['from_text'] : '');
-        $toText = PublicMailStorageService::normalizeMailText(isset($message['to_text']) ? (string)$message['to_text'] : '');
-        $ccText = PublicMailStorageService::normalizeMailText(isset($message['cc_text']) ? (string)$message['cc_text'] : '');
+        $fromText = isset($message['from_text']) ? trim((string)$message['from_text']) : '';
+        $toText = isset($message['to_text']) ? trim((string)$message['to_text']) : '';
+        $ccText = isset($message['cc_text']) ? trim((string)$message['cc_text']) : '';
         $preview = isset($message['preview']) ? trim((string)$message['preview']) : '';
 
         return array(
@@ -282,19 +286,6 @@ class PublicMailIndexService
         $index['source_signature'] = self::sourceSignature();
         PublicMailStorageService::writeJsonFile($path, $index);
         $this->memoryIndex = $index;
-        return $item;
-    }
-
-    private static function normalizeIndexItem($item)
-    {
-        if (!is_array($item)) return array();
-        $item['subject'] = PublicMailStorageService::normalizeMailText(isset($item['subject']) ? (string)$item['subject'] : '');
-        if ($item['subject'] === '') $item['subject'] = '(제목 없음)';
-        $item['from_text'] = PublicMailStorageService::normalizeMailText(isset($item['from_text']) ? (string)$item['from_text'] : '');
-        $item['to_text'] = PublicMailStorageService::normalizeMailText(isset($item['to_text']) ? (string)$item['to_text'] : '');
-        $item['cc_text'] = PublicMailStorageService::normalizeMailText(isset($item['cc_text']) ? (string)$item['cc_text'] : '');
-        $preview = isset($item['preview']) ? (string)$item['preview'] : '';
-        $item['search_text'] = self::lower($item['subject'] . ' ' . $item['from_text'] . ' ' . $item['to_text'] . ' ' . $preview);
         return $item;
     }
 
