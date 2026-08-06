@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.8';
+    const VERSION = '1.7.9';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -100,6 +100,9 @@ class PublicMailStorageService
                 'lock_acquired_at' => '',
                 'lock_released_at' => '',
                 'heartbeat_at' => '',
+                'queue_version' => 2,
+                'target_keys' => array(),
+                'message_attempts' => array(),
                 'cursor' => 0,
                 'total_count' => 0,
                 'target_count' => 0,
@@ -108,6 +111,13 @@ class PublicMailStorageService
                 'skipped_count' => 0,
                 'failed_count' => 0,
                 'remaining_count' => 0,
+                'batch_size_current' => 50,
+                'recommended_batch_size' => 50,
+                'retry_count' => 0,
+                'consecutive_errors' => 0,
+                'last_run_duration_ms' => 0,
+                'last_checkpoint_at' => '',
+                'last_error_code' => '',
                 'last_message' => '',
                 'last_error' => ''
             )
@@ -295,6 +305,17 @@ class PublicMailStorageService
         if (!is_array($messages)) $messages = array();
         self::writeJsonFile(self::path(self::MESSAGES_FILE), $messages);
         self::refreshIndexSafely($messages, null);
+    }
+
+    /**
+     * 대량 복구 중간 체크포인트용 저장입니다.
+     * messages.json만 안전하게 저장하고, 무거운 목록 색인은 묶음이 끝날 때 한 번만 갱신합니다.
+     */
+    public static function saveMessagesCheckpoint($messages)
+    {
+        self::ensureStorage();
+        if (!is_array($messages)) $messages = array();
+        self::writeJsonFile(self::path(self::MESSAGES_FILE), $messages);
     }
 
     public static function upsertMessages($newMessages)

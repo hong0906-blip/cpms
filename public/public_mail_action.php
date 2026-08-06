@@ -4,7 +4,7 @@
  *
  * 네이버 메일의 상세본문 비동기 조회, 인라인 이미지 출력, 설정, 동기화,
  * 처리상태 변경을 담당합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.8
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.9
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';
@@ -178,10 +178,13 @@ try {
     if ($action === 'run_metadata_repair_once') {
         PublicMailWebHelper::requireDevelopmentDepartment();
         if (function_exists('session_write_close')) @session_write_close();
-        @set_time_limit(40);
+        @set_time_limit(30);
+        $batchSize = isset($_POST['batch_size']) ? (int)$_POST['batch_size'] : 50;
+        if ($batchSize < 30) $batchSize = 30;
+        if ($batchSize > 100) $batchSize = 100;
         $state = $service->getSyncState();
         if (empty($state['metadata_repair']['active'])) $service->startMetadataRepair();
-        $result = $service->runMetadataRepairBatch(20,20);
+        $result = $service->runMetadataRepairBatch($batchSize,14);
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }

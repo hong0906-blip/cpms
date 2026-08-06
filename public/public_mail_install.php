@@ -7,7 +7,7 @@
  * - 기존 1분 브라우저 자동확인 코드를 제거하고 외부 예약서비스 방식으로 전환합니다.
  * - 설치 후 이 파일은 서버에서 삭제하세요.
  * PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.8.1
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.9
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
@@ -87,7 +87,7 @@ function pm_install_patch_sidebar($sidebarPath)
 
     $variableBlock = "\n/* CPMS_PUBLIC_MAIL_VARIABLE_START */\n"
         . "\$publicMailMenu = '네이버 메일';\n"
-        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_78';\n"
+        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_79';\n"
         . "/* CPMS_PUBLIC_MAIL_VARIABLE_END */";
 
     $itemBlock = "/* CPMS_PUBLIC_MAIL_ITEM_START */\n"
@@ -223,8 +223,11 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
 
         $action = isset($_POST['action']) ? (string)$_POST['action'] : '';
         if ($action === 'install') {
-            /* 모바일 메뉴만 빠르게 보정합니다. 메일 색인은 다시 만들지 않습니다. */
             $result = pm_install_patch_sidebar($sidebarPath);
+            $mailService = new PublicMailService();
+            $rebuiltIndex = $mailService->rebuildIndex();
+            $indexedCount = is_array($rebuiltIndex) && isset($rebuiltIndex['items']) && is_array($rebuiltIndex['items']) ? count($rebuiltIndex['items']) : 0;
+            $result['message'] .= ' 메일 목록 색인도 ' . number_format($indexedCount) . '건으로 다시 만들었습니다.';
         } elseif ($action === 'uninstall') {
             $result = pm_install_unpatch_sidebar($sidebarPath);
         } else {
@@ -241,25 +244,25 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
 
 $requiredFiles = array(
     'app/services/GoogleDriveHelper.php' => '',
-    'app/services/PublicMailStorageService.php' => "const VERSION = '1.7.8'",
+    'app/services/PublicMailStorageService.php' => "const VERSION = '1.7.9'",
     'app/services/PublicMailImapClient.php' => '',
     'app/services/PublicMailClassifierService.php' => '',
     'app/services/PublicMailLargeAttachmentService.php' => '',
     'app/services/PublicMailDriveService.php' => '',
-    'app/services/PublicMailIndexService.php' => "const VERSION = '1.7.8'",
-    'app/services/PublicMailService.php' => "const VERSION = '1.7.8'",
+    'app/services/PublicMailIndexService.php' => "const VERSION = '1.7.9'",
+    'app/services/PublicMailService.php' => "const VERSION = '1.7.9'",
     'app/services/PublicMailWebHelper.php' => 'requireDevelopmentDepartment',
-    'app/views/public_mail/index.php' => '20260806_78',
+    'app/views/public_mail/index.php' => '20260806_79',
     'app/views/public_mail/detail_panel.php' => 'data-mail-detail-content',
     'app/views/public_mail/detail_fragment.php' => 'data-detail-fragment',
-    'app/views/public_mail/settings.php' => '20260806_78',
-    'public/public_mail.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.8',
-    'public/public_mail_settings.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.8',
-    'public/public_mail_action.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.8',
+    'app/views/public_mail/settings.php' => '20260806_79',
+    'public/public_mail.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.9',
+    'public/public_mail_settings.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.9',
+    'public/public_mail_action.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.9',
     'public/public_mail_attachment.php' => '',
-    'public/assets/css/public_mail.css' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.8',
+    'public/assets/css/public_mail.css' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.9',
     'public/assets/img/naver_n_icon.svg' => '',
-    'public/assets/js/public_mail.js' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.8',
+    'public/assets/js/public_mail.js' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.9',
     'public/cron/naver_mail_sync.php' => ''
 );
 
@@ -286,7 +289,7 @@ $latestInstalled = $installed && $mobileInstalled
     && strpos($sidebarContent, "\$publicMailMenu = '네이버 메일';") !== false
     && strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') === false
     && strpos($sidebarContent, 'assets/img/naver_n_icon.svg') !== false;
-$packageVersion = '1.7.8.1';
+$packageVersion = '1.7.9';
 $indexStatus = array();
 try { $indexStatus = (new PublicMailService())->getIndexStatus(); } catch (Exception $ignored) { $indexStatus = array(); }
 $canOpenSettings = false;
@@ -310,18 +313,18 @@ try {
 <div class="wrap">
     <div class="card">
         <h1>CPMS 네이버 메일 설치</h1>
-        <p class="sub">v1.7.8.1 모바일 메뉴 수정 패치입니다. PC 메뉴뿐 아니라 모바일 하단 메뉴에도 네이버 메일 항목이 있는지 확인합니다.</p>
+        <p class="sub">v1.7.9 고속 자동복구 패치입니다. 모바일 메뉴를 유지하면서 깨진 제목 복구를 50~100건씩 자동 처리하고 통신 오류도 자동 재시도합니다.</p>
 
         <?php if ($message !== ''): ?>
             <div class="alert <?php echo $messageType === 'error' ? 'error' : 'success'; ?>"><?php echo pm_install_h($message); ?><?php echo $backupPath !== '' ? '<br>백업: ' . pm_install_h($backupPath) : ''; ?></div>
         <?php endif; ?>
 
-        <div class="status"><span class="dot <?php echo ($latestInstalled&&$allReady) ? 'on' : ''; ?>"></span><strong>설치 상태: <?php echo ($latestInstalled&&$allReady) ? 'v1.7.8.1 모바일 메뉴 수정 적용' : ($installed ? '일부 파일 업데이트 필요' : '설치 전'); ?></strong></div><div class="status" style="margin-top:10px"><strong>목록 색인: <?php echo !empty($indexStatus['updated_at']) ? pm_install_h($indexStatus['updated_at']).' · '.number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0).'건' : '아직 생성되지 않음'; ?></strong></div>
+        <div class="status"><span class="dot <?php echo ($latestInstalled&&$allReady) ? 'on' : ''; ?>"></span><strong>설치 상태: <?php echo ($latestInstalled&&$allReady) ? 'v1.7.9 전체 적용' : ($installed ? '일부 파일 업데이트 필요' : '설치 전'); ?></strong></div><div class="status" style="margin-top:10px"><strong>목록 색인: <?php echo !empty($indexStatus['updated_at']) ? pm_install_h($indexStatus['updated_at']).' · '.number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0).'건' : '아직 생성되지 않음'; ?></strong></div>
 
         <div class="files">
             <?php foreach ($checks as $check): ?>
                 <?php $checkClass = $check['status']==='latest'?'ok':($check['status']==='old'?'old':'bad'); ?>
-                <?php $checkLabel = $check['status']==='latest'?'v1.7.8 기반 확인':($check['status']==='old'?'이전 버전':'파일 없음'); ?>
+                <?php $checkLabel = $check['status']==='latest'?'v1.7.9 기반 확인':($check['status']==='old'?'이전 버전':'파일 없음'); ?>
                 <div class="row"><span><?php echo pm_install_h($check['path']); ?></span><span class="<?php echo $checkClass; ?>"><?php echo $checkLabel; ?></span></div>
             <?php endforeach; ?>
         </div>
@@ -330,7 +333,7 @@ try {
             <form method="post">
                 <input type="hidden" name="csrf_token" value="<?php echo pm_install_h(pm_install_csrf()); ?>">
                 <input type="hidden" name="action" value="install">
-                <button class="btn primary" type="submit">모바일 메뉴 수정 적용</button>
+                <button class="btn primary" type="submit">네이버 메일 설치·업데이트</button>
             </form>
             <form method="post" onsubmit="return confirm('네이버 메일 메뉴를 제거하시겠습니까? 데이터는 삭제하지 않습니다.');">
                 <input type="hidden" name="csrf_token" value="<?php echo pm_install_h(pm_install_csrf()); ?>">
@@ -340,7 +343,7 @@ try {
             <?php if ($installed && $canOpenSettings): ?><a class="link" href="public_mail_settings.php">연동 설정 열기</a><?php endif; ?>
         </div>
 
-        <div class="note">설치가 끝나면 보안을 위해 public_mail_install.php 파일을 서버에서 삭제하세요.<br>모바일에서 메뉴가 바로 보이지 않으면 브라우저 탭을 완전히 닫았다가 다시 접속하세요.</div>
+        <div class="note">설치가 끝나면 보안을 위해 public_mail_install.php 파일을 서버에서 삭제하세요.<br>설치 후 PC는 Ctrl+F5를 누르고, 모바일은 브라우저 탭을 완전히 닫았다가 다시 접속하세요.</div>
     </div>
 </div>
 </body>
