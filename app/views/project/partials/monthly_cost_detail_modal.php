@@ -401,7 +401,7 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
     for (var r = 0; r < rows.length; r++) {
       var row = rows[r] || {};
       var rowClass = '';
-      if (row.is_changed || row.category_changed || row._category_changed) rowClass = ' class="is-daily-change"';
+      if (row.is_changed) rowClass = ' class="is-daily-change"';
       else if (parseFloat(row.change_amount || 0) < -0.01) rowClass = ' class="is-daily-decrease"';
       html += '<tr' + rowClass + '>';
       for (i = 0; i < columns.length; i++) {
@@ -613,26 +613,6 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
     var changeKey = currentType === 'material' ? 'material' : (currentType === 'outsourcing' ? 'outsourcing' : currentType);
     var changeDelta = change.deltas && typeof change.deltas[changeKey] !== 'undefined' ? parseFloat(change.deltas[changeKey]) : 0;
     if (isNaN(changeDelta)) changeDelta = 0;
-    if (changeDelta > 0.01) {
-      var hasSpecificChange = false;
-      for (var changeIndex = 0; changeIndex < rows.length; changeIndex++) {
-        if (rows[changeIndex] && (rows[changeIndex].is_changed || rows[changeIndex].category_changed)) {
-          hasSpecificChange = true;
-          break;
-        }
-      }
-      if (!hasSpecificChange) {
-        var highlightedRows = [];
-        for (var highlightIndex = 0; highlightIndex < rows.length; highlightIndex++) {
-          var sourceRow = rows[highlightIndex] || {};
-          var copiedRow = {};
-          for (var copiedKey in sourceRow) if (Object.prototype.hasOwnProperty.call(sourceRow, copiedKey)) copiedRow[copiedKey] = sourceRow[copiedKey];
-          copiedRow._category_changed = true;
-          highlightedRows.push(copiedRow);
-        }
-        rows = highlightedRows;
-      }
-    }
 
     var titleParts = [project.project_name || '', label];
     if (currentCompany) titleParts.push(currentCompany);

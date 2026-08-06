@@ -211,61 +211,9 @@ function cpms_monthly_summary_snapshot_metrics($project, $current, $previous, $r
         'previous_snapshot_date' => (string)$previousDate,
         'daily_delta' => $deltas,
         'snapshot_fast_path' => true,
-        'representative_name' => isset($project['representative_name']) ? (string)$project['representative_name'] : '',
-        'contact' => isset($project['contact']) ? (string)$project['contact'] : '',
-        'business_no' => isset($project['business_no']) ? (string)$project['business_no'] : '',
     );
 }}
 
-if (!function_exists('cpms_monthly_summary_contact_map')) {
-function cpms_monthly_summary_contact_map($pdo) {
-    $map = array();
-    if (!$pdo || !cpms_monthly_summary_snapshot_table_exists($pdo, 'cpms_outsourcing_costs')) return $map;
-    foreach (array('project_id','representative_name','contact','business_no','id') as $column) {
-        if (!cpms_monthly_summary_snapshot_column_exists($pdo, 'cpms_outsourcing_costs', $column)) return $map;
-    }
-    try {
-        $sql = "SELECT o.project_id,o.representative_name,o.contact,o.business_no,o.company_name
-                  FROM cpms_outsourcing_costs o
-                  INNER JOIN (
-                    SELECT project_id,MAX(id) AS max_id
-                      FROM cpms_outsourcing_costs
-                     WHERE project_id IS NOT NULL
-                       AND project_id>0
-                       AND (is_deleted=0 OR is_deleted IS NULL)
-                       AND (COALESCE(representative_name,'')<>'' OR COALESCE(contact,'')<>'' OR COALESCE(business_no,'')<>'')
-                     GROUP BY project_id
-                  ) x ON x.max_id=o.id";
-        $st = $pdo->query($sql);
-        $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
-        if (is_array($rows)) {
-            foreach ($rows as $row) {
-                $projectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
-                if ($projectId <= 0) continue;
-                $map[$projectId] = array(
-                    'representative_name' => isset($row['representative_name']) ? trim((string)$row['representative_name']) : '',
-                    'contact' => isset($row['contact']) ? trim((string)$row['contact']) : '',
-                    'business_no' => isset($row['business_no']) ? trim((string)$row['business_no']) : '',
-                    'company_name' => isset($row['company_name']) ? trim((string)$row['company_name']) : '',
-                );
-            }
-        }
-    } catch (Exception $e) {
-        return array();
-    }
-    return $map;
-}}
-
-if (!function_exists('cpms_monthly_summary_apply_contact')) {
-function cpms_monthly_summary_apply_contact($project, $contactMap) {
-    if (!is_array($project)) $project = array();
-    $projectId = isset($project['id']) ? (int)$project['id'] : 0;
-    $contact = ($projectId > 0 && isset($contactMap[$projectId]) && is_array($contactMap[$projectId])) ? $contactMap[$projectId] : array();
-    $project['representative_name'] = isset($contact['representative_name']) ? (string)$contact['representative_name'] : '';
-    $project['contact'] = isset($contact['contact']) ? (string)$contact['contact'] : '';
-    $project['business_no'] = isset($contact['business_no']) ? (string)$contact['business_no'] : '';
-    return $project;
-}}
 
 if (!function_exists('cpms_monthly_summary_event_change_context')) {
 function cpms_monthly_summary_event_change_context($pdo, $projectId, $snapshotDate, $ym) {
@@ -393,19 +341,6 @@ function cpms_monthly_summary_apply_detail_change_context($monthPayload, $change
             $delta = cpms_monthly_summary_change_target_delta($change, 'outsourcing', array('outsourcing','outsourcing_cost'), $sourceId);
             $monthPayload['manual_outsourcing'][$index]['change_amount'] = $delta;
             $monthPayload['manual_outsourcing'][$index]['is_changed'] = $delta > 0.01;
-        }
-    }
-
-    $laborDelta = isset($change['deltas']['labor']) ? (float)$change['deltas']['labor'] : 0.0;
-    if (isset($monthPayload['labor']) && is_array($monthPayload['labor']) && $laborDelta > 0.01) {
-        foreach ($monthPayload['labor'] as $index=>$row) {
-            $monthPayload['labor'][$index]['category_changed'] = true;
-        }
-    }
-    $outsourcingDelta = isset($change['deltas']['outsourcing']) ? (float)$change['deltas']['outsourcing'] : 0.0;
-    if (isset($monthPayload['labor_outsourcing']) && is_array($monthPayload['labor_outsourcing']) && $outsourcingDelta > 0.01) {
-        foreach ($monthPayload['labor_outsourcing'] as $index=>$row) {
-            $monthPayload['labor_outsourcing'][$index]['category_changed'] = true;
         }
     }
     return $monthPayload;

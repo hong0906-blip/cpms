@@ -574,7 +574,6 @@ if (!$pdo) {
         $monthlySummaryPreviousDate = isset($monthlySummarySnapshotContext['previous_date']) ? (string)$monthlySummarySnapshotContext['previous_date'] : '';
         $monthlySummaryCurrentSnapshots = isset($monthlySummarySnapshotContext['current']) && is_array($monthlySummarySnapshotContext['current']) ? $monthlySummarySnapshotContext['current'] : array();
         $monthlySummaryPreviousSnapshots = isset($monthlySummarySnapshotContext['previous']) && is_array($monthlySummarySnapshotContext['previous']) ? $monthlySummarySnapshotContext['previous'] : array();
-        $monthlySummaryContactMap = cpms_monthly_summary_contact_map($pdo);
 
         $st = $pdo->query("SELECT id, name, start_date, end_date, contract_amount FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id DESC");
         $projects = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -583,7 +582,6 @@ if (!$pdo) {
         $remarks = cpms_monthly_summary_load_remarks($pdo, $selectedYm);
 
         foreach ($projects as $project) {
-            $project = cpms_monthly_summary_apply_contact($project, $monthlySummaryContactMap);
             $pid2 = isset($project['id']) ? (int)$project['id'] : 0;
             $remark = isset($remarks[$pid2]) ? $remarks[$pid2] : '';
             if ($pid2 > 0 && isset($monthlySummaryCurrentSnapshots[$pid2])) {
@@ -600,9 +598,6 @@ if (!$pdo) {
                 continue;
             } else {
                 $liveRow = cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $remark);
-                $liveRow['representative_name'] = isset($project['representative_name']) ? (string)$project['representative_name'] : '';
-                $liveRow['contact'] = isset($project['contact']) ? (string)$project['contact'] : '';
-                $liveRow['business_no'] = isset($project['business_no']) ? (string)$project['business_no'] : '';
                 $liveRow['snapshot_date'] = '';
                 $liveRow['previous_snapshot_date'] = '';
                 $liveRow['daily_delta'] = array('labor'=>0.0,'equipment'=>0.0,'material'=>0.0,'outsourcing'=>0.0,'monthly_total'=>0.0,'cumulative_input'=>0.0);
@@ -689,8 +684,6 @@ $cpmsMonthlyCostDetailEndpoint = base_url() . '/monthly_summary_detail.php';
 .cpms-monthly-summary-shell .cpms-summary-snapshot-note { display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border-radius:999px; background:#ecfdf5; color:#047857; font-size:11px; font-weight:900; }
 .cpms-monthly-summary-shell .cpms-summary-filter-label { font-size:11px; font-weight:900; color:#64748b; }
 .cpms-monthly-summary-shell .cpms-summary-filter-box { display:flex; flex-direction:column; gap:3px; }
-.cpms-monthly-summary-shell .cpms-summary-contact-cell { min-width:112px; white-space:nowrap; }
-.cpms-monthly-summary-shell .cpms-summary-business-cell { min-width:125px; white-space:nowrap; }
 @media (max-width:767px) {
   .cpms-monthly-summary-shell .cpms-summary-delta { font-size:9px; letter-spacing:-.02em; }
   .cpms-monthly-summary-shell .cpms-monthly-filter { width:100%; }
@@ -893,13 +886,10 @@ $cpmsMonthlyCostDetailEndpoint = base_url() . '/monthly_summary_detail.php';
 
     <div class="cpms-monthly-summary-desktop">
       <div class="overflow-x-auto">
-        <table class="min-w-[1480px] w-full text-xs border border-gray-200">
+        <table class="min-w-[1120px] w-full text-xs border border-gray-200">
           <thead>
             <tr class="bg-[#d7aa8a] text-gray-900">
               <th class="border p-2 align-middle" rowspan="2">현장명</th>
-              <th class="border p-2 align-middle" rowspan="2">대표자명</th>
-              <th class="border p-2 align-middle" rowspan="2">전화번호</th>
-              <th class="border p-2 align-middle" rowspan="2">사업자등록번호</th>
               <th class="border p-2 text-center" colspan="5"><?php echo h($monthTitle); ?> 투입금액</th>
               <th class="border p-2 align-middle text-right" rowspan="2">누적투입금액<br>(A)</th>
               <th class="border p-2 align-middle text-right" rowspan="2">누적기성금액<br>(B)</th>
@@ -918,9 +908,6 @@ $cpmsMonthlyCostDetailEndpoint = base_url() . '/monthly_summary_detail.php';
               <?php $rowDelta = isset($row['daily_delta']) && is_array($row['daily_delta']) ? $row['daily_delta'] : array(); ?>
               <tr class="odd:bg-white even:bg-gray-50">
                 <td class="border p-2 font-bold text-gray-900 min-w-[210px]"><?php echo h($row['project_name']); ?></td>
-                <td class="border p-2 cpms-summary-contact-cell"><?php echo h(trim((string)$row['representative_name']) !== '' ? $row['representative_name'] : '-'); ?></td>
-                <td class="border p-2 cpms-summary-contact-cell"><?php echo h(trim((string)$row['contact']) !== '' ? $row['contact'] : '-'); ?></td>
-                <td class="border p-2 cpms-summary-business-cell"><?php echo h(trim((string)$row['business_no']) !== '' ? $row['business_no'] : '-'); ?></td>
                 <?php foreach (array('labor'=>'labor_amount','equipment'=>'equipment_amount','material'=>'material_purchase_amount','outsourcing'=>'outsourcing_amount') as $detailType=>$amountKey): ?>
                   <?php $deltaValue = isset($rowDelta[$detailType]) ? (float)$rowDelta[$detailType] : 0.0; ?>
                   <td class="border p-2 text-right <?php echo h(cpms_monthly_summary_increase_cell_class($deltaValue)); ?>">
@@ -951,9 +938,6 @@ $cpmsMonthlyCostDetailEndpoint = base_url() . '/monthly_summary_detail.php';
             <?php $totalDailyDelta = isset($summaryTotals['daily_delta']) ? $summaryTotals['daily_delta'] : array(); ?>
             <tr class="bg-gray-100 font-extrabold text-gray-900">
               <td class="border p-2">합계</td>
-              <td class="border p-2 text-center">-</td>
-              <td class="border p-2 text-center">-</td>
-              <td class="border p-2 text-center">-</td>
               <?php foreach (array('labor'=>'labor_amount','equipment'=>'equipment_amount','material'=>'material_purchase_amount','outsourcing'=>'outsourcing_amount') as $detailType=>$amountKey): ?>
                 <?php $deltaValue = isset($totalDailyDelta[$detailType]) ? (float)$totalDailyDelta[$detailType] : 0.0; ?>
                 <td class="border p-2 text-right <?php echo h(cpms_monthly_summary_increase_cell_class($deltaValue)); ?>">

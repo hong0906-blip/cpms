@@ -25,6 +25,18 @@ ob_start();
 require __DIR__ . '/../../project/monthly_input.php';
 $cpmsMonthlyInputHtml = ob_get_clean();
 
+require_once __DIR__ . '/partials/monthly_input_vendor_info_helper.php';
+$cpmsMonthlyInputVendorInfo = cpms_monthly_input_vendor_info($pdo, $cpmsMonthlyInputSelectedProjectId);
+$cpmsMonthlyInputVendorInfoHtml = cpms_monthly_input_vendor_info_html($cpmsMonthlyInputVendorInfo);
+$cpmsMonthlyInputMonthLabelMarker = '<div class="font-bold text-base ml-3">월 선택 :</div>';
+if ($cpmsMonthlyInputVendorInfoHtml !== '' && strpos($cpmsMonthlyInputHtml, $cpmsMonthlyInputMonthLabelMarker) !== false) {
+    $cpmsMonthlyInputHtml = str_replace(
+        $cpmsMonthlyInputMonthLabelMarker,
+        $cpmsMonthlyInputVendorInfoHtml . $cpmsMonthlyInputMonthLabelMarker,
+        $cpmsMonthlyInputHtml
+    );
+}
+
 require_once __DIR__ . '/../../project/partials/monthly_cost_detail_helper.php';
 $cpmsMonthlyInputDetailMonths = isset($displayMonths) && is_array($displayMonths) ? array_values($displayMonths) : array();
 $cpmsMonthlyInputProjectName = is_array($selectedProject) && isset($selectedProject['name']) ? trim((string)$selectedProject['name']) : '';
@@ -114,6 +126,50 @@ foreach ($cpmsLabels as $cpmsSectionKey => $cpmsSectionTitle) {
     $cpmsCumulativePayload['section_subtotals'][$cpmsSectionTitle] = $cpmsSumMonths($cpmsSectionMonthMap);
 }
 
+?>
+<style>
+.cpms-monthly-input-vendor-info {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cpms-monthly-input-vendor-item {
+  display: inline-flex;
+  align-items: center;
+  min-height: 42px;
+  overflow: hidden;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  background: #fff;
+}
+.cpms-monthly-input-vendor-label {
+  align-self: stretch;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 9px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+.cpms-monthly-input-vendor-value {
+  min-width: 105px;
+  max-width: 190px;
+  padding: 0 10px;
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 767px) {
+  .cpms-monthly-input-vendor-info { display: none !important; }
+}
+</style>
+<?php
 echo $cpmsMonthlyInputHtml;
 ?>
 <script>
