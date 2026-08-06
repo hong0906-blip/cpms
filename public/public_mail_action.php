@@ -4,7 +4,7 @@
  *
  * 네이버 메일의 상세본문 비동기 조회, 인라인 이미지 출력, 설정, 동기화,
  * 처리상태 변경을 담당합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.3
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.4
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';
@@ -166,6 +166,21 @@ try {
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }
 
+    if ($action === 'start_metadata_repair') {
+        PublicMailWebHelper::requireAdmin();
+        $result = $service->startMetadataRepair();
+        if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
+        PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
+    }
+
+    if ($action === 'pause_metadata_repair' || $action === 'resume_metadata_repair' || $action === 'cancel_metadata_repair') {
+        PublicMailWebHelper::requireAdmin();
+        $command = $action === 'pause_metadata_repair' ? 'pause' : ($action === 'resume_metadata_repair' ? 'resume' : 'cancel');
+        $result = $service->controlMetadataRepair($command);
+        if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
+        PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
+    }
+
     if ($action === 'update_workflow' || $action === 'reply_completed' || $action === 'reclassify' || $action === 'rebuild_body_cache') {
         $messageKey = isset($_POST['message_key']) ? trim((string)$_POST['message_key']) : '';
         if ($messageKey === '' && isset($_POST['uid']) && (int)$_POST['uid'] > 0) $messageKey = (string)(int)$_POST['uid'];
@@ -215,8 +230,7 @@ try {
 
     if ($action === 'repair_metadata') {
         PublicMailWebHelper::requireAdmin();
-        $repaired = $service->repairBrokenMetadataBatch(isset($_POST['limit'])?(int)$_POST['limit']:20);
-        $result = array('ok'=>true,'repaired_count'=>$repaired,'message'=>$repaired>0?$repaired.'건의 제목과 본문 미리보기를 복구했습니다.':'추가로 복구할 메일이 없습니다.');
+        $result = $service->startMetadataRepair();
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }
@@ -261,7 +275,7 @@ try {
     throw new RuntimeException('지원하지 않는 요청입니다.');
 } catch (Exception $e) {
     if ($isAjax) PublicMailWebHelper::jsonResponse(array('ok'=>false,'message'=>$e->getMessage()),400);
-    $settingsActions = array('save_settings','test_connection','reset_mail_data','start_full_import','pause_full_import','resume_full_import','cancel_full_import','regenerate_cron_token','repair_metadata','get_sync_status');
+    $settingsActions = array('save_settings','test_connection','reset_mail_data','start_full_import','pause_full_import','resume_full_import','cancel_full_import','start_metadata_repair','pause_metadata_repair','resume_metadata_repair','cancel_metadata_repair','regenerate_cron_token','repair_metadata','get_sync_status');
     $redirect = in_array($action,$settingsActions,true) ? 'public_mail_settings.php' : 'public_mail.php';
     if (!empty($_POST['message_key']) && $redirect === 'public_mail.php') $redirect .= '?message=' . rawurlencode((string)$_POST['message_key']);
     PublicMailWebHelper::redirectWithMessage($redirect,'error',$e->getMessage());

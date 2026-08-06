@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.3';
+    const VERSION = '1.7.4';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -82,6 +82,24 @@ class PublicMailStorageService
                 'total_count' => 0,
                 'remaining_count' => 0,
                 'last_message' => ''
+            ),
+            'metadata_repair' => array(
+                'active' => false,
+                'paused' => false,
+                'cancelled' => false,
+                'started_at' => '',
+                'finished_at' => '',
+                'last_run_at' => '',
+                'cursor' => 0,
+                'total_count' => 0,
+                'target_count' => 0,
+                'processed_count' => 0,
+                'repaired_count' => 0,
+                'skipped_count' => 0,
+                'failed_count' => 0,
+                'remaining_count' => 0,
+                'last_message' => '',
+                'last_error' => ''
             )
         );
     }
@@ -334,7 +352,9 @@ class PublicMailStorageService
         $saved = self::readJsonFile(self::path(self::SYNC_FILE), array());
         if (!is_array($saved)) $saved = array();
         $state = array_merge(self::syncDefaults(), $saved);
-        $state['full_import'] = array_merge(self::syncDefaults()['full_import'], isset($saved['full_import']) && is_array($saved['full_import']) ? $saved['full_import'] : array());
+        $defaults = self::syncDefaults();
+        $state['full_import'] = array_merge($defaults['full_import'], isset($saved['full_import']) && is_array($saved['full_import']) ? $saved['full_import'] : array());
+        $state['metadata_repair'] = array_merge($defaults['metadata_repair'], isset($saved['metadata_repair']) && is_array($saved['metadata_repair']) ? $saved['metadata_repair'] : array());
         if (!isset($state['mailboxes']) || !is_array($state['mailboxes'])) $state['mailboxes'] = array();
         return $state;
     }
@@ -345,6 +365,9 @@ class PublicMailStorageService
         if (!is_array($changes)) $changes = array();
         if (isset($changes['full_import']) && is_array($changes['full_import'])) {
             $changes['full_import'] = array_merge($state['full_import'], $changes['full_import']);
+        }
+        if (isset($changes['metadata_repair']) && is_array($changes['metadata_repair'])) {
+            $changes['metadata_repair'] = array_merge($state['metadata_repair'], $changes['metadata_repair']);
         }
         $state = array_merge($state, $changes);
         self::writeJsonFile(self::path(self::SYNC_FILE), $state);

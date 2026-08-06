@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 자동수집은 public/cron/naver_mail_sync.php를 외부 예약서비스가 호출합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.3
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.4
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.3';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.4';
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
     function csrf() { var el=page(); return el ? (el.getAttribute('data-csrf-token')||'') : ''; }
@@ -115,6 +115,25 @@
         for(i=0;i<buttons.length;i++) buttons[i].addEventListener('click',function(){fullImportAction(this.getAttribute('data-full-import'));});
     }
 
+    function metadataRepairAction(action) {
+        var map={start:'start_metadata_repair',pause:'pause_metadata_repair',resume:'resume_metadata_repair',cancel:'cancel_metadata_repair'};
+        if(!map[action])return;
+        if(action==='start'&&!window.confirm('깨진 메일 전체 복구를 시작할까요? 버튼은 한 번만 누르면 되고 외부 자동동기화가 끝까지 처리합니다.'))return;
+        if(action==='cancel'&&!window.confirm('깨진 메일 복구를 취소할까요? 이미 복구된 메일은 유지됩니다.'))return;
+        showLoading(action==='start'?'복구 대상을 확인해 작업을 등록하는 중입니다.':'복구 작업 상태를 변경하는 중입니다.');
+        postJson({action:map[action],csrf_token:csrf(),response_type:'json'},function(result){
+            hideLoading();
+            if(!result||!result.ok){alert(result&&result.message?result.message:'복구 작업 요청에 실패했습니다.');return;}
+            alert(result.message||'복구 작업 상태를 변경했습니다.');
+            if(result.state)updateStatusView(result.state);else window.location.reload();
+        });
+    }
+
+    function bindMetadataRepair() {
+        var buttons=document.querySelectorAll('[data-metadata-repair]'),i;
+        for(i=0;i<buttons.length;i++)buttons[i].addEventListener('click',function(){metadataRepairAction(this.getAttribute('data-metadata-repair'));});
+    }
+
     function updateStatusView(state) {
         state=state||{}; var full=state.full_import||{};
         var total=parseInt(full.total_count,10)||0,processed=parseInt(full.processed_count,10)||0,remaining=parseInt(full.remaining_count,10)||0,percent=total>0?Math.floor(processed*100/total):0;
@@ -125,6 +144,25 @@
             if(bar)bar.style.width=Math.min(100,percent)+'%'; if(strong)strong.textContent=Math.min(100,percent)+'%'; if(label)label.textContent=processed.toLocaleString()+' / '+total.toLocaleString()+'건'; if(message)message.textContent=full.last_message||'';
             var remainingNode=card.querySelector('[data-import-remaining]'); if(remainingNode)remainingNode.textContent=remaining.toLocaleString()+'건';
             var statusNode=card.querySelector('[data-import-status]'); if(statusNode)statusNode.textContent=full.active?(full.paused?'일시중지':'가져오는 중'):(full.cancelled?'취소됨':(total>0&&remaining===0?'완료':'대기'));
+        }
+        var repair=state.metadata_repair||{};
+        var repairTotal=parseInt(repair.total_count,10)||0,repairTargets=parseInt(repair.target_count,10)||0,repairProcessed=parseInt(repair.processed_count,10)||0,repairRemaining=parseInt(repair.remaining_count,10)||0,repairRepaired=parseInt(repair.repaired_count,10)||0,repairFailed=parseInt(repair.failed_count,10)||0;
+        var repairPercent=repairTotal>0?Math.floor(repairProcessed*100/repairTotal):0;
+        var repairCard=document.querySelector('.pm-repair-card');
+        if(repairCard){
+            repairCard.setAttribute('data-repair-active',repair.active?'1':'0');repairCard.setAttribute('data-repair-paused',repair.paused?'1':'0');
+            var repairBar=repairCard.querySelector('[data-repair-progress-bar]'),repairPercentNode=repairCard.querySelector('[data-repair-progress-percent]'),repairLabel=repairCard.querySelector('[data-repair-progress-label]');
+            if(repairBar)repairBar.style.width=Math.min(100,repairPercent)+'%';
+            if(repairPercentNode)repairPercentNode.textContent=Math.min(100,repairPercent)+'%';
+            if(repairLabel)repairLabel.textContent=repairProcessed.toLocaleString()+' / '+repairTotal.toLocaleString()+'건 확인';
+            var repairStatus=repairCard.querySelector('[data-repair-status]');if(repairStatus)repairStatus.textContent=repair.active?(repair.paused?'일시중지':'복구 중'):(repair.cancelled?'취소됨':(repairTotal>0&&repairRemaining===0?'완료':'대기'));
+            var repairDot=repairCard.querySelector('[data-repair-status-dot]');if(repairDot){repairDot.textContent=repair.active?(repair.paused?'일시중지':'진행 중'):(repair.cancelled?'취소됨':(repairTotal>0&&repairRemaining===0?'완료':'대기'));if(repair.active)repairDot.classList.add('is-on');else repairDot.classList.remove('is-on');}
+            var repairTargetsNode=repairCard.querySelector('[data-repair-targets]');if(repairTargetsNode)repairTargetsNode.textContent=repairTargets.toLocaleString()+'건';
+            var repairRemainingNode=repairCard.querySelector('[data-repair-remaining]');if(repairRemainingNode)repairRemainingNode.textContent=repairRemaining.toLocaleString()+'건';
+            var repairRepairedNode=repairCard.querySelector('[data-repair-repaired]');if(repairRepairedNode)repairRepairedNode.textContent=repairRepaired.toLocaleString()+'건';
+            var repairFailedNode=repairCard.querySelector('[data-repair-failed]');if(repairFailedNode)repairFailedNode.textContent=repairFailed.toLocaleString()+'건';
+            var repairLastRun=repairCard.querySelector('[data-repair-last-run]');if(repairLastRun)repairLastRun.textContent=repair.last_run_at||'아직 없음';
+            var repairMessage=repairCard.querySelector('[data-repair-message]');if(repairMessage)repairMessage.textContent=repair.last_message||'아직 복구 작업을 시작하지 않았습니다.';
         }
         var cronAt=document.querySelector('[data-cron-last-at]'); if(cronAt)cronAt.textContent=state.last_cron_at||'아직 없음';
         var cronResult=document.querySelector('[data-cron-last-result]'); if(cronResult)cronResult.textContent=state.last_cron_result||'아직 없음';
@@ -386,7 +424,7 @@
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); initDetailPanel(document);
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); initDetailPanel(document);
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

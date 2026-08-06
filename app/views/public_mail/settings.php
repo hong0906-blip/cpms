@@ -11,8 +11,17 @@ $processed=isset($full['processed_count'])?(int)$full['processed_count']:0;
 $remaining=isset($full['remaining_count'])?(int)$full['remaining_count']:0;
 $percent=$total>0?(int)floor(($processed/$total)*100):0;
 if ($percent>100) $percent=100;
+$repair=isset($syncState['metadata_repair'])&&is_array($syncState['metadata_repair'])?$syncState['metadata_repair']:array();
+$repairTotal=isset($repair['total_count'])?(int)$repair['total_count']:0;
+$repairTargets=isset($repair['target_count'])?(int)$repair['target_count']:0;
+$repairProcessed=isset($repair['processed_count'])?(int)$repair['processed_count']:0;
+$repairRepaired=isset($repair['repaired_count'])?(int)$repair['repaired_count']:0;
+$repairFailed=isset($repair['failed_count'])?(int)$repair['failed_count']:0;
+$repairRemaining=isset($repair['remaining_count'])?(int)$repair['remaining_count']:0;
+$repairPercent=$repairTotal>0?(int)floor(($repairProcessed/$repairTotal)*100):0;
+if ($repairPercent>100) $repairPercent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_73">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_74">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -64,7 +73,7 @@ if ($percent>100) $percent=100;
       <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>설치 버전·목록 속도 상태</strong><span>실제 적용된 핵심 파일과 메일 색인 상태를 확인합니다.</span></div><span class="pm-status-dot <?php echo !empty($indexStatus['writable'])?'is-on':''; ?>"><?php echo !empty($indexStatus['writable'])?'정상':'확인 필요'; ?></span></div>
         <div class="pm-sync-state-list">
-          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.3'); ?></strong></div>
+          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.4'); ?></strong></div>
           <div><span>목록 색인 버전</span><strong><?php echo isset($indexStatus['version'])?(int)$indexStatus['version']:0; ?></strong></div>
           <div><span>색인 메일 수</span><strong><?php echo number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0); ?>건</strong></div>
           <div><span>마지막 색인 갱신</span><strong><?php echo call_user_func($esc,!empty($indexStatus['updated_at'])?$indexStatus['updated_at']:'아직 없음'); ?></strong></div>
@@ -83,15 +92,27 @@ if ($percent>100) $percent=100;
         <p class="pm-help-text">구버전 캐시가 있어도 네이버에서 본문을 다시 받지 않습니다. 메일을 열 때 저장된 HTML만 빠르게 변환하며, 제목 복구 작업도 본문 캐시를 삭제하지 않습니다.</p>
       </div>
 
-      <div class="pm-settings-card">
-        <div class="pm-card-title"><div><strong>깨진 제목·본문 복구</strong><span>이전 버전에서 잘못 변환된 한글과 구버전 본문 캐시를 네이버 원본으로 다시 만듭니다.</span></div></div>
-        <div class="pm-alert pm-alert-success"><strong>한 번만 시작하면 됩니다.</strong><br>우선 20건을 복구하고, 본문 캐시는 유지한 채 선택한 메일의 제목과 주소정보만 복구합니다. 필요할 때 버튼을 다시 누르면 다음 20건을 처리합니다.</div>
-        <form method="post" action="public_mail_action.php" onsubmit="return confirm('깨진 메일 제목과 본문 캐시 복구를 시작할까요? 네이버 원본메일은 변경되지 않습니다.');">
-          <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
-          <input type="hidden" name="action" value="repair_metadata">
-          <input type="hidden" name="limit" value="20">
-          <button type="submit" class="pm-btn pm-btn-primary"><i data-lucide="languages"></i> 깨진 메일 제목·본문 전체 복구 시작</button>
-        </form>
+      <div class="pm-settings-card pm-repair-card" data-repair-active="<?php echo !empty($repair['active'])?'1':'0'; ?>" data-repair-paused="<?php echo !empty($repair['paused'])?'1':'0'; ?>">
+        <div class="pm-card-title"><div><strong>깨진 제목·한글 전체 자동복구</strong><span>버튼은 한 번만 누르면 됩니다. 외부 자동동기화가 남은 메일을 끝까지 나눠서 처리합니다.</span></div><span class="pm-status-dot <?php echo !empty($repair['active'])?'is-on':''; ?>" data-repair-status-dot><?php echo !empty($repair['active'])?(!empty($repair['paused'])?'일시중지':'진행 중'):(!empty($repair['cancelled'])?'취소됨':($repairTotal>0&&$repairRemaining===0?'완료':'대기')); ?></span></div>
+        <div class="pm-alert pm-alert-success"><strong>20건씩 계속 누를 필요가 없습니다.</strong><br>시작 버튼을 한 번 누르면 cron-job.org가 1분마다 다음 묶음을 자동 처리합니다. 브라우저를 닫아도 계속 진행됩니다.</div>
+        <div class="pm-progress-wrap"><div class="pm-progress-track"><span data-repair-progress-bar style="width:<?php echo $repairPercent; ?>%"></span></div><div class="pm-progress-label"><strong data-repair-progress-percent><?php echo $repairPercent; ?>%</strong><span data-repair-progress-label><?php echo number_format($repairProcessed); ?> / <?php echo number_format($repairTotal); ?>건 확인</span></div></div>
+        <div class="pm-sync-state-list">
+          <div><span>상태</span><strong data-repair-status><?php echo !empty($repair['active'])?(!empty($repair['paused'])?'일시중지':'복구 중'):(!empty($repair['cancelled'])?'취소됨':($repairTotal>0&&$repairRemaining===0?'완료':'대기')); ?></strong></div>
+          <div><span>처음 발견된 복구 대상</span><strong data-repair-targets><?php echo number_format($repairTargets); ?>건</strong></div>
+          <div><span>복구 완료</span><strong data-repair-repaired><?php echo number_format($repairRepaired); ?>건</strong></div>
+          <div><span>남은 확인</span><strong data-repair-remaining><?php echo number_format($repairRemaining); ?>건</strong></div>
+          <div><span>확인 실패</span><strong data-repair-failed><?php echo number_format($repairFailed); ?>건</strong></div>
+          <div><span>최근 실행</span><strong data-repair-last-run><?php echo call_user_func($esc,!empty($repair['last_run_at'])?$repair['last_run_at']:'아직 없음'); ?></strong></div>
+        </div>
+        <?php if (!empty($repair['last_message'])): ?><div class="pm-alert pm-alert-success" data-repair-message><?php echo call_user_func($esc,$repair['last_message']); ?></div><?php else: ?><div class="pm-help-text" data-repair-message>아직 복구 작업을 시작하지 않았습니다.</div><?php endif; ?>
+        <?php if (!empty($repair['last_error'])): ?><div class="pm-alert pm-alert-error" data-repair-error><?php echo call_user_func($esc,$repair['last_error']); ?></div><?php endif; ?>
+        <div class="pm-settings-actions pm-wrap-actions">
+          <button type="button" class="pm-btn pm-btn-primary" data-metadata-repair="start"><i data-lucide="languages"></i> 깨진 메일 전체 복구 시작</button>
+          <button type="button" class="pm-btn pm-btn-light" data-metadata-repair="pause"><i data-lucide="pause"></i> 일시중지</button>
+          <button type="button" class="pm-btn pm-btn-light" data-metadata-repair="resume"><i data-lucide="play"></i> 다시 시작</button>
+          <button type="button" class="pm-btn pm-btn-danger" data-metadata-repair="cancel"><i data-lucide="square"></i> 취소</button>
+        </div>
+        <p class="pm-help-text">메일 본문 전체나 첨부파일을 다시 받지 않고, 제목·보낸사람·받는사람 헤더만 네이버 원본에서 읽습니다. 일반 메일 메뉴와 직원 화면에서는 복구 작업을 실행하지 않습니다.</p>
       </div>
 
       <div class="pm-settings-card">
@@ -133,4 +154,4 @@ if ($percent>100) $percent=100;
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_73"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_74"></script>

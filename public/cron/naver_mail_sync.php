@@ -85,7 +85,9 @@ try {
     $state = isset($result['state']) && is_array($result['state']) ? $result['state'] : PublicMailStorageService::getSyncState();
     $remaining = isset($state['full_import']['remaining_count']) ? (int)$state['full_import']['remaining_count'] : (isset($state['remaining_count']) ? (int)$state['remaining_count'] : 0);
     $duration = (int)round((microtime(true) - $startedAt) * 1000);
-    $summary = '성공: ' . $message . ' / 추가 ' . $added . '건 / 남음 ' . $remaining . '건';
+    $repaired = isset($result['repaired_count']) ? (int)$result['repaired_count'] : 0;
+    $repairRemaining = isset($state['metadata_repair']['remaining_count']) ? (int)$state['metadata_repair']['remaining_count'] : 0;
+    $summary = '성공: ' . $message . ' / 추가 ' . $added . '건 / 메일 남음 ' . $remaining . '건 / 한글복구 ' . $repaired . '건 / 복구 확인 남음 ' . $repairRemaining . '건';
     PublicMailStorageService::saveSyncState(array(
         'last_cron_at' => date('Y-m-d H:i:s'),
         'last_cron_finished_at' => date('Y-m-d H:i:s'),
