@@ -4,6 +4,7 @@
  *
  * 네이버 메일의 상세본문 비동기 조회, 인라인 이미지 출력, 설정, 동기화,
  * 처리상태 변경을 담당합니다. PHP 5.6 호환 코드입니다.
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.3
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';
@@ -21,12 +22,45 @@ $getAction = isset($_GET['action']) ? trim((string)$_GET['action']) : '';
  * 읽기 전용 요청은 GET으로 처리합니다.
  * 메일 본문을 읽는 동안 PHP 세션 잠금을 풀어 다른 CPMS 화면 사용을 방해하지 않습니다.
  */
-if ($method === 'GET' && ($getAction === 'detail_fragment' || $getAction === 'inline_image')) {
+if ($method === 'GET' && ($getAction === 'detail_panel' || $getAction === 'detail_fragment' || $getAction === 'inline_image' || $getAction === 'inline_image_bundle')) {
     try {
         $messageKey = isset($_GET['message_key']) ? trim((string)$_GET['message_key']) : '';
         $partId = isset($_GET['part_id']) ? trim((string)$_GET['part_id']) : '';
         if ($messageKey === '') throw new RuntimeException('메일 식별값을 확인할 수 없습니다.');
+
+        if ($getAction === 'detail_panel') {
+            $currentEmail = PublicMailWebHelper::currentUserEmail();
+            $csrfToken = PublicMailWebHelper::csrfToken();
+            $taskCsrfToken = function_exists('csrf_token') ? csrf_token() : '';
+            $taskRequestToken = md5(uniqid('', true) . session_id());
+            if (function_exists('session_write_close')) @session_write_close();
+
+            $detail = $service->getMessageShell($messageKey);
+            $employees = $service->getEmployees();
+            $projects = $service->getProjects();
+            $settings = $service->getSettings(false);
+            $replyMailUrl = $service->buildGmailComposeUrl($detail, $currentEmail, 'reply');
+            $departmentOptions = array('공무', '공사', '안전/보건', '품질', '관리', '일반', '미분류');
+            $statusOptions = array('미확인', '확인', '담당자 지정', '처리중', '회신대기', '발송완료', '처리완료', '보류');
+            $priorityOptions = array('긴급', '높음', '보통', '낮음');
+            $esc = function ($value) { return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'); };
+            header('Content-Type: text/html; charset=UTF-8');
+            header('Cache-Control: no-store, no-cache, must-revalidate');
+            include __DIR__ . '/../app/views/public_mail/detail_panel.php';
+            exit;
+        }
+
         if (function_exists('session_write_close')) @session_write_close();
+
+        if ($getAction === 'inline_image_bundle') {
+            $partIds = isset($_GET['part_ids']) ? explode(',', (string)$_GET['part_ids']) : array();
+            $bundle = $service->getInlineImageBundle($messageKey, $partIds);
+            header('Content-Type: application/json; charset=UTF-8');
+            header('Cache-Control: private, max-age=3600');
+            header('X-Content-Type-Options: nosniff');
+            echo json_encode(array('ok'=>true,'items'=>isset($bundle['items'])?$bundle['items']:array(),'failed'=>isset($bundle['failed'])?$bundle['failed']:array()));
+            exit;
+        }
 
         if ($getAction === 'inline_image') {
             if ($partId === '') throw new RuntimeException('메일 이미지 위치값을 확인할 수 없습니다.');
@@ -46,7 +80,6 @@ if ($method === 'GET' && ($getAction === 'detail_fragment' || $getAction === 'in
         }
 
         $detail = $service->getMessageDetail($messageKey);
-        $projects = $service->getProjects();
         $esc = function ($value) { return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'); };
         $baseUrl = function_exists('base_url') ? rtrim((string)base_url(), '/') : '';
         $detailClass = isset($detail['classification']) && is_array($detail['classification']) ? $detail['classification'] : array();
@@ -57,6 +90,16 @@ if ($method === 'GET' && ($getAction === 'detail_fragment' || $getAction === 'in
         include __DIR__ . '/../app/views/public_mail/detail_fragment.php';
         exit;
     } catch (Exception $e) {
+        if ($getAction === 'detail_panel') {
+            http_response_code(503);
+            header('Content-Type: text/html; charset=UTF-8');
+            echo '<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>'
+                . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8')
+                . '</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-panel data-message-key="'
+                . htmlspecialchars(isset($messageKey)?$messageKey:'', ENT_QUOTES, 'UTF-8')
+                . '">다시 시도</button></div>';
+            exit;
+        }
         if ($getAction === 'inline_image') {
             http_response_code(404);
             header('Content-Type: text/plain; charset=UTF-8');
@@ -103,8 +146,7 @@ try {
         if ($action === 'sync_initial') $result = $service->syncBatch($limit,'initial');
         elseif ($action === 'automation_tick') $result = $service->runAutomationTick($limit);
         else $result = $service->syncNewBatch($limit);
-        try { $result['repaired_count'] = $service->repairBrokenMetadataBatch(5); }
-        catch (Exception $ignored) { $result['repaired_count'] = 0; }
+        if (!isset($result['repaired_count'])) $result['repaired_count'] = 0;
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
         PublicMailWebHelper::redirectWithMessage('public_mail.php','success',$result['message']);
     }

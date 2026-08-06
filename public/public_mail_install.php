@@ -7,12 +7,17 @@
  * - 기존 1분 브라우저 자동확인 코드를 제거하고 외부 예약서비스 방식으로 전환합니다.
  * - 설치 후 이 파일은 서버에서 삭제하세요.
  * PHP 5.6 호환 코드입니다.
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.3
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailStorageService.php';
+require_once __DIR__ . '/../app/services/PublicMailService.php';
+require_once __DIR__ . '/../app/services/PublicMailIndexService.php';
 
 use App\Services\PublicMailStorageService;
+use App\Services\PublicMailService;
+use App\Services\PublicMailIndexService;
 
 if (!class_exists('\\App\\Core\\Auth') || !\App\Core\Auth::check()) {
     header('Location: index.php?r=login');
@@ -80,7 +85,7 @@ function pm_install_patch_sidebar($sidebarPath)
 
     $variableBlock = "\n/* CPMS_PUBLIC_MAIL_VARIABLE_START */\n"
         . "\$publicMailMenu = '네이버 메일';\n"
-        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_71';\n"
+        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_73';\n"
         . "/* CPMS_PUBLIC_MAIL_VARIABLE_END */";
 
     $itemBlock = "/* CPMS_PUBLIC_MAIL_ITEM_START */\n"
@@ -123,7 +128,7 @@ function pm_install_patch_sidebar($sidebarPath)
     }
 
     if ($content === $originalContent) {
-        return array('changed' => false, 'message' => '네이버 메일 메뉴가 이미 최신 상태이며 브라우저 자동수집은 제거되어 있습니다.', 'backup' => '');
+        return array('changed' => false, 'message' => '왼쪽 네이버 메일 메뉴는 최신 상태이며 브라우저 자동수집은 제거되어 있습니다.', 'backup' => '');
     }
 
     $backup = pm_install_backup($sidebarPath);
@@ -173,6 +178,10 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
         $action = isset($_POST['action']) ? (string)$_POST['action'] : '';
         if ($action === 'install') {
             $result = pm_install_patch_sidebar($sidebarPath);
+            $mailService = new PublicMailService();
+            $rebuiltIndex = $mailService->rebuildIndex();
+            $indexedCount = is_array($rebuiltIndex) && isset($rebuiltIndex['items']) && is_array($rebuiltIndex['items']) ? count($rebuiltIndex['items']) : 0;
+            $result['message'] .= ' 메일 목록 색인도 ' . number_format($indexedCount) . '건으로 다시 만들었습니다.';
         } elseif ($action === 'uninstall') {
             $result = pm_install_unpatch_sidebar($sidebarPath);
         } else {
@@ -188,39 +197,50 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
 }
 
 $requiredFiles = array(
-    'app/services/GoogleDriveHelper.php',
-    'app/services/PublicMailStorageService.php',
-    'app/services/PublicMailImapClient.php',
-    'app/services/PublicMailClassifierService.php',
-    'app/services/PublicMailLargeAttachmentService.php',
-    'app/services/PublicMailDriveService.php',
-    'app/services/PublicMailService.php',
-    'app/services/PublicMailWebHelper.php',
-    'app/views/public_mail/index.php',
-    'app/views/public_mail/settings.php',
-    'public/public_mail.php',
-    'public/public_mail_settings.php',
-    'public/public_mail_action.php',
-    'public/public_mail_attachment.php',
-    'public/assets/css/public_mail.css',
-    'public/assets/img/naver_n_icon.svg',
-    'public/assets/js/public_mail.js',
-    'public/cron/naver_mail_sync.php'
+    'app/services/GoogleDriveHelper.php' => '',
+    'app/services/PublicMailStorageService.php' => "const VERSION = '1.7.3'",
+    'app/services/PublicMailImapClient.php' => '',
+    'app/services/PublicMailClassifierService.php' => '',
+    'app/services/PublicMailLargeAttachmentService.php' => '',
+    'app/services/PublicMailDriveService.php' => '',
+    'app/services/PublicMailIndexService.php' => "const VERSION = '1.7.3'",
+    'app/services/PublicMailService.php' => "const VERSION = '1.7.3'",
+    'app/services/PublicMailWebHelper.php' => '',
+    'app/views/public_mail/index.php' => '20260806_73',
+    'app/views/public_mail/detail_panel.php' => 'data-mail-detail-content',
+    'app/views/public_mail/detail_fragment.php' => 'data-detail-fragment',
+    'app/views/public_mail/settings.php' => '20260806_73',
+    'public/public_mail.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.3',
+    'public/public_mail_settings.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.3',
+    'public/public_mail_action.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.3',
+    'public/public_mail_attachment.php' => '',
+    'public/assets/css/public_mail.css' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.3',
+    'public/assets/img/naver_n_icon.svg' => '',
+    'public/assets/js/public_mail.js' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.3',
+    'public/cron/naver_mail_sync.php' => ''
 );
 
 $checks = array();
 $allReady = true;
-foreach ($requiredFiles as $relativePath) {
-    $exists = is_file($root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath));
-    $checks[] = array('path' => $relativePath, 'exists' => $exists);
-    if (!$exists) {
-        $allReady = false;
+foreach ($requiredFiles as $relativePath => $requiredMarker) {
+    $absolutePath = $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
+    $exists = is_file($absolutePath);
+    $markerOk = $exists;
+    if ($exists && $requiredMarker !== '') {
+        $contentCheck = (string)@file_get_contents($absolutePath);
+        $markerOk = strpos($contentCheck, $requiredMarker) !== false;
     }
+    $status = !$exists ? 'missing' : ($markerOk ? 'latest' : 'old');
+    $checks[] = array('path'=>$relativePath,'exists'=>$exists,'marker_ok'=>$markerOk,'status'=>$status);
+    if (!$exists || !$markerOk) $allReady = false;
 }
 
 $sidebarContent = is_file($sidebarPath) ? (string)@file_get_contents($sidebarPath) : '';
 $installed = strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_ITEM_START') !== false;
 $latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '네이버 메일';") !== false && strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') === false && strpos($sidebarContent, 'assets/img/naver_n_icon.svg') !== false;
+$packageVersion = '1.7.3';
+$indexStatus = array();
+try { $indexStatus = (new PublicMailService())->getIndexStatus(); } catch (Exception $ignored) { $indexStatus = array(); }
 ?>
 <!DOCTYPE html>
 <html lang="ko">
@@ -229,24 +249,26 @@ $latestInstalled = $installed && strpos($sidebarContent, "\$publicMailMenu = '�
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CPMS 네이버 메일 설치</title>
     <style>
-        *{box-sizing:border-box}body{margin:0;padding:30px 16px;background:#f3f6f8;color:#172033;font-family:Arial,"Malgun Gothic",sans-serif}.wrap{max-width:900px;margin:0 auto}.card{background:#fff;border:1px solid #dfe6ee;border-radius:18px;padding:26px;box-shadow:0 12px 35px rgba(23,32,51,.08)}h1{margin:0 0 8px;font-size:28px}.sub{margin:0 0 22px;color:#667085}.alert{margin:15px 0;padding:13px 15px;border-radius:11px;font-weight:700}.success{background:#ecfdf3;color:#067647;border:1px solid #abefc6}.error{background:#fef3f2;color:#b42318;border:1px solid #fecdca}.status{display:flex;gap:10px;align-items:center;padding:13px;border-radius:12px;background:#f8fafc}.dot{width:12px;height:12px;border-radius:50%;background:#98a2b3}.dot.on{background:#12b76a}.files{margin:18px 0;border:1px solid #e4e9ef;border-radius:12px;overflow:hidden}.row{display:flex;justify-content:space-between;gap:12px;padding:10px 13px;border-bottom:1px solid #edf1f5;font-size:13px}.row:last-child{border-bottom:0}.ok{color:#067647;font-weight:800}.bad{color:#b42318;font-weight:800}.buttons{display:flex;gap:10px;flex-wrap:wrap}.btn{min-height:44px;padding:0 17px;border:0;border-radius:11px;font-weight:800;cursor:pointer}.primary{background:#0f766e;color:#fff}.danger{background:#fff1f0;color:#b42318;border:1px solid #fecdca}.link{display:inline-flex;align-items:center;min-height:44px;padding:0 17px;border-radius:11px;background:#eef4ff;color:#3538cd;text-decoration:none;font-weight:800}.note{margin-top:20px;padding-top:16px;border-top:1px solid #e9edf2;color:#b42318;font-weight:800}
+        *{box-sizing:border-box}body{margin:0;padding:30px 16px;background:#f3f6f8;color:#172033;font-family:Arial,"Malgun Gothic",sans-serif}.wrap{max-width:900px;margin:0 auto}.card{background:#fff;border:1px solid #dfe6ee;border-radius:18px;padding:26px;box-shadow:0 12px 35px rgba(23,32,51,.08)}h1{margin:0 0 8px;font-size:28px}.sub{margin:0 0 22px;color:#667085}.alert{margin:15px 0;padding:13px 15px;border-radius:11px;font-weight:700}.success{background:#ecfdf3;color:#067647;border:1px solid #abefc6}.error{background:#fef3f2;color:#b42318;border:1px solid #fecdca}.status{display:flex;gap:10px;align-items:center;padding:13px;border-radius:12px;background:#f8fafc}.dot{width:12px;height:12px;border-radius:50%;background:#98a2b3}.dot.on{background:#12b76a}.files{margin:18px 0;border:1px solid #e4e9ef;border-radius:12px;overflow:hidden}.row{display:flex;justify-content:space-between;gap:12px;padding:10px 13px;border-bottom:1px solid #edf1f5;font-size:13px}.row:last-child{border-bottom:0}.ok{color:#067647;font-weight:800}.old{color:#b54708;font-weight:800}.bad{color:#b42318;font-weight:800}.buttons{display:flex;gap:10px;flex-wrap:wrap}.btn{min-height:44px;padding:0 17px;border:0;border-radius:11px;font-weight:800;cursor:pointer}.primary{background:#0f766e;color:#fff}.danger{background:#fff1f0;color:#b42318;border:1px solid #fecdca}.link{display:inline-flex;align-items:center;min-height:44px;padding:0 17px;border-radius:11px;background:#eef4ff;color:#3538cd;text-decoration:none;font-weight:800}.note{margin-top:20px;padding-top:16px;border-top:1px solid #e9edf2;color:#b42318;font-weight:800}
     </style>
 </head>
 <body>
 <div class="wrap">
     <div class="card">
         <h1>CPMS 네이버 메일 설치</h1>
-        <p class="sub">파일 확인 후 네이버 대표 N 아이콘과 메일 기능을 설치합니다. 기존 1분 브라우저 자동수집을 제거하여 화면 로딩을 없애고, 24시간 자동수집은 cron-job.org 같은 외부 예약서비스가 담당합니다.</p>
+        <p class="sub">패키지 v1.7.3의 실제 핵심 파일 버전과 메일 목록 색인을 확인합니다. 사이드바만 최신인 상태를 전체 패치 완료로 표시하지 않습니다.</p>
 
         <?php if ($message !== ''): ?>
             <div class="alert <?php echo $messageType === 'error' ? 'error' : 'success'; ?>"><?php echo pm_install_h($message); ?><?php echo $backupPath !== '' ? '<br>백업: ' . pm_install_h($backupPath) : ''; ?></div>
         <?php endif; ?>
 
-        <div class="status"><span class="dot <?php echo $installed ? 'on' : ''; ?>"></span><strong>메뉴 상태: <?php echo $latestInstalled ? '최신 버전' : ($installed ? '업데이트 필요' : '설치 전'); ?></strong></div>
+        <div class="status"><span class="dot <?php echo ($latestInstalled&&$allReady) ? 'on' : ''; ?>"></span><strong>설치 상태: <?php echo ($latestInstalled&&$allReady) ? 'v1.7.3 전체 적용' : ($installed ? '일부 파일 업데이트 필요' : '설치 전'); ?></strong></div><div class="status" style="margin-top:10px"><strong>목록 색인: <?php echo !empty($indexStatus['updated_at']) ? pm_install_h($indexStatus['updated_at']).' · '.number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0).'건' : '아직 생성되지 않음'; ?></strong></div>
 
         <div class="files">
             <?php foreach ($checks as $check): ?>
-                <div class="row"><span><?php echo pm_install_h($check['path']); ?></span><span class="<?php echo $check['exists'] ? 'ok' : 'bad'; ?>"><?php echo $check['exists'] ? '확인' : '없음'; ?></span></div>
+                <?php $checkClass = $check['status']==='latest'?'ok':($check['status']==='old'?'old':'bad'); ?>
+                <?php $checkLabel = $check['status']==='latest'?'v1.7.3 확인':($check['status']==='old'?'이전 버전':'파일 없음'); ?>
+                <div class="row"><span><?php echo pm_install_h($check['path']); ?></span><span class="<?php echo $checkClass; ?>"><?php echo $checkLabel; ?></span></div>
             <?php endforeach; ?>
         </div>
 

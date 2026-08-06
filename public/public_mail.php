@@ -2,6 +2,7 @@
 /**
  * 파일 경로: C:\www\cpms\public\public_mail.php
  * 네이버 메일 메인 화면입니다. PHP 5.6 호환 코드입니다.
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.3
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 if (isset($_GET['r']) && trim((string)$_GET['r']) !== '') {
@@ -32,18 +33,24 @@ $filters = array(
     'quick'=>isset($_GET['quick'])?trim((string)$_GET['quick']):''
 );
 $errorMessage=''; $detail=null;
+$employees=array(); $projects=array();
 try {
     $list=$service->getMessageList($filters,$page,$perPage); $counts=$service->getDashboardCounts();
     $settings=$service->getSettings(false); $syncState=$service->getSyncState();
-    $employees=$service->getEmployees(); $projects=$service->getProjects();
 } catch (Exception $e) {
     $errorMessage=$e->getMessage(); $list=array('items'=>array(),'total'=>0,'page'=>1,'per_page'=>$perPage,'page_count'=>1);
     $counts=array('all'=>0,'unread'=>0,'urgent'=>0,'unclassified'=>0,'unassigned'=>0,'unfinished'=>0);
-    $settings=array('enabled'=>false,'username'=>''); $syncState=array(); $employees=array(); $projects=array();
+    $settings=array('enabled'=>false,'username'=>''); $syncState=array();
 }
 if ($selectedMessageKey !== '') {
-    try { $detail=$service->getMessageShell($selectedMessageKey); }
-    catch (Exception $e) { $detail=null; $detailError='메일 상세내용을 불러오지 못했습니다: '.$e->getMessage(); $errorMessage=$errorMessage!==''?$errorMessage.' / '.$detailError:$detailError; }
+    try {
+        $detail=$service->getMessageShell($selectedMessageKey);
+        $employees=$service->getEmployees();
+        $projects=$service->getProjects();
+    } catch (Exception $e) {
+        $detail=null; $detailError='메일 상세내용을 불러오지 못했습니다: '.$e->getMessage();
+        $errorMessage=$errorMessage!==''?$errorMessage.' / '.$detailError:$detailError;
+    }
 }
 $currentEmail=PublicMailWebHelper::currentUserEmail();
 $newMailUrl=$service->buildGmailComposeUrl(array(),$currentEmail,'new');
@@ -55,5 +62,6 @@ PublicMailWebHelper::render('public_mail/index',array(
     'selectedMessageKey'=>$selectedMessageKey,'newMailUrl'=>$newMailUrl,'replyMailUrl'=>$replyMailUrl,
     'csrfToken'=>PublicMailWebHelper::csrfToken(),'flash'=>PublicMailWebHelper::pullFlash(),'errorMessage'=>$errorMessage,
     'currentUserName'=>PublicMailWebHelper::currentUserName(),'currentUserEmail'=>$currentEmail,'isMailAdmin'=>$isMailAdmin,
-    'taskCsrfToken'=>function_exists('csrf_token')?csrf_token():'','taskRequestToken'=>md5(uniqid('',true).session_id())
+    'taskCsrfToken'=>function_exists('csrf_token')?csrf_token():'','taskRequestToken'=>md5(uniqid('',true).session_id()),
+    'packageVersion'=>'1.7.3'
 ));

@@ -12,7 +12,7 @@ $remaining=isset($full['remaining_count'])?(int)$full['remaining_count']:0;
 $percent=$total>0?(int)floor(($processed/$total)*100):0;
 if ($percent>100) $percent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_71">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_73">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -60,9 +60,32 @@ if ($percent>100) $percent=100;
         <p class="pm-help-text">버튼을 한 번 누르면 작업상태만 등록됩니다. 직원 브라우저는 반복 수집을 하지 않으며, 외부 예약서비스가 1분마다 다음 묶음을 처리합니다. 화면을 닫아도 진행됩니다. Gmail에서 보낸 메일은 네이버 보낸메일함이 아니라 Gmail 보낸편지함에 남습니다.</p>
       </div>
 
+
+      <div class="pm-settings-card">
+        <div class="pm-card-title"><div><strong>설치 버전·목록 속도 상태</strong><span>실제 적용된 핵심 파일과 메일 색인 상태를 확인합니다.</span></div><span class="pm-status-dot <?php echo !empty($indexStatus['writable'])?'is-on':''; ?>"><?php echo !empty($indexStatus['writable'])?'정상':'확인 필요'; ?></span></div>
+        <div class="pm-sync-state-list">
+          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.3'); ?></strong></div>
+          <div><span>목록 색인 버전</span><strong><?php echo isset($indexStatus['version'])?(int)$indexStatus['version']:0; ?></strong></div>
+          <div><span>색인 메일 수</span><strong><?php echo number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0); ?>건</strong></div>
+          <div><span>마지막 색인 갱신</span><strong><?php echo call_user_func($esc,!empty($indexStatus['updated_at'])?$indexStatus['updated_at']:'아직 없음'); ?></strong></div>
+        </div>
+        <p class="pm-help-text">메뉴 진입 시 전체 messages.json과 workflow.json을 다시 계산하지 않고, 미리 만들어 둔 mail_index.json만 읽습니다.</p>
+      </div>
+
+      <div class="pm-settings-card">
+        <div class="pm-card-title"><div><strong>메일 본문 속도 상태</strong><span>기존 캐시는 삭제하지 않고 서버 안에서 즉시 현재 형식으로 변환합니다.</span></div><span class="pm-status-dot <?php echo !empty($cacheStats['storage_writable'])?'is-on':''; ?>"><?php echo !empty($cacheStats['storage_writable'])?'정상':'쓰기 확인 필요'; ?></span></div>
+        <div class="pm-sync-state-list">
+          <div><span>전체 저장 메일</span><strong><?php echo number_format(isset($cacheStats['total_messages'])?(int)$cacheStats['total_messages']:0); ?>건</strong></div>
+          <div><span>본문 준비 완료</span><strong><?php echo number_format(isset($cacheStats['cached_messages'])?(int)$cacheStats['cached_messages']:0); ?>건</strong></div>
+          <div><span>본문 미준비</span><strong><?php echo number_format(isset($cacheStats['missing_messages'])?(int)$cacheStats['missing_messages']:0); ?>건</strong></div>
+          <div><span>구버전 캐시</span><strong><?php echo number_format(isset($cacheStats['legacy_messages'])?(int)$cacheStats['legacy_messages']:0); ?>건</strong></div>
+        </div>
+        <p class="pm-help-text">구버전 캐시가 있어도 네이버에서 본문을 다시 받지 않습니다. 메일을 열 때 저장된 HTML만 빠르게 변환하며, 제목 복구 작업도 본문 캐시를 삭제하지 않습니다.</p>
+      </div>
+
       <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>깨진 제목·본문 복구</strong><span>이전 버전에서 잘못 변환된 한글과 구버전 본문 캐시를 네이버 원본으로 다시 만듭니다.</span></div></div>
-        <div class="pm-alert pm-alert-success"><strong>한 번만 시작하면 됩니다.</strong><br>우선 20건을 복구하고, 이후 외부 자동동기화가 실행될 때마다 남은 메일을 조금씩 계속 복구합니다.</div>
+        <div class="pm-alert pm-alert-success"><strong>한 번만 시작하면 됩니다.</strong><br>우선 20건을 복구하고, 본문 캐시는 유지한 채 선택한 메일의 제목과 주소정보만 복구합니다. 필요할 때 버튼을 다시 누르면 다음 20건을 처리합니다.</div>
         <form method="post" action="public_mail_action.php" onsubmit="return confirm('깨진 메일 제목과 본문 캐시 복구를 시작할까요? 네이버 원본메일은 변경되지 않습니다.');">
           <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
           <input type="hidden" name="action" value="repair_metadata">
@@ -110,4 +133,4 @@ if ($percent>100) $percent=100;
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_71"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_73"></script>

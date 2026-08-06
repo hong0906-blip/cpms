@@ -4,9 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 자동수집은 public/cron/naver_mail_sync.php를 외부 예약서비스가 호출합니다.
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.3
  */
 (function () {
     'use strict';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.3';
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
     function csrf() { var el=page(); return el ? (el.getAttribute('data-csrf-token')||'') : ''; }
@@ -164,6 +166,52 @@
     }
 
 
+    function fallbackInlineImages(container) {
+        if(!container)return;
+        var nodes=container.querySelectorAll('img[data-pm-inline-part]'),i;
+        for(i=0;i<nodes.length;i++){
+            var fallback=nodes[i].getAttribute('data-pm-inline-src')||'';
+            if(fallback!=='')nodes[i].setAttribute('src',fallback);
+            nodes[i].removeAttribute('data-pm-inline-part');
+        }
+    }
+
+    function loadInlineImageBundle(container) {
+        if(!container)return;
+        var nodes=container.querySelectorAll('img[data-pm-inline-part]'),parts=[],seen={},i;
+        if(!nodes.length)return;
+        for(i=0;i<nodes.length;i++){
+            var part=nodes[i].getAttribute('data-pm-inline-part')||'';
+            if(part!==''&&!seen[part]){seen[part]=true;parts.push(part);}
+        }
+        if(!parts.length)return;
+        var fragment=container.querySelector('[data-detail-fragment]')||container;
+        var messageKey=fragment.getAttribute('data-message-key')||container.getAttribute('data-message-key')||'';
+        if(messageKey===''){fallbackInlineImages(container);return;}
+        var xhr=new XMLHttpRequest();
+        xhr.open('GET','public_mail_action.php?action=inline_image_bundle&message_key='+encodeURIComponent(messageKey)+'&part_ids='+encodeURIComponent(parts.join(',')),true);
+        xhr.setRequestHeader('X-Requested-With','XMLHttpRequest'); xhr.timeout=15000;
+        xhr.onreadystatechange=function(){
+            if(xhr.readyState!==4)return;
+            if(xhr.status>=200&&xhr.status<300){
+                var result=null; try{result=JSON.parse(xhr.responseText);}catch(e){result=null;}
+                if(result&&result.ok&&result.items){
+                    var images=container.querySelectorAll('img[data-pm-inline-part]'),j;
+                    for(j=0;j<images.length;j++){
+                        var id=images[j].getAttribute('data-pm-inline-part')||'';
+                        if(result.items[id]){images[j].setAttribute('src',result.items[id]);images[j].removeAttribute('data-pm-inline-part');}
+                        else {var fb=images[j].getAttribute('data-pm-inline-src')||'';if(fb!=='')images[j].setAttribute('src',fb);images[j].removeAttribute('data-pm-inline-part');}
+                    }
+                    return;
+                }
+            }
+            fallbackInlineImages(container);
+        };
+        xhr.ontimeout=function(){fallbackInlineImages(container);};
+        xhr.onerror=function(){fallbackInlineImages(container);};
+        xhr.send(null);
+    }
+
     function prepareMailImages(container) {
         if(!container)return;
         var images=container.querySelectorAll('.pm-message-body img'),i;
@@ -174,6 +222,7 @@
             images[i].setAttribute('data-pm-image-bound','1');
             images[i].addEventListener('error',function(){this.style.display='none';});
         }
+        loadInlineImageBundle(container);
     }
 
     function loadMailDetail(container) {
@@ -185,7 +234,7 @@
         var xhr=new XMLHttpRequest();
         xhr.open('GET','public_mail_action.php?action=detail_fragment&message_key='+encodeURIComponent(messageKey)+'&_='+new Date().getTime(),true);
         xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
-        xhr.timeout=30000;
+        xhr.timeout=12000;
         xhr.onreadystatechange=function(){
             if(xhr.readyState!==4)return;
             container.removeAttribute('data-loading');
@@ -231,29 +280,113 @@
         },true);
     }
 
-    function initDetailBody(){
-        var container=document.querySelector('[data-mail-detail-content]');
+    function initDetailBody(root){
+        var scope=root||document;
+        var container=scope.querySelector?scope.querySelector('[data-mail-detail-content]'):null;
         if(container&&container.getAttribute('data-cache-ready')!=='1')loadMailDetail(container);
         else prepareMailImages(container);
     }
 
-    function bindWorkflowNames() {
-        var form=document.querySelector('[data-workflow-form]'); if(!form)return;
+    function bindWorkflowNames(root) {
+        var scope=root||document;
+        var form=scope.querySelector?scope.querySelector('[data-workflow-form]'):null; if(!form)return;
+        if(form.getAttribute('data-pm-bound')==='1')return;
+        form.setAttribute('data-pm-bound','1');
         var ps=form.querySelector('[data-project-select]'),pn=form.querySelector('[data-project-name]'),as=form.querySelector('[data-assignee-select]'),an=form.querySelector('[data-assignee-name]');
         function update(select,hidden){if(!select||!hidden)return;var option=select.options[select.selectedIndex];hidden.value=option?(option.getAttribute('data-name')||''):'';}
         if(ps)ps.addEventListener('change',function(){update(ps,pn);}); if(as)as.addEventListener('change',function(){update(as,an);}); form.addEventListener('submit',function(){update(ps,pn);update(as,an);});
     }
 
-    function bindTaskModal() {
-        var modal=document.querySelector('[data-task-modal]'),opener=document.querySelector('[data-task-modal-open]'); if(!modal||!opener)return;
+    function bindTaskModal(root) {
+        var scope=root||document;
+        var modal=scope.querySelector?scope.querySelector('[data-task-modal]'):null,opener=scope.querySelector?scope.querySelector('[data-task-modal-open]'):null; if(!modal||!opener)return;
+        if(opener.getAttribute('data-pm-bound')==='1')return;
+        opener.setAttribute('data-pm-bound','1');
         function open(){modal.hidden=false;document.body.classList.add('pm-modal-open');} function close(){modal.hidden=true;document.body.classList.remove('pm-modal-open');}
         opener.addEventListener('click',open); var closers=modal.querySelectorAll('[data-task-modal-close]'),i; for(i=0;i<closers.length;i++)closers[i].addEventListener('click',close);
         document.addEventListener('keydown',function(e){if(e.keyCode===27&&!modal.hidden)close();});
     }
 
+    function detailHost(){return document.querySelector('[data-mail-detail-host]');}
+
+    function setSelectedRow(messageKey){
+        var rows=document.querySelectorAll('[data-mail-open]'),i;
+        for(i=0;i<rows.length;i++){
+            if((rows[i].getAttribute('data-message-key')||'')===messageKey)rows[i].classList.add('is-selected');
+            else rows[i].classList.remove('is-selected');
+        }
+    }
+
+    function updateMessageUrl(messageKey,replace){
+        if(!window.history||!window.history.pushState)return;
+        var url=window.location.href.split('#')[0],hash='',parts=url.split('?'),base=parts[0],params={},query=parts.length>1?parts.slice(1).join('?'):'';
+        if(query!==''){
+            var pairs=query.split('&'),i,p,key,value;
+            for(i=0;i<pairs.length;i++){if(pairs[i]==='')continue;p=pairs[i].split('=');key=decodeURIComponent(p.shift()||'');value=decodeURIComponent(p.join('=')||'');if(key!==''&&key!=='message'&&key!=='uid')params[key]=value;}
+        }
+        if(messageKey)params.message=messageKey;
+        var out=[],name;for(name in params)if(Object.prototype.hasOwnProperty.call(params,name))out.push(encodeURIComponent(name)+'='+encodeURIComponent(params[name]));
+        var next=base+(out.length?'?'+out.join('&'):'')+hash;
+        if(replace)window.history.replaceState({message:messageKey||''},'',next);else window.history.pushState({message:messageKey||''},'',next);
+    }
+
+    function showDetailPlaceholder(){
+        var host=detailHost(); if(!host)return;
+        host.innerHTML='<div class="pm-detail-placeholder"><i data-lucide="mail-open"></i><strong>메일을 선택하세요.</strong><span>본문, 첨부파일, 자동분류와 담당자 정보를 한 화면에서 확인할 수 있습니다.</span></div>';
+        var workspace=document.querySelector('.pm-workspace');if(workspace)workspace.classList.remove('has-detail');
+        if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
+    }
+
+    function initDetailPanel(root){
+        initDetailBody(root); bindWorkflowNames(root); bindTaskModal(root);
+        if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
+    }
+
+    function loadDetailPanel(messageKey,pushState){
+        var host=detailHost(); if(!host||messageKey==='')return;
+        setSelectedRow(messageKey);
+        var workspace=document.querySelector('.pm-workspace');if(workspace)workspace.classList.add('has-detail');
+        host.innerHTML='<div class="pm-detail-panel pm-detail-panel-loading"><div class="pm-detail-local-loading"><div class="pm-spinner"></div><strong>메일 정보를 여는 중입니다.</strong><span>목록은 다시 계산하지 않습니다.</span></div></div>';
+        if(pushState)updateMessageUrl(messageKey,false);
+        var xhr=new XMLHttpRequest();
+        xhr.open('GET','public_mail_action.php?action=detail_panel&message_key='+encodeURIComponent(messageKey)+'&_='+new Date().getTime(),true);
+        xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');xhr.timeout=10000;
+        xhr.onreadystatechange=function(){
+            if(xhr.readyState!==4)return;
+            if(xhr.status>=200&&xhr.status<300){host.innerHTML=xhr.responseText;initDetailPanel(host);}
+            else{host.innerHTML=xhr.responseText||'<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>잠시 후 다시 선택해 주세요.</p></div>';}
+        };
+        xhr.ontimeout=function(){host.innerHTML='<div class="pm-detail-load-error"><strong>메일 정보 조회가 지연되고 있습니다.</strong><p>목록은 계속 사용할 수 있습니다. 다시 메일을 선택해 주세요.</p></div>';};
+        xhr.onerror=function(){host.innerHTML='<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>네트워크 연결을 확인해 주세요.</p></div>';};
+        xhr.send(null);
+    }
+
+    function bindMailNavigation(){
+        document.addEventListener('click',function(event){
+            var target=event.target;
+            while(target&&target!==document&&!(target.getAttribute&&target.getAttribute('data-mail-open')!==null))target=target.parentNode;
+            if(target&&target!==document){
+                if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey||event.button===1)return;
+                event.preventDefault();event.stopPropagation();hideLoading();
+                loadDetailPanel(target.getAttribute('data-message-key')||'',true);return;
+            }
+            target=event.target;
+            while(target&&target!==document&&!(target.getAttribute&&target.getAttribute('data-retry-mail-panel')!==null))target=target.parentNode;
+            if(target&&target!==document){event.preventDefault();loadDetailPanel(target.getAttribute('data-message-key')||'',false);return;}
+            target=event.target;
+            while(target&&target!==document&&!(target.getAttribute&&target.getAttribute('data-mail-detail-close')!==null))target=target.parentNode;
+            if(target&&target!==document){event.preventDefault();setSelectedRow('');showDetailPlaceholder();updateMessageUrl('',false);}
+        },true);
+        window.addEventListener('popstate',function(){
+            var match=window.location.search.match(/[?&]message=([^&]+)/);
+            if(match&&match[1])loadDetailPanel(decodeURIComponent(match[1]),false);
+            else{setSelectedRow('');showDetailPlaceholder();}
+        });
+    }
+
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); initDetailBody(); bindWorkflowNames(); bindTaskModal();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); initDetailPanel(document);
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

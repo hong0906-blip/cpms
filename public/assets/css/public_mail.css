@@ -1,3 +1,4 @@
+/* CPMS_PUBLIC_MAIL_VERSION: 1.7.3 */
 /*
  * 파일 경로: C:\www\cpms\public\assets\css\public_mail.css
  * 공용메일 화면 전용 스타일
@@ -311,6 +312,20 @@
     background: #fff;
     box-shadow: 0 10px 28px rgba(35, 52, 73, .05);
     overflow: hidden;
+}
+
+
+.pm-detail-host {
+    min-width: 0;
+}
+
+.pm-detail-host > .pm-detail-panel,
+.pm-detail-host > .pm-detail-placeholder {
+    width: 100%;
+}
+
+.pm-detail-panel-loading {
+    min-height: 260px;
 }
 
 .pm-list-head {

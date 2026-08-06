@@ -11,12 +11,14 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
+    const VERSION = '1.7.3';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
     const SYNC_FILE = 'sync_state.json';
     const KEY_FILE = 'secret.key';
     const DRIVE_RECORDS_FILE = 'drive_records.json';
+    const INDEX_FILE = 'mail_index.json';
     const BODY_CACHE_DIR = 'body_cache';
     const BODY_CACHE_VERSION = 8;
 
@@ -98,7 +100,8 @@ class PublicMailStorageService
             self::MESSAGES_FILE => array(),
             self::WORKFLOW_FILE => array(),
             self::SYNC_FILE => self::syncDefaults(),
-            self::DRIVE_RECORDS_FILE => array()
+            self::DRIVE_RECORDS_FILE => array(),
+            self::INDEX_FILE => array()
         );
         foreach ($defaults as $fileName => $defaultValue) {
             $path = $root . DIRECTORY_SEPARATOR . $fileName;
@@ -263,6 +266,7 @@ class PublicMailStorageService
         self::ensureStorage();
         if (!is_array($messages)) $messages = array();
         self::writeJsonFile(self::path(self::MESSAGES_FILE), $messages);
+        self::refreshIndexSafely($messages, null);
     }
 
     public static function upsertMessages($newMessages)
@@ -306,13 +310,21 @@ class PublicMailStorageService
         if ((int)$parsed['uid'] <= 0) throw new \InvalidArgumentException('메일 식별값이 올바르지 않습니다.');
         $workflow = self::getWorkflow();
         $key = (string)$parsed['message_key'];
-        $current = self::getWorkflowForKey($key);
+        $default = array(
+            'department' => '', 'project_id' => '', 'project_name' => '',
+            'assignee_id' => '', 'assignee_name' => '', 'status' => '미확인',
+            'priority' => '보통', 'important' => false, 'memo' => '',
+            'reply_completed' => false, 'reply_completed_at' => '',
+            'reply_completed_by' => '', 'updated_at' => '', 'updated_by' => ''
+        );
+        $current = isset($workflow[$key]) && is_array($workflow[$key]) ? array_merge($default, $workflow[$key]) : $default;
         $allowed = array('department','project_id','project_name','assignee_id','assignee_name','status','priority','important','memo','reply_completed','reply_completed_at','reply_completed_by');
         foreach ($allowed as $field) if (array_key_exists($field, $changes)) $current[$field] = $changes[$field];
         $current['updated_at'] = date('Y-m-d H:i:s');
         $current['updated_by'] = (string)$updatedBy;
         $workflow[$key] = $current;
         self::writeJsonFile(self::path(self::WORKFLOW_FILE), $workflow);
+        self::refreshIndexSafely(null, $workflow);
         return $current;
     }
 
@@ -346,6 +358,7 @@ class PublicMailStorageService
         self::writeJsonFile(self::path(self::WORKFLOW_FILE), array());
         self::writeJsonFile(self::path(self::DRIVE_RECORDS_FILE), array());
         self::writeJsonFile(self::path(self::SYNC_FILE), self::syncDefaults());
+        self::writeJsonFile(self::path(self::INDEX_FILE), array());
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . 'raw_cache');
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . 'attachment_cache');
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . self::BODY_CACHE_DIR);
@@ -442,8 +455,66 @@ class PublicMailStorageService
         $path = self::bodyCachePath($messageKey);
         $cache = self::readJsonFile($path, array());
         if (!is_array($cache) || empty($cache['message_key'])) return null;
+
+        /*
+         * v1.7에서 만든 본문 캐시는 버전값이 없지만 본문 자체는 이미 저장되어 있습니다.
+         * 이를 무조건 폐기하면 메일을 열 때마다 네이버 IMAP에 다시 연결되어 매우 느려집니다.
+         * 파일 원본을 다시 받지 않고 저장된 HTML만 현재 형식으로 조용히 변환합니다.
+         */
         $version = isset($cache['cache_version']) ? (int)$cache['cache_version'] : 0;
-        if ($version !== self::BODY_CACHE_VERSION) return null;
+        $bodyHtml = isset($cache['body_html']) ? (string)$cache['body_html'] : '';
+        $needsLocalUpgrade = ($version !== self::BODY_CACHE_VERSION)
+            || strpos($bodyHtml, 'data-pm-external-src=') !== false
+            || (strpos($bodyHtml, 'action=inline_image') !== false && strpos($bodyHtml, 'data-pm-inline-part=') === false);
+
+        if ($needsLocalUpgrade) {
+            $cache = self::upgradeBodyCacheLocally($messageKey, $cache);
+        }
+        return $cache;
+    }
+
+    private static function upgradeBodyCacheLocally($messageKey, $cache)
+    {
+        if (!is_array($cache)) return null;
+        $html = isset($cache['body_html']) ? (string)$cache['body_html'] : '';
+        $original = $html;
+
+        // style/script 내용이 일반 글자로 노출되는 구버전 캐시를 서버 안에서 정리합니다.
+        $html = preg_replace('#<(style|script|noscript|template|title)[^>]*>.*?</\1>#is', '', $html);
+        $html = preg_replace('/<!--\[if.*?<!\[endif\]-->/is', '', $html);
+        for ($i = 0; $i < 6; $i++) {
+            $cleaned = preg_replace('/^\s*(?:(?:img\s*,\s*a\s+img|body|table|td|p|\.ExternalClass|#outlook)[^{\r\n]{0,160})\{[^{}]{0,3000}\}\s*/is', '', $html);
+            if ($cleaned === $html) break;
+            $html = $cleaned;
+        }
+
+        // v1.7의 차단 이미지 속성을 실제 지연로딩 이미지로 변환합니다.
+        $html = preg_replace_callback('/\sdata-pm-external-src=("[^"]*"|\'[^\']*\')/i', function ($matches) {
+            return ' src=' . $matches[1] . ' loading="lazy" decoding="async" referrerpolicy="no-referrer"';
+        }, $html);
+        $html = str_replace(array('pm-external-image is-blocked', ' is-blocked'), array('pm-external-image', ''), $html);
+
+        // 기존 CID 이미지 URL을 한 번의 묶음 요청에 사용할 data 속성으로 바꿉니다.
+        $placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+        $html = preg_replace_callback('#<img\b([^>]*?)\bsrc=("|\')([^"\']*public_mail_action\.php\?action=inline_image[^"\']*)\2([^>]*)>#is', function ($matches) use ($placeholder) {
+            $url = html_entity_decode((string)$matches[3], ENT_QUOTES, 'UTF-8');
+            $partId = '';
+            if (preg_match('/(?:^|[?&])part_id=([^&]+)/', $url, $partMatch)) $partId = rawurldecode($partMatch[1]);
+            if ($partId === '') return $matches[0];
+            $before = trim((string)$matches[1]);
+            $after = trim((string)$matches[4]);
+            $attrs = trim($before . ' ' . $after);
+            $attrs = preg_replace('/\sdata-pm-inline-(?:part|src)=("[^"]*"|\'[^\']*\')/i', '', $attrs);
+            return '<img ' . $attrs . ' src="' . $placeholder . '" data-pm-inline-part="' . htmlspecialchars($partId, ENT_QUOTES, 'UTF-8') . '" data-pm-inline-src="' . htmlspecialchars($url, ENT_QUOTES, 'UTF-8') . '" loading="lazy" decoding="async">';
+        }, $html);
+
+        $cache['body_html'] = $html;
+        $cache['cache_version'] = self::BODY_CACHE_VERSION;
+        $cache['source'] = isset($cache['source']) ? (string)$cache['source'] . '+local_upgrade_v172' : 'local_upgrade_v172';
+        $cache['upgraded_at'] = date('Y-m-d H:i:s');
+
+        // 내용이 같더라도 버전값을 기록해 다음 열람에서는 파일을 다시 검사하지 않습니다.
+        self::writeJsonFile(self::bodyCachePath($messageKey), $cache);
         return $cache;
     }
 
@@ -485,8 +556,9 @@ class PublicMailStorageService
         $rows = array();
         foreach ($messages as $key => $message) {
             if (!is_array($message)) continue;
-            $messageCacheVersion = isset($message['body_cache_version']) ? (int)$message['body_cache_version'] : 0;
-            if ($messageCacheVersion === self::BODY_CACHE_VERSION && is_file(self::bodyCachePath($key))) continue;
+            // 본문 캐시 파일이 있으면 버전값과 관계없이 네이버에서 다시 받지 않습니다.
+            // 실제 열람 시 getBodyCache()가 저장된 HTML만 현재 형식으로 빠르게 변환합니다.
+            if (is_file(self::bodyCachePath($key))) continue;
             $rows[] = array(
                 'key' => (string)$key,
                 'timestamp' => isset($message['timestamp']) ? (int)$message['timestamp'] : 0
@@ -510,11 +582,50 @@ class PublicMailStorageService
     }
 
 
+
+    public static function getBodyCacheStats()
+    {
+        self::ensureStorage();
+        $messages = self::getMessages();
+        $total = 0; $cached = 0; $missing = 0; $legacy = 0;
+        foreach ($messages as $key => $message) {
+            if (!is_array($message)) continue;
+            $total++;
+            $path = self::bodyCachePath($key);
+            if (!is_file($path)) { $missing++; continue; }
+            $cached++;
+            $raw = self::readJsonFile($path, array());
+            $version = is_array($raw) && isset($raw['cache_version']) ? (int)$raw['cache_version'] : 0;
+            if ($version !== self::BODY_CACHE_VERSION) $legacy++;
+        }
+        $dir = self::rootPath() . DIRECTORY_SEPARATOR . self::BODY_CACHE_DIR;
+        return array(
+            'storage_writable' => is_dir($dir) && is_writable($dir),
+            'total_messages' => $total,
+            'cached_messages' => $cached,
+            'missing_messages' => $missing,
+            'legacy_messages' => $legacy,
+            'cache_version' => self::BODY_CACHE_VERSION
+        );
+    }
+
     public static function getDriveRecords()
     {
         self::ensureStorage();
         $records = self::readJsonFile(self::path(self::DRIVE_RECORDS_FILE), array());
         return is_array($records) ? $records : array();
+    }
+
+    public static function getDriveRecordsForMessage($messageKey)
+    {
+        $messageKey = (string)$messageKey;
+        $records = self::getDriveRecords();
+        $matched = array();
+        foreach ($records as $record) {
+            if (!is_array($record)) continue;
+            if (isset($record['message_key']) && (string)$record['message_key'] === $messageKey) $matched[] = $record;
+        }
+        return $matched;
     }
 
     public static function saveDriveRecord($record)
@@ -542,6 +653,24 @@ class PublicMailStorageService
         foreach (array('attachment_cache','raw_cache') as $name) {
             $dir = $root . DIRECTORY_SEPARATOR . $name;
             if (is_dir($dir)) self::cleanupDirectory($dir);
+        }
+    }
+
+
+    /**
+     * 메일 목록/처리상태가 바뀐 경우 가벼운 화면 색인을 갱신합니다.
+     * 색인 생성 실패가 메일 저장 자체를 막지 않도록 예외는 내부에서 처리합니다.
+     */
+    public static function refreshIndexSafely($messages, $workflow)
+    {
+        try {
+            require_once __DIR__ . '/PublicMailIndexService.php';
+            if (!class_exists('App\Services\PublicMailIndexService')) return null;
+            if (!is_array($messages)) $messages = self::getMessages();
+            if (!is_array($workflow)) $workflow = self::getWorkflow();
+            return PublicMailIndexService::rebuildSafely($messages, $workflow);
+        } catch (\Exception $e) {
+            return null;
         }
     }
 
