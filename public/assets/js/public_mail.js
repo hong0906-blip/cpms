@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 첨부파일은 브라우저 기본 다운로드로 처리합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.2
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.19.1';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.19.2';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -842,6 +842,9 @@
             'query='+encodeURIComponent(root.getAttribute('data-live-query')||''),
             'period='+encodeURIComponent(root.getAttribute('data-live-period')||'1y'),
             'mailbox_type='+encodeURIComponent(root.getAttribute('data-live-mailbox-type')||''),
+            /* CPMS 공통 app.js가 r=ping 요청은 백그라운드 요청으로 처리해 전체 로딩창을 띄우지 않습니다. */
+            'r=ping',
+            'cpms_silent=1',
             '_='+new Date().getTime()
         ];
         var xhr=new XMLHttpRequest();

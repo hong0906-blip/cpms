@@ -7,7 +7,7 @@
  * - 기존 1분 브라우저 자동확인 코드를 제거하고 외부 예약서비스 방식으로 전환합니다.
  * - 설치 후 이 파일은 서버에서 삭제하세요.
  * PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.2
  */
 
 @ini_set('display_errors', '0');
@@ -114,7 +114,7 @@ function pm_install_patch_sidebar($sidebarPath)
 
     $variableBlock = "\n/* CPMS_PUBLIC_MAIL_VARIABLE_START */\n"
         . "\$publicMailMenu = '네이버 메일';\n"
-        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_7191';\n"
+        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_7192';\n"
         . "/* CPMS_PUBLIC_MAIL_VARIABLE_END */";
 
     $itemBlock = "/* CPMS_PUBLIC_MAIL_ITEM_START */\n"
@@ -239,13 +239,13 @@ function pm_install_critical_requirements()
 {
     return array(
         'app/services/PublicMailStorageService.php' => array('getTitleRefreshSubjectMap', 'saveTitleRefreshQueue', 'saveSyncState'),
-        'app/services/PublicMailIndexService.php' => array("const VERSION = '1.7.19.1'", 'function getLiveState', 'function getLiveUpdates'),
-        'app/views/public_mail/index.php' => array('data-live-mail="1"', '20260806_7191'),
+        'app/services/PublicMailIndexService.php' => array('function getLiveState', 'function getLiveUpdates'),
+        'app/views/public_mail/index.php' => array('data-live-mail="1"', '20260806_7192'),
         'app/views/public_mail/_mail_rows.php' => array('data-live-mail-row'),
-        'public/public_mail_live.php' => array('CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1', 'getLiveUpdates'),
-        'public/assets/js/public_mail.js' => array("CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1", 'bindLiveMailUpdates'),
-        'public/assets/css/public_mail.css' => array('pm-live-mail-enter'),
-        'public/public_mail_install.php' => array('CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1')
+        'public/public_mail_live.php' => array('getLiveUpdates'),
+        'public/assets/js/public_mail.js' => array('CPMS_PUBLIC_MAIL_VERSION: 1.7.19.2', 'bindLiveMailUpdates', "'r=ping'"),
+        'public/assets/css/public_mail.css' => array('CPMS_PUBLIC_MAIL_VERSION: 1.7.19.2', 'pm-live-mail-toast', '.pm-mail-row.is-live-new'),
+        'public/public_mail_install.php' => array('CPMS_PUBLIC_MAIL_VERSION: 1.7.19.2')
     );
 }
 
@@ -364,23 +364,23 @@ $requiredFiles = array(
     'app/services/PublicMailClassifierService.php' => '',
     'app/services/PublicMailLargeAttachmentService.php' => '',
     'app/services/PublicMailDriveService.php' => '',
-    'app/services/PublicMailIndexService.php' => "const VERSION = '1.7.19.1'",
+    'app/services/PublicMailIndexService.php' => 'function getLiveUpdates',
     'app/services/PublicMailService.php' => 'runAutomationTick',
     'app/services/PublicMailWebHelper.php' => 'requireDevelopmentDepartment',
-    'app/views/public_mail/index.php' => '20260806_7191',
+    'app/views/public_mail/index.php' => '20260806_7192',
     'app/views/public_mail/_mail_rows.php' => 'data-live-mail-row',
     'app/views/public_mail/detail_panel.php' => 'data-mail-detail-content',
     'app/views/public_mail/detail_fragment.php' => 'CPMS_PUBLIC_MAIL_VERSION:',
     'app/views/public_mail/settings.php' => '24시간 외부 자동동기화',
     'public/public_mail.php' => 'CPMS_PUBLIC_MAIL_VERSION:',
-    'public/public_mail_live.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1',
+    'public/public_mail_live.php' => 'getLiveUpdates',
     'public/public_mail_settings.php' => 'CPMS_PUBLIC_MAIL_VERSION:',
     'public/public_mail_action.php' => 'CPMS_PUBLIC_MAIL_VERSION:',
     'public/public_mail_title_refresh_worker.php' => 'CPMS_PUBLIC_MAIL_VERSION:',
     'public/public_mail_attachment.php' => 'CPMS_PUBLIC_MAIL_VERSION:',
-    'public/assets/css/public_mail.css' => 'pm-live-mail-enter',
+    'public/assets/css/public_mail.css' => 'pm-live-mail-toast',
     'public/assets/img/naver_n_icon.svg' => '',
-    'public/assets/js/public_mail.js' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1',
+    'public/assets/js/public_mail.js' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.19.2',
     'public/cron/naver_mail_sync.php' => 'X-CPMS-Mail-Key'
 );
 
@@ -407,7 +407,7 @@ $latestInstalled = $installed && $mobileInstalled
     && strpos($sidebarContent, "\$publicMailMenu = '네이버 메일';") !== false
     && strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') === false
     && strpos($sidebarContent, 'assets/img/naver_n_icon.svg') !== false;
-$packageVersion = '1.7.19.1';
+$packageVersion = '1.7.19.2';
 $indexStatus = array();
 try {
     if (class_exists('App\\Services\\PublicMailService')
@@ -436,13 +436,13 @@ try {
 <div class="wrap">
     <div class="card">
         <h1>CPMS 네이버 메일 설치</h1>
-        <p class="sub">v1.7.19.1 설치 오류 긴급 수정 패치입니다. 일부 파일만 적용된 상태에서도 빈 HTTP 500 화면이 나오지 않으며, 전체 패키지 파일을 함께 덮어씁니다.</p>
+        <p class="sub">v1.7.19.2 설치검사·반복로딩 수정 패치입니다. 실제 CSS 기능을 정확히 확인하고, 새 메일 백그라운드 확인은 전체 로딩창을 띄우지 않습니다.</p>
 
         <?php if ($message !== ''): ?>
             <div class="alert <?php echo $messageType === 'error' ? 'error' : 'success'; ?>"><?php echo pm_install_h($message); ?><?php echo $backupPath !== '' ? '<br>백업: ' . pm_install_h($backupPath) : ''; ?></div>
         <?php endif; ?>
 
-        <div class="status"><span class="dot <?php echo ($latestInstalled&&$allReady) ? 'on' : ''; ?>"></span><strong>설치 상태: <?php echo ($latestInstalled&&$allReady) ? 'v1.7.19.1 전체 적용' : ($installed ? '일부 파일 업데이트 필요' : '설치 전'); ?></strong></div><div class="status" style="margin-top:10px"><strong>목록 색인: <?php echo !empty($indexStatus['updated_at']) ? pm_install_h($indexStatus['updated_at']).' · '.number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0).'건' : '아직 생성되지 않음'; ?></strong></div>
+        <div class="status"><span class="dot <?php echo ($latestInstalled&&$allReady) ? 'on' : ''; ?>"></span><strong>설치 상태: <?php echo ($latestInstalled&&$allReady) ? 'v1.7.19.2 전체 적용' : ($installed ? '일부 파일 업데이트 필요' : '설치 전'); ?></strong></div><div class="status" style="margin-top:10px"><strong>목록 색인: <?php echo !empty($indexStatus['updated_at']) ? pm_install_h($indexStatus['updated_at']).' · '.number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0).'건' : '아직 생성되지 않음'; ?></strong></div>
 
         <div class="files">
             <?php foreach ($checks as $check): ?>
