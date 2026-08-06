@@ -92,7 +92,9 @@ try {
     $duration = (int)round((microtime(true) - $startedAt) * 1000);
     $repaired = isset($result['repaired_count']) ? (int)$result['repaired_count'] : 0;
     $repairRemaining = isset($state['metadata_repair']['remaining_count']) ? (int)$state['metadata_repair']['remaining_count'] : 0;
-    $summary = '성공: ' . $message . ' / 추가 ' . $added . '건 / 메일 남음 ' . $remaining . '건 / 한글복구 ' . $repaired . '건 / 복구 확인 남음 ' . $repairRemaining . '건';
+    $recentAdded = isset($state['recent_mail_recovery']['added_count']) ? (int)$state['recent_mail_recovery']['added_count'] : 0;
+    $newFailureCount = isset($state['new_message_failures']) && is_array($state['new_message_failures']) ? count($state['new_message_failures']) : 0;
+    $summary = '성공: ' . $message . ' / 추가 ' . $added . '건 / 메일 남음 ' . $remaining . '건 / 최근48시간 복구 ' . $recentAdded . '건 / 격리·재시도 ' . $newFailureCount . '건';
     $finishedText = date('Y-m-d H:i:s');
     $latestRepair = isset($state['metadata_repair']) && is_array($state['metadata_repair']) ? $state['metadata_repair'] : array();
     $latestRepair['last_http_ping_at'] = $finishedText;

@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.17';
+    const VERSION = '1.7.18';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -153,6 +153,7 @@ class PublicMailStorageService
                 'processed_count' => 0,
                 'updated_count' => 0,
                 'merged_count' => 0,
+                'applied_count' => 0,
                 'failed_count' => 0,
                 'remaining_count' => 0,
                 'last_batch_count' => 0,
@@ -174,7 +175,21 @@ class PublicMailStorageService
                 'last_candidate_subject_preview' => '',
                 'last_message' => '비즈니스온·스마트빌 깨진 제목 복구를 아직 시작하지 않았습니다.',
                 'last_error' => ''
-            )
+            ),
+            'recent_mail_recovery' => array(
+                'active' => false,
+                'since_timestamp' => 0,
+                'started_at' => '',
+                'finished_at' => '',
+                'last_run_at' => '',
+                'checked_count' => 0,
+                'added_count' => 0,
+                'failed_count' => 0,
+                'remaining_count' => 0,
+                'last_message' => '최근 누락 메일 재확인이 아직 실행되지 않았습니다.'
+            ),
+            'new_message_inflight' => array(),
+            'new_message_failures' => array()
         );
     }
 
@@ -279,6 +294,47 @@ class PublicMailStorageService
         );
         self::writeJsonFile(self::path(self::TITLE_REFRESH_UPDATES_FILE), $updates);
         return $updates;
+    }
+
+    /** 제목 복구 작업 파일에서 메일 키별 정상 제목만 가볍게 읽습니다. */
+    public static function getTitleRefreshSubjectMap()
+    {
+        $updates = self::getTitleRefreshUpdates();
+        $items = isset($updates['items']) && is_array($updates['items']) ? $updates['items'] : array();
+        $result = array();
+        foreach ($items as $messageKey => $item) {
+            if (!is_array($item)) continue;
+            $subject = isset($item['subject']) ? trim((string)$item['subject']) : '';
+            if ($subject !== '') $result[(string)$messageKey] = $subject;
+        }
+        return $result;
+    }
+
+    /** 저장된 메일 배열에 작은 제목 보정 파일만 덮어씁니다. */
+    public static function applyTitleRefreshOverridesToMessages($messages)
+    {
+        if (!is_array($messages) || empty($messages)) return is_array($messages) ? $messages : array();
+        $updates = self::getTitleRefreshUpdates();
+        $items = isset($updates['items']) && is_array($updates['items']) ? $updates['items'] : array();
+        foreach ($items as $messageKey => $update) {
+            $key = (string)$messageKey;
+            if (!isset($messages[$key]) || !is_array($messages[$key]) || !is_array($update)) continue;
+            $subject = isset($update['subject']) ? trim((string)$update['subject']) : '';
+            if ($subject === '') continue;
+            $messages[$key]['subject'] = $subject;
+            $messages[$key]['subject_refreshed_at'] = isset($update['refreshed_at']) ? (string)$update['refreshed_at'] : '';
+            $messages[$key]['subject_refresh_source'] = isset($update['source']) ? (string)$update['source'] : 'businesson_worker_v1718';
+        }
+        return $messages;
+    }
+
+    public static function applyTitleRefreshOverrideToMessage($messageKey, $message)
+    {
+        if (!is_array($message)) return $message;
+        $map = self::getTitleRefreshSubjectMap();
+        $key = (string)$messageKey;
+        if (isset($map[$key]) && trim((string)$map[$key]) !== '') $message['subject'] = trim((string)$map[$key]);
+        return $message;
     }
 
     public static function clearTitleRefreshWorkFiles()
@@ -428,10 +484,10 @@ class PublicMailStorageService
         if (!is_array($messages)) return array();
 
         /*
-         * v1.7.12: 평상시 메일 화면에서는 저장된 값을 그대로 반환합니다.
-         * 전체 제목 변환이나 네이버 재조회는 연동 설정의 전용 작업에서만 실행합니다.
+         * v1.7.18: messages.json 전체를 다시 저장하지 않고 작은 제목 보정 파일만 덮어씁니다.
+         * 100여 건의 해시 조회만 수행하므로 목록·상세 속도에 거의 영향을 주지 않습니다.
          */
-        return $messages;
+        return self::applyTitleRefreshOverridesToMessages($messages);
     }
 
     public static function saveMessages($messages)
@@ -526,6 +582,10 @@ class PublicMailStorageService
         $state['title_normalization'] = self::sanitizeUtf8Value($state['title_normalization']);
         $state['title_refresh'] = array_merge($defaults['title_refresh'], isset($saved['title_refresh']) && is_array($saved['title_refresh']) ? $saved['title_refresh'] : array());
         $state['title_refresh'] = self::sanitizeUtf8Value($state['title_refresh']);
+        $state['recent_mail_recovery'] = array_merge($defaults['recent_mail_recovery'], isset($saved['recent_mail_recovery']) && is_array($saved['recent_mail_recovery']) ? $saved['recent_mail_recovery'] : array());
+        $state['recent_mail_recovery'] = self::sanitizeUtf8Value($state['recent_mail_recovery']);
+        if (!isset($state['new_message_inflight']) || !is_array($state['new_message_inflight'])) $state['new_message_inflight'] = array();
+        if (!isset($state['new_message_failures']) || !is_array($state['new_message_failures'])) $state['new_message_failures'] = array();
         if (!isset($state['mailboxes']) || !is_array($state['mailboxes'])) $state['mailboxes'] = array();
 
         /*
@@ -561,6 +621,9 @@ class PublicMailStorageService
         }
         if (isset($changes['title_refresh']) && is_array($changes['title_refresh'])) {
             $changes['title_refresh'] = array_merge($state['title_refresh'], $changes['title_refresh']);
+        }
+        if (isset($changes['recent_mail_recovery']) && is_array($changes['recent_mail_recovery'])) {
+            $changes['recent_mail_recovery'] = array_merge($state['recent_mail_recovery'], $changes['recent_mail_recovery']);
         }
         $state = array_merge($state, $changes);
         self::writeJsonFile(self::path(self::SYNC_FILE), $state);

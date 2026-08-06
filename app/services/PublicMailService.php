@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.17';
+    const VERSION = '1.7.18';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -301,7 +301,8 @@ class PublicMailService
         if ($lock === false) throw new \RuntimeException('다른 사용자가 메일을 가져오는 중입니다. 잠시 후 다시 시도하세요.');
         $client = $this->createClient($settings);
         try {
-            $client->connect(); $client->login($settings['username'], $settings['password']);
+            $client->connect();
+            $client->login($settings['username'], $settings['password']);
             $state = PublicMailStorageService::getSyncState();
             $mailboxes = isset($state['mailboxes']) && is_array($state['mailboxes']) ? $state['mailboxes'] : array();
             if (empty($mailboxes)) {
@@ -310,27 +311,125 @@ class PublicMailService
                     $mailboxes[$id] = array('raw_name'=>$box['raw_name'],'display_name'=>$box['display_name'],'total_count'=>0,'imported_count'=>0,'remaining_count'=>0,'last_uid'=>0,'completed'=>false,'last_error'=>'','mailbox_type'=>isset($box['mailbox_type'])?$box['mailbox_type']:$this->detectMailboxType($box['raw_name'],$box['display_name'],isset($box['flags'])?$box['flags']:array()));
                 }
             }
+
             $messages = PublicMailStorageService::getMessages();
             $projects = $this->getProjects();
-            $added = 0; $gptUsed = 0; $searched = 0;
+            $failures = isset($state['new_message_failures']) && is_array($state['new_message_failures']) ? $state['new_message_failures'] : array();
+            $recovery = isset($state['recent_mail_recovery']) && is_array($state['recent_mail_recovery']) ? $state['recent_mail_recovery'] : array();
+            $recovery = array_merge(array(
+                'active'=>false,'since_timestamp'=>0,'started_at'=>'','finished_at'=>'','last_run_at'=>'',
+                'checked_count'=>0,'added_count'=>0,'failed_count'=>0,'remaining_count'=>0,
+                'last_message'=>'최근 누락 메일 재확인이 아직 실행되지 않았습니다.'
+            ), $recovery);
+
+            /* 이전 PHP 실행이 메일 한 건에서 끊겼다면 같은 UID를 반복하지 않고 즉시 격리합니다. */
+            $inflight = isset($state['new_message_inflight']) && is_array($state['new_message_inflight']) ? $state['new_message_inflight'] : array();
+            if (!empty($inflight['message_key'])) {
+                $staleKey = (string)$inflight['message_key'];
+                $staleMailbox = isset($inflight['mailbox']) ? (string)$inflight['mailbox'] : 'INBOX';
+                $staleUid = isset($inflight['uid']) ? (int)$inflight['uid'] : 0;
+                if (!isset($messages[$staleKey]) && $staleUid > 0) {
+                    $failures[$staleKey] = array(
+                        'message_key'=>$staleKey,'mailbox'=>$staleMailbox,'uid'=>$staleUid,'attempts'=>99,
+                        'status'=>'quarantined_fatal','last_error'=>'이전 실행이 이 메일을 처리하는 중 종료되어 자동 격리했습니다.',
+                        'last_failed_at'=>date('Y-m-d H:i:s')
+                    );
+                    foreach ($mailboxes as $boxId => $boxState) {
+                        if (isset($boxState['raw_name']) && (string)$boxState['raw_name'] === $staleMailbox) {
+                            $mailboxes[$boxId]['last_uid'] = max(isset($boxState['last_uid'])?(int)$boxState['last_uid']:0, $staleUid);
+                            break;
+                        }
+                    }
+                }
+                PublicMailStorageService::saveSyncState(array(
+                    'mailboxes'=>$mailboxes,'new_message_inflight'=>array(),'new_message_failures'=>$failures
+                ));
+            }
+
+            $added = 0; $gptUsed = 0; $searched = 0; $failedThisRun = 0;
+            $recoveryChecked = 0; $recoveryAdded = 0; $recoveryMissingFound = 0; $scannedAllMailboxes = true;
+            $sinceTimestamp = isset($recovery['since_timestamp']) ? (int)$recovery['since_timestamp'] : 0;
+            if (!empty($recovery['active']) && $sinceTimestamp <= 0) $sinceTimestamp = time() - 172800;
+
             foreach ($mailboxes as $id => $box) {
-                if ($added >= $limit) break;
+                if ($added >= $limit) { $scannedAllMailboxes = false; break; }
                 try {
                     $info = $client->selectMailbox($box['raw_name']);
                     $lastUid = isset($box['last_uid']) ? (int)$box['last_uid'] : 0;
                     if ($lastUid <= 0) $lastUid = $this->maximumKnownUid($messages, $box['raw_name']);
-                    $uids = $client->searchUidsAfter($lastUid);
-                    if ($lastUid <= 0) rsort($uids, SORT_NUMERIC); else sort($uids, SORT_NUMERIC);
-                    $searched += count($uids);
-                    $newLastUid = $lastUid;
-                    foreach ($uids as $uid) {
-                        if ($added >= $limit) break;
-                        $key = PublicMailStorageService::messageKey($box['raw_name'], $uid);
-                        if (isset($messages[$key])) { if ((int)$uid > $newLastUid) $newLastUid = (int)$uid; continue; }
-                        $message = $this->fetchAndBuildMessage($client, $box, $uid, $projects, $settings, $gptUsed);
-                        $messages[$key] = $message; $added++;
-                        if ((int)$uid > $newLastUid) $newLastUid = (int)$uid;
+
+                    $retryUids = array();
+                    foreach ($failures as $failure) {
+                        if (!is_array($failure) || !isset($failure['mailbox']) || (string)$failure['mailbox'] !== (string)$box['raw_name']) continue;
+                        if (isset($failure['status']) && strpos((string)$failure['status'], 'quarantined') === 0) continue;
+                        if (!empty($failure['uid'])) $retryUids[(int)$failure['uid']] = (int)$failure['uid'];
                     }
+
+                    $recentUids = array();
+                    if (!empty($recovery['active'])) {
+                        $recentUids = $client->searchUidsSince($sinceTimestamp);
+                        $recoveryChecked += count($recentUids);
+                    }
+                    $afterUids = $client->searchUidsAfter($lastUid);
+                    $searched += count($afterUids);
+
+                    $candidateMap = array();
+                    foreach ($retryUids as $uid) $candidateMap[(int)$uid] = (int)$uid;
+                    foreach ($recentUids as $uid) $candidateMap[(int)$uid] = (int)$uid;
+                    foreach ($afterUids as $uid) $candidateMap[(int)$uid] = (int)$uid;
+                    $uids = array_values($candidateMap);
+                    sort($uids, SORT_NUMERIC);
+                    $newLastUid = $lastUid;
+
+                    foreach ($uids as $uid) {
+                        if ($added >= $limit) { $scannedAllMailboxes = false; break; }
+                        $uid = (int)$uid;
+                        $key = PublicMailStorageService::messageKey($box['raw_name'], $uid);
+                        if (isset($messages[$key])) {
+                            if ($uid > $newLastUid) $newLastUid = $uid;
+                            if (isset($failures[$key])) unset($failures[$key]);
+                            continue;
+                        }
+                        if (isset($failures[$key]['status']) && strpos((string)$failures[$key]['status'], 'quarantined') === 0) {
+                            if ($uid > $newLastUid) $newLastUid = $uid;
+                            continue;
+                        }
+                        if (!empty($recovery['active']) && in_array($uid, $recentUids, true)) $recoveryMissingFound++;
+
+                        PublicMailStorageService::saveSyncState(array(
+                            'new_message_inflight'=>array(
+                                'message_key'=>$key,'mailbox'=>(string)$box['raw_name'],'uid'=>$uid,
+                                'started_at'=>date('Y-m-d H:i:s')
+                            ),
+                            'new_message_failures'=>$failures,
+                            'mailboxes'=>$mailboxes
+                        ));
+
+                        try {
+                            $message = $this->fetchAndBuildMessage($client, $box, $uid, $projects, $settings, $gptUsed);
+                            $messages[$key] = $message;
+                            $added++;
+                            if (!empty($recovery['active']) && in_array($uid, $recentUids, true)) $recoveryAdded++;
+                            if (isset($failures[$key])) unset($failures[$key]);
+                        } catch (\Exception $messageError) {
+                            $oldAttempts = isset($failures[$key]['attempts']) ? (int)$failures[$key]['attempts'] : 0;
+                            $attempts = $oldAttempts + 1;
+                            $status = $attempts >= 2 ? 'quarantined_after_retry' : 'retry';
+                            $failures[$key] = array(
+                                'message_key'=>$key,'mailbox'=>(string)$box['raw_name'],'uid'=>$uid,'attempts'=>$attempts,
+                                'status'=>$status,
+                                'last_error'=>PublicMailStorageService::sanitizeText($messageError->getMessage(), 500),
+                                'last_failed_at'=>date('Y-m-d H:i:s')
+                            );
+                            $failedThisRun++;
+                        }
+
+                        if ($uid > $newLastUid) $newLastUid = $uid;
+                        PublicMailStorageService::saveSyncState(array(
+                            'new_message_inflight'=>array(),'new_message_failures'=>$failures
+                        ));
+                    }
+
                     $box['last_uid'] = $newLastUid;
                     $box['total_count'] = isset($info['exists']) ? (int)$info['exists'] : (isset($box['total_count']) ? (int)$box['total_count'] : 0);
                     $box['imported_count'] = $this->countKnownMailboxMessages($messages, $box['raw_name']);
@@ -338,23 +437,51 @@ class PublicMailService
                     $box['last_error'] = '';
                     $mailboxes[$id] = $box;
                 } catch (\Exception $boxError) {
-                    $box['last_error'] = $boxError->getMessage(); $mailboxes[$id] = $box;
+                    $box['last_error'] = PublicMailStorageService::sanitizeText($boxError->getMessage(), 500);
+                    $mailboxes[$id] = $box;
                 }
             }
+
             if ($added > 0) PublicMailStorageService::saveMessages($messages);
+
+            if (!empty($recovery['active'])) {
+                $recovery['last_run_at'] = date('Y-m-d H:i:s');
+                $recovery['checked_count'] = (int)$recovery['checked_count'] + $recoveryChecked;
+                $recovery['added_count'] = (int)$recovery['added_count'] + $recoveryAdded;
+                $quarantinedCount = 0;
+                foreach ($failures as $failure) {
+                    if (is_array($failure) && isset($failure['status']) && strpos((string)$failure['status'], 'quarantined') === 0) $quarantinedCount++;
+                }
+                $recovery['failed_count'] = $quarantinedCount;
+                if ($scannedAllMailboxes && $recoveryMissingFound === 0) {
+                    $recovery['active'] = false;
+                    $recovery['finished_at'] = date('Y-m-d H:i:s');
+                    $recovery['remaining_count'] = 0;
+                    $recovery['last_message'] = '최근 48시간 누락 메일 재확인을 완료했습니다. ' . number_format((int)$recovery['added_count']) . '건을 추가했습니다.';
+                } else {
+                    $recovery['remaining_count'] = max(0, $recoveryMissingFound - $recoveryAdded);
+                    $recovery['last_message'] = '최근 48시간 누락 메일을 확인 중입니다. 이번 실행에서 ' . number_format($recoveryAdded) . '건을 추가했습니다.';
+                }
+            }
+
             $progress = $this->calculateImportProgress($mailboxes);
             $state = PublicMailStorageService::saveSyncState(array(
                 'last_success_at'=>date('Y-m-d H:i:s'),'last_error_at'=>'','last_error'=>'',
                 'last_batch_count'=>$added,'last_gpt_count'=>$gptUsed,'last_search_count'=>$searched,
                 'last_mode'=>'new','mailboxes'=>$mailboxes,'mailbox_total'=>$progress['total_count'],
-                'remaining_count'=>isset($state['full_import']['remaining_count']) ? (int)$state['full_import']['remaining_count'] : 0
+                'remaining_count'=>isset($state['full_import']['remaining_count']) ? (int)$state['full_import']['remaining_count'] : 0,
+                'new_message_inflight'=>array(),'new_message_failures'=>$failures,
+                'recent_mail_recovery'=>$recovery
             ));
-            return array('ok'=>true,'message'=>$added > 0 ? $added . '개의 새 메일을 가져왔습니다.' : '새로 가져올 메일이 없습니다.','added_count'=>$added,'search_count'=>$searched,'state'=>$state);
+            $messageText = $added > 0 ? $added . '개의 새 메일을 가져왔습니다.' : '새로 가져올 메일이 없습니다.';
+            if ($failedThisRun > 0) $messageText .= ' 읽지 못한 ' . $failedThisRun . '건은 격리하거나 다음 실행에서 한 번 더 확인합니다.';
+            return array('ok'=>true,'message'=>$messageText,'added_count'=>$added,'failed_count'=>$failedThisRun,'search_count'=>$searched,'state'=>$state);
         } catch (\Exception $e) {
-            PublicMailStorageService::saveSyncState(array('last_error_at'=>date('Y-m-d H:i:s'),'last_error'=>$e->getMessage(),'last_mode'=>'new'));
+            PublicMailStorageService::saveSyncState(array('last_error_at'=>date('Y-m-d H:i:s'),'last_error'=>$e->getMessage(),'last_mode'=>'new','new_message_inflight'=>array()));
             throw $e;
         } finally {
-            $client->logout(); PublicMailStorageService::releaseLock($lock);
+            $client->logout();
+            PublicMailStorageService::releaseLock($lock);
         }
     }
 
@@ -818,7 +945,7 @@ class PublicMailService
     /**
      * 네이버 원본 제목 재수집 작업을 등록합니다.
      *
-     * v1.7.17부터는 스마트빌 메일만 한 건씩 처리하고 messages.json은 마지막에 한 번만 저장합니다.
+     * v1.7.18부터는 스마트빌 메일만 한 건씩 처리하고 messages.json은 마지막에 한 번만 저장합니다.
      * 작업 시작 시 작은 대기열을 한 번 만들고, 제목 10건씩 별도 업데이트 파일에 모은 뒤
      * 모든 수집이 끝났을 때 messages.json과 검색 색인을 한 번만 갱신합니다.
      */
@@ -828,11 +955,9 @@ class PublicMailService
      */
     public function startSmartBillTitleRefresh()
     {
-        /* 이전 버전에서 정상적으로 모인 제목이 있다면 먼저 안전하게 적용합니다. */
+        /* 기존에 수집한 정상 제목은 작은 보정 파일에 그대로 보존합니다. */
         $oldUpdates = PublicMailStorageService::getTitleRefreshUpdates();
-        if (!empty($oldUpdates['items']) && is_array($oldUpdates['items'])) {
-            $this->mergeCollectedTitleRefreshUpdates(false);
-        }
+        $oldUpdateItems = isset($oldUpdates['items']) && is_array($oldUpdates['items']) ? $oldUpdates['items'] : array();
 
         $messages = PublicMailStorageService::getMessages();
         $items = array();
@@ -881,9 +1006,8 @@ class PublicMailService
             return $au < $bu ? -1 : 1;
         });
 
-        PublicMailStorageService::clearTitleRefreshWorkFiles();
         $queue = PublicMailStorageService::saveTitleRefreshQueue($items);
-        PublicMailStorageService::saveTitleRefreshUpdates(array());
+        /* 기존 정상 제목 후보는 지우지 않습니다. */
 
         $total = isset($queue['total_count']) ? (int)$queue['total_count'] : count($items);
         $refresh = array(
@@ -911,8 +1035,9 @@ class PublicMailService
             'consecutive_errors'=>0,
             'total_count'=>$total,
             'processed_count'=>0,
-            'updated_count'=>0,
-            'merged_count'=>0,
+            'updated_count'=>count($oldUpdateItems),
+            'merged_count'=>count($oldUpdateItems),
+            'applied_count'=>count($oldUpdateItems),
             'failed_count'=>0,
             'remaining_count'=>$total,
             'last_batch_count'=>0,
@@ -985,10 +1110,7 @@ class PublicMailService
             $refresh['consecutive_errors'] = 0;
             $refresh['last_message'] = '비즈니스온 깨진 제목 복구를 다시 시작했습니다.';
         } elseif ($command === 'cancel') {
-            /*
-             * 수집된 제목은 버리지 않습니다. 네이버 접속 없이 로컬 파일만 한 번 합친 뒤
-             * 취소 상태로 마칩니다.
-             */
+            /* 수집된 제목은 작은 보정 파일에 그대로 남아 즉시 표시됩니다. */
             $this->mergeCollectedTitleRefreshUpdates(false);
             $refresh = PublicMailStorageService::getSyncState();
             $refresh = isset($refresh['title_refresh']) && is_array($refresh['title_refresh'])
@@ -1213,7 +1335,7 @@ class PublicMailService
                 $updateItems[$messageKey] = array(
                     'subject'=>$freshSubject,
                     'refreshed_at'=>date('Y-m-d H:i:s'),
-                    'source'=>'businesson_worker_v1717',
+                    'source'=>'businesson_worker_v1718',
                     'old_score'=>$oldScore,
                     'new_score'=>$freshScore,
                     'old_was_clearly_broken'=>$oldClearlyBroken ? 1 : 0
@@ -1329,45 +1451,23 @@ class PublicMailService
      * 네이버 연결 없이 로컬 제목 업데이트만 합칩니다.
      * 200건 단위로 메모리에서 적용하되 messages.json은 마지막에 한 번만 저장합니다.
      */
+    /**
+     * v1.7.18: 정상 제목은 title_refresh_updates.json에서 즉시 목록·상세에 덮어씁니다.
+     * messages.json 5,559건 전체 저장과 mail_index.json 전체 재생성은 하지 않습니다.
+     */
     private function mergeCollectedTitleRefreshUpdates($markCompleted)
     {
         $state = PublicMailStorageService::getSyncState();
-        $refresh = isset($state['title_refresh']) && is_array($state['title_refresh'])
-            ? $state['title_refresh'] : array();
+        $refresh = isset($state['title_refresh']) && is_array($state['title_refresh']) ? $state['title_refresh'] : array();
         $updates = PublicMailStorageService::getTitleRefreshUpdates();
         $updateItems = isset($updates['items']) && is_array($updates['items']) ? $updates['items'] : array();
-
-        if (!empty($updateItems)) {
-            $messages = PublicMailStorageService::getMessages();
-            $keys = array_keys($updateItems);
-            $chunks = array_chunk($keys, 200);
-            $merged = 0;
-
-            foreach ($chunks as $chunk) {
-                foreach ($chunk as $messageKey) {
-                    if (!isset($messages[$messageKey]) || !is_array($messages[$messageKey])) continue;
-                    $update = isset($updateItems[$messageKey]) && is_array($updateItems[$messageKey])
-                        ? $updateItems[$messageKey] : array();
-                    $subject = isset($update['subject']) ? trim((string)$update['subject']) : '';
-                    if ($subject === '') continue;
-
-                    $messages[$messageKey]['subject'] = $subject;
-                    $messages[$messageKey]['subject_refreshed_at'] = isset($update['refreshed_at'])
-                        ? (string)$update['refreshed_at'] : date('Y-m-d H:i:s');
-                    $messages[$messageKey]['subject_refresh_source'] = isset($update['source'])
-                        ? (string)$update['source'] : 'businesson_worker_v1717';
-                    $merged++;
-                }
-            }
-
-            PublicMailStorageService::saveMessagesCheckpoint($messages);
-            PublicMailIndexService::rebuild($messages, null);
-            $refresh['merged_count'] = $merged;
-        } else {
-            $refresh['merged_count'] = 0;
-            PublicMailIndexService::rebuild();
+        $applied = 0;
+        foreach ($updateItems as $item) {
+            if (is_array($item) && isset($item['subject']) && trim((string)$item['subject']) !== '') $applied++;
         }
-
+        $refresh['updated_count'] = $applied;
+        $refresh['merged_count'] = $applied;
+        $refresh['applied_count'] = $applied;
         $refresh['last_run_at'] = date('Y-m-d H:i:s');
         $refresh['worker_heartbeat_at'] = $refresh['last_run_at'];
         $refresh['last_error'] = '';
@@ -1383,18 +1483,12 @@ class PublicMailService
             $refresh['phase'] = 'completed';
             $refresh['remaining_count'] = 0;
             $refresh['finished_at'] = date('Y-m-d H:i:s');
-            $refresh['last_message'] = '비즈니스온·스마트빌 깨진 제목 복구를 완료했습니다. 정상 제목은 유지했고 메일 목록과 검색 색인도 갱신했습니다.';
+            $refresh['last_message'] = '비즈니스온 깨진 제목 복구를 완료했습니다. 정상 제목 ' . number_format($applied) . '건은 작은 보정 파일에서 메일 목록과 상세화면에 즉시 적용됩니다.';
+        } else {
+            $refresh['last_message'] = '지금까지 확보한 정상 제목 ' . number_format($applied) . '건을 메일 화면에 즉시 적용했습니다.';
         }
-
         PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
-
-        return array(
-            'ok'=>true,
-            'completed'=>(bool)$markCompleted,
-            'retryable'=>false,
-            'message'=>$refresh['last_message'],
-            'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
-        );
+        return array('ok'=>true,'completed'=>(bool)$markCompleted,'retryable'=>false,'message'=>$refresh['last_message'],'refresh'=>$this->compactOriginalTitleRefreshState($refresh));
     }
 
     private function compactOriginalTitleRefreshState($refresh = null)
@@ -1408,7 +1502,7 @@ class PublicMailService
         $fields = array(
             'active','paused','cancelled','status','phase','started_at','finished_at',
             'last_run_at','worker_heartbeat_at','cursor','total_count','processed_count',
-            'updated_count','merged_count','failed_count','remaining_count','last_batch_count',
+            'updated_count','merged_count','applied_count','failed_count','remaining_count','last_batch_count',
             'retry_count','mode','target_name','sender_domain','related_count','broken_count','normal_count','skipped_count','current_position','current_mailbox','current_uid',
             'inflight','skipped_items','last_error_code','last_result_reason',
             'last_old_subject_preview','last_candidate_subject_preview','last_message','last_error'

@@ -5,13 +5,13 @@
  * mailing@businesson.co.kr 메일 중 깨진 제목만 한 번에 1건 읽고 이중 인코딩 후보까지 비교하는 전용 작업자입니다.
  * 설정 화면은 그대로 유지하고, 요청이 끊겨도 저장된 위치부터 다시 시도합니다.
  * PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.17
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.18
  */
 
 @ini_set('display_errors', '0');
 @ini_set('html_errors', '0');
-@ini_set('memory_limit', '128M');
-@set_time_limit(12);
+@ini_set('memory_limit', '96M');
+@set_time_limit(10);
 @ignore_user_abort(true);
 if (ob_get_level() === 0) @ob_start();
 

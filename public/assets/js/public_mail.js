@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 첨부파일은 브라우저 기본 다운로드로 처리합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.17
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.18
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.17';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.18';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -167,6 +167,7 @@
         var total=parseInt(refresh.total_count,10)||0;
         var processed=parseInt(refresh.processed_count,10)||0;
         var updated=parseInt(refresh.updated_count,10)||0;
+        var applied=parseInt(refresh.applied_count,10)||updated;
         var failed=parseInt(refresh.failed_count,10)||0;
         var skipped=parseInt(refresh.skipped_count,10)||0;
         var related=parseInt(refresh.related_count,10)||0;
@@ -188,6 +189,7 @@
         setTitleRefreshText('[data-title-refresh-broken]',broken.toLocaleString());
         setTitleRefreshText('[data-title-refresh-normal]',normal.toLocaleString());
         setTitleRefreshText('[data-title-refresh-updated]',updated.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-applied]',applied.toLocaleString());
         setTitleRefreshText('[data-title-refresh-failed]',failed.toLocaleString());
         setTitleRefreshText('[data-title-refresh-skipped]',(failed+skipped).toLocaleString());
         setTitleRefreshText('[data-title-refresh-remaining]',remaining.toLocaleString());

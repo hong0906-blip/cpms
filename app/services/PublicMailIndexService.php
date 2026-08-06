@@ -13,7 +13,7 @@ require_once __DIR__ . '/PublicMailStorageService.php';
 
 class PublicMailIndexService
 {
-    const VERSION = '1.7.16';
+    const VERSION = '1.7.18';
     const INDEX_VERSION = 6;
     const INDEX_FILE = 'mail_index.json';
 
@@ -22,7 +22,7 @@ class PublicMailIndexService
     public function getIndex($forceRebuild)
     {
         if (!$forceRebuild && is_array($this->memoryIndex)) {
-            return $this->memoryIndex;
+            return $this->applyTitleRefreshOverrides($this->memoryIndex);
         }
 
         PublicMailStorageService::ensureStorage();
@@ -30,12 +30,37 @@ class PublicMailIndexService
         $saved = PublicMailStorageService::readJsonFile($path, array());
 
         if (!$forceRebuild && $this->isValidIndex($saved)) {
-            $this->memoryIndex = $saved;
-            return $saved;
+            $this->memoryIndex = $this->applyTitleRefreshOverrides($saved);
+            return $this->memoryIndex;
         }
 
         $this->memoryIndex = self::rebuild();
         return $this->memoryIndex;
+    }
+
+    /**
+     * 제목 복구 파일의 100여 건만 기존 색인 위치에 덮어씁니다.
+     * mail_index.json 전체 재생성이나 디스크 저장은 하지 않습니다.
+     */
+    private function applyTitleRefreshOverrides($index)
+    {
+        if (!is_array($index) || !isset($index['items']) || !is_array($index['items'])) return $index;
+        $subjectMap = PublicMailStorageService::getTitleRefreshSubjectMap();
+        if (empty($subjectMap)) return $index;
+        $positions = isset($index['positions']) && is_array($index['positions']) ? $index['positions'] : array();
+        foreach ($subjectMap as $messageKey => $subject) {
+            if (!isset($positions[$messageKey])) continue;
+            $position = (int)$positions[$messageKey];
+            if (!isset($index['items'][$position]) || !is_array($index['items'][$position])) continue;
+            $item = $index['items'][$position];
+            $item['subject'] = (string)$subject;
+            $fromText = isset($item['from_text']) ? (string)$item['from_text'] : '';
+            $toText = isset($item['to_text']) ? (string)$item['to_text'] : '';
+            $preview = isset($item['preview']) ? (string)$item['preview'] : '';
+            $item['search_text'] = self::lower((string)$subject . ' ' . $fromText . ' ' . $toText . ' ' . $preview);
+            $index['items'][$position] = $item;
+        }
+        return $index;
     }
 
     public function getMessageList($filters, $page, $perPage)

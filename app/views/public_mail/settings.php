@@ -15,6 +15,10 @@ $titleRefresh=isset($syncState['title_refresh'])&&is_array($syncState['title_ref
 $titleTotal=isset($titleRefresh['total_count'])?(int)$titleRefresh['total_count']:0;
 $titleProcessed=isset($titleRefresh['processed_count'])?(int)$titleRefresh['processed_count']:0;
 $titleUpdated=isset($titleRefresh['updated_count'])?(int)$titleRefresh['updated_count']:0;
+$titleApplied=isset($titleRefresh['applied_count'])?(int)$titleRefresh['applied_count']:$titleUpdated;
+$recentRecovery=isset($syncState['recent_mail_recovery'])&&is_array($syncState['recent_mail_recovery'])?$syncState['recent_mail_recovery']:array();
+$newFailures=isset($syncState['new_message_failures'])&&is_array($syncState['new_message_failures'])?$syncState['new_message_failures']:array();
+$newFailureCount=count($newFailures);
 $titleFailed=isset($titleRefresh['failed_count'])?(int)$titleRefresh['failed_count']:0;
 $titleRemaining=isset($titleRefresh['remaining_count'])?(int)$titleRefresh['remaining_count']:0;
 $titleRelated=isset($titleRefresh['related_count'])?(int)$titleRefresh['related_count']:0;
@@ -27,7 +31,7 @@ $titleCandidatePreview=isset($titleRefresh['last_candidate_subject_preview'])?(s
 $titlePercent=$titleTotal>0?(int)floor(($titleProcessed/$titleTotal)*100):0;
 if($titlePercent>100)$titlePercent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_717">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_718">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -73,13 +77,23 @@ if($titlePercent>100)$titlePercent=100;
           <button type="button" class="pm-btn pm-btn-danger" data-full-import="cancel"><i data-lucide="square"></i> 취소</button>
         </div>
         <p class="pm-help-text">버튼을 한 번 누르면 작업상태만 등록됩니다. 직원 브라우저는 반복 수집을 하지 않으며, 외부 예약서비스가 1분마다 다음 묶음을 처리합니다. 화면을 닫아도 진행됩니다. Gmail에서 보낸 메일은 네이버 보낸메일함이 아니라 Gmail 보낸편지함에 남습니다.</p>
+        <div class="pm-alert pm-alert-success">
+          <strong>최근 48시간 누락 메일 재확인</strong><br>
+          <?php echo call_user_func($esc,!empty($recentRecovery['last_message'])?$recentRecovery['last_message']:'패치 설치 후 자동으로 실행됩니다.'); ?>
+        </div>
+        <div class="pm-sync-state-list">
+          <div><span>재확인 상태</span><strong><?php echo !empty($recentRecovery['active'])?'확인 중':(!empty($recentRecovery['finished_at'])?'완료':'대기'); ?></strong></div>
+          <div><span>재확인 추가 메일</span><strong><?php echo number_format(isset($recentRecovery['added_count'])?(int)$recentRecovery['added_count']:0); ?>건</strong></div>
+          <div><span>격리·재시도 메일</span><strong><?php echo number_format($newFailureCount); ?>건</strong></div>
+          <div><span>마지막 재확인</span><strong><?php echo call_user_func($esc,!empty($recentRecovery['last_run_at'])?$recentRecovery['last_run_at']:'아직 없음'); ?></strong></div>
+        </div>
       </div>
 
 
       <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>설치 버전·목록 속도 상태</strong><span>실제 적용된 핵심 파일과 메일 색인 상태를 확인합니다.</span></div><span class="pm-status-dot <?php echo !empty($indexStatus['writable'])?'is-on':''; ?>"><?php echo !empty($indexStatus['writable'])?'정상':'확인 필요'; ?></span></div>
         <div class="pm-sync-state-list">
-          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.17'); ?></strong></div>
+          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.18'); ?></strong></div>
           <div><span>목록 색인 버전</span><strong><?php echo isset($indexStatus['version'])?(int)$indexStatus['version']:0; ?></strong></div>
           <div><span>색인 메일 수</span><strong><?php echo number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0); ?>건</strong></div>
           <div><span>마지막 색인 갱신</span><strong><?php echo call_user_func($esc,!empty($indexStatus['updated_at'])?$indexStatus['updated_at']:'아직 없음'); ?></strong></div>
@@ -138,7 +152,8 @@ if($titlePercent>100)$titlePercent=100;
           <div><span>깨진 제목 발견</span><strong><span data-title-refresh-broken><?php echo number_format($titleBroken); ?></span>건</strong></div>
           <div><span>정상 제목 유지</span><strong><span data-title-refresh-normal><?php echo number_format($titleNormal); ?></span>건</strong></div>
           <div><span>대상 확인</span><strong><span data-title-refresh-processed><?php echo number_format($titleProcessed); ?></span>건</strong></div>
-          <div><span>복구된 제목</span><strong><span data-title-refresh-updated><?php echo number_format($titleUpdated); ?></span>건</strong></div>
+          <div><span>수집된 정상 제목</span><strong><span data-title-refresh-updated><?php echo number_format($titleUpdated); ?></span>건</strong></div>
+          <div><span>실제 화면 적용</span><strong><span data-title-refresh-applied><?php echo number_format($titleApplied); ?></span>건</strong></div>
           <div><span>건너뜀·실패</span><strong><span data-title-refresh-skipped><?php echo number_format($titleSkipped+$titleFailed); ?></span>건</strong></div>
           <div><span>남은 대상</span><strong><span data-title-refresh-remaining><?php echo number_format($titleRemaining); ?></span>건</strong></div>
           <div><span>최근 작업</span><strong data-title-refresh-last-run><?php echo call_user_func($esc,!empty($titleRefresh['last_run_at'])?$titleRefresh['last_run_at']:'아직 없음'); ?></strong></div>
@@ -224,4 +239,4 @@ if($titlePercent>100)$titlePercent=100;
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_717"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_718"></script>

@@ -7,7 +7,7 @@
  * - 기존 1분 브라우저 자동확인 코드를 제거하고 외부 예약서비스 방식으로 전환합니다.
  * - 설치 후 이 파일은 서버에서 삭제하세요.
  * PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.17
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.18
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
@@ -87,7 +87,7 @@ function pm_install_patch_sidebar($sidebarPath)
 
     $variableBlock = "\n/* CPMS_PUBLIC_MAIL_VARIABLE_START */\n"
         . "\$publicMailMenu = '네이버 메일';\n"
-        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_717';\n"
+        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_718';\n"
         . "/* CPMS_PUBLIC_MAIL_VARIABLE_END */";
 
     $itemBlock = "/* CPMS_PUBLIC_MAIL_ITEM_START */\n"
@@ -224,16 +224,18 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
         $action = isset($_POST['action']) ? (string)$_POST['action'] : '';
         if ($action === 'install') {
             $result = pm_install_patch_sidebar($sidebarPath);
-            @set_time_limit(180);
-            /* v1.7.14에서 이미 모은 정상 제목은 버리지 않고 한 번 적용한 뒤 전체 대기열을 종료합니다. */
-            try {
-                $oldUpdates = PublicMailStorageService::getTitleRefreshUpdates();
-                if (!empty($oldUpdates['items']) && is_array($oldUpdates['items'])) {
-                    (new PublicMailService())->controlOriginalTitleRefresh('cancel');
-                }
-            } catch (Exception $ignored) {}
-            $index = PublicMailIndexService::rebuild();
-            PublicMailStorageService::clearTitleRefreshWorkFiles();
+            @set_time_limit(60);
+            /* 수집된 정상 제목 후보는 절대 지우지 않고 작은 보정 파일에서 즉시 사용합니다. */
+            $oldUpdates = PublicMailStorageService::getTitleRefreshUpdates();
+            $oldUpdateItems = isset($oldUpdates['items']) && is_array($oldUpdates['items']) ? $oldUpdates['items'] : array();
+            $appliedTitleCount = 0;
+            foreach ($oldUpdateItems as $oldUpdate) {
+                if (is_array($oldUpdate) && isset($oldUpdate['subject']) && trim((string)$oldUpdate['subject']) !== '') $appliedTitleCount++;
+            }
+            $existingState = PublicMailStorageService::getSyncState();
+            $existingTitleRefresh = isset($existingState['title_refresh']) && is_array($existingState['title_refresh']) ? $existingState['title_refresh'] : array();
+            /* 오래된 작업 대기열만 비우고 정상 제목 업데이트 파일은 보존합니다. */
+            PublicMailStorageService::saveTitleRefreshQueue(array());
             PublicMailStorageService::saveSyncState(array(
                 'metadata_repair'=>array(
                     'active'=>false,'paused'=>false,'cancelled'=>true,
@@ -250,16 +252,23 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
                     'related_count'=>0,'broken_count'=>0,'normal_count'=>0,'skipped_count'=>0,
                     'cursor'=>0,'merge_cursor'=>0,
                     'retry_cursor'=>-1,'retry_count'=>0,'consecutive_errors'=>0,
-                    'total_count'=>0,'processed_count'=>0,'updated_count'=>0,
-                    'merged_count'=>0,'failed_count'=>0,'remaining_count'=>0,
+                    'total_count'=>isset($existingTitleRefresh['total_count'])?(int)$existingTitleRefresh['total_count']:0,
+                    'processed_count'=>isset($existingTitleRefresh['processed_count'])?(int)$existingTitleRefresh['processed_count']:0,
+                    'updated_count'=>$appliedTitleCount,'merged_count'=>$appliedTitleCount,'applied_count'=>$appliedTitleCount,
+                    'failed_count'=>isset($existingTitleRefresh['failed_count'])?(int)$existingTitleRefresh['failed_count']:0,'remaining_count'=>0,
                     'last_batch_count'=>0,'current_position'=>-1,'current_mailbox'=>'','current_uid'=>0,
                     'inflight'=>array(),'skipped_items'=>array(),'last_error_code'=>'',
-                    'last_result_reason'=>'','last_old_subject_preview'=>'','last_candidate_subject_preview'=>'','last_error'=>'',
-                    'last_message'=>'v1.7.17 비즈니스온 제목 판정 수정이 준비되었습니다. 실패했던 깨진 제목만 다시 복구할 수 있습니다.'
-                )
+                    'last_result_reason'=>'즉시 적용 준비 완료','last_old_subject_preview'=>'','last_candidate_subject_preview'=>'','last_error'=>'',
+                    'last_message'=>'기존에 수집한 정상 제목 ' . number_format($appliedTitleCount) . '건을 목록과 상세화면에 즉시 적용합니다.'
+                ),
+                'recent_mail_recovery'=>array(
+                    'active'=>true,'since_timestamp'=>time()-172800,'started_at'=>date('Y-m-d H:i:s'),'finished_at'=>'',
+                    'last_run_at'=>'','checked_count'=>0,'added_count'=>0,'failed_count'=>0,'remaining_count'=>0,
+                    'last_message'=>'최근 48시간 누락 메일 재확인을 예약했습니다. 다음 자동동기화에서 시작합니다.'
+                ),
+                'new_message_inflight'=>array()
             ));
-            $indexedCount = isset($index['items']) && is_array($index['items']) ? count($index['items']) : 0;
-            $result['message'] .= ' 기존 전체 제목 작업을 종료하고 mailing@businesson.co.kr 깨진 제목 선별복구 상태를 준비했습니다. 빠른 목록 색인 ' . number_format($indexedCount) . '건을 다시 만들었습니다.';
+            $result['message'] .= ' 기존 정상 제목 ' . number_format($appliedTitleCount) . '건을 보존했고, 최근 48시간 누락 메일 재확인을 예약했습니다.';
         } elseif ($action === 'uninstall') {
             $result = pm_install_unpatch_sidebar($sidebarPath);
         } else {
@@ -276,26 +285,26 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
 
 $requiredFiles = array(
     'app/services/GoogleDriveHelper.php' => '',
-    'app/services/PublicMailStorageService.php' => "const VERSION = '1.7.17'",
+    'app/services/PublicMailStorageService.php' => "const VERSION = '1.7.18'",
     'app/services/PublicMailImapClient.php' => 'fetchHeaderPrefix',
     'app/services/PublicMailClassifierService.php' => '',
     'app/services/PublicMailLargeAttachmentService.php' => '',
     'app/services/PublicMailDriveService.php' => '',
-    'app/services/PublicMailIndexService.php' => "const VERSION = '1.7.17'",
-    'app/services/PublicMailService.php' => "const VERSION = '1.7.17'",
+    'app/services/PublicMailIndexService.php' => "const VERSION = '1.7.18'",
+    'app/services/PublicMailService.php' => "const VERSION = '1.7.18'",
     'app/services/PublicMailWebHelper.php' => 'requireDevelopmentDepartment',
-    'app/views/public_mail/index.php' => '20260806_717',
+    'app/views/public_mail/index.php' => '20260806_718',
     'app/views/public_mail/detail_panel.php' => 'data-mail-detail-content',
     'app/views/public_mail/detail_fragment.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.14',
-    'app/views/public_mail/settings.php' => '20260806_717',
-    'public/public_mail.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.17',
-    'public/public_mail_settings.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.17',
-    'public/public_mail_action.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.17',
-    'public/public_mail_title_refresh_worker.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.17',
+    'app/views/public_mail/settings.php' => '20260806_718',
+    'public/public_mail.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
+    'public/public_mail_settings.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
+    'public/public_mail_action.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
+    'public/public_mail_title_refresh_worker.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
     'public/public_mail_attachment.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.14',
     'public/assets/css/public_mail.css' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.12',
     'public/assets/img/naver_n_icon.svg' => '',
-    'public/assets/js/public_mail.js' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.17',
+    'public/assets/js/public_mail.js' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
     'public/cron/naver_mail_sync.php' => ''
 );
 
@@ -322,7 +331,7 @@ $latestInstalled = $installed && $mobileInstalled
     && strpos($sidebarContent, "\$publicMailMenu = '네이버 메일';") !== false
     && strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') === false
     && strpos($sidebarContent, 'assets/img/naver_n_icon.svg') !== false;
-$packageVersion = '1.7.17';
+$packageVersion = '1.7.18';
 $indexStatus = array();
 try { $indexStatus = (new PublicMailService())->getIndexStatus(); } catch (Exception $ignored) { $indexStatus = array(); }
 $canOpenSettings = false;
@@ -346,18 +355,18 @@ try {
 <div class="wrap">
     <div class="card">
         <h1>CPMS 네이버 메일 설치</h1>
-        <p class="sub">v1.7.17 비즈니스온 제목 판정 수정 패치입니다. 명백히 깨진 기존 제목은 점수 차이 없이 정상 한글 원본 후보로 교체하며, 후보도 깨진 경우만 유지합니다.</p>
+        <p class="sub">v1.7.18 비즈니스온 제목 판정 수정 패치입니다. 명백히 깨진 기존 제목은 점수 차이 없이 정상 한글 원본 후보로 교체하며, 후보도 깨진 경우만 유지합니다.</p>
 
         <?php if ($message !== ''): ?>
             <div class="alert <?php echo $messageType === 'error' ? 'error' : 'success'; ?>"><?php echo pm_install_h($message); ?><?php echo $backupPath !== '' ? '<br>백업: ' . pm_install_h($backupPath) : ''; ?></div>
         <?php endif; ?>
 
-        <div class="status"><span class="dot <?php echo ($latestInstalled&&$allReady) ? 'on' : ''; ?>"></span><strong>설치 상태: <?php echo ($latestInstalled&&$allReady) ? 'v1.7.17 전체 적용' : ($installed ? '일부 파일 업데이트 필요' : '설치 전'); ?></strong></div><div class="status" style="margin-top:10px"><strong>목록 색인: <?php echo !empty($indexStatus['updated_at']) ? pm_install_h($indexStatus['updated_at']).' · '.number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0).'건' : '아직 생성되지 않음'; ?></strong></div>
+        <div class="status"><span class="dot <?php echo ($latestInstalled&&$allReady) ? 'on' : ''; ?>"></span><strong>설치 상태: <?php echo ($latestInstalled&&$allReady) ? 'v1.7.18 전체 적용' : ($installed ? '일부 파일 업데이트 필요' : '설치 전'); ?></strong></div><div class="status" style="margin-top:10px"><strong>목록 색인: <?php echo !empty($indexStatus['updated_at']) ? pm_install_h($indexStatus['updated_at']).' · '.number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0).'건' : '아직 생성되지 않음'; ?></strong></div>
 
         <div class="files">
             <?php foreach ($checks as $check): ?>
                 <?php $checkClass = $check['status']==='latest'?'ok':($check['status']==='old'?'old':'bad'); ?>
-                <?php $checkLabel = $check['status']==='latest'?'v1.7.17 구성 확인':($check['status']==='old'?'이전 버전':'파일 없음'); ?>
+                <?php $checkLabel = $check['status']==='latest'?'v1.7.18 구성 확인':($check['status']==='old'?'이전 버전':'파일 없음'); ?>
                 <div class="row"><span><?php echo pm_install_h($check['path']); ?></span><span class="<?php echo $checkClass; ?>"><?php echo $checkLabel; ?></span></div>
             <?php endforeach; ?>
         </div>
