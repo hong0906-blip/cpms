@@ -7,7 +7,7 @@
  * - 기존 1분 브라우저 자동확인 코드를 제거하고 외부 예약서비스 방식으로 전환합니다.
  * - 설치 후 이 파일은 서버에서 삭제하세요.
  * PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.18
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.19
  */
 
 require_once __DIR__ . '/../app/bootstrap.php';
@@ -87,7 +87,7 @@ function pm_install_patch_sidebar($sidebarPath)
 
     $variableBlock = "\n/* CPMS_PUBLIC_MAIL_VARIABLE_START */\n"
         . "\$publicMailMenu = '네이버 메일';\n"
-        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_718';\n"
+        . "\$publicMailIcon = base_url() . '/assets/img/naver_n_icon.svg?v=20260806_719';\n"
         . "/* CPMS_PUBLIC_MAIL_VARIABLE_END */";
 
     $itemBlock = "/* CPMS_PUBLIC_MAIL_ITEM_START */\n"
@@ -268,7 +268,8 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
                 ),
                 'new_message_inflight'=>array()
             ));
-            $result['message'] .= ' 기존 정상 제목 ' . number_format($appliedTitleCount) . '건을 보존했고, 최근 48시간 누락 메일 재확인을 예약했습니다.';
+            $liveState = (new PublicMailIndexService())->getLiveState(true);
+            $result['message'] .= ' 기존 정상 제목 ' . number_format($appliedTitleCount) . '건을 보존했고, 최근 48시간 누락 메일 재확인을 예약했습니다. 새 메일 자동표시 상태파일도 준비했습니다.';
         } elseif ($action === 'uninstall') {
             $result = pm_install_unpatch_sidebar($sidebarPath);
         } else {
@@ -285,26 +286,28 @@ if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'POST') 
 
 $requiredFiles = array(
     'app/services/GoogleDriveHelper.php' => '',
-    'app/services/PublicMailStorageService.php' => "const VERSION = '1.7.18'",
+    'app/services/PublicMailStorageService.php' => "const VERSION = '1.7.19'",
     'app/services/PublicMailImapClient.php' => 'fetchHeaderPrefix',
     'app/services/PublicMailClassifierService.php' => '',
     'app/services/PublicMailLargeAttachmentService.php' => '',
     'app/services/PublicMailDriveService.php' => '',
-    'app/services/PublicMailIndexService.php' => "const VERSION = '1.7.18'",
-    'app/services/PublicMailService.php' => "const VERSION = '1.7.18'",
+    'app/services/PublicMailIndexService.php' => "const VERSION = '1.7.19'",
+    'app/services/PublicMailService.php' => "const VERSION = '1.7.19'",
     'app/services/PublicMailWebHelper.php' => 'requireDevelopmentDepartment',
-    'app/views/public_mail/index.php' => '20260806_718',
+    'app/views/public_mail/index.php' => '20260806_719',
+    'app/views/public_mail/_mail_rows.php' => '공통 행 화면',
     'app/views/public_mail/detail_panel.php' => 'data-mail-detail-content',
     'app/views/public_mail/detail_fragment.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.14',
-    'app/views/public_mail/settings.php' => '20260806_718',
-    'public/public_mail.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
-    'public/public_mail_settings.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
-    'public/public_mail_action.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
-    'public/public_mail_title_refresh_worker.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
+    'app/views/public_mail/settings.php' => '20260806_719',
+    'public/public_mail.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.19',
+    'public/public_mail_live.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.19',
+    'public/public_mail_settings.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.19',
+    'public/public_mail_action.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.19',
+    'public/public_mail_title_refresh_worker.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.19',
     'public/public_mail_attachment.php' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.14',
     'public/assets/css/public_mail.css' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.12',
     'public/assets/img/naver_n_icon.svg' => '',
-    'public/assets/js/public_mail.js' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.18',
+    'public/assets/js/public_mail.js' => 'CPMS_PUBLIC_MAIL_VERSION: 1.7.19',
     'public/cron/naver_mail_sync.php' => ''
 );
 
@@ -331,7 +334,7 @@ $latestInstalled = $installed && $mobileInstalled
     && strpos($sidebarContent, "\$publicMailMenu = '네이버 메일';") !== false
     && strpos($sidebarContent, 'CPMS_PUBLIC_MAIL_LIVE_SYNC_START') === false
     && strpos($sidebarContent, 'assets/img/naver_n_icon.svg') !== false;
-$packageVersion = '1.7.18';
+$packageVersion = '1.7.19';
 $indexStatus = array();
 try { $indexStatus = (new PublicMailService())->getIndexStatus(); } catch (Exception $ignored) { $indexStatus = array(); }
 $canOpenSettings = false;
@@ -355,18 +358,18 @@ try {
 <div class="wrap">
     <div class="card">
         <h1>CPMS 네이버 메일 설치</h1>
-        <p class="sub">v1.7.18 비즈니스온 제목 판정 수정 패치입니다. 명백히 깨진 기존 제목은 점수 차이 없이 정상 한글 원본 후보로 교체하며, 후보도 깨진 경우만 유지합니다.</p>
+        <p class="sub">v1.7.19 새 메일 스르륵 자동표시 패치입니다. cron이 수집한 새 메일을 열린 목록에 새로고침 없이 부드럽게 추가합니다.</p>
 
         <?php if ($message !== ''): ?>
             <div class="alert <?php echo $messageType === 'error' ? 'error' : 'success'; ?>"><?php echo pm_install_h($message); ?><?php echo $backupPath !== '' ? '<br>백업: ' . pm_install_h($backupPath) : ''; ?></div>
         <?php endif; ?>
 
-        <div class="status"><span class="dot <?php echo ($latestInstalled&&$allReady) ? 'on' : ''; ?>"></span><strong>설치 상태: <?php echo ($latestInstalled&&$allReady) ? 'v1.7.18 전체 적용' : ($installed ? '일부 파일 업데이트 필요' : '설치 전'); ?></strong></div><div class="status" style="margin-top:10px"><strong>목록 색인: <?php echo !empty($indexStatus['updated_at']) ? pm_install_h($indexStatus['updated_at']).' · '.number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0).'건' : '아직 생성되지 않음'; ?></strong></div>
+        <div class="status"><span class="dot <?php echo ($latestInstalled&&$allReady) ? 'on' : ''; ?>"></span><strong>설치 상태: <?php echo ($latestInstalled&&$allReady) ? 'v1.7.19 전체 적용' : ($installed ? '일부 파일 업데이트 필요' : '설치 전'); ?></strong></div><div class="status" style="margin-top:10px"><strong>목록 색인: <?php echo !empty($indexStatus['updated_at']) ? pm_install_h($indexStatus['updated_at']).' · '.number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0).'건' : '아직 생성되지 않음'; ?></strong></div>
 
         <div class="files">
             <?php foreach ($checks as $check): ?>
                 <?php $checkClass = $check['status']==='latest'?'ok':($check['status']==='old'?'old':'bad'); ?>
-                <?php $checkLabel = $check['status']==='latest'?'v1.7.18 구성 확인':($check['status']==='old'?'이전 버전':'파일 없음'); ?>
+                <?php $checkLabel = $check['status']==='latest'?'v1.7.19 구성 확인':($check['status']==='old'?'이전 버전':'파일 없음'); ?>
                 <div class="row"><span><?php echo pm_install_h($check['path']); ?></span><span class="<?php echo $checkClass; ?>"><?php echo $checkLabel; ?></span></div>
             <?php endforeach; ?>
         </div>

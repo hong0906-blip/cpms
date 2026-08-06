@@ -12,6 +12,12 @@ $page = isset($list['page']) ? (int)$list['page'] : 1;
 $pageCount = isset($list['page_count']) ? (int)$list['page_count'] : 1;
 $total = isset($list['total']) ? (int)$list['total'] : 0;
 $mailboxType = isset($filters['mailbox_type']) ? (string)$filters['mailbox_type'] : '';
+$liveState = isset($list['live_state']) && is_array($list['live_state']) ? $list['live_state'] : array();
+$liveRevision = isset($liveState['revision']) ? (string)$liveState['revision'] : '';
+$liveHeadKeys = isset($liveState['head_keys']) && is_array($liveState['head_keys']) ? $liveState['head_keys'] : array();
+$liveLatestTimestamp = isset($liveState['latest_timestamp']) ? (int)$liveState['latest_timestamp'] : 0;
+$liveHeadJson = json_encode(array_values($liveHeadKeys));
+if ($liveHeadJson === false) $liveHeadJson = '[]';
 
 $scopeTitle = '전체메일';
 $searchPlaceholder = '전체메일에서 제목 또는 발신자 검색';
@@ -41,10 +47,19 @@ if ($mailboxType !== '') {
 }
 $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($resetQuery, '', '&') : '');
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260806_716">
+<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260806_719">
 
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page"
      data-public-mail-page
+     data-live-mail="1"
+     data-live-revision="<?php echo call_user_func($esc, $liveRevision); ?>"
+     data-live-head-keys="<?php echo call_user_func($esc, $liveHeadJson); ?>"
+     data-live-latest-timestamp="<?php echo (int)$liveLatestTimestamp; ?>"
+     data-live-page="<?php echo (int)$page; ?>"
+     data-live-query="<?php echo call_user_func($esc, isset($filters['query']) ? $filters['query'] : ''); ?>"
+     data-live-period="<?php echo call_user_func($esc, isset($filters['period']) ? $filters['period'] : '1y'); ?>"
+     data-live-mailbox-type="<?php echo call_user_func($esc, $mailboxType); ?>"
+     data-live-per-page="<?php echo isset($list['per_page']) ? (int)$list['per_page'] : 30; ?>"
      data-csrf-token="<?php echo call_user_func($esc, $csrfToken); ?>"
      data-selected-message-key="<?php echo call_user_func($esc, $selectedMessageKey); ?>">
     <div class="public-mail-shell">
@@ -136,58 +151,19 @@ $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($r
             <div class="pm-list-panel pm-list-panel-wide">
                 <div class="pm-list-head">
                     <div><?php echo call_user_func($esc, $scopeTitle); ?> 메일 목록</div>
-                    <small>메일을 누르면 큰 화면으로 내용을 확인합니다.</small>
+                    <small><span class="pm-live-indicator"><i></i> 새 메일 자동표시 중</span><span class="pm-live-head-help">메일을 누르면 큰 화면으로 내용을 확인합니다.</span></small>
                 </div>
 
                 <?php if (empty($items)): ?>
-                    <div class="pm-empty">
+                    <div class="pm-empty" data-live-empty>
                         <i data-lucide="inbox"></i>
                         <strong>표시할 메일이 없습니다.</strong>
                         <span>검색어 또는 조회기간을 바꿔서 다시 확인하세요.</span>
                     </div>
+                    <div class="pm-mail-list pm-mail-list-wide" data-live-mail-list></div>
                 <?php else: ?>
-                    <div class="pm-mail-list pm-mail-list-wide">
-                        <?php foreach ($items as $message): ?>
-                            <?php
-                            $classification = isset($message['classification']) && is_array($message['classification']) ? $message['classification'] : array();
-                            $workflow = isset($message['workflow']) && is_array($message['workflow']) ? $message['workflow'] : array();
-                            $department = !empty($workflow['department']) ? $workflow['department'] : (isset($classification['department']) ? $classification['department'] : '미분류');
-                            $priority = !empty($workflow['priority']) ? $workflow['priority'] : (isset($classification['priority']) ? $classification['priority'] : '보통');
-                            $projectName = !empty($workflow['project_name']) ? $workflow['project_name'] : (isset($classification['project_name']) ? $classification['project_name'] : '');
-                            $messageMailboxType = isset($message['mailbox_type']) ? (string)$message['mailbox_type'] : '';
-                            $addressText = $messageMailboxType === 'sent'
-                                ? (isset($message['to_text']) && trim((string)$message['to_text']) !== '' ? (string)$message['to_text'] : '수신자 정보 없음')
-                                : (isset($message['from_text']) ? (string)$message['from_text'] : '발신자 정보 없음');
-                            $addressLabel = $messageMailboxType === 'sent' ? '받는 사람' : '보낸 사람';
-                            $rowUrl = $buildUrl(array('message' => $message['message_key']));
-                            ?>
-                            <a data-no-loading="1"
-                               data-mail-open
-                               data-message-key="<?php echo call_user_func($esc, $message['message_key']); ?>"
-                               class="pm-mail-row pm-mail-row-wide <?php echo (string)$selectedMessageKey === (string)$message['message_key'] ? 'is-selected' : ''; ?> <?php echo empty($message['is_seen']) ? 'is-unread' : ''; ?>"
-                               href="<?php echo call_user_func($esc, $rowUrl); ?>">
-                                <div class="pm-mail-row-top">
-                                    <span class="pm-mobile-address"><?php echo call_user_func($esc, $addressText); ?></span>
-                                    <span class="pm-badge pm-badge-<?php echo $priority === '긴급' ? 'danger' : ($priority === '높음' ? 'warning' : 'neutral'); ?>"><?php echo call_user_func($esc, $priority); ?></span>
-                                    <span class="pm-department"><?php echo call_user_func($esc, $department); ?></span>
-                                    <time><?php echo call_user_func($esc, substr(isset($message['date_text']) ? $message['date_text'] : '', 5, 11)); ?></time>
-                                </div>
-                                <div class="pm-subject"><?php echo call_user_func($esc, isset($message['subject']) ? $message['subject'] : '(제목 없음)'); ?></div>
-                                <div class="pm-mail-meta">
-                                    <span class="pm-address-label"><?php echo call_user_func($esc, $addressLabel); ?></span>
-                                    <span><?php echo call_user_func($esc, $addressText); ?></span>
-                                    <span class="pm-mailbox-chip"><?php echo call_user_func($esc, isset($message['mailbox_name']) ? $message['mailbox_name'] : '받은메일함'); ?></span>
-                                    <?php if ($projectName !== ''): ?><span class="pm-project-chip"><?php echo call_user_func($esc, $projectName); ?></span><?php endif; ?>
-                                </div>
-                                <div class="pm-preview">
-                                    <?php echo call_user_func($esc, !empty($message['preview']) ? $message['preview'] : '본문 미리보기를 준비 중입니다.'); ?>
-                                </div>
-                                <div class="pm-mail-status">
-                                    <span><?php echo call_user_func($esc, isset($workflow['status']) ? $workflow['status'] : '미확인'); ?></span>
-                                    <span><?php echo call_user_func($esc, !empty($workflow['assignee_name']) ? $workflow['assignee_name'] : '담당자 없음'); ?></span>
-                                </div>
-                            </a>
-                        <?php endforeach; ?>
+                    <div class="pm-mail-list pm-mail-list-wide" data-live-mail-list>
+                        <?php include __DIR__ . '/_mail_rows.php'; ?>
                     </div>
                 <?php endif; ?>
 
@@ -218,4 +194,4 @@ $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($r
     </div>
 </div>
 
-<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260806_716"></script>
+<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260806_719"></script>

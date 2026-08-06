@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 첨부파일은 브라우저 기본 다운로드로 처리합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.18
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.19
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.18';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.19';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -718,9 +718,183 @@
         if(messageKey)loadDetailPanel(messageKey,false);
     }
 
+    var liveMailTimer=null;
+    var liveMailBusy=false;
+    var liveMailDelay=5000;
+    var liveMailStopped=false;
+
+    function liveMailRoot(){
+        var root=page();
+        return root&&root.getAttribute('data-live-mail')==='1'?root:null;
+    }
+
+    function liveMailHeadKeys(root){
+        var raw=root?root.getAttribute('data-live-head-keys')||'[]':'[]';
+        try{
+            var parsed=JSON.parse(raw);
+            return Object.prototype.toString.call(parsed)==='[object Array]'?parsed:[];
+        }catch(ignore){return [];}
+    }
+
+    function setLiveMailHeadKeys(root,keys){
+        if(!root)return;
+        if(Object.prototype.toString.call(keys)!=='[object Array]')keys=[];
+        root.setAttribute('data-live-head-keys',JSON.stringify(keys.slice(0,50)));
+    }
+
+    function liveMailLatestUrl(root){
+        var params=[];
+        var mailbox=root.getAttribute('data-live-mailbox-type')||'';
+        var period=root.getAttribute('data-live-period')||'1y';
+        if(mailbox!=='')params.push('mailbox_type='+encodeURIComponent(mailbox));
+        if(period!=='')params.push('period='+encodeURIComponent(period));
+        return 'public_mail.php'+(params.length?'?'+params.join('&'):'');
+    }
+
+    function removeLiveMailToast(){
+        var toast=document.querySelector('[data-live-mail-toast]');
+        if(toast&&toast.parentNode)toast.parentNode.removeChild(toast);
+    }
+
+    function showLiveMailToast(count,inserted,root){
+        removeLiveMailToast();
+        var toast=document.createElement('div');
+        toast.className='pm-live-mail-toast';
+        toast.setAttribute('data-live-mail-toast','1');
+        var message='<strong>새 메일 '+String(count)+'건이 도착했습니다.</strong>';
+        if(inserted)message+='<span>목록 맨 위에 자동으로 추가했습니다.</span>';
+        else message+='<span>현재 검색·페이지는 유지하고 있습니다.</span><a href="'+escapeHtml(liveMailLatestUrl(root))+'">최신 메일 보기</a>';
+        toast.innerHTML=message+'<button type="button" aria-label="알림 닫기">×</button>';
+        document.body.appendChild(toast);
+        window.setTimeout(function(){toast.classList.add('is-visible');},20);
+        var close=toast.querySelector('button');
+        if(close)close.addEventListener('click',removeLiveMailToast);
+        window.setTimeout(function(){
+            if(toast&&toast.parentNode){toast.classList.remove('is-visible');window.setTimeout(removeLiveMailToast,250);}
+        },inserted?4500:9000);
+    }
+
+    function insertLiveMailRows(html,count,root){
+        var list=document.querySelector('[data-live-mail-list]');
+        if(!list||String(html||'').trim()==='')return false;
+        var holder=document.createElement('div');
+        holder.innerHTML=html;
+        var nodes=holder.querySelectorAll('[data-live-mail-row]');
+        if(!nodes.length)return false;
+
+        var existing={},current=document.querySelectorAll('[data-live-mail-row]'),i,key;
+        for(i=0;i<current.length;i++){
+            key=current[i].getAttribute('data-message-key')||'';
+            if(key!=='')existing[key]=true;
+        }
+
+        var added=[];
+        for(i=nodes.length-1;i>=0;i--){
+            key=nodes[i].getAttribute('data-message-key')||'';
+            if(key===''||existing[key])continue;
+            existing[key]=true;
+            nodes[i].classList.add('is-live-new');
+            list.insertBefore(nodes[i],list.firstChild);
+            added.push(nodes[i]);
+        }
+        if(!added.length)return false;
+
+        var empty=document.querySelector('[data-live-empty]');
+        if(empty&&empty.parentNode)empty.parentNode.removeChild(empty);
+        window.setTimeout(function(){
+            var j;
+            for(j=0;j<added.length;j++)added[j].classList.add('is-live-entered');
+        },30);
+        window.setTimeout(function(){
+            var j;
+            for(j=0;j<added.length;j++){
+                added[j].classList.remove('is-live-new','is-live-entered');
+            }
+        },3600);
+
+        var perPage=parseInt(root.getAttribute('data-live-per-page'),10)||30;
+        var rows=list.querySelectorAll('[data-live-mail-row]');
+        while(rows.length>perPage){
+            var last=rows[rows.length-1];
+            if(last&&last.parentNode)last.parentNode.removeChild(last);
+            rows=list.querySelectorAll('[data-live-mail-row]');
+        }
+        if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
+        return true;
+    }
+
+    function scheduleLiveMail(delay){
+        if(liveMailTimer)window.clearTimeout(liveMailTimer);
+        if(liveMailStopped||document.hidden)return;
+        liveMailTimer=window.setTimeout(runLiveMailCheck,Math.max(1000,parseInt(delay,10)||5000));
+    }
+
+    function runLiveMailCheck(){
+        var root=liveMailRoot();
+        if(!root||liveMailStopped||document.hidden||liveMailBusy){scheduleLiveMail(liveMailDelay);return;}
+        liveMailBusy=true;
+        var known=liveMailHeadKeys(root);
+        var params=[
+            'revision='+encodeURIComponent(root.getAttribute('data-live-revision')||''),
+            'known_keys='+encodeURIComponent(known.join(',')),
+            'latest_timestamp='+encodeURIComponent(root.getAttribute('data-live-latest-timestamp')||'0'),
+            'page='+encodeURIComponent(root.getAttribute('data-live-page')||'1'),
+            'query='+encodeURIComponent(root.getAttribute('data-live-query')||''),
+            'period='+encodeURIComponent(root.getAttribute('data-live-period')||'1y'),
+            'mailbox_type='+encodeURIComponent(root.getAttribute('data-live-mailbox-type')||''),
+            '_='+new Date().getTime()
+        ];
+        var xhr=new XMLHttpRequest();
+        xhr.open('GET','public_mail_live.php?'+params.join('&'),true);
+        xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
+        xhr.timeout=10000;
+        function finishFailure(){
+            liveMailBusy=false;
+            if(liveMailDelay<10000)liveMailDelay=10000;
+            else if(liveMailDelay<30000)liveMailDelay=30000;
+            else liveMailDelay=60000;
+            scheduleLiveMail(liveMailDelay);
+        }
+        xhr.onreadystatechange=function(){
+            if(xhr.readyState!==4)return;
+            if(xhr.status<200||xhr.status>=300){finishFailure();return;}
+            var result=parseJsonText(xhr.responseText||'');
+            if(!result||!result.ok){finishFailure();return;}
+            liveMailBusy=false;
+            liveMailDelay=5000;
+            if(result.revision)root.setAttribute('data-live-revision',String(result.revision));
+            if(Object.prototype.toString.call(result.head_keys)==='[object Array]')setLiveMailHeadKeys(root,result.head_keys);
+            if(result.latest_timestamp)root.setAttribute('data-live-latest-timestamp',String(result.latest_timestamp));
+
+            var count=parseInt(result.new_count,10)||0;
+            if(count>0){
+                var pageNumber=parseInt(root.getAttribute('data-live-page'),10)||1;
+                var query=String(root.getAttribute('data-live-query')||'');
+                var inserted=false;
+                if(pageNumber===1&&query==='')inserted=insertLiveMailRows(result.html||'',count,root);
+                showLiveMailToast(count,inserted,root);
+            }
+            scheduleLiveMail(liveMailDelay);
+        };
+        xhr.onerror=finishFailure;
+        xhr.ontimeout=finishFailure;
+        xhr.send(null);
+    }
+
+    function bindLiveMailUpdates(){
+        var root=liveMailRoot();
+        if(!root)return;
+        document.addEventListener('visibilitychange',function(){
+            if(document.hidden){if(liveMailTimer)window.clearTimeout(liveMailTimer);}
+            else{liveMailDelay=5000;scheduleLiveMail(300);}
+        });
+        window.addEventListener('beforeunload',function(){liveMailStopped=true;if(liveMailTimer)window.clearTimeout(liveMailTimer);});
+        scheduleLiveMail(5000);
+    }
+
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindOriginalTitleRefreshWorker(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMobileSearch(); bindMailNavigation(); openInitialMessage();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindOriginalTitleRefreshWorker(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMobileSearch(); bindMailNavigation(); bindLiveMailUpdates(); openInitialMessage();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

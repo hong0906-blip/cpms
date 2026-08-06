@@ -1785,3 +1785,17 @@ body.pm-mail-reader-open {
 /* v1.7.11 로컬 제목 자동보정 카드 */
 .pm-title-normalization-card .pm-settings-actions { margin-top: 14px; }
 .pm-title-normalization-card .pm-alert { line-height: 1.6; }
+
+
+/* v1.7.19 새 메일 자동표시 */
+.pm-live-indicator{display:inline-flex;align-items:center;gap:6px;color:#067647;font-weight:800;white-space:nowrap}
+.pm-live-indicator i{width:8px;height:8px;border-radius:999px;background:#12b76a;box-shadow:0 0 0 0 rgba(18,183,106,.45);animation:pmLivePulse 2s infinite}
+.pm-live-head-help{margin-left:10px}
+@keyframes pmLivePulse{0%{box-shadow:0 0 0 0 rgba(18,183,106,.42)}70%{box-shadow:0 0 0 8px rgba(18,183,106,0)}100%{box-shadow:0 0 0 0 rgba(18,183,106,0)}}
+.pm-mail-row.is-live-new{opacity:0;transform:translateY(-18px);max-height:0;overflow:hidden;margin-top:0;margin-bottom:0;padding-top:0!important;padding-bottom:0!important;border-width:0;transition:opacity .42s ease,transform .42s ease,max-height .55s ease,padding .55s ease,margin .55s ease,background-color 2.6s ease}
+.pm-mail-row.is-live-new.is-live-entered{opacity:1;transform:translateY(0);max-height:260px;padding-top:16px!important;padding-bottom:16px!important;background:#ecfdf3;border-width:1px}
+.pm-live-mail-toast{position:fixed;z-index:99999;right:24px;bottom:24px;display:grid;grid-template-columns:1fr auto;gap:3px 16px;align-items:center;min-width:300px;max-width:430px;padding:15px 16px;border:1px solid #abefc6;border-radius:15px;background:#fff;box-shadow:0 18px 45px rgba(15,118,110,.2);opacity:0;transform:translateY(20px);pointer-events:none;transition:opacity .25s ease,transform .25s ease}
+.pm-live-mail-toast.is-visible{opacity:1;transform:translateY(0);pointer-events:auto}
+.pm-live-mail-toast strong{color:#065f46;font-size:14px}.pm-live-mail-toast span{grid-column:1;color:#667085;font-size:12px}.pm-live-mail-toast a{grid-column:1;display:inline-flex;margin-top:6px;color:#0f766e;font-size:13px;font-weight:800;text-decoration:none}.pm-live-mail-toast button{grid-column:2;grid-row:1/4;align-self:start;width:30px;height:30px;border:0;border-radius:9px;background:#ecfdf3;color:#067647;font-size:22px;line-height:1;cursor:pointer}
+@media(max-width:768px){.pm-live-head-help{display:none}.pm-live-mail-toast{left:14px;right:14px;bottom:18px;min-width:0;max-width:none}.pm-mail-row.is-live-new.is-live-entered{max-height:320px}}
+@media(prefers-reduced-motion:reduce){.pm-live-indicator i{animation:none}.pm-mail-row.is-live-new,.pm-mail-row.is-live-new.is-live-entered,.pm-live-mail-toast{transition:none;transform:none}}

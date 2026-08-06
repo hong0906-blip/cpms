@@ -13,9 +13,11 @@ require_once __DIR__ . '/PublicMailStorageService.php';
 
 class PublicMailIndexService
 {
-    const VERSION = '1.7.18';
-    const INDEX_VERSION = 6;
+    const VERSION = '1.7.19';
+    const INDEX_VERSION = 7;
     const INDEX_FILE = 'mail_index.json';
+    const LIVE_STATE_VERSION = 1;
+    const LIVE_STATE_FILE = 'mail_live_state.json';
 
     private $memoryIndex = null;
 
@@ -88,8 +90,157 @@ class PublicMailIndexService
             'page' => $page,
             'per_page' => $perPage,
             'page_count' => $pageCount,
-            'index_updated_at' => isset($index['updated_at']) ? (string)$index['updated_at'] : ''
+            'index_updated_at' => isset($index['updated_at']) ? (string)$index['updated_at'] : '',
+            'live_state' => $this->buildLiveClientState($index, $filters, 50)
         );
+    }
+
+    /**
+     * 브라우저가 5초마다 읽는 아주 작은 상태파일입니다.
+     * mail_index.json 전체를 매번 읽지 않고 변경번호만 확인합니다.
+     */
+    public function getLiveState($forceRefresh)
+    {
+        PublicMailStorageService::ensureStorage();
+        $path = PublicMailStorageService::path(self::LIVE_STATE_FILE);
+        if (!$forceRefresh) {
+            $saved = PublicMailStorageService::readJsonFile($path, array());
+            if (is_array($saved)
+                && isset($saved['version']) && (int)$saved['version'] === self::LIVE_STATE_VERSION
+                && !empty($saved['revision'])) {
+                return $saved;
+            }
+        }
+
+        $index = $this->getIndex(false);
+        return self::writeLiveStateFromIndex($index);
+    }
+
+    /**
+     * 현재 검색조건의 맨 앞 메일 키를 함께 내려줍니다.
+     * 페이지가 2페이지이거나 검색 중이어도 새 메일 여부를 정확히 비교할 수 있습니다.
+     */
+    private function buildLiveClientState($index, $filters, $headLimit)
+    {
+        $headLimit = max(10, min(100, (int)$headLimit));
+        $items = isset($index['items']) && is_array($index['items']) ? $index['items'] : array();
+        $headKeys = array();
+        $latestTimestamp = 0;
+        foreach ($items as $item) {
+            if (!is_array($item) || !$this->matchesFilters($item, $filters)) continue;
+            if ($latestTimestamp <= 0) $latestTimestamp = isset($item['timestamp']) ? (int)$item['timestamp'] : 0;
+            if (!empty($item['message_key'])) $headKeys[] = (string)$item['message_key'];
+            if (count($headKeys) >= $headLimit) break;
+        }
+        $global = self::buildLiveStateFromIndex($index);
+        return array(
+            'version' => self::LIVE_STATE_VERSION,
+            'revision' => isset($global['revision']) ? (string)$global['revision'] : '',
+            'updated_at' => isset($global['updated_at']) ? (string)$global['updated_at'] : '',
+            'item_count' => isset($global['item_count']) ? (int)$global['item_count'] : count($items),
+            'latest_timestamp' => $latestTimestamp,
+            'head_keys' => $headKeys
+        );
+    }
+
+    /**
+     * 변경번호가 달라졌을 때만 현재 검색조건의 앞부분을 비교합니다.
+     * 새 메일 HTML은 별도 화면 조각에서 만들고 이 메서드는 데이터만 반환합니다.
+     */
+    public function getLiveUpdates($filters, $clientRevision, $knownHeadKeys, $clientLatestTimestamp, $limit)
+    {
+        $clientRevision = trim((string)$clientRevision);
+        $clientLatestTimestamp = max(0, (int)$clientLatestTimestamp);
+        $limit = max(1, min(20, (int)$limit));
+        if (!is_array($knownHeadKeys)) $knownHeadKeys = array();
+
+        $currentState = $this->getLiveState(false);
+        $currentRevision = isset($currentState['revision']) ? (string)$currentState['revision'] : '';
+        if ($clientRevision !== '' && $currentRevision !== '' && $clientRevision === $currentRevision) {
+            return array(
+                'changed'=>false,
+                'revision'=>$currentRevision,
+                'updated_at'=>isset($currentState['updated_at'])?(string)$currentState['updated_at']:'',
+                'new_count'=>0,
+                'new_items'=>array(),
+                'head_keys'=>$knownHeadKeys,
+                'latest_timestamp'=>$clientLatestTimestamp
+            );
+        }
+
+        /* 같은 PHP 실행 안에서 색인이 갱신된 경우에도 최신 디스크 색인을 다시 읽습니다. */
+        $this->memoryIndex = null;
+        $index = $this->getIndex(false);
+        $clientState = $this->buildLiveClientState($index, $filters, 50);
+        $known = array();
+        foreach ($knownHeadKeys as $key) {
+            $key = trim((string)$key);
+            if ($key !== '') $known[$key] = true;
+        }
+
+        $items = isset($index['items']) && is_array($index['items']) ? $index['items'] : array();
+        $newItems = array();
+        $newCount = 0;
+        $matchedHead = 0;
+        foreach ($items as $item) {
+            if (!is_array($item) || !$this->matchesFilters($item, $filters)) continue;
+            $matchedHead++;
+            if ($matchedHead > 50) break;
+            $key = isset($item['message_key']) ? trim((string)$item['message_key']) : '';
+            if ($key === '' || isset($known[$key])) continue;
+
+            /* 검색조건/업무상태 변경으로 오래된 행이 갑자기 새 메일처럼 보이는 것을 방지합니다. */
+            $timestamp = isset($item['timestamp']) ? (int)$item['timestamp'] : 0;
+            if ($clientLatestTimestamp > 0 && $timestamp + 5 < $clientLatestTimestamp) continue;
+
+            $newCount++;
+            if (count($newItems) < $limit) $newItems[] = $item;
+        }
+
+        return array(
+            'changed'=>true,
+            'revision'=>isset($clientState['revision'])?(string)$clientState['revision']:$currentRevision,
+            'updated_at'=>isset($clientState['updated_at'])?(string)$clientState['updated_at']:'',
+            'new_count'=>$newCount,
+            'new_items'=>$newItems,
+            'head_keys'=>isset($clientState['head_keys'])&&is_array($clientState['head_keys'])?$clientState['head_keys']:array(),
+            'latest_timestamp'=>isset($clientState['latest_timestamp'])?(int)$clientState['latest_timestamp']:0
+        );
+    }
+
+    private static function buildLiveStateFromIndex($index)
+    {
+        $items = isset($index['items']) && is_array($index['items']) ? $index['items'] : array();
+        $head = array();
+        $maximum = min(50, count($items));
+        for ($i = 0; $i < $maximum; $i++) {
+            if (is_array($items[$i]) && !empty($items[$i]['message_key'])) $head[] = (string)$items[$i]['message_key'];
+        }
+        $payload = array(
+            'index_version'=>isset($index['index_version'])?(int)$index['index_version']:0,
+            'updated_at'=>isset($index['updated_at'])?(string)$index['updated_at']:'',
+            'item_count'=>count($items),
+            'head_keys'=>$head,
+            'source_signature'=>isset($index['source_signature'])&&is_array($index['source_signature'])?$index['source_signature']:array()
+        );
+        $encoded = json_encode($payload);
+        if ($encoded === false) $encoded = serialize($payload);
+        return array(
+            'version'=>self::LIVE_STATE_VERSION,
+            'package_version'=>self::VERSION,
+            'revision'=>sha1((string)$encoded),
+            'updated_at'=>isset($index['updated_at'])?(string)$index['updated_at']:'',
+            'item_count'=>count($items),
+            'latest_message_key'=>isset($head[0])?(string)$head[0]:'',
+            'latest_timestamp'=>isset($items[0]['timestamp'])?(int)$items[0]['timestamp']:0
+        );
+    }
+
+    private static function writeLiveStateFromIndex($index)
+    {
+        $state = self::buildLiveStateFromIndex($index);
+        PublicMailStorageService::writeJsonFile(PublicMailStorageService::path(self::LIVE_STATE_FILE), $state);
+        return $state;
     }
 
     public function getDashboardCounts()
@@ -177,6 +328,7 @@ class PublicMailIndexService
             'items' => $items
         );
         PublicMailStorageService::writeJsonFile(PublicMailStorageService::path(self::INDEX_FILE), $index);
+        self::writeLiveStateFromIndex($index);
         return $index;
     }
 
@@ -310,6 +462,7 @@ class PublicMailIndexService
         $index['package_version'] = self::VERSION;
         $index['source_signature'] = self::sourceSignature();
         PublicMailStorageService::writeJsonFile($path, $index);
+        self::writeLiveStateFromIndex($index);
         $this->memoryIndex = $index;
         return $item;
     }
