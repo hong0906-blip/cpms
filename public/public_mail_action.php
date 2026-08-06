@@ -4,7 +4,7 @@
  *
  * 네이버 메일의 상세본문 비동기 조회, 인라인 이미지 출력, 설정, 동기화,
  * 처리상태 변경을 담당합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.6
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.7
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';

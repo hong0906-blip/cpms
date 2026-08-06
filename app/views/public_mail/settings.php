@@ -20,12 +20,9 @@ $repairFailed=isset($repair['failed_count'])?(int)$repair['failed_count']:0;
 $repairRemaining=isset($repair['remaining_count'])?(int)$repair['remaining_count']:0;
 $repairPercent=$repairTotal>0?(int)floor(($repairProcessed/$repairTotal)*100):0;
 if ($repairPercent>100) $repairPercent=100;
-$repairLastPing=isset($repair['last_http_ping_at'])?trim((string)$repair['last_http_ping_at']):'';
-$repairLastPingTs=$repairLastPing!==''?strtotime($repairLastPing):false;
-$repairCronStale=!empty($repair['active'])&&($repairLastPingTs===false||(time()-$repairLastPingTs)>180);
 $repairLockActive=!empty($repair['lock_is_active']);
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_76">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_77">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -77,7 +74,7 @@ $repairLockActive=!empty($repair['lock_is_active']);
       <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>설치 버전·목록 속도 상태</strong><span>실제 적용된 핵심 파일과 메일 색인 상태를 확인합니다.</span></div><span class="pm-status-dot <?php echo !empty($indexStatus['writable'])?'is-on':''; ?>"><?php echo !empty($indexStatus['writable'])?'정상':'확인 필요'; ?></span></div>
         <div class="pm-sync-state-list">
-          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.6'); ?></strong></div>
+          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.7'); ?></strong></div>
           <div><span>목록 색인 버전</span><strong><?php echo isset($indexStatus['version'])?(int)$indexStatus['version']:0; ?></strong></div>
           <div><span>색인 메일 수</span><strong><?php echo number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0); ?>건</strong></div>
           <div><span>마지막 색인 갱신</span><strong><?php echo call_user_func($esc,!empty($indexStatus['updated_at'])?$indexStatus['updated_at']:'아직 없음'); ?></strong></div>
@@ -97,24 +94,22 @@ $repairLockActive=!empty($repair['lock_is_active']);
       </div>
 
       <div class="pm-settings-card pm-repair-card" data-repair-active="<?php echo !empty($repair['active'])?'1':'0'; ?>" data-repair-paused="<?php echo !empty($repair['paused'])?'1':'0'; ?>">
-        <div class="pm-card-title"><div><strong>깨진 제목·한글 전체 자동복구</strong><span>버튼은 한 번만 누르면 됩니다. 외부 자동동기화가 남은 메일을 끝까지 나눠서 처리합니다.</span></div><span class="pm-status-dot <?php echo !empty($repair['active'])?'is-on':''; ?>" data-repair-status-dot><?php echo !empty($repair['active'])?(!empty($repair['paused'])?'일시중지':'진행 중'):(!empty($repair['cancelled'])?'취소됨':($repairTotal>0&&$repairRemaining===0?'완료':'대기')); ?></span></div>
-        <div class="pm-alert pm-alert-success"><strong>20건씩 계속 누를 필요가 없습니다.</strong><br>시작 버튼을 한 번 누르면 cron-job.org가 1분마다 다음 묶음을 자동 처리합니다. 브라우저를 닫아도 계속 진행됩니다.</div>
+        <div class="pm-card-title"><div><strong>깨진 제목·한글 전체 자동복구</strong><span>시작 버튼을 한 번만 누르면 이 설정 화면에서 20건씩 자동으로 이어서 처리합니다.</span></div><span class="pm-status-dot <?php echo !empty($repair['active'])?'is-on':''; ?>" data-repair-status-dot><?php echo !empty($repair['active'])?(!empty($repair['paused'])?'일시중지':'진행 중'):(!empty($repair['cancelled'])?'취소됨':($repairTotal>0&&$repairRemaining===0?'완료':'대기')); ?></span></div>
+        <div class="pm-alert pm-alert-success"><strong>cron-job.org 설정이 필요하지 않습니다.</strong><br>이 화면을 열어 둔 동안 20건 처리 후 약 5초 뒤 다음 묶음을 자동으로 실행합니다. 브라우저를 닫으면 안전하게 멈추고, 다시 이 화면에 들어오면 저장된 위치부터 자동 재개합니다.</div>
         <div class="pm-progress-wrap"><div class="pm-progress-track"><span data-repair-progress-bar style="width:<?php echo $repairPercent; ?>%"></span></div><div class="pm-progress-label"><strong data-repair-progress-percent><?php echo $repairPercent; ?>%</strong><span data-repair-progress-label><?php echo number_format($repairProcessed); ?> / <?php echo number_format($repairTotal); ?>건 확인</span></div></div>
         <div class="pm-sync-state-list">
           <div><span>상태</span><strong data-repair-status><?php echo !empty($repair['active'])?(!empty($repair['paused'])?'일시중지':'복구 중'):(!empty($repair['cancelled'])?'취소됨':($repairTotal>0&&$repairRemaining===0?'완료':'대기')); ?></strong></div>
+          <div><span>브라우저 자동처리</span><strong data-repair-runner-status><?php echo !empty($repair['active'])&&!empty($repair['paused'])?'일시중지':(!empty($repair['active'])?'자동 재개 준비':'대기'); ?></strong></div>
           <div><span>처음 발견된 복구 대상</span><strong data-repair-targets><?php echo number_format($repairTargets); ?>건</strong></div>
           <div><span>복구 완료</span><strong data-repair-repaired><?php echo number_format($repairRepaired); ?>건</strong></div>
           <div><span>남은 확인</span><strong data-repair-remaining><?php echo number_format($repairRemaining); ?>건</strong></div>
           <div><span>확인 실패</span><strong data-repair-failed><?php echo number_format($repairFailed); ?>건</strong></div>
           <div><span>최근 실행</span><strong data-repair-last-run><?php echo call_user_func($esc,!empty($repair['last_run_at'])?$repair['last_run_at']:'아직 없음'); ?></strong></div>
           <div><span>최근 실행 처리</span><strong data-repair-last-processed><?php echo number_format(isset($repair['last_run_processed_count'])?(int)$repair['last_run_processed_count']:0); ?>건</strong></div>
-          <div><span>외부 자동호출 최근 수신</span><strong data-repair-last-ping><?php echo call_user_func($esc,$repairLastPing!==''?$repairLastPing:'아직 없음'); ?></strong></div>
-          <div><span>외부 자동호출 결과</span><strong data-repair-http-status><?php echo call_user_func($esc,!empty($repair['last_http_status'])?$repair['last_http_status']:'아직 없음'); ?></strong></div>
           <div><span>복구 잠금</span><strong data-repair-lock-status><?php echo $repairLockActive?'실행 중':'해제'; ?></strong></div>
         </div>
-        <div class="pm-alert pm-alert-error" data-repair-cron-warning<?php echo $repairCronStale?'':' hidden'; ?>>자동복구가 등록되었지만 최근 3분 동안 외부 자동호출이 확인되지 않았습니다. cron-job.org의 URL과 X-CPMS-Mail-Key 헤더를 확인하거나 아래의 지금 1회 실행을 눌러 점검하세요.</div>
         <?php if (!empty($repair['last_message'])): ?><div class="pm-alert pm-alert-success" data-repair-message><?php echo call_user_func($esc,$repair['last_message']); ?></div><?php else: ?><div class="pm-help-text" data-repair-message>아직 복구 작업을 시작하지 않았습니다.</div><?php endif; ?>
-        <?php if (!empty($repair['last_error'])): ?><div class="pm-alert pm-alert-error" data-repair-error><?php echo call_user_func($esc,$repair['last_error']); ?></div><?php endif; ?>
+        <?php if (!empty($repair['last_error'])): ?><div class="pm-alert pm-alert-error" data-repair-error><?php echo call_user_func($esc,$repair['last_error']); ?></div><?php else: ?><div class="pm-alert pm-alert-error" data-repair-error hidden></div><?php endif; ?>
         <div class="pm-settings-actions pm-wrap-actions">
           <button type="button" class="pm-btn pm-btn-primary" data-metadata-repair="start"><i data-lucide="languages"></i> 깨진 메일 전체 복구 시작</button>
           <button type="button" class="pm-btn pm-btn-light" data-metadata-repair="run_once"><i data-lucide="play-circle"></i> 지금 1회 실행</button>
@@ -122,7 +117,7 @@ $repairLockActive=!empty($repair['lock_is_active']);
           <button type="button" class="pm-btn pm-btn-light" data-metadata-repair="resume"><i data-lucide="play"></i> 다시 시작</button>
           <button type="button" class="pm-btn pm-btn-danger" data-metadata-repair="cancel"><i data-lucide="square"></i> 취소</button>
         </div>
-        <p class="pm-help-text">메일 본문 전체나 첨부파일을 다시 받지 않고, 제목·보낸사람·받는사람 헤더만 네이버 원본에서 읽습니다. 일반 메일 메뉴와 직원 화면에서는 복구 작업을 실행하지 않습니다.</p>
+        <p class="pm-help-text">메일 본문 전체나 첨부파일을 다시 받지 않고 제목·보낸사람·받는사람 헤더만 네이버 원본에서 읽습니다. 이 자동 연속 실행은 개발부서의 연동 설정 화면에서만 동작하며 일반 메일 화면과 직원 화면에서는 실행되지 않습니다.</p>
       </div>
 
       <div class="pm-settings-card">
@@ -164,4 +159,4 @@ $repairLockActive=!empty($repair['lock_is_active']);
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_76"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_77"></script>

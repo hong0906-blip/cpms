@@ -3,12 +3,12 @@
  * 네이버 메일 화면 동작 - PHP 5.6 서버 호환용 순수 JavaScript
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
- * 자동수집은 public/cron/naver_mail_sync.php를 외부 예약서비스가 호출합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.6
+ * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 깨진 한글 복구만 개발부서 연동 설정 화면에서 자동 연속 실행합니다.
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.7
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.6';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.7';
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
     function csrf() { var el=page(); return el ? (el.getAttribute('data-csrf-token')||'') : ''; }
@@ -115,23 +115,104 @@
         for(i=0;i<buttons.length;i++) buttons[i].addEventListener('click',function(){fullImportAction(this.getAttribute('data-full-import'));});
     }
 
+    var metadataRepairTimer=null;
+    var metadataRepairRequestRunning=false;
+    var metadataRepairRetryDelay=5000;
+
+    function repairCard(){return document.querySelector('.pm-repair-card');}
+
+    function setRepairRunnerStatus(text){
+        var card=repairCard(),node=card?card.querySelector('[data-repair-runner-status]'):null;
+        if(node)node.textContent=text||'';
+    }
+
+    function setRepairInlineError(message){
+        var card=repairCard(),node=card?card.querySelector('[data-repair-error]'):null;
+        if(!node)return;
+        if(message){node.textContent=message;node.hidden=false;}else{node.textContent='';node.hidden=true;}
+    }
+
+    function stopMetadataRepairLoop(statusText){
+        if(metadataRepairTimer!==null){window.clearTimeout(metadataRepairTimer);metadataRepairTimer=null;}
+        if(statusText)setRepairRunnerStatus(statusText);
+    }
+
+    function scheduleMetadataRepairLoop(delay){
+        var card=repairCard();
+        if(!card||card.getAttribute('data-repair-active')!=='1'||card.getAttribute('data-repair-paused')==='1'){
+            stopMetadataRepairLoop(card&&card.getAttribute('data-repair-paused')==='1'?'일시중지':'대기');
+            return;
+        }
+        if(metadataRepairTimer!==null)window.clearTimeout(metadataRepairTimer);
+        setRepairRunnerStatus('다음 묶음 대기 중');
+        metadataRepairTimer=window.setTimeout(runMetadataRepairLoop,Math.max(300,parseInt(delay,10)||metadataRepairRetryDelay));
+    }
+
+    function runMetadataRepairLoop(){
+        var card=repairCard();
+        metadataRepairTimer=null;
+        if(!card||card.getAttribute('data-repair-active')!=='1'||card.getAttribute('data-repair-paused')==='1'){
+            stopMetadataRepairLoop(card&&card.getAttribute('data-repair-paused')==='1'?'일시중지':'대기');
+            return;
+        }
+        if(metadataRepairRequestRunning){scheduleMetadataRepairLoop(1000);return;}
+        metadataRepairRequestRunning=true;
+        setRepairRunnerStatus('20건 자동 처리 중');
+        setRepairInlineError('');
+        postJson({action:'run_metadata_repair_once',csrf_token:csrf(),response_type:'json'},function(result){
+            metadataRepairRequestRunning=false;
+            if(!result||!result.ok){
+                setRepairRunnerStatus('오류 후 재시도 대기');
+                setRepairInlineError(result&&result.message?result.message:'복구 작업 요청에 실패했습니다. 15초 후 다시 시도합니다.');
+                scheduleMetadataRepairLoop(15000);
+                return;
+            }
+            if(result.state)updateStatusView(result.state);
+            card=repairCard();
+            if(card&&card.getAttribute('data-repair-active')==='1'&&card.getAttribute('data-repair-paused')!=='1')scheduleMetadataRepairLoop(metadataRepairRetryDelay);
+            else stopMetadataRepairLoop(card&&card.getAttribute('data-repair-paused')==='1'?'일시중지':'완료');
+        });
+    }
+
     function metadataRepairAction(action) {
         var map={start:'start_metadata_repair',run_once:'run_metadata_repair_once',pause:'pause_metadata_repair',resume:'resume_metadata_repair',cancel:'cancel_metadata_repair'};
         if(!map[action])return;
-        if(action==='start'&&!window.confirm('깨진 메일 전체 복구를 시작할까요? 버튼은 한 번만 누르면 되고 외부 자동동기화가 끝까지 처리합니다.'))return;
+        if(action==='start'&&!window.confirm('깨진 메일 전체 복구를 시작할까요? 이 설정 화면을 열어 두면 20건씩 자동으로 끝까지 처리합니다.'))return;
         if(action==='cancel'&&!window.confirm('깨진 메일 복구를 취소할까요? 이미 복구된 메일은 유지됩니다.'))return;
+        if(action==='pause'||action==='cancel')stopMetadataRepairLoop(action==='pause'?'일시중지':'취소 처리 중');
         showLoading(action==='start'?'복구 대상을 확인해 작업을 등록하는 중입니다.':(action==='run_once'?'깨진 메일 복구를 지금 한 번 실행하는 중입니다.':'복구 작업 상태를 변경하는 중입니다.'));
         postJson({action:map[action],csrf_token:csrf(),response_type:'json'},function(result){
             hideLoading();
             if(!result||!result.ok){alert(result&&result.message?result.message:'복구 작업 요청에 실패했습니다.');return;}
-            alert(result.message||'복구 작업 상태를 변경했습니다.');
             if(result.state)updateStatusView(result.state);else window.location.reload();
+            if(action==='start'||action==='resume'){
+                alert((result.message||'복구 작업을 시작했습니다.')+'\n\n이 설정 화면을 열어 두면 자동으로 계속 진행됩니다.');
+                scheduleMetadataRepairLoop(500);
+            }else if(action==='run_once'){
+                alert(result.message||'복구 작업을 한 번 실행했습니다.');
+                var card=repairCard();
+                if(card&&card.getAttribute('data-repair-active')==='1'&&card.getAttribute('data-repair-paused')!=='1')scheduleMetadataRepairLoop(metadataRepairRetryDelay);
+            }else{
+                alert(result.message||'복구 작업 상태를 변경했습니다.');
+            }
         });
     }
 
     function bindMetadataRepair() {
         var buttons=document.querySelectorAll('[data-metadata-repair]'),i;
         for(i=0;i<buttons.length;i++)buttons[i].addEventListener('click',function(){metadataRepairAction(this.getAttribute('data-metadata-repair'));});
+    }
+
+    function bindMetadataRepairAutoRunner(){
+        var settingsPage=document.querySelector('[data-public-mail-settings]'),card=repairCard();
+        if(!settingsPage||!card)return;
+        if(card.getAttribute('data-repair-active')==='1'&&card.getAttribute('data-repair-paused')!=='1'){
+            setRepairRunnerStatus('자동 재개 준비');
+            scheduleMetadataRepairLoop(1000);
+        }else{
+            setRepairRunnerStatus(card.getAttribute('data-repair-paused')==='1'?'일시중지':'대기');
+        }
+        window.addEventListener('beforeunload',function(){stopMetadataRepairLoop();});
     }
 
     function updateStatusView(state) {
@@ -163,11 +244,9 @@
             var repairFailedNode=repairCard.querySelector('[data-repair-failed]');if(repairFailedNode)repairFailedNode.textContent=repairFailed.toLocaleString()+'건';
             var repairLastRun=repairCard.querySelector('[data-repair-last-run]');if(repairLastRun)repairLastRun.textContent=repair.last_run_at||'아직 없음';
             var repairLastProcessed=repairCard.querySelector('[data-repair-last-processed]');if(repairLastProcessed)repairLastProcessed.textContent=(parseInt(repair.last_run_processed_count,10)||0).toLocaleString()+'건';
-            var repairLastPing=repairCard.querySelector('[data-repair-last-ping]');if(repairLastPing)repairLastPing.textContent=repair.last_http_ping_at||'아직 없음';
-            var repairHttpStatus=repairCard.querySelector('[data-repair-http-status]');if(repairHttpStatus)repairHttpStatus.textContent=repair.last_http_status||'아직 없음';
             var repairLockStatus=repairCard.querySelector('[data-repair-lock-status]');if(repairLockStatus)repairLockStatus.textContent=repair.lock_is_active?'실행 중':'해제';
-            var repairWarning=repairCard.querySelector('[data-repair-cron-warning]');
-            if(repairWarning){var pingTime=repair.last_http_ping_at?Date.parse(String(repair.last_http_ping_at).replace(' ','T')):0;var stale=!!repair.active&&(!pingTime||((new Date().getTime()-pingTime)>180000));repairWarning.hidden=!stale;}
+            var repairRunnerStatus=repairCard.querySelector('[data-repair-runner-status]');
+            if(repairRunnerStatus){repairRunnerStatus.textContent=repair.active?(repair.paused?'일시중지':(metadataRepairRequestRunning?'20건 자동 처리 중':'다음 묶음 대기 중')):(repair.cancelled?'취소됨':(repairTotal>0&&repairRemaining===0?'완료':'대기'));}
             var repairMessage=repairCard.querySelector('[data-repair-message]');if(repairMessage)repairMessage.textContent=repair.last_message||'아직 복구 작업을 시작하지 않았습니다.';
         }
         var cronAt=document.querySelector('[data-cron-last-at]'); if(cronAt)cronAt.textContent=state.last_cron_at||'아직 없음';
@@ -188,7 +267,7 @@
         });
     }
 
-    /* 설정 화면에서 진행 중일 때 상태 JSON만 읽습니다. 메일 수집이나 IMAP 접속은 실행하지 않습니다. */
+    /* 설정 화면의 별도 상태 새로고침입니다. 실제 복구는 위의 연속 실행기가 한 번씩 안전하게 호출합니다. */
     function bindRepairStatusPolling() {
         var settingsPage=document.querySelector('[data-public-mail-settings]');
         var repairCard=document.querySelector('.pm-repair-card');
@@ -515,7 +594,7 @@
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindStatusRefresh(); bindRepairStatusPolling(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); openInitialMessage();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindMetadataRepairAutoRunner(); bindStatusRefresh(); bindRepairStatusPolling(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); openInitialMessage();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

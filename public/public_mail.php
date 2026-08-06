@@ -2,7 +2,7 @@
 /**
  * 파일 경로: C:\www\cpms\public\public_mail.php
  * 네이버 메일 메인 화면입니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.6
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.7
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 if (isset($_GET['r']) && trim((string)$_GET['r']) !== '') {
@@ -30,7 +30,7 @@ if (!in_array($mailboxType, array('', 'inbox', 'sent'), true)) {
 }
 
 /*
- * v1.7.6부터 목록 화면 검색조건은 검색어·기간·현재 메일함 탭만 사용합니다.
+ * v1.7.7부터 목록 화면 검색조건은 검색어·기간·현재 메일함 탭만 사용합니다.
  * 부서·현장·상태·중요도·담당자 필터는 화면과 처리에서 모두 제외합니다.
  */
 $filters = array(
@@ -67,5 +67,5 @@ PublicMailWebHelper::render('public_mail/index', array(
     'currentUserName' => PublicMailWebHelper::currentUserName(),
     'currentUserEmail' => PublicMailWebHelper::currentUserEmail(),
     'canManageMailSettings' => $canManageMailSettings,
-    'packageVersion' => '1.7.6'
+    'packageVersion' => '1.7.7'
 ));

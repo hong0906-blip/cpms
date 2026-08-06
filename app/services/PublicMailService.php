@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.6';
+    const VERSION = '1.7.7';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -168,7 +168,7 @@ class PublicMailService
     public function runAutomationTick($limit)
     {
         /*
-         * v1.7.6: 깨진 한글 복구를 메일 수집보다 먼저 실행합니다.
+         * v1.7.7: 깨진 한글 복구를 메일 수집보다 먼저 실행합니다.
          * 네이버 새메일 수집이 오류나거나 오래 걸려도 복구 진행률은 매 호출마다 남습니다.
          */
         $repairResult = array('processed_count'=>0,'repaired_count'=>0,'failed_count'=>0);
@@ -2000,7 +2000,7 @@ class PublicMailService
     }
 
 
-    /** 깨진 메일 전체 복구 작업을 한 번 등록합니다. 실제 복구는 외부 cron이 이어서 처리합니다. */
+    /** 깨진 메일 전체 복구 작업을 등록합니다. 개발부서 연동 설정 화면이 열려 있으면 브라우저가 이어서 처리합니다. */
     public function startMetadataRepair()
     {
         $existingState = PublicMailStorageService::getSyncState();
@@ -2008,7 +2008,7 @@ class PublicMailService
             $existing = $existingState['metadata_repair'];
             $message = !empty($existing['paused'])
                 ? '깨진 메일 복구가 일시중지되어 있습니다. [다시 시작]을 누르면 이어집니다.'
-                : '깨진 메일 전체 복구가 이미 진행 중입니다. 외부 자동동기화가 계속 이어서 처리합니다.';
+                : '깨진 메일 전체 복구가 이미 진행 중입니다. 이 연동 설정 화면에서 자동으로 이어서 처리합니다.';
             return array('ok'=>true,'message'=>$message,'target_count'=>isset($existing['target_count'])?(int)$existing['target_count']:0,'state'=>$existingState);
         }
         $messages = PublicMailStorageService::getMessages();
@@ -2043,7 +2043,7 @@ class PublicMailService
             'failed_count' => 0,
             'remaining_count' => $targets > 0 ? $total : 0,
             'last_message' => $targets > 0
-                ? '깨진 메일 전체 복구를 등록했습니다. 외부 자동동기화가 1분마다 이어서 처리합니다.'
+                ? '깨진 메일 전체 복구를 등록했습니다. 이 연동 설정 화면을 열어 두면 5초 간격으로 다음 묶음을 자동 처리합니다.'
                 : '복구가 필요한 깨진 메일을 찾지 못했습니다.',
             'last_error' => ''
         );
@@ -2083,7 +2083,7 @@ class PublicMailService
     }
 
     /**
-     * 외부 cron 한 번당 깨진 메일을 제한된 수만 복구합니다.
+     * 브라우저 또는 외부 예약호출 한 번당 깨진 메일을 제한된 수만 복구합니다.
      * 본문 전체는 받지 않고 헤더만 다시 읽으므로 일반 메일 화면의 속도에 영향을 주지 않습니다.
      */
     public function runMetadataRepairBatch($limit, $maximumSeconds)
@@ -2101,9 +2101,9 @@ class PublicMailService
             $state = PublicMailStorageService::saveSyncState(array('metadata_repair'=>array(
                 'lock_status'=>'busy',
                 'last_run_result'=>'다른 복구 작업이 실행 중입니다.',
-                'last_message'=>'다른 자동호출이 깨진 메일을 복구 중입니다. 다음 호출에서 이어집니다.'
+                'last_message'=>'다른 복구 작업이 실행 중입니다. 잠시 후 자동으로 다시 시도합니다.'
             )));
-            return array('ok'=>true,'message'=>'다른 자동호출이 깨진 메일을 복구 중입니다. 다음 호출에서 이어집니다.','processed_count'=>0,'repaired_count'=>0,'failed_count'=>0,'state'=>$state);
+            return array('ok'=>true,'message'=>'다른 복구 작업이 실행 중입니다. 잠시 후 자동으로 다시 시도합니다.','processed_count'=>0,'repaired_count'=>0,'failed_count'=>0,'state'=>$state);
         }
 
         $lockAt = date('Y-m-d H:i:s');
@@ -2226,7 +2226,7 @@ class PublicMailService
             $repair['last_run_repaired_count'] = $repairedThisRun;
             $repair['last_error'] = $runError;
             $repair['last_run_result'] = '오류: ' . $runError;
-            $repair['last_message'] = '복구 실행 중 오류가 발생했습니다. 다음 호출에서 다시 시도합니다.';
+            $repair['last_message'] = '복구 실행 중 오류가 발생했습니다. 잠시 후 자동으로 다시 시도합니다.';
         } finally {
             if ($client !== null) {
                 try { $client->logout(); } catch (\Exception $ignored) {}

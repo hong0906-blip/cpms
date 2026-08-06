@@ -1,4 +1,4 @@
-/* CPMS_PUBLIC_MAIL_VERSION: 1.7.6 */
+/* CPMS_PUBLIC_MAIL_VERSION: 1.7.7 */
 /*
  * 파일 경로: C:\www\cpms\public\assets\css\public_mail.css
  * 공용메일 화면 전용 스타일
@@ -1347,7 +1347,7 @@ body.pm-modal-open {
 
 
 /* ========================================================================
- * v1.7.6 단순 검색 · 전체너비 목록 · 대형 메일 상세 모달
+ * v1.7.7 단순 검색 · 전체너비 목록 · 대형 메일 상세 모달
  * ====================================================================== */
 .pm-filter-form-simple {
     grid-template-columns: minmax(320px, 1fr) minmax(160px, 210px) auto auto;
@@ -1533,5 +1533,8 @@ body.pm-mail-reader-open {
     }
 }
 
-/* v1.7.6 자동복구 외부호출 경고는 hidden 속성을 우선합니다. */
+/* v1.7.7 자동복구 외부호출 경고는 hidden 속성을 우선합니다. */
 [data-repair-cron-warning][hidden] { display: none !important; }
+
+/* v1.7.7 개발부서 설정 화면 전용 깨진 한글 자동 연속 실행 */
+.pm-repair-card [data-repair-runner-status]{color:#0f766e;font-weight:800;}
