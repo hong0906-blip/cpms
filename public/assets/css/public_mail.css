@@ -1787,7 +1787,7 @@ body.pm-mail-reader-open {
 .pm-title-normalization-card .pm-alert { line-height: 1.6; }
 
 
-/* v1.7.19 새 메일 자동표시 */
+/* v1.7.19.1 새 메일 자동표시 */
 .pm-live-indicator{display:inline-flex;align-items:center;gap:6px;color:#067647;font-weight:800;white-space:nowrap}
 .pm-live-indicator i{width:8px;height:8px;border-radius:999px;background:#12b76a;box-shadow:0 0 0 0 rgba(18,183,106,.45);animation:pmLivePulse 2s infinite}
 .pm-live-head-help{margin-left:10px}

@@ -5,7 +5,7 @@
  * 열린 메일 목록에서 새로고침 없이 새 메일을 표시하기 위한 읽기 전용 주소입니다.
  * 네이버 IMAP에는 접속하지 않고 작은 mail_live_state.json과 mail_index.json만 확인합니다.
  * PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.19
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1
  */
 
 @ini_set('display_errors', '0');
@@ -45,6 +45,13 @@ try {
     $knownKeys = array_values($knownKeys);
 
     $indexService = new PublicMailIndexService();
+    if (!method_exists($indexService, 'getLiveUpdates')) {
+        PublicMailWebHelper::jsonResponse(array(
+            'ok'=>false,
+            'retryable'=>true,
+            'message'=>'새 메일 자동표시 파일이 일부만 적용되었습니다. 관리자에게 패치 재적용을 요청해 주세요.'
+        ), 503);
+    }
     $result = $indexService->getLiveUpdates(
         $filters,
         isset($_GET['revision']) ? (string)$_GET['revision'] : '',

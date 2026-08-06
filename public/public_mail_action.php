@@ -8,7 +8,7 @@ if (ob_get_level() === 0) @ob_start();
  *
  * 네이버 메일의 상세본문 비동기 조회, 인라인 이미지 출력, 설정, 동기화,
  * 처리상태 변경을 담당합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.18
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';

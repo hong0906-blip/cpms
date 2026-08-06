@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.18';
+    const VERSION = '1.7.19.1';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -945,7 +945,7 @@ class PublicMailService
     /**
      * 네이버 원본 제목 재수집 작업을 등록합니다.
      *
-     * v1.7.18부터는 스마트빌 메일만 한 건씩 처리하고 messages.json은 마지막에 한 번만 저장합니다.
+     * v1.7.19.1부터는 스마트빌 메일만 한 건씩 처리하고 messages.json은 마지막에 한 번만 저장합니다.
      * 작업 시작 시 작은 대기열을 한 번 만들고, 제목 10건씩 별도 업데이트 파일에 모은 뒤
      * 모든 수집이 끝났을 때 messages.json과 검색 색인을 한 번만 갱신합니다.
      */
@@ -1335,7 +1335,7 @@ class PublicMailService
                 $updateItems[$messageKey] = array(
                     'subject'=>$freshSubject,
                     'refreshed_at'=>date('Y-m-d H:i:s'),
-                    'source'=>'businesson_worker_v1718',
+                    'source'=>'businesson_worker_v17191',
                     'old_score'=>$oldScore,
                     'new_score'=>$freshScore,
                     'old_was_clearly_broken'=>$oldClearlyBroken ? 1 : 0
@@ -1452,7 +1452,7 @@ class PublicMailService
      * 200건 단위로 메모리에서 적용하되 messages.json은 마지막에 한 번만 저장합니다.
      */
     /**
-     * v1.7.18: 정상 제목은 title_refresh_updates.json에서 즉시 목록·상세에 덮어씁니다.
+     * v1.7.19.1: 정상 제목은 title_refresh_updates.json에서 즉시 목록·상세에 덮어씁니다.
      * messages.json 5,559건 전체 저장과 mail_index.json 전체 재생성은 하지 않습니다.
      */
     private function mergeCollectedTitleRefreshUpdates($markCompleted)

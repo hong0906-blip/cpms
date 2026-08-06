@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.18';
+    const VERSION = '1.7.19.1';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -323,7 +323,7 @@ class PublicMailStorageService
             if ($subject === '') continue;
             $messages[$key]['subject'] = $subject;
             $messages[$key]['subject_refreshed_at'] = isset($update['refreshed_at']) ? (string)$update['refreshed_at'] : '';
-            $messages[$key]['subject_refresh_source'] = isset($update['source']) ? (string)$update['source'] : 'businesson_worker_v1718';
+            $messages[$key]['subject_refresh_source'] = isset($update['source']) ? (string)$update['source'] : 'businesson_worker_v17191';
         }
         return $messages;
     }
@@ -484,7 +484,7 @@ class PublicMailStorageService
         if (!is_array($messages)) return array();
 
         /*
-         * v1.7.18: messages.json 전체를 다시 저장하지 않고 작은 제목 보정 파일만 덮어씁니다.
+         * v1.7.19.1: messages.json 전체를 다시 저장하지 않고 작은 제목 보정 파일만 덮어씁니다.
          * 100여 건의 해시 조회만 수행하므로 목록·상세 속도에 거의 영향을 주지 않습니다.
          */
         return self::applyTitleRefreshOverridesToMessages($messages);

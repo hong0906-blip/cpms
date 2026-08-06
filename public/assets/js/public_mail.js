@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 첨부파일은 브라우저 기본 다운로드로 처리합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.19
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.19';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.19.1';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }

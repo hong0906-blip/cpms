@@ -2,7 +2,7 @@
 /**
  * 파일 경로: C:\www\cpms\public\public_mail_settings.php
  * 네이버 메일 관리자 설정 화면 진입 파일입니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.18
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 if (isset($_GET['r']) && trim((string)$_GET['r'])!=='') { header('Location: index.php?'.http_build_query($_GET,'','&')); exit; }
@@ -23,5 +23,5 @@ try {
 }
 PublicMailWebHelper::render('public_mail/settings',array(
     'selectedMenu'=>'네이버 메일','pageTitle'=>'네이버 메일 설정','settings'=>$settings,'syncState'=>$syncState,
-    'cronInfo'=>$cronInfo,'cacheStats'=>$cacheStats,'indexStatus'=>$indexStatus,'packageVersion'=>'1.7.18','csrfToken'=>PublicMailWebHelper::csrfToken(),'flash'=>PublicMailWebHelper::pullFlash(),'errorMessage'=>$errorMessage
+    'cronInfo'=>$cronInfo,'cacheStats'=>$cacheStats,'indexStatus'=>$indexStatus,'packageVersion'=>'1.7.19.1','csrfToken'=>PublicMailWebHelper::csrfToken(),'flash'=>PublicMailWebHelper::pullFlash(),'errorMessage'=>$errorMessage
 ));
