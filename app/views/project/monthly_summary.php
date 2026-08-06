@@ -1,17 +1,25 @@
 <?php
 use App\Core\Db;
+use App\Core\Auth;
 
 require_once __DIR__ . '/../construction/tabs/partials/sales_data_loader.php';
 require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
 require_once __DIR__ . '/../construction/tabs/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/../safety/safety_cost_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/partials/monthly_summary_snapshot_helper.php';
 
 $pdo = Db::pdo();
 $selectedYm = isset($_GET['ym']) ? trim((string)$_GET['ym']) : date('Y-m');
 if (!cpms_monthly_summary_ym_valid($selectedYm)) {
     $selectedYm = date('Y-m');
 }
+
+$monthlySummaryCanDailyView = cpms_monthly_summary_can_daily_view();
+$monthlySummaryView = isset($_GET['summary_view']) ? trim((string)$_GET['summary_view']) : 'monthly';
+if ($monthlySummaryView !== 'daily' || !$monthlySummaryCanDailyView) $monthlySummaryView = 'monthly';
+$monthlySummaryRequestedDate = isset($_GET['snapshot_date']) ? trim((string)$_GET['snapshot_date']) : '';
+$monthlySummaryDailyMode = ($monthlySummaryView === 'daily');
 
 function cpms_monthly_summary_ym_valid($ym) {
     return preg_match('/^\d{4}-\d{2}$/', (string)$ym);
@@ -20,6 +28,23 @@ function cpms_monthly_summary_ym_valid($ym) {
 function cpms_monthly_summary_money($value) {
     if ((float)$value == 0.0) return '-';
     return number_format((float)$value, 0);
+}
+
+function cpms_monthly_summary_delta_text($value) {
+    $value = (float)$value;
+    if (abs($value) < 0.01) return '';
+    return ($value > 0 ? '+' : '-') . number_format(abs($value), 0) . '원';
+}
+
+function cpms_monthly_summary_delta_class($value) {
+    $value = (float)$value;
+    if ($value > 0.01) return 'cpms-summary-delta-positive';
+    if ($value < -0.01) return 'cpms-summary-delta-negative';
+    return '';
+}
+
+function cpms_monthly_summary_increase_cell_class($value) {
+    return ((float)$value > 0.01) ? 'cpms-summary-cell-increase' : '';
 }
 
 function cpms_monthly_summary_mobile_money_class($value) {
@@ -525,25 +550,74 @@ $projects = array();
 $errors = array();
 $summaryRows = array();
 $monthOptions = array($selectedYm);
+$monthlySummarySnapshotContext = array(
+    'installed'=>false,
+    'dates'=>array(),
+    'selected_date'=>'',
+    'previous_date'=>'',
+    'current'=>array(),
+    'previous'=>array(),
+);
 
 if (!$pdo) {
     $errors[] = 'DB 연결이 필요합니다.';
 } else {
     try {
         cpms_monthly_summary_ensure_remark_table($pdo);
+        $monthlySummarySnapshotContext = cpms_monthly_summary_snapshot_context(
+            $pdo,
+            $selectedYm,
+            $monthlySummaryRequestedDate,
+            $monthlySummaryDailyMode
+        );
+        $monthlySummarySelectedDate = isset($monthlySummarySnapshotContext['selected_date']) ? (string)$monthlySummarySnapshotContext['selected_date'] : '';
+        $monthlySummaryPreviousDate = isset($monthlySummarySnapshotContext['previous_date']) ? (string)$monthlySummarySnapshotContext['previous_date'] : '';
+        $monthlySummaryCurrentSnapshots = isset($monthlySummarySnapshotContext['current']) && is_array($monthlySummarySnapshotContext['current']) ? $monthlySummarySnapshotContext['current'] : array();
+        $monthlySummaryPreviousSnapshots = isset($monthlySummarySnapshotContext['previous']) && is_array($monthlySummarySnapshotContext['previous']) ? $monthlySummarySnapshotContext['previous'] : array();
+        $monthlySummaryContactMap = cpms_monthly_summary_contact_map($pdo);
+
         $st = $pdo->query("SELECT id, name, start_date, end_date, contract_amount FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id DESC");
         $projects = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($projects)) $projects = array();
         $monthOptions = cpms_monthly_summary_month_options($projects, $selectedYm);
         $remarks = cpms_monthly_summary_load_remarks($pdo, $selectedYm);
+
         foreach ($projects as $project) {
+            $project = cpms_monthly_summary_apply_contact($project, $monthlySummaryContactMap);
             $pid2 = isset($project['id']) ? (int)$project['id'] : 0;
-            $summaryRows[] = cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, isset($remarks[$pid2]) ? $remarks[$pid2] : '');
+            $remark = isset($remarks[$pid2]) ? $remarks[$pid2] : '';
+            if ($pid2 > 0 && isset($monthlySummaryCurrentSnapshots[$pid2])) {
+                $summaryRows[] = cpms_monthly_summary_snapshot_metrics(
+                    $project,
+                    $monthlySummaryCurrentSnapshots[$pid2],
+                    isset($monthlySummaryPreviousSnapshots[$pid2]) ? $monthlySummaryPreviousSnapshots[$pid2] : array(),
+                    $remark,
+                    $monthlySummarySelectedDate,
+                    $monthlySummaryPreviousDate
+                );
+            } else if ($monthlySummarySelectedDate !== '') {
+                // 스냅샷이 있는 조회에서는 저장된 현장만 표시해 초기 로딩을 빠르게 유지한다.
+                continue;
+            } else {
+                $liveRow = cpms_monthly_summary_project_metrics($pdo, $project, $selectedYm, $remark);
+                $liveRow['representative_name'] = isset($project['representative_name']) ? (string)$project['representative_name'] : '';
+                $liveRow['contact'] = isset($project['contact']) ? (string)$project['contact'] : '';
+                $liveRow['business_no'] = isset($project['business_no']) ? (string)$project['business_no'] : '';
+                $liveRow['snapshot_date'] = '';
+                $liveRow['previous_snapshot_date'] = '';
+                $liveRow['daily_delta'] = array('labor'=>0.0,'equipment'=>0.0,'material'=>0.0,'outsourcing'=>0.0,'monthly_total'=>0.0,'cumulative_input'=>0.0);
+                $liveRow['snapshot_fast_path'] = false;
+                $summaryRows[] = $liveRow;
+            }
         }
     } catch (Exception $e) {
         $errors[] = '월별 투입비 집계를 불러오지 못했습니다. 오류: ' . $e->getMessage();
     }
 }
+
+$monthlySummarySelectedDate = isset($monthlySummarySnapshotContext['selected_date']) ? (string)$monthlySummarySnapshotContext['selected_date'] : '';
+$monthlySummaryPreviousDate = isset($monthlySummarySnapshotContext['previous_date']) ? (string)$monthlySummarySnapshotContext['previous_date'] : '';
+$monthlySummarySnapshotDates = isset($monthlySummarySnapshotContext['dates']) && is_array($monthlySummarySnapshotContext['dates']) ? $monthlySummarySnapshotContext['dates'] : array();
 
 $summaryTotals = array(
     'contract_amount' => 0.0,
@@ -566,6 +640,7 @@ $summaryTotals = array(
     'cumulative_input' => 0.0,
     'cumulative_revenue' => 0.0,
     'breakdown' => array('labor' => 0.0, 'outsourcing' => 0.0, 'equipment' => 0.0, 'material' => 0.0, 'purchase' => 0.0, 'other' => 0.0, 'safety' => 0.0, 'deduction' => 0.0),
+    'daily_delta' => array('labor'=>0.0,'equipment'=>0.0,'material'=>0.0,'outsourcing'=>0.0,'monthly_total'=>0.0,'cumulative_input'=>0.0),
 );
 foreach ($summaryRows as $row) {
     $summaryTotals['contract_amount'] += isset($row['contract_amount']) ? (float)$row['contract_amount'] : 0.0;
@@ -585,6 +660,10 @@ foreach ($summaryRows as $row) {
     foreach ($summaryTotals['breakdown'] as $breakdownKey => $breakdownAmount) {
         $summaryTotals['breakdown'][$breakdownKey] += isset($rowBreakdown[$breakdownKey]) ? (float)$rowBreakdown[$breakdownKey] : 0.0;
     }
+    $rowDailyDelta = isset($row['daily_delta']) && is_array($row['daily_delta']) ? $row['daily_delta'] : array();
+    foreach ($summaryTotals['daily_delta'] as $deltaKey => $deltaAmount) {
+        $summaryTotals['daily_delta'][$deltaKey] += isset($rowDailyDelta[$deltaKey]) ? (float)$rowDailyDelta[$deltaKey] : 0.0;
+    }
     $eqTotal = isset($row['equipment']) && is_array($row['equipment']) ? $row['equipment'] : array();
     foreach ($summaryTotals['equipment'] as $bucket => $amount) {
         $summaryTotals['equipment'][$bucket] += isset($eqTotal[$bucket]) ? (float)$eqTotal[$bucket] : 0.0;
@@ -599,33 +678,90 @@ if (isset($cpmsMonthlySummaryDataOnly) && $cpmsMonthlySummaryDataOnly) {
     return;
 }
 
-$cpmsMonthlyCostDetailPayload = cpms_monthly_cost_detail_payload_for_summary_rows($pdo, $summaryRows, $selectedYm);
+$cpmsMonthlyCostDetailPayload = array();
+$cpmsMonthlyCostDetailEndpoint = base_url() . '/monthly_summary_detail.php';
 ?>
+<style>
+.cpms-monthly-summary-shell .cpms-summary-cell-increase { background:#ecfdf5 !important; }
+.cpms-monthly-summary-shell .cpms-summary-delta { margin-top:3px; font-size:10px; line-height:1.2; font-weight:900; white-space:nowrap; }
+.cpms-monthly-summary-shell .cpms-summary-delta-positive { color:#047857; }
+.cpms-monthly-summary-shell .cpms-summary-delta-negative { color:#dc2626; }
+.cpms-monthly-summary-shell .cpms-summary-snapshot-note { display:inline-flex; align-items:center; gap:5px; padding:4px 8px; border-radius:999px; background:#ecfdf5; color:#047857; font-size:11px; font-weight:900; }
+.cpms-monthly-summary-shell .cpms-summary-filter-label { font-size:11px; font-weight:900; color:#64748b; }
+.cpms-monthly-summary-shell .cpms-summary-filter-box { display:flex; flex-direction:column; gap:3px; }
+.cpms-monthly-summary-shell .cpms-summary-contact-cell { min-width:112px; white-space:nowrap; }
+.cpms-monthly-summary-shell .cpms-summary-business-cell { min-width:125px; white-space:nowrap; }
+@media (max-width:767px) {
+  .cpms-monthly-summary-shell .cpms-summary-delta { font-size:9px; letter-spacing:-.02em; }
+  .cpms-monthly-summary-shell .cpms-monthly-filter { width:100%; }
+  .cpms-monthly-summary-shell .cpms-summary-filter-box { flex:1 1 130px; }
+  .cpms-monthly-summary-shell .cpms-summary-filter-box select { width:100%; min-width:0; }
+}
+</style>
 <div class="cpms-monthly-summary-shell bg-white rounded-3xl border border-gray-100 p-5">
   <div class="cpms-monthly-summary-toolbar flex flex-wrap items-center justify-between gap-3 mb-4">
     <div>
       <h3 class="text-xl font-extrabold text-gray-900">월별 투입비 집계</h3>
       <div class="text-sm text-gray-500 mt-1">
-        <?php echo h(str_replace('-', '.', $selectedYm)); ?> 기준 · 오늘 날짜 <?php echo h(date('Y.m.d')); ?>
+        <?php echo h(str_replace('-', '.', $selectedYm)); ?> 기준
+        <?php if ($monthlySummarySelectedDate !== ''): ?>
+          · 스냅샷 <?php echo h(str_replace('-', '.', $monthlySummarySelectedDate)); ?>
+          <?php if ($monthlySummaryPreviousDate !== ''): ?>
+            · 비교 <?php echo h(str_replace('-', '.', $monthlySummaryPreviousDate)); ?>
+          <?php endif; ?>
+        <?php else: ?>
+          · 오늘 날짜 <?php echo h(date('Y.m.d')); ?>
+        <?php endif; ?>
       </div>
+      <?php if ($monthlySummarySelectedDate !== ''): ?>
+        <div class="mt-2"><span class="cpms-summary-snapshot-note">전일 대비 증감 표시</span></div>
+      <?php endif; ?>
     </div>
     <div class="flex flex-wrap items-center gap-2">
-      <form method="get" class="cpms-monthly-filter flex flex-wrap items-center gap-2">
+      <form method="get" class="cpms-monthly-filter flex flex-wrap items-end gap-2">
         <input type="hidden" name="r" value="공무">
         <input type="hidden" name="tab" value="monthly_summary">
-        <select name="ym" class="px-3 py-2 border rounded-xl min-w-[150px]">
-          <?php foreach ($monthOptions as $ymOpt): ?>
-            <option value="<?php echo h($ymOpt); ?>" <?php echo $ymOpt === $selectedYm ? 'selected' : ''; ?>><?php echo h(str_replace('-', '.', $ymOpt)); ?></option>
-          <?php endforeach; ?>
-        </select>
+        <div class="cpms-summary-filter-box">
+          <label class="cpms-summary-filter-label">조회 월</label>
+          <select name="ym" class="px-3 py-2 border rounded-xl min-w-[150px]">
+            <?php foreach ($monthOptions as $ymOpt): ?>
+              <option value="<?php echo h($ymOpt); ?>" <?php echo $ymOpt === $selectedYm ? 'selected' : ''; ?>><?php echo h(str_replace('-', '.', $ymOpt)); ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <?php if ($monthlySummaryCanDailyView): ?>
+          <div class="cpms-summary-filter-box">
+            <label class="cpms-summary-filter-label">조회 방식</label>
+            <select name="summary_view" class="px-3 py-2 border rounded-xl min-w-[120px]" onchange="this.form.submit();">
+              <option value="monthly" <?php echo $monthlySummaryView === 'monthly' ? 'selected' : ''; ?>>월별 보기</option>
+              <option value="daily" <?php echo $monthlySummaryView === 'daily' ? 'selected' : ''; ?>>일별 보기</option>
+            </select>
+          </div>
+          <?php if ($monthlySummaryDailyMode): ?>
+            <div class="cpms-summary-filter-box">
+              <label class="cpms-summary-filter-label">스냅샷 날짜</label>
+              <select name="snapshot_date" class="px-3 py-2 border rounded-xl min-w-[150px]">
+                <?php if (count($monthlySummarySnapshotDates) === 0): ?>
+                  <option value="">저장된 날짜 없음</option>
+                <?php else: ?>
+                  <?php foreach ($monthlySummarySnapshotDates as $snapshotDateOption): ?>
+                    <option value="<?php echo h($snapshotDateOption); ?>" <?php echo $snapshotDateOption === $monthlySummarySelectedDate ? 'selected' : ''; ?>><?php echo h(str_replace('-', '.', $snapshotDateOption)); ?></option>
+                  <?php endforeach; ?>
+                <?php endif; ?>
+              </select>
+            </div>
+          <?php endif; ?>
+        <?php else: ?>
+          <input type="hidden" name="summary_view" value="monthly">
+        <?php endif; ?>
         <button type="submit" class="px-4 py-2 rounded-xl bg-blue-600 text-white font-bold">조회</button>
       </form>
       <?php
-        $monthlySummaryPdfAllowed = \App\Core\Auth::isMaster()
-          || \App\Core\Auth::userRole() === 'executive'
-          || in_array((string)\App\Core\Auth::userDepartment(), array('공무', '공무부', '공무팀', '관리', '관리부', '관리팀'), true);
+        $monthlySummaryPdfAllowed = Auth::isMaster()
+          || Auth::userRole() === 'executive'
+          || in_array((string)Auth::userDepartment(), array('공무', '공무부', '공무팀', '관리', '관리부', '관리팀'), true);
       ?>
-      <?php if ($monthlySummaryPdfAllowed): ?>
+      <?php if ($monthlySummaryPdfAllowed && !$monthlySummaryDailyMode): ?>
         <form method="post"
               action="?r=project/monthly_summary_pdf_drive"
               onsubmit="var b=this.getElementsByTagName('button')[0];if(b){b.disabled=true;b.textContent='PDF 저장 중...';}">
@@ -638,6 +774,12 @@ $cpmsMonthlyCostDetailPayload = cpms_monthly_cost_detail_payload_for_summary_row
       <?php endif; ?>
     </div>
   </div>
+
+  <?php if ($monthlySummaryDailyMode && count($monthlySummarySnapshotDates) === 0): ?>
+    <div class="cpms-monthly-summary-inset mb-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 p-3 text-sm font-bold">
+      선택한 월에는 AI 일일 스냅샷이 아직 없습니다. 현재 실시간 집계값을 표시하며 전일 대비 금액은 표시되지 않습니다.
+    </div>
+  <?php endif; ?>
 
   <?php if (isset($flash) && !empty($flash) && is_array($flash)): ?>
     <?php
@@ -699,44 +841,65 @@ $cpmsMonthlyCostDetailPayload = cpms_monthly_cost_detail_payload_for_summary_row
         </thead>
         <tbody>
           <?php foreach ($summaryRows as $row): ?>
+            <?php $rowDelta = isset($row['daily_delta']) && is_array($row['daily_delta']) ? $row['daily_delta'] : array(); ?>
             <tr class="odd:bg-white even:bg-gray-50">
               <td class="font-bold text-gray-900"><?php echo h($row['project_name']); ?></td>
-              <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($row['labor_amount'])); ?>">
-                <button type="button" class="cpms-monthly-detail-trigger" data-project-id="<?php echo (int)$row['project_id']; ?>" data-ym="<?php echo h($selectedYm); ?>" data-detail-type="labor" aria-label="<?php echo h($row['project_name']); ?> 노무비 상세 보기"><?php echo h(cpms_monthly_summary_money($row['labor_amount'])); ?></button>
+              <?php foreach (array('labor'=>'labor_amount','equipment'=>'equipment_amount','material'=>'material_purchase_amount','outsourcing'=>'outsourcing_amount') as $detailType=>$amountKey): ?>
+                <?php $deltaValue = isset($rowDelta[$detailType]) ? (float)$rowDelta[$detailType] : 0.0; ?>
+                <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($row[$amountKey])); ?> <?php echo h(cpms_monthly_summary_increase_cell_class($deltaValue)); ?>">
+                  <button type="button" class="cpms-monthly-detail-trigger"
+                          data-project-id="<?php echo (int)$row['project_id']; ?>"
+                          data-ym="<?php echo h($selectedYm); ?>"
+                          data-snapshot-date="<?php echo h(isset($row['snapshot_date']) ? $row['snapshot_date'] : $monthlySummarySelectedDate); ?>"
+                          data-detail-type="<?php echo h($detailType); ?>"
+                          aria-label="<?php echo h($row['project_name']); ?> <?php echo h($detailType); ?> 상세 보기"><?php echo h(cpms_monthly_summary_money($row[$amountKey])); ?></button>
+                  <?php if (cpms_monthly_summary_delta_text($deltaValue) !== ''): ?>
+                    <div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($deltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($deltaValue)); ?></div>
+                  <?php endif; ?>
+                </td>
+              <?php endforeach; ?>
+              <?php $totalDeltaValue = isset($rowDelta['monthly_total']) ? (float)$rowDelta['monthly_total'] : 0.0; ?>
+              <td class="text-right font-bold <?php echo h(cpms_monthly_summary_mobile_money_class($row['monthly_cost_total'])); ?> <?php echo h(cpms_monthly_summary_increase_cell_class($totalDeltaValue)); ?>">
+                <?php echo h(cpms_monthly_summary_money($row['monthly_cost_total'])); ?>
+                <?php if (cpms_monthly_summary_delta_text($totalDeltaValue) !== ''): ?>
+                  <div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($totalDeltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($totalDeltaValue)); ?></div>
+                <?php endif; ?>
               </td>
-              <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($row['equipment_amount'])); ?>">
-                <button type="button" class="cpms-monthly-detail-trigger" data-project-id="<?php echo (int)$row['project_id']; ?>" data-ym="<?php echo h($selectedYm); ?>" data-detail-type="equipment" aria-label="<?php echo h($row['project_name']); ?> 장비비 상세 보기"><?php echo h(cpms_monthly_summary_money($row['equipment_amount'])); ?></button>
-              </td>
-              <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($row['material_purchase_amount'])); ?>">
-                <button type="button" class="cpms-monthly-detail-trigger" data-project-id="<?php echo (int)$row['project_id']; ?>" data-ym="<?php echo h($selectedYm); ?>" data-detail-type="material" aria-label="<?php echo h($row['project_name']); ?> 자재구입비 상세 보기"><?php echo h(cpms_monthly_summary_money($row['material_purchase_amount'])); ?></button>
-              </td>
-              <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($row['outsourcing_amount'])); ?>">
-                <button type="button" class="cpms-monthly-detail-trigger" data-project-id="<?php echo (int)$row['project_id']; ?>" data-ym="<?php echo h($selectedYm); ?>" data-detail-type="outsourcing" aria-label="<?php echo h($row['project_name']); ?> 외주비 상세 보기"><?php echo h(cpms_monthly_summary_money($row['outsourcing_amount'])); ?></button>
-              </td>
-              <td class="text-right font-bold <?php echo h(cpms_monthly_summary_mobile_money_class($row['monthly_cost_total'])); ?>"><?php echo h(cpms_monthly_summary_money($row['monthly_cost_total'])); ?></td>
               <td class="text-right"><?php echo h(cpms_monthly_summary_ratio($row['cumulative_input'], $row['cumulative_revenue'])); ?></td>
             </tr>
           <?php endforeach; ?>
         </tbody>
         <tfoot>
+          <?php $totalDailyDelta = isset($summaryTotals['daily_delta']) ? $summaryTotals['daily_delta'] : array(); ?>
           <tr class="bg-gray-100 font-extrabold text-gray-900">
             <td>합계</td>
-            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['labor_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['labor_amount'])); ?></td>
-            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['equipment_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['equipment_amount'])); ?></td>
-            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['material_purchase_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['material_purchase_amount'])); ?></td>
-            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['outsourcing_amount'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['outsourcing_amount'])); ?></td>
-            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['monthly_cost_total'])); ?>"><?php echo h(cpms_monthly_summary_money($summaryTotals['monthly_cost_total'])); ?></td>
+            <?php foreach (array('labor'=>'labor_amount','equipment'=>'equipment_amount','material'=>'material_purchase_amount','outsourcing'=>'outsourcing_amount') as $detailType=>$amountKey): ?>
+              <?php $deltaValue = isset($totalDailyDelta[$detailType]) ? (float)$totalDailyDelta[$detailType] : 0.0; ?>
+              <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals[$amountKey])); ?> <?php echo h(cpms_monthly_summary_increase_cell_class($deltaValue)); ?>">
+                <?php echo h(cpms_monthly_summary_money($summaryTotals[$amountKey])); ?>
+                <?php if (cpms_monthly_summary_delta_text($deltaValue) !== ''): ?><div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($deltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($deltaValue)); ?></div><?php endif; ?>
+              </td>
+            <?php endforeach; ?>
+            <?php $deltaValue = isset($totalDailyDelta['monthly_total']) ? (float)$totalDailyDelta['monthly_total'] : 0.0; ?>
+            <td class="text-right <?php echo h(cpms_monthly_summary_mobile_money_class($summaryTotals['monthly_cost_total'])); ?> <?php echo h(cpms_monthly_summary_increase_cell_class($deltaValue)); ?>">
+              <?php echo h(cpms_monthly_summary_money($summaryTotals['monthly_cost_total'])); ?>
+              <?php if (cpms_monthly_summary_delta_text($deltaValue) !== ''): ?><div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($deltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($deltaValue)); ?></div><?php endif; ?>
+            </td>
             <td class="text-right"><?php echo h(cpms_monthly_summary_ratio($summaryTotals['cumulative_input'], $summaryTotals['cumulative_revenue'])); ?></td>
           </tr>
         </tfoot>
       </table>
     </div>
+
     <div class="cpms-monthly-summary-desktop">
       <div class="overflow-x-auto">
-        <table class="min-w-[1050px] w-full text-xs border border-gray-200">
+        <table class="min-w-[1480px] w-full text-xs border border-gray-200">
           <thead>
             <tr class="bg-[#d7aa8a] text-gray-900">
               <th class="border p-2 align-middle" rowspan="2">현장명</th>
+              <th class="border p-2 align-middle" rowspan="2">대표자명</th>
+              <th class="border p-2 align-middle" rowspan="2">전화번호</th>
+              <th class="border p-2 align-middle" rowspan="2">사업자등록번호</th>
               <th class="border p-2 text-center" colspan="5"><?php echo h($monthTitle); ?> 투입금액</th>
               <th class="border p-2 align-middle text-right" rowspan="2">누적투입금액<br>(A)</th>
               <th class="border p-2 align-middle text-right" rowspan="2">누적기성금액<br>(B)</th>
@@ -752,28 +915,62 @@ $cpmsMonthlyCostDetailPayload = cpms_monthly_cost_detail_payload_for_summary_row
           </thead>
           <tbody>
             <?php foreach ($summaryRows as $row): ?>
+              <?php $rowDelta = isset($row['daily_delta']) && is_array($row['daily_delta']) ? $row['daily_delta'] : array(); ?>
               <tr class="odd:bg-white even:bg-gray-50">
-                <td class="border p-2 font-bold text-gray-900"><?php echo h($row['project_name']); ?></td>
-                <td class="border p-2 text-right"><button type="button" class="cpms-monthly-detail-trigger" data-project-id="<?php echo (int)$row['project_id']; ?>" data-ym="<?php echo h($selectedYm); ?>" data-detail-type="labor" aria-label="<?php echo h($row['project_name']); ?> 노무비 상세 보기"><?php echo h(cpms_monthly_summary_money($row['labor_amount'])); ?></button></td>
-                <td class="border p-2 text-right"><button type="button" class="cpms-monthly-detail-trigger" data-project-id="<?php echo (int)$row['project_id']; ?>" data-ym="<?php echo h($selectedYm); ?>" data-detail-type="equipment" aria-label="<?php echo h($row['project_name']); ?> 장비비 상세 보기"><?php echo h(cpms_monthly_summary_money($row['equipment_amount'])); ?></button></td>
-                <td class="border p-2 text-right"><button type="button" class="cpms-monthly-detail-trigger" data-project-id="<?php echo (int)$row['project_id']; ?>" data-ym="<?php echo h($selectedYm); ?>" data-detail-type="material" aria-label="<?php echo h($row['project_name']); ?> 자재구입비 상세 보기"><?php echo h(cpms_monthly_summary_money($row['material_purchase_amount'])); ?></button></td>
-                <td class="border p-2 text-right"><button type="button" class="cpms-monthly-detail-trigger" data-project-id="<?php echo (int)$row['project_id']; ?>" data-ym="<?php echo h($selectedYm); ?>" data-detail-type="outsourcing" aria-label="<?php echo h($row['project_name']); ?> 외주비 상세 보기"><?php echo h(cpms_monthly_summary_money($row['outsourcing_amount'])); ?></button></td>
-                <td class="border p-2 text-right font-bold"><?php echo h(cpms_monthly_summary_money($row['monthly_cost_total'])); ?></td>
-                <td class="border p-2 text-right font-bold"><?php echo h(cpms_monthly_summary_money($row['cumulative_input'])); ?></td>
+                <td class="border p-2 font-bold text-gray-900 min-w-[210px]"><?php echo h($row['project_name']); ?></td>
+                <td class="border p-2 cpms-summary-contact-cell"><?php echo h(trim((string)$row['representative_name']) !== '' ? $row['representative_name'] : '-'); ?></td>
+                <td class="border p-2 cpms-summary-contact-cell"><?php echo h(trim((string)$row['contact']) !== '' ? $row['contact'] : '-'); ?></td>
+                <td class="border p-2 cpms-summary-business-cell"><?php echo h(trim((string)$row['business_no']) !== '' ? $row['business_no'] : '-'); ?></td>
+                <?php foreach (array('labor'=>'labor_amount','equipment'=>'equipment_amount','material'=>'material_purchase_amount','outsourcing'=>'outsourcing_amount') as $detailType=>$amountKey): ?>
+                  <?php $deltaValue = isset($rowDelta[$detailType]) ? (float)$rowDelta[$detailType] : 0.0; ?>
+                  <td class="border p-2 text-right <?php echo h(cpms_monthly_summary_increase_cell_class($deltaValue)); ?>">
+                    <button type="button" class="cpms-monthly-detail-trigger"
+                            data-project-id="<?php echo (int)$row['project_id']; ?>"
+                            data-ym="<?php echo h($selectedYm); ?>"
+                            data-snapshot-date="<?php echo h(isset($row['snapshot_date']) ? $row['snapshot_date'] : $monthlySummarySelectedDate); ?>"
+                            data-detail-type="<?php echo h($detailType); ?>"><?php echo h(cpms_monthly_summary_money($row[$amountKey])); ?></button>
+                    <?php if (cpms_monthly_summary_delta_text($deltaValue) !== ''): ?><div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($deltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($deltaValue)); ?></div><?php endif; ?>
+                  </td>
+                <?php endforeach; ?>
+                <?php $totalDeltaValue = isset($rowDelta['monthly_total']) ? (float)$rowDelta['monthly_total'] : 0.0; ?>
+                <td class="border p-2 text-right font-bold <?php echo h(cpms_monthly_summary_increase_cell_class($totalDeltaValue)); ?>">
+                  <?php echo h(cpms_monthly_summary_money($row['monthly_cost_total'])); ?>
+                  <?php if (cpms_monthly_summary_delta_text($totalDeltaValue) !== ''): ?><div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($totalDeltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($totalDeltaValue)); ?></div><?php endif; ?>
+                </td>
+                <?php $cumulativeDeltaValue = isset($rowDelta['cumulative_input']) ? (float)$rowDelta['cumulative_input'] : 0.0; ?>
+                <td class="border p-2 text-right font-bold <?php echo h(cpms_monthly_summary_increase_cell_class($cumulativeDeltaValue)); ?>">
+                  <?php echo h(cpms_monthly_summary_money($row['cumulative_input'])); ?>
+                  <?php if (cpms_monthly_summary_delta_text($cumulativeDeltaValue) !== ''): ?><div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($cumulativeDeltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($cumulativeDeltaValue)); ?></div><?php endif; ?>
+                </td>
                 <td class="border p-2 text-right font-bold"><?php echo h(cpms_monthly_summary_money($row['cumulative_revenue'])); ?></td>
                 <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_ratio($row['cumulative_input'], $row['cumulative_revenue'])); ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>
           <tfoot>
+            <?php $totalDailyDelta = isset($summaryTotals['daily_delta']) ? $summaryTotals['daily_delta'] : array(); ?>
             <tr class="bg-gray-100 font-extrabold text-gray-900">
               <td class="border p-2">합계</td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['labor_amount'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['equipment_amount'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['material_purchase_amount'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['outsourcing_amount'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['monthly_cost_total'])); ?></td>
-              <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['cumulative_input'])); ?></td>
+              <td class="border p-2 text-center">-</td>
+              <td class="border p-2 text-center">-</td>
+              <td class="border p-2 text-center">-</td>
+              <?php foreach (array('labor'=>'labor_amount','equipment'=>'equipment_amount','material'=>'material_purchase_amount','outsourcing'=>'outsourcing_amount') as $detailType=>$amountKey): ?>
+                <?php $deltaValue = isset($totalDailyDelta[$detailType]) ? (float)$totalDailyDelta[$detailType] : 0.0; ?>
+                <td class="border p-2 text-right <?php echo h(cpms_monthly_summary_increase_cell_class($deltaValue)); ?>">
+                  <?php echo h(cpms_monthly_summary_money($summaryTotals[$amountKey])); ?>
+                  <?php if (cpms_monthly_summary_delta_text($deltaValue) !== ''): ?><div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($deltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($deltaValue)); ?></div><?php endif; ?>
+                </td>
+              <?php endforeach; ?>
+              <?php $deltaValue = isset($totalDailyDelta['monthly_total']) ? (float)$totalDailyDelta['monthly_total'] : 0.0; ?>
+              <td class="border p-2 text-right <?php echo h(cpms_monthly_summary_increase_cell_class($deltaValue)); ?>">
+                <?php echo h(cpms_monthly_summary_money($summaryTotals['monthly_cost_total'])); ?>
+                <?php if (cpms_monthly_summary_delta_text($deltaValue) !== ''): ?><div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($deltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($deltaValue)); ?></div><?php endif; ?>
+              </td>
+              <?php $deltaValue = isset($totalDailyDelta['cumulative_input']) ? (float)$totalDailyDelta['cumulative_input'] : 0.0; ?>
+              <td class="border p-2 text-right <?php echo h(cpms_monthly_summary_increase_cell_class($deltaValue)); ?>">
+                <?php echo h(cpms_monthly_summary_money($summaryTotals['cumulative_input'])); ?>
+                <?php if (cpms_monthly_summary_delta_text($deltaValue) !== ''): ?><div class="cpms-summary-delta <?php echo h(cpms_monthly_summary_delta_class($deltaValue)); ?>"><?php echo h(cpms_monthly_summary_delta_text($deltaValue)); ?></div><?php endif; ?>
+              </td>
               <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_money($summaryTotals['cumulative_revenue'])); ?></td>
               <td class="border p-2 text-right"><?php echo h(cpms_monthly_summary_ratio($summaryTotals['cumulative_input'], $summaryTotals['cumulative_revenue'])); ?></td>
             </tr>

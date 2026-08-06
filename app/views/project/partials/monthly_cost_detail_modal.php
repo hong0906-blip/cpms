@@ -18,6 +18,7 @@ $cpmsMonthlyCostDetailTriggerSelector = isset($cpmsMonthlyCostDetailTriggerSelec
     ? trim((string)$cpmsMonthlyCostDetailTriggerSelector)
     : '.cpms-monthly-detail-trigger';
 $cpmsMonthlyCostDetailDesktopOnly = isset($cpmsMonthlyCostDetailDesktopOnly) ? (bool)$cpmsMonthlyCostDetailDesktopOnly : false;
+$cpmsMonthlyCostDetailEndpoint = isset($cpmsMonthlyCostDetailEndpoint) ? trim((string)$cpmsMonthlyCostDetailEndpoint) : '';
 $cpmsMonthlyCostDetailJson = json_encode(
     $cpmsMonthlyCostDetailPayload,
     JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
@@ -197,6 +198,9 @@ if (!is_string($cpmsMonthlyCostDetailJson) || $cpmsMonthlyCostDetailJson === '')
 }
 .cpms-cost-detail-table tbody tr:nth-child(even) td { background: #f8fafc; }
 .cpms-cost-detail-table tbody tr:nth-child(odd) td { background: #fff; }
+.cpms-cost-detail-table tbody tr.is-daily-change td { background:#ecfdf5 !important; }
+.cpms-cost-detail-table tbody tr.is-daily-decrease td { background:#fff7ed !important; }
+.cpms-cost-detail-change-badge { display:inline-flex; margin-left:8px; padding:3px 7px; border-radius:999px; background:#d1fae5; color:#047857; font-size:11px; font-weight:900; }
 .cpms-cost-detail-table tr:last-child td { border-bottom: 0; }
 .cpms-cost-detail-table th:last-child,
 .cpms-cost-detail-table td:last-child { border-right: 0; }
@@ -315,6 +319,7 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
   var detailData = <?php echo $cpmsMonthlyCostDetailJson; ?>;
   var triggerSelector = <?php echo json_encode($cpmsMonthlyCostDetailTriggerSelector); ?>;
   var desktopOnly = <?php echo $cpmsMonthlyCostDetailDesktopOnly ? 'true' : 'false'; ?>;
+  var detailEndpoint = <?php echo json_encode($cpmsMonthlyCostDetailEndpoint); ?>;
   var modal = document.getElementById('cpmsCostDetailModal');
   var title = document.getElementById('cpmsCostDetailTitle');
   var meta = document.getElementById('cpmsCostDetailMeta');
@@ -327,6 +332,8 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
   var currentCompany = '';
   var currentCategory = '';
   var currentRowLabel = '';
+  var currentSnapshotDate = '';
+  var currentLoadKey = '';
   var currentOutsourcingTab = 'labor_outsourcing';
 
   function escapeHtml(value) {
@@ -393,7 +400,10 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
     html += '</tr></thead><tbody>';
     for (var r = 0; r < rows.length; r++) {
       var row = rows[r] || {};
-      html += '<tr>';
+      var rowClass = '';
+      if (row.is_changed || row.category_changed || row._category_changed) rowClass = ' class="is-daily-change"';
+      else if (parseFloat(row.change_amount || 0) < -0.01) rowClass = ' class="is-daily-decrease"';
+      html += '<tr' + rowClass + '>';
       for (i = 0; i < columns.length; i++) {
         var column = columns[i];
         var value = row[column.key];
@@ -449,6 +459,53 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
       if (!isNaN(amount)) sum += amount;
     }
     return sum;
+  }
+
+  function formatSignedMoney(value) {
+    var number = parseFloat(value);
+    if (isNaN(number) || Math.abs(number) < 0.01) return '';
+    return (number > 0 ? '+' : '-') + formatMoney(Math.abs(number)) + '원';
+  }
+
+  function ensureCurrentData(callback) {
+    if (currentMonthData()) {
+      callback();
+      return;
+    }
+    if (!detailEndpoint) {
+      callback();
+      return;
+    }
+    var loadKey = currentProjectId + '|' + currentYm + '|' + currentSnapshotDate;
+    currentLoadKey = loadKey;
+    body.innerHTML = emptyHtml('상세 내역을 불러오는 중입니다.');
+    var joiner = detailEndpoint.indexOf('?') >= 0 ? '&' : '?';
+    var url = detailEndpoint + joiner
+      + 'project_id=' + encodeURIComponent(currentProjectId)
+      + '&ym=' + encodeURIComponent(currentYm)
+      + '&snapshot_date=' + encodeURIComponent(currentSnapshotDate || '');
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+    xhr.onreadystatechange = function() {
+      if (xhr.readyState !== 4 || loadKey !== currentLoadKey) return;
+      if (xhr.status < 200 || xhr.status >= 300) {
+        body.innerHTML = emptyHtml('상세 내역을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+      var response = null;
+      try { response = JSON.parse(xhr.responseText); } catch (e) { response = null; }
+      if (!response || !response.ok || !response.month) {
+        body.innerHTML = emptyHtml(response && response.message ? response.message : '상세 데이터를 찾을 수 없습니다.');
+        return;
+      }
+      if (!detailData[currentProjectId]) detailData[currentProjectId] = {project_name: response.project_name || '', months:{}};
+      if (!detailData[currentProjectId].months) detailData[currentProjectId].months = {};
+      if (response.project_name) detailData[currentProjectId].project_name = response.project_name;
+      detailData[currentProjectId].months[currentYm] = response.month;
+      callback();
+    };
+    xhr.send(null);
   }
 
   function currentMonthData() {
@@ -552,16 +609,44 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
       }
     }
 
+    var change = monthData.change || {};
+    var changeKey = currentType === 'material' ? 'material' : (currentType === 'outsourcing' ? 'outsourcing' : currentType);
+    var changeDelta = change.deltas && typeof change.deltas[changeKey] !== 'undefined' ? parseFloat(change.deltas[changeKey]) : 0;
+    if (isNaN(changeDelta)) changeDelta = 0;
+    if (changeDelta > 0.01) {
+      var hasSpecificChange = false;
+      for (var changeIndex = 0; changeIndex < rows.length; changeIndex++) {
+        if (rows[changeIndex] && (rows[changeIndex].is_changed || rows[changeIndex].category_changed)) {
+          hasSpecificChange = true;
+          break;
+        }
+      }
+      if (!hasSpecificChange) {
+        var highlightedRows = [];
+        for (var highlightIndex = 0; highlightIndex < rows.length; highlightIndex++) {
+          var sourceRow = rows[highlightIndex] || {};
+          var copiedRow = {};
+          for (var copiedKey in sourceRow) if (Object.prototype.hasOwnProperty.call(sourceRow, copiedKey)) copiedRow[copiedKey] = sourceRow[copiedKey];
+          copiedRow._category_changed = true;
+          highlightedRows.push(copiedRow);
+        }
+        rows = highlightedRows;
+      }
+    }
+
     var titleParts = [project.project_name || '', label];
     if (currentCompany) titleParts.push(currentCompany);
     title.textContent = titleParts.join(' · ');
     var metaText = String(currentYm || '').replace('-', '.') + ' 기준';
+    if (change.snapshot_date) metaText += ' · 스냅샷 ' + String(change.snapshot_date).replace(/-/g, '.');
+    if (change.previous_date) metaText += ' · 비교 ' + String(change.previous_date).replace(/-/g, '.');
     if (currentRowLabel && currentRowLabel !== label) metaText += ' · ' + currentRowLabel;
     meta.textContent = metaText;
+    var deltaText = formatSignedMoney(changeDelta);
     if (currentType === 'outsourcing') {
-      total.textContent = '현재 탭 소계 ' + formatMoney(totalValue) + '원 · 외주비 전체 ' + formatMoney(combinedOutsourcingTotal) + '원';
+      total.textContent = '현재 탭 소계 ' + formatMoney(totalValue) + '원 · 외주비 전체 ' + formatMoney(combinedOutsourcingTotal) + '원' + (deltaText ? ' · 전일 대비 ' + deltaText : '');
     } else {
-      total.textContent = '상세 합계 ' + formatMoney(totalValue) + '원';
+      total.textContent = '상세 합계 ' + formatMoney(totalValue) + '원' + (deltaText ? ' · 전일 대비 ' + deltaText : '');
     }
     body.innerHTML = tableHtml(columns, rows);
   }
@@ -575,17 +660,23 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
     currentCompany = String(trigger.getAttribute('data-company') || '');
     currentCategory = String(trigger.getAttribute('data-category') || '');
     currentRowLabel = String(trigger.getAttribute('data-row-label') || '');
+    currentSnapshotDate = String(trigger.getAttribute('data-snapshot-date') || '');
     currentOutsourcingTab = 'labor_outsourcing';
     if (tabs) {
       if (currentType === 'outsourcing') tabs.classList.add('is-visible');
       else tabs.classList.remove('is-visible');
+      var tabButtons = tabs.querySelectorAll('[data-outsourcing-tab]');
+      for (var i = 0; i < tabButtons.length; i++) {
+        if (tabButtons[i].getAttribute('data-outsourcing-tab') === 'labor_outsourcing') tabButtons[i].classList.add('is-active');
+        else tabButtons[i].classList.remove('is-active');
+      }
     }
-    setActiveOutsourcingTab('labor_outsourcing');
     if (modal) {
       modal.classList.add('is-open');
       modal.setAttribute('aria-hidden', 'false');
       document.body.classList.add('cpms-cost-detail-open');
     }
+    ensureCurrentData(renderCurrent);
   }
 
   function closeModal() {

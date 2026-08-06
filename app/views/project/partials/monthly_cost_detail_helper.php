@@ -353,6 +353,8 @@ function cpms_monthly_summary_equipment_detail_rows($pdo, $projectId, $ym) {
                     'amount' => 0.0,
                     'remark' => $remark,
                     'files' => array(),
+                    'source_type' => 'equipment',
+                    'source_ids' => array(),
                     '_file_keys' => array(),
                 );
             }
@@ -362,8 +364,9 @@ function cpms_monthly_summary_equipment_detail_rows($pdo, $projectId, $ym) {
             $grouped[$groupKey]['amount'] += $amount;
             $result['total'] += $amount;
 
-            $storedPath = isset($row['statement_stored_path']) ? trim((string)$row['statement_stored_path']) : '';
             $usageId = isset($row['id']) ? (int)$row['id'] : 0;
+            if ($usageId > 0) $grouped[$groupKey]['source_ids'][] = (string)$usageId;
+            $storedPath = isset($row['statement_stored_path']) ? trim((string)$row['statement_stored_path']) : '';
             if ($storedPath !== '' && $usageId > 0) {
                 $fileKey = $storedPath;
                 if (!isset($grouped[$groupKey]['_file_keys'][$fileKey])) {
@@ -453,6 +456,8 @@ function cpms_monthly_summary_material_detail_rows($pdo, $projectId, $ym) {
                 'amount' => $amount,
                 'remark' => cpms_monthly_summary_first_text($row, array('memo', 'usage_memo', 'use_content', 'item_name', 'remark', 'item_remark')),
                 'files' => $files,
+                'source_type' => 'material',
+                'source_id' => $usageId > 0 ? (string)$usageId : '',
             );
             $result['total'] += $amount;
         }
@@ -494,6 +499,8 @@ function cpms_monthly_summary_manual_outsourcing_detail_rows($pdo, $projectId, $
                 'amount' => $amount,
                 'memo' => isset($row['memo']) ? trim((string)$row['memo']) : '',
                 'files' => $files,
+                'source_type' => 'outsourcing',
+                'source_id' => $costId > 0 ? (string)$costId : '',
             );
             $result['total'] += $amount;
         }
