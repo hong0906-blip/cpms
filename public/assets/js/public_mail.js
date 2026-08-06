@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 첨부파일은 브라우저 기본 다운로드로 처리합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.13
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.14
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.13';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.14';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -150,14 +150,171 @@
         for(i=0;i<buttons.length;i++) buttons[i].addEventListener('click',function(){fullImportAction(this.getAttribute('data-full-import'));});
     }
 
-    function bindOriginalTitleRefreshAutoSubmit(){
-        var form=document.querySelector('[data-title-refresh-auto-form]');
-        if(!form)return;
-        window.setTimeout(function(){
-            if(form.getAttribute('data-submitted')==='1')return;
-            form.setAttribute('data-submitted','1');
-            form.submit();
-        },900);
+    var titleRefreshTimer=null;
+    var titleRefreshBusy=false;
+    var titleRefreshFailureCount=0;
+
+    function setTitleRefreshText(selector,value){
+        var nodes=document.querySelectorAll(selector),i;
+        for(i=0;i<nodes.length;i++)nodes[i].textContent=String(value);
+    }
+
+    function updateTitleRefreshView(refresh){
+        refresh=refresh||{};
+        var card=document.querySelector('[data-title-refresh-card]');
+        if(!card)return;
+
+        var total=parseInt(refresh.total_count,10)||0;
+        var processed=parseInt(refresh.processed_count,10)||0;
+        var updated=parseInt(refresh.updated_count,10)||0;
+        var failed=parseInt(refresh.failed_count,10)||0;
+        var remaining=parseInt(refresh.remaining_count,10)||0;
+        var percent=total>0?Math.floor(processed*100/total):0;
+        if(percent<0)percent=0;
+        if(percent>100)percent=100;
+
+        card.setAttribute('data-title-refresh-active',refresh.active?'1':'0');
+        card.setAttribute('data-title-refresh-paused',refresh.paused?'1':'0');
+        card.setAttribute('data-title-refresh-status',refresh.status||'ready');
+
+        setTitleRefreshText('[data-title-refresh-percent]',percent+'%');
+        setTitleRefreshText('[data-title-refresh-processed]',processed.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-total]',total.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-updated]',updated.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-failed]',failed.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-remaining]',remaining.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-last-run]',refresh.last_run_at||'아직 없음');
+
+        var progress=card.querySelector('[data-title-refresh-progress]');
+        if(progress)progress.style.width=percent+'%';
+
+        var statusLabel=card.querySelector('[data-title-refresh-status-label]');
+        if(statusLabel){
+            var statusText='대기';
+            if(refresh.active){
+                statusText=refresh.paused?'일시중지':(refresh.phase==='merging'?'제목 적용 중':(refresh.status==='retrying'?'재시도 대기':'수집 중'));
+            }else if(refresh.status==='completed')statusText='완료';
+            else if(refresh.status==='cancelled')statusText='취소됨';
+            statusLabel.textContent=statusText;
+            if(refresh.active&&!refresh.paused)statusLabel.classList.add('is-on');
+            else statusLabel.classList.remove('is-on');
+        }
+
+        var notice=card.querySelector('[data-title-refresh-notice]');
+        var message=card.querySelector('[data-title-refresh-message]');
+        if(message)message.textContent=refresh.last_message||'';
+        if(notice){
+            if(refresh.last_message)notice.removeAttribute('hidden');
+            else notice.setAttribute('hidden','hidden');
+        }
+
+        var errorBox=card.querySelector('[data-title-refresh-error]');
+        var errorText=card.querySelector('[data-title-refresh-error-text]');
+        if(errorText)errorText.textContent=refresh.last_error||'';
+        if(errorBox){
+            if(refresh.last_error)errorBox.removeAttribute('hidden');
+            else errorBox.setAttribute('hidden','hidden');
+        }
+    }
+
+    function scheduleTitleRefreshWorker(delay){
+        if(titleRefreshTimer)window.clearTimeout(titleRefreshTimer);
+        titleRefreshTimer=window.setTimeout(function(){runTitleRefreshWorker(false);},Math.max(500,parseInt(delay,10)||1000));
+    }
+
+    function titleRefreshCardIsRunnable(){
+        var card=document.querySelector('[data-title-refresh-card]');
+        if(!card)return false;
+        return card.getAttribute('data-title-refresh-active')==='1'&&card.getAttribute('data-title-refresh-paused')!=='1';
+    }
+
+    function showTitleRefreshConnectionMessage(message,isError){
+        var card=document.querySelector('[data-title-refresh-card]');
+        if(!card)return;
+        var notice=card.querySelector('[data-title-refresh-notice]');
+        var messageNode=card.querySelector('[data-title-refresh-message]');
+        if(messageNode)messageNode.textContent=message||'';
+        if(notice)notice.removeAttribute('hidden');
+
+        if(isError){
+            var errorBox=card.querySelector('[data-title-refresh-error]');
+            var errorText=card.querySelector('[data-title-refresh-error-text]');
+            if(errorText)errorText.textContent=message||'';
+            if(errorBox)errorBox.removeAttribute('hidden');
+        }
+    }
+
+    function runTitleRefreshWorker(manual){
+        var card=document.querySelector('[data-title-refresh-card]');
+        if(!card||titleRefreshBusy)return;
+        if(!manual&&!titleRefreshCardIsRunnable())return;
+
+        titleRefreshBusy=true;
+        var button=card.querySelector('[data-title-refresh-run-once]');
+        if(button){button.classList.add('is-busy');button.setAttribute('disabled','disabled');}
+
+        var xhr=new XMLHttpRequest();
+        xhr.open('POST','public_mail_title_refresh_worker.php',true);
+        xhr.setRequestHeader('Content-Type','application/x-www-form-urlencoded; charset=UTF-8');
+        xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
+        xhr.timeout=20000;
+
+        function finish(){
+            titleRefreshBusy=false;
+            if(button){button.classList.remove('is-busy');button.removeAttribute('disabled');}
+        }
+
+        function retryAfterFailure(message,delay){
+            finish();
+            titleRefreshFailureCount++;
+            var retryDelay=Math.max(3000,parseInt(delay,10)||Math.min(60000,10000*titleRefreshFailureCount));
+            showTitleRefreshConnectionMessage(message+' '+Math.round(retryDelay/1000)+'초 후 저장된 위치부터 다시 시도합니다.',true);
+            if(titleRefreshCardIsRunnable())scheduleTitleRefreshWorker(retryDelay);
+        }
+
+        xhr.onreadystatechange=function(){
+            if(xhr.readyState!==4)return;
+            var result=parseJsonText(xhr.responseText||'');
+            if(!result){
+                retryAfterFailure('작업 요청의 연결이 잠시 끊겼습니다.',10000);
+                return;
+            }
+
+            finish();
+            if(result.refresh)updateTitleRefreshView(result.refresh);
+
+            if(result.ok){
+                titleRefreshFailureCount=0;
+                if(result.completed){
+                    window.setTimeout(function(){window.location.reload();},900);
+                    return;
+                }
+                if(titleRefreshCardIsRunnable())scheduleTitleRefreshWorker(900);
+                return;
+            }
+
+            if(result.error_code==='session_expired'||result.error_code==='csrf_failed'||result.retryable===false){
+                showTitleRefreshConnectionMessage(result.message||'작업을 계속할 수 없습니다. 페이지를 새로고침하세요.',true);
+                return;
+            }
+
+            titleRefreshFailureCount++;
+            var retrySeconds=parseInt(result.retry_after,10)||10;
+            showTitleRefreshConnectionMessage(result.message||'네이버 연결이 잠시 끊겼습니다.',true);
+            if(titleRefreshCardIsRunnable())scheduleTitleRefreshWorker(retrySeconds*1000);
+        };
+
+        xhr.onerror=function(){retryAfterFailure('네트워크 연결이 잠시 끊겼습니다.',10000);};
+        xhr.ontimeout=function(){retryAfterFailure('제목 10건 처리 응답이 늦어지고 있습니다.',10000);};
+        xhr.send(encodeForm({csrf_token:csrf(),limit:10}));
+    }
+
+    function bindOriginalTitleRefreshWorker(){
+        var card=document.querySelector('[data-title-refresh-card]');
+        if(!card)return;
+        var button=card.querySelector('[data-title-refresh-run-once]');
+        if(button)button.addEventListener('click',function(){runTitleRefreshWorker(true);});
+        if(titleRefreshCardIsRunnable())scheduleTitleRefreshWorker(700);
     }
 
     function updateStatusView(state) {
@@ -544,7 +701,7 @@
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindOriginalTitleRefreshAutoSubmit(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMobileSearch(); bindMailNavigation(); openInitialMessage();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindOriginalTitleRefreshWorker(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMobileSearch(); bindMailNavigation(); openInitialMessage();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

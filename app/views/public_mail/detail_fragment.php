@@ -2,7 +2,7 @@
 /**
  * 파일 경로: C:\www\cpms\app\views\public_mail\detail_fragment.php
  * 메일 본문과 첨부파일만 비동기로 출력합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.13
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.14
  */
 if (!isset($esc) || !is_callable($esc)) {
     $esc = function ($value) { return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'); };

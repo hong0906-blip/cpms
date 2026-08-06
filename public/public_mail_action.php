@@ -8,7 +8,7 @@ if (ob_get_level() === 0) @ob_start();
  *
  * 네이버 메일의 상세본문 비동기 조회, 인라인 이미지 출력, 설정, 동기화,
  * 처리상태 변경을 담당합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.12
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.14
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';
@@ -180,12 +180,10 @@ try {
 
     if ($action === 'process_original_title_refresh_batch') {
         PublicMailWebHelper::requireDevelopmentDepartment();
-        $limit = isset($_POST['limit']) ? (int)$_POST['limit'] : 100;
-        @set_time_limit(60);
-        $result = $service->processOriginalTitleRefreshBatch($limit);
-        /* 일반 페이지 요청으로 다음 설정 화면을 열어 JSON 응답 형식 문제를 완전히 피합니다. */
-        header('Location: public_mail_settings.php?title_refresh=continue#title-refresh');
-        exit;
+        @set_time_limit(15);
+        $result = $service->processOriginalTitleRefreshBatch(10);
+        if ($isAjax) PublicMailWebHelper::jsonResponse($result,!empty($result['ok'])?200:503);
+        PublicMailWebHelper::redirectWithMessage('public_mail_settings.php',!empty($result['ok'])?'success':'error',$result['message']);
     }
 
     if ($action === 'pause_original_title_refresh' || $action === 'resume_original_title_refresh' || $action === 'cancel_original_title_refresh') {

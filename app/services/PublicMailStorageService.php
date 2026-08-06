@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.12';
+    const VERSION = '1.7.14';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -19,6 +19,8 @@ class PublicMailStorageService
     const KEY_FILE = 'secret.key';
     const DRIVE_RECORDS_FILE = 'drive_records.json';
     const INDEX_FILE = 'mail_index.json';
+    const TITLE_REFRESH_QUEUE_FILE = 'title_refresh_queue.json';
+    const TITLE_REFRESH_UPDATES_FILE = 'title_refresh_updates.json';
     const BODY_CACHE_DIR = 'body_cache';
     const BODY_CACHE_VERSION = 8;
 
@@ -136,18 +138,25 @@ class PublicMailStorageService
                 'paused' => false,
                 'cancelled' => false,
                 'status' => 'ready',
+                'phase' => 'idle',
                 'started_at' => '',
                 'finished_at' => '',
                 'last_run_at' => '',
-                'mailbox_order' => array(),
-                'current_mailbox_index' => 0,
-                'last_uid' => 0,
+                'worker_heartbeat_at' => '',
+                'queue_version' => 1,
+                'cursor' => 0,
+                'merge_cursor' => 0,
+                'retry_cursor' => -1,
+                'retry_count' => 0,
+                'consecutive_errors' => 0,
                 'total_count' => 0,
                 'processed_count' => 0,
                 'updated_count' => 0,
+                'merged_count' => 0,
                 'failed_count' => 0,
                 'remaining_count' => 0,
                 'last_batch_count' => 0,
+                'last_error_code' => '',
                 'last_message' => '네이버 원본 제목 재수집을 아직 시작하지 않았습니다.',
                 'last_error' => ''
             )
@@ -169,7 +178,18 @@ class PublicMailStorageService
             self::WORKFLOW_FILE => array(),
             self::SYNC_FILE => self::syncDefaults(),
             self::DRIVE_RECORDS_FILE => array(),
-            self::INDEX_FILE => array()
+            self::INDEX_FILE => array(),
+            self::TITLE_REFRESH_QUEUE_FILE => array(
+                'version' => 1,
+                'created_at' => '',
+                'total_count' => 0,
+                'items' => array()
+            ),
+            self::TITLE_REFRESH_UPDATES_FILE => array(
+                'version' => 1,
+                'updated_at' => '',
+                'items' => array()
+            )
         );
         foreach ($defaults as $fileName => $defaultValue) {
             $path = $root . DIRECTORY_SEPARATOR . $fileName;
@@ -191,6 +211,70 @@ class PublicMailStorageService
     public static function path($fileName)
     {
         return self::rootPath() . DIRECTORY_SEPARATOR . basename((string)$fileName);
+    }
+
+
+    /**
+     * 원본 제목 재수집 대기열을 읽습니다.
+     * 대기열은 작업 시작 시 한 번만 만들고 이후에는 수정하지 않습니다.
+     */
+    public static function getTitleRefreshQueue()
+    {
+        self::ensureStorage();
+        $default = array('version'=>1,'created_at'=>'','total_count'=>0,'items'=>array());
+        $queue = self::readJsonFile(self::path(self::TITLE_REFRESH_QUEUE_FILE), $default);
+        if (!is_array($queue)) $queue = $default;
+        if (!isset($queue['items']) || !is_array($queue['items'])) $queue['items'] = array();
+        $queue['total_count'] = count($queue['items']);
+        return $queue;
+    }
+
+    public static function saveTitleRefreshQueue($items)
+    {
+        self::ensureStorage();
+        if (!is_array($items)) $items = array();
+        $queue = array(
+            'version'=>1,
+            'created_at'=>date('Y-m-d H:i:s'),
+            'total_count'=>count($items),
+            'items'=>array_values($items)
+        );
+        self::writeJsonFile(self::path(self::TITLE_REFRESH_QUEUE_FILE), $queue);
+        return $queue;
+    }
+
+    public static function getTitleRefreshUpdates()
+    {
+        self::ensureStorage();
+        $default = array('version'=>1,'updated_at'=>'','items'=>array());
+        $updates = self::readJsonFile(self::path(self::TITLE_REFRESH_UPDATES_FILE), $default);
+        if (!is_array($updates)) $updates = $default;
+        if (!isset($updates['items']) || !is_array($updates['items'])) $updates['items'] = array();
+        return $updates;
+    }
+
+    public static function saveTitleRefreshUpdates($items)
+    {
+        self::ensureStorage();
+        if (!is_array($items)) $items = array();
+        $updates = array(
+            'version'=>1,
+            'updated_at'=>date('Y-m-d H:i:s'),
+            'items'=>$items
+        );
+        self::writeJsonFile(self::path(self::TITLE_REFRESH_UPDATES_FILE), $updates);
+        return $updates;
+    }
+
+    public static function clearTitleRefreshWorkFiles()
+    {
+        self::ensureStorage();
+        self::writeJsonFile(self::path(self::TITLE_REFRESH_QUEUE_FILE), array(
+            'version'=>1,'created_at'=>'','total_count'=>0,'items'=>array()
+        ));
+        self::writeJsonFile(self::path(self::TITLE_REFRESH_UPDATES_FILE), array(
+            'version'=>1,'updated_at'=>'','items'=>array()
+        ));
     }
 
     public static function getSettings($includeSecrets)
@@ -476,6 +560,7 @@ class PublicMailStorageService
         self::writeJsonFile(self::path(self::DRIVE_RECORDS_FILE), array());
         self::writeJsonFile(self::path(self::SYNC_FILE), self::syncDefaults());
         self::writeJsonFile(self::path(self::INDEX_FILE), array());
+        self::clearTitleRefreshWorkFiles();
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . 'raw_cache');
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . 'attachment_cache');
         self::cleanupDirectory(self::rootPath() . DIRECTORY_SEPARATOR . self::BODY_CACHE_DIR);

@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.13';
+    const VERSION = '1.7.14';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -817,13 +817,16 @@ class PublicMailService
 
     /**
      * 네이버 원본 제목 재수집 작업을 등록합니다.
-     * 실제 처리는 설정 화면의 일반 POST 요청에서 메일함별 100건씩 진행합니다.
+     *
+     * v1.7.14부터는 messages.json을 매 묶음마다 다시 저장하지 않습니다.
+     * 작업 시작 시 작은 대기열을 한 번 만들고, 제목 10건씩 별도 업데이트 파일에 모은 뒤
+     * 모든 수집이 끝났을 때 messages.json과 검색 색인을 한 번만 갱신합니다.
      */
     public function startOriginalTitleRefresh()
     {
         $messages = PublicMailStorageService::getMessages();
-        $mailboxCounts = array();
-        $total = 0;
+        $items = array();
+
         foreach ($messages as $messageKey => $message) {
             if (!is_array($message)) continue;
             $parsed = PublicMailStorageService::parseMessageKey($messageKey);
@@ -831,44 +834,82 @@ class PublicMailService
                 ? (string)$message['mailbox'] : (string)$parsed['mailbox'];
             $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsed['uid'];
             if ($mailbox === '' || $uid <= 0) continue;
-            if (!isset($mailboxCounts[$mailbox])) $mailboxCounts[$mailbox] = 0;
-            $mailboxCounts[$mailbox]++;
-            $total++;
+
+            $items[] = array(
+                'message_key'=>(string)$messageKey,
+                'mailbox'=>$mailbox,
+                'uid'=>$uid,
+                'old_subject'=>isset($message['subject']) ? (string)$message['subject'] : ''
+            );
         }
-        $order = array_keys($mailboxCounts);
-        usort($order, function ($a, $b) {
-            if (strcasecmp((string)$a, 'INBOX') === 0) return -1;
-            if (strcasecmp((string)$b, 'INBOX') === 0) return 1;
-            return strcmp((string)$a, (string)$b);
+
+        usort($items, function ($a, $b) {
+            $am = isset($a['mailbox']) ? (string)$a['mailbox'] : '';
+            $bm = isset($b['mailbox']) ? (string)$b['mailbox'] : '';
+            $ainbox = strcasecmp($am, 'INBOX') === 0;
+            $binbox = strcasecmp($bm, 'INBOX') === 0;
+            if ($ainbox && !$binbox) return -1;
+            if (!$ainbox && $binbox) return 1;
+            $mailboxCompare = strcmp($am, $bm);
+            if ($mailboxCompare !== 0) return $mailboxCompare;
+            $au = isset($a['uid']) ? (int)$a['uid'] : 0;
+            $bu = isset($b['uid']) ? (int)$b['uid'] : 0;
+            if ($au === $bu) return 0;
+            return $au < $bu ? -1 : 1;
         });
 
+        PublicMailStorageService::clearTitleRefreshWorkFiles();
+        $queue = PublicMailStorageService::saveTitleRefreshQueue($items);
+        PublicMailStorageService::saveTitleRefreshUpdates(array());
+
+        $total = isset($queue['total_count']) ? (int)$queue['total_count'] : count($items);
         $refresh = array(
             'active'=>$total > 0,
             'paused'=>false,
             'cancelled'=>false,
             'status'=>$total > 0 ? 'running' : 'completed',
+            'phase'=>$total > 0 ? 'collecting' : 'completed',
             'started_at'=>date('Y-m-d H:i:s'),
             'finished_at'=>$total > 0 ? '' : date('Y-m-d H:i:s'),
             'last_run_at'=>'',
-            'mailbox_order'=>$order,
-            'current_mailbox_index'=>0,
-            'last_uid'=>0,
+            'worker_heartbeat_at'=>'',
+            'queue_version'=>1,
+            'cursor'=>0,
+            'merge_cursor'=>0,
+            'retry_cursor'=>-1,
+            'retry_count'=>0,
+            'consecutive_errors'=>0,
             'total_count'=>$total,
             'processed_count'=>0,
             'updated_count'=>0,
+            'merged_count'=>0,
             'failed_count'=>0,
             'remaining_count'=>$total,
             'last_batch_count'=>0,
+            'last_error_code'=>'',
             'last_message'=>$total > 0
-                ? '네이버 원본 제목 재수집을 시작했습니다. 설정 화면을 열어두면 100건씩 계속 진행합니다.'
+                ? '초경량 원본 제목 수집을 시작했습니다. 이 설정 화면을 열어두면 10건씩 자동으로 이어집니다.'
                 : '재수집할 저장 메일이 없습니다.',
             'last_error'=>''
         );
+
         $state = PublicMailStorageService::saveSyncState(array(
-            'title_normalization'=>array('enabled'=>false,'status'=>'disabled_for_speed','last_message'=>'평상시 화면 제목 자동보정을 중지했습니다.'),
-            'metadata_repair'=>array('active'=>false,'paused'=>false,'cancelled'=>true,'status'=>'replaced_by_title_refresh','remaining_count'=>0,'last_error'=>''),
+            'title_normalization'=>array(
+                'enabled'=>false,
+                'status'=>'disabled_for_speed',
+                'last_message'=>'평상시 메일 화면에서는 제목 복구 작업을 실행하지 않습니다.'
+            ),
+            'metadata_repair'=>array(
+                'active'=>false,
+                'paused'=>false,
+                'cancelled'=>true,
+                'status'=>'replaced_by_title_refresh',
+                'remaining_count'=>0,
+                'last_error'=>''
+            ),
             'title_refresh'=>$refresh
         ));
+
         return array('ok'=>true,'message'=>$refresh['last_message'],'state'=>$state);
     }
 
@@ -876,173 +917,430 @@ class PublicMailService
     {
         $command = trim((string)$command);
         $state = PublicMailStorageService::getSyncState();
-        $refresh = isset($state['title_refresh']) && is_array($state['title_refresh']) ? $state['title_refresh'] : array();
+        $refresh = isset($state['title_refresh']) && is_array($state['title_refresh'])
+            ? $state['title_refresh'] : array();
+
         if ($command === 'pause') {
             $refresh['active'] = true;
             $refresh['paused'] = true;
             $refresh['status'] = 'paused';
-            $refresh['last_message'] = '원본 제목 재수집을 일시중지했습니다.';
+            $refresh['last_message'] = '원본 제목 수집을 일시중지했습니다.';
         } elseif ($command === 'resume') {
-            if (empty($refresh['mailbox_order']) || (int)$refresh['remaining_count'] <= 0) {
-                return $this->startOriginalTitleRefresh();
-            }
+            $queue = PublicMailStorageService::getTitleRefreshQueue();
+            if (empty($queue['items'])) return $this->startOriginalTitleRefresh();
+
             $refresh['active'] = true;
             $refresh['paused'] = false;
             $refresh['cancelled'] = false;
-            $refresh['status'] = 'running';
+            if (empty($refresh['phase']) || $refresh['phase'] === 'idle' || $refresh['phase'] === 'completed') {
+                $refresh['phase'] = 'collecting';
+            }
+            $refresh['status'] = $refresh['phase'] === 'merging' ? 'merging' : 'running';
             $refresh['last_error'] = '';
-            $refresh['last_message'] = '원본 제목 재수집을 다시 시작했습니다.';
+            $refresh['last_error_code'] = '';
+            $refresh['consecutive_errors'] = 0;
+            $refresh['last_message'] = '원본 제목 수집을 다시 시작했습니다.';
         } elseif ($command === 'cancel') {
+            /*
+             * 수집된 제목은 버리지 않습니다. 네이버 접속 없이 로컬 파일만 한 번 합친 뒤
+             * 취소 상태로 마칩니다.
+             */
+            $this->mergeCollectedTitleRefreshUpdates(false);
+            $refresh = PublicMailStorageService::getSyncState();
+            $refresh = isset($refresh['title_refresh']) && is_array($refresh['title_refresh'])
+                ? $refresh['title_refresh'] : array();
             $refresh['active'] = false;
             $refresh['paused'] = false;
             $refresh['cancelled'] = true;
             $refresh['status'] = 'cancelled';
+            $refresh['phase'] = 'cancelled';
             $refresh['finished_at'] = date('Y-m-d H:i:s');
-            $refresh['last_message'] = '원본 제목 재수집을 취소했습니다. 이미 바뀐 제목은 유지됩니다.';
-            PublicMailIndexService::rebuild();
+            $refresh['last_message'] = '원본 제목 수집을 취소했습니다. 지금까지 수집된 제목은 적용했습니다.';
         } else {
             throw new \InvalidArgumentException('제목 재수집 명령이 올바르지 않습니다.');
         }
+
         $state = PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
         return array('ok'=>true,'message'=>$refresh['last_message'],'state'=>$state);
     }
 
     /**
-     * 같은 메일함의 제목 최대 100건을 한 번의 UID FETCH 명령으로 가져옵니다.
-     * JSON 비동기 응답을 사용하지 않고 일반 페이지 요청 한 번으로 한 묶음을 끝냅니다.
+     * 설정 화면 전용 초경량 작업자입니다.
+     * 한 번에 같은 메일함의 제목 최대 10건만 조회하며 messages.json은 건드리지 않습니다.
      */
-    public function processOriginalTitleRefreshBatch($limit)
+    public function processOriginalTitleRefreshWorkerStep($limit)
     {
-        $limit = max(20, min(100, (int)$limit));
-        $settings = $this->requireEnabledSettings();
-        $lock = PublicMailStorageService::acquireLock('title_refresh');
-        if ($lock === false) throw new \RuntimeException('다른 제목 재수집 요청이 실행 중입니다. 잠시 후 다시 시도하세요.');
-        $client = $this->createClient($settings);
-        $refresh = array();
+        $limit = max(1, min(10, (int)$limit));
+        $lock = PublicMailStorageService::acquireLock('title_refresh_worker');
+        if ($lock === false) {
+            return array(
+                'ok'=>false,
+                'retryable'=>true,
+                'retry_after'=>3,
+                'error_code'=>'worker_busy',
+                'message'=>'다른 제목 작업이 마무리 중입니다. 3초 후 자동으로 다시 시도합니다.',
+                'refresh'=>$this->compactOriginalTitleRefreshState()
+            );
+        }
+
         try {
             $state = PublicMailStorageService::getSyncState();
-            $refresh = isset($state['title_refresh']) && is_array($state['title_refresh']) ? $state['title_refresh'] : array();
-            if (empty($refresh['active'])) return array('ok'=>true,'message'=>'원본 제목 재수집이 실행 중이 아닙니다.','state'=>$state);
-            if (!empty($refresh['paused'])) return array('ok'=>true,'message'=>'원본 제목 재수집이 일시중지되어 있습니다.','state'=>$state);
+            $refresh = isset($state['title_refresh']) && is_array($state['title_refresh'])
+                ? $state['title_refresh'] : array();
 
-            $messages = PublicMailStorageService::getMessages();
-            $order = isset($refresh['mailbox_order']) && is_array($refresh['mailbox_order']) ? $refresh['mailbox_order'] : array();
-            $mailboxIndex = isset($refresh['current_mailbox_index']) ? (int)$refresh['current_mailbox_index'] : 0;
-            $lastUid = isset($refresh['last_uid']) ? (int)$refresh['last_uid'] : 0;
-            $selectedMailbox = '';
-            $candidates = array();
-
-            while ($mailboxIndex < count($order) && empty($candidates)) {
-                $selectedMailbox = (string)$order[$mailboxIndex];
-                foreach ($messages as $messageKey => $message) {
-                    if (!is_array($message)) continue;
-                    $parsed = PublicMailStorageService::parseMessageKey($messageKey);
-                    $mailbox = isset($message['mailbox']) && trim((string)$message['mailbox']) !== ''
-                        ? (string)$message['mailbox'] : (string)$parsed['mailbox'];
-                    $uid = isset($message['uid']) ? (int)$message['uid'] : (int)$parsed['uid'];
-                    if ($mailbox !== $selectedMailbox || $uid <= $lastUid) continue;
-                    $candidates[] = array('message_key'=>(string)$messageKey,'uid'=>$uid);
-                }
-                usort($candidates, function ($a, $b) {
-                    $au = isset($a['uid']) ? (int)$a['uid'] : 0;
-                    $bu = isset($b['uid']) ? (int)$b['uid'] : 0;
-                    if ($au === $bu) return 0;
-                    return $au < $bu ? -1 : 1;
-                });
-                if (empty($candidates)) {
-                    $mailboxIndex++;
-                    $lastUid = 0;
-                }
+            if (empty($refresh['active'])) {
+                return array(
+                    'ok'=>true,
+                    'completed'=>isset($refresh['status']) && $refresh['status'] === 'completed',
+                    'message'=>'원본 제목 수집이 실행 중이 아닙니다.',
+                    'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
+                );
+            }
+            if (!empty($refresh['paused'])) {
+                return array(
+                    'ok'=>true,
+                    'paused'=>true,
+                    'message'=>'원본 제목 수집이 일시중지되어 있습니다.',
+                    'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
+                );
             }
 
-            if ($mailboxIndex >= count($order)) {
+            $phase = isset($refresh['phase']) ? (string)$refresh['phase'] : 'collecting';
+            if ($phase === 'merging') {
+                return $this->mergeCollectedTitleRefreshUpdates(true);
+            }
+
+            $queue = PublicMailStorageService::getTitleRefreshQueue();
+            $items = isset($queue['items']) && is_array($queue['items']) ? $queue['items'] : array();
+            $total = count($items);
+            $cursor = isset($refresh['cursor']) ? max(0, (int)$refresh['cursor']) : 0;
+
+            if ($total === 0) {
                 $refresh['active'] = false;
                 $refresh['paused'] = false;
                 $refresh['status'] = 'completed';
+                $refresh['phase'] = 'completed';
+                $refresh['total_count'] = 0;
                 $refresh['remaining_count'] = 0;
                 $refresh['finished_at'] = date('Y-m-d H:i:s');
-                $refresh['last_message'] = '네이버 원본 제목 재수집과 검색 색인 갱신을 완료했습니다.';
-                PublicMailIndexService::rebuild($messages, null);
-                $state = PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
-                return array('ok'=>true,'message'=>$refresh['last_message'],'completed'=>true,'state'=>$state);
+                $refresh['last_message'] = '재수집할 제목이 없습니다.';
+                PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+                return array(
+                    'ok'=>true,
+                    'completed'=>true,
+                    'message'=>$refresh['last_message'],
+                    'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
+                );
             }
 
-            $candidates = array_slice($candidates, 0, $limit);
-            $uids = array();
-            foreach ($candidates as $candidate) $uids[] = (int)$candidate['uid'];
+            if ($cursor >= $total) {
+                $refresh['phase'] = 'merging';
+                $refresh['status'] = 'merging';
+                $refresh['remaining_count'] = 0;
+                $refresh['last_message'] = '원본 제목 수집을 마쳤습니다. 수집된 제목을 메일 목록에 한 번만 적용합니다.';
+                PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+                return $this->mergeCollectedTitleRefreshUpdates(true);
+            }
 
-            $client->connect();
-            $client->login($settings['username'], $settings['password']);
-            $client->selectMailbox($selectedMailbox);
-            $headerMap = $client->fetchSubjectHeaders($uids);
+            $first = isset($items[$cursor]) && is_array($items[$cursor]) ? $items[$cursor] : array();
+            $mailbox = isset($first['mailbox']) ? (string)$first['mailbox'] : 'INBOX';
+            $batch = array();
 
-            $processedThisRun = 0;
+            for ($position = $cursor; $position < $total && count($batch) < $limit; $position++) {
+                $item = isset($items[$position]) && is_array($items[$position]) ? $items[$position] : array();
+                if ((string)(isset($item['mailbox']) ? $item['mailbox'] : '') !== $mailbox) break;
+                if ((int)(isset($item['uid']) ? $item['uid'] : 0) <= 0) break;
+                $item['_queue_position'] = $position;
+                $batch[] = $item;
+            }
+
+            if (empty($batch)) {
+                $refresh['cursor'] = $cursor + 1;
+                $refresh['processed_count'] = (int)$refresh['processed_count'] + 1;
+                $refresh['failed_count'] = (int)$refresh['failed_count'] + 1;
+                $refresh['remaining_count'] = max(0, $total - (int)$refresh['cursor']);
+                $refresh['last_message'] = '식별값이 없는 제목 1건을 건너뛰었습니다.';
+                $refresh['last_run_at'] = date('Y-m-d H:i:s');
+                $refresh['worker_heartbeat_at'] = $refresh['last_run_at'];
+                PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+                return array(
+                    'ok'=>true,
+                    'message'=>$refresh['last_message'],
+                    'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
+                );
+            }
+
+            $settings = $this->requireEnabledSettings();
+            $client = $this->createClient($settings, 4);
+            $headerMap = array();
+
+            try {
+                $client->connect();
+                $client->login($settings['username'], $settings['password']);
+                $client->selectMailbox($mailbox);
+                $uids = array();
+                foreach ($batch as $candidate) $uids[] = (int)$candidate['uid'];
+                $headerMap = $client->fetchSubjectHeaders($uids);
+            } catch (\Exception $e) {
+                return $this->handleOriginalTitleRefreshWorkerError($refresh, $cursor, $total, $e);
+            } finally {
+                try { $client->logout(); } catch (\Exception $ignored) {}
+            }
+
+            $updates = PublicMailStorageService::getTitleRefreshUpdates();
+            $updateItems = isset($updates['items']) && is_array($updates['items']) ? $updates['items'] : array();
+
+            $advanced = 0;
             $updatedThisRun = 0;
             $failedThisRun = 0;
-            $changed = false;
-            foreach ($candidates as $candidate) {
-                $messageKey = (string)$candidate['message_key'];
-                $uid = (int)$candidate['uid'];
-                $lastUid = max($lastUid, $uid);
-                $processedThisRun++;
-                if (!isset($headerMap[$uid]) || trim((string)$headerMap[$uid]) === '') {
+            $stoppedForRetry = false;
+
+            foreach ($batch as $candidate) {
+                $messageKey = isset($candidate['message_key']) ? (string)$candidate['message_key'] : '';
+                $uid = isset($candidate['uid']) ? (int)$candidate['uid'] : 0;
+                $oldSubject = isset($candidate['old_subject']) ? (string)$candidate['old_subject'] : '';
+
+                $freshSubject = '';
+                if (isset($headerMap[$uid]) && trim((string)$headerMap[$uid]) !== '') {
+                    $headers = $this->parseHeaders((string)$headerMap[$uid]);
+                    $freshSubject = PublicMailStorageService::normalizeMailText(
+                        $this->decodeHeader(isset($headers['subject']) ? $headers['subject'] : '')
+                    );
+                }
+
+                if ($messageKey === '' || $freshSubject === '') {
+                    $sameRetry = isset($refresh['retry_cursor']) && (int)$refresh['retry_cursor'] === ($cursor + $advanced);
+                    $attempt = $sameRetry ? ((int)$refresh['retry_count'] + 1) : 1;
+                    if ($attempt < 2) {
+                        $refresh['retry_cursor'] = $cursor + $advanced;
+                        $refresh['retry_count'] = $attempt;
+                        $stoppedForRetry = true;
+                        break;
+                    }
+
+                    $refresh['retry_cursor'] = -1;
+                    $refresh['retry_count'] = 0;
+                    $advanced++;
                     $failedThisRun++;
                     continue;
                 }
-                $headers = $this->parseHeaders((string)$headerMap[$uid]);
-                $freshSubject = PublicMailStorageService::normalizeMailText(
-                    $this->decodeHeader(isset($headers['subject']) ? $headers['subject'] : '')
-                );
-                if ($freshSubject === '') {
-                    $failedThisRun++;
-                    continue;
-                }
-                $oldSubject = isset($messages[$messageKey]['subject']) ? (string)$messages[$messageKey]['subject'] : '';
+
+                $refresh['retry_cursor'] = -1;
+                $refresh['retry_count'] = 0;
                 if ($freshSubject !== $oldSubject) {
-                    $messages[$messageKey]['subject'] = $freshSubject;
-                    $messages[$messageKey]['subject_refreshed_at'] = date('Y-m-d H:i:s');
-                    $messages[$messageKey]['subject_refresh_source'] = 'naver_batch_v1712';
+                    $updateItems[$messageKey] = array(
+                        'subject'=>$freshSubject,
+                        'refreshed_at'=>date('Y-m-d H:i:s'),
+                        'source'=>'naver_worker_v1714'
+                    );
                     $updatedThisRun++;
-                    $changed = true;
+                }
+                $advanced++;
+            }
+
+            if ($updatedThisRun > 0) {
+                PublicMailStorageService::saveTitleRefreshUpdates($updateItems);
+            }
+
+            $refresh['cursor'] = $cursor + $advanced;
+            $refresh['total_count'] = $total;
+            $refresh['processed_count'] = (int)$refresh['processed_count'] + $advanced;
+            $refresh['updated_count'] = count($updateItems);
+            $refresh['failed_count'] = (int)$refresh['failed_count'] + $failedThisRun;
+            $refresh['remaining_count'] = max(0, $total - (int)$refresh['cursor']);
+            $refresh['last_batch_count'] = $advanced;
+            $refresh['last_run_at'] = date('Y-m-d H:i:s');
+            $refresh['worker_heartbeat_at'] = $refresh['last_run_at'];
+            $refresh['status'] = 'running';
+            $refresh['phase'] = 'collecting';
+            $refresh['consecutive_errors'] = 0;
+            $refresh['last_error_code'] = '';
+            $refresh['last_error'] = '';
+
+            if ($stoppedForRetry) {
+                $refresh['last_message'] = $mailbox . ' 메일함의 한 제목을 한 번 더 확인합니다. 나머지 작업은 멈추지 않습니다.';
+            } else {
+                $refresh['last_message'] = $mailbox . ' 제목 ' . number_format($advanced)
+                    . '건을 확인했고, 누적 ' . number_format(count($updateItems)) . '건의 새 제목을 안전하게 모았습니다.';
+            }
+
+            if ((int)$refresh['cursor'] >= $total) {
+                $refresh['phase'] = 'merging';
+                $refresh['status'] = 'merging';
+                $refresh['last_message'] = '원본 제목 수집을 마쳤습니다. 수집된 제목을 한 번만 적용합니다.';
+            }
+
+            PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+
+            return array(
+                'ok'=>true,
+                'retryable'=>false,
+                'completed'=>false,
+                'message'=>$refresh['last_message'],
+                'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
+            );
+        } finally {
+            PublicMailStorageService::releaseLock($lock);
+        }
+    }
+
+    /**
+     * 일시적인 연결 실패는 화면을 죽이지 않고 자동 재시도합니다.
+     * 같은 대기열 위치에서 두 번 연속 실패하면 그 제목 한 건만 건너뜁니다.
+     */
+    private function handleOriginalTitleRefreshWorkerError($refresh, $cursor, $total, $exception)
+    {
+        $sameRetry = isset($refresh['retry_cursor']) && (int)$refresh['retry_cursor'] === (int)$cursor;
+        $attempt = $sameRetry ? ((int)$refresh['retry_count'] + 1) : 1;
+        $message = PublicMailStorageService::sanitizeText($exception->getMessage(), 500);
+
+        if ($attempt >= 2) {
+            $refresh['cursor'] = (int)$cursor + 1;
+            $refresh['processed_count'] = (int)$refresh['processed_count'] + 1;
+            $refresh['failed_count'] = (int)$refresh['failed_count'] + 1;
+            $refresh['remaining_count'] = max(0, (int)$total - (int)$refresh['cursor']);
+            $refresh['retry_cursor'] = -1;
+            $refresh['retry_count'] = 0;
+            $refresh['consecutive_errors'] = 0;
+            $refresh['status'] = 'running';
+            $refresh['phase'] = 'collecting';
+            $refresh['last_error_code'] = 'mail_skipped_after_retry';
+            $refresh['last_error'] = $message;
+            $refresh['last_message'] = '같은 제목을 두 번 읽지 못해 1건만 건너뛰고 다음 제목으로 계속 진행합니다.';
+            $refresh['last_run_at'] = date('Y-m-d H:i:s');
+            $refresh['worker_heartbeat_at'] = $refresh['last_run_at'];
+            PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+
+            return array(
+                'ok'=>true,
+                'retryable'=>false,
+                'message'=>$refresh['last_message'],
+                'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
+            );
+        }
+
+        $refresh['retry_cursor'] = (int)$cursor;
+        $refresh['retry_count'] = $attempt;
+        $refresh['consecutive_errors'] = (int)$refresh['consecutive_errors'] + 1;
+        $refresh['status'] = 'retrying';
+        $refresh['phase'] = 'collecting';
+        $refresh['last_error_code'] = 'imap_temporary_error';
+        $refresh['last_error'] = $message;
+        $refresh['last_message'] = '네이버 연결이 잠시 끊겼습니다. 저장된 위치부터 10초 후 자동으로 다시 시도합니다.';
+        $refresh['last_run_at'] = date('Y-m-d H:i:s');
+        $refresh['worker_heartbeat_at'] = $refresh['last_run_at'];
+        PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+
+        return array(
+            'ok'=>false,
+            'retryable'=>true,
+            'retry_after'=>10,
+            'error_code'=>'imap_temporary_error',
+            'message'=>$refresh['last_message'],
+            'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
+        );
+    }
+
+    /**
+     * 네이버 연결 없이 로컬 제목 업데이트만 합칩니다.
+     * 200건 단위로 메모리에서 적용하되 messages.json은 마지막에 한 번만 저장합니다.
+     */
+    private function mergeCollectedTitleRefreshUpdates($markCompleted)
+    {
+        $state = PublicMailStorageService::getSyncState();
+        $refresh = isset($state['title_refresh']) && is_array($state['title_refresh'])
+            ? $state['title_refresh'] : array();
+        $updates = PublicMailStorageService::getTitleRefreshUpdates();
+        $updateItems = isset($updates['items']) && is_array($updates['items']) ? $updates['items'] : array();
+
+        if (!empty($updateItems)) {
+            $messages = PublicMailStorageService::getMessages();
+            $keys = array_keys($updateItems);
+            $chunks = array_chunk($keys, 200);
+            $merged = 0;
+
+            foreach ($chunks as $chunk) {
+                foreach ($chunk as $messageKey) {
+                    if (!isset($messages[$messageKey]) || !is_array($messages[$messageKey])) continue;
+                    $update = isset($updateItems[$messageKey]) && is_array($updateItems[$messageKey])
+                        ? $updateItems[$messageKey] : array();
+                    $subject = isset($update['subject']) ? trim((string)$update['subject']) : '';
+                    if ($subject === '') continue;
+
+                    $messages[$messageKey]['subject'] = $subject;
+                    $messages[$messageKey]['subject_refreshed_at'] = isset($update['refreshed_at'])
+                        ? (string)$update['refreshed_at'] : date('Y-m-d H:i:s');
+                    $messages[$messageKey]['subject_refresh_source'] = isset($update['source'])
+                        ? (string)$update['source'] : 'naver_worker_v1714';
+                    $merged++;
                 }
             }
 
-            if ($changed) PublicMailStorageService::saveMessagesCheckpoint($messages);
-            $refresh['current_mailbox_index'] = $mailboxIndex;
-            $refresh['last_uid'] = $lastUid;
-            $refresh['processed_count'] = (int)$refresh['processed_count'] + $processedThisRun;
-            $refresh['updated_count'] = (int)$refresh['updated_count'] + $updatedThisRun;
-            $refresh['failed_count'] = (int)$refresh['failed_count'] + $failedThisRun;
-            $refresh['remaining_count'] = max(0, (int)$refresh['total_count'] - (int)$refresh['processed_count']);
-            $refresh['last_batch_count'] = $processedThisRun;
-            $refresh['last_run_at'] = date('Y-m-d H:i:s');
-            $refresh['status'] = 'running';
-            $refresh['last_error'] = '';
-            $refresh['last_message'] = $selectedMailbox . ' 메일함 제목 ' . number_format($processedThisRun) . '건을 확인해 ' . number_format($updatedThisRun) . '건을 바꿨습니다.';
-
-            $state = PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
-            return array(
-                'ok'=>true,
-                'message'=>$refresh['last_message'],
-                'processed_count'=>$processedThisRun,
-                'updated_count'=>$updatedThisRun,
-                'failed_count'=>$failedThisRun,
-                'completed'=>false,
-                'state'=>$state
-            );
-        } catch (\Exception $e) {
-            $refresh['active'] = true;
-            $refresh['paused'] = true;
-            $refresh['status'] = 'error';
-            $refresh['last_run_at'] = date('Y-m-d H:i:s');
-            $refresh['last_error'] = PublicMailStorageService::sanitizeText($e->getMessage(), 500);
-            $refresh['last_message'] = '제목 재수집을 잠시 멈췄습니다. 아래 실제 오류를 확인한 뒤 다시 시작하세요.';
-            PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
-            throw $e;
-        } finally {
-            try { $client->logout(); } catch (\Exception $ignored) {}
-            PublicMailStorageService::releaseLock($lock);
+            PublicMailStorageService::saveMessagesCheckpoint($messages);
+            PublicMailIndexService::rebuild($messages, null);
+            $refresh['merged_count'] = $merged;
+        } else {
+            $refresh['merged_count'] = 0;
+            PublicMailIndexService::rebuild();
         }
+
+        $refresh['last_run_at'] = date('Y-m-d H:i:s');
+        $refresh['worker_heartbeat_at'] = $refresh['last_run_at'];
+        $refresh['last_error'] = '';
+        $refresh['last_error_code'] = '';
+        $refresh['retry_cursor'] = -1;
+        $refresh['retry_count'] = 0;
+        $refresh['consecutive_errors'] = 0;
+
+        if ($markCompleted) {
+            $refresh['active'] = false;
+            $refresh['paused'] = false;
+            $refresh['status'] = 'completed';
+            $refresh['phase'] = 'completed';
+            $refresh['remaining_count'] = 0;
+            $refresh['finished_at'] = date('Y-m-d H:i:s');
+            $refresh['last_message'] = '원본 제목 수집과 적용을 완료했습니다. 메일 목록과 검색 색인도 갱신했습니다.';
+        }
+
+        PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
+
+        return array(
+            'ok'=>true,
+            'completed'=>(bool)$markCompleted,
+            'retryable'=>false,
+            'message'=>$refresh['last_message'],
+            'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
+        );
+    }
+
+    private function compactOriginalTitleRefreshState($refresh = null)
+    {
+        if (!is_array($refresh)) {
+            $state = PublicMailStorageService::getSyncState();
+            $refresh = isset($state['title_refresh']) && is_array($state['title_refresh'])
+                ? $state['title_refresh'] : array();
+        }
+
+        $fields = array(
+            'active','paused','cancelled','status','phase','started_at','finished_at',
+            'last_run_at','worker_heartbeat_at','cursor','total_count','processed_count',
+            'updated_count','merged_count','failed_count','remaining_count','last_batch_count',
+            'retry_count','last_error_code','last_message','last_error'
+        );
+        $result = array();
+        foreach ($fields as $field) {
+            if (array_key_exists($field, $refresh)) $result[$field] = $refresh[$field];
+        }
+        return $result;
+    }
+
+    /**
+     * v1.7.12 구형 일반 POST 처리 호환용입니다.
+     * 오래된 캐시 화면이 호출해도 새 초경량 작업자 10건만 실행합니다.
+     */
+    public function processOriginalTitleRefreshBatch($limit)
+    {
+        return $this->processOriginalTitleRefreshWorkerStep(min(10, max(1, (int)$limit)));
     }
 
     /** v1.7.11의 구형 버튼이 남아 있어도 새 원본 제목 재수집을 시작합니다. */

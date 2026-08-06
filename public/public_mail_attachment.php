@@ -4,7 +4,7 @@
  *
  * 네이버 일반/대용량 첨부파일을 CPMS 서버 디스크에 저장하지 않고
  * 브라우저로 바로 내려보냅니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.13
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.14
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';
@@ -43,7 +43,7 @@ function pm_attachment_send_download_headers($filename, $mime)
     header('Cache-Control: private, no-store, no-cache, must-revalidate, max-age=0');
     header('Pragma: no-cache');
     header('Expires: 0');
-    header('X-CPMS-Public-Mail-Version: 1.7.13');
+    header('X-CPMS-Public-Mail-Version: 1.7.14');
 }
 
 function pm_attachment_error_page($message, $status)

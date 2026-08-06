@@ -13,7 +13,7 @@ require_once __DIR__ . '/PublicMailStorageService.php';
 
 class PublicMailIndexService
 {
-    const VERSION = '1.7.12';
+    const VERSION = '1.7.14';
     const INDEX_VERSION = 6;
     const INDEX_FILE = 'mail_index.json';
 

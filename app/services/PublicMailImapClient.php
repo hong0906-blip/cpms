@@ -22,7 +22,7 @@ class PublicMailImapClient
     {
         $this->host = trim((string)$host);
         $this->port = (int)$port;
-        $this->timeout = max(5, (int)$timeout);
+        $this->timeout = max(4, (int)$timeout);
         $this->socket = null;
         $this->tagNumber = 1;
         $this->selectedMailbox = '';
@@ -182,7 +182,7 @@ class PublicMailImapClient
 
     /**
      * 여러 UID의 SUBJECT 헤더만 한 번의 IMAP 명령으로 가져옵니다.
-     * 본문과 첨부파일은 내려받지 않으며 최대 100건으로 제한합니다.
+     * 본문과 첨부파일은 내려받지 않으며 작업 안정성을 위해 최대 10건으로 제한합니다.
      */
     public function fetchSubjectHeaders($uids)
     {
@@ -192,7 +192,7 @@ class PublicMailImapClient
         foreach ($uids as $uid) {
             $uid = (int)$uid;
             if ($uid > 0) $clean[$uid] = $uid;
-            if (count($clean) >= 100) break;
+            if (count($clean) >= 10) break;
         }
         $clean = array_values($clean);
         sort($clean, SORT_NUMERIC);
@@ -200,7 +200,7 @@ class PublicMailImapClient
 
         $response = $this->command(
             'UID FETCH ' . implode(',', $clean) . ' (UID BODY.PEEK[HEADER.FIELDS (SUBJECT)])',
-            4194304
+            1048576
         );
         if (!$response['ok']) throw new \RuntimeException('메일 제목 묶음을 읽지 못했습니다: ' . $response['final']);
 

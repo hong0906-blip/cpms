@@ -20,7 +20,7 @@ $titleRemaining=isset($titleRefresh['remaining_count'])?(int)$titleRefresh['rema
 $titlePercent=$titleTotal>0?(int)floor(($titleProcessed/$titleTotal)*100):0;
 if($titlePercent>100)$titlePercent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_713">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_714">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -72,7 +72,7 @@ if($titlePercent>100)$titlePercent=100;
       <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>설치 버전·목록 속도 상태</strong><span>실제 적용된 핵심 파일과 메일 색인 상태를 확인합니다.</span></div><span class="pm-status-dot <?php echo !empty($indexStatus['writable'])?'is-on':''; ?>"><?php echo !empty($indexStatus['writable'])?'정상':'확인 필요'; ?></span></div>
         <div class="pm-sync-state-list">
-          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.13'); ?></strong></div>
+          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.14'); ?></strong></div>
           <div><span>목록 색인 버전</span><strong><?php echo isset($indexStatus['version'])?(int)$indexStatus['version']:0; ?></strong></div>
           <div><span>색인 메일 수</span><strong><?php echo number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0); ?>건</strong></div>
           <div><span>마지막 색인 갱신</span><strong><?php echo call_user_func($esc,!empty($indexStatus['updated_at'])?$indexStatus['updated_at']:'아직 없음'); ?></strong></div>
@@ -91,31 +91,84 @@ if($titlePercent>100)$titlePercent=100;
         <p class="pm-help-text">구버전 캐시가 있어도 네이버에서 본문을 다시 받지 않습니다. 메일을 열 때 저장된 HTML만 빠르게 변환하며, 제목 재수집도 본문 캐시를 삭제하지 않습니다.</p>
       </div>
 
-      <div class="pm-settings-card pm-title-normalization-card" id="title-refresh">
-        <div class="pm-card-title"><div><strong>기존 메일 원본 제목 재수집</strong><span>평상시 메일 화면과 완전히 분리해 네이버 제목 헤더만 100건씩 가져옵니다.</span></div><span class="pm-status-dot <?php echo !empty($titleRefresh['active'])&&!empty($titleRefresh['paused'])?'':(!empty($titleRefresh['active'])?'is-on':''); ?>"><?php echo !empty($titleRefresh['active'])?(!empty($titleRefresh['paused'])?'일시중지':'진행 중'):(isset($titleRefresh['status'])&&$titleRefresh['status']==='completed'?'완료':'대기'); ?></span></div>
-        <div class="pm-alert pm-alert-success"><strong>메일 메뉴 속도와 제목 복구 작업을 분리했습니다.</strong><br>메일 메뉴 진입·목록·상세에서는 전체 제목 검사나 네이버 제목 조회를 전혀 실행하지 않습니다.</div>
-        <div class="pm-progress-label"><strong><?php echo $titlePercent; ?>%</strong><span><?php echo number_format($titleProcessed); ?> / <?php echo number_format($titleTotal); ?>건</span></div>
-        <div class="pm-progress-track"><span style="width:<?php echo $titlePercent; ?>%"></span></div>
+      <div class="pm-settings-card pm-title-normalization-card"
+           id="title-refresh"
+           data-title-refresh-card
+           data-title-refresh-active="<?php echo !empty($titleRefresh['active'])?'1':'0'; ?>"
+           data-title-refresh-paused="<?php echo !empty($titleRefresh['paused'])?'1':'0'; ?>"
+           data-title-refresh-status="<?php echo call_user_func($esc,isset($titleRefresh['status'])?$titleRefresh['status']:'ready'); ?>">
+        <?php
+          $titleStatus='대기';
+          if (!empty($titleRefresh['active'])) {
+              $titleStatus=!empty($titleRefresh['paused'])?'일시중지':((isset($titleRefresh['phase'])&&$titleRefresh['phase']==='merging')?'제목 적용 중':'수집 중');
+          } elseif (isset($titleRefresh['status'])&&$titleRefresh['status']==='completed') {
+              $titleStatus='완료';
+          } elseif (isset($titleRefresh['status'])&&$titleRefresh['status']==='cancelled') {
+              $titleStatus='취소됨';
+          }
+        ?>
+        <div class="pm-card-title">
+          <div>
+            <strong>초경량 원본 제목 수집</strong>
+            <span>네이버 제목만 10건씩 별도 파일에 모은 뒤 마지막에 메일 목록에 한 번만 적용합니다.</span>
+          </div>
+          <span class="pm-status-dot <?php echo !empty($titleRefresh['active'])&&empty($titleRefresh['paused'])?'is-on':''; ?>" data-title-refresh-status-label><?php echo $titleStatus; ?></span>
+        </div>
+
+        <div class="pm-alert pm-alert-success">
+          <strong>메일 화면 속도에는 영향을 주지 않습니다.</strong><br>
+          작업 중에는 큰 messages.json을 반복 저장하지 않습니다. 설정 화면을 닫으면 멈추고, 다시 열면 저장된 위치부터 이어집니다.
+        </div>
+
+        <div class="pm-progress-label">
+          <strong data-title-refresh-percent><?php echo $titlePercent; ?>%</strong>
+          <span><span data-title-refresh-processed><?php echo number_format($titleProcessed); ?></span> / <span data-title-refresh-total><?php echo number_format($titleTotal); ?></span>건</span>
+        </div>
+        <div class="pm-progress-track"><span data-title-refresh-progress style="width:<?php echo $titlePercent; ?>%"></span></div>
+
         <div class="pm-sync-state-list">
-          <div><span>확인 완료</span><strong><?php echo number_format($titleProcessed); ?>건</strong></div>
-          <div><span>실제 제목 변경</span><strong><?php echo number_format($titleUpdated); ?>건</strong></div>
-          <div><span>확인 실패</span><strong><?php echo number_format($titleFailed); ?>건</strong></div>
-          <div><span>남은 제목</span><strong><?php echo number_format($titleRemaining); ?>건</strong></div>
-          <div><span>최근 실행</span><strong><?php echo call_user_func($esc,!empty($titleRefresh['last_run_at'])?$titleRefresh['last_run_at']:'아직 없음'); ?></strong></div>
+          <div><span>확인 완료</span><strong><span data-title-refresh-processed><?php echo number_format($titleProcessed); ?></span>건</strong></div>
+          <div><span>수집된 새 제목</span><strong><span data-title-refresh-updated><?php echo number_format($titleUpdated); ?></span>건</strong></div>
+          <div><span>확인 실패</span><strong><span data-title-refresh-failed><?php echo number_format($titleFailed); ?></span>건</strong></div>
+          <div><span>남은 제목</span><strong><span data-title-refresh-remaining><?php echo number_format($titleRemaining); ?></span>건</strong></div>
+          <div><span>최근 작업</span><strong data-title-refresh-last-run><?php echo call_user_func($esc,!empty($titleRefresh['last_run_at'])?$titleRefresh['last_run_at']:'아직 없음'); ?></strong></div>
         </div>
-        <?php if (!empty($titleRefresh['last_error'])): ?><div class="pm-alert pm-alert-error"><strong>실제 오류</strong><br><?php echo call_user_func($esc,$titleRefresh['last_error']); ?></div><?php endif; ?>
-        <?php if (!empty($titleRefresh['last_message'])): ?><div class="pm-help-text"><?php echo call_user_func($esc,$titleRefresh['last_message']); ?></div><?php endif; ?>
+
+        <div class="pm-alert pm-alert-warning" data-title-refresh-notice <?php echo empty($titleRefresh['last_message'])?'hidden':''; ?>>
+          <span data-title-refresh-message><?php echo call_user_func($esc,isset($titleRefresh['last_message'])?$titleRefresh['last_message']:''); ?></span>
+        </div>
+        <div class="pm-alert pm-alert-error" data-title-refresh-error <?php echo empty($titleRefresh['last_error'])?'hidden':''; ?>>
+          <strong>최근 확인 내용</strong><br><span data-title-refresh-error-text><?php echo call_user_func($esc,isset($titleRefresh['last_error'])?$titleRefresh['last_error']:''); ?></span>
+        </div>
+
         <div class="pm-settings-actions pm-wrap-actions">
-          <form method="post" action="public_mail_action.php" onsubmit="return confirm('네이버 원본 제목을 100건씩 다시 가져올까요? 메일 본문과 첨부파일은 받지 않습니다.');"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="start_original_title_refresh"><button type="submit" class="pm-btn pm-btn-primary"><i data-lucide="refresh-cw"></i> 원본 제목 다시 가져오기</button></form>
-          <form method="post" action="public_mail_action.php"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="process_original_title_refresh_batch"><input type="hidden" name="limit" value="100"><button type="submit" class="pm-btn pm-btn-light"><i data-lucide="chevrons-right"></i> 지금 100건 처리</button></form>
-          <form method="post" action="public_mail_action.php"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="pause_original_title_refresh"><button type="submit" class="pm-btn pm-btn-light"><i data-lucide="pause"></i> 일시중지</button></form>
-          <form method="post" action="public_mail_action.php"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="resume_original_title_refresh"><button type="submit" class="pm-btn pm-btn-light"><i data-lucide="play"></i> 다시 시작</button></form>
-          <form method="post" action="public_mail_action.php" onsubmit="return confirm('제목 재수집을 취소할까요? 이미 바뀐 제목은 유지됩니다.');"><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="cancel_original_title_refresh"><button type="submit" class="pm-btn pm-btn-danger"><i data-lucide="square"></i> 취소</button></form>
+          <form method="post" action="public_mail_action.php" onsubmit="return confirm('네이버 원본 제목을 초경량 방식으로 다시 가져올까요? 메일 본문과 첨부파일은 받지 않습니다.');">
+            <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
+            <input type="hidden" name="action" value="start_original_title_refresh">
+            <button type="submit" class="pm-btn pm-btn-primary"><i data-lucide="refresh-cw"></i> 원본 제목 수집 시작</button>
+          </form>
+          <button type="button" class="pm-btn pm-btn-light" data-title-refresh-run-once><i data-lucide="chevrons-right"></i> 지금 10건 처리</button>
+          <form method="post" action="public_mail_action.php">
+            <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
+            <input type="hidden" name="action" value="pause_original_title_refresh">
+            <button type="submit" class="pm-btn pm-btn-light"><i data-lucide="pause"></i> 일시중지</button>
+          </form>
+          <form method="post" action="public_mail_action.php">
+            <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
+            <input type="hidden" name="action" value="resume_original_title_refresh">
+            <button type="submit" class="pm-btn pm-btn-light"><i data-lucide="play"></i> 다시 시작</button>
+          </form>
+          <form method="post" action="public_mail_action.php" onsubmit="return confirm('제목 수집을 취소할까요? 지금까지 모은 제목은 메일 목록에 적용합니다.');">
+            <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
+            <input type="hidden" name="action" value="cancel_original_title_refresh">
+            <button type="submit" class="pm-btn pm-btn-danger"><i data-lucide="square"></i> 취소</button>
+          </form>
         </div>
-        <p class="pm-help-text">진행 중에는 이 설정 화면이 일반 POST 요청으로 100건씩 다음 페이지를 엽니다. JSON 비동기 응답을 사용하지 않습니다. 화면을 닫으면 안전하게 멈추고, 다시 설정 화면을 열면 저장 위치부터 이어집니다.</p>
-        <?php if (!empty($titleRefresh['active']) && empty($titleRefresh['paused'])): ?>
-          <form method="post" action="public_mail_action.php" data-title-refresh-auto-form hidden><input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>"><input type="hidden" name="action" value="process_original_title_refresh_batch"><input type="hidden" name="limit" value="100"></form>
-        <?php endif; ?>
+
+        <p class="pm-help-text">
+          전용 작업자가 제목 10건만 요청합니다. 연결이 끊기면 이 화면은 그대로 유지되고 10초 후 자동 재시도합니다.
+          같은 메일을 두 번 읽지 못하면 그 제목 한 건만 건너뛰고 다음 메일로 계속 진행합니다.
+        </p>
       </div>
 
       <div class="pm-settings-card">
@@ -157,4 +210,4 @@ if($titlePercent>100)$titlePercent=100;
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_713"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_714"></script>
