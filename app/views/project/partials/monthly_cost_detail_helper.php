@@ -220,6 +220,7 @@ function cpms_monthly_summary_labor_detail_rows($pdo, $projectId, $projectName, 
                 }
                 $result['labor'][] = array(
                     'name' => $workerName,
+                    'worker_key' => $workerKey,
                     'company_name' => $companyName,
                     'ratio_label' => $laborRatioLabel,
                     'output_days' => $laborOutputDays,
@@ -237,6 +238,7 @@ function cpms_monthly_summary_labor_detail_rows($pdo, $projectId, $projectName, 
                 if ($hasRange) $outsourcingRatioLabel .= ' (선택기간)';
                 $result['labor_outsourcing'][] = array(
                     'name' => $workerName,
+                    'worker_key' => $workerKey,
                     'ratio_label' => $outsourcingRatioLabel,
                     'output_days' => $outsourcingOutputDays,
                     'total_gongsu' => $outsourcingGongsu,
@@ -252,7 +254,7 @@ function cpms_monthly_summary_labor_detail_rows($pdo, $projectId, $projectName, 
 
         if (cpms_monthly_summary_table_exists($pdo, 'cpms_labor_force_adjustments')) {
             try {
-                $stForce = $pdo->prepare('SELECT amount, memo FROM cpms_labor_force_adjustments WHERE project_id = :pid AND month = :ym LIMIT 1');
+                $stForce = $pdo->prepare('SELECT id, amount, memo FROM cpms_labor_force_adjustments WHERE project_id = :pid AND month = :ym LIMIT 1');
                 $stForce->bindValue(':pid', (int)$projectId, PDO::PARAM_INT);
                 $stForce->bindValue(':ym', (string)$ym);
                 $stForce->execute();
@@ -261,7 +263,10 @@ function cpms_monthly_summary_labor_detail_rows($pdo, $projectId, $projectName, 
                 if ($forceAmount > 0) {
                     $result['labor'][] = array(
                         'name' => '노무비 강제입력',
+                        'worker_key' => 'labor_force_adjustment',
                         'company_name' => '창명건설',
+                        'source_type' => 'labor_force_adjustment',
+                        'source_id' => is_array($forceRow) && isset($forceRow['id']) ? (string)$forceRow['id'] : '',
                         'ratio_label' => '100%',
                         'output_days' => null,
                         'total_gongsu' => null,

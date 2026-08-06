@@ -26,15 +26,10 @@ require __DIR__ . '/../../project/monthly_input.php';
 $cpmsMonthlyInputHtml = ob_get_clean();
 
 require_once __DIR__ . '/partials/monthly_input_vendor_info_helper.php';
-$cpmsMonthlyInputVendorInfo = cpms_monthly_input_vendor_info($pdo, $cpmsMonthlyInputSelectedProjectId);
-$cpmsMonthlyInputVendorInfoHtml = cpms_monthly_input_vendor_info_html($cpmsMonthlyInputVendorInfo);
-$cpmsMonthlyInputMonthLabelMarker = '<div class="font-bold text-base ml-3">월 선택 :</div>';
-if ($cpmsMonthlyInputVendorInfoHtml !== '' && strpos($cpmsMonthlyInputHtml, $cpmsMonthlyInputMonthLabelMarker) !== false) {
-    $cpmsMonthlyInputHtml = str_replace(
-        $cpmsMonthlyInputMonthLabelMarker,
-        $cpmsMonthlyInputVendorInfoHtml . $cpmsMonthlyInputMonthLabelMarker,
-        $cpmsMonthlyInputHtml
-    );
+$cpmsMonthlyInputVendorInfoMap = cpms_monthly_input_vendor_info_map($pdo, $cpmsMonthlyInputSelectedProjectId);
+$cpmsMonthlyInputVendorInfoMapJson = json_encode($cpmsMonthlyInputVendorInfoMap, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+if (!is_string($cpmsMonthlyInputVendorInfoMapJson) || $cpmsMonthlyInputVendorInfoMapJson === '') {
+    $cpmsMonthlyInputVendorInfoMapJson = '{}';
 }
 
 require_once __DIR__ . '/../../project/partials/monthly_cost_detail_helper.php';
@@ -128,50 +123,87 @@ foreach ($cpmsLabels as $cpmsSectionKey => $cpmsSectionTitle) {
 
 ?>
 <style>
-.cpms-monthly-input-vendor-info {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.cpms-monthly-input-vendor-item {
-  display: inline-flex;
-  align-items: center;
-  min-height: 42px;
-  overflow: hidden;
-  border: 1px solid #fde68a;
-  border-radius: 12px;
-  background: #fff;
-}
-.cpms-monthly-input-vendor-label {
-  align-self: stretch;
-  display: inline-flex;
-  align-items: center;
-  padding: 0 9px;
-  background: #fffbeb;
-  color: #92400e;
-  font-size: 12px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-.cpms-monthly-input-vendor-value {
-  min-width: 105px;
+.cpms-monthly-table-scroll table { min-width: 1460px; }
+.cpms-monthly-vendor-extra {
+  min-width: 125px;
   max-width: 190px;
-  padding: 0 10px;
-  overflow: hidden;
-  color: #111827;
-  font-size: 13px;
-  font-weight: 800;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
+.cpms-monthly-vendor-extra.is-business-no { min-width: 145px; }
 @media (max-width: 767px) {
-  .cpms-monthly-input-vendor-info { display: none !important; }
+  .cpms-monthly-table-scroll table { min-width: 1100px; }
+  .cpms-monthly-vendor-extra { display: none !important; }
 }
 </style>
 <?php
 echo $cpmsMonthlyInputHtml;
 ?>
+<script>
+(function () {
+    'use strict';
+
+    var vendorMap = <?php echo $cpmsMonthlyInputVendorInfoMapJson; ?>;
+    var tableWrap = document.querySelector('.cpms-monthly-table-scroll');
+    var table = tableWrap ? tableWrap.querySelector('table') : null;
+    if (!table || !table.tHead || !table.tHead.rows.length || !table.tBodies || !table.tBodies.length) return;
+    if (table.getAttribute('data-cpms-vendor-columns-ready') === '1') return;
+
+    function trimText(value) {
+        return String(value || '').replace(/^\s+|\s+$/g, '');
+    }
+
+    function vendorKey(value) {
+        return trimText(value).replace(/\s+/g, '').toLowerCase();
+    }
+
+    function makeHeader(label, extraClass) {
+        var th = document.createElement('th');
+        th.className = 'border p-2 cpms-monthly-vendor-extra' + (extraClass ? ' ' + extraClass : '');
+        th.textContent = label;
+        return th;
+    }
+
+    function makeCell(value, extraClass, keepBlank) {
+        var td = document.createElement('td');
+        td.className = 'border p-2 cpms-monthly-vendor-extra' + (extraClass ? ' ' + extraClass : '');
+        var text = trimText(value);
+        td.textContent = keepBlank ? text : (text || '-');
+        if (td.textContent !== '') td.title = td.textContent;
+        return td;
+    }
+
+    var headerRow = table.tHead.rows[0];
+    if (!headerRow.cells || headerRow.cells.length < 3) return;
+    var headerAnchor = headerRow.cells[2];
+    headerRow.insertBefore(makeHeader('대표자명', ''), headerAnchor);
+    headerRow.insertBefore(makeHeader('전화번호', ''), headerAnchor);
+    headerRow.insertBefore(makeHeader('사업자등록번호', 'is-business-no'), headerAnchor);
+
+    var rows = table.tBodies[0].rows;
+    for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        if (!row.cells || row.cells.length < 2) continue;
+
+        var companyCell = row.cells[1];
+        var companyName = trimText(companyCell.textContent);
+        var firstText = trimText(row.cells[0] ? row.cells[0].textContent : '');
+
+        if (companyCell.colSpan && companyCell.colSpan > 1) {
+            companyCell.colSpan = companyCell.colSpan + 3;
+            continue;
+        }
+
+        var info = vendorMap[vendorKey(companyName)] || {};
+        var isDetailRow = firstText === '' && companyName !== '' && companyName !== '데이터 없음';
+        var anchor = row.cells[2] || null;
+        row.insertBefore(makeCell(isDetailRow ? info.representative_name : '', '', !isDetailRow), anchor);
+        row.insertBefore(makeCell(isDetailRow ? info.contact : '', '', !isDetailRow), anchor);
+        row.insertBefore(makeCell(isDetailRow ? info.business_no : '', 'is-business-no', !isDetailRow), anchor);
+    }
+
+    table.setAttribute('data-cpms-vendor-columns-ready', '1');
+})();
+</script>
 <script>
 (function () {
     'use strict';
@@ -307,10 +339,10 @@ echo $cpmsMonthlyInputHtml;
 
     for (var i = 0; i < rows.length; i++) {
         var row = rows[i];
-        if (!row.cells || row.cells.length < 4) continue;
+        if (!row.cells || row.cells.length < 7) continue;
         var firstText = trimText(row.cells[0].textContent);
         var secondText = row.cells.length > 1 ? trimText(row.cells[1].textContent) : '';
-        var thirdText = row.cells.length > 2 ? trimText(row.cells[2].textContent) : '';
+        var detailText = row.cells.length > 5 ? trimText(row.cells[5].textContent) : '';
 
         if (Object.prototype.hasOwnProperty.call(sectionMap, firstText)) {
             currentSectionTitle = firstText;
@@ -327,9 +359,9 @@ echo $cpmsMonthlyInputHtml;
         if (!currentConfig || firstText !== '' || secondText === '데이터 없음') continue;
 
         for (var monthIndex = 0; monthIndex < displayMonths.length; monthIndex++) {
-            var cellIndex = 3 + monthIndex;
+            var cellIndex = 6 + monthIndex;
             if (cellIndex >= row.cells.length - 1) break;
-            makeButton(row.cells[cellIndex], currentConfig, displayMonths[monthIndex], secondText, thirdText);
+            makeButton(row.cells[cellIndex], currentConfig, displayMonths[monthIndex], secondText, detailText);
         }
     }
 })();

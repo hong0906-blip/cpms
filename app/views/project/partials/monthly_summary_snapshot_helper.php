@@ -215,25 +215,37 @@ function cpms_monthly_summary_snapshot_metrics($project, $current, $previous, $r
 }}
 
 
+if (!function_exists('cpms_monthly_summary_snapshot_valid_datetime')) {
+function cpms_monthly_summary_snapshot_valid_datetime($value) {
+    $value = trim((string)$value);
+    return preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $value) ? $value : '';
+}}
+
 if (!function_exists('cpms_monthly_summary_event_change_context')) {
-function cpms_monthly_summary_event_change_context($pdo, $projectId, $snapshotDate, $ym) {
-    $empty = array('deltas'=>array(), 'target_ids'=>array(), 'target_deltas'=>array());
+function cpms_monthly_summary_event_change_context($pdo, $projectId, $rangeStart, $rangeEnd, $ym) {
+    $empty = array('deltas'=>array(), 'target_ids'=>array(), 'target_deltas'=>array(), 'worker_keys'=>array());
     $projectId = (int)$projectId;
-    $snapshotDate = cpms_monthly_summary_snapshot_valid_date($snapshotDate);
+    $rangeStart = cpms_monthly_summary_snapshot_valid_datetime($rangeStart);
+    $rangeEnd = cpms_monthly_summary_snapshot_valid_datetime($rangeEnd);
     $ym = cpms_monthly_summary_snapshot_valid_ym($ym);
-    if (!$pdo || $projectId <= 0 || $snapshotDate === '' || $ym === '' || !cpms_monthly_summary_snapshot_table_exists($pdo, 'cpms_cost_data_events')) return $empty;
+    if (!$pdo || $projectId <= 0 || $rangeStart === '' || $rangeEnd === '' || $ym === '' || $rangeEnd <= $rangeStart || !cpms_monthly_summary_snapshot_table_exists($pdo, 'cpms_cost_data_events')) return $empty;
     try {
+        /*
+         * 스냅샷끼리 비교하는 것이므로 달력상의 오늘 00~24시가 아니라
+         * 전날 스냅샷이 찍힌 시각부터 현재 스냅샷이 찍힌 시각까지의 변경을 찾는다.
+         * 전날 오후에 입력된 내역도 오늘 스냅샷에서 증가한 목록으로 정확히 잡힌다.
+         */
         $sql = "SELECT cost_type,target_type,target_id,delta_amount,event_action,event_at
                   FROM cpms_cost_data_events
                  WHERE project_id=:project_id
-                   AND event_at>=:day_start
-                   AND event_at<:day_end
+                   AND event_at>:range_start
+                   AND event_at<=:range_end
                    AND (settlement_ym=:ym OR settlement_ym IS NULL OR settlement_ym='')
                  ORDER BY event_at ASC,id ASC";
         $st = $pdo->prepare($sql);
         $st->bindValue(':project_id', $projectId, PDO::PARAM_INT);
-        $st->bindValue(':day_start', $snapshotDate . ' 00:00:00', PDO::PARAM_STR);
-        $st->bindValue(':day_end', date('Y-m-d', strtotime($snapshotDate . ' +1 day')) . ' 00:00:00', PDO::PARAM_STR);
+        $st->bindValue(':range_start', $rangeStart, PDO::PARAM_STR);
+        $st->bindValue(':range_end', $rangeEnd, PDO::PARAM_STR);
         $st->bindValue(':ym', $ym, PDO::PARAM_STR);
         $st->execute();
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -245,19 +257,59 @@ function cpms_monthly_summary_event_change_context($pdo, $projectId, $snapshotDa
             $delta = isset($row['delta_amount']) ? (float)$row['delta_amount'] : 0.0;
             if (!isset($empty['deltas'][$costType])) $empty['deltas'][$costType] = 0.0;
             $empty['deltas'][$costType] += $delta;
+
             $targetType = strtolower(trim(isset($row['target_type']) ? (string)$row['target_type'] : ''));
             $targetId = trim(isset($row['target_id']) ? (string)$row['target_id'] : '');
             if ($targetId === '') continue;
+            if ($targetType === '') $targetType = $costType;
+
             if (!isset($empty['target_ids'][$costType])) $empty['target_ids'][$costType] = array();
             if (!isset($empty['target_ids'][$costType][$targetType])) $empty['target_ids'][$costType][$targetType] = array();
             $empty['target_ids'][$costType][$targetType][$targetId] = true;
+
             if (!isset($empty['target_deltas'][$costType])) $empty['target_deltas'][$costType] = array();
             if (!isset($empty['target_deltas'][$costType][$targetType])) $empty['target_deltas'][$costType][$targetType] = array();
             if (!isset($empty['target_deltas'][$costType][$targetType][$targetId])) $empty['target_deltas'][$costType][$targetType][$targetId] = 0.0;
             $empty['target_deltas'][$costType][$targetType][$targetId] += $delta;
         }
+
+        /* 노무 공수 승인 이벤트는 이벤트 ID가 아니라 override ID를 가리키므로 근로자 키로 다시 연결한다. */
+        $laborOverrideIds = array();
+        if (isset($empty['target_ids']['labor']['labor_gongsu_override']) && is_array($empty['target_ids']['labor']['labor_gongsu_override'])) {
+            foreach (array_keys($empty['target_ids']['labor']['labor_gongsu_override']) as $overrideId) {
+                $overrideId = (int)$overrideId;
+                if ($overrideId > 0) $laborOverrideIds[$overrideId] = $overrideId;
+            }
+        }
+        if (count($laborOverrideIds) > 0 && cpms_monthly_summary_snapshot_table_exists($pdo, 'cpms_labor_gongsu_overrides')) {
+            $holders = array();
+            $params = array();
+            foreach (array_values($laborOverrideIds) as $index=>$overrideId) {
+                $key = ':labor_override_' . $index;
+                $holders[] = $key;
+                $params[$key] = (int)$overrideId;
+            }
+            try {
+                $stLabor = $pdo->prepare('SELECT id,worker_key,worker_name FROM cpms_labor_gongsu_overrides WHERE id IN (' . implode(',', $holders) . ')');
+                foreach ($params as $key=>$value) $stLabor->bindValue($key, $value, PDO::PARAM_INT);
+                $stLabor->execute();
+                $laborRows = $stLabor->fetchAll(PDO::FETCH_ASSOC);
+                if (is_array($laborRows)) {
+                    foreach ($laborRows as $laborRow) {
+                        $workerKey = isset($laborRow['worker_key']) ? trim((string)$laborRow['worker_key']) : '';
+                        if ($workerKey === '' && isset($laborRow['worker_name'])) $workerKey = trim((string)$laborRow['worker_name']);
+                        if ($workerKey !== '') {
+                            $workerKey = preg_replace('/\s+/u', '', $workerKey);
+                            $workerKey = function_exists('mb_strtolower') ? mb_strtolower($workerKey, 'UTF-8') : strtolower($workerKey);
+                            $empty['worker_keys'][$workerKey] = true;
+                        }
+                    }
+                }
+            } catch (Exception $laborException) {
+            }
+        }
     } catch (Exception $e) {
-        return array('deltas'=>array(), 'target_ids'=>array(), 'target_deltas'=>array());
+        return array('deltas'=>array(), 'target_ids'=>array(), 'target_deltas'=>array(), 'worker_keys'=>array());
     }
     return $empty;
 }}
@@ -269,9 +321,12 @@ function cpms_monthly_summary_project_snapshot_change($pdo, $projectId, $snapsho
     $result = array(
         'snapshot_date'=>$snapshotDate,
         'previous_date'=>'',
+        'event_range_start'=>'',
+        'event_range_end'=>'',
         'deltas'=>array('labor'=>0.0,'equipment'=>0.0,'material'=>0.0,'outsourcing'=>0.0,'monthly_total'=>0.0),
         'target_ids'=>array(),
         'target_deltas'=>array(),
+        'worker_keys'=>array(),
     );
     if (!$pdo || (int)$projectId <= 0 || $snapshotDate === '' || $ym === '' || !cpms_monthly_summary_snapshot_table_exists($pdo, 'cpms_ai_daily_snapshots')) return $result;
     try {
@@ -282,14 +337,36 @@ function cpms_monthly_summary_project_snapshot_change($pdo, $projectId, $snapsho
         $stPrev->execute();
         $previousDate = cpms_monthly_summary_snapshot_valid_date($stPrev->fetchColumn());
         $result['previous_date'] = $previousDate;
+
         $currentMap = cpms_monthly_summary_snapshot_load_map($pdo, $snapshotDate);
         $previousMap = $previousDate !== '' ? cpms_monthly_summary_snapshot_load_map($pdo, $previousDate) : array();
         $current = isset($currentMap[(int)$projectId]) ? $currentMap[(int)$projectId] : array();
         $previous = isset($previousMap[(int)$projectId]) ? $previousMap[(int)$projectId] : array();
         $result['deltas'] = cpms_monthly_summary_snapshot_delta_map($current, $previous);
-        $events = cpms_monthly_summary_event_change_context($pdo, $projectId, $snapshotDate, $ym);
+
+        $rangeStart = '';
+        if (is_array($previous)) {
+            $rangeStart = cpms_monthly_summary_snapshot_valid_datetime(isset($previous['last_captured_at']) ? $previous['last_captured_at'] : '');
+            if ($rangeStart === '') $rangeStart = cpms_monthly_summary_snapshot_valid_datetime(isset($previous['captured_at']) ? $previous['captured_at'] : '');
+        }
+        if ($rangeStart === '' && $previousDate !== '') $rangeStart = $previousDate . ' 00:00:00';
+
+        $rangeEnd = '';
+        if (is_array($current)) {
+            $rangeEnd = cpms_monthly_summary_snapshot_valid_datetime(isset($current['last_captured_at']) ? $current['last_captured_at'] : '');
+            if ($rangeEnd === '') $rangeEnd = cpms_monthly_summary_snapshot_valid_datetime(isset($current['captured_at']) ? $current['captured_at'] : '');
+        }
+        if ($rangeEnd === '') $rangeEnd = $snapshotDate . ' 23:59:59';
+        if ($rangeStart === '' || $rangeStart >= $rangeEnd) {
+            $rangeStart = date('Y-m-d H:i:s', strtotime($snapshotDate . ' -1 day'));
+        }
+
+        $result['event_range_start'] = $rangeStart;
+        $result['event_range_end'] = $rangeEnd;
+        $events = cpms_monthly_summary_event_change_context($pdo, $projectId, $rangeStart, $rangeEnd, $ym);
         $result['target_ids'] = isset($events['target_ids']) ? $events['target_ids'] : array();
         $result['target_deltas'] = isset($events['target_deltas']) ? $events['target_deltas'] : array();
+        $result['worker_keys'] = isset($events['worker_keys']) ? $events['worker_keys'] : array();
     } catch (Exception $e) {
         return $result;
     }
@@ -305,7 +382,28 @@ function cpms_monthly_summary_change_target_delta($change, $costType, $aliases, 
         if ($alias === '') continue;
         if (isset($change['target_deltas'][$costType][$alias][$targetId])) return (float)$change['target_deltas'][$costType][$alias][$targetId];
     }
+    /* 저장 화면마다 target_type 이름이 조금 달라도 같은 비용구분 안의 원본 ID가 같으면 같은 행으로 본다. */
+    foreach ($change['target_deltas'][$costType] as $targetType=>$targetMap) {
+        if (is_array($targetMap) && isset($targetMap[$targetId])) return (float)$targetMap[$targetId];
+    }
     return 0.0;
+}}
+
+if (!function_exists('cpms_monthly_summary_change_worker_key')) {
+function cpms_monthly_summary_change_worker_key($value) {
+    $value = preg_replace('/\s+/u', '', trim((string)$value));
+    if ($value === '') return '';
+    return function_exists('mb_strtolower') ? mb_strtolower($value, 'UTF-8') : strtolower($value);
+}}
+
+if (!function_exists('cpms_monthly_summary_change_worker_marked')) {
+function cpms_monthly_summary_change_worker_marked($change, $workerKey, $workerName) {
+    if (!is_array($change) || !isset($change['worker_keys']) || !is_array($change['worker_keys'])) return false;
+    $keys = array(cpms_monthly_summary_change_worker_key($workerKey), cpms_monthly_summary_change_worker_key($workerName));
+    foreach ($keys as $key) {
+        if ($key !== '' && isset($change['worker_keys'][$key])) return true;
+    }
+    return false;
 }}
 
 if (!function_exists('cpms_monthly_summary_apply_detail_change_context')) {
@@ -313,6 +411,26 @@ function cpms_monthly_summary_apply_detail_change_context($monthPayload, $change
     if (!is_array($monthPayload)) $monthPayload = array();
     if (!is_array($change)) $change = array();
     $monthPayload['change'] = $change;
+
+    foreach (array('labor','labor_outsourcing') as $laborSection) {
+        if (!isset($monthPayload[$laborSection]) || !is_array($monthPayload[$laborSection])) continue;
+        foreach ($monthPayload[$laborSection] as $index=>$row) {
+            $delta = 0.0;
+            $isChanged = false;
+            $sourceType = isset($row['source_type']) ? strtolower(trim((string)$row['source_type'])) : '';
+            $sourceId = isset($row['source_id']) ? (string)$row['source_id'] : '';
+            if ($sourceType === 'labor_force_adjustment' && $sourceId !== '') {
+                $delta = cpms_monthly_summary_change_target_delta($change, 'labor', array('labor_force_adjustment','labor_force'), $sourceId);
+                $isChanged = abs($delta) > 0.01;
+            } else {
+                $workerKey = isset($row['worker_key']) ? (string)$row['worker_key'] : '';
+                $workerName = isset($row['name']) ? (string)$row['name'] : '';
+                $isChanged = cpms_monthly_summary_change_worker_marked($change, $workerKey, $workerName);
+            }
+            $monthPayload[$laborSection][$index]['change_amount'] = $delta;
+            $monthPayload[$laborSection][$index]['is_changed'] = $isChanged;
+        }
+    }
 
     if (isset($monthPayload['equipment']) && is_array($monthPayload['equipment'])) {
         foreach ($monthPayload['equipment'] as $index=>$row) {
@@ -322,7 +440,7 @@ function cpms_monthly_summary_apply_detail_change_context($monthPayload, $change
                 $delta += cpms_monthly_summary_change_target_delta($change, 'equipment', array('equipment','equipment_usage'), $sourceId);
             }
             $monthPayload['equipment'][$index]['change_amount'] = $delta;
-            $monthPayload['equipment'][$index]['is_changed'] = $delta > 0.01;
+            $monthPayload['equipment'][$index]['is_changed'] = abs($delta) > 0.01;
         }
     }
 
@@ -331,7 +449,7 @@ function cpms_monthly_summary_apply_detail_change_context($monthPayload, $change
             $sourceId = isset($row['source_id']) ? (string)$row['source_id'] : '';
             $delta = cpms_monthly_summary_change_target_delta($change, 'material', array('material','material_usage'), $sourceId);
             $monthPayload['material'][$index]['change_amount'] = $delta;
-            $monthPayload['material'][$index]['is_changed'] = $delta > 0.01;
+            $monthPayload['material'][$index]['is_changed'] = abs($delta) > 0.01;
         }
     }
 
@@ -340,7 +458,7 @@ function cpms_monthly_summary_apply_detail_change_context($monthPayload, $change
             $sourceId = isset($row['source_id']) ? (string)$row['source_id'] : '';
             $delta = cpms_monthly_summary_change_target_delta($change, 'outsourcing', array('outsourcing','outsourcing_cost'), $sourceId);
             $monthPayload['manual_outsourcing'][$index]['change_amount'] = $delta;
-            $monthPayload['manual_outsourcing'][$index]['is_changed'] = $delta > 0.01;
+            $monthPayload['manual_outsourcing'][$index]['is_changed'] = abs($delta) > 0.01;
         }
     }
     return $monthPayload;

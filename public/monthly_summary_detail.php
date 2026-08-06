@@ -74,6 +74,7 @@ try {
             'deltas'=>array('labor'=>0.0,'equipment'=>0.0,'material'=>0.0,'outsourcing'=>0.0,'monthly_total'=>0.0),
             'target_ids'=>array(),
             'target_deltas'=>array(),
+            'worker_keys'=>array(),
         );
     $monthPayload = cpms_monthly_summary_apply_detail_change_context($monthPayload, $change);
 
