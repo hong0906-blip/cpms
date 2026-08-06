@@ -20,7 +20,7 @@ $titleRemaining=isset($titleRefresh['remaining_count'])?(int)$titleRefresh['rema
 $titlePercent=$titleTotal>0?(int)floor(($titleProcessed/$titleTotal)*100):0;
 if($titlePercent>100)$titlePercent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_714">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_715">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -72,7 +72,7 @@ if($titlePercent>100)$titlePercent=100;
       <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>설치 버전·목록 속도 상태</strong><span>실제 적용된 핵심 파일과 메일 색인 상태를 확인합니다.</span></div><span class="pm-status-dot <?php echo !empty($indexStatus['writable'])?'is-on':''; ?>"><?php echo !empty($indexStatus['writable'])?'정상':'확인 필요'; ?></span></div>
         <div class="pm-sync-state-list">
-          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.14'); ?></strong></div>
+          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.15'); ?></strong></div>
           <div><span>목록 색인 버전</span><strong><?php echo isset($indexStatus['version'])?(int)$indexStatus['version']:0; ?></strong></div>
           <div><span>색인 메일 수</span><strong><?php echo number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0); ?>건</strong></div>
           <div><span>마지막 색인 갱신</span><strong><?php echo call_user_func($esc,!empty($indexStatus['updated_at'])?$indexStatus['updated_at']:'아직 없음'); ?></strong></div>
@@ -109,15 +109,15 @@ if($titlePercent>100)$titlePercent=100;
         ?>
         <div class="pm-card-title">
           <div>
-            <strong>초경량 원본 제목 수집</strong>
-            <span>네이버 제목만 10건씩 별도 파일에 모은 뒤 마지막에 메일 목록에 한 번만 적용합니다.</span>
+            <strong>스마트빌 전자세금계산서 제목 복구</strong>
+            <span>저장된 메일에서 스마트빌 발신 메일만 골라 원본 제목을 한 건씩 확인합니다.</span>
           </div>
           <span class="pm-status-dot <?php echo !empty($titleRefresh['active'])&&empty($titleRefresh['paused'])?'is-on':''; ?>" data-title-refresh-status-label><?php echo $titleStatus; ?></span>
         </div>
 
         <div class="pm-alert pm-alert-success">
-          <strong>메일 화면 속도에는 영향을 주지 않습니다.</strong><br>
-          작업 중에는 큰 messages.json을 반복 저장하지 않습니다. 설정 화면을 닫으면 멈추고, 다시 열면 저장된 위치부터 이어집니다.
+          <strong>전체 5,559건을 다시 확인하지 않습니다.</strong><br>
+          스마트빌 발신 메일만 대상으로 하며, 일반 메일 목록과 상세화면에서는 아무 복구 작업도 실행하지 않습니다.
         </div>
 
         <div class="pm-progress-label">
@@ -127,10 +127,10 @@ if($titlePercent>100)$titlePercent=100;
         <div class="pm-progress-track"><span data-title-refresh-progress style="width:<?php echo $titlePercent; ?>%"></span></div>
 
         <div class="pm-sync-state-list">
-          <div><span>확인 완료</span><strong><span data-title-refresh-processed><?php echo number_format($titleProcessed); ?></span>건</strong></div>
-          <div><span>수집된 새 제목</span><strong><span data-title-refresh-updated><?php echo number_format($titleUpdated); ?></span>건</strong></div>
-          <div><span>확인 실패</span><strong><span data-title-refresh-failed><?php echo number_format($titleFailed); ?></span>건</strong></div>
-          <div><span>남은 제목</span><strong><span data-title-refresh-remaining><?php echo number_format($titleRemaining); ?></span>건</strong></div>
+          <div><span>대상 확인</span><strong><span data-title-refresh-processed><?php echo number_format($titleProcessed); ?></span>건</strong></div>
+          <div><span>복구된 제목</span><strong><span data-title-refresh-updated><?php echo number_format($titleUpdated); ?></span>건</strong></div>
+          <div><span>건너뜀</span><strong><span data-title-refresh-failed><?php echo number_format($titleFailed); ?></span>건</strong></div>
+          <div><span>남은 대상</span><strong><span data-title-refresh-remaining><?php echo number_format($titleRemaining); ?></span>건</strong></div>
           <div><span>최근 작업</span><strong data-title-refresh-last-run><?php echo call_user_func($esc,!empty($titleRefresh['last_run_at'])?$titleRefresh['last_run_at']:'아직 없음'); ?></strong></div>
         </div>
 
@@ -142,12 +142,12 @@ if($titlePercent>100)$titlePercent=100;
         </div>
 
         <div class="pm-settings-actions pm-wrap-actions">
-          <form method="post" action="public_mail_action.php" onsubmit="return confirm('네이버 원본 제목을 초경량 방식으로 다시 가져올까요? 메일 본문과 첨부파일은 받지 않습니다.');">
+          <form method="post" action="public_mail_action.php" onsubmit="return confirm('스마트빌에서 보낸 전자세금계산서 메일 제목만 복구할까요? 일반 메일은 확인하지 않습니다.');">
             <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
-            <input type="hidden" name="action" value="start_original_title_refresh">
-            <button type="submit" class="pm-btn pm-btn-primary"><i data-lucide="refresh-cw"></i> 원본 제목 수집 시작</button>
+            <input type="hidden" name="action" value="start_smartbill_title_refresh">
+            <button type="submit" class="pm-btn pm-btn-primary"><i data-lucide="refresh-cw"></i> 스마트빌 제목 복구 시작</button>
           </form>
-          <button type="button" class="pm-btn pm-btn-light" data-title-refresh-run-once><i data-lucide="chevrons-right"></i> 지금 10건 처리</button>
+          <button type="button" class="pm-btn pm-btn-light" data-title-refresh-run-once><i data-lucide="chevrons-right"></i> 지금 1건 처리</button>
           <form method="post" action="public_mail_action.php">
             <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
             <input type="hidden" name="action" value="pause_original_title_refresh">
@@ -158,7 +158,7 @@ if($titlePercent>100)$titlePercent=100;
             <input type="hidden" name="action" value="resume_original_title_refresh">
             <button type="submit" class="pm-btn pm-btn-light"><i data-lucide="play"></i> 다시 시작</button>
           </form>
-          <form method="post" action="public_mail_action.php" onsubmit="return confirm('제목 수집을 취소할까요? 지금까지 모은 제목은 메일 목록에 적용합니다.');">
+          <form method="post" action="public_mail_action.php" onsubmit="return confirm('스마트빌 제목 복구를 취소할까요? 지금까지 복구된 제목은 메일 목록에 적용합니다.');">
             <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
             <input type="hidden" name="action" value="cancel_original_title_refresh">
             <button type="submit" class="pm-btn pm-btn-danger"><i data-lucide="square"></i> 취소</button>
@@ -166,8 +166,7 @@ if($titlePercent>100)$titlePercent=100;
         </div>
 
         <p class="pm-help-text">
-          전용 작업자가 제목 10건만 요청합니다. 연결이 끊기면 이 화면은 그대로 유지되고 10초 후 자동 재시도합니다.
-          같은 메일을 두 번 읽지 못하면 그 제목 한 건만 건너뛰고 다음 메일로 계속 진행합니다.
+          스마트빌 메일 제목을 한 번에 1건만 요청합니다. 네이버에 접속하기 전에 다음 위치를 먼저 저장하므로, 특정 메일에서 서버 응답이 끊겨도 그 1건만 자동으로 건너뛰고 계속 진행합니다.
         </p>
       </div>
 
@@ -210,4 +209,4 @@ if($titlePercent>100)$titlePercent=100;
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_714"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_715"></script>

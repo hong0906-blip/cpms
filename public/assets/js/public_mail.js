@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 첨부파일은 브라우저 기본 다운로드로 처리합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.14
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.15
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.14';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.15';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -257,7 +257,7 @@
         xhr.open('POST','public_mail_title_refresh_worker.php',true);
         xhr.setRequestHeader('Content-Type','application/x-www-form-urlencoded; charset=UTF-8');
         xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
-        xhr.timeout=20000;
+        xhr.timeout=15000;
 
         function finish(){
             titleRefreshBusy=false;
@@ -276,7 +276,7 @@
             if(xhr.readyState!==4)return;
             var result=parseJsonText(xhr.responseText||'');
             if(!result){
-                retryAfterFailure('작업 요청의 연결이 잠시 끊겼습니다.',10000);
+                retryAfterFailure('스마트빌 메일 1건 처리 중 응답이 끊겼습니다. 다음 요청에서 해당 1건만 자동으로 건너뜁니다.',5000);
                 return;
             }
 
@@ -300,13 +300,13 @@
 
             titleRefreshFailureCount++;
             var retrySeconds=parseInt(result.retry_after,10)||10;
-            showTitleRefreshConnectionMessage(result.message||'네이버 연결이 잠시 끊겼습니다.',true);
+            showTitleRefreshConnectionMessage(result.message||'스마트빌 제목 1건을 건너뛰고 다음 메일로 계속합니다.',true);
             if(titleRefreshCardIsRunnable())scheduleTitleRefreshWorker(retrySeconds*1000);
         };
 
-        xhr.onerror=function(){retryAfterFailure('네트워크 연결이 잠시 끊겼습니다.',10000);};
-        xhr.ontimeout=function(){retryAfterFailure('제목 10건 처리 응답이 늦어지고 있습니다.',10000);};
-        xhr.send(encodeForm({csrf_token:csrf(),limit:10}));
+        xhr.onerror=function(){retryAfterFailure('스마트빌 메일 1건 처리 중 연결이 끊겼습니다. 다음 요청에서 이 1건만 건너뜁니다.',5000);};
+        xhr.ontimeout=function(){retryAfterFailure('스마트빌 제목 1건의 응답이 늦어 중단했습니다. 다음 요청에서 이 1건만 건너뜁니다.',5000);};
+        xhr.send(encodeForm({csrf_token:csrf(),limit:1}));
     }
 
     function bindOriginalTitleRefreshWorker(){

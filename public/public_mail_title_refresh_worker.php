@@ -2,16 +2,16 @@
 /**
  * 파일 경로: C:\www\cpms\public\public_mail_title_refresh_worker.php
  *
- * 네이버 원본 제목을 한 번에 최대 10건만 읽는 초경량 작업자입니다.
+ * 스마트빌 전자세금계산서 메일 제목을 한 번에 1건만 읽는 전용 작업자입니다.
  * 설정 화면은 그대로 유지하고, 요청이 끊겨도 저장된 위치부터 다시 시도합니다.
  * PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.14
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.15
  */
 
 @ini_set('display_errors', '0');
 @ini_set('html_errors', '0');
-@ini_set('memory_limit', '256M');
-@set_time_limit(15);
+@ini_set('memory_limit', '128M');
+@set_time_limit(12);
 @ignore_user_abort(true);
 if (ob_get_level() === 0) @ob_start();
 
@@ -70,7 +70,7 @@ try {
      */
     if (function_exists('session_write_close')) @session_write_close();
 
-    $limit = isset($_POST['limit']) ? (int)$_POST['limit'] : 10;
+    $limit = 1;
     $service = new PublicMailService();
     $result = $service->processOriginalTitleRefreshWorkerStep($limit);
     $status = !empty($result['ok']) ? 200 : 503;
@@ -82,6 +82,6 @@ try {
         'retryable'=>true,
         'retry_after'=>10,
         'error_code'=>'worker_exception',
-        'message'=>'제목 작업 연결이 잠시 끊겼습니다. 저장된 위치부터 10초 후 자동으로 다시 시도합니다.'
+        'message'=>'스마트빌 제목 1건 처리 중 오류가 발생했습니다. 다음 요청에서 해당 1건만 건너뛰고 계속합니다.'
     ), 503);
 }

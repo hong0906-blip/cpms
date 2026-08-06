@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.14';
+    const VERSION = '1.7.15';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -156,8 +156,15 @@ class PublicMailStorageService
                 'failed_count' => 0,
                 'remaining_count' => 0,
                 'last_batch_count' => 0,
+                'mode' => 'smartbill_only',
+                'target_name' => '스마트빌 전자세금계산서',
+                'current_position' => -1,
+                'current_mailbox' => '',
+                'current_uid' => 0,
+                'inflight' => array(),
+                'skipped_items' => array(),
                 'last_error_code' => '',
-                'last_message' => '네이버 원본 제목 재수집을 아직 시작하지 않았습니다.',
+                'last_message' => '스마트빌 제목 전용 복구를 아직 시작하지 않았습니다.',
                 'last_error' => ''
             )
         );

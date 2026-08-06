@@ -230,6 +230,40 @@ class PublicMailImapClient
         return $result;
     }
 
+    /**
+     * 스마트빌 제목 복구용 단일 UID 조회입니다.
+     * 문제가 있는 메일이 다른 메일까지 함께 멈추지 않도록 반드시 1건만 요청합니다.
+     */
+    public function fetchSingleSubjectHeader($uid)
+    {
+        $this->assertMailboxSelected();
+        $uid = (int)$uid;
+        if ($uid <= 0) throw new \InvalidArgumentException('메일 UID가 올바르지 않습니다.');
+
+        $response = $this->command(
+            'UID FETCH ' . $uid . ' (UID BODY.PEEK[HEADER.FIELDS (SUBJECT)])',
+            262144
+        );
+        if (!$response['ok']) {
+            throw new \RuntimeException('스마트빌 메일 제목을 읽지 못했습니다: UID ' . $uid);
+        }
+
+        if (!empty($response['literal_contexts']) && is_array($response['literal_contexts'])) {
+            foreach ($response['literal_contexts'] as $context) {
+                if (!is_array($context)) continue;
+                $line = isset($context['line']) ? (string)$context['line'] : '';
+                $literal = isset($context['literal']) ? (string)$context['literal'] : '';
+                if ($literal !== '' && preg_match('/\\bUID\\s+' . preg_quote((string)$uid, '/') . '\\b/i', $line)) {
+                    return $literal;
+                }
+            }
+        }
+        if (!empty($response['literals']) && isset($response['literals'][0])) {
+            return (string)$response['literals'][0];
+        }
+        throw new \RuntimeException('스마트빌 메일 제목 응답이 비어 있습니다: UID ' . $uid);
+    }
+
     public function fetchRawPreview($uid, $maximumBytes)
     {
         $this->assertMailboxSelected();
