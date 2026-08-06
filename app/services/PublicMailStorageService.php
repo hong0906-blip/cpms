@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.16';
+    const VERSION = '1.7.17';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -169,6 +169,9 @@ class PublicMailStorageService
                 'inflight' => array(),
                 'skipped_items' => array(),
                 'last_error_code' => '',
+                'last_result_reason' => '',
+                'last_old_subject_preview' => '',
+                'last_candidate_subject_preview' => '',
                 'last_message' => '비즈니스온·스마트빌 깨진 제목 복구를 아직 시작하지 않았습니다.',
                 'last_error' => ''
             )

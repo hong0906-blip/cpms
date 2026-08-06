@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.16';
+    const VERSION = '1.7.17';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -818,7 +818,7 @@ class PublicMailService
     /**
      * 네이버 원본 제목 재수집 작업을 등록합니다.
      *
-     * v1.7.16부터는 스마트빌 메일만 한 건씩 처리하고 messages.json은 마지막에 한 번만 저장합니다.
+     * v1.7.17부터는 스마트빌 메일만 한 건씩 처리하고 messages.json은 마지막에 한 번만 저장합니다.
      * 작업 시작 시 작은 대기열을 한 번 만들고, 제목 10건씩 별도 업데이트 파일에 모은 뒤
      * 모든 수집이 끝났을 때 messages.json과 검색 색인을 한 번만 갱신합니다.
      */
@@ -922,6 +922,9 @@ class PublicMailService
             'inflight'=>array(),
             'skipped_items'=>array(),
             'last_error_code'=>'',
+            'last_result_reason'=>'',
+            'last_old_subject_preview'=>'',
+            'last_candidate_subject_preview'=>'',
             'last_message'=>$total > 0
                 ? 'mailing@businesson.co.kr 관련 메일 ' . number_format($relatedCount) . '건 중 깨진 제목 ' . number_format($total) . '건만 확인합니다. 정상 제목 ' . number_format($normalCount) . '건은 그대로 유지합니다.'
                 : 'mailing@businesson.co.kr 관련 메일 ' . number_format($relatedCount) . '건을 확인했으며, 복구가 필요한 깨진 제목은 없습니다.',
@@ -1181,38 +1184,72 @@ class PublicMailService
 
             $headers = $this->parseHeaders($headerText);
             $rawFreshSubject = isset($headers['subject']) ? (string)$headers['subject'] : '';
-            $freshSubject = PublicMailStorageService::normalizeMailText(
-                $this->decodeSmartBillSubject($rawFreshSubject)
-            );
+            $decodeDetails = $this->decodeSmartBillSubjectDetails($rawFreshSubject);
+            $freshSubject = isset($decodeDetails['subject'])
+                ? PublicMailStorageService::normalizeMailText((string)$decodeDetails['subject']) : '';
 
             $updates = PublicMailStorageService::getTitleRefreshUpdates();
             $updateItems = isset($updates['items']) && is_array($updates['items']) ? $updates['items'] : array();
             $oldScore = isset($candidate['old_score']) ? (int)$candidate['old_score'] : $this->businessOnSubjectScore($oldSubject);
             $freshScore = $this->businessOnSubjectScore($freshSubject);
-            $freshStillBroken = $this->isBrokenBusinessOnSubject($freshSubject);
+            $oldClearlyBroken = $this->isClearlyBrokenBusinessOnSubject($oldSubject);
+            $freshUsable = $this->isUsableBusinessOnSubjectCandidate($freshSubject);
+            $freshStillBroken = $this->isClearlyBrokenBusinessOnSubject($freshSubject);
+
+            /*
+             * 기존 제목이 사진처럼 명백히 깨졌다면 모호한 점수 차이를 요구하지 않습니다.
+             * 후보가 정상 UTF-8이고 한글 또는 전자세금계산서 문구가 확인되면 즉시 교체합니다.
+             */
             $isImproved = $freshSubject !== ''
                 && $freshSubject !== $oldSubject
+                && $freshUsable
                 && !$freshStillBroken
-                && $freshScore >= ($oldScore + 8);
+                && ($oldClearlyBroken || $freshScore >= ($oldScore + 8));
+
+            $refresh['last_old_subject_preview'] = $this->shortBusinessOnSubjectPreview($oldSubject);
+            $refresh['last_candidate_subject_preview'] = $this->shortBusinessOnSubjectPreview($freshSubject);
 
             if ($isImproved) {
                 $updateItems[$messageKey] = array(
                     'subject'=>$freshSubject,
                     'refreshed_at'=>date('Y-m-d H:i:s'),
-                    'source'=>'businesson_worker_v1716',
+                    'source'=>'businesson_worker_v1717',
                     'old_score'=>$oldScore,
-                    'new_score'=>$freshScore
+                    'new_score'=>$freshScore,
+                    'old_was_clearly_broken'=>$oldClearlyBroken ? 1 : 0
                 );
                 PublicMailStorageService::saveTitleRefreshUpdates($updateItems);
                 $refresh['updated_count'] = count($updateItems);
                 $refresh['last_error_code'] = '';
+                $refresh['last_result_reason'] = '복구 완료';
                 $refresh['last_error'] = '';
                 $refresh['last_message'] = '비즈니스온 깨진 제목 1건을 정상 제목으로 복구했습니다. 누적 ' . number_format(count($updateItems)) . '건입니다.';
             } else {
                 $refresh['skipped_count'] = isset($refresh['skipped_count']) ? (int)$refresh['skipped_count'] + 1 : 1;
-                $refresh['last_error_code'] = 'businesson_subject_not_improved';
-                $refresh['last_error'] = '원본 제목 후보가 기존 제목보다 확실히 정상이라고 판단되지 않아 기존 제목을 유지했습니다.';
-                $refresh['last_message'] = '제목을 안전하게 확정할 수 없는 1건은 기존 제목을 유지하고 다음 메일로 계속합니다.';
+                $reason = '후보 판정 보류';
+                $errorCode = 'businesson_candidate_unusable';
+                if (trim($rawFreshSubject) === '') {
+                    $reason = '원본 제목 없음';
+                    $errorCode = 'businesson_subject_empty';
+                } elseif ($freshSubject === '') {
+                    $reason = '원본 제목 해석 실패';
+                    $errorCode = 'businesson_subject_decode_failed';
+                } elseif ($freshSubject === $oldSubject) {
+                    $reason = '원본 후보가 기존 깨진 제목과 동일';
+                    $errorCode = 'businesson_candidate_same';
+                } elseif ($freshStillBroken) {
+                    $reason = '원본 후보도 깨진 문자로 해석됨';
+                    $errorCode = 'businesson_candidate_still_broken';
+                } elseif (!$freshUsable) {
+                    $reason = '후보를 정상 한글 제목으로 확인하지 못함';
+                    $errorCode = 'businesson_candidate_unusable';
+                }
+                $refresh['last_error_code'] = $errorCode;
+                $refresh['last_result_reason'] = $reason;
+                $refresh['last_error'] = "결과: " . $reason
+                    . "\n기존: " . $refresh['last_old_subject_preview']
+                    . "\n후보: " . ($refresh['last_candidate_subject_preview'] !== '' ? $refresh['last_candidate_subject_preview'] : '(없음)');
+                $refresh['last_message'] = $reason . '으로 1건은 기존 제목을 유지하고 다음 메일로 계속합니다.';
             }
 
             $refresh['inflight'] = array();
@@ -1318,7 +1355,7 @@ class PublicMailService
                     $messages[$messageKey]['subject_refreshed_at'] = isset($update['refreshed_at'])
                         ? (string)$update['refreshed_at'] : date('Y-m-d H:i:s');
                     $messages[$messageKey]['subject_refresh_source'] = isset($update['source'])
-                        ? (string)$update['source'] : 'businesson_worker_v1716';
+                        ? (string)$update['source'] : 'businesson_worker_v1717';
                     $merged++;
                 }
             }
@@ -1373,7 +1410,8 @@ class PublicMailService
             'last_run_at','worker_heartbeat_at','cursor','total_count','processed_count',
             'updated_count','merged_count','failed_count','remaining_count','last_batch_count',
             'retry_count','mode','target_name','sender_domain','related_count','broken_count','normal_count','skipped_count','current_position','current_mailbox','current_uid',
-            'inflight','skipped_items','last_error_code','last_message','last_error'
+            'inflight','skipped_items','last_error_code','last_result_reason',
+            'last_old_subject_preview','last_candidate_subject_preview','last_message','last_error'
         );
         $result = array();
         foreach ($fields as $field) {
@@ -2149,9 +2187,16 @@ class PublicMailService
 
     /**
      * 정상 제목은 네이버에 다시 요청하지 않습니다.
-     * 화면에서 확인된 한자/이상문자 위주의 제목, MIME 표식, 대체문자와 제어문자만 복구 대상으로 봅니다.
+     * 사진처럼 한자/이상문자 덩어리, MIME 표식, 대체문자와 제어문자가 보이면 복구 대상으로 봅니다.
      */
     private function isBrokenBusinessOnSubject($value)
+    {
+        if ($this->isClearlyBrokenBusinessOnSubject($value)) return true;
+        return $this->businessOnSubjectScore($value) < -5;
+    }
+
+    /** 기존 제목이 명백하게 깨졌는지 강하게 판정합니다. */
+    private function isClearlyBrokenBusinessOnSubject($value)
     {
         $value = trim((string)$value);
         if ($value === '' || $value === '(제목 없음)') return true;
@@ -2159,74 +2204,153 @@ class PublicMailService
         if (strpos($value, '=?') !== false || strpos($value, "\xEF\xBF\xBD") !== false) return true;
         if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $value)) return true;
         if (preg_match('/(?:Ã.|Â.|ì.|ë.|ê.|ã.|ð.|þ.|æ.|å.)/u', $value)) return true;
+        if (preg_match('/[譴翌絃滅霓關轄]{2,}/u', $value)) return true;
 
         $hangul = preg_match_all('/[가-힣]/u', $value, $matches);
         $cjk = preg_match_all('/[\x{4E00}-\x{9FFF}]/u', $value, $matches);
         $letters = preg_match_all('/[A-Za-z가-힣\x{4E00}-\x{9FFF}]/u', $value, $matches);
-        if ((int)$cjk >= 4 && (int)$cjk > ((int)$hangul * 2)) return true;
-        if ((int)$letters > 0 && (int)$cjk >= 3 && ((int)$cjk / (int)$letters) >= 0.28) return true;
-        if ((int)$cjk >= 2 && !preg_match('/(전자세금계산서|세금계산서|계산서|발행|발행취소|수신|승인|스마트빌|국세청)/u', $value)) return true;
-        return $this->businessOnSubjectScore($value) < -5;
+        if ((int)$cjk >= 4 && (int)$hangul <= 3) return true;
+        if ((int)$cjk >= 5 && (int)$cjk > ((int)$hangul * 2)) return true;
+        if ((int)$letters > 0 && (int)$cjk >= 4 && ((int)$cjk / (int)$letters) >= 0.22) return true;
+        if ((int)$cjk >= 3 && !preg_match('/(전자세금계산서|세금계산서|계산서|발행|발행취소|수신|승인|스마트빌|국세청)/u', $value)) return true;
+        return false;
+    }
+
+    /** 복구 후보가 실제로 사용할 수 있는 정상 한글 제목인지 확인합니다. */
+    private function isUsableBusinessOnSubjectCandidate($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '' || !@preg_match('//u', $value)) return false;
+        if (strpos($value, '=?') !== false || strpos($value, "\xEF\xBF\xBD") !== false) return false;
+        if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $value)) return false;
+        if ($this->isClearlyBrokenBusinessOnSubject($value)) return false;
+        $hangul = preg_match_all('/[가-힣]/u', $value, $matches);
+        if ((int)$hangul >= 2) return true;
+        return preg_match('/(전자세금계산서|세금계산서|발행|발행취소|스마트빌|국세청|주식회사)/u', $value) === 1;
+    }
+
+    /** 외부 호출은 기존 이름을 유지하고 내부 상세 후보 선택기를 사용합니다. */
+    private function decodeSmartBillSubject($value)
+    {
+        $details = $this->decodeSmartBillSubjectDetails($value);
+        return isset($details['subject']) ? (string)$details['subject'] : '';
     }
 
     /**
-     * 비즈니스온/스마트빌의 구형·비표준 Subject 헤더를 전용 순서로 해석합니다.
-     * KS_C_5601, EUC-KR, CP949, WINDOWS-949, 접힌 encoded-word와 이중 인코딩 후보를 비교합니다.
+     * MIME/CP949/EUC-KR/UTF-8 이중변환 후보를 두 차례 확장한 뒤 가장 정상적인 제목을 선택합니다.
      */
-    private function decodeSmartBillSubject($value)
+    private function decodeSmartBillSubjectDetails($value)
     {
         $value = trim((string)$value);
-        if ($value === '') return '';
-        $value = preg_replace("/\\r?\\n[ \\t]+/", ' ', $value);
+        if ($value === '') return array('subject'=>'','score'=>-1000000,'candidates'=>array());
+        $value = preg_replace("/\r?\n[ \t]+/", ' ', $value);
         $value = str_ireplace(
             array('KS_C_5601-1987','KS-C-5601-1987','KS_C_5601','KSC5601','EUC_KR','EUC-KR','X-WINDOWS-949','WINDOWS-949','MS949'),
             array('CP949','CP949','CP949','CP949','CP949','CP949','CP949','CP949','CP949'),
             $value
         );
-        $value = preg_replace('/\\?=\\s+(?==\\?)/', '?=', $value);
+        $value = preg_replace('/\?=\s+(?==\?)/', '?=', $value);
 
         $candidates = array();
-        $generic = $this->decodeHeader($value);
-        if ($generic !== '') $candidates[$generic] = $generic;
+        $this->appendBusinessOnSubjectCandidate($candidates, $value, 'raw');
+        $this->appendBusinessOnSubjectCandidate($candidates, $this->decodeHeader($value), 'generic');
+
+        if (function_exists('iconv_mime_decode')) {
+            $decoded = @iconv_mime_decode($value, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+            if ($decoded !== false) $this->appendBusinessOnSubjectCandidate($candidates, $decoded, 'iconv_mime');
+        }
+        if (function_exists('mb_decode_mimeheader')) {
+            $decoded = @mb_decode_mimeheader($value);
+            if ($decoded !== false) $this->appendBusinessOnSubjectCandidate($candidates, $decoded, 'mb_mime');
+        }
 
         $self = $this;
-        $manual = preg_replace_callback('/=\\?([^?]+)\\?([bBqQ])\\?(.*?)\\?=/s', function ($matches) use ($self) {
+        $manual = preg_replace_callback('/=\?([^?]+)\?([bBqQ])\?(.*?)\?=/s', function ($matches) use ($self) {
             $charset = isset($matches[1]) ? (string)$matches[1] : '';
             $mode = isset($matches[2]) ? strtoupper((string)$matches[2]) : 'Q';
             $payload = isset($matches[3]) ? (string)$matches[3] : '';
             if ($mode === 'B') {
-                $raw = base64_decode(preg_replace('/\\s+/', '', $payload), true);
+                $raw = base64_decode(preg_replace('/\s+/', '', $payload), true);
                 if ($raw === false) $raw = '';
             } else {
                 $raw = quoted_printable_decode(str_replace('_', ' ', $payload));
             }
             return $self->bestSmartBillBytesToUtf8($raw, $charset);
         }, $value);
-        if (is_string($manual) && trim($manual) !== '') {
-            $manual = preg_replace('/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]/', '', $manual);
-            $manual = PublicMailStorageService::normalizeMailText($this->repairMojibake($this->ensureUtf8($manual, '')));
-            if ($manual !== '') $candidates[$manual] = $manual;
-        }
+        if (is_string($manual)) $this->appendBusinessOnSubjectCandidate($candidates, $manual, 'manual_mime');
 
-        if (strpos($value, '=?') === false) {
-            foreach (array('CP949','EUC-KR','UTF-8','ISO-8859-1','WINDOWS-1252') as $charset) {
-                $plain = $this->bestSmartBillBytesToUtf8($value, $charset);
-                if ($plain !== '') $candidates[$plain] = $plain;
+        /* 각 후보를 최대 두 번 역변환하여 이중 인코딩도 복구합니다. */
+        for ($round = 0; $round < 2; $round++) {
+            $snapshot = $candidates;
+            foreach ($snapshot as $entry) {
+                $candidate = isset($entry['value']) ? (string)$entry['value'] : '';
+                $source = isset($entry['source']) ? (string)$entry['source'] : 'candidate';
+                if ($candidate === '') continue;
+                $this->appendBusinessOnSubjectCandidate($candidates, $this->repairMojibake($candidate), $source . '_repair');
+                foreach ($this->businessOnReverseTranscodeCandidates($candidate) as $reverse) {
+                    $this->appendBusinessOnSubjectCandidate($candidates, $reverse, $source . '_reverse');
+                }
+                if (count($candidates) >= 96) break 2;
             }
         }
 
         $best = '';
         $bestScore = -1000000;
-        foreach ($candidates as $candidate) {
-            $candidate = trim((string)$candidate);
+        $debug = array();
+        foreach ($candidates as $entry) {
+            $candidate = isset($entry['value']) ? trim((string)$entry['value']) : '';
             if ($candidate === '') continue;
             $score = $this->businessOnSubjectScore($candidate);
+            if ($this->isUsableBusinessOnSubjectCandidate($candidate)) $score += 250;
+            elseif ($this->isClearlyBrokenBusinessOnSubject($candidate)) $score -= 200;
+            $debug[] = array('subject'=>$this->shortBusinessOnSubjectPreview($candidate),'score'=>$score,'source'=>isset($entry['source'])?$entry['source']:'');
             if ($score > $bestScore) {
                 $best = $candidate;
                 $bestScore = $score;
             }
         }
-        return $best !== '' ? $best : $generic;
+        usort($debug, function ($a, $b) {
+            $as = isset($a['score']) ? (int)$a['score'] : -1000000;
+            $bs = isset($b['score']) ? (int)$b['score'] : -1000000;
+            if ($as === $bs) return 0;
+            return $as > $bs ? -1 : 1;
+        });
+        if (count($debug) > 5) $debug = array_slice($debug, 0, 5);
+        return array('subject'=>$best,'score'=>$bestScore,'candidates'=>$debug);
+    }
+
+    private function appendBusinessOnSubjectCandidate(&$candidates, $value, $source)
+    {
+        $value = (string)$value;
+        if ($value === '') return;
+        $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', '', $value);
+        if (!@preg_match('//u', $value)) return;
+        $value = PublicMailStorageService::normalizeMailText(trim($value));
+        if ($value === '') return;
+        $key = sha1($value);
+        if (!isset($candidates[$key])) {
+            $candidates[$key] = array('value'=>$value,'source'=>(string)$source);
+        }
+    }
+
+    /** UTF-8 문자열을 CP949/EUC-KR 바이트로 되돌려 다시 UTF-8로 읽는 역변환 후보입니다. */
+    private function businessOnReverseTranscodeCandidates($value)
+    {
+        $value = (string)$value;
+        $result = array();
+        if ($value === '' || !$this->isValidUtf8($value) || !function_exists('iconv')) return $result;
+        foreach (array('CP949','EUC-KR','ISO-8859-1','WINDOWS-1252') as $target) {
+            $bytes = @iconv('UTF-8', $target . '//IGNORE', $value);
+            if ($bytes === false || $bytes === '') continue;
+            if ($this->isValidUtf8($bytes)) $result[$bytes] = $bytes;
+            foreach (array('UTF-8','CP949','EUC-KR','ISO-8859-1','WINDOWS-1252') as $source) {
+                $decoded = @iconv($source, 'UTF-8//IGNORE', $bytes);
+                if ($decoded !== false && $decoded !== '' && $this->isValidUtf8($decoded)) {
+                    $result[$decoded] = $decoded;
+                }
+            }
+        }
+        return array_values($result);
     }
 
     private function bestSmartBillBytesToUtf8($raw, $declaredCharset)
@@ -2243,11 +2367,19 @@ class PublicMailService
         }
         if (@preg_match('//u', $raw)) $candidates[$raw] = $raw;
 
+        $expanded = $candidates;
+        foreach ($candidates as $candidate) {
+            $expanded[$this->repairMojibake($candidate)] = $this->repairMojibake($candidate);
+            foreach ($this->businessOnReverseTranscodeCandidates($candidate) as $reverse) $expanded[$reverse] = $reverse;
+        }
+
         $best = '';
         $bestScore = -1000000;
-        foreach ($candidates as $candidate) {
-            $candidate = PublicMailStorageService::normalizeMailText($this->repairMojibake($candidate));
+        foreach ($expanded as $candidate) {
+            $candidate = PublicMailStorageService::normalizeMailText(trim((string)$candidate));
+            if ($candidate === '') continue;
             $score = $this->businessOnSubjectScore($candidate);
+            if ($this->isUsableBusinessOnSubjectCandidate($candidate)) $score += 250;
             if ($score > $bestScore) { $best = $candidate; $bestScore = $score; }
         }
         return $best;
@@ -2260,19 +2392,30 @@ class PublicMailService
         if (!@preg_match('//u', $value)) return -1000000;
         $score = 0;
         $hangul = preg_match_all('/[가-힣]/u', $value, $matches);
-        $cjk = preg_match_all('/[\\x{4E00}-\\x{9FFF}]/u', $value, $matches);
+        $cjk = preg_match_all('/[\x{4E00}-\x{9FFF}]/u', $value, $matches);
         $replacement = substr_count($value, "\xEF\xBF\xBD");
-        $control = preg_match_all('/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]/', $value, $matches);
+        $control = preg_match_all('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $value, $matches);
         $mojibake = preg_match_all('/(?:Ã.|Â.|ì.|ë.|ê.|ã.|ð.|þ.|æ.|å.)/u', $value, $matches);
-        $score += (int)$hangul * 5;
-        $score -= (int)$cjk * 5;
-        $score -= (int)$replacement * 50;
-        $score -= (int)$control * 50;
-        $score -= (int)$mojibake * 15;
-        $score -= substr_count($value, '=?') * 35;
-        if (preg_match('/(스마트빌|전자세금계산서|세금계산서|계산서|국세청|발행|발행취소|승인|공급가액|작성일자|수신|주식회사)/u', $value)) $score += 55;
-        if (preg_match('/[가-힣]{3,}/u', $value)) $score += 20;
+        $score += (int)$hangul * 7;
+        $score -= (int)$cjk * 9;
+        $score -= (int)$replacement * 80;
+        $score -= (int)$control * 80;
+        $score -= (int)$mojibake * 25;
+        $score -= substr_count($value, '=?') * 60;
+        if (preg_match('/(스마트빌|전자세금계산서|세금계산서|계산서|국세청|발행|발행취소|승인|공급가액|작성일자|수신|주식회사)/u', $value)) $score += 140;
+        if (preg_match('/[가-힣]{3,}/u', $value)) $score += 40;
+        if (preg_match('/\[[^\]]*(전자세금계산서|세금계산서|발행|발행취소)[^\]]*\]/u', $value)) $score += 80;
         return $score;
+    }
+
+    private function shortBusinessOnSubjectPreview($value)
+    {
+        $value = PublicMailStorageService::sanitizeText((string)$value, 500);
+        $value = preg_replace('/\s+/', ' ', trim($value));
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            return mb_strlen($value, 'UTF-8') > 140 ? mb_substr($value, 0, 140, 'UTF-8') . '…' : $value;
+        }
+        return strlen($value) > 280 ? substr($value, 0, 280) . '…' : $value;
     }
 
     /** 구형 내부 이름 호환용입니다. */
