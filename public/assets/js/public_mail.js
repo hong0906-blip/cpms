@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 첨부파일은 브라우저 기본 다운로드로 처리합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.15
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.16
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.15';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.16';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -168,6 +168,10 @@
         var processed=parseInt(refresh.processed_count,10)||0;
         var updated=parseInt(refresh.updated_count,10)||0;
         var failed=parseInt(refresh.failed_count,10)||0;
+        var skipped=parseInt(refresh.skipped_count,10)||0;
+        var related=parseInt(refresh.related_count,10)||0;
+        var broken=parseInt(refresh.broken_count,10)||total;
+        var normal=parseInt(refresh.normal_count,10)||0;
         var remaining=parseInt(refresh.remaining_count,10)||0;
         var percent=total>0?Math.floor(processed*100/total):0;
         if(percent<0)percent=0;
@@ -180,8 +184,12 @@
         setTitleRefreshText('[data-title-refresh-percent]',percent+'%');
         setTitleRefreshText('[data-title-refresh-processed]',processed.toLocaleString());
         setTitleRefreshText('[data-title-refresh-total]',total.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-related]',related.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-broken]',broken.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-normal]',normal.toLocaleString());
         setTitleRefreshText('[data-title-refresh-updated]',updated.toLocaleString());
         setTitleRefreshText('[data-title-refresh-failed]',failed.toLocaleString());
+        setTitleRefreshText('[data-title-refresh-skipped]',(failed+skipped).toLocaleString());
         setTitleRefreshText('[data-title-refresh-remaining]',remaining.toLocaleString());
         setTitleRefreshText('[data-title-refresh-last-run]',refresh.last_run_at||'아직 없음');
 
@@ -276,7 +284,7 @@
             if(xhr.readyState!==4)return;
             var result=parseJsonText(xhr.responseText||'');
             if(!result){
-                retryAfterFailure('스마트빌 메일 1건 처리 중 응답이 끊겼습니다. 다음 요청에서 해당 1건만 자동으로 건너뜁니다.',5000);
+                retryAfterFailure('비즈니스온 깨진 제목 1건 처리 중 응답이 끊겼습니다. 다음 요청에서 해당 1건만 자동으로 건너뜁니다.',5000);
                 return;
             }
 
@@ -300,12 +308,12 @@
 
             titleRefreshFailureCount++;
             var retrySeconds=parseInt(result.retry_after,10)||10;
-            showTitleRefreshConnectionMessage(result.message||'스마트빌 제목 1건을 건너뛰고 다음 메일로 계속합니다.',true);
+            showTitleRefreshConnectionMessage(result.message||'비즈니스온 제목 1건을 건너뛰고 다음 메일로 계속합니다.',true);
             if(titleRefreshCardIsRunnable())scheduleTitleRefreshWorker(retrySeconds*1000);
         };
 
-        xhr.onerror=function(){retryAfterFailure('스마트빌 메일 1건 처리 중 연결이 끊겼습니다. 다음 요청에서 이 1건만 건너뜁니다.',5000);};
-        xhr.ontimeout=function(){retryAfterFailure('스마트빌 제목 1건의 응답이 늦어 중단했습니다. 다음 요청에서 이 1건만 건너뜁니다.',5000);};
+        xhr.onerror=function(){retryAfterFailure('비즈니스온 깨진 제목 1건 처리 중 연결이 끊겼습니다. 다음 요청에서 이 1건만 건너뜁니다.',5000);};
+        xhr.ontimeout=function(){retryAfterFailure('비즈니스온 깨진 제목 1건의 응답이 늦어 중단했습니다. 다음 요청에서 이 1건만 건너뜁니다.',5000);};
         xhr.send(encodeForm({csrf_token:csrf(),limit:1}));
     }
 

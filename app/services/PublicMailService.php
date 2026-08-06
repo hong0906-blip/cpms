@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.15';
+    const VERSION = '1.7.16';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -818,7 +818,7 @@ class PublicMailService
     /**
      * 네이버 원본 제목 재수집 작업을 등록합니다.
      *
-     * v1.7.15부터는 스마트빌 메일만 한 건씩 처리하고 messages.json은 마지막에 한 번만 저장합니다.
+     * v1.7.16부터는 스마트빌 메일만 한 건씩 처리하고 messages.json은 마지막에 한 번만 저장합니다.
      * 작업 시작 시 작은 대기열을 한 번 만들고, 제목 10건씩 별도 업데이트 파일에 모은 뒤
      * 모든 수집이 끝났을 때 messages.json과 검색 색인을 한 번만 갱신합니다.
      */
@@ -828,7 +828,7 @@ class PublicMailService
      */
     public function startSmartBillTitleRefresh()
     {
-        /* 이전 전체수집에서 이미 모인 정상 제목이 있으면 먼저 한 번만 적용합니다. */
+        /* 이전 버전에서 정상적으로 모인 제목이 있다면 먼저 안전하게 적용합니다. */
         $oldUpdates = PublicMailStorageService::getTitleRefreshUpdates();
         if (!empty($oldUpdates['items']) && is_array($oldUpdates['items'])) {
             $this->mergeCollectedTitleRefreshUpdates(false);
@@ -836,9 +836,19 @@ class PublicMailService
 
         $messages = PublicMailStorageService::getMessages();
         $items = array();
+        $relatedCount = 0;
+        $normalCount = 0;
 
         foreach ($messages as $messageKey => $message) {
-            if (!is_array($message) || !$this->isSmartBillMessage($message)) continue;
+            if (!is_array($message) || !$this->isBusinessOnMessage($message)) continue;
+            $relatedCount++;
+
+            $oldSubject = isset($message['subject']) ? (string)$message['subject'] : '';
+            if (!$this->isBrokenBusinessOnSubject($oldSubject)) {
+                $normalCount++;
+                continue;
+            }
+
             $parsed = PublicMailStorageService::parseMessageKey($messageKey);
             $mailbox = isset($message['mailbox']) && trim((string)$message['mailbox']) !== ''
                 ? (string)$message['mailbox'] : (string)$parsed['mailbox'];
@@ -849,7 +859,8 @@ class PublicMailService
                 'message_key'=>(string)$messageKey,
                 'mailbox'=>$mailbox,
                 'uid'=>$uid,
-                'old_subject'=>isset($message['subject']) ? (string)$message['subject'] : '',
+                'old_subject'=>$oldSubject,
+                'old_score'=>$this->businessOnSubjectScore($oldSubject),
                 'from_text'=>isset($message['from_text']) ? (string)$message['from_text'] : '',
                 'from_email'=>isset($message['from_email']) ? (string)$message['from_email'] : ''
             );
@@ -881,13 +892,18 @@ class PublicMailService
             'cancelled'=>false,
             'status'=>$total > 0 ? 'running' : 'completed',
             'phase'=>$total > 0 ? 'collecting' : 'completed',
-            'mode'=>'smartbill_only',
-            'target_name'=>'스마트빌 전자세금계산서',
+            'mode'=>'businesson_broken_only',
+            'target_name'=>'비즈니스온·스마트빌 깨진 제목',
+            'sender_domain'=>'businesson.co.kr',
+            'related_count'=>$relatedCount,
+            'broken_count'=>$total,
+            'normal_count'=>$normalCount,
+            'skipped_count'=>0,
             'started_at'=>date('Y-m-d H:i:s'),
             'finished_at'=>$total > 0 ? '' : date('Y-m-d H:i:s'),
             'last_run_at'=>'',
             'worker_heartbeat_at'=>'',
-            'queue_version'=>2,
+            'queue_version'=>3,
             'cursor'=>0,
             'merge_cursor'=>0,
             'retry_cursor'=>-1,
@@ -907,8 +923,8 @@ class PublicMailService
             'skipped_items'=>array(),
             'last_error_code'=>'',
             'last_message'=>$total > 0
-                ? '스마트빌 관련 메일 ' . number_format($total) . '건만 찾았습니다. 제목을 한 건씩 안전하게 확인합니다.'
-                : '저장된 메일에서 스마트빌 발신 메일을 찾지 못했습니다.',
+                ? 'mailing@businesson.co.kr 관련 메일 ' . number_format($relatedCount) . '건 중 깨진 제목 ' . number_format($total) . '건만 확인합니다. 정상 제목 ' . number_format($normalCount) . '건은 그대로 유지합니다.'
+                : 'mailing@businesson.co.kr 관련 메일 ' . number_format($relatedCount) . '건을 확인했으며, 복구가 필요한 깨진 제목은 없습니다.',
             'last_error'=>''
         );
 
@@ -922,7 +938,7 @@ class PublicMailService
                 'active'=>false,
                 'paused'=>false,
                 'cancelled'=>true,
-                'status'=>'replaced_by_smartbill_refresh',
+                'status'=>'replaced_by_businesson_refresh',
                 'remaining_count'=>0,
                 'last_error'=>''
             ),
@@ -949,7 +965,7 @@ class PublicMailService
             $refresh['active'] = true;
             $refresh['paused'] = true;
             $refresh['status'] = 'paused';
-            $refresh['last_message'] = '스마트빌 제목 복구를 일시중지했습니다.';
+            $refresh['last_message'] = '비즈니스온 깨진 제목 복구를 일시중지했습니다.';
         } elseif ($command === 'resume') {
             $queue = PublicMailStorageService::getTitleRefreshQueue();
             if (empty($queue['items'])) return $this->startSmartBillTitleRefresh();
@@ -964,7 +980,7 @@ class PublicMailService
             $refresh['last_error'] = '';
             $refresh['last_error_code'] = '';
             $refresh['consecutive_errors'] = 0;
-            $refresh['last_message'] = '스마트빌 제목 복구를 다시 시작했습니다.';
+            $refresh['last_message'] = '비즈니스온 깨진 제목 복구를 다시 시작했습니다.';
         } elseif ($command === 'cancel') {
             /*
              * 수집된 제목은 버리지 않습니다. 네이버 접속 없이 로컬 파일만 한 번 합친 뒤
@@ -980,7 +996,7 @@ class PublicMailService
             $refresh['status'] = 'cancelled';
             $refresh['phase'] = 'cancelled';
             $refresh['finished_at'] = date('Y-m-d H:i:s');
-            $refresh['last_message'] = '스마트빌 제목 복구를 취소했습니다. 지금까지 복구된 제목은 적용했습니다.';
+            $refresh['last_message'] = '비즈니스온 깨진 제목 복구를 취소했습니다. 지금까지 복구된 제목은 적용했습니다.';
         } else {
             throw new \InvalidArgumentException('제목 재수집 명령이 올바르지 않습니다.');
         }
@@ -1004,7 +1020,7 @@ class PublicMailService
                 'retryable'=>true,
                 'retry_after'=>3,
                 'error_code'=>'worker_busy',
-                'message'=>'다른 스마트빌 제목 작업이 마무리 중입니다. 3초 후 다시 확인합니다.',
+                'message'=>'다른 비즈니스온 제목 작업이 마무리 중입니다. 3초 후 다시 확인합니다.',
                 'refresh'=>$this->compactOriginalTitleRefreshState()
             );
         }
@@ -1018,7 +1034,7 @@ class PublicMailService
                 return array(
                     'ok'=>true,
                     'completed'=>isset($refresh['status']) && $refresh['status'] === 'completed',
-                    'message'=>'스마트빌 제목 복구가 실행 중이 아닙니다.',
+                    'message'=>'비즈니스온 깨진 제목 복구가 실행 중이 아닙니다.',
                     'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
                 );
             }
@@ -1026,7 +1042,7 @@ class PublicMailService
                 return array(
                     'ok'=>true,
                     'paused'=>true,
-                    'message'=>'스마트빌 제목 복구가 일시중지되어 있습니다.',
+                    'message'=>'비즈니스온 깨진 제목 복구가 일시중지되어 있습니다.',
                     'refresh'=>$this->compactOriginalTitleRefreshState($refresh)
                 );
             }
@@ -1052,13 +1068,14 @@ class PublicMailService
                 if (count($skipped) > 50) $skipped = array_slice($skipped, -50);
                 $refresh['skipped_items'] = $skipped;
                 $refresh['failed_count'] = (int)$refresh['failed_count'] + 1;
+                $refresh['skipped_count'] = isset($refresh['skipped_count']) ? (int)$refresh['skipped_count'] + 1 : 1;
                 $refresh['inflight'] = array();
                 $refresh['current_position'] = -1;
                 $refresh['current_mailbox'] = '';
                 $refresh['current_uid'] = 0;
                 $refresh['last_error_code'] = 'smartbill_mail_skipped_after_empty_response';
-                $refresh['last_error'] = '이전 요청에서 서버 응답이 끊긴 스마트빌 메일 1건을 건너뛰었습니다.';
-                $refresh['last_message'] = '응답을 끊었던 스마트빌 메일 1건만 자동으로 건너뛰었습니다. 다음 메일부터 계속합니다.';
+                $refresh['last_error'] = '이전 요청에서 서버 응답이 끊긴 비즈니스온 깨진 제목 1건을 건너뛰었습니다.';
+                $refresh['last_message'] = '응답을 끊었던 비즈니스온 메일 1건만 자동으로 건너뛰었습니다. 다음 메일부터 계속합니다.';
                 $refresh['last_run_at'] = date('Y-m-d H:i:s');
                 $refresh['worker_heartbeat_at'] = $refresh['last_run_at'];
                 PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
@@ -1084,7 +1101,7 @@ class PublicMailService
                 $refresh['total_count'] = 0;
                 $refresh['remaining_count'] = 0;
                 $refresh['finished_at'] = date('Y-m-d H:i:s');
-                $refresh['last_message'] = '복구할 스마트빌 제목이 없습니다.';
+                $refresh['last_message'] = '복구할 비즈니스온 깨진 제목이 없습니다.';
                 PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
                 return array('ok'=>true,'completed'=>true,'message'=>$refresh['last_message'],'refresh'=>$this->compactOriginalTitleRefreshState($refresh));
             }
@@ -1093,7 +1110,7 @@ class PublicMailService
                 $refresh['phase'] = 'merging';
                 $refresh['status'] = 'merging';
                 $refresh['remaining_count'] = 0;
-                $refresh['last_message'] = '스마트빌 원본 제목 확인을 마쳤습니다. 복구된 제목을 메일 목록에 적용합니다.';
+                $refresh['last_message'] = '비즈니스온 깨진 제목 확인을 마쳤습니다. 복구된 제목을 메일 목록에 적용합니다.';
                 PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
                 return $this->mergeCollectedTitleRefreshUpdates(true);
             }
@@ -1109,7 +1126,7 @@ class PublicMailService
                 $refresh['processed_count'] = (int)$refresh['processed_count'] + 1;
                 $refresh['failed_count'] = (int)$refresh['failed_count'] + 1;
                 $refresh['remaining_count'] = max(0, $total - (int)$refresh['cursor']);
-                $refresh['last_message'] = '식별값이 없는 스마트빌 메일 1건을 건너뛰었습니다.';
+                $refresh['last_message'] = '식별값이 없는 비즈니스온 메일 1건을 건너뛰었습니다.';
                 $refresh['last_run_at'] = date('Y-m-d H:i:s');
                 PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
                 return array('ok'=>true,'message'=>$refresh['last_message'],'refresh'=>$this->compactOriginalTitleRefreshState($refresh));
@@ -1134,7 +1151,7 @@ class PublicMailService
             $refresh['worker_heartbeat_at'] = $refresh['last_run_at'];
             $refresh['status'] = 'running';
             $refresh['phase'] = 'collecting';
-            $refresh['last_message'] = '스마트빌 메일 ' . number_format($cursor + 1) . ' / ' . number_format($total) . ' 제목을 확인하고 있습니다.';
+            $refresh['last_message'] = '비즈니스온 깨진 제목 ' . number_format($cursor + 1) . ' / ' . number_format($total) . ' 제목을 확인하고 있습니다.';
             PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
 
             $settings = $this->requireEnabledSettings();
@@ -1151,9 +1168,10 @@ class PublicMailService
                 $refresh['current_mailbox'] = '';
                 $refresh['current_uid'] = 0;
                 $refresh['failed_count'] = (int)$refresh['failed_count'] + 1;
-                $refresh['last_error_code'] = 'smartbill_single_mail_error';
+                $refresh['skipped_count'] = isset($refresh['skipped_count']) ? (int)$refresh['skipped_count'] + 1 : 1;
+                $refresh['last_error_code'] = 'businesson_single_mail_error';
                 $refresh['last_error'] = PublicMailStorageService::sanitizeText($e->getMessage(), 500);
-                $refresh['last_message'] = '스마트빌 제목 1건을 읽지 못해 건너뛰고 다음 메일로 계속합니다.';
+                $refresh['last_message'] = '비즈니스온 원본 제목 1건을 읽지 못해 건너뛰고 다음 메일로 계속합니다.';
                 $refresh['last_run_at'] = date('Y-m-d H:i:s');
                 PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
                 return array('ok'=>true,'retryable'=>false,'message'=>$refresh['last_message'],'refresh'=>$this->compactOriginalTitleRefreshState($refresh));
@@ -1162,31 +1180,39 @@ class PublicMailService
             }
 
             $headers = $this->parseHeaders($headerText);
+            $rawFreshSubject = isset($headers['subject']) ? (string)$headers['subject'] : '';
             $freshSubject = PublicMailStorageService::normalizeMailText(
-                $this->decodeSmartBillSubject(isset($headers['subject']) ? $headers['subject'] : '')
+                $this->decodeSmartBillSubject($rawFreshSubject)
             );
 
             $updates = PublicMailStorageService::getTitleRefreshUpdates();
             $updateItems = isset($updates['items']) && is_array($updates['items']) ? $updates['items'] : array();
+            $oldScore = isset($candidate['old_score']) ? (int)$candidate['old_score'] : $this->businessOnSubjectScore($oldSubject);
+            $freshScore = $this->businessOnSubjectScore($freshSubject);
+            $freshStillBroken = $this->isBrokenBusinessOnSubject($freshSubject);
+            $isImproved = $freshSubject !== ''
+                && $freshSubject !== $oldSubject
+                && !$freshStillBroken
+                && $freshScore >= ($oldScore + 8);
 
-            if ($freshSubject === '') {
-                $refresh['failed_count'] = (int)$refresh['failed_count'] + 1;
-                $refresh['last_error_code'] = 'smartbill_subject_empty';
-                $refresh['last_error'] = '스마트빌 원본 제목을 한글로 해석하지 못했습니다.';
-                $refresh['last_message'] = '해석할 수 없는 스마트빌 제목 1건을 건너뛰고 계속합니다.';
-            } else {
-                if ($freshSubject !== $oldSubject) {
-                    $updateItems[$messageKey] = array(
-                        'subject'=>$freshSubject,
-                        'refreshed_at'=>date('Y-m-d H:i:s'),
-                        'source'=>'smartbill_worker_v1715'
-                    );
-                    PublicMailStorageService::saveTitleRefreshUpdates($updateItems);
-                }
+            if ($isImproved) {
+                $updateItems[$messageKey] = array(
+                    'subject'=>$freshSubject,
+                    'refreshed_at'=>date('Y-m-d H:i:s'),
+                    'source'=>'businesson_worker_v1716',
+                    'old_score'=>$oldScore,
+                    'new_score'=>$freshScore
+                );
+                PublicMailStorageService::saveTitleRefreshUpdates($updateItems);
                 $refresh['updated_count'] = count($updateItems);
                 $refresh['last_error_code'] = '';
                 $refresh['last_error'] = '';
-                $refresh['last_message'] = '스마트빌 제목 1건을 확인했습니다. 누적 ' . number_format(count($updateItems)) . '건을 복구했습니다.';
+                $refresh['last_message'] = '비즈니스온 깨진 제목 1건을 정상 제목으로 복구했습니다. 누적 ' . number_format(count($updateItems)) . '건입니다.';
+            } else {
+                $refresh['skipped_count'] = isset($refresh['skipped_count']) ? (int)$refresh['skipped_count'] + 1 : 1;
+                $refresh['last_error_code'] = 'businesson_subject_not_improved';
+                $refresh['last_error'] = '원본 제목 후보가 기존 제목보다 확실히 정상이라고 판단되지 않아 기존 제목을 유지했습니다.';
+                $refresh['last_message'] = '제목을 안전하게 확정할 수 없는 1건은 기존 제목을 유지하고 다음 메일로 계속합니다.';
             }
 
             $refresh['inflight'] = array();
@@ -1199,7 +1225,7 @@ class PublicMailService
             if ((int)$refresh['cursor'] >= $total) {
                 $refresh['phase'] = 'merging';
                 $refresh['status'] = 'merging';
-                $refresh['last_message'] = '스마트빌 원본 제목 확인을 마쳤습니다. 복구된 제목을 한 번만 적용합니다.';
+                $refresh['last_message'] = '비즈니스온 깨진 제목 확인을 마쳤습니다. 복구된 제목을 한 번만 적용합니다.';
             }
 
             PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
@@ -1292,7 +1318,7 @@ class PublicMailService
                     $messages[$messageKey]['subject_refreshed_at'] = isset($update['refreshed_at'])
                         ? (string)$update['refreshed_at'] : date('Y-m-d H:i:s');
                     $messages[$messageKey]['subject_refresh_source'] = isset($update['source'])
-                        ? (string)$update['source'] : 'smartbill_worker_v1715';
+                        ? (string)$update['source'] : 'businesson_worker_v1716';
                     $merged++;
                 }
             }
@@ -1320,7 +1346,7 @@ class PublicMailService
             $refresh['phase'] = 'completed';
             $refresh['remaining_count'] = 0;
             $refresh['finished_at'] = date('Y-m-d H:i:s');
-            $refresh['last_message'] = '스마트빌 전자세금계산서 제목 복구를 완료했습니다. 메일 목록과 검색 색인도 갱신했습니다.';
+            $refresh['last_message'] = '비즈니스온·스마트빌 깨진 제목 복구를 완료했습니다. 정상 제목은 유지했고 메일 목록과 검색 색인도 갱신했습니다.';
         }
 
         PublicMailStorageService::saveSyncState(array('title_refresh'=>$refresh));
@@ -1346,7 +1372,7 @@ class PublicMailService
             'active','paused','cancelled','status','phase','started_at','finished_at',
             'last_run_at','worker_heartbeat_at','cursor','total_count','processed_count',
             'updated_count','merged_count','failed_count','remaining_count','last_batch_count',
-            'retry_count','mode','target_name','current_position','current_mailbox','current_uid',
+            'retry_count','mode','target_name','sender_domain','related_count','broken_count','normal_count','skipped_count','current_position','current_mailbox','current_uid',
             'inflight','skipped_items','last_error_code','last_message','last_error'
         );
         $result = array();
@@ -1421,7 +1447,7 @@ class PublicMailService
         $fromText = $this->decodeHeader(isset($rootHeaders['from']) ? $rootHeaders['from'] : '');
         $fromEmail = $this->extractEmail($fromText);
         $rawSubject = isset($rootHeaders['subject']) ? $rootHeaders['subject'] : '';
-        $decodedSubject = $this->isSmartBillSenderText($fromText, $fromEmail)
+        $decodedSubject = $this->isBusinessOnSenderText($fromText, $fromEmail)
             ? $this->decodeSmartBillSubject($rawSubject) : $this->decodeHeader($rawSubject);
         return array(
             'body_text'=>$bodyText,'body_html_raw'=>$bodyHtml,'body_html'=>$this->sanitizeHtml($bodyHtml),'attachments'=>$attachments,'headers'=>$rootHeaders,
@@ -1776,7 +1802,7 @@ class PublicMailService
         $fromEmail=$this->extractEmail($fromText);
         $rawSubject=isset($headers['subject'])?$headers['subject']:'';
         $subject=PublicMailStorageService::normalizeMailText(
-            $this->isSmartBillSenderText($fromText,$fromEmail)
+            $this->isBusinessOnSenderText($fromText,$fromEmail)
                 ? $this->decodeSmartBillSubject($rawSubject) : $this->decodeHeader($rawSubject)
         );
         $toText=PublicMailStorageService::normalizeMailText($this->decodeHeader(isset($headers['to'])?$headers['to']:''));
@@ -2087,28 +2113,65 @@ class PublicMailService
         return (string)$body;
     }
 
-    /** 저장된 발신자 정보로 스마트빌 메일만 고릅니다. */
-    private function isSmartBillMessage($message)
+    /** 저장된 발신자 정보로 비즈니스온·스마트빌 메일을 찾습니다. */
+    private function isBusinessOnMessage($message)
     {
         if (!is_array($message)) return false;
         $fromText = isset($message['from_text']) ? (string)$message['from_text'] : '';
         $fromEmail = isset($message['from_email']) ? (string)$message['from_email'] : '';
-        return $this->isSmartBillSenderText($fromText, $fromEmail);
+        return $this->isBusinessOnSenderText($fromText, $fromEmail);
     }
 
-    private function isSmartBillSenderText($fromText, $fromEmail)
+    /** 구형 호출 호환용입니다. */
+    private function isSmartBillMessage($message)
+    {
+        return $this->isBusinessOnMessage($message);
+    }
+
+    private function isBusinessOnSenderText($fromText, $fromEmail)
     {
         $haystack = $this->lower(trim((string)$fromText . ' ' . (string)$fromEmail));
         if ($haystack === '') return false;
-        return $this->contains($haystack, '스마트빌')
+        return $this->contains($haystack, 'mailing@businesson.co.kr')
+            || $this->contains($haystack, '@businesson.co.kr')
+            || $this->contains($haystack, '.businesson.co.kr')
+            || $this->contains($haystack, '스마트빌')
             || $this->contains($haystack, 'smartbill')
             || $this->contains($haystack, '@smartbill.co.kr')
             || $this->contains($haystack, '.smartbill.co.kr');
     }
 
+    /** 구형 호출 호환용입니다. */
+    private function isSmartBillSenderText($fromText, $fromEmail)
+    {
+        return $this->isBusinessOnSenderText($fromText, $fromEmail);
+    }
+
     /**
-     * 스마트빌의 구형/비표준 Subject 헤더를 전용 순서로 해석합니다.
-     * KS_C_5601, EUC-KR, CP949 표기와 접힌 encoded-word를 모두 후보로 비교합니다.
+     * 정상 제목은 네이버에 다시 요청하지 않습니다.
+     * 화면에서 확인된 한자/이상문자 위주의 제목, MIME 표식, 대체문자와 제어문자만 복구 대상으로 봅니다.
+     */
+    private function isBrokenBusinessOnSubject($value)
+    {
+        $value = trim((string)$value);
+        if ($value === '' || $value === '(제목 없음)') return true;
+        if (!@preg_match('//u', $value)) return true;
+        if (strpos($value, '=?') !== false || strpos($value, "\xEF\xBF\xBD") !== false) return true;
+        if (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $value)) return true;
+        if (preg_match('/(?:Ã.|Â.|ì.|ë.|ê.|ã.|ð.|þ.|æ.|å.)/u', $value)) return true;
+
+        $hangul = preg_match_all('/[가-힣]/u', $value, $matches);
+        $cjk = preg_match_all('/[\x{4E00}-\x{9FFF}]/u', $value, $matches);
+        $letters = preg_match_all('/[A-Za-z가-힣\x{4E00}-\x{9FFF}]/u', $value, $matches);
+        if ((int)$cjk >= 4 && (int)$cjk > ((int)$hangul * 2)) return true;
+        if ((int)$letters > 0 && (int)$cjk >= 3 && ((int)$cjk / (int)$letters) >= 0.28) return true;
+        if ((int)$cjk >= 2 && !preg_match('/(전자세금계산서|세금계산서|계산서|발행|발행취소|수신|승인|스마트빌|국세청)/u', $value)) return true;
+        return $this->businessOnSubjectScore($value) < -5;
+    }
+
+    /**
+     * 비즈니스온/스마트빌의 구형·비표준 Subject 헤더를 전용 순서로 해석합니다.
+     * KS_C_5601, EUC-KR, CP949, WINDOWS-949, 접힌 encoded-word와 이중 인코딩 후보를 비교합니다.
      */
     private function decodeSmartBillSubject($value)
     {
@@ -2124,7 +2187,7 @@ class PublicMailService
 
         $candidates = array();
         $generic = $this->decodeHeader($value);
-        if ($generic !== '') $candidates[] = $generic;
+        if ($generic !== '') $candidates[$generic] = $generic;
 
         $self = $this;
         $manual = preg_replace_callback('/=\\?([^?]+)\\?([bBqQ])\\?(.*?)\\?=/s', function ($matches) use ($self) {
@@ -2142,12 +2205,14 @@ class PublicMailService
         if (is_string($manual) && trim($manual) !== '') {
             $manual = preg_replace('/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]/', '', $manual);
             $manual = PublicMailStorageService::normalizeMailText($this->repairMojibake($this->ensureUtf8($manual, '')));
-            if ($manual !== '') $candidates[] = $manual;
+            if ($manual !== '') $candidates[$manual] = $manual;
         }
 
         if (strpos($value, '=?') === false) {
-            $plain = $this->bestSmartBillBytesToUtf8($value, 'CP949');
-            if ($plain !== '') $candidates[] = $plain;
+            foreach (array('CP949','EUC-KR','UTF-8','ISO-8859-1','WINDOWS-1252') as $charset) {
+                $plain = $this->bestSmartBillBytesToUtf8($value, $charset);
+                if ($plain !== '') $candidates[$plain] = $plain;
+            }
         }
 
         $best = '';
@@ -2155,7 +2220,7 @@ class PublicMailService
         foreach ($candidates as $candidate) {
             $candidate = trim((string)$candidate);
             if ($candidate === '') continue;
-            $score = $this->smartBillSubjectScore($candidate);
+            $score = $this->businessOnSubjectScore($candidate);
             if ($score > $bestScore) {
                 $best = $candidate;
                 $bestScore = $score;
@@ -2170,7 +2235,7 @@ class PublicMailService
         if ($raw === '') return '';
         $candidates = array();
         $declared = $this->normalizeCharset($declaredCharset);
-        foreach (array($declared, 'CP949', 'EUC-KR', 'UTF-8', 'ISO-8859-1') as $charset) {
+        foreach (array($declared, 'CP949', 'EUC-KR', 'UTF-8', 'ISO-8859-1', 'WINDOWS-1252') as $charset) {
             $charset = trim((string)$charset);
             if ($charset === '') continue;
             $converted = $this->convertToUtf8($raw, $charset);
@@ -2182,29 +2247,38 @@ class PublicMailService
         $bestScore = -1000000;
         foreach ($candidates as $candidate) {
             $candidate = PublicMailStorageService::normalizeMailText($this->repairMojibake($candidate));
-            $score = $this->smartBillSubjectScore($candidate);
+            $score = $this->businessOnSubjectScore($candidate);
             if ($score > $bestScore) { $best = $candidate; $bestScore = $score; }
         }
         return $best;
     }
 
-    private function smartBillSubjectScore($value)
+    private function businessOnSubjectScore($value)
     {
         $value = trim((string)$value);
         if ($value === '') return -1000000;
+        if (!@preg_match('//u', $value)) return -1000000;
         $score = 0;
         $hangul = preg_match_all('/[가-힣]/u', $value, $matches);
-        $replacement = substr_count($value, "\\xEF\\xBF\\xBD");
+        $cjk = preg_match_all('/[\\x{4E00}-\\x{9FFF}]/u', $value, $matches);
+        $replacement = substr_count($value, "\xEF\xBF\xBD");
         $control = preg_match_all('/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F]/', $value, $matches);
         $mojibake = preg_match_all('/(?:Ã.|Â.|ì.|ë.|ê.|ã.|ð.|þ.|æ.|å.)/u', $value, $matches);
-        $score += (int)$hangul * 4;
-        $score -= (int)$replacement * 40;
-        $score -= (int)$control * 40;
-        $score -= (int)$mojibake * 12;
-        $score -= substr_count($value, '=?') * 30;
-        if (preg_match('/(스마트빌|전자세금계산서|세금계산서|계산서|국세청|발행|승인|공급가액|작성일자|수신)/u', $value)) $score += 40;
-        if (preg_match('/[가-힣]{3,}/u', $value)) $score += 15;
+        $score += (int)$hangul * 5;
+        $score -= (int)$cjk * 5;
+        $score -= (int)$replacement * 50;
+        $score -= (int)$control * 50;
+        $score -= (int)$mojibake * 15;
+        $score -= substr_count($value, '=?') * 35;
+        if (preg_match('/(스마트빌|전자세금계산서|세금계산서|계산서|국세청|발행|발행취소|승인|공급가액|작성일자|수신|주식회사)/u', $value)) $score += 55;
+        if (preg_match('/[가-힣]{3,}/u', $value)) $score += 20;
         return $score;
+    }
+
+    /** 구형 내부 이름 호환용입니다. */
+    private function smartBillSubjectScore($value)
+    {
+        return $this->businessOnSubjectScore($value);
     }
 
     private function decodeHeader($value)

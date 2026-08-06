@@ -240,28 +240,59 @@ class PublicMailImapClient
         $uid = (int)$uid;
         if ($uid <= 0) throw new \InvalidArgumentException('메일 UID가 올바르지 않습니다.');
 
-        $response = $this->command(
-            'UID FETCH ' . $uid . ' (UID BODY.PEEK[HEADER.FIELDS (SUBJECT)])',
-            262144
-        );
-        if (!$response['ok']) {
-            throw new \RuntimeException('스마트빌 메일 제목을 읽지 못했습니다: UID ' . $uid);
-        }
-
-        if (!empty($response['literal_contexts']) && is_array($response['literal_contexts'])) {
-            foreach ($response['literal_contexts'] as $context) {
-                if (!is_array($context)) continue;
-                $line = isset($context['line']) ? (string)$context['line'] : '';
-                $literal = isset($context['literal']) ? (string)$context['literal'] : '';
-                if ($literal !== '' && preg_match('/\\bUID\\s+' . preg_quote((string)$uid, '/') . '\\b/i', $line)) {
-                    return $literal;
+        /*
+         * 1차: 제목 필드만 요청합니다.
+         * 일부 비즈니스온 구형 메일이 비표준 Subject를 사용하면 이 응답이 비거나 실패할 수 있어
+         * 2차로 본문 없이 메일 머리글 앞부분만 다시 읽습니다.
+         */
+        try {
+            $response = $this->command(
+                'UID FETCH ' . $uid . ' (UID BODY.PEEK[HEADER.FIELDS (SUBJECT)])',
+                262144
+            );
+            if ($response['ok']) {
+                if (!empty($response['literal_contexts']) && is_array($response['literal_contexts'])) {
+                    foreach ($response['literal_contexts'] as $context) {
+                        if (!is_array($context)) continue;
+                        $line = isset($context['line']) ? (string)$context['line'] : '';
+                        $literal = isset($context['literal']) ? (string)$context['literal'] : '';
+                        if ($literal !== '' && preg_match('/\\bUID\\s+' . preg_quote((string)$uid, '/') . '\\b/i', $line)) {
+                            return $literal;
+                        }
+                    }
+                }
+                if (!empty($response['literals']) && isset($response['literals'][0])) {
+                    return (string)$response['literals'][0];
                 }
             }
+        } catch (\Exception $ignored) {
+            /* 아래의 작은 전체 헤더 조회로 자동 전환합니다. */
         }
-        if (!empty($response['literals']) && isset($response['literals'][0])) {
-            return (string)$response['literals'][0];
+
+        return $this->fetchHeaderPrefix($uid, 16384);
+    }
+
+    /**
+     * 본문과 첨부파일은 받지 않고 RFC822 머리글 앞부분만 읽습니다.
+     * Subject 전용 조회가 실패하는 비표준 스마트빌/비즈니스온 메일의 보조 경로입니다.
+     */
+    public function fetchHeaderPrefix($uid, $maximumBytes)
+    {
+        $this->assertMailboxSelected();
+        $uid = (int)$uid;
+        $maximumBytes = (int)$maximumBytes;
+        if ($uid <= 0) throw new \InvalidArgumentException('메일 UID가 올바르지 않습니다.');
+        if ($maximumBytes < 4096) $maximumBytes = 4096;
+        if ($maximumBytes > 32768) $maximumBytes = 32768;
+
+        $response = $this->command(
+            'UID FETCH ' . $uid . ' (UID BODY.PEEK[HEADER]<0.' . $maximumBytes . '>)',
+            $maximumBytes + 65536
+        );
+        if (!$response['ok'] || empty($response['literals'])) {
+            throw new \RuntimeException('비즈니스온 메일 머리글을 읽지 못했습니다: UID ' . $uid);
         }
-        throw new \RuntimeException('스마트빌 메일 제목 응답이 비어 있습니다: UID ' . $uid);
+        return (string)$response['literals'][0];
     }
 
     public function fetchRawPreview($uid, $maximumBytes)

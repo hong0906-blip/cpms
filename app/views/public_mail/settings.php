@@ -17,10 +17,14 @@ $titleProcessed=isset($titleRefresh['processed_count'])?(int)$titleRefresh['proc
 $titleUpdated=isset($titleRefresh['updated_count'])?(int)$titleRefresh['updated_count']:0;
 $titleFailed=isset($titleRefresh['failed_count'])?(int)$titleRefresh['failed_count']:0;
 $titleRemaining=isset($titleRefresh['remaining_count'])?(int)$titleRefresh['remaining_count']:0;
+$titleRelated=isset($titleRefresh['related_count'])?(int)$titleRefresh['related_count']:0;
+$titleBroken=isset($titleRefresh['broken_count'])?(int)$titleRefresh['broken_count']:$titleTotal;
+$titleNormal=isset($titleRefresh['normal_count'])?(int)$titleRefresh['normal_count']:0;
+$titleSkipped=isset($titleRefresh['skipped_count'])?(int)$titleRefresh['skipped_count']:0;
 $titlePercent=$titleTotal>0?(int)floor(($titleProcessed/$titleTotal)*100):0;
 if($titlePercent>100)$titlePercent=100;
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_715">
+<link rel="stylesheet" href="<?php echo call_user_func($esc,base_url()); ?>/assets/css/public_mail.css?v=20260806_716">
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page" data-public-mail-page data-public-mail-settings data-csrf-token="<?php echo call_user_func($esc,$csrfToken); ?>">
   <div class="public-mail-shell pm-settings-shell">
     <section class="public-mail-hero">
@@ -72,7 +76,7 @@ if($titlePercent>100)$titlePercent=100;
       <div class="pm-settings-card">
         <div class="pm-card-title"><div><strong>설치 버전·목록 속도 상태</strong><span>실제 적용된 핵심 파일과 메일 색인 상태를 확인합니다.</span></div><span class="pm-status-dot <?php echo !empty($indexStatus['writable'])?'is-on':''; ?>"><?php echo !empty($indexStatus['writable'])?'정상':'확인 필요'; ?></span></div>
         <div class="pm-sync-state-list">
-          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.15'); ?></strong></div>
+          <div><span>설치 패키지</span><strong><?php echo call_user_func($esc,isset($packageVersion)?$packageVersion:'1.7.16'); ?></strong></div>
           <div><span>목록 색인 버전</span><strong><?php echo isset($indexStatus['version'])?(int)$indexStatus['version']:0; ?></strong></div>
           <div><span>색인 메일 수</span><strong><?php echo number_format(isset($indexStatus['item_count'])?(int)$indexStatus['item_count']:0); ?>건</strong></div>
           <div><span>마지막 색인 갱신</span><strong><?php echo call_user_func($esc,!empty($indexStatus['updated_at'])?$indexStatus['updated_at']:'아직 없음'); ?></strong></div>
@@ -109,15 +113,15 @@ if($titlePercent>100)$titlePercent=100;
         ?>
         <div class="pm-card-title">
           <div>
-            <strong>스마트빌 전자세금계산서 제목 복구</strong>
-            <span>저장된 메일에서 스마트빌 발신 메일만 골라 원본 제목을 한 건씩 확인합니다.</span>
+            <strong>비즈니스온·스마트빌 깨진 제목 복구</strong>
+            <span>mailing@businesson.co.kr에서 온 메일 중 실제로 깨진 제목만 골라 원본 제목을 확인합니다.</span>
           </div>
           <span class="pm-status-dot <?php echo !empty($titleRefresh['active'])&&empty($titleRefresh['paused'])?'is-on':''; ?>" data-title-refresh-status-label><?php echo $titleStatus; ?></span>
         </div>
 
         <div class="pm-alert pm-alert-success">
           <strong>전체 5,559건을 다시 확인하지 않습니다.</strong><br>
-          스마트빌 발신 메일만 대상으로 하며, 일반 메일 목록과 상세화면에서는 아무 복구 작업도 실행하지 않습니다.
+          mailing@businesson.co.kr 관련 메일만 확인하고 정상 제목은 그대로 유지합니다. 일반 메일 목록과 상세화면에서는 복구 작업을 실행하지 않습니다.
         </div>
 
         <div class="pm-progress-label">
@@ -127,9 +131,12 @@ if($titlePercent>100)$titlePercent=100;
         <div class="pm-progress-track"><span data-title-refresh-progress style="width:<?php echo $titlePercent; ?>%"></span></div>
 
         <div class="pm-sync-state-list">
+          <div><span>비즈니스온 관련 메일</span><strong><span data-title-refresh-related><?php echo number_format($titleRelated); ?></span>건</strong></div>
+          <div><span>깨진 제목 발견</span><strong><span data-title-refresh-broken><?php echo number_format($titleBroken); ?></span>건</strong></div>
+          <div><span>정상 제목 유지</span><strong><span data-title-refresh-normal><?php echo number_format($titleNormal); ?></span>건</strong></div>
           <div><span>대상 확인</span><strong><span data-title-refresh-processed><?php echo number_format($titleProcessed); ?></span>건</strong></div>
           <div><span>복구된 제목</span><strong><span data-title-refresh-updated><?php echo number_format($titleUpdated); ?></span>건</strong></div>
-          <div><span>건너뜀</span><strong><span data-title-refresh-failed><?php echo number_format($titleFailed); ?></span>건</strong></div>
+          <div><span>건너뜀·실패</span><strong><span data-title-refresh-skipped><?php echo number_format($titleSkipped+$titleFailed); ?></span>건</strong></div>
           <div><span>남은 대상</span><strong><span data-title-refresh-remaining><?php echo number_format($titleRemaining); ?></span>건</strong></div>
           <div><span>최근 작업</span><strong data-title-refresh-last-run><?php echo call_user_func($esc,!empty($titleRefresh['last_run_at'])?$titleRefresh['last_run_at']:'아직 없음'); ?></strong></div>
         </div>
@@ -142,10 +149,10 @@ if($titlePercent>100)$titlePercent=100;
         </div>
 
         <div class="pm-settings-actions pm-wrap-actions">
-          <form method="post" action="public_mail_action.php" onsubmit="return confirm('스마트빌에서 보낸 전자세금계산서 메일 제목만 복구할까요? 일반 메일은 확인하지 않습니다.');">
+          <form method="post" action="public_mail_action.php" onsubmit="return confirm('mailing@businesson.co.kr에서 온 메일 중 깨진 제목만 복구할까요? 정상 제목은 그대로 유지합니다.');">
             <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
             <input type="hidden" name="action" value="start_smartbill_title_refresh">
-            <button type="submit" class="pm-btn pm-btn-primary"><i data-lucide="refresh-cw"></i> 스마트빌 제목 복구 시작</button>
+            <button type="submit" class="pm-btn pm-btn-primary"><i data-lucide="refresh-cw"></i> 비즈니스온 깨진 제목 복구</button>
           </form>
           <button type="button" class="pm-btn pm-btn-light" data-title-refresh-run-once><i data-lucide="chevrons-right"></i> 지금 1건 처리</button>
           <form method="post" action="public_mail_action.php">
@@ -158,7 +165,7 @@ if($titlePercent>100)$titlePercent=100;
             <input type="hidden" name="action" value="resume_original_title_refresh">
             <button type="submit" class="pm-btn pm-btn-light"><i data-lucide="play"></i> 다시 시작</button>
           </form>
-          <form method="post" action="public_mail_action.php" onsubmit="return confirm('스마트빌 제목 복구를 취소할까요? 지금까지 복구된 제목은 메일 목록에 적용합니다.');">
+          <form method="post" action="public_mail_action.php" onsubmit="return confirm('비즈니스온 깨진 제목 복구를 취소할까요? 지금까지 복구된 제목은 메일 목록에 적용합니다.');">
             <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc,$csrfToken); ?>">
             <input type="hidden" name="action" value="cancel_original_title_refresh">
             <button type="submit" class="pm-btn pm-btn-danger"><i data-lucide="square"></i> 취소</button>
@@ -166,7 +173,7 @@ if($titlePercent>100)$titlePercent=100;
         </div>
 
         <p class="pm-help-text">
-          스마트빌 메일 제목을 한 번에 1건만 요청합니다. 네이버에 접속하기 전에 다음 위치를 먼저 저장하므로, 특정 메일에서 서버 응답이 끊겨도 그 1건만 자동으로 건너뛰고 계속 진행합니다.
+          깨진 것으로 선별된 비즈니스온 메일 제목만 한 번에 1건 요청합니다. Subject 전용 조회가 실패하면 본문 없이 16KB 머리글 조회로 자동 전환합니다. 네이버에 접속하기 전에 다음 위치를 먼저 저장하므로, 특정 메일에서 서버 응답이 끊겨도 그 1건만 자동으로 건너뛰고 계속 진행합니다.
         </p>
       </div>
 
@@ -209,4 +216,4 @@ if($titlePercent>100)$titlePercent=100;
     </section>
   </div>
 </div>
-<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_715"></script>
+<script src="<?php echo call_user_func($esc,base_url()); ?>/assets/js/public_mail.js?v=20260806_716"></script>

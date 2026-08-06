@@ -2,10 +2,10 @@
 /**
  * 파일 경로: C:\www\cpms\public\public_mail_title_refresh_worker.php
  *
- * 스마트빌 전자세금계산서 메일 제목을 한 번에 1건만 읽는 전용 작업자입니다.
+ * mailing@businesson.co.kr 메일 중 깨진 제목만 한 번에 1건 읽는 전용 작업자입니다.
  * 설정 화면은 그대로 유지하고, 요청이 끊겨도 저장된 위치부터 다시 시도합니다.
  * PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.15
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.16
  */
 
 @ini_set('display_errors', '0');
@@ -82,6 +82,6 @@ try {
         'retryable'=>true,
         'retry_after'=>10,
         'error_code'=>'worker_exception',
-        'message'=>'스마트빌 제목 1건 처리 중 오류가 발생했습니다. 다음 요청에서 해당 1건만 건너뛰고 계속합니다.'
+        'message'=>'비즈니스온 깨진 제목 1건 처리 중 오류가 발생했습니다. 다음 요청에서 해당 1건만 건너뛰고 계속합니다.'
     ), 503);
 }

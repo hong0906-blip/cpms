@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.15';
+    const VERSION = '1.7.16';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -156,15 +156,20 @@ class PublicMailStorageService
                 'failed_count' => 0,
                 'remaining_count' => 0,
                 'last_batch_count' => 0,
-                'mode' => 'smartbill_only',
-                'target_name' => '스마트빌 전자세금계산서',
+                'mode' => 'businesson_broken_only',
+                'target_name' => '비즈니스온·스마트빌 깨진 제목',
+                'sender_domain' => 'businesson.co.kr',
+                'related_count' => 0,
+                'broken_count' => 0,
+                'normal_count' => 0,
+                'skipped_count' => 0,
                 'current_position' => -1,
                 'current_mailbox' => '',
                 'current_uid' => 0,
                 'inflight' => array(),
                 'skipped_items' => array(),
                 'last_error_code' => '',
-                'last_message' => '스마트빌 제목 전용 복구를 아직 시작하지 않았습니다.',
+                'last_message' => '비즈니스온·스마트빌 깨진 제목 복구를 아직 시작하지 않았습니다.',
                 'last_error' => ''
             )
         );
