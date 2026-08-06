@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.5';
+    const VERSION = '1.7.6';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -89,7 +89,17 @@ class PublicMailStorageService
                 'cancelled' => false,
                 'started_at' => '',
                 'finished_at' => '',
+                'status' => 'idle',
                 'last_run_at' => '',
+                'last_run_result' => '',
+                'last_run_processed_count' => 0,
+                'last_run_repaired_count' => 0,
+                'last_http_ping_at' => '',
+                'last_http_status' => '',
+                'lock_status' => 'idle',
+                'lock_acquired_at' => '',
+                'lock_released_at' => '',
+                'heartbeat_at' => '',
                 'cursor' => 0,
                 'total_count' => 0,
                 'target_count' => 0,
@@ -356,6 +366,22 @@ class PublicMailStorageService
         $state['full_import'] = array_merge($defaults['full_import'], isset($saved['full_import']) && is_array($saved['full_import']) ? $saved['full_import'] : array());
         $state['metadata_repair'] = array_merge($defaults['metadata_repair'], isset($saved['metadata_repair']) && is_array($saved['metadata_repair']) ? $saved['metadata_repair'] : array());
         if (!isset($state['mailboxes']) || !is_array($state['mailboxes'])) $state['mailboxes'] = array();
+
+        /*
+         * flock은 PHP 프로세스가 끝나면 자동 해제됩니다. 다만 이전 실행이 남긴
+         * lock_status 값은 화면에 계속 보일 수 있으므로 실제 파일 잠금과 비교해 정리합니다.
+         */
+        $lockInfo = self::getOperationLockStatus('metadata_repair');
+        $state['metadata_repair']['lock_is_active'] = !empty($lockInfo['locked']);
+        $state['metadata_repair']['lock_file_age_seconds'] = isset($lockInfo['age_seconds']) ? (int)$lockInfo['age_seconds'] : 0;
+        $lockAt = isset($state['metadata_repair']['lock_acquired_at']) ? strtotime((string)$state['metadata_repair']['lock_acquired_at']) : false;
+        if (empty($lockInfo['locked']) && $lockAt !== false && (time() - $lockAt) > 90 && $state['metadata_repair']['lock_status'] !== 'idle') {
+            $state['metadata_repair']['lock_status'] = 'idle';
+            $state['metadata_repair']['lock_acquired_at'] = '';
+            $state['metadata_repair']['lock_released_at'] = date('Y-m-d H:i:s');
+            $saved['metadata_repair'] = $state['metadata_repair'];
+            self::writeJsonFile(self::path(self::SYNC_FILE), array_merge(self::syncDefaults(), $saved));
+        }
         return $state;
     }
 
@@ -695,6 +721,32 @@ class PublicMailStorageService
         } catch (\Exception $e) {
             return null;
         }
+    }
+
+    /** 실제 flock 상태를 읽습니다. lock 파일이 존재하는 것과 실행 중인 것은 다릅니다. */
+    public static function getOperationLockStatus($name)
+    {
+        self::ensureStorage();
+        $safeName = preg_replace('/[^a-zA-Z0-9_.-]/', '_', (string)$name);
+        if ($safeName === '') $safeName = 'operation';
+        $path = self::path($safeName . '.lock');
+        $result = array('locked'=>false,'file_exists'=>is_file($path),'age_seconds'=>0,'content'=>'');
+        if (is_file($path)) {
+            $mtime = @filemtime($path);
+            if ($mtime !== false) $result['age_seconds'] = max(0, time() - (int)$mtime);
+            $content = @file_get_contents($path);
+            if ($content !== false) $result['content'] = trim((string)$content);
+        }
+        $handle = @fopen($path, 'c+');
+        if (!$handle) return $result;
+        if (@flock($handle, LOCK_EX | LOCK_NB)) {
+            $result['locked'] = false;
+            @flock($handle, LOCK_UN);
+        } else {
+            $result['locked'] = true;
+        }
+        @fclose($handle);
+        return $result;
     }
 
     public static function acquireLock($name)

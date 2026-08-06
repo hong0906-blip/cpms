@@ -41,7 +41,7 @@ if ($mailboxType !== '') {
 }
 $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($resetQuery, '', '&') : '');
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260806_75">
+<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260806_76">
 
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page"
      data-public-mail-page
@@ -124,8 +124,6 @@ $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($r
             </form>
             <div class="pm-sync-summary pm-search-scope-summary">
                 <span><strong>검색 범위:</strong> <?php echo call_user_func($esc, $scopeTitle); ?></span>
-                <span>검색 결과: <?php echo number_format($total); ?>건</span>
-                <span>마지막 수집 성공: <?php echo call_user_func($esc, isset($syncState['last_success_at']) && $syncState['last_success_at'] !== '' ? $syncState['last_success_at'] : '아직 없음'); ?></span>
             </div>
         </section>
 
@@ -215,4 +213,4 @@ $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($r
 </div>
 
 <iframe name="pmMailDownloadFrame" title="첨부파일 다운로드" class="pm-download-frame" aria-hidden="true"></iframe>
-<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260806_75"></script>
+<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260806_76"></script>

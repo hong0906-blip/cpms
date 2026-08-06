@@ -4,7 +4,7 @@
  *
  * 네이버 메일의 상세본문 비동기 조회, 인라인 이미지 출력, 설정, 동기화,
  * 처리상태 변경을 담당합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.5
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.6
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';
@@ -175,6 +175,17 @@ try {
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }
 
+    if ($action === 'run_metadata_repair_once') {
+        PublicMailWebHelper::requireDevelopmentDepartment();
+        if (function_exists('session_write_close')) @session_write_close();
+        @set_time_limit(40);
+        $state = $service->getSyncState();
+        if (empty($state['metadata_repair']['active'])) $service->startMetadataRepair();
+        $result = $service->runMetadataRepairBatch(20,20);
+        if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
+        PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
+    }
+
     if ($action === 'pause_metadata_repair' || $action === 'resume_metadata_repair' || $action === 'cancel_metadata_repair') {
         PublicMailWebHelper::requireDevelopmentDepartment();
         $command = $action === 'pause_metadata_repair' ? 'pause' : ($action === 'resume_metadata_repair' ? 'resume' : 'cancel');
@@ -277,7 +288,7 @@ try {
     throw new RuntimeException('지원하지 않는 요청입니다.');
 } catch (Exception $e) {
     if ($isAjax) PublicMailWebHelper::jsonResponse(array('ok'=>false,'message'=>$e->getMessage()),400);
-    $settingsActions = array('save_settings','test_connection','reset_mail_data','start_full_import','pause_full_import','resume_full_import','cancel_full_import','start_metadata_repair','pause_metadata_repair','resume_metadata_repair','cancel_metadata_repair','regenerate_cron_token','repair_metadata','get_sync_status');
+    $settingsActions = array('save_settings','test_connection','reset_mail_data','start_full_import','pause_full_import','resume_full_import','cancel_full_import','start_metadata_repair','run_metadata_repair_once','pause_metadata_repair','resume_metadata_repair','cancel_metadata_repair','regenerate_cron_token','repair_metadata','get_sync_status');
     $redirect = in_array($action,$settingsActions,true) ? 'public_mail_settings.php' : 'public_mail.php';
     if (!empty($_POST['message_key']) && $redirect === 'public_mail.php') $redirect .= '?message=' . rawurlencode((string)$_POST['message_key']);
     PublicMailWebHelper::redirectWithMessage($redirect,'error',$e->getMessage());

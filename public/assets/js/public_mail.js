@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 자동수집은 public/cron/naver_mail_sync.php를 외부 예약서비스가 호출합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.5
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.6
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.5';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.6';
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
     function csrf() { var el=page(); return el ? (el.getAttribute('data-csrf-token')||'') : ''; }
@@ -116,11 +116,11 @@
     }
 
     function metadataRepairAction(action) {
-        var map={start:'start_metadata_repair',pause:'pause_metadata_repair',resume:'resume_metadata_repair',cancel:'cancel_metadata_repair'};
+        var map={start:'start_metadata_repair',run_once:'run_metadata_repair_once',pause:'pause_metadata_repair',resume:'resume_metadata_repair',cancel:'cancel_metadata_repair'};
         if(!map[action])return;
         if(action==='start'&&!window.confirm('깨진 메일 전체 복구를 시작할까요? 버튼은 한 번만 누르면 되고 외부 자동동기화가 끝까지 처리합니다.'))return;
         if(action==='cancel'&&!window.confirm('깨진 메일 복구를 취소할까요? 이미 복구된 메일은 유지됩니다.'))return;
-        showLoading(action==='start'?'복구 대상을 확인해 작업을 등록하는 중입니다.':'복구 작업 상태를 변경하는 중입니다.');
+        showLoading(action==='start'?'복구 대상을 확인해 작업을 등록하는 중입니다.':(action==='run_once'?'깨진 메일 복구를 지금 한 번 실행하는 중입니다.':'복구 작업 상태를 변경하는 중입니다.'));
         postJson({action:map[action],csrf_token:csrf(),response_type:'json'},function(result){
             hideLoading();
             if(!result||!result.ok){alert(result&&result.message?result.message:'복구 작업 요청에 실패했습니다.');return;}
@@ -162,6 +162,12 @@
             var repairRepairedNode=repairCard.querySelector('[data-repair-repaired]');if(repairRepairedNode)repairRepairedNode.textContent=repairRepaired.toLocaleString()+'건';
             var repairFailedNode=repairCard.querySelector('[data-repair-failed]');if(repairFailedNode)repairFailedNode.textContent=repairFailed.toLocaleString()+'건';
             var repairLastRun=repairCard.querySelector('[data-repair-last-run]');if(repairLastRun)repairLastRun.textContent=repair.last_run_at||'아직 없음';
+            var repairLastProcessed=repairCard.querySelector('[data-repair-last-processed]');if(repairLastProcessed)repairLastProcessed.textContent=(parseInt(repair.last_run_processed_count,10)||0).toLocaleString()+'건';
+            var repairLastPing=repairCard.querySelector('[data-repair-last-ping]');if(repairLastPing)repairLastPing.textContent=repair.last_http_ping_at||'아직 없음';
+            var repairHttpStatus=repairCard.querySelector('[data-repair-http-status]');if(repairHttpStatus)repairHttpStatus.textContent=repair.last_http_status||'아직 없음';
+            var repairLockStatus=repairCard.querySelector('[data-repair-lock-status]');if(repairLockStatus)repairLockStatus.textContent=repair.lock_is_active?'실행 중':'해제';
+            var repairWarning=repairCard.querySelector('[data-repair-cron-warning]');
+            if(repairWarning){var pingTime=repair.last_http_ping_at?Date.parse(String(repair.last_http_ping_at).replace(' ','T')):0;var stale=!!repair.active&&(!pingTime||((new Date().getTime()-pingTime)>180000));repairWarning.hidden=!stale;}
             var repairMessage=repairCard.querySelector('[data-repair-message]');if(repairMessage)repairMessage.textContent=repair.last_message||'아직 복구 작업을 시작하지 않았습니다.';
         }
         var cronAt=document.querySelector('[data-cron-last-at]'); if(cronAt)cronAt.textContent=state.last_cron_at||'아직 없음';
@@ -180,6 +186,17 @@
                 updateStatusView(result.state||{});
             });
         });
+    }
+
+    /* 설정 화면에서 진행 중일 때 상태 JSON만 읽습니다. 메일 수집이나 IMAP 접속은 실행하지 않습니다. */
+    function bindRepairStatusPolling() {
+        var settingsPage=document.querySelector('[data-public-mail-settings]');
+        var repairCard=document.querySelector('.pm-repair-card');
+        if(!settingsPage||!repairCard)return;
+        window.setInterval(function(){
+            if(repairCard.getAttribute('data-repair-active')!=='1'||document.hidden)return;
+            postJson({action:'get_sync_status',csrf_token:csrf(),response_type:'json'},function(result){if(result&&result.ok)updateStatusView(result.state||{});});
+        },15000);
     }
 
     function bindRunAutomation() {
@@ -498,7 +515,7 @@
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); openInitialMessage();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindStatusRefresh(); bindRepairStatusPolling(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); openInitialMessage();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

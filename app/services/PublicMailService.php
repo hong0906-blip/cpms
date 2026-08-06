@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.5';
+    const VERSION = '1.7.6';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -167,33 +167,38 @@ class PublicMailService
 
     public function runAutomationTick($limit)
     {
+        /*
+         * v1.7.6: 깨진 한글 복구를 메일 수집보다 먼저 실행합니다.
+         * 네이버 새메일 수집이 오류나거나 오래 걸려도 복구 진행률은 매 호출마다 남습니다.
+         */
+        $repairResult = array('processed_count'=>0,'repaired_count'=>0,'failed_count'=>0);
+        try {
+            $repairState = PublicMailStorageService::getSyncState();
+            if (!empty($repairState['metadata_repair']['active']) && empty($repairState['metadata_repair']['paused'])) {
+                $repairResult = $this->runMetadataRepairBatch(20, 10);
+            }
+        } catch (\Exception $repairError) {
+            PublicMailStorageService::saveSyncState(array('metadata_repair'=>array(
+                'status'=>'error',
+                'last_run_at'=>date('Y-m-d H:i:s'),
+                'last_run_result'=>'오류: ' . $repairError->getMessage(),
+                'last_error'=>$repairError->getMessage(),
+                'last_message'=>'복구 작업 중 오류가 발생했습니다. 다음 자동호출에서 다시 이어갑니다.',
+                'lock_status'=>'idle',
+                'lock_acquired_at'=>'',
+                'lock_released_at'=>date('Y-m-d H:i:s')
+            )));
+            $repairResult['error'] = $repairError->getMessage();
+        }
+
         $state = PublicMailStorageService::getSyncState();
         if (!empty($state['full_import']['active']) && empty($state['full_import']['paused'])) $result = $this->syncFullImportBatch($limit);
         else $result = $this->syncNewBatch($limit);
 
-        /*
-         * 깨진 한글 복구는 직원 브라우저가 아니라 외부 cron에서만 조금씩 처리합니다.
-         * 사용자가 설정 화면에서 한 번 시작하면 metadata_repair 상태가 active로 유지되고,
-         * 매 cron 호출마다 다음 묶음을 이어서 처리한 뒤 대상이 끝나면 자동 종료됩니다.
-         */
-        $result['repaired_count'] = 0;
-        $result['repair_processed_count'] = 0;
-        try {
-            $repairState = PublicMailStorageService::getSyncState();
-            if (!empty($repairState['metadata_repair']['active']) && empty($repairState['metadata_repair']['paused'])) {
-                $repairResult = $this->runMetadataRepairBatch(20, 20);
-                $result['repaired_count'] = isset($repairResult['repaired_count']) ? (int)$repairResult['repaired_count'] : 0;
-                $result['repair_processed_count'] = isset($repairResult['processed_count']) ? (int)$repairResult['processed_count'] : 0;
-                $result['repair_state'] = isset($repairResult['state']) ? $repairResult['state'] : array();
-            }
-        } catch (\Exception $repairError) {
-            PublicMailStorageService::saveSyncState(array('metadata_repair'=>array(
-                'last_run_at'=>date('Y-m-d H:i:s'),
-                'last_error'=>$repairError->getMessage(),
-                'last_message'=>'복구 작업 중 오류가 발생했습니다. 다음 자동호출에서 다시 이어갑니다.'
-            )));
-            $result['repair_error'] = $repairError->getMessage();
-        }
+        $result['repaired_count'] = isset($repairResult['repaired_count']) ? (int)$repairResult['repaired_count'] : 0;
+        $result['repair_processed_count'] = isset($repairResult['processed_count']) ? (int)$repairResult['processed_count'] : 0;
+        $result['repair_failed_count'] = isset($repairResult['failed_count']) ? (int)$repairResult['failed_count'] : 0;
+        if (isset($repairResult['error'])) $result['repair_error'] = $repairResult['error'];
 
         $latestState = PublicMailStorageService::getSyncState();
         if (empty($latestState['metadata_repair']['active'])) {
@@ -2018,7 +2023,17 @@ class PublicMailService
             'cancelled' => false,
             'started_at' => date('Y-m-d H:i:s'),
             'finished_at' => $targets > 0 ? '' : date('Y-m-d H:i:s'),
+            'status' => $targets > 0 ? 'active' : 'completed',
             'last_run_at' => '',
+            'last_run_result' => '',
+            'last_run_processed_count' => 0,
+            'last_run_repaired_count' => 0,
+            'last_http_ping_at' => '',
+            'last_http_status' => '',
+            'lock_status' => 'idle',
+            'lock_acquired_at' => '',
+            'lock_released_at' => '',
+            'heartbeat_at' => '',
             'cursor' => $targets > 0 ? 0 : $total,
             'total_count' => $total,
             'target_count' => $targets,
@@ -2044,17 +2059,20 @@ class PublicMailService
         $command = trim((string)$command);
         if ($command === 'pause') {
             $repair['paused'] = true;
+            $repair['status'] = 'paused';
             $repair['last_message'] = '깨진 메일 복구를 일시중지했습니다.';
         } elseif ($command === 'resume') {
             if (!empty($repair['cancelled']) || (int)$repair['cursor'] >= (int)$repair['total_count']) return $this->startMetadataRepair();
             $repair['active'] = true;
             $repair['paused'] = false;
             $repair['cancelled'] = false;
+            $repair['status'] = 'active';
             $repair['last_message'] = '깨진 메일 복구를 다시 시작했습니다.';
         } elseif ($command === 'cancel') {
             $repair['active'] = false;
             $repair['paused'] = false;
             $repair['cancelled'] = true;
+            $repair['status'] = 'cancelled';
             $repair['finished_at'] = date('Y-m-d H:i:s');
             $repair['last_message'] = '깨진 메일 복구를 취소했습니다.';
         } else {
@@ -2075,25 +2093,43 @@ class PublicMailService
         $started = microtime(true);
         $state = PublicMailStorageService::getSyncState();
         $repair = $state['metadata_repair'];
-        if (empty($repair['active'])) return array('ok'=>true,'message'=>'깨진 메일 복구가 실행 중이 아닙니다.','processed_count'=>0,'repaired_count'=>0,'state'=>$state);
-        if (!empty($repair['paused'])) return array('ok'=>true,'message'=>'깨진 메일 복구가 일시중지되어 있습니다.','processed_count'=>0,'repaired_count'=>0,'state'=>$state);
-        $repairLock = PublicMailStorageService::acquireLock('metadata_repair');
-        if ($repairLock === false) return array('ok'=>true,'message'=>'다른 자동호출이 깨진 메일을 복구 중입니다. 다음 호출에서 이어집니다.','processed_count'=>0,'repaired_count'=>0,'state'=>$state);
+        if (empty($repair['active'])) return array('ok'=>true,'message'=>'깨진 메일 복구가 실행 중이 아닙니다.','processed_count'=>0,'repaired_count'=>0,'failed_count'=>0,'state'=>$state);
+        if (!empty($repair['paused'])) return array('ok'=>true,'message'=>'깨진 메일 복구가 일시중지되어 있습니다.','processed_count'=>0,'repaired_count'=>0,'failed_count'=>0,'state'=>$state);
 
-        $messages = PublicMailStorageService::getMessages();
-        $keys = array_keys($messages);
-        $total = count($keys);
-        $cursor = max(0, min($total, (int)$repair['cursor']));
+        $repairLock = PublicMailStorageService::acquireLock('metadata_repair');
+        if ($repairLock === false) {
+            $state = PublicMailStorageService::saveSyncState(array('metadata_repair'=>array(
+                'lock_status'=>'busy',
+                'last_run_result'=>'다른 복구 작업이 실행 중입니다.',
+                'last_message'=>'다른 자동호출이 깨진 메일을 복구 중입니다. 다음 호출에서 이어집니다.'
+            )));
+            return array('ok'=>true,'message'=>'다른 자동호출이 깨진 메일을 복구 중입니다. 다음 호출에서 이어집니다.','processed_count'=>0,'repaired_count'=>0,'failed_count'=>0,'state'=>$state);
+        }
+
+        $lockAt = date('Y-m-d H:i:s');
+        $repair['status'] = 'running';
+        $repair['lock_status'] = 'locked';
+        $repair['lock_acquired_at'] = $lockAt;
+        $repair['heartbeat_at'] = $lockAt;
+        $repair['last_error'] = '';
+        PublicMailStorageService::saveSyncState(array('metadata_repair'=>$repair));
+
         $processedThisRun = 0;
         $repairedThisRun = 0;
         $skippedThisRun = 0;
         $failedThisRun = 0;
-        $settings = PublicMailStorageService::getSettings(true);
         $client = null;
-        $selected = '';
         $changed = false;
+        $runError = '';
 
         try {
+            $messages = PublicMailStorageService::getMessages();
+            $keys = array_keys($messages);
+            $total = count($keys);
+            $cursor = max(0, min($total, (int)$repair['cursor']));
+            $settings = PublicMailStorageService::getSettings(true);
+            $selected = '';
+
             while ($cursor < $total && $processedThisRun < $limit) {
                 if ((microtime(true) - $started) >= $maximumSeconds) break;
                 $key = (string)$keys[$cursor];
@@ -2152,32 +2188,58 @@ class PublicMailService
                     $failedThisRun++;
                     $changed = true;
                 }
+
+                if (($processedThisRun % 5) === 0) {
+                    PublicMailStorageService::saveSyncState(array('metadata_repair'=>array('heartbeat_at'=>date('Y-m-d H:i:s'))));
+                }
             }
+
+            if ($changed) PublicMailStorageService::saveMessages($messages);
+            $repair['cursor'] = $cursor;
+            $repair['total_count'] = $total;
+            $repair['processed_count'] = min($total, (int)$repair['processed_count'] + $processedThisRun);
+            $repair['repaired_count'] = (int)$repair['repaired_count'] + $repairedThisRun;
+            $repair['skipped_count'] = (int)$repair['skipped_count'] + $skippedThisRun;
+            $repair['failed_count'] = (int)$repair['failed_count'] + $failedThisRun;
+            $repair['remaining_count'] = max(0, $total - $cursor);
+            $repair['last_run_at'] = date('Y-m-d H:i:s');
+            $repair['last_run_processed_count'] = $processedThisRun;
+            $repair['last_run_repaired_count'] = $repairedThisRun;
+            $repair['last_error'] = $failedThisRun > 0 ? $failedThisRun . '건은 원본 헤더를 읽지 못했습니다.' : '';
+
+            if ($cursor >= $total) {
+                $repair['active'] = false;
+                $repair['paused'] = false;
+                $repair['status'] = 'completed';
+                $repair['finished_at'] = date('Y-m-d H:i:s');
+                $repair['last_message'] = '깨진 메일 전체 복구를 완료했습니다. 복구 ' . number_format((int)$repair['repaired_count']) . '건, 확인 실패 ' . number_format((int)$repair['failed_count']) . '건입니다.';
+            } else {
+                $repair['status'] = 'active';
+                $repair['last_message'] = '이번 실행에서 ' . $processedThisRun . '건을 확인하고 ' . $repairedThisRun . '건을 복구했습니다. 남은 확인 대상은 ' . number_format($repair['remaining_count']) . '건입니다.';
+            }
+            $repair['last_run_result'] = $repair['last_message'];
+        } catch (\Exception $e) {
+            $runError = $e->getMessage();
+            $repair['status'] = 'error';
+            $repair['last_run_at'] = date('Y-m-d H:i:s');
+            $repair['last_run_processed_count'] = $processedThisRun;
+            $repair['last_run_repaired_count'] = $repairedThisRun;
+            $repair['last_error'] = $runError;
+            $repair['last_run_result'] = '오류: ' . $runError;
+            $repair['last_message'] = '복구 실행 중 오류가 발생했습니다. 다음 호출에서 다시 시도합니다.';
         } finally {
-            if ($client !== null) $client->logout();
+            if ($client !== null) {
+                try { $client->logout(); } catch (\Exception $ignored) {}
+            }
+            $repair['lock_status'] = 'idle';
+            $repair['lock_acquired_at'] = '';
+            $repair['lock_released_at'] = date('Y-m-d H:i:s');
+            $repair['heartbeat_at'] = date('Y-m-d H:i:s');
+            $state = PublicMailStorageService::saveSyncState(array('metadata_repair'=>$repair));
+            PublicMailStorageService::releaseLock($repairLock);
         }
 
-        if ($changed) PublicMailStorageService::saveMessages($messages);
-        $repair['cursor'] = $cursor;
-        $repair['total_count'] = $total;
-        $repair['processed_count'] = min($total, (int)$repair['processed_count'] + $processedThisRun);
-        $repair['repaired_count'] = (int)$repair['repaired_count'] + $repairedThisRun;
-        $repair['skipped_count'] = (int)$repair['skipped_count'] + $skippedThisRun;
-        $repair['failed_count'] = (int)$repair['failed_count'] + $failedThisRun;
-        $repair['remaining_count'] = max(0, $total - $cursor);
-        $repair['last_run_at'] = date('Y-m-d H:i:s');
-        $repair['last_error'] = $failedThisRun > 0 ? $failedThisRun . '건은 원본 헤더를 읽지 못했습니다.' : '';
-
-        if ($cursor >= $total) {
-            $repair['active'] = false;
-            $repair['paused'] = false;
-            $repair['finished_at'] = date('Y-m-d H:i:s');
-            $repair['last_message'] = '깨진 메일 전체 복구를 완료했습니다. 복구 ' . number_format((int)$repair['repaired_count']) . '건, 확인 실패 ' . number_format((int)$repair['failed_count']) . '건입니다.';
-        } else {
-            $repair['last_message'] = '이번 자동호출에서 ' . $processedThisRun . '건을 확인하고 ' . $repairedThisRun . '건을 복구했습니다. 남은 확인 대상은 ' . number_format($repair['remaining_count']) . '건입니다.';
-        }
-        $state = PublicMailStorageService::saveSyncState(array('metadata_repair'=>$repair));
-        PublicMailStorageService::releaseLock($repairLock);
+        if ($runError !== '') throw new \RuntimeException($runError);
         return array('ok'=>true,'message'=>$repair['last_message'],'processed_count'=>$processedThisRun,'repaired_count'=>$repairedThisRun,'failed_count'=>$failedThisRun,'state'=>$state);
     }
 

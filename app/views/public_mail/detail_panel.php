@@ -21,12 +21,6 @@ $selectedPriority = !empty($detailWorkflow['priority']) ? $detailWorkflow['prior
             <?php if (!empty($employees)): ?>
                 <button type="button" class="pm-btn pm-btn-primary" data-task-modal-open><i data-lucide="list-plus"></i> 업무요청 만들기</button>
             <?php endif; ?>
-            <form method="post" action="public_mail_action.php" class="pm-inline-form">
-                <input type="hidden" name="csrf_token" value="<?php echo call_user_func($esc, $csrfToken); ?>">
-                <input type="hidden" name="action" value="reply_completed">
-                <input type="hidden" name="message_key" value="<?php echo call_user_func($esc, $detail['message_key']); ?>">
-                <button class="pm-btn pm-btn-light" type="submit"><i data-lucide="check"></i> 발송완료 처리</button>
-            </form>
         </div>
     </div>
 

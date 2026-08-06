@@ -63,11 +63,16 @@ if (!$service->verifyCronToken($key)) {
 
 $startedAt = microtime(true);
 $startedText = date('Y-m-d H:i:s');
+$currentState = PublicMailStorageService::getSyncState();
+$currentRepair = isset($currentState['metadata_repair']) && is_array($currentState['metadata_repair']) ? $currentState['metadata_repair'] : array();
+$currentRepair['last_http_ping_at'] = $startedText;
+$currentRepair['last_http_status'] = '200 ACCEPTED';
 PublicMailStorageService::saveSyncState(array(
     'last_cron_at' => $startedText,
     'last_cron_started_at' => $startedText,
     'last_cron_status' => 'running',
-    'last_cron_result' => '자동동기화 실행 중'
+    'last_cron_result' => '자동동기화 실행 중',
+    'metadata_repair' => $currentRepair
 ));
 
 $continuedInBackground = pm_cron_finish_response('ACCEPTED');
@@ -88,24 +93,35 @@ try {
     $repaired = isset($result['repaired_count']) ? (int)$result['repaired_count'] : 0;
     $repairRemaining = isset($state['metadata_repair']['remaining_count']) ? (int)$state['metadata_repair']['remaining_count'] : 0;
     $summary = '성공: ' . $message . ' / 추가 ' . $added . '건 / 메일 남음 ' . $remaining . '건 / 한글복구 ' . $repaired . '건 / 복구 확인 남음 ' . $repairRemaining . '건';
+    $finishedText = date('Y-m-d H:i:s');
+    $latestRepair = isset($state['metadata_repair']) && is_array($state['metadata_repair']) ? $state['metadata_repair'] : array();
+    $latestRepair['last_http_ping_at'] = $finishedText;
+    $latestRepair['last_http_status'] = '200 SUCCESS';
     PublicMailStorageService::saveSyncState(array(
-        'last_cron_at' => date('Y-m-d H:i:s'),
-        'last_cron_finished_at' => date('Y-m-d H:i:s'),
+        'last_cron_at' => $finishedText,
+        'last_cron_finished_at' => $finishedText,
         'last_cron_status' => 'success',
         'last_cron_duration_ms' => $duration,
-        'last_cron_result' => $summary
+        'last_cron_result' => $summary,
+        'metadata_repair' => $latestRepair
     ));
     if (!$continuedInBackground) {
         /* 이미 ACCEPTED를 출력했으므로 추가 출력은 하지 않습니다. */
     }
 } catch (Exception $e) {
     $duration = (int)round((microtime(true) - $startedAt) * 1000);
+    $errorText = date('Y-m-d H:i:s');
+    $errorState = PublicMailStorageService::getSyncState();
+    $errorRepair = isset($errorState['metadata_repair']) && is_array($errorState['metadata_repair']) ? $errorState['metadata_repair'] : array();
+    $errorRepair['last_http_ping_at'] = $errorText;
+    $errorRepair['last_http_status'] = '500 ERROR';
     PublicMailStorageService::saveSyncState(array(
-        'last_cron_at' => date('Y-m-d H:i:s'),
-        'last_cron_finished_at' => date('Y-m-d H:i:s'),
+        'last_cron_at' => $errorText,
+        'last_cron_finished_at' => $errorText,
         'last_cron_status' => 'error',
         'last_cron_duration_ms' => $duration,
-        'last_cron_result' => '오류: ' . $e->getMessage()
+        'last_cron_result' => '오류: ' . $e->getMessage(),
+        'metadata_repair' => $errorRepair
     ));
     if (!$continuedInBackground) {
         /* 예약서비스에는 이미 짧은 응답을 보냈고, 상세 오류는 설정 화면에 기록됩니다. */
