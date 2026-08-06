@@ -15,7 +15,7 @@ $selectedPriority = !empty($detailWorkflow['priority']) ? $detailWorkflow['prior
 ?>
 <div class="pm-detail-panel">
     <div class="pm-detail-toolbar">
-        <a class="pm-icon-btn" data-mail-detail-close href="public_mail.php" title="상세 닫기"><i data-lucide="x"></i></a>
+        <a class="pm-icon-btn pm-reader-back-button" data-mail-detail-close href="public_mail.php" title="메일 목록으로 돌아가기" aria-label="메일 목록으로 돌아가기"><i data-lucide="arrow-left"></i><span>뒤로</span></a>
         <div class="pm-detail-actions">
             <a class="pm-btn pm-btn-gmail" href="<?php echo call_user_func($esc, $replyMailUrl); ?>" target="_blank" rel="noopener noreferrer"><i data-lucide="reply"></i> Gmail로 답장쓰기</a>
             <?php if (!empty($employees)): ?>

@@ -20,7 +20,7 @@ class PublicMailWebHelper
 
     /**
      * 기존 호환용 최고관리자 권한 확인입니다.
-     * 네이버 메일 연동 설정은 v1.7.7부터 requireDevelopmentDepartment()를 사용합니다.
+     * 네이버 메일 연동 설정은 v1.7.8부터 requireDevelopmentDepartment()를 사용합니다.
      */
     public static function requireAdmin()
     {

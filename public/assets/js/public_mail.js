@@ -4,11 +4,12 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 깨진 한글 복구만 개발부서 연동 설정 화면에서 자동 연속 실행합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.7
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.8
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.7';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.8';
+    var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
     function csrf() { var el=page(); return el ? (el.getAttribute('data-csrf-token')||'') : ''; }
@@ -478,6 +479,14 @@
     function openReaderModal(){
         var modal=readerModal();
         if(!modal)return;
+        if(isMobileMailView()&&!document.body.classList.contains('pm-mail-reader-open')){
+            readerScrollY=window.pageYOffset||document.documentElement.scrollTop||0;
+            document.body.style.position='fixed';
+            document.body.style.top='-'+readerScrollY+'px';
+            document.body.style.left='0';
+            document.body.style.right='0';
+            document.body.style.width='100%';
+        }
         modal.hidden=false;
         modal.setAttribute('aria-hidden','false');
         document.body.classList.add('pm-mail-reader-open');
@@ -490,6 +499,14 @@
             modal.setAttribute('aria-hidden','true');
         }
         document.body.classList.remove('pm-mail-reader-open');
+        if(document.body.style.position==='fixed'){
+            document.body.style.position='';
+            document.body.style.top='';
+            document.body.style.left='';
+            document.body.style.right='';
+            document.body.style.width='';
+            window.scrollTo(0,readerScrollY||0);
+        }
         setSelectedRow('');
         if(host){
             host.innerHTML='<div class="pm-detail-panel pm-detail-panel-loading"><div class="pm-detail-local-loading"><div class="pm-spinner"></div><strong>메일 정보를 여는 중입니다.</strong><span>메일 목록은 그대로 유지됩니다.</span></div></div>';
@@ -536,6 +553,29 @@
     function currentMessageFromUrl(){
         var match=window.location.search.match(/[?&]message=([^&]+)/);
         return match&&match[1]?decodeURIComponent(match[1]):'';
+    }
+
+    function isMobileMailView(){
+        return !!(window.matchMedia && window.matchMedia('(max-width: 768px)').matches);
+    }
+
+    function bindMobileSearch(){
+        var toggle=document.querySelector('[data-mobile-search-toggle]');
+        var panel=document.querySelector('[data-mobile-search-panel]');
+        if(!toggle||!panel)return;
+        function setOpen(open){
+            if(open)panel.classList.add('is-mobile-open');
+            else panel.classList.remove('is-mobile-open');
+            toggle.setAttribute('aria-expanded',open?'true':'false');
+            toggle.setAttribute('aria-label',open?'메일 검색 닫기':'메일 검색 열기');
+            if(open){
+                var input=panel.querySelector('input[name="query"]');
+                if(input&&isMobileMailView())setTimeout(function(){try{input.focus();}catch(e){}},80);
+            }
+        }
+        toggle.addEventListener('click',function(){setOpen(!panel.classList.contains('is-mobile-open'));});
+        var input=panel.querySelector('input[name="query"]');
+        if(input&&String(input.value||'')!=='')setOpen(true);
     }
 
     function bindMailNavigation(){
@@ -594,7 +634,7 @@
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindMetadataRepairAutoRunner(); bindStatusRefresh(); bindRepairStatusPolling(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); openInitialMessage();
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindMetadataRepairAutoRunner(); bindStatusRefresh(); bindRepairStatusPolling(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMobileSearch(); bindMailNavigation(); openInitialMessage();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

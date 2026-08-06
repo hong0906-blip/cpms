@@ -41,7 +41,7 @@ if ($mailboxType !== '') {
 }
 $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($resetQuery, '', '&') : '');
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260806_77">
+<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260806_78">
 
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page"
      data-public-mail-page
@@ -51,7 +51,12 @@ $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($r
         <section class="public-mail-hero">
             <div>
                 <div class="public-mail-eyebrow">COMPANY MAIL HUB</div>
-                <h1>네이버 메일</h1>
+                <div class="pm-mobile-title-row">
+                    <h1>네이버 메일</h1>
+                    <button type="button" class="pm-mobile-search-toggle" data-mobile-search-toggle aria-expanded="<?php echo !empty($filters['query']) ? 'true' : 'false'; ?>" aria-controls="pmMobileSearchPanel" aria-label="메일 검색 열기">
+                        <i data-lucide="search"></i><span>검색</span>
+                    </button>
+                </div>
                 <p>전체메일·받은메일함·보낸메일함에서 필요한 메일을 빠르게 검색하고 확인합니다.</p>
             </div>
             <?php if (!empty($canManageMailSettings)): ?>
@@ -99,7 +104,7 @@ $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($r
             </a>
         </nav>
 
-        <section class="pm-filter-card pm-filter-card-simple">
+        <section id="pmMobileSearchPanel" class="pm-filter-card pm-filter-card-simple<?php echo !empty($filters['query']) ? ' is-mobile-open' : ''; ?>" data-mobile-search-panel>
             <form method="get" action="public_mail.php" class="pm-filter-form pm-filter-form-simple">
                 <?php if ($mailboxType !== ''): ?>
                     <input type="hidden" name="mailbox_type" value="<?php echo call_user_func($esc, $mailboxType); ?>">
@@ -162,6 +167,7 @@ $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($r
                                class="pm-mail-row pm-mail-row-wide <?php echo (string)$selectedMessageKey === (string)$message['message_key'] ? 'is-selected' : ''; ?> <?php echo empty($message['is_seen']) ? 'is-unread' : ''; ?>"
                                href="<?php echo call_user_func($esc, $rowUrl); ?>">
                                 <div class="pm-mail-row-top">
+                                    <span class="pm-mobile-address"><?php echo call_user_func($esc, $addressText); ?></span>
                                     <span class="pm-badge pm-badge-<?php echo $priority === '긴급' ? 'danger' : ($priority === '높음' ? 'warning' : 'neutral'); ?>"><?php echo call_user_func($esc, $priority); ?></span>
                                     <span class="pm-department"><?php echo call_user_func($esc, $department); ?></span>
                                     <time><?php echo call_user_func($esc, substr(isset($message['date_text']) ? $message['date_text'] : '', 5, 11)); ?></time>
@@ -213,4 +219,4 @@ $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($r
 </div>
 
 <iframe name="pmMailDownloadFrame" title="첨부파일 다운로드" class="pm-download-frame" aria-hidden="true"></iframe>
-<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260806_77"></script>
+<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260806_78"></script>

@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.7';
+    const VERSION = '1.7.8';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -168,7 +168,7 @@ class PublicMailService
     public function runAutomationTick($limit)
     {
         /*
-         * v1.7.7: 깨진 한글 복구를 메일 수집보다 먼저 실행합니다.
+         * v1.7.8: 깨진 한글 복구를 메일 수집보다 먼저 실행합니다.
          * 네이버 새메일 수집이 오류나거나 오래 걸려도 복구 진행률은 매 호출마다 남습니다.
          */
         $repairResult = array('processed_count'=>0,'repaired_count'=>0,'failed_count'=>0);
