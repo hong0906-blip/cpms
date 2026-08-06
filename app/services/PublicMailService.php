@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.9';
+    const VERSION = '1.7.10';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -168,7 +168,7 @@ class PublicMailService
     public function runAutomationTick($limit)
     {
         /*
-         * v1.7.9: 깨진 한글 복구를 메일 수집보다 먼저 실행합니다.
+         * v1.7.10: 깨진 한글 복구를 메일 수집보다 먼저 실행합니다.
          * 네이버 새메일 수집이 오류나거나 오래 걸려도 복구 진행률은 매 호출마다 남습니다.
          */
         $repairResult = array('processed_count'=>0,'repaired_count'=>0,'failed_count'=>0);
@@ -2012,7 +2012,7 @@ class PublicMailService
     }
 
     /**
-     * v1.7.8에서 진행 중이던 전체목록 방식 작업을 v1.7.9 대상목록 방식으로 자동 변환합니다.
+     * v1.7.8에서 진행 중이던 전체목록 방식 작업을 v1.7.10 대상목록 방식으로 자동 변환합니다.
      * 이미 복구된 메일은 다시 네이버에 요청하지 않고 남아 있는 깨진 메일만 대기열에 넣습니다.
      */
     private function prepareMetadataRepairQueue($repair, $messages)
@@ -2105,6 +2105,7 @@ class PublicMailService
             'consecutive_errors' => 0,
             'last_run_duration_ms' => 0,
             'last_checkpoint_at' => '',
+            'last_index_refresh_processed' => 0,
             'last_error_code' => '',
             'last_message' => $targets > 0
                 ? '깨진 메일 전체 복구를 등록했습니다. 50건부터 시작해 서버 상태에 따라 최대 100건까지 자동으로 빠르게 처리합니다.'
@@ -2285,16 +2286,17 @@ class PublicMailService
                             $changed = true;
                             $messagesChangedThisRun = true;
                         } catch (\Exception $messageError) {
+                            $messageErrorText = PublicMailStorageService::sanitizeText($messageError->getMessage(), 500);
                             $attempts[$key] = isset($attempts[$key]) ? ((int)$attempts[$key] + 1) : 1;
-                            if ((int)$attempts[$key] < 3) {
+                            if ((int)$attempts[$key] < 2) {
                                 $retryable = true;
                                 $errorCode = 'temporary_mail_error';
-                                $runError = $messageError->getMessage();
+                                $runError = $messageErrorText;
                                 break;
                             }
 
                             $messages[$key]['metadata_repair_failed'] = true;
-                            $messages[$key]['metadata_repair_error'] = substr($messageError->getMessage(), 0, 500);
+                            $messages[$key]['metadata_repair_error'] = $messageErrorText;
                             $messages[$key]['metadata_repair_attempted_at'] = date('Y-m-d H:i:s');
                             unset($attempts[$key]);
                             $cursor++;
@@ -2327,7 +2329,17 @@ class PublicMailService
                 }
 
                 if ($changed) PublicMailStorageService::saveMessagesCheckpoint($messages);
-                if ($messagesChangedThisRun) PublicMailStorageService::refreshIndexSafely($messages, null);
+                /*
+                 * 5천 건 이상 색인을 매 묶음마다 다시 만들면 FastCGI가 응답을 끊을 수 있습니다.
+                 * 200건마다 또는 마지막 묶음에서만 색인을 갱신해 속도와 안정성을 함께 확보합니다.
+                 */
+                $lastIndexRefreshProcessed = isset($repair['last_index_refresh_processed']) ? (int)$repair['last_index_refresh_processed'] : 0;
+                $currentTotalProcessed = $baseProcessed + $processedThisRun;
+                $shouldRefreshIndex = $messagesChangedThisRun && (($currentTotalProcessed - $lastIndexRefreshProcessed) >= 200 || $cursor >= $queueTotal);
+                if ($shouldRefreshIndex) {
+                    PublicMailStorageService::refreshIndexSafely($messages, null);
+                    $repair['last_index_refresh_processed'] = $currentTotalProcessed;
+                }
 
                 $repair['cursor'] = $cursor;
                 $repair['processed_count'] = $baseProcessed + $processedThisRun;
@@ -2372,7 +2384,7 @@ class PublicMailService
             }
         } catch (\Exception $e) {
             $retryable = true;
-            $runError = $e->getMessage();
+            $runError = PublicMailStorageService::sanitizeText($e->getMessage(), 500);
             $errorCode = 'temporary_connection';
             $repair['active'] = true;
             $repair['status'] = 'retry_wait';
@@ -2399,12 +2411,21 @@ class PublicMailService
             $repair['batch_size_current'] = $limit;
             $repair['recommended_batch_size'] = $recommended;
             $repair['last_run_duration_ms'] = $durationMs;
-            $repair['last_run_result'] = isset($repair['last_message']) ? $repair['last_message'] : '';
+            $repair['last_run_result'] = isset($repair['last_message']) ? PublicMailStorageService::sanitizeText($repair['last_message'], 1000) : '';
+            $repair['last_error'] = isset($repair['last_error']) ? PublicMailStorageService::sanitizeText($repair['last_error'], 1000) : '';
             $repair['lock_status'] = 'idle';
             $repair['lock_acquired_at'] = '';
             $repair['lock_released_at'] = date('Y-m-d H:i:s');
             $repair['heartbeat_at'] = date('Y-m-d H:i:s');
-            $state = PublicMailStorageService::saveSyncState(array('metadata_repair'=>$repair));
+            try {
+                $state = PublicMailStorageService::saveSyncState(array('metadata_repair'=>$repair));
+            } catch (\Exception $stateSaveError) {
+                @error_log('[CPMS Public Mail] metadata repair state save failed: ' . PublicMailStorageService::sanitizeText($stateSaveError->getMessage(), 500));
+                $retryable = true;
+                $errorCode = 'state_save_error';
+                $repair['last_message'] = '복구 진행상태 저장이 잠시 지연되었습니다. 저장된 체크포인트부터 자동으로 다시 시도합니다.';
+                $state = PublicMailStorageService::getSyncState();
+            }
             PublicMailStorageService::releaseLock($repairLock);
         }
 

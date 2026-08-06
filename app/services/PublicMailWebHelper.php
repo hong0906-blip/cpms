@@ -10,6 +10,9 @@ namespace App\Services;
 
 class PublicMailWebHelper
 {
+    private static $jsonRequestActive = false;
+    private static $jsonResponseSent = false;
+    private static $jsonShutdownRegistered = false;
     public static function requireLogin()
     {
         if (!class_exists('\\App\\Core\\Auth') || !\App\Core\Auth::check()) {
@@ -138,12 +141,153 @@ class PublicMailWebHelper
         return isset($_POST['response_type']) && (string)$_POST['response_type'] === 'json';
     }
 
+    /**
+     * AJAX 요청이 PHP 경고문이나 치명적 오류 HTML로 오염되지 않도록 JSON 전용 종료 처리를 등록합니다.
+     */
+    public static function beginJsonRequest()
+    {
+        self::$jsonRequestActive = true;
+        if (!self::$jsonShutdownRegistered) {
+            self::$jsonShutdownRegistered = true;
+            register_shutdown_function(array(__CLASS__, 'handleJsonShutdown'));
+        }
+    }
+
+    /**
+     * PHP 5.6에서 처리 중 치명적 오류가 발생해도 브라우저에는 항상 JSON을 반환합니다.
+     */
+    public static function handleJsonShutdown()
+    {
+        if (!self::$jsonRequestActive || self::$jsonResponseSent) return;
+
+        $error = error_get_last();
+        $fatalTypes = array(E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR);
+        if (!is_array($error) || !in_array(isset($error['type']) ? (int)$error['type'] : 0, $fatalTypes, true)) return;
+
+        self::$jsonResponseSent = true;
+        $logMessage = '[CPMS Public Mail] fatal JSON request error';
+        if (isset($error['message'])) $logMessage .= ': ' . self::cleanUtf8String((string)$error['message']);
+        if (isset($error['file'])) $logMessage .= ' in ' . (string)$error['file'];
+        if (isset($error['line'])) $logMessage .= ':' . (int)$error['line'];
+        @error_log($logMessage);
+
+        while (ob_get_level() > 0) @ob_end_clean();
+        if (!headers_sent()) {
+            http_response_code(500);
+            header('Content-Type: application/json; charset=UTF-8');
+            header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+            header('X-Content-Type-Options: nosniff');
+        }
+
+        echo self::encodeJsonSafely(array(
+            'ok' => false,
+            'retryable' => true,
+            'error_code' => 'server_fatal',
+            'message' => '서버 처리 중 오류가 발생했습니다. 저장된 위치부터 자동으로 다시 시도합니다.'
+        ));
+    }
+
+    /**
+     * 대량 복구 상태에서 브라우저에 필요 없는 대상키와 재시도 목록을 제거합니다.
+     */
+    public static function compactSyncState($state)
+    {
+        if (!is_array($state)) return array();
+        $state = self::sanitizeUtf8Value($state);
+        if (isset($state['mailboxes'])) unset($state['mailboxes']);
+        if (isset($state['metadata_repair']) && is_array($state['metadata_repair'])) {
+            unset($state['metadata_repair']['target_keys']);
+            unset($state['metadata_repair']['message_attempts']);
+        }
+        return $state;
+    }
+
+    public static function sanitizeUtf8Value($value)
+    {
+        if (is_string($value)) return self::cleanUtf8String($value);
+        if (is_array($value)) {
+            $clean = array();
+            foreach ($value as $key => $item) {
+                $cleanKey = is_string($key) ? self::cleanUtf8String($key) : $key;
+                $clean[$cleanKey] = self::sanitizeUtf8Value($item);
+            }
+            return $clean;
+        }
+        if (is_object($value)) return self::sanitizeUtf8Value(get_object_vars($value));
+        return $value;
+    }
+
+    private static function cleanUtf8String($value)
+    {
+        $value = (string)$value;
+        if ($value === '') return '';
+        if (function_exists('mb_check_encoding') && @mb_check_encoding($value, 'UTF-8')) return $value;
+        if (function_exists('iconv')) {
+            $converted = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
+            if ($converted !== false && $converted !== '') return $converted;
+        }
+
+        $result = '';
+        $length = strlen($value);
+        for ($i = 0; $i < $length; $i++) {
+            $b1 = ord($value[$i]);
+            if ($b1 <= 0x7F) {
+                if ($b1 === 9 || $b1 === 10 || $b1 === 13 || $b1 >= 32) $result .= $value[$i];
+                continue;
+            }
+            $seqLength = 0;
+            if ($b1 >= 0xC2 && $b1 <= 0xDF) $seqLength = 2;
+            elseif ($b1 >= 0xE0 && $b1 <= 0xEF) $seqLength = 3;
+            elseif ($b1 >= 0xF0 && $b1 <= 0xF4) $seqLength = 4;
+            if ($seqLength === 0 || ($i + $seqLength) > $length) continue;
+
+            $valid = true;
+            for ($j = 1; $j < $seqLength; $j++) {
+                $bj = ord($value[$i + $j]);
+                if ($bj < 0x80 || $bj > 0xBF) { $valid = false; break; }
+            }
+            if ($valid && $seqLength === 3) {
+                $b2 = ord($value[$i + 1]);
+                if (($b1 === 0xE0 && $b2 < 0xA0) || ($b1 === 0xED && $b2 > 0x9F)) $valid = false;
+            }
+            if ($valid && $seqLength === 4) {
+                $b2 = ord($value[$i + 1]);
+                if (($b1 === 0xF0 && $b2 < 0x90) || ($b1 === 0xF4 && $b2 > 0x8F)) $valid = false;
+            }
+            if ($valid) {
+                $result .= substr($value, $i, $seqLength);
+                $i += $seqLength - 1;
+            }
+        }
+        return $result;
+    }
+
+    private static function encodeJsonSafely($data)
+    {
+        $clean = self::sanitizeUtf8Value($data);
+        $json = json_encode($clean, JSON_UNESCAPED_UNICODE);
+        if ($json === false) $json = json_encode($clean);
+        if ($json === false) {
+            $json = '{"ok":false,"retryable":true,"error_code":"json_encode_failed","message":"서버 응답을 안전하게 만들지 못했습니다. 자동으로 다시 시도합니다."}';
+        }
+        return $json;
+    }
+
     public static function jsonResponse($data, $statusCode)
     {
+        self::beginJsonRequest();
+        self::$jsonResponseSent = true;
+
+        if (is_array($data) && isset($data['state'])) {
+            $data['state'] = self::compactSyncState($data['state']);
+        }
+
+        while (ob_get_level() > 0) @ob_end_clean();
         http_response_code((int)$statusCode);
         header('Content-Type: application/json; charset=UTF-8');
         header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
-        echo json_encode($data, JSON_UNESCAPED_UNICODE);
+        header('X-Content-Type-Options: nosniff');
+        echo self::encodeJsonSafely($data);
         exit;
     }
 

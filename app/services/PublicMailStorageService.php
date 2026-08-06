@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.9';
+    const VERSION = '1.7.10';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -117,6 +117,7 @@ class PublicMailStorageService
                 'consecutive_errors' => 0,
                 'last_run_duration_ms' => 0,
                 'last_checkpoint_at' => '',
+                'last_index_refresh_processed' => 0,
                 'last_error_code' => '',
                 'last_message' => '',
                 'last_error' => ''
@@ -386,6 +387,7 @@ class PublicMailStorageService
         $defaults = self::syncDefaults();
         $state['full_import'] = array_merge($defaults['full_import'], isset($saved['full_import']) && is_array($saved['full_import']) ? $saved['full_import'] : array());
         $state['metadata_repair'] = array_merge($defaults['metadata_repair'], isset($saved['metadata_repair']) && is_array($saved['metadata_repair']) ? $saved['metadata_repair'] : array());
+        $state['metadata_repair'] = self::sanitizeUtf8Value($state['metadata_repair']);
         if (!isset($state['mailboxes']) || !is_array($state['mailboxes'])) $state['mailboxes'] = array();
 
         /*
@@ -803,12 +805,87 @@ class PublicMailStorageService
         return is_array($decoded) ? $decoded : $default;
     }
 
+    /**
+     * 네이버 원문에 잘못된 바이트가 섞여 있어도 상태/메일 JSON 전체 저장이 중단되지 않게 정리합니다.
+     */
+    public static function sanitizeUtf8Value($value)
+    {
+        if (is_string($value)) return self::sanitizeText($value, 0);
+        if (is_array($value)) {
+            $clean = array();
+            foreach ($value as $key => $item) {
+                $cleanKey = is_string($key) ? self::sanitizeText($key, 0) : $key;
+                $clean[$cleanKey] = self::sanitizeUtf8Value($item);
+            }
+            return $clean;
+        }
+        if (is_object($value)) return self::sanitizeUtf8Value(get_object_vars($value));
+        return $value;
+    }
+
+    public static function sanitizeText($value, $maxLength)
+    {
+        $value = (string)$value;
+        if ($value === '') return '';
+        if (!(function_exists('mb_check_encoding') && @mb_check_encoding($value, 'UTF-8'))) {
+            if (function_exists('iconv')) {
+                $converted = @iconv('UTF-8', 'UTF-8//IGNORE', $value);
+                if ($converted !== false) $value = $converted;
+            }
+            if (!(function_exists('mb_check_encoding') && @mb_check_encoding($value, 'UTF-8'))) {
+                $result = '';
+                $length = strlen($value);
+                for ($i = 0; $i < $length; $i++) {
+                    $b1 = ord($value[$i]);
+                    if ($b1 <= 0x7F) {
+                        if ($b1 === 9 || $b1 === 10 || $b1 === 13 || $b1 >= 32) $result .= $value[$i];
+                        continue;
+                    }
+                    $seqLength = 0;
+                    if ($b1 >= 0xC2 && $b1 <= 0xDF) $seqLength = 2;
+                    elseif ($b1 >= 0xE0 && $b1 <= 0xEF) $seqLength = 3;
+                    elseif ($b1 >= 0xF0 && $b1 <= 0xF4) $seqLength = 4;
+                    if ($seqLength === 0 || ($i + $seqLength) > $length) continue;
+                    $valid = true;
+                    for ($j = 1; $j < $seqLength; $j++) {
+                        $bj = ord($value[$i + $j]);
+                        if ($bj < 0x80 || $bj > 0xBF) { $valid = false; break; }
+                    }
+                    if ($valid && $seqLength === 3) {
+                        $b2 = ord($value[$i + 1]);
+                        if (($b1 === 0xE0 && $b2 < 0xA0) || ($b1 === 0xED && $b2 > 0x9F)) $valid = false;
+                    }
+                    if ($valid && $seqLength === 4) {
+                        $b2 = ord($value[$i + 1]);
+                        if (($b1 === 0xF0 && $b2 < 0x90) || ($b1 === 0xF4 && $b2 > 0x8F)) $valid = false;
+                    }
+                    if ($valid) {
+                        $result .= substr($value, $i, $seqLength);
+                        $i += $seqLength - 1;
+                    }
+                }
+                $value = $result;
+            }
+        }
+        if ((int)$maxLength > 0) {
+            if (function_exists('mb_substr')) $value = mb_substr($value, 0, (int)$maxLength, 'UTF-8');
+            else $value = substr($value, 0, (int)$maxLength);
+        }
+        return $value;
+    }
+
     public static function writeJsonFile($path, $value)
     {
         $dir = dirname($path);
         if (!is_dir($dir) && !@mkdir($dir, 0770, true) && !is_dir($dir)) throw new \RuntimeException('저장 폴더를 만들 수 없습니다: ' . $dir);
+        $value = self::sanitizeUtf8Value($value);
         $json = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
-        if ($json === false) throw new \RuntimeException('JSON 데이터 변환에 실패했습니다.');
+        if ($json === false) $json = json_encode($value);
+        if ($json === false) {
+            $jsonError = function_exists('json_last_error_msg') ? json_last_error_msg() : (string)json_last_error();
+            @error_log('[CPMS Public Mail] JSON file encode failed: ' . $path . ' / ' . $jsonError);
+            throw new \RuntimeException('JSON 데이터 변환에 실패했습니다.');
+        }
         $temp = $path . '.tmp.' . uniqid('', true);
         $fp = @fopen($temp, 'wb');
         if (!$fp) throw new \RuntimeException('임시 저장 파일을 만들 수 없습니다.');

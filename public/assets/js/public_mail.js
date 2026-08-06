@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 깨진 한글 복구만 개발부서 연동 설정 화면에서 자동 연속 실행합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.9
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.10
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.9';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.10';
     var readerScrollY=0;
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
@@ -30,6 +30,18 @@
         document.body.classList.remove('is-loading','loading');
     }
 
+    function parseJsonText(raw) {
+        raw=String(raw||'').replace(/^\uFEFF/,'').trim();
+        if(raw==='')return null;
+        try{return JSON.parse(raw);}catch(ignore){}
+        /* PHP 경고문이 앞뒤에 붙은 경우에도 가운데 JSON 본문만 복구합니다. */
+        var first=raw.indexOf('{'),last=raw.lastIndexOf('}');
+        if(first!==-1&&last>first){
+            try{return JSON.parse(raw.substring(first,last+1));}catch(ignore2){}
+        }
+        return null;
+    }
+
     function postJson(data, callback, options) {
         options=options||{};
         var xhr=new XMLHttpRequest(),finished=false;
@@ -46,8 +58,8 @@
         xhr.timeout=parseInt(options.timeout,10)||30000;
         xhr.onreadystatechange=function(){
             if(xhr.readyState!==4||finished)return;
-            var result=null,raw=String(xhr.responseText||'');
-            try{result=JSON.parse(raw);}catch(e){
+            var raw=String(xhr.responseText||''),result=parseJsonText(raw);
+            if(!result){
                 var lower=raw.toLowerCase(),sessionLike=(lower.indexOf('login')!==-1||raw.indexOf('로그인')!==-1);
                 result={
                     ok:false,
@@ -256,7 +268,7 @@
             }else{
                 stopMetadataRepairLoop(card&&card.getAttribute('data-repair-paused')==='1'?'일시중지':'복구 완료');
             }
-        },{timeout:28000});
+        },{timeout:24000});
     }
 
     function metadataRepairAction(action) {

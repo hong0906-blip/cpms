@@ -1,4 +1,4 @@
-/* CPMS_PUBLIC_MAIL_VERSION: 1.7.9 */
+/* CPMS_PUBLIC_MAIL_VERSION: 1.7.10 */
 /*
  * 파일 경로: C:\www\cpms\public\assets\css\public_mail.css
  * 공용메일 화면 전용 스타일
@@ -1347,7 +1347,7 @@ body.pm-modal-open {
 
 
 /* ========================================================================
- * v1.7.9 단순 검색 · 전체너비 목록 · 대형 메일 상세 모달
+ * v1.7.10 단순 검색 · 전체너비 목록 · 대형 메일 상세 모달
  * ====================================================================== */
 .pm-filter-form-simple {
     grid-template-columns: minmax(320px, 1fr) minmax(160px, 210px) auto auto;
@@ -1533,15 +1533,15 @@ body.pm-mail-reader-open {
     }
 }
 
-/* v1.7.9 자동복구 외부호출 경고는 hidden 속성을 우선합니다. */
+/* v1.7.10 자동복구 외부호출 경고는 hidden 속성을 우선합니다. */
 [data-repair-cron-warning][hidden] { display: none !important; }
 
-/* v1.7.9 개발부서 설정 화면 전용 깨진 한글 자동 연속 실행 */
+/* v1.7.10 개발부서 설정 화면 전용 깨진 한글 자동 연속 실행 */
 .pm-repair-card [data-repair-runner-status]{color:#0f766e;font-weight:800;}
 
 
 /* ========================================================================
- * v1.7.9 모바일 네이버 메일형 반응형 화면
+ * v1.7.10 모바일 네이버 메일형 반응형 화면
  * PC 레이아웃은 유지하고 768px 이하에서 목록 중심 모바일 UI를 사용합니다.
  * ====================================================================== */
 .pm-mobile-title-row { display: block; }
@@ -1787,7 +1787,7 @@ body.pm-mail-reader-open {
 }
 
 
-/* v1.7.9: 자동복구 재시도 안내는 오류 종료가 아니라 대기 상태로 표시합니다. */
+/* v1.7.10: 자동복구 재시도 안내는 오류 종료가 아니라 대기 상태로 표시합니다. */
 .pm-repair-card .pm-alert-warning:not([hidden]) {
     animation: pm-retry-pulse 1.8s ease-in-out infinite;
 }

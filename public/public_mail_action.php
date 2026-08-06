@@ -1,10 +1,14 @@
 <?php
+/* JSON 응답 앞에 PHP 경고문이 섞이지 않도록 가장 먼저 출력 버퍼를 시작합니다. */
+@ini_set('display_errors', '0');
+@ini_set('html_errors', '0');
+if (ob_get_level() === 0) @ob_start();
 /**
  * 파일 경로: C:\www\cpms\public\public_mail_action.php
  *
  * 네이버 메일의 상세본문 비동기 조회, 인라인 이미지 출력, 설정, 동기화,
  * 처리상태 변경을 담당합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.9
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.10
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';
@@ -55,11 +59,7 @@ if ($method === 'GET' && ($getAction === 'detail_panel' || $getAction === 'detai
         if ($getAction === 'inline_image_bundle') {
             $partIds = isset($_GET['part_ids']) ? explode(',', (string)$_GET['part_ids']) : array();
             $bundle = $service->getInlineImageBundle($messageKey, $partIds);
-            header('Content-Type: application/json; charset=UTF-8');
-            header('Cache-Control: private, max-age=3600');
-            header('X-Content-Type-Options: nosniff');
-            echo json_encode(array('ok'=>true,'items'=>isset($bundle['items'])?$bundle['items']:array(),'failed'=>isset($bundle['failed'])?$bundle['failed']:array()));
-            exit;
+            PublicMailWebHelper::jsonResponse(array('ok'=>true,'items'=>isset($bundle['items'])?$bundle['items']:array(),'failed'=>isset($bundle['failed'])?$bundle['failed']:array()), 200);
         }
 
         if ($getAction === 'inline_image') {
@@ -132,6 +132,7 @@ if (!$csrfValid) {
 $action = isset($_POST['action']) ? trim((string)$_POST['action']) : '';
 $currentUser = PublicMailWebHelper::currentUserName();
 $isAjax = PublicMailWebHelper::isAjax();
+if ($isAjax) PublicMailWebHelper::beginJsonRequest();
 
 try {
     if ($action === 'get_sync_status') {
@@ -178,13 +179,13 @@ try {
     if ($action === 'run_metadata_repair_once') {
         PublicMailWebHelper::requireDevelopmentDepartment();
         if (function_exists('session_write_close')) @session_write_close();
-        @set_time_limit(30);
+        @set_time_limit(24);
         $batchSize = isset($_POST['batch_size']) ? (int)$_POST['batch_size'] : 50;
         if ($batchSize < 30) $batchSize = 30;
         if ($batchSize > 100) $batchSize = 100;
         $state = $service->getSyncState();
         if (empty($state['metadata_repair']['active'])) $service->startMetadataRepair();
-        $result = $service->runMetadataRepairBatch($batchSize,14);
+        $result = $service->runMetadataRepairBatch($batchSize,10);
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }
