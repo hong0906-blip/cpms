@@ -4,7 +4,6 @@ $totalSales = isset($totals['sales']) ? (float)$totals['sales'] : 0.0;
 $projectInputCost = isset($totals['project_input_cost']) ? (float)$totals['project_input_cost'] : 0.0;
 $totalOverhead = isset($totals['overhead']) ? (float)$totals['overhead'] : 0.0;
 $totalInputCost = isset($totals['total_input_cost']) ? (float)$totals['total_input_cost'] : 0.0;
-$targetAmount = isset($totals['target_amount']) ? (float)$totals['target_amount'] : 0.0;
 $costRateLabel = isset($totals['cost_rate_label']) ? (string)$totals['cost_rate_label'] : '0%';
 $overheadHasData = !empty($overhead['has_data']);
 ?>
@@ -28,12 +27,12 @@ $overheadHasData = !empty($overhead['has_data']);
     <?php if (!$overheadHasData): ?><div class="sub"><strong>총관리비 데이터 미등록</strong></div><?php endif; ?>
   </div>
   <div class="cp-summary-card">
-    <div class="label">총 원가율</div>
-    <div class="value"><?php echo h($costRateLabel); ?></div>
+    <div class="label">총 현장 투입비</div>
+    <div class="value"><?php echo h(cpms_company_profit_money($projectInputCost)); ?></div>
   </div>
   <div class="cp-summary-card">
-    <div class="label">총 투입목표 금액</div>
-    <div class="value"><?php echo h(cpms_company_profit_money($targetAmount)); ?></div>
+    <div class="label">총 원가율</div>
+    <div class="value"><?php echo h($costRateLabel); ?></div>
   </div>
 </div>
 

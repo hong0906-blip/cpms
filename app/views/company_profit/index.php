@@ -11,6 +11,9 @@ $scope = isset($filters['scope']) ? (string)$filters['scope'] : 'year';
 $viewMode = isset($filters['view_mode']) ? (string)$filters['view_mode'] : 'monthly';
 $selectedYear = isset($filters['year']) ? (int)$filters['year'] : (int)date('Y');
 $selectedMonth = isset($filters['month']) ? (int)$filters['month'] : 0;
+$selectedMonthForUi = ($selectedMonth >= 1 && $selectedMonth <= 12)
+    ? $selectedMonth
+    : (($selectedYear === (int)date('Y')) ? (int)date('n') : 1);
 $selectedStatus = isset($filters['status']) ? (string)$filters['status'] : '';
 $searchQuery = isset($filters['q']) ? (string)$filters['q'] : '';
 $startMonth = isset($filters['start_month']) ? (string)$filters['start_month'] : sprintf('%04d-01', $selectedYear);
@@ -22,7 +25,7 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
 
 <style>
 .cp-company-profit { color:#0f172a; }
-.cp-company-profit .cp-filter { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:10px; align-items:end; }
+.cp-company-profit .cp-filter { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:10px; align-items:end; }
 .cp-company-profit .cp-field label { display:block; margin-bottom:5px; font-size:12px; font-weight:800; color:#475569; }
 .cp-company-profit .cp-field input,
 .cp-company-profit .cp-field select { width:100%; border:1px solid #dbe3ef; border-radius:8px; padding:9px 10px; background:#fff; color:#0f172a; min-height:40px; }
@@ -69,6 +72,9 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
 .cp-company-profit .cp-legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; color:#475569; font-size:12px; font-weight:800; }
 .cp-company-profit .cp-legend span { display:inline-flex; align-items:center; gap:5px; }
 .cp-company-profit .cp-dot { width:10px; height:10px; border-radius:2px; display:inline-block; }
+@media (max-width: 1280px) {
+  .cp-company-profit .cp-filter { grid-template-columns:repeat(4,minmax(0,1fr)); }
+}
 @media (max-width: 1100px) {
   .cp-company-profit .cp-filter { grid-template-columns:repeat(3,minmax(0,1fr)); }
   .cp-company-profit .cp-summary-grid { grid-template-columns:repeat(3,minmax(0,1fr)); }
@@ -99,6 +105,7 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
         <label>기간</label>
         <select id="companyProfitScope" name="scope">
           <option value="year" <?php echo $scope === 'year' ? 'selected' : ''; ?>>연도</option>
+          <option value="month" <?php echo $scope === 'month' ? 'selected' : ''; ?>>월별</option>
           <option value="custom" <?php echo $scope === 'custom' ? 'selected' : ''; ?>>직접기간</option>
           <option value="all" <?php echo $scope === 'all' ? 'selected' : ''; ?>>전체기간</option>
         </select>
@@ -122,9 +129,17 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
       <div class="cp-field">
         <label>그래프 보기</label>
         <select name="view_mode">
-          <option value="monthly" <?php echo $viewMode === 'monthly' ? 'selected' : ''; ?>>월별 보기</option>
-          <option value="quarterly" <?php echo $viewMode === 'quarterly' ? 'selected' : ''; ?>>분기별 보기</option>
-          <option value="yearly" <?php echo $viewMode === 'yearly' ? 'selected' : ''; ?>>연도별 보기</option>
+          <option value="monthly" <?php echo $viewMode === 'monthly' ? 'selected' : ''; ?>>그래프 월별 보기</option>
+          <option value="quarterly" <?php echo $viewMode === 'quarterly' ? 'selected' : ''; ?>>그래프 분기별 보기</option>
+          <option value="yearly" <?php echo $viewMode === 'yearly' ? 'selected' : ''; ?>>그래프 연도별 보기</option>
+        </select>
+      </div>
+      <div class="cp-field">
+        <label>월별 보기</label>
+        <select name="month" onchange="document.getElementById('companyProfitScope').value='month';">
+          <?php for ($monthOption = 1; $monthOption <= 12; $monthOption++): ?>
+            <option value="<?php echo $monthOption; ?>" <?php echo $selectedMonthForUi === $monthOption ? 'selected' : ''; ?>><?php echo $monthOption; ?>월</option>
+          <?php endfor; ?>
         </select>
       </div>
       <div class="cp-action">
