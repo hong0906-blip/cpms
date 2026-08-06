@@ -13,8 +13,8 @@ require_once __DIR__ . '/PublicMailStorageService.php';
 
 class PublicMailIndexService
 {
-    const VERSION = '1.7.4';
-    const INDEX_VERSION = 3;
+    const VERSION = '1.7.5';
+    const INDEX_VERSION = 4;
     const INDEX_FILE = 'mail_index.json';
 
     private $memoryIndex = null;
@@ -244,7 +244,7 @@ class PublicMailIndexService
             'size' => isset($message['size']) ? (int)$message['size'] : 0,
             'classification' => $classification,
             'workflow' => $workflow,
-            'search_text' => self::lower($subject . ' ' . $fromText . ' ' . $preview)
+            'search_text' => self::lower($subject . ' ' . $fromText . ' ' . (isset($message['to_text']) ? (string)$message['to_text'] : '') . ' ' . $preview)
         );
     }
 

@@ -1,4 +1,4 @@
-/* CPMS_PUBLIC_MAIL_VERSION: 1.7.4 */
+/* CPMS_PUBLIC_MAIL_VERSION: 1.7.5 */
 /*
  * 파일 경로: C:\www\cpms\public\assets\css\public_mail.css
  * 공용메일 화면 전용 스타일
@@ -1342,5 +1342,193 @@ body.pm-modal-open {
     .pm-external-image-notice {
         align-items: flex-start;
         flex-direction: column;
+    }
+}
+
+
+/* ========================================================================
+ * v1.7.5 단순 검색 · 전체너비 목록 · 대형 메일 상세 모달
+ * ====================================================================== */
+.pm-filter-form-simple {
+    grid-template-columns: minmax(320px, 1fr) minmax(160px, 210px) auto auto;
+    align-items: center;
+}
+
+.pm-filter-card-simple {
+    margin-top: 12px;
+}
+
+.pm-search-scope-summary strong {
+    color: #0f766e;
+}
+
+.pm-workspace-list-only {
+    display: block;
+    margin-top: 18px;
+}
+
+.pm-list-panel-wide {
+    width: 100%;
+}
+
+.pm-mail-list-wide {
+    max-height: calc(100vh - 355px);
+    min-height: 360px;
+}
+
+.pm-mail-row-wide {
+    padding: 18px 22px;
+}
+
+.pm-mail-row-wide .pm-subject {
+    font-size: 16px;
+}
+
+.pm-mail-row-wide .pm-preview {
+    max-width: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.pm-mail-row-wide .pm-mail-meta {
+    min-width: 0;
+    flex-wrap: wrap;
+}
+
+.pm-address-label {
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+body.pm-mail-reader-open {
+    overflow: hidden;
+}
+
+.pm-mail-reader-modal[hidden] {
+    display: none !important;
+}
+
+.pm-mail-reader-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+}
+
+.pm-mail-reader-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(15, 23, 42, .66);
+    backdrop-filter: blur(4px);
+}
+
+.pm-mail-reader-dialog {
+    position: relative;
+    z-index: 1;
+    width: min(1600px, calc(100vw - 64px));
+    height: calc(100vh - 64px);
+    max-height: 940px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.5);
+    border-radius: 24px;
+    background: #f8fafc;
+    box-shadow: 0 32px 100px rgba(15, 23, 42, .42);
+}
+
+.pm-mail-reader-host {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+.pm-mail-reader-host > .pm-detail-panel {
+    min-height: 100%;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+}
+
+.pm-mail-reader-host .pm-detail-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: rgba(255,255,255,.97);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 1px 0 #e5e7eb;
+}
+
+.pm-mail-reader-host .pm-message-card,
+.pm-mail-reader-host .pm-workflow-card,
+.pm-mail-reader-host .pm-reclassify-form {
+    max-width: 1460px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.pm-mail-reader-host .pm-detail-panel-loading,
+.pm-mail-reader-host > .pm-detail-load-error {
+    min-height: 100%;
+}
+
+.pm-modal {
+    z-index: 11000;
+}
+
+@media (max-width: 980px) {
+    .pm-filter-form-simple {
+        grid-template-columns: minmax(0, 1fr) minmax(150px, 190px) auto auto;
+    }
+
+    .pm-mail-list-wide {
+        max-height: none;
+    }
+
+    .pm-mail-reader-modal {
+        padding: 16px;
+    }
+
+    .pm-mail-reader-dialog {
+        width: calc(100vw - 32px);
+        height: calc(100vh - 32px);
+        border-radius: 18px;
+    }
+}
+
+@media (max-width: 680px) {
+    .pm-filter-form-simple {
+        grid-template-columns: 1fr;
+    }
+
+    .pm-filter-form-simple .pm-btn {
+        width: 100%;
+    }
+
+    .pm-list-head {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .pm-mail-row-wide {
+        padding: 16px;
+    }
+
+    .pm-mail-reader-modal {
+        align-items: stretch;
+        padding: 0;
+    }
+
+    .pm-mail-reader-dialog {
+        width: 100vw;
+        height: 100vh;
+        max-height: none;
+        border: 0;
+        border-radius: 0;
     }
 }

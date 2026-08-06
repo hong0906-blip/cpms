@@ -4,7 +4,7 @@
  *
  * 네이버 메일의 상세본문 비동기 조회, 인라인 이미지 출력, 설정, 동기화,
  * 처리상태 변경을 담당합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.4
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.5
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/PublicMailService.php';
@@ -135,6 +135,7 @@ $isAjax = PublicMailWebHelper::isAjax();
 
 try {
     if ($action === 'get_sync_status') {
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $state = $service->getSyncState();
         $result = array('ok'=>true,'message'=>'동기화 상태를 확인했습니다.','state'=>$state);
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
@@ -142,6 +143,7 @@ try {
     }
 
     if ($action === 'sync_new' || $action === 'sync_initial' || $action === 'automation_tick') {
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $limit = isset($_POST['limit']) ? (int)$_POST['limit'] : 0;
         if ($action === 'sync_initial') $result = $service->syncBatch($limit,'initial');
         elseif ($action === 'automation_tick') $result = $service->runAutomationTick($limit);
@@ -152,14 +154,14 @@ try {
     }
 
     if ($action === 'start_full_import') {
-        PublicMailWebHelper::requireAdmin();
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $result = $service->startFullImport();
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }
 
     if ($action === 'pause_full_import' || $action === 'resume_full_import' || $action === 'cancel_full_import') {
-        PublicMailWebHelper::requireAdmin();
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $command = $action === 'pause_full_import' ? 'pause' : ($action === 'resume_full_import' ? 'resume' : 'cancel');
         $result = $service->controlFullImport($command);
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
@@ -167,14 +169,14 @@ try {
     }
 
     if ($action === 'start_metadata_repair') {
-        PublicMailWebHelper::requireAdmin();
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $result = $service->startMetadataRepair();
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }
 
     if ($action === 'pause_metadata_repair' || $action === 'resume_metadata_repair' || $action === 'cancel_metadata_repair') {
-        PublicMailWebHelper::requireAdmin();
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $command = $action === 'pause_metadata_repair' ? 'pause' : ($action === 'resume_metadata_repair' ? 'resume' : 'cancel');
         $result = $service->controlMetadataRepair($command);
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
@@ -229,14 +231,14 @@ try {
     }
 
     if ($action === 'repair_metadata') {
-        PublicMailWebHelper::requireAdmin();
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $result = $service->startMetadataRepair();
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }
 
     if ($action === 'save_settings') {
-        PublicMailWebHelper::requireAdmin();
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $service->saveSettings(array(
             'enabled'=>!empty($_POST['enabled']),
             'username'=>isset($_POST['username'])?trim((string)$_POST['username']):'',
@@ -250,14 +252,14 @@ try {
     }
 
     if ($action === 'test_connection') {
-        PublicMailWebHelper::requireAdmin();
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $result = $service->testConnection(array('username'=>isset($_POST['username'])?trim((string)$_POST['username']):'','password'=>isset($_POST['password'])?trim((string)$_POST['password']):''));
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
         PublicMailWebHelper::redirectWithMessage('public_mail_settings.php','success',$result['message']);
     }
 
     if ($action === 'regenerate_cron_token') {
-        PublicMailWebHelper::requireAdmin();
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $service->regenerateCronToken($currentUser);
         $result = array('ok'=>true,'message'=>'자동동기화 요청 헤더의 비밀키를 새로 만들었습니다. 기존 비밀키는 더 이상 작동하지 않습니다.');
         if ($isAjax) PublicMailWebHelper::jsonResponse($result,200);
@@ -265,7 +267,7 @@ try {
     }
 
     if ($action === 'reset_mail_data') {
-        PublicMailWebHelper::requireAdmin();
+        PublicMailWebHelper::requireDevelopmentDepartment();
         $confirmation = isset($_POST['confirmation']) ? trim((string)$_POST['confirmation']) : '';
         if ($confirmation !== '초기화') throw new RuntimeException('초기화를 실행하려면 확인칸에 초기화라고 입력하세요.');
         $service->resetMailData();

@@ -18,14 +18,16 @@ class PublicMailWebHelper
         }
     }
 
+    /**
+     * 기존 호환용 최고관리자 권한 확인입니다.
+     * 네이버 메일 연동 설정은 v1.7.5부터 requireDevelopmentDepartment()를 사용합니다.
+     */
     public static function requireAdmin()
     {
         self::requireLogin();
 
         $allowed = false;
         try {
-            // 공용메일 계정정보와 애플리케이션 비밀번호는
-            // 최고관리자만 변경할 수 있도록 제한합니다.
             $allowed = \App\Core\Auth::isMaster();
         } catch (\Exception $e) {
             $allowed = false;
@@ -34,6 +36,44 @@ class PublicMailWebHelper
         if (!$allowed) {
             http_response_code(403);
             echo '공용메일 설정 권한이 없습니다.';
+            exit;
+        }
+    }
+
+    /**
+     * 로그인 사용자가 개발부서 소속인지 확인합니다.
+     * CPMS Auth의 공식 부서 판정 메서드를 우선 사용하고,
+     * 오래된 서버에서는 사용자 부서명으로 안전하게 보완 판정합니다.
+     */
+    public static function isDevelopmentDepartment()
+    {
+        self::requireLogin();
+
+        try {
+            if (method_exists('\\App\\Core\\Auth', 'isDevelopmentDepartment')) {
+                return (bool)\App\Core\Auth::isDevelopmentDepartment();
+            }
+
+            $user = \App\Core\Auth::user();
+            $department = is_array($user) && isset($user['department'])
+                ? trim((string)$user['department'])
+                : '';
+            $normalized = preg_replace('/\s+/u', '', $department);
+            return in_array($normalized, array('개발부서', '개발부', '개발팀', '개발'), true);
+        } catch (\Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * 네이버 메일 연동정보와 자동수집 설정은 개발부서만 접근할 수 있습니다.
+     */
+    public static function requireDevelopmentDepartment()
+    {
+        self::requireLogin();
+        if (!self::isDevelopmentDepartment()) {
+            http_response_code(403);
+            echo '네이버 메일 연동 설정은 개발부서만 접근할 수 있습니다.';
             exit;
         }
     }

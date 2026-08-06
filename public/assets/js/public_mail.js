@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 자동수집은 public/cron/naver_mail_sync.php를 외부 예약서비스가 호출합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.4
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.5
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.4';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.5';
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
     function csrf() { var el=page(); return el ? (el.getAttribute('data-csrf-token')||'') : ''; }
@@ -346,6 +346,7 @@
     }
 
     function detailHost(){return document.querySelector('[data-mail-detail-host]');}
+    function readerModal(){return document.querySelector('[data-mail-reader-modal]');}
 
     function setSelectedRow(messageKey){
         var rows=document.querySelectorAll('[data-mail-open]'),i;
@@ -357,46 +358,88 @@
 
     function updateMessageUrl(messageKey,replace){
         if(!window.history||!window.history.pushState)return;
-        var url=window.location.href.split('#')[0],hash='',parts=url.split('?'),base=parts[0],params={},query=parts.length>1?parts.slice(1).join('?'):'';
+        var url=window.location.href.split('#')[0],parts=url.split('?'),base=parts[0],params={},query=parts.length>1?parts.slice(1).join('?'):'';
         if(query!==''){
             var pairs=query.split('&'),i,p,key,value;
-            for(i=0;i<pairs.length;i++){if(pairs[i]==='')continue;p=pairs[i].split('=');key=decodeURIComponent(p.shift()||'');value=decodeURIComponent(p.join('=')||'');if(key!==''&&key!=='message'&&key!=='uid')params[key]=value;}
+            for(i=0;i<pairs.length;i++){
+                if(pairs[i]==='')continue;
+                p=pairs[i].split('=');
+                key=decodeURIComponent(p.shift()||'');
+                value=decodeURIComponent(p.join('=')||'');
+                if(key!==''&&key!=='message'&&key!=='uid')params[key]=value;
+            }
         }
         if(messageKey)params.message=messageKey;
-        var out=[],name;for(name in params)if(Object.prototype.hasOwnProperty.call(params,name))out.push(encodeURIComponent(name)+'='+encodeURIComponent(params[name]));
-        var next=base+(out.length?'?'+out.join('&'):'')+hash;
-        if(replace)window.history.replaceState({message:messageKey||''},'',next);else window.history.pushState({message:messageKey||''},'',next);
+        var out=[],name;
+        for(name in params){
+            if(Object.prototype.hasOwnProperty.call(params,name))out.push(encodeURIComponent(name)+'='+encodeURIComponent(params[name]));
+        }
+        var next=base+(out.length?'?'+out.join('&'):'');
+        if(replace)window.history.replaceState({message:messageKey||''},'',next);
+        else window.history.pushState({message:messageKey||''},'',next);
     }
 
-    function showDetailPlaceholder(){
-        var host=detailHost(); if(!host)return;
-        host.innerHTML='<div class="pm-detail-placeholder"><i data-lucide="mail-open"></i><strong>메일을 선택하세요.</strong><span>본문, 첨부파일, 자동분류와 담당자 정보를 한 화면에서 확인할 수 있습니다.</span></div>';
-        var workspace=document.querySelector('.pm-workspace');if(workspace)workspace.classList.remove('has-detail');
-        if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
+    function openReaderModal(){
+        var modal=readerModal();
+        if(!modal)return;
+        modal.hidden=false;
+        modal.setAttribute('aria-hidden','false');
+        document.body.classList.add('pm-mail-reader-open');
+    }
+
+    function closeReaderModal(pushState){
+        var modal=readerModal(),host=detailHost();
+        if(modal){
+            modal.hidden=true;
+            modal.setAttribute('aria-hidden','true');
+        }
+        document.body.classList.remove('pm-mail-reader-open');
+        setSelectedRow('');
+        if(host){
+            host.innerHTML='<div class="pm-detail-panel pm-detail-panel-loading"><div class="pm-detail-local-loading"><div class="pm-spinner"></div><strong>메일 정보를 여는 중입니다.</strong><span>메일 목록은 그대로 유지됩니다.</span></div></div>';
+        }
+        if(pushState)updateMessageUrl('',false);
     }
 
     function initDetailPanel(root){
-        initDetailBody(root); bindWorkflowNames(root); bindTaskModal(root);
+        initDetailBody(root);
+        bindWorkflowNames(root);
+        bindTaskModal(root);
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
 
     function loadDetailPanel(messageKey,pushState){
-        var host=detailHost(); if(!host||messageKey==='')return;
+        var host=detailHost();
+        if(!host||messageKey==='')return;
         setSelectedRow(messageKey);
-        var workspace=document.querySelector('.pm-workspace');if(workspace)workspace.classList.add('has-detail');
-        host.innerHTML='<div class="pm-detail-panel pm-detail-panel-loading"><div class="pm-detail-local-loading"><div class="pm-spinner"></div><strong>메일 정보를 여는 중입니다.</strong><span>목록은 다시 계산하지 않습니다.</span></div></div>';
+        openReaderModal();
+        host.innerHTML='<div class="pm-detail-panel pm-detail-panel-loading"><div class="pm-detail-local-loading"><div class="pm-spinner"></div><strong>메일 정보를 여는 중입니다.</strong><span>메일 목록과 검색조건은 그대로 유지됩니다.</span></div></div>';
         if(pushState)updateMessageUrl(messageKey,false);
         var xhr=new XMLHttpRequest();
         xhr.open('GET','public_mail_action.php?action=detail_panel&message_key='+encodeURIComponent(messageKey)+'&_='+new Date().getTime(),true);
-        xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');xhr.timeout=10000;
+        xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
+        xhr.timeout=15000;
         xhr.onreadystatechange=function(){
             if(xhr.readyState!==4)return;
-            if(xhr.status>=200&&xhr.status<300){host.innerHTML=xhr.responseText;initDetailPanel(host);}
-            else{host.innerHTML=xhr.responseText||'<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>잠시 후 다시 선택해 주세요.</p></div>';}
+            if(xhr.status>=200&&xhr.status<300){
+                host.innerHTML=xhr.responseText;
+                initDetailPanel(host);
+            }else{
+                host.innerHTML=xhr.responseText||'<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>잠시 후 다시 선택해 주세요.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-panel data-message-key="'+escapeHtml(messageKey)+'">다시 시도</button></div>';
+            }
         };
-        xhr.ontimeout=function(){host.innerHTML='<div class="pm-detail-load-error"><strong>메일 정보 조회가 지연되고 있습니다.</strong><p>목록은 계속 사용할 수 있습니다. 다시 메일을 선택해 주세요.</p></div>';};
-        xhr.onerror=function(){host.innerHTML='<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>네트워크 연결을 확인해 주세요.</p></div>';};
+        xhr.ontimeout=function(){
+            host.innerHTML='<div class="pm-detail-load-error"><strong>메일 정보 조회가 지연되고 있습니다.</strong><p>메일 목록은 계속 사용할 수 있습니다.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-panel data-message-key="'+escapeHtml(messageKey)+'">다시 시도</button></div>';
+        };
+        xhr.onerror=function(){
+            host.innerHTML='<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>네트워크 연결을 확인해 주세요.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-panel data-message-key="'+escapeHtml(messageKey)+'">다시 시도</button></div>';
+        };
         xhr.send(null);
+    }
+
+    function currentMessageFromUrl(){
+        var match=window.location.search.match(/[?&]message=([^&]+)/);
+        return match&&match[1]?decodeURIComponent(match[1]):'';
     }
 
     function bindMailNavigation(){
@@ -405,26 +448,57 @@
             while(target&&target!==document&&!(target.getAttribute&&target.getAttribute('data-mail-open')!==null))target=target.parentNode;
             if(target&&target!==document){
                 if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey||event.button===1)return;
-                event.preventDefault();event.stopPropagation();hideLoading();
-                loadDetailPanel(target.getAttribute('data-message-key')||'',true);return;
+                event.preventDefault();
+                event.stopPropagation();
+                hideLoading();
+                loadDetailPanel(target.getAttribute('data-message-key')||'',true);
+                return;
             }
+
             target=event.target;
             while(target&&target!==document&&!(target.getAttribute&&target.getAttribute('data-retry-mail-panel')!==null))target=target.parentNode;
-            if(target&&target!==document){event.preventDefault();loadDetailPanel(target.getAttribute('data-message-key')||'',false);return;}
+            if(target&&target!==document){
+                event.preventDefault();
+                loadDetailPanel(target.getAttribute('data-message-key')||'',false);
+                return;
+            }
+
             target=event.target;
-            while(target&&target!==document&&!(target.getAttribute&&target.getAttribute('data-mail-detail-close')!==null))target=target.parentNode;
-            if(target&&target!==document){event.preventDefault();setSelectedRow('');showDetailPlaceholder();updateMessageUrl('',false);}
+            while(target&&target!==document&&!(target.getAttribute&&(
+                target.getAttribute('data-mail-detail-close')!==null||
+                target.getAttribute('data-mail-reader-close')!==null
+            )))target=target.parentNode;
+            if(target&&target!==document){
+                event.preventDefault();
+                closeReaderModal(true);
+            }
         },true);
-        window.addEventListener('popstate',function(){
-            var match=window.location.search.match(/[?&]message=([^&]+)/);
-            if(match&&match[1])loadDetailPanel(decodeURIComponent(match[1]),false);
-            else{setSelectedRow('');showDetailPlaceholder();}
+
+        document.addEventListener('keydown',function(event){
+            if(event.keyCode!==27)return;
+            var taskModal=document.querySelector('[data-task-modal]:not([hidden])');
+            if(taskModal)return;
+            var modal=readerModal();
+            if(modal&&!modal.hidden)closeReaderModal(true);
         });
+
+        window.addEventListener('popstate',function(){
+            var messageKey=currentMessageFromUrl();
+            if(messageKey)loadDetailPanel(messageKey,false);
+            else closeReaderModal(false);
+        });
+    }
+
+    function openInitialMessage(){
+        var root=page();
+        if(!root)return;
+        var messageKey=root.getAttribute('data-selected-message-key')||currentMessageFromUrl();
+        if(messageKey)loadDetailPanel(messageKey,false);
     }
 
     function init() {
         if(!page())return;
-        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); initDetailPanel(document);
+        bindAttachmentDownloads(); bindDriveSaveButtons(); bindSyncButtons(); bindConnectionTest(); bindFullImport(); bindMetadataRepair(); bindStatusRefresh(); bindRunAutomation(); bindCopyCron(); bindDetailBodyActions(); bindMailNavigation(); openInitialMessage();
         if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
     }
     if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();

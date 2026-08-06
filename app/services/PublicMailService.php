@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.4';
+    const VERSION = '1.7.5';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
