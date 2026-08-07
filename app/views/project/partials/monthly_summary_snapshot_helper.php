@@ -231,14 +231,14 @@ function cpms_monthly_summary_event_change_context($pdo, $projectId, $rangeStart
     if (!$pdo || $projectId <= 0 || $rangeStart === '' || $rangeEnd === '' || $ym === '' || $rangeEnd <= $rangeStart || !cpms_monthly_summary_snapshot_table_exists($pdo, 'cpms_cost_data_events')) return $empty;
     try {
         /*
-         * 스냅샷끼리 비교하는 것이므로 달력상의 오늘 00~24시가 아니라
-         * 전날 스냅샷이 찍힌 시각부터 현재 스냅샷이 찍힌 시각까지의 변경을 찾는다.
-         * 전날 오후에 입력된 내역도 오늘 스냅샷에서 증가한 목록으로 정확히 잡힌다.
+         * 변경 목록은 시간 단위로 자르지 않는다.
+         * 비교 스냅샷 날짜 00:00:00부터 현재 스냅샷 날짜 23:59:59까지
+         * 날짜 전체를 조회하여, 전날 스냅샷 이후 반영된 행을 빠뜨리지 않는다.
          */
         $sql = "SELECT cost_type,target_type,target_id,delta_amount,event_action,event_at
                   FROM cpms_cost_data_events
                  WHERE project_id=:project_id
-                   AND event_at>:range_start
+                   AND event_at>=:range_start
                    AND event_at<=:range_end
                    AND (settlement_ym=:ym OR settlement_ym IS NULL OR settlement_ym='')
                  ORDER BY event_at ASC,id ASC";
@@ -344,22 +344,14 @@ function cpms_monthly_summary_project_snapshot_change($pdo, $projectId, $snapsho
         $previous = isset($previousMap[(int)$projectId]) ? $previousMap[(int)$projectId] : array();
         $result['deltas'] = cpms_monthly_summary_snapshot_delta_map($current, $previous);
 
-        $rangeStart = '';
-        if (is_array($previous)) {
-            $rangeStart = cpms_monthly_summary_snapshot_valid_datetime(isset($previous['last_captured_at']) ? $previous['last_captured_at'] : '');
-            if ($rangeStart === '') $rangeStart = cpms_monthly_summary_snapshot_valid_datetime(isset($previous['captured_at']) ? $previous['captured_at'] : '');
-        }
-        if ($rangeStart === '' && $previousDate !== '') $rangeStart = $previousDate . ' 00:00:00';
-
-        $rangeEnd = '';
-        if (is_array($current)) {
-            $rangeEnd = cpms_monthly_summary_snapshot_valid_datetime(isset($current['last_captured_at']) ? $current['last_captured_at'] : '');
-            if ($rangeEnd === '') $rangeEnd = cpms_monthly_summary_snapshot_valid_datetime(isset($current['captured_at']) ? $current['captured_at'] : '');
-        }
-        if ($rangeEnd === '') $rangeEnd = $snapshotDate . ' 23:59:59';
-        if ($rangeStart === '' || $rangeStart >= $rangeEnd) {
-            $rangeStart = date('Y-m-d H:i:s', strtotime($snapshotDate . ' -1 day'));
-        }
+        /*
+         * 시간 비교를 제거하고 날짜 전체를 비교한다.
+         * 예: 비교일 2026-08-05 / 기준일 2026-08-06이면
+         *     2026-08-05 00:00:00 ~ 2026-08-06 23:59:59 전체를 조회한다.
+         */
+        $rangeStartDate = $previousDate !== '' ? $previousDate : date('Y-m-d', strtotime($snapshotDate . ' -1 day'));
+        $rangeStart = $rangeStartDate . ' 00:00:00';
+        $rangeEnd = $snapshotDate . ' 23:59:59';
 
         $result['event_range_start'] = $rangeStart;
         $result['event_range_end'] = $rangeEnd;
@@ -404,6 +396,75 @@ function cpms_monthly_summary_change_worker_marked($change, $workerKey, $workerN
         if ($key !== '' && isset($change['worker_keys'][$key])) return true;
     }
     return false;
+}}
+
+if (!function_exists('cpms_monthly_summary_detail_row_date')) {
+function cpms_monthly_summary_detail_row_date($row) {
+    if (!is_array($row)) return '';
+    foreach (array('use_date','expense_date','work_date','date') as $key) {
+        if (!isset($row[$key])) continue;
+        $date = cpms_monthly_summary_snapshot_valid_date($row[$key]);
+        if ($date !== '') return $date;
+    }
+    return '';
+}}
+
+if (!function_exists('cpms_monthly_summary_mark_snapshot_new_rows')) {
+function cpms_monthly_summary_mark_snapshot_new_rows($rows, $change, $costType) {
+    if (!is_array($rows)) return array();
+    if (!is_array($change) || !isset($change['deltas'][$costType])) return $rows;
+
+    $delta = (float)$change['deltas'][$costType];
+    if ($delta <= 0.01) return $rows;
+
+    $previousDate = cpms_monthly_summary_snapshot_valid_date(isset($change['previous_date']) ? $change['previous_date'] : '');
+    $snapshotDate = cpms_monthly_summary_snapshot_valid_date(isset($change['snapshot_date']) ? $change['snapshot_date'] : '');
+    if ($previousDate === '' || $snapshotDate === '') return $rows;
+
+    $alreadyMarked = 0.0;
+    foreach ($rows as $row) {
+        if (!empty($row['is_changed'])) {
+            $rowDelta = isset($row['change_amount']) ? (float)$row['change_amount'] : 0.0;
+            if ($rowDelta > 0.01) $alreadyMarked += $rowDelta;
+        }
+    }
+    $remaining = $delta - $alreadyMarked;
+    if ($remaining <= 0.01) return $rows;
+
+    $candidates = array();
+    $candidateTotal = 0.0;
+    foreach ($rows as $index=>$row) {
+        if (!empty($row['is_changed'])) continue;
+        $rowDate = cpms_monthly_summary_detail_row_date($row);
+        if ($rowDate === '' || $rowDate < $previousDate || $rowDate > $snapshotDate) continue;
+        $amount = isset($row['amount']) ? (float)$row['amount'] : 0.0;
+        if ($amount <= 0.01) continue;
+        $candidates[] = array('index'=>(int)$index, 'amount'=>$amount);
+        $candidateTotal += $amount;
+    }
+
+    /* 한 행 금액이 스냅샷 증가액과 정확히 같으면 그 행만 강조한다. */
+    foreach ($candidates as $candidate) {
+        if (abs((float)$candidate['amount'] - $remaining) <= 0.01) {
+            $index = (int)$candidate['index'];
+            $rows[$index]['is_changed'] = true;
+            $rows[$index]['change_amount'] = (float)$candidate['amount'];
+            $rows[$index]['change_basis'] = 'snapshot_date_amount';
+            return $rows;
+        }
+    }
+
+    /* 같은 날짜 범위의 신규 행 합계가 증가액과 같으면 해당 행들을 모두 강조한다. */
+    if (count($candidates) > 0 && abs($candidateTotal - $remaining) <= 0.01) {
+        foreach ($candidates as $candidate) {
+            $index = (int)$candidate['index'];
+            $rows[$index]['is_changed'] = true;
+            $rows[$index]['change_amount'] = (float)$candidate['amount'];
+            $rows[$index]['change_basis'] = 'snapshot_date_total';
+        }
+    }
+
+    return $rows;
 }}
 
 if (!function_exists('cpms_monthly_summary_apply_detail_change_context')) {
@@ -461,5 +522,23 @@ function cpms_monthly_summary_apply_detail_change_context($monthPayload, $change
             $monthPayload['manual_outsourcing'][$index]['is_changed'] = abs($delta) > 0.01;
         }
     }
+
+    /*
+     * 이벤트 ID 연결이 누락된 경우에도 스냅샷 증가액과 상세 행 금액을 날짜 단위로 비교한다.
+     * 비교일~기준일 범위에서 새로 나타난 금액과 증가액이 일치하는 행만 연두색으로 표시한다.
+     */
+    if (isset($monthPayload['material']) && is_array($monthPayload['material'])) {
+        $monthPayload['material'] = cpms_monthly_summary_mark_snapshot_new_rows($monthPayload['material'], $change, 'material');
+    }
+    if (isset($monthPayload['manual_outsourcing']) && is_array($monthPayload['manual_outsourcing'])) {
+        $monthPayload['manual_outsourcing'] = cpms_monthly_summary_mark_snapshot_new_rows($monthPayload['manual_outsourcing'], $change, 'outsourcing');
+    }
+    if (isset($monthPayload['labor']) && is_array($monthPayload['labor'])) {
+        $monthPayload['labor'] = cpms_monthly_summary_mark_snapshot_new_rows($monthPayload['labor'], $change, 'labor');
+    }
+    if (isset($monthPayload['labor_outsourcing']) && is_array($monthPayload['labor_outsourcing'])) {
+        $monthPayload['labor_outsourcing'] = cpms_monthly_summary_mark_snapshot_new_rows($monthPayload['labor_outsourcing'], $change, 'outsourcing');
+    }
+
     return $monthPayload;
 }}
