@@ -418,6 +418,26 @@ class CostChangeService
         );
     }
 
+    /**
+     * 달력 월(1일~말일) 기준으로 마감하는 비용인지 확인한다.
+     * - 노무비
+     * - 외주비
+     *
+     * 자재구입비, 장비비, 안전·보건 비용 등은 기존 26일~25일 기준을 유지한다.
+     */
+    public static function isCalendarMonthType($costType)
+    {
+        $normalized = strtolower(trim((string)$costType));
+
+        return
+            self::isLaborType($costType) ||
+            in_array(
+                $normalized,
+                array('outsourcing', '외주', '외주비'),
+                true
+            );
+    }
+
     public static function settlementYm($costType, $dateValue)
     {
         $date = self::validDate($dateValue);
@@ -429,7 +449,7 @@ class CostChangeService
         $ym = substr($date, 0, 7);
 
         if (
-            !self::isLaborType($costType) &&
+            !self::isCalendarMonthType($costType) &&
             (int)substr($date, 8, 2) >= 26
         ) {
             $ts = strtotime($ym . '-01 +1 month');
@@ -488,7 +508,7 @@ class CostChangeService
             );
         }
 
-        if (self::isLaborType($costType)) {
+        if (self::isCalendarMonthType($costType)) {
             $lastTs = strtotime($ym . '-01 +1 month -1 day');
 
             return array(

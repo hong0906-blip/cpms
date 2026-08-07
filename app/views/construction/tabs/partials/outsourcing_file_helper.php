@@ -127,6 +127,39 @@ function cpms_outsourcing_file_storage_dir($projectId, $ym)
     return cpms_storage_root() . '/outsourcing/files/' . ((int)$projectId) . '/' . $ym;
 }}
 
+if (!function_exists('cpms_outsourcing_file_upload_error_message')) {
+function cpms_outsourcing_file_upload_error_message($errorCode)
+{
+    $errorCode = (int)$errorCode;
+    if ($errorCode === 1) return '서버 upload_max_filesize 제한을 초과했습니다.';
+    if ($errorCode === 2) return '화면에서 허용한 최대 파일 크기를 초과했습니다.';
+    if ($errorCode === 3) return '파일이 일부만 업로드되었습니다.';
+    if ($errorCode === 6) return '서버 임시 업로드 폴더를 찾을 수 없습니다.';
+    if ($errorCode === 7) return '서버 디스크에 파일을 쓰지 못했습니다.';
+    if ($errorCode === 8) return '서버 확장 모듈이 파일 업로드를 중단했습니다.';
+    return '파일 업로드 중 오류가 발생했습니다. 오류코드: ' . $errorCode;
+}}
+
+if (!function_exists('cpms_outsourcing_file_move_uploaded')) {
+function cpms_outsourcing_file_move_uploaded($tmpName, $absolutePath)
+{
+    if ($tmpName === '' || !is_file($tmpName)) return false;
+
+    /*
+     * Windows/IIS + PHP 5.6 환경에서는 정상적인 $_FILES 임시파일인데도
+     * is_uploaded_file() 판정이 false가 되는 경우가 있어 이 값만으로 차단하지 않는다.
+     * 우선 move_uploaded_file()을 사용하고, 실패 시 같은 서버의 임시파일을
+     * rename/copy 방식으로 한 번 더 저장한다.
+     */
+    if (@move_uploaded_file($tmpName, $absolutePath)) return true;
+    if (@rename($tmpName, $absolutePath)) return true;
+    if (@copy($tmpName, $absolutePath)) {
+        @unlink($tmpName);
+        return true;
+    }
+    return false;
+}}
+
 if (!function_exists('cpms_outsourcing_file_store_uploads')) {
 function cpms_outsourcing_file_store_uploads($pdo, $fieldName, $projectId, $costId, $ym)
 {
@@ -147,7 +180,7 @@ function cpms_outsourcing_file_store_uploads($pdo, $fieldName, $projectId, $cost
         if ($error === $noFileCode) continue;
         $result['has_file'] = true;
         if ($error !== $okCode) {
-            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>0, 'message'=>'파일 업로드 중 오류가 발생했습니다.');
+            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>0, 'message'=>cpms_outsourcing_file_upload_error_message($error));
         }
         $originalName = basename(str_replace('\\', '/', isset($upload['name']) ? (string)$upload['name'] : ''));
         $extension = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
@@ -159,20 +192,26 @@ function cpms_outsourcing_file_store_uploads($pdo, $fieldName, $projectId, $cost
         if ($size <= 0 || $size > 20 * 1024 * 1024) {
             return array('has_file'=>true, 'ok'=>false, 'saved_count'=>0, 'message'=>'첨부파일은 파일당 20MB 이하만 업로드할 수 있습니다.');
         }
-        if ($tmpName === '' || !is_file($tmpName) || !is_uploaded_file($tmpName)) {
-            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>0, 'message'=>'정상적인 업로드 파일이 아닙니다.');
+        if ($tmpName === '' || !is_file($tmpName)) {
+            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>0, 'message'=>'업로드 임시파일을 찾지 못했습니다. 서버 PHP 업로드 설정을 확인해주세요.');
         }
         $mime = cpms_outsourcing_file_detect_mime($tmpName);
         if ($mime !== '' && !isset($allowedMimes[$mime])) {
-            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>0, 'message'=>'허용되지 않은 파일 형식입니다.');
+            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>0, 'message'=>'허용되지 않은 파일 형식입니다. 감지형식: ' . $mime);
         }
         $validRows[] = array('original_name'=>$originalName, 'extension'=>$extension, 'size'=>$size, 'tmp_name'=>$tmpName, 'mime'=>$mime);
     }
     if (!$result['has_file']) return $result;
 
     $storageDir = cpms_outsourcing_file_storage_dir($projectId, $ym);
-    if (!is_dir($storageDir) && !@mkdir($storageDir, 0775, true) && !is_dir($storageDir)) {
-        return array('has_file'=>true, 'ok'=>false, 'saved_count'=>0, 'message'=>'첨부파일 저장 폴더를 만들지 못했습니다.');
+    $dirReady = false;
+    if (function_exists('cpms_ensure_dir')) {
+        $dirReady = cpms_ensure_dir($storageDir) ? true : false;
+    } else {
+        $dirReady = is_dir($storageDir) || (@mkdir($storageDir, 0775, true) && is_dir($storageDir));
+    }
+    if (!$dirReady || !is_dir($storageDir)) {
+        return array('has_file'=>true, 'ok'=>false, 'saved_count'=>0, 'message'=>'첨부파일 저장 폴더를 만들지 못했습니다: ' . $storageDir);
     }
 
     $st = $pdo->prepare("INSERT INTO cpms_outsourcing_cost_files
@@ -182,8 +221,8 @@ function cpms_outsourcing_file_store_uploads($pdo, $fieldName, $projectId, $cost
         $random = substr(sha1(uniqid((string)mt_rand(), true)), 0, 16);
         $storedName = 'outsourcing_' . (int)$costId . '_' . date('Ymd_His') . '_' . $random . '.' . $validRow['extension'];
         $absolutePath = rtrim($storageDir, '/\\') . DIRECTORY_SEPARATOR . $storedName;
-        if (!@move_uploaded_file($validRow['tmp_name'], $absolutePath)) {
-            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>$result['saved_count'], 'message'=>'첨부파일을 저장하지 못했습니다.');
+        if (!cpms_outsourcing_file_move_uploaded($validRow['tmp_name'], $absolutePath)) {
+            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>$result['saved_count'], 'message'=>'첨부파일을 실제 저장 폴더로 이동하지 못했습니다.');
         }
         $relativePath = 'outsourcing/files/' . ((int)$projectId) . '/' . $ym . '/' . $storedName;
         try {
@@ -202,7 +241,7 @@ function cpms_outsourcing_file_store_uploads($pdo, $fieldName, $projectId, $cost
             $result['saved_count']++;
         } catch (Exception $e) {
             @unlink($absolutePath);
-            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>$result['saved_count'], 'message'=>'첨부파일 정보를 저장하지 못했습니다.');
+            return array('has_file'=>true, 'ok'=>false, 'saved_count'=>$result['saved_count'], 'message'=>'첨부파일 정보 DB 저장에 실패했습니다: ' . $e->getMessage());
         }
     }
     $result['message'] = $result['saved_count'] . '개 파일을 첨부했습니다.';
