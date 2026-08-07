@@ -1,394 +1,122 @@
 <?php
 /**
- * 파일: app/views/construction/tabs/outsourcing.php
+ * 파일: C:\www\cpms\app\views\construction\tabs\outsourcing.php
  * 공사 > 외주비
- * - 월별 외주비: 노무비 월별 비율 연동 인원 + 직접 입력 외주비
- * - 외주비 입력
+ * - 외주비 저장 후 첨부파일을 파일별 AJAX로 Google Drive 업로드
+ * - 파일 선택 누적 / 선택파일 X 삭제 / 기존파일 삭제
  * - PHP 5.6 호환
  */
-
 require_once __DIR__ . '/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/../../../services/CostChangeService.php';
-
 use App\Services\CostChangeService;
 
-$outsourcingCanEdit = isset($canEdit) ? (bool)$canEdit : false;
-$outsourcingTab = isset($_GET['outsourcing_tab']) ? trim((string)$_GET['outsourcing_tab']) : 'monthly';
-if ($outsourcingTab !== 'input') $outsourcingTab = 'monthly';
-if (!$outsourcingCanEdit && $outsourcingTab === 'input') $outsourcingTab = 'monthly';
-$selectedMonth = isset($_GET['month']) ? trim((string)$_GET['month']) : '';
-
-$months = array();
-$monthLabels = array();
+$outsourcingCanEdit=isset($canEdit)?(bool)$canEdit:false;
+$outsourcingTab=isset($_GET['outsourcing_tab'])?trim((string)$_GET['outsourcing_tab']):'monthly';
+if ($outsourcingTab!=='input') $outsourcingTab='monthly';
+if (!$outsourcingCanEdit && $outsourcingTab==='input') $outsourcingTab='monthly';
+$selectedMonth=isset($_GET['month'])?trim((string)$_GET['month']):'';
+$months=array(); $monthLabels=array();
 try {
-    $startObj = new DateTime(isset($projectRow['start_date']) ? (string)$projectRow['start_date'] : date('Y-m-01'));
-    $endObj = new DateTime(isset($projectRow['end_date']) ? (string)$projectRow['end_date'] : date('Y-m-t'));
-    $startObj->modify('first day of this month');
-    $endObj->modify('first day of this month');
-    $cursor = clone $startObj;
-    while ($cursor <= $endObj) {
-        $ym = $cursor->format('Y-m');
-        $months[] = $ym;
-        $monthLabels[$ym] = $cursor->format('Y년 m월');
-        $cursor->modify('+1 month');
-    }
-} catch (Exception $e) {
-    $months = array(date('Y-m'));
-    $monthLabels = array(date('Y-m') => date('Y년 m월'));
+    $startObj=new DateTime(isset($projectRow['start_date'])?(string)$projectRow['start_date']:date('Y-m-01'));
+    $endObj=new DateTime(isset($projectRow['end_date'])?(string)$projectRow['end_date']:date('Y-m-t'));
+    $startObj->modify('first day of this month'); $endObj->modify('first day of this month'); $cursor=clone $startObj;
+    while ($cursor<=$endObj) { $ym=$cursor->format('Y-m'); $months[]=$ym; $monthLabels[$ym]=$cursor->format('Y년 m월'); $cursor->modify('+1 month'); }
+} catch (Exception $e) { $months=array(date('Y-m')); $monthLabels=array(date('Y-m')=>date('Y년 m월')); }
+if (count($months)===0) { $months[]=date('Y-m'); $monthLabels[date('Y-m')]=date('Y년 m월'); }
+if (!in_array($selectedMonth,$months,true)) {
+    $currentOutsourcingYm=CostChangeService::currentSettlementYm('outsourcing',date('Y-m-d'));
+    $selectedMonth=in_array($currentOutsourcingYm,$months,true)?$currentOutsourcingYm:$months[count($months)-1];
 }
-if (count($months) === 0) {
-    $months[] = date('Y-m');
-    $monthLabels[date('Y-m')] = date('Y년 m월');
-}
-if (!in_array($selectedMonth, $months, true)) {
-    $currentOutsourcingYm = CostChangeService::currentSettlementYm('outsourcing', date('Y-m-d'));
-    $selectedMonth = in_array($currentOutsourcingYm, $months, true) ? $currentOutsourcingYm : $months[count($months) - 1];
-}
-$outsourcingPeriod = CostChangeService::periodForYm('outsourcing', $selectedMonth);
-$monthStart = $outsourcingPeriod['start'];
-$monthEnd = $outsourcingPeriod['end'];
-$outsourcingSelectedMonthLock = CostChangeService::lockInfo('outsourcing', $monthStart, $selectedMonth, date('Y-m-d'));
-$projectName = isset($projectRow['name']) ? (string)$projectRow['name'] : '';
-
-$laborOutsourcing = cpms_outsourcing_labor_company_rows_for_month($pdo, (int)$pid, $projectName, $selectedMonth);
-$laborOutsourcingRows = isset($laborOutsourcing['rows']) && is_array($laborOutsourcing['rows']) ? $laborOutsourcing['rows'] : array();
-$laborOutsourcingTotal = isset($laborOutsourcing['total']) ? (float)$laborOutsourcing['total'] : 0.0;
-$manualMonthlyRows = cpms_outsourcing_manual_rows($pdo, (int)$pid, $monthStart, $monthEnd);
-$manualAllRows = cpms_outsourcing_manual_rows($pdo, (int)$pid, '', '');
-$manualCostIds = array();
-foreach ($manualAllRows as $manualFileRow) {
-    if (isset($manualFileRow['id'])) $manualCostIds[] = (int)$manualFileRow['id'];
-}
-$outsourcingFilesByCost = cpms_outsourcing_files_by_cost_ids($pdo, $manualCostIds);
-$manualMonthlyTotal = 0.0;
-foreach ($manualMonthlyRows as $manualMonthlyRow) {
-    $manualMonthlyTotal += isset($manualMonthlyRow['amount']) ? (float)$manualMonthlyRow['amount'] : 0.0;
-}
-$monthlyTotal = $laborOutsourcingTotal + $manualMonthlyTotal;
-
-$editId = isset($_GET['edit_id']) ? (int)$_GET['edit_id'] : 0;
-$editRow = null;
-if ($editId > 0) {
-    foreach ($manualAllRows as $oneEditRow) {
-        if (isset($oneEditRow['id']) && (int)$oneEditRow['id'] === $editId) {
-            $editRow = $oneEditRow;
-            break;
-        }
-    }
-}
-$inputDate = $editRow && isset($editRow['expense_date']) ? (string)$editRow['expense_date'] : date('Y-m-d');
-if (!$editRow && strpos($inputDate, $selectedMonth) !== 0) $inputDate = $selectedMonth . '-01';
+$outsourcingPeriod=CostChangeService::periodForYm('outsourcing',$selectedMonth);
+$monthStart=$outsourcingPeriod['start']; $monthEnd=$outsourcingPeriod['end'];
+$outsourcingSelectedMonthLock=CostChangeService::lockInfo('outsourcing',$monthStart,$selectedMonth,date('Y-m-d'));
+$projectName=isset($projectRow['name'])?(string)$projectRow['name']:'';
+$laborOutsourcing=cpms_outsourcing_labor_company_rows_for_month($pdo,(int)$pid,$projectName,$selectedMonth);
+$laborOutsourcingRows=isset($laborOutsourcing['rows'])&&is_array($laborOutsourcing['rows'])?$laborOutsourcing['rows']:array();
+$laborOutsourcingTotal=isset($laborOutsourcing['total'])?(float)$laborOutsourcing['total']:0.0;
+$manualMonthlyRows=cpms_outsourcing_manual_rows($pdo,(int)$pid,$monthStart,$monthEnd);
+$manualAllRows=cpms_outsourcing_manual_rows($pdo,(int)$pid,'','');
+$manualCostIds=array(); foreach ($manualAllRows as $manualFileRow) if (isset($manualFileRow['id'])) $manualCostIds[]=(int)$manualFileRow['id'];
+$outsourcingFilesByCost=cpms_outsourcing_files_by_cost_ids($pdo,$manualCostIds);
+$manualMonthlyTotal=0.0; foreach ($manualMonthlyRows as $manualMonthlyRow) $manualMonthlyTotal+=isset($manualMonthlyRow['amount'])?(float)$manualMonthlyRow['amount']:0.0;
+$monthlyTotal=$laborOutsourcingTotal+$manualMonthlyTotal;
+$editId=isset($_GET['edit_id'])?(int)$_GET['edit_id']:0; $editRow=null;
+if ($editId>0) foreach ($manualAllRows as $oneEditRow) if (isset($oneEditRow['id'])&&(int)$oneEditRow['id']===$editId) { $editRow=$oneEditRow; break; }
+$inputDate=$editRow&&isset($editRow['expense_date'])?(string)$editRow['expense_date']:date('Y-m-d');
+if (!$editRow && strpos($inputDate,$selectedMonth)!==0) $inputDate=$selectedMonth.'-01';
 ?>
 
 <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
-    <div class="flex flex-wrap items-center justify-between gap-3">
-        <div>
-            <h3 class="text-xl font-extrabold text-gray-900">외주비</h3>
-            <div class="mt-1 text-sm text-gray-600">인원별 월 외주비 반영금액과 직접 입력한 외주비를 함께 조회합니다.</div>
-        </div>
-        <?php if ($outsourcingTab === 'monthly'): ?>
-        <div>
-            <label class="text-xs font-bold text-gray-500">월 선택</label>
-            <select class="mt-1 px-3 py-2 rounded-xl border border-gray-200 text-sm"
-                    onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=monthly&month=' + encodeURIComponent(this.value)">
-                <?php foreach ($months as $ym): ?>
-                    <option value="<?php echo h($ym); ?>" <?php echo $ym === $selectedMonth ? 'selected' : ''; ?>><?php echo h(isset($monthLabels[$ym]) ? $monthLabels[$ym] : $ym); ?></option>
-                <?php endforeach; ?>
-            </select>
-        </div>
-        <?php endif; ?>
-    </div>
-
-    <div class="mt-5 flex flex-wrap gap-2">
-        <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=monthly&month=<?php echo h($selectedMonth); ?>"
-           class="px-4 py-2 rounded-xl border font-extrabold text-sm <?php echo $outsourcingTab === 'monthly' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">월별 외주비</a>
-        <?php if ($outsourcingCanEdit): ?>
-        <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=input&month=<?php echo h($selectedMonth); ?>"
-           class="px-4 py-2 rounded-xl border font-extrabold text-sm <?php echo $outsourcingTab === 'input' ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-300'; ?>">외주비 입력</a>
-        <?php if (!empty($outsourcingSelectedMonthLock['locked'])): ?>
-        <a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=outsourcing&request_type=ADD&return_url=<?php echo rawurlencode('?r=공사&pid=' . (int)$pid . '&tab=outsourcing&outsourcing_tab=input&month=' . $selectedMonth); ?>" class="px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 font-extrabold text-sm">마감월 추가 승인 요청</a>
-        <?php endif; ?>
-        <?php endif; ?>
-    </div>
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <div><h3 class="text-xl font-extrabold text-gray-900">외주비</h3><div class="mt-1 text-sm text-gray-600">인원별 월 외주비 반영금액과 직접 입력한 외주비를 함께 조회합니다.</div></div>
+    <?php if ($outsourcingTab==='monthly'): ?><div><label class="text-xs font-bold text-gray-500">월 선택</label><select class="mt-1 px-3 py-2 rounded-xl border border-gray-200 text-sm" onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=monthly&month='+encodeURIComponent(this.value)"><?php foreach ($months as $ym): ?><option value="<?php echo h($ym); ?>" <?php echo $ym===$selectedMonth?'selected':''; ?>><?php echo h(isset($monthLabels[$ym])?$monthLabels[$ym]:$ym); ?></option><?php endforeach; ?></select></div><?php endif; ?>
+  </div>
+  <div class="mt-5 flex flex-wrap gap-2">
+    <a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=monthly&month=<?php echo h($selectedMonth); ?>" class="px-4 py-2 rounded-xl border font-extrabold text-sm <?php echo $outsourcingTab==='monthly'?'bg-gray-900 text-white border-gray-900':'bg-white text-gray-800 border-gray-300'; ?>">월별 외주비</a>
+    <?php if ($outsourcingCanEdit): ?><a href="<?php echo h(base_url()); ?>/?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=input&month=<?php echo h($selectedMonth); ?>" class="px-4 py-2 rounded-xl border font-extrabold text-sm <?php echo $outsourcingTab==='input'?'bg-gray-900 text-white border-gray-900':'bg-white text-gray-800 border-gray-300'; ?>">외주비 입력</a><?php endif; ?>
+    <?php if ($outsourcingCanEdit && !empty($outsourcingSelectedMonthLock['locked'])): ?><a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=outsourcing&request_type=ADD&return_url=<?php echo rawurlencode('?r=공사&pid='.(int)$pid.'&tab=outsourcing&outsourcing_tab=input&month='.$selectedMonth); ?>" class="px-4 py-2 rounded-xl border border-amber-300 bg-amber-50 text-amber-800 font-extrabold text-sm">마감월 추가 승인 요청</a><?php endif; ?>
+  </div>
 </div>
 
-<?php if ($outsourcingTab === 'monthly'): ?>
+<?php if ($outsourcingTab==='monthly'): ?>
 <div class="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-    <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4">
-        <div class="text-xs font-bold text-blue-700">노무비 연동 외주비</div>
-        <div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo h(number_format($laborOutsourcingTotal)); ?>원</div>
-    </div>
-    <div class="rounded-2xl border border-violet-200 bg-violet-50 p-4">
-        <div class="text-xs font-bold text-violet-700">직접 입력 외주비</div>
-        <div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo h(number_format($manualMonthlyTotal)); ?>원</div>
-    </div>
-    <div class="rounded-2xl border border-gray-900 bg-gray-900 p-4 text-white">
-        <div class="text-xs font-bold text-gray-300">월 외주비 합계</div>
-        <div class="mt-1 text-xl font-extrabold"><?php echo h(number_format($monthlyTotal)); ?>원</div>
-    </div>
+  <div class="rounded-2xl border border-blue-200 bg-blue-50 p-4"><div class="text-xs font-bold text-blue-700">노무비 연동 외주비</div><div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo h(number_format($laborOutsourcingTotal)); ?>원</div></div>
+  <div class="rounded-2xl border border-violet-200 bg-violet-50 p-4"><div class="text-xs font-bold text-violet-700">직접 입력 외주비</div><div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo h(number_format($manualMonthlyTotal)); ?>원</div></div>
+  <div class="rounded-2xl border border-gray-900 bg-gray-900 p-4 text-white"><div class="text-xs font-bold text-gray-300">월 외주비 합계</div><div class="mt-1 text-xl font-extrabold"><?php echo h(number_format($monthlyTotal)); ?>원</div></div>
 </div>
-
 <div class="mt-4 bg-white rounded-3xl border border-gray-200 p-4 shadow-sm overflow-x-auto">
-    <table class="min-w-[1000px] w-full border border-gray-200 text-sm">
-        <thead class="bg-gray-100 text-gray-700">
-        <tr>
-            <th class="border border-gray-200 px-3 py-2">일자</th>
-            <th class="border border-gray-200 px-3 py-2">구분</th>
-            <th class="border border-gray-200 px-3 py-2">업체명</th>
-            <th class="border border-gray-200 px-3 py-2">대표자명</th>
-            <th class="border border-gray-200 px-3 py-2">사업자번호</th>
-            <th class="border border-gray-200 px-3 py-2">연락처</th>
-            <th class="border border-gray-200 px-3 py-2 text-right">금액</th>
-        </tr>
-        </thead>
-        <tbody>
-        <?php foreach ($laborOutsourcingRows as $row): ?>
-            <?php $workerNames = isset($row['worker_names']) && is_array($row['worker_names']) ? implode(', ', $row['worker_names']) : ''; ?>
-            <tr class="bg-blue-50/40">
-                <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['expense_date']) ? $row['expense_date'] : ''); ?></td>
-                <td class="border border-gray-200 px-3 py-2"><span class="px-2 py-1 rounded-lg bg-blue-100 text-blue-700 text-xs font-bold">인원 외주비</span></td>
-                <td class="border border-gray-200 px-3 py-2 font-bold" title="<?php echo h($workerNames !== '' ? '외주비 반영 인원: ' . $workerNames : ''); ?>"><?php echo h(isset($row['company_name']) ? $row['company_name'] : ''); ?></td>
-                <td class="border border-gray-200 px-3 py-2">-</td>
-                <td class="border border-gray-200 px-3 py-2">-</td>
-                <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['contact']) && trim((string)$row['contact']) !== '' ? $row['contact'] : '-'); ?></td>
-                <td class="border border-gray-200 px-3 py-2 text-right font-bold"><?php echo h(number_format(isset($row['amount']) ? (float)$row['amount'] : 0)); ?></td>
-            </tr>
-        <?php endforeach; ?>
-        <?php foreach ($manualMonthlyRows as $row): ?>
-            <tr class="bg-violet-50/40">
-                <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['expense_date']) ? $row['expense_date'] : ''); ?></td>
-                <td class="border border-gray-200 px-3 py-2"><span class="px-2 py-1 rounded-lg bg-violet-100 text-violet-700 text-xs font-bold">외주비</span></td>
-                <td class="border border-gray-200 px-3 py-2 font-bold"><?php echo h(isset($row['company_name']) ? $row['company_name'] : ''); ?></td>
-                <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['representative_name']) && trim((string)$row['representative_name']) !== '' ? $row['representative_name'] : '-'); ?></td>
-                <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['business_no']) && trim((string)$row['business_no']) !== '' ? $row['business_no'] : '-'); ?></td>
-                <td class="border border-gray-200 px-3 py-2"><?php echo h(isset($row['contact']) && trim((string)$row['contact']) !== '' ? $row['contact'] : '-'); ?></td>
-                <td class="border border-gray-200 px-3 py-2 text-right font-bold"><?php echo h(number_format(isset($row['amount']) ? (float)$row['amount'] : 0)); ?></td>
-            </tr>
-        <?php endforeach; ?>
-        <?php if (count($laborOutsourcingRows) === 0 && count($manualMonthlyRows) === 0): ?>
-            <tr><td colspan="7" class="border border-gray-200 px-3 py-8 text-center text-gray-500">선택한 월의 외주비 내역이 없습니다.</td></tr>
-        <?php endif; ?>
-        </tbody>
-        <tfoot class="bg-gray-900 text-white font-extrabold">
-        <tr><td colspan="6" class="border border-gray-700 px-3 py-2 text-center">합계</td><td class="border border-gray-700 px-3 py-2 text-right"><?php echo h(number_format($monthlyTotal)); ?></td></tr>
-        </tfoot>
-    </table>
+<table class="min-w-[1000px] w-full border border-gray-200 text-sm"><thead class="bg-gray-100 text-gray-700"><tr><th class="border px-3 py-2">일자</th><th class="border px-3 py-2">구분</th><th class="border px-3 py-2">업체명</th><th class="border px-3 py-2">대표자명</th><th class="border px-3 py-2">사업자번호</th><th class="border px-3 py-2">연락처</th><th class="border px-3 py-2 text-right">금액</th></tr></thead><tbody>
+<?php foreach ($laborOutsourcingRows as $row): ?><tr class="bg-blue-50/40"><td class="border px-3 py-2"><?php echo h(isset($row['expense_date'])?$row['expense_date']:''); ?></td><td class="border px-3 py-2">인원 외주비</td><td class="border px-3 py-2 font-bold"><?php echo h(isset($row['company_name'])?$row['company_name']:''); ?></td><td class="border px-3 py-2">-</td><td class="border px-3 py-2">-</td><td class="border px-3 py-2"><?php echo h(isset($row['contact'])&&trim((string)$row['contact'])!==''?$row['contact']:'-'); ?></td><td class="border px-3 py-2 text-right font-bold"><?php echo h(number_format(isset($row['amount'])?(float)$row['amount']:0)); ?></td></tr><?php endforeach; ?>
+<?php foreach ($manualMonthlyRows as $row): ?><tr class="bg-violet-50/40"><td class="border px-3 py-2"><?php echo h($row['expense_date']); ?></td><td class="border px-3 py-2">외주비</td><td class="border px-3 py-2 font-bold"><?php echo h($row['company_name']); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['representative_name'])&&trim((string)$row['representative_name'])!==''?$row['representative_name']:'-'); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['business_no'])&&trim((string)$row['business_no'])!==''?$row['business_no']:'-'); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['contact'])&&trim((string)$row['contact'])!==''?$row['contact']:'-'); ?></td><td class="border px-3 py-2 text-right font-bold"><?php echo h(number_format((float)$row['amount'])); ?></td></tr><?php endforeach; ?>
+<?php if (count($laborOutsourcingRows)===0&&count($manualMonthlyRows)===0): ?><tr><td colspan="7" class="border px-3 py-8 text-center text-gray-500">선택한 월의 외주비 내역이 없습니다.</td></tr><?php endif; ?></tbody><tfoot class="bg-gray-900 text-white font-extrabold"><tr><td colspan="6" class="border px-3 py-2 text-center">합계</td><td class="border px-3 py-2 text-right"><?php echo h(number_format($monthlyTotal)); ?></td></tr></tfoot></table>
 </div>
-
 <?php else: ?>
 <div class="mt-4 bg-white rounded-3xl border border-gray-200 p-5 shadow-sm">
-    <h4 class="text-lg font-extrabold text-gray-900"><?php echo $editRow ? '외주비 수정' : '외주비 입력'; ?></h4>
-    <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/outsourcing_cost_save" class="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3" id="outsourcingCostForm" enctype="multipart/form-data">
-        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-        <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-        <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
-        <input type="hidden" name="entry_id" value="<?php echo $editRow ? (int)$editRow['id'] : 0; ?>">
-        <input type="hidden" name="category" value="외주비">
-        <div class="md:col-span-2 xl:col-span-4 bg-gray-50 border border-gray-200 rounded-xl p-3 outsourcing-vendor-search-wrap">
-            <label class="text-sm font-bold text-gray-700" for="outsourcingVendorSearch">업체명 검색 자동완성</label>
-            <input type="text" id="outsourcingVendorSearch" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-outsourcing-vendor-search" placeholder="업체명 2글자 이상 입력" lang="ko" inputmode="text" autocomplete="off" aria-autocomplete="list" aria-controls="outsourcingVendorSuggestList" aria-expanded="false">
-            <div id="outsourcingVendorSuggestList" class="outsourcing-vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto" role="listbox"></div>
-        </div>
-        <div><label class="text-xs font-bold text-gray-600">일자</label><input required type="date" name="expense_date" value="<?php echo h($inputDate); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"></div>
-        <div><label class="text-xs font-bold text-gray-600">구분</label><input readonly value="외주비" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 bg-gray-100"></div>
-        <div><label class="text-xs font-bold text-gray-600">업체명</label><input required name="company_name" value="<?php echo h($editRow && isset($editRow['company_name']) ? $editRow['company_name'] : ''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200" lang="ko" inputmode="text" autocomplete="off"></div>
-        <div><label class="text-xs font-bold text-gray-600">대표자명</label><input name="representative_name" value="<?php echo h($editRow && isset($editRow['representative_name']) ? $editRow['representative_name'] : ''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"></div>
-        <div><label class="text-xs font-bold text-gray-600">사업자번호</label><input name="business_no" value="<?php echo h($editRow && isset($editRow['business_no']) ? $editRow['business_no'] : ''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"></div>
-        <div><label class="text-xs font-bold text-gray-600">연락처</label><input name="contact" value="<?php echo h($editRow && isset($editRow['contact']) ? $editRow['contact'] : ''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"></div>
-        <div><label class="text-xs font-bold text-gray-600">금액</label><input required name="amount" inputmode="numeric" value="<?php echo h($editRow && isset($editRow['amount']) ? number_format((float)$editRow['amount'], 0, '.', '') : ''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-right"></div>
-        <div class="md:col-span-2 xl:col-span-4">
-            <label class="text-xs font-bold text-gray-600">비고</label>
-            <textarea name="memo" rows="3" maxlength="500" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200" placeholder="외주비 관련 비고를 입력하세요."><?php echo h($editRow && isset($editRow['memo']) ? $editRow['memo'] : ''); ?></textarea>
-        </div>
-        <div class="md:col-span-2 xl:col-span-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
-            <label class="text-xs font-bold text-gray-600">파일 업로드</label>
-            <input type="file" name="attachments[]" multiple accept=".pdf,.xls,.xlsx,.xlsm,.xlsb,.csv,.jpg,.jpeg,.png,.webp,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.ms-excel.sheet.binary.macroenabled.12,text/csv,image/jpeg,image/png,image/webp" class="mt-2 block w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div class="mt-1 text-xs text-gray-500">PDF·엑셀(XLS, XLSX, XLSM, XLSB, CSV)·이미지(JPG, JPEG, PNG, WEBP), 파일당 20MB 이하 · 여러 파일 선택 가능</div>
-            <?php if ($editRow && isset($outsourcingFilesByCost[(int)$editRow['id']])): ?>
-                <div class="mt-2 flex flex-wrap gap-2">
-                    <?php foreach ($outsourcingFilesByCost[(int)$editRow['id']] as $attachedFile): ?>
-                        <a class="rounded-lg border border-blue-200 bg-white px-2 py-1 text-xs font-bold text-blue-700" href="<?php echo h(base_url()); ?>/?r=construction/outsourcing_file_download&id=<?php echo (int)$attachedFile['id']; ?>"><?php echo h($attachedFile['original_name']); ?></a>
-                    <?php endforeach; ?>
-                </div>
-            <?php endif; ?>
-        </div>
-        <div class="flex items-end gap-2">
-            <button type="submit" name="action" value="save" class="px-5 py-2 rounded-xl bg-gray-900 text-white font-extrabold"><?php echo $editRow ? '수정 저장' : '저장'; ?></button>
-            <?php if ($editRow): ?><a href="?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=input&month=<?php echo h($selectedMonth); ?>" class="px-4 py-2 rounded-xl border border-gray-300 font-bold">취소</a><?php endif; ?>
-        </div>
-    </form>
+<h4 class="text-lg font-extrabold text-gray-900"><?php echo $editRow?'외주비 수정':'외주비 입력'; ?></h4>
+<form method="post" action="<?php echo h(base_url()); ?>/?r=construction/outsourcing_cost_save" class="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3" id="outsourcingCostForm" enctype="multipart/form-data">
+<input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>"><input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>"><input type="hidden" name="entry_id" value="<?php echo $editRow?(int)$editRow['id']:0; ?>"><input type="hidden" name="category" value="외주비">
+<div class="md:col-span-2 xl:col-span-4 bg-gray-50 border border-gray-200 rounded-xl p-3 outsourcing-vendor-search-wrap"><label class="text-sm font-bold text-gray-700" for="outsourcingVendorSearch">업체명 검색 자동완성</label><input type="text" id="outsourcingVendorSearch" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-outsourcing-vendor-search" placeholder="업체명 2글자 이상 입력" autocomplete="off"><div id="outsourcingVendorSuggestList" class="outsourcing-vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div></div>
+<div><label class="text-xs font-bold text-gray-600">일자</label><input required type="date" name="expense_date" value="<?php echo h($inputDate); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"></div>
+<div><label class="text-xs font-bold text-gray-600">구분</label><input readonly value="외주비" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 bg-gray-100"></div>
+<div><label class="text-xs font-bold text-gray-600">업체명</label><input required name="company_name" value="<?php echo h($editRow&&isset($editRow['company_name'])?$editRow['company_name']:''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"></div>
+<div><label class="text-xs font-bold text-gray-600">대표자명</label><input name="representative_name" value="<?php echo h($editRow&&isset($editRow['representative_name'])?$editRow['representative_name']:''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"></div>
+<div><label class="text-xs font-bold text-gray-600">사업자번호</label><input name="business_no" value="<?php echo h($editRow&&isset($editRow['business_no'])?$editRow['business_no']:''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"></div>
+<div><label class="text-xs font-bold text-gray-600">연락처</label><input name="contact" value="<?php echo h($editRow&&isset($editRow['contact'])?$editRow['contact']:''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"></div>
+<div><label class="text-xs font-bold text-gray-600">금액</label><input required name="amount" inputmode="numeric" value="<?php echo h($editRow&&isset($editRow['amount'])?number_format((float)$editRow['amount'],0,'.',''):''); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-right"></div>
+<div class="md:col-span-2 xl:col-span-4"><label class="text-xs font-bold text-gray-600">비고</label><textarea name="memo" rows="3" maxlength="500" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200"><?php echo h($editRow&&isset($editRow['memo'])?$editRow['memo']:''); ?></textarea></div>
+
+<div class="md:col-span-2 xl:col-span-4 rounded-xl border border-gray-200 bg-gray-50 p-4">
+  <div class="flex flex-wrap items-center justify-between gap-2"><div><label class="text-sm font-extrabold text-gray-700">첨부파일 · Google Drive 자동 저장</label><div class="mt-1 text-xs text-gray-500">PDF·엑셀·JPG·PNG·WEBP / 파일당 20MB 이하</div></div><label class="cursor-pointer rounded-xl bg-blue-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-blue-700">+ 파일 추가<input id="outsourcingAttachmentPicker" type="file" multiple accept=".pdf,.xls,.xlsx,.xlsm,.xlsb,.csv,.jpg,.jpeg,.png,.webp" class="hidden"></label></div>
+  <div id="outsourcingSelectedFiles" class="mt-3 space-y-2"></div>
+  <?php if ($editRow && isset($outsourcingFilesByCost[(int)$editRow['id']]) && count($outsourcingFilesByCost[(int)$editRow['id']])>0): ?>
+  <div class="mt-4 border-t border-gray-200 pt-3"><div class="mb-2 text-xs font-extrabold text-gray-600">기존 첨부파일</div><div id="outsourcingExistingFiles" class="space-y-2">
+  <?php foreach ($outsourcingFilesByCost[(int)$editRow['id']] as $attachedFile): ?><div class="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2" data-existing-file-id="<?php echo (int)$attachedFile['id']; ?>"><div class="min-w-0 flex-1 truncate text-sm font-bold text-gray-800"><?php echo h($attachedFile['original_name']); ?></div><div class="flex items-center gap-2"><a target="_blank" rel="noopener" href="<?php echo h(base_url()); ?>/?r=construction/outsourcing_file_download&id=<?php echo (int)$attachedFile['id']; ?>" class="text-xs font-bold text-blue-700">보기</a><a href="<?php echo h(base_url()); ?>/?r=construction/outsourcing_file_download&id=<?php echo (int)$attachedFile['id']; ?>&download=1" class="text-xs font-bold text-gray-700">다운로드</a><button type="button" class="js-outsourcing-existing-delete rounded-lg border border-red-200 px-2 py-1 text-xs font-extrabold text-red-600" data-file-id="<?php echo (int)$attachedFile['id']; ?>">× 삭제</button></div></div><?php endforeach; ?>
+  </div></div><?php endif; ?>
 </div>
+<div class="md:col-span-2 xl:col-span-4 flex items-center gap-3"><button type="submit" id="outsourcingSaveButton" name="action" value="save" class="px-5 py-2 rounded-xl bg-gray-900 text-white font-extrabold"><?php echo $editRow?'수정 저장':'저장'; ?></button><span id="outsourcingSaveStatus" class="text-sm font-bold text-gray-500"></span><?php if ($editRow): ?><a href="?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=input&month=<?php echo h($selectedMonth); ?>" class="px-4 py-2 rounded-xl border border-gray-300 font-bold">취소</a><?php endif; ?></div>
+</form></div>
 
 <script>
 (function(){
-    var searchInput = document.getElementById('outsourcingVendorSearch');
-    var form = document.getElementById('outsourcingCostForm');
-    var suggestList = document.getElementById('outsourcingVendorSuggestList');
-    var searchTimer = null;
-    var requestSequence = 0;
+var form=document.getElementById('outsourcingCostForm'), picker=document.getElementById('outsourcingAttachmentPicker'), list=document.getElementById('outsourcingSelectedFiles'), saveBtn=document.getElementById('outsourcingSaveButton'), saveStatus=document.getElementById('outsourcingSaveStatus');
+var selected=[], uploadUrl='<?php echo h(base_url()); ?>/?r=construction/outsourcing_file_download&action=upload', deleteUrl='<?php echo h(base_url()); ?>/?r=construction/outsourcing_file_download&action=delete';
+function esc(s){var d=document.createElement('div');d.textContent=s||'';return d.innerHTML;}
+function keyOf(f){return [f.name,f.size,f.lastModified].join('::');}
+function sizeText(n){if(n<1024)return n+' B';if(n<1048576)return (n/1024).toFixed(1)+' KB';return (n/1048576).toFixed(1)+' MB';}
+function render(){list.innerHTML='';for(var i=0;i<selected.length;i++){var x=selected[i], div=document.createElement('div');div.className='rounded-xl border border-gray-200 bg-white px-3 py-2';div.setAttribute('data-file-key',x.key);div.innerHTML='<div class="flex items-center gap-3"><div class="min-w-0 flex-1"><div class="truncate text-sm font-bold text-gray-800">'+esc(x.file.name)+'</div><div class="mt-1 text-xs text-gray-500">'+sizeText(x.file.size)+' · <span class="js-file-state">'+esc(x.status||'대기')+'</span></div><div class="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-100"><div class="js-file-progress h-full bg-blue-500" style="width:'+(x.progress||0)+'%"></div></div></div><button type="button" class="js-selected-remove rounded-full border border-gray-300 px-2 py-1 text-sm font-extrabold text-gray-500" data-key="'+esc(x.key)+'">×</button></div>';list.appendChild(div);}}
+if(picker) picker.addEventListener('change',function(){for(var i=0;i<picker.files.length;i++){var f=picker.files[i],k=keyOf(f),dup=false;for(var j=0;j<selected.length;j++)if(selected[j].key===k)dup=true;if(!dup)selected.push({key:k,file:f,status:'대기',progress:0});}picker.value='';render();});
+if(list) list.addEventListener('click',function(e){var b=e.target;if(!b.classList.contains('js-selected-remove'))return;var k=b.getAttribute('data-key'),next=[];for(var i=0;i<selected.length;i++)if(selected[i].key!==k)next.push(selected[i]);selected=next;render();});
+function updateItem(item,status,progress){item.status=status;if(typeof progress==='number')item.progress=progress;var row=list.querySelector('[data-file-key="'+item.key.replace(/"/g,'\\"')+'"]');if(row){var st=row.querySelector('.js-file-state'),bar=row.querySelector('.js-file-progress');if(st)st.textContent=status;if(bar&&typeof progress==='number')bar.style.width=progress+'%';}}
+function uploadOne(item,entryId,done){var fd=new FormData();fd.append('_csrf',form.elements['_csrf'].value);fd.append('project_id',form.elements['project_id'].value);fd.append('cost_id',entryId);fd.append('ym',form.elements['month'].value);fd.append('file',item.file,item.file.name);var xhr=new XMLHttpRequest();xhr.open('POST',uploadUrl,true);xhr.upload.onprogress=function(ev){if(ev.lengthComputable)updateItem(item,'업로드 중 '+Math.round(ev.loaded*100/ev.total)+'%',Math.round(ev.loaded*100/ev.total));};xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;var r=null;try{r=JSON.parse(xhr.responseText);}catch(ex){}if(xhr.status>=200&&xhr.status<300&&r&&r.ok){updateItem(item,'완료',100);done(true);}else{updateItem(item,'실패: '+(r&&r.message?r.message:'업로드 오류'),item.progress||0);done(false);}};updateItem(item,'업로드 준비',1);xhr.send(fd);}
+function uploadQueue(entryId,complete){var queue=[];for(var i=0;i<selected.length;i++)if(selected[i].status!=='완료')queue.push(selected[i]);if(queue.length===0){complete(true);return;}var pos=0,active=0,failed=false,max=2;function pump(){if(pos>=queue.length&&active===0){complete(!failed);return;}while(active<max&&pos<queue.length){(function(item){active++;uploadOne(item,entryId,function(ok){active--;if(!ok)failed=true;pump();});})(queue[pos++]);}}pump();}
+if(form) form.addEventListener('submit',function(e){if(!window.FormData||!window.XMLHttpRequest)return;e.preventDefault();if(saveBtn.disabled)return;saveBtn.disabled=true;saveStatus.textContent='외주비 저장 중...';var fd=new FormData(form);fd.append('ajax','1');var xhr=new XMLHttpRequest();xhr.open('POST',form.action,true);xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;var r=null;try{r=JSON.parse(xhr.responseText);}catch(ex){}if(!(xhr.status>=200&&xhr.status<300&&r&&r.ok)){saveBtn.disabled=false;saveStatus.textContent=r&&r.message?r.message:'저장에 실패했습니다.';return;}var entryId=r.entry_id;form.elements['entry_id'].value=entryId;if(selected.length===0){location.href='?r=공사&pid='+encodeURIComponent(form.elements['project_id'].value)+'&tab=outsourcing&outsourcing_tab=input&month='+encodeURIComponent(form.elements['month'].value);return;}saveStatus.textContent='첨부파일을 Google Drive에 업로드 중...';uploadQueue(entryId,function(ok){if(ok){saveStatus.textContent='저장 완료';location.href='?r=공사&pid='+encodeURIComponent(form.elements['project_id'].value)+'&tab=outsourcing&outsourcing_tab=input&month='+encodeURIComponent(form.elements['month'].value)+'&edit_id='+encodeURIComponent(entryId);}else{saveBtn.disabled=false;saveBtn.textContent='실패 파일 다시 업로드';saveStatus.textContent='일부 파일 업로드 실패. 실패 파일만 다시 시도할 수 있습니다.';}});};xhr.send(fd);});
+var existing=document.getElementById('outsourcingExistingFiles');if(existing)existing.addEventListener('click',function(e){var b=e.target;if(!b.classList.contains('js-outsourcing-existing-delete'))return;if(!confirm('이 첨부파일을 Google Drive에서도 삭제할까요?'))return;b.disabled=true;var fd=new FormData();fd.append('_csrf',form.elements['_csrf'].value);fd.append('file_id',b.getAttribute('data-file-id'));var xhr=new XMLHttpRequest();xhr.open('POST',deleteUrl,true);xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;var r=null;try{r=JSON.parse(xhr.responseText);}catch(ex){}if(xhr.status>=200&&xhr.status<300&&r&&r.ok){var row=b.closest('[data-existing-file-id]');if(row)row.parentNode.removeChild(row);}else{b.disabled=false;alert(r&&r.message?r.message:'파일 삭제에 실패했습니다.');}};xhr.send(fd);});
 
-    if (!searchInput || !form || !suggestList) return;
-
-    function hideSuggestions(){
-        suggestList.innerHTML = '';
-        if (suggestList.className.indexOf('hidden') === -1) suggestList.className += ' hidden';
-        suggestList.style.display = 'none';
-        searchInput.setAttribute('aria-expanded', 'false');
-    }
-
-    function showSuggestions(){
-        suggestList.className = suggestList.className.replace(/\bhidden\b/g, '').replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
-        suggestList.style.display = 'block';
-        searchInput.setAttribute('aria-expanded', 'true');
-    }
-
-    function fillVendorFields(item){
-        if (!item) return;
-        if (form.elements['company_name']) form.elements['company_name'].value = item.vendor_name || '';
-        if (form.elements['representative_name']) form.elements['representative_name'].value = item.representative || '';
-        if (form.elements['business_no']) form.elements['business_no'].value = item.biz_no || '';
-        if (form.elements['contact']) form.elements['contact'].value = item.phone || '';
-    }
-
-    function renderSuggestions(items){
-        suggestList.innerHTML = '';
-        if (!items || !items.length) {
-            var empty = document.createElement('div');
-            empty.className = 'px-3 py-2 text-sm text-gray-500';
-            empty.textContent = '검색 결과 없음';
-            suggestList.appendChild(empty);
-            showSuggestions();
-            return;
-        }
-
-        for (var i = 0; i < items.length; i++) {
-            (function(item){
-                var button = document.createElement('button');
-                var detail = [];
-                button.type = 'button';
-                button.className = 'block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50';
-                button.setAttribute('role', 'option');
-                button.setAttribute('data-outsourcing-vendor-item', '1');
-                if (item.representative) detail[detail.length] = item.representative;
-                if (item.phone) detail[detail.length] = item.phone;
-                button.textContent = (item.vendor_name || '') + (detail.length ? ' (' + detail.join(' / ') + ')' : '');
-                button.vendorData = item;
-                button.addEventListener('mousedown', function(event){
-                    event.preventDefault();
-                });
-                suggestList.appendChild(button);
-            })(items[i]);
-        }
-        showSuggestions();
-    }
-
-    searchInput.addEventListener('input', function(){
-        var query = (searchInput.value || '').replace(/^\s+|\s+$/g, '');
-        var currentSequence;
-        if (searchTimer) clearTimeout(searchTimer);
-        requestSequence++;
-        currentSequence = requestSequence;
-        if (query.length < 2) {
-            hideSuggestions();
-            return;
-        }
-
-        searchTimer = setTimeout(function(){
-            var xhr = new XMLHttpRequest();
-            xhr.open('GET', '<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q=' + encodeURIComponent(query), true);
-            xhr.onreadystatechange = function(){
-                var items = arrayFallback();
-                if (xhr.readyState !== 4 || currentSequence !== requestSequence) return;
-                if (xhr.status === 200) {
-                    try {
-                        var response = JSON.parse(xhr.responseText);
-                        items = response && response.items ? response.items : arrayFallback();
-                    } catch (error) {
-                        items = arrayFallback();
-                    }
-                }
-                renderSuggestions(items);
-            };
-            xhr.send();
-        }, 250);
-    });
-
-    function arrayFallback(){
-        return [];
-    }
-
-    suggestList.addEventListener('click', function(event){
-        var target = event.target;
-        while (target && target !== suggestList && (!target.getAttribute || target.getAttribute('data-outsourcing-vendor-item') !== '1')) {
-            target = target.parentNode;
-        }
-        if (!target || target === suggestList) return;
-        fillVendorFields(target.vendorData || {});
-        searchInput.value = target.vendorData && target.vendorData.vendor_name ? target.vendorData.vendor_name : '';
-        hideSuggestions();
-        if (form.elements['company_name']) form.elements['company_name'].focus();
-    });
-
-    document.addEventListener('click', function(event){
-        var wrap = searchInput.parentNode;
-        if (wrap && !wrap.contains(event.target)) hideSuggestions();
-    });
-
-    searchInput.addEventListener('keydown', function(event){
-        if (event.keyCode === 27) hideSuggestions();
-    });
+var searchInput=document.getElementById('outsourcingVendorSearch'),suggestList=document.getElementById('outsourcingVendorSuggestList'),timer=null,seq=0;if(searchInput&&suggestList){function hide(){suggestList.innerHTML='';suggestList.className+=' hidden';suggestList.style.display='none';}function show(items){suggestList.innerHTML='';for(var i=0;i<items.length;i++){var b=document.createElement('button');b.type='button';b.className='block w-full text-left px-3 py-2 border-b hover:bg-blue-50';b.textContent=items[i].vendor_name||'';b.vendorData=items[i];suggestList.appendChild(b);}suggestList.className=suggestList.className.replace(/\bhidden\b/g,'');suggestList.style.display='block';}searchInput.addEventListener('input',function(){var q=searchInput.value.replace(/^\s+|\s+$/g,'');if(timer)clearTimeout(timer);seq++;var s=seq;if(q.length<2){hide();return;}timer=setTimeout(function(){var x=new XMLHttpRequest();x.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true);x.onreadystatechange=function(){if(x.readyState!==4||s!==seq)return;var items=[];if(x.status===200)try{var r=JSON.parse(x.responseText);items=r&&r.items?r.items:[];}catch(ex){}show(items);};x.send();},250);});suggestList.addEventListener('click',function(e){var b=e.target;if(!b.vendorData)return;var d=b.vendorData;if(form.elements['company_name'])form.elements['company_name'].value=d.vendor_name||'';if(form.elements['representative_name'])form.elements['representative_name'].value=d.representative||'';if(form.elements['business_no'])form.elements['business_no'].value=d.biz_no||'';if(form.elements['contact'])form.elements['contact'].value=d.phone||'';searchInput.value=d.vendor_name||'';hide();});document.addEventListener('click',function(e){if(searchInput.parentNode&&!searchInput.parentNode.contains(e.target))hide();});}
 })();
 </script>
 
-<div class="mt-4 bg-white rounded-3xl border border-gray-200 p-4 shadow-sm overflow-x-auto">
-    <table class="min-w-[1450px] w-full border border-gray-200 text-sm">
-        <thead class="bg-gray-100 text-gray-700"><tr><th class="border px-3 py-2">일자</th><th class="border px-3 py-2">구분</th><th class="border px-3 py-2">업체명</th><th class="border px-3 py-2">대표자명</th><th class="border px-3 py-2">사업자번호</th><th class="border px-3 py-2">연락처</th><th class="border px-3 py-2 text-right">금액</th><th class="border px-3 py-2">비고</th><th class="border px-3 py-2">파일</th><th class="border px-3 py-2">관리</th></tr></thead>
-        <tbody>
-        <?php foreach ($manualAllRows as $row): ?>
-            <?php
-            $outsourcingRowId = isset($row['id']) ? (int)$row['id'] : 0;
-            $outsourcingRowDate = isset($row['expense_date']) ? (string)$row['expense_date'] : '';
-            $outsourcingRowYm = CostChangeService::effectiveSettlementYm($pdo, 'outsourcing', (string)$outsourcingRowId, 'outsourcing', $outsourcingRowDate);
-            $outsourcingRowLock = CostChangeService::lockInfo('outsourcing', $outsourcingRowDate, $outsourcingRowYm, date('Y-m-d'));
-            $outsourcingActiveRequest = $outsourcingRowId > 0 ? CostChangeService::activeRequest($pdo, 'outsourcing', (string)$outsourcingRowId) : null;
-            $outsourcingHistoryCount = $outsourcingRowId > 0 ? CostChangeService::historyCount($pdo, 'outsourcing', (string)$outsourcingRowId) : 0;
-            $outsourcingLatestRequest = $outsourcingHistoryCount > 0 ? CostChangeService::latestRequest($pdo, 'outsourcing', (string)$outsourcingRowId) : null;
-            $outsourcingReturnUrl = '?r=공사&pid=' . (int)$pid . '&tab=outsourcing&outsourcing_tab=input&month=' . $selectedMonth;
-            ?>
-            <tr class="<?php echo !empty($outsourcingRowLock['locked']) ? 'bg-gray-50' : ''; ?>">
-                <td class="border px-3 py-2"><?php echo h($row['expense_date']); ?></td><td class="border px-3 py-2">외주비</td><td class="border px-3 py-2 font-bold"><?php echo h($row['company_name']); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['representative_name']) ? $row['representative_name'] : ''); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['business_no']) ? $row['business_no'] : ''); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['contact']) ? $row['contact'] : ''); ?></td><td class="border px-3 py-2 text-right font-bold"><?php echo h(number_format((float)$row['amount'])); ?></td>
-                <td class="border px-3 py-2 whitespace-pre-line"><?php echo h(isset($row['memo']) && trim((string)$row['memo']) !== '' ? $row['memo'] : '-'); ?></td>
-                <td class="border px-3 py-2">
-                    <?php $rowFiles = isset($outsourcingFilesByCost[(int)$row['id']]) ? $outsourcingFilesByCost[(int)$row['id']] : array(); ?>
-                    <?php if (count($rowFiles) <= 0): ?>
-                        <span class="text-gray-400">-</span>
-                    <?php else: ?>
-                        <div class="flex flex-col gap-1">
-                            <?php foreach ($rowFiles as $rowFile): ?>
-                                <a class="text-xs font-bold text-blue-700 hover:underline" href="<?php echo h(base_url()); ?>/?r=construction/outsourcing_file_download&id=<?php echo (int)$rowFile['id']; ?>"><?php echo h($rowFile['original_name']); ?></a>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                </td>
-                <td class="border px-3 py-2">
-                    <?php if (is_array($outsourcingActiveRequest)): ?>
-                        <div class="text-center text-xs font-extrabold text-amber-700"><?php echo h(CostChangeService::statusLabel($outsourcingActiveRequest['status'])); ?></div>
-                        <div class="text-center"><a href="?r=cost_change/detail&id=<?php echo (int)$outsourcingActiveRequest['id']; ?>" class="text-xs text-blue-700 underline">요청 상세</a></div>
-                    <?php elseif (!empty($outsourcingRowLock['locked'])): ?>
-                        <div class="flex flex-wrap justify-center gap-1">
-                            <?php foreach (array('MODIFY'=>'수정 승인 요청','MONTH_MOVE'=>'귀속월 변경 요청','DELETE'=>'삭제 승인 요청') as $requestCode=>$requestLabel): ?>
-                                <a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=outsourcing&target_id=<?php echo (int)$outsourcingRowId; ?>&request_type=<?php echo h($requestCode); ?>&return_url=<?php echo rawurlencode($outsourcingReturnUrl); ?>" class="px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-bold"><?php echo h($requestLabel); ?></a>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php else: ?>
-                        <div class="flex justify-center gap-2"><a href="?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=input&month=<?php echo h($outsourcingRowYm); ?>&edit_id=<?php echo (int)$row['id']; ?>" class="px-2 py-1 rounded-lg border border-gray-300 text-xs font-bold">수정</a><form method="post" action="<?php echo h(base_url()); ?>/?r=construction/outsourcing_cost_save" onsubmit="return confirm('이 외주비 입력 내역을 삭제할까요?');"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>"><input type="hidden" name="month" value="<?php echo h($outsourcingRowYm); ?>"><input type="hidden" name="entry_id" value="<?php echo (int)$row['id']; ?>"><button name="action" value="delete" class="px-2 py-1 rounded-lg border border-red-200 text-red-600 text-xs font-bold">삭제</button></form></div>
-                    <?php endif; ?>
-                    <?php if ($outsourcingHistoryCount > 0): ?><div class="mt-1 text-center"><a href="?r=cost_change/history&target_type=outsourcing&target_id=<?php echo (int)$outsourcingRowId; ?>&project_id=<?php echo (int)$pid; ?>" class="text-[11px] font-bold text-blue-700 underline"><?php echo h(CostChangeService::historyBadgeLabel($outsourcingLatestRequest, $outsourcingHistoryCount)); ?></a></div><?php endif; ?>
-                </td>
-            </tr>
-        <?php endforeach; ?>
-        <?php if (count($manualAllRows) === 0): ?><tr><td colspan="10" class="border px-3 py-8 text-center text-gray-500">입력된 외주비가 없습니다.</td></tr><?php endif; ?>
-        </tbody>
-    </table>
-</div>
+<div class="mt-4 bg-white rounded-3xl border border-gray-200 p-4 shadow-sm overflow-x-auto"><table class="min-w-[1450px] w-full border border-gray-200 text-sm"><thead class="bg-gray-100 text-gray-700"><tr><th class="border px-3 py-2">일자</th><th class="border px-3 py-2">구분</th><th class="border px-3 py-2">업체명</th><th class="border px-3 py-2">대표자명</th><th class="border px-3 py-2">사업자번호</th><th class="border px-3 py-2">연락처</th><th class="border px-3 py-2 text-right">금액</th><th class="border px-3 py-2">비고</th><th class="border px-3 py-2">파일</th><th class="border px-3 py-2">관리</th></tr></thead><tbody>
+<?php foreach ($manualAllRows as $row): ?><?php $rid=(int)$row['id'];$rdate=(string)$row['expense_date'];$rym=CostChangeService::effectiveSettlementYm($pdo,'outsourcing',(string)$rid,'outsourcing',$rdate);$rlock=CostChangeService::lockInfo('outsourcing',$rdate,$rym,date('Y-m-d'));$active=$rid>0?CostChangeService::activeRequest($pdo,'outsourcing',(string)$rid):null;$history=$rid>0?CostChangeService::historyCount($pdo,'outsourcing',(string)$rid):0;$latest=$history>0?CostChangeService::latestRequest($pdo,'outsourcing',(string)$rid):null;$returnUrl='?r=공사&pid='.(int)$pid.'&tab=outsourcing&outsourcing_tab=input&month='.$selectedMonth; ?><tr class="<?php echo !empty($rlock['locked'])?'bg-gray-50':''; ?>"><td class="border px-3 py-2"><?php echo h($row['expense_date']); ?></td><td class="border px-3 py-2">외주비</td><td class="border px-3 py-2 font-bold"><?php echo h($row['company_name']); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['representative_name'])?$row['representative_name']:''); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['business_no'])?$row['business_no']:''); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['contact'])?$row['contact']:''); ?></td><td class="border px-3 py-2 text-right font-bold"><?php echo h(number_format((float)$row['amount'])); ?></td><td class="border px-3 py-2"><?php echo h(isset($row['memo'])&&trim((string)$row['memo'])!==''?$row['memo']:'-'); ?></td><td class="border px-3 py-2"><?php $files=isset($outsourcingFilesByCost[$rid])?$outsourcingFilesByCost[$rid]:array(); if(count($files)===0): ?><span class="text-gray-400">-</span><?php else: ?><div class="flex flex-col gap-1"><?php foreach($files as $f): ?><div class="flex items-center gap-2"><a target="_blank" rel="noopener" class="text-xs font-bold text-blue-700 hover:underline" href="<?php echo h(base_url()); ?>/?r=construction/outsourcing_file_download&id=<?php echo (int)$f['id']; ?>"><?php echo h($f['original_name']); ?></a><a class="text-[11px] text-gray-500 underline" href="<?php echo h(base_url()); ?>/?r=construction/outsourcing_file_download&id=<?php echo (int)$f['id']; ?>&download=1">다운</a></div><?php endforeach; ?></div><?php endif; ?></td><td class="border px-3 py-2"><?php if(is_array($active)): ?><div class="text-center text-xs font-extrabold text-amber-700"><?php echo h(CostChangeService::statusLabel($active['status'])); ?></div><?php elseif(!empty($rlock['locked'])): ?><div class="flex flex-wrap justify-center gap-1"><?php foreach(array('MODIFY'=>'수정 승인 요청','MONTH_MOVE'=>'귀속월 변경 요청','DELETE'=>'삭제 승인 요청') as $code=>$label): ?><a href="?r=cost_change/request&project_id=<?php echo (int)$pid; ?>&target_type=outsourcing&target_id=<?php echo $rid; ?>&request_type=<?php echo h($code); ?>&return_url=<?php echo rawurlencode($returnUrl); ?>" class="px-2 py-1 rounded-lg border border-amber-200 bg-amber-50 text-amber-800 text-[11px] font-bold"><?php echo h($label); ?></a><?php endforeach; ?></div><?php else: ?><div class="flex justify-center gap-2"><a href="?r=공사&pid=<?php echo (int)$pid; ?>&tab=outsourcing&outsourcing_tab=input&month=<?php echo h($rym); ?>&edit_id=<?php echo $rid; ?>" class="px-2 py-1 rounded-lg border border-gray-300 text-xs font-bold">수정</a><form method="post" action="<?php echo h(base_url()); ?>/?r=construction/outsourcing_cost_save" onsubmit="return confirm('이 외주비 입력 내역을 삭제할까요?');"><input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>"><input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>"><input type="hidden" name="month" value="<?php echo h($rym); ?>"><input type="hidden" name="entry_id" value="<?php echo $rid; ?>"><button name="action" value="delete" class="px-2 py-1 rounded-lg border border-red-200 text-red-600 text-xs font-bold">삭제</button></form></div><?php endif; ?><?php if($history>0): ?><div class="mt-1 text-center"><a href="?r=cost_change/history&target_type=outsourcing&target_id=<?php echo $rid; ?>&project_id=<?php echo (int)$pid; ?>" class="text-[11px] font-bold text-blue-700 underline"><?php echo h(CostChangeService::historyBadgeLabel($latest,$history)); ?></a></div><?php endif; ?></td></tr><?php endforeach; ?>
+<?php if(count($manualAllRows)===0): ?><tr><td colspan="10" class="border px-3 py-8 text-center text-gray-500">입력된 외주비가 없습니다.</td></tr><?php endif; ?></tbody></table></div>
 <?php endif; ?>
