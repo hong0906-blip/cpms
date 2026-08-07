@@ -202,8 +202,8 @@ if (!$editRow && strpos($inputDate, $selectedMonth) !== 0) $inputDate = $selecte
         </div>
         <div class="md:col-span-2 xl:col-span-4 rounded-xl border border-gray-200 bg-gray-50 p-3">
             <label class="text-xs font-bold text-gray-600">파일 업로드</label>
-            <input type="file" name="attachments[]" multiple accept=".pdf,.xls,.xlsx,.xlsm,.xlsb,.csv,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.ms-excel.sheet.binary.macroenabled.12,text/csv" class="mt-2 block w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">
-            <div class="mt-1 text-xs text-gray-500">PDF·엑셀(XLS, XLSX, XLSM, XLSB, CSV), 파일당 20MB 이하 · 여러 파일 선택 가능</div>
+            <input type="file" name="attachments[]" multiple accept=".pdf,.xls,.xlsx,.xlsm,.xlsb,.csv,.jpg,.jpeg,.png,.webp,application/pdf,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel.sheet.macroenabled.12,application/vnd.ms-excel.sheet.binary.macroenabled.12,text/csv,image/jpeg,image/png,image/webp" class="mt-2 block w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm">
+            <div class="mt-1 text-xs text-gray-500">PDF·엑셀(XLS, XLSX, XLSM, XLSB, CSV)·이미지(JPG, JPEG, PNG, WEBP), 파일당 20MB 이하 · 여러 파일 선택 가능</div>
             <?php if ($editRow && isset($outsourcingFilesByCost[(int)$editRow['id']])): ?>
                 <div class="mt-2 flex flex-wrap gap-2">
                     <?php foreach ($outsourcingFilesByCost[(int)$editRow['id']] as $attachedFile): ?>
