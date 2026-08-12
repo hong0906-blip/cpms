@@ -489,6 +489,48 @@ function cpms_labor_override_path($projectId, $month) {
     return cpms_storage_root() . '/labor_overrides/' . ((int)$projectId) . '/' . $month . '.json';
 }
 
+function cpms_resolve_labor_override_rows($dbRows) {
+    $rows = array();
+    $hasAppliedRow = array();
+    if (!is_array($dbRows)) return $rows;
+
+    foreach ($dbRows as $r) {
+        if (!is_array($r)) continue;
+        $workerKey = isset($r['worker_key']) ? trim((string)$r['worker_key']) : '';
+        $workDate = isset($r['work_date']) ? trim((string)$r['work_date']) : '';
+        if ($workerKey === '' || $workDate === '') continue;
+        if (!isset($rows[$workerKey]) || !is_array($rows[$workerKey])) $rows[$workerKey] = array();
+        $cellKey = $workerKey . '|' . $workDate;
+        $status = isset($r['status']) ? trim((string)$r['status']) : '';
+        $isApplied = ($status === 'applied' || $status === 'approved');
+
+        if ($isApplied) {
+            $rows[$workerKey][$workDate] = array(
+                'worker_name' => isset($r['worker_name']) ? (string)$r['worker_name'] : '',
+                'value' => isset($r['new_value']) ? (float)$r['new_value'] : 0.0,
+                'is_deleted' => (isset($r['is_deleted_entry']) && (int)$r['is_deleted_entry'] === 1),
+                'meta' => $r
+            );
+            $hasAppliedRow[$cellKey] = true;
+            continue;
+        }
+
+        // 2026-08-11 이전에는 승인요청이 기존 반영 행을 pending/rejected/cancelled로 덮어썼습니다.
+        // 같은 셀의 승인 완료 이력이 없을 때만 old_value를 사용해 기존 표시값과 노무비 계산을 복원합니다.
+        if (!isset($hasAppliedRow[$cellKey]) && isset($r['old_value']) && is_numeric($r['old_value'])) {
+            $legacyValue = (float)$r['old_value'];
+            $rows[$workerKey][$workDate] = array(
+                'worker_name' => isset($r['worker_name']) ? (string)$r['worker_name'] : '',
+                'value' => $legacyValue,
+                'is_deleted' => ($legacyValue <= 0),
+                'meta' => $r
+            );
+        }
+    }
+
+    return $rows;
+}
+
 function cpms_load_labor_overrides($projectId, $month) {
     $projectId = (int)$projectId;
     $month = trim((string)$month);
@@ -496,26 +538,16 @@ function cpms_load_labor_overrides($projectId, $month) {
     try {
         $pdo = \App\Core\Db::pdo();
         if ($pdo && cpms_ensure_labor_override_table($pdo)) {
-            $sql = "SELECT worker_key, work_date, worker_name, old_value, new_value, is_deleted_entry, status, reason, requested_by, approved_by, approved_at, created_at, updated_at
+            $sql = "SELECT id, worker_key, work_date, worker_name, old_value, new_value, is_deleted_entry, status, reason, requested_by, approved_by, approved_at, created_at, updated_at
                     FROM cpms_labor_gongsu_overrides
-                    WHERE project_id = :pid AND month = :month AND status IN ('applied','approved')";
+                    WHERE project_id = :pid AND month = :month
+                      AND status IN ('applied','approved','pending','rejected','cancelled')
+                    ORDER BY id ASC";
             $st = $pdo->prepare($sql);
             $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
             $st->bindValue(':month', $month, PDO::PARAM_STR);
             $st->execute();
-            while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
-                $workerKey = isset($r['worker_key']) ? trim((string)$r['worker_key']) : '';
-                $workDate = isset($r['work_date']) ? trim((string)$r['work_date']) : '';
-                if ($workerKey === '' || $workDate === '') continue;
-                if (!isset($rows[$workerKey]) || !is_array($rows[$workerKey])) $rows[$workerKey] = array();
-                $rows[$workerKey][$workDate] = array(
-                    'worker_name' => (string)$r['worker_name'],
-                    'value' => (float)$r['new_value'],
-                    'is_deleted' => (isset($r['is_deleted_entry']) && (int)$r['is_deleted_entry'] === 1),
-                    'meta' => $r
-                );
-            }
-            return $rows;
+            return cpms_resolve_labor_override_rows($st->fetchAll(PDO::FETCH_ASSOC));
         }
     } catch (Exception $e) {}    
     return cpms_read_json_file(cpms_labor_override_path($projectId, $month), array());
@@ -724,7 +756,7 @@ function cpms_ensure_labor_override_table($pdo) {
             rejected_acknowledged_at DATETIME NULL,
             rejected_acknowledged_by INT NULL,
             updated_at DATETIME NOT NULL,
-            UNIQUE KEY uk_labor_override(project_id, worker_key, work_date),
+            KEY idx_labor_override_cell(project_id, worker_key, work_date),
             KEY idx_labor_override_project_month(project_id, month),
             KEY idx_labor_override_status(status),
             KEY idx_labor_override_batch(batch_token, status)
@@ -795,7 +827,12 @@ function cpms_ensure_labor_override_table($pdo) {
         } catch (Exception $e) {
             $idx = array();
         }
-        if (!isset($idx['uk_labor_override'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD UNIQUE KEY uk_labor_override(project_id, worker_key, work_date)");
+        // 승인요청과 승인 완료 이력을 각각 보존할 수 있도록 셀 고유키를 일반 조회 인덱스로 전환합니다.
+        if (isset($idx['uk_labor_override'])) {
+            $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides DROP INDEX uk_labor_override");
+            unset($idx['uk_labor_override']);
+        }
+        if (!isset($idx['idx_labor_override_cell'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_cell(project_id, worker_key, work_date)");
         if (!isset($idx['idx_labor_override_project_month'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_project_month(project_id, month)");
         if (!isset($idx['idx_labor_override_status'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_status(status)");
         if (!isset($idx['idx_labor_override_current_approver'])) $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_current_approver(current_approver_employee_id, status)");

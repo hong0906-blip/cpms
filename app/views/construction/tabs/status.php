@@ -28,7 +28,7 @@ if (!function_exists('cpms_cost_period_range')) {
         $ym = trim((string)$ym);
         $type = trim((string)$type);
         if (!preg_match('/^\d{4}-\d{2}$/', $ym)) { $ym = date('Y-m'); }
-        if ($type === 'labor' || $type === 'sales') {
+        if ($type === 'labor' || $type === 'outsourcing' || $type === 'sales') {
             $start = $ym . '-01';
             $ts = strtotime($start);
             $end = date('Y-m-t', $ts);
@@ -652,11 +652,14 @@ foreach ($periodMonths as $ym) {
     $m = (int)substr($ym, 5, 2);
     $rowYear = (int)substr($ym, 0, 4);
     $laborRange = cpms_cost_period_range($ym, 'labor');
+    $outsourcingRange = cpms_cost_period_range($ym, 'outsourcing');
     $costRange = cpms_cost_period_range($ym, 'material');
     $salesRange = cpms_cost_period_range($ym, 'sales');
 
     $laborStart = isset($laborRange['start']) ? (string)$laborRange['start'] : '';
     $laborEnd = isset($laborRange['end']) ? (string)$laborRange['end'] : '';
+    $outsourcingStart = isset($outsourcingRange['start']) ? (string)$outsourcingRange['start'] : '';
+    $outsourcingEnd = isset($outsourcingRange['end']) ? (string)$outsourcingRange['end'] : '';
     $costStart = isset($costRange['start']) ? (string)$costRange['start'] : '';
     $costEnd = isset($costRange['end']) ? (string)$costRange['end'] : '';
     $salesStart = isset($salesRange['start']) ? (string)$salesRange['start'] : '';
@@ -676,7 +679,7 @@ foreach ($periodMonths as $ym) {
     // 상황탭 노무비/외주비는 월별 비용 배분 반영금액을 각각 합산합니다.
     $labor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
     $outsourcingLabor = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap, true);
-    $outsourcingManual = cpms_outsourcing_manual_total_between($pdo, (int)$pid, $costStart, $costEnd);
+    $outsourcingManual = cpms_outsourcing_manual_total_between($pdo, (int)$pid, $outsourcingStart, $outsourcingEnd);
     $outsourcing = $outsourcingLabor + $outsourcingManual;
 
     // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
@@ -794,11 +797,14 @@ foreach ($years as $yy) {
     for ($m = 1; $m <= 12; $m++) {
         $ym = sprintf('%04d-%02d', (int)$yy, $m);
         $laborRange = cpms_cost_period_range($ym, 'labor');
+        $outsourcingRange = cpms_cost_period_range($ym, 'outsourcing');
         $costRange = cpms_cost_period_range($ym, 'material');
         $salesRange = cpms_cost_period_range($ym, 'sales');
 
         $laborStart = isset($laborRange['start']) ? (string)$laborRange['start'] : '';
         $laborEnd = isset($laborRange['end']) ? (string)$laborRange['end'] : '';
+        $outsourcingStart = isset($outsourcingRange['start']) ? (string)$outsourcingRange['start'] : '';
+        $outsourcingEnd = isset($outsourcingRange['end']) ? (string)$outsourcingRange['end'] : '';
         $costStart = isset($costRange['start']) ? (string)$costRange['start'] : '';
         $costEnd = isset($costRange['end']) ? (string)$costRange['end'] : '';
         $salesStart = isset($salesRange['start']) ? (string)$salesRange['start'] : '';
@@ -810,7 +816,7 @@ foreach ($years as $yy) {
         $overallTotals['purchase'] += (float)$overallMaterialByCategory['구매품'];
         $overallTotals['labor'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap);
         $overallTotals['outsourcing'] += cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $laborStart, $laborEnd, $laborWageMap, true);
-        $overallTotals['outsourcing'] += cpms_outsourcing_manual_total_between($pdo, (int)$pid, $laborStart, $laborEnd);
+        $overallTotals['outsourcing'] += cpms_outsourcing_manual_total_between($pdo, (int)$pid, $outsourcingStart, $outsourcingEnd);
 
         $overallExpectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
         $overallConfirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
@@ -819,7 +825,7 @@ foreach ($years as $yy) {
         $overallTotals['sales'] += ($overallConfirmedSales > 0) ? $overallConfirmedSales : $overallExpectedSales;
     }
 }
-$currentOutsourcingRange = cpms_cost_period_range($currentYm, 'labor');
+$currentOutsourcingRange = cpms_cost_period_range($currentYm, 'outsourcing');
 $currentOutsourcingStart = isset($currentOutsourcingRange['start']) ? (string)$currentOutsourcingRange['start'] : ($currentYm . '-01');
 $currentOutsourcingEnd = isset($currentOutsourcingRange['end']) ? (string)$currentOutsourcingRange['end'] : date('Y-m-t', strtotime($currentYm . '-01'));
 $currentOutsourcingTotal = cpms_status_labor_total_between($pdo, (int)$pid, $projectName, $currentOutsourcingStart, $currentOutsourcingEnd, $laborWageMap, true);

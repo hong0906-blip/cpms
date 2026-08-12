@@ -1492,6 +1492,39 @@ if (!function_exists('cpms_load_project_labor_worker_month_map')) {
     }
 }
 
+// 인원작성에서 특정 월에 등록된 프로젝트 인원과 표시용 기본정보를 불러옵니다.
+if (!function_exists('cpms_load_project_labor_workers_for_month')) {
+    function cpms_load_project_labor_workers_for_month($pdo, $projectId, $month) {
+        $rows = array();
+        $projectId = (int)$projectId;
+        $month = trim((string)$month);
+        if (!$pdo || $projectId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return $rows;
+        if (!cpms_ensure_project_labor_workers_table($pdo) || !cpms_ensure_project_labor_worker_months_table($pdo)) return $rows;
+        try {
+            $st = $pdo->prepare("SELECT plw.*
+                                 FROM cpms_project_labor_worker_months pwm
+                                 INNER JOIN cpms_project_labor_workers plw
+                                         ON plw.id = pwm.labor_worker_id
+                                        AND plw.project_id = pwm.project_id
+                                 WHERE pwm.project_id = :pid
+                                   AND pwm.month = :month
+                                   AND pwm.is_deleted = 0
+                                   AND plw.is_deleted = 0
+                                 ORDER BY COALESCE(NULLIF(plw.agency_name_snapshot, ''), NULLIF(plw.company_name, ''), '창명건설') ASC,
+                                          COALESCE(NULLIF(plw.worker_name_snapshot, ''), plw.name) ASC,
+                                          plw.id ASC");
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->bindValue(':month', $month);
+            $st->execute();
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($rows)) $rows = array();
+        } catch (Exception $e) {
+            $rows = array();
+        }
+        return $rows;
+    }
+}
+
 if (!function_exists('cpms_ensure_labor_force_adjustments_table')) {
     function cpms_ensure_labor_force_adjustments_table($pdo) {
         if (!$pdo) return false;
@@ -2099,4 +2132,4 @@ if (!function_exists('cpms_sort_labor_workers')) {
 }
 
 
-// approved만 공수표 반영 / pending/rejected 미반영은 app/helpers.php cpms_load_labor_overrides()에서 status IN ('applied','approved')로 처리됩니다.
+// 최신 승인 완료 행을 공수표에 반영하고, 구버전 덮어쓰기 건의 old_value 복원은 app/helpers.php cpms_load_labor_overrides()에서 처리합니다.

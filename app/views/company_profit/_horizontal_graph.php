@@ -23,11 +23,12 @@ $projectGraphMax = cpms_company_profit_max_value($projects, array('sales', 'inpu
           $salesPct = cpms_company_profit_safe_percent($sales, $projectGraphMax);
           $costPct = cpms_company_profit_safe_percent($cost, $projectGraphMax);
           $rateState = cpms_company_profit_rate_state(isset($row['cost_rate']) ? (float)$row['cost_rate'] : 0.0, isset($row['no_sales']) ? (int)$row['no_sales'] : 0);
+          $isOverCost = empty($row['no_sales']) && isset($row['cost_rate']) && (float)$row['cost_rate'] > 100.0;
           ?>
           <div class="cp-project-bar-row">
-            <div class="cp-project-name" title="<?php echo h(isset($row['name']) ? $row['name'] : ''); ?>">
+            <div class="cp-project-name <?php echo $isOverCost ? 'cp-project-over-cost' : ''; ?>" title="<?php echo h(isset($row['name']) ? $row['name'] : ''); ?>">
               <?php if (isset($row['id']) && (int)$row['id'] > 0): ?>
-                <a href="?r=project/detail&amp;id=<?php echo (int)$row['id']; ?>"><?php echo h(isset($row['name']) ? $row['name'] : '-'); ?></a>
+                <a href="?r=construction_home&amp;pid=<?php echo (int)$row['id']; ?>&amp;tab=status" title="공사 섹션으로 이동"><?php echo h(isset($row['name']) ? $row['name'] : '-'); ?></a>
               <?php else: ?>
                 <?php echo h(isset($row['name']) ? $row['name'] : '-'); ?>
               <?php endif; ?>

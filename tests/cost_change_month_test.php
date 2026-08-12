@@ -28,7 +28,8 @@ cpms_cost_change_test_same('labor 2026-08-01', '2026-08', CostChangeService::set
 cpms_cost_change_test_same('other 2026-07-25', '2026-07', CostChangeService::settlementYm('material', '2026-07-25'));
 cpms_cost_change_test_same('other 2026-07-26', '2026-08', CostChangeService::settlementYm('material', '2026-07-26'));
 cpms_cost_change_test_same('other 2026-08-25', '2026-08', CostChangeService::settlementYm('equipment', '2026-08-25'));
-cpms_cost_change_test_same('other 2026-08-26', '2026-09', CostChangeService::settlementYm('outsourcing', '2026-08-26'));
+cpms_cost_change_test_same('outsourcing 2026-07-26', '2026-07', CostChangeService::settlementYm('outsourcing', '2026-07-26'));
+cpms_cost_change_test_same('outsourcing 2026-08-26', '2026-08', CostChangeService::settlementYm('outsourcing', '2026-08-26'));
 cpms_cost_change_test_same('year boundary 2026-12-26', '2027-01', CostChangeService::settlementYm('safety', '2026-12-26'));
 cpms_cost_change_test_same('january beginning', '2027-01', CostChangeService::settlementYm('daily_cost', '2027-01-01'));
 
@@ -43,6 +44,21 @@ cpms_cost_change_test_same(
     'labor month period',
     array('start'=>'2024-02-01', 'end'=>'2024-02-29'),
     CostChangeService::periodForYm('labor', '2024-02')
+);
+cpms_cost_change_test_same(
+    'outsourcing month period',
+    array('start'=>'2024-02-01', 'end'=>'2024-02-29'),
+    CostChangeService::periodForYm('outsourcing', '2024-02')
+);
+cpms_cost_change_test_same(
+    'old automatic outsourcing month is recalculated',
+    '2026-07',
+    CostChangeService::resolveSettlementYm('outsourcing', '2026-07-31', '2026-08', 0)
+);
+cpms_cost_change_test_same(
+    'manual outsourcing month move is preserved',
+    '2026-08',
+    CostChangeService::resolveSettlementYm('outsourcing', '2026-07-31', '2026-08', 1)
 );
 cpms_cost_change_test_same(
     'year crossing period',

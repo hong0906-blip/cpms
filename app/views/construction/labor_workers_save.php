@@ -35,6 +35,7 @@ $laborTab = isset($_POST['labor_tab']) ? trim((string)$_POST['labor_tab']) : 'wo
 $action = isset($_POST['action']) ? trim((string)$_POST['action']) : 'save';
 $deleteWorkerId = isset($_POST['delete_worker_id']) ? (int)$_POST['delete_worker_id'] : 0;
 $workers = isset($_POST['workers']) && is_array($_POST['workers']) ? $_POST['workers'] : array();
+$previousWorkerIdsRaw = isset($_POST['previous_worker_ids']) && is_array($_POST['previous_worker_ids']) ? $_POST['previous_worker_ids'] : array();
 if ($laborTab === '') $laborTab = 'workers';
 $workerSort = isset($_POST['worker_sort']) ? trim((string)$_POST['worker_sort']) : 'company';
 $workerSortAllowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'bank_account', 'bank_name', 'account_holder', 'remark');
@@ -80,6 +81,76 @@ try {
         $stDel->execute();
 
         flash_set('success', '인원을 삭제했습니다.');
+        header('Location: ' . $redirect);
+        exit;
+    }
+
+    if ($action === 'import_previous') {
+        if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+            flash_set('error', '가져올 대상 월이 올바르지 않습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+        if (!cpms_ensure_project_labor_worker_months_table($pdo)) {
+            flash_set('error', '월별 인원 테이블을 확인할 수 없습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $selectedWorkerIds = array();
+        foreach ($previousWorkerIdsRaw as $previousWorkerIdRaw) {
+            $previousWorkerId = (int)$previousWorkerIdRaw;
+            if ($previousWorkerId > 0) $selectedWorkerIds[$previousWorkerId] = $previousWorkerId;
+            if (count($selectedWorkerIds) >= 500) break;
+        }
+        if (count($selectedWorkerIds) === 0) {
+            flash_set('error', '전달에서 가져올 인원을 선택해주세요.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $previousMonth = date('Y-m', strtotime($month . '-01 -1 month'));
+        $previousRows = cpms_load_project_labor_workers_for_month($pdo, $projectId, $previousMonth);
+        $previousAvailableMap = array();
+        foreach ($previousRows as $previousRow) {
+            $previousRowId = isset($previousRow['id']) ? (int)$previousRow['id'] : 0;
+            if ($previousRowId > 0) $previousAvailableMap[$previousRowId] = true;
+        }
+        $currentMonthMap = cpms_load_project_labor_worker_month_map($pdo, $projectId, $month);
+        $importWorkerIds = array();
+        $alreadyCurrentCount = 0;
+        $matchedPreviousCount = 0;
+        foreach ($selectedWorkerIds as $selectedWorkerId) {
+            if (!isset($previousAvailableMap[$selectedWorkerId])) continue;
+            $matchedPreviousCount++;
+            if (isset($currentMonthMap[$selectedWorkerId])) {
+                $alreadyCurrentCount++;
+                continue;
+            }
+            $importWorkerIds[] = $selectedWorkerId;
+        }
+        if (count($importWorkerIds) === 0) {
+            if ($matchedPreviousCount > 0 && $alreadyCurrentCount === $matchedPreviousCount) {
+                flash_set('success', '선택한 전달 인원은 이미 ' . $month . '에 등록되어 있습니다.');
+            } else {
+                flash_set('error', '선택한 인원이 ' . $previousMonth . ' 전달 명단에 없습니다. 다시 확인해주세요.');
+            }
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $pdo->beginTransaction();
+        foreach ($importWorkerIds as $importWorkerId) {
+            // 전달의 인원 기본정보는 그대로 사용하고, 당월 비용배분만 전액 노무비로 시작합니다.
+            if (!cpms_save_project_labor_worker_month_ratio($pdo, $projectId, $importWorkerId, $month, 0, '', '')) {
+                throw new Exception('선택한 전달 인원을 저장하지 못했습니다.');
+            }
+        }
+        $pdo->commit();
+
+        $message = $previousMonth . ' 전달 인원 ' . count($importWorkerIds) . '명을 가져왔습니다. 비용 배분은 전액 노무비로 적용했습니다.';
+        if ($alreadyCurrentCount > 0) $message .= ' 이미 등록된 ' . (int)$alreadyCurrentCount . '명은 제외했습니다.';
+        flash_set('success', $message);
         header('Location: ' . $redirect);
         exit;
     }

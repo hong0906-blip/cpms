@@ -19,6 +19,49 @@ function cpms_company_profit_cache_key($pdo, $suffix) {
     return $prefix . ':' . (string)$suffix;
 }}
 
+if (!function_exists('cpms_company_profit_shared_cache_root')) {
+function cpms_company_profit_shared_cache_root() {
+    $storageRoot = function_exists('cpms_storage_root')
+        ? cpms_storage_root()
+        : dirname(dirname(__DIR__)) . '/storage';
+    return rtrim((string)$storageRoot, '/\\') . '/cache/company_profit';
+}}
+
+if (!function_exists('cpms_company_profit_shared_cache_path')) {
+function cpms_company_profit_shared_cache_path($cacheKey) {
+    $cacheKey = strtolower(trim((string)$cacheKey));
+    if (!preg_match('/^[a-f0-9]{32}$/', $cacheKey)) return '';
+    return cpms_company_profit_shared_cache_root() . '/' . $cacheKey . '.json';
+}}
+
+if (!function_exists('cpms_company_profit_shared_cache_read')) {
+function cpms_company_profit_shared_cache_read($cacheKey, $ttlSeconds) {
+    $path = cpms_company_profit_shared_cache_path($cacheKey);
+    $ttlSeconds = max(1, (int)$ttlSeconds);
+    if ($path === '' || !is_file($path)) return null;
+    $mtime = @filemtime($path);
+    if ($mtime === false || (time() - (int)$mtime) > $ttlSeconds) return null;
+    $text = @file_get_contents($path);
+    if ($text === false || trim($text) === '') return null;
+    $payload = @json_decode($text, true);
+    if (!is_array($payload) || !isset($payload['data']) || !is_array($payload['data'])) return null;
+    if (!isset($payload['version']) || (int)$payload['version'] !== 1) return null;
+    return $payload['data'];
+}}
+
+if (!function_exists('cpms_company_profit_shared_cache_write')) {
+function cpms_company_profit_shared_cache_write($cacheKey, $data) {
+    $path = cpms_company_profit_shared_cache_path($cacheKey);
+    if ($path === '' || !is_array($data)) return false;
+    $dir = dirname($path);
+    $dirReady = function_exists('cpms_ensure_dir') ? cpms_ensure_dir($dir) : (is_dir($dir) || @mkdir($dir, 0777, true));
+    if (!$dirReady) return false;
+    $options = defined('JSON_UNESCAPED_UNICODE') ? JSON_UNESCAPED_UNICODE : 0;
+    $json = json_encode(array('version' => 1, 'saved_at' => time(), 'data' => $data), $options);
+    if ($json === false || $json === '') return false;
+    return (@file_put_contents($path, $json, LOCK_EX) !== false);
+}}
+
 if (!function_exists('cpms_company_profit_table_exists')) {
 function cpms_company_profit_table_exists($pdo, $table) {
     static $cache = array();
@@ -75,7 +118,7 @@ function cpms_company_profit_cost_period_range($ym, $type) {
     $type = trim((string)$type);
     if (!preg_match('/^\d{4}-\d{2}$/', $ym)) $ym = date('Y-m');
 
-    if ($type === 'labor' || $type === 'sales') {
+    if ($type === 'labor' || $type === 'outsourcing' || $type === 'sales') {
         $start = $ym . '-01';
         return array('start' => $start, 'end' => date('Y-m-t', strtotime($start)));
     }
@@ -591,23 +634,477 @@ function cpms_company_profit_confirmed_sales_month($pdo, $projectId, $ym) {
     return $result;
 }}
 
+if (!function_exists('cpms_company_profit_project_id_list')) {
+function cpms_company_profit_project_id_list($projects) {
+    $ids = array();
+    if (!is_array($projects)) return $ids;
+    foreach ($projects as $project) {
+        $projectId = isset($project['id']) ? (int)$project['id'] : 0;
+        if ($projectId > 0) $ids[$projectId] = $projectId;
+    }
+    return array_values($ids);
+}}
+
+if (!function_exists('cpms_company_profit_empty_month_map')) {
+function cpms_company_profit_empty_month_map($projectIds, $months, $defaultValue) {
+    $map = array();
+    foreach ($projectIds as $projectId) {
+        $projectId = (int)$projectId;
+        $map[$projectId] = array();
+        foreach ($months as $ym) $map[$projectId][(string)$ym] = $defaultValue;
+    }
+    return $map;
+}}
+
+if (!function_exists('cpms_company_profit_settlement_ym_from_date')) {
+function cpms_company_profit_settlement_ym_from_date($dateValue, $calendarMonth) {
+    $dateValue = trim((string)$dateValue);
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $dateValue)) return '';
+    $ym = substr($dateValue, 0, 7);
+    if (!$calendarMonth && (int)substr($dateValue, 8, 2) >= 26) {
+        $ts = strtotime($ym . '-01 +1 month');
+        if ($ts !== false) $ym = date('Y-m', $ts);
+    }
+    return $ym;
+}}
+
+if (!function_exists('cpms_company_profit_preload_confirmed_sales')) {
+function cpms_company_profit_preload_confirmed_sales($pdo, $projects, $months) {
+    $projectIds = cpms_company_profit_project_id_list($projects);
+    $emptyValue = array('has_input' => false, 'amount' => 0.0, 'rows' => 0);
+    $result = array(
+        'available' => false,
+        'map' => cpms_company_profit_empty_month_map($projectIds, $months, $emptyValue),
+    );
+    if (!$pdo || count($projectIds) === 0 || count($months) === 0) return $result;
+
+    $firstYm = (string)$months[0];
+    $lastYm = (string)$months[count($months) - 1];
+    $startDate = $firstYm . '-01';
+    $endDate = date('Y-m-t', strtotime($lastYm . '-01'));
+    $idSql = implode(',', array_map('intval', $projectIds));
+
+    if (cpms_company_profit_table_exists($pdo, 'cpms_progress_billings') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_progress_billings', 'project_id') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_progress_billings', 'recognized_amount')) {
+        $dateExpr = '';
+        if (cpms_company_profit_column_exists($pdo, 'cpms_progress_billings', 'progress_date')) {
+            $dateExpr = cpms_company_profit_column_exists($pdo, 'cpms_progress_billings', 'created_at')
+                ? "COALESCE(progress_date, DATE(created_at))"
+                : "progress_date";
+        } else if (cpms_company_profit_column_exists($pdo, 'cpms_progress_billings', 'created_at')) {
+            $dateExpr = "DATE(created_at)";
+        }
+        if ($dateExpr !== '') {
+            try {
+                $hasRequested = cpms_company_profit_column_exists($pdo, 'cpms_progress_billings', 'requested_amount');
+                $amountExpr = $hasRequested ? "COALESCE(NULLIF(recognized_amount, 0), requested_amount, 0)" : "recognized_amount";
+                $sql = "SELECT project_id, DATE_FORMAT(" . $dateExpr . ", '%Y-%m') AS ym,
+                               COUNT(*) AS row_count, COALESCE(SUM(" . $amountExpr . "), 0) AS amount
+                          FROM cpms_progress_billings
+                         WHERE project_id IN (" . $idSql . ")
+                           AND " . $dateExpr . " BETWEEN :start_date AND :end_date
+                         GROUP BY project_id, DATE_FORMAT(" . $dateExpr . ", '%Y-%m')";
+                $st = $pdo->prepare($sql);
+                $st->bindValue(':start_date', $startDate);
+                $st->bindValue(':end_date', $endDate);
+                $st->execute();
+                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+                if (!is_array($rows)) $rows = array();
+                foreach ($rows as $row) {
+                    $projectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
+                    $ym = isset($row['ym']) ? (string)$row['ym'] : '';
+                    if (!isset($result['map'][$projectId][$ym])) continue;
+                    $result['map'][$projectId][$ym] = array(
+                        'has_input' => true,
+                        'amount' => isset($row['amount']) ? (float)$row['amount'] : 0.0,
+                        'rows' => isset($row['row_count']) ? (int)$row['row_count'] : 0,
+                    );
+                }
+                $result['available'] = true;
+            } catch (Exception $e) {
+                error_log('[company_profit] confirmed sales preload failed: ' . $e->getMessage());
+            }
+        }
+    }
+
+    if (cpms_company_profit_table_exists($pdo, 'cpms_monthly_recognized') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_monthly_recognized', 'project_id') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_monthly_recognized', 'ym') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_monthly_recognized', 'recognized_cum_amount')) {
+        try {
+            $legacyStartYm = date('Y-m', strtotime($firstYm . '-01 -1 month'));
+            $sql = "SELECT project_id, ym, recognized_cum_amount
+                      FROM cpms_monthly_recognized
+                     WHERE project_id IN (" . $idSql . ") AND ym BETWEEN :start_ym AND :end_ym";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':start_ym', $legacyStartYm);
+            $st->bindValue(':end_ym', $lastYm);
+            $st->execute();
+            $legacyRows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($legacyRows)) $legacyRows = array();
+            $cumulative = array();
+            foreach ($legacyRows as $legacyRow) {
+                $projectId = isset($legacyRow['project_id']) ? (int)$legacyRow['project_id'] : 0;
+                $ym = isset($legacyRow['ym']) ? (string)$legacyRow['ym'] : '';
+                if ($projectId <= 0 || !cpms_company_profit_month_valid($ym)) continue;
+                if (!isset($cumulative[$projectId])) $cumulative[$projectId] = array();
+                $cumulative[$projectId][$ym] = isset($legacyRow['recognized_cum_amount']) ? (float)$legacyRow['recognized_cum_amount'] : 0.0;
+            }
+            foreach ($projectIds as $projectId) {
+                foreach ($months as $ym) {
+                    if (!isset($result['map'][$projectId][$ym]) || !empty($result['map'][$projectId][$ym]['has_input'])) continue;
+                    if (!isset($cumulative[$projectId][$ym])) continue;
+                    $prevYm = date('Y-m', strtotime($ym . '-01 -1 month'));
+                    $previous = isset($cumulative[$projectId][$prevYm]) ? (float)$cumulative[$projectId][$prevYm] : 0.0;
+                    $result['map'][$projectId][$ym] = array(
+                        'has_input' => true,
+                        'amount' => max(0.0, (float)$cumulative[$projectId][$ym] - $previous),
+                        'rows' => 1,
+                    );
+                }
+            }
+            $result['available'] = true;
+        } catch (Exception $e) {
+            error_log('[company_profit] legacy confirmed sales preload failed: ' . $e->getMessage());
+        }
+    }
+
+    return $result;
+}}
+
+if (!function_exists('cpms_company_profit_preload_expected_activity')) {
+function cpms_company_profit_preload_expected_activity($pdo, $projects, $months) {
+    $projectIds = cpms_company_profit_project_id_list($projects);
+    $result = array(
+        'available' => false,
+        'map' => cpms_company_profit_empty_month_map($projectIds, $months, false),
+    );
+    if (!$pdo || count($projectIds) === 0 || count($months) === 0) return $result;
+    if (!cpms_company_profit_table_exists($pdo, 'cpms_schedule_tasks') ||
+        !cpms_company_profit_table_exists($pdo, 'cpms_project_unit_prices') ||
+        !cpms_company_profit_column_exists($pdo, 'cpms_schedule_tasks', 'project_id')) {
+        $result['available'] = true;
+        return $result;
+    }
+
+    $firstYm = (string)$months[0];
+    $lastYm = (string)$months[count($months) - 1];
+    $startDate = $firstYm . '-01';
+    $endDate = date('Y-m-t', strtotime($lastYm . '-01'));
+    $idSql = implode(',', array_map('intval', $projectIds));
+    $selects = array();
+    $activityParams = array();
+    $selectIndex = 0;
+
+    if (cpms_company_profit_table_exists($pdo, 'cpms_schedule_task_item_progress') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_schedule_task_item_progress', 'project_id') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_schedule_task_item_progress', 'work_date') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_schedule_task_item_progress', 'done_qty')) {
+        $startKey = ':start_date_' . $selectIndex;
+        $endKey = ':end_date_' . $selectIndex;
+        $activityParams[$startKey] = $startDate;
+        $activityParams[$endKey] = $endDate;
+        $selects[] = "SELECT project_id, DATE_FORMAT(work_date, '%Y-%m') AS ym
+                       FROM cpms_schedule_task_item_progress
+                      WHERE project_id IN (" . $idSql . ") AND work_date BETWEEN " . $startKey . " AND " . $endKey . "
+                        AND COALESCE(done_qty, 0) <> 0";
+        $selectIndex++;
+    }
+    if (cpms_company_profit_table_exists($pdo, 'cpms_schedule_progress') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_schedule_progress', 'project_id') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_schedule_progress', 'work_date') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_schedule_progress', 'done_qty')) {
+        $startKey = ':start_date_' . $selectIndex;
+        $endKey = ':end_date_' . $selectIndex;
+        $activityParams[$startKey] = $startDate;
+        $activityParams[$endKey] = $endDate;
+        $selects[] = "SELECT project_id, DATE_FORMAT(work_date, '%Y-%m') AS ym
+                       FROM cpms_schedule_progress
+                      WHERE project_id IN (" . $idSql . ") AND work_date BETWEEN " . $startKey . " AND " . $endKey . "
+                        AND COALESCE(done_qty, 0) <> 0";
+        $selectIndex++;
+    }
+    if (cpms_company_profit_column_exists($pdo, 'cpms_schedule_tasks', 'end_date') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_schedule_tasks', 'progress')) {
+        $startKey = ':start_date_' . $selectIndex;
+        $endKey = ':end_date_' . $selectIndex;
+        $todayKey = ':today_' . $selectIndex;
+        $activityParams[$startKey] = $startDate;
+        $activityParams[$endKey] = $endDate;
+        $activityParams[$todayKey] = date('Y-m-d');
+        $selects[] = "SELECT project_id, DATE_FORMAT(end_date, '%Y-%m') AS ym
+                       FROM cpms_schedule_tasks
+                      WHERE project_id IN (" . $idSql . ") AND end_date BETWEEN " . $startKey . " AND " . $endKey . "
+                        AND (COALESCE(progress, 0) >= 100 OR (end_date < " . $todayKey . " AND (progress IS NULL OR progress = 0)))";
+        $selectIndex++;
+    }
+
+    if (count($selects) === 0) {
+        $result['available'] = true;
+        return $result;
+    }
+    try {
+        $sql = "SELECT project_id, ym FROM (" . implode(' UNION ', $selects) . ") company_profit_expected_activity GROUP BY project_id, ym";
+        $st = $pdo->prepare($sql);
+        foreach ($activityParams as $paramKey => $paramValue) $st->bindValue($paramKey, $paramValue);
+        $st->execute();
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) $rows = array();
+        foreach ($rows as $row) {
+            $projectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
+            $ym = isset($row['ym']) ? (string)$row['ym'] : '';
+            if (isset($result['map'][$projectId][$ym])) $result['map'][$projectId][$ym] = true;
+        }
+        $result['available'] = true;
+    } catch (Exception $e) {
+        error_log('[company_profit] expected activity preload failed: ' . $e->getMessage());
+    }
+    return $result;
+}}
+
+if (!function_exists('cpms_company_profit_preload_cost_maps')) {
+function cpms_company_profit_preload_cost_maps($pdo, $projects, $months) {
+    $projectIds = cpms_company_profit_project_id_list($projects);
+    $materialDefault = array('자재비' => 0.0, '구매품' => 0.0, '기타경비' => 0.0, '안전관리비' => 0.0);
+    $result = array(
+        'available' => array('equipment' => false, 'materials' => false, 'manual_outsourcing' => false, 'safety' => false, 'deduction' => false),
+        'equipment' => cpms_company_profit_empty_month_map($projectIds, $months, 0.0),
+        'materials' => cpms_company_profit_empty_month_map($projectIds, $months, $materialDefault),
+        'manual_outsourcing' => cpms_company_profit_empty_month_map($projectIds, $months, 0.0),
+        'safety' => cpms_company_profit_empty_month_map($projectIds, $months, 0.0),
+        'deduction' => cpms_company_profit_empty_month_map($projectIds, $months, 0.0),
+    );
+    if (!$pdo || count($projectIds) === 0 || count($months) === 0) return $result;
+
+    $firstYm = (string)$months[0];
+    $lastYm = (string)$months[count($months) - 1];
+    $costStartRange = cpms_company_profit_cost_period_range($firstYm, 'material');
+    $costEndRange = cpms_company_profit_cost_period_range($lastYm, 'material');
+    $costStart = $costStartRange['start'];
+    $costEnd = $costEndRange['end'];
+    $idSql = implode(',', array_map('intval', $projectIds));
+    $metaInstalled = class_exists('App\\Services\\CostChangeService') && \App\Services\CostChangeService::isInstalled($pdo);
+
+    if (cpms_company_profit_table_exists($pdo, 'cpms_equipment_usage') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_equipment_usage', 'project_id') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_equipment_usage', 'use_date')) {
+        $hasWorkUnit = cpms_company_profit_column_exists($pdo, 'cpms_equipment_usage', 'work_unit');
+        $hasBaseRate = cpms_company_profit_column_exists($pdo, 'cpms_equipment_usage', 'base_rate_snapshot');
+        $hasAmount = cpms_company_profit_column_exists($pdo, 'cpms_equipment_usage', 'amount');
+        if ($hasAmount || ($hasWorkUnit && $hasBaseRate)) {
+            try {
+                $fromSql = "cpms_equipment_usage u";
+                $whereSql = '';
+                $dateExpr = 'u.use_date';
+                if ($metaInstalled) {
+                    $fromSql .= " LEFT JOIN cpms_cost_record_meta ccm ON ccm.target_type = 'equipment' AND ccm.target_id = CAST(u.id AS CHAR)";
+                    $dateExpr = "COALESCE(CONCAT(NULLIF(ccm.settlement_ym, ''), '-25'), u.use_date)";
+                    $whereSql .= " AND (ccm.is_deleted = 0 OR ccm.is_deleted IS NULL)";
+                }
+                if (cpms_company_profit_table_exists($pdo, 'cpms_equipment_items') &&
+                    cpms_company_profit_column_exists($pdo, 'cpms_equipment_usage', 'equipment_id') &&
+                    cpms_company_profit_column_exists($pdo, 'cpms_equipment_items', 'is_deleted')) {
+                    $fromSql .= " INNER JOIN cpms_equipment_items e ON e.id = u.equipment_id AND e.project_id = u.project_id";
+                    $whereSql .= " AND (e.is_deleted = 0 OR e.is_deleted IS NULL)";
+                }
+                $amountExpr = ($hasWorkUnit && $hasBaseRate)
+                    ? "COALESCE(NULLIF(u.work_unit, 0), 1) * COALESCE(NULLIF(u.base_rate_snapshot, 0)" . ($hasAmount ? ", u.amount" : "") . ", 0)"
+                    : "u.amount";
+                $sql = "SELECT u.project_id, " . $dateExpr . " AS effective_date, COALESCE(SUM(" . $amountExpr . "), 0) AS amount
+                          FROM " . $fromSql . "
+                         WHERE u.project_id IN (" . $idSql . ") AND " . $dateExpr . " BETWEEN :start_date AND :end_date" . $whereSql . "
+                         GROUP BY u.project_id, " . $dateExpr;
+                $st = $pdo->prepare($sql);
+                $st->execute(array(':start_date' => $costStart, ':end_date' => $costEnd));
+                $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+                if (!is_array($rows)) $rows = array();
+                foreach ($rows as $row) {
+                    $projectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
+                    $ym = cpms_company_profit_settlement_ym_from_date(isset($row['effective_date']) ? $row['effective_date'] : '', false);
+                    if (isset($result['equipment'][$projectId][$ym])) $result['equipment'][$projectId][$ym] += isset($row['amount']) ? (float)$row['amount'] : 0.0;
+                }
+                $result['available']['equipment'] = true;
+            } catch (Exception $e) {
+                error_log('[company_profit] equipment preload failed: ' . $e->getMessage());
+            }
+        }
+    }
+
+    if (cpms_company_profit_table_exists($pdo, 'cpms_material_usage') &&
+        cpms_company_profit_table_exists($pdo, 'cpms_material_items') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_material_usage', 'project_id') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_material_usage', 'use_date') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_material_usage', 'amount')) {
+        try {
+            $metaJoin = '';
+            $dateExpr = 'u.use_date';
+            $whereSql = cpms_company_profit_column_exists($pdo, 'cpms_material_items', 'is_deleted') ? " AND (i.is_deleted = 0 OR i.is_deleted IS NULL)" : '';
+            if ($metaInstalled) {
+                $metaJoin = " LEFT JOIN cpms_cost_record_meta ccm ON ccm.target_type = 'material' AND ccm.target_id = CAST(u.id AS CHAR)";
+                $dateExpr = "COALESCE(CONCAT(NULLIF(ccm.settlement_ym, ''), '-25'), u.use_date)";
+                $whereSql .= " AND (ccm.is_deleted = 0 OR ccm.is_deleted IS NULL)";
+            }
+            $sql = "SELECT u.project_id, " . $dateExpr . " AS effective_date, COALESCE(i.category, '') AS category,
+                           COALESCE(SUM(u.amount), 0) AS amount
+                      FROM cpms_material_usage u
+                      LEFT JOIN cpms_material_items i ON i.id = u.material_id" . $metaJoin . "
+                     WHERE u.project_id IN (" . $idSql . ") AND " . $dateExpr . " BETWEEN :start_date AND :end_date" . $whereSql . "
+                     GROUP BY u.project_id, " . $dateExpr . ", COALESCE(i.category, '')";
+            $st = $pdo->prepare($sql);
+            $st->execute(array(':start_date' => $costStart, ':end_date' => $costEnd));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($rows)) $rows = array();
+            foreach ($rows as $row) {
+                $projectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
+                $ym = cpms_company_profit_settlement_ym_from_date(isset($row['effective_date']) ? $row['effective_date'] : '', false);
+                $category = isset($row['category']) ? trim((string)$row['category']) : '';
+                if (!isset($materialDefault[$category])) $category = '자재비';
+                if (isset($result['materials'][$projectId][$ym])) $result['materials'][$projectId][$ym][$category] += isset($row['amount']) ? (float)$row['amount'] : 0.0;
+            }
+            $result['available']['materials'] = true;
+        } catch (Exception $e) {
+            error_log('[company_profit] material preload failed: ' . $e->getMessage());
+        }
+    }
+
+    if (cpms_company_profit_table_exists($pdo, 'cpms_outsourcing_costs') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_outsourcing_costs', 'project_id') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_outsourcing_costs', 'expense_date') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_outsourcing_costs', 'amount')) {
+        try {
+            $fromSql = 'cpms_outsourcing_costs o';
+            $ymExpr = "DATE_FORMAT(o.expense_date, '%Y-%m')";
+            $whereSql = cpms_company_profit_column_exists($pdo, 'cpms_outsourcing_costs', 'is_deleted') ? ' AND (o.is_deleted = 0 OR o.is_deleted IS NULL)' : '';
+            if ($metaInstalled) {
+                $fromSql .= " LEFT JOIN cpms_cost_record_meta ccm ON ccm.target_type = 'outsourcing' AND ccm.target_id = CAST(o.id AS CHAR)";
+                $ymExpr = "CASE WHEN ccm.manual_settlement_yn = 1 AND ccm.settlement_ym REGEXP '^[0-9]{4}-[0-9]{2}$' THEN ccm.settlement_ym ELSE DATE_FORMAT(o.expense_date, '%Y-%m') END";
+                $whereSql .= ' AND (ccm.is_deleted = 0 OR ccm.is_deleted IS NULL)';
+            }
+            $sql = "SELECT o.project_id, " . $ymExpr . " AS ym, COALESCE(SUM(o.amount), 0) AS amount
+                      FROM " . $fromSql . "
+                     WHERE o.project_id IN (" . $idSql . ") AND " . $ymExpr . " BETWEEN :start_ym AND :end_ym" . $whereSql . "
+                     GROUP BY o.project_id, " . $ymExpr;
+            $st = $pdo->prepare($sql);
+            $st->execute(array(':start_ym' => $firstYm, ':end_ym' => $lastYm));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($rows)) $rows = array();
+            foreach ($rows as $row) {
+                $projectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
+                $ym = isset($row['ym']) ? (string)$row['ym'] : '';
+                if (isset($result['manual_outsourcing'][$projectId][$ym])) $result['manual_outsourcing'][$projectId][$ym] += isset($row['amount']) ? (float)$row['amount'] : 0.0;
+            }
+            $result['available']['manual_outsourcing'] = true;
+        } catch (Exception $e) {
+            error_log('[company_profit] outsourcing preload failed: ' . $e->getMessage());
+        }
+    }
+
+    if (cpms_company_profit_table_exists($pdo, 'cpms_project_monthly_deductions') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_project_monthly_deductions', 'project_id') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_project_monthly_deductions', 'ym') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_project_monthly_deductions', 'amount')) {
+        try {
+            $sql = "SELECT project_id, ym, COALESCE(SUM(amount), 0) AS amount
+                      FROM cpms_project_monthly_deductions
+                     WHERE project_id IN (" . $idSql . ") AND ym BETWEEN :start_ym AND :end_ym
+                     GROUP BY project_id, ym";
+            $st = $pdo->prepare($sql);
+            $st->execute(array(':start_ym' => $firstYm, ':end_ym' => $lastYm));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($rows)) $rows = array();
+            foreach ($rows as $row) {
+                $projectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
+                $ym = isset($row['ym']) ? (string)$row['ym'] : '';
+                if (isset($result['deduction'][$projectId][$ym])) $result['deduction'][$projectId][$ym] += isset($row['amount']) ? (float)$row['amount'] : 0.0;
+            }
+            $result['available']['deduction'] = true;
+        } catch (Exception $e) {
+            error_log('[company_profit] deduction preload failed: ' . $e->getMessage());
+        }
+    }
+
+    if (function_exists('cpms_safety_cost_all_items') && function_exists('cpms_safety_cost_row_amount')) {
+        try {
+            $safetyMeta = array();
+            if ($metaInstalled) {
+                $sql = "SELECT target_id, settlement_ym, manual_settlement_yn, is_deleted
+                          FROM cpms_cost_record_meta
+                         WHERE target_type = 'safety' AND project_id IN (" . $idSql . ")";
+                $metaRows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+                if (!is_array($metaRows)) $metaRows = array();
+                foreach ($metaRows as $metaRow) {
+                    $targetId = isset($metaRow['target_id']) ? (string)$metaRow['target_id'] : '';
+                    if ($targetId !== '') $safetyMeta[$targetId] = $metaRow;
+                }
+            }
+            $projectSet = array_fill_keys($projectIds, true);
+            $items = cpms_safety_cost_all_items();
+            foreach ($items as $item) {
+                if (!is_array($item) || !cpms_safety_cost_is_active($item)) continue;
+                $projectId = isset($item['project_id']) ? (int)$item['project_id'] : 0;
+                if (!isset($projectSet[$projectId])) continue;
+                $targetId = isset($item['id']) ? (string)$item['id'] : '';
+                $meta = ($targetId !== '' && isset($safetyMeta[$targetId])) ? $safetyMeta[$targetId] : array();
+                if (isset($meta['is_deleted']) && (int)$meta['is_deleted'] === 1) continue;
+                $ym = isset($meta['settlement_ym']) && cpms_company_profit_month_valid($meta['settlement_ym'])
+                    ? (string)$meta['settlement_ym']
+                    : cpms_company_profit_settlement_ym_from_date(isset($item['use_date']) ? $item['use_date'] : '', false);
+                if (!isset($result['safety'][$projectId][$ym])) continue;
+                $result['safety'][$projectId][$ym] += (float)cpms_safety_cost_row_amount($item);
+            }
+            $result['available']['safety'] = true;
+        } catch (Exception $e) {
+            error_log('[company_profit] safety preload failed: ' . $e->getMessage());
+        }
+    }
+
+    return $result;
+}}
+
+if (!function_exists('cpms_company_profit_preload_context')) {
+function cpms_company_profit_preload_context($pdo, $projects, $months) {
+    $confirmed = cpms_company_profit_preload_confirmed_sales($pdo, $projects, $months);
+    $expectedActivity = cpms_company_profit_preload_expected_activity($pdo, $projects, $months);
+    $costs = cpms_company_profit_preload_cost_maps($pdo, $projects, $months);
+    $costs['confirmed_available'] = !empty($confirmed['available']);
+    $costs['confirmed'] = isset($confirmed['map']) && is_array($confirmed['map']) ? $confirmed['map'] : array();
+    $costs['expected_activity_available'] = !empty($expectedActivity['available']);
+    $costs['expected_activity'] = isset($expectedActivity['map']) && is_array($expectedActivity['map']) ? $expectedActivity['map'] : array();
+    return $costs;
+}}
+
 if (!function_exists('cpms_company_profit_project_month_metrics')) {
-function cpms_company_profit_project_month_metrics($pdo, $project, $ym, $laborWageMap) {
+function cpms_company_profit_project_month_metrics($pdo, $project, $ym, $laborWageMap, $preloaded = array()) {
     $projectId = isset($project['id']) ? (int)$project['id'] : 0;
     $projectName = isset($project['name']) ? (string)$project['name'] : '';
 
     $salesRange = cpms_company_profit_cost_period_range($ym, 'sales');
     $laborRange = cpms_company_profit_cost_period_range($ym, 'labor');
+    $outsourcingRange = cpms_company_profit_cost_period_range($ym, 'outsourcing');
     $costRange = cpms_company_profit_cost_period_range($ym, 'material');
 
-    $expectedSales = cpms_company_profit_expected_sales_between($pdo, $projectId, $salesRange['start'], $salesRange['end']);
-    $confirmed = cpms_company_profit_confirmed_sales_month($pdo, $projectId, $ym);
+    if (!is_array($preloaded)) $preloaded = array();
+    if (!empty($preloaded['confirmed_available']) && isset($preloaded['confirmed'][$projectId][$ym])) {
+        $confirmed = $preloaded['confirmed'][$projectId][$ym];
+    } else {
+        $confirmed = cpms_company_profit_confirmed_sales_month($pdo, $projectId, $ym);
+    }
     $confirmedSales = isset($confirmed['amount']) ? (float)$confirmed['amount'] : 0.0;
     $hasConfirmed = !empty($confirmed['has_input']);
+    $skipConfirmedExpected = !empty($preloaded['skip_confirmed_expected']);
+    $hasExpectedActivity = empty($preloaded['expected_activity_available']) || !empty($preloaded['expected_activity'][$projectId][$ym]);
+    $expectedSales = (($hasConfirmed && $skipConfirmedExpected) || !$hasExpectedActivity)
+        ? 0.0
+        : cpms_company_profit_expected_sales_between($pdo, $projectId, $salesRange['start'], $salesRange['end']);
     $sales = $hasConfirmed ? $confirmedSales : $expectedSales;
 
-    $equipment = cpms_company_profit_equipment_total_between($pdo, $projectId, $costRange['start'], $costRange['end']);
-    $materialByCategory = cpms_company_profit_material_category_sum_between($pdo, $projectId, $costRange['start'], $costRange['end']);
+    $equipment = !empty($preloaded['available']['equipment']) && isset($preloaded['equipment'][$projectId][$ym])
+        ? (float)$preloaded['equipment'][$projectId][$ym]
+        : cpms_company_profit_equipment_total_between($pdo, $projectId, $costRange['start'], $costRange['end']);
+    $materialByCategory = !empty($preloaded['available']['materials']) && isset($preloaded['materials'][$projectId][$ym])
+        ? $preloaded['materials'][$projectId][$ym]
+        : cpms_company_profit_material_category_sum_between($pdo, $projectId, $costRange['start'], $costRange['end']);
     $materialCost = (float)$materialByCategory['자재비'];
     $purchaseCost = (float)$materialByCategory['구매품'];
     $otherCost = (float)$materialByCategory['기타경비'];
@@ -621,15 +1118,25 @@ function cpms_company_profit_project_month_metrics($pdo, $project, $ym, $laborWa
     if ($laborOutsourcing < 0) $laborOutsourcing = 0.0;
     if ($laborOutsourcing > $laborGross) $laborOutsourcing = $laborGross;
     $labor = $laborGross - $laborOutsourcing;
-    $manualOutsourcing = cpms_company_profit_table_exists($pdo, 'cpms_outsourcing_costs') && function_exists('cpms_outsourcing_manual_total_between')
-        ? (float)cpms_outsourcing_manual_total_between($pdo, $projectId, $costRange['start'], $costRange['end'])
-        : 0.0;
+    if (!empty($preloaded['available']['manual_outsourcing']) && isset($preloaded['manual_outsourcing'][$projectId][$ym])) {
+        $manualOutsourcing = (float)$preloaded['manual_outsourcing'][$projectId][$ym];
+    } else {
+        $manualOutsourcing = cpms_company_profit_table_exists($pdo, 'cpms_outsourcing_costs') && function_exists('cpms_outsourcing_manual_total_between')
+            ? (float)cpms_outsourcing_manual_total_between($pdo, $projectId, $outsourcingRange['start'], $outsourcingRange['end'])
+            : 0.0;
+    }
     $outsourcing = $laborOutsourcing + $manualOutsourcing;
-    $safety = function_exists('cpms_safety_cost_total_between')
-        ? (float)cpms_safety_cost_total_between($projectId, $costRange['start'], $costRange['end'])
-        : 0.0;
+    if (!empty($preloaded['available']['safety']) && isset($preloaded['safety'][$projectId][$ym])) {
+        $safety = (float)$preloaded['safety'][$projectId][$ym];
+    } else {
+        $safety = function_exists('cpms_safety_cost_total_between')
+            ? (float)cpms_safety_cost_total_between($projectId, $costRange['start'], $costRange['end'])
+            : 0.0;
+    }
     $deduction = 0.0;
-    if (cpms_company_profit_table_exists($pdo, 'cpms_project_monthly_deductions')) {
+    if (!empty($preloaded['available']['deduction']) && isset($preloaded['deduction'][$projectId][$ym])) {
+        $deduction = (float)$preloaded['deduction'][$projectId][$ym];
+    } else if (cpms_company_profit_table_exists($pdo, 'cpms_project_monthly_deductions')) {
         try {
             $stDeduction = $pdo->prepare("SELECT COALESCE(SUM(amount), 0) FROM cpms_project_monthly_deductions WHERE project_id = :pid AND ym = :ym");
             $stDeduction->bindValue(':pid', $projectId, PDO::PARAM_INT);
@@ -672,7 +1179,8 @@ function cpms_company_profit_project_month_metrics($pdo, $project, $ym, $laborWa
 }}
 
 if (!function_exists('cpms_company_profit_project_summary')) {
-function cpms_company_profit_project_summary($pdo, $project, $months) {
+function cpms_company_profit_project_summary($pdo, $project, $months, $preloaded = array()) {
+    if (!is_array($preloaded)) $preloaded = array();
     $projectId = isset($project['id']) ? (int)$project['id'] : 0;
     $laborWageMap = cpms_company_profit_labor_wage_map($pdo, $projectId);
     $row = array(
@@ -707,7 +1215,7 @@ function cpms_company_profit_project_summary($pdo, $project, $months) {
     $confirmedCount = 0;
     $expectedCount = 0;
     foreach ($months as $ym) {
-        $monthRow = cpms_company_profit_project_month_metrics($pdo, $project, $ym, $laborWageMap);
+        $monthRow = cpms_company_profit_project_month_metrics($pdo, $project, $ym, $laborWageMap, $preloaded);
         $row['monthly'][$ym] = $monthRow;
         $row['sales'] += (float)$monthRow['sales'];
         $row['expected_sales'] += (float)$monthRow['expected_sales'];
@@ -832,15 +1340,78 @@ function cpms_company_profit_safety_cost_total_summary($pdo, $projects) {
     );
     if (!$pdo || !is_array($projects)) return $summary;
     $currentYear = (int)$summary['current_year'];
-    $currentYearStart = sprintf('%04d-01-01', $currentYear);
-    $currentYearEnd = sprintf('%04d-12-31', $currentYear);
-    foreach ($projects as $project) {
-        $projectId = isset($project['id']) ? (int)$project['id'] : 0;
-        if ($projectId <= 0) continue;
-        $summary['project_count']++;
-        $summary['contract_total'] += function_exists('cpms_safety_cost_contract_total') ? (float)cpms_safety_cost_contract_total($pdo, $projectId) : 0.0;
-        $summary['used_total'] += function_exists('cpms_safety_cost_total') ? (float)cpms_safety_cost_total($projectId) : 0.0;
-        $summary['used_current_year'] += function_exists('cpms_safety_cost_total_between') ? (float)cpms_safety_cost_total_between($projectId, $currentYearStart, $currentYearEnd) : 0.0;
+    $projectIds = cpms_company_profit_project_id_list($projects);
+    $summary['project_count'] = count($projectIds);
+    if (count($projectIds) === 0) return $summary;
+    $idSql = implode(',', array_map('intval', $projectIds));
+
+    $contractLoaded = false;
+    if (cpms_company_profit_table_exists($pdo, 'cpms_project_unit_prices') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_project_unit_prices', 'project_id') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_project_unit_prices', 'item_name') &&
+        cpms_company_profit_column_exists($pdo, 'cpms_project_unit_prices', 'is_safety')) {
+        try {
+            $select = array('project_id', 'item_name');
+            foreach (array('spec', 'qty', 'unit_price', 'safety_unit_price', 'amount') as $column) {
+                $select[] = cpms_company_profit_column_exists($pdo, 'cpms_project_unit_prices', $column) ? $column : ('NULL AS ' . $column);
+            }
+            $where = array('project_id IN (' . $idSql . ')', 'is_safety = 1');
+            if (cpms_company_profit_column_exists($pdo, 'cpms_project_unit_prices', 'is_active')) $where[] = '(is_active = 1 OR is_active IS NULL)';
+            if (cpms_company_profit_column_exists($pdo, 'cpms_project_unit_prices', 'is_current')) $where[] = '(is_current = 1 OR is_current IS NULL)';
+            $rows = $pdo->query('SELECT ' . implode(', ', $select) . ' FROM cpms_project_unit_prices WHERE ' . implode(' AND ', $where))->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($rows)) $rows = array();
+            foreach ($rows as $row) {
+                $summary['contract_total'] += function_exists('cpms_safety_cost_unit_row_amount')
+                    ? (float)cpms_safety_cost_unit_row_amount($row)
+                    : (isset($row['amount']) ? (float)$row['amount'] : 0.0);
+            }
+            $contractLoaded = true;
+        } catch (Exception $e) {
+            error_log('[company_profit] safety contract preload failed: ' . $e->getMessage());
+        }
+    }
+    if (!$contractLoaded && function_exists('cpms_safety_cost_contract_total')) {
+        foreach ($projectIds as $projectId) $summary['contract_total'] += (float)cpms_safety_cost_contract_total($pdo, $projectId);
+    }
+
+    $usageLoaded = false;
+    if (function_exists('cpms_safety_cost_all_items') && function_exists('cpms_safety_cost_row_amount')) {
+        try {
+            $projectSet = array_fill_keys($projectIds, true);
+            $safetyMeta = array();
+            if (class_exists('App\\Services\\CostChangeService') && \App\Services\CostChangeService::isInstalled($pdo)) {
+                $metaRows = $pdo->query("SELECT target_id, settlement_ym FROM cpms_cost_record_meta WHERE target_type = 'safety' AND project_id IN (" . $idSql . ")")->fetchAll(PDO::FETCH_ASSOC);
+                if (!is_array($metaRows)) $metaRows = array();
+                foreach ($metaRows as $metaRow) {
+                    $targetId = isset($metaRow['target_id']) ? (string)$metaRow['target_id'] : '';
+                    if ($targetId !== '') $safetyMeta[$targetId] = isset($metaRow['settlement_ym']) ? (string)$metaRow['settlement_ym'] : '';
+                }
+            }
+            $items = cpms_safety_cost_all_items();
+            foreach ($items as $item) {
+                if (!is_array($item) || !cpms_safety_cost_is_active($item)) continue;
+                $projectId = isset($item['project_id']) ? (int)$item['project_id'] : 0;
+                if (!isset($projectSet[$projectId])) continue;
+                $amount = (float)cpms_safety_cost_row_amount($item);
+                $summary['used_total'] += $amount;
+                $targetId = isset($item['id']) ? (string)$item['id'] : '';
+                $ym = ($targetId !== '' && isset($safetyMeta[$targetId]) && cpms_company_profit_month_valid($safetyMeta[$targetId]))
+                    ? $safetyMeta[$targetId]
+                    : cpms_company_profit_settlement_ym_from_date(isset($item['use_date']) ? $item['use_date'] : '', false);
+                if ((int)substr((string)$ym, 0, 4) === $currentYear) $summary['used_current_year'] += $amount;
+            }
+            $usageLoaded = true;
+        } catch (Exception $e) {
+            error_log('[company_profit] safety usage preload failed: ' . $e->getMessage());
+        }
+    }
+    if (!$usageLoaded) {
+        $currentYearStart = sprintf('%04d-01-01', $currentYear);
+        $currentYearEnd = sprintf('%04d-12-31', $currentYear);
+        foreach ($projectIds as $projectId) {
+            $summary['used_total'] += function_exists('cpms_safety_cost_total') ? (float)cpms_safety_cost_total($projectId) : 0.0;
+            $summary['used_current_year'] += function_exists('cpms_safety_cost_total_between') ? (float)cpms_safety_cost_total_between($projectId, $currentYearStart, $currentYearEnd) : 0.0;
+        }
     }
     $summary['limit_110'] = round($summary['contract_total'] * 1.1);
     $summary['remaining'] = $summary['limit_110'] - $summary['used_total'];
@@ -927,13 +1498,15 @@ function cpms_company_profit_build_dashboard($pdo, $request) {
     }
 
     $projects = cpms_company_profit_load_projects($pdo, $filters);
+    $preloaded = cpms_company_profit_preload_context($pdo, $projects, $months);
+    $preloaded['skip_confirmed_expected'] = !empty($request['_skip_confirmed_expected']);
     $safetyProjects = !empty($filters['project_id'])
         ? $projects
         : cpms_company_profit_load_projects($pdo, array('status' => '', 'q' => ''));
     $result['safety_cost'] = cpms_company_profit_safety_cost_total_summary($pdo, $safetyProjects);
     foreach ($projects as $project) {
         try {
-            $projectSummary = cpms_company_profit_project_summary($pdo, $project, $months);
+            $projectSummary = cpms_company_profit_project_summary($pdo, $project, $months, $preloaded);
             $result['projects'][] = $projectSummary;
             $result['totals']['sales'] += (float)$projectSummary['sales'];
             $result['totals']['project_input_cost'] += (float)$projectSummary['input_cost'];

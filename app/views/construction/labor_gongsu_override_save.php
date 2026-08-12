@@ -81,7 +81,7 @@ if (!function_exists('cpms_gongsu_ensure_override_table')) {
             approved_at DATETIME NULL,
             created_at DATETIME NOT NULL,
             updated_at DATETIME NOT NULL,
-            UNIQUE KEY uk_labor_override(project_id, worker_key, work_date),
+            KEY idx_labor_override_cell(project_id, worker_key, work_date),
             KEY idx_labor_override_project_month(project_id, month),
             KEY idx_labor_override_status(status)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
@@ -113,8 +113,11 @@ if (!function_exists('cpms_gongsu_ensure_override_table')) {
             }
         }
 
-        if (!cpms_gongsu_index_exists($pdo, 'cpms_labor_gongsu_overrides', 'uk_labor_override')) {
-            $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD UNIQUE KEY uk_labor_override(project_id, worker_key, work_date)");
+        if (cpms_gongsu_index_exists($pdo, 'cpms_labor_gongsu_overrides', 'uk_labor_override')) {
+            $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides DROP INDEX uk_labor_override");
+        }
+        if (!cpms_gongsu_index_exists($pdo, 'cpms_labor_gongsu_overrides', 'idx_labor_override_cell')) {
+            $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_cell(project_id, worker_key, work_date)");
         }
         if (!cpms_gongsu_index_exists($pdo, 'cpms_labor_gongsu_overrides', 'idx_labor_override_project_month')) {
             $pdo->exec("ALTER TABLE cpms_labor_gongsu_overrides ADD KEY idx_labor_override_project_month(project_id, month)");
@@ -145,47 +148,28 @@ if (!function_exists('cpms_gongsu_generate_batch_token')) {
 
 if (!function_exists('cpms_gongsu_override_upsert_sql')) {
     // 파일: app/views/construction/labor_gongsu_override_save.php
-    // 단건과 일괄 요청이 동일한 저장 규칙을 사용하도록 SQL을 공통화합니다.
+    // 승인요청과 기존 승인 완료값을 각각 보존하기 위해 모든 변경을 새 이력 행으로 저장합니다.
     function cpms_gongsu_override_upsert_sql() {
         return "INSERT INTO cpms_labor_gongsu_overrides
           (project_id, month, batch_token, request_scope, worker_key, worker_name, work_date, old_value, new_value, is_deleted_entry, reason, status, requested_by, requested_by_email, requested_by_name, approval_stage, approval_required_level, current_approver_employee_id, current_approver_name, current_approver_email, first_approver_employee_id, first_approver_name, first_approver_email, approved_by, approved_at, first_approved_at, second_approved_at, final_approved_at, rejected_by, rejected_by_name, rejected_by_email, rejected_at, reject_reason, rejected_acknowledged_at, rejected_acknowledged_by, created_at, updated_at)
           VALUES
-          (:project_id, :month, :batch_token, :request_scope, :worker_key, :worker_name, :work_date, :old_value, :new_value, :is_deleted_entry, :reason, :status, :requested_by, :requested_by_email, :requested_by_name, :approval_stage, :approval_required_level, :current_approver_employee_id, :current_approver_name, :current_approver_email, :first_approver_employee_id, :first_approver_name, :first_approver_email, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :created_at, :updated_at)
-          ON DUPLICATE KEY UPDATE
-            month = VALUES(month),
-            batch_token = VALUES(batch_token),
-            request_scope = VALUES(request_scope),
-            worker_name = VALUES(worker_name),
-            old_value = VALUES(old_value),
-            new_value = VALUES(new_value),
-            is_deleted_entry = VALUES(is_deleted_entry),
-            reason = VALUES(reason),
-            status = VALUES(status),
-            requested_by = VALUES(requested_by),
-            requested_by_email = VALUES(requested_by_email),
-            requested_by_name = VALUES(requested_by_name),
-            approval_stage = VALUES(approval_stage),
-            approval_required_level = VALUES(approval_required_level),
-            current_approver_employee_id = VALUES(current_approver_employee_id),
-            current_approver_name = VALUES(current_approver_name),
-            current_approver_email = VALUES(current_approver_email),
-            first_approver_employee_id = VALUES(first_approver_employee_id),
-            first_approver_name = VALUES(first_approver_name),
-            first_approver_email = VALUES(first_approver_email),
-            approved_by = NULL,
-            approved_at = NULL,
-            first_approved_at = NULL,
-            second_approved_at = NULL,
-            final_approved_at = NULL,
-            rejected_by = NULL,
-            rejected_by_name = NULL,
-            rejected_by_email = NULL,
-            rejected_at = NULL,
-            reject_reason = NULL,
-            rejected_acknowledged_at = NULL,
-            rejected_acknowledged_by = NULL,
-            created_at = VALUES(created_at),
-            updated_at = VALUES(updated_at)";
+          (:project_id, :month, :batch_token, :request_scope, :worker_key, :worker_name, :work_date, :old_value, :new_value, :is_deleted_entry, :reason, :status, :requested_by, :requested_by_email, :requested_by_name, :approval_stage, :approval_required_level, :current_approver_employee_id, :current_approver_name, :current_approver_email, :first_approver_employee_id, :first_approver_name, :first_approver_email, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, :created_at, :updated_at)";
+    }
+}
+
+if (!function_exists('cpms_gongsu_has_pending_request')) {
+    function cpms_gongsu_has_pending_request($pdo, $projectId, $workerKey, $workDate, $lockRow) {
+        $sql = "SELECT id FROM cpms_labor_gongsu_overrides
+                WHERE project_id=:project_id AND worker_key=:worker_key AND work_date=:work_date AND status='pending'
+                ORDER BY id DESC LIMIT 1";
+        if ($lockRow) $sql .= " FOR UPDATE";
+        $st = $pdo->prepare($sql);
+        $st->execute(array(
+            ':project_id'=>(int)$projectId,
+            ':worker_key'=>(string)$workerKey,
+            ':work_date'=>(string)$workDate
+        ));
+        return ($st->fetchColumn() !== false);
     }
 }
 
@@ -429,7 +413,7 @@ try {
     $bulkEntriesJson = isset($_POST['bulk_entries']) ? trim((string)$_POST['bulk_entries']) : '';
     if ($bulkEntriesJson !== '') {
         // 파일: app/views/construction/labor_gongsu_override_save.php
-        // 1.5/2공수 일괄 요청은 모든 행을 먼저 검증한 뒤 한 트랜잭션과 한 batch_token으로 저장합니다.
+        // 1.3/1.4/1.5/2공수 일괄 요청은 모든 행을 먼저 검증한 뒤 한 트랜잭션과 한 batch_token으로 저장합니다.
         $bulkEntriesRaw = json_decode($bulkEntriesJson, true);
         if (!is_array($bulkEntriesRaw) || count($bulkEntriesRaw) < 1) cpms_gongsu_json_exit(false, '일괄 요청 인원 정보가 올바르지 않습니다.', array(), 200);
         if (count($bulkEntriesRaw) > 500) cpms_gongsu_json_exit(false, '일괄 요청은 한 번에 500명까지 가능합니다.', array(), 200);
@@ -437,7 +421,7 @@ try {
         $newValueRaw = isset($_POST['new_value']) ? trim((string)$_POST['new_value']) : '';
         if ($newValueRaw === '' || !is_numeric($newValueRaw)) cpms_gongsu_json_exit(false, '일괄 요청 공수는 숫자여야 합니다.', array(), 200);
         $newValue = (float)number_format((float)$newValueRaw, 2, '.', '');
-        if (abs($newValue - 1.5) > 0.0001 && abs($newValue - 2.0) > 0.0001) cpms_gongsu_json_exit(false, '일괄 승인 요청은 1.5공수 또는 2공수만 가능합니다.', array(), 200);
+        if (abs($newValue - 1.3) > 0.0001 && abs($newValue - 1.4) > 0.0001 && abs($newValue - 1.5) > 0.0001 && abs($newValue - 2.0) > 0.0001) cpms_gongsu_json_exit(false, '일괄 승인 요청은 1.3공수, 1.4공수, 1.5공수 또는 2공수만 가능합니다.', array(), 200);
         $reason = isset($_POST['reason']) ? trim((string)$_POST['reason']) : '';
         if ($reason === '') cpms_gongsu_json_exit(false, '일괄 공수 승인 요청사유를 입력해 주세요.', array(), 200);
         $reasonLength = function_exists('mb_strlen') ? mb_strlen($reason, 'UTF-8') : strlen($reason);
@@ -482,6 +466,12 @@ try {
         $batchToken = cpms_gongsu_generate_batch_token();
 
         $pdo->beginTransaction();
+        foreach ($bulkEntries as $bulkEntry) {
+            if (cpms_gongsu_has_pending_request($pdo, $projectId, $bulkEntry['worker_key'], $bulkEntry['work_date'], true)) {
+                $pdo->rollBack();
+                cpms_gongsu_json_exit(false, $bulkEntry['worker_name'] . '님의 ' . $bulkEntry['work_date'] . ' 공수는 이미 승인 대기 중입니다.', array(), 200);
+            }
+        }
         $stBulk = $pdo->prepare(cpms_gongsu_override_upsert_sql());
         foreach ($bulkEntries as $bulkEntry) {
             $stBulk->execute(array(
@@ -579,6 +569,10 @@ try {
     $directorId = ($directorApprover && isset($directorApprover['id'])) ? (int)$directorApprover['id'] : null;
     $directorName = ($directorApprover && isset($directorApprover['name'])) ? (string)$directorApprover['name'] : null;
     $directorEmail = ($directorApprover && isset($directorApprover['email'])) ? (string)$directorApprover['email'] : null;
+
+    if (cpms_gongsu_has_pending_request($pdo, $projectId, $workerKey, $workDate, false)) {
+        cpms_gongsu_json_exit(false, $workerName . '님의 ' . $workDate . ' 공수는 이미 승인 대기 중입니다.', array(), 200);
+    }
     
     $st = $pdo->prepare(cpms_gongsu_override_upsert_sql());
     $st->bindValue(':project_id', $projectId, PDO::PARAM_INT);
@@ -618,7 +612,7 @@ try {
 
     $overrideId = (int)$pdo->lastInsertId();
     if ($overrideId <= 0) {
-        $stFind = $pdo->prepare("SELECT id FROM cpms_labor_gongsu_overrides WHERE project_id=:project_id AND worker_key=:worker_key AND work_date=:work_date LIMIT 1");
+        $stFind = $pdo->prepare("SELECT id FROM cpms_labor_gongsu_overrides WHERE project_id=:project_id AND worker_key=:worker_key AND work_date=:work_date ORDER BY id DESC LIMIT 1");
         $stFind->execute(array(':project_id'=>$projectId, ':worker_key'=>$workerKey, ':work_date'=>$workDate));
         $overrideId = (int)$stFind->fetchColumn();
     }

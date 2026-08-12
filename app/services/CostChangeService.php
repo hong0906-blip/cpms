@@ -1399,16 +1399,40 @@ class CostChangeService
             $targetId
         );
 
+        return self::resolveSettlementYm(
+            $costType,
+            $useDate,
+            is_array($meta) && isset($meta['settlement_ym'])
+                ? $meta['settlement_ym']
+                : '',
+            is_array($meta) && isset($meta['manual_settlement_yn'])
+                ? $meta['manual_settlement_yn']
+                : 0
+        );
+    }
+
+    /**
+     * Resolve the effective month while preserving only explicit month moves.
+     *
+     * Calendar-month policies can change independently of old automatically
+     * stored metadata. An approved manual month move must remain unchanged.
+     */
+    public static function resolveSettlementYm(
+        $costType,
+        $useDate,
+        $storedSettlementYm,
+        $manualSettlementYn
+    ) {
+        $storedYm = self::validYm($storedSettlementYm);
+
         if (
-            is_array($meta) &&
-            isset($meta['settlement_ym']) &&
-            self::validYm(
-                $meta['settlement_ym']
-            ) !== ''
+            $storedYm !== '' &&
+            (
+                (int)$manualSettlementYn === 1 ||
+                !self::isCalendarMonthType($costType)
+            )
         ) {
-            return self::validYm(
-                $meta['settlement_ym']
-            );
+            return $storedYm;
         }
 
         return self::settlementYm(

@@ -10,12 +10,26 @@ if (!isset($esc) || !is_callable($esc)) {
 $attachments = isset($detail['attachments']) && is_array($detail['attachments']) ? $detail['attachments'] : array();
 $driveRecords = isset($detail['drive_records']) && is_array($detail['drive_records']) ? $detail['drive_records'] : array();
 $bodyHtml = isset($detail['body_html']) ? (string)$detail['body_html'] : '';
+$bodyText = isset($detail['body_text']) ? trim((string)$detail['body_text']) : '';
+$bodyHtmlSource = isset($detail['body_html_source']) ? (string)$detail['body_html_source'] : '';
+$htmlCandidateCount = (isset($detail['html_part_count']) ? (int)$detail['html_part_count'] : 0)
+    + (isset($detail['loose_html_candidate_count']) ? (int)$detail['loose_html_candidate_count'] : 0);
+$rawMessageBytes = isset($detail['raw_message_bytes']) ? (int)$detail['raw_message_bytes'] : 0;
+$bodyFallbackText = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($bodyHtml), ENT_QUOTES, 'UTF-8')));
+$bodyFallbackHtml = $bodyText !== ''
+    ? '<div class="pm-plain-mail">' . nl2br(call_user_func($esc, $bodyText)) . '</div>'
+    : ($bodyFallbackText !== ''
+        ? '<div class="pm-plain-mail">' . nl2br(call_user_func($esc, $bodyFallbackText)) . '</div>'
+        : '<div class="pm-empty-body">표시할 메일 본문이 없습니다.</div>');
 $messageKey = isset($detail['message_key']) ? (string)$detail['message_key'] : '';
 $baseUrl = isset($baseUrl) ? rtrim((string)$baseUrl, '/') : '';
 ?>
 <div class="pm-detail-fragment" data-detail-fragment data-message-key="<?php echo call_user_func($esc, $messageKey); ?>">
     <div class="pm-detail-fragment-toolbar">
         <span>본문 준비: <?php echo call_user_func($esc, isset($detail['body_cache_updated_at']) && $detail['body_cache_updated_at'] !== '' ? $detail['body_cache_updated_at'] : '방금'); ?></span>
+        <?php if ($bodyHtmlSource === 'text_fallback'): ?>
+            <span class="pm-body-source-warning">HTML 후보 <?php echo number_format($htmlCandidateCount); ?>개 · 원문 <?php echo number_format($rawMessageBytes); ?> bytes</span>
+        <?php endif; ?>
         <button type="button" class="pm-text-button" data-rebuild-body-cache data-message-key="<?php echo call_user_func($esc, $messageKey); ?>">원문 다시 읽기</button>
     </div>
 
@@ -67,6 +81,6 @@ $baseUrl = isset($baseUrl) ? rtrim((string)$baseUrl, '/') : '';
     <?php endif; ?>
 
     <div class="pm-message-body-wrap">
-        <div class="pm-message-body"><?php echo $bodyHtml !== '' ? $bodyHtml : '<div class="pm-empty-body">표시할 메일 본문이 없습니다.</div>'; ?></div>
+        <div class="pm-message-body"><?php echo $bodyHtml !== '' ? $bodyHtml : $bodyFallbackHtml; ?></div>
     </div>
 </div>

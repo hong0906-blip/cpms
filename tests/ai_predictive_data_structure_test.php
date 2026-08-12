@@ -57,6 +57,7 @@ cpms_ai_structure_same('Admin correction requires reason', true, AiCostDataGover
 cpms_ai_structure_same('June finalized amount group is usable by default', true, AiCostDataGovernanceService::amountGroupEligible(false, 1, '2026-06', 'material'));
 
 cpms_ai_structure_same('Labor remains in calendar month', '2026-07', CostChangeService::settlementYm('labor', '2026-07-26'));
+cpms_ai_structure_same('Outsourcing remains in calendar month', '2026-07', CostChangeService::settlementYm('outsourcing', '2026-07-26'));
 cpms_ai_structure_same('Non-labor through 25th remains in month', '2026-07', CostChangeService::settlementYm('material', '2026-07-25'));
 cpms_ai_structure_same('Non-labor from 26th belongs to next month', '2026-08', CostChangeService::settlementYm('material', '2026-07-26'));
 

@@ -1824,27 +1824,28 @@ if ($route === '경영현황') {
 
     require_once __DIR__ . '/../app/services/CompanyProfitSummaryService.php';
     $companyProfitCacheKey = '';
+    $companyProfitForceRefresh = isset($_GET['refresh']) && (string)$_GET['refresh'] === '1';
     if (is_array($_GET)) {
-        $cacheParams = $_GET;
+        $cacheParams = array();
+        $companyProfitFilterKeys = array('scope', 'year', 'month', 'start_month', 'end_month', 'view_mode', 'status', 'q', 'project_id');
+        foreach ($companyProfitFilterKeys as $filterKey) {
+            if (isset($_GET[$filterKey])) $cacheParams[$filterKey] = $_GET[$filterKey];
+        }
         ksort($cacheParams);
-        $companyProfitCacheKey = md5('company_profit_period_v2:' . serialize($cacheParams));
+        $companyProfitCacheKey = md5('company_profit_period_v4:' . serialize($cacheParams));
     }
     $companyProfitSummary = null;
-    if ($companyProfitCacheKey !== '' && isset($_SESSION['_company_profit_cache'][$companyProfitCacheKey]) && is_array($_SESSION['_company_profit_cache'][$companyProfitCacheKey])) {
-        $cached = $_SESSION['_company_profit_cache'][$companyProfitCacheKey];
-        if (isset($cached['time']) && isset($cached['data']) && (time() - (int)$cached['time']) <= 60 && is_array($cached['data'])) {
-            $companyProfitSummary = $cached['data'];
-        }
+    // 큰 월별 집계 배열을 세션에 보관하면 이후 모든 요청의 세션 직렬화가 느려집니다.
+    // 서버 공용 파일 캐시만 사용하고, 이전 버전 세션 캐시는 즉시 비웁니다.
+    if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
+    if (!is_array($companyProfitSummary) && !$companyProfitForceRefresh && $companyProfitCacheKey !== '') {
+        $companyProfitSummary = cpms_company_profit_shared_cache_read($companyProfitCacheKey, 600);
     }
     if (!is_array($companyProfitSummary)) {
-        $companyProfitSummary = cpms_company_profit_build_dashboard($companyProfitPdo, $_GET);
-        if ($companyProfitCacheKey !== '') {
-            if (!isset($_SESSION['_company_profit_cache']) || !is_array($_SESSION['_company_profit_cache'])) $_SESSION['_company_profit_cache'] = array();
-            $_SESSION['_company_profit_cache'][$companyProfitCacheKey] = array('time' => time(), 'data' => $companyProfitSummary);
-            if (count($_SESSION['_company_profit_cache']) > 8) {
-                array_shift($_SESSION['_company_profit_cache']);
-            }
-        }
+        $companyProfitBuildRequest = is_array($_GET) ? $_GET : array();
+        $companyProfitBuildRequest['_skip_confirmed_expected'] = 1;
+        $companyProfitSummary = cpms_company_profit_build_dashboard($companyProfitPdo, $companyProfitBuildRequest);
+        if ($companyProfitCacheKey !== '') cpms_company_profit_shared_cache_write($companyProfitCacheKey, $companyProfitSummary);
     }
     \App\Core\View::render('company_profit/index', array(
         'title' => '경영현황',

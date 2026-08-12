@@ -36,12 +36,23 @@ $redirect='?r=공사&pid='.$projectId.'&tab=outsourcing&outsourcing_tab=input';
 if (preg_match('/^\d{4}-\d{2}$/',$month)) $redirect.='&month='.urlencode($month);
 $pdo=Db::pdo();
 if (!$pdo || $projectId<=0 || !cpms_outsourcing_cost_ensure_table($pdo)) cpms_outsourcing_cost_finish($isAjax,false,'외주비 테이블 또는 프로젝트 정보를 확인할 수 없습니다.',$redirect,0);
+$outsourcingColumnMap=array();
+try {
+    $stOutsourcingColumns=$pdo->query("SHOW COLUMNS FROM cpms_outsourcing_costs");
+    while ($outsourcingColumnRow=$stOutsourcingColumns->fetch(PDO::FETCH_ASSOC)) {
+        if (isset($outsourcingColumnRow['Field'])) $outsourcingColumnMap[(string)$outsourcingColumnRow['Field']]=true;
+    }
+} catch (Exception $outsourcingColumnCheckException) {
+    $outsourcingColumnMap=array();
+}
+$outsourcingHasMemoColumn=isset($outsourcingColumnMap['memo']);
+$outsourcingHasAdvancePaymentColumn=isset($outsourcingColumnMap['advance_payment_yn']);
 
 try {
     $now=date('Y-m-d H:i:s');
     if ($action==='delete') {
         if ($entryId<=0) throw new Exception('삭제할 외주비 내역이 없습니다.');
-        $stOld=$pdo->prepare("SELECT id,project_id,expense_date,category,company_name,amount,memo,is_deleted FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
+        $stOld=$pdo->prepare("SELECT * FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
         $stOld->execute(array(':id'=>$entryId,':pid'=>$projectId)); $oldRow=$stOld->fetch(PDO::FETCH_ASSOC);
         if ($oldRow) {
             $oldYm=CostChangeService::effectiveSettlementYm($pdo,'outsourcing',(string)$entryId,'outsourcing',$oldRow['expense_date']);
@@ -62,48 +73,63 @@ try {
     $businessNo=isset($_POST['business_no'])?trim((string)$_POST['business_no']):'';
     $contact=isset($_POST['contact'])?trim((string)$_POST['contact']):'';
     $amount=cpms_outsourcing_money(isset($_POST['amount'])?$_POST['amount']:'');
+    $advancePaymentYn=isset($_POST['advance_payment_yn'])&&strtoupper(trim((string)$_POST['advance_payment_yn']))==='Y'?'Y':'N';
     $memo=isset($_POST['memo'])?trim((string)$_POST['memo']):'';
     $memo=function_exists('mb_substr')?mb_substr($memo,0,500,'UTF-8'):substr($memo,0,500);
     if ($expenseDate==='') throw new Exception('일자를 올바르게 입력해주세요.');
     if ($companyName==='') throw new Exception('업체명을 입력해주세요.');
     if ($amount<=0) throw new Exception('금액은 0보다 크게 입력해주세요.');
+    if ($advancePaymentYn==='Y'&&!$outsourcingHasAdvancePaymentColumn) throw new Exception('선급여부 저장 컬럼을 준비하지 못했습니다. 관리자에게 문의해주세요.');
     $destinationLock=CostChangeService::lockInfo('outsourcing',$expenseDate,'',date('Y-m-d'));
     if (!empty($destinationLock['locked'])) throw new Exception('마감된 기간의 자료입니다. 추가 또는 수정하려면 비용 변경 승인이 필요합니다.');
 
     $oldRow=null;
     if ($entryId>0) {
-        $stOld=$pdo->prepare("SELECT id,project_id,expense_date,category,company_name,amount,memo,is_deleted FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
+        $stOld=$pdo->prepare("SELECT * FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid AND is_deleted=0 LIMIT 1");
         $stOld->execute(array(':id'=>$entryId,':pid'=>$projectId)); $oldRow=$stOld->fetch(PDO::FETCH_ASSOC);
         if (!$oldRow) throw new Exception('수정할 외주비 내역을 찾을 수 없습니다.');
         $oldYm=CostChangeService::effectiveSettlementYm($pdo,'outsourcing',(string)$entryId,'outsourcing',$oldRow['expense_date']);
         $oldLock=CostChangeService::lockInfo('outsourcing',$oldRow['expense_date'],$oldYm,date('Y-m-d'));
         if (!empty($oldLock['locked'])) throw new Exception('마감된 기간의 자료입니다. 수정하려면 비용 변경 승인이 필요합니다.');
-        $sql="UPDATE cpms_outsourcing_costs SET expense_date=:expense_date,category='외주비',company_name=:company_name,representative_name=:representative_name,business_no=:business_no,contact=:contact,amount=:amount,memo=:memo,updated_at=:now WHERE id=:id AND project_id=:pid AND is_deleted=0";
+        $sql="UPDATE cpms_outsourcing_costs SET expense_date=:expense_date,category='외주비',company_name=:company_name,representative_name=:representative_name,business_no=:business_no,contact=:contact,amount=:amount";
+        if ($outsourcingHasAdvancePaymentColumn) $sql.=',advance_payment_yn=:advance_payment_yn';
+        if ($outsourcingHasMemoColumn) $sql.=',memo=:memo';
+        $sql.=',updated_at=:now WHERE id=:id AND project_id=:pid AND is_deleted=0';
         $st=$pdo->prepare($sql); $st->bindValue(':id',$entryId,PDO::PARAM_INT);
     } else {
-        $sql="INSERT INTO cpms_outsourcing_costs (project_id,expense_date,category,company_name,representative_name,business_no,contact,amount,memo,created_by_name,created_by_email,is_deleted,created_at,updated_at) VALUES (:pid,:expense_date,'외주비',:company_name,:representative_name,:business_no,:contact,:amount,:memo,:created_by_name,:created_by_email,0,:now,:now)";
+        $insertAdvanceColumn=$outsourcingHasAdvancePaymentColumn?',advance_payment_yn':'';
+        $insertAdvanceValue=$outsourcingHasAdvancePaymentColumn?',:advance_payment_yn':'';
+        $insertMemoColumn=$outsourcingHasMemoColumn?',memo':'';
+        $insertMemoValue=$outsourcingHasMemoColumn?',:memo':'';
+        $sql="INSERT INTO cpms_outsourcing_costs (project_id,expense_date,category,company_name,representative_name,business_no,contact,amount".$insertAdvanceColumn.$insertMemoColumn.",created_by_name,created_by_email,is_deleted,created_at,updated_at) VALUES (:pid,:expense_date,'외주비',:company_name,:representative_name,:business_no,:contact,:amount".$insertAdvanceValue.$insertMemoValue.",:created_by_name,:created_by_email,0,:now,:now)";
         $st=$pdo->prepare($sql); $st->bindValue(':created_by_name',(string)Auth::userName()); $st->bindValue(':created_by_email',(string)Auth::userEmail());
     }
     $st->bindValue(':pid',$projectId,PDO::PARAM_INT); $st->bindValue(':expense_date',$expenseDate); $st->bindValue(':company_name',$companyName);
     $st->bindValue(':representative_name',$representativeName===''?null:$representativeName,$representativeName===''?PDO::PARAM_NULL:PDO::PARAM_STR);
     $st->bindValue(':business_no',$businessNo===''?null:$businessNo,$businessNo===''?PDO::PARAM_NULL:PDO::PARAM_STR);
     $st->bindValue(':contact',$contact===''?null:$contact,$contact===''?PDO::PARAM_NULL:PDO::PARAM_STR);
-    $st->bindValue(':amount',number_format($amount,2,'.','')); $st->bindValue(':memo',$memo===''?null:$memo,$memo===''?PDO::PARAM_NULL:PDO::PARAM_STR); $st->bindValue(':now',$now); $st->execute();
+    $st->bindValue(':amount',number_format($amount,2,'.',''));
+    if ($outsourcingHasAdvancePaymentColumn) $st->bindValue(':advance_payment_yn',$advancePaymentYn);
+    if ($outsourcingHasMemoColumn) $st->bindValue(':memo',$memo===''?null:$memo,$memo===''?PDO::PARAM_NULL:PDO::PARAM_STR);
+    $st->bindValue(':now',$now); $st->execute();
     $writeAffectedRows=(int)$st->rowCount(); $savedEntryId=$entryId>0?$entryId:(int)$pdo->lastInsertId();
     try {
-        $stEventNew=$pdo->prepare("SELECT id,project_id,expense_date,category,company_name,amount,memo,is_deleted FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid LIMIT 1");
+        $stEventNew=$pdo->prepare("SELECT * FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid LIMIT 1");
         $stEventNew->execute(array(':id'=>$savedEntryId,':pid'=>$projectId)); $eventNewRow=$stEventNew->fetch(PDO::FETCH_ASSOC);
         if (($entryId<=0 || $writeAffectedRows>0) && is_array($eventNewRow)) {
             CostDataEventService::recordChange($pdo,array('project_id'=>$projectId,'cost_type'=>'outsourcing','target_type'=>'outsourcing_cost','target_id'=>(string)$savedEntryId,'event_action'=>$entryId>0?'UPDATE':'CREATE','source_type'=>'DIRECT','actual_date'=>$expenseDate,'settlement_ym'=>CostChangeService::settlementYm('outsourcing',$expenseDate),'old_amount'=>$entryId>0&&isset($oldRow['amount'])?$oldRow['amount']:null,'new_amount'=>isset($eventNewRow['amount'])?$eventNewRow['amount']:$amount,'old_data'=>$entryId>0&&is_array($oldRow)?$oldRow:array(),'new_data'=>$eventNewRow,'reason'=>$memo,'source_file'=>__FILE__));
         }
     } catch (Exception $e) { error_log('[CostDataEvent] event capture failed'); }
 
-    // 구형 브라우저/JS 비활성화 환경에서는 일반 폼 첨부도 Drive로 저장합니다.
-    $uploadResult=cpms_outsourcing_file_store_uploads($pdo,'attachments',$projectId,$savedEntryId,substr($expenseDate,0,7));
+    // 외주비와 첨부파일을 한 번의 multipart 폼 요청으로 저장합니다.
+    $uploadResult=array('has_file'=>false,'ok'=>true,'saved_count'=>0,'message'=>'');
+    if (isset($_FILES['attachments'])) {
+        $uploadResult=cpms_outsourcing_file_store_uploads($pdo,'attachments',$projectId,$savedEntryId,substr($expenseDate,0,7));
+    }
     $message=$entryId>0?'외주비 입력 내역을 수정했습니다.':'외주비를 등록했습니다.';
-    if (!empty($uploadResult['has_file'])) {
-        if (!empty($uploadResult['ok'])) $message.=' '.$uploadResult['message'];
-        else $message.=' 다만 파일 첨부 실패: '.$uploadResult['message'];
+    if (!empty($uploadResult['has_file'])&&!empty($uploadResult['ok'])) $message.=' '.$uploadResult['message'];
+    if (!empty($uploadResult['has_file'])&&empty($uploadResult['ok'])) {
+        cpms_outsourcing_cost_finish($isAjax,false,'외주비는 저장됐지만 파일 첨부 실패: '.$uploadResult['message'],$redirect.'&edit_id='.$savedEntryId,$savedEntryId);
     }
     cpms_outsourcing_cost_finish($isAjax,true,trim($message),$redirect,$savedEntryId);
 } catch (Exception $e) {

@@ -1137,6 +1137,11 @@ body.pm-modal-open {
     line-height: 1.65;
 }
 
+.pm-body-source-warning {
+    color: #b45309;
+    font-weight: 600;
+}
+
 /* v1.3: 메일 목록 본문 미리보기 */
 .pm-preview {
     margin-top: 7px;

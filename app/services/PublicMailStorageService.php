@@ -22,7 +22,7 @@ class PublicMailStorageService
     const TITLE_REFRESH_QUEUE_FILE = 'title_refresh_queue.json';
     const TITLE_REFRESH_UPDATES_FILE = 'title_refresh_updates.json';
     const BODY_CACHE_DIR = 'body_cache';
-    const BODY_CACHE_VERSION = 8;
+    const BODY_CACHE_VERSION = 17;
 
     public static function rootPath()
     {
@@ -737,20 +737,44 @@ class PublicMailStorageService
         if (!is_array($cache) || empty($cache['message_key'])) return null;
 
         /*
+         * 예전 본문 수집기는 MIME 구조 조회가 성공했더라도 실제 text 파트를 얻지 못하면
+         * 빈 캐시를 완료 상태로 저장했습니다. 확인된 빈 메일 표시가 없는 기존 빈 캐시는
+         * 한 번 다시 수집하여 상세화면의 빈 원문이 계속 고착되지 않게 합니다.
+         */
+        if (!self::bodyCacheHasContent($cache) && empty($cache['body_empty_confirmed'])) {
+            return null;
+        }
+
+        /*
          * v1.7에서 만든 본문 캐시는 버전값이 없지만 본문 자체는 이미 저장되어 있습니다.
          * 이를 무조건 폐기하면 메일을 열 때마다 네이버 IMAP에 다시 연결되어 매우 느려집니다.
          * 파일 원본을 다시 받지 않고 저장된 HTML만 현재 형식으로 조용히 변환합니다.
          */
         $version = isset($cache['cache_version']) ? (int)$cache['cache_version'] : 0;
         $bodyHtml = isset($cache['body_html']) ? (string)$cache['body_html'] : '';
+        /* v17부터 완전한 HTML 문서의 body를 올바르게 추출하므로 구버전은 다시 읽습니다. */
+        if ($version < self::BODY_CACHE_VERSION || empty($cache['body_document_html'])) return null;
         $needsLocalUpgrade = ($version !== self::BODY_CACHE_VERSION)
             || strpos($bodyHtml, 'data-pm-external-src=') !== false
             || (strpos($bodyHtml, 'action=inline_image') !== false && strpos($bodyHtml, 'data-pm-inline-part=') === false);
 
         if ($needsLocalUpgrade) {
             $cache = self::upgradeBodyCacheLocally($messageKey, $cache);
+            if (!self::bodyCacheHasContent($cache) && empty($cache['body_empty_confirmed'])) return null;
         }
         return $cache;
+    }
+
+    private static function bodyCacheHasContent($cache)
+    {
+        if (!is_array($cache)) return false;
+        $bodyText = isset($cache['body_text']) ? trim((string)$cache['body_text']) : '';
+        if ($bodyText !== '') return true;
+        $bodyHtml = isset($cache['body_html']) ? trim((string)$cache['body_html']) : '';
+        if ($bodyHtml === '') return false;
+        $visibleText = html_entity_decode(strip_tags($bodyHtml), ENT_QUOTES, 'UTF-8');
+        if (trim(preg_replace('/\s+/u', ' ', $visibleText)) !== '') return true;
+        return preg_match('/<img\b/i', $bodyHtml) === 1;
     }
 
     private static function upgradeBodyCacheLocally($messageKey, $cache)
@@ -836,17 +860,21 @@ class PublicMailStorageService
         $rows = array();
         foreach ($messages as $key => $message) {
             if (!is_array($message)) continue;
-            // 본문 캐시 파일이 있으면 버전값과 관계없이 네이버에서 다시 받지 않습니다.
-            // 실제 열람 시 getBodyCache()가 저장된 HTML만 현재 형식으로 빠르게 변환합니다.
-            if (is_file(self::bodyCachePath($key))) continue;
             $rows[] = array(
                 'key' => (string)$key,
-                'timestamp' => isset($message['timestamp']) ? (int)$message['timestamp'] : 0
+                'timestamp' => isset($message['timestamp']) ? (int)$message['timestamp'] : 0,
+                'known_cache_version' => isset($message['body_cache_version']) ? (int)$message['body_cache_version'] : 0
             );
         }
         usort($rows, array(__CLASS__, 'compareUncachedMessageRows'));
         $result = array();
         foreach ($rows as $row) {
+            $key = isset($row['key']) ? (string)$row['key'] : '';
+            if ($key === '') continue;
+            $path = self::bodyCachePath($key);
+            if (is_file($path) && isset($row['known_cache_version']) && (int)$row['known_cache_version'] >= self::BODY_CACHE_VERSION) continue;
+            // 구버전 파일이 남아 있어도 최근 메일부터 예약 작업에서 다시 준비합니다.
+            if (is_array(self::getBodyCache($key))) continue;
             $result[] = $row['key'];
             if (count($result) >= $limit) break;
         }

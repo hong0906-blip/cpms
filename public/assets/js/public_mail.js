@@ -10,6 +10,11 @@
     'use strict';
     window.CPMS_PUBLIC_MAIL_VERSION='1.7.19.2';
     var readerScrollY=0;
+    var activeDetailMessageKey='';
+    var detailPanelCache={};
+    var detailPanelPending={};
+    var detailFragmentCache={};
+    var detailFragmentPending={};
 
     function page() { return document.querySelector('[data-public-mail-page]'); }
     function csrf() { var el=page(); return el ? (el.getAttribute('data-csrf-token')||'') : ''; }
@@ -446,33 +451,65 @@
         loadInlineImageBundle(container);
     }
 
+    function requestMailHtml(action,messageKey,callback) {
+        var isPanel=action==='detail_panel';
+        var cache=isPanel?detailPanelCache:detailFragmentCache;
+        var pending=isPanel?detailPanelPending:detailFragmentPending;
+        if(Object.prototype.hasOwnProperty.call(cache,messageKey)){
+            window.setTimeout(function(){callback(true,cache[messageKey],200,'cache');},0);
+            return;
+        }
+        if(pending[messageKey]){
+            pending[messageKey].push(callback);
+            return;
+        }
+        pending[messageKey]=[callback];
+        var xhr=new XMLHttpRequest(),finished=false;
+        function complete(ok,html,status,reason){
+            if(finished)return;
+            finished=true;
+            if(ok)cache[messageKey]=html;
+            var callbacks=pending[messageKey]||[],i;
+            delete pending[messageKey];
+            for(i=0;i<callbacks.length;i++)callbacks[i](ok,html,status,reason);
+        }
+        xhr.open('GET','public_mail_action.php?action='+encodeURIComponent(action)+'&message_key='+encodeURIComponent(messageKey)+'&_='+new Date().getTime(),true);
+        xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
+        xhr.timeout=isPanel?12000:15000;
+        xhr.onreadystatechange=function(){
+            if(xhr.readyState!==4)return;
+            complete(xhr.status>=200&&xhr.status<300,xhr.responseText||'',xhr.status,'complete');
+        };
+        xhr.ontimeout=function(){complete(false,'',0,'timeout');};
+        xhr.onerror=function(){complete(false,'',0,'network');};
+        xhr.send(null);
+    }
+
+    function clearMailResponseCache(messageKey) {
+        delete detailPanelCache[messageKey];
+        delete detailFragmentCache[messageKey];
+    }
+
     function loadMailDetail(container) {
         if(!container)return;
         var messageKey=container.getAttribute('data-message-key')||'';
         if(messageKey==='')return;
         container.setAttribute('data-loading','1');
         container.innerHTML='<div class="pm-detail-local-loading"><div class="pm-spinner"></div><strong>메일 본문을 불러오는 중입니다.</strong><span>현재 화면의 다른 기능은 계속 사용할 수 있습니다.</span></div>';
-        var xhr=new XMLHttpRequest();
-        xhr.open('GET','public_mail_action.php?action=detail_fragment&message_key='+encodeURIComponent(messageKey)+'&_='+new Date().getTime(),true);
-        xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
-        xhr.timeout=12000;
-        xhr.onreadystatechange=function(){
-            if(xhr.readyState!==4)return;
+        requestMailHtml('detail_fragment',messageKey,function(ok,html,status,reason){
+            if(!document.documentElement.contains(container)||(container.getAttribute('data-message-key')||'')!==messageKey)return;
             container.removeAttribute('data-loading');
-            if(xhr.status>=200&&xhr.status<300){
-                container.innerHTML=xhr.responseText;
+            if(ok){
+                container.innerHTML=html;
                 container.setAttribute('data-cache-ready','1');
                 prepareMailImages(container);
                 if(window.lucide&&typeof window.lucide.createIcons==='function')window.lucide.createIcons();
+            }else if(reason==='timeout'){
+                container.innerHTML='<div class="pm-detail-load-error"><strong>메일 원문을 불러오는 데 시간이 걸리고 있습니다.</strong><p>백그라운드 준비가 끝난 뒤 다시 열면 즉시 표시됩니다.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-detail>다시 시도</button></div>';
             }else{
-                container.innerHTML=xhr.responseText||'<div class="pm-detail-load-error"><strong>메일 본문을 불러오지 못했습니다.</strong><p>네이버 연결이 지연되고 있습니다.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-detail>다시 시도</button></div>';
+                container.innerHTML=html||'<div class="pm-detail-load-error"><strong>메일 본문을 불러오지 못했습니다.</strong><p>네이버 연결이 지연되고 있습니다.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-detail>다시 시도</button></div>';
             }
-        };
-        xhr.ontimeout=function(){
-            container.removeAttribute('data-loading');
-            container.innerHTML='<div class="pm-detail-load-error"><strong>메일 원문을 불러오는 데 시간이 걸리고 있습니다.</strong><p>화면 전체는 멈추지 않았습니다. 잠시 후 다시 시도하세요.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-detail>다시 시도</button></div>';
-        };
-        xhr.send(null);
+        });
     }
 
     function bindDetailBodyActions(){
@@ -491,10 +528,12 @@
             if(rebuild&&rebuild!==document){
                 event.preventDefault();
                 if(rebuild.classList.contains('is-busy'))return;
+                var rebuildMessageKey=rebuild.getAttribute('data-message-key')||'';
                 rebuild.classList.add('is-busy'); rebuild.setAttribute('disabled','disabled');
-                postJson({action:'rebuild_body_cache',csrf_token:csrf(),response_type:'json',message_key:rebuild.getAttribute('data-message-key')||''},function(result){
+                postJson({action:'rebuild_body_cache',csrf_token:csrf(),response_type:'json',message_key:rebuildMessageKey},function(result){
                     rebuild.classList.remove('is-busy'); rebuild.removeAttribute('disabled');
                     if(!result||!result.ok){alert(result&&result.message?result.message:'메일 원문을 다시 읽지 못했습니다.');return;}
+                    clearMailResponseCache(rebuildMessageKey);
                     loadMailDetail(document.querySelector('[data-mail-detail-content]'));
                 });
             }
@@ -580,6 +619,7 @@
 
     function closeReaderModal(pushState){
         var modal=readerModal(),host=detailHost();
+        activeDetailMessageKey='';
         if(modal){
             modal.hidden=true;
             modal.setAttribute('aria-hidden','true');
@@ -610,30 +650,22 @@
     function loadDetailPanel(messageKey,pushState){
         var host=detailHost();
         if(!host||messageKey==='')return;
+        activeDetailMessageKey=messageKey;
         setSelectedRow(messageKey);
         openReaderModal();
         host.innerHTML='<div class="pm-detail-panel pm-detail-panel-loading"><div class="pm-detail-local-loading"><div class="pm-spinner"></div><strong>메일 정보를 여는 중입니다.</strong><span>메일 목록과 검색조건은 그대로 유지됩니다.</span></div></div>';
         if(pushState)updateMessageUrl(messageKey,false);
-        var xhr=new XMLHttpRequest();
-        xhr.open('GET','public_mail_action.php?action=detail_panel&message_key='+encodeURIComponent(messageKey)+'&_='+new Date().getTime(),true);
-        xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
-        xhr.timeout=15000;
-        xhr.onreadystatechange=function(){
-            if(xhr.readyState!==4)return;
-            if(xhr.status>=200&&xhr.status<300){
-                host.innerHTML=xhr.responseText;
+        requestMailHtml('detail_panel',messageKey,function(ok,html,status,reason){
+            if(activeDetailMessageKey!==messageKey)return;
+            if(ok){
+                host.innerHTML=html;
                 initDetailPanel(host);
+            }else if(reason==='timeout'){
+                host.innerHTML='<div class="pm-detail-load-error"><strong>메일 정보 조회가 지연되고 있습니다.</strong><p>메일 목록은 계속 사용할 수 있습니다.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-panel data-message-key="'+escapeHtml(messageKey)+'">다시 시도</button></div>';
             }else{
-                host.innerHTML=xhr.responseText||'<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>잠시 후 다시 선택해 주세요.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-panel data-message-key="'+escapeHtml(messageKey)+'">다시 시도</button></div>';
+                host.innerHTML=html||'<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>잠시 후 다시 선택해 주세요.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-panel data-message-key="'+escapeHtml(messageKey)+'">다시 시도</button></div>';
             }
-        };
-        xhr.ontimeout=function(){
-            host.innerHTML='<div class="pm-detail-load-error"><strong>메일 정보 조회가 지연되고 있습니다.</strong><p>메일 목록은 계속 사용할 수 있습니다.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-panel data-message-key="'+escapeHtml(messageKey)+'">다시 시도</button></div>';
-        };
-        xhr.onerror=function(){
-            host.innerHTML='<div class="pm-detail-load-error"><strong>메일 정보를 열지 못했습니다.</strong><p>네트워크 연결을 확인해 주세요.</p><button type="button" class="pm-btn pm-btn-light" data-retry-mail-panel data-message-key="'+escapeHtml(messageKey)+'">다시 시도</button></div>';
-        };
-        xhr.send(null);
+        });
     }
 
     function currentMessageFromUrl(){

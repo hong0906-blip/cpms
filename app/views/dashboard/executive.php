@@ -357,48 +357,28 @@ function cpms_render_executive_attendance_modal($modalKey, $title, $people, $kin
     ?>
     <div id="modal-execAttendance-<?php echo h($modalKey); ?>" class="cpms-exec-attendance-modal fixed inset-0 z-50 hidden" role="dialog" aria-modal="true" aria-labelledby="modal-execAttendance-title-<?php echo h($modalKey); ?>">
         <div class="absolute inset-0 bg-slate-950/55" data-exec-attendance-close="<?php echo h($modalKey); ?>"></div>
-        <div class="absolute inset-0 flex items-center justify-center p-4">
-            <div class="relative w-full max-w-5xl max-h-[88vh] overflow-hidden rounded-3xl bg-white shadow-2xl border border-gray-100">
-                <div class="flex items-center justify-between gap-4 px-5 py-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white">
-                    <div class="min-w-0">
-                        <div id="modal-execAttendance-title-<?php echo h($modalKey); ?>" class="text-xl font-extrabold text-gray-900"><?php echo h($title); ?></div>
-                        <div class="mt-1 text-sm text-gray-500">한 줄에 3명씩 표시됩니다.</div>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <span class="inline-flex px-3 py-1.5 rounded-full border text-sm font-extrabold <?php echo h($accentClass); ?>"><?php echo count($people); ?>명</span>
-                        <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-extrabold text-gray-700 hover:bg-gray-50" data-exec-attendance-close="<?php echo h($modalKey); ?>">닫기</button>
+        <div class="absolute inset-0 flex items-center justify-center p-2 sm:p-4">
+            <div class="relative w-full max-w-6xl max-h-[92vh] sm:max-h-[88vh] overflow-hidden rounded-2xl sm:rounded-3xl bg-white shadow-2xl border border-gray-100">
+                <div class="flex items-center justify-between gap-2 px-3 sm:px-5 py-3 sm:py-4 border-b border-gray-100 bg-gradient-to-r from-slate-50 to-white">
+                    <div id="modal-execAttendance-title-<?php echo h($modalKey); ?>" class="min-w-0 flex-1 text-base sm:text-xl leading-tight font-extrabold text-gray-900 whitespace-nowrap"><?php echo h($title); ?></div>
+                    <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                        <span class="inline-flex px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border text-xs sm:text-sm font-extrabold whitespace-nowrap <?php echo h($accentClass); ?>"><?php echo count($people); ?>명</span>
+                        <button type="button" class="px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl border border-gray-200 bg-white text-xs sm:text-sm font-extrabold text-gray-700 whitespace-nowrap hover:bg-gray-50" data-exec-attendance-close="<?php echo h($modalKey); ?>">닫기</button>
                     </div>
                 </div>
-                <div class="p-4 md:p-5 overflow-y-auto max-h-[70vh]">
+                <div class="p-3 sm:p-4 md:p-5 overflow-y-auto max-h-[72vh] sm:max-h-[70vh]">
                     <?php if (count($people) === 0): ?>
                         <div class="p-8 rounded-2xl border border-dashed border-gray-200 bg-gray-50 text-center text-sm font-bold text-gray-500"><?php echo h($title); ?> 명단이 없습니다.</div>
                     <?php else: ?>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                        <div class="grid grid-cols-3 gap-1.5 sm:gap-2 lg:grid-cols-5">
                             <?php foreach ($people as $personIndex => $person): ?>
                                 <?php
                                 $isExtraPerson = ((int)$personIndex >= 10);
                                 $positionLabel = isset($person['position']) && trim((string)$person['position']) !== '' ? $person['position'] : '-';
                                 ?>
-                                <article class="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition <?php echo $isExtraPerson ? 'hidden' : ''; ?>" <?php echo $isExtraPerson ? 'data-exec-attendance-extra="' . h($modalKey) . '"' : ''; ?>>
-                                    <div class="flex items-start justify-between gap-3">
-                                        <div class="min-w-0">
-                                            <div class="text-base font-extrabold text-gray-900 truncate"><?php echo h(isset($person['name']) ? $person['name'] : '-'); ?></div>
-                                            <div class="mt-1 text-xs text-gray-500 break-words"><?php echo h(cpms_executive_dashboard_department_label($person)); ?> · <?php echo h($positionLabel); ?></div>
-                                        </div>
-                                        <span class="shrink-0 inline-flex w-9 h-9 items-center justify-center rounded-xl border font-black <?php echo h($accentClass); ?>"><?php echo $isPresent ? '출' : '미'; ?></span>
-                                    </div>
-                                    <?php if ($isPresent): ?>
-                                        <?php
-                                        $checkInLabel = call_user_func($attendanceTimeLabel, isset($person['check_in']) ? $person['check_in'] : '');
-                                        $checkOutLabel = call_user_func($attendanceTimeLabel, isset($person['check_out']) ? $person['check_out'] : '');
-                                        ?>
-                                        <div class="mt-3 grid grid-cols-2 gap-2 text-xs">
-                                            <div class="rounded-xl bg-sky-50 px-3 py-2"><span class="block text-sky-600 font-bold">출근</span><b class="text-sky-900"><?php echo h($checkInLabel); ?></b></div>
-                                            <div class="rounded-xl bg-slate-50 px-3 py-2"><span class="block text-slate-500 font-bold">퇴근</span><b class="text-slate-800"><?php echo h($checkOutLabel); ?></b></div>
-                                        </div>
-                                    <?php else: ?>
-                                        <div class="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-xs font-bold text-rose-700">오늘 출근 기록 없음</div>
-                                    <?php endif; ?>
+                                <article class="min-w-0 px-2 py-2 sm:px-3 sm:py-2.5 rounded-xl border-2 border-rose-200 bg-white text-center <?php echo $isExtraPerson ? 'hidden' : ''; ?>" <?php echo $isExtraPerson ? 'data-exec-attendance-extra="' . h($modalKey) . '"' : ''; ?>>
+                                    <div class="text-xs sm:text-base leading-tight font-extrabold text-gray-900 truncate"><?php echo h(isset($person['name']) ? $person['name'] : '-'); ?></div>
+                                    <div class="mt-0.5 text-[9px] sm:text-xs leading-snug text-gray-500 truncate"><?php echo h(cpms_executive_dashboard_department_label($person)); ?> · <?php echo h($positionLabel); ?></div>
                                 </article>
                             <?php endforeach; ?>
                         </div>

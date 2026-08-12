@@ -19,7 +19,7 @@ try {
     $base=$scheme.'://'.$host.rtrim((string)base_url(),'/');
     $cronInfo=$service->getCronInfo($base);
 } catch (Exception $e) {
-    $errorMessage=$e->getMessage(); $settings=array('enabled'=>false,'username'=>'','batch_size'=>100,'imap_host'=>'imap.naver.com','imap_port'=>993); $syncState=array(); $cacheStats=array('storage_writable'=>false,'total_messages'=>0,'cached_messages'=>0,'missing_messages'=>0,'legacy_messages'=>0,'cache_version'=>8); $indexStatus=array('version'=>0,'package_version'=>'','updated_at'=>'','item_count'=>0,'file_exists'=>false,'file_size'=>0,'writable'=>false); $cronInfo=array('url'=>'','header_name'=>'X-CPMS-Mail-Key','header_value'=>'');
+    $errorMessage=$e->getMessage(); $settings=array('enabled'=>false,'username'=>'','batch_size'=>100,'imap_host'=>'imap.naver.com','imap_port'=>993); $syncState=array(); $cacheStats=array('storage_writable'=>false,'total_messages'=>0,'cached_messages'=>0,'missing_messages'=>0,'legacy_messages'=>0,'cache_version'=>17); $indexStatus=array('version'=>0,'package_version'=>'','updated_at'=>'','item_count'=>0,'file_exists'=>false,'file_size'=>0,'writable'=>false); $cronInfo=array('url'=>'','header_name'=>'X-CPMS-Mail-Key','header_value'=>'');
 }
 PublicMailWebHelper::render('public_mail/settings',array(
     'selectedMenu'=>'네이버 메일','pageTitle'=>'네이버 메일 설정','settings'=>$settings,'syncState'=>$syncState,

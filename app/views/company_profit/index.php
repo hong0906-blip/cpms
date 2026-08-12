@@ -21,6 +21,10 @@ $defaultEndMonth = ($selectedYear === (int)date('Y')) ? date('Y-m') : sprintf('%
 $endMonth = isset($filters['end_month']) ? (string)$filters['end_month'] : $defaultEndMonth;
 $years = (isset($filters['years']) && is_array($filters['years'])) ? $filters['years'] : array((int)date('Y'));
 $statusOptions = (isset($filters['status_options']) && is_array($filters['status_options'])) ? $filters['status_options'] : array();
+$refreshParams = is_array($_GET) ? $_GET : array();
+$refreshParams['r'] = 'company_profit';
+$refreshParams['refresh'] = '1';
+$refreshUrl = '?' . http_build_query($refreshParams, '', '&');
 ?>
 
 <style>
@@ -62,6 +66,36 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
 .cp-company-profit .cp-bar-ledger { min-width:760px; display:flex; flex-direction:column; gap:12px; }
 .cp-company-profit .cp-project-bar-row { display:grid; grid-template-columns:190px 1fr 105px 120px; gap:12px; align-items:center; }
 .cp-company-profit .cp-project-name { font-weight:900; color:#0f172a; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.cp-company-profit .cp-project-name a,
+.cp-company-profit .cp-project-link { color:inherit; text-decoration:none; }
+.cp-company-profit .cp-project-name a:hover,
+.cp-company-profit .cp-project-link:hover { text-decoration:underline; }
+.cp-company-profit .cp-project-over-cost,
+.cp-company-profit .cp-project-over-cost a { color:#dc2626 !important; }
+.cp-company-profit .cp-detail-trigger { border:0; padding:2px 0; background:transparent; color:#1d4ed8; font:inherit; font-weight:900; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px; cursor:pointer; }
+.cp-company-profit .cp-detail-trigger:hover { color:#1e40af; }
+.cp-company-profit .cp-detail-trigger:focus { outline:2px solid #93c5fd; outline-offset:3px; border-radius:3px; }
+.cp-detail-modal[hidden] { display:none !important; }
+.cp-detail-modal { position:fixed; inset:0; z-index:10000; display:flex; align-items:center; justify-content:center; padding:20px; }
+.cp-detail-modal__backdrop { position:absolute; inset:0; background:rgba(15,23,42,.62); }
+.cp-detail-modal__panel { position:relative; width:min(760px,100%); max-height:calc(100vh - 40px); overflow:hidden; display:flex; flex-direction:column; border-radius:14px; background:#fff; box-shadow:0 25px 70px rgba(15,23,42,.3); }
+.cp-detail-modal__head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; padding:18px 20px; border-bottom:1px solid #e5e7eb; }
+.cp-detail-modal__head h3 { margin:0; color:#0f172a; font-size:19px; font-weight:900; }
+.cp-detail-modal__head p { margin:5px 0 0; color:#64748b; font-size:12px; }
+.cp-detail-modal__close { width:36px; height:36px; flex:0 0 36px; border:1px solid #dbe3ef; border-radius:9px; background:#fff; color:#334155; font-size:23px; line-height:1; cursor:pointer; }
+.cp-detail-modal__body { overflow:auto; padding:16px 20px 20px; }
+.cp-detail-list { display:flex; flex-direction:column; gap:10px; }
+.cp-detail-row { border:1px solid #e5e7eb; border-radius:10px; padding:13px 14px; background:#fff; }
+.cp-detail-row__main { display:flex; align-items:center; justify-content:space-between; gap:14px; }
+.cp-detail-row__title { display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:#0f172a; font-weight:900; }
+.cp-detail-row__amount { color:#0f172a; font-weight:900; white-space:nowrap; }
+.cp-detail-badge { display:inline-flex; align-items:center; border-radius:999px; padding:3px 8px; font-size:11px; font-weight:900; }
+.cp-detail-badge--confirmed { color:#1d4ed8; background:#dbeafe; }
+.cp-detail-badge--expected { color:#7c3aed; background:#ede9fe; }
+.cp-detail-components { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.cp-detail-component { border:1px solid #e2e8f0; border-radius:999px; padding:4px 8px; background:#f8fafc; color:#475569; font-size:11px; font-weight:800; }
+.cp-detail-empty { padding:24px 12px; color:#64748b; text-align:center; }
+body.cp-detail-modal-open { overflow:hidden; }
 .cp-company-profit .cp-bars { display:flex; flex-direction:column; gap:6px; min-width:0; }
 .cp-company-profit .cp-bar-line { display:grid; grid-template-columns:72px 1fr 112px; gap:8px; align-items:center; font-size:12px; color:#64748b; }
 .cp-company-profit .cp-track { display:block; width:100%; height:13px; border-radius:999px; background:#eef2f7; overflow:hidden; }
@@ -88,6 +122,9 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
   .cp-company-profit .cp-summary-card .value { font-size:17px; }
   .cp-company-profit .cp-panel { padding:12px; }
   .cp-company-profit .cp-panel-title { display:block; }
+  .cp-detail-modal { padding:10px; }
+  .cp-detail-modal__panel { max-height:calc(100vh - 20px); }
+  .cp-detail-row__main { align-items:flex-start; flex-direction:column; gap:6px; }
 }
 </style>
 
@@ -97,6 +134,7 @@ $statusOptions = (isset($filters['status_options']) && is_array($filters['status
       <div>
         <h2 class="text-2xl font-extrabold text-gray-900">경영현황</h2>
       </div>
+      <a href="<?php echo h($refreshUrl); ?>" class="cp-btn cp-btn-sub" title="캐시를 사용하지 않고 최신 자료를 다시 집계합니다."><i data-lucide="refresh-cw"></i>최신 데이터 새로고침</a>
     </div>
 
     <form method="get" action="" class="cp-filter">

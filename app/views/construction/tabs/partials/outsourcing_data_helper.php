@@ -27,6 +27,7 @@ if (!function_exists('cpms_outsourcing_cost_ensure_table')) {
                 business_no VARCHAR(30) NULL,
                 contact VARCHAR(50) NULL,
                 amount DECIMAL(15,2) NOT NULL DEFAULT 0,
+                advance_payment_yn CHAR(1) NOT NULL DEFAULT 'N',
                 memo VARCHAR(500) NULL,
                 created_by_name VARCHAR(100) NULL,
                 created_by_email VARCHAR(190) NULL,
@@ -41,9 +42,26 @@ if (!function_exists('cpms_outsourcing_cost_ensure_table')) {
                 if (isset($columnRow['Field'])) $columnMap[(string)$columnRow['Field']] = true;
             }
             if (!isset($columnMap['memo'])) {
-                $pdo->exec("ALTER TABLE cpms_outsourcing_costs ADD COLUMN memo VARCHAR(500) NULL AFTER amount");
+                try {
+                    $pdo->exec("ALTER TABLE cpms_outsourcing_costs ADD COLUMN memo VARCHAR(500) NULL AFTER amount");
+                } catch (Exception $memoColumnException) {
+                    // The main cost record must remain usable even when the
+                    // production DB account cannot alter an optional column.
+                    error_log('[OutsourcingCost] optional memo column: ' . $memoColumnException->getMessage());
+                }
             }
-            cpms_outsourcing_file_ensure_schema($pdo);
+            if (!isset($columnMap['advance_payment_yn'])) {
+                try {
+                    $pdo->exec("ALTER TABLE cpms_outsourcing_costs ADD COLUMN advance_payment_yn CHAR(1) NOT NULL DEFAULT 'N' AFTER amount");
+                } catch (Exception $advancePaymentColumnException) {
+                    // 기존 외주비 저장은 유지하되, Y 값 저장 시 저장 처리부에서
+                    // 명확한 오류를 반환할 수 있도록 여기서는 기록만 남깁니다.
+                    error_log('[OutsourcingCost] advance payment column: ' . $advancePaymentColumnException->getMessage());
+                }
+            }
+            // Attachment storage is optional. Its schema is prepared only by
+            // attachment operations so a Drive/file-table problem cannot
+            // block saving the outsourcing cost itself.
             $ensured[$cacheKey] = true;
             return true;
         } catch (Exception $e) {

@@ -693,10 +693,11 @@ class AiDailySnapshotService
             }
         }
         $laborPeriod = CostChangeService::periodForYm('labor', $targetYm);
+        $outsourcingPeriod = CostChangeService::periodForYm('outsourcing', $targetYm);
         $costPeriod = CostChangeService::periodForYm('material', $targetYm);
         self::addProjectIdsByDate($pdo, 'cpms_material_usage', 'use_date', $costPeriod['start'], $costPeriod['end'], $ids);
         self::addProjectIdsByDate($pdo, 'cpms_equipment_usage', 'use_date', $costPeriod['start'], $costPeriod['end'], $ids);
-        self::addProjectIdsByDate($pdo, 'cpms_outsourcing_costs', 'expense_date', $costPeriod['start'], $costPeriod['end'], $ids);
+        self::addProjectIdsByDate($pdo, 'cpms_outsourcing_costs', 'expense_date', $outsourcingPeriod['start'], $outsourcingPeriod['end'], $ids);
         self::addProjectIdsByDate($pdo, 'cpms_progress_billings', 'progress_date', $laborPeriod['start'], $laborPeriod['end'], $ids);
         self::addProjectIdsByDate($pdo, 'cpms_schedule_task_item_progress', 'work_date', $laborPeriod['start'], $laborPeriod['end'], $ids);
         self::addProjectIdsByDate($pdo, 'cpms_schedule_progress', 'work_date', $laborPeriod['start'], $laborPeriod['end'], $ids);
@@ -862,6 +863,7 @@ class AiDailySnapshotService
         $detail = array(
             'periods'=>array(
                 'labor'=>CostChangeService::periodForYm('labor', $targetYm),
+                'outsourcing'=>CostChangeService::periodForYm('outsourcing', $targetYm),
                 'sales'=>CostChangeService::periodForYm('labor', $targetYm),
                 'other_costs'=>$costPeriod
             ),

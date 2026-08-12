@@ -178,6 +178,10 @@ $laborWorkerRatioMap = cpms_load_project_labor_worker_month_ratio_map(isset($pdo
 $projectLaborWorkers = cpms_apply_project_labor_worker_month_ratios($projectLaborWorkers, $laborWorkerRatioMap);
 $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
 $laborWorkerMonthMap = function_exists('cpms_load_project_labor_worker_month_map') ? cpms_load_project_labor_worker_month_map(isset($pdo) ? $pdo : null, $projectId, $selectedMonth) : array();
+$previousLaborMonth = date('Y-m', strtotime($selectedMonth . '-01 -1 month'));
+$previousLaborWorkers = ($laborTab === 'workers' && $canEditLabor && function_exists('cpms_load_project_labor_workers_for_month'))
+    ? cpms_load_project_labor_workers_for_month(isset($pdo) ? $pdo : null, $projectId, $previousLaborMonth)
+    : array();
 if (is_array($workerRows) && is_array($laborWorkerMonthMap) && count($laborWorkerMonthMap) > 0) {
     foreach ($workerRows as $workerRowIndex => $workerRow) {
         $laborWorkerId = isset($workerRow['id']) ? (int)$workerRow['id'] : 0;
@@ -538,11 +542,17 @@ foreach ($timesheetWorkers as $worker) {
 <?php if ($laborTab === 'timesheet'): ?>
     <?php if ($canEditLabor): ?>
     <div class="mb-3 flex flex-wrap items-center justify-end gap-2">
+        <button type="button" class="px-4 py-2 rounded-2xl bg-red-600 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="2">
+            2공수 일괄 · 승인요청
+        </button>
         <button type="button" class="px-4 py-2 rounded-2xl bg-amber-600 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="1.5">
             1.5공수 일괄 · 승인요청
         </button>
-        <button type="button" class="px-4 py-2 rounded-2xl bg-red-600 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="2">
-            2공수 일괄 · 승인요청
+        <button type="button" class="px-4 py-2 rounded-2xl bg-orange-600 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="1.4">
+            1.4공수 일괄 · 승인요청
+        </button>
+        <button type="button" class="px-4 py-2 rounded-2xl bg-yellow-600 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="1.3">
+            1.3공수 일괄 · 승인요청
         </button>
         <button type="button" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="1">
             1공수일괄
@@ -617,13 +627,20 @@ foreach ($timesheetWorkers as $worker) {
         <div class="text-sm text-gray-600 mt-1">임금 단가와 계좌 정보를 등록하고, 선택한 월에 적용할 노무비·외주비 배분을 설정합니다.</div>
         <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 선택해 프로젝트에 추가합니다.</div>
         <div class="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
-            <label class="text-sm font-extrabold text-blue-900">월별 보기</label>
-            <select class="mt-2 w-full max-w-xs px-3 py-2 rounded-xl border border-blue-200 bg-white text-sm font-bold"
-                    onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=workers&labor_sort=<?php echo h($laborSort); ?>&labor_sort_dir=<?php echo h($laborSortDir); ?>&worker_sort=<?php echo h($workerSort); ?>&worker_sort_dir=<?php echo h($workerSortDir); ?>&month=' + encodeURIComponent(this.value)">
-                <?php foreach ($months as $workerMonthOption): ?>
-                    <option value="<?php echo h($workerMonthOption); ?>" <?php echo $workerMonthOption === $selectedMonth ? 'selected' : ''; ?>><?php echo h(isset($monthLabels[$workerMonthOption]) ? $monthLabels[$workerMonthOption] : $workerMonthOption); ?></option>
-                <?php endforeach; ?>
-            </select>
+            <div class="flex flex-wrap items-end justify-between gap-3">
+                <div class="w-full max-w-xs">
+                    <label class="text-sm font-extrabold text-blue-900">월별 보기</label>
+                    <select class="mt-2 w-full px-3 py-2 rounded-xl border border-blue-200 bg-white text-sm font-bold"
+                            onchange="location.href='?r=공사&pid=<?php echo (int)$pid; ?>&tab=labor&labor_tab=workers&labor_sort=<?php echo h($laborSort); ?>&labor_sort_dir=<?php echo h($laborSortDir); ?>&worker_sort=<?php echo h($workerSort); ?>&worker_sort_dir=<?php echo h($workerSortDir); ?>&month=' + encodeURIComponent(this.value)">
+                        <?php foreach ($months as $workerMonthOption): ?>
+                            <option value="<?php echo h($workerMonthOption); ?>" <?php echo $workerMonthOption === $selectedMonth ? 'selected' : ''; ?>><?php echo h(isset($monthLabels[$workerMonthOption]) ? $monthLabels[$workerMonthOption] : $workerMonthOption); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <button type="button" class="px-4 py-2 rounded-2xl bg-blue-700 text-white font-extrabold shadow-sm hover:bg-blue-800" data-previous-workers-modal-open>
+                    전달인원 가져오기
+                </button>
+            </div>
             <div class="mt-2 text-xs font-bold text-blue-800"><?php echo h($selectedMonth); ?>에 저장한 비용 배분과 외주비 적용기간은 다른 월에 영향을 주지 않습니다.</div>
         </div>
 
@@ -875,6 +892,77 @@ foreach ($timesheetWorkers as $worker) {
             </div>
         </form>    
 
+        <div id="previousWorkersImportModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
+            <div class="absolute inset-0 bg-black/50" data-previous-workers-modal-close></div>
+            <div class="absolute inset-0 flex items-center justify-center p-4">
+                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_workers_save" class="relative flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-3xl border border-gray-100 bg-white shadow-2xl" id="previousWorkersImportForm">
+                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                    <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+                    <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+                    <input type="hidden" name="labor_tab" value="workers">
+                    <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
+                    <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
+                    <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-5">
+                        <div>
+                            <div class="text-lg font-extrabold text-gray-900">전달인원 가져오기</div>
+                            <div class="mt-1 text-xs text-gray-500"><?php echo h($previousLaborMonth); ?>에 등록된 인원을 선택해 <?php echo h($selectedMonth); ?>로 가져옵니다.</div>
+                        </div>
+                        <button type="button" class="rounded-xl border border-gray-200 px-3 py-2 font-bold text-gray-700" data-previous-workers-modal-close>닫기</button>
+                    </div>
+                    <div class="flex-1 overflow-auto p-5">
+                        <div class="mb-3 rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-900">가져온 인원은 업체명·성명·핸드폰 번호·임금단가를 그대로 사용하며, 비용배분은 전액 노무비로 시작합니다.</div>
+                        <table class="min-w-[760px] w-full border border-gray-200 text-sm">
+                            <thead class="bg-gray-100 text-gray-700">
+                                <tr>
+                                    <th class="w-12 border border-gray-200 px-3 py-2 text-center"><input type="checkbox" data-previous-workers-select-all aria-label="전체 선택"></th>
+                                    <th class="border border-gray-200 px-3 py-2">인력사 업체명</th>
+                                    <th class="border border-gray-200 px-3 py-2">성명</th>
+                                    <th class="border border-gray-200 px-3 py-2">핸드폰 번호</th>
+                                    <th class="border border-gray-200 px-3 py-2 text-right">임금 단가</th>
+                                    <th class="border border-gray-200 px-3 py-2 text-center">상태</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php if (count($previousLaborWorkers) > 0): ?>
+                                <?php foreach ($previousLaborWorkers as $previousLaborWorker): ?>
+                                    <?php
+                                    $previousWorkerId = isset($previousLaborWorker['id']) ? (int)$previousLaborWorker['id'] : 0;
+                                    $previousWorkerCompany = isset($previousLaborWorker['agency_name_snapshot']) ? trim((string)$previousLaborWorker['agency_name_snapshot']) : '';
+                                    if ($previousWorkerCompany === '' && isset($previousLaborWorker['company_name'])) $previousWorkerCompany = trim((string)$previousLaborWorker['company_name']);
+                                    if ($previousWorkerCompany === '') $previousWorkerCompany = '창명건설';
+                                    $previousWorkerName = isset($previousLaborWorker['worker_name_snapshot']) ? trim((string)$previousLaborWorker['worker_name_snapshot']) : '';
+                                    if ($previousWorkerName === '' && isset($previousLaborWorker['name'])) $previousWorkerName = trim((string)$previousLaborWorker['name']);
+                                    $previousWorkerPhone = isset($previousLaborWorker['phone']) ? trim((string)$previousLaborWorker['phone']) : '';
+                                    $previousWorkerWage = isset($previousLaborWorker['daily_wage_snapshot']) ? (int)$previousLaborWorker['daily_wage_snapshot'] : 0;
+                                    if ($previousWorkerWage <= 0 && isset($previousLaborWorker['deposit_rate'])) $previousWorkerWage = (int)$previousLaborWorker['deposit_rate'];
+                                    $previousWorkerAlreadyCurrent = isset($laborWorkerMonthMap[$previousWorkerId]);
+                                    ?>
+                                    <tr class="<?php echo $previousWorkerAlreadyCurrent ? 'bg-gray-50 text-gray-400' : 'bg-white'; ?>">
+                                        <td class="border border-gray-200 px-3 py-2 text-center"><input type="checkbox" name="previous_worker_ids[]" value="<?php echo $previousWorkerId; ?>" data-previous-worker-check <?php echo $previousWorkerAlreadyCurrent ? 'disabled' : ''; ?> aria-label="<?php echo h($previousWorkerName); ?> 선택"></td>
+                                        <td class="border border-gray-200 px-3 py-2 font-bold"><?php echo h($previousWorkerCompany); ?></td>
+                                        <td class="border border-gray-200 px-3 py-2 font-extrabold"><?php echo h($previousWorkerName); ?></td>
+                                        <td class="border border-gray-200 px-3 py-2"><?php echo h($previousWorkerPhone === '' ? '-' : $previousWorkerPhone); ?></td>
+                                        <td class="border border-gray-200 px-3 py-2 text-right font-bold"><?php echo h(number_format($previousWorkerWage)); ?>원</td>
+                                        <td class="border border-gray-200 px-3 py-2 text-center"><?php if ($previousWorkerAlreadyCurrent): ?><span class="rounded-full bg-gray-200 px-2 py-1 text-xs font-bold text-gray-600">이미 등록</span><?php else: ?><span class="text-xs font-bold text-blue-700">가져오기 가능</span><?php endif; ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            <?php else: ?>
+                                <tr><td colspan="6" class="border border-gray-200 px-3 py-10 text-center text-gray-500"><?php echo h($previousLaborMonth); ?>에 등록된 전달 인원이 없습니다.</td></tr>
+                            <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="flex flex-wrap items-center justify-between gap-3 border-t border-gray-100 bg-gray-50 p-5">
+                        <div class="text-sm font-extrabold text-gray-700">선택 <span class="text-blue-700" data-previous-workers-selected-count>0</span>명</div>
+                        <div class="flex gap-2">
+                            <button type="button" class="rounded-xl border border-gray-300 bg-white px-4 py-2 font-bold" data-previous-workers-modal-close>취소</button>
+                            <button type="submit" name="action" value="import_previous" class="rounded-xl bg-blue-700 px-5 py-2 font-extrabold text-white disabled:cursor-not-allowed disabled:bg-gray-300" data-previous-workers-import-submit disabled>선택 인원 가져오기</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div id="workforceSearchModal" class="fixed inset-0 z-50 hidden">
             <div class="absolute inset-0 bg-black/40" data-workforce-modal-close></div>
             <div class="absolute inset-0 flex items-center justify-center p-4">
@@ -902,6 +990,49 @@ foreach ($timesheetWorkers as $worker) {
         // 파일: app/views/construction/tabs/labor.php
         // 현장 담당자가 외주비 비율만 선택하면 노무비 비율과 합계가 즉시 보이도록 합니다.
         (function(){
+            var previousModal = document.getElementById('previousWorkersImportModal');
+            var previousForm = document.getElementById('previousWorkersImportForm');
+            var previousOpenButtons = document.querySelectorAll('[data-previous-workers-modal-open]');
+            var previousCloseButtons = document.querySelectorAll('[data-previous-workers-modal-close]');
+            var previousSelectAll = previousModal ? previousModal.querySelector('[data-previous-workers-select-all]') : null;
+            var previousImportButton = previousModal ? previousModal.querySelector('[data-previous-workers-import-submit]') : null;
+            var previousSelectedCount = previousModal ? previousModal.querySelector('[data-previous-workers-selected-count]') : null;
+            function previousEnabledChecks() {
+                return previousModal ? previousModal.querySelectorAll('[data-previous-worker-check]:not(:disabled)') : [];
+            }
+            function updatePreviousSelection() {
+                var checks = previousEnabledChecks();
+                var checked = 0;
+                for (var previousIndex = 0; previousIndex < checks.length; previousIndex++) if (checks[previousIndex].checked) checked++;
+                if (previousSelectedCount) previousSelectedCount.textContent = String(checked);
+                if (previousImportButton) previousImportButton.disabled = checked === 0;
+                if (previousSelectAll) {
+                    previousSelectAll.disabled = checks.length === 0;
+                    previousSelectAll.checked = checks.length > 0 && checked === checks.length;
+                    previousSelectAll.indeterminate = checked > 0 && checked < checks.length;
+                }
+            }
+            function openPreviousModal() {
+                if (!previousModal) return;
+                previousModal.classList.remove('hidden');
+                previousModal.setAttribute('aria-hidden', 'false');
+                document.body.classList.add('overflow-hidden');
+                updatePreviousSelection();
+            }
+            function closePreviousModal() {
+                if (!previousModal) return;
+                previousModal.classList.add('hidden');
+                previousModal.setAttribute('aria-hidden', 'true');
+                document.body.classList.remove('overflow-hidden');
+            }
+            for (var previousOpenIndex = 0; previousOpenIndex < previousOpenButtons.length; previousOpenIndex++) previousOpenButtons[previousOpenIndex].addEventListener('click', openPreviousModal);
+            for (var previousCloseIndex = 0; previousCloseIndex < previousCloseButtons.length; previousCloseIndex++) previousCloseButtons[previousCloseIndex].addEventListener('click', closePreviousModal);
+            if (previousSelectAll) previousSelectAll.addEventListener('change', function(){var checks=previousEnabledChecks();for(var checkIndex=0;checkIndex<checks.length;checkIndex++)checks[checkIndex].checked=previousSelectAll.checked;updatePreviousSelection();});
+            if (previousModal) previousModal.addEventListener('change', function(e){if(e.target&&e.target.hasAttribute('data-previous-worker-check'))updatePreviousSelection();});
+            if (previousForm) previousForm.addEventListener('submit', function(e){var checks=previousEnabledChecks(),checked=0;for(var checkIndex=0;checkIndex<checks.length;checkIndex++)if(checks[checkIndex].checked)checked++;if(checked===0){e.preventDefault();alert('전달에서 가져올 인원을 선택해주세요.');}});
+            document.addEventListener('keydown', function(e){if(e.key==='Escape'&&previousModal&&!previousModal.classList.contains('hidden'))closePreviousModal();});
+            updatePreviousSelection();
+
             function clampRatio(value) {
                 var ratio = parseInt(value, 10);
                 if (isNaN(ratio)) ratio = 0;
@@ -1639,7 +1770,7 @@ foreach ($timesheetWorkers as $worker) {
     }
 
     // 파일: app/views/construction/tabs/labor.php
-    // 1.5/2공수는 선택 인원을 한 번의 HTTP 요청으로 보내 같은 승인 묶음으로 저장합니다.
+    // 1.3/1.4/1.5/2공수는 선택 인원을 한 번의 HTTP 요청으로 보내 같은 승인 묶음으로 저장합니다.
     function saveGongsuBulkApprovalRequest(targets, newValue, reason, requestScope){
         var entries = [];
         for (var i = 0; i < targets.length; i++) {
