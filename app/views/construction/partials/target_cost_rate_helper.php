@@ -341,6 +341,13 @@ function cpms_target_cost_rate_send_notification($pdo, $requestId) {
         array_push($lines, '사유 : ' . (isset($row['reason']) && trim((string)$row['reason']) !== '' ? trim((string)$row['reason']) : '-'));
         array_push($lines, '');
         array_push($lines, '공사 > 상황 탭에서 승인 처리 바랍니다.');
+        if (function_exists('cpms_app_route_url')) {
+            $requestUrl = cpms_app_route_url($pdo, '공사', array(
+                'pid' => isset($row['project_id']) ? (int)$row['project_id'] : 0,
+                'tab' => 'status'
+            ), $employeeId);
+            if (trim((string)$requestUrl) !== '') array_push($lines, 'URL : ' . $requestUrl);
+        }
         return cpms_send_google_chat_to_employee($pdo, $employeeId, implode("\n", $lines), (int)$requestId, 'TARGET_COST_RATE_REQUEST', 'TARGET_COST_RATE');
     } catch (Exception $e) {
         error_log('[target_cost_rate_chat] ' . $e->getMessage());

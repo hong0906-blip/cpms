@@ -18,6 +18,7 @@ function cpms_attendance_chat_link_guard($label, $condition)
 $requestSave = file_get_contents($root . '/app/views/attendance/request_save.php');
 $attendanceView = file_get_contents($root . '/app/views/admin/attendance.php');
 $chatHelpers = file_get_contents($root . '/app/views/common/chat_notification_helpers.php');
+$googleChatHelpers = file_get_contents($root . '/app/views/approval/google_chat_helpers.php');
 
 cpms_attendance_chat_link_guard(
     'attendance request chat message links to request management',
@@ -28,8 +29,19 @@ cpms_attendance_chat_link_guard(
 );
 
 cpms_attendance_chat_link_guard(
-    'chat link receives the approver login token',
+    'card button link receives the approver login token',
     strpos($chatHelpers, 'cpms_chat_login_append_missing_tokens($messageText, (int)$receiverId)') !== false
+);
+
+cpms_attendance_chat_link_guard(
+    'all Google Chat action links use a filled blue open-link button',
+    strpos($googleChatHelpers, 'function approval_google_chat_extract_action_link') !== false
+    && strpos($googleChatHelpers, "'바로 이동하시려면 눌러주세요'") !== false
+    && strpos($googleChatHelpers, "'cardsV2' => array(") !== false
+    && strpos($googleChatHelpers, "'buttonList' => array(") !== false
+    && strpos($googleChatHelpers, "'type' => 'FILLED'") !== false
+    && strpos($googleChatHelpers, "'color' => array(") !== false
+    && strpos($googleChatHelpers, "'openLink' => array(") !== false
 );
 
 cpms_attendance_chat_link_guard(

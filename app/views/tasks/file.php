@@ -51,6 +51,25 @@ if (!$download && $target !== '') {
     exit;
 }
 
+if (function_exists('session_write_close')) @session_write_close();
+
+$path = cpms_tasks_local_file_path(isset($file['stored_path']) ? $file['stored_path'] : '');
+if ($path !== '') {
+    $name = isset($file['original_name']) && trim((string)$file['original_name']) !== '' ? trim((string)$file['original_name']) : basename($path);
+    $mime = isset($file['mime_type']) && trim((string)$file['mime_type']) !== '' ? trim((string)$file['mime_type']) : 'application/octet-stream';
+    if (cpms_tasks_drive_helper_loaded()) $mime = cpms_drive_detect_mime_type($path);
+    $asciiName = preg_replace('/[^A-Za-z0-9\.\_\-]+/', '_', $name);
+    if ($asciiName === '') $asciiName = 'task_file';
+    $disposition = $download ? 'attachment' : 'inline';
+
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . (string)filesize($path));
+    header('Content-Disposition: ' . $disposition . '; filename="' . $asciiName . '"; filename*=UTF-8\'\'' . rawurlencode($name));
+    header('X-Content-Type-Options: nosniff');
+    readfile($path);
+    exit;
+}
+
 if ($storageType === 'google_drive' && $driveFileId !== '' && cpms_tasks_drive_helper_loaded() && function_exists('cpms_drive_download_file')) {
     $driveDownload = cpms_drive_download_file($driveFileId);
     if (is_array($driveDownload) && !empty($driveDownload['ok'])) {
@@ -71,23 +90,6 @@ if ($storageType === 'google_drive' && $driveFileId !== '' && cpms_tasks_drive_h
 
 if ($download && $contentUrl !== '') {
     header('Location: ' . $contentUrl);
-    exit;
-}
-
-$path = cpms_tasks_local_file_path(isset($file['stored_path']) ? $file['stored_path'] : '');
-if ($path !== '') {
-    $name = isset($file['original_name']) && trim((string)$file['original_name']) !== '' ? trim((string)$file['original_name']) : basename($path);
-    $mime = isset($file['mime_type']) && trim((string)$file['mime_type']) !== '' ? trim((string)$file['mime_type']) : 'application/octet-stream';
-    if (cpms_tasks_drive_helper_loaded()) $mime = cpms_drive_detect_mime_type($path);
-    $asciiName = preg_replace('/[^A-Za-z0-9\.\_\-]+/', '_', $name);
-    if ($asciiName === '') $asciiName = 'task_file';
-    $disposition = $download ? 'attachment' : 'inline';
-
-    header('Content-Type: ' . $mime);
-    header('Content-Length: ' . (string)filesize($path));
-    header('Content-Disposition: ' . $disposition . '; filename="' . $asciiName . '"; filename*=UTF-8\'\'' . rawurlencode($name));
-    header('X-Content-Type-Options: nosniff');
-    readfile($path);
     exit;
 }
 

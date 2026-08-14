@@ -92,6 +92,37 @@ function cpms_google_chat_company_space_name($pdo) {
     return trim((string)approval_google_chat_setting($pdo, 'google_chat_company_space_name', ''));
 }
 }
+if (!function_exists('cpms_google_chat_company_leave_block_reason')) {
+function cpms_google_chat_company_leave_block_reason($pdo, $sourceType, $sourceId) {
+    $sourceType = trim((string)$sourceType);
+    if ($sourceType !== 'DAILY_LEAVE' && $sourceType !== 'DAILY_LEAVE_ADDITION') return '';
+
+    $dateDigits = trim((string)$sourceId);
+    if (!preg_match('/^(\d{4})(\d{2})(\d{2})$/', $dateDigits, $matches)) {
+        return '연차자 알림 기준일이 올바르지 않아 발송하지 않습니다.';
+    }
+    if (!checkdate((int)$matches[2], (int)$matches[3], (int)$matches[1])) {
+        return '연차자 알림 기준일이 올바르지 않아 발송하지 않습니다.';
+    }
+    $baseDate = $matches[1] . '-' . $matches[2] . '-' . $matches[3];
+    try {
+        $dateValue = new DateTime($baseDate . ' 00:00:00', new DateTimeZone('Asia/Seoul'));
+    } catch (Exception $e) {
+        return '연차자 알림 기준일을 확인할 수 없어 발송하지 않습니다.';
+    }
+    if ((int)$dateValue->format('N') >= 6) {
+        return '주말에는 연차자 알림을 발송하지 않습니다.';
+    }
+
+    if (!function_exists('attendance_is_holiday')) {
+        require_once __DIR__ . '/../attendance/common.php';
+    }
+    if (function_exists('attendance_is_holiday') && attendance_is_holiday($pdo, $baseDate)) {
+        return '공휴일 또는 대체공휴일에는 연차자 알림을 발송하지 않습니다.';
+    }
+    return '';
+}
+}
 if (!function_exists('cpms_google_chat_send_to_company_space')) {
 function cpms_google_chat_send_to_company_space($pdo, $messageText, $eventType, $sourceId, $sourceType) {
     if (!function_exists('approval_google_chat_send_message')) {
@@ -112,6 +143,15 @@ function cpms_google_chat_send_to_company_space($pdo, $messageText, $eventType, 
         'error_message' => null,
         'sent_at' => null
     );
+
+    $leaveBlockReason = cpms_google_chat_company_leave_block_reason($pdo, $sourceType, $sourceId);
+    if ($leaveBlockReason !== '') {
+        if (function_exists('approval_google_chat_set_last_error')) approval_google_chat_set_last_error($leaveBlockReason);
+        $logData['error_message'] = $leaveBlockReason;
+        if ($pdo) cpms_google_chat_log_notification($pdo, $logData);
+        error_log('[google_chat_company] skipped non-working day source=' . (string)$sourceType . ' source_id=' . (int)$sourceId . ' reason=' . $leaveBlockReason);
+        return false;
+    }
 
     if (!$pdo || $spaceName === '') {
         $errorMessage = 'google_chat_company_space_name 설정값이 비어 있습니다.';

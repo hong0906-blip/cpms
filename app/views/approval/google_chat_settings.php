@@ -149,11 +149,13 @@ https://www.googleapis.com/auth/chat.spaces,<br>
 https://www.googleapis.com/auth/chat.spaces.create,<br>
 https://www.googleapis.com/auth/chat.messages,<br>
 https://www.googleapis.com/auth/chat.messages.create,<br>
-https://www.googleapis.com/auth/chat.memberships
+https://www.googleapis.com/auth/chat.memberships,<br>
+https://www.googleapis.com/auth/chat.memberships.app
 </div>
 <div style="margin-top:8px;"><strong>CPMS 설정 google_chat_oauth_scope(공백 구분):</strong><br>
-https://www.googleapis.com/auth/chat.bot https://www.googleapis.com/auth/chat.spaces https://www.googleapis.com/auth/chat.spaces.create https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.messages.create https://www.googleapis.com/auth/chat.memberships
+https://www.googleapis.com/auth/chat.bot https://www.googleapis.com/auth/chat.spaces https://www.googleapis.com/auth/chat.spaces.create https://www.googleapis.com/auth/chat.messages https://www.googleapis.com/auth/chat.messages.create https://www.googleapis.com/auth/chat.memberships https://www.googleapis.com/auth/chat.memberships.app
 </div>
+<div style="margin-top:8px;color:#555;">카드 버튼 전송을 위해 <strong>chat.memberships.app</strong> 범위가 필요합니다. 관리자 콘솔의 도메인 전체 위임 범위에도 동일하게 추가해주세요.</div>
 <?php if ($impersonationHasUsersPrefix) { ?>
 <div style="margin-top:8px;color:#c00;">google_chat_impersonation_user에는 users/를 붙이지 말고 회사 Google Workspace 이메일만 입력해주세요.</div>
 <?php } ?>

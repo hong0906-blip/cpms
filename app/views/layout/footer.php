@@ -38,5 +38,51 @@
     }
   })();
 </script>
+<?php
+$cpmsTasksRunDeferredWork = isset($_SESSION)
+    && is_array($_SESSION)
+    && !empty($_SESSION['cpms_tasks_deferred_work']);
+if ($cpmsTasksRunDeferredWork) unset($_SESSION['cpms_tasks_deferred_work']);
+?>
+<?php if ($cpmsTasksRunDeferredWork): ?>
+<script>
+  (function(){
+    var attempts = 0;
+    var body = <?php echo json_encode('_csrf=' . rawurlencode(csrf_token())); ?>;
+    function runDeferredTaskWork(){
+      attempts++;
+      if (window.fetch) {
+        window.fetch('?r=tasks/deferred_sync', {
+          method: 'POST',
+          credentials: 'same-origin',
+          keepalive: true,
+          headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
+          body: body
+        }).then(function(response){
+          return response.ok ? response.json() : null;
+        }).then(function(result){
+          if (!result && attempts < 3) {
+            window.setTimeout(runDeferredTaskWork, 1200);
+            return;
+          }
+          if (result && result.ok && parseInt(result.remaining || 0, 10) > 0 && attempts < 5) {
+            window.setTimeout(runDeferredTaskWork, 500);
+          }
+        }, function(){
+          if (attempts < 3) window.setTimeout(runDeferredTaskWork, 1200);
+        });
+        return;
+      }
+      try {
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', '?r=tasks/deferred_sync', true);
+        xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded; charset=UTF-8');
+        xhr.send(body);
+      } catch (e) {}
+    }
+    window.setTimeout(runDeferredTaskWork, 250);
+  })();
+</script>
+<?php endif; ?>
 </body>
 </html>

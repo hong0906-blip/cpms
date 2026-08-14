@@ -87,6 +87,7 @@ if (!is_array($files) || count($files) === 0) {
 if (!class_exists('ZipArchive')) {
     cpms_tasks_zip_error('서버에 ZIP 다운로드 기능이 설치되어 있지 않습니다.', 500);
 }
+if (function_exists('session_write_close')) @session_write_close();
 
 $zipPath = tempnam(sys_get_temp_dir(), 'cpms_task_zip_');
 if ($zipPath === false) cpms_tasks_zip_error('임시 다운로드 파일을 만들 수 없습니다.', 500);
@@ -106,6 +107,12 @@ for ($i = 0; $i < count($files); $i++) {
     $storageType = isset($file['storage_type']) ? strtolower(trim((string)$file['storage_type'])) : '';
     $driveFileId = isset($file['drive_file_id']) ? trim((string)$file['drive_file_id']) : '';
 
+    $localPath = cpms_tasks_local_file_path(isset($file['stored_path']) ? $file['stored_path'] : '');
+    if ($localPath !== '' && is_file($localPath) && $zip->addFile($localPath, $entryName)) {
+        $addedCount++;
+        continue;
+    }
+
     if ($storageType === 'google_drive' && $driveFileId !== '' && cpms_tasks_drive_helper_loaded() && function_exists('cpms_drive_download_file')) {
         $driveDownload = cpms_drive_download_file($driveFileId);
         if (is_array($driveDownload) && !empty($driveDownload['ok'])) {
@@ -115,10 +122,6 @@ for ($i = 0; $i < count($files); $i++) {
         }
     }
 
-    $localPath = cpms_tasks_local_file_path(isset($file['stored_path']) ? $file['stored_path'] : '');
-    if ($localPath !== '' && is_file($localPath) && $zip->addFile($localPath, $entryName)) {
-        $addedCount++;
-    }
 }
 $zip->close();
 

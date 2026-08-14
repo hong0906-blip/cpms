@@ -1463,13 +1463,23 @@ function cpms_tasks_insert_file_row($pdo, $row)
     }
 }}
 
+if (!function_exists('cpms_tasks_mark_deferred_work')) {
+function cpms_tasks_mark_deferred_work()
+{
+    if (isset($_SESSION) && is_array($_SESSION)) {
+        $_SESSION['cpms_tasks_deferred_work'] = 1;
+    }
+}}
+
 if (!function_exists('cpms_tasks_save_uploaded_files')) {
 function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy, $fileRole = 'request')
 {
     if (!$pdo || (int)$taskId <= 0 || !is_array($files) || !isset($files['name'])) return array();
     $saved = array();
     $fileRole = cpms_tasks_drive_file_role($fileRole);
-    $task = cpms_tasks_find_task($pdo, (int)$taskId);
+    $relativeDir = cpms_tasks_upload_relative_dir((int)$taskId);
+    $absoluteDir = cpms_tasks_upload_abs_dir((int)$taskId);
+    if (!cpms_ensure_dir($absoluteDir)) return $saved;
     $names = is_array($files['name']) ? $files['name'] : array($files['name']);
     $tmpNames = is_array($files['tmp_name']) ? $files['tmp_name'] : array($files['tmp_name']);
     $errors = is_array($files['error']) ? $files['error'] : array($files['error']);
@@ -1493,18 +1503,16 @@ function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy, $fil
         if (cpms_tasks_drive_helper_loaded()) $mimeType = cpms_drive_detect_mime_type($tmpName);
         if ($mimeType === '') $mimeType = isset($types[$i]) ? (string)$types[$i] : '';
         if ($mimeType === '') $mimeType = 'application/octet-stream';
-        $driveRecord = cpms_tasks_drive_upload_local_file($pdo, $task, $tmpName, $originalName, $mimeType, $fileSize, (int)$uploadedBy, $fileRole);
-        if (!is_array($driveRecord) || !isset($driveRecord['storage_type']) || (string)$driveRecord['storage_type'] !== 'google_drive' || !isset($driveRecord['drive_file_id']) || trim((string)$driveRecord['drive_file_id']) === '') {
-            continue;
-        }
-        if (isset($driveRecord['drive_name']) && trim((string)$driveRecord['drive_name']) !== '') {
-            $storedName = (string)$driveRecord['drive_name'];
-        }
+        $absolutePath = $absoluteDir . '/' . $storedName;
+        if (!@move_uploaded_file($tmpName, $absolutePath)) continue;
+        $storedPath = $relativeDir . '/' . $storedName;
+        $driveRecord = cpms_tasks_drive_failed_record('', $fileRole);
+        $driveRecord['upload_status'] = 'pending';
         $row = array_merge(array(
             'task_id' => (int)$taskId,
             'original_name' => $originalName,
             'stored_name' => $storedName,
-            'stored_path' => '',
+            'stored_path' => $storedPath,
             'file_size' => (int)$fileSize,
             'mime_type' => $mimeType,
             'uploaded_by' => (int)$uploadedBy > 0 ? (int)$uploadedBy : null,
@@ -1516,21 +1524,26 @@ function cpms_tasks_save_uploaded_files($pdo, $taskId, $files, $uploadedBy, $fil
                 $saved[count($saved)] = array(
                     'original_name' => $originalName,
                     'stored_name' => $storedName,
-                    'stored_path' => '',
-                    'tmp_name' => $tmpName,
+                    'stored_path' => $storedPath,
+                    'tmp_name' => $absolutePath,
                     'file_size' => (int)$fileSize,
                     'mime_type' => $mimeType,
                     'file_role' => $fileRole,
-                    'storage_type' => 'google_drive',
-                    'drive_file_id' => isset($driveRecord['drive_file_id']) ? (string)$driveRecord['drive_file_id'] : '',
-                    'drive_web_view_link' => isset($driveRecord['drive_web_view_link']) ? (string)$driveRecord['drive_web_view_link'] : '',
-                    'drive_web_content_link' => isset($driveRecord['drive_web_content_link']) ? (string)$driveRecord['drive_web_content_link'] : '',
+                    'storage_type' => 'local',
+                    'drive_file_id' => '',
+                    'drive_web_view_link' => '',
+                    'drive_web_content_link' => '',
+                    'upload_status' => 'pending',
                 );
+            } else {
+                @unlink($absolutePath);
             }
         } catch (Exception $e) {
+            @unlink($absolutePath);
         }
     }
 
+    if (count($saved) > 0) cpms_tasks_mark_deferred_work();
     return $saved;
 }}
 
@@ -1540,12 +1553,14 @@ function cpms_tasks_copy_saved_files_to_task($pdo, $sourceFiles, $targetTaskId, 
     $copied = array();
     if (!$pdo || (int)$targetTaskId <= 0 || !is_array($sourceFiles) || !cpms_tasks_table_exists($pdo, 'cpms_task_files')) return $copied;
     $fileRole = cpms_tasks_drive_file_role($fileRole);
-    $targetTask = cpms_tasks_find_task($pdo, (int)$targetTaskId);
 
     for ($i = 0; $i < count($sourceFiles); $i++) {
         $file = $sourceFiles[$i];
         if (!is_array($file)) continue;
         $tmpName = isset($file['tmp_name']) ? (string)$file['tmp_name'] : '';
+        if (($tmpName === '' || !is_file($tmpName)) && isset($file['stored_path'])) {
+            $tmpName = cpms_tasks_local_file_path($file['stored_path']);
+        }
         if ($tmpName === '' || !is_file($tmpName)) continue;
 
         $fileSize = @filesize($tmpName);
@@ -1555,16 +1570,16 @@ function cpms_tasks_copy_saved_files_to_task($pdo, $sourceFiles, $targetTaskId, 
         if ($originalName === '') $originalName = isset($file['stored_name']) ? (string)$file['stored_name'] : 'task_file';
         if ($mimeType === '' && cpms_tasks_drive_helper_loaded()) $mimeType = cpms_drive_detect_mime_type($tmpName);
         if ($mimeType === '') $mimeType = 'application/octet-stream';
-        $driveRecord = cpms_tasks_drive_upload_local_file($pdo, $targetTask, $tmpName, $originalName, $mimeType, $fileSize, (int)$uploadedBy, $fileRole);
-        if (!is_array($driveRecord) || !isset($driveRecord['storage_type']) || (string)$driveRecord['storage_type'] !== 'google_drive' || !isset($driveRecord['drive_file_id']) || trim((string)$driveRecord['drive_file_id']) === '') {
-            continue;
-        }
-        $storedName = isset($driveRecord['drive_name']) && trim((string)$driveRecord['drive_name']) !== '' ? (string)$driveRecord['drive_name'] : (isset($file['stored_name']) ? (string)$file['stored_name'] : $originalName);
+        $storedName = isset($file['stored_name']) && trim((string)$file['stored_name']) !== '' ? (string)$file['stored_name'] : basename($tmpName);
+        $storedPath = isset($file['stored_path']) ? trim((string)$file['stored_path']) : '';
+        if ($storedPath === '') continue;
+        $driveRecord = cpms_tasks_drive_failed_record('', $fileRole);
+        $driveRecord['upload_status'] = 'pending';
         $row = array_merge(array(
             'task_id' => (int)$targetTaskId,
             'original_name' => $originalName,
             'stored_name' => $storedName,
-            'stored_path' => '',
+            'stored_path' => $storedPath,
             'file_size' => (int)$fileSize,
             'mime_type' => $mimeType,
             'uploaded_by' => (int)$uploadedBy > 0 ? (int)$uploadedBy : null,
@@ -1576,22 +1591,110 @@ function cpms_tasks_copy_saved_files_to_task($pdo, $sourceFiles, $targetTaskId, 
                 $copied[count($copied)] = array(
                     'original_name' => $originalName,
                     'stored_name' => $storedName,
-                    'stored_path' => '',
+                    'stored_path' => $storedPath,
                     'tmp_name' => $tmpName,
                     'file_size' => (int)$fileSize,
                     'mime_type' => $mimeType,
                     'file_role' => $fileRole,
-                    'storage_type' => 'google_drive',
-                    'drive_file_id' => isset($driveRecord['drive_file_id']) ? (string)$driveRecord['drive_file_id'] : '',
-                    'drive_web_view_link' => isset($driveRecord['drive_web_view_link']) ? (string)$driveRecord['drive_web_view_link'] : '',
-                    'drive_web_content_link' => isset($driveRecord['drive_web_content_link']) ? (string)$driveRecord['drive_web_content_link'] : '',
+                    'storage_type' => 'local',
+                    'drive_file_id' => '',
+                    'drive_web_view_link' => '',
+                    'drive_web_content_link' => '',
+                    'upload_status' => 'pending',
                 );
             }
         } catch (Exception $e) {
         }
     }
 
+    if (count($copied) > 0) cpms_tasks_mark_deferred_work();
     return $copied;
+}}
+
+if (!function_exists('cpms_tasks_process_pending_drive_files')) {
+function cpms_tasks_process_pending_drive_files($pdo, $uploadedBy, $limit)
+{
+    $result = array('processed' => 0, 'uploaded' => 0, 'failed' => 0, 'remaining' => 0);
+    if (!$pdo || !cpms_tasks_table_exists($pdo, 'cpms_task_files')) return $result;
+    $uploadedBy = (int)$uploadedBy;
+    $limit = (int)$limit;
+    if ($limit < 1) $limit = 1;
+    if ($limit > 20) $limit = 20;
+    try {
+        $sql = "SELECT * FROM cpms_task_files WHERE upload_status IN ('pending','local_saved') AND stored_path<>'' AND (drive_file_id IS NULL OR drive_file_id='')";
+        $params = array();
+        if ($uploadedBy > 0) {
+            $sql .= ' AND uploaded_by=:uploaded_by';
+            $params[':uploaded_by'] = $uploadedBy;
+        }
+        $sql .= ' ORDER BY id ASC LIMIT ' . $limit;
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) $rows = array();
+        for ($i = 0; $i < count($rows); $i++) {
+            $file = $rows[$i];
+            $fileId = isset($file['id']) ? (int)$file['id'] : 0;
+            if ($fileId <= 0) continue;
+            $claim = $pdo->prepare("UPDATE cpms_task_files SET upload_status='processing', drive_upload_error=NULL WHERE id=:id AND upload_status IN ('pending','local_saved')");
+            $claim->execute(array(':id' => $fileId));
+            if ((int)$claim->rowCount() <= 0) continue;
+            $result['processed']++;
+            $localPath = cpms_tasks_local_file_path(isset($file['stored_path']) ? $file['stored_path'] : '');
+            $task = cpms_tasks_find_task($pdo, isset($file['task_id']) ? (int)$file['task_id'] : 0);
+            if ($localPath === '' || !$task) {
+                $errorMessage = $localPath === '' ? 'Local task file is unavailable.' : 'Task is unavailable.';
+                $failed = $pdo->prepare("UPDATE cpms_task_files SET storage_type='local', upload_status='failed', drive_upload_error=:error WHERE id=:id");
+                $failed->execute(array(':error' => $errorMessage, ':id' => $fileId));
+                $result['failed']++;
+                continue;
+            }
+            $driveRecord = cpms_tasks_drive_upload_local_file(
+                $pdo,
+                $task,
+                $localPath,
+                isset($file['original_name']) ? (string)$file['original_name'] : basename($localPath),
+                isset($file['mime_type']) ? (string)$file['mime_type'] : 'application/octet-stream',
+                isset($file['file_size']) ? (int)$file['file_size'] : (int)@filesize($localPath),
+                isset($file['uploaded_by']) ? (int)$file['uploaded_by'] : 0,
+                isset($file['file_role']) ? (string)$file['file_role'] : 'request'
+            );
+            if (is_array($driveRecord) && isset($driveRecord['storage_type']) && (string)$driveRecord['storage_type'] === 'google_drive' && !empty($driveRecord['drive_file_id'])) {
+                $up = $pdo->prepare("UPDATE cpms_task_files SET storage_type='google_drive', drive_name=:drive_name, drive_file_id=:drive_file_id, drive_folder_id=:drive_folder_id, drive_web_view_link=:drive_web_view_link, drive_web_content_link=:drive_web_content_link, drive_root_folder_id=:drive_root_folder_id, drive_employee_folder_id=:drive_employee_folder_id, drive_month_folder_id=:drive_month_folder_id, drive_stage_folder_id=:drive_stage_folder_id, upload_status='uploaded', drive_upload_error=NULL WHERE id=:id");
+                $up->execute(array(
+                    ':drive_name' => isset($driveRecord['drive_name']) ? (string)$driveRecord['drive_name'] : '',
+                    ':drive_file_id' => isset($driveRecord['drive_file_id']) ? (string)$driveRecord['drive_file_id'] : '',
+                    ':drive_folder_id' => isset($driveRecord['drive_folder_id']) ? (string)$driveRecord['drive_folder_id'] : '',
+                    ':drive_web_view_link' => isset($driveRecord['drive_web_view_link']) ? (string)$driveRecord['drive_web_view_link'] : '',
+                    ':drive_web_content_link' => isset($driveRecord['drive_web_content_link']) ? (string)$driveRecord['drive_web_content_link'] : '',
+                    ':drive_root_folder_id' => isset($driveRecord['drive_root_folder_id']) ? (string)$driveRecord['drive_root_folder_id'] : '',
+                    ':drive_employee_folder_id' => isset($driveRecord['drive_employee_folder_id']) ? (string)$driveRecord['drive_employee_folder_id'] : '',
+                    ':drive_month_folder_id' => isset($driveRecord['drive_month_folder_id']) ? (string)$driveRecord['drive_month_folder_id'] : '',
+                    ':drive_stage_folder_id' => isset($driveRecord['drive_stage_folder_id']) ? (string)$driveRecord['drive_stage_folder_id'] : '',
+                    ':id' => $fileId,
+                ));
+                $result['uploaded']++;
+            } else {
+                $errorMessage2 = is_array($driveRecord) && isset($driveRecord['drive_upload_error']) ? trim((string)$driveRecord['drive_upload_error']) : '';
+                if ($errorMessage2 === '') $errorMessage2 = 'Google Drive upload failed.';
+                $failed2 = $pdo->prepare("UPDATE cpms_task_files SET storage_type='local', upload_status='failed', drive_upload_error=:error WHERE id=:id");
+                $failed2->execute(array(':error' => $errorMessage2, ':id' => $fileId));
+                $result['failed']++;
+            }
+        }
+        $countSql = "SELECT COUNT(*) FROM cpms_task_files WHERE upload_status IN ('pending','local_saved') AND stored_path<>'' AND (drive_file_id IS NULL OR drive_file_id='')";
+        $countParams = array();
+        if ($uploadedBy > 0) {
+            $countSql .= ' AND uploaded_by=:uploaded_by';
+            $countParams[':uploaded_by'] = $uploadedBy;
+        }
+        $countSt = $pdo->prepare($countSql);
+        $countSt->execute($countParams);
+        $result['remaining'] = (int)$countSt->fetchColumn();
+    } catch (Exception $e) {
+        error_log('[tasks_deferred_drive] ' . $e->getMessage());
+    }
+    return $result;
 }}
 
 if (!function_exists('cpms_tasks_find_task')) {
@@ -2759,30 +2862,116 @@ function cpms_tasks_send_meeting_confirmed_notification($pdo, $task)
     return cpms_send_google_chat_to_employee($pdo, $requesterId, cpms_tasks_build_meeting_confirmed_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'MEETING_CONFIRMED', 'TASK');
 }}
 
+if (!function_exists('cpms_tasks_queue_deferred_notification')) {
+function cpms_tasks_queue_deferred_notification($pdo, $task, $employeeId, $messageText, $eventType)
+{
+    if (!$pdo || !is_array($task) || (int)$employeeId <= 0) return false;
+    require_once dirname(__DIR__) . '/common/chat_notification_helpers.php';
+    if (!function_exists('cpms_google_chat_log_notification')) return false;
+    $taskId = isset($task['id']) ? (int)$task['id'] : 0;
+    if ($taskId <= 0) return false;
+    try {
+        if (cpms_google_chat_table_exists($pdo, 'cpms_google_chat_notifications')) {
+            $exists = $pdo->prepare("SELECT id FROM cpms_google_chat_notifications WHERE source_type='TASK' AND source_id=:source_id AND event_type=:event_type AND receiver_employee_id=:receiver_employee_id AND send_status IN ('RESERVED','PROCESSING') LIMIT 1");
+            $exists->execute(array(
+                ':source_id' => $taskId,
+                ':event_type' => (string)$eventType,
+                ':receiver_employee_id' => (int)$employeeId,
+            ));
+            if ($exists->fetchColumn() !== false) {
+                cpms_tasks_mark_deferred_work();
+                return true;
+            }
+        }
+        $receiver = cpms_tasks_find_employee_by_id($pdo, (int)$employeeId);
+        cpms_google_chat_log_notification($pdo, array(
+            'source_type' => 'TASK',
+            'source_id' => $taskId,
+            'event_type' => (string)$eventType,
+            'receiver_employee_id' => (int)$employeeId,
+            'receiver_name' => is_array($receiver) && isset($receiver['name']) ? (string)$receiver['name'] : '',
+            'receiver_email' => is_array($receiver) && isset($receiver['email']) ? (string)$receiver['email'] : '',
+            'dm_space_name' => is_array($receiver) && isset($receiver['google_chat_dm_space_name']) ? (string)$receiver['google_chat_dm_space_name'] : '',
+            'message_text' => (string)$messageText,
+            'send_status' => 'RESERVED',
+            'error_message' => null,
+            'sent_at' => null,
+        ));
+        cpms_tasks_mark_deferred_work();
+        return true;
+    } catch (Exception $e) {
+        error_log('[tasks_deferred_chat_queue] ' . $e->getMessage());
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_tasks_process_deferred_notifications')) {
+function cpms_tasks_process_deferred_notifications($pdo, $limit)
+{
+    $result = array('processed' => 0, 'sent' => 0, 'failed' => 0, 'remaining' => 0);
+    if (!$pdo) return $result;
+    require_once dirname(__DIR__) . '/common/chat_notification_helpers.php';
+    if (!function_exists('cpms_google_chat_table_exists') || !cpms_google_chat_table_exists($pdo, 'cpms_google_chat_notifications')) return $result;
+    if (!function_exists('cpms_send_google_chat_to_employee')) require_once dirname(dirname(__DIR__)) . '/helpers.php';
+    if (!function_exists('cpms_send_google_chat_to_employee')) return $result;
+    $limit = (int)$limit;
+    if ($limit < 1) $limit = 1;
+    if ($limit > 20) $limit = 20;
+    try {
+        $st = $pdo->query("SELECT id, source_id, event_type, receiver_employee_id, message_text FROM cpms_google_chat_notifications WHERE source_type='TASK' AND event_type IN ('TASK_COMPLETED','TASK_COMPLETION_PENDING') AND send_status='RESERVED' ORDER BY id ASC LIMIT " . $limit);
+        $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+        if (!is_array($rows)) $rows = array();
+        for ($i = 0; $i < count($rows); $i++) {
+            $row = $rows[$i];
+            $queueId = isset($row['id']) ? (int)$row['id'] : 0;
+            if ($queueId <= 0) continue;
+            $claim = $pdo->prepare("UPDATE cpms_google_chat_notifications SET send_status='PROCESSING', error_message=NULL WHERE id=:id AND send_status='RESERVED'");
+            $claim->execute(array(':id' => $queueId));
+            if ((int)$claim->rowCount() <= 0) continue;
+            $result['processed']++;
+            $ok = cpms_send_google_chat_to_employee(
+                $pdo,
+                isset($row['receiver_employee_id']) ? (int)$row['receiver_employee_id'] : 0,
+                isset($row['message_text']) ? (string)$row['message_text'] : '',
+                isset($row['source_id']) ? (int)$row['source_id'] : 0,
+                isset($row['event_type']) ? (string)$row['event_type'] : '',
+                'TASK'
+            );
+            $lastError = function_exists('approval_google_chat_get_last_error') ? trim((string)approval_google_chat_get_last_error()) : '';
+            $finish = $pdo->prepare("UPDATE cpms_google_chat_notifications SET send_status=:send_status, error_message=:error_message, sent_at=:sent_at WHERE id=:id");
+            $finish->execute(array(
+                ':send_status' => $ok ? 'DISPATCHED' : 'DISPATCH_FAILED',
+                ':error_message' => $ok ? null : ($lastError !== '' ? $lastError : 'Google Chat send failed.'),
+                ':sent_at' => $ok ? cpms_tasks_now() : null,
+                ':id' => $queueId,
+            ));
+            if ($ok) $result['sent']++;
+            else $result['failed']++;
+        }
+        $countSt = $pdo->query("SELECT COUNT(*) FROM cpms_google_chat_notifications WHERE source_type='TASK' AND event_type IN ('TASK_COMPLETED','TASK_COMPLETION_PENDING') AND send_status='RESERVED'");
+        $result['remaining'] = $countSt ? (int)$countSt->fetchColumn() : 0;
+    } catch (Exception $e) {
+        error_log('[tasks_deferred_chat] ' . $e->getMessage());
+    }
+    return $result;
+}}
+
 if (!function_exists('cpms_tasks_send_completed_notification')) {
 function cpms_tasks_send_completed_notification($pdo, $task)
 {
-    if (!function_exists('cpms_send_google_chat_to_employee')) {
-        require_once dirname(dirname(__DIR__)) . '/helpers.php';
-    }
-    if (!function_exists('cpms_send_google_chat_to_employee')) return false;
     $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
     if ($requesterId <= 0) return false;
-    return cpms_send_google_chat_to_employee($pdo, $requesterId, cpms_tasks_build_complete_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_COMPLETED', 'TASK');
+    return cpms_tasks_queue_deferred_notification($pdo, $task, $requesterId, cpms_tasks_build_complete_message($task), 'TASK_COMPLETED');
 }}
 
 if (!function_exists('cpms_tasks_send_completion_pending_notification')) {
 function cpms_tasks_send_completion_pending_notification($pdo, $task)
 {
-    if (!function_exists('cpms_send_google_chat_to_employee')) {
-        require_once dirname(dirname(__DIR__)) . '/helpers.php';
-    }
-    if (!function_exists('cpms_send_google_chat_to_employee')) return false;
     if (!$pdo || !is_array($task)) return false;
     $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
     $assigneeId = isset($task['assignee_employee_id']) ? (int)$task['assignee_employee_id'] : 0;
     if ($requesterId <= 0 || $requesterId === $assigneeId) return false;
-    return cpms_send_google_chat_to_employee($pdo, $requesterId, cpms_tasks_build_completion_pending_message($task), isset($task['id']) ? (int)$task['id'] : 0, 'TASK_COMPLETION_PENDING', 'TASK');
+    return cpms_tasks_queue_deferred_notification($pdo, $task, $requesterId, cpms_tasks_build_completion_pending_message($task), 'TASK_COMPLETION_PENDING');
 }}
 
 if (!function_exists('cpms_tasks_send_transfer_request_notification')) {
@@ -3124,10 +3313,33 @@ function cpms_tasks_process_delayed_notifications($pdo, $limit)
     return $result;
 }}
 
+if (!function_exists('cpms_tasks_schema_ready_quick')) {
+function cpms_tasks_schema_ready_quick($pdo)
+{
+    if (!$pdo) return false;
+    $requiredColumns = array(
+        'cpms_tasks' => 'group_key',
+        'cpms_task_logs' => 'new_status',
+        'cpms_task_files' => 'drive_upload_error',
+        'cpms_task_comments' => 'created_by_photo_path',
+        'cpms_task_delay_notifications' => 'send_result',
+    );
+    foreach ($requiredColumns as $tableName => $columnName) {
+        if (!cpms_tasks_table_exists($pdo, $tableName)) return false;
+        if (!cpms_tasks_column_exists($pdo, $tableName, $columnName)) return false;
+    }
+    return is_dir(cpms_tasks_public_root() . '/uploads/tasks');
+}}
+
 if (!function_exists('cpms_tasks_ensure_schema')) {
 function cpms_tasks_ensure_schema($pdo, &$results)
 {
     if (!$pdo) return false;
+    static $requestSchemaReady = false;
+    if ($requestSchemaReady || cpms_tasks_schema_ready_quick($pdo)) {
+        $requestSchemaReady = true;
+        return true;
+    }
 
     $tableSql = array(
         'cpms_tasks' => "CREATE TABLE IF NOT EXISTS cpms_tasks (
@@ -3414,5 +3626,6 @@ function cpms_tasks_ensure_schema($pdo, &$results)
         cpms_tasks_add_result($results, 'DIR', 'public/uploads/tasks', false, '업로드 폴더 생성 실패');
     }
 
+    $requestSchemaReady = true;
     return true;
 }}

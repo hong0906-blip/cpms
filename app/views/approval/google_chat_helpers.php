@@ -45,7 +45,7 @@ function approval_google_chat_http_request($method, $url, $headers, $body) {
     return array('status' => $status, 'body' => $resp, 'error' => $err);
 }
 
-function approval_google_chat_get_access_token($pdo) {
+function approval_google_chat_get_access_token($pdo, $authMode = 'user') {
     $jsonPath = approval_google_chat_setting($pdo, 'google_chat_service_account_json_path', '/www/cpms/storage/secrets/google-chat-service-account.json');
     if ($jsonPath === '' || !is_file($jsonPath)) {
         approval_google_chat_set_last_error('서비스 계정 JSON 파일을 찾을 수 없습니다.');        
@@ -81,6 +81,13 @@ function approval_google_chat_get_access_token($pdo) {
     $impersonationUser = approval_google_chat_setting($pdo, 'google_chat_impersonation_user', '');
     $scope = trim((string)$scope);    
     $impersonationUser = trim((string)$impersonationUser);
+    $authMode = trim((string)$authMode);
+    if ($authMode === 'app') {
+        $scope = 'https://www.googleapis.com/auth/chat.bot';
+        $impersonationUser = '';
+    } elseif ($authMode === 'membership_app') {
+        $scope = 'https://www.googleapis.com/auth/chat.memberships.app';
+    }
     if ($impersonationUser !== '' && strpos($impersonationUser, 'users/') === 0) {
         approval_google_chat_set_last_error('google_chat_impersonation_user에는 users/를 붙이지 말고 회사 Google Workspace 이메일만 입력해주세요.');
         error_log('[google_chat] impersonation user invalid value=' . $impersonationUser);
@@ -230,9 +237,9 @@ function approval_google_chat_json_encode($value) {
     return '{}';
 }}
 
-function approval_google_chat_api_post($pdo, $url, $bodyArray, $contextLabel) {
+function approval_google_chat_api_post($pdo, $url, $bodyArray, $contextLabel, $authMode = 'user') {
     approval_google_chat_set_last_error('');
-    $token = approval_google_chat_get_access_token($pdo);
+    $token = approval_google_chat_get_access_token($pdo, $authMode);
     if ($token === false) {
         return array('ok' => false, 'status' => 0, 'body' => '');
     }
@@ -323,12 +330,182 @@ function approval_google_chat_setup_dm_space($pdo, $userName) {
     return false;
 }
 
+function approval_google_chat_extract_action_link($messageText) {
+    $messageText = (string)$messageText;
+    $lines = preg_split("/\r\n|\n|\r/", $messageText);
+    if (!is_array($lines)) {
+        return array('url' => '', 'title' => 'CPMS 알림', 'message_text' => $messageText);
+    }
+
+    $buttonUrl = '';
+    $keptLines = array();
+    foreach ($lines as $line) {
+        $trimmed = trim((string)$line);
+        $matchedUrl = '';
+        if ($buttonUrl === '' && preg_match('/^(?:URL|LINK|링크)\s*:\s*(https?:\/\/\S+)$/i', $trimmed, $matches)) {
+            $matchedUrl = isset($matches[1]) ? trim((string)$matches[1]) : '';
+        } elseif ($buttonUrl === '' && preg_match('/^(https?:\/\/\S+)$/i', $trimmed, $matches)) {
+            $matchedUrl = isset($matches[1]) ? trim((string)$matches[1]) : '';
+        }
+        if ($matchedUrl !== '') {
+            $buttonUrl = $matchedUrl;
+            continue;
+        }
+        $keptLines[count($keptLines)] = (string)$line;
+    }
+
+    while (count($keptLines) > 0 && trim((string)$keptLines[count($keptLines) - 1]) === '') {
+        array_pop($keptLines);
+    }
+
+    $cardTitle = 'CPMS 알림';
+    for ($i = 0; $i < count($keptLines); $i++) {
+        $candidate = trim((string)$keptLines[$i]);
+        if ($candidate === '') continue;
+        if (preg_match('/^\[(.+)\]$/', $candidate, $titleMatches)) {
+            $cardTitle = trim((string)$titleMatches[1]);
+            array_splice($keptLines, $i, 1);
+            while (count($keptLines) > 0 && trim((string)$keptLines[0]) === '') {
+                array_shift($keptLines);
+            }
+        }
+        break;
+    }
+
+    $cardMessageText = trim(implode("\n", $keptLines));
+    if ($cardMessageText === '') $cardMessageText = '자세한 내용은 아래 버튼을 눌러 확인해주세요.';
+    return array('url' => $buttonUrl, 'title' => $cardTitle, 'message_text' => $cardMessageText);
+}
+
+function approval_google_chat_build_card_button_payload($cardTitle, $messageText, $buttonText, $buttonUrl) {
+    $cardTitle = trim((string)$cardTitle);
+    $messageText = trim((string)$messageText);
+    $buttonText = trim((string)$buttonText);
+    $buttonUrl = trim((string)$buttonUrl);
+    if ($cardTitle === '') $cardTitle = 'CPMS 알림';
+    if ($buttonText === '') $buttonText = '바로 이동하시려면 눌러주세요';
+    $escapedMessage = htmlspecialchars($messageText, ENT_QUOTES, 'UTF-8');
+    $escapedMessage = str_replace(array("\r\n", "\r", "\n"), '<br>', $escapedMessage);
+
+    return array(
+        'fallbackText' => trim($cardTitle . "\n" . $messageText . "\n" . $buttonText),
+        'cardsV2' => array(
+            array(
+                'cardId' => 'cpms-action-card',
+                'card' => array(
+                    'header' => array(
+                        'title' => $cardTitle
+                    ),
+                    'sections' => array(
+                        array(
+                            'widgets' => array(
+                                array(
+                                    'textParagraph' => array(
+                                        'text' => $escapedMessage
+                                    )
+                                ),
+                                array(
+                                    'buttonList' => array(
+                                        'buttons' => array(
+                                            array(
+                                                'text' => $buttonText,
+                                                'type' => 'FILLED',
+                                                'color' => array(
+                                                    'red' => 0.10,
+                                                    'green' => 0.42,
+                                                    'blue' => 0.95,
+                                                    'alpha' => 1.0
+                                                ),
+                                                'onClick' => array(
+                                                    'openLink' => array(
+                                                        'url' => $buttonUrl
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    );
+}
+
+function approval_google_chat_build_compact_link_message($actionLink, $buttonText) {
+    $actionLink = is_array($actionLink) ? $actionLink : array();
+    $cardTitle = isset($actionLink['title']) ? trim((string)$actionLink['title']) : '';
+    $messageText = isset($actionLink['message_text']) ? trim((string)$actionLink['message_text']) : '';
+    $buttonUrl = isset($actionLink['url']) ? trim((string)$actionLink['url']) : '';
+    $buttonText = trim((string)$buttonText);
+    if ($cardTitle === '') $cardTitle = 'CPMS 알림';
+    if ($buttonText === '') $buttonText = '바로 이동하시려면 눌러주세요';
+
+    $lines = array('[' . $cardTitle . ']');
+    if ($messageText !== '') $lines[count($lines)] = $messageText;
+    if ($buttonUrl !== '') $lines[count($lines)] = '<' . $buttonUrl . '|[' . $buttonText . ']>';
+    return implode("\n", $lines);
+}
+
+function approval_google_chat_add_calling_app_to_space($pdo, $spaceName) {
+    $spaceName = trim((string)$spaceName);
+    if ($spaceName === '') return false;
+    $url = 'https://chat.googleapis.com/v1/' . $spaceName . '/members';
+    $body = array(
+        'member' => array(
+            'name' => 'users/app',
+            'type' => 'BOT'
+        )
+    );
+    $res = approval_google_chat_api_post($pdo, $url, $body, 'members.create calling app', 'membership_app');
+    return ($res['ok'] || (isset($res['status']) && (int)$res['status'] === 409));
+}
+
 function approval_google_chat_send_message($pdo, $spaceName, $messageText) {
-    $url = 'https://chat.googleapis.com/v1/' . trim((string)$spaceName) . '/messages';
-    $res = approval_google_chat_api_post($pdo, $url, array('text' => $messageText), 'messages.create');
-    if (!$res['ok']) {
+    $spaceName = trim((string)$spaceName);
+    $messageText = (string)$messageText;
+    if ($spaceName === '') {
+        approval_google_chat_set_last_error('Google Chat 메시지를 전송할 Space Name이 비어 있습니다.');
         return false;
     }
+
+    $url = 'https://chat.googleapis.com/v1/' . $spaceName . '/messages';
+    $actionLink = approval_google_chat_extract_action_link($messageText);
+    $buttonUrl = isset($actionLink['url']) ? trim((string)$actionLink['url']) : '';
+    if ($buttonUrl !== '') {
+        $body = approval_google_chat_build_card_button_payload(
+            isset($actionLink['title']) ? $actionLink['title'] : 'CPMS 알림',
+            isset($actionLink['message_text']) ? $actionLink['message_text'] : $messageText,
+            '바로 이동하시려면 눌러주세요',
+            $buttonUrl
+        );
+        $res = approval_google_chat_api_post($pdo, $url, $body, 'messages.create card button', 'app');
+        if ($res['ok']) {
+            $arr = json_decode((string)$res['body'], true);
+            if (is_array($arr) && !empty($arr['name'])) return true;
+        }
+
+        $cardError = approval_google_chat_get_last_error();
+        $cardStatus = isset($res['status']) ? (int)$res['status'] : 0;
+        if (($cardStatus === 403 || $cardStatus === 404) && approval_google_chat_add_calling_app_to_space($pdo, $spaceName)) {
+            $res = approval_google_chat_api_post($pdo, $url, $body, 'messages.create card button after app membership', 'app');
+            if ($res['ok']) {
+                $arr = json_decode((string)$res['body'], true);
+                if (is_array($arr) && !empty($arr['name'])) return true;
+            }
+            $cardError = approval_google_chat_get_last_error();
+        }
+
+        error_log('[google_chat] card button send failed; retrying as compact text link error=' . $cardError);
+        $compactMessage = approval_google_chat_build_compact_link_message($actionLink, '바로 이동하시려면 눌러주세요');
+        $res = approval_google_chat_api_post($pdo, $url, array('text' => $compactMessage), 'messages.create compact link fallback');
+    } else {
+        $res = approval_google_chat_api_post($pdo, $url, array('text' => $messageText), 'messages.create');
+    }
+
+    if (!$res['ok']) return false;
     $arr = json_decode((string)$res['body'], true);
     return (is_array($arr) && !empty($arr['name']));
 }

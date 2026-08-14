@@ -127,9 +127,12 @@
   }
 
   function shouldSkipLoadingUrl(urlText) {
-    var url = String(urlText || '');
+    var url = String(urlText || '').replace(/&amp;/gi, '&');
     if (url === '') return true;
     if (url.indexOf('r=ping') !== -1) return true;
+    if (/[?&]r=tasks\/files_download(?:[&#]|$)/i.test(url)) return true;
+    if (/[?&]r=tasks\/file(?:[&#]|$)/i.test(url) && /[?&]download=1(?:[&#]|$)/i.test(url)) return true;
+    if (/[?&]r=tasks\/deferred_sync(?:[&#]|$)/i.test(url)) return true;
     if (/^(javascript:|mailto:|tel:)/i.test(url)) return true;
     return false;
   }
@@ -218,6 +221,7 @@
       if (!form || form.getAttribute('data-cpms-no-loading') === '1') return;
       if (event.defaultPrevented) return;
       if (form.target && form.target !== '_self') return;
+      if (shouldSkipLoadingUrl(form.getAttribute('action') || '')) return;
       if (form.getAttribute('data-cpms-loading-submitting') === '1') {
         event.preventDefault();
         return;

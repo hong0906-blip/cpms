@@ -208,13 +208,13 @@ ob_start();
     </div>
 
     <?php if (count($requestFiles) > 0 || count($completeFiles) > 0): ?>
-        <form method="post" action="?r=tasks/files_download" class="space-y-4">
+        <form method="post" action="?r=tasks/files_download" class="space-y-4" data-cpms-no-loading="1">
             <input type="hidden" name="task_id" value="<?php echo (int)$taskId; ?>">
             <div class="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white p-3">
                 <div class="text-sm font-extrabold text-gray-900">첨부파일 <?php echo count($files); ?>개</div>
                 <div class="flex flex-wrap items-center gap-2">
                     <button type="submit" class="px-3 py-2 rounded-xl border border-gray-300 bg-white text-sm font-extrabold text-gray-700 hover:bg-gray-50">선택 다운로드</button>
-                    <a href="?r=tasks/files_download&amp;task_id=<?php echo (int)$taskId; ?>&amp;mode=all" class="px-3 py-2 rounded-xl bg-gray-900 text-sm font-extrabold text-white hover:bg-gray-800">전체 다운로드</a>
+                    <a href="?r=tasks/files_download&amp;task_id=<?php echo (int)$taskId; ?>&amp;mode=all" data-cpms-no-loading="1" class="px-3 py-2 rounded-xl bg-gray-900 text-sm font-extrabold text-white hover:bg-gray-800">전체 다운로드</a>
                 </div>
             </div>
             <?php if (count($requestFiles) > 0): ?>
@@ -226,7 +226,7 @@ ob_start();
                                 <input type="checkbox" name="file_ids[]" value="<?php echo (int)(isset($file['id']) ? $file['id'] : 0); ?>" class="w-4 h-4 shrink-0" aria-label="<?php echo h(isset($file['original_name']) ? $file['original_name'] : '파일'); ?> 선택">
                                 <span class="min-w-0 flex-1 font-bold text-slate-800 break-all"><?php echo h(isset($file['original_name']) ? $file['original_name'] : '-'); ?></span>
                                 <a href="<?php echo h(cpms_tasks_file_url($file)); ?>" target="_blank" class="shrink-0 text-xs font-bold text-sky-700 hover:underline">열기</a>
-                                <a href="<?php echo h(cpms_tasks_file_url($file)); ?>&amp;download=1" class="shrink-0 px-3 py-1.5 rounded-lg bg-sky-700 text-xs font-extrabold text-white hover:bg-sky-800">다운로드</a>
+                                <a href="<?php echo h(cpms_tasks_file_url($file)); ?>&amp;download=1" data-cpms-no-loading="1" class="shrink-0 px-3 py-1.5 rounded-lg bg-sky-700 text-xs font-extrabold text-white hover:bg-sky-800">다운로드</a>
                             </div>
                         <?php endforeach; ?>
                     </div>
@@ -246,7 +246,7 @@ ob_start();
                                     <?php endif; ?>
                                 </span>
                                 <a href="<?php echo h(cpms_tasks_file_url($file)); ?>" target="_blank" class="shrink-0 text-xs font-bold text-emerald-700 hover:underline">열기</a>
-                                <a href="<?php echo h(cpms_tasks_file_url($file)); ?>&amp;download=1" class="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-700 text-xs font-extrabold text-white hover:bg-emerald-800">다운로드</a>
+                                <a href="<?php echo h(cpms_tasks_file_url($file)); ?>&amp;download=1" data-cpms-no-loading="1" class="shrink-0 px-3 py-1.5 rounded-lg bg-emerald-700 text-xs font-extrabold text-white hover:bg-emerald-800">다운로드</a>
                             </div>
                         <?php endforeach; ?>
                     </div>

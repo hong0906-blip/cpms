@@ -1081,6 +1081,15 @@ function cpms_send_google_chat_to_employee($pdo, $employeeId, $messageText, $sou
         $spaceName = isset($emp['google_chat_dm_space_name']) ? trim((string)$emp['google_chat_dm_space_name']) : '';
         $userName = isset($emp['google_chat_user_name']) ? trim((string)$emp['google_chat_user_name']) : '';
         $enabled = isset($emp['google_chat_enabled']) ? (int)$emp['google_chat_enabled'] : 0;
+        $taskSourceTypes = array('TASK', 'TASK_COMMENT', 'TASK_DELAYED');
+        if ((int)$sourceId > 0 && in_array((string)$sourceType, $taskSourceTypes, true) && function_exists('cpms_app_dashboard_employee_url')) {
+            $actionLink = function_exists('approval_google_chat_extract_action_link') ? approval_google_chat_extract_action_link($messageText) : array('url' => '');
+            $existingActionUrl = isset($actionLink['url']) ? trim((string)$actionLink['url']) : '';
+            if ($existingActionUrl === '') {
+                $taskUrl = cpms_app_dashboard_employee_url($pdo, (int)$sourceId, 0);
+                if (trim((string)$taskUrl) !== '') $messageText = rtrim((string)$messageText) . "\nURL : " . $taskUrl;
+            }
+        }
         if (function_exists('cpms_chat_login_append_missing_tokens')) {
             $messageText = cpms_chat_login_append_missing_tokens($messageText, (int)$employeeId);
         }
