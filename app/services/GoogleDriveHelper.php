@@ -74,6 +74,73 @@ function cpms_drive_ensure_dir($dir) {
     return @mkdir($dir, 0777, true);
 }}
 
+if (!function_exists('cpms_drive_cache_dir')) {
+function cpms_drive_cache_dir() {
+    return cpms_drive_storage_root() . '/cache/google_drive';
+}}
+
+if (!function_exists('cpms_drive_cache_read')) {
+function cpms_drive_cache_read($path) {
+    if (!is_file($path) || !is_readable($path)) return array();
+    $content = @file_get_contents($path);
+    if ($content === false || trim($content) === '') return array();
+    $data = @json_decode($content, true);
+    return is_array($data) ? $data : array();
+}}
+
+if (!function_exists('cpms_drive_cache_write')) {
+function cpms_drive_cache_write($path, $data) {
+    $dir = dirname($path);
+    if (!cpms_drive_ensure_dir($dir)) return false;
+    $tempPath = $path . '.' . uniqid('tmp_', true);
+    $written = @file_put_contents($tempPath, cpms_drive_json_encode($data), LOCK_EX);
+    if ($written === false) return false;
+    if (@rename($tempPath, $path)) {
+        @chmod($path, 0600);
+        return true;
+    }
+    @unlink($tempPath);
+    return false;
+}}
+
+if (!function_exists('cpms_drive_token_cache_path')) {
+function cpms_drive_token_cache_path($scope) {
+    $identity = trim((string)cpms_drive_config('service_account_email'));
+    if ($identity === '') $identity = trim((string)cpms_drive_config('service_account_json_path'));
+    $key = sha1($identity . '|' . trim((string)$scope) . '|' . trim((string)cpms_drive_config('token_url')));
+    return cpms_drive_cache_dir() . '/token_' . $key . '.json';
+}}
+
+if (!function_exists('cpms_drive_folder_cache_path')) {
+function cpms_drive_folder_cache_path($name, $parentFolderId) {
+    $key = sha1(cpms_drive_shared_drive_id() . '|' . trim((string)$parentFolderId) . '|' . trim((string)$name));
+    return cpms_drive_cache_dir() . '/folder_' . $key . '.json';
+}}
+
+if (!function_exists('cpms_drive_folder_cache_get')) {
+function cpms_drive_folder_cache_get($name, $parentFolderId) {
+    static $memory = array();
+    $path = cpms_drive_folder_cache_path($name, $parentFolderId);
+    if (isset($memory[$path])) return $memory[$path];
+    $cached = cpms_drive_cache_read($path);
+    $cachedAt = isset($cached['cached_at']) ? (int)$cached['cached_at'] : 0;
+    $file = isset($cached['file']) && is_array($cached['file']) ? $cached['file'] : array();
+    if ($cachedAt <= 0 || $cachedAt < (time() - 21600) || !isset($file['id']) || trim((string)$file['id']) === '') {
+        return array();
+    }
+    $memory[$path] = $file;
+    return $file;
+}}
+
+if (!function_exists('cpms_drive_folder_cache_put')) {
+function cpms_drive_folder_cache_put($name, $parentFolderId, $file) {
+    if (!is_array($file) || !isset($file['id']) || trim((string)$file['id']) === '') return false;
+    return cpms_drive_cache_write(cpms_drive_folder_cache_path($name, $parentFolderId), array(
+        'cached_at' => time(),
+        'file' => $file
+    ));
+}}
+
 if (!function_exists('cpms_drive_user_label')) {
 function cpms_drive_user_label($user) {
     if (is_array($user)) {
@@ -225,9 +292,11 @@ function cpms_drive_curl_request($method, $url, $headers, $body, $timeout) {
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HEADER, false);
     curl_setopt($ch, CURLOPT_TIMEOUT, (int)$timeout > 0 ? (int)$timeout : 60);
-    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+    if (defined('CURLOPT_DNS_CACHE_TIMEOUT')) curl_setopt($ch, CURLOPT_DNS_CACHE_TIMEOUT, 300);
+    if (defined('CURLOPT_TCP_KEEPALIVE')) curl_setopt($ch, CURLOPT_TCP_KEEPALIVE, 1);
     if (defined('CURLOPT_PROTOCOLS') && defined('CURLPROTO_HTTPS')) curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTPS);
     if ($body !== null) curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
 
@@ -253,11 +322,27 @@ function cpms_drive_curl_request($method, $url, $headers, $body, $timeout) {
 }}
 
 if (!function_exists('cpms_drive_get_access_token')) {
-function cpms_drive_get_access_token($scope = '') {
+function cpms_drive_get_access_token($scope = '', $forceRefresh = false) {
     static $cache = null;
     $now = time();
-    if (is_array($cache) && isset($cache['access_token']) && isset($cache['expires_at']) && (int)$cache['expires_at'] > ($now + 60)) {
+    if ($scope === '') {
+        $scope = trim((string)cpms_drive_config('scope'));
+        if ($scope === '') $scope = 'https://www.googleapis.com/auth/drive';
+    }
+    $cachePath = cpms_drive_token_cache_path($scope);
+    if ($forceRefresh) {
+        $cache = null;
+        if (is_file($cachePath)) @unlink($cachePath);
+    }
+    if (!$forceRefresh && is_array($cache) && isset($cache['access_token']) && isset($cache['expires_at']) && (int)$cache['expires_at'] > ($now + 60)) {
         return array('ok' => true, 'access_token' => $cache['access_token'], 'expires_at' => $cache['expires_at'], 'http_code' => 0, 'message' => 'Access token loaded from request memory.');
+    }
+    if (!$forceRefresh) {
+        $diskCache = cpms_drive_cache_read($cachePath);
+        if (isset($diskCache['access_token']) && isset($diskCache['expires_at']) && (int)$diskCache['expires_at'] > ($now + 120)) {
+            $cache = array('access_token' => (string)$diskCache['access_token'], 'expires_at' => (int)$diskCache['expires_at']);
+            return array('ok' => true, 'access_token' => $cache['access_token'], 'expires_at' => $cache['expires_at'], 'http_code' => 0, 'message' => 'Access token loaded from server cache.');
+        }
     }
 
     $result = array(
@@ -282,10 +367,6 @@ function cpms_drive_get_access_token($scope = '') {
     $account = $read['account'];
     $tokenUrl = trim((string)cpms_drive_config('token_url'));
     if ($tokenUrl === '') $tokenUrl = 'https://oauth2.googleapis.com/token';
-    if ($scope === '') {
-        $scope = trim((string)cpms_drive_config('scope'));
-        if ($scope === '') $scope = 'https://www.googleapis.com/auth/drive';
-    }
 
     $claim = array(
         'iss' => $account['client_email'],
@@ -335,6 +416,7 @@ function cpms_drive_get_access_token($scope = '') {
         'access_token' => (string)$res['json']['access_token'],
         'expires_at' => $expiresAt
     );
+    cpms_drive_cache_write($cachePath, $cache);
 
     $result['ok'] = true;
     $result['access_token'] = $cache['access_token'];
@@ -370,7 +452,20 @@ function cpms_drive_authorized_request($method, $path, $params, $body, $headers,
     if (!is_array($headers)) $headers = array();
     array_unshift($headers, 'Authorization: Bearer ' . $token['access_token']);
     $url = cpms_drive_api_url($path, $params, $upload);
-    return cpms_drive_curl_request($method, $url, $headers, $body, $timeout);
+    $response = cpms_drive_curl_request($method, $url, $headers, $body, $timeout);
+    if (isset($response['http_code']) && (int)$response['http_code'] === 401) {
+        $token = cpms_drive_get_access_token('', true);
+        if (!empty($token['ok'])) {
+            $retryHeaders = is_array($headers) ? $headers : array();
+            for ($i = count($retryHeaders) - 1; $i >= 0; $i--) {
+                if (stripos((string)$retryHeaders[$i], 'Authorization:') === 0) unset($retryHeaders[$i]);
+            }
+            $retryHeaders = array_values($retryHeaders);
+            array_unshift($retryHeaders, 'Authorization: Bearer ' . $token['access_token']);
+            $response = cpms_drive_curl_request($method, $url, $retryHeaders, $body, $timeout);
+        }
+    }
+    return $response;
 }}
 
 if (!function_exists('cpms_drive_file_fields')) {
@@ -491,6 +586,10 @@ function cpms_drive_create_folder($name, $parentFolderId, $context) {
 
 if (!function_exists('cpms_drive_find_or_create_folder')) {
 function cpms_drive_find_or_create_folder($name, $parentFolderId, $context) {
+    $cachedFile = cpms_drive_folder_cache_get($name, $parentFolderId);
+    if (is_array($cachedFile) && isset($cachedFile['id'])) {
+        return array('ok' => true, 'created' => false, 'file' => $cachedFile, 'message' => 'Cached folder used.', 'http_code' => 0);
+    }
     $found = cpms_drive_find_folder($name, $parentFolderId);
     if (!$found['ok']) {
         if (!is_array($context)) $context = array();
@@ -503,9 +602,13 @@ function cpms_drive_find_or_create_folder($name, $parentFolderId, $context) {
         return array('ok' => false, 'created' => false, 'file' => null, 'message' => $found['message'], 'http_code' => $found['http_code']);
     }
     if ($found['found'] && is_array($found['file'])) {
+        cpms_drive_folder_cache_put($name, $parentFolderId, $found['file']);
         return array('ok' => true, 'created' => false, 'file' => $found['file'], 'message' => 'Existing folder used.', 'http_code' => $found['http_code']);
     }
     $created = cpms_drive_create_folder($name, $parentFolderId, $context);
+    if (!empty($created['ok']) && isset($created['file']) && is_array($created['file'])) {
+        cpms_drive_folder_cache_put($name, $parentFolderId, $created['file']);
+    }
     return array(
         'ok' => $created['ok'],
         'created' => $created['ok'],

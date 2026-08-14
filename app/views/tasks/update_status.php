@@ -160,10 +160,10 @@ if (!$task) {
 $requestedStatus = $status;
 $isMeetingTask = isset($task['task_type']) && (string)$task['task_type'] === 'meeting';
 $canApproveDone = (!$isMeetingTask && $status === 'done' && cpms_tasks_can_approve_group_completion($pdo, $task, $currentEmployeeId));
-$canSelfComplete = (!$isMeetingTask && $status === 'done' && cpms_tasks_is_self_request($task) && cpms_tasks_can_submit_completion($task, $currentEmployeeId));
+$canDirectComplete = (!$isMeetingTask && $status === 'done' && cpms_tasks_can_complete_directly($task, $currentEmployeeId));
 $canSubmitCompletion = (!$isMeetingTask && $status === 'completion_pending' && cpms_tasks_can_submit_completion($task, $currentEmployeeId));
 $canChangeStatus = cpms_tasks_can_change_status($task, $currentEmployeeId);
-if (!$canApproveDone && !$canSelfComplete && !$canSubmitCompletion && !$canChangeStatus) {
+if (!$canApproveDone && !$canDirectComplete && !$canSubmitCompletion && !$canChangeStatus) {
     cpms_tasks_status_fail('상태 변경 권한이 없습니다.', $isAjax);
 }
 if ($isMeetingTask && $status === 'progress') $status = 'meeting_available';
@@ -171,7 +171,7 @@ if ($isMeetingTask && $status === 'rejected') $status = 'meeting_unavailable';
 if ($status === 'done' && isset($task['status']) && in_array((string)$task['status'], array('done', 'cancelled'), true)) {
     cpms_tasks_status_fail('이미 완료 또는 취소된 업무입니다.', $isAjax);
 }
-if (!$isMeetingTask && $requestedStatus === 'done' && !$canApproveDone && !$canSelfComplete) {
+if (!$isMeetingTask && $requestedStatus === 'done' && !$canApproveDone && !$canDirectComplete) {
     cpms_tasks_status_fail('완료는 요청자 승인 후 처리할 수 있습니다.', $isAjax);
 }
 if (!$isMeetingTask && isset($task['status']) && (string)$task['status'] === 'completion_pending' && !in_array($requestedStatus, array('done', 'completion_pending'), true)) {

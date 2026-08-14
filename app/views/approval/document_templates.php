@@ -36,6 +36,33 @@ if (!function_exists('approval_render_delegated_sign_cell')) {
     }
 }
 
+if (!function_exists('approval_render_ceo_approved_sign_cell')) {
+    function approval_render_ceo_approved_sign_cell()
+    {
+        echo '<td><div class="approval-sign-cell"><span class="approval-delegated-status">' . h(approval_status_label('CEO_APPROVED')) . '</span></div></td>';
+    }
+}
+
+if (!function_exists('approval_sign_path_from_line')) {
+    function approval_sign_path_from_line($line, $email)
+    {
+        $line = is_array($line) ? $line : array();
+        $storedPath = isset($line['sign_path']) && is_scalar($line['sign_path'])
+            ? trim((string)$line['sign_path'])
+            : '';
+        if ($storedPath !== '') {
+            $root = dirname(dirname(dirname(__DIR__)));
+            $normalized = str_replace('\\', '/', $storedPath);
+            $normalized = preg_replace('#^file:/+#i', '', $normalized);
+            $normalized = ltrim($normalized, '/');
+            if (strpos($normalized, '../') === false && is_file($root . '/' . $normalized)) {
+                return $normalized;
+            }
+        }
+        return approval_sign_path_by_email($email);
+    }
+}
+
 if (!function_exists('approval_render_sign_cell')) {
     function approval_render_sign_cell($line, $opts)
     {
@@ -47,6 +74,7 @@ if (!function_exists('approval_render_sign_cell')) {
         }
         $status = isset($line['line_status']) ? strtoupper((string)$line['line_status']) : '';
         $isApproved = ($status === 'APPROVED' || $status === 'SKIPPED');
+        $isCeoApproved = ($status === 'CEO_APPROVED');
         $isDelegated = ($status === 'DELEGATED' || (isset($line['is_delegated']) && (int)$line['is_delegated'] === 1));
         $isDrafter = isset($opts['is_drafter']) && (int)$opts['is_drafter'] === 1;
         $email = '';
@@ -55,7 +83,11 @@ if (!function_exists('approval_render_sign_cell')) {
         } else {
             $email = isset($line['approver_email']) ? (string)$line['approver_email'] : '';
         }
-        $sig = approval_sign_path_by_email($email);
+        $sig = approval_sign_path_from_line($line, $email);
+        if ($isCeoApproved) {
+            approval_render_ceo_approved_sign_cell();
+            return;
+        }
         if ($isDelegated) {
             approval_render_delegated_sign_cell(approval_status_label('DELEGATED'));
             return;
@@ -119,11 +151,17 @@ if (!function_exists('approval_render_time_cell')) {
             return;
         }
         $status = isset($line['line_status']) ? strtoupper((string)$line['line_status']) : 'WAITING';
+        $isCeoApproved = ($status === 'CEO_APPROVED');
         $isDelegated = ($status === 'DELEGATED' || (isset($line['is_delegated']) && (int)$line['is_delegated'] === 1) || !empty($opts['is_delegated']));
         $time = !empty($line['acted_at']) ? $line['acted_at'] : '';
         echo '<td class="approval-time-cell">';
         if (!empty($opts['is_drafter'])) {
             echo '-';
+        } else if ($isCeoApproved) {
+            echo '<span class="approval-delegated-status">' . h(approval_status_label('CEO_APPROVED')) . '</span>';
+            if ($time !== '') {
+                echo '<br><span class="doc-time">' . h($time) . '</span>';
+            }
         } else if ($isDelegated) {
             echo '<span class="approval-delegated-status">' . h(approval_status_label('DELEGATED')) . '</span>';
             $note = approval_line_auto_note($line);

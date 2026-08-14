@@ -3,6 +3,7 @@ use App\Core\Auth;
 use App\Core\Db;
 
 require_once __DIR__ . '/leave_management_helpers.php';
+require_once __DIR__ . '/../../services/ApprovalPdfService.php';
 
 if (!function_exists('cpms_leave_empty_usage_bucket')) {
 function cpms_leave_empty_usage_bucket()
@@ -36,6 +37,59 @@ function cpms_leave_render_usage_html($usage)
     return implode('<span class="leave-use-divider"> / </span>', $parts);
 }}
 
+if (!function_exists('cpms_leave_history_content_value')) {
+function cpms_leave_history_content_value($content, $key)
+{
+    if (!is_array($content) || !isset($content[$key]) || !is_scalar($content[$key])) {
+        return '';
+    }
+    return trim((string)$content[$key]);
+}}
+
+if (!function_exists('cpms_leave_history_type_label')) {
+function cpms_leave_history_type_label($content)
+{
+    $requestType = cpms_leave_history_content_value($content, 'request_type');
+    $requestTypeEtc = cpms_leave_history_content_value($content, 'request_type_etc');
+    if ($requestType === '기타' && $requestTypeEtc !== '') {
+        return '기타 (' . $requestTypeEtc . ')';
+    }
+    return $requestType !== '' ? $requestType : '휴가';
+}}
+
+if (!function_exists('cpms_leave_history_use_days')) {
+function cpms_leave_history_use_days($content, $deductDays)
+{
+    if ($deductDays !== null && $deductDays !== '' && is_numeric($deductDays) && (float)$deductDays > 0) {
+        return cpms_leave_normalize_half_step($deductDays);
+    }
+    $requestType = cpms_leave_history_content_value($content, 'request_type');
+    if (strpos($requestType, '반차') !== false) {
+        return 0.5;
+    }
+    $leaveDays = str_replace(',', '', cpms_leave_history_content_value($content, 'leave_days'));
+    if ($leaveDays !== '' && is_numeric($leaveDays)) {
+        return cpms_leave_normalize_half_step($leaveDays);
+    }
+    return 0.0;
+}}
+
+if (!function_exists('cpms_leave_history_sort_rows')) {
+function cpms_leave_history_sort_rows($left, $right)
+{
+    $leftStart = isset($left['leave_start_date']) ? (string)$left['leave_start_date'] : '';
+    $rightStart = isset($right['leave_start_date']) ? (string)$right['leave_start_date'] : '';
+    if ($leftStart !== $rightStart) {
+        return strcmp($rightStart, $leftStart);
+    }
+    $leftId = isset($left['document_id']) ? (int)$left['document_id'] : 0;
+    $rightId = isset($right['document_id']) ? (int)$right['document_id'] : 0;
+    if ($leftId === $rightId) {
+        return 0;
+    }
+    return $leftId < $rightId ? 1 : -1;
+}}
+
 $pdo = Db::pdo();
 $user = Auth::user();
 
@@ -64,6 +118,18 @@ if (!in_array($statusFilter, array('active', 'resigned', 'all'), true)) {
     $statusFilter = 'active';
 }
 $q = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
+$leaveView = isset($_GET['leave_view']) ? trim((string)$_GET['leave_view']) : 'status';
+if (!in_array($leaveView, array('status', 'history'), true)) {
+    $leaveView = 'status';
+}
+// 기존 PDF 복구가 다시 필요할 때 true로 변경하면 일괄 재생성 UI가 표시됩니다.
+$showLeavePdfRebuildUi = false;
+$usageMonth = isset($_GET['usage_month']) ? (int)$_GET['usage_month'] : (int)date('n');
+if ($usageMonth < 1 || $usageMonth > 12) {
+    $usageMonth = (int)date('n');
+}
+$usageMonthStart = sprintf('%04d-%02d-01', $year, $usageMonth);
+$usageMonthEnd = date('Y-m-t', strtotime($usageMonthStart));
 
 $accrualStats = cpms_leave_apply_accruals_until($pdo, $today);
 
@@ -80,6 +146,13 @@ $hasLeaveDeductions = cpms_leave_table_exists($pdo, 'cpms_approval_leave_deducti
     && cpms_leave_column_exists($pdo, 'cpms_approval_leave_deductions', 'deduct_amount')
     && cpms_leave_column_exists($pdo, 'cpms_approval_leave_deductions', 'deducted_at')
     && cpms_leave_column_exists($pdo, 'cpms_approval_leave_deductions', 'document_id');
+$hasApprovalDocuments = cpms_leave_table_exists($pdo, 'cpms_approval_documents')
+    && cpms_leave_column_exists($pdo, 'cpms_approval_documents', 'doc_type')
+    && cpms_leave_column_exists($pdo, 'cpms_approval_documents', 'doc_status')
+    && cpms_leave_column_exists($pdo, 'cpms_approval_documents', 'content');
+$hasApprovalPdfFileId = $hasApprovalDocuments && cpms_leave_column_exists($pdo, 'cpms_approval_documents', 'completed_pdf_drive_file_id');
+$hasApprovalPdfStatus = $hasApprovalDocuments && cpms_leave_column_exists($pdo, 'cpms_approval_documents', 'completed_pdf_upload_status');
+$hasApprovalPdfVersion = $hasApprovalDocuments && cpms_leave_column_exists($pdo, 'cpms_approval_documents', 'completed_pdf_render_version');
 $hasAdjustments = cpms_leave_table_exists($pdo, 'cpms_leave_adjustments')
     && cpms_leave_column_exists($pdo, 'cpms_leave_adjustments', 'target_year')
     && cpms_leave_column_exists($pdo, 'cpms_leave_adjustments', 'adjust_type');
@@ -91,6 +164,7 @@ if (!$hasAnnualBalance) $schemaWarnings[count($schemaWarnings)] = 'employees.lea
 if (!$hasHalfBalance) $schemaWarnings[count($schemaWarnings)] = 'employees.leave_half_balance';
 if (!$hasAccrualLogs) $schemaWarnings[count($schemaWarnings)] = 'cpms_leave_accrual_logs';
 if (!$hasLeaveDeductions) $schemaWarnings[count($schemaWarnings)] = 'cpms_approval_leave_deductions';
+if (!$hasApprovalDocuments) $schemaWarnings[count($schemaWarnings)] = 'cpms_approval_documents';
 
 $departmentOptions = array();
 try {
@@ -331,6 +405,130 @@ for ($i = 0; $i < count($employees); $i++) {
         $monthlyRows[count($monthlyRows)] = $row;
     }
 }
+
+$historyRows = array();
+$historyLoadError = '';
+$historyEmployeeMap = array();
+for ($i = 0; $i < count($employees); $i++) {
+    $historyEmployeeId = isset($employees[$i]['id']) ? (int)$employees[$i]['id'] : 0;
+    if ($historyEmployeeId > 0) {
+        $historyEmployeeMap[$historyEmployeeId] = $employees[$i];
+    }
+}
+
+if ($leaveView === 'history' && $hasApprovalDocuments && count($historyEmployeeMap) > 0) {
+    try {
+        $historyHasCreatorId = cpms_leave_column_exists($pdo, 'cpms_approval_documents', 'created_by_id');
+        $historyHasCreatorName = cpms_leave_column_exists($pdo, 'cpms_approval_documents', 'created_by_name');
+        $historyCreatorIdSelect = $historyHasCreatorId ? 'd.created_by_id' : '0 AS created_by_id';
+        $historyCreatorNameSelect = $historyHasCreatorName ? 'd.created_by_name' : "'' AS created_by_name";
+        $historyPdfFileIdSelect = $hasApprovalPdfFileId ? 'd.completed_pdf_drive_file_id' : "'' AS completed_pdf_drive_file_id";
+        $historyPdfStatusSelect = $hasApprovalPdfStatus ? 'd.completed_pdf_upload_status' : "'' AS completed_pdf_upload_status";
+        $historyPdfVersionSelect = $hasApprovalPdfVersion ? 'd.completed_pdf_render_version' : '0 AS completed_pdf_render_version';
+        $historyDeductionSelect = 'NULL AS deducted_days';
+        $historyDeductionJoin = '';
+        if ($hasLeaveDeductions) {
+            $historyDeductionSelect = 'ld.deducted_days';
+            $historyDeductionJoin = " LEFT JOIN (SELECT document_id,SUM(deduct_amount) AS deducted_days FROM cpms_approval_leave_deductions GROUP BY document_id) ld ON ld.document_id=d.id";
+        }
+        $historySql = "SELECT d.id," . $historyCreatorIdSelect . "," . $historyCreatorNameSelect . ",d.content," . $historyDeductionSelect
+            . "," . $historyPdfFileIdSelect . "," . $historyPdfStatusSelect . "," . $historyPdfVersionSelect
+            . " FROM cpms_approval_documents d" . $historyDeductionJoin
+            . " WHERE d.doc_type='leave' AND UPPER(COALESCE(d.doc_status,'')) IN ('APPROVED','COMPLETED') ORDER BY d.id DESC";
+        $historyResult = $pdo->query($historySql);
+        $historyDocuments = $historyResult ? $historyResult->fetchAll(PDO::FETCH_ASSOC) : array();
+        if (!is_array($historyDocuments)) {
+            $historyDocuments = array();
+        }
+        for ($i = 0; $i < count($historyDocuments); $i++) {
+            $historyDocument = $historyDocuments[$i];
+            $employeeId = isset($historyDocument['created_by_id']) ? (int)$historyDocument['created_by_id'] : 0;
+            if ($employeeId <= 0 || !isset($historyEmployeeMap[$employeeId])) {
+                continue;
+            }
+            $content = array();
+            $rawContent = isset($historyDocument['content']) ? trim((string)$historyDocument['content']) : '';
+            if ($rawContent !== '') {
+                $decodedContent = json_decode($rawContent, true);
+                if (is_array($decodedContent)) {
+                    $content = $decodedContent;
+                }
+            }
+            $leaveStartDate = cpms_leave_parse_date(cpms_leave_history_content_value($content, 'leave_start_date'));
+            $leaveEndDate = cpms_leave_parse_date(cpms_leave_history_content_value($content, 'leave_end_date'));
+            if ($leaveStartDate === '') {
+                continue;
+            }
+            if ($leaveEndDate === '') {
+                $leaveEndDate = $leaveStartDate;
+            }
+            if ($leaveStartDate < $usageMonthStart || $leaveStartDate > $usageMonthEnd) {
+                continue;
+            }
+
+            $historyEmployee = $historyEmployeeMap[$employeeId];
+            $employeeName = cpms_leave_history_content_value($content, 'applicant_name');
+            if ($employeeName === '') {
+                $employeeName = isset($historyEmployee['name']) ? trim((string)$historyEmployee['name']) : '';
+            }
+            if ($employeeName === '' && isset($historyDocument['created_by_name'])) {
+                $employeeName = trim((string)$historyDocument['created_by_name']);
+            }
+            $department = cpms_leave_history_content_value($content, 'department');
+            if ($department === '') {
+                $department = isset($historyEmployee['department']) ? trim((string)$historyEmployee['department']) : '';
+            }
+            $position = cpms_leave_history_content_value($content, 'position');
+            if ($position === '') {
+                $position = isset($historyEmployee['position']) ? trim((string)$historyEmployee['position']) : '';
+            }
+            $deductedDays = isset($historyDocument['deducted_days']) ? $historyDocument['deducted_days'] : null;
+            $historyRows[count($historyRows)] = array(
+                'document_id' => isset($historyDocument['id']) ? (int)$historyDocument['id'] : 0,
+                'employee_name' => $employeeName,
+                'department' => $department,
+                'position' => $position,
+                'leave_type' => cpms_leave_history_type_label($content),
+                'leave_start_date' => $leaveStartDate,
+                'leave_end_date' => $leaveEndDate,
+                'used_days' => cpms_leave_history_use_days($content, $deductedDays),
+                'pdf_file_id' => isset($historyDocument['completed_pdf_drive_file_id']) ? trim((string)$historyDocument['completed_pdf_drive_file_id']) : '',
+                'pdf_status' => isset($historyDocument['completed_pdf_upload_status']) ? strtolower(trim((string)$historyDocument['completed_pdf_upload_status'])) : '',
+                'pdf_render_version' => isset($historyDocument['completed_pdf_render_version']) ? (int)$historyDocument['completed_pdf_render_version'] : 0
+            );
+        }
+        usort($historyRows, 'cpms_leave_history_sort_rows');
+    } catch (Exception $e) {
+        $historyRows = array();
+        $historyLoadError = $e->getMessage();
+    }
+}
+
+$leaveFilterParams = array(
+    'r' => '관리',
+    'tab' => 'leave_management',
+    'year' => $year,
+    'status' => $statusFilter
+);
+if ($deptFilter !== '') {
+    $leaveFilterParams['department'] = $deptFilter;
+}
+if ($q !== '') {
+    $leaveFilterParams['q'] = $q;
+}
+$leaveStatusParams = $leaveFilterParams;
+$leaveStatusParams['leave_view'] = 'status';
+$leaveHistoryParams = $leaveFilterParams;
+$leaveHistoryParams['leave_view'] = 'history';
+$leaveHistoryParams['usage_month'] = $usageMonth;
+$leaveResetParams = array(
+    'r' => '관리',
+    'tab' => 'leave_management',
+    'leave_view' => $leaveView
+);
+if ($leaveView === 'history') {
+    $leaveResetParams['usage_month'] = (int)date('n');
+}
 ?>
 
 <style>
@@ -358,6 +556,23 @@ for ($i = 0; $i < count($employees); $i++) {
 .leave-use-divider{color:#94a3b8;font-weight:700}
 .leave-use-stack{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:4px;min-height:18px}
 .leave-use-stack.inline{gap:4px}
+.cpms-leave-view-tabs{display:flex;flex-wrap:wrap;gap:8px;border-bottom:1px solid #d1d5db;margin:4px 0 16px;padding:0 2px 10px}
+.cpms-leave-view-tab{display:inline-flex;align-items:center;justify-content:center;padding:10px 18px;border:1px solid #d1d5db;border-radius:12px;background:#fff;color:#4b5563;font-weight:800;text-decoration:none}
+.cpms-leave-view-tab.is-active{border-color:#1d4ed8;background:#1d4ed8;color:#fff}
+.cpms-leave-month-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.cpms-leave-month-tab{display:inline-flex;align-items:center;justify-content:center;min-width:52px;padding:8px 11px;border:1px solid #d1d5db;border-radius:10px;background:#fff;color:#4b5563;font-size:13px;font-weight:800;text-decoration:none}
+.cpms-leave-month-tab.is-active{border-color:#0f766e;background:#0f766e;color:#fff}
+.cpms-leave-history-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.cpms-leave-history-table{min-width:980px}
+.cpms-leave-history-table th,.cpms-leave-history-table td{padding:10px 12px}
+.cpms-leave-pdf-actions{display:flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap}
+.cpms-leave-pdf-action{display:inline-flex;align-items:center;justify-content:center;padding:6px 10px;border-radius:8px;font-size:12px;font-weight:800;text-decoration:none;white-space:nowrap}
+.cpms-leave-pdf-view{background:#e0e7ff;color:#3730a3}
+.cpms-leave-pdf-download{background:#f3f4f6;color:#374151}
+.cpms-leave-pdf-status{font-size:11px;color:#6b7280}
+.cpms-leave-pdf-rebuild{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border:1px solid #c7d2fe;background:#eef2ff;border-radius:14px;padding:12px 14px;margin-bottom:14px}
+.cpms-leave-pdf-rebuild button{border:0;border-radius:10px;background:#4338ca;color:#fff;padding:9px 14px;font-weight:800;cursor:pointer}
+.cpms-leave-pdf-rebuild button:disabled{cursor:wait;opacity:.65}
 </style>
 
 <div class="mb-5">
@@ -379,6 +594,10 @@ for ($i = 0; $i < count($employees); $i++) {
 <form method="get" class="cpms-leave-filter">
     <input type="hidden" name="r" value="관리">
     <input type="hidden" name="tab" value="leave_management">
+    <input type="hidden" name="leave_view" value="<?php echo h($leaveView); ?>">
+    <?php if ($leaveView === 'history') { ?>
+        <input type="hidden" name="usage_month" value="<?php echo (int)$usageMonth; ?>">
+    <?php } ?>
     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
         <div>
             <div class="text-xs font-bold text-gray-600 mb-1">연도</div>
@@ -411,7 +630,7 @@ for ($i = 0; $i < count($employees); $i++) {
         </div>
         <div class="flex items-end gap-2">
             <button type="submit" class="px-4 py-2 rounded-xl bg-gray-900 text-white font-bold">검색</button>
-            <a href="?r=관리&tab=leave_management" class="px-4 py-2 rounded-xl bg-gray-100 text-gray-900 font-bold">초기화</a>
+            <a href="?<?php echo h(http_build_query($leaveResetParams)); ?>" class="px-4 py-2 rounded-xl bg-gray-100 text-gray-900 font-bold">초기화</a>
         </div>
     </div>
     <div class="cpms-leave-meta">
@@ -420,6 +639,12 @@ for ($i = 0; $i < count($employees); $i++) {
     </div>
 </form>
 
+<nav class="cpms-leave-view-tabs" aria-label="연차관리 상세 탭">
+    <a class="cpms-leave-view-tab <?php echo $leaveView === 'status' ? 'is-active' : ''; ?>" href="?<?php echo h(http_build_query($leaveStatusParams)); ?>">연차현황</a>
+    <a class="cpms-leave-view-tab <?php echo $leaveView === 'history' ? 'is-active' : ''; ?>" href="?<?php echo h(http_build_query($leaveHistoryParams)); ?>">연차관리 사용내역</a>
+</nav>
+
+<?php if ($leaveView === 'status') { ?>
 <div class="cpms-leave-section">
     <div class="cpms-leave-section-title">
         <h4 class="annual-title">연차 현황</h4>
@@ -480,7 +705,187 @@ for ($i = 0; $i < count($employees); $i++) {
         </table>
     </div>
 </div>
+<?php } ?>
+<?php if ($leaveView === 'history') { ?>
+<div class="cpms-leave-section">
+    <div class="cpms-leave-section-title">
+        <h4 class="annual-title">연차관리 사용내역</h4>
+        <div class="cpms-leave-section-note">최종 승인된 전자결재 휴가계 기준</div>
+    </div>
 
+    <?php if ($showLeavePdfRebuildUi) { ?>
+    <div class="cpms-leave-pdf-rebuild">
+        <div>
+            <div class="font-extrabold text-indigo-950">기존 승인 휴가계 PDF 서명 갱신</div>
+            <div class="text-xs text-indigo-700 mt-1">승인 완료된 휴가계 PDF를 전체 결재자 서명이 포함된 새 파일로 교체합니다.</div>
+        </div>
+        <div class="flex items-center gap-3 flex-wrap">
+            <span id="leavePdfRebuildProgress" class="text-sm font-bold text-indigo-800"></span>
+            <button type="button" id="leavePdfRebuildButton">휴가계 PDF 전체 다시 생성</button>
+        </div>
+    </div>
+    <?php } ?>
+
+    <div class="cpms-leave-month-tabs" aria-label="사용내역 조회 월">
+        <?php for ($m = 1; $m <= 12; $m++) {
+            $usageMonthParams = $leaveFilterParams;
+            $usageMonthParams['leave_view'] = 'history';
+            $usageMonthParams['usage_month'] = $m;
+        ?>
+            <a class="cpms-leave-month-tab <?php echo $usageMonth === $m ? 'is-active' : ''; ?>" href="?<?php echo h(http_build_query($usageMonthParams)); ?>"><?php echo (int)$m; ?>월</a>
+        <?php } ?>
+    </div>
+
+    <div class="cpms-leave-history-summary">
+        <div class="font-extrabold text-gray-900"><?php echo (int)$year; ?>년 <?php echo (int)$usageMonth; ?>월</div>
+        <div class="text-sm text-gray-500">총 <?php echo count($historyRows); ?>건</div>
+    </div>
+
+    <?php if ($historyLoadError !== '') { ?>
+        <div class="mb-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">사용내역을 불러오지 못했습니다. <?php echo h($historyLoadError); ?></div>
+    <?php } ?>
+
+    <div class="cpms-leave-table-wrap">
+        <table class="cpms-leave-table cpms-leave-history-table">
+            <thead>
+                <tr>
+                    <th class="sticky-name">성명</th>
+                    <th>부서명</th>
+                    <th>직위</th>
+                    <th>휴가구분</th>
+                    <th>휴가 시작일</th>
+                    <th>휴가 종료일</th>
+                    <th>사용일 수</th>
+                    <th>휴가계 PDF</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if (count($historyRows) === 0) { ?>
+                    <tr>
+                        <td colspan="8" class="left"><?php echo (int)$year; ?>년 <?php echo (int)$usageMonth; ?>월에 승인된 휴가 사용내역이 없습니다.</td>
+                    </tr>
+                <?php } ?>
+                <?php for ($i = 0; $i < count($historyRows); $i++) {
+                    $historyRow = $historyRows[$i];
+                ?>
+                    <tr>
+                        <td class="sticky-name"><strong><?php echo h($historyRow['employee_name']); ?></strong></td>
+                        <td><?php echo h($historyRow['department']); ?></td>
+                        <td><?php echo h($historyRow['position']); ?></td>
+                        <td><?php echo h($historyRow['leave_type']); ?></td>
+                        <td><?php echo h($historyRow['leave_start_date']); ?></td>
+                        <td><?php echo h($historyRow['leave_end_date']); ?></td>
+                        <td class="sum-cell"><?php echo h(cpms_leave_format_decimal($historyRow['used_days'])); ?></td>
+                        <td>
+                            <?php if ($historyRow['pdf_file_id'] !== '') { ?>
+                                <div class="cpms-leave-pdf-actions">
+                                    <a class="cpms-leave-pdf-action cpms-leave-pdf-view" href="?r=approval_completed_pdf&amp;id=<?php echo (int)$historyRow['document_id']; ?>" target="_blank" rel="noopener">보기</a>
+                                    <a class="cpms-leave-pdf-action cpms-leave-pdf-download" href="?r=approval_completed_pdf&amp;id=<?php echo (int)$historyRow['document_id']; ?>&amp;download=1">다운로드</a>
+                                </div>
+                                <?php if ($historyRow['pdf_render_version'] < cpms_approval_pdf_render_version()) { ?>
+                                    <div class="cpms-leave-pdf-status mt-1">서명 갱신 필요</div>
+                                <?php } ?>
+                            <?php } else if ($historyRow['pdf_status'] === 'failed') { ?>
+                                <span class="cpms-leave-pdf-status text-red-600">PDF 생성 실패</span>
+                            <?php } else { ?>
+                                <span class="cpms-leave-pdf-status">PDF 미생성</span>
+                            <?php } ?>
+                        </td>
+                    </tr>
+                <?php } ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php if ($showLeavePdfRebuildUi) { ?>
+<script>
+(function () {
+    var button = document.getElementById('leavePdfRebuildButton');
+    var progress = document.getElementById('leavePdfRebuildProgress');
+    if (!button || !progress || !window.fetch) return;
+    button.onclick = function () {
+        if (!window.confirm('승인 완료된 휴가계 PDF 전체를 다시 생성하고 Google Drive 파일을 교체하시겠습니까?')) return;
+        var cursor = 0;
+        var succeeded = 0;
+        var failed = 0;
+        var lastFailureMessage = '';
+        button.disabled = true;
+        progress.textContent = '재생성 준비 중...';
+
+        function runBatch() {
+            var body = 'cursor=' + encodeURIComponent(cursor)
+                + '&limit=1&_csrf=' + encodeURIComponent(<?php echo json_encode(csrf_token()); ?>);
+            window.fetch('?r=management/leave_pdf_rebuild', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
+                body: body
+            }).then(function (response) {
+                return response.text().then(function (text) {
+                    var data = null;
+                    if (text !== '') {
+                        try {
+                            data = JSON.parse(text);
+                        } catch (parseError) {
+                            if (text.charAt(0) === '<' || response.redirected) {
+                                throw new Error('로그인이 만료되었거나 서버 오류 페이지가 반환되었습니다. 화면을 새로고침한 후 다시 시도해주세요.');
+                            }
+                            throw new Error('서버 응답을 확인할 수 없습니다. HTTP ' + response.status);
+                        }
+                    }
+                    if (!data) {
+                        throw new Error('서버 응답이 비어 있습니다. PHP 오류 로그를 확인해주세요. HTTP ' + response.status);
+                    }
+                    if (!response.ok) {
+                        throw new Error(data.message ? data.message : 'PDF 재생성 요청 실패 (HTTP ' + response.status + ')');
+                    }
+                    return data;
+                });
+            }).then(function (data) {
+                if (!data || !data.ok) throw new Error(data && data.message ? data.message : 'PDF 재생성 요청 실패');
+                cursor = parseInt(data.next_cursor, 10) || cursor;
+                succeeded += parseInt(data.succeeded, 10) || 0;
+                failed += parseInt(data.failed, 10) || 0;
+                if (data.items && data.items.length) {
+                    for (var itemIndex = 0; itemIndex < data.items.length; itemIndex++) {
+                        if (!data.items[itemIndex].ok && data.items[itemIndex].message) {
+                            lastFailureMessage = data.items[itemIndex].message;
+                        }
+                    }
+                }
+                progress.textContent = '완료 ' + succeeded + '건 / 실패 ' + failed + '건 / 전체 ' + (parseInt(data.total, 10) || 0) + '건';
+                if ((parseInt(data.failed, 10) || 0) > 0) {
+                    button.disabled = false;
+                    button.textContent = '휴가계 PDF 전체 다시 생성';
+                    progress.textContent += lastFailureMessage !== '' ? ' / 중단 원인: ' + lastFailureMessage : ' / 첫 실패에서 중단했습니다.';
+                    return;
+                }
+                if (data.done) {
+                    button.disabled = false;
+                    button.textContent = '휴가계 PDF 전체 다시 생성';
+                    if (failed === 0) {
+                        progress.textContent = '전체 ' + succeeded + '건 재생성 완료';
+                        window.setTimeout(function () { window.location.reload(); }, 800);
+                    } else if (lastFailureMessage !== '') {
+                        progress.textContent += ' / 마지막 실패: ' + lastFailureMessage;
+                    }
+                    return;
+                }
+                window.setTimeout(runBatch, 100);
+            }).catch(function (error) {
+                button.disabled = false;
+                progress.textContent = error && error.message ? error.message : 'PDF 재생성 중 오류가 발생했습니다.';
+            });
+        }
+
+        runBatch();
+    };
+}());
+</script>
+<?php } ?>
+<?php } ?>
+
+<?php if ($leaveView === 'status') { ?>
 <div class="cpms-leave-section">
     <div class="cpms-leave-section-title">
         <h4 class="monthly-title">월차 현황</h4>
@@ -541,3 +946,4 @@ for ($i = 0; $i < count($employees); $i++) {
         </table>
     </div>
 </div>
+<?php } ?>

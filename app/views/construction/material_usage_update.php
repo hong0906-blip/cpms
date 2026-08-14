@@ -12,11 +12,13 @@ require_once __DIR__ . '/partials/material_statement_helper.php';
 require_once __DIR__ . '/partials/material_usage_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
 require_once __DIR__ . '/../../services/CostDataEventService.php';
+require_once __DIR__ . '/../../services/VendorService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
 use App\Services\CostDataEventService;
+use App\Services\VendorService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -130,6 +132,13 @@ if (!$pdo) {
 }
 
 cpms_material_usage_ensure_schema($pdo);
+VendorService::bootstrap($pdo, true);
+$resolvedVendorId = VendorService::selectedVendorId($pdo, isset($_POST['vendor_id']) ? (int)$_POST['vendor_id'] : 0, $vendorName);
+if ($resolvedVendorId <= 0) {
+    flash_set('error', '업체명 자동검색에서 등록된 업체를 선택해주세요. 업체명을 직접 입력해서는 저장할 수 없습니다.');
+    header('Location: ' . $redirect);
+    exit;
+}
 $hasMaterialAdvanceYn = cpms_material_usage_column_exists($pdo, 'advance_yn');
 
 try {
@@ -251,6 +260,7 @@ try {
     if ($targetMaterialId <= 0) {
         throw new Exception('수정할 업체정보를 저장하지 못했습니다.');
     }
+    if ($resolvedVendorId > 0) VendorService::attachDbRecord($pdo, 'cpms_material_items', $targetMaterialId, $resolvedVendorId);
 
     /* 변경 후 동일한 자재 마스터와 사용일자가 겹치는지 확인한다. */
     $stDup = $pdo->prepare("SELECT id

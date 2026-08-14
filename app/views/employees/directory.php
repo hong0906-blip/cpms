@@ -2,7 +2,7 @@
 /**
  * app/views/employees/directory.php
  * - 임직원 연락처 카드 화면
- * - 관리 > 직원명부(employees) 데이터를 보기 전용으로 표시
+ * - 관리 > 임직원 명부(employees)와 직영팀 명부(direct_team_members)를 보기 전용으로 표시
  * - PHP 5.6 호환
  */
 
@@ -16,6 +16,7 @@ if (!Auth::check()) {
 
 $pdo = Db::pdo();
 $rows = array();
+$directTeamRows = array();
 $loadError = '';
 
 if (!function_exists('cpms_employee_directory_column_exists')) {
@@ -42,6 +43,44 @@ function cpms_employee_directory_table_exists($pdo) {
     } catch (Exception $e) {
         return false;
     }
+}}
+
+if (!function_exists('cpms_employee_directory_named_table_exists')) {
+function cpms_employee_directory_named_table_exists($pdo, $table) {
+    $table = trim((string)$table);
+    if (!$pdo || $table === '') return false;
+    try {
+        $st = $pdo->prepare("SHOW TABLES LIKE :table_name");
+        $st->bindValue(':table_name', $table);
+        $st->execute();
+        return (bool)$st->fetch(PDO::FETCH_NUM);
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_employee_directory_named_column_exists')) {
+function cpms_employee_directory_named_column_exists($pdo, $table, $column) {
+    $table = trim((string)$table);
+    $column = trim((string)$column);
+    if (!$pdo || $table === '' || $column === '') return false;
+    try {
+        $dbName = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
+        if ($dbName === '') return false;
+        $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:table_name AND COLUMN_NAME=:column_name");
+        $st->execute(array(':db' => $dbName, ':table_name' => $table, ':column_name' => $column));
+        return ((int)$st->fetchColumn() > 0);
+    } catch (Exception $e) {
+        return false;
+    }
+}}
+
+if (!function_exists('cpms_employee_directory_named_select_column')) {
+function cpms_employee_directory_named_select_column($pdo, $table, $column, $alias, $fallbackSql) {
+    if (cpms_employee_directory_named_column_exists($pdo, $table, $column)) {
+        return $column . ' AS ' . $alias;
+    }
+    return $fallbackSql . ' AS ' . $alias;
 }}
 
 if (!function_exists('cpms_employee_directory_select_column')) {
@@ -95,7 +134,7 @@ function cpms_employee_directory_normalize_dept($dept) {
 if (!function_exists('cpms_employee_directory_filter_group')) {
 function cpms_employee_directory_filter_group($dept, $sectionName) {
     $sectionName = trim((string)$sectionName);
-    if ($sectionName === 'CEO' || $sectionName === '임원') return $sectionName;
+    if ($sectionName === 'CEO' || $sectionName === '임원' || $sectionName === '직영팀') return $sectionName;
     $dept = cpms_employee_directory_normalize_dept($dept);
     if ($dept === '품질' || $dept === '안전' || $dept === '보건') return '품질/안전';
     return $dept !== '' ? $dept : '기타';
@@ -249,6 +288,31 @@ if ($pdo && cpms_employee_directory_table_exists($pdo)) {
     $loadError = '직원명부 테이블을 찾을 수 없습니다.';
 }
 
+if ($pdo && cpms_employee_directory_named_table_exists($pdo, 'direct_team_members')) {
+    try {
+        $directSelectParts = array(
+            'id',
+            'name',
+            cpms_employee_directory_named_select_column($pdo, 'direct_team_members', 'photo_path', 'photo_path', "''"),
+            cpms_employee_directory_named_select_column($pdo, 'direct_team_members', 'phone', 'phone', "''"),
+            cpms_employee_directory_named_select_column($pdo, 'direct_team_members', 'hire_date', 'hire_date', 'NULL'),
+            cpms_employee_directory_named_select_column($pdo, 'direct_team_members', 'is_active', 'is_active', '1'),
+        );
+        $directSql = 'SELECT ' . implode(',', $directSelectParts) . ' FROM direct_team_members';
+        if (cpms_employee_directory_named_column_exists($pdo, 'direct_team_members', 'is_active')) {
+            $directSql .= ' WHERE is_active = 1';
+        }
+        $directSql .= ' ORDER BY name ASC LIMIT 1000';
+        $stDirect = $pdo->query($directSql);
+        $directTeamRows = $stDirect ? $stDirect->fetchAll(PDO::FETCH_ASSOC) : array();
+        if (!is_array($directTeamRows)) $directTeamRows = array();
+    } catch (Exception $e) {
+        $directTeamRows = array();
+        $directError = '직영팀 명부를 불러오는 중 오류가 발생했습니다: ' . $e->getMessage();
+        $loadError = $loadError === '' ? $directError : ($loadError . ' / ' . $directError);
+    }
+}
+
 $sections = array(
     'CEO' => array(),
     '임원' => array(),
@@ -278,6 +342,22 @@ for ($i = 0; $i < count($rows); $i++) {
     $filterCounts['전체']++;
 }
 
+for ($i = 0; $i < count($directTeamRows); $i++) {
+    $directTeamRows[$i]['email'] = '';
+    $directTeamRows[$i]['department'] = '직영팀';
+    $directTeamRows[$i]['position'] = '';
+    $directTeamRows[$i]['role'] = 'direct_team';
+    $directTeamRows[$i]['birth_date'] = '';
+    $directTeamRows[$i]['employee_no'] = '';
+    $directTeamRows[$i]['work_location'] = '';
+    $directTeamRows[$i]['is_direct_team'] = 1;
+}
+if (count($directTeamRows) > 0) {
+    usort($directTeamRows, 'cpms_employee_directory_compare_rows');
+    $filterCounts['직영팀'] = count($directTeamRows);
+    $filterCounts['전체'] += count($directTeamRows);
+}
+
 foreach ($sections as $sectionKey => $sectionRows) {
     usort($sections[$sectionKey], 'cpms_employee_directory_compare_rows');
 }
@@ -292,7 +372,7 @@ foreach ($rankGroups as $rank => $rankRows) {
     usort($rankGroups[$rank], 'cpms_employee_directory_compare_rows');
 }
 
-$filterButtons = array('전체', 'CEO', '임원', '공무', '공사', '관리', '품질/안전', '개발', '기타');
+$filterButtons = array('전체', 'CEO', '임원', '공무', '공사', '관리', '품질/안전', '개발', '기타', '직영팀');
 $initialSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
 ?>
 
@@ -314,6 +394,7 @@ $initialSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
 .employee-directory-card[data-filter="공무"]{border-color:#d32f2f}
 .employee-directory-card[data-filter="관리"]{border-color:#f57c00}
 .employee-directory-card[data-filter="품질/안전"]{border-color:#1565c0}
+.employee-directory-card[data-filter="직영팀"]{border-color:#7c3aed}
 .employee-directory-card[data-filter="CEO"],.employee-directory-card[data-filter="임원"]{border-color:#000}
 .employee-directory-birthday-marker{position:absolute;left:6px;top:6px;z-index:2;display:flex;width:22px;height:22px;align-items:center;justify-content:center;color:#f97316}
 .employee-directory-birthday-marker svg{width:20px;height:20px;stroke-width:2.3}
@@ -358,16 +439,22 @@ $initialSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
 
   <?php if ($loadError !== ''): ?>
     <div class="employee-directory-empty"><?php echo h($loadError); ?></div>
-  <?php elseif (count($rows) < 1): ?>
+  <?php elseif ((count($rows) + count($directTeamRows)) < 1): ?>
     <div class="employee-directory-empty">표시할 임직원이 없습니다.</div>
   <?php else: ?>
     <?php
       $renderSections = array();
       if (count($sections['CEO']) > 0) $renderSections[] = array('label' => 'CEO', 'rows' => $sections['CEO']);
       if (count($sections['임원']) > 0) $renderSections[] = array('label' => '임원', 'rows' => $sections['임원']);
+      $directTeamSectionAdded = false;
       foreach ($rankGroups as $rank => $rankRows) {
           if (count($rankRows) > 0) $renderSections[] = array('label' => $rank, 'rows' => $rankRows);
+          if ((string)$rank === '주임' && count($directTeamRows) > 0) {
+              $renderSections[] = array('label' => '직영팀', 'rows' => $directTeamRows);
+              $directTeamSectionAdded = true;
+          }
       }
+      if (!$directTeamSectionAdded && count($directTeamRows) > 0) $renderSections[] = array('label' => '직영팀', 'rows' => $directTeamRows);
     ?>
     <?php for ($s = 0; $s < count($renderSections); $s++): ?>
       <?php $section = $renderSections[$s]; ?>
@@ -381,6 +468,7 @@ $initialSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
               $position = cpms_employee_directory_value(isset($emp['position']) ? $emp['position'] : '', '');
               $department = cpms_employee_directory_value(isset($emp['department']) ? $emp['department'] : '', '-');
               $sectionLabel = isset($section['label']) ? (string)$section['label'] : '';
+              $isDirectTeamCard = isset($emp['is_direct_team']) && (int)$emp['is_direct_team'] === 1;
               $cardDeptLabel = ($sectionLabel === 'CEO' || $sectionLabel === '임원') ? $sectionLabel : $department;
               $birthday = cpms_employee_directory_birthday(isset($emp['birth_date']) ? $emp['birth_date'] : '');
               $photoSrc = cpms_employee_directory_photo_src(isset($emp['photo_path']) ? $emp['photo_path'] : '');
@@ -406,11 +494,15 @@ $initialSearch = isset($_GET['q']) ? trim((string)$_GET['q']) : '';
               <div class="employee-directory-name"><?php echo h($nameLine); ?></div>
               <div class="employee-directory-dept"><?php echo h($cardDeptLabel); ?></div>
               <div class="employee-directory-info">
-                <div class="employee-directory-line"><i data-lucide="badge"></i><span>사번 <?php echo h($employeeNo); ?></span></div>
-                <div class="employee-directory-line"><i data-lucide="cake"></i><span><?php echo h($birthday['display']); ?></span></div>
-                <div class="employee-directory-line"><i data-lucide="building-2"></i><span><?php echo h($workLocation); ?></span></div>
+                <?php if (!$isDirectTeamCard): ?>
+                  <div class="employee-directory-line"><i data-lucide="badge"></i><span>사번 <?php echo h($employeeNo); ?></span></div>
+                  <div class="employee-directory-line"><i data-lucide="cake"></i><span><?php echo h($birthday['display']); ?></span></div>
+                  <div class="employee-directory-line"><i data-lucide="building-2"></i><span><?php echo h($workLocation); ?></span></div>
+                <?php endif; ?>
                 <div class="employee-directory-line"><i data-lucide="calendar-days"></i><span><?php echo h($hireDate); ?></span></div>
-                <div class="employee-directory-line"><i data-lucide="mail"></i><?php if ($email !== '-'): ?><a href="mailto:<?php echo h($email); ?>"><?php echo h($email); ?></a><?php else: ?><span>-</span><?php endif; ?></div>
+                <?php if (!$isDirectTeamCard): ?>
+                  <div class="employee-directory-line"><i data-lucide="mail"></i><?php if ($email !== '-'): ?><a href="mailto:<?php echo h($email); ?>"><?php echo h($email); ?></a><?php else: ?><span>-</span><?php endif; ?></div>
+                <?php endif; ?>
                 <div class="employee-directory-line"><i data-lucide="phone"></i><?php if ($phone !== '-'): ?><a href="tel:<?php echo h($phone); ?>"><?php echo h($phone); ?></a><?php else: ?><span>-</span><?php endif; ?></div>
               </div>
             </div>

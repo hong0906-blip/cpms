@@ -59,10 +59,14 @@ function cpms_approval_drive_ensure_file_columns($pdo) {
         'drive_upload_error' => "ALTER TABLE cpms_approval_files ADD COLUMN drive_upload_error TEXT NULL"
     );
     $ok = true;
+    $changed = false;
+    $existingColumns = function_exists('approval_table_columns') ? approval_table_columns($pdo, 'cpms_approval_files', false) : array();
     foreach ($columns as $column => $sql) {
-        if (cpms_approval_drive_column_exists($pdo, 'cpms_approval_files', $column)) continue;
+        $columnExists = count($existingColumns) > 0 ? isset($existingColumns[$column]) : cpms_approval_drive_column_exists($pdo, 'cpms_approval_files', $column);
+        if ($columnExists) continue;
         try {
             $pdo->exec($sql);
+            $changed = true;
         } catch (Exception $e) {
             $ok = false;
             cpms_drive_log_upload_failure(array(
@@ -71,6 +75,7 @@ function cpms_approval_drive_ensure_file_columns($pdo) {
             ));
         }
     }
+    if ($changed && function_exists('approval_table_columns')) approval_table_columns($pdo, 'cpms_approval_files', true);
     return $ok;
 }}
 
@@ -80,6 +85,7 @@ function cpms_approval_drive_ensure_document_columns($pdo) {
     if (cpms_approval_drive_column_exists($pdo, 'cpms_approval_documents', 'project_id')) return true;
     try {
         $pdo->exec("ALTER TABLE cpms_approval_documents ADD COLUMN project_id INT NULL");
+        if (function_exists('approval_table_columns')) approval_table_columns($pdo, 'cpms_approval_documents', true);
         return true;
     } catch (Exception $e) {
         cpms_drive_log_upload_failure(array(
@@ -250,6 +256,14 @@ function cpms_approval_drive_failed_record($originalName, $localPath, $mimeType,
     );
 }}
 
+if (!function_exists('cpms_approval_drive_pending_record')) {
+function cpms_approval_drive_pending_record($originalName, $localPath, $mimeType, $size, $userContext) {
+    $record = cpms_approval_drive_failed_record($originalName, $localPath, $mimeType, $size, $userContext, '', array());
+    $record['upload_status'] = 'pending';
+    $record['drive_upload_error'] = '';
+    return $record;
+}}
+
 if (!function_exists('cpms_approval_drive_upload_local_file')) {
 function cpms_approval_drive_upload_local_file($localPath, $originalName, $docRow, $content, $fileMeta, $userContext) {
     $localPath = trim((string)$localPath);
@@ -380,6 +394,161 @@ function cpms_approval_drive_save_file_row($pdo, $row) {
         ));
         return array('ok' => false, 'id' => 0, 'message' => $e->getMessage());
     }
+}}
+
+if (!function_exists('cpms_approval_drive_update_file_row')) {
+function cpms_approval_drive_update_file_row($pdo, $fileId, $record) {
+    $fileId = (int)$fileId;
+    if (!$pdo || $fileId <= 0 || !is_array($record)) return array('ok' => false, 'message' => 'Invalid approval file update.');
+    $values = array(
+        'storage_type' => isset($record['storage_type']) ? (string)$record['storage_type'] : 'local',
+        'drive_name' => isset($record['stored_name']) ? (string)$record['stored_name'] : '',
+        'drive_file_id' => isset($record['drive_file_id']) ? (string)$record['drive_file_id'] : '',
+        'drive_folder_id' => isset($record['drive_folder_id']) ? (string)$record['drive_folder_id'] : '',
+        'drive_web_view_link' => isset($record['drive_web_view_link']) ? (string)$record['drive_web_view_link'] : '',
+        'drive_web_content_link' => isset($record['drive_web_content_link']) ? (string)$record['drive_web_content_link'] : '',
+        'document_year' => isset($record['document_year']) ? (string)$record['document_year'] : '',
+        'document_month' => isset($record['document_month']) ? (string)$record['document_month'] : '',
+        'drive_year_folder_id' => isset($record['drive_year_folder_id']) ? (string)$record['drive_year_folder_id'] : '',
+        'drive_type_folder_id' => isset($record['drive_type_folder_id']) ? (string)$record['drive_type_folder_id'] : '',
+        'drive_month_folder_id' => isset($record['drive_month_folder_id']) ? (string)$record['drive_month_folder_id'] : '',
+        'mime_type' => isset($record['mime_type']) ? (string)$record['mime_type'] : '',
+        'file_size' => (isset($record['size']) && $record['size'] !== '') ? (int)$record['size'] : null,
+        'uploaded_by' => isset($record['uploaded_by']) ? (string)$record['uploaded_by'] : '',
+        'uploaded_at' => isset($record['uploaded_at']) ? (string)$record['uploaded_at'] : date('Y-m-d H:i:s'),
+        'upload_status' => isset($record['upload_status']) ? (string)$record['upload_status'] : '',
+        'drive_upload_error' => isset($record['drive_upload_error']) ? (string)$record['drive_upload_error'] : ''
+    );
+    $sets = array();
+    $params = array(':id' => $fileId);
+    foreach ($values as $column => $value) {
+        if (!cpms_approval_drive_column_exists($pdo, 'cpms_approval_files', $column)) continue;
+        $param = ':' . $column;
+        $sets[] = $column . '=' . $param;
+        $params[$param] = $value;
+    }
+    if (count($sets) === 0) return array('ok' => false, 'message' => 'Approval Drive columns are not available.');
+    try {
+        $pdo->prepare("UPDATE cpms_approval_files SET " . implode(',', $sets) . " WHERE id=:id")->execute($params);
+        return array('ok' => true, 'message' => '');
+    } catch (Exception $e) {
+        cpms_drive_log_upload_failure(array('section' => 'approval_deferred_db_update', 'message' => $e->getMessage()));
+        return array('ok' => false, 'message' => $e->getMessage());
+    }
+}}
+
+if (!function_exists('cpms_approval_drive_remove_local_copy')) {
+function cpms_approval_drive_remove_local_copy($pdo, $fileRow) {
+    if (!$pdo || !is_array($fileRow) || !isset($fileRow['id'])) return false;
+    $path = cpms_approval_drive_resolve_local_path(isset($fileRow['file_path']) ? $fileRow['file_path'] : '');
+    if ($path === '') {
+        try {
+            $pdo->prepare("UPDATE cpms_approval_files SET file_path='', saved_name='' WHERE id=:id")
+                ->execute(array(':id' => (int)$fileRow['id']));
+        } catch (Exception $missingPathException) {
+            return false;
+        }
+        return true;
+    }
+
+    $realPath = @realpath($path);
+    $approvalRoot = @realpath(cpms_drive_storage_root() . '/approvals');
+    if ($realPath === false || $approvalRoot === false) return false;
+    $realPathNormalized = strtolower(str_replace('\\', '/', $realPath));
+    $rootNormalized = rtrim(strtolower(str_replace('\\', '/', $approvalRoot)), '/') . '/';
+    if (strpos($realPathNormalized, $rootNormalized) !== 0 || !is_file($realPath)) {
+        cpms_drive_log_upload_failure(array(
+            'section' => 'approval_local_cleanup_guard',
+            'approval_document_id' => isset($fileRow['document_id']) ? (int)$fileRow['document_id'] : 0,
+            'original_name' => isset($fileRow['original_name']) ? (string)$fileRow['original_name'] : '',
+            'message' => 'Approval local cleanup path was outside the allowed storage directory.'
+        ));
+        return false;
+    }
+    if (!@unlink($realPath)) {
+        cpms_drive_log_upload_failure(array(
+            'section' => 'approval_local_cleanup',
+            'approval_document_id' => isset($fileRow['document_id']) ? (int)$fileRow['document_id'] : 0,
+            'original_name' => isset($fileRow['original_name']) ? (string)$fileRow['original_name'] : '',
+            'message' => 'Approval temporary local file could not be deleted after Drive upload.'
+        ));
+        return false;
+    }
+    try {
+        $pdo->prepare("UPDATE cpms_approval_files SET file_path='', saved_name='' WHERE id=:id")
+            ->execute(array(':id' => (int)$fileRow['id']));
+    } catch (Exception $e) {
+        cpms_drive_log_upload_failure(array(
+            'section' => 'approval_local_cleanup_db',
+            'approval_document_id' => isset($fileRow['document_id']) ? (int)$fileRow['document_id'] : 0,
+            'message' => $e->getMessage()
+        ));
+    }
+    @rmdir(dirname($realPath));
+    return true;
+}}
+
+if (!function_exists('cpms_approval_drive_process_pending_files')) {
+function cpms_approval_drive_process_pending_files($pdo, $docRow, $userContext, $limit) {
+    $result = array('ok' => true, 'processed' => 0, 'uploaded' => 0, 'failed' => 0, 'cleaned' => 0, 'cleanup_failed' => 0);
+    if (!$pdo || !is_array($docRow) || !isset($docRow['id'])) return $result;
+    if (!cpms_approval_drive_column_exists($pdo, 'cpms_approval_files', 'upload_status')) return $result;
+    $limit = (int)$limit;
+    if ($limit <= 0 || $limit > 20) $limit = 20;
+    $st = $pdo->prepare("SELECT * FROM cpms_approval_files WHERE document_id=:document_id AND upload_status IN ('pending','failed') AND file_path IS NOT NULL AND file_path<>'' ORDER BY id ASC LIMIT " . $limit);
+    $st->execute(array(':document_id' => (int)$docRow['id']));
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (!is_array($rows)) $rows = array();
+    $content = function_exists('approval_parse_content') ? approval_parse_content(isset($docRow['content']) ? $docRow['content'] : '') : array();
+
+    for ($i = 0; $i < count($rows); $i++) {
+        $row = $rows[$i];
+        $result['processed']++;
+        $path = cpms_approval_drive_resolve_local_path(isset($row['file_path']) ? $row['file_path'] : '');
+        $originalName = isset($row['original_name']) ? (string)$row['original_name'] : '';
+        $upload = cpms_approval_drive_upload_local_file($path, $originalName, $docRow, $content, array(
+            'file_type' => isset($row['file_type']) ? (string)$row['file_type'] : '',
+            'file_label' => isset($row['file_label']) ? (string)$row['file_label'] : '',
+            'local_path' => isset($row['file_path']) ? (string)$row['file_path'] : ''
+        ), $userContext);
+        $record = isset($upload['record']) && is_array($upload['record']) ? $upload['record'] : cpms_approval_drive_failed_record($originalName, isset($row['file_path']) ? $row['file_path'] : '', '', 0, $userContext, 'Deferred Drive upload failed.');
+        $saved = cpms_approval_drive_update_file_row($pdo, (int)$row['id'], $record);
+        if (!empty($upload['ok']) && !empty($saved['ok'])) {
+            $result['uploaded']++;
+            if (!cpms_approval_drive_remove_local_copy($pdo, $row)) {
+                $result['cleanup_failed']++;
+            } else {
+                $result['cleaned']++;
+            }
+        } else {
+            $result['ok'] = false;
+            $result['failed']++;
+            if (!empty($upload['ok']) && isset($record['drive_file_id']) && trim((string)$record['drive_file_id']) !== '') {
+                cpms_drive_delete_file((string)$record['drive_file_id'], array(
+                    'user' => $userContext,
+                    'section' => 'approval_deferred_db_cleanup',
+                    'approval_document_id' => (int)$docRow['id'],
+                    'original_name' => $originalName
+                ));
+            }
+        }
+    }
+
+    // Also clean local copies left by older synchronous uploads or by a
+    // transient unlink failure. The Drive metadata must already be complete.
+    $cleanupSt = $pdo->prepare("SELECT * FROM cpms_approval_files WHERE document_id=:document_id AND upload_status='uploaded' AND file_path IS NOT NULL AND file_path<>'' ORDER BY id ASC LIMIT " . $limit);
+    $cleanupSt->execute(array(':document_id' => (int)$docRow['id']));
+    $cleanupRows = $cleanupSt->fetchAll(PDO::FETCH_ASSOC);
+    if (is_array($cleanupRows)) {
+        for ($cleanupIndex = 0; $cleanupIndex < count($cleanupRows); $cleanupIndex++) {
+            if (cpms_approval_drive_remove_local_copy($pdo, $cleanupRows[$cleanupIndex])) {
+                $result['cleaned']++;
+            } else {
+                $result['cleanup_failed']++;
+            }
+        }
+    }
+    return $result;
 }}
 
 if (!function_exists('cpms_approval_drive_h')) {

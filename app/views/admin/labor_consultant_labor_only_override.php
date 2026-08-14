@@ -92,11 +92,12 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
         $projectWorkers = cpms_load_project_labor_workers($pdo, $projectId);
         $laborWorkerRatioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $ym, $projectWorkers);
         $projectWorkers = cpms_apply_project_labor_worker_month_ratios($projectWorkers, $laborWorkerRatioMap);
+        $projectWorkers = cpms_apply_project_labor_worker_month_wages($projectWorkers, cpms_load_project_labor_worker_wage_map($pdo, $projectId, $ym));
         $projectWorkers = cpms_labor_consultant_unique_project_workers($projectWorkers);
 
         $directTeamMembers = cpms_load_direct_team_members($pdo);
         $directMemberMap = cpms_labor_consultant_direct_member_map($directTeamMembers);
-        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers);
+        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers, $pdo, $ym);
         $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
         $roleMap = isset($gongsuData['role_map']) && is_array($gongsuData['role_map'])
             ? $gongsuData['role_map']
@@ -171,7 +172,7 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
             if ($laborAmount <= 0) continue;
 
             // 지급총액은 현재 노무비 탭에서 실제 표시되는 공수 기준이다.
-            $visibleTotalAmount = round($totalGongsu * $wageRate);
+            $visibleTotalAmount = isset($laborAmounts['total_amount']) ? (float)$laborAmounts['total_amount'] : round($totalGongsu * $wageRate);
 
             $rows[count($rows)] = array(
                 'project_id' => $projectId,

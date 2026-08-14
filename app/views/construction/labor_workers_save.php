@@ -38,7 +38,7 @@ $workers = isset($_POST['workers']) && is_array($_POST['workers']) ? $_POST['wor
 $previousWorkerIdsRaw = isset($_POST['previous_worker_ids']) && is_array($_POST['previous_worker_ids']) ? $_POST['previous_worker_ids'] : array();
 if ($laborTab === '') $laborTab = 'workers';
 $workerSort = isset($_POST['worker_sort']) ? trim((string)$_POST['worker_sort']) : 'company';
-$workerSortAllowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'bank_account', 'bank_name', 'account_holder', 'remark');
+$workerSortAllowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'remark');
 if (!in_array($workerSort, $workerSortAllowed, true)) $workerSort = 'company';
 $workerSortDir = isset($_POST['worker_sort_dir']) && (string)$_POST['worker_sort_dir'] === 'desc' ? 'desc' : 'asc';
 
@@ -112,8 +112,23 @@ try {
         $previousMonth = date('Y-m', strtotime($month . '-01 -1 month'));
         $previousRows = cpms_load_project_labor_workers_for_month($pdo, $projectId, $previousMonth);
         $previousAvailableMap = array();
+        $activeDirectMemberMap = array();
+        if (cpms_table_exists_labor($pdo, 'direct_team_members')) {
+            $stActiveDirect = $pdo->query("SELECT id FROM direct_team_members WHERE is_active = 1");
+            $activeDirectRows = $stActiveDirect ? $stActiveDirect->fetchAll(PDO::FETCH_ASSOC) : array();
+            foreach ($activeDirectRows as $activeDirectRow) {
+                $activeDirectId = isset($activeDirectRow['id']) ? (int)$activeDirectRow['id'] : 0;
+                if ($activeDirectId > 0) $activeDirectMemberMap[$activeDirectId] = true;
+            }
+        }
+        $retiredDirectCount = 0;
         foreach ($previousRows as $previousRow) {
             $previousRowId = isset($previousRow['id']) ? (int)$previousRow['id'] : 0;
+            $previousDirectId = isset($previousRow['direct_member_id']) ? (int)$previousRow['direct_member_id'] : 0;
+            if ($previousDirectId > 0 && !isset($activeDirectMemberMap[$previousDirectId])) {
+                if ($previousRowId > 0 && isset($selectedWorkerIds[$previousRowId])) $retiredDirectCount++;
+                continue;
+            }
             if ($previousRowId > 0) $previousAvailableMap[$previousRowId] = true;
         }
         $currentMonthMap = cpms_load_project_labor_worker_month_map($pdo, $projectId, $month);
@@ -133,7 +148,7 @@ try {
             if ($matchedPreviousCount > 0 && $alreadyCurrentCount === $matchedPreviousCount) {
                 flash_set('success', '선택한 전달 인원은 이미 ' . $month . '에 등록되어 있습니다.');
             } else {
-                flash_set('error', '선택한 인원이 ' . $previousMonth . ' 전달 명단에 없습니다. 다시 확인해주세요.');
+                flash_set('error', $retiredDirectCount > 0 ? '퇴직한 직영팀 인원은 노무비에 가져올 수 없습니다.' : '선택한 인원이 ' . $previousMonth . ' 전달 명단에 없습니다. 다시 확인해주세요.');
             }
             header('Location: ' . $redirect);
             exit;
@@ -163,7 +178,13 @@ try {
         }
 
         $repo = new WorkerRepository($pdo);
-        $stRows = $pdo->prepare("SELECT id, worker_id FROM cpms_project_labor_workers
+        if (!preg_match('/^\d{4}-\d{2}$/', $month)) {
+            flash_set('error', '최신 단가를 적용할 월이 올바르지 않습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+        $selectedWageMap = cpms_load_project_labor_worker_wage_map($pdo, $projectId, $month);
+        $stRows = $pdo->prepare("SELECT id, worker_id, deposit_rate, daily_wage_snapshot FROM cpms_project_labor_workers
                                  WHERE project_id = :pid
                                    AND is_deleted = 0
                                    AND worker_id IS NOT NULL
@@ -193,6 +214,15 @@ try {
             $master = $repo->getById($masterId, false);
             if (!$master || !is_array($master)) continue;
             $payload = cpms_labor_worker_payload_from_workforce($master, 'workforce', 'matched');
+            $previousWage = isset($selectedWageMap[$projectWorkerId]) ? (int)$selectedWageMap[$projectWorkerId] : 0;
+            if ($previousWage <= 0 && isset($projectRow['daily_wage_snapshot'])) $previousWage = (int)$projectRow['daily_wage_snapshot'];
+            if ($previousWage <= 0 && isset($projectRow['deposit_rate'])) $previousWage = (int)$projectRow['deposit_rate'];
+            $wageResult = cpms_save_project_labor_worker_month_wage($pdo, $projectId, $projectWorkerId, $month, (int)$payload['daily_wage_snapshot'], $previousWage);
+            if (!isset($wageResult['saved']) || !$wageResult['saved']) continue;
+            if (!isset($wageResult['is_latest']) || !$wageResult['is_latest']) {
+                $updated++;
+                continue;
+            }
             $stLatest->bindValue(':worker_name_snapshot', $payload['worker_name_snapshot']);
             $stLatest->bindValue(':agency_name_snapshot', $payload['agency_name_snapshot']);
             $stLatest->bindValue(':job_type_snapshot', $payload['job_type_snapshot']);
@@ -206,7 +236,7 @@ try {
             $updated++;
         }
 
-        flash_set('success', '최신 단가를 적용했습니다. 업데이트 ' . (int)$updated . '건');
+        flash_set('success', $month . '에 인력관리 최신 단가를 적용했습니다. 이전 월 단가는 유지됩니다. 업데이트 ' . (int)$updated . '건');
         header('Location: ' . $redirect);
         exit;
     }
@@ -382,28 +412,44 @@ try {
             $validatedAllocationDates[$workerId] = array('start'=>$outsourcingStartDate, 'end'=>$outsourcingEndDate);
         }
 
+        if (!cpms_labor_load_workforce_services()) {
+            flash_set('error', '인력관리 서비스를 찾을 수 없습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+        $selectedWageMap = cpms_load_project_labor_worker_wage_map($pdo, $projectId, $month);
+        $repo = new WorkerRepository($pdo);
+        $authUser = Auth::user();
+        $authUserId = is_array($authUser) && isset($authUser['id']) ? (int)$authUser['id'] : 0;
+
         $pdo->beginTransaction();
         if (count($workers) > 0) {
             foreach ($workers as $workerIdRaw => $fields) {
                 $workerId = (int)$workerIdRaw;
                 if ($workerId <= 0 || !is_array($fields)) continue;
 
-                $phone = isset($fields['phone']) ? trim((string)$fields['phone']) : '';
-                $address = isset($fields['address']) ? trim((string)$fields['address']) : '';
                 $companyName = isset($fields['company_name']) ? trim((string)$fields['company_name']) : '';
+                $jobType = isset($fields['job_type']) ? trim((string)$fields['job_type']) : '';
                 $remark = isset($fields['remark']) ? trim((string)$fields['remark']) : '';
-                if (function_exists('mb_substr')) $remark = mb_substr($remark, 0, 255, 'UTF-8');
-                else $remark = substr($remark, 0, 255);
+                if (function_exists('mb_strlen')) {
+                    $jobTypeLength = mb_strlen($jobType, 'UTF-8');
+                    $remarkLength = mb_strlen($remark, 'UTF-8');
+                } else {
+                    $jobTypeMatches = array();
+                    $remarkMatches = array();
+                    $jobTypeLength = preg_match_all('/./us', $jobType, $jobTypeMatches);
+                    $remarkLength = preg_match_all('/./us', $remark, $remarkMatches);
+                    if ($jobTypeLength === false) $jobTypeLength = strlen($jobType);
+                    if ($remarkLength === false) $remarkLength = strlen($remark);
+                }
+                if ($jobTypeLength > 100 || $remarkLength > 255) {
+                    throw new Exception('구분/직종 또는 비고 입력 길이를 확인해 주세요.');
+                }
                 $outsourcingRatio = isset($validatedOutsourcingRatios[$workerId]) ? (int)$validatedOutsourcingRatios[$workerId] : 0;
                 $isOutsourcing = ($outsourcingRatio === 100) ? 1 : 0;
-                $jobTypeSnapshot = isset($fields['job_type_snapshot']) ? trim((string)$fields['job_type_snapshot']) : '';
-                $workerNameSnapshot = isset($fields['worker_name_snapshot']) ? trim((string)$fields['worker_name_snapshot']) : '';
-                $sourceType = isset($fields['source_type']) ? trim((string)$fields['source_type']) : 'manual';
-                $matchedStatus = isset($fields['matched_status']) ? trim((string)$fields['matched_status']) : 'manual';
-                $masterWorkerId = isset($fields['worker_id']) ? (int)$fields['worker_id'] : 0;
 
                 $depositRateRaw = isset($fields['deposit_rate']) ? trim((string)$fields['deposit_rate']) : '';
-                $depositRateNormalized = preg_replace('/[^0-9\-]/', '', $depositRateRaw);
+                $depositRateNormalized = preg_replace('/[^0-9]/', '', $depositRateRaw);
                 if ($depositRateNormalized === '' || !is_numeric($depositRateNormalized)) {
                     $depositRate = 0;
                 } else {
@@ -411,8 +457,30 @@ try {
                     if ($depositRate < 0) $depositRate = 0;
                 }
 
-                if ($sourceType === '') $sourceType = 'manual';
-                if ($matchedStatus === '') $matchedStatus = ($masterWorkerId > 0 ? 'matched' : 'manual');
+                $stCurrent = $pdo->prepare("SELECT plw.worker_id, plw.direct_member_id, plw.deposit_rate,
+                                                   plw.daily_wage_snapshot,
+                                                   COALESCE(dtm.monthly_salary, 0) AS direct_monthly_salary
+                                            FROM cpms_project_labor_workers plw
+                                            LEFT JOIN direct_team_members dtm ON dtm.id = plw.direct_member_id
+                                            WHERE plw.id = :id AND plw.project_id = :pid AND plw.is_deleted = 0 LIMIT 1");
+                $stCurrent->bindValue(':id', $workerId, PDO::PARAM_INT);
+                $stCurrent->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                $stCurrent->execute();
+                $currentRow = $stCurrent->fetch(PDO::FETCH_ASSOC);
+                if (!$currentRow) continue;
+                $masterWorkerId = isset($currentRow['worker_id']) ? (int)$currentRow['worker_id'] : 0;
+                $isDirectSalaryWorker = isset($currentRow['direct_member_id'])
+                    && (int)$currentRow['direct_member_id'] > 0
+                    && isset($currentRow['direct_monthly_salary'])
+                    && (int)$currentRow['direct_monthly_salary'] > 0;
+                if ($isDirectSalaryWorker) {
+                    $outsourcingRatio = 0;
+                    $isOutsourcing = 0;
+                    $validatedAllocationDates[$workerId] = array('start'=>'', 'end'=>'');
+                }
+                $previousWage = isset($selectedWageMap[$workerId]) ? (int)$selectedWageMap[$workerId] : 0;
+                if ($previousWage <= 0 && isset($currentRow['daily_wage_snapshot'])) $previousWage = (int)$currentRow['daily_wage_snapshot'];
+                if ($previousWage <= 0 && isset($currentRow['deposit_rate'])) $previousWage = (int)$currentRow['deposit_rate'];
 
                 // 최초 월별 비율 저장 전에 기존 이진 외주값을 보존하여 다른 월의 금액이 바뀌지 않게 합니다.
                 $stLegacyRatio = $pdo->prepare("UPDATE cpms_project_labor_workers
@@ -425,33 +493,24 @@ try {
                 $stLegacyRatio->bindValue(':pid', $projectId, PDO::PARAM_INT);
                 $stLegacyRatio->execute();
 
+                $wageResult = $isDirectSalaryWorker
+                    ? array('saved'=>true, 'is_latest'=>false)
+                    : cpms_save_project_labor_worker_month_wage($pdo, $projectId, $workerId, $month, $depositRate, $previousWage);
+                if (!isset($wageResult['saved']) || !$wageResult['saved']) {
+                    throw new Exception('월별 임금단가를 저장하지 못했습니다.');
+                }
+
                 $set = array(
-                    'phone = :phone',
-                    'address = :address',
-                    'deposit_rate = :deposit_rate',
-                    'worker_id = :worker_id',
-                    'worker_name_snapshot = :worker_name_snapshot',
                     'agency_name_snapshot = :agency_name_snapshot',
                     'job_type_snapshot = :job_type_snapshot',
-                    'daily_wage_snapshot = :daily_wage_snapshot',
-                    'source_type = :source_type',
-                    'matched_status = :matched_status',
                     'company_name = :company_name',
                     'remark = :remark',
                     'is_outsourcing = :is_outsourcing',
                     'updated_at = :now'
                 );
                 $params = array(
-                    ':phone' => $phone === '' ? null : $phone,
-                    ':address' => $address === '' ? null : $address,
-                    ':deposit_rate' => $depositRate,
-                    ':worker_id' => $masterWorkerId > 0 ? $masterWorkerId : null,
-                    ':worker_name_snapshot' => $workerNameSnapshot === '' ? null : $workerNameSnapshot,
                     ':agency_name_snapshot' => $companyName === '' ? null : $companyName,
-                    ':job_type_snapshot' => $jobTypeSnapshot === '' ? null : $jobTypeSnapshot,
-                    ':daily_wage_snapshot' => $depositRate,
-                    ':source_type' => $sourceType,
-                    ':matched_status' => $matchedStatus,
+                    ':job_type_snapshot' => $jobType === '' ? null : $jobType,
                     ':company_name' => $companyName === '' ? null : $companyName,
                     ':remark' => $remark === '' ? null : $remark,
                     ':is_outsourcing' => $isOutsourcing,
@@ -460,20 +519,11 @@ try {
                     ':pid' => $projectId,
                 );
 
-                if (array_key_exists('bank_account', $fields)) {
-                    $set[] = 'bank_account = :bank_account';
-                    $bankAccount = trim((string)$fields['bank_account']);
-                    $params[':bank_account'] = $bankAccount === '' ? null : $bankAccount;
-                }
-                if (array_key_exists('bank_name', $fields)) {
-                    $set[] = 'bank_name = :bank_name';
-                    $bankName = trim((string)$fields['bank_name']);
-                    $params[':bank_name'] = $bankName === '' ? null : $bankName;
-                }
-                if (array_key_exists('account_holder', $fields)) {
-                    $set[] = 'account_holder = :account_holder';
-                    $accountHolder = trim((string)$fields['account_holder']);
-                    $params[':account_holder'] = $accountHolder === '' ? null : $accountHolder;
+                if (isset($wageResult['is_latest']) && $wageResult['is_latest']) {
+                    $set[] = 'deposit_rate = :deposit_rate';
+                    $set[] = 'daily_wage_snapshot = :daily_wage_snapshot';
+                    $params[':deposit_rate'] = $depositRate;
+                    $params[':daily_wage_snapshot'] = $depositRate;
                 }
 
                 $sql = "UPDATE cpms_project_labor_workers
@@ -489,6 +539,12 @@ try {
                 }
                 $stUp->execute();
 
+                if ($masterWorkerId > 0) {
+                    if (!$repo->updateProjectEditableFields($masterWorkerId, $companyName, $depositRate, $authUserId, isset($wageResult['is_latest']) && $wageResult['is_latest'], $jobType, $remark)) {
+                        throw new Exception('관리 인력정보를 업데이트하지 못했습니다.');
+                    }
+                }
+
                 $allocationDates = isset($validatedAllocationDates[$workerId]) ? $validatedAllocationDates[$workerId] : array('start'=>'', 'end'=>'');
                 if (!cpms_save_project_labor_worker_month_ratio($pdo, $projectId, $workerId, $month, $outsourcingRatio, $allocationDates['start'], $allocationDates['end'])) {
                     throw new Exception('월별 외주비 비율을 저장하지 못했습니다.');
@@ -498,7 +554,7 @@ try {
 
         $pdo->commit();
 
-        flash_set('success', '인원 정보와 ' . $month . ' 비용 배분을 저장했습니다.');
+        flash_set('success', $month . ' 임금단가와 비용 배분을 저장하고 인력사·구분/직종·비고를 관리 인력에 반영했습니다. 이전 월 단가는 유지됩니다.');
         header('Location: ' . $redirect);
         exit;
     }

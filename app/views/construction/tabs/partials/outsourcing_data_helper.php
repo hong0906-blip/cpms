@@ -9,6 +9,7 @@
 require_once __DIR__ . '/labor_data_loader.php';
 require_once __DIR__ . '/outsourcing_file_helper.php';
 require_once __DIR__ . '/../../../../services/CostChangeService.php';
+require_once __DIR__ . '/../../../../services/VendorService.php';
 
 if (!function_exists('cpms_outsourcing_cost_ensure_table')) {
     function cpms_outsourcing_cost_ensure_table($pdo) {
@@ -126,6 +127,8 @@ if (!function_exists('cpms_outsourcing_manual_rows')) {
                 }
                 $rows = $filtered;
             }
+            \App\Services\VendorService::bootstrap($pdo, true);
+            $rows = \App\Services\VendorService::applyCurrentVendorRows($pdo, $rows, 'company_name', 'representative_name', 'contact', 'business_no');
         } catch (Exception $e) {
             $rows = array();
         }
@@ -164,7 +167,8 @@ if (!function_exists('cpms_outsourcing_labor_company_rows_for_month')) {
         $projectWorkers = cpms_load_project_labor_workers($pdo, (int)$projectId);
         $ratioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, (int)$projectId, (string)$ym, $projectWorkers);
         $projectWorkers = cpms_apply_project_labor_worker_month_ratios($projectWorkers, $ratioMap);
-        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directMembers);
+        $projectWorkers = cpms_apply_project_labor_worker_month_wages($projectWorkers, cpms_load_project_labor_worker_wage_map($pdo, (int)$projectId, (string)$ym));
+        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directMembers, $pdo, (string)$ym);
         $workers = cpms_build_timesheet_workers($workerRows);
         $gongsuData = cpms_load_gongsu_data($pdo, (string)$projectName, (string)$ym);
         $gongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();

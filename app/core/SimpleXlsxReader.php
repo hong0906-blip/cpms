@@ -107,7 +107,13 @@ class SimpleXlsxReader
                         $idx = isset($c->v) ? (int)$c->v : -1;
                         $v = ($idx >= 0 && isset($sharedStrings[$idx])) ? $sharedStrings[$idx] : '';
                     } else if ($t === 'inlineStr') {
-                        if (isset($c->is) && isset($c->is->t)) $v = (string)$c->is->t;
+                        if (isset($c->is) && isset($c->is->t)) {
+                            $v = (string)$c->is->t;
+                        } else if (isset($c->is) && isset($c->is->r)) {
+                            foreach ($c->is->r as $run) {
+                                if (isset($run->t)) $v .= (string)$run->t;
+                            }
+                        }
                     } else {
                         // number / general
                         $v = isset($c->v) ? (string)$c->v : '';
@@ -133,6 +139,89 @@ class SimpleXlsxReader
         $zip->close();
         $result['rows'] = $rowsOut;
         return $result;
+    }
+
+    /**
+     * Read multiple physical worksheets so an instruction sheet may precede data.
+     * @return array array('sheets'=>array(array('index'=>int,'rows'=>array())), 'error'=>string|null)
+     */
+    public static function readWorksheets($filePath, $maxRows, $maxSheets)
+    {
+        $result = array('sheets'=>array(), 'error'=>null);
+        if (!is_string($filePath) || $filePath === '' || !file_exists($filePath)) {
+            $result['error'] = '파일을 찾을 수 없습니다.';
+            return $result;
+        }
+        if (!class_exists('ZipArchive')) {
+            $result['error'] = '서버에 ZipArchive 확장 모듈이 없습니다. (.xlsx 읽기 불가)';
+            return $result;
+        }
+        $zip = new \ZipArchive();
+        if ($zip->open($filePath) !== true) {
+            $result['error'] = '엑셀 파일을 열 수 없습니다. (손상되었거나 형식이 다릅니다)';
+            return $result;
+        }
+
+        $sharedStrings = array();
+        $sharedXml = $zip->getFromName('xl/sharedStrings.xml');
+        if ($sharedXml !== false) {
+            $sharedSheet = @simplexml_load_string($sharedXml);
+            if ($sharedSheet) {
+                foreach ($sharedSheet->si as $si) {
+                    $text = '';
+                    if (isset($si->t)) $text = (string)$si->t;
+                    else if (isset($si->r)) foreach ($si->r as $run) if (isset($run->t)) $text .= (string)$run->t;
+                    $sharedStrings[] = $text;
+                }
+            }
+        }
+
+        $maxSheets = max(1, min(20, (int)$maxSheets));
+        $scanLimit = 100;
+        for ($sheetIndex = 1; $sheetIndex <= $scanLimit && count($result['sheets']) < $maxSheets; $sheetIndex++) {
+            $sheetXml = $zip->getFromName('xl/worksheets/sheet' . $sheetIndex . '.xml');
+            if ($sheetXml === false) continue;
+            $rows = self::rowsFromSheetXml($sheetXml, $sharedStrings, $maxRows);
+            $result['sheets'][] = array('index'=>$sheetIndex, 'rows'=>$rows);
+        }
+        $zip->close();
+        if (count($result['sheets']) === 0) $result['error'] = '엑셀 시트 데이터를 찾을 수 없습니다.';
+        return $result;
+    }
+
+    private static function rowsFromSheetXml($sheetXml, $sharedStrings, $maxRows)
+    {
+        $sheet = @simplexml_load_string($sheetXml);
+        if (!$sheet || !isset($sheet->sheetData)) return array();
+        $rowsOut = array();
+        $rowCount = 0;
+        foreach ($sheet->sheetData->row as $row) {
+            $rowCount++;
+            if ($rowCount > (int)$maxRows) break;
+            $cells = array();
+            if (isset($row->c)) foreach ($row->c as $cell) {
+                $ref = isset($cell['r']) ? (string)$cell['r'] : '';
+                $columnIndex = self::colRefToIndex($ref);
+                $type = isset($cell['t']) ? (string)$cell['t'] : '';
+                $value = '';
+                if ($type === 's') {
+                    $sharedIndex = isset($cell->v) ? (int)$cell->v : -1;
+                    $value = $sharedIndex >= 0 && isset($sharedStrings[$sharedIndex]) ? $sharedStrings[$sharedIndex] : '';
+                } else if ($type === 'inlineStr') {
+                    if (isset($cell->is) && isset($cell->is->t)) $value = (string)$cell->is->t;
+                    else if (isset($cell->is) && isset($cell->is->r)) foreach ($cell->is->r as $run) if (isset($run->t)) $value .= (string)$run->t;
+                } else {
+                    $value = isset($cell->v) ? (string)$cell->v : '';
+                }
+                if ($columnIndex > 0) $cells[$columnIndex] = $value;
+            }
+            $maxColumn = 0;
+            foreach ($cells as $columnIndex => $unused) if ($columnIndex > $maxColumn) $maxColumn = $columnIndex;
+            $rowOut = array();
+            for ($columnIndex = 1; $columnIndex <= $maxColumn; $columnIndex++) $rowOut[] = isset($cells[$columnIndex]) ? $cells[$columnIndex] : '';
+            $rowsOut[] = $rowOut;
+        }
+        return $rowsOut;
     }
 
     /**

@@ -156,6 +156,7 @@ for ($ownerEmailCandidateIndex = 0; $ownerEmailCandidateIndex < count($ownerEmai
     }
 }
 $isAdmin = approval_is_admin_user($u);
+$isCeoUser = approval_is_ceo_user($pdo, $u);
 $debugApprovalRequested = isset($_GET['debug_approval']) && (string)$_GET['debug_approval'] === '1';
 
 $txt = array(
@@ -860,7 +861,9 @@ $debugFileMtimeText = $debugFileMtime > 0 ? date('Y-m-d H:i:s', $debugFileMtime)
                             $mobileCreatedByName = approval_index_scalar_text($row, 'created_by_name', '');
                             $mobileCreatedAt = approval_index_scalar_text($row, 'created_at', '');
                             $isFinalCeoDecision = approval_index_is_final_ceo_decision($row);
-                            $canMobileDecide = (($mobileDocType === 'leave' && strtoupper($docStatus) === 'PENDING' && strtoupper($myLineStatus) === 'PENDING') || $isFinalCeoDecision);
+                            $canMobileCeoDirectApprove = ($isCeoUser && strtoupper($docStatus) === 'PENDING');
+                            $canMobileDecide = (($mobileDocType === 'leave' && strtoupper($docStatus) === 'PENDING' && strtoupper($myLineStatus) === 'PENDING') || $isFinalCeoDecision || $canMobileCeoDirectApprove);
+                            $canMobileReject = (strtoupper($docStatus) === 'PENDING' && strtoupper($myLineStatus) === 'PENDING');
                             $canMobileCancelApprovedLeave = approval_can_cancel_approved_leave($pdo, $row, $u);
                             if ($debugApproval) {
                                 $GLOBALS['cpms_approval_debug_render_state'] = array(
@@ -904,7 +907,7 @@ $debugFileMtimeText = $debugFileMtime > 0 ? date('Y-m-d H:i:s', $debugFileMtime)
                                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                             <input type="hidden" name="id" value="<?php echo $rowId; ?>">
                                             <input type="hidden" name="action" value="approve">
-                                            <button type="submit" class="w-full px-3 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"<?php echo $isFinalCeoDecision ? ' onclick="return confirm(\'최종 승인하시겠습니까?\');"' : ''; ?>>승인</button>
+                                            <button type="submit" class="w-full px-3 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"<?php echo ($isFinalCeoDecision || $canMobileCeoDirectApprove) ? ' onclick="return confirm(\'' . h(approval_ko('%EB%8C%80%ED%91%9C%EC%8A%B9%EC%9D%B8%20%EC%B2%98%EB%A6%AC%ED%95%98%EC%8B%9C%EA%B2%A0%EC%8A%B5%EB%8B%88%EA%B9%8C%3F')) . '\');"' : ''; ?>><?php echo h($canMobileCeoDirectApprove ? approval_ko('%EB%8C%80%ED%91%9C%20%EC%A6%89%EC%8B%9C%20%EC%8A%B9%EC%9D%B8') : approval_ko('%EC%8A%B9%EC%9D%B8')); ?></button>
                                         </form>
                                     <?php } ?>
                                     <?php if ($canMobileCancelApprovedLeave) { ?>
@@ -915,7 +918,7 @@ $debugFileMtimeText = $debugFileMtime > 0 ? date('Y-m-d H:i:s', $debugFileMtime)
                                         </form>
                                     <?php } ?>
                                 </div>
-                                <?php if ($canMobileDecide) { ?>
+                                <?php if ($canMobileReject) { ?>
                                     <form method="post" action="?r=approval_decide" class="mt-2 flex gap-2">
                                         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                                         <input type="hidden" name="id" value="<?php echo $rowId; ?>">

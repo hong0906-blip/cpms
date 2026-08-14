@@ -871,7 +871,7 @@ class PublicMailService
         }
 
         try {
-            $statement = $pdo->query('SELECT * FROM employees ORDER BY name ASC');
+            $statement = $pdo->query('SELECT * FROM employees WHERE is_active = 1 ORDER BY name ASC');
             $rows = $statement ? $statement->fetchAll(\PDO::FETCH_ASSOC) : array();
             $result = array();
 

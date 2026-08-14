@@ -1130,7 +1130,7 @@ if (!empty($cpmsAttendanceDataOnly)) return;
         </div>
 
         <?php foreach($filteredReqs as $r): $st=isset($r['status'])?(string)$r['status']:''; ?>
-            <div class='rounded-2xl border border-gray-200 p-4 mb-3 bg-white shadow-sm'>
+            <div id='attendance-request-<?php echo isset($r['id'])?(int)$r['id']:0; ?>' class='rounded-2xl border border-gray-200 p-4 mb-3 bg-white shadow-sm' style='scroll-margin-top:24px;'>
                 <div class='flex items-center justify-between mb-2 gap-3'>
                     <div class='font-bold'><?php echo h(attendance_text('%EC%B6%9C%ED%87%B4%EA%B7%BC%20%EC%88%98%EC%A0%95%20%EC%9A%94%EC%B2%AD')); ?> #<?php echo isset($r['id'])?(int)$r['id']:0; ?></div>
                     <span class='px-2 py-1 text-xs rounded-full border <?php echo attendance_request_status_class($st); ?>'><?php echo h(attendance_request_status_label($st)); ?></span>

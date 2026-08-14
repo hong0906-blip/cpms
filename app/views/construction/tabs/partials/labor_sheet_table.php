@@ -358,7 +358,9 @@ if (is_array($timesheetWorkers)) {
                 'outsourcing_amount' => 0
             );
 
-        $displayPayForTotal = round($rowTotalGongsuForTotal * $wageRateForTotal);
+        $displayPayForTotal = isset($amountsForTotal['total_amount'])
+            ? (float)$amountsForTotal['total_amount']
+            : round($rowTotalGongsuForTotal * $wageRateForTotal);
         $groupKeyForTotal = cpms_labor_sheet_group_key($workerForTotal);
 
         if (!isset($laborSheetSubtotals[$groupKeyForTotal])) {
@@ -545,7 +547,9 @@ if (is_array($timesheetWorkers)) {
                         'outsourcing_amount' => 0
                     );
 
-                $totalPay = round($totalGongsu * $wageRate);
+                $totalPay = isset($workerAmounts['total_amount'])
+                    ? (float)$workerAmounts['total_amount']
+                    : round($totalGongsu * $wageRate);
                 $laborRatio = isset($workerAmounts['labor_ratio'])
                     ? (int)$workerAmounts['labor_ratio']
                     : (100 - $outsourcingRatio);
@@ -562,6 +566,7 @@ if (is_array($timesheetWorkers)) {
                 ?>
                 <tr class="cpms-timesheet-row <?php echo (($idx + 1) % 2 === 0) ? 'bg-gray-50' : 'bg-white'; ?>"
                     data-wage-rate="<?php echo h(number_format($wageRate, 2, '.', '')); ?>"
+                    data-pay-unit="<?php echo isset($worker['salary_allocation_mode']) && (int)$worker['salary_allocation_mode'] === 1 ? 'days' : 'gongsu'; ?>"
                     data-worker-key="<?php echo h($workerKey); ?>"
                     data-worker-name="<?php echo h($workerName); ?>"
                     data-group-key="<?php echo h($rowGroupKey); ?>">

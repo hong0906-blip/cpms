@@ -52,6 +52,7 @@ $canCompleteMeeting = cpms_tasks_can_complete_meeting_after_response($task, isse
 $canRevision = cpms_tasks_can_request_revision($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $canCancel = cpms_tasks_can_cancel($task, isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0);
 $currentEmployeeId = isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0;
+$isSystemRequest = cpms_tasks_is_system_request($task);
 $canEditPriority = (!$readOnlyMode && !$isMeetingTask && $currentEmployeeId > 0 && isset($task['assignee_employee_id']) && (int)$task['assignee_employee_id'] === $currentEmployeeId);
 $hasTransferRequest = cpms_tasks_has_transfer_request($task);
 $canTransfer = (!$readOnlyMode && cpms_tasks_can_transfer($task, $currentEmployeeId));
@@ -141,7 +142,7 @@ ob_start();
                     <button type="submit" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-bold">완료</button>
                 </form>
             <?php endif; ?>
-            <?php if (!$isMeetingTask && $canChangeStatus && !in_array(isset($task['status']) ? $task['status'] : '', array('completion_pending', 'done', 'cancelled'), true)): ?>
+            <?php if (!$isMeetingTask && $canChangeStatus && !in_array(isset($task['status']) ? $task['status'] : '', array('done', 'cancelled'), true) && ((isset($task['status']) ? (string)$task['status'] : '') !== 'completion_pending' || $isSystemRequest)): ?>
                 <button type="button"
                         data-task-complete-open
                         data-task-id="<?php echo (int)$taskId; ?>"

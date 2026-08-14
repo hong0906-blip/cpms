@@ -34,7 +34,10 @@ if ($tab === '') {
 }
 
 $tabs = array(
-    'employees' => array('label' => '직원명부', 'icon' => 'users'),
+    'employees' => array('label' => '임직원 명부', 'icon' => 'users'),
+    'direct_team' => array('label' => '직영팀 명부', 'icon' => 'users'),
+    'vendors' => array('label' => '업체관리', 'icon' => 'building-2'),
+    'monthly_input' => array('label' => '투입비 상세', 'icon' => 'receipt'),
     'workforce' => array('label' => '인력관리', 'icon' => 'hard-hat'),
     'labor_calc' => array('label' => '노무비 계산', 'icon' => 'calculator'),
     'attendance' => array('label' => '출퇴근·근태관리', 'icon' => 'clock-3'),
@@ -194,6 +197,12 @@ $GLOBALS['__admin_embedded'] = true;
 
 if ($tab === 'employees') {
     require __DIR__ . '/employees.php';
+} elseif ($tab === 'direct_team' && $canManage) {
+    require __DIR__ . '/direct_team.php';
+} elseif ($tab === 'vendors' && $canManage) {
+    require __DIR__ . '/vendors.php';
+} elseif ($tab === 'monthly_input' && $canManage) {
+    require __DIR__ . '/monthly_input.php';
 } elseif ($tab === 'workforce') {
     require __DIR__ . '/workforce.php';
 } elseif ($tab === 'labor_calc') {

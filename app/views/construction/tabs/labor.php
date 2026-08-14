@@ -9,6 +9,8 @@ require_once __DIR__ . '/../../../services/CostChangeService.php';
 use App\Services\CostChangeService;
 
 $canEditLabor = isset($canEdit) ? (bool)$canEdit : false;
+$laborRelaxedRegistration = \App\Core\Auth::isDevelopmentDepartment();
+$laborGongsuApprovalExempt = $laborRelaxedRegistration;
 $laborTab = isset($_GET['labor_tab']) ? trim((string)$_GET['labor_tab']) : 'timesheet';
 if ($laborTab === '') $laborTab = 'timesheet';
 
@@ -17,8 +19,12 @@ $laborTabs = array(
     'labor' => '노무비',
     'outsourcing' => '외주비',
     'workers'   => '인원 작성',
+    'worker_register' => '인원 등록',
 );
-if (!$canEditLabor && isset($laborTabs['workers'])) unset($laborTabs['workers']);
+if (!$canEditLabor) {
+    if (isset($laborTabs['workers'])) unset($laborTabs['workers']);
+    if (isset($laborTabs['worker_register'])) unset($laborTabs['worker_register']);
+}
 if (!isset($laborTabs[$laborTab])) $laborTab = 'timesheet';
 
 $laborSort = isset($_GET['labor_sort']) ? trim((string)$_GET['labor_sort']) : 'job_type';
@@ -27,7 +33,7 @@ if (!in_array($laborSort, $laborSortAllowed, true)) $laborSort = 'job_type';
 $laborSortDir = isset($_GET['labor_sort_dir']) ? trim((string)$_GET['labor_sort_dir']) : 'asc';
 if ($laborSortDir !== 'desc') $laborSortDir = 'asc';
 $workerSort = isset($_GET['worker_sort']) ? trim((string)$_GET['worker_sort']) : 'company';
-$workerSortAllowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'bank_account', 'bank_name', 'account_holder', 'remark');
+$workerSortAllowed = array('company', 'name', 'allocation', 'phone', 'address', 'job_type', 'wage', 'remark');
 if (!in_array($workerSort, $workerSortAllowed, true)) $workerSort = 'company';
 $workerSortDir = isset($_GET['worker_sort_dir']) ? trim((string)$_GET['worker_sort_dir']) : 'asc';
 if ($workerSortDir !== 'desc') $workerSortDir = 'asc';
@@ -91,6 +97,14 @@ $downloadUrl = base_url() . '/?r=construction/labor_sheet_download&pid=' . (int)
 require_once __DIR__ . '/partials/labor_data_loader.php';
 
 $directTeamMembers = cpms_load_direct_team_members(isset($pdo) ? $pdo : null);
+$activeDirectTeamMembers = array();
+$directTeamActiveMap = array();
+foreach ($directTeamMembers as $directTeamMember) {
+    $directTeamMemberId = isset($directTeamMember['id']) ? (int)$directTeamMember['id'] : 0;
+    $directTeamMemberActive = !isset($directTeamMember['is_active']) || (int)$directTeamMember['is_active'] === 1;
+    if ($directTeamMemberId > 0) $directTeamActiveMap[$directTeamMemberId] = $directTeamMemberActive;
+    if ($directTeamMemberId > 0 && $directTeamMemberActive) $activeDirectTeamMembers[] = $directTeamMember;
+}
 $gongsuData = cpms_load_gongsu_data(isset($pdo) ? $pdo : null, isset($projectRow['name']) ? $projectRow['name'] : '', $selectedMonth);
 
 $attendanceWorkers = isset($gongsuData['all_workers']) ? $gongsuData['all_workers'] : (isset($gongsuData['workers']) ? $gongsuData['workers'] : array());
@@ -164,7 +178,7 @@ if (isset($pdo) && $pdo) {
 $executiveUsers = array();
 if (isset($pdo) && $pdo) {
     try {
-        $stExec = $pdo->query("SELECT id, name, email, position FROM employees WHERE role = 'executive' ORDER BY name ASC");
+        $stExec = $pdo->query("SELECT id, name, email, position FROM employees WHERE role = 'executive' AND is_active = 1 ORDER BY name ASC");
         $executiveUsers = $stExec->fetchAll();
     } catch (Exception $e) {
         $executiveUsers = array();
@@ -173,10 +187,23 @@ if (isset($pdo) && $pdo) {
 
 cpms_cleanup_project_labor_workers(isset($pdo) ? $pdo : null, $projectId, $excludedWorkers); // 장비기사 기존 기록 삭제(soft delete)
 cpms_sync_project_labor_workers_from_attendance(isset($pdo) ? $pdo : null, $projectId, $attendanceWorkers); // 장비기사 제외
+// 기존 현장 인원은 삭제하지 않고, 안전한 일치 규칙으로 관리 인력 마스터에 자동 편입합니다.
+if ($canEditLabor && isset($pdo) && $pdo && cpms_labor_load_workforce_services()) {
+    try {
+        $workforceSyncRepo = new WorkerRepository($pdo);
+        $workforceSyncUser = \App\Core\Auth::user();
+        $workforceSyncUserId = is_array($workforceSyncUser) && isset($workforceSyncUser['id']) ? (int)$workforceSyncUser['id'] : 0;
+        $workforceSyncRepo->syncLegacyProjectWorkers($projectId, $workforceSyncUserId, 1000);
+    } catch (Exception $e) {
+        // 화면 표시는 기존 인원 데이터로 계속 진행합니다.
+    }
+}
 $projectLaborWorkers = cpms_load_project_labor_workers(isset($pdo) ? $pdo : null, $projectId);
 $laborWorkerRatioMap = cpms_load_project_labor_worker_month_ratio_map(isset($pdo) ? $pdo : null, $projectId, $selectedMonth, $projectLaborWorkers);
 $projectLaborWorkers = cpms_apply_project_labor_worker_month_ratios($projectLaborWorkers, $laborWorkerRatioMap);
-$workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
+$laborWorkerWageMap = cpms_load_project_labor_worker_wage_map(isset($pdo) ? $pdo : null, $projectId, $selectedMonth);
+$projectLaborWorkers = cpms_apply_project_labor_worker_month_wages($projectLaborWorkers, $laborWorkerWageMap);
+$workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers, isset($pdo) ? $pdo : null, $selectedMonth);
 $laborWorkerMonthMap = function_exists('cpms_load_project_labor_worker_month_map') ? cpms_load_project_labor_worker_month_map(isset($pdo) ? $pdo : null, $projectId, $selectedMonth) : array();
 $previousLaborMonth = date('Y-m', strtotime($selectedMonth . '-01 -1 month'));
 $previousLaborWorkers = ($laborTab === 'workers' && $canEditLabor && function_exists('cpms_load_project_labor_workers_for_month'))
@@ -543,16 +570,16 @@ foreach ($timesheetWorkers as $worker) {
     <?php if ($canEditLabor): ?>
     <div class="mb-3 flex flex-wrap items-center justify-end gap-2">
         <button type="button" class="px-4 py-2 rounded-2xl bg-red-600 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="2">
-            2공수 일괄 · 승인요청
+            2공수 일괄<?php echo $laborGongsuApprovalExempt ? ' · 즉시입력' : ' · 승인요청'; ?>
         </button>
         <button type="button" class="px-4 py-2 rounded-2xl bg-amber-600 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="1.5">
-            1.5공수 일괄 · 승인요청
+            1.5공수 일괄<?php echo $laborGongsuApprovalExempt ? ' · 즉시입력' : ' · 승인요청'; ?>
         </button>
         <button type="button" class="px-4 py-2 rounded-2xl bg-orange-600 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="1.4">
-            1.4공수 일괄 · 승인요청
+            1.4공수 일괄<?php echo $laborGongsuApprovalExempt ? ' · 즉시입력' : ' · 승인요청'; ?>
         </button>
         <button type="button" class="px-4 py-2 rounded-2xl bg-yellow-600 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="1.3">
-            1.3공수 일괄 · 승인요청
+            1.3공수 일괄<?php echo $laborGongsuApprovalExempt ? ' · 즉시입력' : ' · 승인요청'; ?>
         </button>
         <button type="button" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold shadow-sm hover:shadow transition" data-labor-bulk-value="1">
             1공수일괄
@@ -620,12 +647,13 @@ foreach ($timesheetWorkers as $worker) {
     require __DIR__ . '/partials/labor_sheet_table.php';
     $canEdit = $canEditLabor;
     ?>
-<?php else: ?>
-    <?php $showSensitiveLaborFields = (\App\Core\Auth::isMaster() || \App\Core\Auth::canManageEmployees()); ?>
+<?php elseif ($laborTab === 'workers'): ?>
+    <?php // 공사섹션에서는 권한과 관계없이 계좌번호·은행명·예금주를 표시하지 않습니다. ?>
+    <?php $showSensitiveLaborFields = false; ?>
     <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
         <h4 class="text-lg font-extrabold text-gray-900">인원 작성</h4>
-        <div class="text-sm text-gray-600 mt-1">임금 단가와 계좌 정보를 등록하고, 선택한 월에 적용할 노무비·외주비 배분을 설정합니다.</div>
-        <div class="text-xs text-gray-500 mt-2">* 직영팀 인원은 관리팀 섹션의 직영팀 명부에서 선택해 프로젝트에 추가합니다.</div>
+        <div class="text-sm text-gray-600 mt-1">인력사 업체명, 구분/직종, 비고, 선택 월의 임금단가와 노무비·외주비 비용배분을 수정할 수 있습니다.</div>
+        <div class="text-xs text-gray-500 mt-2">* 이름·연락처·주민번호는 관리섹션 인력관리의 등록정보를 사용하며 계좌정보는 공사섹션에 표시하지 않습니다.</div>
         <div class="mt-4 rounded-2xl border border-blue-200 bg-blue-50 p-4">
             <div class="flex flex-wrap items-end justify-between gap-3">
                 <div class="w-full max-w-xs">
@@ -654,79 +682,37 @@ foreach ($timesheetWorkers as $worker) {
             <input type="hidden" name="workforce_worker_id" id="workforceAddWorkerId" value="">
         </form>
 
-        <div class="mt-4 grid gap-3 lg:grid-cols-3">
-            <div class="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                <div class="text-sm font-extrabold text-gray-900">인력관리에서 가져오기</div>
-                <div class="text-xs text-gray-600 mt-1">현재 현장 인원작성 명단의 이름을 인력관리와 맞춰 전체 입력합니다.</div>
-                <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_workers_save" class="mt-3 flex flex-wrap justify-end gap-2">
-                    <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                    <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-                    <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
-                    <input type="hidden" name="labor_tab" value="workers">
-                    <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
-                    <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
-                    <button type="submit" name="action" value="apply_workforce_by_name" class="px-4 py-2 rounded-2xl bg-emerald-600 text-white font-extrabold" onclick="return confirm('현재 현장 인원 명단을 인력관리 기준으로 전체 입력할까요?');">
-                        현재 명단 전체 가져오기
-                    </button>
-                    <button type="button" class="px-4 py-2 rounded-2xl border border-emerald-200 bg-white text-emerald-700 font-extrabold" data-workforce-modal-open>
-                        개별 검색
-                    </button>
-                </form>
+        <div class="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+            <div class="text-sm font-extrabold text-gray-900">직접 인원 추가</div>
+            <div class="text-xs text-gray-600 mt-1">관리섹션 인력관리의 이름을 검색합니다. 정확히 한 명이면 Enter로 바로 추가되고, 동명이인은 확인창에서 선택합니다.</div>
+            <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+                <input id="workforceQuickSearchInput" type="text" autocomplete="off" class="flex-1 px-4 py-3 rounded-2xl border border-emerald-200 bg-white" placeholder="인력관리 이름 검색">
+                <button type="button" id="workforceQuickSearchButton" class="px-5 py-3 rounded-2xl bg-emerald-600 text-white font-extrabold">검색</button>
             </div>
-
-            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" class="rounded-2xl border border-gray-200 p-4">
-                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-                <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
-                <input type="hidden" name="labor_tab" value="workers">
-                <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
-                <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
-                <div class="text-sm font-extrabold text-gray-900">직영팀에서 추가</div>
-                <div class="text-xs text-gray-500 mt-1">관리부 직영팀 명부에 등록된 인원을 프로젝트에 연결합니다.</div>
-                <div class="mt-3">
-                    <label class="text-xs font-bold text-gray-500">직영팀 선택</label>
-                    <select name="direct_member_id" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-sm">
-                        <option value="">직영팀 선택</option>
-                        <?php foreach ($directTeamMembers as $member): ?>
-                            <option value="<?php echo (int)$member['id']; ?>">
-                                <?php echo h(isset($member['name']) ? $member['name'] : ''); ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-                <div class="mt-3 flex justify-end">
-                    <button type="submit" class="px-4 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">
-                        직영팀 추가
-                    </button>
-                </div>
-            </form>
-
-            <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" class="rounded-2xl border border-gray-200 p-4">
-                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
-                <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
-                <input type="hidden" name="labor_tab" value="workers">
-                <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
-                <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
-                <div class="text-sm font-extrabold text-gray-900">직접 인원 추가</div>
-                <div class="text-xs text-gray-500 mt-1">근로자 시프티에서 못 가져온 인원을 직접 추가합니다.</div>
-                <div class="mt-3 grid gap-3 md:grid-cols-2">
-                    <div>
-                        <label class="text-xs font-bold text-gray-500">이름</label>
-                        <input name="manual_name" type="text" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-sm" placeholder="이름 입력">
-                    </div>
-                    <div>
-                        <label class="text-xs font-bold text-gray-500">업체명</label>
-                        <input name="manual_company_name" type="text" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-200 text-sm" placeholder="창명건설">
-                    </div>
-                </div>
-                <div class="mt-3 flex justify-end">
-                    <button type="submit" class="px-4 py-2 rounded-2xl bg-blue-600 text-white font-extrabold">
-                        인원 추가
-                    </button>
-                </div>
-            </form>
+            <div id="workforceQuickSearchStatus" class="mt-2 text-xs font-bold text-emerald-800"></div>
         </div>
+
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_worker_add" class="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-5">
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+            <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+            <input type="hidden" name="labor_tab" value="workers">
+            <input type="hidden" name="worker_sort" value="<?php echo h($workerSort); ?>">
+            <input type="hidden" name="worker_sort_dir" value="<?php echo h($workerSortDir); ?>">
+            <div class="text-sm font-extrabold text-violet-950">직영팀 추가</div>
+            <div class="mt-1 text-xs text-violet-800">재직 중인 직영팀을 선택합니다. 직영팀 단가는 선택 월의 월급 ÷ 전체 현장 출역일수로 자동 계산됩니다.</div>
+            <div class="mt-3 flex flex-col gap-2 sm:flex-row">
+                <select name="direct_member_id" required class="flex-1 px-4 py-3 rounded-2xl border border-violet-200 bg-white font-bold">
+                    <option value="">직영팀 이름 선택</option>
+                    <?php foreach ($activeDirectTeamMembers as $directTeamOption): ?>
+                        <?php $directTeamOptionId = isset($directTeamOption['id']) ? (int)$directTeamOption['id'] : 0; ?>
+                        <option value="<?php echo $directTeamOptionId; ?>"><?php echo h(isset($directTeamOption['name']) ? $directTeamOption['name'] : ''); ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <button type="submit" class="px-5 py-3 rounded-2xl bg-violet-700 text-white font-extrabold disabled:bg-gray-300" <?php echo count($activeDirectTeamMembers) === 0 ? 'disabled' : ''; ?>>직영팀 추가</button>
+            </div>
+            <?php if (count($activeDirectTeamMembers) === 0): ?><div class="mt-2 text-xs font-bold text-red-700">관리 &gt; 직영팀 명부에 재직자를 먼저 등록해주세요.</div><?php endif; ?>
+        </form>
 
         <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_workers_save" class="mt-4 flex justify-end">
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -783,8 +769,12 @@ foreach ($timesheetWorkers as $worker) {
                             $remark = isset($member['remark']) ? trim((string)$member['remark']) : '';
                             $sourceType = isset($member['source_type']) ? trim((string)$member['source_type']) : 'manual';
                             $matchedStatus = isset($member['matched_status']) ? trim((string)$member['matched_status']) : 'manual';
+                            $isDirectSalary = isset($member['salary_allocation_mode']) && (int)$member['salary_allocation_mode'] === 1;
+                            $directSalaryRate = $isDirectSalary && isset($member['salary_daily_rate']) ? (float)$member['salary_daily_rate'] : 0.0;
+                            $directSalaryDays = $isDirectSalary && isset($member['salary_total_output_days']) ? (int)$member['salary_total_output_days'] : 0;
                             $isMonthAssigned = (isset($member['month_assigned']) && (int)$member['month_assigned'] === 1);
                             $outsourcingRatio = function_exists('cpms_resolve_worker_outsourcing_ratio') ? cpms_resolve_worker_outsourcing_ratio($member) : ((isset($member['is_outsourcing']) && (int)$member['is_outsourcing'] === 1) ? 100 : 0);
+                            if ($isDirectSalary) $outsourcingRatio = 0;
                             $laborRatio = 100 - $outsourcingRatio;
                             $allocationPreset = in_array($outsourcingRatio, array(0, 30, 40, 50, 100), true) ? (string)$outsourcingRatio : 'custom';
                             $outsourcingStartDate = isset($member['outsourcing_start_date']) ? trim((string)$member['outsourcing_start_date']) : '';
@@ -795,15 +785,11 @@ foreach ($timesheetWorkers as $worker) {
                                     <input name="workers[<?php echo $workerId; ?>][company_name]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h($companyName); ?>" placeholder="인력사 업체명">
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
-                                    <input type="hidden" name="workers[<?php echo $workerId; ?>][worker_id]" value="<?php echo (int)$masterWorkerId; ?>">
-                                    <input type="hidden" name="workers[<?php echo $workerId; ?>][worker_name_snapshot]" value="<?php echo h(isset($member['name']) ? $member['name'] : ''); ?>">
-                                    <input type="hidden" name="workers[<?php echo $workerId; ?>][source_type]" value="<?php echo h($sourceType); ?>">
-                                    <input type="hidden" name="workers[<?php echo $workerId; ?>][matched_status]" value="<?php echo h($matchedStatus); ?>">
-                                    <input class="w-full px-2 py-1 border border-gray-200 rounded-lg bg-gray-100" type="text" value="<?php echo h(isset($member['name']) ? $member['name'] : ''); ?>" placeholder="성명" readonly>
+                                    <div class="font-extrabold text-gray-900"><?php echo h(isset($member['name']) ? $member['name'] : ''); ?></div>
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2" data-labor-allocation>
                                     <input type="hidden" name="workers[<?php echo $workerId; ?>][outsourcing_ratio]" value="<?php echo (int)$outsourcingRatio; ?>" data-allocation-ratio>
-                                    <select class="w-full px-2 py-2 rounded-xl border border-gray-200 bg-white text-sm font-bold" data-allocation-preset>
+                                    <select class="w-full px-2 py-2 rounded-xl border border-gray-200 bg-white text-sm font-bold" data-allocation-preset <?php echo $isDirectSalary ? 'disabled' : ''; ?>>
                                         <option value="0" <?php echo $allocationPreset === '0' ? 'selected' : ''; ?>>전액 노무비</option>
                                         <option value="30" <?php echo $allocationPreset === '30' ? 'selected' : ''; ?>>노무비 70% / 외주비 30%</option>
                                         <option value="40" <?php echo $allocationPreset === '40' ? 'selected' : ''; ?>>노무비 60% / 외주비 40%</option>
@@ -819,46 +805,52 @@ foreach ($timesheetWorkers as $worker) {
                                         </div>
                                     </div>
                                     <div class="mt-2 rounded-lg bg-gray-50 px-2 py-1 text-xs font-extrabold text-gray-700" data-allocation-summary>
-                                        노무비 <?php echo (int)$laborRatio; ?>% + 외주비 <?php echo (int)$outsourcingRatio; ?>% = 100%
+                                        <?php echo $isDirectSalary ? '직영팀 월급제 · 전액 노무비' : '노무비 ' . (int)$laborRatio . '% + 외주비 ' . (int)$outsourcingRatio . '% = 100%'; ?>
                                     </div>
                                     <div class="mt-2 rounded-xl border border-blue-100 bg-blue-50 p-2">
                                         <div class="text-xs font-extrabold text-blue-900">외주비 적용기간</div>
                                         <div class="mt-1 grid grid-cols-2 gap-2">
                                             <label class="text-[11px] font-bold text-gray-600">시작일
-                                                <input type="date" name="workers[<?php echo $workerId; ?>][outsourcing_start_date]" min="<?php echo h($periodStart); ?>" max="<?php echo h($periodEnd); ?>" value="<?php echo h($outsourcingStartDate); ?>" class="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-1 text-xs" data-allocation-start-date>
+                                                <input type="date" name="workers[<?php echo $workerId; ?>][outsourcing_start_date]" min="<?php echo h($periodStart); ?>" max="<?php echo h($periodEnd); ?>" value="<?php echo h($outsourcingStartDate); ?>" class="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-1 text-xs" data-allocation-start-date <?php echo $isDirectSalary ? 'disabled' : ''; ?>>
                                             </label>
                                             <label class="text-[11px] font-bold text-gray-600">종료일
-                                                <input type="date" name="workers[<?php echo $workerId; ?>][outsourcing_end_date]" min="<?php echo h($periodStart); ?>" max="<?php echo h($periodEnd); ?>" value="<?php echo h($outsourcingEndDate); ?>" class="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-1 text-xs" data-allocation-end-date>
+                                                <input type="date" name="workers[<?php echo $workerId; ?>][outsourcing_end_date]" min="<?php echo h($periodStart); ?>" max="<?php echo h($periodEnd); ?>" value="<?php echo h($outsourcingEndDate); ?>" class="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-1 text-xs" data-allocation-end-date <?php echo $isDirectSalary ? 'disabled' : ''; ?>>
                                             </label>
                                         </div>
                                         <div class="mt-1 text-[11px] text-blue-800">비워두면 선택 월 전체에 비율을 적용합니다.</div>
                                     </div>
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][phone]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['phone']) ? $member['phone'] : ''); ?>" placeholder="핸드폰 번호">
+                                    <?php echo h(isset($member['phone']) && trim((string)$member['phone']) !== '' ? $member['phone'] : '-'); ?>
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][address]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['address']) ? $member['address'] : ''); ?>" placeholder="주소">
+                                    <?php echo h(isset($member['address']) && trim((string)$member['address']) !== '' ? $member['address'] : '-'); ?>
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][job_type_snapshot]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h($jobTypeSnapshot); ?>" placeholder="구분/직종">
+                                    <input name="workers[<?php echo $workerId; ?>][job_type]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" maxlength="100" value="<?php echo h($jobTypeSnapshot); ?>" placeholder="구분/직종">
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][deposit_rate]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['deposit_rate']) ? $member['deposit_rate'] : '0'); ?>" placeholder="임금단가">
+                                    <?php if ($isDirectSalary): ?>
+                                        <input type="hidden" name="workers[<?php echo $workerId; ?>][deposit_rate]" value="<?php echo h((string)(int)round($directSalaryRate)); ?>">
+                                        <div class="rounded-lg border border-violet-200 bg-violet-50 px-2 py-2 text-right font-extrabold text-violet-900"><?php echo number_format($directSalaryRate); ?>원</div>
+                                        <div class="mt-1 text-[11px] font-bold text-violet-700">월급 <?php echo number_format(isset($member['monthly_salary']) ? (int)$member['monthly_salary'] : 0); ?>원 ÷ 전체 <?php echo number_format($directSalaryDays); ?>일</div>
+                                    <?php else: ?>
+                                        <input name="workers[<?php echo $workerId; ?>][deposit_rate]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['deposit_rate']) ? $member['deposit_rate'] : '0'); ?>" placeholder="임금단가">
+                                    <?php endif; ?>
                                 </td>
                                 <?php if ($showSensitiveLaborFields): ?>
                                     <td class="border border-gray-200 px-2 py-2">
-                                        <input name="workers[<?php echo $workerId; ?>][bank_account]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['bank_account']) ? $member['bank_account'] : ''); ?>" placeholder="계좌번호">
+                                        <?php echo h(isset($member['bank_account']) && trim((string)$member['bank_account']) !== '' ? CryptoHelper::maskBankAccount($member['bank_account']) : '-'); ?>
                                     </td>
                                     <td class="border border-gray-200 px-2 py-2">
-                                        <input name="workers[<?php echo $workerId; ?>][bank_name]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['bank_name']) ? $member['bank_name'] : ''); ?>" placeholder="은행명">
+                                        <?php echo h(isset($member['bank_name']) && trim((string)$member['bank_name']) !== '' ? $member['bank_name'] : '-'); ?>
                                     </td>
                                     <td class="border border-gray-200 px-2 py-2">
-                                        <input name="workers[<?php echo $workerId; ?>][account_holder]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" value="<?php echo h(isset($member['account_holder']) ? $member['account_holder'] : ''); ?>" placeholder="예금주">
+                                        <?php echo h(isset($member['account_holder']) && trim((string)$member['account_holder']) !== '' ? $member['account_holder'] : '-'); ?>
                                     </td>
                                 <?php endif; ?>
                                 <td class="border border-gray-200 px-2 py-2">
-                                    <input name="workers[<?php echo $workerId; ?>][remark]" class="w-full min-w-[150px] px-2 py-1 border border-gray-200 rounded-lg" type="text" maxlength="255" value="<?php echo h($remark); ?>" placeholder="비고">
+                                    <input name="workers[<?php echo $workerId; ?>][remark]" class="w-full px-2 py-1 border border-gray-200 rounded-lg" type="text" maxlength="255" value="<?php echo h($remark); ?>" placeholder="비고">
                                 </td>
                                 <td class="border border-gray-200 px-2 py-2 text-center">
                                     <?php if ($workerId > 0): ?>
@@ -936,14 +928,17 @@ foreach ($timesheetWorkers as $worker) {
                                     $previousWorkerWage = isset($previousLaborWorker['daily_wage_snapshot']) ? (int)$previousLaborWorker['daily_wage_snapshot'] : 0;
                                     if ($previousWorkerWage <= 0 && isset($previousLaborWorker['deposit_rate'])) $previousWorkerWage = (int)$previousLaborWorker['deposit_rate'];
                                     $previousWorkerAlreadyCurrent = isset($laborWorkerMonthMap[$previousWorkerId]);
+                                    $previousDirectMemberId = isset($previousLaborWorker['direct_member_id']) ? (int)$previousLaborWorker['direct_member_id'] : 0;
+                                    $previousDirectMemberRetired = $previousDirectMemberId > 0 && (!isset($directTeamActiveMap[$previousDirectMemberId]) || !$directTeamActiveMap[$previousDirectMemberId]);
+                                    $previousWorkerDisabled = $previousWorkerAlreadyCurrent || $previousDirectMemberRetired;
                                     ?>
-                                    <tr class="<?php echo $previousWorkerAlreadyCurrent ? 'bg-gray-50 text-gray-400' : 'bg-white'; ?>">
-                                        <td class="border border-gray-200 px-3 py-2 text-center"><input type="checkbox" name="previous_worker_ids[]" value="<?php echo $previousWorkerId; ?>" data-previous-worker-check <?php echo $previousWorkerAlreadyCurrent ? 'disabled' : ''; ?> aria-label="<?php echo h($previousWorkerName); ?> 선택"></td>
+                                    <tr class="<?php echo $previousWorkerDisabled ? 'bg-gray-50 text-gray-400' : 'bg-white'; ?>">
+                                        <td class="border border-gray-200 px-3 py-2 text-center"><input type="checkbox" name="previous_worker_ids[]" value="<?php echo $previousWorkerId; ?>" data-previous-worker-check <?php echo $previousWorkerDisabled ? 'disabled' : ''; ?> aria-label="<?php echo h($previousWorkerName); ?> 선택"></td>
                                         <td class="border border-gray-200 px-3 py-2 font-bold"><?php echo h($previousWorkerCompany); ?></td>
                                         <td class="border border-gray-200 px-3 py-2 font-extrabold"><?php echo h($previousWorkerName); ?></td>
                                         <td class="border border-gray-200 px-3 py-2"><?php echo h($previousWorkerPhone === '' ? '-' : $previousWorkerPhone); ?></td>
                                         <td class="border border-gray-200 px-3 py-2 text-right font-bold"><?php echo h(number_format($previousWorkerWage)); ?>원</td>
-                                        <td class="border border-gray-200 px-3 py-2 text-center"><?php if ($previousWorkerAlreadyCurrent): ?><span class="rounded-full bg-gray-200 px-2 py-1 text-xs font-bold text-gray-600">이미 등록</span><?php else: ?><span class="text-xs font-bold text-blue-700">가져오기 가능</span><?php endif; ?></td>
+                                        <td class="border border-gray-200 px-3 py-2 text-center"><?php if ($previousDirectMemberRetired): ?><span class="rounded-full bg-red-100 px-2 py-1 text-xs font-bold text-red-700">퇴직 · 추가 불가</span><?php elseif ($previousWorkerAlreadyCurrent): ?><span class="rounded-full bg-gray-200 px-2 py-1 text-xs font-bold text-gray-600">이미 등록</span><?php else: ?><span class="text-xs font-bold text-blue-700">가져오기 가능</span><?php endif; ?></td>
                                     </tr>
                                 <?php endforeach; ?>
                             <?php else: ?>
@@ -963,29 +958,30 @@ foreach ($timesheetWorkers as $worker) {
             </div>
         </div>
 
-        <div id="workforceSearchModal" class="fixed inset-0 z-50 hidden">
+        <div id="workforceSearchModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
             <div class="absolute inset-0 bg-black/40" data-workforce-modal-close></div>
             <div class="absolute inset-0 flex items-center justify-center p-4">
                 <div class="w-full max-w-2xl bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
                     <div class="p-5 border-b border-gray-100 flex items-center justify-between">
                         <div>
-                            <div class="text-lg font-extrabold text-gray-900">인력관리에서 가져오기</div>
-                            <div class="text-xs text-gray-500 mt-1">이름을 검색하고 선택하세요.</div>
+                            <div class="text-lg font-extrabold text-gray-900">동명이인 선택</div>
+                            <div class="text-xs text-gray-500 mt-1">연락처와 주민번호 앞자리를 확인한 뒤 추가할 인원을 선택하세요.</div>
                         </div>
                         <button type="button" class="px-3 py-2 rounded-xl border border-gray-200" data-workforce-modal-close>닫기</button>
                     </div>
                     <div class="p-5">
-                        <div class="flex gap-2">
-                            <input id="workforceSearchInput" class="flex-1 px-4 py-3 rounded-2xl border border-gray-200" placeholder="이름을 입력하세요">
-                            <button type="button" id="workforceSearchButton" class="px-4 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">검색</button>
+                        <div id="workforceSearchResults" class="space-y-2 text-sm"></div>
+                        <div class="mt-5 flex justify-end gap-2">
+                            <button type="button" class="px-4 py-2 rounded-xl border border-gray-200 font-bold" data-workforce-modal-close>취소</button>
+                            <button type="button" id="workforceDuplicateAddButton" class="px-5 py-2 rounded-xl bg-emerald-600 text-white font-extrabold">인원 추가</button>
                         </div>
-                        <div id="workforceSearchResults" class="mt-4 space-y-2 text-sm"></div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <script defer src="<?php echo h(asset_url('assets/js/labor_personnel.js')); ?>"></script>
+        <?php $laborPersonnelJsPath = dirname(dirname(dirname(dirname(__DIR__)))) . '/public/assets/js/labor_personnel.js'; ?>
+        <script defer src="<?php echo h(asset_url('assets/js/labor_personnel.js') . '?v=' . (string)@filemtime($laborPersonnelJsPath)); ?>"></script>
         <script>
         // 파일: app/views/construction/tabs/labor.php
         // 현장 담당자가 외주비 비율만 선택하면 노무비 비율과 합계가 즉시 보이도록 합니다.
@@ -1084,6 +1080,33 @@ foreach ($timesheetWorkers as $worker) {
         })();
         </script>
     </div>
+<?php else: ?>
+    <div class="bg-white rounded-3xl border border-gray-200 p-6 shadow-sm">
+        <div>
+            <h4 class="text-lg font-extrabold text-gray-900">인원 등록</h4>
+            <div class="mt-1 text-sm text-gray-600">등록한 인원은 관리섹션 인력관리에도 즉시 저장되며 모든 현장에서 이름으로 검색할 수 있습니다.</div>
+        </div>
+        <form method="post" action="<?php echo h(base_url()); ?>/?r=construction/labor_workforce_save" class="mt-5 space-y-5" data-construction-workforce-register>
+            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+            <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
+            <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
+                <label><span class="block text-sm font-bold text-gray-700 mb-1">이름</span><input name="name" required maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
+                <label><span class="block text-sm font-bold text-gray-700 mb-1">연락처</span><input name="phone" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="50" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="010-0000-0000"></label>
+                <label><span class="block text-sm font-bold text-gray-700 mb-1">주민번호</span><input name="resident_no" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="14" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="000000-0000000"></label>
+                <label><span class="block text-sm font-bold text-gray-700 mb-1">구분/직종</span><input name="job_type" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
+                <label><span class="block text-sm font-bold text-gray-700 mb-1">인력사 업체명</span><input name="agency_name" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
+                <label><span class="block text-sm font-bold text-gray-700 mb-1">임금단가</span><input name="daily_wage" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> type="number" min="<?php echo $laborRelaxedRegistration ? '0' : '1'; ?>" step="1" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
+                <label><span class="block text-sm font-bold text-gray-700 mb-1">은행명</span><input name="bank_name" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
+                <label><span class="block text-sm font-bold text-gray-700 mb-1">계좌번호</span><input name="bank_account" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
+                <label><span class="block text-sm font-bold text-gray-700 mb-1">예금주</span><input name="account_holder" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
+            </div>
+            <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800"><?php echo $laborRelaxedRegistration ? '개발부서는 이름만 입력해도 임시 등록할 수 있으며 나머지 정보는 인력관리에서 나중에 보완할 수 있습니다.' : '위 9개 항목을 모두 입력해야 등록할 수 있습니다.'; ?></div>
+            <div class="flex justify-end">
+                <button type="submit" class="px-6 py-3 rounded-2xl bg-emerald-600 text-white font-extrabold">인력 등록</button>
+            </div>
+        </form>
+    </div>
 <?php endif; ?>
 
 
@@ -1107,10 +1130,10 @@ foreach ($timesheetWorkers as $worker) {
     <div class="absolute inset-0 bg-black/40" data-labor-bulk-request-close></div>
     <div class="absolute inset-0 flex items-center justify-center p-4">
         <div class="w-full max-w-2xl max-h-[88vh] overflow-hidden bg-white rounded-3xl shadow-2xl border border-gray-100">
-            <div class="p-6 border-b border-gray-100 flex items-center justify-between">
+            <div class="p-6 border-b border-gray-100 flex shrink-0 items-center justify-between">
                 <div>
-                    <h3 class="text-xl font-extrabold text-gray-900">일괄 공수 승인 요청</h3>
-                    <div class="text-xs text-gray-500 mt-1">공수 적용일자, 대상 인원, 요청 공수와 신청 사유를 확인합니다.</div>
+                    <h3 class="text-xl font-extrabold text-gray-900"><?php echo $laborGongsuApprovalExempt ? '일괄 공수 입력' : '일괄 공수 승인 요청'; ?></h3>
+                    <div class="text-xs text-gray-500 mt-1"><?php echo $laborGongsuApprovalExempt ? '개발부서는 승인 없이 공수가 바로 적용됩니다.' : '공수 적용일자, 대상 인원, 요청 공수와 신청 사유를 확인합니다.'; ?></div>
                 </div>
                 <button type="button" class="px-3 py-2 rounded-xl border border-gray-200 font-bold" data-labor-bulk-request-close>닫기</button>
             </div>
@@ -1139,12 +1162,12 @@ foreach ($timesheetWorkers as $worker) {
                     <div id="laborBulkRequestNames" class="mt-2 max-h-44 overflow-y-auto rounded-2xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700"></div>
                 </div>
                 <div>
-                    <label class="text-xs font-bold text-gray-500" for="laborBulkRequestReason">신청 사유</label>
-                    <textarea id="laborBulkRequestReason" rows="4" maxlength="255" class="mt-1 w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="예: 점심시간 없이 연장 근무" required></textarea>
+                    <label class="text-xs font-bold text-gray-500" for="laborBulkRequestReason"><?php echo $laborGongsuApprovalExempt ? '변경 사유(선택)' : '신청 사유'; ?></label>
+                    <textarea id="laborBulkRequestReason" rows="4" maxlength="255" class="mt-1 w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="예: 점심시간 없이 연장 근무" <?php echo $laborGongsuApprovalExempt ? '' : 'required'; ?>></textarea>
                 </div>
                 <div class="flex justify-end gap-2">
                     <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 font-extrabold" data-labor-bulk-request-close>취소</button>
-                    <button type="button" id="laborBulkRequestSubmit" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold">승인 요청</button>
+                    <button type="button" id="laborBulkRequestSubmit" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold"><?php echo $laborGongsuApprovalExempt ? '바로 적용' : '승인 요청'; ?></button>
                 </div>
             </div>
         </div>
@@ -1154,7 +1177,7 @@ foreach ($timesheetWorkers as $worker) {
 <div id="modal-gongsuRequest" class="fixed inset-0 z-50 hidden">
     <div class="absolute inset-0 bg-black/40" data-modal-close="gongsuRequest"></div>
     <div class="absolute inset-0 flex items-center justify-center p-4">
-        <div class="w-full max-w-xl bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+        <div class="w-full max-w-xl max-h-[calc(100vh-2rem)] bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden flex flex-col">
             <div class="p-6 border-b border-gray-100 flex items-center justify-between">
                 <div>
                     <h3 class="text-xl font-extrabold text-gray-900">공수 수정</h3>
@@ -1162,12 +1185,7 @@ foreach ($timesheetWorkers as $worker) {
                 </div>
                 <button type="button" class="p-3 rounded-2xl hover:bg-gray-50" data-modal-close="gongsuRequest">닫기</button>
             </div>
-            <div class="p-6 space-y-4">
-                <div class="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800 leading-6">
-                    <div>1.2 미만은 즉시 반영됩니다.</div>
-                    <div>1.2 이상 1.4 미만은 공사PM 승인 후 반영됩니다.</div>
-                    <div>1.4 이상은 공사PM 승인 후 부사장 승인까지 완료되어야 반영됩니다.</div>
-                </div>
+            <div class="min-h-0 overflow-y-auto p-6 space-y-4">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
                     <div>
                         <label class="text-xs font-bold text-gray-500">현장명</label>
@@ -1199,19 +1217,22 @@ foreach ($timesheetWorkers as $worker) {
                     <input id="gongsuRequestedValue" type="number" min="0" step="0.1" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" placeholder="예: 1.3">
                 </div>
                 <div>
-                    <label class="text-xs font-bold text-gray-500">요청 사유 입력</label>
+                    <label class="text-xs font-bold text-gray-500"><?php echo $laborGongsuApprovalExempt ? '변경 사유 입력(선택)' : '요청 사유 입력'; ?></label>
                     <textarea id="gongsuRequestReason" class="mt-1 px-4 py-3 rounded-2xl border border-gray-200 w-full" rows="3" placeholder="예: 점심시간 없이 근무"></textarea>
-                    <div class="mt-2 text-xs text-gray-500">1.2 이상 공수 수정은 요청 사유가 필요합니다. 예: 점심시간 없이 근무</div>
+                    <div class="mt-2 text-xs text-gray-500"><?php echo $laborGongsuApprovalExempt ? '개발부서는 1.2 이상 공수도 승인 없이 바로 반영됩니다.' : '1.2 이상 공수 수정은 요청 사유가 필요합니다. 예: 점심시간 없이 근무'; ?></div>
                 </div>
-                <div id="gongsuHistoryBox" class="rounded-2xl border border-gray-200 bg-gray-50 p-4 text-sm hidden">
-                    <div class="text-sm font-extrabold text-gray-900 mb-3">이력</div>
-                    <div id="gongsuHistoryContent" class="space-y-3 text-gray-700"></div>
+                <div id="gongsuHistoryBox" class="rounded-2xl border border-gray-200 bg-gray-50 text-sm hidden">
+                    <button type="button" id="gongsuHistoryToggle" class="flex w-full items-center justify-between px-4 py-3 text-left font-extrabold text-gray-900" aria-expanded="false" aria-controls="gongsuHistoryContent">
+                        <span>이력</span>
+                        <span id="gongsuHistoryToggleIcon" aria-hidden="true">▼</span>
+                    </button>
+                    <div id="gongsuHistoryContent" class="hidden max-h-64 space-y-3 overflow-y-auto border-t border-gray-200 px-4 py-3 text-gray-700"></div>
                 </div>
                 <div class="flex items-center justify-between gap-2">
                     <button type="button" class="px-4 py-2 rounded-2xl border border-red-200 text-red-600 font-extrabold hidden" id="gongsuRequestDelete">공수 삭제</button>
                     <div class="flex items-center justify-end gap-2 ml-auto">
                         <button type="button" class="px-4 py-2 rounded-2xl border border-gray-200 text-gray-700 font-extrabold" data-modal-close="gongsuRequest">취소</button>
-                        <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" id="gongsuRequestSubmit">요청/저장</button>
+                        <button type="button" class="px-5 py-2 rounded-2xl bg-gray-900 text-white font-extrabold" id="gongsuRequestSubmit"><?php echo $laborGongsuApprovalExempt ? '저장' : '요청/저장'; ?></button>
                     </div>
                 </div>
             </div>
@@ -1223,6 +1244,7 @@ foreach ($timesheetWorkers as $worker) {
 (function(){
     var csrf = <?php echo json_encode(csrf_token()); ?>;
     var projectName = <?php echo json_encode(isset($projectRow['name']) ? (string)$projectRow['name'] : ''); ?>;    
+    var gongsuApprovalExempt = <?php echo $laborGongsuApprovalExempt ? 'true' : 'false'; ?>;
     var requestCtx = null;
     var savingCell = false;
     function openModal(){ var m=document.getElementById('modal-gongsuRequest'); if(m)m.classList.remove('hidden'); }
@@ -1335,7 +1357,7 @@ foreach ($timesheetWorkers as $worker) {
             if (!/^\d+(\.\d+)?$/.test(requestedVal)) { alert('변경 공수는 숫자 형식으로 입력하세요.'); return; }
             var nextValue = parseFloat(requestedVal);
             if (isNaN(nextValue) || nextValue < 0) { alert('변경 공수는 0 이상만 가능합니다.'); return; }
-            if (nextValue >= 1.2 && !reason) { alert('1.2 이상 공수 수정은 승인 요청사유가 필요합니다.'); return; }
+            if (!gongsuApprovalExempt && nextValue >= 1.2 && !reason) { alert('1.2 이상 공수 수정은 승인 요청사유가 필요합니다.'); return; }
             if (!requestCtx.ctx.projectId || isNaN(parseInt(requestCtx.ctx.projectId, 10)) || parseInt(requestCtx.ctx.projectId, 10) <= 0) {
                 alert('프로젝트 정보가 올바르지 않아 저장할 수 없습니다. 페이지를 새로고침 후 다시 시도해 주세요.');
                 return;
@@ -1352,6 +1374,7 @@ foreach ($timesheetWorkers as $worker) {
     var projectName = <?php echo json_encode(isset($projectRow['name']) ? (string)$projectRow['name'] : ''); ?>;
     var selectedMonth = <?php echo json_encode($selectedMonth); ?>;
     var todayDate = <?php echo json_encode(date('Y-m-d')); ?>;
+    var gongsuApprovalExempt = <?php echo $laborGongsuApprovalExempt ? 'true' : 'false'; ?>;
     var gongsuHistoryMap = <?php echo json_encode($overrideHistoryMap, JSON_UNESCAPED_UNICODE); ?>;
     var requestCtx = null;
     var addCtx = null;
@@ -1426,12 +1449,13 @@ foreach ($timesheetWorkers as $worker) {
             }
             var wageRate = parseFloat(row.getAttribute('data-wage-rate') || '0');
             if (isNaN(wageRate)) wageRate = 0;
+            var payUnits = row.getAttribute('data-pay-unit') === 'days' ? rowOutputDays : rowGongsu;
             totalOutputDays += rowOutputDays;
             totalGongsu += rowGongsu;
-            totalPay += rowGongsu * wageRate;
+            totalPay += payUnits * wageRate;
             groupTotals[groupKey].outputDays += rowOutputDays;
             groupTotals[groupKey].gongsu += rowGongsu;
-            groupTotals[groupKey].pay += rowGongsu * wageRate;
+            groupTotals[groupKey].pay += payUnits * wageRate;
             if (todayDate) {
                 var todayCell = row.querySelector('.cpms-gongsu-cell[data-date="' + todayDate + '"]');
                 if (todayCell && parseCellValue(todayCell) > 0) todayAttendanceCount++;
@@ -1507,9 +1531,10 @@ foreach ($timesheetWorkers as $worker) {
         var totalGongsuCell = row.querySelector('.cpms-total-gongsu');
         var totalPayCell = row.querySelector('.cpms-total-pay');
         var wageRate = parseFloat(row.getAttribute('data-wage-rate') || '0');
+        var payUnits = row.getAttribute('data-pay-unit') === 'days' ? outputDays : totalGongsu;
         if (outputDaysCell) outputDaysCell.textContent = String(outputDays);
         if (totalGongsuCell) totalGongsuCell.textContent = totalGongsu > 0 ? formatValue(totalGongsu) : '0';
-        if (totalPayCell) totalPayCell.textContent = formatMoney(totalGongsu * (isNaN(wageRate) ? 0 : wageRate));
+        if (totalPayCell) totalPayCell.textContent = formatMoney(payUnits * (isNaN(wageRate) ? 0 : wageRate));
         updateLaborSheetTotals();
     }
 
@@ -1545,10 +1570,29 @@ foreach ($timesheetWorkers as $worker) {
         lines.push('<div><span class="font-bold text-gray-500">' + escHtml(label) + ':</span> ' + escHtml(value) + '</div>');
     }
 
+    function setGongsuHistoryExpanded(expanded){
+        var toggle = document.getElementById('gongsuHistoryToggle');
+        var icon = document.getElementById('gongsuHistoryToggleIcon');
+        var content = document.getElementById('gongsuHistoryContent');
+        if (!toggle || !icon || !content) return;
+        toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+        icon.textContent = expanded ? '▲' : '▼';
+        if (expanded) content.classList.remove('hidden');
+        else content.classList.add('hidden');
+    }
+
+    var gongsuHistoryToggle = document.getElementById('gongsuHistoryToggle');
+    if (gongsuHistoryToggle) {
+        gongsuHistoryToggle.addEventListener('click', function(){
+            setGongsuHistoryExpanded(this.getAttribute('aria-expanded') !== 'true');
+        });
+    }
+
     function renderGongsuHistory(ctx){
         var box = document.getElementById('gongsuHistoryBox');
         var content = document.getElementById('gongsuHistoryContent');
         if (!box || !content) return;
+        setGongsuHistoryExpanded(false);
         content.innerHTML = '';
         var key = String((ctx && ctx.workerKey) ? ctx.workerKey : '').replace(/^\s+|\s+$/g, '') + '|' + String((ctx && ctx.date) ? ctx.date : '');
         var rows = (gongsuHistoryMap && gongsuHistoryMap[key]) ? gongsuHistoryMap[key] : [];
@@ -1770,7 +1814,7 @@ foreach ($timesheetWorkers as $worker) {
     }
 
     // 파일: app/views/construction/tabs/labor.php
-    // 1.3/1.4/1.5/2공수는 선택 인원을 한 번의 HTTP 요청으로 보내 같은 승인 묶음으로 저장합니다.
+    // 1.3/1.4/1.5/2공수는 선택 인원을 한 번의 HTTP 요청으로 보내 같은 일괄 묶음으로 저장합니다.
     function saveGongsuBulkApprovalRequest(targets, newValue, reason, requestScope){
         var entries = [];
         for (var i = 0; i < targets.length; i++) {
@@ -1800,7 +1844,14 @@ foreach ($timesheetWorkers as $worker) {
             .then(parseJsonResponse)
             .then(function(data){
                 for (var i = 0; i < targets.length; i++) {
-                    setCellDisplay(targets[i].cell, formatValue(targets[i].ctx.oldValue), true);
+                    if (data.mode === 'pending') {
+                        setCellDisplay(targets[i].cell, formatValue(targets[i].ctx.oldValue), true);
+                    } else {
+                        setCellDisplay(targets[i].cell, formatValue(newValue), false);
+                        updateRowSummary(targets[i].cell);
+                        pushGongsuHistory(targets[i].ctx, targets[i].ctx.oldValue, newValue, reason, false);
+                        flashGongsuCell(targets[i].cell);
+                    }
                 }
                 return data;
             });
@@ -1988,33 +2039,33 @@ foreach ($timesheetWorkers as $worker) {
             if (!laborBulkApprovalState.targets || !laborBulkApprovalState.targets.length) return;
             var reasonBox = document.getElementById('laborBulkRequestReason');
             var reason = reasonBox ? String(reasonBox.value || '').replace(/^\s+|\s+$/g, '') : '';
-            if (!reason) {
+            if (!gongsuApprovalExempt && !reason) {
                 alert('일괄 공수 승인 요청사유를 입력해 주세요.');
                 if (reasonBox) reasonBox.focus();
                 return;
             }
             var state = laborBulkApprovalState;
             laborBulkRequestSubmit.disabled = true;
-            laborBulkRequestSubmit.textContent = '요청 중';
+            laborBulkRequestSubmit.textContent = gongsuApprovalExempt ? '적용 중' : '요청 중';
             setLaborBulkDisabled(true);
-            setLaborBulkStatus(state.targets.length + '명 일괄 승인 요청 중');
+            setLaborBulkStatus(state.targets.length + (gongsuApprovalExempt ? '명 일괄 적용 중' : '명 일괄 승인 요청 중'));
             saveGongsuBulkApprovalRequest(state.targets, state.value, reason, state.scope)
                 .then(function(data){
-                    setLaborBulkStatus(state.targets.length + '명 승인 요청 완료');
+                    setLaborBulkStatus(state.targets.length + (data && data.mode === 'applied' ? '명 일괄 적용 완료' : '명 승인 요청 완료'));
                     closeModal('modal-laborBulkRequest');
                     laborBulkApprovalState = null;
-                    alert(data && data.message ? data.message : '일괄 승인 요청을 보냈습니다.');
+                    alert(data && data.message ? data.message : (gongsuApprovalExempt ? '일괄 공수를 적용했습니다.' : '일괄 승인 요청을 보냈습니다.'));
                     window.location.reload();
                 })
                 .catch(function(e){
-                    setLaborBulkStatus('일괄 승인 요청 실패');
+                    setLaborBulkStatus(gongsuApprovalExempt ? '일괄 공수 적용 실패' : '일괄 승인 요청 실패');
                     if (window.console && console.error) console.error('bulk approval request failed:', e);
-                    alert(e && e.message ? e.message : '일괄 승인 요청에 실패했습니다.');
+                    alert(e && e.message ? e.message : (gongsuApprovalExempt ? '일괄 공수 적용에 실패했습니다.' : '일괄 승인 요청에 실패했습니다.'));
                 })
                 .then(function(){
                     setLaborBulkDisabled(false);
                     laborBulkRequestSubmit.disabled = false;
-                    laborBulkRequestSubmit.textContent = '승인 요청';
+                    laborBulkRequestSubmit.textContent = gongsuApprovalExempt ? '바로 적용' : '승인 요청';
                 });
         });
     }
@@ -2209,7 +2260,7 @@ foreach ($timesheetWorkers as $worker) {
                 alert('변경 공수는 0 이상만 가능합니다.');
                 return;
             }
-            if (nextValue >= 1.2 && !reason) {
+            if (!gongsuApprovalExempt && nextValue >= 1.2 && !reason) {
                 alert('1.2 이상 공수 수정은 승인 요청사유가 필요합니다.');
                 return;
             }

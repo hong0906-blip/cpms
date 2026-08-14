@@ -11,10 +11,30 @@
  * PHP 5.6 호환
  */
 
-$cpmsMonthlyInputRoute = '공사';
-$cpmsMonthlyInputTab = 'monthly_input';
-$cpmsMonthlyInputSelectedProjectId = isset($pid) ? (int)$pid : 0;
-$cpmsMonthlyInputShowProjectFilter = false;
+$cpmsMonthlyInputRoute = isset($cpmsMonthlyInputRoute) && trim((string)$cpmsMonthlyInputRoute) !== ''
+    ? trim((string)$cpmsMonthlyInputRoute)
+    : '공사';
+$cpmsMonthlyInputTab = isset($cpmsMonthlyInputTab) && trim((string)$cpmsMonthlyInputTab) !== ''
+    ? trim((string)$cpmsMonthlyInputTab)
+    : 'monthly_input';
+$cpmsMonthlyInputSelectedProjectId = isset($cpmsMonthlyInputSelectedProjectId)
+    ? (int)$cpmsMonthlyInputSelectedProjectId
+    : (isset($pid) ? (int)$pid : 0);
+$cpmsMonthlyInputShowProjectFilter = isset($cpmsMonthlyInputShowProjectFilter)
+    ? (bool)$cpmsMonthlyInputShowProjectFilter
+    : false;
+$cpmsMonthlyInputManagementMode = isset($cpmsMonthlyInputManagementMode)
+    ? (bool)$cpmsMonthlyInputManagementMode
+    : false;
+$cpmsMonthlyInputIncludeBankInfo = isset($cpmsMonthlyInputIncludeBankInfo)
+    ? (bool)$cpmsMonthlyInputIncludeBankInfo
+    : $cpmsMonthlyInputManagementMode;
+$cpmsMonthlyInputShowTotalColumn = isset($cpmsMonthlyInputShowTotalColumn)
+    ? (bool)$cpmsMonthlyInputShowTotalColumn
+    : true;
+$cpmsMonthlyInputCompactTable = isset($cpmsMonthlyInputCompactTable)
+    ? (bool)$cpmsMonthlyInputCompactTable
+    : false;
 
 /*
  * 공통 투입비 상세 화면을 먼저 실행합니다.
@@ -25,8 +45,17 @@ ob_start();
 require __DIR__ . '/../../project/monthly_input.php';
 $cpmsMonthlyInputHtml = ob_get_clean();
 
+/* 첫 진입 시 공통 화면이 선택한 첫 현장 ID도 업체/상세 조회에 동일하게 사용합니다. */
+if (isset($selectedProjectId) && (int)$selectedProjectId > 0) {
+    $cpmsMonthlyInputSelectedProjectId = (int)$selectedProjectId;
+}
+
 require_once __DIR__ . '/partials/monthly_input_vendor_info_helper.php';
-$cpmsMonthlyInputVendorInfoMap = cpms_monthly_input_vendor_info_map($pdo, $cpmsMonthlyInputSelectedProjectId);
+$cpmsMonthlyInputVendorInfoMap = cpms_monthly_input_vendor_info_map(
+    $pdo,
+    $cpmsMonthlyInputSelectedProjectId,
+    $cpmsMonthlyInputIncludeBankInfo
+);
 $cpmsMonthlyInputVendorInfoMapJson = json_encode($cpmsMonthlyInputVendorInfoMap, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 if (!is_string($cpmsMonthlyInputVendorInfoMapJson) || $cpmsMonthlyInputVendorInfoMapJson === '') {
     $cpmsMonthlyInputVendorInfoMapJson = '{}';
@@ -121,15 +150,50 @@ foreach ($cpmsLabels as $cpmsSectionKey => $cpmsSectionTitle) {
     $cpmsCumulativePayload['section_subtotals'][$cpmsSectionTitle] = $cpmsSumMonths($cpmsSectionMonthMap);
 }
 
+$cpmsMonthlyInputVendorExtraColumnCount = $cpmsMonthlyInputIncludeBankInfo ? 6 : 3;
+$cpmsMonthlyInputDetailCellIndex = $cpmsMonthlyInputIncludeBankInfo ? 8 : 5;
+$cpmsMonthlyInputMonthCellStart = $cpmsMonthlyInputIncludeBankInfo ? 9 : 6;
+$cpmsMonthlyInputHasTotalColumn = $cpmsMonthlyInputShowTotalColumn;
+
 ?>
 <style>
-.cpms-monthly-table-scroll table { min-width: 1460px; }
+.cpms-monthly-table-scroll table { min-width: <?php echo $cpmsMonthlyInputCompactTable ? '1040px' : ($cpmsMonthlyInputIncludeBankInfo ? '1880px' : '1460px'); ?>; }
 .cpms-monthly-vendor-extra {
-  min-width: 125px;
-  max-width: 190px;
+  min-width: <?php echo $cpmsMonthlyInputCompactTable ? '0' : '125px'; ?>;
+  max-width: <?php echo $cpmsMonthlyInputCompactTable ? 'none' : '190px'; ?>;
   white-space: nowrap;
 }
-.cpms-monthly-vendor-extra.is-business-no { min-width: 145px; }
+.cpms-monthly-vendor-extra.is-business-no { min-width: <?php echo $cpmsMonthlyInputCompactTable ? '0' : '145px'; ?>; }
+.cpms-monthly-vendor-extra.is-account-number { min-width: <?php echo $cpmsMonthlyInputCompactTable ? '0' : '165px'; ?>; }
+<?php if ($cpmsMonthlyInputCompactTable): ?>
+.cpms-monthly-table-scroll table {
+  width: 100%;
+  table-layout: fixed;
+  margin-left: auto;
+  margin-right: auto;
+  font-size: 14px;
+}
+.cpms-monthly-table-scroll th,
+.cpms-monthly-table-scroll td {
+  padding: 5px 4px !important;
+  line-height: 1.25;
+  text-align: center !important;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+}
+.cpms-monthly-table-scroll th:nth-child(1) { width: 96px; }
+.cpms-monthly-table-scroll th:nth-child(2) { width: 112px; }
+.cpms-monthly-table-scroll th:nth-child(3) { width: 74px; }
+.cpms-monthly-table-scroll th:nth-child(4) { width: 108px; }
+.cpms-monthly-table-scroll th:nth-child(5) { width: 108px; }
+.cpms-monthly-table-scroll th:nth-child(6) { width: 108px; }
+.cpms-monthly-table-scroll th:nth-child(7) { width: 58px; }
+.cpms-monthly-table-scroll th:nth-child(8) { width: 132px; }
+.cpms-monthly-table-scroll th:nth-child(9) { width: 130px; }
+.cpms-monthly-table-scroll th:nth-child(10) { width: 100px; }
+<?php endif; ?>
 @media (max-width: 767px) {
   .cpms-monthly-table-scroll table { min-width: 1100px; }
   .cpms-monthly-vendor-extra { display: none !important; }
@@ -143,6 +207,9 @@ echo $cpmsMonthlyInputHtml;
     'use strict';
 
     var vendorMap = <?php echo $cpmsMonthlyInputVendorInfoMapJson; ?>;
+    var includeBankInfo = <?php echo $cpmsMonthlyInputIncludeBankInfo ? 'true' : 'false'; ?>;
+    var compactTable = <?php echo $cpmsMonthlyInputCompactTable ? 'true' : 'false'; ?>;
+    var extraColumnCount = <?php echo (int)$cpmsMonthlyInputVendorExtraColumnCount; ?>;
     var tableWrap = document.querySelector('.cpms-monthly-table-scroll');
     var table = tableWrap ? tableWrap.querySelector('table') : null;
     if (!table || !table.tHead || !table.tHead.rows.length || !table.tBodies || !table.tBodies.length) return;
@@ -154,6 +221,23 @@ echo $cpmsMonthlyInputHtml;
 
     function vendorKey(value) {
         return trimText(value).replace(/\s+/g, '').toLowerCase();
+    }
+
+    function laborVendorKey(value) {
+        return vendorKey(value).replace(/^(?:주식회사|\(주\)|㈜)+/, '');
+    }
+
+    function mergeVendorInfo(primary, fallback) {
+        primary = primary || {};
+        fallback = fallback || {};
+        return {
+            representative_name: primary.representative_name || fallback.representative_name || '',
+            contact: primary.contact || fallback.contact || '',
+            business_no: primary.business_no || fallback.business_no || '',
+            account_holder: primary.account_holder || fallback.account_holder || '',
+            bank_name: primary.bank_name || fallback.bank_name || '',
+            account_number: primary.account_number || fallback.account_number || ''
+        };
     }
 
     function makeHeader(label, extraClass) {
@@ -178,6 +262,11 @@ echo $cpmsMonthlyInputHtml;
     headerRow.insertBefore(makeHeader('대표자명', ''), headerAnchor);
     headerRow.insertBefore(makeHeader('전화번호', ''), headerAnchor);
     headerRow.insertBefore(makeHeader('사업자등록번호', 'is-business-no'), headerAnchor);
+    if (includeBankInfo) {
+        headerRow.insertBefore(makeHeader('예금주', ''), headerAnchor);
+        headerRow.insertBefore(makeHeader('은행명', ''), headerAnchor);
+        headerRow.insertBefore(makeHeader('계좌번호', 'is-account-number'), headerAnchor);
+    }
 
     var rows = table.tBodies[0].rows;
     for (var i = 0; i < rows.length; i++) {
@@ -189,21 +278,37 @@ echo $cpmsMonthlyInputHtml;
         var firstText = trimText(row.cells[0] ? row.cells[0].textContent : '');
 
         if (companyCell.colSpan && companyCell.colSpan > 1) {
-            companyCell.colSpan = companyCell.colSpan + 3;
+            companyCell.colSpan = companyCell.colSpan + extraColumnCount;
             continue;
         }
 
         var info = vendorMap[vendorKey(companyName)] || {};
+        if (row.getAttribute('data-vendor-match-scope') === 'labor') {
+            info = mergeVendorInfo(info, vendorMap['__labor_corp__' + laborVendorKey(companyName)] || {});
+        }
         var isDetailRow = firstText === '' && companyName !== '' && companyName !== '데이터 없음';
         var anchor = row.cells[2] || null;
         row.insertBefore(makeCell(isDetailRow ? info.representative_name : '', '', !isDetailRow), anchor);
         row.insertBefore(makeCell(isDetailRow ? info.contact : '', '', !isDetailRow), anchor);
         row.insertBefore(makeCell(isDetailRow ? info.business_no : '', 'is-business-no', !isDetailRow), anchor);
+        if (includeBankInfo) {
+            row.insertBefore(makeCell(isDetailRow ? info.account_holder : '', '', !isDetailRow), anchor);
+            row.insertBefore(makeCell(isDetailRow ? info.bank_name : '', '', !isDetailRow), anchor);
+            row.insertBefore(makeCell(isDetailRow ? info.account_number : '', 'is-account-number', !isDetailRow), anchor);
+        }
+
+        if (compactTable) {
+            for (var cellIndex = 0; cellIndex < row.cells.length; cellIndex++) {
+                var cellText = trimText(row.cells[cellIndex].textContent);
+                if (cellText !== '') row.cells[cellIndex].title = cellText;
+            }
+        }
     }
 
     table.setAttribute('data-cpms-vendor-columns-ready', '1');
 })();
 </script>
+<?php if ($cpmsMonthlyInputShowTotalColumn): ?>
 <script>
 (function () {
     'use strict';
@@ -285,6 +390,7 @@ echo $cpmsMonthlyInputHtml;
     }
 })();
 </script>
+<?php endif; ?>
 
 <script>
 (function () {
@@ -292,6 +398,9 @@ echo $cpmsMonthlyInputHtml;
 
     var projectId = <?php echo (int)$cpmsMonthlyInputSelectedProjectId; ?>;
     var displayMonths = <?php echo $cpmsMonthlyInputDetailMonthsJson; ?>;
+    var detailCellIndex = <?php echo (int)$cpmsMonthlyInputDetailCellIndex; ?>;
+    var monthCellStart = <?php echo (int)$cpmsMonthlyInputMonthCellStart; ?>;
+    var hasTotalColumn = <?php echo $cpmsMonthlyInputHasTotalColumn ? 'true' : 'false'; ?>;
     var tableWrap = document.querySelector('.cpms-monthly-table-scroll');
     var table = tableWrap ? tableWrap.querySelector('table') : null;
     if (!table || !table.tBodies || !table.tBodies.length || projectId <= 0) return;
@@ -302,7 +411,8 @@ echo $cpmsMonthlyInputHtml;
         '3. 자재비': {type:'material', category:'자재비'},
         '4. 장비비': {type:'equipment', category:''},
         '5. 노무비': {type:'labor', category:''},
-        '6. 기타경비': {type:'material', category:'기타경비'}
+        '6. 기타경비': {type:'material', category:'기타경비'},
+        '7. 안전관리비': {type:'safety', category:''}
     };
 
     function trimText(value) {
@@ -339,10 +449,10 @@ echo $cpmsMonthlyInputHtml;
 
     for (var i = 0; i < rows.length; i++) {
         var row = rows[i];
-        if (!row.cells || row.cells.length < 7) continue;
+        if (!row.cells || row.cells.length <= monthCellStart) continue;
         var firstText = trimText(row.cells[0].textContent);
         var secondText = row.cells.length > 1 ? trimText(row.cells[1].textContent) : '';
-        var detailText = row.cells.length > 5 ? trimText(row.cells[5].textContent) : '';
+        var detailText = row.cells.length > detailCellIndex ? trimText(row.cells[detailCellIndex].textContent) : '';
 
         if (Object.prototype.hasOwnProperty.call(sectionMap, firstText)) {
             currentSectionTitle = firstText;
@@ -359,8 +469,9 @@ echo $cpmsMonthlyInputHtml;
         if (!currentConfig || firstText !== '' || secondText === '데이터 없음') continue;
 
         for (var monthIndex = 0; monthIndex < displayMonths.length; monthIndex++) {
-            var cellIndex = 6 + monthIndex;
-            if (cellIndex >= row.cells.length - 1) break;
+            var cellIndex = monthCellStart + monthIndex;
+            var lastExclusive = hasTotalColumn ? row.cells.length - 1 : row.cells.length;
+            if (cellIndex >= lastExclusive) break;
             makeButton(row.cells[cellIndex], currentConfig, displayMonths[monthIndex], secondText, detailText);
         }
     }
@@ -368,6 +479,6 @@ echo $cpmsMonthlyInputHtml;
 </script>
 <?php
 $cpmsMonthlyCostDetailTriggerSelector = '.cpms-monthly-input-detail-trigger';
-$cpmsMonthlyCostDetailDesktopOnly = true;
+$cpmsMonthlyCostDetailDesktopOnly = $cpmsMonthlyInputManagementMode ? false : true;
 require __DIR__ . '/../../project/partials/monthly_cost_detail_modal.php';
 ?>

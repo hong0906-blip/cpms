@@ -498,11 +498,13 @@ if (!function_exists('approval_line_rules_add_line')) {
         if (!is_array($employee)) {
             return false;
         }
+        $options = is_array($options) ? $options : array();
+        $allowDuplicateEmployee = isset($options['allow_duplicate_employee']) && (int)$options['allow_duplicate_employee'] === 1;
         $key = approval_line_rules_line_key($employee);
-        if ($key !== '' && isset($seen[$key])) {
+        if (!$allowDuplicateEmployee && $key !== '' && isset($seen[$key])) {
             return false;
         }
-        if ($key !== '') {
+        if (!$allowDuplicateEmployee && $key !== '') {
             $seen[$key] = 1;
         }
         $line = array(
@@ -510,7 +512,6 @@ if (!function_exists('approval_line_rules_add_line')) {
             'emp' => $employee,
             'delegated' => 0
         );
-        $options = is_array($options) ? $options : array();
         foreach ($options as $k => $v) {
             $line[$k] = $v;
         }
@@ -644,6 +645,20 @@ if (!function_exists('approval_line_rules_build')) {
                 approval_line_rules_add_line($lines, $seen, $manageRole, $manageApprover, $manageOptions);
             } else {
                 $warnings[] = approval_ko('%EA%B4%80%EB%A6%AC%20%EA%B2%B0%EC%9E%AC%EC%9E%90%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.');
+            }
+
+            $smallProposalDelegationReason = approval_ko('%EC%86%8C%EC%95%A1%EA%B8%B0%EC%95%88%EC%84%9C%20%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC%20%EC%A0%84%EA%B2%B0');
+            if ($ceo) {
+                approval_line_rules_add_line($lines, $seen, $ceoRole, $ceo, array(
+                    'delegated' => 1,
+                    'status' => 'DELEGATED',
+                    'auto_reason' => $smallProposalDelegationReason,
+                    'delegated_by_role' => $manageRole,
+                    'allow_duplicate_employee' => 1
+                ));
+                $messages[] = approval_ko('%EC%86%8C%EC%95%A1%EA%B8%B0%EC%95%88%EC%84%9C%EB%8A%94%20%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC%20%EA%B2%B0%EC%9E%AC%EB%9D%BC%EC%9D%B8%EC%9D%84%20%EA%B4%80%EB%A6%AC%20%EC%A0%84%EA%B2%B0%EB%A1%9C%20%EC%B2%98%EB%A6%AC%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.');
+            } else {
+                $warnings[] = approval_ko('%EC%86%8C%EC%95%A1%EA%B8%B0%EC%95%88%EC%84%9C%20%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.');
             }
 
             return array('lines' => $lines, 'messages' => $messages, 'warnings' => $warnings, 'vp' => $vp, 'ceo' => $ceo, 'construction_pm' => $constructionPm, 'team_lead' => $teamLead, 'force_ceo_actual' => 0);

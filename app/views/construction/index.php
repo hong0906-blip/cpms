@@ -120,6 +120,7 @@ $tabs = array(
     'outsourcing' => '외주비',
     'equipment'=> '장비',
     'materials'=> '자재구입비',
+    'vendors'  => '업체등록',
     'progress_statement' => '기성내역서 제출',
     'issues'   => '이슈',
     'security' => '보안사고',

@@ -79,6 +79,7 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
     $statusKey = cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
     $currentStatus = isset($item['status']) ? (string)$item['status'] : '';
     $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
+    $isSystemRequest = cpms_tasks_is_system_request($item);
     $isPublicAffairsCollab = isset($item['source_type']) && (string)$item['source_type'] === 'public_affairs_collab';
     $canRespondMeeting = $isMeetingTask
         && !$requestedMode
@@ -183,7 +184,7 @@ function cpms_render_feed_card($item, $currentEmployeeId, $returnUrl, $requested
                     <button type="submit" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-bold">대기</button>
                 </form>
             <?php endif; ?>
-            <?php if (!$hasTransferRequest && ($canCompleteMeeting || !$isMeetingTask) && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array(isset($item['status']) ? $item['status'] : '', array('completion_pending', 'done', 'cancelled'), true)): ?>
+            <?php if (!$hasTransferRequest && ($canCompleteMeeting || !$isMeetingTask) && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1 && !$requestedMode && (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId && !in_array($currentStatus, array('done', 'cancelled'), true) && ($currentStatus !== 'completion_pending' || $isSystemRequest)): ?>
                 <button type="button" data-task-complete-open data-task-id="<?php echo (int)$item['source_id']; ?>" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-bold">완료</button>
             <?php endif; ?>
             <?php if ($canEditDue && isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1): ?>
@@ -323,6 +324,7 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
     $canDrag = isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1
         && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId;
     $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
+    $isSystemRequest = cpms_tasks_is_system_request($item);
     $hasTransferRequest = cpms_tasks_has_transfer_request($item);
     $canStatusAction = $canDrag && !$isMeetingTask && !$hasTransferRequest;
     $personLabel = '요청자';
@@ -370,7 +372,7 @@ function cpms_render_task_kanban_card($item, $currentEmployeeId)
         <div class="mt-4 flex flex-wrap justify-end gap-2">
             <?php if ($canStatusAction): ?>
                 <button type="button" data-kanban-status-action="progress" data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm font-extrabold <?php echo $laneKey === 'progress' || $laneKey === 'completion_pending' || $laneKey === 'done' ? 'hidden' : ''; ?>">진행중</button>
-                <button type="button" data-kanban-status-action="done" data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-extrabold <?php echo $laneKey === 'completion_pending' || $laneKey === 'done' ? 'hidden' : ''; ?>">완료 요청</button>
+                <button type="button" data-kanban-status-action="done" data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-emerald-600 text-white text-sm font-extrabold <?php echo ($laneKey === 'completion_pending' && !$isSystemRequest) || $laneKey === 'done' ? 'hidden' : ''; ?>"><?php echo $isSystemRequest ? '완료' : '완료 요청'; ?></button>
             <?php endif; ?>
             <button type="button" data-task-detail-open data-task-id="<?php echo (int)(isset($item['source_id']) ? $item['source_id'] : 0); ?>" class="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm font-extrabold">상세</button>
         </div>
@@ -599,6 +601,7 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
     $statusKey = cpms_tasks_is_delayed($item) ? 'delayed' : (isset($item['status']) ? $item['status'] : 'pending');
     $isMeetingTask = isset($item['task_type']) && (string)$item['task_type'] === 'meeting';
     $isDirectTask = isset($item['is_direct_task']) && (int)$item['is_direct_task'] === 1;
+    $isSystemRequest = cpms_tasks_is_system_request($item);
     $isConstructionSchedule = isset($item['source_type']) && (string)$item['source_type'] === 'construction_schedule';
     $isAssignedToCurrent = (int)$currentEmployeeId > 0 && isset($item['assignee_employee_id']) && (int)$item['assignee_employee_id'] === (int)$currentEmployeeId;
     $hasTransferRequest = cpms_tasks_has_transfer_request($item);
@@ -619,7 +622,8 @@ function cpms_render_mobile_task_card($item, $currentEmployeeId, $returnUrl)
         && !$hasTransferRequest
         && $isDirectTask
         && $isAssignedToCurrent
-        && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('completion_pending', 'done', 'cancelled'), true);
+        && !in_array(isset($item['status']) ? (string)$item['status'] : '', array('done', 'cancelled'), true)
+        && ((isset($item['status']) ? (string)$item['status'] : '') !== 'completion_pending' || $isSystemRequest);
     $detailUrl = isset($item['action_url']) ? (string)$item['action_url'] : '#';
     ?>
     <div class="cpms-mobile-task-card">

@@ -442,7 +442,7 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
       var row = rows[i] || {};
       var rowCompany = '';
       if (typeName === 'labor' || typeName === 'labor_outsourcing' || typeName === 'manual_outsourcing') rowCompany = trimText(row.company_name);
-      else if (typeName === 'equipment' || typeName === 'material') rowCompany = trimText(row.vendor_name);
+      else if (typeName === 'equipment' || typeName === 'material' || typeName === 'safety') rowCompany = trimText(row.vendor_name);
       var rowCategory = trimText(row.category);
       if (company && rowCompany !== company) continue;
       if (category && rowCategory !== category) continue;
@@ -578,6 +578,19 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
         {key:'amount', label:'공급가액', format:'money', align:'right'},
         {key:'remark', label:'비고', remark:true},
         {key:'files', label:'증빙파일', format:'files'}
+      ];
+    } else if (currentType === 'safety') {
+      label = '안전관리비';
+      rows = filterRows(monthData.safety || [], 'safety');
+      totalValue = sumRows(rows);
+      columns = [
+        {key:'use_date', label:'사용일자', align:'center'},
+        {key:'category', label:'구분'},
+        {key:'vendor_name', label:'업체명'},
+        {key:'item_name', label:'품목·사용내용'},
+        {key:'amount', label:'공급가액', format:'money', align:'right'},
+        {key:'remark', label:'비고', remark:true},
+        {key:'files', label:'명세표', format:'files'}
       ];
     } else if (currentType === 'outsourcing') {
       if (currentOutsourcingTab === 'manual_outsourcing') {

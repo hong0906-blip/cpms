@@ -8,11 +8,13 @@ require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/safety_cost_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
 require_once __DIR__ . '/../../services/CostDataEventService.php';
+require_once __DIR__ . '/../../services/VendorService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
 use App\Services\CostDataEventService;
+use App\Services\VendorService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
@@ -64,6 +66,13 @@ if (!in_array($category, $allowedCategories, true)) $category = '안전관리비
 if ($itemName === '') $itemName = $useContent;
 if ($vendorName === '' || $useContent === '') {
     flash_set('error', '업체명과 품목 또는 사용내용을 입력해주세요.');
+    header('Location: ' . $redirect);
+    exit;
+}
+VendorService::bootstrap($pdo, true);
+$resolvedVendorId = VendorService::selectedVendorId($pdo, isset($_POST['vendor_id']) ? (int)$_POST['vendor_id'] : 0, $vendorName);
+if ($resolvedVendorId <= 0) {
+    flash_set('error', '업체명 자동검색에서 등록된 업체를 선택해주세요. 업체명을 직접 입력해서는 저장할 수 없습니다.');
     header('Location: ' . $redirect);
     exit;
 }
@@ -160,6 +169,7 @@ try {
     $base['project_name'] = $projectName;
     $base['use_date'] = $useDate;
     $base['category'] = $category;
+    $base['vendor_id'] = $resolvedVendorId;
     $base['vendor_name'] = $vendorName;
     $base['representative'] = $representative;
     $base['phone'] = $phone;

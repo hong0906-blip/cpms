@@ -31,6 +31,7 @@ if (!$doc || !approval_can_view_document($pdo, $doc, $u)) {
 }
 
 $storageType = cpms_approval_drive_file_storage_type($file);
+$path = cpms_approval_drive_resolve_local_path(isset($file['file_path']) ? $file['file_path'] : '');
 $driveFallbackUrl = '';
 $driveFileId = '';
 if ($storageType === 'google_drive') {
@@ -39,6 +40,13 @@ if ($storageType === 'google_drive') {
     $contentUrl = isset($file['drive_web_content_link']) ? trim((string)$file['drive_web_content_link']) : '';
     $driveFallbackUrl = ($download && $contentUrl !== '') ? $contentUrl : $viewUrl;
     if ($driveFallbackUrl === '' && $contentUrl !== '') $driveFallbackUrl = $contentUrl;
+
+    // Files are kept only on Drive after backup. Redirecting to Google's
+    // stored link avoids proxying the entire download through PHP.
+    if ($driveFallbackUrl !== '') {
+        header('Location: ' . $driveFallbackUrl);
+        exit;
+    }
 
     if ($driveFileId !== '' && function_exists('cpms_drive_download_file')) {
         $driveDownload = cpms_drive_download_file($driveFileId);
@@ -61,7 +69,6 @@ if ($storageType === 'google_drive') {
     }
 }
 
-$path = cpms_approval_drive_resolve_local_path(isset($file['file_path']) ? $file['file_path'] : '');
 if ($path === '') {
     if ($storageType === 'google_drive' && $driveFileId === '' && $driveFallbackUrl !== '') {
         header('Location: ' . $driveFallbackUrl);

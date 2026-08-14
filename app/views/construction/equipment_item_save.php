@@ -12,10 +12,12 @@ require_once __DIR__ . '/partials/master_dedupe_helper.php';
 require_once __DIR__ . '/partials/project_month_options_helper.php';
 require_once __DIR__ . '/partials/equipment_statement_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/VendorService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\VendorService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
@@ -189,6 +191,13 @@ if (!$pdo) {
     header('Location: ' . $redirect);
     exit;
 }
+VendorService::bootstrap($pdo, true);
+$resolvedVendorId = VendorService::selectedVendorId($pdo, isset($_POST['vendor_id']) ? (int)$_POST['vendor_id'] : 0, $vendorName);
+if ($resolvedVendorId <= 0) {
+    flash_set('error', '업체명 자동검색에서 등록된 업체를 선택해주세요. 업체명을 직접 입력해서는 저장할 수 없습니다.');
+    header('Location: ' . $redirect);
+    exit;
+}
 $dates = equipment_collect_usage_dates($usageDates, $useDatesText, $ym);
 foreach ($dates as $lockDate) {
     $lockInfo = CostChangeService::lockInfo('equipment', $lockDate, '', date('Y-m-d'));
@@ -231,6 +240,7 @@ try {
         $st->execute();
         $equipmentId = (int)$pdo->lastInsertId();
     }
+    if ($resolvedVendorId > 0 && $equipmentId > 0) VendorService::attachDbRecord($pdo, 'cpms_equipment_items', $equipmentId, $resolvedVendorId);
 
         // 공용 업체 프리셋 저장
     $stPreset = $pdo->prepare("INSERT INTO cpms_equipment_vendor_presets (vendor_name, category, representative, phone, biz_no, base_rate, remark, created_at, updated_at) VALUES (:vendor, :category, :rep, :phone, :biz_no, :base_rate, :remark, :now, :now) ON DUPLICATE KEY UPDATE category=VALUES(category), representative=VALUES(representative), phone=VALUES(phone), biz_no=VALUES(biz_no), base_rate=VALUES(base_rate), remark=VALUES(remark), updated_at=VALUES(updated_at)");

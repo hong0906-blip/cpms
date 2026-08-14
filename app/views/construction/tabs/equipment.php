@@ -9,11 +9,13 @@
 
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\VendorService;
 require_once __DIR__ . '/../partials/equipment_gongsu_approval_helper.php';
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../partials/project_month_options_helper.php';
 require_once __DIR__ . '/../partials/equipment_statement_helper.php';
 require_once __DIR__ . '/../../../services/CostChangeService.php';
+require_once __DIR__ . '/../../../services/VendorService.php';
 
 $canEditEquipment = isset($canEdit) ? (bool)$canEdit : false;
 $hideEquipmentExcelUploadUi = true; // 복구 시 false로 변경하면 엑셀 업로드 버튼/카드가 다시 보입니다.
@@ -25,6 +27,7 @@ if (!$pdo) {
 }
 cpms_equipment_gongsu_ensure_schema($pdo);
 cpms_equipment_statement_ensure_usage_columns($pdo);
+VendorService::bootstrap($pdo, true);
 
 $equipTab = isset($_GET['equip_tab']) ? trim((string)$_GET['equip_tab']) : 'monthly';
 if ($equipTab !== 'monthly' && $equipTab !== 'input') {
@@ -79,6 +82,7 @@ try {
     $stItem->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
     $stItem->execute();
     $items = $stItem->fetchAll(PDO::FETCH_ASSOC);
+    $items = VendorService::applyCurrentVendorRows($pdo, $items, 'vendor_name', 'representative', 'phone', 'biz_no');
 
     foreach ($items as $it) {
         $eid = (int)$it['id'];
@@ -93,7 +97,8 @@ try {
             ? " AND COALESCE(crm.is_deleted,0)=0
                 AND COALESCE(NULLIF(crm.settlement_ym,''),IF(DAY(u.use_date)>=26,DATE_FORMAT(DATE_ADD(u.use_date,INTERVAL 1 MONTH),'%Y-%m'),DATE_FORMAT(u.use_date,'%Y-%m'))) = :settlement_ym"
             : " AND u.use_date BETWEEN :s AND :e";
-        $stUsage = $pdo->prepare("SELECT u.*, i.category, i.vendor_name, i.spec, i.remark
+        $equipmentVendorIdSelect = VendorService::hasVendorReference($pdo, 'cpms_equipment_items') ? 'i.vendor_id' : '0 AS vendor_id';
+        $stUsage = $pdo->prepare("SELECT u.*, " . $equipmentVendorIdSelect . ", i.category, i.vendor_name, i.spec, i.remark
             FROM cpms_equipment_usage u
             JOIN cpms_equipment_items i ON i.id = u.equipment_id" . $equipmentMetaJoin . "
             WHERE u.project_id = :pid
@@ -108,6 +113,7 @@ try {
         }
         $stUsage->execute();
         $usageRows = $stUsage->fetchAll(PDO::FETCH_ASSOC);
+        $usageRows = VendorService::applyCurrentVendorRows($pdo, $usageRows, 'vendor_name', '', '', '');
 
         foreach ($usageRows as $usageIndex => $ur) {
             $eid = (int)$ur['equipment_id'];
@@ -448,16 +454,24 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                 <input type="hidden" name="equip_tab" value="input">
                 <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
                 <input type="hidden" name="usage_dates[]" id="equipmentMobileQuickDate" value="">
+                <input type="hidden" name="vendor_id" value="" data-vendor-name="">
+
+                <div class="rounded-xl border border-blue-100 bg-white p-3 vendor-search-wrap">
+                    <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
+                    <input type="text" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-equipment-vendor-search" placeholder="업체명 2글자 이상 입력">
+                    <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
+                </div>
 
                 <div class="grid grid-cols-1 gap-2">
                     <input type="text" name="category" class="px-3 py-3 border rounded-xl bg-white" placeholder="구분" required>
-                    <input type="text" name="vendor_name" class="px-3 py-3 border rounded-xl bg-white" placeholder="업체명" required>
+                    <input type="text" name="vendor_name" class="px-3 py-3 border rounded-xl bg-gray-100" placeholder="자동검색에서 업체 선택" required readonly>
                     <input type="text" name="spec" class="px-3 py-3 border rounded-xl bg-white" placeholder="규격">
-                    <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-3 border rounded-xl bg-white" placeholder="금액" required>
+                    <input type="number" step="0.01" min="0" name="base_rate" class="px-3 py-3 border rounded-xl bg-white" placeholder="공급가액" required>
                     <select name="amount_sign" class="px-3 py-3 border rounded-xl bg-white" required>
                         <option value="plus">+ 일반</option>
                         <option value="minus">- 공제</option>
                     </select>
+                    <input type="text" name="remark" class="px-3 py-3 border rounded-xl bg-white" placeholder="비고">
                 </div>
 
                 <div class="rounded-xl border border-blue-100 bg-white p-3">
@@ -498,17 +512,19 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="equip_tab" value="input">
                     <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+                    <input type="hidden" name="vendor_id" value="" data-vendor-name="">
 
                     <!-- 업체 검색 자동완성/공용프리셋 -->
                     <div class="bg-gray-50 border border-gray-200 rounded-xl p-3 vendor-search-wrap">
                         <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
                         <input type="text" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-equipment-vendor-search" placeholder="업체명 2글자 이상 입력">
                         <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
+                        <div class="mt-2 text-xs text-gray-500">업체정보만 자동으로 불러옵니다. 공급가액과 비고는 거래별로 직접 입력할 수 있습니다.</div>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         <input type="text" name="category" class="px-3 py-2 border rounded-xl" placeholder="구분" required>
-                        <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required>
+                        <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl bg-gray-100" placeholder="자동검색에서 업체 선택" required readonly>
                         <input type="text" name="spec" class="px-3 py-2 border rounded-xl" placeholder="규격(직접입력)">
                         <input type="text" name="representative" class="px-3 py-2 border rounded-xl" placeholder="대표자명">
                         <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호">
@@ -1053,13 +1069,14 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
             }
             function fillEquipmentPreset(formEl, p){
                 if (!formEl || !p) return;
+                if (formEl.elements['vendor_id']) { formEl.elements['vendor_id'].value = p.vendor_id || ''; formEl.elements['vendor_id'].setAttribute('data-vendor-name', p.vendor_name || ''); }
                 if (formEl.elements['category']) formEl.elements['category'].value = p.category || '';
                 if (formEl.elements['vendor_name']) formEl.elements['vendor_name'].value = p.vendor_name || '';
                 if (formEl.elements['representative']) formEl.elements['representative'].value = p.representative || '';
                 if (formEl.elements['phone']) formEl.elements['phone'].value = p.phone || '';
                 if (formEl.elements['biz_no']) formEl.elements['biz_no'].value = p.biz_no || '';
-                if (formEl.elements['base_rate']) formEl.elements['base_rate'].value = p.base_rate || '';
-                if (formEl.elements['remark']) formEl.elements['remark'].value = p.remark || '';
+                if (formEl.elements['base_rate']) { formEl.elements['base_rate'].readOnly = false; formEl.elements['base_rate'].disabled = false; }
+                if (formEl.elements['remark']) { formEl.elements['remark'].readOnly = false; formEl.elements['remark'].disabled = false; }
             }
             function renderEquipmentSuggestions(inputEl, rows){
                 var wrap = inputEl ? inputEl.closest('.vendor-search-wrap') : null;
@@ -1079,7 +1096,7 @@ if ($equipmentExcelToken !== '' && isset($_SESSION['equipment_excel_preview'][$e
                         var btn = document.createElement('button');
                         btn.type = 'button';
                         btn.className = 'block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50';
-                        btn.textContent = (row.vendor_name || '') + (row.phone ? ' (' + row.phone + ')' : '');
+                        btn.textContent = (row.vendor_name || '') + (row.description ? ' · ' + row.description : '');
                         btn.setAttribute('data-vendor-item', '1');
                         btn.vendorData = row;
                         listEl.appendChild(btn);

@@ -709,6 +709,22 @@ if ($route === 'admin/employees_columns_save') {
     require_once __DIR__ . '/../app/views/admin/employees_columns_save.php';
     exit;
 }
+if ($route === 'vendor/save') {
+    require_once __DIR__ . '/../app/views/vendor/save.php';
+    exit;
+}
+if ($route === 'admin/vendor_link_save') {
+    require_once __DIR__ . '/../app/views/admin/vendor_link_save.php';
+    exit;
+}
+if ($route === 'admin/vendor_import') {
+    require_once __DIR__ . '/../app/views/admin/vendor_import.php';
+    exit;
+}
+if ($route === 'admin/vendor_delete') {
+    require_once __DIR__ . '/../app/views/admin/vendor_delete.php';
+    exit;
+}
 if ($route === 'admin/workforce_save') {
     require_once __DIR__ . '/../app/views/admin/workforce_save.php';
     exit;
@@ -1051,6 +1067,10 @@ if ($route === 'construction/labor_worker_delete') {
 // 인원작성 저장 기능
 if ($route === 'construction/labor_workers_save') {
     require_once __DIR__ . '/../app/views/construction/labor_workers_save.php';
+    exit;
+}
+if ($route === 'construction/labor_workforce_save') {
+    require_once __DIR__ . '/../app/views/construction/labor_workforce_save.php';
     exit;
 }
 if ($route === 'construction/progress_statement_upload') {
@@ -1418,10 +1438,12 @@ if ($route === 'construction/safety_incident_action_save') {
 
 if ($route === 'approval_store') { require_once __DIR__ . '/../app/views/approval/store.php'; exit; }
 if ($route === 'approval_decide') { require_once __DIR__ . '/../app/views/approval/decide.php'; exit; }
+if ($route === 'approval_deferred_sync') { require_once __DIR__ . '/../app/views/approval/deferred_sync.php'; exit; }
 if ($route === 'approval_cancel') { require_once __DIR__ . '/../app/views/approval/cancel.php'; exit; }
 if ($route === 'approval_delete') { require_once __DIR__ . '/../app/views/approval/delete.php'; exit; }
 if ($route === 'approval_file') { require_once __DIR__ . '/../app/views/approval/file.php'; exit; }
 if ($route === 'approval_completed_pdf') { require_once __DIR__ . '/../app/views/approval/completed_pdf.php'; exit; }
+if ($route === 'management/leave_pdf_rebuild') { require_once __DIR__ . '/../app/views/admin/leave_pdf_rebuild.php'; exit; }
 if ($route === 'db_setup_approval') { require_once __DIR__ . '/db_setup_approval.php'; exit; }
 
 // 비용 월마감/변경승인 액션 및 보호 파일 라우트

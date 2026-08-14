@@ -11,6 +11,7 @@ if (!class_exists('WorkerRepository')) {
 class WorkerRepository
 {
     private $pdo;
+    private $schemaReady = false;
 
     public function __construct($pdo)
     {
@@ -19,6 +20,7 @@ class WorkerRepository
 
     public function ensureSchema()
     {
+        if ($this->schemaReady) return true;
         if (!$this->pdo) return false;
 
         try {
@@ -79,6 +81,7 @@ class WorkerRepository
                 KEY idx_worker_import_errors_batch(batch_id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
 
+            $this->schemaReady = true;
             return true;
         } catch (Exception $e) {
             return false;
@@ -138,7 +141,12 @@ class WorkerRepository
 
         $sql = "SELECT * FROM workers";
         if (count($where) > 0) $sql .= " WHERE " . implode(" AND ", $where);
-        $sql .= " ORDER BY deleted_at IS NOT NULL ASC, is_active DESC, name ASC, id DESC LIMIT " . (int)$limit;
+        $missingOrder = "(CASE WHEN deleted_at IS NULL THEN "
+            . "(TRIM(COALESCE(name, '')) = '') + (TRIM(COALESCE(phone, '')) = '') + (resident_no_hash IS NULL OR resident_no_hash = '') + "
+            . "(TRIM(COALESCE(job_type, '')) = '') + (TRIM(COALESCE(agency_name, '')) = '') + (daily_wage <= 0) + "
+            . "(TRIM(COALESCE(bank_name, '')) = '') + (bank_account_hash IS NULL OR bank_account_hash = '') + (TRIM(COALESCE(account_holder, '')) = '') "
+            . "ELSE 0 END)";
+        $sql .= " ORDER BY deleted_at IS NOT NULL ASC, " . $missingOrder . " DESC, is_active DESC, name ASC, id DESC LIMIT " . (int)$limit;
 
         try {
             $st = $this->pdo->prepare($sql);
@@ -309,6 +317,39 @@ class WorkerRepository
         }
     }
 
+    public function updateProjectEditableFields($id, $agencyName, $dailyWage, $userId, $updateWage, $jobType, $memo)
+    {
+        $this->ensureSchema();
+        $id = (int)$id;
+        if (!$this->pdo || $id <= 0) return false;
+        $agencyName = trim((string)$agencyName);
+        $jobType = trim((string)$jobType);
+        $memo = trim((string)$memo);
+        $dailyWage = max(0, (int)$dailyWage);
+        $sets = array(
+            'agency_name = :agency_name',
+            'job_type = :job_type',
+            'memo = :memo',
+            'updated_by = :updated_by',
+            'updated_at = :updated_at'
+        );
+        if ($updateWage) $sets[] = 'daily_wage = :daily_wage';
+        try {
+            $st = $this->pdo->prepare("UPDATE workers SET " . implode(', ', $sets) . " WHERE id = :id AND deleted_at IS NULL");
+            $st->bindValue(':agency_name', $agencyName === '' ? null : $agencyName, $agencyName === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $st->bindValue(':job_type', $jobType === '' ? null : $jobType, $jobType === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            $st->bindValue(':memo', $memo === '' ? null : $memo, $memo === '' ? PDO::PARAM_NULL : PDO::PARAM_STR);
+            if ($updateWage) $st->bindValue(':daily_wage', $dailyWage, PDO::PARAM_INT);
+            $st->bindValue(':updated_by', (int)$userId > 0 ? (int)$userId : null, (int)$userId > 0 ? PDO::PARAM_INT : PDO::PARAM_NULL);
+            $st->bindValue(':updated_at', date('Y-m-d H:i:s'));
+            $st->bindValue(':id', $id, PDO::PARAM_INT);
+            $st->execute();
+            return true;
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+
     public function searchByName($keyword, $limit)
     {
         $this->ensureSchema();
@@ -340,6 +381,114 @@ class WorkerRepository
         } catch (Exception $e) {
             return array();
         }
+    }
+
+    /**
+     * 기존 현장 인원 중 아직 인력 마스터 ID가 없는 행을 안전하게 편입합니다.
+     * 주민번호, 이름+연락처, 정확히 일치하는 단일 이름 순서로만 연결하며
+     * 동명이인은 임의로 합치지 않습니다.
+     */
+    public function syncLegacyProjectWorkers($projectId, $userId, $limit)
+    {
+        $result = array('created' => 0, 'linked' => 0, 'duplicate' => 0, 'skipped' => 0);
+        $this->ensureSchema();
+        if (!$this->pdo) return $result;
+
+        $projectId = (int)$projectId;
+        $userId = (int)$userId;
+        $limit = (int)$limit;
+        if ($limit <= 0) $limit = 1000;
+        if ($limit > 5000) $limit = 5000;
+
+        try {
+            $sql = "SELECT id, project_id, name, worker_name_snapshot, resident_no, phone, address,
+                           job_type_snapshot, agency_name_snapshot, daily_wage_snapshot, deposit_rate,
+                           bank_account, bank_name, account_holder, company_name
+                    FROM cpms_project_labor_workers
+                    WHERE is_deleted = 0
+                      AND (worker_id IS NULL OR worker_id = 0)";
+            if ($projectId > 0) $sql .= " AND project_id = :project_id";
+            $sql .= " ORDER BY id ASC LIMIT " . $limit;
+            $st = $this->pdo->prepare($sql);
+            if ($projectId > 0) $st->bindValue(':project_id', $projectId, PDO::PARAM_INT);
+            $st->execute();
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Exception $e) {
+            return $result;
+        }
+
+        foreach ($rows as $legacy) {
+            $legacyId = isset($legacy['id']) ? (int)$legacy['id'] : 0;
+            $name = isset($legacy['worker_name_snapshot']) ? trim((string)$legacy['worker_name_snapshot']) : '';
+            if ($name === '' && isset($legacy['name'])) $name = trim((string)$legacy['name']);
+            if ($legacyId <= 0 || $name === '') {
+                $result['skipped']++;
+                continue;
+            }
+
+            $residentNo = isset($legacy['resident_no']) ? trim((string)$legacy['resident_no']) : '';
+            $phone = isset($legacy['phone']) ? trim((string)$legacy['phone']) : '';
+            $match = $this->matchWorker($name, $phone, $residentNo);
+            $status = isset($match['status']) ? (string)$match['status'] : 'not_found';
+            if ($status === 'duplicate') {
+                $result['duplicate']++;
+                continue;
+            }
+
+            $masterId = 0;
+            try {
+                if ($status === 'matched' && isset($match['worker']['id'])) {
+                    $masterId = (int)$match['worker']['id'];
+                    $master = $this->getById($masterId, true);
+                    if (is_array($master)) {
+                        $merged = $this->mergeMissingLegacyFields($master, $legacy);
+                        $this->save($merged, $userId);
+                    }
+                } else {
+                    $dailyWage = isset($legacy['daily_wage_snapshot']) ? (int)$legacy['daily_wage_snapshot'] : 0;
+                    if ($dailyWage <= 0 && isset($legacy['deposit_rate'])) $dailyWage = (int)$legacy['deposit_rate'];
+                    $agencyName = isset($legacy['agency_name_snapshot']) ? trim((string)$legacy['agency_name_snapshot']) : '';
+                    if ($agencyName === '' && isset($legacy['company_name'])) $agencyName = trim((string)$legacy['company_name']);
+                    $masterId = $this->save(array(
+                        'name' => $name,
+                        'resident_no' => $residentNo,
+                        'phone' => $phone,
+                        'address' => isset($legacy['address']) ? $legacy['address'] : '',
+                        'job_type' => isset($legacy['job_type_snapshot']) ? $legacy['job_type_snapshot'] : '',
+                        'agency_name' => $agencyName,
+                        'daily_wage' => $dailyWage,
+                        'bank_name' => isset($legacy['bank_name']) ? $legacy['bank_name'] : '',
+                        'bank_account' => isset($legacy['bank_account']) ? $legacy['bank_account'] : '',
+                        'account_holder' => isset($legacy['account_holder']) ? $legacy['account_holder'] : '',
+                        'source_type' => 'legacy_project',
+                        'is_active' => 1,
+                    ), $userId);
+                    if ($masterId > 0) $result['created']++;
+                }
+
+                if ($masterId <= 0) {
+                    $result['skipped']++;
+                    continue;
+                }
+
+                $stLink = $this->pdo->prepare("UPDATE cpms_project_labor_workers
+                                               SET worker_id = :worker_id,
+                                                   source_type = 'legacy_project',
+                                                   matched_status = 'matched',
+                                                   updated_at = :updated_at
+                                               WHERE id = :id
+                                                 AND (worker_id IS NULL OR worker_id = 0)");
+                $stLink->bindValue(':worker_id', $masterId, PDO::PARAM_INT);
+                $stLink->bindValue(':updated_at', date('Y-m-d H:i:s'));
+                $stLink->bindValue(':id', $legacyId, PDO::PARAM_INT);
+                $stLink->execute();
+                if ($stLink->rowCount() > 0) $result['linked']++;
+            } catch (Exception $e) {
+                $result['skipped']++;
+            }
+        }
+
+        return $result;
     }
 
     public function findDuplicate($residentNoHash, $name, $phoneDigits, $excludeId)
@@ -437,6 +586,7 @@ class WorkerRepository
             'import_no' => isset($row['import_no']) ? (string)$row['import_no'] : '',
             'name' => isset($row['name']) ? (string)$row['name'] : '',
             'resident_no_masked' => CryptoHelper::maskResidentNo($residentPlain),
+            'resident_no_front' => strlen(CryptoHelper::normalizeDigits($residentPlain)) >= 6 ? substr(CryptoHelper::normalizeDigits($residentPlain), 0, 6) : '',
             'birth_date' => isset($row['birth_date']) ? (string)$row['birth_date'] : '',
             'phone' => isset($row['phone']) ? (string)$row['phone'] : '',
             'phone_digits' => isset($row['phone_digits']) ? (string)$row['phone_digits'] : '',
@@ -462,6 +612,45 @@ class WorkerRepository
         }
 
         return $out;
+    }
+
+    private function mergeMissingLegacyFields($master, $legacy)
+    {
+        $data = array(
+            'id' => isset($master['id']) ? (int)$master['id'] : 0,
+            'import_no' => isset($master['import_no']) ? $master['import_no'] : '',
+            'name' => isset($master['name']) ? $master['name'] : '',
+            'resident_no' => isset($master['resident_no_plain']) ? $master['resident_no_plain'] : '',
+            'birth_date' => isset($master['birth_date']) ? $master['birth_date'] : '',
+            'phone' => isset($master['phone']) ? $master['phone'] : '',
+            'address' => isset($master['address']) ? $master['address'] : '',
+            'job_type' => isset($master['job_type']) ? $master['job_type'] : '',
+            'agency_name' => isset($master['agency_name']) ? $master['agency_name'] : '',
+            'daily_wage' => isset($master['daily_wage']) ? (int)$master['daily_wage'] : 0,
+            'account_holder' => isset($master['account_holder']) ? $master['account_holder'] : '',
+            'bank_name' => isset($master['bank_name']) ? $master['bank_name'] : '',
+            'bank_account' => isset($master['bank_account_plain']) ? $master['bank_account_plain'] : '',
+            'memo' => isset($master['memo']) ? $master['memo'] : '',
+            'source_type' => isset($master['source_type']) ? $master['source_type'] : 'legacy_project',
+            'is_active' => isset($master['is_active']) ? (int)$master['is_active'] : 1,
+        );
+
+        if (trim((string)$data['resident_no']) === '' && isset($legacy['resident_no'])) $data['resident_no'] = $legacy['resident_no'];
+        if (trim((string)$data['phone']) === '' && isset($legacy['phone'])) $data['phone'] = $legacy['phone'];
+        if (trim((string)$data['address']) === '' && isset($legacy['address'])) $data['address'] = $legacy['address'];
+        if (trim((string)$data['job_type']) === '' && isset($legacy['job_type_snapshot'])) $data['job_type'] = $legacy['job_type_snapshot'];
+        if (trim((string)$data['agency_name']) === '') {
+            $data['agency_name'] = isset($legacy['agency_name_snapshot']) ? $legacy['agency_name_snapshot'] : '';
+            if (trim((string)$data['agency_name']) === '' && isset($legacy['company_name'])) $data['agency_name'] = $legacy['company_name'];
+        }
+        if ((int)$data['daily_wage'] <= 0) {
+            $data['daily_wage'] = isset($legacy['daily_wage_snapshot']) ? (int)$legacy['daily_wage_snapshot'] : 0;
+            if ((int)$data['daily_wage'] <= 0 && isset($legacy['deposit_rate'])) $data['daily_wage'] = (int)$legacy['deposit_rate'];
+        }
+        if (trim((string)$data['bank_name']) === '' && isset($legacy['bank_name'])) $data['bank_name'] = $legacy['bank_name'];
+        if (trim((string)$data['bank_account']) === '' && isset($legacy['bank_account'])) $data['bank_account'] = $legacy['bank_account'];
+        if (trim((string)$data['account_holder']) === '' && isset($legacy['account_holder'])) $data['account_holder'] = $legacy['account_holder'];
+        return $data;
     }
 
     private function normalizeForSave($data)

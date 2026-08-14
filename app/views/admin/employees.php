@@ -331,7 +331,7 @@ for ($i = 0; $i < count($teamLeaderCandidates); $i++) {
 ?>
 <div class="flex items-center justify-between mb-6">
   <div>
-    <h2 class="text-2xl font-extrabold text-gray-900">직원명부</h2>
+    <h2 class="text-2xl font-extrabold text-gray-900">임직원 명부</h2>
   </div>
   <div class="flex flex-wrap gap-2 justify-end">
     <form method="post" action="?r=admin/employees_save" onsubmit="return confirm('입사날짜 기준으로 기존 사번을 다시 생성합니다. 진행할까요?');">

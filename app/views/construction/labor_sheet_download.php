@@ -125,7 +125,8 @@ cpms_sync_project_labor_workers_from_attendance($pdo, $projectId, $attendanceWor
 $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
 $laborWorkerRatioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $selectedMonth, $projectLaborWorkers);
 $projectLaborWorkers = cpms_apply_project_labor_worker_month_ratios($projectLaborWorkers, $laborWorkerRatioMap);
-$workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
+$projectLaborWorkers = cpms_apply_project_labor_worker_month_wages($projectLaborWorkers, cpms_load_project_labor_worker_wage_map($pdo, $projectId, $selectedMonth));
+$workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers, $pdo, $selectedMonth);
 $laborWorkerMonthMap = function_exists('cpms_load_project_labor_worker_month_map') ? cpms_load_project_labor_worker_month_map($pdo, $projectId, $selectedMonth) : array();
 if (is_array($workerRows) && is_array($laborWorkerMonthMap) && count($laborWorkerMonthMap) > 0) {
     foreach ($workerRows as $workerRowIndex => $workerRow) {

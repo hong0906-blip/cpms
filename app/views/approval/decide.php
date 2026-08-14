@@ -29,6 +29,7 @@ $userEmail = approval_current_user_email($u);
 $userName = approval_current_user_name($u);
 $actorName = $userName;
 $actorEmail = $userEmail;
+$isCeoDirectApproval = ($action === 'approve' && approval_is_ceo_user($pdo, $u));
 
 $docSt = $pdo->prepare("SELECT * FROM cpms_approval_documents WHERE id=:id LIMIT 1");
 $docSt->execute(array(':id' => $id));
@@ -53,16 +54,19 @@ if ($userName !== '') {
     $lineParts[] = 'approver_name=:name';
     $lineParams[':name'] = $userName;
 }
-if (count($lineParts) === 0) {
+if (count($lineParts) === 0 && !$isCeoDirectApproval) {
     flash_set('danger', approval_ko('%EC%B2%98%EB%A6%AC%20%EA%B6%8C%ED%95%9C%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
     header('Location: ?r=approval_detail&id=' . $id);
     exit;
 }
-$sql = "SELECT * FROM cpms_approval_lines WHERE document_id=:d AND line_status='PENDING' AND (" . implode(' OR ', $lineParts) . ") LIMIT 1";
-$st = $pdo->prepare($sql);
-$st->execute($lineParams);
-$line = $st->fetch(PDO::FETCH_ASSOC);
-if (!$line) {
+$line = null;
+if (count($lineParts) > 0) {
+    $sql = "SELECT * FROM cpms_approval_lines WHERE document_id=:d AND line_status='PENDING' AND (" . implode(' OR ', $lineParts) . ") LIMIT 1";
+    $st = $pdo->prepare($sql);
+    $st->execute($lineParams);
+    $line = $st->fetch(PDO::FETCH_ASSOC);
+}
+if (!$line && !$isCeoDirectApproval) {
     flash_set('danger', approval_ko('%EC%B2%98%EB%A6%AC%20%EA%B6%8C%ED%95%9C%EC%9D%B4%20%EC%97%86%EC%8A%B5%EB%8B%88%EB%8B%A4.'));
     header('Location: ?r=approval_detail&id=' . $id);
     exit;
@@ -94,8 +98,25 @@ $vpRole = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5');
 try {
     $pdo->beginTransaction();
 
+    $lockedDocSt = $pdo->prepare("SELECT * FROM cpms_approval_documents WHERE id=:id LIMIT 1 FOR UPDATE");
+    $lockedDocSt->execute(array(':id' => $id));
+    $lockedDoc = $lockedDocSt->fetch(PDO::FETCH_ASSOC);
+    if (!$lockedDoc || strtoupper((string)$lockedDoc['doc_status']) !== 'PENDING') {
+        throw new Exception('approval_document_status_changed');
+    }
+    $doc = $lockedDoc;
+    if (!$isCeoDirectApproval) {
+        $lockedLineSt = $pdo->prepare("SELECT * FROM cpms_approval_lines WHERE id=:id AND document_id=:document_id LIMIT 1 FOR UPDATE");
+        $lockedLineSt->execute(array(':id' => isset($line['id']) ? (int)$line['id'] : 0, ':document_id' => $id));
+        $lockedLine = $lockedLineSt->fetch(PDO::FETCH_ASSOC);
+        if (!$lockedLine || strtoupper((string)$lockedLine['line_status']) !== 'PENDING') {
+            throw new Exception('approval_line_status_changed');
+        }
+        $line = $lockedLine;
+    }
+
     if ($action === 'approve') {
-        if (isset($doc['doc_type']) && (string)$doc['doc_type'] === 'unused_leave_plan') {
+        if (!$isCeoDirectApproval && isset($doc['doc_type']) && (string)$doc['doc_type'] === 'unused_leave_plan') {
             $content = approval_parse_content(isset($doc['content']) ? $doc['content'] : '');
             $planTotal = 0.0;
             $planFields = array('plan_notice_date', 'plan_total_days');
@@ -126,23 +147,22 @@ try {
             $doc['content'] = json_encode($content);
         }
         $sign = approval_sign_path_by_email($actorEmail);
-        $pdo->prepare("UPDATE cpms_approval_lines SET line_status='APPROVED', acted_at=NOW(), sign_path=:s WHERE id=:id AND line_status='PENDING'")
-            ->execute(array(':s' => $sign, ':id' => $line['id']));
-
-        $advance = approval_move_to_next_pending_line($pdo, $doc, $id, array('id' => $uid, 'name' => $actorName, 'email' => $actorEmail));
-        $nextLine = isset($advance['next_line']) ? $advance['next_line'] : null;
-
-        if ($nextLine) {
-            $docStatus = 'PENDING';
-            $step = isset($advance['step']) ? (int)$advance['step'] : (int)$nextLine['line_order'];
-            try {
-                $msg = approval_build_request_message(isset($doc['doc_type']) ? $doc['doc_type'] : '', isset($doc['title']) ? $doc['title'] : '', isset($doc['created_by_name']) ? $doc['created_by_name'] : '');
-                approval_queue_notification($pdo, $id, 'REQUEST', $nextLine['approver_id'], $msg);
-            } catch (Exception $e) {
-            }
-        } else {
+        if ($isCeoDirectApproval) {
+            $actor = array('id' => $uid, 'name' => $actorName, 'email' => $actorEmail);
+            $ceoResult = approval_apply_ceo_direct_approval($pdo, $id, $actor, $sign);
             $docStatus = 'APPROVED';
-            $step = isset($advance['step']) && (int)$advance['step'] > 0 ? (int)$advance['step'] : (int)$line['line_order'];
+            $step = isset($ceoResult['step']) ? (int)$ceoResult['step'] : 0;
+            $ceoLineId = isset($ceoResult['ceo_line_id']) ? $ceoResult['ceo_line_id'] : null;
+            $ceoNote = isset($ceoResult['note']) ? trim((string)$ceoResult['note']) : '';
+            if ($approvalComment !== '') {
+                $ceoNote .= ($ceoNote !== '' ? ' / ' : '') . $approvalComment;
+            }
+
+            $pdo->prepare("UPDATE cpms_approval_documents SET doc_status='APPROVED',current_step_order=:o,updated_at=NOW() WHERE id=:id AND UPPER(COALESCE(doc_status,''))='PENDING'")
+                ->execute(array(':o' => $step, ':id' => $id));
+            $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,:l,:a,:n,:e,'CEO_DIRECT_APPROVE',:m,NOW())")
+                ->execute(array(':d' => $id, ':l' => $ceoLineId, ':a' => $uid, ':n' => $actorName, ':e' => $actorEmail, ':m' => $ceoNote));
+
             $creatorId = isset($doc['created_by_id']) ? (int)$doc['created_by_id'] : 0;
             $finalApprovedMessage = approval_build_final_approved_message(
                 isset($doc['doc_type']) ? $doc['doc_type'] : '',
@@ -156,14 +176,49 @@ try {
                 }
             }
             try {
-                approval_queue_final_approved_to_representative($pdo, $id, $doc, array($creatorId));
+                approval_queue_final_approved_to_representative($pdo, $id, $doc, array($creatorId, $uid));
             } catch (Exception $e) {
             }
+        } else {
+            $pdo->prepare("UPDATE cpms_approval_lines SET line_status='APPROVED', acted_at=NOW(), sign_path=:s WHERE id=:id AND line_status='PENDING'")
+                ->execute(array(':s' => $sign, ':id' => $line['id']));
+
+            $advance = approval_move_to_next_pending_line($pdo, $doc, $id, array('id' => $uid, 'name' => $actorName, 'email' => $actorEmail));
+            $nextLine = isset($advance['next_line']) ? $advance['next_line'] : null;
+
+            if ($nextLine) {
+                $docStatus = 'PENDING';
+                $step = isset($advance['step']) ? (int)$advance['step'] : (int)$nextLine['line_order'];
+                try {
+                    $msg = approval_build_request_message(isset($doc['doc_type']) ? $doc['doc_type'] : '', isset($doc['title']) ? $doc['title'] : '', isset($doc['created_by_name']) ? $doc['created_by_name'] : '');
+                    approval_queue_notification($pdo, $id, 'REQUEST', $nextLine['approver_id'], $msg);
+                } catch (Exception $e) {
+                }
+            } else {
+                $docStatus = 'APPROVED';
+                $step = isset($advance['step']) && (int)$advance['step'] > 0 ? (int)$advance['step'] : (int)$line['line_order'];
+                $creatorId = isset($doc['created_by_id']) ? (int)$doc['created_by_id'] : 0;
+                $finalApprovedMessage = approval_build_final_approved_message(
+                    isset($doc['doc_type']) ? $doc['doc_type'] : '',
+                    isset($doc['title']) ? $doc['title'] : '',
+                    isset($doc['created_by_name']) ? $doc['created_by_name'] : ''
+                );
+                if ($creatorId > 0) {
+                    try {
+                        approval_queue_notification($pdo, $id, 'FINAL_APPROVED', $creatorId, $finalApprovedMessage);
+                    } catch (Exception $e) {
+                    }
+                }
+                try {
+                    approval_queue_final_approved_to_representative($pdo, $id, $doc, array($creatorId));
+                } catch (Exception $e) {
+                }
+            }
+            $pdo->prepare("UPDATE cpms_approval_documents SET doc_status=:s,current_step_order=:o,updated_at=NOW() WHERE id=:id")
+                ->execute(array(':s' => $docStatus, ':o' => $step, ':id' => $id));
+            $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,:l,:a,:n,:e,'APPROVE',:m,NOW())")
+                ->execute(array(':d' => $id, ':l' => $line['id'], ':a' => $uid, ':n' => $actorName, ':e' => $actorEmail, ':m' => $approvalComment));
         }
-        $pdo->prepare("UPDATE cpms_approval_documents SET doc_status=:s,current_step_order=:o,updated_at=NOW() WHERE id=:id")
-            ->execute(array(':s' => $docStatus, ':o' => $step, ':id' => $id));
-        $pdo->prepare("INSERT INTO cpms_approval_logs (document_id,line_id,actor_id,actor_name,actor_email,action_type,action_note,created_at) VALUES (:d,:l,:a,:n,:e,'APPROVE',:m,NOW())")
-            ->execute(array(':d' => $id, ':l' => $line['id'], ':a' => $uid, ':n' => $actorName, ':e' => $actorEmail, ':m' => $approvalComment));
         if ($docStatus === 'APPROVED') {
             approval_deduct_leave_balance_on_final_approval($pdo, $id);
         }
@@ -193,15 +248,19 @@ try {
     }
     if ($action === 'approve' && isset($docStatus) && $docStatus === 'APPROVED') {
         try {
-            cpms_approval_pdf_upload_completed_pdf($pdo, $id, $u);
+            cpms_approval_pdf_ensure_document_columns($pdo);
+            cpms_approval_pdf_update_document($pdo, $id, array(
+                'completed_pdf_upload_status' => 'pending',
+                'completed_pdf_upload_error' => ''
+            ));
         } catch (Exception $pdfException) {
             cpms_approval_pdf_log_failure(array(
                 'user' => $u,
-                'section' => 'approval_completed_pdf_exception',
+                'section' => 'approval_completed_pdf_queue_exception',
                 'approval_document_id' => $id,
                 'document_type' => isset($doc['doc_type']) ? approval_doc_label($doc['doc_type']) : '',
                 'project_id' => isset($doc['project_id']) ? (string)$doc['project_id'] : '',
-                'message' => 'Completed PDF post-approval job failed: ' . $pdfException->getMessage()
+                'message' => 'Completed PDF deferred job could not be queued: ' . $pdfException->getMessage()
             ));
         }
     }

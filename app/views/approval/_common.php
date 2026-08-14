@@ -22,6 +22,8 @@ if (!function_exists('approval_status_badge')) {
             'CANCELLED' => 'bg-gray-100 text-gray-700 border-gray-300',
             'SKIPPED' => 'bg-slate-100 text-slate-700 border-slate-300',
             'DELEGATED' => 'bg-zinc-100 text-zinc-800 border-zinc-300',
+            'CEO_APPROVED' => 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            'CEO_DIRECT_APPROVE' => 'bg-emerald-50 text-emerald-700 border-emerald-200',
             'REFERENCE' => 'bg-cyan-50 text-cyan-700 border-cyan-200'
         );
         return isset($map[$status]) ? $map[$status] : 'bg-gray-100 text-gray-700 border-gray-300';
@@ -42,6 +44,8 @@ if (!function_exists('approval_status_label')) {
             'CANCELLED' => approval_ko('%EC%9A%94%EC%B2%AD%EC%B7%A8%EC%86%8C'),
             'SKIPPED' => approval_ko('%EA%B1%B4%EB%84%88%EB%9C%80'),
             'DELEGATED' => approval_ko('%EC%A0%84%EA%B2%B0'),
+            'CEO_APPROVED' => approval_ko('%EB%8C%80%ED%91%9C%EC%8A%B9%EC%9D%B8'),
+            'CEO_DIRECT_APPROVE' => approval_ko('%EB%8C%80%ED%91%9C%EC%8A%B9%EC%9D%B8'),
             'REFERENCE' => approval_ko('%EC%B0%B8%EC%A1%B0')
         );
         return isset($map[$status]) ? $map[$status] : $status;
@@ -257,7 +261,7 @@ if (!function_exists('approval_role_is_ceo')) {
         $roleNorm = approval_normalize_compare_text(approval_role_label($role));
         $ceoNorm = approval_normalize_compare_text(approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC'));
         $ceoShortNorm = approval_normalize_compare_text(approval_ko('%EB%8C%80%ED%91%9C'));
-        return ($roleNorm === 'ceo' || $roleNorm === $ceoNorm || $roleNorm === $ceoShortNorm);
+        return ($roleNorm === 'ceo' || $roleNorm === 'president' || $roleNorm === $ceoNorm || $roleNorm === $ceoShortNorm);
     }
 }
 
@@ -354,6 +358,7 @@ if (!function_exists('approval_employee_is_ceo')) {
             approval_ko('%EB%8C%80%ED%91%9C%EB%8B%98'),
             approval_ko('%EB%8C%80%ED%91%9C'),
             'ceo',
+            'president',
             'chiefexecutiveofficer'
         );
         for ($i = 0; $i < count($words); $i++) {
@@ -1074,17 +1079,63 @@ if (!function_exists('approval_table_exists')) {
         if (!$pdo || trim((string)$table) === '') {
             return false;
         }
+        static $cache = array();
+        $table = trim((string)$table);
+        $pdoKey = function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'default';
+        $cacheKey = $pdoKey . '|' . $table;
+        if (array_key_exists($cacheKey, $cache)) {
+            return $cache[$cacheKey];
+        }
         try {
             $db = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
             if ($db === '') {
+                $cache[$cacheKey] = false;
                 return false;
             }
             $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:tbl");
             $st->execute(array(':db' => $db, ':tbl' => $table));
-            return ((int)$st->fetchColumn() > 0);
+            $cache[$cacheKey] = ((int)$st->fetchColumn() > 0);
+            return $cache[$cacheKey];
         } catch (Exception $e) {
+            $cache[$cacheKey] = false;
             return false;
         }
+    }
+}
+
+if (!function_exists('approval_table_columns')) {
+    function approval_table_columns($pdo, $table, $refresh = false)
+    {
+        static $cache = array();
+        if (!$pdo) {
+            return array();
+        }
+        $table = trim((string)$table);
+        if ($table === '' || !preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+            return array();
+        }
+        $pdoKey = function_exists('spl_object_hash') ? spl_object_hash($pdo) : 'default';
+        $cacheKey = $pdoKey . '|' . $table;
+        if (!$refresh && isset($cache[$cacheKey]) && is_array($cache[$cacheKey])) {
+            return $cache[$cacheKey];
+        }
+
+        $columns = array();
+        try {
+            $st = $pdo->query("SHOW COLUMNS FROM `" . $table . "`");
+            $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+            if (is_array($rows)) {
+                for ($i = 0; $i < count($rows); $i++) {
+                    if (isset($rows[$i]['Field'])) {
+                        $columns[(string)$rows[$i]['Field']] = true;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            $columns = array();
+        }
+        $cache[$cacheKey] = $columns;
+        return $columns;
     }
 }
 
@@ -1094,17 +1145,8 @@ if (!function_exists('approval_table_column_exists')) {
         if (!$pdo || trim((string)$table) === '' || trim((string)$column) === '') {
             return false;
         }
-        try {
-            $db = (string)$pdo->query("SELECT DATABASE()")->fetchColumn();
-            if ($db === '') {
-                return false;
-            }
-            $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=:db AND TABLE_NAME=:tbl AND COLUMN_NAME=:col");
-            $st->execute(array(':db' => $db, ':tbl' => $table, ':col' => $column));
-            return ((int)$st->fetchColumn() > 0);
-        } catch (Exception $e) {
-            return false;
-        }
+        $columns = approval_table_columns($pdo, $table, false);
+        return isset($columns[trim((string)$column)]);
     }
 }
 
@@ -1642,6 +1684,138 @@ if (!function_exists('approval_is_ceo_user')) {
     }
 }
 
+if (!function_exists('approval_apply_ceo_direct_approval')) {
+    function approval_apply_ceo_direct_approval($pdo, $documentId, $actor, $signPath)
+    {
+        $result = array(
+            'ceo_line_id' => null,
+            'ceo_line_created' => false,
+            'step' => 0,
+            'open_count' => 0,
+            'bypassed_count' => 0,
+            'note' => approval_status_label('CEO_DIRECT_APPROVE') . ' - ' . approval_ko('%EB%8C%80%ED%91%9C%EA%B0%80%20%EA%B8%B0%EC%A1%B4%20%EB%AF%B8%EC%B2%98%EB%A6%AC%20%EA%B2%B0%EC%9E%AC%EC%84%A0%EC%9D%84%20%EC%A0%84%EA%B2%B0%20%EC%B2%98%EB%A6%AC%ED%95%98%EA%B3%A0%20%EC%B5%9C%EC%A2%85%20%EC%8A%B9%EC%9D%B8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.')
+        );
+        if (!$pdo || (int)$documentId <= 0) {
+            return $result;
+        }
+
+        $st = $pdo->prepare("SELECT * FROM cpms_approval_lines WHERE document_id=:id ORDER BY line_order ASC FOR UPDATE");
+        $st->execute(array(':id' => (int)$documentId));
+        $lines = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($lines)) {
+            $lines = array();
+        }
+
+        $openLines = array();
+        $ceoLine = null;
+        $fallbackCeoLine = null;
+        for ($i = 0; $i < count($lines); $i++) {
+            $line = $lines[$i];
+            $lineOrder = isset($line['line_order']) ? (int)$line['line_order'] : 0;
+            if ($lineOrder > $result['step']) {
+                $result['step'] = $lineOrder;
+            }
+            $status = isset($line['line_status']) ? strtoupper(trim((string)$line['line_status'])) : '';
+            if (!in_array($status, array('PENDING', 'WAITING'), true)) {
+                if (approval_role_is_ceo(isset($line['role_type']) ? $line['role_type'] : '')) {
+                    if ($fallbackCeoLine === null) $fallbackCeoLine = $line;
+                    if (approval_line_matches_employee($line, $actor)) $ceoLine = $line;
+                }
+                continue;
+            }
+            $openLines[] = $line;
+            if (approval_role_is_ceo(isset($line['role_type']) ? $line['role_type'] : '')) {
+                if ($fallbackCeoLine === null) $fallbackCeoLine = $line;
+                if (approval_line_matches_employee($line, $actor)) $ceoLine = $line;
+            }
+        }
+        $result['open_count'] = count($openLines);
+        if ($ceoLine === null) $ceoLine = $fallbackCeoLine;
+
+        $bypassedLabels = array();
+        $ceoLineId = ($ceoLine && isset($ceoLine['id'])) ? (int)$ceoLine['id'] : 0;
+        $ceoRole = approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC');
+        $delegatedReason = approval_ko('%EB%8C%80%ED%91%9C%20%EC%A7%81%EC%A0%91%20%EC%8A%B9%EC%9D%B8%EC%97%90%20%EB%94%B0%EB%A5%B8%20%EC%A0%84%EA%B2%B0%20%EC%B2%98%EB%A6%AC');
+        $ceoApprovalNote = approval_ko('%EB%8C%80%ED%91%9C%20%EC%A7%81%EC%A0%91%20%EC%8A%B9%EC%9D%B8');
+        for ($i = 0; $i < count($openLines); $i++) {
+            $line = $openLines[$i];
+            $lineId = isset($line['id']) ? (int)$line['id'] : 0;
+            if ($lineId <= 0 || ($ceoLineId > 0 && $lineId === $ceoLineId)) continue;
+
+            $sets = array("line_status='DELEGATED'", 'acted_at=NOW()', 'sign_path=NULL', 'reject_reason=:note');
+            $params = array(':note' => $delegatedReason, ':id' => $lineId);
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated')) $sets[] = 'is_delegated=1';
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'delegated_by_role')) {
+                $sets[] = 'delegated_by_role=:delegated_by_role';
+                $params[':delegated_by_role'] = $ceoRole;
+            }
+            $pdo->prepare("UPDATE cpms_approval_lines SET " . implode(',', $sets) . " WHERE id=:id AND UPPER(COALESCE(line_status,'')) IN ('PENDING','WAITING')")
+                ->execute($params);
+            approval_insert_auto_delegate_log($pdo, $documentId, $lineId, $line, $delegatedReason, $actor);
+            $result['bypassed_count']++;
+            $roleLabel = approval_role_label(isset($line['role_type']) ? $line['role_type'] : '');
+            $approverName = isset($line['approver_name']) ? trim((string)$line['approver_name']) : '';
+            $bypassedLabels[] = $roleLabel . ($approverName !== '' ? ' / ' . $approverName : '');
+        }
+
+        $actorId = isset($actor['id']) ? (int)$actor['id'] : 0;
+        $actorName = isset($actor['name']) ? trim((string)$actor['name']) : '';
+        $actorEmail = isset($actor['email']) ? trim((string)$actor['email']) : '';
+        if ($ceoLineId > 0) {
+            $sets = array("line_status='APPROVED'", 'acted_at=NOW()', 'sign_path=:sign_path', 'reject_reason=:note');
+            $params = array(':sign_path' => (string)$signPath, ':note' => $ceoApprovalNote, ':id' => $ceoLineId);
+            if ($actorId > 0) {
+                $sets[] = 'approver_id=:approver_id';
+                $params[':approver_id'] = $actorId;
+            }
+            if ($actorName !== '') {
+                $sets[] = 'approver_name=:approver_name';
+                $params[':approver_name'] = $actorName;
+            }
+            if ($actorEmail !== '') {
+                $sets[] = 'approver_email=:approver_email';
+                $params[':approver_email'] = $actorEmail;
+            }
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated')) $sets[] = 'is_delegated=0';
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'delegated_by_role')) $sets[] = 'delegated_by_role=NULL';
+            $pdo->prepare("UPDATE cpms_approval_lines SET " . implode(',', $sets) . " WHERE id=:id AND UPPER(COALESCE(line_status,'')) IN ('PENDING','WAITING','DELEGATED','CEO_APPROVED','APPROVED')")
+                ->execute($params);
+            $result['ceo_line_id'] = $ceoLineId;
+        } else {
+            $newOrder = (int)$result['step'] + 1;
+            $cols = array('document_id', 'line_order', 'role_type', 'approver_id', 'approver_name', 'approver_email', 'line_status', 'acted_at', 'sign_path', 'reject_reason');
+            $marks = array(':document_id', ':line_order', ':role_type', ':approver_id', ':approver_name', ':approver_email', "'APPROVED'", 'NOW()', ':sign_path', ':note');
+            $params = array(
+                ':document_id' => (int)$documentId,
+                ':line_order' => $newOrder,
+                ':role_type' => $ceoRole,
+                ':approver_id' => $actorId,
+                ':approver_name' => $actorName,
+                ':approver_email' => $actorEmail,
+                ':sign_path' => (string)$signPath,
+                ':note' => $ceoApprovalNote
+            );
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'is_delegated')) {
+                $cols[] = 'is_delegated';
+                $marks[] = '0';
+            }
+            if (approval_table_column_exists($pdo, 'cpms_approval_lines', 'delegated_by_role')) {
+                $cols[] = 'delegated_by_role';
+                $marks[] = 'NULL';
+            }
+            $pdo->prepare("INSERT INTO cpms_approval_lines (" . implode(',', $cols) . ") VALUES (" . implode(',', $marks) . ")")->execute($params);
+            $result['ceo_line_id'] = method_exists($pdo, 'lastInsertId') ? (int)$pdo->lastInsertId() : null;
+            $result['ceo_line_created'] = true;
+            $result['step'] = $newOrder;
+        }
+
+        if (count($bypassedLabels) > 0) {
+            $result['note'] .= ' ' . approval_ko('%EC%A0%84%EA%B2%B0%20%EC%B2%98%EB%A6%AC%EB%90%9C%20%EA%B2%B0%EC%9E%AC%EC%84%A0') . ': ' . implode(', ', $bypassedLabels);
+        }
+        return $result;
+    }
+}
+
 if (!function_exists('approval_can_view_all_completed_documents')) {
     function approval_can_view_all_completed_documents($pdo, $user)
     {
@@ -1734,7 +1908,7 @@ if (!function_exists('approval_can_cancel_approved_leave')) {
 if (!function_exists('approval_can_view_all_active_documents')) {
     function approval_can_view_all_active_documents($pdo, $user)
     {
-        return approval_is_development_department_user($pdo, $user);
+        return approval_is_development_department_user($pdo, $user) || approval_is_ceo_user($pdo, $user);
     }
 }
 

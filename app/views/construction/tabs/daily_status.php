@@ -5,9 +5,11 @@
  */
 
 use App\Core\Db;
+use App\Services\VendorService;
 
 require_once __DIR__ . '/../partials/schedule_auto_progress_helper.php';
 require_once __DIR__ . '/partials/labor_data_loader.php';
+require_once __DIR__ . '/../../../services/VendorService.php';
 
 $projectId = isset($pid) ? (int)$pid : 0;
 $pdo = isset($pdo) ? $pdo : Db::pdo();
@@ -17,6 +19,7 @@ if (!$pdo || $projectId <= 0) {
 }
 
 cpms_schedule_apply_auto_progress($pdo, $projectId);
+VendorService::bootstrap($pdo, true);
 
 if (!function_exists('cpms_daily_status_table_exists')) {
 function cpms_daily_status_table_exists($pdo, $table) {
@@ -325,12 +328,14 @@ if (cpms_daily_status_table_exists($pdo, 'cpms_schedule_progress') && cpms_daily
 if (cpms_daily_status_table_exists($pdo, 'cpms_material_usage')) {
     try {
         $hasAdvance = cpms_daily_status_column_exists($pdo, 'cpms_material_usage', 'advance_yn');
-        $sql = "SELECT u.use_date, u.amount, u.memo, i.category, i.vendor_name";
+        $materialVendorIdSelect = VendorService::hasVendorReference($pdo, 'cpms_material_items') ? 'i.vendor_id' : '0 AS vendor_id';
+        $sql = "SELECT u.use_date, u.amount, u.memo, " . $materialVendorIdSelect . ", i.category, i.vendor_name";
         $sql .= $hasAdvance ? ", u.advance_yn" : ", 'N' AS advance_yn";
         $sql .= " FROM cpms_material_usage u LEFT JOIN cpms_material_items i ON i.id=u.material_id WHERE u.project_id=:pid AND u.use_date BETWEEN :s AND :e ORDER BY u.use_date ASC, u.id ASC";
         $st = $pdo->prepare($sql);
         $st->execute(array(':pid'=>$projectId, ':s'=>$monthStart, ':e'=>$monthEnd));
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        $rows = VendorService::applyCurrentVendorRows($pdo, $rows, 'vendor_name', '', '', '');
         if (is_array($rows)) {
             foreach ($rows as $row) {
                 $date = isset($row['use_date']) ? (string)$row['use_date'] : '';
@@ -350,13 +355,15 @@ if (cpms_daily_status_table_exists($pdo, 'cpms_equipment_usage')) {
     try {
         $hasWorkUnit = cpms_daily_status_column_exists($pdo, 'cpms_equipment_usage', 'work_unit');
         $hasBaseRateSnapshot = cpms_daily_status_column_exists($pdo, 'cpms_equipment_usage', 'base_rate_snapshot');
-        $sql = "SELECT u.use_date, u.amount, u.memo, i.category, i.vendor_name, i.spec, i.base_rate";
+        $equipmentVendorIdSelect = VendorService::hasVendorReference($pdo, 'cpms_equipment_items') ? 'i.vendor_id' : '0 AS vendor_id';
+        $sql = "SELECT u.use_date, u.amount, u.memo, " . $equipmentVendorIdSelect . ", i.category, i.vendor_name, i.spec, i.base_rate";
         $sql .= $hasWorkUnit ? ", u.work_unit" : ", 1 AS work_unit";
         $sql .= $hasBaseRateSnapshot ? ", u.base_rate_snapshot" : ", 0 AS base_rate_snapshot";
         $sql .= " FROM cpms_equipment_usage u LEFT JOIN cpms_equipment_items i ON i.id=u.equipment_id WHERE u.project_id=:pid AND u.use_date BETWEEN :s AND :e ORDER BY u.use_date ASC, u.id ASC";
         $st = $pdo->prepare($sql);
         $st->execute(array(':pid'=>$projectId, ':s'=>$monthStart, ':e'=>$monthEnd));
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        $rows = VendorService::applyCurrentVendorRows($pdo, $rows, 'vendor_name', '', '', '');
         if (is_array($rows)) {
             foreach ($rows as $row) {
                 $date = isset($row['use_date']) ? (string)$row['use_date'] : '';
@@ -393,7 +400,9 @@ try {
 
     $directTeamMembers = cpms_load_direct_team_members($pdo);
     $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
-    $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
+    $projectLaborWorkers = cpms_apply_project_labor_worker_month_ratios($projectLaborWorkers, cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $selectedMonth, $projectLaborWorkers));
+    $projectLaborWorkers = cpms_apply_project_labor_worker_month_wages($projectLaborWorkers, cpms_load_project_labor_worker_wage_map($pdo, $projectId, $selectedMonth));
+    $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers, $pdo, $selectedMonth);
     $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
     $workerByKey = array();
     if (is_array($timesheetWorkers)) {
@@ -421,8 +430,10 @@ try {
             if (!isset($days[$date]) || !is_numeric($gongsuValue)) continue;
             $gongsu = (float)$gongsuValue;
             if ($gongsu <= 0) continue;
-            $amount = $gongsu * $wageRate;
-            cpms_daily_status_add_cost_detail($days, $date, 'labor', $workerName . ' / ' . cpms_daily_status_qty($gongsu) . '공수', $amount, '임금단가 ' . cpms_daily_status_money($wageRate));
+            $isMonthlySalaryWorker = isset($worker['salary_allocation_mode']) && (int)$worker['salary_allocation_mode'] === 1;
+            $amount = ($isMonthlySalaryWorker ? 1 : $gongsu) * $wageRate;
+            $quantityLabel = $isMonthlySalaryWorker ? '1일' : cpms_daily_status_qty($gongsu) . '공수';
+            cpms_daily_status_add_cost_detail($days, $date, 'labor', $workerName . ' / ' . $quantityLabel, $amount, ($isMonthlySalaryWorker ? '월급 배분단가 ' : '임금단가 ') . cpms_daily_status_money($wageRate));
         }
     }
 } catch (Exception $e) {}

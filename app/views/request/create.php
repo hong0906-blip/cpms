@@ -50,12 +50,15 @@ $pdo = Db::pdo();
 $targetEmployee = array('id' => $targetUserId);
 if ($pdo && approval_table_exists($pdo, 'employees')) {
     try {
-        $stTarget = $pdo->prepare("SELECT id, name, email, department, position FROM employees WHERE id=:id LIMIT 1");
+        $stTarget = $pdo->prepare("SELECT id, name, email, department, position FROM employees WHERE id=:id AND is_active=1 LIMIT 1");
         $stTarget->execute(array(':id' => $targetUserId));
         $rowTarget = $stTarget->fetch(PDO::FETCH_ASSOC);
-        if ($rowTarget) {
-            $targetEmployee = $rowTarget;
+        if (!$rowTarget) {
+            http_response_code(400);
+            echo json_encode(array('ok' => false, 'message' => '퇴직자는 담당자로 선택할 수 없습니다.'));
+            exit;
         }
+        $targetEmployee = $rowTarget;
     } catch (Exception $e) {
     }
 }

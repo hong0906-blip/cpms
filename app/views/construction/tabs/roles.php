@@ -19,7 +19,7 @@ $canSave = Auth::canManageConstruction();
 function load_employees_by_dept($pdo, $deptName) {
     $list = array();
     try {
-        $st = $pdo->prepare("SELECT id, name, department, position FROM employees WHERE department = :d ORDER BY position, name");
+        $st = $pdo->prepare("SELECT id, name, department, position FROM employees WHERE department = :d AND is_active = 1 ORDER BY position, name");
         $st->bindValue(':d', (string)$deptName);
         $st->execute();
         $list = $st->fetchAll();

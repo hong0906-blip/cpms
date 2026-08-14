@@ -782,7 +782,6 @@ $hasLineDelegated = approval_store_column_exists($pdo, 'cpms_approval_lines', 'i
 $hasLineDelegatedBy = approval_store_column_exists($pdo, 'cpms_approval_lines', 'delegated_by_role');
 $hasLineReason = approval_store_column_exists($pdo, 'cpms_approval_lines', 'reject_reason');
 $hasFileDriveColumns = approval_is_proposal_doc_type($docType) ? cpms_approval_drive_ensure_file_columns($pdo) : false;
-$approvalDriveUploadedFiles = array();
 
 try {
     $pdo->beginTransaction();
@@ -959,15 +958,6 @@ try {
             @mkdir($base, 0777, true);
         }
         $driveColumnsReady = $hasFileDriveColumns;
-        $docForDrive = array(
-            'id' => $did,
-            'doc_type' => $docType,
-            'title' => $title,
-            'created_at' => date('Y-m-d H:i:s'),
-            'created_by_name' => $creatorName,
-            'created_by_email' => $creatorEmail,
-            'project_id' => $projectId
-        );
         $driveFailUserMessage = approval_ko('%EC%B2%A8%EB%B6%80%ED%8C%8C%EC%9D%BC%20Drive%20%EC%97%85%EB%A1%9C%EB%93%9C%EC%97%90%20%EC%8B%A4%ED%8C%A8%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.%20%EA%B4%80%EB%A6%AC%EC%9E%90%EC%97%90%EA%B2%8C%20%EB%AC%B8%EC%9D%98%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.');
         foreach ($labels as $ft => $meta) {
             $fname = $meta[1];
@@ -998,15 +988,11 @@ try {
                 $rel = 'storage/approvals/' . $did . '/files/' . $saved;
                 $mimeType = cpms_drive_detect_mime_type($dest);
                 $fileSize = is_file($dest) ? (int)@filesize($dest) : 0;
-                $driveUploadOk = false;
                 $driveRecord = cpms_approval_drive_failed_record($orig, $rel, $mimeType, $fileSize, $user, 'Drive upload was not attempted.');
                 if ($driveColumnsReady) {
-                    $driveUpload = cpms_approval_drive_upload_local_file($dest, $orig, $docForDrive, $contentData, array('file_type' => $ft, 'file_label' => $meta[0], 'local_path' => $rel), $user);
-                    $driveRecord = isset($driveUpload['record']) && is_array($driveUpload['record']) ? $driveUpload['record'] : $driveRecord;
-                    $driveUploadOk = !empty($driveUpload['ok']);
-                    if (!$driveUploadOk || !isset($driveRecord['drive_file_id']) || trim((string)$driveRecord['drive_file_id']) === '') {
-                        $uploadWarn[] = $meta[0] . ' ' . $driveFailUserMessage;
-                    }
+                    // The local copy is committed immediately. Google Drive backup runs
+                    // after the detail page loads so the user does not wait on network I/O.
+                    $driveRecord = cpms_approval_drive_pending_record($orig, $rel, $mimeType, $fileSize, $user);
                 } else {
                     cpms_drive_log_upload_failure(array(
                         'user' => $user,
@@ -1030,25 +1016,7 @@ try {
                 ));
                 $saveFile = cpms_approval_drive_save_file_row($pdo, $fileRow);
                 if (empty($saveFile['ok'])) {
-                    if ($driveUploadOk && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
-                        cpms_drive_delete_file((string)$driveRecord['drive_file_id'], array(
-                            'user' => $user,
-                            'section' => 'approval_db_save_cleanup',
-                            'approval_document_id' => $did,
-                            'document_type' => isset($driveRecord['document_type']) ? (string)$driveRecord['document_type'] : approval_doc_label($docType),
-                            'project_id' => $projectId > 0 ? $projectId : '',
-                            'original_name' => $orig,
-                            'target_folder_id' => isset($driveRecord['drive_folder_id']) ? (string)$driveRecord['drive_folder_id'] : ''
-                        ));
-                    }
                     $uploadWarn[] = $meta[0] . ' ' . approval_ko('%ED%8C%8C%EC%9D%BC%20%EC%A0%95%EB%B3%B4%20%EC%A0%80%EC%9E%A5%20%EC%8B%A4%ED%8C%A8');
-                } else if ($driveUploadOk && isset($driveRecord['drive_file_id']) && trim((string)$driveRecord['drive_file_id']) !== '') {
-                    $approvalDriveUploadedFiles[] = array(
-                        'id' => (string)$driveRecord['drive_file_id'],
-                        'original_name' => $orig,
-                        'target_folder_id' => isset($driveRecord['drive_folder_id']) ? (string)$driveRecord['drive_folder_id'] : '',
-                        'document_type' => isset($driveRecord['document_type']) ? (string)$driveRecord['document_type'] : ''
-                    );
                 }
             }
         }
@@ -1070,24 +1038,6 @@ try {
 } catch (Exception $e) {
     if ($pdo && $pdo->inTransaction()) {
         $pdo->rollBack();
-    }
-    if (is_array($approvalDriveUploadedFiles)) {
-        for ($i = 0; $i < count($approvalDriveUploadedFiles); $i++) {
-            $driveFile = $approvalDriveUploadedFiles[$i];
-            if (!is_array($driveFile) || !isset($driveFile['id']) || trim((string)$driveFile['id']) === '') {
-                continue;
-            }
-            cpms_drive_delete_file((string)$driveFile['id'], array(
-                'user' => $user,
-                'section' => 'approval_store_rollback_cleanup',
-                'approval_document_id' => isset($did) ? (int)$did : 0,
-                'document_type' => isset($driveFile['document_type']) ? (string)$driveFile['document_type'] : approval_doc_label($docType),
-                'project_id' => $projectId > 0 ? $projectId : '',
-                'original_name' => isset($driveFile['original_name']) ? (string)$driveFile['original_name'] : '',
-                'target_folder_id' => isset($driveFile['target_folder_id']) ? (string)$driveFile['target_folder_id'] : '',
-                'message' => 'Approval DB save failed after Drive upload; cleanup attempted.'
-            ));
-        }
     }
     error_log('[approval_store] ' . $e->getMessage());
     flash_set('danger', approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EC%A0%80%EC%9E%A5%20%EC%A4%91%20%EC%98%A4%EB%A5%98%EA%B0%80%20%EB%B0%9C%EC%83%9D%ED%96%88%EC%8A%B5%EB%8B%88%EB%8B%A4.%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20DB%20%EC%84%A4%EC%B9%98%2F%ED%99%95%EC%9D%B8%EC%9D%84%20%EB%A8%BC%EC%A0%80%20%EC%8B%A4%ED%96%89%ED%95%B4%EC%A3%BC%EC%84%B8%EC%9A%94.'));

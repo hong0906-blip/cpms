@@ -450,7 +450,7 @@ function cpms_company_profit_material_category_sum_between($pdo, $projectId, $st
 }}
 
 if (!function_exists('cpms_company_profit_labor_wage_map')) {
-function cpms_company_profit_labor_wage_map($pdo, $projectId) {
+function cpms_company_profit_labor_wage_map($pdo, $projectId, $month = '') {
     $wageMap = array();
     if (!$pdo || (int)$projectId <= 0) return $wageMap;
     if (!function_exists('cpms_load_direct_team_members') || !function_exists('cpms_load_project_labor_workers') || !function_exists('cpms_build_project_worker_rows') || !function_exists('cpms_build_timesheet_workers')) {
@@ -458,23 +458,29 @@ function cpms_company_profit_labor_wage_map($pdo, $projectId) {
     }
 
     static $cache = array();
-    $cacheKey = cpms_company_profit_cache_key($pdo, 'labor-wage:' . (int)$projectId);
+    $cacheKey = cpms_company_profit_cache_key($pdo, 'labor-wage:' . (int)$projectId . ':' . (string)$month);
     if (isset($cache[$cacheKey])) return $cache[$cacheKey];
 
     try {
         $directTeamMembers = cpms_load_direct_team_members($pdo);
         $projectWorkers = cpms_load_project_labor_workers($pdo, (int)$projectId);
-        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers);
+        if (preg_match('/^\d{4}-\d{2}$/', (string)$month) && function_exists('cpms_load_project_labor_worker_wage_map')) {
+            $projectWorkers = cpms_apply_project_labor_worker_month_wages($projectWorkers, cpms_load_project_labor_worker_wage_map($pdo, (int)$projectId, (string)$month));
+        }
+        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers, $pdo, (string)$month);
         $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
         foreach ($timesheetWorkers as $worker) {
             $name = isset($worker['name']) ? (string)$worker['name'] : '';
             $key = function_exists('cpms_normalize_worker_key') ? cpms_normalize_worker_key($name) : trim($name);
             if ($key === '') continue;
             if (function_exists('cpms_resolve_labor_wage_rate')) {
-                $wageMap[$key] = (float)cpms_resolve_labor_wage_rate($worker);
+                $wageMap[$key] = array(
+                    'rate' => (float)cpms_resolve_labor_wage_rate($worker),
+                    'use_output_days' => isset($worker['salary_allocation_mode']) && (int)$worker['salary_allocation_mode'] === 1 ? 1 : 0
+                );
             } else {
                 $raw = isset($worker['deposit_rate']) ? preg_replace('/[^0-9.\-]/', '', (string)$worker['deposit_rate']) : '';
-                $wageMap[$key] = ($raw !== '' && is_numeric($raw)) ? (float)$raw : 0.0;
+                $wageMap[$key] = array('rate'=>($raw !== '' && is_numeric($raw)) ? (float)$raw : 0.0, 'use_output_days'=>0);
             }
         }
     } catch (Exception $e) {
@@ -539,8 +545,15 @@ function cpms_company_profit_labor_total_between($pdo, $projectId, $projectName,
     foreach ($sumGongsu as $workerKey => $workerSumGongsu) {
         $outputDays = isset($outputDaysSet[$workerKey]) && is_array($outputDaysSet[$workerKey]) ? count($outputDaysSet[$workerKey]) : 0;
         if ($outputDays <= 0) continue;
-        $wageRate = isset($laborWageMap[$workerKey]) ? (float)$laborWageMap[$workerKey] : 0.0;
-        $totalLabor += ((float)$workerSumGongsu) * $wageRate;
+        $wageInfo = isset($laborWageMap[$workerKey]) ? $laborWageMap[$workerKey] : 0.0;
+        if (is_array($wageInfo)) {
+            $wageRate = isset($wageInfo['rate']) ? (float)$wageInfo['rate'] : 0.0;
+            $billingUnits = !empty($wageInfo['use_output_days']) ? $outputDays : (float)$workerSumGongsu;
+        } else {
+            $wageRate = (float)$wageInfo;
+            $billingUnits = (float)$workerSumGongsu;
+        }
+        $totalLabor += $billingUnits * $wageRate;
     }
 
     if (function_exists('cpms_labor_force_amount_between')) {
@@ -1182,7 +1195,6 @@ if (!function_exists('cpms_company_profit_project_summary')) {
 function cpms_company_profit_project_summary($pdo, $project, $months, $preloaded = array()) {
     if (!is_array($preloaded)) $preloaded = array();
     $projectId = isset($project['id']) ? (int)$project['id'] : 0;
-    $laborWageMap = cpms_company_profit_labor_wage_map($pdo, $projectId);
     $row = array(
         'id' => $projectId,
         'name' => isset($project['name']) ? (string)$project['name'] : ('현장 #' . $projectId),
@@ -1215,6 +1227,7 @@ function cpms_company_profit_project_summary($pdo, $project, $months, $preloaded
     $confirmedCount = 0;
     $expectedCount = 0;
     foreach ($months as $ym) {
+        $laborWageMap = cpms_company_profit_labor_wage_map($pdo, $projectId, $ym);
         $monthRow = cpms_company_profit_project_month_metrics($pdo, $project, $ym, $laborWageMap, $preloaded);
         $row['monthly'][$ym] = $monthRow;
         $row['sales'] += (float)$monthRow['sales'];

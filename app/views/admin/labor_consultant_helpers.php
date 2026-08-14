@@ -497,10 +497,11 @@ if (!function_exists('cpms_labor_consultant_load_project_month_rows')) {
         // 관리부 노무사 확인용 자료도 공사섹션 노무비 탭과 같은 선택 월 배분비율을 사용합니다.
         $laborWorkerRatioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $ym, $projectWorkers);
         $projectWorkers = cpms_apply_project_labor_worker_month_ratios($projectWorkers, $laborWorkerRatioMap);
+        $projectWorkers = cpms_apply_project_labor_worker_month_wages($projectWorkers, cpms_load_project_labor_worker_wage_map($pdo, $projectId, $ym));
         $projectWorkers = cpms_labor_consultant_unique_project_workers($projectWorkers);
         $directTeamMembers = cpms_load_direct_team_members($pdo);
         $directMemberMap = cpms_labor_consultant_direct_member_map($directTeamMembers);
-        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers);
+        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers, $pdo, $ym);
         $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
         $roleMap = isset($gongsuData['role_map']) && is_array($gongsuData['role_map']) ? $gongsuData['role_map'] : array();
         $gongsuMap = isset($dataset['gongsu_map']) && is_array($dataset['gongsu_map']) ? $dataset['gongsu_map'] : array();

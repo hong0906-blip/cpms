@@ -200,6 +200,7 @@ function cpms_task_feed_direct_tasks_for_employee($pdo, $employeeId)
                 'display_status' => cpms_tasks_display_status($task),
                 'action_url' => '?r=tasks/detail&id=' . (int)$task['id'],
                 'is_direct_task' => 1,
+                'created_by' => isset($task['created_by']) ? (int)$task['created_by'] : 0,
                 'created_at' => isset($task['created_at']) ? (string)$task['created_at'] : '',
                 'completed_at' => isset($task['completed_at']) ? (string)$task['completed_at'] : '',
                 'group_key' => isset($task['group_key']) ? (string)$task['group_key'] : '',
@@ -237,7 +238,27 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
             $sql = "SELECT task_main.* FROM cpms_tasks task_main WHERE task_main.requester_employee_id = :employee_id";
         }
         $params = array(':employee_id' => (int)$employeeId);
+        $excludeInactiveGroupAssignees = cpms_tasks_table_exists($pdo, 'employees') && cpms_tasks_column_exists($pdo, 'employees', 'is_active');
+        if ($excludeInactiveGroupAssignees) {
+            $sql .= " AND (
+                task_main.group_key IS NULL
+                OR task_main.group_key NOT LIKE 'task_request:%'
+                OR EXISTS (
+                    SELECT 1 FROM employees task_assignee
+                    WHERE task_assignee.id = task_main.assignee_employee_id
+                      AND task_assignee.is_active = 1
+                )
+            )";
+        }
         if ($unfinishedOnly) {
+            $activeSiblingSql = '';
+            if ($excludeInactiveGroupAssignees) {
+                $activeSiblingSql = " AND EXISTS (
+                    SELECT 1 FROM employees sibling_assignee
+                    WHERE sibling_assignee.id = task_sibling.assignee_employee_id
+                      AND sibling_assignee.is_active = 1
+                )";
+            }
             $sql .= " AND (
                 task_main.status IS NULL
                 OR task_main.status NOT IN ('done','cancelled')
@@ -247,6 +268,7 @@ function cpms_task_feed_direct_tasks_requested_by_employee($pdo, $employeeId, $r
                         SELECT 1 FROM cpms_tasks task_sibling
                         WHERE task_sibling.group_key = task_main.group_key
                           AND (task_sibling.status IS NULL OR task_sibling.status NOT IN ('done','cancelled'))
+                          " . $activeSiblingSql . "
                     )
                 )
             )";

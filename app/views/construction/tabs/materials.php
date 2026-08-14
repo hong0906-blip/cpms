@@ -10,12 +10,14 @@
 
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\VendorService;
 require_once __DIR__ . '/../partials/master_dedupe_helper.php';
 require_once __DIR__ . '/../partials/project_month_options_helper.php';
 require_once __DIR__ . '/../partials/material_statement_helper.php';
 require_once __DIR__ . '/../partials/material_usage_helper.php';
 require_once __DIR__ . '/../../safety/safety_cost_helper.php';
 require_once __DIR__ . '/../../../services/CostChangeService.php';
+require_once __DIR__ . '/../../../services/VendorService.php';
 
 $canEditMaterials = isset($canEdit) ? (bool)$canEdit : false;
 $hideMaterialMonthlyExcelUploadCard = true; // 복구 시 false로 변경하면 월별 자재구입비 엑셀 업로드 카드가 다시 보입니다.
@@ -26,6 +28,7 @@ if (!$pdo) {
     return;
 }
 cpms_material_usage_ensure_schema($pdo);
+VendorService::bootstrap($pdo, true);
 $hasMaterialAdvanceYn = cpms_material_usage_column_exists($pdo, 'advance_yn');
 $canDownloadMaterialStatements = cpms_material_statement_user_can_download($pdo, (int)$pid);
 $canViewMaterialInput = ($canEditMaterials || $canDownloadMaterialStatements);
@@ -83,6 +86,7 @@ try {
     $stItem->bindValue(':pid', (int)$pid, PDO::PARAM_INT);
     $stItem->execute();
     $items = $stItem->fetchAll(PDO::FETCH_ASSOC);
+    $items = VendorService::applyCurrentVendorRows($pdo, $items, 'vendor_name', 'representative', 'phone', 'biz_no');
 
     foreach ($items as $it) {
         $eid = (int)$it['id'];
@@ -98,7 +102,8 @@ try {
             ? " AND COALESCE(crm.is_deleted,0)=0
                 AND COALESCE(NULLIF(crm.settlement_ym,''),IF(DAY(u.use_date)>=26,DATE_FORMAT(DATE_ADD(u.use_date,INTERVAL 1 MONTH),'%Y-%m'),DATE_FORMAT(u.use_date,'%Y-%m'))) = :settlement_ym"
             : " AND u.use_date BETWEEN :s AND :e";
-        $stUsage = $pdo->prepare("SELECT " . $usageSelect . ", i.category, i.vendor_name, i.representative, i.phone, i.biz_no, i.base_rate, i.remark
+        $materialVendorIdSelect = VendorService::hasVendorReference($pdo, 'cpms_material_items') ? 'i.vendor_id' : '0 AS vendor_id';
+        $stUsage = $pdo->prepare("SELECT " . $usageSelect . ", " . $materialVendorIdSelect . ", i.category, i.vendor_name, i.representative, i.phone, i.biz_no, i.base_rate, i.remark
             FROM cpms_material_usage u
             JOIN cpms_material_items i ON i.id = u.material_id" . $materialMetaJoin . "
             WHERE u.project_id = :pid
@@ -114,6 +119,7 @@ try {
         }
         $stUsage->execute();
         $usageRows = $stUsage->fetchAll(PDO::FETCH_ASSOC);
+        $usageRows = VendorService::applyCurrentVendorRows($pdo, $usageRows, 'vendor_name', 'representative', 'phone', 'biz_no');
 
         foreach ($usageRows as $ur) {
             $eid = (int)$ur['material_id'];
@@ -320,6 +326,7 @@ foreach ($usageRows as $ur) {
 $safetyRowsForMaterials = array();
 try {
     $safetyRowsForMaterials = cpms_safety_cost_project_items_between((int)$pid, $monthlyStart, $monthlyEnd);
+    $safetyRowsForMaterials = VendorService::applyCurrentVendorRows($pdo, $safetyRowsForMaterials, 'vendor_name', 'representative', 'phone', 'biz_no');
     foreach ($safetyRowsForMaterials as $safetyRow) {
         $useDate = isset($safetyRow['use_date']) ? cpms_safety_cost_valid_date($safetyRow['use_date']) : '';
         if ($useDate === '') continue;
@@ -464,6 +471,13 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                 <input type="hidden" name="materials_tab" value="input">
                 <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
                 <input type="hidden" name="usage_dates[]" id="materialMobileQuickDate" value="">
+                <input type="hidden" name="vendor_id" value="" data-vendor-name="">
+
+                <div class="rounded-xl border border-blue-100 bg-white p-3 vendor-search-wrap">
+                    <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
+                    <input type="text" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-material-vendor-search" placeholder="업체명 2글자 이상 입력" lang="ko" inputmode="text" autocomplete="off">
+                    <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
+                </div>
 
                 <div class="grid grid-cols-1 gap-2">
                     <select name="category" class="px-3 py-3 border rounded-xl bg-white" required>
@@ -476,7 +490,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         <option value="N">선급 N</option>
                         <option value="Y">선급 Y</option>
                     </select>
-                    <input type="text" name="vendor_name" class="px-3 py-3 border rounded-xl bg-white" placeholder="업체명" required lang="ko" inputmode="text" autocomplete="off">
+                    <input type="text" name="vendor_name" class="px-3 py-3 border rounded-xl bg-gray-100" placeholder="자동검색에서 업체 선택" required readonly>
                     <input type="text" inputmode="decimal" name="base_rate" data-material-money class="px-3 py-3 border rounded-xl bg-white text-right" placeholder="공급가액" required>
                     <select name="amount_sign" class="px-3 py-3 border rounded-xl bg-white" required>
                         <option value="plus">+ 일반</option>
@@ -528,11 +542,13 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="materials_tab" value="input">
                     <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
+                    <input type="hidden" name="vendor_id" value="" data-vendor-name="">
 
                     <div class="bg-gray-50 border border-gray-200 rounded-xl p-3 vendor-search-wrap">
                         <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
                         <input type="text" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-material-vendor-search" placeholder="업체명 2글자 이상 입력" lang="ko" inputmode="text" autocomplete="off">
                         <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
+                        <div class="mt-2 text-xs text-gray-500">업체정보만 자동으로 불러옵니다. 공급가액과 비고는 거래별로 직접 입력할 수 있습니다.</div>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -546,7 +562,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                             <option value="N">선급 N</option>
                             <option value="Y">선급 Y</option>
                         </select>
-                        <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl" placeholder="업체명" required lang="ko" inputmode="text" autocomplete="off">
+                        <input type="text" name="vendor_name" class="px-3 py-2 border rounded-xl bg-gray-100" placeholder="자동검색에서 업체 선택" required readonly>
                         <!-- 자재: 규격 제거 -->
                         <input type="text" name="representative" class="px-3 py-2 border rounded-xl" placeholder="대표자명" lang="ko" inputmode="text" autocomplete="off">
                         <input type="text" name="phone" class="px-3 py-2 border rounded-xl" placeholder="전화번호" lang="ko" inputmode="text" autocomplete="off">
@@ -875,6 +891,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                                                     data-use-date="<?php echo h(isset($ur['use_date']) ? $ur['use_date'] : ''); ?>"
                                                     data-category="<?php echo h(material_category_label(isset($ur['category']) ? $ur['category'] : '')); ?>"
                                                     data-advance-yn="<?php echo h(cpms_material_advance_yn(isset($ur['advance_yn']) ? $ur['advance_yn'] : 'N')); ?>"
+                                                    data-vendor-id="<?php echo isset($ur['vendor_id']) ? (int)$ur['vendor_id'] : 0; ?>"
                                                     data-vendor-name="<?php echo h(isset($ur['vendor_name']) ? $ur['vendor_name'] : ''); ?>"
                                                     data-representative="<?php echo h(isset($ur['representative']) ? $ur['representative'] : ''); ?>"
                                                     data-phone="<?php echo h(isset($ur['phone']) ? $ur['phone'] : ''); ?>"
@@ -917,11 +934,18 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                     <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
                     <input type="hidden" name="usage_id" id="materialUsageEditId" value="">
+                    <input type="hidden" name="vendor_id" id="materialUsageEditVendorId" value="" data-vendor-name="">
                     <input type="hidden" name="materials_tab" value="input">
                     <input type="hidden" name="ym" value="<?php echo h($ym); ?>">
 
                     <div class="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
                         이 수정은 선택한 자재구입비 한 건에만 적용됩니다.
+                    </div>
+
+                    <div class="rounded-xl border border-gray-200 bg-gray-50 p-3 vendor-search-wrap">
+                        <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
+                        <input type="text" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-material-vendor-search" placeholder="업체명 2글자 이상 입력" lang="ko" inputmode="text" autocomplete="off">
+                        <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
                     </div>
 
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -946,7 +970,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                         </label>
                         <label class="block">
                             <span class="text-xs text-gray-500 font-bold">업체명</span>
-                            <input type="text" name="vendor_name" id="materialUsageEditVendorName" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300" lang="ko" inputmode="text" autocomplete="off" required>
+                            <input type="text" name="vendor_name" id="materialUsageEditVendorName" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 bg-gray-100" placeholder="자동검색에서 업체 선택" required readonly>
                         </label>
                         <label class="block">
                             <span class="text-xs text-gray-500 font-bold">대표자명</span>
@@ -1082,6 +1106,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
 
             var materialUsageEditModal = document.getElementById('materialUsageEditModal');
             var materialUsageEditId = document.getElementById('materialUsageEditId');
+            var materialUsageEditVendorId = document.getElementById('materialUsageEditVendorId');
             var materialUsageEditDate = document.getElementById('materialUsageEditDate');
             var materialUsageEditCategory = document.getElementById('materialUsageEditCategory');
             var materialUsageEditAdvanceYn = document.getElementById('materialUsageEditAdvanceYn');
@@ -1111,6 +1136,7 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
                     if (materialUsageEditDate) materialUsageEditDate.value = editBtn.getAttribute('data-use-date') || '';
                     if (materialUsageEditCategory) materialUsageEditCategory.value = editBtn.getAttribute('data-category') || '자재비';
                     if (materialUsageEditAdvanceYn) materialUsageEditAdvanceYn.value = editBtn.getAttribute('data-advance-yn') || 'N';
+                    if (materialUsageEditVendorId) { materialUsageEditVendorId.value = editBtn.getAttribute('data-vendor-id') || ''; materialUsageEditVendorId.setAttribute('data-vendor-name', editBtn.getAttribute('data-vendor-name') || ''); }
                     if (materialUsageEditVendorName) materialUsageEditVendorName.value = editBtn.getAttribute('data-vendor-name') || '';
                     if (materialUsageEditRepresentative) materialUsageEditRepresentative.value = editBtn.getAttribute('data-representative') || '';
                     if (materialUsageEditPhone) materialUsageEditPhone.value = editBtn.getAttribute('data-phone') || '';
@@ -1171,8 +1197,8 @@ if ($bulkToken !== '' && isset($_SESSION['material_bulk_preview'][$bulkToken]) &
             }
             function hideSuggestList(listEl){ if(!listEl)return; listEl.innerHTML=''; if(listEl.className.indexOf('hidden')===-1) listEl.className += ' hidden'; listEl.style.display='none'; }
             function showSuggestList(listEl){ if(!listEl)return; listEl.className=listEl.className.replace(/\bhidden\b/g,'').replace(/\s+/g,' ').trim(); listEl.style.display='block'; }
-            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1,'안전관리비':1}; if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']) formEl.elements['base_rate'].value=''; if(formEl.elements['remark']) formEl.elements['remark'].value=''; }
-            function renderMaterialSuggestions(inputEl, rows){ var wrap=inputEl?inputEl.closest('.vendor-search-wrap'):null; var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; listEl.innerHTML=''; if(!rows||!rows.length){ var empty=document.createElement('div'); empty.className='px-3 py-2 text-sm text-gray-500'; empty.textContent='검색 결과 없음'; listEl.appendChild(empty); showSuggestList(listEl); return; } for(var i=0;i<rows.length;i++){ (function(row){ var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.phone ? ' ('+row.phone+')' : ''); btn.setAttribute('data-material-vendor-item','1'); btn.vendorData=row; btn.addEventListener('mousedown', function(ev){ ev.preventDefault(); }); listEl.appendChild(btn);} )(rows[i]); } showSuggestList(listEl); }
+            function fillMaterialPreset(formEl, p){ if(!formEl||!p)return; var allowed={'자재비':1,'구매품':1,'기타경비':1,'안전관리비':1}; if(formEl.elements['vendor_id']){formEl.elements['vendor_id'].value=p.vendor_id||'';formEl.elements['vendor_id'].setAttribute('data-vendor-name',p.vendor_name||'');} if(formEl.elements['category']) formEl.elements['category'].value=allowed[p.category]?p.category:'자재비'; if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value=p.vendor_name||''; if(formEl.elements['representative']) formEl.elements['representative'].value=p.representative||''; if(formEl.elements['phone']) formEl.elements['phone'].value=p.phone||''; if(formEl.elements['biz_no']) formEl.elements['biz_no'].value=p.biz_no||''; if(formEl.elements['base_rate']){formEl.elements['base_rate'].readOnly=false;formEl.elements['base_rate'].disabled=false;} if(formEl.elements['remark']){formEl.elements['remark'].readOnly=false;formEl.elements['remark'].disabled=false;} }
+            function renderMaterialSuggestions(inputEl, rows){ var wrap=inputEl?inputEl.closest('.vendor-search-wrap'):null; var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; listEl.innerHTML=''; if(!rows||!rows.length){ var empty=document.createElement('div'); empty.className='px-3 py-2 text-sm text-gray-500'; empty.textContent='검색 결과 없음'; listEl.appendChild(empty); showSuggestList(listEl); return; } for(var i=0;i<rows.length;i++){ (function(row){ var btn=document.createElement('button'); btn.type='button'; btn.className='block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50'; btn.textContent=(row.vendor_name||'') + (row.description ? ' · '+row.description : ''); btn.setAttribute('data-material-vendor-item','1'); btn.vendorData=row; btn.addEventListener('mousedown', function(ev){ ev.preventDefault(); }); listEl.appendChild(btn);} )(rows[i]); } showSuggestList(listEl); }
             document.addEventListener('input', function(e){ var inputEl=e.target; if(!inputEl||inputEl.className.indexOf('js-material-vendor-search')===-1) return; var wrap=inputEl.closest('.vendor-search-wrap'); var listEl=wrap?wrap.querySelector('.vendor-suggest-list'):null; if(!listEl)return; var q=(inputEl.value||'').trim(); if(materialVendorTimers[inputEl]) clearTimeout(materialVendorTimers[inputEl]); if(q.length<2){ hideSuggestList(listEl); return; } materialVendorTimers[inputEl]=setTimeout(function(){ // 프리셋 최신 검색
                 var xhr=new XMLHttpRequest(); xhr.open('GET','<?php echo h(base_url()); ?>/?r=construction/material_vendor_search&q='+encodeURIComponent(q),true); xhr.onreadystatechange=function(){ if(xhr.readyState!==4)return; var rows=[]; if(xhr.status===200){ try{var json=JSON.parse(xhr.responseText); rows=(json&&json.items)?json.items:[];}catch(err){rows=[];} } renderMaterialSuggestions(inputEl, rows); }; xhr.send(); },250); });
             document.addEventListener('click', function(e){ var target=e.target; if(target&&target.getAttribute&&target.getAttribute('data-material-vendor-item')==='1'){ var wrap=target.closest('.vendor-search-wrap'); var inputEl=wrap?wrap.querySelector('.js-material-vendor-search'):null; var formEl=target.closest('form'); // 자동채움 재초기화

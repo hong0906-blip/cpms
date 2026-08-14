@@ -193,6 +193,26 @@ if (count($subManagerIds) > 4) {
     exit;
 }
 
+$managerIdsToValidate = array($mainManagerId => $mainManagerId);
+foreach ($subManagerIds as $managerIdToValidate) {
+    $managerIdToValidate = (int)$managerIdToValidate;
+    if ($managerIdToValidate > 0) $managerIdsToValidate[$managerIdToValidate] = $managerIdToValidate;
+}
+$managerIdList = implode(',', array_map('intval', array_values($managerIdsToValidate)));
+$activeManagerIds = array();
+if ($managerIdList !== '') {
+    $stActiveManagers = $pdo->query("SELECT id FROM employees WHERE is_active = 1 AND id IN (" . $managerIdList . ")");
+    $activeManagerRows = $stActiveManagers ? $stActiveManagers->fetchAll(PDO::FETCH_ASSOC) : array();
+    foreach ($activeManagerRows as $activeManagerRow) $activeManagerIds[(int)$activeManagerRow['id']] = true;
+}
+foreach ($managerIdsToValidate as $managerIdToValidate) {
+    if (!isset($activeManagerIds[(int)$managerIdToValidate])) {
+        flash_set('error', '퇴직한 임직원은 공사 담당자로 지정할 수 없습니다.');
+        header('Location: ?r=공무');
+        exit;
+    }
+}
+
 try {
     $pdo->beginTransaction();
 

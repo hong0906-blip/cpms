@@ -4,11 +4,13 @@ require_once __DIR__ . '/../../bootstrap.php';
 require_once __DIR__ . '/tabs/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
 require_once __DIR__ . '/../../services/CostDataEventService.php';
+require_once __DIR__ . '/../../services/VendorService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
 use App\Services\CostDataEventService;
+use App\Services\VendorService;
 
 $isAjax = isset($_POST['ajax']) && (string)$_POST['ajax'] === '1';
 function cpms_outsourcing_cost_finish($isAjax, $ok, $message, $redirect, $entryId)
@@ -36,6 +38,7 @@ $redirect='?r=공사&pid='.$projectId.'&tab=outsourcing&outsourcing_tab=input';
 if (preg_match('/^\d{4}-\d{2}$/',$month)) $redirect.='&month='.urlencode($month);
 $pdo=Db::pdo();
 if (!$pdo || $projectId<=0 || !cpms_outsourcing_cost_ensure_table($pdo)) cpms_outsourcing_cost_finish($isAjax,false,'외주비 테이블 또는 프로젝트 정보를 확인할 수 없습니다.',$redirect,0);
+VendorService::bootstrap($pdo, true);
 $outsourcingColumnMap=array();
 try {
     $stOutsourcingColumns=$pdo->query("SHOW COLUMNS FROM cpms_outsourcing_costs");
@@ -80,6 +83,8 @@ try {
     if ($companyName==='') throw new Exception('업체명을 입력해주세요.');
     if ($amount<=0) throw new Exception('금액은 0보다 크게 입력해주세요.');
     if ($advancePaymentYn==='Y'&&!$outsourcingHasAdvancePaymentColumn) throw new Exception('선급여부 저장 컬럼을 준비하지 못했습니다. 관리자에게 문의해주세요.');
+    $resolvedVendorId=VendorService::selectedVendorId($pdo,isset($_POST['vendor_id'])?(int)$_POST['vendor_id']:0,$companyName);
+    if ($resolvedVendorId<=0) throw new Exception('업체명 자동검색에서 등록된 업체를 선택해주세요. 업체명을 직접 입력해서는 저장할 수 없습니다.');
     $destinationLock=CostChangeService::lockInfo('outsourcing',$expenseDate,'',date('Y-m-d'));
     if (!empty($destinationLock['locked'])) throw new Exception('마감된 기간의 자료입니다. 추가 또는 수정하려면 비용 변경 승인이 필요합니다.');
 
@@ -113,6 +118,7 @@ try {
     if ($outsourcingHasMemoColumn) $st->bindValue(':memo',$memo===''?null:$memo,$memo===''?PDO::PARAM_NULL:PDO::PARAM_STR);
     $st->bindValue(':now',$now); $st->execute();
     $writeAffectedRows=(int)$st->rowCount(); $savedEntryId=$entryId>0?$entryId:(int)$pdo->lastInsertId();
+    if ($resolvedVendorId>0&&$savedEntryId>0) VendorService::attachDbRecord($pdo,'cpms_outsourcing_costs',$savedEntryId,$resolvedVendorId);
     try {
         $stEventNew=$pdo->prepare("SELECT * FROM cpms_outsourcing_costs WHERE id=:id AND project_id=:pid LIMIT 1");
         $stEventNew->execute(array(':id'=>$savedEntryId,':pid'=>$projectId)); $eventNewRow=$stEventNew->fetch(PDO::FETCH_ASSOC);

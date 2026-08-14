@@ -73,6 +73,7 @@ if (!is_array($lines)) {
 
 $content = approval_parse_content(isset($d['content']) ? $d['content'] : '');
 $filesByType = array();
+$fileRows = array();
 if (isset($d['doc_type']) && approval_is_proposal_doc_type($d['doc_type']) && approval_table_exists($pdo, 'cpms_approval_files')) {
     $fs = $pdo->prepare("SELECT * FROM cpms_approval_files WHERE document_id=:id ORDER BY id DESC");
     $fs->execute(array(':id' => $id));
@@ -89,6 +90,30 @@ if (isset($d['doc_type']) && approval_is_proposal_doc_type($d['doc_type']) && ap
             }
         }
     }
+}
+$needsDeferredDriveSync = false;
+for ($driveFileIndex = 0; $driveFileIndex < count($fileRows); $driveFileIndex++) {
+    $driveFileStatus = isset($fileRows[$driveFileIndex]['upload_status']) ? strtolower(trim((string)$fileRows[$driveFileIndex]['upload_status'])) : '';
+    $driveLocalPath = isset($fileRows[$driveFileIndex]['file_path']) ? trim((string)$fileRows[$driveFileIndex]['file_path']) : '';
+    if ((in_array($driveFileStatus, array('pending', 'failed'), true) && $driveLocalPath !== '') || ($driveFileStatus === 'uploaded' && $driveLocalPath !== '')) {
+        $needsDeferredDriveSync = true;
+        break;
+    }
+}
+$detailDocStatus = isset($d['doc_status']) ? strtoupper(trim((string)$d['doc_status'])) : '';
+$detailPdfFileId = isset($d['completed_pdf_drive_file_id']) ? trim((string)$d['completed_pdf_drive_file_id']) : '';
+$detailPdfStatus = isset($d['completed_pdf_upload_status']) ? strtolower(trim((string)$d['completed_pdf_upload_status'])) : '';
+$detailPdfVersion = isset($d['completed_pdf_render_version']) ? (int)$d['completed_pdf_render_version'] : 0;
+$detailPdfNeedsCurrentRender = ($detailPdfFileId !== '' && $detailPdfVersion < cpms_approval_pdf_render_version());
+$detailPdfExpectedSize = isset($d['completed_pdf_size']) ? (int)$d['completed_pdf_size'] : 0;
+$detailPdfCacheMissing = ($detailPdfFileId !== ''
+    && !$detailPdfNeedsCurrentRender
+    && cpms_approval_pdf_cache_get_path($detailPdfFileId, $detailPdfExpectedSize) === '');
+if (in_array($detailDocStatus, array('APPROVED', 'COMPLETED'), true)
+    && (($detailPdfFileId === '' && in_array($detailPdfStatus, array('', 'pending', 'processing', 'failed'), true))
+        || $detailPdfNeedsCurrentRender
+        || $detailPdfCacheMissing)) {
+    $needsDeferredDriveSync = true;
 }
 
 $references = approval_fetch_references($pdo, $id);
@@ -112,6 +137,7 @@ $canDelete = approval_can_delete_document($pdo, $d, $u);
 $uid = approval_current_employee_id($pdo, $u);
 $userEmail = approval_current_user_email($u);
 $userName = approval_current_user_name($u);
+$isCeoUser = approval_is_ceo_user($pdo, $u);
 $myPendingLine = null;
 $finalActionLineOrder = 0;
 for ($i = 0; $i < count($lines); $i++) {
@@ -131,14 +157,16 @@ for ($i = 0; $i < count($lines); $i++) {
         $myPendingLine = $line;
     }
 }
-$canDecide = (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && $myPendingLine);
+$canCeoDirectApprove = ($detailDocStatus === 'PENDING' && $isCeoUser);
+$canDecide = ($detailDocStatus === 'PENDING' && ($myPendingLine || $canCeoDirectApprove));
+$canReject = ($detailDocStatus === 'PENDING' && $myPendingLine);
 $myPendingLineOrder = ($myPendingLine && isset($myPendingLine['line_order'])) ? (int)$myPendingLine['line_order'] : 0;
 $myPendingRole = ($myPendingLine && isset($myPendingLine['role_type'])) ? $myPendingLine['role_type'] : '';
-$isFinalCeoDecision = ($canDecide
+$isFinalCeoDecision = ($canCeoDirectApprove || ($canDecide
     && approval_role_is_ceo($myPendingRole)
     && $myPendingLineOrder > 0
-    && $myPendingLineOrder === $finalActionLineOrder);
-$isRecipientEditablePlan = ($canDecide && isset($d['doc_type']) && $d['doc_type'] === 'unused_leave_plan');
+    && $myPendingLineOrder === $finalActionLineOrder));
+$isRecipientEditablePlan = ($canDecide && !$canCeoDirectApprove && isset($d['doc_type']) && $d['doc_type'] === 'unused_leave_plan');
 $detailDocType = isset($d['doc_type']) ? strtolower(trim((string)$d['doc_type'])) : '';
 $approvalCommentsEnabled = ($detailDocType === 'leave' || approval_is_proposal_doc_type($detailDocType));
 $approvalComments = array();
@@ -212,7 +240,7 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
 
     <?php echo cpms_approval_pdf_links_html($d); ?>
 
-    <?php if (isset($d['doc_status']) && $d['doc_status'] === 'PENDING' && !$isRecipientEditablePlan) { ?>
+    <?php if ($detailDocStatus === 'PENDING' && !$isRecipientEditablePlan) { ?>
         <div class="no-print cpms-approval-decision-panel <?php echo ((isset($d['doc_type']) && (string)$d['doc_type'] === 'leave') || $isFinalCeoDecision) ? '' : 'cpms-mobile-hide'; ?> bg-white rounded-2xl border p-4">
             <?php if ($canDecide) { ?>
                 <div class="space-y-4">
@@ -222,6 +250,9 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
                             <?php approval_detail_render_comment_items($approvalComments, true); ?>
                         </div>
                     <?php } ?>
+                    <?php if ($canCeoDirectApprove) { ?>
+                        <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-800"><?php echo h(approval_ko('%EB%8C%80%ED%91%9C%EB%8A%94%20%ED%98%84%EC%9E%AC%20%EA%B2%B0%EC%9E%AC%20%EC%88%9C%EC%84%9C%EC%99%80%20%EA%B4%80%EA%B3%84%EC%97%86%EC%9D%B4%20%EB%B0%94%EB%A1%9C%20%EC%B5%9C%EC%A2%85%20%EC%8A%B9%EC%9D%B8%ED%95%A0%20%EC%88%98%20%EC%9E%88%EC%8A%B5%EB%8B%88%EB%8B%A4.')); ?></div>
+                    <?php } ?>
                     <div class="flex flex-col lg:flex-row lg:items-start gap-3">
                         <form method="post" action="?r=approval_decide" class="flex-1 space-y-2">
                             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
@@ -230,15 +261,17 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
                             <?php if ($approvalCommentsEnabled) { ?>
                                 <textarea name="approval_comment" rows="3" class="w-full border rounded-xl px-3 py-2" placeholder="<?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%20%EC%8B%9C%20%EB%82%A8%EA%B8%B8%20%EC%9D%98%EA%B2%AC%EC%9D%84%20%EC%9E%85%EB%A0%A5%ED%95%98%EC%84%B8%EC%9A%94.')); ?>"></textarea>
                             <?php } ?>
-                            <button type="submit" class="px-6 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"<?php echo $isFinalCeoDecision ? ' onclick="return confirm(\'최종 승인하시겠습니까?\');"' : ''; ?>><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%ED%95%98%EA%B8%B0')); ?></button>
+                            <button type="submit" class="px-6 py-3 rounded-xl bg-emerald-600 text-white font-extrabold"<?php echo $isFinalCeoDecision ? ' onclick="return confirm(\'' . h(approval_ko('%EB%8C%80%ED%91%9C%EC%8A%B9%EC%9D%B8%20%EC%B2%98%EB%A6%AC%ED%95%98%EC%8B%9C%EA%B2%A0%EC%8A%B5%EB%8B%88%EA%B9%8C%3F')) . '\');"' : ''; ?>><?php echo h(approval_ko('%EC%8A%B9%EC%9D%B8%ED%95%98%EA%B8%B0')); ?></button>
                         </form>
-                        <form method="post" action="?r=approval_decide" class="flex flex-wrap gap-2 items-center">
-                            <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-                            <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
-                            <input type="hidden" name="action" value="reject">
-                            <input type="text" name="reject_reason" class="border rounded-xl px-3 py-2 min-w-[280px]" placeholder="<?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%EC%82%AC%EC%9C%A0%20%EC%9E%85%EB%A0%A5')); ?>" required>
-                            <button type="submit" class="px-6 py-3 rounded-xl bg-rose-600 text-white font-extrabold"><?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%ED%95%98%EA%B8%B0')); ?></button>
-                        </form>
+                        <?php if ($canReject) { ?>
+                            <form method="post" action="?r=approval_decide" class="flex flex-wrap gap-2 items-center">
+                                <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+                                <input type="hidden" name="id" value="<?php echo (int)$id; ?>">
+                                <input type="hidden" name="action" value="reject">
+                                <input type="text" name="reject_reason" class="border rounded-xl px-3 py-2 min-w-[280px]" placeholder="<?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%EC%82%AC%EC%9C%A0%20%EC%9E%85%EB%A0%A5')); ?>" required>
+                                <button type="submit" class="px-6 py-3 rounded-xl bg-rose-600 text-white font-extrabold"><?php echo h(approval_ko('%EB%B0%98%EB%A0%A4%ED%95%98%EA%B8%B0')); ?></button>
+                            </form>
+                        <?php } ?>
                     </div>
                 </div>
             <?php } else { ?>
@@ -389,6 +422,8 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
                             $actionText = approval_status_label($actionType);
                             if ($actionType === 'APPROVE') {
                                 $actionText = approval_ko('%EC%8A%B9%EC%9D%B8');
+                            } else if ($actionType === 'CEO_DIRECT_APPROVE') {
+                                $actionText = approval_status_label('CEO_DIRECT_APPROVE');
                             } else if ($actionType === 'REJECT') {
                                 $actionText = approval_ko('%EB%B0%98%EB%A0%A4');
                             } else if ($actionType === 'APPROVED_LEAVE_CANCEL') {
@@ -437,3 +472,26 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
         </div>
     <?php } ?>
 </div>
+<?php if ($needsDeferredDriveSync) { ?>
+<script>
+(function () {
+    if (!window.fetch) return;
+    var body = <?php echo json_encode('id=' . (int)$id . '&_csrf=' . rawurlencode(csrf_token())); ?>;
+    window.setTimeout(function () {
+        window.fetch('?r=approval_deferred_sync', {
+            method: 'POST',
+            credentials: 'same-origin',
+            keepalive: true,
+            headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
+            body: body
+        }).then(function (response) {
+            if (!response.ok) return null;
+            return response.json();
+        }).then(function (result) {
+            if (!result || !result.ok || !result.completed_pdf || !result.completed_pdf.ok) return;
+            if (!result.completed_pdf.skipped) window.location.reload();
+        }).catch(function () {});
+    }, 50);
+}());
+</script>
+<?php } ?>

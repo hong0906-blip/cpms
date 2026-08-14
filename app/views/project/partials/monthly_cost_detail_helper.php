@@ -13,6 +13,7 @@ require_once __DIR__ . '/../../construction/partials/material_statement_helper.p
 require_once __DIR__ . '/../../construction/partials/equipment_statement_helper.php';
 require_once __DIR__ . '/../../safety/safety_cost_helper.php';
 require_once __DIR__ . '/../../../services/CostChangeService.php';
+require_once __DIR__ . '/../../../services/VendorService.php';
 
 if (!function_exists('cpms_monthly_summary_ym_valid')) {
 function cpms_monthly_summary_ym_valid($ym) {
@@ -113,6 +114,29 @@ function cpms_monthly_cost_detail_file_payload($fileType, $row, $routeId) {
     );
 }}
 
+if (!function_exists('cpms_monthly_cost_detail_safety_file_payload')) {
+function cpms_monthly_cost_detail_safety_file_payload($row) {
+    if (!is_array($row)) return null;
+    $recordId = isset($row['id']) ? trim((string)$row['id']) : '';
+    $pdf = isset($row['pdf']) && is_array($row['pdf']) ? $row['pdf'] : array();
+    if ($recordId === '' || count($pdf) === 0) return null;
+    if (function_exists('cpms_safety_cost_file_exists') && !cpms_safety_cost_file_exists($row)) return null;
+
+    $name = isset($pdf['original_name']) ? trim((string)$pdf['original_name']) : '';
+    if ($name === '') $name = '안전관리비 명세표.pdf';
+    $mime = isset($pdf['mime_type']) ? trim((string)$pdf['mime_type']) : 'application/pdf';
+    $size = isset($pdf['file_size']) ? (int)$pdf['file_size'] : 0;
+    $base = base_url() . '/?r=safety/safety_cost_download&id=' . rawurlencode($recordId);
+
+    return array(
+        'name' => $name,
+        'mime_type' => $mime,
+        'file_size' => $size,
+        'view_url' => $base,
+        'download_url' => $base . '&download=1',
+    );
+}}
+
 if (!function_exists('cpms_monthly_cost_detail_date_label')) {
 function cpms_monthly_cost_detail_date_label($dates) {
     if (!is_array($dates) || count($dates) === 0) return '';
@@ -145,8 +169,9 @@ function cpms_monthly_summary_labor_detail_rows($pdo, $projectId, $projectName, 
         if (function_exists('cpms_load_project_labor_worker_month_ratio_map') && function_exists('cpms_apply_project_labor_worker_month_ratios')) {
             $ratioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, (int)$projectId, (string)$ym, $projectWorkers);
             $projectWorkers = cpms_apply_project_labor_worker_month_ratios($projectWorkers, $ratioMap);
+            $projectWorkers = cpms_apply_project_labor_worker_month_wages($projectWorkers, cpms_load_project_labor_worker_wage_map($pdo, (int)$projectId, (string)$ym));
         }
-        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directMembers);
+        $workerRows = cpms_build_project_worker_rows($projectWorkers, $directMembers, $pdo, (string)$ym);
         $workers = cpms_build_timesheet_workers($workerRows);
 
         $gongsuData = cpms_load_gongsu_data($pdo, (string)$projectName, (string)$ym);
@@ -307,7 +332,9 @@ function cpms_monthly_summary_equipment_detail_rows($pdo, $projectId, $ym) {
         $metaInstalled = \App\Services\CostChangeService::isInstalled($pdo);
         $hasDeleted = cpms_monthly_summary_column_exists($pdo, 'cpms_equipment_items', 'is_deleted');
         $metaJoin = $metaInstalled ? " LEFT JOIN cpms_cost_record_meta crm ON crm.target_type='equipment' AND crm.target_id=CAST(u.id AS CHAR)" : '';
-        $sql = "SELECT u.*, e.category, e.vendor_name, e.spec, e.base_rate, e.remark AS item_remark
+        \App\Services\VendorService::bootstrap($pdo, true);
+        $equipmentVendorIdSelect = \App\Services\VendorService::hasVendorReference($pdo, 'cpms_equipment_items') ? 'e.vendor_id' : '0 AS vendor_id';
+        $sql = "SELECT u.*, " . $equipmentVendorIdSelect . ", e.category, e.vendor_name, e.spec, e.base_rate, e.remark AS item_remark
                 FROM cpms_equipment_usage u
                 INNER JOIN cpms_equipment_items e ON e.id = u.equipment_id AND e.project_id = u.project_id" . $metaJoin . "
                 WHERE u.project_id = :pid";
@@ -331,6 +358,7 @@ function cpms_monthly_summary_equipment_detail_rows($pdo, $projectId, $ym) {
         $st->execute();
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($rows)) $rows = array();
+        $rows = \App\Services\VendorService::applyCurrentVendorRows($pdo, $rows, 'vendor_name', '', '', '');
 
         $grouped = array();
         foreach ($rows as $row) {
@@ -408,7 +436,9 @@ function cpms_monthly_summary_material_detail_rows($pdo, $projectId, $ym) {
         $metaInstalled = \App\Services\CostChangeService::isInstalled($pdo);
         $hasDeleted = cpms_monthly_summary_column_exists($pdo, 'cpms_material_items', 'is_deleted');
         $metaJoin = $metaInstalled ? " LEFT JOIN cpms_cost_record_meta crm ON crm.target_type='material' AND crm.target_id=CAST(u.id AS CHAR)" : '';
-        $sql = "SELECT u.*, m.category, m.vendor_name, m.remark AS item_remark
+        \App\Services\VendorService::bootstrap($pdo, true);
+        $materialVendorIdSelect = \App\Services\VendorService::hasVendorReference($pdo, 'cpms_material_items') ? 'm.vendor_id' : '0 AS vendor_id';
+        $sql = "SELECT u.*, " . $materialVendorIdSelect . ", m.category, m.vendor_name, m.remark AS item_remark
                 FROM cpms_material_usage u
                 INNER JOIN cpms_material_items m ON m.id = u.material_id AND m.project_id = u.project_id" . $metaJoin . "
                 WHERE u.project_id = :pid
@@ -433,6 +463,7 @@ function cpms_monthly_summary_material_detail_rows($pdo, $projectId, $ym) {
         $st->execute();
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         if (!is_array($rows)) $rows = array();
+        $rows = \App\Services\VendorService::applyCurrentVendorRows($pdo, $rows, 'vendor_name', '', '', '');
 
         $usageIds = array();
         foreach ($rows as $row) {
@@ -463,6 +494,51 @@ function cpms_monthly_summary_material_detail_rows($pdo, $projectId, $ym) {
                 'files' => $files,
                 'source_type' => 'material',
                 'source_id' => $usageId > 0 ? (string)$usageId : '',
+            );
+            $result['total'] += $amount;
+        }
+    } catch (Exception $e) {
+        return $result;
+    }
+    return $result;
+}}
+
+if (!function_exists('cpms_monthly_summary_safety_detail_rows')) {
+function cpms_monthly_summary_safety_detail_rows($pdo, $projectId, $ym) {
+    $result = array('rows' => array(), 'total' => 0.0);
+    if (!$pdo || (int)$projectId <= 0 || !cpms_monthly_summary_ym_valid($ym) || !function_exists('cpms_safety_cost_project_items')) return $result;
+
+    try {
+        $rows = cpms_safety_cost_project_items((int)$projectId);
+        if (!is_array($rows)) $rows = array();
+        $rows = \App\Services\VendorService::applyCurrentVendorRows($pdo, $rows, 'vendor_name', 'representative', 'phone', 'biz_no');
+        foreach ($rows as $row) {
+            $useDate = isset($row['use_date']) ? cpms_safety_cost_valid_date($row['use_date']) : '';
+            if ($useDate === '') continue;
+            $recordId = isset($row['id']) ? trim((string)$row['id']) : '';
+            $settlementYm = \App\Services\CostChangeService::effectiveSettlementYm(
+                $pdo,
+                'safety',
+                $recordId,
+                'safety',
+                $useDate
+            );
+            if ((string)$settlementYm !== (string)$ym) continue;
+
+            $amount = function_exists('cpms_safety_cost_row_amount') ? (float)cpms_safety_cost_row_amount($row) : 0.0;
+            $files = array();
+            $filePayload = cpms_monthly_cost_detail_safety_file_payload($row);
+            if (is_array($filePayload)) $files[] = $filePayload;
+            $result['rows'][] = array(
+                'use_date' => $useDate,
+                'category' => isset($row['category']) ? trim((string)$row['category']) : '안전관리비',
+                'vendor_name' => isset($row['vendor_name']) ? trim((string)$row['vendor_name']) : '',
+                'item_name' => cpms_monthly_summary_first_text($row, array('item_name', 'use_content')),
+                'amount' => $amount,
+                'remark' => cpms_monthly_summary_first_text($row, array('remark', 'use_content')),
+                'files' => $files,
+                'source_type' => 'safety',
+                'source_id' => $recordId,
             );
             $result['total'] += $amount;
         }
@@ -521,12 +597,14 @@ function cpms_monthly_cost_detail_month_payload($pdo, $projectId, $projectName, 
     $labor = cpms_monthly_summary_labor_detail_rows($pdo, $projectId, $projectName, $ym);
     $equipment = cpms_monthly_summary_equipment_detail_rows($pdo, $projectId, $ym);
     $material = cpms_monthly_summary_material_detail_rows($pdo, $projectId, $ym);
+    $safety = cpms_monthly_summary_safety_detail_rows($pdo, $projectId, $ym);
     $manualOutsourcing = cpms_monthly_summary_manual_outsourcing_detail_rows($pdo, $projectId, $ym);
 
     $calculatedLabor = isset($labor['labor_total']) ? (float)$labor['labor_total'] : 0.0;
     $calculatedLaborOutsourcing = isset($labor['labor_outsourcing_total']) ? (float)$labor['labor_outsourcing_total'] : 0.0;
     $calculatedEquipment = isset($equipment['total']) ? (float)$equipment['total'] : 0.0;
     $calculatedMaterial = isset($material['total']) ? (float)$material['total'] : 0.0;
+    $calculatedSafety = isset($safety['total']) ? (float)$safety['total'] : 0.0;
     $calculatedManualOutsourcing = isset($manualOutsourcing['total']) ? (float)$manualOutsourcing['total'] : 0.0;
 
     return array(
@@ -535,12 +613,14 @@ function cpms_monthly_cost_detail_month_payload($pdo, $projectId, $projectName, 
             'labor' => isset($totals['labor']) ? (float)$totals['labor'] : $calculatedLabor,
             'equipment' => isset($totals['equipment']) ? (float)$totals['equipment'] : $calculatedEquipment,
             'material' => isset($totals['material']) ? (float)$totals['material'] : $calculatedMaterial,
+            'safety' => isset($totals['safety']) ? (float)$totals['safety'] : $calculatedSafety,
             'outsourcing' => isset($totals['outsourcing']) ? (float)$totals['outsourcing'] : ($calculatedLaborOutsourcing + $calculatedManualOutsourcing),
         ),
         'labor' => isset($labor['labor']) ? $labor['labor'] : array(),
         'labor_outsourcing' => isset($labor['labor_outsourcing']) ? $labor['labor_outsourcing'] : array(),
         'equipment' => isset($equipment['rows']) ? $equipment['rows'] : array(),
         'material' => isset($material['rows']) ? $material['rows'] : array(),
+        'safety' => isset($safety['rows']) ? $safety['rows'] : array(),
         'manual_outsourcing' => isset($manualOutsourcing['rows']) ? $manualOutsourcing['rows'] : array(),
     );
 }}

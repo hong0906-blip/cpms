@@ -11,16 +11,18 @@
 
   function openModal() {
     var modal = $('workforceSearchModal');
-    if (modal) modal.classList.remove('hidden');
-    setTimeout(function () {
-      var input = $('workforceSearchInput');
-      if (input) input.focus();
-    }, 0);
+    if (modal) {
+      modal.classList.remove('hidden');
+      modal.setAttribute('aria-hidden', 'false');
+    }
   }
 
   function closeModal() {
     var modal = $('workforceSearchModal');
-    if (modal) modal.classList.add('hidden');
+    if (modal) {
+      modal.classList.add('hidden');
+      modal.setAttribute('aria-hidden', 'true');
+    }
   }
 
   function escapeHtml(value) {
@@ -48,27 +50,36 @@
     var html = '';
     for (var i = 0; i < items.length; i++) {
       var w = items[i] || {};
-      html += ''
-        + '<button type="button" class="w-full text-left rounded-2xl border border-gray-200 p-4 hover:bg-emerald-50" data-workforce-select="' + escapeHtml(w.id) + '">'
-        + '<div class="font-extrabold text-gray-900">' + escapeHtml(w.name) + '</div>'
-        + '<div class="mt-1 text-xs text-gray-600">'
-        + escapeHtml(w.phone || '-') + ' · ' + escapeHtml(w.job_type || '-') + ' · ' + escapeHtml(w.agency_name || '-')
-        + ' · ' + formatMoney(w.daily_wage) + '원'
-        + '</div>'
-        + '</button>';
+      html += '<label class="flex cursor-pointer items-start gap-3 rounded-2xl border border-gray-200 p-4 hover:bg-emerald-50">'
+        + '<input type="checkbox" class="mt-1 workforce-duplicate-check" value="' + escapeHtml(w.id) + '">'
+        + '<span class="min-w-0 flex-1">'
+        + '<span class="block font-extrabold text-gray-900">' + escapeHtml(w.name) + '</span>'
+        + '<span class="mt-1 block text-xs text-gray-600">인력사 ' + escapeHtml(w.agency_name || '-')
+        + ' · 연락처 ' + escapeHtml(w.phone || '-')
+        + ' · 주민번호 앞자리 ' + escapeHtml(w.resident_no_front || '-')
+        + ' · ' + formatMoney(w.daily_wage) + '원</span>'
+        + '</span></label>';
     }
     box.innerHTML = html;
   }
 
+  function submitWorker(workerId) {
+    var hidden = $('workforceAddWorkerId');
+    var form = $('workforceAddForm');
+    if (!workerId || !hidden || !form) return;
+    hidden.value = workerId;
+    form.submit();
+  }
+
   function search() {
-    var input = $('workforceSearchInput');
+    var input = $('workforceQuickSearchInput');
     var q = input ? input.value.replace(/^\s+|\s+$/g, '') : '';
-    var box = $('workforceSearchResults');
+    var status = $('workforceQuickSearchStatus');
     if (!q) {
-      if (box) box.innerHTML = '<div class="rounded-2xl border border-gray-200 p-4 text-gray-500">이름을 입력하세요.</div>';
+      if (status) status.textContent = '이름을 입력하세요.';
       return;
     }
-    if (box) box.innerHTML = '<div class="rounded-2xl border border-gray-200 p-4 text-gray-500">검색 중...</div>';
+    if (status) status.textContent = '인력관리에서 검색 중...';
 
     fetch('?r=ajax/workforce_search&q=' + encodeURIComponent(q), {
       credentials: 'same-origin'
@@ -76,10 +87,27 @@
       .then(function (res) { return res.json(); })
       .then(function (data) {
         if (!data || !data.ok) throw new Error(data && data.message ? data.message : '검색 실패');
-        renderResults(data.items || []);
+        var items = data.items || [];
+        var exact = [];
+        for (var i = 0; i < items.length; i++) {
+          if (trim(items[i] && items[i].name) === q) exact.push(items[i]);
+        }
+        if (exact.length === 1) {
+          if (status) status.textContent = exact[0].name + ' 인원을 추가합니다.';
+          submitWorker(exact[0].id);
+          return;
+        }
+        var candidates = exact.length > 1 ? exact : items;
+        if (!candidates.length) {
+          if (status) status.textContent = '등록된 인력이 없습니다. 옆의 인원 등록 탭에서 먼저 등록하세요.';
+          return;
+        }
+        if (status) status.textContent = exact.length > 1 ? '동명이인이 있습니다. 확인 후 한 명을 선택하세요.' : '검색 결과에서 추가할 한 명을 선택하세요.';
+        renderResults(candidates);
+        openModal();
       })
       .catch(function (err) {
-        if (box) box.innerHTML = '<div class="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">' + escapeHtml(err.message || '검색 실패') + '</div>';
+        if (status) status.textContent = err.message || '검색 실패';
       });
   }
 
@@ -229,35 +257,39 @@
 
   document.addEventListener('click', function (event) {
     var target = event.target;
-    if (target && target.closest && target.closest('[data-workforce-modal-open]')) {
-      event.preventDefault();
-      openModal();
-      return;
-    }
     if (target && target.closest && target.closest('[data-workforce-modal-close]')) {
       event.preventDefault();
       closeModal();
       return;
     }
-    if (target && target.id === 'workforceSearchButton') {
+    if (target && target.id === 'workforceQuickSearchButton') {
       event.preventDefault();
       search();
       return;
     }
-    var selectBtn = target && target.closest ? target.closest('[data-workforce-select]') : null;
-    if (selectBtn) {
-      var id = selectBtn.getAttribute('data-workforce-select') || '';
-      var hidden = $('workforceAddWorkerId');
-      var form = $('workforceAddForm');
-      if (!id || !hidden || !form) return;
-      hidden.value = id;
-      form.submit();
+    if (target && target.id === 'workforceDuplicateAddButton') {
+      event.preventDefault();
+      var checked = document.querySelector('.workforce-duplicate-check:checked');
+      if (!checked) {
+        alert('추가할 인원을 선택하세요.');
+        return;
+      }
+      submitWorker(checked.value);
+    }
+  });
+
+  document.addEventListener('change', function (event) {
+    var target = event.target;
+    if (!target || !target.classList || !target.classList.contains('workforce-duplicate-check') || !target.checked) return;
+    var checks = document.querySelectorAll('.workforce-duplicate-check');
+    for (var i = 0; i < checks.length; i++) {
+      if (checks[i] !== target) checks[i].checked = false;
     }
   });
 
   document.addEventListener('keydown', function (event) {
     if (event.key === 'Escape') closeModal();
-    if (event.key === 'Enter' && event.target && event.target.id === 'workforceSearchInput') {
+    if (event.key === 'Enter' && event.target && event.target.id === 'workforceQuickSearchInput') {
       event.preventDefault();
       search();
     }

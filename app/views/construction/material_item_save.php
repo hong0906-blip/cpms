@@ -14,10 +14,12 @@ require_once __DIR__ . '/partials/material_statement_helper.php';
 require_once __DIR__ . '/partials/material_usage_helper.php';
 require_once __DIR__ . '/../safety/safety_cost_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/VendorService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\VendorService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 
@@ -58,6 +60,7 @@ if ($bulkAction === 'preview' || $bulkAction === 'apply') {
         exit;
     }
     cpms_material_usage_ensure_schema($pdo);
+    VendorService::bootstrap($pdo, true);
     if ($bulkAction === 'preview') {
         material_bulk_preview_action($pdo, $projectId, $ym);
     } else {
@@ -450,6 +453,14 @@ function material_bulk_append_safety_row($pdo, $projectId, $row, $now, &$store, 
     $amount = isset($row['amount']) ? (float)$row['amount'] : 0.0;
     if ((int)$projectId <= 0 || $useDate === '' || abs($amount) <= 0.0001) return 0;
 
+    $vendorId = VendorService::matchExistingVendorId($pdo, isset($row['vendor_id']) ? (int)$row['vendor_id'] : 0, array(
+        'vendor_name' => isset($row['vendor_name']) ? $row['vendor_name'] : '',
+        'biz_no' => isset($row['biz_no']) ? $row['biz_no'] : '',
+        'representative' => isset($row['representative']) ? $row['representative'] : '',
+        'phone' => isset($row['phone']) ? $row['phone'] : ''
+    ));
+    if ($vendorId <= 0) return 0;
+
     $recordId = cpms_safety_cost_new_id();
     $content = material_bulk_safety_content($row);
     $item = array(
@@ -462,6 +473,7 @@ function material_bulk_append_safety_row($pdo, $projectId, $row, $now, &$store, 
         'project_name' => $projectName,
         'use_date' => $useDate,
         'category' => '안전관리비',
+        'vendor_id' => $vendorId,
         'vendor_name' => trim((string)(isset($row['vendor_name']) ? $row['vendor_name'] : '')),
         'representative' => trim((string)(isset($row['representative']) ? $row['representative'] : '')),
         'phone' => trim((string)(isset($row['phone']) ? $row['phone'] : '')),
@@ -966,6 +978,11 @@ function material_bulk_save_row($pdo, $projectId, $row, $now)
     $advanceYn = material_bulk_normalize_advance(isset($row['advance_yn']) ? $row['advance_yn'] : 'N');
     $useDate = isset($row['use_date']) ? (string)$row['use_date'] : '';
     if ($useDate === '' || abs($amount) <= 0.0001) return 0;
+    $vendorId = VendorService::matchExistingVendorId($pdo, isset($row['vendor_id']) ? (int)$row['vendor_id'] : 0, array(
+        'vendor_name'=>$vendorName,'biz_no'=>$bizNo,'category'=>$category,
+        'representative'=>$representative,'phone'=>$phone
+    ));
+    if ($vendorId <= 0) return 0;
 
     $sourceRow = array('representative'=>$representative, 'phone'=>$phone, 'biz_no'=>$bizNo, 'remark'=>$remark);
     $existingItem = cpms_find_existing_material_item($pdo, $projectId, $category, $vendorName, $bizNo, $amount, $remark);
@@ -990,6 +1007,7 @@ function material_bulk_save_row($pdo, $projectId, $row, $now)
         $materialId = (int)$pdo->lastInsertId();
     }
     if ($materialId <= 0) return 0;
+    if ($vendorId > 0) VendorService::attachDbRecord($pdo, 'cpms_material_items', $materialId, $vendorId);
 
     if ($vendorName !== '' && $amount > 0) {
         try {
@@ -1266,6 +1284,14 @@ if (!$pdo) {
     exit;
 }
 cpms_material_usage_ensure_schema($pdo);
+VendorService::bootstrap($pdo, true);
+$selectedVendorId = isset($_POST['vendor_id']) ? (int)$_POST['vendor_id'] : 0;
+$resolvedVendorId = VendorService::selectedVendorId($pdo, $selectedVendorId, $vendorName);
+if ($resolvedVendorId <= 0) {
+    flash_set('error', '업체명 자동검색에서 등록된 업체를 선택해주세요. 업체명을 직접 입력해서는 저장할 수 없습니다.');
+    header('Location: ' . $redirect);
+    exit;
+}
 $hasMaterialAdvanceYn = cpms_material_usage_column_exists($pdo, 'advance_yn');
 $validatedUsageDates = material_collect_usage_dates($usageDates, $useDatesText, $ym);
 if (count($validatedUsageDates) > 1) {
@@ -1318,6 +1344,7 @@ if ($category === '안전관리비') {
                 'use_date' => $useDate,
                 'category' => '안전관리비',
                 'advance_yn' => $advanceYn,
+                'vendor_id' => $resolvedVendorId,
                 'vendor_name' => $vendorName,
                 'detail' => ($remark !== '') ? $remark : '안전관리비 사용',
                 'representative' => $representative,
@@ -1487,6 +1514,7 @@ try {
         $st->execute();
         $materialId = (int)$pdo->lastInsertId();
     }
+    if ($resolvedVendorId > 0 && $materialId > 0) VendorService::attachDbRecord($pdo, 'cpms_material_items', $materialId, $resolvedVendorId);
 
     // 공용 업체 프리셋 저장
     $stPreset = $pdo->prepare("INSERT INTO cpms_material_vendor_presets (vendor_name, category, representative, phone, biz_no, base_rate, remark, created_at, updated_at) VALUES (:vendor, :category, :rep, :phone, :biz_no, :base_rate, :remark, :now, :now) ON DUPLICATE KEY UPDATE category=VALUES(category), representative=VALUES(representative), phone=VALUES(phone), biz_no=VALUES(biz_no), base_rate=VALUES(base_rate), remark=VALUES(remark), updated_at=VALUES(updated_at)");

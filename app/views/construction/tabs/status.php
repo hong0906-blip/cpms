@@ -493,7 +493,8 @@ if (!function_exists('cpms_status_labor_total_between')) {
             // 적용 월마다 근로자 비율이 다를 수 있으므로 월 단위로 비율 맵을 다시 구성합니다.
             $ratioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, (int)$projectId, $ym, $baseProjectWorkers);
             $monthProjectWorkers = cpms_apply_project_labor_worker_month_ratios($baseProjectWorkers, $ratioMap);
-            $workerRows = cpms_build_project_worker_rows($monthProjectWorkers, $directTeamMembers);
+            $monthProjectWorkers = cpms_apply_project_labor_worker_month_wages($monthProjectWorkers, cpms_load_project_labor_worker_wage_map($pdo, (int)$projectId, $ym));
+            $workerRows = cpms_build_project_worker_rows($monthProjectWorkers, $directTeamMembers, $pdo, $ym);
             $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
             $workerAllocationMap = array();
             foreach ($timesheetWorkers as $timesheetWorker) {

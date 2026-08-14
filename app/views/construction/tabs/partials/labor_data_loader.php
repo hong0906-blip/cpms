@@ -1018,6 +1018,122 @@ if (!function_exists('cpms_load_direct_team_members')) {
     }
 }
 
+if (!function_exists('cpms_direct_team_salary_allocations')) {
+    /**
+     * 선택 월에 직영팀이 배정된 모든 현장의 실제 출역일수를 합산해 월급제 일 단가를 계산합니다.
+     */
+    function cpms_direct_team_salary_allocations($pdo, $directTeamMembers, $selectedMonth) {
+        $result = array();
+        static $cache = array();
+        $selectedMonth = trim((string)$selectedMonth);
+        if (!$pdo || !is_array($directTeamMembers) || !preg_match('/^\d{4}-\d{2}$/', $selectedMonth)) return $result;
+        $cacheKey = cpms_labor_cache_key($pdo, 'direct-salary-allocation:' . $selectedMonth);
+        if (isset($cache[$cacheKey])) return $cache[$cacheKey];
+        if (!cpms_table_exists_labor($pdo, 'direct_team_members') || !cpms_table_exists_labor($pdo, 'cpms_project_labor_workers') || !cpms_table_exists_labor($pdo, 'cpms_projects')) return $result;
+
+        $memberMap = array();
+        foreach ($directTeamMembers as $member) {
+            $memberId = isset($member['id']) ? (int)$member['id'] : 0;
+            $monthlySalary = isset($member['monthly_salary']) ? (int)$member['monthly_salary'] : 0;
+            $name = isset($member['name']) ? trim((string)$member['name']) : '';
+            // 예전 직영팀 단가제 인원(monthly_salary=0)은 월급 N/1 계산 대상이 아닙니다.
+            if ($memberId <= 0 || $monthlySalary <= 0 || $name === '') continue;
+            $memberMap[$memberId] = array('name'=>$name, 'monthly_salary'=>$monthlySalary);
+            $result[$memberId] = array('monthly_salary'=>$monthlySalary, 'total_output_days'=>0, 'daily_rate'=>0.0, 'project_days'=>array());
+        }
+        if (count($memberMap) === 0) {
+            $cache[$cacheKey] = $result;
+            return $result;
+        }
+
+        try {
+            $hasMonthTable = cpms_table_exists_labor($pdo, 'cpms_project_labor_worker_months');
+            $sql = "SELECT DISTINCT plw.direct_member_id, p.id AS project_id, p.name AS project_name
+                    FROM cpms_project_labor_workers plw
+                    INNER JOIN cpms_projects p ON p.id = plw.project_id";
+            if ($hasMonthTable) {
+                $sql .= " INNER JOIN cpms_project_labor_worker_months pwm
+                            ON pwm.project_id = plw.project_id
+                           AND pwm.labor_worker_id = plw.id
+                           AND pwm.month = :month
+                           AND pwm.is_deleted = 0";
+            }
+            $sql .= " WHERE plw.direct_member_id IS NOT NULL
+                        AND plw.direct_member_id > 0
+                        AND plw.is_deleted = 0
+                      ORDER BY p.id ASC, plw.direct_member_id ASC";
+            $st = $pdo->prepare($sql);
+            if ($hasMonthTable) $st->bindValue(':month', $selectedMonth);
+            $st->execute();
+            $assignments = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($assignments)) $assignments = array();
+
+            $projects = array();
+            foreach ($assignments as $assignment) {
+                $memberId = isset($assignment['direct_member_id']) ? (int)$assignment['direct_member_id'] : 0;
+                $projectId = isset($assignment['project_id']) ? (int)$assignment['project_id'] : 0;
+                if (!isset($memberMap[$memberId]) || $projectId <= 0) continue;
+                if (!isset($projects[$projectId])) {
+                    $projects[$projectId] = array('name'=>isset($assignment['project_name']) ? (string)$assignment['project_name'] : '', 'member_ids'=>array());
+                }
+                $projects[$projectId]['member_ids'][$memberId] = $memberId;
+            }
+
+            foreach ($projects as $projectId => $projectInfo) {
+                $gongsuData = cpms_load_gongsu_data($pdo, isset($projectInfo['name']) ? $projectInfo['name'] : '', $selectedMonth);
+                $gongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
+                $outputDays = isset($gongsuData['output_days']) && is_array($gongsuData['output_days']) ? $gongsuData['output_days'] : array();
+                $gongsuUnit = isset($gongsuData['gongsu_unit']) && is_array($gongsuData['gongsu_unit']) ? $gongsuData['gongsu_unit'] : array();
+                if (function_exists('cpms_apply_labor_overrides_to_dataset')) {
+                    $overridden = cpms_apply_labor_overrides_to_dataset($gongsuMap, $outputDays, $gongsuUnit, (int)$projectId, $selectedMonth);
+                    if (isset($overridden['gongsu_map']) && is_array($overridden['gongsu_map'])) $gongsuMap = $overridden['gongsu_map'];
+                }
+                foreach ($projectInfo['member_ids'] as $memberId) {
+                    $workerKey = cpms_normalize_worker_key($memberMap[$memberId]['name']);
+                    $dailyMap = $workerKey !== '' && isset($gongsuMap[$workerKey]) && is_array($gongsuMap[$workerKey]) ? $gongsuMap[$workerKey] : array();
+                    $days = 0;
+                    foreach ($dailyMap as $dateKey => $gongsuValue) {
+                        if (strpos((string)$dateKey, $selectedMonth . '-') !== 0 || !is_numeric($gongsuValue) || (float)$gongsuValue <= 0) continue;
+                        $days++;
+                    }
+                    if ($days > 0) {
+                        $result[$memberId]['project_days'][(int)$projectId] = $days;
+                        $result[$memberId]['total_output_days'] += $days;
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            $cache[$cacheKey] = $result;
+            return $result;
+        }
+
+        foreach ($result as $memberId => $allocation) {
+            $days = isset($allocation['total_output_days']) ? (int)$allocation['total_output_days'] : 0;
+            $salary = isset($allocation['monthly_salary']) ? (int)$allocation['monthly_salary'] : 0;
+            $result[$memberId]['daily_rate'] = $days > 0 ? ((float)$salary / (float)$days) : 0.0;
+        }
+        $cache[$cacheKey] = $result;
+        return $result;
+    }
+}
+
+if (!function_exists('cpms_apply_direct_team_salary_allocations')) {
+    function cpms_apply_direct_team_salary_allocations($pdo, $directTeamMembers, $selectedMonth) {
+        if (!is_array($directTeamMembers)) return array();
+        $allocations = cpms_direct_team_salary_allocations($pdo, $directTeamMembers, $selectedMonth);
+        foreach ($directTeamMembers as $index => $member) {
+            $memberId = isset($member['id']) ? (int)$member['id'] : 0;
+            if ($memberId <= 0 || !isset($allocations[$memberId])) continue;
+            $allocation = $allocations[$memberId];
+            $directTeamMembers[$index]['salary_allocation_mode'] = 1;
+            $directTeamMembers[$index]['salary_total_output_days'] = isset($allocation['total_output_days']) ? (int)$allocation['total_output_days'] : 0;
+            $directTeamMembers[$index]['salary_daily_rate'] = isset($allocation['daily_rate']) ? (float)$allocation['daily_rate'] : 0.0;
+            $directTeamMembers[$index]['salary_project_days'] = isset($allocation['project_days']) ? $allocation['project_days'] : array();
+        }
+        return $directTeamMembers;
+    }
+}
+
 if (!function_exists('cpms_parse_labor_wage_value')) {
     function cpms_parse_labor_wage_value($value) {
         $raw = trim((string)$value);
@@ -1031,6 +1147,10 @@ if (!function_exists('cpms_parse_labor_wage_value')) {
 if (!function_exists('cpms_resolve_labor_wage_rate')) {
     function cpms_resolve_labor_wage_rate($worker) {
         if (!is_array($worker)) return 0.0;
+        if (isset($worker['salary_allocation_mode']) && (int)$worker['salary_allocation_mode'] === 1) {
+            $salaryRate = isset($worker['salary_daily_rate']) ? (float)$worker['salary_daily_rate'] : 0.0;
+            return $salaryRate > 0 ? $salaryRate : 0.0;
+        }
         $depositRateRaw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : '';
         $dailyWageRaw = isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : '';
         $depositRate = cpms_parse_labor_wage_value($depositRateRaw);
@@ -1081,7 +1201,7 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
                     is_deleted TINYINT(1) NOT NULL DEFAULT 0,
                     created_at DATETIME NOT NULL,
                     updated_at DATETIME NOT NULL,
-                    UNIQUE KEY uk_project_labor_workers (project_id, name),
+                    KEY idx_project_labor_project_name(project_id, name),
                     KEY idx_project_labor_worker_id(worker_id),
                     KEY idx_project_labor_match(project_id, matched_status)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
@@ -1131,6 +1251,14 @@ if (!function_exists('cpms_ensure_project_labor_workers_table')) {
             }
             if (!isset($idxMap['idx_project_labor_match'])) {
                 $pdo->exec("ALTER TABLE cpms_project_labor_workers ADD KEY idx_project_labor_match(project_id, matched_status)");
+            }
+            // 동명이인을 서로 다른 인력 마스터 ID로 연결할 수 있도록 과거 이름 유일키를 일반 인덱스로 전환합니다.
+            if (isset($idxMap['uk_project_labor_workers'])) {
+                $pdo->exec("ALTER TABLE cpms_project_labor_workers DROP INDEX uk_project_labor_workers");
+                unset($idxMap['uk_project_labor_workers']);
+            }
+            if (!isset($idxMap['idx_project_labor_project_name'])) {
+                $pdo->exec("ALTER TABLE cpms_project_labor_workers ADD KEY idx_project_labor_project_name(project_id, name)");
             }
             return true;
         } catch (Exception $e) {
@@ -1341,6 +1469,141 @@ if (!function_exists('cpms_save_project_labor_worker_month_ratio')) {
     }
 }
 
+// 임금단가를 적용 월 기준으로 보존하여 이후 월의 인상분이 과거 월에 소급되지 않게 합니다.
+if (!function_exists('cpms_ensure_project_labor_worker_wages_table')) {
+    function cpms_ensure_project_labor_worker_wages_table($pdo) {
+        if (!$pdo) return false;
+        static $ensured = array();
+        $key = cpms_labor_cache_key($pdo, 'project-labor-worker-wages-schema');
+        if (isset($ensured[$key])) return $ensured[$key];
+        try {
+            $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_project_labor_worker_wages (
+                id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                project_id INT UNSIGNED NOT NULL,
+                labor_worker_id INT UNSIGNED NOT NULL,
+                effective_month CHAR(7) NOT NULL,
+                daily_wage INT NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                UNIQUE KEY uk_project_labor_worker_wage (project_id, labor_worker_id, effective_month),
+                KEY idx_project_labor_worker_wage_lookup(project_id, effective_month, labor_worker_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8");
+            $ensured[$key] = true;
+            return true;
+        } catch (Exception $e) {
+            $ensured[$key] = false;
+            return false;
+        }
+    }
+}
+
+if (!function_exists('cpms_load_project_labor_worker_wage_map')) {
+    function cpms_load_project_labor_worker_wage_map($pdo, $projectId, $month) {
+        $map = array();
+        $projectId = (int)$projectId;
+        $month = trim((string)$month);
+        if (!$pdo || $projectId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return $map;
+        if (!cpms_ensure_project_labor_worker_wages_table($pdo)) return $map;
+        try {
+            $st = $pdo->prepare("SELECT wage.labor_worker_id, wage.daily_wage
+                                 FROM cpms_project_labor_worker_wages wage
+                                 INNER JOIN (
+                                     SELECT labor_worker_id, MAX(effective_month) AS effective_month
+                                     FROM cpms_project_labor_worker_wages
+                                     WHERE project_id = :pid_inner
+                                       AND effective_month <= :month_inner
+                                     GROUP BY labor_worker_id
+                                 ) latest
+                                   ON latest.labor_worker_id = wage.labor_worker_id
+                                  AND latest.effective_month = wage.effective_month
+                                 WHERE wage.project_id = :pid");
+            $st->bindValue(':pid_inner', $projectId, PDO::PARAM_INT);
+            $st->bindValue(':month_inner', $month);
+            $st->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $st->execute();
+            while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+                $workerId = isset($row['labor_worker_id']) ? (int)$row['labor_worker_id'] : 0;
+                if ($workerId > 0) $map[$workerId] = max(0, (int)$row['daily_wage']);
+            }
+        } catch (Exception $e) {
+            return array();
+        }
+        return $map;
+    }
+}
+
+if (!function_exists('cpms_apply_project_labor_worker_month_wages')) {
+    function cpms_apply_project_labor_worker_month_wages($projectWorkers, $wageMap) {
+        if (!is_array($projectWorkers)) return array();
+        if (!is_array($wageMap)) $wageMap = array();
+        foreach ($projectWorkers as $index => $worker) {
+            $workerId = isset($worker['id']) ? (int)$worker['id'] : 0;
+            if ($workerId <= 0 || !isset($wageMap[$workerId])) continue;
+            $wage = max(0, (int)$wageMap[$workerId]);
+            $projectWorkers[$index]['daily_wage_snapshot'] = $wage;
+            $projectWorkers[$index]['deposit_rate'] = $wage;
+            $projectWorkers[$index]['monthly_wage_snapshot'] = $wage;
+        }
+        return $projectWorkers;
+    }
+}
+
+if (!function_exists('cpms_save_project_labor_worker_month_wage')) {
+    function cpms_save_project_labor_worker_month_wage($pdo, $projectId, $laborWorkerId, $month, $newWage, $previousWage) {
+        $result = array('saved' => false, 'is_latest' => false);
+        $projectId = (int)$projectId;
+        $laborWorkerId = (int)$laborWorkerId;
+        $month = trim((string)$month);
+        $newWage = max(0, (int)$newWage);
+        $previousWage = max(0, (int)$previousWage);
+        if (!$pdo || $projectId <= 0 || $laborWorkerId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) return $result;
+        if (!cpms_ensure_project_labor_worker_wages_table($pdo)) return $result;
+        try {
+            $stOwner = $pdo->prepare("SELECT id FROM cpms_project_labor_workers WHERE id = :wid AND project_id = :pid AND is_deleted = 0 LIMIT 1");
+            $stOwner->bindValue(':wid', $laborWorkerId, PDO::PARAM_INT);
+            $stOwner->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stOwner->execute();
+            if (!(int)$stOwner->fetchColumn()) return $result;
+
+            $stMax = $pdo->prepare("SELECT MAX(effective_month) FROM cpms_project_labor_worker_wages WHERE project_id = :pid AND labor_worker_id = :wid");
+            $stMax->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stMax->bindValue(':wid', $laborWorkerId, PDO::PARAM_INT);
+            $stMax->execute();
+            $latestMonth = trim((string)$stMax->fetchColumn());
+            $now = date('Y-m-d H:i:s');
+
+            if ($latestMonth === '') {
+                $stBase = $pdo->prepare("INSERT INTO cpms_project_labor_worker_wages
+                                         (project_id, labor_worker_id, effective_month, daily_wage, created_at, updated_at)
+                                         VALUES (:pid, :wid, '1970-01', :wage, :now, :now)
+                                         ON DUPLICATE KEY UPDATE daily_wage = VALUES(daily_wage), updated_at = VALUES(updated_at)");
+                $stBase->bindValue(':pid', $projectId, PDO::PARAM_INT);
+                $stBase->bindValue(':wid', $laborWorkerId, PDO::PARAM_INT);
+                $stBase->bindValue(':wage', $previousWage, PDO::PARAM_INT);
+                $stBase->bindValue(':now', $now);
+                $stBase->execute();
+                $latestMonth = '1970-01';
+            }
+
+            $stSave = $pdo->prepare("INSERT INTO cpms_project_labor_worker_wages
+                                     (project_id, labor_worker_id, effective_month, daily_wage, created_at, updated_at)
+                                     VALUES (:pid, :wid, :month, :wage, :now, :now)
+                                     ON DUPLICATE KEY UPDATE daily_wage = VALUES(daily_wage), updated_at = VALUES(updated_at)");
+            $stSave->bindValue(':pid', $projectId, PDO::PARAM_INT);
+            $stSave->bindValue(':wid', $laborWorkerId, PDO::PARAM_INT);
+            $stSave->bindValue(':month', $month);
+            $stSave->bindValue(':wage', $newWage, PDO::PARAM_INT);
+            $stSave->bindValue(':now', $now);
+            $stSave->execute();
+            $result['saved'] = true;
+            $result['is_latest'] = ($latestMonth === '' || $month >= $latestMonth);
+        } catch (Exception $e) {
+            return array('saved' => false, 'is_latest' => false);
+        }
+        return $result;
+    }
+}
+
 // 근로자 배열에서 월별 비율을 우선하고 없으면 기존 호환값을 사용합니다.
 if (!function_exists('cpms_resolve_worker_outsourcing_ratio')) {
     function cpms_resolve_worker_outsourcing_ratio($worker) {
@@ -1408,6 +1671,8 @@ if (!function_exists('cpms_labor_calculate_worker_period_amounts')) {
             && $outsourcingStart <= $outsourcingEnd;
         $totalGongsu = 0.0;
         $outsourcingGongsu = 0.0;
+        $totalOutputDays = 0;
+        $outsourcingOutputDays = 0;
         foreach ($dailyMap as $dateKey => $gongsuValue) {
             if (!is_numeric($gongsuValue)) continue;
             $dateKey = (string)$dateKey;
@@ -1416,18 +1681,25 @@ if (!function_exists('cpms_labor_calculate_worker_period_amounts')) {
             $gongsu = (float)$gongsuValue;
             if ($gongsu <= 0) continue;
             $totalGongsu += $gongsu;
+            $totalOutputDays++;
             if (!$hasOutsourcingRange || ($dateKey >= $outsourcingStart && $dateKey <= $outsourcingEnd)) {
                 $outsourcingGongsu += $gongsu;
+                $outsourcingOutputDays++;
             }
         }
         $wageRate = cpms_resolve_labor_wage_rate($worker);
         $outsourcingRatio = cpms_resolve_worker_outsourcing_ratio($worker);
-        $totalAmount = round($totalGongsu * $wageRate);
-        $outsourcingAmount = round($outsourcingGongsu * $wageRate * $outsourcingRatio / 100);
+        $isMonthlySalary = isset($worker['salary_allocation_mode']) && (int)$worker['salary_allocation_mode'] === 1;
+        $billingUnits = $isMonthlySalary ? $totalOutputDays : $totalGongsu;
+        $outsourcingBillingUnits = $isMonthlySalary ? $outsourcingOutputDays : $outsourcingGongsu;
+        $totalAmount = round($billingUnits * $wageRate);
+        $outsourcingAmount = round($outsourcingBillingUnits * $wageRate * $outsourcingRatio / 100);
         if ($outsourcingAmount > $totalAmount) $outsourcingAmount = $totalAmount;
         return array(
             'total_gongsu'=>$totalGongsu,
             'outsourcing_gongsu'=>$outsourcingGongsu,
+            'output_days'=>$totalOutputDays,
+            'billing_units'=>$billingUnits,
             'wage_rate'=>$wageRate,
             'total_amount'=>(float)$totalAmount,
             'outsourcing_ratio'=>$outsourcingRatio,
@@ -1518,6 +1790,7 @@ if (!function_exists('cpms_load_project_labor_workers_for_month')) {
             $st->execute();
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
             if (!is_array($rows)) $rows = array();
+            $rows = cpms_apply_project_labor_worker_month_wages($rows, cpms_load_project_labor_worker_wage_map($pdo, $projectId, $month));
         } catch (Exception $e) {
             $rows = array();
         }
@@ -1817,8 +2090,11 @@ if (!function_exists('cpms_cleanup_project_labor_workers')) {
 }
 
 if (!function_exists('cpms_build_project_worker_rows')) {
-    function cpms_build_project_worker_rows($projectWorkers, $directTeamMembers) {
+    function cpms_build_project_worker_rows($projectWorkers, $directTeamMembers, $pdo = null, $selectedMonth = '') {
         $rows = array();
+        if ($pdo && preg_match('/^\d{4}-\d{2}$/', (string)$selectedMonth)) {
+            $directTeamMembers = cpms_apply_direct_team_salary_allocations($pdo, $directTeamMembers, $selectedMonth);
+        }
         $directMap = array();
         foreach ($directTeamMembers as $member) {
             $id = isset($member['id']) ? (int)$member['id'] : 0;
@@ -1868,6 +2144,21 @@ if (!function_exists('cpms_build_project_worker_rows')) {
                     if ($field === 'name') continue;
                     if (trim((string)$fieldValue) !== '') $merged[$field] = $fieldValue;
                 }
+                $merged['direct_member_id'] = $directId;
+                if (isset($memberData['salary_allocation_mode']) && (int)$memberData['salary_allocation_mode'] === 1) {
+                    $merged['salary_allocation_mode'] = 1;
+                    $merged['monthly_salary'] = isset($memberData['monthly_salary']) ? (int)$memberData['monthly_salary'] : 0;
+                    $merged['salary_total_output_days'] = isset($memberData['salary_total_output_days']) ? (int)$memberData['salary_total_output_days'] : 0;
+                    $merged['salary_daily_rate'] = isset($memberData['salary_daily_rate']) ? (float)$memberData['salary_daily_rate'] : 0.0;
+                    $merged['salary_project_days'] = isset($memberData['salary_project_days']) ? $memberData['salary_project_days'] : array();
+                    $merged['deposit_rate'] = $merged['salary_daily_rate'];
+                    $merged['daily_wage'] = $merged['salary_daily_rate'];
+                    $merged['is_outsourcing'] = 0;
+                    $merged['legacy_outsourcing_ratio'] = 0;
+                    $merged['outsourcing_ratio'] = 0;
+                    $merged['outsourcing_start_date'] = '';
+                    $merged['outsourcing_end_date'] = '';
+                }
                 $data = $merged;
             }
             if (!isset($data['daily_wage'])) {
@@ -1916,6 +2207,7 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'worker_id' => isset($row['id']) ? (int)$row['id'] : 0,
                 'master_worker_id' => isset($data['worker_id']) ? (int)$data['worker_id'] : 0,
                 'source' => isset($row['source']) ? (string)$row['source'] : '',
+                'direct_member_id' => isset($data['direct_member_id']) ? (int)$data['direct_member_id'] : 0,
                 'name' => isset($data['name']) ? (string)$data['name'] : '',
                 'resident_no' => isset($data['resident_no']) ? (string)$data['resident_no'] : '',
                 'phone' => isset($data['phone']) ? (string)$data['phone'] : '',
@@ -1939,6 +2231,11 @@ if (!function_exists('cpms_build_timesheet_workers')) {
                 'daily_wage_snapshot' => isset($data['daily_wage_snapshot']) ? (int)$data['daily_wage_snapshot'] : 0,
                 'source_type' => isset($data['source_type']) ? (string)$data['source_type'] : 'manual',
                 'matched_status' => isset($data['matched_status']) ? (string)$data['matched_status'] : 'manual',
+                'salary_allocation_mode' => isset($data['salary_allocation_mode']) ? (int)$data['salary_allocation_mode'] : 0,
+                'monthly_salary' => isset($data['monthly_salary']) ? (int)$data['monthly_salary'] : 0,
+                'salary_total_output_days' => isset($data['salary_total_output_days']) ? (int)$data['salary_total_output_days'] : 0,
+                'salary_daily_rate' => isset($data['salary_daily_rate']) ? (float)$data['salary_daily_rate'] : 0.0,
+                'salary_project_days' => isset($data['salary_project_days']) && is_array($data['salary_project_days']) ? $data['salary_project_days'] : array(),
                 'month_assigned' => ((isset($row['month_assigned']) && (int)$row['month_assigned'] === 1) || (isset($data['month_assigned']) && (int)$data['month_assigned'] === 1)) ? 1 : 0,
             );
         }

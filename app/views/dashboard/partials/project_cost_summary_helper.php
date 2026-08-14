@@ -242,12 +242,12 @@ function cpms_dashboard_labor_apply_overrides($map, $projectId, $month)
 }}
 
 if (!function_exists('cpms_dashboard_labor_wage_map')) {
-function cpms_dashboard_labor_wage_map($pdo, $projectId)
+function cpms_dashboard_labor_wage_map($pdo, $projectId, $month = '')
 {
     static $cache = array();
     $wageMap = array();
     if (!$pdo || $projectId <= 0) return $wageMap;
-    $cacheKey = cpms_dashboard_cache_key($pdo, 'labor-wage-map:' . (int)$projectId);
+    $cacheKey = cpms_dashboard_cache_key($pdo, 'labor-wage-map:' . (int)$projectId . ':' . (string)$month);
     if (isset($cache[$cacheKey])) return $cache[$cacheKey];
     if (!function_exists('cpms_load_direct_team_members') || !function_exists('cpms_load_project_labor_workers') || !function_exists('cpms_build_project_worker_rows') || !function_exists('cpms_build_timesheet_workers')) {
         return $wageMap;
@@ -255,7 +255,10 @@ function cpms_dashboard_labor_wage_map($pdo, $projectId)
 
     $directTeamMembers = cpms_load_direct_team_members($pdo);
     $projectWorkers = cpms_load_project_labor_workers($pdo, (int)$projectId);
-    $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers);
+    if (preg_match('/^\d{4}-\d{2}$/', (string)$month) && function_exists('cpms_load_project_labor_worker_wage_map')) {
+        $projectWorkers = cpms_apply_project_labor_worker_month_wages($projectWorkers, cpms_load_project_labor_worker_wage_map($pdo, (int)$projectId, (string)$month));
+    }
+    $workerRows = cpms_build_project_worker_rows($projectWorkers, $directTeamMembers, $pdo, (string)$month);
     $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
 
     foreach ($timesheetWorkers as $worker) {
@@ -263,10 +266,13 @@ function cpms_dashboard_labor_wage_map($pdo, $projectId)
         $key = function_exists('cpms_normalize_worker_key') ? cpms_normalize_worker_key($name) : strtolower(trim($name));
         if ($key === '') continue;
         if (function_exists('cpms_resolve_labor_wage_rate')) {
-            $wageMap[$key] = (float)cpms_resolve_labor_wage_rate($worker);
+            $wageMap[$key] = array(
+                'rate'=>(float)cpms_resolve_labor_wage_rate($worker),
+                'use_output_days'=>isset($worker['salary_allocation_mode']) && (int)$worker['salary_allocation_mode'] === 1 ? 1 : 0
+            );
         } else {
             $raw = isset($worker['deposit_rate']) ? (string)$worker['deposit_rate'] : (isset($worker['daily_wage']) ? (string)$worker['daily_wage'] : '');
-            $wageMap[$key] = cpms_dashboard_parse_money($raw);
+            $wageMap[$key] = array('rate'=>cpms_dashboard_parse_money($raw), 'use_output_days'=>0);
         }
     }
     $cache[$cacheKey] = $wageMap;
@@ -301,8 +307,6 @@ function cpms_dashboard_labor_total($pdo, $projectId, $projectName, $startDate, 
         $endDate = $tmp;
     }
 
-    $wageMap = cpms_dashboard_labor_wage_map($pdo, (int)$projectId);
-
     try {
         $cursor = new DateTime(substr($startDate, 0, 7) . '-01');
         $last = new DateTime(substr($endDate, 0, 7) . '-01');
@@ -312,19 +316,26 @@ function cpms_dashboard_labor_total($pdo, $projectId, $projectName, $startDate, 
     }
 
     $sumGongsu = array();
+    $outputDaySets = array();
     while ($cursor <= $last) {
         $ym = $cursor->format('Y-m');
+        if (!isset($sumGongsu[$ym])) $sumGongsu[$ym] = array();
+        if (!isset($outputDaySets[$ym])) $outputDaySets[$ym] = array();
         $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
         $gongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
         $gongsuMap = cpms_dashboard_labor_apply_overrides($gongsuMap, (int)$projectId, $ym);
 
         foreach ($gongsuMap as $workerKey => $dailyMap) {
             if (!is_array($dailyMap)) continue;
-            if (!isset($sumGongsu[$workerKey])) $sumGongsu[$workerKey] = 0.0;
+            if (!isset($sumGongsu[$ym][$workerKey])) $sumGongsu[$ym][$workerKey] = 0.0;
+            if (!isset($outputDaySets[$ym][$workerKey])) $outputDaySets[$ym][$workerKey] = array();
             foreach ($dailyMap as $dateKey => $gongsuValue) {
                 if (!is_numeric($gongsuValue)) continue;
                 if ((string)$dateKey < (string)$startDate || (string)$dateKey > (string)$endDate) continue;
-                $sumGongsu[$workerKey] += (float)$gongsuValue;
+                $gongsuValue = (float)$gongsuValue;
+                if ($gongsuValue <= 0) continue;
+                $sumGongsu[$ym][$workerKey] += $gongsuValue;
+                $outputDaySets[$ym][$workerKey][(string)$dateKey] = true;
             }
         }
 
@@ -332,9 +343,14 @@ function cpms_dashboard_labor_total($pdo, $projectId, $projectName, $startDate, 
     }
 
     $total = 0.0;
-    foreach ($sumGongsu as $workerKey => $gongsuTotal) {
-        $wageRate = isset($wageMap[$workerKey]) ? (float)$wageMap[$workerKey] : 0.0;
-        $total += ((float)$gongsuTotal) * $wageRate;
+    foreach ($sumGongsu as $ym => $monthGongsu) {
+        $wageMap = cpms_dashboard_labor_wage_map($pdo, (int)$projectId, $ym);
+        foreach ($monthGongsu as $workerKey => $gongsuTotal) {
+            $wageInfo = isset($wageMap[$workerKey]) ? $wageMap[$workerKey] : 0.0;
+            $wageRate = is_array($wageInfo) && isset($wageInfo['rate']) ? (float)$wageInfo['rate'] : (float)$wageInfo;
+            $billingUnits = is_array($wageInfo) && !empty($wageInfo['use_output_days']) ? count($outputDaySets[$ym][$workerKey]) : (float)$gongsuTotal;
+            $total += $billingUnits * $wageRate;
+        }
     }
     if (function_exists('cpms_labor_force_amount_between')) {
         $total += cpms_labor_force_amount_between($pdo, (int)$projectId, $startDate, $endDate);
@@ -524,6 +540,7 @@ function cpms_dashboard_labor_total_between($pdo, $projectId, $projectName, $sta
     }
 
     $sumGongsu = array();
+    $outputDaySets = array();
     while ($cursor <= $last) {
         $ym = $cursor->format('Y-m');
         $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
@@ -533,10 +550,14 @@ function cpms_dashboard_labor_total_between($pdo, $projectId, $projectName, $sta
         foreach ($gongsuMap as $workerKey => $dailyMap) {
             if (!is_array($dailyMap)) continue;
             if (!isset($sumGongsu[$workerKey])) $sumGongsu[$workerKey] = 0.0;
+            if (!isset($outputDaySets[$workerKey])) $outputDaySets[$workerKey] = array();
             foreach ($dailyMap as $dateKey => $gongsuValue) {
                 if (!is_numeric($gongsuValue)) continue;
                 if ((string)$dateKey < (string)$startDate || (string)$dateKey > (string)$endDate) continue;
-                $sumGongsu[$workerKey] += (float)$gongsuValue;
+                $gongsuValue = (float)$gongsuValue;
+                if ($gongsuValue <= 0) continue;
+                $sumGongsu[$workerKey] += $gongsuValue;
+                $outputDaySets[$workerKey][(string)$dateKey] = true;
             }
         }
         $cursor->modify('+1 month');
@@ -544,8 +565,10 @@ function cpms_dashboard_labor_total_between($pdo, $projectId, $projectName, $sta
 
     $total = 0.0;
     foreach ($sumGongsu as $workerKey => $gongsuTotal) {
-        $wageRate = isset($wageMap[$workerKey]) ? (float)$wageMap[$workerKey] : 0.0;
-        $total += ((float)$gongsuTotal) * $wageRate;
+        $wageInfo = isset($wageMap[$workerKey]) ? $wageMap[$workerKey] : 0.0;
+        $wageRate = is_array($wageInfo) && isset($wageInfo['rate']) ? (float)$wageInfo['rate'] : (float)$wageInfo;
+        $billingUnits = is_array($wageInfo) && !empty($wageInfo['use_output_days']) ? count($outputDaySets[$workerKey]) : (float)$gongsuTotal;
+        $total += $billingUnits * $wageRate;
     }
     if (function_exists('cpms_labor_force_amount_between')) {
         $total += cpms_labor_force_amount_between($pdo, (int)$projectId, $startDate, $endDate);
@@ -599,9 +622,9 @@ function cpms_dashboard_project_monthly_cost_rows($pdo, $projectId, $projectName
         return $cache[$cacheKey];
     }
 
-    $wageMap = cpms_dashboard_labor_wage_map($pdo, (int)$projectId);
     while ($cursor <= $last) {
         $ym = $cursor->format('Y-m');
+        $wageMap = cpms_dashboard_labor_wage_map($pdo, (int)$projectId, $ym);
         $salesRange = cpms_dashboard_cost_period_range($ym, 'sales');
         $laborRange = cpms_dashboard_cost_period_range($ym, 'labor');
         $costRange = cpms_dashboard_cost_period_range($ym, 'material');

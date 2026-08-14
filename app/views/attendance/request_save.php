@@ -241,7 +241,7 @@ try {
         $requestDetailText = implode(' / ', $requestDetailParts);
     }
 
-    $messageText = implode("\n", array(
+    $messageLines = array(
         '[CPMS 출퇴근 수정 요청]',
         '',
         '요청자 : ' . $requesterName,
@@ -251,7 +251,20 @@ try {
         '요청 사유 : ' . ($reason !== '' ? $reason : '-'),
         '',
         '출퇴근/근태관리에서 확인 바랍니다.'
-    ));
+    );
+    if (function_exists('cpms_app_route_url')) {
+        $requestUrl = cpms_app_route_url($pdo, 'dashboard_executive', array(
+            'exec_tab' => 'attendanceManagement',
+            'tab' => 'attendance',
+            'atab' => 'requests',
+            'status' => 'pending',
+            'request_date' => $d
+        ));
+        if ($requestUrl !== '') {
+            $messageLines[] = 'URL : ' . $requestUrl . '#attendance-request-' . (int)$requestId;
+        }
+    }
+    $messageText = implode("\n", $messageLines);
 
     try {
         require_once __DIR__ . '/../common/chat_notification_helpers.php';

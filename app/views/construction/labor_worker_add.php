@@ -1,7 +1,7 @@
 <?php
 /**
- * - 공사: 노무비 인원작성(직영팀/수동 추가)
- * - 프로젝트별 인원 목록에 작업자를 추가
+ * - 공사: 노무비 인원작성(인력 마스터 검색 추가)
+ * - 임의 이름 입력 없이 등록된 worker_id로만 프로젝트에 연결
  * - PHP 5.6 호환
  */
 
@@ -31,8 +31,8 @@ if (!csrf_check($token)) {
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $directMemberId = isset($_POST['direct_member_id']) ? (int)$_POST['direct_member_id'] : 0;
 $workforceWorkerId = isset($_POST['workforce_worker_id']) ? (int)$_POST['workforce_worker_id'] : 0;
-$manualName = isset($_POST['manual_name']) ? trim((string)$_POST['manual_name']) : '';
-$manualCompanyName = isset($_POST['manual_company_name']) ? trim((string)$_POST['manual_company_name']) : '';
+$manualName = '';
+$manualCompanyName = '';
 $month = isset($_POST['month']) ? trim((string)$_POST['month']) : '';
 $laborTab = isset($_POST['labor_tab']) ? trim((string)$_POST['labor_tab']) : 'workers';
 if ($laborTab === '') $laborTab = 'workers';
@@ -53,8 +53,13 @@ if ($projectId <= 0) {
     exit;
 }
 
-if ($directMemberId <= 0 && $workforceWorkerId <= 0 && $manualName === '') {
-    flash_set('error', '추가할 인원 정보를 입력하세요.');
+if ($workforceWorkerId <= 0 && $directMemberId <= 0) {
+    flash_set('error', '인력관리 또는 직영팀 명부에서 인원을 선택하세요.');
+    header('Location: ' . $redirect);
+    exit;
+}
+if ($workforceWorkerId > 0 && $directMemberId > 0) {
+    flash_set('error', '추가할 인원 유형을 하나만 선택하세요.');
     header('Location: ' . $redirect);
     exit;
 }
@@ -78,9 +83,30 @@ try {
     $name = $manualName;
     $companyName = $manualCompanyName === '' ? '창명건설' : $manualCompanyName;
     $workforcePayload = null;
+    $directMember = null;
     $savedWorkerId = 0;
 
-    if ($workforceWorkerId > 0) {
+    if ($directMemberId > 0) {
+        if (!cpms_table_exists_labor($pdo, 'direct_team_members')) {
+            flash_set('error', '직영팀 명부 테이블이 없습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $st = $pdo->prepare("SELECT * FROM direct_team_members WHERE id = :id AND is_active = 1 LIMIT 1");
+        $st->bindValue(':id', $directMemberId, PDO::PARAM_INT);
+        $st->execute();
+        $directMember = $st->fetch(PDO::FETCH_ASSOC);
+
+        if (!$directMember || !isset($directMember['name']) || trim((string)$directMember['name']) === '') {
+            flash_set('error', '재직 중인 직영팀 인원을 찾을 수 없습니다. 퇴직자는 노무비에 추가할 수 없습니다.');
+            header('Location: ' . $redirect);
+            exit;
+        }
+
+        $source = 'direct';
+        $name = trim((string)$directMember['name']);
+    } else if ($workforceWorkerId > 0) {
         if (!cpms_labor_load_workforce_services()) {
             flash_set('error', '인력관리 서비스를 찾을 수 없습니다.');
             header('Location: ' . $redirect);
@@ -101,37 +127,20 @@ try {
         $companyName = isset($workforcePayload['company_name']) ? trim((string)$workforcePayload['company_name']) : '';
     }
 
-    if ($directMemberId > 0) {
-        if (!cpms_table_exists_labor($pdo, 'direct_team_members')) {
-            flash_set('error', '직영팀 명부 테이블이 없습니다.');
-            header('Location: ' . $redirect);
-            exit;
-        }
-
-        $st = $pdo->prepare("SELECT * FROM direct_team_members WHERE id = :id LIMIT 1");
-        $st->bindValue(':id', $directMemberId, PDO::PARAM_INT);
-        $st->execute();
-        $member = $st->fetch();
-
-        if (!$member || !isset($member['name']) || trim((string)$member['name']) === '') {
-            flash_set('error', '직영팀 인원을 찾을 수 없습니다.');
-            header('Location: ' . $redirect);
-            exit;
-        }
-
-        $source = 'direct';
-        $name = trim((string)$member['name']);
-    }
-
     if ($name === '') {
         flash_set('error', '이름을 입력하세요.');
         header('Location: ' . $redirect);
         exit;
     }
 
-    $stCheck = $pdo->prepare("SELECT id FROM cpms_project_labor_workers WHERE project_id = :pid AND name = :name LIMIT 1");
+    if ($source === 'direct') {
+        $stCheck = $pdo->prepare("SELECT id FROM cpms_project_labor_workers WHERE project_id = :pid AND direct_member_id = :member_id LIMIT 1");
+        $stCheck->bindValue(':member_id', $directMemberId, PDO::PARAM_INT);
+    } else {
+        $stCheck = $pdo->prepare("SELECT id FROM cpms_project_labor_workers WHERE project_id = :pid AND worker_id = :worker_id LIMIT 1");
+        $stCheck->bindValue(':worker_id', $workforceWorkerId, PDO::PARAM_INT);
+    }
     $stCheck->bindValue(':pid', $projectId, PDO::PARAM_INT);
-    $stCheck->bindValue(':name', $name);
     $stCheck->execute();
     $existingId = (int)$stCheck->fetchColumn();
 
@@ -261,6 +270,10 @@ try {
 
     if ($savedWorkerId > 0 && preg_match('/^\d{4}-\d{2}$/', $month)) {
         cpms_assign_project_labor_worker_month($pdo, $projectId, $savedWorkerId, $month);
+        if (is_array($workforcePayload)) {
+            $initialWage = isset($workforcePayload['daily_wage_snapshot']) ? (int)$workforcePayload['daily_wage_snapshot'] : 0;
+            cpms_save_project_labor_worker_month_wage($pdo, $projectId, $savedWorkerId, $month, $initialWage, $initialWage);
+        }
     }
 
     if ($source === 'direct') {

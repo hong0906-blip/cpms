@@ -8,6 +8,14 @@ $monthlyInputTab = isset($cpmsMonthlyInputTab) ? trim((string)$cpmsMonthlyInputT
 if ($monthlyInputTab === '') $monthlyInputTab = 'monthly_input';
 $monthlyInputFixedProjectId = isset($cpmsMonthlyInputSelectedProjectId) ? (int)$cpmsMonthlyInputSelectedProjectId : 0;
 $monthlyInputShowProjectFilter = isset($cpmsMonthlyInputShowProjectFilter) ? (bool)$cpmsMonthlyInputShowProjectFilter : true;
+$monthlyInputShowTotalColumn = isset($cpmsMonthlyInputShowTotalColumn) ? (bool)$cpmsMonthlyInputShowTotalColumn : true;
+$monthlyInputShowRevenueRow = isset($cpmsMonthlyInputShowRevenueRow) ? (bool)$cpmsMonthlyInputShowRevenueRow : true;
+$monthlyInputSingleMonthOnly = isset($cpmsMonthlyInputSingleMonthOnly) ? (bool)$cpmsMonthlyInputSingleMonthOnly : false;
+$monthlyInputHideEmptySections = isset($cpmsMonthlyInputHideEmptySections) ? (bool)$cpmsMonthlyInputHideEmptySections : false;
+$monthlyInputShowDeductionEntry = isset($cpmsMonthlyInputShowDeductionEntry) ? (bool)$cpmsMonthlyInputShowDeductionEntry : true;
+$monthlyInputShowProfitRow = isset($cpmsMonthlyInputShowProfitRow) ? (bool)$cpmsMonthlyInputShowProfitRow : true;
+$monthlyInputProjectFilterLabel = isset($cpmsMonthlyInputProjectFilterLabel) ? trim((string)$cpmsMonthlyInputProjectFilterLabel) : '프로젝트 선택 :';
+if ($monthlyInputProjectFilterLabel === '') $monthlyInputProjectFilterLabel = '프로젝트 선택 :';
 $selectedProjectId = $monthlyInputFixedProjectId > 0 ? $monthlyInputFixedProjectId : (isset($_GET['pid']) ? (int)$_GET['pid'] : 0);
 $viewMonthParam = isset($_GET['view_month']) ? trim((string)$_GET['view_month']) : '';
 $monthlyProjects = array();
@@ -35,11 +43,43 @@ require_once __DIR__ . '/../safety/safety_cost_helper.php';
 require_once __DIR__ . '/../construction/tabs/partials/labor_data_loader.php';
 require_once __DIR__ . '/../construction/tabs/partials/outsourcing_data_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/VendorService.php';
 
 function monthly_zero_map($months) { $m = array(); foreach ($months as $ym) { $m[$ym] = 0; } return $m; }
 function amount_fmt($n){ if ((float)$n == 0) { return '-'; } return number_format((float)$n); }
 function row_total($row, $months){ $sum = 0; foreach($months as $ym){ $sum += isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; } return $sum; }
 function ym_valid($ym){ return preg_match('/^\\d{4}-\\d{2}$/', (string)$ym); }
+function project_monthly_contract_months($startDate, $endDate) {
+    $startDate = trim((string)$startDate);
+    $endDate = trim((string)$endDate);
+    $startYm = preg_match('/^(\\d{4})-(\\d{2})/', $startDate, $startMatch)
+        ? $startMatch[1] . '-' . $startMatch[2]
+        : '';
+    $endYm = preg_match('/^(\\d{4})-(\\d{2})/', $endDate, $endMatch)
+        ? $endMatch[1] . '-' . $endMatch[2]
+        : '';
+    $cursorYear = (int)substr($startYm, 0, 4);
+    $cursorMonth = (int)substr($startYm, 5, 2);
+    $endYear = (int)substr($endYm, 0, 4);
+    $endMonth = (int)substr($endYm, 5, 2);
+    if (
+        !ym_valid($startYm) || !ym_valid($endYm) ||
+        $cursorMonth < 1 || $cursorMonth > 12 ||
+        $endMonth < 1 || $endMonth > 12 ||
+        strcmp($startYm, $endYm) > 0
+    ) return array();
+
+    $months = array();
+    while ($cursorYear < $endYear || ($cursorYear === $endYear && $cursorMonth <= $endMonth)) {
+        $months[] = sprintf('%04d-%02d', $cursorYear, $cursorMonth);
+        $cursorMonth++;
+        if ($cursorMonth > 12) {
+            $cursorMonth = 1;
+            $cursorYear++;
+        }
+    }
+    return $months;
+}
 function project_monthly_text_key($value) {
     $value = trim((string)$value);
     if ($value === '') return '';
@@ -149,7 +189,8 @@ function project_monthly_labor_breakdown($pdo, $projectId, $projectName, $ym) {
     $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
     $laborRatioMap = cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $ym, $projectLaborWorkers);
     $projectLaborWorkers = cpms_apply_project_labor_worker_month_ratios($projectLaborWorkers, $laborRatioMap);
-    $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers);
+    $projectLaborWorkers = cpms_apply_project_labor_worker_month_wages($projectLaborWorkers, cpms_load_project_labor_worker_wage_map($pdo, $projectId, $ym));
+    $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamMembers, $pdo, $ym);
     $timesheetWorkers = cpms_build_timesheet_workers($workerRows);
     $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
     $attendanceGongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map']) ? $gongsuData['gongsu_map'] : array();
@@ -391,16 +432,8 @@ if ($pdo) {
     if (is_array($selectedProject)) {
         $startDate = (string)$selectedProject['start_date'];
         $endDate = (string)$selectedProject['end_date'];
-        if (preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $startDate) && preg_match('/^\\d{4}-\\d{2}-\\d{2}$/', $endDate)) {
-            $s = substr($startDate, 0, 7) . '-01';
-            $e = substr($endDate, 0, 7) . '-01';
-            $cur = strtotime($s);
-            $end = strtotime($e);
-            while ($cur <= $end) {
-                $allMonths[] = date('Y-m', $cur);
-                $cur = strtotime('+1 month', $cur);
-            }
-        } else {
+        $allMonths = project_monthly_contract_months($startDate, $endDate);
+        if (count($allMonths) === 0) {
             $periodMissing = true;
         }
     }
@@ -410,7 +443,7 @@ if (count($allMonths) === 0) { $allMonths[] = date('Y-m'); }
 $monthlyRevenue = monthly_zero_map($allMonths);
 
 $currentMonth = date('Y-m');
-if ($viewMonthParam === 'all') {
+if (!$monthlyInputSingleMonthOnly && $viewMonthParam === 'all') {
     $selectedViewMonth = 'all';
 } else if (ym_valid($viewMonthParam) && in_array($viewMonthParam, $allMonths, true)) {
     $selectedViewMonth = $viewMonthParam;
@@ -423,6 +456,7 @@ if ($selectedViewMonth === '' && count($allMonths) > 0) { $selectedViewMonth = $
 $displayMonths = ($selectedViewMonth === 'all') ? $allMonths : array($selectedViewMonth);
 
 if ($pdo && is_array($selectedProject)) {
+    \App\Services\VendorService::bootstrap($pdo, true);
     $revenueResult = project_monthly_load_revenue($pdo, $selectedProjectId, $allMonths);
     $monthlyRevenue = isset($revenueResult['months']) ? $revenueResult['months'] : $monthlyRevenue;
     $salesDiagnostics[] = '매출 집계 기준: ' . (isset($revenueResult['basis']) ? $revenueResult['basis'] : '항목별 완료수량');
@@ -431,11 +465,13 @@ if ($pdo && is_array($selectedProject)) {
     try {
         $hasMatDeleted = project_monthly_column_exists($pdo, 'cpms_material_items', 'is_deleted');
         $matDeletedWhere = $hasMatDeleted ? ' AND (m.is_deleted = 0 OR m.is_deleted IS NULL)' : '';
-        $stMat = $pdo->prepare('SELECT m.id,m.category,m.vendor_name,m.representative,m.phone,m.biz_no,m.remark,u.id AS usage_id,u.use_date,u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id=m.id AND u.project_id=m.project_id WHERE m.project_id=:pid' . $matDeletedWhere);
+        $materialVendorIdSelect = \App\Services\VendorService::hasVendorReference($pdo, 'cpms_material_items') ? 'm.vendor_id' : '0 AS vendor_id';
+        $stMat = $pdo->prepare('SELECT m.id,' . $materialVendorIdSelect . ',m.category,m.vendor_name,m.representative,m.phone,m.biz_no,m.remark,u.id AS usage_id,u.use_date,u.amount FROM cpms_material_items m INNER JOIN cpms_material_usage u ON u.material_id=m.id AND u.project_id=m.project_id WHERE m.project_id=:pid' . $matDeletedWhere);
         $stMat->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
         $stMat->execute();
         $mat = $stMat->fetchAll();
         if (!is_array($mat)) { $mat = array(); }
+        $mat = \App\Services\VendorService::applyCurrentVendorRows($pdo, $mat, 'vendor_name', 'representative', 'phone', 'biz_no');
         $map = array('구매품'=>'구매품','자재비'=>'자재비','기타경비'=>'기타경비');
         $tmp = array();
         foreach ($mat as $r) {
@@ -487,6 +523,7 @@ if ($pdo && is_array($selectedProject)) {
     } catch (Exception $e) { $errors[] = '자재구입비 데이터를 불러오지 못했습니다. 오류: ' . $e->getMessage(); }
 
     $safetyCostRows = cpms_safety_cost_project_items($selectedProjectId);
+    $safetyCostRows = \App\Services\VendorService::applyCurrentVendorRows($pdo, $safetyCostRows, 'vendor_name', 'representative', 'phone', 'biz_no');
     $tmpSafety = array();
     foreach ($safetyCostRows as $safetyRow) {
         $useDate = isset($safetyRow['use_date']) ? cpms_safety_cost_valid_date($safetyRow['use_date']) : '';
@@ -543,11 +580,13 @@ if ($pdo && is_array($selectedProject)) {
         if ($hasEqWorkUnit) $eqSelectExtra .= ',u.work_unit';
         if ($hasEqBaseRate) $eqSelectExtra .= ',u.base_rate_snapshot';
         $eqDeletedWhere = $hasEqDeleted ? ' AND (e.is_deleted = 0 OR e.is_deleted IS NULL)' : '';
-        $stEq = $pdo->prepare('SELECT e.id,e.vendor_name,e.spec,e.category,e.base_rate,u.id AS usage_id,u.use_date,u.amount' . $eqSelectExtra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid' . $eqDeletedWhere);
+        $equipmentVendorIdSelect = \App\Services\VendorService::hasVendorReference($pdo, 'cpms_equipment_items') ? 'e.vendor_id' : '0 AS vendor_id';
+        $stEq = $pdo->prepare('SELECT e.id,' . $equipmentVendorIdSelect . ',e.vendor_name,e.spec,e.category,e.base_rate,u.id AS usage_id,u.use_date,u.amount' . $eqSelectExtra . ' FROM cpms_equipment_items e INNER JOIN cpms_equipment_usage u ON u.equipment_id=e.id AND u.project_id=e.project_id WHERE e.project_id=:pid' . $eqDeletedWhere);
         $stEq->bindValue(':pid', $selectedProjectId, \PDO::PARAM_INT);
         $stEq->execute();
         $eq = $stEq->fetchAll();
         if (!is_array($eq)) { $eq = array(); }
+        $eq = \App\Services\VendorService::applyCurrentVendorRows($pdo, $eq, 'vendor_name', '', '', '');
         $tmpEq = array();
         foreach ($eq as $r) {
             if (\App\Services\CostChangeService::isTargetDeleted($pdo, 'equipment', isset($r['usage_id']) ? (string)$r['usage_id'] : '')) { continue; }
@@ -600,6 +639,7 @@ if ($pdo && is_array($selectedProject)) {
                         'section' => '노무비',
                         '업체명' => $companyName,
                         '내역' => '노무비 합계',
+                        'vendor_match_scope' => 'labor',
                         'months' => monthly_zero_map($allMonths)
                     );
                 }
@@ -613,11 +653,13 @@ if ($pdo && is_array($selectedProject)) {
                 if ($companyName === '') $companyName = '창명건설';
                 $outsourcingKey = project_monthly_text_key($companyName);
                 if ($outsourcingKey === '') $outsourcingKey = '-';
+                $outsourcingKey = 'labor:' . $outsourcingKey;
                 if (!isset($outsourcingCompanyRows[$outsourcingKey])) {
                     $outsourcingCompanyRows[$outsourcingKey] = array(
                         'section' => '외주비',
                         '업체명' => $companyName,
-                        '내역' => '외주비 합계',
+                        '내역' => '외주비성 노무비 합계',
+                        'vendor_match_scope' => 'labor',
                         'months' => monthly_zero_map($allMonths)
                     );
                 }
@@ -627,7 +669,7 @@ if ($pdo && is_array($selectedProject)) {
             }
             $laborWorkerRows = isset($laborResult['worker_rows']) ? (int)$laborResult['worker_rows'] : $laborWorkerRows;
         }
-        $rowsBySection['노무비'][] = array('section'=>'노무비','업체명'=>'-','내역'=>'노무비 합계','months'=>$laborMonths);
+        $rowsBySection['노무비'][] = array('section'=>'노무비','업체명'=>'-','내역'=>'노무비 합계','vendor_match_scope'=>'labor','months'=>$laborMonths);
         if (count($otherCompanyRows) > 0) {
             ksort($otherCompanyRows);
             foreach ($otherCompanyRows as $companyRow) {
@@ -648,17 +690,18 @@ if ($pdo && is_array($selectedProject)) {
             if ($expenseYm === '' || !in_array($expenseYm, $allMonths, true)) continue;
             $companyName = isset($manualOutsourcingRow['company_name']) ? trim((string)$manualOutsourcingRow['company_name']) : '';
             if ($companyName === '') $companyName = '-';
-            $outsourcingKey = project_monthly_text_key($companyName);
-            if ($outsourcingKey === '') $outsourcingKey = '-';
-            if (!isset($outsourcingCompanyRows[$outsourcingKey])) {
-                $outsourcingCompanyRows[$outsourcingKey] = array(
+            $manualOutsourcingKey = project_monthly_text_key($companyName);
+            if ($manualOutsourcingKey === '') $manualOutsourcingKey = '-';
+            $manualOutsourcingKey = 'manual:' . $manualOutsourcingKey;
+            if (!isset($outsourcingCompanyRows[$manualOutsourcingKey])) {
+                $outsourcingCompanyRows[$manualOutsourcingKey] = array(
                     'section' => '외주비',
                     '업체명' => $companyName,
                     '내역' => '외주비 합계',
                     'months' => monthly_zero_map($allMonths)
                 );
             }
-            $outsourcingCompanyRows[$outsourcingKey]['months'][$expenseYm] += isset($manualOutsourcingRow['amount']) ? (float)$manualOutsourcingRow['amount'] : 0.0;
+            $outsourcingCompanyRows[$manualOutsourcingKey]['months'][$expenseYm] += isset($manualOutsourcingRow['amount']) ? (float)$manualOutsourcingRow['amount'] : 0.0;
         }
         if (count($outsourcingCompanyRows) > 0) {
             ksort($outsourcingCompanyRows);
@@ -717,6 +760,31 @@ if ($pdo && is_array($selectedProject)) {
 
 if ($workDateFallbackUsed) { $notices[] = 'work_date가 없거나 비어 있으면 공정 시작일 기준으로 임시 집계했습니다.'; }
 
+/* 관리 투입비 상세는 선택 월에 실제 금액이 있는 업체 행만 표시한다. */
+if ($monthlyInputSingleMonthOnly && ym_valid($selectedViewMonth)) {
+    foreach ($rowsBySection as $filterSection => $filterRows) {
+        $selectedRows = array();
+        foreach ($filterRows as $filterRow) {
+            $selectedAmount = isset($filterRow['months'][$selectedViewMonth])
+                ? (float)$filterRow['months'][$selectedViewMonth]
+                : 0.0;
+            if (abs($selectedAmount) < 0.0001) continue;
+            $selectedRows[] = $filterRow;
+        }
+        $rowsBySection[$filterSection] = $selectedRows;
+    }
+
+    $selectedDeductionEntries = array();
+    foreach ($deductionEntryRows as $deductionEntryRow) {
+        $deductionAmount = isset($deductionEntryRow['months'][$selectedViewMonth])
+            ? (float)$deductionEntryRow['months'][$selectedViewMonth]
+            : 0.0;
+        if (abs($deductionAmount) < 0.0001) continue;
+        $selectedDeductionEntries[] = $deductionEntryRow;
+    }
+    $deductionEntryRows = $selectedDeductionEntries;
+}
+
 $labels = array('외주비'=>'1. 외주비','구매품'=>'2. 구매품','자재비'=>'3. 자재비','장비비'=>'4. 장비비','노무비'=>'5. 노무비','기타경비'=>'6. 기타경비','안전관리비'=>'7. 안전관리비','공제분'=>'8. 공제분');
 $sumBySection = array();
 foreach ($labels as $k=>$v) { $sumBySection[$k] = monthly_zero_map($allMonths); }
@@ -732,6 +800,13 @@ foreach ($allMonths as $ym) {
     $subtotal1[$ym] = $sumBySection['외주비'][$ym] + $sumBySection['구매품'][$ym] + $sumBySection['자재비'][$ym] + $sumBySection['장비비'][$ym] + $sumBySection['노무비'][$ym] + $sumBySection['기타경비'][$ym];
     $finalTotal[$ym] = $subtotal1[$ym] + $sumBySection['안전관리비'][$ym] + $sumBySection['공제분'][$ym];
     $profit[$ym] = (isset($monthlyRevenue[$ym]) ? (float)$monthlyRevenue[$ym] : 0) - $finalTotal[$ym];
+}
+if ($monthlyInputHideEmptySections) {
+    foreach ($labels as $labelSection => $labelText) {
+        if (!isset($rowsBySection[$labelSection]) || count($rowsBySection[$labelSection]) === 0) {
+            unset($labels[$labelSection]);
+        }
+    }
 }
 if ($debugMode && isset($revenueResult['stats']) && is_array($revenueResult['stats'])) {
     $salesDiagnostics[] = 'cpms_schedule_tasks rows: ' . number_format((int)$revenueResult['stats']['schedule_task_rows']);
@@ -797,7 +872,7 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 <form method="get" class="cpms-monthly-filter mb-4 flex flex-wrap items-center gap-2 bg-amber-50 border border-amber-200 rounded-2xl p-3">
 <input type="hidden" name="r" value="<?php echo h($monthlyInputRoute); ?>"><input type="hidden" name="tab" value="<?php echo h($monthlyInputTab); ?>">
 <?php if ($monthlyInputShowProjectFilter): ?>
-<div class="font-bold text-base">프로젝트 선택 :</div>
+<div class="font-bold text-base"><?php echo h($monthlyInputProjectFilterLabel); ?></div>
 <select name="pid" class="px-3 py-2 border rounded-xl min-w-[260px]"><?php foreach($monthlyProjects as $pp): ?><option value="<?php echo (int)$pp['id']; ?>" <?php echo ((int)$pp['id']===$selectedProjectId)?'selected':''; ?>><?php echo h($pp['name']); ?></option><?php endforeach; ?></select>
 <?php else: ?>
 <input type="hidden" name="pid" value="<?php echo (int)$selectedProjectId; ?>">
@@ -806,7 +881,9 @@ if (isset($rowsBySection['노무비'][0]) && row_total($rowsBySection['노무비
 <?php endif; ?>
 <div class="font-bold text-base ml-3">월 선택 :</div>
 <select name="view_month" class="px-3 py-2 border rounded-xl min-w-[160px]">
+<?php if (!$monthlyInputSingleMonthOnly): ?>
 <option value="all" <?php echo ($selectedViewMonth==='all')?'selected':''; ?>>전체보기</option>
+<?php endif; ?>
 <?php foreach($allMonths as $ymOpt): ?><option value="<?php echo h($ymOpt); ?>" <?php echo ($selectedViewMonth===$ymOpt)?'selected':''; ?>><?php echo h(str_replace('-', '.', $ymOpt)); ?></option><?php endforeach; ?>
 </select>
 <button type="submit" class="px-4 py-2 rounded-xl bg-amber-700 text-white">조회</button>
@@ -840,18 +917,22 @@ foreach ($displayMonths as $mobileYm) {
 }
 ?>
 <div class="cpms-monthly-mobile-summary">
+  <?php if ($monthlyInputShowRevenueRow): ?>
   <div class="rounded-2xl bg-slate-900 text-white p-4">
     <div class="text-xs text-slate-300">매출</div>
     <div class="mt-1 text-xl font-extrabold"><?php echo h(amount_fmt($mobileSalesTotal)); ?></div>
   </div>
+  <?php endif; ?>
   <div class="rounded-2xl bg-white border border-gray-200 p-4">
     <div class="text-xs text-gray-500">최종 합계</div>
     <div class="mt-1 text-xl font-extrabold text-gray-900"><?php echo h(amount_fmt($mobileFinalTotal)); ?></div>
   </div>
+  <?php if ($monthlyInputShowProfitRow): ?>
   <div class="rounded-2xl bg-white border border-gray-200 p-4">
     <div class="text-xs text-gray-500">손익</div>
     <div class="mt-1 text-xl font-extrabold <?php echo $mobileProfitTotal < 0 ? 'text-red-600' : 'text-blue-700'; ?>"><?php echo h(amount_fmt($mobileProfitTotal)); ?></div>
   </div>
+  <?php endif; ?>
   <?php foreach($labels as $sec=>$title): ?>
     <?php $mobileSecTotal = 0.0; foreach ($displayMonths as $mobileYm) { $mobileSecTotal += isset($sumBySection[$sec][$mobileYm]) ? (float)$sumBySection[$sec][$mobileYm] : 0.0; } ?>
     <div class="rounded-2xl bg-gray-50 border border-gray-200 p-4">
@@ -863,13 +944,15 @@ foreach ($displayMonths as $mobileYm) {
 
 <div class="cpms-monthly-table-scroll overflow-x-auto">
 <table class="min-w-[1100px] w-full text-sm border">
-<thead><tr class="bg-[#d7aa8a]"><th class="border p-2">구분</th><th class="border p-2">업체명</th><th class="border p-2">내역</th><?php foreach($displayMonths as $ym): ?><th class="border p-2 text-right"><?php echo h(str_replace('-', '.', $ym)); ?></th><?php endforeach; ?><th class="border p-2 text-right">총합계<br><span class="text-[10px] font-normal">프로젝트 계약기간 전체 합계</span></th></tr></thead>
+<thead><tr class="bg-[#d7aa8a]"><th class="border p-2">구분</th><th class="border p-2">업체명</th><th class="border p-2">내역</th><?php foreach($displayMonths as $ym): ?><th class="border p-2 text-right"><?php echo h(str_replace('-', '.', $ym)); ?></th><?php endforeach; ?><?php if ($monthlyInputShowTotalColumn): ?><th class="border p-2 text-right">총합계<br><span class="text-[10px] font-normal">프로젝트 계약기간 전체 합계</span></th><?php endif; ?></tr></thead>
 <tbody>
-<tr class="bg-amber-100 font-bold"><td class="border p-2">매출금액(기성관리 인정금액 우선)</td><td class="border p-2"></td><td class="border p-2"></td><?php $revSum=0; foreach($allMonths as $ymAll){ $revSum+=(float)$monthlyRevenue[$ymAll]; } foreach($displayMonths as $ym){ $v=(float)$monthlyRevenue[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($revSum); ?></td></tr>
+<?php if ($monthlyInputShowRevenueRow): ?>
+<tr class="bg-amber-100 font-bold"><td class="border p-2">매출금액(기성관리 인정금액 우선)</td><td class="border p-2"></td><td class="border p-2"></td><?php $revSum=0; foreach($allMonths as $ymAll){ $revSum+=(float)$monthlyRevenue[$ymAll]; } foreach($displayMonths as $ym){ $v=(float)$monthlyRevenue[$ym]; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php } ?><?php if ($monthlyInputShowTotalColumn): ?><td class="border p-2 text-right"><?php echo amount_fmt($revSum); ?></td><?php endif; ?></tr>
+<?php endif; ?>
 <?php foreach($labels as $sec=>$title): ?>
-<tr class="bg-[#f2dfcf] font-semibold"><td class="border p-2"><?php echo h($title); ?></td><td class="border p-2"></td><td class="border p-2"></td><?php foreach($displayMonths as $ym): ?><td class="border p-2"></td><?php endforeach; ?><td class="border p-2"></td></tr>
+<tr class="bg-[#f2dfcf] font-semibold"><td class="border p-2"><?php echo h($title); ?></td><td class="border p-2"></td><td class="border p-2"></td><?php foreach($displayMonths as $ym): ?><td class="border p-2"></td><?php endforeach; ?><?php if ($monthlyInputShowTotalColumn): ?><td class="border p-2"></td><?php endif; ?></tr>
 <?php if (count($rowsBySection[$sec]) === 0): ?>
-<tr><td class="border p-2"></td><td class="border p-2 text-gray-500" colspan="2">데이터 없음</td><?php foreach($displayMonths as $ym): ?><td class="border p-2 text-right">-</td><?php endforeach; ?><td class="border p-2 text-right">-</td></tr>
+<tr><td class="border p-2"></td><td class="border p-2 text-gray-500" colspan="2">데이터 없음</td><?php foreach($displayMonths as $ym): ?><td class="border p-2 text-right">-</td><?php endforeach; ?><?php if ($monthlyInputShowTotalColumn): ?><td class="border p-2 text-right">-</td><?php endif; ?></tr>
 <?php else: foreach($rowsBySection[$sec] as $row): ?>
 <?php
 $detailText = isset($row['내역']) ? (string)$row['내역'] : '';
@@ -880,17 +963,19 @@ if (!isset($row['내역_html']) && count($displayMonths) === 1 && isset($row['de
     }
 }
 ?>
-<tr><td class="border p-2"></td><td class="border p-2"><?php echo h(isset($row['업체명'])?$row['업체명']:''); ?></td><td class="border p-2"><?php if (isset($row['내역_html'])) { echo $row['내역_html']; } else { echo h($detailText); } ?></td><?php foreach($displayMonths as $ym): $v = isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php endforeach; ?><td class="border p-2 text-right"><?php echo amount_fmt(row_total($row,$allMonths)); ?></td></tr>
+<tr<?php echo isset($row['vendor_match_scope']) && (string)$row['vendor_match_scope'] === 'labor' ? ' data-vendor-match-scope="labor"' : ''; ?>><td class="border p-2"></td><td class="border p-2"><?php echo h(isset($row['업체명'])?$row['업체명']:''); ?></td><td class="border p-2"><?php if (isset($row['내역_html'])) { echo $row['내역_html']; } else { echo h($detailText); } ?></td><?php foreach($displayMonths as $ym): $v = isset($row['months'][$ym]) ? (float)$row['months'][$ym] : 0; ?><td class="border p-2 text-right"><?php echo amount_fmt($v); ?></td><?php endforeach; ?><?php if ($monthlyInputShowTotalColumn): ?><td class="border p-2 text-right"><?php echo amount_fmt(row_total($row,$allMonths)); ?></td><?php endif; ?></tr>
 <?php endforeach; endif; ?>
-<tr class="bg-amber-50 font-semibold"><td class="border p-2"><?php echo h($title); ?> 소계</td><td class="border p-2"></td><td class="border p-2"></td><?php $secSum=0; foreach($allMonths as $ymAll){ $secSum += $sumBySection[$sec][$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($sumBySection[$sec][$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($secSum); ?></td></tr>
+<tr class="bg-amber-50 font-semibold"><td class="border p-2"><?php echo h($title); ?> 소계</td><td class="border p-2"></td><td class="border p-2"></td><?php $secSum=0; foreach($allMonths as $ymAll){ $secSum += $sumBySection[$sec][$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($sumBySection[$sec][$ym]); ?></td><?php } ?><?php if ($monthlyInputShowTotalColumn): ?><td class="border p-2 text-right"><?php echo amount_fmt($secSum); ?></td><?php endif; ?></tr>
 <?php endforeach; ?>
-<tr class="bg-yellow-100 font-bold"><td class="border p-2">1차 합계</td><td class="border p-2"></td><td class="border p-2"></td><?php $s1=0; foreach($allMonths as $ymAll){ $s1 += $subtotal1[$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($subtotal1[$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($s1); ?></td></tr>
-<tr class="bg-orange-100 font-bold"><td class="border p-2">최종 합계</td><td class="border p-2"></td><td class="border p-2"></td><?php $sf=0; foreach($allMonths as $ymAll){ $sf += $finalTotal[$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($finalTotal[$ym]); ?></td><?php } ?><td class="border p-2 text-right"><?php echo amount_fmt($sf); ?></td></tr>
-<tr class="font-bold"><td class="border p-2">손익</td><td class="border p-2"></td><td class="border p-2"></td><?php $sp=0; foreach($allMonths as $ymAll){ $sp += $profit[$ymAll]; } foreach($displayMonths as $ym){ $cls=$profit[$ym]<0?'text-red-600':'text-blue-700'; ?><td class="border p-2 text-right <?php echo $cls; ?>"><?php echo amount_fmt($profit[$ym]); ?></td><?php } $clsAll=$sp<0?'text-red-600':'text-blue-700'; ?><td class="border p-2 text-right <?php echo $clsAll; ?>"><?php echo amount_fmt($sp); ?></td></tr>
+<tr class="bg-yellow-100 font-bold"><td class="border p-2">1차 합계</td><td class="border p-2"></td><td class="border p-2"></td><?php $s1=0; foreach($allMonths as $ymAll){ $s1 += $subtotal1[$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($subtotal1[$ym]); ?></td><?php } ?><?php if ($monthlyInputShowTotalColumn): ?><td class="border p-2 text-right"><?php echo amount_fmt($s1); ?></td><?php endif; ?></tr>
+<tr class="bg-orange-100 font-bold"><td class="border p-2">최종 합계</td><td class="border p-2"></td><td class="border p-2"></td><?php $sf=0; foreach($allMonths as $ymAll){ $sf += $finalTotal[$ymAll]; } foreach($displayMonths as $ym){ ?><td class="border p-2 text-right"><?php echo amount_fmt($finalTotal[$ym]); ?></td><?php } ?><?php if ($monthlyInputShowTotalColumn): ?><td class="border p-2 text-right"><?php echo amount_fmt($sf); ?></td><?php endif; ?></tr>
+<?php if ($monthlyInputShowProfitRow): ?>
+<tr class="font-bold"><td class="border p-2">손익</td><td class="border p-2"></td><td class="border p-2"></td><?php $sp=0; foreach($allMonths as $ymAll){ $sp += $profit[$ymAll]; } foreach($displayMonths as $ym){ $cls=$profit[$ym]<0?'text-red-600':'text-blue-700'; ?><td class="border p-2 text-right <?php echo $cls; ?>"><?php echo amount_fmt($profit[$ym]); ?></td><?php } $clsAll=$sp<0?'text-red-600':'text-blue-700'; ?><?php if ($monthlyInputShowTotalColumn): ?><td class="border p-2 text-right <?php echo $clsAll; ?>"><?php echo amount_fmt($sp); ?></td><?php endif; ?></tr>
+<?php endif; ?>
 </tbody></table>
 </div>
 
-<?php if ($canManageMonthlyDeductions): ?>
+<?php if ($canManageMonthlyDeductions && $monthlyInputShowDeductionEntry): ?>
 <div class="cpms-monthly-deduction mt-4 p-3 border rounded-xl bg-gray-50">
 <div class="font-semibold mb-2">공제분 입력</div>
 <?php $deductionDefaultYm = $guideYm; if (!ym_valid($deductionDefaultYm) || !in_array($deductionDefaultYm, $allMonths, true)) { $deductionDefaultYm = (count($allMonths) > 0) ? $allMonths[count($allMonths)-1] : date('Y-m'); } ?>

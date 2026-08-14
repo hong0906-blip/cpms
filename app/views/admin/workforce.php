@@ -28,7 +28,42 @@ $filters = array(
     'agency_name' => isset($_GET['agency_name']) ? trim((string)$_GET['agency_name']) : '',
     'status' => isset($_GET['status']) ? trim((string)$_GET['status']) : 'active',
 );
+$workforceUser = Auth::user();
+$workforceUserId = is_array($workforceUser) && isset($workforceUser['id']) ? (int)$workforceUser['id'] : 0;
+$workforceRelaxedEdit = Auth::isDevelopmentDepartment();
+// 관리 인력관리 진입 시에도 기존 모든 현장 인원을 삭제 없이 마스터로 편입합니다.
+$repo->syncLegacyProjectWorkers(0, $workforceUserId, 5000);
 $workers = $repo->listWorkers($filters, 500);
+
+function cpms_workforce_missing_fields($worker)
+{
+    if (!is_array($worker) || (isset($worker['status']) && $worker['status'] === 'deleted')) return array();
+    $missing = array();
+    $checks = array(
+        'name' => '이름', 'phone' => '연락처', 'resident_no_masked' => '주민번호',
+        'job_type' => '구분/직종', 'agency_name' => '인력사 업체명',
+        'bank_name' => '은행명', 'bank_account_masked' => '계좌번호', 'account_holder' => '예금주'
+    );
+    foreach ($checks as $field => $label) {
+        if (!isset($worker[$field]) || trim((string)$worker[$field]) === '') $missing[] = $label;
+    }
+    if (!isset($worker['daily_wage']) || (int)$worker['daily_wage'] <= 0) $missing[] = '임금단가';
+    return $missing;
+}
+
+foreach ($workers as $workerIndex => $workerRow) {
+    $missingFields = cpms_workforce_missing_fields($workerRow);
+    $workers[$workerIndex]['missing_fields'] = $missingFields;
+    $workers[$workerIndex]['missing_count'] = count($missingFields);
+}
+usort($workers, function ($a, $b) {
+    $aMissing = isset($a['missing_count']) ? (int)$a['missing_count'] : 0;
+    $bMissing = isset($b['missing_count']) ? (int)$b['missing_count'] : 0;
+    if ($aMissing !== $bMissing) return $aMissing > $bMissing ? -1 : 1;
+    $aName = isset($a['name']) ? (string)$a['name'] : '';
+    $bName = isset($b['name']) ? (string)$b['name'] : '';
+    return strcmp($aName, $bName);
+});
 
 $importToken = isset($_GET['import_token']) ? trim((string)$_GET['import_token']) : '';
 $preview = null;
@@ -189,6 +224,7 @@ function cpms_workforce_status_label($status)
         <thead class="bg-gray-50 text-gray-700">
           <tr>
             <th class="px-3 py-3 border-b"><input type="checkbox" data-workforce-check-all></th>
+            <th class="px-3 py-3 border-b text-left">미입력</th>
             <th class="px-3 py-3 border-b text-left">이름</th>
             <th class="px-3 py-3 border-b text-left">연락처</th>
             <th class="px-3 py-3 border-b text-left">주민번호</th>
@@ -205,7 +241,7 @@ function cpms_workforce_status_label($status)
         </thead>
         <tbody class="divide-y divide-gray-100">
           <?php if (empty($workers)): ?>
-            <tr><td colspan="13" class="px-4 py-8 text-center text-gray-500">등록된 인력이 없습니다.</td></tr>
+            <tr><td colspan="14" class="px-4 py-8 text-center text-gray-500">등록된 인력이 없습니다.</td></tr>
           <?php else: ?>
             <?php foreach ($workers as $w): ?>
               <?php
@@ -214,8 +250,16 @@ function cpms_workforce_status_label($status)
                 $bankMasked = isset($w['bank_account_masked']) ? trim((string)$w['bank_account_masked']) : '';
                 if ($bankMasked === '') $bankMasked = '-';
               ?>
-              <tr>
+              <tr class="<?php echo isset($w['missing_count']) && (int)$w['missing_count'] > 0 ? 'bg-red-50 text-red-900' : ''; ?>">
                 <td class="px-3 py-3 text-center"><input type="checkbox" class="workforce-row-check" value="<?php echo (int)$w['id']; ?>"></td>
+                <td class="px-3 py-3">
+                  <?php if (isset($w['missing_count']) && (int)$w['missing_count'] > 0): ?>
+                    <span class="inline-flex rounded-full bg-red-600 px-2 py-1 text-xs font-extrabold text-white"><?php echo (int)$w['missing_count']; ?>개</span>
+                    <div class="mt-1 max-w-[180px] text-[11px] font-bold text-red-700"><?php echo h(implode(', ', $w['missing_fields'])); ?></div>
+                  <?php else: ?>
+                    <span class="text-xs font-bold text-emerald-700">완료</span>
+                  <?php endif; ?>
+                </td>
                 <td class="px-3 py-3 font-extrabold text-gray-900"><?php echo h($w['name']); ?></td>
                 <td class="px-3 py-3"><?php echo h($w['phone']); ?></td>
                 <td class="px-3 py-3" data-sensitive-cell>
@@ -240,7 +284,7 @@ function cpms_workforce_status_label($status)
                 </td>
                 <td class="px-3 py-3"><?php echo h($w['account_holder']); ?></td>
                 <td class="px-3 py-3"><?php echo h(cpms_workforce_status_label($w['status'])); ?></td>
-                <td class="px-3 py-3 text-center"><a class="px-3 py-2 rounded-xl border border-gray-200 font-bold" href="?r=admin/workforce_form&id=<?php echo (int)$w['id']; ?>">수정</a></td>
+                <td class="px-3 py-3 text-center"><button type="button" class="px-3 py-2 rounded-xl border border-gray-200 bg-white font-bold" data-workforce-edit data-worker-id="<?php echo (int)$w['id']; ?>">수정</button></td>
                 <td class="px-3 py-3 text-center">
                   <?php if ($w['status'] !== 'deleted'): ?>
                     <form method="post" action="?r=admin/workforce_delete" class="inline" data-workforce-delete-form>
@@ -259,6 +303,44 @@ function cpms_workforce_status_label($status)
       </table>
     </div>
   </div>
+
+  <div id="workforceEditModal" class="fixed inset-0 z-50 hidden" aria-hidden="true">
+    <div class="absolute inset-0 bg-black/50" data-workforce-edit-close></div>
+    <div class="absolute inset-0 flex items-center justify-center p-4">
+      <form id="workforceEditForm" method="post" action="?r=admin/workforce_save" data-cpms-no-loading="1" data-workforce-relaxed="<?php echo $workforceRelaxedEdit ? '1' : '0'; ?>" novalidate class="relative max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
+        <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
+        <input type="hidden" name="ajax" value="1">
+        <input type="hidden" name="id" value="">
+        <input type="hidden" name="import_no" value="">
+        <input type="hidden" name="birth_date" value="">
+        <input type="hidden" name="is_active" value="1">
+        <input type="hidden" name="source_type" value="manual">
+        <div class="flex items-center justify-between gap-3">
+          <div><h3 class="text-xl font-extrabold text-gray-900">인력 수정</h3><div class="mt-1 text-xs font-bold <?php echo $workforceRelaxedEdit ? 'text-blue-700' : 'text-red-600'; ?>"><?php echo $workforceRelaxedEdit ? '개발부서는 이름만 필수이며 나머지는 비워두고 저장할 수 있습니다.' : '필수 9개 항목을 모두 채워 저장하세요.'; ?></div></div>
+          <button type="button" class="rounded-xl border border-gray-200 px-3 py-2 font-bold" data-workforce-edit-close>닫기</button>
+        </div>
+        <div id="workforceEditError" role="alert" aria-live="assertive" class="sticky top-0 z-20 mt-4 hidden rounded-2xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700 shadow-sm"></div>
+        <div class="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+          <label><span class="block text-sm font-bold mb-1">이름</span><input name="name" required class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label><span class="block text-sm font-bold mb-1">연락처</span><input name="phone" <?php echo $workforceRelaxedEdit ? '' : 'required'; ?> class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label><span class="block text-sm font-bold mb-1">주민번호</span><input name="resident_no" <?php echo $workforceRelaxedEdit ? '' : 'required'; ?> class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label><span class="block text-sm font-bold mb-1">구분/직종</span><input name="job_type" <?php echo $workforceRelaxedEdit ? '' : 'required'; ?> class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label><span class="block text-sm font-bold mb-1">인력사 업체명</span><input name="agency_name" <?php echo $workforceRelaxedEdit ? '' : 'required'; ?> class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label><span class="block text-sm font-bold mb-1">임금단가</span><input name="daily_wage" type="number" min="<?php echo $workforceRelaxedEdit ? '0' : '1'; ?>" <?php echo $workforceRelaxedEdit ? '' : 'required'; ?> class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label><span class="block text-sm font-bold mb-1">은행명</span><input name="bank_name" <?php echo $workforceRelaxedEdit ? '' : 'required'; ?> class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label><span class="block text-sm font-bold mb-1">계좌번호</span><input name="bank_account" <?php echo $workforceRelaxedEdit ? '' : 'required'; ?> class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label><span class="block text-sm font-bold mb-1">예금주</span><input name="account_holder" <?php echo $workforceRelaxedEdit ? '' : 'required'; ?> class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label class="md:col-span-3"><span class="block text-sm font-bold mb-1">주소(선택)</span><input name="address" class="w-full rounded-2xl border border-gray-200 px-4 py-3"></label>
+          <label class="md:col-span-3"><span class="block text-sm font-bold mb-1">비고(선택)</span><textarea name="memo" rows="3" class="w-full rounded-2xl border border-gray-200 px-4 py-3"></textarea></label>
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <button type="button" class="rounded-2xl border border-gray-200 px-5 py-3 font-bold" data-workforce-edit-close>취소</button>
+          <button type="button" class="rounded-2xl bg-emerald-600 px-6 py-3 font-extrabold text-white disabled:cursor-not-allowed disabled:bg-gray-400" data-workforce-edit-submit>저장</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </div>
 
-<script defer src="<?php echo h(asset_url('assets/js/admin_workforce.js')); ?>"></script>
+<?php $adminWorkforceJsPath = dirname(dirname(dirname(__DIR__))) . '/public/assets/js/admin_workforce.js'; ?>
+<script defer src="<?php echo h(asset_url('assets/js/admin_workforce.js') . '?v=' . (string)@filemtime($adminWorkforceJsPath)); ?>"></script>

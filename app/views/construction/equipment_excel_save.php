@@ -13,11 +13,13 @@ require_once __DIR__ . '/../../services/EquipmentExcelImporter.php';
 require_once __DIR__ . '/../../services/ConstructionDriveService.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
 require_once __DIR__ . '/../../services/CostDataEventService.php';
+require_once __DIR__ . '/../../services/VendorService.php';
 
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
 use App\Services\CostDataEventService;
+use App\Services\VendorService;
 
 if (!Auth::check()) { header('Location: ?r=login'); exit; }
 if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidden'; exit; }
@@ -128,6 +130,11 @@ function equipment_excel_save_find_or_create_item($pdo, $importer, $projectId, $
     $bizNo = equipment_excel_save_normalize_biz_no(isset($row['business_no']) ? $row['business_no'] : '');
     $baseRate = isset($row['base_price']) ? (float)$row['base_price'] : 0.0;
     $remark = trim((string)(isset($row['memo']) ? $row['memo'] : ''));
+    $vendorId = VendorService::matchExistingVendorId($pdo, isset($row['vendor_id']) ? (int)$row['vendor_id'] : 0, array(
+        'vendor_name'=>$vendorName,'biz_no'=>$bizNo,'category'=>$category,
+        'representative'=>$representative,'phone'=>$phone
+    ));
+    if ($vendorId <= 0) return 0;
 
     $existingItem = $importer->findExistingEquipment($projectId, $bizNo, $category, $spec, $vendorName, $baseRate);
     if (is_array($existingItem) && isset($existingItem['id'])) {
@@ -138,6 +145,7 @@ function equipment_excel_save_find_or_create_item($pdo, $importer, $projectId, $
             'biz_no' => $bizNo,
             'remark' => $remark
         ), $now);
+        if ($vendorId > 0) VendorService::attachDbRecord($pdo, 'cpms_equipment_items', $equipmentId, $vendorId);
         return $equipmentId;
     }
 
@@ -156,8 +164,9 @@ function equipment_excel_save_find_or_create_item($pdo, $importer, $projectId, $
     $st->bindValue(':remark', $remark);
     $st->bindValue(':now', $now);
     $st->execute();
-
-    return (int)$pdo->lastInsertId();
+    $equipmentId = (int)$pdo->lastInsertId();
+    if ($vendorId > 0 && $equipmentId > 0) VendorService::attachDbRecord($pdo, 'cpms_equipment_items', $equipmentId, $vendorId);
+    return $equipmentId;
 }
 
 function equipment_excel_save_usage_row($pdo, $projectId, $equipmentId, $row, $now)
@@ -273,6 +282,7 @@ if (!$pdo) {
 }
 cpms_equipment_gongsu_ensure_schema($pdo);
 equipment_excel_save_ensure_log_table($pdo);
+VendorService::bootstrap($pdo, true);
 
 $importer = new EquipmentExcelImporter($pdo);
 $savedCount = 0;

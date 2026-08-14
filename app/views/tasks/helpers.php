@@ -929,6 +929,15 @@ function cpms_tasks_is_self_request($task)
     return ($requesterId > 0 && $requesterId === $assigneeId);
 }}
 
+if (!function_exists('cpms_tasks_is_system_request')) {
+function cpms_tasks_is_system_request($task)
+{
+    if (!$task || !is_array($task)) return false;
+    $requesterId = isset($task['requester_employee_id']) ? (int)$task['requester_employee_id'] : 0;
+    $createdBy = isset($task['created_by']) ? (int)$task['created_by'] : 0;
+    return ($requesterId <= 0 && $createdBy <= 0);
+}}
+
 if (!function_exists('cpms_tasks_can_submit_completion')) {
 function cpms_tasks_can_submit_completion($task, $currentEmployeeId)
 {
@@ -936,6 +945,13 @@ function cpms_tasks_can_submit_completion($task, $currentEmployeeId)
     if (cpms_tasks_has_transfer_request($task)) return false;
     if (cpms_tasks_is_overall_manager()) return true;
     return ((int)$currentEmployeeId > 0 && isset($task['assignee_employee_id']) && (int)$task['assignee_employee_id'] === (int)$currentEmployeeId);
+}}
+
+if (!function_exists('cpms_tasks_can_complete_directly')) {
+function cpms_tasks_can_complete_directly($task, $currentEmployeeId)
+{
+    if (!cpms_tasks_can_submit_completion($task, $currentEmployeeId)) return false;
+    return cpms_tasks_is_self_request($task) || cpms_tasks_is_system_request($task);
 }}
 
 if (!function_exists('cpms_tasks_can_approve_completion')) {
@@ -971,7 +987,12 @@ function cpms_tasks_completion_group_summary($pdo, $task)
     $groupKey = isset($task['group_key']) ? trim((string)$task['group_key']) : '';
     if (cpms_tasks_is_request_group_key($groupKey) && cpms_tasks_column_exists($pdo, 'cpms_tasks', 'group_key')) {
         try {
-            $st = $pdo->prepare("SELECT * FROM cpms_tasks WHERE group_key = :group_key AND (status IS NULL OR status <> 'cancelled') ORDER BY id ASC");
+            $sql = "SELECT task_main.* FROM cpms_tasks task_main WHERE task_main.group_key = :group_key AND (task_main.status IS NULL OR task_main.status <> 'cancelled')";
+            if (cpms_tasks_table_exists($pdo, 'employees') && cpms_tasks_column_exists($pdo, 'employees', 'is_active')) {
+                $sql .= " AND EXISTS (SELECT 1 FROM employees task_assignee WHERE task_assignee.id = task_main.assignee_employee_id AND task_assignee.is_active = 1)";
+            }
+            $sql .= " ORDER BY task_main.id ASC";
+            $st = $pdo->prepare($sql);
             $st->execute(array(':group_key' => $groupKey));
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
             if (is_array($rows)) $result['rows'] = $rows;

@@ -67,6 +67,26 @@ if (!$pdo) {
     exit;
 }
 
+$roleEmployeeIds = array();
+foreach (array_merge(array($siteId, $safetyId, $qualityId), $subManagerIds) as $roleEmployeeId) {
+    $roleEmployeeId = (int)$roleEmployeeId;
+    if ($roleEmployeeId > 0) $roleEmployeeIds[$roleEmployeeId] = $roleEmployeeId;
+}
+if (count($roleEmployeeIds) > 0) {
+    $roleEmployeeIdList = implode(',', array_map('intval', array_values($roleEmployeeIds)));
+    $stActiveRoleEmployees = $pdo->query("SELECT id FROM employees WHERE is_active = 1 AND id IN (" . $roleEmployeeIdList . ")");
+    $activeRoleEmployeeRows = $stActiveRoleEmployees ? $stActiveRoleEmployees->fetchAll(PDO::FETCH_ASSOC) : array();
+    $activeRoleEmployeeMap = array();
+    foreach ($activeRoleEmployeeRows as $activeRoleEmployeeRow) $activeRoleEmployeeMap[(int)$activeRoleEmployeeRow['id']] = true;
+    foreach ($roleEmployeeIds as $roleEmployeeId) {
+        if (!isset($activeRoleEmployeeMap[(int)$roleEmployeeId])) {
+            flash_set('error', '퇴직한 임직원은 공사 담당자로 지정할 수 없습니다.');
+            header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
+            exit;
+        }
+    }
+}
+
 try {
     $pdo->beginTransaction();
     $st = $pdo->prepare("SELECT project_id FROM cpms_construction_roles WHERE project_id = :pid LIMIT 1");

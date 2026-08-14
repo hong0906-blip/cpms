@@ -8,9 +8,11 @@
 use App\Core\Auth;
 use App\Core\Db;
 use App\Services\CostChangeService;
+use App\Services\VendorService;
 
 require_once __DIR__ . '/safety_cost_helper.php';
 require_once __DIR__ . '/../../services/CostChangeService.php';
+require_once __DIR__ . '/../../services/VendorService.php';
 
 $flash = flash_get();
 $pdo = Db::pdo();
@@ -62,6 +64,7 @@ if (function_exists('get_safety_checklist_data')) {
 }
 
 if ($pdo) {
+    VendorService::bootstrap($pdo, true);
     $canViewSamsungPortal = cpms_samsung_portal_can_view();
     $canEditSamsungPortal = cpms_samsung_portal_can_edit();
     if ($canViewSamsungPortal) {
@@ -90,6 +93,7 @@ if ($pdo) {
         $canManageSafetyCost = cpms_safety_cost_user_can_manage_project($pdo, $selectedProjectId);
         $canManageIncident = cpms_safety_incident_user_can_manage_project($pdo, $selectedProjectId);
         $safetyCostItems = cpms_safety_cost_project_items($selectedProjectId);
+        $safetyCostItems = VendorService::applyCurrentVendorRows($pdo, $safetyCostItems, 'vendor_name', 'representative', 'phone', 'biz_no');
         $safetyCostSummary = cpms_safety_cost_summary($pdo, $selectedProjectId);
         if ($canManageSafetyCost && $editSafetyCostId !== '') {
             foreach ($safetyCostItems as $row) {
@@ -636,16 +640,19 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                     $editAmount = is_array($editSafetyCost) ? (string)cpms_safety_cost_row_amount($editSafetyCost) : '';
                     $editRemark = is_array($editSafetyCost) && isset($editSafetyCost['remark']) ? (string)$editSafetyCost['remark'] : '';
                     $editCategory = is_array($editSafetyCost) && isset($editSafetyCost['category']) ? (string)$editSafetyCost['category'] : '안전관리비';
+                    $editVendorId = is_array($editSafetyCost) && isset($editSafetyCost['vendor_id']) ? (int)$editSafetyCost['vendor_id'] : 0;
                     ?>
                     <form method="post" action="<?php echo h(base_url()); ?>/?r=safety/safety_cost_save" enctype="multipart/form-data" class="mb-5 rounded-2xl border border-gray-200 bg-gray-50 p-4" id="safetyCostForm">
                         <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
                         <input type="hidden" name="project_id" value="<?php echo (int)$selectedProjectId; ?>">
                         <input type="hidden" name="safety_cost_id" value="<?php echo h($editId); ?>">
+                        <input type="hidden" name="vendor_id" value="<?php echo (int)$editVendorId; ?>" data-vendor-name="<?php echo h($editVendor); ?>">
 
                         <div class="mb-3 rounded-xl border border-gray-200 bg-white p-3 vendor-search-wrap">
                             <label class="text-sm font-bold text-gray-700">업체명 검색 자동완성</label>
                             <input type="text" class="mt-1 w-full px-3 py-2 border rounded-xl bg-white js-safety-vendor-search" placeholder="업체명 2글자 이상 입력">
                             <div class="vendor-suggest-list mt-2 hidden border border-gray-200 rounded-xl bg-white max-h-48 overflow-auto"></div>
+                            <div class="mt-2 text-xs text-gray-500">업체정보만 자동으로 불러옵니다. 공급가액과 비고는 거래별로 직접 입력할 수 있습니다.</div>
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
@@ -663,7 +670,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                             </div>
                             <div>
                                 <label class="text-xs font-bold text-gray-600">업체명</label>
-                                <input type="text" name="vendor_name" value="<?php echo h($editVendor); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 bg-white" required>
+                                <input type="text" name="vendor_name" value="<?php echo h($editVendor); ?>" class="mt-1 w-full px-3 py-2 rounded-xl border border-gray-300 bg-gray-100" placeholder="자동검색에서 업체 선택" required readonly>
                             </div>
                             <div>
                                 <label class="text-xs font-bold text-gray-600">대표자명</label>
@@ -900,6 +907,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
             function showSuggestList(listEl){ if(!listEl)return; listEl.className=listEl.className.replace(/\bhidden\b/g,'').replace(/\s+/g,' ').trim(); listEl.style.display='block'; }
             function fillSafetyVendor(formEl, row){
                 if(!formEl || !row) return;
+                if(formEl.elements['vendor_id']){ formEl.elements['vendor_id'].value=row.vendor_id||''; formEl.elements['vendor_id'].setAttribute('data-vendor-name',row.vendor_name||''); }
                 if(formEl.elements['vendor_name']) formEl.elements['vendor_name'].value = row.vendor_name || '';
                 if(formEl.elements['representative']) formEl.elements['representative'].value = row.representative || '';
                 if(formEl.elements['phone']) formEl.elements['phone'].value = row.phone || '';
@@ -923,7 +931,7 @@ $baseSafetyUrl = base_url() . '/?r=safety_home&pid=' . (int)$selectedProjectId;
                         var btn = document.createElement('button');
                         btn.type = 'button';
                         btn.className = 'block w-full text-left px-3 py-2 border-b last:border-b-0 hover:bg-blue-50';
-                        btn.textContent = (row.vendor_name || '') + (row.phone ? ' (' + row.phone + ')' : '');
+                        btn.textContent = (row.vendor_name || '') + (row.description ? ' · ' + row.description : '');
                         btn.setAttribute('data-safety-vendor-item', '1');
                         btn.vendorData = row;
                         listEl.appendChild(btn);

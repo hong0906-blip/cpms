@@ -297,10 +297,16 @@ function cpms_monthly_summary_labor_breakdown($pdo, $projectId, $projectName, $y
     if (!isset($directTeamCache[$pdoKey])) {
         $directTeamCache[$pdoKey] = cpms_load_direct_team_members($pdo);
     }
-    $timesheetKey = $pdoKey . ':project:' . (int)$projectId;
+    $timesheetKey = $pdoKey . ':project:' . (int)$projectId . ':month:' . (string)$ym;
     if (!isset($timesheetCache[$timesheetKey])) {
         $projectLaborWorkers = cpms_load_project_labor_workers($pdo, $projectId);
-        $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamCache[$pdoKey]);
+        if (function_exists('cpms_load_project_labor_worker_month_ratio_map')) {
+            $projectLaborWorkers = cpms_apply_project_labor_worker_month_ratios($projectLaborWorkers, cpms_load_project_labor_worker_month_ratio_map($pdo, $projectId, $ym, $projectLaborWorkers));
+        }
+        if (function_exists('cpms_load_project_labor_worker_wage_map')) {
+            $projectLaborWorkers = cpms_apply_project_labor_worker_month_wages($projectLaborWorkers, cpms_load_project_labor_worker_wage_map($pdo, $projectId, $ym));
+        }
+        $workerRows = cpms_build_project_worker_rows($projectLaborWorkers, $directTeamCache[$pdoKey], $pdo, $ym);
         $timesheetCache[$timesheetKey] = cpms_build_timesheet_workers($workerRows);
     }
     $timesheetWorkers = $timesheetCache[$timesheetKey];
@@ -329,7 +335,10 @@ function cpms_monthly_summary_labor_breakdown($pdo, $projectId, $projectName, $y
         if ($totalGongsu <= 0) continue;
         $wageRate = function_exists('cpms_resolve_labor_wage_rate') ? (float)cpms_resolve_labor_wage_rate($worker) : cpms_monthly_summary_parse_money(isset($worker['deposit_rate']) ? $worker['deposit_rate'] : '');
         if ($wageRate <= 0) continue;
-        $result['amount'] += $totalGongsu * $wageRate;
+        $workerAmounts = function_exists('cpms_labor_calculate_worker_month_amounts')
+            ? cpms_labor_calculate_worker_month_amounts($worker, $attendanceGongsuMap, $ym)
+            : array('total_amount'=>$totalGongsu * $wageRate);
+        $result['amount'] += isset($workerAmounts['total_amount']) ? (float)$workerAmounts['total_amount'] : 0.0;
         $result['output_day_sum'] += $outputDays;
         $result['workers_considered']++;
     }
