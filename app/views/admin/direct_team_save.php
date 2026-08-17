@@ -103,11 +103,32 @@ function cpms_direct_team_ensure_schema($pdo) {
 if (!function_exists('cpms_direct_team_photo_delete')) {
 function cpms_direct_team_photo_delete($photoPath) {
     $photoPath = trim((string)$photoPath);
-    if (strpos($photoPath, '/cpms/public/uploads/direct_team/') !== 0) return;
+    if ($photoPath === '') return;
+
+    $normalized = str_replace('\\', '/', $photoPath);
+    $baseName = basename($normalized);
+    if (strpos($baseName, 'direct_team_') !== 0) return;
+
     $root = realpath(__DIR__ . '/../../..');
     if ($root === false) return;
-    $file = $root . '/public/uploads/direct_team/' . basename($photoPath);
-    if (is_file($file)) @unlink($file);
+
+    $candidates = array();
+    if (strpos($normalized, '/cpms/public/uploads/direct_team/') === 0) {
+        $candidates[] = $root . '/public/uploads/direct_team/' . $baseName;
+    }
+    if (strpos($normalized, '/cpms/public/uploads/employees/') === 0) {
+        $candidates[] = $root . '/public/uploads/employees/' . $baseName;
+    }
+    if (strpos($normalized, '/cpms/public/uploads/') === 0) {
+        $candidates[] = $root . '/public/uploads/' . $baseName;
+    }
+
+    foreach ($candidates as $file) {
+        if (is_file($file)) {
+            @unlink($file);
+            return;
+        }
+    }
 }}
 
 if (!function_exists('cpms_direct_team_photo_upload')) {
@@ -115,18 +136,30 @@ function cpms_direct_team_photo_upload($memberId, $fileInfo) {
     if (!is_array($fileInfo) || !isset($fileInfo['tmp_name']) || !is_uploaded_file($fileInfo['tmp_name'])) return array('ok'=>false, 'message'=>'업로드 파일이 없습니다.');
     if (!isset($fileInfo['error']) || (int)$fileInfo['error'] !== UPLOAD_ERR_OK) return array('ok'=>false, 'message'=>'사진 업로드 중 오류가 발생했습니다.');
     if (!isset($fileInfo['size']) || (int)$fileInfo['size'] > 5242880) return array('ok'=>false, 'message'=>'사진은 5MB 이하만 가능합니다.');
+
     $info = @getimagesize($fileInfo['tmp_name']);
     $types = array('image/jpeg'=>'jpg', 'image/png'=>'png', 'image/webp'=>'webp');
     $mime = is_array($info) && isset($info['mime']) ? strtolower((string)$info['mime']) : '';
     if (!isset($types[$mime])) return array('ok'=>false, 'message'=>'JPG, PNG, WEBP 사진만 가능합니다.');
+
     $root = realpath(__DIR__ . '/../../..');
     if ($root === false) return array('ok'=>false, 'message'=>'프로젝트 경로를 확인할 수 없습니다.');
-    $dir = $root . '/public/uploads/direct_team';
-    if (!is_dir($dir) && !@mkdir($dir, 0775, true)) return array('ok'=>false, 'message'=>'사진 폴더를 생성할 수 없습니다.');
+
+    // 파일: C:\www\cpms\app\views\admin\direct_team_save.php
+    // 직영팀 사진은 임직원 사진과 동일한 폴더 한 곳만 사용한다.
+    $dir = $root . '/public/uploads/employees';
+    if (!is_dir($dir)) return array('ok'=>false, 'message'=>'사진 저장 폴더가 없습니다: public/uploads/employees');
+    if (!is_writable($dir)) return array('ok'=>false, 'message'=>'사진 저장 폴더에 쓰기 권한이 없습니다: public/uploads/employees');
+
     $name = 'direct_team_' . (int)$memberId . '_' . date('YmdHis') . '_' . mt_rand(1000, 9999) . '.' . $types[$mime];
     $dest = $dir . '/' . $name;
-    if (!@move_uploaded_file($fileInfo['tmp_name'], $dest) || !is_file($dest)) return array('ok'=>false, 'message'=>'사진 파일 저장에 실패했습니다.');
-    return array('ok'=>true, 'path'=>'/cpms/public/uploads/direct_team/' . $name);
+    if (!@move_uploaded_file($fileInfo['tmp_name'], $dest) || !is_file($dest)) {
+        error_log('[direct_team_photo_upload] save failed=' . $dest);
+        return array('ok'=>false, 'message'=>'사진 파일 저장에 실패했습니다: public/uploads/employees');
+    }
+
+    error_log('[direct_team_photo_upload] saved=' . $dest);
+    return array('ok'=>true, 'path'=>'/cpms/public/uploads/employees/' . $name);
 }}
 
 try {

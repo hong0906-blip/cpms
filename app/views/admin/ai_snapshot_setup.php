@@ -119,7 +119,7 @@ $latestRun = isset($snapshotStatus['latest_run']) && is_array($snapshotStatus['l
 
   <section class="ss-card ss-section">
     <h3>예약 실행 안내</h3>
-    <p style="margin:0;color:#475569;font-size:13px;line-height:1.7;">서버 예약작업을 사용할 수 있는 경우 <strong>scripts/ai_daily_snapshot.php</strong>를 하루 한 번 실행하도록 설정할 수 있습니다. 권장 시각은 매일 23:50입니다. 이 화면은 서버 운영체제별 예약 명령을 자동 등록하지 않으며, 관리자 수동 버튼만으로도 사용할 수 있습니다.</p>
+    <p style="margin:0;color:#475569;font-size:13px;line-height:1.7;">전체 AI 자동 파이프라인을 사용하면 일일 스냅샷도 매일 19:00 파이프라인의 첫 단계로 실행되므로 <strong>scripts/ai_daily_snapshot.php</strong>를 별도 예약하지 마세요. 등록 명령과 실행 결과는 <a href="?r=admin%2Fai_pipeline_setup">AI 자동 분석 설정</a>에서 확인할 수 있습니다.</p>
   </section>
 
   <details class="ss-card ss-section"><summary style="cursor:pointer;font-weight:900;">설치 예정 테이블 구조 보기</summary><pre class="ss-code"><?php echo h(AiDailySnapshotService::createRunTableSql() . ";\n\n" . AiDailySnapshotService::createSnapshotTableSql() . ';'); ?></pre></details>

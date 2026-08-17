@@ -32,8 +32,69 @@ class AiDailyPipelineService
     public static function tableExists($pdo,$table){if(!$pdo||!preg_match('/^[A-Za-z0-9_]+$/',(string)$table))return false;$key=self::key($pdo).':'.$table;if(array_key_exists($key,self::$tableCache))return self::$tableCache[$key];try{$st=$pdo->prepare('SHOW TABLES LIKE :table');$ok=$st&&$st->execute(array(':table'=>$table))&&$st->fetchColumn()!==false;self::$tableCache[$key]=$ok;return $ok;}catch(Exception $e){return false;}}
     public static function createRunTableSql(){return "CREATE TABLE IF NOT EXISTS cpms_ai_pipeline_runs (\n id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n run_uid VARCHAR(64) NOT NULL,\n run_date DATE NOT NULL,\n target_ym CHAR(7) NOT NULL,\n trigger_type VARCHAR(20) NOT NULL,\n run_status VARCHAR(20) NOT NULL,\n last_success_step VARCHAR(50) NULL,\n failed_step VARCHAR(50) NULL,\n source_fingerprint CHAR(64) NULL,\n force_run TINYINT(1) NOT NULL DEFAULT 0,\n actor_employee_id INT NULL,\n actor_name VARCHAR(100) NULL,\n started_at DATETIME NOT NULL,\n finished_at DATETIME NULL,\n error_summary VARCHAR(500) NULL,\n created_at DATETIME NOT NULL,\n UNIQUE KEY uk_ai_pipeline_run_uid (run_uid),\n KEY idx_ai_pipeline_date (run_date,started_at),\n KEY idx_ai_pipeline_status (run_status,started_at)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";}
     public static function createStepTableSql(){return "CREATE TABLE IF NOT EXISTS cpms_ai_pipeline_steps (\n id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,\n run_id BIGINT UNSIGNED NOT NULL,\n step_name VARCHAR(50) NOT NULL,\n step_order INT UNSIGNED NOT NULL,\n step_status VARCHAR(20) NOT NULL,\n processed_count INT UNSIGNED NOT NULL DEFAULT 0,\n success_count INT UNSIGNED NOT NULL DEFAULT 0,\n failure_count INT UNSIGNED NOT NULL DEFAULT 0,\n started_at DATETIME NOT NULL,\n finished_at DATETIME NULL,\n safe_message VARCHAR(500) NULL,\n created_at DATETIME NOT NULL,\n KEY idx_ai_pipeline_step_run (run_id,step_order),\n KEY idx_ai_pipeline_step_status (step_status,started_at)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";}
-    public static function installOrUpdate($pdo=null){$pdo=self::pdo($pdo);if(!$pdo)return array('ok'=>false,'message'=>'DB 연결 상태를 확인할 수 없습니다.');$messages=array();try{foreach(array(self::createRunTableSql(),self::createStepTableSql()) as $sql)if($pdo->exec($sql)===false)throw new Exception('schema');self::$tableCache=array();$results=array(AiCostDataGovernanceService::installOrUpdate($pdo),AiProjectTypeService::installOrUpdate($pdo),AiInputCompletionPatternService::installOrUpdate($pdo),AiCostForecastV2Service::installOrUpdate($pdo),AiForecastAccuracyService::installOrUpdate($pdo),AiMemoryService::installOrUpdate($pdo),AiCeoIndexService::installV2($pdo));$ok=self::isInstalled($pdo);foreach($results as $result){if(empty($result['ok']))$ok=false;if(isset($result['message']))$messages[]=$result['message'];}return array('ok'=>$ok,'message'=>($ok?'파이프라인 전용 테이블 설치를 확인했습니다. ':'파이프라인 설치상태를 확인해주세요. ').implode(' ',$messages));}catch(Exception $e){error_log('[AI Pipeline] install failed: '.$e->getMessage());return array('ok'=>false,'message'=>'파이프라인 테이블 설치를 확인하지 못했습니다.');}}
-    public static function isInstalled($pdo=null){$pdo=self::pdo($pdo);return $pdo&&self::tableExists($pdo,self::RUN_TABLE)&&self::tableExists($pdo,self::STEP_TABLE)&&AiCostDataGovernanceService::isInstalled($pdo)&&AiProjectTypeService::isInstalled($pdo)&&AiInputCompletionPatternService::isInstalled($pdo)&&AiCostForecastV2Service::isInstalled($pdo)&&AiForecastAccuracyService::isInstalled($pdo)&&AiMemoryService::isInstalled($pdo)&&AiCeoIndexService::isV2Installed($pdo);}
+    public static function installOrUpdate($pdo=null)
+    {
+        $pdo=self::pdo($pdo);
+        if(!$pdo)return array('ok'=>false,'message'=>'DB 연결 상태를 확인할 수 없습니다.');
+        $messages=array();
+        try{
+            foreach(array(self::createRunTableSql(),self::createStepTableSql()) as $sql){
+                if($pdo->exec($sql)===false)throw new Exception('schema');
+            }
+            self::$tableCache=array();
+
+            /*
+             * 크론 최초 실행만으로 스냅샷부터 CEO Index/GPT 요약까지 필요한
+             * 모든 소유 테이블을 준비한다. 각 설치 함수는 반복 실행해도 안전하다.
+             */
+            $results=array(
+                AiCostDataGovernanceService::installOrUpdate($pdo),
+                AiProjectTypeService::installOrUpdate($pdo),
+                AiDailySnapshotService::installOrUpdate($pdo),
+                AiInputCompletionPatternService::installOrUpdate($pdo),
+                AiCostForecastV2Service::installOrUpdate($pdo),
+                AiForecastAccuracyService::installOrUpdate($pdo),
+                AiInputReliabilityService::installOrUpdate($pdo),
+                AiAnomalyDetectionService::installOrUpdate($pdo),
+                AiProfitRiskService::installOrUpdate($pdo),
+                AiCeoIndexService::installV2($pdo),
+                AiExecutiveBriefService::installOrUpdate($pdo),
+                AiMemoryService::installOrUpdate($pdo)
+            );
+            $ok=self::isInstalled($pdo);
+            foreach($results as $result){
+                if(empty($result['ok']))$ok=false;
+                if(isset($result['message']))$messages[]=$result['message'];
+            }
+            return array(
+                'ok'=>$ok,
+                'message'=>($ok?'전체 자동 파이프라인 테이블 설치를 확인했습니다. ':'전체 자동 파이프라인 설치상태를 확인해주세요. ').implode(' ',$messages)
+            );
+        }catch(Exception $e){
+            error_log('[AI Pipeline] install failed: '.$e->getMessage());
+            return array('ok'=>false,'message'=>'전체 자동 파이프라인 테이블 설치를 확인하지 못했습니다.');
+        }
+    }
+
+    public static function isInstalled($pdo=null)
+    {
+        $pdo=self::pdo($pdo);
+        return $pdo
+            && self::tableExists($pdo,self::RUN_TABLE)
+            && self::tableExists($pdo,self::STEP_TABLE)
+            && AiCostDataGovernanceService::isInstalled($pdo)
+            && AiProjectTypeService::isInstalled($pdo)
+            && AiDailySnapshotService::isInstalled($pdo)
+            && AiInputCompletionPatternService::isInstalled($pdo)
+            && AiCostForecastV2Service::isInstalled($pdo)
+            && AiForecastAccuracyService::isInstalled($pdo)
+            && AiInputReliabilityService::isInstalled($pdo)
+            && AiAnomalyDetectionService::isInstalled($pdo)
+            && AiProfitRiskService::isInstalled($pdo)
+            && AiCeoIndexService::isV2Installed($pdo)
+            && AiExecutiveBriefService::isInstalled($pdo)
+            && AiMemoryService::isInstalled($pdo);
+    }
     public static function schemaStatus($pdo=null){$pdo=self::pdo($pdo);$s=array('db_available'=>(bool)$pdo,'installed'=>false,'latest_run'=>array(),'run_count'=>0,'settings'=>array('min_completion_rate'=>20));if(!$pdo)return $s;$s['installed']=self::isInstalled($pdo);$s['settings']=array('min_completion_rate'=>AiInputCompletionPatternService::minCompletionRate($pdo));if(!self::tableExists($pdo,self::RUN_TABLE))return $s;try{$st=$pdo->query('SELECT * FROM `'.self::RUN_TABLE.'` ORDER BY started_at DESC,id DESC LIMIT 1');$row=$st?$st->fetch(PDO::FETCH_ASSOC):false;$s['latest_run']=is_array($row)?$row:array();$st=$pdo->query('SELECT COUNT(*) FROM `'.self::RUN_TABLE.'`');$s['run_count']=$st?(int)$st->fetchColumn():0;}catch(Exception $e){}return $s;}
     private static function actor($trigger){if($trigger==='SYSTEM'||$trigger==='CLI')return array('id'=>null,'name'=>null);$u=Auth::user();$name=isset($u['name'])?(string)$u['name']:'';$name=function_exists('mb_substr')?mb_substr($name,0,100,'UTF-8'):substr($name,0,100);return array('id'=>isset($u['employee_id'])?(int)$u['employee_id']:null,'name'=>$name!==''?$name:null);}
     private static function acquireLock($pdo,$date){$name='cpms_ai_daily_pipeline_'.str_replace('-','',$date);try{$st=$pdo->prepare('SELECT GET_LOCK(:name,0)');if(!$st||!$st->execute(array(':name'=>$name)))return array('ok'=>true,'name'=>'');return array('ok'=>(int)$st->fetchColumn()===1,'name'=>$name);}catch(Exception $e){return array('ok'=>true,'name'=>'');}}
