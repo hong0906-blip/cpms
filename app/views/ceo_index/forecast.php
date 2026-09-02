@@ -59,7 +59,7 @@ if(!function_exists('cpms_ceo_forecast_risk_text')){
 
 if(!function_exists('cpms_ceo_forecast_learning_meta')){
     function cpms_ceo_forecast_learning_meta($row){
-        $meta=array('amount'=>0,'timing'=>0,'work'=>0,'work_rate'=>null,'text'=>'자료 없음');
+        $meta=array('amount'=>0,'timing'=>0,'work'=>0,'work_rate'=>null,'lag_samples'=>0,'text'=>'자료 없음');
         if(!is_array($row))return $meta;
         $meta['amount']=isset($row['amount_pattern_month_count'])?(int)$row['amount_pattern_month_count']:0;
         $meta['timing']=isset($row['timing_pattern_month_count'])?(int)$row['timing_pattern_month_count']:(isset($row['sample_count'])?(int)$row['sample_count']:0);
@@ -69,12 +69,38 @@ if(!function_exists('cpms_ceo_forecast_learning_meta')){
         }
         if(isset($decoded['work_pattern_month_count']))$meta['work']=(int)$decoded['work_pattern_month_count'];
         if(isset($decoded['work_occurrence_rate'])&&is_numeric($decoded['work_occurrence_rate']))$meta['work_rate']=(float)$decoded['work_occurrence_rate'];
+        if(isset($decoded['lag_sample_count']))$meta['lag_samples']=max(0,(int)$decoded['lag_sample_count']);
         $parts=array();
         if($meta['amount']>0)$parts[]='금액 '.$meta['amount'].'개월';
         if($meta['work']>0)$parts[]='상세공수 '.$meta['work'].'개월';
         if($meta['timing']>0)$parts[]='입력시점 '.$meta['timing'].'개월';
         $meta['text']=count($parts)>0?implode(' · ',$parts):'실제 학습자료 없음';
         return $meta;
+    }
+}
+
+
+if(!function_exists('cpms_ceo_forecast_completion_text')){
+    function cpms_ceo_forecast_completion_text($row,$meta){
+        if(isset($row['data_status'])&&(string)$row['data_status']==='WAITING_ACTIVITY')return '해당 없음';
+        if((int)$meta['timing']<=0||!isset($row['expected_completion_rate'])||$row['expected_completion_rate']===null)return '측정자료 없음';
+        return cpms_ceo_v2_rate($row['expected_completion_rate']);
+    }
+}
+
+if(!function_exists('cpms_ceo_forecast_work_text')){
+    function cpms_ceo_forecast_work_text($row,$meta){
+        if(!isset($row['cost_type'])||(string)$row['cost_type']!=='labor')return '해당 없음';
+        if($meta['work_rate']===null)return '측정자료 없음';
+        return number_format((float)$meta['work_rate'],1).'%';
+    }
+}
+
+if(!function_exists('cpms_ceo_forecast_lag_text')){
+    function cpms_ceo_forecast_lag_text($row,$meta){
+        if(isset($row['data_status'])&&(string)$row['data_status']==='WAITING_ACTIVITY'&&(int)$meta['lag_samples']<=0)return '해당 없음';
+        if((int)$meta['lag_samples']<=0||!isset($row['average_input_lag_days'])||$row['average_input_lag_days']===null)return '측정자료 없음';
+        return number_format((float)$row['average_input_lag_days'],1).'영업일 · '.(int)$meta['lag_samples'].'건';
     }
 }
 
@@ -179,20 +205,20 @@ else $ceoForecastBasisText='현재 입력 + 기본/유사현장 참고';
  <h3>비용항목별 예측</h3>
  <div class="ceo-v2-scroll">
   <table class="ceo-v2-table">
-   <thead><tr><th>비용항목</th><th>현재</th><th>입력완료율</th><th>작업발생 패턴</th><th>미입력 예상</th><th>최종 예상</th><th>범위</th><th>분석 신뢰도</th><th>학습자료</th><th>평균 입력지연</th><th>가능성</th><th>적용 기준</th></tr></thead>
+   <thead><tr><th>비용항목</th><th>현재</th><th>입력완료율</th><th>작업발생 패턴</th><th>미입력 예상</th><th>최종 예상</th><th>범위</th><th>분석 신뢰도</th><th>학습자료</th><th>평균 입력지연(영업일)</th><th>가능성</th><th>적용 기준</th></tr></thead>
    <tbody>
    <?php foreach($ceoCategoryRows as $row): $ceoRowLearning=cpms_ceo_forecast_learning_meta($row); ?>
     <tr>
      <td><?php echo h(isset($ceoCategoryLabels[$row['cost_type']])?$ceoCategoryLabels[$row['cost_type']]:$row['cost_type']); ?></td>
      <td><?php echo h(cpms_ceo_v2_money($row['current_input_amount'])); ?></td>
-     <td><?php echo h(cpms_ceo_v2_rate($row['expected_completion_rate'])); ?></td>
-     <td><?php echo h($ceoRowLearning['work_rate']===null?'-':number_format((float)$ceoRowLearning['work_rate'],1).'%'); ?></td>
+     <td><?php echo h(cpms_ceo_forecast_completion_text($row,$ceoRowLearning)); ?></td>
+     <td><?php echo h(cpms_ceo_forecast_work_text($row,$ceoRowLearning)); ?></td>
      <td><?php echo h(cpms_ceo_v2_money($row['expected_unentered_amount'])); ?></td>
      <td><?php echo h(cpms_ceo_v2_money($row['final_forecast_amount'])); ?></td>
      <td><?php echo h(cpms_ceo_v2_money($row['forecast_low_amount'])); ?> ~ <?php echo h(cpms_ceo_v2_money($row['forecast_high_amount'])); ?></td>
      <td><?php echo h(cpms_ceo_confidence_text($row['forecast_confidence_score'],$row['forecast_confidence_grade'])); ?></td>
      <td><?php echo h($ceoRowLearning['text']); ?></td>
-     <td><?php echo h($row['average_input_lag_days']===null?'-':number_format((float)$row['average_input_lag_days'],1).'일'); ?></td>
+     <td><?php echo h(cpms_ceo_forecast_lag_text($row,$ceoRowLearning)); ?></td>
      <td>과다 <?php echo h(cpms_ceo_forecast_risk_text($row['overinput_grade'],'over',$row,$ceoRowLearning)); ?> · 미입력 <?php echo h(cpms_ceo_forecast_risk_text($row['missing_possibility_grade'],'missing',$row,$ceoRowLearning)); ?></td>
      <td><?php echo h(cpms_ceo_label_text($row['fallback_level'],false)); ?></td>
     </tr>
@@ -203,7 +229,8 @@ else $ceoForecastBasisText='현재 입력 + 기본/유사현장 참고';
  <div class="ceo-v2-note">
   현장 자체의 과거 실제금액을 우선 사용하되, <strong>현재 0원이고 해당 비용항목에 이번 달 활동도 없으면 과거금액을 최종예상에 자동으로 넣지 않습니다.</strong><br>
   이 경우 과거금액은 예상범위의 상한 참고값으로만 남습니다. 입찰 진행중·계약중·종료 현장도 이번 달 실제 활동이 없으면 회사 최종예상 합계에서 자동 제외됩니다.<br>
-  노무비의 <strong>작업발생 패턴</strong>은 인원별 날짜 공수에서 계산하며, <strong>입력완료율</strong>은 실제 그 당시의 일일 스냅샷에서 계산하므로 서로 다른 값입니다.
+  노무비의 <strong>작업발생 패턴</strong>은 인원별 날짜 공수에서 계산하며, <strong>입력완료율</strong>은 실제 그 당시의 일일 스냅샷에서 계산하므로 서로 다른 값입니다.<br>
+  평균 입력지연은 실제 직접입력 건의 사용일·근무일과 저장일을 비교한 <strong>영업일 기준</strong>이며, 입력이 없는 날짜 자체는 지연건으로 만들지 않습니다.
  </div>
 </section>
 <?php endif; ?>

@@ -754,6 +754,14 @@ class AiCostForecastV2Service
         $workVolatility = isset($detail['work_pattern_volatility']) && is_numeric($detail['work_pattern_volatility'])
             ? max(0.0, (float)$detail['work_pattern_volatility'])
             : null;
+        $lagSampleCount = isset($detail['lag_sample_count']) ? max(0, (int)$detail['lag_sample_count']) : 0;
+        $sameDayInputRate = isset($detail['same_day_input_rate']) && is_numeric($detail['same_day_input_rate']) ? (float)$detail['same_day_input_rate'] : null;
+        $withinOneBusinessDayRate = isset($detail['within_one_business_day_rate']) && is_numeric($detail['within_one_business_day_rate']) ? (float)$detail['within_one_business_day_rate'] : null;
+        $lateTwoPlusInputRate = isset($detail['late_two_plus_input_rate']) && is_numeric($detail['late_two_plus_input_rate']) ? (float)$detail['late_two_plus_input_rate'] : null;
+        $inputLagBasis = isset($detail['input_lag_basis']) ? (string)$detail['input_lag_basis'] : '';
+        $inputLagOrigin = isset($detail['input_lag_origin']) ? (string)$detail['input_lag_origin'] : '';
+        $inputLagScope = isset($detail['input_lag_scope']) ? (string)$detail['input_lag_scope'] : (isset($pattern['fallback_level']) ? (string)$pattern['fallback_level'] : '');
+        $inputLagHolidayBasis = isset($detail['input_lag_holiday_basis']) ? (string)$detail['input_lag_holiday_basis'] : '';
         $oldValue = isset($oldCategory['forecast']) && is_numeric($oldCategory['forecast'])
             ? max(0.0, (float)$oldCategory['forecast'])
             : null;
@@ -809,6 +817,14 @@ class AiCostForecastV2Service
                     'historical_reference'=>$historical,
                     'work_occurrence_rate'=>$workOccurrenceRate,
                     'work_pattern_month_count'=>$workMonths,
+                    'lag_sample_count'=>$lagSampleCount,
+                    'same_day_input_rate'=>$sameDayInputRate,
+                    'within_one_business_day_rate'=>$withinOneBusinessDayRate,
+                    'late_two_plus_input_rate'=>$lateTwoPlusInputRate,
+                    'input_lag_basis'=>$inputLagBasis,
+                    'input_lag_origin'=>$inputLagOrigin,
+                    'input_lag_scope'=>$inputLagScope,
+                    'input_lag_holiday_basis'=>$inputLagHolidayBasis,
                     'project_activity'=>0,
                     'category_activity'=>0
                 ),
@@ -868,6 +884,14 @@ class AiCostForecastV2Service
                     'historical_reference'=>$historical,
                     'work_occurrence_rate'=>$workOccurrenceRate,
                     'work_pattern_month_count'=>$workMonths,
+                    'lag_sample_count'=>$lagSampleCount,
+                    'same_day_input_rate'=>$sameDayInputRate,
+                    'within_one_business_day_rate'=>$withinOneBusinessDayRate,
+                    'late_two_plus_input_rate'=>$lateTwoPlusInputRate,
+                    'input_lag_basis'=>$inputLagBasis,
+                    'input_lag_origin'=>$inputLagOrigin,
+                    'input_lag_scope'=>$inputLagScope,
+                    'input_lag_holiday_basis'=>$inputLagHolidayBasis,
                     'similar_reference'=>$similarValue,
                     'project_activity'=>$projectActivity ? 1 : 0,
                     'category_activity'=>0
@@ -1032,6 +1056,12 @@ class AiCostForecastV2Service
                 'timing_pattern_month_count'=>$sample,
                 'work_pattern_month_count'=>$workMonths,
                 'work_occurrence_rate'=>$workOccurrenceRate,
+                'lag_sample_count'=>$lagSampleCount,
+                'same_day_input_rate'=>$sameDayInputRate,
+                'within_one_business_day_rate'=>$withinOneBusinessDayRate,
+                'late_two_plus_input_rate'=>$lateTwoPlusInputRate,
+                'input_lag_basis'=>$inputLagBasis,
+                'input_lag_origin'=>$inputLagOrigin,
                 'work_pattern_value'=>$workPatternValue,
                 'operational_input_sample_count'=>$operationalSamples,
                 'live_input_sample_count'=>$liveSamples,
@@ -1086,22 +1116,28 @@ class AiCostForecastV2Service
             $categories[] = $row;
 
             $amount = max(1, (float)$row['current_input_amount']);
+            $candidateMeta = isset($row['candidate_data']) && is_array($row['candidate_data']) ? $row['candidate_data'] : array();
+            $categoryActive = !empty($candidateMeta['category_activity']);
             $totals['current'] += $row['current_input_amount'];
             $totals['forecast'] += $row['final_forecast_amount'];
             $totals['low'] += $row['forecast_low_amount'];
             $totals['high'] += $row['forecast_high_amount'];
-            if ($row['expected_completion_rate'] !== null) {
+
+            /*
+             * CEO Index 전체 입력완료율/신뢰도는 이번 달 실제 활동이 있는 비용항목만 반영한다.
+             * 활동 없음/해당 없음 항목의 0%를 평균에 섞으면 회사 전체 입력완료율이 부당하게 낮아진다.
+             */
+            if ($categoryActive && $row['expected_completion_rate'] !== null) {
                 $totals['completion_weighted'] += (float)$row['expected_completion_rate'] * $amount;
                 $totals['completion_base'] += $amount;
                 $available++;
             }
-            if ($row['forecast_confidence_score'] !== null) {
+            if ($categoryActive && $row['forecast_confidence_score'] !== null) {
                 $totals['confidence_weighted'] += (float)$row['forecast_confidence_score'] * $amount;
                 $totals['confidence_base'] += $amount;
             }
             $sample = max($sample, (int)$row['sample_count']);
             $amountMonths = max($amountMonths, (int)$row['amount_pattern_month_count']);
-            $candidateMeta = isset($row['candidate_data']) && is_array($row['candidate_data']) ? $row['candidate_data'] : array();
             $workMonths = max($workMonths, isset($candidateMeta['work_pattern_month_count']) ? (int)$candidateMeta['work_pattern_month_count'] : 0);
             $liveSamples += (int)$row['live_input_sample_count'];
             $operationalSamples += isset($candidateMeta['operational_input_sample_count']) ? (int)$candidateMeta['operational_input_sample_count'] : (int)$row['live_input_sample_count'];
@@ -1435,6 +1471,33 @@ class AiCostForecastV2Service
         ));
     }
 
+    /**
+     * 파일: app/services/AiCostForecastV2Service.php
+     * 화면: CEO Index > 투입비 예측 / GPT 요약
+     *
+     * 같은 날짜에 강제 파이프라인을 여러 번 실행하면 RESULT_TABLE에는 run별 결과가 누적된다.
+     * 일부 하위 분석 서비스가 analysis_date/target_ym만으로 읽기 때문에 과거 run까지 합산되는 문제가 있었다.
+     * 최신 정상 run의 프로젝트 결과만 남기고, 상세 비용항목(CATEGORY_TABLE)과 run 이력은 보존한다.
+     */
+    private static function pruneSupersededProjectResults($pdo, $runId, $context)
+    {
+        if (!$pdo || (int)$runId <= 0 || empty($context['analysis_date']) || empty($context['target_ym'])) return false;
+        try {
+            $sql = 'DELETE FROM `' . self::RESULT_TABLE . '` '
+                . 'WHERE analysis_date=:date AND target_ym=:ym AND (run_id IS NULL OR run_id<>:run_id)';
+            $st = $pdo->prepare($sql);
+            if (!$st) return false;
+            return $st->execute(array(
+                ':date'=>(string)$context['analysis_date'],
+                ':ym'=>(string)$context['target_ym'],
+                ':run_id'=>(int)$runId
+            ));
+        } catch (Exception $e) {
+            error_log('[AI Forecast V2] superseded project result cleanup failed');
+            return false;
+        }
+    }
+
     public static function forecastLatest($pdo = null, $triggerType = 'SYSTEM')
     {
         $pdo = self::pdo($pdo);
@@ -1509,6 +1572,9 @@ class AiCostForecastV2Service
                 $totals,
                 $counts['failure'] > 0 ? '일부 현장 V2 예측 실패: ' . $counts['failure'] . '건' : null
             );
+            if ($status === 'COMPLETED') {
+                self::pruneSupersededProjectResults($pdo, $runId, $context);
+            }
             self::releaseLock($pdo, $lock);
             return array(
                 'ok'=>$counts['success']>0,

@@ -11,6 +11,8 @@
  * 5) 강제 총액 입력은 월 최종금액 학습에만 사용한다.
  * 6) 회사 전체의 절대 금액 중앙값을 개별 현장 예상금액으로 복사하지 않는다.
  * 7) 입력완료율 표본이 3개월 미만이거나 완료율이 너무 낮으면 직접 확대 예측을 막는다.
+ * 8) 입력지연은 실제 직접입력 건만 사용일/근무일과 저장일을 영업일 기준으로 비교한다.
+ *    입력이 없는 날짜는 지연건으로 만들지 않고, 주말/공휴일과 과거이관/강제입력/자동계산은 제외한다.
  *
  * PHP 5.6 / MySQL 5.6 compatible.
  */
@@ -29,7 +31,7 @@ class AiInputCompletionPatternService
     const TABLE_NAME = 'cpms_ai_input_completion_patterns';
     const SNAPSHOT_TABLE = 'cpms_ai_daily_snapshots';
     const EVENT_TABLE = 'cpms_cost_data_events';
-    const CALCULATION_VERSION = 'INPUT_PATTERN_V4';
+    const CALCULATION_VERSION = 'INPUT_PATTERN_V5';
     const DEFAULT_GRACE_DAYS = 0;
     const DEFAULT_MIN_COMPLETION_RATE = 20;
     const MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION = 3;
@@ -465,36 +467,176 @@ class AiInputCompletionPatternService
         }
     }
 
-    private static function eventStats($pdo, $targetYm)
+    /**
+     * 실제 등록된 건의 발생일(actual_date)과 저장일(event_at)을 비교하기 위한 공휴일 지도.
+     *
+     * - 입력이 전혀 없는 날짜를 지연건으로 만들지 않는다. 실제 이벤트가 있는 건만 측정한다.
+     * - 토/일 및 공휴일/대체공휴일은 지연 영업일에서 제외한다.
+     * - CPMS에 이미 있는 Google 공휴일 캐시를 우선 활용하고, 캐시가 없을 때를 대비해
+     *   고정 공휴일과 2026년 공식 공휴일을 보완한다.
+     */
+    private static function inputLagHolidayMap($pdo, $startDate, $endDate)
+    {
+        $holidays = array();
+        if (!preg_match('/^(\d{4})-\d{2}-\d{2}$/', (string)$startDate, $startParts)) return $holidays;
+        if (!preg_match('/^(\d{4})-\d{2}-\d{2}$/', (string)$endDate, $endParts)) return $holidays;
+        if ($startDate > $endDate) return $holidays;
+
+        $fixed = array('01-01','03-01','05-01','05-05','06-06','08-15','10-03','10-09','12-25');
+        $startYear = (int)$startParts[1];
+        $endYear = (int)$endParts[1];
+        for ($year=$startYear; $year<=$endYear; $year++) {
+            foreach ($fixed as $monthDay) {
+                $date = sprintf('%04d-%s', $year, $monthDay);
+                if ($date >= $startDate && $date <= $endDate) $holidays[$date] = true;
+            }
+            if ($year >= 2026) {
+                $date = sprintf('%04d-07-17', $year);
+                if ($date >= $startDate && $date <= $endDate) $holidays[$date] = true;
+            }
+        }
+
+        $official2026 = array(
+            '2026-01-01','2026-02-16','2026-02-17','2026-02-18','2026-03-01','2026-03-02',
+            '2026-05-01','2026-05-05','2026-05-24','2026-05-25','2026-06-03','2026-06-06',
+            '2026-07-17','2026-08-15','2026-08-17','2026-09-24','2026-09-25','2026-09-26',
+            '2026-10-03','2026-10-05','2026-10-09','2026-12-25'
+        );
+        foreach ($official2026 as $date) if ($date >= $startDate && $date <= $endDate) $holidays[$date] = true;
+
+        if ($pdo && self::tableExists($pdo, 'cpms_holiday_cache')) {
+            try {
+                $st = $pdo->prepare('SELECT holiday_date FROM cpms_holiday_cache WHERE is_active=1 AND holiday_date BETWEEN :start_date AND :end_date');
+                if ($st && $st->execute(array(':start_date'=>$startDate, ':end_date'=>$endDate))) {
+                    foreach ((array)$st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                        $date = isset($row['holiday_date']) ? trim((string)$row['holiday_date']) : '';
+                        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) $holidays[$date] = true;
+                    }
+                }
+            } catch (Exception $e) {
+            }
+        }
+        return $holidays;
+    }
+
+    /**
+     * 발생일 다음 날부터 실제 등록일까지의 영업일 수를 계산한다.
+     * 같은 날 입력은 0일, 금요일 발생 후 월요일 입력은 주말을 빼고 1영업일이다.
+     */
+    private static function inputLagBusinessDays($actualDate, $eventDate, $holidays)
+    {
+        $actualDate = trim((string)$actualDate);
+        $eventDate = trim((string)$eventDate);
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $actualDate)) return null;
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $eventDate)) return null;
+        if ($eventDate <= $actualDate) return 0;
+
+        $cursor = strtotime($actualDate . ' +1 day');
+        $end = strtotime($eventDate);
+        if ($cursor === false || $end === false) return null;
+        $days = 0;
+        $guard = 0;
+        while ($cursor <= $end && $guard < 800) {
+            $date = date('Y-m-d', $cursor);
+            $weekday = (int)date('N', $cursor);
+            if ($weekday <= 5 && !isset($holidays[$date])) $days++;
+            $cursor = strtotime('+1 day', $cursor);
+            $guard++;
+        }
+        return $days;
+    }
+
+    private static function eventStats($pdo, $targetYm, $analysisDate)
     {
         $result = array();
         if (!self::tableExists($pdo, self::EVENT_TABLE)) return $result;
         $start = date('Y-m-d', strtotime($targetYm . '-01 -' . self::HISTORY_MONTH_LIMIT . ' months'));
-        $end = $targetYm . '-01';
+        $analysisDate = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$analysisDate) ? (string)$analysisDate : self::businessToday();
+        /* 현재 분석일까지 실제로 등록된 지연 건은 즉시 반영한다. */
+        $end = date('Y-m-d', strtotime($analysisDate . ' +1 day'));
+        $holidayEnd = $analysisDate;
+        $holidays = self::inputLagHolidayMap($pdo, $start, $holidayEnd);
         $originWhere = AiCostDataGovernanceService::columnExists($pdo, self::EVENT_TABLE, 'data_origin')
             ? " AND (data_origin='LIVE_EMPLOYEE_INPUT' OR (cost_type='labor' AND data_origin='SYSTEM_IMPORT' AND source_type IN ('ATTENDANCE','AUTO_CALC')))"
             : ' AND 1=0';
-        $sql = "SELECT project_id,cost_type,COUNT(*) AS event_count,"
-            . "AVG(CASE WHEN actual_date IS NOT NULL THEN GREATEST(0,DATEDIFF(DATE(event_at),actual_date)) ELSE NULL END) AS average_lag,"
-            . "SUM(CASE WHEN event_action IN ('UPDATE','ADJUST') THEN 1 ELSE 0 END) AS correction_count,"
-            . "SUM(CASE WHEN source_type IN ('EXCEL','APPROVAL') AND actual_date IS NOT NULL AND DATEDIFF(DATE(event_at),actual_date)>=7 THEN 1 ELSE 0 END) AS bulk_count,"
-            . "SUM(CASE WHEN event_action='UPDATE' AND old_data LIKE '%settlement_ym%' AND new_data LIKE '%settlement_ym%' THEN 1 ELSE 0 END) AS move_count "
+
+        /*
+         * event_count는 실제 운영 흐름 파악을 위해 출퇴근/자동계산도 포함한다.
+         * 그러나 '입력 지연'은 사람의 실제 직접입력(LIVE_EMPLOYEE_INPUT)만 측정한다.
+         * 강제입력, 과거이관, 과거 복원입력, 승인/관리자 보정, 자동계산은 지연 측정에서 제외한다.
+         */
+        $sql = "SELECT project_id,cost_type,target_type,event_action,source_type,data_origin,actual_date,event_at,old_data,new_data "
             . "FROM `" . self::EVENT_TABLE . "` WHERE event_at>=:start_date AND event_at<:end_date AND event_action<>'DELETE'"
-            . $originWhere . " GROUP BY project_id,cost_type";
+            . $originWhere . " ORDER BY project_id,cost_type,event_at,id";
         try {
             $st = $pdo->prepare($sql);
             if (!$st || !$st->execute(array(':start_date'=>$start, ':end_date'=>$end))) return $result;
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            $groups = array();
             foreach ((array)$rows as $row) {
-                $project = (int)$row['project_id'];
-                $cost = (string)$row['cost_type'];
-                $count = max(0, (int)$row['event_count']);
-                $result[$project . ':' . $cost] = array(
+                $project = isset($row['project_id']) ? (int)$row['project_id'] : 0;
+                $cost = isset($row['cost_type']) ? (string)$row['cost_type'] : '';
+                if ($project <= 0 || $cost === '') continue;
+                $key = $project . ':' . $cost;
+                if (!isset($groups[$key])) {
+                    $groups[$key] = array(
+                        'event_count'=>0,'human_event_count'=>0,'lag_total'=>0.0,'lag_count'=>0,'same_day_count'=>0,'within_one_count'=>0,'late_two_plus_count'=>0,
+                        'correction_count'=>0,'bulk_count'=>0,'move_count'=>0
+                    );
+                }
+                $groups[$key]['event_count']++;
+
+                $origin = isset($row['data_origin']) ? strtoupper(trim((string)$row['data_origin'])) : '';
+                $humanInput = $origin === 'LIVE_EMPLOYEE_INPUT';
+                if ($humanInput) $groups[$key]['human_event_count']++;
+                $actualDate = isset($row['actual_date']) ? trim((string)$row['actual_date']) : '';
+                $eventDate = isset($row['event_at']) ? substr((string)$row['event_at'], 0, 10) : '';
+                $lag = null;
+                if ($humanInput && $actualDate !== '' && $eventDate !== '') {
+                    $lag = self::inputLagBusinessDays($actualDate, $eventDate, $holidays);
+                    if ($lag !== null) {
+                        $groups[$key]['lag_total'] += (float)$lag;
+                        $groups[$key]['lag_count']++;
+                        if ((int)$lag === 0) $groups[$key]['same_day_count']++;
+                        if ((int)$lag <= 1) $groups[$key]['within_one_count']++;
+                        if ((int)$lag >= 2) $groups[$key]['late_two_plus_count']++;
+                    }
+                }
+
+                if ($humanInput) {
+                    $isInitialLaborGongsu = $cost === 'labor'
+                        && isset($row['target_type']) && (string)$row['target_type'] === 'labor_gongsu_override'
+                        && isset($row['source_type']) && strtoupper((string)$row['source_type']) === 'DIRECT';
+                    if (!$isInitialLaborGongsu && isset($row['event_action']) && in_array(strtoupper((string)$row['event_action']), array('UPDATE','ADJUST'), true)) {
+                        $groups[$key]['correction_count']++;
+                    }
+                    if ($lag !== null && $lag >= 7 && isset($row['source_type']) && in_array(strtoupper((string)$row['source_type']), array('EXCEL','APPROVAL'), true)) {
+                        $groups[$key]['bulk_count']++;
+                    }
+                    if (isset($row['event_action']) && strtoupper((string)$row['event_action']) === 'UPDATE'
+                        && isset($row['old_data'],$row['new_data'])
+                        && strpos((string)$row['old_data'], 'settlement_ym') !== false
+                        && strpos((string)$row['new_data'], 'settlement_ym') !== false) {
+                        $groups[$key]['move_count']++;
+                    }
+                }
+            }
+
+            foreach ($groups as $key=>$group) {
+                $count = max(0, (int)$group['event_count']);
+                $lagCount = max(0, (int)$group['lag_count']);
+                $humanCount = max(0, (int)$group['human_event_count']);
+                $result[$key] = array(
                     'event_count'=>$count,
-                    'average_lag'=>$row['average_lag'] === null ? null : (float)$row['average_lag'],
-                    'correction_rate'=>$count ? round((int)$row['correction_count'] / $count * 100, 3) : null,
-                    'bulk_rate'=>$count ? round((int)$row['bulk_count'] / $count * 100, 3) : null,
-                    'move_rate'=>$count ? round((int)$row['move_count'] / $count * 100, 3) : null
+                    'human_event_count'=>$humanCount,
+                    'lag_sample_count'=>$lagCount,
+                    'average_lag'=>$lagCount ? round((float)$group['lag_total'] / $lagCount, 3) : null,
+                    'same_day_rate'=>$lagCount ? round((int)$group['same_day_count'] / $lagCount * 100, 3) : null,
+                    'within_one_business_day_rate'=>$lagCount ? round((int)$group['within_one_count'] / $lagCount * 100, 3) : null,
+                    'late_two_plus_rate'=>$lagCount ? round((int)$group['late_two_plus_count'] / $lagCount * 100, 3) : null,
+                    'correction_rate'=>$humanCount ? round((int)$group['correction_count'] / $humanCount * 100, 3) : null,
+                    'bulk_rate'=>$humanCount ? round((int)$group['bulk_count'] / $humanCount * 100, 3) : null,
+                    'move_rate'=>$humanCount ? round((int)$group['move_count'] / $humanCount * 100, 3) : null
                 );
             }
         } catch (Exception $e) {
@@ -800,7 +942,12 @@ class AiInputCompletionPatternService
         $amountMonths = array();
         $finals = array();
         $events = 0;
+        $humanEvents = 0;
         $lags = array();
+        $lagSamples = 0;
+        $sameDayRates = array();
+        $withinOneRates = array();
+        $lateTwoPlusRates = array();
         $bulk = array();
         $corrections = array();
         $moves = array();
@@ -819,20 +966,58 @@ class AiInputCompletionPatternService
                 $workMonths[$sample['ym']] = true;
             }
 
-            if (empty($sample['timing_eligible']) || $sample['completion_rate'] === null) continue;
-            $rates[] = $sample['completion_rate'];
-            $months[$sample['ym']] = true;
-
+            /*
+             * 입력지연/수정 통계는 일일 스냅샷 보유 여부와 별개다.
+             * 실제 직접입력 이벤트가 있으면 입력완료율 표본이 없는 항목도 지연 측정은 가능해야 한다.
+             */
             $eventKey = (int)$sample['project_id'] . ':' . $sample['cost_type'];
             if (isset($eventStats[$eventKey]) && !isset($seenEvent[$eventKey])) {
                 $seenEvent[$eventKey] = true;
                 $row = $eventStats[$eventKey];
                 $events += (int)$row['event_count'];
+                if (isset($row['human_event_count'])) $humanEvents += (int)$row['human_event_count'];
                 if ($row['average_lag'] !== null) $lags[] = $row['average_lag'];
+                if (isset($row['lag_sample_count'])) $lagSamples += (int)$row['lag_sample_count'];
+                if (isset($row['same_day_rate']) && $row['same_day_rate'] !== null) $sameDayRates[] = $row['same_day_rate'];
+                if (isset($row['within_one_business_day_rate']) && $row['within_one_business_day_rate'] !== null) $withinOneRates[] = $row['within_one_business_day_rate'];
+                if (isset($row['late_two_plus_rate']) && $row['late_two_plus_rate'] !== null) $lateTwoPlusRates[] = $row['late_two_plus_rate'];
                 if ($row['bulk_rate'] !== null) $bulk[] = $row['bulk_rate'];
                 if ($row['correction_rate'] !== null) $corrections[] = $row['correction_rate'];
                 if ($row['move_rate'] !== null) $moves[] = $row['move_rate'];
             }
+
+            if (empty($sample['timing_eligible']) || $sample['completion_rate'] === null) continue;
+            $rates[] = $sample['completion_rate'];
+            $months[$sample['ym']] = true;
+        }
+
+        /*
+         * 과거 금액/스냅샷 표본이 없는 신규 현장이라도 현재 실제 직접입력 이벤트가 있으면
+         * 입력지연 통계는 즉시 표시할 수 있어야 한다. 샘플 루프에서 잡히지 않은 이벤트를 보완한다.
+         */
+        foreach ((array)$eventStats as $eventKey=>$row) {
+            if (isset($seenEvent[$eventKey])) continue;
+            $parts = explode(':', (string)$eventKey, 2);
+            $eventProject = isset($parts[0]) ? (int)$parts[0] : 0;
+            $eventCost = isset($parts[1]) ? (string)$parts[1] : '';
+            $match = false;
+            if ($scope === 'PROJECT_CATEGORY') $match = $eventProject === $projectId && $eventCost === $costType;
+            else if ($scope === 'PROJECT_ALL') $match = $eventProject === $projectId;
+            else if ($scope === 'COMPANY_CATEGORY') $match = $eventCost === $costType;
+            else if ($scope === 'COMPANY_ALL') $match = true;
+            if (!$match) continue;
+
+            $seenEvent[$eventKey] = true;
+            $events += isset($row['event_count']) ? (int)$row['event_count'] : 0;
+            if (isset($row['human_event_count'])) $humanEvents += (int)$row['human_event_count'];
+            if (isset($row['average_lag']) && $row['average_lag'] !== null) $lags[] = $row['average_lag'];
+            if (isset($row['lag_sample_count'])) $lagSamples += (int)$row['lag_sample_count'];
+            if (isset($row['same_day_rate']) && $row['same_day_rate'] !== null) $sameDayRates[] = $row['same_day_rate'];
+            if (isset($row['within_one_business_day_rate']) && $row['within_one_business_day_rate'] !== null) $withinOneRates[] = $row['within_one_business_day_rate'];
+            if (isset($row['late_two_plus_rate']) && $row['late_two_plus_rate'] !== null) $lateTwoPlusRates[] = $row['late_two_plus_rate'];
+            if (isset($row['bulk_rate']) && $row['bulk_rate'] !== null) $bulk[] = $row['bulk_rate'];
+            if (isset($row['correction_rate']) && $row['correction_rate'] !== null) $corrections[] = $row['correction_rate'];
+            if (isset($row['move_rate']) && $row['move_rate'] !== null) $moves[] = $row['move_rate'];
         }
 
         $sampleMonths = array_keys($months);
@@ -853,7 +1038,12 @@ class AiInputCompletionPatternService
             'amount_pattern_month_count'=>count($amountMonths),
             'amount_sample_months'=>$amountSampleMonths,
             'event_count'=>$events,
+            'human_input_event_count'=>$humanEvents,
             'average_input_lag_days'=>self::median($lags),
+            'lag_sample_count'=>$lagSamples,
+            'same_day_input_rate'=>self::median($sameDayRates),
+            'within_one_business_day_rate'=>self::median($withinOneRates),
+            'late_two_plus_input_rate'=>self::median($lateTwoPlusRates),
             'completion_volatility'=>self::volatility($rates),
             'late_bulk_rate'=>self::median($bulk),
             'correction_rate'=>self::median($corrections),
@@ -913,6 +1103,15 @@ class AiInputCompletionPatternService
             'amount_origin'=>'CPMS_FINALIZED_ACTUALS',
             'work_origin'=>'DETAILED_DAILY_GONGSU_BY_WORK_DATE',
             'timing_origin'=>'OBSERVED_DAILY_SNAPSHOT',
+            'human_input_event_count'=>isset($stats['human_input_event_count']) ? (int)$stats['human_input_event_count'] : 0,
+            'lag_sample_count'=>isset($stats['lag_sample_count']) ? (int)$stats['lag_sample_count'] : 0,
+            'same_day_input_rate'=>isset($stats['same_day_input_rate']) ? $stats['same_day_input_rate'] : null,
+            'within_one_business_day_rate'=>isset($stats['within_one_business_day_rate']) ? $stats['within_one_business_day_rate'] : null,
+            'late_two_plus_input_rate'=>isset($stats['late_two_plus_input_rate']) ? $stats['late_two_plus_input_rate'] : null,
+            'input_lag_basis'=>'ACTUAL_DATE_TO_EVENT_DATE_BUSINESS_DAYS',
+            'input_lag_origin'=>'LIVE_EMPLOYEE_INPUT_ONLY',
+            'input_lag_holiday_basis'=>'WEEKEND_AND_CPMS_HOLIDAY_CACHE',
+            'input_lag_scope'=>$scope,
             'absolute_amount_scope'=>$scope === 'PROJECT_CATEGORY' ? 'SAME_PROJECT_SAME_CATEGORY' : 'DIAGNOSTIC_ONLY',
             'direct_projection_min_timing_months'=>self::MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION,
             'direct_projection_min_completion_rate'=>self::minCompletionRate($pdo)
@@ -1013,7 +1212,7 @@ class AiInputCompletionPatternService
 
         /* 4) 금액 / 실제 입력시점 / 작업발생 자료를 같은 월·현장·항목끼리 결합 */
         $samples = self::mergeSamples($amountSamples, $timingSamples, $workSamples);
-        $events = self::eventStats($pdo, $context['target_ym']);
+        $events = self::eventStats($pdo, $context['target_ym'], $context['snapshot_date']);
 
         $projects = self::currentProjectIds($pdo, $context);
         if (count($projects) === 0) {
@@ -1103,6 +1302,7 @@ class AiInputCompletionPatternService
             array('COMPANY_ALL', 0, 'all', false)
         );
         $minRate = self::minCompletionRate($pdo);
+        $projectInputDiagnostics = null;
 
         foreach ($candidates as $candidate) {
             try {
@@ -1122,6 +1322,32 @@ class AiInputCompletionPatternService
                 $row = $st->fetch(PDO::FETCH_ASSOC);
                 if (!is_array($row)) continue;
                 $detail = self::decode(isset($row['detail_data']) ? $row['detail_data'] : '');
+
+                /*
+                 * 예측 fallback과 입력지연 진단 fallback을 분리한다.
+                 * 같은 현장/같은 비용항목의 실제 직접입력 통계가 있으면 회사 평균으로 덮어쓰지 않는다.
+                 */
+                if ($candidate[0] === 'PROJECT_CATEGORY') {
+                    $projectLagSamples = isset($detail['lag_sample_count']) ? (int)$detail['lag_sample_count'] : 0;
+                    $projectEvents = isset($row['event_count']) ? (int)$row['event_count'] : 0;
+                    if ($projectLagSamples > 0 || $projectEvents > 0) {
+                        $projectInputDiagnostics = array(
+                            'event_count'=>$projectEvents,
+                            'average_input_lag_days'=>isset($row['average_input_lag_days']) ? $row['average_input_lag_days'] : null,
+                            'late_bulk_rate'=>isset($row['late_bulk_rate']) ? $row['late_bulk_rate'] : null,
+                            'correction_rate'=>isset($row['correction_rate']) ? $row['correction_rate'] : null,
+                            'month_move_rate'=>isset($row['month_move_rate']) ? $row['month_move_rate'] : null,
+                            'lag_sample_count'=>$projectLagSamples,
+                            'same_day_input_rate'=>isset($detail['same_day_input_rate']) ? $detail['same_day_input_rate'] : null,
+                            'within_one_business_day_rate'=>isset($detail['within_one_business_day_rate']) ? $detail['within_one_business_day_rate'] : null,
+                            'late_two_plus_input_rate'=>isset($detail['late_two_plus_input_rate']) ? $detail['late_two_plus_input_rate'] : null,
+                            'input_lag_basis'=>isset($detail['input_lag_basis']) ? $detail['input_lag_basis'] : 'ACTUAL_DATE_TO_EVENT_DATE_BUSINESS_DAYS',
+                            'input_lag_origin'=>isset($detail['input_lag_origin']) ? $detail['input_lag_origin'] : 'LIVE_EMPLOYEE_INPUT_ONLY',
+                            'input_lag_holiday_basis'=>isset($detail['input_lag_holiday_basis']) ? $detail['input_lag_holiday_basis'] : 'WEEKEND_AND_CPMS_HOLIDAY_CACHE',
+                            'input_lag_scope'=>'PROJECT_CATEGORY'
+                        );
+                    }
+                }
 
                 /* 회사/전체 fallback의 금액 중앙값은 개별 현장 예상금액으로 사용하지 않는다. */
                 if (!$candidate[3]) {
@@ -1164,6 +1390,19 @@ class AiInputCompletionPatternService
                 }
 
                 if ($rawCompletion === null && !$hasAmount && !$hasWorkPattern) continue;
+
+                if ($projectInputDiagnostics !== null && $candidate[0] !== 'PROJECT_CATEGORY') {
+                    $row['event_count'] = $projectInputDiagnostics['event_count'];
+                    $row['average_input_lag_days'] = $projectInputDiagnostics['average_input_lag_days'];
+                    $row['late_bulk_rate'] = $projectInputDiagnostics['late_bulk_rate'];
+                    $row['correction_rate'] = $projectInputDiagnostics['correction_rate'];
+                    $row['month_move_rate'] = $projectInputDiagnostics['month_move_rate'];
+                    foreach (array('lag_sample_count','same_day_input_rate','within_one_business_day_rate','late_two_plus_input_rate','input_lag_basis','input_lag_origin','input_lag_holiday_basis','input_lag_scope') as $diagKey) {
+                        $detail[$diagKey] = $projectInputDiagnostics[$diagKey];
+                    }
+                    $row['detail_data'] = self::encode($detail);
+                }
+
                 $row['available'] = true;
                 return $row;
             } catch (Exception $e) {
