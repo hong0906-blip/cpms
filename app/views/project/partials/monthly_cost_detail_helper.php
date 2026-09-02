@@ -235,6 +235,7 @@ function cpms_monthly_summary_labor_detail_rows($pdo, $projectId, $projectName, 
             $outsourcingAmount = isset($amounts['outsourcing_amount']) ? (float)$amounts['outsourcing_amount'] : 0.0;
             $companyName = isset($worker['company_name']) ? trim((string)$worker['company_name']) : '';
             if ($companyName === '') $companyName = '창명건설';
+            $jobType = isset($worker['job_type_snapshot']) ? trim((string)$worker['job_type_snapshot']) : '';
             $remark = isset($worker['remark']) ? trim((string)$worker['remark']) : '';
 
             if ($laborAmount > 0 && $laborGongsu > 0) {
@@ -246,6 +247,7 @@ function cpms_monthly_summary_labor_detail_rows($pdo, $projectId, $projectName, 
                 $result['labor'][] = array(
                     'name' => $workerName,
                     'worker_key' => $workerKey,
+                    'job_type' => $jobType,
                     'company_name' => $companyName,
                     'ratio_label' => $laborRatioLabel,
                     'output_days' => $laborOutputDays,
@@ -264,6 +266,7 @@ function cpms_monthly_summary_labor_detail_rows($pdo, $projectId, $projectName, 
                 $result['labor_outsourcing'][] = array(
                     'name' => $workerName,
                     'worker_key' => $workerKey,
+                    'job_type' => $jobType,
                     'ratio_label' => $outsourcingRatioLabel,
                     'output_days' => $outsourcingOutputDays,
                     'total_gongsu' => $outsourcingGongsu,

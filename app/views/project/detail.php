@@ -738,10 +738,11 @@ if (count($estimateVersions) > 0) {
             <input type="hidden" name="action" value="create">
             <input name="round_label" required maxlength="100" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="1회 기성">
             <input type="date" name="progress_date" required class="px-4 py-3 rounded-2xl border border-gray-200">
-            <input name="recognized_amount" required class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="기성금액(확정매출)">
+            <input name="recognized_amount" required inputmode="decimal" class="px-4 py-3 rounded-2xl border border-gray-200" placeholder="기성금액(0원 입력 가능)">
             <input type="file" name="attachment_file" accept=".pdf,.hwp,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png" class="md:col-span-2 px-4 py-3 rounded-2xl border border-gray-200 bg-white">
             <textarea name="remark" rows="2" class="md:col-span-5 px-4 py-3 rounded-2xl border border-gray-200" placeholder="비고"></textarea>
             <button type="submit" class="px-6 py-3 rounded-2xl bg-gray-900 text-white font-extrabold">등록</button>
+            <div class="md:col-span-6 text-xs text-gray-500">해당 월에 기성이 없으면 0원으로 등록하세요. 경영현황에는 확정매출 0원으로 반영되고, 공사 &gt; 상황에서는 기성 없음으로 표시됩니다.</div>
         </form>
         <?php if (count($progressBillings) > 0): ?>
             <div class="mt-5 overflow-x-auto rounded-2xl border border-gray-200">
@@ -771,7 +772,7 @@ if (count($estimateVersions) > 0) {
                                 <input form="<?php echo h($progressFormId); ?>" type="date" name="progress_date" required class="w-36 px-2 py-1 rounded-lg border border-gray-200" value="<?php echo h(isset($progressRow['progress_date']) ? $progressRow['progress_date'] : ''); ?>">
                             </td>
                             <td class="px-3 py-2 text-right">
-                                <input form="<?php echo h($progressFormId); ?>" name="recognized_amount" required class="w-36 px-2 py-1 rounded-lg border border-gray-200 text-right" value="<?php echo h(cpms_format_amount0($progressDisplayAmount)); ?>">
+                                <input form="<?php echo h($progressFormId); ?>" name="recognized_amount" required inputmode="decimal" class="w-36 px-2 py-1 rounded-lg border border-gray-200 text-right" value="<?php echo h(cpms_format_amount0($progressDisplayAmount)); ?>">
                             </td>
                             <td class="px-3 py-2">
                                 <?php $progressFileActions = cpms_public_affairs_drive_actions_html('progress', isset($progressRow['id']) ? (int)$progressRow['id'] : 0, $progressRow); ?>

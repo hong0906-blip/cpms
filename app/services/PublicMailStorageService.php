@@ -11,7 +11,7 @@ namespace App\Services;
 
 class PublicMailStorageService
 {
-    const VERSION = '1.7.19.1';
+    const VERSION = '1.7.21';
     const SETTINGS_FILE = 'settings.json';
     const MESSAGES_FILE = 'messages.json';
     const WORKFLOW_FILE = 'workflow.json';
@@ -22,7 +22,7 @@ class PublicMailStorageService
     const TITLE_REFRESH_QUEUE_FILE = 'title_refresh_queue.json';
     const TITLE_REFRESH_UPDATES_FILE = 'title_refresh_updates.json';
     const BODY_CACHE_DIR = 'body_cache';
-    const BODY_CACHE_VERSION = 17;
+    const BODY_CACHE_VERSION = 19;
 
     public static function rootPath()
     {
@@ -752,7 +752,7 @@ class PublicMailStorageService
          */
         $version = isset($cache['cache_version']) ? (int)$cache['cache_version'] : 0;
         $bodyHtml = isset($cache['body_html']) ? (string)$cache['body_html'] : '';
-        /* v17부터 완전한 HTML 문서의 body를 올바르게 추출하므로 구버전은 다시 읽습니다. */
+        /* v19부터 첨부 메일은 소용량 원문 EML 전체 검증을 거쳐 다시 읽습니다. */
         if ($version < self::BODY_CACHE_VERSION || empty($cache['body_document_html'])) return null;
         $needsLocalUpgrade = ($version !== self::BODY_CACHE_VERSION)
             || strpos($bodyHtml, 'data-pm-external-src=') !== false

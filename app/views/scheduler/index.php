@@ -303,6 +303,13 @@ function cpms_scheduler_add_visible_employee(&$visible, &$seen, $employee)
     $visible[] = $employee;
 }}
 
+if (!function_exists('cpms_scheduler_is_shared_field_department')) {
+function cpms_scheduler_is_shared_field_department($employee)
+{
+    $department = cpms_scheduler_department_group($employee);
+    return in_array($department, array('안전', '품질', '공사'), true);
+}}
+
 if (!function_exists('cpms_scheduler_visible_employees')) {
 function cpms_scheduler_visible_employees($employees, $currentEmployee, $canViewAll)
 {
@@ -312,6 +319,15 @@ function cpms_scheduler_visible_employees($employees, $currentEmployee, $canView
     $seen = array();
     $currentId = isset($currentEmployee['id']) ? (int)$currentEmployee['id'] : 0;
     if ($currentId <= 0) return $visible;
+
+    if (cpms_scheduler_is_shared_field_department($currentEmployee)) {
+        for ($i = 0; $i < count($employees); $i++) {
+            if (cpms_scheduler_is_shared_field_department($employees[$i])) {
+                cpms_scheduler_add_visible_employee($visible, $seen, $employees[$i]);
+            }
+        }
+        return $visible;
+    }
 
     $publicAffairsAnchorId = cpms_scheduler_public_affairs_anchor_id($employees);
     $teamAnchorId = cpms_scheduler_team_anchor_id($currentEmployee, $publicAffairsAnchorId);
@@ -891,7 +907,8 @@ $selectedIdMap = array();
 if ($personMode === 'employees') {
     for ($i = 0; $i < count($requestedEmployeeIds); $i++) $selectedIdMap[(int)$requestedEmployeeIds[$i]] = true;
 }
-$groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
+$isSharedFieldDepartmentView = (!$canViewAll && cpms_scheduler_is_shared_field_department($currentEmployee));
+$groupLabel = $canViewAll ? '부서 전체' : ($isSharedFieldDepartmentView ? '안전·품질·공사 전체' : '팀 전체');
 ?>
 
 <style>
@@ -956,7 +973,7 @@ $groupLabel = $canViewAll ? '부서 전체' : '팀 전체';
                 </div>
                 <h2 class="mt-3 text-3xl font-extrabold text-gray-900">업무 일정</h2>
                 <div class="mt-2 text-sm font-bold text-gray-500">
-                    <?php echo h($canViewAll ? '임원 조회' : '팀 조회'); ?> · <?php echo h($calendarLabel); ?>
+                    <?php echo h($canViewAll ? '임원 조회' : ($isSharedFieldDepartmentView ? '안전·품질·공사 통합 조회' : '팀 조회')); ?> · <?php echo h($calendarLabel); ?>
                 </div>
             </div>
             <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 min-w-0" data-scheduler-status-filters>

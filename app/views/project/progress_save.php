@@ -19,6 +19,15 @@ function cpms_progress_parse_money($value) {
     return is_numeric($value) ? (float)$value : 0.0;
 }}
 
+if (!function_exists('cpms_progress_money_is_valid')) {
+function cpms_progress_money_is_valid($value) {
+    $value = trim((string)$value);
+    if ($value === '') return false;
+    $value = str_replace(',', '', $value);
+    $value = preg_replace('/[\x{20A9}\s]/u', '', $value);
+    return ($value !== '' && preg_match('/^\d+(?:\.\d+)?$/', $value) && (float)$value >= 0);
+}}
+
 if (!function_exists('cpms_progress_current_user_id')) {
 function cpms_progress_current_user_id() {
     $user = Auth::user();
@@ -165,8 +174,10 @@ function cpms_progress_refresh_monthly_recognized($pdo, $projectId) {
     $monthCum = array();
     foreach ($rows as $row) {
         $amount = isset($row['recognized_amount']) ? (float)$row['recognized_amount'] : 0.0;
-        if ($amount <= 0 && isset($row['requested_amount'])) $amount = (float)$row['requested_amount'];
-        if ($amount <= 0) continue;
+        $requested = isset($row['requested_amount']) ? (float)$row['requested_amount'] : 0.0;
+        if ($amount == 0.0 && $requested > 0) $amount = $requested;
+        // 0원 기성도 해당 월의 확정 입력이다. 누계는 그대로 두되 월 행은 남긴다.
+        if ($amount < 0) continue;
         $basisDate = isset($row['progress_date']) ? trim((string)$row['progress_date']) : '';
         if ($basisDate === '') {
             $basisDate = isset($row['created_at']) ? substr((string)$row['created_at'], 0, 10) : '';
@@ -209,7 +220,8 @@ if ($action !== 'create' && $action !== 'update' && $action !== 'delete') $actio
 $roundLabel = trim((string)(isset($_POST['round_label']) ? $_POST['round_label'] : ''));
 $progressDate = cpms_progress_valid_date_or_today(isset($_POST['progress_date']) ? $_POST['progress_date'] : '');
 $requestedAmount = cpms_progress_parse_money(isset($_POST['requested_amount']) ? $_POST['requested_amount'] : '');
-$recognizedAmount = cpms_progress_parse_money(isset($_POST['recognized_amount']) ? $_POST['recognized_amount'] : '');
+$recognizedAmountRaw = isset($_POST['recognized_amount']) ? $_POST['recognized_amount'] : '';
+$recognizedAmount = cpms_progress_parse_money($recognizedAmountRaw);
 $remark = trim((string)(isset($_POST['remark']) ? $_POST['remark'] : ''));
 $redirect = '?r=project/detail&id=' . $projectId;
 
@@ -218,6 +230,11 @@ if ($requestedAmount <= 0 && $recognizedAmount > 0) $requestedAmount = $recogniz
 
 if ($projectId <= 0 || ($action !== 'delete' && $roundLabel === '')) {
     flash_set('error', '기성 회차를 입력해주세요.');
+    header('Location: ' . $redirect);
+    exit;
+}
+if ($action !== 'delete' && !cpms_progress_money_is_valid($recognizedAmountRaw)) {
+    flash_set('error', '기성금액은 0원 이상의 숫자로 입력해주세요. 기성이 없는 달은 0원을 입력할 수 있습니다.');
     header('Location: ' . $redirect);
     exit;
 }
@@ -301,6 +318,17 @@ try {
 
     cpms_progress_refresh_monthly_recognized($pdo, $projectId);
     $pdo->commit();
+    // 경영현황은 공용 파일 캐시를 사용하므로 기성 변경 내용을 즉시 반영한다.
+    if (isset($_SESSION['_company_profit_cache'])) unset($_SESSION['_company_profit_cache']);
+    $companyProfitCacheDir = rtrim(cpms_storage_root(), '/\\') . '/cache/company_profit';
+    if (is_dir($companyProfitCacheDir)) {
+        $companyProfitCacheFiles = glob($companyProfitCacheDir . '/*.json');
+        if (is_array($companyProfitCacheFiles)) {
+            foreach ($companyProfitCacheFiles as $companyProfitCacheFile) {
+                if (is_file($companyProfitCacheFile)) @unlink($companyProfitCacheFile);
+            }
+        }
+    }
     $driveUpload = null;
     if ($action !== 'delete' && $savedProgressId > 0 && isset($fileInfo['path']) && trim((string)$fileInfo['path']) !== '') {
         $driveUpload = cpms_public_affairs_drive_upload_local_file($pdo, $projectId, $fileInfo['path'], $fileInfo['original'], 'progress_attachment', $progressDate, $progressDate, array('date' => $progressDate), Auth::user());

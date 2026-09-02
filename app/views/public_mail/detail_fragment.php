@@ -2,7 +2,7 @@
 /**
  * 파일 경로: C:\www\cpms\app\views\public_mail\detail_fragment.php
  * 메일 본문과 첨부파일만 비동기로 출력합니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.14
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.21
  */
 if (!isset($esc) || !is_callable($esc)) {
     $esc = function ($value) { return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8'); };
@@ -11,10 +11,12 @@ $attachments = isset($detail['attachments']) && is_array($detail['attachments'])
 $driveRecords = isset($detail['drive_records']) && is_array($detail['drive_records']) ? $detail['drive_records'] : array();
 $bodyHtml = isset($detail['body_html']) ? (string)$detail['body_html'] : '';
 $bodyText = isset($detail['body_text']) ? trim((string)$detail['body_text']) : '';
+$bodyDocumentHtml = isset($detail['body_document_html']) ? (string)$detail['body_document_html'] : '';
 $bodyHtmlSource = isset($detail['body_html_source']) ? (string)$detail['body_html_source'] : '';
 $htmlCandidateCount = (isset($detail['html_part_count']) ? (int)$detail['html_part_count'] : 0)
     + (isset($detail['loose_html_candidate_count']) ? (int)$detail['loose_html_candidate_count'] : 0);
 $rawMessageBytes = isset($detail['raw_message_bytes']) ? (int)$detail['raw_message_bytes'] : 0;
+$rawOriginalStatus = isset($detail['raw_original_status']) ? (string)$detail['raw_original_status'] : '';
 $bodyFallbackText = trim(preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags($bodyHtml), ENT_QUOTES, 'UTF-8')));
 $bodyFallbackHtml = $bodyText !== ''
     ? '<div class="pm-plain-mail">' . nl2br(call_user_func($esc, $bodyText)) . '</div>'
@@ -26,11 +28,13 @@ $baseUrl = isset($baseUrl) ? rtrim((string)$baseUrl, '/') : '';
 ?>
 <div class="pm-detail-fragment" data-detail-fragment data-message-key="<?php echo call_user_func($esc, $messageKey); ?>">
     <div class="pm-detail-fragment-toolbar">
-        <span>본문 준비: <?php echo call_user_func($esc, isset($detail['body_cache_updated_at']) && $detail['body_cache_updated_at'] !== '' ? $detail['body_cache_updated_at'] : '방금'); ?></span>
+        <span>본문 준비: <?php echo call_user_func($esc, isset($detail['body_cache_updated_at']) && $detail['body_cache_updated_at'] !== '' ? $detail['body_cache_updated_at'] : '방금'); ?>
+            · <?php echo $rawOriginalStatus === 'verified' ? '원문 EML 전체' : ($rawOriginalStatus === 'skipped_large' ? '대용량 MIME 구조' : '빠른 MIME 본문'); ?>
+        </span>
         <?php if ($bodyHtmlSource === 'text_fallback'): ?>
             <span class="pm-body-source-warning">HTML 후보 <?php echo number_format($htmlCandidateCount); ?>개 · 원문 <?php echo number_format($rawMessageBytes); ?> bytes</span>
         <?php endif; ?>
-        <button type="button" class="pm-text-button" data-rebuild-body-cache data-message-key="<?php echo call_user_func($esc, $messageKey); ?>">원문 다시 읽기</button>
+        <button type="button" class="pm-text-button" data-rebuild-body-cache data-message-key="<?php echo call_user_func($esc, $messageKey); ?>">EML 원문 다시 읽기</button>
     </div>
 
 
@@ -81,6 +85,10 @@ $baseUrl = isset($baseUrl) ? rtrim((string)$baseUrl, '/') : '';
     <?php endif; ?>
 
     <div class="pm-message-body-wrap">
-        <div class="pm-message-body"><?php echo $bodyHtml !== '' ? $bodyHtml : $bodyFallbackHtml; ?></div>
+        <?php if ($bodyDocumentHtml !== ''): ?>
+            <iframe class="pm-message-document" data-mail-document title="메일 원문" sandbox="allow-same-origin allow-popups" referrerpolicy="no-referrer" srcdoc="<?php echo call_user_func($esc, $bodyDocumentHtml); ?>"></iframe>
+        <?php else: ?>
+            <div class="pm-message-body"><?php echo $bodyHtml !== '' ? $bodyHtml : $bodyFallbackHtml; ?></div>
+        <?php endif; ?>
     </div>
 </div>

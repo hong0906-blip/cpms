@@ -545,6 +545,7 @@ body.cpms-cost-detail-open { overflow: hidden !important; }
       totalValue = sumRows(rows);
       columns = [
         {key:'name', label:'성명'},
+        {key:'job_type', label:'직종'},
         {key:'company_name', label:'업체명'},
         {key:'ratio_label', label:'노무비 비율', align:'center'},
         {key:'output_days', label:'출력일수', format:'count', align:'right'},

@@ -126,6 +126,13 @@ cpms_admin_monthly_input_guard(
 );
 
 cpms_admin_monthly_input_guard(
+    'labor detail reuses the construction labor job type snapshot',
+    strpos($detailHelper, "isset(\$worker['job_type_snapshot'])") !== false
+        && strpos($detailHelper, "'job_type' => \$jobType") !== false
+        && strpos($detailModal, "{key:'job_type', label:'직종'}") !== false
+);
+
+cpms_admin_monthly_input_guard(
     'PHP 7-only null coalescing syntax was not introduced',
     strpos($adminView, '??') === false
         && strpos($constructionView, '??') === false

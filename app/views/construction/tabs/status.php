@@ -284,6 +284,12 @@ if (!function_exists('cpms_status_money')) {
     }
 }
 
+if (!function_exists('cpms_status_confirmed_money')) {
+    function cpms_status_confirmed_money($amount) {
+        return ((float)$amount > 0) ? cpms_status_money($amount) : '기성 없음';
+    }
+}
+
 if (!function_exists('cpms_status_cost_rate_info')) {
     function cpms_status_cost_rate_info($sales, $usedTotal) {
         $sales = (float)$sales;
@@ -298,7 +304,8 @@ if (!function_exists('cpms_status_cost_rate_info')) {
         }
         if ($usedTotal > 0) {
             return array(
-                'cost_rate' => 999.0,
+                // 0원 매출을 큰 원가율 숫자로 치환하지 않고 상태값으로만 표시한다.
+                'cost_rate' => 0.0,
                 'cost_rate_label' => '매출 없음',
                 'no_sales' => 1,
             );
@@ -686,7 +693,9 @@ foreach ($periodMonths as $ym) {
     // 상황탭 매출 추가/색상변경/상단금액구조 변경: 완료 공정 기준 매출 인식
     $expectedSales = cpms_status_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
     $confirmedSales = cpms_status_confirmed_sales_total_between($pdo, (int)$pid, $salesStart, $salesEnd);
-    $sales = ($confirmedSales > 0) ? $confirmedSales : $expectedSales;
+    // 상황 탭에서는 0원 기성을 '기성 없음'으로 보고 예상매출 기준 원가율을 유지한다.
+    $hasConfirmedSales = ($confirmedSales > 0);
+    $sales = $hasConfirmedSales ? $confirmedSales : $expectedSales;
     $targetCostRate = isset($targetRateByMonth[$ym]) ? (float)$targetRateByMonth[$ym] : $targetRateValue;
     $targetCostAmount = cpms_status_target_cost_amount($sales, $targetCostRate);
     $usedTotal = $labor + $outsourcing + $equipment + $materials + $purchase + $safety;
@@ -715,6 +724,7 @@ foreach ($periodMonths as $ym) {
         'sales' => $sales,
         'expected_sales' => $expectedSales,
         'confirmed_sales' => $confirmedSales,
+        'has_confirmed_sales' => $hasConfirmedSales ? 1 : 0,
         'used_total' => $usedTotal,
         'target_cost_rate' => $targetCostRate,
         'target_cost_rate_label' => cpms_target_cost_rate_format($targetCostRate),
@@ -929,7 +939,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
             </div>
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
                 <div class="text-xs text-gray-500">총 확정매출</div>
-                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_money($overallTotals['confirmed_sales'])); ?></div>
+                <div class="text-lg font-extrabold text-gray-900"><?php echo h(cpms_status_confirmed_money($overallTotals['confirmed_sales'])); ?></div>
             </div>
             <div class="p-3 rounded-xl" style="border:1px solid #e5e7eb;">
                 <div class="text-xs text-gray-500">총 예상매출</div>
@@ -1149,7 +1159,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                         ?>
                         <tr class="border-t border-gray-100">
                             <td class="px-3 py-2 text-gray-700 font-bold"><?php echo h(isset($row['label']) ? $row['label'] : '-'); ?></td>
-                            <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['confirmed_sales']) ? $row['confirmed_sales'] : 0)); ?></td>
+                            <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_confirmed_money(isset($row['confirmed_sales']) ? $row['confirmed_sales'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['expected_sales']) ? $row['expected_sales'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-900 font-bold"><?php echo h(cpms_status_money(isset($row['sales']) ? $row['sales'] : 0)); ?></td>
                             <td class="px-3 py-2 text-right text-gray-800"><?php echo h(cpms_status_money(isset($row['used_total']) ? $row['used_total'] : 0)); ?></td>
@@ -1171,7 +1181,7 @@ if ($maxQuarterValue <= 0) $maxQuarterValue = 1;
                 <tfoot class="bg-gray-50">
                     <tr class="border-t border-gray-200">
                         <td class="px-3 py-2 text-gray-900 font-extrabold">합계</td>
-                        <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['confirmed_sales'])); ?></td>
+                        <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_confirmed_money($yearTotals['confirmed_sales'])); ?></td>
                         <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['expected_sales'])); ?></td>
                         <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['sales'])); ?></td>
                         <td class="px-3 py-2 text-right text-gray-900 font-extrabold"><?php echo h(cpms_status_money($yearTotals['used_total'])); ?></td>

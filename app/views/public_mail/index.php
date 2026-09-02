@@ -47,7 +47,7 @@ if ($mailboxType !== '') {
 }
 $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($resetQuery, '', '&') : '');
 ?>
-<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260812_bodyfix6">
+<link rel="stylesheet" href="<?php echo call_user_func($esc, base_url()); ?>/assets/css/public_mail.css?v=20260818_rawmail1">
 
 <div class="flex-1 min-w-0 overflow-auto bg-slate-50 public-mail-page"
      data-public-mail-page
@@ -194,4 +194,4 @@ $resetUrl = 'public_mail.php' . (!empty($resetQuery) ? '?' . http_build_query($r
     </div>
 </div>
 
-<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260812_servercache1"></script>
+<script src="<?php echo call_user_func($esc, base_url()); ?>/assets/js/public_mail.js?v=20260818_rawmail1"></script>

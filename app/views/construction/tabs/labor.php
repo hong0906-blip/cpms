@@ -1090,22 +1090,61 @@ foreach ($timesheetWorkers as $worker) {
             <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
             <input type="hidden" name="project_id" value="<?php echo (int)$pid; ?>">
             <input type="hidden" name="month" value="<?php echo h($selectedMonth); ?>">
+            <label class="flex cursor-pointer items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3">
+                <input type="checkbox" name="is_outsourcing" value="1" class="mt-1 h-5 w-5 rounded border-blue-300 text-blue-600" data-outsourcing-worker>
+                <span>
+                    <span class="block text-sm font-extrabold text-blue-900">외주비인원</span>
+                    <span class="mt-1 block text-xs text-blue-700">체크하면 임금단가, 주민번호, 은행명, 계좌번호, 예금주는 입력하지 않아도 됩니다.</span>
+                </span>
+            </label>
             <div class="grid grid-cols-1 gap-4 md:grid-cols-3">
                 <label><span class="block text-sm font-bold text-gray-700 mb-1">이름</span><input name="name" required maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
                 <label><span class="block text-sm font-bold text-gray-700 mb-1">연락처</span><input name="phone" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="50" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="010-0000-0000"></label>
-                <label><span class="block text-sm font-bold text-gray-700 mb-1">주민번호</span><input name="resident_no" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="14" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="000000-0000000"></label>
+                <label data-outsourcing-optional-label><span class="block text-sm font-bold text-gray-700 mb-1">주민번호</span><input name="resident_no" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="14" class="w-full px-4 py-3 rounded-2xl border border-gray-200" placeholder="000000-0000000" data-outsourcing-optional-field data-default-required="<?php echo $laborRelaxedRegistration ? '0' : '1'; ?>"></label>
                 <label><span class="block text-sm font-bold text-gray-700 mb-1">구분/직종</span><input name="job_type" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
                 <label><span class="block text-sm font-bold text-gray-700 mb-1">인력사 업체명</span><input name="agency_name" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
-                <label><span class="block text-sm font-bold text-gray-700 mb-1">임금단가</span><input name="daily_wage" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> type="number" min="<?php echo $laborRelaxedRegistration ? '0' : '1'; ?>" step="1" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
-                <label><span class="block text-sm font-bold text-gray-700 mb-1">은행명</span><input name="bank_name" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
-                <label><span class="block text-sm font-bold text-gray-700 mb-1">계좌번호</span><input name="bank_account" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
-                <label><span class="block text-sm font-bold text-gray-700 mb-1">예금주</span><input name="account_holder" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200"></label>
+                <label data-outsourcing-optional-label><span class="block text-sm font-bold text-gray-700 mb-1">임금단가</span><input name="daily_wage" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> type="number" min="<?php echo $laborRelaxedRegistration ? '0' : '1'; ?>" step="1" class="w-full px-4 py-3 rounded-2xl border border-gray-200" data-outsourcing-optional-field data-default-required="<?php echo $laborRelaxedRegistration ? '0' : '1'; ?>" data-default-min="<?php echo $laborRelaxedRegistration ? '0' : '1'; ?>"></label>
+                <label data-outsourcing-optional-label><span class="block text-sm font-bold text-gray-700 mb-1">은행명</span><input name="bank_name" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200" data-outsourcing-optional-field data-default-required="<?php echo $laborRelaxedRegistration ? '0' : '1'; ?>"></label>
+                <label data-outsourcing-optional-label><span class="block text-sm font-bold text-gray-700 mb-1">계좌번호</span><input name="bank_account" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200" data-outsourcing-optional-field data-default-required="<?php echo $laborRelaxedRegistration ? '0' : '1'; ?>"></label>
+                <label data-outsourcing-optional-label><span class="block text-sm font-bold text-gray-700 mb-1">예금주</span><input name="account_holder" <?php echo $laborRelaxedRegistration ? '' : 'required'; ?> maxlength="100" class="w-full px-4 py-3 rounded-2xl border border-gray-200" data-outsourcing-optional-field data-default-required="<?php echo $laborRelaxedRegistration ? '0' : '1'; ?>"></label>
             </div>
-            <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800"><?php echo $laborRelaxedRegistration ? '개발부서는 이름만 입력해도 임시 등록할 수 있으며 나머지 정보는 인력관리에서 나중에 보완할 수 있습니다.' : '위 9개 항목을 모두 입력해야 등록할 수 있습니다.'; ?></div>
+            <div class="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+                <span data-outsourcing-default-hint><?php echo $laborRelaxedRegistration ? '개발부서는 이름만 입력해도 임시 등록할 수 있으며 나머지 정보는 인력관리에서 나중에 보완할 수 있습니다.' : '일반 인원은 위 9개 항목을 모두 입력해야 등록할 수 있습니다.'; ?></span>
+                <span class="hidden" data-outsourcing-checked-hint>외주비인원은 이름, 연락처, 구분/직종, 인력사 업체명만 입력하면 등록할 수 있습니다.</span>
+            </div>
             <div class="flex justify-end">
                 <button type="submit" class="px-6 py-3 rounded-2xl bg-emerald-600 text-white font-extrabold">인력 등록</button>
             </div>
         </form>
+        <script>
+        (function(){
+            var form = document.querySelector('[data-construction-workforce-register]');
+            if (!form) return;
+            var checkbox = form.querySelector('[data-outsourcing-worker]');
+            var fields = form.querySelectorAll('[data-outsourcing-optional-field]');
+            var defaultHint = form.querySelector('[data-outsourcing-default-hint]');
+            var checkedHint = form.querySelector('[data-outsourcing-checked-hint]');
+            if (!checkbox) return;
+
+            function syncOutsourcingFields() {
+                var isOutsourcing = checkbox.checked;
+                var i;
+                for (i = 0; i < fields.length; i++) {
+                    fields[i].required = !isOutsourcing && fields[i].getAttribute('data-default-required') === '1';
+                    fields[i].setAttribute('aria-required', fields[i].required ? 'true' : 'false');
+                    if (fields[i].getAttribute('data-default-min') !== null) {
+                        fields[i].min = isOutsourcing ? '0' : fields[i].getAttribute('data-default-min');
+                    }
+                    if (fields[i].parentNode) fields[i].parentNode.classList.toggle('opacity-60', isOutsourcing);
+                }
+                if (defaultHint) defaultHint.classList.toggle('hidden', isOutsourcing);
+                if (checkedHint) checkedHint.classList.toggle('hidden', !isOutsourcing);
+            }
+
+            checkbox.addEventListener('change', syncOutsourcingFields);
+            syncOutsourcingFields();
+        })();
+        </script>
     </div>
 <?php endif; ?>
 

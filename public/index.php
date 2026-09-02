@@ -683,8 +683,8 @@ if (\App\Core\Auth::check()) {
     );
     if (isset($cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute])) $cpmsDeptForRestrictedRoute = $cpmsDeptRestrictedMap[$cpmsDeptForRestrictedRoute];
 }
-// AI 데이터 점검·이력 조회는 운영자료를 변경하지 않으며, 설치 화면은 전용 POST만 기록한다.
-if (strpos($route, 'admin/ai_data_') !== 0) {
+// AI 데이터 점검·이력 및 일회성 공수 조사 화면은 조회 자체도 기록하지 않는다.
+if (strpos($route, 'admin/ai_data_') !== 0 && $route !== 'admin/labor_forensic_check') {
     cpms_usage_track_request($route);
 }
 $cpmsIsRestrictedManagementRoute = ($route === '관리' || strpos($route, 'admin/') === 0 || strpos($route, 'management/') === 0);
@@ -1903,6 +1903,17 @@ if ($route === '관리' && isset($_GET['debug_route']) && (string)$_GET['debug_r
 // ==========================
 //  AI 데이터 준비상태 점검(읽기 전용)
 // ==========================
+if ($route === 'admin/labor_forensic_check') {
+    if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
+        http_response_code(403);
+        header('Content-Type: text/plain; charset=UTF-8');
+        echo '접근 권한이 없습니다.';
+        exit;
+    }
+    require __DIR__ . '/../app/views/admin/labor_forensic_check.php';
+    exit;
+}
+
 if ($route === 'admin/ai_data_audit') {
     if (!\App\Core\Auth::check() || !\App\Core\Auth::isDevelopmentDepartment()) {
         http_response_code(403);

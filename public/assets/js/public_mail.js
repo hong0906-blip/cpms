@@ -4,11 +4,11 @@
  *
  * 중요: 직원 브라우저에서는 주기적인 메일 동기화를 실행하지 않습니다.
  * 일반 직원 화면에서는 자동수집을 실행하지 않습니다. 첨부파일은 브라우저 기본 다운로드로 처리합니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.2
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.21
  */
 (function () {
     'use strict';
-    window.CPMS_PUBLIC_MAIL_VERSION='1.7.19.2';
+    window.CPMS_PUBLIC_MAIL_VERSION='1.7.21';
     var readerScrollY=0;
     var activeDetailMessageKey='';
     var detailPanelCache={};
@@ -438,6 +438,26 @@
         xhr.send(null);
     }
 
+    function prepareMailDocumentFrames(container) {
+        if(!container)return;
+        var frames=container.querySelectorAll('iframe[data-mail-document]'),i;
+        function resize(frame){
+            try{
+                var doc=frame.contentDocument||frame.contentWindow.document;
+                if(!doc)return;
+                var body=doc.body,root=doc.documentElement;
+                var height=Math.max(body?body.scrollHeight:0,body?body.offsetHeight:0,root?root.scrollHeight:0,root?root.offsetHeight:0,520);
+                frame.style.height=Math.min(height+24,3200)+'px';
+            }catch(ignore){}
+        }
+        for(i=0;i<frames.length;i++){
+            if(frames[i].getAttribute('data-pm-frame-bound')==='1')continue;
+            frames[i].setAttribute('data-pm-frame-bound','1');
+            frames[i].addEventListener('load',function(){resize(this);});
+            resize(frames[i]);
+        }
+    }
+
     function prepareMailImages(container) {
         if(!container)return;
         var images=container.querySelectorAll('.pm-message-body img'),i;
@@ -449,6 +469,7 @@
             images[i].addEventListener('error',function(){this.style.display='none';});
         }
         loadInlineImageBundle(container);
+        prepareMailDocumentFrames(container);
     }
 
     function requestMailHtml(action,messageKey,callback) {
@@ -475,7 +496,7 @@
         }
         xhr.open('GET','public_mail_action.php?action='+encodeURIComponent(action)+'&message_key='+encodeURIComponent(messageKey)+'&_='+new Date().getTime(),true);
         xhr.setRequestHeader('X-Requested-With','XMLHttpRequest');
-        xhr.timeout=isPanel?12000:15000;
+        xhr.timeout=isPanel?12000:60000;
         xhr.onreadystatechange=function(){
             if(xhr.readyState!==4)return;
             complete(xhr.status>=200&&xhr.status<300,xhr.responseText||'',xhr.status,'complete');

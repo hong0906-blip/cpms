@@ -2,7 +2,7 @@
 /**
  * 파일 경로: C:\www\cpms\public\public_mail.php
  * 네이버 메일 메인 화면입니다. PHP 5.6 호환 코드입니다.
- * CPMS_PUBLIC_MAIL_VERSION: 1.7.19.1
+ * CPMS_PUBLIC_MAIL_VERSION: 1.7.21
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 if (isset($_GET['r']) && trim((string)$_GET['r']) !== '') {
@@ -67,5 +67,5 @@ PublicMailWebHelper::render('public_mail/index', array(
     'currentUserName' => PublicMailWebHelper::currentUserName(),
     'currentUserEmail' => PublicMailWebHelper::currentUserEmail(),
     'canManageMailSettings' => $canManageMailSettings,
-    'packageVersion' => '1.7.19.1'
+    'packageVersion' => '1.7.21'
 ));

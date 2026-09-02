@@ -16,6 +16,7 @@ if (!Auth::canManageConstruction()) { http_response_code(403); echo '403 Forbidd
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') { http_response_code(405); echo 'Method Not Allowed'; exit; }
 csrf_validate();
 $isDevelopmentDepartment = Auth::isDevelopmentDepartment();
+$isOutsourcingWorker = isset($_POST['is_outsourcing']) && (string)$_POST['is_outsourcing'] === '1';
 
 $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $month = isset($_POST['month']) ? trim((string)$_POST['month']) : '';
@@ -41,11 +42,19 @@ $labels = array(
     'agency_name' => '인력사 업체명', 'daily_wage' => '임금단가', 'bank_name' => '은행명',
     'bank_account' => '계좌번호', 'account_holder' => '예금주'
 );
+$outsourcingOptionalFields = array(
+    'resident_no' => true,
+    'daily_wage' => true,
+    'bank_name' => true,
+    'bank_account' => true,
+    'account_holder' => true
+);
 $missing = array();
 if ($isDevelopmentDepartment) {
     if ($data['name'] === '') $missing[] = '이름';
 } else {
     foreach ($labels as $field => $label) {
+        if ($isOutsourcingWorker && isset($outsourcingOptionalFields[$field])) continue;
         if (!isset($data[$field]) || trim((string)$data[$field]) === '') $missing[] = $label;
     }
 }
@@ -68,8 +77,8 @@ if ($phoneDigits !== '' && strlen($phoneDigits) < 9) {
     header('Location: ' . $redirect);
     exit;
 }
-if ($wageDigits !== '' && (!preg_match('/^\d+$/', $wageDigits) || (!$isDevelopmentDepartment && (int)$wageDigits <= 0))) {
-    flash_set('error', $isDevelopmentDepartment ? '임금단가는 0 이상의 정수 금액으로 입력하세요.' : '임금단가는 0보다 큰 정수 금액으로 입력하세요.');
+if ($wageDigits !== '' && (!preg_match('/^\d+$/', $wageDigits) || (!$isDevelopmentDepartment && !$isOutsourcingWorker && (int)$wageDigits <= 0))) {
+    flash_set('error', ($isDevelopmentDepartment || $isOutsourcingWorker) ? '임금단가는 0 이상의 정수 금액으로 입력하세요.' : '임금단가는 0보다 큰 정수 금액으로 입력하세요.');
     header('Location: ' . $redirect);
     exit;
 }

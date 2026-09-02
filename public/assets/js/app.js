@@ -177,6 +177,9 @@
       form.appendChild(hidden);
     }
     window.setTimeout(function () {
+      if (window.CPMSMoneyInput && typeof window.CPMSMoneyInput.stripForm === 'function') {
+        window.CPMSMoneyInput.stripForm(form);
+      }
       if (window.HTMLFormElement && window.HTMLFormElement.prototype && window.HTMLFormElement.prototype.submit) {
         window.HTMLFormElement.prototype.submit.call(form);
       } else {

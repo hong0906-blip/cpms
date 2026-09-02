@@ -17,7 +17,7 @@ require_once __DIR__ . '/PublicMailIndexService.php';
 
 class PublicMailService
 {
-    const VERSION = '1.7.19.1';
+    const VERSION = '1.7.21';
     private $storage;
     private $classifier;
     private $largeAttachmentService;
@@ -528,6 +528,7 @@ class PublicMailService
         $detail['body_html_source'] = is_array($cache) && isset($cache['body_html_source']) ? (string)$cache['body_html_source'] : '';
         $detail['html_part_count'] = is_array($cache) && isset($cache['html_part_count']) ? (int)$cache['html_part_count'] : 0;
         $detail['raw_message_bytes'] = is_array($cache) && isset($cache['raw_message_bytes']) ? (int)$cache['raw_message_bytes'] : 0;
+        $detail['raw_original_status'] = is_array($cache) && isset($cache['raw_original_status']) ? (string)$cache['raw_original_status'] : '';
         $detail['loose_html_candidate_count'] = is_array($cache) && isset($cache['loose_html_candidate_count']) ? (int)$cache['loose_html_candidate_count'] : 0;
         $detail['attachments'] = is_array($cache) && isset($cache['attachments']) && is_array($cache['attachments']) ? $cache['attachments'] : array();
         $detail['inline_images'] = is_array($cache) && isset($cache['inline_images']) && is_array($cache['inline_images']) ? $cache['inline_images'] : array();
@@ -551,7 +552,7 @@ class PublicMailService
     public function rebuildBodyCache($messageKey)
     {
         PublicMailStorageService::deleteBodyCache($messageKey);
-        $this->buildBodyCache($messageKey, true);
+        $this->buildBodyCache($messageKey, true, null, null, true);
         return $this->getMessageShell($messageKey);
     }
 
@@ -1611,8 +1612,8 @@ class PublicMailService
     {
         $includeAttachmentContent = !empty($includeAttachmentContent);
         $root = $this->parseMimeEntity((string)$raw, '1', $includeAttachmentContent);
-        $textBodies = array(); $htmlBodies = array(); $attachments = array();
-        $this->collectMimeParts($root, $textBodies, $htmlBodies, $attachments);
+        $textBodies = array(); $htmlBodies = array(); $attachments = array(); $inlineImages = array();
+        $this->collectMimeParts($root, $textBodies, $htmlBodies, $attachments, $inlineImages);
         $bodyText = trim(implode("\n\n", $textBodies));
         $bodyHtml = trim(implode("<hr>", $htmlBodies));
         $hasHtmlBody = !empty($htmlBodies);
@@ -1625,7 +1626,7 @@ class PublicMailService
         $decodedSubject = $this->isBusinessOnSenderText($fromText, $fromEmail)
             ? $this->decodeSmartBillSubject($rawSubject) : $this->decodeHeader($rawSubject);
         return array(
-            'body_text'=>$bodyText,'body_html_raw'=>$bodyHtml,'has_html_body'=>$hasHtmlBody,'body_html'=>$this->sanitizeHtml($bodyHtml),'attachments'=>$attachments,'headers'=>$rootHeaders,
+            'body_text'=>$bodyText,'body_html_raw'=>$bodyHtml,'has_html_body'=>$hasHtmlBody,'body_html'=>$this->sanitizeHtml($bodyHtml),'attachments'=>$attachments,'inline_images'=>$inlineImages,'headers'=>$rootHeaders,
             'subject'=>$decodedSubject,
             'from_text'=>$fromText,'from_email'=>$fromEmail,
             'to_text'=>$this->decodeHeader(isset($rootHeaders['to'])?$rootHeaders['to']:''),
@@ -1637,7 +1638,7 @@ class PublicMailService
      * MIME BODYSTRUCTURE를 이용해 본문과 첨부 메타정보만 가져옵니다.
      * 첨부파일 원본은 다운로드하지 않으므로 큰 메일도 상세화면을 빠르게 준비할 수 있습니다.
      */
-    private function buildBodyCache($messageKey, $force, $activeClient = null, $messageOverride = null)
+    private function buildBodyCache($messageKey, $force, $activeClient = null, $messageOverride = null, $preferRawOriginal = false)
     {
         $messageKey = trim((string)$messageKey);
         if (!$force) {
@@ -1671,6 +1672,10 @@ class PublicMailService
         $htmlPartCount = 0;
         $rawMessageBytes = 0;
         $looseHtmlCandidateCount = 0;
+        $rawOriginalStatus = '';
+        $rawOriginalError = '';
+        $structureErrorMessage = '';
+        $structurePartCount = 0;
         $messageSize = isset($message['size']) ? (int)$message['size'] : 0;
         try {
             if ($ownsClient) {
@@ -1683,11 +1688,55 @@ class PublicMailService
                 $messageSize = isset($headerData['size']) ? (int)$headerData['size'] : 0;
             }
 
-            try {
-                $structureText = $client->fetchBodyStructure($uid);
+            $rawOriginalReady = false;
+            if ($preferRawOriginal) {
+                if ($messageSize > 0 && $messageSize <= 12582912) {
+                    try {
+                        $originalRaw = $client->fetchRawMessage($uid, $messageSize + 262144);
+                        $originalParsed = $this->parseRawMessage($originalRaw, false);
+                        $originalBodyHtml = isset($originalParsed['body_html_raw']) ? (string)$originalParsed['body_html_raw'] : '';
+                        $originalBodyText = isset($originalParsed['body_text']) ? (string)$originalParsed['body_text'] : '';
+                        $originalAttachments = isset($originalParsed['attachments']) && is_array($originalParsed['attachments']) ? $originalParsed['attachments'] : array();
+                        $originalInlineImages = isset($originalParsed['inline_images']) && is_array($originalParsed['inline_images']) ? $originalParsed['inline_images'] : array();
+                        $expectsAttachment = !empty($message['has_attachment']);
+                        $originalHasBody = $this->mailBodyHasContent($originalBodyHtml, $originalBodyText);
+                        $expectsBody = isset($message['preview']) && trim((string)$message['preview']) !== '';
+                        $originalUseful = $originalHasBody || !empty($originalAttachments);
+                        if ($originalUseful
+                            && (!$expectsBody || $originalHasBody)
+                            && (!$expectsAttachment || !empty($originalAttachments))) {
+                            $bodyHtmlRaw = $originalBodyHtml;
+                            $bodyText = $originalBodyText;
+                            $attachments = $originalAttachments;
+                            $inlineImages = $originalInlineImages;
+                            $rawMessageBytes = strlen($originalRaw);
+                            $htmlPartCount = !empty($originalParsed['has_html_body']) ? 1 : 0;
+                            $bodyHtmlSource = 'raw_original';
+                            $rawFallbackAttempted = true;
+                            $rawOriginalStatus = 'verified';
+                            $rawOriginalReady = true;
+                        } else {
+                            $rawOriginalStatus = 'incomplete';
+                            $rawOriginalError = '원문 EML에서 본문과 첨부 메타정보를 모두 확인하지 못했습니다.';
+                        }
+                    } catch (\Exception $rawOriginalException) {
+                        $rawOriginalStatus = 'failed';
+                        $rawOriginalError = $rawOriginalException->getMessage();
+                    }
+                } elseif ($messageSize > 12582912) {
+                    $rawOriginalStatus = 'skipped_large';
+                } else {
+                    $rawOriginalStatus = 'unknown_size';
+                }
+            }
+
+            if (!$rawOriginalReady) {
+                try {
+                    $structureText = $client->fetchBodyStructure($uid);
                 $structure = $this->parseBodyStructure($structureText);
                 $parts = array();
                 $this->flattenBodyStructure($structure, '', $parts);
+                $structurePartCount = count($parts);
                 $htmlParts = array(); $textParts = array();
                 foreach ($parts as $part) {
                     if (!is_array($part)) continue;
@@ -1738,25 +1787,49 @@ class PublicMailService
                         if (trim($candidateText) !== '') { $bodyText = $candidateText; break; }
                     }
                 }
-            } catch (\Exception $structureError) {
-                // 아래의 원문 앞부분 대체 조회에서 다시 해석합니다.
+                } catch (\Exception $structureError) {
+                    $structureErrorMessage = $structureError->getMessage();
+                    // 아래의 원문 앞부분 대체 조회에서 다시 해석합니다.
+                }
             }
 
             /*
              * BODYSTRUCTURE 해석이 예외 없이 끝났더라도 본문 파트를 찾지 못하거나 빈 파트를
              * 선택할 수 있습니다. 이 경우에도 원문 앞부분을 읽어야 빈 캐시가 고착되지 않습니다.
              */
-            if (!$this->mailBodyHasContent($bodyHtmlRaw, $bodyText)) {
+            $attachmentMetadataMissing = !empty($message['has_attachment']) && empty($attachments);
+            if (!$this->mailBodyHasContent($bodyHtmlRaw, $bodyText) || $attachmentMetadataMissing) {
                 $rawFallbackAttempted = true;
-                $previewRaw = '';
-                if ($messageSize > 0 && $messageSize <= 33554432) {
+                /*
+                 * 첨부 메일에서 원문 전체를 먼저 받으면 일반 열람이 크게 느려질 수 있습니다.
+                 * 먼저 작은 앞부분으로 본문과 첨부 헤더를 복구하고, 정말 부족한 소용량 메일만 전체를 읽습니다.
+                 */
+                $previewRaw = $client->fetchRawPreview($uid, 262144);
+                $previewHasBody = false;
+                $previewHasAttachments = false;
+                if ($previewRaw !== '') {
+                    try {
+                        $previewParsed = $this->parseRawMessage($previewRaw, false);
+                        $previewHasBody = $this->mailBodyHasContent(
+                            isset($previewParsed['body_html_raw']) ? $previewParsed['body_html_raw'] : '',
+                            isset($previewParsed['body_text']) ? $previewParsed['body_text'] : ''
+                        );
+                        $previewHasAttachments = isset($previewParsed['attachments'])
+                            && is_array($previewParsed['attachments'])
+                            && !empty($previewParsed['attachments']);
+                    } catch (\Exception $previewParseError) {
+                        $previewHasBody = false;
+                        $previewHasAttachments = false;
+                    }
+                }
+                $previewIncomplete = !$previewHasBody || ($attachmentMetadataMissing && !$previewHasAttachments);
+                if ($previewIncomplete && $messageSize > 0 && $messageSize <= 12582912) {
                     try {
                         $previewRaw = $client->fetchRawMessage($uid, $messageSize + 262144);
                     } catch (\Exception $fullRawError) {
-                        $previewRaw = '';
+                        /* 앞부분이 있으면 그 내용으로 계속 복구합니다. */
                     }
                 }
-                if ($previewRaw === '') $previewRaw = $client->fetchRawPreview($uid, 262144);
                 if ($previewRaw !== '') {
                     $rawMessageBytes = strlen($previewRaw);
                     $fallback = $this->parseRawMessage($previewRaw, false);
@@ -1820,12 +1893,16 @@ class PublicMailService
             'attachments'=>$attachments,
             'inline_images'=>$inlineImages,
             'external_image_count'=>(int)$externalCount,
-            'source'=>$rawFallbackAttempted ? 'imap_bodystructure_v2+raw_fallback' : 'imap_bodystructure_v2',
+            'source'=>$rawOriginalReady ? 'imap_raw_original_v1' : ($rawFallbackAttempted ? 'imap_bodystructure_v2+raw_fallback' : 'imap_bodystructure_v2'),
             'body_html_source'=>$bodyHtmlSource,
             'body_html_bytes'=>strlen($bodyHtmlRaw),
             'body_text_bytes'=>strlen($bodyText),
             'html_part_count'=>(int)$htmlPartCount,
             'raw_message_bytes'=>(int)$rawMessageBytes,
+            'raw_original_status'=>$rawOriginalStatus,
+            'raw_original_error'=>$rawOriginalError,
+            'structure_part_count'=>(int)$structurePartCount,
+            'structure_error'=>$structureErrorMessage,
             'loose_html_candidate_count'=>(int)$looseHtmlCandidateCount,
             'body_empty_confirmed'=>(!$this->mailBodyHasContent($bodyHtml, $bodyText) && $rawFallbackAttempted),
             'mailbox'=>$mailbox,
@@ -1903,6 +1980,18 @@ class PublicMailService
         if (in_array($mimeType, array('text/html','text/x-html','application/xhtml+xml'), true)) return true;
         $filename = strtolower(trim((string)$filename));
         return $filename !== '' && preg_match('/\.x?html?$/i', $filename) === 1;
+    }
+
+    private function isMimeAttachmentCandidate($mimeType, $filename, $disposition, $isInlineImage)
+    {
+        $mimeType = strtolower(trim((string)$mimeType));
+        $filename = trim((string)$filename);
+        $disposition = strtolower(trim((string)$disposition));
+        if (!empty($isInlineImage) || $this->isHtmlMimeCandidate($mimeType, $filename)) return false;
+        if ($filename !== '' || $disposition === 'attachment') return true;
+        if (strpos($mimeType, 'application/') === 0 || strpos($mimeType, 'audio/') === 0 || strpos($mimeType, 'video/') === 0) return true;
+        if (strpos($mimeType, 'image/') === 0 || $mimeType === 'message/rfc822' || $mimeType === 'text/calendar') return true;
+        return false;
     }
 
     /** 표준 MIME 트리 해석이 실패해도 원문에서 HTML 섹션을 직접 찾아 복구합니다. */
@@ -2325,8 +2414,7 @@ class PublicMailService
         $mime = $type . '/' . $subtype;
         $isInlineImage = $type === 'image' && ($contentId !== '' || $disposition === 'inline') && $disposition !== 'attachment';
         /* 일부 발송시스템은 본문 HTML에도 name/filename을 넣으므로 attachment로 오인하지 않습니다. */
-        $isHtmlBody = $this->isHtmlMimeCandidate($mime, $filename);
-        $isAttachment = !$isInlineImage && !$isHtmlBody && ($filename !== '' || $disposition === 'attachment');
+        $isAttachment = $this->isMimeAttachmentCandidate($mime, $filename, $disposition, $isInlineImage);
         $parts[] = array(
             'part_id'=>$prefix === '' ? '1' : $prefix,
             'mime_type'=>$mime,
@@ -2568,6 +2656,7 @@ class PublicMailService
             'charset' => $charset,
             'disposition' => strtolower($dispositionInfo['value']),
             'filename' => $filename,
+            'transfer_encoding' => $transferEncoding,
             'content' => '',
             'size' => 0,
             'children' => array()
@@ -2584,12 +2673,21 @@ class PublicMailService
             return $entity;
         }
 
+        $isInlineImage = strpos($mimeType, 'image/') === 0
+            && !empty($headers['content-id'])
+            && $entity['disposition'] !== 'attachment';
+        $isAttachment = $this->isMimeAttachmentCandidate($mimeType, $filename, $entity['disposition'], $isInlineImage);
+
+        /* 본문 캐시는 첨부 원본을 필요로 하지 않으므로 base64 전체 디코딩을 생략합니다. */
+        if (!$includeAttachmentContent && ($isAttachment || $isInlineImage)) {
+            $entity['size'] = strlen((string)$body);
+            return $entity;
+        }
+
         $decoded = $this->decodeBody($body, $transferEncoding);
         $entity['size'] = strlen($decoded);
 
         /* 이름이 붙은 text/html도 메일 클라이언트에서는 본문으로 표시될 수 있습니다. */
-        $isHtmlBody = $this->isHtmlMimeCandidate($mimeType, $filename);
-        $isAttachment = !$isHtmlBody && ($filename !== '' || $entity['disposition'] === 'attachment');
         if ($isAttachment) {
             if ($includeAttachmentContent) {
                 $entity['content'] = $decoded;
@@ -2605,11 +2703,11 @@ class PublicMailService
         return $entity;
     }
 
-    private function collectMimeParts($entity, &$textBodies, &$htmlBodies, &$attachments)
+    private function collectMimeParts($entity, &$textBodies, &$htmlBodies, &$attachments, &$inlineImages)
     {
         if (!empty($entity['children'])) {
             foreach ($entity['children'] as $child) {
-                $this->collectMimeParts($child, $textBodies, $htmlBodies, $attachments);
+                $this->collectMimeParts($child, $textBodies, $htmlBodies, $attachments, $inlineImages);
             }
             return;
         }
@@ -2617,8 +2715,23 @@ class PublicMailService
         $filename = isset($entity['filename']) ? (string)$entity['filename'] : '';
         $disposition = isset($entity['disposition']) ? (string)$entity['disposition'] : '';
         $mimeType = isset($entity['mime_type']) ? (string)$entity['mime_type'] : 'application/octet-stream';
-        $isHtmlBody = $this->isHtmlMimeCandidate($mimeType, $filename);
-        $isAttachment = !$isHtmlBody && ($filename !== '' || $disposition === 'attachment');
+        $headers = isset($entity['headers']) && is_array($entity['headers']) ? $entity['headers'] : array();
+        $isInlineImage = strpos($mimeType, 'image/') === 0
+            && !empty($headers['content-id'])
+            && $disposition !== 'attachment';
+        $isAttachment = $this->isMimeAttachmentCandidate($mimeType, $filename, $disposition, $isInlineImage);
+
+        if ($isInlineImage) {
+            $inlineImages[] = array(
+                'part_id' => (string)$entity['part_id'],
+                'content_id' => $this->normalizeContentId((string)$headers['content-id']),
+                'filename' => $filename !== '' ? $this->safeFilename($filename) : '',
+                'mime_type' => $mimeType,
+                'size' => isset($entity['size']) ? (int)$entity['size'] : 0,
+                'transfer_encoding' => isset($entity['transfer_encoding']) ? (string)$entity['transfer_encoding'] : ''
+            );
+            return;
+        }
 
         if ($isAttachment) {
             if ($filename === '') {
@@ -2629,6 +2742,7 @@ class PublicMailService
                 'filename' => $this->safeFilename($filename),
                 'mime_type' => $mimeType,
                 'size' => isset($entity['size']) ? (int)$entity['size'] : 0,
+                'transfer_encoding' => isset($entity['transfer_encoding']) ? (string)$entity['transfer_encoding'] : '',
                 'content' => isset($entity['content']) ? $entity['content'] : ''
             );
             return;
@@ -2741,7 +2855,8 @@ class PublicMailService
 
         $closed = false;
         foreach ($lines as $line) {
-            if ($line === $delimiter) {
+            $boundaryLine = rtrim((string)$line, " \t");
+            if ($boundaryLine === $delimiter) {
                 if ($inside && !empty($current)) {
                     $parts[] = implode("\r\n", $current);
                 }
@@ -2749,7 +2864,7 @@ class PublicMailService
                 $inside = true;
                 continue;
             }
-            if ($line === $endDelimiter) {
+            if ($boundaryLine === $endDelimiter) {
                 if ($inside && !empty($current)) {
                     $parts[] = implode("\r\n", $current);
                 }

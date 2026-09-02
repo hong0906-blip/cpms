@@ -153,7 +153,7 @@ class PublicMailImapClient
         if ($uid <= 0) throw new \InvalidArgumentException('메일 UID가 올바르지 않습니다.');
         $response = $this->command('UID FETCH ' . $uid . ' (BODYSTRUCTURE)', 1048576);
         if (!$response['ok']) throw new \RuntimeException('메일 본문 구조를 읽지 못했습니다: UID ' . $uid);
-        $text = implode('', isset($response['lines']) && is_array($response['lines']) ? $response['lines'] : array());
+        $text = $this->responseTextWithLiterals($response);
         $position = stripos($text, 'BODYSTRUCTURE');
         if ($position === false) throw new \RuntimeException('메일 본문 구조 응답을 찾지 못했습니다: UID ' . $uid);
         $open = strpos($text, '(', $position + strlen('BODYSTRUCTURE'));
@@ -161,6 +161,32 @@ class PublicMailImapClient
         $balanced = $this->extractBalancedParentheses($text, $open);
         if ($balanced === '') throw new \RuntimeException('메일 본문 구조를 해석할 수 없습니다: UID ' . $uid);
         return $balanced;
+    }
+
+    /**
+     * BODYSTRUCTURE의 한글 파일명은 따옴표 문자열이 아닌 IMAP literal({N})로 올 수 있습니다.
+     * 소켓 리더가 분리해 둔 literal을 다시 인용 문자열로 넣어 MIME 트리의 항목 순서를 보존합니다.
+     */
+    private function responseTextWithLiterals($response)
+    {
+        $lines = isset($response['lines']) && is_array($response['lines']) ? $response['lines'] : array();
+        $literals = isset($response['literals']) && is_array($response['literals']) ? $response['literals'] : array();
+        $literalIndex = 0;
+        $text = '';
+        foreach ($lines as $line) {
+            $line = (string)$line;
+            $match = array();
+            if (preg_match('/~?\{[0-9]+\+?\}\r?\n$/', $line, $match) && isset($literals[$literalIndex])) {
+                $prefixLength = strlen($line) - strlen($match[0]);
+                $literal = (string)$literals[$literalIndex];
+                $literal = str_replace(array('\\', '"'), array('\\\\', '\\"'), $literal);
+                $text .= substr($line, 0, $prefixLength) . '"' . $literal . '"';
+                $literalIndex++;
+                continue;
+            }
+            $text .= $line;
+        }
+        return $text;
     }
 
     public function fetchHeader($uid)
@@ -456,7 +482,7 @@ class PublicMailImapClient
                 throw new \RuntimeException('네이버 메일 서버 응답을 읽지 못했습니다.');
             }
             $result['lines'][] = $line;
-            if (preg_match('/\{([0-9]+)\}\r?\n$/', $line, $m)) {
+            if (preg_match('/~?\{([0-9]+)\+?\}\r?\n$/', $line, $m)) {
                 $length = (int)$m[1];
                 if ($length > $maximumLiteralBytes) throw new \RuntimeException('메일 데이터가 허용 크기를 초과했습니다.');
                 $literal = ''; $remaining = $length;
