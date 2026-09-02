@@ -1347,7 +1347,6 @@ if (!function_exists('approval_is_document_owner')) {
         $userEmail = isset($identity['email']) ? trim((string)$identity['email']) : '';
         $userNames = array($userName, approval_current_user_name($user));
         $userEmails = array($userEmail, approval_current_user_email($user));
-
         if ($uid > 0 && isset($docRow['created_by_id']) && (int)$docRow['created_by_id'] === (int)$uid) {
             return true;
         }
@@ -1908,7 +1907,10 @@ if (!function_exists('approval_can_cancel_approved_leave')) {
 if (!function_exists('approval_can_view_all_active_documents')) {
     function approval_can_view_all_active_documents($pdo, $user)
     {
-        return approval_is_development_department_user($pdo, $user) || approval_is_ceo_user($pdo, $user);
+        // 전자결재 진행/반려 문서 전체 조회: 관리부도 개발부와 동일한 조회 권한을 갖습니다.
+        return approval_is_management_department_user($pdo, $user)
+            || approval_is_development_department_user($pdo, $user)
+            || approval_is_ceo_user($pdo, $user);
     }
 }
 

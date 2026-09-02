@@ -1,4 +1,9 @@
 <?php
+/*
+ * 파일경로: app/views/approval/create.php
+ * 화면: 전자결재 작성 / 첫 결재 전 수정 / 반려문서 수정 후 재상신
+ * PHP 5.6 호환
+ */
 use App\Core\Db;
 
 require_once __DIR__ . '/_common.php';
@@ -8,6 +13,7 @@ require_once __DIR__ . '/template_proposal.php';
 require_once __DIR__ . '/template_leave.php';
 require_once __DIR__ . '/template_unused_leave.php';
 require_once __DIR__ . '/line_rules.php';
+require_once __DIR__ . '/resubmit_helpers.php';
 
 if (!function_exists('approval_create_fetch_employee_by_name')) {
     function approval_create_fetch_employee_by_name($pdo, $name)
@@ -58,16 +64,73 @@ if (!function_exists('approval_create_employee_list_by_dept')) {
 }
 
 $pdo = Db::pdo();
+$u = \App\Core\Auth::user();
 $type = isset($_GET['type']) ? trim((string)$_GET['type']) : 'proposal';
 $allowedTypes = array('proposal', 'small_proposal', 'leave', 'unused_leave_notice', 'unused_leave_plan');
 if (!in_array($type, $allowedTypes, true)) {
     $type = 'proposal';
 }
+
+/*
+ * 수정 모드
+ * - edit_id: 아직 아무도 승인/반려하지 않은 진행문서 수정
+ * - resubmit_id: 반려문서를 기존 내용으로 불러와 새 문서로 재상신
+ */
+$editDocumentId = isset($_GET['edit_id']) ? (int)$_GET['edit_id'] : 0;
+$resubmitDocumentId = isset($_GET['resubmit_id']) ? (int)$_GET['resubmit_id'] : 0;
+$approvalEditMode = '';
+$sourceDocumentId = 0;
+$sourceDocument = null;
+$sourceContent = array();
+$sourceLines = array();
+$sourceFiles = array();
+
+if ($editDocumentId > 0 || $resubmitDocumentId > 0) {
+    if ($editDocumentId > 0) {
+        $approvalEditMode = 'edit';
+        $sourceDocumentId = $editDocumentId;
+    } else {
+        $approvalEditMode = 'resubmit';
+        $sourceDocumentId = $resubmitDocumentId;
+    }
+
+    $sourceDocument = approval_resubmit_fetch_document($pdo, $sourceDocumentId, false);
+    if (!$sourceDocument) {
+        echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4">문서를 찾을 수 없습니다.</div>';
+        return;
+    }
+
+    if ($approvalEditMode === 'edit') {
+        if (!approval_resubmit_can_edit_before_first_decision($pdo, $sourceDocument, $u)) {
+            echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4">이미 결재가 진행되어 이 문서는 수정할 수 없습니다. 반려 후 수정하여 재상신해 주세요.</div>';
+            return;
+        }
+    } else {
+        if (!approval_resubmit_can_resubmit($pdo, $sourceDocument, $u)) {
+            echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4">반려된 본인 문서만 수정 후 재상신할 수 있습니다.</div>';
+            return;
+        }
+        $existingChild = approval_resubmit_find_child($pdo, $sourceDocumentId);
+        if ($existingChild && isset($existingChild['id'])) {
+            header('Location: ?r=approval_detail&id=' . (int)$existingChild['id']);
+            exit;
+        }
+    }
+
+    $type = isset($sourceDocument['doc_type']) ? trim((string)$sourceDocument['doc_type']) : $type;
+    if (!approval_resubmit_supported_doc_type($type)) {
+        echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4">현재 이 문서 종류는 수정/재상신 대상이 아닙니다.</div>';
+        return;
+    }
+    $sourceContent = approval_parse_content(isset($sourceDocument['content']) ? $sourceDocument['content'] : '');
+    $sourceLines = approval_resubmit_fetch_lines($pdo, $sourceDocumentId, false);
+    $sourceFiles = approval_resubmit_fetch_files($pdo, $sourceDocumentId);
+}
+
 $isLeave = ($type === 'leave');
 $isUnusedLeaveNotice = ($type === 'unused_leave_notice');
 $isUnusedLeavePlan = ($type === 'unused_leave_plan');
 $isManagementOnlyDoc = ($isUnusedLeaveNotice || $isUnusedLeavePlan);
-$u = \App\Core\Auth::user();
 $dept = isset($u['department']) ? trim((string)$u['department']) : '';
 $name = isset($u['name']) ? trim((string)$u['name']) : '';
 $email = isset($u['email']) ? trim((string)$u['email']) : '';
@@ -121,45 +184,23 @@ if ($pdo) {
 
     for ($i = 0; $i < count($employees); $i++) {
         $e = $employees[$i];
-        if ((int)$e['approval_can_be_site_manager'] === 1) {
-            $site[] = $e;
-        }
-        if ((int)$e['approval_can_be_team_leader'] === 1) {
-            $lead[] = $e;
-        }
-        if ((int)$e['approval_can_be_gongmu_approver'] === 1) {
-            $gongmu[] = $e;
-        }
-        if ((int)$e['approval_can_be_manage_approver'] === 1) {
-            $manage[] = $e;
-        }
-        if ($creatorEmployeeId > 0 && isset($e['id']) && (int)$e['id'] === $creatorEmployeeId) {
-            $myEmp = $e;
-        }
-        if (empty($myEmp) && $email !== '' && isset($e['email']) && strtolower(trim((string)$e['email'])) === strtolower($email)) {
-            $myEmp = $e;
-        }
-        if (empty($myEmp) && $name !== '' && isset($e['name']) && trim((string)$e['name']) === $name) {
-            $myEmp = $e;
-        }
+        if ((int)$e['approval_can_be_site_manager'] === 1) $site[] = $e;
+        if ((int)$e['approval_can_be_team_leader'] === 1) $lead[] = $e;
+        if ((int)$e['approval_can_be_gongmu_approver'] === 1) $gongmu[] = $e;
+        if ((int)$e['approval_can_be_manage_approver'] === 1) $manage[] = $e;
+        if ($creatorEmployeeId > 0 && isset($e['id']) && (int)$e['id'] === $creatorEmployeeId) $myEmp = $e;
+        if (empty($myEmp) && $email !== '' && isset($e['email']) && strtolower(trim((string)$e['email'])) === strtolower($email)) $myEmp = $e;
+        if (empty($myEmp) && $name !== '' && isset($e['name']) && trim((string)$e['name']) === $name) $myEmp = $e;
     }
 
-    if (count($site) === 0) {
-        $site = approval_create_employee_list_by_dept($employees, array(approval_ko('%EA%B3%B5%EC%82%AC')));
-    }
-    if (count($gongmu) === 0) {
-        $gongmu = approval_create_employee_list_by_dept($employees, array(approval_ko('%EA%B3%B5%EB%AC%B4')));
-    }
-    if (count($manage) === 0) {
-        $manage = approval_create_employee_list_by_dept($employees, array(approval_ko('%EA%B4%80%EB%A6%AC')));
-    }
+    if (count($site) === 0) $site = approval_create_employee_list_by_dept($employees, array(approval_ko('%EA%B3%B5%EC%82%AC')));
+    if (count($gongmu) === 0) $gongmu = approval_create_employee_list_by_dept($employees, array(approval_ko('%EA%B3%B5%EB%AC%B4')));
+    if (count($manage) === 0) $manage = approval_create_employee_list_by_dept($employees, array(approval_ko('%EA%B4%80%EB%A6%AC')));
     if (count($lead) === 0) {
         $leadPositions = array(approval_ko('%ED%8C%80%EC%9E%A5'), approval_ko('%EA%B3%BC%EC%9E%A5'), approval_ko('%EC%B0%A8%EC%9E%A5'), approval_ko('%EB%B6%80%EC%9E%A5'), approval_ko('%EC%83%81%EB%AC%B4'), approval_ko('%EC%A0%84%EB%AC%B4'));
         for ($i = 0; $i < count($employees); $i++) {
             $pos = isset($employees[$i]['position']) ? trim((string)$employees[$i]['position']) : '';
-            if (in_array($pos, $leadPositions, true)) {
-                $lead[] = $employees[$i];
-            }
+            if (in_array($pos, $leadPositions, true)) $lead[] = $employees[$i];
         }
     }
 
@@ -170,33 +211,17 @@ if ($pdo) {
     $ruleVp = approval_line_rules_find_vp($pdo);
     $ruleCeo = approval_line_rules_find_ceo($pdo);
     $ruleConstructionPm = approval_line_rules_find_construction_pm($pdo);
-    if ($ruleVp) {
-        $vp = $ruleVp;
-    }
-    if ($ruleCeo) {
-        $ceo = $ruleCeo;
-    }
-    if ($ruleConstructionPm) {
-        $constructionPm = $ruleConstructionPm;
-    }
+    if ($ruleVp) $vp = $ruleVp;
+    if ($ruleCeo) $ceo = $ruleCeo;
+    if ($ruleConstructionPm) $constructionPm = $ruleConstructionPm;
 }
 
 if (!empty($myEmp)) {
-    if (isset($myEmp['department'])) {
-        $dept = trim((string)$myEmp['department']);
-    }
-    if (isset($myEmp['position'])) {
-        $position = trim((string)$myEmp['position']);
-    }
-    if (isset($myEmp['name']) && trim((string)$myEmp['name']) !== '') {
-        $name = trim((string)$myEmp['name']);
-    }
-    if (isset($myEmp['email']) && trim((string)$myEmp['email']) !== '') {
-        $email = trim((string)$myEmp['email']);
-    }
-    if (isset($myEmp['birth_date'])) {
-        $myBirth = trim((string)$myEmp['birth_date']);
-    }
+    if (isset($myEmp['department'])) $dept = trim((string)$myEmp['department']);
+    if (isset($myEmp['position'])) $position = trim((string)$myEmp['position']);
+    if (isset($myEmp['name']) && trim((string)$myEmp['name']) !== '') $name = trim((string)$myEmp['name']);
+    if (isset($myEmp['email']) && trim((string)$myEmp['email']) !== '') $email = trim((string)$myEmp['email']);
+    if (isset($myEmp['birth_date'])) $myBirth = trim((string)$myEmp['birth_date']);
 }
 
 $normDept = approval_norm_dept($dept);
@@ -208,12 +233,8 @@ if ($normDept === approval_ko('%EA%B3%B5%EB%AC%B4')) {
 }
 
 $pmCandidates = array();
-if ($constructionPm) {
-    $pmCandidates[] = $constructionPm;
-}
-if ($gongmuPm && (!$constructionPm || (int)$gongmuPm['id'] !== (int)$constructionPm['id'])) {
-    $pmCandidates[] = $gongmuPm;
-}
+if ($constructionPm) $pmCandidates[] = $constructionPm;
+if ($gongmuPm && (!$constructionPm || (int)$gongmuPm['id'] !== (int)$constructionPm['id'])) $pmCandidates[] = $gongmuPm;
 for ($i = 0; $i < count($employees); $i++) {
     $id = isset($employees[$i]['id']) ? (int)$employees[$i]['id'] : 0;
     $exists = false;
@@ -223,9 +244,7 @@ for ($i = 0; $i < count($employees); $i++) {
             break;
         }
     }
-    if (!$exists) {
-        $pmCandidates[] = $employees[$i];
-    }
+    if (!$exists) $pmCandidates[] = $employees[$i];
 }
 
 $init = array(
@@ -248,6 +267,11 @@ $init = array(
     'delegate_level' => 'none'
 );
 
+/* 기존 작성 내용을 그대로 불러옵니다. */
+if ($sourceDocumentId > 0 && is_array($sourceContent)) {
+    $init = array_merge($init, $sourceContent);
+}
+
 $ruleCreator = !empty($myEmp) ? $myEmp : array(
     'id' => $creatorEmployeeId,
     'name' => $name,
@@ -255,17 +279,30 @@ $ruleCreator = !empty($myEmp) ? $myEmp : array(
     'department' => $dept,
     'position' => $position
 );
+
+$sourceTeamLeaderId = approval_resubmit_source_team_leader_id($sourceLines);
+if ($sourceTeamLeaderId > 0) {
+    $ruleCreator['team_leader_id'] = $sourceTeamLeaderId;
+}
+
 $requiresTeamLeaderSelect = approval_line_rules_requires_manual_team_leader_for_doc($ruleCreator, $type) ? 1 : 0;
 $selectedTeamLeaderId = isset($ruleCreator['team_leader_id']) ? (int)$ruleCreator['team_leader_id'] : 0;
 $teamLeaderTargetKeys = approval_line_rules_team_department_keys(isset($ruleCreator['department']) ? $ruleCreator['department'] : '');
 $teamLeaderCandidates = $requiresTeamLeaderSelect ? approval_line_rules_team_leader_candidates($pdo, $teamLeaderTargetKeys, $creatorEmployeeId) : array();
 $lineRuleResult = array('lines' => array(), 'messages' => array(), 'warnings' => array());
-if (!$isManagementOnlyDoc) {
+$previewLines = array();
+
+if ($approvalEditMode === 'edit') {
+    /* 첫 결재 전 수정은 기존 결재선을 그대로 유지합니다. */
+    $previewLines = $sourceLines;
+    $requiresTeamLeaderSelect = 0;
+} else if (!$isManagementOnlyDoc) {
+    /* 신규 작성과 반려 후 재상신은 현재 규칙으로 결재선을 새로 구성합니다. */
     $lineRuleResult = approval_line_rules_build($pdo, $type, $ruleCreator, $init);
+    $previewLines = isset($lineRuleResult['lines']) && is_array($lineRuleResult['lines'])
+        ? approval_line_rules_to_template_lines($lineRuleResult['lines'])
+        : array();
 }
-$previewLines = isset($lineRuleResult['lines']) && is_array($lineRuleResult['lines'])
-    ? approval_line_rules_to_template_lines($lineRuleResult['lines'])
-    : array();
 
 if ($isManagementOnlyDoc) {
     $init = array(
@@ -307,16 +344,42 @@ $approvalOptions = array(
     'team_leader_candidates' => $teamLeaderCandidates,
     'selected_team_leader_id' => $selectedTeamLeaderId
 );
+
+$formAction = $approvalEditMode !== '' ? 'approval_edit_store.php' : '?r=approval_store';
+$submitLabel = approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%B3%B4%EB%82%B4%EA%B8%B0');
+if ($approvalEditMode === 'edit') {
+    $submitLabel = '수정 저장';
+} else if ($approvalEditMode === 'resubmit') {
+    $submitLabel = '수정 후 재상신';
+}
 ?>
 <div class="mb-4 flex items-center justify-between">
     <div class="flex gap-2">
-        <a href="?r=approval_home" onclick="if(history.length>1){history.back();return false;}" class="px-4 py-2 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800"><?php echo h(approval_ko('%EB%92%A4%EB%A1%9C%EA%B0%80%EA%B8%B0')); ?></a>
+        <a href="<?php echo $sourceDocumentId > 0 ? '?r=approval_detail&id=' . (int)$sourceDocumentId : '?r=approval_home'; ?>" class="px-4 py-2 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800"><?php echo h(approval_ko('%EB%92%A4%EB%A1%9C%EA%B0%80%EA%B8%B0')); ?></a>
         <a href="?r=approval_home" class="px-4 py-2 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800"><?php echo h(approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%AA%A9%EB%A1%9D')); ?></a>
     </div>
 </div>
-<form id="approvalCreateForm" method="post" action="?r=approval_store" enctype="multipart/form-data">
+
+<?php if ($approvalEditMode === 'edit') { ?>
+    <div class="mb-4 rounded-2xl border border-blue-200 bg-blue-50 p-4 text-blue-900">
+        <div class="font-extrabold">첫 결재 전 문서 수정</div>
+        <div class="mt-1 text-sm">아직 승인/반려된 결재가 없어서 현재 문서를 수정할 수 있습니다. 저장하면 같은 문서로 계속 진행됩니다.</div>
+    </div>
+<?php } else if ($approvalEditMode === 'resubmit') { ?>
+    <div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+        <div class="font-extrabold">반려문서 수정 후 재상신</div>
+        <div class="mt-1 text-sm">기존 반려문서는 그대로 보존되고, 수정한 내용은 새 문서로 생성되어 결재선 처음부터 다시 시작합니다.</div>
+    </div>
+<?php } ?>
+
+<form id="approvalCreateForm" method="post" action="<?php echo h($formAction); ?>" enctype="multipart/form-data">
     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
     <input type="hidden" name="doc_type" value="<?php echo h($type); ?>">
+    <?php if ($approvalEditMode !== '') { ?>
+        <input type="hidden" name="approval_edit_mode" value="<?php echo h($approvalEditMode); ?>">
+        <input type="hidden" name="source_document_id" value="<?php echo (int)$sourceDocumentId; ?>">
+    <?php } ?>
+
     <?php
     if ($isLeave) {
         render_approval_leave_document($init, $previewLines, 'edit', $approvalOptions);
@@ -328,15 +391,59 @@ $approvalOptions = array(
         render_approval_proposal_document($init, $previewLines, 'edit', array(), $approvalOptions);
     }
     ?>
+
+    <?php if ($sourceDocumentId > 0 && approval_is_proposal_doc_type($type) && count($sourceFiles) > 0) { ?>
+        <div class="mt-4 rounded-2xl border border-gray-200 bg-white p-4">
+            <div class="font-extrabold text-gray-900">기존 첨부파일</div>
+            <div class="mt-1 text-sm text-gray-500">
+                <?php echo $approvalEditMode === 'edit' ? '기본값은 그대로 유지입니다. 삭제할 파일만 체크하세요.' : '기본값은 재상신 문서에도 그대로 포함입니다. 제외할 파일만 체크를 해제하세요.'; ?>
+            </div>
+            <div class="mt-3 space-y-2">
+                <?php for ($sf = 0; $sf < count($sourceFiles); $sf++) {
+                    $sourceFile = $sourceFiles[$sf];
+                    $sourceFileId = isset($sourceFile['id']) ? (int)$sourceFile['id'] : 0;
+                    $sourceFileName = isset($sourceFile['original_name']) ? trim((string)$sourceFile['original_name']) : '';
+                    $sourceFileLabel = isset($sourceFile['file_label']) ? trim((string)$sourceFile['file_label']) : '';
+                    if ($sourceFileId <= 0) continue;
+                ?>
+                    <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
+                        <div class="min-w-0">
+                            <div class="font-bold text-gray-800 break-all"><?php echo h($sourceFileName !== '' ? $sourceFileName : '첨부파일'); ?></div>
+                            <?php if ($sourceFileLabel !== '') { ?><div class="text-xs text-gray-500"><?php echo h($sourceFileLabel); ?></div><?php } ?>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <?php echo cpms_approval_drive_file_links_html($sourceFile); ?>
+                            <?php if ($approvalEditMode === 'edit') { ?>
+                                <label class="inline-flex items-center gap-1 text-sm text-rose-700 font-bold">
+                                    <input type="checkbox" name="remove_existing_file_ids[]" value="<?php echo $sourceFileId; ?>"> 삭제
+                                </label>
+                            <?php } else { ?>
+                                <label class="inline-flex items-center gap-1 text-sm text-emerald-700 font-bold">
+                                    <input type="checkbox" name="copy_source_file_ids[]" value="<?php echo $sourceFileId; ?>" checked="checked"> 포함
+                                </label>
+                            <?php } ?>
+                        </div>
+                    </div>
+                <?php } ?>
+            </div>
+        </div>
+    <?php } ?>
+
     <div class="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
-        <?php echo h(approval_ko('%EC%9E%91%EC%84%B1%20%EB%82%B4%EC%9A%A9%EC%9D%84%20%ED%99%95%EC%9D%B8%ED%95%9C%20%EB%92%A4%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%B3%B4%EB%82%B4%EA%B8%B0%EB%A5%BC%20%EB%88%84%EB%A5%B4%EB%A9%B4%20%EA%B2%B0%EC%9E%AC%EC%84%A0%20%EC%88%9C%EC%84%9C%EB%8C%80%EB%A1%9C%20%EC%9A%94%EC%B2%AD%EC%9D%B4%20%EC%A0%84%EB%8B%AC%EB%90%A9%EB%8B%88%EB%8B%A4.')); ?>
+        <?php if ($approvalEditMode === 'edit') { ?>
+            수정 저장 후에도 현재 첫 결재자 대기 상태가 유지됩니다.
+        <?php } else if ($approvalEditMode === 'resubmit') { ?>
+            재상신하면 결재선은 처음부터 다시 시작하며 기존 반려문서와 이력이 그대로 남습니다.
+        <?php } else { ?>
+            <?php echo h(approval_ko('%EC%9E%91%EC%84%B1%20%EB%82%B4%EC%9A%A9%EC%9D%84%20%ED%99%95%EC%9D%B8%ED%95%9C%20%EB%92%A4%20%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%B3%B4%EB%82%B4%EA%B8%B0%EB%A5%BC%20%EB%88%84%EB%A5%B4%EB%A9%B4%20%EA%B2%B0%EC%9E%AC%EC%84%A0%20%EC%88%9C%EC%84%9C%EB%8C%80%EB%A1%9C%20%EC%9A%94%EC%B2%AD%EC%9D%B4%20%EC%A0%84%EB%8B%AC%EB%90%A9%EB%8B%88%EB%8B%A4.')); ?>
+        <?php } ?>
     </div>
     <div class="mt-4 flex items-center justify-between gap-3">
         <div class="flex gap-2">
-            <a href="?r=approval_home" onclick="if(history.length>1){history.back();return false;}" class="px-4 py-3 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800"><?php echo h(approval_ko('%EB%92%A4%EB%A1%9C%EA%B0%80%EA%B8%B0')); ?></a>
+            <a href="<?php echo $sourceDocumentId > 0 ? '?r=approval_detail&id=' . (int)$sourceDocumentId : '?r=approval_home'; ?>" class="px-4 py-3 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800"><?php echo h(approval_ko('%EB%92%A4%EB%A1%9C%EA%B0%80%EA%B8%B0')); ?></a>
             <a href="?r=approval_home" class="px-4 py-3 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800"><?php echo h(approval_ko('%EB%AA%A9%EB%A1%9D%EC%9C%BC%EB%A1%9C')); ?></a>
         </div>
-        <button id="approvalCreateSubmitButton" type="button" class="px-8 py-4 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-lg"><?php echo h(approval_ko('%EC%A0%84%EC%9E%90%EA%B2%B0%EC%9E%AC%20%EB%B3%B4%EB%82%B4%EA%B8%B0')); ?></button>
+        <button id="approvalCreateSubmitButton" type="button" class="px-8 py-4 rounded-2xl bg-indigo-600 text-white font-extrabold shadow-lg"><?php echo h($submitLabel); ?></button>
     </div>
 </form>
 <script>
@@ -355,13 +462,8 @@ $approvalOptions = array(
         var tagName = target && target.tagName ? target.tagName.toUpperCase() : '';
         var isEditable = target && (target.isContentEditable || target.contentEditable === 'true');
 
-        if (key !== 'Enter' && key !== 13) {
-            return;
-        }
-        if (tagName === 'TEXTAREA' || tagName === 'SELECT' || isEditable) {
-            return;
-        }
-
+        if (key !== 'Enter' && key !== 13) return;
+        if (tagName === 'TEXTAREA' || tagName === 'SELECT' || isEditable) return;
         event.preventDefault();
     });
 
@@ -375,13 +477,11 @@ $approvalOptions = array(
 
     submitButton.addEventListener('click', function () {
         submitRequestedByButton = true;
-
         if (typeof form.requestSubmit === 'function') {
             form.requestSubmit();
             submitRequestedByButton = false;
             return;
         }
-
         form.submit();
         submitRequestedByButton = false;
     });
