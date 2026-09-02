@@ -31,7 +31,7 @@ class AiInputCompletionPatternService
     const TABLE_NAME = 'cpms_ai_input_completion_patterns';
     const SNAPSHOT_TABLE = 'cpms_ai_daily_snapshots';
     const EVENT_TABLE = 'cpms_cost_data_events';
-    const CALCULATION_VERSION = 'INPUT_PATTERN_V5';
+    const CALCULATION_VERSION = 'INPUT_PATTERN_V7';
     const DEFAULT_GRACE_DAYS = 0;
     const DEFAULT_MIN_COMPLETION_RATE = 20;
     const MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION = 3;
@@ -86,7 +86,6 @@ class AiInputCompletionPatternService
             'equipment' => 'equipment_amount',
             'other_expense' => 'other_expense_amount',
             'safety' => 'safety_amount',
-            'health' => 'health_amount',
             'other' => 'other_amount'
         );
     }
@@ -330,7 +329,11 @@ class AiInputCompletionPatternService
     }
 
     /**
-     * 안전/보건 비용은 일일 스냅샷과 동일한 기준으로 분리한다.
+     * 안전 메뉴에서 입력되는 비용은 AI에서는 모두 하나의 '안전관리비'로 본다.
+     * 실제 CPMS 비용 구분에는 별도 '보건관리비' 항목이 없으므로 검진비와
+     * 기타 안전·보건 비용도 안전관리비 안에 포함한다.
+     *
+     * DB의 기존 health_amount 컬럼은 하위호환을 위해 남겨두되 신규 AI 비용항목으로 사용하지 않는다.
      */
     private static function splitSafetyHealth($projectId, $startDate, $endDate)
     {
@@ -341,11 +344,8 @@ class AiInputCompletionPatternService
         try {
             $rows = cpms_safety_cost_project_items_between((int)$projectId, $startDate, $endDate);
             foreach ((array)$rows as $row) {
-                $category = isset($row['category']) ? trim((string)$row['category']) : '';
                 $amount = (float)cpms_safety_cost_row_amount($row);
-                if ($category === '검진비') $result['health'] += $amount;
-                else if ($category === '기타 안전·보건 비용') $result['other'] += $amount;
-                else $result['safety'] += $amount;
+                if ($amount > 0) $result['safety'] += $amount;
             }
         } catch (Exception $e) {
             return array('safety'=>0.0, 'health'=>0.0, 'other'=>0.0);
@@ -408,8 +408,7 @@ class AiInputCompletionPatternService
                     'equipment'=>isset($monthly['equipment']) ? (float)$monthly['equipment'] : 0.0,
                     'other_expense'=>isset($monthly['other_cost']) ? (float)$monthly['other_cost'] : 0.0,
                     'safety'=>(float)$safetySplit['safety'],
-                    'health'=>(float)$safetySplit['health'],
-                    'other'=>(isset($monthly['deduction']) ? (float)$monthly['deduction'] : 0.0) + (float)$safetySplit['other']
+                    'other'=>(isset($monthly['deduction']) ? (float)$monthly['deduction'] : 0.0)
                 );
 
                 /* 일일 스냅샷과 동일하게 세부합계와 기존 손익합계의 차이는 기타 투입비로 맞춘다. */
@@ -453,6 +452,8 @@ class AiInputCompletionPatternService
         if (!self::tableExists($pdo, self::SNAPSHOT_TABLE)) return array();
         $min = date('Y-m', strtotime($targetYm . '-01 -' . self::HISTORY_MONTH_LIMIT . ' months'));
         $columns = array_values(self::categories());
+        /* 과거 스냅샷에 분리 저장되어 있던 health_amount는 안전관리비로 합치기 위해 같이 읽는다. */
+        if (!in_array('health_amount', $columns, true)) $columns[] = 'health_amount';
         $sql = 'SELECT snapshot_date,target_ym,project_id,project_name_snapshot,' . implode(',', $columns)
             . ',monthly_input_amount FROM `' . self::SNAPSHOT_TABLE . '`'
             . ' WHERE target_ym>=:min_ym AND target_ym<:target_ym'
@@ -575,7 +576,11 @@ class AiInputCompletionPatternService
             $groups = array();
             foreach ((array)$rows as $row) {
                 $project = isset($row['project_id']) ? (int)$row['project_id'] : 0;
-                $cost = isset($row['cost_type']) ? (string)$row['cost_type'] : '';
+                $cost = isset($row['cost_type']) ? strtolower(trim((string)$row['cost_type'])) : '';
+                $targetType = isset($row['target_type']) ? strtolower(trim((string)$row['target_type'])) : '';
+                /* 과거 검진비(health) 및 안전비 화면에서 들어온 기타 안전·보건 비용은 안전관리비로 통합한다. */
+                if ($cost === 'health') $cost = 'safety';
+                if ($cost === 'other' && strpos($targetType, 'safety') !== false) $cost = 'safety';
                 if ($project <= 0 || $cost === '') continue;
                 $key = $project . ':' . $cost;
                 if (!isset($groups[$key])) {
@@ -849,6 +854,7 @@ class AiInputCompletionPatternService
             if (!$final) continue;
 
             $finalAmount = isset($final[$column]) ? (float)$final[$column] : 0.0;
+            if ($cost === 'safety' && isset($final['health_amount'])) $finalAmount += (float)$final['health_amount'];
             if ($finalAmount <= 0) continue;
 
             $currentProgress = self::progress($context['snapshot_date'], $context['target_ym'], $cost);
@@ -857,6 +863,7 @@ class AiInputCompletionPatternService
 
             $best = $evidence['best'];
             $partial = isset($best[$column]) ? (float)$best[$column] : 0.0;
+            if ($cost === 'safety' && isset($best['health_amount'])) $partial += (float)$best['health_amount'];
             $rate = max(0, min(100, $partial / $finalAmount * 100));
 
             /* 원천분류는 품질 가중치용으로만 사용하고, 정상 일일 스냅샷 월 전체를 탈락시키지 않는다. */
@@ -1277,6 +1284,58 @@ class AiInputCompletionPatternService
     }
 
     /**
+     * 입력지연/반복수정 같은 평가성 지표는 반드시 '해당 현장 + 해당 비용항목'의 실제 자료만 반환한다.
+     * 예측을 위해 회사/현장 전체 패턴으로 fallback 하더라도 그 표본수와 지연값을 개별 현장 값처럼 보여주지 않는다.
+     */
+    private static function projectCategoryInputDiagnostics($pdo, $analysisDate, $targetYm, $projectId, $costType)
+    {
+        $empty = array(
+            'event_count'=>0,
+            'average_input_lag_days'=>null,
+            'late_bulk_rate'=>null,
+            'correction_rate'=>null,
+            'month_move_rate'=>null,
+            'lag_sample_count'=>0,
+            'same_day_input_rate'=>null,
+            'within_one_business_day_rate'=>null,
+            'late_two_plus_input_rate'=>null,
+            'input_lag_basis'=>'ACTUAL_DATE_TO_EVENT_DATE_BUSINESS_DAYS',
+            'input_lag_origin'=>'LIVE_EMPLOYEE_INPUT_ONLY',
+            'input_lag_holiday_basis'=>'WEEKEND_AND_CPMS_HOLIDAY_CACHE',
+            'input_lag_scope'=>'NONE'
+        );
+        try {
+            $st = $pdo->prepare(
+                'SELECT * FROM `' . self::TABLE_NAME . '` '
+                . "WHERE analysis_date=:date AND target_ym=:ym AND scope_type='PROJECT_CATEGORY' "
+                . 'AND project_id=:project AND cost_type=:cost ORDER BY progress_day DESC,id DESC LIMIT 1'
+            );
+            if (!$st || !$st->execute(array(
+                ':date'=>$analysisDate,
+                ':ym'=>$targetYm,
+                ':project'=>(int)$projectId,
+                ':cost'=>(string)$costType
+            ))) return $empty;
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row)) return $empty;
+            $detail = self::decode(isset($row['detail_data']) ? $row['detail_data'] : '');
+            $empty['event_count'] = isset($row['event_count']) ? max(0,(int)$row['event_count']) : 0;
+            $empty['average_input_lag_days'] = isset($row['average_input_lag_days']) && $row['average_input_lag_days'] !== null ? (float)$row['average_input_lag_days'] : null;
+            $empty['late_bulk_rate'] = isset($row['late_bulk_rate']) && $row['late_bulk_rate'] !== null ? (float)$row['late_bulk_rate'] : null;
+            $empty['correction_rate'] = isset($row['correction_rate']) && $row['correction_rate'] !== null ? (float)$row['correction_rate'] : null;
+            $empty['month_move_rate'] = isset($row['month_move_rate']) && $row['month_move_rate'] !== null ? (float)$row['month_move_rate'] : null;
+            $empty['lag_sample_count'] = isset($detail['lag_sample_count']) ? max(0,(int)$detail['lag_sample_count']) : 0;
+            foreach (array('same_day_input_rate','within_one_business_day_rate','late_two_plus_input_rate') as $key) {
+                $empty[$key] = isset($detail[$key]) && is_numeric($detail[$key]) ? (float)$detail[$key] : null;
+            }
+            if ($empty['lag_sample_count'] > 0 || $empty['event_count'] > 0) $empty['input_lag_scope'] = 'PROJECT_CATEGORY';
+            return $empty;
+        } catch (Exception $e) {
+            return $empty;
+        }
+    }
+
+    /**
      * 예측에 사용할 최적 패턴을 선택한다.
      *
      * 안전장치:
@@ -1302,7 +1361,7 @@ class AiInputCompletionPatternService
             array('COMPANY_ALL', 0, 'all', false)
         );
         $minRate = self::minCompletionRate($pdo);
-        $projectInputDiagnostics = null;
+        $projectInputDiagnostics = self::projectCategoryInputDiagnostics($pdo, $analysisDate, $targetYm, $projectId, $costType);
 
         foreach ($candidates as $candidate) {
             try {
@@ -1323,31 +1382,7 @@ class AiInputCompletionPatternService
                 if (!is_array($row)) continue;
                 $detail = self::decode(isset($row['detail_data']) ? $row['detail_data'] : '');
 
-                /*
-                 * 예측 fallback과 입력지연 진단 fallback을 분리한다.
-                 * 같은 현장/같은 비용항목의 실제 직접입력 통계가 있으면 회사 평균으로 덮어쓰지 않는다.
-                 */
-                if ($candidate[0] === 'PROJECT_CATEGORY') {
-                    $projectLagSamples = isset($detail['lag_sample_count']) ? (int)$detail['lag_sample_count'] : 0;
-                    $projectEvents = isset($row['event_count']) ? (int)$row['event_count'] : 0;
-                    if ($projectLagSamples > 0 || $projectEvents > 0) {
-                        $projectInputDiagnostics = array(
-                            'event_count'=>$projectEvents,
-                            'average_input_lag_days'=>isset($row['average_input_lag_days']) ? $row['average_input_lag_days'] : null,
-                            'late_bulk_rate'=>isset($row['late_bulk_rate']) ? $row['late_bulk_rate'] : null,
-                            'correction_rate'=>isset($row['correction_rate']) ? $row['correction_rate'] : null,
-                            'month_move_rate'=>isset($row['month_move_rate']) ? $row['month_move_rate'] : null,
-                            'lag_sample_count'=>$projectLagSamples,
-                            'same_day_input_rate'=>isset($detail['same_day_input_rate']) ? $detail['same_day_input_rate'] : null,
-                            'within_one_business_day_rate'=>isset($detail['within_one_business_day_rate']) ? $detail['within_one_business_day_rate'] : null,
-                            'late_two_plus_input_rate'=>isset($detail['late_two_plus_input_rate']) ? $detail['late_two_plus_input_rate'] : null,
-                            'input_lag_basis'=>isset($detail['input_lag_basis']) ? $detail['input_lag_basis'] : 'ACTUAL_DATE_TO_EVENT_DATE_BUSINESS_DAYS',
-                            'input_lag_origin'=>isset($detail['input_lag_origin']) ? $detail['input_lag_origin'] : 'LIVE_EMPLOYEE_INPUT_ONLY',
-                            'input_lag_holiday_basis'=>isset($detail['input_lag_holiday_basis']) ? $detail['input_lag_holiday_basis'] : 'WEEKEND_AND_CPMS_HOLIDAY_CACHE',
-                            'input_lag_scope'=>'PROJECT_CATEGORY'
-                        );
-                    }
-                }
+                /* 입력지연 진단값은 위에서 PROJECT_CATEGORY 전용으로 별도 확보했다. */
 
                 /* 회사/전체 fallback의 금액 중앙값은 개별 현장 예상금액으로 사용하지 않는다. */
                 if (!$candidate[3]) {
@@ -1391,17 +1426,19 @@ class AiInputCompletionPatternService
 
                 if ($rawCompletion === null && !$hasAmount && !$hasWorkPattern) continue;
 
-                if ($projectInputDiagnostics !== null && $candidate[0] !== 'PROJECT_CATEGORY') {
-                    $row['event_count'] = $projectInputDiagnostics['event_count'];
-                    $row['average_input_lag_days'] = $projectInputDiagnostics['average_input_lag_days'];
-                    $row['late_bulk_rate'] = $projectInputDiagnostics['late_bulk_rate'];
-                    $row['correction_rate'] = $projectInputDiagnostics['correction_rate'];
-                    $row['month_move_rate'] = $projectInputDiagnostics['month_move_rate'];
-                    foreach (array('lag_sample_count','same_day_input_rate','within_one_business_day_rate','late_two_plus_input_rate','input_lag_basis','input_lag_origin','input_lag_holiday_basis','input_lag_scope') as $diagKey) {
-                        $detail[$diagKey] = $projectInputDiagnostics[$diagKey];
-                    }
-                    $row['detail_data'] = self::encode($detail);
+                /*
+                 * 예측용 fallback의 회사/현장전체 통계가 개별 현장의 입력지연 값으로 노출되지 않게
+                 * 평가성 지표는 항상 PROJECT_CATEGORY 실제값(없으면 0/null)으로 덮어쓴다.
+                 */
+                $row['event_count'] = $projectInputDiagnostics['event_count'];
+                $row['average_input_lag_days'] = $projectInputDiagnostics['average_input_lag_days'];
+                $row['late_bulk_rate'] = $projectInputDiagnostics['late_bulk_rate'];
+                $row['correction_rate'] = $projectInputDiagnostics['correction_rate'];
+                $row['month_move_rate'] = $projectInputDiagnostics['month_move_rate'];
+                foreach (array('lag_sample_count','same_day_input_rate','within_one_business_day_rate','late_two_plus_input_rate','input_lag_basis','input_lag_origin','input_lag_holiday_basis','input_lag_scope') as $diagKey) {
+                    $detail[$diagKey] = $projectInputDiagnostics[$diagKey];
                 }
+                $row['detail_data'] = self::encode($detail);
 
                 $row['available'] = true;
                 return $row;

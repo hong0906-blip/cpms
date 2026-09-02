@@ -78,7 +78,6 @@ class AiCostForecastV2Service
             'equipment'=>'장비비',
             'other_expense'=>'기타경비',
             'safety'=>'안전관리비',
-            'health'=>'보건관리비',
             'other'=>'기타 투입비'
         );
     }
@@ -559,10 +558,12 @@ class AiCostForecastV2Service
             if (!$st || !$st->execute(array(':ym'=>$context['target_ym']))) return $map;
             foreach ((array)$st->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $projectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
-                $costType = isset($row['cost_type']) ? trim((string)$row['cost_type']) : '';
+                $costType = isset($row['cost_type']) ? strtolower(trim((string)$row['cost_type'])) : '';
+                if ($costType === 'health') $costType = 'safety';
                 if ($projectId <= 0 || $costType === '') continue;
                 if (!isset($map[$projectId])) $map[$projectId] = array();
-                $map[$projectId][$costType] = isset($row['event_count']) ? (int)$row['event_count'] : 0;
+                $map[$projectId][$costType] = (isset($map[$projectId][$costType]) ? (int)$map[$projectId][$costType] : 0)
+                    + (isset($row['event_count']) ? (int)$row['event_count'] : 0);
             }
         } catch (Exception $e) {
             return array();
@@ -574,6 +575,8 @@ class AiCostForecastV2Service
     {
         $cols = array();
         foreach (array_values(self::categories()) as $column) $cols[] = 's.' . $column;
+        /* 기존 스냅샷의 health_amount는 별도 비용항목으로 노출하지 않고 안전관리비에 합친다. */
+        $cols[] = 's.health_amount';
         $sql = 'SELECT s.snapshot_date,s.target_ym,s.project_id,s.project_name_snapshot,s.project_status_snapshot,'
             . 's.contract_amount,s.cumulative_input_amount,s.monthly_input_amount,s.today_event_count,s.month_event_count,s.latest_event_at,'
             . implode(',', $cols)
@@ -588,6 +591,9 @@ class AiCostForecastV2Service
             $activityMap = self::currentActivityMap($pdo, $context);
             foreach ($rows as $index=>$row) {
                 $projectId = isset($row['project_id']) ? (int)$row['project_id'] : 0;
+                $rows[$index]['safety_amount'] = (isset($row['safety_amount']) ? (float)$row['safety_amount'] : 0.0)
+                    + (isset($row['health_amount']) ? (float)$row['health_amount'] : 0.0);
+                $rows[$index]['health_amount'] = 0.0;
                 $rows[$index]['_category_activity'] = isset($activityMap[$projectId]) ? $activityMap[$projectId] : array();
                 $activityTotal = 0;
                 foreach ($rows[$index]['_category_activity'] as $count) $activityTotal += (int)$count;
@@ -621,6 +627,7 @@ class AiCostForecastV2Service
         $map = array();
         $start = date('Y-m-d', strtotime($context['snapshot_date'] . ' -14 days'));
         $cols = array_values(self::categories());
+        if (!in_array('health_amount', $cols, true)) $cols[] = 'health_amount';
         try {
             $sql = 'SELECT snapshot_date,project_id,' . implode(',', $cols) . ' FROM `' . self::SNAPSHOT_TABLE . '` '
                 . 'WHERE target_ym=:ym AND snapshot_date>=:start AND snapshot_date<=:end ORDER BY project_id,snapshot_date';
@@ -628,6 +635,9 @@ class AiCostForecastV2Service
             if (!$st || !$st->execute(array(':ym'=>$context['target_ym'], ':start'=>$start, ':end'=>$context['snapshot_date']))) return $map;
             foreach ((array)$st->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $projectId = (int)$row['project_id'];
+                $row['safety_amount'] = (isset($row['safety_amount']) ? (float)$row['safety_amount'] : 0.0)
+                    + (isset($row['health_amount']) ? (float)$row['health_amount'] : 0.0);
+                $row['health_amount'] = 0.0;
                 if (!isset($map[$projectId])) $map[$projectId] = array('first'=>$row,'last'=>$row);
                 $map[$projectId]['last'] = $row;
             }
@@ -694,7 +704,6 @@ class AiCostForecastV2Service
         if ((float)$current != 0.0) return true;
         $map = isset($snapshot['_category_activity']) && is_array($snapshot['_category_activity']) ? $snapshot['_category_activity'] : array();
         if (isset($map[$cost]) && (int)$map[$cost] > 0) return true;
-        if ($cost === 'health' && isset($map['safety']) && (int)$map['safety'] > 0) return true;
         return false;
     }
 
@@ -977,6 +986,17 @@ class AiCostForecastV2Service
         if ($directBlocked && $similarValue !== null) $high = max($high, $similarValue);
 
         $origins = AiCostDataGovernanceService::originSummary($pdo, (int)$snapshot['project_id'], $snapshot['target_ym'], $cost);
+        if ($cost === 'safety') {
+            /* 과거 검진비가 health로 분류된 이력도 안전관리비 운영표본으로 합친다. */
+            $healthOrigins = AiCostDataGovernanceService::originSummary($pdo, (int)$snapshot['project_id'], $snapshot['target_ym'], 'health');
+            if (isset($healthOrigins['origins']) && is_array($healthOrigins['origins'])) {
+                if (!isset($origins['origins']) || !is_array($origins['origins'])) $origins['origins'] = array();
+                foreach ($healthOrigins['origins'] as $originKey=>$originCount) {
+                    $origins['origins'][$originKey] = isset($origins['origins'][$originKey])
+                        ? (int)$origins['origins'][$originKey] + (int)$originCount : (int)$originCount;
+                }
+            }
+        }
         $originCounts = isset($origins['origins']) && is_array($origins['origins']) ? $origins['origins'] : array();
         $liveSamples = isset($originCounts['LIVE_EMPLOYEE_INPUT']) ? (int)$originCounts['LIVE_EMPLOYEE_INPUT'] : 0;
         $operationalSamples = $liveSamples;
