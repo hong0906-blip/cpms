@@ -419,18 +419,37 @@ class AiCostForecastV2Service
         $factors = is_array($factors) ? $factors : array();
         $score = (float)$score;
         $live = isset($factors['live_input_sample_count']) ? (int)$factors['live_input_sample_count'] : 0;
+        $operational = isset($factors['operational_input_sample_count']) ? (int)$factors['operational_input_sample_count'] : $live;
         $timing = isset($factors['timing_pattern_month_count']) ? (int)$factors['timing_pattern_month_count'] : 0;
         $amount = isset($factors['amount_pattern_month_count']) ? (int)$factors['amount_pattern_month_count'] : 0;
+        $work = isset($factors['work_pattern_month_count']) ? (int)$factors['work_pattern_month_count'] : 0;
         $similar = isset($factors['similar_project_sample_count']) ? (int)$factors['similar_project_sample_count'] : 0;
-        if ($live <= 0 || $timing <= 0) $score = min($score, 49);
-        else if ($timing === 1) $score = min($score, 59);
-        else if ($timing === 2) $score = min($score, 69);
+
+        /*
+         * 입력시점 자료가 없더라도 노무비의 날짜별 상세공수 패턴이 있으면
+         * "분석불가"로 떨어뜨리지 않는다. 다만 실제 입력지연 패턴과는 별개이므로 신뢰도 상한을 둔다.
+         */
+        if ($timing <= 0) {
+            if ($work >= 3 && $amount >= 3) $score = min($score, 79);
+            else if ($work === 2 && $amount > 0) $score = min($score, 69);
+            else if ($work === 1 && $amount > 0) $score = min($score, 59);
+            else $score = min($score, 49);
+        } else if ($timing === 1) {
+            $score = min($score, $work >= 2 ? 69 : 59);
+        } else if ($timing === 2) {
+            $score = min($score, $work >= 2 ? 79 : 69);
+        }
+
+        if ($operational <= 0 && $timing <= 0 && $work <= 0) $score = min($score, 49);
         if ($amount <= 0) $score -= 10;
         if (!empty($factors['new_site_flag'])) $score -= 10;
         if (!empty($factors['contract_change_flag'])) $score -= 10;
         if (!empty($factors['schedule_change_flag'])) $score -= 8;
-        if ($similar <= 0) $score -= 5;
+        if ($similar <= 0 && $work <= 0) $score -= 5;
         else if ($similar >= 3) $score += 3;
+        if ($work >= 3) $score += 4;
+        else if ($work >= 1) $score += 2;
+
         $correction = isset($factors['recent_correction_ratio']) ? (float)$factors['recent_correction_ratio'] : 0;
         if ($correction >= 0.25) $score -= 20;
         else if ($correction >= 0.10) $score -= 10;
@@ -477,6 +496,20 @@ class AiCostForecastV2Service
         if ((float)$current > 0) $score += 5;
         if ($hasActivity) $score += 4;
         return (float)min(49, $score);
+    }
+
+    private static function workPatternConfidence($amountMonths, $workMonths, $current, $hasActivity)
+    {
+        $amountMonths = max(0, (int)$amountMonths);
+        $workMonths = max(0, (int)$workMonths);
+        if ($workMonths <= 0) return self::amountOnlyConfidence($amountMonths, $current, $hasActivity);
+        $score = 34 + min(5, $amountMonths) * 4 + min(5, $workMonths) * 6;
+        if ((float)$current > 0) $score += 5;
+        if ($hasActivity) $score += 3;
+        if ($workMonths === 1) $score = min($score, 59);
+        else if ($workMonths === 2) $score = min($score, 69);
+        else $score = min($score, 79);
+        return (float)max(0, $score);
     }
 
     private static function sourceFingerprint($context, $snapshots, $patterns)
@@ -707,11 +740,19 @@ class AiCostForecastV2Service
         $projectActivity = self::projectHasActivity($snapshot);
         $candidates = array();
         $patternValue = null;
+        $workPatternValue = null;
         $periodPaceValue = null;
 
         $detail = AiInputCompletionPatternService::decode(isset($pattern['detail_data']) ? $pattern['detail_data'] : '');
         $historical = isset($detail['historical_final_median']) && is_numeric($detail['historical_final_median'])
             ? max(0.0, (float)$detail['historical_final_median'])
+            : null;
+        $workOccurrenceRate = isset($detail['expected_work_occurrence_rate']) && is_numeric($detail['expected_work_occurrence_rate'])
+            ? max(0.0, min(100.0, (float)$detail['expected_work_occurrence_rate']))
+            : null;
+        $workMonths = isset($detail['work_pattern_month_count']) ? max(0, (int)$detail['work_pattern_month_count']) : 0;
+        $workVolatility = isset($detail['work_pattern_volatility']) && is_numeric($detail['work_pattern_volatility'])
+            ? max(0.0, (float)$detail['work_pattern_volatility'])
             : null;
         $oldValue = isset($oldCategory['forecast']) && is_numeric($oldCategory['forecast'])
             ? max(0.0, (float)$oldCategory['forecast'])
@@ -766,6 +807,8 @@ class AiCostForecastV2Service
                     'direct_projection_blocked'=>1,
                     'direct_projection_block_reason'=>'PROJECT_NO_ACTIVITY',
                     'historical_reference'=>$historical,
+                    'work_occurrence_rate'=>$workOccurrenceRate,
+                    'work_pattern_month_count'=>$workMonths,
                     'project_activity'=>0,
                     'category_activity'=>0
                 ),
@@ -823,6 +866,8 @@ class AiCostForecastV2Service
                     'direct_projection_blocked'=>1,
                     'direct_projection_block_reason'=>'CATEGORY_NO_ACTIVITY',
                     'historical_reference'=>$historical,
+                    'work_occurrence_rate'=>$workOccurrenceRate,
+                    'work_pattern_month_count'=>$workMonths,
                     'similar_reference'=>$similarValue,
                     'project_activity'=>$projectActivity ? 1 : 0,
                     'category_activity'=>0
@@ -839,6 +884,22 @@ class AiCostForecastV2Service
         }
 
         /*
+         * 노무비는 과거 상세공수의 실제 근무일 분포를 별도 작업발생 패턴으로 사용한다.
+         * 과거 자료를 오늘 복원입력했더라도 work_date 기준이므로 사용할 수 있지만,
+         * 등록시각은 과거 입력지연으로 사용하지 않는다.
+         */
+        if ($cost === 'labor' && $current > 0 && $workOccurrenceRate !== null && $workOccurrenceRate >= 5.0 && $workMonths > 0) {
+            $workPatternValue = $current / max(0.05, $workOccurrenceRate / 100);
+            $workWeight = $workMonths >= 3 ? 65 : ($workMonths === 2 ? 50 : 35);
+            if ($workVolatility !== null && $workVolatility >= 30) $workWeight = max(25, $workWeight - 15);
+            $candidates[] = array(
+                'type'=>'LABOR_WORK_PATTERN',
+                'value'=>$workPatternValue,
+                'weight'=>$workWeight
+            );
+        }
+
+        /*
          * When timing learning is still weak, use calendar-period pace as the point estimate anchor.
          * This prevents a small current input from jumping to a very large historical median.
          */
@@ -848,14 +909,14 @@ class AiCostForecastV2Service
             $candidates[] = array(
                 'type'=>'PERIOD_PROGRESS_BASELINE',
                 'value'=>$periodPaceValue,
-                'weight'=>$directBlocked ? 60 : 20
+                'weight'=>$directBlocked ? ($workPatternValue !== null ? 35 : 60) : 20
             );
         } else if ($current > 0 && $directBlocked) {
             $candidates[] = array('type'=>'CURRENT_BASELINE','value'=>$current,'weight'=>60);
         }
 
         if ($historical !== null && $historical > 0) {
-            $candidates[] = array('type'=>'HISTORICAL_MEDIAN','value'=>$historical,'weight'=>$directBlocked ? 25 : 25);
+            $candidates[] = array('type'=>'HISTORICAL_MEDIAN','value'=>$historical,'weight'=>$workPatternValue !== null ? 30 : 25);
         }
         if ($oldValue !== null && $oldValue > 0 && $categoryActivity) {
             $candidates[] = array('type'=>'BASIC_FORECAST','value'=>$oldValue,'weight'=>$directBlocked ? 10 : 20);
@@ -875,7 +936,9 @@ class AiCostForecastV2Service
         $forecast = max($current, $forecast);
 
         $method = 'COLD_START';
-        if ($directBlocked && $periodPaceValue !== null) $method = 'PERIOD_PROGRESS_BASELINE';
+        $workSelected = $workPatternValue !== null && abs($forecast - $workPatternValue) <= max(1.0, $workPatternValue * 0.03);
+        if ($workSelected) $method = 'LABOR_WORK_PATTERN';
+        else if ($directBlocked && $periodPaceValue !== null) $method = 'PERIOD_PROGRESS_BASELINE';
         else if (!$directBlocked && $patternValue !== null) $method = count($candidates) > 1 ? 'COMPLETION_AND_HISTORICAL' : 'COMPLETION_PATTERN';
         else if ($historical !== null) $method = count($candidates) > 1 ? 'HISTORICAL_WITH_CURRENT' : 'HISTORICAL_MEDIAN';
         else if (count($candidates) > 0) $method = (string)$candidates[0]['type'];
@@ -892,20 +955,38 @@ class AiCostForecastV2Service
         $origins = AiCostDataGovernanceService::originSummary($pdo, (int)$snapshot['project_id'], $snapshot['target_ym'], $cost);
         $originCounts = isset($origins['origins']) && is_array($origins['origins']) ? $origins['origins'] : array();
         $liveSamples = isset($originCounts['LIVE_EMPLOYEE_INPUT']) ? (int)$originCounts['LIVE_EMPLOYEE_INPUT'] : 0;
+        $operationalSamples = $liveSamples;
+        /* 출퇴근/공수 자동계산은 노무비에서 정상 운영자료로 인정한다. 강제입력은 ADMIN_CORRECTION이므로 포함되지 않는다. */
+        if ($cost === 'labor' && isset($originCounts['SYSTEM_IMPORT'])) $operationalSamples += (int)$originCounts['SYSTEM_IMPORT'];
         $accuracy = AiForecastAccuracyService::historicalPerformance($pdo, (int)$snapshot['project_id'], $cost);
 
         $analyzable = $completion === null ? 0 : 100;
         $confidence = self::confidence($pattern, $progressRate, $analyzable);
-        if ($confidence === null) $confidence = self::amountOnlyConfidence($amountMonths, $current, $categoryActivity);
-        if ($directBlocked && $confidence !== null) $confidence = min(49, $confidence);
-        else if ($completion !== null && $completion < $minRate && $confidence !== null) $confidence = max(0, $confidence - 15);
-        if ($confidence !== null && $sample === 1) $confidence = min(59, $confidence);
-        else if ($confidence !== null && $sample === 2) $confidence = min(69, $confidence);
-        if ($confidence !== null && $liveSamples === 0) $confidence = min($confidence, 49);
+        if ($confidence === null) {
+            $confidence = $workMonths > 0
+                ? self::workPatternConfidence($amountMonths, $workMonths, $current, $categoryActivity)
+                : self::amountOnlyConfidence($amountMonths, $current, $categoryActivity);
+        }
+        if ($directBlocked && $confidence !== null) {
+            if ($workMonths >= 3) $confidence = min(79, $confidence);
+            else if ($workMonths === 2) $confidence = min(69, $confidence);
+            else if ($workMonths === 1) $confidence = min(59, $confidence);
+            else $confidence = min(49, $confidence);
+        } else if ($completion !== null && $completion < $minRate && $confidence !== null) {
+            $confidence = max(0, $confidence - 15);
+        }
+        if ($confidence !== null && $sample === 1 && $workMonths < 2) $confidence = min(59, $confidence);
+        else if ($confidence !== null && $sample === 2 && $workMonths < 3) $confidence = min(69, $confidence);
+        if ($confidence !== null && $operationalSamples === 0 && $sample === 0 && $workMonths === 0) $confidence = min($confidence, 49);
         if ($confidence !== null && !empty($accuracy['available']) && $accuracy['wape'] !== null) {
             $accuracyScore = max(0, min(100, (1 - (float)$accuracy['wape']) * 100));
             $confidence = round($confidence * 0.8 + $accuracyScore * 0.2, 2);
-            if ($directBlocked) $confidence = min(49, $confidence);
+            if ($directBlocked) {
+                if ($workMonths >= 3) $confidence = min(79, $confidence);
+                else if ($workMonths === 2) $confidence = min(69, $confidence);
+                else if ($workMonths === 1) $confidence = min(59, $confidence);
+                else $confidence = min(49, $confidence);
+            }
         }
 
         $over = AiCostProjectionRiskService::overinputGrade($current, $forecast, $historical, $completion);
@@ -942,13 +1023,17 @@ class AiCostForecastV2Service
             'month_move_rate'=>isset($pattern['month_move_rate']) ? $pattern['month_move_rate'] : null,
             'overinput_grade'=>$over,
             'missing_possibility_grade'=>$missing,
-            'data_status'=>$directBlocked ? 'LIMITED' : ($sample >= 3 ? 'READY' : 'LIMITED'),
+            'data_status'=>$workMonths >= 3 ? 'WORK_READY' : ($workMonths > 0 ? 'WORK_LIMITED' : ($directBlocked ? 'LIMITED' : ($sample >= 3 ? 'READY' : 'LIMITED'))),
             'calculation_version'=>self::CALCULATION_VERSION,
             'candidate_data'=>array(
                 'candidates'=>$candidates,
                 'learning'=>$learning,
                 'amount_pattern_month_count'=>$amountMonths,
                 'timing_pattern_month_count'=>$sample,
+                'work_pattern_month_count'=>$workMonths,
+                'work_occurrence_rate'=>$workOccurrenceRate,
+                'work_pattern_value'=>$workPatternValue,
+                'operational_input_sample_count'=>$operationalSamples,
                 'live_input_sample_count'=>$liveSamples,
                 'data_origin_summary'=>$origins,
                 'similar_project_sample_count'=>!empty($similar['available']) ? (int)$similar['sample_count'] : 0,
@@ -977,7 +1062,9 @@ class AiCostForecastV2Service
         );
         $sample = 0;
         $amountMonths = 0;
+        $workMonths = 0;
         $liveSamples = 0;
+        $operationalSamples = 0;
         $similarSamples = 0;
         $originTotals = array();
         $available = 0;
@@ -1014,7 +1101,10 @@ class AiCostForecastV2Service
             }
             $sample = max($sample, (int)$row['sample_count']);
             $amountMonths = max($amountMonths, (int)$row['amount_pattern_month_count']);
+            $candidateMeta = isset($row['candidate_data']) && is_array($row['candidate_data']) ? $row['candidate_data'] : array();
+            $workMonths = max($workMonths, isset($candidateMeta['work_pattern_month_count']) ? (int)$candidateMeta['work_pattern_month_count'] : 0);
             $liveSamples += (int)$row['live_input_sample_count'];
+            $operationalSamples += isset($candidateMeta['operational_input_sample_count']) ? (int)$candidateMeta['operational_input_sample_count'] : (int)$row['live_input_sample_count'];
             $similarSamples = max($similarSamples, (int)$row['similar_project_sample_count']);
             $rowOrigins = isset($row['data_origin_summary']['origins']) && is_array($row['data_origin_summary']['origins'])
                 ? $row['data_origin_summary']['origins']
@@ -1050,8 +1140,10 @@ class AiCostForecastV2Service
         );
         $confidenceFactors = array(
             'live_input_sample_count'=>$liveSamples,
+            'operational_input_sample_count'=>$operationalSamples,
             'timing_pattern_month_count'=>$sample,
             'amount_pattern_month_count'=>$amountMonths,
+            'work_pattern_month_count'=>$workMonths,
             'similar_project_sample_count'=>$similarSamples,
             'new_site_flag'=>$newSite,
             'contract_change_flag'=>$changeFlags['contract_change_flag'],
@@ -1069,6 +1161,9 @@ class AiCostForecastV2Service
             $categoryFactors['live_input_sample_count'] = isset($categoryValue['live_input_sample_count']) ? (int)$categoryValue['live_input_sample_count'] : 0;
             $categoryFactors['timing_pattern_month_count'] = isset($categoryValue['timing_pattern_month_count']) ? (int)$categoryValue['timing_pattern_month_count'] : 0;
             $categoryFactors['amount_pattern_month_count'] = isset($categoryValue['amount_pattern_month_count']) ? (int)$categoryValue['amount_pattern_month_count'] : 0;
+            $categoryMeta = isset($categoryValue['candidate_data']) && is_array($categoryValue['candidate_data']) ? $categoryValue['candidate_data'] : array();
+            $categoryFactors['work_pattern_month_count'] = isset($categoryMeta['work_pattern_month_count']) ? (int)$categoryMeta['work_pattern_month_count'] : 0;
+            $categoryFactors['operational_input_sample_count'] = isset($categoryMeta['operational_input_sample_count']) ? (int)$categoryMeta['operational_input_sample_count'] : (isset($categoryValue['live_input_sample_count']) ? (int)$categoryValue['live_input_sample_count'] : 0);
             $categoryFactors['similar_project_sample_count'] = isset($categoryValue['similar_project_sample_count']) ? (int)$categoryValue['similar_project_sample_count'] : 0;
             $categories[$categoryIndex]['forecast_confidence_score'] = self::adjustConfidence($categoryValue['forecast_confidence_score'], $categoryFactors);
             $categories[$categoryIndex]['forecast_confidence_grade'] = self::confidenceGrade($categories[$categoryIndex]['forecast_confidence_score']);
@@ -1111,13 +1206,15 @@ class AiCostForecastV2Service
             'overinput_grade'=>$risk['overinput_grade'],
             'missing_possibility_grade'=>$risk['missing_possibility_grade'],
             'anomaly_count'=>count($risk['anomaly_types']),
-            'data_status'=>$confidence===null ? ($amountMonths>0?'AMOUNT_ONLY':'INSUFFICIENT') : ($available<count(self::categories())?'LIMITED':'READY'),
+            'data_status'=>$confidence===null ? ($workMonths>0?'AMOUNT_AND_WORK':($amountMonths>0?'AMOUNT_ONLY':'INSUFFICIENT')) : ($available<count(self::categories())?'LIMITED':'READY'),
             'calculation_version'=>self::CALCULATION_VERSION,
             'method_data'=>array(
                 'methods'=>$methods,
                 'fallbacks'=>$fallbacks,
                 'project_type'=>AiProjectTypeService::projectType($pdo,(int)$snapshot['project_id']),
                 'confidence_factors'=>$confidenceFactors,
+                'work_pattern_month_count'=>$workMonths,
+                'operational_input_sample_count'=>$operationalSamples,
                 'project_activity'=>self::projectHasActivity($snapshot) ? 1 : 0,
                 'project_point_forecast_excluded'=>$projectDormant ? 1 : 0
             ),

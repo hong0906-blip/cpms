@@ -5,9 +5,12 @@
  * 핵심 원칙
  * 1) 과거 월별 최종 투입금액은 기존 CPMS 원본 집계에서 바로 학습한다.
  * 2) 과거 이관/강제입력 자료는 "금액" 학습에만 사용한다.
- * 3) "언제 입력됐는지" 패턴은 신뢰 가능한 LIVE 입력 + 일일 스냅샷만 사용한다.
- * 4) 회사 전체의 절대 금액 중앙값을 개별 현장 예상금액으로 복사하지 않는다.
- * 5) 입력완료율 표본이 3개월 미만이거나 완료율이 너무 낮으면 직접 확대 예측을 막는다.
+ * 3) 실제 입력시점 패턴은 과거 일일 스냅샷의 날짜별 변화로 학습한다.
+ * 4) 과거 인원/날짜별 공수를 직접 복원한 자료는 노무비의 작업발생 패턴으로 사용한다.
+ *    단, 나중에 입력한 등록시각은 과거 입력지연 패턴으로 사용하지 않는다.
+ * 5) 강제 총액 입력은 월 최종금액 학습에만 사용한다.
+ * 6) 회사 전체의 절대 금액 중앙값을 개별 현장 예상금액으로 복사하지 않는다.
+ * 7) 입력완료율 표본이 3개월 미만이거나 완료율이 너무 낮으면 직접 확대 예측을 막는다.
  *
  * PHP 5.6 / MySQL 5.6 compatible.
  */
@@ -26,11 +29,12 @@ class AiInputCompletionPatternService
     const TABLE_NAME = 'cpms_ai_input_completion_patterns';
     const SNAPSHOT_TABLE = 'cpms_ai_daily_snapshots';
     const EVENT_TABLE = 'cpms_cost_data_events';
-    const CALCULATION_VERSION = 'INPUT_PATTERN_V3';
+    const CALCULATION_VERSION = 'INPUT_PATTERN_V4';
     const DEFAULT_GRACE_DAYS = 0;
     const DEFAULT_MIN_COMPLETION_RATE = 20;
     const MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION = 3;
     const HISTORY_MONTH_LIMIT = 18;
+    const WORK_PATTERN_MONTH_LIMIT = 6;
 
     private static $tableCache = array();
 
@@ -421,6 +425,7 @@ class AiInputCompletionPatternService
 
                     $samples[] = array(
                         'project_id'=>$projectId,
+                        'project_name'=>isset($project['name']) ? (string)$project['name'] : '',
                         'cost_type'=>$costType,
                         'ym'=>$ym,
                         'completion_rate'=>null,
@@ -467,7 +472,7 @@ class AiInputCompletionPatternService
         $start = date('Y-m-d', strtotime($targetYm . '-01 -' . self::HISTORY_MONTH_LIMIT . ' months'));
         $end = $targetYm . '-01';
         $originWhere = AiCostDataGovernanceService::columnExists($pdo, self::EVENT_TABLE, 'data_origin')
-            ? " AND data_origin='LIVE_EMPLOYEE_INPUT'"
+            ? " AND (data_origin='LIVE_EMPLOYEE_INPUT' OR (cost_type='labor' AND data_origin='SYSTEM_IMPORT' AND source_type IN ('ATTENDANCE','AUTO_CALC')))"
             : ' AND 1=0';
         $sql = "SELECT project_id,cost_type,COUNT(*) AS event_count,"
             . "AVG(CASE WHEN actual_date IS NOT NULL THEN GREATEST(0,DATEDIFF(DATE(event_at),actual_date)) ELSE NULL END) AS average_lag,"
@@ -495,6 +500,174 @@ class AiInputCompletionPatternService
         } catch (Exception $e) {
         }
         return $result;
+    }
+
+    /**
+     * 과거 일일 스냅샷 자체가 실제 그날의 상태를 보존하고 있는지 확인한다.
+     *
+     * 예전 구현은 같은 달의 모든 원천행이 LIVE_EMPLOYEE_INPUT 이어야만 월 전체를 인정했다.
+     * 노무비처럼 출퇴근/공수 자동계산이 섞이거나 정상 수정 1건이 있는 경우에도 월 전체가 탈락해
+     * 오래 운영한 현장이 "마감자료 0개월"로 보이는 문제가 있었다.
+     *
+     * 과거 스냅샷은 임의 역산 생성하지 않으므로, 서로 다른 날짜의 관측값이 실제로 존재하고
+     * 현재 예측 진행률과 가까운 관측점이 있으면 입력시점 표본으로 인정한다.
+     */
+    private static function snapshotTimingEvidence($monthRows, $column, $ym, $cost, $currentProgress)
+    {
+        $result = array('eligible'=>false,'best'=>null,'best_distance'=>9999,'distinct_days'=>0,'span_days'=>0);
+        $period = CostChangeService::periodForYm($cost, $ym);
+        if (empty($period['end'])) return $result;
+
+        $dates = array();
+        $firstTs = null;
+        $lastTs = null;
+        $best = null;
+        $bestDistance = 9999;
+        foreach ((array)$monthRows as $row) {
+            $date = isset($row['snapshot_date']) ? (string)$row['snapshot_date'] : '';
+            if ($date === '' || $date > (string)$period['end']) continue;
+            $dates[$date] = true;
+            $ts = strtotime($date);
+            if ($ts !== false) {
+                if ($firstTs === null || $ts < $firstTs) $firstTs = $ts;
+                if ($lastTs === null || $ts > $lastTs) $lastTs = $ts;
+            }
+            $pointProgress = self::progress($date, $ym, $cost);
+            $distance = abs((float)$pointProgress['rate'] - (float)$currentProgress['rate']);
+            if ($distance < $bestDistance) {
+                $bestDistance = $distance;
+                $best = $row;
+            }
+        }
+
+        $distinctDays = count($dates);
+        $spanDays = ($firstTs !== null && $lastTs !== null) ? (int)floor(($lastTs - $firstTs) / 86400) : 0;
+        $result['best'] = $best;
+        $result['best_distance'] = $bestDistance;
+        $result['distinct_days'] = $distinctDays;
+        $result['span_days'] = $spanDays;
+
+        /* 서로 다른 날짜가 2개 이상이며 현재 진행률과 12.5%p 안의 관측점이 있어야 사용한다. */
+        if ($distinctDays >= 2 && $spanDays >= 1 && $best !== null && $bestDistance <= 12.5) {
+            $result['eligible'] = true;
+        }
+        return $result;
+    }
+
+    /**
+     * 과거 상세 노무 입력의 "실제 근무일별 공수"를 작업발생 패턴으로 만든다.
+     *
+     * - 강제입력: 월 총액만 있으므로 gongsu_map이 없어 여기에는 포함되지 않는다.
+     * - 과거 직접복원: 오늘 입력했더라도 work_date가 과거 날짜로 남으므로 작업발생 패턴에는 포함된다.
+     * - 단, 오늘의 등록시각을 과거 입력지연으로 착각하지 않도록 입력시점 학습에는 절대 사용하지 않는다.
+     */
+    private static function laborWorkPatternSamples($pdo, $amountSamples, $context)
+    {
+        $samples = array();
+        if (!$pdo || !function_exists('cpms_load_gongsu_data')) return $samples;
+        if (empty($context['snapshot_date']) || empty($context['target_ym'])) return $samples;
+
+        $targetProgress = self::progress($context['snapshot_date'], $context['target_ym'], 'labor');
+        $targetDay = isset($targetProgress['day']) ? (int)$targetProgress['day'] : 0;
+        if ($targetDay <= 0) return $samples;
+
+        $groups = array();
+        foreach ((array)$amountSamples as $sample) {
+            if (!isset($sample['cost_type']) || (string)$sample['cost_type'] !== 'labor') continue;
+            $projectId = isset($sample['project_id']) ? (int)$sample['project_id'] : 0;
+            $ym = isset($sample['ym']) ? (string)$sample['ym'] : '';
+            if ($projectId <= 0 || self::validYm($ym) === '') continue;
+            if (!isset($groups[$projectId])) $groups[$projectId] = array();
+            $groups[$projectId][$ym] = $sample;
+        }
+
+        foreach ($groups as $projectId=>$monthMap) {
+            krsort($monthMap, SORT_STRING);
+            $used = 0;
+            foreach ($monthMap as $ym=>$amountSample) {
+                if ($used >= self::WORK_PATTERN_MONTH_LIMIT) break;
+                $projectName = isset($amountSample['project_name']) ? trim((string)$amountSample['project_name']) : '';
+                if ($projectName === '') continue;
+
+                try {
+                    $gongsuData = cpms_load_gongsu_data($pdo, $projectName, $ym);
+                } catch (Exception $e) {
+                    continue;
+                }
+                $gongsuMap = isset($gongsuData['gongsu_map']) && is_array($gongsuData['gongsu_map'])
+                    ? $gongsuData['gongsu_map'] : array();
+                $outputDays = isset($gongsuData['output_days']) && is_array($gongsuData['output_days'])
+                    ? $gongsuData['output_days'] : array();
+                $gongsuUnit = isset($gongsuData['gongsu_unit']) && is_array($gongsuData['gongsu_unit'])
+                    ? $gongsuData['gongsu_unit'] : array();
+
+                /*
+                 * 공사 > 노무비에서 사람이 과거 날짜의 공수를 하나씩 직접 입력하면
+                 * cpms_labor_gongsu_overrides에 저장된다. 화면에서 실제 노무비를 계산할 때와 동일하게
+                 * 승인된 공수 보정값까지 합친 뒤 작업발생 패턴을 만든다.
+                 * 월 총액 강제입력(cpms_labor_force_adjustments)은 이 데이터셋에 포함되지 않는다.
+                 */
+                if (function_exists('cpms_apply_labor_overrides_to_dataset')) {
+                    try {
+                        $overrideData = cpms_apply_labor_overrides_to_dataset(
+                            $gongsuMap,
+                            $outputDays,
+                            $gongsuUnit,
+                            (int)$projectId,
+                            (string)$ym
+                        );
+                        if (is_array($overrideData) && isset($overrideData['gongsu_map']) && is_array($overrideData['gongsu_map'])) {
+                            $gongsuMap = $overrideData['gongsu_map'];
+                        }
+                    } catch (Exception $e) {
+                        /* 보정자료를 읽지 못해도 원래 상세공수 자료로 학습을 계속한다. */
+                    }
+                }
+                if (count($gongsuMap) === 0) continue;
+
+                $daysInMonth = (int)date('t', strtotime($ym . '-01'));
+                $cutoffDay = min(max(1, $targetDay), max(1, $daysInMonth));
+                $cutoffDate = sprintf('%s-%02d', $ym, $cutoffDay);
+                $total = 0.0;
+                $partial = 0.0;
+                $workDates = array();
+                $workers = 0;
+
+                foreach ($gongsuMap as $workerKey=>$dailyMap) {
+                    if (!is_array($dailyMap)) continue;
+                    $workerHas = false;
+                    foreach ($dailyMap as $workDate=>$gongsuValue) {
+                        if (strpos((string)$workDate, $ym . '-') !== 0 || !is_numeric($gongsuValue)) continue;
+                        $gongsu = (float)$gongsuValue;
+                        if ($gongsu <= 0) continue;
+                        $total += $gongsu;
+                        if ((string)$workDate <= $cutoffDate) $partial += $gongsu;
+                        $workDates[(string)$workDate] = true;
+                        $workerHas = true;
+                    }
+                    if ($workerHas) $workers++;
+                }
+                if ($total <= 0 || count($workDates) === 0) continue;
+
+                $rate = max(0.0, min(100.0, $partial / $total * 100));
+                $samples[] = array(
+                    'project_id'=>(int)$projectId,
+                    'project_name'=>$projectName,
+                    'cost_type'=>'labor',
+                    'ym'=>$ym,
+                    'final_amount'=>isset($amountSample['final_amount']) ? (float)$amountSample['final_amount'] : 0.0,
+                    'work_occurrence_rate'=>round($rate, 3),
+                    'work_pattern_eligible'=>1,
+                    'work_source'=>'DETAILED_DAILY_GONGSU',
+                    'work_total_gongsu'=>round($total, 3),
+                    'work_partial_gongsu'=>round($partial, 3),
+                    'work_day_count'=>count($workDates),
+                    'work_worker_count'=>$workers
+                );
+                $used++;
+            }
+        }
+        return $samples;
     }
 
     /**
@@ -536,25 +709,17 @@ class AiInputCompletionPatternService
             $finalAmount = isset($final[$column]) ? (float)$final[$column] : 0.0;
             if ($finalAmount <= 0) continue;
 
-            $governancePdo = isset($context['pdo']) ? $context['pdo'] : null;
-            $timingEligible = AiCostDataGovernanceService::timingGroupEligible($governancePdo, $project, $ym, $cost);
-            if (!$timingEligible) continue;
-
             $currentProgress = self::progress($context['snapshot_date'], $context['target_ym'], $cost);
-            $best = null;
-            $bestDistance = 9999;
-            foreach ($monthRows as $row) {
-                $p = self::progress($row['snapshot_date'], $ym, $cost);
-                $distance = abs((float)$p['rate'] - (float)$currentProgress['rate']);
-                if ($distance < $bestDistance) {
-                    $bestDistance = $distance;
-                    $best = $row;
-                }
-            }
-            if (!$best) continue;
+            $evidence = self::snapshotTimingEvidence($monthRows, $column, $ym, $cost, $currentProgress);
+            if (empty($evidence['eligible']) || !is_array($evidence['best'])) continue;
 
+            $best = $evidence['best'];
             $partial = isset($best[$column]) ? (float)$best[$column] : 0.0;
             $rate = max(0, min(100, $partial / $finalAmount * 100));
+
+            /* 원천분류는 품질 가중치용으로만 사용하고, 정상 일일 스냅샷 월 전체를 탈락시키지 않는다. */
+            $governancePdo = isset($context['pdo']) ? $context['pdo'] : null;
+            $strictEligible = AiCostDataGovernanceService::timingGroupEligible($governancePdo, $project, $ym, $cost);
             $samples[] = array(
                 'project_id'=>$project,
                 'cost_type'=>$cost,
@@ -562,10 +727,14 @@ class AiInputCompletionPatternService
                 'completion_rate'=>$rate,
                 'final_amount'=>$finalAmount,
                 'timing_eligible'=>1,
+                'timing_quality'=>$strictEligible ? 1.0 : 0.75,
                 'progress_rate'=>$currentProgress['rate'],
                 'progress_day'=>$currentProgress['day'],
                 'amount_source'=>'SNAPSHOT_FINAL_FALLBACK',
-                'timing_source'=>'LIVE_DAILY_SNAPSHOT'
+                'timing_source'=>$strictEligible ? 'LIVE_DAILY_SNAPSHOT_VERIFIED' : 'DAILY_SNAPSHOT_OBSERVED',
+                'snapshot_distinct_days'=>isset($evidence['distinct_days']) ? (int)$evidence['distinct_days'] : 0,
+                'snapshot_span_days'=>isset($evidence['span_days']) ? (int)$evidence['span_days'] : 0,
+                'snapshot_progress_distance'=>isset($evidence['best_distance']) ? (float)$evidence['best_distance'] : null
             );
         }
         return $samples;
@@ -574,7 +743,7 @@ class AiInputCompletionPatternService
     /**
      * 금액 표본과 입력시점 표본을 월/현장/비용항목 단위로 합친다.
      */
-    private static function mergeSamples($amountSamples, $timingSamples)
+    private static function mergeSamples($amountSamples, $timingSamples, $workSamples)
     {
         $map = array();
         foreach ((array)$amountSamples as $sample) {
@@ -586,12 +755,38 @@ class AiInputCompletionPatternService
             if (isset($map[$key])) {
                 $map[$key]['completion_rate'] = isset($sample['completion_rate']) ? $sample['completion_rate'] : null;
                 $map[$key]['timing_eligible'] = !empty($sample['timing_eligible']) ? 1 : 0;
+                $map[$key]['timing_quality'] = isset($sample['timing_quality']) ? (float)$sample['timing_quality'] : 1.0;
                 $map[$key]['progress_rate'] = isset($sample['progress_rate']) ? $sample['progress_rate'] : null;
                 $map[$key]['progress_day'] = isset($sample['progress_day']) ? $sample['progress_day'] : null;
-                $map[$key]['timing_source'] = 'LIVE_DAILY_SNAPSHOT';
+                $map[$key]['timing_source'] = isset($sample['timing_source']) ? (string)$sample['timing_source'] : 'DAILY_SNAPSHOT_OBSERVED';
             } else {
                 $map[$key] = $sample;
             }
+        }
+        foreach ((array)$workSamples as $sample) {
+            $key = (int)$sample['project_id'] . ':' . (string)$sample['ym'] . ':' . (string)$sample['cost_type'];
+            if (!isset($map[$key])) {
+                $map[$key] = array(
+                    'project_id'=>(int)$sample['project_id'],
+                    'project_name'=>isset($sample['project_name']) ? (string)$sample['project_name'] : '',
+                    'cost_type'=>(string)$sample['cost_type'],
+                    'ym'=>(string)$sample['ym'],
+                    'completion_rate'=>null,
+                    'final_amount'=>isset($sample['final_amount']) ? (float)$sample['final_amount'] : 0.0,
+                    'timing_eligible'=>0,
+                    'progress_rate'=>null,
+                    'progress_day'=>null,
+                    'amount_source'=>'CPMS_FINALIZED_ACTUAL',
+                    'timing_source'=>'NONE'
+                );
+            }
+            $map[$key]['work_occurrence_rate'] = isset($sample['work_occurrence_rate']) ? (float)$sample['work_occurrence_rate'] : null;
+            $map[$key]['work_pattern_eligible'] = !empty($sample['work_pattern_eligible']) ? 1 : 0;
+            $map[$key]['work_source'] = isset($sample['work_source']) ? (string)$sample['work_source'] : 'DETAILED_DAILY_GONGSU';
+            $map[$key]['work_total_gongsu'] = isset($sample['work_total_gongsu']) ? (float)$sample['work_total_gongsu'] : null;
+            $map[$key]['work_partial_gongsu'] = isset($sample['work_partial_gongsu']) ? (float)$sample['work_partial_gongsu'] : null;
+            $map[$key]['work_day_count'] = isset($sample['work_day_count']) ? (int)$sample['work_day_count'] : 0;
+            $map[$key]['work_worker_count'] = isset($sample['work_worker_count']) ? (int)$sample['work_worker_count'] : 0;
         }
         return array_values($map);
     }
@@ -600,6 +795,8 @@ class AiInputCompletionPatternService
     {
         $rates = array();
         $months = array();
+        $workRates = array();
+        $workMonths = array();
         $amountMonths = array();
         $finals = array();
         $events = 0;
@@ -616,6 +813,11 @@ class AiInputCompletionPatternService
 
             $amountMonths[$sample['ym']] = true;
             $finals[] = $sample['final_amount'];
+
+            if (!empty($sample['work_pattern_eligible']) && isset($sample['work_occurrence_rate']) && $sample['work_occurrence_rate'] !== null) {
+                $workRates[] = (float)$sample['work_occurrence_rate'];
+                $workMonths[$sample['ym']] = true;
+            }
 
             if (empty($sample['timing_eligible']) || $sample['completion_rate'] === null) continue;
             $rates[] = $sample['completion_rate'];
@@ -637,11 +839,17 @@ class AiInputCompletionPatternService
         sort($sampleMonths, SORT_STRING);
         $amountSampleMonths = array_keys($amountMonths);
         sort($amountSampleMonths, SORT_STRING);
+        $workSampleMonths = array_keys($workMonths);
+        sort($workSampleMonths, SORT_STRING);
 
         return array(
             'expected_completion_rate'=>self::median($rates),
             'sample_month_count'=>count($months),
             'sample_months'=>$sampleMonths,
+            'expected_work_occurrence_rate'=>self::median($workRates),
+            'work_pattern_month_count'=>count($workMonths),
+            'work_sample_months'=>$workSampleMonths,
+            'work_pattern_volatility'=>self::volatility($workRates),
             'amount_pattern_month_count'=>count($amountMonths),
             'amount_sample_months'=>$amountSampleMonths,
             'event_count'=>$events,
@@ -663,9 +871,13 @@ class AiInputCompletionPatternService
             'COMPANY_ALL'=>'COMPANY_ALL'
         );
 
-        $status = $stats['expected_completion_rate'] === null
-            ? ($stats['amount_pattern_month_count'] > 0 ? 'AMOUNT_ONLY' : 'INSUFFICIENT')
-            : ($stats['sample_month_count'] >= self::MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION ? 'READY' : 'LIMITED');
+        if ($stats['expected_completion_rate'] !== null) {
+            $status = $stats['sample_month_count'] >= self::MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION ? 'READY' : 'LIMITED';
+        } else if (isset($stats['work_pattern_month_count']) && (int)$stats['work_pattern_month_count'] > 0) {
+            $status = $stats['amount_pattern_month_count'] > 0 ? 'AMOUNT_AND_WORK' : 'WORK_ONLY';
+        } else {
+            $status = $stats['amount_pattern_month_count'] > 0 ? 'AMOUNT_ONLY' : 'INSUFFICIENT';
+        }
 
         /*
          * 절대 금액 중앙값은 반드시 같은 현장 + 같은 비용항목에서만 예측 후보로 공개한다.
@@ -694,8 +906,13 @@ class AiInputCompletionPatternService
             'scope_historical_final_median'=>$stats['historical_final_median'],
             'sample_months'=>$stats['sample_months'],
             'amount_sample_months'=>$stats['amount_sample_months'],
+            'expected_work_occurrence_rate'=>isset($stats['expected_work_occurrence_rate']) ? $stats['expected_work_occurrence_rate'] : null,
+            'work_pattern_month_count'=>isset($stats['work_pattern_month_count']) ? (int)$stats['work_pattern_month_count'] : 0,
+            'work_sample_months'=>isset($stats['work_sample_months']) ? $stats['work_sample_months'] : array(),
+            'work_pattern_volatility'=>isset($stats['work_pattern_volatility']) ? $stats['work_pattern_volatility'] : null,
             'amount_origin'=>'CPMS_FINALIZED_ACTUALS',
-            'timing_origin'=>'LIVE_DAILY_SNAPSHOT_ONLY',
+            'work_origin'=>'DETAILED_DAILY_GONGSU_BY_WORK_DATE',
+            'timing_origin'=>'OBSERVED_DAILY_SNAPSHOT',
             'absolute_amount_scope'=>$scope === 'PROJECT_CATEGORY' ? 'SAME_PROJECT_SAME_CATEGORY' : 'DIAGNOSTIC_ONLY',
             'direct_projection_min_timing_months'=>self::MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION,
             'direct_projection_min_completion_rate'=>self::minCompletionRate($pdo)
@@ -791,8 +1008,11 @@ class AiInputCompletionPatternService
         $timingContext['pdo'] = $pdo;
         $timingSamples = self::timingSamplesFromSnapshots($snapshotRows, $today, 0, $timingContext);
 
-        /* 3) 두 종류 학습자료를 같은 월/현장/항목끼리 결합 */
-        $samples = self::mergeSamples($amountSamples, $timingSamples);
+        /* 3) 과거 상세 노무 입력: 등록시각이 아니라 실제 근무일/공수 분포만 작업발생 패턴으로 학습 */
+        $workSamples = self::laborWorkPatternSamples($pdo, $amountSamples, $context);
+
+        /* 4) 금액 / 실제 입력시점 / 작업발생 자료를 같은 월·현장·항목끼리 결합 */
+        $samples = self::mergeSamples($amountSamples, $timingSamples, $workSamples);
         $events = self::eventStats($pdo, $context['target_ym']);
 
         $projects = self::currentProjectIds($pdo, $context);
@@ -804,8 +1024,10 @@ class AiInputCompletionPatternService
             'context'=>$context,
             'amount_samples'=>$amountSamples,
             'timing_samples'=>$timingSamples,
+            'work_samples'=>$workSamples,
             'amount_origin'=>'CPMS_FINALIZED_ACTUALS',
-            'timing_origin'=>'LIVE_DAILY_SNAPSHOT_ONLY',
+            'work_origin'=>'DETAILED_DAILY_GONGSU_BY_WORK_DATE',
+            'timing_origin'=>'OBSERVED_DAILY_SNAPSHOT',
             'version'=>self::CALCULATION_VERSION
         )));
 
@@ -848,8 +1070,9 @@ class AiInputCompletionPatternService
             'patterns'=>$saved,
             'amount_sample_count'=>count($amountSamples),
             'timing_sample_count'=>count($timingSamples),
+            'work_sample_count'=>count($workSamples),
             'message'=>$saved > 0
-                ? '기존 CPMS 과거금액과 신뢰 가능한 입력시점 패턴을 분리해 학습했습니다.'
+                ? '과거 최종금액, 상세 공수의 작업발생 패턴, 실제 일일 스냅샷의 입력시점을 분리해 학습했습니다.'
                 : '학습 가능한 입력패턴 자료가 부족합니다.'
         );
     }
@@ -904,11 +1127,17 @@ class AiInputCompletionPatternService
                 if (!$candidate[3]) {
                     unset($detail['historical_final_median']);
                     unset($detail['amount_sample_months']);
+                    unset($detail['expected_work_occurrence_rate']);
+                    unset($detail['work_pattern_month_count']);
+                    unset($detail['work_sample_months']);
+                    unset($detail['work_pattern_volatility']);
                     $row['amount_pattern_month_count'] = 0;
                     $row['detail_data'] = self::encode($detail);
                 }
 
                 $hasAmount = isset($detail['historical_final_median']) && is_numeric($detail['historical_final_median']);
+                $hasWorkPattern = isset($detail['expected_work_occurrence_rate']) && is_numeric($detail['expected_work_occurrence_rate'])
+                    && isset($detail['work_pattern_month_count']) && (int)$detail['work_pattern_month_count'] > 0;
                 $rawCompletion = isset($row['expected_completion_rate']) && $row['expected_completion_rate'] !== null
                     ? (float)$row['expected_completion_rate']
                     : null;
@@ -934,7 +1163,7 @@ class AiInputCompletionPatternService
                     $row['direct_projection_block_reason'] = 'LOW_COMPLETION_RATE';
                 }
 
-                if ($rawCompletion === null && !$hasAmount) continue;
+                if ($rawCompletion === null && !$hasAmount && !$hasWorkPattern) continue;
                 $row['available'] = true;
                 return $row;
             } catch (Exception $e) {
@@ -982,7 +1211,11 @@ class AiInputCompletionPatternService
             'amount_month_count'=>0,
             'amount_months'=>array(),
             'amount_first_ym'=>'',
-            'amount_last_ym'=>''
+            'amount_last_ym'=>'',
+            'work_month_count'=>0,
+            'work_months'=>array(),
+            'work_first_ym'=>'',
+            'work_last_ym'=>''
         );
 
         $pdo = self::pdo($pdo);
@@ -997,13 +1230,16 @@ class AiInputCompletionPatternService
 
             $timingMonths = array();
             $amountMonths = array();
+            $workMonths = array();
             $maxTimingCount = 0;
             $maxAmountCount = 0;
+            $maxWorkCount = 0;
 
             foreach ((array)$st->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $maxTimingCount = max($maxTimingCount, isset($row['sample_month_count']) ? (int)$row['sample_month_count'] : 0);
                 $maxAmountCount = max($maxAmountCount, isset($row['amount_pattern_month_count']) ? (int)$row['amount_pattern_month_count'] : 0);
                 $detail = self::decode(isset($row['detail_data']) ? $row['detail_data'] : '');
+                $maxWorkCount = max($maxWorkCount, isset($detail['work_pattern_month_count']) ? (int)$detail['work_pattern_month_count'] : 0);
 
                 if (isset($detail['sample_months']) && is_array($detail['sample_months'])) {
                     foreach ($detail['sample_months'] as $ym) {
@@ -1015,15 +1251,23 @@ class AiInputCompletionPatternService
                         if (self::validYm($ym)) $amountMonths[(string)$ym] = true;
                     }
                 }
+                if (isset($detail['work_sample_months']) && is_array($detail['work_sample_months'])) {
+                    foreach ($detail['work_sample_months'] as $ym) {
+                        if (self::validYm($ym)) $workMonths[(string)$ym] = true;
+                    }
+                }
             }
 
             $timingList = array_keys($timingMonths);
             sort($timingList, SORT_STRING);
             $amountList = array_keys($amountMonths);
             sort($amountList, SORT_STRING);
+            $workList = array_keys($workMonths);
+            sort($workList, SORT_STRING);
 
             $timingCount = max($maxTimingCount, count($timingList));
             $amountCount = max($maxAmountCount, count($amountList));
+            $workCount = max($maxWorkCount, count($workList));
 
             return array(
                 'month_count'=>$timingCount,
@@ -1038,7 +1282,11 @@ class AiInputCompletionPatternService
                 'amount_month_count'=>$amountCount,
                 'amount_months'=>$amountList,
                 'amount_first_ym'=>count($amountList) ? $amountList[0] : '',
-                'amount_last_ym'=>count($amountList) ? $amountList[count($amountList) - 1] : ''
+                'amount_last_ym'=>count($amountList) ? $amountList[count($amountList) - 1] : '',
+                'work_month_count'=>$workCount,
+                'work_months'=>$workList,
+                'work_first_ym'=>count($workList) ? $workList[0] : '',
+                'work_last_ym'=>count($workList) ? $workList[count($workList) - 1] : ''
             );
         } catch (Exception $e) {
             return $empty;

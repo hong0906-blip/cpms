@@ -1,7 +1,7 @@
 <?php
 /**
  * CEO Index > 투입비 예측 화면.
- * 과거 월별 실제 금액 학습과 입력시점 학습을 구분해 표시한다.
+ * 과거 월별 실제금액 / 상세공수 작업발생 / 실제 입력시점 학습을 구분해 표시한다.
  * PHP 5.6 compatible.
  */
 $ceoForecastContext=$ceoSectionPdo?\App\Services\AiCostForecastV2Service::latestContext($ceoSectionPdo,$ceoTargetYm):array('available'=>false);
@@ -25,6 +25,7 @@ if(!function_exists('cpms_ceo_forecast_method_text')){
             'MIXED'=>'복합 예측 적용',
             'COMPLETION_AND_HISTORICAL'=>'입력패턴 + 과거실적',
             'COMPLETION_PATTERN'=>'입력완료율 예측',
+            'LABOR_WORK_PATTERN'=>'상세공수 작업패턴 예측',
             'PERIOD_PROGRESS_BASELINE'=>'현재 진행률 기준 예측',
             'HISTORICAL_WITH_CURRENT'=>'현재입력 + 현장 과거실적',
             'HISTORICAL_MEDIAN'=>'현장 과거실적 예측',
@@ -38,6 +39,45 @@ if(!function_exists('cpms_ceo_forecast_method_text')){
     }
 }
 
+if(!function_exists('cpms_ceo_forecast_risk_text')){
+    function cpms_ceo_forecast_risk_text($grade,$type,$row,$meta){
+        $grade=strtoupper(trim((string)$grade));
+        $status=isset($row['data_status'])?(string)$row['data_status']:'';
+        if($status==='WAITING_ACTIVITY')return '해당 없음';
+        if($grade!=='INSUFFICIENT')return cpms_ceo_label_text($grade,false);
+        if($type==='missing'){
+            if((int)$meta['timing']<=0&&((int)$meta['amount']>0||(int)$meta['work']>0))return '입력시점 학습 중';
+            return '입력시점 자료 부족';
+        }
+        if($type==='over'){
+            if((int)$meta['amount']>0)return '금액학습 중';
+            return '금액자료 부족';
+        }
+        return '자료 부족';
+    }
+}
+
+if(!function_exists('cpms_ceo_forecast_learning_meta')){
+    function cpms_ceo_forecast_learning_meta($row){
+        $meta=array('amount'=>0,'timing'=>0,'work'=>0,'work_rate'=>null,'text'=>'자료 없음');
+        if(!is_array($row))return $meta;
+        $meta['amount']=isset($row['amount_pattern_month_count'])?(int)$row['amount_pattern_month_count']:0;
+        $meta['timing']=isset($row['timing_pattern_month_count'])?(int)$row['timing_pattern_month_count']:(isset($row['sample_count'])?(int)$row['sample_count']:0);
+        $decoded=array();
+        if(isset($row['candidate_data'])&&is_string($row['candidate_data'])&&trim($row['candidate_data'])!==''){
+            $decoded=\App\Services\AiCostForecastV2Service::decode($row['candidate_data']);
+        }
+        if(isset($decoded['work_pattern_month_count']))$meta['work']=(int)$decoded['work_pattern_month_count'];
+        if(isset($decoded['work_occurrence_rate'])&&is_numeric($decoded['work_occurrence_rate']))$meta['work_rate']=(float)$decoded['work_occurrence_rate'];
+        $parts=array();
+        if($meta['amount']>0)$parts[]='금액 '.$meta['amount'].'개월';
+        if($meta['work']>0)$parts[]='상세공수 '.$meta['work'].'개월';
+        if($meta['timing']>0)$parts[]='입력시점 '.$meta['timing'].'개월';
+        $meta['text']=count($parts)>0?implode(' · ',$parts):'실제 학습자료 없음';
+        return $meta;
+    }
+}
+
 $ceoAmountLearning=array(
     'month_count'=>isset($ceoLearning['amount_month_count'])?(int)$ceoLearning['amount_month_count']:0,
     'first_ym'=>isset($ceoLearning['amount_first_ym'])?(string)$ceoLearning['amount_first_ym']:'',
@@ -48,16 +88,23 @@ $ceoTimingLearning=array(
     'first_ym'=>isset($ceoLearning['timing_first_ym'])?(string)$ceoLearning['timing_first_ym']:(isset($ceoLearning['first_ym'])?(string)$ceoLearning['first_ym']:''),
     'last_ym'=>isset($ceoLearning['timing_last_ym'])?(string)$ceoLearning['timing_last_ym']:(isset($ceoLearning['last_ym'])?(string)$ceoLearning['last_ym']:'')
 );
+$ceoWorkLearning=array(
+    'month_count'=>isset($ceoLearning['work_month_count'])?(int)$ceoLearning['work_month_count']:0,
+    'first_ym'=>isset($ceoLearning['work_first_ym'])?(string)$ceoLearning['work_first_ym']:'',
+    'last_ym'=>isset($ceoLearning['work_last_ym'])?(string)$ceoLearning['work_last_ym']:''
+);
 $ceoAmountMonthCount=(int)$ceoAmountLearning['month_count'];
 $ceoTimingMonthCount=(int)$ceoTimingLearning['month_count'];
-if($ceoAmountMonthCount>0&&$ceoTimingMonthCount>=3)$ceoForecastBasisText='현장 과거 실제금액 + 입력시점 패턴 반영';
+$ceoWorkMonthCount=(int)$ceoWorkLearning['month_count'];
+if($ceoAmountMonthCount>0&&$ceoTimingMonthCount>=3)$ceoForecastBasisText='과거 실제금액 + 실제 입력시점 패턴 반영';
+else if($ceoAmountMonthCount>0&&$ceoWorkMonthCount>0)$ceoForecastBasisText='과거 실제금액 + 상세공수 작업패턴 반영';
 else if($ceoAmountMonthCount>0)$ceoForecastBasisText='현장 과거 실제금액 중심 예측';
 else if($ceoTimingMonthCount>=3)$ceoForecastBasisText='입력시점 패턴 중심 예측';
 else $ceoForecastBasisText='현재 입력 + 기본/유사현장 참고';
 ?>
 <section class="ceo-v2-card">
  <h3>투입비 예측</h3>
- <p>현재 입력금액, 해당 현장의 과거 월별 실제 마감금액, 신뢰 가능한 입력시점 패턴을 함께 사용해 월말 최종 투입비를 예상합니다.</p>
+ <p>현재 입력금액, 해당 현장의 과거 월별 실제 마감금액, 날짜별 상세공수의 작업발생 패턴, 실제 일일 입력시점 패턴을 서로 구분해 월말 최종 투입비를 예상합니다.</p>
  <form method="get" class="ceo-v2-filter">
   <input type="hidden" name="r" value="ceo_index">
   <input type="hidden" name="tab" value="forecast">
@@ -107,6 +154,10 @@ else $ceoForecastBasisText='현재 입력 + 기본/유사현장 참고';
    <strong><?php echo h($ceoAmountMonthCount>0?'최종 실제금액 '.$ceoAmountMonthCount.'개월':'최종 실제금액 없음'); ?></strong>
   </div>
   <div class="ceo-v2-kpi">
+   <small>상세공수 작업학습</small>
+   <strong><?php echo h($ceoWorkMonthCount>0?cpms_ceo_learning_period($ceoWorkLearning):'상세공수 자료 없음'); ?></strong>
+  </div>
+  <div class="ceo-v2-kpi">
    <small>입력시점 학습</small>
    <strong><?php echo h($ceoTimingMonthCount>0?cpms_ceo_learning_period($ceoTimingLearning):'입력시점 자료 없음'); ?></strong>
   </div>
@@ -116,8 +167,9 @@ else $ceoForecastBasisText='현재 입력 + 기본/유사현장 참고';
   </div>
  </div>
  <div class="ceo-v2-note">
-  기존 CPMS에 이미 입력된 과거 월별 최종 투입비는 즉시 <strong>금액 학습</strong>에 사용합니다.<br>
-  2026년 7월 이전에 이관·강제입력한 자료는 최종 금액만 사용하며, 입력일·수정일을 과거 입력패턴으로 간주하지 않습니다.<br>
+  기존 CPMS의 과거 월별 최종 투입비는 즉시 <strong>금액 학습</strong>에 사용합니다.<br>
+  월 총액만 넣은 <strong>강제입력</strong>은 금액 학습에만 사용합니다. 인원별로 1일 1공수, 3일 2공수처럼 과거 공수를 직접 복원한 자료는 <strong>실제 근무일 기준 작업발생 패턴</strong>에도 사용합니다.<br>
+  과거 상세자료를 오늘 입력했더라도 오늘의 등록시각을 과거 입력지연으로 보지 않습니다. 실제 입력시점 학습은 그 당시 저장된 일일 스냅샷으로만 계산합니다.<br>
   입력시점 표본이 3개월 미만이거나 예상 입력완료율이 너무 낮을 때는 <strong>현재금액 ÷ 입력완료율</strong> 방식의 직접 확대 예측을 사용하지 않습니다.
  </div>
 </section>
@@ -127,19 +179,21 @@ else $ceoForecastBasisText='현재 입력 + 기본/유사현장 참고';
  <h3>비용항목별 예측</h3>
  <div class="ceo-v2-scroll">
   <table class="ceo-v2-table">
-   <thead><tr><th>비용항목</th><th>현재</th><th>입력완료율</th><th>미입력 예상</th><th>최종 예상</th><th>범위</th><th>분석 신뢰도</th><th>평균 입력지연</th><th>가능성</th><th>적용 기준</th></tr></thead>
+   <thead><tr><th>비용항목</th><th>현재</th><th>입력완료율</th><th>작업발생 패턴</th><th>미입력 예상</th><th>최종 예상</th><th>범위</th><th>분석 신뢰도</th><th>학습자료</th><th>평균 입력지연</th><th>가능성</th><th>적용 기준</th></tr></thead>
    <tbody>
-   <?php foreach($ceoCategoryRows as $row): ?>
+   <?php foreach($ceoCategoryRows as $row): $ceoRowLearning=cpms_ceo_forecast_learning_meta($row); ?>
     <tr>
      <td><?php echo h(isset($ceoCategoryLabels[$row['cost_type']])?$ceoCategoryLabels[$row['cost_type']]:$row['cost_type']); ?></td>
      <td><?php echo h(cpms_ceo_v2_money($row['current_input_amount'])); ?></td>
      <td><?php echo h(cpms_ceo_v2_rate($row['expected_completion_rate'])); ?></td>
+     <td><?php echo h($ceoRowLearning['work_rate']===null?'-':number_format((float)$ceoRowLearning['work_rate'],1).'%'); ?></td>
      <td><?php echo h(cpms_ceo_v2_money($row['expected_unentered_amount'])); ?></td>
      <td><?php echo h(cpms_ceo_v2_money($row['final_forecast_amount'])); ?></td>
      <td><?php echo h(cpms_ceo_v2_money($row['forecast_low_amount'])); ?> ~ <?php echo h(cpms_ceo_v2_money($row['forecast_high_amount'])); ?></td>
      <td><?php echo h(cpms_ceo_confidence_text($row['forecast_confidence_score'],$row['forecast_confidence_grade'])); ?></td>
+     <td><?php echo h($ceoRowLearning['text']); ?></td>
      <td><?php echo h($row['average_input_lag_days']===null?'-':number_format((float)$row['average_input_lag_days'],1).'일'); ?></td>
-     <td>과다 <?php echo h(cpms_ceo_label_text($row['overinput_grade'],false)); ?> · 미입력 <?php echo h(cpms_ceo_label_text($row['missing_possibility_grade'],false)); ?></td>
+     <td>과다 <?php echo h(cpms_ceo_forecast_risk_text($row['overinput_grade'],'over',$row,$ceoRowLearning)); ?> · 미입력 <?php echo h(cpms_ceo_forecast_risk_text($row['missing_possibility_grade'],'missing',$row,$ceoRowLearning)); ?></td>
      <td><?php echo h(cpms_ceo_label_text($row['fallback_level'],false)); ?></td>
     </tr>
    <?php endforeach; ?>
@@ -148,7 +202,8 @@ else $ceoForecastBasisText='현재 입력 + 기본/유사현장 참고';
  </div>
  <div class="ceo-v2-note">
   현장 자체의 과거 실제금액을 우선 사용하되, <strong>현재 0원이고 해당 비용항목에 이번 달 활동도 없으면 과거금액을 최종예상에 자동으로 넣지 않습니다.</strong><br>
-  이 경우 과거금액은 예상범위의 상한 참고값으로만 남습니다. 입찰 진행중·계약중·종료 현장도 이번 달 실제 활동이 없으면 회사 최종예상 합계에서 자동 제외됩니다.
+  이 경우 과거금액은 예상범위의 상한 참고값으로만 남습니다. 입찰 진행중·계약중·종료 현장도 이번 달 실제 활동이 없으면 회사 최종예상 합계에서 자동 제외됩니다.<br>
+  노무비의 <strong>작업발생 패턴</strong>은 인원별 날짜 공수에서 계산하며, <strong>입력완료율</strong>은 실제 그 당시의 일일 스냅샷에서 계산하므로 서로 다른 값입니다.
  </div>
 </section>
 <?php endif; ?>
