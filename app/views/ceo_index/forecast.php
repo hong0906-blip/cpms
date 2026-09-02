@@ -18,6 +18,26 @@ $ceoCategoryRows=$ceoDetailProject>0&&$ceoSectionPdo&&!empty($ceoForecastContext
     :array();
 $ceoCategoryLabels=\App\Services\AiCostForecastV2Service::categoryLabels();
 
+if(!function_exists('cpms_ceo_forecast_method_text')){
+    function cpms_ceo_forecast_method_text($value){
+        $value=trim((string)$value);
+        $map=array(
+            'MIXED'=>'복합 예측 적용',
+            'COMPLETION_AND_HISTORICAL'=>'입력패턴 + 과거실적',
+            'COMPLETION_PATTERN'=>'입력완료율 예측',
+            'PERIOD_PROGRESS_BASELINE'=>'현재 진행률 기준 예측',
+            'HISTORICAL_WITH_CURRENT'=>'현재입력 + 현장 과거실적',
+            'HISTORICAL_MEDIAN'=>'현장 과거실적 예측',
+            'RECENT_PACE'=>'최근 입력속도 예측',
+            'CURRENT_BASELINE'=>'현재 입력 기준',
+            'NO_CATEGORY_ACTIVITY'=>'해당 항목 이번달 활동 없음',
+            'NO_PROJECT_ACTIVITY'=>'이번달 활동 없음 · 합계 제외',
+            'COLD_START'=>'예측자료 부족'
+        );
+        return isset($map[$value])?$map[$value]:cpms_ceo_label_text($value,false);
+    }
+}
+
 $ceoAmountLearning=array(
     'month_count'=>isset($ceoLearning['amount_month_count'])?(int)$ceoLearning['amount_month_count']:0,
     'first_ym'=>isset($ceoLearning['amount_first_ym'])?(string)$ceoLearning['amount_first_ym']:'',
@@ -59,7 +79,7 @@ else $ceoForecastBasisText='현재 입력 + 기본/유사현장 참고';
      <td><strong><?php echo h(cpms_ceo_v2_money($row['final_forecast_amount'])); ?></strong></td>
      <td><?php echo h(cpms_ceo_v2_money($row['forecast_low_amount'])); ?> ~ <?php echo h(cpms_ceo_v2_money($row['forecast_high_amount'])); ?></td>
      <td><?php echo h(cpms_ceo_confidence_text($row['forecast_confidence_score'],$row['forecast_confidence_grade'])); ?></td>
-     <td><?php echo h(cpms_ceo_label_text($row['forecast_method'],false)); ?></td>
+     <td><?php echo h(cpms_ceo_forecast_method_text($row['forecast_method'])); ?></td>
      <td><a href="<?php echo h(cpms_ceo_v2_url('forecast',$ceoTargetYm,array('project_id'=>(int)$row['project_id'],'include_zero'=>$ceoIncludeZero?1:0))); ?>">항목별 보기</a></td>
     </tr>
    <?php endforeach;endif; ?>
@@ -127,7 +147,8 @@ else $ceoForecastBasisText='현재 입력 + 기본/유사현장 참고';
   </table>
  </div>
  <div class="ceo-v2-note">
-  현장 자체의 과거 실제금액을 우선 사용합니다. 회사 전체의 절대 금액 중앙값을 개별 현장 예상금액으로 그대로 적용하지 않습니다. 현장 자체 금액자료가 없을 때만 유사현장·기본예측·신뢰 가능한 입력시점 패턴을 보조자료로 사용합니다.
+  현장 자체의 과거 실제금액을 우선 사용하되, <strong>현재 0원이고 해당 비용항목에 이번 달 활동도 없으면 과거금액을 최종예상에 자동으로 넣지 않습니다.</strong><br>
+  이 경우 과거금액은 예상범위의 상한 참고값으로만 남습니다. 입찰 진행중·계약중·종료 현장도 이번 달 실제 활동이 없으면 회사 최종예상 합계에서 자동 제외됩니다.
  </div>
 </section>
 <?php endif; ?>

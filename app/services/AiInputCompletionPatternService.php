@@ -869,6 +869,10 @@ class AiInputCompletionPatternService
             return array('available'=>false,'fallback_level'=>'COLD_START');
         }
 
+        /*
+         * 금액은 반드시 동일 현장 + 동일 비용항목(PROJECT_CATEGORY)의 과거 실제금액만 사용한다.
+         * PROJECT_ALL / COMPANY_* 단계는 절대금액을 복사하지 않고 입력시점 비율 fallback 용도로만 사용한다.
+         */
         $candidates = array(
             array('PROJECT_CATEGORY', $projectId, $costType, true),
             array('PROJECT_ALL', $projectId, 'all', false),
@@ -895,8 +899,16 @@ class AiInputCompletionPatternService
                 $row = $st->fetch(PDO::FETCH_ASSOC);
                 if (!is_array($row)) continue;
                 $detail = self::decode(isset($row['detail_data']) ? $row['detail_data'] : '');
-                $hasAmount = isset($detail['historical_final_median']) && is_numeric($detail['historical_final_median']);
 
+                /* 회사/전체 fallback의 금액 중앙값은 개별 현장 예상금액으로 사용하지 않는다. */
+                if (!$candidate[3]) {
+                    unset($detail['historical_final_median']);
+                    unset($detail['amount_sample_months']);
+                    $row['amount_pattern_month_count'] = 0;
+                    $row['detail_data'] = self::encode($detail);
+                }
+
+                $hasAmount = isset($detail['historical_final_median']) && is_numeric($detail['historical_final_median']);
                 $rawCompletion = isset($row['expected_completion_rate']) && $row['expected_completion_rate'] !== null
                     ? (float)$row['expected_completion_rate']
                     : null;
@@ -906,21 +918,23 @@ class AiInputCompletionPatternService
                     && $rawCompletion >= $minRate
                     && $timingMonths >= self::MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION;
 
-                if (!$directAllowed && $rawCompletion !== null) {
-                    $row['raw_expected_completion_rate'] = $rawCompletion;
-                    $row['expected_completion_rate'] = null;
-                    $row['direct_projection_blocked'] = 1;
-                    if ($timingMonths < self::MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION) {
-                        $row['direct_projection_block_reason'] = 'TIMING_SAMPLE_SHORTAGE';
-                    } else {
-                        $row['direct_projection_block_reason'] = 'LOW_COMPLETION_RATE';
-                    }
+                /*
+                 * 중요: 완료율 값 자체는 화면/신뢰도 계산에 필요하므로 절대 지우지 않는다.
+                 * 직접 확대 가능 여부만 별도 flag로 전달한다.
+                 */
+                $row['raw_expected_completion_rate'] = $rawCompletion;
+                $row['direct_projection_blocked'] = $directAllowed ? 0 : 1;
+                if ($directAllowed) {
+                    $row['direct_projection_block_reason'] = 'READY';
+                } else if ($rawCompletion === null) {
+                    $row['direct_projection_block_reason'] = 'NO_TIMING_PATTERN';
+                } else if ($timingMonths < self::MIN_TIMING_MONTHS_FOR_DIRECT_PROJECTION) {
+                    $row['direct_projection_block_reason'] = 'TIMING_SAMPLE_SHORTAGE';
                 } else {
-                    $row['direct_projection_blocked'] = 0;
-                    $row['direct_projection_block_reason'] = $directAllowed ? 'READY' : 'NO_TIMING_PATTERN';
+                    $row['direct_projection_block_reason'] = 'LOW_COMPLETION_RATE';
                 }
 
-                if ($row['expected_completion_rate'] === null && !$hasAmount) continue;
+                if ($rawCompletion === null && !$hasAmount) continue;
                 $row['available'] = true;
                 return $row;
             } catch (Exception $e) {
