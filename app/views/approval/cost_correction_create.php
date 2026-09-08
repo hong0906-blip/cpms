@@ -39,6 +39,11 @@ $creatorName = isset($creator['name']) ? trim((string)$creator['name']) : approv
 $creatorEmail = isset($creator['email']) ? trim((string)$creator['email']) : approval_current_user_email($u);
 $creatorDepartment = isset($creator['department']) ? trim((string)$creator['department']) : (isset($u['department']) ? trim((string)$u['department']) : '');
 
+$resubmitId = isset($_GET['resubmit_id']) ? (int)$_GET['resubmit_id'] : 0;
+$resubmitInfo = null;
+$resubmitError = '';
+$existingFiles = array();
+
 $init = array(
     'cpms_cost_correction' => '1',
     'correction_form_type' => 'labor',
@@ -55,18 +60,53 @@ $init = array(
     'quantity' => '1',
     'reason' => ''
 );
+
+if ($resubmitId > 0) {
+    try {
+        $resubmitInfo = ApprovalCostCorrectionService::resubmitSource($pdo, $u, $resubmitId);
+        $sourceContent = isset($resubmitInfo['content']) && is_array($resubmitInfo['content']) ? $resubmitInfo['content'] : array();
+        if (count($sourceContent) > 0) {
+            $init = array_merge($init, $sourceContent);
+        }
+        $init['draft_date'] = date('Y-m-d');
+        $init['draft_department'] = $creatorDepartment;
+        $init['drafter_name'] = $creatorName;
+        $init['writer_email'] = $creatorEmail;
+        $init['auto_apply_status'] = 'PENDING';
+        $init['auto_applied_at'] = '';
+        $init['auto_applied_target_type'] = '';
+        $init['auto_applied_target_id'] = '';
+        $existingFiles = isset($resubmitInfo['files']) && is_array($resubmitInfo['files']) ? $resubmitInfo['files'] : array();
+    } catch (Exception $resubmitException) {
+        $resubmitError = $resubmitException->getMessage();
+        $lineError = $resubmitError;
+    }
+}
+
 $options = array(
     'projects' => $projects,
     'writer_email' => $creatorEmail,
-    'ceo_preview' => is_array($ceoPreview) ? $ceoPreview : array()
+    'ceo_preview' => is_array($ceoPreview) ? $ceoPreview : array(),
+    'resubmit_mode' => $resubmitId > 0 ? 1 : 0
 );
 ?>
 <div class="mb-4 flex items-center justify-between">
     <div class="flex gap-2">
-        <a href="?r=approval_home" class="px-4 py-2 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800">뒤로가기</a>
+        <a href="<?php echo $resubmitId > 0 ? '?r=approval_detail&id=' . (int)$resubmitId : '?r=approval_home'; ?>" class="px-4 py-2 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800">뒤로가기</a>
         <a href="?r=approval_home" class="px-4 py-2 bg-white border-2 border-gray-400 rounded-xl font-bold text-gray-800">전자결재 목록</a>
     </div>
 </div>
+
+<?php if (is_array($resubmitInfo)) { ?>
+<div class="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+    <div class="font-extrabold">반려 문서 #<?php echo (int)$resubmitInfo['source_id']; ?> 수정 후 재상신</div>
+    <div class="mt-1 text-sm">이번 문서는 <?php echo (int)$resubmitInfo['next_revision']; ?>차 문서로 새로 상신됩니다. 기존 반려 문서는 그대로 보관됩니다.</div>
+    <?php if (isset($resubmitInfo['reject_reason']) && trim((string)$resubmitInfo['reject_reason']) !== '') { ?>
+        <div class="mt-2 text-sm"><b>반려사유:</b> <?php echo h($resubmitInfo['reject_reason']); ?></div>
+    <?php } ?>
+    <div class="mt-2 text-sm font-bold">기존 증빙자료 <?php echo count($existingFiles); ?>개는 그대로 이어지며, 필요한 경우 새 증빙자료를 추가할 수 있습니다.</div>
+</div>
+<?php } ?>
 
 <?php if ($lineError !== '') { ?>
 <div class="mb-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-rose-800 font-bold">
@@ -76,14 +116,15 @@ $options = array(
 
 <form id="costCorrectionApprovalForm" method="post" action="approval_cost_correction.php" enctype="multipart/form-data">
     <input type="hidden" name="_csrf" value="<?php echo h(csrf_token()); ?>">
-    <?php render_approval_cost_correction_document($init, $previewLines, 'edit', array(), $options); ?>
+    <?php if ($resubmitId > 0) { ?><input type="hidden" name="resubmit_source_id" value="<?php echo (int)$resubmitId; ?>"><?php } ?>
+    <?php render_approval_cost_correction_document($init, $previewLines, 'edit', $existingFiles, $options); ?>
 
     <div class="mt-6 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-900">
-        최종 결재 승인 후 해당 현장의 노무비/장비비/외주비/자재·안전·기타비용에 자동 반영됩니다. 신청 변동금액이 100만원 이상이면 대표 결재가 자동으로 추가됩니다.
+        <?php echo $resubmitId > 0 ? '반려사유를 확인하여 필요한 내용을 수정한 뒤 다시 상신해주세요. 기존 반려 문서는 이력으로 남습니다. ' : ''; ?>최종 결재 승인 후 해당 현장의 노무비/장비비/외주비/자재·안전·기타비용에 자동 반영됩니다. 신청 변동금액이 100만원 이상이면 대표 결재가 자동으로 추가됩니다.
     </div>
     <div class="mt-5 flex justify-end gap-3">
-        <a href="?r=approval_home" class="px-6 py-3 rounded-xl bg-gray-200 text-gray-800 font-extrabold">취소</a>
-        <button type="submit" class="px-6 py-3 rounded-xl bg-indigo-600 text-white font-extrabold"<?php echo $lineError !== '' ? ' disabled style="opacity:.45;cursor:not-allowed"' : ''; ?>>전자결재 보내기</button>
+        <a href="<?php echo $resubmitId > 0 ? '?r=approval_detail&id=' . (int)$resubmitId : '?r=approval_home'; ?>" class="px-6 py-3 rounded-xl bg-gray-200 text-gray-800 font-extrabold">취소</a>
+        <button type="submit" class="px-6 py-3 rounded-xl bg-indigo-600 text-white font-extrabold"<?php echo $lineError !== '' ? ' disabled style="opacity:.45;cursor:not-allowed"' : ''; ?>><?php echo $resubmitId > 0 ? '수정 후 재상신' : '전자결재 보내기'; ?></button>
     </div>
 </form>
 
@@ -128,6 +169,14 @@ var vendorRequestSerial=0;
 var laborRequestSerial=0;
 var laborWorkerPool=[];
 var selectedLaborWorkers={};
+var initialLaborChanges=<?php echo ApprovalCostCorrectionService::jsonEncode(isset($init['labor_changes']) && is_array($init['labor_changes']) ? $init['labor_changes'] : array()); ?>;
+var initialLaborPending=<?php echo ($resubmitId > 0 && isset($init['correction_form_type']) && (string)$init['correction_form_type'] === 'labor') ? 'true' : 'false'; ?>;
+var initialLaborProjectId=<?php echo isset($init['project_id']) ? (int)$init['project_id'] : 0; ?>;
+var initialLaborDate=<?php echo json_encode(isset($init['use_date']) ? (string)$init['use_date'] : ''); ?>;
+var initialTargetId=<?php echo json_encode(isset($init['target_id']) ? (string)$init['target_id'] : ''); ?>;
+var initialTargetPending=<?php echo ($resubmitId > 0 && isset($init['correction_form_type']) && (string)$init['correction_form_type'] !== 'labor' && isset($init['correction_mode']) && strtoupper((string)$init['correction_mode']) === 'MODIFY') ? 'true' : 'false'; ?>;
+var existingEvidenceCount=<?php echo (int)count($existingFiles); ?>;
+var isResubmit=<?php echo $resubmitId > 0 ? 'true' : 'false'; ?>;
 
 function xhr(url,done){
     var x=new XMLHttpRequest();
@@ -188,23 +237,24 @@ function clearLaborSelection(text){
     renderLaborEmpty(text||'근로자를 검색해 추가해주세요.');
     updateLaborCount();
 }
-function requestedSelect(index,current){
+function requestedSelect(index,current,requested){
     var select=document.createElement('select');
     select.name='labor_requested_gongsu['+index+']';
     select.className='cc-select cc-labor-requested';
     select.setAttribute('data-current',String(current));
     var values=['0.5','1.0','1.1','1.2','1.3','1.4','1.5','2.0'];
     var currentText=Number(current||0).toFixed(1);
+    var requestedText=(requested!==undefined&&requested!==null&&requested!==''&&isFinite(Number(requested)))?Number(requested).toFixed(1):currentText;
     var selected=false;
     for(var i=0;i<values.length;i++){
         var o=document.createElement('option');o.value=values[i];o.textContent=values[i]+' 공수';
-        if(values[i]===currentText){o.selected=true;selected=true;}
+        if(values[i]===requestedText){o.selected=true;selected=true;}
         select.appendChild(o);
     }
     if(!selected){
         for(var j=0;j<select.options.length;j++)if(select.options[j].value==='1.0')select.options[j].selected=true;
     }
-    select.addEventListener('change',updateApprovalThreshold);
+    select.addEventListener('change',function(){selectedLaborWorkers[index]=this.value;updateApprovalThreshold();});
     return select;
 }
 function renderSelectedWorkers(){
@@ -250,7 +300,7 @@ function renderSelectedWorkers(){
             tr.appendChild(tdCurrent);
 
             var tdNew=document.createElement('td');
-            tdNew.appendChild(requestedSelect(index,current));
+            tdNew.appendChild(requestedSelect(index,current,selectedLaborWorkers[index]));
             tr.appendChild(tdNew);
 
             var tdRemove=document.createElement('td');
@@ -274,7 +324,7 @@ function addLaborWorker(index){
         closeWorkerSuggestions();
         return;
     }
-    selectedLaborWorkers[index]=true;
+    selectedLaborWorkers[index]='__default__';
     renderSelectedWorkers();
     updateApprovalThreshold();
     if(workerSearch){workerSearch.value='';workerSearch.focus();}
@@ -364,6 +414,32 @@ function updateApprovalThreshold(){
     }
 }
 
+function applyInitialLaborSelection(){
+    if(!initialLaborPending)return;
+    if(!project||String(project.value||'')!==String(initialLaborProjectId)||!laborDate||String(laborDate.value||'')!==String(initialLaborDate)){initialLaborPending=false;return;}
+    initialLaborPending=false;
+    if(!initialLaborChanges||!initialLaborChanges.length)return;
+    var missing=[];
+    for(var c=0;c<initialLaborChanges.length;c++){
+        var change=initialLaborChanges[c]||{};
+        var wanted=String(change.worker_name||'');
+        if(!wanted)continue;
+        var found=-1;
+        for(var i=0;i<laborWorkerPool.length;i++){
+            if(String(laborWorkerPool[i].worker_name||'')===wanted){found=i;break;}
+        }
+        if(found>=0)selectedLaborWorkers[found]=String(change.requested_gongsu!==undefined?change.requested_gongsu:'');
+        else missing.push(wanted);
+    }
+    renderSelectedWorkers();
+    updateApprovalThreshold();
+    if(missing.length&&laborRows){
+        var tr=document.createElement('tr');
+        var td=document.createElement('td');td.colSpan=4;td.className='cc-labor-status';
+        td.textContent='기존 문서 근로자 중 현재 선택월 목록에서 찾지 못한 인원: '+missing.join(', ');
+        tr.appendChild(td);laborRows.appendChild(tr);
+    }
+}
 function loadWorkers(){
     if(!laborRows||!project||!laborDate||selectedFormType()!=='labor')return;
     var pid=project.value||'';var day=laborDate.value||'';
@@ -383,6 +459,7 @@ function loadWorkers(){
         if(!laborWorkerPool.length){renderLaborEmpty(day.substring(0,7)+' 해당 현장의 노무비 인원이 없습니다.');updateLaborCount();return;}
         renderLaborEmpty('위의 근로자 선택에서 이름을 검색해 추가해주세요.');
         updateLaborCount();
+        applyInitialLaborSelection();
         updateApprovalThreshold();
         if(workerSearch&&document.activeElement===workerSearch)showWorkerSuggestions();
     });
@@ -409,6 +486,15 @@ function loadTargets(){
             target.appendChild(o);
         }
         if(targetNote)targetNote.textContent=r.rows.length?'선택한 수정 신청 날짜의 마감기간 자료입니다. 수정할 원본자료를 선택해주세요.':'선택한 수정 신청 날짜의 마감기간에 기존자료가 없습니다.';
+        if(initialTargetPending){
+            initialTargetPending=false;
+            if(initialTargetId&&targetRows[String(initialTargetId)]){
+                target.value=String(initialTargetId);
+                if(targetNote)targetNote.textContent='기존 반려문서에서 선택했던 원본자료: '+targetLabel(targetRows[String(initialTargetId)]);
+            }else if(initialTargetId&&targetNote){
+                targetNote.textContent='기존 반려문서의 원본자료를 현재 마감기간에서 찾지 못했습니다. 원본자료를 다시 선택해주세요.';
+            }
+        }
         updateApprovalThreshold();
     });
 }
@@ -484,6 +570,10 @@ if(form)form.addEventListener('submit',function(e){
         if(!itemName||!itemName.value.replace(/^\s+|\s+$/g,'')){alert(t==='equipment'?'장비명/규격을 입력해주세요.':(t==='outsourcing'?'외주 내용을 입력해주세요.':'품목/내용을 입력해주세요.'));e.preventDefault();return;}
         if(!amount||!String(amount.value||'').replace(/[^0-9]/g,'')){alert('금액을 입력해주세요.');e.preventDefault();return;}
         if(selectedMode()==='MODIFY'&&(!target||!target.value)){alert('수정할 기존자료를 선택해주세요.');e.preventDefault();return;}
+    }
+    if(isResubmit&&existingEvidenceCount<=0){
+        var evidence=document.getElementById('cc_evidence');
+        if(!evidence||!evidence.files||!evidence.files.length){alert('수정 후 재상신에는 증빙자료가 반드시 필요합니다. 증빙자료를 첨부해주세요.');if(evidence)evidence.focus();e.preventDefault();return;}
     }
 });
 setProjectPreview();applyMode();applyFormType();updateApprovalThreshold();

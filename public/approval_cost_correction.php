@@ -67,10 +67,12 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
+$resubmitSourceId = isset($_POST['resubmit_source_id']) ? (int)$_POST['resubmit_source_id'] : 0;
+$writeRedirect = './?r=approval_create&type=cost_correction' . ($resubmitSourceId > 0 ? '&resubmit_id=' . $resubmitSourceId : '');
 $token = isset($_POST['_csrf']) ? (string)$_POST['_csrf'] : '';
 if (!csrf_check($token)) {
     if (function_exists('flash_set')) flash_set('danger','보안 토큰이 만료되었습니다. 다시 작성해주세요.');
-    header('Location: ./?r=approval_create&type=cost_correction');
+    header('Location: ' . $writeRedirect);
     exit;
 }
 
@@ -83,11 +85,11 @@ try {
     $result = ApprovalCostCorrectionService::createDocument($pdo,$user,$_POST,$files);
     $docId = isset($result['document_id']) ? (int)$result['document_id'] : 0;
     if ($docId <= 0) throw new Exception('전자결재 문서번호를 확인할 수 없습니다.');
-    if (function_exists('flash_set')) flash_set('success','비용 수정/누락 전자결재를 상신했습니다. 최종 승인 후 공사자료에 자동 반영됩니다.');
+    if (function_exists('flash_set')) flash_set('success',$resubmitSourceId > 0 ? '반려된 비용 수정/누락 문서를 수정 후 재상신했습니다.' : '비용 수정/누락 전자결재를 상신했습니다. 최종 승인 후 공사자료에 자동 반영됩니다.');
     header('Location: ./?r=approval_detail&id=' . $docId);
     exit;
 } catch (Exception $e) {
     if (function_exists('flash_set')) flash_set('danger',$e->getMessage());
-    header('Location: ./?r=approval_create&type=cost_correction');
+    header('Location: ' . $writeRedirect);
     exit;
 }

@@ -85,6 +85,39 @@ function render_approval_cost_correction_document($data, $lines, $mode, $files, 
     $ceoPreview = isset($options['ceo_preview']) && is_array($options['ceo_preview']) ? $options['ceo_preview'] : array();
     $ceoPreviewName = isset($ceoPreview['name']) ? trim((string)$ceoPreview['name']) : '';
     $laborChanges = isset($data['labor_changes']) && is_array($data['labor_changes']) ? $data['labor_changes'] : array();
+    $flatFiles = approval_cost_correction_files($files);
+
+    /*
+     * V8 직접 덮어쓰기용 재상신 버튼
+     * - 별도 setup/update 패치 없이 비용문서 자체에서 버튼을 표시합니다.
+     * - 반려된 본인 문서만 표시하고 이미 재상신된 문서가 있으면 중복 버튼을 숨깁니다.
+     */
+    $costResubmitSourceId = 0;
+    $costResubmittedChildId = 0;
+    $costCanResubmit = false;
+    if (!$edit) {
+        $costDocRow = isset($GLOBALS['d']) && is_array($GLOBALS['d']) ? $GLOBALS['d'] : array();
+        $costPdo = isset($GLOBALS['pdo']) ? $GLOBALS['pdo'] : null;
+        $costUser = isset($GLOBALS['u']) ? $GLOBALS['u'] : null;
+        $costResubmitSourceId = isset($GLOBALS['id']) ? (int)$GLOBALS['id'] : (isset($_GET['id']) ? (int)$_GET['id'] : 0);
+        $costDocStatus = isset($costDocRow['doc_status']) ? strtoupper(trim((string)$costDocRow['doc_status'])) : '';
+
+        if ($costPdo && $costResubmitSourceId > 0 && $costDocStatus === 'REJECTED' && function_exists('approval_is_document_owner')) {
+            if (!$costUser && class_exists('App\\Core\\Auth')) {
+                $costUser = \App\Core\Auth::user();
+            }
+            if ($costUser && approval_is_document_owner($costPdo, $costDocRow, $costUser)) {
+                $costCanResubmit = true;
+                if (function_exists('approval_resubmit_find_child')) {
+                    $costChild = approval_resubmit_find_child($costPdo, $costResubmitSourceId);
+                    if (is_array($costChild) && isset($costChild['id']) && (int)$costChild['id'] > 0) {
+                        $costResubmittedChildId = (int)$costChild['id'];
+                        $costCanResubmit = false;
+                    }
+                }
+            }
+        }
+    }
     if (count($laborChanges) === 0 && $workerName !== '') {
         $laborChanges[] = array('worker_name'=>$workerName,'current_gongsu'=>$currentGongsu,'requested_gongsu'=>$requestedGongsu);
     }
@@ -102,6 +135,16 @@ function render_approval_cost_correction_document($data, $lines, $mode, $files, 
 
     echo '<div class="approval-paper proposal-paper cost-correction-paper">';
     echo '<div class="doc-title">비용 수정/누락 신청</div>';
+
+    if ($costCanResubmit && $costResubmitSourceId > 0) {
+        echo '<div class="no-print" style="margin:0 0 12px;text-align:right">';
+        echo '<a href="?r=approval_create&type=cost_correction&resubmit_id=' . (int)$costResubmitSourceId . '" style="display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:10px;background:#f59e0b;color:#fff;font-weight:900;text-decoration:none">수정 후 재상신</a>';
+        echo '</div>';
+    } else if ($costResubmittedChildId > 0) {
+        echo '<div class="no-print" style="margin:0 0 12px;text-align:right">';
+        echo '<a href="?r=approval_detail&id=' . (int)$costResubmittedChildId . '" style="display:inline-flex;align-items:center;justify-content:center;padding:10px 16px;border-radius:10px;background:#059669;color:#fff;font-weight:900;text-decoration:none">재상신 문서 보기</a>';
+        echo '</div>';
+    }
 
     echo '<table><tr><td style="width:36%;padding:0"><table>';
     echo '<tr><th style="width:90px">신청일자</th><td>'.h($draftDate).'</td></tr>';
@@ -189,9 +232,12 @@ function render_approval_cost_correction_document($data, $lines, $mode, $files, 
     echo '</table>';
     if($edit)echo '<div id="cc_change_amount_notice" class="cc-change-notice">현재 신청 변동금액: 0원 · 100만원 이상이면 대표 결재가 자동 추가됩니다.</div>';
 
-    echo '<div class="doc-attach"><div class="doc-attach-heading"><b>증빙자료</b></div>';
-    if($edit){ echo '<input type="file" name="evidence[]" id="cc_evidence" multiple accept=".pdf,.xls,.xlsx,.xlsm,.csv,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.txt"><div class="cc-help">최대 20개, 파일당 20MB 이하.</div>'; }
-    else { $flat=approval_cost_correction_files($files); if(count($flat)===0)echo '<div class="attach-empty">첨부된 증빙자료가 없습니다.</div>'; else { echo '<div class="cc-attach-list">'; for($i=0;$i<count($flat);$i++){ $f=$flat[$i]; $fn=isset($f['original_name'])?(string)$f['original_name']:'증빙자료'; echo '<div class="cc-attach-row"><span>'.h($fn).'</span><span>'.cpms_approval_drive_file_links_html($f).'</span></div>'; } echo '</div>'; } }
+    echo '<div class="doc-attach"><div class="doc-attach-heading"><b>증빙자료 <span style="color:#dc2626">(필수)</span></b></div>';
+    if($edit){
+        if(count($flatFiles)>0){ echo '<div class="cc-help" style="margin-bottom:6px;font-weight:800;color:#92400e">기존 증빙자료는 재상신 문서에 그대로 포함됩니다.</div><div class="cc-attach-list">'; for($i=0;$i<count($flatFiles);$i++){ $f=$flatFiles[$i]; $fn=isset($f['original_name'])?(string)$f['original_name']:'증빙자료'; echo '<div class="cc-attach-row"><span>'.h($fn).'</span><span>'.cpms_approval_drive_file_links_html($f).'</span></div>'; } echo '</div>'; }
+        echo '<div style="margin-top:8px"><input type="file" name="evidence[]" id="cc_evidence" multiple accept=".pdf,.xls,.xlsx,.xlsm,.csv,.jpg,.jpeg,.png,.gif,.webp,.heic,.heif,.hwp,.hwpx,.doc,.docx,.ppt,.pptx,.txt"><div class="cc-help">증빙자료는 필수입니다. 기존 자료가 있으면 그대로 유지되며 새 자료를 추가할 수 있습니다. 최대 20개, 파일당 20MB 이하.</div></div>';
+    }
+    else { if(count($flatFiles)===0)echo '<div class="attach-empty">첨부된 증빙자료가 없습니다.</div>'; else { echo '<div class="cc-attach-list">'; for($i=0;$i<count($flatFiles);$i++){ $f=$flatFiles[$i]; $fn=isset($f['original_name'])?(string)$f['original_name']:'증빙자료'; echo '<div class="cc-attach-row"><span>'.h($fn).'</span><span>'.cpms_approval_drive_file_links_html($f).'</span></div>'; } echo '</div>'; } }
     echo '</div>';
     if($edit)echo '<div class="cc-help" style="margin-top:12px;font-weight:700">결재선: 담당 → 팀장 → 관리 → 공사PM → 부사장 · 신청 변동금액 100만원 이상이면 대표 자동 추가 (신청자가 팀장이면 팀장 단계 자동 제외)</div>';
     echo '</div>';

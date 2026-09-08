@@ -400,6 +400,197 @@ class ApprovalCostCorrectionService
         return implode(' -> ', $parts);
     }
 
+
+    /**
+     * 비용 수정/누락 문서의 첨부파일 목록
+     */
+    public static function approvalFilesForDocument($pdo, $documentId)
+    {
+        $documentId = (int)$documentId;
+        if (!$pdo || $documentId <= 0 || !self::tableExists($pdo, 'cpms_approval_files')) return array();
+        try {
+            $st = $pdo->prepare("SELECT * FROM cpms_approval_files WHERE document_id=:id ORDER BY id ASC");
+            $st->execute(array(':id' => $documentId));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            return is_array($rows) ? $rows : array();
+        } catch (Exception $e) {
+            return array();
+        }
+    }
+
+    private static function findResubmitChild($pdo, $sourceDocumentId)
+    {
+        $sourceDocumentId = (int)$sourceDocumentId;
+        if (!$pdo || $sourceDocumentId <= 0 || !self::tableExists($pdo, 'cpms_approval_documents')) return null;
+        try {
+            $st = $pdo->prepare("SELECT * FROM cpms_approval_documents WHERE content LIKE :needle_comma OR content LIKE :needle_end ORDER BY id DESC LIMIT 10");
+            $st->execute(array(
+                ':needle_comma' => '%\"resubmit_source_id\":' . $sourceDocumentId . ',%',
+                ':needle_end' => '%\"resubmit_source_id\":' . $sourceDocumentId . '}%'
+            ));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($rows)) return null;
+            for ($i = 0; $i < count($rows); $i++) {
+                $content = self::jsonDecode(isset($rows[$i]['content']) ? $rows[$i]['content'] : '');
+                if (isset($content['resubmit_source_id']) && (int)$content['resubmit_source_id'] === $sourceDocumentId) {
+                    return $rows[$i];
+                }
+            }
+        } catch (Exception $e) {
+        }
+        return null;
+    }
+
+    /**
+     * 반려된 비용 수정/누락 문서를 재상신할 수 있는지 검증하고 원문 내용을 반환합니다.
+     */
+    public static function resubmitSource($pdo, $user, $documentId)
+    {
+        $documentId = (int)$documentId;
+        if (!$pdo || $documentId <= 0) throw new Exception('재상신할 문서를 확인할 수 없습니다.');
+
+        $st = $pdo->prepare("SELECT * FROM cpms_approval_documents WHERE id=:id LIMIT 1");
+        $st->execute(array(':id' => $documentId));
+        $doc = $st->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($doc)) throw new Exception('재상신할 문서를 찾을 수 없습니다.');
+
+        $content = self::jsonDecode(isset($doc['content']) ? $doc['content'] : '');
+        if (!self::isCorrectionContent($content)) throw new Exception('비용 수정/누락 신청 문서만 이 화면에서 재상신할 수 있습니다.');
+
+        $status = strtoupper(trim((string)(isset($doc['doc_status']) ? $doc['doc_status'] : '')));
+        if ($status !== 'REJECTED') throw new Exception('반려된 비용 수정/누락 신청 문서만 수정 후 재상신할 수 있습니다.');
+
+        $lineResult = self::buildApprovalLines($pdo, $user, false);
+        if (empty($lineResult['ok']) || !isset($lineResult['creator']) || !is_array($lineResult['creator'])) {
+            throw new Exception(isset($lineResult['message']) ? $lineResult['message'] : '현재 작성자 정보를 확인할 수 없습니다.');
+        }
+        $creator = $lineResult['creator'];
+        $creatorId = isset($creator['id']) ? (int)$creator['id'] : 0;
+        $creatorEmail = isset($creator['email']) ? strtolower(trim((string)$creator['email'])) : '';
+        $docCreatorId = isset($doc['created_by_id']) ? (int)$doc['created_by_id'] : 0;
+        $docCreatorEmail = isset($doc['created_by_email']) ? strtolower(trim((string)$doc['created_by_email'])) : '';
+        $isOwner = ($creatorId > 0 && $docCreatorId > 0 && $creatorId === $docCreatorId)
+            || ($creatorEmail !== '' && $docCreatorEmail !== '' && $creatorEmail === $docCreatorEmail);
+        if (!$isOwner) throw new Exception('본인이 작성한 반려 문서만 수정 후 재상신할 수 있습니다.');
+
+        $child = self::findResubmitChild($pdo, $documentId);
+        if (is_array($child) && isset($child['id']) && (int)$child['id'] > 0) {
+            throw new Exception('이미 재상신된 문서가 있습니다. 재상신 문서 #' . (int)$child['id'] . '를 확인해주세요.');
+        }
+
+        $sourceRevision = isset($content['resubmit_revision']) ? (int)$content['resubmit_revision'] : 0;
+        if ($sourceRevision <= 0) $sourceRevision = 1;
+        $rootId = isset($content['resubmit_root_id']) ? (int)$content['resubmit_root_id'] : 0;
+        if ($rootId <= 0) $rootId = $documentId;
+
+        return array(
+            'ok' => true,
+            'document' => $doc,
+            'content' => $content,
+            'files' => self::approvalFilesForDocument($pdo, $documentId),
+            'source_id' => $documentId,
+            'root_id' => $rootId,
+            'source_revision' => $sourceRevision,
+            'next_revision' => $sourceRevision + 1,
+            'reject_reason' => isset($doc['reject_reason']) ? trim((string)$doc['reject_reason']) : '',
+            'rejected_step' => isset($doc['rejected_step']) ? trim((string)$doc['rejected_step']) : ''
+        );
+    }
+
+    private static function uploadedFileCount($files)
+    {
+        if (!is_array($files) || !isset($files['name'])) return 0;
+        $names = is_array($files['name']) ? $files['name'] : array($files['name']);
+        $errors = isset($files['error']) ? (is_array($files['error']) ? $files['error'] : array($files['error'])) : array();
+        $count = 0;
+        for ($i = 0; $i < count($names); $i++) {
+            $name = trim((string)$names[$i]);
+            $error = isset($errors[$i]) ? (int)$errors[$i] : UPLOAD_ERR_NO_FILE;
+            if ($name !== '' && $error !== UPLOAD_ERR_NO_FILE) $count++;
+        }
+        return $count;
+    }
+
+    /**
+     * 재상신 시 기존 증빙자료를 새 문서에 안전하게 이어줍니다.
+     * - 로컬 파일이 남아 있으면 새 문서 전용 사본을 생성합니다.
+     * - Drive 업로드가 완료되어 로컬 파일이 이미 정리된 경우 Drive 참조를 그대로 이어갑니다.
+     * - 원문서와 재상신문서가 같은 로컬 파일을 공유하지 않도록 해 삭제 시 상호 영향을 막습니다.
+     */
+    private static function copyApprovalFiles($pdo, $sourceDocumentId, $targetDocumentId, &$copiedPaths)
+    {
+        if (!is_array($copiedPaths)) $copiedPaths = array();
+        $rows = self::approvalFilesForDocument($pdo, $sourceDocumentId);
+        if (count($rows) === 0) return 0;
+        $columns = self::tableColumns($pdo, 'cpms_approval_files');
+        if (count($columns) === 0) return 0;
+
+        $repoRoot = realpath(dirname(dirname(__DIR__)));
+        if ($repoRoot === false) $repoRoot = dirname(dirname(__DIR__));
+        $approvalRoot = function_exists('cpms_drive_storage_root')
+            ? rtrim((string)cpms_drive_storage_root(), '/\\') . '/approvals'
+            : rtrim((string)$repoRoot, '/\\') . '/storage/approvals';
+        $targetDir = $approvalRoot . '/' . date('Y') . '/' . (int)$targetDocumentId;
+
+        $copied = 0;
+        for ($i = 0; $i < count($rows); $i++) {
+            $row = $rows[$i];
+            $oldPath = isset($row['file_path']) ? trim((string)$row['file_path']) : '';
+            if ($oldPath !== '') {
+                $oldAbsolute = $oldPath;
+                $isAbsolute = (substr($oldPath, 0, 1) === '/' || preg_match('/^[A-Za-z]:[\\\\\/]/', $oldPath));
+                if (!$isAbsolute) {
+                    $oldAbsolute = rtrim((string)$repoRoot, '/\\') . '/' . ltrim(str_replace('\\', '/', $oldPath), '/');
+                }
+
+                if (is_file($oldAbsolute)) {
+                    if (!is_dir($targetDir) && !@mkdir($targetDir, 0775, true) && !is_dir($targetDir)) {
+                        throw new Exception('재상신 증빙자료 저장폴더를 만들 수 없습니다.');
+                    }
+                    $extension = strtolower(pathinfo(isset($row['saved_name']) ? (string)$row['saved_name'] : '', PATHINFO_EXTENSION));
+                    if ($extension === '') $extension = strtolower(pathinfo(isset($row['original_name']) ? (string)$row['original_name'] : '', PATHINFO_EXTENSION));
+                    $savedName = 'carry_' . (isset($row['id']) ? (int)$row['id'] : $i) . '_' . date('Ymd_His') . '_' . mt_rand(1000, 9999);
+                    if ($extension !== '') $savedName .= '.' . $extension;
+                    $newAbsolute = $targetDir . '/' . $savedName;
+                    if (!@copy($oldAbsolute, $newAbsolute)) {
+                        throw new Exception('기존 증빙자료를 재상신 문서용으로 복사하지 못했습니다.');
+                    }
+                    $copiedPaths[] = $newAbsolute;
+                    $row['saved_name'] = $savedName;
+                    $row['file_path'] = self::relativeToRepoRoot($newAbsolute);
+                    if (isset($row['file_size'])) $row['file_size'] = (int)@filesize($newAbsolute);
+                } else {
+                    $uploadStatus = isset($row['upload_status']) ? strtolower(trim((string)$row['upload_status'])) : '';
+                    $driveFileId = isset($row['drive_file_id']) ? trim((string)$row['drive_file_id']) : '';
+                    if ($uploadStatus === 'uploaded' && $driveFileId !== '') {
+                        if (isset($row['file_path'])) $row['file_path'] = '';
+                        if (isset($row['saved_name'])) $row['saved_name'] = '';
+                    } else {
+                        throw new Exception('기존 증빙자료 원본파일을 찾을 수 없습니다. 새 증빙자료를 첨부하거나 원문서를 확인해주세요.');
+                    }
+                }
+            }
+
+            $fields = array('document_id');
+            $marks = array(':document_id');
+            $params = array(':document_id' => (int)$targetDocumentId);
+            $paramNo = 0;
+            foreach ($row as $key => $value) {
+                if ($key === 'id' || $key === 'document_id' || !isset($columns[$key])) continue;
+                $safeKey = str_replace('`', '', (string)$key);
+                $param = ':v' . $paramNo;
+                $paramNo++;
+                $fields[] = '`' . $safeKey . '`';
+                $marks[] = $param;
+                $params[$param] = $value;
+            }
+            $sql = "INSERT INTO cpms_approval_files (" . implode(',', $fields) . ") VALUES (" . implode(',', $marks) . ")";
+            $pdo->prepare($sql)->execute($params);
+            $copied++;
+        }
+        return $copied;
+    }
+
     /**
      * 프로젝트에 등록된 노무 인원 목록
      */
@@ -961,6 +1152,12 @@ class ApprovalCostCorrectionService
         if (!$pdo) throw new Exception('DB 연결을 확인할 수 없습니다.');
         if (!is_array($input)) $input = array();
 
+        $resubmitSourceId = isset($input['resubmit_source_id']) ? (int)$input['resubmit_source_id'] : 0;
+        $resubmitInfo = null;
+        if ($resubmitSourceId > 0) {
+            $resubmitInfo = self::resubmitSource($pdo, $user, $resubmitSourceId);
+        }
+
         $formType = isset($input['form_type']) ? strtolower(trim((string)$input['form_type'])) : '';
         if (!self::validFormType($formType)) throw new Exception('신청 양식을 확인해주세요.');
 
@@ -1011,6 +1208,14 @@ class ApprovalCostCorrectionService
             'auto_applied_target_id' => '',
             'approval_line_text' => self::approvalLineText($lines)
         );
+
+        if (is_array($resubmitInfo)) {
+            $content['resubmit_source_id'] = (int)$resubmitInfo['source_id'];
+            $content['resubmit_root_id'] = (int)$resubmitInfo['root_id'];
+            $content['resubmit_revision'] = (int)$resubmitInfo['next_revision'];
+            $content['resubmit_source_reject_reason'] = isset($resubmitInfo['reject_reason']) ? (string)$resubmitInfo['reject_reason'] : '';
+            $content['resubmit_source_rejected_step'] = isset($resubmitInfo['rejected_step']) ? (string)$resubmitInfo['rejected_step'] : '';
+        }
 
         $titleDetail = '';
 
@@ -1188,13 +1393,45 @@ class ApprovalCostCorrectionService
         $content['headline'] = self::formLabel($formType);
         $content['intro_text'] = '아래 수정/누락 내용을 확인하시어 결재하여 주시기 바랍니다. 최종 승인 시 공사 원가자료에 자동 반영됩니다.';
 
+        $sourceEvidenceCount = is_array($resubmitInfo) && isset($resubmitInfo['files']) && is_array($resubmitInfo['files']) ? count($resubmitInfo['files']) : 0;
+        $newEvidenceCount = self::uploadedFileCount($files);
+        if (is_array($resubmitInfo)) {
+            if (($sourceEvidenceCount + $newEvidenceCount) <= 0) {
+                throw new Exception('수정 후 재상신에는 증빙자료가 반드시 1개 이상 필요합니다. 증빙자료를 첨부해주세요.');
+            }
+            if (($sourceEvidenceCount + $newEvidenceCount) > 20) {
+                throw new Exception('기존 증빙자료와 새 증빙자료를 합쳐 최대 20개까지 첨부할 수 있습니다.');
+            }
+        }
+
         $savedPaths = array();
+        $copiedEvidencePaths = array();
         $pdo->beginTransaction();
         try {
+            if (is_array($resubmitInfo)) {
+                $lockSt = $pdo->prepare("SELECT id,doc_status FROM cpms_approval_documents WHERE id=:id LIMIT 1 FOR UPDATE");
+                $lockSt->execute(array(':id' => (int)$resubmitInfo['source_id']));
+                $lockedSource = $lockSt->fetch(PDO::FETCH_ASSOC);
+                if (!is_array($lockedSource) || strtoupper(trim((string)$lockedSource['doc_status'])) !== 'REJECTED') {
+                    throw new Exception('재상신 원문서 상태가 변경되었습니다. 반려 문서를 다시 확인해주세요.');
+                }
+                $existingChild = self::findResubmitChild($pdo, (int)$resubmitInfo['source_id']);
+                if (is_array($existingChild) && isset($existingChild['id']) && (int)$existingChild['id'] > 0) {
+                    throw new Exception('이미 재상신된 문서가 있습니다. 재상신 문서 #' . (int)$existingChild['id'] . '를 확인해주세요.');
+                }
+            }
             $docId = self::insertApprovalDocument($pdo, $creatorId, $creatorName, $creatorEmail, $projectId, $title, $content);
             if ($docId <= 0) throw new Exception('전자결재 문서를 저장하지 못했습니다.');
             self::insertApprovalLines($pdo, $docId, $lines);
-            self::insertApprovalLog($pdo, $docId, null, $creatorId, $creatorName, $creatorEmail, 'CREATE', self::formLabel($formType) . ' 작성');
+            if (is_array($resubmitInfo)) {
+                self::insertApprovalLog($pdo, $docId, null, $creatorId, $creatorName, $creatorEmail, 'RESUBMIT', '반려 문서 #' . (int)$resubmitInfo['source_id'] . ' 수정 후 재상신');
+                $copiedEvidenceCount = self::copyApprovalFiles($pdo, (int)$resubmitInfo['source_id'], $docId, $copiedEvidencePaths);
+                if ($copiedEvidenceCount !== $sourceEvidenceCount) {
+                    throw new Exception('기존 증빙자료를 재상신 문서로 연결하지 못했습니다.');
+                }
+            } else {
+                self::insertApprovalLog($pdo, $docId, null, $creatorId, $creatorName, $creatorEmail, 'CREATE', self::formLabel($formType) . ' 작성');
+            }
             $savedPaths = self::saveApprovalFiles($pdo, $docId, $files, $creatorName, $formType, $projectId);
             self::queueFirstApprovalNotification($pdo, $docId, $title, $creatorName, $lines);
             $pdo->commit();
@@ -1203,6 +1440,9 @@ class ApprovalCostCorrectionService
             if ($pdo->inTransaction()) $pdo->rollBack();
             for ($i = 0; $i < count($savedPaths); $i++) {
                 if (is_file($savedPaths[$i])) @unlink($savedPaths[$i]);
+            }
+            for ($i = 0; $i < count($copiedEvidencePaths); $i++) {
+                if (is_file($copiedEvidencePaths[$i])) @unlink($copiedEvidencePaths[$i]);
             }
             throw $e;
         }
