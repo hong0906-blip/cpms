@@ -1,4 +1,14 @@
 <?php
+/*
+ * 파일경로: app/views/approval/template_leave.php
+ * 기능: 전자결재 휴가계 화면 렌더링
+ * 변경: 생년월일 표시를 사번(employee_no)으로 교체
+ * PHP 5.6 호환
+ */
+
+require_once __DIR__ . '/leave_identity_helpers.php';
+require_once __DIR__ . '/leave_pdf_renderer.php';
+
 function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
 {
     $requestTypes = array(
@@ -19,6 +29,7 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
     $applicantEmail = approval_doc_get($data, 'applicant_email', approval_doc_get($data, 'writer_email', ''));
     $sig = approval_sign_path_by_email($applicantEmail);
     $requestDate = approval_doc_get($data, 'request_date', date('Y-m-d'));
+    $employeeNo = approval_leave_resolve_employee_no($data);
 
     $lineByRole = array();
     $orderedRoles = array();
@@ -193,7 +204,15 @@ function render_approval_leave_document($data, $lines, $mode, $approvalOptions)
     }
     echo '</td></tr>';
     echo '<tr><th>' . h(approval_ko('%EC%86%8C%EC%86%8D')) . '</th><td>'; approval_doc_field($mode, 'department', approval_doc_get($data, 'department', ''), 'doc-input', 'text', ''); echo '</td><th>' . h(approval_ko('%EC%A7%81%EC%9C%84')) . '</th><td>'; approval_doc_field($mode, 'position', approval_doc_get($data, 'position', ''), 'doc-input', 'text', ''); echo '</td></tr>';
-    echo '<tr><th>' . h(approval_ko('%EC%84%B1%EB%AA%85')) . '</th><td>'; approval_doc_field($mode, 'applicant_name', approval_doc_get($data, 'applicant_name', ''), 'doc-input', 'text', ''); echo '</td><th>' . h(approval_ko('%EC%83%9D%EB%85%84%EC%9B%94%EC%9D%BC')) . '</th><td>'; approval_doc_field($mode, 'birth_date', approval_doc_get($data, 'birth_date', ''), 'doc-input', 'date', ''); echo '</td></tr>';
+    echo '<tr><th>' . h(approval_ko('%EC%84%B1%EB%AA%85')) . '</th><td>'; approval_doc_field($mode, 'applicant_name', approval_doc_get($data, 'applicant_name', ''), 'doc-input', 'text', ''); echo '</td><th>' . h(approval_ko('%EC%82%AC%EB%B2%88')) . '</th><td>';
+    if ($mode === 'edit') {
+        // 기존 저장/재상신 로직과의 호환을 위해 POST 키 birth_date는 유지하되, 실제 값은 사번을 사용합니다.
+        echo '<input type="text" name="birth_date" value="' . h($employeeNo) . '" class="doc-input" readonly="readonly">';
+        echo '<input type="hidden" name="employee_no" value="' . h($employeeNo) . '">';
+    } else {
+        echo h($employeeNo !== '' ? $employeeNo : '-');
+    }
+    echo '</td></tr>';
     echo '<tr><th>' . h(approval_ko('%ED%9C%B4%EA%B0%80%EA%B8%B0%EA%B0%84')) . '</th><td colspan="3">';
     if ($mode === 'edit') {
         approval_doc_field($mode, 'leave_start_date', $start, 'doc-input doc-inline-input', 'date', '');
