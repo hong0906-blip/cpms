@@ -194,7 +194,13 @@ if (!function_exists('approval_edit_store_apply_auto_delegation')) {
             $creatorRank = approval_edit_store_auto_role_rank($creatorRole);
             for ($i = 0; $i < count($lines); $i++) {
                 $rank = approval_edit_store_auto_role_rank(isset($lines[$i]['role']) ? $lines[$i]['role'] : '');
-                if (($creatorRank > 0 && $rank > 0 && $rank < $creatorRank) || ($creatorRank <= 0 && $i < $creatorIndex)) {
+                if ($creatorRank > 0 && $rank > 0 && $rank < $creatorRank) {
+                    // 공무 결재자가 작성자인 경우에도 앞 단계의 관리 결재는 실제 결재로 유지한다.
+                    if ($creatorRank === 2 && $rank === 1) {
+                        continue;
+                    }
+                    approval_edit_store_mark_delegated($lines[$i], approval_auto_delegate_reason_label('previous_step'), null);
+                } else if ($creatorRank <= 0 && $i < $creatorIndex) {
                     approval_edit_store_mark_delegated($lines[$i], approval_auto_delegate_reason_label('previous_step'), null);
                 }
             }

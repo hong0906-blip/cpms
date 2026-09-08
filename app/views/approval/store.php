@@ -200,7 +200,7 @@ if (!function_exists('approval_store_auto_role_rank')) {
         $teamNorm = approval_normalize_compare_text(approval_ko('%ED%8C%80%EC%9E%A5'));
         $siteNorm = approval_normalize_compare_text(approval_ko('%EC%86%8C%EC%9E%A5'));
         $constructionPmNorm = approval_normalize_compare_text(approval_ko('%EA%B3%B5%EC%82%AC%50%4D'));
-        if ($roleNorm === $manageNorm) {
+       if ($roleNorm === $manageNorm) {
             return 1;
         }
         if ($roleNorm === $gongmuNorm) {
@@ -230,11 +230,10 @@ if (!function_exists('approval_store_apply_auto_delegation_rules')) {
         }
         $baseDate = date('Y-m-d');
         $vpRole = approval_ko('%EB%B6%80%EC%82%AC%EC%9E%A5');
-        $ceoRole = approval_ko('%EB%8C%80%ED%91%9C%EC%9D%B4%EC%82%AC');
+        $ceoRole = approval_ko('%EB%8C%80%ED%91%9B%EC%9D%B4%EC%82%AC');
         $creator = is_array($creatorEmployee) ? $creatorEmployee : array('id' => $creatorEmployeeId, 'name' => $creatorName, 'email' => $creatorEmail);
         $creatorIndex = -1;
-        $vpLeaveRequiresCeo = false;
-        $forceCeoActual = false;
+        $vpLeaveRequiresCeo = false;        $forceCeoActual = false;
 
         for ($i = 0; $i < count($lines); $i++) {
             if (!empty($lines[$i]['force_actual'])) {
@@ -255,6 +254,10 @@ if (!function_exists('approval_store_apply_auto_delegation_rules')) {
             for ($i = 0; $i < count($lines); $i++) {
                 $rank = approval_store_auto_role_rank(isset($lines[$i]['role']) ? $lines[$i]['role'] : '');
                 if ($creatorRank > 0 && $rank > 0 && $rank < $creatorRank) {
+                    // 공무 결재자가 작성자인 경우에도 앞 단계의 관리 결재는 실제 결재로 유지한다.
+                    if ($creatorRank === 2 && $rank === 1) {
+                        continue;
+                    }
                     approval_store_mark_line_delegated($lines[$i], approval_auto_delegate_reason_label('previous_step'), null);
                 } else if ($creatorRank <= 0 && $i < $creatorIndex) {
                     approval_store_mark_line_delegated($lines[$i], approval_auto_delegate_reason_label('previous_step'), null);

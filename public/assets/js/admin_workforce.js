@@ -91,14 +91,17 @@
 
   function editModal() { return document.getElementById('workforceEditModal'); }
   function editForm() { return document.getElementById('workforceEditForm'); }
+
   function editField(name) {
     var form = editForm();
     return form ? form.querySelector('[name="' + name + '"]') : null;
   }
+
   function setEditField(name, value) {
     var field = editField(name);
     if (field) field.value = value === null || typeof value === 'undefined' ? '' : value;
   }
+
   function showEditError(message) {
     var box = document.getElementById('workforceEditError');
     if (!box) return;
@@ -106,6 +109,7 @@
     if (message) box.classList.remove('hidden');
     else box.classList.add('hidden');
   }
+
   function closeEditModal() {
     var modal = editModal();
     if (!modal) return;
@@ -113,6 +117,7 @@
     modal.setAttribute('aria-hidden', 'true');
     showEditError('');
   }
+
   function fillEditForm(worker) {
     setEditField('id', worker.id);
     setEditField('import_no', worker.import_no);
@@ -140,9 +145,21 @@
     return String(value || '').replace(/[^0-9]/g, '');
   }
 
+  /*
+   * 관리 > 인력관리 > 인력 수정 > 임금단가
+   * 쉼표나 공백이 섞여 들어와도 저장 전에 정상 숫자 형태로 정리합니다.
+   * 예:
+   * 150000   -> 150000
+   * 150,000  -> 150000
+   */
+  function normalizeWageValue(value) {
+    return trimValue(value).replace(/,/g, '').replace(/\s+/g, '');
+  }
+
   function validateEditForm() {
     var form = editForm();
     var relaxed = form && form.getAttribute('data-workforce-relaxed') === '1';
+
     var requiredFields = relaxed ? [
       ['name', '이름']
     ] : [
@@ -156,8 +173,10 @@
       ['bank_account', '계좌번호'],
       ['account_holder', '예금주']
     ];
+
     var missing = [];
     var firstInvalid = null;
+
     for (var i = 0; i < requiredFields.length; i++) {
       var field = editField(requiredFields[i][0]);
       if (!field || trimValue(field.value) === '') {
@@ -165,6 +184,7 @@
         if (!firstInvalid && field) firstInvalid = field;
       }
     }
+
     if (missing.length > 0) {
       showEditError('저장할 수 없습니다. 다음 필수항목을 입력하세요: ' + missing.join(', '));
       if (firstInvalid) firstInvalid.focus();
@@ -188,16 +208,22 @@
     }
 
     var wageField = editField('daily_wage');
-    var wageText = wageField ? trimValue(wageField.value) : '';
+    var wageText = wageField ? normalizeWageValue(wageField.value) : '';
     var wage = /^\d+$/.test(wageText) ? parseInt(wageText, 10) : 0;
     var invalidWage = relaxed
       ? (wageText !== '' && (!/^\d+$/.test(wageText) || wage < 0))
       : (!wage || wage <= 0);
+
     if (invalidWage) {
       showEditError(relaxed ? '저장할 수 없습니다. 임금단가는 0 이상의 정수로 입력하세요.' : '저장할 수 없습니다. 임금단가는 0보다 큰 금액으로 입력하세요.');
       if (wageField) wageField.focus();
       return false;
     }
+
+    if (wageField && wageText !== '') {
+      wageField.value = wageText;
+    }
+
     showEditError('');
     return true;
   }
@@ -205,9 +231,11 @@
   function openEditModal(workerId) {
     var modal = editModal();
     if (!modal || !workerId) return;
+
     showEditError('인력 정보를 불러오는 중입니다.');
     modal.classList.remove('hidden');
     modal.setAttribute('aria-hidden', 'false');
+
     fetchSensitiveWorker(workerId, function (worker) {
       sensitiveCache[workerId] = worker;
       fillEditForm(worker);
@@ -224,9 +252,11 @@
     if (!form) return false;
     if (event && event.preventDefault) event.preventDefault();
     if (!validateEditForm()) return false;
+
     showEditError('저장 중입니다.');
     var submit = form.querySelector('[data-workforce-edit-submit]');
     if (submit) submit.disabled = true;
+
     var xhr = new XMLHttpRequest();
     xhr.open('POST', form.action, true);
     xhr.withCredentials = true;
@@ -254,6 +284,7 @@
       saveEditModal(event);
       return;
     }
+
     var form = closest(event.target, '[data-workforce-delete-form]');
     if (!form) return;
     if (!window.confirm('해당 인력을 삭제 처리할까요?')) {
@@ -277,18 +308,21 @@
       saveEditModal(event);
       return;
     }
+
     var editClose = closest(event.target, '[data-workforce-edit-close]');
     if (editClose) {
       event.preventDefault();
       closeEditModal();
       return;
     }
+
     var editButton = closest(event.target, '[data-workforce-edit]');
     if (editButton) {
       event.preventDefault();
       openEditModal(editButton.getAttribute('data-worker-id') || '');
       return;
     }
+
     var sensitiveButton = closest(event.target, '[data-workforce-sensitive-toggle]');
     if (sensitiveButton) {
       event.preventDefault();
@@ -312,6 +346,7 @@
     for (var i = 0; i < old.length; i++) {
       old[i].parentNode.removeChild(old[i]);
     }
+
     for (var j = 0; j < checks.length; j++) {
       var input = document.createElement('input');
       input.type = 'hidden';
@@ -319,6 +354,7 @@
       input.value = checks[j].value;
       form.appendChild(input);
     }
+
     form.submit();
   });
 

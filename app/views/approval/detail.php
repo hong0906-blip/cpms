@@ -2,7 +2,7 @@
 /*
  * 파일경로: app/views/approval/detail.php
  * 화면: 전자결재 상세
- * 추가: 첫 결재 전 수정 / 반려 후 수정 재상신 / 재상신 이력 연결
+ * 추가: 첫 결재 전 수정 / 반려 후 수정 재상신 / 재상신 이력 연결 / 승인의견 수정
  * PHP 5.6 호환
  */
 use App\Core\Db;
@@ -33,13 +33,38 @@ if (!function_exists('approval_detail_render_comment_items')) {
             $actor = isset($comment['actor']) ? trim((string)$comment['actor']) : '';
             $createdAt = isset($comment['created_at']) ? trim((string)$comment['created_at']) : '';
             $note = isset($comment['note']) ? trim((string)$comment['note']) : '';
+            $editedAt = isset($comment['edited_at']) ? trim((string)$comment['edited_at']) : '';
+            $logId = isset($comment['log_id']) ? (int)$comment['log_id'] : 0;
+            $canEdit = !empty($comment['can_edit']) && $logId > 0;
+
             echo '<div class="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">';
             echo '<div class="flex flex-wrap items-center gap-2 text-xs text-gray-500">';
             echo '<span class="font-extrabold text-indigo-700">' . h($role !== '' ? approval_role_label($role) : '-') . '</span>';
             echo '<span>' . h($actor !== '' ? $actor : '-') . '</span>';
             if ($createdAt !== '') echo '<span>' . h($createdAt) . '</span>';
+            if ($editedAt !== '') {
+                echo '<span class="font-extrabold text-amber-700">(수정됨)</span>';
+                echo '<span>' . h($editedAt) . ' 수정</span>';
+            }
             echo '</div>';
             echo '<div class="mt-2 text-sm leading-6 text-gray-800">' . nl2br(h($note)) . '</div>';
+
+            if ($canEdit) {
+                echo '<details class="mt-3 no-print">';
+                echo '<summary class="inline-flex cursor-pointer select-none rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-extrabold text-indigo-700">수정</summary>';
+                echo '<form method="post" action="approval_comment_edit.php" class="mt-2 space-y-2">';
+                echo '<input type="hidden" name="_csrf" value="' . h(csrf_token()) . '">';
+                echo '<input type="hidden" name="document_id" value="' . (int)$comment['document_id'] . '">';
+                echo '<input type="hidden" name="log_id" value="' . $logId . '">';
+                echo '<textarea name="approval_comment" rows="3" maxlength="2000" required class="w-full border rounded-xl px-3 py-2 text-sm">' . h($note) . '</textarea>';
+                echo '<div class="flex flex-wrap gap-2 items-center">';
+                echo '<button type="submit" class="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-extrabold">수정 저장</button>';
+                echo '<span class="text-xs text-gray-500">수정 전 내용은 화면에 표시하지 않고 내부 이력으로 보관됩니다.</span>';
+                echo '</div>';
+                echo '</form>';
+                echo '</details>';
+            }
+
             echo '</div>';
         }
         echo '</div>';
@@ -168,6 +193,7 @@ $isRecipientEditablePlan = ($canDecide && !$canCeoDirectApprove && isset($d['doc
 $detailDocType = isset($d['doc_type']) ? strtolower(trim((string)$d['doc_type'])) : '';
 $approvalCommentsEnabled = ($detailDocType === 'leave' || approval_is_proposal_doc_type($detailDocType));
 $approvalComments = array();
+$approvalCommentEdits = array();
 $leaveRestoreLog = null;
 for ($restoreIndex = count($approvalLogs) - 1; $restoreIndex >= 0; $restoreIndex--) {
     $restoreActionType = isset($approvalLogs[$restoreIndex]['action_type']) ? strtoupper(trim((string)$approvalLogs[$restoreIndex]['action_type'])) : '';
@@ -176,6 +202,21 @@ for ($restoreIndex = count($approvalLogs) - 1; $restoreIndex >= 0; $restoreIndex
         break;
     }
 }
+
+/* 승인의견 수정 이력은 내부 로그로 보관하고, 화면에는 최신 의견과 수정 시각만 표시합니다. */
+for ($editIndex = 0; $editIndex < count($approvalLogs); $editIndex++) {
+    $editLog = $approvalLogs[$editIndex];
+    $editActionType = isset($editLog['action_type']) ? strtoupper(trim((string)$editLog['action_type'])) : '';
+    if ($editActionType !== 'COMMENT_EDIT') continue;
+    $editPayloadRaw = isset($editLog['action_note']) ? (string)$editLog['action_note'] : '';
+    $editPayload = json_decode($editPayloadRaw, true);
+    $sourceLogId = (is_array($editPayload) && isset($editPayload['source_log_id'])) ? (int)$editPayload['source_log_id'] : 0;
+    if ($sourceLogId <= 0) continue;
+    $approvalCommentEdits[$sourceLogId] = array(
+        'edited_at' => isset($editLog['created_at']) ? trim((string)$editLog['created_at']) : ''
+    );
+}
+
 if ($approvalCommentsEnabled) {
     for ($ci = 0; $ci < count($approvalLogs); $ci++) {
         $log = $approvalLogs[$ci];
@@ -184,10 +225,28 @@ if ($approvalCommentsEnabled) {
         if ($actionType !== 'APPROVE' || $note === '') continue;
         $actor = isset($log['actor_name']) && trim((string)$log['actor_name']) !== '' ? trim((string)$log['actor_name']) : '';
         if ($actor === '' && isset($log['line_approver_name'])) $actor = trim((string)$log['line_approver_name']);
+
+        $logId = isset($log['id']) ? (int)$log['id'] : 0;
+        $logActorId = isset($log['actor_id']) ? (int)$log['actor_id'] : 0;
+        $logActorEmail = isset($log['actor_email']) ? strtolower(trim((string)$log['actor_email'])) : '';
+        $logActorName = isset($log['actor_name']) ? trim((string)$log['actor_name']) : '';
+        $canEditComment = false;
+        if ($uid > 0 && $logActorId > 0) {
+            $canEditComment = ($uid === $logActorId);
+        } else if ($userEmail !== '' && $logActorEmail !== '') {
+            $canEditComment = (strtolower($userEmail) === $logActorEmail);
+        } else if ($logActorId <= 0 && $logActorEmail === '' && $userName !== '' && $logActorName !== '') {
+            $canEditComment = ($userName === $logActorName);
+        }
+
         $approvalComments[] = array(
+            'document_id' => $id,
+            'log_id' => $logId,
             'role' => isset($log['role_type']) ? $log['role_type'] : '',
             'actor' => $actor,
             'created_at' => isset($log['created_at']) ? $log['created_at'] : '',
+            'edited_at' => ($logId > 0 && isset($approvalCommentEdits[$logId]['edited_at'])) ? $approvalCommentEdits[$logId]['edited_at'] : '',
+            'can_edit' => $canEditComment ? 1 : 0,
             'note' => $note
         );
     }
@@ -422,7 +481,9 @@ $showApprovalCommentModal = ($approvalCommentsEnabled && $canDecide && count($ap
                         else if ($actionType === 'LEAVE_RESTORE') $actionText = approval_ko('%ED%9C%B4%EA%B0%80%EB%B3%B5%EA%B5%AC');
                         else if ($actionType === 'EDIT') $actionText = '수정';
                         else if ($actionType === 'RESUBMIT') $actionText = '재상신';
+                        else if ($actionType === 'COMMENT_EDIT') $actionText = '승인의견 수정';
                         $note = isset($log['action_note']) ? trim((string)$log['action_note']) : '';
+                        if ($actionType === 'COMMENT_EDIT') $note = '';
                     ?>
                         <tr>
                             <td class="border px-2 py-1"><?php echo h(isset($log['created_at']) ? $log['created_at'] : ''); ?></td>

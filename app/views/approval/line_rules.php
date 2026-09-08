@@ -99,7 +99,8 @@ if (!function_exists('approval_line_rules_department_key')) {
             'construction' => approval_ko('%EA%B3%B5%EC%82%AC'),
             'safety' => approval_ko('%EC%95%88%EC%A0%84'),
             'health' => approval_ko('%EB%B3%B4%EA%B1%B4'),
-            'quality' => approval_ko('%ED%92%88%EC%A7%88')
+            'quality' => approval_ko('%ED%92%88%EC%A7%88'),
+            'development' => approval_ko('%EA%B0%9C%EB%B0%9C')
         );
         foreach ($map as $key => $label) {
             if ($norm === approval_normalize_compare_text($label)) {
@@ -277,7 +278,10 @@ if (!function_exists('approval_line_rules_find_team_leader')) {
         $targetKeys = approval_line_rules_team_department_keys(isset($creator['department']) ? $creator['department'] : '');
         if ($teamLeaderId > 0 && $teamLeaderId !== $creatorId) {
             $selected = approval_line_rules_fetch_employee($pdo, $teamLeaderId);
-            if ($selected && !approval_employee_is_executive($selected) && approval_line_rules_employee_department_matches_any($selected, $targetKeys)) {
+            // 개발부서는 인원이 적어 다른 부서 팀장을 명시적으로 지정할 수 있습니다.
+            // employees.team_leader_id에 저장된 팀장이 있으면 부서가 달라도 해당 지정값을 우선합니다.
+            $allowAssignedCrossDepartmentLeader = ($creatorDeptKey === 'development');
+            if ($selected && !approval_employee_is_executive($selected) && ($allowAssignedCrossDepartmentLeader || approval_line_rules_employee_department_matches_any($selected, $targetKeys))) {
                 $result['employee'] = $selected;
                 return $result;
             }
@@ -764,7 +768,8 @@ if (!function_exists('approval_line_rules_build')) {
                 $warnings[] = approval_ko('%EA%B3%B5%EB%AC%B4%20%EA%B2%B0%EC%9E%AC%EC%9E%90%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.');
             }
 
-            if ($deptKey === 'construction' || $deptKey === 'safety' || $deptKey === 'health' || $deptKey === 'quality') {
+            // 공무팀과 개발팀 기안서도 공사PM 결재 단계를 포함한다.
+            if ($deptKey === 'gongmu' || $deptKey === 'development' || $deptKey === 'construction' || $deptKey === 'safety' || $deptKey === 'health' || $deptKey === 'quality') {
                 if ($constructionPm) {
                     approval_line_rules_add_line($lines, $seen, $pmRole, $constructionPm, array());
                 } else {
