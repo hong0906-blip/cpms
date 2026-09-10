@@ -88,25 +88,45 @@ $attendanceRequestMonth = isset($_GET['attendance_request_month']) ? trim((strin
 if (!preg_match('/^\d{4}-\d{2}$/', $attendanceRequestMonth)) $attendanceRequestMonth = date('Y-m');
 $attendanceRequestMonthStart = $attendanceRequestMonth . '-01';
 $attendanceRequestMonthEnd = date('Y-m-t', strtotime($attendanceRequestMonthStart));
-$attendanceIssueSince = '2026-07-01';
-$attendanceIssueHolidayMap = attendance_holiday_map($pdo, $attendanceIssueSince, $today_att);
+// 근태 미처리 현황은 시스템 적용일(2026-07-01)과 실제 입사일 중 더 늦은 날짜부터 계산한다.
+$attendanceIssueBaseSince = '2026-07-01';
+$attendanceEmployeeHireDate = '';
+if ($pdo && $eid_att > 0) {
+    try {
+        $stAttendanceHire = $pdo->prepare("SELECT hire_date FROM employees WHERE id=:e LIMIT 1");
+        $stAttendanceHire->execute(array(':e' => $eid_att));
+        $attendanceHireRaw = trim((string)$stAttendanceHire->fetchColumn());
+        if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $attendanceHireRaw) && strtotime($attendanceHireRaw) !== false) {
+            $attendanceEmployeeHireDate = $attendanceHireRaw;
+        }
+    } catch (Exception $e) {
+        $attendanceEmployeeHireDate = '';
+    }
+}
+$attendanceIssueSince = $attendanceIssueBaseSince;
+if ($attendanceEmployeeHireDate !== '' && $attendanceEmployeeHireDate > $attendanceIssueSince) {
+    $attendanceIssueSince = $attendanceEmployeeHireDate;
+}
+$attendanceIssueHasStarted = ($attendanceIssueSince <= $today_att);
+$attendanceIssueHolidayMap = $attendanceIssueHasStarted ? attendance_holiday_map($pdo, $attendanceIssueSince, $today_att) : array();
 $attendanceIssueSinceMonth = substr($attendanceIssueSince, 0, 7);
 $attendanceIssueCurrentMonth = substr($today_att, 0, 7);
 $attendanceIssueMonth = isset($_GET['attendance_issue_month']) ? trim((string)$_GET['attendance_issue_month']) : 'all';
 if ($attendanceIssueMonth !== 'all' && !preg_match('/^\d{4}-\d{2}$/', $attendanceIssueMonth)) $attendanceIssueMonth = 'all';
 if ($attendanceIssueMonth !== 'all' && $attendanceIssueMonth < $attendanceIssueSinceMonth) $attendanceIssueMonth = $attendanceIssueSinceMonth;
 $attendanceIssueMonthOptions = array();
-$issueMonthStartTs = strtotime($attendanceIssueSinceMonth . '-01');
-$issueMonthEndTs = strtotime($attendanceIssueCurrentMonth . '-01');
-if ($issueMonthEndTs !== false && $issueMonthStartTs !== false && $issueMonthEndTs < $issueMonthStartTs) $issueMonthEndTs = $issueMonthStartTs;
-while ($issueMonthStartTs !== false && $issueMonthEndTs !== false && $issueMonthStartTs <= $issueMonthEndTs) {
-    $attendanceIssueMonthOptions[count($attendanceIssueMonthOptions)] = array(
-        'value' => date('Y-m', $issueMonthStartTs),
-        'label' => date('Y년 n월', $issueMonthStartTs)
-    );
-    $issueMonthStartTs = strtotime('+1 month', $issueMonthStartTs);
+if ($attendanceIssueHasStarted) {
+    $issueMonthStartTs = strtotime($attendanceIssueSinceMonth . '-01');
+    $issueMonthEndTs = strtotime($attendanceIssueCurrentMonth . '-01');
+    while ($issueMonthStartTs !== false && $issueMonthEndTs !== false && $issueMonthStartTs <= $issueMonthEndTs) {
+        $attendanceIssueMonthOptions[count($attendanceIssueMonthOptions)] = array(
+            'value' => date('Y-m', $issueMonthStartTs),
+            'label' => date('Y년 n월', $issueMonthStartTs)
+        );
+        $issueMonthStartTs = strtotime('+1 month', $issueMonthStartTs);
+    }
 }
-$attendanceIssueRangeLabel = '전체(2026-07-01 이후)';
+$attendanceIssueRangeLabel = '전체(' . $attendanceIssueSince . ' 이후)';
 if ($attendanceIssueMonth !== 'all') {
     $issueSelectedTs = strtotime($attendanceIssueMonth . '-01');
     if ($issueSelectedTs !== false) $attendanceIssueRangeLabel = date('Y년 n월', $issueSelectedTs);

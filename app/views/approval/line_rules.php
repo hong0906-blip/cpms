@@ -126,7 +126,8 @@ if (!function_exists('approval_line_rules_team_department_keys')) {
             return array('construction', 'safety', 'health', 'quality');
         }
         if ($key === 'quality') {
-            return array('quality', 'safety', 'health');
+            // 품질부서도 공사부서 직원을 팀장으로 지정할 수 있습니다.
+            return array('construction', 'quality', 'safety', 'health');
         }
         return array($key);
     }
@@ -279,8 +280,10 @@ if (!function_exists('approval_line_rules_find_team_leader')) {
         if ($teamLeaderId > 0 && $teamLeaderId !== $creatorId) {
             $selected = approval_line_rules_fetch_employee($pdo, $teamLeaderId);
             // 개발부서는 인원이 적어 다른 부서 팀장을 명시적으로 지정할 수 있습니다.
-            // employees.team_leader_id에 저장된 팀장이 있으면 부서가 달라도 해당 지정값을 우선합니다.
-            $allowAssignedCrossDepartmentLeader = ($creatorDeptKey === 'development');
+            // 공사부서 직원은 관리/공무/품질/안전/보건/개발 등 모든 부서에서
+            // '나의 팀장'으로 명시 지정할 수 있습니다.
+            $selectedDeptKey = $selected ? approval_line_rules_department_key(isset($selected['department']) ? $selected['department'] : '') : '';
+            $allowAssignedCrossDepartmentLeader = ($creatorDeptKey === 'development' || $selectedDeptKey === 'construction');
             if ($selected && !approval_employee_is_executive($selected) && ($allowAssignedCrossDepartmentLeader || approval_line_rules_employee_department_matches_any($selected, $targetKeys))) {
                 $result['employee'] = $selected;
                 return $result;
@@ -768,8 +771,8 @@ if (!function_exists('approval_line_rules_build')) {
                 $warnings[] = approval_ko('%EA%B3%B5%EB%AC%B4%20%EA%B2%B0%EC%9E%AC%EC%9E%90%20%EC%84%A4%EC%A0%95%EC%9D%B4%20%ED%95%84%EC%9A%94%ED%95%A9%EB%8B%88%EB%8B%A4.');
             }
 
-            // 공무팀과 개발팀 기안서도 공사PM 결재 단계를 포함한다.
-            if ($deptKey === 'gongmu' || $deptKey === 'development' || $deptKey === 'construction' || $deptKey === 'safety' || $deptKey === 'health' || $deptKey === 'quality') {
+            // 관리팀, 공무팀, 개발팀 기안서도 공사PM 결재 단계를 포함한다.
+            if ($deptKey === 'manage' || $deptKey === 'gongmu' || $deptKey === 'development' || $deptKey === 'construction' || $deptKey === 'safety' || $deptKey === 'health' || $deptKey === 'quality') {
                 if ($constructionPm) {
                     approval_line_rules_add_line($lines, $seen, $pmRole, $constructionPm, array());
                 } else {
