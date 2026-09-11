@@ -133,7 +133,26 @@ $tabs = array_merge(
 );
 if (!isset($tabs[$tab])) $tab = $defaultTab;
 
-$canEditSchedule = Auth::canManageConstruction(); // 공사/공무/임원 수정 권한
+// 공정표/담당지정/이슈 등의 일반 공사 수정 권한은 기존대로 유지한다.
+$canEditSchedule = (
+    Auth::isMaster() ||
+    $role === 'executive' ||
+    $deptForConstructionView === '공사' ||
+    $deptForConstructionView === '공무'
+);
+
+// 관리부는 공사 비용 관련 탭에서만 입력/수정 권한을 가진다.
+$constructionCostEditTabs = array(
+    'monthly_input',
+    'labor',
+    'outsourcing',
+    'equipment',
+    'materials'
+);
+$canEditConstructionCost = (
+    $canEditSchedule ||
+    $deptForConstructionView === '관리'
+);
 
 $flash = flash_get();
 
@@ -351,7 +370,9 @@ if (!file_exists($tabFile)) {
     // 탭에서 쓸 변수 전달
     $pid = $selectedPid;
     $projectRow = $project;
-    $canEdit = $canEditSchedule;
+    $canEdit = in_array($tab, $constructionCostEditTabs, true)
+        ? $canEditConstructionCost
+        : $canEditSchedule;
     require $tabFile;
 }
 ?>

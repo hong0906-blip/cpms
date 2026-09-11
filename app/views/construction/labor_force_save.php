@@ -2,8 +2,8 @@
 /**
  * 파일경로: C:\www\cpms\app\views\construction\labor_force_save.php
  * - 공사: 노무비 월별 강제입력 저장
- * - 개발부서 전용 기능
- * - 개발부서는 현재월 및 마감된 이전월을 승인 없이 직접 수정 가능
+ * - 개발/관리 부서 공사비용 직접조정 기능
+ * - 현재월 및 마감된 이전월을 승인 없이 직접 수정 가능
  * - PHP 5.6 호환
  */
 
@@ -23,10 +23,14 @@ if (!Auth::check()) {
 }
 
 /*
- * 노무비 강제입력은 개발부서 전용 기능이다.
+ * 노무비 강제입력은 개발부서와 관리부서의 공사 비용 조정 기능이다.
  * 화면에서 숨기는 것과 별도로 저장 주소에 직접 접근하는 경우도 차단한다.
  */
-if (!Auth::isDevelopmentDepartment()) {
+$canDirectManageLaborCost = method_exists('App\\Core\\Auth', 'canBypassConstructionCostApproval')
+    ? Auth::canBypassConstructionCostApproval()
+    : Auth::isDevelopmentDepartment();
+
+if (!$canDirectManageLaborCost) {
     http_response_code(403);
     echo '403 Forbidden';
     exit;
@@ -91,9 +95,7 @@ if ($projectId <= 0 || !preg_match('/^\d{4}-\d{2}$/', $month)) {
 }
 
 /*
- * 기존에는 선택월이 현재월이 아니면 무조건 비용 변경 승인을 요구했다.
- * 이 저장 기능은 애초에 개발부서만 접근할 수 있으므로,
- * 개발부서는 마감된 이전월도 승인 없이 바로 수정할 수 있도록 한다.
+ * 개발/관리 부서는 마감된 이전월도 승인 없이 바로 수정할 수 있다.
  * 단, 아직 시작되지 않은 미래월의 강제입력은 실수 방지를 위해 차단한다.
  */
 $currentMonth = CostChangeService::currentSettlementYm('labor', date('Y-m-d'));

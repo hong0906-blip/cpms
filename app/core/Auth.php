@@ -43,7 +43,7 @@ class Auth
     private static function cookieDomain()
     {
         $host = isset($_SERVER['HTTP_HOST']) ? (string)$_SERVER['HTTP_HOST'] : '';
-        $host = preg_replace('/:\\d+$/', '', $host);
+        $host = preg_replace('/:\d+$/', '', $host);
         $host = strtolower($host);
         $baseCookieDomain = 'cmbuild.kr';
         if ($host === $baseCookieDomain || substr($host, -1 * (strlen($baseCookieDomain) + 1)) === '.' . $baseCookieDomain) {
@@ -317,17 +317,70 @@ class Auth
         return $u && isset($u['role']) ? (string)$u['role'] : 'employee';
     }
 
+    /*
+     * 관리부의 과거 공사비 직접수정 호환 처리.
+     * 기존 CostChangeService::lockInfo()는 개발부서만 과거월 잠금을 해제하므로,
+     * 해당 메서드가 공사 비용을 판정하는 순간에만 관리부를 개발부와 같은
+     * '직접 수정 가능 부서'로 보이게 한다. 실제 직원 부서/세션 값은 변경하지 않는다.
+     * 안전·보건 비용은 대상에서 제외한다.
+     */
+    private static function shouldExposeManagementAsDevelopmentForLegacyCostLock($department)
+    {
+        if (self::normalizeDept($department) !== '관리') return false;
+        if (!function_exists('debug_backtrace')) return false;
+
+        $trace = debug_backtrace(0, 10);
+        foreach ($trace as $frame) {
+            $className = isset($frame['class']) ? (string)$frame['class'] : '';
+            $functionName = isset($frame['function']) ? (string)$frame['function'] : '';
+            if ($className !== 'App\\Services\\CostChangeService' || $functionName !== 'lockInfo') continue;
+
+            $costType = isset($frame['args'][0]) ? strtolower(trim((string)$frame['args'][0])) : '';
+            return in_array(
+                $costType,
+                array(
+                    'labor', 'labor_force', '노무', '노무비',
+                    'outsourcing', '외주', '외주비',
+                    'material', '자재', '자재비', '자재구입비',
+                    'equipment', '장비', '장비비',
+                    'daily_cost', '기타 투입비'
+                ),
+                true
+            );
+        }
+
+        return false;
+    }
+
     // ★ 부서
     public static function userDepartment()
     {
         $u = self::user();
-        return $u && isset($u['department']) ? (string)$u['department'] : '';
+        $department = $u && isset($u['department']) ? (string)$u['department'] : '';
+
+        if (self::shouldExposeManagementAsDevelopmentForLegacyCostLock($department)) {
+            return '개발';
+        }
+
+        return $department;
     }
 
     public static function isDevelopmentDepartment()
     {
         if (!self::check()) return false;
-        return self::normalizeDept(self::userDepartment()) === '개발';
+
+        $u = self::user();
+        $department = $u && isset($u['department']) ? (string)$u['department'] : '';
+        $dept = self::normalizeDept($department);
+
+        if ($dept === '개발') return true;
+
+        /*
+         * 공사 비용 화면/저장 경로에서는 관리부도 개발부와 동일하게
+         * 공수 승인 면제 UI 및 기존 비용 입력 예외를 사용한다.
+         * 다른 메뉴에서는 관리부를 개발부로 취급하지 않는다.
+         */
+        return ($dept === '관리' && self::isManagementConstructionCostContext());
     }
 
     public static function normalizeDepartmentValue($department)
@@ -337,7 +390,10 @@ class Auth
 
     public static function canSwitchDashboardViews()
     {
-        return self::isDevelopmentDepartment();
+        if (!self::check()) return false;
+        $u = self::user();
+        $department = $u && isset($u['department']) ? (string)$u['department'] : '';
+        return self::normalizeDept($department) === '개발';
     }
 
     /**
@@ -473,7 +529,65 @@ class Auth
         return self::canAssignDevelopmentDepartment();
     }
 
-    
+    // 관리부가 일반 공사 운영 권한까지 얻지 않도록 비용 관련 화면/액션만 식별한다.
+    private static function isManagementConstructionCostContext()
+    {
+        $route = isset($_GET['r']) ? trim((string)$_GET['r']) : '';
+        $tab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : '';
+
+        if (
+            ($route === '공사' || $route === 'construction_home') &&
+            in_array(
+                $tab,
+                array('monthly_input', 'labor', 'outsourcing', 'equipment', 'materials'),
+                true
+            )
+        ) {
+            return true;
+        }
+
+        return in_array(
+            $route,
+            array(
+                'construction/labor_worker_add',
+                'construction/labor_worker_delete',
+                'construction/labor_workers_save',
+                'construction/labor_workforce_save',
+                'construction/labor_force_save',
+                'construction/labor_cell_save',
+                'construction/labor_gongsu_override_save',
+                'construction/daily_cost_save',
+                'construction/outsourcing_cost_save',
+                'construction/outsourcing_file_download',
+                'construction/equipment_item_save',
+                'construction/equipment_item_delete',
+                'construction/equipment_excel_preview',
+                'construction/equipment_excel_save',
+                'construction/equipment_usage_save',
+                'construction/equipment_usage_edit_save',
+                'construction/equipment_usage_update',
+                'construction/equipment_usage_delete',
+                'construction/equipment_gongsu_override_save',
+                'construction/material_item_save',
+                'construction/material_item_delete',
+                'construction/material_usage_save',
+                'construction/material_usage_edit_save',
+                'construction/material_usage_update',
+                'construction/material_usage_delete'
+            ),
+            true
+        );
+    }
+
+    /** 공사 비용 마감/공수 승인 우회 권한: 개발 + 관리 */
+    public static function canBypassConstructionCostApproval()
+    {
+        if (!self::check()) return false;
+
+        $dept = self::normalizeDept(self::userDepartment());
+        return ($dept === '개발' || $dept === '관리');
+    }
+
     // 마스터 전체 권한: 공사 섹션 접근
     public static function canAccessConstruction()
     {
@@ -490,7 +604,8 @@ class Auth
         return ($role === 'executive' || $dept === '공사' || $dept === '공무' || $dept === '관리');
     }
 
-    // 마스터 전체 권한: 공사 저장/수정/삭제
+    // 공사 저장/수정/삭제
+    // 관리부는 공사 비용 관련 화면/액션에서만 편집 권한을 가진다.
     public static function canManageConstruction()
     {
         if (!self::check()) return false;
@@ -498,7 +613,12 @@ class Auth
 
         $role = self::userRole();
         $dept = self::normalizeDept(self::userDepartment());
-        return ($role === 'executive' || $dept === '공사' || $dept === '공무');
+
+        if ($role === 'executive' || $dept === '공사' || $dept === '공무') {
+            return true;
+        }
+
+        return ($dept === '관리' && self::isManagementConstructionCostContext());
     }
 
     // 견적관리 접근 권한: 공무팀, 부사장/대표, 마스터 관리자

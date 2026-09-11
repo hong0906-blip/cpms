@@ -62,7 +62,7 @@ if (!function_exists('cpms_gongsu_index_exists')) {
 
 if (!function_exists('cpms_gongsu_ensure_override_table')) {
     function cpms_gongsu_ensure_override_table($pdo) {
-        if (function_exists('cpms_ensure_labor_override_table')) return cpms_ensure_labor_override_table($pdo);        
+        if (function_exists('cpms_ensure_labor_override_table')) return cpms_ensure_labor_override_table($pdo);
         $pdo->exec("CREATE TABLE IF NOT EXISTS cpms_labor_gongsu_overrides (
             id INT AUTO_INCREMENT PRIMARY KEY,
             project_id INT NOT NULL,
@@ -99,7 +99,7 @@ if (!function_exists('cpms_gongsu_ensure_override_table')) {
             'status' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'applied' AFTER reason",
             'requested_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by INT NULL AFTER status",
             'requested_by_email' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by_email VARCHAR(120) NULL AFTER requested_by",
-            'requested_by_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by_name VARCHAR(80) NULL AFTER requested_by_email",            
+            'requested_by_name' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN requested_by_name VARCHAR(80) NULL AFTER requested_by_email",
             'approved_by' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_by INT NULL AFTER requested_by",
             'approved_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN approved_at DATETIME NULL AFTER approved_by",
             'rejected_acknowledged_at' => "ALTER TABLE cpms_labor_gongsu_overrides ADD COLUMN rejected_acknowledged_at DATETIME NULL AFTER approved_at",
@@ -233,10 +233,15 @@ try {
     if (!$isDevelopmentDepartment && method_exists('App\\Core\\Auth', 'normalizeDepartmentValue')) {
         $isDevelopmentDepartment = (Auth::normalizeDepartmentValue($effectiveDepartment) === '개발');
     }
+    // 공수 승인 면제는 개발부서 + 관리부서의 공사 비용 권한으로 판단한다.
+    $gongsuApprovalExempt = method_exists('App\\Core\\Auth', 'canBypassConstructionCostApproval')
+        ? (bool)Auth::canBypassConstructionCostApproval()
+        : $isDevelopmentDepartment;
+
     // 이메일 기반 마스터 예외는 사용하지 않음
     $isMasterByRaw = false;
     $allowedByRaw = ($effectiveRole === 'executive' || $effectiveDepartmentNorm === '공사' || $effectiveDepartmentNorm === '공무');
-    
+
     if (!$authChecked) {
         cpms_gongsu_json_exit(false, '로그인 세션을 읽지 못했습니다. auth_email=' . $authEmail . ', auth_role=' . $authRole . ', auth_department=' . $authDepartment . ', master_by_auth=' . ($isMaster ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N') . ', session_id=' . session_id() . ', raw_user_email=' . $rawUserEmail . ', raw_cpms_user_email=' . $rawCpmsUserEmail . ', raw_cpms_user_role=' . $rawCpmsUserRole . ', raw_cpms_user_department=' . $rawCpmsUserDepartment . ', effective_email=' . $effectiveEmail . ', effective_role=' . $effectiveRole . ', effective_department=' . $effectiveDepartment . ', master_by_raw=' . ($isMasterByRaw ? 'Y' : 'N') . ', allowed_by_raw=' . ($allowedByRaw ? 'Y' : 'N'), array(
             'session_id' => session_id(),
@@ -270,7 +275,7 @@ try {
         cpms_gongsu_json_exit(
             false,
             '권한이 없습니다. auth_email=' . $authEmail . ', auth_role=' . $authRole . ', auth_department=' . $authDepartment . ', raw_user_email=' . $rawUserEmail . ', raw_cpms_user_email=' . $rawCpmsUserEmail . ', raw_cpms_user_role=' . $rawCpmsUserRole . ', raw_cpms_user_department=' . $rawCpmsUserDepartment . ', effective_email=' . $effectiveEmail . ', effective_role=' . $effectiveRole . ', effective_department=' . $effectiveDepartment . ', master_by_auth=' . ($isMaster ? 'Y' : 'N') . ', master_by_raw=' . ($isMasterByRaw ? 'Y' : 'N') . ', canManageConstruction=' . ($canManageConstruction ? 'Y' : 'N') . ', allowed_by_raw=' . ($allowedByRaw ? 'Y' : 'N') . ', session_id=' . session_id(),
-            array(            
+            array(
                 'session_id' => session_id(),
                 'has_session' => (isset($_SESSION) && is_array($_SESSION)) ? 'Y' : 'N',
                 'has_user_email' => ($rawUserEmail !== '') ? 'Y' : 'N',
@@ -429,7 +434,7 @@ try {
         $newValue = (float)number_format((float)$newValueRaw, 2, '.', '');
         if (abs($newValue - 1.3) > 0.0001 && abs($newValue - 1.4) > 0.0001 && abs($newValue - 1.5) > 0.0001 && abs($newValue - 2.0) > 0.0001) cpms_gongsu_json_exit(false, '일괄 공수 입력은 1.3공수, 1.4공수, 1.5공수 또는 2공수만 가능합니다.', array(), 200);
         $reason = isset($_POST['reason']) ? trim((string)$_POST['reason']) : '';
-        if (!$isDevelopmentDepartment && $reason === '') cpms_gongsu_json_exit(false, '일괄 공수 승인 요청사유를 입력해 주세요.', array(), 200);
+        if (!$gongsuApprovalExempt && $reason === '') cpms_gongsu_json_exit(false, '일괄 공수 승인 요청사유를 입력해 주세요.', array(), 200);
         $reasonLength = function_exists('mb_strlen') ? mb_strlen($reason, 'UTF-8') : strlen($reason);
         if ($reasonLength > 255) cpms_gongsu_json_exit(false, '일괄 공수 승인 요청사유는 255자 이하로 입력해 주세요.', array(), 200);
         $requestScope = isset($_POST['request_scope']) && trim((string)$_POST['request_scope']) === 'all' ? 'all' : 'partial';
@@ -464,8 +469,8 @@ try {
             $bulkWorkerNames[] = $bulkWorkerName;
         }
 
-        $directorApprover = $isDevelopmentDepartment ? null : cpms_labor_find_director_approver($pdo);
-        if (!$isDevelopmentDepartment && !$directorApprover) cpms_gongsu_json_exit(false, '공사PM 승인자를 직원명부에서 찾을 수 없습니다.', array(), 200);
+        $directorApprover = $gongsuApprovalExempt ? null : cpms_labor_find_director_approver($pdo);
+        if (!$gongsuApprovalExempt && !$directorApprover) cpms_gongsu_json_exit(false, '공사PM 승인자를 직원명부에서 찾을 수 없습니다.', array(), 200);
         $directorId = isset($directorApprover['id']) ? (int)$directorApprover['id'] : null;
         $directorName = isset($directorApprover['name']) ? (string)$directorApprover['name'] : null;
         $directorEmail = isset($directorApprover['email']) ? (string)$directorApprover['email'] : null;
@@ -492,12 +497,12 @@ try {
                 ':new_value'=>$newValue,
                 ':is_deleted_entry'=>0,
                 ':reason'=>$reason,
-                ':status'=>$isDevelopmentDepartment ? 'applied' : 'pending',
+                ':status'=>$gongsuApprovalExempt ? 'applied' : 'pending',
                 ':requested_by'=>$requestedBy,
                 ':requested_by_email'=>$requestedByEmail !== '' ? $requestedByEmail : null,
                 ':requested_by_name'=>$requestedByName !== '' ? $requestedByName : null,
-                ':approval_stage'=>$isDevelopmentDepartment ? 'COMPLETED' : 'DIRECTOR_PENDING',
-                ':approval_required_level'=>$isDevelopmentDepartment ? 'NONE' : 'DIRECTOR_THEN_VP',
+                ':approval_stage'=>$gongsuApprovalExempt ? 'COMPLETED' : 'DIRECTOR_PENDING',
+                ':approval_required_level'=>$gongsuApprovalExempt ? 'NONE' : 'DIRECTOR_THEN_VP',
                 ':current_approver_employee_id'=>$directorId,
                 ':current_approver_name'=>$directorName,
                 ':current_approver_email'=>$directorEmail,
@@ -507,7 +512,7 @@ try {
                 ':created_at'=>$now,
                 ':updated_at'=>$now
             ));
-            if ($isDevelopmentDepartment) {
+            if ($gongsuApprovalExempt) {
                 $bulkAppliedOverrideId = (int)$pdo->lastInsertId();
                 CostDataEventService::recordChange($pdo, array(
                     'project_id' => $projectId,
@@ -532,7 +537,7 @@ try {
         $stBulkId->execute(array(':batch_token'=>$batchToken));
         $bulkOverrideId = (int)$stBulkId->fetchColumn();
         $pdo->commit();
-        if ($isDevelopmentDepartment) {
+        if ($gongsuApprovalExempt) {
             cpms_gongsu_json_exit(true, $bulkWorkDate . ' 기준 선택한 ' . count($bulkEntries) . '명의 ' . cpms_labor_format_chat_gongsu($newValue) . '공수를 바로 적용했습니다.', array(
                 'mode'=>'applied',
                 'batch_token'=>$batchToken,
@@ -582,14 +587,14 @@ try {
         $newValue = 0.0;
         $reason = '';
     }
-    if (!$isDevelopmentDepartment && !$deleteMode && $newValue >= 1.2 && $reason === '') cpms_gongsu_json_exit(false, '1.2 이상 공수 수정은 승인 요청사유가 필요합니다.', array(), 200);
+    if (!$gongsuApprovalExempt && !$deleteMode && $newValue >= 1.2 && $reason === '') cpms_gongsu_json_exit(false, '1.2 이상 공수 수정은 승인 요청사유가 필요합니다.', array(), 200);
 
     $approvalRequiredLevel = 'NONE';
     $approvalStage = 'COMPLETED';
     $currentApprover = null;
     $directorApprover = null;
     $isDeletedEntry = $deleteMode ? 1 : 0;
-    if (!$isDevelopmentDepartment && !$deleteMode && $newValue >= 1.2) {
+    if (!$gongsuApprovalExempt && !$deleteMode && $newValue >= 1.2) {
         $status = 'pending';
         $approvalStage = 'DIRECTOR_PENDING';
         $directorApprover = cpms_labor_find_director_approver($pdo);
@@ -609,7 +614,7 @@ try {
     if (cpms_gongsu_has_pending_request($pdo, $projectId, $workerKey, $workDate, false)) {
         cpms_gongsu_json_exit(false, $workerName . '님의 ' . $workDate . ' 공수는 이미 승인 대기 중입니다.', array(), 200);
     }
-    
+
     $st = $pdo->prepare(cpms_gongsu_override_upsert_sql());
     $st->bindValue(':project_id', $projectId, PDO::PARAM_INT);
     $st->bindValue(':month', $month, PDO::PARAM_STR);
