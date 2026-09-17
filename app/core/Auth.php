@@ -322,7 +322,7 @@ class Auth
      * 기존 CostChangeService::lockInfo()는 개발부서만 과거월 잠금을 해제하므로,
      * 해당 메서드가 공사 비용을 판정하는 순간에만 관리부를 개발부와 같은
      * '직접 수정 가능 부서'로 보이게 한다. 실제 직원 부서/세션 값은 변경하지 않는다.
-     * 안전·보건 비용은 대상에서 제외한다.
+     * 안전관리비/안전·보건 비용까지 동일하게 직접 수정 대상으로 포함한다.
      */
     private static function shouldExposeManagementAsDevelopmentForLegacyCostLock($department)
     {
@@ -343,7 +343,8 @@ class Auth
                     'outsourcing', '외주', '외주비',
                     'material', '자재', '자재비', '자재구입비',
                     'equipment', '장비', '장비비',
-                    'daily_cost', '기타 투입비'
+                    'daily_cost', '기타 투입비',
+                    'safety', '안전', '안전관리비', '보건', '보건비', '안전·보건 비용', '기타 안전·보건 비용'
                 ),
                 true
             );
@@ -529,6 +530,30 @@ class Auth
         return self::canAssignDevelopmentDepartment();
     }
 
+    // 관리부가 안전관리비 외의 안전사고/상생협력포탈 권한까지 얻지 않도록
+    // 안전관리비 화면/저장/삭제 액션만 별도로 식별한다.
+    private static function isManagementSafetyCostContext()
+    {
+        $route = isset($_GET['r']) ? trim((string)$_GET['r']) : '';
+        $tab = isset($_GET['tab']) ? trim((string)$_GET['tab']) : '';
+
+        if (
+            ($route === 'safety_home' || $route === '안전/보건') &&
+            ($tab === '' || $tab === 'safety_cost')
+        ) {
+            return true;
+        }
+
+        return in_array(
+            $route,
+            array(
+                'safety/safety_cost_save',
+                'safety/safety_cost_delete'
+            ),
+            true
+        );
+    }
+
     // 관리부가 일반 공사 운영 권한까지 얻지 않도록 비용 관련 화면/액션만 식별한다.
     private static function isManagementConstructionCostContext()
     {
@@ -618,7 +643,10 @@ class Auth
             return true;
         }
 
-        return ($dept === '관리' && self::isManagementConstructionCostContext());
+        return (
+            $dept === '관리' &&
+            (self::isManagementConstructionCostContext() || self::isManagementSafetyCostContext())
+        );
     }
 
     // 견적관리 접근 권한: 공무팀, 부사장/대표, 마스터 관리자

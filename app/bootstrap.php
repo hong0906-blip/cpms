@@ -144,5 +144,8 @@ require_once __DIR__ . '/core/Db.php';
 require_once __DIR__ . '/core/Auth.php';
 require_once __DIR__ . '/core/View.php';
 
+// ===== 프로젝트 안전/품질 서브 담당 호환 헬퍼 =====
+require_once __DIR__ . '/helpers/project_sub_roles.php';
+
 // ===== 포탈 세션 기반 자동로그인 =====
 \App\Core\Auth::autoLoginFromPortal();

@@ -1,10 +1,10 @@
 <?php
 /**
  * C:\www\cpms\app\views\construction\roles_save.php
- * - 공사: 프로젝트 담당(안전/품질/현장) 저장(POST)
- *
- * 권한:
- * - 임원(executive) 또는 공사부서(공사)만
+ * - 공사: 프로젝트 담당(공사/안전/품질) 저장(POST)
+ * - 공사: 메인 1 + 서브 최대 4
+ * - 안전: 메인 1 + 서브 최대 2
+ * - 품질: 메인 1 + 서브 최대 2
  *
  * PHP 5.6 호환
  */
@@ -38,6 +38,8 @@ $projectId = isset($_POST['project_id']) ? (int)$_POST['project_id'] : 0;
 $siteId    = isset($_POST['site_employee_id']) ? (int)$_POST['site_employee_id'] : 0;
 $safetyId  = isset($_POST['safety_employee_id']) ? (int)$_POST['safety_employee_id'] : 0;
 $qualityId = isset($_POST['quality_employee_id']) ? (int)$_POST['quality_employee_id'] : 0;
+
+// 공사 서브: 기존과 동일하게 최대 4명.
 $postedSubManagerIds = isset($_POST['sub_manager_ids']) && is_array($_POST['sub_manager_ids']) ? $_POST['sub_manager_ids'] : array();
 $subManagerIds = array();
 $seenSubManagerIds = array();
@@ -47,9 +49,40 @@ foreach ($postedSubManagerIds as $postedSubManagerId) {
     $seenSubManagerIds[$subManagerId] = true;
     $subManagerIds[] = $subManagerId;
 }
-
 if (count($subManagerIds) > 4) {
-    flash_set('error', '서브 담당자는 최대 4명까지 지정할 수 있습니다.');
+    flash_set('error', '공사 서브 담당자는 최대 4명까지 지정할 수 있습니다.');
+    header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
+    exit;
+}
+
+// 안전 서브: 메인 제외, 중복 제거, 최대 2명.
+$postedSafetySubIds = isset($_POST['safety_sub_employee_ids']) && is_array($_POST['safety_sub_employee_ids']) ? $_POST['safety_sub_employee_ids'] : array();
+$safetySubIds = array();
+$seenSafetySubIds = array();
+foreach ($postedSafetySubIds as $postedSafetySubId) {
+    $safetySubId = (int)$postedSafetySubId;
+    if ($safetySubId <= 0 || $safetySubId === $safetyId || isset($seenSafetySubIds[$safetySubId])) continue;
+    $seenSafetySubIds[$safetySubId] = true;
+    $safetySubIds[] = $safetySubId;
+}
+if (count($safetySubIds) > 2) {
+    flash_set('error', '안전 서브 담당자는 최대 2명까지 지정할 수 있습니다.');
+    header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
+    exit;
+}
+
+// 품질 서브: 메인 제외, 중복 제거, 최대 2명.
+$postedQualitySubIds = isset($_POST['quality_sub_employee_ids']) && is_array($_POST['quality_sub_employee_ids']) ? $_POST['quality_sub_employee_ids'] : array();
+$qualitySubIds = array();
+$seenQualitySubIds = array();
+foreach ($postedQualitySubIds as $postedQualitySubId) {
+    $qualitySubId = (int)$postedQualitySubId;
+    if ($qualitySubId <= 0 || $qualitySubId === $qualityId || isset($seenQualitySubIds[$qualitySubId])) continue;
+    $seenQualitySubIds[$qualitySubId] = true;
+    $qualitySubIds[] = $qualitySubId;
+}
+if (count($qualitySubIds) > 2) {
+    flash_set('error', '품질 서브 담당자는 최대 2명까지 지정할 수 있습니다.');
     header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
     exit;
 }
@@ -67,23 +100,47 @@ if (!$pdo) {
     exit;
 }
 
+// 지정 대상 전체가 재직자인지 확인하고, 안전/품질 서브는 해당 부서 직원만 허용한다.
 $roleEmployeeIds = array();
-foreach (array_merge(array($siteId, $safetyId, $qualityId), $subManagerIds) as $roleEmployeeId) {
+foreach (array_merge(array($siteId, $safetyId, $qualityId), $subManagerIds, $safetySubIds, $qualitySubIds) as $roleEmployeeId) {
     $roleEmployeeId = (int)$roleEmployeeId;
     if ($roleEmployeeId > 0) $roleEmployeeIds[$roleEmployeeId] = $roleEmployeeId;
 }
+
+$activeRoleEmployeeMap = array();
 if (count($roleEmployeeIds) > 0) {
     $roleEmployeeIdList = implode(',', array_map('intval', array_values($roleEmployeeIds)));
-    $stActiveRoleEmployees = $pdo->query("SELECT id FROM employees WHERE is_active = 1 AND id IN (" . $roleEmployeeIdList . ")");
+    $stActiveRoleEmployees = $pdo->query("SELECT id, department FROM employees WHERE is_active = 1 AND id IN (" . $roleEmployeeIdList . ")");
     $activeRoleEmployeeRows = $stActiveRoleEmployees ? $stActiveRoleEmployees->fetchAll(PDO::FETCH_ASSOC) : array();
-    $activeRoleEmployeeMap = array();
-    foreach ($activeRoleEmployeeRows as $activeRoleEmployeeRow) $activeRoleEmployeeMap[(int)$activeRoleEmployeeRow['id']] = true;
+    foreach ($activeRoleEmployeeRows as $activeRoleEmployeeRow) {
+        $activeRoleEmployeeMap[(int)$activeRoleEmployeeRow['id']] = isset($activeRoleEmployeeRow['department']) ? (string)$activeRoleEmployeeRow['department'] : '';
+    }
     foreach ($roleEmployeeIds as $roleEmployeeId) {
         if (!isset($activeRoleEmployeeMap[(int)$roleEmployeeId])) {
-            flash_set('error', '퇴직한 임직원은 공사 담당자로 지정할 수 없습니다.');
+            flash_set('error', '퇴직한 임직원은 담당자로 지정할 수 없습니다.');
             header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
             exit;
         }
+    }
+}
+
+foreach ($safetySubIds as $safetySubId) {
+    $safetySubDept = isset($activeRoleEmployeeMap[$safetySubId]) ? $activeRoleEmployeeMap[$safetySubId] : '';
+    $safetySubDept = method_exists('App\\Core\\Auth', 'normalizeDepartmentValue') ? Auth::normalizeDepartmentValue($safetySubDept) : $safetySubDept;
+    if ($safetySubDept !== '안전') {
+        flash_set('error', '안전 서브 담당자는 안전부서 재직자만 지정할 수 있습니다.');
+        header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
+        exit;
+    }
+}
+
+foreach ($qualitySubIds as $qualitySubId) {
+    $qualitySubDept = isset($activeRoleEmployeeMap[$qualitySubId]) ? $activeRoleEmployeeMap[$qualitySubId] : '';
+    $qualitySubDept = method_exists('App\\Core\\Auth', 'normalizeDepartmentValue') ? Auth::normalizeDepartmentValue($qualitySubDept) : $qualitySubDept;
+    if ($qualitySubDept !== '품질') {
+        flash_set('error', '품질 서브 담당자는 품질부서 재직자만 지정할 수 있습니다.');
+        header('Location: ?r=공사&pid='.$projectId.'&tab=roles');
+        exit;
     }
 }
 
@@ -115,30 +172,50 @@ try {
         $ins->execute();
     }
 
-    // 공무 섹션과 같은 프로젝트 멤버 데이터를 사용하여 메인/서브 담당자를 양방향 연동한다.
+    // 공무 섹션과 같은 프로젝트 멤버 데이터를 사용하여 공사 메인/서브 담당자를 양방향 연동한다.
     $deleteMain = $pdo->prepare("DELETE FROM cpms_project_members WHERE project_id = :pid AND LOWER(TRIM(role)) = 'main'");
     $deleteMain->bindValue(':pid', $projectId, \PDO::PARAM_INT);
     $deleteMain->execute();
+
+    $insertMember = $pdo->prepare("INSERT INTO cpms_project_members(project_id, employee_id, role) VALUES(:pid, :eid, :role)");
+
     if ($siteId > 0) {
-        $insertMember = $pdo->prepare("INSERT INTO cpms_project_members(project_id, employee_id, role) VALUES(:pid, :eid, :role)");
         $insertMember->bindValue(':pid', $projectId, \PDO::PARAM_INT);
         $insertMember->bindValue(':eid', $siteId, \PDO::PARAM_INT);
         $insertMember->bindValue(':role', 'main');
         $insertMember->execute();
-    } else {
-        $insertMember = null;
     }
 
     $deleteSubs = $pdo->prepare("DELETE FROM cpms_project_members WHERE project_id = :pid AND LOWER(TRIM(role)) = 'sub'");
     $deleteSubs->bindValue(':pid', $projectId, \PDO::PARAM_INT);
     $deleteSubs->execute();
-    if ($insertMember === null) {
-        $insertMember = $pdo->prepare("INSERT INTO cpms_project_members(project_id, employee_id, role) VALUES(:pid, :eid, :role)");
-    }
     foreach ($subManagerIds as $subManagerId) {
         $insertMember->bindValue(':pid', $projectId, \PDO::PARAM_INT);
         $insertMember->bindValue(':eid', $subManagerId, \PDO::PARAM_INT);
         $insertMember->bindValue(':role', 'sub');
+        $insertMember->execute();
+    }
+
+    /*
+     * 안전/품질 서브는 기존 cpms_project_members에 별도 role로 저장한다.
+     * 기존 role 컬럼이 VARCHAR(10)이므로 safety_sub(10), qual_sub(8)를 사용한다.
+     * 이 방식은 DB 컬럼 추가 없이 기존 데이터와 완전히 분리된다.
+     */
+    $deleteSpecialSubs = $pdo->prepare("DELETE FROM cpms_project_members WHERE project_id = :pid AND LOWER(TRIM(role)) IN ('safety_sub', 'qual_sub')");
+    $deleteSpecialSubs->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+    $deleteSpecialSubs->execute();
+
+    foreach ($safetySubIds as $safetySubId) {
+        $insertMember->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+        $insertMember->bindValue(':eid', $safetySubId, \PDO::PARAM_INT);
+        $insertMember->bindValue(':role', 'safety_sub');
+        $insertMember->execute();
+    }
+
+    foreach ($qualitySubIds as $qualitySubId) {
+        $insertMember->bindValue(':pid', $projectId, \PDO::PARAM_INT);
+        $insertMember->bindValue(':eid', $qualitySubId, \PDO::PARAM_INT);
+        $insertMember->bindValue(':role', 'qual_sub');
         $insertMember->execute();
     }
 
