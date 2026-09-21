@@ -613,7 +613,7 @@ class Auth
         return ($dept === '개발' || $dept === '관리');
     }
 
-    // 마스터 전체 권한: 공사 섹션 접근
+    // 공사 섹션 접근: 안전/품질은 담당 지정된 현장 조회를 위해 진입 허용
     public static function canAccessConstruction()
     {
         if (!self::check()) return false;
@@ -626,7 +626,7 @@ class Auth
 
         $role = self::userRole();
         $dept = self::normalizeDept(self::userDepartment());
-        return ($role === 'executive' || $dept === '공사' || $dept === '공무' || $dept === '관리');
+        return ($role === 'executive' || $dept === '공사' || $dept === '공무' || $dept === '관리' || $dept === '안전' || $dept === '품질');
     }
 
     // 공사 저장/수정/삭제

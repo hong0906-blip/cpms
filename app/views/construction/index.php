@@ -23,11 +23,13 @@ $deptForConstructionView = trim((string)$dept);
 if ($deptForConstructionView === '관리부' || $deptForConstructionView === '관리팀') $deptForConstructionView = '관리';
 if ($deptForConstructionView === '공무부' || $deptForConstructionView === '공무팀') $deptForConstructionView = '공무';
 if ($deptForConstructionView === '공사부' || $deptForConstructionView === '공사팀') $deptForConstructionView = '공사';
+if ($deptForConstructionView === '안전부' || $deptForConstructionView === '안전팀' || $deptForConstructionView === '안전/보건' || $deptForConstructionView === '안전보건') $deptForConstructionView = '안전';
+if ($deptForConstructionView === '품질부' || $deptForConstructionView === '품질팀' || $deptForConstructionView === '품질관리' || $deptForConstructionView === '품질관리부' || $deptForConstructionView === '품질관리팀') $deptForConstructionView = '품질';
 
-// 공사 메뉴 접근: 공사/공무/관리 또는 임원
+// 공사 메뉴 접근: 공사/공무/관리/안전/품질 또는 임원
 $allowed = Auth::canAccessConstruction();
 if (!$allowed) {
-    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (공사/공무/관리/임원 전용)</div>';
+    echo '<div class="bg-red-50 border border-red-200 text-red-700 rounded-2xl p-4 font-bold">접근 권한이 없습니다. (공사/공무/관리/안전/품질/임원)</div>';
     return;
 }
 
@@ -64,15 +66,52 @@ try {
         $st = $pdo->query("SELECT * FROM cpms_projects WHERE name NOT LIKE '(가제)%' ORDER BY id DESC");
         $projects = $st->fetchAll();
     } else {
-        $sql = "SELECT DISTINCT p.*
-                FROM cpms_projects p
-                JOIN cpms_project_members pm ON pm.project_id = p.id
-                WHERE pm.employee_id = :eid
-                  AND LOWER(TRIM(pm.role)) IN ('main','sub')
-                  AND p.name NOT LIKE '(가제)%'
-                ORDER BY p.id DESC";
-        $st = $pdo->prepare($sql);
-        $st->bindValue(':eid', $employeeId, \PDO::PARAM_INT);
+        if ($deptForConstructionView === '안전') {
+            // 안전 메인(cpms_construction_roles) + 안전 서브(cpms_project_members.safety_sub)에게
+            // 담당 지정된 현장만 공사 섹션 조회 권한을 준다.
+            $sql = "SELECT DISTINCT p.*
+                    FROM cpms_projects p
+                    LEFT JOIN cpms_construction_roles cr ON cr.project_id = p.id
+                    LEFT JOIN cpms_project_members pm
+                      ON pm.project_id = p.id
+                     AND pm.employee_id = :eid_pm
+                     AND LOWER(TRIM(pm.role)) = 'safety_sub'
+                    WHERE (cr.safety_employee_id = :eid_role OR pm.employee_id = :eid_member)
+                      AND p.name NOT LIKE '(가제)%'
+                    ORDER BY p.id DESC";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':eid_pm', $employeeId, \PDO::PARAM_INT);
+            $st->bindValue(':eid_role', $employeeId, \PDO::PARAM_INT);
+            $st->bindValue(':eid_member', $employeeId, \PDO::PARAM_INT);
+        } elseif ($deptForConstructionView === '품질') {
+            // 품질 메인(cpms_construction_roles) + 품질 서브(cpms_project_members.qual_sub)에게
+            // 담당 지정된 현장만 공사 섹션 조회 권한을 준다.
+            $sql = "SELECT DISTINCT p.*
+                    FROM cpms_projects p
+                    LEFT JOIN cpms_construction_roles cr ON cr.project_id = p.id
+                    LEFT JOIN cpms_project_members pm
+                      ON pm.project_id = p.id
+                     AND pm.employee_id = :eid_pm
+                     AND LOWER(TRIM(pm.role)) = 'qual_sub'
+                    WHERE (cr.quality_employee_id = :eid_role OR pm.employee_id = :eid_member)
+                      AND p.name NOT LIKE '(가제)%'
+                    ORDER BY p.id DESC";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':eid_pm', $employeeId, \PDO::PARAM_INT);
+            $st->bindValue(':eid_role', $employeeId, \PDO::PARAM_INT);
+            $st->bindValue(':eid_member', $employeeId, \PDO::PARAM_INT);
+        } else {
+            // 공사팀 및 기존 예외 계정은 기존 main/sub 배정 현장만 조회한다.
+            $sql = "SELECT DISTINCT p.*
+                    FROM cpms_projects p
+                    JOIN cpms_project_members pm ON pm.project_id = p.id
+                    WHERE pm.employee_id = :eid
+                      AND LOWER(TRIM(pm.role)) IN ('main','sub')
+                      AND p.name NOT LIKE '(가제)%'
+                    ORDER BY p.id DESC";
+            $st = $pdo->prepare($sql);
+            $st->bindValue(':eid', $employeeId, \PDO::PARAM_INT);
+        }
         $st->execute();
         $projects = $st->fetchAll();
     }
@@ -81,7 +120,7 @@ try {
 }
 
 if (count($projects) === 0) {
-    echo '<div class="bg-white rounded-2xl border border-gray-200 p-6 text-gray-600">조회 가능한 프로젝트가 없습니다. (공사팀은 본인/팀이 배정(main/sub)된 프로젝트만 보이고, 공무/임원은 전체 프로젝트가 보입니다.)</div>';
+    echo '<div class="bg-white rounded-2xl border border-gray-200 p-6 text-gray-600">조회 가능한 프로젝트가 없습니다. (공사/안전/품질은 담당 지정된 현장만 보이며, 공무/관리/임원은 전체 프로젝트가 보입니다.)</div>';
     return;
 }
 

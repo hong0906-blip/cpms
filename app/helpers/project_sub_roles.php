@@ -151,6 +151,51 @@ function cpms_safety_cost_user_can_manage_project($pdo, $projectId)
 }}
 
 /*
+ * 품질 파일 권한 검사에서도 qual_sub를 품질 메인과 동일한 현장 담당자로 인정한다.
+ * quality_file_helper.php보다 bootstrap에서 먼저 로드되므로 이 정의가 우선 사용됩니다.
+ */
+if (!function_exists('cpms_quality_file_user_has_project_role')) {
+function cpms_quality_file_user_has_project_role($pdo, $projectId, $column)
+{
+    $projectId = (int)$projectId;
+    $column = trim((string)$column);
+    if (!$pdo || $projectId <= 0 || $column === '') return false;
+
+    $employeeId = cpms_project_sub_role_current_employee_id($pdo);
+    if ($employeeId <= 0) return false;
+
+    // 기존 cpms_construction_roles의 메인 담당자 판정은 그대로 유지한다.
+    if (cpms_project_sub_role_table_exists($pdo, 'cpms_construction_roles')) {
+        $allowedColumns = array('site_employee_id', 'safety_employee_id', 'quality_employee_id');
+        if (in_array($column, $allowedColumns, true)) {
+            try {
+                $sql = "SELECT COUNT(*) FROM cpms_construction_roles
+                        WHERE project_id = :project_id
+                          AND `" . str_replace('`', '``', $column) . "` = :employee_id";
+                $st = $pdo->prepare($sql);
+                $st->bindValue(':project_id', $projectId, PDO::PARAM_INT);
+                $st->bindValue(':employee_id', $employeeId, PDO::PARAM_INT);
+                $st->execute();
+                if ((int)$st->fetchColumn() > 0) return true;
+            } catch (Exception $e) {
+            }
+        }
+    }
+
+    // 품질 메인 컬럼을 검사하는 위치에서는 품질 서브도 같은 담당자로 인정한다.
+    if ($column === 'quality_employee_id') {
+        return cpms_project_sub_role_has_member_role($pdo, $projectId, $employeeId, 'qual_sub');
+    }
+
+    // 안전 메인 컬럼을 직접 검사하는 코드가 있다면 안전 서브도 동일하게 인정한다.
+    if ($column === 'safety_employee_id') {
+        return cpms_project_sub_role_has_member_role($pdo, $projectId, $employeeId, 'safety_sub');
+    }
+
+    return false;
+}}
+
+/*
  * 공사 이슈 댓글 알림 대상에도 안전/품질 서브 담당자를 포함한다.
  * 실제 서비스 파일에서 function_exists()로 감싸져 있어 이 정의가 우선 사용됩니다.
  */

@@ -95,7 +95,7 @@ function cpms_company_profit_access_is_park_jihye_deputy($name, $dept, $position
 
     if ($name === '' || strpos($name, cpms_company_profit_access_normalize_text('박지혜')) === false) return false;
     if ($dept !== cpms_company_profit_access_normalize_text('관리') && $dept !== cpms_company_profit_access_normalize_text('관리부') && $dept !== cpms_company_profit_access_normalize_text('관리팀')) return false;
-    if ($position === '' || strpos($position, cpms_company_profit_access_normalize_text('대리')) === false) return false;
+    if ($position === '' || strpos($position, cpms_company_profit_access_normalize_text('과장')) === false) return false;
     return true;
 }}
 
