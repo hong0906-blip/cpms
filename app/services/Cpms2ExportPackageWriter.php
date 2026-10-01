@@ -7,6 +7,7 @@ class Cpms2ExportPackageWriter
     public $missing = array();
     public $expectedFiles = 0;
     public $fileBytes = 0;
+    public $excludedLaborForce = array('count'=>0,'amount'=>'0.00','projects'=>array());
     private $directory;
     private $streams = array();
     private $files = array();
@@ -21,9 +22,25 @@ class Cpms2ExportPackageWriter
         $this->counts[$entity]++;
     }
     public function emptyEntity($entity) { if (!isset($this->counts[$entity])) { $this->streams[$entity]=fopen($this->directory.'/data/'.$entity.'.jsonl','wb'); $this->counts[$entity]=0; } }
+    public static function moneyCents($value)
+    {
+        $value=(string)$value;
+        if (!preg_match('/^-?\d+(?:\.\d{1,2})?$/D',$value)) throw new RuntimeException('Invalid summary amount.');
+        // PHP 5.6 on Windows can have 32-bit integers. Whole cents stay exact
+        // in a double up to 2^53; avoid integer overflow even for 23,500,000 won.
+        $parts=explode('.',ltrim($value,'-')); $cents=(float)$parts[0]*100+(float)str_pad(isset($parts[1])?$parts[1]:'',2,'0');
+        if ($cents>9007199254740991) throw new RuntimeException('Summary amount exceeds exact precision.');
+        return substr($value,0,1)==='-'?-$cents:$cents;
+    }
+    public static function moneyDecimal($cents)
+    {
+        if (abs($cents)>9007199254740991) throw new RuntimeException('Summary amount exceeds exact precision.');
+        $digits=str_pad(sprintf('%.0f',abs($cents)),3,'0',STR_PAD_LEFT);
+        return ($cents<0?'-':'').substr($digits,0,-2).'.'.substr($digits,-2);
+    }
     public function amount($project, $kind, $amount)
     {
-        $cents=(int)round((float)$amount*100);
+        $cents=round((float)$amount*100);
         if (!isset($this->totals[$project])) $this->totals[$project]=array();
         if (!isset($this->totals[$project][$kind])) $this->totals[$project][$kind]=0;
         $this->totals[$project][$kind]+=$cents;
@@ -55,9 +72,19 @@ class Cpms2ExportPackageWriter
         foreach ($this->streams as $stream) fclose($stream);
         $this->streams=array();
         $total=array(); $projects=array();
-        foreach ($this->totals as $project=>$amounts) foreach ($amounts as $kind=>$cents) { $projects[$project][$kind]=sprintf('%.2f',$cents/100); if (!isset($total[$kind])) $total[$kind]=0; $total[$kind]+=$cents; }
-        foreach ($total as $kind=>$cents) $total[$kind]=sprintf('%.2f',$cents/100);
+        foreach ($this->totals as $project=>$amounts) foreach ($amounts as $kind=>$cents) { $projects[$project][$kind]=self::moneyDecimal($cents); if (!isset($total[$kind])) $total[$kind]=0; $total[$kind]+=$cents; }
+        foreach ($total as $kind=>$cents) $total[$kind]=self::moneyDecimal($cents);
+        $labor=array('projects'=>array(),'company'=>array());
+        foreach (array_unique(array_merge(array_keys($projects),array_keys($this->excludedLaborForce['projects']))) as $project) {
+            if (!isset($projects[$project]['labor'])) $projects[$project]['labor']='0.00';
+            $eligible=self::moneyCents($projects[$project]['labor']); $excluded=isset($this->excludedLaborForce['projects'][$project])?self::moneyCents($this->excludedLaborForce['projects'][$project]['amount']):0;
+            $labor['projects'][$project]=array('source_original_labor'=>self::moneyDecimal($eligible+$excluded),'excluded_force_amount'=>self::moneyDecimal($excluded),'source_migration_labor'=>self::moneyDecimal($eligible));
+        }
+        $eligible=isset($total['labor'])?self::moneyCents($total['labor']):0; $excluded=self::moneyCents($this->excludedLaborForce['amount']);
+        $labor['company']=array('source_original_labor'=>self::moneyDecimal($eligible+$excluded),'excluded_force_amount'=>self::moneyDecimal($excluded),'source_migration_labor'=>self::moneyDecimal($eligible));
         $summary=array('record_counts'=>$this->counts,'amounts'=>array('projects'=>$projects,'company'=>$total),'expected_file_count'=>$this->expectedFiles,'exported_file_count'=>count($this->files),'missing_file_count'=>count($this->missing),'missing_file_rows'=>$this->missing,'deduplicated_file_count'=>$this->expectedFiles-count($this->missing)-count($this->files),'warnings'=>$this->warnings);
+        $summary['excluded_labor_force_adjustments']=$this->excludedLaborForce;
+        $summary['labor_reconciliation']=$labor;
         $this->json('schema-report.json',$schema); $this->json('summary.json',$summary);
         $paths=array('schema-report.json','summary.json');
         foreach ($this->counts as $entity=>$count) $paths[]='data/'.$entity.'.jsonl';

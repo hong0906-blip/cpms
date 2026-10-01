@@ -10,6 +10,32 @@ class Cpms2LaborExportService
     private $gongsuSource;
     private $gongsuInfo;
     public function __construct($db,$attendance,$writer) { $this->db=$db; $this->attendance=$attendance; $this->writer=$writer; }
+    public static function excludedForceAdjustments($db)
+    {
+        $report=array('count'=>0,'amount'=>'0.00','projects'=>array()); $total=0;
+        $columns=$db->inspect('cpms_labor_force_adjustments');
+        if (!$columns) return $report;
+        if (count(array_diff(array('project_id','month','amount'),$columns))) throw new RuntimeException('Labor force adjustment summary columns missing.');
+        // Aggregate only: no row IDs, memo, author or adjustment entity in the package.
+        $st=$db->query('SELECT project_id,month,COUNT(*) AS excluded_count,SUM(amount) AS excluded_amount FROM cpms_labor_force_adjustments WHERE amount<>0 GROUP BY project_id,month ORDER BY project_id,month');
+        $projectTotals=array();
+        while ($r=$st->fetch(PDO::FETCH_ASSOC)) {
+            $project=(int)$r['project_id']; $month=(string)$r['month']; $count=(int)$r['excluded_count']; $cents=Cpms2ExportPackageWriter::moneyCents($r['excluded_amount']);
+            if (!isset($report['projects'][$project])) { $report['projects'][$project]=array('count'=>0,'amount'=>'0.00','months'=>array()); $projectTotals[$project]=0; }
+            $report['projects'][$project]['months'][$month]=array('count'=>$count,'amount'=>Cpms2ExportPackageWriter::moneyDecimal($cents));
+            $report['projects'][$project]['count']+=$count; $projectTotals[$project]+=$cents;
+            $report['count']+=$count; $total+=$cents;
+        }
+        foreach ($projectTotals as $project=>$cents) $report['projects'][$project]['amount']=Cpms2ExportPackageWriter::moneyDecimal($cents);
+        $report['amount']=Cpms2ExportPackageWriter::moneyDecimal($total);
+        return $report;
+    }
+    public static function exclusionWarnings($report)
+    {
+        $warnings=array('노무비 강제입력 '.number_format($report['count']).'건 / 총 '.number_format((float)$report['amount'],2).'원은 이번 CPMS2 이관에서 제외됩니다.');
+        foreach ($report['projects'] as $project=>$group) foreach ($group['months'] as $month=>$r) $warnings[]='노무비 강제입력 제외: 프로젝트 #'.$project.' / '.$month.' / '.number_format($r['count']).'건 / '.number_format((float)$r['amount'],2).'원';
+        return $warnings;
+    }
     public static function resolveOverrides($rows)
     {
         $result=array(); $applied=array();
@@ -87,7 +113,9 @@ class Cpms2LaborExportService
     }
     public function run()
     {
-        foreach (array('cpms_project_labor_workers','cpms_project_labor_worker_months','cpms_project_labor_worker_wages','cpms_labor_gongsu_overrides','cpms_labor_force_adjustments') as $table) $this->db->inspect($table);
+        $this->writer->excludedLaborForce=self::excludedForceAdjustments($this->db);
+        $this->writer->warnings=array_merge($this->writer->warnings,self::exclusionWarnings($this->writer->excludedLaborForce));
+        foreach (array('cpms_project_labor_workers','cpms_project_labor_worker_months','cpms_project_labor_worker_wages','cpms_labor_gongsu_overrides') as $table) $this->db->inspect($table);
         if (!count($this->db->columns('cpms_project_labor_workers'))) { $this->writer->warnings[]='Labor assignments unavailable.'; return; }
         $this->gongsuSource=$this->db; $this->gongsuInfo=cpms_find_gongsu_table($this->db);
         if (!$this->gongsuInfo && $this->attendance) { $this->gongsuSource=$this->attendance; $this->gongsuInfo=cpms_find_gongsu_table($this->attendance); }
@@ -138,11 +166,6 @@ class Cpms2LaborExportService
                 }
                 $this->writer->amount($p['id'],'labor',$amounts['labor_amount']); $this->writer->amount($p['id'],'subcontract',$amounts['outsourcing_amount']);
             }
-        }
-        // Force adjustments are a separate unsupported financial source; never hide them.
-        if (count($this->db->columns('cpms_labor_force_adjustments'))) {
-            $count=(int)$this->db->query('SELECT COUNT(*) FROM cpms_labor_force_adjustments WHERE amount<>0')->fetchColumn();
-            if ($count) throw new RuntimeException('Nonzero labor force adjustments require explicit mapping before export.');
         }
     }
     public static function allocate($total,$weights)

@@ -63,6 +63,13 @@ try {
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
     cpms_web_assert(strpos($html,'ZIP 다운로드')!==false && strpos($html,'disabled')!==false,'Web ready state or preflight gate missing.');
     cpms_web_assert(strpos($html,'<script>fixture</script>')===false && strpos($html,'&lt;script&gt;fixture&lt;/script&gt;')!==false,'Report HTML not escaped.');
+    $excluded=array('count'=>8,'amount'=>'23500000.00','projects'=>array(22=>array('count'=>8,'amount'=>'23500000.00','months'=>array('2026-07'=>array('count'=>8,'amount'=>'23500000.00')))));
+    $exclusionWarnings=Cpms2LaborExportService::exclusionWarnings($excluded);
+    $_SESSION['_cpms2_export_preflight']=array('owner_employee_id'=>17,'checked_at'=>time(),'report'=>array('counts'=>array(),'expected_file_count'=>0,'missing_file_count'=>0,'excluded_labor_force_adjustments'=>$excluded,'warnings'=>$exclusionWarnings));
+    $_SESSION['_cpms2_export_packages'][$id]['summary']['warnings']=$exclusionWarnings;
+    ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
+    cpms_web_assert(substr_count($html,'노무비 강제입력 8건 / 총 23,500,000.00원')===2,'Preflight and generated summary exclusion total missing.');
+    cpms_web_assert(substr_count($html,'프로젝트 #22 / 2026-07 / 8건')===2 && strpos($html,' disabled')===false,'Project/month warning missing or exclusions disabled Export.');
     $_SERVER['REQUEST_METHOD']='POST'; $_POST=array('action'=>'download','package'=>$id,'_csrf'=>'bad');
     http_response_code(200); ob_start(); (new Cpms2ExportController($web))->handle(); $response=ob_get_clean();
     cpms_web_assert(http_response_code()===403 && strpos($response,'fixture-package')===false,'Invalid CSRF downloaded data.');

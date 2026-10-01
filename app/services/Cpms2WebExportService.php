@@ -66,11 +66,11 @@ class Cpms2WebExportService
         $gongsu=cpms_find_gongsu_table($this->source);
         if (!$gongsu && $this->attendance) $gongsu=cpms_find_gongsu_table($this->attendance);
         if (!$gongsu && (!$this->attendance || !count($this->attendance->inspect('attendance')))) throw new RuntimeException('ATTENDANCE_SOURCE_REQUIRED');
-        $columns=$this->source->inspect('cpms_labor_force_adjustments');
-        if ($columns && (int)$this->source->query('SELECT COUNT(*) FROM cpms_labor_force_adjustments WHERE amount<>0')->fetchColumn()) throw new RuntimeException('UNMAPPED_LABOR_ADJUSTMENT');
+        $excluded=Cpms2LaborExportService::excludedForceAdjustments($this->source);
+        $warnings=array_merge($warnings,Cpms2LaborExportService::exclusionWarnings($excluded));
         if ($missing) $warnings[]='Missing statement files: '.count($missing);
         if (in_array('bank_account_enc',$this->source->columns('workers'))) $warnings[]='Encrypted worker accounts are omitted; the decrypt helper can write key files.';
-        return array('counts'=>$counts,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'warnings'=>$warnings);
+        return array('counts'=>$counts,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'excluded_labor_force_adjustments'=>$excluded,'warnings'=>$warnings);
     }
     public function generate($employee)
     {

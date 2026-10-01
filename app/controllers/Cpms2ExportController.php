@@ -69,7 +69,6 @@ class Cpms2ExportController
                     'PRIVATE_STORAGE_REQUIRED'=>'Export 저장 경로가 쓰기 가능한 폴더인지 확인하세요.',
                     'ZIP_EXTENSION_REQUIRED'=>'서버 PHP ZIP 확장 기능이 필요합니다.',
                     'ATTENDANCE_SOURCE_REQUIRED'=>'노무 원본 연결을 확인할 수 없습니다.',
-                    'UNMAPPED_LABOR_ADJUSTMENT'=>'별도 노무 강제 조정금액이 있어 Export를 중단했습니다. 해당 원가의 Mapping 확인이 필요합니다.',
                     'PREFLIGHT_REQUIRED'=>'먼저 사전검사를 실행하세요. 검사 결과는 15분 동안 유효합니다.',
                     'EXPORT_ALREADY_RUNNING'=>'이 계정의 Export가 이미 진행 중입니다.',
                     'PACKAGE_ACCESS_DENIED'=>'이 계정에서 생성한 ZIP만 다운로드할 수 있습니다.',

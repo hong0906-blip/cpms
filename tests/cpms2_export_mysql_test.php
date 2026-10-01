@@ -19,6 +19,7 @@ $tables=array(
  'cpms_project_labor_worker_months'=>'id INT PRIMARY KEY,project_id INT,labor_worker_id INT,month VARCHAR(7),outsourcing_ratio INT,outsourcing_ratio_is_set INT,outsourcing_start_date DATE,outsourcing_end_date DATE,is_deleted INT',
  'cpms_project_labor_worker_wages'=>'id INT PRIMARY KEY,project_id INT,labor_worker_id INT,effective_month VARCHAR(7),daily_wage INT',
  'cpms_labor_gongsu_overrides'=>'id INT PRIMARY KEY,project_id INT,worker_key VARCHAR(120),worker_name VARCHAR(120),work_date DATE,status VARCHAR(20),old_value DECIMAL(10,4),new_value DECIMAL(10,4),is_deleted_entry INT',
+ 'cpms_labor_force_adjustments'=>'id INT PRIMARY KEY,project_id INT,month CHAR(7),amount DECIMAL(15,2),memo TEXT,UNIQUE(project_id,month)',
  'cpms_material_items'=>'id INT PRIMARY KEY,project_id INT,vendor_id INT,category VARCHAR(30),item_name VARCHAR(100),base_rate DECIMAL(18,2)',
  'cpms_material_usage'=>'id INT PRIMARY KEY,project_id INT,material_id INT,use_date DATE,amount DECIMAL(18,2),is_deleted INT',
  'cpms_equipment_items'=>'id INT PRIMARY KEY,project_id INT,vendor_id INT,category VARCHAR(30),item_name VARCHAR(100),base_rate DECIMAL(18,2)',
@@ -41,6 +42,7 @@ $db->exec("INSERT INTO employees VALUES(17,'FIX17','Fixture employee','source-fi
  INSERT INTO cpms_project_labor_worker_months VALUES(1,22,315,'2026-07',30,1,NULL,NULL,0),(2,22,316,'2026-07',0,1,NULL,NULL,0),(3,23,317,'2026-07',0,1,NULL,NULL,0);
  INSERT INTO cpms_project_labor_worker_wages VALUES(1,22,315,'2026-06',90000),(2,22,315,'2026-07',100000),(3,22,315,'2026-08',200000);
  INSERT INTO cpms_labor_gongsu_overrides VALUES(1,22,'fixture worker','Fixture worker','2026-07-20','applied',1,1.5,0),(2,22,'fixture worker','Fixture worker','2026-07-20','pending',1.5,2,0);
+ INSERT INTO cpms_labor_force_adjustments VALUES(1,22,'2026-05',1000000,'excluded fixture memo'),(2,22,'2026-06',1000000,''),(3,22,'2026-07',1000000,''),(4,22,'2026-08',1000000,''),(5,23,'2026-05',10000000,''),(6,23,'2026-06',5000000,''),(7,23,'2026-07',5000000,''),(8,23,'2026-08',-500000,''),(9,22,'2026-09',0,'');
  INSERT INTO cpms_material_items VALUES(5,22,31,'자재비','Fixture material',0),(6,22,31,'안전관리비','Fixture helmet',0);
  INSERT INTO cpms_material_usage VALUES(815,22,5,'2026-07-20',30000,0),(816,22,5,'2026-07-20',-1000,0),(817,22,6,'2026-07-20',2000,0),(818,22,5,'2026-07-20',999,1);
  INSERT INTO cpms_equipment_items VALUES(8,22,31,'장비','Fixture equipment',10000);
@@ -63,14 +65,19 @@ try {
     $employee=$web->authorize(array('cpms_user'=>array('id'=>17,'email'=>'source-fixture@example.invalid')));
     $preflight=$web->preflight();
     if ($preflight['expected_file_count']!==3 || $preflight['missing_file_count']!==1) throw new RuntimeException('Web preflight file counts mismatch.');
+    if ($preflight['excluded_labor_force_adjustments']['count']!==8 || $preflight['excluded_labor_force_adjustments']['amount']!=='23500000.00') throw new RuntimeException('Preflight force exclusions mismatch.');
     $beforeHash=hash_file('sha256',$statement);
     $package=$web->generate($employee); $summary=$package['summary'];
     $generated=$web->downloadPath($package['id'],$package,$employee);
     if (!copy($generated,$output) || hash_file('sha256',$statement)!==$beforeHash) throw new RuntimeException('Source file was changed by web export.');
     if ($summary['record_counts']['labor_entries']!==4 || $summary['record_counts']['material_usages']!==2 || $summary['record_counts']['safety_costs']!==1 || $summary['exported_file_count']!==1 || $summary['missing_file_count']!==1) throw new RuntimeException('Fixture counts mismatch.');
     if ($summary['amounts']['projects'][22]['labor']!=='1605000.00' || $summary['amounts']['projects'][23]['labor']!=='3000000.00' || $summary['amounts']['company']['material']!=='29000.00' || $summary['amounts']['company']['equipment']!=='24999.00') throw new RuntimeException('Fixture source money mismatch.');
+    if ($summary['excluded_labor_force_adjustments']!==$preflight['excluded_labor_force_adjustments'] || $summary['labor_reconciliation']['company']['source_original_labor']!=='28105000.00' || $summary['labor_reconciliation']['company']['source_migration_labor']!=='4605000.00') throw new RuntimeException('Force exclusions changed eligible labor.');
+    if ($summary['excluded_labor_force_adjustments']['projects'][23]['months']['2026-08']['amount']!=='-500000.00') throw new RuntimeException('Monthly signed exclusion lost.');
     $zip=new ZipArchive(); $zip->open($output); $employee=$zip->getFromName('data/employees.jsonl'); $workers=$zip->getFromName('data/workers.jsonl');
     if (strpos($employee,'forbidden-password')!==false || strpos($workers,'forbidden-')!==false) throw new RuntimeException('Sensitive field leaked.'); $zip->close();
+    $zip->open($output); if ($zip->locateName('data/cpms_labor_force_adjustments.jsonl')!==false || strpos($zip->getFromName('summary.json'),'excluded fixture memo')!==false) throw new RuntimeException('Excluded force row or memo leaked.'); $zip->close();
+    if ((int)$db->query('SELECT COUNT(*) FROM cpms_labor_force_adjustments')->fetchColumn()!==9 || $db->query('SELECT SUM(amount) FROM cpms_labor_force_adjustments')->fetchColumn()!=='23500000.00') throw new RuntimeException('Source force data changed.');
     $db->commit();
 } catch (Exception $e) { $db->rollBack(); throw $e; }
 unlink($generated); unlink($temporary.'/private/employee-17.lock'); rmdir($temporary.'/private'); rmdir($temporary.'/web');
