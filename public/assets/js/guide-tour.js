@@ -703,6 +703,7 @@
     var steps = [
       step(groupOf('a[href*="r=관리"][href*="tab="]'), '관리 업무 탭', '직원, 인력, 출퇴근, 휴가, 급여·관리비와 자료 점검 화면을 전환합니다.', '개인정보와 금액을 다루므로 필요한 업무 탭과 권한을 확인하세요.')
     ];
+    steps.push(step('[data-guide="admin-cpms2-open"]', 'CPMS2 데이터 Export', '이관 화면을 열어 사전검사를 실행하고 생성한 ZIP을 다운로드합니다.'));
     if (tab === 'employees') {
       steps.push(step('[data-modal-open="empAdd"]', '직원 추가', '신규 직원의 사번, 이름, 부서, 직급, 연락처, 계정과 권한 정보를 입력하는 창을 엽니다.', '퇴직자 복구와 신규 등록을 구분하고 이메일·사번 중복을 확인하세요.'));
       steps.push(step(formWithField('employee_view'), '재직·퇴직 직원 조회', '재직 상태와 검색어로 직원 목록을 좁힙니다. 퇴직자는 별도 탭에서 확인합니다.'));
@@ -812,6 +813,11 @@
     if (route === '품질' || lower === 'quality_home' || lower.indexOf('quality/') === 0) return qualityGuide();
     if (lower === 'estimate_home' || lower.indexOf('estimate/') === 0) return estimateGuide();
     if (route === '공무' || lower.indexOf('project') === 0) return projectGuide(lower || route);
+    if (lower === 'admin/cpms2_export') return guide('CPMS2 데이터 Export', '원본 데이터와 거래명세서를 읽어 CPMS2 이관용 ZIP을 생성합니다.', '사전검사 결과를 확인한 다음 ZIP을 생성하고 다운로드하세요.', [
+      step('[data-guide="admin-cpms2-preflight"]', '사전검사', '사전검사를 누르면 Schema·파일 누락·비공개 저장 경로를 검사하고 결과를 표시합니다.'),
+      step('[data-guide="admin-cpms2-generate"]', '전체 Export ZIP 생성', '검사 후 생성 버튼을 누르면 원본 DB와 파일을 읽어 비공개 경로에 ZIP을 생성하고 결과를 표시합니다.'),
+      step('[data-guide="admin-cpms2-download"]', 'ZIP 다운로드', '생성 완료 후 다운로드를 누르면 현재 로그인 권한과 ZIP 무결성을 확인하고 브라우저로 전송합니다.')
+    ]);
     if (route === '관리' || lower.indexOf('admin/') === 0 || lower.indexOf('management/') === 0) return managementGuide();
     if (lower.indexOf('company_profit') === 0) return companyProfitGuide();
     if (lower.indexOf('representative_management') === 0) return representativeGuide();

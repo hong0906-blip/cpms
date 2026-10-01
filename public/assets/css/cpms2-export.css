@@ -1,0 +1,28 @@
+/* public/assets/css/cpms2-export.css
+ * Existing CPMS admin card/button treatment; isolated from ordinary screens.
+ */
+.cpms2-export-page{margin:0;background:#f8fafc;color:#1e293b;font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif}
+.cpms2-export,.cpms2-export *{box-sizing:border-box}
+.cpms2-export{max-width:1024px;margin:auto;padding:16px;min-width:0}
+.cpms2-export header,.cpms2-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.cpms2-export header{justify-content:space-between;margin-bottom:20px}
+.cpms2-export h1{margin:0;font-size:20px;font-weight:700}
+.cpms2-export h2{margin:0 0 12px;font-size:17px}
+.cpms2-export section{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin-bottom:16px;min-width:0}
+.cpms2-export p{margin:12px 0 0;overflow-wrap:anywhere}
+.cpms2-export dl{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:0}
+.cpms2-export dl>div{display:flex;justify-content:space-between;gap:12px;min-width:0;padding:8px 0;border-bottom:1px solid #e5e7eb}
+.cpms2-export dt{overflow-wrap:anywhere}
+.cpms2-export dd{margin:0;flex-shrink:0}
+.cpms2-export button,.cpms2-export header a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;max-width:100%;padding:10px 14px;border:1px solid #2563eb;border-radius:10px;background:#2563eb;color:#fff;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;overflow-wrap:anywhere}
+.cpms2-export header button,.cpms2-export header a,.cpms2-export button.cpms2-secondary{background:#fff;color:#4b5563;border-color:#d1d5db}
+.cpms2-export button:disabled{opacity:.4;cursor:default}
+.cpms2-export button:hover:not(:disabled){filter:brightness(.95)}
+.cpms2-export button:active:not(:disabled){transform:translateY(1px)}
+.cpms2-export button:focus-visible,.cpms2-export a:focus-visible{outline:2px solid #2563eb;outline-offset:3px}
+.cpms2-export [aria-busy=true]{opacity:.65}
+.cpms2-export section>form{margin-top:16px}
+.cpms2-export #cpms2-export-status:empty{display:none}
+.cpms2-error{padding:16px;margin-bottom:16px;border:1px solid #fecaca;border-radius:12px;background:#fef2f2;color:#b91c1c;overflow-wrap:anywhere}
+.cpms2-export .cpms2-warning{color:#92400e}
+@media(min-width:640px){.cpms2-export{padding:24px}.cpms2-export section{padding:20px}.cpms2-export dl{grid-template-columns:repeat(2,minmax(0,1fr))}}

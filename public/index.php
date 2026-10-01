@@ -8,6 +8,12 @@
  * 2) 관리 화면에서 사용하는 admin/... 저장 라우트 연결
  */
 
+// Export requests must bypass bootstrap schema initialization and usage writes.
+if (isset($_GET['r']) && is_string($_GET['r']) && $_GET['r']==='admin/cpms2_export') {
+    require_once __DIR__.'/../app/controllers/Cpms2ExportController.php';
+    Cpms2ExportController::dispatch();
+    exit;
+}
 require_once __DIR__ . '/../app/bootstrap.php';
 require_once __DIR__ . '/../app/services/UsageAnalyticsService.php';
 

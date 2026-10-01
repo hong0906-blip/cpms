@@ -114,6 +114,9 @@ if (!function_exists('admin_tab_url')) {
 ?>
 
 <div style="margin:0 0 16px 0; padding:12px; border:1px solid #e5e7eb; border-radius:12px; background:#fff;">
+  <?php if ($canManage): ?>
+    <a data-guide="admin-cpms2-open" href="?r=admin%2Fcpms2_export" style="display:inline-block;margin:4px 6px 4px 0;padding:12px 14px;border-radius:10px;text-decoration:none;font-weight:700;background:#fff;color:#4b5563;border:1px solid #d1d5db;">CPMS2 데이터 Export</a>
+  <?php endif; ?>
   <?php $adminAiGroupOpen = false; ?>
   <?php foreach ($tabs as $k => $t): ?>
     <?php if (!$adminAiGroupOpen && strpos($k, 'ai_') === 0): $adminAiGroupOpen = true; ?>
