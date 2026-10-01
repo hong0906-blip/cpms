@@ -66,7 +66,7 @@ class Cpms2ExportController
             } catch (Exception $e) {
                 if (!cpms_shared_session_is_active()) cpms_shared_session_start();
                 $messages=array(
-                    'PRIVATE_STORAGE_REQUIRED'=>'비공개 Export 저장 경로를 확인하세요. 웹 공개 경로 밖의 쓰기 가능한 경로를 CPMS2_EXPORT_STORAGE_ROOT로 지정해야 합니다.',
+                    'PRIVATE_STORAGE_REQUIRED'=>'Export 저장 경로가 쓰기 가능한 폴더인지 확인하세요.',
                     'ZIP_EXTENSION_REQUIRED'=>'서버 PHP ZIP 확장 기능이 필요합니다.',
                     'ATTENDANCE_SOURCE_REQUIRED'=>'노무 원본 연결을 확인할 수 없습니다.',
                     'UNMAPPED_LABOR_ADJUSTMENT'=>'별도 노무 강제 조정금액이 있어 Export를 중단했습니다. 해당 원가의 Mapping 확인이 필요합니다.',

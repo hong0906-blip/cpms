@@ -33,9 +33,7 @@ class Cpms2WebExportService
     }
     public function checkedPrivateRoot($create=false)
     {
-        if ($this->documentRoot==='') throw new RuntimeException('PRIVATE_STORAGE_REQUIRED');
-        $document=realpath($this->documentRoot);
-        if (!$document || $this->privateRoot==='') throw new RuntimeException('PRIVATE_STORAGE_REQUIRED');
+        if ($this->privateRoot==='') throw new RuntimeException('PRIVATE_STORAGE_REQUIRED');
         $candidate=$this->privateRoot; $tail=array();
         while (!file_exists($candidate)) {
             $parent=dirname($candidate); if ($parent===$candidate) throw new RuntimeException('PRIVATE_STORAGE_REQUIRED');
@@ -43,8 +41,7 @@ class Cpms2WebExportService
         }
         $ancestor=realpath($candidate); if (!$ancestor || !is_dir($ancestor)) throw new RuntimeException('PRIVATE_STORAGE_REQUIRED');
         $resolved=rtrim($ancestor,'/\\').(count($tail)?'/'.implode('/',$tail):'');
-        $normal=self::normalized($resolved); $public=self::normalized($document);
-        if ($normal===$public || strpos($normal,$public.'/')===0 || !is_writable($ancestor)) throw new RuntimeException('PRIVATE_STORAGE_REQUIRED');
+        if (!is_writable($ancestor)) throw new RuntimeException('PRIVATE_STORAGE_REQUIRED');
         if ($create && !is_dir($resolved) && !mkdir($resolved,0700,true)) throw new RuntimeException('PRIVATE_STORAGE_REQUIRED');
         return $create?realpath($resolved):$resolved;
     }
