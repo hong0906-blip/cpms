@@ -39,6 +39,11 @@ INSERT INTO cpms_project_labor_worker_months VALUES(1,8,315,'2026-07',30,1,NULL,
 INSERT INTO cpms_project_members VALUES(8,17,'main'); INSERT INTO cpms_construction_roles VALUES(8,17,NULL,NULL);
 INSERT INTO sites VALUES(1,'Referenced project',1);
 INSERT INTO attendance VALUES(1,1,'Referenced worker','2026-07-20 08:00:00','2026-07-20 17:00:00',540,'done','근로자'),(2,1,'Orphan snapshot','2026-07-20 08:00:00','2026-07-20 17:00:00',540,'done','근로자'),(3,1,'Missing master snapshot','2026-07-20 08:00:00','2026-07-20 17:00:00',540,'done','근로자'),(4,1,'Referenced direct','2026-07-20 08:00:00','2026-07-20 17:00:00',540,'done','근로자')");
+if (getenv('CPMS2_HISTORICAL_PROJECT_FIXTURE')) {
+    $db->exec("DELETE FROM cpms_projects WHERE id=8;
+CREATE TABLE cpms_ai_daily_snapshots(id INT PRIMARY KEY,project_id INT,project_name_snapshot VARCHAR(190),project_status_snapshot VARCHAR(50),project_start_date DATE,project_end_date DATE,contract_amount DECIMAL(18,2),snapshot_date DATE,captured_at DATETIME);
+INSERT INTO cpms_ai_daily_snapshots VALUES(1,8,' Referenced   project ',NULL,NULL,NULL,NULL,'2020-07-01','2020-07-01 12:00:00')");
+}
 $temporary=sys_get_temp_dir().'/cpms-reference-native-'.uniqid(); mkdir($temporary,0700); mkdir($temporary.'/web',0700); mkdir($temporary.'/storage/safety_costs',0700,true);
 $pdf=$temporary.'/fixture.pdf'; file_put_contents($pdf,"%PDF-1.7\nreference fixture\n%%EOF\n"); $before=hash_file('sha256',$pdf);
 $st=$db->prepare('INSERT INTO cpms_material_statement_files VALUES(?,8,11,?,?,?,?)');
@@ -53,6 +58,7 @@ try {
     nativeReferenceAssert($preflight['can_export'],'Historical closure preflight blocked.');
     $closure=$preflight['referenced_master_closure'];
     nativeReferenceAssert($closure['projects']['normal']===1 && $closure['projects']['reference_recovered']===2,'DB/JSON project dependency closure.');
+    if (getenv('CPMS2_HISTORICAL_PROJECT_FIXTURE')) nativeReferenceAssert($closure['projects']['historical_snapshot_recovered']===1 && $closure['projects']['physically_missing']===0 && !$closure['historical_project_recovery'][0]['status_confirmed'],'Historical project preflight guessed missing status.');
     foreach (array('material_items','equipment_items','workers','direct_team','material_usages') as $entity) nativeReferenceAssert($closure[$entity]['reference_recovered']===1,'Master closure count: '.$entity);
     nativeReferenceAssert($closure['workers']['snapshot_only_labor_workers']===2 && $closure['workers']['physically_missing']===1,'Orphan snapshot classification.');
     nativeReferenceAssert($closure['labor_vendor']['legacy_vendor_id']===1 && $closure['labor_vendor']['unique_business_identity']===1 && $closure['labor_vendor']['snapshot_only']===1 && $closure['labor_vendor']['ambiguous']===1,'Vendor preflight safe identity / zero-outsourcing exclusion.');
@@ -62,7 +68,7 @@ try {
     nativeReferenceAssert($package['summary']['referenced_master_closure']===$closure,'Summary/preflight mismatch.');
     $zip=new ZipArchive(); $zip->open($output); $labor=array(); foreach (explode("\n",trim($zip->getFromName('data/labor_workers.jsonl'))) as $line) { $row=json_decode($line,true); $labor[$row['legacy_id']]=$row; }
     nativeReferenceAssert($labor[316]['legacy_snapshot_only'] && $labor[317]['legacy_snapshot_only'] && $labor[317]['legacy_worker_master_id']==1475 && $labor[316]['worker_name_snapshot']==='Orphan snapshot' && $labor[316]['source_type']==='legacy' && $labor[316]['matched_status']==='unmatched','Assignment snapshot provenance lost.'); $zip->close();
-    nativeReferenceAssert(hash_file('sha256',$pdf)===$before && $db->query('SELECT COUNT(*) FROM cpms_projects')->fetchColumn()==4 && !is_dir($temporary.'/storage/secrets'),'Source or keys changed.');
+    nativeReferenceAssert(hash_file('sha256',$pdf)===$before && $db->query('SELECT COUNT(*) FROM cpms_projects')->fetchColumn()==(getenv('CPMS2_HISTORICAL_PROJECT_FIXTURE')?3:4) && !is_dir($temporary.'/storage/secrets'),'Source or keys changed.');
     $db->commit();
 } catch (Exception $e) { $db->rollBack(); throw $e; }
 // Fixture mutation belongs to the test harness, never the exporter.

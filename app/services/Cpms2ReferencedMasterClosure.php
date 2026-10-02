@@ -1,11 +1,13 @@
 <?php
 // app/services/Cpms2ReferencedMasterClosure.php
 // PHP 5.6: filtered source rows plus only masters referenced by exported children.
+require_once __DIR__.'/Cpms2HistoricalProjectRecoveryService.php';
 class Cpms2ReferencedMasterClosure
 {
     private $source;
     private $normal=array(); private $references=array(); private $recovered=array(); private $missing=array();
     private $assignments=array(); private $vendors=array(); private $report=array(); private $failures=array();
+    private $historicalProjects=array(); private $projectRecovery=array();
     private static $entities=array('cpms_projects'=>'projects','cpms_material_items'=>'material_items','cpms_equipment_items'=>'equipment_items','workers'=>'workers','direct_team_members'=>'direct_team','cpms_vendors'=>'vendors','cpms_material_usage'=>'material_usages');
     public function __construct($source,$root=null,$storage=null)
     {
@@ -56,14 +58,27 @@ class Cpms2ReferencedMasterClosure
                         $this->referencesFor($table,$row); $changed=true;
                     }
                 }
-                foreach (array_diff_key($pending,$found) as $id=>$unused) $this->missing[$table][$id]=true;
+                foreach (array_diff_key($pending,$found) as $id=>$unused) {
+                    if ($table==='cpms_projects') {
+                        $recovery=(new Cpms2HistoricalProjectRecoveryService($source))->recover($id);
+                        $this->projectRecovery[]=$recovery['diagnostic'];
+                        if ($recovery['row']) { $this->historicalProjects[(string)$id]=$recovery['row']; $this->recovered[$table][(string)$id]=true; $changed=true; continue; }
+                    }
+                    $this->missing[$table][$id]=true;
+                }
             }
         } while ($changed);
         foreach (self::$entities as $table=>$entity) {
             $this->report[$entity]=array('normal'=>count($this->normal[$table]),'reference_recovered'=>count($this->recovered[$table]),'physically_missing'=>count($this->missing[$table]));
             if (in_array($table,array('workers','direct_team_members'),true)) continue;
-            foreach ($this->missing[$table] as $id=>$unused) $this->failures[]=array('entity'=>$entity,'legacy_id'=>(string)$id,'code'=>'legacy_referenced_master_physically_missing');
+            foreach ($this->missing[$table] as $id=>$unused) {
+                $code='legacy_referenced_master_physically_missing';
+                if ($table==='cpms_projects') foreach ($this->projectRecovery as $diagnostic) if ($diagnostic['legacy_id']===(string)$id) $code=$diagnostic['code'];
+                $this->failures[]=array('entity'=>$entity,'legacy_id'=>(string)$id,'code'=>$code);
+            }
         }
+        $this->report['projects']['historical_snapshot_recovered']=count($this->historicalProjects);
+        $this->report['historical_project_recovery']=$this->projectRecovery;
         $snapshot=0;
         foreach ($this->assignments as $row) if ($this->snapshotOnly($row)) {
             $name=!empty($row['worker_name_snapshot'])?trim($row['worker_name_snapshot']):(isset($row['name'])?trim($row['name']):'');
@@ -101,11 +116,17 @@ class Cpms2ReferencedMasterClosure
     {
         foreach ($this->source->rows($table,$fields,$where,$params) as $row) yield $row;
         if (empty($this->recovered[$table])) return;
-        foreach ($this->source->rowsByIds($table,array_merge($fields,array('is_deleted','deleted_at')),array_keys($this->recovered[$table]),$where,$params) as $row) {
+        $ids=array_keys($table==='cpms_projects'?array_diff_key($this->recovered[$table],$this->historicalProjects):$this->recovered[$table]);
+        foreach ($this->source->rowsByIds($table,array_merge($fields,array('is_deleted','deleted_at')),$ids,$where,$params) as $row) {
             $row['legacy_reference_only']=1; $row['recovered_by']='referenced_master_closure';
             if (array_key_exists('is_deleted',$row)) { $row['source_is_deleted']=$row['is_deleted']; unset($row['is_deleted']); }
             if (array_key_exists('deleted_at',$row)) { $row['source_deleted_at']=$row['deleted_at']; unset($row['deleted_at']); }
             yield $row;
+        }
+        if ($table==='cpms_projects') foreach ($this->historicalProjects as $row) {
+            if ($where!=='') throw new RuntimeException('Historical project filtering unsupported.');
+            $metadata=explode(' ','legacy_reference_only legacy_project_physically_deleted recovered_by recovery_source source_snapshot_date source_status_snapshot');
+            yield array_intersect_key($row,array_flip(array_merge($fields,$metadata)));
         }
     }
     public static function businessNumber($row)

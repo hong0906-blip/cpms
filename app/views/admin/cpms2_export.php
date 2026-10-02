@@ -41,6 +41,17 @@ $renderClosure=function($data) {
     }
     if (isset($data['referenced_master_closure']['labor_vendor'])) foreach (array('legacy_vendor_id'=>'업체 PK 확인','unique_business_identity'=>'고유 사업자 확인','snapshot_only'=>'업체 Snapshot 보존','ambiguous'=>'업체 식별 모호') as $key=>$label) echo '<div><dt>'.h($label).'</dt><dd>'.(int)$data['referenced_master_closure']['labor_vendor'][$key].'</dd></div>';
     echo '</dl>';
+    if (!empty($data['referenced_master_closure']['historical_project_recovery'])) {
+        echo '<h3>삭제 프로젝트 Snapshot 복구</h3>';
+        echo '<p>복구 성공 '.(int)$data['referenced_master_closure']['projects']['historical_snapshot_recovered'].'건</p>';
+        $sources=array('ai_daily_snapshot'=>'AI Daily Snapshot','cost_data_event'=>'Cost Data Event');
+        foreach ($data['referenced_master_closure']['historical_project_recovery'] as $recovery) {
+            echo '<p>legacy #'.h($recovery['legacy_id']).' · 물리 Master: 없음 · 프로젝트명: '.($recovery['name_confirmed']?'확인':'미확인').' · 상태: '.($recovery['status_confirmed']?'확인':'미확인');
+            if (isset($sources[$recovery['recovery_source']])) echo ' · Source: '.h($sources[$recovery['recovery_source']]);
+            if (!$recovery['recovered']) echo ' · '.($recovery['code']==='legacy_project_snapshot_ambiguous'?'프로젝트명 Snapshot 충돌':'프로젝트명 Snapshot 없음').' · Export 차단';
+            echo '</p>';
+        }
+    }
 };
 ?>
 <!doctype html>
@@ -76,7 +87,7 @@ $renderClosure=function($data) {
   <?php if (isset($report['accounts'])): $renderAccounts($report['accounts']); ?>
   <?php if (!$report['can_export']): ?><p class="cpms2-error" role="alert">사전검사를 통과하지 못해 Export를 진행할 수 없습니다.</p><?php endif; ?>
   <?php endif; ?>
-  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity']) && !in_array($failure['code'],array('legacy_referenced_master_physically_missing','legacy_labor_snapshot_insufficient'))) continue; ?><p class="cpms2-error"><?php echo h(isset($failure['entity'])?$failure['entity']:'문서'); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
+  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity']) && !in_array($failure['code'],array('legacy_referenced_master_physically_missing','legacy_labor_snapshot_insufficient','legacy_project_snapshot_unavailable','legacy_project_snapshot_ambiguous'))) continue; ?><p class="cpms2-error"><?php echo h(isset($failure['entity'])?$failure['entity']:'문서'); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
   <?php foreach ($report['warnings'] as $warning): ?><p class="cpms2-warning">Warning: <?php echo h($warning); ?></p><?php endforeach; ?>
 </section>
 <?php endif; ?>
