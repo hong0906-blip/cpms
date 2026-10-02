@@ -64,6 +64,8 @@ class Cpms2WebExportService
             if (in_array('deleted_at',$columns)) $filter[]='deleted_at IS NULL';
             $counts[$table]=(int)$this->source->query('SELECT COUNT(*) FROM '.$table.(count($filter)?' WHERE '.implode(' AND ',$filter):''))->fetchColumn();
         }
+        $migrationSource=new Cpms2ReferencedMasterClosure($this->source,$this->root,$this->storage);
+        $closure=$migrationSource->summary();
         $expected=0; $missing=array();
         foreach ($this->source->rows('cpms_material_statement_files',array('id','stored_path','original_name')) as $r) {
             $expected++;
@@ -75,13 +77,22 @@ class Cpms2WebExportService
         $excluded=Cpms2LaborExportService::excludedForceAdjustments($this->source);
         $warnings=array_merge($warnings,Cpms2LaborExportService::exclusionWarnings($excluded));
         if ($missing) $warnings[]='Missing statement files: '.count($missing);
-        $this->phase='employees'; $accounts=$this->sensitive->preflight($this->source);
-        $this->phase='safety'; $safety=(new Cpms2SafetyCostExportService($this->root,$this->storage))->collect($this->source);
+        $closureFailures=$migrationSource->failures();
+        if ($closureFailures) {
+            $phaseMap=array('material_items'=>'material','material_usages'=>'material','equipment_items'=>'equipment','workers'=>'workers','direct_team'=>'direct_team','labor_workers'=>'labor','vendors'=>'vendors');
+            $this->phase=isset($phaseMap[$closureFailures[0]['entity']])?$phaseMap[$closureFailures[0]['entity']]:'projects';
+            return $this->lastReport=array('counts'=>$counts,'referenced_master_closure'=>$closure,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'excluded_labor_force_adjustments'=>$excluded,'failures'=>$closureFailures,'can_export'=>false,'warnings'=>$warnings);
+        }
+        $this->phase='labor'; $laborReport=new Cpms2LaborReferencePreflightWriter();
+        (new Cpms2LaborExportService($migrationSource,$this->attendance,$laborReport))->run();
+        $closure['labor_vendor']=$laborReport->vendors;
+        $this->phase='employees'; $accounts=$this->sensitive->preflight($migrationSource);
+        $this->phase='safety'; $safety=(new Cpms2SafetyCostExportService($this->root,$this->storage))->collect($migrationSource);
         $this->phase='completed_approvals'; $archive=(new Cpms2CompletedApprovalExportService($this->storage))->collect($this->source);
         $warnings=array_merge($warnings,$safety['warnings'],$archive['warnings']);
-        $failures=array_merge($accounts['failures'],$archive['failures']);
+        $failures=array_merge($migrationSource->failures(),$accounts['failures'],$archive['failures']);
         if ($failures) $this->phase=isset($failures[0]['entity'])?$failures[0]['entity']:'completed_approvals';
-        return $this->lastReport=array('counts'=>$counts,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'excluded_labor_force_adjustments'=>$excluded,'accounts'=>$accounts,'safety_costs'=>$safety['summary'],'completed_approvals'=>$archive['summary'],'failures'=>$failures,'can_export'=>!count($failures),'warnings'=>$warnings);
+        return $this->lastReport=array('counts'=>$counts,'referenced_master_closure'=>$closure,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'excluded_labor_force_adjustments'=>$excluded,'accounts'=>$accounts,'safety_costs'=>$safety['summary'],'completed_approvals'=>$archive['summary'],'failures'=>$failures,'can_export'=>!count($failures),'warnings'=>$warnings);
     }
     public function generate($employee)
     {
@@ -100,7 +111,7 @@ class Cpms2WebExportService
             (new Cpms2MigrationExportService($this->source,$writer,$this->root,$this->fileRoot,$this->sensitive,$this->storage))->run($this->attendance);
             $commit=getenv('CPMS2_EXPORT_SOURCE_COMMIT'); if (!$commit || !preg_match('/^[a-f0-9]{40}$/D',$commit)) { $commit=null; $writer->warnings[]='Source commit unavailable in FileZilla deployment; source_code_sha256 is recorded.'; }
             $writer->phase='summary';
-            $fingerprint=''; foreach (array('Cpms2ReadOnlySource','Cpms2ExportPackageWriter','Cpms2MigrationExportService','Cpms2LaborExportService','Cpms2WebExportService','Cpms2SensitiveExportService','Cpms2PayrollAccountExportService','Cpms2ExportDiagnostic','Cpms2SafetyCostExportService','Cpms2CompletedApprovalExportService','Cpms2ReadOnlyDriveDownload') as $file) $fingerprint.=hash_file('sha256',__DIR__.'/'.$file.'.php');
+            $fingerprint=''; foreach (array('Cpms2ReadOnlySource','Cpms2ExportPackageWriter','Cpms2MigrationExportService','Cpms2LaborExportService','Cpms2WebExportService','Cpms2SensitiveExportService','Cpms2PayrollAccountExportService','Cpms2ExportDiagnostic','Cpms2SafetyCostExportService','Cpms2CompletedApprovalExportService','Cpms2ReadOnlyDriveDownload','Cpms2ReferencedMasterClosure') as $file) $fingerprint.=hash_file('sha256',__DIR__.'/'.$file.'.php');
             $schema=$this->source->report(); if ($this->attendance) $schema['attendance_database']=$this->attendance->report();
             $summary=$writer->finish($output,array('format'=>'cpms1-company-export','format_version'=>1,'export_id'=>'cpms1-'.$id,'created_at'=>date('c'),'source_system'=>'cpms1','source_repository'=>'hong0906-blip/cpms','source_commit'=>$commit,'source_code_sha256'=>hash('sha256',$fingerprint),'php_version'=>PHP_VERSION,'database_name'=>$this->source->databaseName()),$schema);
             return array('id'=>$id,'owner_employee_id'=>(int)$employee['id'],'created_at'=>date('c'),'size'=>filesize($output),'sha256'=>hash_file('sha256',$output),'summary'=>$summary);

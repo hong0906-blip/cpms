@@ -92,7 +92,7 @@ class Cpms2LaborExportService
     }
     private function assignments($project,$month)
     {
-        $fields=explode(' ','id project_id worker_id direct_member_id name worker_name_snapshot phone daily_wage_snapshot deposit_rate daily_wage company_name agency_name_snapshot job_type_snapshot legacy_outsourcing_ratio is_outsourcing source_type');
+        $fields=explode(' ','id project_id worker_id direct_member_id vendor_id biz_no business_no name worker_name_snapshot phone daily_wage_snapshot deposit_rate daily_wage company_name agency_name_snapshot job_type_snapshot legacy_outsourcing_ratio is_outsourcing source_type matched_status');
         $result=array();
         foreach ($this->db->rows('cpms_project_labor_workers',$fields,'project_id=?',array($project)) as $r) {
             if (count($this->db->columns('cpms_project_labor_worker_months'))) {
@@ -130,8 +130,11 @@ class Cpms2LaborExportService
         elseif ($this->attendance) $st=$this->attendance->query('SELECT DISTINCT LEFT(start_time_phone,7) FROM attendance');
         if (isset($st)) while ($value=$st->fetchColumn()) if (preg_match('/^\d{4}-\d{2}$/',$value)) $months[$value]=true;
         ksort($months);
-        foreach ($this->db->rows('cpms_project_labor_workers',explode(' ','id project_id worker_id direct_member_id name phone')) as $r) {
-            $this->writer->record('labor_workers',array('legacy_id'=>$r['id'],'legacy_project_id'=>$r['project_id'],'legacy_worker_master_id'=>!empty($r['worker_id'])?$r['worker_id']:null,'legacy_direct_member_id'=>!empty($r['direct_member_id'])?$r['direct_member_id']:null,'name'=>isset($r['name'])?$r['name']:null,'phone'=>isset($r['phone'])?$r['phone']:null));
+        $vendorCounts=array('legacy_vendor_id'=>0,'unique_business_identity'=>0,'snapshot_only'=>0,'ambiguous'=>0);
+        foreach ($this->db->rows('cpms_project_labor_workers',explode(' ','id project_id worker_id direct_member_id name worker_name_snapshot phone daily_wage_snapshot deposit_rate company_name agency_name_snapshot job_type_snapshot source_type matched_status')) as $r) {
+            $snapshot=array_intersect_key($r,array_flip(explode(' ','worker_name_snapshot daily_wage_snapshot deposit_rate company_name agency_name_snapshot job_type_snapshot source_type matched_status')));
+            if ($this->db instanceof Cpms2ReferencedMasterClosure) $snapshot['legacy_snapshot_only']=$this->db->snapshotOnly($r);
+            $this->writer->record('labor_workers',array_merge(array('legacy_id'=>$r['id'],'legacy_project_id'=>$r['project_id'],'legacy_worker_master_id'=>!empty($r['worker_id'])?$r['worker_id']:null,'legacy_direct_member_id'=>!empty($r['direct_member_id'])?$r['direct_member_id']:null,'name'=>isset($r['name'])?$r['name']:null,'phone'=>isset($r['phone'])?$r['phone']:null),$snapshot));
         }
         $direct=array(); foreach ($this->db->rows('direct_team_members',array('id','name','monthly_salary','daily_wage')) as $r) $direct[$r['id']]=$r;
         $projects=array(); foreach ($this->db->rows('cpms_projects',array('id','name')) as $p) $projects[]=$p;
@@ -154,7 +157,10 @@ class Cpms2LaborExportService
                 }
                 $amounts=cpms_labor_calculate_worker_period_amounts($r,$daily,$month.'-01',date('Y-m-t',strtotime($month.'-01')));
                 $ratio=cpms_resolve_worker_outsourcing_ratio($r); $rate=cpms_resolve_labor_wage_rate($r);
-                $this->writer->record('labor_months',array('legacy_id'=>$id.':'.$month,'legacy_project_id'=>$p['id'],'legacy_labor_worker_id'=>$id,'target_month'=>$month.'-01','pay_type'=>!empty($r['salary_allocation_mode'])?'monthly':'unit','wage_rate'=>sprintf('%.2f',!empty($r['salary_allocation_mode'])?$direct[$directId]['monthly_salary']:$rate),'source_daily_rate'=>sprintf('%.8f',$rate),'labor_ratio'=>100-$ratio,'labor_outsourcing_ratio'=>$ratio,'vendor_name'=>!empty($r['agency_name_snapshot'])?$r['agency_name_snapshot']:(isset($r['company_name'])?$r['company_name']:''),'source_labor_amount'=>sprintf('%.2f',$amounts['labor_amount']),'source_outsourcing_amount'=>sprintf('%.2f',$amounts['outsourcing_amount'])));
+                $vendor=$this->db instanceof Cpms2ReferencedMasterClosure?$this->db->vendorSnapshot($r):array();
+                $resolution=isset($vendor['legacy_vendor_resolution'])?$vendor['legacy_vendor_resolution']:'snapshot_only'; $vendorCounts[$resolution]++;
+                if (!empty($vendor['legacy_vendor_ambiguous'])) $vendorCounts['ambiguous']++;
+                $this->writer->record('labor_months',array_merge(array('legacy_id'=>$id.':'.$month,'legacy_project_id'=>$p['id'],'legacy_labor_worker_id'=>$id,'target_month'=>$month.'-01','pay_type'=>!empty($r['salary_allocation_mode'])?'monthly':'unit','wage_rate'=>sprintf('%.2f',!empty($r['salary_allocation_mode'])?$direct[$directId]['monthly_salary']:$rate),'source_daily_rate'=>sprintf('%.8f',$rate),'labor_ratio'=>100-$ratio,'labor_outsourcing_ratio'=>$ratio,'vendor_name'=>!empty($r['agency_name_snapshot'])?$r['agency_name_snapshot']:(isset($r['company_name'])?$r['company_name']:''),'source_labor_amount'=>sprintf('%.2f',$amounts['labor_amount']),'source_outsourcing_amount'=>sprintf('%.2f',$amounts['outsourcing_amount'])),$vendor));
                 // Preserve CPMS1 month rounding; allocate its rounded totals without inventing money.
                 $weights=array(); $outWeights=array();
                 foreach ($daily as $date=>$gongsu) { $units=!empty($r['salary_allocation_mode'])?($gongsu>0?1:0):max(0,$gongsu); $weights[$date]=$units; $inRange=empty($r['outsourcing_start_date']) || empty($r['outsourcing_end_date']) || ($date>=$r['outsourcing_start_date'] && $date<=$r['outsourcing_end_date']); $outWeights[$date]=$inRange?$units:0; }
@@ -167,6 +173,7 @@ class Cpms2LaborExportService
                 $this->writer->amount($p['id'],'labor',$amounts['labor_amount']); $this->writer->amount($p['id'],'subcontract',$amounts['outsourcing_amount']);
             }
         }
+        if ($this->writer instanceof Cpms2ExportPackageWriter) $this->writer->referenceClosure['labor_vendor']=$vendorCounts;
     }
     public static function allocate($total,$weights)
     {

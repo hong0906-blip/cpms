@@ -38,6 +38,18 @@ class Cpms2ReadOnlySource
         return $columns;
     }
     public function report() { return $this->schema; }
+    public function rowsByIds($table,$fields,$ids,$where='',$params=array())
+    {
+        $columns=$this->columns($table);
+        $fields=array_values(array_unique(array_intersect($fields,$columns)));
+        if (!in_array('id',$fields)) throw new RuntimeException('Source primary key unavailable.');
+        foreach (array_chunk(array_values(array_unique($ids)),500) as $chunk) {
+            $sql='SELECT `'.implode('`,`',$fields).'` FROM `'.$table.'` WHERE id IN ('.implode(',',array_fill(0,count($chunk),'?')).')';
+            if ($where!=='') $sql.=' AND ('.$where.')';
+            $st=$this->query($sql.' ORDER BY id',array_merge($chunk,$params));
+            while ($row=$st->fetch(PDO::FETCH_ASSOC)) yield $row;
+        }
+    }
     public function columns($table) { return isset($this->schema[$table]) ? $this->schema[$table]['columns'] : $this->inspect($table); }
     public function rows($table, $fields, $where = '', $params = array())
     {

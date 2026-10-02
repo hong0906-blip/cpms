@@ -7,6 +7,7 @@ require_once __DIR__.'/Cpms2SensitiveExportService.php';
 require_once __DIR__.'/Cpms2ExportDiagnostic.php';
 require_once __DIR__.'/Cpms2SafetyCostExportService.php';
 require_once __DIR__.'/Cpms2CompletedApprovalExportService.php';
+require_once __DIR__.'/Cpms2ReferencedMasterClosure.php';
 
 class Cpms2MigrationExportService
 {
@@ -74,6 +75,11 @@ class Cpms2MigrationExportService
             $mandatory=in_array($table,array('employees','cpms_vendors','workers','direct_team_members','cpms_projects'));
             $columns=$this->db->inspect($table,$mandatory,array('id','name'));
             if (!count($columns)) $this->writer->warnings[]='Optional source table missing: '.$table;
+        }
+        if ($this->db instanceof Cpms2ReadOnlySource) $this->db=new Cpms2ReferencedMasterClosure($this->db,$this->root,$this->storage);
+        if ($this->db instanceof Cpms2ReferencedMasterClosure) {
+            $this->writer->referenceClosure=$this->db->summary();
+            $failures=$this->db->failures(); if ($failures) throw new RuntimeException($failures[0]['code']);
         }
         foreach (array('departments','positions','employees','vendors','workers','direct_team','projects','project_members','project_roles','labor_workers','labor_months','labor_entries','material_items','material_usages','equipment_items','equipment_usages','subcontract_costs','safety_costs','progress_billings','material_statement_files','safety_evidence_files','legacy_completed_approvals') as $entity) $this->writer->emptyEntity($entity);
         $this->writer->phase='employees'; $departments=array(); $positions=array();

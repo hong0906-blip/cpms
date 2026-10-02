@@ -30,6 +30,18 @@ $renderMigration=function($data) {
         echo '</dl>';
     }
 };
+$renderClosure=function($data) {
+    if (empty($data['referenced_master_closure'])) return;
+    echo '<h3>참조 Master 사전검사</h3><dl>';
+    foreach (array('projects'=>'프로젝트','material_items'=>'자재','equipment_items'=>'장비','workers'=>'근로자','direct_team'=>'직영팀','vendors'=>'업체','material_usages'=>'명세서 참조 사용내역') as $key=>$label) {
+        if (!isset($data['referenced_master_closure'][$key])) continue;
+        $row=$data['referenced_master_closure'][$key];
+        echo '<div><dt>'.h($label).'</dt><dd>일반 '.(int)$row['normal'].' / 참조 복구 '.(int)$row['reference_recovered'].' / 물리 누락 '.(int)$row['physically_missing'].'</dd></div>';
+        if (isset($row['snapshot_only_labor_workers'])) echo '<div><dt>노무 Snapshot 근로자</dt><dd>'.(int)$row['snapshot_only_labor_workers'].'</dd></div>';
+    }
+    if (isset($data['referenced_master_closure']['labor_vendor'])) foreach (array('legacy_vendor_id'=>'업체 PK 확인','unique_business_identity'=>'고유 사업자 확인','snapshot_only'=>'업체 Snapshot 보존','ambiguous'=>'업체 식별 모호') as $key=>$label) echo '<div><dt>'.h($label).'</dt><dd>'.(int)$data['referenced_master_closure']['labor_vendor'][$key].'</dd></div>';
+    echo '</dl>';
+};
 ?>
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -56,6 +68,7 @@ $renderMigration=function($data) {
 <section>
   <h2>사전검사 결과</h2>
   <?php $renderMigration($report); ?>
+  <?php $renderClosure($report); ?>
   <dl>
   <?php foreach ($report['counts'] as $entity=>$count): ?><div><dt><?php echo h($entity); ?></dt><dd><?php echo number_format($count); ?>건</dd></div><?php endforeach; ?>
   </dl>
@@ -63,7 +76,7 @@ $renderMigration=function($data) {
   <?php if (isset($report['accounts'])): $renderAccounts($report['accounts']); ?>
   <?php if (!$report['can_export']): ?><p class="cpms2-error" role="alert">사전검사를 통과하지 못해 Export를 진행할 수 없습니다.</p><?php endif; ?>
   <?php endif; ?>
-  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity'])) continue; ?><p class="cpms2-error">문서 #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
+  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity']) && !in_array($failure['code'],array('legacy_referenced_master_physically_missing','legacy_labor_snapshot_insufficient'))) continue; ?><p class="cpms2-error"><?php echo h(isset($failure['entity'])?$failure['entity']:'문서'); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
   <?php foreach ($report['warnings'] as $warning): ?><p class="cpms2-warning">Warning: <?php echo h($warning); ?></p><?php endforeach; ?>
 </section>
 <?php endif; ?>
@@ -71,6 +84,7 @@ $renderMigration=function($data) {
 <section>
   <h2>생성 완료</h2>
   <?php $renderMigration($summary); ?>
+  <?php $renderClosure($summary); ?>
   <?php if (!empty($summary['account_preflight'])) $renderAccounts($summary['account_preflight']); ?>
   <p>SHA-256: <?php echo h($package['sha256']); ?></p>
   <p>ZIP <?php echo number_format($package['size']); ?> bytes · 전체 Package 파일 <?php echo (int)$summary['exported_file_count']; ?>개 · 누락 <?php echo (int)$summary['missing_file_count']; ?>건 · 중복 제거 <?php echo (int)$summary['deduplicated_file_count']; ?>건</p>
