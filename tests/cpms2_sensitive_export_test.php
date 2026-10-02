@@ -14,10 +14,10 @@ class Cpms2AccountFixtureSource
     public $tables=array(); public $queries=array();
     public function rows($table,$fields) { if (isset($this->tables[$table])) foreach ($this->tables[$table] as $row) yield array_intersect_key($row,array_flip($fields)); }
     public function columns($table) { return !empty($this->tables[$table])?array_keys($this->tables[$table][0]):array(); }
-    public function query($sql,$params) {
+    public function query($sql,$params=array()) {
         Cpms2ReadOnlySource::assertReadOnly($sql); $this->queries[]=$sql;
-        account_assert($params===array(120),'Snapshot query was not scoped to legacy worker ID.');
-        $rows=array(); foreach ($this->tables['cpms_project_labor_workers'] as $row) if ($row['worker_id']===$params[0] && trim($row['bank_account'])!=='') $rows[]=$row;
+        if ($params) account_assert(count($params)===1 && strpos($sql,'worker_id=?')!==false,'Snapshot query was not scoped to legacy worker ID.');
+        $rows=array(); foreach ($this->tables['cpms_project_labor_workers'] as $row) if ((!$params || (isset($row['worker_id']) && $row['worker_id']===$params[0])) && trim($row['bank_account'])!=='') $rows[]=$row;
         return new Cpms2AccountFixtureStatement($rows);
     }
 }
@@ -25,6 +25,12 @@ class Cpms2AccountFixtureStatement
 {
     private $rows; public function __construct($rows) { $this->rows=$rows; }
     public function fetch($mode=null) { return array_shift($this->rows); }
+}
+// A synthetic hash collision exercises the defensive branch; production always
+// uses CryptoHelper::hashSensitive and never accepts a hash supplied by a snapshot.
+class Cpms2CollisionFixtureService extends Cpms2SensitiveExportService
+{
+    protected function snapshotHash($number) { return CryptoHelper::hashSensitive('000000000003'); }
 }
 // A real temporary file tree exposed with read-only permissions on every OS.
 class Cpms2ReadonlyPayrollFixture
@@ -170,14 +176,56 @@ try {
     $noHash=$row; unset($noHash['bank_account_hash']);
     account_reject(function() use($service,$noHash,$snapshots){ $service->workerAccount($noHash,$snapshots); },'WORKER_ACCOUNT_SNAPSHOT_CONFLICT');
     $snapshots->tables['cpms_project_labor_workers']=array($other);
-    account_reject(function() use($service,$row,$snapshots){ $service->workerAccount($row,$snapshots); },'WORKER_ACCOUNT_HASH_MISMATCH');
+    account_reject(function() use($root,$row,$snapshots){ (new Cpms2SensitiveExportService($root))->workerAccount($row,$snapshots); },'WORKER_ACCOUNT_HASH_MISMATCH');
     $snapshots->tables['cpms_project_labor_workers']=array($snapshot); $snapshots->tables['cpms_project_labor_workers'][0]['worker_id']=999;
-    account_reject(function() use($service,$row,$snapshots){ $service->workerAccount($row,$snapshots); },'WORKER_ACCOUNT_DECRYPT_FAILED');
+    account_assert((new Cpms2SensitiveExportService($root))->workerAccount($row,$snapshots)['account_number']===$number,'Unlinked global hash recovery failed.');
     $snapshots->tables['cpms_project_labor_workers']=array($snapshot); $snapshots->tables['workers']=array($row);
     $recoveryReport=$service->preflight($snapshots);
     account_assert($recoveryReport['counts']['workers']['snapshot_recovered']===1 && $recoveryReport['counts']['workers']['failed']===0,'Snapshot summary wrong.');
     ob_start(); $service->workerAccount($row,$snapshots); $console=ob_get_clean();
     $safe=json_encode($recoveryReport).$console.implode(' ',$snapshots->queries);
     foreach (array($number,$row['bank_account_enc'],$row['bank_account_hash'],'lost-fixture-key') as $secret) account_assert(strpos($safe,$secret)===false,'Snapshot account, cipher, hash or key leaked.');
+    foreach (array('000-000-000001','000.000.000001','000/000/000001','Fixture bank (000000000001)') as $legacyNumber) {
+        account_assert(Cpms2SensitiveExportService::accountNumber($legacyNumber)==='000000000001','Legacy vendor punctuation/label normalization failed.');
+    }
+    foreach (array('없음','미등록','현금','Fixture bank','123','***000003') as $unregistered) {
+        $vendor=array('id'=>31,'name'=>'Fixture vendor','bank_name'=>'Fixture bank','account_number'=>$unregistered);
+        account_assert(!Cpms2SensitiveExportService::hasSource($vendor) && Cpms2SensitiveExportService::plainAccount($vendor,'VENDORS_ACCOUNT_MISSING')['account_number']===null,'Unregistered vendor blocked or fabricated an account.');
+    }
+    $alias=array('account_number'=>'없음','bank_account'=>'Fixture bank 000.000.000001');
+    account_assert(Cpms2SensitiveExportService::plainAccount($alias,'VENDORS_ACCOUNT_MISSING')['account_number']==='000000000001','Valid secondary account alias lost.');
+    $global=new Cpms2AccountFixtureSource(); $unlinked=$snapshot; $unlinked['worker_id']=null;
+    $global->tables['cpms_project_labor_workers']=array($unlinked,$unlinked); $globalService=new Cpms2SensitiveExportService($root);
+    $method=null; account_assert($globalService->workerAccount($row,$global,$method)['account_number']===$number && $method==='snapshot_recovered','Global repeated hash match not recovered.');
+    $another=$row; $another['id']=121;
+    account_assert($globalService->workerAccount($another,$global)['account_number']===$number,'Global index not shared between workers.');
+    $scans=0; foreach ($global->queries as $sql) if (strpos($sql,'WHERE bank_account IS NOT NULL')!==false) $scans++;
+    account_assert($scans===1,'Global snapshots scanned once per worker instead of once per source.');
+    $noHash=$row; unset($noHash['bank_account_hash']); $queryCount=count($global->queries);
+    account_reject(function() use($globalService,$noHash,$global){ $globalService->workerAccount($noHash,$global); },'WORKER_ACCOUNT_DECRYPT_FAILED');
+    account_assert(count($global->queries)===$queryCount+1,'Hashless worker used global snapshot search.');
+    $missingGlobal=new Cpms2AccountFixtureSource(); $missingGlobal->tables['cpms_project_labor_workers']=array($other);
+    $missingGlobal->tables['cpms_project_labor_workers'][0]['worker_id']=null;
+    account_reject(function() use($root,$row,$missingGlobal){ (new Cpms2SensitiveExportService($root))->workerAccount($row,$missingGlobal); },'WORKER_ACCOUNT_DECRYPT_FAILED');
+    $global->tables['cpms_project_labor_workers'][]=array('bank_account'=>$other['bank_account'],'worker_id'=>null);
+    account_reject(function() use($root,$row,$global){ (new Cpms2CollisionFixtureService($root))->workerAccount($row,$global); },'WORKER_ACCOUNT_SNAPSHOT_CONFLICT');
+    $safe=json_encode($globalService->preflight($global)).implode(' ',$global->queries);
+    foreach (array($number,$row['bank_account_enc'],$row['bank_account_hash'],'lost-fixture-key') as $secret) account_assert(strpos($safe,$secret)===false,'Global recovery leaked sensitive material.');
+    // Latest file is empty: select the latest populated version from both roots.
+    file_put_contents($path,json_encode(array('employees'=>array())));
+    $previous=$storage.'/company_overhead/payroll_versions/2021'; mkdir($previous,0700,true);
+    file_put_contents($previous.'/02.json',json_encode(array('employees'=>array($payroll))));
+    $fallbackPayroll=(new Cpms2SensitiveExportService($root,$storage))->employeeAccounts($source);
+    account_assert($fallbackPayroll['details']['latest_month']===date('Y-m') && $fallbackPayroll['details']['latest_employee_rows']===0 && $fallbackPayroll['details']['selected_month']==='2021-02' && $fallbackPayroll['accounts'][17]['account_number']==='000000000004','Empty latest payroll lost populated earlier version.');
+    $newAccount=$payroll; $newAccount['bank_account']='000000000005';
+    file_put_contents($path,json_encode(array('employees'=>array($newAccount))));
+    account_assert((new Cpms2SensitiveExportService($root,$storage))->employeeAccounts($source)['accounts'][17]['account_number']==='000000000005','Older account overrode current populated payroll version.');
+    unset($newAccount['bank_account']); file_put_contents($path,json_encode(array('employees'=>array($newAccount))));
+    $noCurrentAccount=(new Cpms2SensitiveExportService($root,$storage))->employeeAccounts($source);
+    account_assert($noCurrentAccount['details']['selected_month']===date('Y-m') && $noCurrentAccount['details']['account_rows']===0 && $noCurrentAccount['accounts'][17]['account_number']===null,'Current zero-account payroll incorrectly resurrected an older account.');
+    $onlyEmpty=$root.'/empty-payroll'; mkdir($onlyEmpty.'/data/company_overhead/payroll_versions/2022',0700,true);
+    file_put_contents($onlyEmpty.'/data/company_overhead/payroll_versions/2022/01.json',json_encode(array('employees'=>array())));
+    $empty=(new Cpms2SensitiveExportService($onlyEmpty))->employeeAccounts($source);
+    account_assert($empty['details']['status']==='EMPLOYEE_PAYROLL_EMPTY_VERSIONS' && $empty['details']['selected_month']==='' && !$empty['failures'],'All-empty payroll versions confused with missing source.');
 } finally { putenv($originalEnvironment===false?'CPMS_WORKER_CRYPTO_KEY':'CPMS_WORKER_CRYPTO_KEY='.$originalEnvironment); account_remove_fixture($root); }
 echo 'PASS: '.$checks." read-only account/key/payroll/conflict/privacy checks\n";

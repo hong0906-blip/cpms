@@ -62,8 +62,11 @@ mkdir($temporary.'/data/company_overhead/payroll_versions/2026',0700,true);
 file_put_contents($temporary.'/data/company_overhead/payroll_versions/2026/07.json',json_encode(array('employees'=>array(array('employee_id'=>17,'name'=>'Fixture employee','bank_name'=>'Fixture bank','bank_account'=>'000000000004','account_holder'=>'Fixture employee','resident_encrypted'=>'forbidden-payroll-resident')))));
 // Lost cipher key recovered only from unchanged, worker-ID-scoped source snapshots.
 $db->exec("UPDATE workers SET bank_account_enc='aes256cbc:lost-fixture-key' WHERE id=120");
-$db->exec("UPDATE cpms_project_labor_workers SET bank_account='000-000-000003',bank_name='Fixture bank',account_holder='Fixture worker' WHERE worker_id=120");
+$db->exec("INSERT INTO cpms_project_labor_workers(id,project_id,worker_id,name,is_deleted,bank_account,bank_name,account_holder) VALUES(318,22,NULL,'Fixture historical snapshot',1,'000.000/000003','Fixture bank','Fixture worker')");
 $beforeAccounts=$db->query('SELECT bank_account_enc,bank_account_hash FROM workers WHERE id=120')->fetch(PDO::FETCH_ASSOC);
+// A later empty file must not hide the populated payroll version.
+file_put_contents($temporary.'/data/company_overhead/payroll_versions/2026/08.json',json_encode(array('employees'=>array())));
+$db->exec("UPDATE cpms_vendors SET account_number='Fixture bank 000.000/000001' WHERE id=31");
 $db->exec('SET TRANSACTION READ ONLY'); $db->beginTransaction();
 try {
     $source=new Cpms2ReadOnlySource($db); $attendance=new Cpms2ReadOnlySource($db);
@@ -75,6 +78,7 @@ try {
     if (!$preflight['can_export']) throw new RuntimeException('Valid fixture account preflight blocked.');
     foreach ($preflight['accounts']['counts'] as $counts) if ($counts['source']!==1 || $counts['verified']!==1 || $counts['failed']!==0) throw new RuntimeException('Account preflight count mismatch.');
     if ($preflight['accounts']['counts']['workers']['snapshot_recovered']!==1 || $preflight['accounts']['counts']['workers']['decrypted']!==0) throw new RuntimeException('Snapshot recovery summary mismatch.');
+    if ($preflight['accounts']['payroll']['latest_month']!=='2026-08' || $preflight['accounts']['payroll']['latest_employee_rows']!==0 || $preflight['accounts']['payroll']['selected_month']!=='2026-07') throw new RuntimeException('Latest empty payroll version hid employee accounts.');
     $beforeHash=hash_file('sha256',$statement);
     $package=$web->generate($employee); $summary=$package['summary'];
     $generated=$web->downloadPath($package['id'],$package,$employee);
@@ -96,6 +100,7 @@ try {
 } catch (Exception $e) { $db->rollBack(); throw $e; }
 unlink($generated); unlink($temporary.'/private/employee-17.lock'); rmdir($temporary.'/private'); rmdir($temporary.'/web');
 unlink($statement); unlink($temporary.'/data/company_overhead/payroll_versions/2026/07.json');
+unlink($temporary.'/data/company_overhead/payroll_versions/2026/08.json');
 foreach (array('/data/company_overhead/payroll_versions/2026','/data/company_overhead/payroll_versions','/data/company_overhead','/data') as $directory) rmdir($temporary.$directory);
 if (!getenv('CPMS2_EXPORT_FIXTURE_OUTPUT')) unlink($output); rmdir($temporary);
 echo "Export MySQL fixture: PASS (read-only transaction, schemas, wage history, attendance/override, salary allocation, safety split, equipment fallback, dedup/missing, exclusions)\n";

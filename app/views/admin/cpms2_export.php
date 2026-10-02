@@ -15,7 +15,8 @@ $renderAccounts=function($accounts) {
     if (isset($accounts['payroll'])) {
         $payroll=$accounts['payroll'];
         echo '<p>직원 Payroll Source: '.($payroll['source_found']?'발견':'미발견').' · 상태: '.h($payroll['status']).'</p>';
-        if ($payroll['selected_month']!=='') echo '<p>직원 급여 Version 발견 · 기준월 '.h($payroll['selected_month']).' · 직원 Row '.(int)$payroll['employee_rows'].'건 · 계좌번호 등록 '.(int)$payroll['account_rows'].'건 · Mapping 성공 '.(int)$payroll['mapping_success'].'건 / 실패 '.(int)$payroll['mapping_failed'].'건</p>';
+        if (!empty($payroll['latest_month'])) echo '<p>최신 Payroll Version: '.h($payroll['latest_month']).' / 직원 '.(int)$payroll['latest_employee_rows'].'명 / 계좌 '.(int)$payroll['latest_account_rows'].'건</p>';
+        if ($payroll['selected_month']!=='') echo '<p>계좌 Migration Source: '.h($payroll['selected_month']).' / 직원 '.(int)$payroll['employee_rows'].'명 / 계좌 '.(int)$payroll['account_rows'].'건 · Mapping 성공 '.(int)$payroll['mapping_success'].'건 / 실패 '.(int)$payroll['mapping_failed'].'건</p>';
     }
     foreach ($accounts['failures'] as $failure) echo '<p class="cpms2-warning">'.h($labels[$failure['entity']]).' #'.h($failure['legacy_id']).' · '.h($failure['name']).' · 오류코드: '.h($failure['code']).'</p>';
 };

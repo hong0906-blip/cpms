@@ -7,7 +7,7 @@ class Cpms2PayrollAccountExportService
     public function __construct($root,$storage) { $this->root=$root; $this->storage=$storage; }
     private function effectiveVersion(&$details)
     {
-        $best=''; $path=''; $current=date('Y-m'); $unreadable=false;
+        $candidates=array(); $current=date('Y-m'); $unreadable=false;
         $directories=array_unique(array($this->root.'/data/company_overhead/payroll_versions',$this->storage.'/company_overhead/payroll_versions'));
         foreach ($directories as $directory) {
             if (!is_dir($directory)) continue;
@@ -17,23 +17,33 @@ class Cpms2PayrollAccountExportService
                 $files=@scandir($directory.'/'.$year); if (!is_array($files)) throw new RuntimeException('EMPLOYEE_PAYROLL_READ_FAILED');
                 foreach ($files as $file) if (preg_match('/^(0[1-9]|1[0-2])\.json$/D',$file,$m) && is_file($directory.'/'.$year.'/'.$file)) {
                     $details['source_found']=true;
-                    $month=$year.'-'.$m[1]; if ($month<=$current && $month>$best) { $best=$month; $path=$directory.'/'.$year.'/'.$file; }
+                    $month=$year.'-'.$m[1]; if ($month<=$current) $candidates[$month][]=$directory.'/'.$year.'/'.$file;
                 }
             }
         }
-        if ($path==='') {
+        if (!$candidates) {
             if ($unreadable) throw new RuntimeException('EMPLOYEE_PAYROLL_READ_FAILED');
             $details['status']=$details['source_found']?'EMPLOYEE_PAYROLL_EFFECTIVE_VERSION_NOT_FOUND':'EMPLOYEE_PAYROLL_SOURCE_NOT_FOUND'; return array();
         }
-        $details['selected_month']=$best; $details['status']='EMPLOYEE_PAYROLL_VERSION_FOUND';
-        $json=@file_get_contents($path); $version=is_string($json)?json_decode($json,true):null;
-        if (!is_array($version) || !isset($version['employees']) || !is_array($version['employees'])) throw new RuntimeException('EMPLOYEE_PAYROLL_READ_FAILED');
-        $details['employee_rows']=count($version['employees']);
-        return $version['employees'];
+        krsort($candidates,SORT_STRING);
+        foreach ($candidates as $month=>$paths) foreach ($paths as $path) {
+            $json=@file_get_contents($path); $version=is_string($json)?json_decode($json,true):null;
+            if (!is_array($version) || !isset($version['employees']) || !is_array($version['employees'])) throw new RuntimeException('EMPLOYEE_PAYROLL_READ_FAILED');
+            if ($details['latest_month']==='') {
+                $details['latest_month']=$month; $details['latest_employee_rows']=count($version['employees']);
+                foreach ($version['employees'] as $row) if (is_array($row) && Cpms2SensitiveExportService::hasSource($row)) $details['latest_account_rows']++;
+            }
+            if (!$version['employees']) continue;
+            // Use one latest populated version, never merge stale accounts from
+            // older versions when a current employee has no registered account.
+            $details['selected_month']=$month; $details['status']='EMPLOYEE_PAYROLL_VERSION_FOUND';
+            $details['employee_rows']=count($version['employees']); return $version['employees'];
+        }
+        $details['status']='EMPLOYEE_PAYROLL_EMPTY_VERSIONS'; return array();
     }
     public function accounts($source)
     {
-        $result=array('accounts'=>array(),'counts'=>Cpms2SensitiveExportService::counts(),'failures'=>array(),'details'=>array('source_found'=>false,'selected_month'=>'','employee_rows'=>0,'account_rows'=>0,'mapping_success'=>0,'mapping_failed'=>0,'status'=>'EMPLOYEE_PAYROLL_SOURCE_NOT_FOUND'));
+        $result=array('accounts'=>array(),'counts'=>Cpms2SensitiveExportService::counts(),'failures'=>array(),'details'=>array('source_found'=>false,'latest_month'=>'','latest_employee_rows'=>0,'latest_account_rows'=>0,'selected_month'=>'','employee_rows'=>0,'account_rows'=>0,'mapping_success'=>0,'mapping_failed'=>0,'status'=>'EMPLOYEE_PAYROLL_SOURCE_NOT_FOUND'));
         try { $payroll=$this->effectiveVersion($result['details']); }
         catch (RuntimeException $e) { $result['details']['status']='EMPLOYEE_PAYROLL_READ_FAILED'; $result['counts']['failed']=1; $result['failures'][]=array('entity'=>'employees','legacy_id'=>'','name'=>'','code'=>'EMPLOYEE_PAYROLL_READ_FAILED'); return $result; }
         if (!$payroll) return $result;

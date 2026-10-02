@@ -7,11 +7,16 @@ require_once __DIR__.'/Cpms2ExportDiagnostic.php';
 class Cpms2SensitiveExportService
 {
     private $root; private $storageRoot; private $keys=null;
+    private $snapshotIndex=null; private $snapshotSource=null;
     public function __construct($root,$storageRoot=null) { $this->root=$root; $this->storageRoot=$storageRoot===null?$root.'/storage':$storageRoot; }
     public static function accountNumber($value)
     {
         $value=trim((string)$value);
-        return $value!=='' && preg_match('/^[0-9\s-]+$/D',$value)?CryptoHelper::normalizeDigits($value):'';
+        // Account fields may include bank labels or legacy punctuation. Reject
+        // placeholders and masks; at least six digits are needed for a candidate.
+        if ($value==='' || preg_match('/없음|미등록|현금|[*●]/u',$value)) return '';
+        $number=CryptoHelper::normalizeDigits($value);
+        return strlen($number)>=6 && strlen($number)<=30?$number:'';
     }
     private function keyMaterials()
     {
@@ -44,8 +49,8 @@ class Cpms2SensitiveExportService
     }
     public static function hasSource($row,$worker=false)
     {
-        $fields=$worker?array('account_number','bank_account','bank_account_enc','bank_account_hash'):array('account_number','bank_account');
-        foreach ($fields as $field) if (isset($row[$field]) && trim((string)$row[$field])!=='') return true;
+        foreach (array('account_number','bank_account') as $field) if (isset($row[$field]) && self::accountNumber($row[$field])!=='') return true;
+        if ($worker) foreach (array('bank_account_enc','bank_account_hash') as $field) if (isset($row[$field]) && trim((string)$row[$field])!=='') return true;
         return false;
     }
     private static function bankFields($row,$number)
@@ -53,6 +58,39 @@ class Cpms2SensitiveExportService
         return array('bank_name'=>isset($row['bank_name'])?$row['bank_name']:null,'account_number'=>$number,'account_holder'=>isset($row['account_holder'])?$row['account_holder']:null);
     }
     private function snapshotAccount($row,$source,$expected)
+    {
+        try { return $this->linkedSnapshotAccount($row,$source,$expected); }
+        catch (RuntimeException $e) {
+            if (!$source || $expected==='') throw $e;
+            $index=$this->globalSnapshotIndex($source);
+            if (!isset($index[$expected])) throw $e;
+            if ($index[$expected]['conflict']) throw new RuntimeException('WORKER_ACCOUNT_SNAPSHOT_CONFLICT');
+            return self::snapshotBankFields($row,$index[$expected]['snapshot'],$index[$expected]['number']);
+        }
+    }
+    protected function snapshotHash($number) { return CryptoHelper::hashSensitive($number); }
+    private function globalSnapshotIndex($source)
+    {
+        if ($this->snapshotSource===$source && $this->snapshotIndex!==null) return $this->snapshotIndex;
+        $index=array(); $columns=$source->columns('cpms_project_labor_workers');
+        if (in_array('bank_account',$columns)) {
+            $fields=array_intersect(array('bank_account','bank_name','account_holder'),$columns);
+            $statement=$source->query('SELECT `'.implode('`,`',$fields).'` FROM cpms_project_labor_workers WHERE bank_account IS NOT NULL AND TRIM(bank_account)<>\'\'');
+            while ($snapshot=$statement->fetch(PDO::FETCH_ASSOC)) {
+                $number=self::accountNumber($snapshot['bank_account']); if ($number==='') continue;
+                $hash=$this->snapshotHash($number);
+                if (!isset($index[$hash])) $index[$hash]=array('number'=>$number,'snapshot'=>$snapshot,'conflict'=>false);
+                elseif ($index[$hash]['number']!==$number) $index[$hash]['conflict']=true;
+            }
+        }
+        $this->snapshotSource=$source; return $this->snapshotIndex=$index;
+    }
+    private static function snapshotBankFields($row,$snapshot,$number)
+    {
+        foreach (array('bank_name','account_holder') as $field) if (empty($row[$field]) && isset($snapshot[$field])) $row[$field]=$snapshot[$field];
+        return self::bankFields($row,$number);
+    }
+    private function linkedSnapshotAccount($row,$source,$expected)
     {
         if (!$source || !isset($row['id'])) throw new RuntimeException('WORKER_ACCOUNT_DECRYPT_FAILED');
         $columns=$source->columns('cpms_project_labor_workers');
@@ -70,8 +108,7 @@ class Cpms2SensitiveExportService
         if (count($candidates)>1 && count($matches)!==1) throw new RuntimeException('WORKER_ACCOUNT_SNAPSHOT_CONFLICT');
         if ($expected!=='' && count($matches)!==1) throw new RuntimeException('WORKER_ACCOUNT_HASH_MISMATCH');
         $number=$matches?$matches[0]:(string)key($candidates);
-        foreach (array('bank_name','account_holder') as $field) if (empty($row[$field]) && isset($candidates[$number][$field])) $row[$field]=$candidates[$number][$field];
-        return self::bankFields($row,$number);
+        return self::snapshotBankFields($row,$candidates[$number],$number);
     }
     public function workerAccount($row,$source=null,&$method=null)
     {
@@ -95,6 +132,7 @@ class Cpms2SensitiveExportService
         }
         $mismatch=false;
         foreach ($candidates as $candidate) {
+            if ($expected==='' && !preg_match('/^[0-9\s-]+$/D',trim($candidate[0]))) continue;
             $number=self::accountNumber($candidate[0]); if ($number==='' || ($candidate[1] && $expected==='')) continue;
             if ($expected!=='' && !hash_equals($expected,(string)CryptoHelper::hashSensitive($number))) { $mismatch=true; continue; }
             $method='decrypted'; return self::bankFields($row,$number);
@@ -104,9 +142,8 @@ class Cpms2SensitiveExportService
     }
     public static function plainAccount($row,$code)
     {
-        $value=isset($row['account_number']) && trim((string)$row['account_number'])!==''?$row['account_number']:(isset($row['bank_account'])?$row['bank_account']:'');
-        $number=self::accountNumber($value);
-        if ($number==='' && trim((string)$value)!=='') throw new RuntimeException($code);
+        $number=isset($row['account_number'])?self::accountNumber($row['account_number']):'';
+        if ($number==='' && isset($row['bank_account'])) $number=self::accountNumber($row['bank_account']);
         return array('bank_name'=>isset($row['bank_name'])?$row['bank_name']:null,'account_number'=>$number!==''?$number:null,'account_holder'=>isset($row['account_holder'])?$row['account_holder']:null);
     }
     public function employeeAccounts($source) { return (new Cpms2PayrollAccountExportService($this->root,$this->storageRoot))->accounts($source); }

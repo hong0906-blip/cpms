@@ -88,7 +88,12 @@ try {
     cpms_web_assert(strpos($html,'계좌번호 미등록 40건 · 그중 은행명/예금주만 있음 5건 (Non-blocking)')!==false,'Partial account summary missing.');
     $_SESSION['_cpms2_export_preflight']['report']['accounts']['payroll']=array('source_found'=>true,'selected_month'=>'2026-09','employee_rows'=>8,'account_rows'=>0,'mapping_success'=>0,'mapping_failed'=>0,'status'=>'EMPLOYEE_PAYROLL_VERSION_FOUND');
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
-    cpms_web_assert(strpos($html,'직원 급여 Version 발견 · 기준월 2026-09 · 직원 Row 8건 · 계좌번호 등록 0건')!==false,'Payroll version with zero accounts hidden.');
+    cpms_web_assert(strpos($html,'계좌 Migration Source: 2026-09 / 직원 8명 / 계좌 0건')!==false,'Payroll version with zero accounts hidden.');
+    $payrollVersion=array('source_found'=>true,'latest_month'=>'2026-06','latest_employee_rows'=>0,'latest_account_rows'=>0,'selected_month'=>'2026-05','employee_rows'=>41,'account_rows'=>41,'mapping_success'=>41,'mapping_failed'=>0,'status'=>'EMPLOYEE_PAYROLL_VERSION_FOUND');
+    $_SESSION['_cpms2_export_preflight']['report']['accounts']['payroll']=$payrollVersion;
+    $_SESSION['_cpms2_export_packages'][$id]['summary']['account_preflight']['payroll']=$payrollVersion;
+    ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
+    cpms_web_assert(substr_count($html,'최신 Payroll Version: 2026-06 / 직원 0명')===2 && substr_count($html,'계좌 Migration Source: 2026-05 / 직원 41명 / 계좌 41건')===2,'Preflight or summary hid empty latest versus selected payroll version.');
     $_SESSION['_cpms2_export_preflight']['report']['can_export']=false;
     $_SERVER['REQUEST_METHOD']='POST'; $_POST=array('action'=>'generate','_csrf'=>'fixture-csrf');
     $previousLog=ini_get('error_log'); $log=$root.'/private/diagnostic.log'; ini_set('error_log',$log);
