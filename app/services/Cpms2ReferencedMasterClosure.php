@@ -150,7 +150,7 @@ class Cpms2LaborReferencePreflightWriter
     public function amount($project,$kind,$amount) {}
     public function record($entity,$row)
     {
-        if ($entity!=='labor_months') return;
+        if ($entity!=='labor_months' || empty($row['labor_outsourcing_ratio'])) return;
         $resolution=isset($row['legacy_vendor_resolution'])?$row['legacy_vendor_resolution']:'snapshot_only';
         $this->vendors[$resolution]++;
         if (!empty($row['legacy_vendor_ambiguous'])) $this->vendors['ambiguous']++;

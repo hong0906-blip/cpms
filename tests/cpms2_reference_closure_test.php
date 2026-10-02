@@ -63,4 +63,8 @@ referenceAssert(count($failures)===1 && $failures[0]['code']==='legacy_reference
 $blocked=false; try { $source->query('UPDATE workers SET name=?',array('changed')); } catch (RuntimeException $e) { $blocked=true; }
 referenceAssert($blocked,'Source write was permitted.');
 referenceAssert($db->query('SELECT COUNT(*) FROM cpms_projects')->fetchColumn()==3,'Source masters were modified.');
+$writer=new Cpms2LaborReferencePreflightWriter();
+$writer->record('labor_months',array('labor_outsourcing_ratio'=>0,'legacy_vendor_resolution'=>'snapshot_only'));
+$writer->record('labor_months',array('labor_outsourcing_ratio'=>30,'legacy_vendor_resolution'=>'snapshot_only'));
+referenceAssert($writer->vendors['snapshot_only']===1,'Zero-outsourcing month entered vendor recovery counts.');
 echo 'PASS: '.$checks." reference closure / source READ ONLY checks\n";

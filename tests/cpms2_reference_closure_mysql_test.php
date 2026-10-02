@@ -55,7 +55,7 @@ try {
     nativeReferenceAssert($closure['projects']['normal']===1 && $closure['projects']['reference_recovered']===2,'DB/JSON project dependency closure.');
     foreach (array('material_items','equipment_items','workers','direct_team','material_usages') as $entity) nativeReferenceAssert($closure[$entity]['reference_recovered']===1,'Master closure count: '.$entity);
     nativeReferenceAssert($closure['workers']['snapshot_only_labor_workers']===2 && $closure['workers']['physically_missing']===1,'Orphan snapshot classification.');
-    nativeReferenceAssert($closure['labor_vendor']['legacy_vendor_id']===1 && $closure['labor_vendor']['unique_business_identity']===1 && $closure['labor_vendor']['snapshot_only']===2 && $closure['labor_vendor']['ambiguous']===1,'Vendor preflight safe identity.');
+    nativeReferenceAssert($closure['labor_vendor']['legacy_vendor_id']===1 && $closure['labor_vendor']['unique_business_identity']===1 && $closure['labor_vendor']['snapshot_only']===1 && $closure['labor_vendor']['ambiguous']===1,'Vendor preflight safe identity / zero-outsourcing exclusion.');
     $package=$web->generate($employee); $generated=$web->downloadPath($package['id'],$package,$employee); copy($generated,$output);
     nativeReferenceAssert($package['summary']['record_counts']['labor_workers']===4 && $package['summary']['record_counts']['labor_months']===4 && $package['summary']['record_counts']['labor_entries']===4,'Recovered project labor omitted.');
     nativeReferenceAssert($package['summary']['record_counts']['material_usages']===2 && $package['summary']['record_counts']['equipment_usages']===1 && $package['summary']['record_counts']['material_statement_files']===2,'Recovered child cost/evidence relation omitted.');

@@ -158,8 +158,10 @@ class Cpms2LaborExportService
                 $amounts=cpms_labor_calculate_worker_period_amounts($r,$daily,$month.'-01',date('Y-m-t',strtotime($month.'-01')));
                 $ratio=cpms_resolve_worker_outsourcing_ratio($r); $rate=cpms_resolve_labor_wage_rate($r);
                 $vendor=$this->db instanceof Cpms2ReferencedMasterClosure?$this->db->vendorSnapshot($r):array();
-                $resolution=isset($vendor['legacy_vendor_resolution'])?$vendor['legacy_vendor_resolution']:'snapshot_only'; $vendorCounts[$resolution]++;
-                if (!empty($vendor['legacy_vendor_ambiguous'])) $vendorCounts['ambiguous']++;
+                if ($ratio>0) {
+                    $resolution=isset($vendor['legacy_vendor_resolution'])?$vendor['legacy_vendor_resolution']:'snapshot_only'; $vendorCounts[$resolution]++;
+                    if (!empty($vendor['legacy_vendor_ambiguous'])) $vendorCounts['ambiguous']++;
+                }
                 $this->writer->record('labor_months',array_merge(array('legacy_id'=>$id.':'.$month,'legacy_project_id'=>$p['id'],'legacy_labor_worker_id'=>$id,'target_month'=>$month.'-01','pay_type'=>!empty($r['salary_allocation_mode'])?'monthly':'unit','wage_rate'=>sprintf('%.2f',!empty($r['salary_allocation_mode'])?$direct[$directId]['monthly_salary']:$rate),'source_daily_rate'=>sprintf('%.8f',$rate),'labor_ratio'=>100-$ratio,'labor_outsourcing_ratio'=>$ratio,'vendor_name'=>!empty($r['agency_name_snapshot'])?$r['agency_name_snapshot']:(isset($r['company_name'])?$r['company_name']:''),'source_labor_amount'=>sprintf('%.2f',$amounts['labor_amount']),'source_outsourcing_amount'=>sprintf('%.2f',$amounts['outsourcing_amount'])),$vendor));
                 // Preserve CPMS1 month rounding; allocate its rounded totals without inventing money.
                 $weights=array(); $outWeights=array();
