@@ -3,6 +3,7 @@
 class Cpms2ExportPackageWriter
 {
     public $counts = array();
+    public $safetySummary=array(); public $approvalSummary=array();
     public $warnings = array();
     public $missing = array();
     public $expectedFiles = 0;
@@ -92,6 +93,7 @@ class Cpms2ExportPackageWriter
         $summary['labor_reconciliation']=$labor;
         $summary['account_counts']=$this->accountCounts;
         $summary['account_preflight']=$this->accountPreflight;
+        $summary['safety_costs']=$this->safetySummary; $summary['completed_approvals']=$this->approvalSummary;
         $manifest['contains_plaintext_accounts']=true;
         $this->json('schema-report.json',$schema); $this->json('summary.json',$summary);
         $paths=array('schema-report.json','summary.json');

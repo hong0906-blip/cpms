@@ -69,6 +69,20 @@ $beforeAccounts=$db->query('SELECT bank_account_enc,bank_account_hash FROM worke
 // A later empty file must not hide the populated payroll version.
 file_put_contents($temporary.'/data/company_overhead/payroll_versions/2026/08.json',json_encode(array('employees'=>array())));
 $db->exec("UPDATE cpms_vendors SET account_number='Fixture bank 000.000/000001' WHERE id=31");
+
+// All extended sources are synthetic local fixtures, prepared before READ ONLY.
+$db->exec("CREATE TABLE cpms_approval_documents(id INT PRIMARY KEY,doc_type VARCHAR(100),title VARCHAR(500),doc_status VARCHAR(30),project_id INT NULL,created_by_name VARCHAR(191),created_by_email VARCHAR(191),created_at DATETIME,updated_at DATETIME,completed_pdf_storage_type VARCHAR(30),completed_pdf_drive_file_id VARCHAR(191),completed_pdf_name VARCHAR(255),completed_pdf_mime_type VARCHAR(100),completed_pdf_size BIGINT,completed_pdf_uploaded_at DATETIME NULL,completed_pdf_upload_status VARCHAR(30))");
+mkdir($temporary.'/storage/safety_costs/files/22/2026-07',0700,true); mkdir($temporary.'/storage/cache/approval_completed_pdf',0700,true);
+$safetyPdf=$temporary.'/storage/safety_costs/files/22/2026-07/safety.pdf'; file_put_contents($safetyPdf,"%PDF-1.7\nsafety fixture\n%%EOF\n");
+$safetyRow=array('id'=>'general','project_id'=>22,'vendor_id'=>31,'vendor_name'=>'Fixture vendor','use_date'=>'2026-07-20','category'=>'보호구 구입비','item_name'=>'Fixture helmet','amount'=>'1000.25','pdf'=>array('stored_path'=>'safety_costs/files/22/2026-07/safety.pdf','original_name'=>'safety.pdf','file_size'=>filesize($safetyPdf)));
+file_put_contents($temporary.'/storage/safety_costs/usage.json',json_encode(array('items'=>array($safetyRow,array_merge($safetyRow,array('id'=>'bulk','source'=>'material_bulk_import','amount'=>null,'supply_amount'=>'2000.50')),array_merge($safetyRow,array('id'=>'deleted','is_deleted'=>1))))));
+$archivePdf=$temporary.'/storage/cache/approval_completed_pdf/'.sha1('fixture-completed-pdf').'.pdf'; file_put_contents($archivePdf,"%PDF-1.7\ncompleted archive fixture\n%%EOF\n");
+$insert=$db->prepare('INSERT INTO cpms_approval_documents VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+$baseDoc=array(901,'expense','Completed fixture','APPROVED',22,'Retired fixture','retired@example.invalid','2020-01-01 00:00:00','2020-01-02 00:00:00','google_drive','fixture-completed-pdf','completed.pdf','application/pdf',filesize($archivePdf),'2020-01-02 00:00:00','uploaded');
+$insert->execute($baseDoc); $baseDoc[0]=902; $baseDoc[3]='COMPLETED'; $baseDoc[4]=null; $insert->execute($baseDoc);
+$baseDoc[0]=903; $baseDoc[10]=''; $baseDoc[15]=''; $insert->execute($baseDoc);
+$baseDoc[0]=904; $baseDoc[3]='PENDING'; $insert->execute($baseDoc);
+
 $db->exec('SET TRANSACTION READ ONLY'); $db->beginTransaction();
 try {
     $source=new Cpms2ReadOnlySource($db); $attendance=new Cpms2ReadOnlySource($db);
@@ -86,7 +100,7 @@ try {
     $package=$web->generate($employee); $summary=$package['summary'];
     $generated=$web->downloadPath($package['id'],$package,$employee);
     if (!copy($generated,$output) || hash_file('sha256',$statement)!==$beforeHash) throw new RuntimeException('Source file was changed by web export.');
-    if ($summary['record_counts']['labor_entries']!==4 || $summary['record_counts']['material_usages']!==2 || $summary['record_counts']['safety_costs']!==1 || $summary['exported_file_count']!==1 || $summary['missing_file_count']!==1) throw new RuntimeException('Fixture counts mismatch.');
+    if ($summary['record_counts']['labor_entries']!==4 || $summary['record_counts']['material_usages']!==2 || $summary['record_counts']['safety_costs']!==3 || $summary['exported_file_count']!==3 || $summary['missing_file_count']!==1) throw new RuntimeException('Fixture counts mismatch.');
     if ($summary['amounts']['projects'][22]['labor']!=='1605000.00' || $summary['amounts']['projects'][23]['labor']!=='3000000.00' || $summary['amounts']['company']['material']!=='29000.00' || $summary['amounts']['company']['equipment']!=='24999.00') throw new RuntimeException('Fixture source money mismatch.');
     if ($summary['excluded_labor_force_adjustments']!==$preflight['excluded_labor_force_adjustments'] || $summary['labor_reconciliation']['company']['source_original_labor']!=='28105000.00' || $summary['labor_reconciliation']['company']['source_migration_labor']!=='4605000.00') throw new RuntimeException('Force exclusions changed eligible labor.');
     if ($summary['excluded_labor_force_adjustments']['projects'][23]['months']['2026-08']['amount']!=='-500000.00') throw new RuntimeException('Monthly signed exclusion lost.');
@@ -104,11 +118,15 @@ try {
     if ($workerRows[121]['account_number']!==null || $workerRows[121]['bank_name']!=='Fixture bank' || $workerRows[121]['account_holder']!=='Fixture orphan holder' || isset($workerRows[121]['bank_account_enc']) || isset($workerRows[121]['bank_account_hash'])) throw new RuntimeException('Residue package did not retain only null account and partial metadata.');
     if ($workerRow['account_number']!=='000000000003' || $employeeRow['account_number']!=='000000000004' || isset($workerRow['bank_account_enc']) || isset($workerRow['bank_account_hash']) || strpos($zip->getFromName('data/employees.jsonl'),'resident')!==false) throw new RuntimeException('Current accounts missing or forbidden payload leaked.'); $zip->close();
     if (is_dir($temporary.'/storage/secrets')) throw new RuntimeException('Export created key directory.');
+    if ($summary['safety_costs']['final_count']!==3 || $summary['safety_costs']['amount']!=='5000.75' || $summary['safety_costs']['bulk']!==1 || $summary['safety_costs']['pdf_available']!==2) throw new RuntimeException('Extended safety fixture mismatch.');
+    if ($summary['completed_approvals']['completed_documents']!==3 || $summary['completed_approvals']['pdf_available']!==2 || $summary['completed_approvals']['not_generated']!==1 || $summary['completed_approvals']['unavailable']!==0) throw new RuntimeException('Extended archive fixture mismatch.');
     $db->commit();
 } catch (Exception $e) { $db->rollBack(); throw $e; }
 unlink($generated); unlink($temporary.'/private/employee-17.lock'); rmdir($temporary.'/private'); rmdir($temporary.'/web');
 unlink($statement); unlink($temporary.'/data/company_overhead/payroll_versions/2026/07.json');
 unlink($temporary.'/data/company_overhead/payroll_versions/2026/08.json');
 foreach (array('/data/company_overhead/payroll_versions/2026','/data/company_overhead/payroll_versions','/data/company_overhead','/data') as $directory) rmdir($temporary.$directory);
+unlink($safetyPdf); unlink($archivePdf); unlink($temporary.'/storage/safety_costs/usage.json');
+foreach (array('/storage/safety_costs/files/22/2026-07','/storage/safety_costs/files/22','/storage/safety_costs/files','/storage/safety_costs','/storage/cache/approval_completed_pdf','/storage/cache','/storage') as $directory) rmdir($temporary.$directory);
 if (!getenv('CPMS2_EXPORT_FIXTURE_OUTPUT')) unlink($output); rmdir($temporary);
 echo "Export MySQL fixture: PASS (read-only transaction, schemas, wage history, attendance/override, salary allocation, safety split, equipment fallback, dedup/missing, exclusions)\n";

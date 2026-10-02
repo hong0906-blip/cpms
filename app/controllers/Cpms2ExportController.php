@@ -40,7 +40,10 @@ class Cpms2ExportController
             $action=isset($_POST['action']) && is_string($_POST['action'])?$_POST['action']:'';
             try {
                 if ($action==='preflight') {
-                    $_SESSION['_cpms2_export_preflight']=array('owner_employee_id'=>(int)$employee['id'],'checked_at'=>time(),'report'=>$this->service->preflight());
+                    session_write_close(); @set_time_limit(0);
+                    $report=$this->service->preflight();
+                    cpms_shared_session_start();
+                    $_SESSION['_cpms2_export_preflight']=array('owner_employee_id'=>(int)$employee['id'],'checked_at'=>time(),'report'=>$report);
                 } elseif ($action==='generate') {
                     $check=isset($_SESSION['_cpms2_export_preflight'])?$_SESSION['_cpms2_export_preflight']:array();
                     if (empty($check['owner_employee_id']) || (int)$check['owner_employee_id']!==(int)$employee['id'] || time()-$check['checked_at']>900) throw new RuntimeException('PREFLIGHT_REQUIRED');

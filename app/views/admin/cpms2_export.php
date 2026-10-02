@@ -21,6 +21,15 @@ $renderAccounts=function($accounts) {
     }
     foreach ($accounts['failures'] as $failure) echo '<p class="cpms2-warning">'.h($labels[$failure['entity']]).' #'.h($failure['legacy_id']).' · '.h($failure['name']).' · 오류코드: '.h($failure['code']).'</p>';
 };
+$renderMigration=function($data) {
+    foreach (array('safety_costs'=>'안전관리비','completed_approvals'=>'이전 완료문서') as $key=>$label) {
+        if (empty($data[$key])) continue;
+        echo '<h3>'.h($label).'</h3><dl>';
+        $labels=array('store_found'=>'JSON 저장소 발견','json_total'=>'JSON 전체','json_active'=>'활성','json_excluded'=>'제외','bulk'=>'공사 Excel 일괄입력','other'=>'일반입력','db_candidates'=>'DB 후보','deduplicated'=>'검증된 중복 제외','possible_duplicates'=>'중복 가능성(보존)','db_only'=>'DB 추가','final_count'=>'이관 건수','amount'=>'이관 금액','pdf_metadata'=>'PDF 메타데이터','pdf_available'=>'PDF 확인','pdf_missing'=>'PDF 누락','pdf_deduplicated'=>'PDF 중복','completed_documents'=>'완료 문서','approved'=>'승인완료','completed'=>'처리완료','not_generated'=>'PDF 미생성(제외)','unavailable'=>'PDF 복구 실패','local_cache'=>'기존 Cache','drive_download'=>'Drive 읽기','pdf_bytes'=>'PDF Bytes');
+        foreach ($data[$key] as $field=>$value) echo '<div><dt>'.h(isset($labels[$field])?$labels[$field]:$field).'</dt><dd>'.h(is_bool($value)?($value?'발견':'미발견'):$value).'</dd></div>';
+        echo '</dl>';
+    }
+};
 ?>
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -46,22 +55,25 @@ $renderAccounts=function($accounts) {
 <?php if ($report): ?>
 <section>
   <h2>사전검사 결과</h2>
+  <?php $renderMigration($report); ?>
   <dl>
   <?php foreach ($report['counts'] as $entity=>$count): ?><div><dt><?php echo h($entity); ?></dt><dd><?php echo number_format($count); ?>건</dd></div><?php endforeach; ?>
   </dl>
   <p>거래명세서 <?php echo (int)$report['expected_file_count']; ?>건 · 누락 <?php echo (int)$report['missing_file_count']; ?>건</p>
   <?php if (isset($report['accounts'])): $renderAccounts($report['accounts']); ?>
-  <?php if (!$report['can_export']): ?><p class="cpms2-error" role="alert">계좌 사전검사를 통과하지 못해 Export를 진행할 수 없습니다.</p><?php endif; ?>
+  <?php if (!$report['can_export']): ?><p class="cpms2-error" role="alert">사전검사를 통과하지 못해 Export를 진행할 수 없습니다.</p><?php endif; ?>
   <?php endif; ?>
+  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity'])) continue; ?><p class="cpms2-error">문서 #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
   <?php foreach ($report['warnings'] as $warning): ?><p class="cpms2-warning">Warning: <?php echo h($warning); ?></p><?php endforeach; ?>
 </section>
 <?php endif; ?>
 <?php if ($package): $summary=$package['summary']; ?>
 <section>
   <h2>생성 완료</h2>
+  <?php $renderMigration($summary); ?>
   <?php if (!empty($summary['account_preflight'])) $renderAccounts($summary['account_preflight']); ?>
   <p>SHA-256: <?php echo h($package['sha256']); ?></p>
-  <p>ZIP <?php echo number_format($package['size']); ?> bytes · 거래명세서 <?php echo (int)$summary['exported_file_count']; ?>개 · 누락 <?php echo (int)$summary['missing_file_count']; ?>건 · 중복 제거 <?php echo (int)$summary['deduplicated_file_count']; ?>건</p>
+  <p>ZIP <?php echo number_format($package['size']); ?> bytes · 전체 Package 파일 <?php echo (int)$summary['exported_file_count']; ?>개 · 누락 <?php echo (int)$summary['missing_file_count']; ?>건 · 중복 제거 <?php echo (int)$summary['deduplicated_file_count']; ?>건</p>
   <dl>
   <?php foreach ($summary['record_counts'] as $entity=>$count): ?><div><dt><?php echo h($entity); ?></dt><dd><?php echo number_format($count); ?>건</dd></div><?php endforeach; ?>
   </dl>

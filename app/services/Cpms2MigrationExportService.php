@@ -5,6 +5,8 @@ require_once __DIR__.'/Cpms2ExportPackageWriter.php';
 require_once __DIR__.'/Cpms2LaborExportService.php';
 require_once __DIR__.'/Cpms2SensitiveExportService.php';
 require_once __DIR__.'/Cpms2ExportDiagnostic.php';
+require_once __DIR__.'/Cpms2SafetyCostExportService.php';
+require_once __DIR__.'/Cpms2CompletedApprovalExportService.php';
 
 class Cpms2MigrationExportService
 {
@@ -28,8 +30,8 @@ class Cpms2MigrationExportService
     private $writer;
     private $root;
     private $fileRoot;
-    private $sensitive;
-    public function __construct($db,$writer,$root,$fileRoot,$sensitive=null) { $this->db=$db; $this->writer=$writer; $this->root=$root; $this->fileRoot=$fileRoot; $this->sensitive=$sensitive?$sensitive:new Cpms2SensitiveExportService($root); }
+    private $sensitive; private $storage;
+    public function __construct($db,$writer,$root,$fileRoot,$sensitive=null,$storage=null) { $this->storage=$storage===null?(function_exists('cpms_storage_root')?cpms_storage_root():$root.'/storage'):$storage; $this->db=$db; $this->writer=$writer; $this->root=$root; $this->fileRoot=$fileRoot; $this->sensitive=$sensitive?$sensitive:new Cpms2SensitiveExportService($root); }
     public static function tablePhase($table)
     {
         $phases=array('employees'=>'employees','cpms_vendors'=>'vendors','workers'=>'workers','direct_team_members'=>'direct_team','cpms_material_items'=>'material','cpms_material_usage'=>'material','cpms_equipment_items'=>'equipment','cpms_equipment_usage'=>'equipment','cpms_outsourcing_costs'=>'subcontract','cpms_progress_billings'=>'billing','cpms_material_statement_files'=>'statement_files');
@@ -73,7 +75,7 @@ class Cpms2MigrationExportService
             $columns=$this->db->inspect($table,$mandatory,array('id','name'));
             if (!count($columns)) $this->writer->warnings[]='Optional source table missing: '.$table;
         }
-        foreach (array('departments','positions','employees','vendors','workers','direct_team','projects','project_members','project_roles','labor_workers','labor_months','labor_entries','material_items','material_usages','equipment_items','equipment_usages','subcontract_costs','safety_costs','progress_billings','material_statement_files') as $entity) $this->writer->emptyEntity($entity);
+        foreach (array('departments','positions','employees','vendors','workers','direct_team','projects','project_members','project_roles','labor_workers','labor_months','labor_entries','material_items','material_usages','equipment_items','equipment_usages','subcontract_costs','safety_costs','progress_billings','material_statement_files','safety_evidence_files','legacy_completed_approvals') as $entity) $this->writer->emptyEntity($entity);
         $this->writer->phase='employees'; $departments=array(); $positions=array();
         $payroll=$this->sensitive->employeeAccounts($this->db);
         if ($payroll['failures']) throw new RuntimeException($payroll['failures'][0]['code']);
@@ -107,6 +109,8 @@ class Cpms2MigrationExportService
                 $this->writer->record($entity,self::legacy($row));
             }
         }
+        $this->writer->phase='safety'; $safety=(new Cpms2SafetyCostExportService($this->root,$this->storage))->collect($this->db);
+        $this->writer->safetySummary=$safety['summary']; $this->writer->warnings=array_merge($this->writer->warnings,$safety['warnings']);
         $this->writer->phase='labor'; (new Cpms2LaborExportService($this->db,$attendance,$this->writer))->run();
         foreach (array('material','equipment') as $kind) {
             $this->writer->phase=$kind;
@@ -124,11 +128,14 @@ class Cpms2MigrationExportService
                     $rate=isset($row['base_rate_snapshot']) && (float)$row['base_rate_snapshot']>0?(float)$row['base_rate_snapshot']:(isset($master['base_rate'])?(float)$master['base_rate']:0);
                     if (abs($amount)<=0.0001) $amount=$unit*$rate;
                     $row['quantity']=sprintf('%.4f',$unit); $row['rate']=sprintf('%.2f',$rate); $row['final_amount']=sprintf('%.2f',$amount);
-                } elseif (isset($master['category']) && $master['category']==='안전관리비') { $entity='safety_costs'; $row['source_table']='cpms_material_usage'; }
+                } elseif (isset($master['category']) && $master['category']==='안전관리비') { continue; }
                 $this->writer->record($entity,self::legacy($row));
                 $this->writer->amount($row['project_id'],$entity==='safety_costs'?'safety':$kind,$amount);
             }
         }
+        $this->writer->phase='safety';
+        foreach ($safety['rows'] as $row) { $this->writer->record('safety_costs',$row); $this->writer->amount($row['legacy_project_id'],'safety',$row['amount']); }
+        foreach ($safety['files'] as $file) { $path=$file['path']; unset($file['path']); $this->writer->record('safety_evidence_files',array_merge($file,$this->writer->addFile($path,$file['original_name'],$file['legacy_id']))); }
         $this->writer->phase='subcontract';
         foreach ($this->rows('cpms_outsourcing_costs') as $row) { $this->writer->record('subcontract_costs',self::legacy($row)); $this->writer->amount($row['project_id'],'subcontract',$row['amount']); }
         $this->writer->phase='billing';
@@ -142,7 +149,12 @@ class Cpms2MigrationExportService
             $path=self::statementPath(isset($row['stored_path'])?$row['stored_path']:'',$this->root,$this->fileRoot);
             unset($row['stored_path']);
             $file=$this->writer->addFile($path,$row['original_name'],$row['id']);
+            if (isset($safety['dedup_usage_map']['db:'.$row['material_usage_id']])) $row['safety_cost_id']=$safety['dedup_usage_map']['db:'.$row['material_usage_id']];
             $this->writer->record('material_statement_files',array_merge(self::legacy($row),$file));
         }
+        $this->writer->phase='completed_approvals';
+        $archive=(new Cpms2CompletedApprovalExportService($this->storage))->collect($this->db,$this->writer);
+        $this->writer->approvalSummary=$archive['summary']; $this->writer->warnings=array_merge($this->writer->warnings,$archive['warnings']);
+        if ($archive['failures']) throw new RuntimeException($archive['failures'][0]['code']);
     }
 }
