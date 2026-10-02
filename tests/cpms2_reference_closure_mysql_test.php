@@ -76,5 +76,16 @@ $db->exec('INSERT INTO cpms_equipment_usage VALUES(202,8,9999,\'2026-07-20\',1,1
 $db->exec('SET TRANSACTION READ ONLY'); $db->beginTransaction();
 $bad=(new Cpms2WebExportService(new Cpms2ReadOnlySource($db),new Cpms2ReadOnlySource($db),$temporary,$temporary,$temporary.'/private',$temporary.'/web'))->preflight();
 nativeReferenceAssert(!$bad['can_export'] && $bad['failures'][0]['code']==='legacy_referenced_master_physically_missing','Physical missing cost master was hidden.'); $db->commit();
+// Reproduce the deleted project with no historical name, only in this local fixture.
+$db->exec('DELETE FROM cpms_equipment_usage WHERE id=202');
+$db->exec('DELETE FROM cpms_projects WHERE id=8');
+if (getenv('CPMS2_HISTORICAL_PROJECT_FIXTURE')) $db->exec('DELETE FROM cpms_ai_daily_snapshots WHERE project_id=8');
+$db->exec('SET TRANSACTION READ ONLY'); $db->beginTransaction();
+$blocked=$web->preflight(); $trace=$blocked['referenced_master_closure']['deleted_project_traces'][0];
+nativeReferenceAssert(!$blocked['can_export'] && $blocked['failures'][0]['code']==='legacy_project_snapshot_unavailable' && $trace['legacy_id']==='8','Trace changed blocking or missing identity policy.');
+nativeReferenceAssert($trace['counts']['cpms_material_items']===1 && $trace['counts']['cpms_material_usage']===2 && $trace['counts']['cpms_material_statement_files']===2 && $trace['counts']['cpms_equipment_items']===1,'Native trace counts / historical children incorrect.');
+nativeReferenceAssert($trace['first_use_date']==='2026-07-20' && $trace['last_use_date']==='2026-07-20' && $trace['detail_count']===7,'Native SQL / trace dates / limits failed.');
+nativeReferenceAssert($web->lastPreflight()===$blocked && $db->query('SELECT COUNT(*) FROM cpms_projects WHERE id=8')->fetchColumn()==0 && hash_file('sha256',$pdf)===$before,'Trace lost report or wrote source.');
+$db->commit();
 unlink($generated); unlink($temporary.'/private/employee-17.lock'); rmdir($temporary.'/private'); unlink($pdf); unlink($temporary.'/storage/safety_costs/usage.json'); rmdir($temporary.'/storage/safety_costs'); rmdir($temporary.'/storage'); rmdir($temporary.'/web'); if (!getenv('CPMS2_REFERENCE_FIXTURE_OUTPUT')) unlink($output); rmdir($temporary);
 echo 'PASS: '.$checks." native reference export checks (SELECT-only, JSON projects, snapshot provenance, downloaded ZIP)\n";

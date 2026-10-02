@@ -2,6 +2,7 @@
 // app/services/Cpms2WebExportService.php
 // Web-only orchestration. All database access goes through the SELECT/SHOW guard.
 require_once __DIR__.'/Cpms2MigrationExportService.php';
+require_once __DIR__.'/Cpms2DeletedProjectTraceService.php';
 class Cpms2WebExportService
 {
     private $source; private $storage;
@@ -66,6 +67,11 @@ class Cpms2WebExportService
         }
         $migrationSource=new Cpms2ReferencedMasterClosure($this->source,$this->root,$this->storage);
         $closure=$migrationSource->summary();
+        // Administrator clues do not enter the package or change recovery/blocking decisions.
+        foreach ($closure['historical_project_recovery'] as $recovery) if (!$recovery['recovered']) {
+            $this->phase='projects';
+            $closure['deleted_project_traces'][]=(new Cpms2DeletedProjectTraceService($this->source))->collect($recovery['legacy_id']);
+        }
         $expected=0; $missing=array();
         foreach ($this->source->rows('cpms_material_statement_files',array('id','stored_path','original_name')) as $r) {
             $expected++;
@@ -111,7 +117,7 @@ class Cpms2WebExportService
             (new Cpms2MigrationExportService($this->source,$writer,$this->root,$this->fileRoot,$this->sensitive,$this->storage))->run($this->attendance);
             $commit=getenv('CPMS2_EXPORT_SOURCE_COMMIT'); if (!$commit || !preg_match('/^[a-f0-9]{40}$/D',$commit)) { $commit=null; $writer->warnings[]='Source commit unavailable in FileZilla deployment; source_code_sha256 is recorded.'; }
             $writer->phase='summary';
-            $fingerprint=''; foreach (array('Cpms2ReadOnlySource','Cpms2ExportPackageWriter','Cpms2MigrationExportService','Cpms2LaborExportService','Cpms2WebExportService','Cpms2SensitiveExportService','Cpms2PayrollAccountExportService','Cpms2ExportDiagnostic','Cpms2SafetyCostExportService','Cpms2CompletedApprovalExportService','Cpms2ReadOnlyDriveDownload','Cpms2ReferencedMasterClosure','Cpms2HistoricalProjectRecoveryService') as $file) $fingerprint.=hash_file('sha256',__DIR__.'/'.$file.'.php');
+            $fingerprint=''; foreach (array('Cpms2ReadOnlySource','Cpms2ExportPackageWriter','Cpms2MigrationExportService','Cpms2LaborExportService','Cpms2WebExportService','Cpms2SensitiveExportService','Cpms2PayrollAccountExportService','Cpms2ExportDiagnostic','Cpms2SafetyCostExportService','Cpms2CompletedApprovalExportService','Cpms2ReadOnlyDriveDownload','Cpms2ReferencedMasterClosure','Cpms2HistoricalProjectRecoveryService','Cpms2DeletedProjectTraceService') as $file) $fingerprint.=hash_file('sha256',__DIR__.'/'.$file.'.php');
             $schema=$this->source->report(); if ($this->attendance) $schema['attendance_database']=$this->attendance->report();
             $summary=$writer->finish($output,array('format'=>'cpms1-company-export','format_version'=>1,'export_id'=>'cpms1-'.$id,'created_at'=>date('c'),'source_system'=>'cpms1','source_repository'=>'hong0906-blip/cpms','source_commit'=>$commit,'source_code_sha256'=>hash('sha256',$fingerprint),'php_version'=>PHP_VERSION,'database_name'=>$this->source->databaseName()),$schema);
             return array('id'=>$id,'owner_employee_id'=>(int)$employee['id'],'created_at'=>date('c'),'size'=>filesize($output),'sha256'=>hash_file('sha256',$output),'summary'=>$summary);

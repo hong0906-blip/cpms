@@ -815,6 +815,7 @@
     if (route === '공무' || lower.indexOf('project') === 0) return projectGuide(lower || route);
     if (lower === 'admin/cpms2_export') return guide('CPMS2 데이터 Export', '원본 데이터와 거래명세서를 읽어 CPMS2 이관용 ZIP을 생성합니다.', '사전검사 결과를 확인한 다음 ZIP을 생성하고 다운로드하세요.', [
       step('[data-guide="admin-cpms2-preflight"]', '사전검사', '사전검사를 누르면 Schema·파일 누락·비공개 저장 경로를 검사하고 결과를 표시합니다.'),
+      step('[data-guide="admin-cpms2-project-trace"]', '삭제 프로젝트 추적정보', '상세보기를 누르면 삭제 프로젝트의 비용·명세서 추적정보를 최대 100건까지 확인합니다. 프로젝트명 확인은 관리자가 진행합니다.'),
       step('[data-guide="admin-cpms2-generate"]', '전체 Export ZIP 생성', '검사 후 생성 버튼을 누르면 원본 DB와 파일을 읽어 비공개 경로에 ZIP을 생성하고 결과를 표시합니다.'),
       step('[data-guide="admin-cpms2-download"]', 'ZIP 다운로드', '생성 완료 후 다운로드를 누르면 현재 로그인 권한과 ZIP 무결성을 확인하고 브라우저로 전송합니다.')
     ]);

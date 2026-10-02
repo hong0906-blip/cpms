@@ -25,4 +25,11 @@
 .cpms2-export #cpms2-export-status:empty{display:none}
 .cpms2-error{padding:16px;margin-bottom:16px;border:1px solid #fecaca;border-radius:12px;background:#fef2f2;color:#b91c1c;overflow-wrap:anywhere}
 .cpms2-export .cpms2-warning{color:#92400e}
+.cpms2-project-trace{border-top:1px solid #e5e7eb;margin-top:16px;padding-top:12px;min-width:0}
+.cpms2-project-trace dd{flex-shrink:1;min-width:0;overflow-wrap:anywhere;text-align:right}
+.cpms2-project-trace summary{display:list-item;min-height:44px;padding:10px 0;cursor:pointer;color:#2563eb;font-weight:700;overflow-wrap:anywhere}
+.cpms2-project-trace summary:hover{color:#1d4ed8}
+.cpms2-project-trace summary:focus-visible{outline:2px solid #2563eb;outline-offset:3px}
+.cpms2-project-trace details[open]>summary{border-bottom:1px solid #e5e7eb}
+.cpms2-project-trace .cpms2-trace-row{padding:12px;margin-bottom:12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px}
 @media(min-width:640px){.cpms2-export{padding:24px}.cpms2-export section{padding:20px}.cpms2-export dl{grid-template-columns:repeat(2,minmax(0,1fr))}}

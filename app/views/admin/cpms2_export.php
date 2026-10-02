@@ -53,6 +53,38 @@ $renderClosure=function($data) {
         }
     }
 };
+$renderProjectTraces=function($traces) {
+    $sources=array('cpms_material_items'=>'자재 품목','cpms_material_usage'=>'자재 사용내역','cpms_equipment_items'=>'장비 품목','cpms_equipment_usage'=>'장비 사용내역','cpms_material_statement_files'=>'거래명세서','cpms_outsourcing_costs'=>'외주비','cpms_progress_billings'=>'기성');
+    $fields=array('project_id'=>'프로젝트 ID','vendor_name'=>'업체명','company_name'=>'업체명','category'=>'분류','item_name'=>'품목명','equipment_name'=>'장비명','spec'=>'규격','remark'=>'비고','base_rate'=>'기준단가','use_date'=>'사용일','amount'=>'금액','memo'=>'메모','material_id'=>'자재 ID','equipment_id'=>'장비 ID','work_unit'=>'사용량','original_name'=>'원본 파일명','ym'=>'기준월','uploaded_at'=>'업로드일','expense_date'=>'비용일','content'=>'내용','round_label'=>'회차','progress_date'=>'기성일','requested_amount'=>'청구액','recognized_amount'=>'인정액');
+    $first=true;
+    foreach ($traces as $trace) {
+        echo '<div class="cpms2-project-trace"><h3>삭제 프로젝트 추적정보 · legacy #'.h($trace['legacy_id']).'</h3>';
+        echo '<p class="cpms2-warning">프로젝트명 미확인 · Export 차단</p><dl>';
+        foreach (array('first_use_date'=>'최초 사용일','last_use_date'=>'최종 사용일') as $key=>$label) echo '<div><dt>'.h($label).'</dt><dd>'.h($trace[$key]===null?'미확인':$trace[$key]).'</dd></div>';
+        foreach ($sources as $key=>$label) echo '<div><dt>'.h($label).' 건수</dt><dd>'.($trace['counts'][$key]===null?'조회 Source 없음':number_format($trace['counts'][$key]).'건').'</dd></div>';
+        echo '<div><dt>기성 존재 여부</dt><dd>'.($trace['progress_billing_exists']===null?'미확인':($trace['progress_billing_exists']?'있음':'없음')).'</dd></div></dl>';
+        $vendors=array(); $vendorTruncated=false;
+        foreach ($trace['lists'] as $key=>$list) if (substr($key,-8)==='_vendors') { $vendors=array_unique(array_merge($vendors,$list['values'])); $vendorTruncated=$vendorTruncated || $list['truncated']; }
+        if (count($vendors)>20) $vendorTruncated=true;
+        echo '<p><strong>주요 업체명</strong>: '.h($vendors?implode(' · ',array_slice($vendors,0,20)):'확인된 값 없음').($vendorTruncated?' · 일부 표시':'').'</p>';
+        foreach (array('cpms_material_items_names'=>'주요 자재명/규격','cpms_equipment_items_names'=>'주요 장비명/규격','statement_names'=>'거래명세서 원본 파일명') as $key=>$label) {
+            $list=isset($trace['lists'][$key])?$trace['lists'][$key]:array('values'=>array(),'truncated'=>false);
+            echo '<p><strong>'.h($label).'</strong>: '.h($list['values']?implode(' · ',$list['values']):'확인된 값 없음').($list['truncated']?' · 일부 표시':'').'</p>';
+        }
+        echo '<details><summary'.($first?' data-guide="admin-cpms2-project-trace"':'').'>상세보기 ('.(int)$trace['detail_count'].'건 / 최대 100건)</summary>';
+        $first=false;
+        foreach ($trace['details'] as $table=>$rows) {
+            if (!$rows) continue;
+            echo '<h4>'.h($sources[$table]).' · '.count($rows).' / '.(int)$trace['counts'][$table].'건</h4>';
+            foreach ($rows as $row) {
+                echo '<dl class="cpms2-trace-row">';
+                foreach ($row as $key=>$value) if ($value!==null && $value!=='') echo '<div><dt>'.h($fields[$key]).'</dt><dd>'.h($value).'</dd></div>';
+                echo '</dl>';
+            }
+        }
+        echo '</details></div>';
+    }
+};
 ?>
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -80,6 +112,7 @@ $renderClosure=function($data) {
   <h2>사전검사 결과</h2>
   <?php $renderMigration($report); ?>
   <?php $renderClosure($report); ?>
+  <?php if (!empty($report['referenced_master_closure']['deleted_project_traces'])) $renderProjectTraces($report['referenced_master_closure']['deleted_project_traces']); ?>
   <dl>
   <?php foreach ($report['counts'] as $entity=>$count): ?><div><dt><?php echo h($entity); ?></dt><dd><?php echo number_format($count); ?>건</dd></div><?php endforeach; ?>
   </dl>
