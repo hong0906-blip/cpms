@@ -76,10 +76,11 @@ class Cpms2MigrationExportService
             $columns=$this->db->inspect($table,$mandatory,array('id','name'));
             if (!count($columns)) $this->writer->warnings[]='Optional source table missing: '.$table;
         }
-        if ($this->db instanceof Cpms2ReadOnlySource) $this->db=new Cpms2ReferencedMasterClosure($this->db,$this->root,$this->storage);
+        if ($this->db instanceof Cpms2ReadOnlySource) { $this->writer->phase='projects'; $this->db=new Cpms2ReferencedMasterClosure($this->db,$this->root,$this->storage); }
         if ($this->db instanceof Cpms2ReferencedMasterClosure) {
             $this->writer->referenceClosure=$this->db->summary();
             $failures=$this->db->failures(); if ($failures) throw new RuntimeException($failures[0]['code']);
+            $this->writer->exclusionPolicy=$this->db->exclusionPolicy();
         }
         foreach (array('departments','positions','employees','vendors','workers','direct_team','projects','project_members','project_roles','labor_workers','labor_months','labor_entries','material_items','material_usages','equipment_items','equipment_usages','subcontract_costs','safety_costs','progress_billings','material_statement_files','safety_evidence_files','legacy_completed_approvals') as $entity) $this->writer->emptyEntity($entity);
         $this->writer->phase='employees'; $departments=array(); $positions=array();

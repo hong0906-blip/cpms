@@ -36,11 +36,27 @@ $renderClosure=function($data) {
     foreach (array('projects'=>'프로젝트','material_items'=>'자재','equipment_items'=>'장비','workers'=>'근로자','direct_team'=>'직영팀','vendors'=>'업체','material_usages'=>'명세서 참조 사용내역') as $key=>$label) {
         if (!isset($data['referenced_master_closure'][$key])) continue;
         $row=$data['referenced_master_closure'][$key];
-        echo '<div><dt>'.h($label).'</dt><dd>일반 '.(int)$row['normal'].' / 참조 복구 '.(int)$row['reference_recovered'].' / 물리 누락 '.(int)$row['physically_missing'].'</dd></div>';
+        echo '<div><dt>'.h($label).'</dt><dd>일반 '.(int)$row['normal'].' / 참조 복구 '.(int)$row['reference_recovered'].(isset($row['approved_excluded'])?' / 명시적 제외 '.(int)$row['approved_excluded']:'').' / 물리 누락 '.(int)$row['physically_missing'].'</dd></div>';
         if (isset($row['snapshot_only_labor_workers'])) echo '<div><dt>노무 Snapshot 근로자</dt><dd>'.(int)$row['snapshot_only_labor_workers'].'</dd></div>';
     }
     if (isset($data['referenced_master_closure']['labor_vendor'])) foreach (array('legacy_vendor_id'=>'업체 PK 확인','unique_business_identity'=>'고유 사업자 확인','snapshot_only'=>'업체 Snapshot 보존','ambiguous'=>'업체 식별 모호') as $key=>$label) echo '<div><dt>'.h($label).'</dt><dd>'.(int)$data['referenced_master_closure']['labor_vendor'][$key].'</dd></div>';
     echo '</dl>';
+    if (!empty($data['referenced_master_closure']['approved_deleted_project_exclusions']['projects'])) {
+        $diagnostic=$data['referenced_master_closure']['approved_deleted_project_exclusions'];
+        echo '<h3>삭제 프로젝트 사용자 승인 제외</h3><p>승인 제외 '.(int)$diagnostic['approved_count'].'건 / 조건 변경 차단 '.(int)$diagnostic['blocked_count'].'건</p>';
+        foreach ($diagnostic['projects'] as $id=>$exclusion) {
+            echo '<h4>legacy #'.h($id).' · '.($exclusion['condition_verified']?'사용자 승인 제외':'승인 제외 조건 변경 · Export 차단').'</h4>';
+            echo '<p>프로젝트 Master: '.($exclusion['project_master_present']?'존재':'물리 삭제').' · 프로젝트명: '.($exclusion['project_identity_available']?'Snapshot 확인 필요':'복구 불가').'</p><dl>';
+            foreach (array('material'=>'자재','equipment'=>'장비') as $kind=>$label) {
+                echo '<div><dt>'.h($label).'</dt><dd>'.(int)$exclusion[$kind.'_usage_count'].'건 / '.h(Cpms2MigrationDecimal::format($exclusion[$kind.'_amount'])).'원'.($exclusion[$kind.'_amount_changed']?' · 승인 금액 변경':'').'</dd></div>';
+                echo '<div><dt>'.h($label).' Master / 참조 전용</dt><dd>'.(int)$exclusion[$kind.'_item_count'].'건 / '.(int)$exclusion[$kind.'_reference_only_item_count'].'건</dd></div>';
+            }
+            echo '<div><dt>총 제외비용</dt><dd>'.h(Cpms2MigrationDecimal::format($exclusion['total_cost_amount'])).'원</dd></div>';
+            foreach (array('labor'=>'노무','subcontract'=>'외주','safety'=>'안전관리비','billing'=>'기성') as $kind=>$label) echo '<div><dt>'.h($label).'</dt><dd>'.($kind==='labor' && $exclusion['labor_row_count']?'노무 Row 존재 · 확인 필요':h(Cpms2MigrationDecimal::format($exclusion[$kind.'_amount'])).'원').' / '.(int)$exclusion[$kind.'_row_count'].'건</dd></div>';
+            echo '<div><dt>거래명세서</dt><dd>'.(int)$exclusion['statement_file_count'].'건</dd></div></dl>';
+            echo '<p>사유: 삭제 프로젝트 잔여 고아 데이터 · 처리: '.($exclusion['condition_verified']?'CPMS2 이관 제외':'재승인 필요').'</p>';
+        }
+    }
     if (!empty($data['referenced_master_closure']['historical_project_recovery'])) {
         echo '<h3>삭제 프로젝트 Snapshot 복구</h3>';
         echo '<p>복구 성공 '.(int)$data['referenced_master_closure']['projects']['historical_snapshot_recovered'].'건</p>';
@@ -112,6 +128,7 @@ $renderProjectTraces=function($traces) {
   <h2>사전검사 결과</h2>
   <?php $renderMigration($report); ?>
   <?php $renderClosure($report); ?>
+  <?php if (!empty($report['referenced_master_closure']['projects']['approved_excluded']) && $report['can_export']): ?><p>Export 가능</p><?php endif; ?>
   <?php if (!empty($report['referenced_master_closure']['deleted_project_traces'])) $renderProjectTraces($report['referenced_master_closure']['deleted_project_traces']); ?>
   <dl>
   <?php foreach ($report['counts'] as $entity=>$count): ?><div><dt><?php echo h($entity); ?></dt><dd><?php echo number_format($count); ?>건</dd></div><?php endforeach; ?>
@@ -120,7 +137,7 @@ $renderProjectTraces=function($traces) {
   <?php if (isset($report['accounts'])): $renderAccounts($report['accounts']); ?>
   <?php if (!$report['can_export']): ?><p class="cpms2-error" role="alert">사전검사를 통과하지 못해 Export를 진행할 수 없습니다.</p><?php endif; ?>
   <?php endif; ?>
-  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity']) && !in_array($failure['code'],array('legacy_referenced_master_physically_missing','legacy_labor_snapshot_insufficient','legacy_project_snapshot_unavailable','legacy_project_snapshot_ambiguous'))) continue; ?><p class="cpms2-error"><?php echo h(isset($failure['entity'])?$failure['entity']:'문서'); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
+  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity']) && !in_array($failure['code'],array('legacy_referenced_master_physically_missing','legacy_labor_snapshot_insufficient','legacy_project_snapshot_unavailable','legacy_project_snapshot_ambiguous','legacy_exclusion_scope_changed'))) continue; ?><p class="cpms2-error"><?php echo h(isset($failure['entity'])?$failure['entity']:'문서'); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
   <?php foreach ($report['warnings'] as $warning): ?><p class="cpms2-warning">Warning: <?php echo h($warning); ?></p><?php endforeach; ?>
 </section>
 <?php endif; ?>

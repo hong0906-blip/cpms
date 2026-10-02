@@ -5,6 +5,7 @@ class Cpms2ExportPackageWriter
     public $counts = array();
     public $safetySummary=array(); public $approvalSummary=array();
     public $referenceClosure=array();
+    public $exclusionPolicy=null;
     public $warnings = array();
     public $missing = array();
     public $expectedFiles = 0;
@@ -21,6 +22,7 @@ class Cpms2ExportPackageWriter
     public function __construct($directory) { $this->directory=$directory; if (!mkdir($directory,0700,true)) throw new RuntimeException('Cannot create private package staging directory.'); mkdir($directory.'/data',0700); mkdir($directory.'/files',0700); }
     public function record($entity, $row)
     {
+        if ($this->exclusionPolicy && $this->exclusionPolicy->excludesRecord($entity,$row)) return;
         if (isset($row['account_number']) && trim((string)$row['account_number'])!=='' && isset($this->accountCounts[$entity])) $this->accountCounts[$entity]++;
         if (!isset($this->streams[$entity])) { $this->streams[$entity]=fopen($this->directory.'/data/'.$entity.'.jsonl','wb'); $this->counts[$entity]=0; }
         $json=json_encode($row,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
@@ -46,6 +48,7 @@ class Cpms2ExportPackageWriter
     }
     public function amount($project, $kind, $amount)
     {
+        if ($this->exclusionPolicy && $this->exclusionPolicy->excludes($project)) throw new RuntimeException('legacy_exclusion_scope_changed');
         $cents=round((float)$amount*100);
         if (!isset($this->totals[$project])) $this->totals[$project]=array();
         if (!isset($this->totals[$project][$kind])) $this->totals[$project][$kind]=0;
@@ -96,6 +99,23 @@ class Cpms2ExportPackageWriter
         $summary['account_preflight']=$this->accountPreflight;
         $summary['safety_costs']=$this->safetySummary; $summary['completed_approvals']=$this->approvalSummary;
         $summary['referenced_master_closure']=$this->referenceClosure;
+        if ($this->exclusionPolicy && $this->exclusionPolicy->summary()['count']) {
+            $exclusions=$this->exclusionPolicy->summary(); $summary['excluded_deleted_projects']=$exclusions;
+            $summary['record_reconciliation']=array();
+            foreach ($this->counts as $entity=>$count) {
+                $excluded=isset($exclusions['record_counts'][$entity])?$exclusions['record_counts'][$entity]:0;
+                $summary['record_reconciliation'][$entity]=array('original'=>$count+$excluded,'excluded_deleted_project'=>$excluded,'migration_source'=>$count);
+            }
+            $reconciliation=array('projects'=>array(),'company'=>array());
+            $ids=array_unique(array_merge(array_keys($projects),array_keys($exclusions['projects'])));
+            foreach (array_merge($ids,array('company')) as $id) foreach (array('labor','material','equipment','subcontract','safety','billing') as $kind) {
+                $eligible=$id==='company'?(isset($total[$kind])?$total[$kind]:'0.00'):(isset($projects[$id][$kind])?$projects[$id][$kind]:'0.00');
+                $excluded=$id==='company'?(isset($exclusions['company_amounts'][$kind])?$exclusions['company_amounts'][$kind]:'0.00'):(isset($exclusions['projects'][$id][$kind.'_amount'])?$exclusions['projects'][$id][$kind.'_amount']:'0.00');
+                $row=array('source_original'=>Cpms2MigrationDecimal::add($eligible,$excluded),'excluded_deleted_project'=>$excluded,'source_migration'=>Cpms2MigrationDecimal::normalize($eligible));
+                if ($id==='company') $reconciliation['company'][$kind]=$row; else $reconciliation['projects'][$id][$kind]=$row;
+            }
+            $summary['deleted_project_reconciliation']=$reconciliation;
+        }
         $manifest['contains_plaintext_accounts']=true;
         $this->json('schema-report.json',$schema); $this->json('summary.json',$summary);
         $paths=array('schema-report.json','summary.json');

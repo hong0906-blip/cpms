@@ -27,17 +27,17 @@ CREATE TABLE cpms_material_statement_files(id INTEGER PRIMARY KEY,project_id INT
 CREATE TABLE cpms_project_labor_workers(id INTEGER PRIMARY KEY,project_id INTEGER,worker_id INTEGER,direct_member_id INTEGER,name TEXT,worker_name_snapshot TEXT,is_deleted INTEGER);
 CREATE TABLE cpms_project_members(project_id INTEGER,employee_id INTEGER,role TEXT);
 CREATE TABLE cpms_construction_roles(project_id INTEGER PRIMARY KEY,site_employee_id INTEGER);
-INSERT INTO cpms_projects VALUES(1,'current',0,NULL),(8,'referenced',1,'2020-01-01'),(9,'unreferenced',1,NULL);
+INSERT INTO cpms_projects VALUES(1,'current',0,NULL),(18,'referenced',1,'2020-01-01'),(9,'unreferenced',1,NULL);
 INSERT INTO cpms_vendors VALUES(1,'same name','1234567890',0),(2,'same name','1234567891',0),(3,'unique name','1234567892',0);
-INSERT INTO cpms_material_items VALUES(11,8,1,'자재비','historical material',1),(12,9,1,'자재비','unreferenced material',1);
-INSERT INTO cpms_equipment_items VALUES(31,8,1,'장비','historical equipment',1),(32,9,1,'장비','unreferenced equipment',1);
+INSERT INTO cpms_material_items VALUES(11,18,1,'자재비','historical material',1),(12,9,1,'자재비','unreferenced material',1);
+INSERT INTO cpms_equipment_items VALUES(31,18,1,'장비','historical equipment',1),(32,9,1,'장비','unreferenced equipment',1);
 INSERT INTO workers VALUES(21,'historical worker',1),(22,'unused worker',1);
 INSERT INTO direct_team_members VALUES(25,'historical direct',1),(26,'unused direct',1);
-INSERT INTO cpms_material_usage VALUES(101,8,11,0),(102,8,11,1);
-INSERT INTO cpms_equipment_usage VALUES(201,8,31,0);
-INSERT INTO cpms_material_statement_files VALUES(301,8,11,102);
-INSERT INTO cpms_project_labor_workers VALUES(401,8,21,NULL,'worker',NULL,0),(402,8,NULL,25,'direct',NULL,0),(403,8,NULL,NULL,'orphan','snapshot name',0),(404,8,1475,NULL,'missing master',NULL,0);
-INSERT INTO cpms_project_members VALUES(8,1,'main'); INSERT INTO cpms_construction_roles VALUES(8,1);");
+INSERT INTO cpms_material_usage VALUES(101,18,11,0),(102,18,11,1);
+INSERT INTO cpms_equipment_usage VALUES(201,18,31,0);
+INSERT INTO cpms_material_statement_files VALUES(301,18,11,102);
+INSERT INTO cpms_project_labor_workers VALUES(401,18,21,NULL,'worker',NULL,0),(402,18,NULL,25,'direct',NULL,0),(403,18,NULL,NULL,'orphan','snapshot name',0),(404,18,1475,NULL,'missing master',NULL,0);
+INSERT INTO cpms_project_members VALUES(18,1,'main'); INSERT INTO cpms_construction_roles VALUES(18,1);");
 $db->exec('PRAGMA query_only=ON'); $source=new ReferenceSqliteSource($db);
 $checks=0; function referenceAssert($ok,$label) { global $checks; if (!$ok) throw new RuntimeException($label); $checks++; }
 $closure=new Cpms2ReferencedMasterClosure($source); $report=$closure->summary();
@@ -45,7 +45,7 @@ foreach (array('projects','material_items','equipment_items','workers','direct_t
 referenceAssert(!$closure->failures(),'Snapshot-recoverable source blocked.');
 referenceAssert($report['workers']['physically_missing']===1 && $report['workers']['snapshot_only_labor_workers']===2,'Missing worker or snapshot-only counts.');
 $projects=iterator_to_array($closure->rows('cpms_projects',array('id','name')),false);
-referenceAssert(count($projects)===2 && $projects[1]['id']==8,'Unreferenced deleted project exported.');
+referenceAssert(count($projects)===2 && $projects[1]['id']==18,'Unreferenced deleted project exported.');
 referenceAssert($projects[1]['legacy_reference_only']===1 && $projects[1]['source_is_deleted']==1 && $projects[1]['recovered_by']==='referenced_master_closure','Reference metadata absent.');
 $usage=iterator_to_array($closure->rows('cpms_material_usage',array('id','project_id','material_id')),false);
 referenceAssert(count($usage)===2 && count(array_unique(array_column($usage,'id')))===2,'Statement dependency lost or duplicate rows.');
@@ -57,7 +57,7 @@ $vendor=$closure->vendorSnapshot(array('company_name'=>'same name','biz_no'=>'12
 referenceAssert($vendor['legacy_vendor_id']==2 && $vendor['legacy_vendor_resolution']==='unique_business_identity','Strong business identity was not resolved.');
 $vendor=$closure->vendorSnapshot(array('vendor_id'=>1,'company_name'=>'same name'));
 referenceAssert($vendor['legacy_vendor_id']==1 && $vendor['legacy_vendor_resolution']==='legacy_vendor_id','Explicit PK was not resolved.');
-$db->exec('PRAGMA query_only=OFF'); $db->exec('INSERT INTO cpms_equipment_usage VALUES(202,8,999,0)'); $db->exec('PRAGMA query_only=ON');
+$db->exec('PRAGMA query_only=OFF'); $db->exec('INSERT INTO cpms_equipment_usage VALUES(202,18,999,0)'); $db->exec('PRAGMA query_only=ON');
 $bad=new Cpms2ReferencedMasterClosure($source); $failures=$bad->failures();
 referenceAssert(count($failures)===1 && $failures[0]['code']==='legacy_referenced_master_physically_missing' && $failures[0]['legacy_id']==='999','Physical missing item was synthesized.');
 $blocked=false; try { $source->query('UPDATE workers SET name=?',array('changed')); } catch (RuntimeException $e) { $blocked=true; }

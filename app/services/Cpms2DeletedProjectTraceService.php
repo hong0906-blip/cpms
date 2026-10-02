@@ -26,7 +26,7 @@ class Cpms2DeletedProjectTraceService
         $value=trim(preg_replace('/[\x00-\x1f\x7f]+/u',' ',$value));
         return function_exists('mb_substr')?mb_substr($value,0,240,'UTF-8'):substr($value,0,240);
     }
-    private function scope($table,$alias='t',$depth=0)
+    public function scope($table,$alias='t',$depth=0)
     {
         $columns=$this->source->columns($table); if (!$columns || $depth>2) return null;
         $direct=in_array('project_id',$columns)?$alias.'.`project_id` = ?':null;

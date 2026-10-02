@@ -13,7 +13,7 @@
 .cpms2-export dl{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:0}
 .cpms2-export dl>div{display:flex;justify-content:space-between;gap:12px;min-width:0;padding:8px 0;border-bottom:1px solid #e5e7eb}
 .cpms2-export dt{overflow-wrap:anywhere}
-.cpms2-export dd{margin:0;flex-shrink:0}
+.cpms2-export dd{margin:0;flex-shrink:1;min-width:0;overflow-wrap:anywhere;text-align:right}
 .cpms2-export button,.cpms2-export header a{display:inline-flex;align-items:center;justify-content:center;min-height:44px;max-width:100%;padding:10px 14px;border:1px solid #2563eb;border-radius:10px;background:#2563eb;color:#fff;font:inherit;font-weight:700;cursor:pointer;text-decoration:none;overflow-wrap:anywhere}
 .cpms2-export header button,.cpms2-export header a,.cpms2-export button.cpms2-secondary{background:#fff;color:#4b5563;border-color:#d1d5db}
 .cpms2-export button:disabled{opacity:.4;cursor:default}

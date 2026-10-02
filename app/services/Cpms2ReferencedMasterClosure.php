@@ -2,39 +2,44 @@
 // app/services/Cpms2ReferencedMasterClosure.php
 // PHP 5.6: filtered source rows plus only masters referenced by exported children.
 require_once __DIR__.'/Cpms2HistoricalProjectRecoveryService.php';
+require_once __DIR__.'/Cpms2MigrationExclusionPolicy.php';
 class Cpms2ReferencedMasterClosure
 {
     private $source;
     private $normal=array(); private $references=array(); private $recovered=array(); private $missing=array();
     private $assignments=array(); private $vendors=array(); private $report=array(); private $failures=array();
     private $historicalProjects=array(); private $projectRecovery=array();
+    private $exclusion;
     private static $entities=array('cpms_projects'=>'projects','cpms_material_items'=>'material_items','cpms_equipment_items'=>'equipment_items','workers'=>'workers','direct_team_members'=>'direct_team','cpms_vendors'=>'vendors','cpms_material_usage'=>'material_usages');
     public function __construct($source,$root=null,$storage=null)
     {
         $this->source=$source;
+        $this->exclusion=new Cpms2MigrationExclusionPolicy($source,$root,$storage);
+        $this->failures=$this->exclusion->failures();
         foreach (self::$entities as $table=>$entity) {
             $this->normal[$table]=array(); $this->references[$table]=array(); $this->recovered[$table]=array(); $this->missing[$table]=array();
             if (!in_array('id',$source->columns($table))) continue;
-            foreach ($source->rows($table,array('id')) as $row) $this->normal[$table][(string)$row['id']]=true;
+            foreach ($this->eligibleRows($table,array('id')) as $row) $this->normal[$table][(string)$row['id']]=true;
         }
         $children=array('cpms_material_items','cpms_equipment_items','cpms_material_usage','cpms_equipment_usage','cpms_outsourcing_costs','cpms_progress_billings','cpms_material_statement_files','cpms_project_labor_workers','cpms_project_members','cpms_construction_roles');
         foreach ($children as $table) {
             $columns=$source->columns($table); if (!$columns) continue;
             $fields=array_values(array_intersect(explode(' ','id project_id material_id equipment_id material_usage_id vendor_id worker_id direct_member_id name worker_name_snapshot'),$columns));
             if (!$fields) continue;
-            if (in_array('id',$fields)) $rows=$source->rows($table,$fields);
+            if (in_array('id',$fields)) $rows=$this->eligibleRows($table,$fields);
             else {
                 $filter=array(); if (in_array('is_deleted',$columns)) $filter[]='COALESCE(is_deleted,0)=0'; if (in_array('deleted_at',$columns)) $filter[]='deleted_at IS NULL';
                 $rows=$source->query('SELECT `'.implode('`,`',$fields).'` FROM `'.$table.'`'.($filter?' WHERE '.implode(' AND ',$filter):''))->fetchAll(PDO::FETCH_ASSOC);
             }
             foreach ($rows as $row) {
+                if ($this->exclusion->excludes(isset($row['project_id'])?$row['project_id']:null)) continue;
                 $this->referencesFor($table,$row);
                 if ($table==='cpms_project_labor_workers') $this->assignments[]=$row;
             }
         }
         // Safety JSON rows are exported children too, even without a database cost row.
         if ($root!==null && $storage!==null) {
-            $safety=(new Cpms2SafetyCostExportService($root,$storage))->collect($source);
+            $safety=(new Cpms2SafetyCostExportService($root,$storage))->collect($this);
             foreach ($safety['rows'] as $row) {
                 $this->reference('cpms_projects',$row['legacy_project_id']);
                 if (!empty($row['legacy_vendor_id'])) $this->reference('cpms_vendors',$row['legacy_vendor_id']);
@@ -53,7 +58,8 @@ class Cpms2ReferencedMasterClosure
                 $found=array();
                 if (in_array('id',$source->columns($table))) {
                     $fields=$this->fields($table);
-                    foreach ($source->rowsByIds($table,$fields,array_keys($pending)) as $row) {
+                    list($where,$params)=$this->exclusion->filter($table,'',array());
+                    foreach ($source->rowsByIds($table,$fields,array_keys($pending),$where,$params) as $row) {
                         $id=(string)$row['id']; $found[$id]=true; $this->recovered[$table][$id]=true;
                         $this->referencesFor($table,$row); $changed=true;
                     }
@@ -79,6 +85,8 @@ class Cpms2ReferencedMasterClosure
         }
         $this->report['projects']['historical_snapshot_recovered']=count($this->historicalProjects);
         $this->report['historical_project_recovery']=$this->projectRecovery;
+        $this->report['projects']['approved_excluded']=$this->exclusion->summary()['count'];
+        $this->report['approved_deleted_project_exclusions']=Cpms2ExportFailure::exclusionSection($this->exclusion);
         $snapshot=0;
         foreach ($this->assignments as $row) if ($this->snapshotOnly($row)) {
             $name=!empty($row['worker_name_snapshot'])?trim($row['worker_name_snapshot']):(isset($row['name'])?trim($row['name']):'');
@@ -93,7 +101,7 @@ class Cpms2ReferencedMasterClosure
         $fields=isset(Cpms2MigrationExportService::$fields[$table])?explode(' ',Cpms2MigrationExportService::$fields[$table]):array('id');
         return array_merge($fields,array('project_id','is_deleted','deleted_at'));
     }
-    private function reference($table,$id) { if ($id!==null && (string)$id!=='' && (int)$id>0) $this->references[$table][(string)$id]=true; }
+    private function reference($table,$id) { if ($table==='cpms_projects' && $this->exclusion->excludes($id)) return; if ($id!==null && (string)$id!=='' && (int)$id>0) $this->references[$table][(string)$id]=true; }
     private function referencesFor($table,$row)
     {
         if (isset($row['project_id'])) $this->reference('cpms_projects',$row['project_id']);
@@ -114,9 +122,10 @@ class Cpms2ReferencedMasterClosure
     }
     public function rows($table,$fields,$where='',$params=array())
     {
-        foreach ($this->source->rows($table,$fields,$where,$params) as $row) yield $row;
+        foreach ($this->eligibleRows($table,$fields,$where,$params) as $row) yield $row;
         if (empty($this->recovered[$table])) return;
         $ids=array_keys($table==='cpms_projects'?array_diff_key($this->recovered[$table],$this->historicalProjects):$this->recovered[$table]);
+        list($where,$params)=$this->exclusion->filter($table,$where,$params);
         foreach ($this->source->rowsByIds($table,array_merge($fields,array('is_deleted','deleted_at')),$ids,$where,$params) as $row) {
             $row['legacy_reference_only']=1; $row['recovered_by']='referenced_master_closure';
             if (array_key_exists('is_deleted',$row)) { $row['source_is_deleted']=$row['is_deleted']; unset($row['is_deleted']); }
@@ -129,6 +138,12 @@ class Cpms2ReferencedMasterClosure
             yield array_intersect_key($row,array_flip(array_merge($fields,$metadata)));
         }
     }
+    private function eligibleRows($table,$fields,$where='',$params=array())
+    {
+        list($where,$params)=$this->exclusion->filter($table,$where,$params);
+        foreach ($this->source->rows($table,$fields,$where,$params) as $row) yield $row;
+    }
+    public function exclusionPolicy() { return $this->exclusion; }
     public static function businessNumber($row)
     {
         foreach (array('biz_no','business_no') as $field) if (!empty($row[$field])) {
