@@ -18,7 +18,7 @@ class Cpms2ExportController
         $document=isset($_SERVER['DOCUMENT_ROOT'])?$_SERVER['DOCUMENT_ROOT']:'';
         if ($document==='' && isset($_SERVER['APPL_PHYSICAL_PATH'])) $document=$_SERVER['APPL_PHYSICAL_PATH'];
         $attendance=cpms_load_attendance_pdo();
-        $service=new Cpms2WebExportService(new Cpms2ReadOnlySource($pdo),$attendance?new Cpms2ReadOnlySource($attendance):null,$root,cpms_storage_root().'/materials/statements',$private?$private:cpms_storage_root().'/exports/cpms2',$document);
+        $service=new Cpms2WebExportService(new Cpms2ReadOnlySource($pdo),$attendance?new Cpms2ReadOnlySource($attendance):null,$root,cpms_storage_root().'/materials/statements',$private?$private:cpms_storage_root().'/exports/cpms2',$document,cpms_storage_root());
         (new self($service))->handle();
     }
     public function handle()
@@ -44,6 +44,7 @@ class Cpms2ExportController
                 } elseif ($action==='generate') {
                     $check=isset($_SESSION['_cpms2_export_preflight'])?$_SESSION['_cpms2_export_preflight']:array();
                     if (empty($check['owner_employee_id']) || (int)$check['owner_employee_id']!==(int)$employee['id'] || time()-$check['checked_at']>900) throw new RuntimeException('PREFLIGHT_REQUIRED');
+                    if (empty($check['report']['can_export'])) throw new RuntimeException('ACCOUNT_PREFLIGHT_FAILED');
                     // Release the session lock during bounded source reads and ZIP assembly.
                     session_write_close(); @set_time_limit(0);
                     $package=$this->service->generate($employee);
@@ -76,8 +77,11 @@ class Cpms2ExportController
                 );
                 $error=isset($messages[$e->getMessage()])?$messages[$e->getMessage()]:'Export를 완료하지 못했습니다. 원본 Schema와 서버 저장 권한을 확인하세요.';
                 $request=bin2hex(openssl_random_pseudo_bytes(6));
-                error_log('[CPMS2 export] request='.$request.' action='.$action.' exception='.get_class($e));
-                $error.=' (요청 ID: '.$request.')';
+                $diagnostic=Cpms2ExportFailure::safe($this->service->phase(),$e);
+                error_log('[CPMS2 export] request='.$request.' action='.$action.' phase='.$diagnostic->phase.' code='.$diagnostic->getMessage());
+                $error.=' 실패 단계: '.$diagnostic->phase.' / 오류코드: '.$diagnostic->getMessage().' (요청 ID: '.$request.')';
+                $latest=$this->service->lastPreflight();
+                if ($action==='generate' && $latest && !$latest['can_export']) $_SESSION['_cpms2_export_preflight']=array('owner_employee_id'=>(int)$employee['id'],'checked_at'=>time(),'report'=>$latest);
                 if ($action==='preflight') unset($_SESSION['_cpms2_export_preflight']);
                 http_response_code(422);
             }

@@ -3,13 +3,15 @@
 require_once __DIR__.'/Cpms2ReadOnlySource.php';
 require_once __DIR__.'/Cpms2ExportPackageWriter.php';
 require_once __DIR__.'/Cpms2LaborExportService.php';
+require_once __DIR__.'/Cpms2SensitiveExportService.php';
+require_once __DIR__.'/Cpms2ExportDiagnostic.php';
 
 class Cpms2MigrationExportService
 {
     public static $fields = array(
         'employees'=>'id employee_no name email phone department position role is_active birth_date hire_date resign_date work_location is_team_leader team_leader_id',
         'cpms_vendors'=>'id business_no biz_no name vendor_name description representative representative_name phone bank_name account_number bank_account account_holder is_active',
-        'workers'=>'id name phone birth_date job_type agency_name daily_wage bank_name account_holder is_active',
+        'workers'=>'id name phone birth_date job_type agency_name daily_wage bank_name bank_account_enc bank_account_hash account_number bank_account account_holder is_active',
         'direct_team_members'=>'id name phone hire_date resign_date bank_name bank_account account_holder monthly_salary daily_wage is_active',
         'cpms_projects'=>'id name client contractor location start_date end_date contract_amount status',
         'cpms_project_members'=>'id project_id employee_id role',
@@ -26,7 +28,13 @@ class Cpms2MigrationExportService
     private $writer;
     private $root;
     private $fileRoot;
-    public function __construct($db,$writer,$root,$fileRoot) { $this->db=$db; $this->writer=$writer; $this->root=$root; $this->fileRoot=$fileRoot; }
+    private $sensitive;
+    public function __construct($db,$writer,$root,$fileRoot,$sensitive=null) { $this->db=$db; $this->writer=$writer; $this->root=$root; $this->fileRoot=$fileRoot; $this->sensitive=$sensitive?$sensitive:new Cpms2SensitiveExportService($root); }
+    public static function tablePhase($table)
+    {
+        $phases=array('employees'=>'employees','cpms_vendors'=>'vendors','workers'=>'workers','direct_team_members'=>'direct_team','cpms_material_items'=>'material','cpms_material_usage'=>'material','cpms_equipment_items'=>'equipment','cpms_equipment_usage'=>'equipment','cpms_outsourcing_costs'=>'subcontract','cpms_progress_billings'=>'billing','cpms_material_statement_files'=>'statement_files');
+        return isset($phases[$table])?$phases[$table]:'projects';
+    }
     public static function department($name)
     {
         $name=trim((string)$name);
@@ -58,14 +66,19 @@ class Cpms2MigrationExportService
     private function rows($table) { return $this->db->rows($table,explode(' ',self::$fields[$table])); }
     public function run($attendance)
     {
+        $this->writer->phase='employees';
         foreach (self::$fields as $table=>$fields) {
+            $this->writer->phase=self::tablePhase($table);
             $mandatory=in_array($table,array('employees','cpms_vendors','workers','direct_team_members','cpms_projects'));
             $columns=$this->db->inspect($table,$mandatory,array('id','name'));
             if (!count($columns)) $this->writer->warnings[]='Optional source table missing: '.$table;
         }
         foreach (array('departments','positions','employees','vendors','workers','direct_team','projects','project_members','project_roles','labor_workers','labor_months','labor_entries','material_items','material_usages','equipment_items','equipment_usages','subcontract_costs','safety_costs','progress_billings','material_statement_files') as $entity) $this->writer->emptyEntity($entity);
-        $departments=array(); $positions=array();
+        $this->writer->phase='employees'; $departments=array(); $positions=array();
+        $payroll=$this->sensitive->employeeAccounts($this->db);
+        if ($payroll['failures']) throw new RuntimeException($payroll['failures'][0]['code']);
         foreach ($this->rows('employees') as $row) {
+            if (isset($payroll['accounts'][(string)$row['id']])) $row=array_merge($row,$payroll['accounts'][(string)$row['id']]);
             $row['department']=self::department(isset($row['department'])?$row['department']:'');
             if ($row['department']!=='') $departments[$row['department']]=true;
             if (isset($row['position']) && trim($row['position'])!=='') $positions[trim($row['position'])]=true;
@@ -76,20 +89,22 @@ class Cpms2MigrationExportService
         $index=0;
         foreach (array_unique(array_merge($ordered,array_keys($positions))) as $name) if (isset($positions[$name])) $this->writer->record('positions',array('legacy_id'=>$name,'name'=>$name,'sort_order'=>$index++));
         foreach (array('cpms_vendors'=>'vendors','workers'=>'workers','direct_team_members'=>'direct_team','cpms_projects'=>'projects','cpms_project_members'=>'project_members','cpms_construction_roles'=>'project_roles') as $table=>$entity) {
+            $this->writer->phase=in_array($entity,array('project_members','project_roles'))?'projects':$entity;
             if ($table==='cpms_project_members' && !in_array('id',$this->db->columns($table)) && in_array('employee_id',$this->db->columns($table))) {
                 $st=$this->db->query('SELECT project_id,employee_id,role FROM cpms_project_members ORDER BY project_id,employee_id');
                 while ($row=$st->fetch(PDO::FETCH_ASSOC)) { $row['id']=$row['project_id'].':'.$row['employee_id']; $this->writer->record($entity,self::legacy($row)); }
                 continue;
             }
-            if ($entity==='workers' && in_array('bank_account_enc',$this->db->columns($table))) $this->writer->warnings[]='Encrypted worker accounts omitted (decrypt helper can write key files).';
             foreach ($this->rows($table) as $row) {
-                // CryptoHelper::decrypt may generate a key file; it is NOT read-only.
-                if ($entity==='workers') $row['account_number']=null;
+                if ($entity==='workers') $row=array_merge($row,$this->sensitive->workerAccount($row));
+                elseif (in_array($entity,array('vendors','direct_team'))) $row=array_merge($row,Cpms2SensitiveExportService::plainAccount($row,strtoupper($entity).'_ACCOUNT_MISSING'));
+                unset($row['bank_account_enc'],$row['bank_account_hash'],$row['bank_account']);
                 $this->writer->record($entity,self::legacy($row));
             }
         }
-        (new Cpms2LaborExportService($this->db,$attendance,$this->writer))->run();
+        $this->writer->phase='labor'; (new Cpms2LaborExportService($this->db,$attendance,$this->writer))->run();
         foreach (array('material','equipment') as $kind) {
+            $this->writer->phase=$kind;
             $table='cpms_'.$kind.'_items';
             foreach ($this->rows($table) as $row) $this->writer->record($kind.'_items',self::legacy($row));
             $table='cpms_'.$kind.'_usage';
@@ -109,12 +124,15 @@ class Cpms2MigrationExportService
                 $this->writer->amount($row['project_id'],$entity==='safety_costs'?'safety':$kind,$amount);
             }
         }
+        $this->writer->phase='subcontract';
         foreach ($this->rows('cpms_outsourcing_costs') as $row) { $this->writer->record('subcontract_costs',self::legacy($row)); $this->writer->amount($row['project_id'],'subcontract',$row['amount']); }
+        $this->writer->phase='billing';
         foreach ($this->rows('cpms_progress_billings') as $row) {
             $recognized=isset($row['recognized_amount'])?(float)$row['recognized_amount']:0; $requested=isset($row['requested_amount'])?(float)$row['requested_amount']:0;
             $row['effective_amount']=sprintf('%.2f',$recognized!=0?$recognized:($requested>0?$requested:0));
             $this->writer->record('progress_billings',self::legacy($row)); $this->writer->amount($row['project_id'],'billing',$row['effective_amount']);
         }
+        $this->writer->phase='statement_files';
         foreach ($this->rows('cpms_material_statement_files') as $row) {
             $path=self::statementPath(isset($row['stored_path'])?$row['stored_path']:'',$this->root,$this->fileRoot);
             unset($row['stored_path']);

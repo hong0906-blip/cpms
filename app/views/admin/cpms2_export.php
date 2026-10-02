@@ -21,7 +21,7 @@ $report=$exportView['preflight']; $package=$exportView['package'];
     <form method="post"><input type="hidden" name="_csrf" value="<?php echo h($exportView['csrf']); ?>"><input type="hidden" name="action" value="preflight">
       <button data-guide="admin-cpms2-preflight" class="cpms2-secondary" type="submit">사전검사</button></form>
     <form method="post"><input type="hidden" name="_csrf" value="<?php echo h($exportView['csrf']); ?>"><input type="hidden" name="action" value="generate">
-      <button data-guide="admin-cpms2-generate" type="submit"<?php echo !$report?' disabled':''; ?>>전체 Export ZIP 생성</button></form>
+      <button data-guide="admin-cpms2-generate" type="submit"<?php echo !$report || empty($report['can_export'])?' disabled':''; ?>>전체 Export ZIP 생성</button></form>
   </div><p id="cpms2-export-status" role="status" aria-live="polite"></p>
 </section>
 <?php if ($report): ?>
@@ -31,6 +31,11 @@ $report=$exportView['preflight']; $package=$exportView['package'];
   <?php foreach ($report['counts'] as $entity=>$count): ?><div><dt><?php echo h($entity); ?></dt><dd><?php echo number_format($count); ?>건</dd></div><?php endforeach; ?>
   </dl>
   <p>거래명세서 <?php echo (int)$report['expected_file_count']; ?>건 · 누락 <?php echo (int)$report['missing_file_count']; ?>건</p>
+  <?php if (isset($report['accounts'])): $labels=array('vendors'=>'업체','workers'=>'근로자','direct_team'=>'직영팀','employees'=>'직원'); ?>
+  <?php foreach ($report['accounts']['counts'] as $entity=>$count): ?><p><?php echo h($labels[$entity]); ?> 계좌번호 <?php echo (int)$count['source']; ?>건 중 <?php echo (int)$count['verified']; ?>건 확인 / <?php echo (int)$count['failed']; ?>건 실패</p><?php endforeach; ?>
+  <?php if (!$report['can_export']): ?><p class="cpms2-error" role="alert">계좌 사전검사를 통과하지 못해 Export를 진행할 수 없습니다.</p><?php endif; ?>
+  <?php foreach ($report['accounts']['failures'] as $failure): ?><p class="cpms2-warning"><?php echo h($labels[$failure['entity']]); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['name']); ?> · 오류코드: <?php echo h($failure['code']); ?></p><?php endforeach; ?>
+  <?php endif; ?>
   <?php foreach ($report['warnings'] as $warning): ?><p class="cpms2-warning">Warning: <?php echo h($warning); ?></p><?php endforeach; ?>
 </section>
 <?php endif; ?>

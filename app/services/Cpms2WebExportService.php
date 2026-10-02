@@ -10,11 +10,15 @@ class Cpms2WebExportService
     private $fileRoot;
     private $privateRoot;
     private $documentRoot;
-    public function __construct($source,$attendance,$root,$fileRoot,$privateRoot,$documentRoot)
+    private $sensitive; private $phase='employees'; private $lastReport=null;
+    public function __construct($source,$attendance,$root,$fileRoot,$privateRoot,$documentRoot,$storageRoot=null)
     {
         $this->source=$source; $this->attendance=$attendance; $this->root=$root;
         $this->fileRoot=$fileRoot; $this->privateRoot=$privateRoot; $this->documentRoot=$documentRoot;
+        $this->sensitive=new Cpms2SensitiveExportService($root,$storageRoot);
     }
+    public function phase() { return $this->phase; }
+    public function lastPreflight() { return $this->lastReport; }
     public function authorize($session)
     {
         $user=isset($session['cpms_user']) && is_array($session['cpms_user'])?$session['cpms_user']:array();
@@ -51,6 +55,7 @@ class Cpms2WebExportService
         $this->checkedPrivateRoot();
         $counts=array(); $warnings=array();
         foreach (Cpms2MigrationExportService::$fields as $table=>$fields) {
+            $this->phase=Cpms2MigrationExportService::tablePhase($table);
             $required=in_array($table,array('employees','cpms_vendors','workers','direct_team_members','cpms_projects'));
             $columns=$this->source->inspect($table,$required,array('id','name'));
             if (!$columns) { $counts[$table]=0; $warnings[]='Optional source table missing: '.$table; continue; }
@@ -63,18 +68,20 @@ class Cpms2WebExportService
             $expected++;
             if (!Cpms2MigrationExportService::statementPath(isset($r['stored_path'])?$r['stored_path']:'',$this->root,$this->fileRoot)) $missing[]=$r['id'];
         }
-        $gongsu=cpms_find_gongsu_table($this->source);
+        $this->phase='labor'; $gongsu=cpms_find_gongsu_table($this->source);
         if (!$gongsu && $this->attendance) $gongsu=cpms_find_gongsu_table($this->attendance);
         if (!$gongsu && (!$this->attendance || !count($this->attendance->inspect('attendance')))) throw new RuntimeException('ATTENDANCE_SOURCE_REQUIRED');
         $excluded=Cpms2LaborExportService::excludedForceAdjustments($this->source);
         $warnings=array_merge($warnings,Cpms2LaborExportService::exclusionWarnings($excluded));
         if ($missing) $warnings[]='Missing statement files: '.count($missing);
-        if (in_array('bank_account_enc',$this->source->columns('workers'))) $warnings[]='Encrypted worker accounts are omitted; the decrypt helper can write key files.';
-        return array('counts'=>$counts,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'excluded_labor_force_adjustments'=>$excluded,'warnings'=>$warnings);
+        $this->phase='employees'; $accounts=$this->sensitive->preflight($this->source);
+        if ($accounts['failures']) $this->phase=$accounts['failures'][0]['entity'];
+        return $this->lastReport=array('counts'=>$counts,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'excluded_labor_force_adjustments'=>$excluded,'accounts'=>$accounts,'can_export'=>!count($accounts['failures']),'warnings'=>$warnings);
     }
     public function generate($employee)
     {
-        $this->preflight();
+        $report=$this->preflight();
+        if (!$report['can_export']) throw new Cpms2ExportFailure($this->phase,$report['accounts']['failures'][0]['code']);
         $private=$this->checkedPrivateRoot(true);
         $lock=fopen($private.'/employee-'.(int)$employee['id'].'.lock','c');
         if (!$lock || !flock($lock,LOCK_EX|LOCK_NB)) { if ($lock) fclose($lock); throw new RuntimeException('EXPORT_ALREADY_RUNNING'); }
@@ -84,15 +91,16 @@ class Cpms2WebExportService
             if ($random===false || !$strong) throw new RuntimeException('SECURE_RANDOM_REQUIRED');
             $id=bin2hex($random); $output=$private.'/'.$id.'.zip';
             $writer=new Cpms2ExportPackageWriter($private.'/.stage-'.$id);
-            (new Cpms2MigrationExportService($this->source,$writer,$this->root,$this->fileRoot))->run($this->attendance);
+            (new Cpms2MigrationExportService($this->source,$writer,$this->root,$this->fileRoot,$this->sensitive))->run($this->attendance);
             $commit=getenv('CPMS2_EXPORT_SOURCE_COMMIT'); if (!$commit || !preg_match('/^[a-f0-9]{40}$/D',$commit)) { $commit=null; $writer->warnings[]='Source commit unavailable in FileZilla deployment; source_code_sha256 is recorded.'; }
-            $fingerprint=''; foreach (array('Cpms2ReadOnlySource','Cpms2ExportPackageWriter','Cpms2MigrationExportService','Cpms2LaborExportService','Cpms2WebExportService') as $file) $fingerprint.=hash_file('sha256',__DIR__.'/'.$file.'.php');
+            $writer->phase='summary';
+            $fingerprint=''; foreach (array('Cpms2ReadOnlySource','Cpms2ExportPackageWriter','Cpms2MigrationExportService','Cpms2LaborExportService','Cpms2WebExportService','Cpms2SensitiveExportService','Cpms2PayrollAccountExportService','Cpms2ExportDiagnostic') as $file) $fingerprint.=hash_file('sha256',__DIR__.'/'.$file.'.php');
             $schema=$this->source->report(); if ($this->attendance) $schema['attendance_database']=$this->attendance->report();
             $summary=$writer->finish($output,array('format'=>'cpms1-company-export','format_version'=>1,'export_id'=>'cpms1-'.$id,'created_at'=>date('c'),'source_system'=>'cpms1','source_repository'=>'hong0906-blip/cpms','source_commit'=>$commit,'source_code_sha256'=>hash('sha256',$fingerprint),'php_version'=>PHP_VERSION,'database_name'=>$this->source->databaseName()),$schema);
             return array('id'=>$id,'owner_employee_id'=>(int)$employee['id'],'created_at'=>date('c'),'size'=>filesize($output),'sha256'=>hash_file('sha256',$output),'summary'=>$summary);
         } catch (Exception $e) {
             if ($output!=='' && is_file($output)) unlink($output); // Only this newly created package.
-            throw $e;
+            throw Cpms2ExportFailure::safe($writer?$writer->phase:$this->phase,$e);
         } finally {
             if ($writer) $writer->cleanup();
             flock($lock,LOCK_UN); fclose($lock);

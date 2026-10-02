@@ -7,6 +7,8 @@ class Cpms2ExportPackageWriter
     public $missing = array();
     public $expectedFiles = 0;
     public $fileBytes = 0;
+    public $phase = 'employees';
+    public $accountCounts = array('vendors'=>0,'workers'=>0,'direct_team'=>0,'employees'=>0);
     public $excludedLaborForce = array('count'=>0,'amount'=>'0.00','projects'=>array());
     private $directory;
     private $streams = array();
@@ -16,6 +18,7 @@ class Cpms2ExportPackageWriter
     public function __construct($directory) { $this->directory=$directory; if (!mkdir($directory,0700,true)) throw new RuntimeException('Cannot create private package staging directory.'); mkdir($directory.'/data',0700); mkdir($directory.'/files',0700); }
     public function record($entity, $row)
     {
+        if (isset($row['account_number']) && trim((string)$row['account_number'])!=='' && isset($this->accountCounts[$entity])) $this->accountCounts[$entity]++;
         if (!isset($this->streams[$entity])) { $this->streams[$entity]=fopen($this->directory.'/data/'.$entity.'.jsonl','wb'); $this->counts[$entity]=0; }
         $json=json_encode($row,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
         if ($json===false || fwrite($this->streams[$entity],$json."\n")!==strlen($json)+1) throw new RuntimeException('Cannot write package record.');
@@ -69,6 +72,7 @@ class Cpms2ExportPackageWriter
     }
     public function finish($output,$manifest,$schema)
     {
+        $this->phase='summary';
         foreach ($this->streams as $stream) fclose($stream);
         $this->streams=array();
         $total=array(); $projects=array();
@@ -85,6 +89,8 @@ class Cpms2ExportPackageWriter
         $summary=array('record_counts'=>$this->counts,'amounts'=>array('projects'=>$projects,'company'=>$total),'expected_file_count'=>$this->expectedFiles,'exported_file_count'=>count($this->files),'missing_file_count'=>count($this->missing),'missing_file_rows'=>$this->missing,'deduplicated_file_count'=>$this->expectedFiles-count($this->missing)-count($this->files),'warnings'=>$this->warnings);
         $summary['excluded_labor_force_adjustments']=$this->excludedLaborForce;
         $summary['labor_reconciliation']=$labor;
+        $summary['account_counts']=$this->accountCounts;
+        $manifest['contains_plaintext_accounts']=true;
         $this->json('schema-report.json',$schema); $this->json('summary.json',$summary);
         $paths=array('schema-report.json','summary.json');
         foreach ($this->counts as $entity=>$count) $paths[]='data/'.$entity.'.jsonl';
@@ -92,6 +98,7 @@ class Cpms2ExportPackageWriter
         foreach ($paths as $path) $this->entries[$path]=array('sha256'=>hash_file('sha256',$this->directory.'/'.$path),'size'=>filesize($this->directory.'/'.$path));
         $manifest+=array('record_counts'=>$this->counts,'file_count'=>count($this->files),'file_total_bytes'=>$this->fileBytes,'checksum_algorithm'=>'sha256','entries'=>$this->entries);
         $this->json('manifest.json',$manifest);
+        $this->phase='zip';
         if (file_exists($output)) throw new RuntimeException('Output already exists; refusing overwrite.');
         $zip=new ZipArchive();
         if ($zip->open($output,ZipArchive::CREATE|ZipArchive::EXCL)!==true) throw new RuntimeException('Cannot create output ZIP.');

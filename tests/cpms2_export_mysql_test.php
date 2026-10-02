@@ -9,9 +9,9 @@ $db=new PDO($dsn,getenv('CPMS2_EXPORT_FIXTURE_USER')?getenv('CPMS2_EXPORT_FIXTUR
 // The test harness seeds its own mock source. The exporter receives SELECT-only access.
 $tables=array(
  'employees'=>'id INT PRIMARY KEY,employee_no VARCHAR(30),name VARCHAR(120),email VARCHAR(191),department VARCHAR(100),position VARCHAR(100),is_active INT,is_team_leader INT,team_leader_id INT,hire_date DATE,password_hash TEXT,role VARCHAR(20)',
- 'cpms_vendors'=>'id INT PRIMARY KEY,name VARCHAR(120),business_no VARCHAR(30),is_active INT',
- 'workers'=>'id INT PRIMARY KEY,name VARCHAR(120),phone VARCHAR(30),daily_wage INT,agency_name VARCHAR(100),bank_account_enc TEXT,resident_no_enc TEXT,is_active INT',
- 'direct_team_members'=>'id INT PRIMARY KEY,name VARCHAR(120),phone VARCHAR(30),monthly_salary INT,daily_wage INT,is_active INT',
+ 'cpms_vendors'=>'id INT PRIMARY KEY,name VARCHAR(120),business_no VARCHAR(30),is_active INT,bank_name VARCHAR(100),account_number VARCHAR(100),account_holder VARCHAR(120)',
+ 'workers'=>'id INT PRIMARY KEY,name VARCHAR(120),phone VARCHAR(30),daily_wage INT,agency_name VARCHAR(100),bank_account_enc TEXT,resident_no_enc TEXT,is_active INT,bank_name VARCHAR(100),bank_account_hash CHAR(64),account_holder VARCHAR(120)',
+ 'direct_team_members'=>'id INT PRIMARY KEY,name VARCHAR(120),phone VARCHAR(30),monthly_salary INT,daily_wage INT,is_active INT,bank_name VARCHAR(100),bank_account VARCHAR(100),account_holder VARCHAR(120)',
  'cpms_projects'=>'id INT PRIMARY KEY,name VARCHAR(191),status VARCHAR(30),contract_amount DECIMAL(18,2)',
  'cpms_project_members'=>'project_id INT,employee_id INT,role VARCHAR(10)',
  'cpms_construction_roles'=>'id INT PRIMARY KEY,project_id INT,site_employee_id INT,safety_employee_id INT,quality_employee_id INT',
@@ -32,9 +32,9 @@ $tables=array(
 );
 foreach ($tables as $name=>$columns) $db->exec('CREATE TABLE '.$name.'('.$columns.')');
 $db->exec("INSERT INTO employees VALUES(17,'FIX17','Fixture employee','source-fixture@example.invalid','관리팀','과장',1,1,NULL,'2020-01-01','forbidden-password-hash','employee');
- INSERT INTO cpms_vendors VALUES(31,'Fixture vendor','123-45-67890',1);
- INSERT INTO workers VALUES(120,'Fixture worker','01012345678',100000,'Fixture vendor','forbidden-encrypted-account','forbidden-resident-number',1);
- INSERT INTO direct_team_members VALUES(125,'Fixture direct','01012345679',4500000,0,1);
+ INSERT INTO cpms_vendors VALUES(31,'Fixture vendor','123-45-67890',1,'Fixture bank','000000000001','Fixture vendor');
+ INSERT INTO workers VALUES(120,'Fixture worker','01012345678',100000,'Fixture vendor','plain64:MDAwMDAwMDAwMDAz','forbidden-resident-number',1,'Fixture bank','9838fa3d0b3cf38b6c4ca260ae0fc4486276144cc038540db6bf9451c4cf8155','Fixture worker');
+ INSERT INTO direct_team_members VALUES(125,'Fixture direct','01012345679',4500000,0,1,'Fixture bank','000000000002','Fixture direct');
  INSERT INTO cpms_projects VALUES(22,'Fixture project A','진행중',10000000),(23,'Fixture project B','정산완료',20000000);
  INSERT INTO cpms_project_members VALUES(22,17,'main');
  INSERT INTO cpms_construction_roles VALUES(1,22,17,NULL,NULL);
@@ -58,14 +58,18 @@ $st->execute(array(1,815,'fixture.pdf',$statement,filesize($statement))); $st->e
 $output=getenv('CPMS2_EXPORT_FIXTURE_OUTPUT'); if (!$output) $output=$temporary.'/fixture.zip';
 require_once dirname(__DIR__).'/app/services/Cpms2WebExportService.php';
 mkdir($temporary.'/web',0700);
+mkdir($temporary.'/data/company_overhead/payroll_versions/2026',0700,true);
+file_put_contents($temporary.'/data/company_overhead/payroll_versions/2026/07.json',json_encode(array('employees'=>array(array('employee_id'=>17,'name'=>'Fixture employee','bank_name'=>'Fixture bank','bank_account'=>'000000000004','account_holder'=>'Fixture employee','resident_encrypted'=>'forbidden-payroll-resident')))));
 $db->exec('SET TRANSACTION READ ONLY'); $db->beginTransaction();
 try {
     $source=new Cpms2ReadOnlySource($db); $attendance=new Cpms2ReadOnlySource($db);
-    $web=new Cpms2WebExportService($source,$attendance,dirname(__DIR__),$temporary,$temporary.'/private',$temporary.'/web');
+    $web=new Cpms2WebExportService($source,$attendance,$temporary,$temporary,$temporary.'/private',$temporary.'/web');
     $employee=$web->authorize(array('cpms_user'=>array('id'=>17,'email'=>'source-fixture@example.invalid')));
     $preflight=$web->preflight();
     if ($preflight['expected_file_count']!==3 || $preflight['missing_file_count']!==1) throw new RuntimeException('Web preflight file counts mismatch.');
     if ($preflight['excluded_labor_force_adjustments']['count']!==8 || $preflight['excluded_labor_force_adjustments']['amount']!=='23500000.00') throw new RuntimeException('Preflight force exclusions mismatch.');
+    if (!$preflight['can_export']) throw new RuntimeException('Valid fixture account preflight blocked.');
+    foreach ($preflight['accounts']['counts'] as $counts) if ($counts['source']!==1 || $counts['verified']!==1 || $counts['failed']!==0) throw new RuntimeException('Account preflight count mismatch.');
     $beforeHash=hash_file('sha256',$statement);
     $package=$web->generate($employee); $summary=$package['summary'];
     $generated=$web->downloadPath($package['id'],$package,$employee);
@@ -78,8 +82,14 @@ try {
     if (strpos($employee,'forbidden-password')!==false || strpos($workers,'forbidden-')!==false) throw new RuntimeException('Sensitive field leaked.'); $zip->close();
     $zip->open($output); if ($zip->locateName('data/cpms_labor_force_adjustments.jsonl')!==false || strpos($zip->getFromName('summary.json'),'excluded fixture memo')!==false) throw new RuntimeException('Excluded force row or memo leaked.'); $zip->close();
     if ((int)$db->query('SELECT COUNT(*) FROM cpms_labor_force_adjustments')->fetchColumn()!==9 || $db->query('SELECT SUM(amount) FROM cpms_labor_force_adjustments')->fetchColumn()!=='23500000.00') throw new RuntimeException('Source force data changed.');
+    if ($summary['account_counts']!==array('vendors'=>1,'workers'=>1,'direct_team'=>1,'employees'=>1)) throw new RuntimeException('Export account counts mismatch.');
+    $zip->open($output); $workerRow=json_decode(trim($zip->getFromName('data/workers.jsonl')),true); $employeeRow=json_decode(trim($zip->getFromName('data/employees.jsonl')),true);
+    if ($workerRow['account_number']!=='000000000003' || $employeeRow['account_number']!=='000000000004' || isset($workerRow['bank_account_enc']) || isset($workerRow['bank_account_hash']) || strpos($zip->getFromName('data/employees.jsonl'),'resident')!==false) throw new RuntimeException('Current accounts missing or forbidden payload leaked.'); $zip->close();
+    if (is_dir($temporary.'/storage/secrets')) throw new RuntimeException('Export created key directory.');
     $db->commit();
 } catch (Exception $e) { $db->rollBack(); throw $e; }
 unlink($generated); unlink($temporary.'/private/employee-17.lock'); rmdir($temporary.'/private'); rmdir($temporary.'/web');
-unlink($statement); if (!getenv('CPMS2_EXPORT_FIXTURE_OUTPUT')) unlink($output); rmdir($temporary);
+unlink($statement); unlink($temporary.'/data/company_overhead/payroll_versions/2026/07.json');
+foreach (array('/data/company_overhead/payroll_versions/2026','/data/company_overhead/payroll_versions','/data/company_overhead','/data') as $directory) rmdir($temporary.$directory);
+if (!getenv('CPMS2_EXPORT_FIXTURE_OUTPUT')) unlink($output); rmdir($temporary);
 echo "Export MySQL fixture: PASS (read-only transaction, schemas, wage history, attendance/override, salary allocation, safety split, equipment fallback, dedup/missing, exclusions)\n";
