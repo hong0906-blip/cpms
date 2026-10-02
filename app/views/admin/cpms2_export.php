@@ -2,6 +2,23 @@
 // app/views/admin/cpms2_export.php
 if (!isset($exportView)) { http_response_code(404); return; }
 $report=$exportView['preflight']; $package=$exportView['package'];
+$renderAccounts=function($accounts) {
+    $labels=array('vendors'=>'업체','workers'=>'근로자','direct_team'=>'직영팀','employees'=>'직원');
+    foreach ($accounts['counts'] as $entity=>$count) {
+        echo '<p>'.h($labels[$entity]).' 계좌번호 '.(int)$count['source'].'건 중 '.(int)$count['verified'].'건 확인 / '.(int)$count['failed'].'건 실패</p>';
+        if (isset($count['missing_number'])) echo '<p>계좌번호 미등록 '.(int)$count['missing_number'].'건 · 그중 은행명/예금주만 있음 '.(int)$count['partial_information'].'건 (Non-blocking)</p>';
+        if ($entity==='workers' && isset($count['decrypted'])) {
+            echo '<p>암호화 직접 복호화 '.(int)$count['decrypted'].'건 · 과거 노무 Snapshot 복구 '.(int)$count['snapshot_recovered'].'건 · 복구 실패 '.(int)$count['recovery_failed'].'건 · Snapshot Conflict '.(int)$count['snapshot_conflict'].'건</p>';
+            echo '<p>복호화 실패 '.(int)$count['decrypt_failed'].'건 · Hash 불일치 '.(int)$count['hash_mismatch'].'건 · 복구 Source 유실 '.(int)$count['recovery_source_missing'].'건</p>';
+        }
+    }
+    if (isset($accounts['payroll'])) {
+        $payroll=$accounts['payroll'];
+        echo '<p>직원 Payroll Source: '.($payroll['source_found']?'발견':'미발견').' · 상태: '.h($payroll['status']).'</p>';
+        if ($payroll['selected_month']!=='') echo '<p>직원 급여 Version 발견 · 기준월 '.h($payroll['selected_month']).' · 직원 Row '.(int)$payroll['employee_rows'].'건 · 계좌번호 등록 '.(int)$payroll['account_rows'].'건 · Mapping 성공 '.(int)$payroll['mapping_success'].'건 / 실패 '.(int)$payroll['mapping_failed'].'건</p>';
+    }
+    foreach ($accounts['failures'] as $failure) echo '<p class="cpms2-warning">'.h($labels[$failure['entity']]).' #'.h($failure['legacy_id']).' · '.h($failure['name']).' · 오류코드: '.h($failure['code']).'</p>';
+};
 ?>
 <!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -31,10 +48,8 @@ $report=$exportView['preflight']; $package=$exportView['package'];
   <?php foreach ($report['counts'] as $entity=>$count): ?><div><dt><?php echo h($entity); ?></dt><dd><?php echo number_format($count); ?>건</dd></div><?php endforeach; ?>
   </dl>
   <p>거래명세서 <?php echo (int)$report['expected_file_count']; ?>건 · 누락 <?php echo (int)$report['missing_file_count']; ?>건</p>
-  <?php if (isset($report['accounts'])): $labels=array('vendors'=>'업체','workers'=>'근로자','direct_team'=>'직영팀','employees'=>'직원'); ?>
-  <?php foreach ($report['accounts']['counts'] as $entity=>$count): ?><p><?php echo h($labels[$entity]); ?> 계좌번호 <?php echo (int)$count['source']; ?>건 중 <?php echo (int)$count['verified']; ?>건 확인 / <?php echo (int)$count['failed']; ?>건 실패</p><?php endforeach; ?>
+  <?php if (isset($report['accounts'])): $renderAccounts($report['accounts']); ?>
   <?php if (!$report['can_export']): ?><p class="cpms2-error" role="alert">계좌 사전검사를 통과하지 못해 Export를 진행할 수 없습니다.</p><?php endif; ?>
-  <?php foreach ($report['accounts']['failures'] as $failure): ?><p class="cpms2-warning"><?php echo h($labels[$failure['entity']]); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['name']); ?> · 오류코드: <?php echo h($failure['code']); ?></p><?php endforeach; ?>
   <?php endif; ?>
   <?php foreach ($report['warnings'] as $warning): ?><p class="cpms2-warning">Warning: <?php echo h($warning); ?></p><?php endforeach; ?>
 </section>
@@ -42,6 +57,7 @@ $report=$exportView['preflight']; $package=$exportView['package'];
 <?php if ($package): $summary=$package['summary']; ?>
 <section>
   <h2>생성 완료</h2>
+  <?php if (!empty($summary['account_preflight'])) $renderAccounts($summary['account_preflight']); ?>
   <p>SHA-256: <?php echo h($package['sha256']); ?></p>
   <p>ZIP <?php echo number_format($package['size']); ?> bytes · 거래명세서 <?php echo (int)$summary['exported_file_count']; ?>개 · 누락 <?php echo (int)$summary['missing_file_count']; ?>건 · 중복 제거 <?php echo (int)$summary['deduplicated_file_count']; ?>건</p>
   <dl>

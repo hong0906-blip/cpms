@@ -91,6 +91,7 @@ class Cpms2WebExportService
             if ($random===false || !$strong) throw new RuntimeException('SECURE_RANDOM_REQUIRED');
             $id=bin2hex($random); $output=$private.'/'.$id.'.zip';
             $writer=new Cpms2ExportPackageWriter($private.'/.stage-'.$id);
+            $writer->accountPreflight=$report['accounts'];
             (new Cpms2MigrationExportService($this->source,$writer,$this->root,$this->fileRoot,$this->sensitive))->run($this->attendance);
             $commit=getenv('CPMS2_EXPORT_SOURCE_COMMIT'); if (!$commit || !preg_match('/^[a-f0-9]{40}$/D',$commit)) { $commit=null; $writer->warnings[]='Source commit unavailable in FileZilla deployment; source_code_sha256 is recorded.'; }
             $writer->phase='summary';

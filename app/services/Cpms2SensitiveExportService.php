@@ -17,65 +17,123 @@ class Cpms2SensitiveExportService
     {
         if ($this->keys!==null) return $this->keys;
         $keys=array(); $environment=getenv('CPMS_WORKER_CRYPTO_KEY');
-        if (is_string($environment) && trim($environment)!=='') { $keys[]=$environment; if (trim($environment)!==$environment) $keys[]=trim($environment); }
+        if (is_string($environment) && trim($environment)!=='') { $keys[$environment]=false; $keys[trim($environment)]=false; }
         // This is CryptoHelper's existing file, not a newly configured storage path.
         $file=$this->root.'/storage/secrets/worker_crypto.key';
-        if (is_file($file) && is_readable($file)) { $key=@file_get_contents($file); if (is_string($key) && trim($key)!=='') $keys[]=trim($key); }
+        $files=array($file,$this->root.'/storage/secrets/worker_crypto_legacy.key');
+        $legacy=glob($this->root.'/storage/secrets/worker_crypto_legacy_*.key');
+        if (is_array($legacy)) $files=array_merge($files,$legacy);
+        foreach ($files as $index=>$file) if (is_file($file) && is_readable($file)) {
+            $key=@file_get_contents($file);
+            if (is_string($key) && trim($key)!=='' && !isset($keys[trim($key)])) $keys[trim($key)]=$index!==0;
+        }
         // Exact existing fallback algorithm. Loading this config returns an array;
         // no CryptoHelper keyBytes/loadOrCreateKeyFile/decrypt call is made.
         $part=''; $file=$this->root.'/app/config/database.php';
         if (is_file($file) && is_readable($file)) { $config=include $file; if (is_array($config)) $part=(isset($config['host'])?$config['host']:'').'|'.(isset($config['dbname'])?$config['dbname']:'').'|'.(isset($config['user'])?$config['user']:''); }
-        $keys[]='cpms-worker-crypto-v1|'.$this->root.'|'.$part;
-        return $this->keys=array_unique($keys);
+        $keys['cpms-worker-crypto-v1|'.$this->root.'|'.$part]=false;
+        // cf705bc used __FILE__ when no key material was available. Try both
+        // native and slash paths, but accept historical candidates only by hash.
+        $path=$this->root.'/app/services/CryptoHelper.php';
+        foreach (array($path,str_replace('/',DIRECTORY_SEPARATOR,$path),str_replace('\\','/',$path)) as $path) if (!isset($keys[$path])) $keys[$path]=true;
+        return $this->keys=$keys;
     }
-    public function workerAccount($row)
+    public static function counts()
     {
+        return array('source'=>0,'verified'=>0,'failed'=>0,'missing_number'=>0,'partial_information'=>0,'decrypted'=>0,'snapshot_recovered'=>0,'decrypt_failed'=>0,'hash_mismatch'=>0,'recovery_source_missing'=>0,'snapshot_conflict'=>0,'recovery_failed'=>0);
+    }
+    public static function hasSource($row,$worker=false)
+    {
+        $fields=$worker?array('account_number','bank_account','bank_account_enc','bank_account_hash'):array('account_number','bank_account');
+        foreach ($fields as $field) if (isset($row[$field]) && trim((string)$row[$field])!=='') return true;
+        return false;
+    }
+    private static function bankFields($row,$number)
+    {
+        return array('bank_name'=>isset($row['bank_name'])?$row['bank_name']:null,'account_number'=>$number,'account_holder'=>isset($row['account_holder'])?$row['account_holder']:null);
+    }
+    private function snapshotAccount($row,$source,$expected)
+    {
+        if (!$source || !isset($row['id'])) throw new RuntimeException('WORKER_ACCOUNT_DECRYPT_FAILED');
+        $columns=$source->columns('cpms_project_labor_workers');
+        if (count(array_diff(array('worker_id','bank_account'),$columns))) throw new RuntimeException('WORKER_ACCOUNT_DECRYPT_FAILED');
+        $fields=array_intersect(array('bank_account','bank_name','account_holder'),$columns);
+        $statement=$source->query('SELECT `'.implode('`,`',$fields).'` FROM cpms_project_labor_workers WHERE worker_id=? AND bank_account IS NOT NULL AND TRIM(bank_account)<>\'\'',array($row['id']));
+        $candidates=array();
+        while ($snapshot=$statement->fetch(PDO::FETCH_ASSOC)) {
+            $number=self::accountNumber($snapshot['bank_account']);
+            if ($number!=='' && !isset($candidates[$number])) $candidates[$number]=$snapshot;
+        }
+        if (!$candidates) throw new RuntimeException('WORKER_ACCOUNT_DECRYPT_FAILED');
+        $matches=array();
+        foreach ($candidates as $number=>$snapshot) if ($expected!=='' && hash_equals($expected,(string)CryptoHelper::hashSensitive($number))) $matches[]=(string)$number;
+        if (count($candidates)>1 && count($matches)!==1) throw new RuntimeException('WORKER_ACCOUNT_SNAPSHOT_CONFLICT');
+        if ($expected!=='' && count($matches)!==1) throw new RuntimeException('WORKER_ACCOUNT_HASH_MISMATCH');
+        $number=$matches?$matches[0]:(string)key($candidates);
+        foreach (array('bank_name','account_holder') as $field) if (empty($row[$field]) && isset($candidates[$number][$field])) $row[$field]=$candidates[$number][$field];
+        return self::bankFields($row,$number);
+    }
+    public function workerAccount($row,$source=null,&$method=null)
+    {
+        $method='plain';
         $encrypted=isset($row['bank_account_enc'])?trim((string)$row['bank_account_enc']):'';
         $expected=isset($row['bank_account_hash'])?trim((string)$row['bank_account_hash']):'';
         if ($encrypted==='') {
             $plain=self::plainAccount($row,'WORKER_ACCOUNT_MISSING');
-            if ($expected!=='' && (!isset($plain['account_number']) || $plain['account_number']==='')) throw new RuntimeException('WORKER_ACCOUNT_MISSING');
+            if ($expected!=='' && empty($plain['account_number'])) throw new RuntimeException('WORKER_ACCOUNT_RECOVERY_SOURCE_MISSING');
             if ($expected!=='' && !hash_equals($expected,(string)CryptoHelper::hashSensitive($plain['account_number']))) throw new RuntimeException('WORKER_ACCOUNT_HASH_MISMATCH');
             return $plain;
         }
         $candidates=array();
-        if (strpos($encrypted,'plain64:')===0) { $value=base64_decode(substr($encrypted,8),true); if ($value!==false) $candidates[]=$value; }
+        if (strpos($encrypted,'plain64:')===0) { $value=base64_decode(substr($encrypted,8),true); if ($value!==false) $candidates[]=array($value,false); }
         elseif (strpos($encrypted,'aes256cbc:')===0 && function_exists('openssl_decrypt')) {
             $raw=base64_decode(substr($encrypted,10),true);
-            if ($raw!==false && strlen($raw)>16 && (strlen($raw)-16)%16===0) foreach ($this->keyMaterials() as $material) {
+            if ($raw!==false && strlen($raw)>16 && (strlen($raw)-16)%16===0) foreach ($this->keyMaterials() as $material=>$requireHash) {
                 $value=@openssl_decrypt(substr($raw,16),'AES-256-CBC',hash('sha256',$material,true),OPENSSL_RAW_DATA,substr($raw,0,16));
-                if ($value!==false) $candidates[]=$value;
+                if ($value!==false) $candidates[]=array($value,$requireHash);
             }
         }
         $mismatch=false;
-        foreach ($candidates as $value) {
-            $number=self::accountNumber($value); if ($number==='') continue;
+        foreach ($candidates as $candidate) {
+            $number=self::accountNumber($candidate[0]); if ($number==='' || ($candidate[1] && $expected==='')) continue;
             if ($expected!=='' && !hash_equals($expected,(string)CryptoHelper::hashSensitive($number))) { $mismatch=true; continue; }
-            return array('bank_name'=>isset($row['bank_name'])?$row['bank_name']:null,'account_number'=>$number,'account_holder'=>isset($row['account_holder'])?$row['account_holder']:null);
+            $method='decrypted'; return self::bankFields($row,$number);
         }
-        throw new RuntimeException($mismatch?'WORKER_ACCOUNT_HASH_MISMATCH':'WORKER_ACCOUNT_DECRYPT_FAILED');
+        if ($mismatch) throw new RuntimeException('WORKER_ACCOUNT_HASH_MISMATCH');
+        $account=$this->snapshotAccount($row,$source,$expected); $method='snapshot_recovered'; return $account;
     }
     public static function plainAccount($row,$code)
     {
         $value=isset($row['account_number']) && trim((string)$row['account_number'])!==''?$row['account_number']:(isset($row['bank_account'])?$row['bank_account']:'');
         $number=self::accountNumber($value);
-        if ($number==='' && (trim((string)$value)!=='' || !empty($row['bank_name']) || !empty($row['account_holder']))) throw new RuntimeException($code);
+        if ($number==='' && trim((string)$value)!=='') throw new RuntimeException($code);
         return array('bank_name'=>isset($row['bank_name'])?$row['bank_name']:null,'account_number'=>$number!==''?$number:null,'account_holder'=>isset($row['account_holder'])?$row['account_holder']:null);
     }
     public function employeeAccounts($source) { return (new Cpms2PayrollAccountExportService($this->root,$this->storageRoot))->accounts($source); }
     public function preflight($source)
     {
         $report=array('counts'=>array(),'failures'=>array());
-        $payroll=$this->employeeAccounts($source); $report['counts']['employees']=$payroll['counts']; $report['failures']=$payroll['failures'];
+        $payroll=$this->employeeAccounts($source); $report['counts']['employees']=$payroll['counts']; $report['failures']=$payroll['failures']; $report['payroll']=$payroll['details'];
         foreach (array('cpms_vendors'=>'vendors','workers'=>'workers','direct_team_members'=>'direct_team') as $table=>$entity) {
-            $report['counts'][$entity]=array('source'=>0,'verified'=>0,'failed'=>0);
+            $report['counts'][$entity]=self::counts();
             $fields=explode(' ','id name bank_name account_number bank_account bank_account_enc bank_account_hash account_holder');
             foreach ($source->rows($table,$fields) as $row) {
-                $present=false; foreach (array_slice($fields,2) as $field) if (isset($row[$field]) && trim((string)$row[$field])!=='') $present=true;
-                if (!$present) continue;
+                if (!self::hasSource($row,$entity==='workers')) {
+                    $report['counts'][$entity]['missing_number']++;
+                    if (!empty($row['bank_name']) || !empty($row['account_holder'])) $report['counts'][$entity]['partial_information']++;
+                    continue;
+                }
                 $report['counts'][$entity]['source']++;
-                try { $account=$entity==='workers'?$this->workerAccount($row):self::plainAccount($row,strtoupper($entity).'_ACCOUNT_MISSING'); $report['counts'][$entity]['verified']++; }
-                catch (RuntimeException $e) { $report['counts'][$entity]['failed']++; $report['failures'][]=array('entity'=>$entity,'legacy_id'=>(string)$row['id'],'name'=>isset($row['name'])?(string)$row['name']:'','code'=>Cpms2ExportFailure::safe($entity,$e)->getMessage()); }
+                try {
+                    $method=null; $account=$entity==='workers'?$this->workerAccount($row,$source,$method):self::plainAccount($row,strtoupper($entity).'_ACCOUNT_MISSING'); $report['counts'][$entity]['verified']++;
+                    if ($method==='decrypted' || $method==='snapshot_recovered') $report['counts'][$entity][$method]++;
+                } catch (RuntimeException $e) {
+                    $code=Cpms2ExportFailure::safe($entity,$e)->getMessage(); $report['counts'][$entity]['failed']++;
+                    $kinds=array('WORKER_ACCOUNT_DECRYPT_FAILED'=>'decrypt_failed','WORKER_ACCOUNT_HASH_MISMATCH'=>'hash_mismatch','WORKER_ACCOUNT_RECOVERY_SOURCE_MISSING'=>'recovery_source_missing','WORKER_ACCOUNT_SNAPSHOT_CONFLICT'=>'snapshot_conflict');
+                    if (isset($kinds[$code])) $report['counts'][$entity][$kinds[$code]]++;
+                    if ($entity==='workers') $report['counts'][$entity]['recovery_failed']++;
+                    $report['failures'][]=array('entity'=>$entity,'legacy_id'=>(string)$row['id'],'name'=>isset($row['name'])?(string)$row['name']:'','code'=>$code);
+                }
             }
         }
         return $report;

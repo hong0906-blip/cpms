@@ -96,7 +96,7 @@ class Cpms2MigrationExportService
                 continue;
             }
             foreach ($this->rows($table) as $row) {
-                if ($entity==='workers') $row=array_merge($row,$this->sensitive->workerAccount($row));
+                if ($entity==='workers') $row=array_merge($row,$this->sensitive->workerAccount($row,$this->db));
                 elseif (in_array($entity,array('vendors','direct_team'))) $row=array_merge($row,Cpms2SensitiveExportService::plainAccount($row,strtoupper($entity).'_ACCOUNT_MISSING'));
                 unset($row['bank_account_enc'],$row['bank_account_hash'],$row['bank_account']);
                 $this->writer->record($entity,self::legacy($row));

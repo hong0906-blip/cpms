@@ -9,6 +9,7 @@ class Cpms2ExportPackageWriter
     public $fileBytes = 0;
     public $phase = 'employees';
     public $accountCounts = array('vendors'=>0,'workers'=>0,'direct_team'=>0,'employees'=>0);
+    public $accountPreflight = array();
     public $excludedLaborForce = array('count'=>0,'amount'=>'0.00','projects'=>array());
     private $directory;
     private $streams = array();
@@ -90,6 +91,7 @@ class Cpms2ExportPackageWriter
         $summary['excluded_labor_force_adjustments']=$this->excludedLaborForce;
         $summary['labor_reconciliation']=$labor;
         $summary['account_counts']=$this->accountCounts;
+        $summary['account_preflight']=$this->accountPreflight;
         $manifest['contains_plaintext_accounts']=true;
         $this->json('schema-report.json',$schema); $this->json('summary.json',$summary);
         $paths=array('schema-report.json','summary.json');

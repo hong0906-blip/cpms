@@ -79,6 +79,17 @@ try {
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
     cpms_web_assert(strpos($html,'근로자 계좌번호 183건 중 181건 확인 / 2건 실패')!==false && strpos($html,' disabled')!==false,'Account failure did not disable Export or show safe counts.');
     cpms_web_assert(strpos($html,'WORKER_ACCOUNT_HASH_MISMATCH')!==false && strpos($html,'bank_account_enc')===false,'Safe account failure reason missing.');
+    $accountReport=array('counts'=>array('workers'=>array_merge(Cpms2SensitiveExportService::counts(),array('source'=>452,'verified'=>452,'decrypted'=>440,'snapshot_recovered'=>12,'missing_number'=>40,'partial_information'=>5))),'failures'=>array(),'payroll'=>array('source_found'=>false,'selected_month'=>'','employee_rows'=>0,'account_rows'=>0,'mapping_success'=>0,'mapping_failed'=>0,'status'=>'EMPLOYEE_PAYROLL_SOURCE_NOT_FOUND'));
+    $_SESSION['_cpms2_export_preflight']['report']['accounts']=$accountReport; $_SESSION['_cpms2_export_preflight']['report']['can_export']=true;
+    $_SESSION['_cpms2_export_packages'][$id]['summary']['account_preflight']=$accountReport;
+    ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
+    cpms_web_assert(substr_count($html,'암호화 직접 복호화 440건 · 과거 노무 Snapshot 복구 12건')===2,'Preflight or Export summary omitted recovery counts.');
+    cpms_web_assert(substr_count($html,'EMPLOYEE_PAYROLL_SOURCE_NOT_FOUND')===2 && strpos($html,' disabled')===false,'Missing payroll source hidden or blocking.');
+    cpms_web_assert(strpos($html,'계좌번호 미등록 40건 · 그중 은행명/예금주만 있음 5건 (Non-blocking)')!==false,'Partial account summary missing.');
+    $_SESSION['_cpms2_export_preflight']['report']['accounts']['payroll']=array('source_found'=>true,'selected_month'=>'2026-09','employee_rows'=>8,'account_rows'=>0,'mapping_success'=>0,'mapping_failed'=>0,'status'=>'EMPLOYEE_PAYROLL_VERSION_FOUND');
+    ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
+    cpms_web_assert(strpos($html,'직원 급여 Version 발견 · 기준월 2026-09 · 직원 Row 8건 · 계좌번호 등록 0건')!==false,'Payroll version with zero accounts hidden.');
+    $_SESSION['_cpms2_export_preflight']['report']['can_export']=false;
     $_SERVER['REQUEST_METHOD']='POST'; $_POST=array('action'=>'generate','_csrf'=>'fixture-csrf');
     $previousLog=ini_get('error_log'); $log=$root.'/private/diagnostic.log'; ini_set('error_log',$log);
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
