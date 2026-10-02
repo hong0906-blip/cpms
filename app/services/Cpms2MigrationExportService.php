@@ -95,6 +95,11 @@ class Cpms2MigrationExportService
                 while ($row=$st->fetch(PDO::FETCH_ASSOC)) { $row['id']=$row['project_id'].':'.$row['employee_id']; $this->writer->record($entity,self::legacy($row)); }
                 continue;
             }
+            if ($table==='cpms_construction_roles' && !in_array('id',$this->db->columns($table)) && in_array('project_id',$this->db->columns($table))) {
+                $st=$this->db->query('SELECT project_id,site_employee_id,safety_employee_id,quality_employee_id FROM cpms_construction_roles ORDER BY project_id');
+                while ($row=$st->fetch(PDO::FETCH_ASSOC)) { $row['id']=$row['project_id']; $this->writer->record($entity,self::legacy($row)); }
+                continue;
+            }
             foreach ($this->rows($table) as $row) {
                 if ($entity==='workers') $row=array_merge($row,$this->sensitive->workerAccount($row,$this->db));
                 elseif (in_array($entity,array('vendors','direct_team'))) $row=array_merge($row,Cpms2SensitiveExportService::plainAccount($row,strtoupper($entity).'_ACCOUNT_MISSING'));

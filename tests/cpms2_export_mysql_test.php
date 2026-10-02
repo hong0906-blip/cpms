@@ -14,7 +14,7 @@ $tables=array(
  'direct_team_members'=>'id INT PRIMARY KEY,name VARCHAR(120),phone VARCHAR(30),monthly_salary INT,daily_wage INT,is_active INT,bank_name VARCHAR(100),bank_account VARCHAR(100),account_holder VARCHAR(120)',
  'cpms_projects'=>'id INT PRIMARY KEY,name VARCHAR(191),status VARCHAR(30),contract_amount DECIMAL(18,2)',
  'cpms_project_members'=>'project_id INT,employee_id INT,role VARCHAR(10)',
- 'cpms_construction_roles'=>'id INT PRIMARY KEY,project_id INT,site_employee_id INT,safety_employee_id INT,quality_employee_id INT',
+ 'cpms_construction_roles'=>'project_id INT PRIMARY KEY,site_employee_id INT,safety_employee_id INT,quality_employee_id INT',
  'cpms_project_labor_workers'=>'id INT PRIMARY KEY,project_id INT,worker_id INT,direct_member_id INT,name VARCHAR(120),daily_wage_snapshot INT,deposit_rate INT,company_name VARCHAR(100),is_outsourcing INT,legacy_outsourcing_ratio INT,is_deleted INT,bank_account VARCHAR(100),bank_name VARCHAR(100),account_holder VARCHAR(120)',
  'cpms_project_labor_worker_months'=>'id INT PRIMARY KEY,project_id INT,labor_worker_id INT,month VARCHAR(7),outsourcing_ratio INT,outsourcing_ratio_is_set INT,outsourcing_start_date DATE,outsourcing_end_date DATE,is_deleted INT',
  'cpms_project_labor_worker_wages'=>'id INT PRIMARY KEY,project_id INT,labor_worker_id INT,effective_month VARCHAR(7),daily_wage INT',
@@ -37,7 +37,7 @@ $db->exec("INSERT INTO employees VALUES(17,'FIX17','Fixture employee','source-fi
  INSERT INTO direct_team_members VALUES(125,'Fixture direct','01012345679',4500000,0,1,'Fixture bank','000000000002','Fixture direct');
  INSERT INTO cpms_projects VALUES(22,'Fixture project A','진행중',10000000),(23,'Fixture project B','정산완료',20000000);
  INSERT INTO cpms_project_members VALUES(22,17,'main');
- INSERT INTO cpms_construction_roles VALUES(1,22,17,NULL,NULL);
+ INSERT INTO cpms_construction_roles VALUES(22,17,NULL,NULL);
  INSERT INTO cpms_project_labor_workers (id,project_id,worker_id,direct_member_id,name,daily_wage_snapshot,deposit_rate,company_name,is_outsourcing,legacy_outsourcing_ratio,is_deleted) VALUES(315,22,120,NULL,'Fixture worker',100000,100000,'Fixture vendor',1,30,0),(316,22,NULL,125,'Fixture direct',0,0,'',0,0,0),(317,23,NULL,125,'Fixture direct',0,0,'',0,0,0);
  INSERT INTO cpms_project_labor_worker_months VALUES(1,22,315,'2026-07',30,1,NULL,NULL,0),(2,22,316,'2026-07',0,1,NULL,NULL,0),(3,23,317,'2026-07',0,1,NULL,NULL,0);
  INSERT INTO cpms_project_labor_worker_wages VALUES(1,22,315,'2026-06',90000),(2,22,315,'2026-07',100000),(3,22,315,'2026-08',200000);
@@ -91,6 +91,10 @@ try {
     if ($summary['excluded_labor_force_adjustments']!==$preflight['excluded_labor_force_adjustments'] || $summary['labor_reconciliation']['company']['source_original_labor']!=='28105000.00' || $summary['labor_reconciliation']['company']['source_migration_labor']!=='4605000.00') throw new RuntimeException('Force exclusions changed eligible labor.');
     if ($summary['excluded_labor_force_adjustments']['projects'][23]['months']['2026-08']['amount']!=='-500000.00') throw new RuntimeException('Monthly signed exclusion lost.');
     $zip=new ZipArchive(); $zip->open($output); $employee=$zip->getFromName('data/employees.jsonl'); $workers=$zip->getFromName('data/workers.jsonl');
+    $roles=json_decode(trim($zip->getFromName('data/project_roles.jsonl')),true);
+    if ($roles!=array('legacy_project_id'=>22,'legacy_site_employee_id'=>17,'legacy_safety_employee_id'=>null,'legacy_quality_employee_id'=>null,'legacy_id'=>22)) throw new RuntimeException('Project-role synthetic ID or employee references incorrect.');
+    $members=json_decode(trim($zip->getFromName('data/project_members.jsonl')),true);
+    if ($members['legacy_id']!=='22:17' || (int)$members['legacy_project_id']!==22 || (int)$members['legacy_employee_id']!==17 || $summary['record_counts']['projects']!==2 || $summary['record_counts']['project_roles']!==1) throw new RuntimeException('Projects phase or no-id project members failed.');
     if (strpos($employee,'forbidden-password')!==false || strpos($workers,'forbidden-')!==false) throw new RuntimeException('Sensitive field leaked.'); $zip->close();
     $zip->open($output); if ($zip->locateName('data/cpms_labor_force_adjustments.jsonl')!==false || strpos($zip->getFromName('summary.json'),'excluded fixture memo')!==false) throw new RuntimeException('Excluded force row or memo leaked.'); $zip->close();
     if ((int)$db->query('SELECT COUNT(*) FROM cpms_labor_force_adjustments')->fetchColumn()!==9 || $db->query('SELECT SUM(amount) FROM cpms_labor_force_adjustments')->fetchColumn()!=='23500000.00') throw new RuntimeException('Source force data changed.');
