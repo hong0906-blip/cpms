@@ -7,6 +7,7 @@ $renderAccounts=function($accounts) {
     foreach ($accounts['counts'] as $entity=>$count) {
         echo '<p>'.h($labels[$entity]).' 계좌번호 '.(int)$count['source'].'건 중 '.(int)$count['verified'].'건 확인 / '.(int)$count['failed'].'건 실패</p>';
         if (isset($count['missing_number'])) echo '<p>계좌번호 미등록 '.(int)$count['missing_number'].'건 · 그중 은행명/예금주만 있음 '.(int)$count['partial_information'].'건 (Non-blocking)</p>';
+        if ($entity==='workers' && isset($count['legacy_residue'])) echo '<p>일반 미등록 '.(int)($count['missing_number']-$count['legacy_residue']).'건 · 암호화 흔적만 존재 / 실제 계좌 미등록 '.(int)$count['legacy_residue'].'건 (Non-blocking)</p>';
         if ($entity==='workers' && isset($count['decrypted'])) {
             echo '<p>암호화 직접 복호화 '.(int)$count['decrypted'].'건 · 과거 노무 Snapshot 복구 '.(int)$count['snapshot_recovered'].'건 · 복구 실패 '.(int)$count['recovery_failed'].'건 · Snapshot Conflict '.(int)$count['snapshot_conflict'].'건</p>';
             echo '<p>복호화 실패 '.(int)$count['decrypt_failed'].'건 · Hash 불일치 '.(int)$count['hash_mismatch'].'건 · 복구 Source 유실 '.(int)$count['recovery_source_missing'].'건</p>';

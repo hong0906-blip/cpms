@@ -32,6 +32,10 @@ class Cpms2CollisionFixtureService extends Cpms2SensitiveExportService
 {
     protected function snapshotHash($number) { return CryptoHelper::hashSensitive('000000000003'); }
 }
+class Cpms2UnavailableAccountFixtureSource extends Cpms2AccountFixtureSource
+{
+    public function columns($table) { throw new RuntimeException('fixture-source-unavailable'); }
+}
 // A real temporary file tree exposed with read-only permissions on every OS.
 class Cpms2ReadonlyPayrollFixture
 {
@@ -114,7 +118,7 @@ try {
     file_put_contents($path,json_encode(array('employees'=>array($payroll))));
     $source->tables['workers']=array($row,$bad); $source->tables['cpms_vendors']=array(array('id'=>31,'name'=>'Fixture vendor','bank_account'=>'000000000001')); $source->tables['direct_team_members']=array(array('id'=>125,'name'=>'Fixture direct','bank_account'=>'000000000002'));
     $report=$service->preflight($source);
-    account_assert($report['counts']['workers']['source']===2 && $report['counts']['workers']['verified']===1 && $report['counts']['workers']['failed']===1 && $report['counts']['workers']['recovery_source_missing']===1,'Blocking worker count summary incorrect.');
+    account_assert($report['counts']['workers']['source']===1 && $report['counts']['workers']['verified']===1 && $report['counts']['workers']['failed']===0 && $report['counts']['workers']['legacy_residue']===1 && $report['counts']['workers']['missing_number']===1,'Legacy residue counted as an account source or failure.');
     $safe=json_encode($report); foreach (array($number,'000000000004','fixture-password-must-not-leak','fixture-resident-must-not-leak',$fallback) as $secret) account_assert(strpos($safe,$secret)===false,'Sensitive value entered account preflight report.');
     $diagnostic=Cpms2ExportFailure::safe('workers',new RuntimeException('untrusted-secret-'.$number));
     account_assert($diagnostic->phase==='workers' && $diagnostic->getMessage()==='EXPORT_STAGE_FAILED','Untrusted diagnostic message exposed.');
@@ -202,15 +206,39 @@ try {
     $scans=0; foreach ($global->queries as $sql) if (strpos($sql,'WHERE bank_account IS NOT NULL')!==false) $scans++;
     account_assert($scans===1,'Global snapshots scanned once per worker instead of once per source.');
     $noHash=$row; unset($noHash['bank_account_hash']); $queryCount=count($global->queries);
-    account_reject(function() use($globalService,$noHash,$global){ $globalService->workerAccount($noHash,$global); },'WORKER_ACCOUNT_DECRYPT_FAILED');
+    account_assert($globalService->workerAccount($noHash,$global)['account_number']===null,'Hashless orphan residue blocked.');
     account_assert(count($global->queries)===$queryCount+1,'Hashless worker used global snapshot search.');
     $missingGlobal=new Cpms2AccountFixtureSource(); $missingGlobal->tables['cpms_project_labor_workers']=array($other);
     $missingGlobal->tables['cpms_project_labor_workers'][0]['worker_id']=null;
-    account_reject(function() use($root,$row,$missingGlobal){ (new Cpms2SensitiveExportService($root))->workerAccount($row,$missingGlobal); },'WORKER_ACCOUNT_DECRYPT_FAILED');
+    $residueMethod=null;
+    account_assert((new Cpms2SensitiveExportService($root))->workerAccount($row,$missingGlobal,$residueMethod)['account_number']===null && $residueMethod==='legacy_residue','No-candidate encrypted residue blocked.');
     $global->tables['cpms_project_labor_workers'][]=array('bank_account'=>$other['bank_account'],'worker_id'=>null);
     account_reject(function() use($root,$row,$global){ (new Cpms2CollisionFixtureService($root))->workerAccount($row,$global); },'WORKER_ACCOUNT_SNAPSHOT_CONFLICT');
     $safe=json_encode($globalService->preflight($global)).implode(' ',$global->queries);
     foreach (array($number,$row['bank_account_enc'],$row['bank_account_hash'],'lost-fixture-key') as $secret) account_assert(strpos($safe,$secret)===false,'Global recovery leaked sensitive material.');
+    $orphanSource=new Cpms2AccountFixtureSource(); $orphanSource->tables['cpms_project_labor_workers']=array(array('worker_id'=>120,'bank_account'=>'미등록'));
+    foreach (array(array('bank_account_enc'=>'aes256cbc:orphan-fixture','bank_account_hash'=>hash('sha256','orphan-fixture')),array('bank_account_enc'=>'aes256cbc:orphan-fixture'),array('bank_account_hash'=>hash('sha256','orphan-fixture'))) as $trace) {
+        $orphan=array_merge(array('id'=>120,'name'=>'Fixture orphan','bank_name'=>'Fixture bank','account_holder'=>'Fixture holder'),$trace);
+        $method=null; $account=(new Cpms2SensitiveExportService($root))->workerAccount($orphan,$orphanSource,$method);
+        account_assert($account['account_number']===null && $account['bank_name']==='Fixture bank' && $account['account_holder']==='Fixture holder' && $method==='legacy_residue','Residue lost partial metadata or generated a number.');
+    }
+    $orphanSource->tables['workers']=array($orphan,array('id'=>444,'name'=>'Fixture unregistered'),array('id'=>555,'name'=>'Fixture partial','bank_name'=>'Fixture bank'));
+    $orphanReport=(new Cpms2SensitiveExportService($root.'/absent'))->preflight($orphanSource);
+    account_assert(!$orphanReport['failures'] && $orphanReport['counts']['workers']['source']===0 && $orphanReport['counts']['workers']['missing_number']===3 && $orphanReport['counts']['workers']['legacy_residue']===1 && $orphanReport['counts']['workers']['partial_information']===2,'Residue versus normal missing summary incorrect.');
+    $plainMismatch=$row; $plainMismatch['account_number']='000000000099';
+    account_reject(function() use($root,$plainMismatch,$orphanSource){ (new Cpms2SensitiveExportService($root))->workerAccount($plainMismatch,$orphanSource); },'WORKER_ACCOUNT_HASH_MISMATCH');
+    $plainMatch=$row; $plainMatch['bank_account']='000-000-000003';
+    account_assert((new Cpms2SensitiveExportService($root))->workerAccount($plainMatch,$orphanSource)['account_number']===$number,'Existing valid plaintext candidate discarded as residue.');
+    $hashOnly=$row; unset($hashOnly['bank_account_enc']);
+    account_assert((new Cpms2SensitiveExportService($root))->workerAccount($hashOnly,$global)['account_number']===$number,'Hash-only trace did not recover its real global candidate.');
+    $orphanSource->tables['cpms_project_labor_workers']=array($other);
+    account_reject(function() use($root,$orphan,$orphanSource){ (new Cpms2SensitiveExportService($root))->workerAccount($orphan,$orphanSource); },'WORKER_ACCOUNT_HASH_MISMATCH');
+    $orphanSource->tables['cpms_project_labor_workers'][]=$snapshot;
+    account_reject(function() use($root,$orphan,$orphanSource){ (new Cpms2SensitiveExportService($root))->workerAccount($orphan,$orphanSource); },'WORKER_ACCOUNT_SNAPSHOT_CONFLICT');
+    account_reject(function() use($root,$row){ (new Cpms2SensitiveExportService($root))->workerAccount($row,new Cpms2UnavailableAccountFixtureSource()); },'fixture-source-unavailable');
+    $legacyUnverified=$row; unset($legacyUnverified['bank_account_hash']); $legacyUnverified['bank_account_enc']=account_cipher($number,$root.'/app/services/CryptoHelper.php');
+    account_reject(function() use($root,$legacyUnverified,$missingGlobal){ (new Cpms2SensitiveExportService($root))->workerAccount($legacyUnverified,$missingGlobal); },'WORKER_ACCOUNT_DECRYPT_FAILED');
+    $safe=json_encode($orphanReport); foreach (array($number,'orphan-fixture',$orphan['bank_account_hash']) as $secret) account_assert(strpos($safe,$secret)===false,'Residue report leaked account/key/hash data.');
     // Latest file is empty: select the latest populated version from both roots.
     file_put_contents($path,json_encode(array('employees'=>array())));
     $previous=$storage.'/company_overhead/payroll_versions/2021'; mkdir($previous,0700,true);

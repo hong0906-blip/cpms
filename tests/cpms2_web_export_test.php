@@ -94,6 +94,11 @@ try {
     $_SESSION['_cpms2_export_packages'][$id]['summary']['account_preflight']['payroll']=$payrollVersion;
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
     cpms_web_assert(substr_count($html,'최신 Payroll Version: 2026-06 / 직원 0명')===2 && substr_count($html,'계좌 Migration Source: 2026-05 / 직원 41명 / 계좌 41건')===2,'Preflight or summary hid empty latest versus selected payroll version.');
+    $_SESSION['_cpms2_export_preflight']['report']['accounts']['counts']['workers']['missing_number']=259;
+    $_SESSION['_cpms2_export_preflight']['report']['accounts']['counts']['workers']['legacy_residue']=12;
+    $_SESSION['_cpms2_export_packages'][$id]['summary']['account_preflight']['counts']['workers']=$_SESSION['_cpms2_export_preflight']['report']['accounts']['counts']['workers'];
+    ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
+    cpms_web_assert(substr_count($html,'계좌번호 미등록 259건')===2 && substr_count($html,'일반 미등록 247건 · 암호화 흔적만 존재 / 실제 계좌 미등록 12건')===2 && strpos($html,' disabled')===false,'Residue summary hidden or disabled Export.');
     $_SESSION['_cpms2_export_preflight']['report']['can_export']=false;
     $_SERVER['REQUEST_METHOD']='POST'; $_POST=array('action'=>'generate','_csrf'=>'fixture-csrf');
     $previousLog=ini_get('error_log'); $log=$root.'/private/diagnostic.log'; ini_set('error_log',$log);

@@ -45,7 +45,7 @@ class Cpms2SensitiveExportService
     }
     public static function counts()
     {
-        return array('source'=>0,'verified'=>0,'failed'=>0,'missing_number'=>0,'partial_information'=>0,'decrypted'=>0,'snapshot_recovered'=>0,'decrypt_failed'=>0,'hash_mismatch'=>0,'recovery_source_missing'=>0,'snapshot_conflict'=>0,'recovery_failed'=>0);
+        return array('source'=>0,'verified'=>0,'failed'=>0,'missing_number'=>0,'legacy_residue'=>0,'partial_information'=>0,'decrypted'=>0,'snapshot_recovered'=>0,'decrypt_failed'=>0,'hash_mismatch'=>0,'recovery_source_missing'=>0,'snapshot_conflict'=>0,'recovery_failed'=>0);
     }
     public static function hasSource($row,$worker=false)
     {
@@ -110,6 +110,23 @@ class Cpms2SensitiveExportService
         $number=$matches?$matches[0]:(string)key($candidates);
         return self::snapshotBankFields($row,$candidates[$number],$number);
     }
+    private function recoverWorkerAccount($row,$source,$expected,&$method,$missingCode)
+    {
+        $plain=self::plainAccount($row,'WORKER_ACCOUNT_MISSING');
+        if ($plain['account_number']!==null) {
+            if ($expected!=='' && !hash_equals($expected,(string)CryptoHelper::hashSensitive($plain['account_number']))) throw new RuntimeException('WORKER_ACCOUNT_HASH_MISMATCH');
+            $method='plain'; return $plain;
+        }
+        // Without a source, absence of linked/global candidates is unverified.
+        if (!$source) throw new RuntimeException($missingCode);
+        try { $account=$this->snapshotAccount($row,$source,$expected); $method='snapshot_recovered'; return $account; }
+        catch (RuntimeException $e) {
+            // Only genuine absence can be residue. Query failures, actual account
+            // mismatches and conflicts must remain blocking.
+            if ($e->getMessage()!=='WORKER_ACCOUNT_DECRYPT_FAILED') throw $e;
+            $method='legacy_residue'; return self::bankFields($row,null);
+        }
+    }
     public function workerAccount($row,$source=null,&$method=null)
     {
         $method='plain';
@@ -117,7 +134,7 @@ class Cpms2SensitiveExportService
         $expected=isset($row['bank_account_hash'])?trim((string)$row['bank_account_hash']):'';
         if ($encrypted==='') {
             $plain=self::plainAccount($row,'WORKER_ACCOUNT_MISSING');
-            if ($expected!=='' && empty($plain['account_number'])) throw new RuntimeException('WORKER_ACCOUNT_RECOVERY_SOURCE_MISSING');
+            if ($expected!=='' && empty($plain['account_number'])) return $this->recoverWorkerAccount($row,$source,$expected,$method,'WORKER_ACCOUNT_RECOVERY_SOURCE_MISSING');
             if ($expected!=='' && !hash_equals($expected,(string)CryptoHelper::hashSensitive($plain['account_number']))) throw new RuntimeException('WORKER_ACCOUNT_HASH_MISMATCH');
             return $plain;
         }
@@ -130,15 +147,16 @@ class Cpms2SensitiveExportService
                 if ($value!==false) $candidates[]=array($value,$requireHash);
             }
         }
-        $mismatch=false;
+        $mismatch=false; $unverifiedCandidate=false;
         foreach ($candidates as $candidate) {
-            if ($expected==='' && !preg_match('/^[0-9\s-]+$/D',trim($candidate[0]))) continue;
-            $number=self::accountNumber($candidate[0]); if ($number==='' || ($candidate[1] && $expected==='')) continue;
+            $number=self::accountNumber($candidate[0]); if ($number==='') continue;
+            if ($expected==='' && ($candidate[1] || !preg_match('/^[0-9\s-]+$/D',trim($candidate[0])))) { $unverifiedCandidate=true; continue; }
             if ($expected!=='' && !hash_equals($expected,(string)CryptoHelper::hashSensitive($number))) { $mismatch=true; continue; }
             $method='decrypted'; return self::bankFields($row,$number);
         }
         if ($mismatch) throw new RuntimeException('WORKER_ACCOUNT_HASH_MISMATCH');
-        $account=$this->snapshotAccount($row,$source,$expected); $method='snapshot_recovered'; return $account;
+        if ($unverifiedCandidate) throw new RuntimeException('WORKER_ACCOUNT_DECRYPT_FAILED');
+        return $this->recoverWorkerAccount($row,$source,$expected,$method,'WORKER_ACCOUNT_DECRYPT_FAILED');
     }
     public static function plainAccount($row,$code)
     {
@@ -162,7 +180,13 @@ class Cpms2SensitiveExportService
                 }
                 $report['counts'][$entity]['source']++;
                 try {
-                    $method=null; $account=$entity==='workers'?$this->workerAccount($row,$source,$method):self::plainAccount($row,strtoupper($entity).'_ACCOUNT_MISSING'); $report['counts'][$entity]['verified']++;
+                    $method=null; $account=$entity==='workers'?$this->workerAccount($row,$source,$method):self::plainAccount($row,strtoupper($entity).'_ACCOUNT_MISSING');
+                    if ($method==='legacy_residue') {
+                        $report['counts'][$entity]['source']--; $report['counts'][$entity]['missing_number']++; $report['counts'][$entity]['legacy_residue']++;
+                        if (!empty($row['bank_name']) || !empty($row['account_holder'])) $report['counts'][$entity]['partial_information']++;
+                        continue;
+                    }
+                    $report['counts'][$entity]['verified']++;
                     if ($method==='decrypted' || $method==='snapshot_recovered') $report['counts'][$entity][$method]++;
                 } catch (RuntimeException $e) {
                     $code=Cpms2ExportFailure::safe($entity,$e)->getMessage(); $report['counts'][$entity]['failed']++;

@@ -62,6 +62,8 @@ mkdir($temporary.'/data/company_overhead/payroll_versions/2026',0700,true);
 file_put_contents($temporary.'/data/company_overhead/payroll_versions/2026/07.json',json_encode(array('employees'=>array(array('employee_id'=>17,'name'=>'Fixture employee','bank_name'=>'Fixture bank','bank_account'=>'000000000004','account_holder'=>'Fixture employee','resident_encrypted'=>'forbidden-payroll-resident')))));
 // Lost cipher key recovered only from unchanged, worker-ID-scoped source snapshots.
 $db->exec("UPDATE workers SET bank_account_enc='aes256cbc:lost-fixture-key' WHERE id=120");
+$residueHash=CryptoHelper::hashSensitive('000000000088');
+$db->prepare('INSERT INTO workers(id,name,phone,daily_wage,agency_name,bank_account_enc,bank_account_hash,is_active,bank_name,account_holder) VALUES(?,?,?,?,?,?,?,?,?,?)')->execute(array(121,'Fixture orphan worker','01012340088',100000,'Fixture vendor','aes256cbc:orphan-fixture',$residueHash,1,'Fixture bank','Fixture orphan holder'));
 $db->exec("INSERT INTO cpms_project_labor_workers(id,project_id,worker_id,name,is_deleted,bank_account,bank_name,account_holder) VALUES(318,22,NULL,'Fixture historical snapshot',1,'000.000/000003','Fixture bank','Fixture worker')");
 $beforeAccounts=$db->query('SELECT bank_account_enc,bank_account_hash FROM workers WHERE id=120')->fetch(PDO::FETCH_ASSOC);
 // A later empty file must not hide the populated payroll version.
@@ -78,6 +80,7 @@ try {
     if (!$preflight['can_export']) throw new RuntimeException('Valid fixture account preflight blocked.');
     foreach ($preflight['accounts']['counts'] as $counts) if ($counts['source']!==1 || $counts['verified']!==1 || $counts['failed']!==0) throw new RuntimeException('Account preflight count mismatch.');
     if ($preflight['accounts']['counts']['workers']['snapshot_recovered']!==1 || $preflight['accounts']['counts']['workers']['decrypted']!==0) throw new RuntimeException('Snapshot recovery summary mismatch.');
+    if ($preflight['accounts']['counts']['workers']['legacy_residue']!==1 || $preflight['accounts']['counts']['workers']['missing_number']!==1) throw new RuntimeException('Residue blocked Export or entered account counts.');
     if ($preflight['accounts']['payroll']['latest_month']!=='2026-08' || $preflight['accounts']['payroll']['latest_employee_rows']!==0 || $preflight['accounts']['payroll']['selected_month']!=='2026-07') throw new RuntimeException('Latest empty payroll version hid employee accounts.');
     $beforeHash=hash_file('sha256',$statement);
     $package=$web->generate($employee); $summary=$package['summary'];
@@ -93,7 +96,8 @@ try {
     if ((int)$db->query('SELECT COUNT(*) FROM cpms_labor_force_adjustments')->fetchColumn()!==9 || $db->query('SELECT SUM(amount) FROM cpms_labor_force_adjustments')->fetchColumn()!=='23500000.00') throw new RuntimeException('Source force data changed.');
     if ($summary['account_counts']!==array('vendors'=>1,'workers'=>1,'direct_team'=>1,'employees'=>1)) throw new RuntimeException('Export account counts mismatch.');
     if ($summary['account_preflight']!==$preflight['accounts'] || $db->query('SELECT bank_account_enc,bank_account_hash FROM workers WHERE id=120')->fetch(PDO::FETCH_ASSOC)!==$beforeAccounts) throw new RuntimeException('Recovery modified source or summary.');
-    $zip->open($output); $workerRow=json_decode(trim($zip->getFromName('data/workers.jsonl')),true); $employeeRow=json_decode(trim($zip->getFromName('data/employees.jsonl')),true);
+    $zip->open($output); $workerRows=array(); foreach (explode("\n",trim($zip->getFromName('data/workers.jsonl'))) as $line) { $parsed=json_decode($line,true); $workerRows[$parsed['legacy_id']]=$parsed; } $workerRow=$workerRows[120]; $employeeRow=json_decode(trim($zip->getFromName('data/employees.jsonl')),true);
+    if ($workerRows[121]['account_number']!==null || $workerRows[121]['bank_name']!=='Fixture bank' || $workerRows[121]['account_holder']!=='Fixture orphan holder' || isset($workerRows[121]['bank_account_enc']) || isset($workerRows[121]['bank_account_hash'])) throw new RuntimeException('Residue package did not retain only null account and partial metadata.');
     if ($workerRow['account_number']!=='000000000003' || $employeeRow['account_number']!=='000000000004' || isset($workerRow['bank_account_enc']) || isset($workerRow['bank_account_hash']) || strpos($zip->getFromName('data/employees.jsonl'),'resident')!==false) throw new RuntimeException('Current accounts missing or forbidden payload leaked.'); $zip->close();
     if (is_dir($temporary.'/storage/secrets')) throw new RuntimeException('Export created key directory.');
     $db->commit();
