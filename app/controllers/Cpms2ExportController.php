@@ -17,7 +17,8 @@ class Cpms2ExportController
         $root=dirname(dirname(__DIR__)); $private=getenv('CPMS2_EXPORT_STORAGE_ROOT');
         $document=isset($_SERVER['DOCUMENT_ROOT'])?$_SERVER['DOCUMENT_ROOT']:'';
         if ($document==='' && isset($_SERVER['APPL_PHYSICAL_PATH'])) $document=$_SERVER['APPL_PHYSICAL_PATH'];
-        $attendance=cpms_load_attendance_pdo();
+        $managementRequest=isset($_SERVER['REQUEST_METHOD'],$_POST['action']) && $_SERVER['REQUEST_METHOD']==='POST' && $_POST['action']==='management_preflight';
+        $attendance=$managementRequest?null:cpms_load_attendance_pdo();
         $service=new Cpms2WebExportService(new Cpms2ReadOnlySource($pdo),$attendance?new Cpms2ReadOnlySource($attendance):null,$root,cpms_storage_root().'/materials/statements',$private?$private:cpms_storage_root().'/exports/cpms2',$document,cpms_storage_root());
         (new self($service))->handle();
     }
@@ -27,7 +28,7 @@ class Cpms2ExportController
         ini_set('display_errors','0');
         header('Cache-Control: private, no-store, max-age=0');
         header('X-Content-Type-Options: nosniff');
-        $error=''; $employee=null;
+        $error=''; $employee=null; $managementReport=null;
         try { $employee=$this->service->authorize($_SESSION); }
         catch (Exception $e) {
             http_response_code($e->getMessage()==='LOGIN_REQUIRED'?401:403);
@@ -39,7 +40,11 @@ class Cpms2ExportController
             if (!csrf_check(isset($_POST['_csrf'])?$_POST['_csrf']:null)) { http_response_code(403); echo '보안 토큰이 올바르지 않습니다.'; return; }
             $action=isset($_POST['action']) && is_string($_POST['action'])?$_POST['action']:'';
             try {
-                if ($action==='preflight') {
+                if ($action==='management_preflight') {
+                    session_write_close(); @set_time_limit(0);
+                    $managementReport=$this->service->managementPreflight();
+                    cpms_shared_session_start();
+                } elseif ($action==='preflight') {
                     session_write_close(); @set_time_limit(0);
                     $report=$this->service->preflight();
                     cpms_shared_session_start();
@@ -78,9 +83,9 @@ class Cpms2ExportController
                     'PACKAGE_ACCESS_DENIED'=>'이 계정에서 생성한 ZIP만 다운로드할 수 있습니다.',
                     'PACKAGE_INTEGRITY_FAILED'=>'ZIP 무결성 검사를 통과하지 못했습니다. 다시 생성하세요.'
                 );
-                $error=isset($messages[$e->getMessage()])?$messages[$e->getMessage()]:'Export를 완료하지 못했습니다. 원본 Schema와 서버 저장 권한을 확인하세요.';
+                $error=$action==='management_preflight'?'관리부 진단을 완료하지 못했습니다. 오류코드: MANAGEMENT_PREFLIGHT_FAILED':(isset($messages[$e->getMessage()])?$messages[$e->getMessage()]:'Export를 완료하지 못했습니다. 원본 Schema와 서버 저장 권한을 확인하세요.');
                 $request=bin2hex(openssl_random_pseudo_bytes(6));
-                $diagnostic=Cpms2ExportFailure::safe($this->service->phase(),$e);
+                $diagnostic=$action==='management_preflight'?new Cpms2ExportFailure('summary','MANAGEMENT_PREFLIGHT_FAILED'):Cpms2ExportFailure::safe($this->service->phase(),$e);
                 error_log('[CPMS2 export] request='.$request.' action='.$action.' phase='.$diagnostic->phase.' code='.$diagnostic->getMessage());
                 $error.=' 실패 단계: '.$diagnostic->phase.' / 오류코드: '.$diagnostic->getMessage().' (요청 ID: '.$request.')';
                 $latest=$this->service->lastPreflight();
@@ -94,7 +99,7 @@ class Cpms2ExportController
         $id=isset($_SESSION['_cpms2_export_latest'])?$_SESSION['_cpms2_export_latest']:'';
         $package=isset($_SESSION['_cpms2_export_packages'][$id])?$_SESSION['_cpms2_export_packages'][$id]:null;
         if ($package && (int)$package['owner_employee_id']!==(int)$employee['id']) $package=null;
-        $exportView=array('preflight'=>$check?$check['report']:null,'package'=>$package,'error'=>$error,'csrf'=>csrf_token());
+        $exportView=array('preflight'=>$check?$check['report']:null,'package'=>$package,'error'=>$error,'csrf'=>csrf_token(),'management'=>$managementReport);
         require __DIR__.'/../views/admin/cpms2_export.php';
     }
 }

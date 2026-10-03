@@ -157,6 +157,7 @@ $renderProjectTraces=function($traces) {
     <button data-guide="admin-cpms2-download" type="submit">ZIP 다운로드</button></form>
 </section>
 <?php endif; ?>
+<?php require __DIR__.'/partials/cpms2_management_preflight.php'; ?>
 </main>
 <script>
 // Release buttons only on navigation; hidden actions remain part of the request.

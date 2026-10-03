@@ -32,6 +32,15 @@ class Cpms2WebDiagnosticFixture extends Cpms2WebExportService
 {
     public function generate($employee) { throw new Cpms2ExportFailure('workers','WORKER_ACCOUNT_DECRYPT_FAILED'); }
 }
+class Cpms2WebManagementFixture extends Cpms2WebExportService
+{
+    public $managementCalls=0;
+    public function managementPreflight()
+    {
+        $this->managementCalls++;
+        return array('audit'=>array('Attendance'=>array('status'=>'BLOCKING','blocking_count'=>1,'warning_count'=>0)),'blocking_count'=>1,'warning_count'=>0,'issues'=>array(),'Attendance'=>array(),'Leave'=>array(),'Overhead'=>array());
+    }
+}
 $checks=0;
 function cpms_web_assert($ok,$message) { global $checks; if (!$ok) throw new RuntimeException($message); $checks++; }
 function cpms_web_reject($call,$message) { try { $call(); } catch (Exception $e) { cpms_web_assert(true,$message); return; } throw new RuntimeException($message); }
@@ -111,6 +120,21 @@ try {
     $logged=file_get_contents($log);
     cpms_web_assert(strpos($logged,'phase=workers code=WORKER_ACCOUNT_DECRYPT_FAILED')!==false && strpos($logged,'account_number')===false && strpos($logged,'bank_account_enc')===false,'Safe diagnostic log missing or leaked account payload.');
     ini_set('error_log',$previousLog); unlink($log);
+    $managementWeb=new Cpms2WebManagementFixture($source,null,$root,$root,$storage,$root.'/public');
+    $prior=$_SESSION['_cpms2_export_preflight'];
+    $_SERVER['REQUEST_METHOD']='POST'; $_POST=array('action'=>'management_preflight','_csrf'=>'bad');
+    ob_start(); (new Cpms2ExportController($managementWeb))->handle(); ob_end_clean();
+    cpms_web_assert(http_response_code()===403 && $managementWeb->managementCalls===0,'Management CSRF bypass.');
+    $_SESSION=$manager; $_SESSION['cpms_user']=array('id'=>18,'email'=>'reader@example.invalid'); $_POST['_csrf']='fixture-csrf';
+    ob_start(); (new Cpms2ExportController($managementWeb))->handle(); ob_end_clean();
+    cpms_web_assert(http_response_code()===403 && $managementWeb->managementCalls===0,'Management unauthorized access.');
+    $_SESSION=$manager; $_SESSION['_cpms2_export_preflight']=$prior; $_SESSION['_cpms2_export_packages'][$id]=$package; $_SESSION['_cpms2_export_latest']=$id;
+    ob_start(); (new Cpms2ExportController($managementWeb))->handle(); $html=ob_get_clean();
+    cpms_web_assert($managementWeb->managementCalls===1 && strpos($html,'관리부 Migration 사전검사')!==false && strpos($html,'진단 상세 · 전달용 결과')!==false,'Management report not rendered.');
+    cpms_web_assert($_SESSION['_cpms2_export_preflight']===$prior && !isset($_SESSION['_cpms2_management_report']),'Management changed Export eligibility or persisted source report.');
+    cpms_web_assert(strpos($html,' disabled')===false,'Diagnostic blocked legacy Export button.');
+    $partial=file_get_contents(dirname(__DIR__).'/app/views/admin/partials/cpms2_management_preflight.php'); $managementGuide=file_get_contents(dirname(__DIR__).'/public/assets/js/guide-tour.js');
+    foreach (array('management-preflight','management-results') as $key) cpms_web_assert(substr_count($partial,'data-guide="admin-cpms2-'.$key.'"')===1 && substr_count($managementGuide,'data-guide="admin-cpms2-'.$key.'"')===1,'Management Guide missing or duplicate.');
     $_SERVER['REQUEST_METHOD']='POST'; $_POST=array('action'=>'download','package'=>$id,'_csrf'=>'bad');
     http_response_code(200); ob_start(); (new Cpms2ExportController($web))->handle(); $response=ob_get_clean();
     cpms_web_assert(http_response_code()===403 && strpos($response,'fixture-package')===false,'Invalid CSRF downloaded data.');

@@ -3,6 +3,7 @@
 // Web-only orchestration. All database access goes through the SELECT/SHOW guard.
 require_once __DIR__.'/Cpms2MigrationExportService.php';
 require_once __DIR__.'/Cpms2DeletedProjectTraceService.php';
+require_once __DIR__.'/Cpms2ManagementMigrationPreflightService.php';
 class Cpms2WebExportService
 {
     private $source; private $storage;
@@ -20,6 +21,10 @@ class Cpms2WebExportService
         $this->sensitive=new Cpms2SensitiveExportService($root,$storageRoot);
     }
     public function phase() { return $this->phase; }
+    public function managementPreflight()
+    {
+        return (new Cpms2ManagementMigrationPreflightService($this->source,$this->root,$this->storage))->inspect();
+    }
     public function lastPreflight() { return $this->lastReport; }
     public function authorize($session)
     {

@@ -23,6 +23,7 @@
 .cpms2-export [aria-busy=true]{opacity:.65}
 .cpms2-export section>form{margin-top:16px}
 .cpms2-export #cpms2-export-status:empty{display:none}
+.cpms2-export .cpms2-management-result{white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;font-size:13px;line-height:1.6}
 .cpms2-error{padding:16px;margin-bottom:16px;border:1px solid #fecaca;border-radius:12px;background:#fef2f2;color:#b91c1c;overflow-wrap:anywhere}
 .cpms2-export .cpms2-warning{color:#92400e}
 .cpms2-project-trace{border-top:1px solid #e5e7eb;margin-top:16px;padding-top:12px;min-width:0}
