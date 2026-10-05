@@ -22,6 +22,22 @@ $management=isset($exportView['management'])?$exportView['management']:null;
             <div><dt>휴가 / 연차 조정</dt><dd><?php echo isset($management['Leave']['cpms_leave_records']['total'])?(int)$management['Leave']['cpms_leave_records']['total']:'확인 불가'; ?> / <?php echo isset($management['Leave']['cpms_leave_adjustments']['total'])?(int)$management['Leave']['cpms_leave_adjustments']['total']:'확인 불가'; ?></dd></div>
             <div><dt>연차 발생 / 차감 / 복구</dt><dd><?php echo isset($management['Leave']['cpms_leave_accrual_logs']['total'])?(int)$management['Leave']['cpms_leave_accrual_logs']['total']:'확인 불가'; ?> / <?php echo isset($management['Leave']['cpms_approval_leave_deductions']['total'])?(int)$management['Leave']['cpms_approval_leave_deductions']['total']:'확인 불가'; ?> / <?php echo isset($management['Leave']['restore_logs'])?(int)$management['Leave']['restore_logs']:'확인 불가'; ?></dd></div>
         </dl>
+        <?php if (isset($management['Attendance']['records']['reversed_diagnostic'])): $reversed=$management['Attendance']['records']['reversed_diagnostic']; ?>
+        <h3>역전 출퇴근 정밀진단</h3>
+        <dl>
+            <div><dt>역전 기록</dt><dd><?php echo (int)$reversed['total']; ?>건<?php if ($reversed['truncated']): ?> · 상세 최대 100건<?php endif; ?></dd></div>
+            <?php foreach ($reversed['classifications'] as $classification=>$count): ?>
+            <div><dt><?php echo h($classification); ?></dt><dd><?php echo (int)$count; ?>건</dd></div>
+            <?php endforeach; ?>
+            <?php if (isset($management['Attendance']['records']['missing_checkout_preview'])): $missing=$management['Attendance']['records']['missing_checkout_preview']; ?>
+            <div><dt>과거 미퇴근 / 당일 진행 중 / 미래 기록</dt><dd><?php echo (int)$missing['past_missing_checkout']; ?> / <?php echo (int)$missing['today_in_progress']; ?> / <?php echo (int)$missing['future_records']; ?></dd></div>
+            <?php endif; ?>
+        </dl>
+        <?php endif; ?>
+        <?php if (isset($management['Leave']['cpms_leave_accrual_logs']['orphan_diagnostic'])): $orphan=$management['Leave']['cpms_leave_accrual_logs']['orphan_diagnostic']; ?>
+        <h3>연차 발생 Orphan 정밀진단</h3>
+        <dl><div><dt>직원 ID / 발생 Row</dt><dd><?php echo (int)$orphan['employee_count']; ?> / <?php echo (int)$orphan['row_count']; ?><?php if ($orphan['truncated']): ?> · 상세 최대 100개 ID<?php endif; ?></dd></div></dl>
+        <?php endif; ?>
         <?php if (!empty($management['Overhead']['categories'])): ?>
         <h3>총관리비 인정액 Preview</h3>
         <dl>

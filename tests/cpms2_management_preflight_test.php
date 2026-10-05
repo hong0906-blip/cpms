@@ -28,20 +28,20 @@ $db=$mysql?new PDO($dsn,'root',''):new PDO('sqlite::memory:'); $db->setAttribute
 if (!$mysql) { $db->sqliteCreateFunction('CHAR_LENGTH',function($s) { return mb_strlen($s,'UTF-8'); }); $db->sqliteCreateFunction('TIME_FORMAT',function($s,$format) { return $s===null?null:substr($s,11,5); }); }
 $tables=array(
     'employees'=>'id INT PRIMARY KEY,name VARCHAR(120),position VARCHAR(120),leave_monthly_balance DECIMAL(6,2),leave_annual_balance DECIMAL(6,2),leave_half_balance DECIMAL(6,2)',
-    'cpms_attendance_records'=>'id INT PRIMARY KEY,employee_id INT,work_date DATE,check_in DATETIME,check_out DATETIME,status VARCHAR(50),raw_minutes INT,work_minutes INT,memo VARCHAR(255)',
+    'cpms_attendance_records'=>'id INT PRIMARY KEY,employee_id INT,work_date DATE,check_in DATETIME,check_out DATETIME,status VARCHAR(50),raw_minutes INT,work_minutes INT,memo VARCHAR(255),created_at DATETIME,updated_at DATETIME',
     'cpms_attendance_requests'=>'id INT PRIMARY KEY,employee_id INT,request_date DATE,request_type VARCHAR(50),status VARCHAR(50),reviewed_by INT,reviewed_at DATETIME,reason TEXT,reject_reason TEXT,requested_check_in DATETIME,requested_check_out DATETIME',
     'cpms_leave_records'=>'id INT PRIMARY KEY,employee_id INT,leave_date DATE,leave_type VARCHAR(30),leave_amount DECIMAL(6,2)',
     'cpms_leave_adjustments'=>'id INT PRIMARY KEY,employee_id INT,leave_type VARCHAR(30),amount DECIMAL(6,2),created_at DATETIME',
-    'cpms_leave_accrual_logs'=>'id INT PRIMARY KEY,employee_id INT,leave_type VARCHAR(20),accrual_date DATE,accrual_year INT,amount DECIMAL(6,2)',
-    'cpms_approval_leave_deductions'=>'id INT PRIMARY KEY,employee_id INT,document_id INT,leave_bucket VARCHAR(20),deduct_amount DECIMAL(6,2)',
-    'cpms_approval_documents'=>'id INT PRIMARY KEY,status VARCHAR(50)',
+    'cpms_leave_accrual_logs'=>'id INT PRIMARY KEY,employee_id INT,leave_type VARCHAR(20),accrual_date DATE,accrual_year INT,amount DECIMAL(6,2),reason TEXT,created_at DATETIME',
+    'cpms_approval_leave_deductions'=>'id INT PRIMARY KEY,employee_id INT,document_id INT,leave_bucket VARCHAR(20),deduct_amount DECIMAL(6,2),deducted_at DATETIME',
+    'cpms_approval_documents'=>'id INT PRIMARY KEY,doc_status VARCHAR(50)',
     'cpms_approval_logs'=>'id INT PRIMARY KEY,document_id INT,action_type VARCHAR(50)',
     'cpms_holiday_cache'=>'id INT PRIMARY KEY,holiday_date DATE,source VARCHAR(30),is_active INT'
 );
 foreach ($tables as $t=>$fields) { if ($mysql) $db->exec('DROP TABLE IF EXISTS `'.$t.'`'); $db->exec('CREATE TABLE `'.$t.'` ('.$fields.')'); }
 $db->exec("INSERT INTO employees VALUES(1,'SECRET_EMPLOYEE_NAME','일반',7,15,0),(2,'SECRET_DRIVER','[부 사 장]',0,0,0)");
-$db->exec("INSERT INTO cpms_attendance_records VALUES(1,1,'2026-01-02','2026-01-02 08:00:30','2026-01-02 17:00:00','퇴근완료',540,480,'SECRET_MEMO'),(2,2,'2026-01-02','2026-01-02 08:31:00',NULL,'출근중',0,0,NULL)");
-$db->exec("INSERT INTO cpms_leave_accrual_logs VALUES(1,1,'MONTHLY','2026-01-01',2026,1)");
+$db->exec("INSERT INTO cpms_attendance_records VALUES(1,1,'2026-01-02','2026-01-02 08:00:30','2026-01-02 17:00:00','퇴근완료',540,480,'SECRET_MEMO','2026-01-02 08:00:30','2026-01-02 17:00:00'),(2,2,'2026-01-02','2026-01-02 08:31:00',NULL,'출근중',0,0,NULL,'2026-01-02 08:31:00','2026-01-02 08:31:00')");
+$db->exec("INSERT INTO cpms_leave_accrual_logs VALUES(1,1,'MONTHLY','2026-01-01',2026,1,'입사일 기준 월차 자동 발생','2026-01-01 00:00:00')");
 $db->exec("INSERT INTO cpms_leave_adjustments VALUES(1,1,'월차',1,'2026-01-01 00:00:00')");
 $db->exec("INSERT INTO cpms_holiday_cache VALUES(1,'2026-01-01','GOOGLE_CALENDAR',1)");
 $root=sys_get_temp_dir().'/cpms-management-fixture-'.uniqid(); mkdir($root,0700); mkdir($root.'/storage',0700);
@@ -54,7 +54,7 @@ try {
     management_assert($a['Attendance']['schema']['cpms_leave_adjustments']['variant']==='LEGACY_LEAVE_TYPE','Old adjustment schema');
     management_assert($a['Leave']['balances']['candidate_mismatches']===1,'Balance mismatch');
     management_assert($a['Leave']['balances']['reconstructable_employees']===0,'Incomplete ledger misrepresented as complete');
-    $db->exec("INSERT INTO cpms_attendance_records VALUES(3,1,'2026-01-02','2026-01-02 10:00:00','2026-01-02 09:00:00','UNKNOWN',-1,1500,NULL),(4,99,'2026-01-03',NULL,NULL,'출근전',0,0,NULL)");
+    $db->exec("INSERT INTO cpms_attendance_records VALUES(3,1,'2026-01-02','2026-01-02 10:00:00','2026-01-02 09:00:00','UNKNOWN',-1,1500,NULL,'2026-01-02 10:00:00','2026-01-02 11:00:00'),(4,99,'2026-01-03',NULL,NULL,'출근전',0,0,NULL,NULL,NULL)");
     $db->exec("INSERT INTO cpms_attendance_requests VALUES(1,99,'2026-01-02','both','approved',98,NULL,NULL,NULL,NULL,NULL)");
     $support=new Cpms2ManagementPreflightSupport(); $a=(new Cpms2AttendanceExportService($source,$support))->inspect();
     management_assert($a['Attendance']['records']['duplicate_employee_dates']===1,'Duplicate not detected');
@@ -66,6 +66,83 @@ try {
     $db->exec('DROP TABLE cpms_leave_adjustments'); $db->exec('CREATE TABLE cpms_leave_adjustments(id INT PRIMARY KEY,employee_id INT,target_year INT,adjust_type VARCHAR(20),amount DECIMAL(6,2),created_at DATETIME)');
     $support=new Cpms2ManagementPreflightSupport(); $a=(new Cpms2AttendanceExportService(new ManagementFixtureSource($db,$mysql),$support))->inspect();
     management_assert($a['Attendance']['schema']['cpms_leave_adjustments']['variant']==='ADJUST_TYPE_TARGET_YEAR','New adjustment schema');
+    // Production approval schema: doc_status, never status. Exclude cancelled/rejected deductions.
+    $db->exec("INSERT INTO cpms_approval_documents VALUES(1,'APPROVED'),(2,'COMPLETED'),(3,'CANCELLED'),(4,'REJECTED')");
+    $db->exec("INSERT INTO employees VALUES(3,'SECRET_APPROVAL_EMPLOYEE','일반',1,13,0)");
+    $db->exec("INSERT INTO cpms_leave_accrual_logs VALUES(10,3,'MONTHLY','2026-01-01',2026,2,'입사일 기준 월차 자동 발생','2026-01-01 00:00:00'),(11,3,'ANNUAL','2026-01-01',2026,15,'입사일 기준 연차 자동 발생','2026-01-01 00:00:00')");
+    $db->exec("INSERT INTO cpms_approval_leave_deductions VALUES(10,3,1,'MONTHLY',1,'2026-01-02 00:00:00'),(11,3,3,'MONTHLY',5,'2026-01-02 00:00:00'),(12,3,4,'MONTHLY',10,'2026-01-02 00:00:00'),(13,3,2,'ANNUAL',2,'2026-01-02 00:00:00')");
+    $db->exec("INSERT INTO cpms_attendance_records VALUES
+        (10,1,'2026-02-01','2026-02-01 10:00:00','2026-02-01 09:00:00','퇴근완료',0,0,'SECRET_RECORD_MEMO','2026-02-01 10:00:00','2026-02-01 18:30:00'),
+        (11,1,'2026-02-02','2026-02-02 10:00:00','2026-02-02 09:00:00','퇴근완료',0,0,NULL,'2026-02-02 10:00:00','2026-02-02 10:00:00'),
+        (12,1,'2026-02-03','2026-02-03 10:00:00','2026-02-03 09:00:00','퇴근완료',0,0,NULL,NULL,NULL),
+        (13,1,'2026-02-04','2026-02-04 10:00:00','2026-02-04 09:00:00','퇴근완료',0,0,NULL,NULL,NULL),
+        (14,1,'2026-02-05','2026-02-05 10:00:00','2026-02-05 09:00:00','퇴근완료',0,0,NULL,NULL,NULL),
+        (15,1,'2026-02-06','2026-02-06 10:00:00','2026-02-06 09:00:00','퇴근완료',0,0,NULL,NULL,NULL),
+        (16,1,'2026-02-07','2026-02-07 10:00:00','2026-02-07 09:00:00','퇴근완료',0,0,NULL,NULL,NULL),
+        (17,1,'2026-02-08','2026-02-08 10:00:00','2026-02-08 09:00:00','퇴근완료',0,0,NULL,NULL,NULL),
+        (18,1,'2026-02-09','2026-02-09 10:00:00','2026-02-09 09:00:00','퇴근완료',0,0,NULL,NULL,NULL),
+        (20,902,'2026-02-01','2026-02-01 08:00:00','2026-02-01 17:00:00','퇴근완료',540,480,NULL,NULL,NULL),
+        (30,1,'2026-01-03','2026-01-03 08:00:00',NULL,'출근중',0,0,NULL,NULL,NULL),
+        (31,1,'2026-01-04','2026-01-04 08:00:00',NULL,'출근중',0,0,NULL,NULL,NULL)");
+    $db->exec("INSERT INTO cpms_attendance_requests VALUES
+        (10,1,'2026-02-01','both','approved',1,'2026-02-01 18:30:00','SECRET_REQUEST_REASON',NULL,'2026-02-01 08:00:00','2026-02-01 18:00:00'),
+        (12,1,'2026-02-03','both','approved',1,'2026-02-03 18:30:00',NULL,NULL,'2026-02-03 11:00:00','2026-02-03 10:00:00'),
+        (13,1,'2026-02-04','both','approved',1,'2026-02-04 18:30:00',NULL,NULL,'2026-02-04 08:00:00','2026-02-04 18:00:00'),
+        (14,1,'2026-02-04','both','approved',1,'2026-02-04 19:30:00',NULL,NULL,'2026-02-04 08:00:00','2026-02-04 19:00:00'),
+        (15,1,'2026-02-05','check_in','approved',1,'2026-02-05 18:30:00',NULL,NULL,'2026-02-05 08:00:00',NULL),
+        (16,1,'2026-02-06','both','approved',1,'2026-02-06 18:30:00',NULL,NULL,'2026-02-07 08:00:00','2026-02-07 18:00:00'),
+        (17,1,'2026-02-07','both','approved',1,NULL,NULL,NULL,'2026-02-07 08:00:00','2026-02-07 18:00:00'),
+        (18,1,'2026-02-08','check_out','approved',1,'2026-02-08 18:30:00',NULL,NULL,NULL,'2026-02-08 11:00:00'),
+        (19,1,'2026-02-09','check_in','approved',1,'2026-02-09 18:30:00',NULL,NULL,'2026-02-09 11:00:00',NULL),
+        (20,904,'2026-02-01','check_in','pending',NULL,NULL,NULL,NULL,'2026-02-01 08:00:00',NULL)");
+    $db->exec("INSERT INTO cpms_leave_accrual_logs VALUES
+        (100,901,'MONTHLY','2025-12-01',2025,1,'입사일 기준 월차 자동 발생','2025-12-01 01:00:00'),
+        (101,901,'ANNUAL','2026-02-01',2026,10,'입사일 기준 연차 자동 발생','2026-02-01 01:00:00'),
+        (102,902,'MONTHLY','2026-02-01',2026,1,'입사일 기준 월차 자동 발생','2026-02-01 01:00:00'),
+        (103,903,'ANNUAL','2026-02-01',2026,15,'입사일 기준 연차 자동 발생','2026-02-01 01:00:00'),
+        (104,904,'MONTHLY','2026-02-01',2026,1,NULL,'2026-02-01 01:00:00'),
+        (105,905,'MONTHLY','2026-02-01',2026,0,'기존 월차 발생일 확인(최초 잔여 유지)','2026-02-01 01:00:00'),
+        (106,906,'MONTHLY','2026-02-01',2026,1,'SECRET_ORPHAN_NAME 01099998888 private@example.invalid','2026-02-01 01:00:00'),
+        (107,907,'ANNUAL','2026-02-01',2026,0,'기존 연차 발생일 확인(최초 잔여 유지)','2026-02-01 01:00:00')");
+    $db->exec("INSERT INTO cpms_approval_leave_deductions VALUES(20,903,1,'ANNUAL',1,'2026-02-01 01:00:00')");
+    $db->exec("INSERT INTO cpms_leave_adjustments VALUES(20,905,2026,'ADD',1,'2026-02-01 01:00:00')");
+    $diagSource=new ManagementFixtureSource($db,$mysql); $diagSupport=new Cpms2ManagementPreflightSupport();
+    $beforeAttendance=(int)$db->query('SELECT COUNT(*) FROM cpms_attendance_records')->fetchColumn();
+    $beforeWrites=$mysql?null:(int)$db->query('SELECT total_changes()')->fetchColumn();
+    $d=(new Cpms2AttendanceExportService($diagSource,$diagSupport))->inspect('2026-01-03');
+    management_assert($d['Attendance']['schema']['cpms_approval_documents']['missing_columns']===array(),'doc_status false Blocking');
+    management_assert(!$mysql || !in_array('status',$d['Attendance']['schema']['cpms_approval_documents']['columns']),'Fixture must use production schema');
+    foreach ($diagSupport->issues as $issue) management_assert($issue['code']!=='COLUMN_MISSING_cpms_approval_documents','False approval schema issue');
+    $statuses=array(); foreach ($d['Leave']['approval_document_statuses'] as $s) $statuses[$s['value']]=$s['count'];
+    management_assert(isset($statuses['APPROVED'],$statuses['COMPLETED'],$statuses['CANCELLED'],$statuses['REJECTED']),'Approval DISTINCT status');
+    management_assert($d['Leave']['balances']['candidate_mismatches']===1,'Cancelled/rejected deductions included or active deduction omitted');
+    foreach ($diagSupport->issues as $issue) if ($issue['code']==='BALANCE_MISMATCH') management_assert($issue['severity']==='WARNING','Balance mismatch elevated to Blocking');
+    $reversed=array(); foreach ($d['Attendance']['records']['reversed_diagnostic']['records'] as $r) $reversed[$r['legacy_id']]=$r;
+    management_assert($reversed[10]['classification']==='VALID_REQUEST_CAN_RECONSTRUCT' && $reversed[10]['check_in']==='2026-02-01 10:00:00' && $reversed[10]['updated_at']==='2026-02-01 18:30:00','Reversed details or normal request candidate');
+    management_assert($reversed[10]['related_requests']['requests'][0]['reason_present'] && !isset($reversed[10]['related_requests']['requests'][0]['reason']),'Request reason leaked');
+    management_assert($reversed[10]['reconstruction_candidate']['automatic_apply']===false,'Diagnostic applied reconstruction');
+    management_assert($reversed[11]['classification']==='SOURCE_RECORD_REVERSED','No-request classification');
+    management_assert($reversed[12]['classification']==='REQUEST_ALSO_REVERSED','Reversed request classification');
+    management_assert($reversed[13]['classification']==='AMBIGUOUS','Multiple approvals classification');
+    management_assert($reversed[14]['classification']==='VALID_REQUEST_CAN_RECONSTRUCT' && $reversed[17]['classification']==='VALID_REQUEST_CAN_RECONSTRUCT','Partial request semantics');
+    management_assert($reversed[15]['classification']==='AMBIGUOUS' && $reversed[16]['classification']==='AMBIGUOUS','Date/review uncertainty not protected');
+    management_assert($reversed[18]['classification']==='SOURCE_RECORD_REVERSED','Partial reversed request treated as independently reversed pair');
+    management_assert($reversed[3]['classification']==='AMBIGUOUS','Duplicate date relation auto-resolved');
+    $missing=$d['Attendance']['records']['missing_checkout_preview'];
+    management_assert($missing['past_missing_checkout']===1 && $missing['today_in_progress']===1 && $missing['future_records']===1,'Missing-checkout date partitions');
+    foreach ($diagSupport->issues as $issue) if ($issue['code']==='MISSING_CHECKOUT') management_assert($issue['severity']==='WARNING','Missing checkout Blocking');
+    $orphan=array(); $orphanReport=$d['Leave']['cpms_leave_accrual_logs']['orphan_diagnostic']; foreach ($orphanReport['employees'] as $r) $orphan[$r['employee_id']]=$r;
+    management_assert($orphanReport['row_count']===8 && $orphanReport['employee_count']===7,'Orphan grouping totals');
+    management_assert($orphan[901]['row_count']===2 && $orphan[901]['monthly_count']===1 && $orphan[901]['annual_count']===1 && $orphan[901]['amount_sum']==='11.00','Orphan type/amount aggregation');
+    management_assert($orphan[901]['first_accrual_date']==='2025-12-01' && $orphan[901]['last_created_at']==='2026-02-01 01:00:00','Orphan date ranges');
+    management_assert($orphan[901]['classification']==='ORPHAN_ACCRUAL_ONLY' && $orphan[902]['classification']==='ORPHAN_WITH_ATTENDANCE','Accrual-only/attendance relation');
+    management_assert($orphan[903]['classification']==='ORPHAN_WITH_LEAVE_USAGE' && $orphan[904]['classification']==='ORPHAN_WITH_OTHER_RELATION' && $orphan[905]['classification']==='ORPHAN_WITH_OTHER_RELATION','Usage/request/adjustment relation');
+    management_assert($orphan[907]['reason_type']==='LEGACY_BALANCE_CONFIRMATION' && $orphan[906]['reason_type']==='UNKNOWN','System reason classification');
+    $diagnosticJson=json_encode($d);
+    foreach (array('SECRET_EMPLOYEE_NAME','SECRET_REQUEST_REASON','SECRET_RECORD_MEMO','SECRET_ORPHAN_NAME','01099998888','private@example.invalid','reason":"') as $secret) management_assert(strpos($diagnosticJson,$secret)===false,'Detailed diagnostic leaked PII');
+    foreach ($diagSource->queries as $sql) Cpms2ReadOnlySource::assertReadOnly($sql);
+    management_assert((int)$db->query('SELECT COUNT(*) FROM cpms_attendance_records')->fetchColumn()===$beforeAttendance && (!$mysql?(int)$db->query('SELECT total_changes()')->fetchColumn()===$beforeWrites:true),'Diagnostic DB writes');
+    management_assert($db->query('SELECT check_in FROM cpms_attendance_records WHERE id=10')->fetchColumn()==='2026-02-01 10:00:00','Source record changed');
     management_json($data,'lease/2026/01.json',array('items'=>array(array('id'=>'LEASE-IMPORT-1','lease_group_id'=>'g1','amount'=>'100.00','maintenance_fee'=>'20.00','deposit'=>'5000.00'))));
     management_json($storage,'lease/2026/01.json',array('items'=>array(array('id'=>'LEASE-IMPORT-1','lease_group_id'=>'g1','amount'=>'100.00','maintenance_fee'=>'20.00','deposit'=>'5000.00'))));
     management_json($data,'etc/2026/01.json',array(array('id'=>'a','amount'=>'7.00','attachments'=>array(array('drive_file_id'=>'SECRET_TOKEN')))));
