@@ -128,6 +128,13 @@ $renderProjectTraces=function($traces) {
   <h2>사전검사 결과</h2>
   <?php $renderMigration($report); ?>
   <?php $renderClosure($report); ?>
+  <?php if (!empty($report['attendance_leave'])): $attendanceLeave=$report['attendance_leave']; ?>
+  <h3>근태·연차 이관 사전검사</h3>
+  <p>기준일 <?php echo h($attendanceLeave['cutoff_date']); ?> · 출퇴근 <?php echo (int)$attendanceLeave['record_counts']['attendance_records']; ?>건 · 요청 <?php echo (int)$attendanceLeave['record_counts']['attendance_requests']; ?>건</p>
+  <p>기존 미퇴근 <?php echo (int)$attendanceLeave['attendance']['missing_checkout_original']; ?>건 · 역전시간 원본 보존 / 미퇴근 처리 <?php echo (int)$attendanceLeave['attendance']['reversed_normalized']; ?>건</p>
+  <p>연차 발생 원본 <?php echo (int)$attendanceLeave['accrual']['original']; ?>건 · 승인 제외 <?php echo (int)$attendanceLeave['accrual']['explicit_orphan_excluded']; ?>건 / <?php echo h($attendanceLeave['accrual']['excluded_amount']); ?>일 · 0일 확인 <?php echo (int)$attendanceLeave['accrual']['zero_confirmation']; ?>건</p>
+  <p>직원 잔액 Snapshot <?php echo (int)$attendanceLeave['record_counts']['leave_balance_snapshots']; ?>명 · 휴가 차감 <?php echo (int)$attendanceLeave['record_counts']['leave_approval_deductions']; ?>건</p>
+  <?php endif; ?>
   <?php if (!empty($report['referenced_master_closure']['projects']['approved_excluded']) && $report['can_export']): ?><p>Export 가능</p><?php endif; ?>
   <?php if (!empty($report['referenced_master_closure']['deleted_project_traces'])) $renderProjectTraces($report['referenced_master_closure']['deleted_project_traces']); ?>
   <dl>
@@ -137,7 +144,7 @@ $renderProjectTraces=function($traces) {
   <?php if (isset($report['accounts'])): $renderAccounts($report['accounts']); ?>
   <?php if (!$report['can_export']): ?><p class="cpms2-error" role="alert">사전검사를 통과하지 못해 Export를 진행할 수 없습니다.</p><?php endif; ?>
   <?php endif; ?>
-  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity']) && !in_array($failure['code'],array('legacy_referenced_master_physically_missing','legacy_labor_snapshot_insufficient','legacy_project_snapshot_unavailable','legacy_project_snapshot_ambiguous','legacy_exclusion_scope_changed'))) continue; ?><p class="cpms2-error"><?php echo h(isset($failure['entity'])?$failure['entity']:'문서'); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
+  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity']) && $failure['entity']!=='attendance' && !in_array($failure['code'],array('legacy_referenced_master_physically_missing','legacy_labor_snapshot_insufficient','legacy_project_snapshot_unavailable','legacy_project_snapshot_ambiguous','legacy_exclusion_scope_changed'))) continue; ?><p class="cpms2-error"><?php echo h(isset($failure['entity'])?$failure['entity']:'문서'); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
   <?php foreach ($report['warnings'] as $warning): ?><p class="cpms2-warning">Warning: <?php echo h($warning); ?></p><?php endforeach; ?>
 </section>
 <?php endif; ?>

@@ -103,8 +103,11 @@ class Cpms2WebExportService
         $this->phase='completed_approvals'; $archive=(new Cpms2CompletedApprovalExportService($this->storage))->collect($this->source);
         $warnings=array_merge($warnings,$safety['warnings'],$archive['warnings']);
         $failures=array_merge($migrationSource->failures(),$accounts['failures'],$archive['failures']);
+        $management=array();
+        try { $this->phase='attendance'; $management=(new Cpms2AttendanceMigrationExportService($this->source))->run(); }
+        catch (Exception $e) { $safe=Cpms2ExportFailure::safe('attendance',$e); $failures[]=array('entity'=>'attendance','legacy_id'=>null,'code'=>$safe->getMessage()); }
         if ($failures) $this->phase=isset($failures[0]['entity'])?$failures[0]['entity']:'completed_approvals';
-        return $this->lastReport=array('counts'=>$counts,'referenced_master_closure'=>$closure,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'excluded_labor_force_adjustments'=>$excluded,'accounts'=>$accounts,'safety_costs'=>$safety['summary'],'completed_approvals'=>$archive['summary'],'failures'=>$failures,'can_export'=>!count($failures),'warnings'=>$warnings);
+        return $this->lastReport=array('counts'=>$counts,'referenced_master_closure'=>$closure,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'excluded_labor_force_adjustments'=>$excluded,'accounts'=>$accounts,'safety_costs'=>$safety['summary'],'completed_approvals'=>$archive['summary'],'attendance_leave'=>$management,'failures'=>$failures,'can_export'=>!count($failures),'warnings'=>$warnings);
     }
     public function generate($employee)
     {
@@ -123,7 +126,7 @@ class Cpms2WebExportService
             (new Cpms2MigrationExportService($this->source,$writer,$this->root,$this->fileRoot,$this->sensitive,$this->storage))->run($this->attendance);
             $commit=getenv('CPMS2_EXPORT_SOURCE_COMMIT'); if (!$commit || !preg_match('/^[a-f0-9]{40}$/D',$commit)) { $commit=null; $writer->warnings[]='Source commit unavailable in FileZilla deployment; source_code_sha256 is recorded.'; }
             $writer->phase='summary';
-            $fingerprint=''; foreach (array('Cpms2ReadOnlySource','Cpms2ExportPackageWriter','Cpms2MigrationExportService','Cpms2LaborExportService','Cpms2WebExportService','Cpms2SensitiveExportService','Cpms2PayrollAccountExportService','Cpms2ExportDiagnostic','Cpms2SafetyCostExportService','Cpms2CompletedApprovalExportService','Cpms2ReadOnlyDriveDownload','Cpms2ReferencedMasterClosure','Cpms2HistoricalProjectRecoveryService','Cpms2DeletedProjectTraceService','Cpms2MigrationExclusionPolicy','Cpms2MigrationDecimal') as $file) $fingerprint.=hash_file('sha256',__DIR__.'/'.$file.'.php');
+            $fingerprint=''; foreach (array('Cpms2ReadOnlySource','Cpms2ExportPackageWriter','Cpms2MigrationExportService','Cpms2LaborExportService','Cpms2WebExportService','Cpms2SensitiveExportService','Cpms2PayrollAccountExportService','Cpms2ExportDiagnostic','Cpms2SafetyCostExportService','Cpms2CompletedApprovalExportService','Cpms2ReadOnlyDriveDownload','Cpms2ReferencedMasterClosure','Cpms2HistoricalProjectRecoveryService','Cpms2DeletedProjectTraceService','Cpms2MigrationExclusionPolicy','Cpms2MigrationDecimal','Cpms2AttendanceMigrationExportService','Cpms2AttendanceExportService','Cpms2ManagementPreflightSupport') as $file) $fingerprint.=hash_file('sha256',__DIR__.'/'.$file.'.php');
             $schema=$this->source->report(); if ($this->attendance) $schema['attendance_database']=$this->attendance->report();
             $summary=$writer->finish($output,array('format'=>'cpms1-company-export','format_version'=>1,'export_id'=>'cpms1-'.$id,'created_at'=>date('c'),'source_system'=>'cpms1','source_repository'=>'hong0906-blip/cpms','source_commit'=>$commit,'source_code_sha256'=>hash('sha256',$fingerprint),'php_version'=>PHP_VERSION,'database_name'=>$this->source->databaseName()),$schema);
             return array('id'=>$id,'owner_employee_id'=>(int)$employee['id'],'created_at'=>date('c'),'size'=>filesize($output),'sha256'=>hash_file('sha256',$output),'summary'=>$summary);

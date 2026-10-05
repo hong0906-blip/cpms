@@ -8,6 +8,7 @@ require_once __DIR__.'/Cpms2ExportDiagnostic.php';
 require_once __DIR__.'/Cpms2SafetyCostExportService.php';
 require_once __DIR__.'/Cpms2CompletedApprovalExportService.php';
 require_once __DIR__.'/Cpms2ReferencedMasterClosure.php';
+require_once __DIR__.'/Cpms2AttendanceMigrationExportService.php';
 
 class Cpms2MigrationExportService
 {
@@ -163,5 +164,7 @@ class Cpms2MigrationExportService
         $archive=(new Cpms2CompletedApprovalExportService($this->storage))->collect($this->db,$this->writer);
         $this->writer->approvalSummary=$archive['summary']; $this->writer->warnings=array_merge($this->writer->warnings,$archive['warnings']);
         if ($archive['failures']) throw new RuntimeException($archive['failures'][0]['code']);
+        $this->writer->phase='attendance';
+        (new Cpms2AttendanceMigrationExportService($this->db))->run($this->writer);
     }
 }

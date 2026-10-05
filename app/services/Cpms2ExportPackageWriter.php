@@ -5,6 +5,7 @@ class Cpms2ExportPackageWriter
     public $counts = array();
     public $safetySummary=array(); public $approvalSummary=array();
     public $referenceClosure=array();
+    public $managementSummary=array();
     public $exclusionPolicy=null;
     public $warnings = array();
     public $missing = array();
@@ -99,6 +100,7 @@ class Cpms2ExportPackageWriter
         $summary['account_preflight']=$this->accountPreflight;
         $summary['safety_costs']=$this->safetySummary; $summary['completed_approvals']=$this->approvalSummary;
         $summary['referenced_master_closure']=$this->referenceClosure;
+        if ($this->managementSummary) $summary['attendance_leave']=$this->managementSummary;
         if ($this->exclusionPolicy && $this->exclusionPolicy->summary()['count']) {
             $exclusions=$this->exclusionPolicy->summary(); $summary['excluded_deleted_projects']=$exclusions;
             $summary['record_reconciliation']=array();
