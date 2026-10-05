@@ -4,6 +4,7 @@
 require_once __DIR__.'/Cpms2MigrationExportService.php';
 require_once __DIR__.'/Cpms2DeletedProjectTraceService.php';
 require_once __DIR__.'/Cpms2ManagementMigrationPreflightService.php';
+require_once __DIR__.'/Cpms2OverheadMigrationExportService.php';
 class Cpms2WebExportService
 {
     private $source; private $storage;
@@ -24,6 +25,28 @@ class Cpms2WebExportService
     public function managementPreflight()
     {
         return (new Cpms2ManagementMigrationPreflightService($this->source,$this->root,$this->storage))->inspect();
+    }
+    public function generateOverhead($employee,$preflight)
+    {
+        if (!is_array($preflight) || empty($preflight['Overhead']) || !isset($preflight['audit']['Overhead'])
+            || (int)$preflight['audit']['Overhead']['blocking_count']!==0 || empty($preflight['Overhead']['total_is_final'])) throw new RuntimeException('OVERHEAD_PREFLIGHT_REQUIRED');
+        $private=$this->checkedPrivateRoot(true); $lock=fopen($private.'/employee-'.(int)$employee['id'].'-overhead.lock','c');
+        if (!$lock || !flock($lock,LOCK_EX|LOCK_NB)) { if ($lock) fclose($lock); throw new RuntimeException('EXPORT_ALREADY_RUNNING'); }
+        $output='';
+        try {
+            $strong=false; $random=openssl_random_pseudo_bytes(24,$strong); if ($random===false || !$strong) throw new RuntimeException('SECURE_RANDOM_REQUIRED');
+            $id=bin2hex($random); $output=$private.'/'.$id.'.zip'; $commit=getenv('CPMS2_EXPORT_SOURCE_COMMIT');
+            if (!$commit || !preg_match('/^[a-f0-9]{40}$/D',$commit)) $commit=null;
+            $fingerprint=''; foreach (array('Cpms2MigrationDecimal','Cpms2ManagementPreflightSupport','Cpms2OverheadExportService','Cpms2OverheadPackageWriter','Cpms2OverheadMigrationExportService') as $file) $fingerprint.=hash_file('sha256',__DIR__.'/'.$file.'.php');
+            $manifest=array('export_id'=>'cpms1-overhead-'.$id,'generated_at'=>date('c'),'source_system'=>'cpms1','source_repository'=>'hong0906-blip/cpms',
+                'source_commit'=>$commit,'source_code_sha256'=>hash('sha256',$fingerprint));
+            $summary=(new Cpms2OverheadMigrationExportService($this->source,$this->root,$this->storage))->build($output,$private.'/.overhead-stage-'.$id,$manifest,$preflight['Overhead']['cutoff_month']);
+            return array('id'=>$id,'owner_employee_id'=>(int)$employee['id'],'created_at'=>date('c'),'filename'=>'cpms1-overhead-'.substr($id,0,12).'.zip',
+                'size'=>filesize($output),'sha256'=>hash_file('sha256',$output),'summary'=>$summary,'package_type'=>'cpms1_overhead_only');
+        } catch (Exception $e) {
+            if ($output!=='' && is_file($output)) unlink($output);
+            throw $e;
+        } finally { flock($lock,LOCK_UN); fclose($lock); }
     }
     public function lastPreflight() { return $this->lastReport; }
     public function authorize($session)

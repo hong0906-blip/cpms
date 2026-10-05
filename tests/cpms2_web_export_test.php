@@ -41,6 +41,15 @@ class Cpms2WebManagementFixture extends Cpms2WebExportService
         return array('audit'=>array('Attendance'=>array('status'=>'BLOCKING','blocking_count'=>1,'warning_count'=>0)),'blocking_count'=>1,'warning_count'=>0,'issues'=>array(),'Attendance'=>array(),'Leave'=>array(),'Overhead'=>array());
     }
 }
+class Cpms2WebOverheadFixture extends Cpms2WebExportService
+{
+    public $generateCalls=0;
+    public function generateOverhead($employee,$preflight)
+    {
+        $this->generateCalls++; $id=str_repeat('b',48);
+        return array('id'=>$id,'owner_employee_id'=>(int)$employee['id'],'created_at'=>date('c'),'filename'=>'cpms1-overhead-'.substr($id,0,12).'.zip','size'=>15,'sha256'=>str_repeat('c',64),'summary'=>array('grand_total'=>'582.00'),'package_type'=>'cpms1_overhead_only');
+    }
+}
 $checks=0;
 function cpms_web_assert($ok,$message) { global $checks; if (!$ok) throw new RuntimeException($message); $checks++; }
 function cpms_web_reject($call,$message) { try { $call(); } catch (Exception $e) { cpms_web_assert(true,$message); return; } throw new RuntimeException($message); }
@@ -74,7 +83,7 @@ try {
     cpms_shared_session_start(); $_SESSION=$manager; $_SERVER['REQUEST_METHOD']='GET'; $_GET['r']='admin/cpms2_export'; $_SERVER['SCRIPT_NAME']='/public/index.php';
     $_SESSION['_cpms2_export_latest']=$id; $_SESSION['_cpms2_export_packages']=array($id=>$package);
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
-    cpms_web_assert(strpos($html,'ZIP 다운로드')!==false && strpos($html,'disabled')!==false,'Web ready state or preflight gate missing.');
+    cpms_web_assert(strpos($html,'ZIP 다운로드')!==false && strpos($html,'data-guide="admin-cpms2-generate" type="submit" disabled')!==false,'Web ready state or preflight gate missing.');
     cpms_web_assert(strpos($html,'<script>fixture</script>')===false && strpos($html,'&lt;script&gt;fixture&lt;/script&gt;')!==false,'Report HTML not escaped.');
     $excluded=array('count'=>8,'amount'=>'23500000.00','projects'=>array(22=>array('count'=>8,'amount'=>'23500000.00','months'=>array('2026-07'=>array('count'=>8,'amount'=>'23500000.00')))));
     $exclusionWarnings=Cpms2LaborExportService::exclusionWarnings($excluded);
@@ -82,24 +91,24 @@ try {
     $_SESSION['_cpms2_export_packages'][$id]['summary']['warnings']=$exclusionWarnings;
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
     cpms_web_assert(substr_count($html,'노무비 강제입력 8건 / 총 23,500,000.00원')===2,'Preflight and generated summary exclusion total missing.');
-    cpms_web_assert(substr_count($html,'프로젝트 #22 / 2026-07 / 8건')===2 && strpos($html,' disabled')===false,'Project/month warning missing or exclusions disabled Export.');
+    cpms_web_assert(substr_count($html,'프로젝트 #22 / 2026-07 / 8건')===2 && strpos($html,'data-guide="admin-cpms2-generate" type="submit" disabled')===false,'Project/month warning missing or exclusions disabled Export.');
     $_SESSION['_cpms2_export_preflight']['report']['can_export']=false;
     $_SESSION['_cpms2_export_preflight']['report']['accounts']=array('counts'=>array('workers'=>array('source'=>183,'verified'=>181,'failed'=>2)),'failures'=>array(array('entity'=>'workers','legacy_id'=>'120','name'=>'Fixture worker','code'=>'WORKER_ACCOUNT_HASH_MISMATCH')));
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
-    cpms_web_assert(strpos($html,'근로자 계좌번호 183건 중 181건 확인 / 2건 실패')!==false && strpos($html,' disabled')!==false,'Account failure did not disable Export or show safe counts.');
+    cpms_web_assert(strpos($html,'근로자 계좌번호 183건 중 181건 확인 / 2건 실패')!==false && strpos($html,'data-guide="admin-cpms2-generate" type="submit" disabled')!==false,'Account failure did not disable Export or show safe counts.');
     cpms_web_assert(strpos($html,'WORKER_ACCOUNT_HASH_MISMATCH')!==false && strpos($html,'bank_account_enc')===false,'Safe account failure reason missing.');
     $_SESSION['_cpms2_export_preflight']['report']['attendance_leave']=array('cutoff_date'=>'2026-10-05','record_counts'=>array('attendance_records'=>1,'attendance_requests'=>1,'leave_balance_snapshots'=>1,'leave_approval_deductions'=>89),'attendance'=>array('missing_checkout_original'=>0,'reversed_normalized'=>0),'accrual'=>array('original'=>1,'explicit_orphan_excluded'=>0,'excluded_amount'=>'0.00','zero_confirmation'=>0),'leave_document_conflicts'=>array(array('deduction_id'=>80,'document_id'=>123,'employee_id'=>17,'reason_code'=>'LEAVE_BUCKET_HIRE_DATE_MISMATCH','safe_detail'=>array('deduction_leave_bucket'=>'monthly','expected_leave_bucket'=>'annual','hire_date'=>'2020-10-04','leave_start_date'=>'2026-07-01','unsafe_name'=>'PRIVATE_CONFLICT_NAME'))));
     $_SESSION['_cpms2_export_preflight']['report']['failures']=array(array('entity'=>'attendance','legacy_id'=>null,'code'=>'LEGACY_LEAVE_DOCUMENT_CONFLICT'));
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
     cpms_web_assert(strpos($html,'근태·연차 휴가문서 충돌 1건')!==false && strpos($html,'문서 #123 / 차감 #80 / 직원 #17')!==false && strpos($html,'LEAVE_BUCKET_HIRE_DATE_MISMATCH')!==false && strpos($html,'예상 버킷=annual')!==false,'Leave document conflict details missing.');
-    cpms_web_assert(strpos($html,'PRIVATE_CONFLICT_NAME')===false && strpos($html,'attendance #')===false && strpos($html,' disabled')!==false,'Leave conflict leaked unsafe detail or failed to block Export.');
+    cpms_web_assert(strpos($html,'PRIVATE_CONFLICT_NAME')===false && strpos($html,'attendance #')===false && strpos($html,'data-guide="admin-cpms2-generate" type="submit" disabled')!==false,'Leave conflict leaked unsafe detail or failed to block Export.');
     unset($_SESSION['_cpms2_export_preflight']['report']['attendance_leave']); $_SESSION['_cpms2_export_preflight']['report']['failures']=array();
     $accountReport=array('counts'=>array('workers'=>array_merge(Cpms2SensitiveExportService::counts(),array('source'=>452,'verified'=>452,'decrypted'=>440,'snapshot_recovered'=>12,'missing_number'=>40,'partial_information'=>5))),'failures'=>array(),'payroll'=>array('source_found'=>false,'selected_month'=>'','employee_rows'=>0,'account_rows'=>0,'mapping_success'=>0,'mapping_failed'=>0,'status'=>'EMPLOYEE_PAYROLL_SOURCE_NOT_FOUND'));
     $_SESSION['_cpms2_export_preflight']['report']['accounts']=$accountReport; $_SESSION['_cpms2_export_preflight']['report']['can_export']=true;
     $_SESSION['_cpms2_export_packages'][$id]['summary']['account_preflight']=$accountReport;
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
     cpms_web_assert(substr_count($html,'암호화 직접 복호화 440건 · 과거 노무 Snapshot 복구 12건')===2,'Preflight or Export summary omitted recovery counts.');
-    cpms_web_assert(substr_count($html,'EMPLOYEE_PAYROLL_SOURCE_NOT_FOUND')===2 && strpos($html,' disabled')===false,'Missing payroll source hidden or blocking.');
+    cpms_web_assert(substr_count($html,'EMPLOYEE_PAYROLL_SOURCE_NOT_FOUND')===2 && strpos($html,'data-guide="admin-cpms2-generate" type="submit" disabled')===false,'Missing payroll source hidden or blocking.');
     cpms_web_assert(strpos($html,'계좌번호 미등록 40건 · 그중 은행명/예금주만 있음 5건 (Non-blocking)')!==false,'Partial account summary missing.');
     $_SESSION['_cpms2_export_preflight']['report']['accounts']['payroll']=array('source_found'=>true,'selected_month'=>'2026-09','employee_rows'=>8,'account_rows'=>0,'mapping_success'=>0,'mapping_failed'=>0,'status'=>'EMPLOYEE_PAYROLL_VERSION_FOUND');
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
@@ -113,7 +122,7 @@ try {
     $_SESSION['_cpms2_export_preflight']['report']['accounts']['counts']['workers']['legacy_residue']=12;
     $_SESSION['_cpms2_export_packages'][$id]['summary']['account_preflight']['counts']['workers']=$_SESSION['_cpms2_export_preflight']['report']['accounts']['counts']['workers'];
     ob_start(); (new Cpms2ExportController($web))->handle(); $html=ob_get_clean();
-    cpms_web_assert(substr_count($html,'계좌번호 미등록 259건')===2 && substr_count($html,'일반 미등록 247건 · 암호화 흔적만 존재 / 실제 계좌 미등록 12건')===2 && strpos($html,' disabled')===false,'Residue summary hidden or disabled Export.');
+    cpms_web_assert(substr_count($html,'계좌번호 미등록 259건')===2 && substr_count($html,'일반 미등록 247건 · 암호화 흔적만 존재 / 실제 계좌 미등록 12건')===2 && strpos($html,'data-guide="admin-cpms2-generate" type="submit" disabled')===false,'Residue summary hidden or disabled Export.');
     $_SESSION['_cpms2_export_preflight']['report']['can_export']=false;
     $_SERVER['REQUEST_METHOD']='POST'; $_POST=array('action'=>'generate','_csrf'=>'fixture-csrf');
     $previousLog=ini_get('error_log'); $log=$root.'/private/diagnostic.log'; ini_set('error_log',$log);
@@ -137,10 +146,17 @@ try {
     $_SESSION=$manager; $_SESSION['_cpms2_export_preflight']=$prior; $_SESSION['_cpms2_export_packages'][$id]=$package; $_SESSION['_cpms2_export_latest']=$id;
     ob_start(); (new Cpms2ExportController($managementWeb))->handle(); $html=ob_get_clean();
     cpms_web_assert($managementWeb->managementCalls===1 && strpos($html,'관리부 Migration 사전검사')!==false && strpos($html,'진단 상세 · 전달용 결과')!==false,'Management report not rendered.');
-    cpms_web_assert($_SESSION['_cpms2_export_preflight']===$prior && !isset($_SESSION['_cpms2_management_report']),'Management changed Export eligibility or persisted source report.');
-    cpms_web_assert(strpos($html,' disabled')===false,'Diagnostic blocked legacy Export button.');
+    cpms_web_assert($_SESSION['_cpms2_export_preflight']===$prior && isset($_SESSION['_cpms2_overhead_preflight']) && $_SESSION['_cpms2_overhead_preflight']['owner_employee_id']===17,'Management changed Base eligibility or failed to preserve Overhead eligibility.');
+    cpms_web_assert(strpos($html,'data-guide="admin-cpms2-generate" type="submit" disabled')===false,'Diagnostic blocked legacy Export button.');
     $partial=file_get_contents(dirname(__DIR__).'/app/views/admin/partials/cpms2_management_preflight.php'); $managementGuide=file_get_contents(dirname(__DIR__).'/public/assets/js/guide-tour.js');
-    foreach (array('management-preflight','management-results') as $key) cpms_web_assert(substr_count($partial,'data-guide="admin-cpms2-'.$key.'"')===1 && substr_count($managementGuide,'data-guide="admin-cpms2-'.$key.'"')===1,'Management Guide missing or duplicate.');
+    foreach (array('management-preflight','management-results','overhead-generate','overhead-download') as $key) cpms_web_assert(substr_count($partial,'data-guide="admin-cpms2-'.$key.'"')===1 && substr_count($managementGuide,'data-guide="admin-cpms2-'.$key.'"')===1,'Management Guide missing or duplicate.');
+    $overheadWeb=new Cpms2WebOverheadFixture($source,null,$root,$root,$storage,$root.'/public');
+    unset($_SESSION['_cpms2_overhead_preflight']); $_SERVER['REQUEST_METHOD']='POST'; $_POST=array('action'=>'generate_overhead','_csrf'=>'fixture-csrf'); http_response_code(200);
+    ob_start(); (new Cpms2ExportController($overheadWeb))->handle(); $blockedHtml=ob_get_clean();
+    cpms_web_assert(http_response_code()===422 && $overheadWeb->generateCalls===0 && strpos($blockedHtml,'근태·총관리비 검사를 다시 실행')!==false,'Overhead generation bypassed preflight.');
+    $_SESSION['_cpms2_overhead_preflight']=array('owner_employee_id'=>17,'checked_at'=>time(),'report'=>array('audit'=>array('Overhead'=>array('blocking_count'=>0)),'Overhead'=>array('total_is_final'=>true,'cutoff_month'=>'2026-03')));
+    http_response_code(200); ob_start(); (new Cpms2ExportController($overheadWeb))->handle(); ob_end_clean();
+    cpms_web_assert($overheadWeb->generateCalls===1 && isset($_SESSION['_cpms2_overhead_packages'][str_repeat('b',48)]),'Ready Overhead package was not registered to its owner session.');
     $_SERVER['REQUEST_METHOD']='POST'; $_POST=array('action'=>'download','package'=>$id,'_csrf'=>'bad');
     http_response_code(200); ob_start(); (new Cpms2ExportController($web))->handle(); $response=ob_get_clean();
     cpms_web_assert(http_response_code()===403 && strpos($response,'fixture-package')===false,'Invalid CSRF downloaded data.');

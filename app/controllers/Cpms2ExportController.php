@@ -17,7 +17,7 @@ class Cpms2ExportController
         $root=dirname(dirname(__DIR__)); $private=getenv('CPMS2_EXPORT_STORAGE_ROOT');
         $document=isset($_SERVER['DOCUMENT_ROOT'])?$_SERVER['DOCUMENT_ROOT']:'';
         if ($document==='' && isset($_SERVER['APPL_PHYSICAL_PATH'])) $document=$_SERVER['APPL_PHYSICAL_PATH'];
-        $managementRequest=isset($_SERVER['REQUEST_METHOD'],$_POST['action']) && $_SERVER['REQUEST_METHOD']==='POST' && $_POST['action']==='management_preflight';
+        $managementRequest=isset($_SERVER['REQUEST_METHOD'],$_POST['action']) && $_SERVER['REQUEST_METHOD']==='POST' && in_array($_POST['action'],array('management_preflight','generate_overhead','download_overhead'),true);
         $attendance=$managementRequest?null:cpms_load_attendance_pdo();
         $service=new Cpms2WebExportService(new Cpms2ReadOnlySource($pdo),$attendance?new Cpms2ReadOnlySource($attendance):null,$root,cpms_storage_root().'/materials/statements',$private?$private:cpms_storage_root().'/exports/cpms2',$document,cpms_storage_root());
         (new self($service))->handle();
@@ -44,6 +44,7 @@ class Cpms2ExportController
                     session_write_close(); @set_time_limit(0);
                     $managementReport=$this->service->managementPreflight();
                     cpms_shared_session_start();
+                    $_SESSION['_cpms2_overhead_preflight']=array('owner_employee_id'=>(int)$employee['id'],'checked_at'=>time(),'report'=>$managementReport);
                 } elseif ($action==='preflight') {
                     session_write_close(); @set_time_limit(0);
                     $report=$this->service->preflight();
@@ -60,6 +61,12 @@ class Cpms2ExportController
                     $_SESSION['_cpms2_export_packages'][$package['id']]=$package;
                     $_SESSION['_cpms2_export_latest']=$package['id'];
                     header('Location: ?r=admin%2Fcpms2_export',true,303); return;
+                } elseif ($action==='generate_overhead') {
+                    $check=isset($_SESSION['_cpms2_overhead_preflight'])?$_SESSION['_cpms2_overhead_preflight']:array();
+                    if (empty($check['owner_employee_id']) || (int)$check['owner_employee_id']!==(int)$employee['id'] || time()-$check['checked_at']>900) throw new RuntimeException('OVERHEAD_PREFLIGHT_REQUIRED');
+                    session_write_close(); @set_time_limit(0); $package=$this->service->generateOverhead($employee,$check['report']); cpms_shared_session_start();
+                    $_SESSION['_cpms2_overhead_packages'][$package['id']]=$package; $_SESSION['_cpms2_overhead_latest']=$package['id'];
+                    header('Location: ?r=admin%2Fcpms2_export',true,303); return;
                 } elseif ($action==='download') {
                     $id=isset($_POST['package']) && is_string($_POST['package'])?$_POST['package']:'';
                     $package=isset($_SESSION['_cpms2_export_packages'][$id])?$_SESSION['_cpms2_export_packages'][$id]:null;
@@ -71,6 +78,12 @@ class Cpms2ExportController
                     header('Content-Length: '.filesize($path));
                     while (!feof($stream) && !connection_aborted()) { echo fread($stream,1048576); flush(); }
                     fclose($stream); return;
+                } elseif ($action==='download_overhead') {
+                    $id=isset($_POST['package']) && is_string($_POST['package'])?$_POST['package']:'';
+                    $package=isset($_SESSION['_cpms2_overhead_packages'][$id])?$_SESSION['_cpms2_overhead_packages'][$id]:null;
+                    $path=$this->service->downloadPath($id,$package,$employee); $stream=fopen($path,'rb'); if (!$stream) throw new RuntimeException('PACKAGE_INTEGRITY_FAILED');
+                    session_write_close(); header('Content-Type: application/zip'); header('Content-Disposition: attachment; filename="cpms1-overhead-'.substr($id,0,12).'.zip"'); header('Content-Length: '.filesize($path));
+                    while (!feof($stream) && !connection_aborted()) { echo fread($stream,1048576); flush(); } fclose($stream); return;
                 } else { http_response_code(400); $error='지원하지 않는 요청입니다.'; }
             } catch (Exception $e) {
                 if (!cpms_shared_session_is_active()) cpms_shared_session_start();
@@ -81,7 +94,11 @@ class Cpms2ExportController
                     'PREFLIGHT_REQUIRED'=>'먼저 사전검사를 실행하세요. 검사 결과는 15분 동안 유효합니다.',
                     'EXPORT_ALREADY_RUNNING'=>'이 계정의 Export가 이미 진행 중입니다.',
                     'PACKAGE_ACCESS_DENIED'=>'이 계정에서 생성한 ZIP만 다운로드할 수 있습니다.',
-                    'PACKAGE_INTEGRITY_FAILED'=>'ZIP 무결성 검사를 통과하지 못했습니다. 다시 생성하세요.'
+                    'PACKAGE_INTEGRITY_FAILED'=>'ZIP 무결성 검사를 통과하지 못했습니다. 다시 생성하세요.',
+                    'OVERHEAD_PREFLIGHT_REQUIRED'=>'근태·총관리비 검사를 다시 실행한 뒤 총관리비 ZIP을 생성하세요.',
+                    'OVERHEAD_PREFLIGHT_BLOCKED'=>'총관리비 Blocking 항목을 해결하기 전에는 ZIP을 생성할 수 없습니다.',
+                    'OVERHEAD_RECONCILIATION_FAILED'=>'총관리비 인정액과 Export 금액이 일치하지 않아 생성이 차단되었습니다.',
+                    'OVERHEAD_SOURCE_CHANGED'=>'검사 중 원본 파일이 변경되어 생성이 차단되었습니다.'
                 );
                 $error=$action==='management_preflight'?'관리부 진단을 완료하지 못했습니다. 오류코드: MANAGEMENT_PREFLIGHT_FAILED':(isset($messages[$e->getMessage()])?$messages[$e->getMessage()]:'Export를 완료하지 못했습니다. 원본 Schema와 서버 저장 권한을 확인하세요.');
                 $request=bin2hex(openssl_random_pseudo_bytes(6));
@@ -99,7 +116,13 @@ class Cpms2ExportController
         $id=isset($_SESSION['_cpms2_export_latest'])?$_SESSION['_cpms2_export_latest']:'';
         $package=isset($_SESSION['_cpms2_export_packages'][$id])?$_SESSION['_cpms2_export_packages'][$id]:null;
         if ($package && (int)$package['owner_employee_id']!==(int)$employee['id']) $package=null;
-        $exportView=array('preflight'=>$check?$check['report']:null,'package'=>$package,'error'=>$error,'csrf'=>csrf_token(),'management'=>$managementReport);
+        $overheadCheck=isset($_SESSION['_cpms2_overhead_preflight'])?$_SESSION['_cpms2_overhead_preflight']:null;
+        if ($overheadCheck && ((int)$overheadCheck['owner_employee_id']!==(int)$employee['id'] || time()-$overheadCheck['checked_at']>900)) $overheadCheck=null;
+        if ($managementReport===null && $overheadCheck) $managementReport=$overheadCheck['report'];
+        $overheadId=isset($_SESSION['_cpms2_overhead_latest'])?$_SESSION['_cpms2_overhead_latest']:'';
+        $overheadPackage=isset($_SESSION['_cpms2_overhead_packages'][$overheadId])?$_SESSION['_cpms2_overhead_packages'][$overheadId]:null;
+        if ($overheadPackage && (int)$overheadPackage['owner_employee_id']!==(int)$employee['id']) $overheadPackage=null;
+        $exportView=array('preflight'=>$check?$check['report']:null,'package'=>$package,'error'=>$error,'csrf'=>csrf_token(),'management'=>$managementReport,'overhead_package'=>$overheadPackage);
         require __DIR__.'/../views/admin/cpms2_export.php';
     }
 }
