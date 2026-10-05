@@ -136,7 +136,7 @@ $renderProjectTraces=function($traces) {
   <p>직원 잔액 Snapshot <?php echo (int)$attendanceLeave['record_counts']['leave_balance_snapshots']; ?>명 · 휴가 차감 <?php echo (int)$attendanceLeave['record_counts']['leave_approval_deductions']; ?>건</p>
   <?php if (!empty($attendanceLeave['leave_document_conflicts'])): ?>
   <h4>근태·연차 휴가문서 충돌 <?php echo count($attendanceLeave['leave_document_conflicts']); ?>건</h4>
-  <?php $leaveDetailLabels=array('deduction_employee_id'=>'차감 직원','document_created_by_id'=>'문서 작성 직원','deduction_leave_type'=>'차감 휴가유형','document_request_type'=>'문서 요청유형','deduction_leave_bucket'=>'차감 버킷','start_date'=>'시작일','end_date'=>'종료일','doc_status'=>'문서 상태','restore_count'=>'복원 로그 수'); ?>
+  <?php $leaveDetailLabels=array('deduction_employee_id'=>'차감 직원','document_created_by_id'=>'문서 작성 직원','deduction_leave_type'=>'차감 휴가유형','document_request_type'=>'문서 요청유형','deduction_leave_bucket'=>'차감 버킷','expected_leave_bucket'=>'예상 버킷','hire_date'=>'입사일','leave_start_date'=>'휴가 시작일','start_date'=>'시작일','end_date'=>'종료일','doc_status'=>'문서 상태','restore_count'=>'복원 로그 수'); ?>
   <?php foreach ($attendanceLeave['leave_document_conflicts'] as $conflict): ?>
   <p class="cpms2-error">문서 #<?php echo h($conflict['document_id']===null?'-':$conflict['document_id']); ?> / 차감 #<?php echo h($conflict['deduction_id']===null?'-':$conflict['deduction_id']); ?> / 직원 #<?php echo h($conflict['employee_id']===null?'-':$conflict['employee_id']); ?><br><?php echo h($conflict['reason_code']); ?><?php foreach ($conflict['safe_detail'] as $key=>$value): if (!isset($leaveDetailLabels[$key])) continue; ?> · <?php echo h($leaveDetailLabels[$key]); ?>=<?php echo h($value); ?><?php endforeach; ?></p>
   <?php endforeach; ?>

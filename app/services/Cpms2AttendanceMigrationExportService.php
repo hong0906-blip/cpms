@@ -40,7 +40,7 @@ class Cpms2AttendanceMigrationExportService
         if (!Cpms2ManagementPreflightSupport::safeDate($this->cutoff)) throw new RuntimeException('LEGACY_ATTENDANCE_DATE_INVALID');
         if (!$this->source->inspect('cpms_attendance_records',false,array())) return array(); // Old installations/packages remain supported.
         $required=array(
-            'employees'=>'id leave_monthly_balance leave_annual_balance leave_half_balance',
+            'employees'=>'id hire_date leave_monthly_balance leave_annual_balance leave_half_balance',
             'cpms_attendance_records'=>'id employee_id work_date check_in check_out status raw_minutes work_minutes',
             'cpms_attendance_requests'=>'id employee_id request_date request_type requested_check_in requested_check_out status reviewed_by reviewed_at reason reject_reason created_at',
             'cpms_leave_accrual_logs'=>'id employee_id leave_type accrual_date accrual_year amount',
@@ -58,8 +58,8 @@ class Cpms2AttendanceMigrationExportService
         foreach (array('cpms_leave_records','cpms_leave_adjustments') as $table) if ((int)$this->source->query('SELECT COUNT(*) FROM '.$table)->fetchColumn()) throw new RuntimeException('LEGACY_LEAVE_DIRECT_SCOPE_CHANGED');
         $this->summary=array('version'=>1,'cutoff_date'=>$this->cutoff,'record_counts'=>array_fill_keys(self::$entities,0),'amounts'=>array(),'attendance'=>array('normal_source'=>0,'missing_checkout_original'=>0,'reversed_normalized'=>0),'requests'=>array('pending'=>0,'approved'=>0,'rejected'=>0),'accrual'=>array('original'=>0,'original_amount'=>'0.00','explicit_orphan_excluded'=>0,'excluded_amount'=>'0.00','zero_confirmation'=>0,'migration_effective'=>0),'excluded_orphans'=>array());
         if ($writer) foreach (self::$entities as $entity) $writer->emptyEntity($entity);
-        foreach ($this->rows('employees','id leave_monthly_balance leave_annual_balance leave_half_balance') as $r) {
-            $this->employees[(string)$r['id']]=true;
+        foreach ($this->rows('employees','id hire_date leave_monthly_balance leave_annual_balance leave_half_balance') as $r) {
+            $this->employees[(string)$r['id']]=$r;
             $row=array('legacy_id'=>$r['id'],'legacy_employee_id'=>$r['id'],'cutoff_date'=>$this->cutoff,'source_system'=>'cpms1');
             foreach (array('monthly','annual','half') as $bucket) $row[$bucket.'_balance']=$r['leave_'.$bucket.'_balance']===null?null:Cpms2MigrationDecimal::normalize($r['leave_'.$bucket.'_balance']);
             $this->emit($writer,'leave_balance_snapshots',$row);
@@ -147,13 +147,19 @@ class Cpms2AttendanceMigrationExportService
             elseif (!isset($types[$type])) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_REQUEST_TYPE_UNKNOWN',array('document_request_type'=>'UNKNOWN'));
             elseif ($type!==$d['leave_type']) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_TYPE_MISMATCH',array('deduction_leave_type'=>self::safeLeaveType($d['leave_type']),'document_request_type'=>$type));
             if (!in_array($bucket,array('monthly','annual'),true)) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_BUCKET_INVALID',array('deduction_leave_bucket'=>'UNKNOWN'));
-            elseif (isset($types[$type]) && in_array($type,array('월차','연차'),true) && $types[$type]!==$bucket) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_BUCKET_TYPE_MISMATCH',array('deduction_leave_bucket'=>$bucket,'document_request_type'=>$type));
             $start=isset($content['leave_start_date'])?substr(trim($content['leave_start_date']),0,10):'';
             $end=isset($content['leave_end_date'])?substr(trim($content['leave_end_date']),0,10):'';
             $startValid=Cpms2ManagementPreflightSupport::safeDate($start); $endValid=Cpms2ManagementPreflightSupport::safeDate($end);
             if (!$startValid) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_START_DATE_INVALID',array('start_date'=>'INVALID'));
             if (!$endValid) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_END_DATE_INVALID',array('end_date'=>'INVALID'));
             if ($startValid && $endValid && $end<$start) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_DATE_RANGE_INVALID',array('start_date'=>$start,'end_date'=>$end));
+            $hireDate=trim((string)$this->employees[(string)$d['employee_id']]['hire_date']);
+            if ($hireDate==='') $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_HIRE_DATE_MISSING');
+            elseif (!Cpms2ManagementPreflightSupport::safeDate($hireDate)) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_HIRE_DATE_INVALID',array('hire_date'=>'INVALID'));
+            elseif ($startValid && in_array($bucket,array('monthly','annual'),true)) {
+                $expectedBucket=self::expectedLeaveBucket($hireDate,$start);
+                if ($bucket!==$expectedBucket) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_BUCKET_HIRE_DATE_MISMATCH',array('deduction_leave_bucket'=>$bucket,'expected_leave_bucket'=>$expectedBucket,'hire_date'=>$hireDate,'leave_start_date'=>$start));
+            }
             if (!in_array($doc['doc_status'],array('APPROVED','COMPLETED','CANCELLED','REJECTED'),true)) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_DOCUMENT_STATUS_INVALID',array('doc_status'=>self::safeDocumentStatus($doc['doc_status'])));
             $amount=Cpms2MigrationDecimal::normalize($d['deduct_amount']);
             if ($amount==='0.00' || substr($amount,0,1)==='-' || (isset($types[$type]) && strpos($types[$type],'half')!==false && $amount!=='0.50')) throw new RuntimeException('LEGACY_LEAVE_AMOUNT_INVALID');
@@ -190,6 +196,13 @@ class Cpms2AttendanceMigrationExportService
     private static function safeDocumentStatus($value)
     {
         $value=strtoupper(trim((string)$value)); return preg_match('/^[A-Z0-9_]{1,30}$/',$value)?$value:'UNKNOWN';
+    }
+    private static function expectedLeaveBucket($hireDate,$leaveStartDate)
+    {
+        $ts=strtotime($hireDate); $year=(int)date('Y',$ts)+1; $month=(int)date('n',$ts); $day=(int)date('j',$ts);
+        $lastDay=(int)date('t',mktime(0,0,0,$month,1,$year)); if ($day>$lastDay) $day=$lastDay;
+        $oneYearDate=date('Y-m-d',mktime(0,0,0,$month,$day,$year));
+        return strcmp($leaveStartDate,$oneYearDate)<0?'monthly':'annual';
     }
     public static function parseContent($value)
     {
