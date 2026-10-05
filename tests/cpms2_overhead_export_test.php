@@ -33,9 +33,23 @@ try {
     overhead_json($data,'vehicles/2026/01.json',array('items'=>array(array('id'=>'vm1','vehicle_name'=>'추가차량','vehicle_number'=>'22나2345','amount'=>'5.00'))));
     overhead_json($data,'lease/2026/01.json',array('items'=>array(array('id'=>'l1','lease_name'=>'본사','amount'=>'100.00','maintenance_fee'=>'20.00','deposit'=>'5000.00'))));
     overhead_json($data,'corporate_cards/2026/01.json',array(array('id'=>'c1','amount'=>'100.00','card_number'=>'1234567890123456','supply_amount'=>'90.00','tax_amount'=>'10.00'),array('id'=>'c2','amount'=>'-30.00','card_number'=>'9999888877776666','supply_amount'=>'-27.00','tax_amount'=>'-3.00')));
-    overhead_json($data,'fuel/2026/01.json',array('items'=>array(array('id'=>'f1','vehicle_number'=>'11가1234','supply_amount'=>'100.00','vat'=>'10.00','total_amount'=>'110.00','amount'=>'110.00'))));
+    overhead_json($data,'fuel/2026/01.json',array('items'=>array(array('id'=>'f1','vehicle_number'=>'11가1234','occurred_date'=>'2026-01-15','supply_amount'=>'100.00','vat'=>'10.00','total_amount'=>'110.00','amount'=>'110.00'))));
     overhead_json($data,'etc/2026/01.json',array(array('id'=>'e1','amount'=>'7.00','drive_file_id'=>'SECRET_DRIVE_TOKEN','private_url'=>'SECRET_PRIVATE_URL')));
+    $dateRoot=$root.'/date_case';
+    overhead_json($dateRoot.'/data/company_overhead','fuel/2026/07.json',array('items'=>array(
+        array('id'=>'invalid-date-1','occurred_date'=>'2607-00-01','amount'=>'10.00'),
+        array('id'=>'invalid-date-2','occurred_date'=>'2607-00-07','amount'=>'10.00'),
+        array('id'=>'invalid-date-3','occurred_date'=>'2607-00-09','amount'=>'10.00'),
+        array('id'=>'invalid-date-4','occurred_date'=>'2607-02-00','amount'=>'10.00'),
+        array('id'=>'valid-date','occurred_date'=>'2026-07-15','amount'=>'20.00')
+    )));
     $before=overhead_files($root); $source=new OverheadFixtureSource(); $support=new Cpms2ManagementPreflightSupport();
+    overhead_assert(Cpms2ManagementPreflightSupport::safeDate('2026-07-01')==='2026-07-01','Valid date rejected');
+    overhead_assert(Cpms2ManagementPreflightSupport::safeDate('2026-02-28')==='2026-02-28','Valid February date rejected');
+    foreach (array('2026-02-30','2607-00-01','2607-00-07','2607-00-09','2607-02-00') as $invalidDate) overhead_assert(Cpms2ManagementPreflightSupport::safeDate($invalidDate)===null,'Invalid calendar date accepted: '.$invalidDate);
+    $datePlan=(new Cpms2OverheadExportService(new OverheadFixtureSource(),$dateRoot,$dateRoot.'/storage',new Cpms2ManagementPreflightSupport(),'2026-07'))->exportPlan();
+    overhead_assert(array_map(function($row) { return $row['occurred_date']; },$datePlan['rows']['overhead_entries'])===array('2026-07-01','2026-07-01','2026-07-01','2026-07-01','2026-07-15'),'Fuel occurred date preservation or July fallback mismatch');
+    overhead_assert(count($datePlan['rows']['overhead_entries'])===5 && $datePlan['report']['categories']['fuel']['recognized_amount']==='60.00' && $datePlan['report']['grand_total']==='60.00' && $datePlan['report']['export_reconciliation']['grand_total']['difference']==='0.00','Date normalization changed count, amount or reconciliation');
     $exporter=new Cpms2OverheadExportService($source,$root,$root.'/storage',$support,'2026-03'); $plan=$exporter->exportPlan(); $report=$plan['report'];
     overhead_assert($report['categories']['payroll']['recognized_amount']==='220.00','Payroll manual/archive/version precedence mismatch');
     overhead_assert($report['categories']['vehicles']['recognized_amount']==='55.00' && $report['vehicles']['auto_payment_amount']==='50.00' && $report['vehicles']['monthly_rows_amount']==='5.00','Vehicle auto/month rows mismatch');

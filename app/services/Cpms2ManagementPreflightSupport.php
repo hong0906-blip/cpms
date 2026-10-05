@@ -57,5 +57,10 @@ class Cpms2ManagementPreflightSupport
         // A malformed status must not become a path, account, free-text payload or secret in the report.
         return is_string($s) && preg_match('/^[a-zA-Z가-힣_ ]{1,40}$/uD',$s)?$s:'[UNRECOGNIZED_VALUE]';
     }
-    public static function safeDate($s) { return is_string($s) && preg_match('/^\d{4}-\d{2}-\d{2}$/D',$s)?$s:null; }
+    public static function safeDate($s)
+    {
+        if (!is_string($s) || !preg_match('/^\d{4}-\d{2}-\d{2}$/D',$s)) return null;
+        $parts=explode('-',$s);
+        return checkdate((int)$parts[1],(int)$parts[2],(int)$parts[0])?$s:null;
+    }
 }
