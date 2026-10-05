@@ -125,27 +125,46 @@ class Cpms2AttendanceMigrationExportService
     }
     private function approvals($writer)
     {
-        if ((int)$this->source->query("SELECT COUNT(*) FROM cpms_approval_logs l WHERE l.action_type='LEAVE_RESTORE' AND NOT EXISTS (SELECT 1 FROM cpms_approval_leave_deductions d WHERE d.document_id=l.document_id)")->fetchColumn()) throw new RuntimeException('LEGACY_LEAVE_DOCUMENT_CONFLICT');
+        $conflicts=array();
+        $orphanRestores=$this->source->query("SELECT l.document_id,COUNT(*) AS restore_count,MAX(doc.created_by_id) AS employee_id FROM cpms_approval_logs l LEFT JOIN cpms_approval_documents doc ON doc.id=l.document_id WHERE l.action_type='LEAVE_RESTORE' AND NOT EXISTS (SELECT 1 FROM cpms_approval_leave_deductions d WHERE d.document_id=l.document_id) GROUP BY l.document_id ORDER BY l.document_id");
+        while ($orphan=$orphanRestores->fetch(PDO::FETCH_ASSOC)) {
+            $conflicts[]=self::leaveDocumentConflict(null,$orphan['document_id'],$orphan['employee_id'],'LEAVE_RESTORE_WITHOUT_DEDUCTION',array('restore_count'=>(int)$orphan['restore_count']));
+        }
         foreach ($this->rows('cpms_approval_leave_deductions','id employee_id document_id leave_type leave_bucket deduct_amount balance_before balance_after deducted_at created_at') as $d) {
             $this->employee($d['employee_id']);
             $doc=$this->source->query('SELECT id,doc_status,content,created_by_id FROM cpms_approval_documents WHERE id=?',array($d['document_id']))->fetch(PDO::FETCH_ASSOC);
-            if (!$doc || (string)$doc['created_by_id']!==(string)$d['employee_id']) throw new RuntimeException('LEGACY_LEAVE_DOCUMENT_CONFLICT');
-            $content=self::parseContent($doc['content']);
-            $type=isset($content['request_type'])?trim($content['request_type']):'';
+            if (!$doc) { $conflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_DOCUMENT_NOT_FOUND'); continue; }
+            $rowConflicts=array();
+            if ((string)$doc['created_by_id']!==(string)$d['employee_id']) {
+                $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_DOCUMENT_EMPLOYEE_MISMATCH',array('deduction_employee_id'=>(int)$d['employee_id'],'document_created_by_id'=>(int)$doc['created_by_id']));
+            }
+            $content=self::decodeContent($doc['content']);
+            if ($content===null) { $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_DOCUMENT_CONTENT_INVALID'); $conflicts=array_merge($conflicts,$rowConflicts); continue; }
+            $type=isset($content['request_type'])?trim((string)$content['request_type']):'';
             $types=array('월차'=>'monthly','연차'=>'annual','반차 오전'=>'morning_half','반차 오후'=>'afternoon_half');
-            $bucket=strtolower($d['leave_bucket']);
-            if (!isset($types[$type]) || $type!==$d['leave_type'] || !in_array($bucket,array('monthly','annual')) || (in_array($type,array('월차','연차')) && $types[$type]!==$bucket)) throw new RuntimeException('LEGACY_LEAVE_DOCUMENT_CONFLICT');
+            $bucket=strtolower(trim((string)$d['leave_bucket']));
+            if ($type==='') $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_REQUEST_TYPE_MISSING');
+            elseif (!isset($types[$type])) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_REQUEST_TYPE_UNKNOWN',array('document_request_type'=>'UNKNOWN'));
+            elseif ($type!==$d['leave_type']) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_TYPE_MISMATCH',array('deduction_leave_type'=>self::safeLeaveType($d['leave_type']),'document_request_type'=>$type));
+            if (!in_array($bucket,array('monthly','annual'),true)) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_BUCKET_INVALID',array('deduction_leave_bucket'=>'UNKNOWN'));
+            elseif (isset($types[$type]) && in_array($type,array('월차','연차'),true) && $types[$type]!==$bucket) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_BUCKET_TYPE_MISMATCH',array('deduction_leave_bucket'=>$bucket,'document_request_type'=>$type));
             $start=isset($content['leave_start_date'])?substr(trim($content['leave_start_date']),0,10):'';
             $end=isset($content['leave_end_date'])?substr(trim($content['leave_end_date']),0,10):'';
-            if (!Cpms2ManagementPreflightSupport::safeDate($start) || !Cpms2ManagementPreflightSupport::safeDate($end) || $end<$start) throw new RuntimeException('LEGACY_LEAVE_DOCUMENT_CONFLICT');
-            if (!in_array($doc['doc_status'],array('APPROVED','COMPLETED','CANCELLED','REJECTED'))) throw new RuntimeException('LEGACY_LEAVE_DOCUMENT_CONFLICT');
+            $startValid=Cpms2ManagementPreflightSupport::safeDate($start); $endValid=Cpms2ManagementPreflightSupport::safeDate($end);
+            if (!$startValid) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_START_DATE_INVALID',array('start_date'=>'INVALID'));
+            if (!$endValid) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_END_DATE_INVALID',array('end_date'=>'INVALID'));
+            if ($startValid && $endValid && $end<$start) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_DATE_RANGE_INVALID',array('start_date'=>$start,'end_date'=>$end));
+            if (!in_array($doc['doc_status'],array('APPROVED','COMPLETED','CANCELLED','REJECTED'),true)) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_DOCUMENT_STATUS_INVALID',array('doc_status'=>self::safeDocumentStatus($doc['doc_status'])));
             $amount=Cpms2MigrationDecimal::normalize($d['deduct_amount']);
-            if ($amount==='0.00' || substr($amount,0,1)==='-' || (strpos($types[$type],'half')!==false && $amount!=='0.50')) throw new RuntimeException('LEGACY_LEAVE_AMOUNT_INVALID');
-            $restores=$this->source->query("SELECT id,created_at FROM cpms_approval_logs WHERE document_id=? AND action_type='LEAVE_RESTORE' ORDER BY id",array($d['document_id'])); $restore=null;
-            while ($log=$restores->fetch(PDO::FETCH_ASSOC)) {
-                if ($restore || $doc['doc_status']!=='CANCELLED') throw new RuntimeException('LEGACY_LEAVE_DOCUMENT_CONFLICT'); $restore=$log;
-                $this->emit($writer,'leave_restore_events',array('legacy_id'=>$log['id'],'legacy_employee_id'=>$d['employee_id'],'legacy_document_id'=>$d['document_id'],'event_at'=>$log['created_at'],'event_type'=>'LEAVE_RESTORE'));
-            }
+            if ($amount==='0.00' || substr($amount,0,1)==='-' || (isset($types[$type]) && strpos($types[$type],'half')!==false && $amount!=='0.50')) throw new RuntimeException('LEGACY_LEAVE_AMOUNT_INVALID');
+            $restoreRows=array(); $restores=$this->source->query("SELECT id,created_at FROM cpms_approval_logs WHERE document_id=? AND action_type='LEAVE_RESTORE' ORDER BY id",array($d['document_id']));
+            while ($log=$restores->fetch(PDO::FETCH_ASSOC)) $restoreRows[]=$log;
+            $restoreCount=count($restoreRows);
+            if ($restoreCount>1) $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_MULTIPLE_RESTORE_LOGS',array('restore_count'=>$restoreCount,'doc_status'=>self::safeDocumentStatus($doc['doc_status'])));
+            if ($restoreCount>0 && $doc['doc_status']!=='CANCELLED') $rowConflicts[]=self::leaveDocumentConflict($d['id'],$d['document_id'],$d['employee_id'],'LEAVE_RESTORE_ON_NON_CANCELLED_DOCUMENT',array('restore_count'=>$restoreCount,'doc_status'=>self::safeDocumentStatus($doc['doc_status'])));
+            if ($rowConflicts) { $conflicts=array_merge($conflicts,$rowConflicts); continue; }
+            $restore=$restoreCount===1?$restoreRows[0]:null;
+            if ($restore) $this->emit($writer,'leave_restore_events',array('legacy_id'=>$restore['id'],'legacy_employee_id'=>$d['employee_id'],'legacy_document_id'=>$d['document_id'],'event_at'=>$restore['created_at'],'event_type'=>'LEAVE_RESTORE'));
             $record=array('legacy_id'=>$doc['id'],'legacy_employee_id'=>$d['employee_id'],'legacy_document_id'=>$doc['id'],'leave_type'=>$types[$type],'leave_bucket'=>$bucket,'start_date'=>$start,'end_date'=>$end,'amount'=>$amount,'doc_status'=>$doc['doc_status'],'restored_at'=>$restore?$restore['created_at']:null);
             $this->emit($writer,'leave_approval_records',$record);
             $d['amount']=$amount; unset($d['deduct_amount']); $d['restored_at']=$record['restored_at']; $d['doc_status']=$doc['doc_status'];
@@ -153,11 +172,28 @@ class Cpms2AttendanceMigrationExportService
             $d['balance_after']=Cpms2MigrationDecimal::normalize($d['balance_after']);
             $this->emit($writer,'leave_approval_deductions',Cpms2MigrationExportService::legacy($d));
         }
+        if ($conflicts) { $this->summary['leave_document_conflicts']=$conflicts; if ($writer!==null) throw new RuntimeException('LEGACY_LEAVE_DOCUMENT_CONFLICT'); }
+    }
+    private static function leaveDocumentConflict($deductionId,$documentId,$employeeId,$reasonCode,$safeDetail=array())
+    {
+        return array('deduction_id'=>$deductionId===null?null:(int)$deductionId,'document_id'=>$documentId===null?null:(int)$documentId,'employee_id'=>$employeeId===null?null:(int)$employeeId,'reason_code'=>$reasonCode,'safe_detail'=>$safeDetail);
+    }
+    private static function decodeContent($value)
+    {
+        if (is_array($value)) return $value;
+        $decoded=json_decode((string)$value,true); return is_array($decoded)?$decoded:null;
+    }
+    private static function safeLeaveType($value)
+    {
+        return in_array($value,array('월차','연차','반차 오전','반차 오후'),true)?$value:'UNKNOWN';
+    }
+    private static function safeDocumentStatus($value)
+    {
+        $value=strtoupper(trim((string)$value)); return preg_match('/^[A-Z0-9_]{1,30}$/',$value)?$value:'UNKNOWN';
     }
     public static function parseContent($value)
     {
         // Exact JSON decoding rule from approval/_common.php; only whitelisted leave fields are emitted.
-        if (is_array($value)) return $value;
-        $decoded=json_decode((string)$value,true); if (!is_array($decoded)) throw new RuntimeException('LEGACY_LEAVE_DOCUMENT_CONFLICT'); return $decoded;
+        $decoded=self::decodeContent($value); if ($decoded===null) throw new RuntimeException('LEGACY_LEAVE_DOCUMENT_CONFLICT'); return $decoded;
     }
 }

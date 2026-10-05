@@ -134,6 +134,13 @@ $renderProjectTraces=function($traces) {
   <p>기존 미퇴근 <?php echo (int)$attendanceLeave['attendance']['missing_checkout_original']; ?>건 · 역전시간 원본 보존 / 미퇴근 처리 <?php echo (int)$attendanceLeave['attendance']['reversed_normalized']; ?>건</p>
   <p>연차 발생 원본 <?php echo (int)$attendanceLeave['accrual']['original']; ?>건 · 승인 제외 <?php echo (int)$attendanceLeave['accrual']['explicit_orphan_excluded']; ?>건 / <?php echo h($attendanceLeave['accrual']['excluded_amount']); ?>일 · 0일 확인 <?php echo (int)$attendanceLeave['accrual']['zero_confirmation']; ?>건</p>
   <p>직원 잔액 Snapshot <?php echo (int)$attendanceLeave['record_counts']['leave_balance_snapshots']; ?>명 · 휴가 차감 <?php echo (int)$attendanceLeave['record_counts']['leave_approval_deductions']; ?>건</p>
+  <?php if (!empty($attendanceLeave['leave_document_conflicts'])): ?>
+  <h4>근태·연차 휴가문서 충돌 <?php echo count($attendanceLeave['leave_document_conflicts']); ?>건</h4>
+  <?php $leaveDetailLabels=array('deduction_employee_id'=>'차감 직원','document_created_by_id'=>'문서 작성 직원','deduction_leave_type'=>'차감 휴가유형','document_request_type'=>'문서 요청유형','deduction_leave_bucket'=>'차감 버킷','start_date'=>'시작일','end_date'=>'종료일','doc_status'=>'문서 상태','restore_count'=>'복원 로그 수'); ?>
+  <?php foreach ($attendanceLeave['leave_document_conflicts'] as $conflict): ?>
+  <p class="cpms2-error">문서 #<?php echo h($conflict['document_id']===null?'-':$conflict['document_id']); ?> / 차감 #<?php echo h($conflict['deduction_id']===null?'-':$conflict['deduction_id']); ?> / 직원 #<?php echo h($conflict['employee_id']===null?'-':$conflict['employee_id']); ?><br><?php echo h($conflict['reason_code']); ?><?php foreach ($conflict['safe_detail'] as $key=>$value): if (!isset($leaveDetailLabels[$key])) continue; ?> · <?php echo h($leaveDetailLabels[$key]); ?>=<?php echo h($value); ?><?php endforeach; ?></p>
+  <?php endforeach; ?>
+  <?php endif; ?>
   <?php endif; ?>
   <?php if (!empty($report['referenced_master_closure']['projects']['approved_excluded']) && $report['can_export']): ?><p>Export 가능</p><?php endif; ?>
   <?php if (!empty($report['referenced_master_closure']['deleted_project_traces'])) $renderProjectTraces($report['referenced_master_closure']['deleted_project_traces']); ?>
@@ -144,7 +151,7 @@ $renderProjectTraces=function($traces) {
   <?php if (isset($report['accounts'])): $renderAccounts($report['accounts']); ?>
   <?php if (!$report['can_export']): ?><p class="cpms2-error" role="alert">사전검사를 통과하지 못해 Export를 진행할 수 없습니다.</p><?php endif; ?>
   <?php endif; ?>
-  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity']) && $failure['entity']!=='attendance' && !in_array($failure['code'],array('legacy_referenced_master_physically_missing','legacy_labor_snapshot_insufficient','legacy_project_snapshot_unavailable','legacy_project_snapshot_ambiguous','legacy_exclusion_scope_changed'))) continue; ?><p class="cpms2-error"><?php echo h(isset($failure['entity'])?$failure['entity']:'문서'); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
+  <?php foreach (isset($report['failures'])?$report['failures']:array() as $failure): if (isset($failure['entity']) && $failure['entity']!=='attendance' && !in_array($failure['code'],array('legacy_referenced_master_physically_missing','legacy_labor_snapshot_insufficient','legacy_project_snapshot_unavailable','legacy_project_snapshot_ambiguous','legacy_exclusion_scope_changed'))) continue; if ($failure['code']==='LEGACY_LEAVE_DOCUMENT_CONFLICT' && !empty($report['attendance_leave']['leave_document_conflicts'])) continue; ?><p class="cpms2-error"><?php echo h(isset($failure['entity'])?$failure['entity']:'문서'); ?> #<?php echo h($failure['legacy_id']); ?> · <?php echo h($failure['code']); ?></p><?php endforeach; ?>
   <?php foreach ($report['warnings'] as $warning): ?><p class="cpms2-warning">Warning: <?php echo h($warning); ?></p><?php endforeach; ?>
 </section>
 <?php endif; ?>

@@ -106,6 +106,7 @@ class Cpms2WebExportService
         $management=array();
         try { $this->phase='attendance'; $management=(new Cpms2AttendanceMigrationExportService($this->source))->run(); }
         catch (Exception $e) { $safe=Cpms2ExportFailure::safe('attendance',$e); $failures[]=array('entity'=>'attendance','legacy_id'=>null,'code'=>$safe->getMessage()); }
+        if (!empty($management['leave_document_conflicts'])) $failures[]=array('entity'=>'attendance','legacy_id'=>null,'code'=>'LEGACY_LEAVE_DOCUMENT_CONFLICT');
         if ($failures) $this->phase=isset($failures[0]['entity'])?$failures[0]['entity']:'completed_approvals';
         return $this->lastReport=array('counts'=>$counts,'referenced_master_closure'=>$closure,'expected_file_count'=>$expected,'missing_file_count'=>count($missing),'missing_file_rows'=>$missing,'excluded_labor_force_adjustments'=>$excluded,'accounts'=>$accounts,'safety_costs'=>$safety['summary'],'completed_approvals'=>$archive['summary'],'attendance_leave'=>$management,'failures'=>$failures,'can_export'=>!count($failures),'warnings'=>$warnings);
     }
