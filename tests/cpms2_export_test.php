@@ -41,6 +41,11 @@ migration_export_assert($override['fixture']['2026-07-20']['value']===1.5,'Pendi
 $rows[0]['status']='rejected'; $rows=array($rows[0]); $override=Cpms2LaborExportService::resolveOverrides($rows);
 migration_export_assert($override['fixture']['2026-07-20']['value']===1.0,'Legacy old value restoration.');
 migration_export_assert(cpms_att_calc_gongsu(600,120)===1.2,'Attendance gongsu.');
+$equipment=Cpms2CostCalculationSupport::equipment(array('amount'=>'400000','work_unit'=>'2','base_rate_snapshot'=>'400000'),array('base_rate'=>'100000'));
+migration_export_assert($equipment['canonical_amount']==='800000.00' && $equipment['calculation_basis']==='work_unit_x_rate','Nonzero raw equipment amount must not override screen rate.');
+migration_export_assert(Cpms2CostCalculationSupport::equipment(array('amount'=>'99','work_unit'=>'2','base_rate_snapshot'=>'0'),array('base_rate'=>'400000'))['canonical_amount']==='800000.00','Equipment master rate fallback.');
+migration_export_assert(Cpms2CostCalculationSupport::equipment(array('amount'=>'99','work_unit'=>'2','base_rate_snapshot'=>'0'),array('base_rate'=>'0'))['canonical_amount']==='99.00','Equipment stored amount without a positive rate.');
+migration_export_assert(Cpms2CostCalculationSupport::equipment(array('amount'=>'99','work_unit'=>'0','base_rate_snapshot'=>'400000','is_manual_unit'=>1),array())['canonical_amount']==='400000.00','Screen nonpositive work-unit fallback, including manual flag.');
 migration_export_assert(array_sum(Cpms2LaborExportService::allocate(100,array('a'=>1,'b'=>2,'c'=>3)))===100,'Monthly allocation conservation.');
 class Cpms2ForceFixtureStatement
 {

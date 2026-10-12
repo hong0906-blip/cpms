@@ -83,6 +83,21 @@ $insert->execute($baseDoc); $baseDoc[0]=902; $baseDoc[3]='COMPLETED'; $baseDoc[4
 $baseDoc[0]=903; $baseDoc[10]=''; $baseDoc[15]=''; $insert->execute($baseDoc);
 $baseDoc[0]=904; $baseDoc[3]='PENDING'; $insert->execute($baseDoc);
 
+// Historical screen-calculation cases. All writes are fixture setup, never exporter calls.
+$db->exec("ALTER TABLE cpms_projects ADD start_date DATE, ADD end_date DATE;
+ UPDATE cpms_projects SET start_date='2026-05-01',end_date='2026-09-30';
+ INSERT INTO attendance VALUES(6,1,'Fixture worker','2026-09-20 08:00:00','2026-09-20 17:00:00',540,'done','근로자');
+ INSERT INTO cpms_material_items VALUES(7,22,31,'구매품','Fixture purchase',0),(8,22,31,'기타경비','Fixture expense',0);
+ INSERT INTO cpms_material_usage VALUES(819,22,7,'2026-07-20',10000,0),(820,22,8,'2026-07-20',300,0);
+ UPDATE cpms_material_usage SET amount=500 WHERE id=820;
+ CREATE TABLE cpms_project_monthly_deductions(id INT PRIMARY KEY,project_id INT,ym CHAR(7),deduction_name VARCHAR(100),amount DECIMAL(18,2));
+ INSERT INTO cpms_project_monthly_deductions VALUES(1,22,'2026-07','Fixture deduction',-100);
+ CREATE TABLE cpms_cost_change_requests(id INT PRIMARY KEY);
+ CREATE TABLE cpms_cost_change_files(id INT PRIMARY KEY);
+ CREATE TABLE cpms_cost_change_logs(id INT PRIMARY KEY);
+ CREATE TABLE cpms_cost_record_meta(target_type VARCHAR(30),target_id VARCHAR(100),settlement_ym CHAR(7),manual_settlement_yn INT,is_deleted INT);
+ INSERT INTO cpms_cost_record_meta VALUES('equipment','9','2026-08',1,0),('material','815','2026-07',0,1)");
+
 $db->exec('SET TRANSACTION READ ONLY'); $db->beginTransaction();
 try {
     $source=new Cpms2ReadOnlySource($db); $attendance=new Cpms2ReadOnlySource($db);
@@ -100,9 +115,9 @@ try {
     $package=$web->generate($employee); $summary=$package['summary'];
     $generated=$web->downloadPath($package['id'],$package,$employee);
     if (!copy($generated,$output) || hash_file('sha256',$statement)!==$beforeHash) throw new RuntimeException('Source file was changed by web export.');
-    if ($summary['record_counts']['labor_entries']!==4 || $summary['record_counts']['material_usages']!==2 || $summary['record_counts']['safety_costs']!==3 || $summary['exported_file_count']!==3 || $summary['missing_file_count']!==1) throw new RuntimeException('Fixture counts mismatch.');
-    if ($summary['amounts']['projects'][22]['labor']!=='1605000.00' || $summary['amounts']['projects'][23]['labor']!=='3000000.00' || $summary['amounts']['company']['material']!=='29000.00' || $summary['amounts']['company']['equipment']!=='24999.00') throw new RuntimeException('Fixture source money mismatch.');
-    if ($summary['excluded_labor_force_adjustments']!==$preflight['excluded_labor_force_adjustments'] || $summary['labor_reconciliation']['company']['source_original_labor']!=='28105000.00' || $summary['labor_reconciliation']['company']['source_migration_labor']!=='4605000.00') throw new RuntimeException('Force exclusions changed eligible labor.');
+    if ($summary['record_counts']['labor_entries']!==5 || $summary['record_counts']['material_usages']!==4 || $summary['record_counts']['safety_costs']!==3 || $summary['exported_file_count']!==3 || $summary['missing_file_count']!==1) throw new RuntimeException('Fixture counts mismatch.');
+    if ($summary['amounts']['projects'][22]['labor']!=='1745000.00' || $summary['amounts']['projects'][23]['labor']!=='3000000.00' || $summary['amounts']['company']['material']!=='39500.00' || $summary['amounts']['company']['equipment']!=='25000.00') throw new RuntimeException('Fixture source money mismatch.');
+    if ($summary['excluded_labor_force_adjustments']!==$preflight['excluded_labor_force_adjustments'] || $summary['labor_reconciliation']['company']['source_original_labor']!=='28245000.00' || $summary['labor_reconciliation']['company']['source_migration_labor']!=='4745000.00') throw new RuntimeException('Force exclusions changed eligible labor.');
     if ($summary['excluded_labor_force_adjustments']['projects'][23]['months']['2026-08']['amount']!=='-500000.00') throw new RuntimeException('Monthly signed exclusion lost.');
     $zip=new ZipArchive(); $zip->open($output); $employee=$zip->getFromName('data/employees.jsonl'); $workers=$zip->getFromName('data/workers.jsonl');
     $roles=json_decode(trim($zip->getFromName('data/project_roles.jsonl')),true);
@@ -113,6 +128,15 @@ try {
     $zip->open($output); if ($zip->locateName('data/cpms_labor_force_adjustments.jsonl')!==false || strpos($zip->getFromName('summary.json'),'excluded fixture memo')!==false) throw new RuntimeException('Excluded force row or memo leaked.'); $zip->close();
     if ((int)$db->query('SELECT COUNT(*) FROM cpms_labor_force_adjustments')->fetchColumn()!==9 || $db->query('SELECT SUM(amount) FROM cpms_labor_force_adjustments')->fetchColumn()!=='23500000.00') throw new RuntimeException('Source force data changed.');
     if ($summary['account_counts']!==array('vendors'=>1,'workers'=>1,'direct_team'=>1,'employees'=>1)) throw new RuntimeException('Export account counts mismatch.');
+    require_once dirname(__DIR__).'/app/services/Cpms2CostReconciliationExportService.php';
+    $canonical=(new Cpms2CostReconciliationExportService($source,$attendance,$temporary.'/storage'))->collect('2026-09');
+    if ($canonical['summary']['projects'][22]['2026-09']['labor']!=='140000.00') throw new RuntimeException('Missing worker-month lost legacy ratio/wage/attendance fallback.');
+    if ($canonical['summary']['projects'][22]['2026-08']['equipment']!=='15000.00' || $canonical['summary']['projects'][22]['2026-07']['equipment']!=='10000.00') throw new RuntimeException('Equipment screen product/manual settlement move mismatch.');
+    if ($canonical['summary']['projects'][22]['2026-07']['material']!=='-1000.00' || $canonical['summary']['projects'][22]['2026-07']['purchase']!=='10000.00' || $canonical['summary']['projects'][22]['2026-07']['expense']!=='500.00') throw new RuntimeException('Approved deletion or purchase/expense separation mismatch.');
+    if ($canonical['summary']['projects'][22]['2026-07']['safety']!=='3000.75' || $canonical['summary']['projects'][22]['2026-07']['deduction']!=='-100.00') throw new RuntimeException('Safety store/deduction screen mismatch.');
+    if ($canonical['summary']['company']['labor_force']!=='24000000.00') throw new RuntimeException('Positive-only force screen semantics mismatch.');
+    foreach($canonical['rows'] as $row) if($row['settlement_month']>'2026-09')throw new RuntimeException('Future canonical row leaked.');
+    if (hash_file('sha256',$temporary.'/storage/safety_costs/usage.json')!==$canonical['safety_source_sha256']) throw new RuntimeException('Canonical source file changed.');
     if ($summary['account_preflight']!==$preflight['accounts'] || $db->query('SELECT bank_account_enc,bank_account_hash FROM workers WHERE id=120')->fetch(PDO::FETCH_ASSOC)!==$beforeAccounts) throw new RuntimeException('Recovery modified source or summary.');
     $zip->open($output); $workerRows=array(); foreach (explode("\n",trim($zip->getFromName('data/workers.jsonl'))) as $line) { $parsed=json_decode($line,true); $workerRows[$parsed['legacy_id']]=$parsed; } $workerRow=$workerRows[120]; $employeeRow=json_decode(trim($zip->getFromName('data/employees.jsonl')),true);
     if ($workerRows[121]['account_number']!==null || $workerRows[121]['bank_name']!=='Fixture bank' || $workerRows[121]['account_holder']!=='Fixture orphan holder' || isset($workerRows[121]['bank_account_enc']) || isset($workerRows[121]['bank_account_hash'])) throw new RuntimeException('Residue package did not retain only null account and partial metadata.');

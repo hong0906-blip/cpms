@@ -3,6 +3,7 @@
 require_once __DIR__.'/Cpms2ReadOnlySource.php';
 require_once __DIR__.'/Cpms2ExportPackageWriter.php';
 require_once __DIR__.'/Cpms2LaborExportService.php';
+require_once __DIR__.'/Cpms2CostCalculationSupport.php';
 require_once __DIR__.'/Cpms2SensitiveExportService.php';
 require_once __DIR__.'/Cpms2ExportDiagnostic.php';
 require_once __DIR__.'/Cpms2SafetyCostExportService.php';
@@ -132,10 +133,9 @@ class Cpms2MigrationExportService
                 if (!$master) throw new RuntimeException('Cost source item missing, legacy_id='.$row['id']);
                 $entity=$kind.'_usages'; $amount=isset($row['amount'])?(float)$row['amount']:0;
                 if ($kind==='equipment') {
-                    $unit=isset($row['work_unit']) && (float)$row['work_unit']>0?(float)$row['work_unit']:1;
-                    $rate=isset($row['base_rate_snapshot']) && (float)$row['base_rate_snapshot']>0?(float)$row['base_rate_snapshot']:(isset($master['base_rate'])?(float)$master['base_rate']:0);
-                    if (abs($amount)<=0.0001) $amount=$unit*$rate;
-                    $row['quantity']=sprintf('%.4f',$unit); $row['rate']=sprintf('%.2f',$rate); $row['final_amount']=sprintf('%.2f',$amount);
+                    $calculated=Cpms2CostCalculationSupport::equipment($row,$master);
+                    $amount=(float)$calculated['canonical_amount'];
+                    $row['quantity']=$calculated['quantity']; $row['rate']=$calculated['rate']; $row['final_amount']=$calculated['canonical_amount'];
                 } elseif (isset($master['category']) && $master['category']==='안전관리비') { continue; }
                 $this->writer->record($entity,self::legacy($row));
                 $this->writer->amount($row['project_id'],$entity==='safety_costs'?'safety':$kind,$amount);

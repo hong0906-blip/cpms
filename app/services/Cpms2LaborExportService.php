@@ -10,14 +10,14 @@ class Cpms2LaborExportService
     private $gongsuSource;
     private $gongsuInfo;
     public function __construct($db,$attendance,$writer) { $this->db=$db; $this->attendance=$attendance; $this->writer=$writer; }
-    public static function excludedForceAdjustments($db)
+    public static function excludedForceAdjustments($db,$throughMonth=null)
     {
         $report=array('count'=>0,'amount'=>'0.00','projects'=>array()); $total=0;
         $columns=$db->inspect('cpms_labor_force_adjustments');
         if (!$columns) return $report;
         if (count(array_diff(array('project_id','month','amount'),$columns))) throw new RuntimeException('Labor force adjustment summary columns missing.');
         // Aggregate only: no row IDs, memo, author or adjustment entity in the package.
-        $st=$db->query('SELECT project_id,month,COUNT(*) AS excluded_count,SUM(amount) AS excluded_amount FROM cpms_labor_force_adjustments WHERE amount<>0 GROUP BY project_id,month ORDER BY project_id,month');
+        $st=$db->query('SELECT project_id,month,COUNT(*) AS excluded_count,SUM(amount) AS excluded_amount FROM cpms_labor_force_adjustments WHERE amount<>0'.($throughMonth===null?'':' AND month<=?').' GROUP BY project_id,month ORDER BY project_id,month',$throughMonth===null?array():array($throughMonth));
         $projectTotals=array();
         while ($r=$st->fetch(PDO::FETCH_ASSOC)) {
             $project=(int)$r['project_id']; $month=(string)$r['month']; $count=(int)$r['excluded_count']; $cents=Cpms2ExportPackageWriter::moneyCents($r['excluded_amount']);
@@ -95,11 +95,13 @@ class Cpms2LaborExportService
         $fields=explode(' ','id project_id worker_id direct_member_id vendor_id biz_no business_no name worker_name_snapshot phone daily_wage_snapshot deposit_rate daily_wage company_name agency_name_snapshot job_type_snapshot legacy_outsourcing_ratio is_outsourcing source_type matched_status');
         $result=array();
         foreach ($this->db->rows('cpms_project_labor_workers',$fields,'project_id=?',array($project)) as $r) {
+            $r['month_assigned']=1;
             if (count($this->db->columns('cpms_project_labor_worker_months'))) {
                 $cols=array_intersect(explode(' ','outsourcing_ratio outsourcing_ratio_is_set outsourcing_start_date outsourcing_end_date'),$this->db->columns('cpms_project_labor_worker_months'));
                 $st=$this->db->query('SELECT '.(count($cols)?'`'.implode('`,`',$cols).'`':'labor_worker_id').' FROM cpms_project_labor_worker_months WHERE project_id=? AND labor_worker_id=? AND month=? AND is_deleted=0',array($project,$r['id'],$month));
-                $settings=$st->fetch(PDO::FETCH_ASSOC); if (!$settings) continue;
-                if (!empty($settings['outsourcing_ratio_is_set'])) $r=array_merge($r,$settings);
+                $settings=$st->fetch(PDO::FETCH_ASSOC);
+                $r['month_assigned']=$settings?1:0;
+                if ($settings && !empty($settings['outsourcing_ratio_is_set'])) $r=array_merge($r,$settings);
             }
             if (count($this->db->columns('cpms_project_labor_worker_wages'))) {
                 $w=$this->db->query('SELECT daily_wage FROM cpms_project_labor_worker_wages WHERE project_id=? AND labor_worker_id=? AND effective_month<=? ORDER BY effective_month DESC,id DESC LIMIT 1',array($project,$r['id'],$month))->fetchColumn();
@@ -111,9 +113,9 @@ class Cpms2LaborExportService
         }
         return $result;
     }
-    public function run()
+    public function run($throughMonth=null)
     {
-        $this->writer->excludedLaborForce=self::excludedForceAdjustments($this->db);
+        $this->writer->excludedLaborForce=self::excludedForceAdjustments($this->db,$throughMonth);
         $this->writer->warnings=array_merge($this->writer->warnings,self::exclusionWarnings($this->writer->excludedLaborForce));
         foreach (array('cpms_project_labor_workers','cpms_project_labor_worker_months','cpms_project_labor_worker_wages','cpms_labor_gongsu_overrides') as $table) $this->db->inspect($table);
         if (!count($this->db->columns('cpms_project_labor_workers'))) { $this->writer->warnings[]='Labor assignments unavailable.'; return; }
@@ -130,6 +132,7 @@ class Cpms2LaborExportService
         elseif ($this->attendance) $st=$this->attendance->query('SELECT DISTINCT LEFT(start_time_phone,7) FROM attendance');
         if (isset($st)) while ($value=$st->fetchColumn()) if (preg_match('/^\d{4}-\d{2}$/',$value)) $months[$value]=true;
         ksort($months);
+        if ($throughMonth!==null) foreach ($months as $month=>$unused) if ($month>$throughMonth) unset($months[$month]);
         $vendorCounts=array('legacy_vendor_id'=>0,'unique_business_identity'=>0,'snapshot_only'=>0,'ambiguous'=>0);
         foreach ($this->db->rows('cpms_project_labor_workers',explode(' ','id project_id worker_id direct_member_id name worker_name_snapshot phone daily_wage_snapshot deposit_rate company_name agency_name_snapshot job_type_snapshot source_type matched_status')) as $r) {
             $snapshot=array_intersect_key($r,array_flip(explode(' ','worker_name_snapshot daily_wage_snapshot deposit_rate company_name agency_name_snapshot job_type_snapshot source_type matched_status')));
@@ -140,22 +143,33 @@ class Cpms2LaborExportService
         $projects=array(); foreach ($this->db->rows('cpms_projects',array('id','name')) as $p) $projects[]=$p;
         foreach ($months as $month=>$unused) {
             // Bounded by one month, not all historical attendance data.
-            $datasets=array(); $assignments=array(); $salaryDays=array();
+            $datasets=array(); $assignments=array(); $salaryDays=array(); $salarySeen=array();
             foreach ($projects as $p) {
                 $datasets[$p['id']]=$this->daily($p,$month); $assignments[$p['id']]=$this->assignments($p['id'],$month);
-                foreach ($assignments[$p['id']] as $r) if (!empty($r['direct_member_id']) && isset($direct[$r['direct_member_id']]) && (float)$direct[$r['direct_member_id']]['monthly_salary']>0) {
-                    $key=cpms_normalize_worker_key($r['name']); $days=isset($datasets[$p['id']]['final'][$key])?count(array_filter($datasets[$p['id']]['final'][$key],function($v){return $v>0;})):0;
+                foreach ($assignments[$p['id']] as $r) if (!empty($r['month_assigned']) && !empty($r['direct_member_id']) && isset($direct[$r['direct_member_id']]) && (float)$direct[$r['direct_member_id']]['monthly_salary']>0) {
+                    if(isset($salarySeen[$p['id']][$r['direct_member_id']]))continue;
+                    $salarySeen[$p['id']][$r['direct_member_id']]=true;
+                    $key=cpms_normalize_worker_key($direct[$r['direct_member_id']]['name']); $days=isset($datasets[$p['id']]['final'][$key])?count(array_filter($datasets[$p['id']]['final'][$key],function($v){return $v>0;})):0;
                     if (!isset($salaryDays[$r['direct_member_id']])) $salaryDays[$r['direct_member_id']]=0;
                     $salaryDays[$r['direct_member_id']]+=$days;
                 }
             }
             foreach ($projects as $p) foreach ($assignments[$p['id']] as $r) {
-                $id=$r['id']; $directId=!empty($r['direct_member_id'])?$r['direct_member_id']:null;
+                $id=$r['id']; $masterId=isset($r['worker_id'])?$r['worker_id']:null; $directId=!empty($r['direct_member_id'])?$r['direct_member_id']:null;
+                $screenDirect=$direct;
+                foreach ($screenDirect as $memberId=>&$member) if ((float)$member['monthly_salary']>0) {
+                    $member['salary_allocation_mode']=1; $member['salary_daily_rate']=!empty($salaryDays[$memberId])?$member['monthly_salary']/$salaryDays[$memberId]:0;
+                } unset($member);
+                $screenWorkers=cpms_build_timesheet_workers(cpms_build_project_worker_rows(array($r),array_values($screenDirect)));
+                $screen=$screenWorkers[0];
+                $r=array_merge($r,$screen); $r['id']=$id; $r['worker_id']=$masterId;
                 $key=cpms_normalize_worker_key($r['name']); $dataset=$datasets[$p['id']]; $daily=isset($dataset['final'][$key])?$dataset['final'][$key]:array(); ksort($daily);
                 if ($directId && isset($direct[$directId]) && (float)$direct[$directId]['monthly_salary']>0) {
                     $r['salary_allocation_mode']=1; $r['salary_daily_rate']=!empty($salaryDays[$directId])?$direct[$directId]['monthly_salary']/$salaryDays[$directId]:0; $r['outsourcing_ratio']=0;
                 }
                 $amounts=cpms_labor_calculate_worker_period_amounts($r,$daily,$month.'-01',date('Y-m-t',strtotime($month.'-01')));
+                // monthly_input additionally excludes a worker with nonpositive net gongsu.
+                if(array_sum($daily)<=0)$amounts=array_merge($amounts,array('total_amount'=>0,'labor_amount'=>0,'outsourcing_amount'=>0));
                 $ratio=cpms_resolve_worker_outsourcing_ratio($r); $rate=cpms_resolve_labor_wage_rate($r);
                 $vendor=$this->db instanceof Cpms2ReferencedMasterClosure?$this->db->vendorSnapshot($r):array();
                 if ($ratio>0) {
