@@ -2,6 +2,15 @@
 // tests/cpms2_approved_exclusion_test.php
 // PHP 5.6 synthetic source, SELECT-only policy/closure and temporary package.
 require_once __DIR__.'/cpms2_reference_closure_test.php';
+require_once dirname(__DIR__).'/app/services/Cpms2CostReconciliationExportService.php';
+class CanonicalExclusionAttendanceFixture extends ReferenceSqliteSource
+{
+    public function query($sql,$params=array()) {
+        // Only translate this MySQL date expression for the empty SQLite attendance fixture.
+        if ($sql==='SELECT DISTINCT LEFT(start_time_phone,7) FROM attendance') $sql='SELECT DISTINCT substr(start_time_phone,1,7) FROM attendance';
+        return parent::query($sql,$params);
+    }
+}
 $checks=0;
 $db=new PDO('sqlite::memory:',null,null,array(PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION));
 $db->exec("CREATE TABLE cpms_projects(id INTEGER PRIMARY KEY,name TEXT,is_deleted INTEGER);
@@ -24,6 +33,13 @@ INSERT INTO cpms_equipment_usage VALUES(1,8,100,'100000.00',0),(2,8,100,'40000.0
 INSERT INTO cpms_project_members VALUES(8,1); INSERT INTO cpms_construction_roles VALUES(8,1);");
 for ($i=1;$i<=10;$i++) $db->exec("INSERT INTO cpms_material_items VALUES($i,8,'자재비','excluded source item',0)");
 for ($i=1;$i<=9;$i++) $db->exec("INSERT INTO cpms_material_usage VALUES($i,8,$i,'".($i===9?'-730175.00':'1000000.00')."',0)");
+$db->exec("ALTER TABLE cpms_projects ADD COLUMN start_date TEXT DEFAULT '2026-04-01';
+ALTER TABLE cpms_projects ADD COLUMN end_date TEXT DEFAULT '2026-09-30';
+ALTER TABLE cpms_material_usage ADD COLUMN use_date TEXT DEFAULT '2026-04-27';
+ALTER TABLE cpms_equipment_usage ADD COLUMN use_date TEXT DEFAULT '2026-04-27';
+CREATE TABLE attendance(id INTEGER PRIMARY KEY,start_time_phone TEXT);
+CREATE TABLE cpms_labor_force_adjustments(id INTEGER PRIMARY KEY,project_id INTEGER,month TEXT,amount TEXT);
+CREATE TABLE cpms_project_monthly_deductions(id INTEGER PRIMARY KEY,project_id INTEGER,ym TEXT,deduction_name TEXT,amount TEXT);");
 $db->exec('PRAGMA query_only=ON'); $source=new ReferenceSqliteSource($db);
 $closure=new Cpms2ReferencedMasterClosure($source); $policy=$closure->exclusionPolicy(); $summary=$policy->summary(); $excluded=$summary['projects'][8];
 referenceAssert(!$closure->failures() && $closure->summary()['projects']['approved_excluded']===1 && $closure->summary()['projects']['physically_missing']===0 && $closure->summary()['projects']['reference_recovered']===0,'Approved project not removed from required closure.');
@@ -38,6 +54,23 @@ foreach (array('cpms_projects','cpms_material_items','cpms_material_usage','cpms
 referenceAssert($db->query('SELECT COUNT(*) FROM cpms_material_usage WHERE project_id=8')->fetchColumn()==9 && $db->query('SELECT COUNT(*) FROM cpms_projects WHERE id=8')->fetchColumn()==0,'Source rows written.');
 referenceAssert(Cpms2MigrationDecimal::add('2147483648.00','7409825.00')==='2154893473.00' && Cpms2MigrationDecimal::add('-10.05','0.06')==='-9.99' && Cpms2MigrationDecimal::add('-1.00','1.00')==='0.00','Exact signed / 32-bit-safe decimal addition failed.');
 $temporary=sys_get_temp_dir().'/approved-exclusion-'.uniqid(); mkdir($temporary,0700);
+$attendance=new CanonicalExclusionAttendanceFixture($db);
+$canonicalExport=new Cpms2CostReconciliationExportService($source,$attendance,$temporary.'/storage');
+$canonical=$canonicalExport->collect('2026-09');
+referenceAssert($canonical['diagnostics']['excluded_deleted_projects']===$summary,'Canonical/base exclusion scope and diagnostics differ.');
+referenceAssert($canonical['diagnostics']['excluded_deleted_projects']['projects'][8]['condition_verified'] && $canonical['diagnostics']['excluded_deleted_projects']['projects'][8]['reason_code']==='user_approved_deleted_project_orphan_exclusion','Canonical exclusion provenance missing.');
+referenceAssert(count($canonical['projects'])===1 && $canonical['projects'][0]['id']==22 && !isset($canonical['summary']['projects'][8]),'Excluded project or monthly totals leaked.');
+referenceAssert(count($canonical['rows'])===2 && $canonical['summary']['company']['material']==='1000.00' && $canonical['summary']['company']['equipment']==='2000.00' && $canonical['summary']['company']['monthly_total']==='3000.00','Excluded costs entered canonical company totals.');
+foreach($canonical['rows'] as $row) referenceAssert($row['legacy_project_id']!=8,'Excluded canonical source row leaked.');
+$collector=new Cpms2CanonicalLaborCollector($policy);
+foreach(array('labor_workers','labor_months','labor_entries','labor_force','subcontract','safety','deduction') as $entity) $collector->record($entity,array('legacy_project_id'=>8));
+referenceAssert(!$collector->rows,'Canonical labor collector leaked an excluded project.');
+$collector->record('labor_entries',array('legacy_project_id'=>22));
+referenceAssert(count($collector->rows['labor_entries'])===1,'Canonical collector removed an eligible project.');
+$db->exec('PRAGMA query_only=OFF');$db->exec("INSERT INTO cpms_project_monthly_deductions VALUES(1,8,'2026-07','excluded fixture deduction','-50.00')");$db->exec('PRAGMA query_only=ON');
+referenceAssert($canonicalExport->collect('2026-09')['summary']===$canonical['summary'],'Excluded deduction entered canonical totals.');
+$db->exec('PRAGMA query_only=OFF');$db->exec('DELETE FROM cpms_project_monthly_deductions');$db->exec('PRAGMA query_only=ON');
+referenceAssert($db->query('SELECT COUNT(*) FROM cpms_material_usage WHERE project_id=8')->fetchColumn()==9 && $db->query('SELECT COUNT(*) FROM cpms_equipment_usage WHERE project_id=8')->fetchColumn()==2 && $db->query('SELECT SUM(CAST(amount AS DECIMAL(30,2))) FROM cpms_material_usage WHERE project_id=8')->fetchColumn()==7269825,'Canonical modified approved source rows.');
 $writer=new Cpms2ExportPackageWriter($temporary.'/stage'); $writer->exclusionPolicy=$policy;
 foreach (array('material_usages'=>'cpms_material_usage','equipment_usages'=>'cpms_equipment_usage') as $entity=>$table) foreach ($closure->rows($table,array('id','project_id','amount')) as $row) { $writer->record($entity,Cpms2MigrationExportService::legacy($row)); $writer->amount($row['project_id'],$entity==='material_usages'?'material':'equipment',$row['amount']); }
 $writer->record('project_members',array('legacy_id'=>1,'legacy_project_id'=>8)); $writer->emptyEntity('project_members');
@@ -49,20 +82,29 @@ referenceAssert($package['deleted_project_reconciliation']['company']['material'
 require_once dirname(__DIR__).'/app/controllers/Cpms2ExportController.php';
 $exportView=array('preflight'=>array('counts'=>array(),'referenced_master_closure'=>$closure->summary(),'expected_file_count'=>0,'missing_file_count'=>0,'can_export'=>true,'warnings'=>array()),'package'=>null,'error'=>'','csrf'=>'fixture-csrf');
 ob_start(); require dirname(__DIR__).'/app/views/admin/cpms2_export.php'; $html=ob_get_clean();
-referenceAssert(strpos($html,'사용자 승인 제외')!==false && strpos($html,'9건 / 7,269,825원')!==false && strpos($html,'2건 / 140,000원')!==false && strpos($html,'7,409,825원')!==false && strpos($html,' disabled')===false,'Approved preflight view missing or generation disabled.');
+referenceAssert(strpos($html,'사용자 승인 제외')!==false && strpos($html,'9건 / 7,269,825원')!==false && strpos($html,'2건 / 140,000원')!==false && strpos($html,'7,409,825원')!==false && preg_match('/<button data-guide="admin-cpms2-generate"[^>]* disabled/',$html)===0,'Approved preflight view missing or generation disabled.');
 if (getenv('CPMS2_EXCLUSION_FIXTURE_HTML')) file_put_contents(getenv('CPMS2_EXCLUSION_FIXTURE_HTML'),$html);
-$writer->cleanup(); unlink($temporary.'/fixture.zip'); rmdir($temporary);
+$writer->cleanup(); unlink($temporary.'/fixture.zip');
 $mutate=function($sql) use($db) { $db->exec('PRAGMA query_only=OFF'); $db->exec($sql); $db->exec('PRAGMA query_only=ON'); };
-foreach (array("INSERT INTO cpms_progress_billings VALUES(1,8,'100.00','0.00')"=>'DELETE FROM cpms_progress_billings',"INSERT INTO cpms_material_statement_files VALUES(1,8,1)"=>'DELETE FROM cpms_material_statement_files',"INSERT INTO cpms_project_labor_workers VALUES(1,8,'synthetic worker','synthetic worker')"=>'DELETE FROM cpms_project_labor_workers',"INSERT INTO cpms_outsourcing_costs VALUES(1,8,'0.00')"=>'DELETE FROM cpms_outsourcing_costs',"UPDATE cpms_material_usage SET amount='999999.00' WHERE id=1"=>"UPDATE cpms_material_usage SET amount='1000000.00' WHERE id=1", "INSERT INTO cpms_projects VALUES(8,'New identity',0)"=>'DELETE FROM cpms_projects WHERE id=8',"INSERT INTO cpms_ai_daily_snapshots VALUES(1,8,'Recovered identity')"=>'DELETE FROM cpms_ai_daily_snapshots') as $insert=>$cleanup) {
+foreach (array("INSERT INTO cpms_progress_billings VALUES(1,8,'100.00','0.00')"=>'DELETE FROM cpms_progress_billings',"INSERT INTO cpms_material_statement_files VALUES(1,8,1)"=>'DELETE FROM cpms_material_statement_files',"INSERT INTO cpms_project_labor_workers VALUES(1,8,'synthetic worker','synthetic worker')"=>'DELETE FROM cpms_project_labor_workers',"INSERT INTO cpms_labor_force_adjustments VALUES(1,8,'2026-07','100.00')"=>'DELETE FROM cpms_labor_force_adjustments',"INSERT INTO cpms_labor_force_adjustments VALUES(1,8,'2026-10','0.00')"=>'DELETE FROM cpms_labor_force_adjustments',"INSERT INTO cpms_outsourcing_costs VALUES(1,8,'0.00')"=>'DELETE FROM cpms_outsourcing_costs',"UPDATE cpms_material_usage SET amount='999999.00' WHERE id=1"=>"UPDATE cpms_material_usage SET amount='1000000.00' WHERE id=1", "UPDATE cpms_equipment_usage SET amount='99999.00' WHERE id=1"=>"UPDATE cpms_equipment_usage SET amount='100000.00' WHERE id=1", "INSERT INTO cpms_material_usage(id,project_id,material_id,amount,is_deleted) VALUES(90,8,10,'0.00',0)"=>'DELETE FROM cpms_material_usage WHERE id=90', "INSERT INTO cpms_material_items VALUES(90,8,'자재비','new item',0)"=>'DELETE FROM cpms_material_items WHERE id=90', "INSERT INTO cpms_equipment_usage(id,project_id,equipment_id,amount,is_deleted) VALUES(90,8,100,'0.00',0)"=>'DELETE FROM cpms_equipment_usage WHERE id=90', "INSERT INTO cpms_projects(id,name,is_deleted) VALUES(8,'New identity',0)"=>'DELETE FROM cpms_projects WHERE id=8',"INSERT INTO cpms_ai_daily_snapshots VALUES(1,8,'Recovered identity')"=>'DELETE FROM cpms_ai_daily_snapshots') as $insert=>$cleanup) {
     $mutate($insert); $changed=new Cpms2ReferencedMasterClosure($source);
-    referenceAssert($changed->failures()[0]['code']==='legacy_exclusion_scope_changed' && $changed->exclusionPolicy()->summary()['count']===0,'Changed approval scope automatically excluded.'); $mutate($cleanup);
+    referenceAssert($changed->failures()[0]['code']==='legacy_exclusion_scope_changed' && $changed->exclusionPolicy()->summary()['count']===0,'Changed approval scope automatically excluded.');
+    $blocked=false;try{$canonicalExport->collect('2026-09');}catch(RuntimeException $e){$blocked=$e->getMessage()==='legacy_exclusion_scope_changed';}
+    referenceAssert($blocked,'Canonical did not block changed approval scope.');$mutate($cleanup);
 }
+mkdir($temporary.'/storage',0700);mkdir($temporary.'/storage/safety_costs',0700);
+file_put_contents($temporary.'/storage/safety_costs/usage.json',json_encode(array('items'=>array(array('id'=>'scope-change','project_id'=>8,'use_date'=>'2026-07-01','amount'=>'100.00')))));
+$blocked=false;try{$canonicalExport->collect('2026-09');}catch(RuntimeException $e){$blocked=$e->getMessage()==='legacy_exclusion_scope_changed';}
+referenceAssert($blocked,'Canonical exclusion validation did not inspect the actual safety storage.');
+unlink($temporary.'/storage/safety_costs/usage.json');rmdir($temporary.'/storage/safety_costs');rmdir($temporary.'/storage');rmdir($temporary);
 $exportView['preflight']['referenced_master_closure']=$changed->summary(); $exportView['preflight']['can_export']=false;
 ob_start(); require dirname(__DIR__).'/app/views/admin/cpms2_export.php'; $html=ob_get_clean();
-referenceAssert(strpos($html,'승인 제외 조건 변경 · Export 차단')!==false && strpos($html,' disabled')!==false,'Scope change view hid blocking.');
-$mutate("INSERT INTO cpms_material_items VALUES(99,9,'자재비','unapproved orphan',0); INSERT INTO cpms_material_usage VALUES(99,9,99,'10.00',0)");
+referenceAssert(strpos($html,'승인 제외 조건 변경 · Export 차단')!==false && preg_match('/<button data-guide="admin-cpms2-generate"[^>]* disabled/',$html)===1,'Scope change view hid blocking.');
+$mutate("INSERT INTO cpms_material_items VALUES(99,9,'자재비','unapproved orphan',0); INSERT INTO cpms_material_usage(id,project_id,material_id,amount,is_deleted) VALUES(99,9,99,'10.00',0)");
 $unapproved=new Cpms2ReferencedMasterClosure($source);
 referenceAssert($unapproved->failures()[0]['legacy_id']==='9' && $unapproved->failures()[0]['code']==='legacy_project_snapshot_unavailable' && $unapproved->summary()['projects']['approved_excluded']===1,'Unapproved identical missing project automatically excluded.');
+$blocked=false;try{$canonicalExport->collect('2026-09');}catch(RuntimeException $e){$blocked=strpos($e->getMessage(),'Canonical cost references a missing project')===0;}
+referenceAssert($blocked,'Canonical silently excluded an unapproved missing project.');
 $diagnostic=Cpms2ExportFailure::safe('projects',new RuntimeException('legacy_exclusion_scope_changed'));
 referenceAssert($diagnostic->getMessage()==='legacy_exclusion_scope_changed','Safe scope change diagnostic lost.');
 echo 'PASS: '.$checks." explicit exclusion / amounts / scope changes / no automatic exclusion / READ ONLY checks\n";
